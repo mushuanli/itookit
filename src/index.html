@@ -1,0 +1,678 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智能学习套件</title>
+
+    <!-- External Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script>
+        window.MathJax = {
+            loader: { load: ['[tex]/mhchem'] },
+            tex: { packages: { '[+]': ['mhchem'] } },
+            startup: {
+                pageReady: () => {
+                    return window.MathJax.startup.defaultPageReady();
+                }
+            }
+        };
+    </script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Local Stylesheet -->
+    <link rel="stylesheet" href="./styles.css">
+</head>
+
+<body>
+    <!-- ====================================================== -->
+    <!--                  Global Layout: Sidebar                -->
+    <!-- ====================================================== -->
+    <div class="sidebar">
+        <nav class="app-nav">
+            <a href="#" class="action-btn app-nav-btn" data-view="anki" id="nav-anki" title="Anki 笔记">
+                <i class="fas fa-layer-group"></i>
+            </a>
+            <a href="#" class="action-btn app-nav-btn active" data-view="task" id="nav-task" title="任务管理">
+                <i class="fas fa-book"></i>
+            </a>
+            <a href="#" class="action-btn app-nav-btn" data-view="agent" id="nav-agent" title="AI角色">
+                <i class="fas fa-robot"></i>
+            </a>
+            <a href="#" class="action-btn app-nav-btn" data-view="settings" id="nav-settings" title="设置">
+                <i class="fas fa-cog"></i>
+            </a>
+        </nav>
+    </div>
+
+    <!-- ====================================================== -->
+    <!--               Global Layout: Main Content              -->
+    <!-- ====================================================== -->
+    <div class="main-content">
+        <div class="content-wrapper">
+
+            <!-- ====================================================== -->
+            <!--                  Anki Notes View                     -->
+            <!-- ====================================================== -->
+            <div id="anki-view" class="main-layout" style="display: none;">
+                <div class="session-sidebar anki_session-sidebar">
+                    <div class="session-header">
+                        <div class="session-title" id="anki_sessionTitleContainer">
+                            <span><i class="fas fa-layer-group"></i> 会话管理</span>
+                        </div>
+                        <div class="session-controls">
+                            <!-- [MODIFIED] Added .action-btn base class -->
+                            <button id="anki_newFileBtn" class="action-btn session-btn" title="新建文件"><i class="fas fa-file"></i></button>
+                            <button id="anki_newFolderBtn" class="action-btn session-btn" title="新建目录"><i class="fas fa-folder-plus"></i></button>
+                            <button id="anki_openFileBtn" class="action-btn session-btn" title="打开文件"><i class="fas fa-folder-open"></i></button>
+                            <button id="anki_moveSelectedBtn" class="action-btn session-btn" title="移动选中"><i class="fas fa-people-arrows"></i></button>
+                            <button id="anki_deleteSelectedBtn" class="action-btn session-btn" title="删除选中"><i class="fas fa-trash"></i></button>
+                        </div>
+                        <div class="select-controls">
+                            <label class="select-all"><input type="checkbox" id="anki_selectAllCheckbox"> 全选</label>
+                        </div>
+                        <div class="current-folder" id="anki_currentFolderContainer"></div>
+                    </div>
+                    <div class="session-content">
+                        <div class="session-list-container">
+                            <ul class="session-list" id="anki_sessionList"></ul>
+                            <div class="empty-session" id="anki_emptySession">
+                                <i class="fas fa-folder-open"></i>
+                                <p>没有打开的会话</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="app-container">
+                    <div class="panel editor-preview-panel" id="anki_editorPreviewPanel">
+                        <!-- [MODIFIED] Added .component-header for layout -->
+                        <div class="panel-header component-header">
+                            <div class="panel-actions-leading">
+                                <!-- [MODIFIED] Added .action-btn base class -->
+                                <button id="anki_toggleSessionBtn" class="action-btn panel-btn" title="显示/隐藏会话栏"><i class="fas fa-bars"></i></button>
+                                <button id="anki_toggleEditPreviewBtn" class="action-btn panel-btn panel-btn-text"><i class="fas fa-book-open"></i> Preview</button>
+                            </div>
+                            <div class="panel-title" id="anki_panelTitle"><i class="fas fa-edit"></i> Anki 编辑器</div>
+                            <div class="panel-actions">
+                                <div class="review-btn-group">
+                                    <button id="anki_startReviewBtn" class="action-btn panel-btn panel-btn-text"><i class="fas fa-play-circle"></i> 待办 (<span id="anki_reviewCount">0</span>)</button>
+                                    <button id="anki_reviewOptionsBtn" class="action-btn panel-btn dropdown-toggle"><i class="fas fa-chevron-down"></i></button>
+                                    <div id="anki_reviewDropdownMenu" class="dropdown-menu" style="display: none;">
+                                        <a href="#" id="anki_customStudyBtn"><i class="fas fa-wrench"></i> 自定义待办...</a>
+                                        <a href="#" id="anki_showStatsBtn"><i class="fas fa-chart-line"></i> 统计</a>
+                                    </div>
+                                </div>
+                                <button id="anki_toggleVisibilityClozeBtn" class="action-btn panel-btn" title="全部隐藏"><i class="fas fa-eye-slash"></i></button>
+                                <button id="anki_invertClozeBtn" class="action-btn panel-btn" title="反向显示/隐藏"><i class="fas fa-random"></i></button>
+                                <button type="button" id="anki_aiBtn" class="action-btn panel-btn" title="AI 助手"><i class="fas fa-magic-wand-sparkles"></i></button>
+                                <button id="anki_saveBtn" class="action-btn panel-btn panel-btn-text" title="保存"><i class="fas fa-save"></i></button>
+                                <button id="anki_exportFileBtn" class="action-btn panel-btn panel-btn-text" title="导出"><i class="fas fa-download"></i></button>
+                                <button id="anki_printPreviewBtn" class="action-btn panel-btn panel-btn-text" title="打印预览内容" disabled><i class="fas fa-print"></i></button>
+                            </div>
+                        </div>
+                        <div class="panel-content">
+                            <div class="editor-sub-toolbar" id="anki_editorToolbar">
+                                <!-- [MODIFIED] Added .action-btn base class -->
+                                <button id="anki_clozeBtn" class="action-btn editor-btn" title="转换为Cloze"><i class="fas fa-square"></i></button>
+                                <button id="anki_boldBtn" class="action-btn editor-btn" title="加粗"><i class="fas fa-bold"></i></button>
+                                <button id="anki_italicBtn" class="action-btn editor-btn" title="斜体"><i class="fas fa-italic"></i></button>
+                                <button id="anki_insertLinebreakBtn" class="action-btn editor-btn" title="插入换行符(¶)"><i class="fas fa-paragraph"></i></button>
+                                <button id="anki_codeBtn" class="action-btn editor-btn" title="代码"><i class="fas fa-code"></i></button>
+                                <button id="anki_linkBtn" class="action-btn editor-btn" title="链接"><i class="fas fa-link"></i></button>
+                                <button id="anki_audioBtn" class="action-btn editor-btn" title="编辑声音"><i class="fas fa-music"></i></button>
+                            </div>
+                            <div class="editor-container" id="anki_editorContainer">
+                                <textarea id="anki_editor" class="editor"></textarea>
+                                <div id="anki_preview" tabindex="0"></div>
+                            </div>
+                            <div class="mode-indicator">
+                                <div class="mode-dot active" id="anki_editModeDot" title="编辑模式"></div>
+                                <div class="mode-dot" id="anki_previewModeDot" title="预览模式"></div>
+                            </div>
+                        </div>
+					</div>
+
+						                    <!-- [NEW] 新增浮动按钮组 -->
+                    <div class="floating-nav-group">
+                        <button id="anki_clozeNavUpBtn" class="action-btn floating-nav-btn" title="上一个 Cloze"><i class="fas fa-arrow-up"></i></button>
+                        <button id="anki_clozeNavDownBtn" class="action-btn floating-nav-btn" title="下一个 Cloze"><i class="fas fa-arrow-down"></i></button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ====================================================== -->
+            <!--                   Task Manager View                    -->
+            <!-- ====================================================== -->
+            <div id="task-view" class="main-layout">
+                <div class="session-sidebar task_session-sidebar">
+                    <div class="session-header">
+        <div class="session-title"><span><i class="fas fa-book-open"></i> 任务导航</span></div>
+                        <div class="session-controls">
+                            <!-- [MODIFIED] Added .action-btn base class -->
+                            <button id="task_createTaskBtn" class="action-btn session-btn" title="新建任务"><i class="fas fa-plus-circle"></i></button>
+							<button id="task_deleteSelectedBtn" class="action-btn session-btn" title="删除选中"><i class="fas fa-trash"></i></button>
+                        </div>
+                      <div class="select-controls">
+                          <label class="select-all"><input type="checkbox" id="task_selectAllCheckbox"> 全选</label>
+                      </div>
+                    </div>
+                    <div class="session-content">
+                        <!-- 1. Search Box -->
+                        <div class="search-container">
+                            <i class="fas fa-search"></i>
+                            <input type="text" id="task_searchInput" placeholder="搜索或使用#tag">
+                        </div>
+
+                        <!-- 2. Quick Filters / Smart Views -->
+                        <div class="quick-filters" id="task_quickFilters">
+                            <a href="#" class="quick-filter-item" data-filter-type="status" data-filter-value="active"><i class="fas fa-inbox fa-fw"></i> 活动中</a>
+                            <a href="#" class="quick-filter-item" data-filter-type="date" data-filter-value="today"><i class="fas fa-calendar-day fa-fw"></i> 今天到期</a>
+                            <a href="#" class="quick-filter-item" data-filter-type="date" data-filter-value="upcoming"><i class="fas fa-calendar-week fa-fw"></i> 即将到来</a>
+                            <a href="#" class="quick-filter-item" data-filter-type="status" data-filter-value="completed"><i class="fas fa-check-circle fa-fw"></i> 已完成</a>
+                        </div>
+
+                        <!-- 3. Collapsible Filters -->
+                        <div class="collapsible-filters">
+                            <details class="filter-accordion-item" open>
+                                <summary>任务列表</summary>
+                                <div id="task_list_filter_container" class="filter-group"></div>
+                            </details>
+                            <details class="filter-accordion-item">
+                                <summary>标签</summary>
+                                <div id="task_tag_filter_container" class="filter-group"></div>
+                            </details>
+                        </div>
+                        
+                        <!-- 4. Task List with Sorting -->
+                        <div class="list-header">
+                            <span><i class="fas fa-list-ul"></i> 待办列表</span>
+                            <select id="task_sortBy" class="list-sort-control" title="排序方式">
+                                <option value="due_date">按到期日</option>
+                                <option value="priority">按优先级</option>
+                                <option value="title">按名称</option>
+                            </select>
+                        </div>
+                        <ul class="session-list" id="task_list"></ul>
+                        
+                        <!-- 5. Pagination -->
+                        <div class="pagination" id="task_paginationContainer"></div>
+                    </div>
+                </div>
+
+                <div class="app-container">
+                    <div id="task_mainPanel" class="panel editor-preview-panel">
+                        <!-- [MODIFIED] Added .component-header for layout -->
+                        <div class="panel-header component-header">
+                            <div class="panel-actions-leading">
+                                <!-- [MODIFIED] Added .action-btn base class -->
+                                <button id="task_toggleSessionBtn" class="action-btn panel-btn" title="显示/隐藏筛选栏"><i class="fas fa-bars"></i></button>
+                                <button id="task_toggleViewBtn" class="action-btn panel-btn panel-btn-text" title="切换到预览视图"><i class="fas fa-book-open"></i> 预览</button>
+                                <!-- [NEW] Status dropdown -->
+                                <select id="task_statusSelector" class="form-control" title="设置任务状态" style="display: none;">
+                                    <option value="todo">待办</option>
+                                    <option value="in_progress">进行中</option>
+                                    <option value="completed">已完成</option>
+                                    <option value="archived">已归档</option>
+                                </select>
+                            </div>
+                            <div class="panel-title" id="task_panelTitle"><i class="fas fa-tasks"></i> 任务管理</div>
+                            <div class="panel-actions">
+                                <div class="review-btn-group">
+                                    <button id="task_startReviewBtn" class="action-btn panel-btn panel-btn-text"><i class="fas fa-play-circle"></i> 待办 (<span id="task_reviewCount">0</span>)</button>
+                                </div>
+                                <button id="task_importBtn" class="action-btn panel-btn" title="导入YAML"><i class="fas fa-upload"></i></button>
+                                <input type="file" id="task_yamlImportInput" accept=".yml,.yaml" style="display: none;">
+                                <button type="button" id="task_aiBtn" class="action-btn panel-btn" title="AI 助手"><i class="fas fa-magic-wand-sparkles"></i></button>
+                                <button id="task_manageTagsBtn" class="action-btn panel-btn" title="管理标签" disabled><i class="fas fa-tags"></i></button>
+                                <button id="task_saveBtn" class="action-btn panel-btn" title="保存并刷新"><i class="fas fa-save"></i></button>
+                                <button id="task_exportBtn" class="action-btn panel-btn" title="导出YAML"><i class="fas fa-download"></i></button>
+                                <button id="task_printPreviewBtn" class="action-btn panel-btn" title="打印预览内容" disabled><i class="fas fa-print"></i></button>
+                            </div>
+                        </div>
+                        <div class="panel-content">
+                            <div class="editor-container">
+                                <textarea id="task_yamlEditor"></textarea>
+                                <div id="task_previewContainer"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="task_statsDashboard" class="stats-dashboard-inline"></div>
+                </div>
+
+                <!-- Review Modal for Task View -->
+                <div class="modal-overlay" id="task_reviewModal" style="display: none;">
+                    <div class="modal-content review-modal">
+                        <div class="modal-header">
+                            <h2>任务待办</h2>
+                            <button class="modal-close" id="task_reviewCloseBtn">×</button>
+                        </div>
+                        <div class="modal-body" id="task_reviewContent"></div>
+                        <div class="modal-footer">
+                            <div class="review-rating-buttons">
+                                <button class="task-review-rating-btn again" data-rating="0">重做</button>
+                                <button class="task-review-rating-btn hard" data-rating="1">困难</button>
+                                <button class="task-review-rating-btn good" data-rating="2">犹豫</button>
+                                <button class="task-review-rating-btn easy" data-rating="3">简单</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ====================================================== -->
+            <!--                    AI Agent View                       -->
+            <!-- ====================================================== -->
+            <div id="agent-view" class="main-layout" style="display: none;">
+                <div class="topics-panel agent_topics-panel">
+                    <!-- [MODIFIED] Added .component-header for layout -->
+                    <div class="topics-header component-header">
+                        <div class="header-title-group"><i class="fas fa-book"></i> 聊天</div>
+                        <div class="header-actions-group">
+                            <select id="agent_topicTagFilter" class="topic-filter-select"></select>
+                            <button id="agent_addTopicHeaderBtn" class="action-btn topic-action-btn" title="添加新主题">
+                                <i class="fas fa-plus"></i>
+                            </button>
+                            <!-- [MODIFIED] Added .action-btn base class -->
+                            <button id="agent_editTopicBtn" class="action-btn topic-action-btn" title="重命名"><i class="fas fa-pencil-alt"></i></button>
+                            <button id="agent_manageTopicsBtn" class="action-btn topic-action-btn" title="管理"><i class="fas fa-tasks"></i></button>
+                        </div>
+                    </div>
+                    <div class="topics-batch-actions" id="agent_topicsBatchActions" style="display: none;">
+                        <button id="agent_selectAllTopicsBtn" class="batch-action-btn">全选</button>
+                        <button id="agent_deleteSelectedTopicsBtn" class="batch-action-btn danger">删除</button>
+                        <button id="agent_cancelTopicSelectionBtn" class="batch-action-btn">取消</button>
+                    </div>
+                    <div class="topics-content">
+                        <ul class="topic-list" id="agent_topicList"></ul>
+                    </div>
+                </div>
+
+                <div class="history-panel agent_history-panel">
+                    <!-- [MODIFIED] Added .component-header for layout -->
+                    <div class="history-header component-header">
+                        <div class="history-title">
+                            <button id="agent_toggleTopicsBtn" class="action-btn panel-btn"><i class="fas fa-bars"></i></button>
+                            <i class="fas fa-comments"></i>
+                            <span id="agent_historyHeaderTitle">对话记录</span>
+                        </div>
+                        <div class="history-header-actions">
+                            <input type="text" id="agent_historySearch" class="history-search" placeholder="搜索...">
+                            <button type="button" id="agent_aiBtn" class="action-btn panel-btn" title="AI 助手">
+                                <i class="fas fa-magic-wand-sparkles"></i>
+                            </button>
+                            <select id="agent_conversationRoleSelector" class="role-selector"></select>
+                        </div>
+                    </div>
+                    <div class="history-content" id="agent_historyContent"></div>
+                        <div class="floating-nav-group">
+                            <button id="agent_chatNavUp" class="action-btn floating-nav-btn"><i class="fas fa-arrow-up"></i></button>
+                            <button id="agent_chatNavDown" class="action-btn floating-nav-btn"><i class="fas fa-arrow-down"></i></button>
+                    </div>
+                    <div class="chat-input-area" id="agent_chatInputArea">
+                        <div class="attachment-preview-container" id="agent_attachmentPreview"></div>
+                        <div class="input-controls">
+                            <textarea id="agent_chatInput" class="chat-textarea"></textarea>
+                            <input type="file" id="agent_attachmentInput" multiple style="display: none;">
+                            <!-- [MODIFIED] Added .action-btn base class -->
+                            <button id="agent_attachFileBtn" class="action-btn chat-action-btn"><i class="fas fa-paperclip"></i></button>
+                            <button id="agent_sendMessageBtn" class="action-btn chat-action-btn send"><i class="fas fa-paper-plane"></i></button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ====================================================== -->
+            <!--                    Settings View                       -->
+            <!-- ====================================================== -->
+            <div id="settings-view" class="main-layout" style="display: none;">
+                <!-- Content dynamically filled by JavaScript -->
+            </div>
+
+        </div> <!-- .content-wrapper end -->
+    </div> <!-- .main-content end -->
+
+    <!-- ====================================================== -->
+    <!--               Global Modals & Templates                -->
+    <!-- ====================================================== -->
+    
+    <!-- [NEW] Global AI Popup -->
+    <div id="ai-popup-overlay" class="modal-overlay" style="display: none;">
+        <div id="ai-popup-content" class="modal-content">
+            <div class="modal-header component-header">
+                <h2>AI 助手</h2>
+                <button class="modal-close" id="ai-popup-close-btn">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="ai-popup-agent-selector">选择 AI 角色:</label>
+                    <select id="ai-popup-agent-selector" class="form-control"></select>
+                </div>
+                <div class="form-group">
+                    <label for="ai-popup-textarea">内容 (可编辑):</label>
+                    <textarea id="ai-popup-textarea" class="form-control" rows="12"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" id="ai-popup-cancel-btn">取消</button>
+                <button type="button" class="btn btn-primary" id="ai-popup-send-btn">
+                    <i class="fas fa-paper-plane"></i> 发送到新会话
+                </button>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- Anki: Audio Player -->
+    <div class="audio-controls" id="anki_audioControls">
+        <div class="audio-title" id="anki_audioTitle"></div>
+        <div class="audio-progress">
+            <div class="audio-progress-bar" id="anki_audioProgressBar"></div>
+        </div>
+        <div class="audio-buttons">
+            <button id="anki_playBtn" class="audio-btn"><i class="fas fa-play"></i> 播放</button>
+            <button id="anki_pauseBtn" class="audio-btn"><i class="fas fa-pause"></i> 暂停</button>
+            <button id="anki_stopBtn" class="audio-btn"><i class="fas fa-stop"></i> 停止</button>
+        </div>
+    </div>
+    <input type="file" id="anki_fileInput" style="display: none;" accept=".md, .txt" multiple>
+
+    <!-- Anki: Move File Modal -->
+    <div class="move-modal" id="anki_moveModal">
+        <div class="move-modal-content">
+            <!-- [MODIFIED] Added .component-header for layout -->
+            <div class="move-modal-header component-header">
+                <div class="move-modal-title">移动到目录</div>
+                <button class="move-modal-close" id="anki_closeMoveModalBtn">×</button>
+            </div>
+            <p>选择目标目录：</p>
+            <div class="folder-list" id="anki_folderList"></div>
+            <div class="move-modal-actions">
+                <!-- [MODIFIED] Added .btn base class -->
+                <button class="btn move-modal-btn cancel" id="anki_cancelMoveBtn">取消</button>
+                <button class="btn move-modal-btn confirm" id="anki_confirmMoveBtn">确认</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Anki: Custom Study Modal -->
+    <div class="modal-overlay" id="anki_customStudyModal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header component-header">
+                <h2>自定义待办</h2>
+                <button class="modal-close" id="anki_customStudyCloseBtn">×</button>
+            </div>
+            <div class="modal-body">
+                <form id="anki_customStudyForm">
+                    <div class="form-group">
+                        <label for="anki_filterByFile">按文件/目录筛选:</label>
+                        <select id="anki_filterByFile" name="anki_filterByFile" class="form-control"></select>
+                    </div>
+                    <div class="form-group">
+                        <label>按卡片状态筛选:</label>
+                        <div class="form-checkbox-group">
+                            <label><input type="checkbox" name="cardState" value="new" checked> 新卡片</label>
+                            <label><input type="checkbox" name="cardState" value="learning" checked> 学习中</label>
+                            <label><input type="checkbox" name="cardState" value="review" checked> 待办中</label>
+                            <label><input type="checkbox" name="cardState" value="relearning" checked> 重学中</label>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="anki_filterByLastReview">按最后一次待办时间筛选:</label>
+                        <select id="anki_filterByLastReview" name="anki_filterByLastReview" class="form-control">
+                            <option value="any">任何时间</option>
+                            <option value="last7days">最近7天内</option>
+                            <option value="last30days">最近30天内</option>
+                            <option value="over30days">超过30天未待办</option>
+                            <option value="never">从未待办过 (新卡片)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="anki_maxCards">最大卡片数量:</label>
+                        <input type="number" id="anki_maxCards" name="anki_maxCards" class="form-control" value="50" min="1">
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <!-- [MODIFIED] Added .btn base class -->
+                <button type="button" class="btn btn-secondary" id="anki_customStudyCancelBtn">取消</button>
+                <button type="submit" class="btn btn-primary" id="anki_startCustomStudyBtn" form="anki_customStudyForm">开始</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Anki: Statistics Modal -->
+    <div class="modal-overlay" id="anki_statsModal" style="display: none;">
+        <div class="modal-content large">
+            <!-- [MODIFIED] Added .component-header for layout -->
+            <div class="modal-header component-header">
+                <h2>待办统计</h2><button class="modal-close" id="anki_statsModalCloseBtn">×</button>
+            </div>
+            <div class="modal-body">
+                <p>近30天每日待办卡片数量</p>
+                <div class="chart-container">
+                    <canvas id="anki_statsChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Task: Task Creation Modal -->
+    <div class="modal-overlay" id="task_taskModal" style="display: none;">
+        <div class="modal-content">
+            <!-- [MODIFIED] Added .component-header for layout -->
+            <div class="modal-header component-header">
+                <h2 id="task_modalTitle">新建任务</h2>
+                <button class="modal-close" id="task_modalCloseBtn">×</button>
+            </div>
+            <div class="modal-body">
+            <form id="task_taskForm">
+                <div class="form-group">
+                    <label for="task_modalName">任务名称</label>
+                    <input type="text" id="task_modalName" class="form-control" required placeholder="例如：学习二叉树的先序遍历">
+                </div>
+            <div class="form-group">
+                <label for="task_modalTaskList">所属列表</label>
+                <select id="task_modalTaskList" class="form-control" required></select>
+            </div>
+            <div class="form-group">
+                    <label for="task_modalTagsInput">标签 (输入后按回车)</label>
+                    <!-- [REFACTORED] for Autocomplete Component -->
+                    <div class="autocomplete-container">
+                        <div class="tags-input-container">
+                            <ul id="task_modalTagsList" class="tags-list"></ul>
+                            <input type="text" id="task_modalTagsInput" class="config-tags-input" placeholder="例如：数据结构, 算法">
+                        </div>
+                        <ul id="task_modalTagsSuggestions" class="autocomplete-suggestions"></ul>
+                    </div>
+                </div>
+            </form>
+        </div>
+            <div class="modal-footer">
+                <!-- [MODIFIED] Added .btn base class -->
+                <button type="button" class="btn btn-secondary" id="task_modalCancelBtn">取消</button>
+                <button type="submit" class="btn btn-primary" id="task_modalConfirmBtn" form="task_taskForm">创建任务</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Task: Tag Management Modal -->
+    <div class="modal-overlay" id="task_tagModal" style="display: none;">
+        <div class="modal-content">
+            <!-- [MODIFIED] Added .component-header for layout -->
+            <div class="modal-header component-header">
+                <h2>管理任务标签</h2>
+                <button class="modal-close" id="task_tagModalCloseBtn">×</button>
+            </div>
+            <div class="modal-body">
+            <form id="task_tagForm">
+                 <div class="form-group">
+                    <label for="task_tagModalInput">添加或移除标签 (输入后按回车)</label>
+                    <div class="tags-input-container">
+                        <ul id="task_tagModalList" class="tags-list"></ul>
+                        <input type="text" id="task_tagModalInput" class="config-tags-input" list="task_existingTagsForTagModal" placeholder="例如：重要, 紧急">
+                        <datalist id="task_existingTagsForTagModal"></datalist>
+                    </div>
+                </div>
+            </form>
+        </div>
+            <div class="modal-footer">
+                <!-- [MODIFIED] Added .btn base class -->
+                <button type="button" class="btn btn-primary" id="task_tagModalConfirmBtn">确认</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings: Layout Template -->
+    <template id="settings_layoutTemplate">
+        <div class="settings-nav-panel">
+            <div class="settings-nav-header">
+                <h3><i class="fas fa-sliders-h"></i> 设置</h3>
+            </div>
+            <!-- JS will generate <a class="list-item settings-nav-item"> here -->
+            <div class="settings-nav-list" id="settings_navList"></div>
+        </div>
+        <div class="settings-detail-panel">
+            <div class="panel" style="height: 100%;">
+                <!-- [MODIFIED] Added .component-header for layout -->
+                <div class="panel-header component-header">
+                    <div id="settings_detailTitle" class="panel-title"></div>
+                    <!-- [MODIFIED] Added .action-btn base class -->
+                    <div class="panel-actions"><button id="settings_saveBtn" class="action-btn panel-btn panel-btn-text" style="display: none;"><i class="fas fa-save"></i> 保存</button></div>
+                </div>
+                <div id="settings_detailContent" class="panel-content" style="padding: 25px; overflow-y: auto;">
+                    <div class="placeholder-content"><i class="fas fa-cogs fa-3x"></i>
+                        <p>从左侧选择一个项目进行配置</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <!-- Settings: General Form Template -->
+    <template id="settings_generalFormTemplate">
+        <div data-id="general" data-type="general">
+            <div class="settings-section">
+                <h3 class="settings-section-title">外观与主题</h3>
+                <div class="form-group">
+                    <label for="settings_themeSelector">选择主题</label>
+                    <select id="settings_themeSelector" class="form-control">
+                        <option value="">默认 (亮色)</option>
+                        <option value="dark">暗黑</option>
+                        <option value="large-font">大号字体</option>
+                        <option value="larger-font">更大号字体</option>
+                    </select>
+                </div>
+            </div>
+            <div class="settings-section">
+                <h3 class="settings-section-title">数据与同步</h3>
+                <div class="form-group">
+                    <label for="settings_autosaveInterval">自动保存间隔 (分钟)</label>
+                    <input type="number" id="settings_autosaveInterval" class="form-control" min="0">
+                </div>
+                <div class="form-group">
+                    <label>数据库同步</label>
+                    <div style="display: flex; gap: 15px;">
+                        <button id="settings_exportDbBtn" class="btn-secondary"><i class="fas fa-download"></i> 导出数据</button>
+                        <button id="settings_importDbBtn" class="btn-danger"><i class="fas fa-upload"></i> 导入数据</button>
+                    </div>
+                    <input type="file" id="settings_importFileInput" accept=".json" style="display: none;">
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <!-- Settings: API Config Form Template -->
+    <template id="settings_apiConfigFormTemplate">
+        <div data-type="apiConfig">
+            <form id="settings_apiConfigFormDynamic" novalidate>
+                <input type="hidden" class="config-id">
+                <div class="form-group"><label>配置名称</label><input type="text" class="config-name form-control" required></div>
+                <div class="form-group"><label>提供商</label><select class="config-provider form-control" required></select></div>
+                <div class="form-group"><label>API 地址</label><input type="url" class="config-apiUrl form-control"></div>
+                <div class="form-group"><label>API Key</label>
+                    <div class="input-group">
+                        <input type="password" class="config-apiKey form-control"><button type="button" class="toggle-api-key-visibility input-group-btn"><i class="fas fa-eye"></i></button>
+                    </div>
+                </div>
+                <div class="form-group"><label>Models (别名:模型名)</label><textarea class="config-models form-control" rows="3"></textarea></div>
+                <div class="settings-detail-footer"><button type="button" class="btn-danger delete-item-btn">删除此配置</button></div>
+            </form>
+        </div>
+    </template>
+
+    <!-- Settings: Agent Form Template -->
+    <template id="settings_agentFormTemplate">
+        <div data-type="agent">
+            <form id="settings_agentFormDynamic" novalidate>
+                <input type="hidden" class="config-id">
+                <div class="form-group"><label>角色名称</label><input type="text" class="config-name form-control" required></div>
+                <div class="form-group"><label>头像 (2字符)</label><input type="text" class="config-avatar form-control" required maxlength="2"></div>
+                <div class="form-group"><label>选择模型</label><select class="config-model form-control" required></select></div>
+                <div class="form-group"><label>System Prompt</label><textarea class="config-systemPrompt form-control" rows="8"></textarea></div>
+                <div class="form-group"><label>标签</label>
+                    <!-- [REFACTORED] for Autocomplete Component -->
+                    <div class="autocomplete-container">
+                        <div class="tags-input-container">
+                            <ul class="tags-list"></ul>
+                            <input type="text" class="config-tags-input form-control">
+                        </div>
+                        <ul class="autocomplete-suggestions"></ul>
+                    </div>
+                </div>
+                <div class="form-group"><label class="form-checkbox-label"><input type="checkbox" class="config-sendHistory"> 发送历史上下文</label></div>
+                <div class="form-group"><label>欢迎语 (可选)</label><textarea class="config-hint form-control" rows="3"></textarea></div>
+                <div class="settings-detail-footer"><button type="button" class="btn-danger delete-item-btn">删除此角色</button></div>
+            </form>
+        </div>
+    </template>
+
+    <!-- [NEW] Settings: Tags Management Template -->
+    <template id="settings_tagsFormTemplate">
+        <div data-id="tags" data-type="tags">
+            <div class="settings-section">
+                <h3 class="settings-section-title">添加新标签</h3>
+                <form id="settings_addTagForm" style="display: flex; gap: 10px;">
+                    <input type="text" id="settings_newTagName" class="form-control" placeholder="例如：编程、生活" required style="flex-grow: 1;">
+                    <button type="submit" class="btn btn-primary">添加</button>
+                </form>
+                <p class="form-help-text">在这里添加的标签，可以在任务管理和AI角色配置中复用。</p>
+            </div>
+            <div class="settings-section">
+                <h3 class="settings-section-title">所有标签</h3>
+                <div id="settings_allTagsList" class="tags-management-list">
+                    <!-- Tags will be dynamically loaded here -->
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <!-- [NEW] Settings: Task Lists Management Template -->
+    <template id="settings_taskListsFormTemplate">
+        <div data-id="taskLists" data-type="taskLists">
+            <div class="settings-section">
+                <h3 class="settings-section-title">添加新任务列表</h3>
+                <form id="settings_addTaskListForm" style="display: flex; gap: 10px;">
+                    <input type="text" id="settings_newListName" class="form-control" placeholder="例如：工作项目、个人学习" required style="flex-grow: 1;">
+                    <button type="submit" class="btn btn-primary">添加</button>
+                </form>
+                <p class="form-help-text">任务列表用于组织和分类您的任务。</p>
+            </div>
+            <div class="settings-section">
+                <h3 class="settings-section-title">所有任务列表</h3>
+                <div id="settings_allTaskLists" class="settings-item-list">
+                    <!-- Task lists will be dynamically loaded here -->
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <script type="module" src="./main.js"></script>
+</body>
+
+</html>
