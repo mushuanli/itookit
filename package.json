@@ -1,5 +1,5 @@
 {
-  "name": "itookit",
+  "name": "iTookit",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
@@ -15,6 +15,9 @@
     "vite-plugin-singlefile": "^2.2.0"
   },
   "dependencies": {
+    "@codemirror/lang-markdown": "^6.3.4",
+    "@codemirror/state": "^6.5.2",
+    "codemirror": "^6.0.2",
     "dexie": "^4.0.11",
     "dotenv": "^17.2.2",
     "openai": "^5.19.1",
