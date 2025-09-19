@@ -1,0 +1,774 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智能学习套件</title>
+
+    <!-- External Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!--script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></！script-->
+    <script>
+        window.MathJax = {
+            loader: { load: ['[tex]/mhchem'] },
+            tex: { packages: { '[+]': ['mhchem'] } },
+            startup: {
+                pageReady: () => {
+                    return window.MathJax.startup.defaultPageReady();
+                }
+            }
+        };
+    </script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Local Stylesheet -->
+    <link rel="stylesheet" href="./styles.css">
+</head>
+
+<body>
+    <!-- ====================================================== -->
+    <!--          1. 应用外壳 (App Shell)                      -->
+    <!-- ====================================================== -->
+    <div class="o-app-layout">
+        <!-- 全局导航，始终存在 -->
+        <aside class="c-sidebar-nav" id="global-nav">
+            <nav class="c-sidebar-nav__list">
+                <!-- data-view 属性用于JS识别要加载哪个视图 -->
+                <a href="#" class="c-sidebar-nav__button" data-view="anki" title="Anki 笔记">
+                    <i class="fas fa-layer-group"></i>
+                </a>
+                <a href="#" class="c-sidebar-nav__button is-active" data-view="task" title="任务管理">
+                    <i class="fas fa-tasks"></i>
+                </a>
+                <a href="#" class="c-sidebar-nav__button" data-view="agent" title="AI角色">
+                    <i class="fas fa-robot"></i>
+                </a>
+                <a href="#" class="c-sidebar-nav__button" data-view="settings" title="设置">
+                    <i class="fas fa-cog"></i>
+                </a>
+            </nav>
+        </aside>
+
+        <!-- 主内容区域的挂载点，所有视图将在这里动态渲染 -->
+        <main class="o-main-content" id="main-content-container"></main>
+    </div>
+
+
+    <!-- ====================================================== -->
+    <!--          2. 可复用布局与视图模板                       -->
+    <!-- ====================================================== -->
+
+    <!-- Anki 和 Task 共用的两栏布局模板 -->
+    <template id="template-two-pane-layout">
+        <div class="o-main-layout">
+            <!-- 侧边栏插槽 (Slot) -->
+            <aside class="c-session-sidebar" data-slot-container="sidebar"></aside>
+            <!-- 主应用容器插槽 -->
+            <div class="o-app-container" data-slot-container="main"></div>
+        </div>
+    </template>
+    
+    <!-- Anki 视图的内容模板 -->
+    <template id="template-view-anki">
+        <!-- 侧边栏内容 -->
+        <div data-slot-content="sidebar">
+            <div class="c-resource-sidebar">
+                <header class="c-resource-sidebar__header o-box o-box--space-between">
+                    <h2 class="c-resource-sidebar__title u-flex-center-gap"><i class="fas fa-layer-group"></i><span>会话管理</span></h2>
+                </header>
+                <div class="c-resource-sidebar__actions">
+                    <button class="c-button c-button--icon c-button--small c-button--on-dark js-new-file" title="新建文件"><i class="fas fa-file-plus"></i></button>
+                    <button class="c-button c-button--icon c-button--small c-button--on-dark js-new-folder" title="新建目录"><i class="fas fa-folder-plus"></i></button>
+                    <button class="c-button c-button--icon c-button--small c-button--on-dark js-import" title="导入"><i class="fas fa-upload"></i></button>
+                    <button class="c-button c-button--icon c-button--small c-button--on-dark js-move-selected" title="移动选中"><i class="fas fa-people-arrows"></i></button>
+                    <button class="c-button c-button--icon c-button--small c-button--on-dark js-delete-selected" title="删除选中"><i class="fas fa-trash"></i></button>
+                </div>
+                <div class="c-resource-sidebar__selection-controls">
+                    <label class="c-checkbox"><input type="checkbox" class="js-select-all"> 全选</label>
+                </div>
+                <div class="c-resource-sidebar__filter-bar">
+                    <div class="c-search-box">
+                        <i class="fas fa-search c-search-box__icon"></i>
+                        <input type="text" class="c-search-box__input" placeholder="搜索笔记...">
+                    </div>
+                </div>
+                <div class="c-resource-sidebar__content">
+                    <ul class="c-resource-sidebar__list">
+                        <li class="c-resource-item u-flex-center-gap" data-id="anki-folder-1"><i class="fas fa-folder fa-fw"></i><span>计算机科学</span></li>
+                        <li class="c-resource-item is-active u-flex-center-gap" data-id="anki-file-1" style="padding-left: 30px;"><i class="fas fa-file-alt fa-fw"></i><span>数据结构笔记.md</span></li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+        
+        <!-- [FIX] Anki 主面板内容，恢复所有按钮 -->
+        <div data-slot-content="main">
+            <div class="c-panel c-panel--editor">
+                <header class="c-panel__header o-box o-box--space-between">
+                    <div class="c-panel__actions c-panel__actions--leading">
+                        <button class="c-button c-button--icon c-button--on-dark js-toggle-sidebar" title="显示/隐藏会话栏"><i class="fas fa-bars"></i></button>
+                        <button class="c-button c-button--text c-button--on-dark u-flex-center-gap js-toggle-preview"><i class="fas fa-book-open"></i> Preview</button>
+                    </div>
+                    <h2 class="c-panel__title u-flex-center-gap" id="anki-panel-title"><i class="fas fa-edit"></i> Anki 编辑器</h2>
+                    <div class="c-panel__actions">
+                        <div class="c-button-group">
+                            <button class="c-button c-button--text c-button--on-dark u-flex-center-gap js-start-review"><i class="fas fa-play-circle"></i> 待办 (<span id="anki-review-count">0</span>)</button>
+                            <button class="c-button c-button--icon c-button--on-dark c-button--dropdown-toggle js-review-options"><i class="fas fa-chevron-down"></i></button>
+                            <div id="anki-review-dropdown" class="c-dropdown-menu" style="display: none;">
+                                <a href="#" class="js-custom-study"><i class="fas fa-wrench"></i> 自定义待办...</a>
+                                <a href="#" class="js-show-stats"><i class="fas fa-chart-line"></i> 统计</a>
+                            </div>
+                        </div>
+                        <button class="c-button c-button--icon c-button--on-dark js-toggle-cloze" title="全部隐藏"><i class="fas fa-eye-slash"></i></button>
+                        <button class="c-button c-button--icon c-button--on-dark js-invert-cloze" title="反向显示/隐藏"><i class="fas fa-random"></i></button>
+                        <button type="button" class="c-button c-button--icon c-button--on-dark js-ai-assistant" title="AI 助手"><i class="fas fa-magic-wand-sparkles"></i></button>
+                        <button class="c-button c-button--text c-button--on-dark u-flex-center-gap js-save" title="保存"><i class="fas fa-save"></i></button>
+                        <button class="c-button c-button--text c-button--on-dark u-flex-center-gap js-export" title="导出"><i class="fas fa-download"></i></button>
+                        <button class="c-button c-button--text c-button--on-dark u-flex-center-gap js-print" title="打印预览内容" disabled><i class="fas fa-print"></i></button>
+                    </div>
+                </header>
+                <div class="c-panel__content">
+                    <div class="c-editor-toolbar" id="anki-editor-toolbar">
+                        <button class="c-button c-button--secondary c-button--icon js-format-cloze" title="转换为Cloze"><i class="fas fa-square"></i></button>
+                        <button class="c-button c-button--secondary c-button--icon js-format-bold" title="加粗"><i class="fas fa-bold"></i></button>
+                        <button class="c-button c-button--secondary c-button--icon js-format-italic" title="斜体"><i class="fas fa-italic"></i></button>
+                        <button class="c-button c-button--secondary c-button--icon js-format-linebreak" title="插入换行符(¶)"><i class="fas fa-paragraph"></i></button>
+                        <button class="c-button c-button--secondary c-button--icon js-format-code" title="代码"><i class="fas fa-code"></i></button>
+                        <button class="c-button c-button--secondary c-button--icon js-format-link" title="链接"><i class="fas fa-link"></i></button>
+                        <button class="c-button c-button--secondary c-button--icon js-format-audio" title="编辑声音"><i class="fas fa-music"></i></button>
+                    </div>
+                    <div class="c-panel__editor-wrapper">
+                        <textarea id="anki-editor" class="c-panel__editor"></textarea>
+                        <div id="anki-preview" class="c-panel__preview c-preview-content" tabindex="0"></div>
+                    </div>
+                    <div class="c-mode-indicator">
+                        <div class="c-mode-indicator__dot is-active" id="anki-edit-mode-dot" title="编辑模式"></div>
+                        <div class="c-mode-indicator__dot" id="anki-preview-mode-dot" title="预览模式"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="c-floating-nav" id="anki-cloze-nav">
+                <button id="anki-cloze-nav-up" class="c-floating-nav__button" title="上一个 Cloze"><i class="fas fa-arrow-up"></i></button>
+                <button id="anki-cloze-nav-down" class="c-floating-nav__button" title="下一个 Cloze"><i class="fas fa-arrow-down"></i></button>
+            </div>
+        </div>
+    </template>
+
+    <!-- Task 视图的内容模板 (REFACTORED / 已重构) -->
+    <template id="template-view-task">
+        <!-- 
+          重构思路: 
+          1. 左侧边栏 (Sidebar) 回归纯粹的导航功能.
+          2. 主面板 (Main) 成为真正的多功能工作区 (Workspace)，承载任务列表.
+          3. 引入右侧滑出的任务详情面板 (Detail Pane) 用于编辑，不离开主列表视图.
+        -->
+    
+        <!-- PART 1: 左侧导航栏 (Navigation Sidebar) -->
+        <div data-slot-content="sidebar">
+            <header class="c-session-sidebar__header o-box">
+                <h2 class="c-session-sidebar__title u-flex-center-gap"><span><i class="fas fa-compass"></i> 导航</span></h2>
+            </header>
+            <div class="c-session-sidebar__content">
+                <!-- 搜索框 -->
+                <div class="c-search-box">
+                    <i class="fas fa-search c-search-box__icon"></i>
+                    <input type="text" id="task-search-input" class="c-search-box__input" placeholder="搜索任务...">
+                </div>
+    
+                <!-- 智能视图/快速过滤器 -->
+                <nav class="c-nav-menu">
+                    <h3 class="c-nav-menu__title">智能视图</h3>
+                    <ul class="c-nav-menu__list">
+                        <li><a href="#" class="c-nav-menu__item is-active u-flex-center-gap" data-view="inbox"><i class="fas fa-inbox fa-fw"></i> 收件箱</a></li>
+                        <li><a href="#" class="c-nav-menu__item u-flex-center-gap" data-view="today"><i class="fas fa-calendar-day fa-fw"></i> 今天</a></li>
+                        <li><a href="#" class="c-nav-menu__item u-flex-center-gap" data-view="upcoming"><i class="fas fa-calendar-week fa-fw"></i> 即将到来</a></li>
+                    </ul>
+                </nav>
+    
+                <!-- 用户自定义视图/项目/标签 -->
+                <div class="c-nav-accordion">
+                    <details class="c-nav-accordion__item" open>
+                        <summary>项目列表</summary>
+                        <div id="task-project-list-container" class="c-nav-accordion__content"></div>
+                    </details>
+                    <details class="c-nav-accordion__item">
+                        <summary>标签</summary>
+                        <div id="task-tag-list-container" class="c-nav-accordion__content"></div>
+                    </details>
+                </div>
+            </div>
+        </div>
+    
+        <!-- PART 2: 主工作区 (Main Workspace) -->
+        <div data-slot-content="main">
+            <div class="c-workspace">
+                <!-- 工作区头部，包含标题、操作和视图控制 -->
+                <header class="c-workspace__header o-box o-box--space-between">
+                    <!-- [ADDED] Task view sidebar toggle button -->
+                    <button class="c-button c-button--icon c-button--secondary js-toggle-sidebar" title="显示/隐藏导航栏"><i class="fas fa-bars"></i></button>
+                    <h2 class="c-workspace__title u-flex-center-gap" id="workspace-title"><i class="fas fa-inbox"></i> 收件箱</h2>
+                    <div class="c-workspace__controls">
+                        <!-- 多维过滤栏 -->
+                        <div class="c-filter-bar" id="task-filter-bar">
+                            <!-- 示例: <span class="c-filter-pill">状态: 待办 <button>&times;</button></span> -->
+                            <button class="c-button c-button--secondary c-button--small u-flex-center-gap js-add-filter"><i class="fas fa-filter"></i> 筛选</button>
+                        </div>
+                        <!-- 排序 -->
+                        <button class="c-button c-button--secondary c-button--small u-flex-center-gap js-sort-tasks"><i class="fas fa-sort-amount-down"></i> 排序</button>
+                        <!-- 视图切换器 -->
+                        <div class="c-button-group">
+                            <button class="c-button c-button--icon c-button--small is-active" title="列表视图"><i class="fas fa-list"></i></button>
+                            <button class="c-button c-button--icon c-button--small" title="看板视图"><i class="fas fa-grip-horizontal"></i></button>
+                            <button class="c-button c-button--icon c-button--small" title="日历视图"><i class="fas fa-calendar-alt"></i></button>
+                        </div>
+                        <!-- 主要操作按钮 -->
+                        <button class="c-button c-button--primary u-flex-center-gap js-create-task"><i class="fas fa-plus"></i> 新建任务</button>
+                    </div>
+                </header>
+    
+                <!-- 任务列表容器 -->
+                <div class="c-workspace__content" id="task-list-container">
+                    <!-- [ADDED] 更多任务示例 -->
+                    <div class="c-task-item is-selected" data-task-id="123">
+                        <label class="c-checkbox c-task-item__checkbox"><input type="checkbox"></label>
+                        <div class="c-task-item__main">
+                            <div class="c-task-item__title">设计一个新的数据库架构</div>
+                            <div class="c-task-item__tags">
+                                <span class="c-tag c-tag--blue">#架构</span>
+                                <span class="c-tag c-tag--red">#紧急</span>
+                            </div>
+                        </div>
+                        <div class="c-task-item__meta">
+                            <div class="c-task-item__duedate u-flex-center-gap"><i class="fas fa-calendar-alt"></i><span>今天</span></div>
+                            <div class="c-task-item__assignee"><i class="fas fa-user-circle"></i></div>
+                        </div>
+                    </div>
+                    <div class="c-task-item is-completed" data-task-id="124">
+                        <label class="c-checkbox c-task-item__checkbox"><input type="checkbox" checked></label>
+                        <div class="c-task-item__main">
+                            <div class="c-task-item__title">修复登录页面的CSS Bug</div>
+                            <div class="c-task-item__tags">
+                                <span class="c-tag">#前端</span>
+                            </div>
+                        </div>
+                        <div class="c-task-item__meta">
+                             <div class="c-task-item__duedate u-flex-center-gap"><i class="fas fa-calendar-alt"></i><span>昨天</span></div>
+                        </div>
+                    </div>
+                    <div class="c-task-item" data-task-id="125">
+                        <label class="c-checkbox c-task-item__checkbox"><input type="checkbox"></label>
+                        <div class="c-task-item__main">
+                            <div class="c-task-item__title">研究 AI Agent 的长短期记忆实现方案</div>
+                        </div>
+                        <div class="c-task-item__meta"></div>
+                    </div>
+                     <div class="c-task-item" data-task-id="126">
+                        <label class="c-checkbox c-task-item__checkbox"><input type="checkbox"></label>
+                        <div class="c-task-item__main">
+                            <div class="c-task-item__title">撰写第三季度项目总结报告</div>
+                            <div class="c-task-item__tags">
+                                <span class="c-tag">#报告</span>
+                                <span class="c-tag">#管理</span>
+                            </div>
+                        </div>
+                        <div class="c-task-item__meta">
+                             <div class="c-task-item__duedate u-flex-center-gap"><i class="fas fa-calendar-alt"></i><span>08-15</span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+    
+            <!-- PART 3: 任务详情侧滑面板 (Task Detail Pane)，默认隐藏 -->
+            <aside class="c-task-detail-pane" id="task-detail-pane" style="display: none;">
+                <header class="c-task-detail-pane__header o-box o-box--space-between">
+                    <select id="task-detail-status" class="c-form-control c-form-control--header-select" title="设置任务状态">
+                        <option value="todo">待办</option>
+                        <option value="in_progress">进行中</option>
+                        <option value="completed">已完成</option>
+                    </select>
+                    <div class="c-task-detail-pane__actions">
+                        <button class="c-button c-button--icon js-focus-mode" title="专注模式"><i class="fas fa-expand"></i></button>
+                        <button class="c-button c-button--icon js-delete-task" title="删除任务"><i class="fas fa-trash"></i></button>
+                        <button class="c-button c-button--icon js-close-detail-pane" title="关闭"><i class="fas fa-times"></i></button>
+                    </div>
+                </header>
+                <div class="c-task-detail-pane__content">
+                    <input type="text" id="task-detail-title" class="c-task-detail-pane__title-input" placeholder="任务名称">
+                    
+                    <div class="c-task-detail-pane__properties">
+                        <div class="c-property-item">
+                            <span class="c-property-item__label u-flex-center-gap"><i class="fas fa-list-ul fa-fw"></i> 项目</span>
+                            <select id="task-detail-project" class="c-property-item__value"></select>
+                        </div>
+                        <div class="c-property-item">
+                            <span class="c-property-item__label u-flex-center-gap"><i class="fas fa-calendar-alt fa-fw"></i> 截止日期</span>
+                            <input type="date" id="task-detail-duedate" class="c-property-item__value">
+                        </div>
+                        <div class="c-property-item">
+                            <span class="c-property-item__label u-flex-center-gap"><i class="fas fa-tags fa-fw"></i> 标签</span>
+                            <div id="task-detail-tags" class="c-property-item__value"><!-- JS渲染标签输入组件 --></div>
+                        </div>
+                    </div>
+    
+                    <!-- 描述区域：实现MD编辑和预览 -->
+                    <div class="c-task-detail-pane__description">
+                        <div class="c-editor-toolbar">
+                            <h3 class="c-editor-toolbar__title">描述</h3>
+                            <div class="c-button-group c-button-group--pills">
+                                <button class="c-button c-button--small is-active js-edit-mode">编辑</button>
+                                <button class="c-button c-button--small js-preview-mode">预览</button>
+                            </div>
+                        </div>
+                        <div class="c-editor-wrapper">
+                            <textarea id="task-detail-editor" placeholder="添加更多细节，支持 Markdown..."></textarea>
+                            <div id="task-detail-preview" class="c-preview-content" style="display: none;"></div>
+                        </div>
+                    </div>
+                    
+                    <div class="c-task-detail-pane__subtasks">
+                        <h3 class="u-flex-center-gap"><i class="fas fa-check-double"></i> 子任务</h3>
+                        <!-- 子任务列表 -->
+                    </div>
+    
+                    <div class="c-task-detail-pane__activity">
+                        <h3 class="u-flex-center-gap"><i class="fas fa-history"></i> 活动</h3>
+                        <!-- 评论和活动日志 -->
+                    </div>
+                </div>
+            </aside>
+        </div>
+    </template>
+    
+    <!-- Agent 视图模板 -->
+    <template id="template-view-agent">
+        <!-- [FIX & ENHANCED] Agent 侧边栏: 使用功能完整的通用资源侧边栏 -->
+        <div data-slot-content="sidebar">
+            <div class="c-resource-sidebar">
+                <header class="c-resource-sidebar__header o-box o-box--space-between">
+                    <h2 class="c-resource-sidebar__title u-flex-center-gap"><i class="fas fa-comments"></i><span>聊天</span></h2>
+                </header>
+                 <div class="c-resource-sidebar__actions">
+                    <button class="c-button c-button--icon c-button--small c-button--on-dark js-new-chat" title="新建聊天"><i class="fas fa-plus"></i></button>
+                    <button class="c-button c-button--icon c-button--small c-button--on-dark js-new-folder" title="新建目录"><i class="fas fa-folder-plus"></i></button>
+                    <button class="c-button c-button--icon c-button--small c-button--on-dark js-import" title="导入"><i class="fas fa-upload"></i></button>
+                    <button class="c-button c-button--icon c-button--small c-button--on-dark js-move-selected" title="移动选中"><i class="fas fa-people-arrows"></i></button>
+                    <button class="c-button c-button--icon c-button--small c-button--on-dark js-delete-selected" title="删除选中"><i class="fas fa-trash"></i></button>
+                </div>
+                <div class="c-resource-sidebar__selection-controls">
+                    <label class="c-checkbox"><input type="checkbox" class="js-select-all"> 全选</label>
+                </div>
+                <div class="c-resource-sidebar__filter-bar">
+                    <div class="c-search-box">
+                        <i class="fas fa-search c-search-box__icon"></i>
+                        <input type="text" class="c-search-box__input" placeholder="搜索聊天...">
+                    </div>
+                </div>
+                <div class="c-resource-sidebar__content">
+                    <ul class="c-resource-sidebar__list">
+                        <li class="c-resource-item u-flex-center-gap" data-id="agent-folder-1"><i class="fas fa-folder fa-fw"></i><span>工作项目</span></li>
+                        <li class="c-resource-item is-active u-flex-center-gap" data-id="agent-chat-1" style="padding-left: 30px;"><i class="fas fa-comment fa-fw"></i><span>Q3 市场营销计划</span></li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+        <div data-slot-content="main">
+                <div class="c-panel" id="agent-history-panel">
+                    <header class="c-panel__header o-box o-box--space-between">
+                        <div class="c-panel__actions c-panel__actions--leading">
+                            <button class="c-button c-button--icon c-button--on-dark js-toggle-sidebar"><i class="fas fa-bars"></i></button>
+                        </div>
+                        <h2 class="c-panel__title u-flex-center-gap">
+                            <i class="fas fa-comments"></i>
+                            <span id="agent-history-title">对话记录</span>
+                        </h2>
+                        <div class="c-panel__actions">
+                            <input type="text" id="agent-history-search" class="c-form-control c-form-control--header-search" placeholder="搜索...">
+                            <button type="button" class="c-button c-button--icon c-button--on-dark js-ai-assistant" title="AI 助手">
+                                <i class="fas fa-magic-wand-sparkles"></i>
+                            </button>
+                            <select id="agent-conversation-role-selector" class="c-form-control c-form-control--header-select"></select>
+                        </div>
+                    </header>
+                    <div class="c-panel__content">
+                        <div class="c-history-panel__content c-preview-content" id="agent-history-content" style="flex: 1; min-height: 0;"></div>
+                        <div class="c-chat-input" id="agent-chat-input-area">
+                            <div class="c-chat-input__attachment-preview" id="agent-attachment-preview"></div>
+                            <div class="c-chat-input__controls">
+                                <textarea id="agent-chat-input" class="c-chat-input__textarea"></textarea>
+                                <input type="file" id="agent-attachment-input" class="u-visually-hidden" multiple>
+                                <button id="agent-attach-file-btn" class="c-button c-button--secondary c-button--circular"><i class="fas fa-paperclip"></i></button>
+                                <button id="agent-send-message-btn" class="c-button c-button--primary c-button--circular"><i class="fas fa-paper-plane"></i></button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="c-floating-nav" id="agent-chat-nav">
+                        <button id="agent-chat-nav-up" class="c-floating-nav__button"><i class="fas fa-arrow-up"></i></button>
+                        <button id="agent-chat-nav-down" class="c-floating-nav__button"><i class="fas fa-arrow-down"></i></button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <!-- Settings 视图模板 -->
+    <template id="template-view-settings">
+        <div class="o-main-layout">
+            <aside class="c-session-sidebar">
+                <header class="c-session-sidebar__header o-box">
+                    <h2 class="c-session-sidebar__title u-flex-center-gap">
+                        <span><i class="fas fa-sliders-h"></i> 设置</span>
+                    </h2>
+                </header>
+                <div class="c-session-sidebar__content" id="settings-nav-list" style="padding: 10px;">
+                </div>
+            </aside>
+            <div class="o-app-container">
+                <div class="c-panel" style="height: 100%;">
+                    <header class="c-panel__header o-box o-box--space-between">
+                        <h2 id="settings-detail-title" class="c-panel__title"></h2>
+                        <div class="c-panel__actions">
+                            <button id="settings-save-btn" class="c-button c-button--text u-flex-center-gap" style="display: none;"><i class="fas fa-save"></i> 保存</button>
+                        </div>
+                    </header>
+                    <div id="settings-detail-content" class="c-panel__content" style="padding: 25px; overflow-y: auto;">
+                        <div class="c-empty-state"><i class="fas fa-cogs fa-3x"></i>
+                            <p>从左侧选择一个项目进行配置</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </template>
+    
+
+    <!-- ====================================================== -->
+    <!--          3. 全局模态框与组件模板                      -->
+    <!-- ====================================================== -->
+    
+    <!-- AI 助手弹窗模板 -->
+    <template id="template-modal-ai-popup">
+        <div class="c-modal">
+            <div class="c-modal__content">
+                <header class="c-modal__header o-box o-box--space-between">
+                    <h2>AI 助手</h2>
+                    <button class="c-modal__close js-close-modal">×</button>
+                </header>
+                <div class="c-modal__body">
+                    <div class="c-form-group">
+                        <label for="ai-popup-agent-selector">选择 AI 角色:</label>
+                        <select id="ai-popup-agent-selector" class="c-form-control"></select>
+                    </div>
+                    <div class="c-form-group">
+                        <label for="ai-popup-textarea">内容 (可编辑):</label>
+                        <textarea id="ai-popup-textarea" class="c-form-control" rows="12"></textarea>
+                    </div>
+                </div>
+                <footer class="c-modal__footer">
+                    <button type="button" class="c-button c-button--secondary js-close-modal">取消</button>
+                    <button type="button" class="c-button c-button--primary u-flex-center-gap" id="ai-popup-send-btn">
+                        <i class="fas fa-paper-plane"></i> 发送到新会话
+                    </button>
+                </footer>
+            </div>
+        </div>
+    </template>
+    
+    <!-- Anki 模态框模板 -->
+    <template id="template-modal-anki-move">
+        <div class="c-modal">
+            <div class="c-modal__content">
+                <header class="c-modal__header o-box o-box--space-between">
+                    <h2 class="c-modal__title">移动到目录</h2>
+                    <button class="c-modal__close js-close-modal">×</button>
+                </header>
+                <div class="c-modal__body">
+                    <p>选择目标目录：</p>
+                    <div class="c-folder-list" id="anki-move-folder-list"></div>
+                </div>
+                <footer class="c-modal__footer">
+                    <button class="c-button c-button--secondary js-close-modal">取消</button>
+                    <button class="c-button c-button--primary" id="anki-confirm-move-btn">确认</button>
+                </footer>
+            </div>
+        </div>
+    </template>
+
+    <!-- Anki: Custom Study Modal -->
+    <template id="template-modal-anki-custom-study">
+        <div class="c-modal">
+            <div class="c-modal__content">
+                <header class="c-modal__header o-box o-box--space-between">
+                    <h2>自定义待办</h2>
+                    <button class="c-modal__close js-close-modal">×</button>
+                </header>
+                <div class="c-modal__body">
+                    <form id="anki-custom-study-form">
+                        <div class="c-form-group">
+                            <label for="anki-filter-by-file">按文件/目录筛选:</label>
+                            <select id="anki-filter-by-file" name="filterByFile" class="c-form-control"></select>
+                        </div>
+                        <div class="c-form-group">
+                            <label>按卡片状态筛选:</label>
+                            <div class="c-checkbox-group">
+                                <label class="c-checkbox"><input type="checkbox" name="cardState" value="new" checked> 新卡片</label>
+                                <label class="c-checkbox"><input type="checkbox" name="cardState" value="learning" checked> 学习中</label>
+                                <label class="c-checkbox"><input type="checkbox" name="cardState" value="review" checked> 待办中</label>
+                                <label class="c-checkbox"><input type="checkbox" name="cardState" value="relearning" checked> 重学中</label>
+                            </div>
+                        </div>
+                        <div class="c-form-group">
+                            <label for="anki-filter-by-last-review">按最后一次待办时间筛选:</label>
+                            <select id="anki-filter-by-last-review" name="filterByLastReview" class="c-form-control">
+                                <option value="any">任何时间</option>
+                                <option value="last7days">最近7天内</option>
+                                <option value="last30days">最近30天内</option>
+                                <option value="over30days">超过30天未待办</option>
+                                <option value="never">从未待办过 (新卡片)</option>
+                            </select>
+                        </div>
+                        <div class="c-form-group">
+                            <label for="anki-max-cards">最大卡片数量:</label>
+                            <input type="number" id="anki-max-cards" name="maxCards" class="c-form-control" value="50" min="1">
+                        </div>
+                    </form>
+                </div>
+                <footer class="c-modal__footer">
+                    <button type="button" class="c-button c-button--secondary js-close-modal">取消</button>
+                    <button type="submit" class="c-button c-button--primary" form="anki-custom-study-form">开始</button>
+                </footer>
+            </div>
+        </div>
+    </template>
+
+    <!-- Anki: Statistics Modal -->
+    <template id="template-modal-anki-stats">
+        <div class="c-modal">
+            <div class="c-modal__content c-modal__content--large">
+                <header class="c-modal__header o-box o-box--space-between">
+                    <h2>待办统计</h2><button class="c-modal__close js-close-modal">×</button>
+                </header>
+                <div class="c-modal__body">
+                    <p>近30天每日待办卡片数量</p>
+                    <div class="c-chart-container">
+                        <canvas id="anki-stats-chart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <!-- Task: Task Creation Modal -->
+    <template id="template-modal-task-create">
+        <div class="c-modal">
+            <div class="c-modal__content">
+                <header class="c-modal__header o-box o-box--space-between">
+                    <h2 id="task-modal-title">新建任务</h2>
+                    <button class="c-modal__close js-close-modal">×</button>
+                </header>
+                <div class="c-modal__body">
+                    <form id="task-create-form">
+                        <div class="c-form-group">
+                            <label for="task-modal-name">任务名称</label>
+                            <input type="text" id="task-modal-name" class="c-form-control" required placeholder="例如：学习二叉树的先序遍历">
+                        </div>
+                        <div class="c-form-group">
+                            <label for="task-modal-task-list">所属列表</label>
+                            <select id="task-modal-task-list" class="c-form-control" required></select>
+                        </div>
+                        <div class="c-form-group">
+                            <label for="task-modal-tags-input">标签 (输入后按回车)</label>
+                            <div class="c-autocomplete">
+                                <div class="c-tags-input">
+                                    <ul id="task-modal-tags-list" class="c-tags-input__list"></ul>
+                                    <input type="text" id="task-modal-tags-input" class="c-tags-input__input" placeholder="例如：数据结构, 算法">
+                                </div>
+                                <ul id="task-modal-tags-suggestions" class="c-autocomplete__suggestions"></ul>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <footer class="c-modal__footer">
+                    <button type="button" class="c-button c-button--secondary js-close-modal">取消</button>
+                    <button type="submit" class="c-button c-button--primary" form="task-create-form">创建任务</button>
+                </footer>
+            </div>
+        </div>
+    </template>
+
+    <!-- Task: Tag Management Modal -->
+    <template id="template-modal-task-tag-manager">
+        <div class="c-modal">
+            <div class="c-modal__content">
+                <header class="c-modal__header o-box o-box--space-between">
+                    <h2>管理任务标签</h2>
+                    <button class="c-modal__close js-close-modal">×</button>
+                </header>
+                <div class="c-modal__body">
+                    <form id="task-tag-form">
+                         <div class="c-form-group">
+                            <label for="task-tag-modal-input">添加或移除标签 (输入后按回车)</label>
+                            <div class="c-tags-input">
+                                <ul id="task-tag-modal-list" class="c-tags-input__list"></ul>
+                                <input type="text" id="task-tag-modal-input" class="c-tags-input__input" list="task-existing-tags-datalist" placeholder="例如：重要, 紧急">
+                                <datalist id="task-existing-tags-datalist"></datalist>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <footer class="c-modal__footer">
+                    <button type="button" class="c-button c-button--primary" id="task-tag-modal-confirm-btn">确认</button>
+                </footer>
+            </div>
+        </div>
+    </template>
+    <template id="template-modal-task-review">
+        <div class="c-modal">
+            <div class="c-modal__content c-modal__content--review">
+                <header class="c-modal__header o-box o-box--space-between">
+                    <h2>任务待办</h2>
+                    <button class="c-modal__close js-close-modal">×</button>
+                </header>
+                <div class="c-modal__body" id="task-review-content"></div>
+                <footer class="c-modal__footer">
+                    <div class="c-review-controls">
+                        <button class="c-review-controls__button c-review-controls__button--again" data-rating="0">重做</button>
+                        <button class="c-review-controls__button c-review-controls__button--hard" data-rating="1">困难</button>
+                        <button class="c-review-controls__button c-review-controls__button--good" data-rating="2">犹豫</button>
+                        <button class="c-review-controls__button c-review-controls__button--easy" data-rating="3">简单</button>
+                    </div>
+                </footer>
+            </div>
+        </div>
+    </template>
+    
+    <!-- 其他独立组件模板 -->
+    <template id="template-component-audio-player">
+        <div class="c-audio-player">
+            <div class="c-audio-player__title" id="audio-title"></div>
+            <div class="c-audio-player__progress">
+                <div class="c-audio-player__progress-bar" id="audio-progress-bar"></div>
+            </div>
+            <div class="c-audio-player__buttons">
+                <button id="audio-play-btn" class="c-button c-button--primary u-flex-center-gap"><i class="fas fa-play"></i> 播放</button>
+                <button id="audio-pause-btn" class="c-button c-button--primary u-flex-center-gap"><i class="fas fa-pause"></i> 暂停</button>
+                <button id="audio-stop-btn" class="c-button c-button--secondary u-flex-center-gap"><i class="fas fa-stop"></i> 停止</button>
+            </div>
+        </div>
+    </template>
+
+
+    <!-- ====================================================== -->
+    <!--          4. 设置页面的详细内容模板                     -->
+    <!-- ====================================================== -->
+    <template id="settings-general-form">
+        <div data-id="general" data-type="general">
+            <section class="c-settings-section">
+                <h3 class="c-settings-section__title">外观与主题</h3>
+                <div class="c-form-group">
+                    <label for="settings-theme-selector">选择主题</label>
+                    <select id="settings-theme-selector" class="c-form-control">
+                        <option value="">默认 (亮色)</option>
+                        <option value="dark">暗黑</option>
+                        <option value="large-font">大号字体</option>
+                        <option value="larger-font">更大号字体</option>
+                    </select>
+                </div>
+            </section>
+            <section class="c-settings-section">
+                <h3 class="c-settings-section__title">数据与同步</h3>
+                <div class="c-form-group">
+                    <label for="settings-autosave-interval">自动保存间隔 (分钟)</label>
+                    <input type="number" id="settings-autosave-interval" class="c-form-control" min="0">
+                </div>
+                <div class="c-form-group">
+                    <label>数据库同步</label>
+                    <div style="display: flex; gap: 15px;">
+                        <button id="settings-export-db-btn" class="c-button c-button--secondary u-flex-center-gap"><i class="fas fa-download"></i> 导出数据</button>
+                        <button id="settings-import-db-btn" class="c-button c-button--danger u-flex-center-gap"><i class="fas fa-upload"></i> 导入数据</button>
+                    </div>
+                    <input type="file" id="settings-import-file-input" class="u-visually-hidden" accept=".json">
+                </div>
+            </section>
+        </div>
+    </template>
+    <template id="settings-api-config-form">
+        <div data-type="apiConfig">
+            <form class="settings-dynamic-form" novalidate>
+                <input type="hidden" class="config-id">
+                <div class="c-form-group"><label>配置名称</label><input type="text" class="config-name c-form-control" required></div>
+                <div class="c-form-group"><label>提供商</label><select class="config-provider c-form-control" required></select></div>
+                <div class="c-form-group"><label>API 地址</label><input type="url" class="config-apiUrl c-form-control"></div>
+                <div class="c-form-group"><label>API Key</label>
+                    <div class="c-input-group">
+                        <input type="password" class="config-apiKey c-form-control"><button type="button" class="toggle-api-key-visibility c-input-group__button"><i class="fas fa-eye"></i></button>
+                    </div>
+                </div>
+                <div class="c-form-group"><label>Models (别名:模型名)</label><textarea class="config-models c-form-control" rows="3"></textarea></div>
+                <footer class="c-settings-section__footer"><button type="button" class="c-button c-button--danger delete-item-btn">删除此配置</button></footer>
+            </form>
+        </div>
+    </template>
+    <template id="settings-agent-form">
+        <div data-type="agent">
+            <form class="settings-dynamic-form" novalidate>
+                <input type="hidden" class="config-id">
+                <div class="c-form-group"><label>角色名称</label><input type="text" class="config-name c-form-control" required></div>
+                <div class="c-form-group"><label>头像 (2字符)</label><input type="text" class="config-avatar c-form-control" required maxlength="2"></div>
+                <div class="c-form-group"><label>选择模型</label><select class="config-model c-form-control" required></select></div>
+                <div class="c-form-group"><label>System Prompt</label><textarea class="config-systemPrompt c-form-control" rows="8"></textarea></div>
+                <div class="c-form-group"><label>标签</label>
+                    <div class="c-autocomplete">
+                        <div class="c-tags-input">
+                            <ul class="c-tags-input__list"></ul>
+                            <input type="text" class="config-tags-input c-tags-input__input">
+                        </div>
+                        <ul class="c-autocomplete__suggestions"></ul>
+                    </div>
+                </div>
+                <div class="c-form-group"><label class="c-checkbox"><input type="checkbox" class="config-sendHistory"> 发送历史上下文</label></div>
+                <div class="c-form-group"><label>欢迎语 (可选)</label><textarea class="config-hint c-form-control" rows="3"></textarea></div>
+                <footer class="c-settings-section__footer"><button type="button" class="c-button c-button--danger delete-item-btn">删除此角色</button></footer>
+            </form>
+        </div>
+    </template>
+    <template id="settings-tags-form">
+        <div data-id="tags" data-type="tags">
+            <section class="c-settings-section">
+                <h3 class="c-settings-section__title">添加新标签</h3>
+                <form id="settings-add-tag-form" style="display: flex; gap: 10px;">
+                    <input type="text" id="settings-new-tag-name" class="c-form-control" placeholder="例如：编程、生活" required style="flex-grow: 1;">
+                    <button type="submit" class="c-button c-button--primary">添加</button>
+                </form>
+                <p class="c-form-group__help-text">在这里添加的标签，可以在任务管理和AI角色配置中复用。</p>
+            </section>
+            <section class="c-settings-section">
+                <h3 class="c-settings-section__title">所有标签</h3>
+                <div id="settings-all-tags-list" class="c-tags-management-list"></div>
+            </section>
+        </div>
+    </template>
+    <template id="settings-task-lists-form">
+        <div data-id="taskLists" data-type="taskLists">
+            <section class="c-settings-section">
+                <h3 class="c-settings-section__title">添加新任务列表</h3>
+                <form id="settings-add-task-list-form" style="display: flex; gap: 10px;">
+                    <input type="text" id="settings-new-list-name" class="c-form-control" placeholder="例如：工作项目、个人学习" required style="flex-grow: 1;">
+                    <button type="submit" class="c-button c-button--primary">添加</button>
+                </form>
+                <p class="c-form-group__help-text">任务列表用于组织和分类您的任务。</p>
+            </section>
+            <section class="c-settings-section">
+                <h3 class="c-settings-section__title">所有任务列表</h3>
+                <div id="settings-all-task-lists" class="c-settings-item-list"></div>
+            </section>
+        </div>
+    </template>
+
+    <script type="module" src="./main.js"></script>
+</body>
+
+</html>
