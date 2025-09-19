@@ -4,6 +4,37 @@
 // import { renderMathAndMermaid, processTaskLists } from '../services/renderService.js';
 import { audioService } from '../services/audioService.js';
 
+// ▼▼▼ 1. 将颜色计算逻辑作为一个独立的辅助函数或组件的私有方法 ▼▼▼
+/**
+ * 根据 cloze 的状态计算其应有的背景颜色CSS类。
+ * @param {object} clozeState - cloze 的状态对象，至少包含 due 和 state 属性。
+ * @returns {string} The CSS class name for the cloze color.
+ */
+function getClozeColorClass(clozeState) {
+    if (!clozeState || !clozeState.due) return 'cloze-28plus';
+
+    const now = Date.now();
+    const diffDays = (clozeState.due - now) / (1000 * 60 * 60 * 24);
+
+    if (diffDays <= 0) { // 已到期或过期
+        if (clozeState.state === 'learning' || clozeState.state === 'relearning') {
+            return 'cloze-10m'; // 学习/重学中的卡片，用醒目的颜色提示
+        }
+        return 'cloze-28plus'; // 默认的到期颜色
+    }
+    // 未到期
+    if (diffDays < 1) return 'cloze-1d';
+    if (diffDays < 2) return 'cloze-2d';
+    if (diffDays < 3) return 'cloze-3d';
+    if (diffDays < 5) return 'cloze-5d';
+    if (diffDays < 7) return 'cloze-7d';
+    if (diffDays < 14) return 'cloze-14d';
+    if (diffDays < 28) return 'cloze-28d';
+
+    return 'cloze-28plus'; // 超过28天的也用这个颜色
+}
+
+
 export class PreviewComponent {
     constructor(store) {
         this.store = store;
@@ -121,21 +152,33 @@ export class PreviewComponent {
             return;
         }
         
-        // 3. 处理普通点击以显示Cloze
-        this.store.recordClozeInteraction(cloze.dataset.clozeId);
-        
-        // --- 开始修改 ---
-        const audioText = cloze.dataset.multimedia;
-        const isCurrentlyHidden = cloze.classList.contains('hidden');
+        // ▼▼▼ 开始修改 ▼▼▼
+        // 3. 处理普通点击以显示Cloze和评分按钮
+        // 只有当cloze是隐藏状态时，单击才有效
+        if (cloze.classList.contains('hidden')) {
+            e.stopPropagation(); // 阻止事件冒泡
 
-        // 如果Cloze当前是隐藏的，并且它有关联的音频，则在显示它之前播放音频。
-        if (isCurrentlyHidden && audioText) {
-            audioService.play(audioText);
-        }
-        // --- 结束修改 ---
+            // 记录交互，用于“上一个/下一个”导航
+            this.store.recordClozeInteraction(cloze.dataset.clozeId);
         
-        // 切换可见性的动作照常执行
-        this.store.toggleClozeVisibility(cloze.dataset.clozeId);
+            // 如果有音频，则播放
+            const audioText = cloze.dataset.multimedia;
+            if (audioText) {
+                audioService.play(audioText);
+            }
+            
+            // 核心交互：移除hidden类并显示评分按钮
+            cloze.classList.remove('hidden');
+            const actionsEl = cloze.querySelector('.cloze-actions');
+            if (actionsEl) {
+                actionsEl.style.display = 'flex';
+            }
+
+            // 【注意】我们不再调用 this.store.toggleClozeVisibility()
+            // 因为这只是一个临时的UI交互，不应该永久改变store中的tempVisible状态。
+            // 当用户评分后，store的状态改变会通过updateClozeVisibility自动将其隐藏。
+        }
+        // ▲▲▲ 结束修改 ▲▲▲
     }
 
     /**
@@ -166,20 +209,27 @@ export class PreviewComponent {
     }
   
     async handleStateChange(newState, oldState) {
-        const shouldRedraw = (newState.previewContent !== oldState.previewContent && newState.previewContent) || 
-                             (!oldState.previewContent && newState.previewContent);
+        // --- 逻辑重构：区分完全重绘和局部更新 ---
 
-        if (shouldRedraw) {
+        // 优先级 1: 检查基础HTML内容是否已更新。如果是，则必须执行完全重绘。
+        const contentHasChanged = (newState.previewContent !== oldState.previewContent && newState.previewContent) ||
+                                  (!oldState.previewContent && newState.previewContent);
+
+        if (contentHasChanged) {
             this.element.innerHTML = newState.previewContent;
-            // 不再需要调用 processTaskLists 或 renderMathAndMermaid，
-            // 因为 RichContentRenderer 在 ankiStore._doUpdatePreview 中已经完成了所有工作。
-        } else if (!newState.previewContent && !this.element.innerHTML.includes('empty-preview')) {
-            this.element.innerHTML = '<div class="empty-preview"><p>暂无内容</p></div>';
+            // 完全重绘后，必须立即应用当前的动态状态（颜色、可见性），
+            // 因为新的HTML不包含这些动态信息。
+            this.updateClozeVisibility(newState); 
+        } else {
+            // 优先级 2: 如果基础HTML未变，则只检查动态状态是否需要局部更新。
+            if (newState.clozeStates !== oldState.clozeStates || newState.areAllClozesVisible !== oldState.areAllClozesVisible) {
+                this.updateClozeVisibility(newState);
+            }
         }
-
-        // 2. 高效更新Cloze的可见性，避免重绘
-        if (newState.clozeStates !== oldState.clozeStates || newState.areAllClozesVisible !== oldState.areAllClozesVisible) {
-            this.updateClozeVisibility(newState);
+        
+        // --- 处理空状态 (逻辑可以简化并移到这里) ---
+        if (!newState.previewContent && !this.element.innerHTML.includes('empty-preview')) {
+            this.element.innerHTML = '<div class="empty-preview"><p>暂无内容</p></div>';
         }
 
         // 3. 处理视图模式切换
@@ -216,12 +266,26 @@ export class PreviewComponent {
             const clozeState = state.clozeStates[id];
             if (!clozeState) return;
 
+            // ▼▼▼ 3. 在这里添加颜色更新的逻辑 ▼▼▼
+            
+            // a. 移除所有旧的颜色类，以防叠加。正则表达式匹配所有 cloze- 开头的类。
+            clozeEl.className.match(/cloze-\w+/g)?.forEach(c => clozeEl.classList.remove(c));
+
+            // b. 根据最新状态计算并添加新的颜色类
+            const newColorClass = getClozeColorClass(clozeState);
+            clozeEl.classList.add(newColorClass);
+            
+            // ▲▲▲ 颜色更新逻辑结束 ▲▲▲
+
+            // --- 以下是原有的可见性逻辑，保持不变 ---
             const isHidden = !state.areAllClozesVisible && !clozeState.tempVisible;
             clozeEl.classList.toggle('hidden', isHidden);
             
             const actionsEl = clozeEl.querySelector('.cloze-actions');
             if (actionsEl) {
-                actionsEl.style.display = !isHidden && !state.areAllClozesVisible ? 'flex' : 'none';
+                if (isHidden) {
+                    actionsEl.style.display = 'none';
+                }
             }
         });
     }

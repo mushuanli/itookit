@@ -161,10 +161,33 @@ export class RichContentRenderer {
             const isHidden = clozeState.state !== 'mastered';
             const audioIcon = audio ? `<span class="media-icon" title="Play audio"><i class="fas fa-volume-up"></i></span>` : '';
             
+            // +++ [ADDED] 添加评分按钮的 HTML 结构，默认隐藏 +++
+            const reviewButtonsHtml = `
+                <div class="cloze-actions" style="display: none;">
+                    <button class="cloze-btn again" data-rating="0">
+                        <i class="fas fa-undo"></i>
+                        <div>重做<br>(<10分钟)</div>
+                    </button>
+                    <button class="cloze-btn hard" data-rating="1">
+                        <i class="fas fa-brain"></i>
+                        <div>困难<br>(<6天)</div>
+                    </button>
+                    <button class="cloze-btn double" data-rating="2">
+                        <i class="fas fa-thumbs-up"></i>
+                        <div>犹豫<br>(<15天)</div>
+                    </button>
+                    <button class="cloze-btn easy" data-rating="3">
+                        <i class="fas fa-graduation-cap"></i>
+                        <div>简单<br>(<30天)</div>
+                    </button>
+                </div>
+            `;
+
             return `<span class="cloze ${isHidden ? 'hidden' : ''}" data-cloze-id="${clozeId}" data-multimedia="${audio || ''}">
                         ${audioIcon}
                         <span class="cloze-content">${clozeContent.replace(/¶/g, '<br>')}</span>
                         <span class="placeholder">[...]</span>
+                        ${reviewButtonsHtml}
                     </span>`;
         });
     }
