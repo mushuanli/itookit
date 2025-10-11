@@ -2,6 +2,7 @@ node_modules/
 target/
 .vite
 .env
+src/lib/demo/config.js
 package-lock.json
 back
 venv
@@ -12,6 +13,7 @@ venv
 *.db
 a.txt
 tmp/
+tmp*
 build/
 tookit/aicli/data/client/
 tookit/aicli/data/chats/
