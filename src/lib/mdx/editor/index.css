@@ -1,0 +1,907 @@
+/* #mdx/editor/index.css */
+
+/* =================================================================== */
+/*   1. MDxEditor 组件外壳 (核心布局)                              */
+/* =================================================================== */
+.mdx-container {
+    border: 1px solid #dfe2e5;
+    border-radius: 6px;
+    overflow: hidden;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    background-color: #ffffff;
+    position: relative; /* 为按钮的绝对定位提供容器 */
+}
+
+/* =================================================================== */
+/*   [NEW] Title Bar Styles                                          */
+/* =================================================================== */
+.mdx-container .mdx-title-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 12px;
+    background-color: #f6f8fa; /* Match toolbar bg for consistency */
+    border-bottom: 1px solid #dfe2e5;
+    flex-shrink: 0;
+    gap: 10px; /* Add some space between sections */
+}
+
+.mdx-container .mdx-title-bar-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0; /* Prevent buttons from shrinking */
+}
+
+/* [NEW] Style for the title text itself */
+.mdx-container .mdx-title-bar-title {
+    flex-grow: 1; /* Allow title to take up remaining space */
+    text-align: center;
+    font-weight: 600;
+    color: #24292e;
+    font-size: 14px;
+    /* Prevent long titles from breaking the layout */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mdx-container .mdx-title-bar-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    width: 28px;
+    height: 28px;
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    color: #586069;
+    cursor: pointer;
+    transition: background-color 0.2s ease, border-color 0.2s ease;
+    font-size: 14px;
+}
+
+.mdx-container .mdx-title-bar-btn:hover {
+    background-color: #e1e4e8;
+    border-color: #d1d5db;
+}
+
+/* =================================================================== */
+/*   2. 工具栏 (核心布局与通用按钮样式)                           */
+/* =================================================================== */
+.mdx-container .mdx-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between; /* [MODIFIED] Pushes mode switcher to the right */
+    gap: 8px;
+    padding: 8px 12px;
+    background-color: #f6f8fa;
+    border-bottom: 1px solid #dfe2e5;
+    flex-shrink: 0;
+}
+
+/* [NEW] Container for main formatting buttons */
+.mdx-container .mdx-toolbar .mdx-toolbar-main-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* [NEW] Container for mode switch buttons */
+.mdx-container .mdx-toolbar .mdx-toolbar-mode-switcher {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* [NEW RULE] Hide main toolbar controls when in render mode */
+.mdx-container.render-mode .mdx-toolbar {
+    display: none;
+}
+
+.mdx-container .mdx-toolbar .mdx-toolbar-separator {
+    width: 1px;
+    background-color: #d1d5db;
+    margin: 4px 8px; /* 上下4px, 左右8px的边距 */
+    align-self: stretch; /* 垂直方向拉伸以匹配按钮高度 */
+}
+
+/* [修改] 使用后代选择器，为工具栏内的任何 <button> 元素应用样式 */
+/* 这使得样式不再依赖于插件是否添加了特定的 class，更加健壮 */
+.mdx-container .mdx-toolbar .mdx-toolbar-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    width: 32px;
+    height: 32px;
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    color: #586069;
+    cursor: pointer;
+    transition: background-color 0.2s ease, border-color 0.2s ease;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.mdx-container .mdx-toolbar .mdx-toolbar-btn:hover {
+    background-color: #e1e4e8;
+    border-color: #d1d5db;
+}
+
+.mdx-container .mdx-toolbar .mdx-toolbar-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* =================================================================== */
+/*   3. 编辑器与渲染器视图 (核心布局)                                */
+/* =================================================================== */
+.mdx-container .mdx-editor-view,
+.mdx-container .mdx-render-view {
+    flex-grow: 1;
+    overflow-y: auto;
+    /* [修正] 移除 height: 100%，因为 flex-grow: 1 已经处理了高度分配 */
+    /* 这可以避免在某些 flexbox 实现中可能出现的滚动问题 */
+}
+
+/* --- CodeMirror 编辑器样式 --- */
+.mdx-container .mdx-editor-view .cm-editor {
+    height: 100%;
+    outline: none;
+    padding: 15px;
+    font-size: 16px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    color: #1f2937; /* ✅ 新增：强制黑色 */
+}
+
+/* 确保所有 CodeMirror 内部元素也是黑色 */
+.mdx-container .cm-content,
+.mdx-container .cm-line,
+.mdx-container .cm-activeLine {
+    color: inherit; /* 继承编辑器的黑色 */
+}
+
+/* --- 渲染器容器 --- */
+.mdx-container .mdx-render-view {
+    padding: 15px;
+    line-height: 1.6;
+}
+
+/* =================================================================== */
+/*   4. 渲染内容样式 (由各插件"贡献")                           */
+/* =================================================================== */
+
+/* --- 基础 Markdown 样式 (可视为 "core:markdown" 插件的样式) --- */
+.rich-content-area h1, .rich-content-area h2, .rich-content-area h3 {
+    margin-top: 1.2em;
+    margin-bottom: 0.6em;
+    font-weight: 600;
+    border-bottom: 1px solid #eaecef;
+    padding-bottom: 0.3em;
+}
+.rich-content-area ul, .rich-content-area ol {
+    padding-left: 2em;
+}
+.rich-content-area blockquote {
+    margin: 1em 0;
+    padding: 0.5em 1.5em;
+    border-left: 4px solid #dfe2e5;
+    background-color: #f6f8fa;
+    color: #6a737d;
+}
+.rich-content-area pre {
+    padding: 1em;
+    margin: 1em 0;
+    overflow-x: auto;
+    background-color: #f6f8fa;
+    border: 1px solid #dfe2e5;
+    border-radius: 6px;
+}
+.rich-content-area code {
+    background: rgba(27,31,35,.05);
+    padding: .2em .4em;
+    margin: 0;
+    font-size: 85%;
+    border-radius: 3px;
+    font-family: SFMono-Regular, Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+}
+.rich-content-area pre > code {
+    background-color: transparent; padding: 0;
+}
+
+/* --- Task List 插件样式 ("feature:task-list") --- */
+.rich-content-area .task-list-item {
+    list-style-type: none;
+}
+.rich-content-area .task-list-item input[type="checkbox"] {
+    margin: 0 0.2em 0.25em -1.6em;
+    vertical-align: middle;
+}
+
+/* --- Cloze 插件样式 ("feature:cloze") --- */
+.cloze {
+    padding: 2px 6px;
+    border-radius: 4px;
+    cursor: pointer;
+    position: relative;
+    transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease; /* [新增] 平滑的颜色过渡 */
+    border-bottom: 2px solid;
+    font-weight: 600;
+}
+.cloze.hidden {
+    background-color: #cceeff; /* [微调] 使用稍微柔和的颜色 */
+    color: transparent;
+}
+/* [新增] 增强交互性：鼠标悬停在隐藏的 cloze 上时提供视觉反馈 */
+.cloze.hidden:hover {
+    background-color: #b3e5fc;
+}
+.cloze.hidden .cloze-content {
+    visibility: hidden;
+}
+.cloze:not(.hidden) .placeholder {
+    display: none;
+}
+.cloze .placeholder {
+    color: #0366d6;
+}
+.cloze .media-icon {
+    margin-right: 4px;
+    color: #0366d6;
+}
+/* 记忆等级样式 */
+.cloze[data-memory-tier='new'], .cloze:not([data-memory-tier]) { border-bottom-color: #0366d6; } /* Blue for new */
+.cloze[data-memory-tier='learning'] { border-bottom-color: #f66a0a; } /* Orange for learning */
+.cloze[data-memory-tier='review'] { border-bottom-color: #28a745; } /* Green for review */
+.cloze[data-memory-tier='mature'], .cloze.is-mature { 
+    border-bottom-color: #6f42c1; /* Purple for mature */
+}
+
+/* [NEW] Style for permanently shown mature clozes */
+.cloze.is-mature {
+    background-color: transparent;
+    color: inherit;
+    font-weight: normal; /* Or keep it bold, stylistic choice */
+    cursor: text; /* No longer a button */
+    padding: 0;
+    border-bottom-style: dotted; /* Dotted underline to indicate it's a special term */
+}
+.cloze.is-mature .placeholder {
+    display: none;
+}
+.cloze.is-mature .cloze-content {
+    visibility: visible;
+}
+
+
+/* [NEW] Grading Panel Styles */
+.mdx-memory-grading-panel {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    padding: 8px 0;
+    margin-top: 4px;
+    animation: fade-in 0.3s ease-out;
+}
+
+@keyframes fade-in {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.mdx-memory-grade-btn {
+    padding: 5px 12px;
+    border: 1px solid transparent;
+    border-radius: 12px; /* Pill shape */
+    background-color: #f1f5f9; /* Lighter gray */
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 500;
+    color: #475569; /* Slate */
+    transition: all 0.2s ease;
+    line-height: 1;
+}
+
+.mdx-memory-grade-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+.mdx-memory-grade-btn.again { background-color: #fee2e2; color: #b91c1c; } /* Red */
+.mdx-memory-grade-btn.again:hover { background-color: #fecaca; }
+
+.mdx-memory-grade-btn.hard { background-color: #ffedd5; color: #c2410c; } /* Orange */
+.mdx-memory-grade-btn.hard:hover { background-color: #fed7aa; }
+
+.mdx-memory-grade-btn.good { background-color: #dcfce7; color: #15803d; } /* Green */
+.mdx-memory-grade-btn.good:hover { background-color: #bbf7d0; }
+
+.mdx-memory-grade-btn.easy { background-color: #dbeafe; color: #1d4ed8; } /* Blue */
+.mdx-memory-grade-btn.easy:hover { background-color: #bfdbfe; }
+
+/* --- Foldable 插件样式 ("core:foldable") --- */
+.foldable-block {
+    margin: 1em 0; border: 1px solid #d1d5db; border-radius: 6px; overflow: hidden;
+}
+.foldable-block summary {
+    padding: 10px 15px; font-weight: 600; background-color: #f9fafb; cursor: pointer; outline: none; display: flex; align-items: center; gap: 8px;
+}
+.foldable-block summary::-webkit-details-marker { display: none; }
+.foldable-block summary::before {
+    content: '▶'; display: inline-block; width: 1em; transition: transform 0.2s;
+}
+.foldable-block[open] > summary::before { transform: rotate(90deg); }
+.foldable-block .summary-task-checkbox { margin-right: 8px; }
+.foldable-block .foldable-content {
+    padding: 15px; border-top: 1px solid #d1d5db;
+}
+
+/* --- Media 插件样式 ("feature:media") --- */
+.media-container { margin: 1em 0; }
+.media-container video, .media-container img { max-width: 100%; border-radius: 6px; display: block; }
+.media-attachment {
+    display: inline-flex; align-items: center; gap: 8px; padding: 10px 15px; border: 1px solid #d1d5db; border-radius: 6px; text-decoration: none; color: #24292e; background-color: #f6f8fa; transition: background-color 0.2s;
+}
+.media-attachment:hover { background-color: #e1e4e8; }
+.media-attachment .fa-paperclip { color: #6a737d; }
+
+/* --- 流式渲染光标 (可视为 "feature:streaming" 插件的样式) --- */
+@keyframes blink { 50% { opacity: 0; } }
+.streaming-cursor {
+    display: inline-block; width: 8px; height: 1.2em; background-color: currentColor; margin-left: 2px; animation: blink 1s step-end infinite; vertical-align: text-bottom;
+}
+
+/* --- [MODIFIED] 交互高亮样式 (用于大纲导航等) --- */
+.highlight-heading {
+    /* [新增] 确保动画期间，滚动定位时在标题上方留出一些空间，避免被顶部导航遮挡 */
+    scroll-margin-top: 20px; 
+    animation: highlight-animation 1.5s ease-out;
+}
+@keyframes highlight-animation {
+    0% { background-color: rgba(255, 220, 40, 0.7); box-shadow: 0 0 0 4px rgba(255, 220, 40, 0.7); }
+    80% { background-color: rgba(255, 220, 40, 0); box-shadow: 0 0 0 0 rgba(255, 220, 40, 0); }
+    100% { background-color: transparent; box-shadow: none; }
+}
+
+/* --- [新增] 交互高亮样式 (用于大纲导航等) --- */
+.highlight-heading {
+    /* [新增] 确保动画期间，滚动定位时在标题上方留出一些空间，避免被顶部导航遮挡 */
+    scroll-margin-top: 20px; 
+    animation: highlight-animation 1.5s ease-out;
+}
+@keyframes highlight-animation {
+    0% { background-color: rgba(255, 220, 40, 0.7); box-shadow: 0 0 0 4px rgba(255, 220, 40, 0.7); }
+    80% { background-color: rgba(255, 220, 40, 0); box-shadow: 0 0 0 0 rgba(255, 220, 40, 0); }
+    100% { background-color: transparent; box-shadow: none; }
+}
+
+/* =================================================================== */
+/*   5. 可选的独立模式切换按钮                                     */
+/* =================================================================== */
+.mdx-container {
+    position: relative; /* 为按钮的绝对定位提供容器 */
+}
+
+.mdx-mode-toggle-btn {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 50; /* 确保在内容之上 */
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 1px solid #d1d5db;
+    background-color: rgba(255, 255, 255, 0.8);
+    backdrop-filter: blur(4px);
+    color: #374151;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    transition: all 0.2s ease;
+    opacity: 0.5;
+}
+
+.mdx-container:hover .mdx-mode-toggle-btn,
+.mdx-mode-toggle-btn:hover {
+    opacity: 1;
+    transform: scale(1.05);
+}
+
+/* =================================================================== */
+/*   6. [NEW] Mention 插件样式 ("feature:mention")                 */
+/* =================================================================== */
+
+/* --- 提及链接样式 --- */
+a[data-mdx-uri] {
+    background-color: #e6f7ff;
+    color: #096dd9;
+    padding: 1px 4px;
+    border-radius: 4px;
+    text-decoration: none;
+    font-weight: 500;
+    transition: background-color 0.2s ease;
+}
+
+a[data-mdx-uri]:hover {
+    background-color: #bae7ff;
+    text-decoration: underline;
+}
+
+/* --- 悬浮预览卡片 --- */
+.mdx-mention-preview-card {
+    position: absolute;
+    z-index: 100;
+    width: 350px;
+    max-height: 400px;
+    overflow-y: auto;
+    background-color: #fff;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    font-size: 14px;
+    line-height: 1.5;
+    display: none; /* Initially hidden */
+}
+
+.mdx-mention-preview-card .preview-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-bottom: 1px solid #e1e4e8;
+    background-color: #f6f8fa;
+    font-size: 15px;
+}
+
+.mdx-mention-preview-card .preview-content {
+    padding: 12px;
+}
+.mdx-mention-preview-card .preview-content p:first-child {
+    margin-top: 0;
+}
+.mdx-mention-preview-card .preview-content p:last-child {
+    margin-bottom: 0;
+}
+
+
+/* --- 内容嵌入 (Transclusion) --- */
+.transclusion-block {
+    margin: 1em 0;
+    padding: 15px;
+    border: 1px solid #d0e5f5;
+    border-left: 4px solid #4da1ff;
+    border-radius: 6px;
+    background-color: #f5fafe;
+}
+
+/* 嵌入块错误状态 */
+.transclusion-error {
+    color: #d73a49;
+    font-style: italic;
+    padding: 10px;
+    background-color: #ffeef0;
+    border: 1px solid #ffdce0;
+    border-radius: 4px;
+}
+
+/* CodeMirror 自动完成列表样式 */
+.cm-tooltip.cm-tooltip-autocomplete {
+    z-index: 1000; /* [关键] 确保提示框在最上层 */
+    background: #ffffff; /* [关键] 设置背景色，否则是透明的 */
+    border: 1px solid #d1d5db; /* [关键] 添加边框，使其可见 */
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    overflow: hidden; /* 防止内容溢出圆角 */
+}
+
+.cm-tooltip-autocomplete ul {
+    list-style: none;
+    margin: 0;
+    padding: 4px; /* 给列表一些内部空间 */
+    max-height: 200px; /* 限制最大高度，出现滚动条 */
+    overflow-y: auto;
+}
+
+.cm-tooltip-autocomplete ul li {
+    padding: 4px 10px;
+    cursor: pointer;
+    border-radius: 4px; /* 为每个选项也添加圆角 */
+    white-space: nowrap; /* 防止选项换行 */
+}
+
+.cm-tooltip-autocomplete ul li[aria-selected] {
+    background-color: #0366d6;
+    color: white;
+}
+
+/* =================================================================== */
+/*   7. [NEW] Search Highlight Styles                                */
+/* =================================================================== */
+
+/* --- CodeMirror (Editor) Search --- */
+.cm-searchMatch {
+    background-color: #ffe082; /* General match highlight */
+    border-radius: 2px;
+}
+.cm-searchMatch-selected {
+    background-color: #ffab00 !important; /* Current match highlight */
+}
+
+/* --- MDxRenderer (Preview) Search --- */
+.mdx-search-mark {
+    background-color: #ffe082; /* General match highlight */
+    color: inherit;
+    border-radius: 2px;
+    box-shadow: 0 0 0 1px #ffe082;
+}
+
+.mdx-search-current {
+    background-color: #ffab00; /* Current match highlight */
+    box-shadow: 0 0 0 2px #ffab00;
+}
+
+/* =================================================================== */
+/*   8. [NEW] Print-Specific Styles                                  */
+/* =================================================================== */
+
+/* 这个容器平时是隐藏的，只在打印时通过JS填充和显示 */
+#mdx-print-container {
+    display: none;
+}
+
+@media print {
+    /* 当 body.mdx-printing 时，隐藏页面上所有直接子元素 */
+    body.mdx-printing > *:not(#mdx-print-container) {
+        display: none !important;
+    }
+    
+    /* 仅显示打印容器，并让它占据整个打印页面 */
+    body.mdx-printing #mdx-print-container {
+        display: block !important;
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: auto;
+        padding: 20mm; /* 给予一些打印边距 */
+        font-size: 12pt; /* 适合打印的字体大小 */
+        color: #000;
+        background-color: #fff;
+    }
+    
+    /* 可以在这里覆盖一些不适合打印的样式 */
+    body.mdx-printing #mdx-print-container .cloze.hidden {
+        color: transparent;
+        background-color: #ccc; /* 打印时隐藏的cloze显示为灰色块 */
+    }
+    
+    body.mdx-printing #mdx-print-container a {
+        text-decoration: underline;
+        color: #000;
+    }
+}
+
+/* =================================================================== */
+/*   9. [NEW] Floating Cloze Controls                                */
+/* =================================================================== */
+/* =================================================================== */
+/*   9. [UPDATED] Floating Cloze Controls                            */
+/* =================================================================== */
+.mdx-cloze-controls__panel {
+    position: absolute;
+    bottom: 20px;
+    right: 20px;
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    gap: 8px; /* Slightly more space for circular buttons */
+    background: transparent;
+    padding: 0;
+}
+
+
+
+/* Circular button base style */
+.mdx-cloze-controls__btn {
+    width: 36px;
+    height: 36px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    
+    /* Glassmorphism effect */
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    
+    color: #6b7280;
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    border-radius: 50%; /* Circular */
+    
+    font-size: 14px;
+    cursor: pointer;
+    
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+}
+
+/* Hover effect */
+.mdx-cloze-controls__btn:hover {
+    background: rgba(255, 255, 255, 0.95);
+    color: #3b82f6;
+    border-color: rgba(59, 130, 246, 0.2);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.08), 0 2px 4px rgba(0, 0, 0, 0.06);
+}
+
+/* Active (click) effect */
+.mdx-cloze-controls__btn:active {
+    transform: translateY(0);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+/* Accent button (for the main toggle) */
+.mdx-cloze-controls__btn--accent {
+    background: rgba(102, 126, 234, 0.15);
+    color: #667eea;
+    border-color: rgba(102, 126, 234, 0.2);
+}
+
+.mdx-cloze-controls__btn--accent:hover {
+    background: rgba(102, 126, 234, 0.25);
+    color: #5568d3;
+    border-color: rgba(102, 126, 234, 0.3);
+}
+
+/* Icon container for animation */
+.mdx-cloze-controls__btn-icon {
+    position: relative;
+    display: inline-flex;
+    width: 16px; /* Adjust size for Font Awesome icons */
+    height: 16px;
+}
+
+.mdx-cloze-controls__btn-icon i {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Default state (all hidden, button shows 'open') */
+.mdx-cloze-controls__btn-icon .fa-eye {
+    opacity: 1;
+    transform: rotate(0deg) scale(1);
+}
+.mdx-cloze-controls__btn-icon .fa-eye-slash {
+    opacity: 0;
+    transform: rotate(-90deg) scale(0.8);
+}
+
+/* Open state (all open, button shows 'close') */
+.mdx-cloze-controls__btn.is-all-open .mdx-cloze-controls__btn-icon .fa-eye {
+    opacity: 0;
+    transform: rotate(90deg) scale(0.8);
+}
+.mdx-cloze-controls__btn.is-all-open .mdx-cloze-controls__btn-icon .fa-eye-slash {
+    opacity: 1;
+    transform: rotate(0deg) scale(1);
+}
+
+
+/* Elegant Tooltip */
+.mdx-cloze-controls__btn::after {
+    content: attr(title);
+    position: absolute;
+    right: calc(100% + 10px);
+    top: 50%;
+    transform: translateY(-50%) scale(0.95);
+    
+    padding: 5px 9px;
+    background: rgba(31, 41, 55, 0.92);
+    backdrop-filter: blur(8px);
+    color: #ffffff;
+    
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 500;
+    white-space: nowrap;
+    
+    opacity: 0;
+    pointer-events: none;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.mdx-cloze-controls__btn:hover::after {
+    opacity: 1;
+    transform: translateY(-50%) scale(1);
+}
+
+
+/* When a cloze is navigated to via buttons, apply this highlight */
+.cloze-nav-highlight {
+    animation: cloze-highlight-animation 1.5s ease-out;
+    background-color: transparent !important; 
+}
+
+@keyframes cloze-highlight-animation {
+    0% { background-color: rgba(255, 220, 40, 0.7); box-shadow: 0 0 0 4px rgba(255, 220, 40, 0.7); }
+    80% { background-color: rgba(255, 220, 40, 0); box-shadow: 0 0 0 0 rgba(255, 220, 40, 0); }
+    100% { background-color: transparent; box-shadow: none; }
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .mdx-cloze-controls__panel {
+        bottom: 16px;
+        right: 16px;
+    }
+    .mdx-cloze-controls__btn::after {
+        display: none; /* Hide tooltips on mobile */
+    }
+}
+
+/* =================================================================== */
+/*   10. [REFACTORED] Code Block Controls & Collapse Styles          */
+/* =================================================================== */
+
+/* --- 基础容器结构重构 --- */
+
+/* Wrapper 现在承担背景和边框，确保视觉稳定 */
+.mdx-code-block-wrapper {
+    position: relative;
+    margin: 1em 0;
+    background-color: #f6f8fa; /* Match original pre bg */
+    border: 1px solid #dfe2e5; /* Match original pre border */
+    border-radius: 6px;
+    /* 添加过渡以实现平滑的高度变化 */
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    /* 确保折叠时内部内容不溢出 */
+    overflow: hidden;
+}
+
+/* 这里的 pre 样式需要覆盖一部分核心样式，使其适应 wrapper */
+.rich-content-area .mdx-code-block-wrapper pre {
+    margin: 0;     /* Margin 由 wrapper 处理 */
+    border: none;  /* Border 由 wrapper 处理 */
+    border-radius: 0 0 6px 6px; /* 底部圆角 */
+    background-color: transparent; /* 背景由 wrapper 处理 */
+    
+    /*用于平滑折叠的过渡属性*/
+    transition: padding 0.3s, max-height 0.3s, opacity 0.3s;
+    /* 默认展开状态 */
+    max-height: 2000px; /* 足够大的值 */
+    opacity: 1;
+}
+
+/* --- 控件按钮样式 --- */
+
+.mdx-code-block-controls {
+    position: absolute;
+    z-index: 10;
+    display: flex;
+    gap: 6px;
+    /* 默认位置 (展开态) */
+    top: 8px;
+    right: 8px;
+    
+    /* 默认隐藏，hover 显示 (展开态) */
+    opacity: 0;
+    transform: translateY(-3px);
+    transition: all 0.2s ease-in-out;
+}
+
+/* 展开状态下，Hover wrapper 显示按钮 */
+.mdx-code-block-wrapper:not(.is-collapsed):hover .mdx-code-block-controls {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+/* 按钮本身的设计 (保持精致的毛玻璃感) */
+.mdx-code-block-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    /* 使用深色半透明背景，适应代码块通常较浅的背景 */
+    background-color: rgba(36, 41, 46, 0.05); 
+    color: #586069;
+    border: 1px solid rgba(0,0,0,0.05);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: all 0.2s;
+}
+
+.mdx-code-block-btn:hover {
+    background-color: #fff;
+    color: #0366d6;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    transform: translateY(-1px);
+}
+
+.mdx-code-block-btn.success {
+    color: #28a745;
+    border-color: #28a745;
+    background-color: #fff;
+}
+
+/* --- [核心修改] 完全折叠状态 (Single Line) --- */
+
+/* 1. Wrapper 变为单行条状 */
+.mdx-code-block-wrapper.is-collapsed {
+    /* 设置一个适合单行展示的高度 */
+    height: 44px; 
+    min-height: 44px;
+    
+    /* 使用 Flexbox 垂直居中内容 (标签和按钮) */
+    display: flex;
+    align-items: center;
+    padding: 0 12px;
+    background-color: #f1f3f5; /* 稍微深一点，区分于展开的代码块 */
+    cursor: default;
+}
+
+/* 2. 压缩 <pre> 内容，使其不可见 */
+.mdx-code-block-wrapper.is-collapsed pre {
+    max-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    opacity: 0;
+    margin: 0; /* 确保无残留边距 */
+    pointer-events: none; /* 禁止交互 */
+}
+
+/* 3. 在折叠条左侧显示语言标签 (利用 JS 设置的 data-language) */
+.mdx-code-block-wrapper.is-collapsed::before {
+    content: attr(data-language) " ..."; /* 例如: "js ..." */
+    font-family: SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 12px;
+    font-weight: 600;
+    color: #6a737d;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    
+    /* 简单的淡入动画 */
+    animation: fade-in-label 0.3s ease-out forwards;
+}
+
+@keyframes fade-in-label {
+    from { opacity: 0; transform: translateX(-10px); }
+    to { opacity: 1; transform: translateX(0); }
+}
+
+/* 4. 折叠状态下，调整控件的位置和可见性 */
+.mdx-code-block-wrapper.is-collapsed .mdx-code-block-controls {
+    /* 在折叠条中垂直居中 */
+    top: 50%;
+    right: 8px;
+    transform: translateY(-50%); /* 覆盖之前的 transform */
+    
+    /* [UX决策] 折叠时始终显示按钮，明确告知用户这里可以操作 */
+    opacity: 1; 
+}
+
+/* 针对折叠状态微调按钮样式，使其更融合 */
+.mdx-code-block-wrapper.is-collapsed .mdx-code-block-btn {
+    background-color: transparent;
+    border-color: transparent;
+}
+.mdx-code-block-wrapper.is-collapsed .mdx-code-block-btn:hover {
+    background-color: rgba(255,255,255,0.8);
+    border-color: rgba(0,0,0,0.1);
+}
