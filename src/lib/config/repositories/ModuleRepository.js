@@ -138,9 +138,7 @@ export class ModuleRepository {
             throw new Error(`父目录 '${parentPath}' 未找到或不是一个目录。`);
         }
         
-        const newNodeName = moduleData.path; // 假设模块名通过path属性传入
-        const fullPath = (parentPath === '/' ? '' : parentPath) + '/' + newNodeName;
-
+        const fullPath = (parentPath === '/' ? '' : parentPath) + '/' + moduleData.path;
         const newNode = {
             ...moduleData,
             path: fullPath, // 覆盖为完整的、正确的路径
@@ -152,9 +150,16 @@ export class ModuleRepository {
         };
 
         parentResult.node.children.push(newNode);
+        parentResult.node.meta.mtime = new Date().toISOString(); // 更新父目录的修改时间
 
         await this._save();
-        this.eventManager.publish(getModuleEventName('updated', this.namespace), this.modules);
+        
+        // --- [核心改进] ---
+        // 发布一个精确的“节点已添加”事件，而不是整个树
+        this.eventManager.publish(getModuleEventName('node_added', this.namespace), {
+            parentPath: parentResult.node.path,
+            newNode: newNode
+        });
         
         return newNode;
     }
@@ -177,7 +182,12 @@ export class ModuleRepository {
         result.node.meta.mtime = new Date().toISOString();
 
         await this._save();
-        this.eventManager.publish(getModuleEventName('updated', this.namespace), this.modules);
+        
+        // --- [核心改进] ---
+        // 发布一个精确的“节点已更新”事件
+        this.eventManager.publish(getModuleEventName('node_updated', this.namespace), {
+            updatedNode: result.node
+        });
     }
     
     /**
@@ -189,18 +199,58 @@ export class ModuleRepository {
         await this.getModules();
 
         const result = this._findNodeByPath(path);
-        if (!result) {
-            console.warn(`模块 '${path}' 未找到，无法移除。`);
-            return;
-        }
-        if (!result.parent) {
-            throw new Error("不能移除根目录。");
-        }
+        if (!result) { console.warn(`模块 '${path}' 未找到，无法移除。`); return; }
+        if (!result.parent) { throw new Error("不能移除根目录。"); }
 
         result.parent.children.splice(result.index, 1);
         result.parent.meta.mtime = new Date().toISOString();
 
         await this._save();
-        this.eventManager.publish(getModuleEventName('updated', this.namespace), this.modules);
+        
+        // --- [核心改进] ---
+        // 发布一个精确的“节点已移除”事件
+        this.eventManager.publish(getModuleEventName('node_removed', this.namespace), {
+            parentPath: result.parent.path,
+            removedNodePath: path
+        });
+    }
+    
+    /**
+     * [新方法] 重命名一个文件或目录，并递归更新所有子路径。
+     * @param {string} oldPath
+     * @param {string} newName
+     * @returns {Promise<void>}
+     */
+    async renameModule(oldPath, newName) {
+        await this.getModules();
+        const result = this._findNodeByPath(oldPath);
+        if (!result) throw new Error(`Path '${oldPath}' not found.`);
+        if (!result.parent) throw new Error("Cannot rename the root directory.");
+
+        const parentPath = result.parent.path;
+        const newPath = (parentPath === '/' ? '' : parentPath) + '/' + newName;
+        
+        const nodeToRename = result.node;
+        
+        // 递归更新所有子节点的路径
+        const updateChildrenPaths = (currentNode, oldBasePath, newBasePath) => {
+            currentNode.path = currentNode.path.replace(oldBasePath, newBasePath);
+            if (currentNode.children) {
+                currentNode.children.forEach(child => updateChildrenPaths(child, oldBasePath, newBasePath));
+            }
+        };
+
+        updateChildrenPaths(nodeToRename, oldPath, newPath);
+        
+        nodeToRename.meta.mtime = new Date().toISOString();
+        result.parent.meta.mtime = new Date().toISOString();
+        
+        await this._save();
+        
+        // --- [核心改进] ---
+        // 重命名也被视为一种更新
+        this.eventManager.publish(getModuleEventName('node_updated', this.namespace), {
+            updatedNode: nodeToRename
+        });
     }
 }
