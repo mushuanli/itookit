@@ -98,47 +98,7 @@
         setTimeout(() => toast.remove(), 3000);
     }
 
-    /**
-     * [NEW] 创建一个适配器 (Adapter)
-     * @description 这个适配器是连接新 ConfigManager 和旧 LLMSettingsWidget 的桥梁。
-     * 它实现了 LLMSettingsWidget 所期望的 ILLMConfigService 接口，
-     * 但在内部，它将调用转发到我们新的、更强大的 Repository 上。
-     * @param {import('../../config/ConfigManager.js').ConfigManager} configManager
-     * @returns {import('../../common/store/services/ILLMConfigService.js').ILLMConfigService}
-     */
-    function createServiceAdapter(configManager) {
-        const llmRepo = configManager.llm;
-        const tagRepo = configManager.tags;
-
-        return {
-            getConnections: () => llmRepo.getConnections(),
-            getAgents: () => llmRepo.getAgents(),
-            getWorkflows: () => llmRepo.getWorkflows(),
-            getAllTags: () => tagRepo.getAll(), // 注意这里是同步的，但最好也改为 async
-
-            // 对于保存操作，我们需要先加载，再合并，最后保存
-            async saveConnections(connections) {
-                await llmRepo.load(); // 确保 config 已加载
-                llmRepo.config.connections = connections;
-                await llmRepo._save(); // 调用内部 save
-                 // 手动发布事件，因为仓库的顶层方法没有被调用
-                configManager.eventManager.publish(EVENTS.LLM_CONNECTIONS_UPDATED, connections);
-            },
-            async saveAgents(agents) {
-                await llmRepo.load();
-                llmRepo.config.agents = agents;
-                await llmRepo._save();
-                configManager.eventManager.publish(EVENTS.LLM_AGENTS_UPDATED, agents);
-            },
-            async saveWorkflows(workflows) {
-                await llmRepo.load();
-                llmRepo.config.workflows = workflows;
-                await llmRepo._save();
-                configManager.eventManager.publish(EVENTS.LLM_WORKFLOWS_UPDATED, workflows);
-            }
-        };
-    }
-
+    // [REMOVED] createServiceAdapter 函数被完全移除，因为它已不再需要。
 
     /**
      * APPLICATION INITIALIZATION (MODIFIED)
@@ -188,12 +148,9 @@
             showToast('Workflow finished!', 'success');
         };
 
-        // --- [MODIFIED] 共享的 Widget 配置 ---
+        // --- [SIMPLIFIED] 共享的 Widget 配置 ---
         const commonWidgetOptions = {
-            // 将 configManager.llm 仓库直接作为服务注入。
-            // LLMSettingsWidget 期待的接口 (getConnections, saveConnections, etc.)
-            // 与我们的 LLMRepository 提供的接口是兼容的。
-            llmConfigService: configManager.llm, 
+            // `llmConfigService` 选项被移除，Widget 现在会自动获取 ConfigManager
             onNotify: showToast,
             onWorkflowRun: workflowRunner,
         };
@@ -232,7 +189,8 @@
             // 2. Define the cleanup function
             const closeModal = async () => {
                 log("Closing modal and unmounting widget...");
-                await modalWidget.unmount();
+                await modalWidget.unmount(); // 正确地在关闭时卸载
+                await modalWidget.destroy(); // 彻底清理
                 overlay.remove();
             };
             
@@ -246,49 +204,10 @@
             log("LLMSettingsWidget 已挂载到模态框容器。");
         });
         
-        // --- 2.6. [NEW] 建立响应式数据同步循环！ ---
-        // 这是实现多实例同步的关键。我们监听由 ConfigManager 发出的全局事件。
-        log("正在为 UI 同步设置响应式事件监听器。");
-
-        // 当 Connections 数据发生变化时...
-        configManager.eventManager.subscribe(EVENTS.LLM_CONNECTIONS_UPDATED, (connections) => {
-            log("[事件] Connections 已更新。正在通知所有活动的 UI 组件...");
-            // 调用侧边栏 widget 子组件的 update 方法来刷新UI
-            if (sidebarWidget.isMounted) {
-                sidebarWidget.components.connections.update({ connections });
-                // Connections 的变化会影响 Agent 编辑器（需要选择 connection），所以也要通知它
-                sidebarWidget.components.agents.update({ newConnections: connections });
-            }
-            // 注意：在真实应用中，需要一个全局的组件注册表来通知所有实例，
-            // 包括可能打开的模态框实例。为了演示，我们只更新侧边栏。
-        });
-        
-        // 当 Agents 数据发生变化时...
-        configManager.eventManager.subscribe(EVENTS.LLM_AGENTS_UPDATED, (agents) => {
-            log("[事件] Agents 已更新。正在通知所有活动的 UI 组件...");
-            if (sidebarWidget.isMounted) {
-                sidebarWidget.components.agents.update({ newAgents: agents });
-                // Agents 的变化会影响 Workflow 编辑器（Agent 作为节点）
-                sidebarWidget.components.workflows.updateRunnables({ agents, workflows: sidebarWidget.state.workflows });
-            }
-        });
-        
-        // 当 Workflows 数据发生变化时...
-        configManager.eventManager.subscribe(EVENTS.LLM_WORKFLOWS_UPDATED, (workflows) => {
-            log("[事件] Workflows 已更新。正在通知所有活动的 UI 组件...");
-             if (sidebarWidget.isMounted) {
-                // ... 通知 workflow 组件更新 ...
-             }
-        });
-        
-        // 当 Tags 数据发生变化时...
-        configManager.eventManager.subscribe(EVENTS.TAGS_UPDATED, (tags) => {
-            log("[事件] Tags 已更新。正在通知所有活动的 UI 组件...");
-            if (sidebarWidget.isMounted) {
-                // Agent 编辑器使用了 TagsInput，需要更新它
-                sidebarWidget.components.agents.update({ newAllTags: tags });
-            }
-        });
+        // --- [REMOVED] 外部的响应式数据同步循环被完全移除 ---
+        // LLMSettingsWidget 实例现在自己负责订阅和响应这些事件。
+        // 这使得代码更简洁，并且多实例同步（侧边栏 vs 模态框）可以自动工作。
+        log("UI components will now react to data changes automatically.");
     }
 
     // Sidebar toggle logic (this is part of the host/app, not the widget)
@@ -301,24 +220,20 @@
                 settingsSidebar.classList.toggle('collapsed');
             });
         }
-        // 等待 LiteGraph 加载完成后再启动主程序
+        
+        const startApp = () => main().catch(error => {
+            console.error("Initialization failed:", error);
+            log(`[FATAL] ${error.message}`);
+        });
+
+        // 确保 LiteGraph 加载完成后再启动应用
         if (typeof LiteGraph !== 'undefined') {
-            main().catch(error => {
-                console.error("初始化失败:", error);
-                log(`[致命错误] ${error.message}`);
-            });
+            startApp();
         } else {
-             window.addEventListener('load', () => main().catch(error => {
-                console.error("初始化失败:", error);
-                log(`[致命错误] ${error.message}`);
-            }));
+             window.addEventListener('load', startApp);
         }
     });
 
-    main().catch(error => {
-        console.error("Initialization failed:", error);
-        log(`[FATAL] ${error.message}`);
-    });
 </script>
 
 </body>

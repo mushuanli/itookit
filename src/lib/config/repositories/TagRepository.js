@@ -118,6 +118,36 @@ export class TagRepository {
     }
 
     /**
+     * --- ADDED: Convenience method for syncing multiple tags ---
+     * Adds multiple new tags from an array.
+     * @param {Tag[]} tagsToAdd - An array of tags to potentially add.
+     * @returns {Promise<void>}
+     */
+    async addTags(tagsToAdd) {
+        if (!Array.isArray(tagsToAdd) || tagsToAdd.length === 0) {
+            return;
+        }
+        await this.load();
+
+        let changed = false;
+        tagsToAdd.forEach(tag => {
+            if (!tag || typeof tag !== 'string' || tag.trim().length === 0) {
+                return; // Skip invalid tags
+            }
+            const trimmedTag = tag.trim();
+            if (!this.tags.has(trimmedTag)) {
+                this.tags.add(trimmedTag);
+                changed = true;
+            }
+        });
+
+        if (changed) {
+            await this._save();
+            this.eventManager.publish(EVENTS.TAGS_UPDATED, this.getAll());
+        }
+    }
+
+    /**
      * 移除一个已存在的标签。
      * 1. 如果标签不存在，则静默忽略。
      * 2. 确保数据已加载，然后移除标签。

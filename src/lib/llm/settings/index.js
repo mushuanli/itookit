@@ -18,16 +18,13 @@ import { LibrarySettings } from './components/LibrarySettings.js';
 import { AgentEditor } from './components/AgentEditor.js';
 import { WorkflowManager } from './components/WorkflowManager.js';
 
-// --- REFACTORED: Import dependencies needed for the default fallback service ---
-import { LocalStorageAdapter } from '../../common/store/default/LocalStorageAdapter.js';
-import { TagRepository } from '../../common/store/repositories/TagRepository.js';
-import { LLMConfigService } from '../../common/store/default/LLMConfigService.js';
+// --- REFACTORED: Import the central ConfigManager ---
+import { ConfigManager } from '../../config/ConfigManager.js';
 
 // +++ MODIFIED: Import the new service interface for type checking and clarity.
-/** @typedef {import('../../common/store/services/ILLMConfigService.js').ILLMConfigService} ILLMConfigService */
-/** @typedef {import('../public/types.js').WorkflowDefinition} WorkflowDefinition */
-/** @typedef {import('../public/types.js').LibraryConfig} LibraryConfig */
-/** @typedef {import('../public/types.js').AgentDefinition} AgentDefinition */
+/** @typedef {import('../public/types.js').LLMWorkflowDefinition} LLMWorkflowDefinition */
+/** @typedef {import('../public/types.js').LLMLibraryConfig} LLMLibraryConfig */
+/** @typedef {import('../public/types.js').LLMAgentDefinition} LLMAgentDefinition */
 
 /**
  * @typedef {object} CustomSettingsTab
@@ -47,7 +44,6 @@ import { LLMConfigService } from '../../common/store/default/LLMConfigService.js
 export class LLMSettingsWidget extends ISettingsWidget {
     /**
      * @param {object} options - Configuration options for the widget.
-     * @param {import('../../common/store/services/ILLMConfigService.js').ILLMConfigService} [options.llmConfigService]
      * @param {(workflow: object) => void} [options.onWorkflowRun]
      * @param {(message: string, type: 'success'|'error'|'info') => void} [options.onNotify]
      */
@@ -55,18 +51,10 @@ export class LLMSettingsWidget extends ISettingsWidget {
         super();
         this.options = options;
 
-        // --- REFACTORED: Dependency Injection is cleaner, no UI mode options. ---
-        if (this.options.llmConfigService) {
-            this.llmConfigService = this.options.llmConfigService;
-        } else {
-            console.warn('[LLMSettingsWidget] No `llmConfigService` provided. Creating a default, LocalStorage-based service stack.');
-            const adapter = new LocalStorageAdapter({ prefix: 'llm-kit' });
-            // 2. Create the global repository
-            const tagRepository = new TagRepository(adapter);
-            // 3. Create the service, injecting its dependencies
-            this.llmConfigService = new LLMConfigService(adapter, tagRepository);
-        }
-
+        // --- REFACTORED: Get the singleton instance of the ConfigManager ---
+        // The check for `llmConfigService` is removed. All instances now use the central service.
+        this.configManager = ConfigManager.getInstance();
+        
         // Internal state
         this.isMounted = false;
         this.container = null; // The DOM element provided by the host
@@ -80,6 +68,7 @@ export class LLMSettingsWidget extends ISettingsWidget {
         
         // Bound event handlers for easy add/remove
         this._boundTabClickHandler = this._handleTabClick.bind(this);
+        this._subscriptions = []; // To store unsubscribe functions
     }
 
     // --- ISettingsWidget Interface Implementation ---
@@ -119,6 +108,7 @@ export class LLMSettingsWidget extends ISettingsWidget {
         
         try {
             await this._loadAndInit();
+            this._subscribeToChanges(); // Subscribe to config changes AFTER initial load
             this.emit('mounted');
         } catch (error) {
             console.error("Failed to initialize LLMSettingsWidget:", error);
@@ -135,6 +125,9 @@ export class LLMSettingsWidget extends ISettingsWidget {
         if (!this.isMounted) return;
         
         this._removeShellEventListeners();
+        // --- ADDED: Clean up all event subscriptions ---
+        this._subscriptions.forEach(unsubscribe => unsubscribe());
+        this._subscriptions = [];
 
         // Optional: Call destroy on child components if they have complex cleanup
         Object.values(this.components).forEach(comp => {
@@ -224,10 +217,10 @@ export class LLMSettingsWidget extends ISettingsWidget {
             this.state.workflows,
             this.state.tags
         ] = await Promise.all([
-            this.llmConfigService.getConnections(),
-            this.llmConfigService.getAgents(),
-            this.llmConfigService.getWorkflows(),
-            this.llmConfigService.getAllTags()
+            this.configManager.llm.getConnections(),
+            this.configManager.llm.getAgents(),
+            this.configManager.llm.getWorkflows(),
+            this.configManager.tags.getAll() // getAll() is synchronous after load()
         ]);
         this._initComponents();
     }
@@ -237,11 +230,10 @@ export class LLMSettingsWidget extends ISettingsWidget {
             connections: new LibrarySettings(
                 this.uiContainer.querySelector('#tab-connections'),
                 { connections: this.state.connections },
-                (newConfig) => {
-                    this.state.connections = newConfig.connections;
-                    this.llmConfigService.saveConnections(this.state.connections);
-                    this.components.agents.update({ newConnections: this.state.connections });
-                    this.emit('change', { key: 'connections' }); // Notify host of change
+                // REFACTORED: Callback now uses the LLM repository
+                async (newConfig) => {
+                    await this.configManager.llm.saveConnections(newConfig.connections);
+                    // The event system will notify other components. No manual update needed.
                 },
                 { onNotify: this._notify.bind(this) }
             ),
@@ -254,12 +246,12 @@ export class LLMSettingsWidget extends ISettingsWidget {
                     onNotify: this._notify.bind(this)
                 },
                 async (newAgents) => {
-                    this.state.agents = newAgents;
-                    await this.llmConfigService.saveAgents(newAgents);
-                    const newTags = await this.llmConfigService.getAllTags();
-                    this.state.tags = newTags;
-                    this.components.agents.update({ allTags: this.state.tags });
-                    this.components.workflows.updateRunnables({ agents: this.state.agents, workflows: this.state.workflows });
+                    await this.configManager.llm.saveAgents(newAgents);
+                    
+                    // Business logic: extract all unique tags from agents and update the global tag list
+                    const allAgentTags = new Set(newAgents.flatMap(agent => agent.tags || []));
+                    await this.configManager.tags.addTags(Array.from(allAgentTags));
+
                     this.emit('change', { key: 'agents' });
                 }
             ),
@@ -269,11 +261,9 @@ export class LLMSettingsWidget extends ISettingsWidget {
                     initialWorkflows: this.state.workflows,
                     initialRunnables: { agents: this.state.agents, workflows: this.state.workflows },
                     onRun: (wf) => this.options.onWorkflowRun?.(wf),
-                    onSave: (newWorkflows) => {
-                        this.state.workflows = newWorkflows;
-                        this.llmConfigService.saveWorkflows(newWorkflows);
-                        this.components.workflows.updateRunnables({ agents: this.state.agents, workflows: this.state.workflows });
-                        this.emit('change', { key: 'workflows' });
+                    onSave: async (newWorkflows) => { // REFACTORED: made async
+                        await this.configManager.llm.saveWorkflows(newWorkflows);
+                        // Event system will handle updates to runnables.
                     },
                     onNotify: this._notify.bind(this)
                 }
@@ -292,5 +282,34 @@ export class LLMSettingsWidget extends ISettingsWidget {
         } else {
             this.emit('notification', { message, type });
         }
+    }
+    /**
+     * --- ADDED: Centralized event subscription logic ---
+     */
+    _subscribeToChanges() {
+        const { eventManager } = this.configManager;
+        
+        this._subscriptions.push(eventManager.subscribe('llm:connections:updated', (connections) => {
+            this.state.connections = connections;
+            if (this.components.connections) this.components.connections.update({ connections });
+            if (this.components.agents) this.components.agents.update({ newConnections: connections });
+        }));
+
+        this._subscriptions.push(eventManager.subscribe('llm:agents:updated', (agents) => {
+            this.state.agents = agents;
+            if (this.components.agents) this.components.agents.update({ newAgents: agents });
+            if (this.components.workflows) this.components.workflows.updateRunnables({ agents: this.state.agents, workflows: this.state.workflows });
+        }));
+
+        this._subscriptions.push(eventManager.subscribe('llm:workflows:updated', (workflows) => {
+            this.state.workflows = workflows;
+            if (this.components.workflows) this.components.workflows.update({ initialWorkflows: workflows });
+            if (this.components.workflows) this.components.workflows.updateRunnables({ agents: this.state.agents, workflows: this.state.workflows });
+        }));
+        
+        this._subscriptions.push(eventManager.subscribe('tags:updated', (tags) => {
+            this.state.tags = tags;
+            if (this.components.agents) this.components.agents.update({ newAllTags: tags });
+        }));
     }
 }

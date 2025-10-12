@@ -148,6 +148,18 @@ export class LLMRepository {
         }
     }
 
+    /**
+     * @description Replaces all connections with the provided array.
+     * @param {import('../shared/types.js').LLMProviderConnection[]} connections - The full array of connections.
+     * @returns {Promise<void>}
+     */
+    async saveConnections(connections) {
+        await this.load();
+        this.config.connections = connections;
+        await this._save();
+        this.eventManager.publish(EVENTS.LLM_CONNECTIONS_UPDATED, this.config.connections);
+    }
+
     // --- AgentDefinition 方法 ---
 
     /**
@@ -218,6 +230,18 @@ export class LLMRepository {
         }
     }
 
+    /**
+     * @description Replaces all agents with the provided array.
+     * @param {import('../shared/types.js').LLMAgentDefinition[]} agents - The full array of agents.
+     * @returns {Promise<void>}
+     */
+    async saveAgents(agents) {
+        await this.load();
+        this.config.agents = agents;
+        await this._save();
+        this.eventManager.publish(EVENTS.LLM_AGENTS_UPDATED, this.config.agents);
+    }
+
     // --- WorkflowDefinition 方法 ---
 
     /**
@@ -286,5 +310,17 @@ export class LLMRepository {
             await this._save();
             this.eventManager.publish(EVENTS.LLM_WORKFLOWS_UPDATED, this.config.workflows);
         }
+    }
+
+    /**
+     * @description Replaces all workflows with the provided array.
+     * @param {import('../shared/types.js').LLMWorkflowDefinition[]} workflows - The full array of workflows.
+     * @returns {Promise<void>}
+     */
+    async saveWorkflows(workflows) {
+        await this.load();
+        this.config.workflows = workflows;
+        await this._save();
+        this.eventManager.publish(EVENTS.LLM_WORKFLOWS_UPDATED, this.config.workflows);
     }
 }
