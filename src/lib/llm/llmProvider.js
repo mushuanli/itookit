@@ -1,6 +1,6 @@
 
 /**
- * @file #llm/defaultProvider.js
+ * @file #llm/llmProvider.js
  * @description Single source of truth for LLM provider static metadata.
  * This includes default URLs, recommended models, etc., to be consumed
  * by both the core library and the settings UI.

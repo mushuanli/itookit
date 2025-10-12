@@ -4,7 +4,7 @@ import { BaseProvider } from './base.js';
 import { LLMError } from '../errors.js';
 import { processAttachment } from '../utils/file-processor.js';
 // +++ 导入共享数据
-import { PROVIDER_DEFAULTS } from '../../defaultProvider.js';
+import { PROVIDER_DEFAULTS } from '../../llmProvider.js';
 
 export class ClaudeProvider extends BaseProvider {
     constructor(config) {

@@ -1,0 +1,325 @@
+<!-- ... #llm/demo/settings-ui.html ... -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>LLM Kit - LLMSettingsWidget Demo</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; background: #f4f4f4; color: #333; overflow-x: hidden; }
+        .header { display: flex; justify-content: space-between; align-items: center; padding: 20px; background: #fff; border-bottom: 1px solid #ddd; }
+        h1, h2, h3 { color: #111; }
+        .content { display: flex; }
+        .main-app { flex-grow: 1; padding: 20px; }
+
+        /* --- Settings Sidebar (Page Usage) --- */
+        .settings-sidebar {
+            width: 60vw; max-width: 900px; min-width: 600px;
+            height: calc(100vh - 78px);
+            border-left: 1px solid #ddd; background: #fff;
+            transition: margin-right 0.3s ease;
+            flex-shrink: 0;
+        }
+        .settings-sidebar.collapsed { margin-right: -60vw; }
+
+        /* --- Modal Styling (Modal Usage) --- */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background-color: rgba(0,0,0,0.6); z-index: 1000;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .modal-container {
+            width: 90%; height: 85%; background-color: #fff;
+            border-radius: 8px; box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+            display: flex; flex-direction: column; overflow: hidden;
+            position: relative; /* For the close button */
+        }
+        .modal-close-btn {
+            position: absolute; top: 10px; right: 20px; z-index: 10;
+            background: none; border: none; font-size: 28px;
+            cursor: pointer; color: #666;
+        }
+
+        button { padding: 10px 15px; font-size: 16px; background-color: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; transition: background-color 0.2s; }
+        button:hover { background-color: #0056b3; }
+        #log { background-color: #2d2d2d; color: #f0f0f0; height: 300px; overflow-y: auto; padding: 10px; border-radius: 5px; white-space: pre-wrap; font-size: 13px; }
+    </style>
+
+    <!-- Dependencies -->
+    <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/gh/jagenjo/litegraph.js/css/litegraph.css">
+    <script type="text/javascript" src="https://cdn.jsdelivr.net/gh/jagenjo/litegraph.js/build/litegraph.min.js" defer></script>
+</head>
+<body>
+
+<div class="header">
+    <h1>LLM Kit - LLMSettingsWidget Demo</h1>
+    <button id="toggle-settings-btn">Toggle Sidebar</button>
+</div>
+<div class="content">
+    <div class="main-app">
+        <h2>Main Application Area</h2>
+        <p>On the right is an `LLMSettingsWidget` instance mounted directly into the page layout as a sidebar.</p>
+        <p>Click the button below to mount a separate instance of the widget inside a dynamically-created modal dialog.</p>
+        <button id="open-modal-btn">Open Settings as Modal</button>
+        <h3>Execution Log</h3>
+        <pre id="log"></pre>
+    </div>
+    <!-- Container for SIDEBAR/PAGE USAGE -->
+    <div id="settings-sidebar-container" class="settings-sidebar"></div>
+</div>
+
+<script type="module">
+    // [MODIFIED] 导入我们新的全局配置管理器
+    import { ConfigManager } from '../../config/ConfigManager.js'; 
+    import { EVENTS } from '../../config/shared/constants.js';
+
+    // [MODIFIED] 移除旧的、独立的服务导入
+    // import { LocalStorageAdapter } from '../../common/store/default/LocalStorageAdapter.js';
+    // import { TagRepository } from '../../common/store/repositories/TagRepository.js';
+    // import { LLMConfigService } from '../../common/store/default/LLMConfigService.js';
+
+    // [UNCHANGED] 其他导入保持不变
+    import { LLMSettingsWidget } from '../settings/index.js';
+    import { WorkflowEngine } from '../core/workflow-engine.js';
+
+
+    const logElement = document.getElementById('log');
+    function log(message) {
+        console.log(message);
+        const timestamp = new Date().toLocaleTimeString();
+        logElement.textContent += `[${timestamp}] ${message}\n`;
+        logElement.scrollTop = logElement.scrollHeight;
+    }
+
+    function showToast(message, type = 'info') {
+        const toast = document.createElement('div');
+        toast.textContent = message;
+        toast.style.cssText = `position: fixed; bottom: 20px; right: 20px; padding: 12px 20px; border-radius: 5px; color: white; z-index: 9999; background-color: ${type === 'success' ? '#28a745' : (type === 'error' ? '#dc3545' : '#17a2b8')};`;
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), 3000);
+    }
+
+    /**
+     * [NEW] 创建一个适配器 (Adapter)
+     * @description 这个适配器是连接新 ConfigManager 和旧 LLMSettingsWidget 的桥梁。
+     * 它实现了 LLMSettingsWidget 所期望的 ILLMConfigService 接口，
+     * 但在内部，它将调用转发到我们新的、更强大的 Repository 上。
+     * @param {import('../../config/ConfigManager.js').ConfigManager} configManager
+     * @returns {import('../../common/store/services/ILLMConfigService.js').ILLMConfigService}
+     */
+    function createServiceAdapter(configManager) {
+        const llmRepo = configManager.llm;
+        const tagRepo = configManager.tags;
+
+        return {
+            getConnections: () => llmRepo.getConnections(),
+            getAgents: () => llmRepo.getAgents(),
+            getWorkflows: () => llmRepo.getWorkflows(),
+            getAllTags: () => tagRepo.getAll(), // 注意这里是同步的，但最好也改为 async
+
+            // 对于保存操作，我们需要先加载，再合并，最后保存
+            async saveConnections(connections) {
+                await llmRepo.load(); // 确保 config 已加载
+                llmRepo.config.connections = connections;
+                await llmRepo._save(); // 调用内部 save
+                 // 手动发布事件，因为仓库的顶层方法没有被调用
+                configManager.eventManager.publish(EVENTS.LLM_CONNECTIONS_UPDATED, connections);
+            },
+            async saveAgents(agents) {
+                await llmRepo.load();
+                llmRepo.config.agents = agents;
+                await llmRepo._save();
+                configManager.eventManager.publish(EVENTS.LLM_AGENTS_UPDATED, agents);
+            },
+            async saveWorkflows(workflows) {
+                await llmRepo.load();
+                llmRepo.config.workflows = workflows;
+                await llmRepo._save();
+                configManager.eventManager.publish(EVENTS.LLM_WORKFLOWS_UPDATED, workflows);
+            }
+        };
+    }
+
+
+    /**
+     * APPLICATION INITIALIZATION (MODIFIED)
+     */
+    async function main() {
+        log("Initializing application via ConfigManager...");
+
+        // --- [MODIFIED] 核心服务栈设置 ---
+        // 1. 获取全局唯一的 ConfigManager 实例。所有数据操作都将通过它进行。
+        const configManager = ConfigManager.getInstance({
+            adapterOptions: { prefix: 'llm-kit-integrated-demo_' }
+        });
+        
+        // 2. 等待 ConfigManager 的引导程序完成，确保所有全局数据已加载。
+        await new Promise(resolve => {
+            configManager.eventManager.subscribe(EVENTS.APP_READY, resolve);
+        });
+        log("ConfigManager bootstrapped. Application is ready.");
+
+        // --- 数据种子 (如果需要) ---
+        let agents = await configManager.llm.getAgents();
+        if (agents.length === 0) {
+            log("Seeding with a default agent.");
+            const defaultAgent = { id: "agent-writer", name: "Creative Writer", icon: "✍️", tags: ["writing", "creative"], config: { connectionId: "conn-default-openai", modelName: "gpt-4o", systemPrompt: "You are a creative writer." }, interface: { inputs: [{ name: "topic", type: "string" }], outputs: [{ name: "story", type: "string" }] } };
+            await configManager.llm.addAgent(defaultAgent); // 使用仓库的 addAgent 方法
+        }
+
+        // --- 工作流运行器 (依赖于 ConfigManager 的数据) ---
+        const workflowRunner = async (workflowToRun) => {
+            log(`--- [RUN] Starting workflow: ${workflowToRun.name} ---`);
+            const engine = new WorkflowEngine({
+                // 直接从 configManager 获取最新数据
+                connections: await configManager.llm.getConnections(),
+                agentDefinitions: await configManager.llm.getAgents(),
+                workflowDefinitions: await configManager.llm.getWorkflows()
+            });
+            const { isValid, errors } = engine.validate(workflowToRun);
+            if (!isValid) {
+                log(`WORKFLOW INVALID: ${errors.join(', ')}`);
+                showToast(`Workflow invalid: ${errors.join(', ')}`, 'error');
+                return;
+            }
+            const finalOutputs = await engine.run(workflowToRun, {}, (event) => {
+                log(`Event: ${event.type}${event.nodeId ? ` (Node ${event.nodeId})` : ''}${event.outputs ? ` -> Outputs: ${JSON.stringify(event.outputs)}` : ''}`);
+            });
+            log(`--- Workflow finished successfully! Final outputs: ${JSON.stringify(finalOutputs)} ---`);
+            showToast('Workflow finished!', 'success');
+        };
+
+        // --- [MODIFIED] 共享的 Widget 配置 ---
+        const commonWidgetOptions = {
+            // 将 configManager.llm 仓库直接作为服务注入。
+            // LLMSettingsWidget 期待的接口 (getConnections, saveConnections, etc.)
+            // 与我们的 LLMRepository 提供的接口是兼容的。
+            llmConfigService: configManager.llm, 
+            onNotify: showToast,
+            onWorkflowRun: workflowRunner,
+        };
+
+        // --- 侧边栏 Widget 实例 ---
+        const sidebarContainer = document.getElementById('settings-sidebar-container');
+        const sidebarWidget = new LLMSettingsWidget(commonWidgetOptions);
+        await sidebarWidget.mount(sidebarContainer);
+        log("LLMSettingsWidget mounted in sidebar container.");
+
+        // --- 模态框 Widget 实例 ---
+        document.getElementById('open-modal-btn').addEventListener('click', async () => {
+            log("Opening modal...");
+
+            // 1. Create modal DOM elements dynamically
+            const overlay = document.createElement('div');
+            overlay.className = 'modal-overlay';
+            overlay.innerHTML = `
+                <div class="modal-container">
+                    <button class="modal-close-btn">&times;</button>
+                    <div class="modal-content" style="flex-grow: 1; min-height: 0;"></div>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+
+            const modalContentContainer = overlay.querySelector('.modal-content');
+            const modalWidget = new LLMSettingsWidget({
+                ...commonWidgetOptions,
+                // Wrap the workflow runner to close the modal first
+                onWorkflowRun: async (workflow) => {
+                    closeModal(); // Close the UI before running the long task
+                    await workflowRunner(workflow);
+                }
+            });
+
+            // 2. Define the cleanup function
+            const closeModal = async () => {
+                log("Closing modal and unmounting widget...");
+                await modalWidget.unmount();
+                overlay.remove();
+            };
+            
+            overlay.querySelector('.modal-close-btn').addEventListener('click', closeModal);
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) closeModal(); // Close on clicking the background
+            });
+
+            // 3. Mount the widget into the modal
+            await modalWidget.mount(modalContentContainer);
+            log("LLMSettingsWidget 已挂载到模态框容器。");
+        });
+        
+        // --- 2.6. [NEW] 建立响应式数据同步循环！ ---
+        // 这是实现多实例同步的关键。我们监听由 ConfigManager 发出的全局事件。
+        log("正在为 UI 同步设置响应式事件监听器。");
+
+        // 当 Connections 数据发生变化时...
+        configManager.eventManager.subscribe(EVENTS.LLM_CONNECTIONS_UPDATED, (connections) => {
+            log("[事件] Connections 已更新。正在通知所有活动的 UI 组件...");
+            // 调用侧边栏 widget 子组件的 update 方法来刷新UI
+            if (sidebarWidget.isMounted) {
+                sidebarWidget.components.connections.update({ connections });
+                // Connections 的变化会影响 Agent 编辑器（需要选择 connection），所以也要通知它
+                sidebarWidget.components.agents.update({ newConnections: connections });
+            }
+            // 注意：在真实应用中，需要一个全局的组件注册表来通知所有实例，
+            // 包括可能打开的模态框实例。为了演示，我们只更新侧边栏。
+        });
+        
+        // 当 Agents 数据发生变化时...
+        configManager.eventManager.subscribe(EVENTS.LLM_AGENTS_UPDATED, (agents) => {
+            log("[事件] Agents 已更新。正在通知所有活动的 UI 组件...");
+            if (sidebarWidget.isMounted) {
+                sidebarWidget.components.agents.update({ newAgents: agents });
+                // Agents 的变化会影响 Workflow 编辑器（Agent 作为节点）
+                sidebarWidget.components.workflows.updateRunnables({ agents, workflows: sidebarWidget.state.workflows });
+            }
+        });
+        
+        // 当 Workflows 数据发生变化时...
+        configManager.eventManager.subscribe(EVENTS.LLM_WORKFLOWS_UPDATED, (workflows) => {
+            log("[事件] Workflows 已更新。正在通知所有活动的 UI 组件...");
+             if (sidebarWidget.isMounted) {
+                // ... 通知 workflow 组件更新 ...
+             }
+        });
+        
+        // 当 Tags 数据发生变化时...
+        configManager.eventManager.subscribe(EVENTS.TAGS_UPDATED, (tags) => {
+            log("[事件] Tags 已更新。正在通知所有活动的 UI 组件...");
+            if (sidebarWidget.isMounted) {
+                // Agent 编辑器使用了 TagsInput，需要更新它
+                sidebarWidget.components.agents.update({ newAllTags: tags });
+            }
+        });
+    }
+
+    // Sidebar toggle logic (this is part of the host/app, not the widget)
+    // --- 3. 页面UI交互逻辑 (无变化) ---
+    document.addEventListener('DOMContentLoaded', () => {
+        const toggleBtn = document.getElementById('toggle-settings-btn');
+        const settingsSidebar = document.getElementById('settings-sidebar-container');
+        if (toggleBtn && settingsSidebar) {
+            toggleBtn.addEventListener('click', () => {
+                settingsSidebar.classList.toggle('collapsed');
+            });
+        }
+        // 等待 LiteGraph 加载完成后再启动主程序
+        if (typeof LiteGraph !== 'undefined') {
+            main().catch(error => {
+                console.error("初始化失败:", error);
+                log(`[致命错误] ${error.message}`);
+            });
+        } else {
+             window.addEventListener('load', () => main().catch(error => {
+                console.error("初始化失败:", error);
+                log(`[致命错误] ${error.message}`);
+            }));
+        }
+    });
+
+    main().catch(error => {
+        console.error("Initialization failed:", error);
+        log(`[FATAL] ${error.message}`);
+    });
+</script>
+
+</body>
+</html>

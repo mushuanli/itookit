@@ -1,0 +1,390 @@
+/**
+ * @file #llm/settings/styles.css
+ * @description CSS for the SettingsManagerUI component.
+ */
+
+:root {
+    --settings-bg: #fff; 
+    --settings-overlay-bg: rgba(0,0,0,0.5); 
+    --settings-text: #212529;
+    --settings-border: #dee2e6; 
+    --settings-primary: #007bff; 
+    --settings-primary-text: #fff;
+    --settings-input-bg: #f8f9fa; 
+    --settings-danger: #dc3545;
+}
+
+.settings-manager-overlay {
+    position: fixed; 
+    top: 0; 
+    left: 0; 
+    width: 100%; 
+    height: 100%;
+    background-color: var(--settings-overlay-bg); 
+    z-index: 1000;
+    display: flex; 
+    align-items: center; 
+    justify-content: center;
+}
+
+.settings-manager-container {
+    width: 90%; 
+    height: 85%; 
+    background-color: var(--settings-bg);
+    border-radius: 8px; 
+    box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+    display: flex; 
+    flex-direction: column; 
+    overflow: hidden;
+}
+
+.settings-manager-header {
+    display: flex; 
+    justify-content: space-between; 
+    align-items: center;
+    padding: 10px 20px; 
+    border-bottom: 1px solid var(--settings-border);
+}
+
+.settings-manager-tabs { 
+    flex-grow: 1; 
+}
+
+.settings-manager-tab-button {
+    padding: 10px 15px; 
+    border: none; 
+    background: none; 
+    cursor: pointer;
+    font-size: 16px; 
+    color: var(--settings-text); 
+    opacity: 0.7;
+}
+
+.settings-manager-tab-button.active {
+    font-weight: bold; 
+    opacity: 1; 
+    border-bottom: 2px solid var(--settings-primary);
+}
+
+.settings-manager-close-btn {
+    background: none; 
+    border: none; 
+    font-size: 24px; 
+    cursor: pointer;
+}
+
+.settings-manager-body { 
+    flex-grow: 1; 
+    min-height: 0; 
+}
+
+.settings-manager-tab-content { 
+    display: none; 
+    height: 100%; 
+}
+
+.settings-manager-tab-content.active { 
+    display: block; 
+}
+
+.settings-panel { 
+    padding: 20px; 
+    height: 100%; 
+    box-sizing: border-box; 
+    overflow-y: auto; 
+}
+
+.form-group { 
+    margin-bottom: 15px; 
+}
+
+.form-group label { 
+    display: block; 
+    font-weight: 600; 
+    margin-bottom: 5px; 
+}
+
+.form-group input, .form-group textarea, .form-group select {
+    width: 100%; 
+    padding: 8px; 
+    border: 1px solid var(--settings-border);
+    border-radius: 4px; 
+    background-color: var(--settings-input-bg); 
+    box-sizing: border-box;
+}
+
+.settings-btn {
+    padding: 10px 15px; 
+    border: none; 
+    border-radius: 4px; 
+    cursor: pointer;
+    background-color: var(--settings-primary); 
+    color: var(--settings-primary-text);
+    font-size: 16px;
+}
+
+.settings-btn.danger { 
+    background-color: var(--settings-danger); 
+}
+
+.split-view { 
+    display: flex; 
+    height: 100%; 
+    gap: 10px; 
+}
+
+.split-view .list-pane { 
+    width: 300px; 
+    flex-shrink: 0; 
+    border-right: 1px solid var(--settings-border); 
+    padding: 10px; 
+    overflow-y: auto; 
+    box-sizing: border-box; 
+}
+
+.split-view .detail-pane { 
+    flex-grow: 1; 
+    overflow-y: auto; 
+    padding: 10px; 
+    box-sizing: border-box; 
+}
+
+.list-item { 
+    padding: 10px; 
+    border-radius: 4px; 
+    cursor: pointer; 
+    border: 1px solid transparent; 
+    display: flex; 
+    flex-direction: column; 
+    gap: 4px; 
+}
+
+.list-item:hover { 
+    background-color: var(--settings-input-bg); 
+}
+
+.list-item.selected { 
+    background-color: var(--settings-primary); 
+    color: var(--settings-primary-text); 
+    border-color: var(--settings-primary); 
+}
+
+.list-item small { 
+    opacity: 0.8; 
+    font-size: 0.8em; 
+}
+
+/* Workflow specific styles */
+.workflow-toolbar { 
+    padding: 10px; 
+    border-bottom: 1px solid var(--settings-border); 
+    display: flex; 
+    gap: 10px; 
+    align-items: center; 
+}
+
+.workflow-canvas-container { 
+    flex-grow: 1; 
+    position: relative; 
+}
+
+#workflow-canvas { 
+    position: absolute; 
+    top: 0; 
+    left: 0; 
+}
+
+/* Tab styles for AgentEditor */
+.settings-tabs {
+    display: flex; 
+    border-bottom: 1px solid var(--settings-border); 
+    margin-bottom: 20px;
+}
+
+/* Note: This re-declares .settings-tab-button, but it's okay. */
+.settings-tab-button {
+    padding: 10px 15px; 
+    border: none; 
+    background: none; 
+    cursor: pointer;
+    color: var(--settings-text); 
+    opacity: 0.7;
+}
+
+.settings-tab-button.active {
+    font-weight: bold; 
+    opacity: 1; 
+    border-bottom: 2px solid var(--settings-primary);
+}
+
+.settings-tab-content { 
+    display: none; 
+}
+
+.settings-tab-content.active { 
+    display: block; 
+}
+
+.form-actions { 
+    margin-top: 20px; 
+    padding-top: 20px; 
+    border-top: 1px solid var(--settings-border); 
+    display: flex; 
+    justify-content: space-between; 
+}
+
+/* Interface Editor styles */
+.interface-editor { 
+    padding: 10px; 
+    border: 1px solid var(--settings-border); 
+    border-radius: 4px; 
+}
+
+.interface-editor h4 { 
+    display: flex; 
+    align-items: center; 
+    gap: 10px; 
+    margin: 10px 0; 
+}
+
+.interface-editor h4 button { 
+    font-size: 14px; 
+    padding: 2px 8px; 
+    border-radius: 50%; 
+    line-height: 1; 
+}
+
+.interface-row { 
+    display: grid; 
+    grid-template-columns: 1fr 1fr 2fr auto; 
+    gap: 10px; 
+    margin-bottom: 8px; 
+    align-items: center; 
+}
+
+.interface-row input, .interface-row select { 
+    padding: 6px; 
+}
+
+.remove-row-btn { 
+    background: none; 
+    border: none; 
+    color: var(--settings-danger); 
+    cursor: pointer; 
+    font-size: 18px; 
+}
+
+/* TagsInput component styles */
+.tags-input-container { 
+    display: flex; 
+    flex-wrap: wrap; 
+    gap: 6px; 
+    border: 1px solid var(--settings-border); 
+    padding: 8px; 
+    border-radius: 4px; 
+}
+
+.tags-list { 
+    list-style: none; 
+    padding: 0; 
+    margin: 0; 
+    display: contents; 
+}
+
+.tags-list li { 
+    background-color: var(--settings-primary); 
+    color: var(--settings-primary-text); 
+    padding: 4px 10px; 
+    border-radius: 12px; 
+    display: flex; 
+    align-items: center; 
+    gap: 6px; 
+    font-size: 14px; 
+}
+
+.tags-list li button { 
+    background: none; 
+    border: none; 
+    color: var(--settings-primary-text); 
+    opacity: 0.7; 
+    cursor: pointer; 
+    font-size: 16px; 
+    padding: 0; 
+    line-height: 1; 
+}
+
+.tags-list li button:hover { 
+    opacity: 1; 
+}
+
+.tags-input-field { 
+    border: none; 
+    outline: none; 
+    flex-grow: 1; 
+    padding: 5px; 
+    background: transparent; 
+}
+
+.autocomplete-suggestions { 
+    position: relative; 
+    list-style: none; 
+    padding: 0; 
+    margin: 2px 0 0 0; 
+    border: 1px solid var(--settings-border); 
+    border-radius: 4px; 
+    max-height: 150px; 
+    overflow-y: auto; 
+    display: none; 
+    z-index: 10; 
+    background: var(--settings-bg); 
+}
+
+.autocomplete-suggestions li { 
+    padding: 8px 12px; 
+    cursor: pointer; 
+}
+
+.autocomplete-suggestions li:hover { 
+    background-color: var(--settings-input-bg); 
+}
+
+/* Settings secondary layout styles */
+.settings-split-view { 
+    display: flex; 
+    height: 100%; 
+}
+
+.settings-inner-nav { 
+    width: 200px; 
+    flex-shrink: 0; 
+    border-right: 1px solid var(--settings-border); 
+    padding: 10px; 
+    box-sizing: border-box; 
+}
+
+.settings-inner-nav .sub-nav-item { 
+    display: block; 
+    padding: 8px 12px; 
+    margin-bottom: 4px; 
+    border-radius: 4px; 
+    text-decoration: none; 
+    color: var(--settings-text); 
+    cursor: pointer; 
+}
+
+.settings-inner-nav .sub-nav-item:hover { 
+    background-color: var(--settings-input-bg); 
+}
+
+.settings-inner-nav .sub-nav-item.active { 
+    background-color: var(--settings-primary); 
+    color: var(--settings-primary-text); 
+    font-weight: bold; 
+}
+
+.settings-inner-content { 
+    flex-grow: 1; 
+    padding: 20px; 
+    overflow-y: auto; 
+    box-sizing: border-box; 
+}
