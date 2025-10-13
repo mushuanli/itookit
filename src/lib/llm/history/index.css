@@ -1,0 +1,984 @@
+/**
+ * #llm/history/index.css
+ * @file Main stylesheet for LLM History UI (BEM Refactored)
+ */
+
+/* ============================================
+   Block: llm-historyui
+   ============================================ */
+
+.llm-historyui {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    background-color: #f9fafb;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    font-size: 14px;
+    color: #1f2937;
+    position: relative; /* For nav panel positioning */
+}
+
+/* Block Modifier: locked state */
+.llm-historyui--locked {
+    pointer-events: none;
+}
+/* 允许在锁定状态下点击复制按钮 */
+.llm-historyui--locked .llm-historyui__toolbar-btn[data-action="copy"] {
+    pointer-events: auto;
+}
+
+/* 
+ * +++ 新增规则：即使在锁定状态下，也允许与 thinking 模块交互 +++
+ */
+.llm-historyui--locked .llm-historyui-thinking {
+    pointer-events: auto;
+}
+/* 
+ * +++ 新增规则：即使在锁定状态下，也允许消息区域滚动 +++
+ */
+.llm-historyui--locked .llm-historyui__messages {
+    pointer-events: auto;
+}
+
+/* ============================================
+   Header & Footer
+   ============================================ */
+
+.llm-historyui__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    background: #ffffff;
+    border-bottom: 1px solid #e5e7eb;
+    flex-shrink: 0;
+}
+
+.llm-historyui__title {
+    font-size: 16px;
+    font-weight: 600;
+    color: #111827;
+}
+
+.llm-historyui__actions {
+    display: flex;
+    gap: 8px;
+}
+
+/* Stop Generation Button */
+.llm-historyui__stop-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    background: #ef4444;
+    color: #ffffff;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.llm-historyui__stop-btn:hover {
+    background: #dc2626;
+}
+
+.llm-historyui__footer {
+    padding: 8px 16px;
+    background: #ffffff;
+    border-top: 1px solid #e5e7eb;
+    font-size: 12px;
+    color: #6b7280;
+    flex-shrink: 0;
+}
+
+.llm-historyui__header-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.llm-historyui__header-controls--left {
+    justify-content: flex-start;
+}
+
+.llm-historyui__header-controls--right {
+    justify-content: flex-end;
+}
+
+.llm-historyui__header-btn {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    
+    background: transparent;
+    color: #4b5563; /* 比消息工具栏按钮更深的颜色，以确保在白色背景上可见 */
+    border: 1px solid transparent; /* 占位，避免悬停时跳动 */
+    border-radius: 6px;
+    
+    font-size: 16px; /* 稍大一点以匹配标题栏 */
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.llm-historyui__header-btn:hover {
+    background: #f3f4f6; /* 浅灰色背景 */
+    color: #1f2937;
+    border-color: #e5e7eb;
+}
+
+.llm-historyui__header-btn:active {
+    background: #e5e7eb;
+    transform: scale(0.96);
+}
+
+.llm-historyui__header-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    background: transparent;
+}
+
+/* ============================================
+   Messages Container
+   ============================================ */
+
+.llm-historyui__messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    scroll-behavior: smooth;
+}
+
+.llm-historyui__messages::-webkit-scrollbar {
+    width: 8px;
+}
+
+.llm-historyui__messages::-webkit-scrollbar-track {
+    background: #f9fafb;
+}
+
+.llm-historyui__messages::-webkit-scrollbar-thumb {
+    background: #d1d5db;
+    border-radius: 4px;
+}
+
+.llm-historyui__messages::-webkit-scrollbar-thumb:hover {
+    background: #9ca3af;
+}
+
+/* +++ MODIFIED +++ */
+.llm-historyui__message-pair {
+    margin-bottom: 32px;
+    position: relative;
+    animation: fadeIn 0.3s ease;
+    
+    /* +++ ADDED: 将消息对容器设置为Flex布局 +++ */
+    display: flex;
+    flex-direction: column; /* 子项垂直排列 */
+}
+
+.llm-historyui__message-pair:last-child {
+    margin-bottom: 0;
+}
+
+/* ============================================
+   Message Wrappers
+   ============================================ */
+
+.llm-historyui__message-wrapper {
+    position: relative;
+    border-radius: 12px;
+    padding: 16px;
+    isolation: isolate; /* 🔑 创建独立的层叠上下文，避免 z-index 冲突 */
+}
+
+/* +++ MODIFIED +++ */
+/* Modifier: User Message */
+.llm-historyui__message-wrapper--user {
+    /* 根据要求修改：移除 align-self 和 max-width，使其宽度延伸至最左侧，而高度保持伸缩。*/
+    margin-bottom: 12px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* Modifier: Assistant Message */
+.llm-historyui__message-wrapper--assistant {
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+/* Modifier: Streaming state for Assistant Message */
+.llm-historyui__message-wrapper--assistant.llm-historyui__message-wrapper--streaming::after {
+    content: '●';
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    color: #10b981;
+    font-size: 12px;
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+/* Error State */
+.llm-historyui__message-wrapper--error {
+    border-left: 3px solid #dc2626;
+    background-color: #fef2f2;
+}
+
+.llm-historyui__message-wrapper--error .llm-historyui__message-content {
+    color: #991b1b;
+}
+
+/* ============================================
+   Message Header & Role (for folding)
+   ============================================ */
+
+.llm-historyui__message-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    user-select: none;
+    padding-bottom: 8px;
+}
+
+.llm-historyui__message-role {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #666;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.llm-historyui__message-wrapper--user .llm-historyui__message-role {
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.llm-historyui__message-wrapper--assistant .llm-historyui__message-role {
+    color: #059669;
+}
+
+.llm-historyui__message-header::after {
+    content: '⇲';
+    font-size: 14px;
+    color: #9ca3af;
+    transition: transform 0.2s;
+}
+
+.llm-historyui__message-wrapper--user .llm-historyui__message-header::after {
+    color: rgba(255, 255, 255, 0.7);
+}
+
+/* ============================================
+   Message Summary (for folded state)
+   ============================================ */
+
+.llm-historyui__message-summary {
+    display: none;
+    font-style: italic;
+    color: #6b7280;
+    padding-top: 4px;
+    border-top: 1px solid #e5e7eb;
+}
+
+.llm-historyui__message-wrapper--user .llm-historyui__message-summary {
+    color: rgba(255, 255, 255, 0.8);
+    border-top: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+/* Folded State */
+.llm-historyui__message-wrapper--folded .llm-historyui__message-content,
+.llm-historyui__message-wrapper--folded .llm-historyui__message-attachments,
+.llm-historyui__message-wrapper--folded .llm-historyui-thinking,
+.llm-historyui__message-wrapper--folded .llm-historyui__retry-btn,
+.llm-historyui__message-wrapper--folded .llm-historyui__message-toolbar {
+    display: none;
+}
+
+.llm-historyui__message-wrapper--folded .llm-historyui__message-summary {
+    display: block;
+}
+
+.llm-historyui__message-wrapper--folded .llm-historyui__message-header::after {
+    transform: rotate(180deg);
+    content: '⇱';
+}
+
+/* ============================================
+   Message Content
+   ============================================ */
+
+.llm-historyui__message-content {
+    position: relative;
+    z-index: 1;
+    line-height: 1.6;
+    color: #1f2937;
+}
+
+.llm-historyui__message-wrapper--user .llm-historyui__message-content {
+    color: #ffffff;
+}
+
+/* Typography */
+.llm-historyui__message-content h1,
+.llm-historyui__message-content h2,
+.llm-historyui__message-content h3 {
+    margin-top: 16px;
+    margin-bottom: 8px;
+    font-weight: 600;
+}
+
+.llm-historyui__message-wrapper--user .llm-historyui__message-content h1,
+.llm-historyui__message-wrapper--user .llm-historyui__message-content h2,
+.llm-historyui__message-wrapper--user .llm-historyui__message-content h3 {
+    color: #ffffff;
+    border-bottom-color: rgba(255, 255, 255, 0.3);
+}
+
+.llm-historyui__message-content h1 { font-size: 24px; }
+.llm-historyui__message-content h2 { font-size: 20px; }
+.llm-historyui__message-content h3 { font-size: 16px; }
+
+.llm-historyui__message-content p { margin-bottom: 12px; }
+.llm-historyui__message-content ul,
+.llm-historyui__message-content ol { margin-bottom: 12px; padding-left: 24px; }
+
+.llm-historyui__message-content code {
+    padding: 2px 6px;
+    background: #f3f4f6;
+    border-radius: 3px;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 13px;
+}
+
+.llm-historyui__message-wrapper--user .llm-historyui__message-content code {
+    background: rgba(255, 255, 255, 0.2);
+    color: #ffffff;
+}
+
+.llm-historyui__message-content pre {
+    padding: 12px;
+    background: #1f2937;
+    color: #f9fafb;
+    border-radius: 6px;
+    overflow-x: auto;
+    margin-bottom: 12px;
+}
+
+.llm-historyui__message-wrapper--user .llm-historyui__message-content pre {
+    background: rgba(0, 0, 0, 0.2);
+}
+
+.llm-historyui__message-content pre code { 
+    padding: 0; 
+    background: transparent; 
+    color: inherit; 
+}
+
+/* MDX Editor Overrides */
+.mdx-render-view,
+.rich-content-area {
+    color: #1f2937;
+}
+
+/* 改为更通用的规则（无需 !important）*/
+.llm-historyui__message-wrapper--user .mdx-container {
+    color: #1f2937;
+}
+
+/* 如果上面的规则不够强，添加这个作为保险 */
+.llm-historyui__message-wrapper--user .cm-editor {
+    color: #1f2937 !important;
+    /* 这里保留 !important 是因为可能需要覆盖 CodeMirror 的动态样式 */
+}
+
+.llm-historyui__message-wrapper--user .mdx-container.edit-mode * {
+    color: inherit !important;
+}
+
+
+
+
+/* ============================================
+   Message Toolbar (IMPROVED VISIBILITY)
+   ============================================ */
+
+.llm-historyui__message-toolbar {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 100;
+    
+    display: flex;
+    gap: 6px;
+    padding: 6px;
+    
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(12px);
+    border-radius: 8px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);
+    
+    /* 🔑 IMPROVED: Show toolbar with slight transparency by default */
+    opacity: 0.6;
+    visibility: visible;
+    transform: translateY(0);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.llm-historyui__message-wrapper:hover .llm-historyui__message-toolbar {
+    opacity: 1;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+}
+
+.llm-historyui__message-toolbar--user {
+    background: rgba(255, 255, 255, 0.2);
+    backdrop-filter: blur(12px);
+}
+
+/* ============================================
+   Toolbar Buttons (IMPROVED CONTRAST)
+   ============================================ */
+
+.llm-historyui__toolbar-btn {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    
+    background: transparent;
+    color: #4b5563;
+    border: none;
+    border-radius: 6px;
+    
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.llm-historyui__toolbar-btn:hover {
+    background: rgba(59, 130, 246, 0.15);
+    color: #3b82f6;
+    transform: scale(1.08);
+}
+
+.llm-historyui__toolbar-btn:active {
+    transform: scale(0.95);
+}
+
+.llm-historyui__toolbar-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* User Toolbar Button Overrides */
+.llm-historyui__message-toolbar--user .llm-historyui__toolbar-btn {
+    color: rgba(255, 255, 255, 0.95);
+}
+
+.llm-historyui__message-toolbar--user .llm-historyui__toolbar-btn:hover {
+    background: rgba(255, 255, 255, 0.25);
+    color: #ffffff;
+}
+
+/* ============================================
+   Agent Selector (IMPROVED READABILITY)
+   ============================================ */
+
+.llm-historyui__agent-selector {
+    min-width: 120px;
+    height: 32px;
+    padding: 6px 32px 6px 12px;
+    
+    background: #ffffff;
+    color: #374151;
+    border: 1px solid rgba(0, 0, 0, 0.15);
+    border-radius: 6px;
+    
+    font-size: 13px;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23374151' d='M6 8L2 4h8z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+}
+
+.llm-historyui__agent-selector:hover {
+    border-color: #3b82f6;
+    box-shadow: 0 2px 8px rgba(59, 130, 246, 0.15);
+}
+
+.llm-historyui__agent-selector:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.llm-historyui__agent-selector option {
+    background: #ffffff;
+    color: #1f2937;
+    padding: 8px 12px;
+}
+
+/* User Toolbar Agent Selector */
+.llm-historyui__message-toolbar--user .llm-historyui__agent-selector {
+    background: rgba(255, 255, 255, 0.3);
+    border-color: rgba(255, 255, 255, 0.4);
+    color: #ffffff;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23ffffff' d='M6 8L2 4h8z'/%3E%3C/svg%3E");
+}
+
+.llm-historyui__message-toolbar--user .llm-historyui__agent-selector:hover {
+    background: rgba(255, 255, 255, 0.4);
+    border-color: rgba(255, 255, 255, 0.6);
+}
+
+/* ============================================
+   Branch Switcher (IMPROVED SIZE & VISIBILITY)
+   ============================================ */
+
+.llm-historyui__branch-switcher {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-right: 6px;
+}
+
+.llm-historyui__branch-switcher i {
+    font-size: 14px;
+    color: #6b7280;
+}
+
+.llm-historyui__branch-switcher select {
+    background: #ffffff;
+    border: 1px solid rgba(0, 0, 0, 0.15);
+    border-radius: 6px;
+    padding: 4px 24px 4px 8px;
+    font-size: 12px;
+    font-family: inherit;
+    color: #374151;
+    max-width: 180px;
+    cursor: pointer;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%236b7280' d='M6 8L2 4h8z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 6px center;
+}
+
+.llm-historyui__branch-switcher select:hover {
+    border-color: #3b82f6;
+}
+
+/* User Toolbar Branch Switcher */
+.llm-historyui__message-toolbar--user .llm-historyui__branch-switcher i {
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.llm-historyui__message-toolbar--user .llm-historyui__branch-switcher select {
+    background: rgba(255, 255, 255, 0.3);
+    border-color: rgba(255, 255, 255, 0.4);
+    color: #ffffff;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23ffffff' d='M6 8L2 4h8z'/%3E%3C/svg%3E");
+}
+
+.llm-historyui__message-toolbar--user .llm-historyui__branch-switcher select:hover {
+    background: rgba(255, 255, 255, 0.4);
+    border-color: rgba(255, 255, 255, 0.6);
+}
+
+.llm-historyui__message-toolbar--user .llm-historyui__branch-switcher select option {
+    color: #111827;
+    background: #ffffff;
+}
+
+/* ============================================
+   Attachments
+   ============================================ */
+
+.llm-historyui__message-attachments {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.llm-historyui__attachment-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 6px;
+    font-size: 13px;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.llm-historyui__attachment-item img {
+    max-width: 100px;
+    max-height: 100px;
+    border-radius: 4px;
+}
+
+/* ============================================
+   Thinking Block
+   ============================================ */
+
+.llm-historyui-thinking {
+    margin-bottom: 16px;
+    padding: 12px;
+    background: #fef3c7;
+    border-left: 3px solid #f59e0b;
+    border-radius: 6px;
+}
+
+.llm-historyui-thinking__summary {
+    cursor: pointer;
+    font-weight: 600;
+    color: #92400e;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    user-select: none;
+}
+
+.llm-historyui-thinking__summary:hover {
+    color: #78350f;
+}
+
+.llm-historyui-thinking__content {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid #fde68a;
+    color: #78350f;
+    font-size: 13px;
+}
+
+.llm-historyui-thinking__controls {
+    margin-left: auto;
+}
+
+.llm-historyui-thinking__control-btn {
+    background: transparent;
+    border: none;
+    color: #92400e;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: background-color 0.2s;
+}
+
+.llm-historyui-thinking__control-btn:hover {
+    background: rgba(0, 0, 0, 0.05);
+}
+
+/* ============================================
+   Retry Button
+   ============================================ */
+
+.llm-historyui__retry-btn {
+    margin-top: 1rem;
+    padding: 0.5rem 1rem;
+    background-color: #ef4444;
+    color: white;
+    border: none;
+    border-radius: 0.375rem;
+    cursor: pointer;
+    font-size: 0.875rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    transition: background-color 0.2s;
+}
+
+.llm-historyui__retry-btn:hover {
+    background-color: #dc2626;
+}
+
+.llm-historyui__retry-btn:disabled {
+    background-color: #9ca3af;
+    cursor: not-allowed;
+}
+
+/* ============================================
+   Floating Navigation Panel
+   ============================================ */
+
+.llm-historyui__nav-panel {
+    position: absolute;
+    bottom: 20px;
+    right: 20px;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    background: transparent;
+    padding: 0;
+}
+
+/* 圆形按钮基础样式 */
+.llm-historyui__nav-btn {
+    width: 36px;
+    height: 36px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    
+    /* 磨砂玻璃效果 */
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    
+    color: #6b7280;
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    border-radius: 50%; /* 圆形 */
+    
+    font-size: 14px;
+    cursor: pointer;
+    
+    box-shadow: 
+        0 2px 4px rgba(0, 0, 0, 0.06),
+        0 1px 2px rgba(0, 0, 0, 0.04);
+    
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+}
+
+/* 悬停效果 */
+.llm-historyui__nav-btn:hover {
+    background: rgba(255, 255, 255, 0.95);
+    color: #3b82f6;
+    border-color: rgba(59, 130, 246, 0.2);
+    transform: translateY(-1px);
+    box-shadow: 
+        0 4px 8px rgba(0, 0, 0, 0.08),
+        0 2px 4px rgba(0, 0, 0, 0.06);
+}
+
+/* 点击效果 */
+.llm-historyui__nav-btn:active {
+    transform: translateY(0);
+    box-shadow: 
+        0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+/* 强调按钮（折叠按钮）*/
+.llm-historyui__nav-btn--accent {
+    background: rgba(102, 126, 234, 0.15);
+    color: #667eea;
+    border-color: rgba(102, 126, 234, 0.2);
+}
+
+.llm-historyui__nav-btn--accent:hover {
+    background: rgba(102, 126, 234, 0.25);
+    color: #5568d3;
+    border-color: rgba(102, 126, 234, 0.3);
+}
+
+/* 图标容器 */
+.llm-historyui__nav-btn-icon {
+    position: relative;
+    display: inline-flex;
+    width: 14px;
+    height: 14px;
+}
+
+.llm-historyui__nav-btn-icon i {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 默认状态 */
+.llm-historyui__nav-btn-icon .fa-compress-alt {
+    opacity: 1;
+    transform: rotate(0deg) scale(1);
+}
+
+.llm-historyui__nav-btn-icon .fa-expand-alt {
+    opacity: 0;
+    transform: rotate(-90deg) scale(0.8);
+}
+
+/* 折叠状态 */
+.llm-historyui--all-folded .llm-historyui__nav-btn-icon .fa-compress-alt {
+    opacity: 0;
+    transform: rotate(90deg) scale(0.8);
+}
+
+.llm-historyui--all-folded .llm-historyui__nav-btn-icon .fa-expand-alt {
+    opacity: 1;
+    transform: rotate(0deg) scale(1);
+}
+
+/* 禁用状态 */
+.llm-historyui__nav-btn:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+    transform: none !important;
+    box-shadow: none;
+}
+
+.llm-historyui__nav-btn:disabled:hover {
+    background: rgba(255, 255, 255, 0.85);
+    color: #6b7280;
+    border-color: rgba(0, 0, 0, 0.06);
+}
+
+/* 精致的 Tooltip */
+.llm-historyui__nav-btn::after {
+    content: attr(title);
+    position: absolute;
+    right: calc(100% + 10px);
+    top: 50%;
+    transform: translateY(-50%) scale(0.95);
+    
+    padding: 5px 9px;
+    background: rgba(31, 41, 55, 0.92);
+    backdrop-filter: blur(8px);
+    color: #ffffff;
+    
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 500;
+    white-space: nowrap;
+    
+    opacity: 0;
+    pointer-events: none;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.llm-historyui__nav-btn:hover::after {
+    opacity: 1;
+    transform: translateY(-50%) scale(1);
+}
+
+/* 锁定状态时隐藏导航面板 */
+.llm-historyui--locked .llm-historyui__nav-panel {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+/* 响应式 */
+@media (max-width: 768px) {
+    .llm-historyui__nav-panel {
+        bottom: 16px;
+        right: 16px;
+    }
+    
+    .llm-historyui__nav-btn {
+        width: 40px;
+        height: 40px;
+        font-size: 15px;
+    }
+    
+    /* 移动端始终显示按钮（无需悬停） */
+    .llm-historyui__nav-btn {
+        opacity: 0.9;
+    }
+    
+    /* 移动端隐藏 tooltip */
+    .llm-historyui__nav-btn::after {
+        display: none;
+    }
+}
+
+/* 深色模式适配（如果需要）*/
+@media (prefers-color-scheme: dark) {
+    .llm-historyui__nav-btn {
+        background: rgba(31, 41, 55, 0.85);
+        color: #9ca3af;
+        border-color: rgba(255, 255, 255, 0.1);
+    }
+    
+    .llm-historyui__nav-btn:hover {
+        background: rgba(31, 41, 55, 0.95);
+        color: #60a5fa;
+        border-color: rgba(96, 165, 250, 0.3);
+    }
+    
+    .llm-historyui__nav-btn--accent {
+        background: rgba(102, 126, 234, 0.25);
+        color: #818cf8;
+        border-color: rgba(129, 140, 248, 0.3);
+    }
+}
+
+/* ============================================
+   Responsive
+   ============================================ */
+
+@media (max-width: 768px) {
+    .llm-historyui__message-wrapper--user {
+        max-width: 90%;
+    }
+    
+    .llm-historyui__message-toolbar {
+        opacity: 1; /* Always show on mobile */
+    }
+    
+    .llm-historyui__toolbar-btn {
+        width: 28px;
+        height: 28px;
+    }
+    
+    .llm-historyui__agent-selector {
+        height: 28px;
+        font-size: 11px;
+        min-width: 100px;
+    }
+}
+
+/* ============================================
+   Search Highlight
+   ============================================ */
+
+.llm-historyui__message-pair--highlighted {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    background-color: #fffbeb; /* light yellow background */
+    box-shadow: 0 0 0 2px #facc15; /* yellow border */
+    border-radius: 12px;
+    transform: scale(1.01);
+    padding: 8px; /* Add some padding so border isn't flush */
+    margin: 8px 0; /* Adjust margin to compensate for padding */
+}
+
+/* ============================================
+   Animations
+   ============================================ */
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.3;
+    }
+}
