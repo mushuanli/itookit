@@ -1,11 +1,12 @@
 /**
  * @file #llm/chat/index.js
- * @description 组合 historyUI 和 inputUI 的完整聊天界面
+ * @description 组合 historyUI 和 inputUI 的完整聊天界面编排器。
+ * @version 2.1 (Architectural Refactor)
  * @change
- * - [V2 重构] 现在强制要求传入 `configManager` 实例以实现响应式配置。
- * - [V2 重构] 不再接受静态的 `connections` 或 `agents` 选项，这些数据现在统一由 configManager 提供。
- * - [V2 新增] 增加了编程式 API，如 `sendMessage`，以提升组件的可集成性。
- * - 实现了基于 `sessionId` 的自动保存和历史加载功能。
+ * - [V2.1 架构重构] 移除了 ILLMSessionStorageService 和 sessionId 的直接依赖。
+ * - [V2.1 架构重构] 组件完全实现 IEditor 接口，通过 setText 和 getText 与宿主交换数据。
+ * - [V2.1 架构重构] 数据格式采用 JSONL，由 setText 和 getText 内部处理解析与序列化。
+ * - [V2 重构] 强制要求传入 `configManager` 实例以实现响应式配置。
  */
 
 
@@ -13,18 +14,16 @@ import './styles.css';
 import { LLMInputUI } from '../input/index.js';
 import { createHistoryUI } from '../history/index.js';
 import { registerOrchestratorCommands } from './commands.js';
-
-// 假设 IEditor 接口定义文件路径
-import { IEditor } from '../../common/interfaces/IEditor.js'; // 修正了接口路径
+import { IEditor } from '../../common/interfaces/IEditor.js';
 import { EventEmitter } from '../history/utils/EventEmitter.js';
 
-// --- [核心变更] 导入 ConfigManager 和 LLMService，这是实现依赖注入和服务化的基础 ---
+// --- 核心服务和接口导入 ---
 import { ConfigManager } from '../../config/ConfigManager.js';
 import { LLMService } from '../core/LLMService.js'; // 假设 LLMService 的路径
-
-/** @typedef {import('../../config/adapters/IFileStorageAdapter.js').IFileStorageAdapter} IFileStorageAdapter */
+import { MessagePair } from '../history/core/MessagePair.js';
+/** @typedef {import('../../common/interfaces/IFileStorageAdapter.js').IFileStorageAdapter} IFileStorageAdapter */
 // 假设默认文件存储适配器的路径
-import { FileStorageAdapter } from '../../config/adapters/FileStorageAdapter.js'; 
+import { FileStorageAdapter } from '../../common/utils/FileStorageAdapter.js'; 
 
 export class LLMChatUI extends IEditor {
     /**
@@ -33,7 +32,6 @@ export class LLMChatUI extends IEditor {
      * @param {object} options - 配置选项。
      * @param {ConfigManager} options.configManager - [新, 必需] 应用程序的全局配置管理器实例。
      * @param {string} [options.sessionId] - [可选] 用于持久化的当前聊天会话的唯一 ID。
-     * @param {ILLMSessionStorageService} [options.sessionStorage] - [可选] 用于加载/保存聊天记录的服务。
      * @param {IFileStorageAdapter} [options.fileStorage] - [可选] 用于处理文件上传的服务。
      * @param {object} [options.inputUIConfig] - [可选] 传递给 LLMInputUI 的额外配置。
      * @param {object} [options.historyUIConfig] - [可选] 传递给 LLMHistoryUI 的额外配置。
@@ -55,12 +53,9 @@ export class LLMChatUI extends IEditor {
         this.llmService = LLMService.getInstance(); // 获取 LLMService 的全局单例
         this.events = new EventEmitter();
         this.activeRequestController = null;
-        
-        // --- 3. 持久化服务配置 (保持不变) ---
-        if (options.sessionId && options.sessionStorage) {
-            this.sessionId = options.sessionId;
-            this.sessionStorage = options.sessionStorage;
-        }
+
+        // --- 3. 持久化服务配置 (仅文件服务) ---
+        // [已移除] 不再需要 sessionId 和 sessionStorage，数据持久化由宿主负责。
         this.fileStorage = options.fileStorage || new FileStorageAdapter();
 
         // --- 4. 从 ConfigManager 响应式地获取初始数据，而非静态 options ---
@@ -115,12 +110,10 @@ export class LLMChatUI extends IEditor {
         this._proxyEvents();
         // +++ 3b. MODIFIED: Bind agent sync events +++
         this._bindAgentSyncEvents();
-
-        // +++ ADDED: Implement auto-saving and initial data loading.
-        if (this.sessionStorage) {
-            this.on('change', this._handleAutoSave.bind(this));
-            this._loadInitialData();
-        }
+        
+        // --- 9. [已移除] 自动加载和保存逻辑 ---
+        // 初始数据加载现在通过宿主调用 setText(content) 完成。
+        // 数据保存通过宿主监听 'change' 事件并调用 getText() 完成。
     }
 
     // ===================================================================
@@ -186,20 +179,60 @@ export class LLMChatUI extends IEditor {
 
     /**
      * @implements {IEditor.setText}
-     * @param {string} jsonString - A JSON string representing the chat history.
+     * @description 从一个 JSONL 格式的字符串加载并渲染整个聊天历史。
+     * 这是组件接收数据的唯一入口，取代了旧的 _loadInitialData 方法。
+     * @param {string | null} jsonlContent - 代表聊天历史的 JSONL 字符串。如果为 null 或空，则清空编辑器。
      */
-    setText(jsonString) {
-        // 委托给 historyUI
-        this.historyUI.setText(jsonString);
+    setText(jsonlContent) {
+        // 1. 总是先清空当前状态，确保幂等性
+        this.historyUI.clear();
+
+        // 2. 处理空内容或无效内容
+        if (!jsonlContent || typeof jsonlContent !== 'string' || jsonlContent.trim() === '') {
+            this.historyUI.events.emit('historyLoaded', { count: 0 }); // 触发事件，即使是空加载
+            return;
+        }
+
+        try {
+            // 3. 解析 JSONL: 按行分割，过滤空行，然后逐行解析 JSON
+            const lines = jsonlContent.split('\n').filter(line => line.trim() !== '');
+            const pairs = lines.map(line => MessagePair.fromJSON(JSON.parse(line)));
+
+            // 4. 将解析后的数据模型设置到 historyUI 中
+            this.historyUI.pairs = pairs;
+            this.historyUI._rerenderAll(); // 调用 historyUI 的方法来重绘整个列表
+
+            // 5. 触发加载完成事件
+            this.historyUI.events.emit('historyLoaded', { count: pairs.length });
+
+        } catch (error) {
+            console.error('[LLMChatUI] 解析 JSONL 内容失败:', error);
+            this.historyUI.messagesEl.innerHTML = `<div class="llm-historyui__error-message">加载会话失败：数据格式损坏。</div>`;
+        }
     }
 
     /**
+     * @override
      * @implements {IEditor.getText}
-     * @returns {string} A JSON string of the chat history.
+     * @description 将当前聊天历史序列化为 JSONL 格式的字符串。
+     * 这是组件对外提供数据的唯一出口，取代了旧的 _handleAutoSave 方法。
+     * @returns {string}
      */
     getText() {
-        // 委托给 historyUI
-        return this.historyUI.getText();
+        if (!this.historyUI.pairs || this.historyUI.pairs.length === 0) {
+            return '';
+        }
+
+        try {
+            // 将每个 MessagePair 对象转换为 JSON 字符串，并用换行符连接
+            return this.historyUI.pairs
+                .map(pair => JSON.stringify(pair.toJSON()))
+                .join('\n');
+        } catch (error) {
+            console.error('[LLMChatUI] 序列化为 JSONL 失败:', error);
+            // 在序列化失败时返回空字符串，防止保存损坏的数据
+            return '';
+        }
     }
 
     /**
@@ -252,7 +285,6 @@ export class LLMChatUI extends IEditor {
     /**
      * +++ ADDED: Loads initial chat history from the storage service.
      * @private
-     */
     async _loadInitialData() {
         // --- [MODIFIED] Guard clause to prevent running without storage configured ---
         if (!this.sessionStorage || !this.sessionId) return;
@@ -265,11 +297,11 @@ export class LLMChatUI extends IEditor {
             console.error(`[LLMChatUI] Failed to load session ${this.sessionId}:`, error);
         }
     }
+     */
 
     /**
      * +++ ADDED: Saves the current chat history when a change occurs.
      * @private
-     */
     _handleAutoSave() {
         // --- [MODIFIED] Guard clause ---
         if (!this.sessionStorage || !this.sessionId) return;
@@ -277,6 +309,7 @@ export class LLMChatUI extends IEditor {
         this.sessionStorage.saveSessionContent(this.sessionId, content)
             .catch(error => console.error(`[LLMChatUI] Auto-save for session ${this.sessionId} failed:`, error));
     }
+     */
 
     /**
      * @private
@@ -331,8 +364,8 @@ export class LLMChatUI extends IEditor {
             this.historyUI.on(eventName, (payload) => this.events.emit(eventName, payload));
         });
 
-        // IEditor 'change' event mapping
-        const changeEvents = ['messageComplete', 'historyLoaded', 'pairDeleted', 'historyCleared', 'messageResent'];
+        // IEditor 'change' 事件映射
+        const changeEvents = ['messageComplete', 'historyLoaded', 'pairDeleted', 'historyCleared', 'messageResent', 'branchSwitched'];
         changeEvents.forEach(eventName => {
             this.historyUI.on(eventName, () => this.events.emit('change'));
         });

@@ -27,14 +27,14 @@
         /* [新增] 侧边控制面板 */
         .demo-controls {
             flex-shrink: 0;
-            width: 280px;
+            width: 320px; /* 稍微加宽以容纳更详细的说明 */
             background-color: #ffffff;
             border-right: 1px solid #e0e0e0;
             padding: 20px;
             box-shadow: 2px 0 10px rgba(0,0,0,0.05);
             display: flex;
             flex-direction: column;
-            gap: 20px;
+            gap: 25px; /* 增加间距 */
         }
         .demo-controls h2 {
             margin: 0 0 10px 0;
@@ -52,6 +52,10 @@
             background-color: #f8f8f8;
             cursor: pointer;
             transition: all 0.2s ease;
+            text-align: left; /* 文本左对齐 */
+            display: flex; /* 使用 flex 布局 */
+            align-items: center; /* 垂直居中 */
+            gap: 10px; /* 图标和文字的间距 */
         }
         .demo-controls button:hover {
             background-color: #e9e9e9;
@@ -71,7 +75,8 @@
             font-size: 13px;
             color: #666;
             line-height: 1.5;
-            margin-top: -10px;
+            margin-top: 5px; /* 减小与按钮的间距 */
+            padding-left: 5px;
         }
 
         .chat-column {
@@ -101,27 +106,33 @@
 <body>
 
     <div class="demo-container">
-        <!-- [新增] 左侧控制面板，用于验证响应式更新 -->
+        <!-- 左侧控制面板 -->
         <div class="demo-controls">
-            <h2>⚙️ 配置控制器</h2>
+            <h2>⚙️ 控制中心</h2>
             <div>
+                <h3>数据持久化 (新)</h3>
+                <p>本演示现在使用 <code>ModuleRepository</code> 将会话保存为文件。聊天内容以 <b>JSONL</b> 格式存储在 LocalStorage 中，键为 <code>llm_kit_demo_modules_demo_workspace</code>。</p>
+                <p>你可以在浏览器的开发者工具中查看它。</p>
+            </div>
+            <div>
+                <h3>响应式配置</h3>
                 <button id="add-agent-btn" class="add-btn">
-                    <i class="fas fa-plus-circle"></i> 添加一个新 Agent
+                    <i class="fas fa-plus-circle"></i> 添加"翻译助手" Agent
                 </button>
-                <p>点击后，会通过 <code>ConfigManager</code> 添加一个"翻译助手" Agent。观察聊天界面的 Agent 列表是否会实时更新。</p>
+                <p>通过 <code>ConfigManager</code> 添加一个新 Agent，聊天界面将实时更新。</p>
             </div>
             <div>
                 <button id="del-agent-btn" class="del-btn">
-                    <i class="fas fa-trash-alt"></i> 删除 Coder Agent
+                    <i class="fas fa-trash-alt"></i> 删除 "Coder" Agent
                 </button>
-                <p>点击后，会通过 <code>ConfigManager</code> 删除 "DeepSeek Coder"。观察 Agent 列表的变化。如果当前正选中它，UI 会自动切换到默认 Agent。</p>
+                <p>通过 <code>ConfigManager</code> 删除一个 Agent，UI 将自动同步。</p>
             </div>
         </div>
 
         <!-- 右侧聊天区域 -->
         <div class="chat-column">
             <div class="demo-header">
-                <h1>🤖 LLM Kit - 响应式架构演示</h1>
+                <h1>🤖 LLM Kit - IEditor 架构演示</h1>
             </div>
 
             <div id="chat-app-container"></div>
@@ -133,22 +144,19 @@
         import { LLMChatUI } from "../chat/index.js";
         import { ConfigManager } from "../../config/ConfigManager.js";
         import { API_KEY as DEEPSEEK_API_KEY } from "../../demo/config.js";
-
-        // 这是一个模拟的 Storage Service，在实际应用中，它可能与 IndexedDB 或后端 API 交互
-        import { LLMSessionStorageService } from "../config/services/LLMSessionStorageService.js";
+        // [已移除] 不再需要 LLMSessionStorageService
 
         if (!DEEPSEEK_API_KEY || DEEPSEEK_API_KEY.includes('YOUR_')) {
             alert('请在 demo/config.js 中配置您的 API 密钥以运行此演示。');
             throw new Error("API key not configured.");
         }
 
-        // --- 2. 定义初始的全局配置数据 ---
+        // --- 2. 定义初始的全局配置数据 (保持不变) ---
         const initialConnections = [
             { id: "conn-deepseek", name: "DeepSeek API", provider: "deepseek", apiKey: DEEPSEEK_API_KEY },
             { id: "conn-openai-mock", name: "OpenAI API", provider: "openai", apiKey: "OPENAI_API_KEY_PLACEHOLDER" }
         ];
-
-        let initialAgents = [
+        const initialAgents = [
             {
                 id: "agent-general-chat", name: "通用聊天助手", icon: "💬",
                 description: "一个通用的聊天助手，使用DeepSeek模型。",
@@ -168,49 +176,96 @@
             { type: 'function', function: { name: 'get_weather', description: '获取指定城市的天气信息', parameters: { type: 'object', properties: { city: { type: 'string' } } } } }
         ];
         
-        // --- 3. [核心步骤] 初始化应用核心服务：ConfigManager ---
-        // 这是整个应用的“单一可信数据源”。所有UI组件都将从这里获取数据并监听其变化。
+        // --- 3. [核心步骤] 初始化应用核心服务：ConfigManager (保持不变) ---
         const configManager = ConfigManager.getInstance({
             adapterOptions: { prefix: 'llm_kit_demo_' }
         });
 
-        // --- 4. 异步引导和初始化 UI ---
-        async functioninitializeApp() {
+        // --- 4. [核心重构] 定义数据仓库和会话文件路径 ---
+        const WORKSPACE_ID = 'demo_workspace';
+        const SESSION_FILE_PATH = '/main-conversation.jsonl';
+
+        /**
+         * [新增] 这是一个辅助函数，模拟宿主应用加载或创建会话文件的逻辑。
+         * @param {ModuleRepository} repository - 要操作的仓库实例。
+         * @param {string} path - 会话文件的完整路径。
+         * @returns {Promise<string>} 返回会话文件的内容 (JSONL 字符串)。
+         */
+        async function loadOrCreateSessionFile(repository, path) {
+            console.log(`[Host] 正在尝试加载或创建会话文件: ${path}`);
+            await repository.load(); // 确保仓库数据已从持久层加载
+            
+            // 尝试在根目录查找文件
+            const root = await repository.getModules();
+            const existingFile = root.children.find(child => child.path === path);
+
+            if (existingFile) {
+                console.log(`[Host] 文件已找到，加载内容。`);
+                return existingFile.content;
+            } else {
+                console.log(`[Host] 文件不存在，正在创建新文件...`);
+                // addModule 的第一个参数是父目录路径，第二个参数是新节点的数据
+                await repository.addModule('/', {
+                    path: path.substring(1), // 移除路径开头的 '/'
+                    type: 'file',
+                    content: '' // 新文件内容为空
+                });
+                return '';
+            }
+        }
+
+
+        // --- 5. 异步引导和初始化 UI ---
+        async function initializeApp() {
             try {
-                // 等待 ConfigManager 从 localStorage 加载完初始数据
+                // 等待 ConfigManager 加载完初始数据
                 await configManager._bootstrap();
 
-                // 将我们的初始配置数据保存到 ConfigManager 中。
-                // 在真实应用中，这些数据可能是从服务器获取或由用户在设置页面创建的。
-                // 使用 `save...` 方法会覆盖现有数据并触发更新事件。
+                // 将我们的初始配置保存到 ConfigManager
                 await configManager.llm.saveConnections(initialConnections);
                 await configManager.llm.saveAgents(initialAgents);
 
-                // --- 5. 初始化 LLMChatUI ---
-                const container = document.getElementById('chat-app-container');
-                const sessionID = 'llm-chat-ui-reactive-demo';
-                const sessionStorage = new LLMSessionStorageService();
+                // --- 6. [核心重构] 初始化数据层并加载会话 ---
+                // a. 从 ConfigManager 获取特定工作区的仓库
+                const repository = configManager.modules.get(WORKSPACE_ID);
+                // b. 加载会话文件内容
+                const initialContent = await loadOrCreateSessionFile(repository, SESSION_FILE_PATH);
 
+                // --- 7. [核心重构] 初始化 LLMChatUI ---
+                const container = document.getElementById('chat-app-container');
+                
                 const chatApp = new LLMChatUI(container, {
-                    // [核心变更] 注入 ConfigManager 实例
+                    // 注入 ConfigManager，使其具有响应式能力
                     configManager: configManager,
                     
-                    sessionId: sessionID,
-                    sessionStorage: sessionStorage,
-
+                    // [已移除] 不再需要 sessionId 和 sessionStorage
+                    
                     inputUIConfig: {
                         tools: tools,
                         localization: { placeholder: '与智能体对话...' }
                     },
                     historyUIConfig: {
-                        titleBar: { title: "LLM Kit" }
+                        titleBar: { title: "会话窗口" }
                     }
                 });
+
+                // --- 8. [核心重构] 将加载的内容设置到 UI 中 ---
+                chatApp.setText(initialContent);
+
+                // --- 9. [核心重构] 监听 UI 变化，并保存回数据仓库 ---
+                chatApp.on('change', async () => {
+                    console.log('[Host] 检测到 chatUI 内容变化，正在保存...');
+                    // a. 从 UI 获取最新的内容 (JSONL 字符串)
+                    const updatedContent = chatApp.getText();
+                    // b. 将内容写回文件
+                    await repository.updateModuleContent(SESSION_FILE_PATH, updatedContent);
+                    console.log('[Host] 会话已成功保存到 ModuleRepository！');
+                });
                 
-                console.log('✅ Chat UI (Reactive Architecture) 初始化完成！');
+                console.log('✅ Chat UI (IEditor Architecture) 初始化完成！');
                 window.chatApp = chatApp; // 方便调试
 
-                // --- 6. 绑定测试按钮事件 ---
+                // --- 10. 绑定测试按钮事件 (保持不变) ---
                 setupTestButtons();
 
             } catch (error) {
