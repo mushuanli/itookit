@@ -1,0 +1,34 @@
+/**
+ * LLMChatUI 组合组件样式
+ */
+
+.llm-chat-ui {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    background-color: #f9fafb;
+    overflow: hidden; /* 防止子元素溢出 */
+}
+
+.llm-chat-ui__history {
+    flex: 1;
+    overflow-y: auto; /* 让 historyUI 内部自己处理滚动 */
+    min-height: 0; /* 重要：允许 flex 子元素在空间不足时正确收缩 */
+    position: relative; /* 为 historyUI 内部的浮动元素提供定位上下文 */
+}
+
+.llm-chat-ui__input {
+    flex-shrink: 0;
+    /* 样式由 inputUI 内部组件自行定义，这里只负责布局 */
+    /* 如果需要，可以添加一些外部的 border 或 shadow */
+    border-top: 1px solid #e5e7eb;
+    background-color: #fff; /* 为 input 区域提供背景色 */
+}
+
+/* 移动端适配 (如果需要) */
+@media (max-width: 768px) {
+    .llm-chat-ui__input {
+        /* 可以在此处调整 input 区域的外部 padding 或其他布局属性 */
+    }
+}
+
