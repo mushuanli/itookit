@@ -3,12 +3,12 @@
  * @description DOM rendering logic for the LLMInputUI component.
  */
 
-export function initialRender(container, options) {
-    const { classNames: cls, localization: loc, disableAttachments, agents = [] } = options;
+// +++ 新增: 一个独立的函数，用于生成和渲染 Agent 弹出菜单的内容 +++
+export function renderAgentPopup(popupElement, agents, classNames) {
+    if (!popupElement) return;
 
-    // +++ NEW: Dynamically generate agent menu items +++
     const agentMenuItemsHTML = agents.map(agent => `
-        <div class="${cls.popupItem}" data-agent-id="${agent.id}">
+        <div class="${classNames.popupItem}" data-agent-id="${agent.id}">
             <div style="font-size: 1.5rem; width: 24px; text-align: center;">${agent.icon || '🤖'}</div>
             <div class="popup-item-content">
                 <strong>${agent.name}</strong>
@@ -16,7 +16,16 @@ export function initialRender(container, options) {
             </div>
         </div>
     `).join('');
+    
+    popupElement.innerHTML = agentMenuItemsHTML.length > 0 ? agentMenuItemsHTML : `<div class="${classNames.popupItem}">No agents configured.</div>`;
+}
 
+
+export function initialRender(container, options) {
+    const { classNames: cls, localization: loc, disableAttachments, agents = [] } = options;
+
+    // --- 修改: 将 agent 列表的渲染逻辑委托给新的函数 ---
+    // 先创建一个空的 popup 容器
     container.innerHTML = `
         <div class="${cls.container}">
             <div class="${cls.toast}" style="display: none;"></div>
@@ -33,7 +42,7 @@ export function initialRender(container, options) {
                        <span class="agent-selector-name">Select Agent</span>
                     </button>
                     <div class="llm-popup ${cls.agentPopup}" style="display: none; bottom: 50px; left: 0;">
-                        ${agentMenuItemsHTML.length > 0 ? agentMenuItemsHTML : `<div class="${cls.popupItem}">No agents configured.</div>`}
+                        <!-- 内容将由 renderAgentPopup 填充 -->
                     </div>
                 </div>
 
@@ -63,6 +72,10 @@ export function initialRender(container, options) {
     }
     // Manually add the base popup class for the command popup
     elements.popup = container.querySelector(`.${cls.commandPopup}`);
+
+    // --- 修改: 在初始渲染时调用新的函数来填充 Agent 列表 ---
+    renderAgentPopup(elements.agentPopup, agents, cls);
+    
     return elements;
 }
 

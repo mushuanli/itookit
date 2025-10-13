@@ -7,12 +7,15 @@ import './styles.css';
 
 import { defaultOptions } from './defaults.js';
 import { deepMerge } from './utils.js';
-// +++ MODIFIED: No longer importing CSS injection +++
-import { initialRender, renderAttachments, updateTheme } from './renderer.js';
+// --- 修改: 导入新的渲染函数 ---
+import { initialRender, renderAttachments, updateTheme, renderAgentPopup } from './renderer.js';
 import { attachEventListeners } from './events.js';
 import { CommandManager } from './commands.js';
 import { PopupManager } from './popup.js';
 
+// +++ 新增: 导入 ConfigManager 以进行类型提示和实例检查 +++
+import { ConfigManager } from '../../config/ConfigManager.js';
+import { EVENTS } from '../../config/shared/constants.js';
 
 export class LLMInputUI {
     /**
@@ -24,9 +27,16 @@ export class LLMInputUI {
         if (!element || !options || typeof options.onSubmit !== 'function') {
             throw new Error('LLMInputUI requires a container element and an onSubmit callback.');
         }
+        // +++ 新增: 强制要求 configManager 以实现响应式功能 +++
+        if (!options.configManager || !(options.configManager instanceof ConfigManager)) {
+            throw new Error('LLMInputUI now requires a valid `configManager` instance in its options to enable reactivity.');
+        }
 
         this.container = element;
         this.options = deepMerge(JSON.parse(JSON.stringify(defaultOptions)), options);
+        // +++ 新增: 保存对核心服务的引用 +++
+        this.configManager = this.options.configManager;
+        this._subscriptions = []; // 用于存储取消订阅的函数
 
         this.state = {
             attachments: [],
@@ -51,6 +61,8 @@ export class LLMInputUI {
         this.popupManager = new PopupManager(this);
         
         attachEventListeners(this);
+        // +++ 新增: 挂载后订阅配置变更事件 +++
+        this._subscribeToChanges();
 
         if (this.options.initialText) {
             this.elements.textarea.value = this.options.initialText;
@@ -95,16 +107,7 @@ export class LLMInputUI {
         updateTheme(this.options.theme);
         this._emit('themeChange', this.options.theme);
     }
-
-    // +++ RENAMED: Public API setModel -> setAgent +++
-    setAgent(agentId) {
-        if (this.state.agent === agentId) return;
-        this.state.agent = agentId;
-        this._updateUIState(); // Update all UI elements including status bar and selector button
-        // +++ MODIFIED: Emit 'agentChanged' event +++
-        this._emit('agentChanged', agentId);
-    }
-
+    
     showError(message) {
         if (!this.elements.errorDisplay) return;
         this.elements.errorDisplay.textContent = message;
@@ -114,6 +117,52 @@ export class LLMInputUI {
     registerCommand(commandConfig) {
         this.commandManager.register(commandConfig);
     }
+    
+    setAgent(agentId) {
+        if (this.state.agent === agentId) return;
+        this.state.agent = agentId;
+        this._updateUIState();
+        this._emit('agentChanged', agentId);
+    }
+    
+    /**
+     * +++ 新增: 公共方法，用于接收新的 agents 列表并更新UI +++
+     * @param {import('../../config/shared/types.js').LLMAgentDefinition[]} newAgents
+     */
+    updateAgents(newAgents) {
+        // 1. 更新内部选项
+        this.options.agents = newAgents;
+        
+        // 2. 重新渲染 Agent 弹出菜单
+        renderAgentPopup(this.elements.agentPopup, newAgents, this.options.classNames);
+
+        // 3. 检查当前选择的 Agent 是否仍然存在
+        const currentAgentExists = newAgents.some(a => a.id === this.state.agent);
+        if (!currentAgentExists) {
+            // 如果已被删除，则重置
+            this.setAgent(null); 
+        } else {
+            // 如果存在，仅更新UI状态（例如按钮图标）
+            this._updateUIState();
+        }
+    }
+
+    // +++ 新增: 生命周期方法，用于清理资源 +++
+    destroy() {
+        // 取消所有事件订阅，防止内存泄漏
+        this._subscriptions.forEach(unsubscribe => unsubscribe());
+        this._subscriptions = [];
+        
+        // 清理DOM
+        this.container.innerHTML = '';
+        
+        // 释放引用
+        this.elements = null;
+        this.configManager = null;
+        
+        this._emit('destroy');
+    }
+
 
     // --- Internal State & UI Updaters (The "Controller" part) ---
 
@@ -262,5 +311,22 @@ export class LLMInputUI {
             try { return this.options.on[eventName](payload); } catch (e) { console.error(`Error in '${eventName}' event handler:`, e); }
         }
         return undefined;
+    }
+
+
+    /**
+     * +++ 新增: 订阅来自 ConfigManager 的事件 +++
+     * @private
+     */
+    _subscribeToChanges() {
+        const { eventManager } = this.configManager;
+        
+        // 订阅 Agent 列表的更新
+        const unsubscribe = eventManager.subscribe(EVENTS.LLM_AGENTS_UPDATED, (updatedAgents) => {
+            console.log('[LLMInputUI] Received agent updates. Refreshing UI...');
+            this.updateAgents(updatedAgents);
+        });
+
+        this._subscriptions.push(unsubscribe);
     }
 }

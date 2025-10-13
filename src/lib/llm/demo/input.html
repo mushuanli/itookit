@@ -60,7 +60,7 @@
         .message.thinking strong::before { content: '🧠 '; margin-right: 5px; }
         .demo-area { padding: 20px; flex-grow: 1; overflow-y: auto; }
         .demo-area button { padding: 8px 12px; border: 1px solid var(--border-color); background-color: #fff; border-radius: 4px; cursor: pointer; margin-right: 10px; }
-        .event-log { margin-top: 20px; background-color: #2d2d2d; color: #ccc; padding: 15px; border-radius: 8px; height: 300px; overflow-y: auto; font-family: monospace; font-size: 14px; }
+        .event-log { margin-top: 20px; background-color: #2d2d2d; color: #ccc; padding: 15px; border-radius: 8px; height: 250px; overflow-y: auto; font-family: monospace; font-size: 14px; }
         .event-log div { border-bottom: 1px solid #444; padding-bottom: 5px; margin-bottom: 5px; }
         .event-log .event-name { color: #87ceeb; font-weight: bold; }
         .event-log .event-payload { color: #98fb98; }
@@ -141,6 +141,13 @@
                 <div class="demo-area">
                     <h2>Events & Commands Demo</h2>
                     <p>Interact with the input UI below and see the events firing in the log. Try the custom command <code>/time</code>.</p>
+                    <!-- +++ 新增: 测试按钮 +++ -->
+                    <div style="margin-bottom: 20px; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px;">
+                        <strong>Reactivity Test:</strong>
+                        <p>Click these buttons to modify the agent list in the global config. All three input UIs below should update instantly.</p>
+                        <button id="add-agent-btn">Add Test Agent</button>
+                        <button id="remove-agent-btn">Remove Test Agent</button>
+                    </div>
                      <div id="event-log-container">
                         <strong>Event Log:</strong>
                         <div id="event-log" class="event-log"></div>
@@ -210,10 +217,9 @@
             }
         ];
         
-        // 将 Agent 定义加载到配置中心的 LLMRepository 中
-        for (const agent of AGENT_DEFINITIONS) {
-            try { await configManager.llm.addAgent(agent); } catch (e) { /* 如果已存在则忽略错误 */ }
-        }
+    // --- 修改: 使用 saveAgents 一次性写入，更高效 ---
+    // 这将触发一次 llm:agents:updated 事件
+    await configManager.llm.saveAgents(AGENT_DEFINITIONS);
 
         // 核心函数：根据侧边栏输入更新/创建连接配置
         async function updateConnection() {
@@ -231,19 +237,24 @@
                 apiKey: apiKey,
             };
 
-            try {
-                // 尝试更新连接。如果不存在，会抛出错误，我们在catch块中处理。
-                await configManager.llm.updateConnection(connection.id, connection);
-            } catch (error) {
-                // 如果更新失败，说明它可能不存在，所以我们添加它。
-                await configManager.llm.addConnection(connection);
+            // --- 修改: 使用 saveConnections 替换 add/update 逻辑，更简洁 ---
+            const allConnections = await configManager.llm.getConnections();
+            const existingIndex = allConnections.findIndex(c => c.id === connection.id);
+            if (existingIndex > -1) {
+                allConnections[existingIndex] = { ...allConnections[existingIndex], ...connection };
+            } else {
+                allConnections.push(connection);
             }
-
+            await configManager.llm.saveConnections(allConnections);
+            
             // 更新所有 Agent 定义，使其使用当前选择的提供商连接
-            for (const agent of AGENT_DEFINITIONS) {
-                agent.config.connectionId = connection.id;
-                await configManager.llm.updateAgent(agent.id, agent);
+            const agents = await configManager.llm.getAgents();
+            for (const agent of agents) {
+                if (AGENT_DEFINITIONS.some(def => def.id === agent.id)) { // 只更新我们定义的agent
+                     agent.config.connectionId = connection.id;
+                }
             }
+            await configManager.llm.saveAgents(agents);
 
             // 关键一步：清除LLMService的缓存。这会强制它在下次请求客户端时，
             // 使用我们刚刚更新的配置来创建一个新的客户端实例。
@@ -271,6 +282,7 @@
             initialAgent: availableAgents[0]?.id || '', // 默认选择第一个Agent
             initialText: "写一个关于程序员和一个神奇bug的短篇故事。",
             onSubmit: handleChatSubmit,
+            configManager: configManager, // 注入核心服务
         });
 
         async function handleChatSubmit(data) {
@@ -364,6 +376,7 @@
             agents: availableAgents,
             initialAgent: availableAgents[0]?.id,
             onSubmit: (data) => alert(`主题演示已提交:\n${JSON.stringify(data, null, 2)}`),
+            configManager: configManager, // +++ 注入核心服务
         });
 
         document.getElementById('apply-theme-btn').addEventListener('click', () => {
@@ -395,7 +408,8 @@
                 commandExecute: (cmd) => logEvent('commandExecute', cmd),
                 clear: () => logEvent('clear'),
                 themeChange: () => logEvent('themeChange', '主题对象已更新...'),
-            }
+            },
+            configManager: configManager, // +++ 注入核心服务
         });
 
         eventsUI.registerCommand({
@@ -404,6 +418,42 @@
             handler() { this._showToast(`当前时间: ${new Date().toLocaleTimeString()}`); this.clear(); },
             executeOnClick: true,
         });
+        
+        // +++ 新增: 为测试按钮添加事件监听器 +++
+        let testAgentId = null; // 用于跟踪我们添加的测试Agent的ID
+        
+        document.getElementById('add-agent-btn').addEventListener('click', async () => {
+            if (testAgentId) {
+                alert('A test agent already exists. Please remove it first.');
+                return;
+            }
+            const newId = `test-agent-${Date.now()}`;
+            const newAgent = {
+                id: newId,
+                name: "Test Agent (Dynamic)",
+                icon: "🧪",
+                description: "This agent was added at runtime.",
+                config: { connectionId: 'conn-deepseek', modelName: 'deepseek-chat' }
+            };
+            
+            logEvent('action', `Attempting to add agent: ${newAgent.name}`);
+            // 使用 addAgent API
+            await configManager.llm.addAgent(newAgent);
+            testAgentId = newId;
+        });
+
+        document.getElementById('remove-agent-btn').addEventListener('click', async () => {
+            if (!testAgentId) {
+                alert('No test agent has been added yet.');
+                return;
+            }
+            
+            logEvent('action', `Attempting to remove agent ID: ${testAgentId}`);
+            // 使用 removeAgent API
+            await configManager.llm.removeAgent(testAgentId);
+            testAgentId = null; // 重置ID
+        });
+
 
         // --- UI辅助函数和Tab切换逻辑 (保持不变) ---
         const tabs = document.querySelectorAll('.tab-button');
