@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LLM Chat UI - 架构重构与响应式演示</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Marked.js -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+    <style>
+        /* 页面基础样式 */
+        html, body {
+            height: 100%;
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #f0f2f5;
+            color: #333;
+        }
+
+        .demo-container {
+            display: flex;
+            height: 100vh;
+        }
+
+        /* [新增] 侧边控制面板 */
+        .demo-controls {
+            flex-shrink: 0;
+            width: 280px;
+            background-color: #ffffff;
+            border-right: 1px solid #e0e0e0;
+            padding: 20px;
+            box-shadow: 2px 0 10px rgba(0,0,0,0.05);
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .demo-controls h2 {
+            margin: 0 0 10px 0;
+            font-size: 20px;
+            color: #764ba2;
+            border-bottom: 2px solid #f0f0f0;
+            padding-bottom: 10px;
+        }
+        .demo-controls button {
+            width: 100%;
+            padding: 12px;
+            font-size: 16px;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            background-color: #f8f8f8;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .demo-controls button:hover {
+            background-color: #e9e9e9;
+            border-color: #aaa;
+        }
+        .demo-controls button.add-btn {
+            background-color: #d4edda;
+            border-color: #c3e6cb;
+            color: #155724;
+        }
+        .demo-controls button.del-btn {
+            background-color: #f8d7da;
+            border-color: #f5c6cb;
+            color: #721c24;
+        }
+        .demo-controls p {
+            font-size: 13px;
+            color: #666;
+            line-height: 1.5;
+            margin-top: -10px;
+        }
+
+        .chat-column {
+            display: flex;
+            flex-direction: column;
+            flex-grow: 1;
+            height: 100%;
+            overflow: hidden;
+        }
+
+        .demo-header {
+            padding: 15px 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            text-align: center;
+            flex-shrink: 0;
+        }
+        .demo-header h1 { margin: 0; font-size: 22px; }
+        
+        #chat-app-container {
+            flex-grow: 1;
+            overflow: hidden;
+            background-color: #ffffff;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="demo-container">
+        <!-- [新增] 左侧控制面板，用于验证响应式更新 -->
+        <div class="demo-controls">
+            <h2>⚙️ 配置控制器</h2>
+            <div>
+                <button id="add-agent-btn" class="add-btn">
+                    <i class="fas fa-plus-circle"></i> 添加一个新 Agent
+                </button>
+                <p>点击后，会通过 <code>ConfigManager</code> 添加一个"翻译助手" Agent。观察聊天界面的 Agent 列表是否会实时更新。</p>
+            </div>
+            <div>
+                <button id="del-agent-btn" class="del-btn">
+                    <i class="fas fa-trash-alt"></i> 删除 Coder Agent
+                </button>
+                <p>点击后，会通过 <code>ConfigManager</code> 删除 "DeepSeek Coder"。观察 Agent 列表的变化。如果当前正选中它，UI 会自动切换到默认 Agent。</p>
+            </div>
+        </div>
+
+        <!-- 右侧聊天区域 -->
+        <div class="chat-column">
+            <div class="demo-header">
+                <h1>🤖 LLM Kit - 响应式架构演示</h1>
+            </div>
+
+            <div id="chat-app-container"></div>
+        </div>
+    </div>
+
+    <script type="module">
+        // --- 1. 导入核心模块 ---
+        import { LLMChatUI } from "../chat/index.js";
+        import { ConfigManager } from "../../config/ConfigManager.js";
+        import { API_KEY as DEEPSEEK_API_KEY } from "../../demo/config.js";
+
+        // 这是一个模拟的 Storage Service，在实际应用中，它可能与 IndexedDB 或后端 API 交互
+        import { LLMSessionStorageService } from "../config/services/LLMSessionStorageService.js";
+
+        if (!DEEPSEEK_API_KEY || DEEPSEEK_API_KEY.includes('YOUR_')) {
+            alert('请在 demo/config.js 中配置您的 API 密钥以运行此演示。');
+            throw new Error("API key not configured.");
+        }
+
+        // --- 2. 定义初始的全局配置数据 ---
+        const initialConnections = [
+            { id: "conn-deepseek", name: "DeepSeek API", provider: "deepseek", apiKey: DEEPSEEK_API_KEY },
+            { id: "conn-openai-mock", name: "OpenAI API", provider: "openai", apiKey: "OPENAI_API_KEY_PLACEHOLDER" }
+        ];
+
+        let initialAgents = [
+            {
+                id: "agent-general-chat", name: "通用聊天助手", icon: "💬",
+                description: "一个通用的聊天助手，使用DeepSeek模型。",
+                config: { connectionId: "conn-deepseek", modelName: "deepseek-chat", systemPrompt: "You are a helpful assistant." },
+                interface: { inputs: [], outputs: [] }
+            },
+            {
+                id: "agent-coder", name: "DeepSeek Coder", icon: "💻",
+                description: "一个专门用于编程的助手。",
+                config: { connectionId: "conn-deepseek", modelName: "deepseek-coder", systemPrompt: "You are an expert programmer." },
+                interface: { inputs: [], outputs: [] }
+            }
+        ];
+        
+        // 定义可供模型使用的工具
+        const tools = [
+            { type: 'function', function: { name: 'get_weather', description: '获取指定城市的天气信息', parameters: { type: 'object', properties: { city: { type: 'string' } } } } }
+        ];
+        
+        // --- 3. [核心步骤] 初始化应用核心服务：ConfigManager ---
+        // 这是整个应用的“单一可信数据源”。所有UI组件都将从这里获取数据并监听其变化。
+        const configManager = ConfigManager.getInstance({
+            adapterOptions: { prefix: 'llm_kit_demo_' }
+        });
+
+        // --- 4. 异步引导和初始化 UI ---
+        async functioninitializeApp() {
+            try {
+                // 等待 ConfigManager 从 localStorage 加载完初始数据
+                await configManager._bootstrap();
+
+                // 将我们的初始配置数据保存到 ConfigManager 中。
+                // 在真实应用中，这些数据可能是从服务器获取或由用户在设置页面创建的。
+                // 使用 `save...` 方法会覆盖现有数据并触发更新事件。
+                await configManager.llm.saveConnections(initialConnections);
+                await configManager.llm.saveAgents(initialAgents);
+
+                // --- 5. 初始化 LLMChatUI ---
+                const container = document.getElementById('chat-app-container');
+                const sessionID = 'llm-chat-ui-reactive-demo';
+                const sessionStorage = new LLMSessionStorageService();
+
+                const chatApp = new LLMChatUI(container, {
+                    // [核心变更] 注入 ConfigManager 实例
+                    configManager: configManager,
+                    
+                    sessionId: sessionID,
+                    sessionStorage: sessionStorage,
+
+                    inputUIConfig: {
+                        tools: tools,
+                        localization: { placeholder: '与智能体对话...' }
+                    },
+                    historyUIConfig: {
+                        titleBar: { title: "LLM Kit" }
+                    }
+                });
+                
+                console.log('✅ Chat UI (Reactive Architecture) 初始化完成！');
+                window.chatApp = chatApp; // 方便调试
+
+                // --- 6. 绑定测试按钮事件 ---
+                setupTestButtons();
+
+            } catch (error) {
+                console.error('初始化 Chat UI 失败:', error);
+                document.getElementById('chat-app-container').innerHTML = `<div style="padding: 20px; color: red;"><strong>初始化失败:</strong> ${error.message}</div>`;
+            }
+        }
+
+        // --- 7. [新增] 设置测试按钮的事件监听器 ---
+        function setupTestButtons() {
+            const addBtn = document.getElementById('add-agent-btn');
+            const delBtn = document.getElementById('del-agent-btn');
+            const llmRepo = configManager.llm; // 获取 LLMRepository 的引用
+
+            addBtn.onclick = async () => {
+                const newAgent = {
+                    id: "agent-translator-" + Date.now(), // 保证ID唯一
+                    name: "翻译助手",
+                    icon: "🌐",
+                    description: "一个新增的翻译 Agent。",
+                    config: { connectionId: "conn-openai-mock", modelName: "gpt-3.5-turbo", systemPrompt: "You are a professional translator." },
+                    interface: { inputs: [], outputs: [] }
+                };
+
+                console.log("正在通过 ConfigManager 添加新 Agent:", newAgent);
+                // 直接调用 repository 的方法来修改全局状态。
+                // 这会触发保存到 localStorage 并发布 "llm:agents:updated" 事件。
+                await llmRepo.addAgent(newAgent);
+                alert('已添加 "翻译助手" Agent！请检查聊天输入框左侧和历史消息中的 Agent 下拉列表。');
+            };
+
+            delBtn.onclick = async () => {
+                const agentIdToRemove = 'agent-coder';
+                console.log(`正在通过 ConfigManager 删除 Agent: ${agentIdToRemove}`);
+                
+                // 获取当前 agents 列表，检查是否存在
+                const currentAgents = await llmRepo.getAgents();
+                if (!currentAgents.some(agent => agent.id === agentIdToRemove)) {
+                    alert(`Agent "${agentIdToRemove}" 已被删除或不存在。`);
+                    return;
+                }
+                
+                // 调用 repository 方法来删除
+                await llmRepo.removeAgent(agentIdToRemove);
+                alert(`已删除 "${agentIdToRemove}" Agent！请观察 UI 的变化。`);
+            };
+        }
+
+        // 启动应用
+        initializeApp();
+
+    </script>
+</body>
+</html>
