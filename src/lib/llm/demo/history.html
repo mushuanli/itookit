@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LLM History UI Demo</title>
+    <title>】LLM History UI 联动演示</title>
     
     <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -12,158 +12,251 @@
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+        /* --- 采用与 input-ui.html 类似的现代样式 --- */
+        :root {
+            --primary-color: #667eea;
+            --border-color: #dee2e6;
+            --background-color: #f8f9fa;
+            --text-color: #212529;
         }
-        
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            margin: 0;
+            background-color: var(--background-color);
+            color: var(--text-color);
+            display: flex;
             height: 100vh;
+            overflow: hidden;
+        }
+        #app { display: flex; width: 100%; height: 100%; }
+        .sidebar {
+            width: 320px;
+            background-color: #fff;
+            border-right: 1px solid var(--border-color);
+            padding: 20px;
+            box-sizing: border-box;
             display: flex;
             flex-direction: column;
+            overflow-y: auto;
+            flex-shrink: 0;
         }
-        
-        #app {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            max-width: 1200px;
-            margin: 0 auto;
-            width: 100%;
-        }
-        
-        #chat-container {
-            flex: 1;
-            min-height: 0;
-        }
-        
-        #input-area {
-            padding: 16px;
-            background: #ffffff;
-            border-top: 1px solid #e5e7eb;
-            display: flex;
-            gap: 12px;
-        }
-        
-        #user-input {
-            flex: 1;
-            padding: 12px;
-            border: 1px solid #d1d5db;
-            border-radius: 8px;
-            font-size: 14px;
-            resize: none;
-            font-family: inherit;
-        }
-        
-        #send-btn {
-            padding: 12px 24px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border: none;
-            border-radius: 8px;
-            font-size: 14px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: transform 0.2s;
-        }
-        
-        #send-btn:hover {
-            transform: translateY(-2px);
-        }
-        
-        #send-btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-            transform: none;
-        }
+        .sidebar h2 { text-align: center; color: var(--primary-color); margin-top: 0; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; font-weight: 600; }
+        .form-group input, .form-group select { width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: 4px; box-sizing: border-box; }
+        .main-content { flex-grow: 1; display: flex; flex-direction: column; height: 100%; }
+        #chat-container { flex: 1; min-height: 0; } /* HistoryUI 将占据这里 */
+        .input-area { padding: 10px; border-top: 1px solid var(--border-color); background: #fff; flex-shrink: 0; display: flex; gap: 10px; }
+        #user-input { flex: 1; padding: 10px; border-radius: 6px; border: 1px solid var(--border-color); }
+        #send-btn { padding: 10px 20px; border-radius: 6px; border: none; background-color: var(--primary-color); color: #fff; cursor: pointer; }
+        .event-log { margin-top: 20px; background-color: #2d2d2d; color: #ccc; padding: 15px; border-radius: 8px; height: 150px; overflow-y: auto; font-family: monospace; font-size: 14px; }
+        .settings-btn { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; background-color: #f9f9f9; cursor: pointer; transition: background-color 0.2s; margin-top: 10px; }
     </style>
 </head>
 <body>
     <div id="app">
-        <div id="chat-container"></div>
-        <div id="input-area">
-            <textarea id="user-input" rows="3" placeholder="输入您的消息..."></textarea>
-            <button id="send-btn">发送</button>
+        <div class="sidebar">
+            <h2>History UI Demo</h2>
+            <p style="text-align: center; font-size: 0.9em; color: #666; margin-top: -10px; margin-bottom: 20px;">响应式配置联动</p>
+            
+            <div class="form-group">
+                <label for="provider">Provider</label>
+                <select id="provider">
+                    <option value="deepseek" selected>DeepSeek</option>
+                    <option value="openai">OpenAI</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="apiKey">API Key</label>
+                <input type="password" id="apiKey" placeholder="从 demo/config.js 加载">
+            </div>
+            <hr style="margin: 20px 0;">
+            <h3>实时配置联动测试</h3>
+            <p style="font-size: 13px; color: #666;">点击下方按钮，观察右侧对话历史中 Agent 选择器的实时变化。</p>
+            <button id="add-agent-btn" class="settings-btn">添加 "翻译专家" Agent</button>
+            <button id="delete-agent-btn" class="settings-btn">删除 "写作助手" Agent</button>
+
+            <div id="event-log-container" style="margin-top: auto;">
+                <strong>操作日志:</strong>
+                <div id="event-log" class="event-log"></div>
+            </div>
+        </div>
+
+        <div class="main-content">
+            <div id="chat-container"></div>
+            <div class="input-area">
+                <textarea id="user-input" rows="2" placeholder="输入消息..."></textarea>
+                <button id="send-btn">发送</button>
+            </div>
         </div>
     </div>
 
     <script type="module">
-        import { createHistoryUI } from '../historyUI/index.js';
-        import { LLMClient } from '../core/index.js';
+        // --- 1. 核心架构导入 ---
+        import { createHistoryUI } from '../history/index.js';
+        import { ConfigManager } from '../../config/ConfigManager.js';
+        import { LLMService } from '../core/LLMService.js';
+        import { EVENTS } from '../../config/shared/constants.js';
+        import { API_KEY as DEMO_API_KEY } from '../../demo/config.js';
 
-        // Initialize
-        const container = document.getElementById('chat-container');
-        const input = document.getElementById('user-input');
-        const sendBtn = document.getElementById('send-btn');
-
-        const historyUI = createHistoryUI(container, {
-            llmClient: new LLMClient({provider:'deepseek',apiKey:'fake',model:'deepseek-reasoner'}),
-            agents: [
-                { id: 'default', name: '通用助手' },
-                { id: 'coder', name: '编程专家' },
-                { id: 'writer', name: '写作助手' }
-            ]
-        });
-
-        // Event listeners
-        historyUI.on('locked', () => {
-            sendBtn.disabled = true;
-            input.disabled = true;
-        });
-
-        historyUI.on('unlocked', () => {
-            sendBtn.disabled = false;
-            input.disabled = false;
-            input.focus();
-        });
-
-        // Send message
-        async function sendMessage() {
-            const text = input.value.trim();
-            if (!text) return;
-
-            input.value = '';
-            
-            const pair = historyUI.addPair(text);
-            await historyUI.sendMessage(pair);
+        if (!DEMO_API_KEY || DEMO_API_KEY.includes('YOUR_')) {
+            alert('请在 demo/config.js 文件中添加您的API密钥以运行此演示。');
+            throw new Error("未配置API密钥。");
         }
 
-        sendBtn.addEventListener('click', sendMessage);
-        
-        input.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                e.preventDefault();
-                sendMessage();
-            }
+        // --- 2. 初始化核心服务 ---
+        const configManager = ConfigManager.getInstance({
+            adapterOptions: { prefix: 'llm_history_demo_' }
         });
+        const llmService = LLMService.getInstance(); // LLMService 现在是 historyUI 的依赖
 
-        // Load demo data
-        setTimeout(() => {
-            historyUI.loadHistory([
-                {
-                    id: 'demo-1',
-                    userMessage: {
-                        content: '你好！请介绍一下你自己。',
-                        agent: 'default',
-                        attachments: []
-                    },
-                    assistantMessage: {
-                        content: '你好！我是一个AI助手，可以帮助你完成各种任务。\n\n我的能力包括：\n\n1. **回答问题** - 提供准确的信息\n2. **编写代码** - 支持多种编程语言\n3. **写作辅助** - 帮助你创作内容\n\n有什么我可以帮助你的吗？',
-                        thinking: null
-                    },
-                    metadata: {
-                        createdAt: Date.now() - 60000,
-                        agent: 'default',
-                        branch: null
-                    }
+        // --- 3. DOM 元素和日志 ---
+        const sidebar = {
+            provider: document.getElementById('provider'),
+            apiKey: document.getElementById('apiKey'),
+        };
+        sidebar.apiKey.value = DEMO_API_KEY;
+
+        const logBox = document.getElementById('event-log');
+        const log = (message) => {
+            console.log(message);
+            logBox.innerHTML += `<div>> ${message}</div>`;
+            logBox.scrollTop = logBox.scrollHeight;
+        };
+
+        // --- 4. 核心逻辑 ---
+        configManager.eventManager.subscribe(EVENTS.APP_READY, main);
+
+        async function main() {
+            log("应用配置已就绪，开始初始化...");
+
+            // --- 动态设置和管理配置 ---
+            async function updateConnection() {
+                const provider = sidebar.provider.value;
+                const apiKey = sidebar.apiKey.value;
+                if (!apiKey) {
+                    alert('API密钥是必需的！'); return false;
                 }
-            ]);
-        }, 500);
+                
+                const connection = {
+                    id: `conn-${provider}`,
+                    name: `${provider.charAt(0).toUpperCase() + provider.slice(1)} Connection`,
+                    provider,
+                    apiKey,
+                };
+                
+                // 使用 saveConnections 保证数据一致性并触发事件
+                await configManager.llm.saveConnections([connection]);
+                
+                // 更新所有 Agent 定义，使其使用当前选择的提供商连接
+                const agents = await configManager.llm.getAgents();
+                if (agents.length > 0) {
+                    agents.forEach(agent => agent.config.connectionId = connection.id);
+                    await configManager.llm.saveAgents(agents);
+                }
 
-        // Expose to window for debugging
-        window.historyUI = historyUI;
+                llmService.clearCache(); // 清除旧的客户端实例
+                log(`连接已更新为: ${provider}`);
+                return true;
+            }
+            
+            // --- 初始化配置 ---
+            // 确保有一个连接配置存在
+            await updateConnection(); 
+            // 确保有一些初始 Agent
+            await configManager.llm.saveAgents([
+                { id: 'default', name: '通用助手', config: { connectionId: 'conn-deepseek', modelName: 'deepseek-chat' }, interface: {} },
+                { id: 'coder', name: '编程专家', config: { connectionId: 'conn-deepseek', modelName: 'deepseek-coder' }, interface: {} },
+                { id: 'writer', name: '写作助手', config: { connectionId: 'conn-deepseek', modelName: 'deepseek-chat' }, interface: {} }
+            ]);
+            
+            // --- 初始化 History UI ---
+            // 关键：现在 HistoryUI 也依赖 LLMService
+            // 我们通过 options 将其注入
+            const historyUI = createHistoryUI(document.getElementById('chat-container'), {
+                configManager: configManager,
+                llmService: llmService, // 注入 LLMService
+                titleBar: { title: "对话历史" }
+            });
+            log("HistoryUI 初始化完成。");
+
+            // --- 绑定UI事件 ---
+            const input = document.getElementById('user-input');
+            const sendBtn = document.getElementById('send-btn');
+            
+            historyUI.on('locked', () => { sendBtn.disabled = true; input.disabled = true; });
+            historyUI.on('unlocked', () => { sendBtn.disabled = false; input.disabled = false; input.focus(); });
+            
+            async function sendMessage() {
+                const text = input.value.trim();
+                if (!text || historyUI.isLocked) return;
+                
+                // 确保发送时配置最新
+                if (!await updateConnection()) return; 
+
+                input.value = '';
+                const pair = historyUI.addPair(text);
+                
+                // 现在 sendMessage 会在内部使用 LLMService 来获取客户端
+                // 并且能够真实地发起请求
+                await historyUI.sendMessage(pair);
+            }
+
+            sendBtn.addEventListener('click', sendMessage);
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    sendMessage();
+                }
+            });
+
+            sidebar.provider.addEventListener('change', updateConnection);
+            sidebar.apiKey.addEventListener('change', updateConnection);
+            
+            // --- 绑定联动测试按钮 ---
+            const addAgentBtn = document.getElementById('add-agent-btn');
+            const deleteAgentBtn = document.getElementById('delete-agent-btn');
+
+            addAgentBtn.addEventListener('click', async () => {
+                log('操作: 添加 "翻译专家"...');
+                const agents = await configManager.llm.getAgents();
+                if (!agents.some(a => a.id === 'translator')) {
+                    agents.push({ id: 'translator', name: '翻译专家', config: { connectionId: `conn-${sidebar.provider.value}`, modelName: 'deepseek-chat' }, interface: {} });
+                    await configManager.llm.saveAgents(agents);
+                    log('成功! "llm:agents:updated" 事件已发布。');
+                } else {
+                    log('"翻译专家" 已存在。');
+                }
+            });
+
+            deleteAgentBtn.addEventListener('click', async () => {
+                log('操作: 删除 "写作助手"...');
+                let agents = await configManager.llm.getAgents();
+                const initialLength = agents.length;
+                agents = agents.filter(a => a.id !== 'writer');
+                if(agents.length < initialLength) {
+                    await configManager.llm.saveAgents(agents);
+                    log('成功! "llm:agents:updated" 事件已发布。');
+                } else {
+                    log('"写作助手" 不存在。');
+                }
+            });
+
+            // --- 加载演示对话数据 ---
+            historyUI.loadHistory({
+                pairs:[
+                    {
+                        id: 'demo-1',
+                        userMessage: { content: '你好！请介绍一下你自己。', agent: 'default' },
+                        assistantMessage: { content: '你好！我是一个通过`LLMHistoryUI`展示的AI助手。我的行为由左侧面板的配置驱动。\n\n**请尝试以下操作:**\n1.  点击左侧的“添加/删除 Agent”按钮。\n2.  观察我上方工具栏中的 **Agent下拉列表** 是否会**实时更新**。' },
+                        metadata: { createdAt: Date.now() - 60000, agent: 'default' }
+                    }
+                ]
+            });
+
+            window.historyUI = historyUI;
+            window.configManager = configManager;
+        }
     </script>
 </body>
 </html>

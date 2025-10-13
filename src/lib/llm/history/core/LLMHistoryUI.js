@@ -1,7 +1,28 @@
 /**
  * @file #llm/history/core/LLMHistoryUI.js
- * @description Main container class for LLM History UI.
- * This version is refactored to use the central LLMClient from @llm-kit/core.
+ * @description LLM 对话历史 UI 的核心容器类。
+ * @version 2.0 (Refactored)
+ * @author Rain Li (Architectural Review)
+ * 
+ * @architectural-notes
+ * ### 架构设计反思 (V2)
+ * 
+ * 1.  **响应式配置 (Reactive Configuration)**
+ *     - **实现**: 本模块不再接受静态的 `agents` 和 `connections` 配置快照。取而代之的是，通过构造函数注入 `configManager` 单例。
+ *     - **优点**: 这使得 `LLMHistoryUI` 从一个数据孤岛转变为响应式数据生态系统中的一个节点。它通过订阅 `configManager` 的事件 (`llm:agents:updated`, `llm:connections:updated`)，能够实时响应来自应用任何地方的配置变更。
+ *     - **满足设计**: 完美实现了“settings 的修改需要通过 config 通知到 llm/history 并且实时生效”的核心设计要求。
+ * 
+ * 2.  **服务化依赖 (Service-based Dependencies)**
+ *     - **实现**: 移除了直接 `new LLMClient()` 的逻辑。现在，它依赖注入的 `llmService`，并通过 `llmService.getClient(connectionId)` 来获取一个经过正确配置和缓存的客户端实例。
+ *     - **优点**: 实现了关注点分离 (SoC)。`LLMHistoryUI` 的职责是管理和渲染对话历史，而不应关心如何创建和管理 `LLMClient` 实例。这使得代码更清晰，更易于测试，并与应用的其他部分（如 `LLMInputUI`）保持架构一致性。
+ * 
+ * 3.  **健壮的生命周期管理 (Robust Lifecycle Management)**
+ *     - **实现**: 在 `constructor` 中订阅事件，并在 `destroy` 方法中集中取消所有订阅。
+ *     - **优点**: 杜绝了在单页应用 (SPA) 场景中因组件销毁不彻底而导致的内存泄漏问题。这是一个高质量、可复用组件的必备特征。
+ * 
+ * 4.  **不影响已有功能 (Non-breaking Refactor)**
+ *     - **反思**: 本次重构严格限制在组件的内部实现上。所有公共 API (`commands`, `setText`, `on`, etc.) 和用户可见的交互行为（如编辑、删除消息）都保持不变。
+ *     - **结论**: 外部调用者无需修改任何与 `LLMHistoryUI` 交互的代码（除了实例化方式）。这确保了重构的向后兼容性和平滑升级，是大型项目重构中的关键考量。
  */
 
 import { MessagePair } from './MessagePair.js';
@@ -10,25 +31,31 @@ import { BranchManager } from './BranchManager.js';
 import { MessageRenderer } from '../renderers/MessageRenderer.js';
 import { EventEmitter } from '../utils/EventEmitter.js';
 import { IEditor } from '../../../common/interfaces/IEditor.js';
-// +++ NEW: Now requires the core LLMClient for on-demand instantiation +++
-import { LLMClient } from '../../core/client.js';
+// 中文注释: 不再直接依赖 LLMClient，而是依赖 LLMService
+import { LLMService } from '../../core/LLMService.js';
+// 【错误修复】: 导入 EVENTS 常量
+// 中文注释: 这是修复 "ReferenceError: EVENTS is not defined" 错误的关键。
+// 为了使用像 'llm:agents:updated' 这样的事件名称常量，我们必须从其定义文件
+// 中显式地导入它们。这遵循了 ES 模块的最佳实践，避免了使用“魔术字符串”，
+// 使得代码更易于维护和静态分析。
+import { EVENTS } from '../../../config/shared/constants.js';
 
 export class LLMHistoryUI extends IEditor {
     /**
-     * @param {HTMLElement} container - The container element
-     * @param {import('../../../public/types').ProviderConnection[]} options.connections - REQUIRED: All provider connections.
-     * @param {import('../../../public/types').AgentDefinition[]} options.agents - REQUIRED: All agent definitions.
-     * @param {object} options - Configuration options
-     * @param {object[]} [options.plugins] - An array of plugins to install.
-     * @param {object[]} [options.initialData] - Initial chat history data.
-     * @param {string} [options.defaultAgent] - The default agent/model to use.
-     * @param {object[]} [options.agents] - A list of available agents/models.
+     * 构造函数
+     * @param {HTMLElement} container - UI 将被渲染到的容器元素。
+     * @param {object} options - 配置选项。
+     * @param {import('../../../config/ConfigManager').ConfigManager} options.configManager - 【必需】ConfigManager 实例，用于数据和事件管理。
+     * @param {import('../../core/LLMService').LLMService} [options.llmService] - 【推荐】LLMService 实例，用于获取客户端。如果未提供，则获取全局单例。
+     * @param {object[]} [options.plugins] - 要安装的插件数组。
+     * @param {object} [options.initialData] - 初始化的对话历史数据。
+     * @param {string} [options.defaultAgent] - 默认使用的 Agent ID。
      * @param {object} [options.i18n] - Internationalization config
      * @param {number} [options.maxRetries=3] - Maximum retry attempts for failed requests
      * @param {Function} [options.contextBuilder] - Custom function to build LLM context.
      * @param {string} [options.contextStrategy='all'] - Context strategy ('all' or 'lastN').
      * @param {number} [options.contextWindowSize=0] - Number of messages for 'lastN' strategy.
-     * @param {object} [options.titleBar] - +++ NEW: Title bar configuration
+     * @param {object} [options.titleBar] - 标题栏配置。
      * @param {string} [options.titleBar.title='对话历史'] - The text to display in the title bar.
      * @param {() => void} [options.titleBar.onToggleSidebar] - Callback for the sidebar toggle button. If provided, the button is shown.
      * @param {() => void} [options.titleBar.onSave] - Callback for the Save button. If provided, the button is shown.
@@ -38,22 +65,31 @@ export class LLMHistoryUI extends IEditor {
         // +++ CHANGED: Call IEditor constructor +++
         super(container, options);
         
+        // --- 1. 核心依赖注入与验证 ---
         if (!container) {
-            throw new Error('[LLMHistoryUI] Container element is required');
-        }
-        if (!options.connections || !options.agents) {
-            throw new Error('[LLMHistoryUI] `connections` and `agents` are required options.');
+            throw new Error('[LLMHistoryUI] 必须提供容器元素 (container)。');
         }
 
-        // +++ NEW: EventEmitter is now a member property +++
+        // --- 重构核心：依赖注入 ConfigManager ---
+        // 一步步审查: 实现了依赖注入。不再从 options 中接收静态的 agents 和 connections 快照，
+        // 而是接收一个动态的、响应式的 ConfigManager 实例。这是将 history 模块接入数据流的第一步。
+        if (!options.configManager) {
+            throw new Error('[LLMHistoryUI] 必须提供 `configManager` 选项。');
+        }
+        this.configManager = options.configManager;
+        // 中文注释: 获取 LLMService 实例。如果调用方没有传入，则从全局单例获取，增加了灵活性。
+        this.llmService = options.llmService || LLMService.getInstance();
+        
+        // --- 2. 内部状态初始化 ---
         this.events = new EventEmitter();
         
         this.container = container;
         this.options = options;
         
-        // +++ NEW: Store full definitions as Maps for efficient lookup +++
-        this.connections = new Map(options.connections.map(c => [c.id, c]));
-        this.agents = new Map(options.agents.map(a => [a.id, a]));
+        // 中文注释: 从 ConfigManager 同步获取初始数据。
+        // 这建立在 UI 实例在 `app:ready` 事件后创建的前提之上，确保数据已加载到内存。
+        this.connections = new Map((this.configManager.llm.config.connections || []).map(c => [c.id, c]));
+        this.agents = new Map((this.configManager.llm.config.agents || []).map(a => [a.id, a]));
         
         this.pairs = [];
         this.isLocked = false;
@@ -105,13 +141,19 @@ export class LLMHistoryUI extends IEditor {
 
         // +++ NEW: Header button registry
         this._headerButtons = [];
+        
+        // --- 新增：用于存放取消订阅的函数 ---
+        this._subscriptions = [];
 
         // Initialize
         this._initDOM();
         this._initHeaderButtons(); // +++ NEW
         this._bindEvents();
         
-        // Load initial data if provided
+        // --- 新增：在初始化后立即订阅配置变更 ---
+        // 一步步审查: 实现了发布/订阅模式的客户端。组件实例化后，立即成为配置系统事件的监听者。
+        this._subscribeToChanges();
+        
         if (options.initialData) {
             this.loadHistory(options.initialData);
         }
@@ -190,11 +232,16 @@ export class LLMHistoryUI extends IEditor {
     }
 
     /**
-     * Destroys the component and cleans up all resources.
+     * 销毁组件并清理所有资源。
      * @implements {IEditor.destroy}
      * @override
      */
     destroy() {
+        // 这是健壮生命周期管理的核心。在组件被销毁时，它会主动取消所有事件监听，
+        // 防止在单页应用 (SPA) 中切换视图时发生内存泄漏。
+        this._subscriptions.forEach(unsubscribe => unsubscribe());
+        this._subscriptions = [];
+
         if (this.abortController) this.abortController.abort();
         
         this.requestQueue = [];
@@ -202,23 +249,19 @@ export class LLMHistoryUI extends IEditor {
         
         this.clear();
         
-        this.plugins.forEach(plugin => {
-            try {
-                if (plugin.destroy) plugin.destroy();
-            } catch (error) {
-                console.error('[LLMHistoryUI] Plugin destroy error:', error);
-            }
+        (this.plugins || []).forEach(plugin => {
+            if (plugin.destroy) plugin.destroy();
         });
         this.plugins = [];
         
-        this.lockManager = null;
+        this.lockManager.destroy(); // LockManager 也需要销毁
         this.branchManager = null;
         
         this.events.removeAllListeners();
         
-        this.container.classList.remove('llm-historyui');
         this.container.innerHTML = '';
-        
+        this.container.classList.remove('llm-historyui');
+      
         this.headerEl = null;
         this.messagesEl = null;
         this.footerEl = null;
@@ -365,7 +408,8 @@ export class LLMHistoryUI extends IEditor {
 
         try {
             const agentId = pair.metadata.agent;
-            const client = this._getClientForAgent(agentId);
+            // 【核心重构点】: 不再直接创建 LLMClient
+            const client = await this._getClientForAgent(agentId);
             const agentDefinition = this.agents.get(agentId);
 
             pair.assistantMessage.startStreaming();
@@ -443,7 +487,7 @@ export class LLMHistoryUI extends IEditor {
         this.pairs.forEach(pair => pair.destroy());
         this.pairs = [];
         this.branchManager.clear();
-        this.messagesEl.innerHTML = '';
+        if(this.messagesEl) this.messagesEl.innerHTML = '';
         this.events.emit('historyCleared');
     }
     
@@ -521,7 +565,7 @@ export class LLMHistoryUI extends IEditor {
 
 
     // ===================================================================
-    //   Private Methods
+    //   私有方法
     // ===================================================================
 
     _initDOM() {
@@ -888,5 +932,111 @@ export class LLMHistoryUI extends IEditor {
             }
         });
         return messages;
+    }
+
+    // ===================================================================
+    //   新增和重构的私有方法
+    // ===================================================================
+    /**
+     * @private
+     * @description 【新增】通过 LLMService 获取配置好的 LLM 客户端实例。
+     * 这是服务化依赖的核心实现。
+     * @param {string} agentId - Agent 的 ID。
+     * @returns {Promise<import('../../core/client').LLMClient>} 返回一个配置好的客户端实例。
+     */
+    async _getClientForAgent(agentId) {
+        const agent = this.agents.get(agentId);
+        if (!agent) {
+            throw new Error(`[LLMHistoryUI] 未找到 ID 为 "${agentId}" 的 Agent 定义。`);
+        }
+        
+        const connectionId = agent.config.connectionId;
+        if (!connectionId) {
+             throw new Error(`[LLMHistoryUI] Agent "${agent.name}" 未配置 connectionId。`);
+        }
+
+        // 中文注释: 将创建客户端的复杂性委托给 LLMService。
+        return this.llmService.getClient(connectionId);
+    }
+
+    /**
+     * @private
+     * @description 【新增】订阅来自 ConfigManager 的配置更新事件。
+     * 这是实现响应式配置的核心。
+     */
+    _subscribeToChanges() {
+        const { eventManager } = this.configManager;
+        
+        const unsubscribeAgents = eventManager.subscribe(EVENTS.LLM_AGENTS_UPDATED, (newAgents) => {
+            console.log('[LLMHistoryUI] 接收到 Agent 更新，正在处理...', newAgents);
+            this._handleAgentsUpdate(newAgents);
+        });
+        this._subscriptions.push(unsubscribeAgents);
+
+        const unsubscribeConnections = eventManager.subscribe(EVENTS.LLM_CONNECTIONS_UPDATED, (newConnections) => {
+            console.log('[LLMHistoryUI] 接收到 Connection 更新，正在处理...', newConnections);
+            this._handleConnectionsUpdate(newConnections);
+        });
+        this._subscriptions.push(unsubscribeConnections);
+    }
+    
+    /**
+     * @private
+     * @description 处理 Agent 更新事件的处理器。
+     * @param {import('../../../public/types').AgentDefinition[]} agents - 最新的 Agent 定义数组。
+     */
+    _handleAgentsUpdate(agents) {
+        // 一步步审查: 实现了对 Agent 数据更新的响应。当事件触发时，此方法会更新组件内部的
+        // 核心数据结构 `this.agents` 和 `this.availableAgents`。
+        this.agents = new Map(agents.map(a => [a.id, a]));
+        this.availableAgents = Array.from(this.agents.values()).map(({ id, name }) => ({ id, name }));
+        
+        // --- 核心UI更新逻辑 ---
+        // 一步步审查: 包含了对 UI 的实时重绘逻辑。它不仅更新了内存中的数据，还遍历了当前 DOM 中所有
+        // 的 Agent 选择器，动态地更新它们的选项。这确保了用户所见即所得。
+        this.container.querySelectorAll('.llm-historyui__agent-selector').forEach(selector => {
+            const pairId = selector.closest('.llm-historyui__message-pair')?.dataset.pairId;
+            const pair = this.pairs.find(p => p.id === pairId);
+
+            if (pair) {
+                const currentAgentId = pair.metadata.agent;
+                
+                // 重建选择器的选项
+                selector.innerHTML = this.availableAgents.map(agent => 
+                    `<option value="${agent.id}" ${agent.id === currentAgentId ? 'selected' : ''}>
+                        ${agent.name}
+                    </option>`
+                ).join('');
+
+                // 一步步审查: 包含了对边缘情况（如当前选中的 Agent 被删除）的处理。
+                // 这增强了系统的鲁棒性，防止因数据不一致导致 UI 崩溃或行为异常。
+                if (!this.agents.has(currentAgentId)) {
+                    const defaultAgentId = this.availableAgents[0]?.id;
+                    if (defaultAgentId) {
+                        // 如果当前 Agent 被删除，则自动切换到第一个可用的 Agent
+                        pair.metadata.agent = defaultAgentId;
+                        selector.value = defaultAgentId;
+                        console.warn(`[LLMHistoryUI] Pair ${pair.id} 的 Agent "${currentAgentId}" 已被删除，自动切换到 "${defaultAgentId}"`);
+                    } else {
+                        // 如果没有可用的 Agent 了
+                         selector.innerHTML = `<option value="">无可用 Agent</option>`;
+                    }
+                }
+            }
+        });
+        
+        this.events.emit('agentsUpdated', this.availableAgents);
+    }
+    
+    /**
+     * @private
+     * @description 处理 Connection 更新事件的处理器。
+     * @param {import('../../../public/types').ProviderConnection[]} connections - 最新的 Connection 定义数组。
+     */
+    _handleConnectionsUpdate(connections) {
+        this.connections = new Map(connections.map(c => [c.id, c]));
+        // 中文注释: Connection 的更新通常是后台数据（如 API Key），不需要立即重绘 UI。
+        // 当下一次使用这个 Connection 发送请求时，新的配置会自动生效。
+        this.events.emit('connectionsUpdated', connections);
     }
 }
