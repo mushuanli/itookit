@@ -51,7 +51,7 @@ function loadScript(src, id) {
         if (id) script.id = id;
         script.async = true;
         script.onload = () => resolve();
-        script.onerror = () => reject(new Error(`Failed to load script: ${src}`));
+        script.onerror = () => reject(new Error(`加载脚本失败: ${src}`));
         document.head.appendChild(script);
     });
     loadedScripts.set(src, promise);
@@ -63,15 +63,15 @@ function loadScript(src, id) {
 // ===================================================================
 
 /**
- * MDxEditor orchestrates the CodeMirror view, the renderer preview,
- * and a powerful plugin system for commands and UI.
+ * MDxEditor 编排 CodeMirror 视图、渲染器预览以及一个强大的插件系统，
+ * 作为一个符合 IEditor 接口的完整编辑器组件。
  * @implements {IEditor}
  */
 export class MDxEditor extends IEditor {
     /**
-     * Initializes the MDxEditor.
-     * @param {HTMLElement} container - The element to host the editor and renderer.
-     * @param {object} options
+     * 初始化 MDxEditor.
+     * @param {HTMLElement} container - 宿主元素.
+     * @param {object} options - 配置选项 (具体选项请参考 IEditor 及 MDxEditor 特定选项的 JSDoc).
      * @param {import('../core/plugin.js').MDxPlugin[]} [options.plugins=[]] - An array of plugins.
      * @param {string} [options.initialText=''] - The initial markdown content.
      * @param {boolean} [options.showToolbar=true] - Whether to display the toolbar.
@@ -91,7 +91,7 @@ export class MDxEditor extends IEditor {
         super(container, options); // Call interface constructor for validation
 
         if (!container) {
-            throw new Error("A container element is required for MDxEditor.");
+            throw new Error("MDxEditor 需要一个容器元素。");
         }
         
         // [新增] 在构造函数开始时，立即加载所有必要的外部依赖
@@ -143,8 +143,9 @@ export class MDxEditor extends IEditor {
             initialText: this.initialText,
             extensions: this.pluginManager.codeMirrorExtensions,
             onUpdate: (update) => {
+                // [接口实现] 发出 'change' 事件，并附带载荷
                 if (update.docChanged) {
-                    this._emit('change', { update });
+                    this._emit('change', { fullText: this.getText() });
                 }
                 clearTimeout(this.renderTimeout);
                 this.renderTimeout = setTimeout(() => this._renderContent(), 250);
@@ -162,6 +163,14 @@ export class MDxEditor extends IEditor {
         // such as rendering buttons into the toolbar and title bar.
         this.pluginManager.executeActionHook('editorPostInit', { editor: this, pluginManager: this.pluginManager });
         
+        // --- [新增] 粘合代码：将插件的领域事件转换为 IEditor 的标准事件 ---
+        this.pluginManager.listen('taskToggled', () => {
+            this._emit('interactiveChange', { fullText: this.getText() });
+        });
+        this.pluginManager.listen('clozeGraded', () => {
+            this._emit('interactiveChange', { fullText: this.getText() });
+        });
+
         // +++ START MODIFICATION: FIX for Task List State Loss +++
         // 监听由 TaskListPlugin 发出的 'taskToggled' 事件。
         // 这是解决问题的关键：创建一个从渲染视图到源文档的回调闭环。
@@ -207,6 +216,9 @@ export class MDxEditor extends IEditor {
         // +++ END MODIFICATION +++
 
         this.switchTo(this.initialMode, true);
+
+        // [接口实现] 在所有初始化完成后，发出 'ready' 事件
+        setTimeout(() => this._emit('ready'), 0);
     }
     
 
@@ -223,15 +235,6 @@ export class MDxEditor extends IEditor {
         return this.pluginManager.commands;
     }
 
-    /**
-     * Registers and installs a plugin for the editor.
-     * @param {import('../core/plugin.js').MDxPlugin} plugin
-     * @returns {this}
-     */
-    use(plugin) {
-        this.pluginManager.register(plugin);
-        return this;
-    }
     /**
      * Public API: Gets the current markdown text from the editor.
      * @returns {string}
@@ -259,6 +262,47 @@ export class MDxEditor extends IEditor {
     }
 
     /**
+     * @override
+     */
+    async navigateTo(target, options = { smooth: true }) {
+        if (!target?.elementId) return;
+
+        if (this.mode === 'render') {
+            const element = this.renderEl.querySelector(`#${target.elementId}`);
+            if (element) {
+                element.scrollIntoView({ behavior: options.smooth ? 'smooth' : 'auto', block: 'start' });
+            }
+        } else {
+            console.warn("在 'edit' 模式下 navigateTo 尚未完全实现。临时切换到渲染模式进行导航。");
+            this.switchTo('render');
+            await new Promise(resolve => setTimeout(resolve, 100)); // 等待 DOM 更新
+            const element = this.renderEl.querySelector(`#${target.elementId}`);
+            if (element) {
+                element.scrollIntoView({ behavior: options.smooth ? 'smooth' : 'auto', block: 'start' });
+            }
+        }
+    }
+
+    /**
+     * @override
+     */
+    setReadOnly(isReadOnly) {
+        if (this._coreEditor.view) {
+            this._coreEditor.view.contentDOM.contentEditable = !isReadOnly;
+        }
+        this.container.classList.toggle('is-readonly', isReadOnly);
+    }
+
+    /**
+     * @override
+     */
+    focus() {
+        if (this.mode === 'edit') {
+            this._coreEditor.focus();
+        }
+    }
+    
+    /**
      * [新增] 注册事件监听器
      * @param {'change' | 'interactiveChange'} eventName - 支持 'change' 和 'interactiveChange' 事件
      * @param {(payload: any) => void} callback - 事件触发时执行的回调函数
@@ -279,6 +323,29 @@ export class MDxEditor extends IEditor {
                 }
             }
         };
+    }
+
+    /**
+     * Cleans up the editor instance and its resources.
+     * @override
+     */
+    destroy() {
+        // Destroy plugins first to clean up listeners, etc.
+        this._eventListeners.clear();
+        this.pluginManager.destroy();
+        this._coreEditor.destroy();
+        this.container.innerHTML = '';
+        this.container.classList.remove('mdx-container', 'edit-mode', 'render-mode', 'is-readonly');
+    }
+
+    /**
+     * Registers and installs a plugin for the editor.
+     * @param {import('../core/plugin.js').MDxPlugin} plugin
+     * @returns {this}
+     */
+    use(plugin) {
+        this.pluginManager.register(plugin);
+        return this;
     }
 
     /**
@@ -321,7 +388,7 @@ export class MDxEditor extends IEditor {
             this.renderEl.style.display = 'none';
             this.container.classList.add('edit-mode');
             this.container.classList.remove('render-mode');
-            if (!isInitial) this._coreEditor.focus();
+            if (!isInitial) this.focus();
         }
 
         // Update the toggle button's appearance (managed by CoreTitleBarPlugin)
@@ -403,18 +470,6 @@ export class MDxEditor extends IEditor {
     //   Lifecycle Methods
     // ===================================================================
     
-    /**
-     * Cleans up the editor instance and its resources.
-     * @override
-     */
-    destroy() {
-        // Destroy plugins first to clean up listeners, etc.
-        this._eventListeners.clear();
-        this.pluginManager.destroy();
-        this._coreEditor.destroy();
-        this.container.innerHTML = '';
-        this.container.classList.remove('mdx-container', 'edit-mode', 'render-mode');
-    }
 
     // ===================================================================
     //   Private & Internal Methods
@@ -446,6 +501,11 @@ export class MDxEditor extends IEditor {
         if (listeners) {
             listeners.forEach(cb => cb(payload));
         }
+    }
+
+    _loadDependencies() {
+        loadScript('https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js', 'MathJax-script')
+            .catch(err => console.error("MDxEditor: MathJax 加载失败。", err));
     }
 
     /**

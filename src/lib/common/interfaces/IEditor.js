@@ -53,9 +53,46 @@ export class IEditor {
     }
 
     /**
-     * 订阅编辑器触发的事件。
-     * @param {'change'} eventName - 要订阅的事件名称。目前，只需要 'change' 事件。
-     * @param {Function} callback - 事件触发时要调用的函数。
+     * [新增] 命令编辑器将视图滚动到指定的目标。
+     * @param {object} target - 描述导航目标的对象。
+     * @param {string} target.elementId - 目标元素在文档中的唯一 ID。
+     * @param {object} [options] - 导航选项。
+     * @param {boolean} [options.smooth=true] - 是否平滑滚动。
+     * @returns {Promise<void>} 当导航完成时解析的 Promise。
+     */
+    async navigateTo(target, options) {
+        throw new Error("必须实现 'navigateTo' 方法。");
+    }
+
+    /**
+     * [新增] 动态设置编辑器的只读状态。
+     * @param {boolean} isReadOnly - 如果为 true，编辑器应变为不可编辑状态；否则为可编辑。
+     * @returns {void}
+     */
+    setReadOnly(isReadOnly) {
+        throw new Error("必须实现 'setReadOnly' 方法。");
+    }
+
+    /**
+     * [新增] 使编辑器获得输入焦点。
+     * @returns {void}
+     */
+    focus() {
+        throw new Error("必须实现 'focus' 方法。");
+    }
+
+    // --- 事件系统 ---
+
+    /**
+     * [增强描述] 订阅由编辑器触发的事件。
+     * @param {'change' | 'interactiveChange' | 'ready'} eventName - 要订阅的事件名称。
+     *   - **'change'**: 当编辑器内容因用户输入等高频操作发生变化时触发。适用于防抖动的自动保存。
+     *     - `callback(payload: { fullText: string })`
+     *   - **'interactiveChange'**: 当用户执行了一个需要立即响应的交互式操作时触发（如点击任务复选框）。适用于需要立即持久化并更新UI的状态变更。
+     *     - `callback(payload: { fullText: string })`
+     *   - **'ready'**: 当编辑器完成初始化、完全可用时触发。
+     *     - `callback()`
+     * @param {(payload?: object) => void} callback - 事件触发时要调用的函数。
      * @returns {Function} 一个函数，调用该函数将取消订阅监听器。
      */
     on(eventName, callback) {

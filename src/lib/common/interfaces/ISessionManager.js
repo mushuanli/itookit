@@ -170,20 +170,22 @@ export class ISessionManager {
     }
 
     /**
-     * 订阅由会话管理器发出的公共事件，以便宿主应用作出响应。
-     * @param {'sessionSelected' | 'navigateToHeading' | 'importRequested' | 'sidebarStateChanged' | 'menuItemClicked'} eventName - 要订阅的事件名称。
+     * [增强描述] 订阅由会话管理器发出的公共事件。
+     * @param {'sessionSelected' | 'navigateToHeading' | 'importRequested' | 'sidebarStateChanged' | 'menuItemClicked' | 'stateChanged'} eventName - 要订阅的事件名称。
      * @param {(payload: object) => void} callback - 事件触发时调用的回调函数。
      *   - **sessionSelected**: 当用户选择一个会话时触发。
-     *     - `payload`: `{ item: object | undefined }` - 选中的项目对象，或在取消选择时为 undefined。
+     *     - `payload`: `{ item: object | undefined }`
      *   - **navigateToHeading**: 当用户点击大纲中的标题时触发。
-     *     - `payload`: `{ elementId: string }` - 目标标题元素在文档中的 ID。
+     *     - `payload`: `{ elementId: string }`
      *   - **importRequested**: 当用户点击导入按钮时触发。
-     *     - `payload`: `{ parentId: string | null }` - 期望导入到的目标文件夹ID，根目录为 null。
-     *   - **sidebarStateChanged**: 当侧边栏的折叠状态改变时触发。
-     *     - `payload`: `{ isCollapsed: boolean }` - 侧边栏是否已折叠。
+     *     - `payload`: `{ parentId: string | null }`
+     *   - **sidebarStateChanged**: [已废弃, 请使用 'stateChanged'] 当侧边栏的折叠状态改变时触发。
+     *     - `payload`: `{ isCollapsed: boolean }`
      *   - **menuItemClicked**: 当用户点击一个自定义的上下文菜单项时触发。
-     *     - `payload`: `{ actionId: string, item: object }` - `actionId` 是菜单项的ID，`item` 是被操作的对象。
-     * @returns {Function} 一个用于取消订阅的函数。调用此函数将移除事件监听器。
+     *     - `payload`: `{ actionId: string, item: object }`
+     *   - **[新增] stateChanged**: 当侧边栏的任何重要状态（如只读、折叠）发生变化时触发。
+     *     - `payload`: `{ isReadOnly: boolean, isCollapsed: boolean }`
+     * @returns {Function} 一个用于取消订阅的函数。
      */
     on(eventName, callback) {
         throw new Error("Method 'on' must be implemented.");

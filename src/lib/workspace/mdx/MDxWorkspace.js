@@ -90,11 +90,13 @@ export class MDxWorkspace {
             ...this.options.sidebar, // 传递用户自定义的 sidebar 配置
             sessionListContainer: this.options.sidebarContainer,
             documentOutlineContainer: this.options.outlineContainer,
-            storageKey: this.namespace, // storageKey 现在就是 namespace，用于标识数据分区
-        }, this.configManager); // 将整个 ConfigManager 注入
+            storageKey: this.namespace,
+            // [新增] 将只读状态从 workspace 配置传递给 sidebar
+            readOnly: this.options.sidebar?.readOnly || false, 
+        }, this.configManager);
         
-        // [修复] 正确连接内部事件
-        this._connectInternalEvents();
+        // [重构] 拆分事件连接，使其更清晰
+        this._connectSessionManagerEvents();
         
         // --- 2. 组装编辑器的插件和 Providers ---
         const editorOptions = this.options.editor || {};
@@ -120,25 +122,15 @@ export class MDxWorkspace {
         const activeItem = await this._sessionManager.start();
         
         const defaultTitleBarOptions = {
-            title: activeItem?.metadata.title || this.options.sidebar?.title || '文档',
+            title: activeItem?.metadata.title || '文档',
             toggleSidebarCallback: () => this._sessionManager.toggleSidebar(),
             enableToggleEditMode: true,
             ...(editorOptions.showSaveButton !== false && { saveCallback: () => this.save() }),
         };
-        
-        if (editorOptions.showSaveButton !== false) {
-             editorOptions.titleBar = editorOptions.titleBar || {};
-            if (!editorOptions.titleBar.saveCallback) {
-                defaultTitleBarOptions.saveCallback = () => this.save();
-            }
-        }
-        
-        // 4.4 合并最终的 editor 配置
         const finalEditorOptions = {
             ...editorOptions, // 用户的其他 editor 配置
             plugins: finalPlugins,
-            initialText: activeItem?.content?.data || editorOptions.initialText || '请选择或创建一个会话。',
-            // [关键] 合并 titleBar 配置，用户的自定义项会覆盖我们的默认项
+            initialText: activeItem?.content?.data || '请选择或创建一个会话。',
             titleBar: { ...defaultTitleBarOptions, ...(editorOptions.titleBar || {}) },
             initialMode: editorOptions.clozeControl ? 'render' : (editorOptions.initialMode || 'edit'),
             clozeControls: editorOptions.clozeControl // [NEW] 显式传递 clozeControls 选项
@@ -371,8 +363,11 @@ console.log(`import into: ${targetParentId}`);
         }
     }
     
-    /** @private */
-    _connectInternalEvents() {
+    /**
+     * [重构] 专门连接 SessionManager 的事件到 Workspace 的方法
+     * @private
+     */
+    _connectSessionManagerEvents() {
         const sm = this._sessionManager;
         if (!sm) return;
         
@@ -387,22 +382,34 @@ console.log(`import into: ${targetParentId}`);
             sm.on('menuItemClicked', ({ actionId, item }) => this._emit('menuItemClicked', { actionId, item })),
             // [MODIFIED] Handle 'item' instead of 'session'
             sm.on('sessionSelected', async ({ item }) => {
-                if (this._isDirty) {
-                    await this.save();
+                if (this._isDirty) await this.save();
+                const newContent = item?.content?.data || '请选择或创建一个会话。';
+                const newTitle = item?.metadata.title || '文档';
+                if (this._editor) {
+                    if (this._editor.getText() !== newContent) this._editor.setText(newContent);
+                    this._editor.setTitle(newTitle);
+                    this._editor.focus(); // [新] 切换后自动聚焦
                 }
-
-                // [MODIFIED] Access properties from new structure
-                const newContent = item ? item.content?.data || '' : this.options.editor.initialText || '请选择或创建一个会话。';
-                const newTitle = item ? item.metadata.title : this.options.sidebar?.title || '文档';
-                
-                if (this._editor && this._editor.getText() !== newContent) {
-                    this._editor.setText(newContent);
-                }
-                this._editor?.setTitle(newTitle);
                 this._isDirty = false;
                 
                 // [MODIFIED] Emit 'item'
                 this._emit('sessionSelect', { item });
+            }),
+
+            // [新增] 使用新接口处理大纲导航
+            sm.on('navigateToHeading', ({ elementId }) => {
+                this._editor?.navigateTo({ elementId });
+            }),
+
+            // [新增] 使用新的 'stateChanged' 事件来同步所有状态
+            sm.on('stateChanged', ({ isReadOnly, isCollapsed }) => {
+                // 同步只读状态
+                this._editor?.setReadOnly(isReadOnly);
+                
+                // 同步侧边栏折叠状态
+                if (this.options.sidebarContainer) {
+                   this.options.sidebarContainer.style.display = isCollapsed ? 'none' : 'block';
+                }
             })
         );
     }
@@ -433,8 +440,10 @@ console.log(`import into: ${targetParentId}`);
     _handleInteractiveChange = async () => {
         // 取消任何即将触发的延迟保存，因为我们将立即保存。
         this._debouncedUpdater.cancel?.();
-        // 立即保存。这将触发 SessionService 的内容解析和 store 更新。
-        await this._saveContent(false);
+        const savedItem = await this._saveContent(false);
+        if (savedItem) {
+            this._emit('interactiveChangeSaved', { item: savedItem });
+        }
     }
     // +++ END NEW +++
 
