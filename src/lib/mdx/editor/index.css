@@ -223,7 +223,9 @@
     vertical-align: middle;
 }
 
-/* --- Cloze 插件样式 ("feature:cloze") --- */
+/* ============================================================ */
+/*   [OPTIMIZED] Cloze 插件样式 ("feature:cloze")               */
+/* ============================================================ */
 .cloze {
     padding: 2px 6px;
     border-radius: 4px;
@@ -233,22 +235,35 @@
     border-bottom: 2px solid;
     font-weight: 600;
 }
-.cloze.hidden {
-    background-color: #cceeff; /* [微调] 使用稍微柔和的颜色 */
-    color: transparent;
-}
-/* [新增] 增强交互性：鼠标悬停在隐藏的 cloze 上时提供视觉反馈 */
-.cloze.hidden:hover {
-    background-color: #b3e5fc;
-}
-.cloze.hidden .cloze-content {
-    visibility: hidden;
-}
-.cloze:not(.hidden) .placeholder {
+
+/* --- 核心优化：状态切换逻辑 --- */
+
+/* 默认状态 (打开时): 显示完整内容，隐藏占位符 */
+.cloze .cloze-placeholder {
     display: none;
 }
-.cloze .placeholder {
+.cloze .cloze-content {
+    display: inline;
+}
+
+/* 关闭状态: 隐藏完整内容，显示占位符 */
+.cloze.hidden .cloze-placeholder {
+    display: inline;
     color: #0366d6;
+}
+.cloze.hidden .cloze-content {
+    display: none;
+}
+
+/* --- 完善原有 .hidden 样式 --- */
+.cloze.hidden {
+    background-color: #cceeff;
+    color: transparent; /* 隐藏 audioIcon 的潜在文本 */
+}
+
+/* 增强交互性：鼠标悬停在隐藏的 cloze 上时提供视觉反馈 */
+.cloze.hidden:hover {
+    background-color: #b3e5fc;
 }
 .cloze .media-icon {
     margin-right: 4px;
@@ -262,7 +277,7 @@
     border-bottom-color: #6f42c1; /* Purple for mature */
 }
 
-/* [NEW] Style for permanently shown mature clozes */
+/* Style for permanently shown mature clozes */
 .cloze.is-mature {
     background-color: transparent;
     color: inherit;
@@ -271,10 +286,15 @@
     padding: 0;
     border-bottom-style: dotted; /* Dotted underline to indicate it's a special term */
 }
-.cloze.is-mature .placeholder {
+
+.cloze.is-mature .cloze-placeholder,
+.cloze.is-mature.hidden .cloze-placeholder {
     display: none;
 }
-.cloze.is-mature .cloze-content {
+
+.cloze.is-mature .cloze-content,
+.cloze.is-mature.hidden .cloze-content {
+    display: inline;
     visibility: visible;
 }
 

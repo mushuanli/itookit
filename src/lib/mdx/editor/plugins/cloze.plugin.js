@@ -45,10 +45,28 @@ const clozeSyntaxExtension = {
         const audioIcon = token.audio ?
             `<span class="media-icon" title="Play audio" data-audio-text="${escapeHTML(token.audio)}"><i class="fas fa-volume-up"></i></span>` : '';
 
+        // +++ START MODIFICATION: 动态生成浓缩占位符 +++
+
+        // 1. 将换行符 '¶' 替换为空格，并移除首尾空白
+        let condensedText = token.content.replace(/¶/g, ' ').trim();
+        
+        // 2. 如果文本过长，进行截断并添加省略号
+        const maxLength = 30; // 定义最大显示长度，可按需调整
+        if (condensedText.length > maxLength) {
+            condensedText = condensedText.substring(0, maxLength) + '...';
+        }
+        
+        // 3. 如果处理后内容为空 (例如, 原文只有换行符), 提供一个默认占位符
+        if (!condensedText) {
+            condensedText = '[...]';
+        }
+
+        // 4. 更新 HTML 结构，使用新的动态占位符
+        // 我们将旧的 <span class="placeholder"> 替换为 <span class="cloze-placeholder">
         return `<span class="cloze" data-cloze-content="${escapeHTML(token.content)}" data-cloze-locator="${escapeHTML(token.locator || '')}">
                     ${audioIcon}
                     <span class="cloze-content">${token.content.replace(/¶/g, '<br>')}</span>
-                    <span class="placeholder">[...]</span>
+                    <span class="cloze-placeholder">[...]</span>
                 </span>`;
     }
 };

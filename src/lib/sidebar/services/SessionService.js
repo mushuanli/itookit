@@ -70,14 +70,18 @@ export class SessionService extends ISessionService {
      * @param {string | null} [options.parentId=null]
      * @returns {Promise<import('../types/types.js')._WorkspaceItem>} The newly created item.
      */
-    async createSession({ title, parentId }) {
-        const content = this.newSessionContent || '';
-        const newNodeData = {
-            path: title,
-            type: 'file',
-            content: content,
-        };
-        await this.moduleRepo.addModule(parentId, newNodeData);
+    async createSession({ title, parentId, content }) { // 1. 在方法签名中接收 content
+    // 2. 优先使用传入的 content，如果未提供，再使用默认值作为备用
+    const fileContent = content !== undefined ? content : (this.newSessionContent || '');
+
+    const newNodeData = {
+        path: title,
+        type: 'file',
+        content: fileContent, // 3. 使用正确的 content 变量
+    };
+    // 注意：moduleRepo.addModule 方法应该返回创建的节点，以便在UI中正确响应。
+    // 如果它当前不返回，建议也进行修改。
+    return await this.moduleRepo.addModule(parentId, newNodeData);
     }
 
     /**
