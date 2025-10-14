@@ -345,17 +345,11 @@ export class SessionStore {
                     
                     case 'ITEM_RENAME_SUCCESS': {
                         const { itemId, newTitle } = action.payload;
-                        const findAndRename = (items) => {
-                           for (const item of items) {
-                               if (item.id === itemId) {
-                               setItemTitle(item, newTitle);
-                                   return true;
-                               }
-                               if (item.children && findAndRename(item.children)) return true;
-                           }
-                           return false;
-                        };
-                        findAndRename(draft.items);
+                        const item = findItemById(draft.items, itemId);
+                        if (item) {
+                            item.metadata.title = newTitle;
+                            item.metadata.lastModified = new Date().toISOString();
+                        }
                         break;
                     }
 
@@ -426,26 +420,22 @@ export class SessionStore {
 
                     case 'ITEM_UPDATE_SUCCESS': {
                         const { itemId, updates } = action.payload;
-                        
-                        // [CRITICAL] We need a recursive function to find the item in the tree.
-                        const findAndUpdate = (items) => {
-                           for (const item of items) {
-                               if (item.id === itemId) {
-                                   // [KEY] Use Object.assign to merge the updates into the draft item.
-                                   // This is safe because `item` is a proxy object from Immer's draft.
-                                   Object.assign(item, updates);
-                               touchItem(item);
-                                   return true; // Found and updated, we can stop searching.
+                        const findAndUpdate = (items, id) => {
+                           for (let i=0; i < items.length; i++) {
+                               const item = items[i];
+                               if (item.id === id) {
+                                   // [V2] 深度合并更新，防止覆盖children等属性
+                                   // 简单实现：
+                                   items[i] = { ...item, ...updates, metadata: { ...item.metadata, ...updates.metadata } };
+                                   return true;
                                }
-                               // If it's a folder, search its children recursively.
-                               if (item.children && findAndUpdate(item.children)) {
+                               if (item.children && findAndUpdate(item.children, id)) {
                                    return true;
                                }
                            }
-                           return false; // Not found in this branch.
+                           return false;
                         };
-
-                        findAndUpdate(draft.items);
+                        findAndUpdate(draft.items, itemId);
                         break;
                     }
 
@@ -598,36 +588,21 @@ export class SessionStore {
                     case 'SESSION_CREATE_SUCCESS':
                     case 'FOLDER_CREATE_SUCCESS': {
                         const newItem = action.payload;
-                    const parentId = getItemParentId(newItem);
+                        const parentId = newItem.metadata.parentId;
 
                         if (!parentId) {
                             draft.items.unshift(newItem);
                         } else {
-                            const findAndInsert = (items, targetParentId) => {
-                                for (const item of items) {
-                                    if (item.id === targetParentId && item.type === 'folder') {
-                                        item.children = item.children || [];
-                                        item.children.unshift(newItem);
-                                        draft.expandedFolderIds.add(targetParentId);
-                                        return true;
-                                    }
-                                    if (item.children && findAndInsert(item.children, targetParentId)) {
-                                        return true;
-                                    }
-                                }
-                                return false;
-                            };
-                        const inserted = findAndInsert(draft.items, parentId);
-                        
-                        // ✅ 调试：如果插入失败，记录警告
-                        if (!inserted) {
-                            console.warn(
-                                `[SessionStore] Failed to insert item "${getItemTitle(newItem)}" ` +
-                                `into parent "${parentId}". Adding to root instead.`
-                            );
-                            draft.items.unshift(newItem);
+                            const parentFolder = findItemById(draft.items, parentId);
+                            if (parentFolder && parentFolder.type === 'folder') {
+                                parentFolder.children = parentFolder.children || [];
+                                parentFolder.children.unshift(newItem);
+                                draft.expandedFolderIds.add(parentId);
+                            } else {
+                                // 如果找不到父节点，作为根节点添加
+                                draft.items.unshift(newItem);
+                            }
                         }
-                    }
                         draft.status = 'success';
                         break;
                     }

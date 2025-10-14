@@ -21,11 +21,13 @@ export const EVENTS = {
     LLM_CONNECTIONS_UPDATED: 'llm:connections:updated',
     LLM_WORKFLOWS_UPDATED: 'llm:workflows:updated',
 
-    // --- [新] 模块的细粒度事件模板 ---
-    MODULE_LOADED: 'modules:{ns}:loaded',       // 初始加载完成 (负载: 整个树)
-    MODULE_NODE_ADDED: 'modules:{ns}:node_added',   // 添加了一个新节点
-    MODULE_NODE_REMOVED: 'modules:{ns}:node_removed', // 移除了一个节点
-    MODULE_NODE_UPDATED: 'modules:{ns}:node_updated', // 更新了一个节点 (内容、元数据、重命名等)
+    // --- [V2] 模块事件系统重构，采用更精确的“富领域事件” ---
+    MODULE_LOADED: 'modules:{ns}:loaded',                   // 初始加载完成 (负载: ModuleFSTree)
+    MODULE_NODE_ADDED: 'modules:{ns}:node_added',           // 添加了一个新节点 (负载: { parentId: string, newNode: ModuleFSTreeNode })
+    MODULE_NODE_REMOVED: 'modules:{ns}:node_removed',       // 移除了一个节点 (负载: { parentId: string, removedNodeId: string })
+    MODULE_NODE_RENAMED: 'modules:{ns}:node_renamed',       // 一个节点被重命名 (负载: { updatedNode: ModuleFSTreeNode })
+    MODULE_NODE_CONTENT_UPDATED: 'modules:{ns}:node_content_updated', // 文件内容被更新 (负载: { updatedNode: ModuleFSTreeNode })
+    MODULE_NODES_META_UPDATED: 'modules:{ns}:nodes_meta_updated',     // 一个或多个节点的元数据被更新 (负载: { updatedNodes: ModuleFSTreeNode[] })
 };
 
 /**
@@ -50,7 +52,7 @@ export const EVENTS = {
  */
 
 /**
- * @typedef {'loaded' | 'node_added' | 'node_removed' | 'node_updated'} ModuleEventType
+ * @typedef {'loaded' | 'node_added' | 'node_removed' | 'node_renamed' | 'node_content_updated' | 'nodes_meta_updated'} ModuleEventType
  */
 
 /**
@@ -60,11 +62,9 @@ export const EVENTS = {
  * @returns {string} 完整的事件名称。
  */
 export function getModuleEventName(type, namespace) {
-    const templates = {
-        'loaded': EVENTS.MODULE_LOADED,
-        'node_added': EVENTS.MODULE_NODE_ADDED,
-        'node_removed': EVENTS.MODULE_NODE_REMOVED,
-        'node_updated': EVENTS.MODULE_NODE_UPDATED,
-    };
-    return templates[type].replace('{ns}', namespace);
+    const template = EVENTS[`MODULE_${type.toUpperCase()}`];
+    if (template) {
+        return template.replace('{ns}', namespace);
+    }
+    throw new Error(`Invalid module event type: ${type}`);
 }

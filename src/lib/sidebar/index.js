@@ -11,14 +11,17 @@ import { SessionFileProvider } from './providers/SessionFileProvider.js';
 import { SessionTagProvider } from './providers/SessionTagProvider.js';
 
 /**
- * Initializes and returns a new instance of the SessionUI manager.
- * This is the primary factory function for the library.
+ * [V2] 修改了工厂函数的签名，以接受一个 ConfigManager 实例，实现显式依赖注入。
  *
- * @param {import('./core/SessionUIManager.js').SessionUIOptions} options - Configuration options.
+ * @param {import('./core/SessionUIManager.js').SessionUIOptions} options - 配置选项。
+ * @param {import('../../config/ConfigManager.js').ConfigManager} configManager - 【新】一个已初始化的 ConfigManager 实例。
  * @returns {import('../../common/interfaces/ISessionManager.js').ISessionManager} A new instance conforming to the ISessionManager interface.
  */
-export function createSessionUI(options) {
-    return new SessionUIManager(options);
+export function createSessionUI(options, configManager) {
+    if (!configManager) {
+        throw new Error("createSessionUI requires a valid ConfigManager instance as the second argument.");
+    }
+    return new SessionUIManager(options, configManager);
 }
 
 // For convenience, we can also export the main class itself and the new providers.

@@ -1,6 +1,7 @@
 /**
  * @file @mdx/demo/session.js
- * @description MDxEditor + SessionUI 完整功能演示脚本
+ * @description MDxEditor + SessionUI 完整功能演示脚本 (V2)
+ * @description 这个演示现在展示了如何正确地初始化和使用新的、基于 ConfigManager 的架构。
  */
 
 // --- 导入重构后的 SessionUI 库 ---
@@ -9,9 +10,8 @@ import { createSessionUI } from '../sidebar/index.js';
 // --- 导入重构后的 MDxEditor 及其插件 ---
 import { MDxEditor, defaultPlugins } from '../mdx/editor/index.js';
 
-// --- 导入新的持久化层模块 ---
-import { DatabaseService } from '../sidebar/services/DatabaseService.js';
-import {IndexedDBAdapter} from './demo-indexdbadapter.js';
+// --- [V2] 导入新的全局配置管理器 ---
+import { ConfigManager } from '../config/ConfigManager.js';
 
 //-----------------------------------------------------------------
 
@@ -27,24 +27,22 @@ const editorContainer = document.getElementById('editor-container');
 
 
 /**
- * 将 SessionUI 库与 MDxEditor 连接起来
+ * 将 SessionUI 库与 MDxEditor 连接起来 (事件监听)
  */
 function connectLibraries() {
     if (!editorInstance || !sessionUIManager) return;
 
-    // [REFACTORED] 1. 使用新的、更简洁的公共 API `manager.on()` 来监听事件
-    sessionUIManager.on('sessionSelected', ({ session }) => {
-        if (session?.type === 'session') {
-            // 只有当内容不同时才更新，避免不必要的重渲染和光标丢失
-            if (editorInstance.getText() !== session.content) {
-                editorInstance.setText(session.content);
-            }
-            
-            // [核心修改] 使用新 API 更新编辑器标题
-            editorInstance.setTitle(session.title);
+    // 1. 当用户在侧边栏选择一个会话时，更新编辑器内容和标题
+    sessionUIManager.on('sessionSelected', ({ item }) => {
+        if (item && item.type === 'item') {
+            const currentContent = editorInstance.getText();
+            const newContent = item.content?.data || '';
 
-            // 切换到渲染模式
-            editorInstance.switchTo('render');
+            if (currentContent !== newContent) {
+                editorInstance.setText(newContent);
+            }
+            editorInstance.setTitle(item.metadata.title);
+            editorInstance.switchTo('render'); // 切换到预览模式
         } else {
             // Handle case where selection is cleared
             editorInstance.setText('# 无会话被选中');
@@ -54,27 +52,25 @@ function connectLibraries() {
         }
     });
 
-    // 2. [架构优化] 使用 MDxEditor 新增的 'change' 事件 API 来实现自动保存
-    editorInstance.on('change', () => {
-        // 创建一个防抖函数来处理自动保存逻辑
-        const debouncedSave = (() => {
-            let timeout;
-            return () => {
-                clearTimeout(timeout);
-                timeout = setTimeout(async () => {
-                    const activeSession = sessionUIManager.getActiveSession();
-                    if (activeSession?.type === 'session') {
-                        const newContent = editorInstance.getText();
-                        if (activeSession.content !== newContent) {
-                            await sessionUIManager.updateSessionContent(activeSession.id, newContent);
-                        }
+    // 2. 当编辑器内容改变时，通过防抖函数自动保存回 SessionUI
+    const debouncedSave = (() => {
+        let timeout;
+        return () => {
+            clearTimeout(timeout);
+            timeout = setTimeout(async () => {
+                const activeSession = sessionUIManager.getActiveSession();
+                if (activeSession) {
+                    const newContent = editorInstance.getText();
+                    const oldContent = activeSession.content?.data || '';
+                    if (newContent !== oldContent) {
+                        // 使用公共API更新会话内容
+                        await sessionUIManager.updateSessionContent(activeSession.id, newContent);
                     }
-                }, 500); // 500ms 延迟
-            };
-        })();
-        
-        debouncedSave();
-    });
+                }
+            }, 500); // 500ms 延迟
+        };
+    })();
+    editorInstance.on('change', debouncedSave);
 
     // [REFACTORED] 3. 使用 manager.on() 监听大纲导航请求
     sessionUIManager.on('navigateToHeading', ({ elementId }) => {
@@ -87,16 +83,18 @@ function connectLibraries() {
                 targetEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
                 // 添加视觉反馈
                 targetEl.classList.remove('highlight-heading');
-                setTimeout(() => targetEl.classList.add('highlight-heading'), 10);
+                void targetEl.offsetWidth; // 触发重绘
+                targetEl.classList.add('highlight-heading');
             }
         }, 50);
     });
 }
 
 /**
- * [NEW] Handles the file import request from the SessionUI library.
+ * [V2] 处理来自 SessionUI 的文件导入请求。
+ * @param {{ parentId: string | null }} payload - 包含目标父文件夹ID的对象。
  */
-function handleImportRequest() {
+function handleImportRequest({ parentId }) {
     const fileInput = document.createElement('input');
     fileInput.type = 'file';
     fileInput.accept = '.md,.txt'; // Accept markdown and text files
@@ -110,10 +108,8 @@ function handleImportRequest() {
             reader.onload = async (e) => {
                 const content = e.target.result;
                 const title = file.name.replace(/\.(md|txt)$/, '');
-                // sessionUIManager 没有 createSession 方法，但其内部 service 有
-                // 更好的做法是在 UIManager 上暴露一个 createSession 接口
-                // 暂时直接访问 service
-                await sessionUIManager.sessionService.createSession({ title, content });
+                // 使用 sessionUIManager 暴露的 service 来创建会话
+                await sessionUIManager.sessionService.createSession({ title, content, parentId });
             };
             reader.readAsText(file);
         });
@@ -125,24 +121,19 @@ function handleImportRequest() {
 }
 
 /**
- * 处理应用级别的 UI 逻辑，如侧边栏折叠
+ * 设置应用级别的 UI 交互，如侧边栏折叠和自定义菜单。
  */
 function setupAppUIHandlers() {
-    // 1. Listen for sidebar state changes from the library
+    // 1. 监听来自库的侧边栏状态变化，并更新应用主容器的 class
     sessionUIManager.on('sidebarStateChanged', ({ isCollapsed }) => {
         // Apply the change to the main container's class
         appContainer.classList.toggle('sidebar-collapsed', isCollapsed);
     });
 
-    // [REMOVED] The floating button event listener is no longer needed.
-    // floatingToggleBtn.addEventListener('click', () => {
-    //     sessionUIManager.toggleSidebar();
-    // });
-    
-    // [REFACTORED] 监听导入请求
+    // 2. 监听导入请求
     sessionUIManager.on('importRequested', handleImportRequest);
     
-    // --- [新增] 监听自定义菜单点击事件 ---
+    // 3. 监听自定义菜单项的点击事件
     sessionUIManager.on('menuItemClicked', ({ actionId, item }) => {
         switch (actionId) {
             case 'copy-id':
@@ -151,15 +142,15 @@ function setupAppUIHandlers() {
                     .catch(err => console.error('复制失败:', err));
                 break;
             case 'share-session':
-                alert(`正在分享会话: "${item.title}"... (这是一个自定义操作)`);
+                alert(`正在分享会话: "${item.metadata.title}"... (这是一个自定义操作)`);
                 break;
             case 'export-as-markdown':
-                if (item.type === 'session' && typeof item.content === 'string') {
-                    const blob = new Blob([item.content], { type: 'text/markdown;charset=utf-8' });
+                if (item.type === 'item' && item.content?.data) {
+                    const blob = new Blob([item.content.data], { type: 'text/markdown;charset=utf-8' });
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
-                    a.download = `${item.title.replace(/[^\w\s.-]/g, '').replace(/[\s_]+/g, '_')}.md`;
+                    a.download = `${item.metadata.title.replace(/[^\w\s.-]/g, '') || 'untitled'}.md`;
                     document.body.appendChild(a);
                     a.click();
                     document.body.removeChild(a);
@@ -176,42 +167,51 @@ function setupAppUIHandlers() {
  * 应用主入口函数
  */
 async function main() {
-    // --- 步骤 1: 配置并实例化持久化层 ---
-    // 你可以在这里轻松切换 LocalStorage 和 IndexedDB
-    // const persistenceAdapter = new LocalStorageAdapter({ prefix: 'mdx-demo' });
-    const persistenceAdapter = new IndexedDBAdapter({ dbName: 'mdx-demo-db', storeName: 'app-data' });
-    const dbService = new DatabaseService({ adapter: persistenceAdapter });
-
-    // --- 步骤 2: 初始化 SessionUI ---
-    // 必须先初始化 sidebar，以便在初始化 editor 时可以引用它的 manager
-    sessionUIManager = createSessionUI({
-        sessionListContainer: sidebarContainer,
-        databaseService: dbService,
-        contextMenu: {
-            items: (item, defaultItems) => {
-                const copyIdAction = { id: 'copy-id', label: '复制 ID', iconHTML: '<i class="fas fa-clipboard"></i>' };
-                const shareAction = { id: 'share-session', label: '分享...', iconHTML: '<i class="fas fa-share-alt"></i>', hidden: (it) => it.type !== 'session' };
-                const exportAction = { id: 'export-as-markdown', label: '导出为 Markdown', iconHTML: '<i class="fas fa-file-export"></i>', hidden: (it) => it.type !== 'session' };
-                const renameItem = defaultItems.find(d => d.id === 'rename');
-                const moveToItem = defaultItems.find(d => d.id === 'moveTo');
-                const deleteItem = defaultItems.find(d => d.id === 'delete');
-                const createItems = defaultItems.filter(d => d.id && d.id.startsWith('create-in-folder-'));
-                let finalMenu = [];
-                if (item.type === 'folder' && createItems.length > 0) finalMenu.push(...createItems, { type: 'separator' });
-                if (renameItem) finalMenu.push(renameItem);
-                if (moveToItem) finalMenu.push(moveToItem);
-                finalMenu.push({ type: 'separator' }, shareAction, exportAction, copyIdAction);
-                if (deleteItem) finalMenu.push({ type: 'separator' }, deleteItem);
-                return finalMenu;
-            }
-        }
+    // --- [V2] 步骤 1: 初始化全局 ConfigManager ---
+    // 这是整个应用生命周期中应该只执行一次的操作。
+    // 我们在这里选择默认的 LocalStorageAdapter。
+    const configManager = ConfigManager.getInstance({
+        adapterOptions: { prefix: 'mdx_demo_app_' }
     });
 
-    // --- 步骤 3: 初始化 MDxEditor，并传入连接回调 ---
+    // 等待 ConfigManager 的全局配置（如全局标签）加载完成
+    await new Promise(resolve => {
+        configManager.eventManager.subscribe('app:ready', resolve);
+        configManager.eventManager.subscribe('app:bootstrap_failed', (err) => {
+            alert('应用核心配置加载失败！请检查控制台。');
+            console.error(err);
+        });
+    });
+
+    // --- [V2] 步骤 2: 初始化 SessionUI，并显式注入 ConfigManager ---
+    // 每个 SessionUI 实例都需要一个唯一的 storageKey，它将作为 ModuleRepository 的 namespace。
+    sessionUIManager = createSessionUI({
+        sessionListContainer: sidebarContainer,
+        storageKey: 'main-workspace', // 这个 key 用于隔离不同 sidebar 实例的数据
+        contextMenu: {
+            // 自定义右键菜单
+            items: (item, defaultItems) => {
+                const copyIdAction = { id: 'copy-id', label: '复制稳定ID', iconHTML: '<i class="fas fa-fingerprint"></i>' };
+                const shareAction = { id: 'share-session', label: '分享...', iconHTML: '<i class="fas fa-share-alt"></i>', hidden: (it) => it.type !== 'item' };
+                const exportAction = { id: 'export-as-markdown', label: '导出为 Markdown', iconHTML: '<i class="fas fa-file-export"></i>', hidden: (it) => it.type !== 'item' };
+                
+                // 返回一个全新的菜单结构
+                return [
+                    ...defaultItems,
+                    { type: 'separator' },
+                    shareAction,
+                    exportAction,
+                    copyIdAction
+                ];
+            }
+        }
+    }, configManager); // 【关键】将 configManager 实例注入
+
+    // --- 步骤 3: 初始化 MDxEditor ---
     editorInstance = new MDxEditor(editorContainer, {
         plugins: defaultPlugins,
         initialText: '请在左侧选择或创建一个会话...',
-        initialMode: 'edit', // Start in edit mode to see the button immediately
+        initialMode: 'render',
         showToolbar: true,
         // [MODIFIED] 这里是连接两个库的关键
         titleBar: {
@@ -222,26 +222,24 @@ async function main() {
         }
     });
 
-    // 步骤 4: 连接库的事件监听
+    // 步骤 4: 连接两个库的事件监听
     connectLibraries();
 
     // 步骤 5: 设置应用级别的 UI 交互
     setupAppUIHandlers();
 
-    // 步骤 6: 启动 SessionUI (它将从 IndexedDB 加载数据)
-    await sessionUIManager.start();
+    // 步骤 6: 启动 SessionUI (它现在会通过 ConfigManager 加载数据)
+    const initialSession = await sessionUIManager.start();
 
-    // 启动后，根据 store 的初始状态同步 UI
+    // 步骤 7: 在启动后，根据初始状态同步UI
+    // 同步侧边栏折叠状态
     const initialState = sessionUIManager.store.getState();
     appContainer.classList.toggle('sidebar-collapsed', initialState.isSidebarCollapsed);
     
-    const initialSession = sessionUIManager.getActiveSession();
+    // 如果有初始激活的会话，加载其内容
     if (initialSession) {
-        if (editorInstance.getText() !== initialSession.content) {
-            editorInstance.setText(initialSession.content);
-        }
-        // [新增] 在应用启动时，也根据初始会话设置标题
-        editorInstance.setTitle(initialSession.title);
+        editorInstance.setText(initialSession.content?.data || '');
+        editorInstance.setTitle(initialSession.metadata.title);
     }
 }
 

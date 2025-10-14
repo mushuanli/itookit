@@ -109,6 +109,7 @@
 /**
  * @typedef {object} ModuleFSTreeNodeMeta
  * @description 定义模块文件/目录节点的元数据。
+ * @property {string} id - [V2] 新增：持久且唯一的标识符 (例如 UUID)。这是最重要的改动。
  * @property {string} ctime - 创建时间 (ISO 8601 格式字符串)。
  * @property {string} mtime - 最后修改时间 (ISO 8601 格式字符串)。
  * @property {Tag[]} [tags] - 关联的标签。
@@ -117,7 +118,7 @@
 /**
  * @typedef {object} ModuleFSTreeNode
  * @description 定义模块文件系统树中的一个节点（文件或目录）。
- * @property {string} path - 节点的完整路径。
+ * @property {string} path - 节点的完整路径。现在它只是一个可变属性。
  * @property {'file' | 'directory'} type - 节点的类型。
  * @property {ModuleFSTreeNodeMeta} meta - 节点的元数据。
  * @property {string} [content] - 文件内容 (仅对 'file' 类型有效)。

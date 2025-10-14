@@ -1,18 +1,12 @@
 // #sidebar/services/SessionService.js
 import { ISessionService } from '../../common/interfaces/ISessionService.js';
-import { parseSessionInfo } from '../utils/session-parser.js';
+import { dataAdapter } from '../utils/data-adapter.js';
 
 /**
- * @file Contains the core business logic for session management.
- */
-
-/** @typedef {import('../stores/SessionStore.js').SessionStore} SessionStore */
-/** @typedef {import('../../common/store/repositories/WorkspaceRepository.js').WorkspaceRepository} WorkspaceRepository */
-/** @typedef {import('../../common/store/repositories/TagRepository.js').TagRepository} TagRepository */
-
-/**
- * The SessionService orchestrates session-related operations for a single workspace.
- * It interacts with the store and repositories, but is unaware of the UI or specific storage medium.
+ * @file SessionService (V2)
+ * @description
+ * 充当 UI 操作与数据仓库 (Repository) 之间的桥梁。
+ * 所有写操作都被委托给 Repository，它自己不处理持久化。
  */
 export class SessionService extends ISessionService {
     /**
@@ -22,118 +16,27 @@ export class SessionService extends ISessionService {
      * @param {TagRepository} dependencies.tagRepository - Manages global tags.
      * @param {string} [dependencies.newSessionContent=''] - The default content for new sessions.
      */
-    constructor({ store, workspaceRepository, tagRepository, newSessionContent = '' }) {
+    constructor({ store, moduleRepo, tagRepo, newSessionContent = '' }) {
         super();
-        if (!store || !workspaceRepository || !tagRepository) {
-            throw new Error("SessionService requires a store, workspaceRepository, and tagRepository.");
+        if (!store || !moduleRepo || !tagRepo) {
+            throw new Error("SessionService requires a store, moduleRepository, and tagRepository.");
         }
         this.store = store;
-        this.workspaceRepo = workspaceRepository;
-        this.tagRepo = tagRepository;
+        this.moduleRepo = moduleRepo;
+        this.tagRepo = tagRepo;
         this.newSessionContent = newSessionContent;
     }
 
-    /**
-     * Prepares the state for serialization and saves it using the database service.
-     * @private
-     */
-    async _saveState() {
-        const currentState = this.store.getState();
-        
-        // Convert non-serializable parts of the state (like Set and Map) to arrays.
-        // This responsibility now lies with the service that "owns" the data structure.
-        const serializableState = {
-            ...currentState,
-            expandedFolderIds: Array.from(currentState.expandedFolderIds),
-            expandedOutlineIds: Array.from(currentState.expandedOutlineIds),
-            expandedOutlineH1Ids: Array.from(currentState.expandedOutlineH1Ids),
-            selectedItemIds: Array.from(currentState.selectedItemIds),
-            tags: Array.from(currentState.tags.entries()).map(([name, tagInfo]) => {
-                return [name, { ...tagInfo, itemIds: Array.from(tagInfo.itemIds) }];
-            }),
-        };
-
-        await this.workspaceRepo.saveState(serializableState);
-    }
-
-    /**
-     * Loads all initial data from the persistence layer and updates the store.
-     */
-    async loadInitialData() {
-        this.store.dispatch({ type: 'ITEMS_LOAD_START' });
-        try {
-            const loadedState = await this.workspaceRepo.loadState();
-            // Also ensure global tags are loaded into the tag repository's cache
-            await this.tagRepo.load();
-            // The store's reducer is responsible for correctly hydrating the state from the loaded object
-            this.store.dispatch({ type: 'STATE_LOAD_SUCCESS', payload: loadedState });
-        } catch (error) {
-            console.error("An error occurred during initial data loading:", error);
-            this.store.dispatch({ type: 'ITEMS_LOAD_ERROR', payload: { error } });
-        }
-    }
-
-
-    // [TAGS-FEATURE] New method for handling tag updates.
-    /**
-     * Updates the tags for a single item and persists the changes.
-     * This method is the single entry point for any tag modification on an item.
-     * @param {string} itemId The ID of the session or folder to update.
-     * @param {string[]} newTags The complete new list of tags for the item.
-     */
-    async updateItemTags(itemId, newTags) {
-        // [修改] 调用新的批量方法，以统一逻辑
-        await this.updateMultipleItemsTags({ itemIds: [itemId], newTags });
-    }
-
-    /**
-     * Updates the tags for multiple items simultaneously, registering new tags globally.
-     * @param {object} params
-     * @param {string[]} params.itemIds - The IDs of the items to update.
-     * @param {string[]} params.newTags - The complete new list of tags to apply to all items.
-     */
-    async updateMultipleItemsTags({ itemIds, newTags }) {
-        if (!itemIds || itemIds.length === 0) return;
-
-        // Data sanitization: remove duplicates, trim whitespace, and filter out empty tags.
-        const cleanedTags = [...new Set(newTags.map(t => t.trim()).filter(Boolean))];
-
-        // 1. Register any new tags in the global repository first.
-        await this.tagRepo.registerTags(cleanedTags);
-
-        // 2. Dispatch the change to the local workspace store.
-        this.store.dispatch({
-            type: 'ITEMS_TAGS_UPDATE_SUCCESS',
-            payload: { itemIds, newTags: cleanedTags }
-        });
-        await this._saveState();
+    handleRepositoryLoad(moduleTree) {
+        const items = dataAdapter.treeToItems(moduleTree);
+        const tags = dataAdapter.buildTagsMap(items);
+        const initialStateFromRepo = { items, tags };
+        this.store.dispatch({ type: 'STATE_LOAD_SUCCESS', payload: initialStateFromRepo });
     }
 
 
 
-    /**
-     * Handles the logic for selecting a session.
-     * @param {string} sessionId
-     */
-    selectSession(sessionId) {
-        this.store.dispatch({ type: 'SESSION_SELECT', payload: { sessionId } });
-        // [修改] 选择会话是状态变更，应该触发保存
-        this._saveState();
-    }
 
-    async deleteSession(sessionId) {
-        await this.deleteItems([sessionId]);
-        //console.log('TODO: Implement deleteSession logic', sessionId);
-    }
-
-    /**
-     * Updates the UI settings and persists them.
-     * @param {Partial<import('../types/types.js')._UISettings>} settings
-     */
-    async updateSettings(settings) {
-        this.store.dispatch({ type: 'SETTINGS_UPDATE', payload: { settings } });
-        await this._saveState();
-    }
 
     /**
      * [MIGRATION] Creates a new item (previously session).
@@ -143,39 +46,14 @@ export class SessionService extends ISessionService {
      * @param {string | null} [options.parentId=null]
      * @returns {Promise<import('../types/types.js')._WorkspaceItem>} The newly created item.
      */
-    async createSession({ title, content, parentId = null }) { 
-        const now = new Date().toISOString();
-        const finalTitle = title || 'Untitled Item';
-        const finalContent = content !== undefined ? content : this.newSessionContent || '';
-
-        const { summary, searchableText, headings, metadata: parsedMetadata } = parseSessionInfo(finalContent);
-
-        const newItem = {
-            id: `item-${Date.now()}`,
-            type: 'item',
-            version: "1.0",
-            metadata: {
-                title: finalTitle,
-                tags: [],
-                createdAt: now,
-                lastModified: now,
-                parentId,
-                custom: { isPinned: false, ...parsedMetadata }
-            },
-            content: {
-                format: 'markdown', // Assume markdown for now
-                summary: summary,
-                searchableText: searchableText,
-                data: finalContent
-            },
-            headings: headings,
+    async createSession({ title, parentId }) {
+        const content = this.newSessionContent || '';
+        const newNodeData = {
+            path: title,
+            type: 'file',
+            content: content,
         };
-
-        this.store.dispatch({ type: 'SESSION_CREATE_SUCCESS', payload: newItem });
-        await this._saveState();
-        this.selectSession(newItem.id);
-        
-        return newItem;
+        await this.moduleRepo.addModule(parentId, newNodeData);
     }
 
     /**
@@ -185,44 +63,13 @@ export class SessionService extends ISessionService {
      * @param {string | null} [options.parentId=null]
      * @returns {Promise<import('../types/types.js')._WorkspaceItem>} The newly created folder.
      */
-    async createFolder({ title, parentId = null }) {
-        const now = new Date().toISOString();
-        const newFolder = {
-            id: `folder-${Date.now()}`,
-            type: 'folder',
-            version: "1.0",
-            metadata: {
-                title: title || 'New Folder',
-                tags: [],
-                createdAt: now,
-                lastModified: now,
-                parentId,
-                custom: {}
-            },
+    async createFolder({ title, parentId }) {
+        const newNodeData = {
+            path: title,
+            type: 'directory',
             children: [],
         };
-
-        // Dispatch an action to add the new folder to the store
-        this.store.dispatch({ type: 'FOLDER_CREATE_SUCCESS', payload: newFolder });
-        await this._saveState();
-
-        // Note: We don't automatically select a folder after creation.
-        // We could, for example, toggle it to an expanded state, which is handled in the store reducer.
-        return newFolder;
-    }
-
-    /**
-     * Deletes one or more items (sessions or folders).
-     * @param {string[]} itemIds - An array of item IDs to delete.
-     */
-    async deleteItems(itemIds) {
-        if (!itemIds || itemIds.length === 0) return;
-        this.store.dispatch({ type: 'ITEM_DELETE_SUCCESS', payload: { itemIds } });
-        await this._saveState();
-    }
-    
-    async deleteItem(itemId) {
-        await this.deleteItems([itemId]);
+        await this.moduleRepo.addModule(parentId, newNodeData);
     }
 
     /**
@@ -231,27 +78,7 @@ export class SessionService extends ISessionService {
      * @param {string} newTitle
      */
     async renameItem(itemId, newTitle) {
-        this.store.dispatch({ type: 'ITEM_RENAME_SUCCESS', payload: { itemId, newTitle } });
-        await this._saveState();
-    }
-
-
-    /**
-     * Moves one or more items to a new location.
-     * @param {object} options
-     * @param {string[]} options.itemIds - The IDs of the items to move.
-     * @param {string | null} options.targetId - The ID of the target folder, or null for root.
-     * @param {'before' | 'after' | 'into'} options.position - The position relative to the target.
-     */
-    async moveItems({ itemIds, targetId, position }) {
-        if (!this._validateMove(itemIds, targetId)) {
-            // In a real app, you'd publish an error event here
-            console.error("Invalid move operation: cannot move a folder into itself.");
-            alert("无效的移动操作：不能将文件夹移动到其子文件夹中。");
-            return;
-        }
-        this.store.dispatch({ type: 'ITEMS_MOVE_SUCCESS', payload: { itemIds, targetId, position } });
-        await this._saveState();
+        await this.moduleRepo.renameModule(itemId, newTitle);
     }
 
 
@@ -261,21 +88,64 @@ export class SessionService extends ISessionService {
      * @param {string} newContent
      */
     async updateSessionContent(itemId, newContent) {
-        const item = this.findItemById(itemId);
-        if (!item || item.type !== 'item') return;
-
-        // [MIGRATION] Re-parse content to get all derived data
-        const { summary, searchableText, headings, metadata: parsedMetadata } = parseSessionInfo(newContent);
-        
-        const updates = {
-            content: { ...item.content, summary, searchableText, data: newContent },
-            headings,
-            metadata: { ...item.metadata, lastModified: new Date().toISOString(), custom: { ...item.metadata.custom, ...parsedMetadata } }
-        };
-
-        this.store.dispatch({ type: 'ITEM_UPDATE_SUCCESS', payload: { itemId, updates } });
-        await this._saveState();
+        await this.moduleRepo.updateModuleContent(itemId, newContent);
     }
+
+    /**
+     * Deletes one or more items (sessions or folders).
+     * @param {string[]} itemIds - An array of item IDs to delete.
+     */
+    async deleteItems(itemIds) {
+        await Promise.all(itemIds.map(id => this.moduleRepo.removeModule(id)));
+    }
+    
+    async deleteItem(itemId) {
+        await this.deleteItems([itemId]);
+    }
+
+    /**
+     * Updates the tags for multiple items simultaneously, registering new tags globally.
+     * @param {object} params
+     * @param {string[]} params.itemIds - The IDs of the items to update.
+     * @param {string[]} params.newTags - The complete new list of tags to apply to all items.
+     */
+    async updateMultipleItemsTags({ itemIds, newTags }) {
+        const cleanedTags = [...new Set(newTags.map(t => t.trim()).filter(Boolean))];
+        await this.tagRepo.addTags(cleanedTags);
+
+        // [V2] 使用批量API
+        const updates = itemIds.map(id => ({
+            id,
+            meta: { tags: cleanedTags }
+        }));
+        await this.moduleRepo.updateNodesMeta(updates);
+    }
+
+
+    /**
+     * [V2-FIX] 恢复 moveItems 方法，作为对 moduleRepo 的委托调用。
+     */
+    async moveItems({ itemIds, targetId, position }) {
+        // 'position' 参数目前在我们的模型中简化为 'into'。
+        // 如果需要 'before'/'after'，ModuleRepository需要更复杂的逻辑。
+        // 这里我们假设所有移动都是 'into' 目标文件夹。
+        try {
+            await this.moduleRepo.moveModules(itemIds, targetId);
+        } catch (error) {
+            console.error("移动项目失败:", error.message);
+            // 在实际应用中，这里应该发布一个UI事件来通知用户失败
+            alert(error.message); // 简单的用户反馈
+        }
+    }
+
+    /**
+     * Handles the logic for selecting a session.
+     * @param {string} sessionId
+     */
+    selectSession(sessionId) {
+        this.store.dispatch({ type: 'SESSION_SELECT', payload: { sessionId } });
+    }
+
 
     /**
      * Updates the tags for multiple items simultaneously, registering new tags globally.
@@ -309,38 +179,5 @@ export class SessionService extends ISessionService {
         const state = this.store.getState();
         if (!state.activeId) return undefined;
         return this.findItemById(state.activeId);
-    }
-
-
-    /**
-     * Validates if a move operation is legal (e.g., a folder cannot be moved into its own descendant).
-     * @private
-     * @param {string[]} itemIdsToMove - IDs of items being moved.
-     * @param {string | null} targetId - The ID of the destination folder, or null for root.
-     * @returns {boolean} True if the move is valid.
-     */
-    _validateMove(itemIdsToMove, targetId) {
-        if (!targetId) return true; // Moving to root is always valid
-
-        const state = this.store.getState();
-        const itemsMap = new Map();
-        const buildMap = (items, parent = null) => {
-            items.forEach(item => {
-                itemsMap.set(item.id, { ...item, parent });
-                if (item.children) buildMap(item.children, item);
-            });
-        };
-        buildMap(state.items);
-
-        for (const itemId of itemIdsToMove) {
-            // Rule 1: A folder cannot be moved into its own descendant.
-            let currentTargetId = targetId;
-            while (currentTargetId) {
-                if (currentTargetId === itemId) return false;
-                const parent = itemsMap.get(currentTargetId)?.parent;
-                currentTargetId = parent ? parent.id : null;
-            }
-        }
-        return true;
     }
 }
