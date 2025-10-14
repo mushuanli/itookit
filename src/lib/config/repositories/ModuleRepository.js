@@ -158,15 +158,22 @@ export class ModuleRepository {
 
     /**
      * 向指定的父目录中添加一个新模块（文件或目录）。
-     * @param {string} parentId - 父节点的唯一ID。
-     * @param {Omit<import('../shared/types.js').ModuleFSTreeNode, 'path'>} moduleData - 新模块的数据，其`path`属性应为模块名。完整路径将自动构建。
+     * @param {string | null} parentId - 父节点的唯一ID。如果为 `null`，则添加到根目录。
+     * @param {Omit<import('../shared/types.js').ModuleFSTreeNode, 'path'>} moduleData - 新模块的数据。
      * @returns {Promise<import('../shared/types.js').ModuleFSTreeNode>} 返回新添加的模块节点。
      */
     async addModule(parentId, moduleData) {
         // [修改] 将写操作包裹在队列中
         return this._enqueueWrite(async () => {
             await this.getModules();
-            const parentResult = this._findNodeById(parentId);
+            
+            // --- [核心修复] ---
+            // 识别 `null` parentId 并将其显式映射到根节点的 ID。
+            // 这是连接“逻辑根”（null）和“物理根”（根节点的实际ID）的关键。
+            const effectiveParentId = parentId === null ? this.modules.meta.id : parentId;
+            
+            const parentResult = this._findNodeById(effectiveParentId);
+            
             if (!parentResult || parentResult.node.type !== 'directory') {
                 throw new Error(`父节点ID '${parentId}' 未找到或不是一个目录。`);
             }
