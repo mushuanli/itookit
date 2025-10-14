@@ -10,31 +10,38 @@ import { parseSessionInfo } from './session-parser.js';
 export const dataAdapter = {
 
     /**
-     * 将 ModuleRepository 返回的单个节点转换为 Sidebar UI 可以渲染的 WorkspaceItem。
+     * [SIMPLIFIED] 将 ModuleRepository 返回的单个节点转换为 Sidebar UI 可以渲染的 WorkspaceItem。
+     * 此版本假定输入的 `node` 严格遵守 V2 格式，不提供任何回退。
      * @param {import('../../config/shared/types.js').ModuleFSTreeNode} node - 来自 ModuleRepository 的节点。
      * @returns {import('../types/types.js')._WorkspaceItem}
      */
     nodeToItem(node) {
-        const isFolder = node.type === 'directory';
-        const title = node.path.split('/').pop() || (node.path === '/' ? '根目录' : '未知项');
-        const content = node.content || '';
-
-        let parsedInfo = { summary: '', searchableText: '', headings: [], metadata: {} };
-        if (!isFolder) {
-            parsedInfo = parseSessionInfo(content);
+        // 严格检查输入是否有效
+        if (!node || !node.meta?.id) {
+            console.error('[data-adapter] 节点无效或缺少必需的 meta.id 字段', node);
+            return null;
         }
+        
+        const isFolder = node.type === 'directory';
+        // 直接从 path 获取标题，不再有备用方案
+        const title = node.path === '/' ? '根目录' : node.path.split('/').pop();
+        const content = node.content || '';
+        
+        const parsedInfo = isFolder 
+            ? { summary: '', searchableText: '', headings: [], metadata: {} } 
+            : parseSessionInfo(content);
 
         return {
-            id: node.meta.id, // [V2] 使用稳定ID作为唯一标识符
+            id: node.meta.id,
             type: isFolder ? 'folder' : 'item',
             version: "1.0",
             metadata: {
+                // 直接从 V2 结构的唯一来源读取，不再有 "||" 回退
                 title: title,
                 tags: node.meta.tags || [],
                 createdAt: node.meta.ctime,
                 lastModified: node.meta.mtime,
-                // parentId 暂时不直接从node获取，由treeToItems的递归过程赋予
-                parentId: null, 
+                parentId: null, // parentId 在 treeToItems 的递归中设置
                 custom: parsedInfo.metadata
             },
             content: isFolder ? undefined : {
@@ -44,7 +51,9 @@ export const dataAdapter = {
                 data: content
             },
             headings: parsedInfo.headings,
-            children: isFolder ? (node.children || []).map(child => this.nodeToItem(child)) : undefined,
+            // [核心修复] 不再递归处理 children。
+            // 仅保留 children 属性（如果存在），以便 treeToItems 处理。
+            children: node.children ? [] : undefined
         };
     },
 
@@ -55,17 +64,24 @@ export const dataAdapter = {
      */
     treeToItems(tree) {
         if (!tree || !tree.children) return [];
-        const processChildren = (children, parentId) => {
-            return children.map(node => {
-                const item = this.nodeToItem(node);
-                item.metadata.parentId = parentId;
-                if (item.children) {
-                    item.children = processChildren(item.children, item.id);
-                }
-                return item;
-            });
+
+        const processNode = (node, parentId) => {
+            const item = this.nodeToItem(node);
+            if (!item) return null;
+
+            item.metadata.parentId = parentId;
+
+            if (node.children && item.type === 'folder') {
+                item.children = node.children
+                    .map(childNode => processNode(childNode, item.id))
+                    .filter(Boolean);
+            }
+            return item;
         };
-        return processChildren(tree.children, tree.meta.id);
+
+        return tree.children
+            .map(childNode => processNode(childNode, tree.meta.id))
+            .filter(Boolean);
     },
 
     buildTagsMap(items) {

@@ -201,6 +201,7 @@ export class SessionUIManager extends ISessionManager {
             'importRequested': 'PUBLIC_IMPORT_REQUESTED',
             'sidebarStateChanged': 'PUBLIC_SIDEBAR_STATE_CHANGED',
             'menuItemClicked': 'PUBLIC_MENU_ITEM_CLICKED',
+            'stateChanged': 'PUBLIC_STATE_CHANGED', // <--- [修复] 添加这一行
         };
 
         const channel = publicEventMap[eventName];
@@ -234,9 +235,12 @@ export class SessionUIManager extends ISessionManager {
     _loadUiState() {
         try {
             const stateJSON = localStorage.getItem(this.uiStorageKey);
-            // 对解析出的数据进行基本验证
+            // +++ DEBUG LOG +++
+            console.log(`[SessionUIManager] Raw data from localStorage for key "${this.uiStorageKey}":`, stateJSON);
             const state = stateJSON ? JSON.parse(stateJSON) : {};
             if (typeof state === 'object' && state !== null) {
+                // +++ DEBUG LOG +++
+                console.log('[SessionUIManager] Parsed UI state loaded successfully:', state);
                 return state;
             }
             return {};
@@ -260,6 +264,8 @@ export class SessionUIManager extends ISessionManager {
             isSidebarCollapsed: state.isSidebarCollapsed,
         };
         try {
+            // +++ DEBUG LOG +++
+            console.log(`%c[SessionUIManager] SAVING UI STATE to key "${this.uiStorageKey}"`, 'color: blue; font-weight: bold;', stateToPersist);
             localStorage.setItem(this.uiStorageKey, JSON.stringify(stateToPersist));
         } catch (e) {
             console.error("无法保存UI状态:", e);
@@ -271,17 +277,28 @@ export class SessionUIManager extends ISessionManager {
      * @private
      */
     _connectToStoreForUiPersistence() {
-        let lastState = { ...this.store.getState() };
+        let lastStateForPersistence = { ...this.store.getState() };
+
         this.store.subscribe(currentState => {
-            // 检查关键的UI状态是否发生变化
-            if (currentState.activeId !== lastState.activeId ||
-                currentState.expandedFolderIds !== lastState.expandedFolderIds ||
-                currentState.selectedItemIds !== lastState.selectedItemIds ||
-                currentState.uiSettings !== lastState.uiSettings ||
-                currentState.isSidebarCollapsed !== lastState.isSidebarCollapsed) {
+            const hasChanged = currentState.activeId !== lastStateForPersistence.activeId ||
+                currentState.expandedFolderIds !== lastStateForPersistence.expandedFolderIds ||
+                currentState.selectedItemIds !== lastStateForPersistence.selectedItemIds ||
+                currentState.uiSettings !== lastStateForPersistence.uiSettings ||
+                currentState.isSidebarCollapsed !== lastStateForPersistence.isSidebarCollapsed;
+
+            if (hasChanged) {
+                // +++ DEBUG LOG +++
+                console.log('[SessionUIManager] UI state change detected, triggering save.', {
+                    oldActiveId: lastStateForPersistence.activeId,
+                    newActiveId: currentState.activeId
+                });
                 this._saveUiState();
+            } else {
+                 // +++ DEBUG LOG (optional, can be noisy) +++
+                 // console.log('[SessionUIManager] State changed but no UI persistence keys were affected.');
             }
-            lastState = currentState;
+            // Use deep copy for sets/maps to avoid reference issues
+            lastStateForPersistence = JSON.parse(JSON.stringify(currentState, (k,v) => v instanceof Set ? Array.from(v) : (v instanceof Map ? Array.from(v.entries()) : v)));
         });
     }
 

@@ -61,10 +61,7 @@ if (typeof window !== 'undefined' && window.immer) {
         try {
             // 简单的深拷贝，不处理 Set/Map
             const draft = JSON.parse(JSON.stringify(base, (key, value) => {
-                // 将 Set 转换为 Array 以便序列化
-                if (value instanceof Set) {
-                    return Array.from(value);
-                }
+                if (value instanceof Set) return Array.from(value);
                 return value;
             }));
             recipe(draft);
@@ -111,30 +108,16 @@ export class SessionStore {
      * @private
      */
     _createInitialState(initialState) {
-        const defaultState = {
-            items: [],
-            activeId: null,
-            expandedFolderIds: new Set(),
-            expandedOutlineIds: new Set(),
-            expandedOutlineH1Ids: new Set(),
-            selectedItemIds: new Set(),
-            creatingItem: null,
-            moveOperation: null,
-            
-            tags: new Map(), // [TAGS-FEATURE] Initialize the global tags map.
+        // +++ DEBUG LOG +++
+        console.log('[SessionStore] Creating initial state with persisted data:', JSON.parse(JSON.stringify(initialState)));
 
-            searchQuery: '',
-            uiSettings: {
-                sortBy: 'lastModified',
-                density: 'comfortable',
-                showSummary: true,
-                showTags: true,
-                showBadges: true,
-            },
-            isSidebarCollapsed: false,
-            readOnly: false, // [修改] 默认值为 false
-            status: 'idle',
-            error: null,
+        const defaultState = {
+            items: [], activeId: null, expandedFolderIds: new Set(),
+            expandedOutlineIds: new Set(), expandedOutlineH1Ids: new Set(),
+            selectedItemIds: new Set(), creatingItem: null, moveOperation: null,
+            tags: new Map(), searchQuery: '',
+            uiSettings: { sortBy: 'lastModified', density: 'comfortable', showSummary: true, showTags: true, showBadges: true },
+            isSidebarCollapsed: false, readOnly: false, status: 'idle', error: null,
         };
 
         if (!initialState) {
@@ -143,25 +126,23 @@ export class SessionStore {
 
         // 合并，并确保 Set 类型被正确恢复
         const mergedState = {
-            ...defaultState,
-            ...initialState,
-            uiSettings: {
-                ...defaultState.uiSettings,
-                ...(initialState.uiSettings || {}),
-            },
-            // 关键：从数组恢复 Set
+            ...defaultState, ...initialState,
+            uiSettings: { ...defaultState.uiSettings, ...(initialState.uiSettings || {}) },
             expandedFolderIds: new Set(initialState.expandedFolderIds || []),
             expandedOutlineIds: new Set(initialState.expandedOutlineIds || []),
             expandedOutlineH1Ids: new Set(initialState.expandedOutlineH1Ids || []),
             selectedItemIds: new Set(initialState.selectedItemIds || []),
             creatingItem: initialState.creatingItem || null,
             isSidebarCollapsed: initialState.isSidebarCollapsed === true,
-            // [TAGS-FEATURE] Deserialize tags map from persisted data
-            tags: new Map(initialState.tags?.map(([name, tagInfo]) => {
-                return [name, { ...tagInfo, itemIds: new Set(tagInfo.itemIds || []) }];
-            }) || []),
-            readOnly: initialState.readOnly === true, // [修改] 合并 readOnly 状态
+            tags: new Map(initialState.tags?.map(([name, tagInfo]) => [name, { ...tagInfo, itemIds: new Set(tagInfo.itemIds || []) }]) || []),
+            readOnly: initialState.readOnly === true,
         };
+
+        // +++ DEBUG LOG +++
+        console.log('[SessionStore] Final merged initial state:', {
+            ...mergedState, items: `[${mergedState.items.length} items]`,
+            expandedFolderIds: Array.from(mergedState.expandedFolderIds),
+        });
 
         return mergedState;
     }
@@ -187,71 +168,22 @@ export class SessionStore {
                     return undefined;
                 };
 
-            /**
-             * 兼容新旧结构：获取项目标题
-             * @private
-             */
-            const getItemTitle = (item) => {
-                return item.metadata?.title ?? item.title ?? 'Untitled';
-            };
-
-            /**
-             * 兼容新旧结构：获取父文件夹 ID
-             * @private
-             */
-            const getItemParentId = (item) => {
-                return item.metadata?.parentId ?? item.parentId ?? null;
-            };
-
-            /**
-             * 兼容新旧结构：获取标签列表
-             * @private
-             */
-            const getItemTags = (item) => {
-                return item.metadata?.tags ?? item.tags ?? [];
-            };
-
-            /**
-             * 兼容新旧结构：设置项目标题（同时更新 lastModified）
-             * @private
-             */
-            const setItemTitle = (item, newTitle) => {
-                if (item.metadata) {
+                // [SIMPLIFIED] Helper functions now strictly adhere to the V2 WorkspaceItem format.
+                const getItemTitle = (item) => item.metadata.title;
+                const getItemParentId = (item) => item.metadata.parentId;
+                const getItemTags = (item) => item.metadata.tags;
+                const setItemTitle = (item, newTitle) => {
                     item.metadata.title = newTitle;
                     item.metadata.lastModified = new Date().toISOString();
-                } else {
-                    // 向后兼容旧结构
-                    item.title = newTitle;
-                    item.lastModified = new Date().toISOString();
-                }
-            };
-
-            /**
-             * 兼容新旧结构：设置标签列表
-             * @private
-             */
-            const setItemTags = (item, newTags) => {
-                if (item.metadata) {
+                };
+                const setItemTags = (item, newTags) => {
                     item.metadata.tags = newTags;
                     item.metadata.lastModified = new Date().toISOString();
-                } else {
-                    item.tags = newTags;
-                    item.lastModified = new Date().toISOString();
-                }
-            };
+                };
+                const touchItem = (item) => {
+                    item.metadata.lastModified = new Date().toISOString();
+                };
 
-            /**
-             * 兼容新旧结构：更新最后修改时间
-             * @private
-             */
-            const touchItem = (item) => {
-                const now = new Date().toISOString();
-                if (item.metadata) {
-                    item.metadata.lastModified = now;
-                } else {
-                    item.lastModified = now;
-                }
-            };
                 switch (action.type) {
                     // [新增] 处理从持久化层加载的整个状态
                     case 'STATE_LOAD_SUCCESS': {
@@ -269,9 +201,7 @@ export class SessionStore {
                             
                             // [TAGS-FEATURE] Robust deserialization for tags
                             if (loadedState.tags && Array.isArray(loadedState.tags)) {
-                                draft.tags = new Map(loadedState.tags.map(([name, tagInfo]) => {
-                                    return [name, { ...tagInfo, itemIds: new Set(tagInfo.itemIds || []) }];
-                                }));
+                                draft.tags = new Map(loadedState.tags.map(([name, tagInfo]) => [name, { ...tagInfo, itemIds: new Set(tagInfo.itemIds || []) }]));
                             } else {
                                 draft.tags = new Map();
                             }
@@ -633,6 +563,17 @@ export class SessionStore {
                                 draft.items.unshift(newItem);
                             }
                         }
+
+                        // --- [核心修复] ---
+                        // 确保新创建的会话被自动选中。
+                        // 只有 'item' 类型（会话）需要被激活，文件夹创建后不需要激活。
+                        if (newItem.type === 'item') {
+                            // +++ DEBUG LOG +++
+                            console.log(`[SessionStore/Reducer] Setting activeId from '${draft.activeId}' to '${newItem.id}' due to SESSION_CREATE_SUCCESS.`);
+                            draft.activeId = newItem.id;
+                            draft.expandedOutlineH1Ids.clear(); // 同时重置大纲的展开状态
+                        }
+                        
                         draft.status = 'success';
                         break;
                     }
@@ -667,10 +608,21 @@ export class SessionStore {
      * @param {object} action - An action object, must have a `type` property.
      */
     dispatch(action) {
+        // +++ DEBUG LOG +++
+        console.group(`[SessionStore] Dispatching Action: ${action.type}`);
+        console.log('Action Payload:', action.payload);
+        // 使用 JSON.stringify 创建状态快照，避免 console 引用问题
+        const previousStateSnapshot = JSON.parse(JSON.stringify(this._state, (k, v) => v instanceof Set ? Array.from(v) : v));
+        console.log('State BEFORE:', previousStateSnapshot);
+
         const previousState = this._state;
         this._state = this._reducer(previousState, action);
 
-        // [删除] 移除之前在 dispatch 中的临时修复逻辑，因为它现在由 reducer 和 initialState 创建函数处理
+        // +++ DEBUG LOG +++
+        const newStateSnapshot = JSON.parse(JSON.stringify(this._state, (k, v) => v instanceof Set ? Array.from(v) : v));
+        console.log('State AFTER:', newStateSnapshot);
+        console.groupEnd();
+
         if (previousState !== this._state) {
             this._listeners.forEach(listener => listener(this._state));
         }

@@ -77,8 +77,8 @@ export class ModuleRepository {
 
 
     /**
-     * 从持久化层加载模块树到内存中。
-     * 此方法是可重入安全的：如果正在加载中，后续的并发调用将返回同一个正在加载中的Promise，而不会重新触发加载。
+     * [SIMPLIFIED] 从持久化层加载模块树到内存中。
+     * 此方法不再处理旧格式数据。如果存储中没有数据，则创建一个全新的空树。
      * @returns {Promise<import('../shared/types.js').ModuleFSTree>} 一个解析为模块树的Promise。
      */
     load() {
@@ -88,7 +88,10 @@ export class ModuleRepository {
 
         this._loadingPromise = (async () => {
             let storedTree = await this.adapter.getItem(this.storageKey);
-            if (!storedTree || !storedTree.meta?.id) { // [V2] 检查是否存在根ID，用于向后兼容
+
+            // 简化检查：如果存储中没有任何数据，则创建一个全新的、干净的 V2 树。
+            if (!storedTree) {
+                console.log(`[ModuleRepository] No data found for namespace '${this.namespace}'. Creating a new empty tree.`);
                 storedTree = {
                     path: '/',
                     type: 'directory',
@@ -100,6 +103,8 @@ export class ModuleRepository {
                     children: []
                 };
             }
+            
+            // 直接假定 storedTree 是有效的 V2 格式
             this.modules = storedTree;
             this.eventManager.publish(getModuleEventName('loaded', this.namespace), this.modules);
             return this.modules;
@@ -178,23 +183,59 @@ export class ModuleRepository {
                 throw new Error(`父节点ID '${parentId}' 未找到或不是一个目录。`);
             }
             
-            const now = new Date().toISOString();
-            const newId = generateUUID();
-            const parentPath = parentResult.node.path;
-            const fullPath = (parentPath === '/' ? '' : parentPath) + '/' + moduleData.path;
-            const newNode = {
-                ...moduleData,
-                path: fullPath,
-                meta: { tags: [], ...moduleData.meta, id: newId, ctime: now, mtime: now }
+            // --- [核心修复] ---
+            // 引入一个递归函数来构建完整的节点树，确保所有子孙节点都有正确的 path 和 meta。
+            const buildNodeTree = (nodeData, parentPath) => {
+                const now = new Date().toISOString();
+                const newId = generateUUID();
+                
+                // --- [最终修复] ---
+                // 绝对可靠地获取节点名 (相对路径)
+                // 1. 优先使用 nodeData.path
+                // 2. 如果 path 无效, 回退到 nodeData.title
+                // 3. 如果都无效, 生成一个默认名, 防止程序崩溃
+                let nodeName = nodeData.path || nodeData.title;
+                if (typeof nodeName !== 'string' || !nodeName.trim()) {
+                    nodeName = nodeData.type === 'directory' ? '新建文件夹' : '无标题';
+                    console.warn('[ModuleRepository] 传入 addModule 的节点缺少有效的 path 或 title，已使用默认名称。传入数据:', nodeData);
+                }
+
+                const fullPath = (parentPath === '/' ? '' : parentPath) + '/' + nodeName.trim();
+
+                const newNode = {
+                    ...nodeData,
+                    path: fullPath,
+                    meta: { 
+                        tags: [], 
+                        ...nodeData.meta, 
+                        id: newId, 
+                        ctime: now, 
+                        mtime: now 
+                    }
+                };
+                
+                // 删除临时的 title 属性，因为它不属于 ModuleFSTreeNode 结构
+                delete newNode.title;
+                
+                if (Array.isArray(newNode.children)) {
+                    newNode.children = newNode.children.map(childData => buildNodeTree(childData, fullPath));
+                }
+
+                return newNode;
             };
 
-            parentResult.node.children.push(newNode);
-            parentResult.node.meta.mtime = now;
+            const parentNode = parentResult.node;
+            const newNode = buildNodeTree(moduleData, parentNode.path);
+
+            parentNode.children.push(newNode);
+            parentNode.meta.mtime = new Date().toISOString();
             
+            // +++ DEBUG LOG +++
+            console.log('[ModuleRepository] 即将保存的完整模块树:', JSON.parse(JSON.stringify(this.modules)));
             await this._save();
             
             this.eventManager.publish(getModuleEventName('node_added', this.namespace), {
-                parentId: parentResult.node.meta.id,
+                parentId: parentNode.meta.id,
                 newNode: newNode
             });
             

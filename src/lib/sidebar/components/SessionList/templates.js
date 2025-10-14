@@ -83,13 +83,12 @@ function highlightText(text, query) {
  */
 export function createSessionItemHTML(session, isActive, isSelected, uiSettings, isOutlineExpanded, isSelectionMode, searchQueries = [], isReadOnly = false) {
     const { id, metadata, content, headings = [] } = session;
-    const title = metadata?.title || session.title || 'Untitled';
-    const lastModified = metadata?.lastModified || session.lastModified;
-    const tags = metadata?.tags || session.tags || [];
-    const summary = content?.summary || '';
-    const customMeta = metadata?.custom || {};
-    const isPinned = customMeta.isPinned || false;
-    const hasUnreadUpdate = customMeta.hasUnreadUpdate || false;
+    const { title, lastModified, tags = [], custom = {} } = metadata;
+    
+    const summary = content?.summary || ''; // content can be undefined, so ?. is valid here.
+    const isPinned = custom.isPinned || false;
+    const hasUnreadUpdate = custom.hasUnreadUpdate || false;
+    const taskCount = custom.taskCount;
 
     // [修改] 在非只读且处于选择模式时才显示复选框
     const checkboxHTML = !isReadOnly && isSelectionMode
@@ -97,8 +96,8 @@ export function createSessionItemHTML(session, isActive, isSelected, uiSettings,
         : '';
 
     let badgesHTML = '';
-    if (uiSettings.showBadges && customMeta.taskCount?.total > 0) {
-        badgesHTML = `<div class="mdx-session-item__badges"><span class="mdx-badge">✅ ${customMeta.taskCount.completed}/${customMeta.taskCount.total}</span></div>`;
+    if (uiSettings.showBadges && taskCount?.total > 0) {
+        badgesHTML = `<div class="mdx-session-item__badges"><span class="mdx-badge">✅ ${taskCount.completed}/${taskCount.total}</span></div>`;
     }
 
     const tagsHTML = uiSettings.showTags && tags.length > 0
@@ -163,8 +162,7 @@ export function createSessionItemHTML(session, isActive, isSelected, uiSettings,
  */
 export function createFolderItemHTML(folder, isExpanded, folderSelectionState, childrenHTML, isSelectionMode, searchQueries = [], isReadOnly = false) {
     const { id, metadata } = folder;
-    const title = metadata?.title || folder.title || 'New Folder';
-    const tags = metadata?.tags || folder.tags || [];
+    const { title, tags = [] } = metadata;
     
     // --- [修改] 根据三态状态渲染复选框 ---
     const isSelected = folderSelectionState === 'all' || folderSelectionState === 'partial';

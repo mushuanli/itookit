@@ -28,7 +28,9 @@ export class SessionService extends ISessionService {
     }
 
     handleRepositoryLoad(moduleTree) {
+    console.log('[SessionService] 收到模块树:', moduleTree);
         const items = dataAdapter.treeToItems(moduleTree);
+    console.log('[SessionService] 转换后的 items:', items);
         const tags = dataAdapter.buildTagsMap(items);
         this.store.dispatch({ type: 'STATE_LOAD_SUCCESS', payload: { items, tags } });
     }
@@ -76,6 +78,7 @@ export class SessionService extends ISessionService {
 
     const newNodeData = {
         path: title,
+            title: title, // 提供 title 作为备用
         type: 'file',
         content: fileContent, // 3. 使用正确的 content 变量
     };
@@ -93,7 +96,8 @@ export class SessionService extends ISessionService {
      */
     async createFolder({ title, parentId }) {
         const newNodeData = {
-            path: title,
+            path: title, // 主要使用 path
+            title: title, // 提供 title 作为备用
             type: 'directory',
             children: [],
         };
