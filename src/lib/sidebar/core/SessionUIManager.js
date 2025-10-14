@@ -387,11 +387,22 @@ export class SessionUIManager extends ISessionManager {
                 // 确保父ID被正确设置，以防它也改变了
                 const parent = this.moduleRepo._findNodeById(node.meta.id)?.parent;
                 updatedItem.metadata.parentId = parent ? parent.meta.id : this.moduleRepo.modules.meta.id;
-                
-                this.store.dispatch({
-                    type: 'ITEM_UPDATE_SUCCESS',
-                    payload: { itemId: node.meta.id, updates: updatedItem }
-                });
+                this.store.dispatch({ type: 'ITEM_UPDATE_SUCCESS', payload: { itemId: node.meta.id, updates: updatedItem } });
+            });
+        });
+
+        // --- [新增修复] ---
+        // 专门监听由 ModuleRepository 发出的节点移动事件。
+        // 这将 dispatch 一个 'ITEMS_MOVE_SUCCESS' action，激活 Store 中正确的 reducer 逻辑，
+        // 以便在 UI 上正确地重新排列树状结构，修复了移动后UI不刷新的bug。
+        this.eventManager.subscribe(getModuleEventName('nodes_moved', namespace), ({ movedNodeIds, targetParentId }) => {
+            this.store.dispatch({
+                type: 'ITEMS_MOVE_SUCCESS',
+                payload: {
+                    itemIds: movedNodeIds,
+                    targetId: targetParentId,
+                    position: 'into' // 当前架构只支持移动到文件夹内部
+                }
             });
         });
     }

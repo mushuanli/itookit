@@ -28,6 +28,10 @@ export const EVENTS = {
     MODULE_NODE_RENAMED: 'modules:{ns}:node_renamed',       // 一个节点被重命名 (负载: { updatedNode: ModuleFSTreeNode })
     MODULE_NODE_CONTENT_UPDATED: 'modules:{ns}:node_content_updated', // 文件内容被更新 (负载: { updatedNode: ModuleFSTreeNode })
     MODULE_NODES_META_UPDATED: 'modules:{ns}:nodes_meta_updated',     // 一个或多个节点的元数据被更新 (负载: { updatedNodes: ModuleFSTreeNode[] })
+    // --- [新增修复] ---
+    // 为节点的移动操作定义一个独立的、精确的事件，以区别于普通的元数据更新。
+    // 这使得UI层可以正确地处理树结构的变更，而不是仅仅更新节点数据。
+    MODULE_NODES_MOVED: 'modules:{ns}:nodes_moved',         // 一个或多个节点被移动 (负载: { movedNodeIds: string[], targetParentId: string })
 };
 
 /**
@@ -52,7 +56,7 @@ export const EVENTS = {
  */
 
 /**
- * @typedef {'loaded' | 'node_added' | 'node_removed' | 'node_renamed' | 'node_content_updated' | 'nodes_meta_updated'} ModuleEventType
+ * @typedef {'loaded' | 'node_added' | 'node_removed' | 'node_renamed' | 'node_content_updated' | 'nodes_meta_updated' | 'nodes_moved'} ModuleEventType
  */
 
 /**

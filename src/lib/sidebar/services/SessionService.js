@@ -11,15 +11,15 @@ import { dataAdapter } from '../utils/data-adapter.js';
 export class SessionService extends ISessionService {
     /**
      * @param {object} dependencies
-     * @param {SessionStore} dependencies.store
-     * @param {WorkspaceRepository} dependencies.workspaceRepository - Manages items for this specific instance.
-     * @param {TagRepository} dependencies.tagRepository - Manages global tags.
-     * @param {string} [dependencies.newSessionContent=''] - The default content for new sessions.
+     * @param {import('../stores/SessionStore.js').SessionStore} dependencies.store
+     * @param {import('../../config/repositories/ModuleRepository.js').ModuleRepository} dependencies.moduleRepo
+     * @param {import('../../config/repositories/TagRepository.js').TagRepository} dependencies.tagRepo
+     * @param {string} [dependencies.newSessionContent='']
      */
     constructor({ store, moduleRepo, tagRepo, newSessionContent = '' }) {
         super();
         if (!store || !moduleRepo || !tagRepo) {
-            throw new Error("SessionService requires a store, moduleRepository, and tagRepository.");
+            throw new Error("SessionService 需要 store, moduleRepository, 和 tagRepository.");
         }
         this.store = store;
         this.moduleRepo = moduleRepo;
@@ -30,10 +30,34 @@ export class SessionService extends ISessionService {
     handleRepositoryLoad(moduleTree) {
         const items = dataAdapter.treeToItems(moduleTree);
         const tags = dataAdapter.buildTagsMap(items);
-        const initialStateFromRepo = { items, tags };
-        this.store.dispatch({ type: 'STATE_LOAD_SUCCESS', payload: initialStateFromRepo });
+        this.store.dispatch({ type: 'STATE_LOAD_SUCCESS', payload: { items, tags } });
     }
 
+    // --- [新增修复] ---
+    // 实现了 ISessionService 接口中定义的 getAllFolders 方法。
+    // 这修复了架构层面的一个漏洞，使得依赖此服务的其他模块（如 SessionDirProvider）
+    // 可以通过标准的接口契约来获取数据，而不是破坏封装直接访问 store。
+    /**
+     * @override
+     * 获取所有文件夹的扁平化列表。
+     * @returns {Promise<object[]>}
+     */
+    async getAllFolders() {
+        const state = this.store.getState();
+        const folders = [];
+        const traverse = (items) => {
+            for (const item of items) {
+                if (item.type === 'folder') {
+                    folders.push(item);
+                    if (item.children) {
+                        traverse(item.children);
+                    }
+                }
+            }
+        };
+        traverse(state.items);
+        return folders;
+    }
 
 
 
@@ -125,11 +149,12 @@ export class SessionService extends ISessionService {
     /**
      * [V2-FIX] 恢复 moveItems 方法，作为对 moduleRepo 的委托调用。
      */
-    async moveItems({ itemIds, targetId, position }) {
+    async moveItems({ itemIds, targetId }) {
         // 'position' 参数目前在我们的模型中简化为 'into'。
         // 如果需要 'before'/'after'，ModuleRepository需要更复杂的逻辑。
         // 这里我们假设所有移动都是 'into' 目标文件夹。
         try {
+            // 注意：ModuleRepository 的 moveModules 需要 targetId，这里我们假设所有移动都是 'into'
             await this.moduleRepo.moveModules(itemIds, targetId);
         } catch (error) {
             console.error("移动项目失败:", error.message);
@@ -177,7 +202,6 @@ export class SessionService extends ISessionService {
      */
     getActiveSession() {
         const state = this.store.getState();
-        if (!state.activeId) return undefined;
-        return this.findItemById(state.activeId);
+        return state.activeId ? this.findItemById(state.activeId) : undefined;
     }
 }

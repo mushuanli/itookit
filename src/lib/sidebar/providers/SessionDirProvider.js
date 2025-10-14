@@ -34,34 +34,10 @@ export class SessionDirProvider extends IMentionProvider {
         }
         this.sessionService = sessionService;
     }
-
-    /**
-     * 递归地从 session 项目树中查找所有文件夹。
-     * @private
-     * @param {import('../types/types.js')._Session[]} items
-     * @returns {import('../types/types.js')._Session[]} 文件夹的扁平化列表。
-     */
-    _getAllFolders(items) {
-        let folders = [];
-        const traverse = (itemList) => {
-            for (const item of itemList) {
-                if (item.type === 'folder') {
-                    folders.push(item);
-                    if (item.children) {
-                        traverse(item.children);
-                    }
-                }
-            }
-        };
-        traverse(items);
-        return folders;
-    }
-
     
     // [MODIFIED] Added this method to align with service-oriented architecture
     async getAllFolders() {
-        const state = this.sessionService.store.getState();
-        return this._getAllFolders(state.items);
+        return this.sessionService.getAllFolders();
     }
 
     /**
@@ -70,8 +46,11 @@ export class SessionDirProvider extends IMentionProvider {
      * @returns {Promise<Array<{id: string, label: string}>>}
      */
     async getSuggestions(query) {
-        // [重构] 不再访问 store，而是调用 service 的标准接口
-        const allFolders = await this.getAllFolders();
+        // --- [核心修复] ---
+        // 不再直接访问 store (this.sessionService.store.getState())，
+        // 而是调用 SessionService 提供的标准公共接口。
+        // 这遵循了依赖倒置原则，增强了代码的封装性和可维护性。
+        const allFolders = await this.sessionService.getAllFolders();
         const lowerQuery = query.toLowerCase();
 
         return allFolders
@@ -92,15 +71,9 @@ export class SessionDirProvider extends IMentionProvider {
     async getHoverPreview(targetURL) {
         const folderId = targetURL.pathname.substring(1); // 移除前导的 '/'
         const folder = this.sessionService.findItemById(folderId);
-
-        if (folder && folder.type === 'folder') {
-            const childCount = folder.children ? folder.children.length : 0;
-            return {
-                // [MODIFIED] Access title from metadata
-                title: folder.metadata.title,
-                contentHTML: `<p>包含 ${childCount} 个项目。</p>`,
-                icon: '📁'
-            };
+        if (folder?.type === 'folder') {
+            const childCount = folder.children?.length || 0;
+            return { title: folder.metadata.title, contentHTML: `<p>包含 ${childCount} 个项目。</p>`, icon: '📁' };
         }
         return null;
     }
@@ -117,7 +90,7 @@ export class SessionDirProvider extends IMentionProvider {
             // 在实际应用中，你可能希望在会话列表中展开此文件夹。
             // dispatch 一个 action 到 store 来处理。
             this.sessionService.store.dispatch({ type: 'FOLDER_TOGGLE', payload: { folderId } });
-            console.log(`[SessionDirProvider] Toggled folder: "${folder.title}".`);
+            console.log(`[SessionDirProvider] Toggled folder: "${folder.metadata.title}".`);
         }
     }
     

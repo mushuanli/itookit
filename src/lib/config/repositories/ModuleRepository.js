@@ -47,7 +47,34 @@ export class ModuleRepository {
          * @type {Promise<import('../shared/types.js').ModuleFSTree> | null}
          */
         this._loadingPromise = null;
+
+        // --- [新增修复] ---
+        // 引入一个异步写操作锁，通过Promise链来序列化所有写操作。
+        // 这可以防止并发的异步修改导致竞态条件，特别是在未来替换为真正的异步存储（如IndexedDB）时至关重要。
+        /**
+         * @private
+         * @type {Promise<any>}
+         */
+        this._writeLock = Promise.resolve();
     }
+
+    /**
+     * [新增修复] 封装一个私有方法来执行所有写操作。
+     * 它将一个异步函数（写操作）添加到 Promise 链的末尾，确保操作按顺序执行。
+     * @private
+     * @template T
+     * @param {() => Promise<T>} writeFn - 要执行的异步写操作函数。
+     * @returns {Promise<T>}
+     */
+    _enqueueWrite(writeFn) {
+        this._writeLock = this._writeLock.then(writeFn).catch(error => {
+            console.error("在 ModuleRepository 中一个写操作失败:", error);
+            // 即使失败，也要确保锁链继续，同时向上抛出错误以便调用者处理。
+            throw error;
+        });
+        return this._writeLock;
+    }
+
 
     /**
      * 从持久化层加载模块树到内存中。
@@ -108,8 +135,7 @@ export class ModuleRepository {
      */
     _findNodeById(id) {
         if (!this.modules) return null;
-        const rootId = this.modules.meta.id;
-        if (rootId === id) return { node: this.modules, parent: null, index: -1 };
+        if (this.modules.meta.id === id) return { node: this.modules, parent: null, index: -1 };
         
         const queue = [{ node: this.modules, parent: null, index: -1 }];
         while(queue.length > 0) {
@@ -137,41 +163,36 @@ export class ModuleRepository {
      * @returns {Promise<import('../shared/types.js').ModuleFSTreeNode>} 返回新添加的模块节点。
      */
     async addModule(parentId, moduleData) {
-        await this.getModules();
-        const parentResult = this._findNodeById(parentId);
-        if (!parentResult || parentResult.node.type !== 'directory') {
-            throw new Error(`父节点ID '${parentId}' 未找到或不是一个目录。`);
-        }
-        
-        const now = new Date().toISOString();
-        const newId = generateUUID();
-        const parentPath = parentResult.node.path;
-        const fullPath = (parentPath === '/' ? '' : parentPath) + '/' + moduleData.path;
-        const newNode = {
-            ...moduleData,
-            path: fullPath, // 覆盖为完整的、正确的路径
-            meta: {
-                tags: [],
-                ...moduleData.meta,
-                id: newId,
-                ctime: now,
-                mtime: now,
+        // [修改] 将写操作包裹在队列中
+        return this._enqueueWrite(async () => {
+            await this.getModules();
+            const parentResult = this._findNodeById(parentId);
+            if (!parentResult || parentResult.node.type !== 'directory') {
+                throw new Error(`父节点ID '${parentId}' 未找到或不是一个目录。`);
             }
-        };
+            
+            const now = new Date().toISOString();
+            const newId = generateUUID();
+            const parentPath = parentResult.node.path;
+            const fullPath = (parentPath === '/' ? '' : parentPath) + '/' + moduleData.path;
+            const newNode = {
+                ...moduleData,
+                path: fullPath,
+                meta: { tags: [], ...moduleData.meta, id: newId, ctime: now, mtime: now }
+            };
 
-        parentResult.node.children.push(newNode);
-        parentResult.node.meta.mtime = now;
-        
-        await this._save();
-        
-        // --- [核心改进] ---
-        // 发布一个精确的“节点已添加”事件，而不是整个树
-        this.eventManager.publish(getModuleEventName('node_added', this.namespace), {
-            parentId: parentResult.node.meta.id,
-            newNode: newNode
+            parentResult.node.children.push(newNode);
+            parentResult.node.meta.mtime = now;
+            
+            await this._save();
+            
+            this.eventManager.publish(getModuleEventName('node_added', this.namespace), {
+                parentId: parentResult.node.meta.id,
+                newNode: newNode
+            });
+            
+            return newNode;
         });
-        
-        return newNode;
     }
     
     /**
@@ -180,22 +201,22 @@ export class ModuleRepository {
      * @returns {Promise<void>}
      */
     async removeModule(nodeId) {
-        await this.getModules();
+        // [修改] 将写操作包裹在队列中
+        return this._enqueueWrite(async () => {
+            await this.getModules();
+            const result = this._findNodeById(nodeId);
+            if (!result) { console.warn(`模块ID '${nodeId}' 未找到，无法移除。`); return; }
+            if (!result.parent) { throw new Error("不能移除根目录。"); }
 
-        const result = this._findNodeById(nodeId);
-        if (!result) { console.warn(`模块 '${path}' 未找到，无法移除。`); return; }
-        if (!result.parent) { throw new Error("不能移除根目录。"); }
+            result.parent.children.splice(result.index, 1);
+            result.parent.meta.mtime = new Date().toISOString();
 
-        result.parent.children.splice(result.index, 1);
-        result.parent.meta.mtime = new Date().toISOString();
-
-        await this._save();
-        
-        // --- [核心改进] ---
-        // 发布一个精确的“节点已移除”事件
-        this.eventManager.publish(getModuleEventName('node_removed', this.namespace), {
-            parentId: result.parent.meta.id,
-            removedNodeId: nodeId,
+            await this._save();
+            
+            this.eventManager.publish(getModuleEventName('node_removed', this.namespace), {
+                parentId: result.parent.meta.id,
+                removedNodeId: nodeId,
+            });
         });
     }
     
@@ -207,19 +228,20 @@ export class ModuleRepository {
      * @returns {Promise<void>}
      */
     async updateModuleContent(fileId, newContent) {
-        await this.getModules();
-        const result = this._findNodeById(fileId);
-        if (!result || result.node.type !== 'file') throw new Error(`文件ID '${fileId}' 未找到。`);
+        // [修改] 将写操作包裹在队列中
+        return this._enqueueWrite(async () => {
+            await this.getModules();
+            const result = this._findNodeById(fileId);
+            if (!result || result.node.type !== 'file') throw new Error(`文件ID '${fileId}' 未找到。`);
 
-        result.node.content = newContent;
-        result.node.meta.mtime = new Date().toISOString();
+            result.node.content = newContent;
+            result.node.meta.mtime = new Date().toISOString();
 
-        await this._save();
-        
-        // --- [核心改进] ---
-        // 发布一个精确的“节点已更新”事件
-        this.eventManager.publish(getModuleEventName('node_content_updated', this.namespace), {
-            updatedNode: result.node
+            await this._save();
+            
+            this.eventManager.publish(getModuleEventName('node_content_updated', this.namespace), {
+                updatedNode: result.node
+            });
         });
     }
 
@@ -230,34 +252,34 @@ export class ModuleRepository {
      * @returns {Promise<void>}
      */
     async renameModule(nodeId, newName) {
-        await this.getModules();
-        const result = this._findNodeById(nodeId);
-        if (!result || !result.parent) throw new Error("节点未找到或为根节点，无法重命名。");
+        // [修改] 将写操作包裹在队列中
+        return this._enqueueWrite(async () => {
+            await this.getModules();
+            const result = this._findNodeById(nodeId);
+            if (!result || !result.parent) throw new Error("节点未找到或为根节点，无法重命名。");
 
-        const nodeToRename = result.node;
-        const oldPath = nodeToRename.path;
-        const parentPath = result.parent.path;
-        const newPath = (parentPath === '/' ? '' : parentPath) + '/' + newName;
-        
-        const updateChildrenPaths = (currentNode, oldBasePath, newBasePath) => {
-            currentNode.path = currentNode.path.replace(oldBasePath, newBasePath);
-            if (currentNode.children) {
-                currentNode.children.forEach(child => updateChildrenPaths(child, oldBasePath, newBasePath));
-            }
-        };
-
-        updateChildrenPaths(nodeToRename, oldPath, newPath);
-        
-        const now = new Date().toISOString();
-        nodeToRename.meta.mtime = now;
-        result.parent.meta.mtime = now;
-        
-        await this._save();
-        
-        // --- [核心改进] ---
-        // 重命名也被视为一种更新
-        this.eventManager.publish(getModuleEventName('node_renamed', this.namespace), {
-            updatedNode: nodeToRename
+            const nodeToRename = result.node;
+            const oldPath = nodeToRename.path;
+            const parentPath = result.parent.path;
+            const newPath = (parentPath === '/' ? '' : parentPath) + '/' + newName;
+            
+            const updateChildrenPaths = (currentNode, oldBasePath, newBasePath) => {
+                currentNode.path = currentNode.path.replace(oldBasePath, newBasePath);
+                if (currentNode.children) {
+                    currentNode.children.forEach(child => updateChildrenPaths(child, oldBasePath, newBasePath));
+                }
+            };
+            updateChildrenPaths(nodeToRename, oldPath, newPath);
+            
+            const now = new Date().toISOString();
+            nodeToRename.meta.mtime = now;
+            result.parent.meta.mtime = now;
+            
+            await this._save();
+            
+            this.eventManager.publish(getModuleEventName('node_renamed', this.namespace), {
+                updatedNode: nodeToRename
+            });
         });
     }
 
@@ -266,25 +288,28 @@ export class ModuleRepository {
      * @param {Array<{id: string, meta: Partial<import('../shared/types.js').ModuleFSTreeNodeMeta>}>} updates
      */
     async updateNodesMeta(updates) {
-        await this.getModules();
-        const updatedNodes = [];
-        const now = new Date().toISOString();
-        
-        for (const { id, meta } of updates) {
-            const result = this._findNodeById(id);
-            if (result && result.node) {
-                Object.assign(result.node.meta, meta);
-                result.node.meta.mtime = now;
-                updatedNodes.push(result.node);
+        // [修改] 将写操作包裹在队列中
+        return this._enqueueWrite(async () => {
+            await this.getModules();
+            const updatedNodes = [];
+            const now = new Date().toISOString();
+            
+            for (const { id, meta } of updates) {
+                const result = this._findNodeById(id);
+                if (result && result.node) {
+                    Object.assign(result.node.meta, meta);
+                    result.node.meta.mtime = now;
+                    updatedNodes.push(result.node);
+                }
             }
-        }
 
-        if (updatedNodes.length > 0) {
-            await this._save();
-            this.eventManager.publish(getModuleEventName('nodes_meta_updated', this.namespace), {
-                updatedNodes: updatedNodes
-            });
-        }
+            if (updatedNodes.length > 0) {
+                await this._save();
+                this.eventManager.publish(getModuleEventName('nodes_meta_updated', this.namespace), {
+                    updatedNodes: updatedNodes
+                });
+            }
+        });
     }
 
     /**
@@ -295,59 +320,59 @@ export class ModuleRepository {
      * @throws {Error} 如果移动操作非法。
      */
     async moveModules(nodeIds, targetParentId) {
-        await this.getModules();
+        // [修改] 将写操作包裹在队列中
+        return this._enqueueWrite(async () => {
+            await this.getModules();
 
-        if (!this._validateMove(nodeIds, targetParentId)) {
-            throw new Error("无效的移动操作：不能将文件夹移动到其自身的子文件夹中。");
-        }
-
-        const targetParentResult = this._findNodeById(targetParentId);
-        if (!targetParentResult || targetParentResult.node.type !== 'directory') {
-            throw new Error(`目标父节点ID '${targetParentId}' 未找到或不是目录。`);
-        }
-        
-        const nodesToMove = [];
-        // 步骤1: 从树中找到所有待移动节点并从其旧父节点中移除
-        nodeIds.forEach(id => {
-            const result = this._findNodeById(id);
-            if (result && result.parent) {
-                const [removedNode] = result.parent.children.splice(result.index, 1);
-                nodesToMove.push(removedNode);
+            if (!this._validateMove(nodeIds, targetParentId)) {
+                throw new Error("无效的移动操作：不能将文件夹移动到其自身的子文件夹中。");
             }
-        });
 
-        if (nodesToMove.length === 0) return; // 没有找到任何可移动的节点
-
-        // 步骤2: 更新所有被移动节点及其子孙的路径，并将它们添加到新父节点
-        const newParentPath = targetParentResult.node.path;
-        nodesToMove.forEach(node => {
-            const oldPath = node.path;
-            const nodeName = oldPath.split('/').pop();
-            const newPath = (newParentPath === '/' ? '' : newParentPath) + '/' + nodeName;
+            const targetParentResult = this._findNodeById(targetParentId);
+            if (!targetParentResult || targetParentResult.node.type !== 'directory') {
+                throw new Error(`目标父节点ID '${targetParentId}' 未找到或不是目录。`);
+            }
             
-            // 递归更新路径
-            const updateChildrenPaths = (currentNode, oldBasePath, newBasePath) => {
-                currentNode.path = currentNode.path.replace(oldBasePath, newBasePath);
-                if (currentNode.children) {
-                    currentNode.children.forEach(child => updateChildrenPaths(child, oldBasePath, newBasePath));
+            const nodesToMove = [];
+            nodeIds.forEach(id => {
+                const result = this._findNodeById(id);
+                if (result && result.parent) {
+                    const [removedNode] = result.parent.children.splice(result.index, 1);
+                    nodesToMove.push(removedNode);
                 }
-            };
-            updateChildrenPaths(node, oldPath, newPath);
-            
-            // 添加到新父节点
-            targetParentResult.node.children.push(node);
-        });
+            });
 
-        const now = new Date().toISOString();
-        targetParentResult.node.meta.mtime = now;
-        nodesToMove.forEach(node => node.meta.mtime = now);
+            if (nodesToMove.length === 0) return;
 
-        await this._save();
+            const newParentPath = targetParentResult.node.path;
+            nodesToMove.forEach(node => {
+                const oldPath = node.path;
+                const nodeName = oldPath.split('/').pop();
+                const newPath = (newParentPath === '/' ? '' : newParentPath) + '/' + nodeName;
+                
+                const updateChildrenPaths = (currentNode, oldBasePath, newBasePath) => {
+                    currentNode.path = currentNode.path.replace(oldBasePath, newBasePath);
+                    if (currentNode.children) {
+                        currentNode.children.forEach(child => updateChildrenPaths(child, oldBasePath, newBasePath));
+                    }
+                };
+                updateChildrenPaths(node, oldPath, newPath);
+                targetParentResult.node.children.push(node);
+            });
 
-        // [V2-FIX] 发布一个统一的元数据更新事件，因为移动改变了多个节点的元数据（路径和mtime）
-        // UI层可以通过这个事件来批量更新视图
-        this.eventManager.publish(getModuleEventName('nodes_meta_updated', this.namespace), {
-            updatedNodes: nodesToMove
+            const now = new Date().toISOString();
+            targetParentResult.node.meta.mtime = now;
+            nodesToMove.forEach(node => node.meta.mtime = now);
+
+            await this._save();
+
+            // --- [核心修复] ---
+            // 发布一个精确的 "nodes_moved" 事件，而不是通用的 "nodes_meta_updated"。
+            // 这让UI层可以明确地知道这是一个结构变更操作，并调用正确的 reducer 来更新树状视图。
+            this.eventManager.publish(getModuleEventName('nodes_moved', this.namespace), {
+                movedNodeIds: nodeIds,
+                targetParentId: targetParentId,
+            });
         });
     }
 

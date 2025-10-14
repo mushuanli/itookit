@@ -72,10 +72,11 @@ export class IMemoryProvider {
      * @returns {Promise<ClozeState>} A Promise that resolves to the new, initial state for the cloze.
      */
     async resetState(clozeId) {
-        console.warn(`IMemoryProvider: Method 'resetState' is not implemented. Defaulting to no-op for ${clozeId}.`);
-        // Find the current state from the host app's storage and return it.
-        // For this example, we can't do much. A real implementation would fetch/clear from a DB.
-        const states = await this.getInitialStates([clozeId]);
-        return states.get(clozeId);
+        // --- [核心修复] ---
+        // 移除了接口中不规范的默认实现。
+        // 接口（Interface）的职责是定义契约，而不应包含具体的业务逻辑。
+        // 此修改强制任何实现 IMemoryProvider 的类都必须提供自己的 resetState 逻辑，
+        // 避免了依赖一个实际上无效的默认行为。
+        throw new Error("IMemoryProvider: Method 'resetState' must be implemented.");
     }
 }
