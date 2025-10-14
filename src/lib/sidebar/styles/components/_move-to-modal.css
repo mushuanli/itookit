@@ -1,0 +1,104 @@
+/* ==========================================================================
+   #sidebar/styles/components/_move-to-modal.css
+   Component: Move To Modal
+   ========================================================================== */
+
+.mdx-move-modal-overlay {
+    display: none; /* Initially hidden */
+    position: fixed;
+    inset: 0;
+    background-color: rgba(0,0,0,0.5);
+    z-index: var(--z-index-popover, 2000); /* Use variable with fallback */
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-family-sans);
+    color: var(--color-gray-700);
+}
+
+.mdx-move-modal {
+    background-color: var(--color-white);
+    border-radius: var(--border-radius-lg);
+    width: 400px;
+    max-width: 90vw;
+    box-shadow: var(--box-shadow-default);
+    display: flex;
+    flex-direction: column;
+}
+
+.mdx-move-modal__header {
+    padding: var(--spacing-4);
+    border-bottom: 1px solid var(--color-gray-200);
+    font-weight: 600;
+    color: var(--color-gray-900);
+}
+
+.mdx-move-modal__body {
+    padding: var(--spacing-2) var(--spacing-4);
+    max-height: 40vh;
+    overflow-y: auto;
+}
+
+.mdx-move-modal__footer {
+    padding: var(--spacing-3) var(--spacing-4);
+    border-top: 1px solid var(--color-gray-200);
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--spacing-2);
+}
+
+.mdx-move-modal__btn {
+    padding: var(--spacing-2) var(--spacing-4);
+    border-radius: var(--border-radius-md);
+    border: 1px solid var(--color-gray-300);
+    background-color: var(--color-gray-50);
+    transition: background-color var(--transition-fast);
+}
+
+.mdx-move-modal__btn:hover:not(:disabled) {
+    background-color: var(--color-gray-100);
+}
+
+.mdx-move-modal__btn--primary {
+    background-color: var(--color-primary-default);
+    color: var(--color-white);
+    border-color: var(--color-primary-default);
+}
+
+.mdx-move-modal__btn--primary:hover:not(:disabled) {
+    background-color: var(--color-primary-hover);
+}
+
+.mdx-move-modal__btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.mdx-move-modal__folder {
+    display: flex;
+    align-items: center;
+    padding: var(--spacing-1-5);
+    margin-left: calc(var(--level, 0) * 20px);
+    cursor: pointer;
+    border-radius: var(--border-radius-sm);
+    transition: background-color var(--transition-fast);
+}
+
+.mdx-move-modal__folder:hover {
+    background-color: var(--color-gray-100);
+}
+
+.mdx-move-modal__folder-toggle,
+.mdx-move-modal__folder-icon {
+    margin-right: var(--spacing-2);
+    flex-shrink: 0;
+    color: var(--color-gray-500);
+}
+
+.mdx-move-modal__folder-title.is-selected {
+    font-weight: 600;
+    color: var(--color-primary-default);
+}
+
+.mdx-move-modal__folder-children {
+    /* Children container styles if needed */
+}

@@ -1,0 +1,1018 @@
+/* ==========================================================================
+   #sidebar/styles/session-ui.unified.css
+   MDx SessionUI Kit - Unified Stylesheet v1.0.0
+   - This file imports all necessary modules.
+   - For customization, override the CSS variables defined in base/_variables.css.
+   merge cmd -
+   npx postcss styles/session-ui.unified.css -o index.css
+   ========================================================================== */
+
+/* #sidebar/styles/base/_variables.css */
+
+/* ==========================================================================
+   Base: CSS Variables
+   - Centralized design tokens for colors, fonts, spacing, etc.
+   - Customize these values to theme the entire UI kit.
+   ========================================================================== */
+
+:root {
+  /* --- Colors --- */
+  /* Grayscale Palette */
+  --color-white: #ffffff;
+  --color-gray-50: #f9fafb;   /* Subtle background */
+  --color-gray-100: #f3f4f6;  /* Hover background */
+  --color-gray-200: #e5e7eb;  /* Default border */
+  --color-gray-300: #d1d5db;  /* Medium border, input border */
+  --color-gray-400: #9ca3af;  /* Subtle text, icons */
+  --color-gray-500: #6b7280;  /* Muted text */
+  --color-gray-700: #374151;  /* Default text */
+  --color-gray-900: #111827;  /* Strong text, titles */
+
+  /* Primary/Action Color */
+  --color-primary-default: #3b82f6;
+  --color-primary-hover: #2563eb;
+  --color-primary-bg-light: #dbeafe; /* Light background for drop targets */
+
+  /* Accent/Active Color */
+  --color-accent-default: #4f46e5;
+  --color-accent-bg-light: #eef2ff; /* Active background */
+
+  /* --- Typography --- */
+  --font-family-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-base: 14px;
+  --font-size-md: 13px; /* Special case for summary/meta */
+
+  /* --- Spacing --- */
+  --spacing-1: 4px;
+  --spacing-1-5: 6px;
+  --spacing-2: 8px;
+  --spacing-2-5: 10px;
+  --spacing-3: 12px;
+  --spacing-4: 16px;
+  --spacing-5: 20px;
+
+  /* --- Borders & Shadows --- */
+  --border-radius-sm: 4px;
+  --border-radius-md: 6px;
+  --border-radius-lg: 8px;
+  --border-radius-pill: 10px;
+  --border-radius-full: 9999px;
+  --box-shadow-default: 0 4px 12px rgba(0,0,0,0.1);
+
+  /* --- Sizing --- */
+  --input-height: 36px; /* Example for consistent input sizes */
+  --button-height: 36px;
+
+  /* --- Z-Index --- */
+  --z-index-popover: 1000;
+
+  /* --- Transitions --- */
+  --transition-fast: 0.2s ease;
+  --transition-medium: 0.3s ease-in-out;
+}
+
+/* #sidebar/styles/base/_reset.css */
+
+/* ==========================================================================
+   Base: Reset
+   - A simple reset for consistent styling.
+   ========================================================================== */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: var(--font-family-sans);
+  color: var(--color-gray-700);
+  margin: 0;
+}
+
+ul, ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+button {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* ==========================================================================
+   #sidebar/styles/components/_session-list.css
+   Component: Session List
+   ========================================================================== */
+
+/* --- 主容器与布局 --- */
+
+.mdx-session-list {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    background-color: var(--color-gray-50);
+    border-right: 1px solid var(--color-gray-200);
+    font-family: var(--font-family-sans);
+    color: var(--color-gray-700);
+    overflow: hidden;
+    user-select: none;
+    position: relative;
+}
+
+/* --- 标题栏 --- */
+
+.mdx-session-list__title-bar {
+    padding: var(--spacing-3) var(--spacing-4);
+    border-bottom: 1px solid var(--color-gray-200);
+    flex-shrink: 0;
+}
+
+.mdx-session-list__title {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--color-gray-900);
+}
+
+/* --- 头部: 搜索与新建 --- */
+
+.mdx-session-list__header {
+    padding: var(--spacing-2);
+    border-bottom: 1px solid var(--color-gray-200);
+    flex-shrink: 0;
+}
+
+.mdx-session-list__search {
+    width: 100%;
+    padding: var(--spacing-2) var(--spacing-3);
+    border: 1px solid var(--color-gray-300);
+    border-radius: var(--border-radius-md);
+    font-size: var(--font-size-base);
+}
+
+.mdx-session-list__new-controls {
+    display: grid;
+    grid-template-columns: 1fr auto auto; /* Main button, icon button, icon button */
+    gap: var(--spacing-2);
+    margin-top: var(--spacing-2);
+}
+
+.mdx-session-list__new-btn {
+    flex-grow: 1;
+    padding: var(--spacing-2) var(--spacing-3);
+    border: 1px solid var(--color-primary-default);
+    background-color: var(--color-primary-default);
+    color: var(--color-white);
+    border-radius: var(--border-radius-md);
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-1-5);
+    transition: background-color var(--transition-fast);
+}
+
+.mdx-session-list__new-btn:hover {
+    background-color: var(--color-primary-hover);
+}
+
+.mdx-session-list__new-btn--icon,
+.mdx-session-list__new-btn--folder {
+    flex-grow: 0;
+    padding: var(--spacing-2) var(--spacing-2-5);
+    background-color: var(--color-gray-100);
+    color: var(--color-gray-700);
+    border-color: var(--color-gray-300);
+}
+
+.mdx-session-list__new-btn--icon:hover,
+.mdx-session-list__new-btn--folder:hover {
+    background-color: var(--color-gray-200);
+}
+
+/* --- 列表主体 --- */
+
+.mdx-session-list__body {
+    flex-grow: 1;
+    overflow-y: auto;
+    /* [修改] 移除 body 的垂直 padding，因为它会干扰整行 hover 效果 */
+    padding: 0; 
+}
+
+/* --- 创建中输入框 --- */
+
+.mdx-session-list__item-creator {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-2);
+    padding: var(--spacing-2-5) var(--spacing-3);
+    margin: 0 var(--spacing-2) var(--spacing-2); /* Add bottom margin */
+    border: 1px solid var(--color-primary-default);
+    border-radius: var(--border-radius-md);
+    background-color: var(--color-white);
+}
+
+.mdx-session-list__item-creator-input {
+    flex-grow: 1;
+    border: none;
+    outline: none;
+    padding: 0;
+    font-size: var(--font-size-base);
+    font-weight: 500;
+    background: transparent;
+}
+
+/* --- 通用列表项样式 --- */
+
+.mdx-session-item {
+    position: relative;
+    /* [新增] 为每个 item 添加上下间距，替代 body 的 padding */
+    padding: var(--spacing-0-5) 0;
+}
+
+.mdx-session-item__main-row:hover > .mdx-session-item__content,
+.mdx-session-item__main-row:hover > .mdx-session-folder__header {
+    background-color: var(--color-gray-100);
+}
+
+.mdx-session-item__content--is-active,
+.mdx-session-folder--is-active > .mdx-session-folder__header {
+    background-color: var(--color-accent-bg-light);
+    border-left-color: var(--color-accent-default);
+}
+
+.mdx-session-item__content {
+    position: relative;
+    display: flex;
+    align-items: flex-start;
+    /* [修改] 移除水平 padding，因为它现在由 __main-row 控制 */
+    padding: var(--spacing-2-5) 0;
+    cursor: pointer;
+    border-left: 3px solid transparent;
+    gap: var(--spacing-2);
+    transition: background-color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.mdx-session-item__icon { flex-shrink: 0; margin-top: 2px; }
+
+.mdx-session-item__main { flex-grow: 1; display: flex; flex-direction: column; gap: var(--spacing-1); min-width: 0; }
+
+.mdx-session-item__meta { flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end; gap: var(--spacing-1); margin-left: auto; padding-left: var(--spacing-3); text-align: right; font-size: var(--font-size-md); color: var(--color-gray-500); }
+
+.mdx-session-item__title-wrapper { display: flex; align-items: center; }
+
+.mdx-session-item__title { font-weight: 500; color: var(--color-gray-900); word-break: break-word; transition: color var(--transition-fast); }
+
+.mdx-session-item__indicator { width: 8px; height: 8px; background-color: var(--color-primary-default); border-radius: var(--border-radius-full); margin-left: var(--spacing-1-5); flex-shrink: 0; }
+
+.mdx-session-item__summary { font-size: var(--font-size-md); color: var(--color-gray-500); line-height: 1.4; }
+
+.mdx-session-item__timestamp { font-size: var(--font-size-sm); color: var(--color-gray-400); }
+
+.mdx-session-item__tags { display: flex; flex-wrap: wrap; gap: var(--spacing-1); margin-top: var(--spacing-1); }
+
+.mdx-session-item__badges { display: flex; gap: var(--spacing-1-5); }
+
+.mdx-badge { font-size: var(--font-size-xs); background-color: var(--color-gray-100); padding: 2px 6px; border-radius: var(--border-radius-sm); }
+
+/* --- 文件夹样式 --- */
+
+.mdx-session-folder { position: relative; }
+
+.mdx-session-folder__header {
+    display: flex;
+    align-items: center;
+    /* [修改] 移除水平 padding */
+    padding: var(--spacing-2) 0;
+    cursor: pointer;
+    border-left: 3px solid transparent;
+    transition: background-color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.mdx-session-folder__toggle { width: 16px; height: 16px; flex-shrink: 0; position: relative; margin-right: var(--spacing-1); }
+
+.mdx-session-folder__toggle::before { content: '▶'; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 10px; color: var(--color-gray-500); transition: transform var(--transition-fast); }
+
+.mdx-session-folder__toggle.mdx-session-folder--is-expanded::before { transform: translate(-50%, -50%) rotate(90deg); }
+
+.mdx-session-folder__icon { margin-right: var(--spacing-2); }
+
+.mdx-session-folder__title { font-weight: 500; transition: color var(--transition-fast); }
+
+.mdx-session-folder__children { padding-left: var(--spacing-5); }
+
+/* --- 项内大纲预览 --- */
+
+.mdx-session-item__outline { max-height: 0; overflow: hidden; transition: max-height var(--transition-medium), padding var(--transition-medium), border-top var(--transition-medium); background-color: var(--color-gray-50); padding: 0 var(--spacing-3) 0 45px; font-size: var(--font-size-md); border-left: 3px solid transparent; border-top: 1px solid transparent; }
+
+.mdx-session-item__outline--is-expanded { max-height: 400px; padding-top: var(--spacing-1-5); padding-bottom: var(--spacing-2-5); border-top-color: var(--color-gray-100); overflow-y: auto; }
+
+.mdx-session-item__outline--is-expanded::-webkit-scrollbar { width: 4px; }
+
+.mdx-session-item__outline--is-expanded::-webkit-scrollbar-thumb { background-color: var(--color-gray-300); border-radius: 2px; }
+
+.mdx-session-item__outline--is-expanded::-webkit-scrollbar-thumb:hover { background-color: var(--color-gray-400); }
+
+.mdx-session-item__outline-toggle { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: var(--color-accent-bg-light); border: 1px solid var(--color-gray-300); border-radius: var(--border-radius-full); width: 22px; height: 22px; cursor: pointer; display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity var(--transition-fast); }
+
+.mdx-session-item:hover .mdx-session-item__outline-toggle { opacity: 1; }
+
+.mdx-session-item__outline-toggle-icon { width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 5px solid var(--color-accent-default); transition: transform var(--transition-fast); }
+
+.mdx-session-item__outline-toggle-icon--is-expanded { transform: rotate(180deg); }
+
+.mdx-session-item__outline-list { color: var(--color-gray-700); }
+
+.mdx-session-item__outline-item { padding: 2px 0; }
+
+.mdx-session-item__outline-item a:hover .mdx-session-item__outline-text { color: var(--color-accent-default); }
+
+.mdx-session-item__outline-text { transition: color var(--transition-fast); }
+
+.mdx-session-item__outline-item--level-1 .mdx-session-item__outline-text { font-weight: 500; }
+
+.mdx-session-item__outline-item--level-2 { padding-left: 15px; color: var(--color-gray-500); position: relative; }
+
+.mdx-session-item__outline-item--level-2::before { content: '•'; position: absolute; left: 5px; color: var(--color-gray-400); }
+
+/* --- 密度样式 --- */
+
+.mdx-session-list--density-compact .mdx-session-item__content { padding-top: var(--spacing-1-5); padding-bottom: var(--spacing-1-5); }
+
+.mdx-session-list--density-compact .mdx-session-item__summary,
+.mdx-session-list--density-compact .mdx-session-item__tags,
+.mdx-session-list--density-compact .mdx-session-item__badges { display: none; }
+
+.mdx-session-list--density-compact .mdx-session-item__main { flex-direction: row; align-items: center; justify-content: space-between; }
+
+/* --- [优化] 多选状态样式 (移除 !important) --- */
+
+/* 通过增加 `.mdx-session-item` 上下文来提高特指度，使其高于 :hover 状态 */
+
+.mdx-session-item .mdx-session-item__content.is-selected,
+.mdx-session-folder.is-selected > .mdx-session-folder__header {
+    background-color: var(--color-primary-bg-light);
+    border-left-color: var(--color-primary-default);
+}
+
+.mdx-session-item__content.is-selected .mdx-session-item__title,
+.mdx-session-folder__header.is-selected .mdx-session-folder__title {
+    color: var(--color-primary-default);
+}
+
+/* --- 拖放样式 --- */
+
+.is-dragging { opacity: 0.5; background: var(--color-accent-bg-light); }
+
+.drop-target-above > .mdx-session-item__content, .drop-target-above > .mdx-session-folder__header { border-top: 2px solid var(--color-primary-default); }
+
+.drop-target-below > .mdx-session-item__content, .drop-target-below > .mdx-session-folder__header { border-bottom: 2px solid var(--color-primary-default); }
+
+.drop-target-folder > .mdx-session-folder__header { background-color: var(--color-primary-bg-light); outline: 1px solid var(--color-primary-default); }
+
+/* --- [NEW] Selection Mode & Checkbox Styles --- */
+
+/* [NEW] This new wrapper is now the flex container for the checkbox and the main content/header */
+
+.mdx-session-item__main-row {
+    display: flex;
+    align-items: center;
+    /* [修改] 将水平 padding 移到这里，并添加过渡效果 */
+    padding: 0 var(--spacing-3);
+    transition: padding-left var(--transition-fast);
+}
+
+/* The content and header now grow to fill the space inside the main-row */
+
+.mdx-session-item__content,
+.mdx-session-folder__header {
+    /* [MODIFIED] Make content grow to fill space next to checkbox */
+    flex-grow: 1;
+    min-width: 0;
+}
+
+.mdx-session-item__checkbox-wrapper {
+    /* Wrapper for checkbox to control spacing and alignment */
+    flex-shrink: 0;
+    width: 0;
+    /* Use padding instead of margin to avoid layout shifts on hover */
+    padding-left: 0;
+    overflow: hidden;
+    transition: width var(--transition-fast);
+    /* [新增] 让 checkbox 在 wrapper 内居中 */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    /* [新增] 与右侧内容的间距 */
+    margin-right: 0;
+    transition: width var(--transition-fast), margin-right var(--transition-fast);
+}
+
+/* 当进入选择模式时... */
+
+.mdx-session-item.is-selection-mode .mdx-session-item__main-row {
+    /* [修改] 移除左边距，因为 checkbox-wrapper 会提供空间 */
+    padding-left: 0;
+}
+
+.mdx-session-item.is-selection-mode .mdx-session-item__checkbox-wrapper {
+    /* [修改] width 现在是 16px(checkbox) + 12px(左边距) = 28px */
+    width: calc(16px + var(--spacing-3)); /* Checkbox width + left padding */
+    margin-right: var(--spacing-2); /* Space between checkbox and content */
+}
+
+.mdx-session-item__checkbox {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--color-primary-default);
+    cursor: pointer;
+    /* [新增] 为 checkbox 添加左边距，使其与非选择模式下的内容对齐 */
+    margin-left: var(--spacing-3);
+}
+
+/* --- 页脚与批量操作栏 --- */
+
+.mdx-session-list__footer {
+    padding: var(--spacing-2) var(--spacing-3);
+    border-top: 1px solid var(--color-gray-200);
+    flex-shrink: 0;
+    /* [MODIFIED] Use a grid to allow for easy overlaying/swapping */
+    display: grid;
+    align-items: center;
+    overflow: hidden; /* Prevent content from spilling during transition */
+}
+
+.mdx-session-list__footer-content,
+.mdx-session-list__bulk-bar {
+    /* Both footer types occupy the same grid cell */
+    grid-row: 1;
+    grid-column: 1;
+    transition: opacity 0.15s ease-in-out, visibility 0.15s ease-in-out;
+}
+
+.mdx-session-list__footer-content {
+    /* [MODIFIED] New layout for normal footer */
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+}
+
+.mdx-session-list__footer button {
+    color: var(--color-gray-500);
+    font-size: var(--font-size-base);
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-1-5);
+    padding: var(--spacing-1) var(--spacing-2);
+    border-radius: var(--border-radius-sm);
+}
+
+.mdx-session-list__footer button:hover {
+    background-color: var(--color-gray-100);
+}
+
+.mdx-session-list__bulk-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background-color: var(--color-gray-900);
+    color: var(--color-white);
+    /* Make it fit inside the footer's padding area */
+    margin: calc(-1 * var(--spacing-2)) calc(-1 * var(--spacing-3));
+    padding: var(--spacing-2) var(--spacing-3);
+    /* Initially hidden */
+    opacity: 0;
+    visibility: hidden;
+}
+
+/* The main class toggles visibility of the two footers */
+
+.mdx-session-list--bulk-mode .mdx-session-list__footer-content {
+    opacity: 0;
+    visibility: hidden;
+}
+
+.mdx-session-list--bulk-mode .mdx-session-list__bulk-bar {
+    opacity: 1;
+    visibility: visible;
+}
+
+/* Styles for new buttons in bulk action bar */
+
+.mdx-session-list__bulk-bar-info {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-3);
+    font-size: var(--font-size-md);
+    font-weight: 500;
+}
+
+.mdx-session-list__bulk-bar-actions {
+    display: flex;
+    gap: var(--spacing-2);
+}
+
+.mdx-session-list__bulk-bar-btn {
+    background-color: var(--color-gray-700);
+    color: var(--color-white);
+    border: none;
+    border-radius: var(--border-radius-md);
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+}
+
+.mdx-session-list__bulk-bar-btn:hover {
+    background-color: var(--color-gray-600);
+}
+
+.mdx-session-list__bulk-bar-btn--danger {
+    background-color: #ef4444;
+}
+
+.mdx-session-list__bulk-bar-btn--danger:hover {
+    background-color: #dc2626;
+}
+
+.mdx-session-list__bulk-bar-btn--text {
+    width: auto;
+    height: auto;
+    background: none;
+    color: var(--color-gray-400);
+    font-size: var(--font-size-sm);
+    text-decoration: underline;
+    padding: 0;
+}
+
+.mdx-session-list__bulk-bar-btn--text:hover {
+    color: var(--color-white);
+}
+
+/* 确保文件夹在选择模式下显示 checkbox */
+
+.mdx-session-item__main-row.is-selection-mode {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.mdx-session-item__checkbox-wrapper {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+}
+
+.mdx-session-item__checkbox {
+    cursor: pointer;
+    width: 16px;
+    height: 16px;
+}
+
+/* 确保文件夹的 header 在有 checkbox 时正确布局 */
+
+.mdx-session-item__main-row.is-selection-mode .mdx-session-folder__header {
+    flex: 1;
+    display: flex;
+    align-items: center;
+}
+
+/* 确保文件内容在有 checkbox 时正确布局 */
+
+.mdx-session-item__main-row.is-selection-mode .mdx-session-item__content {
+    flex: 1;
+    display: flex;
+    align-items: center;
+}
+
+/* ==========================================================================
+   #sidebar/styles/components/_document-outline.css
+   Component: Document Outline
+   ========================================================================== */
+
+.mdx-document-outline {
+    background-color: var(--color-white); border-top: 1px solid var(--color-gray-200);
+    padding: var(--spacing-3) var(--spacing-4); font-size: var(--font-size-base);
+    min-height: 60px; max-height: none; height: auto;
+    overflow-y: auto; user-select: none; resize: vertical; flex-shrink: 0;
+}
+
+.mdx-document-outline__title { font-weight: 600; margin-bottom: var(--spacing-2); color: var(--color-gray-900); }
+
+.mdx-document-outline__placeholder { color: var(--color-gray-400); font-size: var(--font-size-md); }
+
+.mdx-document-outline__list { max-height: none; }
+
+.mdx-document-outline__item { padding: var(--spacing-1) 0; line-height: 1.4; }
+
+.mdx-document-outline__link {
+    color: var(--color-gray-700); transition: color var(--transition-fast);
+    cursor: pointer; display: flex; align-items: flex-start;
+    min-width: 0; width: 100%; padding: 2px 0;
+}
+
+.mdx-document-outline__link:hover { color: var(--color-accent-default); }
+
+.mdx-document-outline__text {
+    flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+    white-space: normal; word-break: break-word; line-height: 1.4;
+}
+
+.mdx-document-outline__text[title] { cursor: help; }
+
+.mdx-document-outline__toggle {
+    display: inline-block; flex-shrink: 0; width: 16px; height: 16px;
+    margin-right: var(--spacing-1); position: relative;
+}
+
+.mdx-document-outline__toggle::before {
+    content: '▶'; position: absolute; top: 50%; left: 50%;
+    transform: translate(-50%, -50%); font-size: 10px;
+    color: var(--color-gray-500); transition: transform var(--transition-fast);
+}
+
+.mdx-document-outline__toggle--is-expanded::before { transform: translate(-50%, -50%) rotate(90deg); }
+
+.mdx-document-outline__toggle--is-placeholder { opacity: 0; cursor: default; }
+
+.mdx-document-outline__item--level-1 > .mdx-document-outline__link > .mdx-document-outline__text { font-weight: 600; }
+
+.mdx-document-outline__item--level-2 { padding-left: var(--spacing-5); }
+
+.mdx-document-outline__item--level-2 > .mdx-document-outline__link > .mdx-document-outline__text { padding-left: var(--spacing-1); }
+
+.mdx-document-outline__list .mdx-document-outline__list { max-height: 0; overflow: hidden; transition: max-height var(--transition-medium); }
+
+.mdx-document-outline__item--level-1--is-expanded > .mdx-document-outline__list { max-height: 1000px; }
+
+/* ==========================================================================
+   #sidebar/styles/components/_popover.css
+   Component: Popover (Used for settings)
+   ========================================================================== */
+
+.mdx-settings-popover {
+    position: absolute; bottom: 45px; left: var(--spacing-2);
+    background-color: var(--color-white); border: 1px solid var(--color-gray-200);
+    border-radius: var(--border-radius-lg); box-shadow: var(--box-shadow-default);
+    z-index: var(--z-index-popover); width: 220px; padding: var(--spacing-3);
+}
+
+.mdx-settings-popover__title {
+    margin: 0 0 var(--spacing-2) 0; font-size: var(--font-size-sm); font-weight: 600;
+    color: var(--color-gray-500); text-transform: uppercase;
+}
+
+.mdx-settings-popover__group { display: flex; gap: var(--spacing-1); margin-bottom: var(--spacing-3); }
+
+.mdx-settings-popover__option-btn {
+    flex-grow: 1; font-size: var(--font-size-md); padding: var(--spacing-1) var(--spacing-2);
+    border: 1px solid var(--color-gray-300); background-color: var(--color-gray-50);
+    border-radius: 5px;
+}
+
+.mdx-settings-popover__option-btn:hover { background-color: var(--color-gray-100); }
+
+.mdx-settings-popover__option-btn--is-active {
+    background-color: var(--color-accent-bg-light); border-color: var(--color-accent-default);
+    color: var(--color-accent-default); font-weight: 500;
+}
+
+.mdx-settings-popover__checkbox-group { display: flex; flex-direction: column; gap: var(--spacing-1-5); }
+
+.mdx-settings-popover__checkbox-label {
+    display: flex; align-items: center; gap: var(--spacing-2);
+    font-size: var(--font-size-base); cursor: pointer;
+}
+
+/* ==========================================================================
+   #sidebar/styles/components/_context-menu.css
+   Component: Context Menu
+   ========================================================================== */
+
+.mdx-context-menu {
+    position: fixed; background-color: var(--color-white);
+    border: 1px solid var(--color-gray-200); border-radius: var(--border-radius-md);
+    box-shadow: var(--box-shadow-default); padding: var(--spacing-1-5) 0;
+    z-index: var(--z-index-popover); min-width: 150px;
+}
+
+.mdx-context-menu__list { /* Resets are in base/_reset.css */ }
+
+.mdx-context-menu__item { margin: 0; padding: 0; }
+
+.mdx-context-menu__button {
+    display: block; width: 100%; text-align: left;
+    padding: var(--spacing-2) var(--spacing-3); font-size: var(--font-size-base);
+}
+
+.mdx-context-menu__button:hover { background-color: var(--color-gray-100); }
+
+.mdx-context-menu__separator {
+    border: none; border-top: 1px solid var(--color-gray-100);
+    margin: var(--spacing-1-5) 0;
+}
+
+/* ==========================================================================
+   #sidebar/styles/components/_move-to-modal.css
+   Component: Move To Modal
+   ========================================================================== */
+
+.mdx-move-modal-overlay {
+    display: none; /* Initially hidden */
+    position: fixed;
+    inset: 0;
+    background-color: rgba(0,0,0,0.5);
+    z-index: var(--z-index-popover, 2000); /* Use variable with fallback */
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-family-sans);
+    color: var(--color-gray-700);
+}
+
+.mdx-move-modal {
+    background-color: var(--color-white);
+    border-radius: var(--border-radius-lg);
+    width: 400px;
+    max-width: 90vw;
+    box-shadow: var(--box-shadow-default);
+    display: flex;
+    flex-direction: column;
+}
+
+.mdx-move-modal__header {
+    padding: var(--spacing-4);
+    border-bottom: 1px solid var(--color-gray-200);
+    font-weight: 600;
+    color: var(--color-gray-900);
+}
+
+.mdx-move-modal__body {
+    padding: var(--spacing-2) var(--spacing-4);
+    max-height: 40vh;
+    overflow-y: auto;
+}
+
+.mdx-move-modal__footer {
+    padding: var(--spacing-3) var(--spacing-4);
+    border-top: 1px solid var(--color-gray-200);
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--spacing-2);
+}
+
+.mdx-move-modal__btn {
+    padding: var(--spacing-2) var(--spacing-4);
+    border-radius: var(--border-radius-md);
+    border: 1px solid var(--color-gray-300);
+    background-color: var(--color-gray-50);
+    transition: background-color var(--transition-fast);
+}
+
+.mdx-move-modal__btn:hover:not(:disabled) {
+    background-color: var(--color-gray-100);
+}
+
+.mdx-move-modal__btn--primary {
+    background-color: var(--color-primary-default);
+    color: var(--color-white);
+    border-color: var(--color-primary-default);
+}
+
+.mdx-move-modal__btn--primary:hover:not(:disabled) {
+    background-color: var(--color-primary-hover);
+}
+
+.mdx-move-modal__btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.mdx-move-modal__folder {
+    display: flex;
+    align-items: center;
+    padding: var(--spacing-1-5);
+    margin-left: calc(var(--level, 0) * 20px);
+    cursor: pointer;
+    border-radius: var(--border-radius-sm);
+    transition: background-color var(--transition-fast);
+}
+
+.mdx-move-modal__folder:hover {
+    background-color: var(--color-gray-100);
+}
+
+.mdx-move-modal__folder-toggle,
+.mdx-move-modal__folder-icon {
+    margin-right: var(--spacing-2);
+    flex-shrink: 0;
+    color: var(--color-gray-500);
+}
+
+.mdx-move-modal__folder-title.is-selected {
+    font-weight: 600;
+    color: var(--color-primary-default);
+}
+
+.mdx-move-modal__folder-children {
+    /* Children container styles if needed */
+}
+
+/* ==========================================================================
+   @mdx/common/components/TagEditor/TagEditorComponent.css
+   Component: Tag Editor
+   - Self-contained styles for the reusable tag editor component.
+   - It uses CSS variables from the host application for theming.
+   ========================================================================== */
+
+.mdx-tag-editor {
+    display: flex;
+    flex-direction: column;
+    background-color: var(--color-white, #fff);
+    /* [修改] 基础组件不再强制拥有边框和阴影，这些由修饰符决定 */
+    border-radius: var(--border-radius-lg, 8px);
+    padding: var(--spacing-3, 12px);
+    width: 320px;
+    font-family: var(--font-family-sans, sans-serif);
+    font-size: var(--font-size-base, 14px);
+}
+
+/* --- [新增] 修饰符类，用于弹窗模式 --- */
+
+.mdx-tag-editor--popover {
+    position: fixed;
+    z-index: var(--z-index-popover, 1000);
+    border: 1px solid var(--color-gray-200, #e5e7eb);
+    box-shadow: var(--box-shadow-default, 0 4px 12px rgba(0,0,0,0.1));
+}
+
+/* 包含所有标签和输入框的区域 */
+
+.mdx-tag-editor__pills {
+    display: flex;
+    flex-wrap: wrap; /* [核心修复] 允许标签换行 */
+    gap: var(--spacing-1-5, 6px);
+    padding: var(--spacing-2, 8px);
+    border: 1px solid var(--color-gray-300, #d1d5db);
+    border-radius: var(--border-radius-md, 6px);
+    background-color: var(--color-white, #fff);
+    
+    /* [优化] 防止因标签过多而无限增高 */
+    max-height: 150px;
+    overflow-y: auto;
+    transition: border-color var(--transition-fast, 0.2s ease);
+}
+
+.mdx-tag-editor__pills:focus-within {
+    border-color: var(--color-primary-default, #3b82f6);
+    box-shadow: 0 0 0 1px var(--color-primary-default, #3b82f6);
+}
+
+/* 单个标签 "药丸" */
+
+.mdx-tag-editor__pill {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-1-5, 6px);
+    background-color: var(--color-gray-100, #f3f4f6);
+    color: var(--color-gray-700, #374151);
+    border-radius: var(--border-radius-pill, 10px);
+    padding: var(--spacing-1, 4px) var(--spacing-2-5, 10px);
+    font-size: var(--font-size-sm, 12px);
+    font-weight: 500;
+}
+
+/* 移除按钮 */
+
+.mdx-tag-editor__remove-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background-color: var(--color-gray-400, #9ca3af);
+    color: var(--color-white, #fff);
+    font-size: 12px;
+    line-height: 1;
+    font-weight: bold;
+    transition: background-color var(--transition-fast, 0.2s ease);
+}
+
+.mdx-tag-editor__remove-btn:hover {
+    background-color: var(--color-gray-500, #6b7280);
+}
+
+/* 输入框的容器和输入框本身 */
+
+.mdx-tag-editor__input-wrapper {
+    flex-grow: 1; /* 占据剩余空间 */
+    display: flex;
+    min-width: 120px; /* 保证输入框不会变得太小 */
+}
+
+.mdx-tag-editor__input {
+    width: 100%;
+    border: none;
+    outline: none;
+    padding: 0;
+    background-color: transparent;
+    font-size: inherit;
+    font-family: inherit;
+    color: var(--color-gray-900, #111827);
+}
+
+/* 建议列表 */
+
+.mdx-tag-editor__suggestions {
+    position: relative; /* 确保它在正常文档流中占据空间 */
+    margin-top: var(--spacing-1, 4px);
+    background-color: var(--color-white, #fff);
+    border: 1px solid var(--color-gray-200, #e5e7eb);
+    border-radius: var(--border-radius-md, 6px);
+    box-shadow: var(--box-shadow-default, 0 4px 12px rgba(0,0,0,0.1));
+    max-height: 180px;
+    overflow-y: auto;
+    z-index: 1; /* 确保在 pills 区域之上 */
+    display: none; /* 由 JS 控制显示 */
+}
+
+/* 单个建议项 */
+
+.mdx-tag-editor__suggestion {
+    padding: var(--spacing-2, 8px) var(--spacing-3, 12px);
+    cursor: pointer;
+    font-size: var(--font-size-md, 13px);
+    transition: background-color var(--transition-fast, 0.2s ease);
+}
+
+.mdx-tag-editor__suggestion:hover {
+    background-color: var(--color-gray-100, #f3f4f6);
+}
+
+.mdx-tag-editor__suggestion.is-active {
+    background-color: var(--color-primary-default, #3b82f6);
+    color: var(--color-white, #fff);
+}
+
+/* 页脚和按钮 */
+
+.mdx-tag-editor__footer {
+    display: flex;
+    justify-content: flex-end; /* 按钮靠右 */
+    gap: var(--spacing-2, 8px);
+    padding-top: var(--spacing-3, 12px);
+    margin-top: var(--spacing-2, 8px);
+    border-top: 1px solid var(--color-gray-200, #e5e7eb);
+    flex-shrink: 0; /* 防止页脚被压缩 */
+}
+
+.mdx-tag-editor__btn {
+    padding: var(--spacing-1-5, 6px) var(--spacing-3, 12px);
+    border-radius: var(--border-radius-md, 6px);
+    border: 1px solid var(--color-gray-300, #d1d5db);
+    background-color: var(--color-white, #fff);
+    font-size: var(--font-size-sm, 12px);
+    font-weight: 500;
+    transition: background-color var(--transition-fast, 0.2s ease), border-color var(--transition-fast, 0.2s ease);
+}
+
+.mdx-tag-editor__btn:hover {
+    background-color: var(--color-gray-50, #f9fafb);
+}
+
+.mdx-tag-editor__btn--primary {
+    background-color: var(--color-primary-default, #3b82f6);
+    color: var(--color-white, #fff);
+    border-color: var(--color-primary-default, #3b82f6);
+}
+
+.mdx-tag-editor__btn--primary:hover {
+    background-color: var(--color-primary-hover, #2563eb);
+}
+
+/* 
+   You would use a build tool (like PostCSS with postcss-import) to bundle
+   these @import statements into a single file for production.
+   For development, modern browsers handle this fine.
+*/

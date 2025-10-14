@@ -1,0 +1,25 @@
+/* ==========================================================================
+   #sidebar/styles/session-ui.unified.css
+   MDx SessionUI Kit - Unified Stylesheet v1.0.0
+   - This file imports all necessary modules.
+   - For customization, override the CSS variables defined in base/_variables.css.
+   merge cmd -
+   npx postcss styles/session-ui.unified.css -o index.css
+   ========================================================================== */
+
+@import url("./base/_variables.css");
+@import url("./base/_reset.css");
+@import url("./components/_session-list.css");
+@import url("./components/_document-outline.css");
+@import url("./components/_popover.css");
+@import url("./components/_context-menu.css");
+@import url('components/_move-to-modal.css');
+
+@import url("../../common/components/TagEditor/TagEditorComponent.css");
+
+
+/* 
+   You would use a build tool (like PostCSS with postcss-import) to bundle
+   these @import statements into a single file for production.
+   For development, modern browsers handle this fine.
+*/

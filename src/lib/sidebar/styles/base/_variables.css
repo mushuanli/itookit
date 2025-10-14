@@ -1,0 +1,64 @@
+/* #sidebar/styles/base/_variables.css */
+/* ==========================================================================
+   Base: CSS Variables
+   - Centralized design tokens for colors, fonts, spacing, etc.
+   - Customize these values to theme the entire UI kit.
+   ========================================================================== */
+
+:root {
+  /* --- Colors --- */
+  /* Grayscale Palette */
+  --color-white: #ffffff;
+  --color-gray-50: #f9fafb;   /* Subtle background */
+  --color-gray-100: #f3f4f6;  /* Hover background */
+  --color-gray-200: #e5e7eb;  /* Default border */
+  --color-gray-300: #d1d5db;  /* Medium border, input border */
+  --color-gray-400: #9ca3af;  /* Subtle text, icons */
+  --color-gray-500: #6b7280;  /* Muted text */
+  --color-gray-700: #374151;  /* Default text */
+  --color-gray-900: #111827;  /* Strong text, titles */
+
+  /* Primary/Action Color */
+  --color-primary-default: #3b82f6;
+  --color-primary-hover: #2563eb;
+  --color-primary-bg-light: #dbeafe; /* Light background for drop targets */
+
+  /* Accent/Active Color */
+  --color-accent-default: #4f46e5;
+  --color-accent-bg-light: #eef2ff; /* Active background */
+
+  /* --- Typography --- */
+  --font-family-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-base: 14px;
+  --font-size-md: 13px; /* Special case for summary/meta */
+
+  /* --- Spacing --- */
+  --spacing-1: 4px;
+  --spacing-1-5: 6px;
+  --spacing-2: 8px;
+  --spacing-2-5: 10px;
+  --spacing-3: 12px;
+  --spacing-4: 16px;
+  --spacing-5: 20px;
+
+  /* --- Borders & Shadows --- */
+  --border-radius-sm: 4px;
+  --border-radius-md: 6px;
+  --border-radius-lg: 8px;
+  --border-radius-pill: 10px;
+  --border-radius-full: 9999px;
+  --box-shadow-default: 0 4px 12px rgba(0,0,0,0.1);
+
+  /* --- Sizing --- */
+  --input-height: 36px; /* Example for consistent input sizes */
+  --button-height: 36px;
+
+  /* --- Z-Index --- */
+  --z-index-popover: 1000;
+
+  /* --- Transitions --- */
+  --transition-fast: 0.2s ease;
+  --transition-medium: 0.3s ease-in-out;
+}

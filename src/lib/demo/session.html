@@ -1,0 +1,106 @@
+<!-- @mdx/demo/session.html -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>MDxEditor + SessionUI 完整演示</title>
+    
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        /* --- 全局与应用布局 --- */
+        :root {
+            --sidebar-width: 320px;
+            --transition-speed: 0.3s;
+        }
+
+        body {
+            font-family: var(--mdx-font-family-sans);
+            margin: 0;
+            height: 100vh;
+            overflow: hidden;
+            background-color: #f0f2f5;
+        }
+
+        #app-container {
+            display: grid;
+            /* [MODIFIED] Changed to a two-column layout */
+            grid-template-columns: var(--sidebar-width) 1fr;
+            height: 100%;
+            transition: grid-template-columns var(--transition-speed) ease-in-out;
+        }
+        
+        #sidebar-container {
+            background: var(--mdx-color-bg-primary);
+            height: 100%;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #main-content {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            overflow: hidden;
+        }
+        
+        #editor-container {
+            flex-grow: 1;
+            overflow: hidden;
+        }
+        
+        /* --- 侧边栏折叠效果 --- */
+        #app-container.sidebar-collapsed {
+            /* [MODIFIED] Adjust for two-column layout */
+            grid-template-columns: 0 1fr;
+        }
+
+        #app-container.sidebar-collapsed #sidebar-container {
+            transform: translateX(-100%);
+            opacity: 0;
+            pointer-events: none;
+            border: none;
+            padding: 0;
+        }
+
+        /* --- [REMOVED] Floating toggle button styles are now removed --- */
+
+    </style>
+</head>
+<body>
+    
+    <!-- [REMOVED] The floating toggle button is no longer needed. -->
+
+    <div class="app-container" id="app-container">
+        <!-- 侧边栏：SessionList 组件的容器 -->
+        <aside id="sidebar-container"></aside>
+
+        <!-- 主内容区 -->
+        <main id="main-content">
+            <!-- MDxEditor 组件的容器 -->
+            <div id="editor-container"></div>
+        </main>
+    </div>
+
+    <!-- 新增：为模态框提供一个挂载点 -->
+    <div id="mdx-modal-container"></div>
+
+    <!-- 依赖库 -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/immer/dist/immer.umd.production.min.js"></script> <!-- 新增 Immer -->
+    <!-- 2. 立即调用 enableMapSet() 来启用对 Set 和 Map 的支持 -->
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        if (window.immer) { window.immer.enableMapSet(); }
+    });
+    </script>
+    <!-- --- MODIFICATION END --- -->
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+    <!-- Demo 逻辑脚本 (type="module" 必不可少) -->
+    <script type="module" src="session.js"></script>
+
+</body>
+</html>
