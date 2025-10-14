@@ -494,7 +494,51 @@ export class SessionStore {
                         break;
                     }
 
-                    // --- [新增] 处理文件夹递归选择的 case ---
+                    // --- [新增] 文件夹三态选择逻辑 ---
+                    case 'FOLDER_SELECTION_CYCLE': {
+                        const { folderId } = action.payload;
+                        const folder = findItemById(draft.items, folderId);
+                        if (!folder) break;
+
+                        // 1. 收集所有后代ID
+                        const descendantIds = [];
+                        const traverse = (item) => {
+                            if (item.type === 'folder' && item.children) {
+                                item.children.forEach(child => {
+                                    descendantIds.push(child.id);
+                                    traverse(child);
+                                });
+                            }
+                        };
+                        traverse(folder);
+                        
+                        // 2. 判断当前状态
+                        const isSelfSelected = draft.selectedItemIds.has(folderId);
+                        const selectedDescendantsCount = descendantIds.filter(id => draft.selectedItemIds.has(id)).length;
+                        
+                        let currentState = 'partial'; // 默认是部分选中
+                        if (isSelfSelected && selectedDescendantsCount === descendantIds.length) {
+                            currentState = 'all'; // 全选
+                        } else if (!isSelfSelected && selectedDescendantsCount === descendantIds.length && descendantIds.length > 0) {
+                            currentState = 'contents_only'; // 仅内容
+                        } else if (!isSelfSelected && selectedDescendantsCount === 0) {
+                            currentState = 'none'; // 全不选
+                        }
+
+                        // 3. 根据当前状态切换到下一个状态
+                        if (currentState === 'all') {
+                            // all -> contents_only
+                            draft.selectedItemIds.delete(folderId);
+                        } else if (currentState === 'contents_only') {
+                            // contents_only -> none
+                            descendantIds.forEach(id => draft.selectedItemIds.delete(id));
+                        } else { // none or partial -> all
+                            draft.selectedItemIds.add(folderId);
+                            descendantIds.forEach(id => draft.selectedItemIds.add(id));
+                        }
+                        break;
+                    }
+
                     case 'FOLDER_SELECTION_TOGGLE': {
                         const { folderId, select } = action.payload;
 
@@ -507,28 +551,14 @@ export class SessionStore {
                                     item.children.forEach(traverse); // 递归遍历子项
                                 }
                             };
-                            traverse(startFolder);
+                            if (startFolder) {
+                                traverse(startFolder);
+                            }
                             return ids;
                         };
 
-                        // 2. 找到起始文件夹节点
-                        let startFolder = null;
-                        const findStartFolder = (items) => {
-                            for (const item of items) {
-                                if (item.id === folderId) {
-                                    startFolder = item;
-                                    return true;
-                                }
-                                if (item.children && findStartFolder(item.children)) {
-                                    return true;
-                                }
-                            }
-                            return false;
-                        };
-
-                        findStartFolder(draft.items);
-
-                        // 3. 如果找到了文件夹，则执行批量操作
+                        const startFolder = findItemById(draft.items, folderId);
+                        
                         if (startFolder) {
                             const idsToChange = getAllDescendantIds(startFolder);
                             if (select) {

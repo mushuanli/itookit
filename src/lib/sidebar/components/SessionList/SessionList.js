@@ -329,9 +329,27 @@ export class SessionList extends BaseComponent {
                 }
                 break;
             }
-            case 'select-item': {
-                // This action is on the main body of an item. It handles all selection logic.
+            // --- [修改] 区分“选中”与“打开” ---
+            case 'select-only': {
+                event.stopPropagation(); // 阻止冒泡到父级的 'select-and-open'
                 if (itemEl) {
+                    this._handleItemSelection(itemEl, event);
+                }
+                break;
+            }
+            case 'select-and-open': {
+                if (itemEl) {
+                    const itemId = itemEl.dataset.itemId;
+                    const itemType = itemEl.dataset.itemType;
+                    this._handleItemSelection(itemEl, event);
+                    if (itemType === 'item') {
+                         this.coordinator.publish('SESSION_SELECT_REQUESTED', { sessionId: itemId });
+                    }
+                }
+                break;
+            }
+            case 'select-item': { // 保留用于文件夹的选择
+                if (itemEl && itemEl.dataset.itemType === 'folder') {
                     this._handleItemSelection(itemEl, event);
                 }
                 break;
@@ -341,25 +359,15 @@ export class SessionList extends BaseComponent {
 
                 // 现在 itemEl 是正确的 div 容器，所以 itemType 可以被正确获取
                 const itemId = itemEl.dataset.itemId;
-                const itemType = itemEl.dataset.itemType; // 现在这里会有值 ('folder' 或 'session')
+                const itemType = itemEl.dataset.itemType;
+                // [修正] 更新 lastClickedItemId 以便后续操作能找到正确上下文
+                this.lastClickedItemId = itemId;
 
                 if (itemType === 'folder') {
-                    // 如果是文件夹，分发递归选择动作
-                    const isCurrentlySelected = this.state.selectedItemIds.has(itemId);
-                    this.store.dispatch({
-                        type: 'FOLDER_SELECTION_TOGGLE',
-                        payload: {
-                            folderId: itemId,
-                            // 如果当前已选中，则新状态为取消选中 (false)，反之亦然
-                            select: !isCurrentlySelected 
-                        }
-                    });
+                    // --- [修改] 文件夹三态切换 ---
+                    this.store.dispatch({ type: 'FOLDER_SELECTION_CYCLE', payload: { folderId: itemId } });
                 } else {
-                    // 如果是文件，保持原有的单项切换逻辑
-                    this.store.dispatch({
-                        type: 'ITEM_SELECTION_UPDATE',
-                        payload: { ids: [itemId], mode: 'toggle' }
-                    });
+                    this.store.dispatch({ type: 'ITEM_SELECTION_UPDATE', payload: { ids: [itemId], mode: 'toggle' } });
                 }
                 break;
             }
@@ -392,10 +400,30 @@ export class SessionList extends BaseComponent {
      * @private
      */
     _getTargetParentId() {
-        const selectedIds = Array.from(this.state.selectedItemIds);
-        if (selectedIds.length === 1) {
-            const selectedItem = this._findItemById(selectedIds[0]);
-            if (selectedItem?.type === 'folder') return selectedItem.id;
+        const selectedIds = this.state.selectedItemIds;
+        const lastClickedId = this.lastClickedItemId;
+
+        // 优先级 1: 使用最后点击的项作为上下文
+        if (lastClickedId && selectedIds.has(lastClickedId)) {
+            const lastClickedItem = this._findItemById(lastClickedId);
+            if (lastClickedItem) {
+                // 如果最后点击的是文件夹，目标就是它自己
+                if (lastClickedItem.type === 'folder') {
+                    return lastClickedItem.id;
+                }
+                // 如果最后点击的是文件，目标是它的父文件夹
+                // @ts-ignore
+                return lastClickedItem.metadata?.parentId || null;
+            }
+        }
+
+        // 优先级 2 (回退方案): 如果只选择了一个项目，且该项目是文件夹
+        if (selectedIds.size === 1) {
+            const singleId = selectedIds.values().next().value;
+            const selectedItem = this._findItemById(singleId);
+            if (selectedItem?.type === 'folder') {
+                return selectedItem.id;
+            }
         }
         return null;
     }
@@ -410,14 +438,14 @@ export class SessionList extends BaseComponent {
 
         switch (action) {
             case 'create-session':
-            case 'create-folder': {
-                const parentId = this._getTargetParentId();
-                this.coordinator.publish('CREATE_ITEM_REQUESTED', { type: action.split('-')[1], parentId });
-                break;
-            }
+            case 'create-folder':
             case 'import': {
                 const parentId = this._getTargetParentId();
-                this.coordinator.publish('PUBLIC_IMPORT_REQUESTED', { parentId });
+                if (action === 'import') {
+                    this.coordinator.publish('PUBLIC_IMPORT_REQUESTED', { parentId });
+                } else {
+                    this.coordinator.publish('CREATE_ITEM_REQUESTED', { type: action.split('-')[1], parentId });
+                }
                 break;
             }
             case 'bulk-delete':
@@ -456,49 +484,58 @@ export class SessionList extends BaseComponent {
         const itemId = itemEl.dataset.itemId;
         const itemType = itemEl.dataset.itemType;
 
-        // In readOnly mode, multi-select (Cmd/Ctrl/Shift) is disabled.
         if (this.state.readOnly && (event.metaKey || event.ctrlKey || event.shiftKey)) {
             return;
         }
         
-        if (event.metaKey || event.ctrlKey) {
-            // 当使用 Cmd/Ctrl 进行多选时，统一文件夹和文件的处理逻辑
-            if (itemType === 'folder') {
-                // 如果是文件夹，触发递归选择/取消选择
-                const isCurrentlySelected = this.state.selectedItemIds.has(itemId);
-                this.store.dispatch({
-                    type: 'FOLDER_SELECTION_TOGGLE',
-                    payload: { folderId: itemId, select: !isCurrentlySelected }
-                });
-            } else {
-                // 如果是文件，保持单项切换
-                this.store.dispatch({ type: 'ITEM_SELECTION_UPDATE', payload: { ids: [itemId], mode: 'toggle' } });
-            }
-        } else if (event.shiftKey && this.lastClickedItemId) {
-            // --- Shift Click: Select a range from the last anchor ---
-            // This also does NOT update the shift-click anchor.
-            const { visibleItemIds } = this.state;
-            const lastIndex = visibleItemIds.indexOf(this.lastClickedItemId);
-            const currentIndex = visibleItemIds.indexOf(itemId);
+        // 分支处理文件夹
+        if (itemType === 'folder') {
+            const isCurrentlySelected = this.state.selectedItemIds.has(itemId);
 
-            if (lastIndex !== -1 && currentIndex !== -1) {
-                const start = Math.min(lastIndex, currentIndex);
-                const end = Math.max(lastIndex, currentIndex);
-                const idsToSelect = visibleItemIds.slice(start, end + 1);
-                
-                // Replace the current selection with the new range.
+            if (event.metaKey || event.ctrlKey) {
+                // Ctrl/Cmd 点击: 切换整个文件夹树的选中状态
+                this.store.dispatch({ type: 'FOLDER_SELECTION_TOGGLE', payload: { folderId: itemId, select: !isCurrentlySelected } });
+            } else if (event.shiftKey && this.lastClickedItemId) {
+                // Shift 点击: 行为保持不变，选择一个范围内的可见行
+                const { visibleItemIds } = this.state;
+                const lastIndex = visibleItemIds.indexOf(this.lastClickedItemId);
+                const currentIndex = visibleItemIds.indexOf(itemId);
+
+                if (lastIndex !== -1 && currentIndex !== -1) {
+                    const start = Math.min(lastIndex, currentIndex);
+                    const end = Math.max(lastIndex, currentIndex);
+                    const idsToSelect = visibleItemIds.slice(start, end + 1);
+                    this.store.dispatch({ type: 'ITEM_SELECTION_REPLACE', payload: { ids: idsToSelect } });
+                }
+            } else {
+                // 普通单击: 用这个文件夹及其所有后代替换当前选择
+                const folderNode = this._findItemById(itemId);
+                const idsToSelect = [itemId, ...this._getDescendantIds(folderNode)];
                 this.store.dispatch({ type: 'ITEM_SELECTION_REPLACE', payload: { ids: idsToSelect } });
             }
-        } else {
-            // --- Standard Single Click: Select one item and set the anchor ---
-            this.store.dispatch({ type: 'ITEM_SELECTION_REPLACE', payload: { ids: [itemId] } });
-            if (itemType === 'session' || itemType === 'item') {
-                this.coordinator.publish('SESSION_SELECT_REQUESTED', { sessionId: itemId });
+        } 
+        // 文件处理逻辑保持不变
+        else { 
+            if (event.metaKey || event.ctrlKey) {
+                this.store.dispatch({ type: 'ITEM_SELECTION_UPDATE', payload: { ids: [itemId], mode: 'toggle' } });
+            } else if (event.shiftKey && this.lastClickedItemId) {
+                const { visibleItemIds } = this.state;
+                const lastIndex = visibleItemIds.indexOf(this.lastClickedItemId);
+                const currentIndex = visibleItemIds.indexOf(itemId);
+
+                if (lastIndex !== -1 && currentIndex !== -1) {
+                    const start = Math.min(lastIndex, currentIndex);
+                    const end = Math.max(lastIndex, currentIndex);
+                    const idsToSelect = visibleItemIds.slice(start, end + 1);
+                    
+                    this.store.dispatch({ type: 'ITEM_SELECTION_REPLACE', payload: { ids: idsToSelect } });
+                }
+            } else {
+                this.store.dispatch({ type: 'ITEM_SELECTION_REPLACE', payload: { ids: [itemId] } });
             }
-            
-            // Set the anchor for the next shift-click.
-            this.lastClickedItemId = itemId;
         }
+        // [关键] 无论如何都要更新 lastClickedItemId
+        this.lastClickedItemId = itemId;
     }
 
     _handleKeyDown = (event) => {
@@ -651,7 +688,14 @@ export class SessionList extends BaseComponent {
         } 
         else {
             if (!isTargetSelected || selectedIds.size > 1) {
-                this.store.dispatch({ type: 'ITEM_SELECTION_REPLACE', payload: { ids: [itemId] } });
+                // 如果右键点击一个未选中的文件夹，则执行全选逻辑
+                if (itemEl.dataset.itemType === 'folder') {
+                    const folderNode = this._findItemById(itemId);
+                    const idsToSelect = [itemId, ...this._getDescendantIds(folderNode)];
+                    this.store.dispatch({ type: 'ITEM_SELECTION_REPLACE', payload: { ids: idsToSelect } });
+                } else {
+                    this.store.dispatch({ type: 'ITEM_SELECTION_REPLACE', payload: { ids: [itemId] } });
+                }
             }
             
             // [FIX] Use the new class method `_findItemById`
@@ -985,20 +1029,63 @@ export class SessionList extends BaseComponent {
         
         this.bodyEl.innerHTML = contentHTML;
 
+        // --- [新增] 在渲染后设置 indeterminate 属性 ---
+        this.bodyEl.querySelectorAll('input[type="checkbox"][data-indeterminate="true"]').forEach(checkbox => {
+            checkbox.indeterminate = true;
+        });
+
         if (!this.state.readOnly && this.state.creatingItem) {
             this.bodyEl.querySelector('.mdx-session-list__item-creator-input')?.focus();
         }
     }
     
     /**
-     * [MODIFIED] Recursively renders items, passing down the selection mode flag.
-     * @param {import('../../types/types.js')._Session[]} items
-     * @param {string | null} parentId
-     * @param {boolean} isSelectionMode - [NEW] The flag indicating the current mode.
-     * @returns {string} The generated HTML string.
+     * [新增] 递归获取一个文件夹下所有后代的ID
      * @private
      */
-    _renderItems(items, parentId, isSelectionMode, isReadOnly) { // [修改] 增加 isReadOnly 参数
+    _getDescendantIds(folder) {
+        const ids = [];
+        const traverse = (item) => {
+            if (item.type === 'folder' && item.children) {
+                item.children.forEach(child => {
+                    ids.push(child.id);
+                    traverse(child);
+                });
+            }
+        };
+        if (folder) {
+            traverse(folder);
+        }
+        return ids;
+    }
+
+    /**
+     * [新增] 根据 selectedItemIds 计算文件夹的选择状态
+     * @private
+     * @returns {'none'|'partial'|'all'}
+     */
+    _getFolderSelectionState(folder, selectedItemIds) {
+        const descendantIds = this._getDescendantIds(folder);
+        const isSelfSelected = selectedItemIds.has(folder.id);
+        
+        if (descendantIds.length === 0) {
+            return isSelfSelected ? 'all' : 'none';
+        }
+
+        const selectedDescendantsCount = descendantIds.filter(id => selectedItemIds.has(id)).length;
+
+        if (isSelfSelected && selectedDescendantsCount === descendantIds.length) {
+            return 'all';
+        }
+        if (!isSelfSelected && selectedDescendantsCount === 0) {
+            return 'none';
+        }
+        // "仅内容"状态也属于 'partial'，因为它不是全选也不是全不选
+        return 'partial';
+    }
+
+
+    _renderItems(items, parentId, isSelectionMode, isReadOnly) {
         let creatingItemHTML = '';
         // [修改] 只读模式下不显示创建输入框
         if (!isReadOnly && this.state.creatingItem && this.state.creatingItem.parentId === parentId) {
@@ -1013,6 +1100,9 @@ export class SessionList extends BaseComponent {
 
             if (item.type === 'folder') {
                 const isExpanded = this.state.expandedFolderIds.has(item.id) || !!this.state.searchQuery;
+                // --- [修改] 计算文件夹三态 ---
+                const folderSelectionState = this._getFolderSelectionState(item, this.state.selectedItemIds);
+                
                 let childrenHTML = '';
                 if (isExpanded) {
                     // *** 递归调用时传入当前文件夹ID作为新的 parentId ***
@@ -1025,8 +1115,8 @@ export class SessionList extends BaseComponent {
                         childrenHTML = `<div class="mdx-session-folder__empty-placeholder">(空)</div>`;
                     }
                 }
-                // [修改] 传递 isReadOnly
-                return createFolderItemHTML(item, isExpanded, isSelected, childrenHTML, isSelectionMode, textSearchQueries, isReadOnly);
+                // --- [修改] 传递 folderSelectionState ---
+                return createFolderItemHTML(item, isExpanded, folderSelectionState, childrenHTML, isSelectionMode, textSearchQueries, isReadOnly);
             } else {
                 const isOutlineExpanded = this.state.expandedOutlineIds.has(item.id);
                 // [修改] 传递 isReadOnly

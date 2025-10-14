@@ -127,8 +127,8 @@ export function createSessionItemHTML(session, isActive, isSelected, uiSettings,
         <div class="mdx-session-item" data-item-id="${id}" data-item-type="item" draggable="${draggable}">
             <div class="mdx-session-item__main-row ${isSelectionMode ? 'is-selection-mode' : ''}">
                 ${checkboxHTML}
-                <div class="mdx-session-item__content ${isActive ? 'is-active' : ''} ${isSelected ? 'is-selected' : ''}" data-action="select-item">
-                    <span class="mdx-session-item__icon">${isPinned ? '📌' : '📄'}</span>
+                <div class="mdx-session-item__content ${isActive ? 'is-active' : ''} ${isSelected ? 'is-selected' : ''}" data-action="select-and-open">
+                    <span class="mdx-session-item__icon" data-action="select-only" title="仅选中">${isPinned ? '📌' : '📄'}</span>
                     <div class="mdx-session-item__main">
                         <div class="mdx-session-item__title-wrapper">
                             <span class="mdx-session-item__title">${titleHTML}</span>
@@ -154,21 +154,25 @@ export function createSessionItemHTML(session, isActive, isSelected, uiSettings,
  * [MIGRATION] Creates the HTML for a folder item.
  * @param {import('../../types/types.js')._WorkspaceItem} folder
  * @param {boolean} isExpanded
- * @param {boolean} isSelected
+ * @param {'none'|'partial'|'all'} folderSelectionState - [修改] 文件夹选择状态
  * @param {string} childrenHTML
  * @param {boolean} isSelectionMode
  * @param {string|string[]} [searchQueries=[]]
- * @param {boolean} [isReadOnly=false] - [修改]
+ * @param {boolean} [isReadOnly=false]
  * @returns {string}
  */
-export function createFolderItemHTML(folder, isExpanded, isSelected, childrenHTML, isSelectionMode, searchQueries = [], isReadOnly = false) {
+export function createFolderItemHTML(folder, isExpanded, folderSelectionState, childrenHTML, isSelectionMode, searchQueries = [], isReadOnly = false) {
     const { id, metadata } = folder;
     const title = metadata?.title || folder.title || 'New Folder';
     const tags = metadata?.tags || folder.tags || [];
     
-    // [修改] 在非只读且处于选择模式时才显示复选框
+    // --- [修改] 根据三态状态渲染复选框 ---
+    const isSelected = folderSelectionState === 'all' || folderSelectionState === 'partial';
+    const checkedAttr = folderSelectionState === 'all' ? 'checked' : '';
+    const indeterminateAttr = folderSelectionState === 'partial' ? 'data-indeterminate="true"' : '';
+    
     const checkboxHTML = !isReadOnly && isSelectionMode
-        ? `<div class="mdx-session-item__checkbox-wrapper"><input type="checkbox" class="mdx-session-item__checkbox" data-item-id="${id}" ${isSelected ? 'checked' : ''} data-action="toggle-selection"></div>`
+        ? `<div class="mdx-session-item__checkbox-wrapper"><input type="checkbox" class="mdx-session-item__checkbox" data-item-id="${id}" ${checkedAttr} ${indeterminateAttr} data-action="toggle-selection"></div>`
         : '';
         
     // [TAGS-FEATURE] Generate HTML for folder tags.

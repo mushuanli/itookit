@@ -28,9 +28,7 @@ export class MemoryPlugin {
         /** @private @type {Set<string>} 存储今天被标记为 'easy' 的 cloze ID */
         this.easyTodayIds = new Set();
 
-        /** @private The currently active grading panel element */
-        this.gradingPanel = null;
-        /** @private The cloze element associated with the active panel */
+        /** @private The cloze element associated with the active single-reveal panel */
         this.activeClozeEl = null;
         /** @private The timeout ID for auto-grading */
         this.gradingTimerId = null;
@@ -42,6 +40,16 @@ export class MemoryPlugin {
 
         context.on('domUpdated', ({ element }) => this._applyInitialStates(element));
         context.listen('clozeRevealed', (detail) => this._handleClozeRevealed(detail));
+
+        // +++ START MODIFICATION: 监听批量模式事件 +++
+        context.listen('clozeBatchGradeToggle', ({ isVisible, editor }) => {
+            if (isVisible) {
+                this._enterBatchGradingMode(editor.renderEl);
+            } else {
+                this._dismissAllGradingPanels(editor.renderEl);
+            }
+        });
+        // +++ END MODIFICATION +++
     }
 
     /** @private Loads all states from persistent storage into the in-memory cache. */
@@ -125,8 +133,8 @@ export class MemoryPlugin {
 
     /** @private */
     async _applyInitialStates(element) {
-        // When content re-renders, dismiss any lingering panel.
-        this._dismissGradingPanel();
+        // 当内容重绘时，确保清除所有可能残留的评分菜单
+        this._dismissAllGradingPanels(element); 
 
         const clozeElements = Array.from(element.querySelectorAll('.cloze[data-cloze-id]'));
         if (clozeElements.length === 0) return;
@@ -144,7 +152,7 @@ export class MemoryPlugin {
 
     /** @private */
     async _gradeAndApply(clozeEl, rating) {
-        this._dismissGradingPanel();
+        // --- REFACTORED: 不再调用 dismissAll, 而是移除自己的 panel ---
         const clozeId = clozeEl.dataset.clozeId;
         const currentState = clozeEl.clozeState || null;
 
@@ -163,7 +171,14 @@ export class MemoryPlugin {
                 await this._persistEasyTodayFlags();
             }
         }
-
+        
+        // 关键：在应用视觉效果之前，先找到并移除这个 cloze 对应的评分菜单
+        // 假设菜单是紧随 cloze 的下一个兄弟元素
+        const panel = clozeEl.nextElementSibling;
+        if (panel && panel.classList.contains('mdx-memory-grading-panel')) {
+            panel.remove();
+        }
+        
         this._updateClozeVisuals(clozeEl, newState);
     }
     
@@ -186,53 +201,72 @@ export class MemoryPlugin {
         this._updateClozeVisuals(element, newState);
     }
 
-    // --- The rest of the interactive logic remains the same ---
-    
-    /** @private Removes any active grading panel and its associated timer. */
-    _dismissGradingPanel() {
-        if (this.gradingPanel) { this.gradingPanel.remove(); this.gradingPanel = null; }
-        if (this.gradingTimerId) { clearTimeout(this.gradingTimerId); this.gradingTimerId = null; }
+    /** @private [REFACTORED] Handles single cloze reveal, ensuring other panels are dismissed */
+    _handleClozeRevealed({ element }) {
+        this._dismissAllGradingPanels(element.ownerDocument.body);
+        
+        this.activeClozeEl = element;
+        this._createGradingPanel(element, true); // Pass true to enable auto-grade timeout
+    }
+
+    /** @private [REFACTORED] Central method to remove all grading panels from a given root element. */
+    _dismissAllGradingPanels(element) {
+        element.querySelectorAll('.mdx-memory-grading-panel').forEach(panel => panel.remove());
+        if (this.gradingTimerId) {
+            clearTimeout(this.gradingTimerId);
+            this.gradingTimerId = null;
+        }
         this.activeClozeEl = null;
     }
 
-    /** @private */
-    _handleClozeRevealed({ element }) {
-        if (this.activeClozeEl && this.activeClozeEl !== element) {
-            this._gradeAndApply(this.activeClozeEl, 'hesitant'); // Auto-grade with the new default
-        }
-        
-        this.activeClozeEl = element;
-        this._createGradingPanel(element);
+    /** @private [NEW] Logic to enter batch grading mode */
+    _enterBatchGradingMode(element) {
+        this._dismissAllGradingPanels(element); // Ensure a clean start
+
+        const clozeElements = element.querySelectorAll('.cloze[data-cloze-id]');
+        clozeElements.forEach(clozeEl => {
+            const state = clozeEl.clozeState;
+            const isMature = state && state.tier === 'mature';
+            const isEasyToday = this.easyTodayIds.has(clozeEl.dataset.clozeId);
+
+            // Only show grading panel for clozes that need review
+            if (!isMature && !isEasyToday) {
+                this._createGradingPanel(clozeEl, false); // false for no timeout
+            }
+        });
     }
 
-    /** @private */
-    _createGradingPanel(clozeEl) {
-        this._dismissGradingPanel(); // Ensure no duplicates
-
-        this.gradingPanel = document.createElement('div');
-        this.gradingPanel.className = 'mdx-memory-grading-panel';
+    /** @private [REFACTORED] Pure factory for creating a self-contained grading panel */
+    _createGradingPanel(clozeEl, applyTimeout) {
+        const gradingPanel = document.createElement('div');
+        gradingPanel.className = 'mdx-memory-grading-panel';
         
-        // +++ MODIFICATION START: Updated button text and data-rating to use 'hesitant' +++
-        this.gradingPanel.innerHTML = `
+        gradingPanel.innerHTML = `
             <button class="mdx-memory-grade-btn again" data-rating="again" title="完全忘记，1天后复习">重来</button>
             <button class="mdx-memory-grade-btn hard" data-rating="hard" title="想起来很困难">困难</button>
             <button class="mdx-memory-grade-btn hesitant" data-rating="hesitant" title="想起来有些犹豫">犹豫</button>
             <button class="mdx-memory-grade-btn easy" data-rating="easy" title="不假思索地想起来">简单</button>
         `;
 
-        // Append to the cloze's parent to keep it within the flow, or to body for absolute positioning
-        clozeEl.insertAdjacentElement('afterend', this.gradingPanel);
+        clozeEl.insertAdjacentElement('afterend', gradingPanel);
 
-        // Set up the auto-grade timeout
-        this.gradingTimerId = setTimeout(() => {
-            if (this.activeClozeEl === clozeEl) {
-                this._gradeAndApply(clozeEl, 'hesitant'); // Auto-grade with the new default
-            }
-        }, this.gradingTimeout);
+        if (applyTimeout) {
+            this.gradingTimerId = setTimeout(() => {
+                if (this.activeClozeEl === clozeEl) {
+                    this._gradeAndApply(clozeEl, 'hesitant');
+                }
+            }, this.gradingTimeout);
+        }
 
-        this.gradingPanel.addEventListener('click', (e) => {
+        gradingPanel.addEventListener('click', (e) => {
             const button = e.target.closest('[data-rating]');
-            if (button) this._gradeAndApply(clozeEl, button.dataset.rating);
+            if (button) {
+                if (this.gradingTimerId) {
+                    clearTimeout(this.gradingTimerId);
+                    this.gradingTimerId = null;
+                }
+                this._gradeAndApply(clozeEl, button.dataset.rating);
+            }
         });
     }
 
@@ -283,8 +317,7 @@ export class MemoryPlugin {
     }
 
     destroy() {
-        this._dismissGradingPanel();
-        // [NEW] 清理所有 Cloze 元素上的双击监听器
+        this._dismissAllGradingPanels(document.body); // Ensure cleanup on editor destruction
         document.querySelectorAll('.cloze').forEach(el => {
             if (el._boundHandleMatureDoubleClick) {
                 el.removeEventListener('dblclick', el._boundHandleMatureDoubleClick);

@@ -19,13 +19,16 @@ export class ClozeControlsPlugin {
         this.currentHiddenClozeIndex = -1;
         /** @private A cache of currently hidden cloze elements */
         this.hiddenClozesCache = [];
+        /** @private A reference to the plugin context for event emitting */
+        this.context = null;
     }
 
     /**
      * @param {import('../core/plugin.js').PluginContext} context
      */
     install(context) {
-        // This hook runs after the editor's main DOM is ready.
+        this.context = context; // +++ 新增: 存储上下文以备后用
+
         context.on('editorPostInit', ({ editor }) => {
             // The plugin's functionality is controlled by an option on the MDxEditor instance.
             if (!editor.options.clozeControls) {
@@ -124,6 +127,16 @@ export class ClozeControlsPlugin {
             // [MODIFIED] Toggle a class for CSS-driven animation instead of changing innerHTML
             this.toggleAllBtn.classList.toggle('is-all-open', this.isAllOpen);
             
+            // +++ START MODIFICATION: 广播事件 +++
+            // 使用存储的上下文来访问事件总线
+            if (this.context) {
+                this.context.emit('clozeBatchGradeToggle', { 
+                    isVisible: this.isAllOpen, 
+                    editor: editor // 传递 editor 实例，以便 MemoryPlugin 知道在哪个DOM区域操作
+                });
+            }
+            // +++ END MODIFICATION +++
+
             if (this.isAllOpen) {
                 this.toggleAllBtn.title = '全部折叠 (clozeallcloze)';
             } else {
