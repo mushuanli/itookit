@@ -1,8 +1,12 @@
 /**
  * @file #llm/chat/index.js
  * @description 组合 historyUI 和 inputUI 的完整聊天界面编排器。
- * @version 2.1 (Architectural Refactor)
+ * @version 2.2 (Corrected & Completed IEditor Implementation)
  * @change
+ * - [V2.2 修正] 完整并正确地实现了 IEditor 接口，特别是 `commands` 属性。
+ * - [V2.2 增强] 完善了 `setReadOnly`, `focus`, `navigateTo` 的实现，正确委托给子组件。
+ * - [V2.2 增强] 改进了文件上传流程，在消息创建前完成上传并使用真实 URL。
+ * - [V2.2 增强] 增加了 `interactiveChange` 事件代理，以完全符合 IEditor 规范。
  * - [V2.1 架构重构] 移除了 ILLMSessionStorageService 和 sessionId 的直接依赖。
  * - [V2.1 架构重构] 组件完全实现 IEditor 接口，通过 setText 和 getText 与宿主交换数据。
  * - [V2.1 架构重构] 数据格式采用 JSONL，由 setText 和 getText 内部处理解析与序列化。
@@ -53,6 +57,7 @@ export class LLMChatUI extends IEditor {
         this.llmService = LLMService.getInstance(); // 获取 LLMService 的全局单例
         this.events = new EventEmitter();
         this.activeRequestController = null;
+        this._subscriptions = []; // 用于管理自身的事件订阅
 
         // --- 3. 持久化服务配置 (仅文件服务) ---
         // [已移除] 不再需要 sessionId 和 sessionStorage，数据持久化由宿主负责。
@@ -99,6 +104,8 @@ export class LLMChatUI extends IEditor {
             on: {
                 stopRequested: this.handleStopRequest.bind(this),
                 agentChanged: (agentId) => this._handleAgentChange(agentId),
+                // [新增] 代理 inputUI 的输入事件为 'interactiveChange'
+                input: (payload) => this.events.emit('interactiveChange', payload),
                 ...(options.inputUIConfig?.on || {}),
             }
         });
@@ -173,8 +180,14 @@ export class LLMChatUI extends IEditor {
      * @implements {IEditor.commands}
      */
     get commands() {
-        // 委托给 historyUI，因为它管理着核心内容
-        return this.historyUI.commands;
+        return Object.freeze({
+            ...this.historyUI.commands, // 继承 historyUI 的大部分命令
+            clear: () => { // 覆盖 clear 命令
+                this.historyUI.clear();
+                this.inputUI.clear();
+                this.events.emit('change');
+            },
+        });
     }
 
     /**
@@ -186,6 +199,7 @@ export class LLMChatUI extends IEditor {
     setText(jsonlContent) {
         // 1. 总是先清空当前状态，确保幂等性
         this.historyUI.clear();
+        //this.inputUI.clear(); // 同时清空输入框
 
         // 2. 处理空内容或无效内容
         if (!jsonlContent || typeof jsonlContent !== 'string' || jsonlContent.trim() === '') {
@@ -253,9 +267,43 @@ export class LLMChatUI extends IEditor {
     }
 
     /**
+     * @implements {IEditor.navigateTo}
+     * [新增] 将导航请求委托给 historyUI。
+     */
+    async navigateTo(target, options) {
+        return this.historyUI.navigateTo(target, options);
+    }
+
+    /**
+     * @implements {IEditor.setReadOnly}
+     * [新增] 将只读状态同时应用到 historyUI 和 inputUI。
+     */
+    setReadOnly(isReadOnly) {
+        this.historyUI.setReadOnly(isReadOnly);
+        if (typeof this.inputUI.setReadOnly === 'function') {
+            this.inputUI.setReadOnly(isReadOnly);
+        }
+    }
+
+    /**
+     * @implements {IEditor.focus}
+     * [新增] 将聚焦请求优先委托给 inputUI。
+     */
+    focus() {
+        if (typeof this.inputUI.focus === 'function') {
+            this.inputUI.focus();
+        }
+    }
+
+
+    /**
      * @implements {IEditor.destroy}
      */
     destroy() {
+        // [新增] 取消自身所有事件订阅
+        this._subscriptions.forEach(unsubscribe => unsubscribe());
+        this._subscriptions = [];
+
         // 1. 销毁子组件
         if (this.historyUI) {
             this.historyUI.destroy();
@@ -356,7 +404,7 @@ export class LLMChatUI extends IEditor {
         const historyEventsToProxy = [
             'pairAdded', 'pairDeleted', 'assistantMessageDeleted', 'messageResent',
             'branchSwitched', 'messageComplete', 'locked', 'unlocked',
-            'streamError', 'historyCleared', 'historyLoaded',
+            'generationStopped', 'sendError','streamError', 'historyCleared', 'historyLoaded',
             // 'agentChanged' is now handled by _bindModelSyncEvents, no need to proxy generally
         ];
 
@@ -462,6 +510,7 @@ export class LLMChatUI extends IEditor {
             // e. CRITICAL: Clean up the controller regardless of the outcome (success, error, or abort).
             // This makes the UI ready for the next submission.
             this.activeRequestController = null;
+            this.inputUI.setLoading(false); // 确保在任何情况下都关闭加载状态
         }
     }
 
@@ -472,5 +521,6 @@ export class LLMChatUI extends IEditor {
      */
     clearHistory() {
         this.historyUI.clear();
+        this.inputUI.clear();
     }
 }

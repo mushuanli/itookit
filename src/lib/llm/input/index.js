@@ -1,7 +1,7 @@
 /**
  * @file #llm/input/index.js
  * @description A standalone, dependency-free, and highly customizable UI component for rich LLM interactions.
- * @version 2.0.0
+ * @version 2.2.0 (UX Improvement: Disable inputs on load)
  */
 import './styles.css';
 
@@ -41,7 +41,7 @@ export class LLMInputUI {
         this.state = {
             attachments: [],
             isLoading: false,
-            // +++ RENAMED: model -> agent +++
+            loadingMessage: '',
             agent: this.options.initialAgent,
             toolChoice: null,
             systemPrompt: null,
@@ -73,17 +73,44 @@ export class LLMInputUI {
 
     // --- Public API Methods ---
 
-    startLoading() {
-        this.state.isLoading = true;
-        this._updateSendButton();
-        this._emit('loadingStart');
-    }
+    /**
+     * [改进] 设置组件的加载状态，并可选地显示一条消息。
+     * 在加载期间会禁用文本区和附件按钮。
+     * @param {boolean} isLoading - 是否进入加载状态。
+     * @param {string} [message=''] - 在加载时显示的可选消息（例如“正在上传...”)。
+     */
+    setLoading(isLoading, message = '') {
+        if (this.state.isLoading === isLoading) return;
 
-    stopLoading() {
-        this.state.isLoading = false;
-        this._updateSendButton();
-        this.elements.textarea.focus();
-        this._emit('loadingStop');
+        this.state.isLoading = isLoading;
+        this.state.loadingMessage = message; // 保存消息
+        
+        const { textarea, attachBtn } = this.elements;
+
+        if (isLoading) {
+            // --- 进入加载状态 ---
+            if (textarea) {
+                textarea.disabled = true;
+                textarea.placeholder = message || '正在处理...';
+            }
+            if (attachBtn) {
+                attachBtn.disabled = true;
+            }
+            this._updateSendButton(); // 更新发送按钮为“停止”
+            this._emit('loadingStart');
+        } else {
+            // --- 退出加载状态 ---
+            if (textarea) {
+                textarea.disabled = false;
+                textarea.placeholder = this.options.localization.placeholder;
+                textarea.focus();
+            }
+            if (attachBtn) {
+                attachBtn.disabled = false;
+            }
+            this._updateSendButton(); // 更新发送按钮为“发送”
+            this._emit('loadingStop');
+        }
     }
 
     clear() {
@@ -180,7 +207,8 @@ export class LLMInputUI {
             return;
         }
         
-        this.startLoading();
+        // 使用新的 setLoading 方法
+        this.setLoading(true, '正在发送...');
         try {
             await this.options.onSubmit({
                 text,
@@ -201,7 +229,8 @@ export class LLMInputUI {
             this.showError(error.message);
             this._emit('error', error);
         } finally {
-            this.stopLoading();
+            // 使用新的 setLoading 方法
+            this.setLoading(false);
         }
     }
 
@@ -217,7 +246,9 @@ export class LLMInputUI {
 
     _updateUIState() {
         const hasContent = this.elements.textarea.value.trim().length > 0 || this.state.attachments.length > 0;
-        this.elements.sendBtn.disabled = !hasContent;
+        if (!this.state.isLoading) { // 只有在非加载状态下，才根据内容禁用按钮
+            this.elements.sendBtn.disabled = !hasContent;
+        }
         this._updateSendButton();
         this._updateStatusBar();
         this._updateAgentSelector(); // +++ NEW +++

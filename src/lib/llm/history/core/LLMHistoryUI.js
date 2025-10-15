@@ -173,6 +173,10 @@ export class LLMHistoryUI extends IEditor {
             scrollToBottom: this.scrollToBottom.bind(this),
             stopGeneration: this.stopGeneration.bind(this),
             search: this.search.bind(this),
+            // --- [新增] ---
+            navigateTo: this.navigateTo.bind(this), // Implement IEditor method
+            setReadOnly: this.setReadOnly.bind(this), // Implement IEditor method
+            focus: this.focus.bind(this), // Implement IEditor method
         });
     }
 
@@ -227,15 +231,68 @@ export class LLMHistoryUI extends IEditor {
         return this.events.on(eventName, callback);
     }
 
-    // [REFACTOR] 补全 IEditor 接口中缺失的方法，以满足契约。
-    async navigateTo(target, options) {
-        console.warn("LLMHistoryUI.navigateTo is not implemented.");
+    /**
+     * [完整实现] 命令编辑器将视图滚动到指定的目标。
+     * 对于 LLMHistoryUI，这通常意味着滚动到特定的消息对。
+     * @override
+     * @param {object} target - 描述导航目标的对象。
+     * @param {string} target.elementId - 目标元素在文档中的唯一 ID (通常是 pair.id)。
+     * @param {object} [options] - 导航选项。
+     * @param {boolean} [options.smooth=true] - 是否平滑滚动。
+     * @returns {Promise<void>}
+     */
+    async navigateTo(target, options = { smooth: true }) {
+        if (!target || !target.elementId) {
+            console.warn('[LLMHistoryUI] navigateTo 调用缺少 target.elementId');
+            return;
+        }
+
+        const targetElement = this.messagesEl.querySelector(`[data-pair-id="${target.elementId}"]`);
+        
+        if (targetElement) {
+            targetElement.scrollIntoView({
+                behavior: options.smooth ? 'smooth' : 'auto',
+                block: 'center'
+            });
+        } else {
+            console.warn(`[LLMHistoryUI] navigateTo 未找到 ID 为 "${target.elementId}" 的元素。`);
+        }
     }
+
+    /**
+     * [IMPLEMENTED] Dynamically sets the read-only state of the editor.
+     * @implements {IEditor.setReadOnly}
+     * @override
+     * @param {boolean} isReadOnly - If true, the editor should become non-editable.
+     */
     setReadOnly(isReadOnly) {
-        console.warn("LLMHistoryUI.setReadOnly is not implemented.");
+        // Currently, LLMHistoryUI does not have a direct "read-only" mode that affects user input
+        // in the same way a traditional editor might. The closest equivalent is locking.
+        // For simplicity and clarity, we'll log a warning and disable interactive buttons.
+        // A more complex implementation could disable the footer input and specific toolbars.
+        console.warn(`[LLMHistoryUI] setReadOnly(${isReadOnly}) called. This UI primarily uses locking for interaction control. Some elements might be visually affected.`);
+
+        if (isReadOnly) {
+            this.lockManager.lock();
+        } else {
+            this.lockManager.unlock();
+        }
     }
+
+    /**
+     * [完整实现] 使编辑器获得输入焦点。
+     * 尝试聚焦最后一个用户消息的编辑器（如果它处于编辑模式），否则聚焦整个容器。
+     * @override
+     */
     focus() {
-        console.warn("LLMHistoryUI.focus is not implemented.");
+        const lastPair = this.pairs[this.pairs.length - 1];
+        if (lastPair && lastPair.userMessage.isEditing && lastPair.userMessage.editorInstance) {
+            // 如果最后一个消息正在编辑，聚焦其编辑器实例
+            lastPair.userMessage.editorInstance.focus();
+        } else {
+            // 否则，聚焦整个容器使其可滚动等
+            this.container.focus({ preventScroll: true });
+        }
     }
 
     /**
@@ -390,6 +447,8 @@ export class LLMHistoryUI extends IEditor {
         const { signal, retryCount = 0, contextOverride = null } = options;
 
         this.lock();
+        // Reset abortController for new request
+        if (this.abortController) this.abortController.abort();
         this.abortController = new AbortController();
         const combinedSignal = signal || this.abortController.signal;
         let streamStarted = false;
@@ -405,13 +464,19 @@ export class LLMHistoryUI extends IEditor {
             
             const context = contextOverride !== null ? contextOverride : this._buildContext(agentDefinition.config.systemPrompt);
 
-            const stream = await client.chat.create({ 
+            // Ensure model name is valid
+            const modelName = agentDefinition.config.modelName;
+            if (!modelName) {
+                throw new Error(`Agent "${agentDefinition.name}" (ID: ${agentId}) has no modelName configured.`);
+            }
+
+            const stream = await client.chat.create({
                 messages: context,
-                model: agentDefinition.config.modelName, 
-                stream: true, 
-                include_thinking: true, 
-                tool_choice: pair.metadata.toolChoice, 
-                options: { signal: combinedSignal } 
+                model: modelName,
+                stream: true,
+                include_thinking: true, // Assuming this option is supported by the client
+                tool_choice: pair.metadata.toolChoice,
+                options: { signal: combinedSignal }
             });
             streamStarted = true;
         
@@ -439,7 +504,10 @@ export class LLMHistoryUI extends IEditor {
     }
     
     stopGeneration() {
-        if (this.abortController) this.abortController.abort();
+        if (this.abortController) {
+            this.abortController.abort();
+            console.log('[LLMHistoryUI] Generation stopped by user.');
+        }
     }
     
     lock() { this.lockManager.lock(); }
@@ -489,7 +557,13 @@ export class LLMHistoryUI extends IEditor {
                 pair.assistantMessage.content.toLowerCase().includes(lowerCaseKeyword)
             )
             .map(pair => ({ pairId: pair.id, element: pair.element }));
-        
+
+        // Highlight the first result immediately if available
+        if (this.searchResults.length > 0) {
+            this.searchIndex = 0;
+            this._navigateToSearchResult(this.searchIndex);
+        }
+
         return this.searchResults.map(r => r.pairId);
     }
 
@@ -516,6 +590,7 @@ export class LLMHistoryUI extends IEditor {
     }
 
     scrollToBottom(smooth = true) {
+        if (!this.messagesEl) return;
         this.messagesEl.scrollTo({ top: this.messagesEl.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
     }
 
@@ -533,15 +608,17 @@ export class LLMHistoryUI extends IEditor {
      * @returns {string} The conversation history formatted as Markdown.
      */
     exportAsMarkdown() {
-        let markdown = `# ${this.titleEl.textContent || '对话记录'}\n\n`;
-        
+        let markdown = `# ${this.titleEl.textContent || '对话历史'}\n\n`;
+
         this.pairs.forEach((pair, index) => {
-            const userAgent = this.options.i18n?.userRole || 'User';
-            const assistantAgent = this.historyUI.availableAgents.find(a => a.id === pair.metadata.agent)?.name || this.options.i18n?.assistantRole || 'Assistant';
+            // --- [BUG FIX] ---
+            // Corrected `this.historyUI.availableAgents` to `this.availableAgents`
+            const userRole = this.options.i18n?.userRole || 'User';
+            const assistantAgent = this.availableAgents.find(a => a.id === pair.metadata.agent)?.name || this.options.i18n?.assistantRole || 'Assistant';
 
             markdown += `## 对话 ${index + 1}\n\n`;
-            markdown += `**${userAgent}:**\n${pair.userMessage.content}\n\n`;
-            
+            markdown += `**${userRole}:**\n${pair.userMessage.content}\n\n`;
+
             if (pair.assistantMessage.content) {
                 markdown += `**${assistantAgent}:**\n${pair.assistantMessage.content}\n\n`;
             }
@@ -634,13 +711,16 @@ export class LLMHistoryUI extends IEditor {
                     <style>
                         body { font-family: sans-serif; line-height: 1.5; }
                         .llm-historyui__message-pair { page-break-inside: avoid; margin-bottom: 2rem; }
-                        .llm-historyui__message-wrapper { border: 1px solid #eee; border-radius: 8px; padding: 1rem; }
+                        .llm-historyui__message-wrapper { border: 1px solid #eee; border-radius: 8px; padding: 1rem; margin-bottom: 1rem;}
                         .llm-historyui__message-wrapper--user { background-color: #f0f4ff; }
                         .llm-historyui__message-wrapper--assistant { background-color: #f9f9f9; }
                         .llm-historyui__message-header { font-weight: bold; margin-bottom: 0.5rem; color: #555; }
                         .llm-historyui__message-content pre { white-space: pre-wrap; word-wrap: break-word; }
-                        /* 在打印时隐藏所有工具栏和交互元素 */
-                        .llm-historyui__message-toolbar, .llm-historyui__branch-switcher, .llm-historyui-thinking summary::after { display: none !important; }
+                        /* Hide all toolbars and interactive elements for printing */
+                        .llm-historyui__message-toolbar, .llm-historyui__branch-switcher, .llm-historyui-thinking summary::after, .llm-historyui__stop-btn, .llm-historyui__retry-btn { display: none !important; }
+                        .llm-historyui__message-pair--folded .llm-historyui__message-summary { display: block !important; } /* Ensure summary is visible */
+                        .llm-historyui__message-pair--folded .llm-historyui__message-content { display: none !important; }
+                        .llm-historyui__message-wrapper--folded .llm-historyui__message-content { display: none !important; } /* Ensure content is hidden when folded */
                     </style>
                 </head>
                 <body>
@@ -848,15 +928,25 @@ export class LLMHistoryUI extends IEditor {
     }
 
     _navigateToUserMessage(direction) {
-        const userMessages = Array.from(this.messagesEl.querySelectorAll('.llm-historyui__message-wrapper--user'));
-        if (userMessages.length < 2) return;
+        const userMessageElements = Array.from(this.messagesEl.querySelectorAll('.llm-historyui__message-wrapper--user'));
+        if (userMessageElements.length < 2) return;
         const scrollTop = this.messagesEl.scrollTop;
         let targetElement = null;
-    
+
+        const visibleUserMessages = userMessageElements.filter(el => {
+            const rect = el.getBoundingClientRect();
+            // Consider elements that are at least partially visible or just scrolled past
+            return rect.top < (this.messagesEl.offsetHeight + scrollTop - 5) && rect.bottom > 0;
+        });
+
+        if (visibleUserMessages.length === 0) return; // No user messages currently in view
+
         if (direction === 'up') {
-            targetElement = [...userMessages].reverse().find(el => el.offsetTop < (scrollTop - 5));
-        } else {
-            targetElement = userMessages.find(el => el.offsetTop > (scrollTop + 5));
+            // Find the last user message element that is above the current scroll position
+            targetElement = [...visibleUserMessages].reverse().find(el => el.offsetTop < (scrollTop - 5));
+        } else { // direction === 'down'
+            // Find the first user message element that is below the current scroll position
+            targetElement = visibleUserMessages.find(el => el.offsetTop > (scrollTop + 5));
         }
     
         if (targetElement) {
@@ -909,12 +999,20 @@ export class LLMHistoryUI extends IEditor {
         
         let relevantPairs = this.pairs;
         if (this.contextStrategy === 'lastN' && this.contextWindowSize > 0) {
-            const numPairs = Math.ceil(this.contextWindowSize / 2);
-            relevantPairs = this.pairs.slice(-numPairs);
+            // Calculate number of pairs to include, roughly based on window size
+            // Each pair contributes ~2 messages (user + assistant)
+            const numMessagesToInclude = this.contextWindowSize;
+            const numPairsToInclude = Math.ceil(numMessagesToInclude / 2);
+            relevantPairs = this.pairs.slice(-numPairsToInclude);
         }
         
         relevantPairs.forEach(pair => {
-            messages.push({ role: 'user', content: pair.userMessage.content, attachments: pair.userMessage.attachments });
+            // Ensure user message content is not empty before adding
+            if (pair.userMessage.content || pair.userMessage.attachments.length > 0) {
+                 messages.push({ role: 'user', content: pair.userMessage.content, attachments: pair.userMessage.attachments });
+            }
+            // Only add assistant message if it has content AND it's not the last pair in the history
+            // (because the last pair's assistant message is currently being streamed/generated)
             if (pair.assistantMessage.content && pair !== lastPair) {
                 messages.push({ role: 'assistant', content: pair.assistantMessage.content });
             }
@@ -940,7 +1038,7 @@ export class LLMHistoryUI extends IEditor {
         
         const connectionId = agent.config.connectionId;
         if (!connectionId) {
-             throw new Error(`[LLMHistoryUI] Agent "${agent.name}" 未配置 connectionId。`);
+             throw new Error(`[LLMHistoryUI] Agent "${agent.name}" (ID: ${agentId}) 未配置 connectionId。`);
         }
 
         // 中文注释: 将创建客户端的复杂性委托给 LLMService。
@@ -956,6 +1054,11 @@ export class LLMHistoryUI extends IEditor {
         if (llmConfig) {
             this._handleAgentsUpdate(llmConfig.agents || []);
             this._handleConnectionsUpdate(llmConfig.connections || []);
+        } else {
+            // If config is not yet loaded, wait for APP_READY event
+            this.configManager.eventManager.subscribe(EVENTS.APP_READY, () => {
+                this._loadInitialData(); // Try loading again after app is ready
+            });
         }
     }
 
@@ -983,7 +1086,7 @@ export class LLMHistoryUI extends IEditor {
     /**
      * @private
      * @description 处理 Agent 更新事件的处理器。
-     * @param {import('../../../public/types').AgentDefinition[]} agents - 最新的 Agent 定义数组。
+     * @param {import('../../../config/shared/types').LLMAgentDefinition[]} agents - 最新的 Agent 定义数组。
      */
     _handleAgentsUpdate(agents) {
         // 一步步审查: 实现了对 Agent 数据更新的响应。当事件触发时，此方法会更新组件内部的
@@ -993,18 +1096,25 @@ export class LLMHistoryUI extends IEditor {
         
         // 如果默认 agent 不存在了，更新它
         if (this.currentAgent && !this.agents.has(this.currentAgent)) {
-            this.currentAgent = this.availableAgents[0]?.id || null;
+            const newDefaultAgent = this.availableAgents.length > 0 ? this.availableAgents[0].id : null;
+            console.warn(`[LLMHistoryUI] Current agent "${this.currentAgent}" is no longer available. Switching to "${newDefaultAgent || 'none'}".`);
+            this.currentAgent = newDefaultAgent;
         }
         
         this.container.querySelectorAll('.llm-historyui__agent-selector').forEach(selector => {
-            const pairId = selector.closest('.llm-historyui__message-pair')?.dataset.pairId;
+            // Ensure we're operating on the correct selector (might be multiple if pairs exist)
+            const messagePairElement = selector.closest('.llm-historyui__message-pair');
+            if (!messagePairElement) return;
+
+            const pairId = messagePairElement.dataset.pairId;
             const pair = this.pairs.find(p => p.id === pairId);
 
             if (pair) {
                 const currentAgentId = pair.metadata.agent;
-                
-                // 重建选择器的选项
-                selector.innerHTML = this.availableAgents.map(agent => 
+                const selectorAgentId = selector.value; // Current value in the dropdown
+
+                // Rebuild the options to ensure they reflect the latest available agents
+                selector.innerHTML = this.availableAgents.map(agent =>
                     `<option value="${agent.id}" ${agent.id === currentAgentId ? 'selected' : ''}>
                         ${agent.name}
                     </option>`
@@ -1013,7 +1123,7 @@ export class LLMHistoryUI extends IEditor {
                 // 一步步审查: 包含了对边缘情况（如当前选中的 Agent 被删除）的处理。
                 // 这增强了系统的鲁棒性，防止因数据不一致导致 UI 崩溃或行为异常。
                 if (!this.agents.has(currentAgentId)) {
-                    const defaultAgentId = this.availableAgents[0]?.id;
+                    const defaultAgentId = this.availableAgents.find(a => a.id === this.currentAgent)?.id || this.availableAgents[0]?.id || null;
                     if (defaultAgentId) {
                         // 如果当前 Agent 被删除，则自动切换到第一个可用的 Agent
                         pair.metadata.agent = defaultAgentId;
@@ -1024,6 +1134,9 @@ export class LLMHistoryUI extends IEditor {
                          selector.innerHTML = `<option value="">无可用 Agent</option>`;
                          pair.metadata.agent = null;
                     }
+                } else if (selectorAgentId !== currentAgentId && selector.querySelector(`option[value="${currentAgentId}"]`)) {
+                    // If the pair's agent is still valid but the selector UI is out of sync (e.g. after an edit)
+                    selector.value = currentAgentId;
                 }
             }
         });
@@ -1034,7 +1147,7 @@ export class LLMHistoryUI extends IEditor {
     /**
      * @private
      * @description 处理 Connection 更新事件的处理器。
-     * @param {import('../../../public/types').ProviderConnection[]} connections - 最新的 Connection 定义数组。
+     * @param {import('../../../config/shared/types').LLMProviderConnection[]} connections - 最新的 Connection 定义数组。
      */
     _handleConnectionsUpdate(connections) {
         this.connections = new Map(connections.map(c => [c.id, c]));

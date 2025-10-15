@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LLMWorkspace Demo</title>
+
+    <!--
+      HOW TO RUN THIS DEMO:
+      1. Make sure you have the 'sidebar', 'llm-kit', and 'workspace' directories
+         at the same level as this 'demo' directory.
+      2. You need a simple local server to run this file because it uses ES Modules.
+         If you have Node.js, you can run this command in your project's root directory:
+         npx serve
+      3. Open your browser to the URL provided by the server (e.g., http://localhost:3000/demo/llmworkspace.html).
+      4. IMPORTANT: Replace 'YOUR_OPENAI_API_KEY_HERE' in the script below with your actual API key.
+    -->
+
+    <!-- 1. External Dependencies (Icons) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+
+    <!-- 3. Demo-specific Page Styles -->
+    <style>
+        html, body {
+            height: 100vh;
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            overflow: hidden;
+            background-color: #f0f2f5;
+        }
+
+        /* The main layout for our app, using Flexbox */
+        #app-container {
+            display: flex;
+            height: 100%;
+            width: 100%;
+        }
+
+        #sidebar-container {
+            width: 320px;
+            min-width: 240px; /* Prevent shrinking too much */
+            flex-shrink: 0;
+            height: 100%;
+            /* The sidebar component has its own background and border */
+            resize: horizontal; /* Allow native browser resizing */
+            overflow: auto;
+        }
+
+        #chat-container {
+            flex-grow: 1;
+            height: 100%;
+            min-width: 0; /* Important for flexbox layout to prevent overflow */
+            background-color: #fff; /* A background for the chat area */
+        }
+    </style>
+</head>
+<body>
+
+    <!--
+      The new layout structure: two sibling containers for sidebar and chat.
+      LLMWorkspace will populate these, not create them.
+    -->
+    <div id="app-container">
+        <aside id="sidebar-container"></aside>
+        <main id="chat-container"></main>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/immer/dist/immer.umd.production.min.js"></script>
+    <script>
+      // CRITICAL: Enable Map and Set support for Immer before any library code runs.
+      if (window.immer) {
+        window.immer.enableMapSet();
+      }
+    </script>
+
+    <!-- 2. Main Application Logic -->
+    <script type="module" src="llmworkspace.js"></script>
+
+
+</body>
+</html>
