@@ -155,27 +155,6 @@ export class SettingsWorkspace {
         
         // 4. 启动侧边栏并默认选择第一项
         await this.sidebar.start();
-        
-        // --- [核心改进] ---
-        // 7. 启动后，检查当前是否有激活项。如果没有，则默认选中第一项。
-        //    这确保了设置工作区加载后总能显示一个默认的设置面板。
-        const activeSession = this.sidebar.getActiveSession();
-        let initialItemId = activeSession?.id;
-
-        if (!initialItemId && sidebarItems.length > 0) {
-            initialItemId = sidebarItems[0].id;
-        }
-
-        // 2. 如果有需要初始化的项目，则直接调用我们的核心挂载逻辑。
-        if (initialItemId) {
-            // 2a. 我们需要先手动在 store 中设置 activeId，以确保UI状态同步。
-            //     这是因为 _mountWidgetById 期望 activeWidget 状态能被正确更新。
-            this.sidebar.sessionService.selectSession(initialItemId);
-            
-            // 2b. 直接调用挂载函数，不再依赖事件。
-            //     这确保了内容在 start() 方法返回前就被挂载。
-            await this._mountWidgetById(initialItemId);
-        }
     }
 
     /**

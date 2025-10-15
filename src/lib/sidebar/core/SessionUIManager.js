@@ -131,9 +131,48 @@ export class SessionUIManager extends ISessionManager {
         // 我们完全跳过从 ModuleRepository 加载数据的流程。
         // 这从根本上解决了 "初始状态被仓库空数据覆盖" 的问题（即“一闪而过”）。
         if (this.options.readOnly && this.options.initialState && Array.isArray(this.options.initialState.items)) {
-            console.log('[SessionUIManager] 以只读静态模式启动，跳过仓库加载。');
-            // Store 已在构造函数中被正确初始化，我们只需解析 Promise 即可。
-            return Promise.resolve(this.getActiveSession());
+            // 在静态模式下，我们需要确保一个项目被选中，并且通知父组件。
+            console.log('[SessionUIManager] 以只读静态模式启动。');
+
+            let currentState = this.store.getState();
+            let activeId = currentState.activeId;
+
+            // 1. 如果没有从持久化状态中加载到 activeId，则自动选择第一项。
+            if (!activeId && currentState.items.length > 0) {
+                const findFirstItem = (items) => {
+                    for (const item of items) {
+                        if (item.type === 'item') return item;
+                        if (item.type === 'folder' && item.children) {
+                            const found = findFirstItem(item.children);
+                            if (found) return found;
+                        }
+                    }
+                    return items[0] || null; // Fallback to the very first entry
+                };
+
+                const firstItem = findFirstItem(currentState.items);
+                
+                if (firstItem) {
+                    console.log(`[SessionUIManager] 自动选择第一项: ${firstItem.metadata.title}`);
+                    // 使用 service 来选择，以确保所有相关逻辑都被触发
+                    this.sessionService.selectSession(firstItem.id);
+                    // 更新本地变量以供下一步使用
+                    activeId = firstItem.id; 
+                }
+            }
+
+            // 2. 无论 activeId 是来自持久化还是刚刚的自动选择，
+            //    现在都主动发布一次 'sessionSelected' 事件。
+            //    这保证了父组件(SettingsWorkspace)总能收到初始状态的通知。
+            if (activeId) {
+                const activeItem = this.sessionService.findItemById(activeId);
+                if (activeItem) {
+                    console.log(`[SessionUIManager] 启动时通知选中项: ${activeItem.metadata.title}`);
+                    this.coordinator.publish('PUBLIC_SESSION_SELECTED', { item: activeItem });
+                }
+            }
+            
+            return this.getActiveSession();
         }
         // --- [修复结束] ---
 
@@ -254,12 +293,8 @@ export class SessionUIManager extends ISessionManager {
     _loadUiState() {
         try {
             const stateJSON = localStorage.getItem(this.uiStorageKey);
-            // +++ DEBUG LOG +++
-            console.log(`[SessionUIManager] Raw data from localStorage for key "${this.uiStorageKey}":`, stateJSON);
             const state = stateJSON ? JSON.parse(stateJSON) : {};
             if (typeof state === 'object' && state !== null) {
-                // +++ DEBUG LOG +++
-                console.log('[SessionUIManager] Parsed UI state loaded successfully:', state);
                 return state;
             }
             return {};
@@ -283,8 +318,6 @@ export class SessionUIManager extends ISessionManager {
             isSidebarCollapsed: state.isSidebarCollapsed,
         };
         try {
-            // +++ DEBUG LOG +++
-            console.log(`%c[SessionUIManager] SAVING UI STATE to key "${this.uiStorageKey}"`, 'color: blue; font-weight: bold;', stateToPersist);
             localStorage.setItem(this.uiStorageKey, JSON.stringify(stateToPersist));
         } catch (e) {
             console.error("无法保存UI状态:", e);
@@ -306,15 +339,7 @@ export class SessionUIManager extends ISessionManager {
                 currentState.isSidebarCollapsed !== lastStateForPersistence.isSidebarCollapsed;
 
             if (hasChanged) {
-                // +++ DEBUG LOG +++
-                console.log('[SessionUIManager] UI state change detected, triggering save.', {
-                    oldActiveId: lastStateForPersistence.activeId,
-                    newActiveId: currentState.activeId
-                });
                 this._saveUiState();
-            } else {
-                 // +++ DEBUG LOG (optional, can be noisy) +++
-                 // console.log('[SessionUIManager] State changed but no UI persistence keys were affected.');
             }
             // Use deep copy for sets/maps to avoid reference issues
             lastStateForPersistence = JSON.parse(JSON.stringify(currentState, (k,v) => v instanceof Set ? Array.from(v) : (v instanceof Map ? Array.from(v.entries()) : v)));
