@@ -85,19 +85,19 @@ export class AttachmentPlugin {
     async _uploadFile(file, pair) {
         // +++ ADDED: Guard clause to check if the upload service is configured.
         if (!this.fileStorage) {
-            console.error('AttachmentPlugin: `fileStorage` service is not provided in historyUI options.');
-            alert('File upload functionality is not configured.');
+            console.error('AttachmentPlugin Error: `fileStorage` service is not provided in LLMHistoryUI options.');
+            alert('文件上传功能未配置。');
             return;
         }
 
         try {
-            // --- DELETED: FormData and fetch logic.
-            // const formData = new FormData();
-            // formData.append('file', file);
-            // const response = await fetch(this.options.uploadUrl, { ... });
-            
-            // +++ MODIFIED: Use the injected file storage service.
-            const result = await this.fileStorage.upload(file);
+            // [REFACTOR] 使用抽象的文件存储服务接口，而不是具体的 fetch API。
+            // 这使得插件与后端实现解耦。
+            const result = await this.fileStorage.upload(file, {
+                // 可选的元数据
+                context: 'llm-history-attachment',
+                pairId: pair.id
+            });
             
             // Add to user message using the result from the service
             pair.userMessage.addAttachment({
@@ -111,7 +111,7 @@ export class AttachmentPlugin {
             this._rerenderUserMessage(pair);
             
         } catch (error) {
-            console.error('Failed to upload file:', error);
+            console.error('Failed to upload file via fileStorage service:', error);
             alert(`上传失败: ${error.message}`);
         }
     }
@@ -157,5 +157,7 @@ export class AttachmentPlugin {
      */
     destroy() {
         // Cleanup if needed
+        this.historyUI = null;
+        this.fileStorage = null;
     }
 }
