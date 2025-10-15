@@ -270,16 +270,16 @@ export class SessionList extends BaseComponent {
      */
     _bindEvents() {
         this.container.addEventListener('click', this._handleClick);
-        this.container.addEventListener('keydown', this._handleKeyDown);
-        this.container.addEventListener('blur', this._handleBlur, true);
-        document.addEventListener('click', this._handleGlobalClick, true);
-
         this.searchEl.addEventListener('input', debounce((event) => {
             this.coordinator.publish('SEARCH_QUERY_CHANGED', { query: event.target.value });
         }, 300));
-        
-        // [修改] 只在非只读模式下绑定修改性事件
+        document.addEventListener('click', this._handleGlobalClick, true);
+
+        // --- [核心修改] ---
+        // "写入"或"编辑"操作的事件监听器，仅在非只读模式下绑定
         if (!this.state.readOnly) {
+            this.container.addEventListener('keydown', this._handleKeyDown);
+            this.container.addEventListener('blur', this._handleBlur, true);
             this.container.addEventListener('contextmenu', this._handleContextMenu);
             
             // Drag and Drop listeners

@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SettingsWorkspace Demo</title>
+    <style>
+        :root {
+    --border-color: #e0e0e0;
+    --background-color: #f9f9f9;
+    --sidebar-bg: #ffffff;
+    --active-bg: #e6f7ff;
+    --active-border: #1890ff;
+    --text-color: #333;
+    --text-secondary: #666;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    margin: 0;
+    background-color: var(--background-color);
+    color: var(--text-color);
+}
+
+.app-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+header {
+    border-bottom: 1px solid var(--border-color);
+    margin-bottom: 20px;
+    padding-bottom: 10px;
+}
+
+.workspace {
+    display: flex;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    height: 600px;
+    background-color: var(--sidebar-bg);
+    overflow: hidden;
+}
+
+.sidebar {
+    flex: 0 0 250px;
+    border-right: 1px solid var(--border-color);
+    padding: 10px;
+    box-sizing: border-box;
+}
+
+.content {
+    flex: 1;
+    padding: 20px;
+    box-sizing: border-box;
+    overflow-y: auto;
+}
+
+/* Mock Sidebar Styles */
+.sidebar-title {
+    font-size: 1.2em;
+    font-weight: 600;
+    padding: 10px 5px;
+}
+
+.sidebar-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.sidebar-item {
+    padding: 12px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    margin-bottom: 5px;
+    border-left: 3px solid transparent;
+}
+
+.sidebar-item:hover {
+    background-color: var(--background-color);
+}
+
+.sidebar-item.active {
+    background-color: var(--active-bg);
+    border-left-color: var(--active-border);
+    font-weight: 600;
+}
+
+.sidebar-item small {
+    display: block;
+    font-size: 0.8em;
+    color: var(--text-secondary);
+    font-weight: normal;
+    margin-top: 4px;
+}
+
+/* Widget Content Styles */
+.settings-widget h2 {
+    margin-top: 0;
+}
+
+.settings-widget fieldset {
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    margin-top: 20px;
+}
+
+.settings-widget label {
+    display: block;
+    margin-bottom: 8px;
+}
+
+    </style>
+    <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/gh/jagenjo/litegraph.js/css/litegraph.css">
+    <script type="text/javascript" src="https://cdn.jsdelivr.net/gh/jagenjo/litegraph.js/build/litegraph.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/immer/dist/immer.umd.production.min.js"></script>
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        if (window.immer) { window.immer.enableMapSet(); }
+    });
+    </script>
+</head>
+<body>
+    <div class="app-container">
+        <header>
+            <h1>SettingsWorkspace Demo</h1>
+            <p>A demonstration of the extensible settings component.</p>
+        </header>
+
+        <main class="workspace">
+            <!-- Container for the navigation sidebar -->
+            <div id="sidebar-container" class="sidebar"></div>
+
+            <!-- Container for the main settings content -->
+            <div id="settings-container" class="content"></div>
+        </main>
+    </div>
+
+    <!-- The main script that orchestrates the demo -->
+    <script type="module" src="settings.js"></script>
+</body>
+</html>

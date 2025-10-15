@@ -93,8 +93,16 @@ export class SessionUIManager extends ISessionManager {
 
         // 连接所有模块的事件流
         this._connectUIEvents();
-        this._connectToConfigManagerEvents();
-        this._connectToStoreForUiPersistence(); // [V2] 新增：连接store以持久化UI状态
+
+        // --- [核心修复] ---
+        // 只有在非只读模式（即动态数据模式）下，才需要订阅来自 ConfigManager 的数据变更事件。
+        // 在只读模式下，侧边栏是一个纯粹的静态导航器，不应响应外部数据变化。
+        // 这从根本上解决了 "幽灵刷新" 的竞态条件问题。
+        if (!this.options.readOnly) {
+            this._connectToConfigManagerEvents();
+        }
+        
+        this._connectToStoreForUiPersistence();
     }
 
     // ==========================================================
@@ -117,8 +125,19 @@ export class SessionUIManager extends ISessionManager {
         this.sessionList.init();
         if (this.documentOutline) this.documentOutline.init();
         this.moveToModal.init();
-        
-        // 数据加载由事件驱动，但我们可以主动触发一次加载检查
+
+        // --- [核心修复] ---
+        // 当侧边栏以只读模式启动，并且已通过 initialState 提供静态项目时，
+        // 我们完全跳过从 ModuleRepository 加载数据的流程。
+        // 这从根本上解决了 "初始状态被仓库空数据覆盖" 的问题（即“一闪而过”）。
+        if (this.options.readOnly && this.options.initialState && Array.isArray(this.options.initialState.items)) {
+            console.log('[SessionUIManager] 以只读静态模式启动，跳过仓库加载。');
+            // Store 已在构造函数中被正确初始化，我们只需解析 Promise 即可。
+            return Promise.resolve(this.getActiveSession());
+        }
+        // --- [修复结束] ---
+
+        // 只有在非只读的动态模式下，才执行数据加载逻辑
         this.moduleRepo.load();
         
         return new Promise(resolve => {
