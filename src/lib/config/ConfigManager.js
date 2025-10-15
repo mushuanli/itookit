@@ -13,6 +13,8 @@ import { LLMRepository } from './repositories/LLMRepository.js';
 import { ModuleRepositoryManager } from './managers/ModuleRepositoryManager.js';
 // 从常量文件中导入事件名称，避免使用魔术字符串，增强可维护性。
 import { EVENTS } from './shared/constants.js';
+// +++ 新增: 导入默认配置模板 +++
+import { DEFAULT_CONNECTION, DEFAULT_AGENT } from './llmProvider.js';
 
 // ------------------- 单例控制 -------------------
 // 模块级私有变量，用于保存 ConfigManager 的唯一实例。
@@ -84,6 +86,9 @@ export class ConfigManager {
                 this.llm.load()
             ]);
 
+            // +++ 新增: 在加载后确保默认配置存在 +++
+            await this._ensureDefaultLLMConfig();
+
             console.log("ConfigManager: 全局配置数据引导成功。");
             // 当所有全局数据准备就绪后，发布一个 'app:ready' 事件。
             // 应用的其他部分（特别是UI层）可以监听这个事件，然后才开始执行其业务逻辑，
@@ -95,7 +100,45 @@ export class ConfigManager {
             this.eventManager.publish(EVENTS.APP_BOOTSTRAP_FAILED, error);
         }
     }
-    
+
+    /**
+     * +++ 新增: 确保默认的 Connection 和 Agent 存在的方法 +++
+     * 此方法是幂等的，应在 bootstrap 期间调用。
+     * @private
+     */
+    async _ensureDefaultLLMConfig() {
+        const connections = await this.llm.getConnections();
+        const agents = await this.llm.getAgents();
+        let configWasModified = false;
+
+        // 1. 检查并创建默认 Connection
+        if (!connections.some(c => c.id === DEFAULT_CONNECTION.id)) {
+            connections.unshift({ ...DEFAULT_CONNECTION }); // 使用 unshift 确保它在列表顶部
+            configWasModified = true;
+            console.log("ConfigManager: 未找到默认 Connection，正在创建...");
+        }
+
+        // 2. 检查并创建默认 Agent
+        if (!agents.some(a => a.id === DEFAULT_AGENT.id)) {
+            agents.unshift({ ...DEFAULT_AGENT });
+            
+            // 同时确保 'default' 标签存在
+            await this.tags.addTag('default');
+            
+            configWasModified = true;
+            console.log("ConfigManager: 未找到默认 Agent，正在创建...");
+        }
+
+        // 3. 如果配置被修改，则一次性保存所有更改
+        if (configWasModified) {
+            console.log("ConfigManager: 正在保存新的默认 LLM 配置。");
+            await Promise.all([
+                this.llm.saveConnections(connections),
+                this.llm.saveAgents(agents)
+            ]);
+        }
+    }
+
     // ------------------- 公共访问器 (Getters) -------------------
 
     /**

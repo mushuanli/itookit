@@ -1,6 +1,6 @@
 
 /**
- * @file #llm/llmProvider.js
+ * @file #config/llmProvider.js
  * @description Single source of truth for LLM provider static metadata.
  * This includes default URLs, recommended models, etc., to be consumed
  * by both the core library and the settings UI.
@@ -84,5 +84,59 @@ export const PROVIDER_DEFAULTS = {
         name: "Custom (OpenAI Compatible)",
         baseURL: '', // User must provide this
         models: [] // User must add their own models
+    }
+};
+
+
+// +++ 新增: 默认值定义 +++
+
+export const DEFAULT_ID = 'default';
+const DEFAULT_NAME = '默认';
+
+/**
+ * 决定默认使用哪个 provider 的辅助函数, 可以修改这里改变安装默认值
+ * @returns {string}
+ */
+const getDefaultProviderKey = () => {
+    const providers = Object.keys(PROVIDER_DEFAULTS);
+    // 优先使用 'openai'，如果不存在则使用列表中的第一个，最后回退到自定义类型
+    return providers.includes('openai') ? 'openai' : (providers[0] || 'custom_openai_compatible');
+};
+
+const defaultProviderKey = getDefaultProviderKey();
+const defaultProviderConfig = PROVIDER_DEFAULTS[defaultProviderKey];
+
+/**
+ * @type {import('./shared/types.js').LLMProviderConnection}
+ * 默认连接的模板，如果不存在则会被创建。
+ */
+export const DEFAULT_CONNECTION = {
+    id: DEFAULT_ID,
+    name: DEFAULT_NAME,
+    provider: defaultProviderKey,
+    apiKey: '',
+    baseURL: defaultProviderConfig.baseURL,
+    // 安全地复制模型数组，防止意外修改原始定义
+    availableModels: defaultProviderConfig.models ? [...defaultProviderConfig.models] : []
+};
+
+/**
+ * @type {import('./shared/types.js').LLMAgentDefinition}
+ * 默认智能体的模板，如果不存在则会被创建。
+ */
+export const DEFAULT_AGENT = {
+    id: DEFAULT_ID,
+    name: DEFAULT_NAME,
+    icon: '🤖',
+    description: '系统默认智能体',
+    tags: ['default'],
+    config: {
+        connectionId: DEFAULT_ID, // 链接到默认的 connection
+        modelName: (DEFAULT_CONNECTION.availableModels?.[0]?.id) || "", // 使用默认连接的第一个可用模型
+        systemPrompt: "You are a helpful assistant."
+    },
+    interface: {
+        inputs: [{ name: "prompt", type: "string" }],
+        outputs: [{ name: "response", type: "string" }]
     }
 };

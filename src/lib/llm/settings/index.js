@@ -20,15 +20,13 @@ import { WorkflowManager } from './components/WorkflowManager.js';
 
 // --- REFACTORED: Import the central ConfigManager ---
 import { ConfigManager } from '../../config/ConfigManager.js';
-
-// Import provider defaults to set a valid initial provider for default connection
-import { PROVIDER_DEFAULTS } from '../../config/llmProvider.js';
+// --- 移除: 不再需要直接导入 PROVIDER_DEFAULTS 来构造默认值 ---
+import { DEFAULT_ID } from '../../config/llmProvider.js';
 
 // Constants for Defaults
 const CONSTANTS = {
-    DEFAULT_CONN_ID: 'default',
-    DEFAULT_AGENT_ID: 'default',
-    DEFAULT_NAME: '默认'
+    DEFAULT_CONN_ID: DEFAULT_ID,
+    DEFAULT_AGENT_ID: DEFAULT_ID,
 };
 
 // +++ MODIFIED: Import the new service interface for type checking and clarity.
@@ -222,78 +220,30 @@ export class LLMSettingsWidget extends ISettingsWidget {
         this._setActiveTab(event.target.dataset.tab);
     }
     
+    /**
+     * --- 重构后 ---
+     * 此方法现在只负责从 ConfigManager 加载数据并更新UI状态。
+     * 创建默认值的逻辑已被移除。
+     */
     async _loadAndInit() {
-        // --- FIX: Ensure local variables are declared with 'let' ---
-        // 1. Fetch data into local variables.
-        let [connectionsData, agentsData, workflowsData, tagsData] = await Promise.all([
+        // 1. 直接从 ConfigManager 加载数据。
+        //    此时可以安全地假设默认值已经由 ConfigManager 的 _bootstrap 流程创建好了。
+        const [connections, agents, workflows, tags] = await Promise.all([
             this.configManager.llm.getConnections(),
             this.configManager.llm.getAgents(),
             this.configManager.llm.getWorkflows(),
-            this.configManager.tags.getAll() // getAll() is synchronous after load()
+            this.configManager.tags.getAll()
         ]);
-
-        // Ensure arrays exist to prevent errors on .find() or .unshift()
-        let connections = connectionsData || [];
-        let agents = agentsData || [];
-        let workflows = workflowsData || [];
-        let tags = tagsData || [];
         
-        let dataChanged = false;
+        // --- 以下所有创建默认值的逻辑都已被移除 ---
 
-        // 2. --- IMPLEMENTATION: Ensure Default Connection exists ---
-        if (!connections.find(c => c.id === CONSTANTS.DEFAULT_CONN_ID)) {
-            const providers = Object.keys(PROVIDER_DEFAULTS);
-            const defaultProvider = providers.includes('openai') ? 'openai' : (providers[0] || 'custom');
-            const providerConfig = PROVIDER_DEFAULTS[defaultProvider] || { baseURL: '', models: [] };
-            
-            connections.unshift({
-                id: CONSTANTS.DEFAULT_CONN_ID,
-                name: CONSTANTS.DEFAULT_NAME, // Fixed name
-                provider: defaultProvider,
-                apiKey: '',
-                baseURL: providerConfig.baseURL,
-                availableModels: providerConfig.models ? [...providerConfig.models] : []
-            });
-            dataChanged = true;
-        }
-
-        // 3. --- IMPLEMENTATION: Ensure Default Agent exists ---
-        if (!agents.find(a => a.id === CONSTANTS.DEFAULT_AGENT_ID)) {
-            // [FIX] Find the default connection that was just created/ensured.
-            const defaultConnection = connections.find(c => c.id === CONSTANTS.DEFAULT_CONN_ID);
-            // [FIX] Get the first available model's ID from it, or fallback to an empty string.
-            const defaultModelName = (defaultConnection?.availableModels?.[0]?.id) || "";
-            agents.unshift({
-                id: CONSTANTS.DEFAULT_AGENT_ID,
-                name: CONSTANTS.DEFAULT_NAME, // Fixed name
-                icon: '🤖',
-                description: '系统默认智能体',
-                tags: ['default'],
-                config: { 
-                    connectionId: CONSTANTS.DEFAULT_CONN_ID, // Link to default connection
-                    modelName: defaultModelName, // <-- Use the dynamically found model name
-                    systemPrompt: "You are a helpful assistant." 
-                },
-                interface: { inputs: [{ name: "prompt", type: "string" }], outputs: [{ name: "response", type: "string" }] }
-            });
-            dataChanged = true;
-            // Ensure 'default' tag exists
-            if (!tags.includes('default')) {
-                tags.push('default');
-                await this.configManager.tags.addTags(['default']);
-            }
-        }
-
-        // 4. Persist defaults if created
-        if (dataChanged) {
-            await Promise.all([
-                this.configManager.llm.saveConnections(connections),
-                this.configManager.llm.saveAgents(agents)
-            ]);
-        }
-
-        // 5. Update state
-        this.state = { connections, agents, workflows, tags };
+        // 2. 更新组件内部状态并初始化子组件。
+        this.state = { 
+            connections: connections || [], 
+            agents: agents || [], 
+            workflows: workflows || [], 
+            tags: tags || [] 
+        };
         this._initComponents();
     }
 
@@ -370,11 +320,20 @@ export class LLMSettingsWidget extends ISettingsWidget {
             if (this.components.connections) this.components.connections.update({ connections: newConnections });
             if (this.components.agents) this.components.agents.update({ newConnections: newConnections });
 
-            // --- NEW: Proactive Agent Update Logic ---
-            let updatedAgentCount = 0;
+            // +++ NEW: Proactive Agent Update Logic +++
+            
+            // 1. Find connections where the list of available models has changed.
             const changedConnections = newConnections.filter(newConn => {
                 const oldConn = oldConnections.find(c => c.id === newConn.id);
                 if (!oldConn) return false;
+
+                // --- 核心修复在这里 ---
+                // 条件1: Provider 的类型变了 (例如从 'openai' -> 'deepseek')。这是最直接的触发条件。
+                if (oldConn.provider !== newConn.provider) {
+                    return true;
+                }
+                
+                // 条件2: Provider 没变，但模型列表变了 (例如用户手动增删了模型)。
                 const oldModelIds = new Set((oldConn.availableModels || []).map(m => m.id));
                 const newModelIds = new Set((newConn.availableModels || []).map(m => m.id));
                 if (oldModelIds.size !== newModelIds.size) return true;
@@ -388,6 +347,7 @@ export class LLMSettingsWidget extends ISettingsWidget {
                 let currentAgents = await this.configManager.llm.getAgents();
                 const changedConnectionIds = new Set(changedConnections.map(c => c.id));
                 let wasModified = false;
+                let updatedAgentCount = 0;
 
                 const agentsToUpdate = currentAgents.map(agent => {
                     if (changedConnectionIds.has(agent.config.connectionId)) {
@@ -411,7 +371,7 @@ export class LLMSettingsWidget extends ISettingsWidget {
                 if (wasModified) {
                     await this.configManager.llm.saveAgents(agentsToUpdate);
                     this._notify(
-                        `${updatedAgentCount} agent(s) were automatically updated to use a valid model.`,
+                        `${updatedAgentCount} 个 Agent 的模型已自动更新以保持兼容性。`,
                         'info'
                     );
                 }
