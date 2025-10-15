@@ -9,7 +9,8 @@
 import { TagsInput } from './TagsInput.js';
 
 export class AgentEditor {
-    constructor(element, { initialAgents, allTags, initialConnections, onNotify }, onAgentsChange) {
+    // --- FIX: onAgentsChange moved into options object ---
+    constructor(element, { initialAgents, allTags, initialConnections, onNotify, onAgentsChange }) {
         this.element = element;
         this.agents = initialAgents;
         this.allTags = allTags;
@@ -18,6 +19,7 @@ export class AgentEditor {
         this.onAgentsChange = onAgentsChange;
         this.selectedAgentId = null;
         this.tagsInput = null;
+        this.isDirty = false; // --- FIX: Added isDirty state ---
         this.render();
     }
 
@@ -88,7 +90,7 @@ export class AgentEditor {
         this.tagsInput = new TagsInput(container.querySelector('#agent-tags-input'), {
             initialTags: agent.tags || [],
             allTags: this.allTags,
-            onChange: (tags) => { /* Will be handled on save */ }
+            onChange: (tags) => { this.isDirty = true; } // --- FIX: Set dirty on tag change
         });
     }
 
@@ -140,7 +142,9 @@ export class AgentEditor {
         this.element.addEventListener('click', e => {
             const listItem = e.target.closest('.list-item');
             if (listItem) {
+                if (this.isDirty && !confirm("You have unsaved changes. Are you sure you want to discard them?")) return;
                 this.selectedAgentId = listItem.dataset.id;
+                this.isDirty = false; // --- FIX: Reset dirty state on selection
                 this.render(); // Re-render everything for the new selection
             }
             if (e.target.id === 'new-agent-btn') { this.createNewAgent(); }
@@ -156,10 +160,10 @@ export class AgentEditor {
             }
             
             // Interface editor actions
-            if (e.target.id === 'add-input-btn') this.addInterfaceRow('input');
-            if (e.target.id === 'add-output-btn') this.addInterfaceRow('output');
+            if (e.target.id === 'add-input-btn') { this.addInterfaceRow('input'); this.isDirty = true; }
+            if (e.target.id === 'add-output-btn') { this.addInterfaceRow('output'); this.isDirty = true; }
             const removeBtn = e.target.closest('.remove-row-btn');
-            if (removeBtn) removeBtn.parentElement.remove();
+            if (removeBtn) { removeBtn.parentElement.remove(); this.isDirty = true; }
         });
         
         this.element.addEventListener('submit', e => {
@@ -168,8 +172,14 @@ export class AgentEditor {
                 this.saveCurrentAgent(e.target);
             }
         });
-        // Add change listener for cascading dropdown
+
+        // --- FIX: Set dirty on any form input/change ---
+        this.element.addEventListener('input', e => {
+            if (e.target.closest('#agent-form')) this.isDirty = true;
+        });
+
         this.element.addEventListener('change', e => {
+            if (e.target.closest('#agent-form')) this.isDirty = true;
             if (e.target.name === 'connectionId') {
                 this.updateModelOptions(e.target.value);
             }
@@ -209,6 +219,8 @@ export class AgentEditor {
     }
     
     createNewAgent() {
+        if (this.isDirty && !confirm("You have unsaved changes. Are you sure you want to discard them?")) return;
+
         const newId = `agent-${Date.now()}`;
         const newAgent = {
             id: newId, name: "New Agent", icon: '🤖', tags: [],
@@ -222,6 +234,7 @@ export class AgentEditor {
         this.agents.push(newAgent);
         this.selectedAgentId = newId;
         this.onAgentsChange(this.agents); // Immediately save to get it in the list
+        this.isDirty = false; // A new agent starts clean
         this.render();
     }
 
@@ -230,6 +243,7 @@ export class AgentEditor {
             this.agents = this.agents.filter(a => a.id !== this.selectedAgentId);
             this.selectedAgentId = null;
             this.onAgentsChange(this.agents);
+            this.isDirty = false;
             this.render();
         }
     }
@@ -260,9 +274,9 @@ export class AgentEditor {
         }));
         
         this.onAgentsChange(this.agents);
+        this.isDirty = false; // --- FIX: Reset dirty state after save ---
         this.renderList(); // Re-render list in case name/tags changed
         this.onNotify('Agent saved!', 'success'); // REPLACED alert()
-        alert('Agent saved!');
     }
 
     update({ newAgents, newAllTags, newConnections }) {
@@ -272,6 +286,12 @@ export class AgentEditor {
             if (this.tagsInput) this.tagsInput.updateAllTags(newAllTags);
         }
         if (newConnections) this.allConnections = newConnections; // Handle connection updates
+        
+        // If the selected agent was deleted, deselect it
+        if (this.selectedAgentId && newAgents && !newAgents.some(a => a.id === this.selectedAgentId)) {
+            this.selectedAgentId = null;
+        }
+
         this.render();
     }
 

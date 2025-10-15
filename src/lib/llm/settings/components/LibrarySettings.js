@@ -20,6 +20,7 @@ export class LibrarySettings {
         this.onTest = onTest;
         this.onNotify = onNotify;
         this.selectedConnectionId = null;
+        this.isDirty = false; // --- FIX: Added isDirty state ---
 
         // 从共享数据动态生成提供商列表
         this.providers = Object.keys(PROVIDER_DEFAULTS);
@@ -28,6 +29,7 @@ export class LibrarySettings {
         this._boundHandleClick = this._handleClick.bind(this);
         this._boundHandleSubmit = this._handleSubmit.bind(this);
         this._boundHandleChange = this._handleChange.bind(this);
+        this._boundHandleInput = this._handleInput.bind(this); // For dirty check
         
         this.render();
     }
@@ -116,11 +118,19 @@ export class LibrarySettings {
         this.element.removeEventListener('click', this._boundHandleClick);
         this.element.removeEventListener('submit', this._boundHandleSubmit);
         this.element.removeEventListener('change', this._boundHandleChange);
+        this.element.removeEventListener('input', this._boundHandleInput);
 
         // 重新附加新的、已绑定的处理器
         this.element.addEventListener('click', this._boundHandleClick);
         this.element.addEventListener('submit', this._boundHandleSubmit);
         this.element.addEventListener('change', this._boundHandleChange);
+        this.element.addEventListener('input', this._boundHandleInput);
+    }
+    
+    _handleInput(e) {
+        if(e.target.closest('#connection-form')) {
+            this.isDirty = true;
+        }
     }
 
     _handleProviderChange(providerId) {
@@ -146,6 +156,9 @@ export class LibrarySettings {
     }
 
     _handleChange(e) {
+        if (e.target.closest('#connection-form')) {
+            this.isDirty = true;
+        }
         if (e.target.name === 'provider') {
             this._handleProviderChange(e.target.value);
         }
@@ -155,12 +168,15 @@ export class LibrarySettings {
         const target = e.target;
         const listItem = target.closest('.list-item');
         if (listItem) {
+            if(this.isDirty && !confirm("You have unsaved changes. Are you sure you want to discard them?")) return;
             this.selectedConnectionId = listItem.dataset.id;
+            this.isDirty = false; // Reset dirty on selection
             this.render();
             return;
         }
 
         if (target.id === 'new-connection-btn') {
+            if(this.isDirty && !confirm("You have unsaved changes. Are you sure you want to discard them?")) return;
             const newId = `conn-${Date.now()}`;
             const defaultProvider = this.providers[0];
             const defaults = PROVIDER_DEFAULTS[defaultProvider];
@@ -175,6 +191,7 @@ export class LibrarySettings {
             if (!this.config.connections) this.config.connections = [];
             this.config.connections.push(newConnection);
             this.selectedConnectionId = newId;
+            this.isDirty = false; // New connection starts clean
             this.render();
             return;
         }
@@ -184,6 +201,7 @@ export class LibrarySettings {
                 this.config.connections = this.config.connections.filter(c => c.id !== this.selectedConnectionId);
                 this.selectedConnectionId = null;
                 this.onConfigChange(this.config);
+                this.isDirty = false;
                 this.render();
             }
             return;
@@ -218,6 +236,7 @@ export class LibrarySettings {
         }
         
         if (target.id === 'add-model-btn') {
+            this.isDirty = true;
             const list = this.element.querySelector('#models-list');
             const newRow = document.createElement('div');
             newRow.className = 'interface-row model-row';
@@ -231,6 +250,7 @@ export class LibrarySettings {
 
         const removeBtn = target.closest('.remove-model-row-btn');
         if (removeBtn) {
+            this.isDirty = true;
             removeBtn.parentElement.remove();
         }
     }
@@ -257,6 +277,7 @@ export class LibrarySettings {
                 };
                 this.config.connections[connIndex] = updatedConn;
                 this.onConfigChange(this.config);
+                this.isDirty = false; // Reset dirty on save
                 this.renderList();
                 this.onNotify('Connection saved!', 'success');
             }
@@ -265,6 +286,9 @@ export class LibrarySettings {
 
     update(newConfig) {
         this.config = newConfig;
+        if (this.selectedConnectionId && !this.config.connections.some(c => c.id === this.selectedConnectionId)) {
+            this.selectedConnectionId = null;
+        }
         this.render();
     }
 }

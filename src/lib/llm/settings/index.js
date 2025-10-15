@@ -83,7 +83,11 @@ export class LLMSettingsWidget extends ISettingsWidget {
      * Note: This requires child components to also expose an `isDirty` property.
      */
     get isDirty() {
-        return this.components.workflows?.isDirty || false; // Example, extend for other components
+        // --- FIX: Extended to check all components ---
+        return this.components.connections?.isDirty ||
+               this.components.agents?.isDirty ||
+               this.components.workflows?.isDirty ||
+               false;
     }
 
     // --- Lifecycle Methods ---
@@ -243,16 +247,17 @@ export class LLMSettingsWidget extends ISettingsWidget {
                     initialAgents: this.state.agents, 
                     allTags: this.state.tags,
                     initialConnections: this.state.connections,
-                    onNotify: this._notify.bind(this)
-                },
-                async (newAgents) => {
-                    await this.configManager.llm.saveAgents(newAgents);
-                    
-                    // Business logic: extract all unique tags from agents and update the global tag list
-                    const allAgentTags = new Set(newAgents.flatMap(agent => agent.tags || []));
-                    await this.configManager.tags.addTags(Array.from(allAgentTags));
+                    onNotify: this._notify.bind(this),
+                    // --- FIX: onAgentsChange callback moved into options object ---
+                    onAgentsChange: async (newAgents) => {
+                        await this.configManager.llm.saveAgents(newAgents);
+                        
+                        // Business logic: extract all unique tags from agents and update the global tag list
+                        const allAgentTags = new Set(newAgents.flatMap(agent => agent.tags || []));
+                        await this.configManager.tags.addTags(Array.from(allAgentTags));
 
-                    this.emit('change', { key: 'agents' });
+                        this.emit('change', { key: 'agents' });
+                    }
                 }
             ),
             workflows: new WorkflowManager(
@@ -303,6 +308,7 @@ export class LLMSettingsWidget extends ISettingsWidget {
 
         this._subscriptions.push(eventManager.subscribe('llm:workflows:updated', (workflows) => {
             this.state.workflows = workflows;
+            // --- FIX: Correctly call the new 'update' method on WorkflowManager ---
             if (this.components.workflows) this.components.workflows.update({ initialWorkflows: workflows });
             if (this.components.workflows) this.components.workflows.updateRunnables({ agents: this.state.agents, workflows: this.state.workflows });
         }));

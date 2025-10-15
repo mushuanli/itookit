@@ -351,4 +351,18 @@ export class WorkflowManager {
         this.runnables = newRunnables;
         this.registerNodeTypes();
     }
+
+    // --- FIX: Added update method for external changes ---
+    update({ initialWorkflows }) {
+        if (initialWorkflows) {
+            this.workflows = initialWorkflows;
+            // If the currently selected workflow was deleted externally, clear the details pane.
+            if (this.selectedWorkflowId && !this.workflows.some(wf => wf.id === this.selectedWorkflowId)) {
+                this.selectedWorkflowId = null;
+                this.graph.clear();
+                this.renderPropsPane(null);
+            }
+            this.renderWorkflowList();
+        }
+    }
 }
