@@ -285,6 +285,7 @@ export class LibrarySettings {
 
             const statusEl = form.querySelector('#connection-status');
             statusEl.textContent = 'Testing...';
+            statusEl.style.color = 'inherit';
             target.disabled = true;
 
             const formData = new FormData(form);
@@ -298,7 +299,8 @@ export class LibrarySettings {
                 provider: formData.get('provider'),
                 apiKey: formData.get('apiKey'),
                 baseURL: formData.get('baseURL'),
-                availableModels: models
+                availableModels: models,
+                model: form.querySelector('#models-list .model-row input:first-child')?.value || undefined
             };
 
             try {

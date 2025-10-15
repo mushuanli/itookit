@@ -27,7 +27,7 @@
     *   **关键接口 (`options`)**:
         *   `storageAdapter`: **必需**。定义了数据持久化的方式，是整个库解耦的关键。
         *   `onWorkflowRun`: 业务逻辑回调，定义了点击“运行”工作流后应执行的操作。
-        *   `onTestConnection`: 业务逻辑回调，定义了点击“测试连接”后应执行的操作。
+        *   `onTestLLMConnection`: 业务逻辑回调，定义了点击“测试连接”后应执行的操作。
         *   `customSettingsTabs`: **扩展性接口**。允许宿主应用注入自定义的设置页面，设计非常优秀。
 
 *   **`LibrarySettings` (连接管理)**
@@ -116,7 +116,7 @@
 
 4.  **`StorageAdapter` (存储适配器)**: 这是一个由您自己实现的接口。它告诉 UI 库如何读写数据，从而将 UI 与数据层完全解耦。
 
-5.  **回调注入 (Callback Injection)**: 核心业务逻辑，如测试 API 连接或运行工作流，通过 `onTestConnection` 和 `onWorkflowRun` 等回调函数注入，使 UI 库保持通用性，易于测试。
+5.  **回调注入 (Callback Injection)**: 核心业务逻辑，如测试 API 连接或运行工作流，通过 `onTestLLMConnection` 和 `onWorkflowRun` 等回调函数注入，使 UI 库保持通用性，易于测试。
 
 ## 快速开始 (Quick Start)
 
@@ -155,7 +155,7 @@ async function main() {
     const settingsUI = await SettingsManagerUI.create(container, {
         mode: 'page',
         // 业务逻辑回调仍然需要您自己提供
-        onTestConnection: async (conn) => { /* ... 你的测试逻辑 ... */ },
+        onTestLLMConnection: async (conn) => { /* ... 你的测试逻辑 ... */ },
         onWorkflowRun: (wf) => { console.log('Running:', wf.name); }
     });
 }
@@ -179,7 +179,7 @@ async function main() {
         // 注入你的服务实现
         configService: myConfigService,
         mode: 'page',
-        onTestConnection: async (conn) => { /* ... */ },
+        onTestLLMConnection: async (conn) => { /* ... */ },
         onWorkflowRun: (wf) => { /* ... */ }
     });
 }
@@ -205,7 +205,7 @@ main();
 | `configService` | `IConfigService` | 否 | 用于持久化配置的服务。**默认为 `DefaultConfigService` (使用 LocalStorage)。** |
 | `mode` | `'page' \| 'modal'` | 否 | UI 的显示模式。默认为 `'modal'`。 |
 | `onWorkflowRun` | `(wf) => void` | 否 | 当用户点击工作流运行按钮时触发的回调。 |
-| `onTestConnection`| `(conn) => Promise<...>`| 否 | 当用户点击连接测试按钮时触发的回调。 |
+| `onTestLLMConnection`| `(conn) => Promise<...>`| 否 | 当用户点击连接测试按钮时触发的回调。 |
 | `onNotify` | `(msg, type) => void`| 否 | 用于显示非阻塞式通知的回调。 |
 
 ---

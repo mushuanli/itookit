@@ -45,10 +45,11 @@ export const PROVIDER_DEFAULTS = {
         name: "DeepSeek",
         baseURL: 'https://api.deepseek.com/v1/chat/completions',
         models: [
-            { id: 'deepseek-v3.2-exp', name: 'DeepSeek V3.2 Exp' },
-            { id: 'deepseek-v3.1-terminus', name: 'DeepSeek V3.1 Terminus' },
             { id: 'deepseek-chat', name: 'DeepSeek Chat' },
-            { id: 'deepseek-coder', name: 'DeepSeek Coder' },
+            { id: 'deepseek-reasoner', name: 'DeepSeek Reasoner' },
+            //{ id: 'deepseek-v3.2-exp', name: 'DeepSeek V3.2 Exp' },
+            //{ id: 'deepseek-v3.1-terminus', name: 'DeepSeek V3.1 Terminus' },
+            //{ id: 'deepseek-coder', name: 'DeepSeek Coder' },
         ]
     },
     openrouter: {

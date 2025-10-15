@@ -10,6 +10,7 @@
  */
 
 import { createSessionUI } from '../../sidebar/index.js';
+import { testLLMConnection } from '../../llm/core/index.js';
 import { LLMSettingsWidget } from '../../llm/settings/index.js';
 import { isClass } from '../../common/utils/utils.js';
 
@@ -65,7 +66,12 @@ export class SettingsWorkspace {
         }
 
         // 重新组装最终的 options 对象，供类的其余部分使用。
-        this.options = { ...options, widgets: finalWidgets };
+        const finalWidgetOptions = {
+            ...(options.widgetOptions || {}),
+            onTestLLMConnection: testLLMConnection // 将其注入到 widgetOptions 中
+        };
+
+        this.options = { ...options, widgets: finalWidgets, widgetOptions: finalWidgetOptions };
         
         // --- [新增] 存储核心依赖 ---
         /** @private @type {import('../../config/ConfigManager.js').ConfigManager} */

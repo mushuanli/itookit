@@ -64,7 +64,8 @@ export class LLMSettingsWidget extends ISettingsWidget {
         // --- REFACTORED: Get the singleton instance of the ConfigManager ---
         // The check for `llmConfigService` is removed. All instances now use the central service.
         this.configManager = ConfigManager.getInstance();
-        
+        this.onTestLLMConnection = options.onTestLLMConnection;
+
         // Internal state
         this.isMounted = false;
         this.container = null; // The DOM element provided by the host
@@ -301,7 +302,9 @@ export class LLMSettingsWidget extends ISettingsWidget {
                 { 
                     onNotify: this._notify.bind(this),
                     lockedId: CONSTANTS.DEFAULT_CONN_ID,
-                    allAgents: this.state.agents 
+                    allAgents: this.state.agents,
+                    // --- MODIFIED: Inject the test handler into LibrarySettings ---
+                    onTest: this.onTestLLMConnection
                 }
             ),
             agents: new AgentEditor(

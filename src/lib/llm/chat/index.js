@@ -23,7 +23,7 @@ import { EventEmitter } from '../history/utils/EventEmitter.js';
 
 // --- 核心服务和接口导入 ---
 import { ConfigManager } from '../../config/ConfigManager.js';
-import { LLMService } from '../core/LLMService.js'; // 假设 LLMService 的路径
+import { LLMService,testLLMConnection } from '../core/index.js';
 import { MessagePair } from '../history/core/MessagePair.js';
 /** @typedef {import('../../common/interfaces/IFileStorageAdapter.js').IFileStorageAdapter} IFileStorageAdapter */
 // 假设默认文件存储适配器的路径
