@@ -83,7 +83,9 @@ class ProjectEditorComponent {
         this.configManager = ConfigManager.getInstance();
         this.moduleRepo = this.configManager.modules.get(this.projectId);
         this.eventManager = this.configManager.eventManager;
-        this.unsubscribe = null;
+        // --- [修复] ---
+        // 将单个的 unsubscribe 函数改为一个数组，以管理多个订阅。
+        this.unsubscribes = [];
     }
 
     /**
@@ -92,11 +94,32 @@ class ProjectEditorComponent {
     async mount() {
         console.log(`[ProjectEditor:${this.projectId}] 正在挂载组件，等待初始数据...`);
         
-        // 订阅 *本项目* 的数据更新事件
-        const updateEventName = getModuleEventName('updated', this.projectId);
-        this.unsubscribe = this.eventManager.subscribe(updateEventName, (updatedModules) => {
-            console.log(`[ProjectEditor:${this.projectId}] 收到模块更新通知，正在重新渲染...`);
-            this.render(updatedModules);
+        // --- [修复] ---
+        // 删除了对不存在的 'updated' 事件的订阅。
+        // 改为订阅所有会导致UI变更的具体领域事件。
+        const eventsToWatch = [
+            'MODULE_NODE_ADDED', 'MODULE_NODE_REMOVED', 'MODULE_NODE_RENAMED',
+            'MODULE_NODE_CONTENT_UPDATED', 'MODULE_NODES_META_UPDATED', 'MODULE_NODES_MOVED'
+        ];
+
+        // 定义一个通用的更新处理器
+        // 为了演示简单，任何变更都重新从仓库加载并渲染整个树。
+        const updateHandler = async (eventPayload) => {
+            console.log(`[ProjectEditor:${this.projectId}] 收到模块更新通知，正在重新渲染...`, eventPayload);
+            // 从仓库获取最新的完整状态并渲染
+            const currentModules = await this.moduleRepo.getModules();
+            this.render(currentModules);
+        };
+
+        // 遍历并订阅所有相关事件
+        eventsToWatch.forEach(eventTypeKey => {
+            const eventTemplate = EVENTS[eventTypeKey];
+            if (eventTemplate) {
+                const eventName = eventTemplate.replace('{ns}', this.projectId);
+                const unsubscribe = this.eventManager.subscribe(eventName, updateHandler);
+                // 将取消订阅函数存入数组
+                this.unsubscribes.push(unsubscribe);
+            }
         });
         
         // 等待本项目数据加载完成
@@ -108,9 +131,11 @@ class ProjectEditorComponent {
      * 模拟组件从DOM中卸载。
      */
     unmount() {
-        if (this.unsubscribe) {
-            this.unsubscribe();
-            console.log(`[ProjectEditor:${this.projectId}] 已取消订阅事件。`);
+        // --- [修复] ---
+        // 遍历并执行所有的取消订阅函数。
+        if (this.unsubscribes.length > 0) {
+            this.unsubscribes.forEach(unsub => unsub());
+            console.log(`[ProjectEditor:${this.projectId}] 已取消订阅所有模块事件。`);
         }
         // 关键：通知管理器可以清理这个实例了，释放内存。
         this.configManager.modules.dispose(this.projectId);
@@ -151,7 +176,7 @@ class ProjectEditorComponent {
             content: content,
             meta: {} // ctime 和 mtime 会被仓库自动添加
         };
-        await this.moduleRepo.addModule('/', fileData);
+        await this.moduleRepo.addModule(null, fileData); // 使用 null 代表根目录
     }
 }
 

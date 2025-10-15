@@ -66,7 +66,10 @@ export const dataAdapter = {
         if (!tree || !tree.children) return [];
 
         const processNode = (node, parentId) => {
-            const item = this.nodeToItem(node);
+            // --- [修复] ---
+            // 将 this.nodeToItem(node) 修改为 dataAdapter.nodeToItem(node)。
+            // 因为 dataAdapter 是一个普通对象，'this' 在此上下文中指向不正确。
+            const item = dataAdapter.nodeToItem(node);
             if (!item) return null;
 
             item.metadata.parentId = parentId;

@@ -61,7 +61,31 @@ export class SessionService extends ISessionService {
         return folders;
     }
 
-
+    // --- [修复] ---
+    // 实现了 ISessionService 接口中定义的 getAllFiles 方法。
+    // 这修复了架构层面的一个漏洞，使得依赖此服务的 SessionFileProvider
+    // 可以通过标准的接口契约来获取数据。
+    /**
+     * @override
+     * 获取所有文件（会话）的扁平化列表。
+     * @returns {Promise<object[]>}
+     */
+    async getAllFiles() {
+        const state = this.store.getState();
+        const files = [];
+        const traverse = (items) => {
+            for (const item of items) {
+                if (item.type === 'item') {
+                    files.push(item);
+                }
+                if (item.type === 'folder' && item.children) {
+                    traverse(item.children);
+                }
+            }
+        };
+        traverse(state.items);
+        return files;
+    }
 
 
     /**

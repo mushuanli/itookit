@@ -35,26 +35,9 @@ export class SessionFileProvider extends IMentionProvider {
         this.sessionService = sessionService;
     }
 
-    /**
-     * 递归地从 session 项目树中查找所有会话。
-     * @private
-     * @param {import('../types/types.js')._Session[]} items
-     * @returns {import('../types/types.js')._Session[]} 会话的扁平化列表。
-     */
-    _getAllFiles(items) {
-        let files = [];
-        const traverse = (itemList) => {
-            for (const item of itemList) {
-                if (item.type === 'item') {
-                    files.push(item);
-                } else if (item.type === 'folder' && item.children) {
-                    traverse(item.children);
-                }
-            }
-        };
-        traverse(items);
-        return files;
-    }
+    // --- [修复] ---
+    // 删除了内部的 _getAllFiles 辅助方法。
+    // 这个职责现在已经正确地移交给了 SessionService。
 
     /**
      * 根据查询字符串获取会话建议。
@@ -62,8 +45,10 @@ export class SessionFileProvider extends IMentionProvider {
      * @returns {Promise<Array<{id: string, label: string}>>}
      */
     async getSuggestions(query) {
-        const state = this.sessionService.store.getState();
-        const allFiles = this._getAllFiles(state.items);
+        // --- [修复] ---
+        // 不再直接访问 store (this.sessionService.store.getState())，
+        // 而是调用 SessionService 提供的标准公共接口，恢复了封装性。
+        const allFiles = await this.sessionService.getAllFiles();
         const lowerQuery = query.toLowerCase();
 
         return allFiles
