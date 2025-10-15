@@ -50,7 +50,7 @@ export class LLMChatUI extends IEditor {
         }
 
         this.container = element;
-        this.container.className = 'llm-chat-ui';
+        this.container.className = 'sub-main-content llm-chat-ui';
         
         // --- 2. 保存核心服务引用 ---
         this.configManager = options.configManager;

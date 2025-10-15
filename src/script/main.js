@@ -9,19 +9,28 @@ import { createLLMWorkspace } from '../lib/workspace/llm/index.js';
 import { createSettingsWorkspace } from '../lib/workspace/settings/index.js';
 
 // SettingsWorkspace 依赖
-import { ISettingsWidget } from '../lib/common/interfaces/ISettingsWidget.js';
-import { LLMSettingsWidget } from '../lib/llm-kit/settingsUI/index.js';
+// ISettingsWidget 接口通常在运行时不需要，但在开发时用于类型提示和规范
+// import { ISettingsWidget } from '../lib/common/interfaces/ISettingsWidget.js';
+//import { LLMSettingsWidget } from '../lib/llm-kit/settingsUI/index.js';
 
-// 通用数据存储适配器
-import { LocalStorageAdapter } from '../lib/common/store/default/LocalStorageAdapter.js';
+// [核心重构] 导入 ConfigManager
+import { ConfigManager } from '../lib/config/ConfigManager.js';
 
 
-// --- 3. 主应用逻辑 ---
+// --- 2. 主应用逻辑 ---
 document.addEventListener('DOMContentLoaded', () => {
 
-    // --- 共享资源 ---
-    // 为整个应用创建一个共享的数据库适配器实例
-    const sharedDatabaseAdapter = new LocalStorageAdapter({ prefix: 'my-app' });
+    // =========================================================================
+    // === [核心重构] 应用级数据管理器初始化
+    // =========================================================================
+    // 在整个应用的生命周期中，只创建一个 ConfigManager 实例。
+    // 所有工作区都将共享这个管理器，以实现数据服务的统一管理和跨模块通信。
+    console.log("正在初始化应用级 ConfigManager...");
+    const configManager = ConfigManager.getInstance({
+        // 为 ConfigManager 内部的 LocalStorageAdapter 提供一个统一的前缀
+        adapterOptions: { prefix: 'my_unified_app_' }
+    });
+
     // 跟踪已初始化的工作区，避免重复创建
     const initializedWorkspaces = {};
 
@@ -63,54 +72,47 @@ document.addEventListener('DOMContentLoaded', () => {
             switch (workspaceId) {
                 case 'mdx-workspace':
                     const mdxWorkspace = new MDxWorkspace({
+                        configManager: configManager,
+                        namespace: 'mdx_documents', // 数据隔离的命名空间
                         sidebarContainer: document.getElementById('mdx-sidebar'),
                         editorContainer: document.getElementById('mdx-editor'),
-                        storage: {
-                            adapter: sharedDatabaseAdapter,
-                            namespace: 'mdx_documents' // 数据库前缀
-                        }
                     });
                     await mdxWorkspace.start();
+                    initializedWorkspaces[workspaceId] = mdxWorkspace; // 保存实例
                     break;
 
                 case 'llm-workspace':
+                    // [修正] 使用新的工厂函数签名，不再需要 chatUIConfig.connections/agents
                     const llmWorkspace = createLLMWorkspace({
+                        configManager: configManager,
+                        namespace: 'llm_chats', // 数据隔离的命名空间
                         sidebarContainer: document.getElementById('llm-sidebar'),
                         chatContainer: document.getElementById('llm-chat'),
-                        storage: {
-                            adapter: sharedDatabaseAdapter,
-                            namespace: 'llm_chats' // 数据库前缀
-                        },
-                        // LLM Workspace 需要一些最小化的配置
-                        chatUIConfig: {
-                            connections: [],
-                            agents: []
+                        // chatUIConfig 和 sidebarConfig 仍然可以用于传递 UI 特定的配置
+                        sidebarConfig: {
+                            title: 'LLM 对话'
                         }
                     });
                     await llmWorkspace.start();
+                    initializedWorkspaces[workspaceId] = llmWorkspace; // 保存实例
                     break;
 
                 case 'settings-workspace':
+                    // [修正] 使用新的工厂函数签名，并注入 configManager
                     const settingsWorkspace = createSettingsWorkspace({
+                        configManager: configManager, // 注入 ConfigManager
+                        namespace: 'global_settings', // 数据隔离的命名空间
                         sidebarContainer: document.getElementById('settings-sidebar'),
                         settingsContainer: document.getElementById('settings-content'),
-                        storage: {
-                            adapter: sharedDatabaseAdapter,
-                            namespace: 'global_settings' // 数据库前缀
-                        },
-                        // **关键修复**:
-                        // 显式传入一个包含默认组件和自定义组件的数组。
-                        // 这会覆盖构造函数中的默认值，但确保了 LLMSettingsWidget 存在。
                         widgets: [
-                            LLMSettingsWidget,
+                            //LLMSettingsWidget,
                         ]
                     });
                     await settingsWorkspace.start();
+                    initializedWorkspaces[workspaceId] = settingsWorkspace; // 保存实例
                     break;
             }
 
-            // 标记为已初始化
-            initializedWorkspaces[workspaceId] = true;
             console.log(`${workspaceId} started successfully!`);
 
         } catch (error) {
@@ -123,6 +125,17 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- 首次加载 ---
-    // 初始化默认显示的 MDxWorkspace
-    initializeWorkspace('mdx-workspace');
+    // [改进] 等待 ConfigManager 准备就绪后再启动第一个工作区
+    // 这确保了在工作区尝试访问数据之前，所有全局配置都已加载完毕。
+    configManager.eventManager.subscribe('app:ready', () => {
+        console.log("ConfigManager is ready. Initializing default workspace...");
+        // 默认启动 MDxWorkspace
+        initializeWorkspace('mdx-workspace');
+    });
+
+    // [新增] 将核心实例暴露到 window 以方便调试
+    window.app = {
+        configManager,
+        getWorkspaces: () => initializedWorkspaces
+    };
 });

@@ -141,6 +141,14 @@
             flex-direction: column;
         }
     </style>
+    <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/gh/jagenjo/litegraph.js/css/litegraph.css">
+    <script type="text/javascript" src="https://cdn.jsdelivr.net/gh/jagenjo/litegraph.js/build/litegraph.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/immer/dist/immer.umd.production.min.js"></script>
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        if (window.immer) { window.immer.enableMapSet(); }
+    });
+    </script>
 </head>
 <body>
 
