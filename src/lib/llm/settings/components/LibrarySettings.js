@@ -12,24 +12,33 @@ import { PROVIDER_DEFAULTS } from '../../llmProvider.js';
 export class LibrarySettings {
     constructor(element, initialConfig, onConfigChange, { 
         onTest = async () => ({success: false, message: 'No test handler configured.'}),
-        onNotify = (message, type) => alert(`${type}: ${message}`) // Fallback to alert
+        onNotify = (message, type) => alert(`${type}: ${message}`),
+        lockedId = null,
+        // --- MODIFIED: Accept all agents for dependency check ---
+        allAgents = [] 
     } = {}) {
         this.element = element;
         this.config = initialConfig;
         this.onConfigChange = onConfigChange;
         this.onTest = onTest;
         this.onNotify = onNotify;
+        this.lockedId = lockedId;
+        this.allAgents = allAgents; // Store agents for checks
         this.selectedConnectionId = null;
         this.isDirty = false; // --- FIX: Added isDirty state ---
 
         // 从共享数据动态生成提供商列表
         this.providers = Object.keys(PROVIDER_DEFAULTS);
         
-        // 绑定事件处理器，以便能正确移除监听器
+        // --- Store the provider before a change event ---
+        this.providerBeforeChange = null; 
+
         this._boundHandleClick = this._handleClick.bind(this);
         this._boundHandleSubmit = this._handleSubmit.bind(this);
         this._boundHandleChange = this._handleChange.bind(this);
-        this._boundHandleInput = this._handleInput.bind(this); // For dirty check
+        this._boundHandleInput = this._handleInput.bind(this);
+        // --- Add focus listener to track state before change ---
+        this._boundHandleFocus = this._handleFocus.bind(this);
         
         this.render();
     }
@@ -86,10 +95,22 @@ export class LibrarySettings {
             return;
         }
 
+        // --- Store current provider for later comparison ---
+        this.providerBeforeChange = conn.provider;
+
+        const isLocked = conn.id === this.lockedId;
+        const nameDisabledAttr = isLocked ? 'disabled title="Default connection name cannot be changed."' : '';
+        // Hide delete button if locked, or define style to make it look disabled/hidden
+        const deleteBtnStyle = isLocked ? 'display: none;' : 'margin-left: auto;';
+
         this.ui.detailPane.innerHTML = `
             <h3>Edit Connection: ${conn.name}</h3>
             <form id="connection-form">
-                <div class="form-group"><label>Connection Name</label><input type="text" name="name" value="${conn.name}" required></div>
+                <div class="form-group">
+                    <label>Connection Name ${isLocked ? '(Fixed)' : ''}</label>
+                    <input type="text" name="name" value="${conn.name}" required ${nameDisabledAttr}>
+                    ${isLocked ? '<input type="hidden" name="name" value="' + conn.name + '">' : ''} 
+                </div>
                 <div class="form-group">
                     <label>Provider</label>
                     <select name="provider" required>
@@ -106,7 +127,7 @@ export class LibrarySettings {
                 <div style="display: flex; gap: 10px; align-items: center; margin-top: 20px;">
                     <button type="submit" class="settings-btn">Save Connection</button>
                     <button type="button" id="test-connection-btn" class="settings-btn" style="background-color: #6c757d;">Test</button>
-                    <button type="button" id="delete-connection-btn" class="settings-btn danger" style="margin-left: auto;">Delete</button>
+                    <button type="button" id="delete-connection-btn" class="settings-btn danger" style="${deleteBtnStyle}" ${isLocked ? 'disabled' : ''}>Delete</button>
                 </div>
                 <small id="connection-status" style="display: block; margin-top: 10px;"></small>
             </form>
@@ -119,40 +140,69 @@ export class LibrarySettings {
         this.element.removeEventListener('submit', this._boundHandleSubmit);
         this.element.removeEventListener('change', this._boundHandleChange);
         this.element.removeEventListener('input', this._boundHandleInput);
+        // --- NEW: Use focusin to capture pre-change state ---
+        this.element.removeEventListener('focusin', this._boundHandleFocus);
 
         // 重新附加新的、已绑定的处理器
         this.element.addEventListener('click', this._boundHandleClick);
         this.element.addEventListener('submit', this._boundHandleSubmit);
         this.element.addEventListener('change', this._boundHandleChange);
         this.element.addEventListener('input', this._boundHandleInput);
+        this.element.addEventListener('focusin', this._boundHandleFocus);
     }
     
+    _handleFocus(e) {
+        if (e.target.name === 'provider') {
+            this.providerBeforeChange = e.target.value;
+        }
+    }
+
     _handleInput(e) {
         if(e.target.closest('#connection-form')) {
             this.isDirty = true;
         }
     }
 
-    _handleProviderChange(providerId) {
-        const defaults = PROVIDER_DEFAULTS[providerId];
-        if (!defaults) return;
-
+    // --- MODIFIED: Complete rewrite for non-destructive updates ---
+    _handleProviderChange(newProviderId) {
         const form = this.element.querySelector('#connection-form');
         if (!form) return;
 
-        // 1. 更新 Base URL 输入框 (除非用户已经填了内容)
-        const baseUrlInput = form.querySelector('input[name="baseURL"]');
-        baseUrlInput.value = defaults.baseURL; // 总是更新 Base URL 以反映新的默认值
+        const oldProviderId = this.providerBeforeChange;
+        const oldDefaults = PROVIDER_DEFAULTS[oldProviderId] || { baseURL: '', models: [] };
+        const newDefaults = PROVIDER_DEFAULTS[newProviderId] || { baseURL: '', models: [] };
 
-        // 2. 更新模型列表 (只在当前模型列表为空时填充)
+        // 1. Update Base URL non-destructively
+        const baseUrlInput = form.querySelector('input[name="baseURL"]');
+        const isBaseUrlUnchanged = baseUrlInput.value.trim() === '' || baseUrlInput.value === oldDefaults.baseURL;
+        if (isBaseUrlUnchanged) {
+            baseUrlInput.value = newDefaults.baseURL;
+        }
+
+        // 2. Update models non-destructively
         const modelsListEl = form.querySelector('#models-list');
-        modelsListEl.innerHTML = (defaults.models || []).map(model => `
-            <div class="interface-row model-row">
-                <input type="text" value="${model.id}" placeholder="Model ID">
-                <input type="text" value="${model.name}" placeholder="Display Name">
-                <button type="button" class="remove-row-btn remove-model-row-btn">&times;</button>
-            </div>
-        `).join('');
+        const currentModels = Array.from(modelsListEl.querySelectorAll('.model-row')).map(row => ({
+            id: row.children[0].value,
+            name: row.children[1].value
+        }));
+        
+        // Check if the current model list is the same as the old provider's default list
+        const oldDefaultModels = oldDefaults.models || [];
+        const isModelListUnchanged = 
+            currentModels.length === oldDefaultModels.length && 
+            currentModels.every((model, index) => 
+                model.id === oldDefaultModels[index].id && model.name === oldDefaultModels[index].name
+            );
+
+        if (isModelListUnchanged) {
+            modelsListEl.innerHTML = (newDefaults.models || []).map(model => `
+                <div class="interface-row model-row">
+                    <input type="text" value="${model.id}" placeholder="Model ID">
+                    <input type="text" value="${model.name}" placeholder="Display Name">
+                    <button type="button" class="remove-row-btn remove-model-row-btn">&times;</button>
+                </div>
+            `).join('');
+        }
     }
 
     _handleChange(e) {
@@ -185,8 +235,8 @@ export class LibrarySettings {
                 name: "New Connection",
                 provider: defaultProvider,
                 apiKey: "",
-                baseURL: defaults.baseURL,
-                availableModels: defaults.models ? [...defaults.models] : []
+                baseURL: defaults?.baseURL || '',
+                availableModels: defaults?.models ? [...defaults.models] : []
             };
             if (!this.config.connections) this.config.connections = [];
             this.config.connections.push(newConnection);
@@ -197,6 +247,27 @@ export class LibrarySettings {
         }
 
         if (target.id === 'delete-connection-btn') {
+            // --- IMPLEMENTATION: Guard against deleting locked ID ---
+            if (this.selectedConnectionId === this.lockedId) {
+                this.onNotify("Cannot delete the default connection.", "error");
+                return;
+            }
+
+            // --- NEW: Deletion dependency check ---
+            const dependentAgents = (this.allAgents || []).filter(
+                agent => agent.config.connectionId === this.selectedConnectionId
+            );
+
+            if (dependentAgents.length > 0) {
+                const agentNames = dependentAgents.map(a => a.name).join(', ');
+                this.onNotify(
+                    `Cannot delete. Connection is used by: ${agentNames}.`,
+                    "error"
+                );
+                return; // Block deletion
+            }
+            // --- END NEW ---
+
             if (confirm('Are you sure you want to delete this connection?')) {
                 this.config.connections = this.config.connections.filter(c => c.id !== this.selectedConnectionId);
                 this.selectedConnectionId = null;
@@ -217,10 +288,17 @@ export class LibrarySettings {
             target.disabled = true;
 
             const formData = new FormData(form);
+            
+            // Need to parse models from DOM to test properly
+             const models = Array.from(this.element.querySelectorAll('#models-list .model-row')).map(row => ({
+                id: row.children[0].value.trim()
+            })).filter(m => m.id);
+
             const testConn = {
                 provider: formData.get('provider'),
                 apiKey: formData.get('apiKey'),
                 baseURL: formData.get('baseURL'),
+                availableModels: models
             };
 
             try {
@@ -268,13 +346,19 @@ export class LibrarySettings {
                 }).filter(m => m.id);
 
                 const updatedConn = {
-                    id: this.selectedConnectionId,
+                    ...this.config.connections[connIndex], // Preserve original data
                     name: formData.get('name'),
                     provider: formData.get('provider'),
                     apiKey: formData.get('apiKey'),
                     baseURL: formData.get('baseURL'),
                     availableModels: models
                 };
+                
+                // Ensure name isn't changed if locked (HTML disabled input doesn't submit)
+                if (this.selectedConnectionId === this.lockedId) {
+                    updatedConn.name = this.config.connections[connIndex].name;
+                }
+
                 this.config.connections[connIndex] = updatedConn;
                 this.onConfigChange(this.config);
                 this.isDirty = false; // Reset dirty on save
@@ -284,11 +368,18 @@ export class LibrarySettings {
         }
     }
 
-    update(newConfig) {
-        this.config = newConfig;
-        if (this.selectedConnectionId && !this.config.connections.some(c => c.id === this.selectedConnectionId)) {
-            this.selectedConnectionId = null;
+    update({ connections }) {
+        if (connections) {
+            this.config.connections = connections;
+            if (this.selectedConnectionId && !this.config.connections.some(c => c.id === this.selectedConnectionId)) {
+                this.selectedConnectionId = null;
+            }
+            this.render();
         }
-        this.render();
+    }
+
+    // --- NEW: A way for the parent to push updated agents for dependency checks ---
+    updateAgents(newAgents) {
+        this.allAgents = newAgents;
     }
 }

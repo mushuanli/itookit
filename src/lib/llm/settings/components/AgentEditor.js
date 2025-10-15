@@ -9,14 +9,15 @@
 import { TagsInput } from './TagsInput.js';
 
 export class AgentEditor {
-    // --- FIX: onAgentsChange moved into options object ---
-    constructor(element, { initialAgents, allTags, initialConnections, onNotify, onAgentsChange }) {
+    // --- FIX: Accept lockedId in options ---
+    constructor(element, { initialAgents, allTags, initialConnections, onNotify, onAgentsChange, lockedId = null }) {
         this.element = element;
         this.agents = initialAgents;
         this.allTags = allTags;
         this.allConnections = initialConnections; // Store all connections
         this.onNotify = onNotify || ((message, type) => alert(`${type}: ${message}`));
         this.onAgentsChange = onAgentsChange;
+        this.lockedId = lockedId; // Store locked ID
         this.selectedAgentId = null;
         this.tagsInput = null;
         this.isDirty = false; // --- FIX: Added isDirty state ---
@@ -54,6 +55,10 @@ export class AgentEditor {
             return;
         }
 
+        // --- IMPLEMENTATION: Check if locked ---
+        const isLocked = agent.id === this.lockedId;
+        const deleteBtnStyle = isLocked ? 'display: none;' : '';
+
         detailPane.innerHTML = `
             <h3>Edit Agent: ${agent.name}</h3>
             <form id="agent-form">
@@ -67,7 +72,7 @@ export class AgentEditor {
                 <div id="tab-interface" class="settings-tab-content"></div>
                 <div class="form-actions">
                     <button type="submit" class="settings-btn">Save Agent</button>
-                    <button type="button" id="delete-agent-btn" class="settings-btn danger">Delete</button>
+                    <button type="button" id="delete-agent-btn" class="settings-btn danger" style="${deleteBtnStyle}" ${isLocked ? 'disabled' : ''}>Delete</button>
                 </div>
             </form>
         `;
@@ -79,9 +84,16 @@ export class AgentEditor {
     }
 
     renderBasicTab(agent) {
+        // --- IMPLEMENTATION: Check if locked inside tab ---
+        const isLocked = agent.id === this.lockedId;
+        const nameDisabled = isLocked ? 'disabled title="Default agent name cannot be changed."' : '';
+
         const container = this.element.querySelector('#tab-basic');
         container.innerHTML = `
-            <div class="form-group"><label>Name</label><input type="text" name="name" value="${agent.name}" required></div>
+            <div class="form-group">
+                <label>Name ${isLocked ? '(Fixed)' : ''}</label>
+                <input type="text" name="name" value="${agent.name}" required ${nameDisabled}>
+            </div>
             <div class="form-group"><label>Icon (Emoji)</label><input type="text" name="icon" value="${agent.icon || ''}"></div>
             <div class="form-group"><label>Description / Hint</label><textarea name="description" rows="3">${agent.description || ''}</textarea></div>
             <div class="form-group"><label>Tags</label><div id="agent-tags-input"></div></div>
@@ -239,6 +251,12 @@ export class AgentEditor {
     }
 
     deleteCurrentAgent() {
+        // --- IMPLEMENTATION: Guard against deleting locked ID ---
+        if (this.selectedAgentId === this.lockedId) {
+            this.onNotify("Cannot delete the default agent.", "error");
+            return;
+        }
+
         if (confirm('Are you sure you want to delete this agent?')) {
             this.agents = this.agents.filter(a => a.id !== this.selectedAgentId);
             this.selectedAgentId = null;
@@ -255,8 +273,11 @@ export class AgentEditor {
         const formData = new FormData(form);
         const agent = this.agents[agentIndex];
 
-        // Collect data from all tabs
-        agent.name = formData.get('name');
+        // --- FIX: Do not update name if locked ---
+        if (this.selectedAgentId !== this.lockedId) {
+            agent.name = formData.get('name');
+        }
+
         agent.icon = formData.get('icon');
         agent.description = formData.get('description');
         agent.tags = Array.from(this.tagsInput.currentTags);
