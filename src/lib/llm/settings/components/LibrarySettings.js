@@ -190,8 +190,10 @@ export class LibrarySettings {
         const oldDefaultModels = oldDefaults.models || [];
         const isModelListUnchanged = 
             currentModels.length === oldDefaultModels.length && 
-            currentModels.every((model, index) => 
-                model.id === oldDefaultModels[index].id && model.name === oldDefaultModels[index].name
+            currentModels.every(model => 
+                oldDefaultModels.some(oldModel => 
+                    oldModel.id === model.id && oldModel.name === model.name
+                )
             );
 
         if (isModelListUnchanged) {

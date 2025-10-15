@@ -138,6 +138,19 @@ export class LLMRepository {
      */
     async removeConnection(connectionId) {
         await this.load();
+    
+        // +++ 新增：检查是否有 agent 依赖此 connection +++
+        const dependentAgents = this.config.agents.filter(
+            agent => agent.config.connectionId === connectionId
+        );
+        
+        if (dependentAgents.length > 0) {
+            const agentNames = dependentAgents.map(a => a.name).join(', ');
+            throw new Error(
+                `无法删除连接：以下 Agent 正在使用：${agentNames}`
+            );
+        }
+        // +++ 检查结束 +++
         const initialLength = this.config.connections.length;
         this.config.connections = this.config.connections.filter(c => c.id !== connectionId);
 

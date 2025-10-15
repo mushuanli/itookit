@@ -194,7 +194,7 @@ export class ModuleRepository {
                 // 1. 优先使用 nodeData.path
                 // 2. 如果 path 无效, 回退到 nodeData.title
                 // 3. 如果都无效, 生成一个默认名, 防止程序崩溃
-                let nodeName = nodeData.path || nodeData.title;
+                let nodeName = nodeData.path;
                 if (typeof nodeName !== 'string' || !nodeName.trim()) {
                     nodeName = nodeData.type === 'directory' ? '新建文件夹' : '无标题';
                     console.warn('[ModuleRepository] 传入 addModule 的节点缺少有效的 path 或 title，已使用默认名称。传入数据:', nodeData);

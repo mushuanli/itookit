@@ -314,7 +314,7 @@ export class LLMSettingsWidget extends ISettingsWidget {
         
         // --- MODIFIED: Enhanced connection update logic ---
         this._subscriptions.push(eventManager.subscribe('llm:connections:updated', async (newConnections) => {
-            const oldConnections = this.state.connections;
+            const oldConnections = JSON.parse(JSON.stringify(this.state.connections));
             this.state.connections = newConnections;
 
             if (this.components.connections) this.components.connections.update({ connections: newConnections });
@@ -352,8 +352,12 @@ export class LLMSettingsWidget extends ISettingsWidget {
                 const agentsToUpdate = currentAgents.map(agent => {
                     if (changedConnectionIds.has(agent.config.connectionId)) {
                         const connection = newConnections.find(c => c.id === agent.config.connectionId);
-                        const newModels = connection.availableModels || [];
-                        const currentModelIsValid = newModels.some(m => m.id === agent.config.modelName);
+                        if (!connection) {
+                            console.warn(`Agent "${agent.name}" 引用的 connection "${agent.config.connectionId}" 不存在`);
+                            return agent;
+                        }
+                    const newModels = connection.availableModels || [];
+                    const currentModelIsValid = newModels.some(m => m.id === agent.config.modelName);
 
                         if (!currentModelIsValid) {
                             // Create a deep copy to avoid mutation issues

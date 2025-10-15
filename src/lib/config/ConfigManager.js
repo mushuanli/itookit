@@ -113,7 +113,7 @@ export class ConfigManager {
 
         // 1. 检查并创建默认 Connection
         if (!connections.some(c => c.id === DEFAULT_CONNECTION.id)) {
-            connections.unshift({ ...DEFAULT_CONNECTION }); // 使用 unshift 确保它在列表顶部
+            connections.unshift(JSON.parse(JSON.stringify(DEFAULT_CONNECTION))); // 深拷贝
             configWasModified = true;
             console.log("ConfigManager: 未找到默认 Connection，正在创建...");
         }
