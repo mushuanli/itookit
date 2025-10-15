@@ -99,6 +99,7 @@ export class LLMChatUI extends IEditor {
         this.inputUI = new LLMInputUI(this.inputContainer, {
             ...options.inputUIConfig,
             configManager: this.configManager, // <-- [依赖注入]
+            agents: initialAgents, // <-- [修复] 添加这一行，将完整的 agents 列表传入
             initialAgent: this.currentAgentId,
             onSubmit: this.handleSubmit.bind(this),
             on: {

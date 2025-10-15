@@ -38,7 +38,7 @@ export class LockManager {
         });
         
         // Show stop button
-        this.showStopButton();
+        //this.showStopButton();
         
         // +++ CHANGED: Emit via the events property +++
         this.historyUI.events.emit('locked');

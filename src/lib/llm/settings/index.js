@@ -22,12 +22,12 @@ import { WorkflowManager } from './components/WorkflowManager.js';
 import { ConfigManager } from '../../config/ConfigManager.js';
 
 // Import provider defaults to set a valid initial provider for default connection
-import { PROVIDER_DEFAULTS } from '../llmProvider.js';
+import { PROVIDER_DEFAULTS } from '../../config/llmProvider.js';
 
 // Constants for Defaults
 const CONSTANTS = {
-    DEFAULT_CONN_ID: 'default-connection',
-    DEFAULT_AGENT_ID: 'default-agent',
+    DEFAULT_CONN_ID: 'default',
+    DEFAULT_AGENT_ID: 'default',
     DEFAULT_NAME: '默认'
 };
 
@@ -259,6 +259,10 @@ export class LLMSettingsWidget extends ISettingsWidget {
 
         // 3. --- IMPLEMENTATION: Ensure Default Agent exists ---
         if (!agents.find(a => a.id === CONSTANTS.DEFAULT_AGENT_ID)) {
+            // [FIX] Find the default connection that was just created/ensured.
+            const defaultConnection = connections.find(c => c.id === CONSTANTS.DEFAULT_CONN_ID);
+            // [FIX] Get the first available model's ID from it, or fallback to an empty string.
+            const defaultModelName = (defaultConnection?.availableModels?.[0]?.id) || "";
             agents.unshift({
                 id: CONSTANTS.DEFAULT_AGENT_ID,
                 name: CONSTANTS.DEFAULT_NAME, // Fixed name
@@ -267,7 +271,7 @@ export class LLMSettingsWidget extends ISettingsWidget {
                 tags: ['default'],
                 config: { 
                     connectionId: CONSTANTS.DEFAULT_CONN_ID, // Link to default connection
-                    modelName: "", 
+                    modelName: defaultModelName, // <-- Use the dynamically found model name
                     systemPrompt: "You are a helpful assistant." 
                 },
                 interface: { inputs: [{ name: "prompt", type: "string" }], outputs: [{ name: "response", type: "string" }] }
