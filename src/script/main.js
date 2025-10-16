@@ -28,7 +28,7 @@ document.addEventListener('DOMContentLoaded', () => {
     console.log("正在初始化应用级 ConfigManager...");
     const configManager = ConfigManager.getInstance({
         // 为 ConfigManager 内部的 LocalStorageAdapter 提供一个统一的前缀
-        adapterOptions: { prefix: 'my_unified_app_' }
+        adapterOptions: { prefix: 'metaMind_' }
     });
 
     // 跟踪已初始化的工作区，避免重复创建
@@ -70,10 +70,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         try {
             switch (workspaceId) {
-                case 'mdx-workspace':
+                case 'anki-workspace':
                     const mdxWorkspace = new MDxWorkspace({
                         configManager: configManager,
-                        namespace: 'mdx_documents', // 数据隔离的命名空间
+                        namespace: 'anki_', // 数据隔离的命名空间
                         sidebarContainer: document.getElementById('mdx-sidebar'),
                         editorContainer: document.getElementById('mdx-editor'),
                     });
@@ -130,7 +130,7 @@ document.addEventListener('DOMContentLoaded', () => {
     configManager.eventManager.subscribe('app:ready', () => {
         console.log("ConfigManager is ready. Initializing default workspace...");
         // 默认启动 MDxWorkspace
-        initializeWorkspace('mdx-workspace');
+        initializeWorkspace('anki-workspace');
     });
 
     // [新增] 将核心实例暴露到 window 以方便调试

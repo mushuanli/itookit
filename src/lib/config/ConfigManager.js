@@ -15,6 +15,8 @@ import { ModuleRepositoryManager } from './managers/ModuleRepositoryManager.js';
 import { EVENTS } from './shared/constants.js';
 // +++ 新增: 导入默认配置模板 +++
 import { DEFAULT_CONNECTION, DEFAULT_AGENT } from './llmProvider.js';
+// +++ 新增：导入 Service 层 +++
+import { LLMConfigService } from './services/LLMConfigService.js';
 
 // ------------------- 单例控制 -------------------
 // 模块级私有变量，用于保存 ConfigManager 的唯一实例。
@@ -55,6 +57,9 @@ export class ConfigManager {
         this._tags = new TagRepository(this.persistenceAdapter, this.eventManager);
         // 创建 LLMRepository 实例，同样注入依赖。
         this._llm = new LLMRepository(this.persistenceAdapter, this.eventManager);
+
+        // +++ 新增：实例化业务逻辑层 +++
+        this._llmService = new LLMConfigService(this._llm, this.eventManager);
 
         // --- 3. 实例化“管理器” ---
         // 这是与 TagRepository 和 LLMRepository 的关键区别：
@@ -161,6 +166,13 @@ export class ConfigManager {
     // 使用方式是 `ConfigManager.getInstance().modules.get('project-id')`。
 
     // ------------------- 静态方法 -------------------
+    /**
+     * +++ 新增：暴露 Service 层作为主要接口 +++
+     * @returns {LLMConfigService}
+     */
+    get llmService() {
+        return this._llmService;
+    }
 
     /**
      * 获取 ConfigManager 的全局单例实例。

@@ -62,6 +62,8 @@ export class LLMSettingsWidget extends ISettingsWidget {
         // --- REFACTORED: Get the singleton instance of the ConfigManager ---
         // The check for `llmConfigService` is removed. All instances now use the central service.
         this.configManager = ConfigManager.getInstance();
+        this.llmService = this.configManager.llmService;
+        
         this.onTestLLMConnection = options.onTestLLMConnection;
 
         // Internal state
@@ -160,6 +162,7 @@ export class LLMSettingsWidget extends ISettingsWidget {
     async destroy() {
         await this.unmount();
         this.configManager = null;
+        this.llmService = null;
         this.options = null;
     }
 
@@ -229,9 +232,9 @@ export class LLMSettingsWidget extends ISettingsWidget {
         // 1. 直接从 ConfigManager 加载数据。
         //    此时可以安全地假设默认值已经由 ConfigManager 的 _bootstrap 流程创建好了。
         const [connections, agents, workflows, tags] = await Promise.all([
-            this.configManager.llm.getConnections(),
-            this.configManager.llm.getAgents(),
-            this.configManager.llm.getWorkflows(),
+            this.llmService.getConnections(),
+            this.llmService.getAgents(),
+            this.llmService.getWorkflows(),
             this.configManager.tags.getAll()
         ]);
         
@@ -252,7 +255,8 @@ export class LLMSettingsWidget extends ISettingsWidget {
             connections: new LibrarySettings(
                 this.uiContainer.querySelector('#tab-connections'),
                 { connections: this.state.connections },
-                (newConfig) => this.configManager.llm.saveConnections(newConfig.connections),
+                // +++ 修改：传递 Service 实例而非回调 +++
+                this.llmService,
                 { 
                     onNotify: this._notify.bind(this),
                     lockedId: CONSTANTS.DEFAULT_CONN_ID,
@@ -271,12 +275,10 @@ export class LLMSettingsWidget extends ISettingsWidget {
                     // Pass default ID to control UI
                     lockedId: CONSTANTS.DEFAULT_AGENT_ID,
                     onAgentsChange: async (newAgents) => {
-                        await this.configManager.llm.saveAgents(newAgents);
-                        
-                        // Business logic: extract all unique tags from agents and update the global tag list
-                        const allAgentTags = new Set(newAgents.flatMap(agent => agent.tags || []));
-                        await this.configManager.tags.addTags(Array.from(allAgentTags));
-
+                        await this.llmService.saveAgents(
+                            newAgents,
+                            this.configManager.tags // 传递 TagRepository
+                        );
                         this.emit('change', { key: 'agents' });
                     }
                 }
@@ -287,7 +289,8 @@ export class LLMSettingsWidget extends ISettingsWidget {
                     initialWorkflows: this.state.workflows,
                     initialRunnables: { agents: this.state.agents, workflows: this.state.workflows },
                     onRun: (wf) => this.options.onWorkflowRun?.(wf),
-                    onSave: (newWorkflows) => this.configManager.llm.saveWorkflows(newWorkflows),
+                    // +++ 修改：使用 Service 层方法 +++
+                    onSave: (newWorkflows) => this.llmService.saveWorkflows(newWorkflows),
                     onNotify: this._notify.bind(this)
                 }
             )
@@ -312,75 +315,14 @@ export class LLMSettingsWidget extends ISettingsWidget {
     _subscribeToChanges() {
         const { eventManager } = this.configManager;
         
-        // --- MODIFIED: Enhanced connection update logic ---
-        this._subscriptions.push(eventManager.subscribe('llm:connections:updated', async (newConnections) => {
-            const oldConnections = JSON.parse(JSON.stringify(this.state.connections));
+        // --- MODIFIED: The connection update listener is now much simpler. ---
+        // The business logic for updating agents has been moved to LLMRepository.
+        this._subscriptions.push(eventManager.subscribe('llm:connections:updated', (newConnections) => {
+            // Update the state
             this.state.connections = newConnections;
 
             if (this.components.connections) this.components.connections.update({ connections: newConnections });
             if (this.components.agents) this.components.agents.update({ newConnections: newConnections });
-
-            // +++ NEW: Proactive Agent Update Logic +++
-            
-            // 1. Find connections where the list of available models has changed.
-            const changedConnections = newConnections.filter(newConn => {
-                const oldConn = oldConnections.find(c => c.id === newConn.id);
-                if (!oldConn) return false;
-
-                // --- 核心修复在这里 ---
-                // 条件1: Provider 的类型变了 (例如从 'openai' -> 'deepseek')。这是最直接的触发条件。
-                if (oldConn.provider !== newConn.provider) {
-                    return true;
-                }
-                
-                // 条件2: Provider 没变，但模型列表变了 (例如用户手动增删了模型)。
-                const oldModelIds = new Set((oldConn.availableModels || []).map(m => m.id));
-                const newModelIds = new Set((newConn.availableModels || []).map(m => m.id));
-                if (oldModelIds.size !== newModelIds.size) return true;
-                for (const id of oldModelIds) {
-                    if (!newModelIds.has(id)) return true;
-                }
-                return false;
-            });
-
-            if (changedConnections.length > 0) {
-                let currentAgents = await this.configManager.llm.getAgents();
-                const changedConnectionIds = new Set(changedConnections.map(c => c.id));
-                let wasModified = false;
-                let updatedAgentCount = 0;
-
-                const agentsToUpdate = currentAgents.map(agent => {
-                    if (changedConnectionIds.has(agent.config.connectionId)) {
-                        const connection = newConnections.find(c => c.id === agent.config.connectionId);
-                        if (!connection) {
-                            console.warn(`Agent "${agent.name}" 引用的 connection "${agent.config.connectionId}" 不存在`);
-                            return agent;
-                        }
-                    const newModels = connection.availableModels || [];
-                    const currentModelIsValid = newModels.some(m => m.id === agent.config.modelName);
-
-                        if (!currentModelIsValid) {
-                            // Create a deep copy to avoid mutation issues
-                            const newAgent = JSON.parse(JSON.stringify(agent));
-                            // Update to the first available model or empty
-                            newAgent.config.modelName = newModels.length > 0 ? newModels[0].id : "";
-                            updatedAgentCount++;
-                            wasModified = true;
-                            return newAgent;
-                        }
-                    }
-                    return agent;
-                });
-
-                if (wasModified) {
-                    await this.configManager.llm.saveAgents(agentsToUpdate);
-                    this._notify(
-                        `${updatedAgentCount} 个 Agent 的模型已自动更新以保持兼容性。`,
-                        'info'
-                    );
-                }
-            }
-            // --- END NEW ---
         }));
 
         this._subscriptions.push(eventManager.subscribe('llm:agents:updated', (agents) => {

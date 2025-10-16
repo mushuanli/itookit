@@ -10,7 +10,7 @@
 import { PROVIDER_DEFAULTS } from '../../../config/llmProvider.js';
 
 export class LibrarySettings {
-    constructor(element, initialConfig, onConfigChange, { 
+    constructor(element, initialConfig, configService, { 
         onTest = async () => ({success: false, message: 'No test handler configured.'}),
         onNotify = (message, type) => alert(`${type}: ${message}`),
         lockedId = null,
@@ -19,7 +19,10 @@ export class LibrarySettings {
     } = {}) {
         this.element = element;
         this.config = initialConfig;
-        this.onConfigChange = onConfigChange;
+        
+        // +++ 修改：接收 Service 而非回调 +++
+        this.configService = configService;
+        
         this.onTest = onTest;
         this.onNotify = onNotify;
         this.lockedId = lockedId;
@@ -27,7 +30,9 @@ export class LibrarySettings {
         this.selectedConnectionId = null;
         this.isDirty = false; // --- FIX: Added isDirty state ---
 
-        // 从共享数据动态生成提供商列表
+        // +++ 新增：保存快照用于变更检测 +++
+        this._connectionsSnapshot = null;
+
         this.providers = Object.keys(PROVIDER_DEFAULTS);
         
         // --- Store the provider before a change event ---
@@ -44,6 +49,9 @@ export class LibrarySettings {
     }
 
     render() {
+        // +++ 新增：在每次渲染时创建快照 +++
+        this._connectionsSnapshot = JSON.parse(JSON.stringify(this.config.connections));
+        
         this.element.innerHTML = `
             <div class="split-view">
                 <div class="list-pane" id="connections-list-pane"></div>
@@ -165,6 +173,9 @@ export class LibrarySettings {
 
     // --- MODIFIED: Complete rewrite for non-destructive updates ---
     _handleProviderChange(newProviderId) {
+    console.log('[LibrarySettings] >>> _handleProviderChange 开始执行');
+    console.log('[LibrarySettings] 旧 Provider:', this.providerBeforeChange);
+    console.log('[LibrarySettings] 新 Provider:', newProviderId);
         const form = this.element.querySelector('#connection-form');
         if (!form) return;
 
@@ -172,6 +183,8 @@ export class LibrarySettings {
         const oldDefaults = PROVIDER_DEFAULTS[oldProviderId] || { baseURL: '', models: [] };
         const newDefaults = PROVIDER_DEFAULTS[newProviderId] || { baseURL: '', models: [] };
 
+    console.log('[LibrarySettings] 旧默认配置:', oldDefaults);
+    console.log('[LibrarySettings] 新默认配置:', newDefaults);
         // 1. Update Base URL non-destructively
         const baseUrlInput = form.querySelector('input[name="baseURL"]');
         const isBaseUrlUnchanged = baseUrlInput.value.trim() === '' || baseUrlInput.value === oldDefaults.baseURL;
@@ -196,7 +209,10 @@ export class LibrarySettings {
                 )
             );
 
+    console.log('[LibrarySettings] 模型列表是否未改变:', isModelListUnchanged);
+    console.log('[LibrarySettings] 旧默认模型:', oldDefaultModels);
         if (isModelListUnchanged) {
+        console.log('[LibrarySettings] 正在更新模型列表为新 Provider 的默认值');
             modelsListEl.innerHTML = (newDefaults.models || []).map(model => `
                 <div class="interface-row model-row">
                     <input type="text" value="${model.id}" placeholder="Model ID">
@@ -204,7 +220,11 @@ export class LibrarySettings {
                     <button type="button" class="remove-row-btn remove-model-row-btn">&times;</button>
                 </div>
             `).join('');
+        console.log('[LibrarySettings] 模型列表已更新为:', newDefaults.models);
         }
+    console.log('[LibrarySettings] <<< _handleProviderChange 执行完成');
+    console.log('[LibrarySettings] ⚠️ 注意：此时尚未保存到数据库，需要点击 Save 按钮');
+
     }
 
     _handleChange(e) {
@@ -273,7 +293,13 @@ export class LibrarySettings {
             if (confirm('Are you sure you want to delete this connection?')) {
                 this.config.connections = this.config.connections.filter(c => c.id !== this.selectedConnectionId);
                 this.selectedConnectionId = null;
-                this.onConfigChange(this.config);
+                
+                // +++ 修改：调用 Service 层 +++
+                await this.configService.updateConnections(
+                    this._connectionsSnapshot,
+                    this.config.connections
+                );
+                
                 this.isDirty = false;
                 this.render();
             }
@@ -337,11 +363,14 @@ export class LibrarySettings {
         }
     }
 
-    _handleSubmit(e) {
+    async _handleSubmit(e) {
         if (e.target.id === 'connection-form') {
             e.preventDefault();
+        console.log('[LibrarySettings] >>> 表单提交开始');
             const formData = new FormData(e.target);
             const connIndex = this.config.connections.findIndex(c => c.id === this.selectedConnectionId);
+        console.log('[LibrarySettings] 正在保存 Connection ID:', this.selectedConnectionId);
+        console.log('[LibrarySettings] Connection 索引:', connIndex);
             if (connIndex > -1) {
                 const models = Array.from(this.element.querySelectorAll('#models-list .model-row')).map(row => {
                     const id = row.children[0].value.trim();
@@ -358,16 +387,36 @@ export class LibrarySettings {
                     availableModels: models
                 };
                 
-                // Ensure name isn't changed if locked (HTML disabled input doesn't submit)
+            console.log('[LibrarySettings] 更新后的 Connection 数据:', updatedConn);
                 if (this.selectedConnectionId === this.lockedId) {
                     updatedConn.name = this.config.connections[connIndex].name;
+                console.log('[LibrarySettings] 这是锁定的 Connection，名称保持不变');
                 }
 
                 this.config.connections[connIndex] = updatedConn;
-                this.onConfigChange(this.config);
-                this.isDirty = false; // Reset dirty on save
-                this.renderList();
-                this.onNotify('Connection saved!', 'success');
+                
+                console.log('[LibrarySettings] ✅ 正在调用 Service 层保存');
+                
+                // +++ 核心修改：调用 Service 层的方法 +++
+                try {
+                    await this.configService.updateConnections(
+                        this._connectionsSnapshot,  // 旧值（快照）
+                        this.config.connections      // 新值
+                    );
+                    
+                    // 更新快照
+                    this._connectionsSnapshot = JSON.parse(JSON.stringify(this.config.connections));
+                    
+                    this.isDirty = false;
+                    this.renderList();
+                    this.onNotify('Connection saved!', 'success');
+                    console.log('[LibrarySettings] <<< 表单提交完成');
+                } catch (error) {
+                    console.error('[LibrarySettings] ❌ 保存失败:', error);
+                    this.onNotify(`Failed to save: ${error.message}`, 'error');
+                }
+            } else {
+                console.error('[LibrarySettings] ❌ 未找到要更新的 Connection');
             }
         }
     }

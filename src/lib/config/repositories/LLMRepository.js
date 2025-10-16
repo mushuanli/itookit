@@ -1,17 +1,18 @@
 // #config/repositories/LLMRepository.js
-import { STORAGE_KEYS, EVENTS } from '../shared/constants.js';
+import { STORAGE_KEYS } from '../shared/constants.js';
 
 /**
  * @class LLMRepository
  * @description
- * 负责管理应用程序中所有全局 LLM（大语言模型）相关的配置。
- * 这是一个单例仓库，由 ConfigManager 进行实例化和管理。
- * 它处理三种核心配置：
- * 1. ProviderConnections (提供商连接配置, 如 API Keys)
- * 2. AgentDefinitions (代理定义)
- * 3. WorkflowDefinitions (工作流定义)
- *
- * 所有修改数据的方法都遵循 "加载 -> 修改 -> 保存 -> 发布事件" 的模式，以确保数据的一致性和应用的响应性。
+ * +++ 重构后：纯数据访问层 +++
+ * 职责：
+ * 1. 从持久化层加载数据
+ * 2. 保存数据到持久化层
+ * 3. 提供基础的 CRUD 操作
+ * 
+ * 不再负责：
+ * - 发布事件（移至 Service 层）
+ * - 业务规则（移至 Service 层）
  */
 export class LLMRepository {
     /**
@@ -45,7 +46,7 @@ export class LLMRepository {
      * 这个方法是可重入的：如果正在加载中，后续调用会返回同一个加载中的 Promise，而不会重新触发加载。
      * @returns {Promise<import('../shared/types.js').LLMConfigData>} 返回加载完成后的配置数据。
      */
-    load() {
+    async load() {
         if (this._loadingPromise) {
             return this._loadingPromise;
         }
@@ -99,10 +100,6 @@ export class LLMRepository {
         
         this.config.connections.push(connection);
         await this._save();
-        
-        // 发布事件，通知应用内其他部分
-        this.eventManager.publish(EVENTS.LLM_CONNECTIONS_UPDATED, this.config.connections);
-        
         return connection;
     }
 
@@ -126,8 +123,6 @@ export class LLMRepository {
         this.config.connections[connectionIndex] = updatedConnection;
         
         await this._save();
-        this.eventManager.publish(EVENTS.LLM_CONNECTIONS_UPDATED, this.config.connections);
-        
         return updatedConnection;
     }
 
@@ -138,39 +133,35 @@ export class LLMRepository {
      */
     async removeConnection(connectionId) {
         await this.load();
-    
-        // +++ 新增：检查是否有 agent 依赖此 connection +++
-        const dependentAgents = this.config.agents.filter(
-            agent => agent.config.connectionId === connectionId
-        );
-        
-        if (dependentAgents.length > 0) {
-            const agentNames = dependentAgents.map(a => a.name).join(', ');
-            throw new Error(
-                `无法删除连接：以下 Agent 正在使用：${agentNames}`
-            );
-        }
-        // +++ 检查结束 +++
         const initialLength = this.config.connections.length;
         this.config.connections = this.config.connections.filter(c => c.id !== connectionId);
 
         // 仅在实际发生删除时才保存和发布事件
         if (this.config.connections.length < initialLength) {
             await this._save();
-            this.eventManager.publish(EVENTS.LLM_CONNECTIONS_UPDATED, this.config.connections);
         }
     }
 
     /**
      * @description Replaces all connections with the provided array.
-     * @param {import('../shared/types.js').LLMProviderConnection[]} connections - The full array of connections.
+     * @param {object | import('../shared/types.js').LLMProviderConnection[]} connectionsData - The full array of connections or a config object containing it.
      * @returns {Promise<void>}
      */
-    async saveConnections(connections) {
+    async saveConnections(connectionsData) {
         await this.load();
-        this.config.connections = connections;
+        
+        const newConnections = Array.isArray(connectionsData)
+            ? connectionsData
+            : connectionsData?.connections;
+
+        // Add a secondary check to ensure we have an array before proceeding.
+        if (!Array.isArray(newConnections)) {
+            throw new TypeError("Invalid argument supplied to saveConnections.");
+        }
+        // +++ END FIX +++
+
+        this.config.connections = newConnections;
         await this._save();
-        this.eventManager.publish(EVENTS.LLM_CONNECTIONS_UPDATED, this.config.connections);
     }
 
     // --- AgentDefinition 方法 ---
@@ -198,8 +189,6 @@ export class LLMRepository {
 
         this.config.agents.push(agentDef);
         await this._save();
-        this.eventManager.publish(EVENTS.LLM_AGENTS_UPDATED, this.config.agents);
-        
         return agentDef;
     }
     
@@ -222,8 +211,6 @@ export class LLMRepository {
         this.config.agents[agentIndex] = updatedAgent;
         
         await this._save();
-        this.eventManager.publish(EVENTS.LLM_AGENTS_UPDATED, this.config.agents);
-        
         return updatedAgent;
     }
 
@@ -239,7 +226,6 @@ export class LLMRepository {
 
         if (this.config.agents.length < initialLength) {
             await this._save();
-            this.eventManager.publish(EVENTS.LLM_AGENTS_UPDATED, this.config.agents);
         }
     }
 
@@ -252,7 +238,6 @@ export class LLMRepository {
         await this.load();
         this.config.agents = agents;
         await this._save();
-        this.eventManager.publish(EVENTS.LLM_AGENTS_UPDATED, this.config.agents);
     }
 
     // --- WorkflowDefinition 方法 ---
@@ -280,8 +265,6 @@ export class LLMRepository {
         
         this.config.workflows.push(workflowDef);
         await this._save();
-        this.eventManager.publish(EVENTS.LLM_WORKFLOWS_UPDATED, this.config.workflows);
-        
         return workflowDef;
     }
 
@@ -304,8 +287,6 @@ export class LLMRepository {
         this.config.workflows[workflowIndex] = updatedWorkflow;
         
         await this._save();
-        this.eventManager.publish(EVENTS.LLM_WORKFLOWS_UPDATED, this.config.workflows);
-        
         return updatedWorkflow;
     }
 
@@ -321,7 +302,6 @@ export class LLMRepository {
         
         if (this.config.workflows.length < initialLength) {
             await this._save();
-            this.eventManager.publish(EVENTS.LLM_WORKFLOWS_UPDATED, this.config.workflows);
         }
     }
 
@@ -334,6 +314,5 @@ export class LLMRepository {
         await this.load();
         this.config.workflows = workflows;
         await this._save();
-        this.eventManager.publish(EVENTS.LLM_WORKFLOWS_UPDATED, this.config.workflows);
     }
 }
