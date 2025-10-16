@@ -48,7 +48,7 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 12px 16px;
+    padding: 10px 16px; /* Slightly adjusted padding */
     background: #ffffff;
     border-bottom: 1px solid #e5e7eb;
     flex-shrink: 0;
@@ -948,15 +948,18 @@
 /* ============================================
    Search Highlight
    ============================================ */
-
+.llm-historyui__search-highlight {
+    background-color: rgba(251, 191, 36, 0.5); /* Tailwind amber-400 */
+    border-radius: 2px;
+}
 .llm-historyui__message-pair--highlighted {
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    background-color: #fffbeb; /* light yellow background */
-    box-shadow: 0 0 0 2px #facc15; /* yellow border */
+    box-shadow: 0 0 0 2px #f59e0b; /* Tailwind amber-500 */
     border-radius: 12px;
-    transform: scale(1.01);
-    padding: 8px; /* Add some padding so border isn't flush */
-    margin: 8px 0; /* Adjust margin to compensate for padding */
+    animation: search-highlight-fade 2s ease-out forwards;
+}
+@keyframes search-highlight-fade {
+    from { background-color: rgba(252, 211, 77, 0.2); }
+    to { background-color: transparent; }
 }
 
 /* ============================================

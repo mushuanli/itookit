@@ -236,15 +236,24 @@ export class MDxEditor extends IEditor {
     }
 
     /**
-     * Public API: Gets the current markdown text from the editor.
+     * 公共 API: 获取当前 markdown 文本。
      * @returns {string}
      */
     getText() {
         return this._coreEditor.getText();
     }
+    
+    /**
+     * @override
+     * [新增] 对于标准的 Markdown 编辑器，我们没有特定的摘要逻辑，
+     * 因此返回 null，告知宿主环境使用默认的截断摘要方法。
+     */
+    async getSummary() {
+        return null;
+    }
 
     /**
-     * Public API: Sets the markdown text in the editor.
+     * 公共 API: 设置 markdown 文本。
      * @param {string} markdownText
      */
     setText(markdownText) {
@@ -334,6 +343,7 @@ export class MDxEditor extends IEditor {
         this._eventListeners.clear();
         this.pluginManager.destroy();
         this._coreEditor.destroy();
+        this._renderer.destroy();
         this.container.innerHTML = '';
         this.container.classList.remove('mdx-container', 'edit-mode', 'render-mode', 'is-readonly');
     }
@@ -399,7 +409,7 @@ export class MDxEditor extends IEditor {
     }
 
     // ===================================================================
-    //   Public Search API
+    //   [重构] 公共搜索 API (Public Search API)
     // ===================================================================
 
     /**
@@ -411,26 +421,100 @@ export class MDxEditor extends IEditor {
     /**
      * Finds all occurrences of a query in the editor, highlights them,
      * and returns their positions. This method is stateless.
-     * @param {string} query - The text to search for.
-     * @returns {EditorSearchMatch[]} An array of all matches found.
+     * @override
+     * @param {string} query - 要搜索的文本。
+     * @returns {Promise<UnifiedSearchResult[]>}
      */
-    search(query) {
-        if (!query) {
-            this.clearSearch();
+    async search(query) {
+        this.clearSearch();
+        if (!query || query.trim() === '') {
             return [];
         }
 
-        // 1. Dispatch an effect to tell CodeMirror's search extension
-        //    what to highlight. This enables the built-in highlighting.
-        const searchQuery = new SearchQuery({
-            search: query,
-            caseSensitive: false,
+        // 1. 在 CodeMirror 编辑器中搜索
+        const editorMatches = this._searchInEditor(query);
+        const editorResults = editorMatches.map(match => {
+            const line = this.editorView.state.doc.lineAt(match.from);
+            return {
+                source: 'editor',
+                text: this.editorView.state.doc.sliceString(match.from, match.to),
+                context: line.text.trim(),
+                details: match // { from, to }
+            };
         });
+
+        // 2. 在渲染视图中搜索
+        await this._renderContent(); // 确保渲染内容是最新
+        const rendererMatches = this._renderer.search(query);
+        const rendererResults = rendererMatches.map(markElement => {
+            const contextElement = markElement.closest('p, li, h1, h2, h3, h4, h5, h6, pre, td') || markElement.parentElement;
+            return {
+                source: 'renderer',
+                text: markElement.textContent,
+                context: contextElement.textContent.trim().substring(0, 200), // 上下文截断
+                details: markElement // HTMLElement
+            };
+        });
+
+        // 按在文档中出现的顺序粗略排序
+        const combinedResults = [...editorResults, ...rendererResults];
+        combinedResults.sort((a, b) => {
+            const posA = a.source === 'editor' ? a.details.from : 0; // 简单处理，未来可优化
+            const posB = b.source === 'editor' ? b.details.from : 0;
+            return posA - posB;
+        });
+
+        return combinedResults;
+    }
+
+    /**
+     * @override
+     * @param {UnifiedSearchResult} result
+     */
+    gotoMatch(result) {
+        if (!result || !result.source || !result.details) return;
+
+        if (result.source === 'editor') {
+            this.switchTo('edit');
+            this.editorView.dispatch({
+                selection: { anchor: result.details.from, head: result.details.to },
+                effects: EditorView.scrollIntoView(result.details.from, { y: "center" })
+            });
+            this.editorView.focus();
+        } else if (result.source === 'renderer') {
+            this.switchTo('render');
+            this._renderer.gotoMatch(result.details);
+        }
+    }
+
+    /**
+     * @override
+     */
+    clearSearch() {
+        // 清除 CodeMirror 高亮
+        this.editorView.dispatch({
+            effects: StateEffect.define().of(new SearchQuery({ search: '' }))
+        });
+        // 清除渲染视图高亮
+        this._renderer.clearSearch();
+    }
+    
+    // --- 私有辅助方法 ---
+
+    /**
+     * 内部函数，仅在 CodeMirror 编辑器中执行搜索。
+     * @private
+     * @param {string} query
+     * @returns {Array<{from: number, to: number}>}
+     */
+    _searchInEditor(query) {
+        // 激活 CodeMirror 的内置高亮
+        const searchQuery = new SearchQuery({ search: query, caseSensitive: false });
         this.editorView.dispatch({
             effects: StateEffect.define().of(searchQuery)
         });
         
-        // 2. Manually find all matches to return their positions to the caller.
+        // 手动查找所有匹配项以返回它们的位置
         const matches = [];
         const doc = this.editorView.state.doc.toString();
         const normalizedQuery = query.toLowerCase();
@@ -442,29 +526,6 @@ export class MDxEditor extends IEditor {
         return matches;
     }
 
-    /**
-     * Selects a specific match and scrolls it into view.
-     * @param {EditorSearchMatch} match - A match object returned from the `search` method.
-     */
-    gotoMatch(match) {
-        if (!match || typeof match.from !== 'number' || typeof match.to !== 'number') return;
-
-        this.editorView.dispatch({
-            selection: { anchor: match.from, head: match.to },
-            effects: EditorView.scrollIntoView(match.from, { y: "center" })
-        });
-        this.editorView.focus();
-    }
-
-    /**
-     * Clears all search highlights from the editor.
-     */
-    clearSearch() {
-        // Dispatching an empty SearchQuery effect clears the highlights.
-        this.editorView.dispatch({
-            effects: StateEffect.define().of(new SearchQuery({ search: '' }))
-        });
-    }
     
     // ===================================================================
     //   Lifecycle Methods

@@ -3,6 +3,23 @@
  * @file IEditor - 定义了任何编辑器组件为与 MDxWorkspace 兼容所必须实现的接口。
  * @interface
  */
+
+
+// +++ 新增类型定义 (为方便理解，直接在此处定义) +++
+/**
+ * @typedef {'editor' | 'renderer'} SearchResultSource
+ * @description 搜索结果的来源。'editor' 代表源码视图, 'renderer' 代表渲染视图。
+ */
+
+/**
+ * @typedef {object} UnifiedSearchResult
+ * @description 一个标准化的搜索结果对象，屏蔽了数据源的差异。
+ * @property {SearchResultSource} source - 结果来源 ('editor' 或 'renderer')。
+ * @property {string} text - 匹配的文本。
+ * @property {string} context - 用于UI显示的上下文片段（例如，匹配项所在的行或段落）。
+ * @property {any} details - 执行 `gotoMatch` 等操作所需的源特定数据。这是一个不透明的对象，对于 'editor' 可能是 {from, to}，对于 'renderer' 可能是 HTMLElement。
+ */
+
 export class IEditor {
     /**
      * 编辑器的构造函数必须接受一个容器元素和一个选项对象。
@@ -44,6 +61,40 @@ export class IEditor {
     }
 
     /**
+     * [可选] 获取可搜索的纯文本内容
+     * @returns {Promise<string>}
+     */
+    async getSearchableText() {
+        // 默认实现：提取 getText() 中的纯文本
+        const content = this.getText();
+        return content
+            .replace(/^#+\s/gm, '')
+            .replace(/\[(.*?)\]\(.*?\)/g, '$1')
+            .replace(/```[\s\S]*?```/g, '')
+            .replace(/`[^`]+`/g, '')
+            .trim();
+    }
+    
+    /**
+     * [可选] 获取文档标题结构
+     * @returns {Promise<Heading[]>}
+     */
+    async getHeadings() {
+        return []; // 默认返回空数组，markdown 编辑器可覆盖
+    }
+
+    /**
+     * [新增] 获取一个适合在UI中显示的、人类可读的摘要。
+     * 如果编辑器有特定的摘要逻辑（例如，聊天记录的第一句话），它应该实现此方法。
+     * 如果未实现或返回 null，宿主环境将回退到通用逻辑（例如，截取 getText() 的内容）。
+     * @returns {Promise<string|null>} 一个解析为摘要字符串或 null 的 Promise。
+     */
+    async getSummary() {
+        // 默认实现返回 null，表示使用通用回退逻辑。
+        return null;
+    }
+
+    /**
      * 更新编辑器 UI 中显示的标题（例如，在标题栏中）。
      * @param {string} newTitle - 要显示的新标题。
      * @returns {void}
@@ -65,7 +116,7 @@ export class IEditor {
     }
 
     /**
-     * [新增] 动态设置编辑器的只读状态。
+     * 动态设置编辑器的只读状态。
      * @param {boolean} isReadOnly - 如果为 true，编辑器应变为不可编辑状态；否则为可编辑。
      * @returns {void}
      */
@@ -74,12 +125,39 @@ export class IEditor {
     }
 
     /**
-     * [新增] 使编辑器获得输入焦点。
+     * 使编辑器获得输入焦点。
      * @returns {void}
      */
     focus() {
         throw new Error("必须实现 'focus' 方法。");
     }
+
+    /**
+     * [重构] 在编辑器的所有内容源（例如，源码编辑器和渲染视图）中查找查询字符串。
+     * @param {string} query - 要搜索的文本。
+     * @returns {Promise<UnifiedSearchResult[]>} 一个解析为统一搜索结果对象数组的 Promise。
+     */
+    async search(query) {
+        throw new Error("必须实现 'search' 方法。");
+    }
+
+    /**
+     * [新增] 将视图导航到指定的搜索结果并高亮它。
+     * @param {UnifiedSearchResult} result - 从 `search` 方法返回的搜索结果对象。
+     * @returns {void}
+     */
+    gotoMatch(result) {
+        throw new Error("必须实现 'gotoMatch' 方法。");
+    }
+
+    /**
+     * [新增] 清除所有搜索高亮。
+     * @returns {void}
+     */
+    clearSearch() {
+        throw new Error("必须实现 'clearSearch' 方法。");
+    }
+
 
     // --- 事件系统 ---
 

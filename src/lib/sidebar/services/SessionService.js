@@ -138,14 +138,30 @@ export class SessionService extends ISessionService {
     }
 
 
+    // ==========================================================
+    // =====================[ 核心修复点 ]=======================
+    // ==========================================================
     /**
-     * Updates a session's content and automatically re-parses its metadata and outline.
-     * @param {string} sessionId
-     * @param {string} newContent
+     * @override
+     * 更新一个项目的元数据。此方法实现了 ISessionService 接口的要求。
+     * @param {string} itemId - 要更新的项目的 ID。
+     * @param {object} metadataUpdates - 一个包含要更新的元数据字段的对象，例如 { title: '新标题', summary: '新摘要' }。
+     * @returns {Promise<void>}
      */
-    async updateSessionContent(itemId, newContent) {
-        await this.moduleRepo.updateModuleContent(itemId, newContent);
+    async updateItemMetadata(itemId, metadataUpdates) {
+        // 将单个更新包装成数组，以调用 moduleRepo 的批量更新方法
+        const updates = [{
+            id: itemId,
+            meta: metadataUpdates,
+        }];
+        // 将操作委托给 repository
+        await this.moduleRepo.updateNodesMeta(updates);
     }
+    // ==========================================================
+    // =====================[ 修复结束 ]=========================
+    // ==========================================================
+
+
 
     /**
      * Deletes one or more items (sessions or folders).
@@ -196,15 +212,6 @@ export class SessionService extends ISessionService {
     }
 
     /**
-     * Handles the logic for selecting a session.
-     * @param {string} sessionId
-     */
-    selectSession(sessionId) {
-        this.store.dispatch({ type: 'SESSION_SELECT', payload: { sessionId } });
-    }
-
-
-    /**
      * Updates the tags for multiple items simultaneously, registering new tags globally.
      * @param {object} params
      * @param {string[]} params.itemIds - The IDs of the items to update.
@@ -228,6 +235,14 @@ export class SessionService extends ISessionService {
     }
 
     /**
+     * Handles the logic for selecting a session.
+     * @param {string} sessionId
+     */
+    selectSession(sessionId) {
+        this.store.dispatch({ type: 'SESSION_SELECT', payload: { sessionId } });
+    }
+
+    /**
      * Gets the currently active item object from the state.
      * @override
      * @returns {import('../types/types.js')._WorkspaceItem | undefined} // MODIFIED TYPE
@@ -235,5 +250,25 @@ export class SessionService extends ISessionService {
     getActiveSession() {
         const state = this.store.getState();
         return state.activeId ? this.findItemById(state.activeId) : undefined;
+    }
+
+    /**
+     * Updates a session's content and automatically re-parses its metadata and outline.
+     * @param {string} sessionId
+     * @param {string} newContent
+     */
+    async updateSessionContent(itemId, newContent) {
+        await this.moduleRepo.updateModuleContent(itemId, newContent);
+    }
+
+    /**
+     * [新增] 同时更新内容和元数据，避免两次事件触发
+     * @param {string} itemId
+     * @param {object} updates
+     * @param {string} updates.content - 原始内容
+     * @param {object} updates.meta - 元数据（summary, searchableText等）
+     */
+    async updateSessionContentAndMeta(itemId, { content, meta }) {
+        await this.moduleRepo.updateModuleContentAndMeta(itemId, content, meta);
     }
 }

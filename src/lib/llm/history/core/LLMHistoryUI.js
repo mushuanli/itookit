@@ -547,44 +547,125 @@ export class LLMHistoryUI extends IEditor {
         this.events.emit('historyCleared');
     }
     
+    // ===================================================================
+    //   搜索 API (Search API) - 供 IEditor 实现和内部命令使用
+    // ===================================================================
+
+    /**
+     * 在聊天历史中搜索关键词，并高亮所有匹配项。
+     * @param {string} keyword - 要搜索的关键词。
+     * @returns {Array<{element: HTMLElement, pairId: string}>} 返回一个包含高亮元素和其所属pairId的对象数组。
+     */
     search(keyword) {
         this.clearSearch();
         if (!keyword || keyword.trim() === '') return [];
+
         const lowerCaseKeyword = keyword.toLowerCase();
-        this.searchResults = this.pairs
-            .filter(pair => 
-                pair.userMessage.content.toLowerCase().includes(lowerCaseKeyword) ||
-                pair.assistantMessage.content.toLowerCase().includes(lowerCaseKeyword)
-            )
-            .map(pair => ({ pairId: pair.id, element: pair.element }));
+        const results = [];
+        
+        this.pairs.forEach(pair => {
+            const pairElement = pair.element;
+            if (!pairElement) return;
 
-        // Highlight the first result immediately if available
-        if (this.searchResults.length > 0) {
-            this.searchIndex = 0;
-            this._navigateToSearchResult(this.searchIndex);
-        }
+            // 查找所有文本节点进行搜索和高亮
+            const walker = document.createTreeWalker(pairElement, NodeFilter.SHOW_TEXT, null, false);
+            const textNodes = [];
+            let node;
+            while (node = walker.nextNode()) {
+                if (!node.parentElement.closest('script, style, .llm-historyui__message-toolbar')) {
+                    textNodes.push(node);
+                }
+            }
 
-        return this.searchResults.map(r => r.pairId);
+            const regex = new RegExp(keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+            let hasMatchInPair = false;
+
+            for (const textNode of textNodes) {
+                const text = textNode.nodeValue;
+                const matches = [...text.matchAll(regex)];
+
+                if (matches.length > 0) {
+                    hasMatchInPair = true;
+                }
+
+                for (let i = matches.length - 1; i >= 0; i--) {
+                    const match = matches[i];
+                    const mark = document.createElement('mark');
+                    mark.className = 'llm-historyui__search-highlight';
+                    
+                    const middle = textNode.splitText(match.index);
+                    middle.splitText(match[0].length);
+                    mark.appendChild(middle.cloneNode(true));
+                    middle.parentNode.replaceChild(mark, middle);
+                }
+            }
+
+            if (hasMatchInPair) {
+                results.push({ element: pairElement, pairId: pair.id });
+            }
+        });
+        
+        this.searchResults = results;
+        this.searchIndex = -1;
+
+        return this.searchResults;
     }
 
+    /**
+     * 导航到下一个搜索结果。
+     * @returns {string | null} The ID of the next result's pair, or null.
+     */
     nextResult() {
         if (this.searchResults.length === 0) return null;
         this.searchIndex = (this.searchIndex + 1) % this.searchResults.length;
-        this._navigateToSearchResult(this.searchIndex);
+        this.gotoMatch(this.searchResults[this.searchIndex].element);
         return this.searchResults[this.searchIndex].pairId;
     }
 
+    /**
+     * 导航到上一个搜索结果。
+     * @returns {string | null} The ID of the previous result's pair, or null.
+     */
     previousResult() {
         if (this.searchResults.length === 0) return null;
         this.searchIndex = (this.searchIndex - 1 + this.searchResults.length) % this.searchResults.length;
-        this._navigateToSearchResult(this.searchIndex);
+        this.gotoMatch(this.searchResults[this.searchIndex].element);
         return this.searchResults[this.searchIndex].pairId;
     }
     
-    clearSearch() {
+    /**
+     * 导航并高亮指定的搜索匹配元素。
+     * @param {HTMLElement} matchElement - 要导航到的元素 (通常是 pair.element)。
+     */
+    gotoMatch(matchElement) {
+        if (!matchElement) return;
+
         this.container.querySelectorAll('.llm-historyui__message-pair--highlighted').forEach(el => {
             el.classList.remove('llm-historyui__message-pair--highlighted');
         });
+
+        matchElement.classList.add('llm-historyui__message-pair--highlighted');
+        matchElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    /**
+     * 清除所有搜索高亮。
+     */
+    clearSearch() {
+        const marks = this.container.querySelectorAll('.llm-historyui__search-highlight');
+        marks.forEach(mark => {
+            const parent = mark.parentNode;
+            if (parent) {
+                while(mark.firstChild) parent.insertBefore(mark.firstChild, mark);
+                parent.removeChild(mark);
+                parent.normalize();
+            }
+        });
+        
+        this.container.querySelectorAll('.llm-historyui__message-pair--highlighted').forEach(el => {
+            el.classList.remove('llm-historyui__message-pair--highlighted');
+        });
+
         this.searchResults = [];
         this.searchIndex = -1;
     }

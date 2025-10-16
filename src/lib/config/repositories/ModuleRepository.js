@@ -360,6 +360,47 @@ export class ModuleRepository {
         });
     }
 
+/**
+ * [新增] 原子性地更新内容和元数据
+ * @param {string} nodeId - 节点的唯一ID
+ * @param {string} content - 新的内容
+ * @param {object} metaUpdates - 要更新的元数据字段
+ * @returns {Promise<void>}
+ */
+    async updateModuleContentAndMeta(nodeId, content, metaUpdates) {
+    // [修复] 包裹在写队列中，确保并发安全
+    return this._enqueueWrite(async () => {
+        await this.getModules(); // 确保数据已加载
+        
+        // [核心修复] 正确解构返回值
+        const result = this._findNodeById(nodeId);
+        if (!result) {
+            throw new Error(`节点 ${nodeId} 未找到`);
+        }
+        
+        const { node } = result; // ✅ 正确获取实际的节点对象
+        
+        // 1. 更新内容
+        node.content = content;
+        
+        // 2. 更新时间戳
+        const now = new Date().toISOString();
+        node.meta.mtime = now;
+        
+        // 3. 更新元数据（合并传入的更新）
+        Object.assign(node.meta, metaUpdates);
+        
+        // 4. 持久化
+        await this._save(); // ✅ 使用正确的方法名
+        
+        // 5. 只触发一个事件
+        this.eventManager.publish(
+            getModuleEventName('node_content_updated', this.namespace),
+            { updatedNode: node }
+        );
+    });
+    }
+
     /**
      * [V2-FIX] 新增：移动一个或多个节点到新的父节点下。
      * @param {string[]} nodeIds - 要移动的节点的ID数组。

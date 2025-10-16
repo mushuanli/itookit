@@ -16,6 +16,9 @@ import { SessionTagProvider } from '../providers/SessionTagProvider.js';
 
 import { dataAdapter } from '../utils/data-adapter.js';
 import { getModuleEventName } from '../../config/shared/constants.js';
+// 导入 parseSessionInfo 以便在事件处理器中使用
+import { parseSessionInfo } from '../utils/session-parser.js';
+
 
 /**
  * @typedef {object} TagEditorFactoryOptions
@@ -435,11 +438,28 @@ export class SessionUIManager extends ISessionManager {
         });
         
         this.eventManager.subscribe(getModuleEventName('node_content_updated', namespace), ({ updatedNode }) => {
-             const updatedItem = dataAdapter.nodeToItem(updatedNode);
-             this.store.dispatch({
-                type: 'ITEM_UPDATE_SUCCESS',
-                payload: { itemId: updatedNode.meta.id, updates: updatedItem }
-            });
+            const currentItem = this._sessionService.findItemById(updatedNode.meta.id);
+            if (!currentItem) return;
+
+            // ✅ 直接使用 Repository 提供的元数据，不解析 content！
+            const updates = {
+                content: {
+                    format: 'opaque', // 标记为不透明格式
+                    summary: updatedNode.meta.summary || '',
+                    searchableText: updatedNode.meta.searchableText || '',
+                    data: updatedNode.content, // 原样保存
+                },
+                headings: updatedNode.meta.headings || [],
+                metadata: {
+                    ...currentItem.metadata,
+                    lastModified: updatedNode.meta.mtime,
+                }
+            };
+
+            this.store.dispatch({
+               type: 'ITEM_UPDATE_SUCCESS',
+                payload: { itemId: updatedNode.meta.id, updates }
+           });
         });
 
         this.eventManager.subscribe(getModuleEventName('nodes_meta_updated', namespace), ({ updatedNodes }) => {

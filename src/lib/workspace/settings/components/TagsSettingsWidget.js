@@ -160,6 +160,7 @@ export class TagsSettingsWidget extends ISettingsWidget {
             return;
         }
 
+        //  TODO: support all workspace delete tag action.
         // 2. 检查此标签是否被任何 Agent 使用 (异步操作)
         const allAgents = await this.llmService.getAgents();
         const dependentAgents = allAgents.filter(agent => agent.tags?.includes(tagToDelete));

@@ -111,8 +111,8 @@ export class LLMChatUI extends IEditor {
             }
         });
 
-        // +++ 5. 注册需要协调的命令
-        registerOrchestratorCommands(this);
+        // +++ [核心修改] 传入 IEditor 实例 (this) +++
+        registerOrchestratorCommands(this, this.inputUI, this.historyUI);
         
         // +++ 4. 绑定子组件事件以重新广播，并触发 'change' 事件
         this._proxyEvents();
@@ -211,15 +211,16 @@ export class LLMChatUI extends IEditor {
         try {
             // 3. 解析 JSONL: 按行分割，过滤空行，然后逐行解析 JSON
             const lines = jsonlContent.split('\n').filter(line => line.trim() !== '');
-            const pairs = lines.map(line => MessagePair.fromJSON(JSON.parse(line)));
-
-            // 4. 将解析后的数据模型设置到 historyUI 中
-            this.historyUI.pairs = pairs;
-            this.historyUI._rerenderAll(); // 调用 historyUI 的方法来重绘整个列表
-
-            // 5. 触发加载完成事件
-            this.historyUI.events.emit('historyLoaded', { count: pairs.length });
-
+            // 在这里我们假设 historyUI 已经有了 loadFromJSONL 的能力
+            if (typeof this.historyUI.loadFromJSONL === 'function') {
+                 this.historyUI.loadFromJSONL(lines);
+            } else {
+                 // Fallback to old method for compatibility
+                 const pairs = lines.map(line => MessagePair.fromJSON(JSON.parse(line)));
+                 this.historyUI.pairs = pairs;
+                 this.historyUI._rerenderAll();
+                 this.historyUI.events.emit('historyLoaded', { count: pairs.length });
+            }
         } catch (error) {
             console.error('[LLMChatUI] 解析 JSONL 内容失败:', error);
             this.historyUI.messagesEl.innerHTML = `<div class="llm-historyui__error-message">加载会话失败：数据格式损坏。</div>`;
@@ -248,6 +249,49 @@ export class LLMChatUI extends IEditor {
             // 在序列化失败时返回空字符串，防止保存损坏的数据
             return '';
         }
+    }
+
+    /**
+     * @override
+     */
+    async getSearchableText() {
+        if (!this.historyUI.pairs || this.historyUI.pairs.length === 0) {
+            return '';
+        }
+        
+        return this.historyUI.pairs
+            .map(pair => {
+                const userText = pair.userMessage.content || '';
+                const assistantText = pair.assistantMessage.content || '';
+                return `${userText}\n${assistantText}`;
+            })
+            .join('\n')
+            .trim();
+    }
+    
+    /**
+     * @override
+     */
+    async getHeadings() {
+        // LLM 对话没有标题结构
+        return [];
+    }
+
+    /**
+     * @override
+     * @implements {IEditor.getSummary}
+     * [新增] 为聊天会话提供一个人类可读的摘要。
+     * 摘要内容是第一条用户消息的文本。
+     * @returns {Promise<string|null>}
+     */
+    async getSummary() {
+        const firstPair = this.historyUI.pairs?.[0];
+        if (firstPair && firstPair.userMessage?.content) {
+            // 返回第一条用户消息的内容作为摘要
+            return firstPair.userMessage.content;
+        }
+        // 如果没有消息，或者第一条消息没有内容，则返回一个默认提示或 null
+        return "[空对话]";
     }
 
     /**
@@ -328,37 +372,46 @@ export class LLMChatUI extends IEditor {
         console.log('[LLMChatUI] 已成功销毁');
     }
 
+    // +++ [新增] IEditor 搜索接口实现 +++
+
+    /**
+     * @implements {IEditor.search}
+     */
+    async search(query) {
+        // 委托给 historyUI，并转换结果格式
+        const searchResults = this.historyUI.search(query); // 假设 search 返回 { element, pairId }[]
+        
+        // 转换为 UnifiedSearchResult 格式
+        return searchResults.map(result => ({
+            source: 'renderer', // 在聊天UI中，所有内容都是渲染后的
+            text: result.element.textContent.substring(0, 100) + '...', // 截取部分文本作为匹配文本
+            context: result.element.textContent.substring(0, 200) + '...', // 上下文
+            details: result.element // 将DOM元素作为不透明的细节传递
+        }));
+    }
+
+    /**
+     * @implements {IEditor.gotoMatch}
+     */
+    gotoMatch(result) {
+        // 委托给 historyUI
+        // result.details 就是 historyUI.search 返回的 element
+        if (result && result.source === 'renderer' && result.details instanceof HTMLElement) {
+            this.historyUI.gotoMatch(result.details);
+        }
+    }
+
+    /**
+     * @implements {IEditor.clearSearch}
+     */
+    clearSearch() {
+        // 委托给 historyUI
+        this.historyUI.clearSearch();
+    }
+
     // ===================================================================
     //   Private Methods
     // ===================================================================
-    /**
-     * +++ ADDED: Loads initial chat history from the storage service.
-     * @private
-    async _loadInitialData() {
-        // --- [MODIFIED] Guard clause to prevent running without storage configured ---
-        if (!this.sessionStorage || !this.sessionId) return;
-        try {
-            const content = await this.sessionStorage.getSessionContent(this.sessionId);
-            if (content) {
-                this.setText(content);
-            }
-        } catch (error) {
-            console.error(`[LLMChatUI] Failed to load session ${this.sessionId}:`, error);
-        }
-    }
-     */
-
-    /**
-     * +++ ADDED: Saves the current chat history when a change occurs.
-     * @private
-    _handleAutoSave() {
-        // --- [MODIFIED] Guard clause ---
-        if (!this.sessionStorage || !this.sessionId) return;
-        const content = this.getText();
-        this.sessionStorage.saveSessionContent(this.sessionId, content)
-            .catch(error => console.error(`[LLMChatUI] Auto-save for session ${this.sessionId} failed:`, error));
-    }
-     */
 
     /**
      * @private

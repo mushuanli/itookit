@@ -13,10 +13,10 @@ export class LLMWorkspace {
     /**
      * @param {HTMLElement} container The DOM element to render the workspace into.
      * @param {object} options Configuration for the workspace.
-     * @param {import('../../config/ConfigManager.js').ConfigManager} options.configManager - [新] **必需** 一个已初始化的 ConfigManager 实例。
-     * @param {string} options.namespace - [新] **必需** 此工作区实例的唯一命名空间。
-     * @param {HTMLElement} options.sidebarContainer - **必需** 用于侧边栏的 DOM 元素。
-     * @param {HTMLElement} options.chatContainer - **必需** 用于聊天 UI 的 DOM 元素。
+     * @param {import('../../config/ConfigManager.js').ConfigManager} options.configManager - [必需] 一个已初始化的 ConfigManager 实例。
+     * @param {string} options.namespace - [必需] 此工作区实例的唯一命名空间。
+     * @param {HTMLElement} options.sidebarContainer - [必需] 用于侧边栏的 DOM 元素。
+     * @param {HTMLElement} options.chatContainer - [必需] 用于聊天 UI 的 DOM 元素。
      * @param {object} [options.sidebarConfig] - (可选) 传递给侧边栏的额外配置。
      * @param {object} [options.chatUIConfig] - (可选) 传递给 LLMChatUI 的额外配置。
      * @param {object} options.chatUIConfig **Required** Configuration for LLMChatUI.
@@ -134,35 +134,36 @@ export class LLMWorkspace {
     async _saveActiveSession() {
         if (!this.activeSessionId) return;
 
-        // 1. [修正] 从 chatUI 获取对象，而不是字符串
-        const historyData = this.chatUI.exportHistory();
-        if (!historyData || !historyData.pairs) {
-             console.warn("从 chatUI 获取的历史数据无效，跳过保存。");
-             return;
-        }
-
-        // 2. 业务逻辑：生成描述
-        let description = "";
-        if (historyData.pairs.length > 0) {
-            const firstUserMessage = historyData.pairs[0].userMessage?.content;
-            if (firstUserMessage) {
-                description = firstUserMessage.replace(/\n/g, ' ').trim();
+    // 1. 获取内容（JSONL格式，sidebar 不需要理解）
+    const contentToSave = this.chatUI.getText();
+    
+    // 2. 获取所有元数据（通过标准接口）
+    const summary = await this.chatUI.getSummary();
+    const searchableText = await this.chatUI.getSearchableText();
+    const headings = await this.chatUI.getHeadings();
+    
+    // 3. 一次性更新内容和元数据
+    await this.sidebar.sessionService.updateSessionContentAndMeta(
+        this.activeSessionId,
+        {
+            content: contentToSave,
+            meta: {
+                summary: summary || '[空对话]',
+                searchableText: searchableText,
+                // headings 对 LLM 对话不适用，但保持接口一致性
             }
         }
+    );
         
-        // 3. 自动重命名
+        // 4. [核心改进] 使用从 getSummary() 获取的摘要来驱动自动重命名逻辑
         const currentItem = this.sidebar.sessionService.findItemById(this.activeSessionId);
-        if (currentItem && currentItem.metadata.title.startsWith('Untitled') && description) {
-            const newTitle = description.substring(0, 50) + (description.length > 50 ? '...' : '');
+        if (currentItem && currentItem.metadata.title.startsWith('Untitled') && summary && summary !== '[空对话]') {
+            const newTitle = summary.substring(0, 50) + (summary.length > 50 ? '...' : '');
             if (newTitle.trim()) {
-                await this.sidebar.sessionService.renameItem(this.activeSessionId, newTitle.trim());
-                this.chatUI.setTitle(newTitle.trim());
+                await this.sidebar.sessionService.updateItemMetadata(this.activeSessionId, { title: newTitle.trim() });
+                this.chatUI.setTitle(newTitle.trim()); // 立即同步UI
             }
         }
-        
-        // 4. [修正] 将要保存的内容序列化为 sidebar 期望的 JSONL 格式
-        const contentToSave = this.chatUI.getText();
-        await this.sidebar.updateSessionContent(this.activeSessionId, contentToSave);
     }
     
     /**
@@ -240,6 +241,7 @@ export class LLMWorkspace {
      * Destroys the workspace and all its components, cleaning up memory and event listeners.
      */
     destroy() {
+        this._saveHandler.cancel?.(); // 取消任何待处理的保存
         this.sidebar.destroy();
         // --- [IMPROVED] Call the destroy method on the main component ---
         this.chatUI.destroy();

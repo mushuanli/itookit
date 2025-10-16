@@ -38,14 +38,15 @@ export class MDxRenderer {
     }
 
     // ===================================================================
-    //   [NEW] Public Search API
+    //   [新增] 公共搜索 API (Public Search API)
     // ===================================================================
 
     /**
-     * Finds all occurrences of a query in the rendered content, highlights them,
-     * and returns the highlighted HTML elements. This method is stateless.
-     * @param {string} query - The text to search for.
-     * @returns {HTMLElement[]} An array of the created <mark> elements.
+     * 在渲染后的内容中查找所有查询匹配项，高亮它们，并返回高亮后的HTML元素。
+     * 此方法是无状态的，每次调用都会重新搜索。
+     * @override
+     * @param {string} query - 要搜索的文本。
+     * @returns {HTMLElement[]} 返回创建的 <mark> 元素数组。
      */
     search(query) {
         this.clearSearch();
@@ -56,25 +57,24 @@ export class MDxRenderer {
         const walker = document.createTreeWalker(this.renderRoot, NodeFilter.SHOW_TEXT, null, false);
         const textNodes = [];
         let node;
-        while (node = walker.nextNode()) {
+        // 1. 收集所有文本节点
+        while ((node = walker.nextNode())) {
+            // 忽略脚本、样式块以及交互式UI元素内部的文本
+            if (node.parentElement.closest('script, style, .mdx-code-block-controls, .mdx-cloze-controls__panel')) {
+                continue;
+            }
             textNodes.push(node);
         }
 
-        const regex = new RegExp(query, 'gi');
+        const regex = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
         
+        // 2. 遍历文本节点，查找并包裹匹配项
         for (const textNode of textNodes) {
-            if (textNode.parentElement.tagName === 'MARK' || textNode.parentElement.closest('script, style')) {
-                continue;
-            }
-            
             const text = textNode.nodeValue;
-            let match;
-            const matches = [];
-            while ((match = regex.exec(text)) !== null) {
-                matches.push(match);
-            }
+            // 使用 matchAll 获取所有匹配项及其索引
+            const matches = [...text.matchAll(regex)];
 
-            // Iterate backwards to avoid index issues when splitting nodes
+            // 从后往前替换，避免因节点分割导致的索引错乱
             for (let i = matches.length - 1; i >= 0; i--) {
                 const currentMatch = matches[i];
                 const matchText = currentMatch[0];
@@ -83,7 +83,7 @@ export class MDxRenderer {
                 const mark = document.createElement('mark');
                 mark.className = this.searchMarkClass;
                 
-                // Split the text node
+                // 分割文本节点：[before][match][after]
                 const middle = textNode.splitText(startIndex);
                 middle.splitText(matchText.length);
                 mark.appendChild(middle.cloneNode(true));
@@ -95,19 +95,19 @@ export class MDxRenderer {
     }
 
     /**
-     * Scrolls a specific match element into view and applies a 'current' highlight style.
-     * @param {HTMLElement} matchElement - A <mark> element returned from the `search` method.
+     * 将指定的匹配元素滚动到视图中，并应用 'current' 高亮样式。
+     * @param {HTMLElement} matchElement - 从 `search` 方法返回的 <mark> 元素。
      */
     gotoMatch(matchElement) {
         if (!this.renderRoot || !(matchElement instanceof HTMLElement)) return;
 
-        // Clear previous 'current' highlight
+        // 清除上一个 'current' 高亮
         const current = this.renderRoot.querySelector(`.${this.currentMatchClass}`);
         if (current) {
             current.classList.remove(this.currentMatchClass);
         }
 
-        // Apply new 'current' highlight and scroll
+        // 应用新的 'current' 高亮并滚动
         matchElement.classList.add(this.currentMatchClass);
         matchElement.scrollIntoView({
             behavior: 'smooth',
@@ -116,23 +116,27 @@ export class MDxRenderer {
     }
 
     /**
-     * Clears all search highlights from the rendered content.
+     * 从渲染内容中清除所有搜索高亮。
      */
     clearSearch() {
         if (!this.renderRoot) return;
         const marks = Array.from(this.renderRoot.getElementsByClassName(this.searchMarkClass));
         for (const mark of marks) {
             const parent = mark.parentNode;
+            if (!parent) continue;
+            // 将 <mark> 的内容（文本节点）移到其父节点中
             while(mark.firstChild) {
                 parent.insertBefore(mark.firstChild, mark);
             }
+            // 移除空的 <mark>
             parent.removeChild(mark);
-            parent.normalize(); // Merges adjacent text nodes
+            // 合并相邻的文本节点
+            parent.normalize(); 
         }
     }
     
     // ===================================================================
-    //   End of Public Search API
+    //   (保留 render, configureMarked, destroy 等其他方法)
     // ===================================================================
     
     /**

@@ -448,23 +448,43 @@ console.log(`import into: ${targetParentId}`);
     // +++ END NEW +++
 
 
-    /** @private */
+    /**
+     * @private
+     * 核心保存逻辑。现在它同时处理内容和摘要。
+     */
     async _saveContent(isAutosave = false) {
         const activeItem = this.getCurrentSession();
-        if (!activeItem) return undefined;
+        if (!activeItem || !this._sessionManager) return undefined;
 
         const newContent = this.getContent();
-        // [MODIFIED] Access content from content.data
-        if (isAutosave && activeItem.content?.data === newContent) {
-            return activeItem;
+        const contentChanged = activeItem.content?.data !== newContent;
+
+        // 只有当内容发生变化时，才执行保存和摘要更新
+        if (!isAutosave || contentChanged) {
+            // 步骤 1: 像以前一样，更新完整内容
+            await this._sessionManager.updateSessionContent(activeItem.id, newContent);
+
+            // 步骤 2: [新增] 调用 getSummary 并更新元数据
+            // 我们检查 editor 实例是否存在，以及 getSummary 是否是一个函数
+            if (this._editor && typeof this._editor.getSummary === 'function') {
+                const summary = await this._editor.getSummary();
+                // 只有当编辑器提供了非空的摘要时才更新
+                if (summary !== null) {
+                    // 假设 sessionService 实现了一个 updateItemMetadata 方法
+                    // 这比为摘要创建一个专属方法更具扩展性
+                    await this._sessionManager.sessionService.updateItemMetadata(activeItem.id, { summary: summary });
+                }
+            }
+            
+            this._isDirty = false;
         }
         
-        await this._sessionManager.updateSessionContent(activeItem.id, newContent);
-        this._isDirty = false;
+        const updatedItem = this.getCurrentSession(); // 获取更新后的完整项目
         
-        const updatedItem = this.getCurrentSession();
-        // [MODIFIED] Emit 'item'
-        this._emit('contentChange', { item: updatedItem, content: newContent });
+        if (contentChanged) {
+            this._emit('contentChange', { item: updatedItem, content: newContent });
+        }
+
         return updatedItem;
     }
 

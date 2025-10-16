@@ -22,7 +22,18 @@ export class ISessionService {
     findItemById(itemId) {
         throw new Error("Method 'findItemById' must be implemented.");
     }
-    
+
+    /**
+     * [新增] 更新一个项目的元数据。
+     * 这是一个通用的方法，可以用来更新标题、摘要、标签等。
+     * @param {string} itemId - 要更新的项目的 ID。
+     * @param {object} metadataUpdates - 一个包含要更新的元数据字段的对象，例如 { title: '新标题', summary: '新摘要' }。
+     * @returns {Promise<void>}
+     */
+    async updateItemMetadata(itemId, metadataUpdates) {
+        throw new Error("Method 'updateItemMetadata' must be implemented.");
+    }
+
     /**
      * 获取所有文件夹的扁平化列表。
      * @returns {Promise<object[]>}
