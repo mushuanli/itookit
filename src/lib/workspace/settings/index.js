@@ -2,16 +2,18 @@
  * @file @workspace/settings/index.js
  * @description
  * 一个用于编排设置页侧边栏和内容区域的协调器。
- * 它现在默认包含 LLMSettingsWidget 以提供开箱即用的体验，
+ * 它现在默认包含 LLMSettingsWidget 和 TagsSettingsWidget 以提供开箱即用的体验，
  * 同时保持完全的可定制性。
  *
  * [V2 修复] - 重构了依赖管理方式，不再自行处理持久化，而是
  *             像 MDxWorkspace 一样，接收一个已初始化的 ConfigManager 实例。
+ * [V3 修改] - 增加了 TagsSettingsWidget 作为默认组件，并设计了可扩展的默认组件加载机制。
  */
 
 import { createSessionUI } from '../../sidebar/index.js';
 import { testLLMConnection } from '../../llm/core/index.js';
 import { LLMSettingsWidget } from '../../llm/settings/index.js';
+import { TagsSettingsWidget } from './components/TagsSettingsWidget.js'; // +++ 新增: 导入 Tags Widget
 import { isClass } from '../../common/utils/utils.js';
 
 /**
@@ -26,9 +28,9 @@ import { isClass } from '../../common/utils/utils.js';
  * @property {import('../../config/ConfigManager.js').ConfigManager} configManager - [新] **必需** 一个已初始化的 ConfigManager 实例。
  * @property {string} namespace - [新] **必需** 此工作区实例的唯一命名空间，用于隔离侧边栏的状态。
  * @property {(SettingsWidgetClass | ISettingsWidget)[]} [widgets] - (可选) 一个包含 Widget 类或实例的数组。
- *   **[重要]** 此工作区默认会自动包含 `LLMSettingsWidget`。
- *   如果此数组中没有提供 ID 为 'llm-settings-manager' 的 Widget，
- *   默认的 `LLMSettingsWidget` 将被自动添加到列表的开头。
+ *   **[重要]** 此工作区默认会自动包含 `TagsSettingsWidget` 和 `LLMSettingsWidget`。
+ *   如果用户提供的 `widgets` 数组中不包含具有相应 ID 的 Widget，
+ *   默认的 Widgets 将被自动添加到列表的开头。
  * @property {object} [widgetOptions] - (可选) 一个对象，包含要传递给每个 Widget 构造函数的依赖项或设置（如果它们作为类提供）。
  */
 
@@ -39,32 +41,45 @@ export class SettingsWorkspace {
     constructor(options) {
         this._validateOptions(options); // 先验证传入的 options
 
-        // --- 智能 Widget 合并逻辑 ---
-        // 目的是确保 LLMSettingsWidget 默认存在，除非被用户显式替换。
-        const customWidgets = options.widgets || [];
-        const llmWidgetId = 'llm-settings-manager';
+        // --- [核心修改] 智能 Widget 合并逻辑 ---
+        // 设计目标：确保默认组件存在，允许用户覆盖，并保持可扩展性。
 
-        // 检查用户提供的列表中是否已包含 LLMSettingsWidget（或任何具有相同ID的Widget）
-        const isDefaultWidgetPresent = customWidgets.some(widget => {
+        // 1. 定义默认组件，顺序决定了它们在侧边栏中的显示顺序。
+        const defaultWidgetClasses = [TagsSettingsWidget, LLMSettingsWidget];
+        const customWidgets = options.widgets || [];
+
+        // 2. 获取用户提供的所有 widget 的 ID，用于去重检查。
+        const providedWidgetIds = new Set(customWidgets.map(widget => {
             if (isClass(widget)) {
-                // 对于类，我们实例化一个临时对象来检查其 ID。
-                // 这是一种处理类而无需依赖静态属性的稳健方法。
                 try {
-                    return new widget().id === llmWidgetId;
+                    // 这种方式依赖于无参构造函数，对于我们的 ISettingsWidget 是安全的。
+                    return new widget().id;
                 } catch (e) {
-                    return false; // 如果无法在没有参数的情况下实例化，则可能不是我们的目标
+                    console.warn("无法从 Widget 类中获取 ID", widget);
+                    return null;
                 }
             }
-            // 对于实例，直接检查 id 属性
-            return widget && typeof widget.id === 'string' && widget.id === llmWidgetId;
-        });
+            return widget?.id;
+        }).filter(Boolean));
 
+        // 3. 合并列表：将用户提供的 widgets 作为基础。
         let finalWidgets = [...customWidgets];
-        if (!isDefaultWidgetPresent) {
-            // 如果默认 Widget 不存在，则将其添加到数组的开头。
-            finalWidgets.unshift(LLMSettingsWidget);
-        }
 
+        // 4. 倒序遍历默认组件列表，如果用户未提供，则将其添加到最终列表的 *开头*。
+        //    倒序 unshift 可以确保最终列表中的顺序与 defaultWidgetClasses 中定义的顺序一致。
+        defaultWidgetClasses.reverse().forEach(WidgetClass => {
+            let defaultId;
+            try {
+                defaultId = new WidgetClass().id;
+            } catch (e) {
+                return; // 无法实例化则跳过
+            }
+
+            if (!providedWidgetIds.has(defaultId)) {
+                finalWidgets.unshift(WidgetClass);
+            }
+        });
+        
         // 重新组装最终的 options 对象，供类的其余部分使用。
         const finalWidgetOptions = {
             ...(options.widgetOptions || {}),
@@ -120,6 +135,7 @@ export class SettingsWorkspace {
             version: "1.0",
             metadata: {
                 title: widget.label,
+                iconHTML: widget.iconHTML, // +++ 传递 iconHTML 到侧边栏
                 createdAt: new Date().toISOString(),
                 lastModified: new Date().toISOString(),
                 parentId: null,
