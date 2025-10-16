@@ -1,5 +1,5 @@
 /**
- * @file @workspace/settings/components/TagsSettingsWidget.js
+ * @file #workspace/settings/components/TagsSettingsWidget.js
  * @description 一个用于管理全局标签的设置组件，实现了 ISettingsWidget 接口。
  * @change
  * - [改进] 增加了对 "default" 标签的删除保护。

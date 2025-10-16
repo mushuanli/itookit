@@ -1,0 +1,58 @@
+/* @file #workspace/settings/components/GeneralSettingsWidget.css */
+
+.general-settings-widget {
+    padding: 20px;
+    box-sizing: border-box;
+}
+
+.general-settings-widget h3 {
+    margin-top: 0;
+    border-bottom: 1px solid var(--border-color, #e0e0e0);
+    padding-bottom: 10px;
+    margin-bottom: 15px;
+}
+
+.general-settings-widget p {
+    color: var(--text-color-secondary, #666);
+    line-height: 1.6;
+    margin-bottom: 25px;
+    max-width: 600px;
+}
+
+.sync-actions {
+    display: flex;
+    gap: 12px;
+    justify-content: flex-start;
+    margin-top: 20px;
+}
+
+/* 假设 .settings-btn 和 .settings-btn-primary 在全局样式中定义 */
+/* 如果没有，这里提供一个基础样式作为参考 */
+.settings-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 16px;
+    border: 1px solid var(--border-color, #ccc);
+    background-color: var(--background-color-secondary, #f0f0f0);
+    color: var(--text-color, #333);
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.settings-btn:hover {
+    background-color: var(--hover-color, #e5e5e5);
+}
+
+.settings-btn-primary {
+    background-color: var(--primary-color, #007bff);
+    color: white;
+    border-color: var(--primary-color, #007bff);
+}
+
+.settings-btn-primary:hover {
+    background-color: var(--primary-color-dark, #0056b3);
+}

@@ -1,4 +1,4 @@
-// 文件: @workspace/mdx/MDxWorkspace.js
+// 文件: #workspace/mdx/MDxWorkspace.js
 
 /**
  * @file MDxWorkspace (V2 - Refactored)
@@ -132,7 +132,8 @@ export class MDxWorkspace {
             plugins: finalPlugins,
             initialText: activeItem?.content?.data || '请选择或创建一个会话。',
             titleBar: { ...defaultTitleBarOptions, ...(editorOptions.titleBar || {}) },
-            initialMode: editorOptions.clozeControl ? 'render' : (editorOptions.initialMode || 'edit'),
+            // +++ 修改点 1: 将默认启动模式修改为 'render' +++
+            initialMode: editorOptions.initialMode || 'render',
             clozeControls: editorOptions.clozeControl // [NEW] 显式传递 clozeControls 选项
         };
         
@@ -388,7 +389,8 @@ console.log(`import into: ${targetParentId}`);
                 if (this._editor) {
                     if (this._editor.getText() !== newContent) this._editor.setText(newContent);
                     this._editor.setTitle(newTitle);
-                    this._editor.focus(); // [新] 切换后自动聚焦
+                    // +++ 修改点 2: 切换文档时，强制进入 renderer 模式 +++
+                    this._editor.switchTo('render');
                 }
                 this._isDirty = false;
                 

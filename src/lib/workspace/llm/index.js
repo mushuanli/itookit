@@ -1,5 +1,5 @@
 /**
- * @workspace/llm/LLMWorkspace.js
+ * #workspace/llm/LLMWorkspace.js
  * The main orchestrator class that integrates sidebar and chatUI.
  */
 import { createSessionUI } from '../../sidebar/index.js';

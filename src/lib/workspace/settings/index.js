@@ -1,5 +1,5 @@
 /**
- * @file @workspace/settings/index.js
+ * @file #workspace/settings/index.js
  * @description
  * 一个用于编排设置页侧边栏和内容区域的协调器。
  * 它现在默认包含 LLMSettingsWidget 和 TagsSettingsWidget 以提供开箱即用的体验，
@@ -8,12 +8,14 @@
  * [V2 修复] - 重构了依赖管理方式，不再自行处理持久化，而是
  *             像 MDxWorkspace 一样，接收一个已初始化的 ConfigManager 实例。
  * [V3 修改] - 增加了 TagsSettingsWidget 作为默认组件，并设计了可扩展的默认组件加载机制。
+ * [V4 新增] - 增加了 GeneralSettingsWidget 用于数据同步。
  */
 
 import { createSessionUI } from '../../sidebar/index.js';
 import { testLLMConnection } from '../../llm/core/index.js';
 import { LLMSettingsWidget } from '../../llm/settings/index.js';
-import { TagsSettingsWidget } from './components/TagsSettingsWidget.js'; // +++ 新增: 导入 Tags Widget
+import { TagsSettingsWidget } from './components/TagsSettingsWidget.js';
+import { GeneralSettingsWidget } from './components/GeneralSettingsWidget.js'; // +++ 新增: 导入通用设置 Widget
 import { isClass } from '../../common/utils/utils.js';
 
 /**
@@ -28,7 +30,7 @@ import { isClass } from '../../common/utils/utils.js';
  * @property {import('../../config/ConfigManager.js').ConfigManager} configManager - [新] **必需** 一个已初始化的 ConfigManager 实例。
  * @property {string} namespace - [新] **必需** 此工作区实例的唯一命名空间，用于隔离侧边栏的状态。
  * @property {(SettingsWidgetClass | ISettingsWidget)[]} [widgets] - (可选) 一个包含 Widget 类或实例的数组。
- *   **[重要]** 此工作区默认会自动包含 `TagsSettingsWidget` 和 `LLMSettingsWidget`。
+ *   **[重要]** 此工作区默认会自动包含 `GeneralSettingsWidget`、`TagsSettingsWidget` 和 `LLMSettingsWidget`。
  *   如果用户提供的 `widgets` 数组中不包含具有相应 ID 的 Widget，
  *   默认的 Widgets 将被自动添加到列表的开头。
  * @property {object} [widgetOptions] - (可选) 一个对象，包含要传递给每个 Widget 构造函数的依赖项或设置（如果它们作为类提供）。
@@ -45,7 +47,7 @@ export class SettingsWorkspace {
         // 设计目标：确保默认组件存在，允许用户覆盖，并保持可扩展性。
 
         // 1. 定义默认组件，顺序决定了它们在侧边栏中的显示顺序。
-        const defaultWidgetClasses = [TagsSettingsWidget, LLMSettingsWidget];
+        const defaultWidgetClasses = [GeneralSettingsWidget, TagsSettingsWidget, LLMSettingsWidget]; // +++ 修改: 将 GeneralSettingsWidget 添加到列表开头
         const customWidgets = options.widgets || [];
 
         // 2. 获取用户提供的所有 widget 的 ID，用于去重检查。
