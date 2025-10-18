@@ -1,5 +1,5 @@
 /**
- * @file #workspace/settings/index.js
+ * 文件: #workspace/settings/index.js
  * @description
  * 一个用于编排设置页侧边栏和内容区域的协调器。
  * 它现在默认包含 LLMSettingsWidget 和 TagsSettingsWidget 以提供开箱即用的体验，
@@ -147,30 +147,19 @@ export class SettingsWorkspace {
             },
         }));
 
-        // --- [核心改进] ---
-        // 1. 定义此工作区对侧边栏的默认配置。
-        //    一个设置工作区的侧边栏天生就是只读的导航。
-        const defaultSidebarOptions = {
+        // --- [核心修复点] ---
+        // 在调用 createSessionUI 时，除了 configManager，还必须传入 namespace。
+        // 这确保了设置工作区侧边栏自身的 UI 状态（如展开的文件夹）
+        // 能够被正确地隔离存储。
+        this.sidebar = createSessionUI({
+            sessionListContainer: this.options.sidebarContainer,
+            // storageKey 选项已被废弃，现在由 namespace 统一管理
+            // 直接提供项目，绕过侧边栏持久化自己列表的需求。
+            initialState: { items: sidebarItems },
             readOnly: true,
             title: '设置',
             searchPlaceholder: '搜索设置...'
-        };
-
-        // 2. 将默认配置与用户可能传入的自定义配置合并。
-        //    这样用户仍然可以覆盖标题等设置，但默认行为是安全的。
-        const finalSidebarOptions = {
-            ...defaultSidebarOptions,
-            ...(this.options.sidebarOptions || {})
-        };
-        
-        // 3. 使用最终合并后的配置创建侧边栏。
-        this.sidebar = createSessionUI({
-            sessionListContainer: this.options.sidebarContainer,
-            storageKey: this.namespace, // 命名空间依然需要，用于隔离侧边栏自身状态
-            // 直接提供项目，绕过侧边栏持久化自己列表的需求。
-            initialState: { items: sidebarItems },
-            ...finalSidebarOptions // 传入合并后的配置
-        }, this.configManager);
+        }, this.configManager, this.namespace); // <--- [修复] 补全 namespace 参数
 
         this._connectEvents();
         

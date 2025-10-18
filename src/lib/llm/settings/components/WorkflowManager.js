@@ -1,5 +1,5 @@
 /**
- * @file #llm/settings/components/WorkflowManager.js
+ * 文件: #llm/settings/components/WorkflowManager.js
  * @description UI component for managing and composing workflows.
  * @change
  * - REFACTORED: The component now manages a workflow's own `interface` (inputs/outputs).
@@ -10,6 +10,15 @@
  */
 
 export class WorkflowManager {
+    /**
+     * @param {HTMLElement} element
+     * @param {object} options
+     * @param {object[]} options.initialWorkflows
+     * @param {object} options.initialRunnables
+     * @param {Function} options.onRun
+     * @param {Function} options.onSave - [核心修改] 保存 workflow 的回调
+     * @param {Function} options.onNotify
+     */
     constructor(element, { initialWorkflows, initialRunnables, onRun, onSave, onNotify }) {
         if (typeof LiteGraph === 'undefined') throw new Error('LiteGraph.js is not loaded.');
         
@@ -18,6 +27,8 @@ export class WorkflowManager {
         this.runnables = initialRunnables; // { agents: [], workflows: [] }
         this.onNotify = onNotify || ((message, type) => alert(`${type}: ${message}`));
         this.onRun = onRun;
+        
+        // [核心修改] 保存回调函数
         this.onSave = onSave;
 
         this.selectedWorkflowId = null;
@@ -238,8 +249,14 @@ export class WorkflowManager {
             this.selectedWorkflowId = workflow.id;
         }
         
+        // [核心修改] 调用注入的回调函数 (最终会调用 llmService.saveWorkflows)
+        if (this.onSave) {
+            this.onSave(this.workflows);
+        } else {
+            console.error("WorkflowManager: onSave 回调未提供。");
+        }
+
         this.isDirty = false;
-        this.onSave(this.workflows);
         this.renderWorkflowList();
         this.onNotify('Workflow saved!', 'success');
     }

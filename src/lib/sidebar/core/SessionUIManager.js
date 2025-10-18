@@ -1,8 +1,10 @@
-// #sidebar/core/SessionUIManager.js
+// 文件: #sidebar/core/SessionUIManager.js
+
 /**
- * @file SessionUIManager.js - SessionUI 库的主控制器 (V2)。
- * 负责初始化所有子组件，连接内部UI事件流与外部ConfigManager数据事件流，
- * 并通过实现 ISessionManager 接口向外部应用提供一个稳定、统一的 API。
+ * @file SessionUIManager.js (V3 - 服务容器架构)
+ * @description SessionUI 库的主控制器。
+ * 负责初始化所有子组件，连接内部UI事件流与外部`ConfigManager`数据事件流，
+ * 并通过实现 `ISessionManager` 接口向外部应用（如 MDxWorkspace）提供一个稳定、统一的 API。
  */
 import { ISessionManager } from '../../common/interfaces/ISessionManager.js';
 import { SessionCoordinator } from './Coordinator.js';
@@ -45,29 +47,41 @@ import { parseSessionInfo } from '../utils/session-parser.js';
  */
 export class SessionUIManager extends ISessionManager {
     /**
-     * [V2] 构造函数现在接收 configManager 实例，实现了显式依赖注入。
-     * @param {import('../../common/interfaces/ISessionManager.js').SessionUIOptions} options
-     * @param {import('../../config/ConfigManager.js').ConfigManager} configManager
+     * [V3] 构造函数现在接收 `configManager` 和 `namespace`，实现了依赖的集中管理。
+     * @param {SessionUIOptions} options - UI 配置选项
+     * @param {import('../../config/ConfigManager.js').ConfigManager} configManager - 【注入】应用级配置管理器
+     * @param {string} namespace - 【注入】当前工作区的命名空间
      */
-    constructor(options, configManager) {
+    constructor(options, configManager, namespace) {
         super();
+        // --- 参数校验 ---
         if (!options.sessionListContainer) {
             throw new Error("SessionUIManager requires 'sessionListContainer' in options.");
         }
-        // Critical check for data isolation
-        if (!options.storageKey) {
-            throw new Error("SessionUIManager requires a unique 'storageKey' option for data isolation.");
+        if (!configManager || !namespace) {
+            throw new Error("SessionUIManager requires a configManager and a namespace.");
         }
 
         this.options = options;
-        this.uiStorageKey = `sidebar_ui_state_${options.storageKey}`; // [V2] 用于UI状态的独立key
+        this.namespace = namespace;
+        this.configManager = configManager;
+        
+        // --- [核心重构] 服务解析 ---
+        // 1. 获取与当前工作区绑定的上下文
+        const workspaceContext = this.configManager.getWorkspace(this.namespace);
+        
+        // 2. 从上下文或全局中解析出所需的服务实例
+        /** @type {import('../../config/repositories/ModuleRepository.js').ModuleRepository} */
+        this.moduleRepo = workspaceContext.module; // 从工作区获取作用域服务
+        
+        /** @type {import('../../config/repositories/TagRepository.js').TagRepository} */
+        this.tagRepo = this.configManager.getService('tagRepository'); // 从主容器获取全局服务
+        
+        /** @type {import('../../config/EventManager.js').EventManager} */
+        this.eventManager = this.configManager.eventManager;
 
-        // [V2] 显式依赖注入
-        this.moduleRepo = configManager.modules.get(options.storageKey);
-        this.tagRepo = configManager.tags;
-        this.eventManager = configManager.eventManager;
-
-        // 加载持久化的UI状态
+        // --- 状态和 UI 初始化 (与之前版本类似，但依赖来源更清晰) ---
+        this.uiStorageKey = `sidebar_ui_state_${this.namespace}`;
         const persistedUiState = this._loadUiState();
         
         this.coordinator = new SessionCoordinator();
@@ -78,16 +92,16 @@ export class SessionUIManager extends ISessionManager {
             readOnly: options.readOnly || false, // [修改] 将 readOnly 状态注入 store
         });
 
-        // 2. 初始化服务
+        // 3. 将解析出的服务注入到 SessionService 中
         this._sessionService = new SessionService({
             store: this.store,
-            moduleRepo: this.moduleRepo,
-            tagRepo: this.tagRepo,
+            moduleRepo: this.moduleRepo, // 注入 ModuleRepository
+            tagRepo: this.tagRepo,       // 注入 TagRepository
             newSessionContent: options.newSessionContent
         });
 
         // 3. 内部状态跟踪
-        this.lastActiveId = this.store.getState().activeId;
+        this.lastActiveId = null;
         this.lastSidebarCollapsedState = this.store.getState().isSidebarCollapsed;
         this._title = options.title || '会话列表';
 
@@ -408,8 +422,10 @@ export class SessionUIManager extends ISessionManager {
      * @private
      */
     _connectToConfigManagerEvents() {
-        const namespace = this.options.storageKey;
+        // [核心修复点 2] 直接使用 this.namespace，不再依赖任何局部变量或废弃的 options 属性。
+        const namespace = this.namespace;
 
+        // 订阅 'loaded' 事件
         this.eventManager.subscribe(getModuleEventName('loaded', namespace), (tree) => {
             this.sessionService.handleRepositoryLoad(tree);
         });

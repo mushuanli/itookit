@@ -1,16 +1,19 @@
+// 文件: #llm/settings/index.js
+
 /**
- * @file #llm/settings/index.js
- * @description The main widget for managing LLM settings, implementing the ISettingsWidget interface.
- * @change
- * - REFACTORED: Renamed from SettingsManagerUI to LLMSettingsWidget and now extends ISettingsWidget.
- * - REFACTORED: Removed internal 'mode' ('modal'/'page') logic. The widget is now presentation-agnostic.
- * - REFACTORED: The host/caller is now responsible for providing a container via the `mount` method.
- * - REFACTORED: `show`/`hide` methods are removed in favor of the `mount`/`unmount` lifecycle.
- * - REFACTORED: Data loading and component initialization now happen within the `mount` method.
- * - SIMPLIFIED: CSS is now imported directly via a standard module import.
+ * @file LLMSettingsWidget.js (V3 - 服务容器架构)
+ * @description 管理 LLM 设置的主 Widget，实现了 ISettingsWidget 接口。
+ *
+ * [V3 核心重构]
+ * - **依赖 ConfigManager 单例**: 不再需要通过构造函数注入 `llmConfigService`。
+ *   组件现在直接从 `ConfigManager.getInstance()` 获取所有需要的服务（`llmService`, `tagRepo`），
+ *   简化了实例化过程并确保了与应用其他部分的数据一致性。
+ * - **移除默认值创建逻辑**: 创建默认 Connection 和 Agent 的职责已完全移交给 `ConfigManager` 的 `bootstrap` 流程。
+ *   `_loadAndInit` 方法现在只负责加载数据，变得更纯粹。
+ * - **事件驱动更新**: 通过订阅 `ConfigManager` 的事件，实现了对 Connections, Agents, Tags 等数据变更的实时响应。
  */
 
-// --- Foundation & Child Components ---
+// --- 依赖导入 ---
 import { ISettingsWidget } from '../../common/interfaces/ISettingsWidget.js';
 // import { getCSS } from './styles.js'; // 1. REMOVED: Old style import
 import './styles.css'; // 2. ADDED: Simplified CSS import
@@ -18,10 +21,11 @@ import { LibrarySettings } from './components/LibrarySettings.js';
 import { AgentEditor } from './components/AgentEditor.js';
 import { WorkflowManager } from './components/WorkflowManager.js';
 
-// --- REFACTORED: Import the central ConfigManager ---
+// --- [核心修改] 导入 ConfigManager 单例 ---
 import { ConfigManager } from '../../config/ConfigManager.js';
 // --- 移除: 不再需要直接导入 PROVIDER_DEFAULTS 来构造默认值 ---
 import { DEFAULT_ID } from '../../config/llmProvider.js';
+import { EVENTS } from '../../config/shared/constants.js'; // <--- [修复] 添加这一行导入
 
 // Constants for Defaults
 const CONSTANTS = {
@@ -59,9 +63,11 @@ export class LLMSettingsWidget extends ISettingsWidget {
         super();
         this.options = options;
 
-        // --- REFACTORED: Get the singleton instance of the ConfigManager ---
-        // The check for `llmConfigService` is removed. All instances now use the central service.
+        // --- [核心修改] 直接获取 ConfigManager 单例及其服务 ---
         this.configManager = ConfigManager.getInstance();
+        if (!this.configManager) {
+            throw new Error("LLMSettingsWidget 无法创建：ConfigManager 尚未初始化。请先调用 ConfigManager.getInstance(config)。");
+        }
         this.llmService = this.configManager.llmService;
         
         this.onTestLLMConnection = options.onTestLLMConnection;
@@ -226,11 +232,11 @@ export class LLMSettingsWidget extends ISettingsWidget {
     /**
      * --- 重构后 ---
      * 此方法现在只负责从 ConfigManager 加载数据并更新UI状态。
-     * 创建默认值的逻辑已被移除。
+     * 创建默认值的逻辑已被完全移除。
      */
     async _loadAndInit() {
-        // 1. 直接从 ConfigManager 加载数据。
-        //    此时可以安全地假设默认值已经由 ConfigManager 的 _bootstrap 流程创建好了。
+        // 1. 直接从 `ConfigManager` 的服务中加载数据。
+        //    此时可以安全地假设默认值已经由 `ConfigManager` 的 `bootstrap` 流程创建好了。
         const [connections, agents, workflows, tags] = await Promise.all([
             this.llmService.getConnections(),
             this.llmService.getAgents(),
@@ -238,7 +244,7 @@ export class LLMSettingsWidget extends ISettingsWidget {
             this.configManager.tags.getAll()
         ]);
         
-        // --- 以下所有创建默认值的逻辑都已被移除 ---
+        // --- (所有创建默认值的逻辑都已被移除) ---
 
         // 2. 更新组件内部状态并初始化子组件。
         this.state = { 
@@ -310,40 +316,44 @@ export class LLMSettingsWidget extends ISettingsWidget {
         }
     }
     /**
-     * --- ADDED: Centralized event subscription logic ---
+     * [新增] 集中化的事件订阅逻辑。
+     * @private
      */
     _subscribeToChanges() {
         const { eventManager } = this.configManager;
         
-        // --- MODIFIED: The connection update listener is now much simpler. ---
-        // The business logic for updating agents has been moved to LLMRepository.
-        this._subscriptions.push(eventManager.subscribe('llm:connections:updated', (newConnections) => {
-            // Update the state
+        // 订阅 Connection 更新事件
+        const unsubscribeConnections = eventManager.subscribe(EVENTS.LLM_CONNECTIONS_UPDATED, (newConnections) => {
             this.state.connections = newConnections;
-
             if (this.components.connections) this.components.connections.update({ connections: newConnections });
             if (this.components.agents) this.components.agents.update({ newConnections: newConnections });
-        }));
+        });
+        this._subscriptions.push(unsubscribeConnections);
 
-        this._subscriptions.push(eventManager.subscribe('llm:agents:updated', (agents) => {
+        // 订阅 Agent 更新事件
+        const unsubscribeAgents = eventManager.subscribe(EVENTS.LLM_AGENTS_UPDATED, (agents) => {
             this.state.agents = agents;
-            // --- NEW: Update connections component with latest agents for its dependency checks ---
-            if (this.components.connections) this.components.connections.updateAgents(agents);
+            if (this.components.connections) this.components.connections.updateAgents(agents); // 更新依赖检查
             if (this.components.agents) this.components.agents.update({ newAgents: agents });
             if (this.components.workflows) this.components.workflows.updateRunnables({ agents: this.state.agents, workflows: this.state.workflows });
-        }));
+        });
+        this._subscriptions.push(unsubscribeAgents);
 
-        this._subscriptions.push(eventManager.subscribe('llm:workflows:updated', (workflows) => {
+        // 订阅 Workflow 更新事件
+        const unsubscribeWorkflows = eventManager.subscribe(EVENTS.LLM_WORKFLOWS_UPDATED, (workflows) => {
             this.state.workflows = workflows;
             if (this.components.workflows) {
                 this.components.workflows.update({ initialWorkflows: workflows });
                 this.components.workflows.updateRunnables({ agents: this.state.agents, workflows: this.state.workflows });
             }
-        }));
+        });
+        this._subscriptions.push(unsubscribeWorkflows);
         
-        this._subscriptions.push(eventManager.subscribe('tags:updated', (tags) => {
+        // 订阅 Tag 更新事件
+        const unsubscribeTags = eventManager.subscribe(EVENTS.TAGS_UPDATED, (tags) => {
             this.state.tags = tags;
             if (this.components.agents) this.components.agents.update({ newAllTags: tags });
-        }));
+        });
+        this._subscriptions.push(unsubscribeTags);
     }
 }

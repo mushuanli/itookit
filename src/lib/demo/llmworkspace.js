@@ -6,7 +6,7 @@ import { ConfigManager } from '../config/ConfigManager.js';
 import { API_KEY } from './config.js'; 
 
 if (!API_KEY || API_KEY.includes('YOUR_')) {
-    alert('Please add your API key to demo/config.js to run this demo.');
+    alert('请在 demo/config.js 中配置您的 API 密钥以运行此演示。');
     throw new Error("API key not configured.");
 }
 
@@ -14,26 +14,38 @@ if (!API_KEY || API_KEY.includes('YOUR_')) {
 const sidebarContainer = document.getElementById('sidebar-container');
 const chatContainer = document.getElementById('chat-container');
 
-// =========================================================================
-// === [核心重构] 4. 应用级数据管理器初始化
-// =========================================================================
-// 在整个 Demo 应用的生命周期中，只创建一个 ConfigManager 实例。
-// LLMWorkspace 将通过这个实例来获取响应式的 LLM 配置。
-console.log("正在初始化应用级 ConfigManager...");
-const configManager = ConfigManager.getInstance({
-    // 为 LocalStorageAdapter 提供一个统一的前缀
-    adapterOptions: { prefix: 'llm_demo_' } 
+// --- 应用启动逻辑 ---
+document.addEventListener('DOMContentLoaded', () => {
+    // 1. 初始化全局 ConfigManager
+    console.log("正在初始化应用级 ConfigManager...");
+    const configManager = ConfigManager.getInstance({
+        adapterOptions: { prefix: 'llm_demo_' } 
+    });
+
+    // 2. 监听 app:ready 事件
+    configManager.eventManager.subscribe('app:ready', async () => {
+        console.log("ConfigManager 已就绪。正在设置演示所需的 LLM 配置...");
+        
+        // 在应用准备就绪后，设置此 demo 所需的 LLM 配置
+        await setupInitialLLMConfig(configManager);
+
+        console.log("LLM 配置完成。正在初始化工作区...");
+        
+        // 现在，所有配置都已就绪，可以安全地初始化工作区了
+        initializeWorkspace(configManager);
+    });
+
+    // 3. 启动应用
+    configManager.bootstrap().catch(console.error);
 });
 
 
-// =========================================================================
-// === [核心重构] 5. 定义并预加载全局 LLM 配置
-// =========================================================================
-// 这是一个异步函数，用于在应用启动时设置初始的 LLM 配置。
-// 在真实应用中，这些数据可能来自用户的设置页面。
-async function setupInitialLLMConfig() {
-    // 获取 LLM 配置仓库
-    const llmRepo = configManager.llm;
+/**
+ * 这是一个异步函数，用于在应用启动时设置初始的 LLM 配置。
+ * @param {ConfigManager} cm - 注入的 ConfigManager 实例
+ */
+async function setupInitialLLMConfig(cm) {
+    const llmService = cm.getService('llmService'); // 使用新 API 获取服务
 
     // --- Provider Connections ---
     const connections = [
@@ -49,8 +61,8 @@ async function setupInitialLLMConfig() {
             ]
         }
     ];
-    // 使用 saveConnections 批量保存，这会覆盖现有配置并发布更新事件
-    await llmRepo.saveConnections(connections);
+    // 使用服务层的方法来保存，它会处理事件发布
+    await llmService.repo.saveConnections(connections);
     console.log("LLM Connections have been configured.");
 
     // --- Agent Definitions ---
@@ -85,24 +97,23 @@ async function setupInitialLLMConfig() {
             interface: { inputs: [], outputs: [] }
         }
     ];
-    // 批量保存 Agents
-    await llmRepo.saveAgents(agents);
+    // 使用服务层的方法来保存
+    await llmService.repo.saveAgents(agents);
     console.log("LLM Agents have been configured.");
 }
 
-
-// =========================================================================
-// === [核心重构] 6. Workspace 初始化函数 (已适配新接口)
-// =========================================================================
-function initializeWorkspace() {
+/**
+ * Workspace 初始化函数
+ * @param {ConfigManager} cm - 注入的 ConfigManager 实例
+ */
+function initializeWorkspace(cm) {
     try {
         // --- [修正] Workspace 初始化配置 ---
         // 注意：connections 和 agents 不再是 workspace 的配置项。
         // workspace 将通过注入的 configManager 自动获取它们。
         const workspaceConfig = {
-            // --- 必需的核心依赖 ---
-            configManager: configManager,                // 注入全局管理器
-            namespace: 'llm-workspace-demo-final',       // 指定此工作区的数据分区
+            configManager: cm,
+            namespace: 'llm-workspace-demo-final',
             sidebarContainer: sidebarContainer,
             chatContainer: chatContainer,
             
@@ -145,8 +156,8 @@ function initializeWorkspace() {
         });
 
     } catch (error) {
-        console.error("Failed to initialize LLMWorkspace:", error);
-        document.body.innerHTML = `<div style="padding: 2rem; color: red; font-weight: bold;">Error: ${error.message}</div>`;
+        console.error("初始化 LLMWorkspace 失败:", error);
+        document.body.innerHTML = `<div class="error-message">错误: ${error.message}</div>`;
     }
 }
 

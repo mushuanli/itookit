@@ -1,8 +1,12 @@
+// 文件: demo/settings.js
+
 /**
  * @file @demo/settings.js
- * This is the main entry point for the demo application.
- * It demonstrates how to initialize the SettingsWorkspace with both default
- * and custom widgets, including dirty state tracking.
+ * @description 演示如何初始化 SettingsWorkspace 并集成自定义 Widget。
+ *
+ * [V3 核心重构]
+ * - **遵循应用生命周期**: 严格遵循 "先初始化 ConfigManager -> 等待 app:ready -> 再初始化 Workspace" 的流程。
+ * - **依赖注入**: createSettingsWorkspace 现在通过构造函数接收所有必需的依赖。
  */
 
 // [核心重构] 必须先导入并初始化 ConfigManager
@@ -12,7 +16,7 @@ import { createSettingsWorkspace } from '../workspace/settings/index.js';
 // 导入 Widget 接口，用于类型规范
 import { ISettingsWidget } from '../common/interfaces/ISettingsWidget.js';
 
-
+// --- 自定义 Widget 定义 (保持不变) ---
 export class AppearanceWidget extends ISettingsWidget {
     constructor() {
         super();
@@ -23,11 +27,7 @@ export class AppearanceWidget extends ISettingsWidget {
     get id() { return 'appearance-settings'; }
     get label() { return '外观'; }
     get description() { return '自定义应用的外观和感觉。'; }
-
-    // [修改] 实现 isDirty getter
-    get isDirty() {
-        return this._isDirty;
-    }
+    get isDirty() { return this._isDirty; }
 
     async mount(container) {
         this.container = container;
@@ -38,15 +38,9 @@ export class AppearanceWidget extends ISettingsWidget {
                 <p>${this.description}</p>
                 <fieldset>
                     <legend>主题</legend>
-                    <label>
-                        <input type="radio" name="theme" value="light" checked> 明亮
-                    </label>
-                    <label>
-                        <input type="radio" name="theme" value="dark"> 暗黑
-                    </label>
-                    <label>
-                        <input type="radio" name="theme" value="system"> 跟随系统
-                    </label>
+                    <label><input type="radio" name="theme" value="light" checked> 明亮</label>
+                    <label><input type="radio" name="theme" value="dark"> 暗黑</label>
+                    <label><input type="radio" name="theme" value="system"> 跟随系统</label>
                 </fieldset>
                 <div class="form-actions" style="margin-top: 20px;">
                     <button id="save-appearance-btn" class="settings-btn">保存设置</button>
@@ -94,7 +88,7 @@ export class AppearanceWidget extends ISettingsWidget {
 
 
 document.addEventListener('DOMContentLoaded', () => {
-    console.log("DOM 已加载。正在初始化 Settings Workspace...");
+    console.log("DOM 已加载。正在初始化应用核心服务...");
 
     // --- [核心修复] 步骤 1: 初始化应用的核心服务 ConfigManager ---
     // 在一个真实的应用中，这应该在应用的最高层入口处完成。
@@ -103,33 +97,39 @@ document.addEventListener('DOMContentLoaded', () => {
         adapterOptions: { prefix: 'settings_demo_app_' }
     });
 
-    // --- [核心修复] 步骤 2: 使用新的 API 创建 SettingsWorkspace ---
-    // 我们现在注入 configManager 实例，而不是手动配置 storage。
-    const workspace = createSettingsWorkspace({
-        sidebarContainer: document.getElementById('sidebar-container'),
-        settingsContainer: document.getElementById('settings-container'),
-        
-        // 传入已初始化的 ConfigManager 实例
-        configManager: configManager,
-        // 命名空间仍然需要，用于隔离侧边栏本身的状态（例如最后选中的项目）
-        namespace: 'settings-workspace-demo',
+    // --- 步骤 2: 监听 'app:ready' 事件以初始化 UI ---
+    configManager.eventManager.subscribe('app:ready', () => {
+        console.log("ConfigManager 已就绪。开始初始化 Settings Workspace...");
 
-        // --- 演示如何添加自定义 Widget ---
-        // SettingsWorkspace 会自动将默认的 LLMSettingsWidget 添加到此列表的开头，
-        // 因为我们提供的 AppearanceWidget 的 ID 与之不同。
-        // 因此，最终的侧边栏将显示 "AI Settings" 和 "外观" 两个选项。
-        // 如果您完全不提供 'widgets' 键，侧边栏将只显示 "AI Settings"。
-        widgets: [
-            AppearanceWidget
-        ]
+        try {
+            // 在回调中安全地创建 Workspace
+            const workspace = createSettingsWorkspace({
+                sidebarContainer: document.getElementById('sidebar-container'),
+                settingsContainer: document.getElementById('settings-container'),
+                
+                // [核心修改] 注入核心依赖
+                configManager: configManager,
+                namespace: 'settings-workspace-demo',
+
+                // 添加自定义 Widget
+                widgets: [
+                    AppearanceWidget // SettingsWorkspace 会自动合并默认的 Widgets
+                ]
+            });
+
+            // 启动工作区
+            workspace.start().then(() => {
+                console.log("Settings Workspace 启动成功!");
+            });
+        } catch (error) {
+            console.error("初始化 Settings Workspace 失败:", error);
+            document.body.innerHTML = `<div class="error-message">工作区初始化失败，请查看控制台。</div>`;
+        }
     });
 
-    // 启动工作区
-    workspace.start().then(() => {
-        console.log("Settings Workspace 启动成功!");
-        // 现在可以测试：
-        // 1. 在 "外观" 设置中更改主题，不要保存。
-        // 2. 点击侧边栏切换到 "AI Settings"。
-        // 3. 浏览器应会弹出一个确认框，询问是否放弃更改。
+    // --- 步骤 3: 触发应用启动流程 ---
+    configManager.bootstrap().catch(error => {
+        console.error("应用核心服务启动失败:", error);
+        document.body.innerHTML = `<div class="error-message">应用核心服务启动失败，请查看控制台。</div>`;
     });
 });

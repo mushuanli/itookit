@@ -1,7 +1,14 @@
+// 文件: #llm/input/index.js
+
 /**
- * @file #llm/input/index.js
- * @description A standalone, dependency-free, and highly customizable UI component for rich LLM interactions.
- * @version 2.2.0 (UX Improvement: Disable inputs on load)
+ * @file LLMInputUI.js (V3 - 服务容器架构)
+ * @description 一个独立的、高度可定制的富文本 LLM 输入组件。
+ *
+ * [V3 核心重构]
+ * - **强制依赖注入**: 组件现在强制要求在构造函数中传入一个有效的 `ConfigManager` 实例。
+ * - **响应式 Agent 列表**: 通过订阅 `ConfigManager` 的 `llm:agents:updated` 事件，
+ *   组件能够实时更新可选的 Agent 列表，不再依赖于一次性的静态配置。
+ * - **生命周期管理**: 新增了 `destroy` 方法，用于在组件销毁时取消所有事件订阅，防止内存泄漏。
  */
 import './styles.css';
 
@@ -13,31 +20,47 @@ import { attachEventListeners } from './events.js';
 import { CommandManager } from './commands.js';
 import { PopupManager } from './popup.js';
 
-// +++ 新增: 导入 ConfigManager 以进行类型提示和实例检查 +++
+// --- 核心服务导入 ---
 import { ConfigManager } from '../../config/ConfigManager.js';
 import { EVENTS } from '../../config/shared/constants.js';
 
 export class LLMInputUI {
     /**
-     * Creates an instance of the LLM Input UI.
-     * @param {HTMLElement} element The container element to render the UI into.
-     * @param {object} options Configuration options.
+     * 创建 LLMInputUI 实例。
+     * @param {HTMLElement} element - UI 将被渲染到的容器元素。
+     * @param {object} options - 配置选项。
+     * @param {ConfigManager} options.configManager - [新, 必需] 应用的全局配置管理器。
+     * @param {Function} options.onSubmit - [必需] 提交时的回调函数。
      */
     constructor(element, options) {
         if (!element || !options || typeof options.onSubmit !== 'function') {
-            throw new Error('LLMInputUI requires a container element and an onSubmit callback.');
+            throw new Error('LLMInputUI 需要一个容器元素和 onSubmit 回调。');
         }
-        // +++ 新增: 强制要求 configManager 以实现响应式功能 +++
+        // [核心修改] 强制要求 configManager 以实现响应式功能。
         if (!options.configManager || !(options.configManager instanceof ConfigManager)) {
-            throw new Error('LLMInputUI now requires a valid `configManager` instance in its options to enable reactivity.');
+            throw new Error('LLMInputUI 现在需要在选项中提供一个有效的 `configManager` 实例以启用响应式功能。');
         }
 
         this.container = element;
         this.options = deepMerge(JSON.parse(JSON.stringify(defaultOptions)), options);
-        // +++ 新增: 保存对核心服务的引用 +++
+        
+        // --- [核心修改] 保存对核心服务的引用 ---
+        /** @type {ConfigManager} */
         this.configManager = this.options.configManager;
+        /** @private @type {Function[]} */
         this._subscriptions = []; // 用于存储取消订阅的函数
 
+        // --- [核心修复] ---
+        // 在构造函数中，如果 options.agents 未提供，
+        // 主动从 ConfigManager 同步获取一次初始数据。
+        // 因为我们知道 LLMChatUI 是在 `app:ready` 后创建的，所以此时数据是可用的。
+        if (!this.options.agents || this.options.agents.length === 0) {
+            const llmRepo = this.configManager.getService('llmRepository');
+            this.options.agents = llmRepo.config?.agents || [];
+            console.log('[LLMInputUI] 从 ConfigManager 同步加载初始 Agents:', this.options.agents);
+        }
+
+        // --- 内部状态初始化 ---
         this.state = {
             attachments: [],
             isLoading: false,
@@ -50,6 +73,7 @@ export class LLMInputUI {
             sendWithoutContext: false, 
         };
 
+        // --- UI 和管理器初始化 ---
         this.elements = initialRender(this.container, this.options);
         
         // --- REMOVED: injectStructuralCSS(this.options.classNames); ---
@@ -61,7 +85,8 @@ export class LLMInputUI {
         this.popupManager = new PopupManager(this);
         
         attachEventListeners(this);
-        // +++ 新增: 挂载后订阅配置变更事件 +++
+        
+        // --- [核心修改] 挂载后订阅配置变更事件 ---
         this._subscribeToChanges();
 
         if (this.options.initialText) {
@@ -153,11 +178,12 @@ export class LLMInputUI {
     }
     
     /**
-     * +++ 新增: 公共方法，用于接收新的 agents 列表并更新UI +++
+     * [新增] 公共方法，用于接收新的 agents 列表并更新UI。
+     * 此方法现在由事件处理器调用，也可以由外部手动调用。
      * @param {import('../../config/shared/types.js').LLMAgentDefinition[]} newAgents
      */
     updateAgents(newAgents) {
-        // 1. 更新内部选项
+        // 1. 更新内部选项，作为新的数据源
         this.options.agents = newAgents;
         
         // 2. 重新渲染 Agent 弹出菜单
@@ -166,28 +192,31 @@ export class LLMInputUI {
         // 3. 检查当前选择的 Agent 是否仍然存在
         const currentAgentExists = newAgents.some(a => a.id === this.state.agent);
         if (!currentAgentExists) {
-            // 如果已被删除，则重置
-            this.setAgent(null); 
+            // 如果已被删除，则重置为列表中的第一个或 null
+            this.setAgent(newAgents[0]?.id || null); 
         } else {
-            // 如果存在，仅更新UI状态（例如按钮图标）
+            // 如果存在，仅更新UI状态（例如按钮图标和名称）
             this._updateUIState();
         }
     }
 
-    // +++ 新增: 生命周期方法，用于清理资源 +++
+    /**
+     * [新增] 生命周期方法，用于在组件销毁时清理所有资源。
+     */
     destroy() {
-        // 取消所有事件订阅，防止内存泄漏
+        // 1. 取消所有通过 configManager 订阅的事件，防止内存泄漏。
         this._subscriptions.forEach(unsubscribe => unsubscribe());
         this._subscriptions = [];
         
-        // 清理DOM
+        // 2. 清理DOM
         this.container.innerHTML = '';
         
-        // 释放引用
+        // 3. 释放对核心服务和元素的引用
         this.elements = null;
         this.configManager = null;
         
         this._emit('destroy');
+        console.log('[LLMInputUI] 已成功销毁。');
     }
 
 
@@ -346,18 +375,22 @@ export class LLMInputUI {
 
 
     /**
-     * +++ 新增: 订阅来自 ConfigManager 的事件 +++
+     * [核心修改] 订阅来自 ConfigManager 的事件。
      * @private
      */
     _subscribeToChanges() {
         const { eventManager } = this.configManager;
         
-        // 订阅 Agent 列表的更新
-        const unsubscribe = eventManager.subscribe(EVENTS.LLM_AGENTS_UPDATED, (updatedAgents) => {
-            console.log('[LLMInputUI] Received agent updates. Refreshing UI...');
+        // 订阅 Agent 列表的更新事件
+        const unsubscribeAgents = eventManager.subscribe(EVENTS.LLM_AGENTS_UPDATED, (updatedAgents) => {
+            console.log('[LLMInputUI] 接收到 Agent 更新事件，正在刷新 UI...', updatedAgents);
+            // 当事件发生时，调用公共的 updateAgents 方法来处理 UI 更新
             this.updateAgents(updatedAgents);
         });
 
-        this._subscriptions.push(unsubscribe);
+        // 将取消订阅函数存起来，以便在 destroy 时调用
+        this._subscriptions.push(unsubscribeAgents);
+
+        // 未来可以在这里订阅其他配置变更，例如 connections (如果需要显示连接状态)
     }
 }

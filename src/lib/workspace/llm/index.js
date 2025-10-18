@@ -1,6 +1,13 @@
+// 文件: #workspace/llm/LLMWorkspace.js (或 index.js)
+
 /**
- * #workspace/llm/LLMWorkspace.js
- * The main orchestrator class that integrates sidebar and chatUI.
+ * @file LLMWorkspace.js (V3 - 服务容器架构)
+ * @description 集成了 Sidebar 和 ChatUI 的 LLM 聊天工作区协调器。
+ *
+ * [V3 核心重构]
+ * - 完全依赖注入 `ConfigManager` 和 `namespace`。
+ * - 正确调用 `createSessionUI` 和 `LLMChatUI` 的新构造函数接口。
+ * - 自身不处理任何数据逻辑，仅作为协调器。
  */
 import { createSessionUI } from '../../sidebar/index.js';
 import { LLMChatUI } from '../../llm/chat/index.js';
@@ -33,13 +40,14 @@ export class LLMWorkspace {
         this.configManager = options.configManager;
         this.namespace = options.namespace;
 
-        // 1. [修正] 使用与 MDxWorkspace 一致的方式初始化 Sidebar
+        // --- [核心修复] ---
+        // 1. 调用 createSessionUI 时，使用新的三参数签名，传入 configManager 和 namespace。
+        // 2. 移除已被废弃的 `storageKey` 选项。
         this.sidebar = createSessionUI({
             ...options.sidebarConfig,
             sessionListContainer: options.sidebarContainer,
-            storageKey: this.namespace,
-            newSessionContent: EMPTY_CHAT_CONTENT, // [修正] 使用正确的空内容
-        }, this.configManager);
+            newSessionContent: EMPTY_CHAT_CONTENT,
+        }, this.configManager, this.namespace); // <--- [修复] 传入 namespace
 
         // 2. [修正] 正确地初始化 ChatUI，注入 configManager
         this.chatUI = new LLMChatUI(options.chatContainer, {
@@ -252,14 +260,10 @@ export class LLMWorkspace {
 
 
 /**
- * Factory function to create and initialize a new LLMWorkspace instance.
- * This is the recommended way to use the library.
- * 
- * @param {object} options Configuration for the workspace. 
- * See LLMWorkspace constructor for details.
- * @returns {LLMWorkspace} A new instance of the LLMWorkspace.
+ * 创建并初始化一个新的 LLMWorkspace 实例的工厂函数。
+ * @param {object} options - 工作区的配置，详见 LLMWorkspace 构造函数。
+ * @returns {LLMWorkspace}
  */
-export function createLLMWorkspace(options) { // [MODIFIED] container removed
-    const workspace = new LLMWorkspace(options);
-    return workspace;
+export function createLLMWorkspace(options) {
+    return new LLMWorkspace(options);
 }

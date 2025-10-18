@@ -294,6 +294,46 @@ export class ModuleRepository {
     }
 
     /**
+     * [新增] 原子性地更新内容和元数据
+     * @param {string} nodeId - 节点的唯一ID
+     * @param {string} content - 新的内容
+     * @param {object} metaUpdates - 要更新的元数据字段
+     * @returns {Promise<void>}
+     */
+    async updateModuleContentAndMeta(nodeId, content, metaUpdates) {
+        // 包裹在写队列中，确保并发安全
+        return this._enqueueWrite(async () => {
+            await this.getModules(); // 确保数据已加载
+            
+            const result = this._findNodeById(nodeId);
+            if (!result) {
+                throw new Error(`节点 ${nodeId} 未找到`);
+            }
+            
+            const { node } = result; // 获取实际的节点对象
+            
+            // 1. 更新内容
+            node.content = content;
+            
+            // 2. 更新时间戳
+            const now = new Date().toISOString();
+            node.meta.mtime = now;
+            
+            // 3. 更新元数据（合并传入的更新）
+            Object.assign(node.meta, metaUpdates);
+            
+            // 4. 持久化
+            await this._save();
+            
+            // 5. 只触发一个 'content_updated' 事件，这个事件的 payload 包含了所有更新
+            this.eventManager.publish(
+                getModuleEventName('node_content_updated', this.namespace),
+                { updatedNode: node }
+            );
+        });
+    }
+
+    /**
      * [新方法] 重命名一个文件或目录，并递归更新所有子路径。
      * @param {string} nodeId - 节点的唯一ID。
      * @param {string} newName

@@ -174,14 +174,16 @@ async function main() {
         adapterOptions: { prefix: 'mdx_demo_app_' }
     });
 
-    // 等待 ConfigManager 的全局配置（如全局标签）加载完成
-    await new Promise(resolve => {
-        configManager.eventManager.subscribe('app:ready', resolve);
-        configManager.eventManager.subscribe('app:bootstrap_failed', (err) => {
-            alert('应用核心配置加载失败！请检查控制台。');
-            console.error(err);
-        });
-    });
+    try {
+        // [核心修复] 显式调用 bootstrap() 来启动应用。
+        // 这个方法会负责加载所有急切（eager）的服务，并最终发布 'app:ready' 事件。
+        // 我们只需要等待它完成即可。
+        await configManager.bootstrap();
+    } catch (err) {
+        alert('应用核心配置加载失败！请检查控制台。');
+        console.error(err);
+        return; // 启动失败，终止后续操作
+    }
 
     // --- [V2] 步骤 2: 初始化 SessionUI，并显式注入 ConfigManager ---
     // 每个 SessionUI 实例都需要一个唯一的 storageKey，它将作为 ModuleRepository 的 namespace。
@@ -205,7 +207,7 @@ async function main() {
                 ];
             }
         }
-    }, configManager); // 【关键】将 configManager 实例注入
+    }, configManager, 'main-workspace'); // [修复] V3 架构需要传入 namespace
 
     // --- 步骤 3: 初始化 MDxEditor ---
     editorInstance = new MDxEditor(editorContainer, {

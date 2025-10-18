@@ -4,19 +4,7 @@ import { MDxWorkspace } from '../workspace/mdx/MDxWorkspace.js';
 import { ConfigManager } from '../config/ConfigManager.js'; // [新] 导入 ConfigManager
 import { IndexedDBAdapter } from './indexdbadapter.js';
 
-// =========================================================================
-// === [核心重构] 1. 应用级数据管理器初始化
-// =========================================================================
-// 在整个 Demo 应用的生命周期中，只创建一个 ConfigManager 实例。
-// 所有 MDxWorkspace 实例都将共享这个管理器，以实现数据服务的统一管理。
-console.log("正在初始化应用级 ConfigManager...");
-const configManager = ConfigManager.getInstance({
-    // 为所有仓库提供一个统一的持久化适配器实例
-    adapter: new IndexedDBAdapter({ dbName: 'MDxWorkspaceDemoDB' }),
-    // 为 LocalStorageAdapter（如果作为备用）提供前缀
-    adapterOptions: { prefix: 'mdx_demo_' } 
-});
-
+// --- 全局变量 ---
 let currentWorkspace = null;
 
 // =========================================================================
@@ -54,14 +42,18 @@ let currentWorkspace = null;
 - 提及用户：@John Doe
 - 提及文件：@[示例文件](mdx://file/some-file-id)
 `;
-        
-function initDemo1() {
+
+/**
+ * 初始化 Demo 1: Cloze 学习模式
+ * @param {ConfigManager} cm - 注入的 ConfigManager 实例
+ * @returns {MDxWorkspace}
+ */
+function initDemo1(cm) {
     console.log("Initializing Demo 1: Cloze Learning Mode");
     const workspace = new MDxWorkspace({
-        // --- [核心重构] 注入 ConfigManager 和 Namespace ---
-        configManager: configManager,          // 注入全局管理器
-        namespace: 'demo1-cloze-learning-data', // 指定此工作区的数据分区
-        // ---
+        // --- [核心修改] 注入 ConfigManager 和 Namespace ---
+        configManager: cm,
+        namespace: 'demo1-cloze-learning-data',
 
         sidebarContainer: document.getElementById('demo1-sidebar'),
         editorContainer: document.getElementById('demo1-editor'),
@@ -86,15 +78,17 @@ function initDemo1() {
     workspace.start();
     return workspace;
 }
-        
-function initDemo2() {
+
+/**
+ * 初始化 Demo 2: 外部标题栏和自定义侧边栏
+ * @param {ConfigManager} cm - 注入的 ConfigManager 实例
+ * @returns {MDxWorkspace}
+ */
+function initDemo2(cm) {
     console.log("Initializing Demo 2: External title bar & custom sidebar");
     const workspace = new MDxWorkspace({
-        // --- [核心重构] 注入 ConfigManager 和 Namespace ---
-        configManager: configManager,          // 注入全局管理器
-        namespace: 'demo2-knowledge-base',     // 指定此工作区的数据分区
-        // ---
-        // 注意：我们不再需要在此处单独指定 adapter，因为它由 ConfigManager 统一管理。
+        configManager: cm,
+        namespace: 'demo2-knowledge-base',
         
         sidebarContainer: document.getElementById('demo2-sidebar'),
         editorContainer: document.getElementById('demo2-editor'),
@@ -130,13 +124,16 @@ function initDemo2() {
     return workspace;
 }
 
-function initDemo3() {
+/**
+ * 初始化 Demo 3: 自定义工具栏和手动保存
+ * @param {ConfigManager} cm - 注入的 ConfigManager 实例
+ * @returns {MDxWorkspace}
+ */
+function initDemo3(cm) {
     console.log("Initializing Demo 3: Custom toolbar & manual save");
     const workspace = new MDxWorkspace({
-        // --- [核心重构] 注入 ConfigManager 和 Namespace ---
-        configManager: configManager,      // 注入全局管理器
-        namespace: 'demo3-manual-save',    // 指定此工作区的数据分区
-        // ---
+        configManager: cm,
+        namespace: 'demo3-manual-save',
         
         sidebarContainer: document.getElementById('demo3-sidebar'),
         editorContainer: document.getElementById('demo3-editor'),
@@ -156,16 +153,8 @@ function initDemo3() {
         document.getElementById('custom-cloze-btn').onclick = () => workspace.commands.applyCloze();
         
         document.getElementById('custom-save-btn').onclick = async () => {
-            console.log("手动保存中...");
             const savedItem = await workspace.save();
-            if (savedItem) {
-                // [注意] V2 Item 结构变化，title 在 metadata 中
-                console.log(`保存完成! Session: "${savedItem.metadata.title}"`);
-                alert('保存成功!');
-            } else {
-                console.log("没有活动会话可供保存。");
-                alert('没有需要保存的内容。');
-            }
+            alert(savedItem ? '保存成功!' : '没有需要保存的内容。');
         };
     });
 
@@ -181,40 +170,53 @@ function initDemo3() {
     return workspace;
 }
 
-// =========================================================================
-// === [核心重构] 2. Demo 启动与导航逻辑
-// =========================================================================
-const demoInitializers = {
-    '1': initDemo1,
-    '2': initDemo2,
-    '3': initDemo3,
-};
 
-const navButtons = document.querySelectorAll('nav button');
-const demoContainers = document.querySelectorAll('.demo-container');
-
-function switchDemo(demoId) {
-    if (currentWorkspace) {
-        currentWorkspace.destroy();
-        currentWorkspace = null;
-    }
-    navButtons.forEach(btn => btn.classList.remove('active'));
-    document.querySelector(`button[data-demo="${demoId}"]`).classList.add('active');
-    demoContainers.forEach(container => container.classList.remove('active'));
-    document.getElementById(`demo${demoId}-container`).classList.add('active');
-    currentWorkspace = demoInitializers[demoId]();
-}
-
-navButtons.forEach(button => {
-    button.addEventListener('click', () => {
-        switchDemo(button.dataset.demo);
+// --- Demo 启动与导航逻辑 ---
+document.addEventListener('DOMContentLoaded', () => {
+    // 1. 初始化全局 ConfigManager
+    console.log("正在初始化应用级 ConfigManager...");
+    const configManager = ConfigManager.getInstance({
+        // 注意: `adapter` 选项在我们的重构中没有实现，
+        // 插件系统是注入 adapter 的正确方式。这里我们暂时注释掉。
+        // adapter: new IndexedDBAdapter({ dbName: 'MDxWorkspaceDemoDB' }),
+        adapterOptions: { prefix: 'mdx_demo_' } 
     });
-});
 
-// [重构] 等待 ConfigManager 准备就绪后再启动第一个 Demo
-// 这确保了所有数据仓库在工作区启动前都已加载完毕，避免了竞态条件。
-configManager.eventManager.subscribe('app:ready', () => {
-    console.log("ConfigManager 已准备就绪, 启动默认 Demo...");
-    // 默认启动 Demo 1
-    switchDemo('1');
+    const demoInitializers = {
+        '1': initDemo1,
+        '2': initDemo2,
+        '3': initDemo3,
+    };
+
+    const navButtons = document.querySelectorAll('nav button');
+    const demoContainers = document.querySelectorAll('.demo-container');
+
+    function switchDemo(demoId) {
+        if (currentWorkspace) {
+            currentWorkspace.destroy();
+            currentWorkspace = null;
+        }
+        navButtons.forEach(btn => btn.classList.remove('active'));
+        document.querySelector(`button[data-demo="${demoId}"]`).classList.add('active');
+        demoContainers.forEach(container => container.classList.remove('active'));
+        document.getElementById(`demo${demoId}-container`).classList.add('active');
+        // [核心修改] 将 configManager 实例传递给初始化函数
+        currentWorkspace = demoInitializers[demoId](configManager);
+    }
+
+    navButtons.forEach(button => {
+        button.addEventListener('click', () => {
+            switchDemo(button.dataset.demo);
+        });
+    });
+
+    // 2. 监听 app:ready 事件
+    configManager.eventManager.subscribe('app:ready', () => {
+        console.log("ConfigManager 已准备就绪, 启动默认 Demo...");
+        // 默认启动 Demo 1
+        switchDemo('1');
+    });
+
+    // 3. 启动应用
+    configManager.bootstrap().catch(console.error);
 });

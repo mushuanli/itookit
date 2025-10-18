@@ -1,5 +1,5 @@
 /**
- * @file #workspace/settings/components/TagsSettingsWidget.js
+ * 文件: #workspace/settings/components/TagsSettingsWidget.js
  * @description 一个用于管理全局标签的设置组件，实现了 ISettingsWidget 接口。
  * @change
  * - [改进] 增加了对 "default" 标签的删除保护。
@@ -20,13 +20,14 @@ export class TagsSettingsWidget extends ISettingsWidget {
         this.isMounted = false;
         /** @private */
         this.container = null;
+        
+        // --- [核心修改] 直接从单例获取所需的服务 ---
         /** @private */
         this.configManager = ConfigManager.getInstance();
         /** @private */
-        this.tagRepo = this.configManager.tags;
-        // +++ 新增: 获取 LLM 服务以检查 Agent 依赖
+        this.tagRepo = this.configManager.getService('tagRepository');
         /** @private */
-        this.llmService = this.configManager.llmService;
+        this.llmService = this.configManager.getService('llmService');
         /** @private */
         this.eventManager = this.configManager.eventManager;
         /** @private */
@@ -160,19 +161,24 @@ export class TagsSettingsWidget extends ISettingsWidget {
             return;
         }
 
-        //  TODO: support all workspace delete tag action.
-        // 2. 检查此标签是否被任何 Agent 使用 (异步操作)
-        const allAgents = await this.llmService.getAgents();
-        const dependentAgents = allAgents.filter(agent => agent.tags?.includes(tagToDelete));
+        // [核心修改] 使用注入的 llmService 来检查依赖
+        try {
+            const allAgents = await this.llmService.getAgents();
+            const dependentAgents = allAgents.filter(agent => agent.tags?.includes(tagToDelete));
 
-        if (dependentAgents.length > 0) {
-            const agentNames = dependentAgents.map(a => `"${a.name}"`).join(', ');
-            alert(
-                `无法删除标签 "${tagToDelete}"。\n\n` +
-                `它正在被以下 Agent 使用: ${agentNames}。\n\n` +
-                `请先从这些 Agent 中移除该标签，然后再试。`
-            );
-            return; // 阻止删除
+            if (dependentAgents.length > 0) {
+                const agentNames = dependentAgents.map(a => `"${a.name}"`).join(', ');
+                alert(
+                    `无法删除标签 "${tagToDelete}"。\n\n` +
+                    `它正在被以下 Agent 使用: ${agentNames}。\n\n` +
+                    `请先从这些 Agent 中移除该标签，然后再试。`
+                );
+                return;
+            }
+        } catch (error) {
+            console.error(`检查 Agent 依赖时出错:`, error);
+            alert("检查依赖时发生错误，请稍后再试。");
+            return;
         }
 
         // 3. 如果所有检查通过，则弹出确认框并执行删除

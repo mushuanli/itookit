@@ -1,16 +1,14 @@
+// 文件: #llm/chat/index.js
+
 /**
- * @file #llm/chat/index.js
+ * @file LLMChatUI.js (V3 - 服务容器架构)
  * @description 组合 historyUI 和 inputUI 的完整聊天界面编排器。
- * @version 2.2 (Corrected & Completed IEditor Implementation)
- * @change
- * - [V2.2 修正] 完整并正确地实现了 IEditor 接口，特别是 `commands` 属性。
- * - [V2.2 增强] 完善了 `setReadOnly`, `focus`, `navigateTo` 的实现，正确委托给子组件。
- * - [V2.2 增强] 改进了文件上传流程，在消息创建前完成上传并使用真实 URL。
- * - [V2.2 增强] 增加了 `interactiveChange` 事件代理，以完全符合 IEditor 规范。
- * - [V2.1 架构重构] 移除了 ILLMSessionStorageService 和 sessionId 的直接依赖。
- * - [V2.1 架构重构] 组件完全实现 IEditor 接口，通过 setText 和 getText 与宿主交换数据。
- * - [V2.1 架构重构] 数据格式采用 JSONL，由 setText 和 getText 内部处理解析与序列化。
- * - [V2 重构] 强制要求传入 `configManager` 实例以实现响应式配置。
+ *
+ * [V3 核心重构]
+ * - **强制依赖注入**: 组件完全依赖注入的 `ConfigManager` 来获取响应式配置数据。
+ * - **解耦**: 不再直接管理 agents/connections 数据，而是将其传递给子组件或依赖 `LLMService`。
+ * - **服务化**: 依赖 `LLMService` 单例来处理所有与 LLM 后端的交互，自身不创建客户端。
+ * - **IEditor 接口实现**: 作为一个实现了 `IEditor` 接口的可嵌入组件，与宿主环境通过 `setText`/`getText` 等标准方法交换数据。
  */
 
 
@@ -33,8 +31,8 @@ export class LLMChatUI extends IEditor {
     /**
      * 创建一个完整的聊天 UI 实例。
      * @param {HTMLElement} element - 聊天 UI 的容器元素。
+     * @param {ConfigManager} options.configManager - [必需] 应用程序的全局配置管理器实例。
      * @param {object} options - 配置选项。
-     * @param {ConfigManager} options.configManager - [新, 必需] 应用程序的全局配置管理器实例。
      * @param {string} [options.sessionId] - [可选] 用于持久化的当前聊天会话的唯一 ID。
      * @param {IFileStorageAdapter} [options.fileStorage] - [可选] 用于处理文件上传的服务。
      * @param {object} [options.inputUIConfig] - [可选] 传递给 LLMInputUI 的额外配置。
@@ -63,19 +61,26 @@ export class LLMChatUI extends IEditor {
         // [已移除] 不再需要 sessionId 和 sessionStorage，数据持久化由宿主负责。
         this.fileStorage = options.fileStorage || new FileStorageAdapter();
 
-        // --- 4. 从 ConfigManager 响应式地获取初始数据，而非静态 options ---
-        const initialAgents = this.configManager.llm.config.agents || [];
+        // --- 3. 从 ConfigManager 响应式地获取初始数据 ---
+        // 注意：这里只是获取“初始”数据。后续的更新将由子组件自己通过订阅事件来处理。
+        const initialAgents = this.configManager.llmService.getAgents(); // 直接从 Service 获取
         if (initialAgents.length === 0) {
             console.warn("[LLMChatUI] 警告: 初始化时未在 ConfigManager 中找到任何 Agent。");
         }
         
-        const validInitialAgent = options.initialAgent && initialAgents.some(a => a.id === options.initialAgent)
+        // --- [核心修复] ---
+        // 不再尝试在这里获取初始数据。让子组件自己负责。
+        // const initialAgents = this.configManager.llmService.getAgents(); // <-- 移除这一行
+
+        // 我们可以安全地获取当前选中的 Agent ID，因为 LLMService 是同步的
+        const allAgents = this.configManager.getService('llmRepository').config?.agents || [];
+        const validInitialAgent = options.initialAgent && allAgents.some(a => a.id === options.initialAgent)
             ? options.initialAgent
-            : initialAgents[0]?.id;
+            : allAgents[0]?.id;
 
         this.currentAgentId = validInitialAgent;
 
-        // --- 5. 创建和渲染子组件 DOM (保持不变) ---
+        // --- 4. 创建子组件 DOM ---
         this.historyContainer = document.createElement('div');
         this.historyContainer.className = 'llm-chat-ui__history';
 
@@ -85,8 +90,7 @@ export class LLMChatUI extends IEditor {
         this.container.appendChild(this.historyContainer);
         this.container.appendChild(this.inputContainer);
 
-        // +++ 2. Pass full definitions down to the execution layer (historyUI) +++
-        //    and UI-relevant parts to the input layer (inputUI)
+        // --- 5. 实例化子组件，并将 configManager 注入下去 ---
         this.historyUI = createHistoryUI(this.historyContainer, {
             ...options.historyUIConfig,
             configManager: this.configManager, // <-- [依赖注入]
@@ -99,7 +103,7 @@ export class LLMChatUI extends IEditor {
         this.inputUI = new LLMInputUI(this.inputContainer, {
             ...options.inputUIConfig,
             configManager: this.configManager, // <-- [依赖注入]
-            agents: initialAgents, // <-- [修复] 添加这一行，将完整的 agents 列表传入
+            // agents 选项现在是可选的，因为 inputUI 会自己从 configManager 加载
             initialAgent: this.currentAgentId,
             onSubmit: this.handleSubmit.bind(this),
             on: {
@@ -111,7 +115,7 @@ export class LLMChatUI extends IEditor {
             }
         });
 
-        // +++ [核心修改] 传入 IEditor 实例 (this) +++
+        // --- 6. 连接与初始化 ---
         registerOrchestratorCommands(this, this.inputUI, this.historyUI);
         
         // +++ 4. 绑定子组件事件以重新广播，并触发 'change' 事件

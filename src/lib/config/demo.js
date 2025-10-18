@@ -1,233 +1,88 @@
 // #config/demo.js
 
+/**
+ * @file demo.js
+ * @description 演示如何使用重构后的 ConfigManager 和服务容器架构。
+ */
+
 import { ConfigManager } from './ConfigManager.js';
-import { EVENTS, getModuleEventName } from './shared/constants.js';
 
-// ---- 1. 应用初始化 ----
-// 在应用的生命周期中，这应该只被调用一次。
-const configManager = ConfigManager.getInstance({
-    adapterOptions: { prefix: 'my_llm_app_final_' }
-});
-console.log("应用核心服务已初始化。等待引导程序完成...");
-
-// ---- 2. 模拟 UI 组件定义 ----
-
-/**
- * 模拟一个全局的标签管理UI组件。
- * 它不关心任何特定的项目，只负责显示和修改全局标签。
- */
-class GlobalTagManagerComponent {
-    constructor() {
-        console.log('[TagManager] 组件已实例化。');
-        this.configManager = ConfigManager.getInstance();
-        this.tagRepo = this.configManager.tags;
-        this.eventManager = this.configManager.eventManager;
-        this.unsubscribe = null;
-    }
-
-    /**
-     * 模拟组件被挂载到DOM上。
-     */
-    async mount() {
-        console.log('[TagManager] 正在挂载组件，等待初始数据...');
-        // 确保首次加载完成
-        const initialTags = await this.tagRepo.load(); 
-        this.render(initialTags);
-
-        // 订阅后续的全局标签更新
-        this.unsubscribe = this.eventManager.subscribe(EVENTS.TAGS_UPDATED, (updatedTags) => {
-            console.log('[TagManager] 收到标签更新通知，正在重新渲染...');
-            this.render(updatedTags);
-        });
-    }
-
-    /**
-     * 模拟组件从DOM中卸载。
-     */
-    unmount() {
-        if (this.unsubscribe) {
-            this.unsubscribe();
-            console.log('[TagManager] 已取消订阅事件。');
-        }
-        console.log('[TagManager] 组件已卸载。');
-    }
-
-    /**
-     * 模拟将数据渲染到UI。
-     * @param {string[]} tags
-     */
-    render(tags) {
-        console.log('--- [UI RENDER] 全局标签 ---', tags.length > 0 ? tags : '[无标签]');
-        // 在真实应用中，这里会更新DOM。
-    }
-    
-    /**
-     * 模拟用户在UI上点击“添加标签”按钮。
-     * @param {string} tag 
-     */
-    async addTag(tag) {
-        console.log(`[TagManager] 用户操作: 添加标签 "${tag}"`);
-        await this.tagRepo.addTag(tag);
-    }
-}
-
-
-/**
- * 模拟一个特定项目的编辑器UI组件。
- * 每个实例都与一个唯一的项目ID绑定，只关心该项目的文件模块数据。
- */
-class ProjectEditorComponent {
-    constructor(projectId) {
-        console.log(`[ProjectEditor:${projectId}] 组件已实例化。`);
-        this.projectId = projectId;
-        this.configManager = ConfigManager.getInstance();
-        this.moduleRepo = this.configManager.modules.get(this.projectId);
-        this.eventManager = this.configManager.eventManager;
-        // --- [修复] ---
-        // 将单个的 unsubscribe 函数改为一个数组，以管理多个订阅。
-        this.unsubscribes = [];
-    }
-
-    /**
-     * 模拟组件被挂载到DOM上。
-     */
-    async mount() {
-        console.log(`[ProjectEditor:${this.projectId}] 正在挂载组件，等待初始数据...`);
-        
-        // --- [修复] ---
-        // 删除了对不存在的 'updated' 事件的订阅。
-        // 改为订阅所有会导致UI变更的具体领域事件。
-        const eventsToWatch = [
-            'MODULE_NODE_ADDED', 'MODULE_NODE_REMOVED', 'MODULE_NODE_RENAMED',
-            'MODULE_NODE_CONTENT_UPDATED', 'MODULE_NODES_META_UPDATED', 'MODULE_NODES_MOVED'
-        ];
-
-        // 定义一个通用的更新处理器
-        // 为了演示简单，任何变更都重新从仓库加载并渲染整个树。
-        const updateHandler = async (eventPayload) => {
-            console.log(`[ProjectEditor:${this.projectId}] 收到模块更新通知，正在重新渲染...`, eventPayload);
-            // 从仓库获取最新的完整状态并渲染
-            const currentModules = await this.moduleRepo.getModules();
-            this.render(currentModules);
-        };
-
-        // 遍历并订阅所有相关事件
-        eventsToWatch.forEach(eventTypeKey => {
-            const eventTemplate = EVENTS[eventTypeKey];
-            if (eventTemplate) {
-                const eventName = eventTemplate.replace('{ns}', this.projectId);
-                const unsubscribe = this.eventManager.subscribe(eventName, updateHandler);
-                // 将取消订阅函数存入数组
-                this.unsubscribes.push(unsubscribe);
-            }
-        });
-        
-        // 等待本项目数据加载完成
-        const initialModules = await this.moduleRepo.load(); 
-        this.render(initialModules);
-    }
-
-    /**
-     * 模拟组件从DOM中卸载。
-     */
-    unmount() {
-        // --- [修复] ---
-        // 遍历并执行所有的取消订阅函数。
-        if (this.unsubscribes.length > 0) {
-            this.unsubscribes.forEach(unsub => unsub());
-            console.log(`[ProjectEditor:${this.projectId}] 已取消订阅所有模块事件。`);
-        }
-        // 关键：通知管理器可以清理这个实例了，释放内存。
-        this.configManager.modules.dispose(this.projectId);
-        console.log(`[ProjectEditor:${this.projectId}] 组件已卸载。`);
-    }
-
-    /**
-     * 模拟将文件树渲染到UI。
-     * @param {import('./shared/types.js').ModuleFSTree} modules
-     */
-    render(modules) {
-        console.log(`--- [UI RENDER] 项目 [${this.projectId}] 的文件模块 ---`);
-        const printTree = (node, prefix = '') => {
-            const name = node.path === '/' ? '/' : node.path.split('/').pop();
-            const isLast = prefix.endsWith('└── ');
-            const newPrefix = prefix.slice(0, -4) + (isLast ? '    ' : '│   ');
-            console.log(`${prefix}${name}` + (node.type === 'file' ? ` (内容: '${node.content}')` : ''));
-            if (node.children) {
-                node.children.forEach((child, index) => {
-                    printTree(child, newPrefix + (index === node.children.length - 1 ? '└── ' : '├── '));
-                });
-            }
-        };
-        printTree(modules, '');
-        console.log(`--- [UI RENDER] 结束 ---`);
-    }
-    
-    /**
-     * 模拟用户在UI上创建一个新文件。
-     * @param {string} fileName 
-     * @param {string} content 
-     */
-    async addFile(fileName, content = '') {
-        console.log(`[ProjectEditor:${this.projectId}] 用户操作: 在根目录添加文件 "${fileName}"`);
-        const fileData = {
-            path: fileName, // 仓库将根据父路径构建完整路径
-            type: 'file',
-            content: content,
-            meta: {} // ctime 和 mtime 会被仓库自动添加
-        };
-        await this.moduleRepo.addModule(null, fileData); // 使用 null 代表根目录
-    }
-}
-
-// ---- 3. 运行模拟场景 ----
 async function runDemo() {
-    console.log("应用引导完成，已准备就绪！开始运行演示场景...\n");
-    // 实例化组件
-    const tagComponent = new GlobalTagManagerComponent();
-    const projectA = new ProjectEditorComponent('project-alpha');
-    const projectB = new ProjectEditorComponent('project-beta');
+    console.log("========== 运行新架构演示 ==========");
 
-    // 挂载组件（模拟组件被渲染到页面上）
-    // 使用 Promise.all 并行挂载，模拟真实场景
-    await Promise.all([
-        tagComponent.mount(),
-        projectA.mount(),
-        projectB.mount()
-    ]);
+    // 1. 初始化 (在应用入口处执行一次)
+    console.log("\n[步骤 1] 初始化 ConfigManager...");
+    const manager = ConfigManager.getInstance({
+        adapterOptions: { prefix: 'refactored_app_demo_' }
+    });
+    // 显式启动应用，这将预加载 eager 服务并发布 app:ready 事件
+    await manager.bootstrap();
+    console.log("ConfigManager 初始化并启动完成。");
 
-    console.log('\n==================================');
-    console.log('====       执行用户操作         ====');
-    console.log('==================================\n');
+    // 2. 使用全局服务 (新旧 API 对比)
+    console.log("\n[步骤 2] 测试全局服务...");
+    // 旧 API (仍然可用)
+    const tags_old = manager.tags;
+    // 新 API (推荐)
+    const tags_new = manager.getService('tagRepository');
+    console.log("  - 通过旧 API 获取的 tags 与新 API 是否相同?", tags_old === tags_new); // 应为 true
 
-    // --- 场景1: 全局组件添加一个 tag ---
-    // 预期行为: 只有 tagComponent 会收到通知并重新渲染。
-    console.log('>>> 操作1: 添加一个全局标签 "review"');
-    await tagComponent.addTag('review');
-    console.log('--- 操作1 完成 ---\n');
+    // 使用服务
+    await tags_new.addTag("架构评审");
+    await tags_new.addTag("依赖注入");
+    console.log("  - 当前所有标签:", tags_new.getAll());
 
-    // --- 场景2: 项目 A 添加一个文件 ---
-    // 预期行为: 只有 projectA 组件会收到通知并重新渲染。
-    // projectB 和 tagComponent 不会受到任何影响。
-    console.log(`>>> 操作2: 项目 [${projectA.projectId}] 添加文件 "index.js"...`);
-    await projectA.addFile('index.js', 'console.log("Hello, Alpha!");');
-    console.log('--- 操作2 完成 ---\n');
+    // 3. 使用模块化服务，并验证隔离性
+    console.log("\n[步骤 3] 测试模块化服务和工作区隔离...");
 
-    // --- 场景3: 项目 B 添加一个文件 ---
-    // 预期行为: 只有 projectB 组件会收到通知并重新渲染。
-    console.log(`>>> 操作3: 项目 [${projectB.projectId}] 添加文件 "config.json"...`);
-    await projectB.addFile('config.json', '{ "version": 1 }');
-    console.log('--- 操作3 完成 ---\n');
+    // 获取项目 A 的工作区上下文
+    console.log("  - 获取 'project-alpha' 工作区...");
+    const projectA = manager.getWorkspace('project-alpha');
+    const moduleRepoA = projectA.module; // 使用便捷访问器
+    const srsServiceA = projectA.srs;
+
+    // 获取项目 B 的工作区上下文
+    console.log("  - 获取 'project-beta' 工作区...");
+    const projectB = manager.getWorkspace('project-beta');
+    const moduleRepoB = projectB.module;
+
+    // 验证不同工作区的服务实例是不同的
+    console.log("  - 项目A和项目B的 ModuleRepository 是否为同一实例?", moduleRepoA === moduleRepoB); // 应为 false
+
+    // 在各自的工作区内操作数据
+    await moduleRepoA.addModule(null, { path: 'README.md', type: 'file', content: '这是项目A' });
+    await moduleRepoB.addModule(null, { path: 'main.js', type: 'file', content: 'console.log("项目B")' });
+
+    const modulesA = await moduleRepoA.getModules();
+    const modulesB = await moduleRepoB.getModules();
+    console.log("  - 项目A的模块:", modulesA.children.map(c => c.path));
+    console.log("  - 项目B的模块:", modulesB.children.map(c => c.path));
     
-    console.log('==================================');
-    console.log('====        演示结束          ====');
-    console.log('==================================\n');
+    // 使用项目 A 的 SRS 服务，它将操作项目 A 的 SRS 数据
+    await srsServiceA.gradeCard('card-A1', 'good', 'doc-A1');
+    console.log("  - 已调用项目 A 的 SRS 服务。");
+
+    // 4. 动态添加插件
+    console.log("\n[步骤 4] 测试动态插件...");
     
-    // 清理资源，模拟组件被销毁
-    tagComponent.unmount();
-    projectA.unmount();
-    projectB.unmount();
+    // 定义一个简单的日志插件
+    class LoggerPlugin {
+        install(container) {
+            console.log("  - 'LoggerPlugin' 正在安装...");
+            container.register('logger', () => ({
+                log: (msg) => console.log(`[自定义日志] ${msg}`)
+            }));
+        }
+    }
+    // 在运行时使用插件
+    manager.use(new LoggerPlugin());
+    
+    // 立刻获取并使用新注册的服务
+    const logger = manager.getService('logger');
+    logger.log("动态插件工作正常！");
+    
+    console.log("\n========== 演示结束 ==========");
 }
 
-// 关键: 监听 'app:ready' 事件，确保在所有全局配置加载完成后再执行应用逻辑。
-configManager.eventManager.subscribe(EVENTS.APP_READY, runDemo);
+// 运行演示
+runDemo().catch(console.error);

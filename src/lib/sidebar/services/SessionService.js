@@ -1,25 +1,27 @@
-// #sidebar/services/SessionService.js
+// 文件: #sidebar/services/SessionService.js
 import { ISessionService } from '../../common/interfaces/ISessionService.js';
 import { dataAdapter } from '../utils/data-adapter.js';
 
 /**
- * @file SessionService (V2)
+ * @file SessionService.js (V3 - 服务容器架构)
  * @description
  * 充当 UI 操作与数据仓库 (Repository) 之间的桥梁。
- * 所有写操作都被委托给 Repository，它自己不处理持久化。
+ * 它的所有依赖（如 `moduleRepo`, `tagRepo`）都通过构造函数注入，
+ * 使其成为一个可测试、与具体实现解耦的服务层。
  */
 export class SessionService extends ISessionService {
     /**
-     * @param {object} dependencies
-     * @param {import('../stores/SessionStore.js').SessionStore} dependencies.store
-     * @param {import('../../config/repositories/ModuleRepository.js').ModuleRepository} dependencies.moduleRepo
-     * @param {import('../../config/repositories/TagRepository.js').TagRepository} dependencies.tagRepo
-     * @param {string} [dependencies.newSessionContent='']
+     * @param {object} dependencies - 依赖对象
+     * @param {import('../stores/SessionStore.js').SessionStore} dependencies.store - UI 状态存储
+     * @param {import('../../config/repositories/ModuleRepository.js').ModuleRepository} dependencies.moduleRepo - 【注入】特定于此工作区的文件模块仓库
+     * @param {import('../../config/repositories/TagRepository.js').TagRepository} dependencies.tagRepo - 【注入】全局标签仓库
+     * @param {string} [dependencies.newSessionContent=''] - 新建会话时的默认内容
      */
     constructor({ store, moduleRepo, tagRepo, newSessionContent = '' }) {
         super();
+        // 严格的依赖检查
         if (!store || !moduleRepo || !tagRepo) {
-            throw new Error("SessionService 需要 store, moduleRepository, 和 tagRepository.");
+            throw new Error("SessionService 需要 store, moduleRepo, 和 tagRepo 依赖。");
         }
         this.store = store;
         this.moduleRepo = moduleRepo;
@@ -27,6 +29,10 @@ export class SessionService extends ISessionService {
         this.newSessionContent = newSessionContent;
     }
 
+    /**
+     * 处理从仓库加载的初始模块树数据。
+     * @param {import('../../config/shared/types.js').ModuleFSTree} moduleTree - 从 ModuleRepository 加载的数据。
+     */
     handleRepositoryLoad(moduleTree) {
     console.log('[SessionService] 收到模块树:', moduleTree);
         const items = dataAdapter.treeToItems(moduleTree);
@@ -99,6 +105,7 @@ export class SessionService extends ISessionService {
     async createSession({ title, parentId, content }) { // 1. 在方法签名中接收 content
     // 2. 优先使用传入的 content，如果未提供，再使用默认值作为备用
     const fileContent = content !== undefined ? content : (this.newSessionContent || '');
+    console.log('🔧 createSession 接收到的 content:', fileContent?.substring(0, 100));
 
     const newNodeData = {
         path: title,
@@ -259,6 +266,17 @@ export class SessionService extends ISessionService {
      */
     async updateSessionContent(itemId, newContent) {
         await this.moduleRepo.updateModuleContent(itemId, newContent);
+    }
+
+    /**
+     * [新增] 同时更新内容和元数据，避免两次事件触发
+     * @param {string} itemId
+     * @param {object} updates
+     * @param {string} updates.content - 原始内容
+     * @param {object} updates.meta - 元数据（summary, searchableText等）
+     */
+    async updateSessionContentAndMeta(itemId, { content, meta }) {
+        await this.moduleRepo.updateModuleContentAndMeta(itemId, content, meta);
     }
 
     /**

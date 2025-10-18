@@ -1,194 +1,194 @@
-// #config/ConfigManager.js
+// 文件: #config/ConfigManager.js
 
-// ------------------- 依赖导入 -------------------
-// 导入具体的持久化层实现。这里是 LocalStorage，未来可以替换为 IndexedDBAdapter 等。
-import { LocalStorageAdapter } from './adapters/LocalStorageAdapter.js';
-// 导入全局事件管理器，它是整个应用响应式系统的核心。
-import { EventManager } from './EventManager.js';
-// 导入全局单例仓库：用于管理全局标签数据。
-import { TagRepository } from './repositories/TagRepository.js';
-// 导入全局单例仓库：用于管理所有 LLM 相关的配置。
-import { LLMRepository } from './repositories/LLMRepository.js';
-// 导入模块仓库的管理器，这是支持多工作区/项目的关键。
-import { ModuleRepositoryManager } from './managers/ModuleRepositoryManager.js';
-// 从常量文件中导入事件名称，避免使用魔术字符串，增强可维护性。
-import { EVENTS } from './shared/constants.js';
-// +++ 新增: 导入默认配置模板 +++
+/**
+ * @file ConfigManager.js (V3 - 服务容器架构)
+ * @description 重构后的应用配置和服务管理器。
+ * 它扮演“外观”（Facade）的角色，为应用提供一个统一的配置和服务访问入口，
+ * 内部封装了 ServiceContainer，并为旧代码提供兼容接口。
+ */
+
+import { ServiceContainer } from './core/ServiceContainer.js';
+import { CorePlugin } from './plugins/CorePlugin.js';
+import { GlobalServicesPlugin } from './plugins/GlobalServicesPlugin.js';
+import { ModuleSystemPlugin } from './plugins/ModuleSystemPlugin.js';
 import { DEFAULT_CONNECTION, DEFAULT_AGENT } from './llmProvider.js';
-// +++ 新增：导入 Service 层 +++
-import { LLMConfigService } from './services/LLMConfigService.js';
 
-// ------------------- 单例控制 -------------------
-// 模块级私有变量，用于保存 ConfigManager 的唯一实例。
+// 模块级变量，用于实现单例模式
 let instance = null;
 
 /**
- * @class ConfigManager
+ * @class ConfigManager (重构版)
  * @singleton
  * @description
- * 应用程序的服务注册中心和依赖注入（DI）容器。
- * 它的核心职责是：
- * 1. 作为单例存在，确保整个应用只有一个配置数据入口。
- * 2. 在应用启动时，初始化所有核心服务（如事件管理器、持久化适配器）。
- * 3. 创建并持有所有“全局”数据仓库的实例（如标签、LLM配置）。
- * 4. 创建并持有“管理器”的实例，这些管理器负责创建和维护“非全局”的、与特定上下文（如项目ID）相关的仓库。
- * 5. 编排应用的启动流程（_bootstrap），预加载必要的全局数据。
+ * 这是一个外观类，为应用提供一个统一的配置和服务访问入口。
+ * 它内部封装了 ServiceContainer，负责插件的安装和应用的启动流程。
+ * 同时，它保持了与旧版本兼容的API，以支持平滑迁移。
  */
 export class ConfigManager {
     /**
-     * ConfigManager 的构造函数。
+     * 构造函数现在变得非常轻量，只负责创建容器和安装插件定义。
+     * 所有的异步加载操作都移到了 `bootstrap` 方法中。
      * @param {object} config - 初始化配置。
-     * @param {object} [config.adapterOptions] - 传递给持久化适配器构造函数的选项，例如 `{ prefix: 'my_app_' }`。
      */
-    constructor(config) {
-        // 执行严格的单例模式检查。
+    constructor(config = {}) {
         if (instance) {
-            throw new Error("ConfigManager 是一个单例，已经被实例化。请使用 ConfigManager.getInstance() 获取实例。");
+            throw new Error("ConfigManager 是一个单例，请使用 getInstance()");
         }
 
-        // --- 1. 初始化核心服务 ---
-        // 每个 ConfigManager 实例都包含一个独立的事件总线。
-        this.eventManager = new EventManager();
-        // 根据配置创建持久化适配器实例。所有仓库都将通过这个适配器与浏览器存储交互。
-        this.persistenceAdapter = new LocalStorageAdapter(config.adapterOptions);
-        
-        // --- 2. 实例化全局单例仓库 ---
-        // 创建 TagRepository 实例，并将核心服务（持久化适配器、事件管理器）作为依赖注入进去。
-        this._tags = new TagRepository(this.persistenceAdapter, this.eventManager);
-        // 创建 LLMRepository 实例，同样注入依赖。
-        this._llm = new LLMRepository(this.persistenceAdapter, this.eventManager);
+        // 内部创建一个服务容器实例
+        this._container = new ServiceContainer();
+        // 自动安装所有默认插件
+        this._installDefaultPlugins(config);
 
-        // +++ 新增：实例化业务逻辑层 +++
-        this._llmService = new LLMConfigService(this._llm, this.eventManager);
-
-        // --- 3. 实例化“管理器” ---
-        // 这是与 TagRepository 和 LLMRepository 的关键区别：
-        // 我们实例化的不是 ModuleRepository 本身，而是它的管理器。
-        // 因为应用可能需要同时处理多个项目，每个项目都需要一个独立的 ModuleRepository 实例。
-        // ModuleRepositoryManager 将负责根据项目ID（namespace）来创建和管理这些实例。
-        this.modules = new ModuleRepositoryManager(this.persistenceAdapter, this.eventManager);
-
-        // --- 4. 启动引导程序 ---
-        // 调用异步方法来加载初始数据。
-        this._bootstrap();
-
-        // 将当前创建的实例赋值给模块级变量，完成单例的设置。
         instance = this;
+        
+        // [关键移除] 不再在构造函数中自动调用 _bootstrap()
     }
 
     /**
-     * 应用程序启动引导程序。
-     * 负责在应用启动时，异步预加载所有“全局性”的数据到内存中。
+     * 安装所有默认插件。
      * @private
      */
-    async _bootstrap() {
-        try {
-            // 使用 Promise.all 可以并行加载多个全局仓库的数据，提升启动速度。
-            // 注意：这里没有加载 modules 的数据，因为我们不知道用户将要打开哪个项目。
-            // ModuleRepository 的数据将在首次通过 Manager 获取时按需、懒加载。
-            await Promise.all([
-                this.tags.load(),
-                this.llm.load()
-            ]);
-
-            // +++ 新增: 在加载后确保默认配置存在 +++
-            await this._ensureDefaultLLMConfig();
-
-            console.log("ConfigManager: 全局配置数据引导成功。");
-            // 当所有全局数据准备就绪后，发布一个 'app:ready' 事件。
-            // 应用的其他部分（特别是UI层）可以监听这个事件，然后才开始执行其业务逻辑，
-            // 从而确保它们在访问数据时，数据已经可用。
-            this.eventManager.publish(EVENTS.APP_READY);
-        } catch (error) {
-            console.error("ConfigManager: 引导程序失败!", error);
-            // 如果引导失败，发布一个失败事件，以便UI可以向用户显示错误信息。
-            this.eventManager.publish(EVENTS.APP_BOOTSTRAP_FAILED, error);
-        }
+    _installDefaultPlugins(config) {
+        this._container
+            .use(new CorePlugin(config))
+            .use(new GlobalServicesPlugin())
+            .use(new ModuleSystemPlugin());
     }
 
     /**
-     * +++ 新增: 确保默认的 Connection 和 Agent 存在的方法 +++
-     * 此方法是幂等的，应在 bootstrap 期间调用。
+     * [核心接口] 启动应用。
+     * 这是一个公共的异步方法，由外部调用者（如 main.js）来决定何时执行。
+     * 1. 委托给内部容器执行启动流程（预加载eager服务等）。
+     * 2. 执行应用特有的、需要在启动时完成的业务逻辑。
+     * @returns {Promise<void>}
+     */
+    async bootstrap() {
+        // 调用 ServiceContainer 的 bootstrap，它会加载 eager 服务并发布 app:ready
+        await this._container.bootstrap();
+        // 在核心服务就绪后，执行应用特有的启动逻辑
+        await this._ensureDefaultLLMConfig();
+    }
+
+
+    /**
+     * 确保默认 LLM 配置存在。
+     * 这是应用特有的业务逻辑，保留在 ConfigManager 中是合适的。
      * @private
      */
     async _ensureDefaultLLMConfig() {
-        const connections = await this.llm.getConnections();
-        const agents = await this.llm.getAgents();
-        let configWasModified = false;
-
-        // 1. 检查并创建默认 Connection
-        if (!connections.some(c => c.id === DEFAULT_CONNECTION.id)) {
-            connections.unshift(JSON.parse(JSON.stringify(DEFAULT_CONNECTION))); // 深拷贝
-            configWasModified = true;
-            console.log("ConfigManager: 未找到默认 Connection，正在创建...");
-        }
-
-        // 2. 检查并创建默认 Agent
-        if (!agents.some(a => a.id === DEFAULT_AGENT.id)) {
-            agents.unshift({ ...DEFAULT_AGENT });
+        try {
+            // 使用新的服务定位方式获取依赖
+            const llmService = this.getService('llmService');
+            const tagRepo = this.getService('tagRepository');
             
-            // 同时确保 'default' 标签存在
-            await this.tags.addTag('default');
             
-            configWasModified = true;
-            console.log("ConfigManager: 未找到默认 Agent，正在创建...");
+            const connections = await llmService.getConnections();
+            if (!connections.some(c => c.id === DEFAULT_CONNECTION.id)) {
+                console.log("ConfigManager: 未找到默认 Connection，正在创建...");
+                await llmService.addConnection(JSON.parse(JSON.stringify(DEFAULT_CONNECTION)));
+            }
+
+            const agents = await llmService.getAgents();
+            if (!agents.some(a => a.id === DEFAULT_AGENT.id)) {
+                console.log("ConfigManager: 未找到默认 Agent，正在创建...");
+                await tagRepo.addTag('default');
+                await llmService.addAgent({ ...DEFAULT_AGENT }, tagRepo); 
+            }
+        } catch (error) {
+            console.error('[ConfigManager] 确保默认LLM配置失败:', error);
         }
-
-        // 3. 如果配置被修改，则一次性保存所有更改
-        if (configWasModified) {
-            console.log("ConfigManager: 正在保存新的默认 LLM 配置。");
-            await Promise.all([
-                this.llm.saveConnections(connections),
-                this.llm.saveAgents(agents)
-            ]);
-        }
     }
 
-    // ------------------- 公共访问器 (Getters) -------------------
+    // ================== 新 API (推荐使用) ==================
 
     /**
-     * 获取全局标签仓库的实例。
-     * @returns {TagRepository}
+     * 从容器中获取一个服务。
+     * @param {string} name - 服务名称。
+     * @returns {any}
      */
-    get tags() { 
-        return this._tags; 
+    getService(name) {
+        return this._container.get(name);
     }
+
+    /**
+     * 获取一个工作区上下文，用于访问作用域服务。
+     * @param {string} namespace - 工作区命名空间。
+     * @returns {import('./core/WorkspaceContext.js').WorkspaceContext}
+     */
+    getWorkspace(namespace) {
+        return this._container.workspace(namespace);
+    }
+
+    /**
+     * 动态安装一个新插件。
+     * @param {object} plugin - 插件实例。
+     * @returns {this}
+     */
+    use(plugin) {
+        this._container.use(plugin);
+        return this;
+    }
+
+    /**
+     * 获取事件管理器的便捷访问器。
+     */
+    get eventManager() {
+        return this.getService('eventManager');
+    }
+
+    // ================== 旧 API (为向后兼容保留) ==================
+
+    /** @deprecated 请使用 `getService('tagRepository')` 代替。 */
+    get tags() { return this.getService('tagRepository'); }
+
+    /** @deprecated 请使用 `getService('llmRepository')` 代替。 */
+    get llm() { return this.getService('llmRepository'); }
     
-    /**
-     * 获取全局LLM配置仓库的实例。
-     * @returns {LLMRepository}
-     */
-    get llm() { 
-        return this._llm; 
-    }
+    /** @deprecated 请使用 `getService('llmService')` 代替。 */
+    get llmService() { return this.getService('llmService'); }
     
-    // 注意：`modules` 是一个公共属性，直接返回 ModuleRepositoryManager 实例。
-    // 使用方式是 `ConfigManager.getInstance().modules.get('project-id')`。
-
-    // ------------------- 静态方法 -------------------
-    /**
-     * +++ 新增：暴露 Service 层作为主要接口 +++
-     * @returns {LLMConfigService}
-     */
-    get llmService() {
-        return this._llmService;
+    /** @deprecated `srsService` 是作用域服务，请使用 `getWorkspace(namespace).srs` 获取实例。 */
+    get srsService() {
+        console.warn("[ConfigManager] `srsService` 是作用域服务，直接访问已不推荐。请使用 `getWorkspace(namespace).srs`。");
+        return { for: (namespace) => this.getWorkspace(namespace).srs };
     }
+
+    /** @deprecated 请使用 `getWorkspace(namespace).module` 获取实例。 */
+    get modules() {
+        return {
+            get: (namespace) => {
+                const workspace = this.getWorkspace(namespace);
+                workspace.module.load().catch(err => console.error(`懒加载模块'${namespace}'失败:`, err));
+                return workspace.module;
+            },
+            dispose: (namespace) => {
+                this._container.disposeWorkspace(namespace);
+            }
+        };
+    }
+
+    // ================== 静态方法 ==================
 
     /**
      * 获取 ConfigManager 的全局单例实例。
-     * 这是与 ConfigManager 交互的唯一合法方式。
-     * @param {object} [config] - 仅在首次调用（即实例化）时需要提供初始化配置。
+     * @param {object} [config] - 仅在首次调用时需要提供初始化配置。
      * @returns {ConfigManager}
      */
     static getInstance(config) {
-        // 如果实例不存在，并且提供了配置，则创建新实例。
         if (!instance) {
             if (!config) {
                 throw new Error("首次创建 ConfigManager 实例时，必须提供初始化配置。");
             }
             instance = new ConfigManager(config);
         }
-        // 返回已存在的实例。
         return instance;
+    }
+
+    /** 
+     * 重置单例，主要用于测试环境。
+     */
+    static reset() {
+        instance = null;
     }
 }

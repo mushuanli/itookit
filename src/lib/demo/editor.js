@@ -736,7 +736,8 @@ document.getElementById('rename-doc1-btn').addEventListener('click', () => {
     let allMatches = [];
     let currentIndex = -1;
 
-    const performSearch = () => {
+    // [修正] 将 performSearch 声明为 async 函数，以处理异步的 search API
+    const performSearch = async () => {
         const query = searchInput.value;
         allMatches = [];
         currentIndex = -1;
@@ -748,15 +749,24 @@ document.getElementById('rename-doc1-btn').addEventListener('click', () => {
             return;
         }
 
-        // 遍历所有实例，执行搜索并收集结果
-        searchableInstances.forEach(({ instance }) => {
+        // [修正] 使用 for...of 循环代替 forEach，以便在循环体内安全地使用 await
+        // 因为 forEach 的回调函数是同步执行的，它不会等待内部的 await 完成。
+        for (const { instance } of searchableInstances) {
             // 关键：调用统一的search API
-            const matches = instance.search(query);
-            matches.forEach(match => {
-                // 将每个匹配项与其实例关联起来，存入全局列表
-                allMatches.push({ instance, match });
-            });
-        });
+            // [修正] 使用 await 等待 instance.search(query) 的 Promise 解析完成。
+            // `MDxEditor.search` 是一个 async 函数，所以它返回的是一个 Promise，而不是一个数组。
+            // 直接对 Promise 调用 .forEach() 会导致 "is not a function" 错误。
+            const matches = await instance.search(query);
+
+            // 增加一个健壮性检查，确保 `matches` 确实是一个数组
+            if (Array.isArray(matches)) {
+                matches.forEach(match => {
+                    // 将每个匹配项与其实例关联起来，存入全局列表
+                    allMatches.push({ instance, match });
+                });
+            }
+        }
+
         updateUI();
     };
 

@@ -1,17 +1,19 @@
 // 文件: #workspace/mdx/MDxWorkspace.js
 
 /**
- * @file MDxWorkspace (V2 - Refactored)
+ * @file MDxWorkspace.js (V3 - 服务容器架构)
  * @description
- * 一个功能完备的库，将 mdx-editor 和新一代的 sessionUI（通过 ConfigManager 驱动）
+ * 一个功能完备的库，将 mdx-editor 和新一代的 sessionUI
  * 整合成一个统一、自洽且易于使用的可复用工作区组件。
- * 
- * [V2 核心重构]
- * 此版本不再自行管理持久化层，而是通过依赖注入接收一个已初始化的 `ConfigManager` 实例。
- * 这使得多个 MDxWorkspace 实例可以共享同一个数据后端（如全局标签库），同时通过 `namespace`
- * 保持各自文档数据的隔离，完美融入了新的应用级数据管理架构。
+ *
+ * [V3 核心重构]
+ * - **完全依赖注入**: 此版本不再自行管理持久化层或数据仓库，而是通过依赖注入接收一个已初始化的 `ConfigManager` 实例。
+ * - **工作区上下文**: 通过 `configManager.getWorkspace(this.namespace)` 获取与当前工作区绑定的、隔离的数据服务实例（如 ModuleRepository），
+ *   实现了完美的关注点分离和数据隔离。
+ * - **接口驱动**: 严格依赖 `ConfigManager` 提供的服务接口，而不是其内部实现。
  */
 
+// --- 依赖导入 ---
 import { debounce, isClass } from '../../common/utils/utils.js';
 // 编辑器核心组件及插件
 import { MDxEditor, defaultPlugins, MentionPlugin, MemoryPlugin, ClozeControlsPlugin } from '../../mdx/editor/index.js';
@@ -39,28 +41,56 @@ export class MDxWorkspace {
      * @param {object} [options.sidebar] - (可选) 侧边栏专属的配置选项。
      */
     constructor(options) {
+        // 验证传入的配置是否符合要求
         this._validateOptions(options);
         
         this.options = options;
         
-        /** @private @type {import('../../config/ConfigManager.js').ConfigManager} */
+        /** 
+         * @private 
+         * @type {import('../../config/ConfigManager.js').ConfigManager} 
+         * @description 对应用级配置管理器的引用。
+         */
         this.configManager = options.configManager;
-        /** @private @type {string} */
+        
+        /** 
+         * @private 
+         * @type {string} 
+         * @description 当前工作区的唯一命名空间。
+         */
         this.namespace = options.namespace;
+        
+        /**
+         * @private
+         * @type {import('../../config/core/WorkspaceContext.js').WorkspaceContext}
+         * @description [新增] 获取与此命名空间绑定的工作区上下文。
+         *              这是访问所有作用域服务（如 ModuleRepository）的唯一入口。
+         */
+        this.workspaceContext = this.configManager.getWorkspace(this.namespace);
 
+        // --- [核心修改] ---
+        // 构造函数现在只负责创建对象，不连接任何事件。
+        // this._sessionManager 仍然在这里创建，因为 start 方法需要它。
+        this._sessionManager = createSessionUI({
+            ...this.options.sidebar,
+            sessionListContainer: this.options.sidebarContainer,
+            documentOutlineContainer: this.options.outlineContainer,
+        }, this.configManager, this.namespace);
+
+        // --- 内部状态初始化 ---
         /** @private @type {MDxEditor | null} */
         this._editor = null;
         /** @private @type {ISessionManager | null} */
         this._sessionManager = null;
         /** @private @type {HTMLInputElement | null} */
         this._fileInput = null;
-        /** @private */
+        /** @private @type {Map<string, Function[]>} */
         this._eventEmitter = new Map();
         /** @private @type {Function[]} */
-        this._sessionManagerUnsubscribers = []; // [新增] 用于存储所有 sessionManager 的取消订阅函数
-        /** @private */
+        this._sessionManagerUnsubscribers = [];
+        /** @private @type {boolean} */
         this._isDirty = false;
-        /** @private */
+        /** @private @type {Function & {cancel?: Function}} */
         this._debouncedUpdater = debounce(async () => {
             const savedItem = await this._saveContent(true);
             if (savedItem) {
@@ -84,20 +114,15 @@ export class MDxWorkspace {
      */
     async start() {
         // --- 1. [核心重构] 初始化 SessionUI ---
-        // 不再自己创建 Adapter，而是直接使用注入的 ConfigManager。
-        // createSessionUI 的新签名 `(options, configManager)` 在这里被使用。
+        // `createSessionUI` 的签名已更新，现在直接接收 `configManager` 和 `namespace`。
+        // 它内部将使用 `configManager.getWorkspace(namespace)` 来获取正确的数据服务。
         this._sessionManager = createSessionUI({
             ...this.options.sidebar, // 传递用户自定义的 sidebar 配置
             sessionListContainer: this.options.sidebarContainer,
             documentOutlineContainer: this.options.outlineContainer,
-            storageKey: this.namespace,
-            // [新增] 将只读状态从 workspace 配置传递给 sidebar
-            readOnly: this.options.sidebar?.readOnly || false, 
-        }, this.configManager);
+        }, this.configManager, this.namespace); // 传递 configManager 和 namespace
         
-        // [重构] 拆分事件连接，使其更清晰
-        this._connectSessionManagerEvents();
-        
+
         // --- 2. 组装编辑器的插件和 Providers ---
         const editorOptions = this.options.editor || {};
         // Provider 的依赖 `sessionService` 依然从 `_sessionManager` 获取，这部分逻辑不变
@@ -117,35 +142,40 @@ export class MDxWorkspace {
             finalPlugins.push(new MemoryPlugin(), new ClozeControlsPlugin());
         }
 
-
-        // 4. 组装 MDxEditor 的最终配置
-        const activeItem = await this._sessionManager.start();
-        
-        const defaultTitleBarOptions = {
-            title: activeItem?.metadata.title || '文档',
+    // 3. 先创建编辑器（在启动 SessionManager 之前！）
+    const finalEditorOptions = {
+        ...editorOptions,
+        plugins: finalPlugins,
+        initialText: '加载中...',
+        titleBar: { 
+            title: '加载中...', 
             toggleSidebarCallback: () => this._sessionManager.toggleSidebar(),
             enableToggleEditMode: true,
             ...(editorOptions.showSaveButton !== false && { saveCallback: () => this.save() }),
-        };
-        const finalEditorOptions = {
-            ...editorOptions, // 用户的其他 editor 配置
-            plugins: finalPlugins,
-            initialText: activeItem?.content?.data || '请选择或创建一个会话。',
-            titleBar: { ...defaultTitleBarOptions, ...(editorOptions.titleBar || {}) },
-            // +++ 修改点 1: 将默认启动模式修改为 'render' +++
-            initialMode: editorOptions.initialMode || 'render',
-            clozeControls: editorOptions.clozeControl // [NEW] 显式传递 clozeControls 选项
-        };
-        
-        // --- 5. 初始化 MDxEditor ---
-        this._editor = new MDxEditor(this.options.editorContainer, finalEditorOptions);
+        },
+        initialMode: editorOptions.initialMode || 'render',
+        clozeControls: editorOptions.clozeControl
+    };
+    
+    this._editor = new MDxEditor(this.options.editorContainer, finalEditorOptions);
+    this._createCommandFacade(this._editor);
+    this._connectEditorEvents();
 
-        // --- 6. Dynamically create the command facade ---
-        this._createCommandFacade(this._editor);
-        this._connectEditorEvents();
-        window.addEventListener('beforeunload', this._handleBeforeUnload);
+    // 4. 现在连接 SessionManager 事件（此时 _editor 已存在）
+    this._connectSessionManagerEvents();
 
-        this._emit('ready', { workspace: this });
+    // 6. 🔧 启动 SessionManager（会自动触发 sessionSelected 事件，通过事件处理器更新编辑器）
+    await this._sessionManager.start();
+    
+    // 7. 🔧 删除手动设置内容的代码，完全依赖事件驱动
+    // 不再需要这段代码：
+    // if (activeItem) {
+    //     this._editor.setText(activeItem.content?.data || '');
+    //     this._editor.setTitle(activeItem.metadata.title || '文档');
+    // }
+
+    window.addEventListener('beforeunload', this._handleBeforeUnload);
+    this._emit('ready', { workspace: this });
     }
 
     // ==========================================================
@@ -342,8 +372,8 @@ console.log(`import into: ${targetParentId}`);
     }
     
     /**
-     * [新增] 专门用于连接 SessionManager 的内部事件到 Workspace 的方法
      * @private
+     * @description 验证构造函数选项。现在强制要求 `configManager` 和 `namespace`。
      */
 
     // ==========================================================
@@ -356,10 +386,11 @@ console.log(`import into: ${targetParentId}`);
         if (!options.sidebarContainer || !options.editorContainer) {
             throw new Error('MDxWorkspace 构造函数需要 "sidebarContainer" 和 "editorContainer" 选项。');
         }
-        if (!options.configManager || typeof options.configManager.modules?.get !== 'function') {
+        // [修改] 验证新的核心依赖
+        if (!options.configManager || typeof options.configManager.getWorkspace !== 'function') {
             throw new Error('MDxWorkspace 构造函数需要一个有效的 "configManager" 实例。');
         }
-        if (!options.namespace) {
+        if (typeof options.namespace !== 'string' || !options.namespace) {
             throw new Error('MDxWorkspace 构造函数需要一个唯一的 "namespace" 字符串。');
         }
     }
@@ -383,15 +414,31 @@ console.log(`import into: ${targetParentId}`);
             sm.on('menuItemClicked', ({ actionId, item }) => this._emit('menuItemClicked', { actionId, item })),
             // [MODIFIED] Handle 'item' instead of 'session'
             sm.on('sessionSelected', async ({ item }) => {
+                console.log('📂 选中的 item:', item);
+                console.log('📄 item.content:', item.content);
                 if (this._isDirty) await this.save();
+    // 🔍 添加这一行，看看是否执行到这里
+    console.log('✏️ 准备设置编辑器内容...');
                 const newContent = item?.content?.data || '请选择或创建一个会话。';
                 const newTitle = item?.metadata.title || '文档';
+    console.log('✏️ 内容长度:', newContent.length);
+    console.log('✏️ 内容预览:', newContent.substring(0, 100));
+
                 if (this._editor) {
-                    if (this._editor.getText() !== newContent) this._editor.setText(newContent);
+        console.log('🖊️ 调用 editor.setContent()');
+                    if (this._editor.getText() !== newContent){
+                     this._editor.setText(newContent);
+                     }
+                     else{
+                             console.log('🖊️ skip 调用 editor.setContent()');
+                     }
                     this._editor.setTitle(newTitle);
                     // +++ 修改点 2: 切换文档时，强制进入 renderer 模式 +++
                     this._editor.switchTo('render');
                 }
+                 else {
+        console.error('❌ 编辑器对象不存在！');
+    }
                 this._isDirty = false;
                 
                 // [MODIFIED] Emit 'item'
@@ -463,20 +510,16 @@ console.log(`import into: ${targetParentId}`);
 
         // 只有当内容发生变化时，才执行保存和摘要更新
         if (!isAutosave || contentChanged) {
-            // 步骤 1: 像以前一样，更新完整内容
-            await this._sessionManager.updateSessionContent(activeItem.id, newContent);
+            // [核心修复] 使用原子更新方法
+            const summary = (this._editor && typeof this._editor.getSummary === 'function')
+                ? await this._editor.getSummary()
+                : {}; // 获取摘要
 
-            // 步骤 2: [新增] 调用 getSummary 并更新元数据
-            // 我们检查 editor 实例是否存在，以及 getSummary 是否是一个函数
-            if (this._editor && typeof this._editor.getSummary === 'function') {
-                const summary = await this._editor.getSummary();
-                // 只有当编辑器提供了非空的摘要时才更新
-                if (summary !== null) {
-                    // 假设 sessionService 实现了一个 updateItemMetadata 方法
-                    // 这比为摘要创建一个专属方法更具扩展性
-                    await this._sessionManager.sessionService.updateItemMetadata(activeItem.id, { summary: summary });
-                }
-            }
+            // 将内容和元数据打包在一次调用中
+            await this._sessionManager.sessionService.updateSessionContentAndMeta(activeItem.id, {
+                content: newContent,
+                meta: { summary } // 要更新的元数据
+            });
             
             this._isDirty = false;
         }

@@ -1,5 +1,5 @@
 /**
- * @file #llm/settings/components/AgentEditor.js
+ * 文件: #llm/settings/components/AgentEditor.js
  * @description UI component for Agent CRUD operations.
  * @change
  * - Implemented a tabbed interface for better organization.
@@ -9,13 +9,24 @@
 import { TagsInput } from './TagsInput.js';
 
 export class AgentEditor {
-    // --- FIX: Accept lockedId in options ---
+    /**
+     * @param {HTMLElement} element
+     * @param {object} options
+     * @param {object[]} options.initialAgents - 初始 Agent 列表
+     * @param {string[]} options.allTags - 所有可用标签
+     * @param {object[]} options.initialConnections - 所有连接
+     * @param {Function} options.onNotify - 通知回调
+     * @param {Function} options.onAgentsChange - [核心修改] 保存 Agent 的回调
+     * @param {string|null} options.lockedId - 锁定的 Agent ID
+     */
     constructor(element, { initialAgents, allTags, initialConnections, onNotify, onAgentsChange, lockedId = null }) {
         this.element = element;
         this.agents = initialAgents;
         this.allTags = allTags;
         this.allConnections = initialConnections; // Store all connections
         this.onNotify = onNotify || ((message, type) => alert(`${type}: ${message}`));
+        
+        // [核心修改] 保存回调函数
         this.onAgentsChange = onAgentsChange;
         this.lockedId = lockedId; // Store locked ID
         this.selectedAgentId = null;
@@ -294,7 +305,12 @@ export class AgentEditor {
             name: row.children[0].value, type: row.children[1].value, description: row.children[2].value
         }));
         
-        this.onAgentsChange(this.agents);
+        // [核心修改] 调用注入的回调函数 (最终会调用 llmService.saveAgents)
+        if (this.onAgentsChange) {
+            this.onAgentsChange(this.agents);
+        } else {
+            console.error("AgentEditor: onAgentsChange 回调未提供。");
+        }
         this.isDirty = false; // --- FIX: Reset dirty state after save ---
         this.renderList(); // Re-render list in case name/tags changed
         this.onNotify('Agent saved!', 'success'); // REPLACED alert()

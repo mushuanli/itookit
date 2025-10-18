@@ -10,6 +10,16 @@
 import { PROVIDER_DEFAULTS } from '../../../config/llmProvider.js';
 
 export class LibrarySettings {
+    /**
+     * @param {HTMLElement} element - 容器元素
+     * @param {object} initialConfig - 初始配置 { connections }
+     * @param {import('../../../config/services/LLMConfigService').LLMConfigService} configService - [注入] LLM 配置服务
+     * @param {object} options - 其他选项
+     * @param {Function} options.onTest - 测试连接的回调函数
+     * @param {Function} options.onNotify - 通知回调
+     * @param {string|null} options.lockedId - 锁定的连接ID
+     * @param {object[]} options.allAgents - 所有 Agent 定义，用于依赖检查
+     */
     constructor(element, initialConfig, configService, { 
         onTest = async () => ({success: false, message: 'No test handler configured.'}),
         onNotify = (message, type) => alert(`${type}: ${message}`),
@@ -20,7 +30,7 @@ export class LibrarySettings {
         this.element = element;
         this.config = initialConfig;
         
-        // +++ 修改：接收 Service 而非回调 +++
+        // [核心修改] 直接保存对服务实例的引用
         this.configService = configService;
         
         this.onTest = onTest;
@@ -366,11 +376,9 @@ export class LibrarySettings {
     async _handleSubmit(e) {
         if (e.target.id === 'connection-form') {
             e.preventDefault();
-        console.log('[LibrarySettings] >>> 表单提交开始');
             const formData = new FormData(e.target);
             const connIndex = this.config.connections.findIndex(c => c.id === this.selectedConnectionId);
-        console.log('[LibrarySettings] 正在保存 Connection ID:', this.selectedConnectionId);
-        console.log('[LibrarySettings] Connection 索引:', connIndex);
+
             if (connIndex > -1) {
                 const models = Array.from(this.element.querySelectorAll('#models-list .model-row')).map(row => {
                     const id = row.children[0].value.trim();
@@ -395,13 +403,12 @@ export class LibrarySettings {
 
                 this.config.connections[connIndex] = updatedConn;
                 
-                console.log('[LibrarySettings] ✅ 正在调用 Service 层保存');
-                
-                // +++ 核心修改：调用 Service 层的方法 +++
+                // [核心修改] 调用注入的 configService 的方法来保存
                 try {
+                    // 传递旧值快照和新值，服务层将处理业务逻辑
                     await this.configService.updateConnections(
-                        this._connectionsSnapshot,  // 旧值（快照）
-                        this.config.connections      // 新值
+                        this._connectionsSnapshot,
+                        this.config.connections
                     );
                     
                     // 更新快照
@@ -412,7 +419,7 @@ export class LibrarySettings {
                     this.onNotify('Connection saved!', 'success');
                     console.log('[LibrarySettings] <<< 表单提交完成');
                 } catch (error) {
-                    console.error('[LibrarySettings] ❌ 保存失败:', error);
+                    console.error('保存 Connection 失败:', error);
                     this.onNotify(`Failed to save: ${error.message}`, 'error');
                 }
             } else {
