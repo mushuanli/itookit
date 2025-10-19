@@ -36,7 +36,6 @@ export class SessionService extends ISessionService {
     handleRepositoryLoad(moduleTree) {
     console.log('[SessionService] 收到模块树:', moduleTree);
         const items = dataAdapter.treeToItems(moduleTree);
-    console.log('[SessionService] 转换后的 items:', items);
         const tags = dataAdapter.buildTagsMap(items);
         this.store.dispatch({ type: 'STATE_LOAD_SUCCESS', payload: { items, tags } });
     }

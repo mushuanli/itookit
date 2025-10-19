@@ -11,7 +11,7 @@ import { ServiceContainer } from './core/ServiceContainer.js';
 import { CorePlugin } from './plugins/CorePlugin.js';
 import { GlobalServicesPlugin } from './plugins/GlobalServicesPlugin.js';
 import { ModuleSystemPlugin } from './plugins/ModuleSystemPlugin.js';
-import { DEFAULT_CONNECTION, DEFAULT_AGENT } from './llmProvider.js';
+import { LLM_DEFAULT_CONNECTION, LLM_DEFAULT_AGENT } from './configData.js';
 
 // 模块级变量，用于实现单例模式
 let instance = null;
@@ -84,16 +84,16 @@ export class ConfigManager {
             
             
             const connections = await llmService.getConnections();
-            if (!connections.some(c => c.id === DEFAULT_CONNECTION.id)) {
+            if (!connections.some(c => c.id === LLM_DEFAULT_CONNECTION.id)) {
                 console.log("ConfigManager: 未找到默认 Connection，正在创建...");
-                await llmService.addConnection(JSON.parse(JSON.stringify(DEFAULT_CONNECTION)));
+                await llmService.addConnection(JSON.parse(JSON.stringify(LLM_DEFAULT_CONNECTION)));
             }
 
             const agents = await llmService.getAgents();
-            if (!agents.some(a => a.id === DEFAULT_AGENT.id)) {
+            if (!agents.some(a => a.id === LLM_DEFAULT_AGENT.id)) {
                 console.log("ConfigManager: 未找到默认 Agent，正在创建...");
                 await tagRepo.addTag('default');
-                await llmService.addAgent({ ...DEFAULT_AGENT }, tagRepo); 
+                await llmService.addAgent({ ...LLM_DEFAULT_AGENT }, tagRepo); 
             }
         } catch (error) {
             console.error('[ConfigManager] 确保默认LLM配置失败:', error);

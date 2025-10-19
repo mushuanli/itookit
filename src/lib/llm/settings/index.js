@@ -23,14 +23,14 @@ import { WorkflowManager } from './components/WorkflowManager.js';
 
 // --- [核心修改] 导入 ConfigManager 单例 ---
 import { ConfigManager } from '../../config/ConfigManager.js';
-// --- 移除: 不再需要直接导入 PROVIDER_DEFAULTS 来构造默认值 ---
-import { DEFAULT_ID } from '../../config/llmProvider.js';
+// --- 移除: 不再需要直接导入 LLM_PROVIDER_DEFAULTS 来构造默认值 ---
+import { LLM_DEFAULT_ID } from '../../config/configData.js';
 import { EVENTS } from '../../config/shared/constants.js'; // <--- [修复] 添加这一行导入
 
 // Constants for Defaults
 const CONSTANTS = {
-    DEFAULT_CONN_ID: DEFAULT_ID,
-    DEFAULT_AGENT_ID: DEFAULT_ID,
+    DEFAULT_CONN_ID: LLM_DEFAULT_ID,
+    DEFAULT_AGENT_ID: LLM_DEFAULT_ID,
 };
 
 // +++ MODIFIED: Import the new service interface for type checking and clarity.

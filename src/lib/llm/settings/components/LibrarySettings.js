@@ -7,7 +7,7 @@
  * - REFACTORED: Added a "Test Connection" button and status display area.
  * - REFACTORED: Constructor now accepts an onTest callback for dependency injection.
  */
-import { PROVIDER_DEFAULTS } from '../../../config/llmProvider.js';
+import { LLM_PROVIDER_DEFAULTS } from '../../../config/configData.js';
 
 export class LibrarySettings {
     /**
@@ -43,7 +43,7 @@ export class LibrarySettings {
         // +++ 新增：保存快照用于变更检测 +++
         this._connectionsSnapshot = null;
 
-        this.providers = Object.keys(PROVIDER_DEFAULTS);
+        this.providers = Object.keys(LLM_PROVIDER_DEFAULTS);
         
         // --- Store the provider before a change event ---
         this.providerBeforeChange = null; 
@@ -81,7 +81,7 @@ export class LibrarySettings {
         const listHtml = (this.config.connections || []).map(conn => `
             <div class="list-item ${conn.id === this.selectedConnectionId ? 'selected' : ''}" data-id="${conn.id}">
                 <strong>${conn.name}</strong>
-                <small>${PROVIDER_DEFAULTS[conn.provider]?.name || conn.provider}</small>
+                <small>${LLM_PROVIDER_DEFAULTS[conn.provider]?.name || conn.provider}</small>
             </div>
         `).join('');
         this.ui.listPane.innerHTML = `<h3>Connections</h3>${listHtml}<br/><button id="new-connection-btn" class="settings-btn">New Connection</button>`;
@@ -133,7 +133,7 @@ export class LibrarySettings {
                     <label>Provider</label>
                     <select name="provider" required>
                         ${this.providers.map(p => 
-                            `<option value="${p}" ${conn.provider === p ? 'selected' : ''}>${PROVIDER_DEFAULTS[p].name}</option>`
+                            `<option value="${p}" ${conn.provider === p ? 'selected' : ''}>${LLM_PROVIDER_DEFAULTS[p].name}</option>`
                         ).join('')}
                     </select>
                 </div>
@@ -190,11 +190,9 @@ export class LibrarySettings {
         if (!form) return;
 
         const oldProviderId = this.providerBeforeChange;
-        const oldDefaults = PROVIDER_DEFAULTS[oldProviderId] || { baseURL: '', models: [] };
-        const newDefaults = PROVIDER_DEFAULTS[newProviderId] || { baseURL: '', models: [] };
+        const oldDefaults = LLM_PROVIDER_DEFAULTS[oldProviderId] || { baseURL: '', models: [] };
+        const newDefaults = LLM_PROVIDER_DEFAULTS[newProviderId] || { baseURL: '', models: [] };
 
-    console.log('[LibrarySettings] 旧默认配置:', oldDefaults);
-    console.log('[LibrarySettings] 新默认配置:', newDefaults);
         // 1. Update Base URL non-destructively
         const baseUrlInput = form.querySelector('input[name="baseURL"]');
         const isBaseUrlUnchanged = baseUrlInput.value.trim() === '' || baseUrlInput.value === oldDefaults.baseURL;
@@ -219,8 +217,6 @@ export class LibrarySettings {
                 )
             );
 
-    console.log('[LibrarySettings] 模型列表是否未改变:', isModelListUnchanged);
-    console.log('[LibrarySettings] 旧默认模型:', oldDefaultModels);
         if (isModelListUnchanged) {
         console.log('[LibrarySettings] 正在更新模型列表为新 Provider 的默认值');
             modelsListEl.innerHTML = (newDefaults.models || []).map(model => `
@@ -232,9 +228,6 @@ export class LibrarySettings {
             `).join('');
         console.log('[LibrarySettings] 模型列表已更新为:', newDefaults.models);
         }
-    console.log('[LibrarySettings] <<< _handleProviderChange 执行完成');
-    console.log('[LibrarySettings] ⚠️ 注意：此时尚未保存到数据库，需要点击 Save 按钮');
-
     }
 
     _handleChange(e) {
@@ -261,7 +254,7 @@ export class LibrarySettings {
             if(this.isDirty && !confirm("You have unsaved changes. Are you sure you want to discard them?")) return;
             const newId = `conn-${Date.now()}`;
             const defaultProvider = this.providers[0];
-            const defaults = PROVIDER_DEFAULTS[defaultProvider];
+            const defaults = LLM_PROVIDER_DEFAULTS[defaultProvider];
             const newConnection = {
                 id: newId,
                 name: "New Connection",

@@ -597,13 +597,21 @@ export class MDxEditor extends IEditor {
                 <div class="mdx-title-bar-controls right"></div>
             </div>` : '';
 
-        this.container.innerHTML = `
-            ${titleBarHTML}
-            ${this.showToolbar ? `<div class="mdx-toolbar"></div>` : ''}
-            <div class="mdx-editor-view"></div>
-            <div class="mdx-render-view rich-content-area"></div>
-        `;
-        // +++ END MODIFICATION +++
+    // +++ START MODIFICATION +++
+    const toolbarHTML = this.showToolbar ? `
+        <div class="mdx-toolbar">
+            <div class="mdx-toolbar-main-controls"></div>
+            <div class="mdx-toolbar-mode-switcher"></div>
+        </div>
+    ` : '';
+
+    this.container.innerHTML = `
+        ${titleBarHTML}
+        ${toolbarHTML} 
+        <div class="mdx-editor-view"></div>
+        <div class="mdx-render-view rich-content-area"></div>
+    `;
+    // +++ END MODIFICATION +++
 
         this.editorEl = this.container.querySelector('.mdx-editor-view');
         this.renderEl = this.container.querySelector('.mdx-render-view');

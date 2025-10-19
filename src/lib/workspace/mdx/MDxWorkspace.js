@@ -36,6 +36,7 @@ export class MDxWorkspace {
      * @param {string} options.namespace - [新] **必需** 此工作区实例的唯一命名空间，用于从 ConfigManager 获取对应的数据仓库。
      * @param {HTMLElement} options.sidebarContainer - **必需** 用于承载会话列表的 HTML 元素。
      * @param {HTMLElement} options.editorContainer - **必需** 用于承载编辑器的 HTML 元素。
+     * @param {string} [options.newSessionTemplate=''] - [新增] 创建新会话时使用的默认 Markdown 内容模板。
      * @param {HTMLElement} [options.outlineContainer] - (可选) 用于承载文档大纲的 HTML 元素。
      * @param {object} [options.editor] - (可选) 编辑器专属的配置选项。
      * @param {object} [options.sidebar] - (可选) 侧边栏专属的配置选项。
@@ -120,6 +121,7 @@ export class MDxWorkspace {
             ...this.options.sidebar, // 传递用户自定义的 sidebar 配置
             sessionListContainer: this.options.sidebarContainer,
             documentOutlineContainer: this.options.outlineContainer,
+            newSessionContent: this.options.newSessionTemplate || '', // <--- [修改] 传递模板
         }, this.configManager, this.namespace); // 传递 configManager 和 namespace
         
 
@@ -139,7 +141,7 @@ export class MDxWorkspace {
 
         // --- [新增] Cloze Control 功能注入 ---
         if (editorOptions.clozeControl) {
-            finalPlugins.push(new MemoryPlugin(), new ClozeControlsPlugin());
+            finalPlugins.push(new ClozeControlsPlugin());
         }
 
     // 3. 先创建编辑器（在启动 SessionManager 之前！）
@@ -278,7 +280,6 @@ export class MDxWorkspace {
     async importFiles(targetParentId) {
         if (!this._sessionManager) return [];
         let parentId = targetParentId;
-console.log(`import into: ${targetParentId}`);
 
         // 如果没有传入 targetParentId，则根据当前选择智能判断（保持原有逻辑）
         if (parentId === undefined) {
@@ -414,18 +415,12 @@ console.log(`import into: ${targetParentId}`);
             sm.on('menuItemClicked', ({ actionId, item }) => this._emit('menuItemClicked', { actionId, item })),
             // [MODIFIED] Handle 'item' instead of 'session'
             sm.on('sessionSelected', async ({ item }) => {
-                console.log('📂 选中的 item:', item);
-                console.log('📄 item.content:', item.content);
                 if (this._isDirty) await this.save();
     // 🔍 添加这一行，看看是否执行到这里
-    console.log('✏️ 准备设置编辑器内容...');
                 const newContent = item?.content?.data || '请选择或创建一个会话。';
                 const newTitle = item?.metadata.title || '文档';
-    console.log('✏️ 内容长度:', newContent.length);
-    console.log('✏️ 内容预览:', newContent.substring(0, 100));
 
                 if (this._editor) {
-        console.log('🖊️ 调用 editor.setContent()');
                     if (this._editor.getText() !== newContent){
                      this._editor.setText(newContent);
                      }

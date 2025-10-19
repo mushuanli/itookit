@@ -6,7 +6,7 @@ import { BaseProvider } from './base.js';
 import { LLMError } from '../errors.js';
 import { processAttachment } from '../utils/file-processor.js';
 // +++ 导入共享数据
-import { PROVIDER_DEFAULTS } from '../../../config/llmProvider.js';
+import { LLM_PROVIDER_DEFAULTS } from '../../../config/configData.js';
 
 // --- 删除旧的 PROVIDER_URLS 常量 ---
 
@@ -14,7 +14,7 @@ export class OpenAICompatibleProvider extends BaseProvider {
     constructor(config) {
         super(config);
         this.providerName = config.provider;
-        const defaultBaseURL = PROVIDER_DEFAULTS[this.providerName]?.baseURL;
+        const defaultBaseURL = LLM_PROVIDER_DEFAULTS[this.providerName]?.baseURL;
         this.apiBaseUrl = config.apiBaseUrl || defaultBaseURL;
 
         if (!this.apiBaseUrl) {

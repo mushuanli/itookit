@@ -6,7 +6,7 @@ import { BaseProvider } from './base.js';
 import { LLMError } from '../errors.js';
 import { processAttachment } from '../utils/file-processor.js';
 // +++ 导入共享数据
-import { PROVIDER_DEFAULTS } from '../../../config/llmProvider.js';
+import { LLM_PROVIDER_DEFAULTS } from '../../../config/configData.js';
 
 export class GeminiProvider extends BaseProvider {
     constructor(config) {
@@ -15,7 +15,7 @@ export class GeminiProvider extends BaseProvider {
         
         // +++ Gemini 的 baseURL 比较特殊，因为它依赖模型名称
         // 我们只保存基础部分
-        const defaultBaseURL = PROVIDER_DEFAULTS[this.providerName]?.baseURL;
+        const defaultBaseURL = LLM_PROVIDER_DEFAULTS[this.providerName]?.baseURL;
         const providedBaseURL = config.apiBaseUrl;
 
         // Gemini 的 URL 格式是 BASE/MODEL:ACTION，所以我们只关心 BASE 部分

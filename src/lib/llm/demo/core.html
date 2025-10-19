@@ -343,7 +343,7 @@
         import { LLMService } from '../core/LLMService.js';
         // 导入 LLM 核心逻辑
         import { LLMChain } from '../core/index.js';
-        import { PROVIDER_DEFAULTS } from '../llmProvider.js';
+        import { LLM_PROVIDER_DEFAULTS } from '../llmProvider.js';
         // [新增] 导入用于本地开发的配置文件
         import { API_KEY as DEV_API_KEY } from '../../demo/config.js';
 
@@ -441,7 +441,7 @@
                     
                     await this.configManager.llm.addConnection({
                         id: `conn_${Date.now()}`, name, provider, apiKey,
-                        baseURL: baseURL || PROVIDER_DEFAULTS[provider]?.baseURL || '',
+                        baseURL: baseURL || LLM_PROVIDER_DEFAULTS[provider]?.baseURL || '',
                     });
                     // 清空表单
                     document.getElementById('new-conn-name').value = '';

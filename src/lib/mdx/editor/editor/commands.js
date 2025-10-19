@@ -304,6 +304,30 @@ export function insertTable(view) {
 }
 
 /**
+ * [补全] 为选区添加或包裹 Markdown 链接。
+ * 如果没有选区，则插入一个链接模板。
+ * @param {import("@codemirror/view").EditorView} view
+ */
+export function applyLink(view) {
+    const url = prompt("请输入链接 URL:", "https://");
+    if (!url) return; // 用户取消或输入为空
+
+    const { from, to } = view.state.selection.main;
+    const selectedText = view.state.doc.sliceString(from, to);
+    
+    // 如果没有选择文本，使用 "链接文本" 作为占位符
+    const linkText = selectedText || "链接文本";
+    const newText = `[${linkText}](${url})`;
+
+    view.dispatch({
+        changes: { from, to, insert: newText },
+        selection: { anchor: from + 1, head: from + 1 + linkText.length } // 选中链接文本部分
+    });
+    view.focus();
+}
+
+
+/**
  * [NEW] 插入图片 Markdown。
  * @param {import("@codemirror/view").EditorView} view
  */

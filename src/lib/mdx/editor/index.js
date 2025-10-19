@@ -46,6 +46,7 @@ import { CodeBlockControlsPlugin } from './plugins/codeblock-controls.plugin.js'
 const defaultPlugins = [
     new FoldablePlugin(),
     new ClozePlugin(),
+    new MemoryPlugin(),
     new FormattingPlugin(),
     new MathJaxPlugin(),
     new MediaPlugin(),

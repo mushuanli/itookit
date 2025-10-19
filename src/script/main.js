@@ -8,6 +8,7 @@ import { MDxWorkspace } from '../lib/workspace/mdx/MDxWorkspace.js';
 import { createLLMWorkspace } from '../lib/workspace/llm/index.js';
 import { createSettingsWorkspace } from '../lib/workspace/settings/index.js';
 import { ConfigManager } from '../lib/config/ConfigManager.js';
+import {MDX_EDITOR_GUIDE_TEMPLATE} from '../lib/config/configData.js';
 
 // 将所有应用逻辑都包裹在 DOMContentLoaded 事件中，确保 DOM 准备就绪
 document.addEventListener('DOMContentLoaded', () => {
@@ -67,6 +68,8 @@ document.addEventListener('DOMContentLoaded', () => {
                             sidebarContainer: document.getElementById('mdx-sidebar'),
                             editorContainer: document.getElementById('mdx-editor'),
                             outlineContainer: document.getElementById('mdx-outline'),
+                            newSessionTemplate: MDX_EDITOR_GUIDE_TEMPLATE, // <--- 在这里传入
+                            editor: {showToolbar:true,clozeControl:true}
                         });
                         await mdxWorkspace.start();
                         initializedWorkspaces[workspaceId] = mdxWorkspace;

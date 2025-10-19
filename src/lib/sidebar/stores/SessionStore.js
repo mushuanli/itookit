@@ -613,14 +613,14 @@ export class SessionStore {
         console.log('Action Payload:', action.payload);
         // 使用 JSON.stringify 创建状态快照，避免 console 引用问题
         const previousStateSnapshot = JSON.parse(JSON.stringify(this._state, (k, v) => v instanceof Set ? Array.from(v) : v));
-        console.log('State BEFORE:', previousStateSnapshot);
+        //console.log('State BEFORE:', previousStateSnapshot);
 
         const previousState = this._state;
         this._state = this._reducer(previousState, action);
 
         // +++ DEBUG LOG +++
-        const newStateSnapshot = JSON.parse(JSON.stringify(this._state, (k, v) => v instanceof Set ? Array.from(v) : v));
-        console.log('State AFTER:', newStateSnapshot);
+        //const newStateSnapshot = JSON.parse(JSON.stringify(this._state, (k, v) => v instanceof Set ? Array.from(v) : v));
+        //console.log('State AFTER:', newStateSnapshot);
         console.groupEnd();
 
         if (previousState !== this._state) {
