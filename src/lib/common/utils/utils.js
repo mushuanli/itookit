@@ -110,3 +110,11 @@ export function generateUUID() {
         return v.toString(16);
     });
 }
+
+/**
+ * Generates a simplified, shorter UUID. Good enough for this context.
+ * @returns {string} e.g., 'f4a2bcde'
+ */
+export function generateShortUUID() {
+    return Math.random().toString(36).substring(2, 10);
+}
