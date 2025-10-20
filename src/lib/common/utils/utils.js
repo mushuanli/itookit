@@ -98,3 +98,15 @@ export function debounce(func, delay) {
 export function isClass(v) {
   return typeof v === 'function' && /^\s*class\s+/.test(v.toString());
 }
+
+/**
+ * 生成一个符合 RFC4122 v4 规范的通用唯一标识符 (UUID)。
+ * @returns {string} - 例如 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx' 格式的字符串。
+ */
+export function generateUUID() {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        const r = Math.random() * 16 | 0;
+        const v = c === 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+    });
+}
