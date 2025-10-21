@@ -11,7 +11,7 @@ import { ServiceContainer } from './core/ServiceContainer.js';
 import { CorePlugin } from './plugins/CorePlugin.js';
 import { GlobalServicesPlugin } from './plugins/GlobalServicesPlugin.js';
 import { ModuleSystemPlugin } from './plugins/ModuleSystemPlugin.js';
-import { LLM_DEFAULT_CONNECTION, LLM_DEFAULT_AGENT } from './configData.js';
+import { LLM_DEFAULT_CONNECTION, LLM_DEFAULT_AGENT } from '../common/configData.js';
 
 // 模块级变量，用于实现单例模式
 let instance = null;

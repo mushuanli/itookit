@@ -26,20 +26,49 @@ export class NodeRepository {
     async createNode(type, moduleName, path, extraData = {}) {
         const pathSegments = path.split('/').filter(Boolean);
         const name = pathSegments.pop() || '';
-        const parentPath = '/' + pathSegments.join('/');
+        // [修正] 修正 parentPath 的计算逻辑，确保根目录的父路径为 null
+        const parentPath = pathSegments.length > 0 ? '/' + pathSegments.join('/') : (path === '/' ? null : '/');
 
         const tx = await this.db.getTransaction(STORES.NODES, 'readwrite');
         const store = tx.objectStore(STORES.NODES);
         const index = store.index('by_path');
 
-        // 查找父节点
-        const parentRequest = index.get(parentPath === '/' ? '/' : parentPath);
-        const parent = await new Promise(resolve => {
-            parentRequest.onsuccess = () => resolve(parentRequest.result);
-        });
-        
-        // 根目录特殊处理
         let parentId = null;
+        let parent = null;
+
+        // [修正] 只有在需要父目录时才查找
+        if (parentPath) {
+            const parentRequest = index.get(parentPath);
+            parent = await new Promise((resolve, reject) => {
+                parentRequest.onsuccess = () => resolve(parentRequest.result);
+                parentRequest.onerror = reject;
+            });
+        }
+
+        // [核心修正] 如果父目录是根目录 ("/") 但它不存在，则自动创建它。
+        // 这通常发生在为一个新模块创建第一个文件/目录时。
+        if (parentPath === '/' && !parent) {
+            console.warn(`Root path "/" not found for module "${moduleName}". Creating it automatically.`);
+            const rootId = `${moduleName}-root-${uuidv4()}`;
+            const now = new Date();
+            const rootNode = {
+                id: rootId,
+                type: 'directory',
+                moduleName,
+                path: '/',
+                name: '', // 根目录没有名字
+                parentId: null,
+                createdAt: now,
+                updatedAt: now,
+                meta: {},
+            };
+            await store.put(rootNode);
+            this.events.publish(EVENTS.NODE_ADDED, { newNode: rootNode, parentId: null });
+            
+            // 将自动创建的根节点作为当前操作的父节点
+            parent = rootNode; 
+        }
+
         if (path !== '/') {
             if (!parent) throw new Error(`Parent path "${parentPath}" not found.`);
             parentId = parent.id;

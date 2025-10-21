@@ -19,7 +19,8 @@ import { LLMRepository } from './repositories/LLMRepository.js';
 import { LLMService } from './services/LLMService.js';
 import { STORES } from './constants.js';
 
-class ConfigManager {
+// [修改] 导出 ConfigManager 类，以便进行类型检查和依赖注入
+export class ConfigManager {
     constructor() {
         if (ConfigManager.instance) {
             return ConfigManager.instance;

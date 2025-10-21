@@ -6,7 +6,7 @@ import { BaseProvider } from './base.js';
 import { LLMError } from '../errors.js';
 import { processAttachment } from '../utils/file-processor.js';
 // +++ 导入共享数据
-import { LLM_PROVIDER_DEFAULTS } from '../../../config/configData.js';
+import { LLM_PROVIDER_DEFAULTS } from '../../../common/configData.js';
 
 export class GeminiProvider extends BaseProvider {
     constructor(config) {

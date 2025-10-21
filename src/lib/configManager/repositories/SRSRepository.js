@@ -1,6 +1,6 @@
 // #configManager/repositories/SRSRepository.js
 import { STORES, EVENTS } from '../constants.js';
-import { generateShortUUID } from '../utils.js'; // 引入工具函数
+import { generateShortUUID } from '../../common/utils/utils.js';
 
 export class SRSRepository {
     constructor(db, eventManager) { // [修改] 注入 eventManager

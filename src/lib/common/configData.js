@@ -109,7 +109,7 @@ const defaultProviderKey = getDefaultProviderKey();
 const defaultProviderConfig = LLM_PROVIDER_DEFAULTS[defaultProviderKey];
 
 /**
- * @type {import('./shared/types.js').LLMProviderConnection}
+ * @type {import('../config/shared/types.js').LLMProviderConnection}
  * 默认连接的模板，如果不存在则会被创建。
  */
 export const LLM_DEFAULT_CONNECTION = {
@@ -123,7 +123,7 @@ export const LLM_DEFAULT_CONNECTION = {
 };
 
 /**
- * @type {import('./shared/types.js').LLMAgentDefinition}
+ * @type {import('../config/shared/types.js').LLMAgentDefinition}
  * 默认智能体的模板，如果不存在则会被创建。
  */
 export const LLM_DEFAULT_AGENT = {

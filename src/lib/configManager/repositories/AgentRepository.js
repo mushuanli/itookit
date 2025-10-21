@@ -4,7 +4,7 @@
  * @fileoverview 负责 Agent (智能代理) 信息的持久化和查询。
  */
 import { STORES } from '../constants.js';
-import { generateShortUUID } from '../utils.js';
+import { generateShortUUID } from '../../common/utils/utils.js';
 
 export class AgentRepository {
     /**

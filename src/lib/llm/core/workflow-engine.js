@@ -4,11 +4,11 @@
  */
 
 // JSDoc-style imports for type checking
-/** @typedef {import('../../config/shared/types.js').LibraryConfig} LibraryConfig */
-/** @typedef {import('../../config/shared/types.js').AgentDefinition} AgentDefinition */
-/** @typedef {import('../../config/shared/types.js').WorkflowDefinition} WorkflowDefinition */
-/** @typedef {import('../../config/shared/types.js').WorkflowNode} WorkflowNode */
-/** @typedef {import('../../config/shared/types.js').WorkflowLink} WorkflowLink */
+/** @typedef {import('../../configManager/shared/types.js').LibraryConfig} LibraryConfig */
+/** @typedef {import('../../configManager/shared/types.js').AgentDefinition} AgentDefinition */
+/** @typedef {import('../../configManager/shared/types.js').WorkflowDefinition} WorkflowDefinition */
+/** @typedef {import('../../configManager/shared/types.js').WorkflowNode} WorkflowNode */
+/** @typedef {import('../../configManager/shared/types.js').WorkflowLink} WorkflowLink */
 
 /**
  * @typedef {object} WorkflowEngineOptions

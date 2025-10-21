@@ -5,7 +5,7 @@
  * 包括从文件内容中解析任务，以及按用户、按时间范围查询任务。
  */
 import { STORES } from '../constants.js';
-import { generateShortUUID } from '../utils.js'; // Assuming you have this utility
+import { generateShortUUID } from '../../common/utils/utils.js';
 
 export class TaskRepository {
     /**
