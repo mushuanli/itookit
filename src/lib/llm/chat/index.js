@@ -1,39 +1,47 @@
 // 文件: #llm/chat/index.js
 
 /**
- * @file LLMChatUI.js (V3 - 服务容器架构)
+ * @file LLMChatUI.js (V4 - 最终封装版)
  * @description 组合 historyUI 和 inputUI 的完整聊天界面编排器。
- *
- * [V3 核心重构]
- * - **强制依赖注入**: 组件完全依赖注入的 `ConfigManager` 来获取响应式配置数据。
- * - **解耦**: 不再直接管理 agents/connections 数据，而是将其传递给子组件或依赖 `LLMService`。
- * - **服务化**: 依赖 `LLMService` 单例来处理所有与 LLM 后端的交互，自身不创建客户端。
- * - **IEditor 接口实现**: 作为一个实现了 `IEditor` 接口的可嵌入组件，与宿主环境通过 `setText`/`getText` 等标准方法交换数据。
+ * 
+ * [V4 核心架构]
+ * - **完全封装**: 通过 `createLLMChatUI` 工厂函数创建实例，上层应用无需关心其内部依赖（如 ConfigManager, LLMService）。
+ * - **异步初始化**: 引入 `async init()` 方法，正确处理依赖服务的异步加载流程。
+ * - **严格依赖注入**: 组件的所有外部服务（主要是 ConfigManager）都通过构造函数注入，提高了可测试性和模块独立性。
+ * - **职责下沉**: 将 Agent 列表的加载和响应式更新等状态管理职责完全下放给子组件 (`LLMInputUI`, `LLMHistoryUI`)，自身仅做事件编排。
+ * - **实现 IEditor 接口**: 作为一个标准的可嵌入编辑器组件，通过 `setText`/`getText` 与宿主环境交换数据，并通过 `on` 方法广播事件。
  */
 
 
 import './styles.css';
 import { LLMInputUI } from '../input/index.js';
-import { createHistoryUI } from '../history/index.js';
+import { createHistoryUI } from '../history/index.js'; // createHistoryUI 是异步的
 import { registerOrchestratorCommands } from './commands.js';
 import { IEditor } from '../../common/interfaces/IEditor.js';
-import { EventEmitter } from '../history/utils/EventEmitter.js';
+import { EventEmitter } from '../history/utils/EventEmitter.js'; // 假设这是一个简单的事件发射器实现
 
 // --- 核心服务和接口导入 ---
-import { ConfigManager } from '../../config/ConfigManager.js';
-import { LLMService,testLLMConnection } from '../core/index.js';
+// [修改] 只导入类型和单例获取函数，而不是直接导入服务类
+import { ConfigManager, getConfigManager } from '../../configManager/index.js';
 import { MessagePair } from '../history/core/MessagePair.js';
 /** @typedef {import('../../common/interfaces/IFileStorageAdapter.js').IFileStorageAdapter} IFileStorageAdapter */
-// 假设默认文件存储适配器的路径
-import { FileStorageAdapter } from '../../common/utils/FileStorageAdapter.js'; 
+// 假设默认文件存储适配器的路径，如果不存在则提供一个 mock 实现
+class DefaultFileStorageAdapter {
+    async upload(file) { console.warn("未提供文件存储适配器，上传功能将不可用。"); return { url: URL.createObjectURL(file), id: file.name, name: file.name, size: file.size, type: file.type }; }
+    async delete(fileId) { console.warn("未提供文件存储适配器，删除功能将不可用。"); }
+}
 
+/**
+ * LLMChatUI 类，实现了 IEditor 接口的聊天组件。
+ * @implements {IEditor}
+ */
 export class LLMChatUI extends IEditor {
     /**
-     * 创建一个完整的聊天 UI 实例。
+     * @private 构造函数被设计为私有的，请使用 `createLLMChatUI` 工厂函数创建实例。
      * @param {HTMLElement} element - 聊天 UI 的容器元素。
      * @param {ConfigManager} options.configManager - [必需] 应用程序的全局配置管理器实例。
      * @param {object} options - 配置选项。
-     * @param {string} [options.sessionId] - [可选] 用于持久化的当前聊天会话的唯一 ID。
+     * @param {ConfigManager} options.configManager - [必需] 应用程序的全局配置管理器实例。
      * @param {IFileStorageAdapter} [options.fileStorage] - [可选] 用于处理文件上传的服务。
      * @param {object} [options.inputUIConfig] - [可选] 传递给 LLMInputUI 的额外配置。
      * @param {object} [options.historyUIConfig] - [可选] 传递给 LLMHistoryUI 的额外配置。
@@ -52,35 +60,18 @@ export class LLMChatUI extends IEditor {
         
         // --- 2. 保存核心服务引用 ---
         this.configManager = options.configManager;
-        this.llmService = LLMService.getInstance(); // 获取 LLMService 的全局单例
+        // [核心修改] 从注入的 configManager 中获取 llmService，而不是全局获取
+        this.llmService = this.configManager.llm;
+        
         this.events = new EventEmitter();
         this.activeRequestController = null;
         this._subscriptions = []; // 用于管理自身的事件订阅
+        this.options = options; // 保存选项以备 init 使用
 
-        // --- 3. 持久化服务配置 (仅文件服务) ---
-        // [已移除] 不再需要 sessionId 和 sessionStorage，数据持久化由宿主负责。
-        this.fileStorage = options.fileStorage || new FileStorageAdapter();
-
-        // --- 3. 从 ConfigManager 响应式地获取初始数据 ---
-        // 注意：这里只是获取“初始”数据。后续的更新将由子组件自己通过订阅事件来处理。
-        const initialAgents = this.configManager.llmService.getAgents(); // 直接从 Service 获取
-        if (initialAgents.length === 0) {
-            console.warn("[LLMChatUI] 警告: 初始化时未在 ConfigManager 中找到任何 Agent。");
-        }
+        // --- 3. 文件服务配置 ---
+        this.fileStorage = options.fileStorage || new DefaultFileStorageAdapter();
         
-        // --- [核心修复] ---
-        // 不再尝试在这里获取初始数据。让子组件自己负责。
-        // const initialAgents = this.configManager.llmService.getAgents(); // <-- 移除这一行
-
-        // 我们可以安全地获取当前选中的 Agent ID，因为 LLMService 是同步的
-        const allAgents = this.configManager.getService('llmRepository').config?.agents || [];
-        const validInitialAgent = options.initialAgent && allAgents.some(a => a.id === options.initialAgent)
-            ? options.initialAgent
-            : allAgents[0]?.id;
-
-        this.currentAgentId = validInitialAgent;
-
-        // --- 4. 创建子组件 DOM ---
+        // --- 4. 同步创建子组件 DOM ---
         this.historyContainer = document.createElement('div');
         this.historyContainer.className = 'llm-chat-ui__history';
 
@@ -90,18 +81,38 @@ export class LLMChatUI extends IEditor {
         this.container.appendChild(this.historyContainer);
         this.container.appendChild(this.inputContainer);
 
-        // --- 5. 实例化子组件，并将 configManager 注入下去 ---
-        this.historyUI = createHistoryUI(this.historyContainer, {
-            ...options.historyUIConfig,
+        // 子组件的实例化被移至异步的 init 方法中
+    }
+    
+    /**
+     * [新增] 异步初始化方法。
+     * 此方法必须在构造后调用，以完成组件的设置和子组件的实例化。
+     * @returns {Promise<void>}
+     * @private
+     */
+    async init() {
+        // [核心修改] `LLMInputUI` 和 `createHistoryUI` 都是异步的，必须在此处处理
+
+        // 获取初始选中的 Agent ID
+        const allAgents = await this.llmService.getAgents();
+        const validInitialAgent = this.options.initialAgent && allAgents.some(a => a.id === this.options.initialAgent)
+            ? this.options.initialAgent
+            : allAgents[0]?.id;
+        this.currentAgentId = validInitialAgent;
+
+        // --- 5. 异步实例化子组件，并将 configManager 注入下去 ---
+        const { historyUI } = await createHistoryUI(this.historyContainer, {
+            ...this.options.historyUIConfig,
             configManager: this.configManager, // <-- [依赖注入]
-            llmService: this.llmService,       // <-- [依赖注入]
+            // llmService 不再需要手动注入，createHistoryUI 内部会处理
             defaultAgent: this.currentAgentId,
-            fileStorage: this.fileStorage, // Pass down the file storage adapter
+            fileStorage: this.fileStorage,
         });
+        this.historyUI = historyUI;
 
         // 4. Instantiate InputUI and connect its events
         this.inputUI = new LLMInputUI(this.inputContainer, {
-            ...options.inputUIConfig,
+            ...this.options.inputUIConfig,
             configManager: this.configManager, // <-- [依赖注入]
             // agents 选项现在是可选的，因为 inputUI 会自己从 configManager 加载
             initialAgent: this.currentAgentId,
@@ -111,9 +122,11 @@ export class LLMChatUI extends IEditor {
                 agentChanged: (agentId) => this._handleAgentChange(agentId),
                 // [新增] 代理 inputUI 的输入事件为 'interactiveChange'
                 input: (payload) => this.events.emit('interactiveChange', payload),
-                ...(options.inputUIConfig?.on || {}),
+                ...(this.options.inputUIConfig?.on || {}),
             }
         });
+        // [核心修改] 必须调用子组件的 init 方法
+        await this.inputUI.init();
 
         // --- 6. 连接与初始化 ---
         registerOrchestratorCommands(this, this.inputUI, this.historyUI);
@@ -178,11 +191,13 @@ export class LLMChatUI extends IEditor {
 
 
     // ===================================================================
-    //   IEditor Interface Implementation
+    //   IEditor 接口实现 (Public API)
     // ===================================================================
 
     /**
-     * @implements {IEditor.commands}
+     * 获取可对编辑器执行的命令集。
+     * @type {Readonly<Object.<string, Function>>}
+     * @readonly
      */
     get commands() {
         return Object.freeze({
@@ -190,16 +205,14 @@ export class LLMChatUI extends IEditor {
             clear: () => { // 覆盖 clear 命令
                 this.historyUI.clear();
                 this.inputUI.clear();
-                this.events.emit('change');
+                this.events.emit('change', { fullText: '' }); // 广播内容变更事件
             },
         });
     }
 
     /**
-     * @implements {IEditor.setText}
-     * @description 从一个 JSONL 格式的字符串加载并渲染整个聊天历史。
-     * 这是组件接收数据的唯一入口，取代了旧的 _loadInitialData 方法。
-     * @param {string | null} jsonlContent - 代表聊天历史的 JSONL 字符串。如果为 null 或空，则清空编辑器。
+     * 从 JSONL (JSON Lines) 格式的字符串加载并渲染整个聊天历史。
+     * @param {string | null} jsonlContent - 代表聊天历史的 JSONL 字符串。
      */
     setText(jsonlContent) {
         // 1. 总是先清空当前状态，确保幂等性
@@ -215,16 +228,8 @@ export class LLMChatUI extends IEditor {
         try {
             // 3. 解析 JSONL: 按行分割，过滤空行，然后逐行解析 JSON
             const lines = jsonlContent.split('\n').filter(line => line.trim() !== '');
-            // 在这里我们假设 historyUI 已经有了 loadFromJSONL 的能力
-            if (typeof this.historyUI.loadFromJSONL === 'function') {
-                 this.historyUI.loadFromJSONL(lines);
-            } else {
-                 // Fallback to old method for compatibility
-                 const pairs = lines.map(line => MessagePair.fromJSON(JSON.parse(line)));
-                 this.historyUI.pairs = pairs;
-                 this.historyUI._rerenderAll();
-                 this.historyUI.events.emit('historyLoaded', { count: pairs.length });
-            }
+            const pairs = lines.map(line => MessagePair.fromJSON(JSON.parse(line)));
+            this.historyUI.loadFromPairs(pairs); // 假设 historyUI 有一个从 pairs 加载的方法
         } catch (error) {
             console.error('[LLMChatUI] 解析 JSONL 内容失败:', error);
             this.historyUI.messagesEl.innerHTML = `<div class="llm-historyui__error-message">加载会话失败：数据格式损坏。</div>`;
@@ -284,7 +289,7 @@ export class LLMChatUI extends IEditor {
     /**
      * @override
      * @implements {IEditor.getSummary}
-     * [新增] 为聊天会话提供一个人类可读的摘要。
+     * 为聊天会话提供一个人类可读的摘要 (通常是第一条用户消息)。
      * 摘要内容是第一条用户消息的文本。
      * @returns {Promise<string|null>}
      */
@@ -308,7 +313,10 @@ export class LLMChatUI extends IEditor {
     }
 
     /**
-     * @implements {IEditor.on}
+     * 订阅由组件触发的事件。
+     * @param {'change' | 'interactiveChange' | 'ready' | ...} eventName - 事件名称。
+     * @param {(payload?: object) => void} callback - 回调函数。
+     * @returns {Function} 用于取消订阅的函数。
      */
     on(eventName, callback) {
         // 使用自己的事件系统
@@ -417,89 +425,9 @@ export class LLMChatUI extends IEditor {
     //   Private Methods
     // ===================================================================
 
-    /**
-     * @private
-     * [新增] Agent 状态同步的核心处理器。
-     * 无论变更来自 inputUI 还是 historyUI，都由这个方法统一处理，以确保状态一致。
-     * @param {string} newAgentId - 新的 Agent ID。
-     */
-    _handleAgentChange(newAgentId) {
-        // 如果 ID 无效或未发生变化，则不执行任何操作
-        if (!newAgentId || this.currentAgentId === newAgentId) {
-            return;
-        }
 
-        // 验证 Agent 是否仍然存在于配置中
-        const agentExists = this.configManager.llm.config.agents.some(a => a.id === newAgentId);
-        if (!agentExists) {
-            console.warn(`[LLMChatUI] 尝试切换到一个不存在的 Agent: ${newAgentId}。正在回滚...`);
-            // 如果 Agent 不存在（可能刚被删除），则强制子组件回滚到上一个有效状态
-            this.inputUI.setAgent(this.currentAgentId);
-            // historyUI's dropdown will automatically revert on next render or can be forced
-            return;
-        }
 
-        // Update the Single Source of Truth
-        this.currentAgentId = newAgentId;
-        this.inputUI.setAgent(newAgentId);
-        this.historyUI.switchAgent(newAgentId);
-        this.events.emit('agentChanged', { agentId: newAgentId });
-    }
 
-    /**
-     * +++ ADDED: Binds events from children to the central handler.
-     * @private
-     */
-    _bindAgentSyncEvents() {
-        // The event from inputUI is wired directly in the constructor's `on` block for simplicity.
-        // This handles the event from historyUI.
-        this.historyUI.on('agentChanged', (payload) => {
-            this._handleAgentChange(payload.agentId);
-        });
-    }
-
-    _proxyEvents() {
-        const historyEventsToProxy = [
-            'pairAdded', 'pairDeleted', 'assistantMessageDeleted', 'messageResent',
-            'branchSwitched', 'messageComplete', 'locked', 'unlocked',
-            'generationStopped', 'sendError','streamError', 'historyCleared', 'historyLoaded',
-            // 'agentChanged' is now handled by _bindModelSyncEvents, no need to proxy generally
-        ];
-
-        historyEventsToProxy.forEach(eventName => {
-            this.historyUI.on(eventName, (payload) => this.events.emit(eventName, payload));
-        });
-
-        // IEditor 'change' 事件映射
-        const changeEvents = ['messageComplete', 'historyLoaded', 'pairDeleted', 'historyCleared', 'messageResent', 'branchSwitched'];
-        changeEvents.forEach(eventName => {
-            this.historyUI.on(eventName, () => this.events.emit('change'));
-        });
-
-        if (this.inputUI._emit) {
-            const inputEventsToProxy = ['templateSave', 'personaApplied']; // 'modelChanged' is handled directly
-            inputEventsToProxy.forEach(eventName => {
-                const handler = (payload) => this.events.emit(eventName, payload);
-                if (this.inputUI.options.on) {
-                    this.inputUI.options.on[eventName] = handler;
-                } else {
-                    this.inputUI.options.on = { [eventName]: handler };
-                }
-            });
-        }
-    }
-
-    /**
-     * Handles the 'stopRequested' event from the InputUI.
-     * It aborts the currently active request if one exists.
-     * @private
-     */
-    handleStopRequest() {
-        if (this.activeRequestController) {
-            this.activeRequestController.abort();
-            // The controller is set to null in the handleSubmit's finally block
-        }
-    }
 
     /**
      * Handles the 'onSubmit' event from the InputUI.
@@ -539,18 +467,12 @@ export class LLMChatUI extends IEditor {
         // c. Create the AbortController and trigger the message sending process
         this.activeRequestController = new AbortController();
         
-        // +++ b. 根据 data.sendWithoutContext 准备上下文
-        let contextOverride = null;
-        if (data.sendWithoutContext) {
-            contextOverride = [];
-            if (pair.metadata.systemPrompt) {
-                contextOverride.push({ role: 'system', content: pair.metadata.systemPrompt });
-            }
-            contextOverride.push({ role: 'user', content: data.text });
-        }
+        // 准备上下文覆盖（如果需要）
+        const contextOverride = data.sendWithoutContext ? 
+            [{ role: 'user', content: data.text }] : null;
 
         try {
-            // +++ c. 将上下文覆盖和信号传递给 sendMessage
+            // 将消息发送请求委托给 historyUI，它内部会使用注入的 llmService
             await this.historyUI.sendMessage(pair, { 
                 signal: this.activeRequestController.signal,
                 contextOverride: contextOverride
@@ -572,6 +494,72 @@ export class LLMChatUI extends IEditor {
         }
     }
 
+    /**
+     * 统一处理 Agent 状态变更，确保数据源唯一。
+     * @param {string} newAgentId
+     * @private
+     */
+    async _handleAgentChange(newAgentId) {
+        if (!newAgentId || this.currentAgentId === newAgentId) return;
+
+        const allAgents = await this.llmService.getAgents();
+        const agentExists = allAgents.some(a => a.id === newAgentId);
+
+        if (!agentExists) {
+            console.warn(`[LLMChatUI] 尝试切换到一个不存在的 Agent: ${newAgentId}。正在回滚...`);
+            // 如果 Agent 不存在（可能刚被删除），则强制子组件回滚到上一个有效状态
+            this.inputUI.setAgent(this.currentAgentId);
+            // historyUI's dropdown will automatically revert on next render or can be forced
+            return;
+        }
+
+        // Update the Single Source of Truth
+        this.currentAgentId = newAgentId;
+        this.inputUI.setAgent(newAgentId);
+        this.historyUI.switchAgent(newAgentId);
+        this.events.emit('agentChanged', { agentId: newAgentId });
+    }
+
+
+    /**
+     * Handles the 'stopRequested' event from the InputUI.
+     * It aborts the currently active request if one exists.
+     * @private
+     */
+    handleStopRequest() {
+        if (this.activeRequestController) {
+            this.activeRequestController.abort();
+            // The controller is set to null in the handleSubmit's finally block
+        }
+    }
+
+
+    /**
+     * +++ ADDED: Binds events from children to the central handler.
+     * @private
+     */
+    _bindAgentSyncEvents() {
+        // The event from inputUI is wired directly in the constructor's `on` block for simplicity.
+        // This handles the event from historyUI.
+        this.historyUI.on('agentChanged', (payload) => {
+            this._handleAgentChange(payload.agentId);
+        });
+    }
+
+    /** 代理子组件事件，并映射为 IEditor 事件 @private */
+    _proxyEvents() {
+        const changeEvents = ['messageComplete', 'historyLoaded', 'pairDeleted', 'historyCleared', 'messageResent', 'branchSwitched'];
+        changeEvents.forEach(eventName => {
+            this.historyUI.on(eventName, (payload) => {
+                // 每次内容变更时，都广播带有最新内容的 'change' 事件
+                this.events.emit('change', { fullText: this.getText(), payload });
+            });
+        });
+
+        // 广播 'ready' 事件
+        this.events.emit('ready');
+    }
+
     // --- Public API Methods for the LLMChatUI component ---
 
     /**
@@ -581,4 +569,62 @@ export class LLMChatUI extends IEditor {
         this.historyUI.clear();
         this.inputUI.clear();
     }
+}
+
+
+/**
+ * [推荐] 工厂函数：创建并返回一个完全配置和初始化好的 LLMChatUI 实例。
+ * 这是与上层应用交互的主要入口，它封装了所有底层的初始化复杂性。
+ *
+ * @param {HTMLElement} element - 聊天 UI 的容器元素。
+ * @param {object} [options={}] - 配置选项，与 LLMChatUI 构造函数相同（除了 configManager）。
+ * @returns {Promise<LLMChatUI>} 一个解析为 LLMChatUI 实例的 Promise。
+ *
+ * @example
+ * import { createLLMChatUI } from './llm/chat/index.js';
+ * 
+ * const chatContainer = document.getElementById('chat-container');
+ * 
+ * async function main() {
+ *   try {
+ *     const chatUI = await createLLMChatUI(chatContainer, {
+ *       // 这里不需要提供 configManager，工厂函数会自动处理
+ *       initialAgent: 'default-gpt4',
+ *       // ... 其他 inputUI 或 historyUI 的配置
+ *     });
+ * 
+ *     // 现在 chatUI 实例已经完全可用
+ *     chatUI.setText('...'); // 加载历史记录
+ * 
+ *     chatUI.on('change', ({ fullText }) => {
+ *       // 自动保存逻辑
+ *       console.log('内容已改变，准备保存:', fullText);
+ *     });
+ * 
+ *   } catch (error) {
+ *     console.error("创建聊天界面失败:", error);
+ *     chatContainer.textContent = "无法加载聊天组件。";
+ *   }
+ * }
+ * 
+ * main();
+ */
+export async function createLLMChatUI(element, options = {}) {
+    // 1. 在内部获取核心服务单例
+    const configManager = getConfigManager();
+    
+    // 2. 确保核心服务已初始化
+    await configManager.init();
+
+    // 3. 创建实例，并注入已初始化的服务
+    const chatUIInstance = new LLMChatUI(element, {
+        ...options,
+        configManager: configManager, // 依赖注入
+    });
+
+    // 4. 调用实例的异步初始化方法
+    await chatUIInstance.init();
+
+    // 5. 返回完全就绪的实例
+    return chatUIInstance;
 }

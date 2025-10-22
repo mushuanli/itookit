@@ -4,11 +4,11 @@
  * @file LLMHistoryUI.js (V3 - 服务容器架构)
  * @description LLM 对话历史 UI 的核心容器类。
  *
- * [V3 核心重构]
- * - **响应式配置**: 通过注入 `configManager` 并订阅其事件，
- *   实现了对 Agent 和 Connection 配置的实时响应，例如动态更新工具栏中的 Agent 下拉列表。
- * - **服务化依赖**: 依赖注入的 `llmService` 来获取 LLMClient 实例，实现关注点分离。
- * - **健壮的生命周期**: 在 `destroy` 方法中集中取消所有事件订阅，防止内存泄漏。
+ * [V4 核心重构]
+ * - **正确的异步初始化**: 将初始数据加载移出构造函数，采用非阻塞的异步加载模式。
+ * - **正确的接口调用**: 使用 configManager 提供的真实属性 (e.g., .llm, .events) 和方法 (e.g., .getAgents())。
+ * - **正确的事件处理**: 订阅正确的事件名称 (LLM_CONFIG_UPDATED)，并正确解析事件数据。
+ * - **依赖注入清晰化**: 明确依赖注入的 configManager 和可选的 llmService。
  */
 
 import { MessagePair } from './MessagePair.js';
@@ -17,17 +17,19 @@ import { BranchManager } from './BranchManager.js';
 import { MessageRenderer } from '../renderers/MessageRenderer.js';
 import { EventEmitter } from '../utils/EventEmitter.js';
 import { IEditor } from '../../../common/interfaces/IEditor.js';
-// [REFACTOR] 导入 LLMService 用于依赖注入，不再直接创建客户端。
+// [REFACTOR] 此处导入的 LLMService 是用于创建运行时客户端的服务，它的配置数据源现在是 configManager。
 import { LLMService } from '../../core/LLMService.js'; 
-// [REFACTOR] 导入 EVENTS 常量，解决 ReferenceError 并遵循最佳实践。
-import { EVENTS } from '../../../config/shared/constants.js';
+// [REFACTOR] 路径正确，无需修改
+import { EVENTS } from '../../../configManager/constants.js';
+/** @typedef {import('../../../configManager/index.js').ConfigManager} ConfigManager */
+/** @typedef {import('../../../configManager/services/LLMService.js').LLMService} LLMService */
 
 export class LLMHistoryUI extends IEditor {
     /**
      * 构造函数
      * @param {HTMLElement} container - UI 将被渲染到的容器元素。
      * @param {object} options - 配置选项。
-     * @param {import('../../../config/ConfigManager').ConfigManager} options.configManager - 【必需】ConfigManager 实例，用于数据和事件管理。
+     * @param {import('../../../configManager/index.js').ConfigManager} options.configManager - 【必需】ConfigManager 实例，用于数据和事件管理。
      * @param {import('../../core/LLMService').LLMService} [options.llmService] - 【推荐】LLMService 实例，用于获取客户端。如果未提供，则获取全局单例。
      * @param {import('../../../common/interfaces/IFileStorageAdapter.js').IFileStorageAdapter} [options.fileStorage] - 【新增】文件上传服务。
      * @param {object[]} [options.plugins] - 要安装的插件数组。
@@ -134,10 +136,13 @@ export class LLMHistoryUI extends IEditor {
         // --- [核心修改] 在初始化后立即订阅配置变更 ---
         this._subscribeToChanges();
         
-        // --- [核心修改] 同步加载初始数据 ---
-        // 因为 ConfigManager 是单例且在应用启动时已初始化，
-        // 所以这里可以直接、同步地获取数据，简化了逻辑。
-        this._loadInitialData();
+        // [REFACTOR] 异步加载初始数据，非阻塞构造函数
+        // UI 将首先渲染为空白状态，然后在数据加载后填充内容。
+        this._loadInitialData().catch(error => {
+            console.error('[LLMHistoryUI] 初始化加载数据失败:', error);
+            // 可以在此处向用户显示错误信息
+            this.messagesEl.innerHTML = `<div class="llm-historyui__error-message">无法加载配置数据。请检查数据库或刷新页面。</div>`;
+        });
         
         if (options.initialData) {
             this.loadHistory(options.initialData);
@@ -1095,8 +1100,9 @@ export class LLMHistoryUI extends IEditor {
     // ===================================================================
     /**
      * @private
-     * @description 【新增】通过 LLMService 获取配置好的 LLM 客户端实例。
-     * 这是服务化依赖的核心实现。
+     * @description [REFACTOR] 通过 LLMService 获取配置好的 LLM 客户端实例。
+     * 此方法本身逻辑正确，它依赖于被注入的 llmService。
+     * 关键在于外部应用必须确保注入的 llmService 实例能访问到 configManager 的最新数据。
      * @param {string} agentId - Agent 的 ID。
      * @returns {Promise<import('../../core/client').LLMClient>} 返回一个配置好的客户端实例。
      */
@@ -1111,61 +1117,66 @@ export class LLMHistoryUI extends IEditor {
              throw new Error(`[LLMHistoryUI] Agent "${agent.name}" (ID: ${agentId}) 未配置 connectionId。`);
         }
 
-        // 中文注释: 将创建客户端的复杂性委托给 LLMService。
+        // 委托给运行时服务来创建客户端，这是正确的关注点分离。
         return this.llmService.getClient(connectionId);
     }
     
     /**
      * @private
-     * @description [重构] 同步加载初始的配置数据。
+     * @description [REFACTOR] 异步加载初始的配置数据。
+     * 此方法现在是 async 的，并且使用了正确的 configManager API。
      */
-    _loadInitialData() {
-        // 直接从 configManager 的服务中获取已加载的数据
-        const llmRepo = this.configManager.getService('llmRepository');
-        if (llmRepo.config) { // 检查数据是否已加载
-            this._handleAgentsUpdate(llmRepo.config.agents || []);
-            this._handleConnectionsUpdate(llmRepo.config.connections || []);
-        } else {
-            // 如果数据尚未加载（不太可能，但作为备用），则等待 APP_READY 事件
-            console.warn('[LLMHistoryUI] ConfigManager 数据尚未加载，等待 app:ready 事件...');
-            const unsubscribe = this.configManager.eventManager.subscribe(EVENTS.APP_READY, () => {
-                this._loadInitialData(); // 准备好后重试加载
-                unsubscribe(); // 一次性监听
-            });
-        }
+    async _loadInitialData() {
+        console.log('[LLMHistoryUI] 开始异步加载初始配置...');
+        // [REFACTOR] 直接从 configManager 的服务中调用异步方法获取数据
+        // configManager.llm 实际上是 LLMService 实例
+        const agents = await this.configManager.llm.getAgents();
+        const connections = await this.configManager.llm.getConnections();
+        
+        // 加载成功后，调用处理器更新内部状态和 UI
+        this._handleAgentsUpdate(agents);
+        this._handleConnectionsUpdate(connections);
+        
+        console.log('[LLMHistoryUI] 初始配置加载完成。');
     }
 
     /**
      * @private
-     * @description 【新增】订阅来自 ConfigManager 的配置更新事件。
-     * 这是实现响应式配置的核心。
+     * @description [REFACTOR] 订阅来自 ConfigManager 的配置更新事件。
+     * 修正了事件管理器属性名、事件名和事件数据处理逻辑。
      */
     _subscribeToChanges() {
-        const { eventManager } = this.configManager;
+        // [REFACTOR] 正确的属性名是 'events'
+        const { events } = this.configManager;
         
-        // 订阅 Agent 更新事件
-        const unsubscribeAgents = eventManager.subscribe(EVENTS.LLM_AGENTS_UPDATED, (newAgents) => {
-            console.log('[LLMHistoryUI] 接收到 Agent 更新，正在处理...', newAgents);
-            this._handleAgentsUpdate(newAgents);
-        });
-        this._subscriptions.push(unsubscribeAgents);
+        // [REFACTOR] 订阅唯一且正确的事件：LLM_CONFIG_UPDATED
+        const unsubscribe = events.subscribe(EVENTS.LLM_CONFIG_UPDATED, (data) => {
+            // [REFACTOR] 正确解析事件负载 { key, value }
+            if (!data || !data.key) return;
 
-        // 订阅 Connection 更新事件
-        const unsubscribeConnections = eventManager.subscribe(EVENTS.LLM_CONNECTIONS_UPDATED, (newConnections) => {
-            console.log('[LLMHistoryUI] 接收到 Connection 更新，正在处理...', newConnections);
-            this._handleConnectionsUpdate(newConnections);
+            if (data.key === 'agents') {
+                console.log('[LLMHistoryUI] 接收到 Agent 更新事件，正在处理...', data.value);
+                this._handleAgentsUpdate(data.value);
+            } else if (data.key === 'connections') {
+                console.log('[LLMHistoryUI] 接收到 Connection 更新事件，正在处理...', data.value);
+                this._handleConnectionsUpdate(data.value);
+            }
         });
-        this._subscriptions.push(unsubscribeConnections);
+        
+        this._subscriptions.push(unsubscribe);
     }
     
     /**
      * @private
      * @description 处理 Agent 更新事件的处理器。
-     * @param {import('../../../config/shared/types').LLMAgentDefinition[]} agents - 最新的 Agent 定义数组。
+     * @param {object[]} agents - 最新的 Agent 定义数组。
      */
     _handleAgentsUpdate(agents) {
-        // 一步步审查: 实现了对 Agent 数据更新的响应。当事件触发时，此方法会更新组件内部的
-        // 核心数据结构 `this.agents` 和 `this.availableAgents`。
+        if (!Array.isArray(agents)) {
+            console.warn('[LLMHistoryUI] _handleAgentsUpdate 接收到的 agents 不是一个数组:', agents);
+            return;
+        }
+        
         this.agents = new Map(agents.map(a => [a.id, a]));
         this.availableAgents = Array.from(this.agents.values()).map(({ id, name }) => ({ id, name }));
         
@@ -1173,7 +1184,7 @@ export class LLMHistoryUI extends IEditor {
         if (this.currentAgent && !this.agents.has(this.currentAgent)) {
             const newDefaultAgent = this.availableAgents.length > 0 ? this.availableAgents[0].id : null;
             console.warn(`[LLMHistoryUI] 当前 Agent "${this.currentAgent}" 已被删除，自动切换到 "${newDefaultAgent || '无'}"。`);
-            this.currentAgent = newDefaultAgent;
+            this.switchAgent(newDefaultAgent);
         }
         
         // 关键：遍历 DOM 中所有的 Agent 下拉列表并更新它们的内容和选中状态
@@ -1212,14 +1223,17 @@ export class LLMHistoryUI extends IEditor {
     /**
      * @private
      * @description 处理 Connection 更新事件的处理器。
-     * @param {import('../../../config/shared/types').LLMProviderConnection[]} connections - 最新的 Connection 定义数组。
+     * @param {object[]} connections - 最新的 Connection 定义数组。
      */
     _handleConnectionsUpdate(connections) {
+         if (!Array.isArray(connections)) {
+            console.warn('[LLMHistoryUI] _handleConnectionsUpdate 接收到的 connections 不是一个数组:', connections);
+            return;
+        }
+
         this.connections = new Map(connections.map(c => [c.id, c]));
-        // 中文注释: Connection 的更新通常是后台数据（如 API Key），不需要立即重绘 UI。
-        // 当下一次使用这个 Connection 发送请求时，新的配置会自动生效。
+        // Connection 的更新是后台数据（如API Key），不需要立即重绘UI。
+        // `llmService` 在下次创建客户端时会自动获取到最新的配置。
         this.events.emit('connectionsUpdated', connections);
-        // Connection 的更新通常是后台数据（如API Key），不需要立即重绘UI。
-        // `llmService` 会自动处理客户端缓存，确保下次请求使用新配置。
     }
 }
