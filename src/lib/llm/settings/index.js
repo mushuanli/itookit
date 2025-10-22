@@ -24,7 +24,7 @@ import { WorkflowManager } from './components/WorkflowManager.js';
 // --- [核心修改] 导入 ConfigManager 单例 ---
 import { ConfigManager } from '../../config/ConfigManager.js';
 // --- 移除: 不再需要直接导入 LLM_PROVIDER_DEFAULTS 来构造默认值 ---
-import { LLM_DEFAULT_ID } from '../../config/configData.js';
+import { LLM_DEFAULT_ID } from '../../common/configData.js';
 import { EVENTS } from '../../config/shared/constants.js'; // <--- [修复] 添加这一行导入
 
 // Constants for Defaults

@@ -1,14 +1,15 @@
 // 文件: #llm/input/index.js
 
 /**
- * @file LLMInputUI.js (V3 - 服务容器架构)
+ * @file LLMInputUI.js (V3.1 - 修正版)
  * @description 一个独立的、高度可定制的富文本 LLM 输入组件。
  *
- * [V3 核心重构]
+ * [V3.1 核心修正]
  * - **强制依赖注入**: 组件现在强制要求在构造函数中传入一个有效的 `ConfigManager` 实例。
- * - **响应式 Agent 列表**: 通过订阅 `ConfigManager` 的 `llm:agents:updated` 事件，
- *   组件能够实时更新可选的 Agent 列表，不再依赖于一次性的静态配置。
- * - **生命周期管理**: 新增了 `destroy` 方法，用于在组件销毁时取消所有事件订阅，防止内存泄漏。
+ * - **异步初始化**: 新增了 `init()` 方法，用于异步加载初始数据 (如 Agents)，解决了之前同步加载失败的问题。
+ * - **响应式 Agent 列表**: 通过正确订阅 `ConfigManager` 的 `llm:config_updated` 事件，
+ *   组件能够实时更新可选的 Agent 列表。
+ * - **生命周期管理**: `destroy` 方法用于在组件销毁时取消所有事件订阅，防止内存泄漏。
  */
 import './styles.css';
 
@@ -20,45 +21,41 @@ import { attachEventListeners } from './events.js';
 import { CommandManager } from './commands.js';
 import { PopupManager } from './popup.js';
 
-// --- 核心服务导入 ---
-import { ConfigManager } from '../../config/ConfigManager.js';
-import { EVENTS } from '../../config/shared/constants.js';
+import { ConfigManager } from '../../configManager/index.js';
+import { EVENTS } from '../../configManager/constants.js';
+// [新增] 内部依赖 LLMService 来实现封装
+import { LLMService } from '../core/LLMService.js';
 
 export class LLMInputUI {
     /**
      * 创建 LLMInputUI 实例。
-     * @param {HTMLElement} element - UI 将被渲染到的容器元素。
-     * @param {object} options - 配置选项。
-     * @param {ConfigManager} options.configManager - [新, 必需] 应用的全局配置管理器。
-     * @param {Function} options.onSubmit - [必需] 提交时的回调函数。
+     * @param {HTMLElement} element
+     * @param {object} options
+     * @param {ConfigManager} options.configManager - [必需]
+     * @param {Function} [options.onSubmit] - [可选] 提交时的回调 (高级模式)。
+     * @param {Function} [options.streamChatHandler] - [可选] 流式聊天处理器 (推荐的简单模式)。
      */
     constructor(element, options) {
-        if (!element || !options || typeof options.onSubmit !== 'function') {
-            throw new Error('LLMInputUI 需要一个容器元素和 onSubmit 回调。');
+        if (!element || !options) {
+            throw new Error('LLMInputUI 需要一个容器元素和配置选项。');
         }
         // [核心修改] 强制要求 configManager 以实现响应式功能。
         if (!options.configManager || !(options.configManager instanceof ConfigManager)) {
-            throw new Error('LLMInputUI 现在需要在选项中提供一个有效的 `configManager` 实例以启用响应式功能。');
+            throw new Error('LLMInputUI 需要在选项中提供一个有效的 `configManager` 实例。');
+        }
+        // [修改] onSubmit 和 streamChatHandler 至少要有一个
+        if (typeof options.onSubmit !== 'function' && typeof options.streamChatHandler !== 'function') {
+            throw new Error('LLMInputUI 至少需要一个 onSubmit 或 streamChatHandler 回调。');
         }
 
         this.container = element;
         this.options = deepMerge(JSON.parse(JSON.stringify(defaultOptions)), options);
         
-        // --- [核心修改] 保存对核心服务的引用 ---
-        /** @type {ConfigManager} */
-        this.configManager = this.options.configManager;
-        /** @private @type {Function[]} */
-        this._subscriptions = []; // 用于存储取消订阅的函数
-
-        // --- [核心修复] ---
-        // 在构造函数中，如果 options.agents 未提供，
-        // 主动从 ConfigManager 同步获取一次初始数据。
-        // 因为我们知道 LLMChatUI 是在 `app:ready` 后创建的，所以此时数据是可用的。
-        if (!this.options.agents || this.options.agents.length === 0) {
-            const llmRepo = this.configManager.getService('llmRepository');
-            this.options.agents = llmRepo.config?.agents || [];
-            console.log('[LLMInputUI] 从 ConfigManager 同步加载初始 Agents:', this.options.agents);
-        }
+        // [关键修正] 从 options 对象中正确赋值 configManager
+        this.configManager = options.configManager; 
+        
+        this.llmService = LLMService.getInstance();
+        this._subscriptions = [];
 
         // --- 内部状态初始化 ---
         this.state = {
@@ -84,6 +81,31 @@ export class LLMInputUI {
         this.commandManager = new CommandManager(this);
         this.popupManager = new PopupManager(this);
         
+        // [修正] attachEventListeners 和 _subscribeToChanges 已移至异步的 init() 方法中。
+    }
+
+    /**
+     * [新增] 异步初始化组件。
+     * 必须在构造函数之后调用此方法来完成组件的设置。
+     * @returns {Promise<void>}
+     */
+    async init() {
+        // 1. 异步获取初始 Agents 列表
+        try {
+            const initialAgents = await this.configManager.llm.getAgents();
+            if (initialAgents && initialAgents.length > 0) {
+                 this.updateAgents(initialAgents);
+                 // 如果 initialAgent 未设置或无效，则默认选择第一个
+                 if (!this.state.agent || !initialAgents.some(a => a.id === this.state.agent)) {
+                    this.setAgent(initialAgents[0].id);
+                 }
+            }
+        } catch(error) {
+            console.error("[LLMInputUI] 初始化时加载 Agents 失败:", error);
+            this.showError("Failed to load agents.");
+        }
+       
+        // 2. 挂载事件监听器
         attachEventListeners(this);
         
         // --- [核心修改] 挂载后订阅配置变更事件 ---
@@ -94,6 +116,8 @@ export class LLMInputUI {
         }
         // +++ MODIFIED: Initial UI state update now happens once at the end +++
         this._updateUIState();
+        
+        console.log('[LLMInputUI] 已成功初始化。');
     }
 
     // --- Public API Methods ---
@@ -118,10 +142,8 @@ export class LLMInputUI {
                 textarea.disabled = true;
                 textarea.placeholder = message || '正在处理...';
             }
-            if (attachBtn) {
-                attachBtn.disabled = true;
-            }
-            this._updateSendButton(); // 更新发送按钮为“停止”
+            if (attachBtn) attachBtn.disabled = true;
+            this._updateSendButton();
             this._emit('loadingStart');
         } else {
             // --- 退出加载状态 ---
@@ -130,10 +152,8 @@ export class LLMInputUI {
                 textarea.placeholder = this.options.localization.placeholder;
                 textarea.focus();
             }
-            if (attachBtn) {
-                attachBtn.disabled = false;
-            }
-            this._updateSendButton(); // 更新发送按钮为“发送”
+            if (attachBtn) attachBtn.disabled = false;
+            this._updateSendButton();
             this._emit('loadingStop');
         }
     }
@@ -238,18 +258,30 @@ export class LLMInputUI {
         
         // 使用新的 setLoading 方法
         this.setLoading(true, '正在发送...');
+
+        const agentObject = this.options.agents.find(a => a.id === this.state.agent);
+        const payload = {
+            text,
+            attachments: this.state.attachments.map(a => a.file),
+            agent: this.state.agent,
+            agentObject: agentObject || null,
+            toolChoice: this.state.toolChoice,
+            systemPrompt: this.state.systemPrompt,
+            sendWithoutContext: this.state.sendWithoutContext,
+        };
+
+        // 触发一个通用的 submit 事件，以便外部可以立即响应
+        this._emit('submit', payload);
+
         try {
-            await this.options.onSubmit({
-                text,
-                attachments: this.state.attachments.map(a => a.file),
-                // +++ RENAMED: model -> agent +++
-                agent: this.state.agent,
-                toolChoice: this.state.toolChoice,
-                systemPrompt: this.state.systemPrompt,
-                // +++ 将新标志位传递出去
-                sendWithoutContext: this.state.sendWithoutContext,
-            });
-            // 成功提交后重置临时状态
+            if (typeof this.options.streamChatHandler === 'function') {
+                // 简单模式：组件内部处理所有逻辑
+                await this._internalStreamChat(payload);
+            } else {
+                // 高级模式：将数据传递给外部 onSubmit
+                await this.options.onSubmit(payload);
+            }
+
             this.state.systemPrompt = null; 
             this.state.toolChoice = null;
             this.state.sendWithoutContext = false; // +++ 重置
@@ -261,6 +293,64 @@ export class LLMInputUI {
             // 使用新的 setLoading 方法
             this.setLoading(false);
         }
+    }
+
+    /**
+     * [新增] 内部流式聊天处理逻辑
+     * @param {object} data - 从 UI 收集的数据
+     * @private
+     */
+    async _internalStreamChat(data) {
+        const { agentObject } = data;
+        if (!agentObject) {
+            throw new Error(`Agent with ID '${data.agent}' not found.`);
+        }
+
+        const client = await this.llmService.getClient(agentObject.config.connectionId);
+
+        // 构建 messages 数组 (这部分逻辑从 demo 中移入)
+        // 注意：组件本身不维护历史记录，这依然是应用的责任
+        const userContent = [];
+        if (data.text) userContent.push({ type: 'text', text: data.text });
+        if (data.attachments.length > 0) {
+            // 简化处理，实际应用可能需要转 base64
+            data.attachments.forEach(file => userContent.push({ type: 'image_url', image_url: { url: URL.createObjectURL(file) }}));
+        }
+        const currentTurn = { role: 'user', content: userContent };
+        
+        // 触发一个事件，让应用层可以提供历史记录
+        const historyProvider = this._emit('historyRequest');
+        const chatHistory = Array.isArray(historyProvider) ? historyProvider : [];
+        
+        const messages = data.sendWithoutContext ? [currentTurn] : [...chatHistory, currentTurn];
+        const systemPrompt = data.systemPrompt || agentObject.config.systemPrompt;
+        if (systemPrompt) {
+            messages.unshift({ role: 'system', content: systemPrompt });
+        }
+
+        const stream = await client.chat.create({
+            messages,
+            model: agentObject.config.modelName,
+            temperature: agentObject.config.temperature || 0.7, // 简化，可从外部传入覆盖
+            stream: true,
+            include_thinking: true,
+        });
+
+        // 将组件状态（如输入框）清理掉
+        this.clear();
+
+        for await (const chunk of stream) {
+            this.options.streamChatHandler({ 
+                type: 'chunk', 
+                payload: chunk 
+            });
+        }
+        
+        // 流结束后，通知外部
+        this.options.streamChatHandler({ 
+            type: 'done', 
+            payload: { userTurn: currentTurn, sendWithoutContext: data.sendWithoutContext } 
+        });
     }
 
     _removeAttachment(id) {
@@ -379,18 +469,23 @@ export class LLMInputUI {
      * @private
      */
     _subscribeToChanges() {
-        const { eventManager } = this.configManager;
+        // [修正] 直接从 configManager 实例上获取 event manager
+        const { events } = this.configManager;
         
-        // 订阅 Agent 列表的更新事件
-        const unsubscribeAgents = eventManager.subscribe(EVENTS.LLM_AGENTS_UPDATED, (updatedAgents) => {
-            console.log('[LLMInputUI] 接收到 Agent 更新事件，正在刷新 UI...', updatedAgents);
-            // 当事件发生时，调用公共的 updateAgents 方法来处理 UI 更新
-            this.updateAgents(updatedAgents);
-        });
+        // [修正] 订阅正确的通用配置更新事件
+        const unsubscribeConfig = events.subscribe(
+            EVENTS.LLM_CONFIG_UPDATED, 
+            (payload) => {
+                // [修正] 检查事件的 key 是否为 'agents'
+                if (payload && payload.key === 'agents') {
+                    console.log('[LLMInputUI] 接收到 Agent 配置更新，正在刷新 UI...', payload.value);
+                    // 当事件发生时，调用公共的 updateAgents 方法来处理 UI 更新
+                    this.updateAgents(payload.value);
+                }
+            }
+        );
 
         // 将取消订阅函数存起来，以便在 destroy 时调用
-        this._subscriptions.push(unsubscribeAgents);
-
-        // 未来可以在这里订阅其他配置变更，例如 connections (如果需要显示连接状态)
+        this._subscriptions.push(unsubscribeConfig);
     }
 }

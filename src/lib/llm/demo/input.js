@@ -4,8 +4,8 @@
 // --- 1. 核心架构导入 ---
 // 导入整个应用架构的核心模块
 // [修改] 导入路径更新到新的 configManager/
-import { ConfigManager, getConfigManager } from '../../configManager/index.js';
-import { LLMService } from '../core/LLMService.js';
+import { getConfigManager } from '../../configManager/index.js';
+// [修正] LLMService 不再需要单独导入，它由 ConfigManager 管理
 import { LLMInputUI } from '../input/index.js';
 import { defaultOptions } from '../input/defaults.js';
 // 导入用于演示的API密钥
@@ -20,16 +20,20 @@ if (!DEEPSEEK_API_KEY || DEEPSEEK_API_KEY.includes('YOUR_')) {
 // --- 2. 初始化核心服务 ---
 // [修改] 使用新的 getConfigManager 单例函数
 const configManager = getConfigManager();
-const llmService = LLMService.getInstance();
+let chatHistory = []; // 应用级别的状态
+// 我们将在 main 函数中 configManager 初始化后再获取它
 
 // --- 3. 等待应用就绪后执行主逻辑 ---
 // [修改] 移除对 'app:ready' 的订阅，直接调用 main
 main();
 
 async function main() {
-    // [修改] 在 main 函数开头初始化 configManager
+    // [修正] 必须首先初始化 configManager，这是所有数据服务的基础
     await configManager.init();
     console.log("应用配置已就绪，开始初始化DEMO...");
+
+    // [新增] 从已初始化的 configManager 中获取 llmService
+    const llmConfigService = configManager.llm;
     
     // --- 4. 动态设置和管理配置 ---
     // 在真实应用中，这些数据可能由用户在设置页面输入，并被持久化。
@@ -48,7 +52,7 @@ async function main() {
     ];
     
     // [修正] 使用 llmService.saveAgents 一次性写入
-    await llmService.saveAgents(AGENT_DEFINITIONS);
+    await llmConfigService.saveAgents(AGENT_DEFINITIONS);
 
     // 核心函数：根据侧边栏输入更新/创建连接配置
     async function updateConnection() {
@@ -58,25 +62,13 @@ async function main() {
         
         const connection = { id: `conn-${provider}`, name: `${provider.charAt(0).toUpperCase() + provider.slice(1)} Connection`, provider, apiKey };
 
-        // [修正] 使用 llmService.updateConnections
-        const oldConnections = await llmService.getConnections();
-        const newConnections = [...oldConnections];
-        const existingIndex = newConnections.findIndex(c => c.id === connection.id);
-        if (existingIndex > -1) {
-            newConnections[existingIndex] = { ...newConnections[existingIndex], ...connection };
-        } else {
-            newConnections.push(connection);
-        }
-        await llmService.updateConnections(oldConnections, newConnections);
+        // [修正] 旧的 `llmService.clearCache()` 不存在，新的 `updateConnections` 流程更健壮
+        const oldConnections = await llmConfigService.getConnections();
+        // 创建一个新数组以避免直接修改状态
+        let newConnections = oldConnections.filter(c => c.id !== connection.id);
+        newConnections.push(connection);
         
-        const agents = await llmService.getAgents();
-        for (const agent of agents) {
-            if (AGENT_DEFINITIONS.some(def => def.id === agent.id)) { // 只更新我们定义的agent
-                    agent.config.connectionId = connection.id;
-            }
-        }
-        await llmService.saveAgents(agents);
-        llmService.clearCache();
+        await llmConfigService.updateConnections(oldConnections, newConnections);
         console.log(`提供商 '${provider}' 的连接已更新。`);
         return true;
     }
@@ -90,90 +82,81 @@ async function main() {
 
     // --- 5. 初始化UI组件，并注入从配置中心获取的数据 ---
     const conversationDiv = document.getElementById('conversation');
-    let chatHistory = [];
-    const availableAgents = await llmService.getAgents();
     
     const chatUI = new LLMInputUI(document.getElementById('chat-input-container'), {
-        agents: availableAgents, // 将Agent列表注入UI以渲染选择器
-        initialAgent: availableAgents[0]?.id || '', // 默认选择第一个Agent
+        configManager: configManager, // 依赖注入
+        initialAgent: 'creative-writer',
         initialText: "写一个关于程序员和一个神奇bug的短篇故事。",
-        onSubmit: handleChatSubmit,
-        configManager: configManager, // 注入核心服务
-    });
-
-    async function handleChatSubmit(data) {
-        console.log("聊天已提交:", data);
-        if (!await updateConnection()) { chatUI.stopLoading(); return; }
-
-        const agents = await llmService.getAgents();
-        const agentDef = agents.find(a => a.id === data.agent);
-        if (!agentDef) { alert(`ID为 '${data.agent}' 的Agent未找到！`); chatUI.stopLoading(); return; }
         
-        // 2. 使用Agent定义中的connectionId，通过LLMService获取一个配置好的客户端实例
-        const client = await llmService.getClient(agentDef.config.connectionId);
-        // ---
+        // [核心] 使用新的 streamChatHandler，替代了复杂的 onSubmit
+        streamChatHandler: handleStream,
+        
+        // [新增] 响应组件的事件，来提供历史记录
+        on: {
+            historyRequest: () => {
+                return chatHistory; // 当组件需要历史时，我们提供它
+            },
+            // [新增] 在组件内部处理开始前，立即将用户消息添加到UI
+            submit: (data) => {
+                addMessageToLog(conversationDiv, 'user', data.text, data.attachments);
+            }
+        }
+    });
+    // [新增] 必须调用异步 init() 方法来完成组件的初始化
+    await chatUI.init();
 
-        // 添加用户消息到聊天记录和历史
-        addMessageToLog(conversationDiv, 'user', data.text, data.attachments);
-        const userContent = [];
-        if (data.text) userContent.push({ type: 'text', text: data.text });
-        if (data.attachments.length > 0) {
-                data.attachments.forEach(file => userContent.push({ type: 'image_url', image_url: { url: file }}));
+    // handleStream 的职责非常单一：就是将收到的数据渲染到屏幕上
+    let fullResponse = '';
+    let assistantMsgElement = null;
+    let thinkingMsgElement = null;
+
+    function handleStream(event) {
+        if (event.type === 'chunk') {
+            const chunk = event.payload;
+            const delta = chunk.choices[0]?.delta;
+            if (!delta) return;
+
+            if (delta.thinking) {
+                if (!thinkingMsgElement) {
+                    // 新对话开始，清空上一轮的响应
+                    fullResponse = ''; 
+                    assistantMsgElement = null;
+                    thinkingMsgElement = addMessageToLog(conversationDiv, 'thinking', '');
+                }
+                thinkingMsgElement.querySelector('div').textContent += delta.thinking;
+            }
+            if (delta.content) {
+                if (!assistantMsgElement) {
+                    thinkingMsgElement = null; // 思考结束
+                    assistantMsgElement = addMessageToLog(conversationDiv, 'assistant', '');
+                }
+                fullResponse += delta.content;
+                renderMarkdown(assistantMsgElement.querySelector('div'), fullResponse); 
+            }
+            conversationDiv.scrollTop = conversationDiv.scrollHeight;
         }
         
-        const currentTurnHistory = { role: 'user', content: userContent };
-        const messages = data.sendWithoutContext ? [currentTurnHistory] : [...chatHistory, currentTurnHistory];
-        const systemPrompt = data.systemPrompt || agentDef.config.systemPrompt;
-        if (systemPrompt) messages.unshift({ role: 'system', content: systemPrompt });
-        
-        chatUI.clear();
-
-        try {
-            const stream = await client.chat.create({
-                messages,
-                model: agentDef.config.modelName, // 使用Agent定义中指定的模型
-                temperature: parseFloat(sidebar.temperature.value),
-                stream: true,
-                include_thinking: true,
-            });
-
-            let fullResponse = '';
-            let assistantMsgElement = null;
-            let thinkingMsgElement = null;
-
-            for await (const chunk of stream) {
-                const delta = chunk.choices[0]?.delta;
-                if (!delta) continue;
-
-                if (delta.thinking) {
-                    if (!thinkingMsgElement) thinkingMsgElement = addMessageToLog(conversationDiv, 'thinking', '');
-                    thinkingMsgElement.querySelector('div').textContent += delta.thinking;
-                }
-                if (delta.content) {
-                    thinkingMsgElement = null; // 思考结束
-                    if (!assistantMsgElement) assistantMsgElement = addMessageToLog(conversationDiv, 'assistant', '');
-                    fullResponse += delta.content;
-                    renderMarkdown(assistantMsgElement.querySelector('div'), fullResponse); 
-                }
-                conversationDiv.scrollTop = conversationDiv.scrollHeight;
-            }
-            
-            if (fullResponse && !data.sendWithoutContext) {
-                // 只有在非“无上下文”模式下才将用户和AI的回复都加入历史记录
-                chatHistory.push(currentTurnHistory);
+        if (event.type === 'done') {
+            // 对话结束，更新历史记录
+            if (fullResponse && !event.payload.sendWithoutContext) {
+                chatHistory.push(event.payload.userTurn);
                 chatHistory.push({ role: 'assistant', content: fullResponse });
             }
-
-        } catch (error) {
-            addMessageToLog(conversationDiv, 'assistant', `错误: ${error.message}`);
+            // 重置状态以备下一轮对话
+            assistantMsgElement = null;
+            thinkingMsgElement = null;
         }
     }
 
     // --- DEMO 2 & 3: 其他UI实例的初始化 ---
     // 它们是独立的，所以初始化方式不变，但我们也用配置数据来初始化它们的Agent选择器
     const themingUI = new LLMInputUI(document.getElementById('theming-input-container'), {
-        agents: availableAgents, initialAgent: availableAgents[0]?.id, onSubmit: (data) => alert(`主题演示已提交:\n${JSON.stringify(data, null, 2)}`), configManager: configManager,
+        onSubmit: (data) => alert(`主题演示已提交:\n${JSON.stringify(data, null, 2)}`),
+        configManager: configManager,
     });
+    // [新增] 调用 init
+    await themingUI.init();
+
     document.getElementById('apply-theme-btn').addEventListener('click', () => themingUI.setTheme({ '--llm-primary-color': document.getElementById('theme-primary-color').value, '--llm-border-radius': `${document.getElementById('theme-border-radius').value}px`, '--llm-font-family': document.getElementById('theme-font-family').value, }));
     document.getElementById('reset-theme-btn').addEventListener('click', () => themingUI.setTheme(defaultOptions.theme));
     
@@ -187,10 +170,13 @@ async function main() {
     };
 
     const eventsUI = new LLMInputUI(document.getElementById('events-input-container'), {
-        agents: availableAgents, initialAgent: availableAgents[0]?.id, onSubmit: (data) => logEvent('submit', data),
+        onSubmit: (data) => logEvent('submit', data),
         on: { agentChanged: (agentId) => logEvent('agentChanged', agentId), attachmentAdd: (att) => logEvent('attachmentAdd', { id: att.id, name: att.file.name }), attachmentRemove: (att) => logEvent('attachmentRemove', { id: att.id, name: att.file.name }), commandExecute: (cmd) => logEvent('commandExecute', cmd), clear: () => logEvent('clear'), themeChange: () => logEvent('themeChange', '主题对象已更新...'), },
         configManager: configManager,
     });
+    // [新增] 调用 init
+    await eventsUI.init();
+
     eventsUI.registerCommand({ name: '/time', description: '显示当前时间并清除输入。', handler() { this._showToast(`当前时间: ${new Date().toLocaleTimeString()}`); this.clear(); }, executeOnClick: true, });
     
     // +++ 新增: 为测试按钮添加事件监听器 +++
@@ -201,14 +187,14 @@ async function main() {
         const newId = `test-agent-${Date.now()}`;
         const newAgent = { id: newId, name: "Test Agent (Dynamic)", icon: "🧪", description: "This agent was added at runtime.", config: { connectionId: 'conn-deepseek', modelName: 'deepseek-chat' } };
         logEvent('action', `Attempting to add agent: ${newAgent.name}`);
-        await llmService.addAgent(newAgent); // [修正] 使用 llmService
+        await llmConfigService.addAgent(newAgent);
         testAgentId = newId;
     });
 
     document.getElementById('remove-agent-btn').addEventListener('click', async () => {
         if (!testAgentId) { alert('No test agent has been added yet.'); return; }
         logEvent('action', `Attempting to remove agent ID: ${testAgentId}`);
-        await llmService.removeAgent(testAgentId); // [修正] 使用 llmService
+        await llmConfigService.removeAgent(testAgentId);
         testAgentId = null;
     });
 

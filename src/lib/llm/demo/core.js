@@ -1,12 +1,12 @@
 // #llm/demo/core.js
 // --- 1. 导入所有需要的模块 ---
-// [修改] 导入路径更新到新的 configManager/
-import { ConfigManager, getConfigManager } from '../../configManager/index.js';
+// [修正] 移除未使用的 ConfigManager 导入
+import { getConfigManager } from '../../configManager/index.js';
 import { EVENTS } from '../../configManager/constants.js';
 import { LLMService } from '../core/LLMService.js';
 // 导入 LLM 核心逻辑
 import { LLMChain } from '../core/index.js';
-import { LLM_PROVIDER_DEFAULTS } from '../llmProvider.js';
+import { LLM_PROVIDER_DEFAULTS } from '../../common/configData.js';
 // [新增] 导入用于本地开发的配置文件
 import { API_KEY as DEV_API_KEY } from '../../demo/config.js';
 
@@ -35,7 +35,7 @@ const app = {
             if (payload.key === 'connections') {
                 console.log('连接配置已更新，正在刷新UI。');
                 this.populateConnectionSelect(payload.value);
-                this.llmService.clearCache(); // 清除缓存以使用新配置
+                // [修正] 移除冗余的 clearCache 调用。LLMService 会自我管理缓存。
             }
         });
     },
@@ -45,7 +45,8 @@ const app = {
      * 这个函数只在用户没有任何已保存连接时执行一次。
      */
     async seedDefaultConnection() {
-        let connections = await this.configManager.llmService.getConnections(); // [修正] 使用 llmService
+        // [修正] 使用正确的公共 API: .llm
+        let connections = await this.configManager.llm.getConnections();
         
         // 检查是否已经有连接，如果有，则什么都不做
         if (connections.length > 0) {
@@ -63,8 +64,8 @@ const app = {
         // 如果没有连接且开发Key有效，则自动创建一个
         console.log('未找到任何连接，正在使用 demo/config.js 中的 Key 创建一个默认连接...');
         try {
-            // [修正] 使用 llmService.addConnection
-            await this.configManager.llmService.addConnection({
+            // [修正] 使用正确的公共 API: .llm
+            await this.configManager.llm.addConnection({
                 id: `conn_default_${Date.now()}`,
                 name: 'DeepSeek (开发默认)',
                 provider: 'deepseek',
@@ -79,7 +80,8 @@ const app = {
     },
 
     async loadConnections() {
-        const connections = await this.configManager.llmService.getConnections(); // [修正] 使用 llmService
+        // [修正] 使用正确的公共 API: .llm
+        const connections = await this.configManager.llm.getConnections();
         this.populateConnectionSelect(connections);
     },
 
@@ -106,8 +108,8 @@ const app = {
                 return;
             }
             
-            // [修正] 使用 llmService.addConnection
-            await this.configManager.llmService.addConnection({
+            // [修正] 使用正确的公共 API: .llm
+            await this.configManager.llm.addConnection({
                 id: `conn_${Date.now()}`, name, provider, apiKey,
                 baseURL: baseURL || LLM_PROVIDER_DEFAULTS[provider]?.baseURL || '',
             });

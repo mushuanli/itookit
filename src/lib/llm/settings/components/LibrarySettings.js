@@ -7,7 +7,7 @@
  * - REFACTORED: Added a "Test Connection" button and status display area.
  * - REFACTORED: Constructor now accepts an onTest callback for dependency injection.
  */
-import { LLM_PROVIDER_DEFAULTS } from '../../../config/configData.js';
+import { LLM_PROVIDER_DEFAULTS } from '../../../common/configData.js';
 
 export class LibrarySettings {
     /**
