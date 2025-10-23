@@ -189,13 +189,17 @@ export class LLMService {
         return newList.filter(newConn => {
             const oldConn = oldList.find(c => c.id === newConn.id);
             if (!oldConn) return false;
+            
+            // 【已存在】检测 provider 变化
             if (oldConn.provider !== newConn.provider) return true;
 
+            // 【已存在】检测 model 列表变化
             const oldModelIds = new Set((oldConn.availableModels || []).map(m => m.id));
             const newModelIds = new Set((newConn.availableModels || []).map(m => m.id));
             return !this._areSetsEqual(oldModelIds, newModelIds);
         });
     }
+
 
     _fixInvalidAgentModels(agents, changedConnections, allNewConnections) {
         const changedConnectionIds = new Set(changedConnections.map(c => c.id));

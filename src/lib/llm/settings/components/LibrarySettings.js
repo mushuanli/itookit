@@ -11,17 +11,18 @@ import { LLM_PROVIDER_DEFAULTS } from '../../../common/configData.js';
 
 export class LibrarySettings {
     /**
+     * 构造函数
      * @param {HTMLElement} element - 容器元素
      * @param {object} initialConfig - 初始配置 { connections }
-     * @param {import('../../../config/services/LLMConfigService').LLMConfigService} configService - [注入] LLM 配置服务
+     * @param {import('../../../configManager/services/LLMService.js').LLMService} llmService - [核心修改] 直接注入LLM业务逻辑服务
      * @param {object} options - 其他选项
      * @param {Function} options.onTest - 测试连接的回调函数
      * @param {Function} options.onNotify - 通知回调
-     * @param {string|null} options.lockedId - 锁定的连接ID
-     * @param {object[]} options.allAgents - 所有 Agent 定义，用于依赖检查
+     * @param {string|null} options.lockedId - 锁定的连接ID，该连接不可删除
+     * @param {object[]} options.allAgents - 所有 Agent 定义，用于删除前的依赖检查
      */
-    constructor(element, initialConfig, configService, { 
-        onTest = async () => ({success: false, message: 'No test handler configured.'}),
+    constructor(element, initialConfig, llmService, {
+        onTest = async () => ({ success: false, message: 'No test handler configured.' }),
         onNotify = (message, type) => alert(`${type}: ${message}`),
         lockedId = null,
         // --- MODIFIED: Accept all agents for dependency check ---
@@ -31,23 +32,24 @@ export class LibrarySettings {
         this.config = initialConfig;
         
         // [核心修改] 直接保存对服务实例的引用
-        this.configService = configService;
+        this.llmService = llmService;
         
         this.onTest = onTest;
         this.onNotify = onNotify;
         this.lockedId = lockedId;
-        this.allAgents = allAgents; // Store agents for checks
+        this.allAgents = allAgents; // 用于UI层的即时依赖检查
         this.selectedConnectionId = null;
         this.isDirty = false; // --- FIX: Added isDirty state ---
 
-        // +++ 新增：保存快照用于变更检测 +++
-        this._connectionsSnapshot = null;
+        // [新增] 保存连接列表的快照，用于检测变更
+        this._connectionsSnapshot = JSON.parse(JSON.stringify(this.config.connections || []));
 
         this.providers = Object.keys(LLM_PROVIDER_DEFAULTS);
         
         // --- Store the provider before a change event ---
         this.providerBeforeChange = null; 
 
+        // 绑定事件处理器，方便添加和移除
         this._boundHandleClick = this._handleClick.bind(this);
         this._boundHandleSubmit = this._handleSubmit.bind(this);
         this._boundHandleChange = this._handleChange.bind(this);
@@ -59,8 +61,8 @@ export class LibrarySettings {
     }
 
     render() {
-        // +++ 新增：在每次渲染时创建快照 +++
-        this._connectionsSnapshot = JSON.parse(JSON.stringify(this.config.connections));
+        // [修改] 确保在每次渲染前都更新快照，以便保存时比较的是渲染时的状态
+        this._connectionsSnapshot = JSON.parse(JSON.stringify(this.config.connections || []));
         
         this.element.innerHTML = `
             <div class="split-view">
@@ -117,8 +119,7 @@ export class LibrarySettings {
         this.providerBeforeChange = conn.provider;
 
         const isLocked = conn.id === this.lockedId;
-        const nameDisabledAttr = isLocked ? 'disabled title="Default connection name cannot be changed."' : '';
-        // Hide delete button if locked, or define style to make it look disabled/hidden
+        const nameDisabledAttr = isLocked ? 'disabled title="默认连接的名称不可更改。"' : '';
         const deleteBtnStyle = isLocked ? 'display: none;' : 'margin-left: auto;';
 
         this.ui.detailPane.innerHTML = `
@@ -274,37 +275,20 @@ export class LibrarySettings {
         if (target.id === 'delete-connection-btn') {
             // --- IMPLEMENTATION: Guard against deleting locked ID ---
             if (this.selectedConnectionId === this.lockedId) {
-                this.onNotify("Cannot delete the default connection.", "error");
+                this.onNotify("不能删除默认连接。", "error");
                 return;
             }
 
-            // --- NEW: Deletion dependency check ---
-            const dependentAgents = (this.allAgents || []).filter(
-                agent => agent.config.connectionId === this.selectedConnectionId
-            );
-
-            if (dependentAgents.length > 0) {
-                const agentNames = dependentAgents.map(a => a.name).join(', ');
-                this.onNotify(
-                    `Cannot delete. Connection is used by: ${agentNames}.`,
-                    "error"
-                );
-                return; // Block deletion
-            }
-            // --- END NEW ---
-
-            if (confirm('Are you sure you want to delete this connection?')) {
-                this.config.connections = this.config.connections.filter(c => c.id !== this.selectedConnectionId);
-                this.selectedConnectionId = null;
-                
-                // +++ 修改：调用 Service 层 +++
-                await this.configService.updateConnections(
-                    this._connectionsSnapshot,
-                    this.config.connections
-                );
-                
-                this.isDirty = false;
-                this.render();
+            // [修复] 重新加入用户确认步骤
+            if (confirm('确定要删除此连接吗？')) {
+                try {
+                    await this.llmService.removeConnection(this.selectedConnectionId);
+                    this.selectedConnectionId = null;
+                    this.isDirty = false;
+                    this.onNotify('Connection deleted!', 'success');
+                } catch (error) {
+                    this.onNotify(error.message, "error");
+                }
             }
             return;
         }
@@ -394,25 +378,23 @@ export class LibrarySettings {
                 console.log('[LibrarySettings] 这是锁定的 Connection，名称保持不变');
                 }
 
-                this.config.connections[connIndex] = updatedConn;
-                
-                // [核心修改] 调用注入的 configService 的方法来保存
+                const newConnections = [...this.config.connections];
+                newConnections[connIndex] = updatedConn;
+
+                // [核心修改] 调用 llmService.updateConnections，将业务逻辑委托给服务层
                 try {
-                    // 传递旧值快照和新值，服务层将处理业务逻辑
-                    await this.configService.updateConnections(
+                    // 传递渲染前的快照和表单提交后的新值
+                    await this.llmService.updateConnections(
                         this._connectionsSnapshot,
-                        this.config.connections
+                        newConnections
                     );
                     
-                    // 更新快照
-                    this._connectionsSnapshot = JSON.parse(JSON.stringify(this.config.connections));
-                    
                     this.isDirty = false;
-                    this.renderList();
+                    // 数据保存成功后，父组件将通过事件接收更新，无需在此手动 render
                     this.onNotify('Connection saved!', 'success');
                     console.log('[LibrarySettings] <<< 表单提交完成');
                 } catch (error) {
-                    console.error('保存 Connection 失败:', error);
+                    console.error('Failed to save connection:', error);
                     this.onNotify(`Failed to save: ${error.message}`, 'error');
                 }
             } else {
@@ -421,9 +403,14 @@ export class LibrarySettings {
         }
     }
 
+    /**
+     * [接口声明] 更新组件内部状态。由父组件在接收到数据变更事件后调用。
+     * @param {{ connections: object[] }} data - 新的数据
+     */
     update({ connections }) {
         if (connections) {
             this.config.connections = connections;
+            // 如果当前选中的连接被删除了，则清空选择
             if (this.selectedConnectionId && !this.config.connections.some(c => c.id === this.selectedConnectionId)) {
                 this.selectedConnectionId = null;
             }
@@ -431,7 +418,10 @@ export class LibrarySettings {
         }
     }
 
-    // --- NEW: A way for the parent to push updated agents for dependency checks ---
+    /**
+     * [接口声明] 由父组件调用，用于更新 Agent 列表以进行依赖检查。
+     * @param {object[]} newAgents - 最新的 Agent 列表
+     */
     updateAgents(newAgents) {
         this.allAgents = newAgents;
     }

@@ -10,20 +10,22 @@ import { TagsInput } from './TagsInput.js';
 
 export class AgentEditor {
     /**
-     * @param {HTMLElement} element
-     * @param {object} options
+     * 构造函数
+     * @param {HTMLElement} element - 容器元素
+     * @param {object} options - 配置选项
      * @param {object[]} options.initialAgents - 初始 Agent 列表
-     * @param {string[]} options.allTags - 所有可用标签
+     * @param {object[]} options.allTags - 所有可用标签的对象列表 (e.g., [{name: 'tag1'}])
      * @param {object[]} options.initialConnections - 所有连接
+     * @param {(newAgents: object[]) => Promise<void>} options.onAgentsChange - [核心接口] 当 Agent 列表变更时调用的异步回调
      * @param {Function} options.onNotify - 通知回调
-     * @param {Function} options.onAgentsChange - [核心修改] 保存 Agent 的回调
      * @param {string|null} options.lockedId - 锁定的 Agent ID
      */
-    constructor(element, { initialAgents, allTags, initialConnections, onNotify, onAgentsChange, lockedId = null }) {
+    constructor(element, { initialAgents, allTags, initialConnections, onAgentsChange, onNotify, lockedId = null }) {
         this.element = element;
         this.agents = initialAgents;
-        this.allTags = allTags;
-        this.allConnections = initialConnections; // Store all connections
+        // [修改] 适配 TagRepository 返回的对象数组
+        this.allTags = allTags.map(t => t.name);
+        this.allConnections = initialConnections;
         this.onNotify = onNotify || ((message, type) => alert(`${type}: ${message}`));
         
         // [核心修改] 保存回调函数
@@ -241,48 +243,43 @@ export class AgentEditor {
         list.appendChild(newRow);
     }
     
-    createNewAgent() {
-        if (this.isDirty && !confirm("You have unsaved changes. Are you sure you want to discard them?")) return;
-
+    async createNewAgent() {
+        if (this.isDirty && !confirm("您有未保存的更改。确定要放弃吗?")) return;
         const newId = `agent-${Date.now()}`;
         const newAgent = {
             id: newId, name: "New Agent", icon: '🤖', tags: [],
-            config: { 
-                connectionId: "", // Start with no connection
-                modelName: "", 
-                systemPrompt: "You are a helpful assistant." 
-            },
+            config: { connectionId: "", modelName: "", systemPrompt: "You are a helpful assistant." },
             interface: { inputs: [{ name: "prompt", type: "string" }], outputs: [{ name: "response", type: "string" }] }
         };
-        this.agents.push(newAgent);
-        this.selectedAgentId = newId;
-        this.onAgentsChange(this.agents); // Immediately save to get it in the list
-        this.isDirty = false; // A new agent starts clean
-        this.render();
+        const newAgentsList = [...this.agents, newAgent];
+        
+        // [修改] 调用回调来持久化新创建的 Agent
+        await this.onAgentsChange(newAgentsList);
+        this.selectedAgentId = newId; // 在持久化后设置 ID
+        this.isDirty = false;
+        // 父组件会通过事件更新数据，这里不再需要手动 render()
     }
 
-    deleteCurrentAgent() {
-        // --- IMPLEMENTATION: Guard against deleting locked ID ---
+    async deleteCurrentAgent() {
         if (this.selectedAgentId === this.lockedId) {
-            this.onNotify("Cannot delete the default agent.", "error");
+            this.onNotify("不能删除默认 Agent。", "error");
             return;
         }
-
-        if (confirm('Are you sure you want to delete this agent?')) {
-            this.agents = this.agents.filter(a => a.id !== this.selectedAgentId);
+        if (confirm('确定要删除此 Agent 吗？')) {
+            const newAgents = this.agents.filter(a => a.id !== this.selectedAgentId);
             this.selectedAgentId = null;
-            this.onAgentsChange(this.agents);
+            // [修改] 调用回调来持久化删除操作
+            await this.onAgentsChange(newAgents);
             this.isDirty = false;
-            this.render();
         }
     }
 
-    saveCurrentAgent(form) {
+    async saveCurrentAgent(form) {
         const agentIndex = this.agents.findIndex(a => a.id === this.selectedAgentId);
         if (agentIndex === -1) return;
 
         const formData = new FormData(form);
-        const agent = this.agents[agentIndex];
+        const agent = { ...this.agents[agentIndex] }; // 创建副本以进行修改
 
         // --- FIX: Do not update name if locked ---
         if (this.selectedAgentId !== this.lockedId) {
@@ -291,45 +288,63 @@ export class AgentEditor {
 
         agent.icon = formData.get('icon');
         agent.description = formData.get('description');
-        agent.tags = Array.from(this.tagsInput.currentTags);
-        // Update config with new structure
-        agent.config.connectionId = formData.get('connectionId');
-        agent.config.modelName = formData.get('modelName');
-        agent.config.systemPrompt = formData.get('systemPrompt');
+        agent.tags = this.tagsInput ? Array.from(this.tagsInput.currentTags) : agent.tags;
+        agent.config = {
+            ...agent.config,
+            connectionId: formData.get('connectionId'),
+            modelName: formData.get('modelName'),
+            systemPrompt: formData.get('systemPrompt')
+        };
+        agent.interface = {
+            inputs: Array.from(form.querySelectorAll('#inputs-list .interface-row')).map(row => ({
+                name: row.children[0].value, type: row.children[1].value, description: row.children[2].value
+            })),
+            outputs: Array.from(form.querySelectorAll('#outputs-list .interface-row')).map(row => ({
+                name: row.children[0].value, type: row.children[1].value, description: row.children[2].value
+            }))
+        };
         
-        // Rebuild interface object from the DOM
-        agent.interface.inputs = Array.from(form.querySelectorAll('#inputs-list .interface-row')).map(row => ({
-            name: row.children[0].value, type: row.children[1].value, description: row.children[2].value
-        }));
-        agent.interface.outputs = Array.from(form.querySelectorAll('#outputs-list .interface-row')).map(row => ({
-            name: row.children[0].value, type: row.children[1].value, description: row.children[2].value
-        }));
-        
-        // [核心修改] 调用注入的回调函数 (最终会调用 llmService.saveAgents)
+        const newAgentsList = [...this.agents];
+        newAgentsList[agentIndex] = agent;
+
         if (this.onAgentsChange) {
-            this.onAgentsChange(this.agents);
+            try {
+                // [修改] 调用注入的回调函数，该函数将调用 llmService.saveAgents
+                await this.onAgentsChange(newAgentsList);
+                this.isDirty = false;
+                this.onNotify('Agent saved!', 'success');
+            } catch (error) {
+                this.onNotify(`Failed to save agent: ${error.message}`, 'error');
+            }
         } else {
-            console.error("AgentEditor: onAgentsChange 回调未提供。");
+            console.error("AgentEditor: onAgentsChange callback is not provided.");
         }
-        this.isDirty = false; // --- FIX: Reset dirty state after save ---
-        this.renderList(); // Re-render list in case name/tags changed
-        this.onNotify('Agent saved!', 'success'); // REPLACED alert()
     }
 
+    /**
+     * [接口声明] 更新组件状态，由父组件调用
+     * @param {{ newAgents?: object[], newAllTags?: object[], newConnections?: object[] }} updates
+     */
     update({ newAgents, newAllTags, newConnections }) {
-        if (newAgents) this.agents = newAgents;
+        let needsRender = false;
+        if (newAgents) {
+            this.agents = newAgents;
+            if (this.selectedAgentId && !newAgents.some(a => a.id === this.selectedAgentId)) {
+                this.selectedAgentId = null;
+            }
+            needsRender = true;
+        }
         if (newAllTags) {
-            this.allTags = newAllTags;
-            if (this.tagsInput) this.tagsInput.updateAllTags(newAllTags);
+            // [修改] 适配 TagRepository 返回的对象数组
+            this.allTags = newAllTags.map(t => t.name);
+            if (this.tagsInput) this.tagsInput.updateAllTags(this.allTags);
+            // No full re-render needed for just tag list update
         }
-        if (newConnections) this.allConnections = newConnections; // Handle connection updates
-        
-        // If the selected agent was deleted, deselect it
-        if (this.selectedAgentId && newAgents && !newAgents.some(a => a.id === this.selectedAgentId)) {
-            this.selectedAgentId = null;
+        if (newConnections) {
+            this.allConnections = newConnections;
+            needsRender = true; // Connections list changed, might need to re-render form
         }
-
-        this.render();
+        if (needsRender) this.render();
     }
 
 }

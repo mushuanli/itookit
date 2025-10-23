@@ -1,7 +1,7 @@
 // 文件: #llm/chat/index.js
 
 /**
- * @file LLMChatUI.js (V4 - 最终封装版)
+ * @file index.js (V4 - 最终封装版)
  * @description 组合 historyUI 和 inputUI 的完整聊天界面编排器。
  * 
  * [V4 核心架构]

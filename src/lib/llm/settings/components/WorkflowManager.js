@@ -14,9 +14,9 @@ export class WorkflowManager {
      * @param {HTMLElement} element
      * @param {object} options
      * @param {object[]} options.initialWorkflows
-     * @param {object} options.initialRunnables
+     * @param {object} options.initialRunnables - { agents: [], workflows: [] }
      * @param {Function} options.onRun
-     * @param {Function} options.onSave - [核心修改] 保存 workflow 的回调
+     * @param {(workflows: object[]) => Promise<void>} options.onSave - [核心接口] 保存 workflow 的回调
      * @param {Function} options.onNotify
      */
     constructor(element, { initialWorkflows, initialRunnables, onRun, onSave, onNotify }) {
@@ -210,7 +210,7 @@ export class WorkflowManager {
         });
     }
 
-    saveCurrentWorkflow() {
+    async saveCurrentWorkflow() {
         const nameInput = this.element.querySelector('#workflow-name-input');
         if (!nameInput) return; // Not editing any workflow
 
@@ -231,7 +231,7 @@ export class WorkflowManager {
 
         const workflowInterface = { inputs: getInterface('inputs'), outputs: getInterface('outputs') };
         
-        let workflow = {
+        const workflow = {
             ...graphData,
             name,
             description: this.element.querySelector('#workflow-description-input').value,
@@ -239,26 +239,30 @@ export class WorkflowManager {
         };
         
         const existingIndex = this.workflows.findIndex(wf => wf.id === this.selectedWorkflowId);
+        let newWorkflowsList;
 
         if (existingIndex > -1) {
             workflow.id = this.selectedWorkflowId;
-            this.workflows[existingIndex] = workflow;
+            newWorkflowsList = [...this.workflows];
+            newWorkflowsList[existingIndex] = workflow;
         } else {
             workflow.id = `wf-${Date.now()}`;
-            this.workflows.push(workflow);
+            newWorkflowsList = [...this.workflows, workflow];
             this.selectedWorkflowId = workflow.id;
         }
         
-        // [核心修改] 调用注入的回调函数 (最终会调用 llmService.saveWorkflows)
+        // [核心修改] 调用注入的异步回调函数来持久化
         if (this.onSave) {
-            this.onSave(this.workflows);
+            try {
+                await this.onSave(newWorkflowsList);
+                this.isDirty = false;
+                this.onNotify('Workflow saved!', 'success');
+            } catch (error) {
+                this.onNotify(`Failed to save workflow: ${error.message}`, 'error');
+            }
         } else {
-            console.error("WorkflowManager: onSave 回调未提供。");
+            console.error("WorkflowManager: onSave callback is not provided.");
         }
-
-        this.isDirty = false;
-        this.renderWorkflowList();
-        this.onNotify('Workflow saved!', 'success');
     }
 
     attachEventListeners() {

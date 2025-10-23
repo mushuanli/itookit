@@ -3,31 +3,21 @@
 /**
  * @file LLMSettingsWidget.js (V3 - 服务容器架构)
  * @description 管理 LLM 设置的主 Widget，实现了 ISettingsWidget 接口。
- *
- * [V3 核心重构]
- * - **依赖 ConfigManager 单例**: 不再需要通过构造函数注入 `llmConfigService`。
- *   组件现在直接从 `ConfigManager.getInstance()` 获取所有需要的服务（`llmService`, `tagRepo`），
- *   简化了实例化过程并确保了与应用其他部分的数据一致性。
- * - **移除默认值创建逻辑**: 创建默认 Connection 和 Agent 的职责已完全移交给 `ConfigManager` 的 `bootstrap` 流程。
- *   `_loadAndInit` 方法现在只负责加载数据，变得更纯粹。
- * - **事件驱动更新**: 通过订阅 `ConfigManager` 的事件，实现了对 Connections, Agents, Tags 等数据变更的实时响应。
+ *              这是整个 LLM 设置功能的唯一入口点，负责与 ConfigManager 交互，
+ *              并将数据和服务传递给子组件。它通过订阅事件来保持 UI 的响应式。
  */
 
 // --- 依赖导入 ---
 import { ISettingsWidget } from '../../common/interfaces/ISettingsWidget.js';
-// import { getCSS } from './styles.js'; // 1. REMOVED: Old style import
-import './styles.css'; // 2. ADDED: Simplified CSS import
+import './styles.css'; // 简化 CSS 导入，由构建工具处理
 import { LibrarySettings } from './components/LibrarySettings.js';
 import { AgentEditor } from './components/AgentEditor.js';
 import { WorkflowManager } from './components/WorkflowManager.js';
-
-// --- [核心修改] 导入 ConfigManager 单例 ---
-import { ConfigManager } from '../../config/ConfigManager.js';
-// --- 移除: 不再需要直接导入 LLM_PROVIDER_DEFAULTS 来构造默认值 ---
+import { getConfigManager } from '../../configManager/index.js'; // [核心] 导入 ConfigManager 单例获取函数
 import { LLM_DEFAULT_ID } from '../../common/configData.js';
-import { EVENTS } from '../../config/shared/constants.js'; // <--- [修复] 添加这一行导入
+import { EVENTS } from '../../configManager/constants.js';
 
-// Constants for Defaults
+// --- 常量定义 ---
 const CONSTANTS = {
     DEFAULT_CONN_ID: LLM_DEFAULT_ID,
     DEFAULT_AGENT_ID: LLM_DEFAULT_ID,
@@ -53,28 +43,35 @@ const CONSTANTS = {
  * @property {CustomSettingsTab[]} [customSettingsTabs] - An array of custom tabs to add to the 'Settings' section.
  */
 
+/**
+ * LLMSettingsWidget 类
+ * @implements {ISettingsWidget}
+ */
 export class LLMSettingsWidget extends ISettingsWidget {
     /**
-     * @param {object} options - Configuration options for the widget.
-     * @param {(workflow: object) => void} [options.onWorkflowRun]
-     * @param {(message: string, type: 'success'|'error'|'info') => void} [options.onNotify]
+     * @param {object} options - 配置选项
+     * @param {(workflow: object) => void} [options.onWorkflowRun] - 执行工作流的回调
+     * @param {(message: string, type: 'success'|'error'|'info') => void} [options.onNotify] - 显示通知的回调
+     * @param {(connection: object) => Promise<{success: boolean, message: string}>} [options.onTestLLMConnection] - 测试连接的回调
      */
     constructor(options = {}) {
         super();
         this.options = options;
 
-        // --- [核心修改] 直接获取 ConfigManager 单例及其服务 ---
-        this.configManager = ConfigManager.getInstance();
+        // [核心修改] 直接从单例获取 ConfigManager 及其服务
+        this.configManager = getConfigManager();
         if (!this.configManager) {
-            throw new Error("LLMSettingsWidget 无法创建：ConfigManager 尚未初始化。请先调用 ConfigManager.getInstance(config)。");
+            throw new Error("LLMSettingsWidget 无法创建：ConfigManager 尚未初始化。");
         }
-        this.llmService = this.configManager.llmService;
+        // 从 ConfigManager 获取封装好的 LLM 业务服务
+        this.llmService = this.configManager.llm;
         
         this.onTestLLMConnection = options.onTestLLMConnection;
 
         // Internal state
         this.isMounted = false;
-        this.container = null; // The DOM element provided by the host
+        this.container = null;
+        this.uiContainer = null; // [新增] 明确声明内部UI根元素
         this.components = {};
         this.state = {
             connections: [],
@@ -83,21 +80,21 @@ export class LLMSettingsWidget extends ISettingsWidget {
             tags: []
         };
         
-        // Bound event handlers for easy add/remove
+        this._subscriptions = [];
+
+        // [修正] 在构造函数中预先绑定事件处理器，以获得稳定的函数引用
         this._boundTabClickHandler = this._handleTabClick.bind(this);
-        this._subscriptions = []; // To store unsubscribe functions
     }
 
-    // --- ISettingsWidget Interface Implementation ---
-
+    // --- ISettingsWidget 接口实现 ---
     get id() { return 'llm-settings-manager'; }
-    get label() { return 'AI Settings'; }
+    get label() { return 'AI 设置'; }
     get iconHTML() { return '⚙️'; }
-    get description() { return 'Manage Connections, Agents, and Workflows.'; }
+    get description() { return '管理模型连接、智能代理和工作流。'; }
     
     /**
-     * Aggregates the dirty state from child components.
-     * Note: This requires child components to also expose an `isDirty` property.
+     * 检查是否有未保存的更改
+     * @returns {boolean}
      */
     get isDirty() {
         // --- FIX: Extended to check all components ---
@@ -107,39 +104,40 @@ export class LLMSettingsWidget extends ISettingsWidget {
                false;
     }
 
-    // --- Lifecycle Methods ---
+    // --- 生命周期方法 ---
 
     /**
-     * Renders the widget into a host-provided container and initializes it.
-     * @param {HTMLElement} container - The DOM element to render into.
+     * 将组件挂载到指定的 DOM 容器中
+     * @param {HTMLElement} container - 用于渲染组件的 DOM 元素
      */
     async mount(container) {
         if (this.isMounted) {
-            console.warn("LLMSettingsWidget is already mounted.");
+            console.warn("LLMSettingsWidget 已挂载。");
             return;
         }
         if (!(container instanceof HTMLElement)) {
-            throw new Error("A valid HTMLElement container must be provided to mount().");
+            throw new Error("必须提供一个有效的 HTMLElement 容器来进行挂载。");
         }
         this.container = container;
         this.isMounted = true;
 
         // this._injectCSS(); // 3. REMOVED: No longer need to inject CSS manually
         this._renderShell();
+        this._attachShellEventListeners(); // [新增] 挂载时附加事件监听
         
         try {
-            await this._loadAndInit();
-            this._subscribeToChanges(); // Subscribe to config changes AFTER initial load
+            await this._loadAndInit(); // 加载初始数据
+            this._subscribeToChanges(); // [关键] 在初始加载后订阅数据变更事件
             this.emit('mounted');
         } catch (error) {
-            console.error("Failed to initialize LLMSettingsWidget:", error);
-            this.container.innerHTML = `<p style="color: red;">Error: Could not load settings.</p>`;
-            this.emit('error', { message: "Failed to load settings.", originalError: error });
+            console.error("初始化 LLMSettingsWidget 失败:", error);
+            this.container.innerHTML = `<p style="color: red;">错误：无法加载设置。</p>`;
+            this.emit('error', { message: "加载设置失败。", originalError: error });
         }
     }
 
     /**
-     * Cleans up the DOM and event listeners when the widget is hidden.
+     * 从 DOM 中卸载组件并清理资源
      */
     async unmount() {
         if (!this.isMounted) return;
@@ -149,21 +147,21 @@ export class LLMSettingsWidget extends ISettingsWidget {
         this._subscriptions.forEach(unsubscribe => unsubscribe());
         this._subscriptions = [];
 
-        // Optional: Call destroy on child components if they have complex cleanup
+        // 调用子组件的销毁方法（如果存在）
         Object.values(this.components).forEach(comp => {
             if (typeof comp.destroy === 'function') comp.destroy();
         });
 
-        this.container.innerHTML = '';
+        if (this.container) this.container.innerHTML = '';
         this.container = null;
+        this.uiContainer = null;
         this.isMounted = false;
         this.components = {};
-
         this.emit('unmounted');
     }
-
+    
     /**
-     * Performs a full cleanup of any resources.
+     * 彻底销毁组件实例
      */
     async destroy() {
         await this.unmount();
@@ -172,25 +170,12 @@ export class LLMSettingsWidget extends ISettingsWidget {
         this.options = null;
     }
 
-    // --- Private Methods (Refactored from original) ---
-
-    /* 4. REMOVED: This entire method is now redundant.
-    _injectCSS() {
-        const styleId = 'llm-kit-settings-ui-styles';
-        if (document.getElementById(styleId)) return;
-        const style = document.createElement('style');
-        style.id = styleId;
-        style.innerHTML = getCSS();
-        document.head.appendChild(style);
-    }
-    */
-
+    // --- 私有方法 ---
     /**
-     * Renders the widget's internal structure into the container.
-     * --- REFACTORED: No longer creates its own overlay or container. ---
+     * 渲染组件的基础 DOM 结构
+     * @private
      */
     _renderShell() {
-        // The HTML is now just the *content* of the settings panel.
         this.container.innerHTML = `
             <div class="settings-manager-container" style="width: 100%; height: 100%; display: flex; flex-direction: column;">
                 <div class="settings-manager-header">
@@ -207,20 +192,28 @@ export class LLMSettingsWidget extends ISettingsWidget {
                 </div>
             </div>
         `;
-        
+        // [关键] 获取内部UI的根元素，用于限定事件和查询的作用域
         this.uiContainer = this.container.querySelector('.settings-manager-container');
-        this._attachShellEventListeners();
     }
     
+    /**
+     * [新增] 集中附加 Shell 的事件监听器
+     * @private
+     */
     _attachShellEventListeners() {
-        // Main tab switching
+        if (!this.uiContainer) return;
         this.uiContainer.querySelectorAll('.settings-manager-tab-button').forEach(tab => {
             tab.addEventListener('click', this._boundTabClickHandler);
         });
     }
 
+    /**
+     * [新增] 集中移除 Shell 的事件监听器
+     * @private
+     */
     _removeShellEventListeners() {
-        this.uiContainer?.querySelectorAll('.settings-manager-tab-button').forEach(tab => {
+        if (!this.uiContainer) return;
+        this.uiContainer.querySelectorAll('.settings-manager-tab-button').forEach(tab => {
             tab.removeEventListener('click', this._boundTabClickHandler);
         });
     }
@@ -230,9 +223,19 @@ export class LLMSettingsWidget extends ISettingsWidget {
     }
     
     /**
-     * --- 重构后 ---
-     * 此方法现在只负责从 ConfigManager 加载数据并更新UI状态。
-     * 创建默认值的逻辑已被完全移除。
+     * 设置激活的 Tab
+     * @private
+     */
+    _setActiveTab(tabName) {
+        if (!this.uiContainer) return;
+        this.uiContainer.querySelectorAll('.settings-manager-tab-button').forEach(t => t.classList.toggle('active', t.dataset.tab === tabName));
+        this.uiContainer.querySelectorAll('.settings-manager-tab-content').forEach(c => c.classList.toggle('active', c.id === `tab-${tabName}`));
+    }
+
+    /**
+     * [重构] 从 ConfigManager 加载初始数据并初始化UI。
+     * 此方法不再负责创建默认值，因为这已由 ConfigManager 的启动流程处理。
+     * @private
      */
     async _loadAndInit() {
         // 1. 直接从 `ConfigManager` 的服务中加载数据。
@@ -241,7 +244,7 @@ export class LLMSettingsWidget extends ISettingsWidget {
             this.llmService.getConnections(),
             this.llmService.getAgents(),
             this.llmService.getWorkflows(),
-            this.configManager.tags.getAll()
+            this.configManager.getAllTags() // 直接通过 ConfigManager 的顶层 API 获取
         ]);
         
         // --- (所有创建默认值的逻辑都已被移除) ---
@@ -256,10 +259,16 @@ export class LLMSettingsWidget extends ISettingsWidget {
         this._initComponents();
     }
 
+    /**
+     * [重构] 初始化所有子组件，并注入所需的依赖（服务或回调）。
+     * 这里是连接 UI 和业务逻辑层的关键。
+     * @private
+     */
     _initComponents() {
+        const container = this.container; // 避免在回调中重复查询
         this.components = {
             connections: new LibrarySettings(
-                this.uiContainer.querySelector('#tab-connections'),
+                container.querySelector('#tab-connections'),
                 { connections: this.state.connections },
                 // +++ 修改：传递 Service 实例而非回调 +++
                 this.llmService,
@@ -272,7 +281,7 @@ export class LLMSettingsWidget extends ISettingsWidget {
                 }
             ),
             agents: new AgentEditor(
-                this.uiContainer.querySelector('#tab-agents'),
+                container.querySelector('#tab-agents'),
                 { 
                     initialAgents: this.state.agents, 
                     allTags: this.state.tags,
@@ -280,17 +289,12 @@ export class LLMSettingsWidget extends ISettingsWidget {
                     onNotify: this._notify.bind(this),
                     // Pass default ID to control UI
                     lockedId: CONSTANTS.DEFAULT_AGENT_ID,
-                    onAgentsChange: async (newAgents) => {
-                        await this.llmService.saveAgents(
-                            newAgents,
-                            this.configManager.tags // 传递 TagRepository
-                        );
-                        this.emit('change', { key: 'agents' });
-                    }
+                    // [核心修改] 将 onAgentsChange 回调直接绑定到 llmService 的方法
+                    onAgentsChange: (newAgents) => this.llmService.saveAgents(newAgents)
                 }
             ),
             workflows: new WorkflowManager(
-                this.uiContainer.querySelector('#tab-workflows'),
+                container.querySelector('#tab-workflows'),
                 { 
                     initialWorkflows: this.state.workflows,
                     initialRunnables: { agents: this.state.agents, workflows: this.state.workflows },
@@ -303,56 +307,61 @@ export class LLMSettingsWidget extends ISettingsWidget {
         };
     }
 
-    _setActiveTab(tabName) {
-        this.uiContainer.querySelectorAll('.settings-manager-tab-button').forEach(t => t.classList.toggle('active', t.dataset.tab === tabName));
-        this.uiContainer.querySelectorAll('.settings-manager-tab-content').forEach(c => c.classList.toggle('active', c.id === `tab-${tabName}`));
-    }
-
+    /**
+     * 内部通知分发器
+     * @private
+     */
     _notify(message, type = 'info') {
         if (this.options.onNotify) {
             this.options.onNotify(message, type);
         } else {
+            // 如果未提供外部通知回调，则通过事件系统发出
             this.emit('notification', { message, type });
         }
     }
     /**
-     * [新增] 集中化的事件订阅逻辑。
+     * [新增] 订阅 ConfigManager 的数据变更事件，以实现响应式 UI。
      * @private
      */
     _subscribeToChanges() {
-        const { eventManager } = this.configManager;
-        
-        // 订阅 Connection 更新事件
-        const unsubscribeConnections = eventManager.subscribe(EVENTS.LLM_CONNECTIONS_UPDATED, (newConnections) => {
-            this.state.connections = newConnections;
-            if (this.components.connections) this.components.connections.update({ connections: newConnections });
-            if (this.components.agents) this.components.agents.update({ newConnections: newConnections });
-        });
-        this._subscriptions.push(unsubscribeConnections);
-
-        // 订阅 Agent 更新事件
-        const unsubscribeAgents = eventManager.subscribe(EVENTS.LLM_AGENTS_UPDATED, (agents) => {
-            this.state.agents = agents;
-            if (this.components.connections) this.components.connections.updateAgents(agents); // 更新依赖检查
-            if (this.components.agents) this.components.agents.update({ newAgents: agents });
-            if (this.components.workflows) this.components.workflows.updateRunnables({ agents: this.state.agents, workflows: this.state.workflows });
-        });
-        this._subscriptions.push(unsubscribeAgents);
-
-        // 订阅 Workflow 更新事件
-        const unsubscribeWorkflows = eventManager.subscribe(EVENTS.LLM_WORKFLOWS_UPDATED, (workflows) => {
-            this.state.workflows = workflows;
-            if (this.components.workflows) {
-                this.components.workflows.update({ initialWorkflows: workflows });
-                this.components.workflows.updateRunnables({ agents: this.state.agents, workflows: this.state.workflows });
+        // 订阅 LLM 配置的通用更新事件
+        const unsubscribeLlm = this.configManager.on(EVENTS.LLM_CONFIG_UPDATED, (data) => {
+            if (!this.isMounted) return; // 防御性检查
+            const { key, value } = data;
+            
+            // 根据变更的数据类型，更新对应的状态和子组件
+            switch (key) {
+                case 'connections':
+                    this.state.connections = value;
+                    this.components.connections?.update({ connections: value });
+                    // Agent 编辑器依赖连接列表，因此也需要更新
+                    this.components.agents?.update({ newConnections: value });
+                    break;
+                case 'agents':
+                    this.state.agents = value;
+                    this.components.connections?.updateAgents(value); // 更新连接的依赖检查列表
+                    this.components.agents?.update({ newAgents: value });
+                    // 工作流的可运行节点列表包含 Agent，因此也需要更新
+                    this.components.workflows?.updateRunnables({ agents: value, workflows: this.state.workflows });
+                    break;
+                case 'workflows':
+                    this.state.workflows = value;
+                    if (this.components.workflows) {
+                        this.components.workflows.update({ initialWorkflows: value });
+                        this.components.workflows.updateRunnables({ agents: this.state.agents, workflows: value });
+                    }
+                    break;
             }
         });
-        this._subscriptions.push(unsubscribeWorkflows);
-        
-        // 订阅 Tag 更新事件
-        const unsubscribeTags = eventManager.subscribe(EVENTS.TAGS_UPDATED, (tags) => {
-            this.state.tags = tags;
-            if (this.components.agents) this.components.agents.update({ newAllTags: tags });
+        this._subscriptions.push(unsubscribeLlm);
+
+        // 订阅标签更新事件
+        const unsubscribeTags = this.configManager.on(EVENTS.TAGS_UPDATED, async () => {
+            if (!this.isMounted) return;
+            // 当标签更新时（例如，在 Agent 保存时创建了新标签），重新获取所有标签
+            const newTags = await this.configManager.getAllTags();
+            this.state.tags = newTags;
+            this.components.agents?.update({ newAllTags: newTags });
         });
         this._subscriptions.push(unsubscribeTags);
     }
