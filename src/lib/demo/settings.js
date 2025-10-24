@@ -10,7 +10,7 @@
  */
 
 // [核心重构] 必须先导入并初始化 ConfigManager
-import { ConfigManager } from '../config/ConfigManager.js';
+import { getConfigManager } from '../configManager/index.js';
 // 导入 SettingsWorkspace 的工厂函数
 import { createSettingsWorkspace } from '../workspace/settings/index.js';
 // 导入 Widget 接口，用于类型规范
@@ -26,6 +26,7 @@ export class AppearanceWidget extends ISettingsWidget {
 
     get id() { return 'appearance-settings'; }
     get label() { return '外观'; }
+    get iconHTML() { return '🎨'; }
     get description() { return '自定义应用的外观和感觉。'; }
     get isDirty() { return this._isDirty; }
 
@@ -69,8 +70,9 @@ export class AppearanceWidget extends ISettingsWidget {
     }
 
     async unmount() {
-        // 在卸载前检查脏状态，这是 SettingsWorkspace 的职责，这里仅清理 DOM
-        if (this.container) this.container.innerHTML = '';
+        if (this.container) {
+            this.container.innerHTML = '';
+        }
         this.container = null;
     }
 
@@ -87,49 +89,34 @@ export class AppearanceWidget extends ISettingsWidget {
 }
 
 
-document.addEventListener('DOMContentLoaded', () => {
-    console.log("DOM 已加载。正在初始化应用核心服务...");
+document.addEventListener('DOMContentLoaded', async () => {
+    console.log("🚀 正在初始化应用...");
+    
+    try {
+        // 1. 获取并初始化 ConfigManager
+        const configManager = getConfigManager();
+        await configManager.init();
+        console.log("✅ ConfigManager 已就绪");
+        
+        // 2. 创建工作区
+        const workspace = await createSettingsWorkspace({
+            configManager: configManager,
+            namespace: 'settings-workspace-demo',
+            sidebarContainer: document.getElementById('sidebar-container'),
+            settingsContainer: document.getElementById('settings-container'),
+            widgets: [AppearanceWidget]
+        });
 
-    // --- [核心修复] 步骤 1: 初始化应用的核心服务 ConfigManager ---
-    // 在一个真实的应用中，这应该在应用的最高层入口处完成。
-    const configManager = ConfigManager.getInstance({
-        // 提供一个前缀以避免 LocalStorage 键冲突
-        adapterOptions: { prefix: 'settings_demo_app_' }
-    });
-
-    // --- 步骤 2: 监听 'app:ready' 事件以初始化 UI ---
-    configManager.eventManager.subscribe('app:ready', () => {
-        console.log("ConfigManager 已就绪。开始初始化 Settings Workspace...");
-
-        try {
-            // 在回调中安全地创建 Workspace
-            const workspace = createSettingsWorkspace({
-                sidebarContainer: document.getElementById('sidebar-container'),
-                settingsContainer: document.getElementById('settings-container'),
-                
-                // [核心修改] 注入核心依赖
-                configManager: configManager,
-                namespace: 'settings-workspace-demo',
-
-                // 添加自定义 Widget
-                widgets: [
-                    AppearanceWidget // SettingsWorkspace 会自动合并默认的 Widgets
-                ]
-            });
-
-            // 启动工作区
-            workspace.start().then(() => {
-                console.log("Settings Workspace 启动成功!");
-            });
-        } catch (error) {
-            console.error("初始化 Settings Workspace 失败:", error);
-            document.body.innerHTML = `<div class="error-message">工作区初始化失败，请查看控制台。</div>`;
-        }
-    });
-
-    // --- 步骤 3: 触发应用启动流程 ---
-    configManager.bootstrap().catch(error => {
-        console.error("应用核心服务启动失败:", error);
-        document.body.innerHTML = `<div class="error-message">应用核心服务启动失败，请查看控制台。</div>`;
-    });
+        console.log("✅ Settings Workspace 启动成功！");
+        window.settingsWorkspace = workspace;
+        
+    } catch (error) {
+        console.error("❌ 初始化失败:", error);
+        document.body.innerHTML = `
+            <div class="error-message">
+                <h3>❌ 初始化失败</h3>
+                <p><strong>错误:</strong> ${error.message}</p>
+            </div>
+        `;
+    }
 });

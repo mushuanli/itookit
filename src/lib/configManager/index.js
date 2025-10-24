@@ -21,9 +21,18 @@ import { STORES } from './constants.js';
 
 // [修改] 导出 ConfigManager 类，以便进行类型检查和依赖注入
 export class ConfigManager {
+    static #instance = null;  // 使用私有静态字段
+
+    static getInstance() {
+        if (!ConfigManager.#instance) {
+            ConfigManager.#instance = new ConfigManager();
+        }
+        return ConfigManager.#instance;
+    }
+
     constructor() {
-        if (ConfigManager.instance) {
-            return ConfigManager.instance;
+        if (ConfigManager.#instance) {
+            return ConfigManager.#instance;
         }
 
         this.db = database;
@@ -43,15 +52,11 @@ export class ConfigManager {
         this.llmRepo = new LLMRepository(this.db, this.events);
         this.llmService = new LLMService(this.llmRepo, this.tagRepo, this.events);
         
-        ConfigManager.instance = this;
+        this._workspaceContexts = new Map();
+
+        ConfigManager.#instance = this;
     }
 
-    static getInstance() {
-        if (!instance) {
-            instance = new ConfigManager();
-        }
-        return instance;
-    }
 
     /**
      * 初始化模块，连接数据库。
@@ -61,6 +66,51 @@ export class ConfigManager {
     async init() {
         await this.db.connect();
         console.log("ConfigManager initialized and database is ready.");
+    }
+
+    /**
+     * 获取指定命名空间的工作区上下文
+     * @param {string} namespace - 工作区命名空间
+     * @returns {Object} 工作区上下文对象
+     */
+    getWorkspace(namespace) {
+        if (!this._workspaceContexts.has(namespace)) {
+            // 创建新的工作区上下文
+            const context = {
+                namespace,
+                configManager: this,
+                // 可以添加其他工作区特定的配置
+            };
+            this._workspaceContexts.set(namespace, context);
+        }
+        return this._workspaceContexts.get(namespace);
+    }
+
+    /**
+     * Get a service by name
+     * @param {string} serviceName - Name of the service
+     * @returns {Object} The requested service
+     */
+    getService(serviceName) {
+        const serviceMap = {
+            'nodeRepository': this.nodeRepo,
+            'tagRepository': this.tagRepo,
+            'linkRepository': this.linkRepo,
+            'srsRepository': this.srsRepo,
+            'taskRepository': this.taskRepo,
+            'agentRepository': this.agentRepo,
+            'pluginRepository': this.pluginRepo,
+            'searchRepository': this.searchRepo,
+            'llmRepository': this.llmRepo,
+            'llmService': this.llmService,
+            'eventManager': this.events
+        };
+        
+        if (!serviceMap[serviceName]) {
+            throw new Error(`Service "${serviceName}" not found`);
+        }
+        
+        return serviceMap[serviceName];
     }
 
     // --- [移植] 事件订阅 API ---
@@ -265,8 +315,6 @@ export class ConfigManager {
     async globalSearch(query) { return this.searchRepo.globalTextSearch(query); }
 }
 
-// 单例模式实现
-let instance = null;
 
 /**
  * 获取 ConfigManager 的单例。

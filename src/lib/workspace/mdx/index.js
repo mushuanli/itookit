@@ -1,7 +1,7 @@
-// 文件: #workspace/mdx/MDxWorkspace.js
+// 文件: #workspace/mdx/index.js
 
 /**
- * @file MDxWorkspace.js (V3 - 服务容器架构)
+ * @file index.js (V3 - 服务容器架构)
  * @description
  * 一个功能完备的库，将 mdx-editor 和新一代的 sessionUI
  * 整合成一个统一、自洽且易于使用的可复用工作区组件。
@@ -61,22 +61,9 @@ export class MDxWorkspace {
          */
         this.namespace = options.namespace;
         
-        /**
-         * @private
-         * @type {import('../../config/core/WorkspaceContext.js').WorkspaceContext}
-         * @description [新增] 获取与此命名空间绑定的工作区上下文。
-         *              这是访问所有作用域服务（如 ModuleRepository）的唯一入口。
-         */
-        this.workspaceContext = this.configManager.getWorkspace(this.namespace);
 
         // --- [核心修改] ---
-        // 构造函数现在只负责创建对象，不连接任何事件。
-        // this._sessionManager 仍然在这里创建，因为 start 方法需要它。
-        this._sessionManager = createSessionUI({
-            ...this.options.sidebar,
-            sessionListContainer: this.options.sidebarContainer,
-            documentOutlineContainer: this.options.outlineContainer,
-        }, this.configManager, this.namespace);
+        this._sessionManager = null;
 
         // --- 内部状态初始化 ---
         /** @private @type {MDxEditor | null} */
@@ -114,9 +101,9 @@ export class MDxWorkspace {
      * @returns {Promise<void>}
      */
     async start() {
-        // --- 1. [核心重构] 初始化 SessionUI ---
-        // `createSessionUI` 的签名已更新，现在直接接收 `configManager` 和 `namespace`。
-        // 它内部将使用 `configManager.getWorkspace(namespace)` 来获取正确的数据服务。
+        console.log(`[MDxWorkspace] 正在启动工作区: ${this.namespace}`);
+
+        // 1. 创建 SessionUI（只在这里创建一次）
         this._sessionManager = createSessionUI({
             ...this.options.sidebar, // 传递用户自定义的 sidebar 配置
             sessionListContainer: this.options.sidebarContainer,
@@ -127,11 +114,16 @@ export class MDxWorkspace {
 
         // --- 2. 组装编辑器的插件和 Providers ---
         const editorOptions = this.options.editor || {};
-        // Provider 的依赖 `sessionService` 依然从 `_sessionManager` 获取，这部分逻辑不变
-        const providerDependencies = { sessionService: this._sessionManager.sessionService };
+        const providerDependencies = { 
+            sessionService: this._sessionManager.sessionService 
+        };
         
-        const finalProviders = (editorOptions.mentionProviders || [SessionDirProvider, SessionFileProvider])
-            .map(P => isClass(P) ? new P(providerDependencies) : (typeof P === 'function' ? P(providerDependencies) : P)).filter(Boolean);
+        const finalProviders = (
+            editorOptions.mentionProviders || 
+            [SessionDirProvider, SessionFileProvider]
+        )
+            .map(P => isClass(P) ? new P(providerDependencies) : (typeof P === 'function' ? P(providerDependencies) : P))
+            .filter(Boolean);
         
         // [修复] 将 finalPlugins 的声明和初始化移到这里
         const finalPlugins = [...defaultPlugins, ...(editorOptions.plugins || [])];
@@ -144,40 +136,40 @@ export class MDxWorkspace {
             finalPlugins.push(new ClozeControlsPlugin());
         }
 
-    // 3. 先创建编辑器（在启动 SessionManager 之前！）
-    const finalEditorOptions = {
-        ...editorOptions,
-        plugins: finalPlugins,
-        initialText: '加载中...',
-        titleBar: { 
-            title: '加载中...', 
-            toggleSidebarCallback: () => this._sessionManager.toggleSidebar(),
-            enableToggleEditMode: true,
-            ...(editorOptions.showSaveButton !== false && { saveCallback: () => this.save() }),
-        },
-        initialMode: editorOptions.initialMode || 'render',
-        clozeControls: editorOptions.clozeControl
-    };
-    
-    this._editor = new MDxEditor(this.options.editorContainer, finalEditorOptions);
-    this._createCommandFacade(this._editor);
-    this._connectEditorEvents();
+        // 3. 创建编辑器
+        const finalEditorOptions = {
+            ...editorOptions,
+            plugins: finalPlugins,
+            initialText: '加载中...',
+            titleBar: { 
+                title: '加载中...', 
+                toggleSidebarCallback: () => this._sessionManager.toggleSidebar(),
+                enableToggleEditMode: true,
+                ...(editorOptions.showSaveButton !== false && { 
+                    saveCallback: () => this.save() 
+                }),
+            },
+            initialMode: editorOptions.initialMode || 'render',
+            clozeControls: editorOptions.clozeControl
+        };
+        
+        this._editor = new MDxEditor(this.options.editorContainer, finalEditorOptions);
+        
+        // 4. 创建命令门面
+        this._createCommandFacade(this._editor);
+        
+        // 5. 连接事件（顺序很重要！）
+        this._connectEditorEvents();
+        this._connectSessionManagerEvents();
 
-    // 4. 现在连接 SessionManager 事件（此时 _editor 已存在）
-    this._connectSessionManagerEvents();
+        // 6. 启动 SessionManager（会自动触发 sessionSelected）
+        await this._sessionManager.start();
 
-    // 6. 🔧 启动 SessionManager（会自动触发 sessionSelected 事件，通过事件处理器更新编辑器）
-    await this._sessionManager.start();
-    
-    // 7. 🔧 删除手动设置内容的代码，完全依赖事件驱动
-    // 不再需要这段代码：
-    // if (activeItem) {
-    //     this._editor.setText(activeItem.content?.data || '');
-    //     this._editor.setTitle(activeItem.metadata.title || '文档');
-    // }
-
-    window.addEventListener('beforeunload', this._handleBeforeUnload);
-    this._emit('ready', { workspace: this });
+        // 7. 监听窗口关闭
+        window.addEventListener('beforeunload', this._handleBeforeUnload);
+        
+        this._emit('ready', { workspace: this });
+        console.log(`[MDxWorkspace] ✅ 工作区启动成功`);
     }
 
     // ==========================================================
@@ -207,23 +199,6 @@ export class MDxWorkspace {
                 if (index > -1) listeners.splice(index, 1);
             }
         };
-    }
-
-    /**
-     * 销毁工作区实例，清理所有组件、事件监听器和DOM元素。
-     */
-    destroy() {
-        window.removeEventListener('beforeunload', this._handleBeforeUnload);
-        this._debouncedUpdater.cancel?.();
-        
-        // [修复] 取消所有 sessionManager 的事件订阅
-        this._sessionManagerUnsubscribers.forEach(unsubscribe => unsubscribe());
-        this._sessionManagerUnsubscribers = [];
-
-        this._editor?.destroy();
-        this._sessionManager?.destroy();
-        this._fileInput?.remove();
-        this._eventEmitter.clear();
     }
 
     /**
@@ -388,7 +363,7 @@ export class MDxWorkspace {
             throw new Error('MDxWorkspace 构造函数需要 "sidebarContainer" 和 "editorContainer" 选项。');
         }
         // [修改] 验证新的核心依赖
-        if (!options.configManager || typeof options.configManager.getWorkspace !== 'function') {
+        if (!options.configManager) {
             throw new Error('MDxWorkspace 构造函数需要一个有效的 "configManager" 实例。');
         }
         if (typeof options.namespace !== 'string' || !options.namespace) {
@@ -404,60 +379,81 @@ export class MDxWorkspace {
         const sm = this._sessionManager;
         if (!sm) return;
         
-        // 使用一个数组来存储取消订阅的函数，方便在 destroy 时清理
-        this._sessionManagerUnsubscribers.push(
+        // 使用数组存储取消订阅函数
+        this._subscriptions = [];
+        
+        this._subscriptions.push(
             sm.on('importRequested', ({ parentId }) => this.importFiles(parentId)),
-            sm.on('sidebarStateChanged', ({ isCollapsed }) => {
-                if (this.options.sidebarContainer) {
-                   this.options.sidebarContainer.style.display = isCollapsed ? 'none' : 'block';
-                }
-            }),
-            sm.on('menuItemClicked', ({ actionId, item }) => this._emit('menuItemClicked', { actionId, item })),
-            // [MODIFIED] Handle 'item' instead of 'session'
+            
             sm.on('sessionSelected', async ({ item }) => {
-                if (this._isDirty) await this.save();
-    // 🔍 添加这一行，看看是否执行到这里
+                // 在切换会话前先保存
+                if (this._isDirty) {
+                    await this.save();
+                }
+
                 const newContent = item?.content?.data || '请选择或创建一个会话。';
                 const newTitle = item?.metadata.title || '文档';
 
                 if (this._editor) {
-                    if (this._editor.getText() !== newContent){
-                     this._editor.setText(newContent);
-                     }
-                     else{
-                             console.log('🖊️ skip 调用 editor.setContent()');
-                     }
+                    if (this._editor.getText() !== newContent) {
+                        this._editor.setText(newContent);
+                    }
                     this._editor.setTitle(newTitle);
-                    // +++ 修改点 2: 切换文档时，强制进入 renderer 模式 +++
-                    this._editor.switchTo('render');
+                    this._editor.switchTo('render'); // 切换到渲染模式
                 }
-                 else {
-        console.error('❌ 编辑器对象不存在！');
-    }
+
                 this._isDirty = false;
                 
                 // [MODIFIED] Emit 'item'
                 this._emit('sessionSelect', { item });
             }),
-
-            // [新增] 使用新接口处理大纲导航
+            
             sm.on('navigateToHeading', ({ elementId }) => {
                 this._editor?.navigateTo({ elementId });
             }),
-
-            // [新增] 使用新的 'stateChanged' 事件来同步所有状态
+            
+            sm.on('menuItemClicked', ({ actionId, item }) => 
+                this._emit('menuItemClicked', { actionId, item })
+            ),
+            
             sm.on('stateChanged', ({ isReadOnly, isCollapsed }) => {
                 // 同步只读状态
                 this._editor?.setReadOnly(isReadOnly);
                 
                 // 同步侧边栏折叠状态
                 if (this.options.sidebarContainer) {
-                   this.options.sidebarContainer.style.display = isCollapsed ? 'none' : 'block';
+                    this.options.sidebarContainer.style.display = 
+                        isCollapsed ? 'none' : 'block';
                 }
             })
         );
     }
-    
+
+
+    /**
+     * 销毁工作区实例，清理所有组件、事件监听器和DOM元素。
+     */
+    destroy() {
+        console.log('[MDxWorkspace] 正在销毁工作区...');
+        
+        window.removeEventListener('beforeunload', this._handleBeforeUnload);
+        this._debouncedUpdater.cancel?.();
+        
+        // 取消所有订阅
+        if (this._subscriptions) {
+            this._subscriptions.forEach(unsubscribe => unsubscribe());
+            this._subscriptions = [];
+        }
+
+        this._editor?.destroy();
+        this._sessionManager?.destroy();
+        this._fileInput?.remove();
+        this._eventEmitter.clear();
+        
+        console.log('[MDxWorkspace] ✅ 工作区已销毁');
+    }
+
+
     /**
      * [新增] 专门用于连接 Editor 的事件
      * @private
@@ -563,4 +559,15 @@ export class MDxWorkspace {
             return message;
         }
     }
+}
+
+/**
+ * 工厂函数：创建并初始化 MDxWorkspace
+ * @param {object} options - 配置选项
+ * @returns {Promise<MDxWorkspace>} 已初始化的工作区实例
+ */
+export async function createMDxWorkspace(options) {
+    const workspace = new MDxWorkspace(options);
+    await workspace.start();
+    return workspace;
 }

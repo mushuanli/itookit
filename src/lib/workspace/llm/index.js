@@ -1,16 +1,16 @@
 // 文件: #workspace/llm/LLMWorkspace.js (或 index.js)
 
 /**
- * @file LLMWorkspace.js (V3 - 服务容器架构)
- * @description 集成了 Sidebar 和 ChatUI 的 LLM 聊天工作区协调器。
- *
- * [V3 核心重构]
- * - 完全依赖注入 `ConfigManager` 和 `namespace`。
- * - 正确调用 `createSessionUI` 和 `LLMChatUI` 的新构造函数接口。
- * - 自身不处理任何数据逻辑，仅作为协调器。
+ * @file LLMWorkspace.js
+ * @description 集成 Sidebar 和 ChatUI 的 LLM 聊天工作区协调器
+ * 
+ * [V4 核心修复]
+ * - 完全异步初始化流程
+ * - 正确的事件订阅管理
+ * - 统一的 ConfigManager 单例访问
  */
 import { createSessionUI } from '../../sidebar/index.js';
-import { LLMChatUI } from '../../llm/chat/index.js';
+import { createLLMChatUI } from '../../llm/chat/index.js';
 import { debounce } from '../../common/utils/utils.js';
 
 // [修正] 定义正确的空内容状态为 null，由 chatUI.setText 内部处理
@@ -18,110 +18,226 @@ const EMPTY_CHAT_CONTENT = null;
 
 export class LLMWorkspace {
     /**
-     * @param {HTMLElement} container The DOM element to render the workspace into.
-     * @param {object} options Configuration for the workspace.
-     * @param {import('../../config/ConfigManager.js').ConfigManager} options.configManager - [必需] 一个已初始化的 ConfigManager 实例。
-     * @param {string} options.namespace - [必需] 此工作区实例的唯一命名空间。
-     * @param {HTMLElement} options.sidebarContainer - [必需] 用于侧边栏的 DOM 元素。
-     * @param {HTMLElement} options.chatContainer - [必需] 用于聊天 UI 的 DOM 元素。
-     * @param {object} [options.sidebarConfig] - (可选) 传递给侧边栏的额外配置。
-     * @param {object} [options.chatUIConfig] - (可选) 传递给 LLMChatUI 的额外配置。
-     * @param {object} options.chatUIConfig **Required** Configuration for LLMChatUI.
-     * @param {object[]} options.chatUIConfig.connections **Required** Array of provider connections.
-     * @param {object[]} options.chatUIConfig.agents **Required** Array of agent definitions.
-     * @param {object} [options.sidebarConfig] Optional: Configuration for the sidebar.
+     * @param {object} options - 配置选项
+     * @param {import('../../configManager/index.js').ConfigManager} options.configManager - [必需] ConfigManager 实例
+     * @param {string} options.namespace - [必需] 工作区唯一命名空间
+     * @param {HTMLElement} options.sidebarContainer - [必需] 侧边栏容器
+     * @param {HTMLElement} options.chatContainer - [必需] 聊天UI容器
+     * @param {object} [options.sidebarConfig] - 侧边栏额外配置
+     * @param {object} [options.chatUIConfig] - ChatUI额外配置
      */
     constructor(options) {
-        // --- [修正] 验证新的、基于 ConfigManager 的选项 ---
-        if (!options?.configManager || !options?.namespace || !options?.sidebarContainer || !options?.chatContainer) {
-            throw new Error('LLMWorkspace 需要 configManager, namespace, sidebarContainer, 和 chatContainer。');
-        }
+        this._validateOptions(options);
+        
         this.options = options;
         this.configManager = options.configManager;
         this.namespace = options.namespace;
 
-        // --- [核心修复] ---
-        // 1. 调用 createSessionUI 时，使用新的三参数签名，传入 configManager 和 namespace。
-        // 2. 移除已被废弃的 `storageKey` 选项。
-        this.sidebar = createSessionUI({
-            ...options.sidebarConfig,
-            sessionListContainer: options.sidebarContainer,
-            newSessionContent: EMPTY_CHAT_CONTENT,
-        }, this.configManager, this.namespace); // <--- [修复] 传入 namespace
+        // 组件实例（在 start() 中创建）
+        this.sidebar = null;
+        this.chatUI = null;
 
-        // 2. [修正] 正确地初始化 ChatUI，注入 configManager
-        this.chatUI = new LLMChatUI(options.chatContainer, {
-            ...options.chatUIConfig,
-            configManager: this.configManager,
-        });
-        
-        // 为 LLMChatUI 添加一个返回对象的方法，以便于操作
-        if (typeof this.chatUI.exportHistory !== 'function') {
-            this.chatUI.exportHistory = () => {
-                const jsonl = this.chatUI.getText();
-                if (!jsonl) return { pairs: [], branches: {} };
-                // 这是一个简化的解析，假设 history 数据总是以特定格式存在
-                // 在真实场景中，可能需要更健壮的逻辑
-                try {
-                    const lines = jsonl.split('\n');
-                    const firstLine = JSON.parse(lines[0]);
-                    if (firstLine && firstLine.hasOwnProperty('pairs')) {
-                        // 假设第一行是整体结构
-                        return firstLine;
-                    }
-                    // 否则，解析为 MessagePair[]
-                    return { pairs: lines.map(l => JSON.parse(l)) };
-                } catch(e) {
-                     return { pairs: [], branches: {} };
-                }
-            };
-        }
-
-
-        // 3. 内部状态
+        // 内部状态
         this.activeSessionId = null;
+        this._subscriptions = [];
         this._saveHandler = debounce(this._saveActiveSession.bind(this), 750);
 
-        /**
-         * A unified command interface proxying to the active component.
-         * @public
-         * @readonly
-         */
+        // 命令接口（在 start() 后填充）
         this.commands = {};
-        this._proxyCommands();
-
-        this._connectComponents();
     }
 
     /**
-     * Starts the workspace and loads data.
+     * 初始化并启动工作区
      * @returns {Promise<void>}
      */
     async start() {
-        // 在启动 sidebar 之后再加载 chatUI 的初始内容
+        console.log(`[LLMWorkspace] 正在启动工作区: ${this.namespace}`);
+
+        // 1. 创建侧边栏
+        this.sidebar = createSessionUI({
+            ...this.options.sidebarConfig,
+            sessionListContainer: this.options.sidebarContainer,
+            newSessionContent: EMPTY_CHAT_CONTENT,
+        }, this.configManager, this.namespace);
+
+        // 2. 创建 ChatUI（使用异步工厂函数）
+        this.chatUI = await createLLMChatUI(this.options.chatContainer, {
+            ...this.options.chatUIConfig,
+            configManager: this.configManager,
+        });
+
+        // 3. 代理命令接口
+        this._proxyCommands();
+
+        // 4. 连接组件事件
+        this._connectComponents();
+
+        // 5. 启动侧边栏（会自动触发 sessionSelected 事件）
         const activeItem = await this.sidebar.start();
-        this._loadSessionIntoChatUI(activeItem);
-        console.log("LLMWorkspace started successfully.");
+        
+        // 6. 如果有激活项但事件未触发，手动加载一次（防御性处理）
+        if (activeItem && !this.activeSessionId) {
+            this._loadSessionIntoChatUI(activeItem);
+        }
+
+        console.log(`[LLMWorkspace] ✅ 工作区启动成功`);
+    }
+
+    // =========================================================================
+    // 公共 API
+    // =========================================================================
+
+    /**
+     * 获取当前聊天内容
+     * @returns {string} JSONL 格式的聊天历史
+     */
+    getContent() {
+        return this.chatUI?.getText() || '';
     }
 
     /**
-     * Wires up the event listeners between the two components.
+     * 设置聊天内容
+     * @param {string} jsonContent - JSONL 格式的聊天历史
+     */
+    setContent(jsonContent) {
+        this.chatUI?.setText(jsonContent);
+    }
+
+    /**
+     * 获取当前激活的会话
+     * @returns {object | undefined}
+     */
+    getActiveSession() {
+        return this.sidebar?.getActiveSession();
+    }
+
+    /**
+     * 编程式发送消息
+     * @param {string} text - 消息文本
+     * @param {object} [options] - 发送选项
+     * @returns {Promise<void>}
+     */
+    async sendMessage(text, options = {}) {
+        if (!this.chatUI) {
+            throw new Error('[LLMWorkspace] ChatUI 未初始化');
+        }
+        return this.chatUI.sendMessage(text, options);
+    }
+
+    /**
+     * 创建新会话
+     * @param {object} [options] - 创建选项
+     * @param {string} [options.title='Untitled Session'] - 会话标题
+     * @returns {Promise<object>}
+     */
+    async createNewSession(options = {}) {
+        if (!this.sidebar?.sessionService) {
+            throw new Error('[LLMWorkspace] Session service 未就绪');
+        }
+        return this.sidebar.sessionService.createSession({
+            title: options.title || 'Untitled Session',
+            content: EMPTY_CHAT_CONTENT
+        });
+    }
+
+    /**
+     * 删除会话或文件夹
+     * @param {string[]} itemIds - 要删除的项目ID数组
+     * @returns {Promise<void>}
+     */
+    async deleteItems(itemIds) {
+        if (!this.sidebar?.sessionService) {
+            throw new Error('[LLMWorkspace] Session service 未就绪');
+        }
+        return this.sidebar.sessionService.deleteItems(itemIds);
+    }
+
+    /**
+     * 导入文件作为新会话
+     * @param {string} [targetParentId] - 目标父文件夹ID
+     * @returns {Promise<object[]>} 新创建的会话列表
+     */
+    async importFiles(targetParentId) {
+        // 实现文件导入逻辑
+        // 由于涉及文件选择器，这里保留原有的实现
+        console.warn('[LLMWorkspace] importFiles 功能待实现');
+        return [];
+    }
+
+    /**
+     * 销毁工作区
+     */
+    destroy() {
+        console.log('[LLMWorkspace] 正在销毁工作区...');
+
+        // 1. 取消所有订阅
+        this._subscriptions.forEach(unsubscribe => unsubscribe());
+        this._subscriptions = [];
+
+        // 2. 取消防抖保存
+        this._saveHandler.cancel?.();
+
+        // 3. 销毁组件
+        this.sidebar?.destroy();
+        this.chatUI?.destroy();
+
+        // 4. 清理引用
+        this.sidebar = null;
+        this.chatUI = null;
+        this.commands = {};
+
+        console.log('[LLMWorkspace] ✅ 工作区已销毁');
+    }
+
+    // =========================================================================
+    // 私有方法
+    // =========================================================================
+
+    /**
+     * 验证构造函数选项
+     * @private
+     */
+    _validateOptions(options) {
+        if (!options?.configManager || !options?.namespace) {
+            throw new Error('[LLMWorkspace] 需要 configManager 和 namespace');
+        }
+        if (!options.sidebarContainer || !options.chatContainer) {
+            throw new Error('[LLMWorkspace] 需要 sidebarContainer 和 chatContainer');
+        }
+    }
+
+    /**
+     * 连接组件事件
      * @private
      */
     _connectComponents() {
-        // [MODIFIED] Use 'item' to reflect the new data model from sidebar
-        this.sidebar.on('sessionSelected', ({ item }) => {
-            this._loadSessionIntoChatUI(item);
-        });
-        this.chatUI.on('change', this._saveHandler);
+        // 订阅侧边栏事件
+        this._subscriptions.push(
+            this.sidebar.on('sessionSelected', ({ item }) => {
+                this._loadSessionIntoChatUI(item);
+            })
+        );
+
+        this._subscriptions.push(
+            this.sidebar.on('importRequested', ({ parentId }) => {
+                this.importFiles(parentId);
+            })
+        );
+
+        // 订阅聊天UI事件
+        this._subscriptions.push(
+            this.chatUI.on('change', this._saveHandler)
+        );
     }
-    
+
     /**
-     * [新增] 将会话加载到 ChatUI 的辅助方法
+     * 加载会话到 ChatUI
      * @private
      */
     _loadSessionIntoChatUI(item) {
-        if (this.activeSessionId === item?.id) return;
+        if (this.activeSessionId === item?.id) {
+            return; // 已经加载，跳过
+        }
 
         if (item) {
             this.activeSessionId = item.id;
@@ -136,134 +252,94 @@ export class LLMWorkspace {
     }
 
     /**
-     * [修正] 使用新的 exportHistory 方法来安全地处理数据
+     * 保存当前激活的会话
      * @private
      */
     async _saveActiveSession() {
-        if (!this.activeSessionId) return;
-
-    // 1. 获取内容（JSONL格式，sidebar 不需要理解）
-    const contentToSave = this.chatUI.getText();
-    
-    // 2. 获取所有元数据（通过标准接口）
-    const summary = await this.chatUI.getSummary();
-    const searchableText = await this.chatUI.getSearchableText();
-    const headings = await this.chatUI.getHeadings();
-    
-    // 3. 一次性更新内容和元数据
-    await this.sidebar.sessionService.updateSessionContentAndMeta(
-        this.activeSessionId,
-        {
-            content: contentToSave,
-            meta: {
-                summary: summary || '[空对话]',
-                searchableText: searchableText,
-                // headings 对 LLM 对话不适用，但保持接口一致性
-            }
+        if (!this.activeSessionId || !this.sidebar) {
+            return;
         }
-    );
-        
-        // 4. [核心改进] 使用从 getSummary() 获取的摘要来驱动自动重命名逻辑
-        const currentItem = this.sidebar.sessionService.findItemById(this.activeSessionId);
-        if (currentItem && currentItem.metadata.title.startsWith('Untitled') && summary && summary !== '[空对话]') {
-            const newTitle = summary.substring(0, 50) + (summary.length > 50 ? '...' : '');
-            if (newTitle.trim()) {
-                await this.sidebar.sessionService.updateItemMetadata(this.activeSessionId, { title: newTitle.trim() });
-                this.chatUI.setTitle(newTitle.trim()); // 立即同步UI
+
+        const activeItem = this.getActiveSession();
+        if (!activeItem) {
+            return;
+        }
+
+        const newContent = this.getContent();
+        const contentChanged = activeItem.content?.data !== newContent;
+
+        if (!contentChanged) {
+            return; // 内容未变化，跳过保存
+        }
+
+        try {
+            // 获取摘要
+            const summary = (this.chatUI && typeof this.chatUI.getSummary === 'function')
+                ? await this.chatUI.getSummary()
+                : '[空对话]';
+
+            const searchableText = (this.chatUI && typeof this.chatUI.getSearchableText === 'function')
+                ? await this.chatUI.getSearchableText()
+                : '';
+
+            // 原子更新内容和元数据
+            await this.sidebar.sessionService.updateSessionContentAndMeta(
+                this.activeSessionId,
+                {
+                    content: newContent,
+                    meta: {
+                        summary,
+                        searchableText
+                    }
+                }
+            );
+
+            // 自动重命名未命名会话
+            const currentItem = this.getActiveSession();
+            if (currentItem && 
+                currentItem.metadata.title.startsWith('Untitled') && 
+                summary && 
+                summary !== '[空对话]') {
+                const newTitle = summary.substring(0, 50) + (summary.length > 50 ? '...' : '');
+                if (newTitle.trim()) {
+                    await this.sidebar.sessionService.updateItemMetadata(
+                        this.activeSessionId, 
+                        { title: newTitle.trim() }
+                    );
+                    this.chatUI.setTitle(newTitle.trim());
+                }
             }
+
+            console.log(`[LLMWorkspace] ✅ 会话已保存: ${this.activeSessionId}`);
+        } catch (error) {
+            console.error('[LLMWorkspace] ❌ 保存会话失败:', error);
         }
     }
-    
+
     /**
-     * Proxies commands from sub-components to the top-level workspace.
+     * 代理命令接口
      * @private
      */
     _proxyCommands() {
-        // Proxy chatUI commands (search, export, etc.)
-        if (this.chatUI && this.chatUI.commands) {
-            Object.assign(this.commands, this.chatUI.commands);
-        }
-        // Add workspace-level commands
-        this.commands.createNewSession = this.createNewSession.bind(this);
-    }
-
-    // --- PUBLIC API (Facade Methods) ---
-
-    /**
-     * Gets the content of the currently active chat session.
-     * @returns {string} JSON string of the history.
-     */
-    getContent() {
-        return this.chatUI.getText();
-    }
-
-    /**
-     * Sets the content of the currently active chat session.
-     * @param {string} jsonContent - JSON string of the history.
-     */
-    setContent(jsonContent) {
-        this.chatUI.setText(jsonContent);
-    }
-    
-    /**
-     * Gets the currently active session object from the sidebar.
-     * @returns {object | undefined}
-     */
-    getActiveSession() {
-        return this.sidebar.getActiveSession();
-    }
-    
-    /**
-     * Deletes sessions or folders from the sidebar.
-     * @param {string[]} itemIds - The IDs of items to delete.
-     * @returns {Promise<void>}
-     */
-    async deleteItems(itemIds) {
-        if (!this.sidebar.sessionService) {
-            console.error("Session service not available.");
-            return;
-        }
-        return this.sidebar.sessionService.deleteItems(itemIds);
-    }
-
-    /**
-     * Programmatically creates a new chat session and activates it.
-     * @param {object} [options]
-     * @param {string} [options.title='Untitled Session'] - The initial title for the session.
-     * @returns {Promise<void>}
-     */
-    async createNewSession(options = {}) {
-        if (!this.sidebar.sessionService) {
-            console.error("Session service not available.");
-            return null;
-        }
-        return this.sidebar.sessionService.createSession({ 
-            title: options.title || 'Untitled Session',
-            content: EMPTY_CHAT_CONTENT
-        });
-        // The sidebar's internal logic will automatically select the new session,
-        // which will trigger the 'sessionSelected' event and update the chatUI.
-    }
-
-    /**
-     * Destroys the workspace and all its components, cleaning up memory and event listeners.
-     */
-    destroy() {
-        this._saveHandler.cancel?.(); // 取消任何待处理的保存
-        this.sidebar.destroy();
-        // --- [IMPROVED] Call the destroy method on the main component ---
-        this.chatUI.destroy();
-        // --- [REMOVED] No LayoutManager to destroy ---
-        console.log("LLMWorkspace destroyed.");
+        this.commands = {
+            // 代理 ChatUI 命令
+            ...(this.chatUI?.commands || {}),
+            
+            // 工作区级别命令
+            createNewSession: this.createNewSession.bind(this),
+            deleteItems: this.deleteItems.bind(this),
+            importFiles: this.importFiles.bind(this),
+        };
     }
 }
 
-
 /**
- * 创建并初始化一个新的 LLMWorkspace 实例的工厂函数。
- * @param {object} options - 工作区的配置，详见 LLMWorkspace 构造函数。
- * @returns {LLMWorkspace}
+ * 工厂函数：创建并初始化 LLMWorkspace
+ * @param {object} options - 配置选项
+ * @returns {Promise<LLMWorkspace>} 已初始化的工作区实例
  */
-export function createLLMWorkspace(options) {
-    return new LLMWorkspace(options);
+export async function createLLMWorkspace(options) {
+    const workspace = new LLMWorkspace(options);
+    await workspace.start();
+    return workspace;
 }

@@ -1,3 +1,5 @@
+// 文件: #workspace/settings/index.js (V4 - 完整重构版)
+
 /**
  * 文件: #workspace/settings/index.js
  * @description
@@ -8,14 +10,17 @@
  * [V2 修复] - 重构了依赖管理方式，不再自行处理持久化，而是
  *             像 MDxWorkspace 一样，接收一个已初始化的 ConfigManager 实例。
  * [V3 修改] - 增加了 TagsSettingsWidget 作为默认组件，并设计了可扩展的默认组件加载机制。
- * [V4 新增] - 增加了 GeneralSettingsWidget 用于数据同步。
+ * [V4 核心特性]
+ * - 智能Widget合并（默认 + 自定义）
+ * - 正确的命名空间管理
+ * - 完善的生命周期管理
  */
 
 import { createSessionUI } from '../../sidebar/index.js';
 import { testLLMConnection } from '../../llm/core/index.js';
 import { LLMSettingsWidget } from '../../llm/settings/index.js';
 import { TagsSettingsWidget } from './components/TagsSettingsWidget.js';
-import { GeneralSettingsWidget } from './components/GeneralSettingsWidget.js'; // +++ 新增: 导入通用设置 Widget
+import { GeneralSettingsWidget } from './components/GeneralSettingsWidget.js';
 import { isClass } from '../../common/utils/utils.js';
 
 /**
@@ -25,11 +30,11 @@ import { isClass } from '../../common/utils/utils.js';
 
 /**
  * @typedef {object} SettingsWorkspaceOptions
- * @property {HTMLElement} sidebarContainer - **必需** 用于导航侧边栏的容器。
- * @property {HTMLElement} settingsContainer - **必需** 用于主设置内容的容器。
- * @property {import('../../config/ConfigManager.js').ConfigManager} configManager - [新] **必需** 一个已初始化的 ConfigManager 实例。
- * @property {string} namespace - [新] **必需** 此工作区实例的唯一命名空间，用于隔离侧边栏的状态。
- * @property {(SettingsWidgetClass | ISettingsWidget)[]} [widgets] - (可选) 一个包含 Widget 类或实例的数组。
+ * @property {HTMLElement} sidebarContainer - [必需] 侧边栏容器
+ * @property {HTMLElement} settingsContainer - [必需] 设置内容容器
+ * @property {import('../../configManager/index.js').ConfigManager} configManager - [必需] ConfigManager 实例
+ * @property {string} namespace - [必需] 工作区唯一命名空间
+ * @property {(SettingsWidgetClass | ISettingsWidget)[]} [widgets] - 自定义 Widget 列表
  *   **[重要]** 此工作区默认会自动包含 `GeneralSettingsWidget`、`TagsSettingsWidget` 和 `LLMSettingsWidget`。
  *   如果用户提供的 `widgets` 数组中不包含具有相应 ID 的 Widget，
  *   默认的 Widgets 将被自动添加到列表的开头。
@@ -41,74 +46,37 @@ export class SettingsWorkspace {
      * @param {SettingsWorkspaceOptions} options
      */
     constructor(options) {
-        this._validateOptions(options); // 先验证传入的 options
+        this._validateOptions(options);
 
-        // --- [核心修改] 智能 Widget 合并逻辑 ---
-        // 设计目标：确保默认组件存在，允许用户覆盖，并保持可扩展性。
+        // 核心依赖
+        this.configManager = options.configManager;
+        this.namespace = options.namespace;
 
-        // 1. 定义默认组件，顺序决定了它们在侧边栏中的显示顺序。
-        const defaultWidgetClasses = [GeneralSettingsWidget, TagsSettingsWidget, LLMSettingsWidget]; // +++ 修改: 将 GeneralSettingsWidget 添加到列表开头
-        const customWidgets = options.widgets || [];
+        // 智能合并 Widgets
+        this.options = this._mergeWidgets(options, [
+            GeneralSettingsWidget,
+            TagsSettingsWidget,
+            LLMSettingsWidget
+        ]);
 
-        // 2. 获取用户提供的所有 widget 的 ID，用于去重检查。
-        const providedWidgetIds = new Set(customWidgets.map(widget => {
-            if (isClass(widget)) {
-                try {
-                    // 这种方式依赖于无参构造函数，对于我们的 ISettingsWidget 是安全的。
-                    return new widget().id;
-                } catch (e) {
-                    console.warn("无法从 Widget 类中获取 ID", widget);
-                    return null;
-                }
-            }
-            return widget?.id;
-        }).filter(Boolean));
-
-        // 3. 合并列表：将用户提供的 widgets 作为基础。
-        let finalWidgets = [...customWidgets];
-
-        // 4. 倒序遍历默认组件列表，如果用户未提供，则将其添加到最终列表的 *开头*。
-        //    倒序 unshift 可以确保最终列表中的顺序与 defaultWidgetClasses 中定义的顺序一致。
-        defaultWidgetClasses.reverse().forEach(WidgetClass => {
-            let defaultId;
-            try {
-                defaultId = new WidgetClass().id;
-            } catch (e) {
-                return; // 无法实例化则跳过
-            }
-
-            if (!providedWidgetIds.has(defaultId)) {
-                finalWidgets.unshift(WidgetClass);
-            }
-        });
-        
-        // 重新组装最终的 options 对象，供类的其余部分使用。
-        const finalWidgetOptions = {
-            ...(options.widgetOptions || {}),
-            onTestLLMConnection: testLLMConnection // 将其注入到 widgetOptions 中
-        };
-
-        this.options = { ...options, widgets: finalWidgets, widgetOptions: finalWidgetOptions };
-        
-        // --- [新增] 存储核心依赖 ---
-        /** @private @type {import('../../config/ConfigManager.js').ConfigManager} */
-        this.configManager = this.options.configManager;
-         /** @private @type {string} */
-        this.namespace = this.options.namespace;
-        
-        /** @private */
+        // 组件实例
         this.sidebar = null;
         /** @private @type {ISettingsWidget | null} */
         this.activeWidget = null;
         /** @private @type {ISettingsWidget[]} */
         this.widgets = [];
 
-        // --- [新增] 绑定 beforeunload 事件处理器 ---
-        this._handleBeforeUnload = this._handleBeforeUnload.bind(this);
+        // 内部状态
+        this._subscriptions = [];
+        this._boundHandleBeforeUnload = this._handleBeforeUnload.bind(this);
     }
 
+    // =========================================================================
+    // 公共 API
+    // =========================================================================
+
     /**
-     * 检查是否有未保存的更改。
+     * 检查是否有未保存的更改
      * @returns {boolean}
      */
     get isDirty() {
@@ -116,12 +84,13 @@ export class SettingsWorkspace {
     }
 
     /**
-     * 初始化侧边栏和 Widgets，然后渲染工作区。
+     * 初始化并启动工作区
      * @returns {Promise<void>}
      */
     async start() {
-        // [MODIFIED] - 实例化逻辑现在可以处理类和预创建的实例。
-        // 这对于允许依赖注入至关重要。
+        console.log(`[SettingsWorkspace] 正在启动工作区: ${this.namespace}`);
+
+        // 1. 实例化所有 Widgets
         this.widgets = this.options.widgets.map(WidgetOrInstance => {
             // 如果它是一个类（使用工具函数检查），则实例化它。
             if (isClass(WidgetOrInstance)) {
@@ -131,13 +100,14 @@ export class SettingsWorkspace {
             return WidgetOrInstance;
         });
 
+        // 2. 构建侧边栏项目列表
         const sidebarItems = this.widgets.map(widget => ({
             id: widget.id,
-            type: 'item', // 将每个设置视为一个可选择的“项目”
+            type: 'item',
             version: "1.0",
             metadata: {
                 title: widget.label,
-                iconHTML: widget.iconHTML, // +++ 传递 iconHTML 到侧边栏
+                iconHTML: widget.iconHTML,
                 createdAt: new Date().toISOString(),
                 lastModified: new Date().toISOString(),
                 parentId: null,
@@ -147,10 +117,7 @@ export class SettingsWorkspace {
             },
         }));
 
-        // --- [核心修复点] ---
-        // 在调用 createSessionUI 时，除了 configManager，还必须传入 namespace。
-        // 这确保了设置工作区侧边栏自身的 UI 状态（如展开的文件夹）
-        // 能够被正确地隔离存储。
+        // 3. 创建侧边栏
         this.sidebar = createSessionUI({
             sessionListContainer: this.options.sidebarContainer,
             // storageKey 选项已被废弃，现在由 namespace 统一管理
@@ -159,103 +126,195 @@ export class SettingsWorkspace {
             readOnly: true,
             title: '设置',
             searchPlaceholder: '搜索设置...'
-        }, this.configManager, this.namespace); // <--- [修复] 补全 namespace 参数
+        }, this.configManager, this.namespace);
 
+        // 4. 连接事件
         this._connectEvents();
-        
-        // --- [新增] 监听窗口关闭事件 ---
-        window.addEventListener('beforeunload', this._handleBeforeUnload);
-        
-        // 4. 启动侧边栏并默认选择第一项
+
+        // 5. 监听窗口关闭
+        window.addEventListener('beforeunload', this._boundHandleBeforeUnload);
+
+        // 6. 启动侧边栏（会自动选择第一项）
         await this.sidebar.start();
+
+        console.log(`[SettingsWorkspace] ✅ 工作区启动成功`);
     }
 
     /**
-     * [新增] 核心挂载逻辑，被提取为一个可复用的私有方法。
-     * @param {string} widgetId 要挂载的 Widget 的 ID。
-     * @private
+     * 销毁工作区
      */
-    async _mountWidgetById(widgetId) {
-        if (!widgetId || this.activeWidget?.id === widgetId) {
-            return;
-        }
+    async destroy() {
+        console.log('[SettingsWorkspace] 正在销毁工作区...');
 
-        // 检查脏状态
-        if (this.isDirty && !confirm('您有未保存的更改，确定要切换吗？此操作将丢失您的更改。')) {
-            // 注意：这里我们需要一种方式来阻止侧边栏的视觉状态更新。
-            // 这是一个更复杂的问题，暂时先只阻止内容切换。
-            return;
-        }
+        // 1. 移除窗口监听
+        window.removeEventListener('beforeunload', this._boundHandleBeforeUnload);
 
-        const widgetToMount = this.widgets.find(w => w.id === widgetId);
-        if (!widgetToMount) {
-            console.error(`未找到 ID 为 "${widgetId}" 的设置 Widget。`);
-            this.options.settingsContainer.innerHTML = `<p style="color: red;">错误: 无法加载 ID 为 "${widgetId}" 的 Widget。</p>`;
-            return;
-        }
+        // 2. 取消所有订阅
+        this._subscriptions.forEach(unsubscribe => unsubscribe());
+        this._subscriptions = [];
 
-        // 卸载当前活动的 Widget
-        if (this.activeWidget && typeof this.activeWidget.unmount === 'function') {
-            await this.activeWidget.unmount();
-        }
-
-        // 清空容器并挂载新的 Widget
-        this.options.settingsContainer.innerHTML = '';
-        this.activeWidget = widgetToMount;
-        await this.activeWidget.mount(this.options.settingsContainer, this.options.widgetOptions);
-    }
-
-    /**
-     * 将侧边栏选择事件连接到 Widget 挂载逻辑。
-     * @private
-     */
-    _connectEvents() {
-        if (!this.sidebar) return;
-
-        // --- [核心修改] ---
-        // 事件监听器现在只调用 _mountWidgetById，不再重复逻辑。
-        this.sidebar.on('sessionSelected', ({ item }) => {
-            if (item) {
-                this._mountWidgetById(item.id);
-            }
-        });
-    }
-
-    /**
-     * 销毁工作区及其所有组件。
-     */
-    destroy() {
-        // --- [新增] 移除窗口关闭事件监听器 ---
-        window.removeEventListener('beforeunload', this._handleBeforeUnload);
-
+        // 3. 销毁组件
         this.sidebar?.destroy();
         this.activeWidget?.destroy();
-        this.options.sidebarContainer.innerHTML = '';
-        this.options.settingsContainer.innerHTML = '';
+
+        // 4. 清理 DOM
+        if (this.options.sidebarContainer) {
+            this.options.sidebarContainer.innerHTML = '';
+        }
+        if (this.options.settingsContainer) {
+            this.options.settingsContainer.innerHTML = '';
+        }
+
+        // 5. 清理引用
+        this.sidebar = null;
+        this.activeWidget = null;
+        this.widgets = [];
+
+        console.log('[SettingsWorkspace] ✅ 工作区已销毁');
     }
 
+    // =========================================================================
+    // 私有方法
+    // =========================================================================
+
     /**
+     * 验证构造函数选项
      * @private
      */
     _validateOptions(options) {
         if (!options.sidebarContainer || !options.settingsContainer) {
-            throw new Error('SettingsWorkspace 需要 "sidebarContainer" 和 "settingsContainer" 选项。');
+            throw new Error('[SettingsWorkspace] 需要 sidebarContainer 和 settingsContainer');
         }
-        // --- [核心重构] 更改验证逻辑 ---
-        if (!options.configManager || typeof options.configManager.modules?.get !== 'function') {
-            throw new Error('SettingsWorkspace 构造函数需要一个有效的 "configManager" 实例。');
+        if (!options.configManager || typeof options.configManager.init !== 'function') {
+            throw new Error('[SettingsWorkspace] 需要有效的 configManager 实例');
         }
         if (!options.namespace) {
-            throw new Error('SettingsWorkspace 构造函数需要一个唯一的 "namespace" 字符串。');
+            throw new Error('[SettingsWorkspace] 需要唯一的 namespace 字符串');
         }
-        // [MODIFIED] - 验证现在检查最终的 `widgets` 数组。
-        // 注意：这里我们验证的是传入的options.widgets，因为finalWidgets是在构造函数内部生成的
         if (options.widgets && !Array.isArray(options.widgets)) {
-             throw new Error('SettingsWorkspace 的 "widgets" 选项必须是一个数组。');
+            throw new Error('[SettingsWorkspace] widgets 选项必须是数组');
         }
     }
-    
+
     /**
+     * 智能合并默认和自定义 Widgets
+     * @private
+     */
+    _mergeWidgets(options, defaultClasses) {
+        const customWidgets = options.widgets || [];
+        
+        // 获取所有已提供的 Widget ID
+        const providedIds = new Set(
+            customWidgets
+                .map(w => {
+                    if (isClass(w)) {
+                        try {
+                            return new w().id;
+                        } catch (e) {
+                            console.warn('[SettingsWorkspace] 无法从 Widget 类获取 ID', w);
+                            return null;
+                        }
+                    }
+                    return w?.id;
+                })
+                .filter(Boolean)
+        );
+
+        // 从自定义 Widgets 开始
+        let finalWidgets = [...customWidgets];
+
+        // 倒序添加默认组件到列表开头（这样最终顺序与 defaultClasses 一致）
+        defaultClasses.reverse().forEach(WidgetClass => {
+            try {
+                const defaultId = new WidgetClass().id;
+                if (!providedIds.has(defaultId)) {
+                    finalWidgets.unshift(WidgetClass);
+                }
+            } catch (e) {
+                console.warn('[SettingsWorkspace] 跳过默认 Widget', WidgetClass);
+            }
+        });
+
+        return {
+            ...options,
+            widgets: finalWidgets,
+            widgetOptions: {
+                ...(options.widgetOptions || {}),
+                onTestLLMConnection: testLLMConnection
+            }
+        };
+    }
+
+    /**
+     * 连接侧边栏事件
+     * @private
+     */
+    _connectEvents() {
+        this._subscriptions.push(
+            this.sidebar.on('sessionSelected', ({ item }) => {
+                if (item) {
+                    this._mountWidgetById(item.id);
+                }
+            })
+        );
+    }
+
+    /**
+     * 挂载指定的 Widget
+     * @private
+     */
+    async _mountWidgetById(widgetId) {
+        if (!widgetId || this.activeWidget?.id === widgetId) {
+            return; // 已经是当前 Widget
+        }
+
+        // 检查未保存的更改
+        if (this.isDirty) {
+            const confirmed = confirm(
+                '您有未保存的更改，确定要切换吗？此操作将丢失您的更改。'
+            );
+            if (!confirmed) {
+                // 用户取消，需要恢复侧边栏选择
+                // TODO: 实现侧边栏选择恢复逻辑
+                return;
+            }
+        }
+
+        // 查找目标 Widget
+        const widgetToMount = this.widgets.find(w => w.id === widgetId);
+        if (!widgetToMount) {
+            console.error(`[SettingsWorkspace] 未找到 Widget: ${widgetId}`);
+            this.options.settingsContainer.innerHTML = `
+                <p style="color: red;">错误: 无法加载 Widget "${widgetId}"</p>
+            `;
+            return;
+        }
+
+        // 卸载当前 Widget
+        if (this.activeWidget && typeof this.activeWidget.unmount === 'function') {
+            await this.activeWidget.unmount();
+        }
+
+        // 清空容器并挂载新 Widget
+        this.options.settingsContainer.innerHTML = '';
+        this.activeWidget = widgetToMount;
+        
+        try {
+            await this.activeWidget.mount(
+                this.options.settingsContainer, 
+                this.options.widgetOptions
+            );
+            console.log(`[SettingsWorkspace] ✅ Widget 已挂载: ${widgetId}`);
+        } catch (error) {
+            console.error(`[SettingsWorkspace] ❌ 挂载 Widget 失败:`, error);
+            this.options.settingsContainer.innerHTML = `
+                <p style="color: red;">错误: 挂载 Widget 失败</p>
+            `;
+        }
+    }
+
+    /**
+     * 处理窗口关闭前事件
      * @private
      * @param {Event} event
      * @description 处理窗口/标签页关闭前的事件，以防止数据丢失。
@@ -263,17 +322,19 @@ export class SettingsWorkspace {
     _handleBeforeUnload(event) {
         if (this.isDirty) {
             const message = '您有未保存的更改，确定要离开吗？';
-            event.returnValue = message; // 兼容旧版浏览器
-            return message; // 兼容现代浏览器
+            event.returnValue = message;
+            return message;
         }
     }
 }
 
 /**
- * 工厂函数，用于创建和初始化一个新的 SettingsWorkspace 实例。
- * @param {SettingsWorkspaceOptions} options - 工作区的配置。
- * @returns {SettingsWorkspace} 一个新的实例。
+ * 工厂函数：创建并初始化 SettingsWorkspace
+ * @param {SettingsWorkspaceOptions} options
+ * @returns {Promise<SettingsWorkspace>} 已初始化的工作区实例
  */
-export function createSettingsWorkspace(options) {
-    return new SettingsWorkspace(options);
+export async function createSettingsWorkspace(options) {
+    const workspace = new SettingsWorkspace(options);
+    await workspace.start();
+    return workspace;
 }

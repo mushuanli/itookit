@@ -1,8 +1,8 @@
 // demo/llmworkspace.js (已与 MDxWorkspace Demo 架构同步更新)
 
 // --- 1. 核心库与服务导入 ---
+import { getConfigManager } from '../configManager/index.js';
 import { createLLMWorkspace } from '../workspace/llm/index.js';
-import { ConfigManager } from '../config/ConfigManager.js';
 import { API_KEY } from './config.js'; 
 
 if (!API_KEY || API_KEY.includes('YOUR_')) {
@@ -13,32 +13,6 @@ if (!API_KEY || API_KEY.includes('YOUR_')) {
 // Get the containers we defined in the HTML
 const sidebarContainer = document.getElementById('sidebar-container');
 const chatContainer = document.getElementById('chat-container');
-
-// --- 应用启动逻辑 ---
-document.addEventListener('DOMContentLoaded', () => {
-    // 1. 初始化全局 ConfigManager
-    console.log("正在初始化应用级 ConfigManager...");
-    const configManager = ConfigManager.getInstance({
-        adapterOptions: { prefix: 'llm_demo_' } 
-    });
-
-    // 2. 监听 app:ready 事件
-    configManager.eventManager.subscribe('app:ready', async () => {
-        console.log("ConfigManager 已就绪。正在设置演示所需的 LLM 配置...");
-        
-        // 在应用准备就绪后，设置此 demo 所需的 LLM 配置
-        await setupInitialLLMConfig(configManager);
-
-        console.log("LLM 配置完成。正在初始化工作区...");
-        
-        // 现在，所有配置都已就绪，可以安全地初始化工作区了
-        initializeWorkspace(configManager);
-    });
-
-    // 3. 启动应用
-    configManager.bootstrap().catch(console.error);
-});
-
 
 /**
  * 这是一个异步函数，用于在应用启动时设置初始的 LLM 配置。
@@ -63,7 +37,7 @@ async function setupInitialLLMConfig(cm) {
     ];
     // 使用服务层的方法来保存，它会处理事件发布
     await llmService.repo.saveConnections(connections);
-    console.log("LLM Connections have been configured.");
+    console.log("✅ LLM Connections 已配置");
 
     // --- Agent Definitions ---
     const agents = [
@@ -99,21 +73,21 @@ async function setupInitialLLMConfig(cm) {
     ];
     // 使用服务层的方法来保存
     await llmService.repo.saveAgents(agents);
-    console.log("LLM Agents have been configured.");
+    console.log("✅ LLM Agents 已配置");
 }
 
 /**
- * Workspace 初始化函数
- * @param {ConfigManager} cm - 注入的 ConfigManager 实例
+ * 初始化工作区
+ * @param {ConfigManager} cm - ConfigManager 实例
  */
-function initializeWorkspace(cm) {
+async function initializeWorkspace(cm) {
     try {
-        // --- [修正] Workspace 初始化配置 ---
-        // 注意：connections 和 agents 不再是 workspace 的配置项。
-        // workspace 将通过注入的 configManager 自动获取它们。
-        const workspaceConfig = {
+        console.log("⚙️ 正在初始化 LLM Workspace...");
+        
+        // ✅ 使用工厂函数，一步到位（不再手动调用 start）
+        const workspace = await createLLMWorkspace({
             configManager: cm,
-            namespace: 'llm-workspace-demo-final',
+            namespace: 'llm-workspace-demo',
             sidebarContainer: sidebarContainer,
             chatContainer: chatContainer,
             
@@ -141,41 +115,50 @@ function initializeWorkspace(cm) {
 
             // Sidebar 的配置（保持不变）
             sidebarConfig: {
-                title: 'LLM Workspace'
+                title: 'LLM 对话'
             }
-        };
-
-        // 创建并启动 workspace
-        const workspace = createLLMWorkspace(workspaceConfig);
-        
-        // start() 方法现在负责加载会话数据
-        workspace.start().then(() => {
-            console.log("Workspace is ready!");
-            // 将 workspace 实例暴露到 window，方便调试
-            window.llmWorkspace = workspace; 
         });
 
+        console.log("✅ LLM Workspace 启动成功！");
+        
+        // 暴露到 window 以便调试
+        window.llmWorkspace = workspace;
+        
     } catch (error) {
-        console.error("初始化 LLMWorkspace 失败:", error);
-        document.body.innerHTML = `<div class="error-message">错误: ${error.message}</div>`;
+        console.error("❌ 初始化 LLM Workspace 失败:", error);
+        document.body.innerHTML = `
+            <div class="error-message">
+                <h3>❌ 初始化失败</h3>
+                <p><strong>错误:</strong> ${error.message}</p>
+                <details>
+                    <summary>详细信息</summary>
+                    <pre>${error.stack || '无堆栈信息'}</pre>
+                </details>
+            </div>
+        `;
     }
 }
 
-
-// =========================================================================
-// === [核心重构] 7. 应用启动逻辑
-// =========================================================================
-// 监听 ConfigManager 的 'app:ready' 事件。
-// 这确保了在初始化 workspace 之前，所有核心服务和全局数据（如标签）都已加载完毕。
-configManager.eventManager.subscribe('app:ready', async () => {
-    console.log("ConfigManager is ready. Setting up initial LLM configurations...");
+// --- 应用启动逻辑 ---
+document.addEventListener('DOMContentLoaded', async () => {
+    console.log("🚀 正在初始化应用...");
     
-    // 在应用准备就绪后，设置我们的 demo 所需的 LLM 配置。
-    // await 的使用确保了在初始化 workspace 之前，这些配置已经保存完毕。
-    await setupInitialLLMConfig();
-
-    console.log("Initial LLM config setup complete. Initializing workspace...");
-    
-    // 现在，所有配置都已就绪，可以安全地初始化工作区了。
-    initializeWorkspace();
+    try {
+        // 1. 获取并初始化 ConfigManager
+        const configManager = getConfigManager();
+        await configManager.init();
+        console.log("✅ ConfigManager 已就绪");
+        
+        // 2. 设置初始配置
+        await setupInitialLLMConfig(configManager);
+        
+        // 3. 初始化工作区
+        await initializeWorkspace(configManager);
+        
+    } catch (error) {
+        console.error("❌ 应用启动失败:", error);
+        document.body.innerHTML = `
+            <div class="error-message">应用启动失败: ${error.message}</div>
+        `;
+    }
 });
