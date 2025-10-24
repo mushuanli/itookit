@@ -401,30 +401,27 @@ export class SessionList extends BaseComponent {
      */
     _getTargetParentId() {
         const selectedIds = this.state.selectedItemIds;
-        const lastClickedId = this.lastClickedItemId;
-
-        // 优先级 1: 使用最后点击的项作为上下文
-        if (lastClickedId && selectedIds.has(lastClickedId)) {
-            const lastClickedItem = this._findItemById(lastClickedId);
-            if (lastClickedItem) {
-                // 如果最后点击的是文件夹，目标就是它自己
-                if (lastClickedItem.type === 'folder') {
-                    return lastClickedItem.id;
-                }
-                // 如果最后点击的是文件，目标是它的父文件夹
-                // @ts-ignore
-                return lastClickedItem.metadata?.parentId || null;
+    
+        if (selectedIds.size > 0) {
+            const firstSelectedId = selectedIds.values().next().value;
+            const firstItem = this._findItemById(firstSelectedId);
+        
+            if (firstItem) {
+                const targetId = firstItem.type === 'folder' 
+                    ? firstItem.id 
+                    : (firstItem.metadata?.parentId || null);
+            
+                console.log('[SessionList] 导入目标确定:', {
+                    选中项: firstItem.metadata.title,
+                    类型: firstItem.type === 'folder' ? '目录' : '文件',
+                    目标目录ID: targetId
+                });
+            
+                return targetId;
             }
         }
-
-        // 优先级 2 (回退方案): 如果只选择了一个项目，且该项目是文件夹
-        if (selectedIds.size === 1) {
-            const singleId = selectedIds.values().next().value;
-            const selectedItem = this._findItemById(singleId);
-            if (selectedItem?.type === 'folder') {
-                return selectedItem.id;
-            }
-        }
+    
+        console.log('[SessionList] 未选中任何项，导入到根目录');
         return null;
     }
 

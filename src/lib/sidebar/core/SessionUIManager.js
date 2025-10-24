@@ -1,10 +1,10 @@
 // 文件: #sidebar/core/SessionUIManager.js
 
 /**
- * @file SessionUIManager.js (V3 - 服务容器架构)
- * @description SessionUI 库的主控制器。
- * 负责初始化所有子组件，连接内部UI事件流与外部`ConfigManager`数据事件流，
- * 并通过实现 `ISessionManager` 接口向外部应用（如 MDxWorkspace）提供一个稳定、统一的 API。
+ * @file SessionUIManager.js (V4 - Aligned with ConfigManager Reconstruction)
+ * @description SessionUI 库的主控制器，现已完全对齐 ConfigManager 的重构架构。
+ * 负责初始化所有子组件，连接内部UI事件流与外部 ConfigManager 数据事件流，
+ * 并通过实现 `ISessionManager` 接口向外部应用提供统一的 API。
  */
 import { ISessionManager } from '../../common/interfaces/ISessionManager.js';
 import { SessionCoordinator } from './Coordinator.js';
@@ -15,12 +15,7 @@ import { DocumentOutline } from '../components/DocumentOutline/DocumentOutline.j
 import { MoveToModal } from '../components/MoveToModal/MoveToModal.js';
 import { TagEditorComponent } from '../../common/components/TagEditor/TagEditorComponent.js';
 import { SessionTagProvider } from '../providers/SessionTagProvider.js';
-
-import { dataAdapter } from '../utils/data-adapter.js';
-import { getModuleEventName } from '../../config/shared/constants.js';
-// 导入 parseSessionInfo 以便在事件处理器中使用
-import { parseSessionInfo } from '../utils/session-parser.js';
-
+import { EVENTS } from '../../configManager/constants.js'; // 使用新的事件常量
 
 /**
  * @typedef {object} TagEditorFactoryOptions
@@ -47,41 +42,29 @@ import { parseSessionInfo } from '../utils/session-parser.js';
  */
 export class SessionUIManager extends ISessionManager {
     /**
-     * [V3] 构造函数现在接收 `configManager` 和 `namespace`，实现了依赖的集中管理。
+     * [V4] 构造函数现在直接使用 ConfigManager 的 repositories
      * @param {SessionUIOptions} options - UI 配置选项
-     * @param {import('../../config/ConfigManager.js').ConfigManager} configManager - 【注入】应用级配置管理器
-     * @param {string} namespace - 【注入】当前工作区的命名空间
+     * @param {import('../../configManager/index.js').ConfigManager} configManager - 应用级配置管理器
+     * @param {string} moduleName - 当前工作区的模块名
      */
-    constructor(options, configManager, namespace) {
+    constructor(options, configManager, moduleName) {
         super();
         // --- 参数校验 ---
         if (!options.sessionListContainer) {
             throw new Error("SessionUIManager requires 'sessionListContainer' in options.");
         }
-        if (!configManager || !namespace) {
-            throw new Error("SessionUIManager requires a configManager and a namespace.");
+        if (!configManager || !moduleName) {
+            throw new Error("SessionUIManager requires a configManager and a moduleName.");
         }
 
         this.options = options;
-        this.namespace = namespace;
+        this.moduleName = moduleName;
         this.configManager = configManager;
         
-        // --- [核心重构] 服务解析 ---
-        // 1. 获取与当前工作区绑定的上下文
-        const workspaceContext = this.configManager.getWorkspace(this.namespace);
+        // --- [核心重构] 不再直接访问 repositories，而是使用 ConfigManager 的统一 API ---
         
-        // 2. 从上下文或全局中解析出所需的服务实例
-        /** @type {import('../../config/repositories/ModuleRepository.js').ModuleRepository} */
-        this.moduleRepo = workspaceContext.module; // 从工作区获取作用域服务
-        
-        /** @type {import('../../config/repositories/TagRepository.js').TagRepository} */
-        this.tagRepo = this.configManager.getService('tagRepository'); // 从主容器获取全局服务
-        
-        /** @type {import('../../config/EventManager.js').EventManager} */
-        this.eventManager = this.configManager.eventManager;
-
-        // --- 状态和 UI 初始化 (与之前版本类似，但依赖来源更清晰) ---
-        this.uiStorageKey = `sidebar_ui_state_${this.namespace}`;
+        // --- 状态和 UI 初始化 ---
+        this.uiStorageKey = `sidebar_ui_state_${this.moduleName}`;
         const persistedUiState = this._loadUiState();
         
         this.coordinator = new SessionCoordinator();
@@ -92,11 +75,11 @@ export class SessionUIManager extends ISessionManager {
             readOnly: options.readOnly || false, // [修改] 将 readOnly 状态注入 store
         });
 
-        // 3. 将解析出的服务注入到 SessionService 中
+        // [修改] 使用 ConfigManager 实例而不是单独的 repositories
         this._sessionService = new SessionService({
             store: this.store,
-            moduleRepo: this.moduleRepo, // 注入 ModuleRepository
-            tagRepo: this.tagRepo,       // 注入 TagRepository
+            configManager: this.configManager, // 传入整个 ConfigManager
+            moduleName: this.moduleName,
             newSessionContent: options.newSessionContent
         });
 
@@ -191,25 +174,27 @@ export class SessionUIManager extends ISessionManager {
             
             return this.getActiveSession();
         }
-        // --- [修复结束] ---
 
-        // 只有在非只读的动态模式下，才执行数据加载逻辑
-        this.moduleRepo.load();
-        
-        return new Promise(resolve => {
-            // 如果数据已在缓存中，立即处理并解析
-            if (this.moduleRepo.modules) {
-                this.sessionService.handleRepositoryLoad(this.moduleRepo.modules);
-                resolve(this.getActiveSession());
-                return;
+        // 动态模式 - 从 ConfigManager 加载数据
+        await this._loadModuleData();
+        return this.getActiveSession();
+    }
+
+    /**
+     * [新增] 使用 ConfigManager 的 getTree 方法加载模块数据
+     * @private
+     */
+    async _loadModuleData() {
+        try {
+            const tree = await this.configManager.getTree(this.moduleName);
+            if (tree) {
+                await this.sessionService.handleRepositoryLoad(tree);
+            } else {
+                console.warn(`[SessionUIManager] 未找到模块 "${this.moduleName}" 的数据树。`);
             }
-            // 否则，等待第一次 'loaded' 事件
-            const unsubscribe = this.eventManager.subscribe(getModuleEventName('loaded', this.options.storageKey), (tree) => {
-                this.sessionService.handleRepositoryLoad(tree);
-                resolve(this.getActiveSession());
-                unsubscribe(); // 确保只执行一次
-            });
-        });
+        } catch (error) {
+            console.error('[SessionUIManager] 加载模块数据失败:', error);
+        }
     }
 
     /**
@@ -219,7 +204,6 @@ export class SessionUIManager extends ISessionManager {
     getActiveSession() {
         return this.sessionService.getActiveSession();
     }
-
 
     /**
      * @override
@@ -283,8 +267,8 @@ export class SessionUIManager extends ISessionManager {
         if (channel) {
             return this.coordinator.subscribe(channel, event => callback(event.data));
         } else {
-            console.warn(`[SessionUIManager] Attempted to subscribe to an unknown event: "${eventName}"`);
-            return () => {}; // 返回一个无操作的取消订阅函数
+            console.warn(`[SessionUIManager] 尝试订阅未知事件: "${eventName}"`);
+            return () => {};
         }
     }
     
@@ -358,7 +342,6 @@ export class SessionUIManager extends ISessionManager {
             if (hasChanged) {
                 this._saveUiState();
             }
-            // Use deep copy for sets/maps to avoid reference issues
             lastStateForPersistence = JSON.parse(JSON.stringify(currentState, (k,v) => v instanceof Set ? Array.from(v) : (v instanceof Map ? Array.from(v.entries()) : v)));
         });
     }
@@ -418,90 +401,164 @@ export class SessionUIManager extends ISessionManager {
     }
     
     /**
-     * [V2] 订阅来自 ConfigManager 的全局事件，并将它们转换为对本地Store的action。
+     * [V4 核心更新] 订阅来自 ConfigManager 的全局事件，使用新的事件常量。
      * @private
      */
     _connectToConfigManagerEvents() {
-        // [核心修复点 2] 直接使用 this.namespace，不再依赖任何局部变量或废弃的 options 属性。
-        const namespace = this.namespace;
+        const moduleName = this.moduleName;
 
-        // 订阅 'loaded' 事件
-        this.eventManager.subscribe(getModuleEventName('loaded', namespace), (tree) => {
-            this.sessionService.handleRepositoryLoad(tree);
-        });
-
-        this.eventManager.subscribe(getModuleEventName('node_added', namespace), ({ parentId, newNode }) => {
-            const newItem = dataAdapter.nodeToItem(newNode);
-            newItem.metadata.parentId = parentId; // 设置正确的父ID
+        // 使用 ConfigManager 的 on() 方法订阅事件
+        this.configManager.on('node:added', ({ newNode, parentId }) => {
+            if (newNode.moduleName !== moduleName) return;
+            
+            const newItem = this._nodeToItem(newNode, parentId);
             this.store.dispatch({
                 type: newItem.type === 'folder' ? 'FOLDER_CREATE_SUCCESS' : 'SESSION_CREATE_SUCCESS',
                 payload: newItem,
             });
         });
 
-        this.eventManager.subscribe(getModuleEventName('node_removed', namespace), ({ removedNodeId }) => {
-            this.store.dispatch({ type: 'ITEM_DELETE_SUCCESS', payload: { itemIds: [removedNodeId] } });
+        this.configManager.on('node:removed', ({ removedNodeId, allRemovedIds }) => {
+            const idsToRemove = allRemovedIds || [removedNodeId];
+            this.store.dispatch({ 
+                type: 'ITEM_DELETE_SUCCESS', 
+                payload: { itemIds: idsToRemove } 
+            });
         });
         
-        this.eventManager.subscribe(getModuleEventName('node_renamed', namespace), ({ updatedNode }) => {
+        this.configManager.on('node:renamed', ({ updatedNode }) => {
+            if (updatedNode.moduleName !== moduleName) return;
+            
             this.store.dispatch({
                 type: 'ITEM_RENAME_SUCCESS',
                 payload: {
-                    itemId: updatedNode.meta.id,
-                    newTitle: updatedNode.path.split('/').pop()
+                    itemId: updatedNode.id,
+                    newTitle: updatedNode.name
                 }
             });
         });
         
-        this.eventManager.subscribe(getModuleEventName('node_content_updated', namespace), ({ updatedNode }) => {
-            const currentItem = this._sessionService.findItemById(updatedNode.meta.id);
+        this.configManager.on('node:content_updated', ({ updatedNode }) => {
+            if (updatedNode.moduleName !== moduleName) return;
+            
+            const currentItem = this._sessionService.findItemById(updatedNode.id);
             if (!currentItem) return;
 
-            // ✅ 直接使用 Repository 提供的元数据，不解析 content！
+            // 直接使用 Repository 提供的元数据，利用 reconciliation 的结果
             const updates = {
                 content: {
-                    format: 'opaque', // 标记为不透明格式
-                    summary: updatedNode.meta.summary || '',
-                    searchableText: updatedNode.meta.searchableText || '',
-                    data: updatedNode.content, // 原样保存
+                    format: 'markdown',
+                    summary: updatedNode.meta?.summary || '',
+                    searchableText: updatedNode.meta?.searchableText || '',
+                    data: updatedNode.content,
                 },
-                headings: updatedNode.meta.headings || [],
+                headings: updatedNode.meta?.headings || [],
                 metadata: {
                     ...currentItem.metadata,
-                    lastModified: updatedNode.meta.mtime,
+                    lastModified: updatedNode.updatedAt,
                 }
             };
 
             this.store.dispatch({
                type: 'ITEM_UPDATE_SUCCESS',
-                payload: { itemId: updatedNode.meta.id, updates }
+                payload: { itemId: updatedNode.id, updates }
            });
         });
 
-        this.eventManager.subscribe(getModuleEventName('nodes_meta_updated', namespace), ({ updatedNodes }) => {
-            updatedNodes.forEach(node => {
-                const updatedItem = dataAdapter.nodeToItem(node);
-                // 确保父ID被正确设置，以防它也改变了
-                const parent = this.moduleRepo._findNodeById(node.meta.id)?.parent;
-                updatedItem.metadata.parentId = parent ? parent.meta.id : this.moduleRepo.modules.meta.id;
-                this.store.dispatch({ type: 'ITEM_UPDATE_SUCCESS', payload: { itemId: node.meta.id, updates: updatedItem } });
+        this.configManager.on('node:meta_updated', ({ updatedNode }) => {
+            if (updatedNode.moduleName !== moduleName) return;
+            
+            const updatedItem = this._nodeToItem(updatedNode);
+            this.store.dispatch({ 
+                type: 'ITEM_UPDATE_SUCCESS', 
+                payload: { itemId: updatedNode.id, updates: updatedItem } 
             });
         });
 
-        // --- [新增修复] ---
-        // 专门监听由 ModuleRepository 发出的节点移动事件。
-        // 这将 dispatch 一个 'ITEMS_MOVE_SUCCESS' action，激活 Store 中正确的 reducer 逻辑，
-        // 以便在 UI 上正确地重新排列树状结构，修复了移动后UI不刷新的bug。
-        this.eventManager.subscribe(getModuleEventName('nodes_moved', namespace), ({ movedNodeIds, targetParentId }) => {
+        this.configManager.on('node:moved', ({ nodeId, newParentId, updatedNode }) => {
+            if (updatedNode && updatedNode.moduleName !== moduleName) return;
+            
             this.store.dispatch({
                 type: 'ITEMS_MOVE_SUCCESS',
                 payload: {
-                    itemIds: movedNodeIds,
-                    targetId: targetParentId,
-                    position: 'into' // 当前架构只支持移动到文件夹内部
+                    itemIds: [nodeId],
+                    targetId: newParentId,
+                    position: 'into'
                 }
             });
         });
+
+        this.configManager.on('tags:updated', async ({ action, nodeId }) => {
+            const item = this._sessionService.findItemById(nodeId);
+            if (!item) return;
+            
+            // 刷新该节点的标签
+            await this._refreshItemTags(nodeId);
+        });
+    }
+
+    /**
+     * [新增] 将 ConfigManager 的 node 转换为 UI item
+     * @private
+     * @param {object} node - ConfigManager 的节点对象
+     * @param {string|null} parentId - 父节点 ID
+     * @returns {import('../types/types.js')._WorkspaceItem}
+     */
+    _nodeToItem(node, parentId = null) {
+        const isFolder = node.type === 'directory';
+        
+        return {
+            id: node.id,
+            type: isFolder ? 'folder' : 'item',
+            version: "1.0",
+            metadata: {
+                title: node.name,
+                tags: node.meta?.tags || [],
+                createdAt: node.createdAt,
+                lastModified: node.updatedAt,
+                parentId: parentId,
+                moduleName: node.moduleName,
+                path: node.path,
+                custom: node.meta || {}
+            },
+            content: isFolder ? undefined : {
+                format: 'markdown',
+                summary: node.meta?.summary || '',
+                searchableText: node.meta?.searchableText || '',
+                data: node.content || ''
+            },
+            headings: node.meta?.headings || [],
+            children: isFolder ? [] : undefined
+        };
+    }
+
+    /**
+     * [新增] 从 repository 刷新指定节点的标签
+     * @private
+     * @param {string} nodeId
+     */
+    async _refreshItemTags(nodeId) {
+        try {
+            // 使用 ConfigManager 的 API 获取标签
+            const tags = await this.configManager.getTagsForNode(nodeId);
+            const item = this._sessionService.findItemById(nodeId);
+            if (item) {
+                this.store.dispatch({
+                    type: 'ITEM_UPDATE_SUCCESS',
+                    payload: {
+                        itemId: nodeId,
+                        updates: {
+                            metadata: {
+                                ...item.metadata,
+                                tags
+                            }
+                        }
+                    }
+                });
+            }
+        } catch (error) {
+            console.error('[SessionUIManager] 刷新标签失败:', error);
+        }
     }
 
     /**
@@ -538,11 +595,10 @@ export class SessionUIManager extends ISessionManager {
         
         this.coordinator.subscribe('CREATE_ITEM_CONFIRMED', async event => {
             const { type, title, parentId } = event.data;
-            const parentNode = this.sessionService.findItemById(parentId) || { id: this.moduleRepo.modules.meta.id };
             if (type === 'session') {
-                await this.sessionService.createSession({ title, parentId: parentNode.id });
+                await this.sessionService.createSession({ title, parentId });
             } else if (type === 'folder') {
-                await this.sessionService.createFolder({ title, parentId: parentNode.id });
+                await this.sessionService.createFolder({ title, parentId });
             }
         });
         

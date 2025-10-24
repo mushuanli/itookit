@@ -10,8 +10,8 @@ import { createSessionUI } from '../sidebar/index.js';
 // --- 导入重构后的 MDxEditor 及其插件 ---
 import { MDxEditor, defaultPlugins } from '../mdx/editor/index.js';
 
-// --- [V2] 导入新的全局配置管理器 ---
-import { ConfigManager } from '../config/ConfigManager.js';
+// --- [V2 FIXED] 导入新的全局配置管理器 ---
+import { getConfigManager } from '../configManager/index.js';
 
 //-----------------------------------------------------------------
 
@@ -167,18 +167,14 @@ function setupAppUIHandlers() {
  * 应用主入口函数
  */
 async function main() {
-    // --- [V2] 步骤 1: 初始化全局 ConfigManager ---
-    // 这是整个应用生命周期中应该只执行一次的操作。
-    // 我们在这里选择默认的 LocalStorageAdapter。
-    const configManager = ConfigManager.getInstance({
-        adapterOptions: { prefix: 'mdx_demo_app_' }
-    });
+    // --- [V2 FIXED] 步骤 1: 初始化全局 ConfigManager ---
+    // 使用正确的 getConfigManager() 函数获取单例
+    const configManager = getConfigManager();
 
     try {
-        // [核心修复] 显式调用 bootstrap() 来启动应用。
-        // 这个方法会负责加载所有急切（eager）的服务，并最终发布 'app:ready' 事件。
-        // 我们只需要等待它完成即可。
-        await configManager.bootstrap();
+        // [核心修复] 调用 init() 方法来初始化数据库连接
+        await configManager.init();
+        console.log('ConfigManager initialized successfully.');
     } catch (err) {
         alert('应用核心配置加载失败！请检查控制台。');
         console.error(err);
@@ -193,9 +189,23 @@ async function main() {
         contextMenu: {
             // 自定义右键菜单
             items: (item, defaultItems) => {
-                const copyIdAction = { id: 'copy-id', label: '复制稳定ID', iconHTML: '<i class="fas fa-fingerprint"></i>' };
-                const shareAction = { id: 'share-session', label: '分享...', iconHTML: '<i class="fas fa-share-alt"></i>', hidden: (it) => it.type !== 'item' };
-                const exportAction = { id: 'export-as-markdown', label: '导出为 Markdown', iconHTML: '<i class="fas fa-file-export"></i>', hidden: (it) => it.type !== 'item' };
+                const copyIdAction = { 
+                    id: 'copy-id', 
+                    label: '复制稳定ID', 
+                    iconHTML: '<i class="fas fa-fingerprint"></i>' 
+                };
+                const shareAction = { 
+                    id: 'share-session', 
+                    label: '分享...', 
+                    iconHTML: '<i class="fas fa-share-alt"></i>', 
+                    hidden: (it) => it.type !== 'item' 
+                };
+                const exportAction = { 
+                    id: 'export-as-markdown', 
+                    label: '导出为 Markdown', 
+                    iconHTML: '<i class="fas fa-file-export"></i>', 
+                    hidden: (it) => it.type !== 'item' 
+                };
                 
                 // 返回一个全新的菜单结构
                 return [

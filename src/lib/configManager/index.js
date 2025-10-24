@@ -46,6 +46,13 @@ export class ConfigManager {
         ConfigManager.instance = this;
     }
 
+    static getInstance() {
+        if (!instance) {
+            instance = new ConfigManager();
+        }
+        return instance;
+    }
+
     /**
      * 初始化模块，连接数据库。
      * 应用启动时必须调用此方法。
@@ -226,6 +233,9 @@ export class ConfigManager {
     async deleteTag(tagName) { return this.tagRepo.deleteTagGlobally(tagName); }
     async findNodesByTag(tagName) { return this.tagRepo.findNodesByTag(tagName); }
     async getAllTags() { return this.tagRepo.getAllTags(); }
+    async getTagsForNode(nodeId) { 
+        return this.tagRepo.getTagsForNode(nodeId); 
+    }
 
     // --- 链接 API ---
     async getBacklinks(nodeId) { return this.linkRepo.getBacklinks(nodeId); }
@@ -263,8 +273,5 @@ let instance = null;
  * @returns {ConfigManager}
  */
 export function getConfigManager() {
-    if (!instance) {
-        instance = new ConfigManager();
-    }
-    return instance;
+    return ConfigManager.getInstance();
 }
