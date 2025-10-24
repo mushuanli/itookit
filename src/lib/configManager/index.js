@@ -181,6 +181,44 @@ export class ConfigManager {
         return this.nodeRepo.updateNode(nodeId, { content: finalContent });
     }
 
+    /**
+     * 【新增】通用节点数据更新方法。
+     * 可在一个原子操作中更新节点的多个属性（如 content, meta 等）。
+     * 如果更新中包含 'content'，会自动执行与 updateNodeContent 相同的派生数据协调流程。
+     * @param {string} nodeId - 要更新的节点的 ID。
+     * @param {object} updates - 一个包含要更新的字段的对象, 例如 { content: '...', meta: { newKey: 'value' } }。
+     * @returns {Promise<object>} 更新后的节点对象。
+     */
+    async updateNodeData(nodeId, updates) {
+        const finalUpdates = { ...updates };
+
+        // 1. 如果更新了内容，则执行完整的协调流程
+        if (updates.hasOwnProperty('content')) {
+            const { updatedContent: contentAfterClozes } = await this.srsRepo.reconcileClozes(nodeId, updates.content);
+            const { updatedContent: contentAfterTasks } = await this.taskRepo.reconcileTasks(nodeId, contentAfterClozes);
+            const { updatedContent: finalContent } = await this.agentRepo.reconcileAgents(nodeId, contentAfterTasks);
+
+            // 更新链接（此操作不修改内容）
+            this.linkRepo.updateLinksForNode(nodeId, finalContent).catch(err => 
+                console.error(`Error updating links for node ${nodeId}:`, err)
+            );
+            
+            finalUpdates.content = finalContent;
+        }
+
+        // 2. 如果更新了 meta，需要先获取旧 meta 进行合并
+        if (updates.hasOwnProperty('meta')) {
+            const node = await this.nodeRepo.getNode(nodeId);
+            if (!node) throw new Error(`Node with id ${nodeId} not found for meta update.`);
+            
+            // 合并旧的 meta 和新的 meta
+            finalUpdates.meta = { ...node.meta, ...updates.meta };
+        }
+
+        // 3. 调用底层的 NodeRepository.updateNode 执行一次性更新
+        return this.nodeRepo.updateNode(nodeId, finalUpdates);
+    }
+
     // --- 标签 API ---
     async addTagToNode(nodeId, tagName) { return this.tagRepo.addTagToNode(nodeId, tagName); }
     async removeTagFromNode(nodeId, tagName) { return this.tagRepo.removeTagFromNode(nodeId, tagName); }

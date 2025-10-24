@@ -30,6 +30,22 @@ export class TagRepository {
     }
 
     /**
+     * 【新增】根据节点ID获取其所有标签名称。
+     * 这是UI层在适配Node数据时获取标签信息的关键方法。
+     * @param {string} nodeId - 节点的ID。
+     * @returns {Promise<string[]>} 一个包含该节点所有标签名称的字符串数组。
+     */
+    async getTagsForNode(nodeId) {
+        if (!nodeId) {
+            return [];
+        }
+        // 使用 getAllByIndex 辅助函数高效查询 nodeTags 表中与 nodeId 关联的所有记录
+        const relations = await this.db.getAllByIndex(STORES.NODE_TAGS, 'by_nodeId', nodeId);
+        // 从查询到的关联对象中提取 tagName 字段，并返回一个字符串数组
+        return relations.map(rel => rel.tagName);
+    }
+
+    /**
      * 为节点添加标签
      * @param {string} nodeId
      * @param {string} tagName

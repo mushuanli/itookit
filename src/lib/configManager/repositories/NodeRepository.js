@@ -115,6 +115,11 @@ export class NodeRepository {
      * @returns {Promise<object>} 更新后的节点
      */
     async updateNode(nodeId, updates) {
+        // 【修复】增加ID校验，防止向数据库传递 undefined 的 key
+        if (!nodeId) {
+            throw new Error("updateNode 方法需要一个有效的 nodeId。");
+        }
+
         const tx = await this.db.getTransaction(STORES.NODES, 'readwrite');
         const store = tx.objectStore(STORES.NODES);
         const node = await new Promise(resolve => store.get(nodeId).onsuccess = e => resolve(e.target.result));

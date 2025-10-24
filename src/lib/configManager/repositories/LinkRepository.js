@@ -13,6 +13,12 @@ export class LinkRepository {
      * @returns {Promise<void>}
      */
     async updateLinksForNode(sourceNodeId, content) {
+        // 【修复】增加ID校验，防止向数据库传递 undefined 的 key
+        if (!sourceNodeId) {
+            console.warn("updateLinksForNode 被调用，但 sourceNodeId 无效，操作已跳过。");
+            return;
+        }
+
         // 这是一个简化的解析逻辑，实际应用中需要更健壮的正则表达式
         const linkRegex = /\[\[([a-zA-Z0-9_-]+-[0-9a-fA-F-]+)\]\]/g;
         let match;
