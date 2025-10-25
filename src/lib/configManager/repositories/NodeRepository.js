@@ -102,9 +102,10 @@ export class NodeRepository {
     async getNode(nodeId) {
         const tx = await this.db.getTransaction(STORES.NODES, 'readonly');
         const store = tx.objectStore(STORES.NODES);
-        return new Promise(resolve => {
+        return new Promise((resolve, reject) => { // [FIX]
             const request = store.get(nodeId);
             request.onsuccess = () => resolve(request.result);
+            request.onerror = (e) => reject(e.target.error);
         });
     }
     
@@ -122,7 +123,11 @@ export class NodeRepository {
 
         const tx = await this.db.getTransaction(STORES.NODES, 'readwrite');
         const store = tx.objectStore(STORES.NODES);
-        const node = await new Promise(resolve => store.get(nodeId).onsuccess = e => resolve(e.target.result));
+        const node = await new Promise((resolve, reject) => { // [FIX]
+            const request = store.get(nodeId);
+            request.onsuccess = e => resolve(e.target.result);
+            request.onerror = e => reject(e.target.error);
+        });
         
         if (!node) throw new Error(`Node with id ${nodeId} not found.`);
 

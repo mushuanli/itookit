@@ -117,6 +117,14 @@ export const STORES = {
     LLM_CONFIG: 'llmConfig' // [新增]
 };
 
+// [NEW] 定义 LLM 配置的键名常量
+export const LLM_CONFIG_KEYS = {
+    CONNECTIONS: 'connections',
+    AGENTS: 'agents',
+    WORKFLOWS: 'workflows'
+};
+
+
 // [新增] 定义事件名称常量
 export const EVENTS = {
     NODE_ADDED: 'node:added',

@@ -1,6 +1,7 @@
 // #configManager/repositories/TagRepository.js
 
 import { STORES, EVENTS } from '../constants.js';
+import { PROTECTED_TAGS } from '../../common/configData.js'; // [NEW] 导入受保护的标签列表
 
 export class TagRepository {
     /**
@@ -250,6 +251,11 @@ export class TagRepository {
      * @returns {Promise<void>}
      */
     async renameTagGlobally(oldTagName, newTagName) {
+        // [NEW] 增加对受保护标签的检查
+        if (PROTECTED_TAGS.includes(oldTagName)) {
+            throw new Error(`Cannot rename protected tag: "${oldTagName}"`);
+        }
+
         // 事务需要包含所有受影响的表
         const tx = await this.db.getTransaction([STORES.TAGS, STORES.NODE_TAGS], 'readwrite');
         const tagsStore = tx.objectStore(STORES.TAGS);
@@ -294,6 +300,11 @@ export class TagRepository {
      * @returns {Promise<void>}
      */
     async deleteTagGlobally(tagName) {
+        // [NEW] 增加对受保护标签的检查
+        if (PROTECTED_TAGS.includes(tagName)) {
+            throw new Error(`Cannot delete protected tag: "${tagName}"`);
+        }
+
         const tx = await this.db.getTransaction([STORES.TAGS, STORES.NODE_TAGS], 'readwrite');
         const tagsStore = tx.objectStore(STORES.TAGS);
         const nodeTagsStore = tx.objectStore(STORES.NODE_TAGS);

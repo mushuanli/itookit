@@ -24,7 +24,7 @@ export class PluginRepository {
         return new Promise((resolve, reject) => {
             const request = store.put(pluginData);
             request.onsuccess = () => resolve(request.result);
-            request.onerror = reject;
+            request.onerror = (e) => reject(e.target.error); // [FIX]
         });
     }
 
@@ -36,8 +36,10 @@ export class PluginRepository {
     async getPlugin(pluginId) {
         const tx = await this.db.getTransaction(STORES.PLUGINS, 'readonly');
         const store = tx.objectStore(STORES.PLUGINS);
-        return new Promise(resolve => {
-            store.get(pluginId).onsuccess = e => resolve(e.target.result);
+        return new Promise((resolve, reject) => { // [FIX]
+            const request = store.get(pluginId);
+            request.onsuccess = e => resolve(e.target.result);
+            request.onerror = e => reject(e.target.error);
         });
     }
 
@@ -48,8 +50,10 @@ export class PluginRepository {
     async getAllPlugins() {
         const tx = await this.db.getTransaction(STORES.PLUGINS, 'readonly');
         const store = tx.objectStore(STORES.PLUGINS);
-        return new Promise(resolve => {
-            store.getAll().onsuccess = e => resolve(e.target.result);
+        return new Promise((resolve, reject) => { // [FIX]
+            const request = store.getAll();
+            request.onsuccess = e => resolve(e.target.result);
+            request.onerror = e => reject(e.target.error);
         });
     }
 
@@ -71,12 +75,20 @@ export class PluginRepository {
     async updatePlugin(pluginId, updates) {
         const tx = await this.db.getTransaction(STORES.PLUGINS, 'readwrite');
         const store = tx.objectStore(STORES.PLUGINS);
-        const plugin = await new Promise(r => store.get(pluginId).onsuccess = e => r(e.target.result));
+        const plugin = await new Promise((resolve, reject) => { // [FIX]
+             const request = store.get(pluginId);
+             request.onsuccess = e => resolve(e.target.result);
+             request.onerror = e => reject(e.target.error);
+        });
         
         if (!plugin) throw new Error(`Plugin with id ${pluginId} not found.`);
 
         const updatedPlugin = { ...plugin, ...updates };
-        await store.put(updatedPlugin);
+        await new Promise((resolve, reject) => { // [FIX]
+            const request = store.put(updatedPlugin);
+            request.onsuccess = resolve;
+            request.onerror = e => reject(e.target.error);
+        });
         return updatedPlugin;
     }
 
@@ -91,7 +103,7 @@ export class PluginRepository {
         await new Promise((resolve, reject) => {
             const request = store.delete(pluginId);
             request.onsuccess = resolve;
-            request.onerror = reject;
+            request.onerror = (e) => reject(e.target.error); // [FIX]
         });
     }
 }

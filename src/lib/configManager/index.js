@@ -18,6 +18,8 @@ import { SearchRepository } from './repositories/SearchRepository.js';
 import { LLMRepository } from './repositories/LLMRepository.js';
 import { LLMService } from './services/LLMService.js';
 import { STORES } from './constants.js';
+// [NEW] 导入默认配置项
+import { LLM_DEFAULT_CONNECTION, LLM_DEFAULT_AGENT, LLM_DEFAULT_ID } from '../common/configData.js';
 
 // [修改] 导出 ConfigManager 类，以便进行类型检查和依赖注入
 export class ConfigManager {
@@ -65,6 +67,7 @@ export class ConfigManager {
      */
     async init() {
         await this.db.connect();
+        await this._ensureDefaultConfigurations(); // [MODIFIED] 调用初始化逻辑
         console.log("ConfigManager initialized and database is ready.");
     }
 
@@ -314,6 +317,46 @@ export class ConfigManager {
 
     // --- 搜索 API ---
     async globalSearch(query) { return this.searchRepo.globalTextSearch(query); }
+
+
+    /**
+     * [NEW]
+     * @private
+     * 确保系统级的默认配置存在于数据库中。
+     * 这是一个幂等操作，只在配置不存在时创建。
+     */
+    async _ensureDefaultConfigurations() {
+        console.log("Ensuring default configurations exist...");
+        try {
+            // 1. 确保默认 Connection 存在
+            const connections = await this.llmRepo.getConnections();
+            if (!connections.some(c => c.id === LLM_DEFAULT_ID)) {
+                connections.push(LLM_DEFAULT_CONNECTION);
+                await this.llmRepo.saveConnections(connections);
+                console.log("Default LLM connection created.");
+            }
+
+            // 2. 确保默认 Agent 存在
+            const agents = await this.llmRepo.getAgents();
+            if (!agents.some(a => a.id === LLM_DEFAULT_ID)) {
+                agents.push(LLM_DEFAULT_AGENT);
+                await this.llmRepo.saveAgents(agents);
+                console.log("Default LLM agent created.");
+            }
+
+            // 3. 确保 'default' Tag 存在
+            // Agent 创建时会通过 LLMService -> TagRepo.ensureTagsExist 附带创建标签，
+            // 但为确保健壮性，这里再独立检查一次全局标签。
+            const allTags = await this.tagRepo.getAllTags();
+            if (!allTags.some(t => t.name === 'default')) {
+                await this.tagRepo.addGlobalTag('default');
+                console.log("Global 'default' tag created.");
+            }
+        } catch (error) {
+            console.error("Failed to ensure default configurations:", error);
+        }
+    }
+
 }
 
 
