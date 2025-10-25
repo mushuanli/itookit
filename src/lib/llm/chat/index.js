@@ -308,8 +308,9 @@ export class LLMChatUI extends IEditor {
     async getSummary() {
         const firstPair = this.historyUI.pairs?.[0];
         if (firstPair && firstPair.userMessage?.content) {
-            // 返回第一条用户消息的内容作为摘要
-            return firstPair.userMessage.content;
+            // [修改] 返回第一条用户消息的内容作为摘要，并确保长度不超过40个字符
+            const content = firstPair.userMessage.content;
+            return content.length > 40 ? content.substring(0, 40) : content;
         }
         // 如果没有消息，或者第一条消息没有内容，则返回一个默认提示或 null
         return "[空对话]";

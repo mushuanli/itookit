@@ -33,6 +33,9 @@ export class WorkflowManager {
 
         this.selectedWorkflowId = null;
         this.isDirty = false;
+        
+        // +++ 缓存已注册的节点类型 +++
+        this.registeredNodeTypes = new Set();
 
         this.renderLayout();
 
@@ -67,7 +70,6 @@ export class WorkflowManager {
                     <div class="workflow-toolbar">
                         <span style="font-weight: bold; padding: 0 10px;">Canvas</span>
                         <div style="margin-left: auto; display: flex; gap: 10px;">
-                            <!-- --- FIXED: Moved Save button here for consistent visibility --- -->
                             <button id="save-workflow-btn" class="settings-btn">Save</button>
                             <button id="run-workflow-btn" class="settings-btn">Run</button>
                         </div>
@@ -323,47 +325,85 @@ export class WorkflowManager {
     }
     
     registerNodeTypes() {
-        // Clear existing to prevent duplicates on update
-        LiteGraph.registered_node_types = {};
+        // 1. Register special built-in nodes (只注册一次)
+        if (!this.registeredNodeTypes.has('graph/input')) {
+            class GraphInputNode { constructor() { this.title = "Workflow Inputs"; } }
+            LiteGraph.registerNodeType("graph/input", GraphInputNode);
+            this.registeredNodeTypes.add('graph/input');
+        }
         
-        // 1. Register special built-in nodes
-        class GraphInputNode { constructor() { this.title = "Workflow Inputs"; } }
-        LiteGraph.registerNodeType("graph/input", GraphInputNode);
-        class GraphOutputNode { constructor() { this.title = "Workflow Outputs"; } }
-        LiteGraph.registerNodeType("graph/output", GraphOutputNode);
+        if (!this.registeredNodeTypes.has('graph/output')) {
+            class GraphOutputNode { constructor() { this.title = "Workflow Outputs"; } }
+            LiteGraph.registerNodeType("graph/output", GraphOutputNode);
+            this.registeredNodeTypes.add('graph/output');
+        }
 
         const primitives = {
             'input/text': class { constructor(){ this.addOutput("value", "string"); this.properties = { value: "" }; this.title="Text Input"; }},
             'string/template': class { constructor(){ this.addInput("text", "string"); this.addOutput("output", "string"); this.properties = { template: "{text}" }; this.title="Template"; }},
         };
-        Object.entries(primitives).forEach(([name, nodeClass]) => LiteGraph.registerNodeType(name, nodeClass));
+        Object.entries(primitives).forEach(([name, nodeClass]) => {
+            if (!this.registeredNodeTypes.has(name)) {
+                LiteGraph.registerNodeType(name, nodeClass);
+                this.registeredNodeTypes.add(name);
+            }
+        });
         
-        // 3. Register Agents as nodes
+        // 3. Register Agents (增量更新)
+        const currentAgentTypes = new Set();
         (this.runnables.agents || []).forEach(agent => {
-            function AgentNode() {
-                (agent.interface.inputs || []).forEach(input => this.addInput(input.name, input.type));
-                (agent.interface.outputs || []).forEach(output => this.addOutput(output.name, output.type));
-                this.title = `${agent.icon || '🤖'} ${agent.name}`;
-                this.description = agent.description;
+            const typeName = `agent/${agent.id}`;
+            currentAgentTypes.add(typeName);
+            
+            if (!this.registeredNodeTypes.has(typeName)) {
+                function AgentNode() {
+                    (agent.interface.inputs || []).forEach(input => this.addInput(input.name, input.type));
+                    (agent.interface.outputs || []).forEach(output => this.addOutput(output.name, output.type));
+                    this.title = `${agent.icon || '🤖'} ${agent.name}`;
+                    this.description = agent.description;
+                }
+                LiteGraph.registerNodeType(typeName, AgentNode);
+                this.registeredNodeTypes.add(typeName);
             }
-            LiteGraph.registerNodeType(`agent/${agent.id}`, AgentNode);
         });
 
-        // 4. Register OTHER Workflows as nodes
+        // 4. Register Workflows (增量更新，排除当前编辑的)
+        const currentWorkflowTypes = new Set();
         (this.runnables.workflows || []).forEach(wf => {
-            // Prevent a workflow from including itself
             if (wf.id === this.selectedWorkflowId) return;
-
-            function WorkflowNode() {
-                (wf.interface.inputs || []).forEach(input => this.addInput(input.name, input.type));
-                (wf.interface.outputs || []).forEach(output => this.addOutput(output.name, output.type));
-                this.title = `🌀 ${wf.name}`;
-                this.description = wf.description;
+            
+            const typeName = `workflow/${wf.id}`;
+            currentWorkflowTypes.add(typeName);
+            
+            if (!this.registeredNodeTypes.has(typeName)) {
+                function WorkflowNode() {
+                    (wf.interface.inputs || []).forEach(input => this.addInput(input.name, input.type));
+                    (wf.interface.outputs || []).forEach(output => this.addOutput(output.name, output.type));
+                    this.title = `🌀 ${wf.name}`;
+                    this.description = wf.description;
+                }
+                LiteGraph.registerNodeType(typeName, WorkflowNode);
+                this.registeredNodeTypes.add(typeName);
             }
-            LiteGraph.registerNodeType(`workflow/${wf.id}`, WorkflowNode);
         });
 
-        // Redraw canvas to show new node types in the search box
+        // +++ 清理不再使用的节点类型 +++
+        const allCurrentTypes = new Set([
+            ...currentAgentTypes,
+            ...currentWorkflowTypes,
+            'graph/input',
+            'graph/output',
+            'input/text',
+            'string/template'
+        ]);
+        
+        for (const typeName of this.registeredNodeTypes) {
+            if (!allCurrentTypes.has(typeName)) {
+                delete LiteGraph.registered_node_types[typeName];
+                this.registeredNodeTypes.delete(typeName);
+            }
+        }
+
         this.graphCanvas.draw(true);
 
     }

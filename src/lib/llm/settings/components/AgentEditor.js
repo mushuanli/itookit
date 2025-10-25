@@ -9,6 +9,7 @@
  * - IMPROVED: Locked the maxHistoryLength field for the default agent.
  */
 import { TagsInput } from './TagsInput.js';
+import { measurePerformance } from '../../../common/utils/utils.js';
 
 export class AgentEditor {
     /**
@@ -35,20 +36,33 @@ export class AgentEditor {
         this.lockedId = lockedId; // Store locked ID
         this.selectedAgentId = null;
         this.tagsInput = null;
-        this.isDirty = false; // --- FIX: Added isDirty state ---
+        this.isDirty = false;
+        
+        // +++ 性能优化：预绑定事件处理器 +++
+        this._boundHandleClick = this._handleClick.bind(this);
+        this._boundHandleSubmit = this._handleSubmit.bind(this);
+        this._boundHandleInput = this._handleInput.bind(this);
+        this._boundHandleChange = this._handleChange.bind(this);
+        this._boundHandleTabClick = this._handleTabClick.bind(this);
+        
+        // +++ 缓存当前活动的 tab +++
+        this.activeTab = 'basic';
+        
         this.render();
     }
 
     render() {
-        this.element.innerHTML = `
-            <div class="split-view">
-                <div class="list-pane" id="agent-list-pane"></div>
-                <div class="detail-pane" id="agent-detail-pane"></div>
-            </div>
-        `;
-        this.renderList();
-        this.renderDetail();
-        this.attachEventListeners();
+        measurePerformance('AgentEditor.render', () => {
+            this.element.innerHTML = `
+                <div class="split-view">
+                    <div class="list-pane" id="agent-list-pane"></div>
+                    <div class="detail-pane" id="agent-detail-pane"></div>
+                </div>
+            `;
+            this.renderList();
+            this.renderDetail();
+            this.attachEventListeners();
+        });
     }
 
     renderList() {
@@ -74,17 +88,20 @@ export class AgentEditor {
         const isLocked = agent.id === this.lockedId;
         const deleteBtnStyle = isLocked ? 'display: none;' : '';
 
-        detailPane.innerHTML = `
+        // +++ 使用 DocumentFragment 减少回流 +++
+        const fragment = document.createDocumentFragment();
+        const template = document.createElement('template');
+        template.innerHTML = `
             <h3>Edit Agent: ${agent.name}</h3>
             <form id="agent-form">
                 <div class="settings-tabs">
-                    <button type="button" class="settings-tab-button active" data-tab="basic">Basic Info</button>
-                    <button type="button" class="settings-tab-button" data-tab="model">Model Config</button>
-                    <button type="button" class="settings-tab-button" data-tab="interface">Interface</button>
+                    <button type="button" class="settings-tab-button ${this.activeTab === 'basic' ? 'active' : ''}" data-tab="basic">Basic Info</button>
+                    <button type="button" class="settings-tab-button ${this.activeTab === 'model' ? 'active' : ''}" data-tab="model">Model Config</button>
+                    <button type="button" class="settings-tab-button ${this.activeTab === 'interface' ? 'active' : ''}" data-tab="interface">Interface</button>
                 </div>
-                <div id="tab-basic" class="settings-tab-content active"></div>
-                <div id="tab-model" class="settings-tab-content"></div>
-                <div id="tab-interface" class="settings-tab-content"></div>
+                <div id="tab-basic" class="settings-tab-content ${this.activeTab === 'basic' ? 'active' : ''}"></div>
+                <div id="tab-model" class="settings-tab-content ${this.activeTab === 'model' ? 'active' : ''}"></div>
+                <div id="tab-interface" class="settings-tab-content ${this.activeTab === 'interface' ? 'active' : ''}"></div>
                 <div class="form-actions">
                     <button type="submit" class="settings-btn">Save Agent</button>
                     <button type="button" id="delete-agent-btn" class="settings-btn danger" style="${deleteBtnStyle}" ${isLocked ? 'disabled' : ''}>Delete</button>
@@ -92,10 +109,29 @@ export class AgentEditor {
             </form>
         `;
         
-        this.renderBasicTab(agent);
-        this.renderModelTab(agent);
-        this.renderInterfaceTab(agent);
-        this.updateModelOptions(agent.config.connectionId, agent.config.modelName);
+        detailPane.innerHTML = '';
+        detailPane.appendChild(template.content.cloneNode(true));
+        
+        // +++ 只渲染活动的 tab +++
+        this._renderActiveTab(agent);
+    }
+
+    // +++ 新增：懒加载 tab 内容 +++
+    _renderActiveTab(agent) {
+        measurePerformance(`AgentEditor.renderTab.${this.activeTab}`, () => {
+            switch(this.activeTab) {
+                case 'basic':
+                    this.renderBasicTab(agent);
+                    break;
+                case 'model':
+                    this.renderModelTab(agent);
+                    this.updateModelOptions(agent.config.connectionId, agent.config.modelName);
+                    break;
+                case 'interface':
+                    this.renderInterfaceTab(agent);
+                    break;
+            }
+        });
     }
 
     renderBasicTab(agent) {
@@ -139,15 +175,11 @@ export class AgentEditor {
                     <option value="">-- Select a connection first --</option>
                 </select>
             </div>
-            
-            <!-- START: maxHistoryLength MODIFICATION -->
             <div class="form-group">
                 <label for="maxHistoryLength">Max History Length ${isLocked ? '(Fixed)' : ''}</label>
                 <input type="number" name="maxHistoryLength" value="${agent.maxHistoryLength ?? ''}" min="0" placeholder="e.g., 10 (0=unlimited)" ${historyLengthDisabledAttr}>
                 <small>The max number of conversation turns to send. Leave blank for default, 0 for unlimited.</small>
             </div>
-            <!-- END: maxHistoryLength MODIFICATION -->
-
             <div class="form-group">
                 <label>System Prompt</label>
                 <textarea name="systemPrompt" rows="10">${agent.config.systemPrompt || ''}</textarea>
@@ -177,52 +209,104 @@ export class AgentEditor {
         `;
     }
 
+    // +++ 优化：使用预绑定的处理器并正确移除旧监听器 +++
     attachEventListeners() {
-        this.element.addEventListener('click', e => {
-            const listItem = e.target.closest('.list-item');
-            if (listItem) {
-                if (this.isDirty && !confirm("You have unsaved changes. Are you sure you want to discard them?")) return;
-                this.selectedAgentId = listItem.dataset.id;
-                this.isDirty = false; // --- FIX: Reset dirty state on selection
-                this.render(); // Re-render everything for the new selection
-            }
-            if (e.target.id === 'new-agent-btn') { this.createNewAgent(); }
-            if (e.target.id === 'delete-agent-btn') { this.deleteCurrentAgent(); }
+        this._removeEventListeners();
+        
+        this.element.addEventListener('click', this._boundHandleClick);
+        this.element.addEventListener('submit', this._boundHandleSubmit);
+        this.element.addEventListener('input', this._boundHandleInput);
+        this.element.addEventListener('change', this._boundHandleChange);
+        
+        // Tab 切换使用委托
+        //this.element.querySelectorAll('.settings-tab-button').forEach(btn => {
+        //    btn.addEventListener('click', this._boundHandleTabClick);
+        //});
+    }
 
-            // Tab switching
-            const tabButton = e.target.closest('.settings-tab-button');
-            if (tabButton) {
-                this.element.querySelectorAll('.settings-tab-button').forEach(btn => btn.classList.remove('active'));
-                this.element.querySelectorAll('.settings-tab-content').forEach(c => c.classList.remove('active'));
-                tabButton.classList.add('active');
-                this.element.querySelector(`#tab-${tabButton.dataset.tab}`).classList.add('active');
-            }
-            
-            // Interface editor actions
-            if (e.target.id === 'add-input-btn') { this.addInterfaceRow('input'); this.isDirty = true; }
-            if (e.target.id === 'add-output-btn') { this.addInterfaceRow('output'); this.isDirty = true; }
-            const removeBtn = e.target.closest('.remove-row-btn');
-            if (removeBtn) { removeBtn.parentElement.remove(); this.isDirty = true; }
+    _removeEventListeners() {
+        this.element.removeEventListener('click', this._boundHandleClick);
+        this.element.removeEventListener('submit', this._boundHandleSubmit);
+        this.element.removeEventListener('input', this._boundHandleInput);
+        this.element.removeEventListener('change', this._boundHandleChange);
+        
+        //this.element.querySelectorAll('.settings-tab-button').forEach(btn => {
+        //    btn.removeEventListener('click', this._boundHandleTabClick);
+        //});
+    }
+
+    // +++ 优化：分离 tab 切换逻辑 +++
+    _handleTabClick(e) {
+        const button = e.target.closest('.settings-tab-button');
+        if (!button) return;
+        
+        const newTab = button.dataset.tab;
+        if (newTab === this.activeTab) return; // 避免重复渲染
+        
+        this.activeTab = newTab;
+        
+        // 只更新 class 和内容
+        this.element.querySelectorAll('.settings-tab-button').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.tab === newTab);
+        });
+        this.element.querySelectorAll('.settings-tab-content').forEach(content => {
+            content.classList.toggle('active', content.id === `tab-${newTab}`);
         });
         
-        this.element.addEventListener('submit', e => {
-            if (e.target.id === 'agent-form') {
-                e.preventDefault();
-                this.saveCurrentAgent(e.target);
-            }
-        });
+        // 懒加载新 tab 的内容
+        const agent = this.agents.find(a => a.id === this.selectedAgentId);
+        if (agent) this._renderActiveTab(agent);
+    }
 
-        // --- FIX: Set dirty on any form input/change ---
-        this.element.addEventListener('input', e => {
-            if (e.target.closest('#agent-form')) this.isDirty = true;
-        });
+    _handleClick(e) {
+    // ✅ 在统一的点击处理器中处理 tab 切换
+    const tabButton = e.target.closest('.settings-tab-button');
+    if (tabButton) {
+        this._handleTabClick(e);
+        return;
+    }
+        const listItem = e.target.closest('.list-item');
+        if (listItem) {
+            if (this.isDirty && !confirm("You have unsaved changes. Are you sure you want to discard them?")) return;
+            
+            const newId = listItem.dataset.id;
+            if (newId === this.selectedAgentId) return; // +++ 避免重复加载 +++
+            
+            this.selectedAgentId = newId;
+            this.isDirty = false;
+            this.activeTab = 'basic'; // 重置为第一个 tab
+            
+            // +++ 只更新必要部分 +++
+            this.renderList();
+            this.renderDetail();
+            return;
+        }
+        
+        if (e.target.id === 'new-agent-btn') { this.createNewAgent(); return; }
+        if (e.target.id === 'delete-agent-btn') { this.deleteCurrentAgent(); return; }
+        if (e.target.id === 'add-input-btn') { this.addInterfaceRow('input'); this.isDirty = true; return; }
+        if (e.target.id === 'add-output-btn') { this.addInterfaceRow('output'); this.isDirty = true; return; }
+        
+        const removeBtn = e.target.closest('.remove-row-btn');
+        if (removeBtn) { removeBtn.parentElement.remove(); this.isDirty = true; }
+    }
 
-        this.element.addEventListener('change', e => {
-            if (e.target.closest('#agent-form')) this.isDirty = true;
-            if (e.target.name === 'connectionId') {
-                this.updateModelOptions(e.target.value);
-            }
-        });
+    _handleSubmit(e) {
+        if (e.target.id === 'agent-form') {
+            e.preventDefault();
+            this.saveCurrentAgent(e.target);
+        }
+    }
+
+    _handleInput(e) {
+        if (e.target.closest('#agent-form')) this.isDirty = true;
+    }
+
+    _handleChange(e) {
+        if (e.target.closest('#agent-form')) this.isDirty = true;
+        if (e.target.name === 'connectionId') {
+            this.updateModelOptions(e.target.value);
+        }
     }
 
     updateModelOptions(connectionId, selectedModelName = null) {
@@ -373,4 +457,9 @@ export class AgentEditor {
         if (needsRender) this.render();
     }
 
+    // +++ 清理方法 +++
+    destroy() {
+        this._removeEventListeners();
+        this.tagsInput = null;
+    }
 }

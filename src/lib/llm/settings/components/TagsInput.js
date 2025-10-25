@@ -2,12 +2,18 @@
  * @file #llm/settings/components/TagsInput.js
  * @description A reusable UI component for tag input with autocomplete.
  */
+import { debounce } from '../../../common/utils/utils.js';
+
 export class TagsInput {
     constructor(element, { initialTags = [], allTags = [], onChange = () => {} }) {
         this.element = element;
         this.currentTags = new Set(initialTags);
         this.allTags = allTags;
         this.onChange = onChange;
+        
+        // +++ 性能优化：防抖建议列表更新 +++
+        this.debouncedShowSuggestions = debounce(this.showSuggestions.bind(this), 150);
+        
         this.render();
         this.attachEventListeners();
     }
@@ -29,7 +35,9 @@ export class TagsInput {
     }
 
     renderTags() {
-        this.ui.list.innerHTML = '';
+        // +++ 使用 DocumentFragment 减少重排 +++
+        const fragment = document.createDocumentFragment();
+        
         this.currentTags.forEach(tag => {
             const li = document.createElement('li');
             li.textContent = tag;
@@ -37,8 +45,11 @@ export class TagsInput {
             removeBtn.textContent = '×';
             removeBtn.onclick = () => this.removeTag(tag);
             li.appendChild(removeBtn);
-            this.ui.list.appendChild(li);
+            fragment.appendChild(li);
         });
+        
+        this.ui.list.innerHTML = '';
+        this.ui.list.appendChild(fragment);
     }
     
     addTag(tag) {
@@ -64,12 +75,26 @@ export class TagsInput {
             this.hideSuggestions();
             return;
         }
-        const filtered = this.allTags.filter(t => t.toLowerCase().includes(value) && !this.currentTags.has(t));
+        
+        const filtered = this.allTags.filter(t => 
+            t.toLowerCase().includes(value) && !this.currentTags.has(t)
+        );
+        
         if (filtered.length === 0) {
             this.hideSuggestions();
             return;
         }
-        this.ui.suggestions.innerHTML = filtered.map(t => `<li>${t}</li>`).join('');
+        
+        // +++ 使用 DocumentFragment +++
+        const fragment = document.createDocumentFragment();
+        filtered.forEach(tag => {
+            const li = document.createElement('li');
+            li.textContent = tag;
+            fragment.appendChild(li);
+        });
+        
+        this.ui.suggestions.innerHTML = '';
+        this.ui.suggestions.appendChild(fragment);
         this.ui.suggestions.style.display = 'block';
     }
 
@@ -84,7 +109,10 @@ export class TagsInput {
                 this.addTag(this.ui.input.value);
             }
         });
-        this.ui.input.addEventListener('input', () => this.showSuggestions());
+        
+        // +++ 使用防抖版本 +++
+        this.ui.input.addEventListener('input', this.debouncedShowSuggestions);
+        
         this.ui.suggestions.addEventListener('click', e => {
             if (e.target.tagName === 'LI') {
                 this.addTag(e.target.textContent);
@@ -98,5 +126,10 @@ export class TagsInput {
 
     updateAllTags(newAllTags) {
         this.allTags = newAllTags;
+    }
+    
+    // +++ 清理方法 +++
+    destroy() {
+        this.debouncedShowSuggestions.cancel?.();
     }
 }

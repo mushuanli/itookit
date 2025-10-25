@@ -8,6 +8,7 @@
  * - REFACTORED: Constructor now accepts an onTest callback for dependency injection.
  */
 import { LLM_PROVIDER_DEFAULTS } from '../../../common/configData.js';
+import { measurePerformance } from '../../../common/utils/utils.js';
 
 export class LibrarySettings {
     /**
@@ -61,22 +62,23 @@ export class LibrarySettings {
     }
 
     render() {
-        // [修改] 确保在每次渲染前都更新快照，以便保存时比较的是渲染时的状态
-        this._connectionsSnapshot = JSON.parse(JSON.stringify(this.config.connections || []));
-        
-        this.element.innerHTML = `
-            <div class="split-view">
-                <div class="list-pane" id="connections-list-pane"></div>
-                <div class="detail-pane" id="connections-detail-pane"></div>
-            </div>
-        `;
-        this.ui = {
-            listPane: this.element.querySelector('#connections-list-pane'),
-            detailPane: this.element.querySelector('#connections-detail-pane'),
-        };
-        this.renderList();
-        this.renderDetail();
-        this.attachEventListeners();
+        measurePerformance('LibrarySettings.render', () => {
+            this._connectionsSnapshot = JSON.parse(JSON.stringify(this.config.connections || []));
+            
+            this.element.innerHTML = `
+                <div class="split-view">
+                    <div class="list-pane" id="connections-list-pane"></div>
+                    <div class="detail-pane" id="connections-detail-pane"></div>
+                </div>
+            `;
+            this.ui = {
+                listPane: this.element.querySelector('#connections-list-pane'),
+                detailPane: this.element.querySelector('#connections-detail-pane'),
+            };
+            this.renderList();
+            this.renderDetail();
+            this.attachEventListeners();
+        });
     }
 
     renderList() {
@@ -122,7 +124,9 @@ export class LibrarySettings {
         const nameDisabledAttr = isLocked ? 'disabled title="默认连接的名称不可更改。"' : '';
         const deleteBtnStyle = isLocked ? 'display: none;' : 'margin-left: auto;';
 
-        this.ui.detailPane.innerHTML = `
+        // +++ 使用 template 减少字符串拼接 +++
+        const template = document.createElement('template');
+        template.innerHTML = `
             <h3>Edit Connection: ${conn.name}</h3>
             <form id="connection-form">
                 <div class="form-group">
@@ -151,23 +155,27 @@ export class LibrarySettings {
                 <small id="connection-status" style="display: block; margin-top: 10px;"></small>
             </form>
         `;
+        
+        this.ui.detailPane.innerHTML = '';
+        this.ui.detailPane.appendChild(template.content.cloneNode(true));
     }
 
     attachEventListeners() {
-        // 移除旧的监听器，防止重复绑定
-        this.element.removeEventListener('click', this._boundHandleClick);
-        this.element.removeEventListener('submit', this._boundHandleSubmit);
-        this.element.removeEventListener('change', this._boundHandleChange);
-        this.element.removeEventListener('input', this._boundHandleInput);
-        // --- NEW: Use focusin to capture pre-change state ---
-        this.element.removeEventListener('focusin', this._boundHandleFocus);
-
-        // 重新附加新的、已绑定的处理器
+        this._removeEventListeners();
+        
         this.element.addEventListener('click', this._boundHandleClick);
         this.element.addEventListener('submit', this._boundHandleSubmit);
         this.element.addEventListener('change', this._boundHandleChange);
         this.element.addEventListener('input', this._boundHandleInput);
         this.element.addEventListener('focusin', this._boundHandleFocus);
+    }
+
+    _removeEventListeners() {
+        this.element.removeEventListener('click', this._boundHandleClick);
+        this.element.removeEventListener('submit', this._boundHandleSubmit);
+        this.element.removeEventListener('change', this._boundHandleChange);
+        this.element.removeEventListener('input', this._boundHandleInput);
+        this.element.removeEventListener('focusin', this._boundHandleFocus);
     }
     
     _handleFocus(e) {
@@ -219,15 +227,20 @@ export class LibrarySettings {
             );
 
         if (isModelListUnchanged) {
-        console.log('[LibrarySettings] 正在更新模型列表为新 Provider 的默认值');
-            modelsListEl.innerHTML = (newDefaults.models || []).map(model => `
-                <div class="interface-row model-row">
+            // +++ 使用 DocumentFragment 批量更新 +++
+            const fragment = document.createDocumentFragment();
+            (newDefaults.models || []).forEach(model => {
+                const row = document.createElement('div');
+                row.className = 'interface-row model-row';
+                row.innerHTML = `
                     <input type="text" value="${model.id}" placeholder="Model ID">
                     <input type="text" value="${model.name}" placeholder="Display Name">
                     <button type="button" class="remove-row-btn remove-model-row-btn">&times;</button>
-                </div>
-            `).join('');
-        console.log('[LibrarySettings] 模型列表已更新为:', newDefaults.models);
+                `;
+                fragment.appendChild(row);
+            });
+            modelsListEl.innerHTML = '';
+            modelsListEl.appendChild(fragment);
         }
     }
 
@@ -245,8 +258,12 @@ export class LibrarySettings {
         const listItem = target.closest('.list-item');
         if (listItem) {
             if(this.isDirty && !confirm("You have unsaved changes. Are you sure you want to discard them?")) return;
-            this.selectedConnectionId = listItem.dataset.id;
-            this.isDirty = false; // Reset dirty on selection
+            
+            const newId = listItem.dataset.id;
+            if (newId === this.selectedConnectionId) return; // +++ 避免重复渲染 +++
+            
+            this.selectedConnectionId = newId;
+            this.isDirty = false;
             this.render();
             return;
         }
