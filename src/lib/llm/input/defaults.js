@@ -57,6 +57,10 @@ export const defaultOptions = {
         saveCmdDesc: 'Save the current input as a new template. Usage: /save <name>',
         personaCmdDesc: 'Apply a predefined system prompt persona. Usage: /persona <name>',
         noContextCmdDesc: 'Send the next message without conversation history.',
+        
+        // [新增] /new 命令的描述
+        newCmdDesc: 'Start a new chat session. Any following text will be the first message.',
+
         templateMissing: 'Template not found:',
         templateSaved: 'Template saved:',
         personaApplied: 'Persona applied:',

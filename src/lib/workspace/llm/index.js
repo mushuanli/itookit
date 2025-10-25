@@ -68,6 +68,14 @@ export class LLMWorkspace {
             configManager: this.configManager,
             // 覆盖默认的 onSubmit 行为
             onSubmit: this._handleUserSubmit.bind(this),
+            // [核心修改] 注入 inputUI 的配置，来监听我们自定义的事件
+            inputUIConfig: {
+                ...(this.options.chatUIConfig?.inputUIConfig || {}), // 保留其他可能的 inputUI 配置
+                on: {
+                    ...(this.options.chatUIConfig?.inputUIConfig?.on || {}), // 保留其他事件处理器
+                    newSessionRequested: this._handleNewSessionRequest.bind(this)
+                }
+            }
         });
 
         // 3. 代理命令接口
@@ -455,7 +463,7 @@ export class LLMWorkspace {
             this.chatUI.setTitle(item.metadata.title);
             this.chatUI.setText(item.content?.data || EMPTY_CHAT_CONTENT);
         } else {
-            console.log('[LLMWorkspace] 清空活动 Topic');
+            console.log('[LLMWorkspace] 清空活动 Topic，准备新建'); // [修改] 日志信息更明确
             this.activeTopicId = null;
             const title = this.currentAgent ? `为 ${this.currentAgent.name} 创建新话题` : '新建对话';
             this.chatUI.setTitle(title);
@@ -503,6 +511,52 @@ export class LLMWorkspace {
         } catch (error) {
             // 错误日志中也使用正确的变量
             console.error(`[LLMWorkspace] ❌ 保存会话失败 (${this.activeTopicId}):`, error);
+        }
+    }
+
+    /**
+     * [新增] 处理来自 InputUI 的 /new 命令请求
+     * @param {object} payload - 事件载荷
+     * @param {string} payload.text - /new 命令后的文本
+     * @private
+     */
+    async _handleNewSessionRequest({ text }) {
+        console.log('[LLMWorkspace] 收到 /new 命令请求，正在重置当前会话...');
+
+        // 步骤 1: "关闭" 当前会话 (如果有)
+        if (this.activeTopicId) {
+            // a. 强制保存当前会话，确保数据不丢失
+            await this._saveHandler.flush?.();
+
+            // b. 在侧边栏中取消选中当前项
+            if (this.sidebarController?.sessionService) {
+                this.sidebarController.sessionService.selectSession(null);
+            }
+            
+            // c. 重置 ChatUI 状态，这是核心步骤
+            // 这会设置 activeTopicId = null 并清空聊天界面
+            this._loadSessionIntoChatUI(null);
+        }
+
+        // 步骤 2: "执行" 新建操作
+        // 如果 /new 后面有文本，就用它作为第一条消息提交
+        // 如果没有文本，工作区就进入了准备新建的状态，等待用户下一次输入
+        if (text && text.trim()) {
+            // 构造一个与正常提交兼容的数据对象
+            const submitData = {
+                text: text.trim(),
+                attachments: [],
+                agent: this.chatUI?.inputUI?.state?.agent || null, // 使用当前 inputUI 中选中的 agent
+                toolChoice: null,
+                systemPrompt: null,
+                sendWithoutContext: false,
+            };
+
+            // 直接调用 _handleUserSubmit。
+            // 因为 activeTopicId 已经被设为 null，它会自动执行创建新 Topic 的逻辑。
+            await this._handleUserSubmit(submitData);
+        } else {
+             console.log('[LLMWorkspace] /new 执行完毕，工作区已就绪，等待新输入。');
         }
     }
 

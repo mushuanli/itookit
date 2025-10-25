@@ -115,6 +115,21 @@ export class CommandManager {
             });
         }
 
+        // [新增] 注册 /new 命令
+        this.register({
+            name: '/new',
+            description: loc.newCmdDesc, // 使用我们刚刚添加的描述
+            handler(value) {
+                // 这个命令的逻辑由上层工作区处理。
+                // 我们在这里只发射一个事件，并附带命令后的文本。
+                this._emit('newSessionRequested', { text: value });
+                
+                // 清空输入框，准备接收新会话的下一条输入
+                this.elements.textarea.value = '';
+                this._updateUIState();
+            }
+        });
+
         // /save [name]
         this.register({
             name: '/save',
