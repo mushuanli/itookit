@@ -1,0 +1,102 @@
+/* Placeholder styles for agent list */
+.agent-list-placeholder {
+    padding: 20px;
+    text-align: center;
+    color: var(--text-color-secondary, #888);
+}
+
+.agent-list-placeholder--error {
+    color: var(--color-danger, #e53e3e);
+}
+
+/* Main agent list container */
+.agent-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    height: 100%;
+    overflow-y: auto;
+}
+
+/* Individual agent item */
+.agent-list-item {
+    display: flex;
+    align-items: center;
+    padding: 10px 12px;
+    cursor: pointer;
+    border-bottom: 1px solid var(--border-color, #e2e8f0);
+    transition: background-color 0.2s ease;
+}
+
+.agent-list-item:hover {
+    background-color: var(--hover-background-color, #f7fafc);
+}
+
+.agent-list-item:last-child {
+    border-bottom: none;
+}
+
+/* Icon for the agent */
+.agent-list-item__icon {
+    font-size: 1.8em;
+    margin-right: 12px;
+    width: 32px;
+    text-align: center;
+}
+
+/* Content wrapper for name and description */
+.agent-list-item__content {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* Agent name */
+.agent-list-item__name {
+    font-weight: 600;
+    color: var(--text-color-primary, #2d3748);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Agent description */
+.agent-list-item__description {
+    font-size: 0.85em;
+    color: var(--text-color-secondary, #718096);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+/* ======= main container ==================== */
+/* Container for the topic list view to live within the sidebar */
+.topic-list-view-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+/* Back button to return from topic list to agent list */
+.sidebar-back-button {
+    flex-shrink: 0;
+    padding: 8px 12px;
+    border: none;
+    border-bottom: 1px solid var(--border-color, #e2e8f0);
+    background-color: var(--background-color-secondary, #f7fafc);
+    cursor: pointer;
+    text-align: left;
+    font-weight: 500;
+    color: var(--text-color-link, #3182ce);
+    transition: background-color 0.2s ease;
+}
+
+.sidebar-back-button:hover {
+    background-color: var(--hover-background-color, #edf2f7);
+}
+
+/* The actual container for the SessionUI/SessionList component */
+.topic-list-container {
+    flex-grow: 1;
+    overflow: hidden; /* Important for child component scrolling */
+    position: relative; /* For child component absolute positioning */
+}

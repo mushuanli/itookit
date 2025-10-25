@@ -20,7 +20,7 @@ export class NodeRepository {
      * @param {'file' | 'directory'} type - 节点类型
      * @param {string} moduleName - 所属模块名
      * @param {string} path - 完整路径 (e.g., /notes/project/task.md)
-     * @param {object} extraData - 额外数据，如文件内容 { content: '...' }
+     * @param {object} extraData - 额外数据，如文件内容 { content: '...', meta: {...} }
      * @returns {Promise<object>} 创建的节点对象
      */
     async createNode(type, moduleName, path, extraData = {}) {
@@ -85,8 +85,9 @@ export class NodeRepository {
             parentId,
             createdAt: now,
             updatedAt: now,
-            meta: {},
-            ...extraData,
+            // [修改] 确保 meta 字段总是存在
+            meta: extraData.meta || {}, 
+            content: extraData.content
         };
         
         await store.put(node);
@@ -285,26 +286,82 @@ export class NodeRepository {
     }
 
     /**
-     * [移植新增] 获取并重建指定模块的文件树
+     * [核心改进] 获取并重建指定模块的文件树，支持过滤。
      * @param {string} moduleName
-     * @returns {Promise<object>} ModuleFSTree-like object
+     * @param {(node: object) => boolean} [filter] - 一个可选的过滤器函数。如果提供了，只有函数返回 true 的文件节点会被包含在最终的树中。文件夹节点总是会被包含，以维持结构。
+     * @returns {Promise<object|null>} ModuleFSTree-like object, or null if no nodes found.
      */
-    async getTreeForModule(moduleName) {
+    async getTreeForModule(moduleName, filter) {
         const nodes = await this.db.getAllByIndex(STORES.NODES, 'by_moduleName', moduleName);
         if (nodes.length === 0) return null;
 
-        const nodeMap = new Map(nodes.map(node => [node.id, { ...node, children: [] }]));
-        let root = null;
+        let finalNodes;
 
-        for (const node of nodes) {
+        if (filter) {
+            const nodeMap = new Map(nodes.map(node => [node.id, node]));
+            const includedFileIds = new Set();
+            
+            // 第一次遍历：找出所有符合条件的文件
+            for (const node of nodes) {
+                if (node.type === 'file' && filter(node)) {
+                    includedFileIds.add(node.id);
+                }
+            }
+
+            const includedNodeIds = new Set(includedFileIds);
+
+            // 第二次遍历：为每个符合条件的文件，将其所有祖先文件夹都包含进来
+            includedFileIds.forEach(fileId => {
+                let current = nodeMap.get(fileId);
+                while (current && current.parentId) {
+                    includedNodeIds.add(current.parentId);
+                    current = nodeMap.get(current.parentId);
+                }
+            });
+
+            // 最终的节点列表是所有符合条件的文件及其所有祖先文件夹
+            finalNodes = nodes.filter(node => includedNodeIds.has(node.id) || node.type === 'directory');
+
+            // 如果过滤后没有任何文件，我们可能只想显示空的文件夹结构
+            // 或者根据产品需求返回 null。这里我们选择显示空文件夹结构。
+            if (includedFileIds.size === 0) {
+                 finalNodes = nodes.filter(node => node.type === 'directory');
+            }
+        } else {
+            // 如果没有过滤器，使用所有节点
+            finalNodes = nodes;
+        }
+        
+        if (finalNodes.length === 0) return null;
+
+        // --- 以下是树构建逻辑，保持不变 ---
+        const nodeMap = new Map(finalNodes.map(node => [node.id, { ...node, children: [] }]));
+        let root = null;
+        
+        // 使用 finalNodes 构建树
+        for (const node of finalNodes) {
+            const mappedNode = nodeMap.get(node.id);
             if (node.parentId && nodeMap.has(node.parentId)) {
-                nodeMap.get(node.parentId).children.push(nodeMap.get(node.id));
+                nodeMap.get(node.parentId).children.push(mappedNode);
             } else if (node.path === '/') {
-                root = nodeMap.get(node.id);
+                root = mappedNode;
             }
         }
+        
+        // 如果过滤导致根节点丢失（不太可能，但作为防御），找到顶层节点作为根
+        if (!root) {
+            const topLevelNodes = [];
+            for (const node of finalNodes) {
+                 if (!node.parentId || !nodeMap.has(node.parentId)) {
+                     // 假设根节点 path 为 '/'
+                     if(node.path === '/') root = nodeMap.get(node.id);
+                 }
+            }
+        }
+
         return root;
     }
+
 
     /**
      * @private 内部辅助函数，用于从指定索引中删除所有匹配项

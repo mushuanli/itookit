@@ -1,20 +1,24 @@
-// 文件: #workspace/llm/LLMWorkspace.js (或 index.js)
+// 文件: #workspace/llm/index.js (或 index.js)
 
 /**
- * @file LLMWorkspace.js
+ * @file index.js
  * @description 集成 Sidebar 和 ChatUI 的 LLM 聊天工作区协调器
  * 
- * [V4 核心修复]
- * - 完全异步初始化流程
- * - 正确的事件订阅管理
- * - 统一的 ConfigManager 单例访问
+ * [V5 核心修改]
+ * - 实现双层侧边栏视图：Agent 列表 -> Topic 列表。
+ * - LLMWorkspace 作为视图状态机，动态管理 `AgentListComponent` 和 `SessionUIManager` 的生命周期。
+ * - 引入清晰的命名空间约定，将 Agent 与其 Topics 关联。
  */
+import './index.css';
 import { createSessionUI } from '../../sidebar/index.js';
 import { createLLMChatUI } from '../../llm/chat/index.js';
 import { debounce } from '../../common/utils/utils.js';
+// [新增] 导入新组件
+import { AgentListComponent } from './components/AgentListComponent.js'; 
 
 // [修正] 定义正确的空内容状态为 null，由 chatUI.setText 内部处理
 const EMPTY_CHAT_CONTENT = null;
+const TOPIC_MODULE_NAME = 'llm-agent-topics'; // [新增] 统一的模块名
 
 export class LLMWorkspace {
     /**
@@ -33,13 +37,18 @@ export class LLMWorkspace {
         this.configManager = options.configManager;
         this.namespace = options.namespace;
 
-        // 组件实例（在 start() 中创建）
-        this.sidebar = null;
+        // --- [修改] ---
+        // `sidebarController` 将动态持有 AgentListComponent 或 SessionUIManager 的实例
+        this.sidebarController = null;
         this.chatUI = null;
 
-        // 内部状态
-        this.activeSessionId = null;
-        this._subscriptions = [];
+        // 视图状态
+        this.currentView = 'agent-list'; // 'agent-list' or 'topic-list'
+        this.currentAgent = null;
+        this.activeTopicId = null; 
+        // --- [结束修改] ---
+        
+        this._subscriptions = new Set(); // 使用 Set 避免重复订阅
         this._saveHandler = debounce(this._saveActiveSession.bind(this), 750);
 
         // 命令接口（在 start() 后填充）
@@ -53,14 +62,7 @@ export class LLMWorkspace {
     async start() {
         console.log(`[LLMWorkspace] 正在启动工作区: ${this.namespace}`);
 
-        // 1. 创建侧边栏
-        this.sidebar = createSessionUI({
-            ...this.options.sidebarConfig,
-            sessionListContainer: this.options.sidebarContainer,
-            newSessionContent: EMPTY_CHAT_CONTENT,
-        }, this.configManager, this.namespace);
-
-        // 2. 创建 ChatUI（使用异步工厂函数）
+        // 1. 创建 ChatUI (一次性)
         this.chatUI = await createLLMChatUI(this.options.chatContainer, {
             ...this.options.chatUIConfig,
             configManager: this.configManager,
@@ -69,16 +71,12 @@ export class LLMWorkspace {
         // 3. 代理命令接口
         this._proxyCommands();
 
-        // 4. 连接组件事件
-        this._connectComponents();
+        // 3. 连接 ChatUI 的 'change' 事件，用于自动保存
+        const chatUnsubscribe = this.chatUI.on('change', this._saveHandler);
+        this._subscriptions.add(chatUnsubscribe);
 
-        // 5. 启动侧边栏（会自动触发 sessionSelected 事件）
-        const activeItem = await this.sidebar.start();
-        
-        // 6. 如果有激活项但事件未触发，手动加载一次（防御性处理）
-        if (activeItem && !this.activeSessionId) {
-            this._loadSessionIntoChatUI(activeItem);
-        }
+        // 4. 显示初始视图 (Agent 列表)
+        await this._showAgentList();
 
         console.log(`[LLMWorkspace] ✅ 工作区启动成功`);
     }
@@ -108,7 +106,10 @@ export class LLMWorkspace {
      * @returns {object | undefined}
      */
     getActiveSession() {
-        return this.sidebar?.getActiveSession();
+        if (this.currentView === 'topic-list' && this.sidebarController) {
+            return this.sidebarController.getActiveSession();
+        }
+        return undefined;
     }
 
     /**
@@ -131,13 +132,51 @@ export class LLMWorkspace {
      * @returns {Promise<object>}
      */
     async createNewSession(options = {}) {
-        if (!this.sidebar?.sessionService) {
+        if (!this.sidebarController?.sessionService) {
             throw new Error('[LLMWorkspace] Session service 未就绪');
         }
-        return this.sidebar.sessionService.createSession({
-            title: options.title || 'Untitled Session',
-            content: EMPTY_CHAT_CONTENT
-        });
+
+        const sessionService = this.sidebarController.sessionService;
+        const parentId = options.parentId || null;
+        const title = options.title || 'Untitled Session';
+
+        // [核心修改] 创建 Topic 时，关联当前的 Agent
+        // 如果是在 "所有" 视图下创建，则不关联任何 Agent
+        let associatedAgents = [];
+        if (this.currentAgent && this.currentAgent.id !== '__all__') {
+            associatedAgents.push(this.currentAgent.id);
+        }
+
+        // 使用 ConfigManager 的原生 API 创建节点，并传入 meta 数据
+        const parentNode = parentId ? await this.configManager.getNodeById(parentId) : null;
+        const parentPath = parentNode ? parentNode.path : '/';
+        const newPath = `${parentPath === '/' ? '' : parentPath}/${title}`;
+
+        return this.configManager.createFile(
+            TOPIC_MODULE_NAME,
+            newPath,
+            EMPTY_CHAT_CONTENT,
+            { meta: { associatedAgents } } // 直接在创建时传入元数据
+        );
+    }
+
+    /**
+     * [新增] 当会话中使用了新的 Agent 时，更新 Topic 的关联
+     * @param {string} topicId 
+     * @param {string} agentId 
+     */
+    async associateAgentWithTopic(topicId, agentId) {
+        const item = this.sidebarController.sessionService.findItemById(topicId);
+        if (!item) return;
+
+        const currentAgents = item.metadata.associatedAgents || [];
+        if (!currentAgents.includes(agentId)) {
+            const updatedAgents = [...currentAgents, agentId];
+            await this.sidebarController.sessionService.updateItemMetadata(topicId, {
+                associatedAgents: updatedAgents
+            });
+            console.log(`Topic ${topicId} is now associated with agent ${agentId}`);
+        }
     }
 
     /**
@@ -169,20 +208,21 @@ export class LLMWorkspace {
      */
     destroy() {
         console.log('[LLMWorkspace] 正在销毁工作区...');
+        this._saveHandler.cancel?.();
 
         // 1. 取消所有订阅
         this._subscriptions.forEach(unsubscribe => unsubscribe());
-        this._subscriptions = [];
+        this._subscriptions.clear();
 
         // 2. 取消防抖保存
         this._saveHandler.cancel?.();
 
         // 3. 销毁组件
-        this.sidebar?.destroy();
+        this.sidebarController?.destroy();
         this.chatUI?.destroy();
 
         // 4. 清理引用
-        this.sidebar = null;
+        this.sidebarController = null;
         this.chatUI = null;
         this.commands = {};
 
@@ -192,6 +232,7 @@ export class LLMWorkspace {
     // =========================================================================
     // 私有方法
     // =========================================================================
+
 
     /**
      * 验证构造函数选项
@@ -203,6 +244,150 @@ export class LLMWorkspace {
         }
         if (!options.sidebarContainer || !options.chatContainer) {
             throw new Error('[LLMWorkspace] 需要 sidebarContainer 和 chatContainer');
+        }
+    }
+
+    /**
+     * 切换到 Agent 列表视图
+     * @private
+     */
+    async _showAgentList() {
+        console.log('[LLMWorkspace] 切换到 Agent 列表视图');
+        // 1. 清理旧的 sidebar 控制器
+        await this._cleanupSidebarController();
+        
+        this.currentView = 'agent-list';
+        this.currentAgent = null;
+        this.options.sidebarContainer.innerHTML = '';
+
+        // [修改] 手动创建虚拟的 "All Agents"
+        const allAgentsItem = { 
+            id: '__all__', 
+            name: '所有 Topics', 
+            icon: '📚', 
+            description: '查看所有会话' 
+        };
+
+        const realAgents = await this.configManager.llm.getAgents();
+        
+        this.sidebarController = new AgentListComponent({
+            container: this.options.sidebarContainer,
+            configManager: this.configManager,
+            onAgentSelect: (agent) => this._showTopicList(agent),
+            // [修改] 注入 agent 列表，包含虚拟 agent
+            initialAgents: [allAgentsItem, ...realAgents]
+        });
+        await this.sidebarController.init();
+        
+        // 3. 重置聊天区域
+        this.activeTopicId = null;
+        this.chatUI.setTitle('选择一个 Agent 或查看所有 Topics');
+        this.chatUI.setText(EMPTY_CHAT_CONTENT);
+    }
+    
+    /**
+     * 切换到指定 Agent 的 Topic 列表视图
+     * @param {object} agent - 选定的 Agent 对象
+     * @private
+     */
+    async _showTopicList(agent) {
+        console.log(`[LLMWorkspace] 切换到 Agent "${agent.name}" 的 Topic 列表视图`);
+        // 1. 清理旧的 sidebar 控制器
+        await this._cleanupSidebarController();
+        
+        this.currentView = 'topic-list';
+        this.currentAgent = agent;
+        this.options.sidebarContainer.innerHTML = '';
+
+        // 2. 创建视图容器和 "Back" 按钮
+        const viewContainer = document.createElement('div');
+        viewContainer.className = 'topic-list-view-container';
+        
+        const backButton = document.createElement('button');
+        backButton.className = 'sidebar-back-button';
+        backButton.innerHTML = `&larr; 返回 Agents 列表`;
+        backButton.onclick = () => this._showAgentList();
+        
+        const topicListContainer = document.createElement('div');
+        topicListContainer.className = 'topic-list-container';
+        
+        viewContainer.appendChild(backButton);
+        viewContainer.appendChild(topicListContainer);
+        this.options.sidebarContainer.appendChild(viewContainer);
+
+        // [修改] SessionUI 现在总是使用统一的模块名
+        this.sidebarController = createSessionUI({
+            ...this.options.sidebarConfig,
+            sessionListContainer: topicListContainer,
+            newSessionContent: EMPTY_CHAT_CONTENT,
+        }, this.configManager, TOPIC_MODULE_NAME);
+
+        // [修改] 重写 sessionService 的 getTree 方法以应用过滤器
+        const originalGetTree = this.configManager.getTree.bind(this.configManager);
+        this.sidebarController.sessionService.configManager.getTree = async (moduleName) => {
+             if (moduleName !== TOPIC_MODULE_NAME) {
+                return originalGetTree(moduleName);
+            }
+            if (agent.id === '__all__') {
+                return originalGetTree(TOPIC_MODULE_NAME); // "所有" agent 不使用过滤器
+            }
+            const filter = (node) => node.meta?.associatedAgents?.includes(agent.id);
+            return this.configManager.nodeRepo.getTreeForModule(TOPIC_MODULE_NAME, filter);
+        };
+        
+        // 4. 连接 Topic 侧边栏的事件
+        this._connectTopicSidebarEvents();
+
+        // 5. 启动侧边栏，这会自动加载并可能选中一个 Topic
+        const activeItem = await this.sidebarController.start();
+        this.sidebarController.setTitle(`${agent.name}`);
+
+        // 6. 根据是否有激活项来更新 ChatUI
+        if (activeItem) {
+            this._loadSessionIntoChatUI(activeItem);
+        } else {
+            this.activeTopicId = null;
+            this.chatUI.setTitle(`为 ${agent.name} 创建新话题`);
+            this.chatUI.setText(EMPTY_CHAT_CONTENT);
+        }
+    }
+
+    _connectTopicSidebarEvents() {
+        if (this.currentView !== 'topic-list' || !this.sidebarController) return;
+        
+        const sessionUnsubscribe = this.sidebarController.on('sessionSelected', ({ item }) => {
+            this._loadSessionIntoChatUI(item);
+        });
+        this._subscriptions.add(sessionUnsubscribe);
+
+        const importUnsubscribe = this.sidebarController.on('importRequested', ({ parentId }) => {
+            this.importFiles(parentId);
+        });
+        this._subscriptions.add(importUnsubscribe);
+    }
+    
+    /**
+     * Safely destroys the current sidebar controller and cleans up its subscriptions.
+     * @private
+     */
+    async _cleanupSidebarController() {
+        // 先保存当前会话
+        await this._saveHandler.flush?.();
+
+        // 销毁组件
+        if (this.sidebarController) {
+            this.sidebarController.destroy();
+            this.sidebarController = null;
+        }
+
+        // 清理所有订阅。这是一个简单的策略，更复杂的应用可能需要更精细的控制。
+        // 由于 chatUI 的订阅是固定的，我们可以在这里安全地清除然后重新添加。
+        this._subscriptions.forEach(unsubscribe => unsubscribe());
+        this._subscriptions.clear();
+
+        if (this.chatUI) {
+            const chatUnsubscribe = this.chatUI.on('change', this._saveHandler);
+            this._subscriptions.add(chatUnsubscribe);
         }
     }
 
@@ -235,19 +420,20 @@ export class LLMWorkspace {
      * @private
      */
     _loadSessionIntoChatUI(item) {
-        if (this.activeSessionId === item?.id) {
-            return; // 已经加载，跳过
-        }
+        if (!item && this.activeTopicId === null) return; // 避免不必要的重置
+        if (item && this.activeTopicId === item.id) return; // 避免重复加载
 
         if (item) {
-            this.activeSessionId = item.id;
+            console.log(`[LLMWorkspace] 加载 Topic: ${item.metadata.title} (${item.id})`);
+            this.activeTopicId = item.id;
             this.chatUI.setTitle(item.metadata.title);
-            // item.content.data 是 sidebar 存储的 JSONL 字符串
             this.chatUI.setText(item.content?.data || EMPTY_CHAT_CONTENT);
         } else {
-            this.activeSessionId = null;
-            this.chatUI.setTitle('新建对话');
-            this.chatUI.setText(EMPTY_CHAT_CONTENT); // 使用 setText 清空
+            console.log('[LLMWorkspace] 清空活动 Topic');
+            this.activeTopicId = null;
+            const title = this.currentAgent ? `为 ${this.currentAgent.name} 创建新话题` : '新建对话';
+            this.chatUI.setTitle(title);
+            this.chatUI.setText(EMPTY_CHAT_CONTENT);
         }
     }
 
@@ -256,56 +442,32 @@ export class LLMWorkspace {
      * @private
      */
     async _saveActiveSession() {
-        if (!this.activeSessionId || !this.sidebar) {
+        if (!this.activeTopicId || this.currentView !== 'topic-list' || !this.sidebarController?.sessionService) {
             return;
         }
 
-        const activeItem = this.getActiveSession();
-        if (!activeItem) {
-            return;
-        }
+        const sessionService = this.sidebarController.sessionService;
+        const activeItem = sessionService.findItemById(this.activeTopicId);
+        if (!activeItem) return;
 
-        const newContent = this.getContent();
-        const contentChanged = activeItem.content?.data !== newContent;
-
-        if (!contentChanged) {
-            return; // 内容未变化，跳过保存
-        }
+        const newContent = this.chatUI.getText();
+        if (activeItem.content?.data === newContent) return; // 内容未变，不保存
 
         try {
-            // 获取摘要
-            const summary = (this.chatUI && typeof this.chatUI.getSummary === 'function')
-                ? await this.chatUI.getSummary()
-                : '[空对话]';
-
-            const searchableText = (this.chatUI && typeof this.chatUI.getSearchableText === 'function')
-                ? await this.chatUI.getSearchableText()
-                : '';
-
-            // 原子更新内容和元数据
-            await this.sidebar.sessionService.updateSessionContentAndMeta(
-                this.activeSessionId,
-                {
-                    content: newContent,
-                    meta: {
-                        summary,
-                        searchableText
-                    }
-                }
+            const summary = await this.chatUI.getSummary() || '[空对话]';
+            const searchableText = await this.chatUI.getSearchableText() || '';
+            
+            await sessionService.updateSessionContentAndMeta(
+                this.activeTopicId,
+                { content: newContent, meta: { summary, searchableText } }
             );
 
-            // 自动重命名未命名会话
-            const currentItem = this.getActiveSession();
-            if (currentItem && 
-                currentItem.metadata.title.startsWith('Untitled') && 
-                summary && 
-                summary !== '[空对话]') {
+            // 自动重命名
+            const currentItem = sessionService.findItemById(this.activeTopicId);
+            if (currentItem && currentItem.metadata.title.startsWith('Untitled') && summary && summary !== '[空对话]') {
                 const newTitle = summary.substring(0, 50) + (summary.length > 50 ? '...' : '');
                 if (newTitle.trim()) {
-                    await this.sidebar.sessionService.updateItemMetadata(
-                        this.activeSessionId, 
-                        { title: newTitle.trim() }
-                    );
+                    await sessionService.renameItem(this.activeTopicId, newTitle.trim());
                     this.chatUI.setTitle(newTitle.trim());
                 }
             }
