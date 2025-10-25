@@ -15,7 +15,7 @@ import { SessionTagProvider } from './providers/SessionTagProvider.js';
  * 实现了显式的依赖注入和上下文传递。
  *
  * @param {import('./core/SessionUIManager.js').SessionUIOptions} options - UI 配置选项。
- * @param {import('../../config/ConfigManager.js').ConfigManager} configManager - 【新】一个已初始化的 ConfigManager 实例。
+ * @param {import('../../configManager/ConfigManager.js').ConfigManager} configManager - 【新】一个已初始化的 ConfigManager 实例。
  * @param {string} namespace - 【新】当前工作区的命名空间。
  * @returns {import('../../common/interfaces/ISessionManager.js').ISessionManager} 一个符合 ISessionManager 接口的新实例。
  */

@@ -2,17 +2,15 @@
  * 文件: #workspace/settings/components/TagsSettingsWidget.js
  * @description 一个用于管理全局标签的设置组件，实现了 ISettingsWidget 接口。
  * @change
- * - [改进] 增加了对 "default" 标签的删除保护。
- * - [改进] 在删除标签前，检查其是否被任何 Agent 使用，以保证数据完整性。
+ * - [V4] 适配重构后的 ConfigManager API
+ * - [改进] 增加了对 "default" 标签的删除保护
+ * - [改进] 在删除标签前，检查其是否被任何 Agent 使用，以保证数据完整性
  */
 
 import { ISettingsWidget } from '../../../common/interfaces/ISettingsWidget.js';
-import { ConfigManager } from '../../../config/ConfigManager.js';
-import { EVENTS } from '../../../config/shared/constants.js';
-import './TagsSettingsWidget.css'; // 引入组件专属样式
-
-// +++ 新增: 定义不可删除的受保护标签
-const PROTECTED_TAGS = ['default'];
+import {PROTECTED_TAGS} from '../../../common/configData.js';
+import { getConfigManager } from '../../../configManager/index.js';
+import './TagsSettingsWidget.css';
 
 export class TagsSettingsWidget extends ISettingsWidget {
     constructor() {
@@ -21,25 +19,26 @@ export class TagsSettingsWidget extends ISettingsWidget {
         /** @private */
         this.container = null;
         
-        // --- [核心修改] 直接从单例获取所需的服务 ---
+        // [核心修改] 使用 getConfigManager 获取单例
         /** @private */
-        this.configManager = ConfigManager.getInstance();
+        this.configManager = getConfigManager();
         /** @private */
-        this.tagRepo = this.configManager.getService('tagRepository');
-        /** @private */
-        this.llmService = this.configManager.getService('llmService');
-        /** @private */
-        this.eventManager = this.configManager.eventManager;
+        this.agentRepo = this.configManager.getService('agentRepository');
+        
         /** @private */
         this.ui = {};
         /** @private */
-        this._unsubscribe = null;
+        this._unsubscribers = []; // [改进] 使用数组存储多个取消订阅函数
+        /** @private */
+        this._allTags = []; // [新增] 缓存标签列表
+        
+        // 绑定方法
         /** @private */
         this._boundHandleSubmit = this._handleSubmit.bind(this);
         /** @private */
         this._boundHandleListClick = this._handleListClick.bind(this);
         /** @private */
-        this._boundRenderTags = this.renderTags.bind(this);
+        this._boundRenderTags = this._renderTags.bind(this);
     }
 
     // --- ISettingsWidget 接口实现 ---
@@ -58,9 +57,9 @@ export class TagsSettingsWidget extends ISettingsWidget {
 
         this._renderShell();
         
-        // 初始加载并渲染标签
-        await this.tagRepo.load();
-        this.renderTags();
+        // [修改] 使用 ConfigManager 的 API 加载标签
+        await this._loadTags();
+        this._renderTags();
 
         this._attachEventListeners();
         this.emit('mounted');
@@ -80,6 +79,21 @@ export class TagsSettingsWidget extends ISettingsWidget {
     }
 
     // --- 私有方法 ---
+
+    /**
+     * [新增] 加载所有标签
+     * @private
+     */
+    async _loadTags() {
+        try {
+            const tagObjects = await this.configManager.getAllTags();
+            // 提取标签名称
+            this._allTags = tagObjects.map(t => t.name);
+        } catch (error) {
+            console.error('[TagsWidget] 加载标签失败:', error);
+            this._allTags = [];
+        }
+    }
 
     _renderShell() {
         this.container.innerHTML = `
@@ -102,11 +116,14 @@ export class TagsSettingsWidget extends ISettingsWidget {
         };
     }
 
-    renderTags() {
+    /**
+     * [重命名] renderTags -> _renderTags (私有方法)
+     * @private
+     */
+    _renderTags() {
         if (!this.isMounted) return;
-        const tags = this.tagRepo.getAll();
-        this.ui.list.innerHTML = tags.map(tag => {
-            // +++ 改进: 检查标签是否受保护
+        
+        this.ui.list.innerHTML = this._allTags.map(tag => {
             const isProtected = PROTECTED_TAGS.includes(tag);
             const deleteButton = isProtected
                 ? `<button class="delete-tag-btn" disabled title="这是一个受保护的标签，不能删除。">&times;</button>`
@@ -124,30 +141,49 @@ export class TagsSettingsWidget extends ISettingsWidget {
     _attachEventListeners() {
         this.ui.form.addEventListener('submit', this._boundHandleSubmit);
         this.ui.list.addEventListener('click', this._boundHandleListClick);
-        // 订阅全局标签更新事件，确保UI实时同步
-        this._unsubscribe = this.eventManager.subscribe(EVENTS.TAGS_UPDATED, this._boundRenderTags);
+        
+        // [修正] 使用 configManager.on 订阅事件
+        // 注意：需要确认事件名称是否正确
+        this._unsubscribers.push(
+            this.configManager.on('tags:updated', async () => {
+                await this._loadTags();
+                this._renderTags();
+            })
+        );
     }
 
     _removeEventListeners() {
         this.ui.form?.removeEventListener('submit', this._boundHandleSubmit);
         this.ui.list?.removeEventListener('click', this._boundHandleListClick);
-        if (this._unsubscribe) {
-            this._unsubscribe();
-            this._unsubscribe = null;
-        }
+        
+        // [改进] 取消所有订阅
+        this._unsubscribers.forEach(unsubscribe => unsubscribe());
+        this._unsubscribers = [];
     }
 
-    _handleSubmit(event) {
+    /**
+     * [修改] 处理表单提交，添加新标签
+     * @private
+     */
+    async _handleSubmit(event) {
         event.preventDefault();
         const newTag = this.ui.input.value.trim();
-        if (newTag) {
-            this.tagRepo.addTag(newTag);
-            this.ui.input.value = ''; // 清空输入框
+        if (!newTag) return;
+
+        try {
+            await this.configManager.addGlobalTag(newTag);
+            await this._loadTags();
+            this._renderTags();
+            this.ui.input.value = '';
+        } catch (error) {
+            console.error('[TagsWidget] 添加标签失败:', error);
+            alert(`添加标签失败: ${error.message}`);
         }
     }
 
     /**
-     * +++ 核心改进: 重写点击处理逻辑，增加检查 +++
+     * [改进] 处理删除按钮点击
+     * @private
      */
     async _handleListClick(event) {
         const deleteBtn = event.target.closest('.delete-tag-btn:not([disabled])');
@@ -155,7 +191,7 @@ export class TagsSettingsWidget extends ISettingsWidget {
 
         const tagToDelete = deleteBtn.dataset.tag;
 
-        // 1. 防御性检查，防止通过dev tools删除保护标签
+        // 1. 防御性检查，防止删除保护标签
         if (PROTECTED_TAGS.includes(tagToDelete)) {
             alert(`错误：受保护的标签 "${tagToDelete}" 不能被删除。`);
             return;
@@ -163,8 +199,11 @@ export class TagsSettingsWidget extends ISettingsWidget {
 
         // [核心修改] 使用注入的 llmService 来检查依赖
         try {
-            const allAgents = await this.llmService.getAgents();
-            const dependentAgents = allAgents.filter(agent => agent.tags?.includes(tagToDelete));
+            // 2. 检查是否有 Agent 使用此标签
+            const allAgents = await this.agentRepo.getAllAgents();
+            const dependentAgents = allAgents.filter(agent => 
+                agent.tags?.includes(tagToDelete)
+            );
 
             if (dependentAgents.length > 0) {
                 const agentNames = dependentAgents.map(a => `"${a.name}"`).join(', ');
@@ -175,15 +214,21 @@ export class TagsSettingsWidget extends ISettingsWidget {
                 );
                 return;
             }
-        } catch (error) {
-            console.error(`检查 Agent 依赖时出错:`, error);
-            alert("检查依赖时发生错误，请稍后再试。");
-            return;
-        }
 
-        // 3. 如果所有检查通过，则弹出确认框并执行删除
-        if (confirm(`确定要永久删除标签 "${tagToDelete}" 吗？此操作不可撤销。`)) {
-            await this.tagRepo.removeTag(tagToDelete);
+            // 3. 确认删除
+            if (!confirm(`确定要永久删除标签 "${tagToDelete}" 吗？此操作不可撤销。`)) {
+                return;
+            }
+
+            // 4. [核心修改] 执行删除
+            // 使用 ConfigManager 的 deleteTag API
+            await this.configManager.deleteTag(tagToDelete);
+            await this._loadTags();
+            this._renderTags();
+            
+        } catch (error) {
+            console.error('[TagsWidget] 删除标签时出错:', error);
+            alert('删除标签时发生错误，请稍后再试。');
         }
     }
 }

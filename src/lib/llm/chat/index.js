@@ -174,7 +174,7 @@ export class LLMChatUI extends IEditor {
     
     /**
      * [新增] 获取当前所有可用的 Agent 定义列表。
-     * @returns {import('../../config/shared/types.js').LLMAgentDefinition[]}
+     * @returns {import('../../configManager/shared/types.js').LLMAgentDefinition[]}
      */
     getAvailableAgents() {
         return this.configManager.llm.config.agents || [];
@@ -182,7 +182,7 @@ export class LLMChatUI extends IEditor {
 
     /**
      * [新增] 获取当前选中的 Agent 的完整定义信息。
-     * @returns {import('../../config/shared/types.js').LLMAgentDefinition | undefined}
+     * @returns {import('../../configManager/shared/types.js').LLMAgentDefinition | undefined}
      */
     getCurrentAgent() {
         const agents = this.getAvailableAgents();

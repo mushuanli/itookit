@@ -7,13 +7,13 @@ export class TagRepository {
      * @param {import('../db.js').Database} db
      * @param {import('../EventManager.js').EventManager} eventManager
      */
-    constructor(db, eventManager) { // [FIX] 注入 EventManager
+    constructor(db, eventManager) {
         this.db = db;
         this.events = eventManager;
     }
 
     /**
-     * [新增] 获取所有已定义的全局标签。
+     * 获取所有已定义的全局标签。
      * @returns {Promise<object[]>} 返回一个标签对象数组, e.g., [{ name: 'tag1', createdAt: ... }]
      */
     async getAllTags() {
@@ -30,8 +30,60 @@ export class TagRepository {
     }
 
     /**
-     * 【新增】根据节点ID获取其所有标签名称。
-     * 这是UI层在适配Node数据时获取标签信息的关键方法。
+     * [新增] 添加一个全局标签（不关联到任何节点）
+     * @param {string} tagName - 标签名称
+     * @returns {Promise<object>} 返回创建或已存在的标签对象
+     */
+    async addGlobalTag(tagName) {
+        if (!tagName || typeof tagName !== 'string') {
+            throw new Error('Tag name must be a non-empty string');
+        }
+
+        const normalizedName = tagName.trim();
+        if (!normalizedName) {
+            throw new Error('Tag name cannot be empty or whitespace only');
+        }
+
+        const tx = await this.db.getTransaction(STORES.TAGS, 'readwrite');
+        const store = tx.objectStore(STORES.TAGS);
+        
+        // 检查标签是否已存在
+        const existingTag = await new Promise((resolve, reject) => {
+            const request = store.get(normalizedName);
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = (event) => reject(event.target.error);
+        });
+
+        if (existingTag) {
+            console.log(`Tag "${normalizedName}" already exists`);
+            return existingTag;
+        }
+
+        // 创建新标签
+        const newTag = {
+            name: normalizedName,
+            createdAt: new Date().toISOString()
+        };
+
+        await new Promise((resolve, reject) => {
+            const request = store.put(newTag);
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = (event) => reject(event.target.error);
+        });
+
+        // 在事务成功提交后发布事件
+        tx.oncomplete = () => {
+            this.events.publish(EVENTS.TAGS_UPDATED, { 
+                action: 'add_global', 
+                tagName: normalizedName 
+            });
+        };
+
+        return newTag;
+    }
+
+    /**
+     * 根据节点ID获取其所有标签名称。
      * @param {string} nodeId - 节点的ID。
      * @returns {Promise<string[]>} 一个包含该节点所有标签名称的字符串数组。
      */
@@ -56,8 +108,11 @@ export class TagRepository {
         const tagsStore = tx.objectStore(STORES.TAGS);
         const nodeTagsStore = tx.objectStore(STORES.NODE_TAGS);
 
-        // 1. 确保标签存在于 tags 表中（不存在则创建）
-        await tagsStore.put({ name: tagName, createdAt: new Date() });
+        // 确保标签存在于 tags 表中（不存在则创建）
+        await tagsStore.put({ 
+            name: tagName, 
+            createdAt: new Date().toISOString() 
+        });
 
         try {
             // 【修改】添加错误处理，优雅地处理重复添加的情况
@@ -73,7 +128,11 @@ export class TagRepository {
         
         // [FIX] 在事务成功提交后发布事件
         tx.oncomplete = () => {
-            this.events.publish(EVENTS.TAGS_UPDATED, { action: 'add', nodeId, tagName });
+            this.events.publish(EVENTS.TAGS_UPDATED, { 
+                action: 'add', 
+                nodeId, 
+                tagName 
+            });
         };
     }
     
@@ -105,7 +164,11 @@ export class TagRepository {
 
         // [FIX] 在事务成功提交后发布事件
         tx.oncomplete = () => {
-            this.events.publish(EVENTS.TAGS_UPDATED, { action: 'remove', nodeId, tagName });
+            this.events.publish(EVENTS.TAGS_UPDATED, { 
+                action: 'remove', 
+                nodeId, 
+                tagName 
+            });
         };
     }
 
@@ -139,14 +202,24 @@ export class TagRepository {
         // 2. 确保所有新标签都存在，并为节点添加关联
         for (const tagName of tagNames) {
             if (typeof tagName === 'string' && tagName.trim()) {
-                await tagsStore.put({ name: tagName.trim(), createdAt: new Date() });
-                await nodeTagsStore.put({ nodeId, tagName: tagName.trim() });
+                await tagsStore.put({ 
+                    name: tagName.trim(), 
+                    createdAt: new Date().toISOString() 
+                });
+                await nodeTagsStore.put({ 
+                    nodeId, 
+                    tagName: tagName.trim() 
+                });
             }
         }
         
         // [FIX] 在事务成功提交后发布事件
         tx.oncomplete = () => {
-            this.events.publish(EVENTS.TAGS_UPDATED, { action: 'set', nodeId, tags: tagNames });
+            this.events.publish(EVENTS.TAGS_UPDATED, { 
+                action: 'set', 
+                nodeId, 
+                tags: tagNames 
+            });
         };
     }
 
@@ -161,7 +234,10 @@ export class TagRepository {
         const store = tx.objectStore(STORES.TAGS);
         for (const tagName of tagNames) {
             if (typeof tagName === 'string' && tagName.trim()) {
-                await store.put({ name: tagName.trim(), createdAt: new Date() });
+                await store.put({ 
+                    name: tagName.trim(), 
+                    createdAt: new Date().toISOString() 
+                });
             }
         }
     }
@@ -180,8 +256,11 @@ export class TagRepository {
         const nodeTagsStore = tx.objectStore(STORES.NODE_TAGS);
         const nodeTagsIndex = nodeTagsStore.index('by_tagName');
 
-        // 1. 在 tags 表中创建新标签，并删除旧标签
-        await tagsStore.put({ name: newTagName, createdAt: new Date() });
+        // 在 tags 表中创建新标签，并删除旧标签
+        await tagsStore.put({ 
+            name: newTagName, 
+            createdAt: new Date().toISOString() 
+        });
         await tagsStore.delete(oldTagName);
 
         await new Promise((resolve, reject) => {
@@ -201,7 +280,11 @@ export class TagRepository {
 
         // [FIX] 在事务成功提交后发布事件
         tx.oncomplete = () => {
-            this.events.publish(EVENTS.TAGS_UPDATED, { action: 'rename_global', oldTagName, newTagName });
+            this.events.publish(EVENTS.TAGS_UPDATED, { 
+                action: 'rename_global', 
+                oldTagName, 
+                newTagName 
+            });
         };
     }
 
@@ -234,7 +317,10 @@ export class TagRepository {
 
         // [FIX] 在事务成功提交后发布事件
         tx.oncomplete = () => {
-            this.events.publish(EVENTS.TAGS_UPDATED, { action: 'delete_global', tagName });
+            this.events.publish(EVENTS.TAGS_UPDATED, { 
+                action: 'delete_global', 
+                tagName 
+            });
         };
     }
 
@@ -255,7 +341,9 @@ export class TagRepository {
         const store = tx.objectStore(STORES.NODES);
         
         const nodes = await Promise.all(
-            nodeIds.map(id => new Promise(resolve => store.get(id).onsuccess = e => resolve(e.target.result)))
+            nodeIds.map(id => new Promise(resolve => 
+                store.get(id).onsuccess = e => resolve(e.target.result)
+            ))
         );
 
         return nodes.filter(Boolean); // 过滤掉可能已删除的节点

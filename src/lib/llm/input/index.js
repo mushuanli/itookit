@@ -200,7 +200,7 @@ export class LLMInputUI {
     /**
      * [新增] 公共方法，用于接收新的 agents 列表并更新UI。
      * 此方法现在由事件处理器调用，也可以由外部手动调用。
-     * @param {import('../../config/shared/types.js').LLMAgentDefinition[]} newAgents
+     * @param {import('../../configManager/shared/types.js').LLMAgentDefinition[]} newAgents
      */
     updateAgents(newAgents) {
         // 1. 更新内部选项，作为新的数据源

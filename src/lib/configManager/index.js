@@ -286,6 +286,7 @@ export class ConfigManager {
     async getTagsForNode(nodeId) { 
         return this.tagRepo.getTagsForNode(nodeId); 
     }
+    async addGlobalTag(tagName) { return this.tagRepo.addGlobalTag(tagName); }
 
     // --- 链接 API ---
     async getBacklinks(nodeId) { return this.linkRepo.getBacklinks(nodeId); }

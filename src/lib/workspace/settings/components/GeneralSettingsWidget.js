@@ -1,7 +1,7 @@
 // @file #workspace/settings/components/GeneralSettingsWidget.css
 
 import { ISettingsWidget } from '../../../common/interfaces/ISettingsWidget.js';
-import { ConfigManager } from '../../../config/ConfigManager.js';
+import { ConfigManager } from '../../../configManager/index.js';
 import './GeneralSettingsWidget.css';
 
 export class GeneralSettingsWidget extends ISettingsWidget {

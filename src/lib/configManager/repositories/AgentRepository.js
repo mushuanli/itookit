@@ -15,8 +15,22 @@ export class AgentRepository {
     }
 
     /**
-     * Reconciles agents from content: finds existing agents, creates new ones with stable IDs,
-     * updates the database, and returns the potentially modified content.
+     * [新增] 获取所有 Agent
+     * @returns {Promise<object[]>} Agent 对象数组
+     */
+    async getAllAgents() {
+        const tx = await this.db.getTransaction(STORES.AGENTS, 'readonly');
+        const store = tx.objectStore(STORES.AGENTS);
+        
+        return new Promise((resolve, reject) => {
+            const request = store.getAll();
+            request.onsuccess = () => resolve(request.result || []);
+            request.onerror = (event) => reject(event.target.error);
+        });
+    }
+
+    /**
+     * Reconciles agents from content
      * @param {string} nodeId - The parent node's ID.
      * @param {string} content - The markdown content.
      * @returns {Promise<{updatedContent: string, agents: object[]}>}
@@ -69,7 +83,9 @@ export class AgentRepository {
         const tx = await this.db.getTransaction(STORES.AGENTS, 'readwrite');
         const store = tx.objectStore(STORES.AGENTS);
         const index = store.index('by_nodeId');
-        const oldAgents = await new Promise(r => index.getAll(nodeId).onsuccess = e => r(e.target.result));
+        const oldAgents = await new Promise(r => 
+            index.getAll(nodeId).onsuccess = e => r(e.target.result)
+        );
 
         for (const oldAgent of oldAgents) {
             if (!foundAgentIds.has(oldAgent.id)) {

@@ -8,6 +8,8 @@
 
 import { Batches } from 'openai/resources.js';
 
+export const PROTECTED_TAGS = ['default'];
+
 export const LLM_PROVIDER_DEFAULTS = {
     openai: {
         name: "OpenAI",
@@ -108,8 +110,9 @@ const getDefaultProviderKey = () => {
 const defaultProviderKey = getDefaultProviderKey();
 const defaultProviderConfig = LLM_PROVIDER_DEFAULTS[defaultProviderKey];
 
+
 /**
- * @type {import('../config/shared/types.js').LLMProviderConnection}
+ * @type {import('../configManager/shared/types.js').LLMProviderConnection}
  * 默认连接的模板，如果不存在则会被创建。
  */
 export const LLM_DEFAULT_CONNECTION = {
@@ -123,7 +126,7 @@ export const LLM_DEFAULT_CONNECTION = {
 };
 
 /**
- * @type {import('../config/shared/types.js').LLMAgentDefinition}
+ * @type {import('../configManager/shared/types.js').LLMAgentDefinition}
  * 默认智能体的模板，如果不存在则会被创建。
  */
 export const LLM_DEFAULT_AGENT = {

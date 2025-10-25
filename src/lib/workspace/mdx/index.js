@@ -32,7 +32,7 @@ export class MDxWorkspace {
     /**
      * 创建一个 MDxWorkspace 实例。
      * @param {object} options - 配置选项。
-     * @param {import('../../config/ConfigManager.js').ConfigManager} options.configManager - [新] **必需** 一个已初始化的 ConfigManager 实例。
+     * @param {import('../../configManager/index.js').ConfigManager} options.configManager - [新] **必需** 一个已初始化的 ConfigManager 实例。
      * @param {string} options.namespace - [新] **必需** 此工作区实例的唯一命名空间，用于从 ConfigManager 获取对应的数据仓库。
      * @param {HTMLElement} options.sidebarContainer - **必需** 用于承载会话列表的 HTML 元素。
      * @param {HTMLElement} options.editorContainer - **必需** 用于承载编辑器的 HTML 元素。
@@ -49,7 +49,7 @@ export class MDxWorkspace {
         
         /** 
          * @private 
-         * @type {import('../../config/ConfigManager.js').ConfigManager} 
+         * @type {import('../../configManager/index.js').ConfigManager} 
          * @description 对应用级配置管理器的引用。
          */
         this.configManager = options.configManager;
