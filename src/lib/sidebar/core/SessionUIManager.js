@@ -60,7 +60,8 @@ export class SessionUIManager extends ISessionManager {
         this.options = options;
         this.moduleName = moduleName;
         this.configManager = configManager;
-        
+        this.options.loadDataOnStart = options.loadDataOnStart !== false;
+
         // --- [核心重构] 不再直接访问 repositories，而是使用 ConfigManager 的统一 API ---
         
         // --- 状态和 UI 初始化 ---
@@ -176,7 +177,9 @@ export class SessionUIManager extends ISessionManager {
         }
 
         // 动态模式 - 从 ConfigManager 加载数据
-        await this._loadModuleData();
+        if (this.options.loadDataOnStart) {
+            await this._loadModuleData();
+        }
         return this.getActiveSession();
     }
 

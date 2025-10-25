@@ -40,6 +40,7 @@ export class SessionService extends ISessionService {
     async handleRepositoryLoad(moduleTree) {
         if (!moduleTree) {
             console.warn('[SessionService] 收到空的模块树');
+            this.store.dispatch({ type: 'STATE_LOAD_SUCCESS', payload: { items: [], tags: new Map() } }); // 确保清空
             return;
         }
         
@@ -52,14 +53,14 @@ export class SessionService extends ISessionService {
     /**
      * [核心方法] 将 ConfigManager 的树结构递归转换为扁平的 WorkspaceItem 数组
      * @private
-     * @param {import('../../configManager/shared/types.js').ModuleFSTree} tree
-     * @param {string|null} parentId
+     * @param {import('../../configManager/shared/types.js').ModuleFSTree | import('../../configManager/shared/types.js').ModuleFSTreeNode} tree
      * @returns {import('../types/types.js')._WorkspaceItem[]}
      */
-    _treeToItems(tree, parentId = null) {
+    _treeToItems(tree) {
         if (!tree) return [];
-        
-        const processNode = (node, pid) => {
+
+        // 内部的递归转换函数保持不变
+        const processNode = (node, parentId) => {
             if (!node || !node.id) {
                 console.warn('[SessionService] 遇到无效节点', node);
                 return null;
@@ -76,7 +77,7 @@ export class SessionService extends ISessionService {
                     tags: node.meta?.tags || [],
                     createdAt: node.createdAt,
                     lastModified: node.updatedAt,
-                    parentId: pid,
+                    parentId: parentId, // 使用传入的 parentId
                     moduleName: node.moduleName,
                     path: node.path,
                     custom: node.meta || {}
@@ -98,17 +99,41 @@ export class SessionService extends ISessionService {
                     .filter(Boolean);
             }
 
-            return item;
-        };
-
-        // 处理根节点的子节点
-        if (tree.children) {
-            return tree.children
-                .map(childNode => processNode(childNode, tree.id || null))
-                .filter(Boolean);
+        return item;
+    };
+    
+    // --- [新增] 判断是否为根目录的辅助函数 ---
+    const isRootDirectory = (node) => {
+        return node.type === 'directory' && 
+               node.path === '/' && 
+               (!node.name || node.name === '');
+    };
+    
+    // --- [新增] 递归展开所有根目录层级 ---
+    const unwrapRootDirectories = (node) => {
+        if (!node) return [];
+        
+        // 如果是根目录，继续展开其子节点
+        if (isRootDirectory(node)) {
+            if (Array.isArray(node.children) && node.children.length > 0) {
+                // 对每个子节点递归调用，以处理多层根目录嵌套
+                return node.children.flatMap(child => unwrapRootDirectories(child));
+            }
+            // 空的根目录，返回空数组
+            return [];
         }
-
-        return [];
+        
+        // 不是根目录，返回该节点本身
+        return [node];
+    };
+    
+    // --- [核心修改] 先展开所有根目录 ---
+    const topLevelNodes = unwrapRootDirectories(tree);
+    
+    // 然后处理这些顶层节点
+    return topLevelNodes
+        .map(node => processNode(node, null)) // 顶层节点的 parentId 设为 null
+        .filter(Boolean);
     }
 
     /**

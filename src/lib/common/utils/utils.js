@@ -118,3 +118,58 @@ export function generateUUID() {
 export function generateShortUUID() {
     return Math.random().toString(36).substring(2, 10);
 }
+
+/**
+ * DOM批量更新器 - 减少重排和重绘
+ */
+export class DOMBatchUpdater {
+    constructor() {
+        this.updates = [];
+        this.scheduled = false;
+    }
+    
+    add(fn) {
+        this.updates.push(fn);
+        if (!this.scheduled) {
+            this.scheduled = true;
+            this.flush();
+        }
+    }
+    
+    flush() {
+        requestAnimationFrame(() => {
+            this.updates.forEach(fn => fn());
+            this.updates = [];
+            this.scheduled = false;
+        });
+    }
+}
+
+/**
+ * 性能测量工具
+ */
+export function measurePerformance(name, fn) {
+    const start = performance.now();
+    const result = fn();
+    const end = performance.now();
+    const duration = (end - start).toFixed(2);
+    if (duration > 16) { // 超过一帧的时间
+        console.warn(`[Performance] ${name}: ${duration}ms (slow)`);
+    }
+    return result;
+}
+
+
+/**
+ * 节流函数
+ */
+export function throttle(func, limit) {
+    let inThrottle;
+    return function(...args) {
+        if (!inThrottle) {
+            func.apply(this, args);
+            inThrottle = true;
+            setTimeout(() => inThrottle = false, limit);
+        }
+    };
+}

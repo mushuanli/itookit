@@ -85,6 +85,17 @@ export const LLM_PROVIDER_DEFAULTS = {
             { id: 'x-ai/grok-4', name: 'xAI: Grok 4' }
         ]
     },
+    cloudapi: {
+        name: "CloudAPI",
+        baseURL: 'https://chat.cloudapi.vip/v1/chat/completions',
+        models: [
+            { id: 'claude-sonnet-4-5-20250929-thinking', name: 'Sonnet 4.5 Think' },
+            { id: 'claude-opus-4-1-20250805-thinking-code', name: 'Opus 4.1 Think' },
+            //{ id: 'deepseek-v3.2-exp', name: 'DeepSeek V3.2 Exp' },
+            //{ id: 'deepseek-v3.1-terminus', name: 'DeepSeek V3.1 Terminus' },
+            //{ id: 'deepseek-coder', name: 'DeepSeek Coder' },
+        ]
+    },
     custom_openai_compatible: {
         name: "Custom (OpenAI Compatible)",
         baseURL: '', // User must provide this
@@ -102,38 +113,68 @@ const LLM_TEMP_DEFAULT_NAME = '临时';
 
 
 /**
- * 决定默认使用哪个 provider 的辅助函数, 可以修改这里改变安装默认值
- * @returns {string}
+ * @type {Array<import('../configManager/shared/types.js').LLMProviderConnection>}
+ * [MODIFIED] 系统初始化时会创建的所有默认连接。
  */
-const getDefaultProviderKey = () => {
-    const providers = Object.keys(LLM_PROVIDER_DEFAULTS);
-    // 优先使用 'openai'，如果不存在则使用列表中的第一个，最后回退到自定义类型
-    return providers.includes('openai') ? 'openai' : (providers[0] || 'custom_openai_compatible');
-};
-
-const defaultProviderKey = getDefaultProviderKey();
-const defaultProviderConfig = LLM_PROVIDER_DEFAULTS[defaultProviderKey];
-
-
-/**
- * @type {import('../configManager/shared/types.js').LLMProviderConnection}
- * 默认连接的模板，如果不存在则会被创建。
- */
-export const LLM_DEFAULT_CONNECTION = {
-    id: LLM_DEFAULT_ID,
-    name: LLM_DEFAULT_NAME,
-    provider: defaultProviderKey,
-    apiKey: '',
-    baseURL: defaultProviderConfig.baseURL,
-    // 安全地复制模型数组，防止意外修改原始定义
-    availableModels: defaultProviderConfig.models ? [...defaultProviderConfig.models] : []
-};
+export const LLM_DEFAULT_CONNECTIONS = [
+    // 原始默认连接
+    {
+        id: LLM_DEFAULT_ID,
+        name: LLM_DEFAULT_NAME,
+        provider: 'openai',
+        apiKey: '',
+        baseURL: LLM_PROVIDER_DEFAULTS.openai.baseURL,
+        availableModels: [...LLM_PROVIDER_DEFAULTS.openai.models]
+    },
+    // 新增的默认连接
+    {
+        id: 'deepseek-default',
+        name: 'DeepSeek',
+        provider: 'deepseek',
+        apiKey: '',
+        baseURL: LLM_PROVIDER_DEFAULTS.deepseek.baseURL,
+        availableModels: [...LLM_PROVIDER_DEFAULTS.deepseek.models]
+    },
+    {
+        id: 'claude-default',
+        name: 'Claude',
+        provider: 'anthropic',
+        apiKey: '',
+        baseURL: LLM_PROVIDER_DEFAULTS.anthropic.baseURL,
+        availableModels: [...LLM_PROVIDER_DEFAULTS.anthropic.models]
+    },
+    {
+        id: 'gemini-default',
+        name: 'Gemini',
+        provider: 'gemini',
+        apiKey: '',
+        baseURL: LLM_PROVIDER_DEFAULTS.gemini.baseURL,
+        availableModels: [...LLM_PROVIDER_DEFAULTS.gemini.models]
+    },
+    {
+        id: 'openrouter-default',
+        name: 'OpenRouter',
+        provider: 'openrouter',
+        apiKey: '',
+        baseURL: LLM_PROVIDER_DEFAULTS.openrouter.baseURL,
+        availableModels: [...LLM_PROVIDER_DEFAULTS.openrouter.models]
+    },
+    {
+        id: 'cloudapi-default',
+        name: 'CloudAPI',
+        provider: 'openai',
+        apiKey: '',
+        baseURL: LLM_PROVIDER_DEFAULTS.cloudapi.baseURL,
+        availableModels: [...LLM_PROVIDER_DEFAULTS.cloudapi.models]
+    }
+];
 
 /**
  * @type {Array<import('../configManager/shared/types.js').LLMAgentDefinition>}
- * 默认智能体的模板数组，如果不存在则会被创建。
+ * [MODIFIED] 默认智能体的模板数组，如果不存在则会被创建。
  */
 export const LLM_DEFAULT_AGENTS = [
+    // 原始默认 Agent (受删除保护)
     {
         id: LLM_DEFAULT_ID,
         name: LLM_DEFAULT_NAME,
@@ -142,7 +183,7 @@ export const LLM_DEFAULT_AGENTS = [
         tags: ['default'],
         config: {
             connectionId: LLM_DEFAULT_ID,
-            modelName: (LLM_DEFAULT_CONNECTION.availableModels?.[0]?.id) || "",
+            modelName: (LLM_DEFAULT_CONNECTIONS[0].availableModels?.[0]?.id) || "",
             systemPrompt: "You are a helpful assistant."
         },
         interface: {
@@ -159,8 +200,89 @@ export const LLM_DEFAULT_AGENTS = [
         maxHistoryLength: 0,
         config: {
             connectionId: LLM_DEFAULT_ID,
-            modelName: (LLM_DEFAULT_CONNECTION.availableModels?.[0]?.id) || "",
+            modelName: (LLM_DEFAULT_CONNECTIONS[0].availableModels?.[0]?.id) || "",
             systemPrompt: "You are a helpful assistant. Answer the user's current prompt concisely and accurately, without referring to any past conversation history."
+        },
+        interface: {
+            inputs: [{ name: "prompt", type: "string" }],
+            outputs: [{ name: "response", type: "string" }]
+        }
+    },
+    // 新增的默认 Agent (无删除保护)
+    {
+        id: 'deepseek-default',
+        name: 'DeepSeek',
+        icon: '🌊',
+        description: '使用 DeepSeek 模型的智能体',
+        tags: ['default', 'deepseek'],
+        config: {
+            connectionId: 'deepseek-default',
+            modelName: LLM_PROVIDER_DEFAULTS.deepseek.models[0]?.id || '',
+            systemPrompt: "You are a helpful assistant powered by DeepSeek."
+        },
+        interface: {
+            inputs: [{ name: "prompt", type: "string" }],
+            outputs: [{ name: "response", type: "string" }]
+        }
+    },
+    {
+        id: 'claude-default',
+        name: 'Claude',
+        icon: '📚',
+        description: '使用 Claude 模型的智能体',
+        tags: ['default', 'claude'],
+        config: {
+            connectionId: 'claude-default',
+            modelName: LLM_PROVIDER_DEFAULTS.anthropic.models[0]?.id || '',
+            systemPrompt: "You are a helpful, harmless, and honest assistant."
+        },
+        interface: {
+            inputs: [{ name: "prompt", type: "string" }],
+            outputs: [{ name: "response", type: "string" }]
+        }
+    },
+    {
+        id: 'gemini-default',
+        name: 'Gemini',
+        icon: '💎',
+        description: '使用 Gemini 模型的智能体',
+        tags: ['default', 'gemini'],
+        config: {
+            connectionId: 'gemini-default',
+            modelName: LLM_PROVIDER_DEFAULTS.gemini.models[0]?.id || '',
+            systemPrompt: "You are a helpful assistant powered by Google Gemini."
+        },
+        interface: {
+            inputs: [{ name: "prompt", type: "string" }],
+            outputs: [{ name: "response", type: "string" }]
+        }
+    },
+    {
+        id: 'openrouter-default',
+        name: 'OpenRouter',
+        icon: '🔀',
+        description: '使用 OpenRouter 自动选择最佳模型的智能体',
+        tags: ['default', 'router'],
+        config: {
+            connectionId: 'openrouter-default',
+            modelName: LLM_PROVIDER_DEFAULTS.openrouter.models[0]?.id || '',
+            systemPrompt: "You are a helpful assistant, routed through OpenRouter."
+        },
+        interface: {
+            inputs: [{ name: "prompt", type: "string" }],
+            outputs: [{ name: "response", type: "string" }]
+        }
+    },
+        {
+        id: 'cloudapi-default',
+        name: 'CloudAPI',
+        icon: '☁️',
+        description: '使用 CloudAPI 模型的智能体',
+        tags: ['default', 'cloudapi'],
+        config: {
+            connectionId: 'cloudapi-default',
+            modelName: LLM_PROVIDER_DEFAULTS.cloudapi.models[0]?.id || '',
+            systemPrompt: "You are a helpful assistant, routed through CloudAPI."
         },
         interface: {
             inputs: [{ name: "prompt", type: "string" }],

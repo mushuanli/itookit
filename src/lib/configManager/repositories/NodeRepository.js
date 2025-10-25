@@ -24,75 +24,95 @@ export class NodeRepository {
      * @returns {Promise<object>} 创建的节点对象
      */
     async createNode(type, moduleName, path, extraData = {}) {
-        const pathSegments = path.split('/').filter(Boolean);
-        const name = pathSegments.pop() || '';
-        // [修正] 修正 parentPath 的计算逻辑，确保根目录的父路径为 null
-        const parentPath = pathSegments.length > 0 ? '/' + pathSegments.join('/') : (path === '/' ? null : '/');
-
         const tx = await this.db.getTransaction(STORES.NODES, 'readwrite');
         const store = tx.objectStore(STORES.NODES);
-        const index = store.index('by_path');
 
-        let parentId = null;
-        let parent = null;
+        // --- START: MODIFICATION ---
+        // 将所有数据库操作包裹在一个 Promise 中，以精确控制事务的完成
+        return new Promise(async (resolve, reject) => {
+            try {
+                const pathSegments = path.split('/').filter(Boolean);
+                const name = pathSegments.pop() || '';
+                const parentPath = pathSegments.length > 0 ? '/' + pathSegments.join('/') : (path === '/' ? null : '/');
 
-        // [修正] 只有在需要父目录时才查找
-        if (parentPath) {
-            const parentRequest = index.get(parentPath);
-            parent = await new Promise((resolve, reject) => {
-                parentRequest.onsuccess = () => resolve(parentRequest.result);
-                parentRequest.onerror = reject;
-            });
-        }
+                let parentId = null;
+                let parent = null;
 
-        // [核心修正] 如果父目录是根目录 ("/") 但它不存在，则自动创建它。
-        // 这通常发生在为一个新模块创建第一个文件/目录时。
-        if (parentPath === '/' && !parent) {
-            console.warn(`Root path "/" not found for module "${moduleName}". Creating it automatically.`);
-            const rootId = `${moduleName}-root-${uuidv4()}`;
-            const now = new Date();
-            const rootNode = {
-                id: rootId,
-                type: 'directory',
-                moduleName,
-                path: '/',
-                name: '', // 根目录没有名字
-                parentId: null,
-                createdAt: now,
-                updatedAt: now,
-                meta: {},
-            };
-            await store.put(rootNode);
-            this.events.publish(EVENTS.NODE_ADDED, { newNode: rootNode, parentId: null });
-            
-            // 将自动创建的根节点作为当前操作的父节点
-            parent = rootNode; 
-        }
+                if (parentPath) {
+                    const parentRequest = store.index('by_path').get(parentPath);
+                    // 在同一个事务中等待请求结果
+                    parent = await new Promise((res, rej) => {
+                        parentRequest.onsuccess = () => res(parentRequest.result);
+                        parentRequest.onerror = rej;
+                    });
+                }
+                
+                if (parentPath === '/' && !parent) {
+                    console.warn(`Root path "/" not found for module "${moduleName}". Creating it automatically.`);
+                    const rootId = `${moduleName}-root-${uuidv4()}`;
+                    const now = new Date();
+                    const rootNode = {
+                        id: rootId,
+                        type: 'directory',
+                        moduleName,
+                        path: '/',
+                        name: '',
+                        parentId: null,
+                        createdAt: now,
+                        updatedAt: now,
+                        meta: {},
+                    };
+                    const putRootRequest = store.put(rootNode);
+                    await new Promise((res, rej) => {
+                        putRootRequest.onsuccess = res;
+                        putRootRequest.onerror = rej;
+                    });
+                    
+                    // 注意：这里发布的事件也在事务提交之前，但由于是根节点，通常不涉及立即的后续操作
+                    this.events.publish(EVENTS.NODE_ADDED, { newNode: rootNode, parentId: null });
+                    parent = rootNode;
+                }
 
-        if (path !== '/') {
-            if (!parent) throw new Error(`Parent path "${parentPath}" not found.`);
-            parentId = parent.id;
-        }
+                if (path !== '/') {
+                    if (!parent) throw new Error(`Parent path "${parentPath}" not found.`);
+                    parentId = parent.id;
+                }
 
-        const id = `${moduleName}-${uuidv4()}`;
-        const now = new Date();
-        const node = {
-            id,
-            type,
-            moduleName,
-            path,
-            name,
-            parentId,
-            createdAt: now,
-            updatedAt: now,
-            // [修改] 确保 meta 字段总是存在
-            meta: extraData.meta || {}, 
-            content: extraData.content
-        };
-        
-        await store.put(node);
-        this.events.publish(EVENTS.NODE_ADDED, { newNode: node, parentId }); // [修改] 发布事件
-        return node;
+                const id = `${moduleName}-${uuidv4()}`;
+                const now = new Date();
+                const node = {
+                    id, type, moduleName, path, name, parentId,
+                    createdAt: now, updatedAt: now,
+                    meta: extraData.meta || {},
+                    content: extraData.content
+                };
+                
+                const putNodeRequest = store.put(node);
+                await new Promise((res, rej) => {
+                    putNodeRequest.onsuccess = res;
+                    putNodeRequest.onerror = rej;
+                });
+                
+                // 监听事务的完成事件
+                tx.oncomplete = () => {
+                    console.log(`[NodeRepository] Transaction for creating node "${node.name}" completed.`);
+                    // 只有在事务成功提交后，才发布事件并 resolve Promise
+                    this.events.publish(EVENTS.NODE_ADDED, { newNode: node, parentId });
+                    resolve(node);
+                };
+
+                tx.onerror = (event) => {
+                    console.error("[NodeRepository] Transaction failed:", event.target.error);
+                    reject(event.target.error);
+                };
+
+            } catch (error) {
+                // 如果在 try 块内部发生任何错误，中止事务并拒绝 Promise
+                tx.abort();
+                reject(error);
+            }
+        });
+        // --- END: MODIFICATION ---
     }
     
     /**
@@ -124,25 +144,40 @@ export class NodeRepository {
 
         const tx = await this.db.getTransaction(STORES.NODES, 'readwrite');
         const store = tx.objectStore(STORES.NODES);
-        const node = await new Promise((resolve, reject) => { // [FIX]
-            const request = store.get(nodeId);
-            request.onsuccess = e => resolve(e.target.result);
-            request.onerror = e => reject(e.target.error);
-        });
         
-        if (!node) throw new Error(`Node with id ${nodeId} not found.`);
+        return new Promise(async (resolve, reject) => {
+            try {
+                const node = await new Promise((res, rej) => {
+                    const req = store.get(nodeId);
+                    req.onsuccess = () => res(req.result);
+                    req.onerror = () => rej(req.error);
+                });
 
-        const updatedNode = { ...node, ...updates, updatedAt: new Date() };
-        await store.put(updatedNode);
-        
-        // [修改] 根据更新内容发布不同事件
-        if (updates.hasOwnProperty('content')) {
-             this.events.publish(EVENTS.NODE_CONTENT_UPDATED, { updatedNode });
-        } else {
-             this.events.publish(EVENTS.NODE_META_UPDATED, { updatedNode });
-        }
-        
-        return updatedNode;
+                if (!node) throw new Error(`Node with id ${nodeId} not found.`);
+
+                const updatedNode = { ...node, ...updates, updatedAt: new Date() };
+                const putRequest = store.put(updatedNode);
+                
+                await new Promise((res, rej) => {
+                   putRequest.onsuccess = res;
+                   putRequest.onerror = rej;
+                });
+
+                tx.oncomplete = () => {
+                    if (updates.hasOwnProperty('content')) {
+                        this.events.publish(EVENTS.NODE_CONTENT_UPDATED, { updatedNode });
+                    } else {
+                        this.events.publish(EVENTS.NODE_META_UPDATED, { updatedNode });
+                    }
+                    resolve(updatedNode);
+                };
+                tx.onerror = (e) => reject(e.target.error);
+                
+            } catch (error) {
+                tx.abort();
+                reject(error);
+            }
+        });
     }
 
     /**
@@ -288,78 +323,120 @@ export class NodeRepository {
     /**
      * [核心改进] 获取并重建指定模块的文件树，支持过滤。
      * @param {string} moduleName
-     * @param {(node: object) => boolean} [filter] - 一个可选的过滤器函数。如果提供了，只有函数返回 true 的文件节点会被包含在最终的树中。文件夹节点总是会被包含，以维持结构。
+     * @param {(node: object) => boolean} [filter] - 一个可选的过滤器函数。如果提供了，只有函数返回 true 的文件节点或包含这些文件的文件夹才会被包含。
      * @returns {Promise<object|null>} ModuleFSTree-like object, or null if no nodes found.
      */
     async getTreeForModule(moduleName, filter) {
         const nodes = await this.db.getAllByIndex(STORES.NODES, 'by_moduleName', moduleName);
-        if (nodes.length === 0) return null;
+        if (nodes.length === 0) {
+            console.log(`[NodeRepository] No nodes found for module "${moduleName}".`);
+            return null;
+        }
 
         let finalNodes;
 
         if (filter) {
             const nodeMap = new Map(nodes.map(node => [node.id, node]));
-            const includedFileIds = new Set();
+            const includedNodeIds = new Set();
             
-            // 第一次遍历：找出所有符合条件的文件
+            // 第一次遍历：找出所有直接满足条件的节点（文件或文件夹）
             for (const node of nodes) {
-                if (node.type === 'file' && filter(node)) {
-                    includedFileIds.add(node.id);
+                if (filter(node)) {
+                    includedNodeIds.add(node.id);
                 }
             }
 
-            const includedNodeIds = new Set(includedFileIds);
-
-            // 第二次遍历：为每个符合条件的文件，将其所有祖先文件夹都包含进来
-            includedFileIds.forEach(fileId => {
-                let current = nodeMap.get(fileId);
-                while (current && current.parentId) {
-                    includedNodeIds.add(current.parentId);
-                    current = nodeMap.get(current.parentId);
-                }
-            });
-
-            // 最终的节点列表是所有符合条件的文件及其所有祖先文件夹
-            finalNodes = nodes.filter(node => includedNodeIds.has(node.id) || node.type === 'directory');
-
-            // 如果过滤后没有任何文件，我们可能只想显示空的文件夹结构
-            // 或者根据产品需求返回 null。这里我们选择显示空文件夹结构。
-            if (includedFileIds.size === 0) {
-                 finalNodes = nodes.filter(node => node.type === 'directory');
-            }
-        } else {
-            // 如果没有过滤器，使用所有节点
-            finalNodes = nodes;
+        // 如果没有任何节点满足条件，直接返回 null
+        if (includedNodeIds.size === 0) {
+            console.log(`[NodeRepository] No nodes matched the filter for module "${moduleName}".`);
+            return null;
         }
-        
-        if (finalNodes.length === 0) return null;
 
-        // --- 以下是树构建逻辑，保持不变 ---
-        const nodeMap = new Map(finalNodes.map(node => [node.id, { ...node, children: [] }]));
-        let root = null;
+        // 第二次遍历：为每个满足条件的节点，包含其所有祖先文件夹
+        const nodesToTrace = [...includedNodeIds];
+        nodesToTrace.forEach(nodeId => {
+            let current = nodeMap.get(nodeId);
+            while (current && current.parentId) {
+                // 只追溯同一模块内的父节点
+                const parent = nodeMap.get(current.parentId);
+                if (!parent) break; // 父节点不在当前模块中
+                if (includedNodeIds.has(current.parentId)) break;
+                includedNodeIds.add(current.parentId);
+                current = parent;
+            }
+        });
+
+        finalNodes = nodes.filter(node => includedNodeIds.has(node.id));
+    } else {
+        finalNodes = nodes;
+    }
+    
+    // --- 【关键修改】树构建逻辑 ---
+    const nodeMap = new Map(finalNodes.map(node => [node.id, { ...node, children: [] }]));
+    const nodeMapIds = new Set(nodeMap.keys());
+    let root = null;
+    
+    // 第一步：尝试找到标准的根节点（path === '/'）
+    for (const node of finalNodes) {
+        if (node.path === '/') {
+            root = nodeMap.get(node.id);
+            break;
+        }
+    }
+    
+    // 第二步：构建父子关系
+    for (const node of finalNodes) {
+        const mappedNode = nodeMap.get(node.id);
+        if (node.parentId && nodeMapIds.has(node.parentId)) {
+            // 父节点在当前结果集中，建立父子关系
+            nodeMap.get(node.parentId).children.push(mappedNode);
+        } else if (!root && node.path === '/') {
+            // 如果是根节点但之前没找到
+            root = mappedNode;
+        }
+    }
+    
+    // 【核心修复】第三步：如果没有找到根节点，或者有孤儿节点，创建虚拟根
+    if (!root || finalNodes.some(n => !n.parentId || !nodeMapIds.has(n.parentId)) && finalNodes.length > 1) {
+        console.log(`[NodeRepository] Creating virtual root for module "${moduleName}"`);
         
-        // 使用 finalNodes 构建树
+        // 创建虚拟根节点
+        const virtualRoot = {
+            id: `${moduleName}-virtual-root`,
+            type: 'directory',
+            moduleName,
+            path: '/',
+            name: '',
+            parentId: null,
+            children: [],
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            meta: {}
+        };
+        
+        // 将所有没有父节点（或父节点不在结果集中）的节点作为虚拟根的子节点
         for (const node of finalNodes) {
             const mappedNode = nodeMap.get(node.id);
-            if (node.parentId && nodeMap.has(node.parentId)) {
-                nodeMap.get(node.parentId).children.push(mappedNode);
-            } else if (node.path === '/') {
-                root = mappedNode;
+            if (!node.parentId || !nodeMapIds.has(node.parentId)) {
+                // 从可能已经错误关联的位置移除
+                if (root && root.children) {
+                    const index = root.children.indexOf(mappedNode);
+                    if (index > -1) root.children.splice(index, 1);
+                }
+                // 添加到虚拟根
+                virtualRoot.children.push(mappedNode);
             }
         }
         
-        // 如果过滤导致根节点丢失（不太可能，但作为防御），找到顶层节点作为根
-        if (!root) {
-            const topLevelNodes = [];
-            for (const node of finalNodes) {
-                 if (!node.parentId || !nodeMap.has(node.parentId)) {
-                     // 假设根节点 path 为 '/'
-                     if(node.path === '/') root = nodeMap.get(node.id);
-                 }
-            }
-        }
+        root = virtualRoot;
+    }
+    
+    if (!root) {
+        console.warn(`[NodeRepository] Could not create root node for module "${moduleName}".`);
+        return null;
+    }
 
-        return root;
+    return root;
     }
 
 

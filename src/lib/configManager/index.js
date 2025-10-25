@@ -18,8 +18,8 @@ import { SearchRepository } from './repositories/SearchRepository.js';
 import { LLMRepository } from './repositories/LLMRepository.js';
 import { LLMService } from './services/LLMService.js';
 import { STORES } from './constants.js';
-// [NEW] 导入默认配置项
-import { LLM_DEFAULT_CONNECTION, LLM_DEFAULT_AGENTS, LLM_DEFAULT_ID } from '../common/configData.js';
+// [MODIFIED] 导入默认配置项
+import { LLM_DEFAULT_CONNECTIONS, LLM_DEFAULT_AGENTS } from '../common/configData.js';
 
 // [修改] 导出 ConfigManager 类，以便进行类型检查和依赖注入
 export class ConfigManager {
@@ -330,8 +330,18 @@ export class ConfigManager {
         try {
             // 1. 确保默认 Connection 存在
             const connections = await this.llmRepo.getConnections();
-            if (!connections.some(c => c.id === LLM_DEFAULT_ID)) {
-                connections.push(LLM_DEFAULT_CONNECTION);
+            const existingConnectionIds = new Set(connections.map(c => c.id));
+            let newConnectionsAdded = false;
+
+            for (const defaultConnection of LLM_DEFAULT_CONNECTIONS) {
+                if (!existingConnectionIds.has(defaultConnection.id)) {
+                    connections.push(defaultConnection);
+                    newConnectionsAdded = true;
+                    console.log(`Default LLM connection "${defaultConnection.name}" created.`);
+                }
+            }
+            
+            if (newConnectionsAdded) {
                 await this.llmRepo.saveConnections(connections);
                 console.log("Default LLM connection created.");
             }

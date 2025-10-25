@@ -66,6 +66,8 @@ export class LLMWorkspace {
         this.chatUI = await createLLMChatUI(this.options.chatContainer, {
             ...this.options.chatUIConfig,
             configManager: this.configManager,
+            // 覆盖默认的 onSubmit 行为
+            onSubmit: this._handleUserSubmit.bind(this),
         });
 
         // 3. 代理命令接口
@@ -132,11 +134,10 @@ export class LLMWorkspace {
      * @returns {Promise<object>}
      */
     async createNewSession(options = {}) {
-        if (!this.sidebarController?.sessionService) {
-            throw new Error('[LLMWorkspace] Session service 未就绪');
-        }
+        // --- START: MODIFICATION (SIMPLIFICATION) ---
+        // 移除了 if (this.currentView !== 'topic-list' ...) 的检查，
+        // 因为调用者 (_handleUserSubmit) 现在保证了视图的正确性。
 
-        const sessionService = this.sidebarController.sessionService;
         const parentId = options.parentId || null;
         const title = options.title || 'Untitled Session';
 
@@ -150,13 +151,17 @@ export class LLMWorkspace {
         // 使用 ConfigManager 的原生 API 创建节点，并传入 meta 数据
         const parentNode = parentId ? await this.configManager.getNodeById(parentId) : null;
         const parentPath = parentNode ? parentNode.path : '/';
-        const newPath = `${parentPath === '/' ? '' : parentPath}/${title}`;
+        const newPath = `${parentPath === '/' ? '' : parentPath}/${title.replace(/[\\/]/g, '-')}`; // 替换非法字符
 
-        return this.configManager.createFile(
+        // [修改] 使用 configManager 的 createFile，它现在应该接受 meta 数据
+        return this.configManager.nodeRepo.createNode(
+            'file',
             TOPIC_MODULE_NAME,
             newPath,
-            EMPTY_CHAT_CONTENT,
-            { meta: { associatedAgents } } // 直接在创建时传入元数据
+            { 
+                content: EMPTY_CHAT_CONTENT,
+                meta: { associatedAgents } 
+            }
         );
     }
 
@@ -299,6 +304,16 @@ export class LLMWorkspace {
         this.currentAgent = agent;
         this.options.sidebarContainer.innerHTML = '';
 
+    // +++ [新增] 同步更新 ChatUI 的 Agent（除了虚拟 agent） +++
+    if (agent.id !== '__all__' && this.chatUI?.inputUI) {
+        try {
+            this.chatUI.inputUI.setAgent(agent.id);
+            console.log(`[LLMWorkspace] 已同步 ChatUI 的 Agent 为: ${agent.id}`);
+        } catch (error) {
+            console.warn(`[LLMWorkspace] 同步 ChatUI Agent 失败:`, error);
+        }
+    }
+    // +++ [结束新增] +++
         // 2. 创建视图容器和 "Back" 按钮
         const viewContainer = document.createElement('div');
         viewContainer.className = 'topic-list-view-container';
@@ -320,27 +335,38 @@ export class LLMWorkspace {
             ...this.options.sidebarConfig,
             sessionListContainer: topicListContainer,
             newSessionContent: EMPTY_CHAT_CONTENT,
+            loadDataOnStart: false, // <-- 新增选项
         }, this.configManager, TOPIC_MODULE_NAME);
 
-        // [修改] 重写 sessionService 的 getTree 方法以应用过滤器
-        const originalGetTree = this.configManager.getTree.bind(this.configManager);
-        this.sidebarController.sessionService.configManager.getTree = async (moduleName) => {
-             if (moduleName !== TOPIC_MODULE_NAME) {
-                return originalGetTree(moduleName);
-            }
-            if (agent.id === '__all__') {
-                return originalGetTree(TOPIC_MODULE_NAME); // "所有" agent 不使用过滤器
-            }
-            const filter = (node) => node.meta?.associatedAgents?.includes(agent.id);
-            return this.configManager.nodeRepo.getTreeForModule(TOPIC_MODULE_NAME, filter);
-        };
-        
-        // 4. 连接 Topic 侧边栏的事件
-        this._connectTopicSidebarEvents();
-
-        // 5. 启动侧边栏，这会自动加载并可能选中一个 Topic
-        const activeItem = await this.sidebarController.start();
+        // 2. 启动 sidebarController。它现在只会初始化组件，不会加载数据。
+        await this.sidebarController.start();
         this.sidebarController.setTitle(`${agent.name}`);
+        
+        // 3. LLMWorkspace 负责获取过滤后的数据
+        let treeData = null;
+        try {
+            if (agent.id === '__all__') {
+                // 获取所有 topics
+                treeData = await this.configManager.getTree(TOPIC_MODULE_NAME);
+            } else {
+                // 获取特定 agent 的 topics
+                const filter = (node) => node.meta?.associatedAgents?.includes(agent.id);
+                // 注意：getTreeForModule 是 nodeRepo 的方法
+                treeData = await this.configManager.nodeRepo.getTreeForModule(TOPIC_MODULE_NAME, filter);
+            }
+        } catch (error) {
+            console.error(`[LLMWorkspace] 获取 Agent "${agent.name}" 的数据树失败:`, error);
+        }
+
+        // 4. 将获取到的数据手动加载到 SessionUI 中
+        // sessionService.handleRepositoryLoad 是为此目的设计的完美方法
+        if (this.sidebarController.sessionService) {
+            await this.sidebarController.sessionService.handleRepositoryLoad(treeData);
+        }
+
+        // 5. 连接事件并更新 ChatUI
+        this._connectTopicSidebarEvents();
+        const activeItem = this.sidebarController.getActiveSession();
 
         // 6. 根据是否有激活项来更新 ChatUI
         if (activeItem) {
@@ -446,36 +472,101 @@ export class LLMWorkspace {
             return;
         }
 
-        const sessionService = this.sidebarController.sessionService;
-        const activeItem = sessionService.findItemById(this.activeTopicId);
-        if (!activeItem) return;
-
-        const newContent = this.chatUI.getText();
-        if (activeItem.content?.data === newContent) return; // 内容未变，不保存
-
         try {
+            // 2. 从 UI 获取最新数据
+            const newContent = this.chatUI.getText();
             const summary = await this.chatUI.getSummary() || '[空对话]';
             const searchableText = await this.chatUI.getSearchableText() || '';
             
-            await sessionService.updateSessionContentAndMeta(
-                this.activeTopicId,
-                { content: newContent, meta: { summary, searchableText } }
-            );
+            // 3. 直接调用 ConfigManager 进行原子更新，这是最可靠的方式
+            await this.configManager.updateNodeData(this.activeTopicId, {
+                content: newContent,
+                meta: { summary, searchableText }
+            });
 
-            // 自动重命名
+            // 4. (可选) 自动重命名逻辑
+            //    现在我们需要从 sessionService 获取 UI 状态来进行判断
+            const sessionService = this.sidebarController.sessionService;
             const currentItem = sessionService.findItemById(this.activeTopicId);
+            
+            // 确保 currentItem 存在于 UI store 中再进行重命名
             if (currentItem && currentItem.metadata.title.startsWith('Untitled') && summary && summary !== '[空对话]') {
                 const newTitle = summary.substring(0, 50) + (summary.length > 50 ? '...' : '');
                 if (newTitle.trim()) {
+                    // 重命名也通过 sessionService，以确保 UI 事件正确触发
                     await sessionService.renameItem(this.activeTopicId, newTitle.trim());
                     this.chatUI.setTitle(newTitle.trim());
                 }
             }
-
-            console.log(`[LLMWorkspace] ✅ 会话已保存: ${this.activeSessionId}`);
+            // `activeSessionId` 变量不存在，修正为 `activeTopicId`
+            console.log(`[LLMWorkspace] ✅ 会话已保存: ${this.activeTopicId}`);
         } catch (error) {
-            console.error('[LLMWorkspace] ❌ 保存会话失败:', error);
+            // 错误日志中也使用正确的变量
+            console.error(`[LLMWorkspace] ❌ 保存会话失败 (${this.activeTopicId}):`, error);
         }
+    }
+
+    /**
+     * [新增] 处理用户从 InputUI 提交的请求，包含自动创建逻辑。
+     * @param {object} data - 来自 LLMInputUI 的提交数据
+     * @private
+     */
+    async _handleUserSubmit(data) {
+        // 步骤 1: 检查是否需要创建新 Topic
+        if (!this.activeTopicId) {
+            console.log('[LLMWorkspace] 没有活动的 Topic，正在自动创建...');
+            try {
+                // 1. 如果当前在 Agent 列表视图，必须先切换视图
+                if (this.currentView === 'agent-list') {
+                    console.log('[LLMWorkspace] 当前在 Agent 列表视图，将切换到默认 Agent...');
+                    // 找到默认 Agent（或任何你希望的后备 Agent）
+                    const agents = await this.configManager.llm.getAgents();
+                    const defaultAgent = agents.find(a => a.id === 'default') || agents[0];
+
+                    if (!defaultAgent) {
+                        throw new Error("无法找到任何可用的 Agent 来创建新会话。");
+                    }
+                    
+                    // 2. 异步切换到该 Agent 的 Topic 视图。
+                    //    这个方法会重置 sidebarController 并设置好正确的环境。
+                    await this._showTopicList(defaultAgent);
+                }
+
+                // 3. 现在可以安全地创建新 Topic，因为我们保证在 Topic 列表视图中
+                const tempTitle = data.text.substring(0, 50) || 'Untitled Session';
+
+                // b. 调用 createNewSession 来创建文件
+                const newTopic = await this.createNewSession({ title: tempTitle });
+
+                // c. 更新状态
+                this.activeTopicId = newTopic.id;
+                
+                // d. [重要] 通知 sidebar 刷新并选中新项
+                // SessionService 的 createSession 已经通过事件通知了 store，
+                // store 更新后 SessionList 会自动渲染。我们只需要确保它被选中。
+                if (this.sidebarController?.sessionService) {
+                    this.sidebarController.sessionService.selectSession(newTopic.id);
+                }
+                
+                console.log(`[LLMWorkspace] ✅ 自动创建 Topic 成功: ${newTopic.id}`);
+            } catch (error) {
+                console.error('[LLMWorkspace] ❌ 自动创建 Topic 失败:', error);
+                // 可选：在 UI 中向用户显示错误
+                this.chatUI.historyUI.addErrorMessage('创建新会话失败，请重试。');
+                return; // 创建失败则中止发送
+            }
+        }
+
+        // 步骤 2: 不论是新创建还是已存在，现在都继续发送消息
+        // 调用 ChatUI 内部的原始 handleSubmit 方法来处理请求-响应周期
+        // 我们通过 sendMessage 公共 API 来触发，因为它封装了内部逻辑
+        await this.chatUI.sendMessage(data.text, {
+            attachments: data.attachments,
+            agent: data.agent,
+            toolChoice: data.toolChoice,
+            systemPrompt: data.systemPrompt,
+            sendWithoutContext: data.sendWithoutContext,
+        });
     }
 
     /**

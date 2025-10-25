@@ -69,7 +69,9 @@ export class LLMChatUI extends IEditor {
         this.options = options; // 保存选项以备 init 使用
         this.agents = []; // [新增] 用于缓存 Agent 列表
 
-        // --- 3. 文件服务配置 ---
+        // [修改] 将 onSubmit 从 options 中分离出来，允许外部重写
+        this.onSubmitHandler = options.onSubmit || this.handleSubmit.bind(this);
+        
         this.fileStorage = options.fileStorage || new DefaultFileStorageAdapter();
         
         // --- 4. 同步创建子组件 DOM ---
@@ -122,7 +124,7 @@ export class LLMChatUI extends IEditor {
             configManager: this.configManager, // <-- [依赖注入]
             // agents 选项现在是可选的，因为 inputUI 会自己从 configManager 加载
             initialAgent: this.currentAgentId,
-            onSubmit: this.handleSubmit.bind(this),
+            onSubmit: this.onSubmitHandler, // <-- 使用可重写的 handler
             on: {
                 stopRequested: this.handleStopRequest.bind(this),
                 agentChanged: (agentId) => this._handleAgentChange(agentId),
@@ -236,8 +238,10 @@ export class LLMChatUI extends IEditor {
         try {
             // 3. 解析 JSONL: 按行分割，过滤空行，然后逐行解析 JSON
             const lines = jsonlContent.split('\n').filter(line => line.trim() !== '');
-            const pairs = lines.map(line => MessagePair.fromJSON(JSON.parse(line)));
-            this.historyUI.loadFromPairs(pairs); // 假设 historyUI 有一个从 pairs 加载的方法
+            const pairDataArray = lines.map(line => JSON.parse(line));
+            
+            // 步骤2：调用 historyUI 正确的 `loadHistory` 方法，并传递原始数据数组
+            this.historyUI.loadHistory(pairDataArray);
         } catch (error) {
             console.error('[LLMChatUI] 解析 JSONL 内容失败:', error);
             this.historyUI.messagesEl.innerHTML = `<div class="llm-historyui__error-message">加载会话失败：数据格式损坏。</div>`;
@@ -643,7 +647,7 @@ export async function createLLMChatUI(element, options = {}) {
     // 3. 创建实例，并注入已初始化的服务
     const chatUIInstance = new LLMChatUI(element, {
         ...options,
-        configManager: configManager, // 依赖注入
+        configManager: configManager,
     });
 
     // 4. 调用实例的异步初始化方法
