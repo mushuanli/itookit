@@ -39,7 +39,8 @@ export class NodeRepository {
                 let parent = null;
 
                 if (parentPath) {
-                    const parentRequest = store.index('by_path').get(parentPath);
+                    // [修改] 查询父节点时，也应使用复合索引以确保正确性
+                    const parentRequest = store.index('by_module_path').get([moduleName, parentPath]);
                     // 在同一个事务中等待请求结果
                     parent = await new Promise((res, rej) => {
                         parentRequest.onsuccess = () => res(parentRequest.result);
@@ -78,11 +79,45 @@ export class NodeRepository {
                     parentId = parent.id;
                 }
 
+                let finalPath = path;
+                let finalName = name;
+                let attempt = 0;
+                const maxAttempts = 100;
+
+                while (attempt < maxAttempts) {
+                    // [修改] 检查当前路径在当前模块下是否存在
+                    const existingNode = await new Promise((res, rej) => {
+                        const checkRequest = store.index('by_module_path').get([moduleName, finalPath]);
+                        checkRequest.onsuccess = () => res(checkRequest.result);
+                        checkRequest.onerror = rej;
+                    });
+
+                    if (!existingNode) {
+                        break;
+                    }
+
+                    attempt++;
+                    finalName = `${name} (${attempt})`;
+                    finalPath = parentPath === '/' ? `/${finalName}` : `${parentPath}/${finalName}`;
+                    
+                    console.log(`[NodeRepository] Path "${path}" exists in module "${moduleName}", trying "${finalPath}"`);
+                }
+
+                if (attempt >= maxAttempts) {
+                    throw new Error(`Failed to create node: too many path conflicts for "${path}" in module "${moduleName}"`);
+                }
+
                 const id = `${moduleName}-${uuidv4()}`;
                 const now = new Date();
                 const node = {
-                    id, type, moduleName, path, name, parentId,
-                    createdAt: now, updatedAt: now,
+                    id, 
+                    type, 
+                    moduleName, 
+                    path: finalPath,
+                    name: finalName,
+                    parentId,
+                    createdAt: now, 
+                    updatedAt: now,
                     meta: extraData.meta || {},
                     content: extraData.content
                 };
@@ -194,9 +229,22 @@ export class NodeRepository {
         const newParent = await new Promise(r => store.get(newParentId).onsuccess = e => r(e.target.result));
         
         if (!nodeToMove || !newParent) throw new Error("Node or new parent not found.");
+        if (nodeToMove.moduleName !== newParent.moduleName) {
+            throw new Error("Cannot move nodes between different modules yet."); // 跨模块移动是更复杂的操作
+        }
 
         const oldPathPrefix = nodeToMove.path;
         const newPath = `${newParent.path === '/' ? '' : newParent.path}/${nodeToMove.name}`;
+
+        // [新增] 检查移动后的路径是否冲突
+        const existingNodeAtPath = await new Promise((res, rej) => {
+            const req = store.index('by_module_path').get([nodeToMove.moduleName, newPath]);
+            req.onsuccess = () => res(req.result);
+            req.onerror = rej;
+        });
+        if (existingNodeAtPath) {
+            throw new Error(`Move failed: Path "${newPath}" already exists in module "${nodeToMove.moduleName}".`);
+        }
 
         // 1. 更新节点本身
         nodeToMove.parentId = newParentId;
@@ -246,6 +294,17 @@ export class NodeRepository {
         const oldPath = nodeToRename.path;
         const parentPath = oldPath.substring(0, oldPath.lastIndexOf('/')) || '/';
         const newPath = `${parentPath === '/' ? '' : parentPath}/${newName}`;
+
+        // [修改] 检查重命名后的路径是否在同一模块下冲突
+        const existingNode = await new Promise((res, rej) => {
+            const checkRequest = store.index('by_module_path').get([nodeToRename.moduleName, newPath]);
+            checkRequest.onsuccess = () => res(checkRequest.result);
+            checkRequest.onerror = rej;
+        });
+
+        if (existingNode && existingNode.id !== nodeId) {
+            throw new Error(`Rename failed: Path "${newPath}" already exists in module "${nodeToRename.moduleName}".`);
+        }
 
         // 更新自身
         nodeToRename.name = newName;
@@ -297,8 +356,13 @@ export class NodeRepository {
         // 如果是目录，找到所有子孙节点
         if (node.type === 'directory') {
             const pathIndex = nodesStore.index('by_path');
+            // [修改] 查找子节点时也需要考虑moduleName，以避免潜在的跨模块问题
+            // 但由于当前逻辑是先找到父节点，再用父节点的path前缀匹配，所以暂时是安全的。
+            // 理论上更安全的做法是 getAll(by_moduleName) 然后在内存中过滤path。
             const range = IDBKeyRange.bound(node.path + '/', node.path + '/\uffff');
-            const children = await new Promise(r => pathIndex.getAll(range).onsuccess = e => r(e.target.result));
+            const allChildrenInPath = await new Promise(r => pathIndex.getAll(range).onsuccess = e => r(e.target.result));
+            // 过滤出同一模块的子节点
+            const children = allChildrenInPath.filter(child => child.moduleName === node.moduleName);
             nodesToDelete.push(...children);
         }
 
@@ -346,97 +410,84 @@ export class NodeRepository {
                 }
             }
 
-        // 如果没有任何节点满足条件，直接返回 null
-        if (includedNodeIds.size === 0) {
-            console.log(`[NodeRepository] No nodes matched the filter for module "${moduleName}".`);
+            if (includedNodeIds.size === 0) {
+                console.log(`[NodeRepository] No nodes matched the filter for module "${moduleName}".`);
+                return null;
+            }
+
+            const nodesToTrace = [...includedNodeIds];
+            nodesToTrace.forEach(nodeId => {
+                let current = nodeMap.get(nodeId);
+                while (current && current.parentId) {
+                    const parent = nodeMap.get(current.parentId);
+                    if (!parent) break;
+                    if (includedNodeIds.has(current.parentId)) break;
+                    includedNodeIds.add(current.parentId);
+                    current = parent;
+                }
+            });
+
+            finalNodes = nodes.filter(node => includedNodeIds.has(node.id));
+        } else {
+            finalNodes = nodes;
+        }
+    
+        const nodeMap = new Map(finalNodes.map(node => [node.id, { ...node, children: [] }]));
+        const nodeMapIds = new Set(nodeMap.keys());
+        let root = null;
+    
+        for (const node of finalNodes) {
+            if (node.path === '/') {
+                root = nodeMap.get(node.id);
+                break;
+            }
+        }
+    
+        for (const node of finalNodes) {
+            const mappedNode = nodeMap.get(node.id);
+            if (node.parentId && nodeMapIds.has(node.parentId)) {
+                nodeMap.get(node.parentId).children.push(mappedNode);
+            } else if (!root && node.path === '/') {
+                root = mappedNode;
+            }
+        }
+    
+        if (!root || finalNodes.some(n => !n.parentId || !nodeMapIds.has(n.parentId)) && finalNodes.length > 1) {
+            console.log(`[NodeRepository] Creating virtual root for module "${moduleName}"`);
+            
+            const virtualRoot = {
+                id: `${moduleName}-virtual-root`,
+                type: 'directory',
+                moduleName,
+                path: '/',
+                name: '',
+                parentId: null,
+                children: [],
+                createdAt: new Date(),
+                updatedAt: new Date(),
+                meta: {}
+            };
+            
+            for (const node of finalNodes) {
+                const mappedNode = nodeMap.get(node.id);
+                if (!node.parentId || !nodeMapIds.has(node.parentId)) {
+                    if (root && root.children) {
+                        const index = root.children.indexOf(mappedNode);
+                        if (index > -1) root.children.splice(index, 1);
+                    }
+                    virtualRoot.children.push(mappedNode);
+                }
+            }
+            
+            root = virtualRoot;
+        }
+    
+        if (!root) {
+            console.warn(`[NodeRepository] Could not create root node for module "${moduleName}".`);
             return null;
         }
 
-        // 第二次遍历：为每个满足条件的节点，包含其所有祖先文件夹
-        const nodesToTrace = [...includedNodeIds];
-        nodesToTrace.forEach(nodeId => {
-            let current = nodeMap.get(nodeId);
-            while (current && current.parentId) {
-                // 只追溯同一模块内的父节点
-                const parent = nodeMap.get(current.parentId);
-                if (!parent) break; // 父节点不在当前模块中
-                if (includedNodeIds.has(current.parentId)) break;
-                includedNodeIds.add(current.parentId);
-                current = parent;
-            }
-        });
-
-        finalNodes = nodes.filter(node => includedNodeIds.has(node.id));
-    } else {
-        finalNodes = nodes;
-    }
-    
-    // --- 【关键修改】树构建逻辑 ---
-    const nodeMap = new Map(finalNodes.map(node => [node.id, { ...node, children: [] }]));
-    const nodeMapIds = new Set(nodeMap.keys());
-    let root = null;
-    
-    // 第一步：尝试找到标准的根节点（path === '/'）
-    for (const node of finalNodes) {
-        if (node.path === '/') {
-            root = nodeMap.get(node.id);
-            break;
-        }
-    }
-    
-    // 第二步：构建父子关系
-    for (const node of finalNodes) {
-        const mappedNode = nodeMap.get(node.id);
-        if (node.parentId && nodeMapIds.has(node.parentId)) {
-            // 父节点在当前结果集中，建立父子关系
-            nodeMap.get(node.parentId).children.push(mappedNode);
-        } else if (!root && node.path === '/') {
-            // 如果是根节点但之前没找到
-            root = mappedNode;
-        }
-    }
-    
-    // 【核心修复】第三步：如果没有找到根节点，或者有孤儿节点，创建虚拟根
-    if (!root || finalNodes.some(n => !n.parentId || !nodeMapIds.has(n.parentId)) && finalNodes.length > 1) {
-        console.log(`[NodeRepository] Creating virtual root for module "${moduleName}"`);
-        
-        // 创建虚拟根节点
-        const virtualRoot = {
-            id: `${moduleName}-virtual-root`,
-            type: 'directory',
-            moduleName,
-            path: '/',
-            name: '',
-            parentId: null,
-            children: [],
-            createdAt: new Date(),
-            updatedAt: new Date(),
-            meta: {}
-        };
-        
-        // 将所有没有父节点（或父节点不在结果集中）的节点作为虚拟根的子节点
-        for (const node of finalNodes) {
-            const mappedNode = nodeMap.get(node.id);
-            if (!node.parentId || !nodeMapIds.has(node.parentId)) {
-                // 从可能已经错误关联的位置移除
-                if (root && root.children) {
-                    const index = root.children.indexOf(mappedNode);
-                    if (index > -1) root.children.splice(index, 1);
-                }
-                // 添加到虚拟根
-                virtualRoot.children.push(mappedNode);
-            }
-        }
-        
-        root = virtualRoot;
-    }
-    
-    if (!root) {
-        console.warn(`[NodeRepository] Could not create root node for module "${moduleName}".`);
-        return null;
-    }
-
-    return root;
+        return root;
     }
 
 

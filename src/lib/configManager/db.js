@@ -48,12 +48,10 @@ class Database {
                         this.createInitialSchema(db);
                         // 注意：这里没有 break，以便新数据库可以顺序执行所有升级
                     
-                    /*
-                    // 未来升级示例 (DB_VERSION 升到 2 时取消注释)
-                    case 1: // 从版本 1 升级到版本 2
+                    // [新增] 从版本 1 升级到版本 2 的逻辑
+                    case 1: 
                         this.upgradeToVersion2(db, tx);
                         break;
-                    */
                 }
                 console.log("Database upgrade complete.");
             };
@@ -81,13 +79,33 @@ class Database {
     }
 
     /**
-     * @private 示例：升级到版本 2 的逻辑
+     * @private [新增] 升级到版本 2 的逻辑
      */
     upgradeToVersion2(db, tx) {
         console.log("Applying schema changes for version 2...");
-        // 示例：给 'nodes' 表添加一个新索引
-        // const nodesStore = tx.objectStore('nodes');
-        // nodesStore.createIndex('by_meta_custom_field', 'meta.customField', { unique: false });
+        try {
+            // 获取 'nodes' 表的事务对象
+            const nodesStore = tx.objectStore('nodes');
+            
+            // 1. 删除旧的 'by_path' 唯一索引
+            if (nodesStore.indexNames.contains('by_path')) {
+                nodesStore.deleteIndex('by_path');
+                console.log("Deleted old index 'by_path'.");
+            }
+            
+            // 2. 创建新的 'by_path' 非唯一索引
+            nodesStore.createIndex('by_path', 'path', { unique: false });
+            console.log("Created new non-unique index 'by_path'.");
+
+            // 3. 创建新的复合唯一索引 'by_module_path'
+            nodesStore.createIndex('by_module_path', ['moduleName', 'path'], { unique: true });
+            console.log("Created new composite unique index 'by_module_path'.");
+
+        } catch (error) {
+            console.error("Failed to upgrade to version 2:", error);
+            // 如果出错，可以决定是否中止事务
+            tx.abort();
+        }
     }
 
     async getTransaction(storeNames, mode = 'readonly') {

@@ -8,7 +8,7 @@
 export const DB_NAME = 'MindOS';
 
 // 数据库版本。每次 schema 变更时，都需要增加此版本号。
-export const DB_VERSION = 1;
+export const DB_VERSION = 2; // [修改] 版本号 +1
 
 // 定义所有的 ObjectStore (表) 和其索引
 export const OBJECT_STORES = [
@@ -23,9 +23,11 @@ export const OBJECT_STORES = [
         indexes: [
             { name: 'by_moduleName', keyPath: 'moduleName', unique: false },
             { name: 'by_parentId', keyPath: 'parentId', unique: false },
-            { name: 'by_path', keyPath: 'path', unique: true }, // 路径必须唯一
+            { name: 'by_path', keyPath: 'path', unique: false }, // [修改] 移除唯一约束
             { name: 'by_type', keyPath: 'type', unique: false },
-            { name: 'by_updatedAt', keyPath: 'updatedAt', unique: false }
+            { name: 'by_updatedAt', keyPath: 'updatedAt', unique: false },
+            // [新增] 复合唯一索引，确保在同一个 module 内路径唯一
+            { name: 'by_module_path', keyPath: ['moduleName', 'path'], unique: true }
         ]
     },
     {
