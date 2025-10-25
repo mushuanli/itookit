@@ -456,7 +456,8 @@ export class LLMHistoryUI extends IEditor {
             pair.assistantMessage.startStreaming();
             pair.assistantMessage.hasError = false;
             
-            const context = contextOverride !== null ? contextOverride : this._buildContext(agentDefinition.config.systemPrompt);
+            // [关键修改] 将完整的 agentDefinition 传递给 _buildContext
+            const context = contextOverride !== null ? contextOverride : this._buildContext(agentDefinition);
 
             // Ensure model name is valid
             const modelName = agentDefinition.config.modelName;
@@ -473,7 +474,7 @@ export class LLMHistoryUI extends IEditor {
                 options: { signal: combinedSignal }
             });
             streamStarted = true;
-        
+
             for await (const chunk of stream) {
                 const delta = chunk.choices[0]?.delta;
                 
@@ -1059,35 +1060,48 @@ export class LLMHistoryUI extends IEditor {
         }
     }
     
-    _buildContext(agentSystemPrompt) {
+    /**
+     * [关键修改] 构建发送给 LLM 的上下文消息。
+     * @param {import('../../../configManager/shared/types.js').LLMAgentDefinition} agentDefinition - 当前 Agent 的完整定义。
+     * @private
+     */
+    _buildContext(agentDefinition) {
         if (typeof this.contextBuilder === 'function') {
-            return this.contextBuilder(this.pairs, agentSystemPrompt);
+            return this.contextBuilder(this.pairs, agentDefinition);
         }
         
         const messages = [];
         const lastPair = this.pairs.length > 0 ? this.pairs[this.pairs.length - 1] : null;
         
-        const systemPrompt = lastPair?.metadata.systemPrompt || agentSystemPrompt;
+        // 从 agentDefinition 获取系统提示
+        const systemPrompt = lastPair?.metadata.systemPrompt || agentDefinition?.config?.systemPrompt;
         if (systemPrompt) {
             messages.push({ role: 'system', content: systemPrompt });
         }
         
         let relevantPairs = this.pairs;
-        if (this.contextStrategy === 'lastN' && this.contextWindowSize > 0) {
-            // Calculate number of pairs to include, roughly based on window size
-            // Each pair contributes ~2 messages (user + assistant)
+
+        // --- 新增：优先使用 agent.maxHistoryLength ---
+        const maxHistory = agentDefinition?.maxHistoryLength;
+
+        if (typeof maxHistory === 'number' && maxHistory >= 0) {
+            // 如果 maxHistoryLength=0, slice(-0) 返回空数组，正确。
+            // 如果 maxHistoryLength=10, slice(-10) 返回最后10个元素，正确。
+            relevantPairs = this.pairs.slice(-maxHistory);
+        }
+        // --- 回退：如果 agent 未设置，则使用旧的 UI 级配置 ---
+        else if (this.contextStrategy === 'lastN' && this.contextWindowSize > 0) {
             const numMessagesToInclude = this.contextWindowSize;
             const numPairsToInclude = Math.ceil(numMessagesToInclude / 2);
             relevantPairs = this.pairs.slice(-numPairsToInclude);
         }
         
         relevantPairs.forEach(pair => {
-            // Ensure user message content is not empty before adding
+            // 确保用户消息内容不为空再添加
             if (pair.userMessage.content || pair.userMessage.attachments.length > 0) {
                  messages.push({ role: 'user', content: pair.userMessage.content, attachments: pair.userMessage.attachments });
             }
-            // Only add assistant message if it has content AND it's not the last pair in the history
-            // (because the last pair's assistant message is currently being streamed/generated)
+            // 只有在助理消息有内容，且不是当前正在生成的最后一条时才添加
             if (pair.assistantMessage.content && pair !== lastPair) {
                 messages.push({ role: 'assistant', content: pair.assistantMessage.content });
             }

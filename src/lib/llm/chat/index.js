@@ -67,6 +67,7 @@ export class LLMChatUI extends IEditor {
         this.activeRequestController = null;
         this._subscriptions = []; // 用于管理自身的事件订阅
         this.options = options; // 保存选项以备 init 使用
+        this.agents = []; // [新增] 用于缓存 Agent 列表
 
         // --- 3. 文件服务配置 ---
         this.fileStorage = options.fileStorage || new DefaultFileStorageAdapter();
@@ -94,10 +95,15 @@ export class LLMChatUI extends IEditor {
         // [核心修改] `LLMInputUI` 和 `createHistoryUI` 都是异步的，必须在此处处理
 
         // 获取初始选中的 Agent ID
-        const allAgents = await this.llmService.getAgents();
+        this.agents = await this.llmService.getAgents(); // [修改] 获取并缓存
+        const allAgents = this.agents;
+        
+        // [关键修改] 优先选择 'default' agent 作为后备，而不是列表中的第一个
+        const primaryDefaultAgent = allAgents.find(a => a.id === 'default');
         const validInitialAgent = this.options.initialAgent && allAgents.some(a => a.id === this.options.initialAgent)
             ? this.options.initialAgent
-            : allAgents[0]?.id;
+            : (primaryDefaultAgent?.id || allAgents[0]?.id);
+        
         this.currentAgentId = validInitialAgent;
 
         // --- 5. 异步实例化子组件，并将 configManager 注入下去 ---
@@ -135,6 +141,8 @@ export class LLMChatUI extends IEditor {
         this._proxyEvents();
         // +++ 3b. MODIFIED: Bind agent sync events +++
         this._bindAgentSyncEvents();
+        // [新增] 订阅 Agent 列表变更以保持缓存同步
+        this._subscribeToAgentChanges();
         
         // --- 9. [已移除] 自动加载和保存逻辑 ---
         // 初始数据加载现在通过宿主调用 setText(content) 完成。
@@ -173,11 +181,11 @@ export class LLMChatUI extends IEditor {
     }
     
     /**
-     * [新增] 获取当前所有可用的 Agent 定义列表。
+     * [修改] 获取当前所有可用的 Agent 定义列表。
      * @returns {import('../../configManager/shared/types.js').LLMAgentDefinition[]}
      */
     getAvailableAgents() {
-        return this.configManager.llm.config.agents || [];
+        return this.agents || [];
     }
 
     /**
@@ -544,6 +552,22 @@ export class LLMChatUI extends IEditor {
         this.historyUI.on('agentChanged', (payload) => {
             this._handleAgentChange(payload.agentId);
         });
+    }
+
+    /**
+     * [新增] 订阅 Agent 配置变更以更新内部缓存
+     * @private
+     */
+    _subscribeToAgentChanges() {
+        const unsubscribe = this.configManager.events.subscribe(
+            'llm:config_updated',
+            (payload) => {
+                if (payload && payload.key === 'agents') {
+                    this.agents = payload.value;
+                }
+            }
+        );
+        this._subscriptions.push(unsubscribe);
     }
 
     /** 代理子组件事件，并映射为 IEditor 事件 @private */

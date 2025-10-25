@@ -29,7 +29,25 @@
  * @property {string} id - 模型的唯一标识符 (例如, "gpt-4o")。
  * @property {string} name - 一个用户友好的显示名称 (例如, "GPT-4 Omni")。
  */
-
+/**
+ * @typedef {object} LLMModelConfig
+ * @description LLM 模型的详细配置。
+ * @property {string} connectionId - LLMProviderConnection 的 ID。
+ * @property {string} modelName - 模型标识符（如 "gpt-4o", "claude-sonnet-4"）。
+ * @property {string} [systemPrompt] - 系统提示，指导 Agent 行为。
+ * @property {number} [temperature=0.7] - 采样温度（0.0-2.0）。
+ * @property {number} [maxTokens=2048] - 最大输出令牌数。
+ * @property {number} [topP=1.0] - 核采样参数（0.0-1.0）。
+ * @property {number} [topK] - Top-K 采样参数。
+ * @property {number} [frequencyPenalty=0] - 频率惩罚（-2.0 到 2.0）。
+ * @property {number} [presencePenalty=0] - 存在惩罚（-2.0 到 2.0）。
+ * @property {string[]} [stopSequences] - 停止序列列表。
+ * @property {number} [seed] - 随机种子（用于可复现性）。
+ * @property {boolean} [streaming=false] - 是否启用流式输出。
+ * @property {number} [timeout=60000] - 请求超时时间（毫秒）。
+ * @property {object} [responseFormat] - 响应格式配置（如 JSON mode）。
+ * @property {LLMToolsConfig} [tools] - 工具调用配置。
+ */
 /**
  * @typedef {object} LLMAgentDefinition
  * @description 定义一个可复用的 LLM Agent 模板。
@@ -38,11 +56,8 @@
  * @property {string} [description] - 简短的说明。
  * @property {string} [icon] - 一个 emoji 或图标名称。
  * @property {string[]} [tags] - 用于分类的标签列表。
- * @property {object} config - 此 Agent 将使用的 LLMClient 的配置。
- * @property {string} config.connectionId - 要使用的 LLMProviderConnection 的 ID。
- * @property {string} config.modelName - 要使用的具体模型标识符 (例如, "gpt-4o")。
- * @property {string} [config.systemPrompt] - 用于指导 Agent 行为的系统提示。
- * @property {number} [config.temperature] - 采样温度。
+ * @property {number} [maxHistoryLength=10] - 表示发送给llm server时发送的最大历史消息数量。不设置时不限制，如果设置只发送多少轮历史记录。
+ * @property {LLMModelConfig} config - 此 Agent 将使用的 LLMClient 的配置。
  * @property {object} interface - 定义此 Agent 如何连接到其他节点。
  * @property {LLMAgentInputOutput[]} interface.inputs - Agent 节点的输入槽。
  * @property {LLMAgentInputOutput[]} interface.outputs - Agent 节点的输出槽。

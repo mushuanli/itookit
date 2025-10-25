@@ -3,13 +3,35 @@
  * @description Default options for the LLMInputUI component.
  */
 
+/** @typedef {import('../../configManager/shared/types.js').LLMAgentDefinition} LLMAgentDefinition */
+/** @typedef {import('../../configManager/shared/types.js').LLMTool} LLMTool */ // 假设LLMTool类型存在
+
+/**
+ * @typedef {object} LLMInputUIOptions
+ * @property {LLMTool[]} tools
+ * @property {object.<string, string>} templates
+ * @property {object.<string, string>} personas
+ * @property {LLMAgentDefinition[]} agents
+ * @property {string} initialAgent
+ * @property {string} initialText
+ * @property {boolean} disableAttachments
+ * @property {object} attachments
+ * @property {number} attachments.maxSizeMB
+ * @property {number} attachments.maxCount
+ * @property {string[]} attachments.mimeTypes
+ * @property {object} localization
+ * @property {object} theme
+ * @property {object} classNames
+ * @property {object} on
+ */
+
+/** @type {LLMInputUIOptions} */
 export const defaultOptions = {
     tools: [],
     templates: {},
     personas: {},
-    // +++ NEW: Add agents list to options +++
+    /** @type {LLMAgentDefinition[]} */
     agents: [],
-    // +++ RENAMED: initialModel -> initialAgent +++
     initialAgent: '',
     initialText: '',
     disableAttachments: false,

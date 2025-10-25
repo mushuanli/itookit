@@ -9,6 +9,7 @@
 import { Batches } from 'openai/resources.js';
 
 export const PROTECTED_TAGS = ['default'];
+export const PROTECTED_AGENT_IDS = ['default', 'default-temp'];
 
 export const LLM_PROVIDER_DEFAULTS = {
     openai: {
@@ -95,7 +96,10 @@ export const LLM_PROVIDER_DEFAULTS = {
 // +++ 新增: 默认值定义 +++
 
 export const LLM_DEFAULT_ID = 'default';
+export const LLM_TEMP_DEFAULT_ID = 'default-temp';
 const LLM_DEFAULT_NAME = '默认';
+const LLM_TEMP_DEFAULT_NAME = '临时';
+
 
 /**
  * 决定默认使用哪个 provider 的辅助函数, 可以修改这里改变安装默认值
@@ -126,25 +130,44 @@ export const LLM_DEFAULT_CONNECTION = {
 };
 
 /**
- * @type {import('../configManager/shared/types.js').LLMAgentDefinition}
- * 默认智能体的模板，如果不存在则会被创建。
+ * @type {Array<import('../configManager/shared/types.js').LLMAgentDefinition>}
+ * 默认智能体的模板数组，如果不存在则会被创建。
  */
-export const LLM_DEFAULT_AGENT = {
-    id: LLM_DEFAULT_ID,
-    name: LLM_DEFAULT_NAME,
-    icon: '🤖',
-    description: '系统默认智能体',
-    tags: ['default'],
-    config: {
-        connectionId: LLM_DEFAULT_ID, // 链接到默认的 connection
-        modelName: (LLM_DEFAULT_CONNECTION.availableModels?.[0]?.id) || "", // 使用默认连接的第一个可用模型
-        systemPrompt: "You are a helpful assistant."
+export const LLM_DEFAULT_AGENTS = [
+    {
+        id: LLM_DEFAULT_ID,
+        name: LLM_DEFAULT_NAME,
+        icon: '🤖',
+        description: '系统默认智能体',
+        tags: ['default'],
+        config: {
+            connectionId: LLM_DEFAULT_ID,
+            modelName: (LLM_DEFAULT_CONNECTION.availableModels?.[0]?.id) || "",
+            systemPrompt: "You are a helpful assistant."
+        },
+        interface: {
+            inputs: [{ name: "prompt", type: "string" }],
+            outputs: [{ name: "response", type: "string" }]
+        }
     },
-    interface: {
-        inputs: [{ name: "prompt", type: "string" }],
-        outputs: [{ name: "response", type: "string" }]
+    {
+        id: LLM_TEMP_DEFAULT_ID,
+        name: LLM_TEMP_DEFAULT_NAME,
+        icon: '⚡️',
+        description: '一次性问答。',
+        tags: ['default'],
+        maxHistoryLength: 0,
+        config: {
+            connectionId: LLM_DEFAULT_ID,
+            modelName: (LLM_DEFAULT_CONNECTION.availableModels?.[0]?.id) || "",
+            systemPrompt: "You are a helpful assistant. Answer the user's current prompt concisely and accurately, without referring to any past conversation history."
+        },
+        interface: {
+            inputs: [{ name: "prompt", type: "string" }],
+            outputs: [{ name: "response", type: "string" }]
+        }
     }
-};
+];
 
 export const MDX_EDITOR_GUIDE_TEMPLATE = `# 欢迎使用 MDxEditor！
 

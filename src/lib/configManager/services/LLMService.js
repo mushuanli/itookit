@@ -10,6 +10,7 @@
  * 4. 发布领域事件 (通过注入的 EventManager)。
  */
 import { EVENTS } from '../constants.js';
+import { PROTECTED_AGENT_IDS } from '../../common/configData.js';
 
 export class LLMService {
     /**
@@ -144,6 +145,9 @@ export class LLMService {
      * @returns {Promise<void>}
      */
     async removeAgent(agentId) {
+        if (PROTECTED_AGENT_IDS.includes(agentId)) {
+            throw new Error(`无法删除系统默认 Agent。`);
+        }
         let agents = await this.getAgents();
         agents = agents.filter(a => a.id !== agentId);
         await this.repo.saveAgents(agents);

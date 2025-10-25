@@ -1,3 +1,4 @@
+// 文件: #llm/input/popup.js
 /**
  * @file #llm/input/popup.js
  * @description Manages the command suggestion popup.

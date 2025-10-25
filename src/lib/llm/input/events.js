@@ -1,8 +1,13 @@
+// 文件: #llm/input/events.js
 /**
  * @file #llm/input/events.js
  * @description Event handling logic for the LLMInputUI component.
  */
 
+/**
+ * Attaches all necessary event listeners to the UI elements.
+ * @param {import('./index.js').LLMInputUI} ui - The LLMInputUI instance.
+ */
 export function attachEventListeners(ui) {
     ui.elements.textarea.addEventListener('input', () => onTextareaInput(ui));
     ui.elements.textarea.addEventListener('keydown', (e) => onTextareaKeyDown(ui, e));
@@ -90,6 +95,11 @@ function onDrop(ui, e) {
     handleFilesSelected(ui, e.dataTransfer.files);
 }
 
+/**
+ * Handles file selection from input, paste, or drag-and-drop.
+ * @param {import('./index.js').LLMInputUI} ui 
+ * @param {FileList} files 
+ */
 export function handleFilesSelected(ui, files) {
     const { maxCount, maxSizeMB, mimeTypes } = ui.options.attachments;
     const { localization: loc } = ui.options;

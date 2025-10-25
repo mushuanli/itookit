@@ -26,12 +26,20 @@ import { EVENTS } from '../../configManager/constants.js';
 // [新增] 内部依赖 LLMService 来实现封装
 import { LLMService } from '../core/LLMService.js';
 
+// --- 类型定义导入，用于 JSDoc ---
+/** 
+ * @typedef {import('../../configManager/shared/types.js').LLMAgentDefinition} LLMAgentDefinition 
+ * @typedef {import('../../configManager/shared/types.js').LLMTool} LLMTool // 假设存在
+ */
+
 export class LLMInputUI {
     /**
      * 创建 LLMInputUI 实例。
-     * @param {HTMLElement} element
-     * @param {object} options
-     * @param {ConfigManager} options.configManager - [必需]
+     * @param {HTMLElement} element - 容器元素
+     * @param {object} options - 配置选项
+     * @param {ConfigManager} options.configManager - [必需] ConfigManager 实例
+     * @param {LLMAgentDefinition[]} [options.agents] - 初始的 Agent 列表
+     * @param {LLMTool[]} [options.tools] - 可用的工具列表
      * @param {Function} [options.onSubmit] - [可选] 提交时的回调 (高级模式)。
      * @param {Function} [options.streamChatHandler] - [可选] 流式聊天处理器 (推荐的简单模式)。
      */
@@ -95,9 +103,10 @@ export class LLMInputUI {
             const initialAgents = await this.configManager.llm.getAgents();
             if (initialAgents && initialAgents.length > 0) {
                  this.updateAgents(initialAgents);
-                 // 如果 initialAgent 未设置或无效，则默认选择第一个
+                 // [关键修改] 如果 initialAgent 未设置或无效，则优先选择 'default' Agent
                  if (!this.state.agent || !initialAgents.some(a => a.id === this.state.agent)) {
-                    this.setAgent(initialAgents[0].id);
+                    const primaryDefault = initialAgents.find(a => a.id === 'default');
+                    this.setAgent(primaryDefault?.id || initialAgents[0].id);
                  }
             }
         } catch(error) {
@@ -170,8 +179,8 @@ export class LLMInputUI {
     }
 
     /**
-     * Dynamically updates the component's theme.
-     * @param {object} newThemeOptions - An object with CSS variables to update.
+     * 动态更新组件的主题。
+     * @param {object} newThemeOptions - 包含要更新的 CSS 变量的对象。
      */
     setTheme(newThemeOptions) {
         // Merge with existing theme to allow partial updates
@@ -180,16 +189,28 @@ export class LLMInputUI {
         this._emit('themeChange', this.options.theme);
     }
     
+    /**
+     * 显示一条错误信息。
+     * @param {string} message 
+     */
     showError(message) {
         if (!this.elements.errorDisplay) return;
         this.elements.errorDisplay.textContent = message;
         this.elements.errorDisplay.style.display = 'block';
     }
 
+    /**
+     * 注册一个自定义斜杠命令。
+     * @param {object} commandConfig 
+     */
     registerCommand(commandConfig) {
         this.commandManager.register(commandConfig);
     }
     
+    /**
+     * 设置当前活动的 Agent。
+     * @param {string} agentId 
+     */
     setAgent(agentId) {
         if (this.state.agent === agentId) return;
         this.state.agent = agentId;
@@ -242,6 +263,10 @@ export class LLMInputUI {
 
     // --- Internal State & UI Updaters (The "Controller" part) ---
 
+    /**
+     * @private
+     * @param {boolean} [bypassCommandCheck=false]
+     */
     async _handleSubmit(bypassCommandCheck = false) {
         if (this.state.isLoading) {
             this._emit('stopRequested');
@@ -296,9 +321,10 @@ export class LLMInputUI {
     }
 
     /**
-     * [新增] 内部流式聊天处理逻辑
-     * @param {object} data - 从 UI 收集的数据
+     * 内部流式聊天处理逻辑
      * @private
+     * @param {object} data - 从 UI 收集的数据
+     * @param {LLMAgentDefinition} data.agentObject - 选中的 Agent 对象
      */
     async _internalStreamChat(data) {
         const { agentObject } = data;
@@ -427,6 +453,7 @@ export class LLMInputUI {
     // +++ NEW: Update the agent selector button icon +++
     _updateAgentSelector() {
         if (!this.elements.agentSelectorBtn) return;
+        /** @type {LLMAgentDefinition | undefined} */
         const agentInfo = this.options.agents.find(a => a.id === this.state.agent);
         const iconHTML = `<span class="agent-selector-icon">${agentInfo?.icon || '🤖'}</span>`;
         const nameHTML = `<span class="agent-selector-name">${agentInfo?.name || 'Select Agent'}</span>`;
@@ -465,7 +492,7 @@ export class LLMInputUI {
 
 
     /**
-     * [核心修改] 订阅来自 ConfigManager 的事件。
+     * 订阅来自 ConfigManager 的事件。
      * @private
      */
     _subscribeToChanges() {
@@ -475,12 +502,14 @@ export class LLMInputUI {
         // [修正] 订阅正确的通用配置更新事件
         const unsubscribeConfig = events.subscribe(
             EVENTS.LLM_CONFIG_UPDATED, 
+            /** @param {{key: string, value: any}} payload */
             (payload) => {
                 // [修正] 检查事件的 key 是否为 'agents'
                 if (payload && payload.key === 'agents') {
                     console.log('[LLMInputUI] 接收到 Agent 配置更新，正在刷新 UI...', payload.value);
-                    // 当事件发生时，调用公共的 updateAgents 方法来处理 UI 更新
-                    this.updateAgents(payload.value);
+                    /** @type {LLMAgentDefinition[]} */
+                    const updatedAgents = payload.value;
+                    this.updateAgents(updatedAgents);
                 }
             }
         );

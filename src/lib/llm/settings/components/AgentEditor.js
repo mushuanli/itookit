@@ -5,6 +5,8 @@
  * - Implemented a tabbed interface for better organization.
  * - Added fields for icon, description, and tags, using the new TagsInput component.
  * - Created a user-friendly dynamic list editor for the agent's interface.
+ * - ADDED: maxHistoryLength field in the model config tab.
+ * - IMPROVED: Locked the maxHistoryLength field for the default agent.
  */
 import { TagsInput } from './TagsInput.js';
 
@@ -120,6 +122,9 @@ export class AgentEditor {
     }
 
     renderModelTab(agent) {
+        const isLocked = agent.id === this.lockedId;
+        const historyLengthDisabledAttr = isLocked ? 'disabled title="Cannot change max history length for the default agent."' : '';
+
         this.element.querySelector('#tab-model').innerHTML = `
             <div class="form-group">
                 <label>Connection</label>
@@ -134,6 +139,15 @@ export class AgentEditor {
                     <option value="">-- Select a connection first --</option>
                 </select>
             </div>
+            
+            <!-- START: maxHistoryLength MODIFICATION -->
+            <div class="form-group">
+                <label for="maxHistoryLength">Max History Length ${isLocked ? '(Fixed)' : ''}</label>
+                <input type="number" name="maxHistoryLength" value="${agent.maxHistoryLength ?? ''}" min="0" placeholder="e.g., 10 (0=unlimited)" ${historyLengthDisabledAttr}>
+                <small>The max number of conversation turns to send. Leave blank for default, 0 for unlimited.</small>
+            </div>
+            <!-- END: maxHistoryLength MODIFICATION -->
+
             <div class="form-group">
                 <label>System Prompt</label>
                 <textarea name="systemPrompt" rows="10">${agent.config.systemPrompt || ''}</textarea>
@@ -289,6 +303,18 @@ export class AgentEditor {
         agent.icon = formData.get('icon');
         agent.description = formData.get('description');
         agent.tags = this.tagsInput ? Array.from(this.tagsInput.currentTags) : agent.tags;
+        
+        // Do not update maxHistoryLength if locked
+        if (this.selectedAgentId !== this.lockedId) {
+            const historyLengthStr = formData.get('maxHistoryLength');
+            if (historyLengthStr && !isNaN(parseInt(historyLengthStr, 10))) {
+                agent.maxHistoryLength = parseInt(historyLengthStr, 10);
+            } else {
+                delete agent.maxHistoryLength;
+            }
+        }
+        // --- END: maxHistoryLength MODIFICATION ---
+
         agent.config = {
             ...agent.config,
             connectionId: formData.get('connectionId'),

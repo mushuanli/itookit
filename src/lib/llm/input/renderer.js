@@ -1,9 +1,17 @@
+// 文件: #llm/input/renderer.js
 /**
  * @file #llm/input/renderer.js
  * @description DOM rendering logic for the LLMInputUI component.
  */
 
-// +++ 新增: 一个独立的函数，用于生成和渲染 Agent 弹出菜单的内容 +++
+/** @typedef {import('../../configManager/shared/types.js').LLMAgentDefinition} LLMAgentDefinition */
+
+/**
+ * 生成和渲染 Agent 弹出菜单的内容。
+ * @param {HTMLElement} popupElement - 弹出菜单的 DOM 元素。
+ * @param {LLMAgentDefinition[]} agents - 要渲染的 Agent 对象数组。
+ * @param {object} classNames - CSS 类名配置对象。
+ */
 export function renderAgentPopup(popupElement, agents, classNames) {
     if (!popupElement) return;
 
@@ -20,7 +28,12 @@ export function renderAgentPopup(popupElement, agents, classNames) {
     popupElement.innerHTML = agentMenuItemsHTML.length > 0 ? agentMenuItemsHTML : `<div class="${classNames.popupItem}">No agents configured.</div>`;
 }
 
-
+/**
+ * Renders the initial DOM structure of the input UI.
+ * @param {HTMLElement} container - The container element to render into.
+ * @param {import('./defaults.js').LLMInputUIOptions} options - The component options.
+ * @returns {object.<string, HTMLElement>} A map of key DOM elements.
+ */
 export function initialRender(container, options) {
     const { classNames: cls, localization: loc, disableAttachments, agents = [] } = options;
 
@@ -59,6 +72,7 @@ export function initialRender(container, options) {
         </div>
     `;
 
+    /** @type {object.<string, HTMLElement>} */
     const elements = {};
     // This loop will now work correctly with single class names
     for (const key in cls) {
@@ -79,6 +93,10 @@ export function initialRender(container, options) {
     return elements;
 }
 
+/**
+ * Renders the attachment tray based on the current state.
+ * @param {import('./index.js').LLMInputUI} ui - The LLMInputUI instance.
+ */
 export function renderAttachments(ui) {
     const { attachmentTray } = ui.elements;
     if (!attachmentTray) return;

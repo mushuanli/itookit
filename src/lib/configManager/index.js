@@ -19,7 +19,7 @@ import { LLMRepository } from './repositories/LLMRepository.js';
 import { LLMService } from './services/LLMService.js';
 import { STORES } from './constants.js';
 // [NEW] 导入默认配置项
-import { LLM_DEFAULT_CONNECTION, LLM_DEFAULT_AGENT, LLM_DEFAULT_ID } from '../common/configData.js';
+import { LLM_DEFAULT_CONNECTION, LLM_DEFAULT_AGENTS, LLM_DEFAULT_ID } from '../common/configData.js';
 
 // [修改] 导出 ConfigManager 类，以便进行类型检查和依赖注入
 export class ConfigManager {
@@ -336,12 +336,21 @@ export class ConfigManager {
                 console.log("Default LLM connection created.");
             }
 
-            // 2. 确保默认 Agent 存在
+            // 2. 确保默认 Agents 存在
             const agents = await this.llmRepo.getAgents();
-            if (!agents.some(a => a.id === LLM_DEFAULT_ID)) {
-                agents.push(LLM_DEFAULT_AGENT);
+            const existingAgentIds = new Set(agents.map(a => a.id));
+            let newAgentsAdded = false;
+            
+            for (const defaultAgent of LLM_DEFAULT_AGENTS) {
+                if (!existingAgentIds.has(defaultAgent.id)) {
+                    agents.push(defaultAgent);
+                    newAgentsAdded = true;
+                    console.log(`Default LLM agent "${defaultAgent.name}" created.`);
+                }
+            }
+            
+            if (newAgentsAdded) {
                 await this.llmRepo.saveAgents(agents);
-                console.log("Default LLM agent created.");
             }
 
             // 3. 确保 'default' Tag 存在

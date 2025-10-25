@@ -158,7 +158,7 @@ function setupTestButtons() {
             alert(`Agent "${agentIdToRemove}" 已被删除或不存在。`);
             return;
         }
-        
+
         // 调用 service 方法来删除
         await llmService.removeAgent(agentIdToRemove);
         alert(`已删除 "${agentIdToRemove}" Agent！UI 将自动响应式更新。`);

@@ -1,3 +1,4 @@
+// 文件: #llm/input/utils.js
 /**
  * @file #llm/input/utils.js
  * @description Utility functions for the LLMInputUI component.
