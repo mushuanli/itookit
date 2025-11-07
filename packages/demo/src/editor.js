@@ -11,6 +11,7 @@ import { javascript } from "@codemirror/lang-javascript";
 import { bracketMatching, foldGutter, foldKeymap, syntaxHighlighting, defaultHighlightStyle } from "@codemirror/language";
 import { autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap } from "@codemirror/autocomplete";
 
+import {IMentionProvider} from '@itookit/common';
 // 现有 MDxEditor 库的导入
 import {
     MDxEditor,
@@ -21,15 +22,13 @@ import {
     defaultPlugins,
     // We still import individual plugins if needed for custom renderers or advanced setups
     MentionPlugin,
-    // We don't import MentionPlugin, but we need the interface and keys
-    IMentionProvider,
     // Import keys for services
     ClozeAPIKey,
 } from '@itookit/mdxeditor';
 
 /**
- * @typedef {import('../mdx/editor/core/plugin.js').MDxPlugin} MDxPlugin
- * @typedef {import('../mdx/editor/core/plugin.js').PluginContext} PluginContext
+ * @typedef {import('@itookit/mdxeditor').MDxPlugin} MDxPlugin
+ * @typedef {import('@itookit/mdxeditor').PluginContext} PluginContext
  */
 
 // 使用 Set 来跟踪需要永久打开的 Cloze
@@ -84,9 +83,10 @@ class AnkiFeedbackPlugin {
         detail.element.after(feedbackUI);
 
         feedbackUI.addEventListener('click', (e) => {
-            if (e.target.tagName !== 'BUTTON') return;
-
-            const choice = e.target.textContent;
+            const target = e.target;
+            if (!(target instanceof HTMLButtonElement)) return; // FIXED: Type guard
+    
+            const choice = target.textContent; // FIXED: Now safe to access
             const clozeId = detail.clozeId;
             
             alert(`你将 "${detail.element.dataset.clozeContent}" 评为 "${choice}"`);
@@ -149,11 +149,28 @@ class FileMentionProvider extends IMentionProvider {
         const file = mockDatabase.files.get(fileId);
         if (file) alert(`Navigating to file: "${file.title}"`);
     }
-
-    async getHoverPreview(targetURL) {
-        const fileId = targetURL.pathname.substring(1);
-        const file = mockDatabase.files.get(fileId);
-        return file ? { title: file.title, contentHTML: `<p><em>${file.content.substring(0, 100)}...</em></p>`, icon: '📄' } : null;
+    /**
+     * @param {URL} uri
+     * @returns {Promise<{title: string, contentHTML: string, icon?: string} | null>}
+     */
+    async getHoverPreview(uri) {
+        try {
+            const fileId = uri.pathname.slice(1);
+            const fileData = mockDatabase.files.get(fileId); // FIXED: Use mockDatabase directly
+            
+            if (!fileData) return null;
+            
+            return {
+                title: fileData.title, // FIXED: Use correct property name
+                contentHTML: `<div class="file-preview">
+                    <p>Content: ${this._escapeHTML(fileData.content.substring(0, 100))}...</p>
+                </div>`,
+                icon: '<i class="fas fa-file"></i>'
+            };
+        } catch (error) {
+            console.error('Error getting file preview:', error);
+            return null;
+        }
     }
     
     // [新增] 实现数据获取接口
@@ -166,11 +183,16 @@ class FileMentionProvider extends IMentionProvider {
         const fileId = targetURL.pathname.substring(1);
         return mockDatabase.files.get(fileId)?.content || null;
     }
+    
+    _escapeHTML(str) {
+        return str.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
 }
 
 class UserMentionProvider extends IMentionProvider {
     key = 'user';
-    triggerChar = '@'; // 明确指定触发字符
+    triggerChar = '@';
+    
     async getSuggestions(query) {
         const lowerQuery = query.toLowerCase();
         return Array.from(mockDatabase.users.values())
@@ -178,16 +200,37 @@ class UserMentionProvider extends IMentionProvider {
             .map(user => ({ id: user.id, label: `🧑 ${user.name}` }));
     }
 
-    async getHoverPreview(targetURL) {
-        const userId = targetURL.pathname.substring(1);
-        const user = mockDatabase.users.get(userId);
-        return user ? { title: user.name, contentHTML: `<p><strong>Role:</strong> ${user.role}</p>`, icon: '🧑' } : null;
+    /**
+     * @param {URL} uri
+     * @returns {Promise<{title: string, contentHTML: string, icon?: string} | null>}
+     */
+    async getHoverPreview(uri) {
+        try {
+            const userId = uri.pathname.slice(1);
+            const user = mockDatabase.users.get(userId); // FIXED: Use mockDatabase directly
+            
+            if (!user) return null;
+            
+            return {
+                title: user.name,
+                contentHTML: `<div class="user-preview">
+                    <p>Role: ${this._escapeHTML(user.role)}</p>
+                </div>`,
+                icon: '<i class="fas fa-user"></i>'
+            };
+        } catch (error) {
+            console.error('Error getting user preview:', error);
+            return null;
+        }
     }
 
     // [新增] 实现数据获取接口
     async getDataForProcess(targetURL) {
         const userId = targetURL.pathname.substring(1);
         return mockDatabase.users.get(userId) || null;
+    }
+    _escapeHTML(str) {
+        return str.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     }
 }
 
@@ -207,7 +250,7 @@ class DemoMentionPlugin {
     /**
      * @param {{ providers: IMentionProvider[] }} options 
      */
-    constructor(options = {}) { // [修改] 增加默认值
+    constructor(options = { providers: [] }) { // FIXED: Provide default with providers array
         // [修改] 采用 MentionPlugin 中更健壮的构造函数逻辑
         (options.providers || []).forEach(p => {
             if (!p.key) throw new Error(`A mention provider (${p.constructor.name}) is missing the 'key' property.`);
@@ -327,6 +370,7 @@ class DemoMentionPlugin {
         if (!this.context || placeholders.length === 0) return;
         
         for (const el of placeholders) {
+            if (!(el instanceof HTMLElement)) continue; // FIXED: Type guard
             el.dataset.transclusionProcessed = 'true';
             const uri = new URL(el.dataset.transclusionUri);
             const provider = this.providers.get(uri.hostname);
@@ -371,9 +415,11 @@ class DemoMentionPlugin {
         const url = new URL(target.dataset.mdxUri);
         const provider = this.providers.get(url.hostname);
         if (provider?.getHoverPreview) {
-            const data = await provider.getHoverPreview(url);
-            if (data) this.showPreviewCard(target, data);
+        const htmlContent = await provider.getHoverPreview(url);
+        if (htmlContent) {
+            this.showPreviewCard(target, htmlContent);
         }
+    }
     }
 
     // --- 服务 API 实现 ---
@@ -392,14 +438,14 @@ class DemoMentionPlugin {
     }
 
     // --- UI & 工具函数 ---
-    showPreviewCard(target, { title, contentHTML, icon }) {
+showPreviewCard(target, htmlContent) {
         if (!this.previewCardEl) {
             this.previewCardEl = document.createElement('div');
             this.previewCardEl.className = 'mdx-mention-preview-card';
             document.body.appendChild(this.previewCardEl);
             this.previewCardEl.addEventListener('mouseleave', () => this.hidePreviewCard());
         }
-        this.previewCardEl.innerHTML = `<div class="preview-header">${icon || ''}<strong>${this._escapeHTML(title)}</strong></div><div class="preview-content">${contentHTML}</div>`;
+    this.previewCardEl.innerHTML = htmlContent;
         const rect = target.getBoundingClientRect();
         this.previewCardEl.style.display = 'block';
         this.previewCardEl.style.left = `${window.scrollX + rect.left}px`;
@@ -507,17 +553,47 @@ document.addEventListener('DOMContentLoaded', () => {
     const externalPreviewBtn = document.getElementById('external-preview-btn');
     const modeDisplay = document.getElementById('current-mode-display');
 
-    // 1. 通过外部按钮调用 public API
+// Type guard helper
+const isButton = (el) => el instanceof HTMLButtonElement;
+
+// 1. 通过外部按钮调用 public API
+if (externalEditBtn) {
     externalEditBtn.addEventListener('click', () => editor.switchTo('edit'));
+}
+if (externalPreviewBtn) {
     externalPreviewBtn.addEventListener('click', () => editor.switchTo('render'));
+}
 
     // 2. 监听编辑器内部事件来更新外部 UI
-    editor.pluginManager.listen('modeChanged', ({ mode }) => {
+    editor.on('modeChanged', ({ mode }) => {
+    if (modeDisplay instanceof HTMLElement) {
         modeDisplay.textContent = `当前模式: ${mode}`;
+    }
+    
+    // FIXED: Add type guards
+    if (isButton(externalEditBtn)) {
         externalEditBtn.disabled = (mode === 'edit');
+    }
+    if (isButton(externalPreviewBtn)) {
         externalPreviewBtn.disabled = (mode === 'render');
-    });
-    editor.pluginManager.emit('modeChanged', { mode: editor.mode }); // 初始化UI状态
+    }
+});
+
+// 3. 初始化显示
+if (modeDisplay instanceof HTMLElement) {
+    modeDisplay.textContent = `当前模式: ${editor.mode}`;
+}
+
+// FIXED: Add type guards for initial state
+if (isButton(externalEditBtn)) {
+    externalEditBtn.disabled = (editor.mode === 'edit');
+}
+if (isButton(externalPreviewBtn)) {
+    externalPreviewBtn.disabled = (editor.mode === 'render');
+}
+
+    //editor.pluginManager.emit('modeChanged', { mode: editor.mode }); // 初始化UI状态
+editor.switchTo(editor.mode, true); // This will trigger the internal event
     // 3. 初始化显示
 
     // ======================================================
@@ -565,6 +641,7 @@ document.getElementById('rename-doc1-btn').addEventListener('click', () => {
     //   场景 3: Anki 静态渲染 (Advanced)
     // ======================================================
     const ankiInput = document.getElementById('anki-input');
+    if (ankiInput instanceof HTMLTextAreaElement) {
     ankiInput.value = `# 美国历史测验
 ## 第一任总统是谁？
 - [ ] 亚伯拉罕·林肯
@@ -581,7 +658,7 @@ document.getElementById('rename-doc1-btn').addEventListener('click', () => {
     \`\`\`
     数学公式: $$E=mc^2$$
 `;
-
+    }
     const clozeStates = {
             [`anki-demo_${simpleHash('纽约市')}`]: { isHidden: true, memoryTier: 'due' },
             [`anki-demo_${simpleHash('New York')}`]: { isHidden: true, memoryTier: 'learning-7d' },
@@ -592,6 +669,7 @@ document.getElementById('rename-doc1-btn').addEventListener('click', () => {
     // For standalone renderers, we still compose plugins manually.
     const ankiRenderer = new MDxRenderer([...defaultPlugins, new AnkiFeedbackPlugin()]);
     const renderAnki = () => {
+        // @ts-ignore
         ankiRenderer.render(document.getElementById('anki-output'), ankiInput.value, { 
             contextId: 'anki-demo',
 
@@ -612,6 +690,7 @@ document.getElementById('rename-doc1-btn').addEventListener('click', () => {
     const streamBtn = document.getElementById('render-stream');
     const chatRenderer = new MDxRenderer(defaultPlugins);
     streamBtn.addEventListener('click', () => {
+        // @ts-ignore
         streamBtn.disabled = true;
         streamBtn.textContent = '流式渲染中...';
         agentOutput.innerHTML = '';
@@ -642,6 +721,7 @@ document.getElementById('rename-doc1-btn').addEventListener('click', () => {
                 clearInterval(intervalId);
                 // Final render to process everything (e.g., Mermaid, MathJax)
                 chatRenderer.render(agentOutput, fullText).then(() => {
+                    // @ts-ignore
                     streamBtn.disabled = false;
                     streamBtn.textContent = "重新开始流式渲染";
                 });
@@ -658,6 +738,7 @@ document.getElementById('rename-doc1-btn').addEventListener('click', () => {
     const processBtn = document.getElementById('process-btn');
 
     // 1. 设置默认输入内容
+if (processorInputEl instanceof HTMLTextAreaElement) {
     processorInputEl.value = `---
     title: Weekly Report
     author: @user:alice
@@ -667,6 +748,7 @@ document.getElementById('rename-doc1-btn').addEventListener('click', () => {
     
     A key resource was the technical specification: @file:doc-3.
     `;
+}
 
     // 2. 设置默认处理规则
     const defaultProcessOptions = {
@@ -689,33 +771,50 @@ document.getElementById('rename-doc1-btn').addEventListener('click', () => {
             }
         }
     };
+if (processorOptionsEl instanceof HTMLTextAreaElement) {
     processorOptionsEl.value = JSON.stringify(defaultProcessOptions, null, 2);
-
+}
     // 3. 初始化 MDxProcessor 实例
     // 复用为 Mention 系统创建的 providers
     const processor = new MDxProcessor([new FileMentionProvider(), new UserMentionProvider()]);
     
     // 4. 为按钮添加点击事件
     processBtn.addEventListener('click', async () => {
+    if (!(processorInputEl instanceof HTMLTextAreaElement) || 
+        !(processorOptionsEl instanceof HTMLTextAreaElement)) {
+        return;
+    }
+    
+    if (processorInputEl instanceof HTMLTextAreaElement) {
         const markdownInput = processorInputEl.value;
         let options;
 
         try {
             options = JSON.parse(processorOptionsEl.value);
+        if (processorOutputEl instanceof HTMLElement) {
             processorOutputEl.textContent = 'Processing...';
+        }
+        if (processBtn instanceof HTMLButtonElement) {
             processBtn.disabled = true;
+        }
 
-            const result = await processor.process(markdownInput, options);
-            
-            // 格式化输出
+        const result = await processor.process(markdownInput, options);
+        
+        if (processorOutputEl instanceof HTMLElement) {
             processorOutputEl.textContent = JSON.stringify(result, null, 2);
+        }
 
-        } catch (error) {
+    } catch (error) {
+        if (processorOutputEl instanceof HTMLElement) {
             processorOutputEl.textContent = `Error processing:\n\n${error.message}\n\nCheck your JSON options format.`;
-            console.error(error);
-        } finally {
+        }
+        console.error(error);
+    } finally {
+        if (processBtn instanceof HTMLButtonElement) {
             processBtn.disabled = false;
         }
+        }
+    }
     });
 
     // ======================================================
@@ -738,6 +837,7 @@ document.getElementById('rename-doc1-btn').addEventListener('click', () => {
 
     // [修正] 将 performSearch 声明为 async 函数，以处理异步的 search API
     const performSearch = async () => {
+    if (!(searchInput instanceof HTMLInputElement)) return;
         const query = searchInput.value;
         allMatches = [];
         currentIndex = -1;
@@ -772,14 +872,22 @@ document.getElementById('rename-doc1-btn').addEventListener('click', () => {
 
     const updateUI = () => {
         const total = allMatches.length;
+    if (modeDisplay instanceof HTMLElement) {
         if (total > 0) {
+        if (countEl instanceof HTMLElement) {
             countEl.textContent = `找到 ${currentIndex + 1} / ${total} 个结果`;
-        } else {
-            countEl.textContent = searchInput.value ? '未找到结果' : '';
         }
+        } else {
+            countEl.textContent = searchInput instanceof HTMLInputElement && searchInput.value ? '未找到结果' : '';
+        }
+    }
 
+    if (prevBtn instanceof HTMLButtonElement) {
         prevBtn.disabled = total === 0;
+    }
+    if (nextBtn instanceof HTMLButtonElement) {
         nextBtn.disabled = total === 0;
+    }
     };
     
     const navigateToMatch = (index) => {
@@ -828,9 +936,12 @@ document.getElementById('rename-doc1-btn').addEventListener('click', () => {
     };
 
     document.body.addEventListener('click', (event) => {
-        // --- 音频播放逻辑 ---
-        const mediaIcon = event.target.closest('.media-icon');
-        if (mediaIcon) {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    
+    // --- 音频播放逻辑 ---
+    const mediaIcon = target.closest('.media-icon');
+    if (mediaIcon instanceof HTMLElement && mediaIcon.dataset.audioText) {
             event.stopPropagation(); // 防止触发 Cloze 点击
             audioPlayer.play(mediaIcon.dataset.audioText);
             return;

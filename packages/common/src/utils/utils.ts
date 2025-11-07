@@ -35,6 +35,14 @@ export function generateUUID(): string {
     return 'node-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
 }
 
+/**
+ * Generates a simplified, shorter UUID. Good enough for this context.
+ * @returns {string} e.g., 'f4a2bcde'
+ */
+export function generateShortUUID(): string {
+    return Math.random().toString(36).substring(2, 10);
+}
+
 export function generateId(prefix: string = 'item'): string {
     return `${prefix}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 }
