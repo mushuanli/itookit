@@ -1,0 +1,47 @@
+@layer components {
+  .mdx-tag-editor {
+    @apply flex flex-col bg-white rounded-lg p-3 w-80 font-sans text-sm;
+  }
+  .mdx-tag-editor--popover {
+    @apply fixed z-50 border border-gray-200 shadow-lg;
+  }
+  .mdx-tag-editor__pills {
+    @apply flex flex-wrap gap-1.5 p-2 border border-gray-300 rounded-md bg-white max-h-[150px] overflow-y-auto;
+  }
+  .mdx-tag-editor__pills:focus-within {
+    @apply border-blue-500 ring-1 ring-blue-500;
+  }
+  .mdx-tag-editor__pill {
+    @apply inline-flex items-center gap-1.5 bg-gray-100 text-gray-700 rounded-full px-2.5 py-1 text-xs font-medium;
+  }
+  .mdx-tag-editor__remove-btn {
+    @apply flex items-center justify-center w-4 h-4 rounded-full bg-gray-400 text-white text-xs font-bold transition hover:bg-gray-500;
+  }
+  .mdx-tag-editor__input-wrapper {
+    @apply flex-grow flex min-w-[120px];
+  }
+  .mdx-tag-editor__input {
+    @apply w-full border-none outline-none p-0 bg-transparent text-gray-900;
+  }
+  .mdx-tag-editor__suggestions {
+    @apply relative mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-[180px] overflow-y-auto z-10 hidden;
+  }
+  .mdx-tag-editor__suggestion {
+    @apply px-3 py-2 cursor-pointer text-[13px] transition;
+  }
+  .mdx-tag-editor__suggestion:hover {
+    @apply bg-gray-100;
+  }
+  .mdx-tag-editor__suggestion.is-active {
+    @apply bg-blue-500 text-white;
+  }
+  .mdx-tag-editor__footer {
+    @apply flex justify-end gap-2 pt-3 mt-2 border-t border-gray-200 shrink-0;
+  }
+  .mdx-tag-editor__btn {
+    @apply px-3 py-1.5 rounded-md border border-gray-300 bg-white text-xs font-medium transition hover:bg-gray-50;
+  }
+  .mdx-tag-editor__btn--primary {
+    @apply bg-blue-500 text-white border-blue-500 hover:bg-blue-600;
+  }
+}

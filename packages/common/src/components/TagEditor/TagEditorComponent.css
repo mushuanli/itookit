@@ -1,0 +1,163 @@
+/* ==========================================================================
+   #common/components/TagEditor/TagEditorComponent.css
+   Component: Tag Editor
+   - Self-contained styles for the reusable tag editor component.
+   - It uses CSS variables from the host application for theming.
+   ========================================================================== */
+
+.mdx-tag-editor {
+    display: flex;
+    flex-direction: column;
+    background-color: var(--color-white, #fff);
+    /* [修改] 基础组件不再强制拥有边框和阴影，这些由修饰符决定 */
+    border-radius: var(--border-radius-lg, 8px);
+    padding: var(--spacing-3, 12px);
+    width: 320px;
+    font-family: var(--font-family-sans, sans-serif);
+    font-size: var(--font-size-base, 14px);
+}
+
+/* --- [新增] 修饰符类，用于弹窗模式 --- */
+.mdx-tag-editor--popover {
+    position: fixed;
+    z-index: var(--z-index-popover, 1000);
+    border: 1px solid var(--color-gray-200, #e5e7eb);
+    box-shadow: var(--box-shadow-default, 0 4px 12px rgba(0,0,0,0.1));
+}
+/* 包含所有标签和输入框的区域 */
+.mdx-tag-editor__pills {
+    display: flex;
+    flex-wrap: wrap; /* [核心修复] 允许标签换行 */
+    gap: var(--spacing-1-5, 6px);
+    padding: var(--spacing-2, 8px);
+    border: 1px solid var(--color-gray-300, #d1d5db);
+    border-radius: var(--border-radius-md, 6px);
+    background-color: var(--color-white, #fff);
+    
+    /* [优化] 防止因标签过多而无限增高 */
+    max-height: 150px;
+    overflow-y: auto;
+    transition: border-color var(--transition-fast, 0.2s ease);
+}
+
+.mdx-tag-editor__pills:focus-within {
+    border-color: var(--color-primary-default, #3b82f6);
+    box-shadow: 0 0 0 1px var(--color-primary-default, #3b82f6);
+}
+
+/* 单个标签 "药丸" */
+.mdx-tag-editor__pill {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-1-5, 6px);
+    background-color: var(--color-gray-100, #f3f4f6);
+    color: var(--color-gray-700, #374151);
+    border-radius: var(--border-radius-pill, 10px);
+    padding: var(--spacing-1, 4px) var(--spacing-2-5, 10px);
+    font-size: var(--font-size-sm, 12px);
+    font-weight: 500;
+}
+
+/* 移除按钮 */
+.mdx-tag-editor__remove-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background-color: var(--color-gray-400, #9ca3af);
+    color: var(--color-white, #fff);
+    font-size: 12px;
+    line-height: 1;
+    font-weight: bold;
+    transition: background-color var(--transition-fast, 0.2s ease);
+}
+
+.mdx-tag-editor__remove-btn:hover {
+    background-color: var(--color-gray-500, #6b7280);
+}
+
+/* 输入框的容器和输入框本身 */
+.mdx-tag-editor__input-wrapper {
+    flex-grow: 1; /* 占据剩余空间 */
+    display: flex;
+    min-width: 120px; /* 保证输入框不会变得太小 */
+}
+
+.mdx-tag-editor__input {
+    width: 100%;
+    border: none;
+    outline: none;
+    padding: 0;
+    background-color: transparent;
+    font-size: inherit;
+    font-family: inherit;
+    color: var(--color-gray-900, #111827);
+}
+
+/* 建议列表 */
+.mdx-tag-editor__suggestions {
+    position: relative; /* 确保它在正常文档流中占据空间 */
+    margin-top: var(--spacing-1, 4px);
+    background-color: var(--color-white, #fff);
+    border: 1px solid var(--color-gray-200, #e5e7eb);
+    border-radius: var(--border-radius-md, 6px);
+    box-shadow: var(--box-shadow-default, 0 4px 12px rgba(0,0,0,0.1));
+    max-height: 180px;
+    overflow-y: auto;
+    z-index: 1; /* 确保在 pills 区域之上 */
+    display: none; /* 由 JS 控制显示 */
+}
+
+/* 单个建议项 */
+.mdx-tag-editor__suggestion {
+    padding: var(--spacing-2, 8px) var(--spacing-3, 12px);
+    cursor: pointer;
+    font-size: var(--font-size-md, 13px);
+    transition: background-color var(--transition-fast, 0.2s ease);
+}
+
+.mdx-tag-editor__suggestion:hover {
+    background-color: var(--color-gray-100, #f3f4f6);
+}
+
+.mdx-tag-editor__suggestion.is-active {
+    background-color: var(--color-primary-default, #3b82f6);
+    color: var(--color-white, #fff);
+}
+
+/* 页脚和按钮 */
+.mdx-tag-editor__footer {
+    display: flex;
+    justify-content: flex-end; /* 按钮靠右 */
+    gap: var(--spacing-2, 8px);
+    padding-top: var(--spacing-3, 12px);
+    margin-top: var(--spacing-2, 8px);
+    border-top: 1px solid var(--color-gray-200, #e5e7eb);
+    flex-shrink: 0; /* 防止页脚被压缩 */
+}
+
+.mdx-tag-editor__btn {
+    padding: var(--spacing-1-5, 6px) var(--spacing-3, 12px);
+    border-radius: var(--border-radius-md, 6px);
+    border: 1px solid var(--color-gray-300, #d1d5db);
+    background-color: var(--color-white, #fff);
+    font-size: var(--font-size-sm, 12px);
+    font-weight: 500;
+    transition: background-color var(--transition-fast, 0.2s ease), border-color var(--transition-fast, 0.2s ease);
+}
+
+.mdx-tag-editor__btn:hover {
+    background-color: var(--color-gray-50, #f9fafb);
+}
+
+.mdx-tag-editor__btn--primary {
+    background-color: var(--color-primary-default, #3b82f6);
+    color: var(--color-white, #fff);
+    border-color: var(--color-primary-default, #3b82f6);
+}
+
+.mdx-tag-editor__btn--primary:hover {
+    background-color: var(--color-primary-hover, #2563eb);
+}

@@ -1,0 +1,58 @@
+{
+  "name": "@itookit/mdxeditor",
+  "version": "0.1.0",
+  "description": "A powerful MDX editor component.",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "sideEffects": [
+    "**/*.css"
+  ],
+  "scripts": {
+    "build:css": "tailwindcss -i ./src/index.css -o ./dist/index.css --minify",
+    "build:ts": "tsup src/index.js --format cjs,esm --dts",
+    "build": "pnpm build:ts && pnpm build:css",
+    "dev": "pnpm build --watch"
+  },
+  "keywords": [
+    "mdx",
+    "editor"
+  ],
+  "author": "lizlok@gmail.com",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@codemirror/autocomplete": "^6.16.0",
+    "@codemirror/commands": "^6.5.0",
+    "@codemirror/lang-markdown": "^6.2.5",
+    "@codemirror/language": "^6.10.1",
+    "@codemirror/lint": "^6.7.0",
+    "@codemirror/search": "^6.5.6",
+    "@codemirror/state": "^6.4.1",
+    "@codemirror/view": "^6.26.3",
+    "@itookit/common": "workspace:*",
+    "marked": "^12.0.2",
+    "mermaid": "^10.9.0",
+    "yaml": "^2.4.2"
+  },
+  "devDependencies": {
+    "@fortawesome/fontawesome-free": "^6.5.2",
+    "@tailwindcss/typography": "^0.5.13",
+    "@types/marked": "^6.0.0",
+    "@types/node": "^20.12.12",
+    "autoprefixer": "^10.4.19",
+    "jsdoc": "^4.0.5",
+    "postcss": "^8.4.38",
+    "tailwindcss": "^3.4.3",
+    "tsup": "^8.0.2",
+    "typescript": "^5.4.5"
+  },
+  "peerDependencies": {
+    "tailwindcss": ">=3.0.0"
+  }
+}

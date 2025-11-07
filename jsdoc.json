@@ -1,0 +1,19 @@
+{
+  "source": {
+    "include": ["packages/mdxeditor/src"], 
+    "exclude": [
+      "packages/mdxeditor/node_modules",
+      "packages/mdxeditor/dist",
+      "packages/mdxeditor/tailwind.config.js", 
+      "packages/mdxeditor/postcss.config.js"
+    ],
+    "includePattern": ".+\\.js(doc|x)?$",
+    "excludePattern": "(^|\\/|\\\\)_(?!.*\\/)"
+  },
+  "opts": {
+    "destination": "./docs/mdxeditor/", 
+    "encoding": "utf8",
+    "recurse": true 
+  },
+  "plugins": ["jsdoc-tsimport-plugin"]
+}

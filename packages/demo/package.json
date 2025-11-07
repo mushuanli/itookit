@@ -1,0 +1,28 @@
+{
+  "name": "@itookit/demo",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@itookit/common": "workspace:*",
+    "@itookit/llmdriver": "workspace:*",
+    "@itookit/mdxeditor": "workspace:*"
+  },
+  "devDependencies": {
+    "@codemirror/autocomplete": "^6.19.1",
+    "@codemirror/commands": "^6.10.0",
+    "@codemirror/lang-javascript": "^6.2.4",
+    "@codemirror/language": "^6.11.3",
+    "@codemirror/state": "^6.5.2",
+    "@codemirror/view": "^6.38.6",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.1"
+  },
+  "author": "",
+  "license": "ISC"
+}

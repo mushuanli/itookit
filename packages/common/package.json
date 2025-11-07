@@ -1,0 +1,23 @@
+{
+  "name": "@itookit/common",
+  "version": "0.1.0",
+  "description": "Common utilities, types, and components for the itookit ecosystem.",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+  "build": "tsup src/index.ts --format cjs,esm --dts",
+  "dev": "pnpm build --watch"
+  },
+  "keywords": ["itookit", "common"],
+  "author": "lizlok@gmail.com",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+  }
+}
