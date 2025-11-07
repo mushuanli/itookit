@@ -1,0 +1,387 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* =================================================================== */
+/*   1. MDxEditor 组件外壳 (核心布局)                              */
+/* =================================================================== */
+.mdx-container {
+    @apply border border-gray-300 rounded-md overflow-hidden h-full flex flex-col bg-white relative;
+}
+
+/* =================================================================== */
+/*   2. 标题栏 (Title Bar)                                          */
+/* =================================================================== */
+.mdx-title-bar {
+    @apply flex items-center justify-between px-3 py-1.5 bg-gray-50 border-b border-gray-300 flex-shrink-0 gap-2.5;
+}
+.mdx-title-bar-controls {
+    @apply flex items-center gap-2 flex-shrink-0;
+}
+.mdx-title-bar-title {
+    @apply flex-grow text-center font-semibold text-gray-800 text-sm overflow-hidden text-ellipsis whitespace-nowrap;
+}
+.mdx-title-bar-btn {
+    @apply inline-flex items-center justify-center p-0 w-7 h-7 bg-transparent border border-transparent rounded-md text-gray-600 cursor-pointer transition-colors duration-200 text-sm;
+}
+.mdx-title-bar-btn:hover {
+    @apply bg-gray-200 border-gray-300;
+}
+
+/* =================================================================== */
+/*   3. 工具栏 (Toolbar)                                            */
+/* =================================================================== */
+.mdx-toolbar {
+    @apply flex items-center justify-between gap-2 px-3 py-2 bg-gray-50 border-b border-gray-300 flex-shrink-0;
+}
+.mdx-container.render-mode .mdx-toolbar {
+    display: none;
+}
+.mdx-toolbar-main-controls, .mdx-toolbar-mode-switcher {
+    @apply flex items-center gap-2;
+}
+.mdx-toolbar-separator {
+    @apply w-px bg-gray-300 my-1 mx-2 self-stretch;
+}
+.mdx-toolbar-btn {
+    @apply inline-flex items-center justify-center p-0 w-8 h-8 bg-transparent border border-transparent rounded-md text-gray-600 cursor-pointer transition-colors duration-200 text-base font-semibold;
+}
+.mdx-toolbar-btn:hover {
+    @apply bg-gray-200 border-gray-300;
+}
+.mdx-toolbar-btn:disabled {
+    @apply opacity-50 cursor-not-allowed;
+}
+
+/* =================================================================== */
+/*   4. 编辑器与渲染器视图                                           */
+/* =================================================================== */
+.mdx-editor-view, .mdx-render-view {
+    @apply flex-grow overflow-y-auto;
+}
+
+/* --- CodeMirror 编辑器样式 --- */
+.cm-editor {
+    @apply h-full outline-none p-4 text-base;
+}
+.cm-editor, .cm-content, .cm-line, .cm-activeLine {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    color: #1f2937; /* Tailwind's text-gray-900 */
+}
+
+/* --- 渲染器容器 --- */
+/* rich-content-area
+   使用 @tailwindcss/typography 插件，在你的父容器中添加 'prose' 类。
+   这将自动处理 h1, p, ul, ol, code, pre 等元素的样式。
+   在 MDxEditor 的 _initDOM 中，给 .mdx-render-view 添加 `prose max-w-none` 类。
+   下面只保留 `prose` 无法处理的自定义样式。
+*/
+.rich-content-area {
+    @apply p-4 leading-relaxed;
+}
+.rich-content-area .task-list-item {
+    @apply list-none;
+}
+.rich-content-area .task-list-item input[type="checkbox"] {
+    @apply -ml-6 mr-1 align-middle;
+}
+
+/* =================================================================== */
+/*   5. 插件样式 (Plugin Styles)                                   */
+/* =================================================================== */
+
+/* --- Cloze 插件 --- */
+.cloze {
+    @apply py-0.5 px-1.5 rounded-md cursor-pointer relative transition-colors duration-300 border-b-2 font-semibold;
+}
+.cloze .cloze-placeholder { 
+    display: none; 
+}
+.cloze .cloze-content { 
+    display: inline; 
+}
+.cloze.hidden .cloze-placeholder { 
+    display: inline;
+    @apply text-blue-600; 
+}
+.cloze.hidden .cloze-content { 
+    display: none; 
+}
+.cloze.hidden { 
+    @apply bg-blue-100 text-transparent; 
+}
+.cloze.hidden:hover { 
+    @apply bg-blue-200; 
+}
+.cloze .media-icon { 
+    @apply mr-1 text-blue-600; 
+}
+.cloze[data-memory-tier='new'], .cloze:not([data-memory-tier]) { 
+    @apply border-b-blue-600; 
+}
+.cloze[data-memory-tier='learning'] { 
+    @apply border-b-orange-600; 
+}
+.cloze[data-memory-tier='review'] { 
+    @apply border-b-green-600; 
+}
+.cloze[data-memory-tier='mature'], .cloze.is-mature { 
+    @apply border-b-purple-600; 
+}
+.cloze.is-mature {
+    @apply bg-transparent text-current font-normal cursor-text p-0 border-b-dotted;
+}
+.cloze.is-mature .cloze-placeholder, .cloze.is-mature.hidden .cloze-placeholder,
+.cloze.is-mature .cloze-content, .cloze.is-mature.hidden .cloze-content {
+    display: inline;
+    visibility: visible;
+}
+
+/* --- Memory 插件 (Grading Panel) --- */
+.mdx-memory-grading-panel {
+    @apply flex justify-center gap-2 py-2 mt-1 animate-fade-in;
+}
+.mdx-memory-grade-btn {
+    @apply py-1 px-3 border border-transparent rounded-full bg-slate-100 cursor-pointer text-xs font-medium text-slate-600 transition-all duration-200 leading-none;
+}
+.mdx-memory-grade-btn:hover {
+    @apply -translate-y-px shadow-sm;
+}
+.mdx-memory-grade-btn.again { @apply bg-red-100 text-red-800; }
+.mdx-memory-grade-btn.again:hover { @apply bg-red-200; }
+.mdx-memory-grade-btn.hard { @apply bg-orange-100 text-orange-800; }
+.mdx-memory-grade-btn.hard:hover { @apply bg-orange-200; }
+.mdx-memory-grade-btn.good { @apply bg-green-100 text-green-800; }
+.mdx-memory-grade-btn.good:hover { @apply bg-green-200; }
+.mdx-memory-grade-btn.easy { @apply bg-blue-100 text-blue-800; }
+.mdx-memory-grade-btn.easy:hover { @apply bg-blue-200; }
+
+/* --- Foldable 插件 --- */
+.foldable-block {
+    @apply my-4 border border-gray-300 rounded-md overflow-hidden;
+}
+.foldable-block summary {
+    @apply p-2.5 font-semibold bg-gray-50 cursor-pointer outline-none flex items-center gap-2;
+}
+.foldable-block summary::-webkit-details-marker { 
+    display: none; 
+}
+.foldable-block summary::before {
+    content: '▶';
+    @apply inline-block w-4 transition-transform duration-200;
+}
+.foldable-block[open] > summary::before { 
+    @apply rotate-90; 
+}
+.foldable-block .summary-task-checkbox { 
+    @apply mr-2; 
+}
+.foldable-block .foldable-content {
+    @apply p-4 border-t border-gray-300;
+}
+
+/* --- Media 插件 --- */
+.media-container { 
+    @apply my-4; 
+}
+.media-container video, .media-container img { 
+    @apply max-w-full rounded-md block; 
+}
+.media-attachment {
+    @apply inline-flex items-center gap-2 py-2.5 px-4 border border-gray-300 rounded-md no-underline text-gray-800 bg-gray-100 transition-colors duration-200;
+}
+.media-attachment:hover { 
+    @apply bg-gray-200; 
+}
+.media-attachment .fa-paperclip { 
+    @apply text-gray-500; 
+}
+
+/* --- Streaming Cursor --- */
+.streaming-cursor {
+    @apply inline-block w-2 bg-current ml-0.5 align-text-bottom animate-blink;
+    height: 1.2em;
+}
+
+/* --- Highlight --- */
+.highlight-heading {
+    scroll-margin-top: 20px;
+    animation: highlight-animation 1.5s ease-out;
+}
+
+/* --- Mention 插件 --- */
+a[data-mdx-uri] {
+    @apply bg-blue-50 text-blue-700 py-px px-1 rounded-md no-underline font-medium transition-colors duration-200;
+}
+a[data-mdx-uri]:hover {
+    @apply bg-blue-200 underline;
+}
+.mdx-mention-preview-card {
+    display: none;
+    @apply absolute z-50 w-[350px] max-h-[400px] overflow-y-auto bg-white border border-gray-300 rounded-lg shadow-lg text-sm leading-normal;
+}
+.mdx-mention-preview-card .preview-header {
+    @apply flex items-center gap-2 p-2 px-3 border-b border-gray-200 bg-gray-50 text-base;
+}
+.mdx-mention-preview-card .preview-content {
+    @apply p-3;
+}
+.mdx-mention-preview-card .preview-content p:first-child { 
+    @apply mt-0; 
+}
+.mdx-mention-preview-card .preview-content p:last-child { 
+    @apply mb-0; 
+}
+.transclusion-block {
+    @apply my-4 p-4 border border-l-4 border-blue-200 border-l-blue-500 rounded-md bg-blue-50;
+}
+.transclusion-error {
+    @apply text-red-700 italic p-2.5 bg-red-100 border border-red-200 rounded;
+}
+
+/* CodeMirror Autocomplete Tooltip */
+.cm-tooltip.cm-tooltip-autocomplete {
+    @apply z-[1000] bg-white border border-gray-300 rounded-md shadow-lg overflow-hidden;
+}
+.cm-tooltip-autocomplete ul {
+    @apply list-none m-0 p-1 max-h-52 overflow-y-auto;
+}
+.cm-tooltip-autocomplete ul li {
+    @apply p-1 px-2.5 cursor-pointer rounded whitespace-nowrap;
+}
+.cm-tooltip-autocomplete ul li[aria-selected] {
+    @apply bg-blue-600 text-white;
+}
+
+/* --- 搜索高亮 --- */
+.cm-searchMatch { @apply bg-yellow-300 rounded-sm; }
+.cm-searchMatch-selected { @apply bg-orange-400 !important; }
+.mdx-search-mark {
+    @apply bg-yellow-200/50 rounded p-px px-0.5 -m-px -mx-0.5 shadow-[0_0_0_1px_rgba(251,191,36,0.7)] transition-colors duration-300;
+}
+.mdx-search-current {
+    @apply bg-orange-400/70 shadow-[0_0_0_2px_#fb923c];
+}
+
+/* --- 悬浮 Cloze 控件 --- */
+.mdx-cloze-controls__panel {
+    @apply absolute bottom-5 right-5 z-50 flex flex-col gap-2 p-0 bg-transparent;
+}
+.mdx-cloze-controls__btn {
+    @apply w-9 h-9 inline-flex items-center justify-center bg-white/85 backdrop-blur-md text-gray-500 border border-black/5 rounded-full text-sm cursor-pointer shadow-md shadow-black/5 transition-all duration-200 ease-in-out relative;
+}
+.mdx-cloze-controls__btn:hover {
+    @apply bg-white/95 text-blue-500 border-blue-500/20 -translate-y-0.5 shadow-lg shadow-black/10;
+}
+.mdx-cloze-controls__btn:active {
+    @apply translate-y-0 shadow-md;
+}
+.mdx-cloze-controls__btn--accent {
+    @apply bg-indigo-500/15 text-indigo-500 border-indigo-500/20;
+}
+.mdx-cloze-controls__btn--accent:hover {
+    @apply bg-indigo-500/25 text-indigo-600 border-indigo-500/30;
+}
+.mdx-cloze-controls__btn-icon {
+    @apply relative inline-flex w-4 h-4;
+}
+.mdx-cloze-controls__btn-icon i {
+    @apply absolute inset-0 flex items-center justify-center transition-all duration-200 ease-in-out;
+}
+.mdx-cloze-controls__btn-icon .fa-eye { 
+    @apply opacity-100 rotate-0;
+    transform: scale(1); 
+}
+.mdx-cloze-controls__btn-icon .fa-eye-slash { 
+    @apply opacity-0 -rotate-90;
+    transform: scale(0.8); 
+}
+.mdx-cloze-controls__btn.is-all-open .mdx-cloze-controls__btn-icon .fa-eye {
+    @apply opacity-0 rotate-90;
+    transform: scale(0.8);
+}
+.mdx-cloze-controls__btn.is-all-open .mdx-cloze-controls__btn-icon .fa-eye-slash {
+    @apply opacity-100 rotate-0;
+    transform: scale(1);
+}
+
+/* Tooltip for cloze controls */
+.mdx-cloze-controls__btn::after {
+    content: attr(title);
+    @apply absolute right-full top-1/2 -translate-y-1/2 scale-95 mr-2.5 py-1 px-2.5 bg-gray-800/90 backdrop-blur text-white rounded-md text-[11px] font-medium whitespace-nowrap opacity-0 pointer-events-none transition-all duration-200 ease-in-out shadow-lg;
+}
+.mdx-cloze-controls__btn:hover::after {
+    @apply opacity-100;
+    transform: scale(1);
+}
+
+.cloze-nav-highlight {
+    animation: cloze-highlight-animation 1.5s ease-out;
+    background-color: transparent !important;
+}
+
+/* --- Code Block Controls --- */
+.mdx-code-block-wrapper {
+    @apply relative my-4 bg-gray-100 border border-gray-200 rounded-md transition-all duration-300 ease-in-out overflow-hidden;
+}
+.rich-content-area .mdx-code-block-wrapper pre {
+    @apply m-0 border-none rounded-b-md bg-transparent transition-all duration-300 max-h-[2000px] opacity-100;
+}
+.mdx-code-block-controls {
+    @apply absolute z-10 flex gap-1.5 top-2 right-2 opacity-0 -translate-y-1 transition-all duration-200 ease-in-out;
+}
+.mdx-code-block-wrapper:not(.is-collapsed):hover .mdx-code-block-controls {
+    @apply opacity-100 translate-y-0;
+}
+.mdx-code-block-btn {
+    @apply inline-flex items-center justify-center w-7 h-7 bg-gray-900/5 text-gray-600 border border-black/5 rounded cursor-pointer text-xs transition-all duration-200;
+}
+.mdx-code-block-btn:hover {
+    @apply bg-white text-blue-600 shadow-md -translate-y-px;
+}
+.mdx-code-block-btn.success {
+    @apply text-green-600 border-green-600 bg-white;
+}
+
+/* Collapsed State */
+.mdx-code-block-wrapper.is-collapsed {
+    @apply h-11 min-h-11 flex items-center px-3 bg-gray-200 cursor-default;
+}
+.mdx-code-block-wrapper.is-collapsed pre {
+    @apply max-h-0 p-0 m-0 opacity-0 pointer-events-none;
+}
+.mdx-code-block-wrapper.is-collapsed::before {
+    content: attr(data-language) " ...";
+    @apply font-mono text-xs font-semibold text-gray-500 uppercase tracking-wider animate-fade-in-label;
+}
+.mdx-code-block-wrapper.is-collapsed .mdx-code-block-controls {
+    @apply top-1/2 right-2 -translate-y-1/2 opacity-100;
+}
+.mdx-code-block-wrapper.is-collapsed .mdx-code-block-btn {
+    @apply bg-transparent border-transparent;
+}
+.mdx-code-block-wrapper.is-collapsed .mdx-code-block-btn:hover {
+    @apply bg-white/80 border-black/10;
+}
+
+/* =================================================================== */
+/*   6. 打印样式 (Print Styles)                                      */
+/* =================================================================== */
+#mdx-print-container {
+    display: none;
+}
+@media print {
+    body.mdx-printing > *:not(#mdx-print-container) {
+        display: none !important;
+    }
+    body.mdx-printing #mdx-print-container {
+        display: block !important;
+        @apply absolute top-0 left-0 w-full h-auto p-[20mm] text-xs text-black bg-white;
+    }
+    body.mdx-printing #mdx-print-container .cloze.hidden {
+        @apply text-transparent bg-gray-400;
+    }
+    body.mdx-printing #mdx-print-container a {
+        @apply underline text-black;
+    }
+}
