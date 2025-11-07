@@ -11,7 +11,8 @@
   "dependencies": {
     "@itookit/common": "workspace:*",
     "@itookit/llmdriver": "workspace:*",
-    "@itookit/mdxeditor": "workspace:*"
+    "@itookit/mdxeditor": "workspace:*",
+    "@itookit/configmanager": "workspace:*"
   },
   "devDependencies": {
     "@codemirror/autocomplete": "^6.19.1",

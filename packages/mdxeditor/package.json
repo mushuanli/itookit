@@ -22,7 +22,7 @@
     "editor"
   ],
   "author": "lizlok@gmail.com",
-  "license": "MIT",
+  "license": "ISC",
   "publishConfig": {
     "access": "public"
   },

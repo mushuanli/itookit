@@ -6,6 +6,13 @@
 import { IAutocompleteProvider } from './IAutocompleteProvider.js';
 
 /**
+ * @typedef {object} HoverPreviewData
+ * @property {string} title - The title to display in the preview card
+ * @property {string} contentHTML - The HTML content to display in the preview
+ * @property {string} [icon] - Optional icon HTML or URL
+ */
+
+/**
  * @abstract
  * Defines the contract for providing data and interaction logic for the mention feature.
  * It inherits the generic getSuggestions method and adds mention-specific methods
@@ -35,7 +42,12 @@ export abstract class IMentionProvider extends IAutocompleteProvider {
         console.log(`[IMentionProvider:${this.key}] Clicked:`, targetURL.toString());
     }
 
-    async getHoverPreview(targetURL: URL): Promise<HTMLElement | string | null> {
+    /**
+     * Returns preview data for hover tooltips
+     * @param {URL} targetURL - The URL to get preview for
+     * @returns {Promise<{title: string, contentHTML: string, icon?: string} | null>}
+     */
+    async getHoverPreview(targetURL: URL): Promise<{title: string, contentHTML: string, icon?: string} | null> {
         return null;
     }
 

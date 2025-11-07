@@ -10,7 +10,7 @@ export { ISessionService } from './interfaces/ISessionService';
 export { ISettingsWidget } from './interfaces/ISettingsWidget';
 
 // Export all utils
-export { slugify, simpleHash, escapeHTML, generateUUID, generateId, debounce, isClass } from './utils/utils';
+export { slugify, simpleHash, escapeHTML, generateUUID, generateShortUUID,generateId, debounce, isClass } from './utils/utils';
 
 // Export all components
 export { TagEditorComponent } from './components/TagEditor/TagEditorComponent';
