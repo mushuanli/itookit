@@ -1,0 +1,71 @@
+{
+  "name": "@itookit/vfs-ui",
+  "version": "1.0.0",
+  "description": "A flexible UI layer for VFS-Core, providing tree view, editor integration, and content adapters for browser-based virtual file systems",
+  "main": "src/index.js",
+  "module": "src/index.js",
+  "type": "module",
+  "types": "src/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./src/index.js",
+      "types": "./src/index.d.ts"
+    }
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "type-check": "tsc --noEmit",
+    "prepublishOnly": "npm run test"
+  },
+  "keywords": [
+    "vfs",
+    "vfs-ui",
+    "virtual-file-system",
+    "ui-components",
+    "tree-view",
+    "editor-adapter",
+    "content-management",
+    "file-browser",
+    "markdown-editor",
+    "outline-view",
+    "toolbar",
+    "browser-ui",
+    "typescript"
+  ],
+  "author": "lizlok@gmail.com",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/vfs-ui.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/vfs-ui/issues"
+  },
+  "homepage": "https://github.com/yourusername/vfs-ui#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "peerDependencies": {
+    "@itookit/vfs-core": "^1.0.0"
+  },
+  "dependencies": {
+    "@itookit/common": "workspace:*"
+  },
+  "devDependencies": {
+    "@itookit/vfs-core": "workspace:*",
+    "@types/node": "^20.0.0",
+    "@vitest/coverage-v8": "^1.0.0",
+    "typescript": "^5.3.0",
+    "vitest": "^1.0.0"
+  }
+}
