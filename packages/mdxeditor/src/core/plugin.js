@@ -31,12 +31,16 @@
  * This is the facade that provides a safe and stable API for plugins to interact with the MDx core.
  *
  * @property {function(any): void} registerSyntaxExtension - Registers a Marked.js syntax extension.
- * @property {function('beforeParse' | 'afterRender' | 'domUpdated', Function): void} on - Subscribes to a core lifecycle hook.
+ * @property {function('beforeParse' | 'afterRender' | 'domUpdated' | 'beforeSave', Function): void} on - Subscribes to a core lifecycle hook.
  * @property {function(string, any): void} emit - Emits a global event to the event bus.
  * @property {function(string, Function): void} listen - Listens for a global event on the event bus.
  * @property {function(symbol|string, *): void} provide - Provides a service to the service container.
  * @property {function((symbol|string)): *} inject - Injects a service from the service container.
- * @property {function(): ScopedPersistenceStore} getScopedStore - Gets a storage interface for the plugin to persist its private data.
+ * 
+ * @property {function(): import('@itookit/vfs-manager').VFSManager | null} getVFSManager - Gets the VFSManager instance if available.
+ * @property {function(): string | null} getCurrentNodeId - Gets the current document node ID if in VFS context.
+ * @property {function(): ScopedPersistenceStore} getScopedStore - Gets a storage interface for the plugin to persist its private data. Automatically selects the best available backend: VFS (preferred) > dataAdapter > Memory.
+ * 
  * @property {function(string, function(MDxEditor): void): void} registerCommand - (Editor only) Registers a command.
  * @property {function(object): void} registerToolbarButton - (Editor only) Registers a button for the toolbar.
  * @property {function(object): void} registerTitleBarButton - (Editor only) Registers a button for the title bar.

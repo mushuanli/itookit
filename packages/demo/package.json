@@ -12,7 +12,8 @@
     "@itookit/common": "workspace:*",
     "@itookit/llmdriver": "workspace:*",
     "@itookit/mdxeditor": "workspace:*",
-    "@itookit/configmanager": "workspace:*"
+    "@itookit/configmanager": "workspace:*",
+    "@itookit/vfs-manager": "workspace:*"
   },
   "devDependencies": {
     "@codemirror/autocomplete": "^6.19.1",

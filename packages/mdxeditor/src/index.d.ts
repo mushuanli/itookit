@@ -3,6 +3,7 @@
 import type { EditorView, ViewUpdate } from '@codemirror/view';
 import type { Extension } from '@codemirror/state';
 import type { Renderer, Token, Tokens } from 'marked';
+import type { VFSManager } from '@itookit/vfs-manager';
 
 // ============================================================================
 // Core Interfaces from @itookit/common
@@ -114,11 +115,25 @@ export interface TitleBarButton {
 
 export interface PluginContext {
   registerSyntaxExtension(extension: any): void;
-  on(hook: 'beforeParse' | 'afterRender' | 'domUpdated', callback: Function): void;
+  on(hook: 'beforeParse' | 'afterRender' | 'domUpdated' | 'beforeSave', callback: Function): void;
   emit(eventName: string, payload: any): void;
   listen(eventName: string, callback: (payload: any) => void): void;
   provide(key: symbol | string, service: any): void;
   inject<T = any>(key: symbol | string): T | undefined;
+  /**
+   * 获取 VFSManager 实例（如果可用）
+   */
+  getVFSManager(): VFSManager | null;
+  
+  /**
+   * 获取当前文档节点 ID（如果在 VFS 上下文中）
+   */
+  getCurrentNodeId(): string | null;
+  
+  /**
+   * 获取作用域存储
+   * 优先级：VFS > dataAdapter > Memory
+   */
   getScopedStore(): ScopedPersistenceStore;
   registerCommand(name: string, fn: (editor: MDxEditor) => void): void;
   registerToolbarButton(config: ToolbarButton): void;
@@ -189,7 +204,23 @@ export interface MDxEditorOptions {
   showToolbar?: boolean;
   showTitleBar?: boolean;
   initialMode?: 'edit' | 'render';
+  
+  /**
+   * 传统持久化适配器（向后兼容）
+   * @deprecated 推荐使用 vfsManager
+   */
   dataAdapter?: IPersistenceAdapter;
+  
+  /**
+   * VFS 管理器（推荐）
+   */
+  vfsManager?: VFSManager;
+  
+  /**
+   * 当前文档节点 ID（使用 VFS 时必需）
+   */
+  nodeId?: string;
+  
   clozeControls?: boolean;
   titleBar?: {
     title?: string;

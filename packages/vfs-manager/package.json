@@ -1,0 +1,66 @@
+{
+  "name": "@itookit/vfs-manager",
+  "version": "1.0.0",
+  "description": "A powerful virtual file system manager with plugin architecture for browser-based applications using IndexedDB",
+  "main": "src/index.js",
+  "module": "src/index.js",
+  "type": "module",
+  "types": "src/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./src/index.js",
+      "types": "./src/index.d.ts"
+    }
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "type-check": "tsc --noEmit",
+    "prepublishOnly": "npm run test"
+  },
+  "keywords": [
+    "vfs",
+    "virtual-file-system",
+    "indexeddb",
+    "file-manager",
+    "content-provider",
+    "plugin-architecture",
+    "browser-storage",
+    "note-taking",
+    "srs",
+    "task-management",
+    "typescript"
+  ],
+  "author": "lizlok@gmail.com",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/vfs-manager.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/vfs-manager/issues"
+  },
+  "homepage": "https://github.com/yourusername/vfs-manager#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "dependencies": {
+    "@itookit/common": "workspace:*",
+    "uuid": "^10.0.0"
+  },
+  "devDependencies": {
+    "@types/uuid": "^10.0.0",
+    "@vitest/coverage-v8": "^1.0.0",
+    "typescript": "^5.3.0",
+    "vitest": "^1.0.0"
+  }
+}
