@@ -120,21 +120,23 @@ export interface PluginContext {
   listen(eventName: string, callback: (payload: any) => void): void;
   provide(key: symbol | string, service: any): void;
   inject<T = any>(key: symbol | string): T | undefined;
+  
   /**
-   * 获取 VFSCore 实例（如果可用）
+   * Gets the VFSCore instance if available
    */
   getVFSManager(): VFSCore | null;
   
   /**
-   * 获取当前文档节点 ID（如果在 VFS 上下文中）
+   * Gets the current document node ID if in VFS context
    */
   getCurrentNodeId(): string | null;
   
   /**
-   * 获取作用域存储
-   * 优先级：VFS > dataAdapter > Memory
+   * Gets scoped storage for plugin persistence
+   * Priority: VFS > dataAdapter > Memory
    */
   getScopedStore(): ScopedPersistenceStore;
+  
   registerCommand(name: string, fn: (editor: MDxEditor) => void): void;
   registerToolbarButton(config: ToolbarButton): void;
   registerTitleBarButton(config: TitleBarButton): void;
@@ -206,18 +208,18 @@ export interface MDxEditorOptions {
   initialMode?: 'edit' | 'render';
   
   /**
-   * 传统持久化适配器（向后兼容）
-   * @deprecated 推荐使用 vfsCore
+   * Legacy persistence adapter (backward compatible)
+   * @deprecated Use vfsCore instead
    */
   dataAdapter?: IPersistenceAdapter;
   
   /**
-   * VFS 管理器（推荐）
+   * VFS manager instance (recommended)
    */
   vfsCore?: VFSCore;
   
   /**
-   * 当前文档节点 ID（使用 VFS 时必需）
+   * Current document node ID (required when using VFS)
    */
   nodeId?: string;
   
@@ -263,6 +265,11 @@ export class MDxEditor implements IEditor {
   search(query: string): Promise<UnifiedSearchResult[]>;
   gotoMatch(result: UnifiedSearchResult): void;
   clearSearch(): void;
+  
+  /**
+   * Finds and selects text in the editor (public API for plugins)
+   */
+  findAndSelectText(text: string): void;
 }
 
 // ============================================================================
@@ -291,6 +298,16 @@ export interface MemoryPluginOptions {
 }
 
 export class MemoryPlugin implements MDxPlugin {
+  name: 'feature:memory';
+  constructor(options?: MemoryPluginOptions);
+  install(context: PluginContext): void;
+  destroy(): void;
+}
+
+/**
+ * MemoryPlugin V2 - Uses VFSCore SRSProvider directly
+ */
+export class MemoryPluginV2 implements MDxPlugin {
   name: 'feature:memory';
   constructor(options?: MemoryPluginOptions);
   install(context: PluginContext): void;
@@ -394,3 +411,4 @@ export function handlePrintAction(editor: MDxEditor): Promise<void>;
 // ============================================================================
 
 export const defaultPlugins: MDxPlugin[];
+export const defaultPluginsWithCloze: MDxPlugin[];

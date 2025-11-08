@@ -76,6 +76,8 @@ export class MDxEditor extends IEditor {
      * @param {boolean} [options.showTitleBar=true] - Whether to display the title bar.
      * @param {('edit'|'render')} [options.initialMode='edit'] - The initial view mode.
      * @param {IPersistenceAdapter} [options.dataAdapter] - An adapter for plugins to persist their private data.
+     * @param {import('@itookit/vfs-core').VFSCore} [options.vfsCore] - VFS manager instance (recommended for persistence).
+     * @param {string} [options.nodeId] - Current document node ID (required when using VFS).
      * @param {boolean} [options.clozeControls=false] - If true, displays floating buttons for controlling clozes in render mode. Requires `ClozePlugin` to be active.
      * @param {object} [options.titleBar] - Configuration for the title bar.
      * @param {string} [options.titleBar.title] - The text to display in the title bar.
@@ -111,7 +113,11 @@ export class MDxEditor extends IEditor {
 
         // Initialize the core plugin system
         this.services = new ServiceContainer();
-        this.pluginManager = new PluginManager(this, this.services, this.options.dataAdapter); 
+        this.pluginManager = new PluginManager(this, this.services, {
+            dataAdapter: this.options.dataAdapter,
+            vfsCore: this.options.vfsCore,
+            nodeId: this.options.nodeId
+        }); 
         
         this._loadCorePlugins();
         (options.plugins || []).forEach(p => this.use(p));
@@ -631,9 +637,8 @@ export class MDxEditor extends IEditor {
      * Finds and highlights text in the CodeMirror editor.
      * This remains an internal helper for plugins like SourceSyncPlugin.
      * @param {string} text The text to find.
-     * @private
      */
-    _findAndSelectText(text) {
+    findAndSelectText(text) {
         const doc = this.editorView.state.doc.toString();
         const startIndex = doc.indexOf(text);
         

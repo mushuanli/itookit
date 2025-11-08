@@ -148,7 +148,7 @@ export class PluginManager {
 
             const editorInstance = /** @type {MDxEditor} */ (this.coreInstance);
             context.renderInElement = (element, markdown) => editorInstance._renderer.render(element, markdown);
-            context.findAndSelectText = (text) => editorInstance._findAndSelectText(text);
+            context.findAndSelectText = (text) => editorInstance.findAndSelectText(text);
             context.switchToMode = (mode) => editorInstance.switchTo(mode);
         }
         
