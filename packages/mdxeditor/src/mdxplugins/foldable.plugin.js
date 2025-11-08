@@ -11,7 +11,8 @@
 /** @typedef {import('../core/plugin.js').PluginContext} PluginContext */
 
 import { escapeHTML } from '@itookit/common';
-import { marked } from 'marked'; // <--- [修改] 导入 marked
+// [修改] 导入 Marked 类
+import { Marked } from 'marked';
 
 export class FoldablePlugin {
     name = 'core:foldable';
@@ -53,16 +54,17 @@ export class FoldablePlugin {
             let finalHtml = html;
             if (storedBlocks.size === 0) return { html, options };
 
-            // 创建一个独立的 marked 实例配置，避免污染主渲染器
-            const cleanMarkedOptions = {
+            // ✅ FIX: Create a new Marked instance with 'new' keyword
+            const innerMarked = new Marked({
                 gfm: true,
                 breaks: true,
-                renderer: new marked.Renderer() // <--- [修改] 使用导入的 marked
-            };
+                // Keep a clean, default renderer for inner content
+                // You may not want inner headings to have the same slug ids as outer ones
+            });
 
             for (const [placeholder, blockData] of storedBlocks.entries()) {
-                // 使用独立配置进行解析
-                const innerHtml = marked.parse(blockData.rawContent, cleanMarkedOptions); // <--- [修改] 使用导入的 marked
+                // Use the independent instance for parsing
+                const innerHtml = innerMarked.parse(blockData.rawContent);
 
                 let summaryContent = escapeHTML(blockData.label);
                 if (blockData.checkmark !== undefined) {

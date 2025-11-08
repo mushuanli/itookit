@@ -27,31 +27,31 @@
     "access": "public"
   },
   "dependencies": {
-    "@codemirror/autocomplete": "^6.16.0",
-    "@codemirror/commands": "^6.5.0",
-    "@codemirror/lang-markdown": "^6.2.5",
-    "@codemirror/language": "^6.10.1",
-    "@codemirror/lint": "^6.7.0",
-    "@codemirror/search": "^6.5.6",
-    "@codemirror/state": "^6.4.1",
-    "@codemirror/view": "^6.26.3",
+    "@codemirror/autocomplete": "^6.19.1",
+    "@codemirror/commands": "^6.10.0",
+    "@codemirror/lang-markdown": "^6.5.0",
+    "@codemirror/language": "^6.11.3",
+    "@codemirror/lint": "^6.9.2",
+    "@codemirror/search": "^6.5.11",
+    "@codemirror/state": "^6.5.2",
+    "@codemirror/view": "^6.38.6",
     "@itookit/common": "workspace:*",
     "@itookit/vfs-core": "workspace:*",
     "marked": "^12.0.2",
-    "mermaid": "^10.9.0",
-    "yaml": "^2.4.2"
+    "mermaid": "^10.9.5",
+    "yaml": "^2.8.1"
   },
   "devDependencies": {
-    "@fortawesome/fontawesome-free": "^6.5.2",
-    "@tailwindcss/typography": "^0.5.13",
+    "@fortawesome/fontawesome-free": "^6.7.2",
+    "@tailwindcss/typography": "^0.5.19",
     "@types/marked": "^6.0.0",
-    "@types/node": "^20.12.12",
-    "autoprefixer": "^10.4.19",
+    "@types/node": "^20.19.24",
+    "autoprefixer": "^10.4.21",
     "jsdoc": "^4.0.5",
-    "postcss": "^8.4.38",
-    "tailwindcss": "^3.4.3",
-    "tsup": "^8.0.2",
-    "typescript": "^5.4.5"
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.18",
+    "tsup": "^8.5.0",
+    "typescript": "^5.9.3"
   },
   "peerDependencies": {
     "tailwindcss": ">=3.0.0"

@@ -5,7 +5,8 @@
 import { PluginManager } from '../core/plugin-manager.js';
 import { ServiceContainer } from '../core/service-container.js';
 import { slugify, escapeHTML } from '@itookit/common';
-import { marked } from 'marked';
+// [修改] 导入 Marked 类，而不是单例
+import { Marked } from 'marked'; 
 
 export class MDxRenderer {
     /**
@@ -148,8 +149,14 @@ export class MDxRenderer {
             { markdown: markdownText, options }
         ).markdown;
 
-        this.configureMarked(options);
-        const html = marked.parse(processedMarkdown);
+        // [修改] 创建一个局部的 marked 实例
+        const markedInstance = new Marked();
+        
+        // [修改] 将实例传递给配置函数
+        this.configureMarked(markedInstance, options);
+        
+        // [修改] 使用局部实例进行解析
+        const html = markedInstance.parse(processedMarkdown);
 
         const finalHtml = this.pluginManager.executeTransformHook(
             'afterRender',
@@ -170,18 +177,27 @@ export class MDxRenderer {
     }
     
     /**
-     * Configures the Marked.js instance for a render pass.
+     * @param {Marked} markedInstance - 接收一个 Marked 实例
      * @param {object} options
      */
-    configureMarked(options) {
-        const renderer = new marked.Renderer(); 
+    configureMarked(markedInstance, options) {
+        // [注意] Renderer 的创建方式不变
+        const renderer = new markedInstance.Renderer();
 
-        // @ts-expect-error - Using marked v5+ token-based signature instead of v4 parameter-based signature
-        renderer.heading = function(/** @type {import('marked').Tokens.Heading} */ token) {
-            const id = `heading-${slugify(token.text)}`;
-            // @ts-ignore - parser exists on renderer instance at runtime
-            const innerHTML = this.parser.parseInline(token.tokens);
-            return `<h${token.depth} id="${id}">${innerHTML}</h${token.depth}>`;
+        // FIX: Use a traditional `function` to preserve the `this` context provided by Marked.js.
+        renderer.heading = function(token) {
+            // [MODIFIED] 1. 使用新的 slugify
+            // [MODIFIED] 2. 统一添加 'heading-' 前缀，使其更健壮
+    const id = `heading-${slugify(token.text)}`;
+    // FIX: Check if parser exists, and provide fallback
+    let innerHTML;
+    if (this.parser && typeof this.parser.parseInline === 'function') {
+        innerHTML = this.parser.parseInline(token.tokens);
+    } else {
+        // Fallback: use token.text if parser is not available
+        innerHTML = token.text;
+    }
+    return `<h${token.depth} id="${id}">${innerHTML}</h${token.depth}>`;
         };
 
         // @ts-expect-error - Using marked v5+ token-based signature instead of v4 parameter-based signature
@@ -212,8 +228,9 @@ export class MDxRenderer {
             return `<li>${innerHTML}</li>`;
         };
 
-        marked.use({ extensions: this.pluginManager.syntaxExtensions });
-        marked.setOptions({
+        // [修改] 在局部实例上应用扩展和选项
+        markedInstance.use({ extensions: this.pluginManager.syntaxExtensions });
+        markedInstance.setOptions({
             gfm: true,
             breaks: true,
             renderer: renderer,
