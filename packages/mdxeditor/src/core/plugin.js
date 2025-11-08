@@ -37,7 +37,7 @@
  * @property {function(symbol|string, *): void} provide - Provides a service to the service container.
  * @property {function((symbol|string)): *} inject - Injects a service from the service container.
  * 
- * @property {function(): import('@itookit/vfs-manager').VFSManager | null} getVFSManager - Gets the VFSManager instance if available.
+ * @property {function(): import('@itookit/vfs-core').VFSCore | null} getVFSManager - Gets the VFSCore instance if available.
  * @property {function(): string | null} getCurrentNodeId - Gets the current document node ID if in VFS context.
  * @property {function(): ScopedPersistenceStore} getScopedStore - Gets a storage interface for the plugin to persist its private data. Automatically selects the best available backend: VFS (preferred) > dataAdapter > Memory.
  * 

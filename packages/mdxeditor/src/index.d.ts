@@ -3,7 +3,7 @@
 import type { EditorView, ViewUpdate } from '@codemirror/view';
 import type { Extension } from '@codemirror/state';
 import type { Renderer, Token, Tokens } from 'marked';
-import type { VFSManager } from '@itookit/vfs-manager';
+import type { VFSCore } from '@itookit/vfs-core';
 
 // ============================================================================
 // Core Interfaces from @itookit/common
@@ -121,9 +121,9 @@ export interface PluginContext {
   provide(key: symbol | string, service: any): void;
   inject<T = any>(key: symbol | string): T | undefined;
   /**
-   * 获取 VFSManager 实例（如果可用）
+   * 获取 VFSCore 实例（如果可用）
    */
-  getVFSManager(): VFSManager | null;
+  getVFSManager(): VFSCore | null;
   
   /**
    * 获取当前文档节点 ID（如果在 VFS 上下文中）
@@ -207,14 +207,14 @@ export interface MDxEditorOptions {
   
   /**
    * 传统持久化适配器（向后兼容）
-   * @deprecated 推荐使用 vfsManager
+   * @deprecated 推荐使用 vfsCore
    */
   dataAdapter?: IPersistenceAdapter;
   
   /**
    * VFS 管理器（推荐）
    */
-  vfsManager?: VFSManager;
+  vfsCore?: VFSCore;
   
   /**
    * 当前文档节点 ID（使用 VFS 时必需）
