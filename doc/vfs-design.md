@@ -1,6 +1,6 @@
 <think>
 
-用户希望将整个库重命名为 VFSManager（Virtual File System Manager），并要求我输出指导重构的设计方案和重构计划。
+用户希望将整个库重命名为 VFSCore（Virtual File System Manager），并要求我输出指导重构的设计方案和重构计划。
 
 基于之前的分析，我需要：
 1. 提供一个完整的 VFS（虚拟文件系统）设计方案
@@ -22,17 +22,17 @@
 4. Phase 4: 测试与优化
 5. Phase 5: 清理旧代码
 </think>
-# VFSManager 重构设计方案
+# VFSCore 重构设计方案
 
 ## 一、核心设计理念
 
-将 ConfigManager 重构为 **VFSManager (Virtual File System Manager)**，采用类 Linux VFS 的分层架构：
+将 ConfigManager 重构为 **VFSCore (Virtual File System Manager)**，采用类 Linux VFS 的分层架构：
 
 ```
 ┌─────────────────────────────────────────┐
 │        Application Layer (UI)           │
 ├─────────────────────────────────────────┤
-│         VFSManager (VFS Layer)          │  ← 统一接口
+│         VFSCore (VFS Layer)          │  ← 统一接口
 ├─────────────────────────────────────────┤
 │     Content Provider Registry           │  ← 插件管理
 ├─────────────────────────────────────────┤
@@ -50,9 +50,9 @@
 
 ### 2.1 核心概念映射
 
-| Linux 概念 | VFSManager 概念 | 说明 |
+| Linux 概念 | VFSCore 概念 | 说明 |
 |-----------|----------------|------|
-| VFS | VFSManager | 统一的文件系统接口 |
+| VFS | VFSCore | 统一的文件系统接口 |
 | inode | VNode (Virtual Node) | 文件/目录元数据 |
 | dentry | Path Entry | 路径到 inode 的映射 |
 | super_block | ModuleInfo | 模块（命名空间）元信息 |
@@ -62,9 +62,9 @@
 ### 2.2 目录结构
 
 ```
-vfsManager/
+vfsCore/
 ├── core/
-│   ├── VFSManager.js           # 主入口
+│   ├── VFSCore.js           # 主入口
 │   ├── VNode.js                # 虚拟节点抽象
 │   ├── VFS.js                  # VFS 核心层
 │   └── PathResolver.js         # 路径解析器
@@ -635,26 +635,26 @@ class VFS {
 }
 ```
 
-### 3.5 VFSManager (主入口)
+### 3.5 VFSCore (主入口)
 
 ```javascript
 /**
- * VFSManager - 主入口
+ * VFSCore - 主入口
  * 提供向后兼容的 API
  */
-export class VFSManager {
+export class VFSCore {
     static #instance = null;
     
     static getInstance() {
-        if (!VFSManager.#instance) {
-            VFSManager.#instance = new VFSManager();
+        if (!VFSCore.#instance) {
+            VFSCore.#instance = new VFSCore();
         }
-        return VFSManager.#instance;
+        return VFSCore.#instance;
     }
     
     constructor() {
-        if (VFSManager.#instance) {
-            return VFSManager.#instance;
+        if (VFSCore.#instance) {
+            return VFSCore.#instance;
         }
         
         this.storage = null;
@@ -665,7 +665,7 @@ export class VFSManager {
         // 向后兼容
         this.legacy = null;
         
-        VFSManager.#instance = this;
+        VFSCore.#instance = this;
     }
     
     /**
@@ -701,7 +701,7 @@ export class VFSManager {
             this.legacy = new ConfigManagerAdapter(this);
         }
         
-        console.log('[VFSManager] Initialized successfully');
+        console.log('[VFSCore] Initialized successfully');
     }
     
     /**
@@ -799,7 +799,7 @@ export class VFSManager {
 
 // 导出单例获取函数
 export function getVFSManager() {
-    return VFSManager.getInstance();
+    return VFSCore.getInstance();
 }
 ```
 
@@ -833,14 +833,14 @@ export function getVFSManager() {
 #### 2.1 基础设施
 ```bash
 # 创建新目录结构
-mkdir -p vfsManager/{core,providers/{base},registry,storage,utils,legacy}
+mkdir -p vfsCore/{core,providers/{base},registry,storage,utils,legacy}
 
 # 实现核心类
-touch vfsManager/core/{VNode,VFS,PathResolver,VFSError}.js
-touch vfsManager/providers/base/ContentProvider.js
-touch vfsManager/registry/{ProviderRegistry,ModuleRegistry}.js
-touch vfsManager/storage/{VFSStorage,InodeStore,ContentStore}.js
-touch vfsManager/utils/{EventBus,Transaction,Cache}.js
+touch vfsCore/core/{VNode,VFS,PathResolver,VFSError}.js
+touch vfsCore/providers/base/ContentProvider.js
+touch vfsCore/registry/{ProviderRegistry,ModuleRegistry}.js
+touch vfsCore/storage/{VFSStorage,InodeStore,ContentStore}.js
+touch vfsCore/utils/{EventBus,Transaction,Cache}.js
 ```
 
 #### 2.2 实现顺序
@@ -891,7 +891,7 @@ touch vfsManager/utils/{EventBus,Transaction,Cache}.js
 
 #### 3.1 PlainTextProvider (0.5天)
 ```javascript
-// vfsManager/providers/PlainTextProvider.js
+// vfsCore/providers/PlainTextProvider.js
 class PlainTextProvider extends ContentProvider {
     async read(vnode, options) {
         return {
@@ -986,14 +986,14 @@ prompt: Write a poem
 
 ---
 
-### Phase 4: VFSManager 实现 (2-3 天)
+### Phase 4: VFSCore 实现 (2-3 天)
 
 **目标**：实现主入口和兼容层
 
-#### 4.1 VFSManager 主类 (1天)
+#### 4.1 VFSCore 主类 (1天)
 ```javascript
-// vfsManager/VFSManager.js
-export class VFSManager {
+// vfsCore/VFSCore.js
+export class VFSCore {
     async init(options) {
         // 初始化所有组件
     }
@@ -1010,13 +1010,13 @@ export class VFSManager {
 
 #### 4.2 兼容层 (1天)
 ```javascript
-// vfsManager/legacy/ConfigManagerAdapter.js
+// vfsCore/legacy/ConfigManagerAdapter.js
 /**
  * 提供完全向后兼容的 ConfigManager API
  */
 export class ConfigManagerAdapter {
-    constructor(vfsManager) {
-        this.vfs = vfsManager;
+    constructor(vfsCore) {
+        this.vfs = vfsCore;
     }
     
     async createFile(moduleName, path, content) {
@@ -1042,7 +1042,7 @@ async function migrateDatabase() {
     const newData = transformToVFS(oldData);
     
     // 3. 导入新数据
-    await vfsManager.import(newData);
+    await vfsCore.import(newData);
 }
 ```
 
@@ -1071,7 +1071,7 @@ const cm = getConfigManager();
 await cm.createFile('notes', '/test.md', 'content');
 
 // 新代码（过渡期）
-import { getVFSManager } from './vfsManager';
+import { getVFSManager } from './vfsCore';
 const vfs = getVFSManager();
 await vfs.createFile('notes', '/test.md', 'content'); // 兼容 API
 
@@ -1144,7 +1144,7 @@ rm -rf configManager.old
 
 ### 5.1 API 映射表
 
-| ConfigManager API | VFSManager API | 说明 |
+| ConfigManager API | VFSCore API | 说明 |
 |------------------|----------------|------|
 | `createFile()` | `vfs.createNode({type:'file'})` | 兼容层自动映射 |
 | `getNodeById()` | `vfs.read()` | 返回格式略有不同 |
@@ -1156,19 +1156,19 @@ rm -rf configManager.old
 
 ```javascript
 // Option 1: 全局替换
-window.ConfigManager = VFSManager; // 不推荐
+window.ConfigManager = VFSCore; // 不推荐
 
 // Option 2: 导出别名
 export {
-    VFSManager as ConfigManager,
+    VFSCore as ConfigManager,
     getVFSManager as getConfigManager
 };
 
 // Option 3: 兼容层（推荐）
 export class ConfigManager extends ConfigManagerAdapter {
     constructor() {
-        super(VFSManager.getInstance());
-        console.warn('[DEPRECATED] ConfigManager is deprecated. Use VFSManager instead.');
+        super(VFSCore.getInstance());
+        console.warn('[DEPRECATED] ConfigManager is deprecated. Use VFSCore instead.');
     }
 }
 ```
@@ -1181,7 +1181,7 @@ async createFile(...args) {
     if (process.env.NODE_ENV !== 'production') {
         console.warn(
             'ConfigManager.createFile() is deprecated. ' +
-            'Use vfsManager.vfs.createNode({type:"file"}) instead.'
+            'Use vfsCore.vfs.createNode({type:"file"}) instead.'
         );
     }
     return this.vfs.createFile(...args);
@@ -1221,7 +1221,7 @@ async createFile(...args) {
 | Phase 1 | 1-2天 | 设计确认 |
 | Phase 2 | 3-5天 | 核心抽象完成 |
 | Phase 3 | 5-7天 | Provider 迁移完成 |
-| Phase 4 | 2-3天 | VFSManager 可用 |
+| Phase 4 | 2-3天 | VFSCore 可用 |
 | Phase 5 | 3-5天 | 应用迁移完成 |
 | Phase 6 | 2-3天 | 优化和发布 |
 | **总计** | **16-25天** | **重构完成** |
