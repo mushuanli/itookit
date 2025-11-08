@@ -36,6 +36,7 @@
     "@codemirror/state": "^6.4.1",
     "@codemirror/view": "^6.26.3",
     "@itookit/common": "workspace:*",
+    "@itookit/vfs-manager": "workspace:*",
     "marked": "^12.0.2",
     "mermaid": "^10.9.0",
     "yaml": "^2.4.2"
