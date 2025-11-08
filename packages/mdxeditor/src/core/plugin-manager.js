@@ -7,6 +7,7 @@ import { ServiceContainer } from './service-container.js';
 
 // By defining these here, we tell JSDoc what the simple names refer to.
 /** @typedef {import('@itookit/common').IPersistenceAdapter} IPersistenceAdapter */
+/** @typedef {import('@itookit/vfs-manager').VFSManager} VFSManager */
 /** @typedef {import('./plugin.js').MDxPlugin} MDxPlugin */
 /** @typedef {import('./plugin.js').PluginContext} PluginContext */
 
@@ -14,12 +15,24 @@ export class PluginManager {
     /**
      * @param {MDxRenderer | MDxEditor} coreInstance
      * @param {ServiceContainer} serviceContainer
-     * @param {IPersistenceAdapter | null} dataAdapter
+     * @param {object} [options]
+     * @param {IPersistenceAdapter} [options.dataAdapter] - 传统持久化适配器（向后兼容）
+     * @param {VFSManager} [options.vfsManager] - VFS 管理器（推荐）
+     * @param {string} [options.nodeId] - 当前文档节点 ID（使用 VFS 时必需）
      */
-    constructor(coreInstance, serviceContainer, dataAdapter = null) {
+    constructor(coreInstance, serviceContainer, options = {}) {
         this.coreInstance = coreInstance;
         this.serviceContainer = serviceContainer;
-        this.dataAdapter = dataAdapter;
+        
+        // 存储配置
+        this.vfsManager = options.vfsManager || null;
+        this.currentNodeId = options.nodeId || null;
+        this.dataAdapter = options.dataAdapter || null;
+        
+        // 如果同时提供了 VFS 和 dataAdapter，优先使用 VFS
+        if (this.vfsManager && this.dataAdapter) {
+            console.info('[PluginManager] Both VFSManager and dataAdapter provided. VFS will be preferred.');
+        }
 
         /** @type {Map<string, MDxPlugin>} */
         this.plugins = new Map();
@@ -88,23 +101,29 @@ export class PluginManager {
             emit: this.emit.bind(this),
             listen: this.listen.bind(this),
 
+        // 新增：访问 VFSManager
+        getVFSManager: () => this.vfsManager,
+        
+        // 新增：获取当前文档节点ID
+        getCurrentNodeId: () => this.currentNodeId,
+
             getScopedStore: () => {
-                if (!this.dataAdapter) {
-                    console.warn(`[MDxEditor] No dataAdapter provided. State for plugin "${plugin.name}" will not be persisted.`);
-                    const memStore = new Map();
-                    return {
-                        get: async (key) => memStore.get(key),
-                        set: async (key, value) => { memStore.set(key, value); },
-                        remove: async (key) => { memStore.delete(key); },
-                    };
+                // 策略 1: 优先使用 VFSManager（如果可用）
+                if (this.vfsManager && this.currentNodeId) {
+                    return this._createVFSStore(plugin.name);
                 }
                 
-                const prefix = `plugin::${plugin.name}::`;
-                return {
-                    get: async (key) => this.dataAdapter.getItem(prefix + key),
-                    set: async (key, value) => this.dataAdapter.setItem(prefix + key, value),
-                    remove: async (key) => this.dataAdapter.removeItem(prefix + key),
-                };
+                // 策略 2: 使用传统 dataAdapter（向后兼容）
+                if (this.dataAdapter) {
+                    return this._createAdapterStore(plugin.name);
+                }
+                
+                // 策略 3: 降级到内存存储（不持久化）
+                console.warn(
+                    `[PluginManager] No persistence available for plugin "${plugin.name}". ` +
+                    `Using in-memory store (data will not be persisted).`
+                );
+                return this._createMemoryStore();
             },
 
             // Editor specific placeholders
@@ -180,5 +199,105 @@ export class PluginManager {
             }
         }
         this.eventBus.clear();
+    }
+
+    /**
+     * 创建基于 VFS 的存储
+     * @private
+     */
+    _createVFSStore(pluginName) {
+        const vfs = this.vfsManager;
+        const nodeId = this.currentNodeId;
+        const prefix = `_plugin_${pluginName}_`;
+        
+        return {
+            /**
+             * 从 VNode meta 读取数据
+             */
+            get: async (key) => {
+                try {
+                    const vnode = await vfs.storage.loadVNode(nodeId);
+                    if (!vnode) return null;
+                    
+                    const pluginData = vnode.meta[prefix];
+                    return pluginData?.[key] ?? null;
+                } catch (error) {
+                    console.error(`[VFSStore] Failed to get ${key}:`, error);
+                    return null;
+                }
+            },
+            
+            /**
+             * 写入数据到 VNode meta
+             */
+            set: async (key, value) => {
+                try {
+                    const vnode = await vfs.storage.loadVNode(nodeId);
+                    if (!vnode) {
+                        throw new Error(`Node ${nodeId} not found`);
+                    }
+                    
+                    if (!vnode.meta[prefix]) {
+                        vnode.meta[prefix] = {};
+                    }
+                    
+                    vnode.meta[prefix][key] = value;
+                    vnode.markModified();
+                    
+                    await vfs.storage.saveVNode(vnode);
+                } catch (error) {
+                    console.error(`[VFSStore] Failed to set ${key}:`, error);
+                    throw error;
+                }
+            },
+            
+            /**
+             * 删除数据
+             */
+            remove: async (key) => {
+                try {
+                    const vnode = await vfs.storage.loadVNode(nodeId);
+                    if (!vnode) return;
+                    
+                    const pluginData = vnode.meta[prefix];
+                    if (pluginData && key in pluginData) {
+                        delete pluginData[key];
+                        vnode.markModified();
+                        await vfs.storage.saveVNode(vnode);
+                    }
+                } catch (error) {
+                    console.error(`[VFSStore] Failed to remove ${key}:`, error);
+                }
+            }
+        };
+    }
+
+    /**
+     * 创建基于 IPersistenceAdapter 的存储（向后兼容）
+     * @private
+     */
+    _createAdapterStore(pluginName) {
+        const adapter = this.dataAdapter;
+        const prefix = `plugin::${pluginName}::`;
+        
+        return {
+            get: async (key) => adapter.getItem(prefix + key),
+            set: async (key, value) => adapter.setItem(prefix + key, value),
+            remove: async (key) => adapter.removeItem(prefix + key)
+        };
+    }
+
+    /**
+     * 创建内存存储（不持久化）
+     * @private
+     */
+    _createMemoryStore() {
+        const memStore = new Map();
+        
+        return {
+            get: async (key) => memStore.get(key),
+            set: async (key, value) => { memStore.set(key, value); },
+            remove: async (key) => { memStore.delete(key); }
+        };
     }
 }

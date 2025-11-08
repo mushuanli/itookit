@@ -953,3 +953,86 @@ if (processorOptionsEl instanceof HTMLTextAreaElement) {
         // We only need this if we want custom behavior.
     });
 });
+
+/*
+import { getVFSManager,VFSPersistenceAdapter } from '@itookit/vfs-manager';
+import { MemoryPluginV2 } from './plugins/MemoryPlugin.v2.js';
+
+async function initEditor() {
+    // 初始化 VFS
+    const vfs = getVFSManager();
+    await vfs.init();
+    
+    // 创建或获取文档节点
+    const note = await vfs.createFile(
+        'notes',
+        '/my-note.md',
+        '# My Note\n{{c1::Important concept}}'
+    );
+    
+    // 创建 VFS 适配器
+    const adapter = new VFSPersistenceAdapter(vfs, note.id);
+    
+    // 创建编辑器实例
+    const editor = new MDxEditor({
+        target: document.getElementById('editor'),
+        dataAdapter: adapter,
+        vfsManager: vfs,        // 注入 VFSManager
+        currentNodeId: note.id  // 注入当前节点ID
+    });
+    
+    // 注册插件
+    editor.use(new MemoryPluginV2());
+    
+    // 加载内容
+    const { content } = await vfs.read(note.id);
+    await editor.setMarkdown(content);
+}
+
+示例 A：使用 VFSManager（推荐）
+
+import { getVFSManager } from '@itookit/vfs-manager';
+import { MDxEditor } from '@itookit/mdxeditor';
+import { MemoryPluginV2 } from './plugins/MemoryPlugin.v2.js';
+
+async function createEditor() {
+    const vfs = getVFSManager();
+    await vfs.init();
+    
+    const note = await vfs.createFile(
+        'notes',
+        '/my-note.md',
+        '# My Note\n{{c1::Test}}'
+    );
+    
+    const editor = new MDxEditor(document.getElementById('editor'), {
+        vfsManager: vfs,
+        nodeId: note.id,
+        plugins: [
+            new MemoryPluginV2()
+        ]
+    });
+    
+    const { content } = await vfs.read(note.id);
+    editor.setText(content);
+}
+
+示例 B：使用传统 dataAdapter（向后兼容）
+
+import { MDxEditor } from '@itookit/mdxeditor';
+import { LocalStorageAdapter } from './adapters/LocalStorageAdapter.js';
+import { MemoryPlugin } from './plugins/MemoryPlugin.js'; // 旧版本
+
+const editor = new MDxEditor(document.getElementById('editor'), {
+    dataAdapter: new LocalStorageAdapter(),
+    plugins: [
+        new MemoryPlugin() // 使用旧的插件
+    ]
+});
+
+示例 C：无持久化（开发/测试）
+const editor = new MDxEditor(document.getElementById('editor'), {
+    // 不提供任何持久化选项
+    // 数据仅在内存中
+});
+*/

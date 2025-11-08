@@ -1,0 +1,6 @@
+[submodule "data"]
+	path = data
+	url = git@github.com:mushuanli/anki-data.git
+[submodule "tookit"]
+	path = tookit
+	url = git@github.com:mushuanli/anki-tookit.git

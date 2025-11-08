@@ -26,7 +26,8 @@ import { ClozePlugin, ClozeAPIKey } from './mdxplugins/cloze.plugin.js';
 // [NEW] 导入新创建的插件
 import { ClozeControlsPlugin } from './mdxplugins/cloze-controls.plugin.js';
 // [NEW] Import the new memory plugin
-import { MemoryPlugin } from './mdxplugins/memory.plugin.js';
+//import { MemoryPlugin } from './mdxplugins/memory.plugin.js';
+import { MemoryPluginV2 } from './mdxplugins/memory.plugin.v2';
 import { FoldablePlugin } from './mdxplugins/foldable.plugin.js';
 import { FormattingPlugin } from './mdxplugins/formatting.plugin.js';
 import { MathJaxPlugin } from './mdxplugins/mathjax.plugin.js';
@@ -42,18 +43,19 @@ import { CodeBlockControlsPlugin } from './mdxplugins/codeblock-controls.plugin.
 // A single, simple array of default plugins for the full MDxEditor experience.
 const defaultPlugins = [
     new FoldablePlugin(),
-    new ClozePlugin(),
-    new MemoryPlugin(),
+    new MemoryPluginV2(),
     new FormattingPlugin(),
     new MathJaxPlugin(),
     new MediaPlugin(),
     new MermaidPlugin(),
     new TaskListPlugin(),
-    // +++ START MODIFICATION +++
     new CodeBlockControlsPlugin({ collapseThreshold: 100 }), 
-    // +++ END MODIFICATION +++
 ];
 
+const defaultPluginsWithCloze = [
+    ...defaultPlugins,
+    new ClozePlugin(),
+];
 export {
     // --- Core API ---
     MDxEditor,
@@ -74,7 +76,7 @@ export {
     // [NEW] 导出新插件
     ClozeControlsPlugin,
     // [NEW] Export the memory plugin
-    MemoryPlugin,
+    MemoryPluginV2,
     MentionPlugin,
     FoldablePlugin,
     FormattingPlugin,
@@ -82,12 +84,10 @@ export {
     MediaPlugin,
     MermaidPlugin,
     TaskListPlugin,
-    // +++ START MODIFICATION +++
     CodeBlockControlsPlugin,
-    // +++ END MODIFICATION +++
     
     // --- Keys & Bundles ---
     ClozeAPIKey,
     defaultPlugins, // Export the new unified bundle
-
+    defaultPluginsWithCloze,
 };
