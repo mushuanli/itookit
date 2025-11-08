@@ -9,7 +9,7 @@ ContentProvider 是 VFS 的插件系统核心，允许开发者扩展文件内�
 ### 1. 继承 ContentProvider 基类
 
 ```javascript
-import { ContentProvider } from './vfsManager/providers/base/ContentProvider.js';
+import { ContentProvider } from './vfsCore/providers/base/ContentProvider.js';
 
 class MyCustomProvider extends ContentProvider {
     constructor(storage, eventBus) {
@@ -61,15 +61,15 @@ async write(vnode, content, transaction) {
 ### 3. 注册 Provider
 
 ```javascript
-const vfsManager = await VFSManager.getInstance();
-await vfsManager.init();
+const vfsCore = await VFSCore.getInstance();
+await vfsCore.init();
 
 const myProvider = new MyCustomProvider(
-    vfsManager.storage,
-    vfsManager.events
+    vfsCore.storage,
+    vfsCore.events
 );
 
-vfsManager.registerProvider(myProvider);
+vfsCore.registerProvider(myProvider);
 ```
 
 ## 最佳实践

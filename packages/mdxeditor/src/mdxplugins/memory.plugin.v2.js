@@ -1,9 +1,9 @@
 /**
- * @fileoverview MemoryPlugin V2 - 直接使用 VFSManager 的 SRSProvider
+ * @fileoverview MemoryPlugin V2 - 直接使用 VFSCore 的 SRSProvider
  */
 
 /** @typedef {import('../core/plugin.js').PluginContext} PluginContext */
-/** @typedef {import('@itookit/vfs-manager').VFSManager} VFSManager */
+/** @typedef {import('@itookit/vfs-core').VFSCore} VFSCore */
 
 /**
  * @typedef {object} ClozeMetadata
@@ -35,7 +35,7 @@ export class MemoryPluginV2 {
     constructor(options = {}) {
         this.gradingTimeout = (options.gradingTimeout || 300) * 1000;
         
-        /** @private @type {VFSManager | null} */
+        /** @private @type {VFSCore | null} */
         this.vfs = null;
         
         /** @private @type {string | null} */
@@ -55,12 +55,12 @@ export class MemoryPluginV2 {
      * @param {PluginContext} context
      */
     install(context) {
-        // 获取 VFSManager 实例（需要在 context 中提供）
+        // 获取 VFSCore 实例（需要在 context 中提供）
         this.vfs = context.getVFSManager();
         this.nodeId = context.getCurrentNodeId();
         
         if (!this.vfs || !this.nodeId) {
-            console.warn('[MemoryPlugin] VFSManager or nodeId not available. Plugin disabled.');
+            console.warn('[MemoryPlugin] VFSCore or nodeId not available. Plugin disabled.');
             return;
         }
         
@@ -136,7 +136,7 @@ export class MemoryPluginV2 {
      * 将本地修改同步回 VFS
      */
     async _syncClozeStates() {
-        // VFSManager 的 SRSProvider 会在 write 时自动处理
+        // VFSCore 的 SRSProvider 会在 write 时自动处理
         // 这里不需要手动同步，因为卡片状态已经存储在 VFS 中
     }
     

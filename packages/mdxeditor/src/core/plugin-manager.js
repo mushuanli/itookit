@@ -7,7 +7,7 @@ import { ServiceContainer } from './service-container.js';
 
 // By defining these here, we tell JSDoc what the simple names refer to.
 /** @typedef {import('@itookit/common').IPersistenceAdapter} IPersistenceAdapter */
-/** @typedef {import('@itookit/vfs-manager').VFSManager} VFSManager */
+/** @typedef {import('@itookit/vfs-core').VFSCore} VFSCore */
 /** @typedef {import('./plugin.js').MDxPlugin} MDxPlugin */
 /** @typedef {import('./plugin.js').PluginContext} PluginContext */
 
@@ -17,7 +17,7 @@ export class PluginManager {
      * @param {ServiceContainer} serviceContainer
      * @param {object} [options]
      * @param {IPersistenceAdapter} [options.dataAdapter] - 传统持久化适配器（向后兼容）
-     * @param {VFSManager} [options.vfsManager] - VFS 管理器（推荐）
+     * @param {VFSCore} [options.vfsCore] - VFS 管理器（推荐）
      * @param {string} [options.nodeId] - 当前文档节点 ID（使用 VFS 时必需）
      */
     constructor(coreInstance, serviceContainer, options = {}) {
@@ -25,13 +25,13 @@ export class PluginManager {
         this.serviceContainer = serviceContainer;
         
         // 存储配置
-        this.vfsManager = options.vfsManager || null;
+        this.vfsCore = options.vfsCore || null;
         this.currentNodeId = options.nodeId || null;
         this.dataAdapter = options.dataAdapter || null;
         
         // 如果同时提供了 VFS 和 dataAdapter，优先使用 VFS
-        if (this.vfsManager && this.dataAdapter) {
-            console.info('[PluginManager] Both VFSManager and dataAdapter provided. VFS will be preferred.');
+        if (this.vfsCore && this.dataAdapter) {
+            console.info('[PluginManager] Both VFSCore and dataAdapter provided. VFS will be preferred.');
         }
 
         /** @type {Map<string, MDxPlugin>} */
@@ -101,15 +101,15 @@ export class PluginManager {
             emit: this.emit.bind(this),
             listen: this.listen.bind(this),
 
-        // 新增：访问 VFSManager
-        getVFSManager: () => this.vfsManager,
+        // 新增：访问 VFSCore
+        getVFSManager: () => this.vfsCore,
         
         // 新增：获取当前文档节点ID
         getCurrentNodeId: () => this.currentNodeId,
 
             getScopedStore: () => {
-                // 策略 1: 优先使用 VFSManager（如果可用）
-                if (this.vfsManager && this.currentNodeId) {
+                // 策略 1: 优先使用 VFSCore（如果可用）
+                if (this.vfsCore && this.currentNodeId) {
                     return this._createVFSStore(plugin.name);
                 }
                 
@@ -206,7 +206,7 @@ export class PluginManager {
      * @private
      */
     _createVFSStore(pluginName) {
-        const vfs = this.vfsManager;
+        const vfs = this.vfsCore;
         const nodeId = this.currentNodeId;
         const prefix = `_plugin_${pluginName}_`;
         

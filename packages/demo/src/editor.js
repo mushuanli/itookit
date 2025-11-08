@@ -955,7 +955,7 @@ if (processorOptionsEl instanceof HTMLTextAreaElement) {
 });
 
 /*
-import { getVFSManager,VFSPersistenceAdapter } from '@itookit/vfs-manager';
+import { getVFSManager,VFSPersistenceAdapter } from '@itookit/vfs-core';
 import { MemoryPluginV2 } from './plugins/MemoryPlugin.v2.js';
 
 async function initEditor() {
@@ -977,7 +977,7 @@ async function initEditor() {
     const editor = new MDxEditor({
         target: document.getElementById('editor'),
         dataAdapter: adapter,
-        vfsManager: vfs,        // 注入 VFSManager
+        vfsCore: vfs,        // 注入 VFSCore
         currentNodeId: note.id  // 注入当前节点ID
     });
     
@@ -989,9 +989,9 @@ async function initEditor() {
     await editor.setMarkdown(content);
 }
 
-示例 A：使用 VFSManager（推荐）
+示例 A：使用 VFSCore（推荐）
 
-import { getVFSManager } from '@itookit/vfs-manager';
+import { getVFSManager } from '@itookit/vfs-core';
 import { MDxEditor } from '@itookit/mdxeditor';
 import { MemoryPluginV2 } from './plugins/MemoryPlugin.v2.js';
 
@@ -1006,7 +1006,7 @@ async function createEditor() {
     );
     
     const editor = new MDxEditor(document.getElementById('editor'), {
-        vfsManager: vfs,
+        vfsCore: vfs,
         nodeId: note.id,
         plugins: [
             new MemoryPluginV2()
