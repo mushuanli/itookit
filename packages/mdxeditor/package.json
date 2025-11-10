@@ -2,9 +2,17 @@
   "name": "@itookit/mdxeditor",
   "version": "0.1.2",
   "description": "A powerful MDX editor component.",
-  "main": "dist/index.js",
-  "module": "dist/index.mjs",
-  "types": "dist/index.d.ts",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./style.css": "./dist/index.css"
+  },
   "files": [
     "dist"
   ],
@@ -12,17 +20,27 @@
     "**/*.css"
   ],
   "scripts": {
+    "dev": "pnpm build --watch",
     "build:css": "tailwindcss -i ./src/index.css -o ./dist/index.css --minify",
     "build:ts": "tsup src/index.js --format cjs,esm --dts",
     "build": "pnpm build:ts && pnpm build:css",
-    "dev": "pnpm build --watch"
+    "prepublishOnly": "pnpm build"
   },
   "keywords": [
     "mdx",
     "editor"
   ],
   "author": "lizlok@gmail.com",
-  "license": "ISC",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mushuanli/itookit.git",
+    "directory": "packages/mdxeditor"
+  },
+  "bugs": {
+    "url": "https://github.com/mushuanli/itookit/issues"
+  },
+  "homepage": "https://github.com/mushuanli/itookit/tree/main/packages/mdxeditor#readme",
   "publishConfig": {
     "access": "public"
   },
