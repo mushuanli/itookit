@@ -2,6 +2,16 @@
  * @file vfsCore/core/VFS.js
  * @fileoverview VFS - 虚拟文件系统核心
  */
+import { VNode } from './VNode.js';
+import { PathResolver } from './PathResolver.js';
+import { 
+    VFSError, 
+    VNodeNotFoundError, 
+    PathExistsError,
+    NotDirectoryError,
+    ValidationError 
+} from './VFSError.js';
+import { EVENTS } from '../constants.js';
 
 /**
  * @typedef {Object} CreateNodeOptions
@@ -25,16 +35,6 @@
  * @property {string} removedNodeId - 被删除的节点ID
  * @property {string[]} allRemovedIds - 所有被删除的节点ID列表
  */
-
-import { VNode } from './VNode.js';
-import { PathResolver } from './PathResolver.js';
-import { 
-    VFSError, 
-    VNodeNotFoundError, 
-    PathExistsError,
-    NotDirectoryError,
-    ValidationError 
-} from './VFSError.js';
 
 export class VFS {
     /**
@@ -145,10 +145,9 @@ export class VFS {
             // 提交事务
             await tx.commit();
             
-            // 发布事件
-            this.events.emit('vnode:created', {
-                vnode,
-                derivedData: allDerivedData
+            this.events.emit(EVENTS.NODE_ADDED, {
+                newNode: vnode,
+                parentId: vnode.parent
             });
             
             console.log(`[VFS] Created ${type}: ${path} (${vnode.id})`);
@@ -169,11 +168,8 @@ export class VFS {
      */
     async read(vnodeOrId, options = {}) {
         const vnode = await this._resolveVNode(vnodeOrId);
-        if (!vnode) {
-            throw new VNodeNotFoundError(vnodeOrId);
-        }
-        
-        // 目录没有内容
+        if (!vnode) throw new VNodeNotFoundError(String(vnodeOrId));
+
         if (vnode.isDirectory()) {
             return {
                 content: null,
@@ -270,11 +266,7 @@ export class VFS {
             // 提交事务
             await tx.commit();
             
-            // 发布事件
-            this.events.emit('vnode:updated', {
-                vnode,
-                derivedData: allDerivedData
-            });
+            this.events.emit(EVENTS.NODE_CONTENT_UPDATED, { updatedNode: vnode });
             
             console.log(`[VFS] Updated: ${vnode.id}`);
             
@@ -337,10 +329,10 @@ export class VFS {
             // 提交事务
             await tx.commit();
             
-            // 发布事件
-            this.events.emit('vnode:deleted', {
-                vnode,
-                deletedIds: nodeIdsToDelete
+            this.events.emit(EVENTS.NODE_REMOVED, {
+                removedNode: vnode,
+                removedNodeId: vnode.id,
+                allRemovedIds: nodeIdsToDelete
             });
             
             console.log(`[VFS] Deleted: ${vnode.id} (${nodeIdsToDelete.length} nodes)`);
@@ -364,9 +356,7 @@ export class VFS {
      */
     async move(vnodeOrId, newPath) {
         const vnode = await this._resolveVNode(vnodeOrId);
-        if (!vnode) {
-            throw new VNodeNotFoundError(vnodeOrId);
-        }
+        if (!vnode) throw new VNodeNotFoundError(String(vnodeOrId));
         
         const oldPath = await this.pathResolver.resolvePath(vnode);
         
@@ -400,10 +390,12 @@ export class VFS {
             
             await tx.commit();
             
-            this.events.emit('vnode:moved', {
-                vnode,
+            this.events.emit(EVENTS.NODE_MOVED, {
+                nodeId: vnode.id,
+                updatedNode: vnode,
                 oldPath,
-                newPath
+                newPath,
+                newParentId: vnode.parent
             });
             
             console.log(`[VFS] Moved: ${oldPath} -> ${newPath}`);
@@ -469,12 +461,14 @@ export class VFS {
      * 读取目录
      * @param {string|VNode} vnodeOrId
      * @param {object} [options={}]
+     * @param {boolean} [options.recursive=false]
      * @returns {Promise<VNode[]>}
      */
     async readdir(vnodeOrId, options = {}) {
         const vnode = await this._resolveVNode(vnodeOrId);
         if (!vnode) {
-            throw new VNodeNotFoundError(vnodeOrId);
+            const nodeIdStr = typeof vnodeOrId === 'string' ? vnodeOrId : (vnodeOrId && vnodeOrId.id);
+            throw new VNodeNotFoundError(nodeIdStr || 'unknown');
         }
         
         if (!vnode.isDirectory()) {
@@ -484,7 +478,12 @@ export class VFS {
         const children = await this.storage.getChildren(vnode.id);
         
         if (options.recursive) {
-            return this._buildTree(children);
+            // Build the tree recursively
+            for (const child of children) {
+                if (child.isDirectory()) {
+                    child.children = await this.readdir(child.id, { recursive: true });
+                }
+            }
         }
         
         return children;
@@ -525,29 +524,6 @@ export class VFS {
         // --- MODIFICATION END ---
     }
     
-    /**
-     * 获取模块的文件树
-     * @param {string} module
-     * @returns {Promise<VNode[]>}
-     */
-    async getTree(module) {
-        const moduleInfo = this.registry.modules.get(module); // Assuming ModuleRegistry is accessible
-        if (!moduleInfo) {
-            throw new VFSError(`Module '${module}' not found`);
-        }
-        
-        if (!moduleInfo.rootId) {
-            return []; // Module exists but has no root (should not happen in normal operation)
-        }
-        
-        // --- MODIFICATION START ---
-        // Fetch all nodes for the module at once for efficiency
-        const allNodes = await this.storage.getModuleNodes(module);
-        
-        // Build the tree structure and populate paths
-        return this._buildTreeWithPaths(allNodes);
-        // --- MODIFICATION END ---
-    }
 
 
 
@@ -581,8 +557,7 @@ export class VFS {
             const children = await this.storage.getChildren(vnode.id);
             
             for (const child of children) {
-                const descendants = await this._collectDescendants(child);
-                result.push(...descendants);
+                result.push(...await this._collectDescendants(child));
             }
         }
         

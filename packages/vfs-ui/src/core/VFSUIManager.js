@@ -12,6 +12,7 @@ import { NodeList } from '../components/NodeList/NodeList.js';
 import { FileOutline } from '../components/FileOutline/FileOutline.js';
 import { MoveToModal } from '../components/MoveToModal/MoveToModal.js';
 import { TagProvider } from '../providers/TagProvider.js';
+import { EVENTS } from '@itookit/vfs-core'; // 使用常量
 
 /** @typedef {import('@itookit/common').SessionUIOptions} VFSUIOptions */
 /** @typedef {import('@itookit/common').SessionManagerEvent} SessionManagerEvent */
@@ -291,7 +292,7 @@ export class VFSUIManager extends ISessionManager {
     _connectToVFSCoreEvents() {
         const moduleName = this.moduleName;
     
-        this.vfsCore.on('node:added', ({ newNode, parentId }) => {
+        this.vfsCore.on(EVENTS.NODE_ADDED, ({ newNode, parentId }) => {
             if (newNode.module !== moduleName) return;
             const newItem = this._vfsService.vnodeToUIItem(newNode, parentId);
             this.store.dispatch({
@@ -300,17 +301,16 @@ export class VFSUIManager extends ISessionManager {
             });
         });
     
-        this.vfsCore.on('node:removed', ({ removedNodeId, allRemovedIds }) => {
+        this.vfsCore.on(EVENTS.NODE_REMOVED, ({ removedNodeId, allRemovedIds }) => {
             const nodeInStore = this._vfsService.findItemById(removedNodeId);
-            if (!nodeInStore) return;
-
+            if (!nodeInStore || nodeInStore.metadata.moduleName !== moduleName) return;
             this.store.dispatch({ 
                 type: 'ITEM_DELETE_SUCCESS', 
                 payload: { itemIds: allRemovedIds || [removedNodeId] } 
             });
         });
         
-        this.vfsCore.on('node:renamed', ({ updatedNode }) => {
+        this.vfsCore.on(EVENTS.NODE_RENAMED, ({ updatedNode }) => {
             if (updatedNode.module !== moduleName) return;
             this.store.dispatch({
                 type: 'ITEM_RENAME_SUCCESS',
@@ -318,7 +318,7 @@ export class VFSUIManager extends ISessionManager {
             });
         });
         
-        this.vfsCore.on('node:content_updated', ({ updatedNode }) => {
+        this.vfsCore.on(EVENTS.NODE_CONTENT_UPDATED, ({ updatedNode }) => {
             if (updatedNode.module !== moduleName) return;
             const updatedItem = this._vfsService.vnodeToUIItem(updatedNode, updatedNode.parent);
             this.store.dispatch({
@@ -327,7 +327,7 @@ export class VFSUIManager extends ISessionManager {
            });
         });
     
-        this.vfsCore.on('node:meta_updated', ({ updatedNode }) => {
+        this.vfsCore.on(EVENTS.NODE_META_UPDATED, ({ updatedNode }) => {
             if (updatedNode.module !== moduleName) return;
             const updatedItem = this._vfsService.vnodeToUIItem(updatedNode, updatedNode.parent);
             this.store.dispatch({ 
@@ -336,7 +336,7 @@ export class VFSUIManager extends ISessionManager {
             });
         });
     
-        this.vfsCore.on('node:moved', ({ updatedNode }) => {
+        this.vfsCore.on(EVENTS.NODE_MOVED, ({ updatedNode }) => {
             if (updatedNode?.module !== moduleName) return;
             console.log(`Node ${updatedNode.id} moved. Triggering data reload for consistency.`);
             this._loadModuleData(); 

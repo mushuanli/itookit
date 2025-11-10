@@ -11,7 +11,8 @@ import { ProviderRegistry } from './registry/ProviderRegistry.js';
 import { ModuleRegistry, ModuleInfo } from './registry/ModuleRegistry.js';
 import { EventBus } from './utils/EventBus.js';
 import { ProviderFactory } from './providers/ProviderFactory.js';
-import { VFSError } from './core/VFSError.js';
+import { VFSError, VNodeNotFoundError } from './core/VFSError.js';
+import { EVENTS } from './constants.js';
 
 export class VFSCore {
     static #instance = null;
@@ -74,18 +75,19 @@ export class VFSCore {
             
             // 5. 注册自定义 providers
             if (options.providers) {
-                for (const provider of options.providers) {
-                    this.providerRegistry.register(provider);
-                }
+                options.providers.forEach(p => this.providerRegistry.register(p));
             }
             
             // 6. 创建 VFS 核心
             this.vfs = new VFS(this.storage, this.providerRegistry, this.events);
             
+            // [修正] 将此行上移
+            // 在执行需要 VFS 核心功能（如 mount）的默认设置之前，将状态标记为已初始化。
+            // 此时所有核心组件都已准备就绪。
+            this.initialized = true;
+
             // 7. 初始化默认模块和配置
             await this._ensureDefaults(options.defaults);
-            
-            this.initialized = true;
             
             console.log('[VFSCore] Initialized successfully');
             
@@ -96,6 +98,8 @@ export class VFSCore {
             });
             
         } catch (error) {
+            // 如果初始化失败，重置状态
+            this.initialized = false;
             console.error('[VFSCore] Initialization failed:', error);
             throw new VFSError(`Failed to initialize VFSCore: ${error.message}`);
         }
@@ -134,7 +138,9 @@ export class VFSCore {
         this._ensureInitialized();
         
         if (this.moduleRegistry.has(name)) {
-            throw new VFSError(`Module '${name}' already mounted`);
+            // 在开发中，这可能不是一个错误，只是一个警告
+            console.warn(`[VFSCore] Module '${name}' already mounted.`);
+            return this.moduleRegistry.get(name);
         }
         
         // 创建模块根目录
@@ -143,9 +149,7 @@ export class VFSCore {
             module: name,
             path: '/',
             contentType: 'directory',
-            meta: {
-                description: options.description || ''
-            }
+            meta: { description: options.description || '' }
         });
         
         // 注册模块
@@ -443,10 +447,47 @@ export class VFSCore {
         if (!moduleInfo) {
             throw new VFSError(`Module '${module}' not found`);
         }
+        if (!moduleInfo.rootId) {
+            // Module might be empty or in an inconsistent state
+            return [];
+        }
         
-        return this.vfs.readdir(moduleInfo.rootId, { recursive: true });
+        // [修正] 正确的逻辑：使用 VFS 的 readdir 方法来递归获取树
+        const tree = await this.vfs.readdir(moduleInfo.rootId, { recursive: true });
+
+        // [新增] 在返回前，为树中的所有节点填充完整的路径信息
+        // 这是一个优化，可以一次性完成，而不是在UI层多次递归查询
+        const allNodesInTree = this._flattenTree(tree);
+        await Promise.all(allNodesInTree.map(async (node) => {
+            node.path = await this.vfs.pathResolver.resolvePath(node);
+        }));
+
+        return tree;
     }
-    
+
+    async updateNodeMetadata(nodeId, updates) {
+        this._ensureInitialized();
+        const vnode = await this.storage.loadVNode(nodeId);
+        if (!vnode) throw new VNodeNotFoundError(nodeId);
+        
+        const oldMeta = { ...vnode.meta };
+        vnode.meta = { ...vnode.meta, ...updates };
+        vnode.markModified();
+        
+        const tx = await this.storage.beginTransaction();
+        try {
+            await this.storage.saveVNode(vnode, tx);
+            await tx.commit();
+            
+            this.events.emit(EVENTS.NODE_META_UPDATED, { updatedNode: vnode, oldMeta });
+            
+            return vnode;
+        } catch (error) {
+            await tx.rollback();
+            throw error;
+        }
+    }
+
     // ========== 事件订阅 ==========
     
     /**
@@ -456,7 +497,7 @@ export class VFSCore {
      * @returns {Function} 取消订阅函数
      */
     on(event, callback) {
-        this._ensureInitialized();
+        if (!this.events) this.events = new EventBus();
         return this.events.on(event, callback);
     }
     
@@ -467,7 +508,7 @@ export class VFSCore {
      * @returns {Function} 取消订阅函数
      */
     once(event, callback) {
-        this._ensureInitialized();
+        if (!this.events) this.events = new EventBus();
         return this.events.once(event, callback);
     }
     
@@ -477,8 +518,7 @@ export class VFSCore {
      * @param {Function} callback
      */
     off(event, callback) {
-        this._ensureInitialized();
-        this.events.off(event, callback);
+        if (this.events) this.events.off(event, callback);
     }
     
     // ========== 工具方法 ==========
@@ -649,10 +689,7 @@ export class VFSCore {
             storage: this.storage,
             eventBus: this.events
         });
-        
-        for (const provider of providers) {
-            this.providerRegistry.register(provider);
-        }
+        providers.forEach(p => this.providerRegistry.register(p));
         
         // 注册类型映射
         this.providerRegistry.mapType('plain', ['plain', 'tag']);
@@ -676,7 +713,8 @@ export class VFSCore {
                         description: `Default ${moduleName} module`
                     });
                 } catch (error) {
-                    console.warn(`Failed to create default module ${moduleName}:`, error);
+                    // Log error but continue initialization
+                    console.error(`Failed to create default module ${moduleName}:`, error);
                 }
             }
         }
@@ -691,6 +729,21 @@ export class VFSCore {
             const depthB = (b.path || '/').split('/').filter(Boolean).length;
             return depthA - depthB;
         });
+    }
+
+    // [新增] 辅助方法，用于将树结构扁平化
+    _flattenTree(nodes) {
+        const flatList = [];
+        const traverse = (nodeList) => {
+            for (const node of nodeList) {
+                flatList.push(node);
+                if (node.children) {
+                    traverse(node.children);
+                }
+            }
+        };
+        traverse(nodes);
+        return flatList;
     }
 }
 

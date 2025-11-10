@@ -58,6 +58,18 @@ importers:
       '@fortawesome/fontawesome-free':
         specifier: ^7.1.0
         version: 7.1.0
+      '@itookit/common':
+        specifier: workspace:*
+        version: link:../common
+      '@itookit/mdxeditor':
+        specifier: workspace:*
+        version: link:../mdxeditor
+      '@itookit/vfs-core':
+        specifier: workspace:*
+        version: link:../vfs-core
+      '@itookit/vfs-ui':
+        specifier: workspace:*
+        version: link:../vfs-ui
       codemirror:
         specifier: ^6.0.2
         version: 6.0.2
