@@ -5,7 +5,11 @@ export { IAutocompleteProvider, type Suggestion } from './interfaces/IAutocomple
 export { IEditor, type SearchResultSource, type UnifiedSearchResult, type Heading } from './interfaces/IEditor';
 export { IMentionProvider } from './interfaces/IMentionProvider';
 export { IPersistenceAdapter } from './interfaces/IPersistenceAdapter';
-export { ISessionManager, type MenuItem, type ContextMenuBuilder, type ContextMenuConfig, type SessionUIOptions } from './interfaces/ISessionManager';
+export { ISessionManager, 
+    type MenuItem, type ContextMenuBuilder, type ContextMenuConfig, type SessionUIOptions,
+    type SessionManagerEvent,
+    type SessionManagerCallback
+ } from './interfaces/ISessionManager';
 export { ISessionService } from './interfaces/ISessionService';
 export { ISettingsWidget } from './interfaces/ISettingsWidget';
 

@@ -49,10 +49,11 @@ export class VNode {
         // 内容引用（不直接存储内容）
         this.contentRef = options.contentRef || null;
         
-        // 缓存状态（运行时属性，不持久化）
-        this._cached = false;
-        this._content = null;
-        this._path = null; // 缓存的路径
+        // --- MODIFICATION START ---
+        // Add a runtime property to cache the resolved path. It's not stored in the DB.
+        /** @type {string | null} */
+        this._path = null;
+        // --- MODIFICATION END ---
     }
     
     /**

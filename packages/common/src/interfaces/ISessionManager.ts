@@ -34,10 +34,13 @@ export interface SessionUIOptions {
     components?: {
         tagEditor?: (...args: any[]) => any;
     };
+    /** FIX: Add optional loadDataOnStart property to the interface */
+    loadDataOnStart?: boolean;
 }
 
-type SessionManagerEvent = 'sessionSelected' | 'navigateToHeading' | 'importRequested' | 'sidebarStateChanged' | 'menuItemClicked' | 'stateChanged';
-type SessionManagerCallback = (payload: any) => void;
+/** FIX: Export event types for use in JSDoc */
+export type SessionManagerEvent = 'sessionSelected' | 'navigateToHeading' | 'importRequested' | 'sidebarStateChanged' | 'menuItemClicked' | 'stateChanged';
+export type SessionManagerCallback = (payload: any) => void;
 
 export abstract class ISessionManager {
     protected constructor() {

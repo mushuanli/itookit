@@ -8,9 +8,9 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
+      "types": "./dist/index.d.ts",
       "import": "./dist/vfs-core.es.js",
-      "require": "./dist/vfs-core.umd.js",
-      "types": "./dist/index.d.ts"
+      "require": "./dist/vfs-core.umd.js"
     }
   },
   "files": [
