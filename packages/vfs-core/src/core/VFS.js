@@ -493,15 +493,17 @@ export class VFS {
     /**
      * 获取节点统计信息
      * @param {string|VNode} vnodeOrId
-     * @returns {Promise<object>}
+     * @returns {Promise<import('../index.d.ts').VNodeStat>}
      */
     async stat(vnodeOrId) {
         const vnode = await this._resolveVNode(vnodeOrId);
         if (!vnode) {
-            throw new VNodeNotFoundError(vnodeOrId);
+            // Ensure vnodeOrId is a string for the error message
+            const nodeIdStr = typeof vnodeOrId === 'string' ? vnodeOrId : (vnodeOrId && vnodeOrId.id);
+            throw new VNodeNotFoundError(nodeIdStr || 'unknown');
         }
         
-        const stat = vnode.getStat();
+        const baseStat = vnode.getStat();
         
         // 获取 provider 统计
         const providers = this.registry.getProvidersForNode(vnode);
@@ -511,13 +513,44 @@ export class VFS {
             providerStats[provider.name] = await provider.getStats(vnode);
         }
         
+        // --- MODIFICATION START ---
+        // Assemble the full VNodeStat object that matches the new interface
         return {
-            ...stat,
-            path: await this.pathResolver.resolvePath(vnode),
+            ...baseStat,
+            parent: vnode.parent, // Add parent ID
+            meta: vnode.meta,     // Add full meta object
+            path: await this.pathResolver.resolvePath(vnode), // Add resolved path
             providers: providerStats
         };
+        // --- MODIFICATION END ---
     }
     
+    /**
+     * 获取模块的文件树
+     * @param {string} module
+     * @returns {Promise<VNode[]>}
+     */
+    async getTree(module) {
+        const moduleInfo = this.registry.modules.get(module); // Assuming ModuleRegistry is accessible
+        if (!moduleInfo) {
+            throw new VFSError(`Module '${module}' not found`);
+        }
+        
+        if (!moduleInfo.rootId) {
+            return []; // Module exists but has no root (should not happen in normal operation)
+        }
+        
+        // --- MODIFICATION START ---
+        // Fetch all nodes for the module at once for efficiency
+        const allNodes = await this.storage.getModuleNodes(module);
+        
+        // Build the tree structure and populate paths
+        return this._buildTreeWithPaths(allNodes);
+        // --- MODIFICATION END ---
+    }
+
+
+
     // ========== 私有方法 ==========
     
     /**
@@ -571,5 +604,53 @@ export class VFS {
         }
         
         return tree;
+    }
+
+    /**
+     * @private
+     * Builds a tree structure from a flat list of nodes and populates their paths.
+     * @param {VNode[]} flatNodes - A flat array of all nodes in a module.
+     * @returns {Promise<VNode[]>} The root nodes of the resulting tree.
+     */
+    async _buildTreeWithPaths(flatNodes) {
+        if (!flatNodes || flatNodes.length === 0) {
+            return [];
+        }
+
+        /** @type {Map<string, VNode>} */
+        const nodeMap = new Map();
+        for (const node of flatNodes) {
+            // Ensure `children` property is initialized for directories
+            if (node.isDirectory()) {
+                node.children = [];
+            }
+            nodeMap.set(node.id, node);
+        }
+
+        const rootNodes = [];
+
+        // Link children to parents
+        for (const node of nodeMap.values()) {
+            if (node.parent && nodeMap.has(node.parent)) {
+                const parent = nodeMap.get(node.parent);
+                // The check `node.isDirectory()` above ensures `parent.children` exists
+                if (parent.children) {
+                    parent.children.push(node);
+                }
+            } else {
+                rootNodes.push(node);
+            }
+        }
+        
+        // Asynchronously resolve all paths. This is much more efficient than one-by-one.
+        await Promise.all(flatNodes.map(node => this.pathResolver.resolvePath(node)));
+        
+        // After Promise.all, all `node._path` properties are populated,
+        // so we can now assign them to a public `path` property.
+        for (const node of flatNodes) {
+            node.path = node._path;
+        }
+
+        return rootNodes;
     }
 }
