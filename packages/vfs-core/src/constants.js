@@ -1,4 +1,4 @@
-// #configManager/constants.js
+// #vfs-core/constants.js
 
 /**
  * @fileoverview 定义数据库相关的常量，避免在代码中使用魔法字符串。

@@ -1,4 +1,4 @@
-// #configManager/db.js
+// #vfs-core/db.js
 
 /**
  * @fileoverview 底层 IndexedDB 封装类。

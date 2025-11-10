@@ -9,6 +9,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@itookit/common": "workspace:*",
+    "@itookit/mdxeditor": "workspace:*",
+    "@itookit/vfs-core": "workspace:*",
+    "@itookit/vfs-ui": "workspace:*",
+
     "@codemirror/lang-markdown": "^6.3.4",
     "@codemirror/state": "^6.5.2",
     "@fortawesome/fontawesome-free": "^7.1.0",
