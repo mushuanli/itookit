@@ -5,19 +5,40 @@
   "main": "dist/index.js",
   "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./TagEditorComponent.css": "./dist/TagEditorComponent.css"
+  },
   "files": [
     "dist"
   ],
   "scripts": {
-  "build": "tsup src/index.ts --format cjs,esm --dts",
-  "dev": "pnpm build --watch"
+    "dev": "pnpm build --watch",
+    "build": "tsup src/index.ts --format cjs,esm --dts",
+    "prepublishOnly": "pnpm build"
   },
   "keywords": ["itookit", "common"],
   "author": "lizlok@gmail.com",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mushuanli/itookit.git",
+    "directory": "packages/common"
+  },
+  "bugs": {
+    "url": "https://github.com/mushuanli/itookit/issues"
+  },
+  "homepage": "https://github.com/mushuanli/itookit/tree/main/packages/common#readme",
   "publishConfig": {
     "access": "public"
   },
-  "dependencies": {
+  "dependencies": {},
+  "devDependencies": {
+    "tsup": "^8.5.0",
+    "typescript": "^5.9.3"
   }
 }

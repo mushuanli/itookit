@@ -1,7 +1,7 @@
 {
   "name": "@itookit/vfs-ui",
   "version": "1.0.0",
-  "description": "A flexible UI layer for VFS-Core, providing tree view, editor integration, and content adapters for browser-based virtual file systems",
+  "description": "A UI component library for visualizing and managing file hierarchies from @itookit/vfs-core.",
   "main": "src/index.js",
   "module": "src/index.js",
   "type": "module",
@@ -10,7 +10,8 @@
     ".": {
       "import": "./src/index.js",
       "types": "./src/index.d.ts"
-    }
+    },
+    "./styles/*": "./src/styles/*"
   },
   "files": [
     "src",
@@ -27,15 +28,14 @@
   "keywords": [
     "vfs",
     "vfs-ui",
+    "vfs-core",
     "virtual-file-system",
     "ui-components",
     "tree-view",
     "editor-adapter",
     "content-management",
     "file-browser",
-    "markdown-editor",
     "outline-view",
-    "toolbar",
     "browser-ui",
     "typescript"
   ],
@@ -43,12 +43,13 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/yourusername/vfs-ui.git"
+    "url": "https://github.com/mushuanli/itookit.git",
+    "directory": "packages/vfs-ui"
   },
   "bugs": {
-    "url": "https://github.com/yourusername/vfs-ui/issues"
+    "url": "https://github.com/mushuanli/itookit/issues"
   },
-  "homepage": "https://github.com/yourusername/vfs-ui#readme",
+  "homepage": "https://github.com/mushuanli/itookit/tree/main/packages/vfs-ui#readme",
   "publishConfig": {
     "access": "public"
   },
@@ -56,10 +57,11 @@
     "node": ">=16.0.0"
   },
   "peerDependencies": {
-    "@itookit/vfs-core": "^1.0.0"
+    "@itookit/vfs-core": "^0.0.1"
   },
   "dependencies": {
-    "@itookit/common": "workspace:*"
+    "@itookit/common": "workspace:*",
+    "immer": "^10.0.0"
   },
   "devDependencies": {
     "@itookit/vfs-core": "workspace:*",
