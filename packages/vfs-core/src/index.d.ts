@@ -38,6 +38,11 @@ export class VNode {
     meta: VNodeMeta;
     contentRef: string | null;
     
+    /** FIX: Add optional path property, as it's constructed at runtime */
+    path?: string;
+    /** FIX: Add optional children property, used by getTree */
+    children?: VNode[];
+    
     constructor(options: VNodeOptions);
     
     isDirectory(): boolean;
@@ -63,6 +68,12 @@ export interface VNodeStat {
     accessedAt: Date;
     permissions: string;
     contentType: string;
+    /** FIX: Add parent property to VNodeStat for consistency */
+    parent: string | null;
+    /** FIX: Add meta property to VNodeStat for consistency */
+    meta: VNodeMeta;
+    /** FIX: Add path property */
+    path: string;
 }
 
 // ========== VFSCore ==========
@@ -127,8 +138,9 @@ export class VFSCore {
     move(nodeId: string, newPath: string): Promise<VNode>;
     copy(sourceId: string, targetPath: string): Promise<VNode>;
     readdir(nodeId: string, options?: object): Promise<VNode[]>;
-    stat(nodeId: string): Promise<object>;
-    getTree(module: string): Promise<VNode[]>;
+    /** FIX: Update stat return type to be more specific */
+    stat(nodeId: string): Promise<VNodeStat>;
+    getTree(module: string): Promise<VNode[]>; // Runtime shape includes children
     
     // Event Subscription
     on(event: string, callback: (data: any) => void): () => void;

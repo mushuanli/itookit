@@ -1,4 +1,6 @@
-// vite.config.js
+// @file vfs-core/vite.config.js
+import path from 'path';
+import fs from 'fs';
 import { resolve } from 'path';
 import { defineConfig } from 'vite';
 import dts from 'vite-plugin-dts';
@@ -21,7 +23,7 @@ export default defineConfig({
         // 在 UMD 构建模式下为这些外部化的依赖提供一个全局变量
         globals: {
           uuid: 'uuid',
-          '@itookit/common': 'itookitCommon',
+          '@itookit/common': 'itookitCommon'
         },
       },
     },
@@ -29,14 +31,20 @@ export default defineConfig({
   plugins: [
     // 这个插件会自动从你的源码生成 .d.ts 文件
     dts({
-        // 指定d.ts文件输出目录，默认为 'dist'
-        outDir: 'dist',
-        // 如果你的类型定义是手动维护的，可以这样复制
-        // 如果是 .ts 文件，它会自动生成
-        // 由于你是手动维护的 .d.ts，这里我们直接复制
-        staticImport: true,
-        insertTypesEntry: true,
-        copyDtsFiles: true,
-    }),
+      // 清空默认行为，我们手动控制
+      cleanVueFileName: true,
+      
+      // 在构建结束后，手动将我们的 index.d.ts 复制到 dist 目录
+      afterBuild: () => {
+        const sourcePath = path.resolve(__dirname, 'src/index.d.ts');
+        const destPath = path.resolve(__dirname, 'dist/index.d.ts');
+        if (fs.existsSync(sourcePath)) {
+          fs.copyFileSync(sourcePath, destPath);
+          console.log('[vite:dts-manual] Copied src/index.d.ts to dist/index.d.ts');
+        } else {
+           console.error('[vite:dts-manual] Error: src/index.d.ts not found!');
+        }
+      }
+    })
   ],
 });

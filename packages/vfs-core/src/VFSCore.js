@@ -226,6 +226,7 @@ export class VFSCore {
     /**
      * 获取 provider
      * @param {string} name
+     * @returns {import('./providers/base/ContentProvider.js').ContentProvider | undefined}
      */
     getProvider(name) {
         return this.providerRegistry.get(name);
@@ -242,10 +243,17 @@ export class VFSCore {
     // ========== 标签管理 ==========
     
     /**
-     * 获取 TagProvider
+     * FIX: Gets the specific TagProvider instance and casts its type.
+     * @returns {import('./providers/TagProvider.js').TagProvider}
+     * @throws {VFSError} If the TagProvider is not registered.
      */
     get tagManager() {
-        return this.getProvider('tag');
+        const provider = this.getProvider('tag');
+        if (!provider) {
+            throw new VFSError("TagProvider is not registered or available.", "EPROVIDER_NOT_FOUND");
+        }
+        // This cast tells TypeScript that we know this is a TagProvider, not just a generic ContentProvider.
+        return /** @type {import('./providers/TagProvider.js').TagProvider} */ (provider);
     }
     
     /**
