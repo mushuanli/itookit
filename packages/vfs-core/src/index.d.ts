@@ -1,6 +1,11 @@
 /**
  * @itookit/vfs-core TypeScript Definitions
  */
+import { EventBus } from './utils/EventBus';
+import { VFS } from './core/VFS';
+import { ProviderRegistry } from './registry/ProviderRegistry';
+import { ModuleRegistry, ModuleInfo } from './registry/ModuleRegistry';
+import { VFSStorage, Transaction } from './storage/VFSStorage';
 
 // ========== Core Types ==========
 
@@ -76,6 +81,31 @@ export interface VNodeStat {
     path: string;
 }
 
+// ========== Event Payloads ==========
+
+export interface NodeAddedPayload {
+    newNode: VNode;
+    parentId: string | null;
+}
+
+export interface NodeRemovedPayload {
+    removedNode: VNode;
+    removedNodeId: string;
+    allRemovedIds: string[];
+}
+
+export interface NodeUpdatedPayload {
+    updatedNode: VNode;
+}
+
+export interface NodeMovedPayload {
+    nodeId: string;
+    updatedNode: VNode;
+    oldPath: string;
+    newPath: string;
+    newParentId: string | null;
+}
+
 // ========== VFSCore ==========
 
 export interface VFSManagerOptions {
@@ -142,7 +172,15 @@ export class VFSCore {
     stat(nodeId: string): Promise<VNodeStat>;
     getTree(module: string): Promise<VNode[]>; // Runtime shape includes children
     
-    // Event Subscription
+    updateNodeMetadata(nodeId: string, updates: Partial<VNodeMeta>): Promise<VNode>;
+    
+    // Event Subscription Overloads
+    on(event: 'node:added', callback: (data: NodeAddedPayload) => void): () => void;
+    on(event: 'node:removed', callback: (data: NodeRemovedPayload) => void): () => void;
+    on(event: 'node:renamed', callback: (data: NodeUpdatedPayload) => void): () => void;
+    on(event: 'node:content_updated', callback: (data: NodeUpdatedPayload) => void): () => void;
+    on(event: 'node:meta_updated', callback: (data: NodeUpdatedPayload) => void): () => void;
+    on(event: 'node:moved', callback: (data: NodeMovedPayload) => void): () => void;
     on(event: string, callback: (data: any) => void): () => void;
     once(event: string, callback: (data: any) => void): () => void;
     off(event: string, callback: (data: any) => void): void;

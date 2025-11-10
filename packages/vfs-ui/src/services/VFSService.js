@@ -4,7 +4,7 @@
  * All dependencies are injected, making it a testable, decoupled service layer.
  */
 import { ISessionService } from '@itookit/common';
-import { parseSessionInfo } from '../utils/parser.js';
+import { parseFileInfo } from '../utils/parser.js';
 
 /**
  * @implements {ISessionService}

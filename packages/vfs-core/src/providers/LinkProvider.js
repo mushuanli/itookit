@@ -205,7 +205,7 @@ export class LinkProvider extends ContentProvider {
     async _getLinks(nodeId, transaction = null) {
         if (transaction) {
             const store = transaction.getStore(VFS_STORES.LINKS);
-            const index = store.index('by_sourceId');
+            const index = store.index('by_source');
             
             return new Promise((resolve, reject) => {
                 const request = index.getAll(nodeId);
@@ -227,7 +227,7 @@ export class LinkProvider extends ContentProvider {
     async _getBacklinks(nodeId) {
         return this.storage.db.getAllByIndex(
             VFS_STORES.LINKS,
-            'by_targetId',
+            'by_target',
             nodeId
         );
     }
