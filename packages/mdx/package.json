@@ -18,6 +18,8 @@
     "latex"
   ],
   "dependencies": {
+    "@itookit/common": "workspace:*",
+    "@itookit/vfs-core": "workspace:*",
     "marked": "^11.0.0"
   },
   "devDependencies": {

@@ -1,5 +1,8 @@
+// mdx/editor/editor.ts
 import { MDxRenderer } from '../renderer/renderer';
 import type { MDxPlugin } from '../core/plugin';
+import type { VFSCore } from '@itookit/vfs-core';
+import type { IPersistenceAdapter } from '@itookit/common';
 import { EditorView, basicSetup } from 'codemirror';
 import { markdown } from '@codemirror/lang-markdown';
 import { EditorState } from '@codemirror/state';
@@ -7,6 +10,9 @@ import { EditorState } from '@codemirror/state';
 export interface MDxEditorConfig {
   initialMode?: 'edit' | 'render';
   searchMarkClass?: string;
+  vfsCore?: VFSCore;
+  nodeId?: string;
+  persistenceAdapter?: IPersistenceAdapter;
   [key: string]: any;
 }
 
@@ -29,6 +35,9 @@ export class MDxEditor {
     this.currentMode = config.initialMode || 'edit';
     this.renderer = new MDxRenderer({
       searchMarkClass: config.searchMarkClass,
+      vfsCore: config.vfsCore,
+      nodeId: config.nodeId,
+      persistenceAdapter: config.persistenceAdapter,
     });
   }
 
