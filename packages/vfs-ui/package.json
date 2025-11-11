@@ -7,11 +7,18 @@
   "main": "./dist/vfs-ui.umd.js",
   "module": "./dist/vfs-ui.es.js",
   "types": "./dist/index.d.ts",
+  "source": "src/index.js",
   "exports": {
-    ".": {
+    "source": "./src/index.js",
+    "types": "./dist/index.d.ts",
+    "import": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/vfs-ui.es.js",
-      "require": "./dist/vfs-ui.umd.js"
+      "development": "./src/index.js",
+      "default": "./dist/vfs-ui.es.js"
+    },
+    "require": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/vfs-ui.umd.cjs"
     },
     "./style.css": "./dist/style.css"
   },

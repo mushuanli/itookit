@@ -429,7 +429,7 @@ export class VFS {
             module: sourceVNode.module,
             path: targetPath,
             contentType: sourceVNode.contentType,
-            content,
+            content: content || '',
             meta: { ...sourceVNode.meta }
         });
         
@@ -506,6 +506,7 @@ export class VFS {
         
         // 获取 provider 统计
         const providers = this.registry.getProvidersForNode(vnode);
+        /** @type {Record<string, object>} */ // <<< FIX #1: Add type annotation
         const providerStats = {};
         
         for (const provider of providers) {
@@ -620,12 +621,8 @@ export class VFS {
         // Asynchronously resolve all paths. This is much more efficient than one-by-one.
         await Promise.all(flatNodes.map(node => this.pathResolver.resolvePath(node)));
         
-        // After Promise.all, all `node._path` properties are populated,
-        // so we can now assign them to a public `path` property.
-        for (const node of flatNodes) {
-            node.path = node._path;
-        }
-
+        // 【移除】不再需要手动从 _path 赋值给 path
+        
         return rootNodes;
     }
 }

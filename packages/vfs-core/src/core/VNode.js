@@ -49,11 +49,18 @@ export class VNode {
         // 内容引用（不直接存储内容）
         this.contentRef = options.contentRef || null;
         
-        // --- MODIFICATION START ---
-        // Add a runtime property to cache the resolved path. It's not stored in the DB.
-        /** @type {string | null} */
-        this._path = null;
-        // --- MODIFICATION END ---
+        // 【修改】移除了 this._path 的初始化。
+        // 公开的 'path' 属性将是 undefined 直到被计算。
+        /**
+         * @type {string | undefined}
+         * @description 运行时计算的完整路径
+         */
+        this.path = undefined;
+        /**
+         * @type {VNode[] | undefined}
+         * @description 运行时构建的子节点列表（仅目录节点）
+         */
+        this.children = undefined;
     }
     
     /**
@@ -83,7 +90,9 @@ export class VNode {
     invalidateCache() {
         this._cached = false;
         this._content = null;
-        this._path = null;
+        
+        // 【修改】现在我们重置公开的 path 属性
+        this.path = undefined;
     }
     
     /**
@@ -133,6 +142,7 @@ export class VNode {
     
     /**
      * 获取节点信息摘要
+     * @returns {import('../index.d.ts').VNodeStat}
      */
     getStat() {
         return {
@@ -144,7 +154,14 @@ export class VNode {
             modifiedAt: this.meta.modifiedAt,
             accessedAt: this.meta.accessedAt,
             permissions: this.meta.permissions,
-            contentType: this.contentType
+            contentType: this.contentType,
+            
+            // <<< FIX #2: Add missing properties to match VNodeStat type
+            parent: this.parent,
+            meta: this.meta,
+            // path is populated at runtime by the resolver. Provide a default value
+            // to satisfy the type. The correct path will overwrite this in VFS.stat().
+            path: this.path || '', 
         };
     }
 }
