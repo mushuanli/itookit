@@ -43,7 +43,7 @@ export class Database {
                 this.db = (/** @type {IDBOpenDBRequest} */ (event.target)).result;
                 // [修改] 在日志中也使用动态名称
                 console.log(`Database '${this.dbName}' connected successfully.`);
-            this.verifyDatabaseStructure();
+                this.verifyDatabaseStructure();
                 resolve(this.db);
             };
 
@@ -154,6 +154,21 @@ export class Database {
     }
 
     /**
+     * Gets all records from a given object store.
+     * @param {string} storeName - The name of the object store.
+     * @returns {Promise<any[]>} An array of all records.
+     */
+    async getAll(storeName) {
+        const tx = await this.getTransaction(storeName, 'readonly');
+        const store = tx.objectStore(storeName);
+        return new Promise((resolve, reject) => {
+            const request = store.getAll();
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = (event) => reject((/** @type {IDBRequest} */ (event.target)).error);
+        });
+    }
+
+    /**
      * 辅助函数：通过索引查询所有匹配项
      * @param {string} storeName - 表名
      * @param {string} indexName - 索引名
@@ -163,20 +178,20 @@ export class Database {
     async getAllByIndex(storeName, indexName, query) {
         const tx = await this.getTransaction(storeName, 'readonly');
         const store = tx.objectStore(storeName);
-    // 🔍 详细的索引检查
-    const availableIndexes = Array.from(store.indexNames);
-    //console.log(`[DB Query] Store: ${storeName}, Looking for index: ${indexName}`);
-    //console.log(`[DB Query] Available indexes:`, availableIndexes);
+        // 🔍 详细的索引检查
+        const availableIndexes = Array.from(store.indexNames);
+        //console.log(`[DB Query] Store: ${storeName}, Looking for index: ${indexName}`);
+        //console.log(`[DB Query] Available indexes:`, availableIndexes);
     
-    if (!store.indexNames.contains(indexName)) {
-        const error = new Error(
-            `Index "${indexName}" not found in store "${storeName}".\n` +
-            `Available indexes: ${availableIndexes.join(', ') || 'none'}\n` +
-            `This usually means the database schema wasn't properly upgraded.`
-        );
-        console.error(error);
-        throw error;
-    }
+        if (!store.indexNames.contains(indexName)) {
+            const error = new Error(
+                `Index "${indexName}" not found in store "${storeName}".\n` +
+                `Available indexes: ${availableIndexes.join(', ') || 'none'}\n` +
+                `This usually means the database schema wasn't properly upgraded.`
+            );
+            console.error(error);
+            throw error;
+        }
         const index = store.index(indexName);
         return new Promise((resolve, reject) => {
             const request = index.getAll(query);

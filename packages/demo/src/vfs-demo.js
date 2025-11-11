@@ -16,13 +16,16 @@ import { getVFSManager } from '@itookit/vfs-core';
 
 //-----------------------------------------------------------------
 
+/** @type {MDxEditor | null} */
 let editorInstance = null;
+/** @type {import('@itookit/vfs-ui').IVSUIManager | null} */
 let vfsUIManager = null;
 
 const appContainer = document.getElementById('app-container');
 const sidebarContainer = document.getElementById('sidebar-container');
 const editorContainer = document.getElementById('editor-container');
-
+// [FIX] Keep a reference to vfsCore instance at the top level
+const vfsCore = getVFSManager();
 
 /**
  * 连接 VFS-UI 库与 MDxEditor 的事件流
@@ -31,17 +34,25 @@ function connectLibraries() {
     if (!editorInstance || !vfsUIManager) return;
 
     // 1. 当用户在侧边栏选择一个文件时，更新编辑器内容和标题
-    // 'sessionSelected' 事件名是为了兼容 ISessionManager 接口，语义上代表 "一个可编辑的单元被选中"
-    vfsUIManager.on('sessionSelected', ({ item }) => {
+    vfsUIManager.on('sessionSelected', async ({ item }) => {
         if (item && item.type === 'file') {
             const currentContent = editorInstance.getText();
-            // 在 vfs-ui 中，content.data 通常是懒加载的，需要从 vfs-core 获取
-            vfsUIManager.vfsCore.read(item.id).then(result => {
-                const newContent = result.content || '';
-                if (currentContent !== newContent) {
-                    editorInstance.setText(newContent);
-                }
-            });
+            let newContent = '';
+
+            try {
+                // [FIX] Always use the top-level vfsCore instance
+                const result = await vfsCore.read(item.id);
+                newContent = result.content || '';
+            } catch (error) {
+                console.error(`Failed to read content for item ${item.id}`, error);
+                editorInstance.setText(`# 加载文件内容失败\n\n错误: ${error.message}`);
+                editorInstance.setTitle('加载失败');
+                return;
+            }
+
+            if (currentContent !== newContent) {
+                editorInstance.setText(newContent);
+            }
             
             editorInstance.setTitle(item.metadata.title);
             editorInstance.switchTo('render');
@@ -58,11 +69,11 @@ function connectLibraries() {
         return () => {
             clearTimeout(timeout);
             timeout = setTimeout(async () => {
-                const activeFile = vfsUIManager.getActiveSession(); // 沿用接口名称
+                const activeFile = vfsUIManager.getActiveSession();
                 if (activeFile) {
                     const newContent = editorInstance.getText();
-                    // 直接调用 vfs-core 的 write 方法
-                    await vfsUIManager.vfsCore.write(activeFile.id, newContent);
+                    // [FIX] Always use the top-level vfsCore instance
+                    await vfsCore.write(activeFile.id, newContent);
                 }
             }, 500); // 500ms 延迟
         };
@@ -75,13 +86,16 @@ function connectLibraries() {
         setTimeout(() => {
             const renderEl = editorContainer.querySelector('.mdx-render-view');
             const targetEl = renderEl?.querySelector(`#${elementId}`);
-            if (targetEl) {
+            // [TYPE CAST FIX] Cast Element to HTMLElement
+            if (targetEl instanceof HTMLElement) {
                 targetEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
                 targetEl.style.transition = 'none';
                 targetEl.style.backgroundColor = 'rgba(255, 255, 0, 0.3)';
                 setTimeout(() => {
-                    targetEl.style.transition = 'background-color 0.5s ease';
-                    targetEl.style.backgroundColor = 'transparent';
+                    if (targetEl instanceof HTMLElement) { // Re-check inside async callback
+                        targetEl.style.transition = 'background-color 0.5s ease';
+                        targetEl.style.backgroundColor = 'transparent';
+                    }
                 }, 500);
             }
         }, 50);
@@ -104,10 +118,13 @@ function handleImportRequest({ parentId }) {
         Array.from(fileInput.files).forEach(file => {
             const reader = new FileReader();
             reader.onload = async (e) => {
-                const content = e.target.result;
-                const title = file.name.replace(/\.(md|txt)$/, '');
-                // 使用 vfsUIManager 暴露的 service 来创建文件
-                await vfsUIManager.sessionService.createFile({ title, content, parentId });
+                // [MODIFIED] 添加类型检查，增强代码健壮性
+                if (e.target && typeof e.target.result === 'string') {
+                    const content = e.target.result;
+                    const title = file.name.replace(/\.(md|txt)$/, '');
+                    // vfs-ui's sessionService is the correct public API for UI-initiated actions
+                    await vfsUIManager.sessionService.createFile({ title, content, parentId });
+                }
             };
             reader.readAsText(file);
         });
@@ -140,7 +157,8 @@ function setupAppUIHandlers() {
                 break;
             case 'export-as-markdown':
                 if (item.type === 'file') {
-                    vfsUIManager.vfsCore.read(item.id).then(result => {
+                    // [API FIX] 直接使用 vfsCore 变量
+                    vfsCore.read(item.id).then(result => {
                         const blob = new Blob([result.content], { type: 'text/markdown;charset=utf-8' });
                         const url = URL.createObjectURL(blob);
                         const a = document.createElement('a');
@@ -162,14 +180,10 @@ function setupAppUIHandlers() {
  */
 async function main() {
     // --- 步骤 1: 初始化 vfs-core ---
-    const vfsCore = getVFSManager();
-
     try {
         // [修改] 在 init 调用中传入 storage 配置，指定数据库名称
         await vfsCore.init({
-            storage: {
-                dbName: 'VFS_Demo_MindOS' // 自定义一个清晰的名称
-            }
+            storage: { dbName: 'VFS_Demo_MindOS' }
         });
         
         // 确保我们的演示模块已挂载
@@ -183,14 +197,15 @@ async function main() {
         return;
     }
 
-    // --- 步骤 2: 初始化 VFS-UI，并注入 vfs-core 实例和模块名 ---
+    // --- 步骤 2: 初始化 VFS-UI ---
     vfsUIManager = createVFSUI({
-        sessionListContainer: sidebarContainer, // 挂载点
-        title: "我的笔记", // 设置侧边栏标题
+        sessionListContainer: sidebarContainer,
+        title: "我的笔记",
         contextMenu: {
+            // [MENU ITEM FIX] Add required properties to separator
             items: (item, defaultItems) => [
                 ...defaultItems,
-                { type: 'separator' },
+                { type: 'separator', id: 'sep1', label: '' }, // Add id and label
                 { 
                     id: 'share-file', 
                     label: '分享...', 
@@ -210,7 +225,7 @@ async function main() {
                 }
             ]
         }
-    }, vfsCore, 'notes'); // 注入 vfs-core 实例和要管理的模块名
+    }, vfsCore, 'notes');
 
     // --- 步骤 3: 初始化 MDxEditor ---
     editorInstance = new MDxEditor(editorContainer, {
@@ -232,15 +247,30 @@ async function main() {
     // 步骤 5: 设置应用级别的 UI 交互
     setupAppUIHandlers();
 
-    // 步骤 6: 启动 VFS-UI (它会从 vfs-core 加载数据)
+    // 步骤 6: 启动 VFS-UI
     const initialFile = await vfsUIManager.start();
 
+    // [LISTDIRECTORY FIX] Use correct API
+    console.log('[Demo] VFS initialized, checking for existing files...');
+    const notesModule = vfsCore.getModule('notes');
+    if (notesModule && notesModule.rootId) {
+        try {
+            const files = await vfsCore.readdir(notesModule.rootId);
+            console.log('[Demo] Files in notes root:', files);
+        } catch (error) {
+            console.error('[Demo] Error listing files in root:', error);
+        }
+    } else {
+        console.warn('[Demo] "notes" module or its rootId not found.');
+    }
+    
     // 步骤 7: 在启动后，根据初始状态同步UI
-    const initialState = vfsUIManager.store.getState();
-    appContainer.classList.toggle('sidebar-collapsed', initialState.isSidebarCollapsed);
+    // [STORE FIX] Removed direct access to internal store.
+    // The sidebar state is handled by the `sidebarStateChanged` event listener.
     
     if (initialFile) {
-        const result = await vfsUIManager.vfsCore.read(initialFile.id);
+        // [VFSCORE FIX] Use the top-level vfsCore instance
+        const result = await vfsCore.read(initialFile.id);
         editorInstance.setText(result.content || '');
         editorInstance.setTitle(initialFile.metadata.title);
     }
