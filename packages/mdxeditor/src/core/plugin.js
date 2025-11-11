@@ -31,7 +31,7 @@
  * This is the facade that provides a safe and stable API for plugins to interact with the MDx core.
  *
  * @property {function(any): void} registerSyntaxExtension - Registers a Marked.js syntax extension.
- * @property {function('beforeParse' | 'afterRender' | 'domUpdated' | 'beforeSave', Function): void} on - Subscribes to a core lifecycle hook.
+ * @property {function('editorPostInit'|'beforeParse' | 'afterRender' | 'domUpdated' | 'beforeSave', Function): void} on - Subscribes to a core lifecycle hook.
  * @property {function(string, any): void} emit - Emits a global event to the event bus.
  * @property {function(string, Function): void} listen - Listens for a global event on the event bus.
  * @property {function(symbol|string, *): void} provide - Provides a service to the service container.

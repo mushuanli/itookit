@@ -546,6 +546,7 @@ export class MDxEditor extends IEditor {
      * @private
      */
     _loadCorePlugins() {
+        console.log('load core plugins');
         this.use(new CoreEditorPlugin());
         this.use(new CoreTitleBarPlugin());
         if (this.showToolbar) {

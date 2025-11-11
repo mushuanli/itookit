@@ -24,7 +24,7 @@ export class CoreTitleBarPlugin {
      * @param {PluginContext} context
      */
     install(context) {
-        context.listen('editorPostInit', ({ /** @type {MDxEditor} */ editor }) => {
+        context.on('editorPostInit', ({ /** @type {MDxEditor} */ editor }) => {
             const titleBarOptions = editor.options.titleBar || {};
 
             // 1. Register Toggle Sidebar button
@@ -50,7 +50,7 @@ export class CoreTitleBarPlugin {
                     command: 'toggleEditMode'
                 });
             }
-            
+
             // 3. Register AI button (conditional)
             if (typeof titleBarOptions.aiCallback === 'function') {
                 context.registerCommand('triggerAI', (editorInstance) => {
@@ -98,7 +98,7 @@ export class CoreTitleBarPlugin {
         });
 
         // Phase 2: Render ALL registered buttons into the DOM.
-        context.listen('editorPostInit', ({ /** @type {MDxEditor} */ editor, /** @type {PluginManager} */ pluginManager }) => {
+        context.on('editorPostInit', ({ /** @type {MDxEditor} */ editor, /** @type {PluginManager} */ pluginManager }) => {
             const titleBarEl = editor.container.querySelector('.mdx-title-bar');
             if (!titleBarEl) return;
             

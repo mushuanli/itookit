@@ -16,7 +16,7 @@ export class ToolbarPlugin {
     install(context) {
         // This plugin primarily provides functionality used by the MDxEditor class.
         // It listens for a 'post-init' event that the editor should fire.
-        context.listen('editorPostInit', ({ /** @type {MDxEditor} */ editor, /** @type {PluginManager} */ pluginManager }) => {
+        context.on('editorPostInit', ({ /** @type {MDxEditor} */ editor, /** @type {PluginManager} */ pluginManager }) => {
             if (!editor.showToolbar) return;
 
             const mainControlsEl = editor.container.querySelector('.mdx-toolbar-main-controls');
