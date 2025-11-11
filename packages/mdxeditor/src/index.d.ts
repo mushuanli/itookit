@@ -115,7 +115,15 @@ export interface TitleBarButton {
 
 export interface PluginContext {
   registerSyntaxExtension(extension: any): void;
-  on(hook: 'beforeParse' | 'afterRender' | 'domUpdated' | 'beforeSave', callback: Function): void;
+  /**
+   * Subscribes to a core lifecycle hook.
+   * - `beforeParse`: Before Markdown is parsed by Marked.js.
+   * - `afterRender`: After Marked.js has produced HTML.
+   * - `domUpdated`: After the final HTML is injected into the DOM.
+   * - `editorPostInit`: (Editor only) After the MDxEditor instance and its DOM are fully initialized.
+   * - `beforeSave`: (Future use) Before content is saved.
+   */
+  on(hook: 'beforeParse' | 'afterRender' | 'domUpdated' | 'editorPostInit' | 'beforeSave', callback: Function): void;
   emit(eventName: string, payload: any): void;
   listen(eventName: string, callback: (payload: any) => void): void;
   provide(key: symbol | string, service: any): void;
