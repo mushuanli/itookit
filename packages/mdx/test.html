@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MDxEditor Demo - 编辑器与渲染器</title>
+  <!-- CodeMirror 样式 -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/codemirror@6.0.1/dist/index.css">
+  
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: #f5f5f5;
+      color: #333;
+    }
+
+    .app-container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    .header {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .header h1 {
+      font-size: 24px;
+      color: #2c3e50;
+    }
+
+    .toolbar {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .btn {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      transition: all 0.3s ease;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn-primary {
+      background: #3498db;
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: #2980b9;
+    }
+
+    .btn-success {
+      background: #27ae60;
+      color: white;
+    }
+
+    .btn-success:hover {
+      background: #229954;
+    }
+
+    .btn-secondary {
+      background: #95a5a6;
+      color: white;
+    }
+
+    .btn-secondary:hover {
+      background: #7f8c8d;
+    }
+
+    .btn:active {
+      transform: scale(0.98);
+    }
+
+    .btn svg {
+      width: 16px;
+      height: 16px;
+    }
+
+    .editor-wrapper {
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      overflow: hidden;
+    }
+
+    .mdx-editor-container {
+      min-height: 600px;
+    }
+
+    .mdx-editor-edit-mode,
+    .mdx-editor-render-mode {
+      padding: 20px;
+    }
+
+    .mdx-editor-edit-mode {
+      background: #fafafa;
+    }
+
+    /* CodeMirror 自定义样式 */
+    .cm-editor {
+      height: 100%;
+      font-size: 14px;
+      border: 1px solid #e0e0e0;
+      border-radius: 4px;
+    }
+
+    .cm-scroller {
+      font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    }
+
+    /* 渲染内容样式 */
+    .mdx-editor-render-mode {
+      line-height: 1.8;
+    }
+
+    .mdx-editor-render-mode h1 {
+      font-size: 32px;
+      margin: 20px 0;
+      padding-bottom: 10px;
+      border-bottom: 2px solid #e0e0e0;
+    }
+
+    .mdx-editor-render-mode h2 {
+      font-size: 24px;
+      margin: 18px 0 12px;
+      color: #2c3e50;
+    }
+
+    .mdx-editor-render-mode h3 {
+      font-size: 20px;
+      margin: 16px 0 10px;
+      color: #34495e;
+    }
+
+    .mdx-editor-render-mode p {
+      margin: 12px 0;
+      text-align: justify;
+    }
+
+    .mdx-editor-render-mode code {
+      background: #f8f9fa;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-family: 'Monaco', 'Menlo', monospace;
+      font-size: 0.9em;
+      color: #e83e8c;
+    }
+
+    .mdx-editor-render-mode pre {
+      background: #282c34;
+      color: #abb2bf;
+      padding: 16px;
+      border-radius: 6px;
+      overflow-x: auto;
+      margin: 16px 0;
+    }
+
+    .mdx-editor-render-mode pre code {
+      background: none;
+      color: inherit;
+      padding: 0;
+    }
+
+    .mdx-editor-render-mode blockquote {
+      border-left: 4px solid #3498db;
+      padding-left: 16px;
+      margin: 16px 0;
+      color: #7f8c8d;
+      font-style: italic;
+    }
+
+    .mdx-editor-render-mode ul,
+    .mdx-editor-render-mode ol {
+      margin: 12px 0;
+      padding-left: 30px;
+    }
+
+    .mdx-editor-render-mode li {
+      margin: 6px 0;
+    }
+
+    .mdx-editor-render-mode a {
+      color: #3498db;
+      text-decoration: none;
+    }
+
+    .mdx-editor-render-mode a:hover {
+      text-decoration: underline;
+    }
+
+    .mdx-editor-render-mode img {
+      max-width: 100%;
+      height: auto;
+      border-radius: 6px;
+      margin: 16px 0;
+    }
+
+    .mdx-editor-render-mode table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 16px 0;
+    }
+
+    .mdx-editor-render-mode th,
+    .mdx-editor-render-mode td {
+      border: 1px solid #e0e0e0;
+      padding: 10px;
+      text-align: left;
+    }
+
+    .mdx-editor-render-mode th {
+      background: #f8f9fa;
+      font-weight: 600;
+    }
+
+    /* MathJax 样式 */
+    .MathJax {
+      font-size: 1.1em !important;
+    }
+
+    /* 搜索高亮样式 */
+    .search-highlight mark {
+      background: #fff59d;
+      padding: 2px 4px;
+      border-radius: 2px;
+    }
+
+    .search-highlight.active-match mark {
+      background: #ffd54f;
+      font-weight: bold;
+    }
+
+    /* 状态指示器 */
+    .mode-indicator {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+
+    .mode-indicator.edit-mode {
+      background: #e3f2fd;
+      color: #1976d2;
+    }
+
+    .mode-indicator.render-mode {
+      background: #e8f5e9;
+      color: #388e3c;
+    }
+
+    /* [订正] 缺少 . 选择器 */
+    .mode-indicator-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: currentColor;
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% {
+        opacity: 1;
+      }
+      50% {
+        opacity: 0.5;
+      }
+    }
+
+    /* 响应式设计 */
+    @media (max-width: 768px) {
+      .app-container {
+        padding: 10px;
+      }
+
+      .header {
+        flex-direction: column;
+        gap: 15px;
+      }
+
+      .toolbar {
+        width: 100%;
+        justify-content: center;
+        flex-wrap: wrap;
+      }
+
+      .btn {
+        flex: 1;
+        /* [订正] 缺少分号 */
+        min-width: 120px;
+        justify-content: center;
+      }
+    } /* [订正] 缺少媒体查询的闭合括号 */
+
+    /* 加载动画 */
+    .loading {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      border: 2px solid rgba(255, 255, 255, 0.3);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-container">
+    <!-- 头部工具栏 -->
+    <div class="header">
+      <div>
+        <h1>📝 MDxEditor Demo</h1>
+        <div style="margin-top: 8px;">
+          <span class="mode-indicator edit-mode" id="modeIndicator">
+            <span class="mode-indicator-dot"></span>
+            <span id="modeText">Edit Mode</span>
+          </span>
+        </div>
+      </div>
+      <div class="toolbar">
+        <button class="btn btn-primary" id="toggleModeBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+            <path d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+          <!-- [订正] svg 标签未闭合 -->
+          </svg><span id="toggleBtnText">View</span>
+        </button>
+
+        <button class="btn btn-success" id="saveBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/>
+            <polyline points="17 21 17 13 7 13 7 21"/>
+            <polyline points="7 3 7 8 15 8"/>
+          </svg>
+          Save
+        </button>
+
+        <button class="btn btn-secondary" id="clearBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="3 6 5 6 21 6"/>
+            <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+          </svg>
+          Clear
+        </button>
+      </div>
+    </div>
+
+    <!-- 编辑器容器 -->
+    <div class="editor-wrapper">
+      <div id="editor"></div>
+    </div>
+  </div>
+
+  <!-- 引入依赖 -->
+  <script type="module">
+    // 模拟导入（实际使用时应该从构建后的文件导入）
+    // import { MDxEditor, MathJaxPlugin } from './dist/index.js';
+
+    // 由于这是演示，我们直接在这里实现简化版本
+    
+    // 初始化示例内容
+    const initialContent = `# MDxEditor 演示文档
+
+欢迎使用 **MDxEditor**！这是一个功能强大的 Markdown 编辑器。
+
+## 功能特性
+
+### 1. 基础 Markdown 语法
+
+支持所有标准 Markdown 语法：
+
+- **粗体文本**
+- *斜体文本*
+- ~~删除线~~
+- \`行内代码\`
+- [链接](https://example.com)
+
+### 2. 代码块
+
+\`\`\`javascript
+function hello(name) {
+  console.log(\`Hello, \${name}!\`);
+  return true;
+}
+
+hello('World');
+\`\`\`
+
+### 3. 数学公式
+
+行内公式：质能方程 $E = mc^2$ 是物理学中最著名的公式之一。
+
+公式块：
+
+$$
+\\int_{-\\infty}^{\\infty} e^{-x^2} dx = \\sqrt{\\pi}
+$$
+
+欧拉公式：
+
+$$
+e^{i\\pi} + 1 = 0
+$$
+
+### 4. 引用
+
+> 这是一段引用文本。
+> 
+> 可以包含多行内容。
+
+### 5. 列表
+
+#### 无序列表
+- 项目 1
+- 项目 2
+  - 子项目 2.1
+  - 子项目 2.2
+- 项目 3
+
+#### 有序列表
+1. 第一步
+2. 第二步
+3. 第三步
+
+### 6. 表格
+
+| 功能 | 状态 | 说明 |
+|------|------|------|
+| 编辑模式 | ✅ | 支持 CodeMirror |
+| 渲染模式 | ✅ | 实时预览 |
+| 数学公式 | ✅ | MathJax 支持 |
+| 插件系统 | ✅ | 可扩展架构 |
+
+## 使用说明
+
+1. 点击 **View** 按钮切换到预览模式
+2. 点击 **Edit** 按钮返回编辑模式
+3. 点击 **Save** 按钮保存内容到本地存储
+4. 点击 **Clear** 按钮清空编辑器
+
+---
+
+**提示**：尝试编辑这个文档，然后切换到预览模式查看效果！
+`;
+
+    // 简化的编辑器实现（用于演示）
+    class SimpleEditor {
+      constructor(container) {
+        this.container = container;
+        this.mode = 'edit';
+        this.content = initialContent;
+        this.init();
+      }
+
+      init() {
+        this.container.innerHTML = `
+          <div class="mdx-editor-edit-mode" style="display: block;">
+            <textarea id="editorTextarea" style="
+              width: 100%;
+              min-height: 600px;
+              padding: 20px;
+              border: 1px solid #e0e0e0;
+              border-radius: 4px;
+              font-family: 'Monaco', 'Menlo', monospace;
+              font-size: 14px;
+              line-height: 1.6;
+              resize: vertical;
+            ">${this.content}</textarea>
+          </div>
+          <div class="mdx-editor-render-mode" style="display: none;"></div>
+        `;
+
+        this.textarea = document.getElementById('editorTextarea');
+        this.renderContainer = this.container.querySelector('.mdx-editor-render-mode');
+        this.editContainer = this.container.querySelector('.mdx-editor-edit-mode');
+
+        this.textarea.addEventListener('input', (e) => {
+          this.content = e.target.value;
+        });
+      }
+
+      switchToMode(mode) {
+        this.mode = mode;
+        
+        if (mode === 'edit') {
+          this.editContainer.style.display = 'block';
+          this.renderContainer.style.display = 'none';
+        } else {
+          this.editContainer.style.display = 'none';
+          this.renderContainer.style.display = 'block';
+          this.render();
+        }
+      }
+
+      async render() {
+        // 使用 marked 库渲染（需要引入）
+        // 这里使用简单的替换作为演示
+        let html = this.content
+          .replace(/^# (.*$)/gim, '<h1>$1</h1>')
+          .replace(/^## (.*$)/gim, '<h2>$1</h2>')
+          .replace(/^### (.*$)/gim, '<h3>$1</h3>')
+          .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+          .replace(/\*(.*?)\*/g, '<em>$1</em>')
+          .replace(/~~(.*?)~~/g, '<del>$1</del>')
+          .replace(/`(.*?)`/g, '<code>$1</code>')
+          .replace(/\n\n/g, '</p><p>')
+          .replace(/\n/g, '<br>');
+
+        html = '<p>' + html + '</p>';
+        this.renderContainer.innerHTML = html;
+
+        // 渲染数学公式
+        if (window.MathJax) {
+          await window.MathJax.typesetPromise([this.renderContainer]);
+        }
+      }
+
+      getContent() {
+        return this.content;
+      }
+
+      setContent(content) {
+        this.content = content;
+        // [订正] 缺少分号，导致 content 和 if 拼接
+        this.textarea.value = content;
+        if (this.mode === 'render') {
+          this.render();
+        }
+      }
+    }
+
+    // 初始化编辑器
+    const editorContainer = document.getElementById('editor');
+    const editor = new SimpleEditor(editorContainer);
+
+    // 按钮事件
+    const toggleModeBtn = document.getElementById('toggleModeBtn');
+    const toggleBtnText = document.getElementById('toggleBtnText');
+    const modeIndicator = document.getElementById('modeIndicator');
+    const modeText = document.getElementById('modeText');
+    const saveBtn = document.getElementById('saveBtn');
+    const clearBtn = document.getElementById('clearBtn');
+
+    // 切换模式
+    toggleModeBtn.addEventListener('click', () => {
+      const newMode = editor.mode === 'edit' ? 'render' : 'edit';
+      editor.switchToMode(newMode);
+
+      if (newMode === 'edit') {
+        toggleBtnText.textContent = 'View';
+        modeIndicator.className = 'mode-indicator edit-mode';
+        modeText.textContent = 'Edit Mode';
+        toggleModeBtn.innerHTML = `
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+            <path d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+          </svg>
+          <span id="toggleBtnText">View</span>
+        `;
+      } else {
+        toggleBtnText.textContent = 'Edit';
+        modeIndicator.className = 'mode-indicator render-mode';
+        modeText.textContent = 'Render Mode';
+        toggleModeBtn.innerHTML = `
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
+            <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
+          </svg>
+          <span id="toggleBtnText">Edit</span>
+        `;
+      }
+    });
+
+    // 保存内容
+    saveBtn.addEventListener('click', () => {
+      const content = editor.getContent();
+      localStorage.setItem('mdx-editor-content', content);
+      // 显示保存成功提示
+      const originalHTML = saveBtn.innerHTML;
+      saveBtn.innerHTML = `
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="20 6 9 17 4 12"/>
+        </svg>
+        <span>Saved!</span>
+      `;
+      saveBtn.disabled = true;
+
+      setTimeout(() => {
+        saveBtn.innerHTML = originalHTML;
+        saveBtn.disabled = false;
+      }, 2000);
+    });
+
+    // 清空内容
+    clearBtn.addEventListener('click', () => {
+      if (confirm('确定要清空编辑器内容吗？')) {
+        editor.setContent('');
+        localStorage.removeItem('mdx-editor-content');
+      }
+    });
+
+    // 加载保存的内容
+    const savedContent = localStorage.getItem('mdx-editor-content');
+    if (savedContent) {
+      editor.setContent(savedContent);
+    }
+
+    // 配置 MathJax
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$', '$'], ['\\(', '\\)']],
+        displayMath: [['$$', '$$'], ['\\[', '\\]']],
+      },
+      svg: {
+        fontCache: 'global'
+      }
+    };
+  </script>
+
+  <!-- MathJax -->
+  <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" async></script>
+</body>
+</html>
