@@ -1,25 +1,19 @@
-// vite.config.js
-import { resolve } from 'path';
 import { defineConfig } from 'vite';
-import dts from 'vite-plugin-dts';
+import { resolve } from 'path';
+import { copyFileSync, mkdirSync } from 'fs';
 
 export default defineConfig({
-  plugins: [
-    dts({
-      insertTypesEntry: true,
-    }),
-  ],
   build: {
     // 开启 lib 模式，专门用于构建库
     lib: {
       // **关键**: 回归单一的 JS 入口文件
       entry: resolve(__dirname, 'src/index.js'),
-      name: 'VFSUI',
-      fileName: 'vfs-ui', // **关键**: 提供一个基础文件名，Vite 会自动添加后缀
+      name: 'VFSui',
+      formats: ['es', 'umd'],
+      fileName: (format) => `vfs-ui.${format === 'es' ? 'js' : 'umd.cjs'}`
     },
     rollupOptions: {
-      // 确保外部化处理那些你不想打包进库的依赖
-      external: ['immer', '@itookit/common', '@itookit/vfs-core'],
+      external: ['@itookit/vfs-core', '@itookit/common', 'immer'],
       output: {
         // 在 UMD 构建模式下为这些外部化的依赖提供一个全局变量
         globals: {
@@ -27,15 +21,29 @@ export default defineConfig({
           '@itookit/common': 'ItookitCommon',
           '@itookit/vfs-core': 'VFSCore',
         },
-        // **关键修改**: 确保 CSS 作为资源文件被正确发射出来
+        // 确保CSS被提取为单独的文件
         assetFileNames: (assetInfo) => {
-          // 在这里，我们可以确保 CSS 文件被命名为 'style.css'
-          if (assetInfo.name.endsWith('.css')) {
+          if (assetInfo.name && assetInfo.name.endsWith('.css')) {
             return 'style.css';
           }
           return assetInfo.name;
-        },
-      },
-    },
+        }
+      }
+    }
   },
+  plugins: [
+    {
+      name: 'copy-types',
+      closeBundle() {
+        // 构建完成后复制类型定义文件
+        try {
+          mkdirSync('dist', { recursive: true });
+          copyFileSync('src/index.d.ts', 'dist/index.d.ts');
+          console.log('✓ Type definitions copied');
+        } catch (err) {
+          console.error('Failed to copy type definitions:', err);
+        }
+      }
+    }
+  ]
 });
