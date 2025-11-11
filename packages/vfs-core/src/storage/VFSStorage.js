@@ -3,7 +3,8 @@
  * 适配 IndexedDB，提供统一的存储接口
  */
 
-import { Database } from './db.js'; // 复用现有 Database
+// [修改] 导入 Database 类本身，而不是它的单例实例
+import { Database } from './db.js';
 import { VNode } from '../core/VNode.js';
 import { TransactionManager } from '../utils/Transaction.js';
 import { InodeStore } from './InodeStore.js';
@@ -25,7 +26,12 @@ export const VFS_STORES = {
 
 export class VFSStorage {
     constructor(options = {}) {
-        this.db = options.db || new Database();
+        // [修改] 核心改动：允许通过配置创建 Database 实例
+        // 1. 如果外部直接传入了 db 实例，则使用它。
+        // 2. 否则，根据 options.dbName 创建一个新的 Database 实例。
+        // 3. 如果 options.dbName 也未提供，Database 类将使用其内部的默认名称。
+        this.db = options.db || new Database(options.dbName);
+        
         this.txManager = null;
         this.inodeStore = null;
         this.contentStore = null;

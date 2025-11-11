@@ -4,8 +4,8 @@
  * @fileoverview 定义数据库相关的常量，避免在代码中使用魔法字符串。
  */
 
-// 数据库名称
-export const DB_NAME = 'MindOS';
+// [修改] 将 DB_NAME 变为一个默认值，供 Database 类在未指定名称时使用
+export const DEFAULT_DB_NAME = 'MindOS';
 
 // 数据库版本。每次 schema 变更时，都需要增加此版本号。
 export const DB_VERSION = 2; // [修改] 版本号 +1
