@@ -13,7 +13,7 @@ export class SourceSyncPlugin {
      * @param {PluginContext} context
      */
     install(context) {
-        context.listen('editorPostInit', ({ /** @type {MDxEditor} */ editor }) => {
+        context.on('editorPostInit', ({ /** @type {MDxEditor} */ editor }) => {
             editor.renderEl.addEventListener('dblclick', (e) => {
                 if (!e.ctrlKey && !e.metaKey) return;
                 

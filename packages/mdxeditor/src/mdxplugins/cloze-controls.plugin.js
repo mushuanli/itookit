@@ -33,7 +33,7 @@ export class ClozeControlsPlugin {
     install(context) {
         this.context = context; // +++ 新增: 存储上下文以备后用
 
-        context.listen('editorPostInit', ({ /** @type {MDxEditor} */ editor }) => {
+        context.on('editorPostInit', ({ /** @type {MDxEditor} */ editor }) => {
             // The plugin's functionality is controlled by an option on the MDxEditor instance.
             if (!editor.options.clozeControls) {
                 return;
