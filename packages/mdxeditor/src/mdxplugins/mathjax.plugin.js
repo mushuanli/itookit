@@ -24,7 +24,7 @@ const mathInlineExtension = {
     },
     renderer(token) {
         // Output MathJax 3's standard inline delimiter `\(...\)`
-        return `<span class="math-inline">\\(${escapeHTML(token.text)}\\)</span>`;
+        return `<span class="math-inline">\\(${token.text}\\)</span>`;
     }
 };
 

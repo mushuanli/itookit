@@ -36,7 +36,7 @@ export class MDxEditor {
    * 注册插件
    */
   use(plugin: MDxPlugin): this {
-    this.renderer.use(plugin);
+    this.renderer.usePlugin(plugin);
     return this;
   }
 

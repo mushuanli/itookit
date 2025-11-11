@@ -1,3 +1,5 @@
+// src/plugins/mathjax.plugin.ts
+
 import type { MDxPlugin, PluginContext } from '../core/plugin';
 import type { MarkedExtension, Tokens } from 'marked';
 
@@ -12,12 +14,14 @@ declare global {
   }
 }
 
+/**
+ * MathJax 插件配置选项
+ */
 export interface MathJaxPluginOptions {
   /**
    * MathJax CDN URL
    */
   cdnUrl?: string;
-  
   /**
    * MathJax 配置
    */
@@ -37,50 +41,75 @@ export interface MathJaxPluginOptions {
 }
 
 /**
- * MathJax 插件
- * 支持 LaTeX 数学公式渲染（$$...$$）
+ * MathJax 全局管理器（单例模式）
  */
-export class MathJaxPlugin implements MDxPlugin {
-  name = 'feature:mathjax';
-  private options: Required<MathJaxPluginOptions>;
+class MathJaxManager {
+  private static instance: MathJaxManager | null = null;
   private isLoaded = false;
   private loadPromise: Promise<void> | null = null;
+  private config: any;
+  private cdnUrl: string = '';
+  private instanceCount = 0;
+  private renderQueue: Set<HTMLElement> = new Set();
+  private renderTimer: number | null = null;
 
-  constructor(options: MathJaxPluginOptions = {}) {
-    this.options = {
-      cdnUrl: options.cdnUrl || 'https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js',
-      config: options.config || {
-        tex: {
-          inlineMath: [['$', '$'], ['\\(', '\\)']],
-          displayMath: [['$$', '$$'], ['\\[', '\\]']],
-        },
-      },
-      autoLoad: options.autoLoad !== false,
-    };
+  private constructor() {}
+
+  static getInstance(): MathJaxManager {
+    if (!MathJaxManager.instance) {
+      MathJaxManager.instance = new MathJaxManager();
+    }
+    return MathJaxManager.instance;
   }
 
   /**
-   * 加载 MathJax 库
+   * 注册实例（引用计数）
    */
-  private async loadMathJax(): Promise<void> {
+  registerInstance(config: any, cdnUrl: string): void {
+    this.instanceCount++;
+    
+    // 第一个实例设置配置
+    if (this.instanceCount === 1) {
+      this.config = config;
+      this.cdnUrl = cdnUrl;
+    } else if (JSON.stringify(this.config) !== JSON.stringify(config)) {
+      console.warn('MathJax config differs between instances. Using first config.');
+    }
+  }
+
+  /**
+   * 注销实例
+   */
+  unregisterInstance(): void {
+    this.instanceCount--;
+    
+    // 最后一个实例被销毁时清理
+    if (this.instanceCount === 0) {
+      this.cleanup();
+    }
+  }
+
+  /**
+   * 加载 MathJax
+   */
+  async load(): Promise<void> {
     if (this.isLoaded) return;
     if (this.loadPromise) return this.loadPromise;
 
     this.loadPromise = new Promise((resolve, reject) => {
-      // 检查是否已经加载
-      if (window.MathJax) {
+      if (window.MathJax?.typesetPromise) {
         this.isLoaded = true;
         resolve();
         return;
       }
 
-      // 配置 MathJax
-      (window as any).MathJax = this.options.config;
+      // 设置配置
+      (window as any).MathJax = this.config;
 
-      // 加载脚本
       const script = document.createElement('script');
-      script.src = this.options.cdnUrl;
+      script.src = this.cdnUrl;
       script.async = true;
+      script.id = 'mathjax-script';
       
       script.onload = () => {
         this.isLoaded = true;
@@ -88,6 +117,7 @@ export class MathJaxPlugin implements MDxPlugin {
       };
       
       script.onerror = () => {
+        this.loadPromise = null;
         reject(new Error('Failed to load MathJax'));
       };
 
@@ -95,6 +125,104 @@ export class MathJaxPlugin implements MDxPlugin {
     });
 
     return this.loadPromise;
+  }
+
+  /**
+   * 批量渲染（防抖优化）
+   */
+  queueRender(element: HTMLElement): void {
+    this.renderQueue.add(element);
+
+    if (this.renderTimer) {
+      clearTimeout(this.renderTimer);
+    }
+
+    this.renderTimer = window.setTimeout(() => {
+      this.flushRenderQueue();
+    }, 50);
+  }
+
+  /**
+   * 执行渲染队列
+   */
+  private async flushRenderQueue(): Promise<void> {
+    if (this.renderQueue.size === 0) return;
+
+    try {
+      await this.load();
+
+      if (window.MathJax?.startup?.promise) {
+        await window.MathJax.startup.promise;
+      }
+
+      if (window.MathJax?.typesetPromise) {
+        const elements = Array.from(this.renderQueue);
+        await window.MathJax.typesetPromise(elements);
+      }
+    } catch (error) {
+      console.error('MathJax render error:', error);
+    } finally {
+      this.renderQueue.clear();
+      this.renderTimer = null;
+    }
+  }
+
+  /**
+   * 立即渲染
+   */
+  async renderNow(element: HTMLElement): Promise<void> {
+    try {
+      await this.load();
+
+      if (window.MathJax?.startup?.promise) {
+        await window.MathJax.startup.promise;
+      }
+
+      if (window.MathJax?.typesetPromise) {
+        await window.MathJax.typesetPromise([element]);
+      }
+    } catch (error) {
+      console.error('MathJax render error:', error);
+    }
+  }
+
+  /**
+   * 清理资源
+   */
+  private cleanup(): void {
+    if (this.renderTimer) {
+      clearTimeout(this.renderTimer);
+      this.renderTimer = null;
+    }
+    this.renderQueue.clear();
+  }
+}
+
+/**
+ * MathJax 插件
+ * 支持 LaTeX 数学公式渲染（$$...$$）
+ */
+export class MathJaxPlugin implements MDxPlugin {
+  name = 'feature:mathjax';
+  private options: Required<MathJaxPluginOptions>;
+  private manager: MathJaxManager;
+  private cleanupFns: Array<() => void> = [];
+
+  constructor(options: MathJaxPluginOptions = {}) {
+    this.options = {
+      cdnUrl: options.cdnUrl || 'https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js',
+      config: {
+        tex: {
+          inlineMath: [['$', '$'], ['\\(', '\\)']],
+          displayMath: [['$$', '$$'], ['\\[', '\\]']],
+        },
+        ...options.config,
+      },
+      autoLoad: options.autoLoad !== false,
+    };
+
+    this.manager = MathJaxManager.getInstance();
+    this.manager.registerInstance(this.options.config, this.options.cdnUrl);
   }
 
   /**
@@ -115,7 +243,8 @@ export class MathJaxPlugin implements MDxPlugin {
                 raw: match[0],
                 text: match[1].trim(),
               };
-            }},
+            }
+          },
           renderer: (token: Tokens.Generic) => {
             return `\\[${token.text}\\]`;
           },
@@ -151,50 +280,38 @@ export class MathJaxPlugin implements MDxPlugin {
 
     // 自动加载 MathJax
     if (this.options.autoLoad) {
-      this.loadMathJax().catch(err => {
+      this.manager.load().catch(err => {
         console.error('MathJax load error:', err);
       });
     }
 
     // 监听 DOM 更新事件
-    context.on('domUpdated', async ({ element }: { element: HTMLElement }) => {
-      await this.typeset(element);
+    const removeListener = context.on('domUpdated', ({ element }: { element: HTMLElement }) => {
+      this.manager.queueRender(element);
     });
-  }
 
-  /**
-   * 渲染数学公式
-   */
-  async typeset(element?: HTMLElement): Promise<void> {
-    try {
-      // 确保 MathJax 已加载
-      await this.loadMathJax();
-
-      // 等待 MathJax 初始化完成
-      if (window.MathJax?.startup?.promise) {
-        await window.MathJax.startup.promise;
-      }
-
-      // 渲染公式
-      if (window.MathJax?.typesetPromise) {
-        await window.MathJax.typesetPromise(element ? [element] : undefined);
-      }
-    } catch (error) {
-      console.error('MathJax typeset error:', error);
+    // 记录清理函数
+    if (removeListener) {
+      this.cleanupFns.push(removeListener);
     }
   }
 
   /**
-   * 手动加载 MathJax（用于延迟加载场景）
+   * 手动渲染
    */
-  async load(): Promise<void> {
-    await this.loadMathJax();
+  async typeset(element: HTMLElement): Promise<void> {
+    await this.manager.renderNow(element);
   }
 
   /**
    * 销毁插件
    */
   destroy(): void {
-    this.loadPromise = null;
+    this.cleanupFns.forEach(fn => fn());
+    this.cleanupFns = [];
+    this.manager.unregisterInstance();
   }
 }
+
+// 确保导出类型
+export type { MathJaxPluginOptions as MathJaxOptions };

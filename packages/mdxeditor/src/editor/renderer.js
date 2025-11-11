@@ -5,7 +5,6 @@
 import { PluginManager } from '../core/plugin-manager.js';
 import { ServiceContainer } from '../core/service-container.js';
 import { slugify, escapeHTML } from '@itookit/common';
-// [修改] 导入 Marked 类，而不是单例
 import { Marked } from 'marked'; 
 
 export class MDxRenderer {
@@ -144,24 +143,30 @@ export class MDxRenderer {
         if (!element) return; 
         this.renderRoot = element;
 
+    console.log('📝 Original Markdown:', markdownText);
         const processedMarkdown = this.pluginManager.executeTransformHook(
             'beforeParse', 
             { markdown: markdownText, options }
         ).markdown;
 
-        // [修改] 创建一个局部的 marked 实例
+    console.log('🔄 After beforeParse:', processedMarkdown);
         const markedInstance = new Marked();
         
         // [修改] 将实例传递给配置函数
         this.configureMarked(markedInstance, options);
         
+        const tokens = markedInstance.lexer(processedMarkdown);
+        console.log('🔍 Lexer tokens:', JSON.stringify(tokens, null, 2));
+        
         // [修改] 使用局部实例进行解析
         const html = markedInstance.parse(processedMarkdown);
 
+    console.log('📄 After Marked parse:', html);
         const finalHtml = this.pluginManager.executeTransformHook(
             'afterRender',
             { html, options }
         ).html;
+    console.log('✅ Final HTML:', finalHtml);
         
         element.innerHTML = finalHtml;
 
@@ -181,59 +186,86 @@ export class MDxRenderer {
      * @param {object} options
      */
     configureMarked(markedInstance, options) {
-        // [注意] Renderer 的创建方式不变
-        const renderer = new markedInstance.Renderer();
-
-        // FIX: Use a traditional `function` to preserve the `this` context provided by Marked.js.
-        renderer.heading = function(token) {
-            // [MODIFIED] 1. 使用新的 slugify
-            // [MODIFIED] 2. 统一添加 'heading-' 前缀，使其更健壮
-    const id = `heading-${slugify(token.text)}`;
-    // FIX: Check if parser exists, and provide fallback
-    let innerHTML;
-    if (this.parser && typeof this.parser.parseInline === 'function') {
-        innerHTML = this.parser.parseInline(token.tokens);
-    } else {
-        // Fallback: use token.text if parser is not available
-        innerHTML = token.text;
-    }
-    return `<h${token.depth} id="${id}">${innerHTML}</h${token.depth}>`;
-        };
-
-        // @ts-expect-error - Using marked v5+ token-based signature instead of v4 parameter-based signature
-        renderer.listitem = function(/** @type {import('marked').Tokens.ListItem} */ token) {
-            let innerHTML = '';
-            
-            if (token.tokens && Array.isArray(token.tokens)) {
-                const inlineTokens = token.tokens.filter(t => {
-                    const blockTypes = ['space', 'code', 'heading', 'table', 'hr', 'blockquote', 'list', 'list_item', 'html', 'paragraph'];
-                    // @ts-ignore - Assuming 't' is a Token object with a 'type' property
-                    return !blockTypes.includes(t.type);
-                });
+        const renderer = {
+            /**✅ 修复：heading 渲染器问题：token 是对象，需要解构获取 depth
+             */
+            heading(token) {
+                const { tokens, depth, text } = token;
                 
-                if (inlineTokens.length > 0) {
-                    // @ts-ignore - parser exists on renderer instance at runtime
-                    innerHTML = this.parser.parseInline(inlineTokens);
+                // 优先使用 tokens 进行渲染
+                let innerHTML = '';
+                if (tokens && tokens.length > 0) {
+                    innerHTML = markedInstance.parser.parseInline(tokens);
+                } else {
+                    innerHTML = text || '';
+                }
+                
+                // 生成 slug（移除 HTML 标签）
+                const plainText = innerHTML.replace(/<[^>]*>/g, '');
+                const id = `heading-${slugify(plainText)}`;
+                
+                return `<h${depth} id="${id}">${innerHTML}</h${depth}>`;
+            },
+
+            // ✅ 修复：listitem 渲染器
+            listitem(token) {
+                let innerHTML = '';
+                
+                // ✅ 关键修复：递归提取所有嵌套的 tokens
+                const extractInlineTokens = (tokens) => {
+                    if (!tokens || tokens.length === 0) return [];
+                    
+                    const result = [];
+                    for (const t of tokens) {
+                        if (t.type === 'text') {
+                            // ✅ 检查是否有更深层的 tokens
+                            if (t.tokens && t.tokens.length > 0) {
+                                result.push(...extractInlineTokens(t.tokens));
+                            } else {
+                                result.push(t);
+                            }
+                        } else if (t.type === 'paragraph' && t.tokens) {
+                            result.push(...extractInlineTokens(t.tokens));
+                        } else if (t.type !== 'space') {
+                            result.push(t);
+                        }
+                    }
+                    return result;
+                };
+                
+                // 提取所有内联 tokens
+                if (token.tokens && token.tokens.length > 0) {
+                    const inlineTokens = extractInlineTokens(token.tokens);
+                    
+                    if (inlineTokens.length > 0) {
+                        innerHTML = markedInstance.parser.parseInline(inlineTokens);
+                    }else {
+                        // 降级：使用原始文本
+                        innerHTML = token.text || '';
+                    }
                 } else if (token.text) {
                     innerHTML = token.text;
                 }
-            } else if (token.text) {
-                innerHTML = token.text;
-            }
 
-            if (token.task) {
-                const checkbox = `<input type="checkbox" ${token.checked ? 'checked' : ''} data-task-text="${escapeHTML(token.text || '')}"> `;
-                return `<li class="task-list-item">${checkbox}${innerHTML}</li>`;
+                // 处理任务列表
+                if (token.task) {
+                    const checkbox = `<input type="checkbox" ${token.checked ? 'checked' : ''}> `;
+                    return `<li class="task-list-item">${checkbox}${innerHTML}</li>`;
+                }
+                
+                return `<li>${innerHTML}</li>`;
             }
-            return `<li>${innerHTML}</li>`;
         };
 
-        // [修改] 在局部实例上应用扩展和选项
-        markedInstance.use({ extensions: this.pluginManager.syntaxExtensions });
+        // 应用自定义渲染器和扩展
+        markedInstance.use({ 
+            renderer,
+            extensions: this.pluginManager.syntaxExtensions 
+        });
+        
         markedInstance.setOptions({
             gfm: true,
             breaks: true,
-            renderer: renderer,
             smartypants: false,
             ...this.config.markedOptions,
             ...(options.markedOptions || {})

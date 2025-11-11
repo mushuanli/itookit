@@ -25,17 +25,18 @@ export class FoldablePlugin {
         const storedBlocks = new Map();
         let placeholderId = 0;
 
-        // Hook 1: Before parsing, find custom blocks and replace them with placeholders.
         context.on('beforeParse', ({ markdown, options }) => {
             placeholderId = 0;
-            storedBlocks.clear(); // Ensure state is clean for each render
+            storedBlocks.clear();
 
             const textWithPlaceholders = (markdown || '').replace(
                 /^::>\s*(?:\[([ xX])]\s*)?(.*)\n?((?:^[ \t]{4,}.*\n?|^\s*\n)*)/gm,
                 (match, checkmark, label, rawContent) => {
                     const placeholder = `<!-- FOLDABLE_BLOCK_${placeholderId} -->`;
-                    const dedentedRawContent = rawContent.split('\n').map(line => line.substring(4)).join('\n');
-                    
+                    const dedentedRawContent = rawContent.split('\n')
+                        .map(line => line.substring(4))
+                        .join('\n');
+                  
                     storedBlocks.set(placeholder, {
                         checkmark,
                         label: label.trim(),
@@ -43,7 +44,8 @@ export class FoldablePlugin {
                     });
 
                     placeholderId++;
-                    return `\n${placeholder}\n`; // Ensure it's treated as a block
+                    // ✅ 修复：确保占位符前后有足够的换行，避免破坏 Markdown 结构
+                    return `\n\n${placeholder}\n\n`;
                 }
             );
             return { markdown: textWithPlaceholders, options };
