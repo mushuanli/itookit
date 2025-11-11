@@ -4,7 +4,7 @@
  * 主入口类，提供统一的 API
  */
 
-import { VFSStorage } from './storage/VFSStorage.js';
+import { VFSStorage, VFS_STORES } from './storage/VFSStorage.js';
 import { VFS } from './core/VFS.js';
 import { VNode } from './core/VNode.js';
 import { ProviderRegistry } from './registry/ProviderRegistry.js';
@@ -70,6 +70,19 @@ export class VFSCore {
             this.providerRegistry = new ProviderRegistry();
             this.moduleRegistry = new ModuleRegistry();
             
+            // [CORRECTED] START
+            // 关键修复：在检查默认模块之前，先从存储中加载所有已存在的模块信息。
+            // 这是修复刷新后数据不显示问题的核心。
+            const existingModules = await this.storage.loadAllModules();
+            for (const moduleInfo of existingModules) {
+                // 使用从数据库加载的完整信息（包含正确的 rootId）来注册模块
+                this.moduleRegistry.register(moduleInfo.name, moduleInfo);
+            }
+            if (existingModules.length > 0) {
+                 console.log(`[VFSCore] Loaded ${existingModules.length} existing module(s) from storage.`);
+            }
+            // [CORRECTED] END
+            
             // 4. 注册内置 providers
             this._registerBuiltInProviders();
             
@@ -81,9 +94,6 @@ export class VFSCore {
             // 6. 创建 VFS 核心
             this.vfs = new VFS(this.storage, this.providerRegistry, this.events);
             
-            // [修正] 将此行上移
-            // 在执行需要 VFS 核心功能（如 mount）的默认设置之前，将状态标记为已初始化。
-            // 此时所有核心组件都已准备就绪。
             this.initialized = true;
 
             // 7. 初始化默认模块和配置
@@ -138,7 +148,6 @@ export class VFSCore {
         this._ensureInitialized();
         
         if (this.moduleRegistry.has(name)) {
-            // 在开发中，这可能不是一个错误，只是一个警告
             console.warn(`[VFSCore] Module '${name}' already mounted.`);
             return this.moduleRegistry.get(name);
         }
@@ -152,17 +161,35 @@ export class VFSCore {
             meta: { description: options.description || '' }
         });
         
-        // 注册模块
+        // 注册模块到内存
         const moduleInfo = this.moduleRegistry.register(name, {
             rootId: rootNode.id,
             description: options.description || '',
             meta: options.meta || {}
         });
-        
+    
+        // [CORRECTED] 持久化模块信息到数据库
+        const tx = await this.storage.beginTransaction([VFS_STORES.MODULES], 'readwrite');
+        try {
+            const store = tx.getStore(VFS_STORES.MODULES);
+            await new Promise((resolve, reject) => {
+                const request = store.put(moduleInfo.toJSON());
+                request.onsuccess = () => resolve();
+                request.onerror = (e) => reject((/** @type {IDBRequest} */ (e.target)).error);
+            });
+            await tx.commit();
+            console.log(`[VFSCore] Module '${name}' persisted to database`);
+        } catch (error) {
+            await tx.rollback();
+            console.error(`[VFSCore] Failed to persist module '${name}':`, error);
+            // 在持久化失败时，也应该从内存中回滚注册操作，以保持状态一致
+            this.moduleRegistry.unregister(name);
+            throw error;
+        }
+    
         console.log(`[VFSCore] Mounted module: ${name}`);
-        
         this.events.emit('module:mounted', { name, moduleInfo });
-        
+    
         return moduleInfo;
     }
     
@@ -180,14 +207,75 @@ export class VFSCore {
         }
         
         // 删除模块根节点（会级联删除所有子节点）
-        await this.vfs.unlink(moduleInfo.rootId, { recursive: true });
+        if (moduleInfo.rootId) {
+            await this.vfs.unlink(moduleInfo.rootId, { recursive: true });
+        }
         
-        // 注销模块
+        // 从内存中注销模块
         this.moduleRegistry.unregister(name);
         
+        // [CORRECTED] 从数据库删除模块信息
+        const tx = await this.storage.beginTransaction([VFS_STORES.MODULES], 'readwrite');
+        try {
+            const store = tx.getStore(VFS_STORES.MODULES);
+            await new Promise((resolve, reject) => {
+                const request = store.delete(name);
+                request.onsuccess = () => resolve();
+                request.onerror = (e) => reject((/** @type {IDBRequest} */ (e.target)).error);
+            });
+            await tx.commit();
+            console.log(`[VFSCore] Module '${name}' removed from database`);
+        } catch (error) {
+            await tx.rollback();
+            // 如果删除DB失败，最好把内存中的模块重新注册回来
+            this.moduleRegistry.register(name, moduleInfo);
+            console.error(`[VFSCore] Failed to remove module '${name}' from database:`, error);
+            throw error;
+        }
+    
         console.log(`[VFSCore] Unmounted module: ${name}`);
-        
         this.events.emit('module:unmounted', { name });
+    }
+    
+    /**
+     * [ADDED] 更新模块信息
+     * @param {string} name 模块名称
+     * @param {Partial<ModuleInfo>} updates 要更新的字段
+     * @returns {Promise<ModuleInfo>}
+     */
+    async updateModule(name, updates) {
+        this._ensureInitialized();
+        
+        const originalModuleInfo = this.moduleRegistry.get(name)?.toJSON();
+        if (!originalModuleInfo) {
+            throw new VFSError(`Module '${name}' not found.`);
+        }
+
+        // 1. 更新内存
+        this.moduleRegistry.update(name, updates);
+        const updatedModuleInfo = this.moduleRegistry.get(name);
+
+        // 2. 持久化到数据库
+        const tx = await this.storage.beginTransaction([VFS_STORES.MODULES], 'readwrite');
+        try {
+            const store = tx.getStore(VFS_STORES.MODULES);
+            await new Promise((resolve, reject) => {
+                const request = store.put(updatedModuleInfo.toJSON());
+                request.onsuccess = () => resolve();
+                request.onerror = (e) => reject((/** @type {IDBRequest} */ (e.target)).error);
+            });
+            await tx.commit();
+            console.log(`[VFSCore] Module '${name}' updated in database.`);
+        } catch (error) {
+            await tx.rollback();
+            // 回滚内存中的更改
+            this.moduleRegistry.update(name, originalModuleInfo);
+            console.error(`[VFSCore] Failed to update module '${name}' in database:`, error);
+            throw error;
+        }
+
+        this.events.emit('module:updated', { name, updatedModuleInfo });
+        return updatedModuleInfo;
     }
     
     /**

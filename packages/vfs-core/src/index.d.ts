@@ -79,6 +79,8 @@ export interface VNodeStat {
     meta: VNodeMeta;
     /** FIX: Add path property */
     path: string;
+    /** FIX: (错误 #2) 为 VNodeStat 添加 providers 属性，用于存放来自 Provider 的统计信息 */
+    providers?: Record<string, object>;
 }
 
 // ========== Event Payloads ==========

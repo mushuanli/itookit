@@ -9,6 +9,8 @@ import { VNode } from '../core/VNode.js';
 import { TransactionManager } from '../utils/Transaction.js';
 import { InodeStore } from './InodeStore.js';
 import { ContentStore } from './ContentStore.js';
+// [新增] 导入 ModuleInfo 以便反序列化
+import { ModuleInfo } from '../registry/ModuleRegistry.js';
 
 // 存储常量
 export const VFS_STORES = {
@@ -26,12 +28,7 @@ export const VFS_STORES = {
 
 export class VFSStorage {
     constructor(options = {}) {
-        // [修改] 核心改动：允许通过配置创建 Database 实例
-        // 1. 如果外部直接传入了 db 实例，则使用它。
-        // 2. 否则，根据 options.dbName 创建一个新的 Database 实例。
-        // 3. 如果 options.dbName 也未提供，Database 类将使用其内部的默认名称。
         this.db = options.db || new Database(options.dbName);
-        
         this.txManager = null;
         this.inodeStore = null;
         this.contentStore = null;
@@ -166,6 +163,18 @@ export class VFSStorage {
     }
     
     // ========== 模块操作 ==========
+    
+    /**
+     * [新增] 加载所有已存储的模块信息
+     * @returns {Promise<ModuleInfo[]>}
+     */
+    async loadAllModules() {
+        // 假设您的 db 实例有一个 'getAll' 方法来获取一个 store 中的所有记录
+        // 如果没有，您需要根据 db.js 的实现来添加此功能
+        const allModulesData = await this.db.getAll(VFS_STORES.MODULES);
+        if (!allModulesData) return [];
+        return allModulesData.map(data => ModuleInfo.fromJSON(data));
+    }
     
     /**
      * 获取模块根节点
