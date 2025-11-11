@@ -1,4 +1,7 @@
+// src/core/plugin.ts
 import type { Marked, MarkedExtension } from 'marked';
+import type { IPersistenceAdapter } from '@itookit/common';
+import type { VFSCore } from '@itookit/vfs-core';
 
 /**
  * 作用域持久化存储接口
@@ -55,8 +58,8 @@ export interface PluginContext {
   // 持久化存储
   getScopedStore(): ScopedPersistenceStore;
   
-  // VFS 集成
-  getVFSManager(): any | null;
+  // VFS 集成 - 增强类型
+  getVFSCore(): VFSCore | null;
   getCurrentNodeId(): string | null;
   
   // 编辑器专用（仅在 MDxEditor 中可用）
@@ -101,11 +104,3 @@ export interface HookData {
   };
 }
 
-/**
- * 持久化适配器接口
- */
-export interface IPersistenceAdapter {
-  get(key: string): Promise<any>;
-  set(key: string, value: any): Promise<void>;
-  remove(key: string): Promise<void>;
-}
