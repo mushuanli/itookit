@@ -85,7 +85,7 @@ export class MDxEditor extends IEditor {
      * @param {boolean} [options.titleBar.enableToggleEditMode=false] - If true, the edit/render mode toggle button is shown.
      * @param {(text: string) => void} [options.titleBar.aiCallback] - Callback for the AI button.
      * @param {(text: string) => void} [options.titleBar.saveCallback] - Callback for the Save button.
-     * @param {() => void} [options.titleBar.printCallback] - Optional callback for the Print button, overrides default window.print().
+     * @param {() => void} [options.titleBar.printCallback] - Optional callback for the Print button. If provided, it overrides the default `window.print()` behavior.
      */
     constructor(container, options) {
         super(container, options); // Call interface constructor for validation
@@ -387,7 +387,7 @@ export class MDxEditor extends IEditor {
     }
 
     // ===================================================================
-    //   (Public Search API)
+    //   Public Search API
     // ===================================================================
 
     /**
@@ -412,7 +412,7 @@ export class MDxEditor extends IEditor {
         // 1. Search in the CodeMirror editor
         const editorMatches = this._searchInEditor(query);
         
-        /** @type {UnifiedSearchResult[]} */ // [FIX] Added JSDoc type annotation
+        /** @type {UnifiedSearchResult[]} */
         const editorResults = editorMatches.map(match => ({
             source: 'editor',
             text: this.editorView.state.doc.sliceString(match.from, match.to),
@@ -424,7 +424,7 @@ export class MDxEditor extends IEditor {
         await this._renderContent(); // Ensure rendered content is up-to-date
         const rendererMatches = this._renderer.search(query);
         
-        /** @type {UnifiedSearchResult[]} */ // [FIX] Added JSDoc type annotation
+        /** @type {UnifiedSearchResult[]} */
         const rendererResults = rendererMatches.map(markElement => {
             const contextElement = markElement.closest('p, li, h1, h2, h3, h4, h5, h6, pre, td') || markElement.parentElement;
             return {
@@ -472,14 +472,14 @@ export class MDxEditor extends IEditor {
     clearSearch() {
         // Clear CodeMirror highlights
         this.editorView.dispatch({
-            // @ts-ignore Use the pre-defined effect type instead of calling define() again.
+            // @ts-ignore The `setSearchEffect` is a pre-defined StateEffect.
             effects: setSearchEffect.of(new SearchQuery({ search: '' }))
         });
         // Clear rendered view highlights
         this._renderer.clearSearch();
     }
     
-    // --- private & help method ---
+    // --- Private & Helper Methods ---
 
     /**
      * Internal function to perform a search only within the CodeMirror editor.
@@ -491,7 +491,7 @@ export class MDxEditor extends IEditor {
         // Activate CodeMirror's built-in highlighting
         const searchQuery = new SearchQuery({ search: query, caseSensitive: false });
         this.editorView.dispatch({
-            //  @ts-ignore
+            // @ts-ignore The `setSearchEffect` is a pre-defined StateEffect.
             effects: setSearchEffect.of(searchQuery)
         });
         
@@ -522,10 +522,23 @@ export class MDxEditor extends IEditor {
      * @private
      */
     _loadDependencies() {
-        loadScript(
-            'https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js',
-            'MathJax-script'
-        ).catch(err => console.error("MDxEditor: Failed to load MathJax.", err));
+        /** @ts-ignore */
+        if (!window.MathJax) {
+            /** @ts-ignore */
+            window.MathJax = {
+                tex: {
+                    inlineMath: [['\\(', '\\)']],
+                    displayMath: [['\\[', '\\]']]
+                },
+                startup: {
+                    typeset: false // Defer typesetting to control rendering manually.
+                }
+            };
+            loadScript(
+                'https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js',
+                'MathJax-script'
+            ).catch(err => console.error("MDxEditor: Failed to load MathJax.", err));
+        }
     }
 
 

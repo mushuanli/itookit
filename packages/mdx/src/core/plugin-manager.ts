@@ -1,3 +1,4 @@
+// src/core/plugin-manager.ts
 import type { MarkedExtension } from 'marked';
 import { ServiceContainer } from './service-container';
 import type {
@@ -8,21 +9,56 @@ import type {
 } from './plugin';
 
 /**
- * 内存存储实现
+ * 全局内存存储（所有实例共享，但通过键隔离）
+ */
+class GlobalMemoryStore {
+  private static data: Map<string, any> = new Map();
+
+  static get(key: string): any {
+    return GlobalMemoryStore.data.get(key);
+  }
+
+  static set(key: string, value: any): void {
+    GlobalMemoryStore.data.set(key, value);
+  }
+
+  static remove(key: string): void {
+    GlobalMemoryStore.data.delete(key);
+  }
+
+  static clear(prefix: string): void {
+    const keys = Array.from(GlobalMemoryStore.data.keys());
+    keys.forEach(key => {
+      if (key.startsWith(prefix)) {
+        GlobalMemoryStore.data.delete(key);
+      }
+    });
+  }
+}
+
+/**
+ * 内存存储实现（带命名空间）
  */
 class MemoryStore implements ScopedPersistenceStore {
-  private data: Map<string, any> = new Map();
+  constructor(private namespace: string) {}
 
   async get(key: string): Promise<any> {
-    return this.data.get(key);
+    return GlobalMemoryStore.get(`${this.namespace}:${key}`);
   }
 
   async set(key: string, value: any): Promise<void> {
-    this.data.set(key, value);
+    GlobalMemoryStore.set(`${this.namespace}:${key}`, value);
   }
 
   async remove(key: string): Promise<void> {
-    this.data.delete(key);
+    GlobalMemoryStore.remove(`${this.namespace}:${key}`);
+  }
+
+  /**
+   * 清空当前命名空间的所有数据
+   */
+  async clear(): Promise<void> {
+    GlobalMemoryStore.clear(`${this.namespace}:`);
   }
 }
 
@@ -36,15 +72,15 @@ class AdapterStore implements ScopedPersistenceStore {
   ) {}
 
   async get(key: string): Promise<any> {
-    return this.adapter.get(`${this.prefix}${key}`);
+    return this.adapter.get(`${this.prefix}:${key}`);
   }
 
   async set(key: string, value: any): Promise<void> {
-    return this.adapter.set(`${this.prefix}${key}`, value);
+    return this.adapter.set(`${this.prefix}:${key}`, value);
   }
 
   async remove(key: string): Promise<void> {
-    return this.adapter.remove(`${this.prefix}${key}`);
+    return this.adapter.remove(`${this.prefix}:${key}`);
   }
 }
 
@@ -93,18 +129,20 @@ class VFSStore implements ScopedPersistenceStore {
  * 插件管理器
  */
 export class PluginManager {
-  private plugins: Map<string, MDxPlugin> = new Map();
-  private hooks: Map<string, Function[]> = new Map();
-  private eventBus: Map<string, Function[]> = new Map();
+  private plugins: Map<string, { plugin: MDxPlugin; context: PluginContext; }> = new Map();
+  private hooks: Map<string, Map<symbol, Function>> = new Map();  // 使用 Symbol 作为键，确保每个钩子处理函数的唯一性，便于精确移除
+  private eventBus: Map<string, Map<symbol, Function>> = new Map();
   private serviceContainer: ServiceContainer;
   private vfsCore: any | null = null;
   private currentNodeId: string | null = null;
   private dataAdapter: IPersistenceAdapter | null = null;
   private coreInstance: any;
+  private instanceId: symbol;  // 实例唯一标识
 
   constructor(coreInstance: any) {
     this.coreInstance = coreInstance;
     this.serviceContainer = new ServiceContainer();
+    this.instanceId = Symbol('PluginManager');
   }
 
   /**
@@ -122,24 +160,14 @@ export class PluginManager {
     this.dataAdapter = adapter;
   }
 
-  /**
-   * 注册插件
-   */
-  register(plugin: MDxPlugin): void {
-    if (this.plugins.has(plugin.name)) {
-      console.warn(`Plugin ${plugin.name} is already registered`);
-      return;
-    }
-
-    this.plugins.set(plugin.name, plugin);
-    const context = this.createContextFor(plugin);
-    plugin.install(context);
-  }
 
   /**
    * 创建插件上下文
    */
   private createContextFor(plugin: MDxPlugin): PluginContext {
+    const hookHandlers = new Map<string, symbol>();
+    const eventHandlers = new Map<string, symbol>();
+
     return {
       // 语法扩展
       registerSyntaxExtension: (ext: MarkedExtension) => {
@@ -149,83 +177,154 @@ export class PluginManager {
         this.coreInstance.markedExtensions.push(ext);
       },
 
-      // 生命周期钩子
+      // 生命周期钩子（支持移除）
       on: (hook: string, callback: Function) => {
+        const handlerId = Symbol(`${plugin.name}:${hook}`);
         if (!this.hooks.has(hook)) {
-          this.hooks.set(hook, []);
+          this.hooks.set(hook, new Map());
         }
-        this.hooks.get(hook)!.push(callback);
+        this.hooks.get(hook)!.set(handlerId, callback);
+        
+        hookHandlers.set(hook, handlerId);
+
+        // 返回移除函数
+        return () => {
+          this.hooks.get(hook)?.delete(handlerId);
+        };
       },
 
       // 依赖注入
       provide: (key: string | symbol, service: any) => {
-        this.serviceContainer.provide(key, service);
+        const namespacedKey = typeof key === 'symbol' 
+          ? key 
+          : Symbol.for(`${plugin.name}:${key}`);
+        this.serviceContainer.provide(namespacedKey, service);
       },
 
       inject: (key: string | symbol) => {
-        return this.serviceContainer.inject(key);
+        const namespacedKey = typeof key === 'symbol' 
+          ? key 
+          : Symbol.for(`${plugin.name}:${key}`);
+        return this.serviceContainer.inject(namespacedKey);
       },
 
-      // 事件总线
+      // 事件总线（支持移除）
       emit: (eventName: string, payload: any) => {
         this.emit(eventName, payload);
       },
 
       listen: (eventName: string, callback: Function) => {
-        this.listen(eventName, callback);
+        const handlerId = Symbol(`${plugin.name}:${eventName}`);
+        
+        if (!this.eventBus.has(eventName)) {
+          this.eventBus.set(eventName, new Map());
+        }
+        this.eventBus.get(eventName)!.set(handlerId, callback);
+        
+        eventHandlers.set(eventName, handlerId);
+
+        // 返回移除函数
+        return () => {
+          this.eventBus.get(eventName)?.delete(handlerId);
+        };
       },
 
-      // 持久化存储
+      // 持久化存储（带命名空间）
       getScopedStore: () => {
         return this._createStore(plugin.name);
       },
 
       // VFS 集成
       getVFSManager: () => this.vfsCore,
-      getCurrentNodeId: () => this.currentNodeId,};
+      getCurrentNodeId: () => this.currentNodeId,
+
+      // 清理函数（插件销毁时调用）
+      _cleanup: () => {
+        hookHandlers.forEach((handlerId, hook) => {
+          this.hooks.get(hook)?.delete(handlerId);
+        });
+
+        eventHandlers.forEach((handlerId, eventName) => {
+          this.eventBus.get(eventName)?.delete(handlerId);
+        });
+
+        hookHandlers.clear();
+        eventHandlers.clear();
+      },
+    };
   }
 
   /**
-   * 创建存储实例（策略模式）
+   * 注册插件
    */
-  private _createStore(pluginName: string): ScopedPersistenceStore {
-    // 优先级：VFS > Adapter > Memory
-    if (this.vfsCore && this.currentNodeId) {
-      return new VFSStore(this.vfsCore, this.currentNodeId, pluginName);
+  register(plugin: MDxPlugin): void {
+    if (this.plugins.has(plugin.name)) {
+      console.warn(`Plugin ${plugin.name} is already registered`);
+      return;
     }
 
-    if (this.dataAdapter) {
-      return new AdapterStore(this.dataAdapter, `${pluginName}:`);
-    }
-
-    return new MemoryStore();
+    const context = this.createContextFor(plugin);
+    this.plugins.set(plugin.name, { plugin, context });
+    plugin.install(context);
   }
 
   /**
-   * 执行转换钩子（Transform Hook）
+   * 注销插件
+   */
+  unregister(pluginName: string): void {
+    const entry = this.plugins.get(pluginName);
+    if (!entry) return;
+
+    const { plugin, context } = entry;
+
+    if (plugin.destroy) {
+      plugin.destroy();
+    }
+
+    if (context._cleanup) {
+      context._cleanup();
+    }
+
+    this.plugins.delete(pluginName);
+  }
+
+  /**
+   * 执行转换钩子
    */
   executeTransformHook<T>(hookName: string, initialValue: T): T {
-    const callbacks = this.hooks.get(hookName) || [];
-    return callbacks.reduce((value, callback) => {
+    const callbacks = this.hooks.get(hookName);
+    if (!callbacks) return initialValue;
+
+    let value = initialValue;
+    for (const callback of callbacks.values()) {
       const result = callback(value);
-      return result !== undefined ? result : value;
-    }, initialValue);
+      if (result !== undefined) {
+        value = result;
+      }
+    }
+    return value;
   }
 
   /**
-   * 执行动作钩子（Action Hook）
+   * 执行动作钩子
    */
   executeActionHook(hookName: string, payload: any): void {
-    const callbacks = this.hooks.get(hookName) || [];
-    callbacks.forEach(callback => callback(payload));
+    const callbacks = this.hooks.get(hookName);
+    if (!callbacks) return;
+
+    for (const callback of callbacks.values()) {
+      callback(payload);
+    }
   }
 
   /**
    * 执行异步钩子
    */
   async executeHookAsync(hookName: string, payload: any): Promise<void> {
-    const callbacks = this.hooks.get(hookName) || [];
-    for (const callback of callbacks) {
+    const callbacks = this.hooks.get(hookName);
+    if (!callbacks) return;
+
+    for (const callback of callbacks.values()) {
       await callback(payload);
     }
   }
@@ -234,32 +333,47 @@ export class PluginManager {
    * 触发事件
    */
   emit(eventName: string, payload: any): void {
-    const listeners = this.eventBus.get(eventName) || [];
-    listeners.forEach(listener => listener(payload));
+    const listeners = this.eventBus.get(eventName);
+    if (!listeners) return;
+
+    for (const listener of listeners.values()) {
+      listener(payload);
+    }
   }
 
   /**
-   * 监听事件
+   * 创建存储实例（带实例 ID）
    */
-  listen(eventName: string, callback: Function): void {
-    if (!this.eventBus.has(eventName)) {
-      this.eventBus.set(eventName, []);
+  private _createStore(pluginName: string): ScopedPersistenceStore {
+    const storeKey = `${String(this.instanceId)}:${pluginName}`;
+
+    if (this.vfsCore && this.currentNodeId) {
+      return new VFSStore(this.vfsCore, this.currentNodeId, storeKey);
     }
-    this.eventBus.get(eventName)!.push(callback);
+
+    if (this.dataAdapter) {
+      return new AdapterStore(this.dataAdapter, storeKey);
+    }
+
+    return new MemoryStore(storeKey);
   }
 
   /**
    * 销毁所有插件
    */
   destroy(): void {
-    this.plugins.forEach(plugin => {
-      if (plugin.destroy) {
-        plugin.destroy();
-      }
-    });
-    this.plugins.clear();
+    const pluginNames = Array.from(this.plugins.keys());
+    pluginNames.forEach(name => this.unregister(name));
+
     this.hooks.clear();
     this.eventBus.clear();
     this.serviceContainer.clear();
+  }
+
+  /**
+   * 获取实例 ID
+   */
+  getInstanceId(): symbol {
+    return this.instanceId;
   }
 }
