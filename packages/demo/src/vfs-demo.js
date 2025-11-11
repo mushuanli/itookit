@@ -6,6 +6,7 @@
 
 // --- 导入 VFS-UI 库 ---
 import { createVFSUI } from '@itookit/vfs-ui';
+import '@itookit/vfs-ui/style.css';
 
 // --- 导入 MDxEditor 及其插件 ---
 import { MDxEditor, defaultPlugins } from '@itookit/mdxeditor';

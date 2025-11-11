@@ -41,9 +41,9 @@ export class PathResolver {
      * @returns {Promise<string>}
      */
     async resolvePath(vnode) {
-        // 如果有缓存，直接返回
-        if (vnode._path) {
-            return vnode._path;
+        // 【修改】直接检查公开的 path 属性作为缓存
+        if (vnode.path) {
+            return vnode.path;
         }
         
         // 递归构建路径
@@ -62,8 +62,8 @@ export class PathResolver {
         
         const path = '/' + segments.join('/');
         
-        // 缓存路径
-        vnode._path = path;
+        // 【修改】直接将结果存入公开的 path 属性中
+        vnode.path = path;
         
         return path;
     }

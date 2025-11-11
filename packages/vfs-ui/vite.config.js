@@ -6,19 +6,16 @@ import dts from 'vite-plugin-dts';
 export default defineConfig({
   plugins: [
     dts({
-      // 确保 d.ts 文件被打包到 dist/types 目录，并最终汇总到 dist/index.d.ts
       insertTypesEntry: true,
     }),
   ],
   build: {
     // 开启 lib 模式，专门用于构建库
     lib: {
-      // 指定库的入口文件
+      // **关键**: 回归单一的 JS 入口文件
       entry: resolve(__dirname, 'src/index.js'),
-      // UMD 模式下，暴露的全局变量名
       name: 'VFSUI',
-      // 构建后输出的文件名
-      fileName: (format) => `vfs-ui.${format}.js`,
+      fileName: 'vfs-ui', // **关键**: 提供一个基础文件名，Vite 会自动添加后缀
     },
     rollupOptions: {
       // 确保外部化处理那些你不想打包进库的依赖
@@ -29,6 +26,14 @@ export default defineConfig({
           'immer': 'immer',
           '@itookit/common': 'ItookitCommon',
           '@itookit/vfs-core': 'VFSCore',
+        },
+        // **关键修改**: 确保 CSS 作为资源文件被正确发射出来
+        assetFileNames: (assetInfo) => {
+          // 在这里，我们可以确保 CSS 文件被命名为 'style.css'
+          if (assetInfo.name.endsWith('.css')) {
+            return 'style.css';
+          }
+          return assetInfo.name;
         },
       },
     },
