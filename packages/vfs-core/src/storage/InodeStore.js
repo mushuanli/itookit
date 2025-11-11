@@ -10,7 +10,7 @@ export class InodeStore {
         this.db = db;
         this.storeName = VFS_STORES.VNODES;
     }
-    
+
     /**
      * 保存 VNode
      * @param {VNode} vnode
