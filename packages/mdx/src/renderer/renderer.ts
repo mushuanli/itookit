@@ -1,9 +1,15 @@
+// mdx/renderer/renderer.ts
 import { Marked } from 'marked';
 import { PluginManager } from '../core/plugin-manager';
 import type { MDxPlugin } from '../core/plugin';
+import type { VFSCore } from '@itookit/vfs-core';
+import type { IPersistenceAdapter } from '@itookit/common';
 
 export interface MDxRendererConfig {
   searchMarkClass?: string;
+  vfsCore?: VFSCore;
+  nodeId?: string;
+  persistenceAdapter?: IPersistenceAdapter;
   [key: string]: any;
 }
 
@@ -27,6 +33,16 @@ export class MDxRenderer {
     this.searchMarkClass = config.searchMarkClass || 'search-highlight';
     this.instanceId = `renderer-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     this.pluginManager = new PluginManager(this);
+
+    // 配置 VFS
+    if (config.vfsCore && config.nodeId) {
+      this.pluginManager.setVFSCore(config.vfsCore, config.nodeId);
+    }
+
+    // 配置持久化适配器
+    if (config.persistenceAdapter) {
+      this.pluginManager.setDataAdapter(config.persistenceAdapter);
+    }
   }
 
   /**

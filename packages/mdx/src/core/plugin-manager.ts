@@ -1,11 +1,12 @@
 // src/core/plugin-manager.ts
 import type { MarkedExtension } from 'marked';
 import { ServiceContainer } from './service-container';
+import type { VFSCore, VNode } from '@itookit/vfs-core';
+import type { IPersistenceAdapter } from '@itookit/common';
 import type {
   MDxPlugin,
   PluginContext,
   ScopedPersistenceStore,
-  IPersistenceAdapter,
 } from './plugin';
 
 /**
@@ -37,33 +38,68 @@ class GlobalMemoryStore {
 }
 
 /**
- * 内存存储实现（带命名空间）
+ * VFS 存储实现 - 使用 VNode metadata
  */
-class MemoryStore implements ScopedPersistenceStore {
-  constructor(private namespace: string) {}
+class VFSStore implements ScopedPersistenceStore {
+  constructor(
+    private vfsCore: VFSCore,
+    private nodeId: string,
+    private pluginNamespace: string
+  ) {}
+
+  private getMetaKey(): string {
+    return `_mdx_plugin_${this.pluginNamespace}`;
+  }
 
   async get(key: string): Promise<any> {
-    return GlobalMemoryStore.get(`${this.namespace}:${key}`);
+    try {
+      const node = await this.vfsCore.stat(this.nodeId);
+      const pluginData = node.meta?.[this.getMetaKey()];
+      return pluginData?.[key];
+    } catch (error) {
+      console.warn(`VFSStore: Failed to get key "${key}"`, error);
+      return undefined;
+    }
   }
 
   async set(key: string, value: any): Promise<void> {
-    GlobalMemoryStore.set(`${this.namespace}:${key}`, value);
+    try {
+      const node = await this.vfsCore.stat(this.nodeId);
+      const metaKey = this.getMetaKey();
+      const pluginData = node.meta?.[metaKey] || {};
+      pluginData[key] = value;
+
+      await this.vfsCore.updateNodeMetadata(this.nodeId, {
+        ...node.meta,
+        [metaKey]: pluginData,
+      });
+    } catch (error) {
+      console.error(`VFSStore: Failed to set key "${key}"`, error);
+      throw error;
+    }
   }
 
   async remove(key: string): Promise<void> {
-    GlobalMemoryStore.remove(`${this.namespace}:${key}`);
-  }
-
-  /**
-   * 清空当前命名空间的所有数据
-   */
-  async clear(): Promise<void> {
-    GlobalMemoryStore.clear(`${this.namespace}:`);
+    try {
+      const node = await this.vfsCore.stat(this.nodeId);
+      const metaKey = this.getMetaKey();
+      const pluginData = node.meta?.[metaKey];
+      
+      if (pluginData && key in pluginData) {
+        delete pluginData[key];
+        await this.vfsCore.updateNodeMetadata(this.nodeId, {
+          ...node.meta,
+          [metaKey]: pluginData,
+        });
+      }
+    } catch (error) {
+      console.warn(`VFSStore: Failed to remove key "${key}"`, error);
+    }
   }
 }
 
 /**
- * 适配器存储实现
+ * 适配器存储实现 - 使用 @itookit/common 的 IPersistenceAdapter
  */
 class AdapterStore implements ScopedPersistenceStore {
   constructor(
@@ -71,59 +107,50 @@ class AdapterStore implements ScopedPersistenceStore {
     private prefix: string
   ) {}
 
+  private makeKey(key: string): string {
+    return `${this.prefix}:${key}`;
+  }
+
   async get(key: string): Promise<any> {
-    return this.adapter.get(`${this.prefix}:${key}`);
+    return this.adapter.getItem(this.makeKey(key));
   }
 
   async set(key: string, value: any): Promise<void> {
-    return this.adapter.set(`${this.prefix}:${key}`, value);
+    return this.adapter.setItem(this.makeKey(key), value);
   }
 
   async remove(key: string): Promise<void> {
-    return this.adapter.remove(`${this.prefix}:${key}`);
+    return this.adapter.removeItem(this.makeKey(key));
   }
 }
 
 /**
- * VFS 存储实现
+ * 内存存储实现 - 用于无持久化场景
+ * 每个实例使用独立的 Map，通过 instanceId 完全隔离
  */
-class VFSStore implements ScopedPersistenceStore {
-  constructor(
-    private vfsCore: any,
-    private nodeId: string,
-    private pluginName: string
-  ) {}
+class MemoryStore implements ScopedPersistenceStore {
+  private data: Map<string, any> = new Map();
 
   async get(key: string): Promise<any> {
-    const node = await this.vfsCore.getNode(this.nodeId);
-    if (!node?.meta) return undefined;
-    const pluginData = node.meta[`_plugin_${this.pluginName}_`];
-    return pluginData?.[key];
+    return this.data.get(key);
   }
 
   async set(key: string, value: any): Promise<void> {
-    const node = await this.vfsCore.getNode(this.nodeId);
-    if (!node) throw new Error('Node not found');
-    
-    if (!node.meta) node.meta = {};
-    const pluginKey = `_plugin_${this.pluginName}_`;
-    if (!node.meta[pluginKey]) node.meta[pluginKey] = {};
-    
-    node.meta[pluginKey][key] = value;
-    await this.vfsCore.updateNode(this.nodeId, node);
+    this.data.set(key, value);
   }
 
   async remove(key: string): Promise<void> {
-    const node = await this.vfsCore.getNode(this.nodeId);
-    if (!node?.meta) return;
-    
-    const pluginKey = `_plugin_${this.pluginName}_`;
-    if (node.meta[pluginKey]) {
-      delete node.meta[pluginKey][key];
-      await this.vfsCore.updateNode(this.nodeId, node);
-    }
+    this.data.delete(key);
+  }
+
+  /**
+   * 清空当前命名空间的所有数据
+   */
+  async clear(): Promise<void> {
+    this.data.clear();
   }
 }
+
 
 /**
  * 插件管理器
@@ -133,33 +160,35 @@ export class PluginManager {
   private hooks: Map<string, Map<symbol, Function>> = new Map();  // 使用 Symbol 作为键，确保每个钩子处理函数的唯一性，便于精确移除
   private eventBus: Map<string, Map<symbol, Function>> = new Map();
   private serviceContainer: ServiceContainer;
-  private vfsCore: any | null = null;
+  private vfsCore: VFSCore | null = null;
   private currentNodeId: string | null = null;
   private dataAdapter: IPersistenceAdapter | null = null;
   private coreInstance: any;
-  private instanceId: symbol;  // 实例唯一标识
+  private instanceId: string;
+  
+  // 每个实例独立的存储（用于无 VFS/Adapter 场景）
+  private instanceStores: Map<string, MemoryStore> = new Map();
 
   constructor(coreInstance: any) {
     this.coreInstance = coreInstance;
     this.serviceContainer = new ServiceContainer();
-    this.instanceId = Symbol('PluginManager');
+    this.instanceId = `mdx-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   }
 
   /**
    * 设置 VFS 核心实例
    */
-  setVFSCore(vfsCore: any, nodeId: string): void {
+  setVFSCore(vfsCore: VFSCore, nodeId: string): void {
     this.vfsCore = vfsCore;
     this.currentNodeId = nodeId;
   }
 
   /**
-   * 设置数据适配器
+   * 设置数据适配器（使用 @itookit/common 的标准接口）
    */
   setDataAdapter(adapter: IPersistenceAdapter): void {
     this.dataAdapter = adapter;
   }
-
 
   /**
    * 创建插件上下文
@@ -197,14 +226,14 @@ export class PluginManager {
       provide: (key: string | symbol, service: any) => {
         const namespacedKey = typeof key === 'symbol' 
           ? key 
-          : Symbol.for(`${plugin.name}:${key}`);
+          : Symbol.for(`${this.instanceId}:${plugin.name}:${String(key)}`);
         this.serviceContainer.provide(namespacedKey, service);
       },
 
       inject: (key: string | symbol) => {
         const namespacedKey = typeof key === 'symbol' 
           ? key 
-          : Symbol.for(`${plugin.name}:${key}`);
+          : Symbol.for(`${this.instanceId}:${plugin.name}:${String(key)}`);
         return this.serviceContainer.inject(namespacedKey);
       },
 
@@ -235,7 +264,7 @@ export class PluginManager {
       },
 
       // VFS 集成
-      getVFSManager: () => this.vfsCore,
+      getVFSCore: () => this.vfsCore,
       getCurrentNodeId: () => this.currentNodeId,
 
       // 清理函数（插件销毁时调用）
@@ -252,6 +281,29 @@ export class PluginManager {
         eventHandlers.clear();
       },
     };
+  }
+
+  /**
+   * 创建存储实例（优先级：VFS > Adapter > Memory）
+   */
+  private _createStore(pluginName: string): ScopedPersistenceStore {
+    const storeNamespace = `${this.instanceId}:${pluginName}`;
+
+    // 优先使用 VFS
+    if (this.vfsCore && this.currentNodeId) {
+      return new VFSStore(this.vfsCore, this.currentNodeId, storeNamespace);
+    }
+
+    // 其次使用外部适配器
+    if (this.dataAdapter) {
+      return new AdapterStore(this.dataAdapter, storeNamespace);
+    }
+
+    // 最后使用实例隔离的内存存储
+    if (!this.instanceStores.has(pluginName)) {
+      this.instanceStores.set(pluginName, new MemoryStore());
+    }
+    return this.instanceStores.get(pluginName)!;
   }
 
   /**
@@ -283,6 +335,13 @@ export class PluginManager {
 
     if (context._cleanup) {
       context._cleanup();
+    }
+
+    // 清理插件的内存存储
+    const store = this.instanceStores.get(pluginName);
+    if (store) {
+      store.clear();
+      this.instanceStores.delete(pluginName);
     }
 
     this.plugins.delete(pluginName);
@@ -341,22 +400,6 @@ export class PluginManager {
     }
   }
 
-  /**
-   * 创建存储实例（带实例 ID）
-   */
-  private _createStore(pluginName: string): ScopedPersistenceStore {
-    const storeKey = `${String(this.instanceId)}:${pluginName}`;
-
-    if (this.vfsCore && this.currentNodeId) {
-      return new VFSStore(this.vfsCore, this.currentNodeId, storeKey);
-    }
-
-    if (this.dataAdapter) {
-      return new AdapterStore(this.dataAdapter, storeKey);
-    }
-
-    return new MemoryStore(storeKey);
-  }
 
   /**
    * 销毁所有插件
@@ -368,12 +411,13 @@ export class PluginManager {
     this.hooks.clear();
     this.eventBus.clear();
     this.serviceContainer.clear();
+    this.instanceStores.clear();
   }
 
   /**
    * 获取实例 ID
    */
-  getInstanceId(): symbol {
+  getInstanceId(): string {
     return this.instanceId;
   }
 }
