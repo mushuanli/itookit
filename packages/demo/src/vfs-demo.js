@@ -25,75 +25,118 @@ let vfsUIManager = null;
 const appContainer = document.getElementById('app-container');
 const sidebarContainer = document.getElementById('sidebar-container');
 const editorContainer = document.getElementById('editor-container');
-// [FIX] Keep a reference to vfsCore instance at the top level
 const vfsCore = getVFSManager();
 
+// [新增] 用于防抖保存的控制器
+const saveControllers = new Map();
+
 /**
- * 连接 VFS-UI 库与 MDxEditor 的事件流
+ * [重构] 为指定的 VFS 节点创建一个新的 MDxEditor 实例
+ * @param {string | null} nodeId - VFS 节点的 ID
+ * @param {string} initialContent - 初始 Markdown 内容
+ * @param {string} title - 初始标题
  */
-function connectLibraries() {
-    if (!editorInstance || !vfsUIManager) return;
+function createEditorForNode(nodeId, initialContent, title) {
+    // 1. 如果已存在编辑器实例，先销毁它
+    if (editorInstance) {
+        editorInstance.destroy();
+        editorInstance = null;
+    }
+    // 清空编辑器容器
+    editorContainer.innerHTML = '';
 
-    // 1. 当用户在侧边栏选择一个文件时，更新编辑器内容和标题
-    vfsUIManager.on('sessionSelected', async ({ item }) => {
-        if (item && item.type === 'file') {
-            const currentContent = editorInstance.getText();
-            let newContent = '';
+    // 2. 如果没有 nodeId（例如，没有文件被选中），显示提示信息
+    if (!nodeId) {
+        editorContainer.innerHTML = `<div class="editor-placeholder">请在左侧选择或创建一个文件...</div>`;
+        return;
+    }
 
-            try {
-                // [FIX] Always use the top-level vfsCore instance
-                const result = await vfsCore.read(item.id);
-                newContent = result.content || '';
-            } catch (error) {
-                console.error(`Failed to read content for item ${item.id}`, error);
-                editorInstance.setText(`# 加载文件内容失败\n\n错误: ${error.message}`);
-                editorInstance.setTitle('加载失败');
-                return;
-            }
-
-            if (currentContent !== newContent) {
-                editorInstance.setText(newContent);
-            }
-            
-            editorInstance.setTitle(item.metadata.title);
-            editorInstance.switchTo('render');
-        } else {
-            editorInstance.setText('# 没有文件被选中');
-            editorInstance.setTitle('无标题');
-            editorInstance.switchTo('render');
+    // 3. 创建新的 MDxEditor 实例，并传入 vfsCore 和 nodeId
+    editorInstance = new MDxEditor(editorContainer, {
+        // --- 核心修复 ---
+        vfsCore: vfsCore,
+        nodeId: nodeId,
+        // -----------------
+        plugins: defaultPlugins,
+        initialText: initialContent,
+        initialMode: 'render',
+        showToolbar: true,
+        showTitleBar: true,
+        titleBar: {
+            title: title,
+            toggleSidebarCallback: () => vfsUIManager.toggleSidebar(),
+            enableToggleEditMode: true
         }
     });
 
-    // 2. 当编辑器内容改变时，通过防抖函数自动保存回 vfs-core
+    // 4. 为新实例设置事件监听
+    // 每次内容改变时，通过防抖函数自动保存回 vfs-core
     const debouncedSave = (() => {
         let timeout;
         return () => {
             clearTimeout(timeout);
             timeout = setTimeout(async () => {
                 const activeFile = vfsUIManager.getActiveSession();
-                if (activeFile) {
+                // 确保我们仍在编辑同一个文件
+                if (activeFile && activeFile.id === nodeId) {
                     const newContent = editorInstance.getText();
-                    // [FIX] Always use the top-level vfsCore instance
                     await vfsCore.write(activeFile.id, newContent);
+                    console.log(`[Demo] Content saved for ${nodeId}`);
                 }
             }, 500); // 500ms 延迟
         };
     })();
+
     editorInstance.on('change', debouncedSave);
 
-    // 3. 监听大纲导航请求
+    // 清理旧的防抖控制器（如果存在）
+    if (saveControllers.has(nodeId)) {
+        clearTimeout(saveControllers.get(nodeId));
+    }
+    saveControllers.set(nodeId, debouncedSave);
+}
+
+
+/**
+ * 连接 VFS-UI 库与 MDxEditor 的事件流
+ */
+function connectLibraries() {
+    if (!vfsUIManager) return;
+
+    // 1. 当用户在侧边栏选择一个文件时，销毁旧编辑器，创建新编辑器
+    vfsUIManager.on('sessionSelected', async ({ item }) => {
+        if (item && item.type === 'file') {
+            try {
+                const result = await vfsCore.read(item.id);
+                const content = result.content || '';
+                // 触发编辑器重建
+                createEditorForNode(item.id, content, item.metadata.title);
+            } catch (error) {
+                console.error(`Failed to read content for item ${item.id}`, error);
+                const errorContent = `# 加载文件内容失败\n\n错误: ${error.message}`;
+                // 即使加载失败，也创建一个带有错误信息的编辑器实例
+                createEditorForNode(item.id, errorContent, '加载失败');
+            }
+        } else {
+            // 没有文件被选中，销毁编辑器并显示占位符
+            createEditorForNode(null, '', '');
+        }
+    });
+
+    // 2. 监听大纲导航请求
     vfsUIManager.on('navigateToHeading', ({ elementId }) => {
+        if (!editorInstance) return;
+        
         editorInstance.switchTo('render');
         setTimeout(() => {
             const renderEl = editorContainer.querySelector('.mdx-render-view');
             const targetEl = renderEl?.querySelector(`#${elementId}`);
-            // [TYPE CAST FIX] Cast Element to HTMLElement
             if (targetEl instanceof HTMLElement) {
                 targetEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
                 targetEl.style.transition = 'none';
                 targetEl.style.backgroundColor = 'rgba(255, 255, 0, 0.3)';
                 setTimeout(() => {
-                    if (targetEl instanceof HTMLElement) { // Re-check inside async callback
+                    if (targetEl instanceof HTMLElement) {
                         targetEl.style.transition = 'background-color 0.5s ease';
                         targetEl.style.backgroundColor = 'transparent';
                     }
@@ -229,18 +272,8 @@ async function main() {
     }, vfsCore, 'notes');
 
     // --- 步骤 3: 初始化 MDxEditor ---
-    editorInstance = new MDxEditor(editorContainer, {
-        plugins: defaultPlugins,
-        initialText: '请在左侧选择或创建一个文件...',
-        initialMode: 'render',
-        showToolbar: true,
-        showTitleBar: true,
-        titleBar: {
-            title: '编辑器', 
-            toggleSidebarCallback: () => vfsUIManager.toggleSidebar(),
-            enableToggleEditMode: true
-        }
-    });
+    // [修改] 编辑器初始化被移至 createEditorForNode 函数中，这里不再需要
+    // editorInstance = new MDxEditor(...) // <--- 删除这一整块
 
     // 步骤 4: 连接两个库的事件
     connectLibraries();
@@ -265,15 +298,13 @@ async function main() {
         console.warn('[Demo] "notes" module or its rootId not found.');
     }
     
-    // 步骤 7: 在启动后，根据初始状态同步UI
-    // [STORE FIX] Removed direct access to internal store.
-    // The sidebar state is handled by the `sidebarStateChanged` event listener.
-    
+    // [修改] 根据 initialFile 的存在与否，手动触发一次编辑器的创建
     if (initialFile) {
         // [VFSCORE FIX] Use the top-level vfsCore instance
         const result = await vfsCore.read(initialFile.id);
-        editorInstance.setText(result.content || '');
-        editorInstance.setTitle(initialFile.metadata.title);
+        createEditorForNode(initialFile.id, result.content || '', initialFile.metadata.title);
+    } else {
+        createEditorForNode(null, '', ''); // 如果没有初始文件，则显示占位符
     }
 }
 

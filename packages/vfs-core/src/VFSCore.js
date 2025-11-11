@@ -157,6 +157,7 @@ export class VFSCore {
             type: 'directory',
             module: name,
             path: '/',
+            parent: null,  // ✅ 根节点没有父节点
             contentType: 'directory',
             meta: { description: options.description || '' }
         });
@@ -408,39 +409,90 @@ export class VFSCore {
     
     /**
      * 创建文件
-     * @param {string} module
+     * @param {string} moduleName
      * @param {string} path
      * @param {string} [content='']
      * @param {object} [options={}]
      * @returns {Promise<VNode>}
      */
-    async createFile(module, path, content = '', options = {}) {
+    async createFile(moduleName, path, content = '', options = {}) {
         this._ensureInitialized();
         
-        return this.vfs.createNode({
+        const moduleInfo = this.moduleRegistry.get(moduleName);
+        if (!moduleInfo) {
+            throw new VFSError(`Module '${moduleName}' not found`);
+        }
+        
+        // ✅ 修复：使用 PathResolver 解析路径
+        const dirPath = this.vfs.pathResolver.dirname(path);
+        const fileName = this.vfs.pathResolver.basename(path);
+        
+        // ✅ 修复：获取父目录节点
+        let parentId;
+        if (dirPath === '/') {
+            // 根目录：使用模块的 rootId
+            parentId = moduleInfo.rootId;
+        } else {
+            // 子目录：解析完整路径获取父节点 ID
+            parentId = await this.vfs.pathResolver.resolve(moduleName, dirPath);
+            if (!parentId) {
+                throw new VFSError(`Parent directory not found: ${dirPath}`);
+            }
+        }
+        
+        console.log(`[VFSCore] Creating file '${fileName}' in parent: ${parentId}`);
+        
+        // ✅ 修复：使用正确的 CreateNodeOptions 参数
+        const node = await this.vfs.createNode({
             type: 'file',
-            module,
-            path,
-            content,
+            module: moduleName,
+            path: path,  // ✅ 传递完整路径，让 VFS 内部提取 name
+            parent: parentId,  // ✅ 明确传递父节点 ID
             contentType: options.contentType || 'markdown',
+            content: content,
             meta: options.meta || {}
         });
+        
+        return node;
     }
     
     /**
      * 创建目录
-     * @param {string} module
+     * @param {string} moduleName
      * @param {string} path
      * @param {object} [options={}]
      * @returns {Promise<VNode>}
      */
-    async createDirectory(module, path, options = {}) {
-        this._ensureInitialized();
+    async createDirectory(moduleName, path, options = {}) {
+            this._ensureInitialized();
+        
+        const moduleInfo = this.moduleRegistry.get(moduleName);
+        if (!moduleInfo) {
+            throw new VFSError(`Module '${moduleName}' not found`);
+        }
+        
+        // ✅ 解析父目录
+        const dirPath = this.vfs.pathResolver.dirname(path);
+        let parentId = null;
+        
+        if (dirPath !== '/' && path !== '/') {
+            parentId = await this.vfs.pathResolver.resolve(moduleName, dirPath);
+            if (!parentId) {
+                throw new VFSError(`Parent directory not found: ${dirPath}`);
+            }
+        } else if (path === '/') {
+            // 创建根目录时不需要父节点
+            parentId = null;
+        } else {
+            // 在根目录下创建子目录
+            parentId = moduleInfo.rootId;
+        }
         
         return this.vfs.createNode({
             type: 'directory',
-            module,
-            path,
+            module: moduleName,
+            path: path,
+            parent: parentId,
             contentType: 'directory',
             meta: options.meta || {}
         });
