@@ -40,8 +40,11 @@ export class ModuleRegistry {
      * @returns {ModuleInfo}
      */
     register(name, options = {}) {
+        // [修改] 放宽限制，允许在初始化时覆盖
         if (this.modules.has(name)) {
-            throw new Error(`Module '${name}' already registered`);
+            // 在加载阶段，模块可能被重复注册（从存储加载一次，然后作为默认模块检查一次），这是正常行为。
+            // 我们可以选择静默更新或打印一条警告。
+            console.warn(`[ModuleRegistry] Module '${name}' is being re-registered. This is expected during initialization.`);
         }
         
         const moduleInfo = new ModuleInfo(name, options);

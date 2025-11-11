@@ -1,7 +1,7 @@
 // vfs-ui/index.d.ts
 
 import type { VFSCore, VNode } from '@itookit/vfs-core';
-import type { IAutocompleteProvider, IMentionProvider } from '@itookit/common';
+import type { IAutocompleteProvider, IMentionProvider, Suggestion } from '@itookit/common';
 
 // --- Core Data Structures (UI Representation) ---
 
@@ -29,6 +29,8 @@ export interface VFSNodeUI {
         lastModified?: string;
         parentId: string | null;
         path: string;
+        moduleName: string;
+        /** 用于存储非标准或从内容解析的元数据，例如 isPinned, taskCount 等 */
         custom?: Record<string, any>;
     };
     content?: {
@@ -122,22 +124,56 @@ export interface VFSUIOptions {
     };
 }
 
-// --- Service & Manager Interfaces ---
+// --- State & Service Interfaces ---
 
 /**
- * Represents the entire state managed by the VFS-UI's internal store.
+ * 描述一个标签的元数据。
+ */
+export interface TagInfo {
+    name: string;
+    color: string | null;
+    itemIds: Set<string>;
+}
+
+/**
+ * 描述正在内联创建的项目。
+ */
+export interface CreatingItemState {
+    type: 'file' | 'folder';
+    parentId: string | null;
+}
+
+/**
+ * 描述正在进行的移动操作。
+ */
+export interface MoveOperationState {
+    isMoving: boolean;
+    itemIds: string[];
+}
+
+/**
+ * 代表由 VFS-UI 内部 store 管理的整个状态。
  */
 export interface VFSUIState {
     items: VFSNodeUI[];
     activeId: string | null;
     expandedFolderIds: Set<string>;
+    expandedOutlineIds: Set<string>;
+    expandedOutlineH1Ids: Set<string>;
     selectedItemIds: Set<string>;
+    creatingItem: CreatingItemState | null;
+    moveOperation: MoveOperationState | null;
+    searchQuery: string;
     uiSettings: UISettings;
-    // ... and other internal state properties
+    tags: Map<string, TagInfo>;
+    isSidebarCollapsed: boolean;
+    readOnly: boolean;
+    status: 'idle' | 'loading' | 'success' | 'error';
+    error: Error | null;
 }
 
 /**
- * Defines the public interface for the service layer that communicates with vfs-core.
+ * 定义了与 vfs-core 通信的服务层的公共接口。
  */
 export interface IVFSService {
     findItemById(nodeId: string): VFSNodeUI | undefined;
@@ -145,11 +181,16 @@ export interface IVFSService {
     getAllFiles(): Promise<VFSNodeUI[]>;
     getActiveSession(): VFSNodeUI | undefined;
     selectSession(nodeId: string): void;
-    // ... other methods for CRUD operations
+    createSession(options: { title?: string; content?: string; parentId?: string | null }): Promise<VNode>;
+    createDirectory(options: { title?: string; parentId?: string | null }): Promise<VNode>;
+    renameItem(nodeId: string, newTitle: string): Promise<VNode>;
+    deleteItems(nodeIds: string[]): Promise<void>;
+    moveItems(options: { itemIds: string[]; targetId: string }): Promise<void>;
+    updateItemMetadata(itemId: string, metadataUpdates: Record<string, any>): Promise<void>;
 }
 
 /**
- * The public interface for the VFS-UI manager instance.
+ * VFS-UI 管理器实例的公共接口。
  */
 export interface IVSUIManager {
     /** The service layer instance for direct data interaction. */
@@ -207,16 +248,26 @@ export declare class VFSUIManager implements IVSUIManager {
  * Provides autocompletion for directories.
  */
 export declare class DirectoryProvider implements IMentionProvider {
+    readonly key: 'dir';
+    triggerChar: '@';
     constructor(options: { vfsService: IVFSService });
-    // ... IMentionProvider methods
+    getSuggestions(query: string): Promise<Suggestion[]>;
+    getHoverPreview(targetURL: URL): Promise<{ title: string; contentHTML: string; icon: string; } | null>;
+    handleClick(targetURL: URL): Promise<void>;
 }
 
 /**
  * Provides autocompletion for files.
  */
 export declare class FileProvider implements IMentionProvider {
+    readonly key: 'file';
+    triggerChar: '@';
     constructor(options: { vfsService: IVFSService });
-    // ... IMentionProvider methods
+    getSuggestions(query: string): Promise<Suggestion[]>;
+    getHoverPreview(targetURL: URL): Promise<{ title: string; contentHTML: string; icon: string; } | null>;
+    handleClick(targetURL: URL): Promise<void>;
+    getContentForTransclusion(targetURL: URL): Promise<string | null>;
+    getDataForProcess(targetURL: URL): Promise<object | null>;
 }
 
 /**
@@ -224,7 +275,7 @@ export declare class FileProvider implements IMentionProvider {
  */
 export declare class TagProvider implements IAutocompleteProvider {
     constructor(store: any); // VFSStore is internal, so 'any' is acceptable here for the public interface
-    // ... IAutocompleteProvider methods
+    getSuggestions(query: string): Promise<Suggestion[]>;
 }
 
 /**

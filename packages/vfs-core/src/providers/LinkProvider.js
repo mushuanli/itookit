@@ -17,11 +17,11 @@ export class LinkProvider extends ContentProvider {
         
         this.storage = storage;
         this.events = eventBus;
-        
+    
         // 链接正则：[[node-id]] 或 [[node-id|显示文本]] 或 ![[node-id]]
         this.linkRegex = /(!?)$$\[([^$$|]+)(?:\|([^\]]+))?\]\]/g;
     }
-    
+
     /**
      * 读取链接内容
      */
