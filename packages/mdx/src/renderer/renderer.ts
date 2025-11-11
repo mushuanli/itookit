@@ -20,19 +20,37 @@ export class MDxRenderer {
   private renderRoot: HTMLElement | null = null;
   private searchMarkClass: string;
   public markedExtensions: any[] = [];
+  private instanceId: string;
 
   constructor(config: MDxRendererConfig = {}) {
     this.config = config;
     this.searchMarkClass = config.searchMarkClass || 'search-highlight';
+    this.instanceId = `renderer-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     this.pluginManager = new PluginManager(this);
   }
 
   /**
-   * 注册插件（链式调用）
+   * 注册插件（每次创建新实例）
    */
-  use(plugin: MDxPlugin): this {
+  use(pluginClass: new (...args: any[]) => MDxPlugin, ...args: any[]): this {
+    const plugin = new pluginClass(...args);
     this.pluginManager.register(plugin);
     return this;
+  }
+
+  /**
+   * 或者使用插件实例（需要确保不共享）
+   */
+  usePlugin(plugin: MDxPlugin): this {
+    this.pluginManager.register(plugin);
+    return this;
+  }
+
+  /**
+   * 获取实例 ID
+   */
+  getInstanceId(): string {
+    return this.instanceId;
   }
 
   /**
@@ -172,5 +190,6 @@ export class MDxRenderer {
     this.clearSearch();
     this.pluginManager.destroy();
     this.renderRoot = null;
+    this.markedExtensions = [];
   }
 }

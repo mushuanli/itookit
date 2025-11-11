@@ -42,7 +42,7 @@ export interface PluginContext {
   registerSyntaxExtension(ext: MarkedExtension): void;
   
   // 生命周期钩子
-  on(hook: string, callback: Function): void;
+  on(hook: string, callback: Function): () => void;
   
   // 依赖注入
   provide(key: string | symbol, service: any): void;
@@ -50,7 +50,7 @@ export interface PluginContext {
   
   // 事件总线
   emit(eventName: string, payload: any): void;
-  listen(eventName: string, callback: Function): void;
+  listen(eventName: string, callback: Function): () => void;
   
   // 持久化存储
   getScopedStore(): ScopedPersistenceStore;
@@ -66,6 +66,12 @@ export interface PluginContext {
   renderInElement?(element: HTMLElement, markdown: string): Promise<void>;
   findAndSelectText?(text: string): void;
   switchToMode?(mode: 'edit' | 'render'): void;
+  /**
+   * @internal
+   * 由 PluginManager 内部使用，用于在插件卸载时进行资源清理。
+   * 插件开发者不应直接调用此方法。
+   */
+  _cleanup?(): void;
 }
 
 /**
