@@ -1,24 +1,16 @@
 {
   "name": "@itookit/vfs-ui",
-  "version": "1.0.0",
-  "description": "A UI component library for visualizing and managing file hierarchies from @itookit/vfs-core.",
+  "version": "0.1.0",
+  "description": "A modular UI library for managing Virtual File System interfaces with components for file/folder navigation, tagging, and content outline",
   "type": "module",
-  
-  "main": "./dist/vfs-ui.umd.js",
-  "module": "./dist/vfs-ui.es.js",
+  "main": "./dist/vfs-ui.umd.cjs",
+  "module": "./dist/vfs-ui.js",
   "types": "./dist/index.d.ts",
-  "source": "src/index.js",
   "exports": {
-    "source": "./src/index.js",
-    "types": "./dist/index.d.ts",
-    "import": {
+    ".": {
       "types": "./dist/index.d.ts",
-      "development": "./src/index.js",
-      "default": "./dist/vfs-ui.es.js"
-    },
-    "require": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/vfs-ui.umd.cjs"
+      "import": "./dist/vfs-ui.js",
+      "require": "./dist/vfs-ui.umd.cjs"
     },
     "./style.css": "./dist/style.css"
   },
@@ -30,11 +22,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage",
-    "type-check": "tsc --noEmit",
-    "prepublishOnly": "pnpm test && pnpm build"
+    "preview": "vite preview",
+    "prepublishOnly": "pnpm build"
   },
   "keywords": [
     "vfs",

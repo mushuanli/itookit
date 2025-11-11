@@ -185,7 +185,8 @@ export interface IVFSService {
     createDirectory(options: { title?: string; parentId?: string | null }): Promise<VNode>;
     renameItem(nodeId: string, newTitle: string): Promise<VNode>;
     deleteItems(nodeIds: string[]): Promise<void>;
-    moveItems(options: { itemIds: string[]; targetId: string }): Promise<void>;
+    // --- FIX 2: Allow targetId to be null for moving to root ---
+    moveItems(options: { itemIds: string[]; targetId: string | null }): Promise<void>;
     updateItemMetadata(itemId: string, metadataUpdates: Record<string, any>): Promise<void>;
 }
 
@@ -202,8 +203,11 @@ export interface IVSUIManager {
     /** Returns the currently active file node. */
     getActiveSession(): VFSNodeUI | undefined;
     
-    /** Updates the content of a specific file node in vfs-core. */
-    updateSessionContent(nodeId: string, newContent: string): Promise<VNode>;
+    /**
+     * Updates the content of a specific file node in vfs-core.
+     * --- FIX 1: Changed return type from Promise<VNode> to Promise<void> to match implementation ---
+     */
+    updateSessionContent(nodeId: string, newContent: string): Promise<void>;
     
     /** Toggles the collapsed state of the sidebar. */
     toggleSidebar(): void;
@@ -237,7 +241,8 @@ export declare class VFSUIManager implements IVSUIManager {
     constructor(options: VFSUIOptions, vfsCore: VFSCore, moduleName: string);
     start(): Promise<VFSNodeUI | undefined>;
     getActiveSession(): VFSNodeUI | undefined;
-    updateSessionContent(nodeId: string, newContent: string): Promise<VNode>;
+    // --- FIX 1 Applied Here ---
+    updateSessionContent(nodeId: string, newContent: string): Promise<void>;
     toggleSidebar(): void;
     setTitle(newTitle: string): void;
     on(eventName: any, callback: (payload: any) => void): () => void;

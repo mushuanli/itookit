@@ -123,8 +123,8 @@ function handleImportRequest({ parentId }) {
                 if (e.target && typeof e.target.result === 'string') {
                     const content = e.target.result;
                     const title = file.name.replace(/\.(md|txt)$/, '');
-                    // vfs-ui's sessionService is the correct public API for UI-initiated actions
-                    await vfsUIManager.sessionService.createFile({ title, content, parentId });
+                    // [JSDOC FIX] 使用公共接口中定义的 `createSession` 方法，而不是 `createFile`
+                    await vfsUIManager.sessionService.createSession({ title, content, parentId });
                 }
             };
             reader.readAsText(file);
