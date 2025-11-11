@@ -3,8 +3,6 @@
  * @desc mdx-editor library main entry point.
  */
 
-import './index.css';
-
 // --- Core UI Components ---
 import { MDxEditor } from './editor/index.js';
 // [FIX] Corrected path for MDxRenderer

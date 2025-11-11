@@ -9,6 +9,7 @@ import { createVFSUI } from '@itookit/vfs-ui';
 
 // --- 导入 MDxEditor 及其插件 ---
 import { MDxEditor, defaultPlugins } from '@itookit/mdxeditor';
+import '@itookit/mdxeditor/style.css';
 
 // --- 导入 vfs-core ---
 import { getVFSManager } from '@itookit/vfs-core';
@@ -164,7 +165,13 @@ async function main() {
     const vfsCore = getVFSManager();
 
     try {
-        await vfsCore.init();
+        // [修改] 在 init 调用中传入 storage 配置，指定数据库名称
+        await vfsCore.init({
+            storage: {
+                dbName: 'VFS_Demo_MindOS' // 自定义一个清晰的名称
+            }
+        });
+        
         // 确保我们的演示模块已挂载
         if (!vfsCore.getModule('notes')) {
             await vfsCore.mount('notes', { description: '我的笔记' });
@@ -211,6 +218,7 @@ async function main() {
         initialText: '请在左侧选择或创建一个文件...',
         initialMode: 'render',
         showToolbar: true,
+        showTitleBar: true,
         titleBar: {
             title: '编辑器', 
             toggleSidebarCallback: () => vfsUIManager.toggleSidebar(),

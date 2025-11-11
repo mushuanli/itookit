@@ -128,7 +128,8 @@ export class LinkProvider extends ContentProvider {
         await this._deleteNodeLinks(vnode.id, store);
         
         // 删除入链（其他节点指向此节点的链接）
-        const index = store.index('by_targetId');
+        // [修复] 修正索引名称
+        const index = store.index('by_target');
         
         return new Promise((resolve, reject) => {
             const request = index.openCursor(IDBKeyRange.only(vnode.id));
@@ -216,7 +217,7 @@ export class LinkProvider extends ContentProvider {
         
         return this.storage.db.getAllByIndex(
             VFS_STORES.LINKS,
-            'by_sourceId',
+            'by_source', // [修复] 修正索引名称
             nodeId
         );
     }
@@ -247,7 +248,8 @@ export class LinkProvider extends ContentProvider {
      * 删除节点的所有出链
      */
     async _deleteNodeLinks(nodeId, store) {
-        const index = store.index('by_sourceId');
+        // [修复] 修正索引名称
+        const index = store.index('by_source');
         
         return new Promise((resolve, reject) => {
             const request = index.openCursor(IDBKeyRange.only(nodeId));

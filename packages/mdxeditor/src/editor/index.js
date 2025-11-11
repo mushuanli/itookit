@@ -27,7 +27,7 @@ import { ClozeControlsPlugin } from '../mdxplugins/cloze-controls.plugin.js';
 /** @typedef {import('@itookit/common').IPersistenceAdapter} IPersistenceAdapter */
 
 // Dependency Management
-import '@fortawesome/fontawesome-free/css/all.min.css';
+//import '@fortawesome/fontawesome-free/css/all.min.css';
 
 const loadedScripts = new Map();
 /**
