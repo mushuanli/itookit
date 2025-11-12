@@ -29,3 +29,12 @@ export type { FoldablePluginOptions } from './plugins/syntax-extensions/foldable
 
 export { MathJaxPlugin } from './plugins/syntax-extensions/mathjax.plugin';
 export type { MathJaxPluginOptions, MathJaxOptions } from './plugins/syntax-extensions/mathjax.plugin';
+
+export { ClozePlugin } from './plugins/cloze/cloze.plugin';
+export type { ClozePluginOptions } from './plugins/cloze/cloze.plugin';
+
+export { ClozeControlsPlugin } from './plugins/cloze/cloze-control-ui.plugin';
+export type { ClozeControlsPluginOptions } from './plugins/cloze/cloze-control-ui.plugin';
+
+export { MemoryPlugin } from './plugins/cloze/memory.plugin';
+export type { MemoryPluginOptions } from './plugins/cloze/memory.plugin';

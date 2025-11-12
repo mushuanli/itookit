@@ -6,6 +6,8 @@
   <title>MDxEditor Demo - 编辑器与渲染器</title>
   <!-- [重要] 引入 MDxEditor 的标准样式 -->
   <link rel="stylesheet" href="./dist/style.css">
+  <!-- 引入 Font Awesome 用于图标 -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
 
   <style>
     /* 页面通用样式 */
@@ -250,7 +252,19 @@
 
 欢迎使用 **MDxEditor**！这是一个功能强大的 Markdown 编辑器。
 
-## 功能特性
+## 挖空填词 (Cloze) 功能
+
+这是通过 'cloze' 插件启用的新功能。在预览模式下，点击 --挖空部分-- 即可显示答案。
+
+- **基本用法**: --太阳-- 是太阳系的中心。
+- **带 ID**: [c1]--地球-- 是我们居住的行星。
+- **带音频**: 法语单词 "你好" 的发音是 --Bonjour--^^audio:Bonjour^^。
+- **多行内容**: 
+  Markdown 是一种 --轻量级标记语言--，由 --John Gruber-- 创建。
+
+---
+
+## 其他功能
 
 ### 1. 基础 Markdown 语法
 
@@ -348,11 +362,12 @@ $$
     // 默认就会加载 'folder' 和 'mathjax' 插件
     const editor = createMDxEditor({
         initialMode: 'edit',
-        // 如果需要自定义插件选项，可以这样做：
-        // defaultPluginOptions: {
-        //   folder: { defaultOpen: false },
-        //   mathjax: { cdnUrl: '...' }
-        // }
+        // 默认加载 'folder' 和 'mathjax'
+        // 我们额外指定加载 'cloze'，它会自动带上 'cloze-controls' 和 'memory'
+        plugins: ['cloze'],
+
+        // 如果想加载 cloze 但禁用 memory，可以这样做:
+        // plugins: ['cloze', '-memory'],
     });
 
     // 初始化编辑器

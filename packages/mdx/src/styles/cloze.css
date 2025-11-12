@@ -1,0 +1,155 @@
+/* @file: styles/cloze.css
+ * Styles for the Cloze Plugin with BEM and namespace conventions.
+ * Block: mdx-cloze
+ */
+
+.mdx-cloze {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25em;
+  padding: 0.15em 0.4em;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1px solid #ddd;
+  background-color: #f9f9f9;
+  position: relative;
+  vertical-align: baseline;
+}
+
+/* 隐藏状态 */
+.mdx-cloze.hidden .mdx-cloze__content {
+  display: none;
+}
+
+.mdx-cloze.hidden .mdx-cloze__placeholder {
+  display: inline;
+}
+
+.mdx-cloze:not(.hidden) .mdx-cloze__placeholder {
+  display: none;
+}
+
+/* 占位符样式 */
+.mdx-cloze__placeholder {
+  color: #999;
+  font-style: italic;
+  user-select: none;
+}
+
+/* 内容样式 */
+.mdx-cloze__content {
+  font-weight: 500;
+  color: #333;
+}
+
+/* 音频图标 */
+.mdx-cloze__audio {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.2em;
+  height: 1.2em;
+  margin-left: 0.25em;
+  cursor: pointer;
+  color: #4a90e2;
+  transition: color 0.2s ease;
+}
+
+.mdx-cloze__audio:hover {
+  color: #357abd;
+}
+
+/* 悬停效果 */
+.mdx-cloze:hover {
+  border-color: #4a90e2;
+  background-color: #e8f4fd;
+}
+
+/* 导航高亮 */
+.mdx-cloze--highlight {
+  animation: clozeHighlight 1s ease;
+  border-color: #f39c12;
+  box-shadow: 0 0 8px rgba(243, 156, 18, 0.5);
+}
+
+@keyframes clozeHighlight {
+  0%, 100% {
+    box-shadow: 0 0 8px rgba(243, 156, 18, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 16px rgba(243, 156, 18, 0.8);
+  }
+}
+
+/* 记忆状态样式 */
+.mdx-cloze.is-new {
+  border-color: #3498db;
+  background-color: #ebf5fb;
+}
+
+.mdx-cloze.is-learning {
+  border-color: #f39c12;
+  background-color: #fef5e7;
+}
+
+.mdx-cloze.is-mature {
+  border-color: #27ae60;
+  background-color: #eafaf1;
+}
+
+.mdx-cloze.is-due {
+  border-color: #e74c3c;
+  background-color: #fadbd8;
+  animation: duePulse 2s ease-in-out infinite;
+}
+
+@keyframes duePulse {
+  0%, 100% {
+    box-shadow: 0 0 4px rgba(231, 76, 60, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 8px rgba(231, 76, 60, 0.6);
+  }
+}
+
+/* 深色主题支持 */
+@media (prefers-color-scheme: dark) {
+  .mdx-cloze {
+    border-color: #444;
+    background-color: #2d2d2d;
+  }
+
+  .mdx-cloze__content {
+    color: #e0e0e0;
+  }
+
+  .mdx-cloze__placeholder {
+    color: #888;
+  }
+
+  .mdx-cloze:hover {
+    border-color: #4a90e2;
+    background-color: #1a3a52;
+  }
+
+  .mdx-cloze.is-new {
+    border-color: #5dade2;
+    background-color: #1a3a52;
+  }
+
+  .mdx-cloze.is-learning {
+    border-color: #f5b041;
+    background-color: #4a3c1a;
+  }
+
+  .mdx-cloze.is-mature {
+    border-color: #58d68d;
+    background-color: #1a4d2e;
+  }
+
+  .mdx-cloze.is-due {
+    border-color: #ec7063;
+    background-color: #4a1a1a;
+  }
+}
