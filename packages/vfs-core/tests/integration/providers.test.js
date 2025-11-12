@@ -8,11 +8,31 @@ describe('Provider Integration', () => {
     
     beforeEach(async () => {
         vfsCore = new VFSCore();
-        await vfsCore.init({ legacyMode: false });
+        // 使用唯一的DB Name确保测试隔离
+        await vfsCore.init({ storage: { dbName: `vfs-test-${Date.now()}` } });
     });
     
+    // [修复] 增强的 afterEach，确保完全清理
     afterEach(async () => {
-        await vfsCore.storage.db.disconnect();
+        if (vfsCore && vfsCore.storage && vfsCore.storage.db) {
+            const dbName = vfsCore.storage.db.dbName;
+            
+            // 1. 先关闭所有连接
+            await vfsCore.shutdown();
+    
+            // 2. 然后删除数据库
+            if (dbName) {
+                await new Promise((resolve, reject) => {
+                    const deleteRequest = indexedDB.deleteDatabase(dbName);
+                    deleteRequest.onsuccess = () => resolve();
+                    deleteRequest.onerror = (e) => reject(`Failed to delete database: ${(/** @type {IDBRequest} */ (e.target)).error}`);
+                    deleteRequest.onblocked = () => {
+                        console.warn(`Database ${dbName} deletion blocked. This can happen in jsdom. Retrying after a short delay.`);
+                        setTimeout(() => location.reload(), 100); // 强制重载jsdom环境
+                    };
+                });
+            }
+        }
     });
     
     describe('Markdown with all providers', () => {
@@ -153,7 +173,7 @@ Embed: ![[diagram-id]]
             
             const links = await vfsCore.storage.db.getAllByIndex(
                 'links',
-                'by_sourceId',
+                'by_source', // Note: Corrected index name from original file if needed
                 vnode.id
             );
             expect(links).toHaveLength(0);
@@ -172,7 +192,8 @@ Embed: ![[diagram-id]]
                 providers: ['srs']
             });
             
-            const provider = vfsCore.registry.get('srs');
+            // [修复] 使用正确的属性名 `providerRegistry`
+            const provider = vfsCore.providerRegistry.get('srs');
             const result = await provider.validate(vnode, invalidContent);
             
             expect(result.valid).toBe(false);
@@ -190,7 +211,8 @@ Embed: ![[diagram-id]]
                 providers: ['task']
             });
             
-            const provider = vfsCore.registry.get('task');
+            // [修复] 使用正确的属性名 `providerRegistry`
+            const provider = vfsCore.providerRegistry.get('task');
             const result = await provider.validate(vnode, invalidContent);
             
             expect(result.valid).toBe(false);
