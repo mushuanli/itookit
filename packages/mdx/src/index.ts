@@ -30,6 +30,12 @@ export type { FoldablePluginOptions } from './plugins/syntax-extensions/foldable
 export { MathJaxPlugin } from './plugins/syntax-extensions/mathjax.plugin';
 export type { MathJaxPluginOptions, MathJaxOptions } from './plugins/syntax-extensions/mathjax.plugin';
 
+export { MediaPlugin } from './plugins/syntax-extensions/media.plugin';
+export type { MediaPluginOptions } from './plugins/syntax-extensions/media.plugin';
+
+export { MermaidPlugin } from './plugins/syntax-extensions/mermaid.plugin';
+export type { MermaidPluginOptions } from './plugins/syntax-extensions/mermaid.plugin';
+
 export { ClozePlugin } from './plugins/cloze/cloze.plugin';
 export type { ClozePluginOptions } from './plugins/cloze/cloze.plugin';
 
@@ -38,3 +44,4 @@ export type { ClozeControlsPluginOptions } from './plugins/cloze/cloze-control-u
 
 export { MemoryPlugin } from './plugins/cloze/memory.plugin';
 export type { MemoryPluginOptions } from './plugins/cloze/memory.plugin';
+
