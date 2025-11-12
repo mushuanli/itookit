@@ -47,4 +47,10 @@ export default defineConfig({
       }
     })
   ],
+  // @ts-ignore
+  test: {
+    environment: 'jsdom',
+    globals: true,
+    setupFiles: ['./vitest.setup.js'], // 添加这一行
+  },
 });

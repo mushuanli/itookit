@@ -118,19 +118,28 @@ export class TaskProvider extends ContentProvider {
      */
     async validate(vnode, content) {
         const errors = [];
-        
-        // 检查日期格式
-        const dateRegex = /\[(\d{4}-\d{2}-\d{2})\]/g;
-        let match;
-        
-        while ((match = dateRegex.exec(content)) !== null) {
+    const lines = content.split('\n');
+
+    // 任务行的日期格式正则
+    const taskLineWithDateRegex = /^\s*-\s*\[[ xX]\]\s*.*\[([^\]]+)\]/;
+
+    for (const line of lines) {
+        // 只检查看起来像带日期的任务行
+        const match = line.match(taskLineWithDateRegex);
+        if (match) {
             const dateStr = match[1];
-            const date = new Date(dateStr);
-            
-            if (isNaN(date.getTime())) {
-                errors.push(`Invalid date format: ${dateStr}`);
+            // 检查日期格式
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+                errors.push(`Invalid date format: "${dateStr}". Must be YYYY-MM-DD.`);
+            } else {
+                // 检查日期值是否有效 (e.g., not 2024-13-40)
+                const date = new Date(dateStr);
+                if (isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== dateStr) {
+                     errors.push(`Invalid date value: "${dateStr}".`);
+                }
             }
         }
+    }
         
         return {
             valid: errors.length === 0,
@@ -228,7 +237,7 @@ export class TaskProvider extends ContentProvider {
                     content: taskContent.trim(),
                     completed: checkbox.toLowerCase() === 'x',
                     assignee: assignee || null,
-                    dueDate: dueDate ? new Date(dueDate) : null,
+                    dueDate: dueDate && /^\d{4}-\d{2}-\d{2}$/.test(dueDate) ? new Date(dueDate) : null,
                     priority: this._extractPriority(taskContent),
                     tags: this._extractTags(taskContent),
                     lineNumber: i + 1,
@@ -248,6 +257,7 @@ export class TaskProvider extends ContentProvider {
                 if (dueDate) newLine += ` [${dueDate}]`;
                 newLine += ` ${taskContent}`;
                 if (!existingId) newLine += ` ^${taskId}`;
+                else newLine += ` ^${existingId}`;
                 
                 updatedLines.push(newLine);
             } else {
@@ -265,9 +275,11 @@ export class TaskProvider extends ContentProvider {
      * 获取节点的所有任务
      */
     async _getTasks(nodeId, transaction = null) {
+        const storeName = VFS_STORES.TASKS;
+        const indexName = 'by_nodeId';
         if (transaction) {
-            const store = transaction.getStore(VFS_STORES.TASKS);
-            const index = store.index('by_nodeId');
+            const store = transaction.getStore(storeName);
+            const index = store.index(indexName);
             
             return new Promise((resolve, reject) => {
                 const request = index.getAll(nodeId);
@@ -276,11 +288,7 @@ export class TaskProvider extends ContentProvider {
             });
         }
         
-        return this.storage.db.getAllByIndex(
-            VFS_STORES.TASKS,
-            'by_nodeId',
-            nodeId
-        );
+        return this.storage.db.getAllByIndex(storeName, indexName, nodeId);
     }
     
     /**

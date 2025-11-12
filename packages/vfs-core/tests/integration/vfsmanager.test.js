@@ -7,7 +7,9 @@ describe('VFSCore Integration', () => {
     
     beforeEach(async () => {
         vfs = VFSCore.getInstance();
-        await vfs.init({ defaults: { modules: [] } });
+        await vfs.init({ defaults: { modules: [] ,
+            storage: { dbName: 'vfscore_test_Demo' }
+        } });
     });
     
     afterEach(async () => {
@@ -25,7 +27,8 @@ describe('VFSCore Integration', () => {
         it('should create default modules', async () => {
             const vfs2 = new VFSCore();
             await vfs2.init({
-                defaults: { modules: ['notes', 'tasks'] }
+                defaults: { modules: ['notes', 'tasks'] },
+                storage: { dbName: 'vfscore_test_Demo' }
             });
             
             const modules = vfs2.listModules();
