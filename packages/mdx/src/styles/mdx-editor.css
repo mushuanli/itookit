@@ -1,0 +1,32 @@
+/* styles/mdx-editor.css */
+
+/* 编辑器容器 */
+.mdx-editor-container {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* 编辑模式容器 */
+.mdx-editor-edit-mode {
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+}
+
+/* 渲染模式容器 */
+.mdx-editor-render-mode {
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  padding: 1rem;
+}
+
+/* 隐藏状态 */
+.mdx-editor-edit-mode[style*="display: none"],
+.mdx-editor-render-mode[style*="display: none"] {
+  display: none !important;
+}
