@@ -71,7 +71,20 @@ export class Database {
             };
         });
     }
-    
+
+    /**
+     * 关闭数据库连接
+     * @returns {Promise<void>}
+     */
+    async disconnect() {
+        if (this.db) {
+            this.db.close();
+            this.db = null;
+            console.log(`Database '${this.dbName}' disconnected.`);
+        }
+        return Promise.resolve();
+    }
+
     /**
      * @private 创建初始数据库 schema (V1)
      * @param {IDBDatabase} db

@@ -133,6 +133,9 @@ export class VFSCore {
         
         this.initialized = false;
         
+        // [修复] 重置单例，以便下次能创建新实例，这对于测试隔离至关重要
+        VFSCore.#instance = null;
+        
         console.log('[VFSCore] Shutdown complete');
     }
     
