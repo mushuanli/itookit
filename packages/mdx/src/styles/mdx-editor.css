@@ -11,14 +11,14 @@
 }
 
 /* 编辑模式容器 */
-.mdx-editor-edit-mode {
+.mdx-editor-container__edit-mode {
   width: 100%;
   height: 100%;
   overflow: auto;
 }
 
 /* 渲染模式容器 */
-.mdx-editor-render-mode {
+.mdx-editor-container__render-mode {
   width: 100%;
   height: 100%;
   overflow: auto;
@@ -26,7 +26,7 @@
 }
 
 /* 隐藏状态 */
-.mdx-editor-edit-mode[style*="display: none"],
-.mdx-editor-render-mode[style*="display: none"] {
+.mdx-editor-container__edit-mode[style*="display: none"],
+.mdx-editor-container__render-mode[style*="display: none"] {
   display: none !important;
 }
