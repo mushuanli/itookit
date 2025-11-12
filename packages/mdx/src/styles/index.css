@@ -5,11 +5,14 @@
 @import './mdx-dark-theme.css';
 @import './mdx-codemirror.css';
 @import './mdx-print.css';
-@import './foldable.css';
 
-@import './cloze.css';
-@import './cloze-controls.css';
-@import './cloze-memory.css';
+@import './plugin-foldable.css';
+@import './plugin-media.css';
+@import './plugin-mermaid.css';
+
+@import './plugin-cloze.css';
+@import './plugin-cloze-controls.css';
+@import './plugin-cloze-memory.css';
 
 /* 全局调整 */
 .mdx-editor-renderer .mdx-cloze {

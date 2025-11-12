@@ -1,0 +1,270 @@
+/* @file: styles/plugin-mermaid.css
+ * Styles for the Mermaid Plugin with BEM and namespace conventions.
+ * Block: mdx-editor-mermaid
+ */
+
+/* ===========================
+   Mermaid Container Styles
+   =========================== */
+
+.mdx-editor-renderer pre code.language-mermaid {
+  display: block;
+  padding: 1.5em;
+  margin: 1.5em 0;
+  background-color: #f8f9fa;
+  border: 1px solid #dee2e6;
+  border-radius: 8px;
+  overflow: visible;
+  font-family: inherit;
+}
+
+/* Mermaid 渲染后的容器 */
+.mdx-editor-renderer .mermaid {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 1.5em;
+  margin: 1.5em 0;
+  background-color: #ffffff;
+  border: 1px solid #dee2e6;
+  border-radius: 8px;
+  overflow-x: auto;
+  overflow-y: visible;
+}
+
+/* SVG 容器 */
+.mdx-editor-renderer .mermaid svg {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: 0 auto;
+}
+
+/* ===========================
+   Loading State
+   =========================== */
+
+.mdx-editor-renderer pre code.language-mermaid.mermaid-loading {
+  position: relative;
+  min-height: 100px;
+  color: transparent;
+}
+
+.mdx-editor-renderer pre code.language-mermaid.mermaid-loading::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 40px;
+  height: 40px;
+  margin: -20px 0 0 -20px;
+  border: 3px solid #e0e0e0;
+  border-top-color: #0066cc;
+  border-radius: 50%;
+  animation: mermaid-spin 0.8s linear infinite;
+}
+
+.mdx-editor-renderer pre code.language-mermaid.mermaid-loading::after {
+  content: '正在渲染图表...';
+  position: absolute;
+  top: calc(50% + 30px);
+  left: 50%;
+  transform: translateX(-50%);
+  color: #666;
+  font-size: 0.9em;
+  white-space: nowrap;
+}
+
+@keyframes mermaid-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ===========================
+   Error State
+   =========================== */
+
+.mdx-editor-renderer .mermaid.error {
+  background-color: #fff5f5;
+  border-color: #fc8181;
+  color: #c53030;
+  padding: 1em;
+  text-align: center;
+}
+
+.mdx-editor-renderer .mermaid.error::before {
+  content: '⚠️ ';
+  font-size: 1.2em;
+  margin-right: 0.5em;
+}
+
+/* ===========================
+   Mermaid Theme Overrides
+   =========================== */
+
+/* 确保文本可读性 */
+.mdx-editor-renderer .mermaid text {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+/* 流程图样式优化 */
+.mdx-editor-renderer .mermaid .node rect,
+.mdx-editor-renderer .mermaid .node circle,
+.mdx-editor-renderer .mermaid .node ellipse,
+.mdx-editor-renderer .mermaid .node polygon {
+  stroke-width: 2px;
+}
+
+/* 连接线样式 */
+.mdx-editor-renderer .mermaid .edgePath path {
+  stroke-width: 2px;
+}
+
+/* ===========================
+   Responsive Design
+   =========================== */
+
+@media (max-width: 768px) {
+  .mdx-editor-renderer pre code.language-mermaid,
+  .mdx-editor-renderer .mermaid {
+    padding: 1em;
+    margin: 1em 0;
+    border-radius: 4px;
+  }
+
+  .mdx-editor-renderer .mermaid svg {
+    font-size: 12px;
+  }
+}
+
+@media (max-width: 480px) {
+  .mdx-editor-renderer pre code.language-mermaid,
+  .mdx-editor-renderer .mermaid {
+    padding: 0.75em;
+    margin: 0.75em 0;
+  }
+
+  .mdx-editor-renderer .mermaid svg {
+    font-size: 10px;
+  }
+}
+
+/* ===========================
+   Dark Theme Support
+   =========================== */
+
+@media (prefers-color-scheme: dark) {
+  .mdx-editor-renderer pre code.language-mermaid {
+    background-color: #2d2d2d;
+    border-color: #444;
+    color: #e0e0e0;
+  }
+
+  .mdx-editor-renderer .mermaid {
+    background-color: #1e1e1e;
+    border-color: #444;
+  }
+
+  /* 加载状态 - 深色主题 */
+  .mdx-editor-renderer pre code.language-mermaid.mermaid-loading::before {
+    border-color: #444;
+    border-top-color: #66b3ff;
+  }
+
+  .mdx-editor-renderer pre code.language-mermaid.mermaid-loading::after {
+    color: #999;
+  }
+
+  /* 错误状态 - 深色主题 */
+  .mdx-editor-renderer .mermaid.error {
+    background-color: #3d2020;
+    border-color: #ff6b6b;
+    color: #ff8787;
+  }
+
+  /* Mermaid 深色主题样式覆盖 */
+  .mdx-editor-renderer .mermaid .node rect,
+  .mdx-editor-renderer .mermaid .node circle,
+  .mdx-editor-renderer .mermaid .node ellipse,
+  .mdx-editor-renderer .mermaid .node polygon {
+    fill: #2d2d2d;
+    stroke: #66b3ff;
+  }
+
+  .mdx-editor-renderer .mermaid .edgeLabel {
+    background-color: #1e1e1e;
+    color: #e0e0e0;
+  }
+
+  .mdx-editor-renderer .mermaid text {
+    fill: #e0e0e0 !important;
+  }
+}
+
+/* ===========================
+   Print Styles
+   =========================== */
+
+@media print {
+  .mdx-editor-renderer .mermaid {
+    background-color: #fff;
+    border: 1px solid #000;
+    page-break-inside: avoid;
+  }
+
+  .mdx-editor-renderer .mermaid svg {
+    max-width: 100%;
+  }
+}
+
+/* ===========================
+   Accessibility
+   =========================== */
+
+.mdx-editor-renderer .mermaid:focus-within {
+  outline: 2px solid #0066cc;
+  outline-offset: 2px;
+}
+
+/* 确保图表内容可被屏幕阅读器访问 
+.mdx-editor-renderer .mermaid[role="img"] {
+   由 Mermaid 自动添加
+}
+*/
+
+/* ===========================
+   Scrollbar Styling (Optional)
+   =========================== */
+
+.mdx-editor-renderer .mermaid::-webkit-scrollbar {
+  height: 8px;
+}
+
+.mdx-editor-renderer .mermaid::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 4px;
+}
+
+.mdx-editor-renderer .mermaid::-webkit-scrollbar-thumb {
+  background: #888;
+  border-radius: 4px;
+}
+
+.mdx-editor-renderer .mermaid::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
+@media (prefers-color-scheme: dark) {
+  .mdx-editor-renderer .mermaid::-webkit-scrollbar-track {
+    background: #2d2d2d;
+  }
+
+  .mdx-editor-renderer .mermaid::-webkit-scrollbar-thumb {
+    background: #555;
+  }
+
+  .mdx-editor-renderer .mermaid::-webkit-scrollbar-thumb:hover {
+    background: #777;
+  }
+}

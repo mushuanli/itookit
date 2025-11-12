@@ -5,6 +5,9 @@ import { MDxEditor, MDxEditorConfig } from './editor/editor';
 import { FoldablePlugin, FoldablePluginOptions } from './plugins/syntax-extensions/foldable.plugin';
 import { MathJaxPlugin, MathJaxPluginOptions } from './plugins/syntax-extensions/mathjax.plugin';
 
+import { MediaPlugin, MediaPluginOptions } from './plugins/syntax-extensions/media.plugin';
+import { MermaidPlugin, MermaidPluginOptions } from './plugins/syntax-extensions/mermaid.plugin';
+
 import { ClozePlugin } from './plugins/cloze/cloze.plugin';
 import { ClozeControlsPlugin } from './plugins/cloze/cloze-control-ui.plugin';
 import { MemoryPlugin } from './plugins/cloze/memory.plugin';
@@ -73,6 +76,9 @@ export function registerPlugin(
 // 核心功能插件，优先级最高
 registerPlugin('mathjax', MathJaxPlugin, { priority: 5 });
 registerPlugin('folder', FoldablePlugin, { priority: 6 });
+registerPlugin('media', MediaPlugin, { priority: 7 });
+registerPlugin('mermaid', MermaidPlugin, { priority: 8 });
+
 registerPlugin('cloze', ClozePlugin, { priority: 10 });
 
 // 依赖于核心功能的插件，优先级较低
@@ -99,6 +105,8 @@ export interface MDxEditorFactoryConfig extends MDxEditorConfig {
   defaultPluginOptions?: {
     folder?: FoldablePluginOptions;
     mathjax?: MathJaxPluginOptions;
+    media?: MediaPluginOptions;
+    mermaid?: MermaidPluginOptions;
     [key: string]: Record<string, any> | undefined;
   };
 }
@@ -106,7 +114,7 @@ export interface MDxEditorFactoryConfig extends MDxEditorConfig {
 
 // --- 工厂函数 ---
 
-const DEFAULT_PLUGINS: PluginConfig[] = ['folder', 'mathjax'];
+const DEFAULT_PLUGINS: PluginConfig[] = ['folder', 'mathjax','media','mermaid'];
 const ALL_PLUGINS_DISABLED_FLAG = '-all';
 
 /**
