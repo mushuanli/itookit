@@ -18,8 +18,8 @@ export class LinkProvider extends ContentProvider {
         this.storage = storage;
         this.events = eventBus;
     
-        // 链接正则：[[node-id]] 或 [[node-id|显示文本]] 或 ![[node-id]]
-        this.linkRegex = /(!?)$$\[([^$$|]+)(?:\|([^\]]+))?\]\]/g;
+        // [修复] 修正了正则表达式，移除了多余的 '$' 并正确转义了括号
+        this.linkRegex = /(!?)\[\[([^|\]]+)(?:\|([^\]]+))?\]\]/g;
     }
 
     /**
@@ -33,12 +33,12 @@ export class LinkProvider extends ContentProvider {
             content: null,
             metadata: {
                 outgoingLinks: links.map(l => ({
-                    targetId: l.targetId,
+                    targetId: l.targetNodeId, // 修正
                     type: l.type,
                     displayText: l.displayText
                 })),
                 incomingLinks: backlinks.map(l => ({
-                    sourceId: l.sourceId,
+                    sourceId: l.sourceNodeId, // 修正
                     type: l.type
                 })),
                 linkCount: links.length,
@@ -77,7 +77,7 @@ export class LinkProvider extends ContentProvider {
                 updatedContent: content, // 链接不修改内容
                 derivedData: {
                     links: links.map(l => ({
-                        targetId: l.targetId,
+                        targetId: l.targetNodeId, // 修正
                         type: l.type
                     })),
                     stats: {
@@ -177,7 +177,7 @@ export class LinkProvider extends ContentProvider {
     /**
      * 解析内容中的链接
      */
-    _parseLinks(sourceId, content) {
+    _parseLinks(sourceNodeId, content) {
         const links = [];
         this.linkRegex.lastIndex = 0;
         let match;
@@ -187,8 +187,8 @@ export class LinkProvider extends ContentProvider {
             
             const link = {
                 id: `link-${this._generateShortId()}`,
-                sourceId,
-                targetId,
+                sourceNodeId: sourceNodeId, // [FIX] Use consistent property name
+                targetNodeId: targetId,     // [FIX] Use consistent property name
                 type: isEmbed ? 'embed' : 'reference',
                 displayText: displayText || null,
                 createdAt: new Date()
@@ -204,9 +204,12 @@ export class LinkProvider extends ContentProvider {
      * 获取节点的出链
      */
     async _getLinks(nodeId, transaction = null) {
+        const storeName = VFS_STORES.LINKS;
+        const indexName = 'by_source';
+
         if (transaction) {
-            const store = transaction.getStore(VFS_STORES.LINKS);
-            const index = store.index('by_source');
+            const store = transaction.getStore(storeName);
+            const index = store.index(indexName);
             
             return new Promise((resolve, reject) => {
                 const request = index.getAll(nodeId);
@@ -215,11 +218,7 @@ export class LinkProvider extends ContentProvider {
             });
         }
         
-        return this.storage.db.getAllByIndex(
-            VFS_STORES.LINKS,
-            'by_source', // [修复] 修正索引名称
-            nodeId
-        );
+        return this.storage.db.getAllByIndex(storeName, indexName, nodeId);
     }
     
     /**
