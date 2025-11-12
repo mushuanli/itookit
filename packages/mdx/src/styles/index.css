@@ -1,0 +1,8 @@
+/* styles/index.css */
+@import './mdx-editor.css';
+@import './mdx-renderer.css';
+@import './mdx-search.css';
+@import './mdx-dark-theme.css';
+@import './mdx-codemirror.css';
+@import './mdx-print.css';
+@import './foldable.css';

@@ -1,0 +1,36 @@
+/* styles/mdx-codemirror.css */
+
+/* CodeMirror 容器样式 */
+.mdx-editor-edit-mode .cm-editor {
+  height: 100%;
+  font-size: 14px;
+  font-family: 'SFMono-Regular', 'Consolas', 'Liberation Mono', 'Menlo', monospace;
+}
+
+.mdx-editor-edit-mode .cm-scroller {
+  overflow: auto;
+}
+
+.mdx-editor-edit-mode .cm-content {
+  padding: 1rem;
+}
+
+/* 深色主题支持 */
+@media (prefers-color-scheme: dark) {
+  .mdx-editor-edit-mode .cm-editor {
+    background-color: #0d1117;
+  }
+
+  .mdx-editor-edit-mode .cm-content {
+    color: #e1e4e8;
+  }
+
+  .mdx-editor-edit-mode .cm-gutters {
+    background-color: #161b22;
+    border-right-color: #21262d;
+  }
+
+  .mdx-editor-edit-mode .cm-activeLineGutter {
+    background-color: #1c2128;
+  }
+}

@@ -1,0 +1,201 @@
+/* styles/mdx-renderer.css */
+
+/* 渲染器根容器 */
+.mdx-renderer {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+  color: #333;
+  max-width: 100%;
+  word-wrap: break-word;
+}
+
+/* 标题样式 */
+.mdx-renderer h1,
+.mdx-renderer h2,
+.mdx-renderer h3,
+.mdx-renderer h4,
+.mdx-renderer h5,
+.mdx-renderer h6 {
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+  font-weight: 600;
+  line-height: 1.25;
+  color: #000;
+}
+
+.mdx-renderer h1 {
+  font-size: 2em;
+  border-bottom: 1px solid #eaecef;
+  padding-bottom: 0.3em;
+}
+
+.mdx-renderer h2 {
+  font-size: 1.5em;
+  border-bottom: 1px solid #eaecef;
+  padding-bottom: 0.3em;
+}
+
+.mdx-renderer h3 {
+  font-size: 1.25em;
+}
+
+.mdx-renderer h4 {
+  font-size: 1em;
+}
+
+.mdx-renderer h5 {
+  font-size: 0.875em;
+}
+
+.mdx-renderer h6 {
+  font-size: 0.85em;
+  color: #6a737d;
+}
+
+/* 段落样式 */
+.mdx-renderer p {
+  margin-top: 0;
+  margin-bottom: 1em;
+}
+
+/* 链接样式 */
+.mdx-renderer a {
+  color: #0366d6;
+  text-decoration: none;
+}
+
+.mdx-renderer a:hover {
+  text-decoration: underline;
+}
+
+/* 列表样式 */
+.mdx-renderer ul,
+.mdx-renderer ol {
+  padding-left: 2em;
+  margin-top: 0;
+  margin-bottom: 1em;
+}
+
+.mdx-renderer li {
+  margin-bottom: 0.25em;
+}
+
+.mdx-renderer li > p {
+  margin-bottom: 0.5em;
+}
+
+/* 任务列表样式 */
+.mdx-renderer input[type="checkbox"] {
+  margin-right: 0.5em;
+}
+
+/* 引用块样式 */
+.mdx-renderer blockquote {
+  margin: 0 0 1em 0;
+  padding: 0 1em;
+  color: #6a737d;
+  border-left: 0.25em solid #dfe2e5;
+}
+
+.mdx-renderer blockquote > :first-child {
+  margin-top: 0;
+}
+
+.mdx-renderer blockquote > :last-child {
+  margin-bottom: 0;
+}
+
+/* 代码样式 */
+.mdx-renderer code {
+  padding: 0.2em 0.4em;
+  margin: 0;
+  font-size: 85%;
+  background-color: rgba(27, 31, 35, 0.05);
+  border-radius: 3px;
+  font-family: 'SFMono-Regular', 'Consolas', 'Liberation Mono', 'Menlo', monospace;
+}
+
+.mdx-renderer pre {
+  padding: 16px;
+  overflow: auto;
+  font-size: 85%;
+  line-height: 1.45;
+  background-color: #f6f8fa;
+  border-radius: 6px;
+  margin-bottom: 1em;
+}
+
+.mdx-renderer pre code {
+  display: inline;
+  padding: 0;
+  margin: 0;
+  overflow: visible;
+  line-height: inherit;
+  word-wrap: normal;
+  background-color: transparent;
+  border: 0;
+}
+
+/* 表格样式 */
+.mdx-renderer table {
+  border-spacing: 0;
+  border-collapse: collapse;
+  margin-bottom: 1em;
+  width: 100%;
+  overflow: auto;
+}
+
+.mdx-renderer table th,
+.mdx-renderer table td {
+  padding: 6px 13px;
+  border: 1px solid #dfe2e5;
+}
+
+.mdx-renderer table th {
+  font-weight: 600;
+  background-color: #f6f8fa;
+}
+
+.mdx-renderer table tr {
+  background-color: #fff;
+  border-top: 1px solid #c6cbd1;
+}
+
+.mdx-renderer table tr:nth-child(2n) {
+  background-color: #f6f8fa;
+}
+
+/* 水平分割线 */
+.mdx-renderer hr {
+  height: 0.25em;
+  padding: 0;
+  margin: 24px 0;
+  background-color: #e1e4e8;
+  border: 0;
+}
+
+/* 图片样式 */
+.mdx-renderer img {
+  max-width: 100%;
+  height: auto;
+  box-sizing: content-box;
+  background-color: #fff;
+}
+
+/* 响应式调整 */
+@media (max-width: 768px) {
+  .mdx-renderer {
+    font-size: 14px;
+  }
+
+  .mdx-renderer h1 {
+    font-size: 1.75em;
+  }
+
+  .mdx-renderer h2 {
+    font-size: 1.5em;
+  }
+}

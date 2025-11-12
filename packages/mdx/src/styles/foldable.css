@@ -1,0 +1,91 @@
+/* @file: styles/foldable.css
+ * Styles for the Foldable Plugin with BEM and namespace conventions.
+ * Block: mdx-editor-foldable
+ */
+
+.mdx-editor-foldable {
+  margin: 1em 0;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  overflow: hidden;
+  background-color: #fff;
+}
+
+.mdx-editor-foldable__summary {
+  padding: 0.75em 1em;
+  background-color: #f5f5f5;
+  cursor: pointer;
+  user-select: none;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  transition: background-color 0.2s ease;
+  list-style: none; /* 移除 Safari 中的默认标记 */
+}
+
+.mdx-editor-foldable__summary:hover {
+  background-color: #e8e8e8;
+}
+
+.mdx-editor-foldable[open] > .mdx-editor-foldable__summary {
+  border-bottom: 1px solid #ddd;
+}
+
+.mdx-editor-foldable__summary::-webkit-details-marker {
+  /* 隐藏默认的三角形标记 */
+  display: none;
+}
+
+/* 自定义展开/折叠图标 */
+.mdx-editor-foldable__summary::before {
+  content: '▶';
+  display: inline-block;
+  width: 1em;
+  margin-right: 0.25em;
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+
+.mdx-editor-foldable[open] > .mdx-editor-foldable__summary::before {
+  transform: rotate(90deg);
+}
+
+.mdx-editor-foldable__task-checkbox {
+  margin: 0;
+  cursor: pointer;
+  width: 1em;
+  height: 1em;
+}
+
+.mdx-editor-foldable__content {
+  padding: 1em;
+}
+
+.mdx-editor-foldable__content > :first-child {
+  margin-top: 0;
+}
+
+.mdx-editor-foldable__content > :last-child {
+  margin-bottom: 0;
+}
+
+/* 可选：深色主题支持 */
+@media (prefers-color-scheme: dark) {
+  .mdx-editor-foldable {
+    border-color: #444;
+    background-color: #1e1e1e;
+  }
+
+  .mdx-editor-foldable__summary {
+    background-color: #2d2d2d;
+  }
+
+  .mdx-editor-foldable__summary:hover {
+    background-color: #3a3a3a;
+  }
+
+  .mdx-editor-foldable[open] > .mdx-editor-foldable__summary {
+    border-bottom-color: #444;
+  }
+}
