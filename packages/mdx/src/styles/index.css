@@ -6,3 +6,38 @@
 @import './mdx-codemirror.css';
 @import './mdx-print.css';
 @import './foldable.css';
+
+@import './cloze.css';
+@import './cloze-controls.css';
+@import './cloze-memory.css';
+
+/* 全局调整 */
+.mdx-editor-renderer .mdx-cloze {
+  /* 确保在渲染器中正确显示 */
+  max-width: 100%;
+}
+
+/* 打印样式 */
+@media print {
+  .mdx-cloze-controls__panel {
+    display: none !important;
+  }
+
+  .mdx-memory__panel {
+    display: none !important;
+  }
+
+  .mdx-cloze {
+    border: 1px solid #000;
+    background-color: transparent;
+  }
+
+  .mdx-cloze.hidden .mdx-cloze__content {
+    display: inline;
+    background-color: #f0f0f0;
+  }
+
+  .mdx-cloze.hidden .mdx-cloze__placeholder {
+    display: none;
+  }
+}

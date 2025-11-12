@@ -1,0 +1,173 @@
+/* @file: styles/cloze-memory.css
+ * Styles for the Memory Plugin with BEM and namespace conventions.
+ * Block: mdx-memory
+ */
+
+.mdx-memory__panel {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 8px;
+  background-color: #fff;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  animation: memoryPanelFadeIn 0.3s ease;
+}
+
+@keyframes memoryPanelFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.mdx-memory__panel button {
+  flex: 1;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  outline: none;
+  white-space: nowrap;
+}
+
+/* Again - 红色 */
+.mdx-memory__panel button[data-grade="1"] {
+  background-color: #ffebee;
+  color: #c62828;
+  border: 1px solid #ef5350;
+}
+
+.mdx-memory__panel button[data-grade="1"]:hover {
+  background-color: #ef5350;
+  color: #fff;
+  transform: translateY(-2px);
+  box-shadow: 0 2px 6px rgba(239, 83, 80, 0.3);
+}
+
+/* Hard - 橙色 */
+.mdx-memory__panel button[data-grade="2"] {
+  background-color: #fff3e0;
+  color: #e65100;
+  border: 1px solid #ff9800;
+}
+
+.mdx-memory__panel button[data-grade="2"]:hover {
+  background-color: #ff9800;
+  color: #fff;
+  transform: translateY(-2px);
+  box-shadow: 0 2px 6px rgba(255, 152, 0, 0.3);
+}
+
+/* Good - 绿色 */
+.mdx-memory__panel button[data-grade="3"] {
+  background-color: #e8f5e9;
+  color: #2e7d32;
+  border: 1px solid #66bb6a;
+}
+
+.mdx-memory__panel button[data-grade="3"]:hover {
+  background-color: #66bb6a;
+  color: #fff;
+  transform: translateY(-2px);
+  box-shadow: 0 2px 6px rgba(102, 187, 106, 0.3);
+}
+
+/* Easy - 蓝色 */
+.mdx-memory__panel button[data-grade="4"] {
+  background-color: #e3f2fd;
+  color: #1565c0;
+  border: 1px solid #42a5f5;
+}
+
+.mdx-memory__panel button[data-grade="4"]:hover {
+  background-color: #42a5f5;
+  color: #fff;
+  transform: translateY(-2px);
+  box-shadow: 0 2px 6px rgba(66, 165, 245, 0.3);
+}
+
+.mdx-memory__panel button:active {
+  transform: translateY(0);
+}
+
+/* 记忆等级标记 */
+/* 订正：将属性选择器 [data-memory-tier] 改为类选择器 .is-new, .is-learning, .is-mature */
+.mdx-cloze.is-new::after,
+.mdx-cloze.is-learning::after,
+.mdx-cloze.is-mature::after {
+  content: ''; /* 默认 content，具体内容在下面覆盖 */
+  display: inline-block;
+  margin-left: 0.5em;
+  padding: 0.1em 0.4em;
+  font-size: 0.75em;
+  font-weight: 600;
+  border-radius: 3px;
+  vertical-align: middle;
+}
+
+.mdx-cloze.is-new::after {
+  background-color: #3498db;
+  color: #fff;
+  content: 'NEW';
+}
+
+.mdx-cloze.is-learning::after {
+  background-color: #f39c12;
+  color: #fff;
+  content: 'LEARNING';
+}
+
+.mdx-cloze.is-mature::after {
+  background-color: #27ae60;
+  color: #fff;
+  content: 'MATURE';
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+  .mdx-memory__panel {
+    flex-direction: column;
+  }
+
+  .mdx-memory__panel button {
+    width: 100%;
+  }
+}
+
+/* 深色主题支持 */
+@media (prefers-color-scheme: dark) {
+  .mdx-memory__panel {
+    background-color: #2d2d2d;
+    border-color: #444;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  }
+
+  .mdx-memory__panel button[data-grade="1"] {
+    background-color: #4a1a1a;
+    color: #ef5350;
+  }
+
+  .mdx-memory__panel button[data-grade="2"] {
+    background-color: #4a3c1a;
+    color: #ff9800;
+  }
+
+  .mdx-memory__panel button[data-grade="3"] {
+    background-color: #1a4d2e;
+    color: #66bb6a;
+  }
+
+  .mdx-memory__panel button[data-grade="4"] {
+    background-color: #1a3a52;
+    color: #42a5f5;
+  }
+}

@@ -1,0 +1,101 @@
+/* @file: styles/cloze-controls.css
+ * Styles for the Cloze Controls Plugin with BEM and namespace conventions.
+ * Block: mdx-cloze-controls
+ */
+
+.mdx-cloze-controls__panel {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background-color: #fff;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  transition: all 0.3s ease;
+}
+
+.mdx-cloze-controls__panel:hover {
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+}
+
+.mdx-cloze-controls__btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background-color: #f5f5f5;
+  color: #333;
+  font-size: 16px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  outline: none;
+}
+
+.mdx-cloze-controls__btn:hover {
+  background-color: #4a90e2;
+  color: #fff;
+  transform: translateY(-2px);
+  box-shadow: 0 2px 8px rgba(74, 144, 226, 0.3);
+}
+
+.mdx-cloze-controls__btn:active {
+  transform: translateY(0);
+  box-shadow: 0 1px 4px rgba(74, 144, 226, 0.3);
+}
+
+.mdx-cloze-controls__btn i {
+  pointer-events: none;
+}
+
+/* 按钮特殊样式 */
+.mdx-cloze-controls__btn[data-action="toggle"]:hover {
+  background-color: #27ae60;
+}
+
+.mdx-cloze-controls__btn[data-action="reverse"]:hover {
+  background-color: #f39c12;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+  .mdx-cloze-controls__panel {
+    bottom: 10px;
+    right: 10px;
+    padding: 8px;
+    gap: 6px;
+  }
+
+  .mdx-cloze-controls__btn {
+    width: 36px;
+    height: 36px;
+    font-size: 14px;
+  }
+}
+
+/* 深色主题支持 */
+@media (prefers-color-scheme: dark) {
+  .mdx-cloze-controls__panel {
+    background-color: #2d2d2d;
+    border-color: #444;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  }
+
+  .mdx-cloze-controls__btn {
+    background-color: #3a3a3a;
+    color: #e0e0e0;
+  }
+
+  .mdx-cloze-controls__btn:hover {
+    background-color: #4a90e2;
+    color: #fff;
+  }
+}
