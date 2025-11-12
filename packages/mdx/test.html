@@ -4,11 +4,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>MDxEditor Demo - 编辑器与渲染器</title>
-  <!-- CodeMirror 样式 -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/codemirror@6.0.1/dist/index.css">
+  <!-- [重要] 引入 MDxEditor 的标准样式 -->
   <link rel="stylesheet" href="./dist/style.css">
 
   <style>
+    /* 页面通用样式 */
     * {
       margin: 0;
       padding: 0;
@@ -21,6 +21,7 @@
       color: #333;
     }
 
+    /* 页面布局样式 */
     .app-container {
       max-width: 1200px;
       margin: 0 auto;
@@ -49,6 +50,7 @@
       align-items: center;
     }
 
+    /* 按钮样式 */
     .btn {
       padding: 10px 20px;
       border: none;
@@ -98,23 +100,15 @@
       height: 16px;
     }
 
+    /* 编辑器外层包裹样式 */
     .editor-wrapper {
       background: white;
       border-radius: 8px;
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
       overflow: hidden;
-    }
-
-    /* CodeMirror 自定义样式 */
-    .cm-editor {
-      height: 100%;
-      font-size: 14px;
-      border: 1px solid #e0e0e0;
-      border-radius: 4px;
-    }
-
-    .cm-scroller {
-      font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+      /* 确保编辑器撑满容器 */
+      height: 70vh; 
+      min-height: 500px;
     }
 
 
@@ -123,19 +117,7 @@
       font-size: 1.1em !important;
     }
 
-    /* 搜索高亮样式 */
-    .search-highlight mark {
-      background: #fff59d;
-      padding: 2px 4px;
-      border-radius: 2px;
-    }
-
-    .search-highlight.active-match mark {
-      background: #ffd54f;
-      font-weight: bold;
-    }
-
-    /* 状态指示器 */
+    /* 状态指示器样式 */
     .mode-indicator {
       display: inline-flex;
       align-items: center;
@@ -157,7 +139,6 @@
       color: #388e3c;
     }
 
-    /* [订正] 缺少 . 选择器 */
     .mode-indicator-dot {
       width: 8px;
       height: 8px;
@@ -167,12 +148,8 @@
     }
 
     @keyframes pulse {
-      0%, 100% {
-        opacity: 1;
-      }
-      50% {
-        opacity: 0.5;
-      }
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
     }
 
     /* 响应式设计 */
@@ -194,11 +171,10 @@
 
       .btn {
         flex: 1;
-        /* [订正] 缺少分号 */
         min-width: 120px;
         justify-content: center;
       }
-    } /* [订正] 缺少媒体查询的闭合括号 */
+    }
 
     /* 加载动画 */
     .loading {
@@ -212,9 +188,7 @@
     }
 
     @keyframes spin {
-      to {
-        transform: rotate(360deg);
-      }
+      to { transform: rotate(360deg); }
     }
   </style>
 </head>
@@ -267,7 +241,6 @@
 
   <!-- 引入依赖 -->
   <script type="module">
-    // 模拟导入（实际使用时应该从构建后的文件导入）
     import { createMDxEditor } from './dist/index.mjs';
 
     // 由于这是演示，我们直接在这里实现简化版本
@@ -384,11 +357,12 @@ $$
 
     // 初始化编辑器
     const editorContainer = document.getElementById('editor');
-    const savedContent = localStorage.getItem('mdx-editor-content') || initialContent;
-    editor.init(editorContainer, savedContent);
+    if (editorContainer) {
+      const savedContent = localStorage.getItem('mdx-editor-content') || initialContent;
+      editor.init(editorContainer, savedContent);
+    }
 
-    // --- 按钮事件（现在适配 MDxEditor 实例） ---
-    
+    // --- 按钮事件处理 ---
     const toggleModeBtn = document.getElementById('toggleModeBtn');
     const modeIndicator = document.getElementById('modeIndicator');
     const modeText = document.getElementById('modeText');
@@ -481,8 +455,5 @@ $$
     // 然后将 window.MDxEditorLib 替换成你的库暴露的全局变量
     
   </script>
-
-  <!-- MathJax -->
-  <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" async></script>
 </body>
 </html>

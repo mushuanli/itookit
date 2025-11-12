@@ -1,12 +1,12 @@
 /* styles/mdx-search.css */
 
 /* 搜索高亮容器 */
-.search-highlight {
+.mdx-editor-search-highlight {
   background-color: transparent;
 }
 
 /* 匹配项高亮 */
-.search-highlight mark {
+.mdx-editor-search-highlight mark {
   background-color: #ffeb3b;
   color: #000;
   padding: 0.1em 0.2em;
@@ -14,15 +14,15 @@
   font-weight: 500;
 }
 
-/* 当前活动匹配项 */
-.search-highlight.active-match mark {
+/* 当前活动匹配项 (使用修饰符) */
+.mdx-editor-search-highlight--active mark {
   background-color: #ff9800;
   color: #fff;
   box-shadow: 0 0 0 2px rgba(255, 152, 0, 0.3);
 }
 
 /* 搜索动画 */
-@keyframes highlight-pulse {
+@keyframes mdx-editor-highlight-pulse {
   0%, 100% {
     opacity: 1;
   }
@@ -31,6 +31,6 @@
   }
 }
 
-.search-highlight.active-match {
-  animation: highlight-pulse 1s ease-in-out;
+.mdx-editor-search-highlight--active {
+  animation: mdx-editor-highlight-pulse 1s ease-in-out;
 }

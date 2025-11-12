@@ -30,7 +30,7 @@ export class MDxRenderer {
 
   constructor(config: MDxRendererConfig = {}) {
     this.config = config;
-    this.searchMarkClass = config.searchMarkClass || 'search-highlight';
+    this.searchMarkClass = config.searchMarkClass || 'mdx-editor-search-highlight'; // 标准命名
     this.instanceId = `renderer-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     this.pluginManager = new PluginManager(this);
 
@@ -93,6 +93,8 @@ export class MDxRenderer {
     options: RenderOptions = {}
   ): Promise<void> {
     this.renderRoot = element;
+    // 为渲染器根节点添加标准类名
+    element.classList.add('mdx-editor-renderer');
 
     // 执行 beforeParse 钩子
     const beforeParseResult = this.pluginManager.executeTransformHook('beforeParse', {
@@ -172,7 +174,8 @@ export class MDxRenderer {
     matchElement.scrollIntoView({
       behavior: 'smooth',
       block: 'center',});
-    matchElement.classList.add('active-match');
+    // 使用 BEM 修饰符
+    matchElement.classList.add(`${this.searchMarkClass}--active`);
   }
 
   /**
@@ -205,6 +208,12 @@ export class MDxRenderer {
   destroy(): void {
     this.clearSearch();
     this.pluginManager.destroy();
+    
+    if (this.renderRoot) {
+      // 清理添加的类
+      this.renderRoot.classList.remove('mdx-editor-renderer');
+    }
+    
     this.renderRoot = null;
     this.markedExtensions = [];
   }
