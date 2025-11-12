@@ -87,12 +87,12 @@ export class MDxEditor {
 
     // 编辑器容器
     this.editorContainer = document.createElement('div');
-    this.editorContainer.className = 'mdx-editor-edit-mode';
+    this.editorContainer.className = 'mdx-editor-container__edit-mode'; // BEM 命名
     this.container.appendChild(this.editorContainer);
 
     // 渲染器容器
     this.renderContainer = document.createElement('div');
-    this.renderContainer.className = 'mdx-editor-render-mode';
+    this.renderContainer.className = 'mdx-editor-container__render-mode'; // BEM 命名
     this.container.appendChild(this.renderContainer);
   }
 
@@ -125,7 +125,7 @@ export class MDxEditor {
    * 初始化渲染器
    */
   private initRenderer(): void {
-    // 渲染器会在切换到渲染模式时更}
+    // 渲染器会在切换到渲染模式时自动初始化
   }
 
   /**
