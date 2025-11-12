@@ -252,6 +252,24 @@
 
 欢迎使用 **MDxEditor**！这是一个功能强大的 Markdown 编辑器。
 
+### 图表绘制 (Mermaid)
+使用 Mermaid 语法可以直接在 Markdown 中绘制流程图、序列图等。
+\`\`\`mermaid
+graph TD;
+    A[开始] --> B{检查内容};
+    B -- 内容有效 --> C[渲染预览];
+    B -- 内容无效 --> D[显示错误];
+    C --> E[完成];
+    D --> E[完成];
+\`\`\`
+
+### 媒体嵌入 (Media)
+使用 \`!video[标题](链接)\` 语法嵌入视频，或使用 \`!file[文件名](链接)\` 嵌入可下载的文件。
+
+!video[Big Buck Bunny 演示视频](http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4)
+
+!file[项目文档.pdf](https://example.com/document.pdf)
+
 ## 挖空填词 (Cloze) 功能
 
 这是通过 'cloze' 插件启用的新功能。在预览模式下，点击 --挖空部分-- 即可显示答案。
