@@ -1,4 +1,4 @@
-/* styles/index.css */
+/* file: mdx/styles/index.css */
 @import './mdx-editor.css';
 @import './mdx-renderer.css';
 @import './mdx-search.css';
@@ -13,6 +13,8 @@
 @import './plugin-cloze.css';
 @import './plugin-cloze-controls.css';
 @import './plugin-cloze-memory.css';
+
+@import './plugin-codeblock-controls.css';
 
 /* 全局调整 */
 .mdx-editor-renderer .mdx-cloze {

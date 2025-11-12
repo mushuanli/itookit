@@ -81,7 +81,7 @@ export class FoldablePlugin implements MDxPlugin {
     this.options = {
       defaultOpen: options.defaultOpen !== false,
       className: options.className || 'mdx-editor-foldable',
-      enableTaskCheckbox: options.enableTaskCheckbox !== false,
+      enableTaskCheckbox: false//options.enableTaskCheckbox !== false,
     };
   }
 
