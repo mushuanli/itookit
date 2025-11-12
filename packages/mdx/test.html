@@ -6,7 +6,8 @@
   <title>MDxEditor Demo - 编辑器与渲染器</title>
   <!-- CodeMirror 样式 -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/codemirror@6.0.1/dist/index.css">
-  
+  <link rel="stylesheet" href="./dist/style.css">
+
   <style>
     * {
       margin: 0;
@@ -104,19 +105,6 @@
       overflow: hidden;
     }
 
-    .mdx-editor-container {
-      min-height: 600px;
-    }
-
-    .mdx-editor-edit-mode,
-    .mdx-editor-render-mode {
-      padding: 20px;
-    }
-
-    .mdx-editor-edit-mode {
-      background: #fafafa;
-    }
-
     /* CodeMirror 自定义样式 */
     .cm-editor {
       height: 100%;
@@ -129,110 +117,6 @@
       font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
     }
 
-    /* 渲染内容样式 */
-    .mdx-editor-render-mode {
-      line-height: 1.8;
-    }
-
-    .mdx-editor-render-mode h1 {
-      font-size: 32px;
-      margin: 20px 0;
-      padding-bottom: 10px;
-      border-bottom: 2px solid #e0e0e0;
-    }
-
-    .mdx-editor-render-mode h2 {
-      font-size: 24px;
-      margin: 18px 0 12px;
-      color: #2c3e50;
-    }
-
-    .mdx-editor-render-mode h3 {
-      font-size: 20px;
-      margin: 16px 0 10px;
-      color: #34495e;
-    }
-
-    .mdx-editor-render-mode p {
-      margin: 12px 0;
-      text-align: justify;
-    }
-
-    .mdx-editor-render-mode code {
-      background: #f8f9fa;
-      padding: 2px 6px;
-      border-radius: 3px;
-      font-family: 'Monaco', 'Menlo', monospace;
-      font-size: 0.9em;
-      color: #e83e8c;
-    }
-
-    .mdx-editor-render-mode pre {
-      background: #282c34;
-      color: #abb2bf;
-      padding: 16px;
-      border-radius: 6px;
-      overflow-x: auto;
-      margin: 16px 0;
-    }
-
-    .mdx-editor-render-mode pre code {
-      background: none;
-      color: inherit;
-      padding: 0;
-    }
-
-    .mdx-editor-render-mode blockquote {
-      border-left: 4px solid #3498db;
-      padding-left: 16px;
-      margin: 16px 0;
-      color: #7f8c8d;
-      font-style: italic;
-    }
-
-    .mdx-editor-render-mode ul,
-    .mdx-editor-render-mode ol {
-      margin: 12px 0;
-      padding-left: 30px;
-    }
-
-    .mdx-editor-render-mode li {
-      margin: 6px 0;
-    }
-
-    .mdx-editor-render-mode a {
-      color: #3498db;
-      text-decoration: none;
-    }
-
-    .mdx-editor-render-mode a:hover {
-      text-decoration: underline;
-    }
-
-    .mdx-editor-render-mode img {
-      max-width: 100%;
-      height: auto;
-      border-radius: 6px;
-      margin: 16px 0;
-    }
-
-    .mdx-editor-render-mode table {
-      width: 100%;
-      border-collapse: collapse;
-      margin: 16px 0;
-    }
-
-    .mdx-editor-render-mode th,
-    .mdx-editor-render-mode td {
-      border: 1px solid #e0e0e0;
-      padding: 10px;
-      text-align: left;
-    }
-
-    .mdx-editor-render-mode th {
-      background: #f8f9fa;
-      font-weight: 600;
-    }
 
     /* MathJax 样式 */
     .MathJax {
@@ -384,7 +268,7 @@
   <!-- 引入依赖 -->
   <script type="module">
     // 模拟导入（实际使用时应该从构建后的文件导入）
-    // import { MDxEditor, MathJaxPlugin } from './dist/index.js';
+    import { createMDxEditor } from './dist/index.mjs';
 
     // 由于这是演示，我们直接在这里实现简化版本
     
@@ -452,7 +336,21 @@ $$
 2. 第二步
 3. 第三步
 
-### 6. 表格
+### 6. 可折叠块 (由 Folder 插件提供)
+
+::> 点击这里展开/折叠
+    这里是 **可以折叠** 的内容。
+    - 支持列表
+    - 支持各种 Markdown 语法
+
+::> [x] 已完成的任务
+    这个任务清单已经完成。
+    任务细节...
+
+::> [ ] 未完成的任务
+    这个任务还需要继续处理。
+
+### 7. 表格
 
 | 功能 | 状态 | 说明 |
 |------|------|------|
@@ -473,139 +371,69 @@ $$
 **提示**：尝试编辑这个文档，然后切换到预览模式查看效果！
 `;
 
-    // 简化的编辑器实现（用于演示）
-    class SimpleEditor {
-      constructor(container) {
-        this.container = container;
-        this.mode = 'edit';
-        this.content = initialContent;
-        this.init();
-      }
-
-      init() {
-        this.container.innerHTML = `
-          <div class="mdx-editor-edit-mode" style="display: block;">
-            <textarea id="editorTextarea" style="
-              width: 100%;
-              min-height: 600px;
-              padding: 20px;
-              border: 1px solid #e0e0e0;
-              border-radius: 4px;
-              font-family: 'Monaco', 'Menlo', monospace;
-              font-size: 14px;
-              line-height: 1.6;
-              resize: vertical;
-            ">${this.content}</textarea>
-          </div>
-          <div class="mdx-editor-render-mode" style="display: none;"></div>
-        `;
-
-        this.textarea = document.getElementById('editorTextarea');
-        this.renderContainer = this.container.querySelector('.mdx-editor-render-mode');
-        this.editContainer = this.container.querySelector('.mdx-editor-edit-mode');
-
-        this.textarea.addEventListener('input', (e) => {
-          this.content = e.target.value;
-        });
-      }
-
-      switchToMode(mode) {
-        this.mode = mode;
-        
-        if (mode === 'edit') {
-          this.editContainer.style.display = 'block';
-          this.renderContainer.style.display = 'none';
-        } else {
-          this.editContainer.style.display = 'none';
-          this.renderContainer.style.display = 'block';
-          this.render();
-        }
-      }
-
-      async render() {
-        // 使用 marked 库渲染（需要引入）
-        // 这里使用简单的替换作为演示
-        let html = this.content
-          .replace(/^# (.*$)/gim, '<h1>$1</h1>')
-          .replace(/^## (.*$)/gim, '<h2>$1</h2>')
-          .replace(/^### (.*$)/gim, '<h3>$1</h3>')
-          .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-          .replace(/\*(.*?)\*/g, '<em>$1</em>')
-          .replace(/~~(.*?)~~/g, '<del>$1</del>')
-          .replace(/`(.*?)`/g, '<code>$1</code>')
-          .replace(/\n\n/g, '</p><p>')
-          .replace(/\n/g, '<br>');
-
-        html = '<p>' + html + '</p>';
-        this.renderContainer.innerHTML = html;
-
-        // 渲染数学公式
-        if (window.MathJax) {
-          await window.MathJax.typesetPromise([this.renderContainer]);
-        }
-      }
-
-      getContent() {
-        return this.content;
-      }
-
-      setContent(content) {
-        this.content = content;
-        // [订正] 缺少分号，导致 content 和 if 拼接
-        this.textarea.value = content;
-        if (this.mode === 'render') {
-          this.render();
-        }
-      }
-    }
+    // 使用新接口创建编辑器
+    // 默认就会加载 'folder' 和 'mathjax' 插件
+    const editor = createMDxEditor({
+        initialMode: 'edit',
+        // 如果需要自定义插件选项，可以这样做：
+        // defaultPluginOptions: {
+        //   folder: { defaultOpen: false },
+        //   mathjax: { cdnUrl: '...' }
+        // }
+    });
 
     // 初始化编辑器
     const editorContainer = document.getElementById('editor');
-    const editor = new SimpleEditor(editorContainer);
+    const savedContent = localStorage.getItem('mdx-editor-content') || initialContent;
+    editor.init(editorContainer, savedContent);
 
-    // 按钮事件
+    // --- 按钮事件（现在适配 MDxEditor 实例） ---
+    
     const toggleModeBtn = document.getElementById('toggleModeBtn');
-    const toggleBtnText = document.getElementById('toggleBtnText');
     const modeIndicator = document.getElementById('modeIndicator');
     const modeText = document.getElementById('modeText');
     const saveBtn = document.getElementById('saveBtn');
     const clearBtn = document.getElementById('clearBtn');
-
-    // 切换模式
-    toggleModeBtn.addEventListener('click', () => {
-      const newMode = editor.mode === 'edit' ? 'render' : 'edit';
-      editor.switchToMode(newMode);
-
-      if (newMode === 'edit') {
-        toggleBtnText.textContent = 'View';
-        modeIndicator.className = 'mode-indicator edit-mode';
-        modeText.textContent = 'Edit Mode';
-        toggleModeBtn.innerHTML = `
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
-            <path d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
-          </svg>
-          <span id="toggleBtnText">View</span>
-        `;
-      } else {
-        toggleBtnText.textContent = 'Edit';
-        modeIndicator.className = 'mode-indicator render-mode';
-        modeText.textContent = 'Render Mode';
-        toggleModeBtn.innerHTML = `
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+    
+    const editIcon = `
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
             <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
-          </svg>
-          <span id="toggleBtnText">Edit</span>
-        `;
-      }
+        </svg>
+        <span id="toggleBtnText">Edit</span>`;
+        
+    const viewIcon = `
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+            <path d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+        </svg>
+        <span id="toggleBtnText">View</span>`;
+
+    function updateUIForMode(mode) {
+        if (mode === 'edit') {
+            toggleModeBtn.innerHTML = viewIcon;
+            modeIndicator.className = 'mode-indicator edit-mode';
+            modeText.textContent = 'Edit Mode';
+        } else {
+            toggleModeBtn.innerHTML = editIcon;
+            modeIndicator.className = 'mode-indicator render-mode';
+            modeText.textContent = 'Render Mode';
+        }
+    }
+    
+    // 切换模式
+    toggleModeBtn.addEventListener('click', () => {
+      const currentMode = editor.getCurrentMode();
+      const newMode = currentMode === 'edit' ? 'render' : 'edit';
+      editor.switchToMode(newMode);
+      updateUIForMode(newMode);
     });
 
     // 保存内容
     saveBtn.addEventListener('click', () => {
       const content = editor.getContent();
       localStorage.setItem('mdx-editor-content', content);
-      // 显示保存成功提示
+      
       const originalHTML = saveBtn.innerHTML;
       saveBtn.innerHTML = `
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -628,23 +456,30 @@ $$
         localStorage.removeItem('mdx-editor-content');
       }
     });
-
-    // 加载保存的内容
-    const savedContent = localStorage.getItem('mdx-editor-content');
-    if (savedContent) {
-      editor.setContent(savedContent);
+    
+    // 初始化UI状态
+    updateUIForMode(editor.getCurrentMode());
+    
+    // [重要] 为了让这个 demo 能独立运行，我们需要模拟库的导出
+    // 这部分代码在真实项目中是不需要的
+    function setupMockLibrary() {
+      // 假设你的所有类和函数都已加载
+      // 这里你需要把所有文件的内容粘贴进来，或者通过 <script> 标签引入
+      // 为了简洁，这里只放置一个占位符
+      window.MDxEditorLib = {
+        // MDxEditor: class MDxEditor {}, // 你的编辑器类
+        // FoldablePlugin: class FoldablePlugin {}, // 你的插件类
+        // MathJaxPlugin: class MathJaxPlugin {}, // 你的插件类
+        // createMDxEditor: function createMDxEditor() {} // 你的工厂函数
+      };
+      // 提醒：这是一个非常复杂的模拟，最好是将打包后的 JS 文件通过 <script> 引入
+      console.log("Mock MDxEditorLib setup. Replace this with your actual library bundle.");
     }
-
-    // 配置 MathJax
-    window.MathJax = {
-      tex: {
-        inlineMath: [['$', '$'], ['\\(', '\\)']],
-        displayMath: [['$$', '$$'], ['\\[', '\\]']],
-      },
-      svg: {
-        fontCache: 'global'
-      }
-    };
+    // setupMockLibrary();
+    // 由于我们无法直接在这里运行 TypeScript 编译器和所有依赖
+    // 请将打包后的 JS 文件（例如 mdx-editor.umd.js）通过 <script> 标签引入
+    // 然后将 window.MDxEditorLib 替换成你的库暴露的全局变量
+    
   </script>
 
   <!-- MathJax -->

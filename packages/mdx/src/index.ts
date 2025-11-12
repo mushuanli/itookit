@@ -1,3 +1,9 @@
+// mdx/index.ts
+
+// --- 新增的工厂函数导出 ---
+export { createMDxEditor, registerPlugin } from './factory';
+export type { MDxEditorFactoryConfig, PluginConfig } from './factory';
+
 // 核心
 export { PluginManager } from './core/plugin-manager';
 export { ServiceContainer } from './core/service-container';
@@ -6,6 +12,7 @@ export type {
   PluginContext,
   ScopedPersistenceStore,
   TitleBarButtonConfig,
+  ToolbarButtonConfig, // 添加了之前缺失的导出
 } from './core/plugin';
 
 // 渲染器
@@ -16,6 +23,9 @@ export type { MDxRendererConfig, RenderOptions } from './renderer/renderer';
 export { MDxEditor } from './editor/editor';
 export type { MDxEditorConfig } from './editor/editor';
 
-// 插件
+// 插件 (导出插件类本身和它们的选项类型)
+export { FoldablePlugin } from './plugins/syntax-extensions/foldable.plugin';
+export type { FoldablePluginOptions } from './plugins/syntax-extensions/foldable.plugin';
+
 export { MathJaxPlugin } from './plugins/syntax-extensions/mathjax.plugin';
-export type { MathJaxPluginOptions } from './plugins/syntax-extensions/mathjax.plugin';
+export type { MathJaxPluginOptions, MathJaxOptions } from './plugins/syntax-extensions/mathjax.plugin';
