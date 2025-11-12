@@ -252,6 +252,15 @@
 
 欢迎使用 **MDxEditor**！这是一个功能强大的 Markdown 编辑器。
 
+### 交互式任务列表 (Task List)
+在预览模式下，直接点击下方的复选框，可以修改任务状态。这个更改会 **自动同步** 回 Markdown 源码。
+
+- [ ] 学习 MDxEditor 的插件系统。
+- [x] 审查 codeblock-controls 插件的实现。
+- [ ] 为项目贡献代码。
+
+---
+
 ### 图表绘制 (Mermaid)
 使用 Mermaid 语法可以直接在 Markdown 中绘制流程图、序列图等。
 \`\`\`mermaid
@@ -293,11 +302,13 @@ graph TD;
 - ~~删除线~~
 - \`行内代码\`
 - [链接](https://example.com)
+- [ ] 选择框
 
 ### 2. 代码块
 
 \`\`\`javascript
 function hello(name) {
+  // 代码块高度超过阈值时，会出现复制、下载和折叠按钮
   console.log(\`Hello, \${name}!\`);
   return true;
 }
@@ -348,12 +359,6 @@ $$
     - 支持列表
     - 支持各种 Markdown 语法
 
-::> [x] 已完成的任务
-    这个任务清单已经完成。
-    任务细节...
-
-::> [ ] 未完成的任务
-    这个任务还需要继续处理。
 
 ### 7. 表格
 
@@ -387,6 +392,9 @@ $$
         // 如果想加载 cloze 但禁用 memory，可以这样做:
         // plugins: ['cloze', '-memory'],
     });
+// 检查插件是否加载
+const pluginManager = editor.getRenderer().getPluginManager();
+console.log('已加载的插件:', Array.from(pluginManager.plugins.keys()));
 
     // 初始化编辑器
     const editorContainer = document.getElementById('editor');

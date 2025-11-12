@@ -6,6 +6,7 @@ import type { IPersistenceAdapter } from '@itookit/common';
 import { EditorView, basicSetup } from 'codemirror';
 import { markdown } from '@codemirror/lang-markdown';
 import { EditorState } from '@codemirror/state';
+import type { TaskToggleResult } from '../plugins/interactions/task-list.plugin'; // 💡 新增导入
 
 export interface MDxEditorConfig {
   initialMode?: 'edit' | 'render';
@@ -29,6 +30,7 @@ export class MDxEditor {
   private currentMode: 'edit' | 'render';
   private config: MDxEditorConfig;
   private currentContent: string = '';
+  private cleanupListeners: Array<() => void> = [];
 
   constructor(config: MDxEditorConfig = {}) {
     this.config = config;
@@ -68,13 +70,33 @@ export class MDxEditor {
     // 设置初始模式
     this.switchToMode(this.currentMode);
 
-    // 触发编辑器初始化钩子
+    // 🔥 新增：监听插件事件以同步内容
+    this.listenToPluginEvents(); 
+
     const pluginManager = this.renderer.getPluginManager();
     pluginManager.executeActionHook('editorPostInit', {
       editor: this,
       pluginManager,
     });
   }
+
+  /**
+   * 💡 新增：监听来自插件的事件，以保持编辑器内容同步
+   */
+  private listenToPluginEvents(): void {
+    const pluginManager = this.renderer.getPluginManager();
+    
+    const unlisten = pluginManager.listen('taskToggled', (result: TaskToggleResult) => {
+      // 仅当 Markdown 确实被更新，并且新内容与当前内容不同时，才执行更新
+      if (result.wasUpdated && result.updatedMarkdown !== this.getContent()) {
+        this.setContent(result.updatedMarkdown);
+      }
+    });
+    
+    // 保存清理函数，以便在 destroy 时注销监听器
+    this.cleanupListeners.push(unlisten);
+  }
+
 
   /**
    * 创建容器结构
@@ -175,6 +197,11 @@ export class MDxEditor {
    * 设置内容
    */
   setContent(content: string): void {
+    // 避免不必要的更新和光标移动
+    if (content === this.currentContent) {
+      return;
+    }
+
     this.currentContent = content;
 
     if (this.editorView) {
@@ -187,9 +214,13 @@ export class MDxEditor {
       });
     }
 
-    if (this.currentMode === 'render') {
-      this.renderContent();
-    }
+    // 如果当前在渲染模式，我们不需要重新渲染整个视图。
+    // 因为 DOM 已经通过用户交互（如点击 checkbox）被局部更新了。
+    // 再次调用 renderContent 会导致闪烁。
+    // 这里的关键是确保 backing state (`currentContent`) 和 CodeMirror 的 state 是最新的。
+    // if (this.currentMode === 'render') {
+    //   this.renderContent();
+    // }
   }
 
   /**
@@ -216,6 +247,10 @@ export class MDxEditor {
     }
 
     this.renderer.destroy();
+
+    // 🔥 新增：清理事件监听器
+    this.cleanupListeners.forEach(fn => fn());
+    this.cleanupListeners = [];
     
     if (this.container) {
       this.container.innerHTML = '';

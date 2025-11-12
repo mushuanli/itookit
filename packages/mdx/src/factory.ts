@@ -12,6 +12,9 @@ import { ClozePlugin } from './plugins/cloze/cloze.plugin';
 import { ClozeControlsPlugin } from './plugins/cloze/cloze-control-ui.plugin';
 import { MemoryPlugin } from './plugins/cloze/memory.plugin';
 
+import { TaskListPlugin, TaskListPluginOptions } from './plugins/interactions/task-list.plugin';
+import { CodeBlockControlsPlugin, CodeBlockControlsPluginOptions } from './plugins/interactions/codeblock-controls.plugin';
+
 import type { MDxPlugin } from './core/plugin';
 
 // --- Plugin Registry ---
@@ -91,6 +94,9 @@ registerPlugin('memory', MemoryPlugin, {
   dependencies: ['cloze'],
 });
 
+registerPlugin('task-list', TaskListPlugin, { priority: 51 });
+registerPlugin('codeblock-controls', CodeBlockControlsPlugin, { priority: 52 });
+
 
 // --- 新的配置接口 ---
 
@@ -107,6 +113,8 @@ export interface MDxEditorFactoryConfig extends MDxEditorConfig {
     mathjax?: MathJaxPluginOptions;
     media?: MediaPluginOptions;
     mermaid?: MermaidPluginOptions;
+    'task-list'?: TaskListPluginOptions;        // 新增
+    'codeblock-controls'?: CodeBlockControlsPluginOptions;  // 新增
     [key: string]: Record<string, any> | undefined;
   };
 }
@@ -114,7 +122,7 @@ export interface MDxEditorFactoryConfig extends MDxEditorConfig {
 
 // --- 工厂函数 ---
 
-const DEFAULT_PLUGINS: PluginConfig[] = ['folder', 'mathjax','media','mermaid'];
+const DEFAULT_PLUGINS: PluginConfig[] = ['folder', 'mathjax','media','mermaid','codeblock-controls','task-list'];
 const ALL_PLUGINS_DISABLED_FLAG = '-all';
 
 /**
