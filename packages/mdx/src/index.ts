@@ -17,5 +17,5 @@ export { MDxEditor } from './editor/editor';
 export type { MDxEditorConfig } from './editor/editor';
 
 // 插件
-export { MathJaxPlugin } from './plugins/mathjax.plugin';
-export type { MathJaxPluginOptions } from './plugins/mathjax.plugin';
+export { MathJaxPlugin } from './plugins/syntax-extensions/mathjax.plugin';
+export type { MathJaxPluginOptions } from './plugins/syntax-extensions/mathjax.plugin';

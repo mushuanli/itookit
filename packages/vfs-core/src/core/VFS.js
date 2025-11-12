@@ -309,15 +309,28 @@ export class VFS {
             
             const nodeIdsToDelete = nodesToDelete.map(n => n.id);
             
-            // 清理所有派生数据
-            for (const node of nodesToDelete) {
-                const providers = this.registry.getProvidersForNode(node);
-                
-                for (const provider of providers) {
-                    await provider.cleanup(node, tx);
-                }
-                
-                // 删除内容
+        // [修复] 立即启动所有 cleanup 操作，避免事务过早完成
+        const cleanupPromises = [];
+        
+        for (const node of nodesToDelete) {
+            const providers = this.registry.getProvidersForNode(node);
+            
+            for (const provider of providers) {
+                // 立即调用 cleanup，收集 Promise
+                cleanupPromises.push(
+                    provider.cleanup(node, tx).catch(error => {
+                        console.error(`[VFS] Provider ${provider.name} cleanup failed:`, error);
+                        // 继续处理其他清理，不中断整个过程
+                    })
+                );
+            }
+        }
+        
+        // 等待所有 cleanup 完成
+        await Promise.all(cleanupPromises);
+        
+        // 删除内容和节点
+        for (const node of nodesToDelete) {
                 if (node.contentRef) {
                     await this.storage.deleteContent(node.contentRef, tx);
                 }
