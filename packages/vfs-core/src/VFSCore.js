@@ -846,21 +846,32 @@ export class VFSCore {
      * 确保默认配置
      */
     async _ensureDefaults(defaults = {}) {
-        // 确保默认模块存在
-        const defaultModules = defaults.modules || ['notes', 'tasks', 'agents'];
-        
-        for (const moduleName of defaultModules) {
-            if (!this.moduleRegistry.has(moduleName)) {
-                try {
-                    await this.mount(moduleName, {
-                        description: `Default ${moduleName} module`
-                    });
-                } catch (error) {
-                    // Log error but continue initialization
-                    console.error(`Failed to create default module ${moduleName}:`, error);
-                }
-            }
-        }
+      // 确保默认模块存在
+      const defaultModules = defaults.modules || ['notes', 'tasks', 'agents'];
+    
+      // [修复] 收集错误而不是静默处理
+      const errors = [];
+    
+      for (const moduleName of defaultModules) {
+          if (!this.moduleRegistry.has(moduleName)) {
+              try {
+                  await this.mount(moduleName, {
+                      description: `Default ${moduleName} module`
+                  });
+                  console.log(`[VFSCore] Created default module: ${moduleName}`);
+              } catch (error) {
+                  console.error(`[VFSCore] Failed to create default module ${moduleName}:`, error);
+                  errors.push({ module: moduleName, error });
+              }
+          }
+      }
+    
+      // [修复] 如果所有模块都失败，抛出错误
+      if (errors.length > 0 && errors.length === defaultModules.length) {
+          throw new VFSError(
+              `Failed to create all default modules: ${errors.map(e => e.module).join(', ')}`
+          );
+      }
     }
     
     /**

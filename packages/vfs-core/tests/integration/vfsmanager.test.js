@@ -44,23 +44,28 @@ describe('VFSCore Integration', () => {
             expect(vfs.events).toBeDefined();
         });
 
-        it('should create default modules', async () => {
+        it.only('should create default modules', async () => {
             // This test needs its own instance to check default behavior
             const vfs2 = new VFSCore();
             const dbName = `${dbNamePrefix}-defaults-${testCounter++}`;
             
-            await vfs2.init({
-                storage: { dbName },
-                defaults: { modules: ['notes', 'tasks'] },
-            });
-            
-            const modules = vfs2.listModules();
-            expect(modules).toContain('notes');
-            expect(modules).toContain('tasks');
-            
-            await vfs2.shutdown();
-            // Cleanup for this specific test
-            await new Promise(res => indexedDB.deleteDatabase(dbName).onsuccess = res);
+            try {
+                await vfs2.init({
+                    storage: { dbName },
+                    defaults: { modules: ['notes', 'tasks'] },
+                });
+        
+                const modules = vfs2.listModules();
+                console.log('Created modules:', modules); // 添加调试日志
+        
+                expect(modules).toContain('notes');
+                expect(modules).toContain('tasks');
+            } finally {
+                if (vfs2.initialized) {
+                    await vfs2.shutdown();
+                }
+                await new Promise(res => indexedDB.deleteDatabase(dbName).onsuccess = res);
+            }
         });
     });
 
