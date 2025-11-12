@@ -402,8 +402,24 @@ export class PluginManager {
 
 
   /**
-   * 销毁所有插件
+   * 💡 新增：监听事件（供外部如 MDxEditor 使用）
+   * @param eventName - 事件名称
+   * @param callback - 回调函数
+   * @returns 一个用于取消监听的函数
    */
+  listen(eventName: string, callback: Function): () => void {
+    const handlerId = Symbol(`external-listener:${eventName}`);
+    
+    if (!this.eventBus.has(eventName)) {
+      this.eventBus.set(eventName, new Map());
+    }
+    this.eventBus.get(eventName)!.set(handlerId, callback);
+
+    return () => {
+      this.eventBus.get(eventName)?.delete(handlerId);
+    };
+  }
+
   destroy(): void {
     const pluginNames = Array.from(this.plugins.keys());
     pluginNames.forEach(name => this.unregister(name));
