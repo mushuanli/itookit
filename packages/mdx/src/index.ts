@@ -24,6 +24,11 @@ export { MDxEditor } from './editor/editor';
 export type { MDxEditorConfig } from './editor/editor';
 
 // 插件 (导出插件类本身和它们的选项类型)
+
+// 💡 新增：导出 CoreEditorPlugin
+export { CoreEditorPlugin } from './plugins/core/core-editor.plugin';
+export type { CoreEditorPluginOptions } from './plugins/core/core-editor.plugin';
+
 export { FoldablePlugin } from './plugins/syntax-extensions/foldable.plugin';
 export type { FoldablePluginOptions } from './plugins/syntax-extensions/foldable.plugin';
 

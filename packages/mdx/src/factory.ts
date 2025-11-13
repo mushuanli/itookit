@@ -2,6 +2,10 @@
  * @file mdx/factory.ts
  */
 import { MDxEditor, MDxEditorConfig } from './editor/editor';
+
+// 💡 新增：导入 CoreEditorPlugin
+import { CoreEditorPlugin, CoreEditorPluginOptions } from './plugins/core/core-editor.plugin';
+
 import { FoldablePlugin, FoldablePluginOptions } from './plugins/syntax-extensions/foldable.plugin';
 import { MathJaxPlugin, MathJaxPluginOptions } from './plugins/syntax-extensions/mathjax.plugin';
 
@@ -77,6 +81,8 @@ export function registerPlugin(
 // --- 为插件注册添加元数据 ---
 
 // 核心功能插件，优先级最高
+// 💡 新增：注册 CoreEditorPlugin，并给予最高优先级
+registerPlugin('editor:core', CoreEditorPlugin, { priority: 1 });
 registerPlugin('mathjax', MathJaxPlugin, { priority: 5 });
 registerPlugin('folder', FoldablePlugin, { priority: 6 });
 registerPlugin('media', MediaPlugin, { priority: 7 });
@@ -109,6 +115,7 @@ export type PluginConfig =
 export interface MDxEditorFactoryConfig extends MDxEditorConfig {
   plugins?: PluginConfig[];
   defaultPluginOptions?: {
+    'editor:core'?: CoreEditorPluginOptions; // CoreEditor 的配置入口
     folder?: FoldablePluginOptions;
     mathjax?: MathJaxPluginOptions;
     media?: MediaPluginOptions;
@@ -122,7 +129,15 @@ export interface MDxEditorFactoryConfig extends MDxEditorConfig {
 
 // --- 工厂函数 ---
 
-const DEFAULT_PLUGINS: PluginConfig[] = ['folder', 'mathjax','media','mermaid','codeblock-controls','task-list'];
+// 💡 修改：将 'editor:core' 添加到默认插件列表的最前面
+const DEFAULT_PLUGINS: PluginConfig[] = [
+  'folder', 
+  'mathjax',
+  'media',
+  'mermaid',
+  'codeblock-controls',
+  'task-list'
+];
 const ALL_PLUGINS_DISABLED_FLAG = '-all';
 
 /**
@@ -222,6 +237,14 @@ export function createMDxEditor(config: MDxEditorFactoryConfig = {}): MDxEditor 
     ...config,
   });
 
+  // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+  // 修改点 2: 无条件加载 CoreEditorPlugin 作为基础。
+  const coreOptions = config.defaultPluginOptions?.['editor:core'] || {};
+  const corePlugin = new CoreEditorPlugin(coreOptions);
+  editor.use(corePlugin);
+  // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+
+  // --- 处理用户配置的功能性插件 ---
   let basePlugins = DEFAULT_PLUGINS;
   const userPlugins = config.plugins || [];
 
@@ -261,7 +284,7 @@ export function createMDxEditor(config: MDxEditorFactoryConfig = {}): MDxEditor 
   const finalPluginNames = Array.from(pluginMap.keys());
   const sortedPluginNames = sortPlugins(finalPluginNames);
   
-  console.log('Plugins loading order:', sortedPluginNames);
+  console.log('Plugins loading order:', ['editor:core (forced)', ...sortedPluginNames]);
 
   for (const pluginName of sortedPluginNames) {
     const pluginConfig = pluginMap.get(pluginName)!;
