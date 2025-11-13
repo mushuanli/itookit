@@ -55,3 +55,13 @@ export type { TaskListPluginOptions, TaskToggleDetail } from './plugins/interact
 
 export { CodeBlockControlsPlugin } from './plugins/interactions/codeblock-controls.plugin';
 export type { CodeBlockControlsPluginOptions } from './plugins/interactions/codeblock-controls.plugin';
+
+// 命令系统
+//export * as commands from './editor/commands';
+
+// UI 插件
+export { ToolbarPlugin } from './plugins/ui/toolbar.plugin';
+export type { ToolbarPluginOptions } from './plugins/ui/toolbar.plugin';
+
+export { FormattingPlugin } from './plugins/ui/formatting.plugin';
+export type { FormattingPluginOptions } from './plugins/ui/formatting.plugin';

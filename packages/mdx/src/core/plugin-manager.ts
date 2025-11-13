@@ -1,4 +1,4 @@
-// src/core/plugin-manager.ts
+// mdx/core/plugin-manager.ts
 import type { MarkedExtension } from 'marked';
 import type { Extension } from '@codemirror/state'; // 💡 新增：导入类型
 import { ServiceContainer } from './service-container';
@@ -8,6 +8,8 @@ import type {
   MDxPlugin,
   PluginContext,
   ScopedPersistenceStore,
+  ToolbarButtonConfig,
+  TitleBarButtonConfig,
 } from './plugin';
 
 /**
@@ -173,6 +175,15 @@ export class PluginManager {
   // 💡 新增：用于收集 CodeMirror 扩展的数组
   public codemirrorExtensions: Extension[] = [];
 
+  // 新增：命令注册表
+  private commands: Map<string, Function> = new Map();
+  
+  // 新增：工具栏按钮配置列表
+  private toolbarButtons: ToolbarButtonConfig[] = [];
+  
+  // 新增：标题栏按钮配置列表
+  private titleBarButtons: TitleBarButtonConfig[] = [];
+
   constructor(coreInstance: any) {
     this.coreInstance = coreInstance;
     this.serviceContainer = new ServiceContainer();
@@ -217,6 +228,21 @@ export class PluginManager {
         } else {
           this.codemirrorExtensions.push(extension);
         }
+      },
+
+      // 新增：注册命令
+      registerCommand: (name: string, fn: Function) => {
+        this.commands.set(name, fn);
+      },
+
+      // 新增：注册工具栏按钮
+      registerToolbarButton: (config: ToolbarButtonConfig) => {
+        this.toolbarButtons.push(config);
+      },
+
+      // 新增：注册标题栏按钮
+      registerTitleBarButton: (config: TitleBarButtonConfig) => {
+        this.titleBarButtons.push(config);
       },
 
       // 生命周期钩子（支持移除）
@@ -433,6 +459,27 @@ export class PluginManager {
     };
   }
 
+  /**
+   * 获取命令
+   */
+  getCommand(name: string): Function | undefined {
+    return this.commands.get(name);
+  }
+
+  /**
+   * 获取所有工具栏按钮配置
+   */
+  getToolbarButtons(): ToolbarButtonConfig[] {
+    return this.toolbarButtons;
+  }
+
+  /**
+   * 获取所有标题栏按钮配置
+   */
+  getTitleBarButtons(): TitleBarButtonConfig[] {
+    return this.titleBarButtons;
+  }
+
   destroy(): void {
     const pluginNames = Array.from(this.plugins.keys());
     pluginNames.forEach(name => this.unregister(name));
@@ -442,6 +489,10 @@ export class PluginManager {
     this.serviceContainer.clear();
     this.instanceStores.clear();
     this.codemirrorExtensions = []; // 💡 新增：销毁时清空扩展
+
+    this.commands.clear();
+    this.toolbarButtons = [];
+    this.titleBarButtons = [];
   }
 
   /**
