@@ -169,6 +169,9 @@ export class PluginManager {
   private coreInstance: any;
   private instanceId: string;
   
+  // 💡 新增：保存编辑器实例的引用
+  public editorInstance: any = null;
+  
   // 每个实例独立的存储（用于无 VFS/Adapter 场景）
   private instanceStores: Map<string, MemoryStore> = new Map();
 
@@ -243,6 +246,26 @@ export class PluginManager {
       // 新增：注册标题栏按钮
       registerTitleBarButton: (config: TitleBarButtonConfig) => {
         this.titleBarButtons.push(config);
+      },
+
+      // 💡 新增：实现 findAndSelectText 方法
+      findAndSelectText: (text: string) => {
+        const target = this.editorInstance || this.coreInstance;
+        if (target && typeof target.findAndSelectText === 'function') {
+          target.findAndSelectText(text);
+        } else {
+          console.warn('findAndSelectText is not available in this context');
+        }
+      },
+
+      // 💡 修改：优先使用 editorInstance
+      switchToMode: (mode: 'edit' | 'render') => {
+        const target = this.editorInstance || this.coreInstance;
+        if (target && typeof target.switchToMode === 'function') {
+          target.switchToMode(mode);
+        } else {
+          console.warn('switchToMode is not available in this context');
+        }
       },
 
       // 生命周期钩子（支持移除）

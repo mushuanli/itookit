@@ -123,10 +123,8 @@ export class CoreEditorPlugin implements MDxPlugin {
 
   constructor(options: CoreEditorPluginOptions = {}) {
     this.options = {
-      // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
       // 修改点：将默认值从 true 改为 false。只有当用户明确传入 true 时才启用。
       enableLineNumbers: options.enableLineNumbers === true,
-      // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
       enableHistory: options.enableHistory !== false,
       enableFolding: options.enableFolding !== false,
       enableAutocompletion: options.enableAutocompletion !== false,

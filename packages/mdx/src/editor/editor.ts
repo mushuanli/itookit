@@ -41,6 +41,9 @@ export class MDxEditor {
       nodeId: config.nodeId,
       persistenceAdapter: config.persistenceAdapter,
     });
+    
+    // 💡 新增：将编辑器实例传递给渲染器
+    this.renderer.setEditorInstance(this);
   }
 
   /**
@@ -284,6 +287,33 @@ export class MDxEditor {
    */
   getRenderContainer(): HTMLElement | null {
     return this.renderContainer;
+  }
+
+  /**
+   * 查找并选中文本
+   */
+  findAndSelectText(text: string): void {
+    if (!this.editorView) return;
+
+    const content = this.editorView.state.doc.toString();
+    const index = content.indexOf(text);
+
+    if (index !== -1) {
+      this.editorView.dispatch({
+        selection: { anchor: index, head: index + text.length },
+        scrollIntoView: true,
+      });
+
+      // 聚焦编辑器
+      this.editorView.focus();
+    }
+  }
+
+  /**
+   * 在指定元素中渲染 Markdown（用于插件）
+   */
+  async renderInElement(element: HTMLElement, markdown: string): Promise<void> {
+    await this.renderer.render(element, markdown);
   }
 
   /**

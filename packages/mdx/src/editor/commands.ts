@@ -1,10 +1,8 @@
 // mdx/editor/commands.ts
 
 import { EditorView } from '@codemirror/view';
-// ▼▼▼ 修正 1：在此处添加对 ChangeSpec 和 MDxEditor 类型的导入 ▼▼▼
 import { EditorSelection, ChangeSpec } from '@codemirror/state';
 import type { MDxEditor } from './editor';
-// ▲▲▲ 修正完毕 ▲▲▲
 
 /**
  * 命令函数类型定义
@@ -388,7 +386,6 @@ export async function handlePrintAction(editor: MDxEditor): Promise<boolean> {
     }
     
     try {
-        // ▼▼▼ 修正：使用公共方法代替直接访问私有属性 ▼▼▼
         if (editor.getCurrentMode() === 'render') {
             const renderEl = editor.getRenderContainer();
             if (renderEl) {
