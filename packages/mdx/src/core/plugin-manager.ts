@@ -1,5 +1,6 @@
 // src/core/plugin-manager.ts
 import type { MarkedExtension } from 'marked';
+import type { Extension } from '@codemirror/state'; // 💡 新增：导入类型
 import { ServiceContainer } from './service-container';
 import type { VFSCore, VNode } from '@itookit/vfs-core';
 import type { IPersistenceAdapter } from '@itookit/common';
@@ -169,6 +170,9 @@ export class PluginManager {
   // 每个实例独立的存储（用于无 VFS/Adapter 场景）
   private instanceStores: Map<string, MemoryStore> = new Map();
 
+  // 💡 新增：用于收集 CodeMirror 扩展的数组
+  public codemirrorExtensions: Extension[] = [];
+
   constructor(coreInstance: any) {
     this.coreInstance = coreInstance;
     this.serviceContainer = new ServiceContainer();
@@ -204,6 +208,15 @@ export class PluginManager {
           this.coreInstance.markedExtensions = [];
         }
         this.coreInstance.markedExtensions.push(ext);
+      },
+
+      // 💡 新增：实现 CodeMirror 扩展注册逻辑
+      registerCodeMirrorExtension: (extension: Extension | Extension[]) => {
+        if (Array.isArray(extension)) {
+          this.codemirrorExtensions.push(...extension);
+        } else {
+          this.codemirrorExtensions.push(extension);
+        }
       },
 
       // 生命周期钩子（支持移除）
@@ -428,6 +441,7 @@ export class PluginManager {
     this.eventBus.clear();
     this.serviceContainer.clear();
     this.instanceStores.clear();
+    this.codemirrorExtensions = []; // 💡 新增：销毁时清空扩展
   }
 
   /**
