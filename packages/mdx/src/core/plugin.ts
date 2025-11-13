@@ -48,7 +48,8 @@ export type ToolbarButtonConfig = IToolbarButton | IToolbarSeparator;
 export interface TitleBarButtonConfig {
   id: string;
   title?: string;
-  icon: string;
+  // 这将允许图标既可以是 SVG 字符串，也可以是一个 DOM 元素对象。
+  icon: string | HTMLElement;
   command?: string;
   onClick?: (context: any) => void;
   location?: 'left' | 'right';

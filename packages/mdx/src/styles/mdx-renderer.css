@@ -185,6 +185,10 @@
   background-color: #fff;
 }
 
+.mdx-editor-renderer > :first-child {
+  margin-top: 0 !important;
+}
+
 /* 响应式调整 */
 @media (max-width: 768px) {
   .mdx-editor-renderer {

@@ -22,6 +22,9 @@ import { CodeBlockControlsPlugin, CodeBlockControlsPluginOptions } from './plugi
 import { ToolbarPlugin } from './plugins/ui/toolbar.plugin';
 import { FormattingPlugin } from './plugins/ui/formatting.plugin';
 
+import { CoreTitleBarPlugin } from './plugins/ui/titlebar.plugin';
+import { SourceSyncPlugin } from './plugins/interactions/source-jump.plugin';
+
 import type { MDxPlugin } from './core/plugin';
 
 // --- Plugin Registry ---
@@ -87,6 +90,17 @@ export function registerPlugin(
 // 💡 新增：注册 CoreEditorPlugin，并给予最高优先级
 registerPlugin('editor:core', CoreEditorPlugin, { priority: 1 });
 
+// 注册标题栏插件
+registerPlugin('core:titlebar', CoreTitleBarPlugin, { 
+  priority: 2,
+  //dependencies: ['editor:core'] 
+});
+
+// 注册源码同步插件
+registerPlugin('interaction:source-sync', SourceSyncPlugin, { 
+  priority: 60 
+});
+
 // 注册工具栏插件
 registerPlugin('ui:toolbar', ToolbarPlugin, { priority: 2 });
 
@@ -143,6 +157,7 @@ export interface MDxEditorFactoryConfig extends MDxEditorConfig {
 const DEFAULT_PLUGINS: PluginConfig[] = [
   'ui:toolbar',      // 新增
   'ui:formatting',   // 新增
+  'interaction:source-sync', // 新增
   'folder', 
   'mathjax',
   'media',
@@ -249,12 +264,10 @@ export function createMDxEditor(config: MDxEditorFactoryConfig = {}): MDxEditor 
     ...config,
   });
 
-  // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
   // 修改点 2: 无条件加载 CoreEditorPlugin 作为基础。
   const coreOptions = config.defaultPluginOptions?.['editor:core'] || {};
   const corePlugin = new CoreEditorPlugin(coreOptions);
   editor.use(corePlugin);
-  // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
   // --- 处理用户配置的功能性插件 ---
   let basePlugins = DEFAULT_PLUGINS;
