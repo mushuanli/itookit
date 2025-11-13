@@ -1,6 +1,8 @@
 // mdx/plugins/cloze/cloze.plugin.ts
 import type { MDxPlugin, PluginContext } from '../../core/plugin';
 import type { MarkedExtension, Tokens } from 'marked';
+import * as commands from '../../editor/commands';
+import type { MDxEditor } from '../../editor/editor';
 
 export interface ClozePluginOptions {
   className?: string;
@@ -96,6 +98,54 @@ export class ClozePlugin implements MDxPlugin {
         });
       },
     }));
+    if (!context.registerCommand || !context.registerToolbarButton) {
+      // 如果上下文不是编辑器环境（例如纯渲染器），则跳过
+      console.warn('ClozePlugin: Command registration is not available in this context.');
+    } else {
+      const { registerCommand, registerToolbarButton } = context;
+
+      // 添加一个分隔符，将 Cloze 功能与其他功能分开
+      registerToolbarButton({
+          id: `sep-cloze-${Date.now()}`,
+          type: 'separator'
+      });
+
+      // 注册标准 Cloze 命令和按钮
+      registerCommand('applyCloze', (view: any) => {
+        if (view) return commands.applyCloze(view);
+        return false;
+      });
+      registerToolbarButton({
+        id: 'cloze',
+        title: '挖空 (--text--)',
+        icon: '<i class="fas fa-highlighter"></i>', // 使用更形象的图标
+        command: 'applyCloze'
+      });
+
+      // 注册带音频的 Cloze 命令和按钮
+      registerCommand('applyAudioCloze', (view: any) => {
+        if (view) return commands.applyAudioCloze(view);
+        return false;
+      });
+      registerToolbarButton({
+        id: 'audioCloze',
+        title: '音频挖空',
+        icon: '<i class="fas fa-volume-up"></i>', // 保持与旧版一致
+        command: 'applyAudioCloze'
+      });
+      
+      // 注册插入换行符的命令和按钮（对多行 Cloze 非常有用）
+      registerCommand('insertLinebreak', (view: any) => {
+        if (view) return commands.insertLinebreak(view);
+        return false;
+      });
+      registerToolbarButton({
+        id: 'linebreak',
+        title: '挖空内换行 (¶)',
+        icon: '<i class="fas fa-paragraph"></i>',
+        command: 'insertLinebreak'
+      });
+    }
 
     const removeDomUpdated = context.on('domUpdated', ({ element }: { element: HTMLElement }) => {
       this.attachEventListeners(element, context);
