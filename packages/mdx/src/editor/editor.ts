@@ -3,9 +3,9 @@ import { MDxRenderer } from '../renderer/renderer';
 import type { MDxPlugin } from '../core/plugin';
 import type { VFSCore } from '@itookit/vfs-core';
 import type { IPersistenceAdapter } from '@itookit/common';
-import { EditorView, basicSetup } from 'codemirror';
+import { EditorView } from 'codemirror';
 import { markdown } from '@codemirror/lang-markdown';
-import { EditorState } from '@codemirror/state';
+import { EditorState, Extension } from '@codemirror/state'; // 💡 导入 Extension
 import type { TaskToggleResult } from '../plugins/interactions/task-list.plugin'; // 💡 新增导入
 
 export interface MDxEditorConfig {
@@ -124,17 +124,30 @@ export class MDxEditor {
   private initCodeMirror(content: string): void {
     if (!this.editorContainer) return;
 
+    // 💡 核心修改：从插件管理器获取扩展，替换 basicSetup
+    const pluginManager = this.renderer.getPluginManager();
+    const extensions = pluginManager.codemirrorExtensions;
+
+    // 添加一个安全检查，以防核心插件未加载
+    if (extensions.length === 0) {
+      console.warn(
+        'MDxEditor: No CodeMirror extensions were provided by plugins. The editor may not function correctly. Please ensure CoreEditorPlugin is loaded.'
+      );
+    }
+    
+    const allExtensions: Extension[] = [
+      ...extensions, // 使用从插件收集的扩展
+      markdown(),
+      EditorView.updateListener.of((update) => {
+        if (update.docChanged) {
+          this.currentContent = update.state.doc.toString();
+        }
+      }),
+    ];
+
     const state = EditorState.create({
       doc: content,
-      extensions: [
-        basicSetup,
-        markdown(),
-        EditorView.updateListener.of((update) => {
-          if (update.docChanged) {
-            this.currentContent = update.state.doc.toString();
-          }
-        }),
-      ],
+      extensions: allExtensions,
     });
 
     this.editorView = new EditorView({

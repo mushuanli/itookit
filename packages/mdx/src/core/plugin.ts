@@ -1,4 +1,5 @@
 // src/core/plugin.ts
+import type { Extension } from '@codemirror/state'; // 💡 新增：导入 CodeMirror 扩展类型
 import type { Marked, MarkedExtension } from 'marked';
 import type { IPersistenceAdapter } from '@itookit/common';
 import type { VFSCore } from '@itookit/vfs-core';
@@ -44,6 +45,9 @@ export interface PluginContext {
   // 语法扩展
   registerSyntaxExtension(ext: MarkedExtension): void;
   
+  // 💡 新增：为编辑器注册 CodeMirror 扩展
+  registerCodeMirrorExtension?(extension: Extension | Extension[]): void;
+
   // 生命周期钩子
   on(hook: string, callback: Function): () => void;
   
