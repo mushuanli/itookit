@@ -5,8 +5,8 @@ import type { VFSCore } from '@itookit/vfs-core';
 import type { IPersistenceAdapter } from '@itookit/common';
 import { EditorView } from 'codemirror';
 import { markdown } from '@codemirror/lang-markdown';
-import { EditorState, Extension } from '@codemirror/state'; // 💡 导入 Extension
-import type { TaskToggleResult } from '../plugins/interactions/task-list.plugin'; // 💡 新增导入
+import { EditorState, Extension } from '@codemirror/state';
+import type { TaskToggleResult } from '../plugins/interactions/task-list.plugin';
 
 export interface MDxEditorConfig {
   initialMode?: 'edit' | 'render';
@@ -24,7 +24,7 @@ export interface MDxEditorConfig {
 export class MDxEditor {
   private renderer: MDxRenderer;
   private editorView: EditorView | null = null;
-  private container: HTMLElement | null = null;
+  private _container: HTMLElement | null = null;
   private editorContainer: HTMLElement | null = null;
   private renderContainer: HTMLElement | null = null;
   private currentMode: 'edit' | 'render';
@@ -55,11 +55,17 @@ export class MDxEditor {
    * 初始化编辑器
    */
   init(container: HTMLElement, initialContent: string = ''): void {
-    this.container = container;
+    this._container = container;
     this.currentContent = initialContent;
 
     // 创建容器结构
     this.createContainers();
+    if (this.container) {
+        // 清理可能存在的旧 class
+        this.container.classList.remove('is-edit-mode', 'is-render-mode');
+        // 添加初始模式的 class
+        this.container.classList.add(this.currentMode === 'edit' ? 'is-edit-mode' : 'is-render-mode');
+    }
 
     // 初始化 CodeMirror
     this.initCodeMirror(initialContent);
@@ -102,20 +108,24 @@ export class MDxEditor {
    * 创建容器结构
    */
   private createContainers(): void {
-    if (!this.container) return;
+    if (!this._container) return;
 
-    this.container.innerHTML = '';
-    this.container.className = 'mdx-editor-container';
+    this._container.innerHTML = '';
+    this._container.className = 'mdx-editor-container';
 
+    // 清理可能存在的旧 class
+    this._container.classList.remove('is-edit-mode', 'is-render-mode');
+    // 添加初始模式的 class
+    this._container.classList.add(this.currentMode === 'edit' ? 'is-edit-mode' : 'is-render-mode');
     // 编辑器容器
     this.editorContainer = document.createElement('div');
     this.editorContainer.className = 'mdx-editor-container__edit-mode'; // BEM 命名
-    this.container.appendChild(this.editorContainer);
+    this._container.appendChild(this.editorContainer);
 
     // 渲染器容器
     this.renderContainer = document.createElement('div');
     this.renderContainer.className = 'mdx-editor-container__render-mode'; // BEM 命名
-    this.container.appendChild(this.renderContainer);
+    this._container.appendChild(this.renderContainer);
   }
 
   /**
@@ -167,18 +177,22 @@ export class MDxEditor {
    * 切换模式
    */
   switchToMode(mode: 'edit' | 'render'): void {
-    if (!this.editorContainer || !this.renderContainer) return;
+    if (!this._container ||!this.editorContainer || !this.renderContainer) return;
 
     this.currentMode = mode;
 
     if (mode === 'edit') {
       this.editorContainer.style.display = 'block';
       this.renderContainer.style.display = 'none';
+      this._container.classList.add('is-edit-mode');
+      this._container.classList.remove('is-render-mode');
     } else {
       this.editorContainer.style.display = 'none';
       this.renderContainer.style.display = 'block';
       
       // 渲染当前内容
+      this._container.classList.add('is-render-mode');
+      this._container.classList.remove('is-edit-mode');
       this.renderContent();
     }
 
@@ -244,10 +258,32 @@ export class MDxEditor {
   }
 
   /**
+   * 获取 EditorView 实例
+   */
+  getEditorView(): EditorView | null {
+    return this.editorView;
+  }
+
+  /**
    * 获取渲染器实例
    */
   getRenderer(): MDxRenderer {
     return this.renderer;
+  }
+
+  /**
+   * 提供对编辑器主容器的只读访问。
+   */
+  public get container(): HTMLElement | null {
+    return this._container;
+  }
+
+  /**
+   * [新增] 获取渲染容器元素。
+   * 为打印等外部功能提供对渲染 DOM 的访问。
+   */
+  getRenderContainer(): HTMLElement | null {
+    return this.renderContainer;
   }
 
   /**
@@ -265,11 +301,11 @@ export class MDxEditor {
     this.cleanupListeners.forEach(fn => fn());
     this.cleanupListeners = [];
     
-    if (this.container) {
-      this.container.innerHTML = '';
+    if (this._container) {
+      this._container.innerHTML = '';
     }
 
-    this.container = null;
+    this._container = null;
     this.editorContainer = null;
     this.renderContainer = null;
   }

@@ -16,6 +16,21 @@
 
 @import './plugin-codeblock-controls.css';
 
+@import './plugin-toolbar.css';
+
+/* 当工具栏存在时，调整编辑器容器 */
+.mdx-editor-container.has-toolbar {
+  padding-top: 0;
+}
+
+/* 确保工具栏在编辑器容器内时的定位 */
+.mdx-editor-container > .mdx-editor-toolbar {
+  position: sticky;
+  top: 0;
+  left: 0;
+  right: 0;
+}
+
 /* 全局调整 */
 .mdx-editor-renderer .mdx-cloze {
   /* 确保在渲染器中正确显示 */

@@ -14,17 +14,33 @@ export interface ScopedPersistenceStore {
 }
 
 /**
- * 工具栏按钮配置
+ * 通用按钮配置（必须有图标）
  */
-export interface ToolbarButtonConfig {
+interface IToolbarButton {
   id: string;
+  type?: 'button'; // 可选的辨识符
   title?: string;
-  icon: string | HTMLElement;
+  icon: string | HTMLElement; // 必须有图标
   command?: string;
   onClick?: (context: any) => void;
   location?: 'main' | 'mode-switcher';
-  type?: 'separator';
 }
+
+/**
+ * 分隔符配置（没有图标）
+ */
+interface IToolbarSeparator {
+  id: string;
+  type: 'separator'; // 必须的辨识符
+  location?: 'main' | 'mode-switcher';
+}
+
+/**
+ * 工具栏按钮配置 - 联合类型
+ * 它可以是一个 IToolbarButton 或者一个 IToolbarSeparator
+ */
+export type ToolbarButtonConfig = IToolbarButton | IToolbarSeparator;
+
 
 /**
  * 标题栏按钮配置

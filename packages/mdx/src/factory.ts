@@ -19,6 +19,9 @@ import { MemoryPlugin } from './plugins/cloze/memory.plugin';
 import { TaskListPlugin, TaskListPluginOptions } from './plugins/interactions/task-list.plugin';
 import { CodeBlockControlsPlugin, CodeBlockControlsPluginOptions } from './plugins/interactions/codeblock-controls.plugin';
 
+import { ToolbarPlugin } from './plugins/ui/toolbar.plugin';
+import { FormattingPlugin } from './plugins/ui/formatting.plugin';
+
 import type { MDxPlugin } from './core/plugin';
 
 // --- Plugin Registry ---
@@ -83,6 +86,13 @@ export function registerPlugin(
 // 核心功能插件，优先级最高
 // 💡 新增：注册 CoreEditorPlugin，并给予最高优先级
 registerPlugin('editor:core', CoreEditorPlugin, { priority: 1 });
+
+// 注册工具栏插件
+registerPlugin('ui:toolbar', ToolbarPlugin, { priority: 2 });
+
+// 注册格式化插件
+registerPlugin('ui:formatting', FormattingPlugin, { priority: 3, dependencies: ['ui:toolbar'] });
+
 registerPlugin('mathjax', MathJaxPlugin, { priority: 5 });
 registerPlugin('folder', FoldablePlugin, { priority: 6 });
 registerPlugin('media', MediaPlugin, { priority: 7 });
@@ -131,6 +141,8 @@ export interface MDxEditorFactoryConfig extends MDxEditorConfig {
 
 // 💡 修改：将 'editor:core' 添加到默认插件列表的最前面
 const DEFAULT_PLUGINS: PluginConfig[] = [
+  'ui:toolbar',      // 新增
+  'ui:formatting',   // 新增
   'folder', 
   'mathjax',
   'media',
