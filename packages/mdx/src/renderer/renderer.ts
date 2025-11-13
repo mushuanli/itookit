@@ -27,6 +27,7 @@ export class MDxRenderer {
   private searchMarkClass: string;
   public markedExtensions: any[] = [];
   private instanceId: string;
+  private editorInstance: any = null; // 💡 新增：保存编辑器实例引用
 
   constructor(config: MDxRendererConfig = {}) {
     this.config = config;
@@ -67,6 +68,16 @@ export class MDxRenderer {
    */
   getInstanceId(): string {
     return this.instanceId;
+  }
+
+  /**
+   * 💡 新增：设置编辑器实例引用
+   * 由 MDxEditor 在初始化时调用
+   */
+  setEditorInstance(editor: any): void {
+    this.editorInstance = editor;
+    // 更新插件管理器的 coreInstance
+    (this.pluginManager as any).editorInstance = editor;
   }
 
   /**
