@@ -21,7 +21,7 @@ const editor = createMDxEditor({
   plugins: ['task-list'], // 自动更新 Markdown
 });
 
-editor.init(container, `
+await editor.init(container, `
 - [ ] 未完成任务
 - [x] 已完成任务
 `);

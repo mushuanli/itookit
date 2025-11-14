@@ -36,7 +36,7 @@ export interface TaskToggleDetail {
   taskText: string;
   isChecked: boolean;
   element: HTMLInputElement;
-  lineNumber?: number; // 任务在 Markdown 中的行号
+  lineNumber?: number;
 }
 
 /**
@@ -45,7 +45,7 @@ export interface TaskToggleDetail {
 export interface TaskToggleResult extends TaskToggleDetail {
   originalMarkdown: string;
   updatedMarkdown: string;
-  wasUpdated: boolean; // 是否成功更新
+  wasUpdated: boolean;
 }
 
 /**
@@ -63,12 +63,6 @@ export class TaskListPlugin implements MDxPlugin {
   private store: ScopedPersistenceStore | null = null;
   private currentMarkdown: string = '';
   
-  /**
-   * 🔥 修复：将 taskMap 从 static 改为实例属性。
-   * 这是最关键的修复。`static` 属性在所有插件实例间共享，会导致多实例场景下的
-   * 状态污染和数据错误。改为实例属性后，每个 MDxEditor 实例都将拥有自己独立的
-   * `taskMap`，从而实现完全隔离和多实例安全。
-   */
   private taskMap = new WeakMap<HTMLElement, Map<HTMLInputElement, TaskMetadata>>();
 
   constructor(options: TaskListPluginOptions = {}) {
@@ -111,7 +105,6 @@ export class TaskListPlugin implements MDxPlugin {
       const renderRoot = this.findRenderRoot(checkbox);
       if (!renderRoot) return;
 
-      // ✅ 修正：从实例属性 `this.taskMap` 读取数据
       const taskMeta = this.taskMap.get(renderRoot)?.get(checkbox);
       const listItem = checkbox.closest('.task-list-item');
       const taskText = listItem?.textContent?.trim() || '';
@@ -123,10 +116,8 @@ export class TaskListPlugin implements MDxPlugin {
         lineNumber: taskMeta?.lineNumber,
       };
 
-      // 调用 beforeTaskToggle 钩子
       const shouldProceed = await this.options.beforeTaskToggle(detail);
       if (!shouldProceed) {
-        // 如果钩子返回 false，则恢复复选框的原始状态并中止操作
         event.preventDefault();
         checkbox.checked = !checkbox.checked;
         return;
@@ -139,7 +130,6 @@ export class TaskListPlugin implements MDxPlugin {
         wasUpdated: false,
       };
 
-      // 自动更新 Markdown
       if (this.options.autoUpdateMarkdown && taskMeta) {
         const updated = this.updateMarkdown(taskMeta, detail.isChecked);
         if (updated) {
@@ -147,15 +137,12 @@ export class TaskListPlugin implements MDxPlugin {
           result.wasUpdated = true;
           this.currentMarkdown = updated;
           
-          // 保存到持久化存储
           await this.store?.set('currentMarkdown', updated);
         }
       }
 
-      // 触发全局事件，通知编辑器等外部监听者内容已变更
       context.emit('taskToggled', result);
       
-      // 调用回调
       await this.options.onTaskToggled(result);
     };
   }
@@ -222,7 +209,6 @@ export class TaskListPlugin implements MDxPlugin {
       taskIndex++;
     });
 
-    // ✅ 修正：将映射表存入实例属性 `this.taskMap`
     this.taskMap.set(element, taskMapForElement);
   }
 
@@ -246,20 +232,16 @@ export class TaskListPlugin implements MDxPlugin {
    * 安装插件
    */
   install(context: PluginContext): void {
-    // 注册 Marked 扩展（在 beforeParse 之前）
     context.registerSyntaxExtension(this.createMarkedExtension());
 
-    // 初始化存储
     this.store = context.getScopedStore();
     
-    // 恢复持久化的 Markdown
     this.store.get('currentMarkdown').then(saved => {
       if (saved) {
         this.currentMarkdown = saved;
       }
     });
 
-    // 监听 beforeParse 钩子，捕获最新的原始 Markdown
     const removeBeforeParse = context.on('beforeParse', ({ markdown }: { markdown: string }) => {
       this.currentMarkdown = markdown;
       return { markdown };
@@ -268,19 +250,14 @@ export class TaskListPlugin implements MDxPlugin {
       this.cleanupFns.push(removeBeforeParse);
     }
 
-    // 监听 DOM 更新，构建任务映射并绑定事件
     const removeDomUpdated = context.on('domUpdated', ({ element }: { element: HTMLElement }) => {
-      // 构建任务映射表
       this.buildTaskMap(element);
 
-      // 2. ✅ 修正：实现幂等性，防止重复绑定事件监听器
-      // 检查并移除任何先前附加的点击处理器（无论来自哪个实例）
       const existingHandler = (element as any)._taskListClickHandler;
       if (existingHandler) {
         element.removeEventListener('click', existingHandler);
       }
 
-      // 绑定事件监听器
       const clickHandler = this.createClickHandler(context);
       element.addEventListener('click', clickHandler);
       (element as any)._taskListClickHandler = clickHandler;

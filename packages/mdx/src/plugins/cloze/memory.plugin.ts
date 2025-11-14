@@ -10,7 +10,6 @@ export class MemoryPlugin implements MDxPlugin {
   name = 'feature:memory';
   private options: Required<MemoryPluginOptions>;
   private cleanupFns: Array<() => void> = [];
-  // 使用 WeakMap 缓存，避免多实例数据污染
   private clozeStatesCache = new WeakMap<PluginContext, Map<string, any>>();
 
   constructor(options: MemoryPluginOptions = {}) {
@@ -48,7 +47,6 @@ export class MemoryPlugin implements MDxPlugin {
   private async syncWithVFS(context: PluginContext): Promise<void> {
     const store = context.getScopedStore();
     try {
-        // 假设 VFS 数据存在一个顶层键 '_mdx_srs' 下
         const srsData = await store.get('_mdx_srs') || {};
         this.getCache(context).clear();
         for (const [key, value] of Object.entries(srsData)) {
@@ -68,7 +66,6 @@ export class MemoryPlugin implements MDxPlugin {
 
       const state = cache.get(locator);
       
-      // 重置所有状态类
       cloze.classList.remove('is-new', 'is-learning', 'is-mature', 'is-due');
       
       if (!state) {
@@ -78,11 +75,9 @@ export class MemoryPlugin implements MDxPlugin {
 
       if (state.dueAt && new Date(state.dueAt) <= new Date()) {
         cloze.classList.add('is-due');
-        // 强制显示到期的卡片
         cloze.classList.remove('hidden');
       } else if (state.status === 'mature') {
         cloze.classList.add('is-mature');
-        // 订正逻辑：成熟卡片不应强制显示，尊重其默认隐藏状态
       } else {
         cloze.classList.add('is-learning');
       }
@@ -103,7 +98,6 @@ export class MemoryPlugin implements MDxPlugin {
     `;
 
     const timeout = setTimeout(() => {
-      // 默认评分为 "Good"
       this.gradeCard(clozeElement, 3, context);
       panel.remove();
     }, this.options.gradingTimeout);
@@ -125,7 +119,7 @@ export class MemoryPlugin implements MDxPlugin {
       const scope = container || document;
     const clozes = scope.querySelectorAll('.mdx-cloze:not(.is-mature)');
     clozes.forEach(cloze => {
-      if (!cloze.classList.contains('hidden')) { // 只为已展开的显示评分
+      if (!cloze.classList.contains('hidden')) {
         this.showGradingPanel(cloze as HTMLElement, context);
       }
     });
@@ -136,7 +130,6 @@ export class MemoryPlugin implements MDxPlugin {
     if (!locator) return;
 
     const store = context.getScopedStore();
-    // 假设 VFS/Adapter 有一个 SRS provider
     const srsProvider = context.inject('srsProvider');
 
     try {
@@ -150,7 +143,6 @@ export class MemoryPlugin implements MDxPlugin {
         }
       } else {
           console.warn("MemoryPlugin: No 'srsProvider' found to grade card.");
-          // Fallback: 直接更新本地存储（如果需要）
       }
     } catch (error) {
       console.error('MemoryPlugin: Failed to grade card:', error);

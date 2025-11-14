@@ -1,8 +1,9 @@
-// src/core/plugin.ts
-import type { Extension } from '@codemirror/state'; // 💡 新增：导入 CodeMirror 扩展类型
+// mdx/core/plugin.ts
+import type { Extension } from '@codemirror/state';
 import type { Marked, MarkedExtension } from 'marked';
 import type { IPersistenceAdapter } from '@itookit/common';
 import type { VFSCore } from '@itookit/vfs-core';
+import type { PluginManager } from './plugin-manager';
 
 /**
  * 作用域持久化存储接口
@@ -18,9 +19,9 @@ export interface ScopedPersistenceStore {
  */
 interface IToolbarButton {
   id: string;
-  type?: 'button'; // 可选的辨识符
+  type?: 'button';
   title?: string;
-  icon: string | HTMLElement; // 必须有图标
+  icon: string | HTMLElement;
   command?: string;
   onClick?: (context: any) => void;
   location?: 'main' | 'mode-switcher';
@@ -31,7 +32,7 @@ interface IToolbarButton {
  */
 interface IToolbarSeparator {
   id: string;
-  type: 'separator'; // 必须的辨识符
+  type: 'separator';
   location?: 'main' | 'mode-switcher';
 }
 
@@ -59,6 +60,8 @@ export interface TitleBarButtonConfig {
  * 插件上下文接口
  */
 export interface PluginContext {
+  readonly pluginManager: PluginManager; 
+
   // 语法扩展
   registerSyntaxExtension(ext: MarkedExtension): void;
   

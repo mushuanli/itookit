@@ -3,17 +3,18 @@
  * @desc 核心编辑器插件，为 MDxEditor 提供 CodeMirror 6 的基础编辑体验。
  */
 import type { MDxPlugin, PluginContext } from '../../core/plugin';
-import { EditorView, keymap } from '@codemirror/view';
 import { EditorState, type Extension } from '@codemirror/state';
 import {
   lineNumbers,
   highlightActiveLineGutter,
   highlightSpecialChars,
-  drawSelection,
-  dropCursor,
-  rectangularSelection,
+  drawSelection, 
+  dropCursor, 
+  rectangularSelection, 
   crosshairCursor,
-  highlightActiveLine,
+  highlightActiveLine, 
+  keymap, 
+  EditorView 
 } from '@codemirror/view';
 import { history, defaultKeymap, historyKeymap } from '@codemirror/commands';
 import { 
@@ -29,10 +30,13 @@ import {
   closeBrackets,
   autocompletion,
   closeBracketsKeymap,
-  completionKeymap,
+  type CompletionContext,
+  type CompletionResult,
+  type Completion,
 } from '@codemirror/autocomplete';
 import { lintKeymap } from '@codemirror/lint';
 import { markdown } from '@codemirror/lang-markdown';
+import type { AutocompleteSourceConfig } from '../autocomplete/autocomplete.plugin';
 
 /**
  * 核心编辑器插件配置选项
@@ -123,7 +127,6 @@ export class CoreEditorPlugin implements MDxPlugin {
 
   constructor(options: CoreEditorPluginOptions = {}) {
     this.options = {
-      // 修改点：将默认值从 true 改为 false。只有当用户明确传入 true 时才启用。
       enableLineNumbers: options.enableLineNumbers === true,
       enableHistory: options.enableHistory !== false,
       enableFolding: options.enableFolding !== false,
@@ -200,11 +203,6 @@ export class CoreEditorPlugin implements MDxPlugin {
       extensions.push(closeBrackets());
     }
 
-    // 自动补全
-    if (this.options.enableAutocompletion) {
-      extensions.push(autocompletion());
-    }
-
     // === 3. 高级编辑与交互 (Advanced Editing & Interaction) ===
 
     // 矩形选择
@@ -235,10 +233,7 @@ export class CoreEditorPlugin implements MDxPlugin {
     if (this.options.enableCloseBrackets) {
       keymaps.push(keymap.of(closeBracketsKeymap)); // 括号闭合快捷键
     }
-
-    if (this.options.enableAutocompletion) {
-      keymaps.push(keymap.of(completionKeymap)); // 自动补全快捷键
-    }
+    
 
     keymaps.push(keymap.of(lintKeymap)); // 代码检查快捷键
 
@@ -250,9 +245,6 @@ export class CoreEditorPlugin implements MDxPlugin {
     extensions.push(markdown());
 
     // === 6. 核心主题与样式 (Essential Styling) ===
-    // 这是关键步骤。EditorView.baseTheme 提供了所有基础 UI 元素
-    // (如光标、选区、行号槽、匹配括号等)所必需的 CSS 规则。
-    // 没有它，很多视觉功能将无法正常工作。
     extensions.push(EditorView.baseTheme({
       // 在这里可以对基础主题进行微调，但通常保持默认即可。
       // '&.cm-focused .cm-cursor': { borderLeftColor: 'red' }
@@ -274,29 +266,34 @@ export class CoreEditorPlugin implements MDxPlugin {
    * 每个编辑器实例都会独立调用此方法，确保多实例安全。
    */
   install(context: PluginContext): void {
-    // 构建核心扩展集合
-    const coreExtensions = this.buildCoreExtensions();
+  console.log('🚀 [CoreEditorPlugin] Installing...');
+  
+  const coreExtensions = this.buildCoreExtensions();
+  context.registerCodeMirrorExtension?.(coreExtensions);
+  console.log(`🚀 [CoreEditorPlugin] Registered ${coreExtensions.length} core extensions`);
 
-    // 如果上下文支持注册 CodeMirror 扩展，则注册它们
-    // 注意：这需要 MDxEditor 或其他宿主提供 registerCodeMirrorExtension 方法
-    if (typeof (context as any).registerCodeMirrorExtension === 'function') {
-      coreExtensions.forEach(ext => {
-        (context as any).registerCodeMirrorExtension(ext);
-      });
-    } else {
-      // 如果宿主不支持注册扩展，则通过依赖注入提供扩展
-      // 其他组件（如编辑器初始化代码）可以通过 inject 获取这些扩展
-      context.provide('coreEditorExtensions', coreExtensions);
-    }
+  if (this.options.enableAutocompletion) {
+    console.log('⏰ [CoreEditorPlugin] Scheduling autocomplete registration with setTimeout(0)...');
+    setTimeout(() => {
+      console.log('⏰ [CoreEditorPlugin] setTimeout callback executing NOW');
+      const pluginManager = context.pluginManager;
+      
+      if (pluginManager) {
+        const sourcesCount = (pluginManager as any)._autocompleteSources?.length || 0;
+        console.log(`⏰ [CoreEditorPlugin] Found ${sourcesCount} autocomplete sources`);
+        this.registerAutocompletion(context, pluginManager);
+      } else {
+        console.warn('⏰ [CoreEditorPlugin] pluginManager not found!');
+        context.registerCodeMirrorExtension?.(autocompletion());
+      }
+    }, 0);
+  }
 
-    // 监听编辑器初始化事件（如果需要进一步配置）
-    const removeEditorInit = context.on('editorPostInit', (payload: any) => {
-      this.onEditorInitialized(payload);
-    });
-
+    const removeEditorInit = context.on('editorPostInit', this.onEditorInitialized.bind(this));
     if (removeEditorInit) {
       this.cleanupFns.push(removeEditorInit);
     }
+  console.log('🚀 [CoreEditorPlugin] Installation complete');
   }
 
   /**
@@ -318,6 +315,106 @@ export class CoreEditorPlugin implements MDxPlugin {
   destroy(): void {
     this.cleanupFns.forEach(fn => fn());
     this.cleanupFns = [];
+  }
+
+  // === 移植点 6: 复制文件2的所有自动补全相关方法 ===
+
+  /**
+   * 统一注册自动补全扩展
+   */
+  private registerAutocompletion(context: PluginContext, pluginManager: any): void {
+    const sources: AutocompleteSourceConfig[] = (pluginManager as any)._autocompleteSources || [];
+    
+  console.log(`🎯 [CoreEditorPlugin] registerAutocompletion called with ${sources.length} sources`);
+    if (sources.length === 0) {
+      console.log(`[${this.name}] No autocomplete sources found. Registering default markdown autocompletion.`);
+      // 如果没有自定义源，可以注册一个默认的作为降级
+      context.registerCodeMirrorExtension?.(autocompletion());
+      return;
+    }
+
+  console.log('🎯 [CoreEditorPlugin] Creating unified completion source...');
+    const completionSource = this.createUnifiedCompletionSource(sources);
+    const autocompleteExt = autocompletion({
+      override: [completionSource],
+      activateOnTyping: true,
+    });
+
+    context.registerCodeMirrorExtension?.(autocompleteExt);
+    console.log(`[${this.name}] Registered unified autocompletion with ${sources.length} sources.`);
+  }
+
+  /**
+   * 创建统一的补全源函数
+   */
+  private createUnifiedCompletionSource(sources: AutocompleteSourceConfig[]) {
+    return async (context: CompletionContext): Promise<CompletionResult | null> => {
+      const { state, pos } = context;
+      const textBefore = state.sliceDoc(0, pos);
+    console.log(`🔍 [Autocomplete] Triggered at pos ${pos}, text: "${textBefore.slice(-20)}"`);
+
+      for (const sourceConfig of sources) {
+        const { triggerChar, provider, applyTemplate, minQueryLength = 0 } = sourceConfig;
+        const match = this.matchTrigger(textBefore, triggerChar);
+
+        if (!match) continue;
+
+      console.log(`🎯 [Autocomplete] Matched trigger "${triggerChar}", query: "${match.query}"`);
+        const { start, query } = match;
+      if (query.length < minQueryLength) {
+        console.log(`⏩ [Autocomplete] Query too short (${query.length} < ${minQueryLength})`);
+        continue;
+      }
+
+      const suggestions = await provider.getSuggestions(query);
+      console.log(`📋 [Autocomplete] Got ${suggestions.length} suggestions for "${query}"`);
+      
+      if (suggestions.length === 0) continue;
+
+      const completions = suggestions.map((item) => ({
+        ...item,
+        apply: (view: EditorView, completion: any, from: number, to: number) => {
+          const text = applyTemplate(item);
+          console.log(`✏️ [Autocomplete] Applying: "${text}"`);
+          view.dispatch({
+            changes: { from: start, to, insert: text },
+            selection: { anchor: start + text.length },
+          });
+        },
+      }));
+
+        return {
+          from: start,
+          options: completions,
+          validFor: /^[\w-]*$/,
+        };
+      }
+
+    console.log('❌ [Autocomplete] No matches found');
+      return null;
+    };
+  }
+
+  /**
+   * 匹配触发字符和查询词
+   */
+  private matchTrigger(
+    text: string,
+    triggerChar: string
+  ): { start: number; query: string } | null {
+    const lastTriggerIndex = text.lastIndexOf(triggerChar);
+    if (lastTriggerIndex === -1) return null;
+
+    const charBefore = text[lastTriggerIndex - 1];
+    if (charBefore && !/\s/.test(charBefore) && lastTriggerIndex > 0) return null;
+
+    const query = text.slice(lastTriggerIndex + 1);
+    if (/\s/.test(query)) return null;
+
+    return {
+      start: lastTriggerIndex,
+      query,
+    };
   }
 }
 

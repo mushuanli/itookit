@@ -216,6 +216,8 @@ export class PluginManager {
     const eventHandlers = new Map<string, symbol>();
 
     return {
+      pluginManager: this,
+
       // 语法扩展
       registerSyntaxExtension: (ext: MarkedExtension) => {
         if (!this.coreInstance.markedExtensions) {
@@ -224,7 +226,7 @@ export class PluginManager {
         this.coreInstance.markedExtensions.push(ext);
       },
 
-      // 💡 新增：实现 CodeMirror 扩展注册逻辑
+      // 💡 实现 CodeMirror 扩展注册逻辑
       registerCodeMirrorExtension: (extension: Extension | Extension[]) => {
         if (Array.isArray(extension)) {
           this.codemirrorExtensions.push(...extension);
@@ -233,22 +235,18 @@ export class PluginManager {
         }
       },
 
-      // 新增：注册命令
       registerCommand: (name: string, fn: Function) => {
         this.commands.set(name, fn);
       },
 
-      // 新增：注册工具栏按钮
       registerToolbarButton: (config: ToolbarButtonConfig) => {
         this.toolbarButtons.push(config);
       },
 
-      // 新增：注册标题栏按钮
       registerTitleBarButton: (config: TitleBarButtonConfig) => {
         this.titleBarButtons.push(config);
       },
 
-      // 💡 新增：实现 findAndSelectText 方法
       findAndSelectText: (text: string) => {
         const target = this.editorInstance || this.coreInstance;
         if (target && typeof target.findAndSelectText === 'function') {
@@ -258,7 +256,6 @@ export class PluginManager {
         }
       },
 
-      // 💡 修改：优先使用 editorInstance
       switchToMode: (mode: 'edit' | 'render') => {
         const target = this.editorInstance || this.coreInstance;
         if (target && typeof target.switchToMode === 'function') {
@@ -278,7 +275,6 @@ export class PluginManager {
         
         hookHandlers.set(hook, handlerId);
 
-        // 返回移除函数
         return () => {
           this.hooks.get(hook)?.delete(handlerId);
         };
@@ -399,7 +395,6 @@ export class PluginManager {
       context._cleanup();
     }
 
-    // 清理插件的内存存储
     const store = this.instanceStores.get(pluginName);
     if (store) {
       store.clear();
@@ -464,7 +459,7 @@ export class PluginManager {
 
 
   /**
-   * 💡 新增：监听事件（供外部如 MDxEditor 使用）
+   * 监听事件（供外部如 MDxEditor 使用）
    * @param eventName - 事件名称
    * @param callback - 回调函数
    * @returns 一个用于取消监听的函数
@@ -511,7 +506,7 @@ export class PluginManager {
     this.eventBus.clear();
     this.serviceContainer.clear();
     this.instanceStores.clear();
-    this.codemirrorExtensions = []; // 💡 新增：销毁时清空扩展
+    this.codemirrorExtensions = [];
 
     this.commands.clear();
     this.toolbarButtons = [];

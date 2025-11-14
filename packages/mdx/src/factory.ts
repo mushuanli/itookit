@@ -2,34 +2,24 @@
  * @file mdx/factory.ts
  */
 import { MDxEditor, MDxEditorConfig } from './editor/editor';
-
-// 💡 新增：导入 CoreEditorPlugin
 import { CoreEditorPlugin, CoreEditorPluginOptions } from './plugins/core/core-editor.plugin';
-
 import { FoldablePlugin, FoldablePluginOptions } from './plugins/syntax-extensions/foldable.plugin';
 import { MathJaxPlugin, MathJaxPluginOptions } from './plugins/syntax-extensions/mathjax.plugin';
-
 import { MediaPlugin, MediaPluginOptions } from './plugins/syntax-extensions/media.plugin';
 import { MermaidPlugin, MermaidPluginOptions } from './plugins/syntax-extensions/mermaid.plugin';
-
 import { ClozePlugin } from './plugins/cloze/cloze.plugin';
 import { ClozeControlsPlugin } from './plugins/cloze/cloze-control-ui.plugin';
 import { MemoryPlugin } from './plugins/cloze/memory.plugin';
-
 import { TaskListPlugin, TaskListPluginOptions } from './plugins/interactions/task-list.plugin';
 import { CodeBlockControlsPlugin, CodeBlockControlsPluginOptions } from './plugins/interactions/codeblock-controls.plugin';
-
 import { ToolbarPlugin } from './plugins/ui/toolbar.plugin';
 import { FormattingPlugin } from './plugins/ui/formatting.plugin';
-
 import { CoreTitleBarPlugin } from './plugins/ui/titlebar.plugin';
 import { SourceSyncPlugin } from './plugins/interactions/source-jump.plugin';
-
+import { TagPlugin, TagPluginOptions } from './plugins/autocomplete/tag.plugin';
+import { MentionPlugin, MentionPluginOptions } from './plugins/autocomplete/mention.plugin';
 import type { MDxPlugin } from './core/plugin';
 
-// --- Plugin Registry ---
-
-// 定义插件构造函数类型
 type MDxPluginConstructor = new (...args: any[]) => MDxPlugin;
 
 /**
@@ -58,8 +48,6 @@ export interface RegisterPluginOptions {
   dependencies?: string[];
 }
 
-// --- 更新插件注册表 ---
-
 const pluginRegistry = new Map<string, PluginRegistrationInfo>();
 
 /**
@@ -79,42 +67,25 @@ export function registerPlugin(
   
   pluginRegistry.set(name, {
     constructor: pluginClass,
-    priority: options.priority ?? 100, // 默认优先级较低
+    priority: options.priority ?? 100,
     dependencies: options.dependencies ?? [],
   });
 }
 
-// --- 为插件注册添加元数据 ---
-
-// 核心功能插件，优先级最高
-// 💡 新增：注册 CoreEditorPlugin，并给予最高优先级
 registerPlugin('editor:core', CoreEditorPlugin, { priority: 1 });
-
-// 注册标题栏插件
 registerPlugin('core:titlebar', CoreTitleBarPlugin, { 
   priority: 2,
-  //dependencies: ['editor:core'] 
 });
-
-// 注册源码同步插件
 registerPlugin('interaction:source-sync', SourceSyncPlugin, { 
   priority: 60 
 });
-
-// 注册工具栏插件
 registerPlugin('ui:toolbar', ToolbarPlugin, { priority: 2 });
-
-// 注册格式化插件
 registerPlugin('ui:formatting', FormattingPlugin, { priority: 3, dependencies: ['ui:toolbar'] });
-
 registerPlugin('mathjax', MathJaxPlugin, { priority: 5 });
 registerPlugin('folder', FoldablePlugin, { priority: 6 });
 registerPlugin('media', MediaPlugin, { priority: 7 });
 registerPlugin('mermaid', MermaidPlugin, { priority: 8 });
-
 registerPlugin('cloze', ClozePlugin, { priority: 10 });
-
-// 依赖于核心功能的插件，优先级较低
 registerPlugin('cloze-controls', ClozeControlsPlugin, {
   priority: 20,
   dependencies: ['cloze'],
@@ -123,12 +94,10 @@ registerPlugin('memory', MemoryPlugin, {
   priority: 20,
   dependencies: ['cloze'],
 });
-
 registerPlugin('task-list', TaskListPlugin, { priority: 51 });
 registerPlugin('codeblock-controls', CodeBlockControlsPlugin, { priority: 52 });
-
-
-// --- 新的配置接口 ---
+registerPlugin('autocomplete:tag', TagPlugin, { priority: 53 });
+registerPlugin('autocomplete:mention', MentionPlugin, { priority: 54 });
 
 export type PluginConfig = 
   | string
@@ -139,25 +108,25 @@ export type PluginConfig =
 export interface MDxEditorFactoryConfig extends MDxEditorConfig {
   plugins?: PluginConfig[];
   defaultPluginOptions?: {
-    'editor:core'?: CoreEditorPluginOptions; // CoreEditor 的配置入口
+    'editor:core'?: CoreEditorPluginOptions;
     folder?: FoldablePluginOptions;
     mathjax?: MathJaxPluginOptions;
     media?: MediaPluginOptions;
     mermaid?: MermaidPluginOptions;
-    'task-list'?: TaskListPluginOptions;        // 新增
-    'codeblock-controls'?: CodeBlockControlsPluginOptions;  // 新增
+    'task-list'?: TaskListPluginOptions;
+    'codeblock-controls'?: CodeBlockControlsPluginOptions;
+    'autocomplete:tag'?: TagPluginOptions;
+    'autocomplete:mention'?: MentionPluginOptions;
     [key: string]: Record<string, any> | undefined;
   };
 }
 
 
 // --- 工厂函数 ---
-
-// 💡 修改：将 'editor:core' 添加到默认插件列表的最前面
 const DEFAULT_PLUGINS: PluginConfig[] = [
-  'ui:toolbar',      // 新增
-  'ui:formatting',   // 新增
-  'interaction:source-sync', // 新增
+  'ui:toolbar',
+  'ui:formatting',
+  'interaction:source-sync',
   'folder', 
   'mathjax',
   'media',
@@ -189,21 +158,19 @@ function getPluginName(config: PluginConfig): string {
 function sortPlugins(pluginNames: string[]): string[] {
   const sorted: string[] = [];
   const inDegrees = new Map<string, number>();
-  const graph = new Map<string, string[]>(); // key: dependency, value: list of plugins that depend on it
+  const graph = new Map<string, string[]>();
 
-  // 1. 初始化图和入度
   for (const name of pluginNames) {
     inDegrees.set(name, 0);
     graph.set(name, []);
   }
 
-  // 2. 构建图和计算入度
   for (const name of pluginNames) {
     const info = pluginRegistry.get(name);
     if (!info) continue;
 
     for (const dep of info.dependencies) {
-      if (pluginNames.includes(dep)) { // 只考虑当前加载列表中的依赖
+      if (pluginNames.includes(dep)) {
         graph.get(dep)!.push(name);
         inDegrees.set(name, (inDegrees.get(name) || 0) + 1);
       } else {
@@ -212,7 +179,6 @@ function sortPlugins(pluginNames: string[]): string[] {
     }
   }
 
-  // 3. 初始化优先级队列（存储所有入度为0的插件）
   const queue: string[] = [];
   for (const name of pluginNames) {
     if (inDegrees.get(name) === 0) {
@@ -222,9 +188,7 @@ function sortPlugins(pluginNames: string[]): string[] {
 
   const getPriority = (name: string) => pluginRegistry.get(name)?.priority ?? 100;
   
-  // 4. 拓扑排序主循环
   while (queue.length > 0) {
-    // 按优先级排序队列，数字小的在前
     queue.sort((a, b) => getPriority(a) - getPriority(b));
 
     const current = queue.shift()!;
@@ -239,7 +203,6 @@ function sortPlugins(pluginNames: string[]): string[] {
     }
   }
 
-  // 5. 检测循环依赖
   if (sorted.length !== pluginNames.length) {
     const remaining = pluginNames.filter(p => !sorted.includes(p));
     throw new Error(`Circular dependency detected among plugins: ${remaining.join(', ')}`);
@@ -264,12 +227,10 @@ export function createMDxEditor(config: MDxEditorFactoryConfig = {}): MDxEditor 
     ...config,
   });
 
-  // 修改点 2: 无条件加载 CoreEditorPlugin 作为基础。
   const coreOptions = config.defaultPluginOptions?.['editor:core'] || {};
   const corePlugin = new CoreEditorPlugin(coreOptions);
   editor.use(corePlugin);
 
-  // --- 处理用户配置的功能性插件 ---
   let basePlugins = DEFAULT_PLUGINS;
   const userPlugins = config.plugins || [];
 

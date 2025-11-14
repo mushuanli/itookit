@@ -1,0 +1,139 @@
+/* @file: mdx/styles/plugin-autocomplete.css
+ * Styles for Autocomplete Plugins (Tag, Mention) with BEM and namespace conventions.
+ */
+
+/* ========================================Mention Links
+   ======================================== */
+
+.mdx-mention {
+  color: #0066cc;
+  text-decoration: none;
+  padding: 0.1em 0.3em;
+  border-radius: 3px;
+  background-color: rgba(0, 102, 204, 0.1);
+  transition: background-color 0.2s ease;
+}
+
+.mdx-mention:hover {
+  background-color: rgba(0, 102, 204, 0.2);
+  text-decoration: underline;
+}
+
+/* ========================================
+   Hover Preview Card
+   ======================================== */
+
+.mdx-mention-hover-card {
+  position: absolute;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  max-width: 300px;
+  display: none;
+}
+
+.mdx-mention-hover-card__title {
+  font-weight: 600;
+  margin-bottom: 8px;
+  font-size: 14px;
+  color: #333;
+}
+
+.mdx-mention-hover-card__content {
+  font-size: 13px;
+  color: #666;
+  line-height: 1.5;
+}
+
+/* ========================================
+   Transclusion (Content Embedding)
+   ======================================== */
+
+.mdx-transclusion {
+  margin: 1em 0;
+  padding: 1em;
+  border-left: 3px solid #0066cc;
+  background-color: #f8f9fa;
+  border-radius: 4px;
+}
+
+.mdx-transclusion--loaded {
+  border-left-color: #28a745;
+}
+
+.mdx-transclusion--error {
+  border-left-color: #dc3545;
+  color: #dc3545;
+}
+
+/* ========================================
+   CodeMirror Autocomplete Customization
+   ======================================== */
+
+.cm-tooltip-autocomplete {
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.cm-completionIcon {
+  width: 1.2em;
+  text-align: center;
+  margin-right: 0.5em;
+}
+
+.cm-completionIcon-keyword::after {
+  content: '#';
+  color: #0066cc;
+}
+
+.cm-completionDetail {
+  font-style: italic;
+  color: #999;
+  margin-left: 0.5em;
+}
+
+/* ========================================
+   Dark Theme Support
+   ======================================== */
+
+@media (prefers-color-scheme: dark) {
+  .mdx-mention {
+    color: #4da6ff;
+    background-color: rgba(77, 166, 255, 0.15);
+  }
+
+  .mdx-mention:hover {
+    background-color: rgba(77, 166, 255, 0.25);
+  }
+
+  .mdx-mention-hover-card {
+    background: #2d2d2d;
+    border-color: #444;box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  }
+
+  .mdx-mention-hover-card__title {
+    color: #e0e0e0;
+  }
+
+  .mdx-mention-hover-card__content {
+    color: #b0b0b0;
+  }
+
+  .mdx-transclusion {
+    background-color: #2d2d2d;
+    border-left-color: #4da6ff;
+  }
+
+  .mdx-transclusion--loaded {
+    border-left-color: #4caf50;
+  }
+
+  .cm-tooltip-autocomplete {
+    background: #2d2d2d;
+    border-color: #444;
+  }
+}

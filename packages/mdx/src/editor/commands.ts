@@ -24,7 +24,6 @@ export function applyMarkdownFormatting(
     const after = state.sliceDoc(to, Math.min(state.doc.length, to + marker.length));
 
     if (before === marker && after === marker) {
-        // 移除格式
         dispatch({
             changes: [
                 { from: from - marker.length, to: from, insert: '' },
@@ -32,7 +31,6 @@ export function applyMarkdownFormatting(
             ]
         });
     } else {
-        // 添加格式
         dispatch({
             changes: { from, to, insert: `${marker}${selectedText}${marker}` },
             selection: { anchor: from + marker.length, head: to + marker.length }
@@ -58,10 +56,8 @@ export function applyCloze(view: EditorView): boolean {
     const doc = view.state.doc;
     const docString = doc.toString();
 
-    // 使用带 'd' 标志的正则表达式来获取匹配项的索引
     const clozeRegex = /--.*?--/gd;
     
-    // 1. 检查选区是否在一个现有的 Cloze 内部，如果是则解包
     for (const match of docString.matchAll(clozeRegex)) {
         const clozeStart = match.indices?.[0]?.[0];
         const clozeEnd = match.indices?.[0]?.[1];
@@ -70,7 +66,6 @@ export function applyCloze(view: EditorView): boolean {
 
         if (from >= clozeStart + 2 && to <= clozeEnd - 2) {
             const content = match[0].substring(2, match[0].length - 2);
-            // 移除可能存在的 locator 或 audio 提示
             const plainContent = content.replace(/(\s*\[[^\]]*\]\s*)?(\^\^.*?\^\^)?$/, '');
 
             view.dispatch({
@@ -82,18 +77,15 @@ export function applyCloze(view: EditorView): boolean {
         }
     }
 
-    // 2. 如果不是在内部，则执行合并或创建逻辑
     let modificationStart = from;
     let modificationEnd = to;
 
-    // 查找所有重叠或相邻的现有 Cloze，以确定最终的修改范围
     for (const match of docString.matchAll(clozeRegex)) {
         const clozeStart = match.indices?.[0]?.[0];
         const clozeEnd = match.indices?.[0]?.[1];
 
         if (clozeStart === undefined || clozeEnd === undefined) continue;
 
-        // 检查重叠或紧邻（允许中间有空白字符）
         const isTouching = (
             (modificationStart >= clozeStart && modificationStart <= clozeEnd) ||
             (modificationEnd >= clozeStart && modificationEnd <= clozeEnd) ||
@@ -108,7 +100,6 @@ export function applyCloze(view: EditorView): boolean {
         }
     }
 
-    // 3. 获取需要包裹的最终内容，并移除内部的所有 Cloze 标记
     const contentToWrap = doc.sliceString(modificationStart, modificationEnd).replace(/--/g, '');
     
     if (!contentToWrap.trim()) {
@@ -176,7 +167,6 @@ function toggleLinePrefix(view: EditorView, prefix: string): boolean {
     let changes: ChangeSpec[] = [];
     let allLinesHavePrefix = true;
     
-    // 检查是否所有行都已有前缀
     for (let i = fromLine.number; i <= toLine.number; i++) {
         const line = state.doc.line(i);
         if (line.length > 0 && !line.text.trimStart().startsWith(prefix)) {
@@ -185,16 +175,13 @@ function toggleLinePrefix(view: EditorView, prefix: string): boolean {
         }
     }
 
-    // 根据检查结果添加或移除前缀
     for (let i = fromLine.number; i <= toLine.number; i++) {
         const line = state.doc.line(i);
         if (allLinesHavePrefix) {
-            // 移除前缀
             if (line.text.includes(prefix)) {
                 changes.push({ from: line.from + line.text.indexOf(prefix), to: line.from + line.text.indexOf(prefix) + prefix.length, insert: '' });
             }
         } else if (line.length > 0 && !line.text.trimStart().startsWith(prefix)) {
-            // 添加前缀
             changes.push({ from: line.from, insert: prefix });
         }
     }
@@ -381,7 +368,7 @@ export async function handlePrintAction(editor: MDxEditor): Promise<boolean> {
     if (!printContainer) {
         printContainer = document.createElement('div');
         printContainer.id = 'mdx-print-container';
-        printContainer.className = 'rich-content-area'; // 假设有这个样式类
+        printContainer.className = 'rich-content-area';
         document.body.appendChild(printContainer);
     }
     
@@ -393,7 +380,6 @@ export async function handlePrintAction(editor: MDxEditor): Promise<boolean> {
             }
         } else {
             const latestMarkdown = editor.getContent();
-            // 渲染一份专为打印优化的 "答案版"
             await editor.getRenderer().render(printContainer, latestMarkdown, {
                 areAllClozesVisible: true 
             });
@@ -409,7 +395,6 @@ export async function handlePrintAction(editor: MDxEditor): Promise<boolean> {
         if (printContainer) {
             printContainer.innerHTML = '';
         }
-        // ▼▼▼ 修正：使用新的公共 focus 方法 ▼▼▼
         if (editor.getCurrentMode() === 'edit') {
             const view = editor.getEditorView();
             if (view) {
