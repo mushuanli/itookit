@@ -35,7 +35,6 @@ export class ClozePlugin implements MDxPlugin {
     return this.contextStates.get(context)!;
   }
 
-  // 在 beforeParse 钩子中重置计数器，确保每次渲染都从0开始
   private createBeforeParseHook(context: PluginContext) {
     return () => {
       this.getContextState(context).clozeCounter = 0;
@@ -50,9 +49,7 @@ export class ClozePlugin implements MDxPlugin {
           level: 'inline',
           start: (src: string) => src.match(/--/)?.index,
           tokenizer: (src: string): Tokens.Generic | undefined => {
-            // 获取当前上下文的状态
             const state = this.getContextState(context);
-            // 正则匹配：--[可选id] 挖空内容 --^^可选音频:文本^^
             const match = src.match(/^--(?:\[([^\]]+)\]\s*)?([\s\S]+?)--(?:\^\^audio:([^^]+)\^\^)?/);
             if (match) {
               return {
@@ -63,7 +60,7 @@ export class ClozePlugin implements MDxPlugin {
                 audio: match[3]?.trim(),
               };
             }
-            return undefined; // 明确返回 undefined
+            return undefined;
           },
           renderer: (token: Tokens.Generic) => {
             const audioHtml = token.audio
@@ -81,13 +78,11 @@ export class ClozePlugin implements MDxPlugin {
   }
 
   install(context: PluginContext): void {
-    // 每次渲染前重置自动ID计数器
     const removeBeforeParse = context.on('beforeParse', this.createBeforeParseHook(context));
     if (removeBeforeParse) this.cleanupFns.push(removeBeforeParse);
 
     context.registerSyntaxExtension(this.createSyntaxExtension(context));
 
-    // 提供 API
     context.provide(ClozeAPIKey, () => ({
       toggleAll: (show: boolean, container?: HTMLElement) => {
         const scope = container || document;
@@ -99,18 +94,15 @@ export class ClozePlugin implements MDxPlugin {
       },
     }));
     if (!context.registerCommand || !context.registerToolbarButton) {
-      // 如果上下文不是编辑器环境（例如纯渲染器），则跳过
       console.warn('ClozePlugin: Command registration is not available in this context.');
     } else {
       const { registerCommand, registerToolbarButton } = context;
 
-      // 添加一个分隔符，将 Cloze 功能与其他功能分开
       registerToolbarButton({
           id: `sep-cloze-${Date.now()}`,
           type: 'separator'
       });
 
-      // 注册标准 Cloze 命令和按钮
       registerCommand('applyCloze', (view: any) => {
         if (view) return commands.applyCloze(view);
         return false;
@@ -118,11 +110,10 @@ export class ClozePlugin implements MDxPlugin {
       registerToolbarButton({
         id: 'cloze',
         title: '挖空 (--text--)',
-        icon: '<i class="fas fa-highlighter"></i>', // 使用更形象的图标
+        icon: '<i class="fas fa-highlighter"></i>',
         command: 'applyCloze'
       });
 
-      // 注册带音频的 Cloze 命令和按钮
       registerCommand('applyAudioCloze', (view: any) => {
         if (view) return commands.applyAudioCloze(view);
         return false;
@@ -130,11 +121,10 @@ export class ClozePlugin implements MDxPlugin {
       registerToolbarButton({
         id: 'audioCloze',
         title: '音频挖空',
-        icon: '<i class="fas fa-volume-up"></i>', // 保持与旧版一致
+        icon: '<i class="fas fa-volume-up"></i>',
         command: 'applyAudioCloze'
       });
       
-      // 注册插入换行符的命令和按钮（对多行 Cloze 非常有用）
       registerCommand('insertLinebreak', (view: any) => {
         if (view) return commands.insertLinebreak(view);
         return false;
@@ -163,13 +153,12 @@ export class ClozePlugin implements MDxPlugin {
       }
 
       const handler = (e: Event) => {
-        // 防止点击音频图标时也触发切换
         const target = e.target as HTMLElement;
         if (target.closest(`.${this.options.className}__audio`)) {
           const audioSpan = target.closest(`.${this.options.className}__audio`)!;
           const text = audioSpan.getAttribute('data-audio-text');
           if (text && 'speechSynthesis' in window) {
-            e.stopPropagation(); // 阻止事件冒泡到上层 cloze 元素
+            e.stopPropagation();
             const utterance = new SpeechSynthesisUtterance(text);
             speechSynthesis.speak(utterance);
           }
@@ -180,9 +169,7 @@ export class ClozePlugin implements MDxPlugin {
         const wasHidden = cloze.classList.contains('hidden');
         cloze.classList.toggle('hidden');
 
-        // 仅在第一次展开时触发事件
         if (wasHidden) {
-          // 触发事件，通知 MemoryPlugin
           context.emit('clozeRevealed', {
             element: cloze,
             locator: cloze.getAttribute('data-cloze-locator'),
@@ -192,7 +179,7 @@ export class ClozePlugin implements MDxPlugin {
       };
 
       cloze.addEventListener('click', handler);
-      (cloze as any)._clozeClickHandler = handler; // 缓存处理器以便移除
+      (cloze as any)._clozeClickHandler = handler;
     });
   }
 

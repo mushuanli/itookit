@@ -206,7 +206,72 @@
     // 初始化示例内容
     const initialContent = `# MDxEditor 演示文档
 
-欢迎使用 **MDxEditor**！这是一个功能强大的 Markdown 编辑器。
+欢迎使用 **MDxEditor**！这是一个功能强大的、插件化的 Markdown 编辑器。
+
+---
+
+## ⚡ 自动完成 (Autocomplete) 新功能
+
+MDxEditor 现在集成了强大的自动完成系统，支持标签和提及功能。
+
+### 1. 标签 (Tags) - 由 \`TagPlugin\` 提供
+
+*   **如何操作**: 在编辑器中输入 \`#\` 符号，然后开始输入。例如，尝试输入 \`#java\` 或 \`#re\`。
+*   **功能**: 会弹出一个建议列表，供您快速插入预定义的标签。
+*   **示例**: #javascript #react #bugfix
+
+### 2. 提及 (Mentions) - 由 \`MentionPlugin\` 提供
+
+提及功能支持多种数据源，并提供丰富的交互体验。
+
+#### @ 提及用户
+
+*   **如何操作**: 输入 \`@\` 符号，然后输入用户名，例如 \`@John\` 或 \`@an\`。
+*   **功能**:
+    1.  **自动完成**: 从列表中选择用户。
+    2.  **悬浮预览**: 在 **预览模式** 下，将鼠标悬停在提及链接上，会显示用户的预览卡片。
+    3.  **点击事件**: 在 **预览模式** 下，点击提及链接会触发自定义事件（在本示例中会弹出一个提示框）。
+*   **示例**: 让我们 @[John Doe](mdx://users/john) 来审查代码，并通知 @[Anna Smith](mdx://users/anna)。
+
+#### @@ 提及文档
+
+*   **如何操作**: 输入 \`@@\` 符号，然后输入文档标题，例如 \`@@Project\`。
+*   **功能**: 与用户提及类似，支持自动完成、悬浮预览和点击。
+*   **示例**: 请参考设计文档 @@[Project Plan](mdx://docs/proj-plan) 和技术规范 @@[API Design V2](mdx://docs/api-v2)。
+
+### 3. 内容嵌入 (Transclusion)
+
+*   **如何操作**: 使用 \`!@provider:id\` 语法。例如，输入 \`!@docs:proj-plan\`。
+*   **功能**: 在 **预览模式** 下，这行语法会被替换为对应文档的完整内容。
+*   **示例**:
+
+下面是 "Project Plan" 文档的嵌入内容：
+!@docs:proj-plan
+
+---
+
+## ✨ 其他核心功能
+
+### 1. 标题栏与侧边栏交互
+
+*   **功能**: 编辑器顶部的标题栏现在由 \`core:titlebar\` 插件驱动。它提供了一组可配置的核心操作按钮。
+*   **如何操作**:
+    1.  点击标题栏左上角的 **汉堡菜单图标** (<i class="fas fa-bars"></i>)。
+    2.  观察左侧的“会话列表”侧边栏会平滑地展开和收起。
+    3.  这是通过在编辑器配置中传入 \`toggleSidebarCallback\` 实现的，展示了编辑器与外部 UI 解耦的能力。
+
+### 2. 源码同步跳转
+
+*   **功能**: 在预览模式下，快速从渲染后的内容跳转到对应的 Markdown 源码位置，由 \`interaction:source-sync\` 插件提供支持。
+*   **如何操作**:
+    1.  首先，确保你处于 **预览模式** (点击标题栏的 <i class="fas fa-book-open"></i> 图标切换)。
+    2.  按住键盘上的 \`Ctrl\` 键 (Windows/Linux) 或 \`Cmd\` 键 (Mac)。
+    3.  在按住不放的同时，**用鼠标双击本段落中的任意文字**。
+    4.  编辑器会自动切换回 **编辑模式**，并高亮你刚才双击的文本所在的源码行。
+
+---
+
+## 丰富的功能集
 
 ### 交互式任务列表 (Task List)
 在预览模式下，直接点击下方的复选框，可以修改任务状态。这个更改会 **自动同步** 回 Markdown 源码。
@@ -366,13 +431,92 @@ $$
       console.log('Sidebar toggled!');
     }
 
+    // --- 标签数据 ---
+    const allTags = ['javascript', 'typescript', 'react', 'vue', 'css', 'html', 'refactor', 'bugfix', 'performance'];
+    const getTags = async () => {
+      // 模拟网络延迟
+      await new Promise(resolve => setTimeout(resolve, 100));
+      return allTags;
+    };
+
+    // --- 提及数据 ---
+    const mockUsers = [
+      { id: 'john', label: 'John Doe', type: 'Frontend Developer', avatar: '👨‍💻' },
+      { id: 'anna', label: 'Anna Smith', type: 'Backend Developer', avatar: '👩‍💻' },
+      { id: 'peter', label: 'Peter Jones', type: 'UI/UX Designer', avatar: '🎨' },
+    ];
+
+    const mockDocuments = [
+      { id: 'proj-plan', label: 'Project Plan', type: 'Planning Document' },
+      { id: 'api-v2', label: 'API Design V2', type: 'Technical Spec' },
+      { id: 'ux-research', label: 'UX Research Report', type: 'Research' },
+    ];
+
+    // --- 用户提及提供者 ---
+    const userMentionProvider = {
+      key: 'users',
+      triggerChar: '@',
+      async getSuggestions(query) {
+        await new Promise(resolve => setTimeout(resolve, 150));
+        const lowerCaseQuery = query.toLowerCase();
+        return mockUsers.filter(user => user.label.toLowerCase().includes(lowerCaseQuery));
+      },
+      async getHoverPreview(item) {
+        const user = mockUsers.find(u => u.id === item.id);
+        if (!user) return null;
+        return {
+          title: `${user.avatar} ${user.label}`,
+          content: `<strong>Position:</strong> ${user.type}<br><em>Active on 3 projects.</em>`,
+        };
+      },
+    };
+
+    // --- 文档提及提供者 ---
+    const documentMentionProvider = {
+      key: 'docs',
+      triggerChar: '@@',
+      async getSuggestions(query) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        const lowerCaseQuery = query.toLowerCase();
+        return mockDocuments.filter(doc => doc.label.toLowerCase().includes(lowerCaseQuery));
+      },
+      async getHoverPreview(item) {
+        const doc = mockDocuments.find(d => d.id === item.id);
+        if (!doc) return null;
+        return {
+          title: `📄 ${doc.label}`,
+          content: `A <strong>${doc.type}</strong> last updated 3 days ago.`,
+        };
+      },
+      async getFullContent(id) {
+        const doc = mockDocuments.find(d => d.id === id);
+        if (!doc) return '<div>Document not found.</div>';
+        
+        // 返回包含 Markdown 的 HTML 字符串用于嵌入
+        return `
+          <h3>${doc.label}</h3>
+          <p>This is the embedded content for the document <strong>${doc.label}</strong>.</p>
+          <ul>
+            <li class="task-list-item"><input type="checkbox" checked disabled> Define project scope</li>
+            <li class="task-list-item"><input type="checkbox" disabled> Create initial mockups</li>
+          </ul>
+          <blockquote>This is an important note within the embedded document.</blockquote>
+        `;
+      },
+    };
+
+
     const editor = createMDxEditor({
         initialMode: 'edit',
         // 默认加载 'folder' 和 'mathjax'
         // 我们额外指定加载 'cloze'，它会自动带上 'cloze-controls' 和 'memory'
-        plugins: ['core:titlebar',
-        'interaction:source-sync',
-        'cloze'],
+        plugins: [
+            'core:titlebar',
+            'interaction:source-sync',
+            'cloze',
+            'autocomplete:tag',
+            'autocomplete:mention'
+        ],
 
         // 如果想加载 cloze 但禁用 memory，可以这样做:
         // plugins: ['cloze', '-memory'],
@@ -388,7 +532,17 @@ $$
 	              console.log('Save triggered from titlebar!', editor.getContent());
 	              alert('Content saved to console!');
 	            }
-	        }
+            },
+            // 新增插件配置
+            'autocomplete:tag': {
+              getTags: getTags,
+            },
+            'autocomplete:mention': {
+              providers: [userMentionProvider, documentMentionProvider],
+              onMentionClick: (providerKey, id) => {
+                alert(`Mention clicked!\nProvider: ${providerKey}\nID: ${id}`);
+              },
+            },
 	    }
     });
 
@@ -398,7 +552,7 @@ $$
     const editorContainer = document.getElementById('editor');
     if (editorContainer) {
       const savedContent = localStorage.getItem('mdx-editor-content') || initialContent;
-      editor.init(editorContainer, savedContent);
+      await editor.init(editorContainer, savedContent);
     }
 
     // --- 按钮事件处理 ---

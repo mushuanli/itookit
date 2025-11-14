@@ -81,7 +81,7 @@ export class FoldablePlugin implements MDxPlugin {
     this.options = {
       defaultOpen: options.defaultOpen !== false,
       className: options.className || 'mdx-editor-foldable',
-      enableTaskCheckbox: false//options.enableTaskCheckbox !== false,
+      enableTaskCheckbox: false
     };
   }
 
@@ -121,10 +121,8 @@ export class FoldablePlugin implements MDxPlugin {
    */
   private createBeforeParseHook(context: PluginContext) {
     return ({ markdown, options }: { markdown: string; options: any }) => {
-      // 获取当前上下文的独立状态
       const state = this.getContextState(context);
       
-      // 每次解析前重置状态
       state.storedBlocks.clear();
       state.placeholderId = 0;
 
@@ -140,14 +138,12 @@ export class FoldablePlugin implements MDxPlugin {
         (match, checkmark, label, rawContent) => {
           const placeholder = this.generatePlaceholder(state);
           
-          // 存储提取的数据
           state.storedBlocks.set(placeholder, {
             checkmark: checkmark || undefined,
             label: label.trim(),
             rawContent: rawContent,
           });
 
-          // 返回占位符（前后加换行符防止与相邻元素合并）
           return `\n\n${placeholder}\n\n`;
         }
       );
@@ -185,7 +181,6 @@ export class FoldablePlugin implements MDxPlugin {
           summaryContent = `${checkboxHtml} ${summaryContent}`;
         }
 
-        // 构建完整的 details 块
         const detailsHtml = `<details class="${this.options.className}" ${this.options.defaultOpen ? 'open' : ''}>
   <summary class="${this.options.className}__summary">${summaryContent}</summary>
   <div class="${this.options.className}__content">

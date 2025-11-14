@@ -42,7 +42,6 @@ export class MDxEditor {
       persistenceAdapter: config.persistenceAdapter,
     });
     
-    // 💡 新增：将编辑器实例传递给渲染器
     this.renderer.setEditorInstance(this);
   }
 
@@ -57,52 +56,49 @@ export class MDxEditor {
   /**
    * 初始化编辑器
    */
-  init(container: HTMLElement, initialContent: string = ''): void {
-    this._container = container;
-    this.currentContent = initialContent;
+async init(container: HTMLElement, initialContent: string = ''): Promise<void> {
+  console.log('🎬 [MDxEditor] Starting initialization...');
+  this._container = container;
+  this.currentContent = initialContent;
 
-    // 创建容器结构
-    this.createContainers();
-    if (this.container) {
-        // 清理可能存在的旧 class
-        this.container.classList.remove('is-edit-mode', 'is-render-mode');
-        // 添加初始模式的 class
-        this.container.classList.add(this.currentMode === 'edit' ? 'is-edit-mode' : 'is-render-mode');
-    }
+  this.createContainers();
+  if (this.container) {
+    this.container.classList.remove('is-edit-mode', 'is-render-mode');
+    this.container.classList.add(this.currentMode === 'edit' ? 'is-edit-mode' : 'is-render-mode');
+  }
 
-    // 初始化 CodeMirror
+  console.log('⏳ [MDxEditor] Waiting 10ms for plugins to initialize...');
+  await new Promise(resolve => setTimeout(resolve, 10));
+  console.log('⏳ [MDxEditor] Wait complete, initializing CodeMirror...');
+
+  const pluginManager = this.renderer.getPluginManager();
+  const extensionCount = pluginManager.codemirrorExtensions.length;
+  console.log(`📦 [MDxEditor] CodeMirror extensions count: ${extensionCount}`);
+
     this.initCodeMirror(initialContent);
-
-    // 初始化渲染器
     this.initRenderer();
-
-    // 设置初始模式
     this.switchToMode(this.currentMode);
-
-    // 🔥 新增：监听插件事件以同步内容
     this.listenToPluginEvents(); 
 
-    const pluginManager = this.renderer.getPluginManager();
     pluginManager.executeActionHook('editorPostInit', {
       editor: this,
       pluginManager,
     });
+  console.log('✅ [MDxEditor] Initialization complete');
   }
 
   /**
-   * 💡 新增：监听来自插件的事件，以保持编辑器内容同步
+   * 监听来自插件的事件，以保持编辑器内容同步
    */
   private listenToPluginEvents(): void {
     const pluginManager = this.renderer.getPluginManager();
     
     const unlisten = pluginManager.listen('taskToggled', (result: TaskToggleResult) => {
-      // 仅当 Markdown 确实被更新，并且新内容与当前内容不同时，才执行更新
       if (result.wasUpdated && result.updatedMarkdown !== this.getContent()) {
         this.setContent(result.updatedMarkdown);
       }
     });
     
-    // 保存清理函数，以便在 destroy 时注销监听器
     this.cleanupListeners.push(unlisten);
   }
 
@@ -116,18 +112,15 @@ export class MDxEditor {
     this._container.innerHTML = '';
     this._container.className = 'mdx-editor-container';
 
-    // 清理可能存在的旧 class
     this._container.classList.remove('is-edit-mode', 'is-render-mode');
-    // 添加初始模式的 class
     this._container.classList.add(this.currentMode === 'edit' ? 'is-edit-mode' : 'is-render-mode');
-    // 编辑器容器
+
     this.editorContainer = document.createElement('div');
-    this.editorContainer.className = 'mdx-editor-container__edit-mode'; // BEM 命名
+    this.editorContainer.className = 'mdx-editor-container__edit-mode';
     this._container.appendChild(this.editorContainer);
 
-    // 渲染器容器
     this.renderContainer = document.createElement('div');
-    this.renderContainer.className = 'mdx-editor-container__render-mode'; // BEM 命名
+    this.renderContainer.className = 'mdx-editor-container__render-mode';
     this._container.appendChild(this.renderContainer);
   }
 
@@ -137,11 +130,9 @@ export class MDxEditor {
   private initCodeMirror(content: string): void {
     if (!this.editorContainer) return;
 
-    // 💡 核心修改：从插件管理器获取扩展，替换 basicSetup
     const pluginManager = this.renderer.getPluginManager();
     const extensions = pluginManager.codemirrorExtensions;
 
-    // 添加一个安全检查，以防核心插件未加载
     if (extensions.length === 0) {
       console.warn(
         'MDxEditor: No CodeMirror extensions were provided by plugins. The editor may not function correctly. Please ensure CoreEditorPlugin is loaded.'
@@ -149,7 +140,7 @@ export class MDxEditor {
     }
     
     const allExtensions: Extension[] = [
-      ...extensions, // 使用从插件收集的扩展
+      ...extensions,
       markdown(),
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
@@ -193,13 +184,11 @@ export class MDxEditor {
       this.editorContainer.style.display = 'none';
       this.renderContainer.style.display = 'block';
       
-      // 渲染当前内容
       this._container.classList.add('is-render-mode');
       this._container.classList.remove('is-edit-mode');
       this.renderContent();
     }
 
-    // 触发模式切换事件
     const pluginManager = this.renderer.getPluginManager();
     pluginManager.emit('modeChanged', { mode });
   }
@@ -227,7 +216,6 @@ export class MDxEditor {
    * 设置内容
    */
   setContent(content: string): void {
-    // 避免不必要的更新和光标移动
     if (content === this.currentContent) {
       return;
     }
@@ -282,7 +270,7 @@ export class MDxEditor {
   }
 
   /**
-   * [新增] 获取渲染容器元素。
+   * 获取渲染容器元素。
    * 为打印等外部功能提供对渲染 DOM 的访问。
    */
   getRenderContainer(): HTMLElement | null {
@@ -304,7 +292,6 @@ export class MDxEditor {
         scrollIntoView: true,
       });
 
-      // 聚焦编辑器
       this.editorView.focus();
     }
   }
@@ -327,7 +314,6 @@ export class MDxEditor {
 
     this.renderer.destroy();
 
-    // 🔥 新增：清理事件监听器
     this.cleanupListeners.forEach(fn => fn());
     this.cleanupListeners = [];
     
