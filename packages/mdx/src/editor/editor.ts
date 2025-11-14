@@ -1,11 +1,11 @@
 // mdx/editor/editor.ts
-import { MDxRenderer } from '../renderer/renderer';
-import type { MDxPlugin } from '../core/plugin';
-import type { VFSCore } from '@itookit/vfs-core';
-import type { IPersistenceAdapter } from '@itookit/common';
+import { EditorState, Extension } from '@codemirror/state';
 import { EditorView } from 'codemirror';
 import { markdown } from '@codemirror/lang-markdown';
-import { EditorState, Extension } from '@codemirror/state';
+import type { IPersistenceAdapter } from '@itookit/common';
+import type { VFSCore } from '@itookit/vfs-core';
+import { MDxRenderer } from '../renderer/renderer';
+import type { MDxPlugin } from '../core/plugin';
 import type { TaskToggleResult } from '../plugins/interactions/task-list.plugin';
 
 export interface MDxEditorConfig {
@@ -56,24 +56,23 @@ export class MDxEditor {
   /**
    * 初始化编辑器
    */
-async init(container: HTMLElement, initialContent: string = ''): Promise<void> {
-  console.log('🎬 [MDxEditor] Starting initialization...');
-  this._container = container;
-  this.currentContent = initialContent;
+  async init(container: HTMLElement, initialContent: string = ''): Promise<void> {
+    console.log('🎬 [MDxEditor] Starting initialization...');
+    this._container = container;
+    this.currentContent = initialContent;
 
-  this.createContainers();
-  if (this.container) {
-    this.container.classList.remove('is-edit-mode', 'is-render-mode');
-    this.container.classList.add(this.currentMode === 'edit' ? 'is-edit-mode' : 'is-render-mode');
-  }
+    this.createContainers();
+    if (this.container) {
+      this.container.classList.remove('is-edit-mode', 'is-render-mode');
+      this.container.classList.add(this.currentMode === 'edit' ? 'is-edit-mode' : 'is-render-mode');
+    }
 
-  console.log('⏳ [MDxEditor] Waiting 10ms for plugins to initialize...');
-  await new Promise(resolve => setTimeout(resolve, 10));
-  console.log('⏳ [MDxEditor] Wait complete, initializing CodeMirror...');
+    // 短暂延迟，以确保插件有时间在主线程上完成其同步注册过程。
+    // TODO: 未来可探索更健壮的事件驱动或 Promise 机制来代替 setTimeout。
+    await new Promise((resolve) => setTimeout(resolve, 10));
 
-  const pluginManager = this.renderer.getPluginManager();
-  const extensionCount = pluginManager.codemirrorExtensions.length;
-  console.log(`📦 [MDxEditor] CodeMirror extensions count: ${extensionCount}`);
+    const pluginManager = this.renderer.getPluginManager();
+    const extensionCount = pluginManager.codemirrorExtensions.length;
 
     this.initCodeMirror(initialContent);
     this.initRenderer();
@@ -84,7 +83,6 @@ async init(container: HTMLElement, initialContent: string = ''): Promise<void> {
       editor: this,
       pluginManager,
     });
-  console.log('✅ [MDxEditor] Initialization complete');
   }
 
   /**
@@ -104,7 +102,7 @@ async init(container: HTMLElement, initialContent: string = ''): Promise<void> {
 
 
   /**
-   * 创建容器结构
+   * 创建编辑器和渲染器的 DOM 容器。
    */
   private createContainers(): void {
     if (!this._container) return;
@@ -125,7 +123,7 @@ async init(container: HTMLElement, initialContent: string = ''): Promise<void> {
   }
 
   /**
-   * 初始化 CodeMirror
+   * 初始化 CodeMirror 编辑器实例。
    */
   private initCodeMirror(content: string): void {
     if (!this.editorContainer) return;
@@ -171,49 +169,42 @@ async init(container: HTMLElement, initialContent: string = ''): Promise<void> {
    * 切换模式
    */
   switchToMode(mode: 'edit' | 'render'): void {
-    if (!this._container ||!this.editorContainer || !this.renderContainer) return;
+    if (!this._container || !this.editorContainer || !this.renderContainer) return;
 
     this.currentMode = mode;
+    const isEditMode = mode === 'edit';
 
-    if (mode === 'edit') {
-      this.editorContainer.style.display = 'block';
-      this.renderContainer.style.display = 'none';
-      this._container.classList.add('is-edit-mode');
-      this._container.classList.remove('is-render-mode');
-    } else {
-      this.editorContainer.style.display = 'none';
-      this.renderContainer.style.display = 'block';
-      
-      this._container.classList.add('is-render-mode');
-      this._container.classList.remove('is-edit-mode');
+    this._container.classList.toggle('is-edit-mode', isEditMode);
+    this._container.classList.toggle('is-render-mode', !isEditMode);
+
+    this.editorContainer.style.display = isEditMode ? 'block' : 'none';
+    this.renderContainer.style.display = isEditMode ? 'none' : 'block';
+
+    if (!isEditMode) {
       this.renderContent();
     }
 
-    const pluginManager = this.renderer.getPluginManager();
-    pluginManager.emit('modeChanged', { mode });
+    this.renderer.getPluginManager().emit('modeChanged', { mode });
   }
 
   /**
-   * 渲染内容
+   * 在渲染容器中渲染当前内容。
    */
   private async renderContent(): Promise<void> {
-    if (!this.renderContainer) return;
-
-    await this.renderer.render(
-      this.renderContainer,
-      this.currentContent
-    );
+    if (this.renderContainer) {
+      await this.renderer.render(this.renderContainer, this.currentContent);
+    }
   }
 
   /**
-   * 获取当前内容
+   * 获取编辑器当前的全量 Markdown 内容。
    */
   getContent(): string {
     return this.currentContent;
   }
 
   /**
-   * 设置内容
+   * 设置编辑器的内容。
    */
   setContent(content: string): void {
     if (content === this.currentContent) {
@@ -232,53 +223,48 @@ async init(container: HTMLElement, initialContent: string = ''): Promise<void> {
       });
     }
 
-    // 如果当前在渲染模式，我们不需要重新渲染整个视图。
-    // 因为 DOM 已经通过用户交互（如点击 checkbox）被局部更新了。
-    // 再次调用 renderContent 会导致闪烁。
-    // 这里的关键是确保 backing state (`currentContent`) 和 CodeMirror 的 state 是最新的。
-    // if (this.currentMode === 'render') {
-    //   this.renderContent();
-    // }
+    // 注意：当处于渲染模式时，内容更新通常由用户交互（如点击任务列表）触发，
+    // DOM 已被局部更新。此时不应调用 renderContent()，否则会导致视图闪烁。
+    // 关键是确保 backing state (`currentContent`) 和 CodeMirror state 保持同步。
   }
 
   /**
-   * 获取当前模式
+   * 获取当前模式（'edit' 或 'render'）。
    */
   getCurrentMode(): 'edit' | 'render' {
     return this.currentMode;
   }
 
   /**
-   * 获取 EditorView 实例
+   * 获取 CodeMirror EditorView 实例。
    */
   getEditorView(): EditorView | null {
     return this.editorView;
   }
 
   /**
-   * 获取渲染器实例
+   * 获取 MDxRenderer 实例。
    */
   getRenderer(): MDxRenderer {
     return this.renderer;
   }
 
   /**
-   * 提供对编辑器主容器的只读访问。
+   * 获取编辑器的主容器元素。
    */
   public get container(): HTMLElement | null {
     return this._container;
   }
 
   /**
-   * 获取渲染容器元素。
-   * 为打印等外部功能提供对渲染 DOM 的访问。
+   * 获取渲染容器元素，用于打印等外部功能。
    */
   getRenderContainer(): HTMLElement | null {
     return this.renderContainer;
   }
 
   /**
-   * 查找并选中文本
+   * 在编辑器中查找并选中文本。
    */
   findAndSelectText(text: string): void {
     if (!this.editorView) return;
@@ -297,30 +283,27 @@ async init(container: HTMLElement, initialContent: string = ''): Promise<void> {
   }
 
   /**
-   * 在指定元素中渲染 Markdown（用于插件）
+   * 在指定元素中渲染 Markdown（供插件使用）。
    */
   async renderInElement(element: HTMLElement, markdown: string): Promise<void> {
     await this.renderer.render(element, markdown);
   }
 
   /**
-   * 销毁编辑器
+   * 销毁编辑器实例，释放资源。
    */
   destroy(): void {
-    if (this.editorView) {
-      this.editorView.destroy();
-      this.editorView = null;
-    }
-
+    this.editorView?.destroy();
     this.renderer.destroy();
 
-    this.cleanupListeners.forEach(fn => fn());
+    this.cleanupListeners.forEach((fn) => fn());
     this.cleanupListeners = [];
-    
+
     if (this._container) {
       this._container.innerHTML = '';
     }
 
+    this.editorView = null;
     this._container = null;
     this.editorContainer = null;
     this.renderContainer = null;
