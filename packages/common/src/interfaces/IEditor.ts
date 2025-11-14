@@ -23,11 +23,20 @@ type EditorEvent = 'change' | 'interactiveChange' | 'ready';
 type EditorEventCallback = (payload?: any) => void;
 
 export abstract class IEditor {
-    constructor(container: HTMLElement, options: any) {
+    // 💡 构造函数不再接收 container，只接收 options
+    constructor(options: any) {
         if (this.constructor === IEditor) {
             throw new Error("IEditor is an interface and cannot be instantiated directly.");
         }
     }
+
+    /**
+     * 💡 新增: 异步初始化方法
+     * 这是创建编辑器实例后的第一步，用于设置 DOM 和加载异步资源。
+     * @param container - 编辑器将挂载的 HTML 元素。
+     * @param initialContent - 编辑器的初始 Markdown 内容。
+     */
+    abstract init(container: HTMLElement, initialContent?: string): Promise<void>;
 
     abstract readonly commands: Readonly<Record<string, Function>>;
     abstract setText(markdown: string): void;

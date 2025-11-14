@@ -1,14 +1,19 @@
-// mdx/editor/editor.ts
-import { EditorState, Extension } from '@codemirror/state';
+/**
+ * @file mdx/editor/editor.ts
+ */
+import { EditorState, Extension, Compartment } from '@codemirror/state';
 import { EditorView } from 'codemirror';
 import { markdown } from '@codemirror/lang-markdown';
+import { search } from '@codemirror/search';
 import type { IPersistenceAdapter } from '@itookit/common';
 import type { VFSCore } from '@itookit/vfs-core';
 import { MDxRenderer } from '../renderer/renderer';
 import type { MDxPlugin } from '../core/plugin';
 import type { TaskToggleResult } from '../plugins/interactions/task-list.plugin';
+import { IEditor, UnifiedSearchResult, Heading } from '@itookit/common';
 
 export interface MDxEditorConfig {
+  initialContent?: string;
   initialMode?: 'edit' | 'render';
   searchMarkClass?: string;
   vfsCore?: VFSCore;
@@ -17,11 +22,13 @@ export interface MDxEditorConfig {
   [key: string]: any;
 }
 
+type EditorEventCallback = (payload?: any) => void;
+
 /**
  * MDx 编辑器
- * 集成 CodeMirror 和 MDxRenderer
+ * 集成 CodeMirror 和 MDxRenderer，并实现 IEditor 接口
  */
-export class MDxEditor {
+export class MDxEditor extends IEditor {
   private renderer: MDxRenderer;
   private editorView: EditorView | null = null;
   private _container: HTMLElement | null = null;
@@ -29,20 +36,46 @@ export class MDxEditor {
   private renderContainer: HTMLElement | null = null;
   private currentMode: 'edit' | 'render';
   private config: MDxEditorConfig;
-  private currentContent: string = '';
   private cleanupListeners: Array<() => void> = [];
+  private eventEmitter = new Map<string, Set<EditorEventCallback>>();
+  private readOnlyCompartment = new Compartment();
+  private searchCompartment = new Compartment();
 
-  constructor(config: MDxEditorConfig = {}) {
-    this.config = config;
-    this.currentMode = config.initialMode || 'edit';
+  constructor(options: MDxEditorConfig = {}) {
+    super(options);
+    this.config = options;
+    this.currentMode = options.initialMode || 'edit';
     this.renderer = new MDxRenderer({
-      searchMarkClass: config.searchMarkClass,
-      vfsCore: config.vfsCore,
-      nodeId: config.nodeId,
-      persistenceAdapter: config.persistenceAdapter,
+      searchMarkClass: options.searchMarkClass,
+      vfsCore: options.vfsCore,
+      nodeId: options.nodeId,
+      persistenceAdapter: options.persistenceAdapter,
+    });
+    this.renderer.setEditorInstance(this);
+  }
+
+  /**
+   * 异步初始化编辑器，设置DOM并加载异步资源。
+   */
+  async init(container: HTMLElement, initialContent: string = ''): Promise<void> {
+    console.log('🎬 [MDxEditor] Starting initialization...');
+    this._container = container;
+    this.createContainers(container);
+
+    // 短暂延迟，以确保插件有时间在主线程上完成其同步注册过程。
+    // TODO: 未来可探索更健壮的事件驱动或 Promise 机制来代替 setTimeout。
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    this.initCodeMirror(initialContent);
+    this.switchToMode(this.currentMode);
+    this.listenToPluginEvents();
+
+    this.renderer.getPluginManager().executeActionHook('editorPostInit', {
+      editor: this,
+      pluginManager: this.renderer.getPluginManager(),
     });
     
-    this.renderer.setEditorInstance(this);
+    this.emit('ready');
   }
 
   /**
@@ -53,73 +86,21 @@ export class MDxEditor {
     return this;
   }
 
-  /**
-   * 初始化编辑器
-   */
-  async init(container: HTMLElement, initialContent: string = ''): Promise<void> {
-    console.log('🎬 [MDxEditor] Starting initialization...');
-    this._container = container;
-    this.currentContent = initialContent;
-
-    this.createContainers();
-    if (this.container) {
-      this.container.classList.remove('is-edit-mode', 'is-render-mode');
-      this.container.classList.add(this.currentMode === 'edit' ? 'is-edit-mode' : 'is-render-mode');
-    }
-
-    // 短暂延迟，以确保插件有时间在主线程上完成其同步注册过程。
-    // TODO: 未来可探索更健壮的事件驱动或 Promise 机制来代替 setTimeout。
-    await new Promise((resolve) => setTimeout(resolve, 10));
-
-    const pluginManager = this.renderer.getPluginManager();
-    const extensionCount = pluginManager.codemirrorExtensions.length;
-
-    this.initCodeMirror(initialContent);
-    this.initRenderer();
-    this.switchToMode(this.currentMode);
-    this.listenToPluginEvents(); 
-
-    pluginManager.executeActionHook('editorPostInit', {
-      editor: this,
-      pluginManager,
-    });
-  }
-
-  /**
-   * 监听来自插件的事件，以保持编辑器内容同步
-   */
-  private listenToPluginEvents(): void {
-    const pluginManager = this.renderer.getPluginManager();
-    
-    const unlisten = pluginManager.listen('taskToggled', (result: TaskToggleResult) => {
-      if (result.wasUpdated && result.updatedMarkdown !== this.getContent()) {
-        this.setContent(result.updatedMarkdown);
-      }
-    });
-    
-    this.cleanupListeners.push(unlisten);
-  }
-
 
   /**
    * 创建编辑器和渲染器的 DOM 容器。
    */
-  private createContainers(): void {
-    if (!this._container) return;
-
-    this._container.innerHTML = '';
-    this._container.className = 'mdx-editor-container';
-
-    this._container.classList.remove('is-edit-mode', 'is-render-mode');
-    this._container.classList.add(this.currentMode === 'edit' ? 'is-edit-mode' : 'is-render-mode');
-
+  private createContainers(container: HTMLElement): void {
+    container.innerHTML = '';
+    container.className = 'mdx-editor-root-container mdx-editor-container';
     this.editorContainer = document.createElement('div');
     this.editorContainer.className = 'mdx-editor-container__edit-mode';
-    this._container.appendChild(this.editorContainer);
+    container.appendChild(this.editorContainer);
 
     this.renderContainer = document.createElement('div');
     this.renderContainer.className = 'mdx-editor-container__render-mode';
-    this._container.appendChild(this.renderContainer);
+    this.renderContainer.tabIndex = -1;
+    container.appendChild(this.renderContainer);
   }
 
   /**
@@ -127,43 +108,39 @@ export class MDxEditor {
    */
   private initCodeMirror(content: string): void {
     if (!this.editorContainer) return;
-
-    const pluginManager = this.renderer.getPluginManager();
-    const extensions = pluginManager.codemirrorExtensions;
-
-    if (extensions.length === 0) {
-      console.warn(
-        'MDxEditor: No CodeMirror extensions were provided by plugins. The editor may not function correctly. Please ensure CoreEditorPlugin is loaded.'
-      );
-    }
-    
     const allExtensions: Extension[] = [
-      ...extensions,
+      ...this.renderer.getPluginManager().codemirrorExtensions,
       markdown(),
+      this.readOnlyCompartment.of(EditorView.editable.of(true)),
+      this.searchCompartment.of([]),
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
-          this.currentContent = update.state.doc.toString();
+          this.emit('change');
+          if (update.transactions.some(tr => tr.isUserEvent('input') || tr.isUserEvent('delete'))) {
+            this.emit('interactiveChange');
+          }
         }
       }),
     ];
-
-    const state = EditorState.create({
-      doc: content,
-      extensions: allExtensions,
-    });
-
     this.editorView = new EditorView({
-      state,
+      state: EditorState.create({ doc: content, extensions: allExtensions }),
       parent: this.editorContainer,
     });
   }
 
+
   /**
-   * 初始化渲染器
+   * 监听来自插件的事件，以保持编辑器内容同步
    */
-  private initRenderer(): void {
-    // 渲染器会在切换到渲染模式时自动初始化
+  private listenToPluginEvents(): void {
+    const unlisten = this.renderer.getPluginManager().listen('taskToggled', (result: TaskToggleResult) => {
+      if (result.wasUpdated && result.updatedMarkdown !== this.getText()) {
+        this.setText(result.updatedMarkdown);
+      }
+    });
+    this.cleanupListeners.push(unlisten);
   }
+
 
   /**
    * 切换模式
@@ -177,7 +154,7 @@ export class MDxEditor {
     this._container.classList.toggle('is-edit-mode', isEditMode);
     this._container.classList.toggle('is-render-mode', !isEditMode);
 
-    this.editorContainer.style.display = isEditMode ? 'block' : 'none';
+    this.editorContainer.style.display = isEditMode ? 'flex' : 'none'; // Use flex for child to grow
     this.renderContainer.style.display = isEditMode ? 'none' : 'block';
 
     if (!isEditMode) {
@@ -192,61 +169,172 @@ export class MDxEditor {
    */
   private async renderContent(): Promise<void> {
     if (this.renderContainer) {
-      await this.renderer.render(this.renderContainer, this.currentContent);
+      await this.renderer.render(this.renderContainer, this.getText());
     }
   }
 
-  /**
-   * 获取编辑器当前的全量 Markdown 内容。
-   */
-  getContent(): string {
-    return this.currentContent;
+  // --- IEditor Implementation ---
+
+  get commands(): Readonly<Record<string, Function>> {
+    const commandMap = this.renderer.getPluginManager().getCommands();
+    const commands: Record<string, Function> = {};
+    commandMap.forEach((fn, name) => { commands[name] = fn; });
+    return Object.freeze(commands);
   }
-
-  /**
-   * 设置编辑器的内容。
-   */
-  setContent(content: string): void {
-    if (content === this.currentContent) {
-      return;
-    }
-
-    this.currentContent = content;
-
-    if (this.editorView) {
+  getText(): string { return this.editorView ? this.editorView.state.doc.toString() : ''; }
+  setText(markdown: string): void {
+    if (this.editorView && markdown !== this.getText()) {
       this.editorView.dispatch({
-        changes: {
-          from: 0,
-          to: this.editorView.state.doc.length,
-          insert: content,
-        },
+        changes: { from: 0, to: this.editorView.state.doc.length, insert: markdown }
       });
     }
+  }
 
-    // 注意：当处于渲染模式时，内容更新通常由用户交互（如点击任务列表）触发，
-    // DOM 已被局部更新。此时不应调用 renderContent()，否则会导致视图闪烁。
-    // 关键是确保 backing state (`currentContent`) 和 CodeMirror state 保持同步。
+  async getHeadings(): Promise<Heading[]> {
+    const text = this.getText();
+    const headings: Heading[] = [];
+    const lines = text.split('\n');
+    const slugify = (s: string) => s.toLowerCase().replace(/\s+/g, '-').replace(/[^\w-]+/g, '');
+    for (const line of lines) {
+      const match = line.match(/^(#+)\s+(.*)/);
+      if (match) {
+        const level = match[1].length;
+        const textContent = match[2].trim();
+        if (textContent) {
+          headings.push({ level, text: textContent, id: slugify(textContent) });
+        }
+      }
+    }
+    return headings;
+  }
+  setTitle(newTitle: string): void { this.renderer.getPluginManager().emit('setTitle', { title: newTitle }); }
+  async navigateTo(target: { elementId: string }): Promise<void> {
+    if (this.currentMode === 'render' && this.renderContainer) {
+      const element = this.renderContainer.querySelector(`#${target.elementId}`);
+      element?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    } else { console.warn('Navigation is only supported in render mode.'); }
+  }
+
+  setReadOnly(isReadOnly: boolean): void {
+    if (this.editorView) {
+      this.editorView.dispatch({
+        effects: this.readOnlyCompartment.reconfigure(EditorView.editable.of(!isReadOnly))
+      });
+    }
+  }
+
+  focus(): void {
+    if (this.currentMode === 'edit' && this.editorView) this.editorView.focus();
+    else if (this.renderContainer) this.renderContainer.focus();
+  }
+
+  async search(query: string): Promise<UnifiedSearchResult[]> {
+    this.clearSearch();
+    if (!query) return [];
+
+    if (this.currentMode === 'edit' && this.editorView) {
+      this.editorView.dispatch({
+        effects: this.searchCompartment.reconfigure(search({ top: true }))
+      });
+      
+      const results: UnifiedSearchResult[] = [];
+      const docString = this.editorView.state.doc.toString();
+      const regex = new RegExp(query, 'gi');
+      
+      // 💡 修正: 使用 matchAll 遍历字符串，更安全可靠
+      for (const match of docString.matchAll(regex)) {
+        const from = match.index!;
+        const to = from + match[0].length;
+        results.push({
+          source: 'editor',
+          text: match[0],
+          context: this.editorView.state.doc.lineAt(from).text,
+          details: { from, to },
+        });
+      }
+      return results;
+    } else {
+      const matches = this.renderer.search(query);
+      return matches.map(el => ({
+        source: 'renderer',
+        text: el.textContent || '',
+        context: el.parentElement?.textContent?.substring(0, 100) || '',
+        details: { element: el },
+      }));
+    }
+  }
+
+  gotoMatch(result: UnifiedSearchResult): void {
+    if (result.source === 'editor' && this.editorView && result.details.from !== undefined) {
+      this.editorView.dispatch({
+        selection: { anchor: result.details.from, head: result.details.to },
+        scrollIntoView: true,
+      });
+      this.editorView.focus();
+    } else if (result.source === 'renderer' && result.details.element) {
+      this.renderer.gotoMatch(result.details.element);
+    }
+  }
+
+  clearSearch(): void {
+    if (this.currentMode === 'edit' && this.editorView) {
+       this.editorView.dispatch({ effects: this.searchCompartment.reconfigure([]) });
+    } else { this.renderer.clearSearch(); }
+  }
+
+  on(eventName: 'change' | 'interactiveChange' | 'ready', callback: EditorEventCallback): () => void {
+    if (!this.eventEmitter.has(eventName)) this.eventEmitter.set(eventName, new Set());
+    this.eventEmitter.get(eventName)!.add(callback);
+    return () => { this.eventEmitter.get(eventName)?.delete(callback); };
+  }
+
+  private emit(eventName: 'change' | 'interactiveChange' | 'ready', payload?: any) {
+    this.eventEmitter.get(eventName)?.forEach(cb => cb(payload));
+  }
+
+
+  /**
+   * 销毁编辑器实例，释放资源。
+   */
+  destroy(): void {
+    this.editorView?.destroy();
+    this.renderer.destroy();
+    this.cleanupListeners.forEach((fn) => fn());
+    this.cleanupListeners = [];
+    this.eventEmitter.clear();
+    if (this._container) {
+      this._container.innerHTML = '';
+    }
+    this._container = null;
+    this.editorContainer = null;
+    this.renderContainer = null;
+  }
+  
+  // --- Backward Compatibility & MDxEditor-specific methods ---
+
+
+
+  /**
+   * 获取 MDxRenderer 实例。
+   */
+  public getRenderer(): MDxRenderer {
+    return this.renderer;
+  }
+
+
+
+  /**
+   * 获取 CodeMirror EditorView 实例。
+   */
+  public getEditorView(): EditorView | null {
+    return this.editorView;
   }
 
   /**
    * 获取当前模式（'edit' 或 'render'）。
    */
-  getCurrentMode(): 'edit' | 'render' {
+  public getCurrentMode(): 'edit' | 'render' {
     return this.currentMode;
-  }
-
-  /**
-   * 获取 CodeMirror EditorView 实例。
-   */
-  getEditorView(): EditorView | null {
-    return this.editorView;
-  }
-
-  /**
-   * 获取 MDxRenderer 实例。
-   */
-  getRenderer(): MDxRenderer {
-    return this.renderer;
   }
 
   /**
@@ -259,53 +347,7 @@ export class MDxEditor {
   /**
    * 获取渲染容器元素，用于打印等外部功能。
    */
-  getRenderContainer(): HTMLElement | null {
+  public getRenderContainer(): HTMLElement | null {
     return this.renderContainer;
-  }
-
-  /**
-   * 在编辑器中查找并选中文本。
-   */
-  findAndSelectText(text: string): void {
-    if (!this.editorView) return;
-
-    const content = this.editorView.state.doc.toString();
-    const index = content.indexOf(text);
-
-    if (index !== -1) {
-      this.editorView.dispatch({
-        selection: { anchor: index, head: index + text.length },
-        scrollIntoView: true,
-      });
-
-      this.editorView.focus();
-    }
-  }
-
-  /**
-   * 在指定元素中渲染 Markdown（供插件使用）。
-   */
-  async renderInElement(element: HTMLElement, markdown: string): Promise<void> {
-    await this.renderer.render(element, markdown);
-  }
-
-  /**
-   * 销毁编辑器实例，释放资源。
-   */
-  destroy(): void {
-    this.editorView?.destroy();
-    this.renderer.destroy();
-
-    this.cleanupListeners.forEach((fn) => fn());
-    this.cleanupListeners = [];
-
-    if (this._container) {
-      this._container.innerHTML = '';
-    }
-
-    this.editorView = null;
-    this._container = null;
-    this.editorContainer = null;
-    this.renderContainer = null;
   }
 }
