@@ -379,7 +379,7 @@ export async function handlePrintAction(editor: MDxEditor): Promise<boolean> {
                 printContainer.innerHTML = renderEl.innerHTML;
             }
         } else {
-            const latestMarkdown = editor.getContent();
+            const latestMarkdown = editor.getText();
             await editor.getRenderer().render(printContainer, latestMarkdown, {
                 areAllClozesVisible: true 
             });

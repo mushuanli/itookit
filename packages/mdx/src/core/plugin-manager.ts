@@ -1,6 +1,8 @@
-// mdx/core/plugin-manager.ts
+/**
+ * @file mdx/core/plugin-manager.ts
+ */
 import type { MarkedExtension } from 'marked';
-import type { Extension } from '@codemirror/state'; // 💡 新增：导入类型
+import type { Extension } from '@codemirror/state';
 import { ServiceContainer } from './service-container';
 import type { VFSCore, VNode } from '@itookit/vfs-core';
 import type { IPersistenceAdapter } from '@itookit/common';
@@ -160,7 +162,7 @@ class MemoryStore implements ScopedPersistenceStore {
  */
 export class PluginManager {
   private plugins: Map<string, { plugin: MDxPlugin; context: PluginContext; }> = new Map();
-  private hooks: Map<string, Map<symbol, Function>> = new Map();  // 使用 Symbol 作为键，确保每个钩子处理函数的唯一性，便于精确移除
+  private hooks: Map<string, Map<symbol, Function>> = new Map();
   private eventBus: Map<string, Map<symbol, Function>> = new Map();
   private serviceContainer: ServiceContainer;
   private vfsCore: VFSCore | null = null;
@@ -482,6 +484,13 @@ export class PluginManager {
    */
   getCommand(name: string): Function | undefined {
     return this.commands.get(name);
+  }
+
+  /**
+   * 获取所有已注册的命令
+   */
+  getCommands(): Map<string, Function> {
+    return this.commands;
   }
 
   /**

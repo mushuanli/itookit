@@ -73,12 +73,8 @@ export function registerPlugin(
 }
 
 registerPlugin('editor:core', CoreEditorPlugin, { priority: 1 });
-registerPlugin('core:titlebar', CoreTitleBarPlugin, { 
-  priority: 2,
-});
-registerPlugin('interaction:source-sync', SourceSyncPlugin, { 
-  priority: 60 
-});
+registerPlugin('core:titlebar', CoreTitleBarPlugin, { priority: 2 });
+registerPlugin('interaction:source-sync', SourceSyncPlugin, { priority: 60 });
 registerPlugin('ui:toolbar', ToolbarPlugin, { priority: 2 });
 registerPlugin('ui:formatting', FormattingPlugin, { priority: 3, dependencies: ['ui:toolbar'] });
 registerPlugin('mathjax', MathJaxPlugin, { priority: 5 });
@@ -214,18 +210,13 @@ function sortPlugins(pluginNames: string[]): string[] {
 
 /**
  * 创建、配置并返回一个新的 MDxEditor 实例。
+ * @param container - 编辑器将要挂载的 HTML 元素。
  * @param config - 编辑器及其插件的配置对象。
- * @returns 一个完全配置好的 MDxEditor 实例，准备好调用 `init()`。
+ * @returns 一个完全配置好的 MDxEditor 实例的 Promise。
  */
-export function createMDxEditor(config: MDxEditorFactoryConfig = {}): MDxEditor {
-  const editor = new MDxEditor({
-    initialMode: config.initialMode,
-    searchMarkClass: config.searchMarkClass,
-    vfsCore: config.vfsCore,
-    nodeId: config.nodeId,
-    persistenceAdapter: config.persistenceAdapter,
-    ...config,
-  });
+export async function createMDxEditor(container: HTMLElement, config: MDxEditorFactoryConfig = {}): Promise<MDxEditor> {
+  // 💡 1. 同步创建实例
+  const editor = new MDxEditor(config);
 
   const coreOptions = config.defaultPluginOptions?.['editor:core'] || {};
   const corePlugin = new CoreEditorPlugin(coreOptions);
@@ -233,60 +224,48 @@ export function createMDxEditor(config: MDxEditorFactoryConfig = {}): MDxEditor 
 
   let basePlugins = DEFAULT_PLUGINS;
   const userPlugins = config.plugins || [];
-
   if (userPlugins.length > 0 && getPluginName(userPlugins[0]) === ALL_PLUGINS_DISABLED_FLAG) {
     basePlugins = [];
     userPlugins.shift();
   }
-  
   const combinedPlugins = [...basePlugins, ...userPlugins];
   const pluginMap = new Map<string, PluginConfig>();
   const exclusions = new Set<string>();
-
   for (const pluginConfig of combinedPlugins) {
     const name = getPluginName(pluginConfig);
     if (!name) {
       console.warn('Invalid plugin configuration encountered:', pluginConfig);
       continue;
     }
-
     if (name.startsWith('-')) {
       exclusions.add(name.substring(1));
       continue;
     }
-    
     pluginMap.set(name, pluginConfig);
-
     if (name === 'cloze') {
       if (!pluginMap.has('cloze-controls')) pluginMap.set('cloze-controls', 'cloze-controls');
       if (!pluginMap.has('memory')) pluginMap.set('memory', 'memory');
     }
   }
-
   for (const excluded of exclusions) {
     pluginMap.delete(excluded);
   }
-
   const finalPluginNames = Array.from(pluginMap.keys());
   const sortedPluginNames = sortPlugins(finalPluginNames);
-  
   console.log('Plugins loading order:', ['editor:core (forced)', ...sortedPluginNames]);
 
   for (const pluginName of sortedPluginNames) {
     const pluginConfig = pluginMap.get(pluginName)!;
-    
     try {
       let pluginInstance: MDxPlugin | null = null;
-      
       if (typeof pluginConfig === 'object' && 'install' in pluginConfig) {
         pluginInstance = pluginConfig as MDxPlugin;
       } else {
         const info = pluginRegistry.get(pluginName);
         if (!info) {
-          console.warn(`Plugin with name "${pluginName}" not found in registry and could not be loaded.`);
+          console.warn(`Plugin with name "${pluginName}" not found in registry.`);
           continue;
         }
-
         const PluginClass = info.constructor;
         let options = {};
         if (typeof pluginConfig === 'string') {
@@ -302,14 +281,14 @@ export function createMDxEditor(config: MDxEditorFactoryConfig = {}): MDxEditor 
         }
         pluginInstance = new PluginClass(options);
       }
-
-      if (pluginInstance) {
-        editor.use(pluginInstance);
-      }
+      if (pluginInstance) editor.use(pluginInstance);
     } catch (error) {
       console.error(`Failed to instantiate plugin "${pluginName}" with config:`, pluginConfig, error);
     }
   }
+
+  // 💡 3. 异步初始化编辑器
+  await editor.init(container, config.initialContent || '');
 
   return editor;
 }

@@ -23,3 +23,6 @@ out/
 dist/
 docs/
 configmanager/
+.fdignore
+TODO.md
+prompt.md
