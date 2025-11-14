@@ -1,30 +1,75 @@
 {
-  "name": "@mdxeditor/renderer",
-  "version": "1.0.0",
-  "description": "Extensible Markdown renderer with plugin system",
+  "name": "@itookit/mdxeditor",
+  "version": "0.3.1",
+  "description": "A powerful, plugin-driven MDX editor component based on CodeMirror 6, designed for extensibility and rich content creation.",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    },
+    "./styles/*": "./styles/*"
+  },
   "files": [
     "dist",
     "styles"
   ],
+  "sideEffects": [
+    "**/*.css"
+  ],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "prepublishOnly": "pnpm build"
   },
   "keywords": [
     "markdown",
     "renderer",
     "plugin",
+    "mermaid",
     "mathjax",
-    "latex"
+    "latex",
+    "mdx",
+    "editor",
+    "codemirror",
+    "anki",
+    "md-folder",
+    "fold-codeblock",
+    "autocomplete",
+    "typescript"
   ],
+  "author": "lizlok@gmail.com",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mushuanli/itookit.git",
+    "directory": "packages/mdxeditor"
+  },
+  "bugs": {
+    "url": "https://github.com/mushuanli/itookit/issues"
+  },
+  "homepage": "https://github.com/mushuanli/itookit/tree/main/packages/mdxeditor#readme",
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
+    "@codemirror/autocomplete": "^6.4.2",
+    "@codemirror/commands": "^6.3.3",
+    "@codemirror/lang-markdown": "^6.2.4",
+    "@codemirror/language": "^6.10.0",
+    "@codemirror/lint": "^6.5.0",
+    "@codemirror/search": "^6.5.6",
+    "@codemirror/state": "^6.4.0",
+    "@codemirror/view": "^6.23.1",
     "@itookit/common": "workspace:*",
     "@itookit/vfs-core": "workspace:*",
-    "marked": "^11.0.0"
+    "codemirror": "^6.0.1",
+    "marked": "^11.0.0",
+    "mermaid": "^10.7.0"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
