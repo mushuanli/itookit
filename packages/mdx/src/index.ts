@@ -1,10 +1,7 @@
 // mdx/index.ts
-
-// --- 新增的工厂函数导出 ---
 export { createMDxEditor, registerPlugin } from './factory';
 export type { MDxEditorFactoryConfig, PluginConfig } from './factory';
 
-// 核心
 export { PluginManager } from './core/plugin-manager';
 export { ServiceContainer } from './core/service-container';
 export type {
@@ -12,20 +9,15 @@ export type {
   PluginContext,
   ScopedPersistenceStore,
   TitleBarButtonConfig,
-  ToolbarButtonConfig, // 添加了之前缺失的导出
+  ToolbarButtonConfig,
 } from './core/plugin';
 
-// 渲染器
 export { MDxRenderer } from './renderer/renderer';
 export type { MDxRendererConfig, RenderOptions } from './renderer/renderer';
 
-// 编辑器
 export { MDxEditor } from './editor/editor';
 export type { MDxEditorConfig } from './editor/editor';
 
-// 插件 (导出插件类本身和它们的选项类型)
-
-// 💡 新增：导出 CoreEditorPlugin
 export { CoreEditorPlugin } from './plugins/core/core-editor.plugin';
 export type { CoreEditorPluginOptions } from './plugins/core/core-editor.plugin';
 
@@ -56,12 +48,18 @@ export type { TaskListPluginOptions, TaskToggleDetail } from './plugins/interact
 export { CodeBlockControlsPlugin } from './plugins/interactions/codeblock-controls.plugin';
 export type { CodeBlockControlsPluginOptions } from './plugins/interactions/codeblock-controls.plugin';
 
-// 命令系统
-//export * as commands from './editor/commands';
-
-// UI 插件
 export { ToolbarPlugin } from './plugins/ui/toolbar.plugin';
 export type { ToolbarPluginOptions } from './plugins/ui/toolbar.plugin';
 
 export { FormattingPlugin } from './plugins/ui/formatting.plugin';
 export type { FormattingPluginOptions } from './plugins/ui/formatting.plugin';
+
+export { AutocompletePlugin } from './plugins/autocomplete/autocomplete.plugin';
+export type { AutocompletePluginOptions, AutocompleteProvider, AutocompleteSourceConfig } from './plugins/autocomplete/autocomplete.plugin';
+
+export { TagPlugin, TagProvider } from './plugins/autocomplete/tag.plugin';
+export type { TagPluginOptions } from './plugins/autocomplete/tag.plugin';
+
+export { MentionPlugin } from './plugins/autocomplete/mention.plugin';
+export type { MentionPluginOptions, MentionProvider, MentionItem } from './plugins/autocomplete/mention.plugin';
+

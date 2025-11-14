@@ -67,7 +67,6 @@ class MathJaxManager {
   registerInstance(config: any, cdnUrl: string): void {
     this.instanceCount++;
     
-    // 第一个实例设置配置
     if (this.instanceCount === 1) {
       this.config = config;
       this.cdnUrl = cdnUrl;
@@ -82,7 +81,6 @@ class MathJaxManager {
   unregisterInstance(): void {
     this.instanceCount--;
     
-    // 最后一个实例被销毁时清理
     if (this.instanceCount === 0) {
       this.cleanup();
     }
@@ -102,7 +100,6 @@ class MathJaxManager {
         return;
       }
 
-      // 设置配置
       (window as any).MathJax = this.config;
 
       const script = document.createElement('script');
@@ -274,22 +271,18 @@ export class MathJaxPlugin implements MDxPlugin {
    * 安装插件
    */
   install(context: PluginContext): void {
-    // 注册语法扩展
     context.registerSyntaxExtension(this.createSyntaxExtension());
 
-    // 自动加载 MathJax
     if (this.options.autoLoad) {
       this.manager.load().catch(err => {
         console.error('MathJax load error:', err);
       });
     }
 
-    // 监听 DOM 更新事件
     const removeListener = context.on('domUpdated', ({ element }: { element: HTMLElement }) => {
       this.manager.queueRender(element);
     });
 
-    // 记录清理函数
     if (removeListener) {
       this.cleanupFns.push(removeListener);
     }
@@ -312,5 +305,4 @@ export class MathJaxPlugin implements MDxPlugin {
   }
 }
 
-// 确保导出类型
 export type { MathJaxPluginOptions as MathJaxOptions };

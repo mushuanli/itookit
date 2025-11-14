@@ -44,24 +44,21 @@ export class FormattingPlugin implements MDxPlugin {
     const formats = this.getEnabledFormats();
 
     formats.forEach(format => {
-      // 如果格式是 'separator'，则注册一个分隔符并跳过此项
       if (format === 'separator') {
         registerToolbarButton({
-          id: `sep-${Date.now()}-${Math.random()}`, // 确保唯一 ID
+          id: `sep-${Date.now()}-${Math.random()}`,
           type: 'separator'
         });
-        return; // 继续下一次循环
+        return;
       }
 
-      // 注册所有命令
       const commandDef = this.getCommandDefinition(format);
       if (commandDef) {
     registerCommand(commandDef.name, (view: any) => {
-      return commandDef.fn(view);  // 直接传递，而不是 view.editorView
+      return commandDef.fn(view);
         });
       }
 
-      // 注册工具栏按钮
       const buttonConfig = this.getButtonConfig(format);
       if (buttonConfig) {
         registerToolbarButton(buttonConfig);
@@ -75,16 +72,12 @@ export class FormattingPlugin implements MDxPlugin {
   private getEnabledFormats(): string[] {
     if (this.options.enabledFormats === 'all') {
       return [
-        // 文本样式组
         'heading', 'bold', 'italic', 'strikethrough', 'highlight', 'inlineCode',
         'separator',
-        // 列表组
         'unorderedList', 'orderedList', 'taskList',
         'separator',
-        // 块元素组
         'blockquote', 'codeBlock', 'horizontalRule',
         'separator',
-        // 插入/嵌入组
         'link', 'image', 'table',
       ];
     }

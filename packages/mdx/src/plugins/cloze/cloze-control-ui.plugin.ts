@@ -13,7 +13,7 @@ export class ClozeControlsPlugin implements MDxPlugin {
   private panel: HTMLElement | null = null;
   private currentIndex = 0;
   private isAllOpen = false;
-  private container: HTMLElement | null = null; // <--- 完善：保存容器引用
+  private container: HTMLElement | null = null;
 
   constructor(options: ClozeControlsPluginOptions = {}) {
     this.options = {
@@ -29,9 +29,9 @@ export class ClozeControlsPlugin implements MDxPlugin {
     }
 
     const removeDomUpdated = context.on('domUpdated', ({ element }: { element: HTMLElement }) => {
-      this.container = element; // <--- 完善：保存容器引用
+      this.container = element;
       this.createPanel(context, clozeApi);
-      this.currentIndex = 0; // 重置导航索引
+      this.currentIndex = 0;
     });
     if (removeDomUpdated) this.cleanupFns.push(removeDomUpdated);
 
@@ -44,7 +44,6 @@ export class ClozeControlsPlugin implements MDxPlugin {
   }
 
   private createPanel(context: PluginContext, clozeApi: any): void {
-    // 确保 panel 只创建一次或在需要时重建
     if (this.panel && document.body.contains(this.panel)) return;
     if (this.panel) this.panel.remove();
     
@@ -70,14 +69,12 @@ export class ClozeControlsPlugin implements MDxPlugin {
           break;
         case 'toggle':
           this.isAllOpen = !this.isAllOpen;
-          // <--- 完善：在指定容器内操作
           clozeApi().toggleAll(this.isAllOpen, this.container);
           if (this.isAllOpen) {
             context.emit('clozeBatchGradeToggle', {});
           }
           break;
         case 'reverse': {
-          // <--- 完善：在指定容器内操作
           const clozes = this.container.querySelectorAll('.mdx-cloze');
           clozes.forEach(el => el.classList.toggle('hidden'));
           break;
@@ -85,13 +82,11 @@ export class ClozeControlsPlugin implements MDxPlugin {
       }
     });
     
-    // 将 panel 添加到 body，避免受父容器 overflow:hidden 影响
     document.body.appendChild(this.panel);
   }
 
   private navigate(direction: number): void {
     if (!this.container) return;
-    // <--- 完善：在指定容器内查找
     const hidden = Array.from(this.container.querySelectorAll('.mdx-cloze.hidden'));
     if (hidden.length === 0) return;
 

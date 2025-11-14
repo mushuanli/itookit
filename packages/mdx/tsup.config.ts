@@ -9,13 +9,12 @@ export default defineConfig({
   clean: true,
   onSuccess: async () => {
     try {
-      // 使用 esbuild 构建 CSS
       await build({
         entryPoints: ['src/styles/index.css'],
         bundle: true,
         outfile: 'dist/style.css',
         loader: { '.css': 'css' },
-        minify: false, // 设置为 true 可以压缩 CSS
+        minify: false,
       });
       
       console.log('✅ CSS bundled into dist/style.css');

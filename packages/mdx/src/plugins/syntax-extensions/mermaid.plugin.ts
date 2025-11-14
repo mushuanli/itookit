@@ -2,7 +2,6 @@
 
 import type { MDxPlugin, PluginContext } from '../../core/plugin';
 
-// 声明全局Mermaid类型
 declare global {
   interface Window {
     mermaid?: {
@@ -51,7 +50,6 @@ class MermaidManager {
   private config: any;
   private cdnUrl: string = '';
   private instanceCount = 0;
-  // 改为按实例ID分组的队列
   private renderQueues: Map<string, Set<Element>> = new Map();
   private renderTimers: Map<string, number> = new Map();
 
@@ -70,7 +68,6 @@ class MermaidManager {
   registerInstance(config: any, cdnUrl: string): void {
     this.instanceCount++;
     
-    // 第一个实例设置配置
     if (this.instanceCount === 1) {
       this.config = config;
       this.cdnUrl = cdnUrl;
@@ -85,7 +82,6 @@ class MermaidManager {
   unregisterInstance(): void {
     this.instanceCount--;
     
-    // 最后一个实例被销毁时清理
     if (this.instanceCount === 0) {
       this.cleanup();
     }
@@ -106,7 +102,6 @@ class MermaidManager {
       }
 
       try {
-        // 动态导入 Mermaid（ESM模块）
         const mermaid = await import(/* @vite-ignore */ this.cdnUrl);
 
         if (mermaid.default) {
@@ -164,23 +159,19 @@ class MermaidManager {
       if (window.mermaid?.run) {
         const elementsArray = Array.from(queue);
         
-        // 为当前实例的元素添加唯一标识
         const uniqueAttr = `data-mermaid-instance-${instanceId}`;
         elementsArray.forEach((el, i) => {
           (el as HTMLElement).setAttribute(uniqueAttr, String(i));
         });
 
-        // 使用实例特定的选择器
         const selector = elementsArray
           .map((_, i) => `[${uniqueAttr}="${i}"]`)
           .join(',');
         
         const nodeList = document.querySelectorAll(selector);
         
-        // 建议：移除不必要的 `as any` 类型断言
         await window.mermaid.run({ nodes: nodeList });
 
-        // 清理临时属性
         elementsArray.forEach(el => {
           (el as HTMLElement).removeAttribute(uniqueAttr);
         });
@@ -220,7 +211,7 @@ export class MermaidPlugin implements MDxPlugin {
   private options: Required<MermaidPluginOptions>;
   private manager: MermaidManager;
   private cleanupFns: Array<() => void> = [];
-  private instanceId: string; // 新增：实例ID
+  private instanceId: string;
 
   constructor(options: MermaidPluginOptions = {}) {
     this.options = {
@@ -234,8 +225,6 @@ export class MermaidPlugin implements MDxPlugin {
       autoLoad: options.autoLoad !== false,
     };
 
-    // 生成唯一实例ID
-    // 建议：使用 substring 或 slice 替代已不推荐的 substr
     this.instanceId = `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
     
     this.manager = MermaidManager.getInstance();
@@ -256,7 +245,6 @@ export class MermaidPlugin implements MDxPlugin {
       try {
         const mermaidElements = element.querySelectorAll('pre code.language-mermaid');
         if (mermaidElements.length > 0) {
-          // 传递实例ID进行隔离渲染
           this.manager.queueRender(this.instanceId, mermaidElements);
         }
       } catch (error) {

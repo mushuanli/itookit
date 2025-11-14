@@ -27,27 +27,25 @@ export class MDxRenderer {
   private searchMarkClass: string;
   public markedExtensions: any[] = [];
   private instanceId: string;
-  private editorInstance: any = null; // 💡 新增：保存编辑器实例引用
+  private editorInstance: any = null;
 
   constructor(config: MDxRendererConfig = {}) {
     this.config = config;
-    this.searchMarkClass = config.searchMarkClass || 'mdx-editor-search-highlight'; // 标准命名
+    this.searchMarkClass = config.searchMarkClass || 'mdx-editor-search-highlight';
     this.instanceId = `renderer-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     this.pluginManager = new PluginManager(this);
 
-    // 配置 VFS
     if (config.vfsCore && config.nodeId) {
       this.pluginManager.setVFSCore(config.vfsCore, config.nodeId);
     }
 
-    // 配置持久化适配器
     if (config.persistenceAdapter) {
       this.pluginManager.setDataAdapter(config.persistenceAdapter);
     }
   }
 
   /**
-   * 注册插件（每次创建新实例）
+   * 注册插件
    */
   use(pluginClass: new (...args: any[]) => MDxPlugin, ...args: any[]): this {
     const plugin = new pluginClass(...args);
@@ -56,7 +54,7 @@ export class MDxRenderer {
   }
 
   /**
-   * 或者使用插件实例（需要确保不共享）
+   * 使用插件实例
    */
   usePlugin(plugin: MDxPlugin): this {
     this.pluginManager.register(plugin);
@@ -71,12 +69,10 @@ export class MDxRenderer {
   }
 
   /**
-   * 💡 新增：设置编辑器实例引用
-   * 由 MDxEditor 在初始化时调用
+   * 设置编辑器实例引用
    */
   setEditorInstance(editor: any): void {
     this.editorInstance = editor;
-    // 更新插件管理器的 coreInstance
     (this.pluginManager as any).editorInstance = editor;
   }
 
@@ -84,12 +80,10 @@ export class MDxRenderer {
    * 配置 Marked 实例
    */
   private configureMarked(markedInstance: Marked, options: RenderOptions): void {
-    // 应用所有插件注册的语法扩展
     if (this.markedExtensions.length > 0) {
       markedInstance.use(...this.markedExtensions);
     }
 
-    // 应用用户自定义配置
     if (options.markedOptions) {
       markedInstance.use(options.markedOptions);
     }
@@ -104,32 +98,25 @@ export class MDxRenderer {
     options: RenderOptions = {}
   ): Promise<void> {
     this.renderRoot = element;
-    // 为渲染器根节点添加标准类名
     element.classList.add('mdx-editor-renderer');
 
-    // 执行 beforeParse 钩子
     const beforeParseResult = this.pluginManager.executeTransformHook('beforeParse', {
       markdown: markdownText,
       options,
     });
 
-    // 创建独立的 Marked 实例（避免全局污染）
     const marked = new Marked();
     this.configureMarked(marked, options);
 
-    // 解析 Markdown
     let html = await marked.parse(beforeParseResult.markdown);
 
-    // 执行 afterRender 钩子
     const afterRenderResult = this.pluginManager.executeTransformHook('afterRender', {
       html,
       options,
     });
 
-    // 渲染到 DOM
     element.innerHTML = afterRenderResult.html;
 
-    // 执行 domUpdated 钩子
     await this.pluginManager.executeHookAsync('domUpdated', {
       element,
       options,
@@ -185,7 +172,6 @@ export class MDxRenderer {
     matchElement.scrollIntoView({
       behavior: 'smooth',
       block: 'center',});
-    // 使用 BEM 修饰符
     matchElement.classList.add(`${this.searchMarkClass}--active`);
   }
 
@@ -221,7 +207,6 @@ export class MDxRenderer {
     this.pluginManager.destroy();
     
     if (this.renderRoot) {
-      // 清理添加的类
       this.renderRoot.classList.remove('mdx-editor-renderer');
     }
     

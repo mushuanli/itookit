@@ -20,6 +20,8 @@
 
 @import './plugin-titlebar.css';
 
+@import './plugin-autocomplete.css';
+
 /* 当工具栏存在时，调整编辑器容器 */
 .mdx-editor-container.has-toolbar {
   padding-top: 0;
