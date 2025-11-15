@@ -4,7 +4,9 @@
 import { Database } from './Database.js';
 import { InodeStore } from './InodeStore.js';
 import { ContentStore } from './ContentStore.js';
-import { VFS_STORES, VNode, ContentData, Transaction, TransactionMode } from './types.js';
+import { TagStore } from './TagStore.js';
+import { NodeTagStore } from './NodeTagStore.js';
+import { VFS_STORES, VNode, ContentData, Transaction, TransactionMode, TagData } from './types.js';
 
 /**
  * VFS 存储服务门面
@@ -13,8 +15,9 @@ import { VFS_STORES, VNode, ContentData, Transaction, TransactionMode } from './
 export class VFSStorage {
   private db: Database;
   private inodeStore!: InodeStore;
-  // [修正] 将类型从 InodeStore 修正为 ContentStore
   private contentStore!: ContentStore;
+  public tagStore!: TagStore;
+  public nodeTagStore!: NodeTagStore;
   private connected = false;
 
   constructor(dbName: string = 'vfs_database') {
@@ -33,6 +36,8 @@ export class VFSStorage {
     await this.db.connect();
     this.inodeStore = new InodeStore(this.db);
     this.contentStore = new ContentStore(this.db);
+    this.tagStore = new TagStore(this.db);
+    this.nodeTagStore = new NodeTagStore(this.db);
     this.connected = true;
     
     console.log('VFSStorage connected successfully');
@@ -51,7 +56,7 @@ export class VFSStorage {
    * 开启事务
    */
   async beginTransaction(
-    storeNames: string | string[] = [VFS_STORES.VNODES, VFS_STORES.CONTENTS],
+    storeNames: string | string[] = Object.values(VFS_STORES),
     mode: TransactionMode = 'readwrite'
   ): Promise<Transaction> {
     this.ensureConnected();
@@ -69,11 +74,17 @@ export class VFSStorage {
   }
 
   /**
-   * 加载 VNode
+   * 加载 VNode (并填充 tags)
+   * [修改]
    */
-  async loadVNode(nodeId: string): Promise<VNode | null> {
+  async loadVNode(nodeId: string, transaction?: Transaction | null): Promise<VNode | null> {
     this.ensureConnected();
-    return this.inodeStore.loadVNode(nodeId);
+    const vnode = await this.inodeStore.loadVNode(nodeId, transaction);
+    if (vnode) {
+      // 在这里，getTagsForNode会创建自己的只读事务，这是可接受的，因为我们不在一个写事务中。
+      vnode.tags = await this.nodeTagStore.getTagsForNode(vnode.nodeId);
+    }
+    return vnode;
   }
 
   /**
@@ -97,7 +108,15 @@ export class VFSStorage {
    */
   async getChildren(parentId: string): Promise<VNode[]> {
     this.ensureConnected();
-    return this.inodeStore.getChildren(parentId);
+    // 1. 先从 InodeStore 获取基础的 VNode 列表
+    const children = await this.inodeStore.getChildren(parentId);
+    
+    // 2. 并行地为每个子节点获取它们的标签并填充
+    await Promise.all(children.map(async (child) => {
+        child.tags = await this.nodeTagStore.getTagsForNode(child.nodeId);
+    }));
+
+    return children;
   }
 
   /**
@@ -105,7 +124,12 @@ export class VFSStorage {
    */
   async loadVNodes(nodeIds: string[]): Promise<VNode[]> {
     this.ensureConnected();
-    return this.inodeStore.loadBatch(nodeIds);
+    const vnodes = await this.inodeStore.loadBatch(nodeIds);
+    // [新增] 批量填充 tags
+    await Promise.all(vnodes.map(async (vnode) => {
+        vnode.tags = await this.nodeTagStore.getTagsForNode(vnode.nodeId);
+    }));
+    return vnodes;
   }
 
   // ==================== Content 操作 ====================
@@ -140,6 +164,82 @@ export class VFSStorage {
   async deleteContent(contentRef: string, transaction?: Transaction): Promise<void> {
     this.ensureConnected();
     await this.contentStore.deleteContent(contentRef, transaction);
+  }
+
+
+  // [新增] ==================== Tag 操作 ====================
+
+  /**
+   * 为节点添加标签
+   */
+  async addTagToNode(nodeId: string, tagName: string): Promise<void> {
+    this.ensureConnected();
+    
+    const tx = await this.beginTransaction([
+        VFS_STORES.VNODES, VFS_STORES.TAGS, VFS_STORES.NODE_TAGS
+    ]);
+    
+    try {
+      const existingTag = await this.tagStore.get(tagName, tx);
+      if (!existingTag) {
+        await this.tagStore.create({ name: tagName, createdAt: Date.now() }, tx);
+      }
+      
+      // 2. 建立关联（如果已存在，会因唯一索引而失败，正好可以捕获）
+      await this.nodeTagStore.add(nodeId, tagName, tx);
+      
+      // 3. 更新 VNode 上的冗余字段
+      const vnode = await this.inodeStore.loadVNode(nodeId, tx); 
+      if (vnode && !vnode.tags.includes(tagName)) {
+        vnode.tags.push(tagName);
+        await this.inodeStore.save(vnode, tx);
+      }
+      
+      await tx.done;
+    } catch (e) {
+      console.error("Failed to add tag to node:", e);
+      // 事务会自动回滚
+      if ((e as DOMException).name !== 'ConstraintError') {
+         console.error("Failed to add tag to node:", e);
+         throw e;
+      }
+    }
+  }
+  
+  /**
+   * 从节点移除标签
+   */
+  async removeTagFromNode(nodeId: string, tagName: string): Promise<void> {
+    this.ensureConnected();
+    const tx = await this.beginTransaction([VFS_STORES.VNODES, VFS_STORES.NODE_TAGS]);
+    
+    try {
+      await this.nodeTagStore.remove(nodeId, tagName, tx);
+      
+      const vnode = await this.inodeStore.loadVNode(nodeId, tx);
+      if (vnode) {
+        const index = vnode.tags.indexOf(tagName);
+        if (index > -1) {
+          vnode.tags.splice(index, 1);
+          await this.inodeStore.save(vnode, tx);
+        }
+      }
+      
+      await tx.done;
+    } catch (e) {
+      console.error("Failed to remove tag from node:", e);
+      throw e;
+    }
+  }
+
+  /**
+   * 根据标签查找节点
+   */
+  async findNodesByTag(tagName: string): Promise<VNode[]> {
+      this.ensureConnected();
+      const nodeIds = await this.nodeTagStore.getNodesForTag(tagName);
+      if (nodeIds.length === 0) return [];
+      return this.loadVNodes(nodeIds); // 使用已修改的 loadVNodes
   }
 
   // ==================== Module 操作 ====================

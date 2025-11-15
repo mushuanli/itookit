@@ -9,18 +9,17 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import 'fake-indexeddb/auto';
 
 // 导入 VFS 核心模块和类型
-// [FIX] 导入 VFS 构造函数需要的所有依赖项
 import {
   VFS,
   IProvider,
   VFSEventType,
   VFSErrorCode,
-  ProviderRegistry, // 新增
-  EventBus,        // 新增
-} from '../src/index.js'; // [FIX] 建议从库的统一入口导入
-import { VFSStorage,VNodeType, VNode } from '../src/store/index.js';
+  ProviderRegistry,
+  EventBus,
+} from '../src/index.js';
+import { VFSStorage, VNodeType, VNode } from '../src/store/index.js';
 
-// [新增] 辅助函数，用于解决时间戳精度问题
+// 辅助函数，用于解决时间戳精度问题
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 // --- 测试主体 ---
@@ -29,7 +28,6 @@ describe('VFS Core Functionality', () => {
   let vfs: VFS;
   let dbName: string;
   
-  // [FIX] 声明依赖项变量
   let storage: VFSStorage;
   let providers: ProviderRegistry;
   let events: EventBus;
@@ -39,15 +37,12 @@ describe('VFS Core Functionality', () => {
     // 使用唯一的数据库名确保测试隔离
     dbName = `test_vfs_${Date.now()}_${Math.random()}`;
 
-    // [FIX] 手动创建并初始化 VFS 的依赖项
     storage = new VFSStorage(dbName);
-    providers = new ProviderRegistry(); // 使用基础的 ProviderRegistry 进行测试
+    providers = new ProviderRegistry();
     events = new EventBus();
 
-    // [FIX] 将依赖项注入到 VFS 构造函数中
     vfs = new VFS(storage, providers, events);
     
-    // 初始化 VFS（现在 VFS 的 initialize 仅负责连接 storage）
     await vfs.initialize();
   });
 
@@ -124,7 +119,6 @@ describe('VFS Core Functionality', () => {
         content: 'old',
       });
       
-      // [修复] 增加延迟确保时间戳更新
       await sleep(5);
 
       await vfs.write(file.nodeId, 'new content');
@@ -147,7 +141,6 @@ describe('VFS Core Functionality', () => {
       expect(result.removedNodeId).toBe(file.nodeId);
       expect(result.allRemovedIds).toContain(file.nodeId);
 
-      // [修复] 修改断言方式
       await expect(vfs.stat(file.nodeId)).rejects.toHaveProperty('code', VFSErrorCode.NOT_FOUND);
     });
   });
@@ -183,9 +176,7 @@ describe('VFS Core Functionality', () => {
       expect(movedNode.name).toBe('moved.txt');
       expect(movedNode.path).toBe(`/${module}${newPath}`);
 
-      // 验证旧路径不存在
       await expect(vfs.pathResolver.resolve(module, '/file.txt')).resolves.toBeNull();
-      // 验证新路径存在且内容正确
       const newContent = await vfs.read(movedNode.nodeId);
       expect(newContent).toBe('move me');
     });
@@ -202,15 +193,12 @@ describe('VFS Core Functionality', () => {
 
       const result = await vfs.copy(sourceFile.nodeId, targetPath);
       
-      // 验证源文件仍然存在
       const sourceContent = await vfs.read(sourceFile.nodeId);
       expect(sourceContent).toBe('copy content');
 
-      // 验证目标文件已创建且内容正确
       const targetContent = await vfs.read(result.targetId);
       expect(targetContent).toBe('copy content');
       
-      // 验证是新节点
       expect(result.targetId).not.toBe(sourceFile.nodeId);
     });
 
@@ -232,12 +220,10 @@ describe('VFS Core Functionality', () => {
     it('should throw ALREADY_EXISTS when creating a node at an existing path', async () => {
       const options = { module: 'err', path: '/test.txt', type: VNodeType.FILE as VNodeType };
       await vfs.createNode(options);
-      // [修复] 修改断言方式
       await expect(vfs.createNode(options)).rejects.toHaveProperty('code', VFSErrorCode.ALREADY_EXISTS);
     });
 
     it('should throw NOT_FOUND when reading a non-existent node', async () => {
-      // [修复] 修改断言方式
       await expect(vfs.read('non-existent-id')).rejects.toHaveProperty('code', VFSErrorCode.NOT_FOUND);
     });
 
@@ -246,7 +232,6 @@ describe('VFS Core Functionality', () => {
       const dir = await vfs.createNode({ module, path: '/dir', type: VNodeType.DIRECTORY });
       await vfs.createNode({ module, path: '/dir/file.txt', type: VNodeType.FILE });
       
-      // [修复] 修改断言方式
       await expect(vfs.unlink(dir.nodeId)).rejects.toHaveProperty('code', VFSErrorCode.INVALID_OPERATION);
     });
   });
@@ -270,16 +255,13 @@ describe('VFS Core Functionality', () => {
         content: 'original'
       });
       
-      // 验证钩子被调用
       expect(mockProvider.onValidate).toHaveBeenCalledTimes(1);
       expect(mockProvider.onBeforeWrite).toHaveBeenCalledTimes(1);
       expect(mockProvider.onAfterWrite).toHaveBeenCalledTimes(1);
 
-      // 验证内容被修改
       const modifiedContent = await vfs.read(file.nodeId);
       expect(modifiedContent).toBe('[MODIFIED] original');
 
-      // 验证元数据被添加
       const stat = await vfs.stat(file.nodeId);
       expect(stat.metadata.fromProvider).toBe(true);
       expect(stat.metadata.contentHash).toBe('xyz');
@@ -327,6 +309,104 @@ describe('VFS Core Functionality', () => {
           nodeId: file.nodeId,
         })
       );
+    });
+  });
+  
+  // [新增] 6. 标签系统
+  describe('Tagging System', () => {
+    let fileNode: VNode;
+    let dirNode: VNode;
+    const module = 'tags';
+
+    beforeEach(async () => {
+        fileNode = await vfs.createNode({ module, path: '/document.txt', type: VNodeType.FILE });
+        dirNode = await vfs.createNode({ module, path: '/photos', type: VNodeType.DIRECTORY });
+    });
+
+    it('should add a tag to a file', async () => {
+        await vfs.addTag(fileNode.nodeId, 'important');
+        const tags = await vfs.getTags(fileNode.nodeId);
+        expect(tags).toEqual(['important']);
+    });
+
+    it('should add multiple tags to a directory', async () => {
+        await vfs.addTag(dirNode.nodeId, 'personal');
+        await vfs.addTag(dirNode.nodeId, 'archive');
+        const tags = await vfs.getTags(dirNode.nodeId);
+        expect(tags).toHaveLength(2);
+        expect(tags.sort()).toEqual(['archive', 'personal']);
+    });
+
+    it('should not add a duplicate tag', async () => {
+        await vfs.addTag(fileNode.nodeId, 'draft');
+        await vfs.addTag(fileNode.nodeId, 'draft'); // Add again
+        const tags = await vfs.getTags(fileNode.nodeId);
+        expect(tags).toEqual(['draft']);
+    });
+
+    it('should remove a tag from a node', async () => {
+        await vfs.addTag(fileNode.nodeId, 'important');
+        await vfs.addTag(fileNode.nodeId, 'urgent');
+        
+        await vfs.removeTag(fileNode.nodeId, 'important');
+        
+        const tags = await vfs.getTags(fileNode.nodeId);
+        expect(tags).toEqual(['urgent']);
+    });
+
+    it('should handle removing a non-existent tag gracefully', async () => {
+        await vfs.addTag(fileNode.nodeId, 'important');
+        await vfs.removeTag(fileNode.nodeId, 'non-existent-tag');
+        const tags = await vfs.getTags(fileNode.nodeId);
+        expect(tags).toEqual(['important']);
+    });
+    
+    it('should find nodes by a specific tag', async () => {
+        await vfs.addTag(fileNode.nodeId, 'work');
+        await vfs.addTag(dirNode.nodeId, 'personal');
+        
+        const anotherFile = await vfs.createNode({ module, path: '/report.pdf', type: VNodeType.FILE });
+        await vfs.addTag(anotherFile.nodeId, 'work');
+
+        const workNodes = await vfs.findByTag('work');
+        expect(workNodes).toHaveLength(2);
+        const workNodeIds = workNodes.map(n => n.nodeId).sort();
+        expect(workNodeIds).toEqual([fileNode.nodeId, anotherFile.nodeId].sort());
+
+        const personalNodes = await vfs.findByTag('personal');
+        expect(personalNodes).toHaveLength(1);
+        expect(personalNodes[0].nodeId).toBe(dirNode.nodeId);
+    });
+
+    it('should return an empty array when finding by a non-existent tag', async () => {
+        const nodes = await vfs.findByTag('non-existent-tag');
+        expect(nodes).toEqual([]);
+    });
+
+    it('should remove all tag associations when a node is unlinked', async () => {
+        await vfs.addTag(fileNode.nodeId, 'temp');
+        await vfs.addTag(fileNode.nodeId, 'deletable');
+
+        // Check that findByTag works before deletion
+        let tempNodes = await vfs.findByTag('temp');
+        expect(tempNodes).toHaveLength(1);
+
+        // Unlink the node
+        await vfs.unlink(fileNode.nodeId);
+
+        // Check that findByTag no longer finds the node
+        tempNodes = await vfs.findByTag('temp');
+        expect(tempNodes).toHaveLength(0);
+    });
+
+    it('should persist tags when a node is copied', async () => {
+        await vfs.addTag(fileNode.nodeId, 'template');
+        await vfs.addTag(fileNode.nodeId, 'report');
+
+        const result = await vfs.copy(fileNode.nodeId, '/document_copy.txt');
+        const copiedNode = await storage.loadVNode(result.targetId);
+        
+        expect(copiedNode!.tags.sort()).toEqual(['report', 'template']);
     });
   });
 });

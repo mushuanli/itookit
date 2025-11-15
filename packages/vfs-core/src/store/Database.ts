@@ -9,7 +9,7 @@ import { VFS_STORES, TransactionMode, Transaction } from './types.js';
  */
 export class Database {
   private db: IDBDatabase | null = null;
-  private readonly version = 2;
+  private readonly version = 3; // [修改] 版本升级
 
   constructor(private dbName: string = 'vfs_database') {}
 
@@ -49,6 +49,13 @@ export class Database {
           // 可以在这里添加新的索引或修改
           console.log('Upgrading to version 2...');
         }
+        
+        // [新增] 版本 3: 添加 Tag 功能相关的表
+        if (oldVersion < 3) {
+          console.log('Upgrading to version 3...');
+          this.createTagsStore(db);
+          this.createNodeTagsStore(db);
+        }
       };
     });
   }
@@ -79,6 +86,26 @@ export class Database {
       store.createIndex('nodeId', 'nodeId', { unique: false });
       
       console.log('Created contents store with indexes');
+    }
+  }
+
+  // [新增] 创建 tags 对象存储
+  private createTagsStore(db: IDBDatabase): void {
+    if (!db.objectStoreNames.contains(VFS_STORES.TAGS)) {
+      db.createObjectStore(VFS_STORES.TAGS, { keyPath: 'name' });
+      console.log('Created tags store');
+    }
+  }
+
+  // [新增] 创建 node_tags 对象存储
+  private createNodeTagsStore(db: IDBDatabase): void {
+    if (!db.objectStoreNames.contains(VFS_STORES.NODE_TAGS)) {
+      const store = db.createObjectStore(VFS_STORES.NODE_TAGS, { autoIncrement: true });
+      store.createIndex('nodeId', 'nodeId', { unique: false });
+      store.createIndex('tagName', 'tagName', { unique: false });
+      // 复合索引防止重复关联
+      store.createIndex('nodeId_tagName', ['nodeId', 'tagName'], { unique: true });
+      console.log('Created node_tags store with indexes');
     }
   }
 
