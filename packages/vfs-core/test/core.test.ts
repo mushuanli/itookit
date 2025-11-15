@@ -9,8 +9,16 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import 'fake-indexeddb/auto';
 
 // 导入 VFS 核心模块和类型
-import { VFS,IProvider, VFSEventType, VFSErrorCode } from '../src/core/index.js';
-import { VNodeType, VNode } from '../src/store/index.js';
+// [FIX] 导入 VFS 构造函数需要的所有依赖项
+import {
+  VFS,
+  IProvider,
+  VFSEventType,
+  VFSErrorCode,
+  ProviderRegistry, // 新增
+  EventBus,        // 新增
+} from '../src/index.js'; // [FIX] 建议从库的统一入口导入
+import { VFSStorage,VNodeType, VNode } from '../src/store/index.js';
 
 // [新增] 辅助函数，用于解决时间戳精度问题
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -20,12 +28,26 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 describe('VFS Core Functionality', () => {
   let vfs: VFS;
   let dbName: string;
+  
+  // [FIX] 声明依赖项变量
+  let storage: VFSStorage;
+  let providers: ProviderRegistry;
+  let events: EventBus;
 
   // 在每个测试用例开始前执行
   beforeEach(async () => {
     // 使用唯一的数据库名确保测试隔离
     dbName = `test_vfs_${Date.now()}_${Math.random()}`;
-    vfs = new VFS(dbName);
+
+    // [FIX] 手动创建并初始化 VFS 的依赖项
+    storage = new VFSStorage(dbName);
+    providers = new ProviderRegistry(); // 使用基础的 ProviderRegistry 进行测试
+    events = new EventBus();
+
+    // [FIX] 将依赖项注入到 VFS 构造函数中
+    vfs = new VFS(storage, providers, events);
+    
+    // 初始化 VFS（现在 VFS 的 initialize 仅负责连接 storage）
     await vfs.initialize();
   });
 
@@ -39,7 +61,7 @@ describe('VFS Core Functionality', () => {
       request.onerror = () => reject(request.error);
       request.onblocked = () => {
         console.warn('Database deletion blocked. Ensure all connections are closed.');
-        resolve(); // Or reject, depending on strictness
+        resolve();
       };
     });
   });

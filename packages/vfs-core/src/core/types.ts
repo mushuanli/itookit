@@ -3,7 +3,7 @@
  * VFS Core 层类型定义
  */
 
-import { VNode, VNodeType, Transaction } from '../store/types.js'; // Import Transaction
+import { VNode, VNodeType, Transaction } from '../store/types.js';
 
 /** VFS 错误类型 */
 export enum VFSErrorCode {
@@ -66,12 +66,18 @@ export interface CopyResult {
   copiedIds: string[];
 }
 
-/** 
+/**
  * Provider 接口
  * [MODIFIED] Hooks that perform writes now accept a transaction object.
  */
 export interface IProvider {
   name: string;
+  // [推荐] 添加这些可选属性，让 IProvider 更通用，减少类型冲突
+  priority?: number; 
+  initialize?(storage: any, eventBus: any): void;
+  canHandle?(vnode: any): boolean;
+  cleanup?(): Promise<void>;
+
   onValidate?(vnode: VNode, content: string | ArrayBuffer): Promise<void>;
   onBeforeWrite?(vnode: VNode, content: string | ArrayBuffer, transaction: Transaction): Promise<string | ArrayBuffer>;
   onAfterWrite?(vnode: VNode, content: string | ArrayBuffer, transaction: Transaction): Promise<Record<string, any>>;
