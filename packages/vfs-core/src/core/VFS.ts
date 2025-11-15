@@ -4,7 +4,7 @@
  */
 
 import { VFSStorage } from '../store/VFSStorage.js';
-import { VNode, VNodeType, ContentData, Transaction } from '../store/types.js';
+import { VNode, VNodeType, ContentData, Transaction, VFS_STORES } from '../store/types.js';
 import { ContentStore } from '../store/ContentStore.js';
 import { PathResolver } from './PathResolver.js';
 import { ProviderRegistry } from './ProviderRegistry.js';
@@ -21,14 +21,12 @@ import {
   IProvider
 } from './types.js';
 
-// [NEW] Define a type for the in-memory tree structure
 interface NodeTreeData {
   node: VNode;
   content: ContentData | null;
   children: NodeTreeData[];
 }
 
-// [MODIFIED] Update CopyOperation to use pre-loaded content
 interface CopyOperation {
   type: 'create_node' | 'copy_content';
   sourceContent?: ContentData | null;
@@ -42,6 +40,7 @@ interface CopyOperation {
     contentRef: string | null;
     size: number;
     metadata: Record<string, any>;
+    tags: string[];
   };
 }
 
@@ -104,7 +103,6 @@ export class VFS {
 
     // 解析父节点
     const parentId = await this.pathResolver.resolveParent(module, normalizedPath);
-    // [FIX] Add check to ensure parent is a directory
     if (parentId) {
         const parentNode = await this.storage.loadVNode(parentId);
         if (parentNode && parentNode.type !== VNodeType.DIRECTORY) {
@@ -121,7 +119,7 @@ export class VFS {
     // Create the VNode instance in memory first
     const vnode = new VNode(
       nodeId, parentId, name, type, fullPath, module, contentRef,
-      0, Date.now(), Date.now(), metadata
+      0, Date.now(), Date.now(), metadata, []
     );
 
     // [REFACTORED] Run validation before the transaction starts
@@ -132,25 +130,16 @@ export class VFS {
     // --- Phase 2: Execute (Transactional) ---
     const tx = await this.storage.beginTransaction();
     try {
-    // [修改] 文件类型且未提供内容时，默认为空字符串
-    if (type === VNodeType.FILE) {
-      const fileContent = content !== undefined ? content : '';
-      
-      const { processedContent, derivedData } = await this._processWriteWithProviders(
-        vnode, fileContent, tx
-      );
-
-      vnode.metadata = { ...vnode.metadata, ...derivedData };
-      vnode.size = this._getContentSize(processedContent);
+      if (type === VNodeType.FILE) {
+        const fileContent = content !== undefined ? content : '';
+        const { processedContent, derivedData } = await this._processWriteWithProviders(
+          vnode, fileContent, tx
+        );
+        vnode.metadata = { ...vnode.metadata, ...derivedData };
+        vnode.size = this._getContentSize(processedContent);
       }
-
-      // 保存节点
       await this.storage.saveVNode(vnode, tx);
-
-      // 提交事务
       await tx.done;
-
-      // 发布事件
       this.events.emit({
         type: VFSEventType.NODE_CREATED,
         nodeId: vnode.nodeId,
@@ -158,7 +147,6 @@ export class VFS {
         timestamp: Date.now(),
         data: { type, module }
       });
-
       return vnode;
     } catch (error) {
       // [修复] 改进错误包装
@@ -271,7 +259,10 @@ export class VFS {
     }
     
     const allRemovedIds = nodesToDelete.map(n => n.nodeId);
-    const tx = await this.storage.beginTransaction();
+    // [修改] 确保事务包含 node_tags store
+    const tx = await this.storage.beginTransaction([
+        VFS_STORES.VNODES, VFS_STORES.CONTENTS, VFS_STORES.NODE_TAGS
+    ]);
 
     try {
       // 在事务内批量执行
@@ -282,6 +273,10 @@ export class VFS {
         if (node.contentRef) {
           await this.storage.deleteContent(node.contentRef, tx);
         }
+        
+        // [新增] 删除节点的所有标签关联
+        await this.storage.nodeTagStore.removeAllForNode(node.nodeId, tx);
+
         await this.storage.deleteVNode(node.nodeId, tx);
 
         await this.providers.runAfterDelete(node, tx);
@@ -390,14 +385,17 @@ export class VFS {
       throw new VFSError(VFSErrorCode.INVALID_OPERATION, "Cannot generate copy plan for the source node.");
     }
     
-    // Phase 3: Execute (all DB writes happen inside a single transaction)
-    const tx = await this.storage.beginTransaction();
+    // [修复] 确保事务包含 node_tags store
+    const tx = await this.storage.beginTransaction([
+        VFS_STORES.VNODES, VFS_STORES.CONTENTS, VFS_STORES.NODE_TAGS
+    ]);
+    
     try {
       for (const op of operations) {
         const newNode = new VNode(
           op.newNodeData.nodeId, op.newNodeData.parentId, op.newNodeData.name, op.newNodeData.type,
           op.newNodeData.path, op.newNodeData.moduleId, op.newNodeData.contentRef, op.newNodeData.size,
-          Date.now(), Date.now(), op.newNodeData.metadata
+          Date.now(), Date.now(), op.newNodeData.metadata, op.newNodeData.tags
         );
         await this.storage.saveVNode(newNode, tx);
   
@@ -409,6 +407,13 @@ export class VFS {
             size: op.sourceContent.size,
             createdAt: Date.now()
           }, tx);
+        }
+
+        // 3. [修复] 复制标签关联关系
+        if (op.newNodeData.tags.length > 0) {
+            for (const tagName of op.newNodeData.tags) {
+                await this.storage.nodeTagStore.add(newNode.nodeId, tagName, tx);
+            }
         }
       }
   
@@ -473,6 +478,28 @@ export class VFS {
     };
   }
 
+  // [新增] ==================== Tag 核心方法 ====================
+
+  async addTag(vnodeOrId: VNode | string, tagName: string): Promise<void> {
+    const vnode = await this._resolveVNode(vnodeOrId);
+    await this.storage.addTagToNode(vnode.nodeId, tagName);
+  }
+  
+  async removeTag(vnodeOrId: VNode | string, tagName: string): Promise<void> {
+    const vnode = await this._resolveVNode(vnodeOrId);
+    await this.storage.removeTagFromNode(vnode.nodeId, tagName);
+  }
+
+  async getTags(vnodeOrId: VNode | string): Promise<string[]> {
+    const vnode = await this._resolveVNode(vnodeOrId);
+    // VNode instance already has tags populated by the modified storage.loadVNode
+    return vnode.tags;
+  }
+
+  async findByTag(tagName: string): Promise<VNode[]> {
+      return this.storage.findNodesByTag(tagName);
+  }
+
   // ==================== 私有辅助方法 ====================
 
   /**
@@ -495,7 +522,7 @@ export class VFS {
     }
 
     // 写入后处理，获取派生数据
-    const derivedData = await this.providers.runAfterWrite(vnode, processedContent, tx); // Pass tx
+    const derivedData = await this.providers.runAfterWrite(vnode, processedContent, tx);
 
     return { processedContent, derivedData };
   }
@@ -576,7 +603,8 @@ export class VFS {
       newNodeData: {
         nodeId: newNodeId, parentId: targetParentId, name: targetName, type: sourceNode.type,
         path: targetFullPath, moduleId: module, contentRef: newContentRef, size: sourceNode.size,
-        metadata: { ...sourceNode.metadata }
+        metadata: { ...sourceNode.metadata },
+        tags: [...sourceNode.tags]
       }
     });
   
