@@ -51,11 +51,12 @@ export class VFS {
   public readonly providers: ProviderRegistry;
   public readonly events: EventBus;
 
-  constructor(dbName: string = 'vfs_database') {
-    this.storage = new VFSStorage(dbName);
+  // [ARCH REFACTOR] Constructor accepts dependencies
+  constructor(storage: VFSStorage, providers: ProviderRegistry, events: EventBus) {
+    this.storage = storage;
+    this.providers = providers;
+    this.events = events;
     this.pathResolver = new PathResolver(this);
-    this.providers = new ProviderRegistry();
-    this.events = new EventBus();
   }
 
   /**
@@ -103,6 +104,14 @@ export class VFS {
 
     // 解析父节点
     const parentId = await this.pathResolver.resolveParent(module, normalizedPath);
+    // [FIX] Add check to ensure parent is a directory
+    if (parentId) {
+        const parentNode = await this.storage.loadVNode(parentId);
+        if (parentNode && parentNode.type !== VNodeType.DIRECTORY) {
+            throw new VFSError(VFSErrorCode.INVALID_OPERATION, `Cannot create node inside a file: ${parentNode.path}`);
+        }
+    }
+    
     const name = this.pathResolver.basename(normalizedPath);
     const fullPath = `/${module}${normalizedPath}`;
     
@@ -123,14 +132,16 @@ export class VFS {
     // --- Phase 2: Execute (Transactional) ---
     const tx = await this.storage.beginTransaction();
     try {
-      if (type === VNodeType.FILE && content !== undefined) {
-        const { processedContent, derivedData } = await this._processWriteWithProviders(
-          vnode, content, tx
-        );
+    // [修改] 文件类型且未提供内容时，默认为空字符串
+    if (type === VNodeType.FILE) {
+      const fileContent = content !== undefined ? content : '';
+      
+      const { processedContent, derivedData } = await this._processWriteWithProviders(
+        vnode, fileContent, tx
+      );
 
-        // 合并派生数据到元数据
-        vnode.metadata = { ...vnode.metadata, ...derivedData };
-        vnode.size = this._getContentSize(processedContent);
+      vnode.metadata = { ...vnode.metadata, ...derivedData };
+      vnode.size = this._getContentSize(processedContent);
       }
 
       // 保存节点
@@ -326,6 +337,12 @@ export class VFS {
       vnode.modifiedAt = Date.now();
 
       await this.storage.saveVNode(vnode, tx);
+
+      // [FIX] Recursively update paths of all descendants
+      if (vnode.type === VNodeType.DIRECTORY) {
+        await this._updateDescendantPaths(vnode, oldPath, newFullPath, tx);
+      }
+      
       await tx.done;
 
       // 发布事件
@@ -494,6 +511,20 @@ export class VFS {
       }
     }
   }
+
+  // [NEW] Helper to fix descendant paths after a move operation
+  private async _updateDescendantPaths(parent: VNode, oldPath: string, newPath: string, tx: Transaction): Promise<void> {
+      const children = await this.storage.getChildren(parent.nodeId);
+      for (const child of children) {
+          const childOldPath = this.pathResolver.join(oldPath, child.name);
+          const childNewPath = this.pathResolver.join(newPath, child.name);
+          child.path = childNewPath;
+          await this.storage.saveVNode(child, tx);
+          if (child.type === VNodeType.DIRECTORY) {
+              await this._updateDescendantPaths(child, childOldPath, childNewPath, tx);
+          }
+      }
+  }
   
   /**
    * [NEW] Recursively pre-loads an entire node tree into memory.
@@ -541,7 +572,7 @@ export class VFS {
   
     operations.push({
       type: operationType,
-      sourceContent: tree.content, // Use pre-loaded content
+      sourceContent: tree.content,
       newNodeData: {
         nodeId: newNodeId, parentId: targetParentId, name: targetName, type: sourceNode.type,
         path: targetFullPath, moduleId: module, contentRef: newContentRef, size: sourceNode.size,
@@ -587,14 +618,5 @@ export class VFS {
       return new Blob([content]).size;
     }
     return content.byteLength;
-  }
-
-  /**
-   * [新增] 批量构建带路径的树结构（优化版）
-   */
-  async _buildTreeWithPaths(vnodes: VNode[]): Promise<VNode[]> {
-    // 使用批量路径解析优化
-    await this.pathResolver.resolvePaths(vnodes);
-    return vnodes;
   }
 }

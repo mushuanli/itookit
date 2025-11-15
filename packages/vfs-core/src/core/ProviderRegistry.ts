@@ -4,10 +4,12 @@
  */
 
 import { IProvider } from './types.js';
-import { VNode, Transaction } from '../store/types.js'; // Import Transaction
+import { VNode, Transaction } from '../store/types.js';
 
 export class ProviderRegistry {
-  private providers: Map<string, IProvider> = new Map();
+  // 将 private 改为 protected，以便子类 EnhancedProviderRegistry 可以直接访问（可选，但推荐）
+  // 或者保持 private，通过 super 方法访问
+  protected providers: Map<string, IProvider> = new Map();
 
   /**
    * 注册 Provider
@@ -21,8 +23,9 @@ export class ProviderRegistry {
 
   /**
    * 注销 Provider
+   * [FIX] 改为 async 并返回 Promise<boolean> 以兼容 EnhancedProviderRegistry
    */
-  unregister(name: string): boolean {
+  async unregister(name: string): Promise<boolean> {
     return this.providers.delete(name);
   }
 
@@ -57,16 +60,14 @@ export class ProviderRegistry {
   async runBeforeWrite(
     vnode: VNode,
     content: string | ArrayBuffer,
-    transaction: Transaction // Add transaction parameter
+    transaction: Transaction
   ): Promise<string | ArrayBuffer> {
     let processedContent = content;
-    
     for (const provider of this.providers.values()) {
       if (provider.onBeforeWrite) {
-        processedContent = await provider.onBeforeWrite(vnode, processedContent, transaction); // Pass it down
+        processedContent = await provider.onBeforeWrite(vnode, processedContent, transaction);
       }
     }
-    
     return processedContent;
   }
 
@@ -76,17 +77,15 @@ export class ProviderRegistry {
   async runAfterWrite(
     vnode: VNode,
     content: string | ArrayBuffer,
-    transaction: Transaction // Add transaction parameter
+    transaction: Transaction
   ): Promise<Record<string, any>> {
     const derivedData: Record<string, any> = {};
-    
     for (const provider of this.providers.values()) {
       if (provider.onAfterWrite) {
-        const data = await provider.onAfterWrite(vnode, content, transaction); // Pass it down
+        const data = await provider.onAfterWrite(vnode, content, transaction);
         Object.assign(derivedData, data);
       }
     }
-    
     return derivedData;
   }
 
@@ -96,7 +95,7 @@ export class ProviderRegistry {
   async runBeforeDelete(vnode: VNode, transaction: Transaction): Promise<void> {
     for (const provider of this.providers.values()) {
       if (provider.onBeforeDelete) {
-        await provider.onBeforeDelete(vnode, transaction); // Pass it down
+        await provider.onBeforeDelete(vnode, transaction);
       }
     }
   }
@@ -107,7 +106,7 @@ export class ProviderRegistry {
   async runAfterDelete(vnode: VNode, transaction: Transaction): Promise<void> {
     for (const provider of this.providers.values()) {
       if (provider.onAfterDelete) {
-        await provider.onAfterDelete(vnode, transaction); // Pass it down
+        await provider.onAfterDelete(vnode, transaction);
       }
     }
   }
