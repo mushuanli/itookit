@@ -26,8 +26,8 @@ export class InodeStore extends BaseStore {
   /**
    * 加载 VNode
    */
-  async loadVNode(nodeId: string): Promise<VNode | null> {
-    const data = await this.load<VNodeData>(nodeId);
+  async loadVNode(nodeId: string, transaction?: Transaction | null): Promise<VNode | null> {
+    const data = await this.load<VNodeData>(nodeId, transaction);
     return data ? VNode.fromJSON(data) : null;
   }
 

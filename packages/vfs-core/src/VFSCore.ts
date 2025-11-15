@@ -1,19 +1,18 @@
 /**
- * @file vfs/core/VFSCore.ts
+ * @file vfs/VFSCore.ts
  * VFS 顶层管理器（单例）
  */
 
-import { VFS } from './core/VFS.js'; // [FIX] Correct path
+import { VFS } from './core/VFS.js'; 
 import { VFSStorage } from './store/VFSStorage.js';
 import { EventBus } from './core/EventBus.js';
 import { ModuleRegistry, ModuleInfo } from './core/ModuleRegistry.js';
 import { EnhancedProviderRegistry } from './core/EnhancedProviderRegistry.js';
-// [FIX] Corrected and separated imports
 import { ProviderFactory } from './core/ProviderFactory.js';
 import { ContentProvider } from './provider/base/ContentProvider.js';
 import { PlainTextProvider } from './provider/PlainTextProvider.js';
-import { VNode, VNodeType } from './store/types.js';
-import { VFSError, VFSErrorCode } from './core/types.js'; // [FIX] Correct path
+import { VNode, VNodeType, TagData } from './store/types.js'; // [修改]
+import { VFSError, VFSErrorCode } from './core/types.js';
 
 /**
  * VFS 配置选项
@@ -69,7 +68,6 @@ export class VFSCore {
     const storage = new VFSStorage(this.config.dbName);
     this.eventBus = new EventBus();
     this.providerRegistry = new EnhancedProviderRegistry();
-    // [ARCH REFACTOR] VFS receives its dependencies, promoting consistency
     this.vfs = new VFS(storage, this.providerRegistry, this.eventBus);
     await this.vfs.initialize();
 
@@ -89,10 +87,7 @@ export class VFSCore {
         this.providerRegistry.register(provider);
       }
     }
-
-  // ✅ 修复：在调用 _ensureDefaultModule 之前设置 initialized
-  this.initialized = true;
-    // 6. 确保默认模块存在
+    this.initialized = true;
     await this._ensureDefaultModule();
   }
 
@@ -175,7 +170,7 @@ export class VFSCore {
   async createFile(
     moduleName: string,
     path: string,
-  content: string | ArrayBuffer = '', // ✅ 添加默认值
+    content: string | ArrayBuffer = '', 
     metadata?: Record<string, any>
   ): Promise<VNode> {
     this._ensureInitialized();
@@ -319,7 +314,13 @@ export class VFSCore {
     
     const moduleInfo = data.module as ModuleInfo;
     
-    // 挂载模块
+    if (this.moduleRegistry.has(moduleInfo.name)) {
+        throw new VFSError(
+            VFSErrorCode.ALREADY_EXISTS,
+            `Module '${moduleInfo.name}' already exists. Cannot import.`
+        );
+    }
+
     await this.mount(moduleInfo.name, moduleInfo.description);
     
     // 导入树结构
@@ -340,6 +341,60 @@ export class VFSCore {
   getAllModules(): ModuleInfo[] {
     this._ensureInitialized();
     return this.moduleRegistry.getAll();
+  }
+
+  // [新增] ==================== Tag 高级 API ====================
+
+  /**
+   * 为文件或目录添加标签
+   */
+  async addTag(moduleName: string, path: string, tagName: string): Promise<void> {
+    this._ensureInitialized();
+    const nodeId = await this.vfs.pathResolver.resolve(moduleName, path);
+    if (!nodeId) {
+      throw new VFSError(VFSErrorCode.NOT_FOUND, `Node not found: ${moduleName}:${path}`);
+    }
+    await this.vfs.addTag(nodeId, tagName.trim());
+  }
+
+  /**
+   * 为文件或目录移除标签
+   */
+  async removeTag(moduleName: string, path: string, tagName: string): Promise<void> {
+    this._ensureInitialized();
+    const nodeId = await this.vfs.pathResolver.resolve(moduleName, path);
+    if (!nodeId) {
+      throw new VFSError(VFSErrorCode.NOT_FOUND, `Node not found: ${moduleName}:${path}`);
+    }
+    await this.vfs.removeTag(nodeId, tagName.trim());
+  }
+
+  /**
+   * 获取文件或目录的所有标签
+   */
+  async getTags(moduleName: string, path: string): Promise<string[]> {
+    this._ensureInitialized();
+    const nodeId = await this.vfs.pathResolver.resolve(moduleName, path);
+    if (!nodeId) {
+      throw new VFSError(VFSErrorCode.NOT_FOUND, `Node not found: ${moduleName}:${path}`);
+    }
+    return await this.vfs.getTags(nodeId);
+  }
+
+  /**
+   * 根据标签查找所有节点
+   */
+  async findByTag(tagName: string): Promise<VNode[]> {
+    this._ensureInitialized();
+    return this.vfs.findByTag(tagName.trim());
+  }
+
+  /**
+   * 获取系统中所有的标签
+   */
+  async getAllTags(): Promise<TagData[]> {
+    this._ensureInitialized();
+    return this.vfs.storage.tagStore.getAll();
   }
 
   /**
@@ -455,9 +510,9 @@ export class VFSCore {
     const result: any = {
       name: node.name,
       type: node.type,
-      metadata: node.metadata
+      metadata: node.metadata,
+      tags: node.tags // [新增]
     };
-
     if (node.type === VNodeType.FILE) {
       result.content = await this.vfs.read(node.nodeId);
     } else {
@@ -466,7 +521,6 @@ export class VFSCore {
         children.map(child => this._exportTree(child))
       );
     }
-
     return result;
   }
 
@@ -475,35 +529,35 @@ export class VFSCore {
     parentPath: string,
     treeData: any
   ): Promise<void> {
-  // ✅ 跳过根节点（因为 mount 已经创建了）
-  if (treeData.name === '/' || parentPath === '/' && treeData.name === moduleName) {
-    // 只导入子节点
-    if (treeData.children) {
-      for (const child of treeData.children) {
-        await this._importTree(moduleName, '/', child);
+    if (treeData.name === '/' || (parentPath === '/' && treeData.name === moduleName)) {
+      if (treeData.children) {
+        for (const child of treeData.children) {
+          await this._importTree(moduleName, '/', child);
+        }
       }
+      return;
     }
-    return;
-  }
-    const nodePath = parentPath === '/' 
-      ? `/${treeData.name}` 
-      : `${parentPath}/${treeData.name}`;
+    const nodePath = parentPath === '/' ? `/${treeData.name}` : `${parentPath}/${treeData.name}`;
 
+    let createdNode: VNode;
     if (treeData.type === VNodeType.FILE) {
-      await this.createFile(
-        moduleName,
-        nodePath,
-        treeData.content,
-        treeData.metadata
+      createdNode = await this.createFile(
+        moduleName, nodePath, treeData.content, treeData.metadata
       );
     } else {
-      await this.createDirectory(moduleName, nodePath, treeData.metadata);
-      
+      createdNode = await this.createDirectory(moduleName, nodePath, treeData.metadata);
       if (treeData.children) {
         for (const child of treeData.children) {
           await this._importTree(moduleName, nodePath, child);
         }
       }
+    }
+
+    // [新增] 导入 tags
+    if (treeData.tags && Array.isArray(treeData.tags)) {
+        for(const tag of treeData.tags) {
+            await this.vfs.addTag(createdNode.nodeId, tag);
+        }
     }
   }
 }

@@ -37,7 +37,6 @@ export abstract class BaseStore {
 
   /**
    * 将 IDBRequest 包装为 Promise
-   * [修改] 委托给 Database 实例以避免代码重复
    */
   protected promisifyRequest<T>(request: IDBRequest<T>): Promise<T> {
     return this.db.promisifyRequest(request);
@@ -53,7 +52,7 @@ export abstract class BaseStore {
   /**
    * 根据主键加载记录
    */
-  async load<T>(key: IDBValidKey): Promise<T | undefined> {
-    return this.execute('readonly', (store) => store.get(key));
+  async load<T>(key: IDBValidKey, transaction?: Transaction | null): Promise<T | undefined> {
+    return this.execute('readonly', (store) => store.get(key), transaction);
   }
 }

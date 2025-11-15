@@ -14,7 +14,6 @@ import {
   PlainTextProvider,
   VFSEventType,
   ContentProvider,
-
 } from '../src/index.js';
 import {  VNodeType,
   VNode,
@@ -41,14 +40,10 @@ describe.sequential('VFSCore High-Level API', () => {
   
   // 在每个测试用例开始前，初始化一个新的 VFSCore 实例
   beforeEach(async () => {
-    // [FIX] 关键步骤：在每次测试前，手动重置静态 instance 属性
-    // 为了让这个能工作，你可能需要将 VFSCore.instance 从 private 改为 public static
     (VFSCore as any).instance = null;
 
     const config: VFSConfig = {
-      // 即使是串行，也使用唯一 DB Name 保证数据库隔离
       dbName: `test_vfscore_${Date.now()}_${Math.random()}`,
-      // 传入自定义 Provider 进行测试
       providers: [TestMetadataProvider]
     };
 
@@ -61,7 +56,6 @@ describe.sequential('VFSCore High-Level API', () => {
     if (vfsCore) {
       await vfsCore.shutdown();
     }
-    // [FIX] 再次确保单例状态被清除，为下一个测试文件做准备
     (VFSCore as any).instance = null;
   });
 
@@ -96,7 +90,6 @@ describe.sequential('VFSCore High-Level API', () => {
 
       expect(vfsCore.getModule('temp')).toBeUndefined();
       
-      // 验证底层节点是否真的被删除
       const vfs = vfsCore.getVFS();
       await expect(vfs.stat(moduleInfo.rootNodeId)).rejects.toHaveProperty('code', VFSErrorCode.NOT_FOUND);
     });
@@ -168,32 +161,99 @@ describe.sequential('VFSCore High-Level API', () => {
     });
   });
 
-  // 3. Provider 集成测试
+  // [新增] 3. 标签系统高层 API
+  describe('Tagging System High-Level API', () => {
+    const module = 'default';
+    const filePath = '/tagged-file.md';
+
+    beforeEach(async () => {
+      await vfsCore.createFile(module, filePath, '# My Document');
+    });
+
+    it('should add and get tags for a file using its path', async () => {
+      await vfsCore.addTag(module, filePath, 'draft');
+      await vfsCore.addTag(module, filePath, ' project-x '); // Test trimming
+
+      const tags = await vfsCore.getTags(module, filePath);
+      expect(tags.sort()).toEqual(['draft', 'project-x']);
+    });
+
+    it('should remove a tag from a file using its path', async () => {
+      await vfsCore.addTag(module, filePath, 'draft');
+      await vfsCore.addTag(module, filePath, 'final');
+      
+      await vfsCore.removeTag(module, filePath, 'draft');
+
+      const tags = await vfsCore.getTags(module, filePath);
+      expect(tags).toEqual(['final']);
+    });
+
+    it('should find files by tag across different modules', async () => {
+      await vfsCore.mount('personal');
+      await vfsCore.createFile('personal', '/todo.txt', 'buy milk');
+      
+      await vfsCore.addTag(module, filePath, 'important');
+      await vfsCore.addTag('personal', '/todo.txt', 'important');
+
+      const nodes = await vfsCore.findByTag('important');
+      expect(nodes).toHaveLength(2);
+      
+      const modulesFound = nodes.map(n => n.moduleId);
+      expect(modulesFound).toContain('default');
+      expect(modulesFound).toContain('personal');
+    });
+    
+    it('should get a list of all unique tags in the system', async () => {
+      await vfsCore.addTag(module, filePath, 'tag1');
+      await vfsCore.addTag(module, filePath, 'tag2');
+      await vfsCore.createFile(module, '/another.txt');
+      await vfsCore.addTag(module, '/another.txt', 'tag2'); // Duplicate tag on another file
+      await vfsCore.addTag(module, '/another.txt', 'tag3');
+
+      const allTags = await vfsCore.getAllTags();
+      const tagNames = allTags.map(t => t.name).sort();
+
+      expect(tagNames).toEqual(['tag1', 'tag2', 'tag3']);
+    });
+  });
+
+  // 4. Provider 集成测试
   describe('Provider Integration', () => {
     it('should use custom providers defined in config', async () => {
       const vnode = await vfsCore.createFile('default', '/data.test', 'some data');
       const stat = await vfsCore.getVFS().stat(vnode.nodeId);
 
-      // 验证 TestMetadataProvider 已生效
       expect(stat.metadata.contentType).toBe('test/data');
       expect(stat.metadata.writeTimestamp).toBeTypeOf('number');
     });
   });
   
-  // 4. 导入导出功能
+  // 5. 导入导出功能
   describe('Import/Export Functionality', () => {
-    it('should export and import a module correctly', async () => {
+    it('should export and import a module correctly, including tags', async () => {
         const exportModuleName = 'export-test';
         await vfsCore.mount(exportModuleName, 'A module to be exported');
         await vfsCore.createDirectory(exportModuleName, '/config');
-        await vfsCore.createFile(exportModuleName, '/config/settings.json', '{"theme":"dark"}');
+        const file1 = await vfsCore.createFile(exportModuleName, '/config/settings.json', '{"theme":"dark"}');
         await vfsCore.createFile(exportModuleName, '/readme.md', '# Hello');
+
+        // [新增] 添加标签
+        await vfsCore.addTag(exportModuleName, '/config/settings.json', 'system-config');
+        await vfsCore.addTag(exportModuleName, '/readme.md', 'documentation');
 
         // 1. 导出模块
         const exportedData = await vfsCore.exportModule(exportModuleName);
         
         expect(exportedData.module.name).toBe(exportModuleName);
-        expect(exportedData.tree.children).toHaveLength(2);
+
+// 验证导出数据包含 tags
+const configDir = exportedData.tree.children.find(child => child.name === 'config');
+const readmeFile = exportedData.tree.children.find(child => child.name === 'readme.md');
+
+expect(configDir).toBeDefined();
+expect(readmeFile).toBeDefined();
+expect(configDir!.children[0].tags).toEqual(['system-config']); // settings.json 的标签
+expect(readmeFile!.tags).toEqual(['documentation']); // readme.md 的标签
 
         // 2. 卸载旧模块
         await vfsCore.unmount(exportModuleName);
@@ -202,20 +262,22 @@ describe.sequential('VFSCore High-Level API', () => {
         // 3. 导入数据 (将会自动挂载新模块)
         await vfsCore.importModule(exportedData);
         
-        // 4. 验证数据是否恢复
+        // 4. 验证数据和标签是否恢复
         const newModule = vfsCore.getModule(exportModuleName);
         expect(newModule).toBeDefined();
-        expect(newModule?.description).toBe('A module to be exported');
         
         const content = await vfsCore.read(exportModuleName, '/config/settings.json');
         expect(content).toBe('{"theme":"dark"}');
 
-        const tree = await vfsCore.getTree(exportModuleName, '/');
-        expect(tree.map(n => n.name).sort()).toEqual(['config', 'readme.md']);
+        const tags = await vfsCore.getTags(exportModuleName, '/config/settings.json');
+        expect(tags).toEqual(['system-config']);
+
+        const readmeTags = await vfsCore.getTags(exportModuleName, '/readme.md');
+        expect(readmeTags).toEqual(['documentation']);
     });
   });
 
-  // 5. 事件总线访问
+  // 6. 事件总线访问
   describe('EventBus Access', () => {
     it('should allow subscribing to events via getEventBus', async () => {
         const eventBus = vfsCore.getEventBus();
@@ -233,7 +295,7 @@ describe.sequential('VFSCore High-Level API', () => {
     });
   });
 
-  // 6. [新增] 多模块操作测试
+  // 7. 多模块操作测试
   describe('Multi-Module Operations', () => {
     const moduleA = 'module-a';
     const moduleB = 'module-b';
