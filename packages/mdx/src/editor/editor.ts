@@ -22,6 +22,8 @@ export interface MDxEditorConfig {
   [key: string]: any;
 }
 
+// [修改] 扩展 EditorEventCallback 类型以包含 'modeChanged'
+type EditorEventName = 'change' | 'interactiveChange' | 'ready' | 'modeChanged';
 type EditorEventCallback = (payload?: any) => void;
 
 /**
@@ -37,7 +39,7 @@ export class MDxEditor extends IEditor {
   private currentMode: 'edit' | 'render';
   private config: MDxEditorConfig;
   private cleanupListeners: Array<() => void> = [];
-  private eventEmitter = new Map<string, Set<EditorEventCallback>>();
+  private eventEmitter = new Map<EditorEventName, Set<EditorEventCallback>>(); // 使用新类型
   private readOnlyCompartment = new Compartment();
   private searchCompartment = new Compartment();
 
@@ -67,7 +69,7 @@ export class MDxEditor extends IEditor {
     await new Promise((resolve) => setTimeout(resolve, 10));
 
     this.initCodeMirror(initialContent);
-    this.switchToMode(this.currentMode);
+    this.switchToMode(this.currentMode, true); // Pass a flag to avoid double render
     this.listenToPluginEvents();
 
     this.renderer.getPluginManager().executeActionHook('editorPostInit', {
@@ -145,7 +147,7 @@ export class MDxEditor extends IEditor {
   /**
    * 切换模式
    */
-  switchToMode(mode: 'edit' | 'render'): void {
+  switchToMode(mode: 'edit' | 'render', isInitializing = false): void {
     if (!this._container || !this.editorContainer || !this.renderContainer) return;
 
     this.currentMode = mode;
@@ -154,14 +156,17 @@ export class MDxEditor extends IEditor {
     this._container.classList.toggle('is-edit-mode', isEditMode);
     this._container.classList.toggle('is-render-mode', !isEditMode);
 
-    this.editorContainer.style.display = isEditMode ? 'flex' : 'none'; // Use flex for child to grow
+    this.editorContainer.style.display = isEditMode ? 'flex' : 'none';
     this.renderContainer.style.display = isEditMode ? 'none' : 'block';
 
-    if (!isEditMode) {
+    if (!isEditMode && !isInitializing) {
       this.renderContent();
     }
-
+    
+    // 确保内部插件系统的事件也被触发
     this.renderer.getPluginManager().emit('modeChanged', { mode });
+    // 同时触发公共事件
+    this.emit('modeChanged', { mode });
   }
 
   /**
@@ -282,13 +287,15 @@ export class MDxEditor extends IEditor {
     } else { this.renderer.clearSearch(); }
   }
 
-  on(eventName: 'change' | 'interactiveChange' | 'ready', callback: EditorEventCallback): () => void {
+  // [修改] 扩展 on 方法以接受 'modeChanged'
+  on(eventName: EditorEventName, callback: EditorEventCallback): () => void {
     if (!this.eventEmitter.has(eventName)) this.eventEmitter.set(eventName, new Set());
     this.eventEmitter.get(eventName)!.add(callback);
     return () => { this.eventEmitter.get(eventName)?.delete(callback); };
   }
 
-  private emit(eventName: 'change' | 'interactiveChange' | 'ready', payload?: any) {
+  // [修改] 扩展 emit 方法以接受 'modeChanged'
+  private emit(eventName: EditorEventName, payload?: any) {
     this.eventEmitter.get(eventName)?.forEach(cb => cb(payload));
   }
 

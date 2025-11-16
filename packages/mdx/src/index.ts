@@ -18,6 +18,16 @@ export type { MDxRendererConfig, RenderOptions } from './renderer/renderer';
 export { MDxEditor } from './editor/editor';
 export type { MDxEditorConfig } from './editor/editor';
 
+// [新增] 导出 MDxProcessor 及其相关类型
+export { MDxProcessor } from './core/processor';
+export type {
+  IMentionProviderForProcessor,
+  MentionRule,
+  ProcessOptions,
+  MentionMatch,
+  ProcessResult
+} from './core/processor';
+
 export { CoreEditorPlugin } from './plugins/core/core-editor.plugin';
 export type { CoreEditorPluginOptions } from './plugins/core/core-editor.plugin';
 

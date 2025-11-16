@@ -36,8 +36,9 @@ export class ClozePlugin implements MDxPlugin {
   }
 
   private createBeforeParseHook(context: PluginContext) {
-    return () => {
+    return (payload: any) => {
       this.getContextState(context).clozeCounter = 0;
+      return payload; // <-- 关键：返回 payload
     };
   }
 
@@ -172,14 +173,27 @@ export class ClozePlugin implements MDxPlugin {
         if (wasHidden) {
           context.emit('clozeRevealed', {
             element: cloze,
-            locator: cloze.getAttribute('data-cloze-locator'),
-            content: cloze.getAttribute('data-cloze-content'),
+            clozeId: cloze.dataset.clozeLocator, // 使用 clozeLocator 作为唯一ID
+            content: cloze.dataset.clozeContent,
+            /**
+             * [新增] 一个用于重新隐藏此 Cloze 的便捷函数。
+             * 这将实现细节封装在了 ClozePlugin 内部。
+             */
+            hide: () => {
+              cloze.classList.add('hidden');
+            },
+            /**
+             * [新增] 为保持 API 对称性，也提供一个 show 函数。
+             */
+            show: () => {
+              cloze.classList.remove('hidden');
+            }
           });
         }
       };
 
       cloze.addEventListener('click', handler);
-      (cloze as any)._clozeClickHandler = handler;
+      (cloze as any)._clozeClickHandler = handler; // 缓存处理器以便移除
     });
   }
 
