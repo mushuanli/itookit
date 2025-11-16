@@ -2,6 +2,7 @@
  * #demo/editor-demo.js
  * @file Demo showcasing the new plugin-based architecture for the MDx library.
  */
+import '@itookit/mdxeditor/style.css';
 
 // [新增] CodeMirror 6 独立演示所需的导入
 import { EditorView, lineNumbers, keymap } from "@codemirror/view";
@@ -11,19 +12,24 @@ import { javascript } from "@codemirror/lang-javascript";
 import { bracketMatching, foldGutter, foldKeymap, syntaxHighlighting, defaultHighlightStyle } from "@codemirror/language";
 import { autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap } from "@codemirror/autocomplete";
 
-import {IMentionProvider} from '@itookit/common';
-// 现有 MDxEditor 库的导入
+import {IMentionProvider,simpleHash} from '@itookit/common';
+// [修改] 现有 MDxEditor 库的导入
 import {
-    MDxEditor,
+    createMDxEditor,      // [修改] 导入新的工厂函数替代 MDxEditor 构造函数
+    MDxEditor,            // [保留] 保留 MDxEditor 类型用于 JSDoc 和类型提示
     MDxRenderer,
-    MDxProcessor, // [新增] 导入核心处理引擎
-    simpleHash,
-    // Import the new unified plugin bundle
-    defaultPlugins,
+    MDxProcessor,
+    // [移除] 不再需要 defaultPlugins，工厂函数会自动处理
     // We still import individual plugins if needed for custom renderers or advanced setups
     MentionPlugin,
+    // [新增] 导入用于独立渲染器的插件
+    FoldablePlugin,
+    MathJaxPlugin,
+    MediaPlugin,
+    MermaidPlugin,
+    ClozePlugin,
+    TaskListPlugin,
     // Import keys for services
-    ClozeAPIKey,
 } from '@itookit/mdxeditor';
 
 /**
@@ -47,7 +53,7 @@ class AnkiFeedbackPlugin {
     /** @param {PluginContext} context */
     install(context) {
         // 监听由 ClozePlugin 发出的事件
-        context.listen('clozeRevealed', this.handleClozeRevealed.bind(this, context));
+        context.listen('clozeRevealed', this.handleClozeRevealed.bind(this));
         
         // 监听渲染开始前的钩子，动态修改 clozeStates
         context.on('beforeParse', this.modifyClozeStates.bind(this));
@@ -58,20 +64,40 @@ class AnkiFeedbackPlugin {
      * @param {{ markdown: string, options: any }} payload
      */
     modifyClozeStates(payload) {
-        const { options } = payload;
-        if (!options.clozeStates) options.clozeStates = {};
-        for (const clozeId of permanentlyOpenClozes) {
-            options.clozeStates[clozeId] = { ...options.clozeStates[clozeId], isHidden: false };
+        // 确保 payload 结构完整
+        if (!payload) {
+            payload = { markdown: '', options: {} };
         }
-        return payload; // Pass through
+        if (!payload.options) {
+            payload.options = {};
+        }
+        
+        const { options } = payload;
+        
+        // 确保 clozeStates 属性存在
+        if (!options.clozeStates) {
+            options.clozeStates = {};
+        }
+        
+        // 设置永久打开的 cloze 状态
+        for (const clozeId of permanentlyOpenClozes) {
+            options.clozeStates[clozeId] = { 
+                ...options.clozeStates[clozeId], 
+                isHidden: false 
+            };
+        }
+        
+        return payload;
     }
+
+
 
     /**
      * Event handler for when a cloze is revealed.
-     * @param {PluginContext} context
-     * @param {{ clozeId: string, element: HTMLElement }} detail
+     * [重构] 该方法现在变得极其简洁，因为它直接使用了事件载荷中提供的 `hide` 函数。
+     * @param {{ clozeId: string, element: HTMLElement, content: string, hide: () => void }} detail
      */
-    handleClozeRevealed(context, detail) {
+    handleClozeRevealed(detail) {
         const outputContainer = detail.element.closest('#anki-output');
         if (!outputContainer) return;
 
@@ -84,30 +110,20 @@ class AnkiFeedbackPlugin {
 
         feedbackUI.addEventListener('click', (e) => {
             const target = e.target;
-            if (!(target instanceof HTMLButtonElement)) return; // FIXED: Type guard
+            if (!(target instanceof HTMLButtonElement)) return;
     
-            const choice = target.textContent; // FIXED: Now safe to access
+            const choice = target.textContent;
             const clozeId = detail.clozeId;
             
-            alert(`你将 "${detail.element.dataset.clozeContent}" 评为 "${choice}"`);
+            alert(`你将 "${detail.content}" 评为 "${choice}"`);
             
             if (choice === '简单') {
                 permanentlyOpenClozes.add(clozeId);
             } else {
                 permanentlyOpenClozes.delete(clozeId);
                 
-                // --- FIX STARTS HERE ---
-
-                // 1. Inject the FACTORY function provided by ClozePlugin.
-                const clozeApiFactory = context.inject(ClozeAPIKey);
-                
-                if (clozeApiFactory) {
-                    // 2. CALL the factory with the target element to get the API INSTANCE.
-                    const clozeApiInstance = clozeApiFactory(outputContainer);
-                    
-                    // 3. Now, call the .toggle() method on the instance.
-                    clozeApiInstance.toggle(clozeId, false);
-                }
+                // [核心改进] 直接调用事件载荷中提供的 `hide` 函数，无需了解内部实现。
+                detail.hide(); 
             }
             
             feedbackUI.remove();
@@ -207,7 +223,7 @@ class UserMentionProvider extends IMentionProvider {
     async getHoverPreview(uri) {
         try {
             const userId = uri.pathname.slice(1);
-            const user = mockDatabase.users.get(userId); // FIXED: Use mockDatabase directly
+            const user = mockDatabase.users.get(userId);
             
             if (!user) return null;
             
@@ -224,7 +240,6 @@ class UserMentionProvider extends IMentionProvider {
         }
     }
 
-    // [新增] 实现数据获取接口
     async getDataForProcess(targetURL) {
         const userId = targetURL.pathname.substring(1);
         return mockDatabase.users.get(userId) || null;
@@ -241,17 +256,15 @@ class UserMentionProvider extends IMentionProvider {
 class DemoMentionPlugin {
     name = 'demo:mention';
     providers = new Map();
-    context = null; // [新增] 用于存储插件上下文
+    context = null;
 
-    // [新增] 与 MentionPlugin 对齐的悬停卡片元素和 debounced 函数
     previewCardEl = null;
     debouncedGetHoverPreview;
 
     /**
      * @param {{ providers: IMentionProvider[] }} options 
      */
-    constructor(options = { providers: [] }) { // FIXED: Provide default with providers array
-        // [修改] 采用 MentionPlugin 中更健壮的构造函数逻辑
+    constructor(options = { providers: [] }) {
         (options.providers || []).forEach(p => {
             if (!p.key) throw new Error(`A mention provider (${p.constructor.name}) is missing the 'key' property.`);
             this.providers.set(p.key, p);
@@ -263,19 +276,19 @@ class DemoMentionPlugin {
      * @param {PluginContext} context 
      */
     install(context) {
-        this.context = context; // [新增] 存储上下文，以便稍后访问 coreInstance.renderer
+        this.context = context;
 
-        // 1. 为编辑器贡献“自动补全”功能
         context.registerCodeMirrorExtension(autocompletion({ override: [this.createAutocompleteSource()] }));
-
-        // 2. 为渲染器贡献“语法解析”能力
         context.registerSyntaxExtension(this._createLinkRendererExtension());
+        // @ts-ignore
         context.registerSyntaxExtension(this._createTransclusionExtension());
-
-        // 3. 在DOM更新后，为其附加“交互行为”
         context.on('domUpdated', ({ element }) => this._attachEventListeners(element));
 
-        // 4. 向外界提供“服务”
+        // [修改] 注册一个命令，供外部调用
+        context.registerCommand('updateMentionLabel', (payload) => {
+            this._handleExternalUpdate(payload);
+        });
+
         context.provide(MentionAPIKey, {
             handleExternalUpdate: (payload) => this._handleExternalUpdate(payload)
         });
@@ -328,19 +341,33 @@ class DemoMentionPlugin {
      * [新增] 创建一个 Marked.js 扩展，用于解析和渲染 !@... 内容嵌入语法。
      */
     _createTransclusionExtension() {
+    const self = this; // 保存 this 引用
         return {
             name: 'demoMentionTransclusion',
             level: 'block',
             start: (src) => src.match(/^!@\w+:[^\s]+/)?.index,
             tokenizer: (src) => {
                 const match = /^!@(\w+):([^\s]+)/.exec(src);
-                return match ? { type: 'demoMentionTransclusion', raw: match[0], key: match[1], id: match[2].trim() } : undefined;
+                if (match) {
+                    return {
+                        type: 'demoMentionTransclusion', // Token 的类型
+                        raw: match[0],
+                        key: match[1],
+                        id: match[2].trim()
+                    };
+                }
+                return undefined;
             },
-            renderer: (token) => {
-                const uri = `mdx://${token.key}/${token.id}`;
-                return `<div class="transclusion-block" data-transclusion-uri="${this._escapeHTML(uri)}">Loading ${token.raw}...</div>`;
-            }
-        };
+            // [最终修正] `renderer` 是一个对象，
+            // 对象的键必须与上面 tokenizer 返回的 `type` 完全匹配。
+        renderer(token) {
+            // 注意：这里不是对象，而是直接的函数
+            const escapeHTML = (str) => str.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+            
+            const uri = `mdx://${token.key}/${token.id}`;
+            return `<div class="transclusion-block" data-transclusion-uri="${escapeHTML(uri)}">Loading ${token.raw}...</div>`;
+        }
+    };
     }
 
 
@@ -374,14 +401,21 @@ class DemoMentionPlugin {
             el.dataset.transclusionProcessed = 'true';
             const uri = new URL(el.dataset.transclusionUri);
             const provider = this.providers.get(uri.hostname);
+
             if (provider?.getContentForTransclusion) {
                 const markdown = await provider.getContentForTransclusion(uri);
                 if (markdown !== null) {
-                    // [关键] 使用渲染器实例递归渲染获取到的内容
                     const tempContainer = document.createElement('div');
-                    await this.context.renderInElement(tempContainer, markdown);
-                    el.innerHTML = tempContainer.innerHTML;
-                    this._attachEventListeners(el); // 对新内容再次绑定事件
+                    // [修改] 使用正确的公共 API 来执行递归渲染
+                    // `context.coreInstance` 是 MDxEditor 实例，它有一个公共的 .getRenderer() 方法。
+                    const renderer = this.context.coreInstance?.getRenderer();
+                    if (renderer) {
+                        await renderer.render(tempContainer, markdown);
+                        el.innerHTML = tempContainer.innerHTML;
+                        this._attachEventListeners(el);
+                    } else {
+                         el.innerHTML = `<div class="transclusion-error">Renderer not available.</div>`;
+                    }
                 } else {
                     el.innerHTML = `<div class="transclusion-error">Content not found.</div>`;
                 }
@@ -415,17 +449,29 @@ class DemoMentionPlugin {
         const url = new URL(target.dataset.mdxUri);
         const provider = this.providers.get(url.hostname);
         if (provider?.getHoverPreview) {
-        const htmlContent = await provider.getHoverPreview(url);
-        if (htmlContent) {
-            this.showPreviewCard(target, htmlContent);
+            const previewData = await provider.getHoverPreview(url);
+            if (previewData) {
+                // [修改] 适配 getHoverPreview 的返回结构 {title, contentHTML, icon}
+                const cardHTML = `
+                    <div class="mdx-mention-preview-header">
+                        ${previewData.icon || ''}
+                        <span class="mdx-mention-preview-title">${this._escapeHTML(previewData.title)}</span>
+                    </div>
+                    <div class="mdx-mention-preview-content">
+                        ${previewData.contentHTML}
+                    </div>
+                `;
+                this.showPreviewCard(target, cardHTML);
+            }
         }
-    }
     }
 
     // --- 服务 API 实现 ---
     _handleExternalUpdate({ uri, newLabel }) {
-        const editorView = this.context?.coreInstance?.editorView;
+        // [修改] 使用公共 API getEditorView() 访问 CodeMirror 实例
+        const editorView = this.context?.coreInstance?.getEditorView();
         if (!editorView) return;
+        
         const doc = editorView.state.doc;
         const changes = [];
         const regex = new RegExp(`\\[([^\\]]+)\\]\\(${uri.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\)`, 'g');
@@ -437,20 +483,20 @@ class DemoMentionPlugin {
         if (changes.length > 0) editorView.dispatch({ changes });
     }
 
-    // --- UI & 工具函数 ---
-showPreviewCard(target, htmlContent) {
+    showPreviewCard(target, htmlContent) {
         if (!this.previewCardEl) {
             this.previewCardEl = document.createElement('div');
             this.previewCardEl.className = 'mdx-mention-preview-card';
             document.body.appendChild(this.previewCardEl);
             this.previewCardEl.addEventListener('mouseleave', () => this.hidePreviewCard());
         }
-    this.previewCardEl.innerHTML = htmlContent;
+        this.previewCardEl.innerHTML = htmlContent;
         const rect = target.getBoundingClientRect();
         this.previewCardEl.style.display = 'block';
         this.previewCardEl.style.left = `${window.scrollX + rect.left}px`;
         this.previewCardEl.style.top = `${window.scrollY + rect.bottom + 5}px`;
     }
+    
     hidePreviewCard() { if (this.previewCardEl) this.previewCardEl.style.display = 'none'; }
     _escapeHTML = (str) => str.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     _debounce = (func, delay) => { let t; const d = (...a) => { clearTimeout(t); t = setTimeout(() => func(...a), delay); }; d.cancel = () => clearTimeout(t); return d; };
@@ -469,21 +515,18 @@ class CustomTitleBarButtonsPlugin {
 
     /** @param {PluginContext} context */
     install(context) {
-        // Register a command that the button will use
         context.registerCommand('saveDocument', (editor) => {
             alert('"Save" button clicked! Content:\n\n' + editor.getText());
         });
 
-        // Register a button on the right side of the title bar
         context.registerTitleBarButton({
             id: 'custom-save',
             title: '保存文档',
             icon: '<i class="fas fa-save"></i>',
             command: 'saveDocument',
-            location: 'right' // This is the default, but good to be explicit
+            location: 'right'
         });
         
-        // Register another button that uses a direct onClick handler
         context.registerTitleBarButton({
             id: 'custom-help',
             title: '帮助',
@@ -497,7 +540,8 @@ class CustomTitleBarButtonsPlugin {
 }
 
 
-document.addEventListener('DOMContentLoaded', () => {
+// [修改] 将整个 DOMContentLoaded 回调设为 async，以支持 await createMDxEditor
+document.addEventListener('DOMContentLoaded', async () => {
 
     // ======================================================
     //   场景 1: MDxEditor 集成编辑器
@@ -528,19 +572,19 @@ document.addEventListener('DOMContentLoaded', () => {
     // [MODIFIED] Create an instance of our new custom plugin
     const customTitleBarPlugin = new CustomTitleBarButtonsPlugin();
     
-    // [MODIFIED] 渲染器现在只需要 defaultRendererPlugins
-    const editor = new MDxEditor(document.getElementById('app-container'), {
-        initialText: initialMarkdown,
-        // [MODIFIED] Add the custom plugin to the list
+    // [修改] 使用新的 createMDxEditor 工厂函数进行实例化
+    /** @type {MDxEditor} */
+    const editor = await createMDxEditor(document.getElementById('app-container'), {
+        initialContent: initialMarkdown, // [修改] 配置项从 initialText 改为 initialContent
         plugins: [
-            ...defaultPlugins,
+            // [修改] 无需传入 defaultPlugins，工厂函数会自动加载默认插件
+            // 只需添加额外的自定义插件实例
             customTitleBarPlugin 
         ],
-        // [MODIFIED] Configure the title bar via options
         titleBar: {
-            title: "My Document.md", // Display a title
-            enableToggleEditMode: true, // Enable the core edit/render toggle button
-            toggleSidebarCallback: () => { // Enable the core sidebar button
+            title: "My Document.md",
+            enableToggleEditMode: true,
+            toggleSidebarCallback: () => {
                 alert("Sidebar toggled! (This is a demo callback)");
             }
         }
@@ -553,52 +597,28 @@ document.addEventListener('DOMContentLoaded', () => {
     const externalPreviewBtn = document.getElementById('external-preview-btn');
     const modeDisplay = document.getElementById('current-mode-display');
 
-// Type guard helper
-const isButton = (el) => el instanceof HTMLButtonElement;
+    const isButton = (el) => el instanceof HTMLButtonElement;
 
-// 1. 通过外部按钮调用 public API
-if (externalEditBtn) {
-    externalEditBtn.addEventListener('click', () => editor.switchTo('edit'));
-}
-if (externalPreviewBtn) {
-    externalPreviewBtn.addEventListener('click', () => editor.switchTo('render'));
-}
+    if (externalEditBtn) {
+        externalEditBtn.addEventListener('click', () => editor.switchToMode('edit')); // [修改] API 名称统一为 switchToMode
+    }
+    if (externalPreviewBtn) {
+        externalPreviewBtn.addEventListener('click', () => editor.switchToMode('render')); // [修改] API 名称统一为 switchToMode
+    }
 
-    // 2. 监听编辑器内部事件来更新外部 UI
     editor.on('modeChanged', ({ mode }) => {
-    if (modeDisplay instanceof HTMLElement) {
-        modeDisplay.textContent = `当前模式: ${mode}`;
-    }
-    
-    // FIXED: Add type guards
-    if (isButton(externalEditBtn)) {
-        externalEditBtn.disabled = (mode === 'edit');
-    }
-    if (isButton(externalPreviewBtn)) {
-        externalPreviewBtn.disabled = (mode === 'render');
-    }
-});
+        if (modeDisplay instanceof HTMLElement) modeDisplay.textContent = `当前模式: ${mode}`;
+        if (isButton(externalEditBtn)) externalEditBtn.disabled = (mode === 'edit');
+        if (isButton(externalPreviewBtn)) externalPreviewBtn.disabled = (mode === 'render');
+    });
 
-// 3. 初始化显示
-if (modeDisplay instanceof HTMLElement) {
-    modeDisplay.textContent = `当前模式: ${editor.mode}`;
-}
-
-// FIXED: Add type guards for initial state
-if (isButton(externalEditBtn)) {
-    externalEditBtn.disabled = (editor.mode === 'edit');
-}
-if (isButton(externalPreviewBtn)) {
-    externalPreviewBtn.disabled = (editor.mode === 'render');
-}
-
-    //editor.pluginManager.emit('modeChanged', { mode: editor.mode }); // 初始化UI状态
-editor.switchTo(editor.mode, true); // This will trigger the internal event
-    // 3. 初始化显示
+    const initialMode = editor.getCurrentMode();
+    if (modeDisplay instanceof HTMLElement) modeDisplay.textContent = `当前模式: ${initialMode}`;
+    if (isButton(externalEditBtn)) externalEditBtn.disabled = (initialMode === 'edit');
+    if (isButton(externalPreviewBtn)) externalPreviewBtn.disabled = (initialMode === 'render');
 
     // ======================================================
     //   [NEW] 场景 2: Mention System Editor
-    
     const mentionInitialText = `# Team Collaboration Document
 
 This document tracks our progress. The main reference is @Project Proposal.
@@ -614,27 +634,28 @@ Let's check the technical specs too: @Technical Spec
 
     const mentionPlugin = new DemoMentionPlugin({ providers: [new FileMentionProvider(), new UserMentionProvider()] });
 
-// [MODIFIED] Simplified mention editor initialization WITH a different title bar config
-const mentionEditor = new MDxEditor(document.getElementById('mention-editor-container'), {
-    initialText: mentionInitialText,
-    plugins: [...defaultPlugins, mentionPlugin],
-    // [DEMO HIGHLIGHT] This editor instance has a different title bar configuration.
-    // We are intentionally NOT providing `toggleSidebarCallback`.
-    titleBar: {
-        title: "Collaboration Space",   // It has a title.
-        enableToggleEditMode: true,       // It has the mode toggle button.
-        // `toggleSidebarCallback` is omitted, so that button should NOT appear.
-    }
-});
+    // [修改] 同样使用 createMDxEditor 工厂函数进行实例化
+    /** @type {MDxEditor} */
+    const mentionEditor = await createMDxEditor(document.getElementById('mention-editor-container'), {
+        initialContent: mentionInitialText, // [修改] 配置项名称变更
+        plugins: [mentionPlugin], // [修改] 只需传入自定义插件
+        titleBar: {
+            title: "Collaboration Space",
+            enableToggleEditMode: true,
+        }
+    });
 
-document.getElementById('rename-doc1-btn').addEventListener('click', () => {
-    const newTitle = 'Final Proposal';
-    
-    mockDatabase.files.get('doc-1').title = newTitle;
-    alert(`"Project Proposal" 已重命名为 "${newTitle}". 编辑器将同步更新.`);
-    const mentionService = mentionEditor.getService(MentionAPIKey);
-    mentionService?.handleExternalUpdate({ uri: 'mdx://file/doc-1', newLabel: `📄 ${newTitle}` });
-});
+    document.getElementById('rename-doc1-btn').addEventListener('click', () => {
+        const newTitle = 'Final Proposal';
+        mockDatabase.files.get('doc-1').title = newTitle;
+        alert(`"Project Proposal" 已重命名为 "${newTitle}". 编辑器将同步更新.`);
+        
+        // [修改] 改为执行命令，而不是调用 getService
+        const payload = { uri: 'mdx://file/doc-1', newLabel: `📄 ${newTitle}` };
+        if (mentionEditor.commands.updateMentionLabel) {
+            mentionEditor.commands.updateMentionLabel(payload);
+        }
+    });
 
 
     // ======================================================
@@ -642,7 +663,7 @@ document.getElementById('rename-doc1-btn').addEventListener('click', () => {
     // ======================================================
     const ankiInput = document.getElementById('anki-input');
     if (ankiInput instanceof HTMLTextAreaElement) {
-    ankiInput.value = `# 美国历史测验
+        ankiInput.value = `# 美国历史测验
 ## 第一任总统是谁？
 - [ ] 亚伯拉罕·林肯
 - [x] **乔治·华盛顿**
@@ -666,16 +687,31 @@ document.getElementById('rename-doc1-btn').addEventListener('click', () => {
             [`anki-demo_${simpleHash('一个\n多行')}`]: { isHidden: true, memoryTier: 'new' },
         };
     
-    // For standalone renderers, we still compose plugins manually.
-    const ankiRenderer = new MDxRenderer([...defaultPlugins, new AnkiFeedbackPlugin()]);
-    const renderAnki = () => {
-        // @ts-ignore
-        ankiRenderer.render(document.getElementById('anki-output'), ankiInput.value, { 
-            contextId: 'anki-demo',
+    // [修改] 独立渲染器的插件注册方式变更
+    // 1. 创建一个包含所需插件实例的数组
+    const defaultRendererPlugins = [
+        new FoldablePlugin(),
+        new MathJaxPlugin(),
+        new MediaPlugin(),
+        new MermaidPlugin(),
+        new TaskListPlugin(),
+        new ClozePlugin()
+    ];
+    
+    // 2. 实例化渲染器
+    const ankiRenderer = new MDxRenderer();
+    
+    // 3. 使用 .usePlugin() 方法注册所有插件
+    [...defaultRendererPlugins, new AnkiFeedbackPlugin()].forEach(p => ankiRenderer.usePlugin(p));
 
-            clozeStates: JSON.parse(JSON.stringify(clozeStates)), // 传入深拷贝的基础状态
-            on: { taskToggled: d => alert(`任务 "${d.taskText}" 状态: ${d.isChecked ? '完成' : '未完成'}.`) }
-        });
+    const renderAnki = () => {
+        if (ankiInput instanceof HTMLTextAreaElement) {
+            ankiRenderer.render(document.getElementById('anki-output'), ankiInput.value, { 
+                contextId: 'anki-demo',
+                clozeStates: JSON.parse(JSON.stringify(clozeStates)),
+                on: { taskToggled: d => alert(`任务 "${d.taskText}" 状态: ${d.isChecked ? '完成' : '未完成'}.`) }
+            });
+        }
     };
     document.getElementById('render-anki').addEventListener('click', renderAnki);
     renderAnki();
@@ -688,7 +724,11 @@ document.getElementById('rename-doc1-btn').addEventListener('click', () => {
     // For this demo, we'll keep it simple and create a dedicated renderer.
     const agentOutput = document.getElementById('agent-output');
     const streamBtn = document.getElementById('render-stream');
-    const chatRenderer = new MDxRenderer(defaultPlugins);
+    
+    // [修改] 流式渲染器同样采用新的插件注册方式
+    const chatRenderer = new MDxRenderer();
+    defaultRendererPlugins.forEach(p => chatRenderer.usePlugin(p)); // 复用上面定义的默认渲染插件
+
     streamBtn.addEventListener('click', () => {
         // @ts-ignore
         streamBtn.disabled = true;
@@ -737,9 +777,8 @@ document.getElementById('rename-doc1-btn').addEventListener('click', () => {
     const processorOutputEl = document.getElementById('processor-output');
     const processBtn = document.getElementById('process-btn');
 
-    // 1. 设置默认输入内容
-if (processorInputEl instanceof HTMLTextAreaElement) {
-    processorInputEl.value = `---
+    if (processorInputEl instanceof HTMLTextAreaElement) {
+        processorInputEl.value = `---
     title: Weekly Report
     author: @user:alice
     ---
@@ -748,73 +787,52 @@ if (processorInputEl instanceof HTMLTextAreaElement) {
     
     A key resource was the technical specification: @file:doc-3.
     `;
-}
+    }
 
-    // 2. 设置默认处理规则
     const defaultProcessOptions = {
         rules: {
-            'user': {
-                action: 'extract',
-                collectMetadata: true,
-            },
+            'user': { action: 'extract', collectMetadata: true, },
             'file': {
                 action: 'replace',
                 collectMetadata: true,
                 getReplacementContent: (data, mention) => {
                     if (!data) return `[File Not Found: ${mention.id}]`;
-                    return `> **${data.title}**\n> \n> ${data.content.split('\n')[0]}`; // 嵌入标题和第一行内容
+                    return `> **${data.title}**\n> \n> ${data.content.split('\n')[0]}`;
                 }
             },
-            '*': { // Default rule for any other mention type
-                action: 'keep',
-                collectMetadata: false,
-            }
+            '*': { action: 'keep', collectMetadata: false, }
         }
     };
-if (processorOptionsEl instanceof HTMLTextAreaElement) {
-    processorOptionsEl.value = JSON.stringify(defaultProcessOptions, null, 2);
-}
-    // 3. 初始化 MDxProcessor 实例
-    // 复用为 Mention 系统创建的 providers
+    if (processorOptionsEl instanceof HTMLTextAreaElement) {
+        processorOptionsEl.value = JSON.stringify(defaultProcessOptions, null, 2);
+    }
     const processor = new MDxProcessor([new FileMentionProvider(), new UserMentionProvider()]);
     
     // 4. 为按钮添加点击事件
     processBtn.addEventListener('click', async () => {
-    if (!(processorInputEl instanceof HTMLTextAreaElement) || 
-        !(processorOptionsEl instanceof HTMLTextAreaElement)) {
-        return;
-    }
+        if (!(processorInputEl instanceof HTMLTextAreaElement) || 
+            !(processorOptionsEl instanceof HTMLTextAreaElement)) {
+            return;
+        }
     
-    if (processorInputEl instanceof HTMLTextAreaElement) {
         const markdownInput = processorInputEl.value;
         let options;
-
         try {
             options = JSON.parse(processorOptionsEl.value);
-        if (processorOutputEl instanceof HTMLElement) {
-            processorOutputEl.textContent = 'Processing...';
-        }
-        if (processBtn instanceof HTMLButtonElement) {
-            processBtn.disabled = true;
-        }
+            if (processorOutputEl instanceof HTMLElement) processorOutputEl.textContent = 'Processing...';
+            if (processBtn instanceof HTMLButtonElement) processBtn.disabled = true;
 
-        const result = await processor.process(markdownInput, options);
+            const result = await processor.process(markdownInput, options);
         
-        if (processorOutputEl instanceof HTMLElement) {
-            processorOutputEl.textContent = JSON.stringify(result, null, 2);
+            if (processorOutputEl instanceof HTMLElement) processorOutputEl.textContent = JSON.stringify(result, null, 2);
+        } catch (error) {
+            if (processorOutputEl instanceof HTMLElement) {
+                processorOutputEl.textContent = `Error processing:\n\n${error.message}\n\nCheck your JSON options format.`;
+            }
+            console.error(error);
+        } finally {
+            if (processBtn instanceof HTMLButtonElement) processBtn.disabled = false;
         }
-
-    } catch (error) {
-        if (processorOutputEl instanceof HTMLElement) {
-            processorOutputEl.textContent = `Error processing:\n\n${error.message}\n\nCheck your JSON options format.`;
-        }
-        console.error(error);
-    } finally {
-        if (processBtn instanceof HTMLButtonElement) {
-            processBtn.disabled = false;
-        }
-        }
-    }
     });
 
     // ======================================================
@@ -872,22 +890,15 @@ if (processorOptionsEl instanceof HTMLTextAreaElement) {
 
     const updateUI = () => {
         const total = allMatches.length;
-    if (modeDisplay instanceof HTMLElement) {
-        if (total > 0) {
         if (countEl instanceof HTMLElement) {
-            countEl.textContent = `找到 ${currentIndex + 1} / ${total} 个结果`;
+            if (total > 0) {
+                countEl.textContent = `找到 ${currentIndex + 1} / ${total} 个结果`;
+            } else {
+                countEl.textContent = searchInput instanceof HTMLInputElement && searchInput.value ? '未找到结果' : '';
+            }
         }
-        } else {
-            countEl.textContent = searchInput instanceof HTMLInputElement && searchInput.value ? '未找到结果' : '';
-        }
-    }
-
-    if (prevBtn instanceof HTMLButtonElement) {
-        prevBtn.disabled = total === 0;
-    }
-    if (nextBtn instanceof HTMLButtonElement) {
-        nextBtn.disabled = total === 0;
-    }
+        if (prevBtn instanceof HTMLButtonElement) prevBtn.disabled = total === 0;
+        if (nextBtn instanceof HTMLButtonElement) nextBtn.disabled = total === 0;
     };
     
     const navigateToMatch = (index) => {
@@ -900,20 +911,6 @@ if (processorOptionsEl instanceof HTMLTextAreaElement) {
         updateUI();
     };
 
-    searchInput.addEventListener('input', debounce(performSearch, 300));
-
-    nextBtn.addEventListener('click', () => {
-        if (allMatches.length === 0) return;
-        const nextIndex = (currentIndex + 1) % allMatches.length;
-        navigateToMatch(nextIndex);
-    });
-
-    prevBtn.addEventListener('click', () => {
-        if (allMatches.length === 0) return;
-        const prevIndex = (currentIndex - 1 + allMatches.length) % allMatches.length;
-        navigateToMatch(prevIndex);
-    });
-
     function debounce(func, delay) {
         let timeout;
         return function(...args) {
@@ -921,6 +918,18 @@ if (processorOptionsEl instanceof HTMLTextAreaElement) {
             timeout = setTimeout(() => func.apply(this, args), delay);
         };
     }
+
+    searchInput.addEventListener('input', debounce(performSearch, 300));
+
+    nextBtn.addEventListener('click', () => {
+        if (allMatches.length === 0) return;
+        navigateToMatch((currentIndex + 1) % allMatches.length);
+    });
+
+    prevBtn.addEventListener('click', () => {
+        if (allMatches.length === 0) return;
+        navigateToMatch((currentIndex - 1 + allMatches.length) % allMatches.length);
+    });
 
     // ======================================================
     //   全局交互处理器 (事件委托)

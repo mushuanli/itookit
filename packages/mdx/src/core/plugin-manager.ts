@@ -4,7 +4,7 @@
 import type { MarkedExtension } from 'marked';
 import type { Extension } from '@codemirror/state';
 import { ServiceContainer } from './service-container';
-import type { VFSCore, VNode } from '@itookit/vfs-core';
+import type { VFSCore, NodeStat } from '@itookit/vfs-core';
 import type { IPersistenceAdapter } from '@itookit/common';
 import type {
   MDxPlugin,
@@ -58,8 +58,9 @@ class VFSStore implements ScopedPersistenceStore {
 
   async get(key: string): Promise<any> {
     try {
-      const node = await this.vfsCore.stat(this.nodeId);
-      const pluginData = node.meta?.[this.getMetaKey()];
+      // [修复] stat 方法在底层的 VFS 实例上，通过 getVFS() 访问
+      const nodeStat: NodeStat = await this.vfsCore.getVFS().stat(this.nodeId);
+      const pluginData = nodeStat.metadata?.[this.getMetaKey()];
       return pluginData?.[key];
     } catch (error) {
       console.warn(`VFSStore: Failed to get key "${key}"`, error);
@@ -69,15 +70,20 @@ class VFSStore implements ScopedPersistenceStore {
 
   async set(key: string, value: any): Promise<void> {
     try {
-      const node = await this.vfsCore.stat(this.nodeId);
+      // [修复] 先获取当前元数据
+      const nodeStat: NodeStat = await this.vfsCore.getVFS().stat(this.nodeId);
       const metaKey = this.getMetaKey();
-      const pluginData = node.meta?.[metaKey] || {};
+      const currentMetadata = nodeStat.metadata || {};
+      const pluginData = currentMetadata[metaKey] || {};
       pluginData[key] = value;
+      
+      const newMetadata = {
+          ...currentMetadata,
+          [metaKey]: pluginData,
+      };
 
-      await this.vfsCore.updateNodeMetadata(this.nodeId, {
-        ...node.meta,
-        [metaKey]: pluginData,
-      });
+      // [修复] 使用新增的 updateNodeMetadata 方法
+      await this.vfsCore.updateNodeMetadata(this.nodeId, newMetadata);
     } catch (error) {
       console.error(`VFSStore: Failed to set key "${key}"`, error);
       throw error;
@@ -86,16 +92,20 @@ class VFSStore implements ScopedPersistenceStore {
 
   async remove(key: string): Promise<void> {
     try {
-      const node = await this.vfsCore.stat(this.nodeId);
+      // [修复] 先获取当前元数据
+      const nodeStat: NodeStat = await this.vfsCore.getVFS().stat(this.nodeId);
       const metaKey = this.getMetaKey();
-      const pluginData = node.meta?.[metaKey];
+      const currentMetadata = nodeStat.metadata || {};
+      const pluginData = currentMetadata[metaKey];
       
       if (pluginData && key in pluginData) {
         delete pluginData[key];
-        await this.vfsCore.updateNodeMetadata(this.nodeId, {
-          ...node.meta,
-          [metaKey]: pluginData,
-        });
+        const newMetadata = {
+            ...currentMetadata,
+            [metaKey]: pluginData,
+        };
+        // [修复] 使用新增的 updateNodeMetadata 方法
+        await this.vfsCore.updateNodeMetadata(this.nodeId, newMetadata);
       }
     } catch (error) {
       console.warn(`VFSStore: Failed to remove key "${key}"`, error);
