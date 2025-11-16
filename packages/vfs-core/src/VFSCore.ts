@@ -205,6 +205,24 @@ export class VFSCore {
   }
 
   /**
+   * [新增] 更新节点元数据 (高级 API)
+   */
+  async updateMetadata(moduleName: string, path: string, metadata: Record<string, any>): Promise<void> {
+    this._ensureInitialized();
+    const nodeId = await this.vfs.pathResolver.resolve(moduleName, path);
+    if (!nodeId) {
+      throw new VFSError(VFSErrorCode.NOT_FOUND, `Node not found: ${moduleName}:${path}`);
+    }
+    await this.vfs.updateMetadata(nodeId, metadata);
+  }
+  
+  // [新增] 直接通过 ID 更新元数据，更适合 mdxeditor 的场景
+  async updateNodeMetadata(nodeId: string, metadata: Record<string, any>): Promise<void> {
+      this._ensureInitialized();
+      await this.vfs.updateMetadata(nodeId, metadata);
+  }
+
+  /**
    * 读取文件
    */
   async read(moduleName: string, path: string): Promise<string | ArrayBuffer> {

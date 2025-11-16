@@ -162,6 +162,34 @@ export class VFS {
   }
 
   /**
+   * [新增] 更新节点元数据
+   */
+  async updateMetadata(vnodeOrId: VNode | string, metadata: Record<string, any>): Promise<VNode> {
+    const vnode = await this._resolveVNode(vnodeOrId);
+    
+    const tx = await this.storage.beginTransaction();
+    try {
+      vnode.metadata = metadata;
+      vnode.modifiedAt = Date.now();
+      await this.storage.saveVNode(vnode, tx);
+      await tx.done;
+
+      this.events.emit({
+        type: VFSEventType.NODE_UPDATED,
+        nodeId: vnode.nodeId,
+        path: vnode.path,
+        timestamp: Date.now(),
+        data: { metadataOnly: true }
+      });
+
+      return vnode;
+    } catch (error) {
+      if (error instanceof VFSError) { throw error; }
+      throw new VFSError(VFSErrorCode.TRANSACTION_FAILED, 'Failed to update metadata', error);
+    }
+  }
+
+  /**
    * 读取节点内容
    */
   async read(vnodeOrId: VNode | string): Promise<string | ArrayBuffer> {
