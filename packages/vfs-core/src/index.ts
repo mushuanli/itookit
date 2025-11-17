@@ -34,6 +34,7 @@ export {
   type CopyResult,
   type IProvider,
   type VFSEvent,
+  type SearchQuery, // [修改] 导出 SearchQuery
 } from './core/types.js';
 
 import {VFSConfig} from './VFSCore.js';
