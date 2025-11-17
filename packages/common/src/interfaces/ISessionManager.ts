@@ -10,7 +10,8 @@ export interface MenuItem {
     label: string;
     iconHTML?: string;
     type?: 'item' | 'separator';
-    hidden?: (item: object) => boolean;
+    /** UPDATE: Changed type from `object` to `Record<string, any>` for better type safety. */
+    hidden?: (item: Record<string, any>) => boolean;
 }
 
 export type ContextMenuBuilder = (item: object, defaultItems: MenuItem[]) => MenuItem[];
@@ -32,7 +33,8 @@ export interface SessionUIOptions {
     searchPlaceholder?: string;
     newSessionContent?: string;
     components?: {
-        tagEditor?: (...args: any[]) => any;
+        /** UPDATE: Changed type to `new (...args: any[]) => any` to correctly type a class constructor. */
+        tagEditor?: new (...args: any[]) => any;
     };
     /** FIX: Add optional loadDataOnStart property to the interface */
     loadDataOnStart?: boolean;
