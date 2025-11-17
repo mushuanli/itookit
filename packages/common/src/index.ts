@@ -3,7 +3,7 @@
 // Export all interfaces
 export { IAutocompleteProvider, type Suggestion } from './interfaces/IAutocompleteProvider';
 export { IEditor, type SearchResultSource, type UnifiedSearchResult, type Heading } from './interfaces/IEditor';
-export { IMentionProvider } from './interfaces/IMentionProvider';
+export { IMentionProvider, type HoverPreviewData } from './interfaces/IMentionProvider'; // UPDATE: Export new HoverPreviewData interface
 export { IPersistenceAdapter } from './interfaces/IPersistenceAdapter';
 export { ISessionManager, 
     type MenuItem, type ContextMenuBuilder, type ContextMenuConfig, type SessionUIOptions,
@@ -17,4 +17,4 @@ export { ISettingsWidget } from './interfaces/ISettingsWidget';
 export { slugify, simpleHash, escapeHTML, generateUUID, generateShortUUID,generateId, debounce, isClass } from './utils/utils';
 
 // Export all components
-export { TagEditorComponent } from './components/TagEditor/TagEditorComponent';
+export { TagEditorComponent, type TagEditorParams } from './components/TagEditor/TagEditorComponent'; // UPDATE: Export TagEditorParams type

@@ -3,14 +3,17 @@
  * @description Extends the generic provider interface with mention-specific features.
  */
 
-import { IAutocompleteProvider } from './IAutocompleteProvider.js';
+import { IAutocompleteProvider } from './IAutocompleteProvider';
 
-/**
- * @typedef {object} HoverPreviewData
- * @property {string} title - The title to display in the preview card
- * @property {string} contentHTML - The HTML content to display in the preview
- * @property {string} [icon] - Optional icon HTML or URL
+/** 
+ * UPDATE: Replaced JSDoc @typedef with a native TypeScript interface for strong typing.
+ * Defines the data structure for hover preview cards.
  */
+export interface HoverPreviewData {
+    title: string;
+    contentHTML: string;
+    icon?: string;
+}
 
 /**
  * @abstract
@@ -44,10 +47,10 @@ export abstract class IMentionProvider extends IAutocompleteProvider {
 
     /**
      * Returns preview data for hover tooltips
-     * @param {URL} targetURL - The URL to get preview for
-     * @returns {Promise<{title: string, contentHTML: string, icon?: string} | null>}
+     * @param targetURL - The URL to get preview for
+     * UPDATE: The return type now uses the HoverPreviewData interface.
      */
-    async getHoverPreview(targetURL: URL): Promise<{title: string, contentHTML: string, icon?: string} | null> {
+    async getHoverPreview(targetURL: URL): Promise<HoverPreviewData | null> {
         return null;
     }
 
