@@ -2,7 +2,7 @@
  * @file common/interfaces/ISessionService.ts
  * @description Defines the interface that the SessionService must expose to external modules (like Mention Providers).
  */
-export abstract class ISessionService {
+export abstract class ISessionService<TNode extends object> { 
     protected constructor() {
         if (this.constructor === ISessionService) {
             throw new Error("ISessionService is an interface and cannot be instantiated directly.");
@@ -14,7 +14,7 @@ export abstract class ISessionService {
      * @param itemId - The unique ID of the item.
      * @returns The found item object, or undefined.
      */
-    abstract findItemById(itemId: string): object | undefined;
+    abstract findItemById(itemId: string): Promise<TNode | null | undefined>;
 
     /**
      * Updates an item's metadata.
@@ -26,17 +26,17 @@ export abstract class ISessionService {
     /**
      * Gets a flattened list of all folders.
      */
-    abstract getAllFolders(): Promise<object[]>;
+    abstract getAllFolders(): Promise<TNode[]>;
     
     /**
      * Gets a flattened list of all files (sessions).
      */
-    abstract getAllFiles(): Promise<object[]>;
+    abstract getAllFiles(): Promise<TNode[]>;
     
     /**
      * Creates a new session.
      * @param options - Options for creating the session.
      * @returns The newly created session object.
      */
-    abstract createSession(options: { title?: string; content?: string; parentId?: string }): Promise<object>;
+    abstract createSession(options: { title?: string; content?: string; parentId?: string }): Promise<TNode>;
 }
