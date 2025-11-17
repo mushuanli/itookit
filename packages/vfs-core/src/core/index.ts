@@ -18,5 +18,6 @@ export {
   type UnlinkResult,
   type CopyResult,
   type IProvider,
-  type VFSEvent
+  type VFSEvent,
+  type SearchQuery, // [修改]
 } from './types.js';
