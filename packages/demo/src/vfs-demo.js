@@ -1,7 +1,15 @@
 /**
  * @file @mdx/demo/vfs-demo.js
  * @description MDxEditor + VFS-UI 完整功能演示脚本
- * @description 这个演示展示了如何初始化和使用基于 vfs-core 的 VFS-UI 库。
+ */
+
+// --- 类型定义，用于 JSDoc 和智能提示 ---
+/** 
+ * @typedef {import('@itookit/common').ISessionManager} ISessionManager
+ * @typedef {import('@itookit/vfs-ui').VFSNodeUI} VFSNodeUI 
+ * @typedef {import('@itookit/vfs-ui').VFSService} VFSService
+ * @typedef {import('@itookit/mdxeditor').MDxEditor} MDxEditor
+ * @typedef {import('@itookit/vfs-core').VFSCore} VFSCore
  */
 
 // --- 导入 VFS-UI 库 ---
@@ -10,7 +18,7 @@ import '@itookit/vfs-ui/style.css';
 
 // --- 导入 MDxEditor 及其插件 ---
 // [修正] 不再导入内部变量 defaultPlugins，而是导入 createMDxEditor 工厂函数
-import { MDxEditor, createMDxEditor } from '@itookit/mdxeditor';
+import { createMDxEditor } from '@itookit/mdxeditor';
 import '@itookit/mdxeditor/style.css';
 
 // --- 导入 vfs-core 的便利函数 ---
@@ -21,10 +29,10 @@ import { createVFSCore } from '@itookit/vfs-core';
 
 /** @type {MDxEditor | null} */
 let editorInstance = null;
-/** @type {import('@itookit/vfs-ui').IVSUIManager | null} */
+/** @type {ISessionManager<VFSNodeUI, VFSService> | null} */
 let vfsUIManager = null;
-/** @type {import('@itookit/vfs-core').VFSCore | null} */
-let vfsCore = null; // [更新] vfsCore 实例将在 main 函数中异步创建
+/** @type {VFSCore | null} */
+let vfsCore = null;
 
 const appContainer = document.getElementById('app-container');
 const sidebarContainer = document.getElementById('sidebar-container');
@@ -270,7 +278,7 @@ async function main() {
         contextMenu: {
             items: (item, defaultItems) => [
                 ...defaultItems,
-                { type: 'separator', id: 'sep1', label: '' },
+                { type: 'separator' },
                 { 
                     id: 'share-file', 
                     label: '分享...', 
