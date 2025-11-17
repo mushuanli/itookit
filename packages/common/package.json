@@ -18,10 +18,14 @@
   ],
   "scripts": {
     "dev": "pnpm build --watch",
-    "build": "tsup src/index.ts --format cjs,esm --dts",
+    "build": "tsup src/index.ts --format cjs,esm --dts && pnpm copy-assets",
+    "copy-assets": "cpx \"src/**/*.css\" dist",
     "prepublishOnly": "pnpm build"
   },
-  "keywords": ["itookit", "common"],
+  "keywords": [
+    "itookit",
+    "common"
+  ],
   "author": "lizlok@gmail.com",
   "license": "MIT",
   "repository": {
@@ -36,8 +40,8 @@
   "publishConfig": {
     "access": "public"
   },
-  "dependencies": {},
   "devDependencies": {
+    "cpx": "^1.5.0",
     "tsup": "^8.5.0",
     "typescript": "^5.9.3"
   }

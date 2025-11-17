@@ -6,7 +6,8 @@ import './TagEditorComponent.css';
 import { escapeHTML } from '../../utils/utils.js';
 import { IAutocompleteProvider, Suggestion } from '../../interfaces/IAutocompleteProvider';
 
-interface TagEditorParams {
+/** UPDATE: Exported the params interface for use in other modules. */
+export interface TagEditorParams {
     container: HTMLElement;
     initialItems: string[];
     suggestionProvider: IAutocompleteProvider;
