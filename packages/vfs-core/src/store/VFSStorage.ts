@@ -6,7 +6,8 @@ import { InodeStore } from './InodeStore.js';
 import { ContentStore } from './ContentStore.js';
 import { TagStore } from './TagStore.js';
 import { NodeTagStore } from './NodeTagStore.js';
-import { VFS_STORES, VNode, ContentData, Transaction, TransactionMode, TagData } from './types.js';
+import { VFS_STORES, VNode, VNodeData, ContentData, Transaction, TransactionMode, TagData } from './types.js';
+import { SearchQuery } from '../core/types.js'; // [修改]
 
 /**
  * VFS 存储服务门面
@@ -240,6 +241,81 @@ export class VFSStorage {
       const nodeIds = await this.nodeTagStore.getNodesForTag(tagName);
       if (nodeIds.length === 0) return [];
       return this.loadVNodes(nodeIds); // 使用已修改的 loadVNodes
+  }
+
+  /**
+   * [新增] 根据复合条件在指定模块中搜索节点
+   * @param moduleName 要搜索的模块
+   * @param query 搜索查询对象
+   * @returns {Promise<VNode[]>} 匹配的节点数组
+   */
+  async searchNodes(moduleName: string, query: SearchQuery): Promise<VNode[]> {
+    this.ensureConnected();
+    const results: VNode[] = [];
+
+    const tx = await this.db.getTransaction(VFS_STORES.VNODES, 'readonly');
+    const store = tx.getStore(VFS_STORES.VNODES);
+    // 优先使用 moduleId 索引来限定范围，这是最高效的第一步
+    const index = store.index('moduleId');
+    const range = IDBKeyRange.only(moduleName);
+
+    return new Promise((resolve, reject) => {
+      const cursorRequest = index.openCursor(range);
+      
+      cursorRequest.onerror = () => reject(cursorRequest.error);
+
+      cursorRequest.onsuccess = () => {
+        const cursor = cursorRequest.result;
+        // 如果游标存在，则检查当前节点
+        if (cursor) {
+          const vnodeData = cursor.value as VNodeData;
+          let match = true;
+
+          // 应用类型过滤器
+          if (query.type && vnodeData.type !== query.type) {
+            match = false;
+          }
+          
+          // 应用名称包含过滤器 (不区分大小写)
+          if (match && query.nameContains && !vnodeData.name.toLowerCase().includes(query.nameContains.toLowerCase())) {
+            match = false;
+          }
+          
+          // 应用标签过滤器 (节点必须包含查询中的所有标签)
+          if (match && query.tags && query.tags.length > 0) {
+            const nodeTags = vnodeData.tags || [];
+            if (!query.tags.every(tag => nodeTags.includes(tag))) {
+              match = false;
+            }
+          }
+          
+          // 应用元数据过滤器 (简单的键值全等匹配)
+          if (match && query.metadata) {
+            const nodeMetadata = vnodeData.metadata || {};
+            if (!Object.entries(query.metadata).every(([key, value]) => nodeMetadata[key] === value)) {
+              match = false;
+            }
+          }
+
+          // 如果所有过滤器都通过，则将节点添加到结果集
+          if (match) {
+            results.push(VNode.fromJSON(vnodeData));
+          }
+
+          // 如果达到数量限制，则提前结束并返回结果
+          if (query.limit && results.length >= query.limit) {
+            resolve(results);
+          } else {
+            // 继续移动到下一个节点
+            cursor.continue();
+          }
+
+        } else {
+          // 游标结束，表示已遍历完所有匹配 `moduleId` 的节点
+          resolve(results);
+        }
+      };
+    });
   }
 
   // ==================== Module 操作 ====================

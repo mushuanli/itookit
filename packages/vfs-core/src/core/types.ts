@@ -27,6 +27,15 @@ export class VFSError extends Error {
   }
 }
 
+/** [新增] 搜索查询条件接口 */
+export interface SearchQuery {
+  type?: VNodeType.FILE | VNodeType.DIRECTORY;
+  nameContains?: string;
+  tags?: string[]; // 匹配拥有所有这些标签的节点
+  metadata?: { [key: string]: any }; // 简单的元数据键值匹配
+  limit?: number;
+}
+
 /** 节点创建选项 */
 export interface CreateNodeOptions {
   module: string;

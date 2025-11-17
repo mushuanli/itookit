@@ -9,7 +9,7 @@ import { VFS_STORES, TransactionMode, Transaction } from './types.js';
  */
 export class Database {
   private db: IDBDatabase | null = null;
-  private readonly version = 3; // [修改] 版本升级
+  private readonly version = 4; // [修改] 版本升级以添加新索引
 
   constructor(private dbName: string = 'vfs_database') {}
 
@@ -50,11 +50,30 @@ export class Database {
           console.log('Upgrading to version 2...');
         }
         
-        // [新增] 版本 3: 添加 Tag 功能相关的表
+        // 版本 3: 添加 Tag 功能相关的表
         if (oldVersion < 3) {
           console.log('Upgrading to version 3...');
           this.createTagsStore(db);
           this.createNodeTagsStore(db);
+        }
+        
+        // [新增] 版本 4: 为 vnodes 添加用于搜索的索引
+        if (oldVersion < 4) {
+          console.log('Upgrading to version 4...');
+          const transaction = (event.target as IDBOpenDBRequest).transaction;
+          if (transaction && db.objectStoreNames.contains(VFS_STORES.VNODES)) {
+              const vnodeStore = transaction.objectStore(VFS_STORES.VNODES);
+              // 索引 `name` 用于按名称搜索
+              if (!vnodeStore.indexNames.contains('name')) {
+                  vnodeStore.createIndex('name', 'name', { unique: false });
+                  console.log("Created 'name' index on vnodes store.");
+              }
+              // 索引 `tags` 用于按标签搜索，multiEntry 允许索引数组中的每个值
+              if (!vnodeStore.indexNames.contains('tags')) {
+                  vnodeStore.createIndex('tags', 'tags', { multiEntry: true });
+                  console.log("Created 'tags' index on vnodes store.");
+              }
+          }
         }
       };
     });

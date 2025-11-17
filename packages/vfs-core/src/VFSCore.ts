@@ -11,8 +11,8 @@ import { EnhancedProviderRegistry } from './core/EnhancedProviderRegistry.js';
 import { ProviderFactory } from './core/ProviderFactory.js';
 import { ContentProvider } from './provider/base/ContentProvider.js';
 import { PlainTextProvider } from './provider/PlainTextProvider.js';
-import { VNode, VNodeType, TagData } from './store/types.js'; // [修改]
-import { VFSError, VFSErrorCode } from './core/types.js';
+import { VNode, VNodeType, TagData } from './store/types.js';
+import { VFSError, VFSErrorCode, SearchQuery } from './core/types.js'; // [修改] 导入 SearchQuery
 
 /**
  * VFS 配置选项
@@ -22,6 +22,9 @@ export interface VFSConfig {
   defaultModule?: string;
   providers?: Array<new () => ContentProvider>;
 }
+
+// [新增] 导出 SearchQuery 接口，方便库的使用者进行类型提示
+export type { SearchQuery };
 
 /**
  * VFS 顶层管理器（单例）
@@ -413,6 +416,20 @@ export class VFSCore {
   async getAllTags(): Promise<TagData[]> {
     this._ensureInitialized();
     return this.vfs.storage.tagStore.getAll();
+  }
+  
+  /**
+   * [新增] 在指定模块中按条件搜索节点
+   * @param moduleName 模块名称
+   * @param query 搜索条件
+   * @returns {Promise<VNode[]>} 匹配的节点数组
+   */
+  async searchNodes(moduleName: string, query: SearchQuery): Promise<VNode[]> {
+    this._ensureInitialized();
+    this._ensureModuleExists(moduleName);
+
+    // 委托给 VFS 核心层执行搜索，以利用底层优化
+    return this.vfs.searchNodes(moduleName, query);
   }
 
   /**

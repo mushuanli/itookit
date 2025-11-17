@@ -18,7 +18,8 @@ import {
   UnlinkResult,
   CopyResult,
   VFSEventType,
-  IProvider
+  IProvider,
+  SearchQuery // [修改]
 } from './types.js';
 
 interface NodeTreeData {
@@ -504,6 +505,17 @@ export class VFS {
       modifiedAt: new Date(vnode.modifiedAt),
       metadata: { ...vnode.metadata }
     };
+  }
+
+  /**
+   * [新增] 在指定模块中搜索节点
+   * @param moduleName 模块名称
+   * @param query 搜索条件
+   * @returns {Promise<VNode[]>} 匹配的节点数组
+   */
+  async searchNodes(moduleName: string, query: SearchQuery): Promise<VNode[]> {
+    // 搜索是只读操作，直接委托给存储层以获得最佳性能
+    return this.storage.searchNodes(moduleName, query);
   }
 
   // [新增] ==================== Tag 核心方法 ====================
