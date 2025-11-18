@@ -1,0 +1,35 @@
+tsup.config.ts
+tsconfig.json
+package.json
+vite.config.js
+vite.config.ts
+vitest.config.ts
+test/
+
+# mdx plugins:
+plugin.ts
+commands.ts
+service-container.ts
+# mdx plugins/ui
+formatting.plugin.ts
+source-jump.plugin.ts
+titlebar.plugin.ts
+toolbar.plugin.ts
+codeblock-controls.plugin.ts
+# mdx plugins/autocomplete
+autocomplete.plugin.ts
+mention.plugin.ts
+tag.plugin.ts
+# mdx plugins/function
+cloze/
+mathjax.plugin.ts
+mermaid.plugin.ts
+media.plugin.ts
+foldable.plugin.ts
+task-list.plugin.ts
+# mdx main:
+
+
+# vfs-core
+store/
+provider/
