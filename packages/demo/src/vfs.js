@@ -167,6 +167,7 @@ async function main() {
      * @returns {Promise<IEditor>}
      */
     const mdxEditorFactoryAdapter = (container, options) => {
+    console.log(`[vfs.js Factory] Received options. Content length: ${(options.initialContent || '').length}. Preview: "${(options.initialContent || '').substring(0, 50)}..."`);
         const mdxConfig = {
             // 1. 传递所有通用选项
             ...options,

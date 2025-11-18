@@ -47,7 +47,7 @@ export abstract class IEditor {
      * 这是创建实例后的第一步。
      * @param container - 编辑器将挂载的HTML元素。
      */
-    abstract init(container: HTMLElement): Promise<void>;
+    abstract init(container: HTMLElement, initialContent?: string): Promise<void>;
     /**
      * [关键修改] 销毁编辑器实例并释放所有资源。
      * 此方法必须返回一个 Promise，以允许调用者等待异步清理/保存操作完成。

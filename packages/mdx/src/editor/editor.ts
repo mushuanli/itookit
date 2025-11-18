@@ -55,7 +55,7 @@ export class MDxEditor extends IEditor {
   }
 
   // ✨ [最终] init只负责挂载DOM，不再关心内容
-  async init(container: HTMLElement): Promise<void> {
+    async init(container: HTMLElement, initialContent: string = ''): Promise<void> {
     console.log('🎬 [MDxEditor] Starting initialization...');
     this._container = container;
     this.createContainers(container);
@@ -64,9 +64,22 @@ export class MDxEditor extends IEditor {
     // TODO: 未来可探索更健壮的事件驱动或 Promise 机制来代替 setTimeout。
     await new Promise((resolve) => setTimeout(resolve, 10));
 
-    this.initCodeMirror('');
-    await this.switchToMode(this.currentMode, true);
-    this.listenToPluginEvents();
+        this.initCodeMirror(initialContent);
+        // 简化模式切换
+        const initialMode = this.config.initialMode || 'edit';
+        this.currentMode = initialMode;
+        const isEditMode = initialMode === 'edit';
+        
+        this._container.classList.toggle('is-edit-mode', isEditMode);
+        this._container.classList.toggle('is-render-mode', !isEditMode);
+        this.editorContainer!.style.display = isEditMode ? 'flex' : 'none';
+        this.renderContainer!.style.display = isEditMode ? 'none' : 'block';
+        
+        if (!isEditMode) {
+            await this.renderContent();
+        }
+
+        this.listenToPluginEvents();
 
     this.renderer.getPluginManager().executeActionHook('editorPostInit', {
       editor: this,

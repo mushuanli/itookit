@@ -60,7 +60,7 @@
     </div>
 
     <script type="module">
-        import { MDxEditor,defaultPlugins } from '@itookit/mdxeditor';
+        import { MDxEditor } from '@itookit/mdxeditor';
 
         const debugOutput = document.getElementById('debug-output');
         function log(message) {
@@ -73,7 +73,6 @@
         const container = document.getElementById('editor-container');
         
         const config = {
-            plugins: defaultPlugins,//['core-titlebar', 'core-toolbar', 'core-renderer', 'core-codemirror'],
             initialText: '# 测试标题\n\n这是一个最小化的测试示例。',
             initialMode: 'render',
             showToolbar: true,
