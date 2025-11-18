@@ -64,10 +64,12 @@ export function connectEditorLifecycle(
         if (item && item.type === 'file') {
             console.log(`[EditorConnector] Creating new editor for node ${item.id}.`);
             try {
-                // ✨ [最终] 准备标准的 EditorOptions 对象
+        const content = item.content?.data || ''; // <-- 获取内容
+        // 🔥 添加日志
+        console.log(`[EditorConnector] Preparing options. Content length: ${content.length}. Preview: "${content.substring(0, 50)}..."`);
                 const editorOptions: EditorOptions = {
-                    ...factoryExtraOptions, // 传递onEditorCreated之外的所有额外选项
-                    initialContent: item.content?.data || '',
+            ...factoryExtraOptions,
+            initialContent: content, // <-- 使用内容
                     title: item.metadata.title,
                     nodeId: item.id,
                 };
