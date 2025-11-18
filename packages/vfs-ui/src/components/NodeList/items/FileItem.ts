@@ -2,7 +2,7 @@
  * @file vfs-ui/src/components/NodeList/items/FileItem.ts
  * @desc Component representing a single file in the list.
  */
-import { BaseNodeItem, NodeItemCallbacks } from './BaseNodeItem';
+import { BaseNodeItem } from './BaseNodeItem';
 import { VFSNodeUI, UISettings } from '../../../types/types';
 import { createFileItemHTML } from './itemTemplates';
 
@@ -18,8 +18,9 @@ export interface FileItemProps {
 export class FileItem extends BaseNodeItem {
     private currentProps: FileItemProps;
 
-    constructor(item: VFSNodeUI, callbacks: NodeItemCallbacks, isReadOnly: boolean, initialProps: FileItemProps) {
-        super(item, callbacks, isReadOnly);
+    // [修正] 构造函数不再接收 callbacks
+    constructor(item: VFSNodeUI, isReadOnly: boolean, initialProps: FileItemProps) {
+        super(item, isReadOnly);
         this.currentProps = initialProps;
         this.render();
     }
@@ -51,14 +52,14 @@ export class FileItem extends BaseNodeItem {
             this.isReadOnly
         );
 
-    const tempDiv = document.createElement('div');
-    tempDiv.innerHTML = newHTML;
-    const newElement = tempDiv.firstElementChild as HTMLElement;
-    
-    if (this.element.parentNode) {
-        this.element.parentNode.replaceChild(newElement, this.element);
-        // Update the element reference properly
-        Object.defineProperty(this, 'element', { value: newElement, writable: true });
-    }
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = newHTML;
+        const newElement = tempDiv.firstElementChild as HTMLElement;
+        
+        if (this.element.parentNode) {
+            this.element.parentNode.replaceChild(newElement, this.element);
+            // Update the element reference properly
+            Object.defineProperty(this, 'element', { value: newElement, writable: true });
+        }
     }
 }

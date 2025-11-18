@@ -8,7 +8,7 @@ import { debounce, escapeHTML } from '@itookit/common';
 
 import { createContextMenuHTML, createSettingsPopoverHTML, createItemInputHTML } from './templates';
 import { Footer } from './Footer';
-import { BaseNodeItem,NodeItemCallbacks } from './items/BaseNodeItem';
+import { BaseNodeItem } from './items/BaseNodeItem'; // [修正]不再需要 NodeItemCallbacks
 import { FileItem, FileItemProps } from './items/FileItem';
 import { DirectoryItem, DirectoryItemProps } from './items/DirectoryItem';
 
@@ -230,6 +230,7 @@ export class NodeList extends BaseComponent<NodeListState> {
         return ids;
     }
 
+
     // --- Event Binding & Handling ---
 
     protected _bindEvents(): void {
@@ -240,7 +241,10 @@ export class NodeList extends BaseComponent<NodeListState> {
         this.newControlsEl.addEventListener('click', this._handleNewControlsClick);
         document.addEventListener('click', this._handleGlobalClick, true);
 
+        // [修正] 使用事件委托来处理所有项目相关的事件
+        this.bodyEl.addEventListener('click', this._handleItemClick);
         if (!this.state.readOnly) {
+            this.bodyEl.addEventListener('contextmenu', this._handleItemContextMenu);
             this.bodyEl.addEventListener('keydown', this._handleKeyDown);
             this.bodyEl.addEventListener('blur', this._handleBlur, true);
             this.bodyEl.addEventListener('dragstart', this._handleDragStart);
@@ -267,16 +271,18 @@ export class NodeList extends BaseComponent<NodeListState> {
             this.coordinator.publish('CREATE_ITEM_REQUESTED', { type, parentId });
         }
     };
-
-    private _handleItemClick = (itemId: string, event: MouseEvent): void => {
-        const itemEl = this.itemInstances.get(itemId)?.element;
-        if (!itemEl) return;
-        
+    
+    // [修正] _handleItemClick 现在是事件委托的处理函数
+    private _handleItemClick = (event: MouseEvent): void => {
         const target = event.target as Element;
+        const itemEl = target.closest<HTMLElement>('[data-item-id]');
+        if (!itemEl) return;
+
+        const itemId = itemEl.dataset.itemId!;
         const actionEl = target.closest<HTMLElement>('[data-action]');
         const action = actionEl?.dataset.action;
 
-        // Specific actions within an item are handled here, passed up from the child.
+        // 特定子元素动作的优先处理
         if (action === 'toggle-folder') {
             this.coordinator.publish('FOLDER_TOGGLE_REQUESTED', { folderId: itemId });
             return;
@@ -285,23 +291,33 @@ export class NodeList extends BaseComponent<NodeListState> {
             this.coordinator.publish('OUTLINE_TOGGLE_REQUESTED', { itemId });
             return;
         }
-        if(action === 'navigate-to-heading' && actionEl && actionEl.dataset.elementId) {
+        if (action === 'navigate-to-heading' && actionEl?.dataset.elementId) {
             this.coordinator.publish('NAVIGATE_TO_HEADING_REQUESTED', { elementId: actionEl.dataset.elementId });
             return;
         }
-
         if (this.state.readOnly && (event.metaKey || event.ctrlKey || event.shiftKey)) {
             return;
         }
-
+        
+        // 处理选中逻辑
         this._handleItemSelection(itemEl, event);
         
+        // 如果是文件且没有按住功能键，则触发文件打开事件
         if (itemEl.dataset.itemType === 'file' && !(event.metaKey || event.ctrlKey || event.shiftKey)) {
             this.coordinator.publish('SESSION_SELECT_REQUESTED', { sessionId: itemId });
         }
     };
+    
+    // [修正] _handleItemContextMenu 现在是事件委托的处理函数
+    private _handleItemContextMenu = (event: MouseEvent): void => {
+        const target = event.target as Element;
+        const itemEl = target.closest<HTMLElement>('[data-item-id]');
+        if (!itemEl) return;
+        
+        event.preventDefault();
+        event.stopPropagation();
+        const itemId = itemEl.dataset.itemId!;
 
-    private _handleItemContextMenu = (itemId: string, event: MouseEvent): void => {
         this._hideContextMenu();
         this._hideTagEditor();
 
@@ -384,64 +400,20 @@ export class NodeList extends BaseComponent<NodeListState> {
     
     // --- Helper Methods ---
 
-private _getTargetParentId(): string | null {
-    const { selectedItemIds } = this.state;
-    if (selectedItemIds.size > 0) {
-        const firstSelectedId = selectedItemIds.values().next().value as string;
-        if (firstSelectedId) {
-            const firstItem = this._findItemById(firstSelectedId);
-            if (firstItem) {
-                return firstItem.type === 'directory' ? firstItem.id : (firstItem.metadata?.parentId || null);
+    private _getTargetParentId(): string | null {
+        const { selectedItemIds } = this.state;
+        if (selectedItemIds.size > 0) {
+            const firstSelectedId = selectedItemIds.values().next().value as string;
+            if (firstSelectedId) {
+                const firstItem = this._findItemById(firstSelectedId);
+                if (firstItem) {
+                    return firstItem.type === 'directory' ? firstItem.id : (firstItem.metadata?.parentId || null);
+                }
             }
         }
+        return null;
     }
-    return null;
-}
-
     
-    private _handleActionClick(actionEl: HTMLElement, itemEl: HTMLElement | null): void {
-        const action = actionEl.dataset.action;
-        const itemId = itemEl?.dataset.itemId;
-
-        switch (action) {
-            case 'create-file':
-            case 'create-directory':
-            case 'import': {
-                const parentId = this._getTargetParentId();
-                if (action === 'import') {
-                    this.coordinator.publish('PUBLIC_IMPORT_REQUESTED', { parentId });
-                } else {
-                    const type = action.split('-')[1] as 'file' | 'directory';
-                    this.coordinator.publish('CREATE_ITEM_REQUESTED', { type, parentId });
-                }
-                break;
-            }
-            case 'bulk-delete':
-                if (confirm(`确定要删除 ${this.state.selectedItemIds.size} 个项目吗?`)) {
-                    this.coordinator.publish('BULK_ACTION_REQUESTED', { action: 'delete' });
-                }
-                break;
-            case 'bulk-move': {
-                const itemIds = [...this.state.selectedItemIds];
-                if (itemIds.length > 0) this.coordinator.publish('MOVE_OPERATION_START_REQUESTED', { itemIds });
-                break;
-            }
-            case 'settings':
-                this._toggleSettingsPopover();
-                break;
-            case 'collapse-sidebar':
-                this.coordinator.publish('COLLAPSE_SIDEBAR_REQUESTED', {});
-                break;
-            case 'toggle-outline':
-                if (itemId) this.coordinator.publish('OUTLINE_TOGGLE_REQUESTED', { itemId });
-                break;
-            case 'navigate-to-heading':
-                if (actionEl.dataset.elementId) {
-                    this.coordinator.publish('NAVIGATE_TO_HEADING_REQUESTED', { elementId: actionEl.dataset.elementId });
-                }
-                break;
-        }
-    }
     
     private _handleItemSelection(itemEl: HTMLElement, event: MouseEvent): void {
         const itemId = itemEl.dataset.itemId;
@@ -778,15 +750,19 @@ private _getTargetParentId(): string | null {
 
             itemList.forEach(item => {
                 let itemInstance = this.itemInstances.get(item.id);
-                const callbacks: NodeItemCallbacks = { onClick: this._handleItemClick, onContextMenu: this._handleItemContextMenu };
+                // [修正] 不再需要 callbacks
+                // const callbacks: NodeItemCallbacks = { onClick: this._handleItemClick, onContextMenu: this._handleItemContextMenu };
 
                 if (!itemInstance) {
                     if (item.type === 'file') {
-                        itemInstance = new FileItem(item, callbacks, this.state.readOnly, this._getFileItemProps(item));
+                        // [修正] 构造函数调用不再传递 callbacks
+                        itemInstance = new FileItem(item, this.state.readOnly, this._getFileItemProps(item));
                     } else {
-                        itemInstance = new DirectoryItem(item, callbacks, this.state.readOnly, this._getDirectoryItemProps(item));
+                        // [修正] 构造函数调用不再传递 callbacks
+                        itemInstance = new DirectoryItem(item, this.state.readOnly, this._getDirectoryItemProps(item));
                     }
-                    itemInstance.bindEvents();
+                    // [修正] 不再单独为每个项目绑定事件
+                    // itemInstance.bindEvents();
                 }
 
                 const props = item.type === 'file' ? this._getFileItemProps(item) : this._getDirectoryItemProps(item);
@@ -849,6 +825,12 @@ private _getTargetParentId(): string | null {
     public destroy(): void {
         super.destroy();
         document.removeEventListener('click', this._handleGlobalClick, true);
+        // [修正] 移除委托的事件监听器
+        this.bodyEl.removeEventListener('click', this._handleItemClick);
+        if (!this.state.readOnly) {
+            this.bodyEl.removeEventListener('contextmenu', this._handleItemContextMenu);
+        }
+
         this.itemInstances.forEach(instance => instance.destroy());
         this.itemInstances.clear();
         this._hideSettingsPopover();
