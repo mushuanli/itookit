@@ -12,11 +12,10 @@ import { TagProvider } from './providers/TagProvider.js';
 import type { SessionUIOptions } from '@itookit/common';
 import type { VFSCore } from '@itookit/vfs-core';
 import type { ISessionManager } from '@itookit/common';
-import type { VFSNodeUI } from './types/types.js'; // 导入 VFSNodeUI
-import { VFSService } from './services/VFSService.js'; // 导入 VFSService
-import type { VFSUIState } from './types/types.js'; // 导入 VFSUIState
+import type { VFSNodeUI } from './types/types.js';
+import { VFSService } from './services/VFSService.js';
+import type { VFSUIState } from './types/types.js';
 
-// [修正] 细化 Options 类型
 type VFSUIOptions = SessionUIOptions & { initialState?: Partial<VFSUIState> };
 
 /**
@@ -32,5 +31,9 @@ export function createVFSUI(options: VFSUIOptions, vfsCore: VFSCore, moduleName:
 }
 
 // Export main class, providers, and key types for advanced usage.
-export { VFSService,VFSUIManager, DirectoryProvider, FileProvider, TagProvider };
+export { VFSService, VFSUIManager, DirectoryProvider, FileProvider, TagProvider };
 export * from './types/types.js';
+
+// [新增] 导出编辑器集成相关的功能和类型
+export { connectEditorLifecycle } from './integrations/editor-connector.js';
+export type { EditorFactory } from './integrations/editor-connector.js';
