@@ -10,7 +10,7 @@ export interface UnifiedSearchResult {
     source: SearchResultSource;
     text: string;
     context: string;
-    details: any; // Opaque type, specific to the implementation
+    details: any;
 }
 
 export interface Heading {
@@ -23,7 +23,6 @@ type EditorEvent = 'change' | 'interactiveChange' | 'ready';
 type EditorEventCallback = (payload?: any) => void;
 
 export abstract class IEditor {
-    // 💡 构造函数不再接收 container，只接收 options
     constructor(options: any) {
         if (this.constructor === IEditor) {
             throw new Error("IEditor is an interface and cannot be instantiated directly.");
@@ -68,6 +67,12 @@ export abstract class IEditor {
     abstract gotoMatch(result: UnifiedSearchResult): void;
     abstract clearSearch(): void;
 
-    abstract on(eventName: EditorEvent, callback: EditorEventCallback): () => void; // Returns an unsubscribe function
-    abstract destroy(): void;
+    abstract on(eventName: EditorEvent, callback: EditorEventCallback): () => void;
+
+    /**
+     * [关键修改] 销毁编辑器实例并释放所有资源。
+     * 此方法必须返回一个 Promise，以允许调用者等待异步清理/保存操作完成。
+     * @returns {Promise<void>} A promise that resolves when destruction is complete.
+     */
+    abstract destroy(): Promise<void>;
 }
