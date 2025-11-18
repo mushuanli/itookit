@@ -16,31 +16,62 @@ export interface UnifiedSearchResult {
 export interface Heading {
     level: number;
     text: string;
-    id: string;
+    id: string; // ID必须在文档内唯一
 }
 
-type EditorEvent = 'change' | 'interactiveChange' | 'ready';
-type EditorEventCallback = (payload?: any) => void;
+// ✨ [最终] 合并为一个统一、可扩展的配置接口
+export interface EditorOptions {
+  initialContent?: string;
+  initialMode?: 'edit' | 'render';
+  title?: string;
+  nodeId?: string;
+  readOnly?: boolean;
+  [key: string]: any; // 允许传递任何特定于实现的选项
+}
+
+export type EditorEvent = 'change' | 'interactiveChange' | 'ready' | 'modeChanged';
+export type EditorEventCallback = (payload?: any) => void;
 
 export abstract class IEditor {
-    constructor(options: any) {
+    /**
+     * IEditor实例不应直接构造，而应通过异步工厂函数创建。
+     */
+    protected constructor() {
         if (this.constructor === IEditor) {
             throw new Error("IEditor is an interface and cannot be instantiated directly.");
         }
     }
 
     /**
-     * 💡 新增: 异步初始化方法
-     * 这是创建编辑器实例后的第一步，用于设置 DOM 和加载异步资源。
-     * @param container - 编辑器将挂载的 HTML 元素。
-     * @param initialContent - 编辑器的初始 Markdown 内容。
+     * 异步初始化编辑器DOM和核心服务。
+     * 这是创建实例后的第一步。
+     * @param container - 编辑器将挂载的HTML元素。
      */
-    abstract init(container: HTMLElement, initialContent?: string): Promise<void>;
+    abstract init(container: HTMLElement): Promise<void>;
+    /**
+     * [关键修改] 销毁编辑器实例并释放所有资源。
+     * 此方法必须返回一个 Promise，以允许调用者等待异步清理/保存操作完成。
+     * @returns {Promise<void>} A promise that resolves when destruction is complete.
+     */
+    abstract destroy(): Promise<void>;
 
-    abstract readonly commands: Readonly<Record<string, Function>>;
-    abstract setText(markdown: string): void;
     abstract getText(): string;
-    
+    abstract setText(markdown: string): void;
+    abstract focus(): void;
+
+    // --- 状态与UI交互 ---
+    abstract getMode(): 'edit' | 'render';
+    abstract switchToMode(mode: 'edit' | 'render'): Promise<void>;
+    abstract setTitle(newTitle: string): void;
+    abstract setReadOnly(isReadOnly: boolean): void;
+
+    // --- 内容分析 ---
+    abstract readonly commands: Readonly<Record<string, Function>>;
+
+    async getHeadings(): Promise<Heading[]> {
+        return [];
+    }
+
     async getSearchableText(): Promise<string> {
         const content = this.getText();
         return content
@@ -51,28 +82,18 @@ export abstract class IEditor {
             .trim();
     }
     
-    async getHeadings(): Promise<Heading[]> {
-        return [];
-    }
-
     async getSummary(): Promise<string | null> {
         return null;
     }
 
-    abstract setTitle(newTitle: string): void;
     abstract navigateTo(target: { elementId: string }, options?: { smooth?: boolean }): Promise<void>;
-    abstract setReadOnly(isReadOnly: boolean): void;
-    abstract focus(): void;
+
+    // --- 搜索 ---
     abstract search(query: string): Promise<UnifiedSearchResult[]>;
     abstract gotoMatch(result: UnifiedSearchResult): void;
     abstract clearSearch(): void;
 
+    // --- 事件系统 ---
     abstract on(eventName: EditorEvent, callback: EditorEventCallback): () => void;
 
-    /**
-     * [关键修改] 销毁编辑器实例并释放所有资源。
-     * 此方法必须返回一个 Promise，以允许调用者等待异步清理/保存操作完成。
-     * @returns {Promise<void>} A promise that resolves when destruction is complete.
-     */
-    abstract destroy(): Promise<void>;
 }

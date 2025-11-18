@@ -2,31 +2,12 @@
  * @file vfs-ui/src/integrations/editor-connector.ts
  * @desc Provides a high-level function to connect a VFS-UI manager with any IEditor-compatible editor.
  */
-import type { IEditor,ISessionManager,ISessionService } from '@itookit/common';
+import type { IEditor, EditorFactory, EditorOptions,ISessionManager,ISessionService } from '@itookit/common';
 import type { VFSCore } from '@itookit/vfs-core';
 import type { VFSNodeUI } from '../types/types';
 import type { VFSService } from '../services/VFSService';
 
-export interface EditorFactoryOptions {
-  title?: string;
-  [key: string]: any;
-}
-
-
-/**
- * A factory function that creates and initializes an editor instance.
- * @param container - The DOM element to mount the editor into.
- * @param nodeId - The VFS node ID for the content.
- * @param initialContent - The initial text content for the editor.
- * @param options - Additional options, often including the item's title.
- * @returns A promise that resolves to an IEditor instance.
- */
-export type EditorFactory = (
-    container: HTMLElement,
-    nodeId: string,
-    initialContent: string,
-    options: { title: string, [key: string]: any }
-) => Promise<IEditor>;
+// ❌ [移除] 不再需要本地定义的 EditorFactory 类型
 
 export interface ConnectOptions {
     onEditorCreated?: (editor: IEditor | null) => void;
@@ -53,7 +34,7 @@ export function connectEditorLifecycle(
 ): () => void {
     let activeEditor: IEditor | null = null;
     let activeNode: VFSNodeUI | null = null;
-    const { onEditorCreated } = options;
+    const { onEditorCreated, ...factoryExtraOptions } = options;
 
     const handleSessionChange = async ({ item }: { item?: VFSNodeUI }) => {
         // --- 1. Save and Destroy the previous editor instance ---
@@ -83,18 +64,20 @@ export function connectEditorLifecycle(
         if (item && item.type === 'file') {
             console.log(`[EditorConnector] Creating new editor for node ${item.id}.`);
             try {
-                // [关键修改] 使用直接注入的 vfsCore
-                const content = await vfsCore.getVFS().read(item.id) || '';
-        console.log(`[DEBUG] Loaded ${content.length} chars for node ${item.id}`);
-        console.log(`[DEBUG] Content preview:`, content.substring(0, 100));
-                const factoryOpts = { ...options, title: item.metadata.title };
+                // ✨ [最终] 准备标准的 EditorOptions 对象
+                const editorOptions: EditorOptions = {
+                    ...factoryExtraOptions, // 传递onEditorCreated之外的所有额外选项
+                    initialContent: item.content?.data || '',
+                    title: item.metadata.title,
+                    nodeId: item.id,
+                };
 
+                // ✨ [最终] 调用标准工厂函数，vfs-ui不知道也不关心是哪个编辑器
                 activeEditor = await editorFactory(
                     editorContainer,
-                    item.id,
-                    content as string,
-                    factoryOpts
+                    editorOptions
                 );
+
                 activeNode = item;
                 if (onEditorCreated) onEditorCreated(activeEditor);
             } catch (error) {

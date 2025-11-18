@@ -6,10 +6,10 @@
 // --- 类型定义，用于 JSDoc 和智能提示 ---
 /** 
  * @typedef {import('@itookit/common').IEditor} IEditor
+ * @typedef {import('@itookit/common').EditorOptions} EditorOptions
  * @typedef {import('@itookit/common').ISessionManager} ISessionManager
  * @typedef {import('@itookit/vfs-ui').VFSNodeUI} VFSNodeUI 
  * @typedef {import('@itookit/vfs-ui').VFSService} VFSService
- * @typedef {import('@itookit/mdxeditor').MDxEditor} MDxEditor
  * @typedef {import('@itookit/vfs-core').VFSCore} VFSCore
  */
 
@@ -18,6 +18,7 @@ import { createVFSUI, connectEditorLifecycle } from '@itookit/vfs-ui';
 import '@itookit/vfs-ui/style.css';
 
 // --- 导入 MDxEditor 及其插件 ---
+// ✨ [最终] 应用层是唯一需要知道具体编辑器实现的地方
 import { createMDxEditor } from '@itookit/mdxeditor';
 import '@itookit/mdxeditor/style.css';
 
@@ -157,22 +158,46 @@ async function main() {
         }
     }, vfsCore, 'notes');
 
-    // --- 步骤 3: 定义编辑器工厂函数 ---
-    const mdxEditorFactory = (container, nodeId, initialContent, options) => {
-        return createMDxEditor(container, {
-            //vfsCore: vfsCore,
-            //nodeId: nodeId,
-            initialContent: initialContent,
+    /**
+     * ✨ [最终] 这是适配器模式的最佳实践。
+     * 我们创建一个符合标准EditorFactory签名的函数，
+     * 其内部将通用的options转换为mdxeditor所需的特定配置。
+     * @param {HTMLElement} container
+     * @param {EditorOptions} options - 来自 connectEditorLifecycle 的标准选项
+     * @returns {Promise<IEditor>}
+     */
+    const mdxEditorFactoryAdapter = (container, options) => {
+        const mdxConfig = {
+            // 1. 传递所有通用选项
+            ...options,
+            
+            // 2. 添加或覆盖MDxEditor特定的配置
+            vfsCore: vfsCore, 
             initialMode: 'render',
-            plugins: ['core:titlebar'],
+            plugins: [
+                'core:titlebar',
+                'ui:toolbar',
+                'ui:formatting',
+                'mathjax',
+                'folder',
+                'media',
+                'mermaid',
+                'task-list',
+                'codeblock-controls',
+                'interaction:source-sync'
+            ],
             defaultPluginOptions: {
                 'core:titlebar': {
-                    title: options.title,
+                    // 使用从options传入的title
+                    title: options.title, 
                     toggleSidebarCallback: () => vfsUIManager.toggleSidebar(),
                     enableToggleEditMode: true
                 }
             }
-        });
+        };
+        
+        // 调用具体的编辑器创建函数
+        return createMDxEditor(container, mdxConfig);
     };
 
     // --- 步骤 4: 使用连接器将 VFS-UI 和编辑器连接起来 ---
@@ -180,7 +205,7 @@ async function main() {
         vfsUIManager,
         vfsCore,
         document.getElementById('editor-container'),
-        mdxEditorFactory,
+        mdxEditorFactoryAdapter, // <-- 注入我们的适配器
         {
             // [新] 使用回调来追踪当前编辑器实例
             onEditorCreated: (editor) => {

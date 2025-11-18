@@ -36,4 +36,3 @@ export * from './types/types.js';
 
 // [新增] 导出编辑器集成相关的功能和类型
 export { connectEditorLifecycle } from './integrations/editor-connector.js';
-export type { EditorFactory } from './integrations/editor-connector.js';

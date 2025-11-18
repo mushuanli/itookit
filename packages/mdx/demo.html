@@ -241,7 +241,7 @@
     window.toggleMode = (editorKey) => {
       const editor = editors[editorKey];
       if (!editor) return;
-      const newMode = editor.getCurrentMode() === 'edit' ? 'render' : 'edit';
+      const newMode = editor.getMode() === 'edit' ? 'render' : 'edit';
       editor.switchToMode(newMode);
 
       const statusEl = document.getElementById(`status-mode-${editorKey.slice(-1)}`);
