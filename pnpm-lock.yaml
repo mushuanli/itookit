@@ -25,6 +25,15 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
+  apps/web-app:
+    devDependencies:
+      typescript:
+        specifier: ~5.9.3
+        version: 5.9.3
+      vite:
+        specifier: ^7.2.2
+        version: 7.2.2(@types/node@20.19.24)(jiti@1.21.7)(yaml@2.8.1)
+
   packages/common:
     devDependencies:
       cpx:
