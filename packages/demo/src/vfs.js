@@ -1,5 +1,5 @@
 /**
- * @file @mdx/demo/vfs-demo.js
+ * @file @mdx/demo/vfs.js
  * @description MDxEditor + VFS-UI 完整功能演示脚本
  */
 
@@ -29,7 +29,7 @@ import { createVFSCore } from '@itookit/vfs-core';
 
 /** @type {MDxEditor | null} */
 let editorInstance = null;
-/** @type {ISessionManager<VFSNodeUI, VFSService> | null} */
+/** @type {ISessionManager | null} */
 let vfsUIManager = null;
 /** @type {VFSCore | null} */
 let vfsCore = null;
@@ -137,17 +137,19 @@ function connectLibraries() {
 
     // 1. 当用户在侧边栏选择一个文件时，销毁旧编辑器，创建新编辑器
     vfsUIManager.on('sessionSelected', async ({ item }) => {
+        console.log('[DemoApp] Event "sessionSelected" received with item:', item);
         if (item && item.type === 'file') {
             try {
                 // [修正] 使用辅助函数确保获取到的是字符串
                 const content = await readNodeContentAsString(item.id);
                 await createEditorForNode(item.id, content, item.metadata.title);
             } catch (error) {
-                console.error(`Failed to read content for item ${item.id}`, error);
+                console.error(`[DemoApp] Failed to read content for item ${item.id}`, error);
                 const errorContent = `# 加载文件内容失败\n\n错误: ${error.message}`;
                 await createEditorForNode(item.id, errorContent, '加载失败');
             }
         } else {
+            console.log('[DemoApp] No item or item is not a file. Clearing editor.');
             await createEditorForNode(null, '', '');
         }
     });

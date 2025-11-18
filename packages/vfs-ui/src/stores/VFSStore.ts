@@ -46,6 +46,9 @@ export class VFSStore {
 
     private _createReducer(): (state: VFSUIState, action: Action) => VFSUIState {
         return produce((draft: VFSUIState, action: Action) => {
+            // [DEBUG] Log every action that comes into the store
+            console.log('[VFSStore] Reducer received action:', action);
+
             const findItemById = (items: VFSNodeUI[], id: string): VFSNodeUI | undefined => {
                 for (const item of items) {
                     if (item.id === id) return item;
@@ -179,11 +182,23 @@ export class VFSStore {
                     break;
                 
                 case 'SESSION_SELECT':
-                    const item = findItemById(draft.items, action.payload.sessionId);
+                    const oldActiveId = draft.activeId;
+                    const newSessionId = action.payload.sessionId;
+                    console.log(`[VFSStore] Handling SESSION_SELECT. Old activeId: ${oldActiveId}, New sessionId: ${newSessionId}`);
+                    const item = findItemById(draft.items, newSessionId);
                     if (item && item.type === 'file') {
-                        draft.activeId = action.payload.sessionId;
+                        draft.activeId = newSessionId;
                         draft.creatingItem = null;
                         draft.selectedItemIds.clear();
+        // 🔧 FIX: Force state change even if activeId is the same
+        // This ensures subscribers are notified when user re-selects the same file
+        if (oldActiveId === newSessionId) {
+            // Add a timestamp to force state update
+            draft._forceUpdateTimestamp = Date.now();
+        }
+                        console.log(`[VFSStore] State updated. New activeId is now: ${draft.activeId}`);
+                    } else {
+                        console.warn(`[VFSStore] SESSION_SELECT failed. Item not found or not a file for ID: ${newSessionId}`);
                     }
                     break;
                 
