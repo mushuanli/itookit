@@ -10,16 +10,12 @@ import type { VFSCore } from '@itookit/vfs-core';
 import { MDxRenderer } from '../renderer/renderer';
 import type { MDxPlugin } from '../core/plugin';
 import type { TaskToggleResult } from '../plugins/interactions/task-list.plugin';
-import { IEditor, UnifiedSearchResult, Heading } from '@itookit/common';
+import { IEditor, EditorOptions, UnifiedSearchResult, Heading } from '@itookit/common';
 
-export interface MDxEditorConfig {
-  initialContent?: string;
-  initialMode?: 'edit' | 'render';
+export interface MDxEditorConfig extends EditorOptions {
   searchMarkClass?: string;
   vfsCore?: VFSCore;
-  nodeId?: string;
   persistenceAdapter?: IPersistenceAdapter;
-  [key: string]: any;
 }
 
 // [修改] 扩展 EditorEventCallback 类型以包含 'modeChanged'
@@ -39,14 +35,14 @@ export class MDxEditor extends IEditor {
   private currentMode: 'edit' | 'render';
   private config: MDxEditorConfig;
   private cleanupListeners: Array<() => void> = [];
-  private eventEmitter = new Map<EditorEventName, Set<EditorEventCallback>>(); // 使用新类型
+  private eventEmitter = new Map<EditorEventName, Set<EditorEventCallback>>();
   private readOnlyCompartment = new Compartment();
   private searchCompartment = new Compartment();
 
   private isDestroying = false;
 
   constructor(options: MDxEditorConfig = {}) {
-    super(options);
+    super(); // 🔧 [修正] 调用父构造函数时不传参数
     this.config = options;
     this.currentMode = options.initialMode || 'edit';
     this.renderer = new MDxRenderer({
@@ -58,10 +54,8 @@ export class MDxEditor extends IEditor {
     this.renderer.setEditorInstance(this);
   }
 
-  /**
-   * 异步初始化编辑器，设置DOM并加载异步资源。
-   */
-  async init(container: HTMLElement, initialContent: string = ''): Promise<void> {
+  // ✨ [最终] init只负责挂载DOM，不再关心内容
+  async init(container: HTMLElement): Promise<void> {
     console.log('🎬 [MDxEditor] Starting initialization...');
     this._container = container;
     this.createContainers(container);
@@ -70,8 +64,8 @@ export class MDxEditor extends IEditor {
     // TODO: 未来可探索更健壮的事件驱动或 Promise 机制来代替 setTimeout。
     await new Promise((resolve) => setTimeout(resolve, 10));
 
-    this.initCodeMirror(initialContent);
-    this.switchToMode(this.currentMode, true); // Pass a flag to avoid double render
+    this.initCodeMirror('');
+    await this.switchToMode(this.currentMode, true);
     this.listenToPluginEvents();
 
     this.renderer.getPluginManager().executeActionHook('editorPostInit', {
@@ -145,11 +139,9 @@ export class MDxEditor extends IEditor {
     this.cleanupListeners.push(unlisten);
   }
 
-
-  /**
-   * 切换模式
-   */
-  switchToMode(mode: 'edit' | 'render', isInitializing = false): void {
+  // ✨ [最终] switchToMode返回Promise，使其成为可靠的异步操作
+  async switchToMode(mode: 'edit' | 'render', isInitializing = false): Promise<void> {
+    if (this.currentMode === mode && !isInitializing) return;
     if (!this._container || !this.editorContainer || !this.renderContainer) return;
 
     this.currentMode = mode;
@@ -162,7 +154,7 @@ export class MDxEditor extends IEditor {
     this.renderContainer.style.display = isEditMode ? 'none' : 'block';
 
     if (!isEditMode && !isInitializing) {
-      this.renderContent();
+      await this.renderContent();
     }
     
     // 确保内部插件系统的事件也被触发
@@ -197,23 +189,36 @@ export class MDxEditor extends IEditor {
     }
   }
 
+  getMode(): 'edit' | 'render' {
+    return this.currentMode;
+  }
+  
+  // ✨ [最终] 确保getHeadings生成唯一ID，避免导航冲突
   async getHeadings(): Promise<Heading[]> {
     const text = this.getText();
     const headings: Heading[] = [];
-    const lines = text.split('\n');
-    const slugify = (s: string) => s.toLowerCase().replace(/\s+/g, '-').replace(/[^\w-]+/g, '');
-    for (const line of lines) {
+    const slugCount = new Map<string, number>();
+    const slugify = (s: string) => s.toLowerCase().trim()
+      .replace(/\s+/g, '-')
+      .replace(/[^\w-]+/g, '');
+
+    for (const line of text.split('\n')) {
       const match = line.match(/^(#+)\s+(.*)/);
       if (match) {
         const level = match[1].length;
         const textContent = match[2].trim();
         if (textContent) {
-          headings.push({ level, text: textContent, id: slugify(textContent) });
+          let baseSlug = slugify(textContent) || `section-${headings.length}`;
+          const count = slugCount.get(baseSlug) || 0;
+          slugCount.set(baseSlug, count + 1);
+          const uniqueSlug = count > 0 ? `${baseSlug}-${count}` : baseSlug;
+          headings.push({ level, text: textContent, id: uniqueSlug });
         }
       }
     }
     return headings;
   }
+
   setTitle(newTitle: string): void { this.renderer.getPluginManager().emit('setTitle', { title: newTitle }); }
   async navigateTo(target: { elementId: string }): Promise<void> {
     if (this.currentMode === 'render' && this.renderContainer) {
@@ -337,8 +342,7 @@ export class MDxEditor extends IEditor {
         this.isDestroying = false;
     }
   
-  // --- Backward Compatibility & MDxEditor-specific methods ---
-
+  // --- MDxEditor-specific methods ---
 
 
   /**
@@ -349,19 +353,11 @@ export class MDxEditor extends IEditor {
   }
 
 
-
   /**
    * 获取 CodeMirror EditorView 实例。
    */
   public getEditorView(): EditorView | null {
     return this.editorView;
-  }
-
-  /**
-   * 获取当前模式（'edit' 或 'render'）。
-   */
-  public getCurrentMode(): 'edit' | 'render' {
-    return this.currentMode;
   }
 
   /**

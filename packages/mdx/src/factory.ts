@@ -1,6 +1,7 @@
 /**
  * @file mdx/factory.ts
  */
+import { IEditor, EditorOptions } from '@itookit/common';
 import { MDxEditor, MDxEditorConfig } from './editor/editor';
 import { CoreEditorPlugin, CoreEditorPluginOptions } from './plugins/core/core-editor.plugin';
 import { FoldablePlugin, FoldablePluginOptions } from './plugins/syntax-extensions/foldable.plugin';
@@ -101,7 +102,7 @@ export type PluginConfig =
   | [string, Record<string, any>]
   | { name: string; options?: Record<string, any> };
 
-export interface MDxEditorFactoryConfig extends MDxEditorConfig {
+export interface MDxEditorFactoryConfig extends EditorOptions {
   plugins?: PluginConfig[];
   defaultPluginOptions?: {
     'editor:core'?: CoreEditorPluginOptions;
@@ -212,10 +213,13 @@ function sortPlugins(pluginNames: string[]): string[] {
  * 创建、配置并返回一个新的 MDxEditor 实例。
  * @param container - 编辑器将要挂载的 HTML 元素。
  * @param config - 编辑器及其插件的配置对象。
- * @returns 一个完全配置好的 MDxEditor 实例的 Promise。
+ * @returns 一个完全配置好的、符合 IEditor 接口的实例的 Promise。
  */
-export async function createMDxEditor(container: HTMLElement, config: MDxEditorFactoryConfig = {}): Promise<MDxEditor> {
-  // 💡 1. 同步创建实例
+export async function createMDxEditor(
+  container: HTMLElement,
+  config: MDxEditorFactoryConfig = {}
+): Promise<IEditor> {
+  // 1. 创建实例 (同步)
   const editor = new MDxEditor(config);
 
   const coreOptions = config.defaultPluginOptions?.['editor:core'] || {};
@@ -288,7 +292,12 @@ export async function createMDxEditor(container: HTMLElement, config: MDxEditorF
   }
 
   // 💡 3. 异步初始化编辑器
-  await editor.init(container, config.initialContent || '');
+  await editor.init(container);
+
+  // 4. 设置初始内容 (遵循生命周期)
+  if (config.initialContent) {
+    editor.setText(config.initialContent);
+  }
 
   return editor;
 }

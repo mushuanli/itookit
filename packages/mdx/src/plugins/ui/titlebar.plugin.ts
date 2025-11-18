@@ -101,7 +101,7 @@ export class CoreTitleBarPlugin implements MDxPlugin {
 
     if (this.options.enableToggleEditMode) {
       context.registerCommand?.('toggleEditMode', (editor: MDxEditor) => {
-        const currentMode = editor.getCurrentMode();
+        const currentMode = editor.getMode();
         const newMode = currentMode === 'edit' ? 'render' : 'edit';
         editor.switchToMode(newMode);
       });
