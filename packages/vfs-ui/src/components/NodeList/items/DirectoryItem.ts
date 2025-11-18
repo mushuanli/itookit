@@ -2,7 +2,7 @@
  * @file vfs-ui/src/components/NodeList/items/DirectoryItem.ts
  * @desc Component representing a single directory in the list.
  */
-import { BaseNodeItem, NodeItemCallbacks } from './BaseNodeItem';
+import { BaseNodeItem } from './BaseNodeItem';
 import { VFSNodeUI } from '../../../types/types';
 import { createDirectoryItemHTML } from './itemTemplates';
 
@@ -17,8 +17,9 @@ export class DirectoryItem extends BaseNodeItem {
     public childrenContainer: HTMLElement;
     private currentProps: DirectoryItemProps;
 
-    constructor(item: VFSNodeUI, callbacks: NodeItemCallbacks, isReadOnly: boolean, initialProps: DirectoryItemProps) {
-        super(item, callbacks, isReadOnly);
+    // [修正] 构造函数不再接收 callbacks
+    constructor(item: VFSNodeUI, isReadOnly: boolean, initialProps: DirectoryItemProps) {
+        super(item, isReadOnly);
         this.currentProps = initialProps;
         this.render();
         this.childrenContainer = this.element.querySelector('.vfs-directory-item__children')!;
@@ -51,7 +52,7 @@ export class DirectoryItem extends BaseNodeItem {
 
         const tempDiv = document.createElement('div');
         tempDiv.innerHTML = newHTML;
-    const newElement = tempDiv.firstElementChild as HTMLElement;
+        const newElement = tempDiv.firstElementChild as HTMLElement;
         
         // Preserve children by moving them to the new element before replacing
         const oldChildrenContainer = this.element.querySelector('.vfs-directory-item__children');
@@ -63,14 +64,9 @@ export class DirectoryItem extends BaseNodeItem {
         }
 
         // 如果旧元素已经在 DOM 中，则用新元素替换它
-    if (this.element.parentNode) {
-        this.element.parentNode.replaceChild(newElement, this.element);
-        Object.defineProperty(this, 'element', { value: newElement, writable: true });
-    }
-
-        // **【关键修正】**
-        // 无论是否在 DOM 中，都需要更新实例的 element 引用，使其指向新创建的元素。
-        // 这是修复首次渲染问题的关键。
-        //this.element = newElement;
+        if (this.element.parentNode) {
+            this.element.parentNode.replaceChild(newElement, this.element);
+            Object.defineProperty(this, 'element', { value: newElement, writable: true });
+        }
     }
 }
