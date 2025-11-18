@@ -33,3 +33,9 @@ task-list.plugin.ts
 # vfs-core
 store/
 provider/
+
+#vfs-ui
+mappers/
+providers/
+types/
+utils/

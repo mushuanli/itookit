@@ -43,6 +43,8 @@ export class MDxEditor extends IEditor {
   private readOnlyCompartment = new Compartment();
   private searchCompartment = new Compartment();
 
+  private isDestroying = false;
+
   constructor(options: MDxEditorConfig = {}) {
     super(options);
     this.config = options;
@@ -303,19 +305,37 @@ export class MDxEditor extends IEditor {
   /**
    * 销毁编辑器实例，释放资源。
    */
-  destroy(): void {
-    this.editorView?.destroy();
-    this.renderer.destroy();
-    this.cleanupListeners.forEach((fn) => fn());
-    this.cleanupListeners = [];
-    this.eventEmitter.clear();
-    if (this._container) {
-      this._container.innerHTML = '';
+    async destroy(): Promise<void> {
+        if (this.isDestroying) {
+            return;
+        }
+        this.isDestroying = true;
+        
+        console.log(`[MDxEditor] Destroying instance for node ${this.config.nodeId || 'unknown'}.`);
+
+        // 在这里可以添加一个最后的、非阻塞的保存尝试，作为双重保险，
+        // 但主要保存逻辑已移至连接器中。
+        // if (this.config.vfsCore && this.config.nodeId) {
+        //     this.config.vfsCore.getVFS().write(this.config.nodeId, this.getText()).catch(e => {
+        //         console.warn('[MDxEditor] Non-critical background save on destroy failed.', e);
+        //     });
+        // }
+
+        this.editorView?.destroy();
+        this.renderer.destroy();
+        this.cleanupListeners.forEach((fn) => fn());
+        this.cleanupListeners = [];
+        this.eventEmitter.clear();
+        
+        if (this._container) {
+            this._container.innerHTML = '';
+        }
+
+        this._container = null;
+        this.editorContainer = null;
+        this.renderContainer = null;
+        this.isDestroying = false;
     }
-    this._container = null;
-    this.editorContainer = null;
-    this.renderContainer = null;
-  }
   
   // --- Backward Compatibility & MDxEditor-specific methods ---
 

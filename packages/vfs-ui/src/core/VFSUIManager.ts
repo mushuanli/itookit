@@ -37,6 +37,8 @@ export class VFSUIManager extends ISessionManager<VFSNodeUI, VFSService> {
     private readonly store: VFSStore;
     private readonly _vfsService: VFSService;
 
+    private reloadDebounce: any = null;
+
     private nodeList: NodeList;
     private fileOutline?: FileOutline;
     private moveToModal: MoveToModal;
