@@ -219,7 +219,9 @@ export async function createMDxEditor(
   container: HTMLElement,
   config: MDxEditorFactoryConfig = {}
 ): Promise<IEditor> {
-  // 1. 创建实例 (同步)
+  // 🔥 添加日志
+  console.log(`[createMDxEditor] Received config. Content length: ${(config.initialContent || '').length}. Preview: "${(config.initialContent || '').substring(0, 50)}..."`);
+
   const editor = new MDxEditor(config);
 
   const coreOptions = config.defaultPluginOptions?.['editor:core'] || {};
@@ -292,12 +294,8 @@ export async function createMDxEditor(
   }
 
   // 💡 3. 异步初始化编辑器
-  await editor.init(container);
+  await editor.init(container, config.initialContent || '');
 
-  // 4. 设置初始内容 (遵循生命周期)
-  if (config.initialContent) {
-    editor.setText(config.initialContent);
-  }
 
   return editor;
 }
