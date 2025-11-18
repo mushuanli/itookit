@@ -373,7 +373,7 @@ export async function handlePrintAction(editor: MDxEditor): Promise<boolean> {
     }
     
     try {
-        if (editor.getCurrentMode() === 'render') {
+        if (editor.getMode() === 'render') {
             const renderEl = editor.getRenderContainer();
             if (renderEl) {
                 printContainer.innerHTML = renderEl.innerHTML;
@@ -395,7 +395,7 @@ export async function handlePrintAction(editor: MDxEditor): Promise<boolean> {
         if (printContainer) {
             printContainer.innerHTML = '';
         }
-        if (editor.getCurrentMode() === 'edit') {
+        if (editor.getMode() === 'edit') {
             const view = editor.getEditorView();
             if (view) {
                 view.focus();

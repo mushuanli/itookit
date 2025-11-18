@@ -612,7 +612,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (isButton(externalPreviewBtn)) externalPreviewBtn.disabled = (mode === 'render');
     });
 
-    const initialMode = editor.getCurrentMode();
+    const initialMode = editor.getMode();
     if (modeDisplay instanceof HTMLElement) modeDisplay.textContent = `当前模式: ${initialMode}`;
     if (isButton(externalEditBtn)) externalEditBtn.disabled = (initialMode === 'edit');
     if (isButton(externalPreviewBtn)) externalPreviewBtn.disabled = (initialMode === 'render');
