@@ -97,6 +97,7 @@ export interface VFSUIState {
   readOnly: boolean;
   status: 'idle' | 'loading' | 'success' | 'error';
   error: Error | null;
+  _forceUpdateTimestamp?: number; // 🔧 FIX: Internal timestamp to force updates
 }
 
 // --- Component Configuration Types ---

@@ -8,7 +8,6 @@
 // --- 外部接口与库 ---
 import { ISessionManager, TagEditorComponent } from '@itookit/common';
 import type { SessionUIOptions, SessionManagerEvent, SessionManagerCallback } from '@itookit/common';
-// [修正] 导入正确的事件类型和接口
 import { VFSCore, VNode, VFSEventType, VFSEvent } from '@itookit/vfs-core';
 
 // --- 内部模块 ---
@@ -22,10 +21,8 @@ import { MoveToModal } from '../components/MoveToModal/MoveToModal';
 import { TagProvider } from '../providers/TagProvider';
 import { FileProvider } from '../providers/FileProvider';
 import { DirectoryProvider } from '../providers/DirectoryProvider';
-// [修改] 导入 TagEditorOptions 类型
 import type { VFSNodeUI, TagInfo, ContextMenuConfig, VFSUIState, TagEditorOptions } from '../types/types';
 
-// [修正] 细化 Options 类型
 type VFSUIOptions = SessionUIOptions & { initialState?: Partial<VFSUIState> };
 
 /**
@@ -48,7 +45,10 @@ export class VFSUIManager extends ISessionManager<VFSNodeUI, VFSService> {
     private lastActiveId: string | null = null;
     private lastSidebarCollapsedState: boolean;
     private _title: string;
-    private vfsEventsUnsubscribe: (() => void) | null = null; // [修正] 用于管理事件订阅
+    private vfsEventsUnsubscribe: (() => void) | null = null;
+    
+    // 🔧 FIX: Add flag to track user-initiated selections
+    private lastSessionSelectWasUserAction = false;
 
     constructor(options: VFSUIOptions, vfsCore: VFSCore, moduleName: string) {
         super();
@@ -71,18 +71,17 @@ export class VFSUIManager extends ISessionManager<VFSNodeUI, VFSService> {
             readOnly: options.readOnly || false,
         });
 
-        // [核心变更] VFSService is now stateless and doesn't need the store.
         this._vfsService = new VFSService({
             vfsCore: this.vfsCore,
             moduleName: this.moduleName,
             newFileContent: options.newSessionContent
         });
         
+        this.lastActiveId = this.store.getState().activeId;
         this.lastSidebarCollapsedState = this.store.getState().isSidebarCollapsed;
 
         const tagProvider = new TagProvider({ vfsCore: this.vfsCore });
         
-        // [关键修复] 为备用函数的参数添加明确的类型注解，解决 TS7031 错误
         const tagEditorFactory = this.options.components?.tagEditor || (({ container, initialTags, onSave, onCancel }: TagEditorOptions) => {
             const editor = new TagEditorComponent({ container, initialItems: initialTags, suggestionProvider: tagProvider, onSave, onCancel });
             editor.init();
@@ -144,13 +143,23 @@ export class VFSUIManager extends ISessionManager<VFSNodeUI, VFSService> {
         }
 
         await this._loadModuleData();
-        return this.getActiveSession() || undefined;
+
+        const currentState = this.store.getState();
+        const activeItem = this.getActiveSession();
+
+        if (currentState.activeId && !activeItem) {
+            console.warn(`[VFSUIManager] Persisted activeId "${currentState.activeId}" is no longer valid. Resetting.`);
+            this.store.dispatch({ type: 'SESSION_SELECT', payload: { sessionId: null } });
+            return undefined;
+        }
+        
+        console.log(`[VFSUIManager] Start completed. Initial active session:`, activeItem);
+        return activeItem;
     }
     
     public getActiveSession(): VFSNodeUI | undefined {
         const state = this.store.getState();
         if (!state.activeId) return undefined;
-        // Helper to find item in the state tree
         const find = (items: VFSNodeUI[], id: string): VFSNodeUI | undefined => {
             for (const item of items) {
                 if (item.id === id) return item;
@@ -164,7 +173,6 @@ export class VFSUIManager extends ISessionManager<VFSNodeUI, VFSService> {
         return find(state.items, state.activeId);
     }
 
-    // [修正] 实现 updateSessionContent 方法
     public async updateSessionContent(sessionId: string, newContent: string): Promise<void> {
         await this.vfsCore.getVFS().write(sessionId, newContent);
     }
@@ -200,13 +208,11 @@ export class VFSUIManager extends ISessionManager<VFSNodeUI, VFSService> {
         this.fileOutline?.destroy();
         this.moveToModal.destroy();
         this.coordinator.clearAll();
-        // [修正] 取消对vfs-core事件的订阅
         this.vfsEventsUnsubscribe?.();
     }
 
     // --- Private Helper Methods ---
 
-    // [修正] 重写数据加载逻辑，以递归构建完整的UI树
     private async _loadModuleData(): Promise<void> {
         try {
             this.store.dispatch({ type: 'ITEMS_LOAD_START' });
@@ -217,7 +223,6 @@ export class VFSUIManager extends ISessionManager<VFSNodeUI, VFSService> {
                 throw new Error(`Module ${this.moduleName} not found.`);
             }
 
-            // 递归函数，用于构建一个包含内容和子节点的完整 VNode 树
             const buildFullTree = async (nodeId: string): Promise<VNode> => {
                 const node = await vfs.storage.loadVNode(nodeId);
                 if (!node) {
@@ -225,10 +230,8 @@ export class VFSUIManager extends ISessionManager<VFSNodeUI, VFSService> {
                 }
 
                 if (node.type === 'file') {
-                    // 为文件节点加载内容并附加
                     (node as any).content = await vfs.read(nodeId);
                 } else if (node.type === 'directory') {
-                    // 为目录节点递归加载子节点
                     const children = await vfs.readdir(nodeId);
                     (node as any).children = await Promise.all(
                         children.map(child => buildFullTree(child.nodeId))
@@ -326,9 +329,7 @@ export class VFSUIManager extends ISessionManager<VFSNodeUI, VFSService> {
         const handleNodeCreated = async (event: VFSEvent) => {
             try {
                 const newNode = await vfs.storage.loadVNode(event.nodeId);
-                // 确保事件属于当前管理的模块
                 if (newNode && newNode.moduleId === this.moduleName) {
-                    // 需要重新加载内容以进行映射
                      if (newNode.type === 'file') {
                         (newNode as any).content = await vfs.read(newNode.nodeId);
                     }
@@ -348,9 +349,7 @@ export class VFSUIManager extends ISessionManager<VFSNodeUI, VFSService> {
             this.store.dispatch({ type: 'ITEM_DELETE_SUCCESS', payload: { itemIds: allRemovedIds } });
         };
         
-        // 对于更新和移动，最简单、最可靠的策略是重新加载整个模块数据
         const handleReloadNeeded = (event: VFSEvent) => {
-            // 可以添加一个检查，看事件是否真的影响到了当前模块，但通常重新加载是安全的
             console.log(`[VFSUIManager] ${event.type} event received, reloading module data for consistency.`);
             this._loadModuleData();
         };
@@ -361,7 +360,6 @@ export class VFSUIManager extends ISessionManager<VFSNodeUI, VFSService> {
         const unsub4 = eventBus.on(VFSEventType.NODE_MOVED, handleReloadNeeded);
         const unsub5 = eventBus.on(VFSEventType.NODE_COPIED, handleReloadNeeded);
 
-        // 将所有取消订阅函数组合成一个
         this.vfsEventsUnsubscribe = () => {
             unsub1();
             unsub2();
@@ -372,11 +370,26 @@ export class VFSUIManager extends ISessionManager<VFSNodeUI, VFSService> {
     }
 
     private _connectUIEvents(): void {
+        // 🔧 FIX: Updated store subscription logic
         this.store.subscribe(newState => {
-            if (newState.activeId !== this.lastActiveId) {
+            console.log('[VFSUIManager] Store has updated.');
+            const currentActiveItem = this.getActiveSession();
+            
+            const activeIdChanged = newState.activeId !== this.lastActiveId;
+            const activeItemNowAvailable = this.lastActiveId && !this.getActiveSession() && !!currentActiveItem;
+            
+            console.log(`[VFSUIManager] Old activeId: ${this.lastActiveId}, New activeId: ${newState.activeId}. activeIdChanged: ${activeIdChanged}, userAction: ${this.lastSessionSelectWasUserAction}`);
+            
+            // 🔧 FIX: Also publish event if user explicitly requested session selection
+            if (activeIdChanged || activeItemNowAvailable || this.lastSessionSelectWasUserAction) {
                 this.lastActiveId = newState.activeId;
-                this.coordinator.publish('PUBLIC_SESSION_SELECTED', { item: this.getActiveSession() });
+                console.log('[VFSUIManager] Active session changed! Publishing PUBLIC_SESSION_SELECTED with item:', currentActiveItem);
+                this.coordinator.publish('PUBLIC_SESSION_SELECTED', { item: currentActiveItem });
+                
+                // 🔧 FIX: Reset the flag after publishing
+                this.lastSessionSelectWasUserAction = false;
             }
+
             if (newState.isSidebarCollapsed !== this.lastSidebarCollapsedState) {
                 this.lastSidebarCollapsedState = newState.isSidebarCollapsed;
                 this.coordinator.publish('PUBLIC_SIDEBAR_STATE_CHANGED', { isCollapsed: newState.isSidebarCollapsed });
@@ -395,7 +408,6 @@ export class VFSUIManager extends ISessionManager<VFSNodeUI, VFSService> {
         
         this.coordinator.subscribe('ITEM_ACTION_REQUESTED', async (e) => {
             const { action, itemId } = e.data;
-            // 查找 item 以获取当前名称
             const findItem = (items: VFSNodeUI[], id: string): VFSNodeUI | undefined => {
                 for(const item of items) {
                     if (item.id === id) return item;
@@ -431,8 +443,13 @@ export class VFSUIManager extends ISessionManager<VFSNodeUI, VFSService> {
         this.coordinator.subscribe('ITEMS_MOVE_REQUESTED', async (e) => await this._vfsService.moveItems(e.data));
         this.coordinator.subscribe('ITEM_TAGS_UPDATE_REQUESTED', async (e) => await this._vfsService.updateMultipleItemsTags(e.data));
 
-        // Forward internal UI events to store dispatches
-        this.coordinator.subscribe('SESSION_SELECT_REQUESTED', e => this.store.dispatch({ type: 'SESSION_SELECT', payload: { sessionId: e.data.sessionId } }));
+        // 🔧 FIX: Set flag when user explicitly selects a session
+        this.coordinator.subscribe('SESSION_SELECT_REQUESTED', e => {
+            console.log('[VFSUIManager] Received SESSION_SELECT_REQUESTED, dispatching to store with payload:', e.data);
+            this.lastSessionSelectWasUserAction = true; // Mark as user-initiated
+            this.store.dispatch({ type: 'SESSION_SELECT', payload: { sessionId: e.data.sessionId } })
+        });
+        
         this.coordinator.subscribe('CREATE_ITEM_REQUESTED', e => this.store.dispatch({ type: 'CREATE_ITEM_START', payload: e.data }));
         this.coordinator.subscribe('MOVE_OPERATION_START_REQUESTED', e => this.store.dispatch({ type: 'MOVE_OPERATION_START', payload: e.data }));
         this.coordinator.subscribe('MOVE_OPERATION_END_REQUESTED', () => this.store.dispatch({ type: 'MOVE_OPERATION_END' }));
@@ -442,7 +459,6 @@ export class VFSUIManager extends ISessionManager<VFSNodeUI, VFSService> {
         this.coordinator.subscribe('OUTLINE_H1_TOGGLE_REQUESTED', e => this.store.dispatch({ type: 'OUTLINE_H1_TOGGLE', payload: e.data }));
         this.coordinator.subscribe('SEARCH_QUERY_CHANGED', e => this.store.dispatch({ type: 'SEARCH_QUERY_UPDATE', payload: { query: e.data.query } }));
         
-        // Re-publish internal events as public API events
         this.coordinator.subscribe('NAVIGATE_TO_HEADING_REQUESTED', e => this.coordinator.publish('PUBLIC_NAVIGATE_TO_HEADING', e.data));
         this.coordinator.subscribe('CUSTOM_MENU_ACTION_REQUESTED', e => this.coordinator.publish('PUBLIC_MENU_ITEM_CLICKED', { actionId: e.data.action, item: e.data.item }));
     }

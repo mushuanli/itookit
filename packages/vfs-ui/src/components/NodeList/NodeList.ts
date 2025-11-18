@@ -274,37 +274,51 @@ export class NodeList extends BaseComponent<NodeListState> {
     
     // [修正] _handleItemClick 现在是事件委托的处理函数
     private _handleItemClick = (event: MouseEvent): void => {
+        console.log('[NodeList] _handleItemClick triggered.');
         const target = event.target as Element;
+        console.log('[NodeList] Click target:', target);
+
         const itemEl = target.closest<HTMLElement>('[data-item-id]');
-        if (!itemEl) return;
+        if (!itemEl) {
+            console.log('[NodeList] No item container [data-item-id] found. Aborting.');
+            return;
+        }
 
         const itemId = itemEl.dataset.itemId!;
         const actionEl = target.closest<HTMLElement>('[data-action]');
         const action = actionEl?.dataset.action;
+        console.log(`[NodeList] Item clicked: ID=${itemId}, Action=${action || 'none'}`);
 
         // 特定子元素动作的优先处理
         if (action === 'toggle-folder') {
+            console.log(`[NodeList] Publishing FOLDER_TOGGLE_REQUESTED for ${itemId}`);
             this.coordinator.publish('FOLDER_TOGGLE_REQUESTED', { folderId: itemId });
             return;
         }
         if (action === 'toggle-outline') {
+            console.log(`[NodeList] Publishing OUTLINE_TOGGLE_REQUESTED for ${itemId}`);
             this.coordinator.publish('OUTLINE_TOGGLE_REQUESTED', { itemId });
             return;
         }
         if (action === 'navigate-to-heading' && actionEl?.dataset.elementId) {
+            console.log(`[NodeList] Publishing NAVIGATE_TO_HEADING_REQUESTED for ${actionEl.dataset.elementId}`);
             this.coordinator.publish('NAVIGATE_TO_HEADING_REQUESTED', { elementId: actionEl.dataset.elementId });
             return;
         }
         if (this.state.readOnly && (event.metaKey || event.ctrlKey || event.shiftKey)) {
+            console.log('[NodeList] Read-only mode with modifier key. Ignoring.');
             return;
         }
-        
-        // 处理选中逻辑
+
+        console.log('[NodeList] Proceeding with selection logic...');
         this._handleItemSelection(itemEl, event);
         
-        // 如果是文件且没有按住功能键，则触发文件打开事件
-        if (itemEl.dataset.itemType === 'file' && !(event.metaKey || event.ctrlKey || event.shiftKey)) {
+        // [修正] 增加一个 action !== 'select-only' 的判断，避免点击icon时也打开文件
+        if (action !== 'select-only' && itemEl.dataset.itemType === 'file' && !(event.metaKey || event.ctrlKey || event.shiftKey)) {
+            console.log(`[NodeList] It's a file click. Publishing SESSION_SELECT_REQUESTED for ${itemId}`);
             this.coordinator.publish('SESSION_SELECT_REQUESTED', { sessionId: itemId });
+        } else {
+            console.log(`[NodeList] Not a file-opening click. Conditions not met: action=${action}, itemType=${itemEl.dataset.itemType}, modifierKeys=${event.metaKey || event.ctrlKey || event.shiftKey}`);
         }
     };
     
