@@ -1,8 +1,12 @@
-import { createVFSUI, connectEditorLifecycle, VFSUIManager } from '@itookit/vfs-ui';
-import { EditorOptions, IEditor } from '@itookit/common';
+/**
+ * @file src/core/MemoryManager.ts
+ */
+import { createVFSUI, connectEditorLifecycle, VFSUIManager, FileProvider } from '@itookit/vfs-ui';
+import { EditorOptions, IEditor, ISessionManager } from '@itookit/common';
 import { MemoryManagerConfig } from '../types';
 import { BackgroundBrain } from './BackgroundBrain';
 import { Layout } from './Layout';
+import { VNodeType } from '@itookit/vfs-core';
 
 export class MemoryManager {
     private vfsUI: VFSUIManager;
@@ -62,6 +66,12 @@ export class MemoryManager {
      * 这是实现“依赖注入”的关键步骤，解决了编辑器如何控制外部 UI 的问题。
      */
     private enhancedEditorFactory = async (container: HTMLElement, options: EditorOptions): Promise<IEditor> => {
+        // [新增] 创建默认的文件 Provider，使 @file 提及功能开箱即用
+        const fileProvider = new FileProvider({
+            vfsCore: this.config.vfsCore,
+            moduleName: this.config.moduleName
+        });
+
         // 构造注入给编辑器的上下文能力
         const contextFeatures = {
             // 允许编辑器按钮调用 vfs-ui 的 toggleSidebar
@@ -87,6 +97,14 @@ export class MemoryManager {
             ...options,
             defaultPluginOptions: {
                 ...(options.defaultPluginOptions || {}),
+
+                // [新增] 注入 Mention 插件的必要配置
+                'autocomplete:mention': {
+                    // @ts-ignore
+                    ...(options.defaultPluginOptions?.['autocomplete:mention'] || {}),
+                    providers: [fileProvider] // 注入 Provider，解决 crash 问题
+                },
+
                 'core:titlebar': {
                     // @ts-ignore: 动态合并可能未定义的类型
                     ...(options.defaultPluginOptions?.['core:titlebar'] || {}),
@@ -159,14 +177,63 @@ export class MemoryManager {
         // 劫持 destroy 以清理事件
         const originalEditorDestroy = editor.destroy.bind(editor);
         editor.destroy = async () => {
-            modeUnsub();
             container.removeEventListener('focusout', blurHandler);
             await originalEditorDestroy();
         };
     }
 
     public async start() {
-        await this.vfsUI.start();
+        // [新增] 1. 自动挂载模块
+        await this._ensureModuleMounted();
+
+        // 2. 启动 UI，尝试恢复上次会话
+        const activeSession = await this.vfsUI.start();
+
+        // [新增] 3. 如果没有恢复会话，自动打开第一个文件
+        if (!activeSession) {
+            await this._autoOpenFirstFile();
+        }
+    }
+
+    private async _ensureModuleMounted() {
+        const { vfsCore, moduleName } = this.config;
+        if (!vfsCore.getModule(moduleName)) {
+            try {
+                console.log(`[MemoryManager] Auto-mounting module: ${moduleName}`);
+                await vfsCore.mount(moduleName, 'Memory Manager Module');
+            } catch (error: any) {
+                if (error.code !== 'ALREADY_EXISTS') {
+                    console.error(`[MemoryManager] Failed to mount module:`, error);
+                }
+            }
+        }
+    }
+
+    private async _autoOpenFirstFile() {
+        try {
+            // 使用 VFS Core 的搜索功能查找第一个文件
+            const files = await this.config.vfsCore.searchNodes(
+                this.config.moduleName,
+                { type: VNodeType.FILE, limit: 1 }
+            );
+
+            if (files.length > 0) {
+                console.log(`[MemoryManager] Auto-opening first file: ${files[0].name}`);
+
+                // 通过 VFS-UI Store 触发选择
+                // 这里我们需要一些 Hack，或者在 VFS-UI 中暴露 public method
+                // 假设 VFS-UI 实例上有 store 属性 (在 JS 环境或通过强制类型转换)
+                const store = (this.vfsUI as any).store;
+                if (store && store.dispatch) {
+                    store.dispatch({
+                        type: 'SESSION_SELECT',
+                        payload: { sessionId: files[0].nodeId }
+                    });
+                }
+            }
+        } catch (e) {
+            console.warn('[MemoryManager] Auto-open failed:', e);
+        }
     }
 
     public destroy() {

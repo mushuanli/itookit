@@ -32,9 +32,19 @@ export class BackgroundBrain {
     }
 
     private handleNodeUpdate = async (event: VFSEvent) => {
-        // 1. 安全检查：防止循环调用
-        // 如果这次更新是由 AI 触发的元数据更新，则必须忽略
-        if (event.data?.source === 'AI_BRAIN' || this.isProcessing) return;
+        // 1. 循环保护
+        if (this.isProcessing) return;
+        
+        // [订正] 如果事件数据表明这只是元数据更新，且是我们自己触发的，则忽略
+        // 由于 VFSCore event data 很简单，我们检查 metadata 中是否有特定标记
+        // 或者通过简单的内存锁 this.isProcessing 来防抖
+        if (event.data?.metadataOnly) {
+            // 这里我们无法确定 source，但可以做一个优化：
+            // 如果仅仅是 metadata 更新，通常不需要重新进行 AI 分析（除非内容变了）
+            // 所以我们可以直接 return。
+            // 只有内容变化 (content write) 才触发 AI 分析。
+            return;
+        }
 
         const nodeId = event.nodeId;
 
@@ -67,7 +77,8 @@ export class BackgroundBrain {
             // vfs-ui 会监听 Metadata 变更并更新列表显示的标签/图标
             const newMetadata = {
                 ...result.metadata,
-                _ai_last_scan: Date.now()
+                _ai_last_scan: Date.now(),
+                _ai_processed: true
             };
 
             // 使用 updateNodeMetadata
@@ -81,7 +92,9 @@ export class BackgroundBrain {
             // 如果 vfs-core API 不支持，我们需要在 handleNodeUpdate 开头做更智能的 diff
 
             await this.vfsCore.updateNodeMetadata(nodeId, newMetadata);
-
+            
+            console.log(`🧠 [BackgroundBrain] Updated metadata for ${nodeId}`);
+            
         } catch (e) {
             console.error('[BackgroundBrain] Error processing node:', nodeId, e);
         } finally {

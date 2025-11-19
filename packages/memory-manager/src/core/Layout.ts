@@ -8,7 +8,7 @@ export class Layout {
 
         this.sidebarContainer = document.createElement('div');
         this.sidebarContainer.className = 'mm-sidebar';
-
+        
         this.editorContainer = document.createElement('div');
         this.editorContainer.className = 'mm-editor-area';
 
@@ -22,7 +22,7 @@ export class Layout {
         } else {
             this.sidebarContainer.classList.remove('is-collapsed');
         }
-
+        
         // 触发 resize 事件，以便编辑器（如 CodeMirror）能重新计算布局
         setTimeout(() => {
             window.dispatchEvent(new Event('resize'));
