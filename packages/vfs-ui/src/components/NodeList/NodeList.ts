@@ -332,6 +332,10 @@ export class NodeList extends BaseComponent<NodeListState> {
         if (action !== 'select-only' && itemEl.dataset.itemType === 'file' && !(event.metaKey || event.ctrlKey || event.shiftKey)) {
             console.log(`[NodeList] It's a file click. Publishing SESSION_SELECT_REQUESTED for ${itemId}`);
             this.coordinator.publish('SESSION_SELECT_REQUESTED', { sessionId: itemId });
+} else if (itemEl.dataset.itemType === 'directory' && !(event.metaKey || event.ctrlKey || event.shiftKey)) {
+    // ✨ 新增：点击目录时清除活动文件的高亮状态
+    console.log(`[NodeList] It's a directory click. Clearing active session.`);
+    this.coordinator.publish('SESSION_SELECT_REQUESTED', { sessionId: null });
         } else {
             console.log(`[NodeList] Not a file-opening click. Conditions not met: action=${action}, itemType=${itemEl.dataset.itemType}, modifierKeys=${event.metaKey || event.ctrlKey || event.shiftKey}`);
         }
@@ -773,30 +777,64 @@ export class NodeList extends BaseComponent<NodeListState> {
     }
 
     private _getFolderSelectionState(directory: VFSNodeUI, selectedItemIds: Set<string>): 'none' | 'partial' | 'all' {
-        const descendantIds = this._getDescendantIds(directory);
         const isSelfSelected = selectedItemIds.has(directory.id);
-        if (descendantIds.length === 0) return isSelfSelected ? 'all' : 'none';
+        const descendantIds = this._getDescendantIds(directory);
+        
+        // 空目录的情况
+        if (descendantIds.length === 0) {
+            return isSelfSelected ? 'all' : 'none';
+        }
+        
+        // 非空目录的情况
         const selectedDescendantsCount = descendantIds.filter(id => selectedItemIds.has(id)).length;
-        if (isSelfSelected && selectedDescendantsCount === descendantIds.length) return 'all';
-        if (!isSelfSelected && selectedDescendantsCount === 0) return 'none';
-        return 'partial';
+        
+        // 全选: 自己被选中 且 所有后代都被选中
+        if (isSelfSelected && selectedDescendantsCount === descendantIds.length) {
+            return 'all';
+        }
+        
+        // 部分选中: 自己被选中 或 部分后代被选中
+        if (isSelfSelected || selectedDescendantsCount > 0) {
+            return 'partial';
+        }
+        
+        // 都没选中
+        return 'none';
     }
 
     private _renderItems(container: HTMLElement, items: VFSNodeUI[], parentId: string | null): void {
         const newInstances: Map<string, BaseNodeItem> = new Map();
         const fragment = document.createDocumentFragment();
 
+        // ✨ 修复: 检查 creatingItem 时使用正确的 parentId
+    /*
+        console.log('[NodeList] _renderItems called with parentId:', parentId, 'creatingItem:', this.state.creatingItem);
         if (!this.state.readOnly && this.state.creatingItem?.parentId === parentId) {
+            console.log('[NodeList] Rendering creator input for parentId:', parentId);
             const creatorDiv = document.createElement('div');
             creatorDiv.innerHTML = createItemInputHTML(this.state.creatingItem);
             fragment.appendChild(creatorDiv.firstElementChild!);
         }
+    */
 
-        const traverseAndRender = (itemList: VFSNodeUI[], parentEl: DocumentFragment | HTMLElement) => {
-            if (itemList.length === 0 && parentId !== null && this.state.creatingItem?.parentId !== parentId) {
+    // ✨ 新增：将输入框渲染逻辑移到 traverseAndRender 函数内部
+    const traverseAndRender = (itemList: VFSNodeUI[], parentEl: DocumentFragment | HTMLElement, currentParentId: string | null) => {
+        // ✨ 先在列表开头渲染创建输入框
+        if (!this.state.readOnly && this.state.creatingItem?.parentId === currentParentId) {
+            console.log('[NodeList] Rendering creator input for parentId:', currentParentId);
+            const creatorDiv = document.createElement('div');
+            creatorDiv.innerHTML = createItemInputHTML(this.state.creatingItem);
+            parentEl.appendChild(creatorDiv.firstElementChild!);
+        }
+
+        // ✨ 修改：空目录占位符只在没有子项且不在创建状态时显示
+        if (itemList.length === 0 && currentParentId !== null) {
+            // 如果正在这个目录中创建项目，不显示空占位符
+            if (this.state.creatingItem?.parentId !== currentParentId) {
                 (parentEl as HTMLElement).innerHTML = `<div class="vfs-directory-item__empty-placeholder">(空)</div>`;
-                return;
             }
+            return;
+        }
 
             itemList.forEach(item => {
                 let itemInstance = this.itemInstances.get(item.id);
@@ -818,12 +856,13 @@ export class NodeList extends BaseComponent<NodeListState> {
                 if (item.type === 'directory' && item.children && (this.state.expandedFolderIds.has(item.id) || !!this.state.searchQuery)) {
                     const childrenContainer = (itemInstance as DirectoryItem).childrenContainer;
                     childrenContainer.innerHTML = '';
-                    traverseAndRender(item.children, childrenContainer);
+                    // ✨ 核心修复: 递归时传递当前目录的 ID 作为 parentId
+                    traverseAndRender(item.children, childrenContainer, item.id);
                 }
             });
         };
 
-        traverseAndRender(items, fragment);
+        traverseAndRender(items, fragment, parentId);
         container.innerHTML = '';
         container.appendChild(fragment);
 
@@ -862,6 +901,7 @@ export class NodeList extends BaseComponent<NodeListState> {
         const { type, parentId } = this.state.creatingItem;
         this.store.dispatch({ type: 'CREATE_ITEM_END' });
         if (title) {
+            console.log('[NodeList] Committing creation:', { type, title, parentId });
             this.coordinator.publish('CREATE_ITEM_CONFIRMED', { type, title, parentId });
         }
     }
