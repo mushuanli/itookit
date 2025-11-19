@@ -184,6 +184,8 @@ export class VFSStore {
 
                     if (newItem.type === 'file') {
                         draft.activeId = newItem.id;
+                        // ✨ [新增] 新建文件后自动选中它
+                        draft.selectedItemIds = new Set([newItem.id]);
                     }
                     draft.creatingItem = null;
                     break;
@@ -226,17 +228,24 @@ export class VFSStore {
                 case 'SESSION_SELECT':
                     const oldActiveId = draft.activeId;
                     const newSessionId = action.payload.sessionId;
-                    console.log(`[VFSStore] Handling SESSION_SELECT. Old activeId: ${oldActiveId}, New sessionId: ${newSessionId}`);
-                    const item = findItemById(draft.items, newSessionId);
-                    if (item && item.type === 'file') {
-                        draft.activeId = newSessionId;
-                        draft.creatingItem = null;
-                        draft.selectedItemIds.clear();
-                        if (oldActiveId === newSessionId) {
-                            draft._forceUpdateTimestamp = Date.now();
+                    
+                    if (newSessionId) {
+                        const item = findItemById(draft.items, newSessionId);
+                        if (item && item.type === 'file') {
+                            draft.activeId = newSessionId;
+                            draft.creatingItem = null;
+                            
+                            // ✨ [优化关键] 打开文件时，自动将其设为唯一的选中项
+                            // 这避免了需要单独 dispatch ITEM_SELECTION_UPDATE
+                            draft.selectedItemIds = new Set([newSessionId]);
+                            
+                            if (oldActiveId === newSessionId) {
+                                draft._forceUpdateTimestamp = Date.now();
+                            }
                         }
                     } else if (newSessionId === null) {
                         draft.activeId = null;
+                        // 注意：关闭会话时不一定要清空 selectedItemIds，保持原样或由具体的交互逻辑决定
                     }
                     break;
                 
