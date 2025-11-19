@@ -1,4 +1,6 @@
-// mdx/plugins/ui/titlebar.plugin.ts
+/**
+ * @file mdx/plugins/ui/titlebar.plugin.ts
+ */
 
 import type { MDxPlugin, PluginContext, TitleBarButtonConfig } from '../../core/plugin';
 import type { MDxEditor } from '../../editor/editor';
@@ -43,12 +45,24 @@ export class CoreTitleBarPlugin implements MDxPlugin {
   private options: CoreTitleBarPluginOptions;
   private cleanupFns: Array<() => void> = [];
   private toggleModeBtn: HTMLButtonElement | null = null;
+  // [新增] 属性，用于存储标题元素的引用
+  private titleEl: HTMLElement | null = null; 
 
   constructor(options: CoreTitleBarPluginOptions = {}) {
     this.options = options;
   }
 
   install(context: PluginContext): void {
+    // [新增] 监听 'setTitle' 事件
+    const removeSetTitleListener = context.listen('setTitle', ({ title }: { title: string }) => {
+      if (this.titleEl) {
+        this.titleEl.textContent = title;
+      }
+    });
+    if (removeSetTitleListener) {
+      this.cleanupFns.push(removeSetTitleListener);
+    }
+
     const removeRegister = context.on('editorPostInit', (payload: { 
       editor: MDxEditor, 
       pluginManager: PluginManager 
@@ -176,11 +190,20 @@ export class CoreTitleBarPlugin implements MDxPlugin {
     const leftGroup = document.createElement('div');
     leftGroup.className = 'mdx-editor-titlebar__left';
     
+    // [新增] 创建标题容器和标题元素
+    const titleContainer = document.createElement('div');
+    titleContainer.className = 'mdx-editor-titlebar__center';
+    this.titleEl = document.createElement('span');
+    this.titleEl.className = 'mdx-editor-titlebar__title';
+    this.titleEl.textContent = editor.config.title || ''; // 设置初始标题
+    titleContainer.appendChild(this.titleEl);
+
     const rightGroup = document.createElement('div');
     rightGroup.className = 'mdx-editor-titlebar__right';
 
     titleBar.innerHTML = '';
     titleBar.appendChild(leftGroup);
+    titleBar.appendChild(titleContainer); // [新增]
     titleBar.appendChild(rightGroup);
 
     const buttons = pluginManager.getTitleBarButtons();
@@ -216,8 +239,10 @@ export class CoreTitleBarPlugin implements MDxPlugin {
       }
     });
 
-    if (buttons.length === 0) {
+    if (buttons.length === 0 && !this.titleEl.textContent) {
       titleBar.style.display = 'none';
+    } else {
+      titleBar.style.display = '';
     }
   }
 
@@ -273,5 +298,6 @@ export class CoreTitleBarPlugin implements MDxPlugin {
     this.cleanupFns.forEach(fn => fn());
     this.cleanupFns = [];
     this.toggleModeBtn = null;
+    this.titleEl = null; // [新增]
   }
 }
