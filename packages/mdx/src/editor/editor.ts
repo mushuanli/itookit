@@ -89,7 +89,7 @@ export class MDxEditor extends IEditor {
     if (this.config.title) {
         this.setTitle(this.config.title);
     }
-    
+
     this.emit('ready');
   }
 

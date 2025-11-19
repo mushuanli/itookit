@@ -14,9 +14,14 @@ import type { VFSCore } from '@itookit/vfs-core';
 import type { ISessionManager } from '@itookit/common';
 import type { VFSNodeUI } from './types/types.js';
 import { VFSService } from './services/VFSService.js';
-import type { VFSUIState } from './types/types.js';
+import type { VFSUIState, UISettings } from './types/types.js'; // ✨ 导入 UISettings
 
-type VFSUIOptions = SessionUIOptions & { initialState?: Partial<VFSUIState> };
+// ✨ [修改] 扩展 VFSUIOptions 类型
+type VFSUIOptions = SessionUIOptions & { 
+    initialState?: Partial<VFSUIState>,
+    defaultUiSettings?: Partial<UISettings> 
+};
+
 
 /**
  * Creates a new VFS-UI instance to manage a specific module from vfs-core.

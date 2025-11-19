@@ -580,11 +580,12 @@ export class NodeList extends BaseComponent<NodeListState> {
         }
     }
 
-    private _toggleSettingsPopover(): void {
+    // ✨ [修改] 将以下方法改为箭头函数，确保 'this' 的正确绑定
+    private _toggleSettingsPopover = (): void => {
         this.settingsPopoverEl ? this._hideSettingsPopover() : this._showSettingsPopover();
     }
 
-    private _showSettingsPopover(): void {
+    private _showSettingsPopover = (): void => {
         if (this.settingsPopoverEl) return;
         const popoverContainer = document.createElement('div');
         popoverContainer.innerHTML = createSettingsPopoverHTML(this.state.uiSettings);
@@ -594,7 +595,7 @@ export class NodeList extends BaseComponent<NodeListState> {
         this.mainContainerEl.appendChild(this.settingsPopoverEl);
     }
     
-    private _hideSettingsPopover(): void {
+    private _hideSettingsPopover = (): void => {
         if (this.settingsPopoverEl) {
             this.settingsPopoverEl.remove();
             this.settingsPopoverEl = null;
@@ -602,7 +603,7 @@ export class NodeList extends BaseComponent<NodeListState> {
     }
     
     private _handleSettingsChange = (event: Event): void => {
-        const newSettings = { ...this.state.uiSettings };
+        const newSettings: Partial<UISettings> = {}; // 使用 Partial 类型
         const target = event.target as Element;
         const optionBtn = target.closest<HTMLElement>('[data-value]');
         const checkbox = target.closest<HTMLInputElement>('input[type="checkbox"]');
@@ -610,16 +611,35 @@ export class NodeList extends BaseComponent<NodeListState> {
         if (optionBtn) {
             const settingGroup = optionBtn.closest<HTMLElement>('[data-setting]');
             if (settingGroup?.dataset.setting) {
-                (newSettings as any)[settingGroup.dataset.setting] = optionBtn.dataset.value;
+                const key = settingGroup.dataset.setting as keyof UISettings;
+                (newSettings as any)[key] = optionBtn.dataset.value;
             }
         } else if (checkbox?.dataset.key) {
             const key = checkbox.dataset.key;
             const settingName = `show${key.charAt(0).toUpperCase() + key.slice(1)}` as keyof UISettings;
-            if (settingName in newSettings) {
+            if (settingName in this.state.uiSettings) {
                 (newSettings as any)[settingName] = checkbox.checked;
             }
-        } else { return; }
+        } else { 
+            return; 
+        }
+
+        // 1. 发布事件以更新全局状态
         this.coordinator.publish('SETTINGS_CHANGE_REQUESTED', { settings: newSettings });
+
+        // 2. 立即更新当前Popover的UI以提供即时反馈
+        if (this.settingsPopoverEl) {
+            // 合并当前状态和刚刚发生的变更，得到最新的完整设置
+            const updatedFullSettings = { ...this.state.uiSettings, ...newSettings };
+            
+            // 使用模板函数重新生成Popover的内部HTML
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = createSettingsPopoverHTML(updatedFullSettings);
+            const newContent = tempDiv.firstElementChild as HTMLElement;
+
+            // 仅替换内部内容，保留外部容器及其事件监听器
+            this.settingsPopoverEl.innerHTML = newContent.innerHTML;
+        }
     }
 
     private _hideContextMenu(): void {
@@ -764,19 +784,13 @@ export class NodeList extends BaseComponent<NodeListState> {
 
             itemList.forEach(item => {
                 let itemInstance = this.itemInstances.get(item.id);
-                // [修正] 不再需要 callbacks
-                // const callbacks: NodeItemCallbacks = { onClick: this._handleItemClick, onContextMenu: this._handleItemContextMenu };
 
                 if (!itemInstance) {
                     if (item.type === 'file') {
-                        // [修正] 构造函数调用不再传递 callbacks
                         itemInstance = new FileItem(item, this.state.readOnly, this._getFileItemProps(item));
                     } else {
-                        // [修正] 构造函数调用不再传递 callbacks
                         itemInstance = new DirectoryItem(item, this.state.readOnly, this._getDirectoryItemProps(item));
                     }
-                    // [修正] 不再单独为每个项目绑定事件
-                    // itemInstance.bindEvents();
                 }
 
                 const props = item.type === 'file' ? this._getFileItemProps(item) : this._getDirectoryItemProps(item);
@@ -787,7 +801,7 @@ export class NodeList extends BaseComponent<NodeListState> {
 
                 if (item.type === 'directory' && item.children && (this.state.expandedFolderIds.has(item.id) || !!this.state.searchQuery)) {
                     const childrenContainer = (itemInstance as DirectoryItem).childrenContainer;
-                    childrenContainer.innerHTML = ''; // Clear previous children before re-rendering
+                    childrenContainer.innerHTML = '';
                     traverseAndRender(item.children, childrenContainer);
                 }
             });
