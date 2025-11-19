@@ -46,6 +46,7 @@ export class VFSUIManager extends ISessionManager<VFSNodeUI, VFSService> {
     private readonly uiStorageKey: string;
     private lastActiveId: string | null = null;
     private lastSidebarCollapsedState: boolean;
+    private lastForceUpdateTimestamp?: number;
     private _title: string;
     private vfsEventsUnsubscribe: (() => void) | null = null;
     
@@ -379,12 +380,20 @@ export class VFSUIManager extends ISessionManager<VFSNodeUI, VFSService> {
             
             const activeIdChanged = newState.activeId !== this.lastActiveId;
             const activeItemNowAvailable = this.lastActiveId && !this.getActiveSession() && !!currentActiveItem;
-            
-            console.log(`[VFSUIManager] Old activeId: ${this.lastActiveId}, New activeId: ${newState.activeId}. activeIdChanged: ${activeIdChanged}, userAction: ${this.lastSessionSelectWasUserAction}`);
-            
-            // 🔧 FIX: Also publish event if user explicitly requested session selection
-            if (activeIdChanged || activeItemNowAvailable || this.lastSessionSelectWasUserAction) {
+        
+        // ✅ 新增：检测强制更新标志
+        const forceUpdateDetected = newState._forceUpdateTimestamp !== undefined && 
+                                   newState._forceUpdateTimestamp !== this.lastForceUpdateTimestamp;
+        
+        console.log(`[VFSUIManager] Old activeId: ${this.lastActiveId}, New activeId: ${newState.activeId}. activeIdChanged: ${activeIdChanged}, userAction: ${this.lastSessionSelectWasUserAction}, forceUpdate: ${forceUpdateDetected}`);
+        
+        // ✅ 修改条件：增加强制更新检测
+        if (activeIdChanged || activeItemNowAvailable || this.lastSessionSelectWasUserAction || forceUpdateDetected) {
                 this.lastActiveId = newState.activeId;
+            // 更新强制更新时间戳
+            if (forceUpdateDetected) {
+                this.lastForceUpdateTimestamp = newState._forceUpdateTimestamp;
+            }
                 console.log('[VFSUIManager] Active session changed! Publishing PUBLIC_SESSION_SELECTED with item:', currentActiveItem);
                 this.coordinator.publish('PUBLIC_SESSION_SELECTED', { item: currentActiveItem });
                 
