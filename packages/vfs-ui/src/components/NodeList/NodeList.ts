@@ -326,11 +326,10 @@ export class NodeList extends BaseComponent<NodeListState> {
         // 4. 选中逻辑
         // ✨ 优化：只有在“修饰键点击”或“目录点击”时，才手动触发选中更新。
         // 对于普通文件点击，我们依赖 SESSION_SELECT_REQUESTED 来隐式更新选中状态。
-        if (isModifierClick || itemType === 'directory') {
-            if (!this.state.readOnly) {
-                this._handleItemSelection(itemEl, event);
-            }
-        }
+    if (action !== 'select-only' && !this.state.readOnly) {
+        this._handleItemSelection(itemEl, event);
+    }
+
 
         // 5. 会话/打开逻辑
         if (action !== 'select-only') { // 排除仅选中图标的点击
