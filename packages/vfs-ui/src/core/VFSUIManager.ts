@@ -23,12 +23,10 @@ import { FileProvider } from '../providers/FileProvider';
 import { DirectoryProvider } from '../providers/DirectoryProvider';
 import type { VFSNodeUI, TagInfo, ContextMenuConfig, VFSUIState, TagEditorOptions, UISettings } from '../types/types';
 
-// ✨ [修改] 扩展 VFSUIOptions 类型
 type VFSUIOptions = SessionUIOptions & { 
     initialState?: Partial<VFSUIState>,
     defaultUiSettings?: Partial<UISettings> 
 };
-
 
 /**
  * Manages the entire lifecycle and interaction of the VFS-UI components.
@@ -161,13 +159,35 @@ export class VFSUIManager extends ISessionManager<VFSNodeUI, VFSService> {
 
         await this._loadModuleData();
 
+        let activeItem = this.getActiveSession();
         const currentState = this.store.getState();
-        const activeItem = this.getActiveSession();
 
-        if (currentState.activeId && !activeItem) {
+        // 场景1: 没有活动项，但列表里有文件，则自动选择第一个文件
+        if (!activeItem && currentState.items.length > 0) {
+            const findFirstFile = (nodes: VFSNodeUI[]): VFSNodeUI | null => {
+                for (const node of nodes) {
+                    if (node.type === 'file') return node;
+                    if (node.children) {
+                        const found = findFirstFile(node.children);
+                        if (found) return found;
+                    }
+                }
+                return null;
+            };
+
+            const firstFile = findFirstFile(currentState.items);
+            if (firstFile) {
+                console.log(`[VFSUIManager] No active session found. Auto-selecting first file: ${firstFile.metadata.title}`);
+                this.store.dispatch({ type: 'SESSION_SELECT', payload: { sessionId: firstFile.id } });
+                // dispatch 后，store 状态已更新，重新获取 activeItem
+                activeItem = this.getActiveSession();
+            }
+        }
+        // 场景2: 有一个持久化的 activeId，但它在当前文件列表中无效（例如被删除了）
+        else if (currentState.activeId && !activeItem) {
             console.warn(`[VFSUIManager] Persisted activeId "${currentState.activeId}" is no longer valid. Resetting.`);
             this.store.dispatch({ type: 'SESSION_SELECT', payload: { sessionId: null } });
-            return undefined;
+            activeItem = undefined; // 明确设置为 undefined
         }
         
         console.log(`[VFSUIManager] Start completed. Initial active session:`, activeItem);
@@ -366,6 +386,30 @@ export class VFSUIManager extends ISessionManager<VFSNodeUI, VFSService> {
             this.store.dispatch({ type: 'ITEM_DELETE_SUCCESS', payload: { itemIds: allRemovedIds } });
         };
         
+        const handleNodeUpdated = async (event: VFSEvent) => {
+            console.log(`[VFSUIManager] NODE_UPDATED event received for nodeId ${event.nodeId}.`);
+            try {
+                const updatedNode = await vfs.storage.loadVNode(event.nodeId);
+                if (updatedNode && updatedNode.moduleId === this.moduleName) {
+                    if (updatedNode.type === 'file') {
+                        (updatedNode as any).content = await vfs.read(updatedNode.nodeId);
+                    }
+                    const updatedUIItem = mapVNodeToUIItem(updatedNode, updatedNode.parentId);
+                    
+                    this.store.dispatch({
+                        type: 'ITEM_UPDATE_SUCCESS',
+                        payload: {
+                            itemId: updatedNode.nodeId,
+                            updates: updatedUIItem
+                        }
+                    });
+                }
+            } catch (error) {
+                console.error(`[VFSUIManager] Error processing NODE_UPDATED. Falling back to full reload.`, error);
+                this._loadModuleData();
+            }
+        };
+        
         const handleReloadNeeded = (event: VFSEvent) => {
             console.log(`[VFSUIManager] ${event.type} event received, reloading module data for consistency.`);
             this._loadModuleData();
@@ -373,7 +417,7 @@ export class VFSUIManager extends ISessionManager<VFSNodeUI, VFSService> {
 
         const unsub1 = eventBus.on(VFSEventType.NODE_CREATED, handleNodeCreated);
         const unsub2 = eventBus.on(VFSEventType.NODE_DELETED, handleNodeDeleted);
-        const unsub3 = eventBus.on(VFSEventType.NODE_UPDATED, handleReloadNeeded);
+        const unsub3 = eventBus.on(VFSEventType.NODE_UPDATED, handleNodeUpdated);
         const unsub4 = eventBus.on(VFSEventType.NODE_MOVED, handleReloadNeeded);
         const unsub5 = eventBus.on(VFSEventType.NODE_COPIED, handleReloadNeeded);
 
@@ -395,19 +439,15 @@ export class VFSUIManager extends ISessionManager<VFSNodeUI, VFSService> {
             const activeIdChanged = newState.activeId !== this.lastActiveId;
             const activeItemNowAvailable = this.lastActiveId && !this.getActiveSession() && !!currentActiveItem;
         
-        // ✅ 新增：检测强制更新标志
-        const forceUpdateDetected = newState._forceUpdateTimestamp !== undefined && 
-                                   newState._forceUpdateTimestamp !== this.lastForceUpdateTimestamp;
+            const forceUpdateDetected = newState._forceUpdateTimestamp !== undefined && 
+                                       newState._forceUpdateTimestamp !== this.lastForceUpdateTimestamp;
         
         console.log(`[VFSUIManager] Old activeId: ${this.lastActiveId}, New activeId: ${newState.activeId}. activeIdChanged: ${activeIdChanged}, userAction: ${this.lastSessionSelectWasUserAction}, forceUpdate: ${forceUpdateDetected}`);
-        
-        // ✅ 修改条件：增加强制更新检测
-        if (activeIdChanged || activeItemNowAvailable || this.lastSessionSelectWasUserAction || forceUpdateDetected) {
+            if (activeIdChanged || activeItemNowAvailable || this.lastSessionSelectWasUserAction || forceUpdateDetected) {
                 this.lastActiveId = newState.activeId;
-            // 更新强制更新时间戳
-            if (forceUpdateDetected) {
-                this.lastForceUpdateTimestamp = newState._forceUpdateTimestamp;
-            }
+                if (forceUpdateDetected) {
+                    this.lastForceUpdateTimestamp = newState._forceUpdateTimestamp;
+                }
                 console.log('[VFSUIManager] Active session changed! Publishing PUBLIC_SESSION_SELECTED with item:', currentActiveItem);
                 this.coordinator.publish('PUBLIC_SESSION_SELECTED', { item: currentActiveItem });
                 

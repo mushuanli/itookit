@@ -8,7 +8,7 @@ import { debounce, escapeHTML } from '@itookit/common';
 
 import { createContextMenuHTML, createSettingsPopoverHTML, createItemInputHTML } from './templates';
 import { Footer } from './Footer';
-import { BaseNodeItem } from './items/BaseNodeItem'; // [修正]不再需要 NodeItemCallbacks
+import { BaseNodeItem } from './items/BaseNodeItem';
 import { FileItem, FileItemProps } from './items/FileItem';
 import { DirectoryItem, DirectoryItemProps } from './items/DirectoryItem';
 
@@ -114,7 +114,8 @@ export class NodeList extends BaseComponent<NodeListState> {
         const selectedCount = selectedItemIds.size;
 
         let selectionStatus: 'none' | 'partial' | 'all' = 'none';
-        if (!this.state.readOnly && selectedCount > 0 && visibleItemIds.length > 0) {
+        // [修复] readOnly 检查也应在此处
+        if (!readOnly && selectedCount > 0 && visibleItemIds.length > 0) {
             const allVisibleSelected = visibleItemIds.every(id => selectedItemIds.has(id));
             if (allVisibleSelected && selectedCount === visibleItemIds.length) {
                 selectionStatus = 'all';
@@ -305,6 +306,20 @@ export class NodeList extends BaseComponent<NodeListState> {
             this.coordinator.publish('NAVIGATE_TO_HEADING_REQUESTED', { elementId: actionEl.dataset.elementId });
             return;
         }
+        
+        // ✨ [核心修复] 为复选框点击添加专门的处理逻辑
+        if (action === 'toggle-selection') {
+            if (this.state.readOnly) return;
+            event.stopPropagation(); // 阻止冒泡到整行点击
+            this.store.dispatch({
+                type: 'ITEM_SELECTION_UPDATE',
+                payload: { ids: [itemId], mode: 'toggle' }
+            });
+            // 更新 lastClickedItemId 以支持 shift 选择
+            this.lastClickedItemId = itemId;
+            return;
+        }
+    
         if (this.state.readOnly && (event.metaKey || event.ctrlKey || event.shiftKey)) {
             console.log('[NodeList] Read-only mode with modifier key. Ignoring.');
             return;
@@ -399,6 +414,7 @@ export class NodeList extends BaseComponent<NodeListState> {
     };
 
     private _handleSelectAllToggle = () => {
+        if (this.state.readOnly) return;
         if (this.state.selectionStatus === 'all') {
             this.store.dispatch({ type: 'ITEM_SELECTION_CLEAR' });
         } else {
@@ -603,7 +619,7 @@ export class NodeList extends BaseComponent<NodeListState> {
     }
     
     private _handleSettingsChange = (event: Event): void => {
-        const newSettings: Partial<UISettings> = {}; // 使用 Partial 类型
+        const newSettings: Partial<UISettings> = {};
         const target = event.target as Element;
         const optionBtn = target.closest<HTMLElement>('[data-value]');
         const checkbox = target.closest<HTMLInputElement>('input[type="checkbox"]');
@@ -824,8 +840,8 @@ export class NodeList extends BaseComponent<NodeListState> {
         return {
             isActive: item.id === this.state.activeId,
             isSelected: this.state.selectedItemIds.has(item.id),
-            isSelectionMode: this.state.selectedItemIds.size > 0,
-            isOutlineExpanded: this.state.expandedFolderIds.has(item.id), // You might want a separate state for this
+            isSelectionMode: !this.state.readOnly && this.state.selectedItemIds.size > 0,
+            isOutlineExpanded: this.state.expandedFolderIds.has(item.id),
             searchQueries: this.state.textSearchQueries,
             uiSettings: this.state.uiSettings,
         };
@@ -835,7 +851,7 @@ export class NodeList extends BaseComponent<NodeListState> {
         return {
             isExpanded: this.state.expandedFolderIds.has(item.id) || !!this.state.searchQuery,
             dirSelectionState: this._getFolderSelectionState(item, this.state.selectedItemIds),
-            isSelectionMode: this.state.selectedItemIds.size > 0,
+            isSelectionMode: !this.state.readOnly && this.state.selectedItemIds.size > 0,
             searchQueries: this.state.textSearchQueries,
         };
     }
