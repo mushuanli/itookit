@@ -29,7 +29,15 @@ export interface EditorOptions {
   [key: string]: any; // 允许传递任何特定于实现的选项
 }
 
-export type EditorEvent = 'change' | 'interactiveChange' | 'ready' | 'modeChanged';
+// ✨ [核心修改] 增加 'blur' 和 'focus' 事件类型
+export type EditorEvent = 
+    | 'change'            // 内容变化
+    | 'interactiveChange' // 用户交互导致的变化
+    | 'ready'             // 初始化完成
+    | 'modeChanged'       // 编辑/预览模式切换
+    | 'blur'              // 失去焦点 (用于自动保存)
+    | 'focus';            // 获得焦点
+
 export type EditorEventCallback = (payload?: any) => void;
 
 export abstract class IEditor {
@@ -48,8 +56,9 @@ export abstract class IEditor {
      * @param container - 编辑器将挂载的HTML元素。
      */
     abstract init(container: HTMLElement, initialContent?: string): Promise<void>;
+    
     /**
-     * [关键修改] 销毁编辑器实例并释放所有资源。
+     * 销毁编辑器实例并释放所有资源。
      * 此方法必须返回一个 Promise，以允许调用者等待异步清理/保存操作完成。
      * @returns {Promise<void>} A promise that resolves when destruction is complete.
      */
@@ -95,5 +104,4 @@ export abstract class IEditor {
 
     // --- 事件系统 ---
     abstract on(eventName: EditorEvent, callback: EditorEventCallback): () => void;
-
 }
