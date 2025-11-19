@@ -85,6 +85,10 @@ export class MDxEditor extends IEditor {
       editor: this,
       pluginManager: this.renderer.getPluginManager(),
     });
+
+    if (this.config.title) {
+        this.setTitle(this.config.title);
+    }
     
     this.emit('ready');
   }
