@@ -38,6 +38,9 @@ export class MDxEditor extends IEditor {
 
   private isDestroying = false;
 
+  // 【优化】新增脏状态标志
+  private _isDirty = false;
+
   constructor(options: MDxEditorConfig = {}) {
     super(); 
     this.config = options;
@@ -56,6 +59,7 @@ export class MDxEditor extends IEditor {
     console.log('🎬 [MDxEditor] Starting initialization...');
     this._container = container;
     this.createContainers(container);
+    this._isDirty = false; // 初始化时内容是干净的
 
     // 短暂延迟，以确保插件有时间在主线程上完成其同步注册过程。
     // TODO: 未来可探索更健壮的事件驱动或 Promise 机制来代替 setTimeout。
@@ -139,6 +143,8 @@ export class MDxEditor extends IEditor {
         if (update.docChanged) {
           this.emit('change');
           if (update.transactions.some(tr => tr.isUserEvent('input') || tr.isUserEvent('delete'))) {
+            // 【优化】用户交互导致内容变化，设置脏状态
+            this.setDirty(true);
             this.emit('interactiveChange');
           }
         }
@@ -210,11 +216,22 @@ export class MDxEditor extends IEditor {
       this.editorView.dispatch({
         changes: { from: 0, to: this.editorView.state.doc.length, insert: markdown }
       });
+      // 【优化】程序化设置内容，重置脏状态
+      this.setDirty(false);
     }
   }
 
   getMode(): 'edit' | 'render' {
     return this.currentMode;
+  }
+
+  // 【优化】实现脏检查接口
+  isDirty(): boolean {
+    return this._isDirty;
+  }
+
+  setDirty(isDirty: boolean): void {
+    this._isDirty = isDirty;
   }
   
   // ✨ [最终] 确保getHeadings生成唯一ID，避免导航冲突

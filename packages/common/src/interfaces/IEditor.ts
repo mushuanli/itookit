@@ -74,6 +74,20 @@ export abstract class IEditor {
     abstract setTitle(newTitle: string): void;
     abstract setReadOnly(isReadOnly: boolean): void;
 
+    // --- 【优化】脏检查接口 ---
+    /**
+     * 检查编辑器内容是否自上次保存或加载以来被用户修改过。
+     * @returns {boolean} 如果内容已修改，则返回 true。
+     */
+    abstract isDirty(): boolean;
+
+    /**
+     * 手动设置编辑器的脏状态。
+     * @param {boolean} isDirty - 新的脏状态。
+     */
+    abstract setDirty(isDirty: boolean): void;
+
+
     // --- 内容分析 ---
     abstract readonly commands: Readonly<Record<string, Function>>;
 

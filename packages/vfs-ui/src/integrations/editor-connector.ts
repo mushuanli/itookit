@@ -43,7 +43,13 @@ export function connectEditorLifecycle(
      * 封装了检查节点是否存在、获取内容、写入VFS的逻辑
      */
     const saveCurrentSession = async () => {
-        if (!activeEditor || !activeNode) return;
+        // 关键优化点 1: 如果编辑器不存在、节点不存在，或者内容未被修改（非脏），则跳过保存
+        if (!activeEditor || !activeNode || !activeEditor.isDirty()) {
+            if (activeEditor && !activeEditor.isDirty()) {
+                console.log(`[EditorConnector] Content for node ${activeNode.id} is not dirty. Skipping save.`);
+            }
+            return;
+        }
 
         try {
             // 1. 检查节点是否仍然存在于 State 中 (防止保存到已删除的文件)
@@ -66,6 +72,9 @@ export function connectEditorLifecycle(
                 // 可选：这里可以增加一个脏检查 (dirty check)，比对上次保存的内容，减少不必要的 IO
                 console.log(`[EditorConnector] Auto-saving node ${activeNode.id}...`);
                 await vfsCore.getVFS().write(activeNode.id, contentToSave);
+
+                // 关键优化点 2: 保存成功后，重置编辑器的脏状态
+                activeEditor.setDirty(false);
             } else {
                 console.warn(`[EditorConnector] Node ${activeNode.id} was deleted. Skipping save.`);
             }
