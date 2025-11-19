@@ -2,12 +2,10 @@
  * @file vfs-ui/src/integrations/editor-connector.ts
  * @desc Provides a high-level function to connect a VFS-UI manager with any IEditor-compatible editor.
  */
-import type { IEditor, EditorFactory, EditorOptions,ISessionManager,ISessionService } from '@itookit/common';
+import type { IEditor, EditorFactory, EditorOptions, ISessionManager } from '@itookit/common';
 import type { VFSCore } from '@itookit/vfs-core';
-import type { VFSNodeUI } from '../types/types';
+import type { VFSNodeUI, VFSUIState } from '../types/types'; // ✨ 导入 VFSUIState
 import type { VFSService } from '../services/VFSService';
-
-// ❌ [移除] 不再需要本地定义的 EditorFactory 类型
 
 export interface ConnectOptions {
     onEditorCreated?: (editor: IEditor | null) => void;
@@ -27,7 +25,7 @@ export interface ConnectOptions {
  */
 export function connectEditorLifecycle(
     vfsManager: ISessionManager<VFSNodeUI, VFSService>,
-    vfsCore: VFSCore, // [关键修改] 直接注入 VFSCore 依赖
+    vfsCore: VFSCore,
     editorContainer: HTMLElement,
     editorFactory: EditorFactory,
     options: ConnectOptions = {}
@@ -41,11 +39,29 @@ export function connectEditorLifecycle(
         if (activeEditor && activeNode) {
             console.log(`[EditorConnector] Saving content for node ${activeNode.id} before switching.`);
             try {
-                const contentToSave = activeEditor.getText();
-        console.log(`[DEBUG] Saving ${contentToSave.length} chars for node ${activeNode.id}`);
-                await vfsCore.getVFS().write(activeNode.id, contentToSave);
-        console.log(`[DEBUG] Save complete`);
+                // ✨ [核心修复] 在保存前检查节点是否已被删除
+                const currentState: VFSUIState = (vfsManager as any).store.getState();
+                const findNode = (nodes: VFSNodeUI[], id: string): VFSNodeUI | null => {
+                    for (const n of nodes) {
+                        if (n.id === id) return n;
+                        if (n.children) {
+                            const found = findNode(n.children, id);
+                            if (found) return found;
+                        }
+                    }
+                    return null;
+                };
+
+                if (findNode(currentState.items, activeNode.id)) {
+                    const contentToSave = activeEditor.getText();
+                    console.log(`[DEBUG] Saving ${contentToSave.length} chars for node ${activeNode.id}`);
+                    await vfsCore.getVFS().write(activeNode.id, contentToSave);
+                    console.log(`[DEBUG] Save complete`);
+                } else {
+                    console.warn(`[EditorConnector] Node ${activeNode.id} was deleted. Skipping save.`);
+                }
             } catch (error) {
+                // 即使节点存在，写入也可能失败，所以保留 catch
                 console.error(`[EditorConnector] Failed to save content for node ${activeNode.id}:`, error);
             }
         }
@@ -64,17 +80,15 @@ export function connectEditorLifecycle(
         if (item && item.type === 'file') {
             console.log(`[EditorConnector] Creating new editor for node ${item.id}.`);
             try {
-        const content = item.content?.data || ''; // <-- 获取内容
-        // 🔥 添加日志
-        console.log(`[EditorConnector] Preparing options. Content length: ${content.length}. Preview: "${content.substring(0, 50)}..."`);
+                const content = item.content?.data || '';
+                console.log(`[EditorConnector] Preparing options. Content length: ${content.length}. Preview: "${String(content).substring(0, 50)}..."`);
                 const editorOptions: EditorOptions = {
-            ...factoryExtraOptions,
-            initialContent: content, // <-- 使用内容
+                    ...factoryExtraOptions,
+                    initialContent: content,
                     title: item.metadata.title,
                     nodeId: item.id,
                 };
 
-                // ✨ [最终] 调用标准工厂函数，vfs-ui不知道也不关心是哪个编辑器
                 activeEditor = await editorFactory(
                     editorContainer,
                     editorOptions
@@ -98,7 +112,6 @@ export function connectEditorLifecycle(
         const initialItem = vfsManager.getActiveSession();
         await handleSessionChange({ item: initialItem });
     })();
-
 
     return unsubscribe;
 }

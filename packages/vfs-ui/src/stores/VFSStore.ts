@@ -67,12 +67,9 @@ export class VFSStore {
                     draft.tags = action.payload.tags;
                     draft.status = 'success';
                     draft.error = null;
-    // ✅ 新增：数据加载完成后，如果有 activeId，强制触发更新
-    // 这确保了即使 activeId 是从持久化恢复的，也能触发编辑器初始化
-    if (draft.activeId) {
-        draft._forceUpdateTimestamp = Date.now();
-        console.log(`[VFSStore] Data loaded with activeId ${draft.activeId}, forcing update with timestamp: ${draft._forceUpdateTimestamp}`);
-    }
+                    if (draft.activeId) {
+                        draft._forceUpdateTimestamp = Date.now();
+                    }
                     break;
                 }
                 
@@ -112,13 +109,44 @@ export class VFSStore {
                     break;
                 }
 
+                // ✨ [核心修复] 添加处理多选状态变化的 Reducers
+                case 'ITEM_SELECTION_REPLACE': {
+                    const { ids } = action.payload;
+                    draft.selectedItemIds = new Set(ids || []);
+                    break;
+                }
+        
+                case 'ITEM_SELECTION_UPDATE': {
+                    const { ids, mode } = action.payload;
+                    if (!ids || !Array.isArray(ids)) break;
+        
+                    if (mode === 'toggle') {
+                        ids.forEach(id => {
+                            if (draft.selectedItemIds.has(id)) {
+                                draft.selectedItemIds.delete(id);
+                            } else {
+                                draft.selectedItemIds.add(id);
+                            }
+                        });
+                    } else if (mode === 'replace') {
+                        draft.selectedItemIds = new Set(ids);
+                    }
+                    break;
+                }
+        
+                case 'ITEM_SELECTION_CLEAR':
+                    draft.selectedItemIds.clear();
+                    break;
+
+                // ✨ [架构优化] 修正 ITEM_UPDATE_SUCCESS 的 Reducer 逻辑
                 case 'ITEM_UPDATE_SUCCESS': {
-                    const { itemId, updates } = action.payload;
+                    const { itemId, updates } = action.payload; // `updates` is a full VFSNodeUI object
                     const findAndUpdate = (items: VFSNodeUI[]): boolean => {
                        for (let i=0; i < items.length; i++) {
                            const item = items[i];
                            if (item.id === itemId) {
-                               items[i] = { ...item, ...updates, metadata: { ...item.metadata, ...updates.metadata } };
+                               // 直接用新对象替换旧对象，以确保所有派生数据都已更新
+                               items[i] = updates;
                                return true;
                            }
                            if (item.children && findAndUpdate(item.children)) return true;
@@ -197,16 +225,11 @@ export class VFSStore {
                         draft.activeId = newSessionId;
                         draft.creatingItem = null;
                         draft.selectedItemIds.clear();
-        // 🔧 FIX: Force state change even if activeId is the same
-        // This ensures subscribers are notified when user re-selects the same file
-        if (oldActiveId === newSessionId) {
-            // Add a timestamp to force state update
-            draft._forceUpdateTimestamp = Date.now();
-            console.log(`[VFSStore] Same activeId, forcing update with timestamp: ${draft._forceUpdateTimestamp}`);
-        }
-                        console.log(`[VFSStore] State updated. New activeId is now: ${draft.activeId}`);
-                    } else {
-                        console.warn(`[VFSStore] SESSION_SELECT failed. Item not found or not a file for ID: ${newSessionId}`);
+                        if (oldActiveId === newSessionId) {
+                            draft._forceUpdateTimestamp = Date.now();
+                        }
+                    } else if (newSessionId === null) { // 允许取消选择
+                        draft.activeId = null;
                     }
                     break;
                 
