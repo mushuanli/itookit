@@ -66,7 +66,7 @@ a { color: inherit; text-decoration: none; }
 .vfs-node-list__item-creator-input { flex-grow: 1; border: none; outline: none; padding: 0; font-size: var(--font-size-base); font-weight: 500; background: transparent; }
 .vfs-node-item { position: relative; padding: var(--spacing-0-5) 0; }
 .vfs-node-item__main-row:hover > .vfs-node-item__content, .vfs-node-item__main-row:hover > .vfs-directory-item__header { background-color: var(--color-gray-100); }
-.vfs-node-item__content.is-active, .vfs-directory-item.is-active > .vfs-directory-item__header { background-color: var(--color-accent-bg-light); border-left-color: var(--color-accent-default); }
+.vfs-node-item__content.is-active, .vfs-directory-item__header.is-active { background-color: var(--color-accent-bg-light); border-left-color: var(--color-accent-default); }
 .vfs-node-item__content { position: relative; display: flex; align-items: flex-start; padding: var(--spacing-2-5) 0; cursor: pointer; border-left: 3px solid transparent; gap: var(--spacing-2); transition: background-color var(--transition-fast), border-color var(--transition-fast); }
 .vfs-node-item__icon { flex-shrink: 0; margin-top: 2px; }
 .vfs-node-item__main { flex-grow: 1; display: flex; flex-direction: column; gap: var(--spacing-1); min-width: 0; }
@@ -95,7 +95,7 @@ a { color: inherit; text-decoration: none; }
 .vfs-node-item__outline-toggle-icon.is-expanded { transform: rotate(180deg); }
 .vfs-node-list--density-compact .vfs-node-item__content { padding-top: var(--spacing-1-5); padding-bottom: var(--spacing-1-5); }
 .vfs-node-list--density-compact .vfs-node-item__summary, .vfs-node-list--density-compact .vfs-node-item__tags, .vfs-node-list--density-compact .vfs-node-item__badges { display: none; }
-.vfs-node-item .vfs-node-item__content.is-selected, .vfs-directory-item.is-selected > .vfs-directory-item__header { background-color: var(--color-primary-bg-light); border-left-color: var(--color-primary-default); }
+.vfs-node-item .vfs-node-item__content.is-selected, .vfs-directory-item__header.is-selected { background-color: var(--color-primary-bg-light); border-left-color: var(--color-primary-default); }
 .is-dragging { opacity: 0.5; }
 .drop-target-above > .vfs-node-item__content, .drop-target-above > .vfs-directory-item__header { border-top: 2px solid var(--color-primary-default); }
 .drop-target-below > .vfs-node-item__content, .drop-target-below > .vfs-directory-item__header { border-bottom: 2px solid var(--color-primary-default); }
