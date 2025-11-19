@@ -25,13 +25,17 @@ export function createContextMenuHTML(items: MenuItem[]): string {
 
 export function createFooterHTML(options: { selectionStatus: 'none' | 'partial' | 'all', selectedCount: number, isReadOnly: boolean }): string {
     const { selectionStatus, selectedCount, isReadOnly } = options;
-    const isSelectionMode = !isReadOnly && selectedCount > 0;
+    
+    // ✨ [修改] 只有当选中数量大于 1 时，才进入批量操作模式
+    // 这意味着单选时，底部仍然显示普通的 "设置" 按钮
+    const isBulkMode = !isReadOnly && selectedCount > 1;
+    
     const checkboxHTML = isReadOnly ? '' : `
         <input type="checkbox" class="vfs-node-list__footer-checkbox" data-action="toggle-select-all" 
             title="${selectionStatus === 'all' ? '全部取消' : '全选'}"
             ${selectionStatus === 'all' ? 'checked' : ''}>`;
 
-    if (isSelectionMode) {
+    if (isBulkMode) {
         return `
             <div class="vfs-node-list__bulk-bar">
                 <div class="vfs-node-list__bulk-bar-info">
