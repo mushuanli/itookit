@@ -56,10 +56,13 @@ export class FileItem extends BaseNodeItem {
         tempDiv.innerHTML = newHTML;
         const newElement = tempDiv.firstElementChild as HTMLElement;
         
+        // 如果旧元素在 DOM 中，执行替换以保持位置
         if (this.element.parentNode) {
             this.element.parentNode.replaceChild(newElement, this.element);
-            // Update the element reference properly
-            Object.defineProperty(this, 'element', { value: newElement, writable: true });
         }
+
+        // [核心修复] 无论是否执行了 replaceChild，必须始终更新实例引用的 element
+        // 这样当 NodeList 稍后执行 appendChild(instance.element) 时，添加的是最新的元素
+        Object.defineProperty(this, 'element', { value: newElement, writable: true });
     }
 }

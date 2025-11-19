@@ -97,12 +97,19 @@ export function createFileItemHTML(
 }
 
 export function createDirectoryItemHTML(
-    directory: VFSNodeUI, isExpanded: boolean, dirSelectionState: 'none' | 'partial' | 'all',
-    isSelectionMode: boolean, searchQueries: string[] = [], isReadOnly: boolean = false
+    directory: VFSNodeUI, 
+    isExpanded: boolean, 
+    dirSelectionState: 'none' | 'partial' | 'all',
+    isSelected: boolean, // [修改] 增加明确的选中状态参数，用于高亮背景
+    isSelectionMode: boolean, 
+    searchQueries: string[] = [], 
+    isReadOnly: boolean = false
 ): string {
     const { id, metadata } = directory;
     const { title, tags = [] } = metadata;
-    const isSelected = dirSelectionState === 'all' || dirSelectionState === 'partial';
+    
+    // [修改] 这里不再计算 isSelected，而是直接使用传入的 isSelected 参数决定是否添加 is-selected 类
+    // const isSelected = dirSelectionState === 'all' || dirSelectionState === 'partial'; // 旧逻辑
     
     const checkboxHTML = !isReadOnly && isSelectionMode
         ? `<div class="vfs-node-item__checkbox-wrapper"><input type="checkbox" class="vfs-node-item__checkbox" data-item-id="${id}" ${dirSelectionState === 'all' ? 'checked' : ''} ${dirSelectionState === 'partial' ? 'data-indeterminate="true"' : ''} data-action="toggle-selection"></div>`

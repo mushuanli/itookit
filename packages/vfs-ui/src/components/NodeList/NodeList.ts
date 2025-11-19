@@ -326,13 +326,13 @@ export class NodeList extends BaseComponent<NodeListState> {
         // 4. 选中逻辑
         // ✨ 优化：只有在“修饰键点击”或“目录点击”时，才手动触发选中更新。
         // 对于普通文件点击，我们依赖 SESSION_SELECT_REQUESTED 来隐式更新选中状态。
-    if (action !== 'select-only' && !this.state.readOnly) {
-        this._handleItemSelection(itemEl, event);
-    }
+        if (action !== 'select-only' && !this.state.readOnly) {
+            this._handleItemSelection(itemEl, event);
+        }
 
 
         // 5. 会话/打开逻辑
-        if (action !== 'select-only') { // 排除仅选中图标的点击
+        if (action !== 'select-only') {
             if (itemType === 'file' && !isModifierClick) {
                 // ✨ 普通文件点击：发送打开请求。Store 会自动将其设为选中。
                 this.coordinator.publish('SESSION_SELECT_REQUESTED', { sessionId: itemId });
@@ -876,6 +876,7 @@ export class NodeList extends BaseComponent<NodeListState> {
         return {
             isExpanded: this.state.expandedFolderIds.has(item.id) || !!this.state.searchQuery,
             dirSelectionState: this._getFolderSelectionState(item, this.state.selectedItemIds),
+            isSelected: this.state.selectedItemIds.has(item.id), // [修改] 明确判断目录本身是否被选中
             isSelectionMode: !this.state.readOnly && this.state.selectedItemIds.size > 0,
             searchQueries: this.state.textSearchQueries,
         };

@@ -9,6 +9,7 @@ import { createDirectoryItemHTML } from './itemTemplates';
 export interface DirectoryItemProps {
     isExpanded: boolean;
     dirSelectionState: 'none' | 'partial' | 'all';
+    isSelected: boolean;
     isSelectionMode: boolean;
     searchQueries: string[];
 }
@@ -45,6 +46,7 @@ export class DirectoryItem extends BaseNodeItem {
             this.item,
             this.currentProps.isExpanded,
             this.currentProps.dirSelectionState,
+            this.currentProps.isSelected, // [修改] 传入新增的 isSelected 参数
             this.currentProps.isSelectionMode,
             this.currentProps.searchQueries,
             this.isReadOnly
@@ -66,7 +68,12 @@ export class DirectoryItem extends BaseNodeItem {
         // 如果旧元素已经在 DOM 中，则用新元素替换它
         if (this.element.parentNode) {
             this.element.parentNode.replaceChild(newElement, this.element);
-            Object.defineProperty(this, 'element', { value: newElement, writable: true });
         }
+
+        // [核心修复] 始终更新 element 引用
+        Object.defineProperty(this, 'element', { value: newElement, writable: true });
+        
+        // 更新 childrenContainer 引用，指向新元素的容器
+        this.childrenContainer = newChildrenContainer as HTMLElement;
     }
 }
