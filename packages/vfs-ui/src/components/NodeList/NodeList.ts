@@ -12,7 +12,6 @@ import { BaseNodeItem } from './items/BaseNodeItem';
 import { FileItem, FileItemProps } from './items/FileItem';
 import { DirectoryItem, DirectoryItemProps } from './items/DirectoryItem';
 
-// 扩展 BaseComponentParams 以包含 NodeList 特有的参数
 interface NodeListParams extends BaseComponentParams {
     contextMenu?: ContextMenuConfig;
     tagEditorFactory: ((options: {
@@ -20,7 +19,7 @@ interface NodeListParams extends BaseComponentParams {
         initialTags: string[];
         onSave: (tags: string[]) => void;
         onCancel: () => void;
-    }) => void) | any; // Add | any to allow flexibility
+    }) => void) | any; 
     searchPlaceholder?: string;
 }
 
@@ -286,6 +285,7 @@ export class NodeList extends BaseComponent<NodeListState> {
         }
 
         const itemId = itemEl.dataset.itemId!;
+        const itemType = itemEl.dataset.itemType;
         const actionEl = target.closest<HTMLElement>('[data-action]');
         const action = actionEl?.dataset.action;
         console.log(`[NodeList] Item clicked: ID=${itemId}, Action=${action || 'none'}`);
@@ -310,7 +310,7 @@ export class NodeList extends BaseComponent<NodeListState> {
         // ✨ [核心修复] 为复选框点击添加专门的处理逻辑
         if (action === 'toggle-selection') {
             if (this.state.readOnly) return;
-            event.stopPropagation(); // 阻止冒泡到整行点击
+            event.stopPropagation();
             this.store.dispatch({
                 type: 'ITEM_SELECTION_UPDATE',
                 payload: { ids: [itemId], mode: 'toggle' }
@@ -319,25 +319,28 @@ export class NodeList extends BaseComponent<NodeListState> {
             this.lastClickedItemId = itemId;
             return;
         }
-    
-        if (this.state.readOnly && (event.metaKey || event.ctrlKey || event.shiftKey)) {
-            console.log('[NodeList] Read-only mode with modifier key. Ignoring.');
-            return;
+
+        // 3. 区分普通点击和修饰键点击
+        const isModifierClick = event.metaKey || event.ctrlKey || event.shiftKey;
+
+        // 4. 选中逻辑
+        // ✨ 优化：只有在“修饰键点击”或“目录点击”时，才手动触发选中更新。
+        // 对于普通文件点击，我们依赖 SESSION_SELECT_REQUESTED 来隐式更新选中状态。
+        if (isModifierClick || itemType === 'directory') {
+            if (!this.state.readOnly) {
+                this._handleItemSelection(itemEl, event);
+            }
         }
 
-        console.log('[NodeList] Proceeding with selection logic...');
-        this._handleItemSelection(itemEl, event);
-        
-        // [修正] 增加一个 action !== 'select-only' 的判断，避免点击icon时也打开文件
-        if (action !== 'select-only' && itemEl.dataset.itemType === 'file' && !(event.metaKey || event.ctrlKey || event.shiftKey)) {
-            console.log(`[NodeList] It's a file click. Publishing SESSION_SELECT_REQUESTED for ${itemId}`);
-            this.coordinator.publish('SESSION_SELECT_REQUESTED', { sessionId: itemId });
-} else if (itemEl.dataset.itemType === 'directory' && !(event.metaKey || event.ctrlKey || event.shiftKey)) {
-    // ✨ 新增：点击目录时清除活动文件的高亮状态
-    console.log(`[NodeList] It's a directory click. Clearing active session.`);
-    this.coordinator.publish('SESSION_SELECT_REQUESTED', { sessionId: null });
-        } else {
-            console.log(`[NodeList] Not a file-opening click. Conditions not met: action=${action}, itemType=${itemEl.dataset.itemType}, modifierKeys=${event.metaKey || event.ctrlKey || event.shiftKey}`);
+        // 5. 会话/打开逻辑
+        if (action !== 'select-only') { // 排除仅选中图标的点击
+            if (itemType === 'file' && !isModifierClick) {
+                // ✨ 普通文件点击：发送打开请求。Store 会自动将其设为选中。
+                this.coordinator.publish('SESSION_SELECT_REQUESTED', { sessionId: itemId });
+            } else if (itemType === 'directory' && !isModifierClick) {
+                // 普通目录点击：清除当前编辑器内容
+                this.coordinator.publish('SESSION_SELECT_REQUESTED', { sessionId: null });
+            }
         }
     };
     
@@ -806,35 +809,19 @@ export class NodeList extends BaseComponent<NodeListState> {
         const newInstances: Map<string, BaseNodeItem> = new Map();
         const fragment = document.createDocumentFragment();
 
-        // ✨ 修复: 检查 creatingItem 时使用正确的 parentId
-    /*
-        console.log('[NodeList] _renderItems called with parentId:', parentId, 'creatingItem:', this.state.creatingItem);
-        if (!this.state.readOnly && this.state.creatingItem?.parentId === parentId) {
-            console.log('[NodeList] Rendering creator input for parentId:', parentId);
-            const creatorDiv = document.createElement('div');
-            creatorDiv.innerHTML = createItemInputHTML(this.state.creatingItem);
-            fragment.appendChild(creatorDiv.firstElementChild!);
-        }
-    */
-
-    // ✨ 新增：将输入框渲染逻辑移到 traverseAndRender 函数内部
-    const traverseAndRender = (itemList: VFSNodeUI[], parentEl: DocumentFragment | HTMLElement, currentParentId: string | null) => {
-        // ✨ 先在列表开头渲染创建输入框
-        if (!this.state.readOnly && this.state.creatingItem?.parentId === currentParentId) {
-            console.log('[NodeList] Rendering creator input for parentId:', currentParentId);
-            const creatorDiv = document.createElement('div');
-            creatorDiv.innerHTML = createItemInputHTML(this.state.creatingItem);
-            parentEl.appendChild(creatorDiv.firstElementChild!);
-        }
-
-        // ✨ 修改：空目录占位符只在没有子项且不在创建状态时显示
-        if (itemList.length === 0 && currentParentId !== null) {
-            // 如果正在这个目录中创建项目，不显示空占位符
-            if (this.state.creatingItem?.parentId !== currentParentId) {
-                (parentEl as HTMLElement).innerHTML = `<div class="vfs-directory-item__empty-placeholder">(空)</div>`;
+        const traverseAndRender = (itemList: VFSNodeUI[], parentEl: DocumentFragment | HTMLElement, currentParentId: string | null) => {
+            if (!this.state.readOnly && this.state.creatingItem?.parentId === currentParentId) {
+                const creatorDiv = document.createElement('div');
+                creatorDiv.innerHTML = createItemInputHTML(this.state.creatingItem);
+                parentEl.appendChild(creatorDiv.firstElementChild!);
             }
-            return;
-        }
+
+            if (itemList.length === 0 && currentParentId !== null) {
+                if (this.state.creatingItem?.parentId !== currentParentId) {
+                    (parentEl as HTMLElement).innerHTML = `<div class="vfs-directory-item__empty-placeholder">(空)</div>`;
+                }
+                return;
+            }
 
             itemList.forEach(item => {
                 let itemInstance = this.itemInstances.get(item.id);
