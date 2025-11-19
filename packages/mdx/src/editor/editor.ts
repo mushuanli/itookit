@@ -10,17 +10,13 @@ import type { VFSCore } from '@itookit/vfs-core';
 import { MDxRenderer } from '../renderer/renderer';
 import type { MDxPlugin } from '../core/plugin';
 import type { TaskToggleResult } from '../plugins/interactions/task-list.plugin';
-import { IEditor, EditorOptions, UnifiedSearchResult, Heading } from '@itookit/common';
+import { IEditor, EditorOptions, UnifiedSearchResult, Heading, EditorEvent, EditorEventCallback } from '@itookit/common';
 
 export interface MDxEditorConfig extends EditorOptions {
   searchMarkClass?: string;
   vfsCore?: VFSCore;
   persistenceAdapter?: IPersistenceAdapter;
 }
-
-// [修改] 扩展 EditorEventCallback 类型以包含 'modeChanged'
-type EditorEventName = 'change' | 'interactiveChange' | 'ready' | 'modeChanged';
-type EditorEventCallback = (payload?: any) => void;
 
 /**
  * MDx 编辑器
@@ -35,14 +31,15 @@ export class MDxEditor extends IEditor {
   private currentMode: 'edit' | 'render';
   private config: MDxEditorConfig;
   private cleanupListeners: Array<() => void> = [];
-  private eventEmitter = new Map<EditorEventName, Set<EditorEventCallback>>();
+  // 使用 IEditor 中定义的事件类型
+  private eventEmitter = new Map<EditorEvent, Set<EditorEventCallback>>();
   private readOnlyCompartment = new Compartment();
   private searchCompartment = new Compartment();
 
   private isDestroying = false;
 
   constructor(options: MDxEditorConfig = {}) {
-    super(); // 🔧 [修正] 调用父构造函数时不传参数
+    super(); 
     this.config = options;
     this.currentMode = options.initialMode || 'edit';
     this.renderer = new MDxRenderer({
@@ -55,7 +52,7 @@ export class MDxEditor extends IEditor {
   }
 
   // ✨ [最终] init只负责挂载DOM，不再关心内容
-    async init(container: HTMLElement, initialContent: string = ''): Promise<void> {
+  async init(container: HTMLElement, initialContent: string = ''): Promise<void> {
     console.log('🎬 [MDxEditor] Starting initialization...');
     this._container = container;
     this.createContainers(container);
@@ -64,22 +61,22 @@ export class MDxEditor extends IEditor {
     // TODO: 未来可探索更健壮的事件驱动或 Promise 机制来代替 setTimeout。
     await new Promise((resolve) => setTimeout(resolve, 10));
 
-        this.initCodeMirror(initialContent);
-        // 简化模式切换
-        const initialMode = this.config.initialMode || 'edit';
-        this.currentMode = initialMode;
-        const isEditMode = initialMode === 'edit';
-        
-        this._container.classList.toggle('is-edit-mode', isEditMode);
-        this._container.classList.toggle('is-render-mode', !isEditMode);
-        this.editorContainer!.style.display = isEditMode ? 'flex' : 'none';
-        this.renderContainer!.style.display = isEditMode ? 'none' : 'block';
-        
-        if (!isEditMode) {
-            await this.renderContent();
-        }
+    this.initCodeMirror(initialContent);
+    
+    const initialMode = this.config.initialMode || 'edit';
+    this.currentMode = initialMode;
+    const isEditMode = initialMode === 'edit';
+    
+    this._container.classList.toggle('is-edit-mode', isEditMode);
+    this._container.classList.toggle('is-render-mode', !isEditMode);
+    this.editorContainer!.style.display = isEditMode ? 'flex' : 'none';
+    this.renderContainer!.style.display = isEditMode ? 'none' : 'block';
+    
+    if (!isEditMode) {
+        await this.renderContent();
+    }
 
-        this.listenToPluginEvents();
+    this.listenToPluginEvents();
 
     this.renderer.getPluginManager().executeActionHook('editorPostInit', {
       editor: this,
@@ -100,7 +97,6 @@ export class MDxEditor extends IEditor {
     this.renderer.usePlugin(plugin);
     return this;
   }
-
 
   /**
    * 创建编辑器和渲染器的 DOM 容器。
@@ -128,6 +124,17 @@ export class MDxEditor extends IEditor {
       markdown(),
       this.readOnlyCompartment.of(EditorView.editable.of(true)),
       this.searchCompartment.of([]),
+
+      // ✨ [核心实现] 监听原生 DOM 事件并转发为编辑器事件
+      EditorView.domEventHandlers({
+        blur: (_event, _view) => {
+            this.emit('blur');
+        },
+        focus: (_event, _view) => {
+            this.emit('focus');
+        }
+      }),
+
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
           this.emit('change');
@@ -237,6 +244,7 @@ export class MDxEditor extends IEditor {
   }
 
   setTitle(newTitle: string): void { this.renderer.getPluginManager().emit('setTitle', { title: newTitle }); }
+  
   async navigateTo(target: { elementId: string }): Promise<void> {
     if (this.currentMode === 'render' && this.renderContainer) {
       const element = this.renderContainer.querySelector(`#${target.elementId}`);
@@ -311,29 +319,26 @@ export class MDxEditor extends IEditor {
     } else { this.renderer.clearSearch(); }
   }
 
-  // [修改] 扩展 on 方法以接受 'modeChanged'
-  on(eventName: EditorEventName, callback: EditorEventCallback): () => void {
+  on(eventName: EditorEvent, callback: EditorEventCallback): () => void {
     if (!this.eventEmitter.has(eventName)) this.eventEmitter.set(eventName, new Set());
     this.eventEmitter.get(eventName)!.add(callback);
     return () => { this.eventEmitter.get(eventName)?.delete(callback); };
   }
 
-  // [修改] 扩展 emit 方法以接受 'modeChanged'
-  private emit(eventName: EditorEventName, payload?: any) {
+  private emit(eventName: EditorEvent, payload?: any) {
     this.eventEmitter.get(eventName)?.forEach(cb => cb(payload));
   }
-
 
   /**
    * 销毁编辑器实例，释放资源。
    */
-    async destroy(): Promise<void> {
-        if (this.isDestroying) {
-            return;
-        }
-        this.isDestroying = true;
-        
-        console.log(`[MDxEditor] Destroying instance for node ${this.config.nodeId || 'unknown'}.`);
+  async destroy(): Promise<void> {
+      if (this.isDestroying) {
+          return;
+      }
+      this.isDestroying = true;
+      
+      console.log(`[MDxEditor] Destroying instance for node ${this.config.nodeId || 'unknown'}.`);
 
         // 在这里可以添加一个最后的、非阻塞的保存尝试，作为双重保险，
         // 但主要保存逻辑已移至连接器中。
@@ -343,21 +348,21 @@ export class MDxEditor extends IEditor {
         //     });
         // }
 
-        this.editorView?.destroy();
-        this.renderer.destroy();
-        this.cleanupListeners.forEach((fn) => fn());
-        this.cleanupListeners = [];
-        this.eventEmitter.clear();
-        
-        if (this._container) {
-            this._container.innerHTML = '';
-        }
+      this.editorView?.destroy();
+      this.renderer.destroy();
+      this.cleanupListeners.forEach((fn) => fn());
+      this.cleanupListeners = [];
+      this.eventEmitter.clear();
+      
+      if (this._container) {
+          this._container.innerHTML = '';
+      }
 
-        this._container = null;
-        this.editorContainer = null;
-        this.renderContainer = null;
-        this.isDestroying = false;
-    }
+      this._container = null;
+      this.editorContainer = null;
+      this.renderContainer = null;
+      this.isDestroying = false;
+  }
   
   // --- MDxEditor-specific methods ---
 

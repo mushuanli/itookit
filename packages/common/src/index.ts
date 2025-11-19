@@ -2,7 +2,7 @@
 
 // Export all interfaces
 export { IAutocompleteProvider, type Suggestion } from './interfaces/IAutocompleteProvider';
-export { IEditor,EditorOptions, type SearchResultSource, type UnifiedSearchResult, type Heading } from './interfaces/IEditor';
+export { IEditor,EditorOptions,EditorEvent, EditorEventCallback, type SearchResultSource, type UnifiedSearchResult, type Heading } from './interfaces/IEditor';
 export {EditorFactory} from './interfaces/IEditorFactory';
 
 export { IMentionProvider, type HoverPreviewData } from './interfaces/IMentionProvider'; // UPDATE: Export new HoverPreviewData interface

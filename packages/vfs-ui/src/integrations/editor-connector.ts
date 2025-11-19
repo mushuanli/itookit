@@ -4,7 +4,7 @@
  */
 import type { IEditor, EditorFactory, EditorOptions, ISessionManager } from '@itookit/common';
 import type { VFSCore } from '@itookit/vfs-core';
-import type { VFSNodeUI, VFSUIState } from '../types/types'; // ✨ 导入 VFSUIState
+import type { VFSNodeUI, VFSUIState } from '../types/types';
 import type { VFSService } from '../services/VFSService';
 
 export interface ConnectOptions {
@@ -32,48 +32,78 @@ export function connectEditorLifecycle(
 ): () => void {
     let activeEditor: IEditor | null = null;
     let activeNode: VFSNodeUI | null = null;
+    
+    // ✨ 用于存储当前编辑器实例的事件解绑函数
+    let activeEditorUnsubscribers: Array<() => void> = [];
+
     const { onEditorCreated, ...factoryExtraOptions } = options;
 
-    const handleSessionChange = async ({ item }: { item?: VFSNodeUI }) => {
-        // --- 1. Save and Destroy the previous editor instance ---
-        if (activeEditor && activeNode) {
-            console.log(`[EditorConnector] Saving content for node ${activeNode.id} before switching.`);
-            try {
-                // ✨ [核心修复] 在保存前检查节点是否已被删除
-                const currentState: VFSUIState = (vfsManager as any).store.getState();
-                const findNode = (nodes: VFSNodeUI[], id: string): VFSNodeUI | null => {
-                    for (const n of nodes) {
-                        if (n.id === id) return n;
-                        if (n.children) {
-                            const found = findNode(n.children, id);
-                            if (found) return found;
-                        }
+    /**
+     * ✨ [核心] 统一的保存逻辑
+     * 封装了检查节点是否存在、获取内容、写入VFS的逻辑
+     */
+    const saveCurrentSession = async () => {
+        if (!activeEditor || !activeNode) return;
+
+        try {
+            // 1. 检查节点是否仍然存在于 State 中 (防止保存到已删除的文件)
+            const currentState: VFSUIState = (vfsManager as any).store.getState();
+            const findNode = (nodes: VFSNodeUI[], id: string): VFSNodeUI | null => {
+                for (const n of nodes) {
+                    if (n.id === id) return n;
+                    if (n.children) {
+                        const found = findNode(n.children, id);
+                        if (found) return found;
                     }
-                    return null;
-                };
-
-                if (findNode(currentState.items, activeNode.id)) {
-                    const contentToSave = activeEditor.getText();
-                    console.log(`[DEBUG] Saving ${contentToSave.length} chars for node ${activeNode.id}`);
-                    await vfsCore.getVFS().write(activeNode.id, contentToSave);
-                    console.log(`[DEBUG] Save complete`);
-                } else {
-                    console.warn(`[EditorConnector] Node ${activeNode.id} was deleted. Skipping save.`);
                 }
-            } catch (error) {
-                // 即使节点存在，写入也可能失败，所以保留 catch
-                console.error(`[EditorConnector] Failed to save content for node ${activeNode.id}:`, error);
-            }
-        }
+                return null;
+            };
 
+            if (findNode(currentState.items, activeNode.id)) {
+                // 2. 获取内容并保存
+                const contentToSave = activeEditor.getText();
+                
+                // 可选：这里可以增加一个脏检查 (dirty check)，比对上次保存的内容，减少不必要的 IO
+                console.log(`[EditorConnector] Auto-saving node ${activeNode.id}...`);
+                await vfsCore.getVFS().write(activeNode.id, contentToSave);
+            } else {
+                console.warn(`[EditorConnector] Node ${activeNode.id} was deleted. Skipping save.`);
+            }
+        } catch (error) {
+            // 即使节点存在，写入也可能失败，所以保留 catch
+            console.error(`[EditorConnector] Failed to save content for node ${activeNode?.id}:`, error);
+        }
+    };
+
+    /**
+     * ✨ [核心] 清理当前编辑器：保存、解绑事件、销毁实例
+     * 这是一个原子操作，用于 Editor 的安全卸载
+     */
+    const teardownActiveEditor = async () => {
         if (activeEditor) {
-            console.log(`[EditorConnector] Destroying previous editor instance.`);
+            // 1. 保存 (Save)
+            await saveCurrentSession();
+            
+            // 2. 解绑事件 (Unsubscribe)
+            activeEditorUnsubscribers.forEach(unsub => unsub());
+            activeEditorUnsubscribers = [];
+
+            // 3. 销毁 (Destroy)
+            console.log(`[EditorConnector] Destroying editor instance.`);
             await activeEditor.destroy();
+            
+            // 4. 清理引用
             activeEditor = null;
+            activeNode = null;
+
             if (onEditorCreated) onEditorCreated(null);
         }
+    };
+
+    const handleSessionChange = async ({ item }: { item?: VFSNodeUI }) => {
+        // --- 1. Teardown previous editor (Save & Destroy) ---
+        await teardownActiveEditor();
         
-        activeNode = null;
         editorContainer.innerHTML = '';
 
         // --- 2. Create the new editor instance ---
@@ -95,6 +125,27 @@ export function connectEditorLifecycle(
                 );
 
                 activeNode = item;
+
+                // ✨ [核心] 绑定自动保存事件
+                if (activeEditor) {
+                    // A. 失去焦点时保存 (Blur)
+                    // 由于 IEditor 基类已更新，这里可以直接监听 blur
+                    const unsubBlur = activeEditor.on('blur', () => {
+                        console.log('[EditorConnector] Editor blurred. Saving...');
+                        saveCurrentSession();
+                    });
+                    if (unsubBlur) activeEditorUnsubscribers.push(unsubBlur);
+
+                    // B. 模式切换时保存 (Edit -> Render)
+                    const unsubMode = activeEditor.on('modeChanged', (payload: any) => {
+                        if (payload && payload.mode === 'render') {
+                            console.log('[EditorConnector] Switched to render mode. Saving...');
+                            saveCurrentSession();
+                        }
+                    });
+                    if (unsubMode) activeEditorUnsubscribers.push(unsubMode);
+                }
+
                 if (onEditorCreated) onEditorCreated(activeEditor);
             } catch (error) {
                 console.error(`[EditorConnector] Failed to create editor for node ${item.id}:`, error);
@@ -106,12 +157,18 @@ export function connectEditorLifecycle(
         }
     };
 
-    const unsubscribe = vfsManager.on('sessionSelected', handleSessionChange);
+    const unsubscribeSessionListener = vfsManager.on('sessionSelected', handleSessionChange);
 
+    // 初始化加载
     (async () => {
         const initialItem = vfsManager.getActiveSession();
         await handleSessionChange({ item: initialItem });
     })();
 
-    return unsubscribe;
+    // 返回全局清理函数 (当 connector 被断开时调用)
+    return () => {
+        unsubscribeSessionListener();
+        // ✨ 确保最后一次保存并清理
+        teardownActiveEditor().catch(err => console.error('Error during final teardown:', err));
+    };
 }
