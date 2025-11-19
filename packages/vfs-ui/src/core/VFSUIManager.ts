@@ -461,14 +461,80 @@ export class VFSUIManager extends ISessionManager<VFSNodeUI, VFSService> {
             }
             this.coordinator.publish('PUBLIC_STATE_CHANGED', { state: newState });
         });
+        
+        // ✨ 修复: 添加对导入文件事件的处理
+        this.coordinator.subscribe('PUBLIC_IMPORT_REQUESTED', async (e) => {
+            const { parentId } = e.data;
+            console.log('[VFSUIManager] Import requested for parentId:', parentId);
+            
+            // 创建文件输入元素
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.multiple = true;
+            input.accept = '*/*';
+            input.style.display = 'none';
+            
+            input.onchange = async (event) => {
+                const files = (event.target as HTMLInputElement).files;
+                if (!files || files.length === 0) return;
+                
+                console.log(`[VFSUIManager] Importing ${files.length} file(s)`);
+                
+                try {
+                    // 读取所有文件内容
+                    const filesWithContent = await Promise.all(
+                        Array.from(files).map(async (file) => {
+                            const content = await this._readFileContent(file);
+                            return { title: file.name, content };
+                        })
+                    );
+                    
+                    // 调用批量创建 API
+                    const createdNodes = await this._vfsService.createFiles({ 
+                        parentId, 
+                        files: filesWithContent 
+                    });
+                    
+                    console.log(`[VFSUIManager] Successfully imported ${createdNodes.length} file(s)`);
+                    
+                    // 可选: 选中第一个导入的文件
+                    if (createdNodes.length > 0 && createdNodes[0].type === 'file') {
+                        this.store.dispatch({ 
+                            type: 'SESSION_SELECT', 
+                            payload: { sessionId: createdNodes[0].nodeId } 
+                        });
+                    }
+                } catch (error) {
+                    console.error('[VFSUIManager] Failed to import files:', error);
+                    alert('导入文件失败: ' + (error as Error).message);
+                } finally {
+                    // 清理输入元素
+                    input.remove();
+                }
+            };
+            
+            // 将输入元素添加到 DOM 并触发点击
+            document.body.appendChild(input);
+            input.click();
+        });
 
         this.coordinator.subscribe('CREATE_ITEM_CONFIRMED', async (e) => {
             const { type, title, parentId } = e.data;
-            if (type === 'file') {
-                await this._vfsService.createFile({ title, parentId, content: this.options.newSessionContent || '' });
-            } else if (type === 'directory') {
-                await this._vfsService.createDirectory({ title, parentId });
-            }
+    console.log('[VFSUIManager] CREATE_ITEM_CONFIRMED:', e.data);
+    
+    try {
+        if (type === 'file') {
+            await this._vfsService.createFile({ title, parentId, content: this.options.newSessionContent || '' });
+        } else if (type === 'directory') {
+            await this._vfsService.createDirectory({ title, parentId });
+        }
+        console.log(`[VFSUIManager] ${type} created successfully`);
+    } catch (error) {
+        console.error(`[VFSUIManager] Failed to create ${type}:`, error);
+        alert(`创建${type === 'file' ? '文件' : '目录'}失败: ${(error as Error).message}`);
+        // 重新显示输入框,让用户重试
+        this.store.dispatch({ type: 'CREATE_ITEM_START', payload: { type, parentId } });
+    }
         });
         
         this.coordinator.subscribe('ITEM_ACTION_REQUESTED', async (e) => {
@@ -545,4 +611,31 @@ export class VFSUIManager extends ISessionManager<VFSNodeUI, VFSService> {
         traverse(items);
         return tagsMap;
     }
+
+    /**
+     * 读取文件内容
+     * @private
+     */
+    private async _readFileContent(file: File): Promise<string | ArrayBuffer> {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string | ArrayBuffer);
+            reader.onerror = () => reject(new Error(`Failed to read file: ${file.name}`));
+            
+            // 根据文件类型选择读取方式
+            if (file.type.startsWith('text/') || 
+                file.name.endsWith('.md') || 
+                file.name.endsWith('.txt') ||
+                file.name.endsWith('.json') ||
+                file.name.endsWith('.html') ||
+                file.name.endsWith('.css') ||
+                file.name.endsWith('.js') ||
+                file.name.endsWith('.ts')) {
+                reader.readAsText(file);
+            } else {
+                reader.readAsArrayBuffer(file);
+            }
+        });
+    }
+
 }
