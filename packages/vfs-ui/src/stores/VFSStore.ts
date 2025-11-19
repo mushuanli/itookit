@@ -66,6 +66,12 @@ export class VFSStore {
                     draft.tags = action.payload.tags;
                     draft.status = 'success';
                     draft.error = null;
+    // ✅ 新增：数据加载完成后，如果有 activeId，强制触发更新
+    // 这确保了即使 activeId 是从持久化恢复的，也能触发编辑器初始化
+    if (draft.activeId) {
+        draft._forceUpdateTimestamp = Date.now();
+        console.log(`[VFSStore] Data loaded with activeId ${draft.activeId}, forcing update with timestamp: ${draft._forceUpdateTimestamp}`);
+    }
                     break;
                 }
                 
@@ -195,6 +201,7 @@ export class VFSStore {
         if (oldActiveId === newSessionId) {
             // Add a timestamp to force state update
             draft._forceUpdateTimestamp = Date.now();
+            console.log(`[VFSStore] Same activeId, forcing update with timestamp: ${draft._forceUpdateTimestamp}`);
         }
                         console.log(`[VFSStore] State updated. New activeId is now: ${draft.activeId}`);
                     } else {
