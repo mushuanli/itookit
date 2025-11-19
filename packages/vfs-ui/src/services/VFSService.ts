@@ -30,6 +30,15 @@ export interface CreateFileOptions {
 }
 
 /**
+ * ✨ [新增] Options for creating multiple files.
+ */
+export interface CreateMultipleFilesOptions {
+    parentId?: string | null;
+    files: { title: string; content: string | ArrayBuffer }[];
+}
+
+
+/**
  * Options for creating a new directory.
  */
 export interface CreateDirectoryOptions {
@@ -45,7 +54,7 @@ export class VFSService extends ISessionService<VNode> {
   private readonly vfsCore: VFSCore;
   private readonly moduleName: string;
   private readonly newFileContent: string;
-  private readonly vfs: VFS; // [修正] 缓存底层VFS实例
+  private readonly vfs: VFS;
 
   constructor({ vfsCore, moduleName, newFileContent = '' }: VFSServiceDependencies) {
     super();
@@ -72,6 +81,28 @@ export class VFSService extends ISessionService<VNode> {
     const path = await this._buildPath(parentId, title);
     return this.vfsCore.createFile(this.moduleName, path, content);
   }
+
+  /**
+   * ✨ [新增] Creates multiple files within a specified parent directory.
+   * This enables features like multi-file import.
+   * @param options - The options for creating multiple files.
+   * @returns A promise that resolves to an array of the created VNodes.
+   */
+  public async createFiles({ parentId = null, files }: CreateMultipleFilesOptions): Promise<VNode[]> {
+    if (!files || files.length === 0) {
+        return [];
+    }
+
+    const parentPath = parentId ? await this._getParentRelativePath(parentId) : '';
+
+    return Promise.all(
+        files.map(file => {
+            const relativePath = this.vfs.pathResolver.join(parentPath, file.title);
+            return this.vfsCore.createFile(this.moduleName, relativePath, file.content);
+        })
+    );
+  }
+
 
   public async createDirectory({ title = 'New Directory', parentId = null }: CreateDirectoryOptions): Promise<VNode> {
     const path = await this._buildPath(parentId, title);
@@ -173,34 +204,36 @@ export class VFSService extends ISessionService<VNode> {
   // --- Private Helper Methods ---
 
   /**
-   * Safely constructs the full path for a new node within the virtual file system.
-   * It queries vfs-core directly to get the authoritative parent path.
-   *
-   * @param parentId - The ID of the parent directory, or null for the root.
-   * @param title - The name of the new node.
-   * @returns A promise that resolves to the full, valid path string.
+   * ✨ [重构] Safely constructs the relative path for a new node.
+   * This now uses the VFS path resolver for robust path joining, fixing the in-directory creation bug.
    */
   private async _buildPath(parentId: string | null, title: string): Promise<string> {
-    if (!parentId) {
-      return `/${title}`;
-    }
+    const parentPath = parentId ? await this._getParentRelativePath(parentId) : '';
+    return this.vfs.pathResolver.join(parentPath, title);
+  }
 
+  /**
+   * ✨ [新增辅助方法] Gets the parent's path relative to the module root.
+   */
+  private async _getParentRelativePath(parentId: string): Promise<string> {
     try {
-      const parentStat: NodeStat = await this.vfs.stat(parentId);
-      if (parentStat.type !== VNodeType.DIRECTORY) {
-          throw new Error(`Node with ID ${parentId} is not a directory.`);
-      }
-      // [修正] 移除模块前缀，vfsCore API 需要的是模块内的相对路径
-      const modulePathPrefix = `/${this.moduleName}`;
-      let parentModulePath = parentStat.path;
-      if (parentModulePath.startsWith(modulePathPrefix)) {
-        parentModulePath = parentModulePath.substring(modulePathPrefix.length);
-      }
+        const parentStat: NodeStat = await this.vfs.stat(parentId);
+        if (parentStat.type !== VNodeType.DIRECTORY) {
+            throw new Error(`Node with ID ${parentId} is not a directory.`);
+        }
 
-      return parentModulePath === '/' || parentModulePath === '' ? `/${title}` : `${parentModulePath}/${title}`;
+        const modulePathPrefix = `/${this.moduleName}`;
+        let parentModulePath = parentStat.path;
+
+        if (parentModulePath.startsWith(modulePathPrefix)) {
+            parentModulePath = parentModulePath.substring(modulePathPrefix.length);
+        }
+        
+        // Remove leading slash if it exists, as path.join handles it.
+        return parentModulePath.startsWith('/') ? parentModulePath.substring(1) : parentModulePath;
     } catch (error) {
-      console.warn(`[VFSService] Could not find parent with ID "${parentId}". Defaulting to root.`, error);
-      return `/${title}`;
+        console.warn(`[VFSService] Could not find parent with ID "${parentId}". Defaulting to root.`, error);
+        return '';
     }
   }
 }

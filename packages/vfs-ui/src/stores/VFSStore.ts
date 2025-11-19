@@ -84,8 +84,15 @@ export class VFSStore {
                     break;
 
                 case 'CREATE_ITEM_START':
+                    console.log('[VFSStore] CREATE_ITEM_START:', action.payload);
                     draft.creatingItem = action.payload;
                     draft.selectedItemIds.clear();
+                    
+                    // ✨ 核心修复: 如果在目录中创建,自动展开该目录
+                    if (action.payload.parentId) {
+                        draft.expandedFolderIds.add(action.payload.parentId);
+                        console.log('[VFSStore] Auto-expanded folder:', action.payload.parentId);
+                    }
                     break;
 
                 case 'CREATE_ITEM_END':
@@ -140,7 +147,7 @@ export class VFSStore {
 
                 // ✨ [架构优化] 修正 ITEM_UPDATE_SUCCESS 的 Reducer 逻辑
                 case 'ITEM_UPDATE_SUCCESS': {
-                    const { itemId, updates } = action.payload; // `updates` is a full VFSNodeUI object
+                    const { itemId, updates } = action.payload;
                     const findAndUpdate = (items: VFSNodeUI[]): boolean => {
                        for (let i=0; i < items.length; i++) {
                            const item = items[i];
@@ -228,7 +235,7 @@ export class VFSStore {
                         if (oldActiveId === newSessionId) {
                             draft._forceUpdateTimestamp = Date.now();
                         }
-                    } else if (newSessionId === null) { // 允许取消选择
+                    } else if (newSessionId === null) {
                         draft.activeId = null;
                     }
                     break;
