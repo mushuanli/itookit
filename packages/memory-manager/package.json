@@ -1,0 +1,68 @@
+{
+    "name": "@itookit/memory-manager",
+    "version": "0.1.0",
+    "description": "An intelligent glue layer connecting VFS-UI and MDxEditor with headless AI capabilities for advanced memory management.",
+    "type": "module",
+    "main": "./dist/memory-manager.umd.cjs",
+    "module": "./dist/memory-manager.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/memory-manager.js",
+            "require": "./dist/memory-manager.umd.cjs"
+        },
+        "./style.css": "./dist/style.css"
+    },
+    "files": [
+        "dist",
+        "README.md",
+        "LICENSE"
+    ],
+    "scripts": {
+        "dev": "vite",
+        "build": "tsc && vite build",
+        "preview": "vite preview",
+        "prepublishOnly": "pnpm build"
+    },
+    "keywords": [
+        "memory-manager",
+        "pkm",
+        "vfs-ui",
+        "mdxeditor",
+        "headless-ai",
+        "typescript"
+    ],
+    "author": "lizlok@gmail.com",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/mushuanli/itookit.git",
+        "directory": "packages/memory-manager"
+    },
+    "publishConfig": {
+        "access": "public"
+    },
+    "engines": {
+        "node": ">=16.0.0"
+    },
+    "peerDependencies": {
+        "@itookit/common": "workspace:*",
+        "@itookit/vfs-core": "workspace:*",
+        "@itookit/vfs-ui": "workspace:*",
+        "@itookit/mdxeditor": "workspace:*"
+    },
+    "dependencies": {
+        "immer": "^10.1.1"
+    },
+    "devDependencies": {
+        "@itookit/common": "workspace:*",
+        "@itookit/vfs-core": "workspace:*",
+        "@itookit/vfs-ui": "workspace:*",
+        "@itookit/mdxeditor": "workspace:*",
+        "@types/node": "^20.12.12",
+        "typescript": "^5.4.5",
+        "vite": "^5.2.11",
+        "vite-plugin-dts": "^3.9.1"
+    }
+}

@@ -191,6 +191,37 @@ importers:
         specifier: ^5.3.0
         version: 5.9.3
 
+  packages/memory-manager:
+    dependencies:
+      immer:
+        specifier: ^10.1.1
+        version: 10.2.0
+    devDependencies:
+      '@itookit/common':
+        specifier: workspace:*
+        version: link:../common
+      '@itookit/mdxeditor':
+        specifier: workspace:*
+        version: link:../mdx
+      '@itookit/vfs-core':
+        specifier: workspace:*
+        version: link:../vfs-core
+      '@itookit/vfs-ui':
+        specifier: workspace:*
+        version: link:../vfs-ui
+      '@types/node':
+        specifier: ^20.12.12
+        version: 20.19.24
+      typescript:
+        specifier: ^5.4.5
+        version: 5.9.3
+      vite:
+        specifier: ^5.2.11
+        version: 5.4.21(@types/node@20.19.24)
+      vite-plugin-dts:
+        specifier: ^3.9.1
+        version: 3.9.1(@types/node@20.19.24)(rollup@4.53.1)(typescript@5.9.3)(vite@5.4.21(@types/node@20.19.24))
+
   packages/vfs-core:
     dependencies:
       '@itookit/common':
