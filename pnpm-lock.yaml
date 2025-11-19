@@ -63,6 +63,9 @@ importers:
       '@itookit/mdxeditor':
         specifier: workspace:*
         version: link:../mdx
+      '@itookit/memory-manager':
+        specifier: workspace:*
+        version: link:../memory-manager
       '@itookit/vfs-core':
         specifier: workspace:*
         version: link:../vfs-core
@@ -168,6 +171,9 @@ importers:
       codemirror:
         specifier: ^6.0.1
         version: 6.0.2
+      front-matter:
+        specifier: ^4.0.2
+        version: 4.0.2
       gray-matter:
         specifier: ^4.0.3
         version: 4.0.3
@@ -2125,6 +2131,9 @@ packages:
   fragment-cache@0.2.1:
     resolution: {integrity: sha512-GMBAbW9antB8iZRHLoGw0b3HANt57diZYFO/HL1JGIC1MjKrdmhxvrJbupnVvpys0zsz7yBApXdQyfepKly2kA==}
     engines: {node: '>=0.10.0'}
+
+  front-matter@4.0.2:
+    resolution: {integrity: sha512-I8ZuJ/qG92NWX8i5x1Y8qyj3vizhXS31OxjKDu3LKP+7/qBgfIKValiZIEwoVoJKUHlhWtYrktkxV1XsX+pPlg==}
 
   fs-extra@11.3.2:
     resolution: {integrity: sha512-Xr9F6z6up6Ws+NjzMCZc6WXg2YFRlrLP9NQDO3VQrWrfiojdhS56TzueT88ze0uBdCTwEIhQ3ptnmKeWGFAe0A==}
@@ -5546,6 +5555,10 @@ snapshots:
   fragment-cache@0.2.1:
     dependencies:
       map-cache: 0.2.2
+
+  front-matter@4.0.2:
+    dependencies:
+      js-yaml: 3.14.2
 
   fs-extra@11.3.2:
     dependencies:

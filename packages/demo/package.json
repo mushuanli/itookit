@@ -12,7 +12,7 @@
     "@itookit/mdxeditor": "workspace:*",
     "@itookit/vfs-core": "workspace:*",
     "@itookit/vfs-ui": "workspace:*",
-
+    "@itookit/memory-manager": "workspace:*",
     "@codemirror/lang-markdown": "^6.3.4",
     "@codemirror/state": "^6.5.2",
     "@fortawesome/fontawesome-free": "^7.1.0",

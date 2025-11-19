@@ -3,7 +3,8 @@
  * @desc The headless Markdown processing engine.
  */
 
-import matter from 'gray-matter'; // 使用成熟的库来解析 frontmatter
+// ✅ 引入轻量级替代品 (需 npm install front-matter)
+import fm from 'front-matter'; 
 
 // --- 类型定义 ---
 
@@ -138,7 +139,9 @@ export class MDxProcessor {
    */
   public async process(markdownText: string, options: ProcessOptions): Promise<ProcessResult> {
     // 阶段 0: 解析 Frontmatter
-    const { data: frontmatter, content: body } = matter(markdownText);
+    const parsed = fm(markdownText);
+    const frontmatter = parsed.attributes as Record<string, any>;
+    const body = parsed.body;
     const metadata: Record<string, any> = { ...frontmatter };
 
     // 阶段 1: 查找所有 Mentions
