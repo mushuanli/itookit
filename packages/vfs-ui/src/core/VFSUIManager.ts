@@ -21,9 +21,14 @@ import { MoveToModal } from '../components/MoveToModal/MoveToModal';
 import { TagProvider } from '../providers/TagProvider';
 import { FileProvider } from '../providers/FileProvider';
 import { DirectoryProvider } from '../providers/DirectoryProvider';
-import type { VFSNodeUI, TagInfo, ContextMenuConfig, VFSUIState, TagEditorOptions } from '../types/types';
+import type { VFSNodeUI, TagInfo, ContextMenuConfig, VFSUIState, TagEditorOptions, UISettings } from '../types/types';
 
-type VFSUIOptions = SessionUIOptions & { initialState?: Partial<VFSUIState> };
+// ✨ [修改] 扩展 VFSUIOptions 类型
+type VFSUIOptions = SessionUIOptions & { 
+    initialState?: Partial<VFSUIState>,
+    defaultUiSettings?: Partial<UISettings> 
+};
+
 
 /**
  * Manages the entire lifecycle and interaction of the VFS-UI components.
@@ -67,9 +72,18 @@ export class VFSUIManager extends ISessionManager<VFSNodeUI, VFSService> {
         const persistedUiState = this._loadUiState();
         
         this.coordinator = new Coordinator();
+
+        // ✨ [修改] 构造 VFSStore 的初始状态，以支持可配置的默认排序
+        const finalUiSettings = {
+            ...(options.defaultUiSettings),         // 1. 优先级最低的编程默认值
+            ...(persistedUiState.uiSettings),       // 2. 用户上次会话保存的设置
+            ...(options.initialState?.uiSettings), // 3. 优先级最高的本次实例强制覆盖值
+        };
+
         this.store = new VFSStore({
             ...options.initialState,
             ...persistedUiState,
+            uiSettings: finalUiSettings, // 使用合并后的设置
             isSidebarCollapsed: options.initialSidebarCollapsed,
             readOnly: options.readOnly || false,
         });

@@ -25,7 +25,8 @@ export class VFSStore {
             expandedOutlineIds: new Set(), expandedOutlineH1Ids: new Set(),
             selectedItemIds: new Set(), creatingItem: null, moveOperation: null,
             tags: new Map(), searchQuery: '',
-            uiSettings: { sortBy: 'lastModified', density: 'comfortable', showSummary: true, showTags: true, showBadges: true },
+            // ✨ [修改] 将默认排序方式从 'lastModified' 改为 'title'，提供更稳定的用户体验
+            uiSettings: { sortBy: 'title', density: 'comfortable', showSummary: true, showTags: true, showBadges: true },
             isSidebarCollapsed: false, readOnly: false, status: 'idle', error: null,
         };
 
