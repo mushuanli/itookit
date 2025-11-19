@@ -199,11 +199,8 @@ export class VFSStorage {
       await tx.done;
     } catch (e) {
       console.error("Failed to add tag to node:", e);
-      // 事务会自动回滚
-      if ((e as DOMException).name !== 'ConstraintError') {
-         console.error("Failed to add tag to node:", e);
-         throw e;
-      }
+      // 其他非约束性错误仍需抛出
+      throw e;
     }
   }
   

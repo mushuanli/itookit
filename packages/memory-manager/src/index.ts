@@ -1,3 +1,5 @@
+import '@itookit/vfs-ui/style.css';
+import '@itookit/mdxeditor/style.css';
 import './styles/memory-manager.css';
 
 export * from './types';
