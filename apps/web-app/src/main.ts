@@ -10,8 +10,7 @@ import { WORKSPACES } from './config/modules';
 // 引入样式 (假设构建工具支持 CSS 导入)
 import '@itookit/vfs-ui/style.css';
 import '@itookit/mdxeditor/style.css';
-// 如果 memory-manager 的样式未在 HTML 中引入，也需在此引入
-// import '@itookit/memory-manager/style.css'; 
+import '@itookit/memory-manager/style.css'; 
 
 async function bootstrap() {
     try {
