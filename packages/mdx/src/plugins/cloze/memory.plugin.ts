@@ -7,7 +7,7 @@ export interface MemoryPluginOptions {
 }
 
 export class MemoryPlugin implements MDxPlugin {
-  name = 'feature:memory';
+  name = 'cloze:memory';
   private options: Required<MemoryPluginOptions>;
   private cleanupFns: Array<() => void> = [];
   private clozeStatesCache = new WeakMap<PluginContext, Map<string, any>>();

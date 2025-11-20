@@ -7,7 +7,7 @@ export interface ClozeControlsPluginOptions {
 }
 
 export class ClozeControlsPlugin implements MDxPlugin {
-  name = 'ui:cloze-controls';
+  name = 'cloze:cloze-controls';
   private options: Required<ClozeControlsPluginOptions>;
   private cleanupFns: Array<() => void> = [];
   private panel: HTMLElement | null = null;

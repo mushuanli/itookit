@@ -235,8 +235,10 @@ export async function createMDxEditor(
   container: HTMLElement,
   config: MDxEditorFactoryConfig = {}
 ): Promise<IEditor> {
+  const userPlugins = config.plugins || [];
+
   // 🔥 添加日志
-  console.log(`[createMDxEditor] Received config. Content length: ${(config.initialContent || '').length}. Preview: "${(config.initialContent || '').substring(0, 50)}..."`);
+  console.log(`[createMDxEditor] Received config.Plugin:${userPlugins} Content length: ${(config.initialContent || '').length}. Preview: "${(config.initialContent || '').substring(0, 50)}..."`);
 
   const editor = new MDxEditor(config);
 
@@ -245,7 +247,6 @@ export async function createMDxEditor(
   editor.use(corePlugin);
 
   let basePlugins = DEFAULT_PLUGINS;
-  const userPlugins = config.plugins || [];
   if (userPlugins.length > 0 && getPluginName(userPlugins[0]) === ALL_PLUGINS_DISABLED_FLAG) {
     basePlugins = [];
     userPlugins.shift();

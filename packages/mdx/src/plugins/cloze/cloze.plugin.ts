@@ -46,7 +46,7 @@ export class ClozePlugin implements MDxPlugin {
     return {
       extensions: [
         {
-          name: 'cloze',
+          name: 'cloze:cloze',
           level: 'inline',
           start: (src: string) => src.match(/--/)?.index,
           tokenizer: (src: string): Tokens.Generic | undefined => {
@@ -54,7 +54,7 @@ export class ClozePlugin implements MDxPlugin {
             const match = src.match(/^--(?:\[([^\]]+)\]\s*)?([\s\S]+?)--(?:\^\^audio:([^^]+)\^\^)?/);
             if (match) {
               return {
-                type: 'cloze',
+                type: 'cloze:cloze',
                 raw: match[0],
                 locator: match[1] || `auto-${state.clozeCounter++}`,
                 content: match[2].trim(),

@@ -7,9 +7,49 @@ export interface WorkspaceConfig {
     title: string;
     defaultFileName?: string;
     defaultFileContent?: string;
+    // [新增] 允许配置额外的插件列表
+    plugins?: string[]; 
 }
 
 export const WORKSPACES: WorkspaceConfig[] = [
+    // [新增] Anki Workspace 配置
+    {
+        elementId: 'anki-workspace',
+        moduleName: 'anki', // 对应的 VFS 模块名
+        title: 'Anki Memory Cards',
+        // [重点] 这里指定需要的插件
+        plugins: ['cloze:cloze','cloze:cloze-controls','cloze:cloze-controls'], 
+        defaultFileName: 'Anki Guide.md',
+        defaultFileContent: `### 挖空填词 (Cloze)
+
+这是通过 \`cloze\` 插件启用的功能。在预览模式下，点击挖空部分即可显示/隐藏答案。
+**控制面板**: 请留意屏幕右下角的浮动控制面板，支持 **切换摘要/详细视图**。
+
+- **基本用法**: --太阳-- 是太阳系的中心。
+- **带 ID**: [c1]--地球-- 是我们居住的行星。
+- **带音频**: 法语单词 "你好" 的发音是 --Bonjour--^^audio:Bonjour^^。
+
+** 多行与长文本支持 (使用 ¶ 换行) **:
+MDxEditor 识别 \`¶\` 字符作为挖空内部的换行符。
+
+**1. 短多行示例**:
+--第一行内容¶第二行内容 (点击查看完整布局)--
+
+**2. 长文本自动摘要示例**:
+(在控制面板点击 <i class="fas fa-compress-alt"></i> 按钮可切换视图)
+
+--Markdown 是一种轻量级标记语言，创始人为 John Gruber。¶它允许人们使用易读易写的纯文本格式编写文档，然后将其转换成有效的 XHTML (或者 HTML)。¶Markdown 的目标是实现"易读易写"。¶这份演示文档本身就是用 Markdown 编写的，展示了 MDxEditor 的强大渲染能力。--
+
+** 表格内的挖空 **:
+挖空功能完美集成在表格中，不破坏表格结构，且支持排序。
+
+| 概念 | 定义 (点击查看) | 备注 |
+| :--- | :--- | :--- |
+| **HTML** | --超文本标记语言 (HyperText Markup Language)-- | 网页的基础结构 |
+| **CSS** | --层叠样式表 (Cascading Style Sheets)-- | 用于样式设计 |
+| **JS** | --JavaScript-- | 用于交互逻辑 |
+`
+    },
     {
         elementId: 'prompt-workspace',
         moduleName: 'prompts',

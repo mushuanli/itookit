@@ -1,36 +1,34 @@
+/**
+ * @file src/types.ts (或者 MemoryManager 同级目录)
+ */
+import { EditorFactory, SessionUIOptions } from '@itookit/common';
 import { VFSCore } from '@itookit/vfs-core';
-import { SessionUIOptions, EditorFactory } from '@itookit/common';
 
 export interface MemoryManagerConfig {
-    /** DOM 挂载点 */
     container: HTMLElement;
-    
-    /** VFS 核心实例 */
     vfsCore: VFSCore;
-    
-    /** VFS 模块名称 (如 'wiki', 'tasks') */
     moduleName: string;
-    
-    /** VFS-UI 的配置 (侧边栏标题、右键菜单等) */
-    uiOptions?: Partial<SessionUIOptions>;
-    
-    /** 
-     * 编辑器工厂函数。
-     * 用户通过此函数决定使用什么编辑器，以及启用哪些插件。
-     * MemoryManager 会向 options 中注入 toggleSidebarCallback 等上下文回调。
-     */
     editorFactory: EditorFactory;
-    
-    /** AI 后台处理配置 */
+
+    // [新增] 这里的 options 会透传给 VFSUIManager
+    uiOptions?: Partial<SessionUIOptions>;
+
+    // [核心改进] 专门用于存放传递给 EditorFactory 的静态配置
+    // 包含 plugins, defaultPluginOptions 等
+    editorConfig?: {
+        plugins?: string[];
+        [key: string]: any;
+    };
+
     aiConfig?: {
-        /** 是否启用后台分析 */
         enabled: boolean;
-        /** 
-         * 要激活的处理规则。
-         * 例如: ['user', 'task', 'tag']
-         * 默认启用所有规则 ('*')
-         */
-        activeRules?: string[]; 
+        activeRules?: string[];
+    };
+    
+    // [架构修正] 将“默认文件”逻辑从 UI 层移回业务层配置
+    defaultContentConfig?: {
+        fileName: string;
+        content: string;
     };
 }
 

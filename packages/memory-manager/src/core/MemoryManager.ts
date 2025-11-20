@@ -53,46 +53,60 @@ export class MemoryManager {
     }
 
     /**
-     * 增强工厂：依赖注入层
-     * 负责将 "Manager 级别的能力" (如切换侧边栏) 注入到 "Editor 级别的插件" 中
+     * [架构核心] 增强工厂：配置聚合与依赖注入层
+     * 解决了参数跨越 vfs-ui 传递困难的问题。
      */
-    private enhancedEditorFactory = async (container: HTMLElement, options: EditorOptions): Promise<IEditor> => {
-        // 1. 准备上下文能力
+    private enhancedEditorFactory = async (container: HTMLElement, runtimeOptions: EditorOptions): Promise<IEditor> => {
+        const { editorConfig } = this.config;
+        
+        // 准备上下文能力 (Capabilities)
         const contextFeatures = {
             toggleSidebarCallback: () => this.vfsUI.toggleSidebar(),
-            // 手动保存回调 (供 Ctrl+S 或保存按钮使用)
-            // 自动保存已由 Connector 处理，但显式保存按钮仍需要此回调
             saveCallback: async (editorInstance: any) => {
-                if (options.nodeId && typeof editorInstance.getText === 'function') {
-                    await this.config.vfsCore.getVFS().write(options.nodeId, editorInstance.getText());
+                if (runtimeOptions.nodeId && typeof editorInstance.getText === 'function') {
+                    await this.config.vfsCore.getVFS().write(runtimeOptions.nodeId, editorInstance.getText());
                 }
             }
         };
 
-        // 2. 注入配置
-        const mergedOptions = {
-            ...options,
+        // 智能合并策略：
+        // 1. 静态配置 (来自 Main/Config)
+        // 2. 运行时配置 (来自 VFS-UI，如 nodeId, content) - 优先级高于静态
+        // 3. 注入能力 (Context Features) - 强制注入
+        const mergedOptions: EditorOptions = {
+            ...editorConfig,       // 1. 基础静态配置
+            ...runtimeOptions,     // 2. 运行时覆盖 (nodeId, initialContent, title)
+
+            // 数组合并：确保 workspace 定义的插件 + 运行时可能的插件都被包含
+            plugins: [
+                ...(editorConfig?.plugins || []),
+                ...(runtimeOptions?.plugins || [])
+            ],
+
+            // 深度合并 defaultPluginOptions
             defaultPluginOptions: {
-                ...(options.defaultPluginOptions || {}),
-                
-                // 注入 FileProvider 以支持 @file 补全
+                ...(editorConfig?.defaultPluginOptions || {}),
+                ...(runtimeOptions?.defaultPluginOptions || {}),
+
+                // [注入] 提及插件的数据源
                 'autocomplete:mention': {
                     // @ts-ignore
-                    ...(options.defaultPluginOptions?.['autocomplete:mention'] || {}),
+                    ...(editorConfig?.defaultPluginOptions?.['autocomplete:mention'] || {}),
                     providers: [
                         new FileProvider({ vfsCore: this.config.vfsCore, moduleName: this.config.moduleName })
                     ]
                 },
 
-                // 注入 UI 控制能力
+                // [注入] 标题栏控制能力
                 'core:titlebar': {
                     // @ts-ignore
-                    ...(options.defaultPluginOptions?.['core:titlebar'] || {}),
+                    ...(editorConfig?.defaultPluginOptions?.['core:titlebar'] || {}),
                     ...contextFeatures
                 }
             }
         };
 
+        // 调用原始工厂
         return this.config.editorFactory(container, mergedOptions);
     }
 
@@ -112,9 +126,31 @@ export class MemoryManager {
 
     public async start() {
         await this._ensureModuleMounted();
-        
-        // [简化] VFSUIManager.start() 内部已包含"若无活动会话则打开第一个文件"的逻辑
-        await this.vfsUI.start();
+        await this.vfsUI.start(); // vfsUI 启动
+
+        // [架构修正] 将业务逻辑移至此处：检查空状态并创建默认文件
+        // 这比在 VFSUIManager 内部做更好，因为这属于“应用策略”
+        const { defaultContentConfig } = this.config;
+        if (defaultContentConfig) {
+            const state = this.vfsUI.store?.getState(); // 假设暴露了 store 或有 getter
+            // 或者通过 getSessionService 获取列表检查
+            const files = await this.vfsUI.sessionService.getAllFiles();
+            
+            if (files.length === 0) {
+                console.log(`[MemoryManager] Empty module, creating default file: ${defaultContentConfig.fileName}`);
+                try {
+                    const newFile = await this.vfsUI.sessionService.createFile({
+                        title: defaultContentConfig.fileName,
+                        content: defaultContentConfig.content,
+                        parentId: null
+                    });
+                    // 自动选中新建的文件
+                    this.vfsUI.store.dispatch({ type: 'SESSION_SELECT', payload: { sessionId: newFile.nodeId }});
+                } catch (e) {
+                    console.error("Failed to create default file", e);
+                }
+            }
+        }
     }
 
     private async _ensureModuleMounted() {
