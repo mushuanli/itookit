@@ -12,7 +12,7 @@
 @import './plugin-svg.css';
 @import './plugin-callout.css';
 @import './plugin-plantuml.css';
-
+@import './plugin-vega.css';
 @import './plugin-cloze.css';
 @import './plugin-cloze-controls.css';
 @import './plugin-cloze-memory.css';
