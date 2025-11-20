@@ -89,14 +89,14 @@ registerPlugin('folder', FoldablePlugin, { priority: 6 });
 registerPlugin('media', MediaPlugin, { priority: 7 });
 registerPlugin('mermaid', MermaidPlugin, { priority: 8 });
 registerPlugin('svg', SvgPlugin, { priority: 9 }); // 优先级在 Mermaid 之后
-registerPlugin('cloze', ClozePlugin, { priority: 10 });
-registerPlugin('cloze-controls', ClozeControlsPlugin, {
+registerPlugin('cloze:cloze', ClozePlugin, { priority: 10 });
+registerPlugin('cloze:cloze-controls', ClozeControlsPlugin, {
   priority: 20,
-  dependencies: ['cloze'],
+  dependencies: ['cloze:cloze'],
 });
-registerPlugin('memory', MemoryPlugin, {
+registerPlugin('cloze:memory', MemoryPlugin, {
   priority: 20,
-  dependencies: ['cloze'],
+  dependencies: ['cloze:cloze'],
 });
 registerPlugin('interaction:table', TablePlugin, { priority: 50 });
 registerPlugin('task-list', TaskListPlugin, { priority: 51 });
@@ -264,9 +264,9 @@ export async function createMDxEditor(
       continue;
     }
     pluginMap.set(name, pluginConfig);
-    if (name === 'cloze') {
-      if (!pluginMap.has('cloze-controls')) pluginMap.set('cloze-controls', 'cloze-controls');
-      if (!pluginMap.has('memory')) pluginMap.set('memory', 'memory');
+    if (name === 'cloze:cloze') {
+      if (!pluginMap.has('cloze:cloze-controls')) pluginMap.set('cloze:cloze-controls', 'cloze:cloze-controls');
+      if (!pluginMap.has('cloze:memory')) pluginMap.set('cloze:memory', 'cloze:memory');
     }
   }
   for (const excluded of exclusions) {
