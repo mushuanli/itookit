@@ -9,11 +9,14 @@
 @import './plugin-foldable.css';
 @import './plugin-media.css';
 @import './plugin-mermaid.css';
-
+@import './plugin-svg.css';
+@import './plugin-callout.css';
+@import './plugin-plantuml.css';
+@import './plugin-vega.css';
 @import './plugin-cloze.css';
 @import './plugin-cloze-controls.css';
 @import './plugin-cloze-memory.css';
-
+@import './plugin-table.css';
 @import './plugin-codeblock-controls.css';
 
 @import './plugin-toolbar.css';
@@ -28,7 +31,7 @@
 }
 
 /* 确保工具栏在编辑器容器内时的定位 */
-.mdx-editor-container > .mdx-editor-toolbar {
+.mdx-editor-container>.mdx-editor-toolbar {
   position: sticky;
   top: 0;
   left: 0;
