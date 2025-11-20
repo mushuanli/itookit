@@ -39,7 +39,7 @@ const createStandardConfig = (managerOptions: any, customConfig: any = {}) => {
 
         // B. 插件列表
         plugins: finalPlugins,
-
+        initialMode: 'render',
         // C. 深度合并 defaultPluginOptions
         defaultPluginOptions: {
             ...managerOptions.defaultPluginOptions, // 先展开外部传入的

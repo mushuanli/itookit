@@ -14,12 +14,16 @@ import type { VFSCore } from '@itookit/vfs-core';
 import type { ISessionManager } from '@itookit/common';
 import type { VFSNodeUI } from './types/types.js';
 import { VFSService } from './services/VFSService.js';
-import type { VFSUIState, UISettings } from './types/types.js'; // ✨ 导入 UISettings
+import type { VFSUIState, UISettings } from './types/types.js';
 
-// ✨ [修改] 扩展 VFSUIOptions 类型
+// ✨ [修改] 扩展 VFSUIOptions 类型，增加默认文件配置
 type VFSUIOptions = SessionUIOptions & { 
     initialState?: Partial<VFSUIState>,
-    defaultUiSettings?: Partial<UISettings> 
+    defaultUiSettings?: Partial<UISettings>,
+    /** [新增] 当没有文件时，要创建的默认文件的文件名。如果未提供，则不创建。 */
+    defaultFileName?: string;
+    /** [新增] 默认文件的内容，可以是一段帮助文本或模板。 */
+    defaultFileContent?: string;
 };
 
 
