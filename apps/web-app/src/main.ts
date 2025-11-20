@@ -62,17 +62,26 @@ async function bootstrap() {
                     title: wsConfig.title,
                     initialSidebarCollapsed: false,
                     searchPlaceholder: `Search inside ${wsConfig.title}...`,
+        },
 
-                    // [核心修改] 将默认文件配置传递给 MemoryManager
-                    // MemoryManager 会将这些选项透传给 vfs-ui
-                    defaultFileName: wsConfig.defaultFileName,
-                    defaultFileContent: wsConfig.defaultFileContent
-                },
-                aiConfig: {
-                    enabled: true,
-                    activeRules: ['user', 'tag', 'file']
-                }
-            });
+        // 2. [核心] 编辑器静态配置 (插件配置在此传递)
+        editorConfig: {
+            plugins: wsConfig.plugins, // 数组: ['cloze:cloze', ...]
+            // 如果有其他静态配置，例如 readonly:
+            // readOnly: false
+        },
+
+        // 3. [架构修正] 默认内容策略
+        defaultContentConfig: wsConfig.defaultFileName ? {
+            fileName: wsConfig.defaultFileName,
+            content: wsConfig.defaultFileContent || ''
+        } : undefined,
+
+        aiConfig: {
+            enabled: true,
+            activeRules: ['user', 'tag', 'file']
+        }
+    });
 
             // 2.5 启动并缓存
             await manager.start();

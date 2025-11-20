@@ -17,22 +17,20 @@ export type EditorFactory = (
 const createStandardConfig = (managerOptions: any, customConfig: any = {}) => {
     // 基础插件列表
     const basePlugins = [
-        'ui:toolbar',
-        'ui:formatting',
         'core:titlebar',
-        'interaction:table',
-        'task-list',
-        'codeblock-controls',
-        'folder',
-        'mathjax',
-        'mermaid',
         'autocomplete:tag',
         'autocomplete:mention'
     ];
 
-    // 合并插件列表 (去重可根据需要添加)
-    const finalPlugins = [...basePlugins, ...(customConfig.plugins || [])];
+    // [修改] 合并逻辑：Base + Manager传入的(dynamic) + CustomConfig(static)
+    // 确保 managerOptions.plugins 被包含进来
+    const finalPlugins = [
+        ...basePlugins, 
+        ...(managerOptions.plugins || []), 
+        ...(customConfig.plugins || [])
+    ];
 
+    console.log(`managerOptions plugin: ${managerOptions.plugins}, final: ${finalPlugins} `);
     return {
         // A. 必须透传 MemoryManager 的 options (nodeId, context functions, initialContent)
         ...managerOptions,

@@ -36,8 +36,13 @@ export class VFSUIManager extends ISessionManager<VFSNodeUI, VFSService> {
     private readonly options: VFSUIOptions;
     private readonly moduleName: string;
     private readonly vfsCore: VFSCore;
-    private readonly coordinator: Coordinator;
-    private readonly store: VFSStore;
+    
+    // [架构修改] 将 coordinator 设为 public (或提供访问器)，以便 MemoryManager 订阅内部事件
+    public readonly coordinator: Coordinator;
+    
+    // [架构修改] FIX: 将 store 设为 public，允许 MemoryManager 访问状态和分发 Actions
+    public readonly store: VFSStore;
+    
     private readonly _vfsService: VFSService;
 
     private reloadDebounce: any = null;
