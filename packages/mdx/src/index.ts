@@ -58,6 +58,9 @@ export type { MemoryPluginOptions } from './plugins/cloze/memory.plugin';
 export { TaskListPlugin } from './plugins/interactions/task-list.plugin';
 export type { TaskListPluginOptions, TaskToggleDetail } from './plugins/interactions/task-list.plugin';
 
+export { TablePlugin } from './plugins/interactions/table.plugin';
+export type { TablePluginOptions } from './plugins/interactions/table.plugin';
+
 export { CodeBlockControlsPlugin } from './plugins/interactions/codeblock-controls.plugin';
 export type { CodeBlockControlsPluginOptions } from './plugins/interactions/codeblock-controls.plugin';
 

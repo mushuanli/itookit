@@ -1,0 +1,122 @@
+/* @file: mdx/styles/plugin-table.css
+ * Styles for the Table Plugin
+ */
+
+/* --- 基础容器与滚动 --- */
+.mdx-table-container {
+    width: 100%;
+    overflow-x: auto;
+    margin: 1em 0;
+    border-radius: 4px;
+    /* 细微的滚动条美化 */
+    scrollbar-width: thin;
+}
+
+.mdx-table-container table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.95em;
+}
+
+/* --- 排序样式 --- */
+.mdx-sortable-header {
+    cursor: pointer;
+    user-select: none;
+    position: relative;
+    padding-right: 1.5em !important;
+    /* 为图标留出空间 */
+    transition: background-color 0.2s;
+}
+
+.mdx-sortable-header:hover {
+    background-color: rgba(0, 0, 0, 0.05);
+}
+
+/* 使用 CSS 伪元素绘制排序箭头 */
+.mdx-sortable-header::after {
+    content: '↕';
+    /* 默认显示双向箭头或不显示 */
+    position: absolute;
+    right: 0.5em;
+    opacity: 0.3;
+    font-size: 0.8em;
+}
+
+/* 升序样式 */
+.mdx-sortable-header.sort-asc::after {
+    content: '▲';
+    opacity: 1;
+    color: var(--mdx-accent-color, #0969da);
+}
+
+/* 降序样式 */
+.mdx-sortable-header.sort-desc::after {
+    content: '▼';
+    opacity: 1;
+    color: var(--mdx-accent-color, #0969da);
+}
+
+/* --- 筛选样式 --- */
+.mdx-table-filter-row th {
+    padding: 4px !important;
+    background-color: rgba(128, 128, 128, 0.05);
+    border-bottom: 2px solid #eee;
+}
+
+.mdx-table-filter-input {
+    width: 100%;
+    padding: 4px 8px;
+    border: 1px solid #ddd;
+    border-radius: 3px;
+    font-size: 0.85em;
+    box-sizing: border-box;
+}
+
+.mdx-table-filter-input:focus {
+    outline: none;
+    border-color: var(--mdx-accent-color, #0969da);
+    box-shadow: 0 0 0 2px rgba(9, 105, 218, 0.1);
+}
+
+/* --- 暗黑模式适配 --- */
+.dark-mode .mdx-sortable-header:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+.dark-mode .mdx-sortable-header.sort-asc::after,
+.dark-mode .mdx-sortable-header.sort-desc::after {
+    color: var(--mdx-accent-color, #58a6ff);
+}
+
+.dark-mode .mdx-table-filter-row th {
+    background-color: rgba(255, 255, 255, 0.05);
+    border-bottom-color: #444;
+}
+
+.dark-mode .mdx-table-filter-input {
+    background-color: #222;
+    border-color: #444;
+    color: #eee;
+}
+
+/* 表格内的行内代码样式优化 */
+.mdx-table-container table code {
+    background-color: rgba(175, 184, 193, 0.2);
+    /* 浅灰色背景 */
+    padding: 0.2em 0.4em;
+    border-radius: 4px;
+    font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, Liberation Mono, monospace;
+    font-size: 0.85em;
+}
+
+/* 表格内的图片限制，防止撑破表格 */
+.mdx-table-container table img {
+    max-width: 100px;
+    max-height: 100px;
+    vertical-align: middle;
+}
+
+/* 暗黑模式适配 */
+.dark-mode .mdx-table-container table code {
+    background-color: rgba(110, 118, 129, 0.4);
+}
