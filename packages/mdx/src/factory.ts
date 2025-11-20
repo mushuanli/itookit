@@ -8,6 +8,8 @@ import { FoldablePlugin, FoldablePluginOptions } from './plugins/syntax-extensio
 import { MathJaxPlugin, MathJaxPluginOptions } from './plugins/syntax-extensions/mathjax.plugin';
 import { MediaPlugin, MediaPluginOptions } from './plugins/syntax-extensions/media.plugin';
 import { MermaidPlugin, MermaidPluginOptions } from './plugins/syntax-extensions/mermaid.plugin';
+import { CalloutPlugin, CalloutPluginOptions } from './plugins/syntax-extensions/callout.plugin';
+import { PlantUMLPlugin, PlantUMLPluginOptions } from './plugins/syntax-extensions/plantuml.plugin';
 import { ClozePlugin } from './plugins/cloze/cloze.plugin';
 import { ClozeControlsPlugin } from './plugins/cloze/cloze-control-ui.plugin';
 import { MemoryPlugin } from './plugins/cloze/memory.plugin';
@@ -66,7 +68,7 @@ export function registerPlugin(
   if (pluginRegistry.has(name)) {
     console.warn(`Plugin with name "${name}" is already registered. Overwriting.`);
   }
-  
+
   pluginRegistry.set(name, {
     constructor: pluginClass,
     priority: options.priority ?? 100,
@@ -79,6 +81,7 @@ registerPlugin('core:titlebar', CoreTitleBarPlugin, { priority: 2 });
 registerPlugin('interaction:source-sync', SourceSyncPlugin, { priority: 60 });
 registerPlugin('ui:toolbar', ToolbarPlugin, { priority: 2 });
 registerPlugin('ui:formatting', FormattingPlugin, { priority: 3, dependencies: ['ui:toolbar'] });
+registerPlugin('callout', CalloutPlugin, { priority: 4 }); // 优先级较高，作为语法扩展
 registerPlugin('mathjax', MathJaxPlugin, { priority: 5 });
 registerPlugin('folder', FoldablePlugin, { priority: 6 });
 registerPlugin('media', MediaPlugin, { priority: 7 });
@@ -97,8 +100,9 @@ registerPlugin('task-list', TaskListPlugin, { priority: 51 });
 registerPlugin('codeblock-controls', CodeBlockControlsPlugin, { priority: 52 });
 registerPlugin('autocomplete:tag', TagPlugin, { priority: 53 });
 registerPlugin('autocomplete:mention', MentionPlugin, { priority: 54 });
+registerPlugin('plantuml', PlantUMLPlugin, { priority: 70 });
 
-export type PluginConfig = 
+export type PluginConfig =
   | string
   | MDxPlugin
   | [string, Record<string, any>]
@@ -113,7 +117,7 @@ export interface MDxEditorFactoryConfig extends EditorOptions {
     media?: MediaPluginOptions;
     mermaid?: MermaidPluginOptions;
     // [新增] SVG 选项类型
-    svg?: SvgPluginOptions; 
+    svg?: SvgPluginOptions;
     'task-list'?: TaskListPluginOptions;
     'codeblock-controls'?: CodeBlockControlsPluginOptions;
     'autocomplete:tag'?: TagPluginOptions;
@@ -128,9 +132,10 @@ const DEFAULT_PLUGINS: PluginConfig[] = [
   'ui:toolbar',
   'ui:formatting',
   'interaction:source-sync',
-  'folder', 
+  'folder',
   'mathjax',
   'media',
+  'callout',
   'mermaid',
   'svg', // [新增] 默认启用
   'codeblock-controls',
@@ -143,11 +148,11 @@ const ALL_PLUGINS_DISABLED_FLAG = '-all';
  * @internal
  */
 function getPluginName(config: PluginConfig): string {
-    if (typeof config === 'string') return config;
-    if (Array.isArray(config)) return config[0];
-    if (typeof config === 'object' && 'name' in config && !('install' in config)) return (config as { name: string }).name;
-    if (typeof config === 'object' && 'install' in config) return (config as MDxPlugin).name;
-    return '';
+  if (typeof config === 'string') return config;
+  if (Array.isArray(config)) return config[0];
+  if (typeof config === 'object' && 'name' in config && !('install' in config)) return (config as { name: string }).name;
+  if (typeof config === 'object' && 'install' in config) return (config as MDxPlugin).name;
+  return '';
 }
 
 /**
@@ -189,7 +194,7 @@ function sortPlugins(pluginNames: string[]): string[] {
   }
 
   const getPriority = (name: string) => pluginRegistry.get(name)?.priority ?? 100;
-  
+
   while (queue.length > 0) {
     queue.sort((a, b) => getPriority(a) - getPriority(b));
 
@@ -280,15 +285,15 @@ export async function createMDxEditor(
         const PluginClass = info.constructor;
         let options = {};
         if (typeof pluginConfig === 'string') {
-            options = config.defaultPluginOptions?.[pluginName] || {};
+          options = config.defaultPluginOptions?.[pluginName] || {};
         } else if (Array.isArray(pluginConfig)) {
-            const [, inlineOptions] = pluginConfig;
-            const defaultOptions = config.defaultPluginOptions?.[pluginName] || {};
-            options = { ...defaultOptions, ...inlineOptions };
+          const [, inlineOptions] = pluginConfig;
+          const defaultOptions = config.defaultPluginOptions?.[pluginName] || {};
+          options = { ...defaultOptions, ...inlineOptions };
         } else if (typeof pluginConfig === 'object' && 'name' in pluginConfig) {
-            const { options: inlineOptions = {} } = pluginConfig as { name: string; options?: Record<string, any> };
-            const defaultOptions = config.defaultPluginOptions?.[pluginName] || {};
-            options = { ...defaultOptions, ...inlineOptions };
+          const { options: inlineOptions = {} } = pluginConfig as { name: string; options?: Record<string, any> };
+          const defaultOptions = config.defaultPluginOptions?.[pluginName] || {};
+          options = { ...defaultOptions, ...inlineOptions };
         }
         pluginInstance = new PluginClass(options);
       }

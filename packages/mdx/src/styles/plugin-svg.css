@@ -1,3 +1,7 @@
+/* @file: mdx/styles/plugin-svg.css
+ * Styles for the svg Plugin
+ * Block: mdx-editor-svg
+ */
 .mdx-svg-container {
     display: flex;
     justify-content: center;
