@@ -1,0 +1,12 @@
+.mdx-svg-container {
+    display: flex;
+    justify-content: center;
+    margin: 1em 0;
+    background: transparent;
+}
+
+/* 暗黑模式适配示例 */
+.dark-mode .mdx-svg-container svg {
+    /* 如果 SVG 线条是纯黑色的，可能需要反转或调整 */
+    /* filter: invert(1); */
+}

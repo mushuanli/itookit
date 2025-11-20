@@ -9,6 +9,7 @@
 @import './plugin-foldable.css';
 @import './plugin-media.css';
 @import './plugin-mermaid.css';
+@import './plugin-svg.css';
 
 @import './plugin-cloze.css';
 @import './plugin-cloze-controls.css';
@@ -28,7 +29,7 @@
 }
 
 /* 确保工具栏在编辑器容器内时的定位 */
-.mdx-editor-container > .mdx-editor-toolbar {
+.mdx-editor-container>.mdx-editor-toolbar {
   position: sticky;
   top: 0;
   left: 0;
