@@ -25,7 +25,7 @@ import type { VFSNodeUI, TagInfo, ContextMenuConfig, VFSUIState, TagEditorOption
 
 type VFSUIOptions = SessionUIOptions & { 
     initialState?: Partial<VFSUIState>,
-    defaultUiSettings?: Partial<UISettings> 
+    defaultUiSettings?: Partial<UISettings>,
 };
 
 /**
@@ -159,8 +159,32 @@ export class VFSUIManager extends ISessionManager<VFSNodeUI, VFSService> {
 
         await this._loadModuleData();
 
+        // ✨ [核心新增逻辑] 检查是否需要创建默认文件
+        let currentState = this.store.getState();
+        if (
+            currentState.items.length === 0 &&         // 条件1: 当前没有任何文件
+            !this.options.readOnly &&                  // 条件2: UI不是只读模式
+            this.options.defaultFileName               // 条件3: 已经配置了默认文件名
+        ) {
+            console.log('[VFSUIManager] No items found. Creating a default file as specified in options.');
+            try {
+                // 调用 service 创建文件。vfs-core 的事件系统会自动通知 UI 更新。
+                await this._vfsService.createFile({
+                    title: this.options.defaultFileName,
+                    content: this.options.defaultFileContent || `# Welcome\n\nSelect a file from the list on the left to start editing. You can create new files or folders using the '+' buttons.`, // 提供一个备用内容
+                    parentId: null, // 在根目录创建
+                });
+                // 注意：我们不需要在这里手动更新 store。
+                // createFile -> vfsCore -> NODE_CREATED event -> _connectToVFSCoreEvents listener ->
+                // store.dispatch('SESSION_CREATE_SUCCESS') -> UI and activeId are updated automatically.
+            } catch (error) {
+                console.error('[VFSUIManager] Failed to create the default file:', error);
+                // 即使创建失败，也继续执行，UI会显示为空状态。
+            }
+        }
+        
         let activeItem = this.getActiveSession();
-        const currentState = this.store.getState();
+        currentState = this.store.getState(); // 重新获取状态，因为它可能因创建了默认文件而改变
 
         // 场景1: 没有活动项，但列表里有文件，则自动选择第一个文件
         if (!activeItem && currentState.items.length > 0) {

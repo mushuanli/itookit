@@ -157,3 +157,14 @@ body {
     margin-bottom: 20px;
     color: var(--gray-800);
 }
+
+.workspace-view:not(.active) {
+    display: none;
+    z-index: -1; /* 双重保险，确保它在最底层 */
+    visibility: hidden;
+}
+
+.workspace-view.active {
+    display: flex;
+    z-index: 10; /* 确保激活的在最上层 */
+}

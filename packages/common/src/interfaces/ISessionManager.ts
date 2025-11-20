@@ -42,6 +42,12 @@ export interface SessionUIOptions {
         /** UPDATE: Changed type to `new (...args: any[]) => any` to correctly type a class constructor. */
         tagEditor?: new (...args: any[]) => any;
     };
+    
+    // [核心修改] 在共享接口中添加新的配置项
+    /** 当模块内没有文件时，要创建的默认文件的文件名。如果未提供，则不创建。 */
+    defaultFileName?: string;
+    /** 默认文件的内容，可以是一段帮助文本或模板。 */
+    defaultFileContent?: string;
 }
 
 /** FIX: Export event types for use in JSDoc */

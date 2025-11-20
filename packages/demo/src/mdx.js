@@ -409,7 +409,7 @@ async function initEditor() {
         plugins: [
             'core:titlebar',
             'interaction:source-sync',
-            'cloze',
+            'cloze:cloze',
             'autocomplete:tag',
             'autocomplete:mention',
             'plantuml',

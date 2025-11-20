@@ -11,7 +11,7 @@ export async function initVFS(): Promise<VFSCore> {
 
     // 1. 创建或打开数据库
     console.log('Initializing VFS...');
-    vfsInstance = await createVFSCore('multi-workspace-app');
+    vfsInstance = await createVFSCore('MindOS');
 
     // 2. 确保所有工作区对应的模块都已挂载
     for (const ws of WORKSPACES) {
