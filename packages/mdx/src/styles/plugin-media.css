@@ -47,6 +47,47 @@
 }
 
 /* ===========================
+   Embed Component Styles (New)
+   =========================== */
+
+/* 通用 Embed 容器 (默认 16:9) */
+.mdx-editor-embed {
+  position: relative;
+  width: 100%;
+  padding-bottom: 56.25%; /* 16:9 Aspect Ratio */
+  height: 0;
+  margin: 1.5em 0;
+  background-color: #f8f9fa;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.mdx-editor-embed iframe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+}
+
+/* PDF 专用样式 (固定高度，覆盖 16:9 设置) */
+.mdx-editor-embed.mdx-embed-pdf {
+  padding-bottom: 0;
+  height: 600px;
+  min-height: 50vh;
+  border: 1px solid #e0e0e0;
+}
+
+/* Office 文档专用样式 */
+.mdx-editor-embed.mdx-embed-office {
+  padding-bottom: 0;
+  height: 500px;
+  border: 1px solid #e0e0e0;
+}
+
+/* ===========================
    File Component Styles
    =========================== */
 
@@ -64,6 +105,15 @@
   font-size: 0.95em;
   transition: all 0.2s ease;
   cursor: pointer;
+}
+
+/* 降级后的 Embed 链接样式 (继承 File 样式并微调) */
+.mdx-editor-file.mdx-embed-fallback {
+  background-color: #fff3cd;
+  border-color: #ffeeba;
+  color: #856404;
+  width: 100%; /* 占满一行 */
+  box-sizing: border-box;
 }
 
 .mdx-editor-file:hover {
@@ -94,55 +144,52 @@
 }
 
 /* 不同文件类型的颜色变体（可选） */
+
+/* PDF */
 .mdx-editor-file[href$=".pdf"] {
   border-color: #dc3545;
   color: #dc3545;
 }
-
 .mdx-editor-file[href$=".pdf"]:hover {
   background-color: #fff5f5;
-  border-color: #dc3545;
   color: #c82333;
 }
 
+/* Archives */
 .mdx-editor-file[href$=".zip"],
 .mdx-editor-file[href$=".rar"],
 .mdx-editor-file[href$=".7z"] {
   border-color: #ffc107;
   color: #e09600;
 }
-
 .mdx-editor-file[href$=".zip"]:hover,
 .mdx-editor-file[href$=".rar"]:hover,
 .mdx-editor-file[href$=".7z"]:hover {
   background-color: #fffbf0;
-  border-color: #ffc107;
   color: #d39e00;
 }
 
+/* Word */
 .mdx-editor-file[href$=".doc"],
 .mdx-editor-file[href$=".docx"] {
   border-color: #2b579a;
   color: #2b579a;
 }
-
 .mdx-editor-file[href$=".doc"]:hover,
 .mdx-editor-file[href$=".docx"]:hover {
   background-color: #f0f4ff;
-  border-color: #2b579a;
   color: #1e3a6b;
 }
 
+/* Excel */
 .mdx-editor-file[href$=".xls"],
 .mdx-editor-file[href$=".xlsx"] {
   border-color: #217346;
   color: #217346;
 }
-
 .mdx-editor-file[href$=".xls"]:hover,
 .mdx-editor-file[href$=".xlsx"]:hover {
   background-color: #f0fff4;
-  border-color: #217346;
   color: #1a5c37;
 }
 
@@ -155,19 +202,21 @@
     margin: 1em 0;
     border-radius: 4px;
   }
-
   .mdx-editor-video__title {
     padding: 0.5em 0.75em;
     font-size: 0.85em;
   }
-
   .mdx-editor-file {
     padding: 0.4em 0.8em;
     font-size: 0.9em;
   }
-
   .mdx-editor-file__name {
     max-width: 200px;
+  }
+  
+  /* 移动端 PDF 高度适当减小 */
+  .mdx-editor-embed.mdx-embed-pdf {
+    height: 400px; 
   }
 }
 
@@ -177,7 +226,6 @@
     width: 100%;
     margin: 0.25em 0;
   }
-
   .mdx-editor-file__name {
     max-width: none;
   }
@@ -188,81 +236,54 @@
    =========================== */
 
 @media (prefers-color-scheme: dark) {
+  /* Video */
   .mdx-editor-video {
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
   }
-
   .mdx-editor-video__title {
     background-color: #2d2d2d;
     color: #e0e0e0;
     border-top-color: #444;
   }
 
+  /* Embeds */
+  .mdx-editor-embed {
+    background-color: #1e1e1e;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  }
+  .mdx-editor-embed.mdx-embed-pdf,
+  .mdx-editor-embed.mdx-embed-office {
+    border-color: #444;
+  }
+
+  /* Files */
   .mdx-editor-file {
     background-color: #2d2d2d;
     border-color: #444;
     color: #66b3ff;
   }
-
   .mdx-editor-file:hover {
     background-color: #3a3a3a;
     border-color: #66b3ff;
     color: #99ccff;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
   }
 
-  /* 深色主题下的文件类型颜色 */
-  .mdx-editor-file[href$=".pdf"] {
-    border-color: #ff6b6b;
-    color: #ff6b6b;
-  }
-
-  .mdx-editor-file[href$=".pdf"]:hover {
-    background-color: #3d2020;
-    border-color: #ff6b6b;
-    color: #ff8787;
-  }
+  /* File Types Dark */
+  .mdx-editor-file[href$=".pdf"] { border-color: #ff6b6b; color: #ff6b6b; }
+  .mdx-editor-file[href$=".pdf"]:hover { background-color: #3d2020; color: #ff8787; }
 
   .mdx-editor-file[href$=".zip"],
   .mdx-editor-file[href$=".rar"],
-  .mdx-editor-file[href$=".7z"] {
-    border-color: #ffd43b;
-    color: #ffd43b;
-  }
-
-  .mdx-editor-file[href$=".zip"]:hover,
-  .mdx-editor-file[href$=".rar"]:hover,
-  .mdx-editor-file[href$=".7z"]:hover {
-    background-color: #3d3520;
-    border-color: #ffd43b;
-    color: #ffe066;
-  }
+  .mdx-editor-file[href$=".7z"] { border-color: #ffd43b; color: #ffd43b; }
+  .mdx-editor-file[href$=".zip"]:hover { background-color: #3d3520; color: #ffe066; }
 
   .mdx-editor-file[href$=".doc"],
-  .mdx-editor-file[href$=".docx"] {
-    border-color: #5c7cfa;
-    color: #5c7cfa;
-  }
-
-  .mdx-editor-file[href$=".doc"]:hover,
-  .mdx-editor-file[href$=".docx"]:hover {
-    background-color: #202838;
-    border-color: #5c7cfa;
-    color: #748ffc;
-  }
+  .mdx-editor-file[href$=".docx"] { border-color: #5c7cfa; color: #5c7cfa; }
+  .mdx-editor-file[href$=".doc"]:hover { background-color: #202838; color: #748ffc; }
 
   .mdx-editor-file[href$=".xls"],
-  .mdx-editor-file[href$=".xlsx"] {
-    border-color: #51cf66;
-    color: #51cf66;
-  }
-
-  .mdx-editor-file[href$=".xls"]:hover,
-  .mdx-editor-file[href$=".xlsx"]:hover {
-    background-color: #203528;
-    border-color: #51cf66;
-    color: #69db7c;
-  }
+  .mdx-editor-file[href$=".xlsx"] { border-color: #51cf66; color: #51cf66; }
+  .mdx-editor-file[href$=".xls"]:hover { background-color: #203528; color: #69db7c; }
 }
 
 /* ===========================
@@ -274,17 +295,31 @@
     border: 1px solid #000;
     page-break-inside: avoid;
   }
-
   .mdx-editor-video__title::after {
-    content: ' (视频: ' attr(src) ')';
+    content: ' (视频源: ' attr(src) ')';
     font-size: 0.8em;
     color: #666;
   }
-
   .mdx-editor-file::after {
     content: ' (' attr(href) ')';
     font-size: 0.8em;
     color: #666;
+  }
+  
+  /* 打印时隐藏 iframe 内容，只显示边框和链接提示，节省墨水 */
+  .mdx-editor-embed iframe {
+    display: none;
+  }
+  .mdx-editor-embed {
+    height: auto !important;
+    padding: 1em;
+    border: 1px dashed #999;
+    background: #fff;
+  }
+  .mdx-editor-embed::after {
+    content: 'Embedded Content (Video/PDF) ignored in print.';
+    color: #666;
+    font-style: italic;
   }
 }
 
@@ -292,18 +327,10 @@
    Accessibility
    =========================== */
 
-.mdx-editor-video:focus-within {
+.mdx-editor-video:focus-within,
+.mdx-editor-embed:focus-within {
   outline: 2px solid #0066cc;
   outline-offset: 2px;
-}
-
-.mdx-editor-file:focus {
-  outline: 2px solid #0066cc;
-  outline-offset: 2px;
-}
-
-.mdx-editor-file:focus:not(:focus-visible) {
-  outline: none;
 }
 
 .mdx-editor-file:focus-visible {

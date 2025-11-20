@@ -63,6 +63,28 @@ View --> User: 显示可视化结果
 @enduml
 \`\`\`
 
+### 4. Vega 数据可视化 - 由 \`VegaPlugin\` 提供
+支持 Vega-Lite 语法进行数据绘图。
+
+\`\`\`vega-lite
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "description": "A simple bar chart with embedded data.",
+  "data": {
+    "values": [
+      {"a": "A", "b": 28}, {"a": "B", "b": 55}, {"a": "C", "b": 43},
+      {"a": "D", "b": 91}, {"a": "E", "b": 81}, {"a": "F", "b": 53},
+      {"a": "G", "b": 19}, {"a": "H", "b": 87}, {"a": "I", "b": 52}
+    ]
+  },
+  "mark": "bar",
+  "encoding": {
+    "x": {"field": "a", "type": "nominal", "axis": {"labelAngle": 0}},
+    "y": {"field": "b", "type": "quantitative"}
+  }
+}
+\`\`\`
+
 ---
 
 ## ⚡ 自动完成 (Autocomplete) 新功能
@@ -153,7 +175,7 @@ graph TD;
 
 !video[Big Buck Bunny 演示视频](http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4)
 
-!file[项目文档.pdf](https://example.com/document.pdf)
+!file[项目文档.pdf](https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf)
 
 ## 挖空填词 (Cloze) 功能
 
@@ -350,7 +372,8 @@ if (editorContainer) {
             'cloze',
             'autocomplete:tag',
             'autocomplete:mention',
-            'plantuml'
+            'plantuml',
+            'vega'
         ],
         defaultPluginOptions: {
             'core:titlebar': {
@@ -375,6 +398,10 @@ if (editorContainer) {
             // [可选] 配置 SVG 或 PlantUML 选项，例如服务器地址
             'plantuml': {
                 format: 'svg'
+            },
+            'vega': {
+                theme: 'quartz', // 可选: 'excel' | 'ggplot2' | 'quartz' | 'vox' | 'dark'
+                actions: true
             }
         }
     });

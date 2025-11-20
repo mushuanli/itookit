@@ -1,0 +1,31 @@
+.mdx-vega-container {
+    display: flex;
+    justify-content: center;
+    margin: 1.5em 0;
+    overflow-x: auto;
+    background: white;
+    /* 图表通常需要白底，除非使用了暗色配置 */
+    border-radius: 8px;
+    padding: 10px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.mdx-vega-error {
+    color: #c2410c;
+    background: #fff7ed;
+    border: 1px solid #fdba74;
+    padding: 8px 12px;
+    border-radius: 4px;
+    margin-bottom: 8px;
+    font-size: 0.9em;
+    font-family: monospace;
+}
+
+/* 暗黑模式适配 */
+.dark-mode .mdx-vega-container {
+    background: #1e1e1e;
+    /* 适配暗色背景 */
+}
+
+/* 如果使用了 vega 的 'dark' 主题，这里的适配会自动生效，
+   如果使用 'quartz' 等亮色主题，建议在暗黑模式下降低透明度或强制白底 */
