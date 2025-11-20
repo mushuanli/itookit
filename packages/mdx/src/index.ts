@@ -40,6 +40,9 @@ export type { MathJaxPluginOptions, MathJaxOptions } from './plugins/syntax-exte
 export { MediaPlugin } from './plugins/syntax-extensions/media.plugin';
 export type { MediaPluginOptions } from './plugins/syntax-extensions/media.plugin';
 
+export { SvgPlugin } from './plugins/syntax-extensions/svg.plugin';
+export type { SvgPluginOptions } from './plugins/syntax-extensions/svg.plugin';
+
 export { MermaidPlugin } from './plugins/syntax-extensions/mermaid.plugin';
 export type { MermaidPluginOptions } from './plugins/syntax-extensions/mermaid.plugin';
 
