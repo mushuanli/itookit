@@ -1,0 +1,41 @@
+/* @file: mdx/styles/plugin-plantuml.css
+ * Styles for Callouts and PlantUML Plugins
+ */
+
+/* --- PlantUML Styles --- */
+/* Block: mdx-plantuml */
+.mdx-plantuml-container {
+    display: flex;
+    justify-content: center;
+    margin: 1.5em 0;
+    overflow-x: auto;
+    background: transparent;
+}
+
+.mdx-plantuml-container img {
+    max-width: 100%;
+    height: auto;
+    /* 添加轻微阴影增加层次感 */
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    border-radius: 4px;
+    background-color: white;
+    /* PlantUML 通常是透明背景，加白底防止暗黑模式看不清 */
+    padding: 10px;
+}
+
+.mdx-plantuml-error {
+    color: #ef4444;
+    border: 1px solid #ef4444;
+    padding: 8px;
+    border-radius: 4px;
+    font-size: 0.9em;
+    text-align: center;
+}
+
+/* 暗黑模式适配 - PlantUML */
+.dark-mode .mdx-plantuml-container img {
+    /* 稍微降低亮度以适应暗色背景 */
+    opacity: 0.9;
+    /* 如果 PlantUML 图表本身就是黑白的，可以使用反色滤镜，但小心彩色图表 */
+    /* filter: invert(1) hue-rotate(180deg); */
+}

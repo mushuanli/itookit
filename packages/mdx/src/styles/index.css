@@ -10,6 +10,8 @@
 @import './plugin-media.css';
 @import './plugin-mermaid.css';
 @import './plugin-svg.css';
+@import './plugin-callout.css';
+@import './plugin-plantuml.css';
 
 @import './plugin-cloze.css';
 @import './plugin-cloze-controls.css';
