@@ -1,4 +1,8 @@
-// mdx/plugins/interactions/task-list.plugin.ts
+/**
+ * @file mdx/plugins/interactions/task-list.plugin.ts
+ * @desc 任务列表插件。支持标准 GFM 任务列表和表格内任务列表，支持双向绑定、事件通知和排序兼容。
+ */
+
 import type { MDxPlugin, PluginContext, ScopedPersistenceStore } from '../../core/plugin';
 import type { MarkedExtension } from 'marked';
 
@@ -7,24 +11,27 @@ import type { MarkedExtension } from 'marked';
  */
 export interface TaskListPluginOptions {
   /**
-   * 自定义选择器
-   * @default '.task-list-item input[type="checkbox"]'
+   * 自定义复选框的选择器
+   * 用于在 DOM 中查找交互元素
+   * @default 'input[type="checkbox"].mdx-task-item'
    */
   checkboxSelector?: string;
   
   /**
-   * 是否自动更新 Markdown 源码
+   * 点击任务时是否自动更新 Markdown 源码
    * @default true
    */
   autoUpdateMarkdown?: boolean;
   
   /**
-   * 任务切换前的钩子（返回 false 可阻止更新）
+   * 任务切换前的钩子
+   * 返回 false 或 Promise<false> 可以阻止状态切换和 Markdown 更新
    */
   beforeTaskToggle?: (detail: TaskToggleDetail) => boolean | Promise<boolean>;
   
   /**
    * 任务切换后的回调
+   * 此时 Markdown 已更新（如果 autoUpdateMarkdown 为 true）
    */
   onTaskToggled?: (detail: TaskToggleResult) => void | Promise<void>;
 }
@@ -33,27 +40,38 @@ export interface TaskListPluginOptions {
  * 任务切换事件详情（操作前）
  */
 export interface TaskToggleDetail {
+  /** 任务文本内容 */
   taskText: string;
+  /** 当前复选框的状态（点击时的状态） */
   isChecked: boolean;
+  /** 触发事件的 DOM 元素 */
   element: HTMLInputElement;
+  /** 在 Markdown 源码中的行号 (1-based) */
   lineNumber?: number;
+  /** 是否为表格内的任务 */
+  isTableTask?: boolean;
 }
 
 /**
  * 任务切换结果（操作后）
  */
 export interface TaskToggleResult extends TaskToggleDetail {
+  /** 更新前的 Markdown 源码 */
   originalMarkdown: string;
+  /** 更新后的 Markdown 源码 */
   updatedMarkdown: string;
+  /** 标记 Markdown 是否实际发生了变化 */
   wasUpdated: boolean;
 }
 
 /**
- * 任务元数据
+ * 内部使用的位置信息结构
+ * 用于将 DOM 中的唯一 ID 映射回 Markdown 源码位置
  */
-interface TaskMetadata {
-  taskText: string;
-  lineNumber?: number;
+interface TaskLocation {
+  lineNumber: number;
+  indexInLine: number; // 该行第几个任务（处理表格一行多个任务的情况）
+  isTableTask: boolean;
 }
 
 export class TaskListPlugin implements MDxPlugin {
@@ -63,11 +81,16 @@ export class TaskListPlugin implements MDxPlugin {
   private store: ScopedPersistenceStore | null = null;
   private currentMarkdown: string = '';
   
-  private taskMap = new WeakMap<HTMLElement, Map<HTMLInputElement, TaskMetadata>>();
+  // 存储从 Markdown 源码解析出的所有任务位置，按顺序排列
+  // 索引对应 DOM 元素的 data-task-index
+  private taskLocations: TaskLocation[] = [];
+  
+  // 渲染计数器，用于给 DOM 绑定唯一的 taskIndex
+  private renderTaskCounter = 0;
 
   constructor(options: TaskListPluginOptions = {}) {
     this.options = {
-      checkboxSelector: options.checkboxSelector || '.task-list-item input[type="checkbox"]',
+      checkboxSelector: options.checkboxSelector || 'input[type="checkbox"].mdx-task-item',
       autoUpdateMarkdown: options.autoUpdateMarkdown !== false,
       beforeTaskToggle: options.beforeTaskToggle || (() => true),
       onTaskToggled: options.onTaskToggled || (() => {}),
@@ -75,54 +98,161 @@ export class TaskListPlugin implements MDxPlugin {
   }
 
   /**
-   * 创建 Marked 扩展，移除 GFM 默认添加的 disabled 属性，使复选框可交互。
+   * 创建 Marked 扩展
+   * 核心逻辑：给每个生成的 checkbox 绑定一个全局递增的 data-task-index
    */
   private createMarkedExtension(): MarkedExtension {
+    // 捕获 this 上下文
+    const self = this;
+    
     return {
+      // 钩子：在解析 Markdown 之前重置渲染计数器
+      hooks: {
+        preprocess(markdown: string) {
+          self.renderTaskCounter = 0;
+          return markdown;
+        }
+      },
       renderer: {
+        // 1. 处理标准列表项任务 (- [ ])
         listitem(text: string): string {
-          const taskMatch = text.match(/^<input\s+(?:disabled\s*=\s*"[^"]*"\s*)?type="checkbox"\s*(checked\s*=\s*"[^"]*")?\s*\/?>/);
+          // 检查文本是否以 [ ] 或 [x] 开头（可能被其他扩展处理过，或者还是纯文本）
+          // 为了稳健性，我们处理标准 Markdown 文本模式
+          const taskRegex = /^\[([ xX])\]/;
+          const match = text.match(taskRegex);
           
-          if (taskMatch) {
-            const isChecked = taskMatch[1] ? ' checked' : '';
-            const checkbox = `<input type="checkbox"${isChecked}>`;
-            const remainingText = text.replace(taskMatch[0], checkbox);
-            return `<li class="task-list-item">${remainingText}</li>\n`;
+          if (match) {
+            const isChecked = match[1] !== ' ';
+            const index = self.renderTaskCounter++;
+            
+            // 生成带索引的 input
+            const checkbox = `<input type="checkbox" class="mdx-task-item" ${isChecked ? 'checked' : ''} data-task-index="${index}">`;
+            
+            // 移除 [ ] 部分，保留剩余文本
+            const remainingText = text.substring(match[0].length);
+            return `<li class="task-list-item">${checkbox}${remainingText}</li>\n`;
+          }
+          
+          // 兼容性处理：如果 marked 配置已经将 [ ] 转为了 <input>
+          if (text.startsWith('<input')) {
+             const index = self.renderTaskCounter++;
+             // 注入 class 和 data-task-index
+             const newTag = `<input class="mdx-task-item" data-task-index="${index}"`;
+             return `<li class="task-list-item">${text.replace('<input', newTag)}</li>\n`;
           }
           
           return `<li>${text}</li>\n`;
+        },
+
+        // 2. 处理表格单元格内的任务 (| [ ] |)
+        tablecell(content: string, flags): string {
+          const type = flags.header ? 'th' : 'td';
+          const tag = flags.align ? `<${type} align="${flags.align}">` : `<${type}>`;
+          
+          // 全局替换当前单元格内的所有 [ ] 或 [x]
+          // 使用 replace 的回调函数，确保每次匹配时 index 都能递增
+          const processedContent = content.replace(/\[([ xX])\]/gi, (match, state) => {
+            const isChecked = state.toLowerCase() === 'x';
+            const index = self.renderTaskCounter++;
+            
+            return `<input type="checkbox" class="mdx-task-item mdx-table-task" ${isChecked ? 'checked' : ''} data-task-index="${index}">`;
+          });
+          
+          return `${tag}${processedContent}</${type}>\n`;
         }
       }
     };
   }
 
+  /**
+   * 预处理 Markdown，提取所有任务的确切行号位置
+   * 必须在渲染前执行，以确保 taskLocations 数组的顺序与 renderTaskCounter 一致
+   */
+  private parseTaskLocations(markdown: string): void {
+    this.taskLocations = [];
+    const lines = markdown.split('\n');
+    
+    lines.forEach((line, lineIdx) => {
+      const lineNumber = lineIdx + 1;
+      
+      // 1. 检查标准列表任务 (以 - [ ] 开头)
+      if (/^\s*[-*+]\s+\[[ xX]\]/.test(line)) {
+        this.taskLocations.push({
+          lineNumber,
+          indexInLine: 0,
+          isTableTask: false
+        });
+      } 
+      // 2. 检查表格行任务 (包含 | 且包含 [ ])
+      else if (line.includes('|') && /\[[ xX]\]/.test(line)) {
+        // 表格行可能包含多个任务，例如 | [ ] A | [ ] B |
+        const matches = line.match(/\[[ xX]\]/g);
+        if (matches) {
+          matches.forEach((_, idx) => {
+            this.taskLocations.push({
+              lineNumber,
+              indexInLine: idx, // 记录它是这一行里的第几个匹配项
+              isTableTask: true
+            });
+          });
+        }
+      }
+    });
+  }
+
+  /**
+   * 创建点击事件处理器
+   */
   private createClickHandler(context: PluginContext): (e: Event) => void {
     return async (event: Event) => {
       const target = event.target as HTMLElement;
-      const checkbox = target.closest<HTMLInputElement>(this.options.checkboxSelector);
-      if (!checkbox) return;
+      
+      // 使用 matches 确保精确匹配配置的选择器
+      if (!target.matches(this.options.checkboxSelector)) return;
+      
+      const checkbox = target as HTMLInputElement;
 
-      const renderRoot = this.findRenderRoot(checkbox);
-      if (!renderRoot) return;
+      // 1. 获取绑定的 index
+      const taskIndexStr = checkbox.getAttribute('data-task-index');
+      if (taskIndexStr === null) {
+        console.warn('TaskListPlugin: Checkbox missing data-task-index');
+        return;
+      }
+      
+      const taskIndex = parseInt(taskIndexStr, 10);
+      
+      // 2. 从预先解析的位置数组中获取行号信息
+      const location = this.taskLocations[taskIndex];
+      if (!location) {
+        console.warn('TaskListPlugin: Task location not found for index', taskIndex);
+        return;
+      }
 
-      const taskMeta = this.taskMap.get(renderRoot)?.get(checkbox);
-      const listItem = checkbox.closest('.task-list-item');
-      const taskText = listItem?.textContent?.trim() || '';
+      // 获取任务文本用于显示 (仅供 UI 参考)
+      let taskText = '';
+      if (location.isTableTask) {
+          taskText = checkbox.parentElement?.textContent?.trim() || '';
+      } else {
+          taskText = checkbox.closest('.task-list-item')?.textContent?.trim() || '';
+      }
 
       const detail: TaskToggleDetail = {
         taskText,
         isChecked: checkbox.checked,
         element: checkbox,
-        lineNumber: taskMeta?.lineNumber,
+        lineNumber: location.lineNumber,
+        isTableTask: location.isTableTask
       };
 
+      // 3. 触发 "before" 钩子
       const shouldProceed = await this.options.beforeTaskToggle(detail);
       if (!shouldProceed) {
         event.preventDefault();
-        checkbox.checked = !checkbox.checked;
+        checkbox.checked = !checkbox.checked; // 恢复状态
         return;
       }
 
+      // 4. 准备结果对象
       let result: TaskToggleResult = {
         ...detail,
         originalMarkdown: this.currentMarkdown,
@@ -130,135 +260,103 @@ export class TaskListPlugin implements MDxPlugin {
         wasUpdated: false,
       };
 
-      if (this.options.autoUpdateMarkdown && taskMeta) {
-        const updated = this.updateMarkdown(taskMeta, detail.isChecked);
+      // 5. 如果启用了自动更新，则修改 Markdown
+      if (this.options.autoUpdateMarkdown) {
+        const updated = this.updateMarkdown(location, detail.isChecked);
         if (updated) {
           result.updatedMarkdown = updated;
           result.wasUpdated = true;
-          this.currentMarkdown = updated;
           
+          // 更新当前状态
+          this.currentMarkdown = updated;
           await this.store?.set('currentMarkdown', updated);
+          
+          // 注意：编辑器通常会监听 Markdown 变化并重新渲染。
+          // 重新渲染会触发 beforeParse -> parseTaskLocations，保持索引同步。
         }
       }
 
+      // 6. 发送事件 (通知外部系统)
       context.emit('taskToggled', result);
       
+      // 7. 触发 "after" 回调
       await this.options.onTaskToggled(result);
     };
   }
 
   /**
-   * 更新 Markdown 源码中的任务状态
+   * 更新 Markdown 源码
    */
-  private updateMarkdown(taskMeta: TaskMetadata, isChecked: boolean): string | null {
-    if (!this.currentMarkdown || taskMeta.lineNumber === undefined) {
-      return null;
-    }
-
+  private updateMarkdown(loc: TaskLocation, isChecked: boolean): string | null {
     const lines = this.currentMarkdown.split('\n');
-    const lineIndex = taskMeta.lineNumber - 1;
+    const lineIndex = loc.lineNumber - 1;
 
     if (lineIndex < 0 || lineIndex >= lines.length) {
-      console.warn('Task line number out of range');
+      console.warn('TaskListPlugin: Line number out of bounds');
       return null;
     }
 
-    const line = lines[lineIndex];
+    let line = lines[lineIndex];
     const newCheckmark = isChecked ? '[x]' : '[ ]';
     
-    // 匹配任务列表语法：- [ ] 或 - [x] 或 * [ ] 等
-    const taskRegex = /^(\s*[-*+]\s+)\[[ xX]\]/;
-    
-    if (!taskRegex.test(line)) {
-      console.warn('Line is not a task list item:', line);
-      return null;
+    if (loc.isTableTask) {
+      // 表格任务：精确替换行内第 N 个任务标记
+      let currentIndex = 0;
+      // 使用正则替换回调，只替换对应索引的那一个
+      line = line.replace(/\[[ xX]\]/gi, (match) => {
+        if (currentIndex === loc.indexInLine) {
+          currentIndex++;
+          return newCheckmark;
+        }
+        currentIndex++;
+        return match;
+      });
+    } else {
+      // 标准列表任务：替换行首的标记
+      line = line.replace(/^(\s*[-*+]\s+)\[[ xX]\]/, `$1${newCheckmark}`);
     }
 
-    lines[lineIndex] = line.replace(taskRegex, `$1${newCheckmark}`);
+    lines[lineIndex] = line;
     return lines.join('\n');
-  }
-
-  /**
-   * 查找渲染根容器
-   */
-  private findRenderRoot(element: HTMLElement): HTMLElement | null {
-    return element.closest('.mdx-editor-renderer');
-  }
-
-  /**
-   * 构建任务元素映射表
-   */
-  private buildTaskMap(element: HTMLElement): void {
-    const checkboxes = element.querySelectorAll<HTMLInputElement>(this.options.checkboxSelector);
-    const taskMapForElement = new Map<HTMLInputElement, TaskMetadata>();
-    const taskLines = this.findTaskLines(this.currentMarkdown);
-    let taskIndex = 0;
-
-    checkboxes.forEach(checkbox => {
-      const listItem = checkbox.closest('.task-list-item');
-      const taskText = listItem?.textContent?.trim() || '';
-      
-      // 匹配任务文本与行号
-      const lineNumber = taskLines[taskIndex];
-      
-      taskMapForElement.set(checkbox, {
-        taskText,
-        lineNumber,
-      });
-      
-      taskIndex++;
-    });
-
-    this.taskMap.set(element, taskMapForElement);
-  }
-
-  /**
-   * 查找 Markdown 中所有任务列表的行号
-   */
-  private findTaskLines(markdown: string): number[] {
-    const lines = markdown.split('\n');
-    const taskLines: number[] = [];
-    
-    lines.forEach((line, index) => {
-      if (/^\s*[-*+]\s+\[[ xX]\]/.test(line)) {
-        taskLines.push(index + 1); // 行号从 1 开始
-      }
-    });
-    
-    return taskLines;
   }
 
   /**
    * 安装插件
    */
   install(context: PluginContext): void {
+    // 注册 Marked 扩展以修改 HTML 输出
     context.registerSyntaxExtension(this.createMarkedExtension());
 
+    // 初始化存储
     this.store = context.getScopedStore();
-    
     this.store.get('currentMarkdown').then(saved => {
       if (saved) {
         this.currentMarkdown = saved;
       }
     });
 
+    // 监听解析前事件：解析 Markdown 结构以建立索引
     const removeBeforeParse = context.on('beforeParse', ({ markdown }: { markdown: string }) => {
       this.currentMarkdown = markdown;
+      this.parseTaskLocations(markdown); // 关键：构建 index -> location 映射
       return { markdown };
     });
+    
     if (removeBeforeParse) {
       this.cleanupFns.push(removeBeforeParse);
     }
 
+    // 监听 DOM 更新事件：绑定点击交互
     const removeDomUpdated = context.on('domUpdated', ({ element }: { element: HTMLElement }) => {
-      this.buildTaskMap(element);
-
+      // 清理旧的监听器 (如果存在)
       const existingHandler = (element as any)._taskListClickHandler;
       if (existingHandler) {
         element.removeEventListener('click', existingHandler);
       }
 
+      // 绑定新的监听器
       const clickHandler = this.createClickHandler(context);
+      // 使用事件委托，将监听器绑定在根元素上
       element.addEventListener('click', clickHandler);
       (element as any)._taskListClickHandler = clickHandler;
     });
@@ -269,15 +367,16 @@ export class TaskListPlugin implements MDxPlugin {
   }
 
   /**
-   * 手动设置 Markdown 源码
+   * 手动设置 Markdown（例如外部编辑器内容变化时）
    */
   setMarkdown(markdown: string): void {
     this.currentMarkdown = markdown;
+    this.parseTaskLocations(markdown); // 外部更新时也必须重新建立索引
     this.store?.set('currentMarkdown', markdown);
   }
 
   /**
-   * 获取当前 Markdown 源码
+   * 获取当前 Markdown
    */
   getMarkdown(): string {
     return this.currentMarkdown;
@@ -290,12 +389,4 @@ export class TaskListPlugin implements MDxPlugin {
     this.cleanupFns.forEach(fn => fn());
     this.cleanupFns = [];
   }
-}
-
-/**
- * 任务元数据
- */
-interface TaskMetadata {
-  taskText: string;
-  lineNumber?: number;
 }

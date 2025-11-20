@@ -13,6 +13,7 @@ import { PlantUMLPlugin, PlantUMLPluginOptions } from './plugins/syntax-extensio
 import { ClozePlugin } from './plugins/cloze/cloze.plugin';
 import { ClozeControlsPlugin } from './plugins/cloze/cloze-control-ui.plugin';
 import { MemoryPlugin } from './plugins/cloze/memory.plugin';
+import { TablePlugin, TablePluginOptions } from './plugins/interactions/table.plugin';
 import { TaskListPlugin, TaskListPluginOptions } from './plugins/interactions/task-list.plugin';
 import { CodeBlockControlsPlugin, CodeBlockControlsPluginOptions } from './plugins/interactions/codeblock-controls.plugin';
 import { ToolbarPlugin } from './plugins/ui/toolbar.plugin';
@@ -97,6 +98,7 @@ registerPlugin('memory', MemoryPlugin, {
   priority: 20,
   dependencies: ['cloze'],
 });
+registerPlugin('interaction:table', TablePlugin, { priority: 50 });
 registerPlugin('task-list', TaskListPlugin, { priority: 51 });
 registerPlugin('codeblock-controls', CodeBlockControlsPlugin, { priority: 52 });
 registerPlugin('autocomplete:tag', TagPlugin, { priority: 53 });
@@ -120,6 +122,7 @@ export interface MDxEditorFactoryConfig extends EditorOptions {
     mermaid?: MermaidPluginOptions;
     // [新增] SVG 选项类型
     svg?: SvgPluginOptions;
+    table?: TablePluginOptions; // 新增
     'task-list'?: TaskListPluginOptions;
     'codeblock-controls'?: CodeBlockControlsPluginOptions;
     'autocomplete:tag'?: TagPluginOptions;
@@ -134,6 +137,7 @@ const DEFAULT_PLUGINS: PluginConfig[] = [
   'ui:toolbar',
   'ui:formatting',
   'interaction:source-sync',
+  'interaction:table',
   'folder',
   'mathjax',
   'media',
