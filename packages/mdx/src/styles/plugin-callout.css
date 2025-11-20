@@ -1,0 +1,159 @@
+/* @file: mdx/styles/plugin-callout.css
+ * Styles for Callouts and PlantUML Plugins
+ */
+
+/* --- Callout (Admonition) Styles --- */
+/* Block: mdx-callout */
+.mdx-callout {
+    margin: 1em 0;
+    border-radius: 6px;
+    border-left: 4px solid;
+    background-color: rgba(128, 128, 128, 0.05);
+    /* 默认淡灰色背景 */
+    page-break-inside: avoid;
+    overflow: hidden;
+}
+
+.mdx-callout-title {
+    display: flex;
+    align-items: center;
+    padding: 0.5em 1em;
+    font-weight: 600;
+    font-size: 0.95em;
+    background-color: rgba(128, 128, 128, 0.1);
+    user-select: none;
+}
+
+.mdx-callout-icon {
+    margin-right: 0.5em;
+    display: inline-flex;
+    align-items: center;
+    font-style: normal;
+}
+
+.mdx-callout-content {
+    padding: 0.5em 1em;
+    color: inherit;
+}
+
+.mdx-callout-content>*:first-child {
+    margin-top: 0;
+}
+
+.mdx-callout-content>*:last-child {
+    margin-bottom: 0;
+}
+
+/* --- Type-specific Styling (GitHub Style Colors) --- */
+
+/* Note (Blue) */
+.mdx-callout-note {
+    border-color: #0969da;
+}
+
+.mdx-callout-note .mdx-callout-title {
+    color: #0969da;
+}
+
+.mdx-callout-note .mdx-callout-icon::before {
+    content: "ℹ";
+}
+
+/* Tip / Success (Green) */
+.mdx-callout-tip,
+.mdx-callout-success {
+    border-color: #1a7f37;
+}
+
+.mdx-callout-tip .mdx-callout-title,
+.mdx-callout-success .mdx-callout-title {
+    color: #1a7f37;
+}
+
+.mdx-callout-tip .mdx-callout-icon::before {
+    content: "💡";
+}
+
+/* Warning / Attention (Yellow/Orange) */
+.mdx-callout-warning,
+.mdx-callout-attention {
+    border-color: #9a6700;
+}
+
+.mdx-callout-warning .mdx-callout-title {
+    color: #9a6700;
+}
+
+.mdx-callout-warning .mdx-callout-icon::before {
+    content: "⚠️";
+}
+
+/* Danger / Error (Red) */
+.mdx-callout-danger,
+.mdx-callout-failure,
+.mdx-callout-error {
+    border-color: #cf222e;
+}
+
+.mdx-callout-danger .mdx-callout-title {
+    color: #cf222e;
+}
+
+.mdx-callout-danger .mdx-callout-icon::before {
+    content: "🚨";
+}
+
+/* Info (Gray/Blue) */
+.mdx-callout-info {
+    border-color: #0969da;
+}
+
+.mdx-callout-info .mdx-callout-title {
+    color: #0969da;
+}
+
+.mdx-callout-info .mdx-callout-icon::before {
+    content: "ℹ";
+}
+
+/* 暗黑模式适配 - Callouts */
+.dark-mode .mdx-callout {
+    background-color: rgba(255, 255, 255, 0.03);
+}
+
+.dark-mode .mdx-callout-title {
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+/* 暗黑模式下的特定颜色调整 (使其更亮) */
+.dark-mode .mdx-callout-note {
+    border-color: #2f81f7;
+}
+
+.dark-mode .mdx-callout-note .mdx-callout-title {
+    color: #2f81f7;
+}
+
+.dark-mode .mdx-callout-tip {
+    border-color: #3fb950;
+}
+
+.dark-mode .mdx-callout-tip .mdx-callout-title {
+    color: #3fb950;
+}
+
+.dark-mode .mdx-callout-warning {
+    border-color: #d29922;
+}
+
+.dark-mode .mdx-callout-warning .mdx-callout-title {
+    color: #d29922;
+}
+
+.dark-mode .mdx-callout-danger {
+    border-color: #f85149;
+}
+
+.dark-mode .mdx-callout-danger .mdx-callout-title {
+    color: #f85149;
+}

@@ -38,7 +38,7 @@ export class ClozePlugin implements MDxPlugin {
   private createBeforeParseHook(context: PluginContext) {
     return (payload: any) => {
       this.getContextState(context).clozeCounter = 0;
-      return payload; // <-- 关键：返回 payload
+      return payload;
     };
   }
 
@@ -65,17 +65,36 @@ export class ClozePlugin implements MDxPlugin {
           },
           renderer: (token: Tokens.Generic) => {
             const audioHtml = token.audio
-              ? `<span class="${this.options.className}__audio" data-audio-text="${token.audio}"><i class="${this.options.audioIconClass}"></i></span>`
+              ? `<span class="${this.options.className}__audio" data-audio-text="${this.escapeHtml(token.audio)}"><i class="${this.options.audioIconClass}"></i></span>`
               : '';
 
-            return `<span class="${this.options.className} hidden" data-cloze-locator="${token.locator}" data-cloze-content="${token.content}">
-              <span class="${this.options.className}__content">${token.content}</span><span class="${this.options.className}__placeholder">[...]</span>
+            // [修复] 对 content 属性进行转义，防止 content 包含双引号破坏 HTML 结构
+            const safeContentAttr = this.escapeHtml(token.content);
+            
+            // [新增] 默认渲染时，将 ¶ 替换为 <br/>
+            const displayContent = token.content.replace(/¶/g, '<br/>');
+
+            return `<span class="${this.options.className} hidden" data-cloze-locator="${token.locator}" data-cloze-content="${safeContentAttr}">
+              <span class="${this.options.className}__content">${displayContent}</span><span class="${this.options.className}__placeholder">[...]</span>
               ${audioHtml}
             </span>`;
           },
         },
       ],
     };
+  }
+
+  /**
+   * [新增] 简单的 HTML 转义工具，用于属性值安全
+   */
+  private escapeHtml(str: string): string {
+      if (!str) return '';
+      return str
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#039;");
   }
 
   install(context: PluginContext): void {
@@ -127,7 +146,7 @@ export class ClozePlugin implements MDxPlugin {
       });
       
       registerCommand('insertLinebreak', (view: any) => {
-        if (view) return commands.insertLinebreak(view);
+            if (commands && commands.insertLinebreak) return commands.insertLinebreak(view);
         return false;
       });
       registerToolbarButton({

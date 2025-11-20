@@ -40,6 +40,9 @@ export type { MathJaxPluginOptions, MathJaxOptions } from './plugins/syntax-exte
 export { MediaPlugin } from './plugins/syntax-extensions/media.plugin';
 export type { MediaPluginOptions } from './plugins/syntax-extensions/media.plugin';
 
+export { SvgPlugin } from './plugins/syntax-extensions/svg.plugin';
+export type { SvgPluginOptions } from './plugins/syntax-extensions/svg.plugin';
+
 export { MermaidPlugin } from './plugins/syntax-extensions/mermaid.plugin';
 export type { MermaidPluginOptions } from './plugins/syntax-extensions/mermaid.plugin';
 
@@ -54,6 +57,9 @@ export type { MemoryPluginOptions } from './plugins/cloze/memory.plugin';
 
 export { TaskListPlugin } from './plugins/interactions/task-list.plugin';
 export type { TaskListPluginOptions, TaskToggleDetail } from './plugins/interactions/task-list.plugin';
+
+export { TablePlugin } from './plugins/interactions/table.plugin';
+export type { TablePluginOptions } from './plugins/interactions/table.plugin';
 
 export { CodeBlockControlsPlugin } from './plugins/interactions/codeblock-controls.plugin';
 export type { CodeBlockControlsPluginOptions } from './plugins/interactions/codeblock-controls.plugin';
