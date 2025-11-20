@@ -1,20 +1,88 @@
+/**
+ * @file demo/mdx.js
+ * @desc MDxEditor 完整演示入口文件
+ */
+
 import '@itookit/mdxeditor/style.css';
 import { createMDxEditor } from '@itookit/mdxeditor';
 
-// 由于这是演示，我们直接在这里实现简化版本
+// ============================================================================
+// 1. 模拟数据源 (Mock Data & Providers)
+// ============================================================================
 
-// 初始化示例内容
+const allTags = ['javascript', 'typescript', 'react', 'vue', 'css', 'html', 'refactor', 'bugfix', 'performance'];
+
+const mockUsers = [
+    { id: 'john', label: 'John Doe', type: 'Frontend Developer', avatar: '👨‍💻' },
+    { id: 'anna', label: 'Anna Smith', type: 'Backend Developer', avatar: '👩‍💻' },
+    { id: 'peter', label: 'Peter Jones', type: 'UI/UX Designer', avatar: '🎨' },
+];
+
+const mockDocuments = [
+    { id: 'proj-plan', label: 'Project Plan', type: 'Planning Document' },
+    { id: 'api-v2', label: 'API Design V2', type: 'Technical Spec' },
+    { id: 'ux-research', label: 'UX Research Report', type: 'Research' },
+];
+
+// 用户提及提供者 (@user)
+const userMentionProvider = {
+    key: 'users', 
+    triggerChar: '@',
+    async getSuggestions(query) {
+        await new Promise(r => setTimeout(r, 50)); // 模拟网络延迟
+        return mockUsers.filter(u => u.label.toLowerCase().includes(query.toLowerCase()));
+    },
+    async getHoverPreview(item) {
+        const user = mockUsers.find(u => u.id === item.id);
+        if (!user) return null;
+        return {
+            title: `${user.avatar} ${user.label}`,
+            content: `<strong>职位:</strong> ${user.type}<br><em>活跃于 3 个项目</em>`,
+        };
+    },
+};
+
+// 文档提及提供者 (@@doc)
+const documentMentionProvider = {
+    key: 'docs', 
+    triggerChar: '@@',
+    async getSuggestions(query) {
+        await new Promise(r => setTimeout(r, 50));
+        return mockDocuments.filter(d => d.label.toLowerCase().includes(query.toLowerCase()));
+    },
+    async getHoverPreview(item) {
+        const doc = mockDocuments.find(d => d.id === item.id);
+        if (!doc) return null;
+        return { title: `📄 ${doc.label}`, content: `类型: <strong>${doc.type}</strong>` };
+    },
+    async getFullContent(id) {
+        const doc = mockDocuments.find(d => d.id === id);
+        if (!doc) return '<div>Document not found.</div>';
+        return `
+          <div style="border-left: 3px solid #ccc; padding-left: 15px; margin: 10px 0;">
+            <h4>${doc.label}</h4>
+            <p>This is the embedded content for <strong>${doc.label}</strong>.</p>
+            <ul><li>Define project scope</li><li>Create initial mockups</li></ul>
+          </div>
+        `;
+    },
+};
+
+// ============================================================================
+// 2. 演示文档内容 (Markdown Content)
+// ============================================================================
+
 const initialContent = `# MDxEditor 演示文档
 
 欢迎使用 **MDxEditor**！这是一个功能强大的、插件化的 Markdown 编辑器。
 
 ---
 
-## 🎨 新增可视化扩展 (Visual Extensions)
+## 🎨 1. 可视化扩展 (Visual Extensions)
 
 MDxEditor 支持多种丰富的可视化格式，不仅限于标准的 Markdown。
 
-### 1. 提示块 (Callouts) - 由 \`CalloutPlugin\` 提供
+### 提示块 (Callouts)
 支持 GitHub/Obsidian 风格的提示块语法 \`> [!TYPE]\`。
 
 > [!NOTE]
@@ -29,7 +97,7 @@ MDxEditor 支持多种丰富的可视化格式，不仅限于标准的 Markdown�
 > **注意安全**
 > 这是一个危险警告！
 
-### 2. SVG 渲染 - 由 \`SvgPlugin\` 提供
+### SVG 渲染
 你可以直接在代码块中编写 SVG 代码，编辑器将其渲染为矢量图形。
 
 \`\`\`svg
@@ -41,7 +109,7 @@ MDxEditor 支持多种丰富的可视化格式，不仅限于标准的 Markdown�
 </svg>
 \`\`\`
 
-### 3. PlantUML 绘图 - 由 \`PlantUMLPlugin\` 提供
+### PlantUML 绘图
 除了 Mermaid，现在还支持专业的 UML 绘图工具 PlantUML。
 
 \`\`\`plantuml
@@ -63,7 +131,7 @@ View --> User: 显示可视化结果
 @enduml
 \`\`\`
 
-### 4. Vega 数据可视化 - 由 \`VegaPlugin\` 提供
+### Vega 数据可视化
 支持 Vega-Lite 语法进行数据绘图。
 
 \`\`\`vega-lite
@@ -87,8 +155,24 @@ View --> User: 显示可视化结果
 
 ---
 
-## ⚡ 自动完成 (Autocomplete) 新功能
+## 🖱️ 2. 交互与智能特性 (Interactive & Smart)
 
+### 增强型表格 (Table++)
+由 \`interaction:table\` 和 \`interaction:task-list\` 插件共同驱动。
+
+**功能演示**：
+1.  **排序**：点击表头 (如 "优先级") 可以进行升序/降序排列。
+2.  **筛选**：在表头下方的输入框输入文字可过滤行。
+3.  **表格任务**：直接点击表格内的复选框，状态会同步回源码！
+
+| 任务名称 | 进度 | 优先级 | 负责人 |
+| :--- | :--- | :--- | :--- |
+| [x] 核心架构设计 | <span style="color:green">已完成</span> | P0 | @John |
+| [x] 插件系统实现 | <span style="color:green">已完成</span> | P0 | @Anna |
+| [ ] 表格排序功能 | <span style="color:orange">进行中</span> | P1 | @Peter |
+| [ ] 文档编写 | <span style="color:gray">未开始</span> | P2 | @John |
+
+### 自动完成 (Autocomplete)
 MDxEditor 现在集成了强大的自动完成系统，支持标签和提及功能。
 
 ### 1. 标签 (Tags) - 由 \`TagPlugin\` 提供
@@ -125,11 +209,40 @@ MDxEditor 现在集成了强大的自动完成系统，支持标签和提及功�
 下面是 "Project Plan" 文档的嵌入内容：
 !@docs:proj-plan
 
----
+### 挖空填词 (Cloze)
 
-## ✨ 其他核心功能
+这是通过 \`cloze\` 插件启用的功能。在预览模式下，点击挖空部分即可显示/隐藏答案。
+**控制面板**: 请留意屏幕右下角的浮动控制面板，支持 **切换摘要/详细视图**。
 
-### 1. 标题栏与侧边栏交互
+- **基本用法**: --太阳-- 是太阳系的中心。
+- **带 ID**: [c1]--地球-- 是我们居住的行星。
+- **带音频**: 法语单词 "你好" 的发音是 --Bonjour--^^audio:Bonjour^^。
+
+** 多行与长文本支持 (使用 ¶ 换行) **:
+MDxEditor 识别 \`¶\` 字符作为挖空内部的换行符。
+
+**1. 短多行示例**:
+--第一行内容¶第二行内容 (点击查看完整布局)--
+
+**2. 长文本自动摘要示例**:
+(在控制面板点击 <i class="fas fa-compress-alt"></i> 按钮可切换视图)
+
+--Markdown 是一种轻量级标记语言，创始人为 John Gruber。¶它允许人们使用易读易写的纯文本格式编写文档，然后将其转换成有效的 XHTML (或者 HTML)。¶Markdown 的目标是实现"易读易写"。¶这份演示文档本身就是用 Markdown 编写的，展示了 MDxEditor 的强大渲染能力。--
+
+** 表格内的挖空 **:
+挖空功能完美集成在表格中，不破坏表格结构，且支持排序。
+
+| 概念 | 定义 (点击查看) | 备注 |
+| :--- | :--- | :--- |
+| **HTML** | --超文本标记语言 (HyperText Markup Language)-- | 网页的基础结构 |
+| **CSS** | --层叠样式表 (Cascading Style Sheets)-- | 用于样式设计 |
+| **JS** | --JavaScript-- | 用于交互逻辑 |
+
+
+
+
+
+### 标题栏与侧边栏交互
 
 *   **功能**: 编辑器顶部的标题栏现在由 \`core:titlebar\` 插件驱动。它提供了一组可配置的核心操作按钮。
 *   **如何操作**:
@@ -137,7 +250,8 @@ MDxEditor 现在集成了强大的自动完成系统，支持标签和提及功�
     2.  观察左侧的“会话列表”侧边栏会平滑地展开和收起。
     3.  这是通过在编辑器配置中传入 \`toggleSidebarCallback\` 实现的，展示了编辑器与外部 UI 解耦的能力。
 
-### 2. 源码同步跳转
+### 源码同步跳转
+在预览模式下，按住键盘上的 \`Ctrl\` 键 (Windows/Linux) 或 \`Cmd\` 键 (Mac)，同时**用鼠标双击本段落中的任意文字**，编辑器会自动切换回 **编辑模式**，并高亮你刚才双击的文本所在的源码行。
 
 *   **功能**: 在预览模式下，快速从渲染后的内容跳转到对应的 Markdown 源码位置，由 \`interaction:source-sync\` 插件提供支持。
 *   **如何操作**:
@@ -148,7 +262,7 @@ MDxEditor 现在集成了强大的自动完成系统，支持标签和提及功�
 
 ---
 
-## 丰富的功能集
+## 📝 3. 基础与核心功能 (Standard Features)
 
 ### 交互式任务列表 (Task List)
 在预览模式下，直接点击下方的复选框，可以修改任务状态。这个更改会 **自动同步** 回 Markdown 源码。
@@ -156,8 +270,6 @@ MDxEditor 现在集成了强大的自动完成系统，支持标签和提及功�
 - [ ] 学习 MDxEditor 的插件系统。
 - [x] 审查 codeblock-controls 插件的实现。
 - [ ] 为项目贡献代码。
-
----
 
 ### 图表绘制 (Mermaid)
 使用 Mermaid 语法可以直接在 Markdown 中绘制流程图、序列图等。
@@ -177,22 +289,8 @@ graph TD;
 
 !file[项目文档.pdf](https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf)
 
-## 挖空填词 (Cloze) 功能
 
-这是通过 'cloze' 插件启用的新功能。在预览模式下，点击 --挖空部分-- 即可显示答案。
-
-- **基本用法**: --太阳-- 是太阳系的中心。
-- **带 ID**: [c1]--地球-- 是我们居住的行星。
-- **带音频**: 法语单词 "你好" 的发音是 --Bonjour--^^audio:Bonjour^^。
-- **多行内容**: 
-  Markdown 是一种 --轻量级标记语言--，由 --John Gruber-- 创建。
-
----
-
-## 其他功能
-
-### 1. 基础 Markdown 语法
-
+### 基础 Markdown 语法
 支持所有标准 Markdown 语法：
 
 - **粗体文本**
@@ -202,24 +300,20 @@ graph TD;
 - [链接](https://example.com)
 - [ ] 选择框
 
-### 2. 代码块
-
+### 代码块
 \`\`\`javascript
 function hello(name) {
   // 代码块高度超过阈值时，会出现复制、下载和折叠按钮
   console.log(\`Hello, \${name}!\`);
   return true;
 }
-
 hello('World');
 \`\`\`
 
-### 3. 数学公式
-
+### 数学公式
 行内公式：质能方程 $E = mc^2$ 是物理学中最著名的公式之一。
 
 公式块：
-
 $$
 \\int_{-\\infty}^{\\infty} e^{-x^2} dx = \\sqrt{\\pi}
 $$
@@ -230,14 +324,13 @@ $$
 e^{i\\pi} + 1 = 0
 $$
 
-### 4. 引用
+### 引用
 
 > 这是一段引用文本。
 > 
 > 可以包含多行内容。
 
-### 5. 列表
-
+### 列表
 #### 无序列表
 - 项目 1
 - 项目 2
@@ -250,22 +343,13 @@ $$
 2. 第二步
 3. 第三步
 
-### 6. 可折叠块 (由 Folder 插件提供)
-
+### 可折叠块 (由 Folder 插件提供)
 ::> 点击这里展开/折叠
     这里是 **可以折叠** 的内容。
     - 支持列表
     - 支持各种 Markdown 语法
 
-
-### 7. 表格
-
-| 功能 | 状态 | 说明 |
-|------|------|------|
-| 编辑模式 | ✅ | 支持 CodeMirror |
-| 渲染模式 | ✅ | 实时预览 |
-| 数学公式 | ✅ | MathJax 支持 |
-| 插件系统 | ✅ | 可扩展架构 |
+---
 
 ## 使用说明
 
@@ -274,15 +358,17 @@ $$
 3. 点击 **Save** 按钮保存内容到本地存储
 4. 点击 **Clear** 按钮清空编辑器
 
----
-
 **提示**：尝试编辑这个文档，然后切换到预览模式查看效果！
 `;
 
-// --- Sidebar Logic ---
+// ============================================================================
+// 3. UI 辅助逻辑 (UI Helpers)
+// ============================================================================
+
+// 侧边栏切换
 const sidebar = document.getElementById('sidebar');
 function toggleSidebar() {
-    sidebar.classList.toggle('collapsed');
+    if (sidebar) sidebar.classList.toggle('collapsed');
 }
 // Populate sidebar sessions
 const sessions = [
@@ -292,80 +378,34 @@ const sessions = [
     { id: 4, title: '用户反馈与改进计划' },
 ];
 const sessionList = document.getElementById('sessionList');
-sessions.forEach((session, index) => {
-    const li = document.createElement('li');
-    li.className = `session-item ${index === 0 ? 'active' : ''}`;
-    li.textContent = session.title;
-    if (index === 0) {
-        li.classList.add('active'); // 默认选中第一项
-    }
-    sessionList.appendChild(li);
-});
+if (sessionList) {
+    sessions.forEach((session, index) => {
+        const li = document.createElement('li');
+        li.className = `session-item ${index === 0 ? 'active' : ''}`;
+        li.textContent = session.title;
+        if (index === 0) {
+            li.classList.add('active');
+        }
+        sessionList.appendChild(li);
+    });
+}
 
-// --- Autocomplete Data Providers ---
-const allTags = ['javascript', 'typescript', 'react', 'vue', 'css', 'html', 'refactor', 'bugfix', 'performance'];
-const mockUsers = [
-    { id: 'john', label: 'John Doe', type: 'Frontend Developer', avatar: '👨‍💻' },
-    { id: 'anna', label: 'Anna Smith', type: 'Backend Developer', avatar: '👩‍💻' },
-    { id: 'peter', label: 'Peter Jones', type: 'UI/UX Designer', avatar: '🎨' },
-];
-const mockDocuments = [
-    { id: 'proj-plan', label: 'Project Plan', type: 'Planning Document' },
-    { id: 'api-v2', label: 'API Design V2', type: 'Technical Spec' },
-    { id: 'ux-research', label: 'UX Research Report', type: 'Research' },
-];
+// ============================================================================
+// 4. 编辑器初始化 (Editor Initialization)
+// ============================================================================
 
-const userMentionProvider = {
-    key: 'users', triggerChar: '@',
-    async getSuggestions(query) {
-        await new Promise(r => setTimeout(r, 150));
-        return mockUsers.filter(u => u.label.toLowerCase().includes(query.toLowerCase()));
-    },
-    async getHoverPreview(item) {
-        const user = mockUsers.find(u => u.id === item.id);
-        if (!user) return null;
-        return {
-            title: `${user.avatar} ${user.label}`,
-            content: `<strong>Position:</strong> ${user.type}<br><em>Active on 3 projects.</em>`,
-        };
-    },
-};
-
-const documentMentionProvider = {
-    key: 'docs', triggerChar: '@@',
-    async getSuggestions(query) {
-        await new Promise(r => setTimeout(r, 100));
-        return mockDocuments.filter(d => d.label.toLowerCase().includes(query.toLowerCase()));
-    },
-    async getHoverPreview(item) {
-        const doc = mockDocuments.find(d => d.id === item.id);
-        if (!doc) return null;
-        return { title: `📄 ${doc.label}`, content: `A <strong>${doc.type}</strong>.` };
-    },
-    async getFullContent(id) {
-        const doc = mockDocuments.find(d => d.id === id);
-        if (!doc) return '<div>Document not found.</div>';
-        return `
-          <div style="border-left: 3px solid #ccc; padding-left: 15px; margin: 10px 0;">
-            <h4>${doc.label}</h4>
-            <p>This is the embedded content for <strong>${doc.label}</strong>.</p>
-            <ul><li>Define project scope</li><li>Create initial mockups</li></ul>
-          </div>
-        `;
-    },
-};
-
-// --- Editor Initialization ---
 const editorContainer = document.getElementById('editor');
 let editor;
 
-if (editorContainer) {
+async function initEditor() {
+    if (!editorContainer) return;
+
     const savedContent = localStorage.getItem('mdx-editor-content') || initialContent;
 
     // Create and initialize the editor in one step
     editor = await createMDxEditor(editorContainer, {
         initialContent: savedContent,
-        initialMode: 'edit',
+        initialMode: 'render',
         plugins: [
             'core:titlebar',
             'interaction:source-sync',
@@ -375,46 +415,70 @@ if (editorContainer) {
             'plantuml',
             'vega'
         ],
+        
+        // 插件配置选项
         defaultPluginOptions: {
             'core:titlebar': {
                 enableToggleEditMode: true,
                 toggleSidebarCallback: toggleSidebar,
-                saveCallback: (editor) => {
-                    const content = editor.getText();
+                saveCallback: (edt) => {
+                    const content = edt.getText();
                     localStorage.setItem('mdx-editor-content', content);
-                    console.log('Content saved via title bar button:', content);
-                    alert('Content saved successfully!');
+                    console.log('Content saved:', content);
+                    alert('保存成功！');
                 }
             },
+            // 配置表格插件
+            'interaction:table': {
+                enableSorting: true,
+                enableFiltering: true, // 开启筛选行
+                containerClass: 'mdx-table-wrapper'
+            },
+            // 配置自动完成
             'autocomplete:tag': {
                 getTags: async () => allTags,
             },
             'autocomplete:mention': {
                 providers: [userMentionProvider, documentMentionProvider],
                 onMentionClick: (providerKey, id) => {
+                    console.log(`Clicked mention: ${providerKey}:${id}`);
                     alert(`Mention clicked!\nProvider: ${providerKey}\nID: ${id}`);
                 },
             },
             // [可选] 配置 SVG 或 PlantUML 选项，例如服务器地址
             'plantuml': {
-                format: 'svg'
+                format: 'svg',
+                serverUrl: 'https://www.plantuml.com/plantuml'
             },
             'vega': {
                 theme: 'quartz', // 可选: 'excel' | 'ggplot2' | 'quartz' | 'vox' | 'dark'
                 actions: true
+            },
+            'interaction:task-list': {
+                onTaskToggled: (res) => {
+                    console.log('Task Toggled:', res);
+                }
             }
+
         }
     });
 
     console.log('MDxEditor instance created and initialized.', editor);
 }
 
-// --- Search Logic ---
+// 执行初始化
+initEditor();
+
+// ============================================================================
+// 5. 搜索与底部工具栏 (Search & Toolbar)
+// ============================================================================
+
 const searchInput = document.getElementById('searchInput');
 const searchResultsEl = document.getElementById('searchResults');
 const searchPrevBtn = document.getElementById('searchPrevBtn');
 const searchNextBtn = document.getElementById('searchNextBtn');
 const searchClearBtn = document.getElementById('searchClearBtn');
+const clearBtn = document.getElementById('clearBtn');
 
 let searchResults = [];
 let currentMatchIndex = -1;
@@ -429,10 +493,10 @@ function updateSearchUI() {
     searchClearBtn.disabled = !searchInput.value;
 
     if (hasResults) {
-        searchResultsEl.textContent = `${currentMatchIndex + 1} of ${searchResults.length}`;
+            searchResultsEl.textContent = `${currentMatchIndex + 1} / ${searchResults.length}`;
     } else {
         // @ts-ignore
-        searchResultsEl.textContent = searchInput.value ? 'No results' : '';
+            searchResultsEl.textContent = searchInput.value ? '无结果' : '';
     }
 }
 
@@ -443,14 +507,16 @@ async function performSearch() {
         clearSearch();
         return;
     }
-    searchResults = await editor.search(query);
-    if (searchResults.length > 0) {
-        currentMatchIndex = 0;
-        editor.gotoMatch(searchResults[currentMatchIndex]);
-    } else {
-        currentMatchIndex = -1;
+    if (editor) {
+        searchResults = await editor.search(query);
+        if (searchResults.length > 0) {
+            currentMatchIndex = 0;
+            editor.gotoMatch(searchResults[currentMatchIndex]);
+        } else {
+            currentMatchIndex = -1;
+        }
+        updateSearchUI();
     }
-    updateSearchUI();
 }
 
 function clearSearch() {
@@ -462,34 +528,44 @@ function clearSearch() {
     updateSearchUI();
 }
 
-searchInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-        e.preventDefault();
-        performSearch();
-    }
-});
+// 绑定搜索事件
+if (searchInput) {
+    searchInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            performSearch();
+        }
+    });
+}
 
-searchNextBtn.addEventListener('click', () => {
-    if (searchResults.length === 0) return;
-    currentMatchIndex = (currentMatchIndex + 1) % searchResults.length;
-    editor.gotoMatch(searchResults[currentMatchIndex]);
-    updateSearchUI();
-});
+if (searchNextBtn) {
+    searchNextBtn.addEventListener('click', () => {
+        if (searchResults.length === 0) return;
+        currentMatchIndex = (currentMatchIndex + 1) % searchResults.length;
+        editor.gotoMatch(searchResults[currentMatchIndex]);
+        updateSearchUI();
+    });
+}
 
-searchPrevBtn.addEventListener('click', () => {
-    if (searchResults.length === 0) return;
-    currentMatchIndex = (currentMatchIndex - 1 + searchResults.length) % searchResults.length;
-    editor.gotoMatch(searchResults[currentMatchIndex]);
-    updateSearchUI();
-});
+if (searchPrevBtn) {
+    searchPrevBtn.addEventListener('click', () => {
+        if (searchResults.length === 0) return;
+        currentMatchIndex = (currentMatchIndex - 1 + searchResults.length) % searchResults.length;
+        editor.gotoMatch(searchResults[currentMatchIndex]);
+        updateSearchUI();
+    });
+}
 
-searchClearBtn.addEventListener('click', clearSearch);
+if (searchClearBtn) {
+    searchClearBtn.addEventListener('click', clearSearch);
+}
 
-// --- Other Event Handling ---
-const clearBtn = document.getElementById('clearBtn');
-clearBtn.addEventListener('click', () => {
-    if (confirm('确定要清空编辑器内容吗？')) {
-        editor.setText('');
-        localStorage.removeItem('mdx-editor-content');
-    }
-});
+// 绑定清空事件
+if (clearBtn) {
+    clearBtn.addEventListener('click', () => {
+        if (confirm('确定要清空编辑器内容吗？此操作不可恢复。')) {
+            editor.setText('');
+            localStorage.removeItem('mdx-editor-content');
+        }
+    });
+}
