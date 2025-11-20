@@ -19,6 +19,7 @@ import { CoreTitleBarPlugin } from './plugins/ui/titlebar.plugin';
 import { SourceSyncPlugin } from './plugins/interactions/source-jump.plugin';
 import { TagPlugin, TagPluginOptions } from './plugins/autocomplete/tag.plugin';
 import { MentionPlugin, MentionPluginOptions } from './plugins/autocomplete/mention.plugin';
+import { SvgPlugin, SvgPluginOptions } from './plugins/syntax-extensions/svg.plugin';
 import type { MDxPlugin } from './core/plugin';
 
 type MDxPluginConstructor = new (...args: any[]) => MDxPlugin;
@@ -82,6 +83,7 @@ registerPlugin('mathjax', MathJaxPlugin, { priority: 5 });
 registerPlugin('folder', FoldablePlugin, { priority: 6 });
 registerPlugin('media', MediaPlugin, { priority: 7 });
 registerPlugin('mermaid', MermaidPlugin, { priority: 8 });
+registerPlugin('svg', SvgPlugin, { priority: 9 }); // 优先级在 Mermaid 之后
 registerPlugin('cloze', ClozePlugin, { priority: 10 });
 registerPlugin('cloze-controls', ClozeControlsPlugin, {
   priority: 20,
@@ -110,6 +112,8 @@ export interface MDxEditorFactoryConfig extends EditorOptions {
     mathjax?: MathJaxPluginOptions;
     media?: MediaPluginOptions;
     mermaid?: MermaidPluginOptions;
+    // [新增] SVG 选项类型
+    svg?: SvgPluginOptions; 
     'task-list'?: TaskListPluginOptions;
     'codeblock-controls'?: CodeBlockControlsPluginOptions;
     'autocomplete:tag'?: TagPluginOptions;
@@ -128,6 +132,7 @@ const DEFAULT_PLUGINS: PluginConfig[] = [
   'mathjax',
   'media',
   'mermaid',
+  'svg', // [新增] 默认启用
   'codeblock-controls',
   'task-list'
 ];
