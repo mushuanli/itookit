@@ -6,221 +6,27 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Multi-Workspace Application</title>
 
-    <!-- 引入 Font Awesome 图标库 -->
+    <!-- 1. 图标库 -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 
-    <!-- 引入 Markdown 编辑器依赖 -->
+    <!-- 2. 基础依赖 (Markdown/Graph) -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
-
-    <!-- 引入 Sidebar 样式 (假设已创建) -->
-    <link rel="stylesheet" href="src/sidebar/styles.css">
-
-    <style>
-        /* --- 复制您提供的完整 CSS --- */
-        /* =================================================================== */
-        /*                     1. 全局变量与基础样式                           */
-        /* =================================================================== */
-        :root {
-            /* 1. 颜色系统 (Colors) */
-            --primary-color: #5B66F5;
-            --primary-hover: #4B55E3;
-            --primary-light: #E8EAFF;
-            --primary-dark: #3B41C5;
-            --secondary-color: #6366F1;
-            --secondary-light: #A5A7F3;
-            --accent-color: #06B6D4;
-            --accent-light: #E0F6FF;
-            /* 1.2. 语义色 (Semantic) */
-            --success-color: #10B981;
-            --success-light: #D1FAE5;
-            --warning-color: #F59E0B;
-            --warning-light: #FEF3C7;
-            --danger-color: #EF4444;
-            --danger-light: #FEE2E2;
-            /* 1.3. 灰度色系 (Neutral / Grays) */
-            --gray-50: #F9FAFB;
-            --gray-100: #F3F4F6;
-            --gray-200: #E5E7EB;
-            --gray-300: #D1D5DB;
-            --gray-400: #9CA3AF;
-            --gray-500: #6B7280;
-            --gray-600: #4B5563;
-            --gray-700: #374151;
-            --gray-800: #1F2937;
-            --gray-900: #111827;
-            /* 1.4. 文本色 (Text) */
-            --text-primary: #111827;
-            --text-secondary: #4B5563;
-            --text-tertiary: #9CA3AF;
-            --text-on-primary: #FFFFFF;
-            /* 1.5. 背景色 (Background) */
-            --bg-primary: #FFFFFF;
-            --bg-secondary: #f1f5f9;
-            --bg-tertiary: #F3F4F6;
-            --bg-elevated: #FFFFFF;
-            --content-bg: #f8fafc;
-
-            /* 2. 排版系统 (Typography) */
-            --font-primary: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif;
-            --font-mono: "SF Mono", Monaco, "Cascadia Code", "Roboto Mono", Consolas, "Courier New", monospace;
-            --text-xs: 0.75rem;
-            --text-sm: 0.875rem;
-            --text-base: 1rem;
-            --text-lg: 1.125rem;
-            --text-xl: 1.25rem;
-            --text-2xl: 1.5rem;
-            --text-3xl: 1.875rem;
-            --leading-tight: 1.25;
-            --leading-normal: 1.5;
-            --leading-relaxed: 1.75;
-
-            /* 3. 布局与尺寸 (Layout & Sizing) */
-            --sidebar-width: 56px;
-
-            /* 4. 边框与阴影 (Borders & Shadows) */
-            --border-color: #E5E7EB;
-            --border-radius: 8px;
-            --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-            --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
-            --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-            --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-
-            /* 5. 组件与过渡 (Components & Transitions) */
-            --transition: all 0.3s ease;
-            --sidebar-bg: linear-gradient(135deg, #1e3a8a 0%, #312e81 100%);
-        }
-
-        /* --- 必要的全局样式 --- */
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        html,
-        body {
-            height: 100%;
-            overflow: hidden;
-        }
-
-        body {
-            font-family: var(--font-primary);
-            font-size: var(--text-base);
-            line-height: 1.5;
-            background: var(--bg-secondary);
-            color: var(--text-primary);
-            display: flex;
-        }
-
-        /* --- 顶级布局 --- */
-        .app-sidebar {
-            width: var(--sidebar-width);
-            background: var(--sidebar-bg);
-            flex-shrink: 0;
-            padding-top: 20px;
-        }
-
-        .main-content-area {
-            flex: 1;
-            min-width: 0;
-            position: relative;
-        }
-
-        /* --- 主导航栏样式 --- */
-        .main-nav-list {
-            list-style: none;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 15px;
-        }
-
-        /* --- 导航按钮样式 (来自您提供的 CSS) --- */
-        .app-nav-btn {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            text-decoration: none;
-            background: rgba(255, 255, 255, 0.1);
-            color: rgba(255, 255, 255, 0.9);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            height: 40px;
-            /* 稍微增大，更易点击 */
-            width: 40px;
-            border-radius: var(--border-radius);
-            font-size: 1rem;
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-
-        .app-nav-btn:hover {
-            background: rgba(255, 255, 255, 0.2);
-            color: #FFFFFF;
-            transform: scale(1.1);
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-        }
-
-        .app-nav-btn.active {
-            background: rgba(255, 255, 255, 0.95);
-            color: var(--primary-dark);
-            border-color: transparent;
-            box-shadow: 0 4px 16px rgba(255, 255, 255, 0.3);
-        }
-
-        .app-nav-btn i {
-            font-size: 1.1rem;
-            width: 20px;
-            text-align: center;
-        }
-
-        /* --- 工作区视图 --- */
-        .workspace-view {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            display: none;
-            /* 默认隐藏 */
-        }
-
-        .workspace-view.active {
-            display: flex;
-            /* 激活时显示为 flex 容器 */
-        }
-
-        /* --- 工作区内部通用布局 --- */
-        .sub-sidebar {
-            width: 280px;
-            height: 100%;
-            flex-shrink: 0;
-            border-right: 1px solid var(--border-color);
-            background-color: var(--bg-primary);
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
-
-        .sub-main-content {
-            height: 100%;
-            flex-grow: 1;
-            background-color: var(--bg-elevated);
-            position: relative;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
-    </style>
+    
+    <!-- LiteGraph 依赖 -->
     <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/gh/jagenjo/litegraph.js/css/litegraph.css">
-    <script type="text/javascript" src="https://cdn.jsdelivr.net/gh/jagenjo/litegraph.js/build/litegraph.min.js"
-        defer></script>
+    <script type="text/javascript" src="https://cdn.jsdelivr.net/gh/jagenjo/litegraph.js/build/litegraph.min.js" defer></script>
+    
+    <!-- Immer -->
     <script src="https://cdn.jsdelivr.net/npm/immer/dist/immer.umd.production.min.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function () {
             if (window.immer) { window.immer.enableMapSet(); }
         });
     </script>
+
+    <!-- 3. 应用样式 -->
+    <link rel="stylesheet" href="src/style.css">
 </head>
 
 <body>
@@ -230,6 +36,7 @@
     <!-- ============================================= -->
     <nav class="app-sidebar">
         <ul class="main-nav-list">
+            <!-- 注意：第一个元素默认添加 active 类 -->
             <li>
                 <a class="app-nav-btn active" data-target="prompt-workspace" title="Prompts">
                     <i class="fas fa-pen-to-square"></i>
@@ -268,46 +75,42 @@
     <!-- ============================================= -->
     <main class="main-content-area">
 
-        <!-- (A) Prompt Workspace 的容器 -->
-        <div id="prompt-workspace" class="workspace-view">
-            <div id="prompt-sidebar" class="sub-sidebar"></div>
-            <div id="prompt-editor" class="sub-main-content"></div>
-        </div>
+        <!-- 
+           [重要修改] 
+           由 MemoryManager 接管的容器现在是空的。
+           JS 会自动在其中创建 Sidebar 和 Editor。
+        -->
 
-        <!-- (B) Project Workspace 的容器 -->
-        <div id="project-workspace" class="workspace-view">
-            <div id="project-sidebar" class="sub-sidebar"></div>
-            <div id="project-editor" class="sub-main-content"></div>
-        </div>
+        <!-- (A) Prompt Workspace (默认激活) -->
+        <div id="prompt-workspace" class="workspace-view active"></div>
 
-        <!-- (C) Email Workspace 的容器 -->
-        <div id="email-workspace" class="workspace-view">
-            <div id="email-sidebar" class="sub-sidebar"></div>
-            <div id="email-editor" class="sub-main-content"></div>
-        </div>
+        <!-- (B) Project Workspace -->
+        <div id="project-workspace" class="workspace-view"></div>
 
-        <!-- (D) Private Workspace 的容器 -->
-        <div id="private-workspace" class="workspace-view">
-            <div id="private-sidebar" class="sub-sidebar"></div>
-            <div id="private-editor" class="sub-main-content"></div>
-        </div>
+        <!-- (C) Email Workspace -->
+        <div id="email-workspace" class="workspace-view"></div>
 
-        <!-- (E) LLM Workspace 的容器 -->
-        <div id="llm-workspace" class="workspace-view">
-            <div id="llm-sidebar" class="sub-sidebar"></div>
-            <div id="llm-chat" class="sub-main-content"></div>
-        </div>
+        <!-- (D) Private Workspace -->
+        <div id="private-workspace" class="workspace-view"></div>
 
-        <!-- SettingsWorkspace 的容器 -->
+        <!-- (E) LLM Workspace -->
+        <div id="llm-workspace" class="workspace-view"></div>
+
+        <!-- 
+           Settings Workspace 
+           这是一个特殊的视图，不使用 MemoryManager 文件管理，
+           所以保留内部结构供 React/Vue 或原生 JS 渲染内容。
+        -->
         <div id="settings-workspace" class="workspace-view">
-            <div id="settings-sidebar" class="sub-sidebar"></div>
-            <div id="settings-content" class="sub-main-content"></div>
+            <div id="settings-content">
+                <!-- Settings UI 将被挂载到这里 -->
+            </div>
         </div>
+
     </main>
 
     <!-- 主应用程序脚本 -->
     <script type="module" src="./src/main.ts"></script>
 
 </body>
-
 </html>
