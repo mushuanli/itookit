@@ -22,6 +22,7 @@ import { SourceSyncPlugin } from './plugins/interactions/source-jump.plugin';
 import { TagPlugin, TagPluginOptions } from './plugins/autocomplete/tag.plugin';
 import { MentionPlugin, MentionPluginOptions } from './plugins/autocomplete/mention.plugin';
 import { SvgPlugin, SvgPluginOptions } from './plugins/syntax-extensions/svg.plugin';
+import { VegaPlugin, VegaPluginOptions } from './plugins/syntax-extensions/vega.plugin';
 import type { MDxPlugin } from './core/plugin';
 
 type MDxPluginConstructor = new (...args: any[]) => MDxPlugin;
@@ -101,6 +102,7 @@ registerPlugin('codeblock-controls', CodeBlockControlsPlugin, { priority: 52 });
 registerPlugin('autocomplete:tag', TagPlugin, { priority: 53 });
 registerPlugin('autocomplete:mention', MentionPlugin, { priority: 54 });
 registerPlugin('plantuml', PlantUMLPlugin, { priority: 70 });
+registerPlugin('vega', VegaPlugin, { priority: 71 });
 
 export type PluginConfig =
   | string
