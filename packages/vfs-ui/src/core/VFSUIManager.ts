@@ -422,10 +422,44 @@ export class VFSUIManager extends ISessionManager<VFSNodeUI, VFSService> {
             try {
                 const updatedNode = await vfs.storage.loadVNode(event.nodeId);
                 if (updatedNode && updatedNode.moduleId === this.moduleName) {
-                    if (updatedNode.type === 'file') {
+                    // [修复] 处理目录更新时必须保留原有的子节点
+                    // 因为 loadVNode 不会加载子节点，如果直接覆盖，目录会变空
+                    let childrenToPreserve: VFSNodeUI[] | undefined = undefined;
+
+                    if (updatedNode.type === 'directory') {
+                        // [DEBUG] 添加日志
+                        console.log(`[VFSUIManager] Processing update for directory: ${updatedNode.name} (${updatedNode.nodeId})`);
+                        
+                        const currentState = this.store.getState();
+                        const findItem = (items: VFSNodeUI[]): VFSNodeUI | undefined => {
+                            for (const item of items) {
+                                if (item.id === updatedNode.nodeId) return item;
+                                if (item.children) {
+                                    const found = findItem(item.children);
+                                    if (found) return found;
+                                }
+                            }
+                        };
+                        const existingItem = findItem(currentState.items);
+                        if (existingItem && existingItem.children) {
+                            childrenToPreserve = existingItem.children;
+                            // [DEBUG] 确认保留了多少子节点
+                            console.log(`[VFSUIManager] Preserving ${childrenToPreserve.length} children for directory.`);
+                        } else {
+                            // 如果是新目录（不太可能在 update 中出现，但为了安全），初始化为空数组
+                            childrenToPreserve = [];
+                            console.log(`[VFSUIManager] No existing children found or new directory. Initializing empty.`);
+                        }
+                    } else if (updatedNode.type === 'file') {
                         (updatedNode as any).content = await vfs.read(updatedNode.nodeId);
                     }
+                    
                     const updatedUIItem = mapVNodeToUIItem(updatedNode, updatedNode.parentId);
+                    
+                    // [修复] 如果是目录，恢复其子节点
+                    if (updatedNode.type === 'directory' && childrenToPreserve) {
+                        updatedUIItem.children = childrenToPreserve;
+                    }
                     
                     this.store.dispatch({
                         type: 'ITEM_UPDATE_SUCCESS',
@@ -551,21 +585,20 @@ export class VFSUIManager extends ISessionManager<VFSNodeUI, VFSService> {
 
         this.coordinator.subscribe('CREATE_ITEM_CONFIRMED', async (e) => {
             const { type, title, parentId } = e.data;
-    console.log('[VFSUIManager] CREATE_ITEM_CONFIRMED:', e.data);
-    
-    try {
-        if (type === 'file') {
-            await this._vfsService.createFile({ title, parentId, content: this.options.newSessionContent || '' });
-        } else if (type === 'directory') {
-            await this._vfsService.createDirectory({ title, parentId });
-        }
-        console.log(`[VFSUIManager] ${type} created successfully`);
-    } catch (error) {
-        console.error(`[VFSUIManager] Failed to create ${type}:`, error);
-        alert(`创建${type === 'file' ? '文件' : '目录'}失败: ${(error as Error).message}`);
-        // 重新显示输入框,让用户重试
-        this.store.dispatch({ type: 'CREATE_ITEM_START', payload: { type, parentId } });
-    }
+            console.log('[VFSUIManager] CREATE_ITEM_CONFIRMED:', e.data);
+            
+            try {
+                if (type === 'file') {
+                    await this._vfsService.createFile({ title, parentId, content: this.options.newSessionContent || '' });
+                } else if (type === 'directory') {
+                    await this._vfsService.createDirectory({ title, parentId });
+                }
+                console.log(`[VFSUIManager] ${type} created successfully`);
+            } catch (error) {
+                console.error(`[VFSUIManager] Failed to create ${type}:`, error);
+                alert(`创建${type === 'file' ? '文件' : '目录'}失败: ${(error as Error).message}`);
+                this.store.dispatch({ type: 'CREATE_ITEM_START', payload: { type, parentId } });
+            }
         });
         
         this.coordinator.subscribe('ITEM_ACTION_REQUESTED', async (e) => {
@@ -608,7 +641,7 @@ export class VFSUIManager extends ISessionManager<VFSNodeUI, VFSService> {
         // 🔧 FIX: Set flag when user explicitly selects a session
         this.coordinator.subscribe('SESSION_SELECT_REQUESTED', e => {
             console.log('[VFSUIManager] Received SESSION_SELECT_REQUESTED, dispatching to store with payload:', e.data);
-            this.lastSessionSelectWasUserAction = true; // Mark as user-initiated
+            this.lastSessionSelectWasUserAction = true; 
             this.store.dispatch({ type: 'SESSION_SELECT', payload: { sessionId: e.data.sessionId } })
         });
         
@@ -653,7 +686,6 @@ export class VFSUIManager extends ISessionManager<VFSNodeUI, VFSService> {
             reader.onload = () => resolve(reader.result as string | ArrayBuffer);
             reader.onerror = () => reject(new Error(`Failed to read file: ${file.name}`));
             
-            // 根据文件类型选择读取方式
             if (file.type.startsWith('text/') || 
                 file.name.endsWith('.md') || 
                 file.name.endsWith('.txt') ||
