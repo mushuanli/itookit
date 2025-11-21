@@ -7,10 +7,10 @@ import { VFS } from './core/VFS.js';
 import { VFSStorage } from './store/VFSStorage.js';
 import { EventBus } from './core/EventBus.js';
 import { ModuleRegistry, ModuleInfo } from './core/ModuleRegistry.js';
-import { EnhancedMiddlewareRegistry } from './core/EnhancedMiddlewareRegistry'; // [变更]
-import { MiddlewareFactory } from './core/MiddlewareFactory'; // [变更]
-import { ContentMiddleware } from './middleware/base/ContentMiddleware'; // [变更]
-import { PlainTextMiddleware } from './middleware/PlainTextMiddleware'; // [变更]
+import { EnhancedMiddlewareRegistry } from './core/EnhancedMiddlewareRegistry';
+import { MiddlewareFactory } from './core/MiddlewareFactory';
+import { ContentMiddleware } from './middleware/base/ContentMiddleware';
+import { PlainTextMiddleware } from './middleware/PlainTextMiddleware';
 import { VNode, VNodeType, TagData } from './store/types';
 import { VFSError, VFSErrorCode, SearchQuery } from './core/types';
 
@@ -34,8 +34,8 @@ export class VFSCore {
 
   private vfs!: VFS;
   private moduleRegistry!: ModuleRegistry;
-  private middlewareRegistry!: EnhancedMiddlewareRegistry; // [变更]
-  private middlewareFactory!: MiddlewareFactory; // [变更]
+  private middlewareRegistry!: EnhancedMiddlewareRegistry;
+  private middlewareFactory!: MiddlewareFactory;
   private eventBus!: EventBus;
   private config: VFSConfig;
   private initialized = false;
@@ -44,7 +44,7 @@ export class VFSCore {
     this.config = {
       dbName: 'vfs_database',
       defaultModule: 'default',
-      middlewares: [], // [变更]
+      middlewares: [],
       ...config
     };
   }
@@ -419,17 +419,17 @@ export class VFSCore {
   }
   
   /**
-   * [新增] 在指定模块中按条件搜索节点
-   * @param moduleName 模块名称
+   * [修改] 按条件搜索节点
    * @param query 搜索条件
+   * @param moduleName (可选) 模块名称。不传则搜索全部模块。
    * @returns {Promise<VNode[]>} 匹配的节点数组
    */
-  async searchNodes(moduleName: string, query: SearchQuery): Promise<VNode[]> {
+  async searchNodes(query: SearchQuery, moduleName?: string): Promise<VNode[]> {
     this._ensureInitialized();
-    this._ensureModuleExists(moduleName);
-
-    // 委托给 VFS 核心层执行搜索，以利用底层优化
-    return this.vfs.searchNodes(moduleName, query);
+    if (moduleName) {
+        this._ensureModuleExists(moduleName);
+    }
+    return this.vfs.searchNodes(query, moduleName);
   }
 
   /**

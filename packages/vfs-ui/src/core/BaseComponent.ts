@@ -1,3 +1,6 @@
+/**
+ * @file vfs-ui/core/BaseComponent.ts
+ */
 import type { VFSStore } from '../stores/VFSStore.js';
 import type { Coordinator } from './Coordinator.js';
 import type { VFSUIState } from '../types/types.js';

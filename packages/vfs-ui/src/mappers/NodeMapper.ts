@@ -1,5 +1,5 @@
 /**
- * @file vfs-ui/src/mappers/NodeMapper.ts
+ * @file vfs-ui/mappers/NodeMapper.ts
  * @desc Maps data structures from vfs-core to vfs-ui's internal view models.
  * This module acts as a dedicated transformation layer.
  */
@@ -51,6 +51,8 @@ export function mapVNodeToUIItem(vnode: VNodeWithContentAndChildren, parentId: s
             lastModified: new Date(vnode.modifiedAt).toISOString(),
             parentId: parentId,
             path: vnode.path,
+            // [新增] 映射模块ID，有助于UI在多模块搜索中显示上下文
+            moduleId: vnode.moduleId || undefined,
             custom: {
                 ...(vnode.metadata || {}),
                 ...parsedInfo.metadata,

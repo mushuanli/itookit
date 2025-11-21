@@ -1,3 +1,6 @@
+/**
+ * @file vfs-ui/core/Coordinator.ts
+ */
 type Listener = (event: { channel: string; data: any; timestamp: number }) => void;
 
 export class Coordinator {

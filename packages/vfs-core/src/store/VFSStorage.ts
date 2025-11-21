@@ -7,7 +7,7 @@ import { ContentStore } from './ContentStore.js';
 import { TagStore } from './TagStore.js';
 import { NodeTagStore } from './NodeTagStore.js';
 import { VFS_STORES, VNode, VNodeData, ContentData, Transaction, TransactionMode } from './types.js';
-import { SearchQuery } from '../core/types.js'; // [修改]
+import { SearchQuery } from '../core/types.js';
 
 /**
  * VFS 存储服务门面
@@ -241,24 +241,38 @@ export class VFSStorage {
   }
 
   /**
-   * [新增] 根据复合条件在指定模块中搜索节点
-   * @param moduleName 要搜索的模块
+   * [修改] 根据复合条件搜索节点
    * @param query 搜索查询对象
+   * @param moduleName (可选) 限制在特定模块。如果不传，则搜索所有模块。
    * @returns {Promise<VNode[]>} 匹配的节点数组
    */
-  async searchNodes(moduleName: string, query: SearchQuery): Promise<VNode[]> {
+  async searchNodes(query: SearchQuery, moduleName?: string): Promise<VNode[]> {
     this.ensureConnected();
     const results: VNode[] = [];
 
     const tx = await this.db.getTransaction(VFS_STORES.VNODES, 'readonly');
     const store = tx.getStore(VFS_STORES.VNODES);
-    // 优先使用 moduleId 索引来限定范围，这是最高效的第一步
-    const index = store.index('moduleId');
-    const range = IDBKeyRange.only(moduleName);
+
+    // 优化策略：
+    // 1. 如果指定了 moduleName，使用 'moduleId' 索引（最高效）。
+    // 2. 如果未指定 moduleName 但指定了 type，使用 'type' 索引。
+    // 3. 否则，使用全表游标。
+    
+    let cursorRequest: IDBRequest<IDBCursorWithValue | null>;
+
+    if (moduleName) {
+      const index = store.index('moduleId');
+      const range = IDBKeyRange.only(moduleName);
+      cursorRequest = index.openCursor(range);
+    } else if (query.type) {
+      const index = store.index('type');
+      const range = IDBKeyRange.only(query.type);
+      cursorRequest = index.openCursor(range);
+    } else {
+      cursorRequest = store.openCursor();
+    }
 
     return new Promise((resolve, reject) => {
-      const cursorRequest = index.openCursor(range);
-      
       cursorRequest.onerror = () => reject(cursorRequest.error);
 
       cursorRequest.onsuccess = () => {

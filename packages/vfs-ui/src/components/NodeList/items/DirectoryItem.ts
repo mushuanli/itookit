@@ -1,5 +1,5 @@
 /**
- * @file vfs-ui/src/components/NodeList/items/DirectoryItem.ts
+ * @file vfs-ui/components/NodeList/items/DirectoryItem.ts
  * @desc Component representing a single directory in the list.
  */
 import { BaseNodeItem } from './BaseNodeItem';

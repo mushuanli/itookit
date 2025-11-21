@@ -7,7 +7,7 @@ import { VFSStorage } from '../store/VFSStorage.js';
 import { VNode, VNodeType, ContentData, Transaction, VFS_STORES } from '../store/types.js';
 import { ContentStore } from '../store/ContentStore.js';
 import { PathResolver } from './PathResolver.js';
-import { MiddlewareRegistry } from './MiddlewareRegistry.js'; // [变更]
+import { MiddlewareRegistry } from './MiddlewareRegistry.js';
 import { EventBus } from './EventBus.js';
 import {
   VFSError,
@@ -17,7 +17,7 @@ import {
   UnlinkResult,
   CopyResult,
   VFSEventType,
-  IVFSMiddleware, // [变更]
+  IVFSMiddleware,
   SearchQuery,
   NodeStat
 } from './types.js';
@@ -48,7 +48,7 @@ interface CopyOperation {
 export class VFS {
   public readonly storage: VFSStorage;
   public readonly pathResolver: PathResolver;
-  public readonly middlewares: MiddlewareRegistry; // [变更] 重命名
+  public readonly middlewares: MiddlewareRegistry;
   public readonly events: EventBus;
 
   // [变更] 构造函数接收 MiddlewareRegistry
@@ -77,7 +77,7 @@ export class VFS {
   /**
    * 注册 Middleware
    */
-  registerMiddleware(middleware: IVFSMiddleware): void { // [变更]
+  registerMiddleware(middleware: IVFSMiddleware): void {
     this.middlewares.register(middleware);
   }
 
@@ -509,14 +509,13 @@ export class VFS {
   }
 
   /**
-   * [新增] 在指定模块中搜索节点
-   * @param moduleName 模块名称
+   * [修改] 搜索节点
    * @param query 搜索条件
+   * @param moduleName (可选) 模块名称。不传则搜索全部模块。
    * @returns {Promise<VNode[]>} 匹配的节点数组
    */
-  async searchNodes(moduleName: string, query: SearchQuery): Promise<VNode[]> {
-    // 搜索是只读操作，直接委托给存储层以获得最佳性能
-    return this.storage.searchNodes(moduleName, query);
+  async searchNodes(query: SearchQuery, moduleName?: string): Promise<VNode[]> {
+    return this.storage.searchNodes(query, moduleName);
   }
 
   // [新增] ==================== Tag 核心方法 ====================

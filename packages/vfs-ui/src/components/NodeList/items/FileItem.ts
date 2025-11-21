@@ -1,5 +1,5 @@
 /**
- * @file vfs-ui/src/components/NodeList/items/FileItem.ts
+ * @file vfs-ui/components/NodeList/items/FileItem.ts
  * @desc Component representing a single file in the list.
  */
 import { BaseNodeItem } from './BaseNodeItem';
