@@ -16,7 +16,7 @@ import { VNode, VNodeType } from '../store/types.js';
  */
 export interface DirectorySourceDependencies {
   vfsCore: VFSCore;
-  moduleName?: string; // [修改] 模块名可选
+  moduleName?: string;
 }
 
 /**
@@ -94,8 +94,24 @@ export class DirectoryMentionSource extends IMentionSource {
    * @param targetURL - The vfs://dir/... URI.
    * @returns A promise resolving to a hover preview object or null.
    */
-  public async getHoverPreview(targetURL: URL): Promise<HoverPreviewData | null> {
-    const dirId = targetURL.pathname.substring(1);
+  public async getHoverPreview(targetURL: URL | string): Promise<HoverPreviewData | null> {
+    // [修复] 防御性检查和类型转换
+    if (!targetURL) return null;
+    
+    let urlObj: URL;
+    try {
+        urlObj = typeof targetURL === 'string' ? new URL(targetURL) : targetURL;
+    } catch(e) { 
+        console.error('[DirectoryMentionSource] Invalid URL:', targetURL);
+        return null; 
+    }
+    
+    if (typeof urlObj.pathname === 'undefined') {
+        console.warn('[DirectoryMentionSource] URL missing pathname:', urlObj);
+        return null;
+    }
+
+    const dirId = urlObj.pathname.substring(1);
     try {
       const vfs = this.vfsCore.getVFS();
       const stat = await vfs.stat(dirId);
