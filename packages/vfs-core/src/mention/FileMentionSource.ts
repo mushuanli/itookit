@@ -56,24 +56,17 @@ export class FileMentionSource extends IMentionSource {
         {
           type: VNodeType.FILE,
           nameContains: query,
-          limit: 20 // 稍微增加限制，以容纳可能的同名文件
+          limit: 20
         },
         this.moduleName
       );
-
-      return results.map(node => {
-        // [新增] 格式化 Label 以消除歧义
-        const labelText = this.formatLabel(node);
-
-        return {
-          id: node.nodeId,
-          label: labelText,
-          type: 'file',
-          // 额外数据
-          path: node.path,
-          module: node.moduleId
-        };
-      });
+      return results.map(node => ({
+        id: node.nodeId,
+        label: this.formatLabel(node),
+        type: 'file',
+        path: node.path,
+        module: node.moduleId
+      }));
     } catch (error) {
       console.error(`[FileMentionSource] Error getting suggestions:`, error);
       return [];
@@ -98,40 +91,78 @@ export class FileMentionSource extends IMentionSource {
     return `📄 ${node.name} ([${node.moduleId}]${context})`;
   }
 
-  public async getHoverPreview(targetURL: URL): Promise<HoverPreviewData | null> {
-    // URL 格式假设: vfs://file/<nodeId>
-    const fileId = targetURL.pathname.substring(1); 
-    // 或者如果 URL 格式是 vfs://<module>/<path>，解析逻辑需要相应调整
-    
+  public async getHoverPreview(targetURL: URL | string): Promise<HoverPreviewData | null> {
+    if (!targetURL) {
+        return null;
+    }
+
+    let urlObj: URL;
+    try {
+        urlObj = typeof targetURL === 'string' ? new URL(targetURL) : targetURL;
+    } catch (e) {
+        console.error('[FileMentionSource] URL Parse Error:', e);
+        return null;
+    }
+
+    // 确保 pathname 存在
+    if (!urlObj.pathname) {
+        return null;
+    }
+
+    const fileId = urlObj.pathname.substring(1); 
+
     try {
       const vfs = this.vfsCore.getVFS();
       
-      // 并行获取状态和内容
       const [stat, content] = await Promise.all([
         vfs.stat(fileId),
         vfs.read(fileId)
       ]);
-
+      
       const textContent = typeof content === 'string' 
         ? content 
         : new TextDecoder().decode(content as ArrayBuffer);
       
-      const summary = textContent.substring(0, 150).replace(/\s+/g, ' ') + (textContent.length > 150 ? '...' : '');
+      const summary = textContent.substring(0, 150)
+        .replace(/[\r\n]+/g, ' ') 
+        .replace(/([#*`])/g, '') 
+        + (textContent.length > 150 ? '...' : '');
 
-      return {
+      const size = stat.size < 1024 ? `${stat.size} B` : `${(stat.size / 1024).toFixed(1)} KB`;
+      const moduleBadge = stat.metadata?.moduleId 
+        ? `<span style="background:#eee; padding:2px 4px; border-radius:3px; font-size:0.8em; margin-right:5px;">${stat.metadata.moduleId}</span>` 
+        : '';
+
+      // 构建 HTML 字符串
+      const htmlString = `
+          <div class="vfs-hover-preview" style="font-size: 0.9em; line-height: 1.4;">
+            <div style="margin-bottom: 6px; color: #666; font-size: 0.85em; display: flex; align-items: center;">
+               ${moduleBadge}
+               <span style="font-family: monospace;">${stat.path}</span>
+            </div>
+            <div style="margin-bottom: 8px; color: #333;">
+              ${escapeHTML(summary)}
+            </div>
+            <div style="color: #999; font-size: 0.8em; border-top: 1px solid #eee; padding-top: 4px;">
+              Size: ${size} · Updated: ${new Date(stat.modifiedAt).toLocaleDateString()}
+            </div>
+          </div>`;
+
+      // [重要修复] 
+      // 同时提供 content 和 contentHTML。
+      // 这样无论前端组件是用 data.content 还是 data.contentHTML，都能读到数据。
+      const result = {
         title: stat.name,
-        // 在 Preview 中也显示完整路径和模块信息
-        contentHTML: `<div class="vfs-hover-preview">
-          <div class="vfs-meta">
-             <span class="vfs-badge">${stat.metadata?.moduleId || 'unknown'}</span>
-             ${stat.path}
-          </div>
-          <div class="vfs-meta-sub">Size: ${stat.size} bytes</div>
-          <p class="vfs-summary">${escapeHTML(summary)}</p>
-        </div>`,
+        content: htmlString,     // 兼容方案 A
+        contentHTML: htmlString, // 兼容方案 B
         icon: '📄'
       };
+
+      // 强制类型转换，因为我们添加了额外的 key，可能不完全符合 strict 接口定义，但在运行时这能救命
+      return result as unknown as HoverPreviewData;
+
     } catch (error) {
+      console.error('[FileMentionSource] Error inside getHoverPreview:', error);
       return null;
     }
   }
@@ -142,6 +173,7 @@ export class FileMentionSource extends IMentionSource {
    * @returns A promise resolving to the file's data or null.
    */
   public async getDataForProcess(targetURL: URL): Promise<any | null> {
+    if (!targetURL || !targetURL.pathname) return null;
     const fileId = targetURL.pathname.substring(1);
     try {
       const vfs = this.vfsCore.getVFS();

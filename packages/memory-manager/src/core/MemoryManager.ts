@@ -1,7 +1,7 @@
 /**
  * @file src/core/MemoryManager.ts
  */
-import {FileMentionSource} from '@itookit/vfs-core';
+import {FileMentionSource,DirectoryMentionSource} from '@itookit/vfs-core';
 import { createVFSUI, connectEditorLifecycle, VFSUIManager } from '@itookit/vfs-ui';
 import { EditorOptions, IEditor } from '@itookit/common';
 import { MemoryManagerConfig } from '../types';
@@ -94,7 +94,8 @@ export class MemoryManager {
                     // @ts-ignore
                     ...(editorConfig?.defaultPluginOptions?.['autocomplete:mention'] || {}),
                     providers: [
-                        new FileMentionSource({ vfsCore: this.config.vfsCore, moduleName: this.config.moduleName })
+                        new FileMentionSource({ vfsCore: this.config.vfsCore, moduleName: this.config.moduleName }),
+                        new DirectoryMentionSource({ vfsCore: this.config.vfsCore, moduleName: this.config.moduleName })
                     ]
                 },
 
