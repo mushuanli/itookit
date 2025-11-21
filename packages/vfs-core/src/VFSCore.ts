@@ -7,12 +7,12 @@ import { VFS } from './core/VFS.js';
 import { VFSStorage } from './store/VFSStorage.js';
 import { EventBus } from './core/EventBus.js';
 import { ModuleRegistry, ModuleInfo } from './core/ModuleRegistry.js';
-import { EnhancedProviderRegistry } from './core/EnhancedProviderRegistry.js';
-import { ProviderFactory } from './core/ProviderFactory.js';
-import { ContentProvider } from './provider/base/ContentProvider.js';
-import { PlainTextProvider } from './provider/PlainTextProvider.js';
-import { VNode, VNodeType, TagData } from './store/types.js';
-import { VFSError, VFSErrorCode, SearchQuery } from './core/types.js'; // [修改] 导入 SearchQuery
+import { EnhancedMiddlewareRegistry } from './core/EnhancedMiddlewareRegistry'; // [变更]
+import { MiddlewareFactory } from './core/MiddlewareFactory'; // [变更]
+import { ContentMiddleware } from './middleware/base/ContentMiddleware'; // [变更]
+import { PlainTextMiddleware } from './middleware/PlainTextMiddleware'; // [变更]
+import { VNode, VNodeType, TagData } from './store/types';
+import { VFSError, VFSErrorCode, SearchQuery } from './core/types';
 
 /**
  * VFS 配置选项
@@ -20,7 +20,7 @@ import { VFSError, VFSErrorCode, SearchQuery } from './core/types.js'; // [修�
 export interface VFSConfig {
   dbName?: string;
   defaultModule?: string;
-  providers?: Array<new () => ContentProvider>;
+  middlewares?: Array<new () => ContentMiddleware>; // [变更] providers -> middlewares
 }
 
 // [新增] 导出 SearchQuery 接口，方便库的使用者进行类型提示
@@ -34,8 +34,8 @@ export class VFSCore {
 
   private vfs!: VFS;
   private moduleRegistry!: ModuleRegistry;
-  private providerRegistry!: EnhancedProviderRegistry;
-  private providerFactory!: ProviderFactory;
+  private middlewareRegistry!: EnhancedMiddlewareRegistry; // [变更]
+  private middlewareFactory!: MiddlewareFactory; // [变更]
   private eventBus!: EventBus;
   private config: VFSConfig;
   private initialized = false;
@@ -44,7 +44,7 @@ export class VFSCore {
     this.config = {
       dbName: 'vfs_database',
       defaultModule: 'default',
-      providers: [],
+      middlewares: [], // [变更]
       ...config
     };
   }
@@ -70,24 +70,24 @@ export class VFSCore {
 
     const storage = new VFSStorage(this.config.dbName);
     this.eventBus = new EventBus();
-    this.providerRegistry = new EnhancedProviderRegistry();
-    this.vfs = new VFS(storage, this.providerRegistry, this.eventBus);
+    this.middlewareRegistry = new EnhancedMiddlewareRegistry(); // [变更]
+    this.vfs = new VFS(storage, this.middlewareRegistry, this.eventBus); // [变更]
     await this.vfs.initialize();
 
     this.moduleRegistry = new ModuleRegistry();
-    this.providerFactory = new ProviderFactory(this.vfs.storage, this.eventBus);
+    this.middlewareFactory = new MiddlewareFactory(this.vfs.storage, this.eventBus); // [变更]
 
     // 3. 加载持久化的模块信息
     await this._loadModuleRegistry();
 
     // 4. 注册默认 Providers
-    await this._registerDefaultProviders();
+    await this._registerDefaultMiddlewares(); // [变更]
 
-    // 5. 注册自定义 Providers
-    if (this.config.providers) {
-      for (const ProviderClass of this.config.providers) {
-        const provider = this.providerFactory.create(ProviderClass);
-        this.providerRegistry.register(provider);
+    // [变更] 注册自定义 Middlewares
+    if (this.config.middlewares) {
+      for (const MiddlewareClass of this.config.middlewares) {
+        const middleware = this.middlewareFactory.create(MiddlewareClass);
+        this.middlewareRegistry.register(middleware);
       }
     }
     this.initialized = true;
@@ -104,7 +104,7 @@ export class VFSCore {
     await this._saveModuleRegistry();
 
     // 清理 Providers
-    await this.providerRegistry.clear();
+    await this.middlewareRegistry.clear(); // [变更]
 
     // 关闭 VFS
     this.vfs.destroy();
@@ -449,11 +449,11 @@ export class VFSCore {
   }
 
   /**
-   * 获取 Provider 注册表
+   * 获取 Middleware 注册表
    */
-  getProviderRegistry(): EnhancedProviderRegistry {
+  getMiddlewareRegistry(): EnhancedMiddlewareRegistry { // [变更]
     this._ensureInitialized();
-    return this.providerRegistry;
+    return this.middlewareRegistry;
   }
 
   // ==================== 私有方法 ====================
@@ -514,9 +514,9 @@ export class VFSCore {
     } catch (error) { console.error('Failed to save module registry:', error); }
   }
 
-  private async _registerDefaultProviders(): Promise<void> {
-    const plainTextProvider = this.providerFactory.create(PlainTextProvider);
-    this.providerRegistry.register(plainTextProvider);
+  private async _registerDefaultMiddlewares(): Promise<void> { // [变更]
+    const plainTextMiddleware = this.middlewareFactory.create(PlainTextMiddleware);
+    this.middlewareRegistry.register(plainTextMiddleware);
   }
 
   private async _ensureDefaultModule(): Promise<void> {

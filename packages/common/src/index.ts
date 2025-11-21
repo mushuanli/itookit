@@ -1,11 +1,20 @@
 // packages/common/src/index.ts
 
 // Export all interfaces
-export { IAutocompleteProvider, type Suggestion } from './interfaces/IAutocompleteProvider';
-export { IEditor,EditorOptions,EditorEvent, EditorEventCallback, type SearchResultSource, type UnifiedSearchResult, type Heading } from './interfaces/IEditor';
-export {EditorFactory} from './interfaces/IEditorFactory';
+export { 
+    IEditor, 
+    type EditorOptions, 
+    type EditorEvent, 
+    type EditorEventCallback, 
+    type SearchResultSource, 
+    type UnifiedSearchResult, 
+    type Heading 
+} from './interfaces/IEditor';
+export { type EditorFactory } from './interfaces/IEditorFactory';
 
-export { IMentionProvider, type HoverPreviewData } from './interfaces/IMentionProvider'; // UPDATE: Export new HoverPreviewData interface
+export { IAutocompleteSource, type Suggestion } from './interfaces/IAutocompleteSource';
+
+export { IMentionSource, type HoverPreviewData } from './interfaces/IMentionSource';
 export { IPersistenceAdapter } from './interfaces/IPersistenceAdapter';
 export { ISessionManager, 
     type MenuItem, type ContextMenuBuilder, type ContextMenuConfig, type SessionUIOptions,

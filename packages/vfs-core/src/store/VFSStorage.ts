@@ -6,7 +6,7 @@ import { InodeStore } from './InodeStore.js';
 import { ContentStore } from './ContentStore.js';
 import { TagStore } from './TagStore.js';
 import { NodeTagStore } from './NodeTagStore.js';
-import { VFS_STORES, VNode, VNodeData, ContentData, Transaction, TransactionMode, TagData } from './types.js';
+import { VFS_STORES, VNode, VNodeData, ContentData, Transaction, TransactionMode } from './types.js';
 import { SearchQuery } from '../core/types.js'; // [修改]
 
 /**

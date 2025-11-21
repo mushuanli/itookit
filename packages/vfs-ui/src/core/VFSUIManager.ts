@@ -8,7 +8,7 @@
 // --- 外部接口与库 ---
 import { ISessionManager, TagEditorComponent } from '@itookit/common';
 import type { SessionUIOptions, SessionManagerEvent, SessionManagerCallback } from '@itookit/common';
-import { VFSCore, VNode, VFSEventType, VFSEvent } from '@itookit/vfs-core';
+import { VFSCore, VNode, VFSEventType, VFSEvent,TagAutocompleteSource,FileMentionSource,DirectoryMentionSource } from '@itookit/vfs-core';
 
 // --- 内部模块 ---
 import { Coordinator } from './Coordinator';
@@ -18,9 +18,6 @@ import { mapVNodeToUIItem, mapVNodeTreeToUIItems } from '../mappers/NodeMapper';
 import { NodeList } from '../components/NodeList/NodeList';
 import { FileOutline } from '../components/FileOutline/FileOutline';
 import { MoveToModal } from '../components/MoveToModal/MoveToModal';
-import { TagProvider } from '../providers/TagProvider';
-import { FileProvider } from '../providers/FileProvider';
-import { DirectoryProvider } from '../providers/DirectoryProvider';
 import type { VFSNodeUI, TagInfo, ContextMenuConfig, VFSUIState, TagEditorOptions, UISettings } from '../types/types';
 
 type VFSUIOptions = SessionUIOptions & { 
@@ -100,7 +97,7 @@ export class VFSUIManager extends ISessionManager<VFSNodeUI, VFSService> {
         this.lastActiveId = this.store.getState().activeId;
         this.lastSidebarCollapsedState = this.store.getState().isSidebarCollapsed;
 
-        const tagProvider = new TagProvider({ vfsCore: this.vfsCore });
+        const tagProvider = new TagAutocompleteSource({ vfsCore: this.vfsCore });
         
         const tagEditorFactory = this.options.components?.tagEditor || (({ container, initialTags, onSave, onCancel }: TagEditorOptions) => {
             const editor = new TagEditorComponent({ container, initialItems: initialTags, suggestionProvider: tagProvider, onSave, onCancel });
@@ -348,7 +345,7 @@ export class VFSUIManager extends ISessionManager<VFSNodeUI, VFSService> {
     }
 
     private _setupComponents(): void {
-        const tagProvider = new TagProvider({ vfsCore: this.vfsCore }); 
+        const tagProvider = new TagAutocompleteSource({ vfsCore: this.vfsCore }); 
         const tagEditorFactory = this.options.components?.tagEditor || (({ container, initialTags, onSave, onCancel }: TagEditorOptions) => {
             const editor = new TagEditorComponent({ container, initialItems: initialTags, suggestionProvider: tagProvider, onSave, onCancel });
             editor.init();

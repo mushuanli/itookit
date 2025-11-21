@@ -7,19 +7,19 @@ import { VFSStorage } from '../store/VFSStorage.js';
 import { VNode, VNodeType, ContentData, Transaction, VFS_STORES } from '../store/types.js';
 import { ContentStore } from '../store/ContentStore.js';
 import { PathResolver } from './PathResolver.js';
-import { ProviderRegistry } from './ProviderRegistry.js';
+import { MiddlewareRegistry } from './MiddlewareRegistry.js'; // [变更]
 import { EventBus } from './EventBus.js';
 import {
   VFSError,
   VFSErrorCode,
   CreateNodeOptions,
-  NodeStat,
   UnlinkOptions,
   UnlinkResult,
   CopyResult,
   VFSEventType,
-  IProvider,
-  SearchQuery // [修改]
+  IVFSMiddleware, // [变更]
+  SearchQuery,
+  NodeStat
 } from './types.js';
 
 interface NodeTreeData {
@@ -48,13 +48,13 @@ interface CopyOperation {
 export class VFS {
   public readonly storage: VFSStorage;
   public readonly pathResolver: PathResolver;
-  public readonly providers: ProviderRegistry;
+  public readonly middlewares: MiddlewareRegistry; // [变更] 重命名
   public readonly events: EventBus;
 
-  // [ARCH REFACTOR] Constructor accepts dependencies
-  constructor(storage: VFSStorage, providers: ProviderRegistry, events: EventBus) {
+  // [变更] 构造函数接收 MiddlewareRegistry
+  constructor(storage: VFSStorage, middlewares: MiddlewareRegistry, events: EventBus) {
     this.storage = storage;
-    this.providers = providers;
+    this.middlewares = middlewares;
     this.events = events;
     this.pathResolver = new PathResolver(this);
   }
@@ -75,10 +75,10 @@ export class VFS {
   }
 
   /**
-   * 注册 Provider
+   * 注册 Middleware
    */
-  registerProvider(provider: IProvider): void {
-    this.providers.register(provider);
+  registerMiddleware(middleware: IVFSMiddleware): void { // [变更]
+    this.middlewares.register(middleware);
   }
 
   /**
@@ -123,9 +123,9 @@ export class VFS {
       0, Date.now(), Date.now(), metadata, []
     );
 
-    // [REFACTORED] Run validation before the transaction starts
+    // [变更] 使用 middlewares 执行验证
     if (type === VNodeType.FILE && content !== undefined) {
-      await this.providers.runValidation(vnode, content);
+      await this.middlewares.runValidation(vnode, content);
     }
     
     // --- Phase 2: Execute (Transactional) ---
@@ -133,7 +133,8 @@ export class VFS {
     try {
       if (type === VNodeType.FILE) {
         const fileContent = content !== undefined ? content : '';
-        const { processedContent, derivedData } = await this._processWriteWithProviders(
+        // [变更] 调用 _processWriteWithMiddlewares
+        const { processedContent, derivedData } = await this._processWriteWithMiddlewares(
           vnode, fileContent, tx
         );
         vnode.metadata = { ...vnode.metadata, ...derivedData };
@@ -231,13 +232,14 @@ export class VFS {
       );
     }
     
-    // [REFACTORED] Run validation before the transaction starts
-    await this.providers.runValidation(vnode, content);
+    // [变更] middlewares 验证
+    await this.middlewares.runValidation(vnode, content);
 
     // --- Phase 2: Execute (Transactional) ---
     const tx = await this.storage.beginTransaction();
     try {
-      const { processedContent, derivedData } = await this._processWriteWithProviders(
+      // [变更] middlewares 处理
+      const { processedContent, derivedData } = await this._processWriteWithMiddlewares(
         vnode, content, tx
       );
 
@@ -296,19 +298,18 @@ export class VFS {
     try {
       // 在事务内批量执行
       for (const node of nodesToDelete) {
-        // 假设 provider 操作不需要事务，或者它们内部会处理
-        await this.providers.runBeforeDelete(node, tx);
+        // [变更] middlewares 钩子
+        await this.middlewares.runBeforeDelete(node, tx);
 
-        if (node.contentRef) {
-          await this.storage.deleteContent(node.contentRef, tx);
-        }
+        if (node.contentRef) await this.storage.deleteContent(node.contentRef, tx);
         
         // [新增] 删除节点的所有标签关联
         await this.storage.nodeTagStore.removeAllForNode(node.nodeId, tx);
 
         await this.storage.deleteVNode(node.nodeId, tx);
 
-        await this.providers.runAfterDelete(node, tx);
+        // [变更] middlewares 钩子
+        await this.middlewares.runAfterDelete(node, tx);
       }
       
       await tx.done;
@@ -543,15 +544,15 @@ export class VFS {
   // ==================== 私有辅助方法 ====================
 
   /**
-   * [提取] 处理 Provider 写入流程
+   * [变更] 处理 Middleware 写入流程
    */
-  private async _processWriteWithProviders(
+  private async _processWriteWithMiddlewares(
     vnode: VNode,
     content: string | ArrayBuffer,
     tx: Transaction
   ): Promise<{ processedContent: string | ArrayBuffer; derivedData: Record<string, any> }> {
     // Validation is now done before this method is called.
-    const processedContent = await this.providers.runBeforeWrite(vnode, content, tx);
+    const processedContent = await this.middlewares.runBeforeWrite(vnode, content, tx);
 
     // 保存内容
     if (vnode.contentRef) {
@@ -562,8 +563,7 @@ export class VFS {
     }
 
     // 写入后处理，获取派生数据
-    const derivedData = await this.providers.runAfterWrite(vnode, processedContent, tx);
-
+    const derivedData = await this.middlewares.runAfterWrite(vnode, processedContent, tx);
     return { processedContent, derivedData };
   }
 
