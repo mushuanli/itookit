@@ -5,9 +5,6 @@
 import './styles/vfs-ui.unified.css';
 
 import { VFSUIManager } from './core/VFSUIManager.js';
-import { DirectoryProvider } from './providers/DirectoryProvider.js';
-import { FileProvider } from './providers/FileProvider.js';
-import { TagProvider } from './providers/TagProvider.js';
 
 import type { SessionUIOptions } from '@itookit/common';
 import type { VFSCore } from '@itookit/vfs-core';
@@ -40,7 +37,7 @@ export function createVFSUI(options: VFSUIOptions, vfsCore: VFSCore, moduleName:
 }
 
 // Export main class, providers, and key types for advanced usage.
-export { VFSService, VFSUIManager, DirectoryProvider, FileProvider, TagProvider };
+export { VFSService, VFSUIManager};
 export * from './types/types.js';
 
 // [新增] 导出编辑器集成相关的功能和类型

@@ -3,14 +3,14 @@
  */
 import './TagEditorComponent.css';
 
-import { escapeHTML } from '../../utils/utils.js';
-import { IAutocompleteProvider, Suggestion } from '../../interfaces/IAutocompleteProvider';
+import { escapeHTML } from '../../utils/utils';
+import { IAutocompleteSource, Suggestion } from '../../interfaces/IAutocompleteSource';
 
 /** UPDATE: Exported the params interface for use in other modules. */
 export interface TagEditorParams {
     container: HTMLElement;
     initialItems: string[];
-    suggestionProvider: IAutocompleteProvider;
+    suggestionProvider: IAutocompleteSource;
     onSave: (newItems: string[]) => void;
     onCancel: () => void;
 }
@@ -18,7 +18,7 @@ export interface TagEditorParams {
 export class TagEditorComponent {
     private container: HTMLElement;
     private items: Set<string>;
-    private suggestionProvider: IAutocompleteProvider;
+    private suggestionProvider: IAutocompleteSource;
     private onSave: (newItems: string[]) => void;
     private onCancel: () => void;
 
@@ -86,7 +86,7 @@ export class TagEditorComponent {
         }
     };
 
-    private _handleInput = async (e: Event): Promise<void> => {
+    private _handleInput = async (/*e: Event*/): Promise<void> => {
         const query = this.inputEl.value;
         if (query) {
             const allSuggestions = await this.suggestionProvider.getSuggestions(query);

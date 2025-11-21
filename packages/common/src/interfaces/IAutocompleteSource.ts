@@ -1,26 +1,27 @@
 /**
- * @file common/interfaces/IAutocompleteProvider.ts
+ * @file common/interfaces/IAutocompleteSource.ts
  * @description Defines the interface for a generic autocomplete data provider.
  * Any data source wishing to integrate with AutocompletePlugin should implement this class.
  */
 export interface Suggestion {
     id: string | number;
     label: string;
+    type?: string; // 添加 type 字段，方便 UI 区分 (file, tag, directory)
     [key: string]: any;
 }
 
 /**
- * @interface
- * 定义了为通用自动完成功能提供建议列表的契约。
- * 任何希望接入 AutocompletePlugin 的数据源都应实现此类。
+ * @abstract
+ * 自动完成数据源接口
+ * 定义了为 UI 组件提供建议列表的契约。
  */
-export abstract class IAutocompleteProvider {
+export abstract class IAutocompleteSource {
     /**
      * Constructor. Ensures this interface cannot be instantiated directly.
      */
     constructor() {
-        if (this.constructor === IAutocompleteProvider) {
-            throw new Error("IAutocompleteProvider is an interface and cannot be instantiated directly.");
+        if (this.constructor === IAutocompleteSource) {
+            throw new Error("IAutocompleteSource is an interface and cannot be instantiated directly.");
         }
     }
 

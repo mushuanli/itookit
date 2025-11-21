@@ -11,12 +11,20 @@ import { NodeStat } from './types.js';
  * @description 根据 parentId 构建一个真正的嵌套树结构。
  */
 export function buildTree(nodes: VNode[], rootId: string | null = null): VNode[] {
-  const nodeMap = new Map<string, VNode & { children?: VNode[] }>();
-  const tree: VNode[] = [];
+  // 定义一个类型，包含 children
+  type VNodeWithChildren = VNode & { children: VNodeWithChildren[] };
+  
+  const nodeMap = new Map<string, VNodeWithChildren>();
+  const tree: VNodeWithChildren[] = [];
 
-  // 初始化映射和 children 数组
+  // 初始化
   for (const node of nodes) {
-    const newNode = { ...node, children: [] };
+    // 关键修复：不要解构重建对象，而是直接把 node 赋值过去，并动态添加 children 属性
+    // 或者，如果你必须保持纯净，你需要保留原型链。
+    // 这里最简单的方法是使用 Object.assign 或直接修改
+    
+    // 这种写法保留了 VNode 实例的方法 (如 toJSON)
+    const newNode = Object.assign(node, { children: [] }) as VNodeWithChildren;
     nodeMap.set(node.nodeId, newNode);
   }
 

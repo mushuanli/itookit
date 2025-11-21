@@ -12,7 +12,7 @@ import { javascript } from "@codemirror/lang-javascript";
 import { bracketMatching, foldGutter, foldKeymap, syntaxHighlighting, defaultHighlightStyle } from "@codemirror/language";
 import { autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap } from "@codemirror/autocomplete";
 
-import {IMentionProvider,simpleHash} from '@itookit/common';
+import {IMentionSource,simpleHash} from '@itookit/common';
 // [修改] 现有 MDxEditor 库的导入
 import {
     createMDxEditor,      // [修改] 导入新的工厂函数替代 MDxEditor 构造函数
@@ -150,7 +150,7 @@ let mockDatabase = {
 };
 
 // 2. Create custom Mention Providers
-class FileMentionProvider extends IMentionProvider {
+class FileMentionProvider extends IMentionSource {
     key = 'file';
     triggerChar = '@'; // 明确指定触发字符
     async getSuggestions(query) {
@@ -205,7 +205,7 @@ class FileMentionProvider extends IMentionProvider {
     }
 }
 
-class UserMentionProvider extends IMentionProvider {
+class UserMentionProvider extends IMentionSource {
     key = 'user';
     triggerChar = '@';
     
@@ -262,7 +262,7 @@ class DemoMentionPlugin {
     debouncedGetHoverPreview;
 
     /**
-     * @param {{ providers: IMentionProvider[] }} options 
+     * @param {{ providers: IMentionSource[] }} options 
      */
     constructor(options = { providers: [] }) {
         (options.providers || []).forEach(p => {
