@@ -3,13 +3,11 @@
  * @desc Implements IMentionSource for directories, fetching data from vfs-core.
  */
 
-// [修正] 导入正确的类型并使用别名 'as'
 import { 
   IMentionSource, 
   type Suggestion, 
   type HoverPreviewData 
 } from '@itookit/common';
-// [修正] 导入 VNodeType 枚举
 import { VFSCore } from '../VFSCore';
 import { VNode, VNodeType } from '../store/types.js';
 
@@ -18,7 +16,7 @@ import { VNode, VNodeType } from '../store/types.js';
  */
 export interface DirectorySourceDependencies {
   vfsCore: VFSCore;
-  moduleName: string;
+  moduleName?: string; // [修改] 模块名可选
 }
 
 /**
@@ -31,11 +29,11 @@ export class DirectoryMentionSource extends IMentionSource {
   public readonly triggerChar = '@';
 
   private vfsCore: VFSCore;
-  private moduleName: string;
+  private moduleName?: string;
 
   constructor({ vfsCore, moduleName }: DirectorySourceDependencies) {
     super();
-    if (!vfsCore || !moduleName) {
+    if (!vfsCore) {
       throw new Error("DirectoryMentionSource requires a vfsCore instance.");
     }
     this.vfsCore = vfsCore;
@@ -49,23 +47,46 @@ export class DirectoryMentionSource extends IMentionSource {
    */
   public async getSuggestions(query: string): Promise<Suggestion[]> {
     try {
-      // Again, assumes an efficient search method in vfs-core
-      const results: VNode[] = await this.vfsCore.searchNodes(this.moduleName, {
-        type: VNodeType.DIRECTORY,
-        nameContains: query,
-        limit: 10,
-      });
+      const results: VNode[] = await this.vfsCore.searchNodes(
+        {
+          type: VNodeType.DIRECTORY,
+          nameContains: query,
+          limit: 20,
+        },
+        this.moduleName
+      );
 
-      return results.map(node => ({
-        id: node.nodeId,
-        label: `📁 ${node.name}`,
-        type: 'directory',
-        path: node.path
-      }));
+      return results.map(node => {
+        const labelText = this.formatLabel(node);
+        return {
+          id: node.nodeId,
+          label: labelText,
+          type: 'directory',
+          path: node.path,
+          module: node.moduleId
+        };
+      });
     } catch (error) {
-      console.error(`[DirectoryMentionSource] Error getting suggestions for query "${query}":`, error);
+      console.error(`[DirectoryMentionSource] Error getting suggestions:`, error);
       return [];
     }
+  }
+
+  /**
+   * [新增] 格式化显示标签
+   */
+  private formatLabel(node: VNode): string {
+    // 目录本身就是一个路径，如果只显示 name 可能会混淆
+    // 例如 name: 'src', path: '/app/src' vs path: '/lib/src'
+    
+    if (this.moduleName) {
+       // 单模块内，显示相对简化的信息，如果层级很深，显示完整路径更有帮助
+       // 这里选择：显示名称 + (完整路径)
+       return `📁 ${node.name} (${node.path})`; 
+    }
+    
+    // 全局模式：显示名称 + ([模块] 完整路径)
+    return `📁 ${node.name} ([${node.moduleId}] ${node.path})`;
   }
 
   /**
@@ -78,6 +99,9 @@ export class DirectoryMentionSource extends IMentionSource {
     try {
       const vfs = this.vfsCore.getVFS();
       const stat = await vfs.stat(dirId);
+      // 注意：stat 对象中并没有 moduleId，需要从 VNode 获取，或者在 readdir 时一并返回
+      // 这里简化处理，直接显示 stat 内容
+      
       const children = await vfs.readdir(dirId);
 
       // 简单的文件/文件夹计数
@@ -88,6 +112,7 @@ export class DirectoryMentionSource extends IMentionSource {
         title: stat.name,
         contentHTML: `
           <div class="vfs-dir-preview">
+            <div class="vfs-meta" style="font-size:0.8em; color:#888; margin-bottom:4px;">${stat.path}</div>
             <p>Contains ${children.length} item(s)</p>
             <ul>
               <li>Files: ${fileCount}</li>

@@ -1,5 +1,5 @@
 /**
- * @file vfs-ui/src/components/NodeList/Footer.ts
+ * @file vfs-ui/components/NodeList/Footer.ts
  * @desc Component for the NodeList footer and bulk action bar.
  */
 import { createFooterHTML } from './templates';

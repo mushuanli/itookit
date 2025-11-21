@@ -1,5 +1,5 @@
 /**
- * @file vfs-ui/src/core/VFSUIManager.ts
+ * @file vfs-ui/core/VFSUIManager.ts
  * @description The main controller for the VFS-UI library. It initializes all
  * sub-components, bridges UI events with vfs-core data events, and provides
  * a unified public API by implementing ISessionManager.
@@ -395,7 +395,12 @@ export class VFSUIManager extends ISessionManager<VFSNodeUI, VFSService> {
                 if (newNode && newNode.moduleId === this.moduleName) {
                      if (newNode.type === 'file') {
                         (newNode as any).content = await vfs.read(newNode.nodeId);
+                    } else if (newNode.type === 'directory') {
+                        // ✨ [核心修复] 新建目录时，必须初始化 children 为空数组
+                        // 否则 mapVNodeToUIItem 会将其设为 undefined，导致 NodeList 无法渲染其内部结构（包括新建输入框）
+                        (newNode as any).children = [];
                     }
+                    
                     const newItem = mapVNodeToUIItem(newNode, newNode.parentId);
                     this.store.dispatch({
                         type: newItem.type === 'directory' ? 'FOLDER_CREATE_SUCCESS' : 'SESSION_CREATE_SUCCESS',

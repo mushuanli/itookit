@@ -1,5 +1,5 @@
 /**
- * @file vfs-ui/src/stores/VFSStore.ts
+ * @file vfs-ui/stores/VFSStore.ts
  * @desc Implements the VFSStore, the single source of truth for the UI state, using Immer for immutability.
  */
 import { produce, enableMapSet } from "immer";

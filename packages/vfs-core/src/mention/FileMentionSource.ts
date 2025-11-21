@@ -19,7 +19,7 @@ import { VNode, VNodeType } from '../store/types.js';
  */
 export interface FileSourceDependencies {
   vfsCore: VFSCore;
-  moduleName: string;
+  moduleName?: string; // [修改] 模块名现在是可选的
 }
 
 /**
@@ -33,12 +33,12 @@ export class FileMentionSource extends IMentionSource {
   public readonly triggerChar = '@'; // Or could be another char like '[[', depending on config
 
   private vfsCore: VFSCore;
-  private moduleName: string;
+  private moduleName?: string;
 
   constructor({ vfsCore, moduleName }: FileSourceDependencies) {
     super();
-    if (!vfsCore || !moduleName) {
-      throw new Error("FileMentionSource requires a vfsCore instance and a moduleName.");
+    if (!vfsCore) {
+      throw new Error("FileMentionSource requires a vfsCore instance.");
     }
     this.vfsCore = vfsCore;
     this.moduleName = moduleName;
@@ -51,20 +51,29 @@ export class FileMentionSource extends IMentionSource {
    */
   public async getSuggestions(query: string): Promise<Suggestion[]> {
     try {
-      // 使用 vfsCore 的搜索 API
-      const results: VNode[] = await this.vfsCore.searchNodes(this.moduleName, {
-        type: VNodeType.FILE,
-        nameContains: query,
-        limit: 10
-      });
+      // [修改] 调用 searchNodes，支持全局搜索（当 this.moduleName 为空时）
+      const results: VNode[] = await this.vfsCore.searchNodes(
+        {
+          type: VNodeType.FILE,
+          nameContains: query,
+          limit: 20 // 稍微增加限制，以容纳可能的同名文件
+        },
+        this.moduleName
+      );
 
-      return results.map(node => ({
-        id: node.nodeId,
-        label: `📄 ${node.name}`,
-        type: 'file',
-        // 可以携带额外数据供 UI 使用
-        path: node.path 
-      }));
+      return results.map(node => {
+        // [新增] 格式化 Label 以消除歧义
+        const labelText = this.formatLabel(node);
+
+        return {
+          id: node.nodeId,
+          label: labelText,
+          type: 'file',
+          // 额外数据
+          path: node.path,
+          module: node.moduleId
+        };
+      });
     } catch (error) {
       console.error(`[FileMentionSource] Error getting suggestions:`, error);
       return [];
@@ -72,10 +81,23 @@ export class FileMentionSource extends IMentionSource {
   }
 
   /**
-   * Provides a rich preview for a hovered file link.
-   * @param targetURL - The vfs://file/... URI.
-   * @returns A promise resolving to a hover preview object or null if not found.
+   * [新增] 格式化显示标签，处理同名文件冲突
    */
+  private formatLabel(node: VNode): string {
+    const parentPath = node.path.substring(0, node.path.lastIndexOf('/')) || '/';
+    
+    // 如果实例被限定在特定模块内，只需要显示相对路径来区分同模块下的文件
+    if (this.moduleName) {
+      // 如果是在根目录，不显示路径，否则显示父目录
+      const context = parentPath === '/' ? '' : ` (${parentPath})`;
+      return `📄 ${node.name}${context}`;
+    } 
+    
+    // 如果是全局搜索，必须显示 [模块名] 和路径
+    const context = parentPath === '/' ? '' : ` ${parentPath}`;
+    return `📄 ${node.name} ([${node.moduleId}]${context})`;
+  }
+
   public async getHoverPreview(targetURL: URL): Promise<HoverPreviewData | null> {
     // URL 格式假设: vfs://file/<nodeId>
     const fileId = targetURL.pathname.substring(1); 
@@ -98,8 +120,13 @@ export class FileMentionSource extends IMentionSource {
 
       return {
         title: stat.name,
+        // 在 Preview 中也显示完整路径和模块信息
         contentHTML: `<div class="vfs-hover-preview">
-          <div class="vfs-meta">Size: ${stat.size} bytes</div>
+          <div class="vfs-meta">
+             <span class="vfs-badge">${stat.metadata?.moduleId || 'unknown'}</span>
+             ${stat.path}
+          </div>
+          <div class="vfs-meta-sub">Size: ${stat.size} bytes</div>
           <p class="vfs-summary">${escapeHTML(summary)}</p>
         </div>`,
         icon: '📄'
@@ -128,6 +155,8 @@ export class FileMentionSource extends IMentionSource {
         title: node.name,
         content: content,
         tags: node.tags,
+        module: node.moduleId,
+        path: node.path,
         createdAt: new Date(node.createdAt),
         modifiedAt: new Date(node.modifiedAt),
         ...node.metadata,
