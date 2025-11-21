@@ -1,5 +1,5 @@
 /**
- * @file vfs-ui/src/types/types.ts
+ * @file vfs-ui/types/types.ts
  * @desc Centralized TypeScript type definitions for the VFS-UI library.
  */
 
@@ -42,7 +42,8 @@ export interface VFSNodeUI {
     lastModified: string; // ISO 8601 timestamp
     parentId: string | null;
     path: string;
-    // Merges vfs-core metadata and parsed content metadata
+    // [新增] 模块 ID
+    moduleId?: string;
     custom: Record<string, any> & Partial<FileMetadata>;
   };
   content?: {
@@ -125,7 +126,7 @@ interface RegularMenuItem {
   id: string;
   label: string;
   iconHTML?: string;
-  type?: 'item'; // The discriminant property
+  type?: 'item';
   hidden?: (item: VFSNodeUI) => boolean;
 }
 
@@ -133,7 +134,7 @@ interface RegularMenuItem {
  * Represents a visual separator in the menu.
  */
 interface SeparatorMenuItem {
-  type: 'separator'; // The discriminant property
+  type: 'separator'; 
 }
 
 /**

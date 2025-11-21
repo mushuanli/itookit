@@ -1,5 +1,5 @@
 /**
- * @file vfs-ui/src/index.ts
+ * @file vfs-ui/index.ts
  * @desc Public API entry point for the VFS-UI library.
  */
 import './styles/vfs-ui.unified.css';

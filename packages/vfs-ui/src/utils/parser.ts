@@ -1,5 +1,5 @@
 /**
- * @file vfs-ui/src/utils/parser.ts
+ * @file vfs-ui/utils/parser.ts
  * @desc Self-contained parsing utility for extracting metadata from file content.
  */
 

@@ -1,5 +1,5 @@
 /**
- * @file vfs-ui/src/services/VFSService.ts
+ * @file vfs-ui/services/VFSService.ts
  * @desc Acts as a stateless bridge between UI commands and vfs-core's high-level API.
  * This service is responsible for all "write" operations (Create, Update, Delete).
  */
@@ -66,7 +66,7 @@ export class VFSService extends ISessionService<VNode> {
     this.vfsCore = vfsCore;
     this.moduleName = moduleName;
     this.newFileContent = newFileContent;
-    this.vfs = this.vfsCore.getVFS(); // [修正] 获取并缓存底层VFS实例
+    this.vfs = this.vfsCore.getVFS(); 
   }
 
   // --- ISessionService Implementation & Public API ---
@@ -194,11 +194,13 @@ export class VFSService extends ISessionService<VNode> {
   }
 
   public async getAllFolders(): Promise<VNode[]> {
-      return this.vfsCore.searchNodes(this.moduleName, { type: VNodeType.DIRECTORY });
+      // [修正] searchNodes 参数顺序已变更: (query, moduleName)
+      return this.vfsCore.searchNodes({ type: VNodeType.DIRECTORY }, this.moduleName);
   }
 
   public async getAllFiles(): Promise<VNode[]> {
-      return this.vfsCore.searchNodes(this.moduleName, { type: VNodeType.FILE });
+      // [修正] searchNodes 参数顺序已变更: (query, moduleName)
+      return this.vfsCore.searchNodes({ type: VNodeType.FILE }, this.moduleName);
   }
 
   // --- Private Helper Methods ---

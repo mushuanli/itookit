@@ -1,5 +1,5 @@
 /**
- * @file vfs-ui/src/integrations/editor-connector.ts
+ * @file vfs-ui/integrations/editor-connector.ts
  * @desc Provides a high-level function to connect a VFS-UI manager with any IEditor-compatible editor.
  *       Optimized with debounce saving and async initialization, guarded against race conditions.
  */
