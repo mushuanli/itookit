@@ -5,7 +5,7 @@
 
 export { VFS } from './VFS.js';
 export { PathResolver } from './PathResolver.js';
-export { ProviderRegistry } from './ProviderRegistry.js';
+export { MiddlewareRegistry } from './MiddlewareRegistry.js';
 export { EventBus } from './EventBus.js';
 
 export {
@@ -17,7 +17,7 @@ export {
   type UnlinkOptions,
   type UnlinkResult,
   type CopyResult,
-  type IProvider,
+  type IVFSMiddleware,
   type VFSEvent,
   type SearchQuery, // [修改]
 } from './types.js';

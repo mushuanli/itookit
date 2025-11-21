@@ -73,7 +73,7 @@ export type { FormattingPluginOptions } from './plugins/ui/formatting.plugin';
 export { AutocompletePlugin } from './plugins/autocomplete/autocomplete.plugin';
 export type { AutocompletePluginOptions, AutocompleteProvider, AutocompleteSourceConfig } from './plugins/autocomplete/autocomplete.plugin';
 
-export { TagPlugin, TagProvider } from './plugins/autocomplete/tag.plugin';
+export { TagPlugin, TagAutocompleteSource } from './plugins/autocomplete/tag.plugin';
 export type { TagPluginOptions } from './plugins/autocomplete/tag.plugin';
 
 export { MentionPlugin } from './plugins/autocomplete/mention.plugin';

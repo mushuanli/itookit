@@ -104,7 +104,7 @@ export interface ProcessResult {
  * 负责通过可插拔的 Provider 系统对文本进行解析、数据解析和自定义转换。
  * 
  * @example
- * const processor = new MDxProcessor([new UserProvider(), new FileProvider()]);
+ * const processor = new MDxProcessor([new UserProvider(), new FileMentionSource()]);
  * const result = await processor.process(markdown, { rules: myRules });
  * console.log(result.transformedContent);
  * console.log(result.metadata);

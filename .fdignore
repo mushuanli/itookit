@@ -1,3 +1,4 @@
+#global
 tsup.config.ts
 tsconfig.json
 package.json
@@ -17,11 +18,11 @@ titlebar.plugin.ts
 toolbar.plugin.ts
 codeblock-controls.plugin.ts
 # mdx plugins/autocomplete
-autocomplete.plugin.ts
-mention.plugin.ts
-tag.plugin.ts
+#autocomplete.plugin.ts
+#mention.plugin.ts
+#tag.plugin.ts
 # mdx plugins/function
-cloze/
+plugins/cloze/
 mathjax.plugin.ts
 mermaid.plugin.ts
 media.plugin.ts
@@ -31,12 +32,13 @@ task-list.plugin.ts
 
 
 # vfs-core
-store/
-provider/
+#store/
+#provider/
+vfs-core/src/middleware/
 
 #vfs-ui
-mappers/
-providers/
-types/
-utils/
-components/
+vfs-ui/src/mappers/
+#providers/
+vfs-ui/src/types/
+vfs-ui/src/utils/
+vfs-ui/src/components/

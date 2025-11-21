@@ -1,11 +1,11 @@
 /**
- * @file vfs/provider/PlainTextProvider.ts
- * 纯文本 Provider 示例
+ * @file vfs/middleware/PlainTextMiddleware.ts
+ * 纯文本 Middleware 示例
  */
-import { ContentProvider } from './base/ContentProvider.js';
-import { VNode, Transaction } from '../store/types.js'; // [FIX] Added missing import
+import { ContentMiddleware } from './base/ContentMiddleware.js';
+import { VNode, Transaction } from '../store/types.js';
 
-export class PlainTextProvider extends ContentProvider {
+export class PlainTextMiddleware extends ContentMiddleware {
   readonly name = 'plain-text';
   readonly priority = 0;
 
@@ -14,16 +14,16 @@ export class PlainTextProvider extends ContentProvider {
     return vnode.metadata?.contentType === 'text/plain';
   }
 
-  async onValidate(vnode: VNode, content: string | ArrayBuffer): Promise<void> {
+  async onValidate(_vnode: VNode, content: string | ArrayBuffer): Promise<void> {
     if (typeof content !== 'string') {
       throw new Error('Plain text content must be a string');
     }
   }
 
   async onAfterWrite(
-    vnode: VNode,
+    _vnode: VNode,
     content: string | ArrayBuffer,
-    transaction: Transaction
+    _transaction: Transaction
   ): Promise<Record<string, any>> {
     const text = content as string;
     return {

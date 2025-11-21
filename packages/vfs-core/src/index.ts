@@ -10,17 +10,21 @@ import { VFSCore } from './VFSCore.js';
 export { VFS } from './core/VFS.js';
 export { VFSCore } from './VFSCore.js';
 export { PathResolver } from './core/PathResolver.js';
-export { ProviderRegistry } from './core/ProviderRegistry.js';
-export { EnhancedProviderRegistry, ProviderHook } from './core/EnhancedProviderRegistry.js';
+export { MiddlewareRegistry } from './core/MiddlewareRegistry.js'; // [变更]
+export { EnhancedMiddlewareRegistry, MiddlewareHook } from './core/EnhancedMiddlewareRegistry.js'; // [变更]
 export { EventBus } from './core/EventBus.js';
 export { ModuleRegistry } from './core/ModuleRegistry.js';
-export { ProviderFactory } from './core/ProviderFactory.js';
+export { MiddlewareFactory } from './core/MiddlewareFactory.js'; // [变更]
 export { VNode, VNodeType } from './store/types.js';
 
-// 导出 Provider 相关组件
-export { ContentProvider } from './provider/base/ContentProvider.js';
-export { CompositeProvider } from './provider/CompositeProvider.js';
-export { PlainTextProvider } from './provider/PlainTextProvider.js';
+// 导出 Middleware 相关组件 [变更]
+export { ContentMiddleware } from './middleware/base/ContentMiddleware.js';
+export { CompositeMiddleware } from './middleware/CompositeMiddleware.js';
+export { PlainTextMiddleware } from './middleware/PlainTextMiddleware.js';
+
+export {DirectoryMentionSource} from './mention/DirectoryMentionSource.js';
+export {FileMentionSource} from './mention/FileMentionSource.js';
+export {TagAutocompleteSource} from './mention/TagAutocompleteSource.js';
 
 // 导出核心类型和接口
 export {
@@ -32,9 +36,9 @@ export {
   type UnlinkOptions,
   type UnlinkResult,
   type CopyResult,
-  type IProvider,
+  type IVFSMiddleware, // [变更]
   type VFSEvent,
-  type SearchQuery, // [修改] 导出 SearchQuery
+  type SearchQuery,
 } from './core/types.js';
 
 import {VFSConfig} from './VFSCore.js';
@@ -87,4 +91,3 @@ export async function createVFSCore(
 export type { VFSConfig } from './VFSCore.js';
 // 从 ModuleRegistry 文件导出 ModuleInfo 类型
 export type { ModuleInfo } from './core/ModuleRegistry.js';
-

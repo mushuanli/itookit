@@ -1,6 +1,7 @@
 /**
  * @file vfs/core/types.ts
  * VFS Core 层类型定义
+ * [修改] IProvider 重命名为 IVFSMiddleware
  */
 
 import { VNode, VNodeType, Transaction } from '../store/types.js';
@@ -31,8 +32,8 @@ export class VFSError extends Error {
 export interface SearchQuery {
   type?: VNodeType.FILE | VNodeType.DIRECTORY;
   nameContains?: string;
-  tags?: string[]; // 匹配拥有所有这些标签的节点
-  metadata?: { [key: string]: any }; // 简单的元数据键值匹配
+  tags?: string[];
+  metadata?: { [key: string]: any };
   limit?: number;
 }
 
@@ -76,10 +77,10 @@ export interface CopyResult {
 }
 
 /**
- * Provider 接口
- * [MODIFIED] Hooks that perform writes now accept a transaction object.
+ * [重命名] Middleware 接口
+ * 负责拦截 VFS 操作（验证、写入前后处理、清理）
  */
-export interface IProvider {
+export interface IVFSMiddleware {
   name: string;
   // [推荐] 添加这些可选属性，让 IProvider 更通用，减少类型冲突
   priority?: number; 

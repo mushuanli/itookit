@@ -49,9 +49,12 @@ export function generateId(prefix: string = 'item'): string {
 
 export function debounce<T extends (...args: any[]) => any>(func: T, delay: number): ((...args: Parameters<T>) => void) & { cancel: () => void } {
     let timeout: ReturnType<typeof setTimeout>;
-    const debounced = function(...args: Parameters<T>) {
+    // 必须使用 function 关键字才能动态绑定 this
+    const debounced = function(this: any, ...args: Parameters<T>) {
         clearTimeout(timeout);
-        timeout = setTimeout(() => func.apply(this, args), delay);
+        // 捕获外部的 this
+        const context = this; 
+        timeout = setTimeout(() => func.apply(context, args), delay);
     };
     debounced.cancel = () => clearTimeout(timeout);
     return debounced;

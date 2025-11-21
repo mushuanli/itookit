@@ -1,9 +1,8 @@
 /**
  * @file src/core/BackgroundBrain.ts
  */
-import { VFSCore, VFSEventType, VFSEvent } from '@itookit/vfs-core';
+import { VFSCore, VFSEventType, VFSEvent,FileMentionSource } from '@itookit/vfs-core';
 import { MDxProcessor, ProcessResult } from '@itookit/mdxeditor';
-import { FileProvider } from '@itookit/vfs-ui';
 
 export class BackgroundBrain {
     private processor: MDxProcessor;
@@ -13,7 +12,7 @@ export class BackgroundBrain {
     private unsubscribe: (() => void) | null = null;
 
     constructor(private vfsCore: VFSCore, private moduleName: string, activeRules: string[] = ['*']) {
-        const fileProvider = new FileProvider({ vfsCore, moduleName });
+        const fileProvider = new FileMentionSource({ vfsCore, moduleName });
         // @ts-ignore
         this.processor = new MDxProcessor([fileProvider]);
     }

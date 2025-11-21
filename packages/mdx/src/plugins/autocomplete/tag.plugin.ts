@@ -7,7 +7,7 @@ import type { Completion } from '@codemirror/autocomplete';
 /**
  * 标签提供者
  */
-export class TagProvider implements AutocompleteProvider {
+export class TagAutocompleteSource implements AutocompleteProvider {
   private getTags: () => string[] | Promise<string[]>;
 
   constructor(options: { getTags: () => string[] | Promise<string[]> }) {
@@ -52,7 +52,7 @@ export class TagPlugin implements MDxPlugin {
 
   constructor(options: TagPluginOptions) {
     const triggerChar = options.triggerChar || '#';
-    const provider = new TagProvider({ getTags: options.getTags });
+    const provider = new TagAutocompleteSource({ getTags: options.getTags });
 
     this.autocompletePlugin = new AutocompletePlugin({
       sources: [

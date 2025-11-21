@@ -3,7 +3,6 @@
  * @description Defines the public interface that a session management module must implement.
  */
 import { ISessionService } from './ISessionService';
-import { IPersistenceAdapter } from './IPersistenceAdapter';
 
 interface IRegularMenuItem {
     id: string;
