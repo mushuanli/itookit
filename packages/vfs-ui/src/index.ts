@@ -8,7 +8,7 @@ import { VFSUIManager } from './core/VFSUIManager.js';
 
 import type { SessionUIOptions } from '@itookit/common';
 import type { VFSCore } from '@itookit/vfs-core';
-import type { ISessionManager } from '@itookit/common';
+import type { ISessionUI } from '@itookit/common';
 import type { VFSNodeUI } from './types/types.js';
 import { VFSService } from './services/VFSService.js';
 import type { VFSUIState, UISettings } from './types/types.js';
@@ -30,9 +30,9 @@ type VFSUIOptions = SessionUIOptions & {
  * @param options - UI configuration options.
  * @param vfsCore - An initialized vfs-core instance.
  * @param moduleName - The name of the vfs-core module this UI instance will manage.
- * @returns A new manager instance conforming to the ISessionManager interface.
+ * @returns A new manager instance conforming to the ISessionUI interface.
  */
-export function createVFSUI(options: VFSUIOptions, vfsCore: VFSCore, moduleName: string): ISessionManager<VFSNodeUI, VFSService> {
+export function createVFSUI(options: VFSUIOptions, vfsCore: VFSCore, moduleName: string): ISessionUI<VFSNodeUI, VFSService> {
     return new VFSUIManager(options, vfsCore, moduleName);
 }
 

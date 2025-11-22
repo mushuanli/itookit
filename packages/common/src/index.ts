@@ -16,11 +16,11 @@ export { IAutocompleteSource, type Suggestion } from './interfaces/IAutocomplete
 
 export { IMentionSource, type HoverPreviewData } from './interfaces/IMentionSource';
 export { IPersistenceAdapter } from './interfaces/IPersistenceAdapter';
-export { ISessionManager, 
+export { ISessionUI, 
     type MenuItem, type ContextMenuBuilder, type ContextMenuConfig, type SessionUIOptions,
     type SessionManagerEvent,
     type SessionManagerCallback
- } from './interfaces/ISessionManager';
+ } from './interfaces/ISessionUI';
 export { ISessionService } from './interfaces/ISessionService';
 
 export { ISettingsWidget } from './interfaces/ISettingsWidget';

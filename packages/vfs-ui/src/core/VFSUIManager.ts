@@ -2,11 +2,11 @@
  * @file vfs-ui/core/VFSUIManager.ts
  * @description The main controller for the VFS-UI library. It initializes all
  * sub-components, bridges UI events with vfs-core data events, and provides
- * a unified public API by implementing ISessionManager.
+ * a unified public API by implementing ISessionUI.
  */
 
 // --- 外部接口与库 ---
-import { ISessionManager, TagEditorComponent } from '@itookit/common';
+import { ISessionUI, TagEditorComponent } from '@itookit/common';
 import type { SessionUIOptions, SessionManagerEvent, SessionManagerCallback } from '@itookit/common';
 import { VFSCore, VNode, VFSEventType, VFSEvent,TagAutocompleteSource,FileMentionSource,DirectoryMentionSource } from '@itookit/vfs-core';
 
@@ -27,9 +27,9 @@ type VFSUIOptions = SessionUIOptions & {
 
 /**
  * Manages the entire lifecycle and interaction of the VFS-UI components.
- * @implements {ISessionManager}
+ * @implements {ISessionUI}
  */
-export class VFSUIManager extends ISessionManager<VFSNodeUI, VFSService> {
+export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
     private readonly options: VFSUIOptions;
     private readonly moduleName: string;
     private readonly vfsCore: VFSCore;
@@ -144,7 +144,7 @@ export class VFSUIManager extends ISessionManager<VFSNodeUI, VFSService> {
         this._connectToStoreForUiPersistence();
     }
 
-    // --- ISessionManager Interface Implementation ---
+    // --- ISessionUI Interface Implementation ---
 
     public get sessionService(): VFSService {
         return this._vfsService;
