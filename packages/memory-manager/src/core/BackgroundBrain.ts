@@ -1,7 +1,7 @@
 /**
  * @file src/core/BackgroundBrain.ts
  */
-import { FileMentionSource } from '@itookit/vfs-core';
+import { FileMentionSource } from '@itookit/vfs-ui';
 import { MDxProcessor, ProcessResult } from '@itookit/mdxeditor';
 import type { ISessionEngine, EngineEvent } from '@itookit/common';
 
