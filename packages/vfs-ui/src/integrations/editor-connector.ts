@@ -3,7 +3,7 @@
  * @desc Provides a high-level function to connect a VFS-UI manager with any IEditor-compatible editor.
  *       Optimized with debounce saving and async initialization, guarded against race conditions.
  */
-import type { IEditor, EditorFactory, EditorOptions, ISessionManager } from '@itookit/common';
+import type { IEditor, EditorFactory, EditorOptions, ISessionUI } from '@itookit/common';
 import type { VFSCore } from '@itookit/vfs-core';
 import type { VFSNodeUI, VFSUIState } from '../types/types';
 import type { VFSService } from '../services/VFSService';
@@ -22,7 +22,7 @@ export interface ConnectOptions {
  * creating, saving, and destroying the editor instance when the user selects different files.
  */
 export function connectEditorLifecycle(
-    vfsManager: ISessionManager<VFSNodeUI, VFSService>,
+    vfsManager: ISessionUI<VFSNodeUI, VFSService>,
     vfsCore: VFSCore,
     editorContainer: HTMLElement,
     editorFactory: EditorFactory,
