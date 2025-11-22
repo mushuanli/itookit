@@ -36,22 +36,38 @@ export interface SessionUIOptions {
     title?: string;
     searchPlaceholder?: string;
     newSessionContent?: string;
+    
+    /** 
+     * 自定义组件工厂
+     * TagEditor 的构造函数引用
+     */
     components?: {
         /** UPDATE: Changed type to `new (...args: any[]) => any` to correctly type a class constructor. */
         tagEditor?: new (...args: any[]) => any;
     };
     
-    // [核心修改] 在共享接口中添加新的配置项
-    /** 当模块内没有文件时，要创建的默认文件的文件名。如果未提供，则不创建。 */
+    // [新增] 默认文件配置
+    /** 当模块/列表为空时，自动创建的默认文件名。如果未提供，则不创建。 */
     defaultFileName?: string;
-    /** 默认文件的内容，可以是一段帮助文本或模板。 */
+    /** 默认文件的初始内容 */
     defaultFileContent?: string;
 }
 
-/** FIX: Export event types for use in JSDoc */
-export type SessionManagerEvent = 'sessionSelected' | 'navigateToHeading' | 'importRequested' | 'sidebarStateChanged' | 'menuItemClicked' | 'stateChanged';
+export type SessionManagerEvent = 
+    | 'sessionSelected' 
+    | 'navigateToHeading' 
+    | 'importRequested' 
+    | 'sidebarStateChanged' 
+    | 'menuItemClicked' 
+    | 'stateChanged';
+
 export type SessionManagerCallback = (payload: any) => void;
 
+/**
+ * Session UI 主接口
+ * @template TSession 会话对象类型 (如 VFSNodeUI)
+ * @template TService 服务层类型 (如 VFSService)
+ */
 export abstract class ISessionUI<TSession extends object, TService extends object> {
     protected constructor() {
         if (this.constructor === ISessionUI) {

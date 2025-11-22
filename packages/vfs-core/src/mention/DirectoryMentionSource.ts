@@ -1,22 +1,23 @@
 /**
  * @file vfs-core/mention/DirectoryMentionSource.ts
- * @desc Implements IMentionSource for directories, fetching data from vfs-core.
+ * @desc Implements IMentionSource for directories using ISessionEngine.
  */
 
 import { 
   IMentionSource, 
   type Suggestion, 
-  type HoverPreviewData 
+  type HoverPreviewData,
+  type ISessionEngine,
+  type EngineNode
 } from '@itookit/common';
-import { VFSCore } from '../VFSCore';
-import { VNode, VNodeType } from '../store/types.js';
 
 /**
  * Dependencies required by the DirectoryMentionSource.
  */
 export interface DirectorySourceDependencies {
-  vfsCore: VFSCore;
-  moduleName?: string;
+  engine: ISessionEngine;
+  /** 是否进行全局搜索，默认为 true */
+  globalSearch?: boolean;
 }
 
 /**
@@ -28,16 +29,16 @@ export class DirectoryMentionSource extends IMentionSource {
   public readonly key = 'dir';
   public readonly triggerChar = '@';
 
-  private vfsCore: VFSCore;
-  private moduleName?: string;
+  private engine: ISessionEngine;
+  private globalSearch: boolean;
 
-  constructor({ vfsCore, moduleName }: DirectorySourceDependencies) {
+  constructor({ engine, globalSearch = true }: DirectorySourceDependencies) {
     super();
-    if (!vfsCore) {
-      throw new Error("DirectoryMentionSource requires a vfsCore instance.");
+    if (!engine) {
+      throw new Error("DirectoryMentionSource requires an ISessionEngine instance.");
     }
-    this.vfsCore = vfsCore;
-    this.moduleName = moduleName;
+    this.engine = engine;
+    this.globalSearch = globalSearch;
   }
 
   /**
@@ -47,19 +48,20 @@ export class DirectoryMentionSource extends IMentionSource {
    */
   public async getSuggestions(query: string): Promise<Suggestion[]> {
     try {
-      const results: VNode[] = await this.vfsCore.searchNodes(
-        {
-          type: VNodeType.DIRECTORY,
-          nameContains: query,
+      const results: EngineNode[] = await this.engine.search({
+          type: 'directory',
+          text: query,
           limit: 20,
-        },
-        this.moduleName
-      );
+          scope: this.globalSearch ? ['*'] : undefined
+      });
 
       return results.map(node => {
-        const labelText = this.formatLabel(node);
+        const modulePrefix = node.moduleId ? `[${node.moduleId}] ` : '';
+        const icon = node.icon || '📁';
+        const labelText = `${icon} ${node.name} (${modulePrefix}${node.path})`;
+        
         return {
-          id: node.nodeId,
+          id: node.id,
           label: labelText,
           type: 'directory',
           path: node.path,
@@ -73,69 +75,31 @@ export class DirectoryMentionSource extends IMentionSource {
   }
 
   /**
-   * [新增] 格式化显示标签
-   */
-  private formatLabel(node: VNode): string {
-    // 目录本身就是一个路径，如果只显示 name 可能会混淆
-    // 例如 name: 'src', path: '/app/src' vs path: '/lib/src'
-    
-    if (this.moduleName) {
-       // 单模块内，显示相对简化的信息，如果层级很深，显示完整路径更有帮助
-       // 这里选择：显示名称 + (完整路径)
-       return `📁 ${node.name} (${node.path})`; 
-    }
-    
-    // 全局模式：显示名称 + ([模块] 完整路径)
-    return `📁 ${node.name} ([${node.moduleId}] ${node.path})`;
-  }
-
-  /**
    * Provides a preview for a hovered directory link.
    * @param targetURL - The vfs://dir/... URI.
    * @returns A promise resolving to a hover preview object or null.
    */
   public async getHoverPreview(targetURL: URL | string): Promise<HoverPreviewData | null> {
-    // [修复] 防御性检查和类型转换
     if (!targetURL) return null;
-    
     let urlObj: URL;
-    try {
-        urlObj = typeof targetURL === 'string' ? new URL(targetURL) : targetURL;
-    } catch(e) { 
-        console.error('[DirectoryMentionSource] Invalid URL:', targetURL);
-        return null; 
-    }
-    
-    if (typeof urlObj.pathname === 'undefined') {
-        console.warn('[DirectoryMentionSource] URL missing pathname:', urlObj);
-        return null;
-    }
+    try { urlObj = typeof targetURL === 'string' ? new URL(targetURL) : targetURL; } catch(e) { return null; }
+    if (typeof urlObj.pathname === 'undefined') return null;
 
     const dirId = urlObj.pathname.substring(1);
     try {
-      const vfs = this.vfsCore.getVFS();
-      const stat = await vfs.stat(dirId);
-      // 注意：stat 对象中并没有 moduleId，需要从 VNode 获取，或者在 readdir 时一并返回
-      // 这里简化处理，直接显示 stat 内容
-      
-      const children = await vfs.readdir(dirId);
+      const node = await this.engine.getNode(dirId);
+      if (!node) return null;
 
-      // 简单的文件/文件夹计数
-      const fileCount = children.filter(c => c.type === VNodeType.FILE).length;
-      const dirCount = children.length - fileCount;
+      const childrenCountText = node.children ? `Contains ${node.children.length} items (cached)` : 'Contents info not available';
 
       return {
-        title: stat.name,
+        title: node.name,
         contentHTML: `
           <div class="vfs-dir-preview">
-            <div class="vfs-meta" style="font-size:0.8em; color:#888; margin-bottom:4px;">${stat.path}</div>
-            <p>Contains ${children.length} item(s)</p>
-            <ul>
-              <li>Files: ${fileCount}</li>
-              <li>Folders: ${dirCount}</li>
-            </ul>
+            <div class="vfs-meta" style="font-size:0.8em; color:#888; margin-bottom:4px;">${node.path}</div>
+            <p>${childrenCountText}</p>
           </div>`,
-        icon: '📁',
+        icon: node.icon || '📁',
       };
     } catch (error) {
       return null;

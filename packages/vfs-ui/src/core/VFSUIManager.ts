@@ -4,21 +4,19 @@
  * sub-components, bridges UI events with vfs-core data events, and provides
  * a unified public API by implementing ISessionUI.
  */
-
-// --- 外部接口与库 ---
-import { ISessionUI, TagEditorComponent } from '@itookit/common';
-import type { SessionUIOptions, SessionManagerEvent, SessionManagerCallback } from '@itookit/common';
-import { VFSCore, VNode, VFSEventType, VFSEvent,TagAutocompleteSource,FileMentionSource,DirectoryMentionSource } from '@itookit/vfs-core';
+import { ISessionUI, TagEditorComponent, type SessionUIOptions, type SessionManagerEvent, type SessionManagerCallback, type ISessionEngine, type EngineEvent} from '@itookit/common';
+// [修正] 移除 @itookit/vfs-core 的导入
+import { EngineTagSource } from './EngineTagSource'; // 使用本地实现的通用 Source
 
 // --- 内部模块 ---
 import { Coordinator } from './Coordinator';
 import { VFSStore } from '../stores/VFSStore';
 import { VFSService } from '../services/VFSService';
-import { mapVNodeToUIItem, mapVNodeTreeToUIItems } from '../mappers/NodeMapper';
+import { mapEngineNodeToUIItem, mapEngineTreeToUIItems } from '../mappers/NodeMapper';
 import { NodeList } from '../components/NodeList/NodeList';
 import { FileOutline } from '../components/FileOutline/FileOutline';
 import { MoveToModal } from '../components/MoveToModal/MoveToModal';
-import type { VFSNodeUI, TagInfo, ContextMenuConfig, VFSUIState, TagEditorOptions, UISettings } from '../types/types';
+import type { TagInfo,VFSNodeUI, ContextMenuConfig, VFSUIState, TagEditorOptions, UISettings  } from '../types/types';
 
 type VFSUIOptions = SessionUIOptions & { 
     initialState?: Partial<VFSUIState>,
@@ -31,8 +29,7 @@ type VFSUIOptions = SessionUIOptions & {
  */
 export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
     private readonly options: VFSUIOptions;
-    private readonly moduleName: string;
-    private readonly vfsCore: VFSCore;
+    private readonly engine: ISessionEngine;
     
     // [架构修改] 将 coordinator 设为 public (或提供访问器)，以便 MemoryManager 订阅内部事件
     public readonly coordinator: Coordinator;
@@ -47,31 +44,22 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
     private nodeList: NodeList;
     private fileOutline?: FileOutline;
     private moveToModal: MoveToModal;
-
-    private readonly uiStorageKey: string;
+    private engineUnsubscribe: (() => void) | null = null;
     private lastActiveId: string | null = null;
     private lastSidebarCollapsedState: boolean;
     private lastForceUpdateTimestamp?: number;
-    private _title: string;
-    private vfsEventsUnsubscribe: (() => void) | null = null;
     
     // 🔧 FIX: Add flag to track user-initiated selections
     private lastSessionSelectWasUserAction = false;
 
-    constructor(options: VFSUIOptions, vfsCore: VFSCore, moduleName: string) {
+    constructor(options: VFSUIOptions, engine: ISessionEngine) {
         super();
-        if (!options.sessionListContainer) {
-            throw new Error("VFSUIManager requires 'sessionListContainer' in options.");
-        }
+        if (!options.sessionListContainer) throw new Error("VFSUIManager requires 'sessionListContainer'.");
         this.options = options;
-        this.vfsCore = vfsCore;
-        this.moduleName = moduleName;
-        this._title = options.title || 'Files';
+        this.engine = engine;
 
-        this.uiStorageKey = `vfs_ui_state_${this.moduleName}`;
-        const persistedUiState = this._loadUiState();
-        
         this.coordinator = new Coordinator();
+        const persistedUiState = this._loadUiState();
 
         // ✨ [修改] 构造 VFSStore 的初始状态，以支持可配置的默认排序
         const finalUiSettings = {
@@ -87,19 +75,16 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
             isSidebarCollapsed: options.initialSidebarCollapsed,
             readOnly: options.readOnly || false,
         });
-
-        this._vfsService = new VFSService({
-            vfsCore: this.vfsCore,
-            moduleName: this.moduleName,
-            newFileContent: options.newSessionContent
-        });
-        
         this.lastActiveId = this.store.getState().activeId;
         this.lastSidebarCollapsedState = this.store.getState().isSidebarCollapsed;
 
-        const tagProvider = new TagAutocompleteSource({ vfsCore: this.vfsCore });
+        this._vfsService = new VFSService({ engine: this.engine, newFileContent: options.newSessionContent });
+
+        // [修正] 初始化 Tag Editor 使用通用的 EngineTagSource
+        const tagProvider = new EngineTagSource(this.engine);
         
-        const tagEditorFactory = this.options.components?.tagEditor || (({ container, initialTags, onSave, onCancel }: TagEditorOptions) => {
+        const tagEditorFactory = this.options.components?.tagEditor || (({ container, initialTags, onSave, onCancel }: any) => {
+            // 这里的 TagEditorComponent 是来自 @itookit/common 的 UI 组件，不依赖 vfs-core
             const editor = new TagEditorComponent({ container, initialItems: initialTags, suggestionProvider: tagProvider, onSave, onCancel });
             editor.init();
             return editor;
@@ -134,12 +119,12 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
             coordinator: this.coordinator,
         });
 
-        this.nodeList.setTitle(this._title);
+        if(options.title) this.nodeList.setTitle(options.title);
         // --- 初始化结束 ---
 
         this._connectUIEvents();
         if (!this.options.readOnly) {
-            this._connectToVFSCoreEvents();
+            this._connectToEngineEvents();
         }
         this._connectToStoreForUiPersistence();
     }
@@ -159,16 +144,11 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
             return this.getActiveSession() || undefined;
         }
 
-        await this._loadModuleData();
+        await this._loadData();
 
-        // ✨ [核心新增逻辑] 检查是否需要创建默认文件
-        let currentState = this.store.getState();
-        if (
-            currentState.items.length === 0 &&         // 条件1: 当前没有任何文件
-            !this.options.readOnly &&                  // 条件2: UI不是只读模式
-            this.options.defaultFileName               // 条件3: 已经配置了默认文件名
-        ) {
-            console.log('[VFSUIManager] No items found. Creating a default file as specified in options.');
+        // 默认文件逻辑
+        const state = this.store.getState();
+        if (state.items.length === 0 && !this.options.readOnly && this.options.defaultFileName) {
             try {
                 // 调用 service 创建文件。vfs-core 的事件系统会自动通知 UI 更新。
                 await this._vfsService.createFile({
@@ -186,34 +166,22 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
         }
         
         let activeItem = this.getActiveSession();
-        currentState = this.store.getState(); // 重新获取状态，因为它可能因创建了默认文件而改变
-
-        // 场景1: 没有活动项，但列表里有文件，则自动选择第一个文件
-        if (!activeItem && currentState.items.length > 0) {
-            const findFirstFile = (nodes: VFSNodeUI[]): VFSNodeUI | null => {
-                for (const node of nodes) {
-                    if (node.type === 'file') return node;
-                    if (node.children) {
-                        const found = findFirstFile(node.children);
-                        if (found) return found;
+        if (!activeItem) {
+            const newState = this.store.getState();
+            if (newState.items.length > 0) {
+                const findFirstFile = (nodes: VFSNodeUI[]): VFSNodeUI | null => {
+                    for (const node of nodes) {
+                        if (node.type === 'file') return node;
+                        if (node.children) { const f = findFirstFile(node.children); if (f) return f; }
                     }
+                    return null;
+                };
+                const first = findFirstFile(newState.items);
+                if (first) {
+                    this.store.dispatch({ type: 'SESSION_SELECT', payload: { sessionId: first.id } });
+                    activeItem = this.getActiveSession();
                 }
-                return null;
-            };
-
-            const firstFile = findFirstFile(currentState.items);
-            if (firstFile) {
-                console.log(`[VFSUIManager] No active session found. Auto-selecting first file: ${firstFile.metadata.title}`);
-                this.store.dispatch({ type: 'SESSION_SELECT', payload: { sessionId: firstFile.id } });
-                // dispatch 后，store 状态已更新，重新获取 activeItem
-                activeItem = this.getActiveSession();
             }
-        }
-        // 场景2: 有一个持久化的 activeId，但它在当前文件列表中无效（例如被删除了）
-        else if (currentState.activeId && !activeItem) {
-            console.warn(`[VFSUIManager] Persisted activeId "${currentState.activeId}" is no longer valid. Resetting.`);
-            this.store.dispatch({ type: 'SESSION_SELECT', payload: { sessionId: null } });
-            activeItem = undefined; // 明确设置为 undefined
         }
         
         console.log(`[VFSUIManager] Start completed. Initial active session:`, activeItem);
@@ -237,7 +205,7 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
     }
 
     public async updateSessionContent(sessionId: string, newContent: string): Promise<void> {
-        await this.vfsCore.getVFS().write(sessionId, newContent);
+        await this.engine.writeContent(sessionId, newContent);
     }
 
     public toggleSidebar(): void {
@@ -245,12 +213,11 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
     }
     
     public setTitle(newTitle: string): void {
-        this._title = newTitle;
         this.nodeList.setTitle(newTitle);
     }
     
     public on(eventName: SessionManagerEvent, callback: SessionManagerCallback): () => void {
-        const publicEventMap: Record<SessionManagerEvent, string> = {
+        const map: Record<SessionManagerEvent, string> = {
             'sessionSelected': 'PUBLIC_SESSION_SELECTED',
             'navigateToHeading': 'PUBLIC_NAVIGATE_TO_HEADING',
             'importRequested': 'PUBLIC_IMPORT_REQUESTED',
@@ -258,11 +225,8 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
             'menuItemClicked': 'PUBLIC_MENU_ITEM_CLICKED',
             'stateChanged': 'PUBLIC_STATE_CHANGED',
         };
-        const channel = publicEventMap[eventName];
-        if (channel) {
-            return this.coordinator.subscribe(channel, (event: any) => callback(event.data));
-        }
-        console.warn(`[VFSUIManager] Attempted to subscribe to unknown event: "${eventName}"`);
+        const channel = map[eventName];
+        if (channel) return this.coordinator.subscribe(channel, (e: any) => callback(e.data));
         return () => {};
     }
     
@@ -271,41 +235,16 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
         this.fileOutline?.destroy();
         this.moveToModal.destroy();
         this.coordinator.clearAll();
-        this.vfsEventsUnsubscribe?.();
+        this.engineUnsubscribe?.();
     }
 
     // --- Private Helper Methods ---
 
-    private async _loadModuleData(): Promise<void> {
+    private async _loadData(): Promise<void> {
         try {
             this.store.dispatch({ type: 'ITEMS_LOAD_START' });
-            
-            const vfs = this.vfsCore.getVFS();
-            const moduleInfo = this.vfsCore.getModule(this.moduleName);
-            if (!moduleInfo) {
-                throw new Error(`Module ${this.moduleName} not found.`);
-            }
-
-            const buildFullTree = async (nodeId: string): Promise<VNode> => {
-                const node = await vfs.storage.loadVNode(nodeId);
-                if (!node) {
-                    throw new Error(`Node ${nodeId} not found during tree build.`);
-                }
-
-                if (node.type === 'file') {
-                    (node as any).content = await vfs.read(nodeId);
-                } else if (node.type === 'directory') {
-                    const children = await vfs.readdir(nodeId);
-                    (node as any).children = await Promise.all(
-                        children.map(child => buildFullTree(child.nodeId))
-                    );
-                }
-                return node;
-            };
-
-            const fullVNodeTreeRoot = await buildFullTree(moduleInfo.rootNodeId);
-            const uiItems = mapVNodeTreeToUIItems((fullVNodeTreeRoot as any).children || []);
-            
+            const rootChildren = await this.engine.loadTree();
+            const uiItems = mapEngineTreeToUIItems(rootChildren);
             const tags = this._buildTagsMap(uiItems);
             this.store.dispatch({ type: 'STATE_LOAD_SUCCESS', payload: { items: uiItems, tags } });
         } catch (error) {
@@ -344,155 +283,77 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
         this.store.subscribe(() => this._saveUiState());
     }
 
-    private _setupComponents(): void {
-        const tagProvider = new TagAutocompleteSource({ vfsCore: this.vfsCore }); 
-        const tagEditorFactory = this.options.components?.tagEditor || (({ container, initialTags, onSave, onCancel }: TagEditorOptions) => {
-            const editor = new TagEditorComponent({ container, initialItems: initialTags, suggestionProvider: tagProvider, onSave, onCancel });
-            editor.init();
-            return editor;
-        });
-
-        this.nodeList = new NodeList({
-            container: this.options.sessionListContainer,
-            store: this.store,
-            coordinator: this.coordinator,
-            contextMenu: this.options.contextMenu as ContextMenuConfig,
-            tagEditorFactory: tagEditorFactory,
-            searchPlaceholder: this.options.searchPlaceholder || 'Search (tag:xx type:file|dir)...',
-        });
-
-        if (this.options.documentOutlineContainer) {
-            this.fileOutline = new FileOutline({
-                container: this.options.documentOutlineContainer,
-                store: this.store,
-                coordinator: this.coordinator
-            });
-        }
-        
-        let modalContainer = document.getElementById('vfs-modal-container');
-        if (!modalContainer) {
-            modalContainer = document.createElement('div');
-            modalContainer.id = 'vfs-modal-container';
-            document.body.appendChild(modalContainer);
-        }
-        this.moveToModal = new MoveToModal({
-            container: modalContainer,
-            store: this.store,
-            coordinator: this.coordinator,
-        });
-
-        this.nodeList.setTitle(this._title);
-    }
     
     // [修正] 完全重写事件连接逻辑以匹配 vfs-core 的实际实现
-    private _connectToVFSCoreEvents(): void {
-        const eventBus = this.vfsCore.getEventBus();
-        const vfs = this.vfsCore.getVFS();
-
-        const handleNodeCreated = async (event: VFSEvent) => {
-            try {
-                const newNode = await vfs.storage.loadVNode(event.nodeId);
-                if (newNode && newNode.moduleId === this.moduleName) {
-                     if (newNode.type === 'file') {
-                        (newNode as any).content = await vfs.read(newNode.nodeId);
-                    } else if (newNode.type === 'directory') {
-                        // ✨ [核心修复] 新建目录时，必须初始化 children 为空数组
-                        // 否则 mapVNodeToUIItem 会将其设为 undefined，导致 NodeList 无法渲染其内部结构（包括新建输入框）
-                        (newNode as any).children = [];
-                    }
-                    
-                    const newItem = mapVNodeToUIItem(newNode, newNode.parentId);
-                    this.store.dispatch({
-                        type: newItem.type === 'directory' ? 'FOLDER_CREATE_SUCCESS' : 'SESSION_CREATE_SUCCESS',
-                        payload: newItem,
-                    });
+    private _connectToEngineEvents(): void {
+        const handleEvent = async (event: EngineEvent) => {
+            switch (event.type) {
+                case 'node:created': {
+                    const nodeId = event.payload.nodeId;
+                    try {
+                        const newNode = await this.engine.getNode(nodeId);
+                        if (!newNode) return;
+                        if (newNode.type === 'file') {
+                            newNode.content = await this.engine.readContent(nodeId);
+                        } else if (newNode.type === 'directory') {
+                            newNode.children = [];
+                        }
+                        const newItem = mapEngineNodeToUIItem(newNode);
+                        this.store.dispatch({
+                            type: newItem.type === 'directory' ? 'FOLDER_CREATE_SUCCESS' : 'SESSION_CREATE_SUCCESS',
+                            payload: newItem,
+                        });
+                    } catch (e) {}
+                    break;
                 }
-            } catch (error) {
-                console.error(`[VFSUIManager] Error processing NODE_CREATED event for nodeId ${event.nodeId}:`, error);
+                case 'node:deleted':
+                    const removedIds = event.payload.removedIds || [event.payload.nodeId];
+                    this.store.dispatch({ type: 'ITEM_DELETE_SUCCESS', payload: { itemIds: removedIds } });
+                    break;
+                case 'node:updated':
+                    const updatedId = event.payload.nodeId;
+                    try {
+                        const updatedNode = await this.engine.getNode(updatedId);
+                        if (updatedNode) {
+                             // Preserve children if directory
+                             let childrenToPreserve: any[] = [];
+                             if(updatedNode.type === 'directory') {
+                                 const current = this.store.getState();
+                                 const findRecursive = (list: VFSNodeUI[]): VFSNodeUI|undefined => {
+                                    for(const i of list) {
+                                        if(i.id === updatedId) return i;
+                                        if(i.children) { const f = findRecursive(i.children); if(f) return f; }
+                                    }
+                                 };
+                                 const exist = findRecursive(current.items);
+                                 if(exist && exist.children) childrenToPreserve = exist.children;
+                             } else {
+                                 updatedNode.content = await this.engine.readContent(updatedId);
+                             }
+
+                             const uiItem = mapEngineNodeToUIItem(updatedNode);
+                             if(uiItem.type === 'directory') uiItem.children = childrenToPreserve;
+
+                             this.store.dispatch({
+                                 type: 'ITEM_UPDATE_SUCCESS',
+                                 payload: { itemId: updatedId, updates: uiItem }
+                             });
+                        }
+                    } catch(e) { this._loadData(); }
+                    break;
+                case 'node:moved':
+                    this._loadData();
+                    break;
             }
         };
 
-        const handleNodeDeleted = (event: VFSEvent) => {
-            const allRemovedIds = event.data?.removedIds || [event.nodeId];
-            this.store.dispatch({ type: 'ITEM_DELETE_SUCCESS', payload: { itemIds: allRemovedIds } });
-        };
-        
-        const handleNodeUpdated = async (event: VFSEvent) => {
-            console.log(`[VFSUIManager] NODE_UPDATED event received for nodeId ${event.nodeId}.`);
-            try {
-                const updatedNode = await vfs.storage.loadVNode(event.nodeId);
-                if (updatedNode && updatedNode.moduleId === this.moduleName) {
-                    // [修复] 处理目录更新时必须保留原有的子节点
-                    // 因为 loadVNode 不会加载子节点，如果直接覆盖，目录会变空
-                    let childrenToPreserve: VFSNodeUI[] | undefined = undefined;
-
-                    if (updatedNode.type === 'directory') {
-                        // [DEBUG] 添加日志
-                        console.log(`[VFSUIManager] Processing update for directory: ${updatedNode.name} (${updatedNode.nodeId})`);
-                        
-                        const currentState = this.store.getState();
-                        const findItem = (items: VFSNodeUI[]): VFSNodeUI | undefined => {
-                            for (const item of items) {
-                                if (item.id === updatedNode.nodeId) return item;
-                                if (item.children) {
-                                    const found = findItem(item.children);
-                                    if (found) return found;
-                                }
-                            }
-                        };
-                        const existingItem = findItem(currentState.items);
-                        if (existingItem && existingItem.children) {
-                            childrenToPreserve = existingItem.children;
-                            // [DEBUG] 确认保留了多少子节点
-                            console.log(`[VFSUIManager] Preserving ${childrenToPreserve.length} children for directory.`);
-                        } else {
-                            // 如果是新目录（不太可能在 update 中出现，但为了安全），初始化为空数组
-                            childrenToPreserve = [];
-                            console.log(`[VFSUIManager] No existing children found or new directory. Initializing empty.`);
-                        }
-                    } else if (updatedNode.type === 'file') {
-                        (updatedNode as any).content = await vfs.read(updatedNode.nodeId);
-                    }
-                    
-                    const updatedUIItem = mapVNodeToUIItem(updatedNode, updatedNode.parentId);
-                    
-                    // [修复] 如果是目录，恢复其子节点
-                    if (updatedNode.type === 'directory' && childrenToPreserve) {
-                        updatedUIItem.children = childrenToPreserve;
-                    }
-                    
-                    this.store.dispatch({
-                        type: 'ITEM_UPDATE_SUCCESS',
-                        payload: {
-                            itemId: updatedNode.nodeId,
-                            updates: updatedUIItem
-                        }
-                    });
-                }
-            } catch (error) {
-                console.error(`[VFSUIManager] Error processing NODE_UPDATED. Falling back to full reload.`, error);
-                this._loadModuleData();
-            }
-        };
-        
-        const handleReloadNeeded = (event: VFSEvent) => {
-            console.log(`[VFSUIManager] ${event.type} event received, reloading module data for consistency.`);
-            this._loadModuleData();
-        };
-
-        const unsub1 = eventBus.on(VFSEventType.NODE_CREATED, handleNodeCreated);
-        const unsub2 = eventBus.on(VFSEventType.NODE_DELETED, handleNodeDeleted);
-        const unsub3 = eventBus.on(VFSEventType.NODE_UPDATED, handleNodeUpdated);
-        const unsub4 = eventBus.on(VFSEventType.NODE_MOVED, handleReloadNeeded);
-        const unsub5 = eventBus.on(VFSEventType.NODE_COPIED, handleReloadNeeded);
-
-        this.vfsEventsUnsubscribe = () => {
-            unsub1();
-            unsub2();
-            unsub3();
-            unsub4();
-            unsub5();
-        };
+        const unsubs = [
+            this.engine.on('node:created', handleEvent),
+            this.engine.on('node:updated', handleEvent),
+            this.engine.on('node:deleted', handleEvent),
+            this.engine.on('node:moved', handleEvent)
+        ];
+        this.engineUnsubscribe = () => unsubs.forEach(u => u());
     }
 
     private _connectUIEvents(): void {
@@ -566,7 +427,7 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
                     if (createdNodes.length > 0 && createdNodes[0].type === 'file') {
                         this.store.dispatch({ 
                             type: 'SESSION_SELECT', 
-                            payload: { sessionId: createdNodes[0].nodeId } 
+                            payload: { sessionId: createdNodes[0].id } 
                         });
                     }
                 } catch (error) {
@@ -659,17 +520,14 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
     }
 
     private _buildTagsMap(items: VFSNodeUI[]): Map<string, TagInfo> {
-        const tagsMap = new Map<string, TagInfo>();
-        const traverse = (itemList: VFSNodeUI[]) => {
-            for (const item of itemList) {
-                const itemTags = item.metadata?.tags || [];
-                for (const tagName of itemTags) {
-                    if (!tagsMap.has(tagName)) {
-                        tagsMap.set(tagName, { name: tagName, color: null, itemIds: new Set() });
-                    }
-                    tagsMap.get(tagName)!.itemIds.add(item.id);
-                }
-                if (item.children) traverse(item.children);
+        const tagsMap = new Map();
+        const traverse = (list: VFSNodeUI[]) => {
+            for(const i of list) {
+                i.metadata.tags.forEach(t => {
+                    if(!tagsMap.has(t)) tagsMap.set(t, {name: t, color: null, itemIds: new Set()});
+                    tagsMap.get(t).itemIds.add(i.id);
+                });
+                if(i.children) traverse(i.children);
             }
         };
         traverse(items);
@@ -701,4 +559,5 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
         });
     }
 
+    private get uiStorageKey() { return `vfs_ui_state_${(this.engine as any).moduleName || 'default'}`; }
 }

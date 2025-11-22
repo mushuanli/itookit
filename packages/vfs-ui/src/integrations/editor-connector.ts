@@ -3,8 +3,7 @@
  * @desc Provides a high-level function to connect a VFS-UI manager with any IEditor-compatible editor.
  *       Optimized with debounce saving and async initialization, guarded against race conditions.
  */
-import type { IEditor, EditorFactory, EditorOptions, ISessionUI } from '@itookit/common';
-import type { VFSCore } from '@itookit/vfs-core';
+import type { IEditor, EditorFactory, EditorOptions, ISessionUI, ISessionEngine } from '@itookit/common';
 import type { VFSNodeUI, VFSUIState } from '../types/types';
 import type { VFSService } from '../services/VFSService';
 
@@ -23,7 +22,7 @@ export interface ConnectOptions {
  */
 export function connectEditorLifecycle(
     vfsManager: ISessionUI<VFSNodeUI, VFSService>,
-    vfsCore: VFSCore,
+    engine: ISessionEngine,
     editorContainer: HTMLElement,
     editorFactory: EditorFactory,
     options: ConnectOptions = {}
@@ -80,10 +79,7 @@ export function connectEditorLifecycle(
             if (nodeExists(currentState.items)) {
                 // 5. Perform Write
                 const contentToSave = activeEditor.getText();
-                // console.log(`[EditorConnector] Saving node ${activeNode.id}...`);
-                await vfsCore.getVFS().write(activeNode.id, contentToSave);
-
-                // 6. Reset Dirty State
+                await engine.writeContent(activeNode.id, contentToSave);
                 if (activeEditor.setDirty) activeEditor.setDirty(false);
             } else {
                 console.warn(`[EditorConnector] Node ${activeNode.id} was deleted. Skipping save.`);

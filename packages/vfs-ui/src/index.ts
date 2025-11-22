@@ -3,15 +3,13 @@
  * @desc Public API entry point for the VFS-UI library.
  */
 import './styles/vfs-ui.unified.css';
-
 import { VFSUIManager } from './core/VFSUIManager.js';
+import { VFSCoreAdapter } from './integrations/VFSCoreAdapter.js';
 
-import type { SessionUIOptions } from '@itookit/common';
+import type { SessionUIOptions, ISessionUI, ISessionEngine } from '@itookit/common';
 import type { VFSCore } from '@itookit/vfs-core';
-import type { ISessionUI } from '@itookit/common';
-import type { VFSNodeUI } from './types/types.js';
+import type { VFSNodeUI, VFSUIState, UISettings } from './types/types.js';
 import { VFSService } from './services/VFSService.js';
-import type { VFSUIState, UISettings } from './types/types.js';
 
 // ✨ [修改] 扩展 VFSUIOptions 类型，增加默认文件配置
 type VFSUIOptions = SessionUIOptions & { 
@@ -33,11 +31,18 @@ type VFSUIOptions = SessionUIOptions & {
  * @returns A new manager instance conforming to the ISessionUI interface.
  */
 export function createVFSUI(options: VFSUIOptions, vfsCore: VFSCore, moduleName: string): ISessionUI<VFSNodeUI, VFSService> {
-    return new VFSUIManager(options, vfsCore, moduleName);
+    const engine = new VFSCoreAdapter(vfsCore, moduleName);
+    return new VFSUIManager(options, engine);
 }
 
-// Export main class, providers, and key types for advanced usage.
-export { VFSService, VFSUIManager};
+/**
+ * 创建 VFSUI 实例 (通用引擎模式)
+ */
+export function createGenericVFSUI(options: VFSUIOptions, engine: ISessionEngine): ISessionUI<VFSNodeUI, VFSService> {
+    return new VFSUIManager(options, engine);
+}
+
+export { VFSService, VFSUIManager, VFSCoreAdapter };
 export * from './types/types.js';
 
 // [新增] 导出编辑器集成相关的功能和类型
