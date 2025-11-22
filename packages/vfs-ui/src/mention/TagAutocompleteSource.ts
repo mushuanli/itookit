@@ -1,5 +1,5 @@
 /**
- * @file vfs-core/mention/TagAutocompleteSource.ts
+ * @file vfs-ui/mention/TagAutocompleteSource.ts
  * @desc 提供标签自动完成建议 (基于 ISessionEngine)
  */
 

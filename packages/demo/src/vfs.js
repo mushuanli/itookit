@@ -136,15 +136,18 @@ function setupAppUIHandlers(vfsUIManager, vfsCore) {
  * 应用主入口函数
  */
 async function main() {
+    const moduleName = 'notes';
     // --- 步骤 1: 初始化 vfs-core ---
     const vfsCore = await createVFSCore({
         dbName: 'VFS_Demo_MindOS_Connector',
-        defaultModule: 'notes'
+        defaultModule: moduleName
     });
     console.log('vfs-core initialized and "notes" module is ready.');
 
+    const engine = new VFSCoreAdapter(vfsCore, moduleName);
+    
     // --- 步骤 2: 初始化 VFS-UI ---
-    const vfsUIManager = createVFSUI({
+    const vfsUIManager = createGenericVFSUI({
         sessionListContainer: document.getElementById('sidebar-container'),
         title: "我的笔记",
         contextMenu: {
@@ -156,7 +159,7 @@ async function main() {
                 { id: 'copy-id', label: '复制节点ID', iconHTML: '<i class="fas fa-fingerprint"></i>' }
             ]
         }
-    }, vfsCore, 'notes');
+    }, engine);
 
     /**
      * ✨ [最终] 这是适配器模式的最佳实践。

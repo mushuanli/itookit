@@ -1,5 +1,5 @@
 /**
- * @file vfs-ui/integrations/VFSCoreAdapter.ts
+ * @file vfs-core/VFSCoreAdapter.ts
  * @desc Adapts the specific @itookit/vfs-core implementation to the generic ISessionEngine interface.
  */
 import { VFSCore, VNode, VNodeType, VFSEventType } from '@itookit/vfs-core';
@@ -198,7 +198,7 @@ export class VFSCoreAdapter implements ISessionEngine {
         }
     }
 
-    on(event: EngineEventType, callback: (event: EngineEvent) => void): () => void {
+    on(_event: EngineEventType, callback: (event: EngineEvent) => void): () => void {
         const bus = this.vfsCore.getEventBus();
         const mapAndEmit = (type: EngineEventType, originalPayload: any) => {
             callback({ type, payload: originalPayload });
