@@ -34,7 +34,7 @@ task-list.plugin.ts
 # vfs-core
 #store/
 #provider/
-vfs-core/src/middleware/
+middleware/
 
 #vfs-ui
 vfs-ui/src/mappers/

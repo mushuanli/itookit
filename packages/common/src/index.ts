@@ -21,7 +21,6 @@ export { ISessionUI,
     type SessionManagerEvent,
     type SessionManagerCallback
  } from './interfaces/ISessionUI';
-export { ISessionService } from './interfaces/ISessionService';
 
 export { ISettingsWidget } from './interfaces/ISettingsWidget';
 

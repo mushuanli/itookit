@@ -5,7 +5,6 @@
  */
 
 // --- 外部接口与类型 ---
-import { ISessionService } from '@itookit/common';
 import { VFSCore, VNode, VNodeType, NodeStat, VFS } from '@itookit/vfs-core';
 
 // --- 类型定义 ---
@@ -47,17 +46,18 @@ export interface CreateDirectoryOptions {
 }
 
 /**
- * Implements the ISessionService interface and provides a clean API for
+ * Implements the service logic and provides a clean API for
  * all mutation operations required by the VFS-UI.
  */
-export class VFSService extends ISessionService<VNode> {
+// [修改] 不再继承 ISessionService
+export class VFSService {
   private readonly vfsCore: VFSCore;
   private readonly moduleName: string;
   private readonly newFileContent: string;
   private readonly vfs: VFS;
 
   constructor({ vfsCore, moduleName, newFileContent = '' }: VFSServiceDependencies) {
-    super();
+    // super(); // [修改] 移除 super 调用
 
     // [核心变更] No longer depends on the UI store.
     if (!vfsCore || !moduleName) {
@@ -69,9 +69,9 @@ export class VFSService extends ISessionService<VNode> {
     this.vfs = this.vfsCore.getVFS(); 
   }
 
-  // --- ISessionService Implementation & Public API ---
+  // --- Public API ---
 
-  // [修正] 实现 createSession 并返回创建的节点
+  // [修正] 保持此方法以兼容之前的 API 调用习惯
   public async createSession(options: CreateFileOptions): Promise<VNode> {
     return this.createFile(options);
   }
@@ -177,7 +177,7 @@ export class VFSService extends ISessionService<VNode> {
     }
   }
   
-  // [新增] 实现 ISessionService 缺失的方法
+  // [修正] 保留这些方法作为公共 API，移除 ISessionService 相关注释
   public async findItemById(itemId: string): Promise<VNode | null> {
       try {
           return await this.vfs.storage.loadVNode(itemId);
