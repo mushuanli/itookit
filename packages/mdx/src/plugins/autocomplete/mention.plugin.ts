@@ -1,5 +1,7 @@
 
 // mdx/plugins/autocomplete/mention.plugin.ts
+
+import {type HoverPreviewData} from '@itookit/common';
 import type { MDxPlugin, PluginContext } from '../../core/plugin';
 import { AutocompletePlugin, AutocompleteProvider } from './autocomplete.plugin';
 import type { Completion } from '@codemirror/autocomplete';
@@ -11,6 +13,11 @@ import type { MarkedExtension, Token } from 'marked';
 export interface MentionItem {
   id: string;
   label: string;
+  /** 
+   * ✨ [新增] 纯文本标题，用于插入到 Markdown 中。
+   * 如果未提供，则回退使用 label。
+   */
+  title?: string; 
   /**
    * 类型：用于 UI 显示和分组，例如 'file', 'directory', 'user'
    */
@@ -42,7 +49,7 @@ export interface MentionProvider {
   /**
    * 获取悬浮预览内容
    */
-  getHoverPreview?(item: MentionItem): Promise<{ title: string; content: string }>;
+  getHoverPreview?(uri: string): Promise<HoverPreviewData | null>;
 
   /**
    * 获取完整内容（用于内容嵌入）
@@ -149,9 +156,11 @@ export class MentionPlugin implements MDxPlugin {
                     const provider = providers.find(p => p.key === providerKey);
                     
                     if (provider && provider.getHoverPreview) {
-                        return provider.getHoverPreview(mentionItem);
+                        // ✅ 修复：构造标准 URI 字符串
+                        const uri = `mdx://${providerKey}/${mentionItem.id}`;
+                        return provider.getHoverPreview(uri);
                     }
-                    return Promise.resolve({ title: '', content: '' }); // Fallback
+                    return Promise.resolve(null);
                 }
             },
 
@@ -159,8 +168,12 @@ export class MentionPlugin implements MDxPlugin {
             applyTemplate: (completion: Completion) => {
                 const item = completion as any;
                 const providerKey = item._providerKey || providers[0].key; // Fallback safety
+                
+                // ✨ [修改] 优先使用 title (纯文本)，如果不存在则回退到 label
+                const textToInsert = item.title || item.label;
+                
                 // 生成标准格式: [Label](mdx://provider/id)
-                return `[${item.label}](mdx://${providerKey}/${item.id}) `;
+                return `[${textToInsert}](mdx://${providerKey}/${item.id}) `;
             }
         };
     });
@@ -275,26 +288,37 @@ export class MentionPlugin implements MDxPlugin {
     provider: MentionProvider,
     id: string
   ): Promise<void> {
-    if (!this.options.enableHoverPreview || !provider.getHoverPreview) return;
+    if (!this.options.enableHoverPreview || !provider.getHoverPreview) {
+      console.log('[MentionPlugin] Hover preview disabled or not supported');
+      return;
+    }
 
     try {
-      const url = new URL(`mdx://${provider.key}/${id}`);
-      // 这里使用 URL 对象传递，因为我们的 Source 接口通常接受 URL 或 string
-      const preview = await provider.getHoverPreview(url as any);
+      // ✅ 修复：构造标准 URI 字符串
+      const uri = `mdx://${provider.key}/${id}`;
+      console.log('[MentionPlugin] Requesting hover preview for:', uri);
+      
+      // ✅ 修复：传递字符串 URI
+      const preview = await provider.getHoverPreview(uri);
 
-      if (!preview) return;
+      if (!preview) {
+        console.log('[MentionPlugin] No preview data returned');
+        return;
+      }
+
+      console.log('[MentionPlugin] Preview data received:', preview);
 
       if (!this.hoverCard) {
         this.hoverCard = this.createHoverCard();
       }
 
-      // 简单的样式优化
+      // ✅ 修复：使用 contentHTML 属性
       this.hoverCard.innerHTML = `
         <div class="mdx-mention-hover-card__header" style="padding: 8px 12px; background: #f5f5f5; border-bottom: 1px solid #eee; font-weight: 600;">
-            ${preview.title}
+            ${preview.icon || ''} ${preview.title}
         </div>
         <div class="mdx-mention-hover-card__content" style="padding: 12px;">
-            ${preview.content}
+            ${preview.contentHTML}
         </div>
       `;
 
@@ -309,8 +333,11 @@ export class MentionPlugin implements MDxPlugin {
       this.hoverCard.style.left = `${rect.left}px`;
       this.hoverCard.style.top = `${top}px`;
       this.hoverCard.style.display = 'block';
+      
+      console.log('[MentionPlugin] Hover card displayed at:', { left: rect.left, top });
+      
     } catch (error) {
-      console.error('Failed to load hover preview:', error);
+      console.error('[MentionPlugin] Failed to load hover preview:', error);
     }
   }
 
@@ -320,6 +347,7 @@ export class MentionPlugin implements MDxPlugin {
   private hideHoverPreview(): void {
     if (this.hoverCard) {
       this.hoverCard.style.display = 'none';
+      console.log('[MentionPlugin] Hover card hidden');
     }
   }
 
@@ -376,8 +404,14 @@ export class MentionPlugin implements MDxPlugin {
         const provider = this.options.providers.find((p) => p.key === providerKey);
 
         if (provider && id) {
-          link.addEventListener('mouseenter', () => this.showHoverPreview(link, provider, id));
-          link.addEventListener('mouseleave', () => this.hideHoverPreview());
+          link.addEventListener('mouseenter', () => {
+            console.log('[MentionPlugin] Mouse entered mention:', { providerKey, id });
+            this.showHoverPreview(link, provider, id);
+          });
+          link.addEventListener('mouseleave', () => {
+            console.log('[MentionPlugin] Mouse left mention');
+            this.hideHoverPreview();
+          });
         }
       });
     }
@@ -394,6 +428,7 @@ export class MentionPlugin implements MDxPlugin {
         const id = target.dataset.id;
 
         if (providerKey && id) {
+          console.log('[MentionPlugin] Mention clicked:', { providerKey, id });
           this.options.onMentionClick(providerKey, id);
         }
       });
@@ -402,6 +437,8 @@ export class MentionPlugin implements MDxPlugin {
 
 
   install(context: PluginContext): void {
+    console.log('[MentionPlugin] Installing plugin with', this.options.providers.length, 'providers');
+    
     this.autocompletePlugin.install(context);
 
     context.registerSyntaxExtension(this.createMarkedExtension());
@@ -409,6 +446,7 @@ export class MentionPlugin implements MDxPlugin {
     const removeDomUpdated = context.on(
       'domUpdated',
       async ({ element }: { element: HTMLElement }) => {
+        console.log('[MentionPlugin] DOM updated, binding interactions');
         this.bindMentionInteractions(element);
         await this.processTransclusions(element);
       }
@@ -420,6 +458,7 @@ export class MentionPlugin implements MDxPlugin {
   }
 
   destroy(): void {
+    console.log('[MentionPlugin] Destroying plugin');
     this.cleanupFns.forEach((fn) => fn());
     this.cleanupFns = [];
 

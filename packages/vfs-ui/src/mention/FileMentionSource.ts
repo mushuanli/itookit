@@ -58,7 +58,10 @@ export class FileMentionSource extends IMentionSource {
 
       return results.map(node => ({
         id: node.id,
+        // ✨ [修改] label 用于下拉列表显示（包含丰富信息）
         label: this.formatLabel(node),
+        // ✨ [新增] title 用于插入文档（仅文件名）
+        title: node.name,
         type: 'file',
         path: node.path,
         module: node.moduleId
@@ -85,11 +88,20 @@ export class FileMentionSource extends IMentionSource {
     return `${icon} ${node.name} (${modulePrefix}${context})`;
   }
 
-  public async getHoverPreview(targetURL: URL | string): Promise<HoverPreviewData | null> {
-    if (!targetURL) return null;
+  /**
+   * ✅ 修复：接受字符串 URI，返回统一的类型
+   */
+  public async getHoverPreview(uri: string): Promise<HoverPreviewData | null> {
+    console.log('[FileMentionSource] getHoverPreview called with URI:', uri);
+    
+    if (!uri) {
+      console.log('[FileMentionSource] URI is empty');
+      return null;
+    }
+    
     let urlObj: URL;
     try {
-        urlObj = typeof targetURL === 'string' ? new URL(targetURL) : targetURL;
+        urlObj = new URL(uri);
     } catch (e) {
         console.error('[FileMentionSource] URL Parse Error:', e);
         return null;
@@ -97,10 +109,13 @@ export class FileMentionSource extends IMentionSource {
 
     // 确保 pathname 存在
     if (!urlObj.pathname) {
+        console.log('[FileMentionSource] No pathname in URL');
         return null;
     }
 
-    const fileId = urlObj.pathname.substring(1); 
+    // 移除开头的斜杠获取文件 ID
+    const fileId = urlObj.pathname.substring(1);
+    console.log('[FileMentionSource] Fetching file with ID:', fileId);
 
     try {
       const [node, content] = await Promise.all([
@@ -108,7 +123,12 @@ export class FileMentionSource extends IMentionSource {
         this.engine.readContent(fileId)
       ]);
       
-      if (!node) return null;
+      if (!node) {
+        console.log('[FileMentionSource] Node not found');
+        return null;
+      }
+      
+      console.log('[FileMentionSource] Node found:', node.name);
       
       const textContent = typeof content === 'string' 
         ? content 
@@ -124,8 +144,10 @@ export class FileMentionSource extends IMentionSource {
         ? `<span style="background:#eee; padding:2px 4px; border-radius:3px; font-size:0.8em; margin-right:5px;">${node.moduleId}</span>` 
         : '';
 
-      // 构建 HTML 字符串
-      const htmlString = `
+      // ✅ 修复：返回统一的数据结构
+      const previewData: HoverPreviewData = {
+        title: node.name,
+        contentHTML: `
           <div class="vfs-hover-preview" style="font-size: 0.9em; line-height: 1.4;">
             <div style="margin-bottom: 6px; color: #666; font-size: 0.85em; display: flex; align-items: center;">
                ${moduleBadge}
@@ -137,13 +159,12 @@ export class FileMentionSource extends IMentionSource {
             <div style="color: #999; font-size: 0.8em; border-top: 1px solid #eee; padding-top: 4px;">
               Updated: ${dateStr}
             </div>
-          </div>`;
-
-      return {
-        title: node.name,
-        contentHTML: htmlString,
+          </div>`,
         icon: node.icon || '📄'
       };
+
+      console.log('[FileMentionSource] Returning preview data for:', node.name);
+      return previewData;
 
     } catch (error) {
       console.error('[FileMentionSource] Error inside getHoverPreview:', error);

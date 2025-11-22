@@ -62,7 +62,10 @@ export class DirectoryMentionSource extends IMentionSource {
         
         return {
           id: node.id,
+          // ✨ [修改] label 用于下拉列表显示
           label: labelText,
+          // ✨ [新增] title 用于插入文档
+          title: node.name,
           type: 'directory',
           path: node.path,
           module: node.moduleId
@@ -79,20 +82,45 @@ export class DirectoryMentionSource extends IMentionSource {
    * @param targetURL - The vfs://dir/... URI.
    * @returns A promise resolving to a hover preview object or null.
    */
-  public async getHoverPreview(targetURL: URL | string): Promise<HoverPreviewData | null> {
-    if (!targetURL) return null;
+  public async getHoverPreview(uri: string): Promise<HoverPreviewData | null> {
+    console.log('[DirectoryMentionSource] getHoverPreview called with URI:', uri);
+    
+    if (!uri) {
+      console.log('[DirectoryMentionSource] URI is empty');
+      return null;
+    }
+    
     let urlObj: URL;
-    try { urlObj = typeof targetURL === 'string' ? new URL(targetURL) : targetURL; } catch(e) { return null; }
-    if (typeof urlObj.pathname === 'undefined') return null;
+    try { 
+      urlObj = new URL(uri); 
+    } catch(e) { 
+      console.error('[DirectoryMentionSource] URL Parse Error:', e);
+      return null; 
+    }
+    
+    if (!urlObj.pathname) {
+      console.log('[DirectoryMentionSource] No pathname in URL');
+      return null;
+    }
 
     const dirId = urlObj.pathname.substring(1);
+    console.log('[DirectoryMentionSource] Fetching directory with ID:', dirId);
+    
     try {
       const node = await this.engine.getNode(dirId);
-      if (!node) return null;
+      if (!node) {
+        console.log('[DirectoryMentionSource] Node not found');
+        return null;
+      }
 
-      const childrenCountText = node.children ? `Contains ${node.children.length} items (cached)` : 'Contents info not available';
+      console.log('[DirectoryMentionSource] Node found:', node.name);
 
-      return {
+      const childrenCountText = node.children 
+        ? `Contains ${node.children.length} items` 
+        : 'Contents info not available';
+
+      // ✅ 修复：返回统一的数据结构
+      const previewData: HoverPreviewData = {
         title: node.name,
         contentHTML: `
           <div class="vfs-dir-preview">
@@ -101,7 +129,12 @@ export class DirectoryMentionSource extends IMentionSource {
           </div>`,
         icon: node.icon || '📁',
       };
+
+      console.log('[DirectoryMentionSource] Returning preview data for:', node.name);
+      return previewData;
+      
     } catch (error) {
+      console.error('[DirectoryMentionSource] Error inside getHoverPreview:', error);
       return null;
     }
   }
