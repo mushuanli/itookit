@@ -1,15 +1,16 @@
 /**
  * @file src/core/MemoryManager.ts
  */
-import {FileMentionSource,DirectoryMentionSource} from '@itookit/vfs-core';
-import { createVFSUI, connectEditorLifecycle, VFSUIManager } from '@itookit/vfs-ui';
-import { EditorOptions, IEditor } from '@itookit/common';
+import { FileMentionSource, DirectoryMentionSource } from '@itookit/vfs-core';
+import { createGenericVFSUI, connectEditorLifecycle, VFSUIManager, VFSCoreAdapter } from '@itookit/vfs-ui';
+import { EditorOptions, IEditor, ISessionEngine } from '@itookit/common';
 import { MemoryManagerConfig } from '../types';
 import { BackgroundBrain } from './BackgroundBrain';
 import { Layout } from './Layout';
 
 export class MemoryManager {
     private vfsUI: VFSUIManager;
+    private engine: ISessionEngine; // [新增] 保存 Adapter 实例
     private brain?: BackgroundBrain;
     private layout: Layout;
     private lifecycleUnsubscribe: () => void;
@@ -18,22 +19,27 @@ export class MemoryManager {
         // 1. 创建布局
         this.layout = new Layout(config.container);
 
-        // 2. 初始化 VFS-UI
-        this.vfsUI = createVFSUI(
+        // 2. [核心] 创建 Adapter
+        this.engine = new VFSCoreAdapter(config.vfsCore, config.moduleName);
+
+        // 3. 初始化 VFS-UI
+        // 使用 createGenericVFSUI 或直接 new VFSUIManager，这里使用工厂函数
+        this.vfsUI = createGenericVFSUI(
             {
                 ...config.uiOptions,
                 sessionListContainer: this.layout.sidebarContainer,
                 initialSidebarCollapsed: false,
+                // [核心] 将默认文件配置映射到 UI Options
+                defaultFileName: config.defaultContentConfig?.fileName,
+                defaultFileContent: config.defaultContentConfig?.content,
             },
-            config.vfsCore,
-            config.moduleName
+            this.engine
         ) as VFSUIManager;
 
         // 3. 初始化 AI 大脑
         if (config.aiConfig?.enabled) {
             this.brain = new BackgroundBrain(
-                config.vfsCore,
-                config.moduleName,
+                this.engine,
                 config.aiConfig.activeRules
             );
             this.brain.start();
@@ -44,7 +50,7 @@ export class MemoryManager {
         // connectEditorLifecycle 现在全权负责保存和销毁
         this.lifecycleUnsubscribe = connectEditorLifecycle(
             this.vfsUI,
-            config.vfsCore,
+            this.engine,
             this.layout.editorContainer,
             this.enhancedEditorFactory
         );
@@ -65,7 +71,8 @@ export class MemoryManager {
             toggleSidebarCallback: () => this.vfsUI.toggleSidebar(),
             saveCallback: async (editorInstance: any) => {
                 if (runtimeOptions.nodeId && typeof editorInstance.getText === 'function') {
-                    await this.config.vfsCore.getVFS().write(runtimeOptions.nodeId, editorInstance.getText());
+                    // [修改] 使用 engine 保存
+                    await this.engine.writeContent(runtimeOptions.nodeId, editorInstance.getText());
                 }
             }
         };
@@ -94,8 +101,8 @@ export class MemoryManager {
                     // @ts-ignore
                     ...(editorConfig?.defaultPluginOptions?.['autocomplete:mention'] || {}),
                     providers: [
-                        new FileMentionSource({ vfsCore: this.config.vfsCore, moduleName: this.config.moduleName }),
-                        new DirectoryMentionSource({ vfsCore: this.config.vfsCore, moduleName: this.config.moduleName })
+                        new FileMentionSource({ engine: this.engine }),
+                        new DirectoryMentionSource({ engine: this.engine })
                     ]
                 },
 
@@ -128,31 +135,9 @@ export class MemoryManager {
 
     public async start() {
         await this._ensureModuleMounted();
-        await this.vfsUI.start(); // vfsUI 启动
-
-        // [架构修正] 将业务逻辑移至此处：检查空状态并创建默认文件
-        // 这比在 VFSUIManager 内部做更好，因为这属于“应用策略”
-        const { defaultContentConfig } = this.config;
-        if (defaultContentConfig) {
-            const state = this.vfsUI.store?.getState(); // 假设暴露了 store 或有 getter
-            // 或者通过 getSessionService 获取列表检查
-            const files = await this.vfsUI.sessionService.getAllFiles();
-            
-            if (files.length === 0) {
-                console.log(`[MemoryManager] Empty module, creating default file: ${defaultContentConfig.fileName}`);
-                try {
-                    const newFile = await this.vfsUI.sessionService.createFile({
-                        title: defaultContentConfig.fileName,
-                        content: defaultContentConfig.content,
-                        parentId: null
-                    });
-                    // 自动选中新建的文件
-                    this.vfsUI.store.dispatch({ type: 'SESSION_SELECT', payload: { sessionId: newFile.nodeId }});
-                } catch (e) {
-                    console.error("Failed to create default file", e);
-                }
-            }
-        }
+        await this.vfsUI.start(); 
+        
+        // [移除] 默认文件创建逻辑已移至 VFSUIManager 内部 (通过 options 传递)
     }
 
     private async _ensureModuleMounted() {
