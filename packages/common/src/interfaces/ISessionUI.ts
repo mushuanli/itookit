@@ -1,5 +1,5 @@
 /**
- * @file common/interfaces/ISessionManager.ts
+ * @file common/interfaces/ISessionUI.ts
  * @description Defines the public interface that a session management module must implement.
  */
 import { ISessionService } from './ISessionService';
@@ -53,10 +53,10 @@ export interface SessionUIOptions {
 export type SessionManagerEvent = 'sessionSelected' | 'navigateToHeading' | 'importRequested' | 'sidebarStateChanged' | 'menuItemClicked' | 'stateChanged';
 export type SessionManagerCallback = (payload: any) => void;
 
-export abstract class ISessionManager<TSession extends object, TService extends ISessionService<any>> {
+export abstract class ISessionUI<TSession extends object, TService extends ISessionService<any>> {
     protected constructor() {
-        if (this.constructor === ISessionManager) {
-            throw new Error("ISessionManager is an interface and cannot be instantiated directly.");
+        if (this.constructor === ISessionUI) {
+            throw new Error("ISessionUI is an interface and cannot be instantiated directly.");
         }
     }
 

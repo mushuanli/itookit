@@ -7,7 +7,7 @@
 /** 
  * @typedef {import('@itookit/common').IEditor} IEditor
  * @typedef {import('@itookit/common').EditorOptions} EditorOptions
- * @typedef {import('@itookit/common').ISessionManager} ISessionManager
+ * @typedef {import('@itookit/common').ISessionUI} ISessionUI
  * @typedef {import('@itookit/vfs-ui').VFSNodeUI} VFSNodeUI 
  * @typedef {import('@itookit/vfs-ui').VFSService} VFSService
  * @typedef {import('@itookit/vfs-core').VFSCore} VFSCore
@@ -32,7 +32,7 @@ let currentEditorInstance = null; // 用于响应 UI 事件，如大纲导航
 
 /**
  * 设置与编辑器生命周期无关的应用级别 UI 交互。
- * @param {ISessionManager<any, any>} vfsUIManager 
+ * @param {ISessionUI<any, any>} vfsUIManager 
  * @param {VFSCore} vfsCore 
  */
 function setupAppUIHandlers(vfsUIManager, vfsCore) {
