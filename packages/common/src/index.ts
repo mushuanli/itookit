@@ -21,6 +21,7 @@ export { ISessionUI,
     type SessionManagerEvent,
     type SessionManagerCallback
  } from './interfaces/ISessionUI';
+export {type EngineNode,type EngineSearchQuery,type EngineEventType,type EngineEvent,type ISessionEngine} from './interfaces/ISessionEngine';
 
 export { ISettingsWidget } from './interfaces/ISettingsWidget';
 

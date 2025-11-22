@@ -45,7 +45,7 @@ export function createFileItemHTML(
     file: VFSNodeUI, isActive: boolean, isSelected: boolean, uiSettings: UISettings,
     isOutlineExpanded: boolean, isSelectionMode: boolean, searchQueries: string[] = [], isReadOnly: boolean = false
 ): string {
-    const { id, metadata, content, headings = [] } = file;
+    const { id, metadata, content, headings = [], icon } = file;
     const { title, lastModified, tags = [], custom = {} } = metadata;
     const summary = content?.summary || '';
     const { isPinned = false, hasUnreadUpdate = false, taskCount } = custom;
@@ -71,12 +71,16 @@ export function createFileItemHTML(
 
     const outlinePreviewHTML = hasOutline && isOutlineExpanded ? `<div class="vfs-node-item__outline is-expanded">${createOutlinePreviewHTML(headings)}</div>` : '';
 
+    // [逻辑] Pinned > Custom Icon > Default
+    let displayIcon = icon || '📄';
+    if (isPinned) displayIcon = '📌';
+
     return `
         <div class="vfs-node-item" data-item-id="${id}" data-item-type="file">
             <div class="vfs-node-item__main-row ${isSelectionMode ? 'is-selection-mode' : ''}">
                 ${checkboxHTML}
                 <div class="vfs-node-item__content ${isActive ? 'is-active' : ''} ${isSelected ? 'is-selected' : ''}" data-action="select-and-open">
-                    <span class="vfs-node-item__icon" data-action="select-only" title="仅选中">${isPinned ? '📌' : '📄'}</span>
+                    <span class="vfs-node-item__icon" data-action="select-only" title="仅选中">${displayIcon}</span>
                     <div class="vfs-node-item__main">
                         <div class="vfs-node-item__title-wrapper">
                             <span class="vfs-node-item__title">${highlightText(title, searchQueries)}</span>
@@ -100,12 +104,12 @@ export function createDirectoryItemHTML(
     directory: VFSNodeUI, 
     isExpanded: boolean, 
     dirSelectionState: 'none' | 'partial' | 'all',
-    isSelected: boolean, // [修改] 增加明确的选中状态参数，用于高亮背景
+    isSelected: boolean,
     isSelectionMode: boolean, 
     searchQueries: string[] = [], 
     isReadOnly: boolean = false
 ): string {
-    const { id, metadata } = directory;
+    const { id, metadata, icon } = directory;
     const { title, tags = [] } = metadata;
     
     // [修改] 这里不再计算 isSelected，而是直接使用传入的 isSelected 参数决定是否添加 is-selected 类
@@ -119,13 +123,15 @@ export function createDirectoryItemHTML(
         ? `<div class="vfs-directory-item__tags">${tags.map(tag => `<span class="vfs-tag-pill">${escapeHTML(tag)}</span>`).join('')}</div>`
         : '';
 
+    const displayIcon = icon || '📁';
+
     return `
         <div class="vfs-node-item vfs-directory-item" data-item-id="${id}" data-item-type="directory">
             <div class="vfs-node-item__main-row ${isSelectionMode ? 'is-selection-mode' : ''}">
                 ${checkboxHTML}
                 <div class="vfs-directory-item__header ${isSelected ? 'is-selected' : ''}" data-action="select-item">
                     <span class="vfs-directory-item__toggle ${isExpanded ? 'is-expanded' : ''}" data-action="toggle-folder"></span>
-                    <span class="vfs-directory-item__icon">📁</span>
+                    <span class="vfs-directory-item__icon">${displayIcon}</span>
                     <div class="vfs-directory-item__title-container">
                         <span class="vfs-directory-item__title">${highlightText(title, searchQueries)}</span>
                         ${dirTagsHTML}

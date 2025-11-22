@@ -1,31 +1,28 @@
 /**
  * @file vfs-core/mention/TagAutocompleteSource.ts
- * @desc 提供标签自动完成建议
+ * @desc 提供标签自动完成建议 (基于 ISessionEngine)
  */
 
-import { IAutocompleteSource, type Suggestion } from '@itookit/common';
-// [修正] 确保从 VFS Core 入口导入类型
-import { VFSCore } from '../VFSCore';
-import { TagData } from '../store/types.js';
+import { IAutocompleteSource, type Suggestion, type ISessionEngine } from '@itookit/common';
 
 export interface TagSourceDependencies {
-  vfsCore: VFSCore;
+  engine: ISessionEngine;
 }
 
 /**
  * @class
  * @implements {IAutocompleteSource}
- * A concrete tag data source that retrieves global tag data directly from vfs-core.
+ * 从 ISessionEngine 获取全局标签数据。
  */
 export class TagAutocompleteSource extends IAutocompleteSource {
-  private vfsCore: VFSCore;
+  private engine: ISessionEngine;
 
-  constructor({ vfsCore }: TagSourceDependencies) {
+  constructor({ engine }: TagSourceDependencies) {
     super();
-    if (!vfsCore) {
-      throw new Error("TagAutocompleteSource requires a VFSCore instance.");
+    if (!engine) {
+      throw new Error("TagAutocompleteSource requires an ISessionEngine instance.");
     }
-    this.vfsCore = vfsCore;
+    this.engine = engine;
   }
 
   /**
@@ -35,20 +32,23 @@ export class TagAutocompleteSource extends IAutocompleteSource {
    */
   public async getSuggestions(query: string): Promise<Suggestion[]> {
     try {
-      // 使用 vfsCore 的高级 API 获取标签
-      const allTagData: TagData[] = await this.vfsCore.getAllTags();
-      const allTags = allTagData.map(tag => tag.name);
-      
+      if (!this.engine.getAllTags) {
+          return [];
+      }
+
+      // 使用接口方法获取标签
+      const allTagData = await this.engine.getAllTags();
       const lowerCaseQuery = query.toLowerCase();
 
       const filteredTags = query 
-        ? allTags.filter(tag => tag.toLowerCase().includes(lowerCaseQuery))
-        : allTags;
+        ? allTagData.filter(tag => tag.name.toLowerCase().includes(lowerCaseQuery))
+        : allTagData;
 
       return filteredTags.map(tag => ({
-        id: tag,
-        label: tag,
-        type: 'tag'
+        id: tag.name,
+        label: tag.name,
+        type: 'tag',
+        color: tag.color
       }));
     } catch (error) {
       console.error('[TagAutocompleteSource] Failed to get tag suggestions:', error);

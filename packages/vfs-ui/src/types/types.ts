@@ -35,6 +35,10 @@ export interface VFSNodeUI {
   id: string;
   type: 'file' | 'directory';
   version: string;
+  
+  /** [新增] 图标 */
+  icon?: string;
+
   metadata: {
     title: string;
     tags: string[];
@@ -52,7 +56,7 @@ export interface VFSNodeUI {
     searchableText: string;
     data: any; // The raw content, treated as a black box by the UI list
   };
-  headings?: Heading[];
+  headings?: any[]; // simplified type
   children?: VFSNodeUI[];
 }
 
