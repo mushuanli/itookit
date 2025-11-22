@@ -1,5 +1,5 @@
 /**
- * @file vfs-core/mention/DirectoryMentionSource.ts
+ * @file vfs-ui/mention/DirectoryMentionSource.ts
  * @desc Implements IMentionSource for directories using ISessionEngine.
  */
 

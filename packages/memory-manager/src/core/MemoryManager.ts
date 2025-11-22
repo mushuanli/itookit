@@ -1,8 +1,8 @@
 /**
  * @file src/core/MemoryManager.ts
  */
-import { FileMentionSource, DirectoryMentionSource } from '@itookit/vfs-core';
-import { createGenericVFSUI, connectEditorLifecycle, VFSUIManager, VFSCoreAdapter } from '@itookit/vfs-ui';
+import { VFSCoreAdapter} from '@itookit/vfs-core';
+import { createGenericVFSUI, connectEditorLifecycle, VFSUIManager, FileMentionSource, DirectoryMentionSource } from '@itookit/vfs-ui';
 import { EditorOptions, IEditor, ISessionEngine } from '@itookit/common';
 import { MemoryManagerConfig } from '../types';
 import { BackgroundBrain } from './BackgroundBrain';

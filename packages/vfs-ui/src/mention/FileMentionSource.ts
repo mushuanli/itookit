@@ -1,5 +1,5 @@
 /**
- * @file vfs-core/mention/FileMentionSource.ts
+ * @file vfs-ui/mention/FileMentionSource.ts
  * @desc Implements IMentionSource for files using the generic ISessionEngine.
  */
 

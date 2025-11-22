@@ -9,6 +9,8 @@ import { VFSCore } from './VFSCore.js';
 // 导出 VFS 核心组件
 export { VFS } from './core/VFS.js';
 export { VFSCore } from './VFSCore.js';
+export { VFSCoreAdapter } from './VFSCoreAdapter';
+
 export { PathResolver } from './core/PathResolver.js';
 export { MiddlewareRegistry } from './core/MiddlewareRegistry.js'; // [变更]
 export { EnhancedMiddlewareRegistry, MiddlewareHook } from './core/EnhancedMiddlewareRegistry.js'; // [变更]
@@ -21,10 +23,6 @@ export { VNode, VNodeType } from './store/types.js';
 export { ContentMiddleware } from './middleware/base/ContentMiddleware.js';
 export { CompositeMiddleware } from './middleware/CompositeMiddleware.js';
 export { PlainTextMiddleware } from './middleware/PlainTextMiddleware.js';
-
-export {DirectoryMentionSource} from './mention/DirectoryMentionSource.js';
-export {FileMentionSource} from './mention/FileMentionSource.js';
-export {TagAutocompleteSource} from './mention/TagAutocompleteSource.js';
 
 // 导出核心类型和接口
 export {
