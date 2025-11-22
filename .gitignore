@@ -23,7 +23,7 @@ out/
 old
 dist/
 docs/
-configmanager/
+v
 .fdignore
 TODO.md
 prompt.md

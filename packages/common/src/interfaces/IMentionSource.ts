@@ -46,7 +46,7 @@ export abstract class IMentionSource extends IAutocompleteSource {
     /**
      * 获取悬停预览数据
      */
-    async getHoverPreview(_targetURL: URL): Promise<HoverPreviewData | null> {
+    async getHoverPreview(_uri: string): Promise<HoverPreviewData | null> {
         return null;
     }
 

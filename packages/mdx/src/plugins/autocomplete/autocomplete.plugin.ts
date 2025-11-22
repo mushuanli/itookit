@@ -1,4 +1,5 @@
 // mdx/plugins/autocomplete/autocomplete.plugin.ts
+import {type HoverPreviewData} from '@itookit/common';
 import type { MDxPlugin, PluginContext } from '../../core/plugin';
 import type { Extension } from '@codemirror/state';
 import {
@@ -21,8 +22,9 @@ export interface AutocompleteProvider {
 
   /**
    * 获取悬浮预览内容（可选）
+   * @returns 预览数据，如果无法提供预览则返回 null
    */
-  getHoverPreview?(item: Completion): Promise<{ title: string; content: string }>;
+  getHoverPreview?(item: Completion): Promise<HoverPreviewData | null>;
 }
 
 /**
