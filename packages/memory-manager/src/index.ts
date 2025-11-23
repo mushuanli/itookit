@@ -1,3 +1,4 @@
+// @file memory-manager/index.ts
 import '@itookit/vfs-ui/style.css';
 import '@itookit/mdxeditor/style.css';
 import './styles/memory-manager.css';
