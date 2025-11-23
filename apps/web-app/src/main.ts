@@ -6,7 +6,10 @@ import { initVFS } from './services/vfs';
 import { defaultEditorFactory } from './factories/editorFactory';
 import { initSidebarNavigation } from './utils/layout';
 import { WORKSPACES } from './config/modules';
-import { SettingsEngine } from './engines/SettingsEngine'; // [新增]
+
+import { SettingsEngine } from './workspace/settings/engines/SettingsEngine';
+import { SettingsService } from './workspace/settings/services/SettingsService';
+import { createSettingsFactory } from './factories/settingsFactory';
 
 // 引入样式
 import '@itookit/vfs-ui/style.css';
@@ -39,18 +42,26 @@ async function bootstrap() {
             // [核心修改] 针对 Settings Workspace 的特殊初始化
             if (targetId === 'settings-workspace') {
                 console.log('Initializing Settings Workspace with Custom Engine...');
-                
+            // 1. 创建 Service (核心数据逻辑)
+            const settingsService = new SettingsService(vfsCore);
+            
+            // 2. 创建 Engine (适配层，注入 Service)
+            // [修复] 这里传入 settingsService 解决 Error 2554
+            const settingsEngine = new SettingsEngine(settingsService);
+
+            // 3. 创建 Factory (UI 层，注入 Service)
+            const settingsFactory = createSettingsFactory(settingsService);
+
                 // 清空静态 HTML (如果有)
                 container.innerHTML = '';
 
                 manager = new MemoryManager({
                     container: container,
-                    editorFactory: defaultEditorFactory,
-                    // [关键] 传入自定义引擎
-                    customEngine: new SettingsEngine(),
+                customEngine: settingsEngine, // 传入 Engine
+                editorFactory: settingsFactory, // 传入 Factory
                     
                     uiOptions: {
-                        title: 'Application Settings',
+                        title: 'Settings',
                         // 设置页面通常不需要上下文菜单
                         contextMenu: { items: () => [] }, 
                         searchPlaceholder: 'Search settings...',
