@@ -26,7 +26,7 @@ type VFSUIOptions = SessionUIOptions & {
 /**
  * 创建 VFSUI 实例 (通用引擎模式)
  */
-export function createGenericVFSUI(options: VFSUIOptions, engine: ISessionEngine): ISessionUI<VFSNodeUI, VFSService> {
+export function createVFSUI(options: VFSUIOptions, engine: ISessionEngine): ISessionUI<VFSNodeUI, VFSService> {
     return new VFSUIManager(options, engine);
 }
 

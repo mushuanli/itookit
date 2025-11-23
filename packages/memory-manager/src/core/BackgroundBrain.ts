@@ -1,5 +1,5 @@
 /**
- * @file src/core/BackgroundBrain.ts
+ * @file memory-manager/core/BackgroundBrain.ts
  */
 import { FileMentionSource } from '@itookit/vfs-ui';
 import { MDxProcessor, ProcessResult } from '@itookit/mdxeditor';

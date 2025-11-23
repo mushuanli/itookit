@@ -14,7 +14,8 @@
  */
 
 // --- 导入 VFS-UI 库 ---
-import { createVFSUI, connectEditorLifecycle } from '@itookit/vfs-ui';
+// [修正] createVFSUI 应该从 vfs-ui 导入，而不是 memory-manager
+import { connectEditorLifecycle, createVFSUI } from '@itookit/vfs-ui';
 import '@itookit/vfs-ui/style.css';
 
 // --- 导入 MDxEditor 及其插件 ---
@@ -23,7 +24,7 @@ import { createMDxEditor } from '@itookit/mdxeditor';
 import '@itookit/mdxeditor/style.css';
 
 // --- 导入 vfs-core 的便利函数 ---
-import { createVFSCore } from '@itookit/vfs-core';
+import { createVFSCore,VFSCoreAdapter } from '@itookit/vfs-core';
 
 //-----------------------------------------------------------------
 
@@ -32,7 +33,7 @@ let currentEditorInstance = null; // 用于响应 UI 事件，如大纲导航
 
 /**
  * 设置与编辑器生命周期无关的应用级别 UI 交互。
- * @param {ISessionUI<any, any>} vfsUIManager 
+ * @param {ISessionUI<VFSNodeUI, VFSService>} vfsUIManager 
  * @param {VFSCore} vfsCore 
  */
 function setupAppUIHandlers(vfsUIManager, vfsCore) {
@@ -47,8 +48,8 @@ function setupAppUIHandlers(vfsUIManager, vfsCore) {
     vfsUIManager.on('navigateToHeading', ({ elementId }) => {
         if (!currentEditorInstance) return;
 
-        // @ts-ignore MDxEditor 特有的逻辑：确保在渲染模式下导航
-        if (currentEditorInstance && typeof currentEditorInstance.switchToMode === 'function') {
+        // MDxEditor 特有的逻辑：确保在渲染模式下导航
+        if (typeof currentEditorInstance.switchToMode === 'function') {
             // @ts-ignore
             currentEditorInstance.switchToMode('render');
         }
@@ -58,7 +59,8 @@ function setupAppUIHandlers(vfsUIManager, vfsCore) {
 
             // 添加视觉高亮效果 (可选)
             const editorContainer = document.getElementById('editor-container');
-            const renderEl = editorContainer?.querySelector('.mdx-render-view');
+            // 注意：MDxEditor 的渲染容器类名通常包含 mdx-editor-renderer
+            const renderEl = editorContainer?.querySelector('.mdx-editor-renderer') || editorContainer?.querySelector('.mdx-render-view');
             const targetEl = renderEl?.querySelector(`#${elementId}`);
 
             if (targetEl instanceof HTMLElement) {
@@ -88,7 +90,13 @@ function setupAppUIHandlers(vfsUIManager, vfsCore) {
                     if (e.target?.result && typeof e.target.result === 'string') {
                         const content = e.target.result;
                         const title = file.name.replace(/\.(md|txt)$/, '');
-                        await vfsUIManager.sessionService.createSession({ title, content, parentId });
+                        
+                        // [修正] VFSService 中没有 createSession，方法名是 createFile
+                        await vfsUIManager.sessionService.createFile({ 
+                            title, 
+                            content, 
+                            parentId 
+                        });
                     }
                 };
                 reader.readAsText(file);
@@ -137,6 +145,7 @@ function setupAppUIHandlers(vfsUIManager, vfsCore) {
  */
 async function main() {
     const moduleName = 'notes';
+    
     // --- 步骤 1: 初始化 vfs-core ---
     const vfsCore = await createVFSCore({
         dbName: 'VFS_Demo_MindOS_Connector',
@@ -144,12 +153,17 @@ async function main() {
     });
     console.log('vfs-core initialized and "notes" module is ready.');
 
+    // 初始化引擎适配器 (ISessionEngine 实现)
     const engine = new VFSCoreAdapter(vfsCore, moduleName);
     
     // --- 步骤 2: 初始化 VFS-UI ---
-    const vfsUIManager = createGenericVFSUI({
+    // [修正] createVFSUI 签名: (options, engine)
+    const vfsUIManager = createVFSUI({
         sessionListContainer: document.getElementById('sidebar-container'),
         title: "我的笔记",
+        // [新增] 默认文件配置，防止空状态
+        defaultFileName: "Welcome.md",
+        defaultFileContent: "# Welcome\n\nStart writing your notes here.",
         contextMenu: {
             items: (item, defaultItems) => [
                 ...defaultItems,
@@ -162,23 +176,22 @@ async function main() {
     }, engine);
 
     /**
-     * ✨ [最终] 这是适配器模式的最佳实践。
-     * 我们创建一个符合标准EditorFactory签名的函数，
-     * 其内部将通用的options转换为mdxeditor所需的特定配置。
+     * ✨ 适配器工厂
+     * 将通用的 EditorOptions 转换为 MDxEditor 配置
      * @param {HTMLElement} container
-     * @param {EditorOptions} options - 来自 connectEditorLifecycle 的标准选项
+     * @param {EditorOptions} options
      * @returns {Promise<IEditor>}
      */
     const mdxEditorFactoryAdapter = (container, options) => {
-    console.log(`[vfs.js Factory] Received options. Content length: ${(options.initialContent || '').length}. Preview: "${(options.initialContent || '').substring(0, 50)}..."`);
+        console.log(`[vfs.js Factory] Creating editor for node: ${options.nodeId}`);
+        
         const mdxConfig = {
-            // 1. 传递所有通用选项
             ...options,
-            
-            // 2. 添加或覆盖MDxEditor特定的配置
+            // 注入 vfsCore 供编辑器内部插件 (如图片上传/引用) 使用
             vfsCore: vfsCore, 
-            initialMode: 'render',
+            initialMode: 'render', // 默认阅读模式
             plugins: [
+                'editor:core', // 显式包含核心插件通常更安全，虽有默认值
                 'core:titlebar',
                 'ui:toolbar',
                 'ui:formatting',
@@ -188,11 +201,11 @@ async function main() {
                 'mermaid',
                 'task-list',
                 'codeblock-controls',
-                'interaction:source-sync'
+                'interaction:source-sync',
+                'autocomplete:mention' // 启用提及功能
             ],
             defaultPluginOptions: {
                 'core:titlebar': {
-                    // 使用从options传入的title
                     title: options.title, 
                     toggleSidebarCallback: () => vfsUIManager.toggleSidebar(),
                     enableToggleEditMode: true
@@ -200,18 +213,19 @@ async function main() {
             }
         };
         
-        // 调用具体的编辑器创建函数
         return createMDxEditor(container, mdxConfig);
     };
 
     // --- 步骤 4: 使用连接器将 VFS-UI 和编辑器连接起来 ---
     connectEditorLifecycle(
         vfsUIManager,
-        vfsCore,
+        engine, // [修正] 这里必须传 engine (ISessionEngine)，而不是 vfsCore，因为连接器需要 writeContent 接口
         document.getElementById('editor-container'),
-        mdxEditorFactoryAdapter, // <-- 注入我们的适配器
+        mdxEditorFactoryAdapter,
         {
-            // [新] 使用回调来追踪当前编辑器实例
+            // [可选] 保存防抖时间
+            saveDebounceMs: 800,
+            // 回调追踪实例
             onEditorCreated: (editor) => {
                 currentEditorInstance = editor;
             }

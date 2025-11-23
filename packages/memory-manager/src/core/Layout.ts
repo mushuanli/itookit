@@ -1,3 +1,4 @@
+// @file memory-manager/core/Layout.ts
 export class Layout {
     public sidebarContainer: HTMLElement;
     public editorContainer: HTMLElement;
