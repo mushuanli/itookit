@@ -1,14 +1,19 @@
 /**
  * @file memory-manager/types.ts (或者 MemoryManager 同级目录)
  */
-import { EditorFactory, SessionUIOptions } from '@itookit/common';
+import { EditorFactory, SessionUIOptions, ISessionEngine } from '@itookit/common';
 import { VFSCore } from '@itookit/vfs-core';
 
 export interface MemoryManagerConfig {
     container: HTMLElement;
-    vfsCore: VFSCore;
-    moduleName: string;
     editorFactory: EditorFactory;
+    // [修改] 变为可选，因为如果提供了 customEngine，就不需要 vfsCore
+    vfsCore?: VFSCore;
+    // [修改] 变为可选
+    moduleName?: string;
+
+    // [新增] 允许直接传入 ISessionEngine 实现
+    customEngine?: ISessionEngine;
 
     // [新增] 这里的 options 会透传给 VFSUIManager
     uiOptions?: Partial<SessionUIOptions>;

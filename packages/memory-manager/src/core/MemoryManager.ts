@@ -19,8 +19,14 @@ export class MemoryManager {
         // 1. 创建布局
         this.layout = new Layout(config.container);
 
-        // 2. [核心] 创建 Adapter
-        this.engine = new VFSCoreAdapter(config.vfsCore, config.moduleName);
+        // [核心修改] 优先使用 customEngine，否则回退到 VFSCoreAdapter
+        if (config.customEngine) {
+            this.engine = config.customEngine;
+        } else if (config.vfsCore && config.moduleName) {
+            this.engine = new VFSCoreAdapter(config.vfsCore, config.moduleName);
+        } else {
+            throw new Error("[MemoryManager] You must provide either 'customEngine' or both 'vfsCore' and 'moduleName'.");
+        }
 
         // 3. 初始化 VFS-UI
         // 使用 createVFSUI 或直接 new VFSUIManager，这里使用工厂函数
@@ -134,7 +140,10 @@ export class MemoryManager {
     }
 
     public async start() {
-        await this._ensureModuleMounted();
+        // [修改] 只有在使用 vfsCore 时才检查 mount
+        if (!this.config.customEngine) {
+            await this._ensureModuleMounted();
+        }
         await this.vfsUI.start(); 
         
         // [移除] 默认文件创建逻辑已移至 VFSUIManager 内部 (通过 options 传递)
@@ -142,6 +151,9 @@ export class MemoryManager {
 
     private async _ensureModuleMounted() {
         const { vfsCore, moduleName } = this.config;
+        // 安全检查
+        if (!vfsCore || !moduleName) return;
+
         if (!vfsCore.getModule(moduleName)) {
             try {
                 await vfsCore.mount(moduleName, 'Memory Manager Module');
