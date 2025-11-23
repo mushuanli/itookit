@@ -1,6 +1,6 @@
 {
   "name": "@itookit/mdxeditor",
-  "version": "0.3.1",
+  "version": "0.4.1",
   "description": "A powerful, plugin-driven MDX editor component based on CodeMirror 6, designed for extensibility and rich content creation.",
   "main": "dist/index.js",
   "module": "dist/index.mjs",

@@ -1,6 +1,6 @@
 {
   "name": "@itookit/vfs-ui",
-  "version": "0.1.0",
+  "version": "0.4.1",
   "description": "A modular UI library for managing Virtual File System interfaces with components for file/folder navigation, tagging, and content outline",
   "type": "module",
   "main": "./dist/vfs-ui.umd.cjs",

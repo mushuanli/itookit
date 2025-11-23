@@ -11,10 +11,10 @@ import 'fake-indexeddb/auto';
 // 导入 VFS 核心模块和类型
 import {
   VFS,
-  IProvider,
+  IVFSMiddleware, // [修改] IProvider -> IVFSMiddleware
   VFSEventType,
   VFSErrorCode,
-  ProviderRegistry,
+  MiddlewareRegistry, // [修改] ProviderRegistry -> MiddlewareRegistry
   EventBus,
 } from '../src/index.js';
 import { VFSStorage, VNodeType, VNode } from '../src/store/index.js';
@@ -29,7 +29,7 @@ describe('VFS Core Functionality', () => {
   let dbName: string;
   
   let storage: VFSStorage;
-  let providers: ProviderRegistry;
+  let middlewares: MiddlewareRegistry; // [修改] 变量名和类型
   let events: EventBus;
 
   // 在每个测试用例开始前执行
@@ -38,17 +38,21 @@ describe('VFS Core Functionality', () => {
     dbName = `test_vfs_${Date.now()}_${Math.random()}`;
 
     storage = new VFSStorage(dbName);
-    providers = new ProviderRegistry();
+    middlewares = new MiddlewareRegistry(); // [修改] 实例化 MiddlewareRegistry
     events = new EventBus();
 
-    vfs = new VFS(storage, providers, events);
+    // [修改] 传入 middlewares
+    vfs = new VFS(storage, middlewares, events);
     
     await vfs.initialize();
   });
 
   // 在每个测试用例结束后执行
   afterEach(async () => {
-    vfs.destroy();
+    // [修改] 增加非空检查，防止 beforeEach 失败导致此处报错
+    if (vfs) {
+        vfs.destroy();
+    }
     // 清理 IndexedDB 数据库
     await new Promise<void>((resolve, reject) => {
       const request = indexedDB.deleteDatabase(dbName);
@@ -61,7 +65,8 @@ describe('VFS Core Functionality', () => {
     });
   });
 
-  // 1. 基础 CRUD 和 Stat
+  // ... [前面 1-3 部分测试代码保持不变] ...
+  // 1. 基础 CRUD & Stat Operations
   describe('Basic CRUD & Stat Operations', () => {
     it('should create a file node correctly', async () => {
       const module = 'test';
@@ -236,17 +241,20 @@ describe('VFS Core Functionality', () => {
     });
   });
 
-  // 4. Provider 系统
-  describe('Provider System', () => {
-    it('should run provider hooks on write and modify content/metadata', async () => {
-      const mockProvider: IProvider = {
-        name: 'mock-provider',
+  // 4. Middleware 系统 (原 Provider System)
+  describe('Middleware System', () => { // [修改] 描述文字
+    it('should run middleware hooks on write and modify content/metadata', async () => {
+      // [修改] 接口名 IProvider -> IVFSMiddleware
+      const mockMiddleware: IVFSMiddleware = {
+        name: 'mock-middleware',
+        // [注意] 这里的 mock 实现依然兼容，虽然类型定义中有 transaction 参数
         onValidate: vi.fn().mockResolvedValue(undefined),
         onBeforeWrite: vi.fn(async (vnode, content) => `[MODIFIED] ${content}`),
         onAfterWrite: vi.fn(async (vnode, content) => ({ fromProvider: true, contentHash: 'xyz' })),
       };
 
-      vfs.registerProvider(mockProvider);
+      // [修改] registerProvider -> registerMiddleware
+      vfs.registerMiddleware(mockMiddleware);
 
       const file = await vfs.createNode({
         module: 'provider',
@@ -255,9 +263,9 @@ describe('VFS Core Functionality', () => {
         content: 'original'
       });
       
-      expect(mockProvider.onValidate).toHaveBeenCalledTimes(1);
-      expect(mockProvider.onBeforeWrite).toHaveBeenCalledTimes(1);
-      expect(mockProvider.onAfterWrite).toHaveBeenCalledTimes(1);
+      expect(mockMiddleware.onValidate).toHaveBeenCalledTimes(1);
+      expect(mockMiddleware.onBeforeWrite).toHaveBeenCalledTimes(1);
+      expect(mockMiddleware.onAfterWrite).toHaveBeenCalledTimes(1);
 
       const modifiedContent = await vfs.read(file.nodeId);
       expect(modifiedContent).toBe('[MODIFIED] original');
@@ -268,6 +276,7 @@ describe('VFS Core Functionality', () => {
     });
   });
 
+  // ... [Event Bus 和 Tagging System 测试代码保持不变] ...
   // 5. 事件总线
   describe('Event Bus', () => {
     it('should emit a NODE_CREATED event when a node is created', async () => {
@@ -312,7 +321,7 @@ describe('VFS Core Functionality', () => {
     });
   });
   
-  // [新增] 6. 标签系统
+  // 6. 标签系统
   describe('Tagging System', () => {
     let fileNode: VNode;
     let dirNode: VNode;
