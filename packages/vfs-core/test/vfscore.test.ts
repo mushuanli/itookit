@@ -11,17 +11,18 @@ import {
   VFSCore,
   VFSConfig,
   VFSErrorCode,
-  PlainTextProvider,
+  PlainTextMiddleware, // [修改] PlainTextProvider -> PlainTextMiddleware
   VFSEventType,
-  ContentProvider,
+  ContentMiddleware, // [修改] ContentProvider -> ContentMiddleware
 } from '../src/index.js';
 import {  VNodeType,
   VNode,
   Transaction
 } from '../src/store/index.js';
 
-// --- 自定义测试 Provider ---
-class TestMetadataProvider extends ContentProvider {
+// --- 自定义测试 Middleware ---
+// [修改] extends ContentProvider -> extends ContentMiddleware
+class TestMetadataMiddleware extends ContentMiddleware {
   readonly name = 'test-metadata-provider';
   readonly priority = 10;
 
@@ -44,7 +45,8 @@ describe.sequential('VFSCore High-Level API', () => {
 
     const config: VFSConfig = {
       dbName: `test_vfscore_${Date.now()}_${Math.random()}`,
-      providers: [TestMetadataProvider]
+      // [修改] providers -> middlewares, TestMetadataProvider -> TestMetadataMiddleware
+      middlewares: [TestMetadataMiddleware]
     };
 
     vfsCore = VFSCore.getInstance(config);
@@ -58,8 +60,11 @@ describe.sequential('VFSCore High-Level API', () => {
     }
     (VFSCore as any).instance = null;
   });
-
-  // 1. 初始化和模块管理
+  
+  // ... [其余所有测试用例保持不变] ...
+  // 复制原文件内容即可，除了上面 beforeEach 中的改动
+  // ...
+    // 1. 初始化和模块管理
   describe('Initialization and Module Management', () => {
     it('should initialize successfully and create a default module', () => {
       expect(vfsCore.getModule('default')).toBeDefined();
@@ -218,8 +223,8 @@ describe.sequential('VFSCore High-Level API', () => {
   });
 
   // 4. Provider 集成测试
-  describe('Provider Integration', () => {
-    it('should use custom providers defined in config', async () => {
+  describe('Middleware Integration', () => { // [修改] 描述文字 Provider -> Middleware
+    it('should use custom middlewares defined in config', async () => {
       const vnode = await vfsCore.createFile('default', '/data.test', 'some data');
       const stat = await vfsCore.getVFS().stat(vnode.nodeId);
 
@@ -247,8 +252,8 @@ describe.sequential('VFSCore High-Level API', () => {
         expect(exportedData.module.name).toBe(exportModuleName);
 
 // 验证导出数据包含 tags
-const configDir = exportedData.tree.children.find(child => child.name === 'config');
-const readmeFile = exportedData.tree.children.find(child => child.name === 'readme.md');
+const configDir = exportedData.tree.children.find((child:any) => child.name === 'config');
+const readmeFile = exportedData.tree.children.find((child:any) => child.name === 'readme.md');
 
 expect(configDir).toBeDefined();
 expect(readmeFile).toBeDefined();

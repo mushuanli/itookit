@@ -1,6 +1,6 @@
 {
     "name": "@itookit/memory-manager",
-    "version": "0.1.0",
+    "version": "0.4.1",
     "description": "An intelligent glue layer connecting VFS-UI and MDxEditor with headless AI capabilities for advanced memory management.",
     "type": "module",
     "main": "./dist/memory-manager.umd.cjs",

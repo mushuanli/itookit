@@ -1,6 +1,6 @@
 {
   "name": "@itookit/vfs-core",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A powerful virtual file system manager with plugin architecture for browser-based applications using IndexedDB",
   "main": "./dist/vfs-core.umd.js",
   "module": "./dist/vfs-core.es.js",

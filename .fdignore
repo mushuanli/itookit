@@ -28,6 +28,15 @@ mermaid.plugin.ts
 media.plugin.ts
 foldable.plugin.ts
 task-list.plugin.ts
+# syntax
+callout.plugin.ts
+plantuml.plugin.ts
+svg.plugin.ts
+vega.plugin.ts
+#mention
+autocomplete.plugin.ts
+mention.plugin.ts
+tag.plugin.ts
 # mdx main:
 
 
