@@ -56,11 +56,14 @@ export class FileMentionSource extends IMentionSource {
           scope: this.globalSearch ? ['*'] : undefined
       });
 
-      return results.map(node => ({
+      // ✨ [新增] 过滤掉 __vfs_meta__ 模块的内容
+      const filteredResults = results.filter(node => node.moduleId !== '__vfs_meta__');
+
+      return filteredResults.map(node => ({
         id: node.id,
-        // ✨ [修改] label 用于下拉列表显示（包含丰富信息）
+        // label 用于下拉列表显示（包含丰富信息）
         label: this.formatLabel(node),
-        // ✨ [新增] title 用于插入文档（仅文件名）
+        // title 用于插入文档（仅文件名）
         title: node.name,
         type: 'file',
         path: node.path,
@@ -73,7 +76,7 @@ export class FileMentionSource extends IMentionSource {
   }
 
   /**
-   * [新增] 格式化显示标签，处理同名文件冲突
+   * 格式化显示标签，处理同名文件冲突
    */
   private formatLabel(node: EngineNode): string {
     const parentPath = node.path.substring(0, node.path.lastIndexOf('/')) || '/';

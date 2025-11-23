@@ -1,5 +1,5 @@
 /**
- * @file src/types.ts (或者 MemoryManager 同级目录)
+ * @file memory-manager/types.ts (或者 MemoryManager 同级目录)
  */
 import { EditorFactory, SessionUIOptions } from '@itookit/common';
 import { VFSCore } from '@itookit/vfs-core';

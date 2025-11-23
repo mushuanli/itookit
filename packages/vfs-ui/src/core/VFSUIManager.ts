@@ -6,7 +6,7 @@
  */
 import { ISessionUI, TagEditorComponent, type SessionUIOptions, type SessionManagerEvent, type SessionManagerCallback, type ISessionEngine, type EngineEvent} from '@itookit/common';
 // [修正] 移除 @itookit/vfs-core 的导入
-import { EngineTagSource } from './EngineTagSource'; // 使用本地实现的通用 Source
+import { EngineTagSource } from '../mention/EngineTagSource'; // 使用本地实现的通用 Source
 
 // --- 内部模块 ---
 import { Coordinator } from './Coordinator';

@@ -1,8 +1,8 @@
 /**
- * @file src/core/MemoryManager.ts
+ * @file memory-manager/core/MemoryManager.ts
  */
 import { VFSCoreAdapter} from '@itookit/vfs-core';
-import { createGenericVFSUI, connectEditorLifecycle, VFSUIManager, FileMentionSource, DirectoryMentionSource } from '@itookit/vfs-ui';
+import { createVFSUI, connectEditorLifecycle, VFSUIManager, FileMentionSource, DirectoryMentionSource } from '@itookit/vfs-ui';
 import { EditorOptions, IEditor, ISessionEngine } from '@itookit/common';
 import { MemoryManagerConfig } from '../types';
 import { BackgroundBrain } from './BackgroundBrain';
@@ -23,8 +23,8 @@ export class MemoryManager {
         this.engine = new VFSCoreAdapter(config.vfsCore, config.moduleName);
 
         // 3. 初始化 VFS-UI
-        // 使用 createGenericVFSUI 或直接 new VFSUIManager，这里使用工厂函数
-        this.vfsUI = createGenericVFSUI(
+        // 使用 createVFSUI 或直接 new VFSUIManager，这里使用工厂函数
+        this.vfsUI = createVFSUI(
             {
                 ...config.uiOptions,
                 sessionListContainer: this.layout.sidebarContainer,

@@ -55,16 +55,19 @@ export class DirectoryMentionSource extends IMentionSource {
           scope: this.globalSearch ? ['*'] : undefined
       });
 
-      return results.map(node => {
+      // ✨ [新增] 过滤掉 __vfs_meta__ 模块的内容
+      const filteredResults = results.filter(node => node.moduleId !== '__vfs_meta__');
+
+      return filteredResults.map(node => {
         const modulePrefix = node.moduleId ? `[${node.moduleId}] ` : '';
         const icon = node.icon || '📁';
         const labelText = `${icon} ${node.name} (${modulePrefix}${node.path})`;
         
         return {
           id: node.id,
-          // ✨ [修改] label 用于下拉列表显示
+          // label 用于下拉列表显示
           label: labelText,
-          // ✨ [新增] title 用于插入文档
+          // title 用于插入文档
           title: node.name,
           type: 'directory',
           path: node.path,
