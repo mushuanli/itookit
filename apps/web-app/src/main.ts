@@ -6,6 +6,7 @@ import { initVFS } from './services/vfs';
 import { defaultEditorFactory } from './factories/editorFactory';
 import { initSidebarNavigation } from './utils/layout';
 import { WORKSPACES } from './config/modules';
+import { SettingsEngine } from './engines/SettingsEngine'; // [新增]
 
 // 引入样式
 import '@itookit/vfs-ui/style.css';
@@ -23,11 +24,48 @@ async function bootstrap() {
         
         // 2. 定义单个工作区的加载函数
         const loadWorkspace = async (targetId: string) => {
-            // 2.1 如果是设置页，单独处理（因为它不在 WORKSPACES 列表里）
+            // 1. 检查缓存
+            if (managerCache.has(targetId)) return;
+
+            const container = document.getElementById(targetId);
+            if (!container) return;
+
+            // 确保容器可见以便正确渲染
+            const wasActive = container.classList.contains('active');
+            if (!wasActive) container.classList.add('active');
+
+            let manager: MemoryManager;
+
+            // [核心修改] 针对 Settings Workspace 的特殊初始化
             if (targetId === 'settings-workspace') {
-                initSettingsWorkspace();
-                return;
-            }
+                console.log('Initializing Settings Workspace with Custom Engine...');
+                
+                // 清空静态 HTML (如果有)
+                container.innerHTML = '';
+
+                manager = new MemoryManager({
+                    container: container,
+                    editorFactory: defaultEditorFactory,
+                    // [关键] 传入自定义引擎
+                    customEngine: new SettingsEngine(),
+                    
+                    uiOptions: {
+                        title: 'Application Settings',
+                        // 设置页面通常不需要上下文菜单
+                        contextMenu: { items: () => [] }, 
+                        searchPlaceholder: 'Search settings...',
+                        readOnly: false, // 允许修改内容
+                        // 隐藏新建按钮等 (通过 CSS 或后续扩展 uiOptions 支持 hideControls)
+                    },
+                    editorConfig: {
+                        // 设置页面可能只需要基本的 Markdown 插件
+                        plugins: ['core:titlebar'], 
+                        readOnly: false
+                    },
+                    aiConfig: { enabled: false } // 设置页面不需要 AI 扫描
+                });
+
+            } else {
 
             // 2.2 检查是否已经加载过
             if (managerCache.has(targetId)) {
@@ -54,7 +92,7 @@ async function bootstrap() {
             }
 
             // 2.4 创建实例
-            const manager = new MemoryManager({
+            manager = new MemoryManager({
                 container: container,
                 vfsCore: vfsCore,
                 moduleName: wsConfig.moduleName,
@@ -82,7 +120,8 @@ async function bootstrap() {
             enabled: true,
             activeRules: ['user', 'tag', 'file']
         }
-    });
+                });
+            }
 
             // 2.5 启动并缓存
             await manager.start();
@@ -116,27 +155,10 @@ async function bootstrap() {
         console.log('Application bootstrapped. Waiting for user interaction...');
 
         // 5. 初始化 Settings 工作区
-        initSettingsWorkspace();
+        //initSettingsWorkspace();
 
     } catch (error) {
         console.error('Failed to bootstrap application:', error);
-    }
-}
-
-// 设置页面逻辑保持不变，或者加一个 flag 防止重复渲染
-let settingsInitialized = false;
-function initSettingsWorkspace() {
-    if (settingsInitialized) return;
-    
-    const container = document.getElementById('settings-content');
-    if (container) {
-        container.innerHTML = `
-            <div style="padding: 2rem;">
-                <h2>Settings</h2>
-                <p>Application version: 1.0.0</p>
-            </div>
-        `;
-        settingsInitialized = true;
     }
 }
 
