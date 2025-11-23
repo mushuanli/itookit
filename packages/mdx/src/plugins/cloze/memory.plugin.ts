@@ -14,7 +14,8 @@ export class MemoryPlugin implements MDxPlugin {
 
   constructor(options: MemoryPluginOptions = {}) {
     this.options = {
-      gradingTimeout: options.gradingTimeout || 10000,
+      // 默认配置保留，实际逻辑中会根据触发源覆盖此值
+      gradingTimeout: options.gradingTimeout || 300000, 
       className: options.className || 'mdx-memory',
     };
   }
@@ -27,11 +28,15 @@ export class MemoryPlugin implements MDxPlugin {
   }
 
   install(context: PluginContext): void {
+    // 1. 手工点击单个 Cloze 触发
+    // 需求：点击打开显示 5 分钟 (300000ms)
     const removeClozeRevealed = context.listen('clozeRevealed', (data: any) => {
-      this.showGradingPanel(data.element, context);
+      this.showGradingPanel(data.element, context, 300000); 
     });
     if (removeClozeRevealed) this.cleanupFns.push(removeClozeRevealed);
 
+    // 2. 批量按钮 (Toggle/Reverse) 触发
+    // 需求：一直显示 (传入 0 或 null 表示无超时)
     const removeBatchToggle = context.listen('clozeBatchGradeToggle', (data: { container?: HTMLElement }) => {
       this.showBatchGrading(context, data.container);
     });
@@ -84,9 +89,14 @@ export class MemoryPlugin implements MDxPlugin {
     });
   }
 
-  private showGradingPanel(clozeElement: HTMLElement, context: PluginContext): void {
+  /**
+   * 显示评分面板
+   * @param timeoutDuration - 超时时间(ms)。如果为 0 或 undefined，则不自动关闭。
+   */
+  private showGradingPanel(clozeElement: HTMLElement, context: PluginContext, timeoutDuration: number = 0): void {
+    // 防止重复创建，如果已存在面板则先移除旧的（重置计时器逻辑较为复杂，不如重建简单）
     const existing = clozeElement.querySelector(`.${this.options.className}__panel`);
-    if (existing) return;
+    if (existing) existing.remove();
 
     const panel = document.createElement('div');
     panel.className = `${this.options.className}__panel`;
@@ -97,16 +107,23 @@ export class MemoryPlugin implements MDxPlugin {
       <button data-grade="4">Easy</button>
     `;
 
-    const timeout = setTimeout(() => {
-      this.gradeCard(clozeElement, 3, context);
-      panel.remove();
-    }, this.options.gradingTimeout);
+    let timeout: any = null;
+
+    // 只有当 duration 大于 0 时才设置自动关闭
+    if (timeoutDuration > 0) {
+        timeout = setTimeout(() => {
+          this.gradeCard(clozeElement, 3, context);
+          panel.remove();
+        }, timeoutDuration);
+    }
 
     panel.addEventListener('click', (e) => {
       const btn = (e.target as HTMLElement).closest('button');
       if (!btn) return;
       
-      clearTimeout(timeout);
+      // 清除可能存在的定时器
+      if (timeout) clearTimeout(timeout);
+      
       const grade = parseInt(btn.getAttribute('data-grade') || '3', 10);
       this.gradeCard(clozeElement, grade, context);
       panel.remove();
@@ -116,11 +133,12 @@ export class MemoryPlugin implements MDxPlugin {
   }
 
   private showBatchGrading(context: PluginContext, container?: HTMLElement): void {
-      const scope = container || document;
+    const scope = container || document;
     const clozes = scope.querySelectorAll('.mdx-cloze:not(.is-mature)');
     clozes.forEach(cloze => {
       if (!cloze.classList.contains('hidden')) {
-        this.showGradingPanel(cloze as HTMLElement, context);
+        // 批量触发时，传入 0，表示不自动关闭（一直显示）
+        this.showGradingPanel(cloze as HTMLElement, context, 0);
       }
     });
   }

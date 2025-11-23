@@ -20,9 +20,7 @@
 @import './plugin-codeblock-controls.css';
 
 @import './plugin-toolbar.css';
-
 @import './plugin-titlebar.css';
-
 @import './plugin-autocomplete.css';
 
 /* 当工具栏存在时，调整编辑器容器 */
