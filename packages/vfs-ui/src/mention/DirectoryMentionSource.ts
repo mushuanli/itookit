@@ -55,8 +55,23 @@ export class DirectoryMentionSource extends IMentionSource {
           scope: this.globalSearch ? ['*'] : undefined
       });
 
-      // ✨ [新增] 过滤掉 __vfs_meta__ 模块的内容
-      const filteredResults = results.filter(node => node.moduleId !== '__vfs_meta__');
+      // ✨ [修改] 过滤规则：
+      // 1. moduleid 以 __ 开头
+      // 2. dirname 或 filename 以 _ 开头 (通过检查 path 的每一段)
+      const filteredResults = results.filter(node => {
+        // 检查 Module ID
+        if (node.moduleId && (node.moduleId[0] === '.' || node.moduleId.startsWith('__'))) {
+          return false;
+        }
+        
+        // 检查路径中的每一段（包含目录名和节点名）是否以 _ 开头
+        // split('/') 可能会产生空字符串（如果是绝对路径），startsWith('_') 对空字符串返回 false，安全
+        if (node.path && node.path.split('/').some(part => (part.startsWith('.')||part.startsWith('_'))) ) {
+          return false;
+        }
+
+        return true;
+      });
 
       return filteredResults.map(node => {
         const modulePrefix = node.moduleId ? `[${node.moduleId}] ` : '';
