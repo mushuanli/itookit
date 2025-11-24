@@ -24,6 +24,7 @@ old
 dist/
 docs/
 v
+w
 .fdignore
 TODO.md
 prompt.md

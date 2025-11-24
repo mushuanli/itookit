@@ -2,7 +2,9 @@
    Settings Workspace - Root & Variables
    命名空间: .settings-root
    ============================================ */
-.settings-root {
+.settings-root,
+.settings-modal-overlay,
+.settings-toast-container {
     /* 颜色系统 */
     --st-color-primary: #3b82f6;
     --st-color-primary-hover: #2563eb;
@@ -62,13 +64,21 @@
     box-sizing: border-box;
     font-family: inherit;
     color: var(--st-text-primary);
+    /* 注意：Modal 不需要 height 100% */
+}
+
+/* 特别针对 .settings-root 保持宽高设置 */
+.settings-root {
     height: 100%;
     width: 100%;
 }
 
 .settings-root *,
 .settings-root *::before,
-.settings-root *::after {
+.settings-root *::after,
+.settings-modal *,         /* [新增] 确保 Modal 内部盒模型正确 */
+.settings-modal *::before,
+.settings-modal *::after {
     box-sizing: inherit;
 }
 
@@ -128,6 +138,9 @@
     gap: var(--st-space-sm);
     white-space: nowrap;
     text-decoration: none;
+    /* [新增] 默认背景色，防止变量失效时完全不可见 */
+    background-color: #e5e7eb; 
+    color: #333;
 }
 
 .settings-btn:hover:not(:disabled) {
