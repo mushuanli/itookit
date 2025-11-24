@@ -42,95 +42,100 @@ async function bootstrap() {
             // [核心修改] 针对 Settings Workspace 的特殊初始化
             if (targetId === 'settings-workspace') {
                 console.log('Initializing Settings Workspace with Custom Engine...');
-            // 1. 创建 Service (核心数据逻辑)
-            const settingsService = new SettingsService(vfsCore);
-            
-            // 2. 创建 Engine (适配层，注入 Service)
-            // [修复] 这里传入 settingsService 解决 Error 2554
-            const settingsEngine = new SettingsEngine(settingsService);
+                
+                // 1. 创建 Service (核心数据逻辑)
+                const settingsService = new SettingsService(vfsCore);
+                
+                // 2. 创建 Engine (适配层，注入 Service)
+                const settingsEngine = new SettingsEngine(settingsService);
 
-            // 3. 创建 Factory (UI 层，注入 Service)
-            const settingsFactory = createSettingsFactory(settingsService);
+                // 3. 创建 Factory (UI 层，注入 Service)
+                const settingsFactory = createSettingsFactory(settingsService);
 
                 // 清空静态 HTML (如果有)
                 container.innerHTML = '';
 
                 manager = new MemoryManager({
                     container: container,
-                customEngine: settingsEngine, // 传入 Engine
-                editorFactory: settingsFactory, // 传入 Factory
+                    customEngine: settingsEngine, // 传入 Engine
+                    editorFactory: settingsFactory, // 传入 Factory
                     
                     uiOptions: {
                         title: 'Settings',
-                        // 设置页面通常不需要上下文菜单
+                        // 设置页面不需要上下文菜单
                         contextMenu: { items: () => [] }, 
                         searchPlaceholder: 'Search settings...',
-                        readOnly: false, // 允许修改内容
-                        // 隐藏新建按钮等 (通过 CSS 或后续扩展 uiOptions 支持 hideControls)
+                        
+                        // ✨ [修改] 设为 true。
+                        // 这将隐藏左侧列表的新建按钮、底部栏，并禁用列表排序，
+                        // 因为设置项列表是固定的（Connections, Tags...）。
+                        readOnly: true, 
                     },
                     editorConfig: {
                         // 设置页面可能只需要基本的 Markdown 插件
                         plugins: ['core:titlebar'], 
-                        readOnly: false
+                        // ✨ [保持] false。
+                        // 右侧编辑器区域必须是可交互的（填写表单），不能只读。
+                        readOnly: false 
                     },
                     aiConfig: { enabled: false } // 设置页面不需要 AI 扫描
                 });
 
             } else {
 
-            // 2.2 检查是否已经加载过
-            if (managerCache.has(targetId)) {
-                // console.log(`Workspace ${targetId} already loaded.`);
-                return;
-            }
+                // 2.2 检查是否已经加载过
+                if (managerCache.has(targetId)) {
+                    return;
+                }
 
-            // 2.3 查找配置
-            const wsConfig = WORKSPACES.find(w => w.elementId === targetId);
-            if (!wsConfig) {
-                console.warn(`No configuration found for workspace: ${targetId}`);
-                return;
-            }
+                // 2.3 查找配置
+                const wsConfig = WORKSPACES.find(w => w.elementId === targetId);
+                if (!wsConfig) {
+                    console.warn(`No configuration found for workspace: ${targetId}`);
+                    return;
+                }
 
-            const container = document.getElementById(wsConfig.elementId);
-            if (!container) return;
+                const container = document.getElementById(wsConfig.elementId);
+                if (!container) return;
 
-            console.log(`Lazy loading workspace: ${wsConfig.title}...`);
+                console.log(`Lazy loading workspace: ${wsConfig.title}...`);
 
-            // ✅ 关键修改：确保容器在初始化时可见
-            const wasActive = container.classList.contains('active');
-            if (!wasActive) {
-                container.classList.add('active');
-            }
+                // ✅ 关键修改：确保容器在初始化时可见
+                const wasActive = container.classList.contains('active');
+                if (!wasActive) {
+                    container.classList.add('active');
+                }
 
-            // 2.4 创建实例
-            manager = new MemoryManager({
-                container: container,
-                vfsCore: vfsCore,
-                moduleName: wsConfig.moduleName,
-                editorFactory: defaultEditorFactory,
-                uiOptions: {
-                    title: wsConfig.title,
-                    initialSidebarCollapsed: false,
-                    searchPlaceholder: `Search inside ${wsConfig.title}...`,
-        },
+                // 2.4 创建实例
+                manager = new MemoryManager({
+                    container: container,
+                    vfsCore: vfsCore,
+                    moduleName: wsConfig.moduleName,
+                    editorFactory: defaultEditorFactory,
+                    uiOptions: {
+                        title: wsConfig.title,
+                        initialSidebarCollapsed: false,
+                        searchPlaceholder: `Search inside ${wsConfig.title}...`,
+                        // 普通工作区默认为可读写
+                        readOnly: false
+                    },
 
-        // 2. [核心] 编辑器静态配置 (插件配置在此传递)
-        editorConfig: {
-            plugins: wsConfig.plugins, // 数组: ['cloze:cloze', ...]
-            // 如果有其他静态配置，例如 readonly:
-            // readOnly: false
-        },
+                    // 2. [核心] 编辑器静态配置 (插件配置在此传递)
+                    editorConfig: {
+                        plugins: wsConfig.plugins, 
+                        readOnly: false
+                    },
 
-        // 3. [架构修正] 默认内容策略
-        defaultContentConfig: wsConfig.defaultFileName ? {
-            fileName: wsConfig.defaultFileName,
-            content: wsConfig.defaultFileContent || ''
-        } : undefined,
+                    // 3. [架构修正] 默认内容策略
+                    defaultContentConfig: wsConfig.defaultFileName ? {
+                        fileName: wsConfig.defaultFileName,
+                        content: wsConfig.defaultFileContent || ''
+                    } : undefined,
 
-        aiConfig: {
-            enabled: true,
-            activeRules: ['user', 'tag', 'file']
-        }
+                    aiConfig: {
+                        enabled: true,
+                        activeRules: ['user', 'tag', 'file']
+                    }
                 });
             }
 
@@ -164,9 +169,6 @@ async function bootstrap() {
         });
 
         console.log('Application bootstrapped. Waiting for user interaction...');
-
-        // 5. 初始化 Settings 工作区
-        //initSettingsWorkspace();
 
     } catch (error) {
         console.error('Failed to bootstrap application:', error);
