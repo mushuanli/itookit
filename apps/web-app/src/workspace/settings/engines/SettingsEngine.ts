@@ -4,12 +4,12 @@ import { SettingsService } from '../services/SettingsService';
 
 // UI 定义：ID -> 元数据
 export const SETTINGS_PAGES: Record<string, { name: string, icon: string }> = {
-    'mcp-servers': { name: 'MCP Servers', icon: '🔌' },
-    'connections': { name: 'Connections', icon: '🔗' },
-    'executables': { name: 'Executables', icon: '🤖' },
+    'storage':     { name: 'Storage',     icon: '💾' },
     'tags':        { name: 'Tags',        icon: '🏷️' },
     'contacts':    { name: 'Contacts',    icon: '📒' },
-    'storage':     { name: 'Storage',     icon: '💾' },
+    'connections': { name: 'Connections', icon: '🔗' },
+    'executables': { name: 'Executables', icon: '🤖' },
+    'mcp-servers': { name: 'MCP Servers', icon: '🔌' },
     'about':       { name: 'About',       icon: 'ℹ️' },
 };
 
