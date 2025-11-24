@@ -140,6 +140,33 @@ export class Database {
   }
 
   /**
+   * [新增] 销毁数据库
+   * 物理删除整个 IndexedDB 数据库，用于重置应用
+   */
+  async destroy(): Promise<void> {
+    // 1. 必须先关闭当前连接，否则 deleteDatabase 会被阻塞
+    this.disconnect();
+
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.deleteDatabase(this.dbName);
+
+      request.onsuccess = () => {
+        console.log(`Database '${this.dbName}' deleted successfully`);
+        resolve();
+      };
+
+      request.onerror = () => {
+        console.error('Failed to delete database:', request.error);
+        reject(request.error);
+      };
+
+      request.onblocked = () => {
+        console.warn('Delete database blocked. Please close other tabs of this app.');
+      };
+    });
+  }
+
+  /**
    * 获取事务
    */
   async getTransaction(
