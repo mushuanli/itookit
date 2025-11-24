@@ -54,6 +54,14 @@ export class VFSStorage {
   }
 
   /**
+   * [新增] 销毁存储层（删除数据库）
+   */
+  async destroyDatabase(): Promise<void> {
+    await this.db.destroy();
+    this.connected = false;
+  }
+
+  /**
    * 开启事务
    */
   async beginTransaction(

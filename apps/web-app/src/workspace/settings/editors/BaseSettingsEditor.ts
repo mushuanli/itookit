@@ -17,12 +17,12 @@ export abstract class BaseSettingsEditor implements IEditor {
     async init(container: HTMLElement) {
         this.container = container;
         this.container.classList.add('settings-root'); // 添加根样式类
-        
+
         // 订阅数据变化，实现自动刷新
         const unsubscribe = this.service.onChange(() => this.render());
         // 初始渲染
         this.render();
-        
+
         // Hook into destroy to clean up subscription
         const originalDestroy = this.destroy;
         this.destroy = async () => {

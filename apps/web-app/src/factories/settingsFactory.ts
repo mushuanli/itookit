@@ -19,12 +19,12 @@ export const createSettingsFactory = (service: SettingsService): EditorFactory =
         await service.init();
 
         switch (nodeId) {
-            case 'mcp-servers': return new MCPSettingsEditor(container, service, options);
+            case 'storage':     return new StorageSettingsEditor(container, service, options);
             case 'tags':        return new TagSettingsEditor(container, service, options);
+            case 'contacts':    return new ContactSettingsEditor(container, service, options);
             case 'connections': return new ConnectionSettingsEditor(container, service, options);
             case 'executables': return new ExecutableSettingsEditor(container, service, options);
-            case 'contacts':    return new ContactSettingsEditor(container, service, options);
-            case 'storage':     return new StorageSettingsEditor(container, service, options);
+            case 'mcp-servers': return new MCPSettingsEditor(container, service, options);
             case 'about':       return new AboutSettingsEditor(container, service, options);
 
             default:
