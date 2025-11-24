@@ -53,6 +53,7 @@ export class NodeList extends BaseComponent<NodeListState> {
     private readonly mainContainerEl: HTMLElement;
     private readonly titleEl: HTMLElement;
     private readonly newControlsEl: HTMLElement;
+    private readonly footerEl: HTMLElement; // [新增] 引用 footer 容器以便控制显隐
     private readonly footer: Footer;
     private itemInstances: Map<string, BaseNodeItem> = new Map();
 
@@ -84,9 +85,10 @@ export class NodeList extends BaseComponent<NodeListState> {
         this.mainContainerEl = this.container.querySelector('.vfs-node-list')!;
         this.titleEl = this.container.querySelector('[data-ref="title"]')!;
         this.newControlsEl = this.container.querySelector('[data-ref="new-controls"]')!;
+        this.footerEl = this.container.querySelector('.vfs-node-list__footer')!; // [新增]
         
         this.footer = new Footer(
-            this.container.querySelector('.vfs-node-list__footer')!,
+            this.footerEl,
             {
                 onSelectAllToggle: this._handleSelectAllToggle,
                 onDeselectAll: () => this.store.dispatch({ type: 'ITEM_SELECTION_CLEAR' }),
@@ -107,7 +109,9 @@ export class NodeList extends BaseComponent<NodeListState> {
         const { items, searchQuery, uiSettings, expandedFolderIds, selectedItemIds, activeId, creatingItem, status, readOnly } = globalState;
 
         const { textQueries, tagQueries, typeQueries } = this._parseSearchQuery(searchQuery);
-        const filteredItems = this._filterAndSortItems(items, { textQueries, tagQueries, typeQueries }, uiSettings);
+        
+        // [修改] 传入 readOnly 参数给 _filterAndSortItems
+        const filteredItems = this._filterAndSortItems(items, { textQueries, tagQueries, typeQueries }, uiSettings, readOnly);
         
         const visibleItemIds = this._getVisibleItemIds(filteredItems, new Set([...expandedFolderIds, ...items.map(i => i.id)]));
         const selectedCount = selectedItemIds.size;
@@ -154,7 +158,13 @@ export class NodeList extends BaseComponent<NodeListState> {
         return { textQueries, tagQueries, typeQueries };
     }
 
-    private _filterAndSortItems(items: VFSNodeUI[], queries: { textQueries: string[], tagQueries: string[], typeQueries: string[] }, uiSettings: UISettings): VFSNodeUI[] {
+    // [修改] 增加 isReadOnly 参数
+    private _filterAndSortItems(
+        items: VFSNodeUI[], 
+        queries: { textQueries: string[], tagQueries: string[], typeQueries: string[] }, 
+        uiSettings: UISettings,
+        isReadOnly: boolean
+    ): VFSNodeUI[] {
         let processedItems: VFSNodeUI[] = JSON.parse(JSON.stringify(items));
         const { textQueries, tagQueries, typeQueries } = queries;
         const { sortBy } = uiSettings;
@@ -193,26 +203,30 @@ export class NodeList extends BaseComponent<NodeListState> {
             processedItems = filterRecursively(processedItems);
         }
 
-        const sortRecursively = (itemList: VFSNodeUI[]) => {
-            if (!itemList) return;
-            itemList.sort((a, b) => {
-                const aIsPinned = a.metadata?.custom?.isPinned || false;
-                const bIsPinned = b.metadata?.custom?.isPinned || false;
-                if (aIsPinned !== bIsPinned) return aIsPinned ? -1 : 1;
-                
-                if (sortBy === 'title') {
-                    return (a.metadata?.title || '').localeCompare(b.metadata?.title || '', 'zh-CN');
-                }
-                
-                const aDate = new Date(a.metadata?.lastModified || 0).getTime();
-                const bDate = new Date(b.metadata?.lastModified || 0).getTime();
-                return bDate - aDate;
-            });
-            itemList.forEach(item => {
-                if (item.type === 'directory' && item.children) sortRecursively(item.children);
-            });
-        };
-        sortRecursively(processedItems);
+        // [修改] 如果是只读模式，跳过排序逻辑，保持原始顺序
+        if (!isReadOnly) {
+            const sortRecursively = (itemList: VFSNodeUI[]) => {
+                if (!itemList) return;
+                itemList.sort((a, b) => {
+                    const aIsPinned = a.metadata?.custom?.isPinned || false;
+                    const bIsPinned = b.metadata?.custom?.isPinned || false;
+                    if (aIsPinned !== bIsPinned) return aIsPinned ? -1 : 1;
+                    
+                    if (sortBy === 'title') {
+                        return (a.metadata?.title || '').localeCompare(b.metadata?.title || '', 'zh-CN');
+                    }
+                    
+                    const aDate = new Date(a.metadata?.lastModified || 0).getTime();
+                    const bDate = new Date(b.metadata?.lastModified || 0).getTime();
+                    return bDate - aDate;
+                });
+                itemList.forEach(item => {
+                    if (item.type === 'directory' && item.children) sortRecursively(item.children);
+                });
+            };
+            sortRecursively(processedItems);
+        }
+        
         return processedItems;
     }
 
@@ -743,6 +757,9 @@ export class NodeList extends BaseComponent<NodeListState> {
         this.mainContainerEl.classList.toggle('vfs-node-list--density-compact', this.state.uiSettings.density === 'compact');
         this.mainContainerEl.classList.toggle('vfs-node-list--bulk-mode', !this.state.readOnly && this.state.selectedItemIds.size > 0);
         this.newControlsEl.style.display = this.state.readOnly ? 'none' : '';
+        
+        // [新增] 只读模式隐藏 footer
+        this.footerEl.style.display = this.state.readOnly ? 'none' : '';
 
         this.footer.render({
             selectionStatus: this.state.selectionStatus,
