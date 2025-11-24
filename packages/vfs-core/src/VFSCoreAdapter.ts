@@ -84,6 +84,10 @@ export class VFSCoreAdapter implements ISessionEngine {
     async getNode(id: string): Promise<EngineNode | null> {
         try {
             const vnode = await this.vfs.storage.loadVNode(id);
+            // [安全检查] 确保获取的节点属于当前模块
+            if (vnode && vnode.moduleId !== this.moduleName) {
+                return null;
+            }
             return vnode ? this.toEngineNode(vnode) : null;
         } catch { return null; }
     }
@@ -201,7 +205,16 @@ export class VFSCoreAdapter implements ISessionEngine {
     on(_event: EngineEventType, callback: (event: EngineEvent) => void): () => void {
         const bus = this.vfsCore.getEventBus();
         const mapAndEmit = (type: EngineEventType, originalPayload: any) => {
-            callback({ type, payload: originalPayload });
+            // 1. 检查路径是否属于当前模块
+            // VFS 的完整路径格式是 /moduleName/path/to/file
+            const path = originalPayload.path as string;
+            const expectedPrefix = `/${this.moduleName}`;
+            
+            // 只有当路径以 /moduleName 开头时（或者是根目录），才认为是本模块的事件
+            // 注意：startsWith 判断要严谨，避免 /mod 和 /module 混淆，所以加 '/'
+            if (path && (path === expectedPrefix || path.startsWith(`${expectedPrefix}/`))) {
+                callback({ type, payload: originalPayload });
+            }
         };
 
         const handlers = {

@@ -293,6 +293,10 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
                     try {
                         const newNode = await this.engine.getNode(nodeId);
                         if (!newNode) return;
+                        // [新增] 再次校验，防止 Adapter 过滤失效
+                        // 虽然 Adapter 应该过滤，但双重保险更安全
+                        // 注意：EngineNode 接口里不一定有 moduleId，如果有最好
+                        
                         if (newNode.type === 'file') {
                             newNode.content = await this.engine.readContent(nodeId);
                         } else if (newNode.type === 'directory') {
@@ -312,6 +316,24 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
                     break;
                 case 'node:updated':
                     const updatedId = event.payload.nodeId;
+                    
+                    // [优化] 检查本地 Store 是否存在此 Item
+                    // 如果本地没有，说明这可能是一个过滤掉的文件或者尚未同步的文件
+                    // 对于更新操作，通常只更新已存在的 UI 元素
+                    const currentItems = this.store.getState().items;
+                    const itemExists = (items: VFSNodeUI[]): boolean => {
+                        for (const item of items) {
+                            if (item.id === updatedId) return true;
+                            if (item.children && itemExists(item.children)) return true;
+                        }
+                        return false;
+                    };
+                    
+                    if (!itemExists(currentItems)) {
+                        // console.log(`[VFSUIManager] Ignored update for unknown item ${updatedId}`);
+                        return; 
+                    }
+
                     try {
                         const updatedNode = await this.engine.getNode(updatedId);
                         if (updatedNode) {

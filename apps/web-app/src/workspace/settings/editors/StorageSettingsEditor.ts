@@ -50,23 +50,26 @@ export class StorageSettingsEditor extends BaseSettingsEditor {
                 <div class="settings-storage-actions">
                     <div class="settings-action-card">
                         <div class="settings-action-card__icon">📤</div>
-                        <h3>导出配置</h3>
-                        <button id="btn-export" class="settings-btn settings-btn--primary">导出 JSON</button>
+                        <h3>系统备份</h3>
+                        <p style="font-size:0.8em; color:#666; margin-bottom:10px;">导出所有文档和设置</p>
+                        <button id="btn-export" class="settings-btn settings-btn--primary">导出备份文件</button>
                     </div>
                     <div class="settings-action-card">
                         <div class="settings-action-card__icon">📥</div>
-                        <h3>导入配置</h3>
-                        <button id="btn-import" class="settings-btn settings-btn--primary">导入 JSON</button>
+                        <h3>恢复备份</h3>
+                        <p style="font-size:0.8em; color:#666; margin-bottom:10px;">从备份文件恢复所有数据</p>
+                        <button id="btn-import" class="settings-btn settings-btn--primary">导入备份文件</button>
                     </div>
                     <div class="settings-action-card settings-action-card--danger">
                         <div class="settings-action-card__icon">🧹</div>
-                        <h3>重置应用</h3>
+                        <h3>恢复出厂设置</h3>
+                        <p style="font-size:0.8em; color:#666; margin-bottom:10px;">清空所有数据并重置</p>
                         <button id="btn-reset" class="settings-btn settings-btn--danger">清空所有数据</button>
                     </div>
                 </div>
             </div>
         `;
-
+        
         this.bindEvents();
     }
 
@@ -83,14 +86,25 @@ export class StorageSettingsEditor extends BaseSettingsEditor {
         if (btn) this.addEventListener(btn, 'click', handler);
     }
 
-    private exportConfig() {
-        const data = JSON.stringify(this.service.exportAll(), null, 2);
-        const blob = new Blob([data], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'settings-backup.json';
-        a.click();
+    private async exportConfig() {
+        try {
+            // [修改] 调用全量备份
+            const data = await this.service.createFullBackup();
+            
+            const blob = new Blob([data], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            
+            const date = new Date().toISOString().slice(0, 10);
+            a.href = url;
+            a.download = `mindos-backup-${date}.json`;
+            a.click();
+            
+            Toast.success('系统备份已生成');
+        } catch (e) {
+            console.error(e);
+            Toast.error('导出失败');
+        }
     }
 
     private importConfig() {
@@ -103,11 +117,27 @@ export class StorageSettingsEditor extends BaseSettingsEditor {
             const reader = new FileReader();
             reader.onload = async (ev: any) => {
                 try {
-                    const data = JSON.parse(ev.target.result);
-                    await this.service.importAll(data);
-                    Toast.success('Imported successfully');
+                    const json = ev.target.result;
+                    
+                    // 确认提示
+                    Modal.confirm(
+                        '恢复备份', 
+                        '这将覆盖当前所有数据（包括所有文档和设置），且无法撤销！确定要继续吗？',
+                        async () => {
+                            try {
+                                // [修改] 调用全量恢复
+                                await this.service.restoreFullBackup(json);
+                                Toast.success('恢复成功，正在刷新...');
+                                setTimeout(() => window.location.reload(), 1500);
+                            } catch (err) {
+                                console.error(err);
+                                Toast.error('恢复失败: 数据格式错误');
+                            }
+                        }
+                    );
+
                 } catch (err) {
-                    Toast.error('Invalid JSON');
+                    Toast.error('读取文件失败');
                 }
             };
             reader.readAsText(file);
@@ -116,10 +146,20 @@ export class StorageSettingsEditor extends BaseSettingsEditor {
     }
 
     private resetApp() {
-        Modal.confirm('DANGER', '此操作将清空所有设置数据！确定吗？', async () => {
-            await this.service.clearAll();
-            Toast.success('App reset');
-            window.location.reload();
-        });
+        Modal.confirm(
+            '⚠️ 恢复出厂设置', 
+            '此操作将永久删除所有工作区、文档和设置数据。应用将重置为初始状态。此操作不可逆！', 
+            async () => {
+                try {
+                    // [修改] 调用工厂重置
+                    await this.service.factoryReset();
+                    Toast.success('数据已清除，正在重启...');
+                    setTimeout(() => window.location.reload(), 1000);
+                } catch (e) {
+                    console.error(e);
+                    Toast.error('重置失败');
+                }
+            }
+        );
     }
 }

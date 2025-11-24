@@ -3,10 +3,10 @@
  * VFS 顶层管理器（单例）
  */
 
-import { VFS } from './core/VFS.js'; 
-import { VFSStorage } from './store/VFSStorage.js';
-import { EventBus } from './core/EventBus.js';
-import { ModuleRegistry, ModuleInfo } from './core/ModuleRegistry.js';
+import { VFS } from './core/VFS'; 
+import { VFSStorage } from './store/VFSStorage';
+import { EventBus } from './core/EventBus';
+import { ModuleRegistry, ModuleInfo } from './core/ModuleRegistry';
 import { EnhancedMiddlewareRegistry } from './core/EnhancedMiddlewareRegistry';
 import { MiddlewareFactory } from './core/MiddlewareFactory';
 import { ContentMiddleware } from './middleware/base/ContentMiddleware';
@@ -111,6 +111,90 @@ export class VFSCore {
 
     this.initialized = false;
     VFSCore.instance = null;
+  }
+
+  /**
+   * [新增] 系统级重置
+   * 警告：这将永久删除所有数据！
+   */
+  async systemReset(): Promise<void> {
+    // 1. 如果已初始化，先关闭
+    if (this.initialized) {
+        await this.shutdown();
+    }
+
+    // 2. 实例化一个新的 Storage 对象仅用于执行删除操作
+    // (因为 shutdown 已经销毁了 this.vfs.storage 的引用)
+    const tempStorage = new VFSStorage(this.config.dbName);
+    
+    // 3. 执行物理删除
+    await tempStorage.destroyDatabase();
+    
+    console.log('System reset complete.');
+  }
+
+  /**
+   * [新增] 创建全量系统备份
+   * 导出所有已注册模块的数据
+   */
+  async createSystemBackup(): Promise<string> {
+    this._ensureInitialized();
+
+    const backupData = {
+      version: 1,
+      timestamp: Date.now(),
+      modules: [] as any[]
+    };
+
+    // 获取所有模块列表
+    const modules = this.moduleRegistry.getAll();
+
+    for (const mod of modules) {
+      try {
+        // 导出每个模块的数据
+        const modData = await this.exportModule(mod.name);
+        backupData.modules.push(modData);
+      } catch (e) {
+        console.warn(`Skipping module ${mod.name} in backup:`, e);
+      }
+    }
+
+    return JSON.stringify(backupData, null, 2);
+  }
+
+  /**
+   * [新增] 恢复全量系统备份
+   * 这将清除当前数据并替换为备份数据
+   */
+  async restoreSystemBackup(jsonString: string): Promise<void> {
+    let backupData;
+    try {
+      backupData = JSON.parse(jsonString);
+    } catch (e) {
+      throw new VFSError(VFSErrorCode.INVALID_OPERATION, 'Invalid backup JSON');
+    }
+
+    // 1. 先执行系统重置 (清除旧数据)
+    await this.systemReset();
+
+    // 2. 重新初始化 VFS
+    // 因为 systemReset 关闭了系统，我们需要手动重置状态并重新启动
+    this.initialized = false; 
+    VFSCore.instance = null; // 重置单例（如果需要完全刷新）
+    // 注意：在单例模式下，直接修改 instance = null 可能影响外部引用。
+    // 在这里我们只需要重新执行 init 流程。
+    await this.init();
+
+    // 3. 逐个导入模块
+    if (Array.isArray(backupData.modules)) {
+      for (const modData of backupData.modules) {
+        try {
+          await this.importModule(modData);
+        } catch (e) {
+          console.error(`Failed to restore module ${modData?.module?.name}:`, e);
+        }
+      }
+    }
   }
 
   /**

@@ -2,7 +2,7 @@
 import { VFSCore, VFSErrorCode } from '@itookit/vfs-core';
 import { SettingsState, LLMConnection, MCPServer, Executable, Tag, Contact } from '../types';
 
-const CONFIG_MODULE = '__settings_data';
+const CONFIG_MODULE = '__config';
 const FILES = {
     connections: '/connections.json',
     mcpServers: '/mcp_servers.json',
@@ -188,4 +188,32 @@ export class SettingsService {
     private notify() {
         this.listeners.forEach(l => l());
     }
+
+    // --- System Actions (Backup/Restore/Reset) ---
+
+    /**
+     * [修改] 导出全量系统备份
+     * 返回 JSON 字符串
+     */
+    async createFullBackup(): Promise<string> {
+        return this.vfs.createSystemBackup();
+    }
+
+    /**
+     * [修改] 恢复全量备份
+     */
+    async restoreFullBackup(jsonContent: string): Promise<void> {
+        await this.vfs.restoreSystemBackup(jsonContent);
+        // 恢复底层数据后，重新初始化 Service 以加载新配置
+        this.initialized = false;
+        await this.init();
+    }
+
+    /**
+     * 恢复出厂设置 (清空所有数据)
+     */
+    async factoryReset(): Promise<void> {
+        await this.vfs.systemReset();
+    }
+
 }
