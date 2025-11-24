@@ -2,7 +2,7 @@
 import { VFSCore, VFSErrorCode } from '@itookit/vfs-core';
 import { SettingsState, LLMConnection, MCPServer, Executable, Tag, Contact } from '../types';
 
-const CONFIG_MODULE = '.settings_data';
+const CONFIG_MODULE = '__settings_data';
 const FILES = {
     connections: '/connections.json',
     mcpServers: '/mcp_servers.json',
