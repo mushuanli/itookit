@@ -71,7 +71,7 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
         this.store = new VFSStore({
             ...options.initialState,
             ...persistedUiState,
-            uiSettings: finalUiSettings, // 使用合并后的设置
+            uiSettings: finalUiSettings,
             isSidebarCollapsed: options.initialSidebarCollapsed,
             readOnly: options.readOnly || false,
         });
@@ -80,11 +80,9 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
 
         this._vfsService = new VFSService({ engine: this.engine, newFileContent: options.newSessionContent });
 
-        // [修正] 初始化 Tag Editor 使用通用的 EngineTagSource
         const tagProvider = new EngineTagSource(this.engine);
         
         const tagEditorFactory = this.options.components?.tagEditor || (({ container, initialTags, onSave, onCancel }: any) => {
-            // 这里的 TagEditorComponent 是来自 @itookit/common 的 UI 组件，不依赖 vfs-core
             const editor = new TagEditorComponent({ container, initialItems: initialTags, suggestionProvider: tagProvider, onSave, onCancel });
             editor.init();
             return editor;
@@ -120,7 +118,6 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
         });
 
         if(options.title) this.nodeList.setTitle(options.title);
-        // --- 初始化结束 ---
 
         this._connectUIEvents();
         if (!this.options.readOnly) {
@@ -308,7 +305,6 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
                             payload: newItem,
                         });
                     } catch (e) {
-                        // ✨ [修改] 打印错误日志，不再静默失败
                         console.error(`[VFSUIManager] Failed to handle node:created for ${nodeId}:`, e);
                     }
                     break;
@@ -340,7 +336,6 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
                     try {
                         const updatedNode = await this.engine.getNode(updatedId);
                         if (updatedNode) {
-                             // Preserve children if directory
                              let childrenToPreserve: any[] = [];
                              if(updatedNode.type === 'directory') {
                                  const current = this.store.getState();
@@ -382,9 +377,7 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
     }
 
     private _connectUIEvents(): void {
-        // 🔧 FIX: Updated store subscription logic
         this.store.subscribe(newState => {
-            console.log('[VFSUIManager] Store has updated.');
             const currentActiveItem = this.getActiveSession();
             
             const activeIdChanged = newState.activeId !== this.lastActiveId;
@@ -401,8 +394,6 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
                 }
                 console.log('[VFSUIManager] Active session changed! Publishing PUBLIC_SESSION_SELECTED with item:', currentActiveItem);
                 this.coordinator.publish('PUBLIC_SESSION_SELECTED', { item: currentActiveItem });
-                
-                // 🔧 FIX: Reset the flag after publishing
                 this.lastSessionSelectWasUserAction = false;
             }
 
@@ -413,12 +404,8 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
             this.coordinator.publish('PUBLIC_STATE_CHANGED', { state: newState });
         });
         
-        // ✨ 修复: 添加对导入文件事件的处理
         this.coordinator.subscribe('PUBLIC_IMPORT_REQUESTED', async (e) => {
             const { parentId } = e.data;
-            console.log('[VFSUIManager] Import requested for parentId:', parentId);
-            
-            // 创建文件输入元素
             const input = document.createElement('input');
             input.type = 'file';
             input.multiple = true;
@@ -432,7 +419,6 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
                 console.log(`[VFSUIManager] Importing ${files.length} file(s)`);
                 
                 try {
-                    // 读取所有文件内容
                     const filesWithContent = await Promise.all(
                         Array.from(files).map(async (file) => {
                             const content = await this._readFileContent(file);
@@ -440,22 +426,14 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
                         })
                     );
                     
-                    // 调用批量创建 API
                     const createdNodes = await this._vfsService.createFiles({ 
                         parentId, 
                         files: filesWithContent 
                     });
                     
-                    console.log(`[VFSUIManager] Successfully imported ${createdNodes.length} file(s)`);
-
-                    // ✨ [新增] 强制重新加载数据以确保 UI 刷新
-                    // 虽然 vfs-core 会发送 node:created 事件，但在批量操作下，
-                    // 显式重载能保证列表绝对与数据库同步，解决 UI 滞后问题。
                     await this._loadData();
                     
-                    // 可选: 选中第一个导入的文件
                     if (createdNodes.length > 0 && createdNodes[0].type === 'file') {
-                        // 稍微延迟一下选择，确保列表渲染完成
                         setTimeout(() => {
                             this.store.dispatch({ 
                                 type: 'SESSION_SELECT', 
@@ -467,12 +445,10 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
                     console.error('[VFSUIManager] Failed to import files:', error);
                     alert('导入文件失败: ' + (error as Error).message);
                 } finally {
-                    // 清理输入元素
                     input.remove();
                 }
             };
             
-            // 将输入元素添加到 DOM 并触发点击
             document.body.appendChild(input);
             input.click();
         });
@@ -532,7 +508,6 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
         this.coordinator.subscribe('ITEMS_MOVE_REQUESTED', async (e) => await this._vfsService.moveItems(e.data));
         this.coordinator.subscribe('ITEM_TAGS_UPDATE_REQUESTED', async (e) => await this._vfsService.updateMultipleItemsTags(e.data));
 
-        // 🔧 FIX: Set flag when user explicitly selects a session
         this.coordinator.subscribe('SESSION_SELECT_REQUESTED', e => {
             console.log('[VFSUIManager] Received SESSION_SELECT_REQUESTED, dispatching to store with payload:', e.data);
             this.lastSessionSelectWasUserAction = true; 

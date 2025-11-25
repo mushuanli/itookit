@@ -84,7 +84,6 @@ export class VFSStorage {
 
   /**
    * 加载 VNode (并填充 tags)
-   * [修改]
    */
   async loadVNode(nodeId: string, transaction?: Transaction | null): Promise<VNode | null> {
     this.ensureConnected();
@@ -134,7 +133,6 @@ export class VFSStorage {
   async loadVNodes(nodeIds: string[]): Promise<VNode[]> {
     this.ensureConnected();
     const vnodes = await this.inodeStore.loadBatch(nodeIds);
-    // [新增] 批量填充 tags
     await Promise.all(vnodes.map(async (vnode) => {
         vnode.tags = await this.nodeTagStore.getTagsForNode(vnode.nodeId);
     }));
@@ -176,15 +174,17 @@ export class VFSStorage {
   }
 
 
-  // [新增] ==================== Tag 操作 ====================
+  // [修改] ==================== Tag 操作 ====================
 
   /**
    * 为节点添加标签
+   * [修改] 支持传入外部事务
    */
-  async addTagToNode(nodeId: string, tagName: string): Promise<void> {
+  async addTagToNode(nodeId: string, tagName: string, transaction?: Transaction): Promise<void> {
     this.ensureConnected();
     
-    const tx = await this.beginTransaction([
+    // 如果传入了外部事务，直接使用；否则开启新事务
+    const tx = transaction || await this.beginTransaction([
         VFS_STORES.VNODES, VFS_STORES.TAGS, VFS_STORES.NODE_TAGS
     ]);
     
@@ -204,7 +204,8 @@ export class VFSStorage {
         await this.inodeStore.save(vnode, tx);
       }
       
-      await tx.done;
+      // 只有当我们自己开启事务时才等待 done
+      if (!transaction) await tx.done;
     } catch (e) {
       console.error("Failed to add tag to node:", e);
       // 其他非约束性错误仍需抛出
@@ -214,10 +215,11 @@ export class VFSStorage {
   
   /**
    * 从节点移除标签
+   * [修改] 支持传入外部事务
    */
-  async removeTagFromNode(nodeId: string, tagName: string): Promise<void> {
+  async removeTagFromNode(nodeId: string, tagName: string, transaction?: Transaction): Promise<void> {
     this.ensureConnected();
-    const tx = await this.beginTransaction([VFS_STORES.VNODES, VFS_STORES.NODE_TAGS]);
+    const tx = transaction || await this.beginTransaction([VFS_STORES.VNODES, VFS_STORES.NODE_TAGS]);
     
     try {
       await this.nodeTagStore.remove(nodeId, tagName, tx);
@@ -231,7 +233,7 @@ export class VFSStorage {
         }
       }
       
-      await tx.done;
+      if (!transaction) await tx.done;
     } catch (e) {
       console.error("Failed to remove tag from node:", e);
       throw e;
@@ -245,7 +247,7 @@ export class VFSStorage {
       this.ensureConnected();
       const nodeIds = await this.nodeTagStore.getNodesForTag(tagName);
       if (nodeIds.length === 0) return [];
-      return this.loadVNodes(nodeIds); // 使用已修改的 loadVNodes
+      return this.loadVNodes(nodeIds);
   }
 
   /**
@@ -285,52 +287,33 @@ export class VFSStorage {
 
       cursorRequest.onsuccess = () => {
         const cursor = cursorRequest.result;
-        // 如果游标存在，则检查当前节点
         if (cursor) {
           const vnodeData = cursor.value as VNodeData;
           let match = true;
 
-          // 应用类型过滤器
-          if (query.type && vnodeData.type !== query.type) {
-            match = false;
-          }
+          if (query.type && vnodeData.type !== query.type) match = false;
+          if (match && query.nameContains && !vnodeData.name.toLowerCase().includes(query.nameContains.toLowerCase())) match = false;
           
-          // 应用名称包含过滤器 (不区分大小写)
-          if (match && query.nameContains && !vnodeData.name.toLowerCase().includes(query.nameContains.toLowerCase())) {
-            match = false;
-          }
-          
-          // 应用标签过滤器 (节点必须包含查询中的所有标签)
           if (match && query.tags && query.tags.length > 0) {
             const nodeTags = vnodeData.tags || [];
-            if (!query.tags.every(tag => nodeTags.includes(tag))) {
-              match = false;
-            }
+            if (!query.tags.every(tag => nodeTags.includes(tag))) match = false;
           }
           
-          // 应用元数据过滤器 (简单的键值全等匹配)
           if (match && query.metadata) {
             const nodeMetadata = vnodeData.metadata || {};
-            if (!Object.entries(query.metadata).every(([key, value]) => nodeMetadata[key] === value)) {
-              match = false;
-            }
+            if (!Object.entries(query.metadata).every(([key, value]) => nodeMetadata[key] === value)) match = false;
           }
 
-          // 如果所有过滤器都通过，则将节点添加到结果集
           if (match) {
             results.push(VNode.fromJSON(vnodeData));
           }
 
-          // 如果达到数量限制，则提前结束并返回结果
           if (query.limit && results.length >= query.limit) {
             resolve(results);
           } else {
-            // 继续移动到下一个节点
             cursor.continue();
           }
-
         } else {
-          // 游标结束，表示已遍历完所有匹配 `moduleId` 的节点
           resolve(results);
         }
       };
@@ -340,8 +323,7 @@ export class VFSStorage {
   // ==================== Module 操作 ====================
 
   /**
-   * [优化] 加载所有模块ID
-   * 使用游标高效获取所有唯一的模块ID，避免加载全部节点数据
+   * 加载所有模块ID
    */
   async loadAllModules(): Promise<string[]> {
     this.ensureConnected();
@@ -352,26 +334,21 @@ export class VFSStorage {
     
     return new Promise((resolve, reject) => {
       const moduleIds = new Set<string>();
-      // 使用 'nextunique' 游标，它会自动跳过重复的键
       const cursorRequest = index.openKeyCursor(null, 'nextunique');
 
       cursorRequest.onsuccess = () => {
         const cursor = cursorRequest.result;
         if (cursor) {
-          // cursor.key 就是唯一的 moduleId
           if (cursor.key && typeof cursor.key === 'string') {
             moduleIds.add(cursor.key);
           }
           cursor.continue();
         } else {
-          // 游标结束
           resolve(Array.from(moduleIds));
         }
       };
 
-      cursorRequest.onerror = () => {
-        reject(cursorRequest.error);
-      };
+      cursorRequest.onerror = () => reject(cursorRequest.error);
     });
   }
 

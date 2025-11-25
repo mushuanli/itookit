@@ -144,36 +144,26 @@ export class VFSCoreAdapter implements ISessionEngine {
         const node = await this.vfs.storage.loadVNode(id);
         if (!node) throw new Error('Node not found');
         
-        // 1. 获取父节点的相对路径
         const parentRelativePath = await this.getParentPath(node.parentId);
-        
-        // 2. 拼接新的相对路径
-        // 注意：vfs.move 需要的是 /folder/filename 格式的相对路径
         const newRelativePath = this.vfs.pathResolver.join(parentRelativePath, newName);
         
-        // 3. 调用 move，传入相对路径
         await this.vfs.move(id, newRelativePath);
     }
 
     async move(ids: string[], targetParentId: string | null): Promise<void> {
-        // 1. 获取目标文件夹的绝对路径
         const targetAbsolutePath = targetParentId 
             ? (await this.vfs.storage.loadVNode(targetParentId))?.path 
             : `/${this.moduleName}`;
             
         if (!targetAbsolutePath) throw new Error("Target parent not found");
 
-        // 2. 转换为模块内相对路径 (例如 /my-mod/folder -> /folder)
         const targetRelativePath = this._toRelativePath(targetAbsolutePath);
 
         await Promise.all(ids.map(async (id) => {
             const node = await this.vfs.storage.loadVNode(id);
             if (!node) return;
             
-            // 3. 拼接目标相对路径
             const newPath = this.vfs.pathResolver.join(targetRelativePath, node.name);
-            
-            // 4. 调用 move
             await this.vfs.move(id, newPath);
         }));
     }
@@ -186,32 +176,21 @@ export class VFSCoreAdapter implements ISessionEngine {
         await this.vfsCore.updateNodeMetadata(id, metadata);
     }
 
+    /**
+     * [优化] 使用核心层的 setTags 接口
+     * 这将操作合并为一个事务，并只触发一次事件
+     */
     async setTags(id: string, tags: string[]): Promise<void> {
-        // 这是一个非原子操作的简易实现：先获取现有，计算差异
-        // 或者 vfs-core 提供 setTags API。目前 vfs-core 只有 add/remove。
-        // 我们在这里做 diff。
-        const currentTags = await this.vfs.getTags(id);
-        const newSet = new Set(tags);
-        const currentSet = new Set(currentTags);
-        
-        for (const t of newSet) {
-            if (!currentSet.has(t)) await this.vfs.addTag(id, t);
-        }
-        for (const t of currentSet) {
-            if (!newSet.has(t)) await this.vfs.removeTag(id, t);
-        }
+        // 直接调用我们在 VFSCore 中暴露的新方法
+        await this.vfsCore.setNodeTagsById(id, tags);
     }
 
     on(_event: EngineEventType, callback: (event: EngineEvent) => void): () => void {
         const bus = this.vfsCore.getEventBus();
         const mapAndEmit = (type: EngineEventType, originalPayload: any) => {
-            // 1. 检查路径是否属于当前模块
-            // VFS 的完整路径格式是 /moduleName/path/to/file
             const path = originalPayload.path as string;
             const expectedPrefix = `/${this.moduleName}`;
             
-            // 只有当路径以 /moduleName 开头时（或者是根目录），才认为是本模块的事件
-            // 注意：startsWith 判断要严谨，避免 /mod 和 /module 混淆，所以加 '/'
             if (path && (path === expectedPrefix || path.startsWith(`${expectedPrefix}/`))) {
                 callback({ type, payload: originalPayload });
             }
@@ -235,9 +214,8 @@ export class VFSCoreAdapter implements ISessionEngine {
         const prefix = `/${this.moduleName}`;
         if (absolutePath.startsWith(prefix)) {
             const relative = absolutePath.substring(prefix.length);
-            // 确保返回 /foo/bar 格式（如果是根目录则返回 /）
             return relative.startsWith('/') ? relative : '/' + relative;
         }
-        return absolutePath; // 如果不包含前缀（理论上不应发生），原样返回
+        return absolutePath;
     }
 }

@@ -11,7 +11,7 @@ import { EnhancedMiddlewareRegistry } from './core/EnhancedMiddlewareRegistry';
 import { MiddlewareFactory } from './core/MiddlewareFactory';
 import { ContentMiddleware } from './middleware/base/ContentMiddleware';
 import { PlainTextMiddleware } from './middleware/PlainTextMiddleware';
-import { VNode, VNodeType, TagData, VFS_STORES } from './store/types'; // [修改] 导入 VFS_STORES
+import { VNode, VNodeType, TagData, VFS_STORES } from './store/types'; 
 import { VFSError, VFSErrorCode, SearchQuery } from './core/types';
 
 /**
@@ -146,12 +146,9 @@ export class VFSCore {
       modules: [] as any[]
     };
 
-    // 获取所有模块列表
     const modules = this.moduleRegistry.getAll();
-
     for (const mod of modules) {
       try {
-        // 导出每个模块的数据
         const modData = await this.exportModule(mod.name);
         backupData.modules.push(modData);
       } catch (e) {
@@ -201,7 +198,6 @@ export class VFSCore {
       );
     }
 
-    // 创建模块根节点
     const rootNode = await this.vfs.createNode({
       module: moduleName,
       path: '/',
@@ -235,7 +231,6 @@ export class VFSCore {
       );
     }
 
-    // 删除模块根节点（递归删除所有子节点）
     await this.vfs.unlink(moduleInfo.rootNodeId, { recursive: true });
 
     this.moduleRegistry.unregister(moduleName);
@@ -294,7 +289,6 @@ export class VFSCore {
     await this.vfs.updateMetadata(nodeId, metadata);
   }
   
-  // [新增] 直接通过 ID 更新元数据，更适合 mdxeditor 的场景
   async updateNodeMetadata(nodeId: string, metadata: Record<string, any>): Promise<void> {
       this._ensureInitialized();
       await this.vfs.updateMetadata(nodeId, metadata);
@@ -418,8 +412,6 @@ export class VFSCore {
     }
 
     await this.mount(moduleInfo.name, moduleInfo.description);
-    
-    // 导入树结构
     await this._importTree(moduleInfo.name, '/', data.tree);
   }
 
@@ -439,11 +431,30 @@ export class VFSCore {
     return this.moduleRegistry.getAll();
   }
 
-  // [新增] ==================== Tag 高级 API ====================
+  // ==================== Tag 高级 API ====================
 
   /**
-   * 为文件或目录添加标签
+   * [新增] 批量设置节点标签（覆盖式）
+   * 高性能 API，用于 UI 的批量标签编辑
    */
+  async setNodeTags(moduleName: string, path: string, tags: string[]): Promise<void> {
+    this._ensureInitialized();
+    const nodeId = await this.vfs.pathResolver.resolve(moduleName, path);
+    if (!nodeId) {
+      throw new VFSError(VFSErrorCode.NOT_FOUND, `Node not found: ${moduleName}:${path}`);
+    }
+    // 直接通过 ID 调用 VFS 的 setTags
+    await this.vfs.setTags(nodeId, tags);
+  }
+  
+  /**
+   * [新增] 通过 ID 设置标签 (供 Adapter 使用)
+   */
+  async setNodeTagsById(nodeId: string, tags: string[]): Promise<void> {
+      this._ensureInitialized();
+      await this.vfs.setTags(nodeId, tags);
+  }
+
   async addTag(moduleName: string, path: string, tagName: string): Promise<void> {
     this._ensureInitialized();
     const nodeId = await this.vfs.pathResolver.resolve(moduleName, path);
@@ -552,11 +563,9 @@ export class VFSCore {
   }
 
   private async _loadModuleRegistry(): Promise<void> {
-    // [FIX] Ensure meta module exists before trying to read from it
     if (!this.moduleRegistry.has('__vfs_meta__')) {
        const metaNodeId = await this.vfs.pathResolver.resolve('__vfs_meta__', '/');
        if (!metaNodeId) {
-          // It doesn't exist at all, so registry is empty
           return;
        }
     }
@@ -571,7 +580,6 @@ export class VFSCore {
   }
 
   private async _saveModuleRegistry(): Promise<void> {
-    // [FIX] Ensure meta module exists before saving
     if (!this.moduleRegistry.has('__vfs_meta__')) {
       await this.mount('__vfs_meta__', 'VFS internal metadata');
     }
@@ -660,7 +668,6 @@ export class VFSCore {
       }
     }
 
-    // [新增] 导入 tags
     if (treeData.tags && Array.isArray(treeData.tags)) {
         for(const tag of treeData.tags) {
             await this.vfs.addTag(createdNode.nodeId, tag);

@@ -51,7 +51,6 @@ export class VFS {
   public readonly middlewares: MiddlewareRegistry;
   public readonly events: EventBus;
 
-  // [变更] 构造函数接收 MiddlewareRegistry
   constructor(storage: VFSStorage, middlewares: MiddlewareRegistry, events: EventBus) {
     this.storage = storage;
     this.middlewares = middlewares;
@@ -123,7 +122,7 @@ export class VFS {
       0, Date.now(), Date.now(), metadata, []
     );
 
-    // [变更] 使用 middlewares 执行验证
+    // middlewares 执行验证
     if (type === VNodeType.FILE && content !== undefined) {
       await this.middlewares.runValidation(vnode, content);
     }
@@ -133,7 +132,6 @@ export class VFS {
     try {
       if (type === VNodeType.FILE) {
         const fileContent = content !== undefined ? content : '';
-        // [变更] 调用 _processWriteWithMiddlewares
         const { processedContent, derivedData } = await this._processWriteWithMiddlewares(
           vnode, fileContent, tx
         );
@@ -151,7 +149,6 @@ export class VFS {
       });
       return vnode;
     } catch (error) {
-      // [修复] 改进错误包装
       if (error instanceof VFSError) {
         throw error;
       }
@@ -164,7 +161,7 @@ export class VFS {
   }
 
   /**
-   * [新增] 更新节点元数据
+   * 更新节点元数据
    */
   async updateMetadata(vnodeOrId: VNode | string, metadata: Record<string, any>): Promise<VNode> {
     const vnode = await this._resolveVNode(vnodeOrId);
@@ -232,25 +229,20 @@ export class VFS {
       );
     }
     
-    // [变更] middlewares 验证
     await this.middlewares.runValidation(vnode, content);
 
-    // --- Phase 2: Execute (Transactional) ---
     const tx = await this.storage.beginTransaction();
     try {
-      // [变更] middlewares 处理
       const { processedContent, derivedData } = await this._processWriteWithMiddlewares(
         vnode, content, tx
       );
 
-      // 更新节点元数据
       vnode.metadata = { ...vnode.metadata, ...derivedData };
       vnode.size = this._getContentSize(processedContent);
       vnode.modifiedAt = Date.now();
       await this.storage.saveVNode(vnode, tx);
       await tx.done;
 
-      // 发布事件
       this.events.emit({
         type: VFSEventType.NODE_UPDATED,
         nodeId: vnode.nodeId,
@@ -278,7 +270,6 @@ export class VFS {
     const vnode = await this._resolveVNode(vnodeOrId);
     const { recursive = false } = options;
 
-    // [修复] 先收集所有要删除的节点
     const nodesToDelete: VNode[] = [];
     await this._collectNodesToDelete(vnode, nodesToDelete);
 
@@ -290,31 +281,24 @@ export class VFS {
     }
     
     const allRemovedIds = nodesToDelete.map(n => n.nodeId);
-    // [修改] 确保事务包含 node_tags store
     const tx = await this.storage.beginTransaction([
         VFS_STORES.VNODES, VFS_STORES.CONTENTS, VFS_STORES.NODE_TAGS
     ]);
 
     try {
-      // 在事务内批量执行
       for (const node of nodesToDelete) {
-        // [变更] middlewares 钩子
         await this.middlewares.runBeforeDelete(node, tx);
 
         if (node.contentRef) await this.storage.deleteContent(node.contentRef, tx);
         
-        // [新增] 删除节点的所有标签关联
         await this.storage.nodeTagStore.removeAllForNode(node.nodeId, tx);
-
         await this.storage.deleteVNode(node.nodeId, tx);
 
-        // [变更] middlewares 钩子
         await this.middlewares.runAfterDelete(node, tx);
       }
       
       await tx.done;
 
-      // 发布事件
       this.events.emit({
         type: VFSEventType.NODE_DELETED,
         nodeId: vnode.nodeId,
@@ -341,8 +325,6 @@ export class VFS {
     }
 
     const module = vnode.moduleId!;
-    
-    // [修复] 将异步查询移到事务外部
     const existingId = await this.pathResolver.resolve(module, normalizedPath);
     if (existingId && existingId !== vnode.nodeId) {
       throw new VFSError(VFSErrorCode.ALREADY_EXISTS, `Node already exists at path: ${normalizedPath}`);
@@ -363,14 +345,12 @@ export class VFS {
 
       await this.storage.saveVNode(vnode, tx);
 
-      // [FIX] Recursively update paths of all descendants
       if (vnode.type === VNodeType.DIRECTORY) {
         await this._updateDescendantPaths(vnode, oldPath, newFullPath, tx);
       }
       
       await tx.done;
 
-      // 发布事件
       this.events.emit({
         type: VFSEventType.NODE_MOVED,
         nodeId: vnode.nodeId, path: newFullPath, timestamp: Date.now(), data: { oldPath, newPath: newFullPath }
@@ -404,7 +384,6 @@ export class VFS {
     const targetParentId = await this.pathResolver.resolveParent(module, normalizedPath);
     const sourceTree = await this._loadNodeTree(sourceNode);
 
-    // Phase 2: Plan (pure in-memory computation)
     const operations: CopyOperation[] = [];
     this._planCopyFromTree(sourceTree, targetParentId, normalizedPath, module, operations);
     
@@ -415,7 +394,6 @@ export class VFS {
       throw new VFSError(VFSErrorCode.INVALID_OPERATION, "Cannot generate copy plan for the source node.");
     }
     
-    // [修复] 确保事务包含 node_tags store
     const tx = await this.storage.beginTransaction([
         VFS_STORES.VNODES, VFS_STORES.CONTENTS, VFS_STORES.NODE_TAGS
     ]);
@@ -439,7 +417,6 @@ export class VFS {
           }, tx);
         }
 
-        // 3. [修复] 复制标签关联关系
         if (op.newNodeData.tags.length > 0) {
             for (const tagName of op.newNodeData.tags) {
                 await this.storage.nodeTagStore.add(newNode.nodeId, tagName, tx);
@@ -449,7 +426,6 @@ export class VFS {
   
       await tx.done;
 
-      // 发布事件
       this.events.emit({
         type: VFSEventType.NODE_COPIED,
         nodeId: targetId,
@@ -458,20 +434,10 @@ export class VFS {
         data: { sourceId, copiedIds }
       });
 
-      return {
-        sourceId,
-        targetId,
-        copiedIds
-      };
+      return { sourceId, targetId, copiedIds };
     } catch (error) {
-      if (error instanceof VFSError) {
-        throw error;
-      }
-      throw new VFSError(
-        VFSErrorCode.TRANSACTION_FAILED,
-        'Failed to copy node',
-        error
-      );
+      if (error instanceof VFSError) { throw error; }
+      throw new VFSError(VFSErrorCode.TRANSACTION_FAILED, 'Failed to copy node', error);
     }
   }
 
@@ -486,7 +452,6 @@ export class VFS {
         `Cannot read directory from file: ${vnode.nodeId}`
       );
     }
-
     return await this.storage.getChildren(vnode.nodeId);
   }
 
@@ -495,7 +460,6 @@ export class VFS {
    */
   async stat(vnodeOrId: VNode | string): Promise<NodeStat> {
     const vnode = await this._resolveVNode(vnodeOrId);
-
     return {
       nodeId: vnode.nodeId,
       name: vnode.name,
@@ -520,19 +484,81 @@ export class VFS {
 
   // [新增] ==================== Tag 核心方法 ====================
 
+  /**
+   * [新增] 原子化设置标签（覆盖模式）
+   * 高性能 API，在一个事务中完成所有增删操作，只发射一次事件。
+   */
+  async setTags(vnodeOrId: VNode | string, newTags: string[]): Promise<void> {
+    const vnode = await this._resolveVNode(vnodeOrId);
+    
+    // 开启一个写事务，包含所有涉及的 Store
+    const tx = await this.storage.beginTransaction([
+        VFS_STORES.VNODES, VFS_STORES.TAGS, VFS_STORES.NODE_TAGS
+    ]);
+
+    try {
+        const currentTags = new Set(vnode.tags);
+        const newTagsSet = new Set(newTags);
+
+        // 1. 计算需要添加的
+        for (const tag of newTagsSet) {
+            if (!currentTags.has(tag)) {
+                await this.storage.addTagToNode(vnode.nodeId, tag, tx);
+            }
+        }
+
+        // 2. 计算需要删除的
+        for (const tag of currentTags) {
+            if (!newTagsSet.has(tag)) {
+                await this.storage.removeTagFromNode(vnode.nodeId, tag, tx);
+            }
+        }
+
+        await tx.done;
+
+        // ✨ [优化] 只发射一次事件，不管改了多少标签
+        this.events.emit({
+            type: VFSEventType.NODE_UPDATED,
+            nodeId: vnode.nodeId,
+            path: vnode.path,
+            timestamp: Date.now(),
+            data: { tagsUpdated: true }
+        });
+    } catch (error) {
+        throw new VFSError(VFSErrorCode.TRANSACTION_FAILED, 'Failed to set tags', error);
+    }
+  }
+
   async addTag(vnodeOrId: VNode | string, tagName: string): Promise<void> {
     const vnode = await this._resolveVNode(vnodeOrId);
     await this.storage.addTagToNode(vnode.nodeId, tagName);
+
+    // ✨ [核心修复] 发射更新事件
+    this.events.emit({
+        type: VFSEventType.NODE_UPDATED,
+        nodeId: vnode.nodeId,
+        path: vnode.path,
+        timestamp: Date.now(),
+        data: { tagAdded: tagName }
+    });
   }
   
   async removeTag(vnodeOrId: VNode | string, tagName: string): Promise<void> {
     const vnode = await this._resolveVNode(vnodeOrId);
     await this.storage.removeTagFromNode(vnode.nodeId, tagName);
+
+    // ✨ [核心修复] 发射更新事件
+    this.events.emit({
+        type: VFSEventType.NODE_UPDATED,
+        nodeId: vnode.nodeId,
+        path: vnode.path,
+        timestamp: Date.now(),
+        data: { tagRemoved: tagName }
+    });
   }
 
   async getTags(vnodeOrId: VNode | string): Promise<string[]> {
     const vnode = await this._resolveVNode(vnodeOrId);
-    // VNode instance already has tags populated by the modified storage.loadVNode
     return vnode.tags;
   }
 
@@ -550,10 +576,8 @@ export class VFS {
     content: string | ArrayBuffer,
     tx: Transaction
   ): Promise<{ processedContent: string | ArrayBuffer; derivedData: Record<string, any> }> {
-    // Validation is now done before this method is called.
     const processedContent = await this.middlewares.runBeforeWrite(vnode, content, tx);
-
-    // 保存内容
+    
     if (vnode.contentRef) {
       await this.storage.saveContent({
         contentRef: vnode.contentRef, nodeId: vnode.nodeId, content: processedContent,
@@ -561,13 +585,10 @@ export class VFS {
       }, tx);
     }
 
-    // 写入后处理，获取派生数据
     const derivedData = await this.middlewares.runAfterWrite(vnode, processedContent, tx);
     return { processedContent, derivedData };
   }
 
-  
-  // [新增] 递归收集待删除节点
   private async _collectNodesToDelete(vnode: VNode, collection: VNode[]): Promise<void> {
     collection.push(vnode);
     if (vnode.type === VNodeType.DIRECTORY) {
@@ -578,7 +599,6 @@ export class VFS {
     }
   }
 
-  // [NEW] Helper to fix descendant paths after a move operation
   private async _updateDescendantPaths(parent: VNode, oldPath: string, newPath: string, tx: Transaction): Promise<void> {
       const children = await this.storage.getChildren(parent.nodeId);
       for (const child of children) {
@@ -647,7 +667,6 @@ export class VFS {
       }
     });
   
-    // Use pre-loaded children, no DB access here
     for (const childTree of tree.children) {
       const childTargetPath = this.pathResolver.join(targetPath, childTree.node.name);
       this._planCopyFromTree(childTree, newNodeId, childTargetPath, module, operations);
