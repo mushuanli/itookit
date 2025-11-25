@@ -164,6 +164,31 @@ export class VFSStore {
                     break;
                 }
 
+                // ✨ [新增] 批量更新 Item
+                case 'ITEMS_BATCH_UPDATE_SUCCESS': {
+                    const { updates } = action.payload; // updates: { itemId: string, data: VFSNodeUI }[]
+                    if (!updates || !Array.isArray(updates)) break;
+
+                    const updateMap = new Map(updates.map((u: any) => [u.itemId, u.data]));
+                    
+                    const recursiveUpdate = (items: VFSNodeUI[]) => {
+                        for (let i = 0; i < items.length; i++) {
+                            const item = items[i];
+                            if (updateMap.has(item.id)) {
+                                items[i] = updateMap.get(item.id)!;
+                                updateMap.delete(item.id); // Optimization
+                            }
+                            if (item.children) {
+                                recursiveUpdate(item.children);
+                            }
+                            // 如果所有更新都找到了，可以提前退出，但在 Immer 中这样递归比较简单
+                        }
+                    };
+                    
+                    recursiveUpdate(draft.items);
+                    break;
+                }
+
                 case 'SESSION_CREATE_SUCCESS':
                 case 'FOLDER_CREATE_SUCCESS': {
                     const newItem: VFSNodeUI = action.payload;
@@ -266,7 +291,7 @@ export class VFSStore {
             }
         });
     }
-
+    
     public dispatch(action: Action): void {
         const previousState = this._state;
         this._state = this._reducer(this._state, action);
