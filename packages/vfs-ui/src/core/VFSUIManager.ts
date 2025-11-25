@@ -292,10 +292,10 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
                     const nodeId = event.payload.nodeId;
                     try {
                         const newNode = await this.engine.getNode(nodeId);
-                        if (!newNode) return;
-                        // [新增] 再次校验，防止 Adapter 过滤失效
-                        // 虽然 Adapter 应该过滤，但双重保险更安全
-                        // 注意：EngineNode 接口里不一定有 moduleId，如果有最好
+                        if (!newNode) {
+                            console.warn(`[VFSUIManager] Node created event received but node ${nodeId} not found.`);
+                            return;
+                        }
                         
                         if (newNode.type === 'file') {
                             newNode.content = await this.engine.readContent(nodeId);
@@ -307,7 +307,10 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
                             type: newItem.type === 'directory' ? 'FOLDER_CREATE_SUCCESS' : 'SESSION_CREATE_SUCCESS',
                             payload: newItem,
                         });
-                    } catch (e) {}
+                    } catch (e) {
+                        // ✨ [修改] 打印错误日志，不再静默失败
+                        console.error(`[VFSUIManager] Failed to handle node:created for ${nodeId}:`, e);
+                    }
                     break;
                 }
                 case 'node:deleted':
@@ -444,13 +447,21 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
                     });
                     
                     console.log(`[VFSUIManager] Successfully imported ${createdNodes.length} file(s)`);
+
+                    // ✨ [新增] 强制重新加载数据以确保 UI 刷新
+                    // 虽然 vfs-core 会发送 node:created 事件，但在批量操作下，
+                    // 显式重载能保证列表绝对与数据库同步，解决 UI 滞后问题。
+                    await this._loadData();
                     
                     // 可选: 选中第一个导入的文件
                     if (createdNodes.length > 0 && createdNodes[0].type === 'file') {
-                        this.store.dispatch({ 
-                            type: 'SESSION_SELECT', 
-                            payload: { sessionId: createdNodes[0].id } 
-                        });
+                        // 稍微延迟一下选择，确保列表渲染完成
+                        setTimeout(() => {
+                            this.store.dispatch({ 
+                                type: 'SESSION_SELECT', 
+                                payload: { sessionId: createdNodes[0].id } 
+                            });
+                        }, 50);
                     }
                 } catch (error) {
                     console.error('[VFSUIManager] Failed to import files:', error);
