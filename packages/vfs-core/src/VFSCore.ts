@@ -11,7 +11,7 @@ import { EnhancedMiddlewareRegistry } from './core/EnhancedMiddlewareRegistry';
 import { MiddlewareFactory } from './core/MiddlewareFactory';
 import { ContentMiddleware } from './middleware/base/ContentMiddleware';
 import { PlainTextMiddleware } from './middleware/PlainTextMiddleware';
-import { VNode, VNodeType, TagData } from './store/types';
+import { VNode, VNodeType, TagData, VFS_STORES } from './store/types'; // [修改] 导入 VFS_STORES
 import { VFSError, VFSErrorCode, SearchQuery } from './core/types';
 
 /**
@@ -20,7 +20,7 @@ import { VFSError, VFSErrorCode, SearchQuery } from './core/types';
 export interface VFSConfig {
   dbName?: string;
   defaultModule?: string;
-  middlewares?: Array<new () => ContentMiddleware>; // [变更] providers -> middlewares
+  middlewares?: Array<new () => ContentMiddleware>;
 }
 
 // [新增] 导出 SearchQuery 接口，方便库的使用者进行类型提示
@@ -60,6 +60,13 @@ export class VFSCore {
   }
 
   /**
+   * [新增] 获取当前数据库名称
+   */
+  public get dbName(): string {
+      return this.config.dbName || 'vfs_database';
+  }
+
+  /**
    * 初始化 VFS 系统
    */
   async init(): Promise<void> {
@@ -70,20 +77,20 @@ export class VFSCore {
 
     const storage = new VFSStorage(this.config.dbName);
     this.eventBus = new EventBus();
-    this.middlewareRegistry = new EnhancedMiddlewareRegistry(); // [变更]
-    this.vfs = new VFS(storage, this.middlewareRegistry, this.eventBus); // [变更]
+    this.middlewareRegistry = new EnhancedMiddlewareRegistry();
+    this.vfs = new VFS(storage, this.middlewareRegistry, this.eventBus);
     await this.vfs.initialize();
 
     this.moduleRegistry = new ModuleRegistry();
-    this.middlewareFactory = new MiddlewareFactory(this.vfs.storage, this.eventBus); // [变更]
+    this.middlewareFactory = new MiddlewareFactory(this.vfs.storage, this.eventBus);
 
     // 3. 加载持久化的模块信息
     await this._loadModuleRegistry();
 
     // 4. 注册默认 Providers
-    await this._registerDefaultMiddlewares(); // [变更]
+    await this._registerDefaultMiddlewares();
 
-    // [变更] 注册自定义 Middlewares
+    // 注册自定义 Middlewares
     if (this.config.middlewares) {
       for (const MiddlewareClass of this.config.middlewares) {
         const middleware = this.middlewareFactory.create(MiddlewareClass);
@@ -104,7 +111,7 @@ export class VFSCore {
     await this._saveModuleRegistry();
 
     // 清理 Providers
-    await this.middlewareRegistry.clear(); // [变更]
+    await this.middlewareRegistry.clear();
 
     // 关闭 VFS
     this.vfs.destroy();
@@ -114,22 +121,15 @@ export class VFSCore {
   }
 
   /**
-   * [新增] 系统级重置
+   * 系统级重置
    * 警告：这将永久删除所有数据！
    */
   async systemReset(): Promise<void> {
-    // 1. 如果已初始化，先关闭
     if (this.initialized) {
         await this.shutdown();
     }
-
-    // 2. 实例化一个新的 Storage 对象仅用于执行删除操作
-    // (因为 shutdown 已经销毁了 this.vfs.storage 的引用)
     const tempStorage = new VFSStorage(this.config.dbName);
-    
-    // 3. 执行物理删除
     await tempStorage.destroyDatabase();
-    
     console.log('System reset complete.');
   }
 
@@ -173,19 +173,10 @@ export class VFSCore {
     } catch (e) {
       throw new VFSError(VFSErrorCode.INVALID_OPERATION, 'Invalid backup JSON');
     }
-
-    // 1. 先执行系统重置 (清除旧数据)
     await this.systemReset();
-
-    // 2. 重新初始化 VFS
-    // 因为 systemReset 关闭了系统，我们需要手动重置状态并重新启动
     this.initialized = false; 
-    VFSCore.instance = null; // 重置单例（如果需要完全刷新）
-    // 注意：在单例模式下，直接修改 instance = null 可能影响外部引用。
-    // 在这里我们只需要重新执行 init 流程。
+    VFSCore.instance = null; 
     await this.init();
-
-    // 3. 逐个导入模块
     if (Array.isArray(backupData.modules)) {
       for (const modData of backupData.modules) {
         try {
@@ -535,7 +526,7 @@ export class VFSCore {
   /**
    * 获取 Middleware 注册表
    */
-  getMiddlewareRegistry(): EnhancedMiddlewareRegistry { // [变更]
+  getMiddlewareRegistry(): EnhancedMiddlewareRegistry {
     this._ensureInitialized();
     return this.middlewareRegistry;
   }
@@ -598,7 +589,7 @@ export class VFSCore {
     } catch (error) { console.error('Failed to save module registry:', error); }
   }
 
-  private async _registerDefaultMiddlewares(): Promise<void> { // [变更]
+  private async _registerDefaultMiddlewares(): Promise<void> {
     const plainTextMiddleware = this.middlewareFactory.create(PlainTextMiddleware);
     this.middlewareRegistry.register(plainTextMiddleware);
   }
@@ -606,22 +597,19 @@ export class VFSCore {
   private async _ensureDefaultModule(): Promise<void> {
     const defaultModule = this.config.defaultModule!;
     if (!this.moduleRegistry.has(defaultModule)) {
-    // 直接创建，不调用 mount()
-    const rootNode = await this.vfs.createNode({
-      module: defaultModule,
-      path: '/',
-      type: VNodeType.DIRECTORY
-    });
-
-    const moduleInfo: ModuleInfo = {
-      name: defaultModule,
-      rootNodeId: rootNode.nodeId,
-      description: 'Default module',
-      createdAt: Date.now()
-    };
-
-    this.moduleRegistry.register(moduleInfo);
-    await this._saveModuleRegistry();
+      const rootNode = await this.vfs.createNode({
+        module: defaultModule,
+        path: '/',
+        type: VNodeType.DIRECTORY
+      });
+      const moduleInfo: ModuleInfo = {
+        name: defaultModule,
+        rootNodeId: rootNode.nodeId,
+        description: 'Default module',
+        createdAt: Date.now()
+      };
+      this.moduleRegistry.register(moduleInfo);
+      await this._saveModuleRegistry();
     }
   }
 
@@ -630,7 +618,7 @@ export class VFSCore {
       name: node.name,
       type: node.type,
       metadata: node.metadata,
-      tags: node.tags // [新增]
+      tags: node.tags
     };
     if (node.type === VNodeType.FILE) {
       result.content = await this.vfs.read(node.nodeId);
@@ -678,5 +666,82 @@ export class VFSCore {
             await this.vfs.addTag(createdNode.nodeId, tag);
         }
     }
+  }
+
+  // --- [新增] 静态工具方法 ---
+
+  /**
+   * 数据库克隆 (底层核心能力)
+   * 将 sourceDbName 的数据完全复制到 targetDbName。
+   */
+  static async copyDatabase(sourceDbName: string, targetDbName: string): Promise<void> {
+    console.log(`[VFSCore] Starting DB copy: ${sourceDbName} -> ${targetDbName}`);
+
+    // 1. 关闭可能存在的源连接（虽然这里不持有实例，但为了安全）
+    // 真实场景中，如果是本机复制，通常不需要显式关闭外部连接，除非触发了 versionchange
+
+    // 2. 删除目标数据库 (确保干净)
+    await new Promise<void>((resolve, reject) => {
+        const delReq = indexedDB.deleteDatabase(targetDbName);
+        delReq.onsuccess = () => resolve();
+        delReq.onerror = () => reject(delReq.error);
+        delReq.onblocked = () => console.warn(`Delete ${targetDbName} blocked`);
+    });
+
+    // 3. 初始化目标数据库结构
+    // 利用 VFSStorage 的连接逻辑来创建表结构
+    const tempStorage = new VFSStorage(targetDbName);
+    await tempStorage.connect(); 
+    tempStorage.disconnect();
+
+    // 4. 开始复制数据
+    const srcDb = await new Promise<IDBDatabase>((resolve, reject) => {
+        const req = indexedDB.open(sourceDbName);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+
+    const tgtDb = await new Promise<IDBDatabase>((resolve, reject) => {
+        const req = indexedDB.open(targetDbName);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+
+    // 遍历所有定义的 Store 进行复制
+    const stores = Object.values(VFS_STORES);
+    
+    for (const storeName of stores) {
+        if (!srcDb.objectStoreNames.contains(storeName) || !tgtDb.objectStoreNames.contains(storeName)) {
+            continue;
+        }
+
+        await new Promise<void>((resolve, reject) => {
+            const readTx = srcDb.transaction(storeName, 'readonly');
+            const writeTx = tgtDb.transaction(storeName, 'readwrite');
+            
+            const sourceStore = readTx.objectStore(storeName);
+            const targetStore = writeTx.objectStore(storeName);
+
+            // 使用游标流式复制
+            const cursorReq = sourceStore.openCursor();
+            
+            cursorReq.onsuccess = (e) => {
+                const cursor = (e.target as IDBRequest).result;
+                if (cursor) {
+                    targetStore.put(cursor.value);
+                    cursor.continue();
+                }
+            };
+
+            // 监听写事务完成
+            writeTx.oncomplete = () => resolve();
+            writeTx.onerror = () => reject(writeTx.error);
+            readTx.onerror = () => reject(readTx.error);
+        });
+    }
+
+    srcDb.close();
+    tgtDb.close();
+    console.log(`[VFSCore] DB Copy complete.`);
   }
 }
