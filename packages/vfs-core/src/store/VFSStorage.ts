@@ -90,7 +90,7 @@ export class VFSStorage {
     const vnode = await this.inodeStore.loadVNode(nodeId, transaction);
     if (vnode) {
       // 在这里，getTagsForNode会创建自己的只读事务，这是可接受的，因为我们不在一个写事务中。
-      vnode.tags = await this.nodeTagStore.getTagsForNode(vnode.nodeId);
+      vnode.tags = await this.nodeTagStore.getTagsForNode(vnode.nodeId, transaction);
     }
     return vnode;
   }
@@ -130,11 +130,11 @@ export class VFSStorage {
   /**
    * 批量加载 VNodes
    */
-  async loadVNodes(nodeIds: string[]): Promise<VNode[]> {
+  async loadVNodes(nodeIds: string[], transaction?: Transaction | null): Promise<VNode[]> {
     this.ensureConnected();
     const vnodes = await this.inodeStore.loadBatch(nodeIds);
     await Promise.all(vnodes.map(async (vnode) => {
-        vnode.tags = await this.nodeTagStore.getTagsForNode(vnode.nodeId);
+        vnode.tags = await this.nodeTagStore.getTagsForNode(vnode.nodeId, transaction);
     }));
     return vnodes;
   }

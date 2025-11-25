@@ -485,60 +485,90 @@ export class VFS {
   // [新增] ==================== Tag 核心方法 ====================
 
   /**
-   * [新增] 原子化设置标签（覆盖模式）
-   * 高性能 API，在一个事务中完成所有增删操作，只发射一次事件。
+   * [新增] 批量原子化设置多个节点的标签
+   * 极高性能 API：
+   * 1. 使用单个数据库事务处理所有节点
+   * 2. 只发射一次 NODES_BATCH_UPDATED 事件
    */
-  async setTags(vnodeOrId: VNode | string, newTags: string[]): Promise<void> {
-    const vnode = await this._resolveVNode(vnodeOrId);
-    
+  async batchSetTags(batchData: { nodeId: string, tags: string[] }[]): Promise<void> {
+    if (!batchData || batchData.length === 0) return;
+
     // 开启一个写事务，包含所有涉及的 Store
     const tx = await this.storage.beginTransaction([
         VFS_STORES.VNODES, VFS_STORES.TAGS, VFS_STORES.NODE_TAGS
     ]);
 
+    const updatedNodeIds: string[] = [];
+
     try {
-        const currentTags = new Set(vnode.tags);
-        const newTagsSet = new Set(newTags);
+        for (const { nodeId, tags } of batchData) {
+            // 加载节点（在事务内）
+            const vnode = await this.storage.loadVNode(nodeId, tx);
+            if (!vnode) continue;
 
-        // 1. 计算需要添加的
-        for (const tag of newTagsSet) {
-            if (!currentTags.has(tag)) {
-                await this.storage.addTagToNode(vnode.nodeId, tag, tx);
+            const currentTags = new Set(vnode.tags);
+            const newTagsSet = new Set(tags);
+            let hasChanges = false;
+
+            // 1. 计算需要添加的
+            for (const tag of newTagsSet) {
+                if (!currentTags.has(tag)) {
+                    await this.storage.addTagToNode(nodeId, tag, tx);
+                    hasChanges = true;
+                }
             }
-        }
 
-        // 2. 计算需要删除的
-        for (const tag of currentTags) {
-            if (!newTagsSet.has(tag)) {
-                await this.storage.removeTagFromNode(vnode.nodeId, tag, tx);
+            // 2. 计算需要删除的
+            for (const tag of currentTags) {
+                if (!newTagsSet.has(tag)) {
+                    await this.storage.removeTagFromNode(nodeId, tag, tx);
+                    hasChanges = true;
+                }
+            }
+            
+            if (hasChanges) {
+                updatedNodeIds.push(nodeId);
             }
         }
 
         await tx.done;
 
-        // ✨ [优化] 只发射一次事件，不管改了多少标签
-        this.events.emit({
-            type: VFSEventType.NODE_UPDATED,
-            nodeId: vnode.nodeId,
-            path: vnode.path,
-            timestamp: Date.now(),
-            data: { tagsUpdated: true }
-        });
+        // ✨ [优化] 只发射一次批量事件
+        if (updatedNodeIds.length > 0) {
+            this.events.emit({
+                type: VFSEventType.NODES_BATCH_UPDATED,
+                nodeId: null, // 批量事件不指向单一 ID
+                path: null,
+                timestamp: Date.now(),
+                data: { updatedNodeIds } // Payload 包含所有变更的 ID
+            });
+        }
     } catch (error) {
-        throw new VFSError(VFSErrorCode.TRANSACTION_FAILED, 'Failed to set tags', error);
+        throw new VFSError(VFSErrorCode.TRANSACTION_FAILED, 'Failed to batch set tags', error);
     }
+  }
+
+  /**
+   * [新增] 原子化设置标签（覆盖模式）
+   * 高性能 API，在一个事务中完成所有增删操作，只发射一次事件。
+   */
+  async setTags(vnodeOrId: VNode | string, newTags: string[]): Promise<void> {
+    // 复用 batchSetTags 以保持逻辑一致性，虽然稍微多了一层包装
+    let nodeId: string;
+    if (typeof vnodeOrId === 'string') {
+        nodeId = vnodeOrId;
+    } else {
+        nodeId = vnodeOrId.nodeId;
+    }
+    await this.batchSetTags([{ nodeId, tags: newTags }]);
   }
 
   async addTag(vnodeOrId: VNode | string, tagName: string): Promise<void> {
     const vnode = await this._resolveVNode(vnodeOrId);
     await this.storage.addTagToNode(vnode.nodeId, tagName);
-
-    // ✨ [核心修复] 发射更新事件
     this.events.emit({
         type: VFSEventType.NODE_UPDATED,
-        nodeId: vnode.nodeId,
-        path: vnode.path,
-        timestamp: Date.now(),
+        nodeId: vnode.nodeId, path: vnode.path, timestamp: Date.now(),
         data: { tagAdded: tagName }
     });
   }
@@ -546,13 +576,9 @@ export class VFS {
   async removeTag(vnodeOrId: VNode | string, tagName: string): Promise<void> {
     const vnode = await this._resolveVNode(vnodeOrId);
     await this.storage.removeTagFromNode(vnode.nodeId, tagName);
-
-    // ✨ [核心修复] 发射更新事件
     this.events.emit({
         type: VFSEventType.NODE_UPDATED,
-        nodeId: vnode.nodeId,
-        path: vnode.path,
-        timestamp: Date.now(),
+        nodeId: vnode.nodeId, path: vnode.path, timestamp: Date.now(),
         data: { tagRemoved: tagName }
     });
   }

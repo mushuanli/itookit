@@ -181,8 +181,18 @@ export class VFSCoreAdapter implements ISessionEngine {
      * 这将操作合并为一个事务，并只触发一次事件
      */
     async setTags(id: string, tags: string[]): Promise<void> {
-        // 直接调用我们在 VFSCore 中暴露的新方法
-        await this.vfsCore.setNodeTagsById(id, tags);
+        // 单个设置也走批量通道，逻辑更统一
+        await this.vfsCore.batchSetNodeTags([{ nodeId: id, tags }]);
+    }
+
+    /**
+     * [新增] 专门的批量接口
+     * 即使 ISessionEngine 接口定义中可能没有这个方法，
+     * 我们可以在 Service 层通过类型转换调用它。
+     */
+    async setTagsBatch(updates: { id: string; tags: string[] }[]): Promise<void> {
+        const batchData = updates.map(u => ({ nodeId: u.id, tags: u.tags }));
+        await this.vfsCore.batchSetNodeTags(batchData);
     }
 
     on(_event: EngineEventType, callback: (event: EngineEvent) => void): () => void {
@@ -202,6 +212,13 @@ export class VFSCoreAdapter implements ISessionEngine {
             [VFSEventType.NODE_DELETED]: (e: any) => mapAndEmit('node:deleted', e),
             [VFSEventType.NODE_MOVED]: (e: any) => mapAndEmit('node:moved', e),
             [VFSEventType.NODE_COPIED]: (e: any) => mapAndEmit('node:moved', e),
+            
+            // ✨ [新增] 映射批量更新事件
+            // 我们将其映射为自定义类型 'node:batch_updated'
+            [VFSEventType.NODES_BATCH_UPDATED]: (e: any) => {
+                // 直接透传 payload，包含 updatedNodeIds
+                callback({ type: 'node:batch_updated' as any, payload: e.data });
+            }
         };
 
         const unsubs = Object.entries(handlers).map(([evt, handler]) => bus.on(evt as any, handler));

@@ -18,22 +18,36 @@ export interface FileItemProps {
 export class FileItem extends BaseNodeItem {
     private currentProps: FileItemProps;
 
-    // [修正] 构造函数不再接收 callbacks
     constructor(item: VFSNodeUI, isReadOnly: boolean, initialProps: FileItemProps) {
         super(item, isReadOnly);
         this.currentProps = initialProps;
         this.render();
     }
 
+    /**
+     * [新增] 更新数据对象并检查是否需要重绘
+     */
+    public updateItem(newItem: VFSNodeUI): void {
+        const oldTags = JSON.stringify(this.item.metadata.tags);
+        const newTags = JSON.stringify(newItem.metadata.tags);
+        const oldTitle = this.item.metadata.title;
+        const newTitle = newItem.metadata.title;
+        
+        super.updateItem(newItem);
+
+        // 如果影响显示的元数据发生了变化，强制重绘
+        if (oldTags !== newTags || oldTitle !== newTitle) {
+            this.render();
+        }
+    }
+
     protected createRootElement(): HTMLElement {
-        // Create a temporary wrapper to parse the HTML string
         const tempDiv = document.createElement('div');
-        tempDiv.innerHTML = '<div></div>'; // Placeholder
+        tempDiv.innerHTML = '<div></div>'; 
         return tempDiv.firstElementChild as HTMLElement;
     }
 
     public update(nextProps: FileItemProps): void {
-        // Simple dirty check to avoid unnecessary re-renders
         if (JSON.stringify(this.currentProps) !== JSON.stringify(nextProps)) {
             this.currentProps = nextProps;
             this.render();

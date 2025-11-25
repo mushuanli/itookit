@@ -53,7 +53,7 @@ export class NodeList extends BaseComponent<NodeListState> {
     private readonly mainContainerEl: HTMLElement;
     private readonly titleEl: HTMLElement;
     private readonly newControlsEl: HTMLElement;
-    private readonly footerEl: HTMLElement; // [新增] 引用 footer 容器以便控制显隐
+    private readonly footerEl: HTMLElement;
     private readonly footer: Footer;
     private itemInstances: Map<string, BaseNodeItem> = new Map();
 
@@ -85,7 +85,7 @@ export class NodeList extends BaseComponent<NodeListState> {
         this.mainContainerEl = this.container.querySelector('.vfs-node-list')!;
         this.titleEl = this.container.querySelector('[data-ref="title"]')!;
         this.newControlsEl = this.container.querySelector('[data-ref="new-controls"]')!;
-        this.footerEl = this.container.querySelector('.vfs-node-list__footer')!; // [新增]
+        this.footerEl = this.container.querySelector('.vfs-node-list__footer')!;
         
         this.footer = new Footer(
             this.footerEl,
@@ -109,15 +109,11 @@ export class NodeList extends BaseComponent<NodeListState> {
         const { items, searchQuery, uiSettings, expandedFolderIds, selectedItemIds, activeId, creatingItem, status, readOnly } = globalState;
 
         const { textQueries, tagQueries, typeQueries } = this._parseSearchQuery(searchQuery);
-        
-        // [修改] 传入 readOnly 参数给 _filterAndSortItems
         const filteredItems = this._filterAndSortItems(items, { textQueries, tagQueries, typeQueries }, uiSettings, readOnly);
-        
         const visibleItemIds = this._getVisibleItemIds(filteredItems, new Set([...expandedFolderIds, ...items.map(i => i.id)]));
         const selectedCount = selectedItemIds.size;
 
         let selectionStatus: 'none' | 'partial' | 'all' = 'none';
-        // [修复] readOnly 检查也应在此处
         if (!readOnly && selectedCount > 0 && visibleItemIds.length > 0) {
             const allVisibleSelected = visibleItemIds.every(id => selectedItemIds.has(id));
             if (allVisibleSelected && selectedCount === visibleItemIds.length) {
@@ -255,7 +251,6 @@ export class NodeList extends BaseComponent<NodeListState> {
         this.newControlsEl.addEventListener('click', this._handleNewControlsClick);
         document.addEventListener('click', this._handleGlobalClick, true);
 
-        // [修正] 使用事件委托来处理所有项目相关的事件
         this.bodyEl.addEventListener('click', this._handleItemClick);
         if (!this.state.readOnly) {
             this.bodyEl.addEventListener('contextmenu', this._handleItemContextMenu);
@@ -660,20 +655,15 @@ export class NodeList extends BaseComponent<NodeListState> {
             return; 
         }
 
-        // 1. 发布事件以更新全局状态
         this.coordinator.publish('SETTINGS_CHANGE_REQUESTED', { settings: newSettings });
 
-        // 2. 立即更新当前Popover的UI以提供即时反馈
         if (this.settingsPopoverEl) {
-            // 合并当前状态和刚刚发生的变更，得到最新的完整设置
             const updatedFullSettings = { ...this.state.uiSettings, ...newSettings };
             
-            // 使用模板函数重新生成Popover的内部HTML
             const tempDiv = document.createElement('div');
             tempDiv.innerHTML = createSettingsPopoverHTML(updatedFullSettings);
             const newContent = tempDiv.firstElementChild as HTMLElement;
 
-            // 仅替换内部内容，保留外部容器及其事件监听器
             this.settingsPopoverEl.innerHTML = newContent.innerHTML;
         }
     }
@@ -758,7 +748,6 @@ export class NodeList extends BaseComponent<NodeListState> {
         this.mainContainerEl.classList.toggle('vfs-node-list--bulk-mode', !this.state.readOnly && this.state.selectedItemIds.size > 0);
         this.newControlsEl.style.display = this.state.readOnly ? 'none' : '';
         
-        // [新增] 只读模式隐藏 footer
         this.footerEl.style.display = this.state.readOnly ? 'none' : '';
 
         this.footer.render({
@@ -799,25 +788,20 @@ export class NodeList extends BaseComponent<NodeListState> {
         const isSelfSelected = selectedItemIds.has(directory.id);
         const descendantIds = this._getDescendantIds(directory);
         
-        // 空目录的情况
         if (descendantIds.length === 0) {
             return isSelfSelected ? 'all' : 'none';
         }
         
-        // 非空目录的情况
         const selectedDescendantsCount = descendantIds.filter(id => selectedItemIds.has(id)).length;
         
-        // 全选: 自己被选中 且 所有后代都被选中
         if (isSelfSelected && selectedDescendantsCount === descendantIds.length) {
             return 'all';
         }
         
-        // 部分选中: 自己被选中 或 部分后代被选中
         if (isSelfSelected || selectedDescendantsCount > 0) {
             return 'partial';
         }
         
-        // 都没选中
         return 'none';
     }
 
@@ -848,6 +832,9 @@ export class NodeList extends BaseComponent<NodeListState> {
                     } else {
                         itemInstance = new DirectoryItem(item, this.state.readOnly, this._getDirectoryItemProps(item));
                     }
+                } else {
+                    // [新增] 更新实例内部持有的 item 数据，确保元数据（如 tag）是最新的
+                    itemInstance.updateItem(item);
                 }
 
                 const props = item.type === 'file' ? this._getFileItemProps(item) : this._getDirectoryItemProps(item);
@@ -859,7 +846,6 @@ export class NodeList extends BaseComponent<NodeListState> {
                 if (item.type === 'directory' && item.children && (this.state.expandedFolderIds.has(item.id) || !!this.state.searchQuery)) {
                     const childrenContainer = (itemInstance as DirectoryItem).childrenContainer;
                     childrenContainer.innerHTML = '';
-                    // ✨ 核心修复: 递归时传递当前目录的 ID 作为 parentId
                     traverseAndRender(item.children, childrenContainer, item.id);
                 }
             });
@@ -893,7 +879,7 @@ export class NodeList extends BaseComponent<NodeListState> {
         return {
             isExpanded: this.state.expandedFolderIds.has(item.id) || !!this.state.searchQuery,
             dirSelectionState: this._getFolderSelectionState(item, this.state.selectedItemIds),
-            isSelected: this.state.selectedItemIds.has(item.id), // [修改] 明确判断目录本身是否被选中
+            isSelected: this.state.selectedItemIds.has(item.id),
             isSelectionMode: !this.state.readOnly && this.state.selectedItemIds.size > 0,
             searchQueries: this.state.textSearchQueries,
         };
@@ -913,7 +899,6 @@ export class NodeList extends BaseComponent<NodeListState> {
     public destroy(): void {
         super.destroy();
         document.removeEventListener('click', this._handleGlobalClick, true);
-        // [修正] 移除委托的事件监听器
         this.bodyEl.removeEventListener('click', this._handleItemClick);
         if (!this.state.readOnly) {
             this.bodyEl.removeEventListener('contextmenu', this._handleItemContextMenu);

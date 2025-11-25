@@ -20,7 +20,6 @@ export class NodeTagStore extends BaseStore {
   async add(nodeId: string, tagName: string, transaction?: Transaction | null): Promise<void> {
     const data: NodeTagData = { nodeId, tagName };
 
-    // 如果传入了外部事务，直接使用；否则开启新事务
     const tx = transaction ? transaction : await this.db.getTransaction(this.storeName, 'readwrite');
     const store = tx.getStore(this.storeName);
 
@@ -33,21 +32,15 @@ export class NodeTagStore extends BaseStore {
 
       request.onerror = (event) => {
         const error = request.error;
-        // 检查是否是唯一性约束错误
         if (error && error.name === 'ConstraintError') {
-          // 关键：阻止错误冒泡，防止事务被自动中止
           event.preventDefault();
           event.stopPropagation();
-
-          // 视为成功（幂等）
           resolve(undefined);
         } else {
-          // 其他错误，让其冒泡或 reject
           reject(error);
         }
       };
     }).then(async () => {
-      // 如果是我们自己开启的事务，需要等待它完成
       if (!transaction) {
         await tx.done;
       }
@@ -63,10 +56,8 @@ export class NodeTagStore extends BaseStore {
     const index = store.index('nodeId_tagName');
     const key = [nodeId, tagName];
 
-    // 1. 通过复合索引找到主键
     const primaryKey = await this.promisifyRequest(index.getKey(key));
 
-    // 2. 如果找到，则使用主键删除记录
     if (primaryKey) {
       await this.execute('readwrite', (s) => s.delete(primaryKey), tx);
     }
@@ -78,9 +69,15 @@ export class NodeTagStore extends BaseStore {
 
   /**
    * 获取一个节点的所有标签名
+   * [修复] 增加 transaction 参数，确保在批量操作中保持事务活性
    */
-  async getTagsForNode(nodeId: string): Promise<string[]> {
-    const results = await this.db.getAllByIndex<NodeTagData>(this.storeName, 'nodeId', nodeId);
+  async getTagsForNode(nodeId: string, transaction?: Transaction | null): Promise<string[]> {
+    // 使用 execute 包装器，它会自动处理 "使用传入事务" 或 "创建新只读事务" 的逻辑
+    const results = await this.execute<NodeTagData[]>(
+        'readonly',
+        (store) => store.index('nodeId').getAll(nodeId),
+        transaction
+    );
     return results.map(r => r.tagName);
   }
 
