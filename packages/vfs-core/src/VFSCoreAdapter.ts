@@ -151,21 +151,8 @@ export class VFSCoreAdapter implements ISessionEngine {
     }
 
     async move(ids: string[], targetParentId: string | null): Promise<void> {
-        const targetAbsolutePath = targetParentId 
-            ? (await this.vfs.storage.loadVNode(targetParentId))?.path 
-            : `/${this.moduleName}`;
-            
-        if (!targetAbsolutePath) throw new Error("Target parent not found");
-
-        const targetRelativePath = this._toRelativePath(targetAbsolutePath);
-
-        await Promise.all(ids.map(async (id) => {
-            const node = await this.vfs.storage.loadVNode(id);
-            if (!node) return;
-            
-            const newPath = this.vfs.pathResolver.join(targetRelativePath, node.name);
-            await this.vfs.move(id, newPath);
-        }));
+        // 直接调用批量移动接口
+        await this.vfsCore.batchMoveNodes(this.moduleName, ids, targetParentId);
     }
 
     async delete(ids: string[]): Promise<void> {
@@ -199,6 +186,11 @@ export class VFSCoreAdapter implements ISessionEngine {
         const bus = this.vfsCore.getEventBus();
         const mapAndEmit = (type: EngineEventType, originalPayload: any) => {
             const path = originalPayload.path as string;
+            // 对于批量事件，path 可能是 null，直接通过
+            if (path === null || path === undefined) {
+                 callback({ type, payload: originalPayload });
+                 return;
+            }
             const expectedPrefix = `/${this.moduleName}`;
             
             if (path && (path === expectedPrefix || path.startsWith(`${expectedPrefix}/`))) {
@@ -218,21 +210,12 @@ export class VFSCoreAdapter implements ISessionEngine {
             [VFSEventType.NODES_BATCH_UPDATED]: (e: any) => {
                 // 直接透传 payload，包含 updatedNodeIds
                 callback({ type: 'node:batch_updated' as any, payload: e.data });
-            }
+            },
+            [VFSEventType.NODES_BATCH_MOVED]: (e: any) => callback({ type: 'node:batch_moved' as any, payload: e.data })
         };
 
         const unsubs = Object.entries(handlers).map(([evt, handler]) => bus.on(evt as any, handler));
         
         return () => unsubs.forEach(u => u());
-    }
-
-    // [辅助方法] 从绝对路径中剥离模块前缀，返回模块内相对路径
-    private _toRelativePath(absolutePath: string): string {
-        const prefix = `/${this.moduleName}`;
-        if (absolutePath.startsWith(prefix)) {
-            const relative = absolutePath.substring(prefix.length);
-            return relative.startsWith('/') ? relative : '/' + relative;
-        }
-        return absolutePath;
     }
 }
