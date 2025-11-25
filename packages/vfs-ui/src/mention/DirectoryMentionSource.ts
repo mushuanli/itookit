@@ -55,21 +55,13 @@ export class DirectoryMentionSource extends IMentionSource {
           scope: this.globalSearch ? ['*'] : undefined
       });
 
-      // ✨ [修改] 过滤规则：
-      // 1. moduleid 以 __ 开头
-      // 2. dirname 或 filename 以 _ 开头 (通过检查 path 的每一段)
       const filteredResults = results.filter(node => {
-        // 检查 Module ID
         if (node.moduleId && (node.moduleId[0] === '.' || node.moduleId.startsWith('__'))) {
           return false;
         }
-        
-        // 检查路径中的每一段（包含目录名和节点名）是否以 _ 开头
-        // split('/') 可能会产生空字符串（如果是绝对路径），startsWith('_') 对空字符串返回 false，安全
         if (node.path && node.path.split('/').some(part => (part.startsWith('.')||part.startsWith('_'))) ) {
           return false;
         }
-
         return true;
       });
 
@@ -80,9 +72,7 @@ export class DirectoryMentionSource extends IMentionSource {
         
         return {
           id: node.id,
-          // label 用于下拉列表显示
           label: labelText,
-          // title 用于插入文档
           title: node.name,
           type: 'directory',
           path: node.path,
@@ -101,37 +91,22 @@ export class DirectoryMentionSource extends IMentionSource {
    * @returns A promise resolving to a hover preview object or null.
    */
   public async getHoverPreview(uri: string): Promise<HoverPreviewData | null> {
-    console.log('[DirectoryMentionSource] getHoverPreview called with URI:', uri);
-    
-    if (!uri) {
-      console.log('[DirectoryMentionSource] URI is empty');
-      return null;
-    }
+    if (!uri) return null;
     
     let urlObj: URL;
     try { 
       urlObj = new URL(uri); 
     } catch(e) { 
-      console.error('[DirectoryMentionSource] URL Parse Error:', e);
       return null; 
     }
     
-    if (!urlObj.pathname) {
-      console.log('[DirectoryMentionSource] No pathname in URL');
-      return null;
-    }
+    if (!urlObj.pathname) return null;
 
     const dirId = urlObj.pathname.substring(1);
-    console.log('[DirectoryMentionSource] Fetching directory with ID:', dirId);
     
     try {
       const node = await this.engine.getNode(dirId);
-      if (!node) {
-        console.log('[DirectoryMentionSource] Node not found');
-        return null;
-      }
-
-      console.log('[DirectoryMentionSource] Node found:', node.name);
+      if (!node) return null;
 
       const childrenCountText = node.children 
         ? `Contains ${node.children.length} items` 

@@ -3,6 +3,8 @@
  * @desc Public API entry point for the VFS-UI library.
  */
 import './styles/vfs-ui.unified.css';
+import '@itookit/common/style.css';
+
 import { VFSUIManager } from './core/VFSUIManager.js';
 
 import type { SessionUIOptions, ISessionUI, ISessionEngine } from '@itookit/common';

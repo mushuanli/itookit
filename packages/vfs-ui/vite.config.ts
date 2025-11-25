@@ -12,6 +12,9 @@ export default defineConfig({
       formats: ['es', 'umd'],
       fileName: (format) => `vfs-ui.${format === 'es' ? 'js' : 'umd.cjs'}`
     },
+    // 【新增】: 强制禁用 CSS 代码拆分，确保所有 CSS 合并为一个文件
+    cssCodeSplit: false,
+    
     rollupOptions: {
       // 将无需打包进库的依赖外部化
       external: ['@itookit/vfs-core', '@itookit/common', 'immer'],
@@ -27,7 +30,7 @@ export default defineConfig({
           if (assetInfo.name && assetInfo.name.endsWith('.css')) {
             return 'style.css';
           }
-          return assetInfo.name || 'asset';
+          return assetInfo.name;
         }
       }
     },

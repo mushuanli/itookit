@@ -11,7 +11,8 @@
       "import": "./dist/index.mjs",
       "require": "./dist/index.js"
     },
-    "./TagEditorComponent.css": "./dist/TagEditorComponent.css"
+    "./style.css": "./dist/index.css",
+    "./index.css": "./dist/index.css"
   },
   "files": [
     "dist"

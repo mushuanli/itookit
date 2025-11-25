@@ -14,7 +14,6 @@ import {
 
 export interface FileSourceDependencies {
   engine: ISessionEngine;
-  /** 是否进行全局搜索，默认为 true */
   globalSearch?: boolean;
 }
 
@@ -47,8 +46,6 @@ export class FileMentionSource extends IMentionSource {
    */
   public async getSuggestions(query: string): Promise<Suggestion[]> {
     try {
-      // 使用 engine.search 替代 vfsCore.searchNodes
-      // 如果 globalSearch 为 true，则传入 scope: ['*']
       const results: EngineNode[] = await this.engine.search({
           type: 'file',
           text: query,
@@ -56,28 +53,19 @@ export class FileMentionSource extends IMentionSource {
           scope: this.globalSearch ? ['*'] : undefined
       });
 
-      // ✨ [修改] 过滤规则：
-      // 1. moduleid 以 __ 开头
-      // 2. dirname 或 filename 以 _ 开头 (通过检查 path 的每一段)
       const filteredResults = results.filter(node => {
-        // 检查 Module ID
         if (node.moduleId && (node.moduleId[0] === '.' || node.moduleId.startsWith('__'))) {
           return false;
         }
-        
-        // 检查路径中的每一段（包含目录名和文件名）是否以 _ 开头
         if (node.path && node.path.split('/').some(part => (part.startsWith('.')||part.startsWith('_'))) ) {
           return false;
         }
-
         return true;
       });
 
       return filteredResults.map(node => ({
         id: node.id,
-        // label 用于下拉列表显示（包含丰富信息）
         label: this.formatLabel(node),
-        // title 用于插入文档（仅文件名）
         title: node.name,
         type: 'file',
         path: node.path,
@@ -95,13 +83,8 @@ export class FileMentionSource extends IMentionSource {
   private formatLabel(node: EngineNode): string {
     const parentPath = node.path.substring(0, node.path.lastIndexOf('/')) || '/';
     const context = parentPath === '/' ? '' : ` ${parentPath}`;
-    
-    // 如果有 moduleId 且不为空，则显示模块信息
     const modulePrefix = node.moduleId ? `[${node.moduleId}]` : '';
-    
-    // 显示自定义图标（如果有），否则使用默认图标
     const icon = node.icon || '📄';
-    
     return `${icon} ${node.name} (${modulePrefix}${context})`;
   }
 
@@ -109,30 +92,18 @@ export class FileMentionSource extends IMentionSource {
    * ✅ 修复：接受字符串 URI，返回统一的类型
    */
   public async getHoverPreview(uri: string): Promise<HoverPreviewData | null> {
-    console.log('[FileMentionSource] getHoverPreview called with URI:', uri);
-    
-    if (!uri) {
-      console.log('[FileMentionSource] URI is empty');
-      return null;
-    }
+    if (!uri) return null;
     
     let urlObj: URL;
     try {
         urlObj = new URL(uri);
     } catch (e) {
-        console.error('[FileMentionSource] URL Parse Error:', e);
         return null;
     }
 
-    // 确保 pathname 存在
-    if (!urlObj.pathname) {
-        console.log('[FileMentionSource] No pathname in URL');
-        return null;
-    }
+    if (!urlObj.pathname) return null;
 
-    // 移除开头的斜杠获取文件 ID
     const fileId = urlObj.pathname.substring(1);
-    console.log('[FileMentionSource] Fetching file with ID:', fileId);
 
     try {
       const [node, content] = await Promise.all([
@@ -140,12 +111,7 @@ export class FileMentionSource extends IMentionSource {
         this.engine.readContent(fileId)
       ]);
       
-      if (!node) {
-        console.log('[FileMentionSource] Node not found');
-        return null;
-      }
-      
-      console.log('[FileMentionSource] Node found:', node.name);
+      if (!node) return null;
       
       const textContent = typeof content === 'string' 
         ? content 
