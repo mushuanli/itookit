@@ -1,6 +1,15 @@
 // @file: app/workspace/settings/editors/StorageSettingsEditor.ts
 import { BaseSettingsEditor } from './BaseSettingsEditor';
 import { Modal, Toast } from '../components/UIComponents';
+import { SettingsState } from '../types';
+
+const SETTINGS_LABELS: Record<keyof SettingsState, string> = {
+    connections: '🤖 连接 (Connections)',
+    mcpServers: '🔌 MCP 服务器',
+    executables: '🧠 智能体 (Agents)',
+    tags: '🏷️ 标签 (Tags)',
+    contacts: '📒 通讯录'
+};
 
 export class StorageSettingsEditor extends BaseSettingsEditor {
     private storageInfo: any = null;
@@ -28,7 +37,7 @@ export class StorageSettingsEditor extends BaseSettingsEditor {
         this.container.innerHTML = `
             <div class="settings-page">
                 <div class="settings-page__header">
-                    <h2 class="settings-page__title">存储管理</h2>
+                    <h2 class="settings-page__title">存储与备份</h2>
                 </div>
 
                 <div class="settings-storage-overview">
@@ -40,31 +49,43 @@ export class StorageSettingsEditor extends BaseSettingsEditor {
                         </svg>
                         <div>
                             <div class="settings-stat-item">
-                                <span class="settings-detail-item__label">已使用</span>
+                                <span class="settings-detail-item__label">已使用空间</span>
                                 <span class="settings-detail-item__value">${usageMB} MB</span>
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <div class="settings-storage-actions">
-                    <div class="settings-action-card">
-                        <div class="settings-action-card__icon">📤</div>
-                        <h3>系统备份</h3>
-                        <p style="font-size:0.8em; color:#666; margin-bottom:10px;">导出所有文档和设置</p>
-                        <button id="btn-export" class="settings-btn settings-btn--primary">导出备份文件</button>
+                <!-- 统一的数据管理 -->
+                <div class="settings-section">
+                    <h3 class="settings-section__title">数据迁移</h3>
+                    <p class="settings-page__description" style="margin-bottom: 15px;">
+                        细粒度地导入/导出系统配置或特定的文档工作区。生成的 JSON 文件可用于迁移或备份。
+                    </p>
+                    <div class="settings-storage-actions">
+                        <div class="settings-action-card">
+                            <div class="settings-action-card__icon">📤</div>
+                            <h3>自定义导出</h3>
+                            <button id="btn-export-mixed" class="settings-btn settings-btn--primary">选择数据...</button>
+                        </div>
+                        <div class="settings-action-card">
+                            <div class="settings-action-card__icon">📥</div>
+                            <h3>恢复/导入</h3>
+                            <button id="btn-import-mixed" class="settings-btn settings-btn--primary">选择文件...</button>
+                        </div>
                     </div>
-                    <div class="settings-action-card">
-                        <div class="settings-action-card__icon">📥</div>
-                        <h3>恢复备份</h3>
-                        <p style="font-size:0.8em; color:#666; margin-bottom:10px;">从备份文件恢复所有数据</p>
-                        <button id="btn-import" class="settings-btn settings-btn--primary">导入备份文件</button>
-                    </div>
-                    <div class="settings-action-card settings-action-card--danger">
-                        <div class="settings-action-card__icon">🧹</div>
-                        <h3>恢复出厂设置</h3>
-                        <p style="font-size:0.8em; color:#666; margin-bottom:10px;">清空所有数据并重置</p>
-                        <button id="btn-reset" class="settings-btn settings-btn--danger">清空所有数据</button>
+                </div>
+
+                <!-- 危险区 -->
+                <div class="settings-section" style="margin-top: 40px; border-top: 1px solid var(--st-border-color); padding-top: 20px;">
+                    <h3 class="settings-section__title" style="color: var(--st-color-danger);">危险操作</h3>
+                    <div class="settings-storage-actions">
+                        <div class="settings-action-card settings-action-card--danger">
+                            <div class="settings-action-card__icon">💣</div>
+                            <h3>工厂重置</h3>
+                            <p style="font-size:0.8em; color:#666; margin-bottom:10px;">抹除所有数据并重置为初始状态</p>
+                            <button id="btn-reset" class="settings-btn settings-btn--danger">清空所有数据</button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -76,8 +97,11 @@ export class StorageSettingsEditor extends BaseSettingsEditor {
     private bindEvents() {
         this.clearListeners();
         
-        this.bindButton('#btn-export', () => this.exportConfig());
-        this.bindButton('#btn-import', () => this.importConfig());
+        // Data Migration Actions
+        this.bindButton('#btn-export-mixed', () => this.openExportModal());
+        this.bindButton('#btn-import-mixed', () => this.triggerImportFlow());
+
+        // System Actions
         this.bindButton('#btn-reset', () => this.resetApp());
     }
 
@@ -86,28 +110,90 @@ export class StorageSettingsEditor extends BaseSettingsEditor {
         if (btn) this.addEventListener(btn, 'click', handler);
     }
 
-    private async exportConfig() {
-        try {
-            // [修改] 调用全量备份
-            const data = await this.service.createFullBackup();
-            
-            const blob = new Blob([data], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            
-            const date = new Date().toISOString().slice(0, 10);
-            a.href = url;
-            a.download = `mindos-backup-${date}.json`;
-            a.click();
-            
-            Toast.success('系统备份已生成');
-        } catch (e) {
-            console.error(e);
-            Toast.error('导出失败');
-        }
+    // --- Export UI Logic ---
+
+    private openExportModal() {
+        const settingsKeys = this.service.getAvailableSettingsKeys();
+        const workspaces = this.service.getAvailableWorkspaces();
+
+        // 生成 Settings 复选框
+        const settingsHtml = settingsKeys.map(key => `
+            <label class="settings-checkbox-row">
+                <input type="checkbox" name="export-settings" value="${key}" checked>
+                <span>${SETTINGS_LABELS[key] || key}</span>
+            </label>
+        `).join('');
+
+        // 生成 Workspaces 复选框
+        const workspacesHtml = workspaces.length > 0 
+            ? workspaces.map(ws => `
+                <label class="settings-checkbox-row">
+                    <input type="checkbox" name="export-modules" value="${ws.name}">
+                    <div style="display:flex; flex-direction:column;">
+                        <span>📂 ${ws.name}</span>
+                        <small style="color:#999; font-size:0.8em;">${ws.description || '用户工作区'}</small>
+                    </div>
+                </label>
+            `).join('')
+            : `<div style="padding:10px; color:#999; font-style:italic;">无可用工作区</div>`;
+
+        const content = `
+            <div class="settings-export-modal-content" style="padding: 0 10px;">
+                <div style="margin-bottom: 20px;">
+                    <h4 style="margin:0 0 10px 0; border-bottom:1px solid var(--st-border-color); padding-bottom:5px;">⚙️ 系统配置 (Settings)</h4>
+                    <div class="settings-checklist-grid">${settingsHtml}</div>
+                </div>
+                
+                <div>
+                    <h4 style="margin:0 0 10px 0; border-bottom:1px solid var(--st-border-color); padding-bottom:5px;">📚 文档工作区 (Workspaces)</h4>
+                    <div class="settings-checklist-grid">${workspacesHtml}</div>
+                </div>
+
+                <div style="margin-top:15px; text-align:right;">
+                    <small class="settings-link-btn" onclick="document.querySelectorAll('.settings-checklist-grid input').forEach(c => c.checked = true)">全选</small>
+                    <small class="settings-link-btn" onclick="document.querySelectorAll('.settings-checklist-grid input').forEach(c => c.checked = false)">全不选</small>
+                </div>
+            </div>
+            <style>
+                .settings-checklist-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+                .settings-checkbox-row { display: flex; align-items: center; gap: 8px; padding: 5px; cursor: pointer; border-radius: 4px; }
+                .settings-checkbox-row:hover { background: var(--st-bg-tertiary); }
+                .settings-link-btn { cursor: pointer; color: var(--st-color-primary); margin-left: 10px; }
+                .settings-link-btn:hover { text-decoration: underline; }
+            </style>
+        `;
+
+        new Modal('选择导出内容', content, {
+            confirmText: '导出',
+            onConfirm: async () => {
+                const sInputs = document.querySelectorAll<HTMLInputElement>('input[name="export-settings"]:checked');
+                const mInputs = document.querySelectorAll<HTMLInputElement>('input[name="export-modules"]:checked');
+                
+                const selectedSettings = Array.from(sInputs).map(i => i.value as keyof SettingsState);
+                const selectedModules = Array.from(mInputs).map(i => i.value);
+
+                if (selectedSettings.length === 0 && selectedModules.length === 0) {
+                    Toast.warning('请至少选择一项内容');
+                    return false;
+                }
+
+                try {
+                    const data = await this.service.exportMixedData(selectedSettings, selectedModules);
+                    const date = new Date().toISOString().slice(0, 10);
+                    this.downloadJson(data, `mindos-backup-${date}.json`);
+                    Toast.success(`导出完成: ${selectedSettings.length} 项配置, ${selectedModules.length} 个工作区`);
+                } catch (e) {
+                    console.error(e);
+                    Toast.error('导出失败');
+                }
+                return true;
+            }
+        }).show();
     }
 
-    private importConfig() {
+    // --- Import UI Logic ---
+
+    private triggerImportFlow() {
         const input = document.createElement('input');
         input.type = 'file';
         input.accept = '.json';
@@ -117,27 +203,10 @@ export class StorageSettingsEditor extends BaseSettingsEditor {
             const reader = new FileReader();
             reader.onload = async (ev: any) => {
                 try {
-                    const json = ev.target.result;
-                    
-                    // 确认提示
-                    Modal.confirm(
-                        '恢复备份', 
-                        '这将覆盖当前所有数据（包括所有文档和设置），且无法撤销！确定要继续吗？',
-                        async () => {
-                            try {
-                                // [修改] 调用全量恢复
-                                await this.service.restoreFullBackup(json);
-                                Toast.success('恢复成功，正在刷新...');
-                                setTimeout(() => window.location.reload(), 1500);
-                            } catch (err) {
-                                console.error(err);
-                                Toast.error('恢复失败: 数据格式错误');
-                            }
-                        }
-                    );
-
+                    const json = JSON.parse(ev.target.result);
+                    this.showImportSelectionModal(json);
                 } catch (err) {
-                    Toast.error('读取文件失败');
+                    Toast.error('无法解析 JSON 文件');
                 }
             };
             reader.readAsText(file);
@@ -145,13 +214,106 @@ export class StorageSettingsEditor extends BaseSettingsEditor {
         input.click();
     }
 
+    private showImportSelectionModal(json: any) {
+        // 1. 检测并分析 JSON 内容
+        
+        // A. 检查是否为 Settings 导出 (支持旧版根结构和新版 settings 嵌套结构)
+        const availableSettings = this.service.getAvailableSettingsKeys().filter(k => {
+            return (json.settings && Array.isArray(json.settings[k])) || Array.isArray(json[k]);
+        });
+
+        // B. 检查是否包含 Modules (工作区)
+        let availableModules: any[] = [];
+        if (json.modules && Array.isArray(json.modules)) {
+            availableModules = json.modules;
+        }
+
+        if (availableSettings.length === 0 && availableModules.length === 0) {
+            Toast.error('文件中未发现可识别的备份数据');
+            return;
+        }
+
+        // 2. 构建 UI 列表
+        
+        const settingsHtml = availableSettings.map(key => {
+            // 获取条目数量
+            const count = (json.settings?.[key] || json[key])?.length || 0;
+            return `
+            <label class="settings-checkbox-row">
+                <input type="checkbox" name="import-settings" value="${key}" checked>
+                <div style="flex:1; display:flex; justify-content:space-between;">
+                    <span>${SETTINGS_LABELS[key] || key}</span>
+                    <span class="settings-badge">${count}</span>
+                </div>
+            </label>`;
+        }).join('');
+
+        const modulesHtml = availableModules.map(mod => {
+            const name = mod.module?.name || 'Unknown';
+            // 过滤掉系统模块（以防万一包含）
+            if (['__vfs_meta__', '__config'].includes(name)) return '';
+            return `
+            <label class="settings-checkbox-row">
+                <input type="checkbox" name="import-modules" value="${name}">
+                <div style="flex:1; display:flex; justify-content:space-between;">
+                    <span>📂 ${name}</span>
+                    <span class="settings-badge settings-badge--warning" style="font-size:0.7em; background:#fee2e2; color:#991b1b;">覆盖</span>
+                </div>
+            </label>`;
+        }).join('');
+
+        const content = `
+            <div class="settings-export-modal-content" style="padding: 0 10px;">
+                <p style="color:var(--st-text-secondary); margin-bottom:15px;">检测到以下数据，请选择要恢复的项目：</p>
+                
+                ${settingsHtml ? `
+                <div style="margin-bottom: 20px;">
+                    <h4 style="margin:0 0 10px 0; border-bottom:1px solid var(--st-border-color);">⚙️ 配置数据 (Settings)</h4>
+                    <div class="settings-checklist-grid">${settingsHtml}</div>
+                </div>` : ''}
+
+                ${modulesHtml ? `
+                <div>
+                    <h4 style="margin:0 0 10px 0; border-bottom:1px solid var(--st-border-color);">📚 工作区 (Workspaces) <small style="color:var(--st-color-danger); font-weight:normal;">(同名工作区将被覆盖)</small></h4>
+                    <div class="settings-checklist-grid">${modulesHtml}</div>
+                </div>` : ''}
+            </div>
+            <style>.settings-checklist-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }</style>
+        `;
+
+        new Modal('导入数据', content, {
+            confirmText: '执行导入',
+            type: 'danger', // 警示色，因为包含覆盖操作
+            onConfirm: async () => {
+                const sInputs = document.querySelectorAll<HTMLInputElement>('input[name="import-settings"]:checked');
+                const mInputs = document.querySelectorAll<HTMLInputElement>('input[name="import-modules"]:checked');
+                
+                const keysToImport = Array.from(sInputs).map(i => i.value as keyof SettingsState);
+                const modulesToImport = Array.from(mInputs).map(i => i.value);
+
+                if (keysToImport.length === 0 && modulesToImport.length === 0) return true;
+
+                try {
+                    await this.service.importMixedData(json, keysToImport, modulesToImport);
+                    Toast.success('导入成功，应用正在刷新...');
+                    setTimeout(() => window.location.reload(), 1500);
+                } catch (e) {
+                    console.error(e);
+                    Toast.error('导入过程中发生错误');
+                }
+                return true;
+            }
+        }).show();
+    }
+
+    // --- Helper ---
+
     private resetApp() {
         Modal.confirm(
             '⚠️ 恢复出厂设置', 
             '此操作将永久删除所有工作区、文档和设置数据。应用将重置为初始状态。此操作不可逆！', 
             async () => {
                 try {
-                    // [修改] 调用工厂重置
                     await this.service.factoryReset();
                     Toast.success('数据已清除，正在重启...');
                     setTimeout(() => window.location.reload(), 1000);
@@ -161,5 +323,16 @@ export class StorageSettingsEditor extends BaseSettingsEditor {
                 }
             }
         );
+    }
+
+    private downloadJson(data: object | string, filename: string) {
+        const content = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+        const blob = new Blob([content], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
     }
 }
