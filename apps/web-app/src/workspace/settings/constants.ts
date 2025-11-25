@@ -24,6 +24,7 @@ export const LLM_PROVIDER_DEFAULTS: Record<string, LLMProviderDef> = {
         implementation: 'openai-compatible',
         baseURL: 'https://api.rdsec.trendmicro.com/prod/aiendpoint/v1/chat/completions',
         models: [
+            { id: 'claude-4.5-sonnet', name: 'Claude 4.5 Sonnet' },
             { id: 'gpt-4o', name: 'GPT-4o (OpenAI)' },
             { id: 'claude-3-haiku', name: 'Claude 3 Haiku' },
             { id: 'claude-3.5-sonnet', name: 'Claude 3.5 Sonnet' },
@@ -33,7 +34,6 @@ export const LLM_PROVIDER_DEFAULTS: Record<string, LLMProviderDef> = {
             { id: 'claude-4-sonnet', name: 'Claude 4 Sonnet' },
             { id: 'claude-4.1-opus', name: 'Claude 4.1 Opus' },
             { id: 'claude-4.5-haiku', name: 'Claude 4.5 Haiku' },
-            { id: 'claude-4.5-sonnet', name: 'Claude 4.5 Sonnet' },
             { id: 'deepseek-r1', name: 'DeepSeek R1' },
             { id: 'deepseek-r1-0528', name: 'DeepSeek R1 0528' },
             { id: 'deepseek-r1-aws', name: 'DeepSeek R1 AWS' },
@@ -58,9 +58,9 @@ export const LLM_PROVIDER_DEFAULTS: Record<string, LLMProviderDef> = {
         implementation: 'anthropic', // 改为专用实现
         baseURL: 'https://api.anthropic.com/v1/messages',
         models: [
+            { id: 'claude-sonnet-4-5-20250929', name: 'Claude Sonnet 4.5' },
             { id: 'claude-opus-4-1-20250805', name: 'Claude Opus 4.1' },
             { id: 'claude-opus-4-20250514', name: 'Claude Opus 4' },
-            { id: 'claude-sonnet-4-5-20250929', name: 'Claude Sonnet 4.5' },
             { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4' },
             { id: 'claude-3-7-sonnet-latest', name: 'Claude Sonnet 3.7 (Latest)' },
             { id: 'claude-3-7-sonnet-20250219', name: 'Claude Sonnet 3.7' },
