@@ -101,14 +101,15 @@ export enum VFSEventType {
   NODE_DELETED = 'node:deleted',
   NODE_MOVED = 'node:moved',
   NODE_COPIED = 'node:copied',
-  // ✨ [新增] 批量更新事件，用于聚合通知
-  NODES_BATCH_UPDATED = 'nodes:batch_updated' 
+  NODES_BATCH_UPDATED = 'nodes:batch_updated',
+  // ✨ [新增] 批量移动事件
+  NODES_BATCH_MOVED = 'nodes:batch_moved' 
 }
 
 /** VFS 事件 */
 export interface VFSEvent {
   type: VFSEventType;
-  nodeId: string | null; // 批量事件时可能为 null 或主要 ID
+  nodeId: string | null;
   path: string | null;
   timestamp: number;
   data?: any;

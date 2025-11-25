@@ -349,6 +349,20 @@ export class VFSCore {
     await this.vfs.unlink(nodeId, { recursive });
   }
 
+  // [新增] 批量移动节点 API
+  async batchMoveNodes(moduleName: string, nodeIds: string[], targetParentId: string | null): Promise<void> {
+    this._ensureInitialized();
+    // 确保 targetParentId 属于该模块（如果是 null 则为根目录，无需检查）
+    if (targetParentId) {
+        const node = await this.vfs.storage.loadVNode(targetParentId);
+        if (!node) throw new VFSError(VFSErrorCode.NOT_FOUND, `Target parent ${targetParentId} not found`);
+        if (node.moduleId !== moduleName) throw new VFSError(VFSErrorCode.INVALID_OPERATION, `Cannot move nodes across modules via this API`);
+    }
+    
+    // 调用底层批量移动
+    await this.vfs.batchMove(nodeIds, targetParentId);
+  }
+
   /**
    * 获取目录树
    */

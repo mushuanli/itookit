@@ -390,6 +390,16 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
                 case 'node:moved':
                     this._loadData();
                     break;
+                
+                // ✨ [新增] 处理批量移动事件
+                case 'node:batch_moved' as any:
+                    console.log(`[VFSUIManager] Batch moved ${event.payload.movedNodeIds?.length} items.`);
+                    // 移动操作改变了树结构，最安全的做法是重载
+                    // 因为移动可能影响到目录的 children 列表和 expanded 状态的有效性
+                    this._loadData();
+                    // 结束移动操作模式
+                    this.store.dispatch({ type: 'MOVE_OPERATION_END' });
+                    break;
             }
         };
 
@@ -398,7 +408,8 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
             this.engine.on('node:updated', handleEvent),
             this.engine.on('node:deleted', handleEvent),
             this.engine.on('node:moved', handleEvent),
-            this.engine.on('node:batch_updated' as any, handleEvent)
+            this.engine.on('node:batch_updated' as any, handleEvent),
+            this.engine.on('node:batch_moved' as any, handleEvent)
         ];
         this.engineUnsubscribe = () => unsubs.forEach(u => u());
     }

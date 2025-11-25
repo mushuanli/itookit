@@ -40,26 +40,27 @@ export class InodeStore extends BaseStore {
 
   /**
    * 根据路径获取节点ID
+   * [修复] 增加 transaction 参数，支持事务复用
    */
-  async getIdByPath(path: string): Promise<string | null> {
-    const tx = await this.db.getTransaction(this.storeName, 'readonly');
-    const store = tx.getStore(this.storeName);
-    const index = store.index('path');
-    
-    const data = await this.promisifyRequest<VNodeData>(index.get(path));
+  async getIdByPath(path: string, transaction?: Transaction | null): Promise<string | null> {
+    const data = await this.execute<VNodeData | undefined>(
+      'readonly',
+      (store) => store.index('path').get(path),
+      transaction
+    );
     return data?.nodeId || null;
   }
 
   /**
    * 获取子节点
+   * [修复] 增加 transaction 参数，并使用 execute 以支持事务复用
    */
-  async getChildren(parentId: string): Promise<VNode[]> {
-    const results = await this.db.getAllByIndex<VNodeData>(
-      this.storeName,
-      'parentId',
-      parentId
+  async getChildren(parentId: string, transaction?: Transaction | null): Promise<VNode[]> {
+    const results = await this.execute<VNodeData[]>(
+      'readonly',
+      (store) => store.index('parentId').getAll(parentId),
+      transaction
     );
-    
     return results.map(data => VNode.fromJSON(data));
   }
 

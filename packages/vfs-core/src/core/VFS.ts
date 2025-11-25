@@ -363,6 +363,104 @@ export class VFS {
     }
   }
 
+  // [新增] 批量移动方法
+  async batchMove(nodeIds: string[], targetParentId: string | null): Promise<void> {
+    if (nodeIds.length === 0) return;
+
+    // 1. 获取目标父节点信息（如果不是移到根目录）
+    let targetParentNode: VNode | null = null;
+    if (targetParentId) {
+        targetParentNode = await this.storage.loadVNode(targetParentId);
+        if (!targetParentNode) {
+            throw new VFSError(VFSErrorCode.NOT_FOUND, `Target parent node ${targetParentId} not found`);
+        }
+        if (targetParentNode.type !== VNodeType.DIRECTORY) {
+            throw new VFSError(VFSErrorCode.INVALID_OPERATION, `Cannot move into a file`);
+        }
+    }
+
+    // 开启事务
+    const tx = await this.storage.beginTransaction([VFS_STORES.VNODES, VFS_STORES.NODE_TAGS]);
+
+    try {
+        const movedNodeIds: string[] = [];
+
+        for (const nodeId of nodeIds) {
+            // 在事务中加载节点
+            const vnode = await this.storage.loadVNode(nodeId, tx);
+            if (!vnode) continue; // Skip if missing
+
+            // 检查：不能移动到自己内部
+            if (targetParentId) {
+                if (nodeId === targetParentId) {
+                    throw new VFSError(VFSErrorCode.INVALID_OPERATION, `Cannot move directory ${vnode.name} into itself`);
+                }
+                // 简单的祖先检查（防止 A 移到 A/B）
+                let current = targetParentNode;
+                while (current && current.parentId) {
+                    if (current.parentId === nodeId) {
+                         throw new VFSError(VFSErrorCode.INVALID_OPERATION, `Cannot move directory ${vnode.name} into its own child`);
+                    }
+                    // 这里需要在事务中递归加载祖先，性能较低，但为了数据完整性是必要的
+                    // 简化处理：如果你移动了目录，我们只在 targetPath 包含 sourcePath 时报错
+                    // 由于我们有 path 字段，这很容易检查
+                    current = await this.storage.loadVNode(current.parentId, tx);
+                }
+            }
+
+            // 计算新路径
+            const module = vnode.moduleId!;
+            // 目标目录的路径
+            const targetPath = targetParentNode ? targetParentNode.path : `/${module}`;
+            
+            // 拼接新路径
+            const newFullPath = this.pathResolver.join(targetPath, vnode.name);
+            const oldPath = vnode.path;
+
+            // 检查重名 (在目标目录下是否有同名文件)
+            // 注意：这里需要检查数据库是否已有该路径
+            // [修复] 传递 tx 以防止死锁
+            const existingId = await this.storage.getNodeIdByPath(newFullPath, tx);
+            if (existingId && existingId !== nodeId) {
+                // 策略：抛错或者跳过。这里抛错。
+                throw new VFSError(VFSErrorCode.ALREADY_EXISTS, `Node already exists at ${newFullPath}`);
+            }
+
+            // 更新节点
+            vnode.parentId = targetParentId;
+            vnode.path = newFullPath;
+            vnode.modifiedAt = Date.now();
+            
+            await this.storage.saveVNode(vnode, tx);
+
+            // 递归更新子节点路径
+            if (vnode.type === VNodeType.DIRECTORY) {
+                // [修复] 传递 tx 以防止死锁
+                await this._updateDescendantPaths(vnode, oldPath, newFullPath, tx);
+            }
+
+            movedNodeIds.push(nodeId);
+        }
+
+        await tx.done;
+
+        // ✨ 只发射一次事件
+        if (movedNodeIds.length > 0) {
+            this.events.emit({
+                type: VFSEventType.NODES_BATCH_MOVED,
+                nodeId: null,
+                path: null,
+                timestamp: Date.now(),
+                data: { movedNodeIds, targetParentId }
+            });
+        }
+
+    } catch (error) {
+        if (error instanceof VFSError) throw error;
+        throw new VFSError(VFSErrorCode.TRANSACTION_FAILED, 'Failed to batch move nodes', error);
+    }
+  }
+
   /**
    * 复制节点
    */
@@ -626,7 +724,8 @@ export class VFS {
   }
 
   private async _updateDescendantPaths(parent: VNode, oldPath: string, newPath: string, tx: Transaction): Promise<void> {
-      const children = await this.storage.getChildren(parent.nodeId);
+      // [修复] 传递 tx 以防止死锁
+      const children = await this.storage.getChildren(parent.nodeId, tx);
       for (const child of children) {
           const childOldPath = this.pathResolver.join(oldPath, child.name);
           const childNewPath = this.pathResolver.join(newPath, child.name);
