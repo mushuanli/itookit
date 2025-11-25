@@ -84,7 +84,16 @@ export class VFSService {
   }
 
   public async updateMultipleItemsTags({ itemIds, tags }: { itemIds: string[]; tags: string[] }): Promise<void> {
-    await Promise.all(itemIds.map(id => this.engine.setTags(id, tags)));
+    const engineAny = this.engine as any;
+    
+    // 检查是否存在批量接口 (VFSCoreAdapter 实现了它)
+    if (typeof engineAny.setTagsBatch === 'function') {
+        const updates = itemIds.map(id => ({ id, tags }));
+        await engineAny.setTagsBatch(updates);
+    } else {
+        // 回退逻辑
+        await Promise.all(itemIds.map(id => this.engine.setTags(id, tags)));
+    }
   }
   
   public async findItemById(itemId: string): Promise<EngineNode | null> {

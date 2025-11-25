@@ -5,8 +5,7 @@
  * a unified public API by implementing ISessionUI.
  */
 import { ISessionUI, TagEditorComponent, type SessionUIOptions, type SessionManagerEvent, type SessionManagerCallback, type ISessionEngine, type EngineEvent} from '@itookit/common';
-// [修正] 移除 @itookit/vfs-core 的导入
-import { EngineTagSource } from '../mention/EngineTagSource'; // 使用本地实现的通用 Source
+import { EngineTagSource } from '../mention/EngineTagSource';
 
 // --- 内部模块 ---
 import { Coordinator } from './Coordinator';
@@ -361,6 +360,33 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
                         }
                     } catch(e) { this._loadData(); }
                     break;
+                // ✨ [新增] 处理批量更新事件
+                case 'node:batch_updated' as any: {
+                    const { updatedNodeIds } = event.payload;
+                    if (updatedNodeIds && Array.isArray(updatedNodeIds)) {
+                        console.log(`[VFSUIManager] Received batch update for ${updatedNodeIds.length} items`);
+                        
+                        // 并行获取所有更新的节点数据
+                        const updates = await Promise.all(updatedNodeIds.map(async (id: string) => {
+                            try {
+                                const node = await this.engine.getNode(id);
+                                return node ? { itemId: id, data: mapEngineNodeToUIItem(node) } : null;
+                            } catch { return null; }
+                        }));
+
+                        const validUpdates = updates.filter(u => u !== null);
+                        
+                        // 发送批量更新 Action，只触发一次 Store 更新
+                        if (validUpdates.length > 0) {
+                            this.store.dispatch({
+                                type: 'ITEMS_BATCH_UPDATE_SUCCESS',
+                                payload: { updates: validUpdates }
+                            });
+                        }
+                    }
+                    break;
+                }
+
                 case 'node:moved':
                     this._loadData();
                     break;
@@ -371,7 +397,8 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
             this.engine.on('node:created', handleEvent),
             this.engine.on('node:updated', handleEvent),
             this.engine.on('node:deleted', handleEvent),
-            this.engine.on('node:moved', handleEvent)
+            this.engine.on('node:moved', handleEvent),
+            this.engine.on('node:batch_updated' as any, handleEvent)
         ];
         this.engineUnsubscribe = () => unsubs.forEach(u => u());
     }

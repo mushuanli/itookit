@@ -432,6 +432,11 @@ export class VFSCore {
   }
 
   // ==================== Tag 高级 API ====================
+  // [新增] 批量设置标签 API
+  async batchSetNodeTags(updates: { nodeId: string, tags: string[] }[]): Promise<void> {
+      this._ensureInitialized();
+      await this.vfs.batchSetTags(updates);
+  }
 
   /**
    * [新增] 批量设置节点标签（覆盖式）

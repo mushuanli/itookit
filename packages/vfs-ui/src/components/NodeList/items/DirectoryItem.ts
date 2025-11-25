@@ -26,9 +26,25 @@ export class DirectoryItem extends BaseNodeItem {
         this.childrenContainer = this.element.querySelector('.vfs-directory-item__children')!;
     }
 
+    /**
+     * [新增] 更新数据对象并检查是否需要重绘
+     */
+    public updateItem(newItem: VFSNodeUI): void {
+        const oldTags = JSON.stringify(this.item.metadata.tags);
+        const newTags = JSON.stringify(newItem.metadata.tags);
+        const oldTitle = this.item.metadata.title;
+        const newTitle = newItem.metadata.title;
+        
+        super.updateItem(newItem);
+
+        if (oldTags !== newTags || oldTitle !== newTitle) {
+            this.render();
+        }
+    }
+
     protected createRootElement(): HTMLElement {
         const tempDiv = document.createElement('div');
-        tempDiv.innerHTML = '<div></div>'; // Placeholder
+        tempDiv.innerHTML = '<div></div>';
         return tempDiv.firstElementChild as HTMLElement;
     }
 
@@ -36,7 +52,6 @@ export class DirectoryItem extends BaseNodeItem {
         if (JSON.stringify(this.currentProps) !== JSON.stringify(nextProps)) {
             this.currentProps = nextProps;
             this.render();
-            // Re-assign childrenContainer as the element was replaced
             this.childrenContainer = this.element.querySelector('.vfs-directory-item__children')!;
         }
     }
@@ -46,7 +61,7 @@ export class DirectoryItem extends BaseNodeItem {
             this.item,
             this.currentProps.isExpanded,
             this.currentProps.dirSelectionState,
-            this.currentProps.isSelected, // [修改] 传入新增的 isSelected 参数
+            this.currentProps.isSelected,
             this.currentProps.isSelectionMode,
             this.currentProps.searchQueries,
             this.isReadOnly
@@ -56,7 +71,6 @@ export class DirectoryItem extends BaseNodeItem {
         tempDiv.innerHTML = newHTML;
         const newElement = tempDiv.firstElementChild as HTMLElement;
         
-        // Preserve children by moving them to the new element before replacing
         const oldChildrenContainer = this.element.querySelector('.vfs-directory-item__children');
         const newChildrenContainer = newElement.querySelector('.vfs-directory-item__children');
         if (oldChildrenContainer && newChildrenContainer) {
@@ -65,15 +79,11 @@ export class DirectoryItem extends BaseNodeItem {
             }
         }
 
-        // 如果旧元素已经在 DOM 中，则用新元素替换它
         if (this.element.parentNode) {
             this.element.parentNode.replaceChild(newElement, this.element);
         }
 
-        // [核心修复] 始终更新 element 引用
         Object.defineProperty(this, 'element', { value: newElement, writable: true });
-        
-        // 更新 childrenContainer 引用，指向新元素的容器
         this.childrenContainer = newChildrenContainer as HTMLElement;
     }
 }

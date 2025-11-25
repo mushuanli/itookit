@@ -82,7 +82,6 @@ export interface CopyResult {
  */
 export interface IVFSMiddleware {
   name: string;
-  // [推荐] 添加这些可选属性，让 IProvider 更通用，减少类型冲突
   priority?: number; 
   initialize?(storage: any, eventBus: any): void;
   canHandle?(vnode: any): boolean;
@@ -101,14 +100,16 @@ export enum VFSEventType {
   NODE_UPDATED = 'node:updated',
   NODE_DELETED = 'node:deleted',
   NODE_MOVED = 'node:moved',
-  NODE_COPIED = 'node:copied'
+  NODE_COPIED = 'node:copied',
+  // ✨ [新增] 批量更新事件，用于聚合通知
+  NODES_BATCH_UPDATED = 'nodes:batch_updated' 
 }
 
 /** VFS 事件 */
 export interface VFSEvent {
   type: VFSEventType;
-  nodeId: string;
-  path: string;
+  nodeId: string | null; // 批量事件时可能为 null 或主要 ID
+  path: string | null;
   timestamp: number;
   data?: any;
 }

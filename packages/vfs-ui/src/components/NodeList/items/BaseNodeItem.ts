@@ -1,26 +1,16 @@
 /**
- * @file vfs-ui/src/components/NodeList/items/BaseNodeItem.ts
+ * @file vfs-ui/components/NodeList/items/BaseNodeItem.ts
  * @desc Abstract base class for FileItem and DirectoryItem, handling common logic.
  */
 import { VFSNodeUI } from '../../../types/types';
 
-// [修正] NodeItemCallbacks 接口不再需要，可以删除
-// export interface NodeItemCallbacks {
-//     onClick: (id: string, event: MouseEvent) => void;
-//     onContextMenu: (id: string, event: MouseEvent) => void;
-// }
-
 export abstract class BaseNodeItem {
     public readonly element: HTMLElement;
-    protected readonly item: VFSNodeUI;
-    // [修正] callbacks 属性已移除
-    // protected readonly callbacks: NodeItemCallbacks;
+    protected item: VFSNodeUI; // [修改] 去掉 readonly，允许更新
     protected readonly isReadOnly: boolean;
 
-    // [修正] 构造函数不再接收 callbacks
     constructor(item: VFSNodeUI, isReadOnly: boolean) {
         this.item = item;
-        // this.callbacks = callbacks;
         this.isReadOnly = isReadOnly;
         this.element = this.createRootElement();
         if (!this.isReadOnly) {
@@ -28,14 +18,18 @@ export abstract class BaseNodeItem {
         }
     }
 
+    /**
+     * [新增] 更新组件持有的数据对象
+     * 当 Store 中的数据发生变化（如 tag 更新）时调用
+     */
+    public updateItem(newItem: VFSNodeUI): void {
+        this.item = newItem;
+    }
+
     protected abstract createRootElement(): HTMLElement;
     public abstract update(props: any): void;
 
-
-
     public destroy(): void {
-        // [修正] unbindEvents 不再需要调用
-        // this.unbindEvents();
         this.element.remove();
     }
 }
