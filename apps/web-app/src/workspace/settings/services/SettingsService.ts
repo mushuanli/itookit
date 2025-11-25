@@ -15,6 +15,7 @@ const CONFIG_MODULE = '__config';
 
 // 定义不向用户展示的系统内部模块
 const SYSTEM_MODULES = ['__config', '__vfs_meta__', 'settings_ui'];
+const SNAPSHOT_PREFIX = 'snapshot_'; // [新增] 快照前缀
 
 const FILES = {
     connections: '/connections.json',
@@ -23,6 +24,13 @@ const FILES = {
     tags: '/tags.json',
     contacts: '/contacts.json'
 };
+
+// [新增] 快照接口
+export interface LocalSnapshot {
+    name: string;
+    displayName: string;
+    timestamp: number;
+}
 
 type ChangeListener = () => void;
 
@@ -47,8 +55,6 @@ export class SettingsService {
      */
     async init(): Promise<void> {
         if (this.initialized) return;
-
-        // 1. 挂载隐藏的配置模块
         if (!this.vfs.getModule(CONFIG_MODULE)) {
             try {
                 await this.vfs.mount(CONFIG_MODULE, 'Settings Persistence');
@@ -56,8 +62,6 @@ export class SettingsService {
                 if (e.code !== VFSErrorCode.ALREADY_EXISTS) throw e;
             }
         }
-
-        // 2. 并行加载所有文件
         await Promise.all([
             this.loadEntity('connections'),
             this.loadEntity('mcpServers'),
@@ -65,10 +69,7 @@ export class SettingsService {
             this.loadEntity('tags'),
             this.loadEntity('contacts'),
         ]);
-
-        // 3. 确保默认配置存在 (最小可用系统)
         await this.ensureDefaults();
-
         this.initialized = true;
         this.notify();
     }
@@ -158,7 +159,7 @@ export class SettingsService {
             this.state[key] = JSON.parse(jsonStr);
         } catch (e: any) {
             if (e.code === VFSErrorCode.NOT_FOUND) {
-                this.state[key] = []; // 默认空数组
+                this.state[key] = [];
             } else {
                 console.error(`Failed to load ${key}`, e);
             }
@@ -261,7 +262,6 @@ export class SettingsService {
      */
     getAvailableWorkspaces(): { name: string, description?: string }[] {
         const allModules = this.vfs.getAllModules();
-        // 过滤掉系统保留模块，只返回用户内容模块
         return allModules
             .filter(m => !SYSTEM_MODULES.includes(m.name))
             .map(m => ({ name: m.name, description: m.description }));
@@ -275,21 +275,17 @@ export class SettingsService {
         moduleNames: string[]
     ): Promise<any> {
         const exportData: any = {
-            version: 2, // 版本 2 格式
+            version: 2,
             timestamp: Date.now(),
             type: 'mixed_backup',
             settings: {},
             modules: []
         };
-
-        // 1. 导出配置项 (JSON Data)
         settingsKeys.forEach(key => {
             if (this.state[key]) {
                 exportData.settings[key] = JSON.parse(JSON.stringify(this.state[key]));
             }
         });
-
-        // 2. 导出工作区 (VFS Dump)
         for (const name of moduleNames) {
             try {
                 const moduleDump = await this.vfs.exportModule(name);
@@ -311,10 +307,7 @@ export class SettingsService {
         moduleNames: string[]
     ) {
         const tasks: Promise<void>[] = [];
-
-        // 1. 导入配置项
         if (data.settings) {
-            // 新版格式：数据在 data.settings 下
             for (const key of settingsKeys) {
                 const sourceData = data.settings[key];
                 if (sourceData && Array.isArray(sourceData)) {
@@ -323,7 +316,6 @@ export class SettingsService {
                 }
             }
         } else {
-            // 兼容旧版纯配置导出：数据直接在根节点
             for (const key of settingsKeys) {
                 const sourceData = data[key];
                 if (sourceData && Array.isArray(sourceData)) {
@@ -364,6 +356,52 @@ export class SettingsService {
         
         // 强制通知刷新 UI
         this.notify();
+    }
+
+    // --- [新增] 本地快照管理 ---
+
+    async listLocalSnapshots(): Promise<LocalSnapshot[]> {
+        if (!window.indexedDB.databases) {
+            return []; 
+        }
+        const dbs = await window.indexedDB.databases();
+        const snapshots: LocalSnapshot[] = [];
+        for (const db of dbs) {
+            if (db.name && db.name.startsWith(SNAPSHOT_PREFIX)) {
+                const parts = db.name.split('_');
+                const timestamp = parseInt(parts[1]);
+                if (!isNaN(timestamp)) {
+                    snapshots.push({
+                        name: db.name,
+                        displayName: new Date(timestamp).toLocaleString(),
+                        timestamp
+                    });
+                }
+            }
+        }
+        return snapshots.sort((a, b) => b.timestamp - a.timestamp);
+    }
+
+    async createSnapshot(): Promise<void> {
+        const currentDbName = this.vfs.dbName;
+        const timestamp = Date.now();
+        const targetDbName = `${SNAPSHOT_PREFIX}${timestamp}`;
+        await VFSCore.copyDatabase(currentDbName, targetDbName);
+    }
+
+    async restoreSnapshot(snapshotName: string): Promise<void> {
+        const currentDbName = this.vfs.dbName;
+        await this.vfs.shutdown(); // 先关闭当前系统释放锁
+        await VFSCore.copyDatabase(snapshotName, currentDbName);
+    }
+
+    async deleteSnapshot(snapshotName: string): Promise<void> {
+        return new Promise((resolve, reject) => {
+            const req = window.indexedDB.deleteDatabase(snapshotName);
+            req.onsuccess = () => resolve();
+            req.onerror = () => reject(req.error);
+            req.onblocked = () => console.warn(`Delete ${snapshotName} blocked`);
+        });
     }
 
     // --- System Actions ---
