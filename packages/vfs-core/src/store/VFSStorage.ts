@@ -106,22 +106,22 @@ export class VFSStorage {
   /**
    * 根据路径获取节点ID
    */
-  async getNodeIdByPath(path: string): Promise<string | null> {
+  async getNodeIdByPath(path: string, transaction?: Transaction | null): Promise<string | null> {
     this.ensureConnected();
-    return this.inodeStore.getIdByPath(path);
+    return this.inodeStore.getIdByPath(path, transaction);
   }
 
   /**
    * 获取子节点
    */
-  async getChildren(parentId: string): Promise<VNode[]> {
+  async getChildren(parentId: string, transaction?: Transaction | null): Promise<VNode[]> {
     this.ensureConnected();
-    // 1. 先从 InodeStore 获取基础的 VNode 列表
-    const children = await this.inodeStore.getChildren(parentId);
+    // 1. 先从 InodeStore 获取基础的 VNode 列表 (传递 transaction)
+    const children = await this.inodeStore.getChildren(parentId, transaction);
     
-    // 2. 并行地为每个子节点获取它们的标签并填充
+    // 2. 并行地为每个子节点获取它们的标签并填充 (传递 transaction)
     await Promise.all(children.map(async (child) => {
-        child.tags = await this.nodeTagStore.getTagsForNode(child.nodeId);
+        child.tags = await this.nodeTagStore.getTagsForNode(child.nodeId, transaction);
     }));
 
     return children;
