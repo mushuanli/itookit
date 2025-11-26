@@ -138,10 +138,24 @@ export class MDxProcessor {
    * @returns 一个包含所有处理细节的丰富结果对象的 Promise。
    */
   public async process(markdownText: string, options: ProcessOptions): Promise<ProcessResult> {
-    // 阶段 0: 解析 Frontmatter
-    const parsed = fm(markdownText);
-    const frontmatter = parsed.attributes as Record<string, any>;
-    const body = parsed.body;
+    // [修复] 安全的 Frontmatter 解析
+    let frontmatter: Record<string, any> = {};
+    let body = markdownText;
+
+    try {
+        // 只有当内容确实以 --- 开头时才尝试解析，避免不必要的错误
+        if (markdownText.trimStart().startsWith('---')) {
+            const parsed = fm(markdownText);
+            frontmatter = parsed.attributes as Record<string, any>;
+            body = parsed.body;
+        }
+    } catch (error) {
+        // 解析失败（例如格式错误的 frontmatter），降级处理：
+        // 将整个文本视为 body，不提取 attributes
+        // console.warn('[MDxProcessor] Frontmatter parsing failed, treating content as raw body.', error);
+        body = markdownText; 
+    }
+
     const metadata: Record<string, any> = { ...frontmatter };
 
     // 阶段 1: 查找所有 Mentions
@@ -156,7 +170,7 @@ export class MDxProcessor {
     return {
       originalContent: markdownText,
       transformedContent,
-      mentions: mentions.sort((a, b) => a.index - b.index), // 按原始顺序返回
+      mentions: mentions.sort((a, b) => a.index - b.index),
       metadata,
     };
   }
@@ -169,7 +183,6 @@ export class MDxProcessor {
     // 1. @type:id (e.g., @user:alice)
     // 2. [text](mdx://type/id)
     const mentionRegex = /@(\w+):(\S+)|\[[^\]]+\]\(mdx:\/\/(\w+)\/([^)]+)\)/g;
-    
     return Array.from(content.matchAll(mentionRegex)).map(match => {
       const isAtMention = !!match[1];
       const type = isAtMention ? match[1] : match[3];
@@ -212,24 +225,21 @@ export class MDxProcessor {
     metadata: Record<string, any>
   ): string {
     let transformed = content;
-    const sortedMentions = [...mentions].sort((a, b) => b.index - a.index); // 从后往前处理
+    const sortedMentions = [...mentions].sort((a, b) => b.index - a.index);
 
     for (const mention of sortedMentions) {
       const rule = options.rules[mention.type] || options.rules['*'];
       if (!rule) continue;
 
-      // a. 元数据收集
       if (rule.collectMetadata && mention.id) {
         if (!metadata[mention.type]) {
           metadata[mention.type] = [];
         }
-        // 避免重复添加
         if (!metadata[mention.type].includes(mention.id)) {
             metadata[mention.type].push(mention.id);
         }
       }
 
-      // b. 内容转换
       let replacement = '';
       switch (rule.action) {
         case 'replace':
@@ -239,7 +249,6 @@ export class MDxProcessor {
           replacement = mention.raw;
           break;
         case 'remove':
-          // replacement 保持为空字符串
           break;
       }
       
@@ -247,7 +256,6 @@ export class MDxProcessor {
       const endIndex = startIndex + mention.raw.length;
       transformed = transformed.slice(0, startIndex) + replacement + transformed.slice(endIndex);
     }
-    
     return transformed.trim();
   }
 }
