@@ -184,7 +184,7 @@ export class ExecutableSettingsEditor extends BaseSettingsEditor {
         `;
     }
 
-    private renderOrchestratorConfig(executable: Executable) {
+    private renderOrchestratorConfig(_executable: Executable) {
         // 简化实现：只显示占位
         return `<div class="settings-section"><p class="settings-form__help">编排器配置功能（子 Agent 选择）在此处实现。</p></div>`;
     }

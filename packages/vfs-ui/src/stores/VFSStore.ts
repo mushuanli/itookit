@@ -3,11 +3,36 @@
  * @desc Implements the VFSStore, the single source of truth for the UI state, using Immer for immutability.
  */
 import { produce, enableMapSet } from "immer";
-import type { VFSUIState, VFSNodeUI } from '../types/types.js';
+import type { VFSUIState, VFSNodeUI, TagInfo } from '../types/types.js';
 
 enableMapSet();
 
 export type Action = { type: string; payload?: any };
+
+// [新增] 辅助函数：重新计算全局标签状态
+// 这确保了无论何时 items 发生变化，侧边栏的标签列表和计数都是 100% 准确的（包括新增和删除）
+function rebuildTagsMap(items: VFSNodeUI[]): Map<string, TagInfo> {
+    const tagsMap = new Map<string, TagInfo>();
+    
+    const traverse = (nodes: VFSNodeUI[]) => {
+        for (const node of nodes) {
+            if (node.metadata.tags) {
+                node.metadata.tags.forEach(tagName => {
+                    if (!tagsMap.has(tagName)) {
+                        tagsMap.set(tagName, { name: tagName, color: null, itemIds: new Set() });
+                    }
+                    tagsMap.get(tagName)!.itemIds.add(node.id);
+                });
+            }
+            if (node.children) {
+                traverse(node.children);
+            }
+        }
+    };
+    
+    traverse(items);
+    return tagsMap;
+}
 
 export class VFSStore {
     private _state: VFSUIState;
@@ -113,6 +138,9 @@ export class VFSStore {
                         if (draft.activeId === id) draft.activeId = null;
                         draft.selectedItemIds.delete(id as string);
                     });
+
+                    // [修复] 删除项目后，重新计算标签 (防止删除最后一个引用后标签仍显示)
+                    draft.tags = rebuildTagsMap(draft.items); 
                     break;
                 }
 
@@ -152,7 +180,6 @@ export class VFSStore {
                        for (let i=0; i < items.length; i++) {
                            const item = items[i];
                            if (item.id === itemId) {
-                               // 直接用新对象替换旧对象，以确保所有派生数据都已更新
                                items[i] = updates;
                                return true;
                            }
@@ -161,12 +188,15 @@ export class VFSStore {
                        return false;
                     };
                     findAndUpdate(draft.items);
+
+                    // [修复] 更新项目后，重新计算标签 (处理添加/移除标签)
+                    draft.tags = rebuildTagsMap(draft.items); 
                     break;
                 }
 
                 // ✨ [新增] 批量更新 Item
                 case 'ITEMS_BATCH_UPDATE_SUCCESS': {
-                    const { updates } = action.payload; // updates: { itemId: string, data: VFSNodeUI }[]
+                    const { updates } = action.payload;
                     if (!updates || !Array.isArray(updates)) break;
 
                     const updateMap = new Map(updates.map((u: any) => [u.itemId, u.data]));
@@ -176,7 +206,7 @@ export class VFSStore {
                             const item = items[i];
                             if (updateMap.has(item.id)) {
                                 items[i] = updateMap.get(item.id)!;
-                                updateMap.delete(item.id); // Optimization
+                                updateMap.delete(item.id);
                             }
                             if (item.children) {
                                 recursiveUpdate(item.children);
@@ -186,6 +216,9 @@ export class VFSStore {
                     };
                     
                     recursiveUpdate(draft.items);
+
+                    // [修复] 批量更新后，重新计算标签 (关键修复点)
+                    draft.tags = rebuildTagsMap(draft.items);
                     break;
                 }
 
@@ -193,15 +226,14 @@ export class VFSStore {
                 case 'FOLDER_CREATE_SUCCESS': {
                     const newItem: VFSNodeUI = action.payload;
                     const parentId = newItem.metadata.parentId;
-
                     if (!parentId) {
                         draft.items.unshift(newItem);
                     } else {
-                        const parentFolder = findItemById(draft.items, parentId);
+                         const parentFolder = findItemById(draft.items, parentId);
                         if (parentFolder?.type === 'directory') {
-                            parentFolder.children = parentFolder.children || [];
+                             parentFolder.children = parentFolder.children || [];
                             parentFolder.children.unshift(newItem);
-                            draft.expandedFolderIds.add(parentId);
+                             draft.expandedFolderIds.add(parentId);
                         } else {
                             draft.items.unshift(newItem);
                         }
@@ -213,6 +245,7 @@ export class VFSStore {
                         draft.selectedItemIds = new Set([newItem.id]);
                     }
                     draft.creatingItem = null;
+                    draft.tags = rebuildTagsMap(draft.items);
                     break;
                 }
 
