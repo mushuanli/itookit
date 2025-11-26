@@ -10,7 +10,6 @@ enableMapSet();
 export type Action = { type: string; payload?: any };
 
 // [新增] 辅助函数：重新计算全局标签状态
-// 这确保了无论何时 items 发生变化，侧边栏的标签列表和计数都是 100% 准确的（包括新增和删除）
 function rebuildTagsMap(items: VFSNodeUI[]): Map<string, TagInfo> {
     const tagsMap = new Map<string, TagInfo>();
     
@@ -173,6 +172,30 @@ export class VFSStore {
                     draft.selectedItemIds.clear();
                     break;
 
+                // ✨ [新增] 轻量级元数据更新，用于编辑器实时同步统计值 (Performance Optimization)
+                // 仅更新内存中的 Store，不涉及后端/DB IO
+                case 'ITEM_METADATA_UPDATE': {
+                    const { itemId, metadata } = action.payload;
+                    const findAndUpdateMeta = (items: VFSNodeUI[]): boolean => {
+                        for (const item of items) {
+                            if (item.id === itemId) {
+                                // 使用 Object.assign 进行浅合并，只更新变化的字段 (如 taskCount)
+                                item.metadata = { ...item.metadata, ...metadata };
+                                // 如果更新了 tags，需要重新构建标签索引 (虽然通常 metadata update 用于 badge)
+                                if (metadata.tags) {
+                                     // 标记需要重建 tags，或者在此处简单处理
+                                     // 为性能考虑，如果只更新 taskCount，不重建全局 tags map
+                                }
+                                return true;
+                            }
+                            if (item.children && findAndUpdateMeta(item.children)) return true;
+                        }
+                        return false;
+                    };
+                    findAndUpdateMeta(draft.items);
+                    break;
+                }
+
                 // ✨ [架构优化] 修正 ITEM_UPDATE_SUCCESS 的 Reducer 逻辑
                 case 'ITEM_UPDATE_SUCCESS': {
                     const { itemId, updates } = action.payload;
@@ -299,9 +322,18 @@ export class VFSStore {
                             
                             if (oldActiveId === newSessionId) {
                                 draft._forceUpdateTimestamp = Date.now();
+                            } else {
+                                // ✨ [新增] 切换到新文件时，自动折叠上一个文件的大纲
+                                if (oldActiveId) {
+                                    draft.expandedOutlineIds.delete(oldActiveId);
+                                }
                             }
                         }
                     } else if (newSessionId === null) {
+                        // 关闭会话时，也可选地清理大纲状态
+                        if (draft.activeId) {
+                            draft.expandedOutlineIds.delete(draft.activeId);
+                        }
                         draft.activeId = null;
                         // 注意：关闭会话时不一定要清空 selectedItemIds，保持原样或由具体的交互逻辑决定
                     }

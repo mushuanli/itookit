@@ -33,10 +33,14 @@ export class FileItem extends BaseNodeItem {
         const oldTitle = this.item.metadata.title;
         const newTitle = newItem.metadata.title;
         
+        // ✨ [新增] 检查任务统计是否变化
+        const oldTasks = JSON.stringify(this.item.metadata.custom?.taskCount);
+        const newTasks = JSON.stringify(newItem.metadata.custom?.taskCount);
+        
         super.updateItem(newItem);
 
         // 如果影响显示的元数据发生了变化，强制重绘
-        if (oldTags !== newTags || oldTitle !== newTitle) {
+        if (oldTags !== newTags || oldTitle !== newTitle || oldTasks !== newTasks) {
             this.render();
         }
     }
@@ -70,13 +74,10 @@ export class FileItem extends BaseNodeItem {
         tempDiv.innerHTML = newHTML;
         const newElement = tempDiv.firstElementChild as HTMLElement;
         
-        // 如果旧元素在 DOM 中，执行替换以保持位置
         if (this.element.parentNode) {
             this.element.parentNode.replaceChild(newElement, this.element);
         }
 
-        // [核心修复] 无论是否执行了 replaceChild，必须始终更新实例引用的 element
-        // 这样当 NodeList 稍后执行 appendChild(instance.element) 时，添加的是最新的元素
         Object.defineProperty(this, 'element', { value: newElement, writable: true });
     }
 }

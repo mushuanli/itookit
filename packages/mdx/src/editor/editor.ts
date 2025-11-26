@@ -17,7 +17,7 @@ import {
     Heading, 
     EditorEvent, 
     EditorEventCallback,
-    slugify // [导入公共工具]
+    slugify 
 } from '@itookit/common';
 
 export interface MDxEditorConfig extends EditorOptions {
@@ -159,7 +159,13 @@ export class MDxEditor extends IEditor {
   private listenToPluginEvents(): void {
     const unlisten = this.renderer.getPluginManager().listen('taskToggled', (result: TaskToggleResult) => {
       if (result.wasUpdated && result.updatedMarkdown !== this.getText()) {
+        console.log('[MDxEditor] Received taskToggled. Syncing editor text...');
+        
+        // 1. 更新编辑器文本 (这通常会重置 dirty 状态，但这没关系)
         this.setText(result.updatedMarkdown);
+        
+        // 2. ✨ [修改] 发送乐观更新事件 -> 通知 Connector 立即刷新 UI Badge
+        this.emit('optimisticUpdate');
       }
     });
     this.cleanupListeners.push(unlisten);
@@ -240,17 +246,11 @@ export class MDxEditor extends IEditor {
         const level = match[1].length;
         const textContent = match[2].trim();
         if (textContent) {
-          // 1. 使用公共 slugify
           const rawSlug = slugify(textContent);
-          // 2. [强制约定] 添加 heading- 前缀
           const baseSlug = `heading-${rawSlug}`;
-          
           const count = slugCount.get(baseSlug) || 0;
           slugCount.set(baseSlug, count + 1);
-          
-          // 处理重复标题
           const uniqueId = count > 0 ? `${baseSlug}-${count}` : baseSlug;
-          
           headings.push({ level, text: textContent, id: uniqueId });
         }
       }
@@ -263,11 +263,9 @@ export class MDxEditor extends IEditor {
   async navigateTo(target: { elementId: string }): Promise<void> {
     if (this.currentMode === 'render' && this.renderContainer) {
       try {
-          // CSS.escape 防止 ID 中的特殊字符导致 querySelector 报错
           const element = this.renderContainer.querySelector(`#${CSS.escape(target.elementId)}`);
           if (element) {
               element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              // 可选：高亮一下目标
               element.classList.add('highlight-pulse');
               setTimeout(() => element.classList.remove('highlight-pulse'), 1500);
           } else {
@@ -379,11 +377,9 @@ export class MDxEditor extends IEditor {
       this.cleanupListeners.forEach((fn) => fn());
       this.cleanupListeners = [];
       this.eventEmitter.clear();
-      
       if (this._container) {
           this._container.innerHTML = '';
       }
-
       this._container = null;
       this.editorContainer = null;
       this.renderContainer = null;
