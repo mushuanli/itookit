@@ -50,13 +50,21 @@ export function createFileItemHTML(
     const summary = content?.summary || '';
     const { isPinned = false, hasUnreadUpdate = false, taskCount } = custom;
 
+    // 🔥 [DEBUG] 检查渲染时的输入数据
+    if (custom.taskCount) {
+        console.log(`[ItemTemplate] Rendering file ${id}:`, { 
+            taskCount: custom.taskCount, 
+            showBadges: uiSettings.showBadges 
+        });
+    }
+
     const checkboxHTML = !isReadOnly && isSelectionMode
         ? `<div class="vfs-node-item__checkbox-wrapper"><input type="checkbox" class="vfs-node-item__checkbox" data-item-id="${id}" ${isSelected ? 'checked' : ''} data-action="toggle-selection"></div>`
         : '';
 
-    // [修复] 明确检查 taskCount 及其属性
-    const badgesHTML = uiSettings.showBadges && taskCount && taskCount.total > 0
-        ? `<div class="vfs-node-item__badges"><span class="vfs-badge">✅ ${taskCount.completed}/${taskCount.total}</span></div>` : '';
+    // [核心检查] 确保这一行逻辑正确
+    const badgesHTML = uiSettings.showBadges && custom.taskCount && custom.taskCount.total > 0
+        ? `<div class="vfs-node-item__badges"><span class="vfs-badge">✅ ${custom.taskCount.completed}/${custom.taskCount.total}</span></div>` : '';
 
     const tagsHTML = uiSettings.showTags && tags.length > 0
         ? `<div class="vfs-node-item__tags">${tags.map(tag => `<span class="vfs-tag-pill">${escapeHTML(tag)}</span>`).join('')}</div>` : '';

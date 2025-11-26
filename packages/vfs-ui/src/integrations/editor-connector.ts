@@ -6,6 +6,7 @@
 import type { IEditor, EditorFactory, EditorOptions, ISessionUI, ISessionEngine } from '@itookit/common';
 import type { VFSNodeUI, VFSUIState } from '../types/types';
 import type { VFSService } from '../services/VFSService';
+import { parseFileInfo } from '../utils/parser'; // [新增] 引入解析器
 
 export interface ConnectOptions {
     /** Callback fired when an editor instance is fully created and mounted */
@@ -80,6 +81,25 @@ export function connectEditorLifecycle(
                 // 5. Perform Write
                 const contentToSave = activeEditor.getText();
                 await engine.writeContent(activeNode.id, contentToSave);
+                
+                // 2. [Core Fix] 解析内容并持久化统计数据 (Task, Cloze, Mermaid)
+                // 这样下次 loadTree 时即使没有 content 也能显示 Badge
+                const parseResult = parseFileInfo(contentToSave);
+                
+                // 🔥 [DEBUG] 打印即将写入的元数据
+                console.log('[Connector] Saving Metadata for node:', activeNode.id, parseResult.metadata);
+
+                const metadataUpdates = {
+                    taskCount: parseResult.metadata.taskCount,
+                    clozeCount: parseResult.metadata.clozeCount,
+                    mermaidCount: parseResult.metadata.mermaidCount,
+                    // 同时也更新摘要，方便搜索预览
+                    _summary: parseResult.summary 
+                };
+                
+                // 使用 updateMetadata 进行增量更新
+                await engine.updateMetadata(activeNode.id, metadataUpdates);
+
                 if (activeEditor.setDirty) activeEditor.setDirty(false);
             } else {
                 console.warn(`[EditorConnector] Node ${activeNode.id} was deleted. Skipping save.`);
@@ -146,6 +166,10 @@ export function connectEditorLifecycle(
                             }
                         });
                         if (unsubMode) activeEditorUnsubscribers.push(unsubMode);
+                        
+                        // 监听交互变化，如果想要更实时的保存，可以在这里触发 scheduleSave
+                        const unsubChange = activeEditor.on('interactiveChange', () => { scheduleSave(); });
+                        if (unsubChange) activeEditorUnsubscribers.push(unsubChange);
                     }
 
                     if (onEditorCreated) onEditorCreated(activeEditor);
@@ -183,7 +207,7 @@ export function connectEditorLifecycle(
 
     return () => {
         unsubscribeSessionListener();
-        unsubscribeNav(); // 别忘了清理导航监听
+        unsubscribeNav();
         teardownActiveEditor().catch(err => console.error('Error during final teardown:', err));
     };
 }
