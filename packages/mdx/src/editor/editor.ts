@@ -10,7 +10,15 @@ import type { VFSCore } from '@itookit/vfs-core';
 import { MDxRenderer } from '../renderer/renderer';
 import type { MDxPlugin } from '../core/plugin';
 import type { TaskToggleResult } from '../plugins/interactions/task-list.plugin';
-import { IEditor, EditorOptions, UnifiedSearchResult, Heading, EditorEvent, EditorEventCallback } from '@itookit/common';
+import { 
+    IEditor, 
+    EditorOptions, 
+    UnifiedSearchResult, 
+    Heading, 
+    EditorEvent, 
+    EditorEventCallback,
+    slugify // [导入公共工具]
+} from '@itookit/common';
 
 export interface MDxEditorConfig extends EditorOptions {
   searchMarkClass?: string;
@@ -31,14 +39,10 @@ export class MDxEditor extends IEditor {
   private currentMode: 'edit' | 'render';
   private config: MDxEditorConfig;
   private cleanupListeners: Array<() => void> = [];
-  // 使用 IEditor 中定义的事件类型
   private eventEmitter = new Map<EditorEvent, Set<EditorEventCallback>>();
   private readOnlyCompartment = new Compartment();
   private searchCompartment = new Compartment();
-
   private isDestroying = false;
-
-  // 【优化】新增脏状态标志
   private _isDirty = false;
 
   constructor(options: MDxEditorConfig = {}) {
@@ -59,7 +63,7 @@ export class MDxEditor extends IEditor {
     console.log('🎬 [MDxEditor] Starting initialization...');
     this._container = container;
     this.createContainers(container);
-    this._isDirty = false; // 初始化时内容是干净的
+    this._isDirty = false;
 
     // 短暂延迟，以确保插件有时间在主线程上完成其同步注册过程。
     // TODO: 未来可探索更健壮的事件驱动或 Promise 机制来代替 setTimeout。
@@ -128,22 +132,14 @@ export class MDxEditor extends IEditor {
       markdown(),
       this.readOnlyCompartment.of(EditorView.editable.of(true)),
       this.searchCompartment.of([]),
-
-      // ✨ [核心实现] 监听原生 DOM 事件并转发为编辑器事件
       EditorView.domEventHandlers({
-        blur: (_event, _view) => {
-            this.emit('blur');
-        },
-        focus: (_event, _view) => {
-            this.emit('focus');
-        }
+        blur: (_event, _view) => { this.emit('blur'); },
+        focus: (_event, _view) => { this.emit('focus'); }
       }),
-
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
           this.emit('change');
           if (update.transactions.some(tr => tr.isUserEvent('input') || tr.isUserEvent('delete'))) {
-            // 【优化】用户交互导致内容变化，设置脏状态
             this.setDirty(true);
             this.emit('interactiveChange');
           }
@@ -169,7 +165,6 @@ export class MDxEditor extends IEditor {
     this.cleanupListeners.push(unlisten);
   }
 
-  // ✨ [最终] switchToMode返回Promise，使其成为可靠的异步操作
   async switchToMode(mode: 'edit' | 'render', isInitializing = false): Promise<void> {
     if (this.currentMode === mode && !isInitializing) return;
     if (!this._container || !this.editorContainer || !this.renderContainer) return;
@@ -187,9 +182,7 @@ export class MDxEditor extends IEditor {
       await this.renderContent();
     }
     
-    // 确保内部插件系统的事件也被触发
     this.renderer.getPluginManager().emit('modeChanged', { mode });
-    // 同时触发公共事件
     this.emit('modeChanged', { mode });
   }
 
@@ -210,13 +203,14 @@ export class MDxEditor extends IEditor {
     commandMap.forEach((fn, name) => { commands[name] = fn; });
     return Object.freeze(commands);
   }
+  
   getText(): string { return this.editorView ? this.editorView.state.doc.toString() : ''; }
+  
   setText(markdown: string): void {
     if (this.editorView && markdown !== this.getText()) {
       this.editorView.dispatch({
         changes: { from: 0, to: this.editorView.state.doc.length, insert: markdown }
       });
-      // 【优化】程序化设置内容，重置脏状态
       this.setDirty(false);
     }
   }
@@ -239,9 +233,6 @@ export class MDxEditor extends IEditor {
     const text = this.getText();
     const headings: Heading[] = [];
     const slugCount = new Map<string, number>();
-    const slugify = (s: string) => s.toLowerCase().trim()
-      .replace(/\s+/g, '-')
-      .replace(/[^\w-]+/g, '');
 
     for (const line of text.split('\n')) {
       const match = line.match(/^(#+)\s+(.*)/);
@@ -249,11 +240,18 @@ export class MDxEditor extends IEditor {
         const level = match[1].length;
         const textContent = match[2].trim();
         if (textContent) {
-          let baseSlug = slugify(textContent) || `section-${headings.length}`;
+          // 1. 使用公共 slugify
+          const rawSlug = slugify(textContent);
+          // 2. [强制约定] 添加 heading- 前缀
+          const baseSlug = `heading-${rawSlug}`;
+          
           const count = slugCount.get(baseSlug) || 0;
           slugCount.set(baseSlug, count + 1);
-          const uniqueSlug = count > 0 ? `${baseSlug}-${count}` : baseSlug;
-          headings.push({ level, text: textContent, id: uniqueSlug });
+          
+          // 处理重复标题
+          const uniqueId = count > 0 ? `${baseSlug}-${count}` : baseSlug;
+          
+          headings.push({ level, text: textContent, id: uniqueId });
         }
       }
     }
@@ -264,9 +262,23 @@ export class MDxEditor extends IEditor {
   
   async navigateTo(target: { elementId: string }): Promise<void> {
     if (this.currentMode === 'render' && this.renderContainer) {
-      const element = this.renderContainer.querySelector(`#${target.elementId}`);
-      element?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    } else { console.warn('Navigation is only supported in render mode.'); }
+      try {
+          // CSS.escape 防止 ID 中的特殊字符导致 querySelector 报错
+          const element = this.renderContainer.querySelector(`#${CSS.escape(target.elementId)}`);
+          if (element) {
+              element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              // 可选：高亮一下目标
+              element.classList.add('highlight-pulse');
+              setTimeout(() => element.classList.remove('highlight-pulse'), 1500);
+          } else {
+              console.warn(`[MDxEditor] Target element not found: #${target.elementId}`);
+          }
+      } catch (e) {
+          console.error('[MDxEditor] Navigation error:', e);
+      }
+    } else { 
+        console.warn('Navigation is only supported in render mode.'); 
+    }
   }
 
   setReadOnly(isReadOnly: boolean): void {
@@ -290,12 +302,9 @@ export class MDxEditor extends IEditor {
       this.editorView.dispatch({
         effects: this.searchCompartment.reconfigure(search({ top: true }))
       });
-      
       const results: UnifiedSearchResult[] = [];
       const docString = this.editorView.state.doc.toString();
       const regex = new RegExp(query, 'gi');
-      
-      // 💡 修正: 使用 matchAll 遍历字符串，更安全可靠
       for (const match of docString.matchAll(regex)) {
         const from = match.index!;
         const to = from + match[0].length;

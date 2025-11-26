@@ -1,8 +1,14 @@
 /**
  * @file memory-manager/core/MemoryManager.ts
  */
-import { VFSCoreAdapter} from '@itookit/vfs-core';
-import { createVFSUI, connectEditorLifecycle, VFSUIManager, FileMentionSource, DirectoryMentionSource } from '@itookit/vfs-ui';
+import { VFSCoreAdapter } from '@itookit/vfs-core';
+import { 
+    createVFSUI, 
+    connectEditorLifecycle, 
+    VFSUIManager, 
+    FileMentionSource, 
+    DirectoryMentionSource 
+} from '@itookit/vfs-ui';
 import { EditorOptions, IEditor, ISessionEngine } from '@itookit/common';
 import { MemoryManagerConfig } from '../types';
 import { BackgroundBrain } from './BackgroundBrain';
@@ -10,7 +16,7 @@ import { Layout } from './Layout';
 
 export class MemoryManager {
     private vfsUI: VFSUIManager;
-    private engine: ISessionEngine; // [新增] 保存 Adapter 实例
+    private engine: ISessionEngine;
     private brain?: BackgroundBrain;
     private layout: Layout;
     private lifecycleUnsubscribe: () => void;
@@ -131,7 +137,7 @@ export class MemoryManager {
             this.layout.toggleSidebar(isCollapsed);
         });
 
-        // 简单的销毁链
+        // 劫持 destroy 方法以确保清理所有监听器
         const originalDestroy = this.destroy;
         this.destroy = () => {
             unsubscribe();

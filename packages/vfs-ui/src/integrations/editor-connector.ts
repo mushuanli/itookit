@@ -94,25 +94,14 @@ export function connectEditorLifecycle(
      * Performs: Token increment, Forced Save, Event Unbinding, Destruction.
      */
     const teardownActiveEditor = async () => {
-        // ✨ [CRITICAL] Invalidate any pending async initializations immediately
         currentSessionToken++;
-        
         if (activeEditor) {
-            // 1. Force Save immediately (skip debounce)
             await saveCurrentSession();
-            
-            // 2. Unsubscribe events
             activeEditorUnsubscribers.forEach(unsub => unsub());
             activeEditorUnsubscribers = [];
-
-            // 3. Destroy instance
-            // console.log(`[EditorConnector] Destroying editor.`);
             await activeEditor.destroy();
-            
-            // 4. Reset references
             activeEditor = null;
             activeNode = null;
-
             if (onEditorCreated) onEditorCreated(null);
         }
     };
@@ -121,23 +110,13 @@ export function connectEditorLifecycle(
      * Main handler for session selection events.
      */
     const handleSessionChange = async ({ item }: { item?: VFSNodeUI }) => {
-        // --- 1. Teardown previous editor ---
         await teardownActiveEditor();
-        
-        // ✨ Capture the token for this specific session attempt
         const myToken = currentSessionToken;
-
         editorContainer.innerHTML = '';
 
-        // --- 2. Create the new editor instance ---
         if (item && item.type === 'file') {
-            
-            // ✨ Async Initialization Wrapper
             const initEditor = async () => {
-                // Race Condition Check 1:
-                // If user switched file again while waiting for setTimeout, abort.
                 if (myToken !== currentSessionToken) return;
-
                 try {
                     const content = item.content?.data || '';
                     const editorOptions: EditorOptions = {
@@ -147,31 +126,20 @@ export function connectEditorLifecycle(
                         nodeId: item.id,
                     };
 
-                    // Heavy operation: Create Editor
                     const editorInstance = await editorFactory(editorContainer, editorOptions);
 
-                    // Race Condition Check 2:
-                    // If user switched file while awaiting editorFactory, destroy this orphan and abort.
                     if (myToken !== currentSessionToken) {
-                        console.log(`[EditorConnector] Editor created but stale. Destroying immediately.`);
                         if (editorInstance) editorInstance.destroy();
                         return;
                     }
 
-                    // Success: Assign state
                     activeEditor = editorInstance;
                     activeNode = item;
 
                     if (activeEditor) {
-                        // Bind Events
-                        
-                        // A. Blur -> Debounced Save
-                        const unsubBlur = activeEditor.on('blur', () => {
-                            scheduleSave();
-                        });
+                        const unsubBlur = activeEditor.on('blur', () => { scheduleSave(); });
                         if (unsubBlur) activeEditorUnsubscribers.push(unsubBlur);
 
-                        // B. Mode Change (e.g., Edit to Render) -> Immediate Save
                         const unsubMode = activeEditor.on('modeChanged', (payload: any) => {
                             if (payload && payload.mode === 'render') {
                                 saveCurrentSession();
@@ -183,35 +151,39 @@ export function connectEditorLifecycle(
                     if (onEditorCreated) onEditorCreated(activeEditor);
 
                 } catch (error) {
-                    // Only show error if we are still the active session
                     if (myToken === currentSessionToken) {
                         console.error(`[EditorConnector] Failed to create editor for node ${item.id}:`, error);
                         editorContainer.innerHTML = `<div class="editor-placeholder editor-placeholder--error">Error loading file: ${item.metadata.title}</div>`;
                     }
                 }
             };
-
-            // ✨ Schedule initialization to next tick to unblock UI
             setTimeout(initEditor, 0);
-
         } else {
-            // No file selected or directory selected
             editorContainer.innerHTML = `<div class="editor-placeholder">Select a file to begin editing.</div>`;
         }
     };
 
-    // Subscribe to VFS Manager events
+    // [Core Fix] 监听导航事件
+    const unsubscribeNav = vfsManager.on('navigateToHeading', async (payload: { elementId: string }) => {
+        if (activeEditor) {
+            // 如果需要，可以在这里自动切换到 render 模式
+            // if (activeEditor.getMode() === 'edit') await activeEditor.switchToMode('render');
+            
+            console.log('[EditorConnector] Navigating to:', payload.elementId);
+            await activeEditor.navigateTo({ elementId: payload.elementId });
+        }
+    });
+
     const unsubscribeSessionListener = vfsManager.on('sessionSelected', handleSessionChange);
 
-    // Initial Load
     (async () => {
         const initialItem = vfsManager.getActiveSession();
         await handleSessionChange({ item: initialItem });
     })();
 
-    // Return Global Teardown Function
     return () => {
         unsubscribeSessionListener();
+        unsubscribeNav(); // 别忘了清理导航监听
         teardownActiveEditor().catch(err => console.error('Error during final teardown:', err));
     };
 }
