@@ -31,6 +31,7 @@ interface NodeListState {
     searchQuery: string;
     activeId: string | null;
     expandedFolderIds: Set<string>;
+    expandedOutlineIds: Set<string>; // <--- [修复] 新增这一行
     selectedItemIds: Set<string>;
     creatingItem: { type: 'file' | 'directory'; parentId: string | null } | null;
     selectionStatus: 'none' | 'partial' | 'all';
@@ -106,7 +107,7 @@ export class NodeList extends BaseComponent<NodeListState> {
     // --- State Transformation & Logic ---
 
     protected _transformState(globalState: VFSUIState): NodeListState {
-        const { items, searchQuery, uiSettings, expandedFolderIds, selectedItemIds, activeId, creatingItem, status, readOnly } = globalState;
+        const { items, searchQuery, uiSettings, expandedFolderIds, expandedOutlineIds, selectedItemIds, activeId, creatingItem, status, readOnly } = globalState;
 
         const { textQueries, tagQueries, typeQueries } = this._parseSearchQuery(searchQuery);
         const filteredItems = this._filterAndSortItems(items, { textQueries, tagQueries, typeQueries }, uiSettings, readOnly);
@@ -126,8 +127,17 @@ export class NodeList extends BaseComponent<NodeListState> {
         return {
             items: filteredItems,
             textSearchQueries: textQueries,
-            searchQuery, activeId, expandedFolderIds, uiSettings, status,
-            selectedItemIds, creatingItem, selectionStatus, visibleItemIds, readOnly,
+            searchQuery, 
+            activeId, 
+            expandedFolderIds, 
+            expandedOutlineIds, // <--- [修复] 传递给局部状态
+            uiSettings, 
+            status,
+            selectedItemIds, 
+            creatingItem, 
+            selectionStatus, 
+            visibleItemIds, 
+            readOnly,
         };
     }
 
@@ -869,7 +879,10 @@ export class NodeList extends BaseComponent<NodeListState> {
             isActive: item.id === this.state.activeId,
             isSelected: this.state.selectedItemIds.has(item.id),
             isSelectionMode: !this.state.readOnly && this.state.selectedItemIds.size > 0,
-            isOutlineExpanded: this.state.expandedFolderIds.has(item.id),
+            
+            // [修复] 这里之前错误地使用了 expandedFolderIds.has(item.id)
+            isOutlineExpanded: this.state.expandedOutlineIds.has(item.id), 
+            
             searchQueries: this.state.textSearchQueries,
             uiSettings: this.state.uiSettings,
         };

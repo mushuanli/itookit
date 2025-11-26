@@ -70,24 +70,30 @@ export function parseFileInfo(contentString: string | null | undefined): ParseRe
 
     if (h1Match) {
       const text = h1Match[1].trim();
+      // [关键] 逻辑必须与 MDxEditor.getHeadings 和 MDxRenderer 保持 100% 一致
+      const elementId = `heading-${slugify(text)}`; 
+      
       currentH1 = {
         level: 1,
         text,
-        elementId: `heading-${slugify(text)}`,
+        elementId, 
         children: [],
       };
       headings.push(currentH1);
     } else if (h2Match) {
       const text = h2Match[1].trim();
+      const elementId = `heading-${slugify(text)}`;
+      
       const h2: Heading = {
         level: 2,
         text,
-        elementId: `heading-${slugify(text)}`,
+        elementId,
+        children: []
       };
+      
       if (currentH1) {
         currentH1.children.push(h2);
       } else {
-        // If an H2 appears before any H1, treat it as a top-level heading
         headings.push({ ...h2, level: 1, children: [] });
       }
     } else if (!summary && trimmedLine.length > 0 && !trimmedLine.startsWith('---') && !trimmedLine.startsWith('```')) {
@@ -95,11 +101,9 @@ export function parseFileInfo(contentString: string | null | undefined): ParseRe
     }
   }
   
-  // Format summary
   summary = summary.replace(/\[(.*?)\]\(.*?\)/g, '$1').replace(/[*_~`]/g, '');
   summary = summary.length > 120 ? summary.substring(0, 120) + '…' : summary;
 
-  // Generate searchableText from Markdown by stripping syntax
   const searchableText = contentString
     .replace(/^#+\s/gm, '')
     .replace(/\[(.*?)\]\(.*?\)/g, '$1')
@@ -108,7 +112,6 @@ export function parseFileInfo(contentString: string | null | undefined): ParseRe
     .replace(/(\*|_|~|>|#|-|\+)/g, '')
     .trim();
 
-  // Extract structured metadata from content
   const metadata: FileMetadata = {};
   const tasks = contentString.match(/-\s\[\s*[xX]?\s*\]/g) || [];
   if (tasks.length > 0) {

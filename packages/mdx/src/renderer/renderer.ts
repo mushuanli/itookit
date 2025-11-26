@@ -4,6 +4,7 @@ import { PluginManager } from '../core/plugin-manager';
 import type { MDxPlugin } from '../core/plugin';
 import type { VFSCore } from '@itookit/vfs-core';
 import type { IPersistenceAdapter } from '@itookit/common';
+import { slugify } from '@itookit/common';
 
 export interface MDxRendererConfig {
   searchMarkClass?: string;
@@ -80,6 +81,19 @@ export class MDxRenderer {
    * 配置 Marked 实例
    */
   private configureMarked(markedInstance: Marked, options: RenderOptions): void {
+    // [重构] 自定义渲染器，确保 ID 生成规则与 Editor/UI 一致
+    const renderer = {
+        heading(text: string, level: number) {
+            // 1. 使用公共 slugify
+            const rawSlug = slugify(text);
+            // 2. [强制约定] 添加 heading- 前缀
+            const id = `heading-${rawSlug}`;
+            return `<h${level} id="${id}">${text}</h${level}>`;
+        }
+    };
+    
+    markedInstance.use({ renderer });
+
     if (this.markedExtensions.length > 0) {
       markedInstance.use(...this.markedExtensions);
     }
@@ -205,11 +219,9 @@ export class MDxRenderer {
   destroy(): void {
     this.clearSearch();
     this.pluginManager.destroy();
-    
     if (this.renderRoot) {
       this.renderRoot.classList.remove('mdx-editor-renderer');
     }
-    
     this.renderRoot = null;
     this.markedExtensions = [];
   }

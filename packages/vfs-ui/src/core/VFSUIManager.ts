@@ -314,6 +314,7 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
                     break;
                 case 'node:updated':
                     const updatedId = event.payload.nodeId;
+    console.log(`[VFSUIManager] Event: node:updated for ${updatedId}`);
                     
                     // [优化] 检查本地 Store 是否存在此 Item
                     // 如果本地没有，说明这可能是一个过滤掉的文件或者尚未同步的文件
@@ -335,6 +336,7 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
                     try {
                         const updatedNode = await this.engine.getNode(updatedId);
                         if (updatedNode) {
+             console.log(`[VFSUIManager] Fetched updated node from Engine. Tags:`, updatedNode.tags);
                              let childrenToPreserve: any[] = [];
                              if(updatedNode.type === 'directory') {
                                  const current = this.store.getState();
@@ -352,6 +354,7 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
 
                              const uiItem = mapEngineNodeToUIItem(updatedNode);
                              if(uiItem.type === 'directory') uiItem.children = childrenToPreserve;
+             console.log(`[VFSUIManager] Dispatching ITEM_UPDATE_SUCCESS with tags:`, uiItem.metadata.tags);
 
                              this.store.dispatch({
                                  type: 'ITEM_UPDATE_SUCCESS',
@@ -363,6 +366,7 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
                 // ✨ [新增] 处理批量更新事件
                 case 'node:batch_updated' as any: {
                     const { updatedNodeIds } = event.payload;
+    console.log(`[VFSUIManager] Event: node:batch_updated for`, updatedNodeIds);
                     if (updatedNodeIds && Array.isArray(updatedNodeIds)) {
                         console.log(`[VFSUIManager] Received batch update for ${updatedNodeIds.length} items`);
                         
@@ -370,7 +374,12 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
                         const updates = await Promise.all(updatedNodeIds.map(async (id: string) => {
                             try {
                                 const node = await this.engine.getNode(id);
-                                return node ? { itemId: id, data: mapEngineNodeToUIItem(node) } : null;
+                if (node) {
+                    // [DEBUG]
+                    console.log(`[VFSUIManager] Batch fetched ${id}, tags:`, node.tags);
+                    return { itemId: id, data: mapEngineNodeToUIItem(node) };
+                }
+                return null;
                             } catch { return null; }
                         }));
 
