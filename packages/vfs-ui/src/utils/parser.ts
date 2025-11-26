@@ -20,7 +20,7 @@ interface ParseResult {
  * 专门用于提取任务统计的辅助函数
  * 支持 Markdown 标准语法、表格内语法以及 HTML 语法
  */
-function extractTaskCounts(content: string): { total: number; completed: number } {
+export function extractTaskCounts(content: string): { total: number; completed: number } {
   let total = 0;
   let completed = 0;
 
@@ -34,7 +34,7 @@ function extractTaskCounts(content: string): { total: number; completed: number 
   
   const mdMatches = [...content.matchAll(mdRegex)];
   total += mdMatches.length;
-  completed += mdMatches.filter(m => m[1].toLowerCase() === 'x').length; // 注意 group index 变为 1
+  completed += mdMatches.filter(m => m[1].toLowerCase() === 'x').length;
 
   // HTML 语法匹配
   const htmlRegex = /<input[^>]+type=["']checkbox["'][^>]*>/gi;
@@ -137,7 +137,7 @@ export function parseFileInfo(contentString: string | null | undefined): ParseRe
   if (taskStats.total > 0) {
       metadata.taskCount = taskStats;
       // 🔥 [DEBUG] 确认 metadata 被赋值
-      console.log('[Parser] Metadata updated with tasks:', metadata.taskCount);
+      //console.log('[Parser] Metadata updated with tasks:', metadata.taskCount);
   }
   
   const clozes = contentString.match(/--/g) || [];

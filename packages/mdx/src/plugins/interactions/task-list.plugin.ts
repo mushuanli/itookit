@@ -70,7 +70,7 @@ export interface TaskToggleResult extends TaskToggleDetail {
  */
 interface TaskLocation {
   lineNumber: number;
-  indexInLine: number; // 该行第几个任务（处理表格一行多个任务的情况）
+  indexInLine: number;
   isTableTask: boolean;
 }
 
@@ -198,6 +198,7 @@ export class TaskListPlugin implements MDxPlugin {
         }
       }
     });
+    console.log(`[TaskListPlugin] Parsed ${this.taskLocations.length} task locations.`);
   }
 
   /**
@@ -207,15 +208,30 @@ export class TaskListPlugin implements MDxPlugin {
     return async (event: Event) => {
       const target = event.target as HTMLElement;
       
+      // 🔥 [DEBUG] 日志 1：确认点击事件是否被捕获
+      // 如果你在控制台连这条都看不到，说明事件监听器没绑上，或者被父级/其他插件 stopPropagation 了
+      // console.log('[TaskListPlugin] Click detected on:', target); 
+
       // 使用 matches 确保精确匹配配置的选择器
-      if (!target.matches(this.options.checkboxSelector)) return;
+      if (!target.matches(this.options.checkboxSelector)) {
+          // 🔥 [DEBUG] 日志 2：如果点击了 checkbox 但没进逻辑，可能是 class 不对
+          if (target.tagName === 'INPUT' && (target as HTMLInputElement).type === 'checkbox') {
+              console.warn('[TaskListPlugin] Checkbox clicked but selector mismatch.', {
+                  expected: this.options.checkboxSelector,
+                  actualClass: target.className
+              });
+          }
+          return;
+      }
       
+      console.log('[TaskListPlugin] Valid Task Checkbox clicked.');
+
       const checkbox = target as HTMLInputElement;
 
       // 1. 获取绑定的 index
       const taskIndexStr = checkbox.getAttribute('data-task-index');
       if (taskIndexStr === null) {
-        console.warn('TaskListPlugin: Checkbox missing data-task-index');
+        console.error('[TaskListPlugin] Checkbox missing data-task-index attribute.');
         return;
       }
       
@@ -224,11 +240,12 @@ export class TaskListPlugin implements MDxPlugin {
       // 2. 从预先解析的位置数组中获取行号信息
       const location = this.taskLocations[taskIndex];
       if (!location) {
-        console.warn('TaskListPlugin: Task location not found for index', taskIndex);
+        console.error('[TaskListPlugin] Task location NOT found for index:', taskIndex, 'Total locations:', this.taskLocations.length);
         return;
       }
 
-      // 获取任务文本用于显示 (仅供 UI 参考)
+      console.log('[TaskListPlugin] Location found:', location);
+
       let taskText = '';
       if (location.isTableTask) {
           taskText = checkbox.parentElement?.textContent?.trim() || '';
@@ -247,8 +264,9 @@ export class TaskListPlugin implements MDxPlugin {
       // 3. 触发 "before" 钩子
       const shouldProceed = await this.options.beforeTaskToggle(detail);
       if (!shouldProceed) {
+        console.log('[TaskListPlugin] Toggle cancelled by beforeTaskToggle hook.');
         event.preventDefault();
-        checkbox.checked = !checkbox.checked; // 恢复状态
+        checkbox.checked = !checkbox.checked;
         return;
       }
 
@@ -262,6 +280,7 @@ export class TaskListPlugin implements MDxPlugin {
 
       // 5. 如果启用了自动更新，则修改 Markdown
       if (this.options.autoUpdateMarkdown) {
+        console.log('[TaskListPlugin] Updating Markdown...');
         const updated = this.updateMarkdown(location, detail.isChecked);
         if (updated) {
           result.updatedMarkdown = updated;
@@ -270,13 +289,14 @@ export class TaskListPlugin implements MDxPlugin {
           // 更新当前状态
           this.currentMarkdown = updated;
           await this.store?.set('currentMarkdown', updated);
-          
-          // 注意：编辑器通常会监听 Markdown 变化并重新渲染。
-          // 重新渲染会触发 beforeParse -> parseTaskLocations，保持索引同步。
+          console.log('[TaskListPlugin] Markdown updated successfully.');
+        } else {
+            console.warn('[TaskListPlugin] updateMarkdown returned null.');
         }
       }
 
-      // 6. 发送事件 (通知外部系统)
+      // 6. 发送事件
+      console.log('[TaskListPlugin] Emitting taskToggled event:', result);
       context.emit('taskToggled', result);
       
       // 7. 触发 "after" 回调
@@ -292,7 +312,7 @@ export class TaskListPlugin implements MDxPlugin {
     const lineIndex = loc.lineNumber - 1;
 
     if (lineIndex < 0 || lineIndex >= lines.length) {
-      console.warn('TaskListPlugin: Line number out of bounds');
+      console.warn('[TaskListPlugin] Line number out of bounds:', lineIndex);
       return null;
     }
 
@@ -337,8 +357,9 @@ export class TaskListPlugin implements MDxPlugin {
 
     // 监听解析前事件：解析 Markdown 结构以建立索引
     const removeBeforeParse = context.on('beforeParse', ({ markdown }: { markdown: string }) => {
+      // console.log('[TaskListPlugin] beforeParse triggered. Length:', markdown.length);
       this.currentMarkdown = markdown;
-      this.parseTaskLocations(markdown); // 关键：构建 index -> location 映射
+      this.parseTaskLocations(markdown);
       return { markdown };
     });
     
@@ -348,7 +369,8 @@ export class TaskListPlugin implements MDxPlugin {
 
     // 监听 DOM 更新事件：绑定点击交互
     const removeDomUpdated = context.on('domUpdated', ({ element }: { element: HTMLElement }) => {
-      // 清理旧的监听器 (如果存在)
+      console.log('[TaskListPlugin] domUpdated triggered. Binding click listeners.');
+      
       const existingHandler = (element as any)._taskListClickHandler;
       if (existingHandler) {
         element.removeEventListener('click', existingHandler);
@@ -371,7 +393,7 @@ export class TaskListPlugin implements MDxPlugin {
    */
   setMarkdown(markdown: string): void {
     this.currentMarkdown = markdown;
-    this.parseTaskLocations(markdown); // 外部更新时也必须重新建立索引
+    this.parseTaskLocations(markdown);
     this.store?.set('currentMarkdown', markdown);
   }
 

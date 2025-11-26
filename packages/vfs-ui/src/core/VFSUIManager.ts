@@ -30,10 +30,7 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
     private readonly options: VFSUIOptions;
     private readonly engine: ISessionEngine;
     
-    // [架构修改] 将 coordinator 设为 public (或提供访问器)，以便 MemoryManager 订阅内部事件
     public readonly coordinator: Coordinator;
-    
-    // [架构修改] FIX: 将 store 设为 public，允许 MemoryManager 访问状态和分发 Actions
     public readonly store: VFSStore;
     
     private readonly _vfsService: VFSService;
@@ -48,8 +45,11 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
     private lastSidebarCollapsedState: boolean;
     private lastForceUpdateTimestamp?: number;
     
-    // 🔧 FIX: Add flag to track user-initiated selections
     private lastSessionSelectWasUserAction = false;
+
+    // ✨ [新增] 更新去重队列
+    private updateQueue: Set<string> = new Set();
+    private updateTimer: any = null;
 
     constructor(options: VFSUIOptions, engine: ISessionEngine) {
         super();
@@ -142,22 +142,16 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
 
         await this._loadData();
 
-        // 默认文件逻辑
         const state = this.store.getState();
         if (state.items.length === 0 && !this.options.readOnly && this.options.defaultFileName) {
             try {
-                // 调用 service 创建文件。vfs-core 的事件系统会自动通知 UI 更新。
                 await this._vfsService.createFile({
                     title: this.options.defaultFileName,
-                    content: this.options.defaultFileContent || `# Welcome\n\nSelect a file from the list on the left to start editing. You can create new files or folders using the '+' buttons.`, // 提供一个备用内容
-                    parentId: null, // 在根目录创建
+                    content: this.options.defaultFileContent || `# Welcome\n\nSelect a file from the list on the left to start editing.`,
+                    parentId: null,
                 });
-                // 注意：我们不需要在这里手动更新 store。
-                // createFile -> vfsCore -> NODE_CREATED event -> _connectToVFSCoreEvents listener ->
-                // store.dispatch('SESSION_CREATE_SUCCESS') -> UI and activeId are updated automatically.
             } catch (error) {
                 console.error('[VFSUIManager] Failed to create the default file:', error);
-                // 即使创建失败，也继续执行，UI会显示为空状态。
             }
         }
         
@@ -282,6 +276,45 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
     
     // [修正] 完全重写事件连接逻辑以匹配 vfs-core 的实际实现
     private _connectToEngineEvents(): void {
+        // ✨ [新增] 批量处理函数
+        const processUpdateQueue = async () => {
+            if (this.updateQueue.size === 0) return;
+
+            const idsToUpdate = Array.from(this.updateQueue);
+            this.updateQueue.clear();
+            this.updateTimer = null;
+
+            // console.log(`[VFSUIManager] Processing batch update for ${idsToUpdate.length} items...`);
+
+            const updates = await Promise.all(idsToUpdate.map(async (id) => {
+                try {
+                    // 注意：这里我们重新获取节点，这会触发一次 DB 读操作
+                    // 如果这个开销仍然太大，未来可以考虑仅获取 metadata (如果 Engine 支持)
+                    const node = await this.engine.getNode(id);
+                    if (node) {
+                        // 为了准确性，对于当前激活的文件，可能还是需要最新的 content
+                        // 但为了性能，如果是 metadata 更新风暴，我们尽量减少 readContent
+                        // 在这里保持默认逻辑：全量更新以确保一致性
+                        if (node.type === 'file') {
+                            node.content = await this.engine.readContent(id);
+                        } else {
+                            node.children = [];
+                        }
+                        return { itemId: id, data: mapEngineNodeToUIItem(node) };
+                    }
+                    return null;
+                } catch { return null; }
+            }));
+
+            const validUpdates = updates.filter(u => u !== null);
+            if (validUpdates.length > 0) {
+                this.store.dispatch({
+                    type: 'ITEMS_BATCH_UPDATE_SUCCESS',
+                    payload: { updates: validUpdates }
+                });
+            }
+        };
+
         const handleEvent = async (event: EngineEvent) => {
             switch (event.type) {
                 case 'node:created': {
@@ -313,12 +346,10 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
                     this.store.dispatch({ type: 'ITEM_DELETE_SUCCESS', payload: { itemIds: removedIds } });
                     break;
                 case 'node:updated':
+                    // ✨ [优化] 不要立即处理，而是加入队列进行防抖
                     const updatedId = event.payload.nodeId;
-    console.log(`[VFSUIManager] Event: node:updated for ${updatedId}`);
                     
-                    // [优化] 检查本地 Store 是否存在此 Item
-                    // 如果本地没有，说明这可能是一个过滤掉的文件或者尚未同步的文件
-                    // 对于更新操作，通常只更新已存在的 UI 元素
+                    // 检查本地 Store 是否存在此 Item，过滤无关更新
                     const currentItems = this.store.getState().items;
                     const itemExists = (items: VFSNodeUI[]): boolean => {
                         for (const item of items) {
@@ -328,69 +359,20 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
                         return false;
                     };
                     
-                    if (!itemExists(currentItems)) {
-                        // console.log(`[VFSUIManager] Ignored update for unknown item ${updatedId}`);
-                        return; 
-                    }
-
-                    try {
-                        const updatedNode = await this.engine.getNode(updatedId);
-                        if (updatedNode) {
-             console.log(`[VFSUIManager] Fetched updated node from Engine. Tags:`, updatedNode.tags);
-                             let childrenToPreserve: any[] = [];
-                             if(updatedNode.type === 'directory') {
-                                 const current = this.store.getState();
-                                 const findRecursive = (list: VFSNodeUI[]): VFSNodeUI|undefined => {
-                                    for(const i of list) {
-                                        if(i.id === updatedId) return i;
-                                        if(i.children) { const f = findRecursive(i.children); if(f) return f; }
-                                    }
-                                 };
-                                 const exist = findRecursive(current.items);
-                                 if(exist && exist.children) childrenToPreserve = exist.children;
-                             } else {
-                                 updatedNode.content = await this.engine.readContent(updatedId);
-                             }
-
-                             const uiItem = mapEngineNodeToUIItem(updatedNode);
-                             if(uiItem.type === 'directory') uiItem.children = childrenToPreserve;
-             console.log(`[VFSUIManager] Dispatching ITEM_UPDATE_SUCCESS with tags:`, uiItem.metadata.tags);
-
-                             this.store.dispatch({
-                                 type: 'ITEM_UPDATE_SUCCESS',
-                                 payload: { itemId: updatedId, updates: uiItem }
-                             });
+                    if (itemExists(currentItems)) {
+                        this.updateQueue.add(updatedId);
+                        if (!this.updateTimer) {
+                            this.updateTimer = setTimeout(processUpdateQueue, 50); // 50ms 防抖
                         }
-                    } catch(e) { this._loadData(); }
+                    }
                     break;
                 // ✨ [新增] 处理批量更新事件
                 case 'node:batch_updated' as any: {
                     const { updatedNodeIds } = event.payload;
-    console.log(`[VFSUIManager] Event: node:batch_updated for`, updatedNodeIds);
                     if (updatedNodeIds && Array.isArray(updatedNodeIds)) {
-                        console.log(`[VFSUIManager] Received batch update for ${updatedNodeIds.length} items`);
-                        
-                        // 并行获取所有更新的节点数据
-                        const updates = await Promise.all(updatedNodeIds.map(async (id: string) => {
-                            try {
-                                const node = await this.engine.getNode(id);
-                if (node) {
-                    // [DEBUG]
-                    console.log(`[VFSUIManager] Batch fetched ${id}, tags:`, node.tags);
-                    return { itemId: id, data: mapEngineNodeToUIItem(node) };
-                }
-                return null;
-                            } catch { return null; }
-                        }));
-
-                        const validUpdates = updates.filter(u => u !== null);
-                        
-                        // 发送批量更新 Action，只触发一次 Store 更新
-                        if (validUpdates.length > 0) {
-                            this.store.dispatch({
-                                type: 'ITEMS_BATCH_UPDATE_SUCCESS',
-                                payload: { updates: validUpdates }
-                            });
+                        updatedNodeIds.forEach(id => this.updateQueue.add(id));
+                        if (!this.updateTimer) {
+                            this.updateTimer = setTimeout(processUpdateQueue, 50);
                         }
                     }
                     break;
@@ -402,11 +384,7 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
                 
                 // ✨ [新增] 处理批量移动事件
                 case 'node:batch_moved' as any:
-                    console.log(`[VFSUIManager] Batch moved ${event.payload.movedNodeIds?.length} items.`);
-                    // 移动操作改变了树结构，最安全的做法是重载
-                    // 因为移动可能影响到目录的 children 列表和 expanded 状态的有效性
                     this._loadData();
-                    // 结束移动操作模式
                     this.store.dispatch({ type: 'MOVE_OPERATION_END' });
                     break;
             }
