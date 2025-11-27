@@ -14,13 +14,16 @@ export const SETTINGS_PAGES: Record<string, { name: string, icon: string }> = {
 };
 
 export class SettingsEngine implements ISessionEngine {
+    // [修复] MemoryManager/VFSUIManager 需要 moduleName 来生成 localStorage key
+    public readonly moduleName = 'settings_root';
+
     private listeners: Map<string, Set<(event: EngineEvent) => void>> = new Map();
 
     constructor(private service: SettingsService) {}
 
     // 只读 Tree，不需要 VFS，直接返回静态结构
     async loadTree(): Promise<EngineNode[]> {
-        // 确保 Service 数据已加载，尽管 Tree 本身是静态的，但为了后续操作
+        // 确保 Service 数据已加载
         await this.service.init();
 
         return Object.entries(SETTINGS_PAGES).map(([id, config]) => ({
@@ -76,9 +79,15 @@ export class SettingsEngine implements ISessionEngine {
         };
     }
     
+    // [修复] 防止 EditorConnector 尝试保存时报错
     async writeContent(_id: string, _content: string | ArrayBuffer): Promise<void> {
         // Settings Engine 是只读的树结构，具体内容修改由 SettingsService 处理
         console.warn('Direct write to SettingsEngine ignored. Use SettingsService.');
+    }
+
+    // [修复] 防止 EditorConnector 尝试更新元数据时报错
+    async updateMetadata(_id: string, _metadata: Record<string, any>): Promise<void> {
+        // 无需持久化菜单的元数据
     }
 
     // 以下为只读存根
@@ -98,13 +107,9 @@ export class SettingsEngine implements ISessionEngine {
     async delete(_ids: string[]): Promise<void> {
         throw new Error("Cannot delete settings.");
     }
-    async updateMetadata(_id: string, _metadata: Record<string, any>): Promise<void> {
-        // 可选：实现 metadata 持久化
-    }
     async setTags(_id: string, _tags: string[]): Promise<void> {}
 
     // --- Events Implementation ---
-    
     on(event: EngineEventType, callback: (event: EngineEvent) => void): () => void {
         if (!this.listeners.has(event)) this.listeners.set(event, new Set());
         this.listeners.get(event)!.add(callback);

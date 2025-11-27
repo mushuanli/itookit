@@ -151,13 +151,10 @@ export class MemoryManager {
             await this._ensureModuleMounted();
         }
         await this.vfsUI.start(); 
-        
-        // [移除] 默认文件创建逻辑已移至 VFSUIManager 内部 (通过 options 传递)
     }
 
     private async _ensureModuleMounted() {
         const { vfsCore, moduleName } = this.config;
-        // 安全检查
         if (!vfsCore || !moduleName) return;
 
         if (!vfsCore.getModule(moduleName)) {

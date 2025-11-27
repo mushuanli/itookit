@@ -47,15 +47,29 @@ export interface AgentConfig {
     mcpServers?: string[];
 }
 
+// [修改] Executable 增加层级和元数据支持
 export interface Executable {
     id: string;
+    parentId?: string | null; // [新增] 支持层级
     name: string;
     type: 'agent' | 'orchestrator';
     icon?: string;
     description?: string;
-    config?: AgentConfig; // If type === agent
-    mode?: 'serial' | 'parallel'; // If type === orchestrator
-    children?: string[]; // If type === orchestrator
+    config?: AgentConfig;
+    mode?: 'serial' | 'parallel';
+    children?: string[]; // Orchestrator 的子节点（逻辑引用）
+    
+    tags?: string[]; // [新增] 支持标签
+    createdAt?: number; // [新增] 创建时间
+    modifiedAt?: number; // [新增] 修改时间
+}
+
+// [新增] 专门用于 Agent 管理界面的文件夹结构
+export interface AgentFolder {
+    id: string;
+    parentId: string | null;
+    name: string;
+    createdAt: number;
 }
 
 export interface Tag {
@@ -80,6 +94,7 @@ export interface SettingsState {
     connections: LLMConnection[];
     mcpServers: MCPServer[];
     executables: Executable[];
+    agentFolders: AgentFolder[]; // [新增] 存储文件夹结构
     tags: Tag[];
     contacts: Contact[];
 }

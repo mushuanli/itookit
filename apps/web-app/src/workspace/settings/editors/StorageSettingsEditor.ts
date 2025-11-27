@@ -9,12 +9,13 @@ const SETTINGS_LABELS: Record<keyof SettingsState, string> = {
     mcpServers: '🔌 MCP 服务器',
     executables: '🧠 智能体 (Agents)',
     tags: '🏷️ 标签 (Tags)',
-    contacts: '📒 通讯录'
+    contacts: '📒 通讯录',
+    agentFolders: '📂 Agent 文件夹' // 修复：补充缺失的键
 };
 
 export class StorageSettingsEditor extends BaseSettingsEditor {
     private storageInfo: any = null;
-    private snapshots: LocalSnapshot[] = []; // [新增] 快照列表
+    private snapshots: LocalSnapshot[] = []; 
 
     async init(container: HTMLElement) {
         await super.init(container);
@@ -226,7 +227,6 @@ export class StorageSettingsEditor extends BaseSettingsEditor {
         const settingsKeys = this.service.getAvailableSettingsKeys();
         const workspaces = this.service.getAvailableWorkspaces();
 
-        // 生成 Settings 复选框
         const settingsHtml = settingsKeys.map(key => `
             <label class="settings-checkbox-row">
                 <input type="checkbox" name="export-settings" value="${key}" checked>
@@ -234,7 +234,6 @@ export class StorageSettingsEditor extends BaseSettingsEditor {
             </label>
         `).join('');
 
-        // 生成 Workspaces 复选框
         const workspacesHtml = workspaces.length > 0 
             ? workspaces.map(ws => `
                 <label class="settings-checkbox-row">
@@ -323,14 +322,9 @@ export class StorageSettingsEditor extends BaseSettingsEditor {
     }
 
     private showImportSelectionModal(json: any) {
-        // 1. 检测并分析 JSON 内容
-        
-        // A. 检查是否为 Settings 导出 (支持旧版根结构和新版 settings 嵌套结构)
         const availableSettings = this.service.getAvailableSettingsKeys().filter(k => {
             return (json.settings && Array.isArray(json.settings[k])) || Array.isArray(json[k]);
         });
-
-        // B. 检查是否包含 Modules (工作区)
         let availableModules: any[] = [];
         if (json.modules && Array.isArray(json.modules)) {
             availableModules = json.modules;
@@ -341,10 +335,7 @@ export class StorageSettingsEditor extends BaseSettingsEditor {
             return;
         }
 
-        // 2. 构建 UI 列表
-        
         const settingsHtml = availableSettings.map(key => {
-            // 获取条目数量
             const count = (json.settings?.[key] || json[key])?.length || 0;
             return `
             <label class="settings-checkbox-row">
@@ -358,7 +349,6 @@ export class StorageSettingsEditor extends BaseSettingsEditor {
 
         const modulesHtml = availableModules.map(mod => {
             const name = mod.module?.name || 'Unknown';
-            // 过滤掉系统模块（以防万一包含）
             if (['__vfs_meta__', '__config'].includes(name)) return '';
             return `
             <label class="settings-checkbox-row">
@@ -407,7 +397,7 @@ export class StorageSettingsEditor extends BaseSettingsEditor {
                     setTimeout(() => window.location.reload(), 1500);
                 } catch (e) {
                     console.error(e);
-                    Toast.error('导入过程中发生错误');
+                    Toast.error('导入错误');
                 }
                 return true;
             }
@@ -417,20 +407,16 @@ export class StorageSettingsEditor extends BaseSettingsEditor {
     // --- Helper ---
 
     private resetApp() {
-        Modal.confirm(
-            '⚠️ 恢复出厂设置', 
-            '此操作将永久删除所有工作区、文档和设置数据。应用将重置为初始状态。此操作不可逆！', 
-            async () => {
-                try {
-                    await this.service.factoryReset();
-                    Toast.success('数据已清除，正在重启...');
-                    setTimeout(() => window.location.reload(), 1000);
-                } catch (e) {
-                    console.error(e);
-                    Toast.error('重置失败');
-                }
+        Modal.confirm('⚠️ 恢复出厂设置', '此操作将永久删除所有数据。', async () => {
+            try {
+                await this.service.factoryReset();
+                Toast.success('数据已清除，正在重启...');
+                setTimeout(() => window.location.reload(), 1000);
+            } catch (e) {
+                console.error(e);
+                Toast.error('重置失败');
             }
-        );
+        });
     }
 
     private downloadJson(data: object | string, filename: string) {

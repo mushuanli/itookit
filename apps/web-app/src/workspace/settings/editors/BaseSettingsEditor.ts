@@ -11,17 +11,20 @@ export abstract class BaseSettingsEditor implements IEditor {
         protected service: SettingsService,
         protected options: EditorOptions
     ) {
-        this.init(container);
+        // [修复] 移除这里的 this.init() 调用
+        // 防止子类属性（如 agentEngine）在 super() 返回前未初始化就被 render() 调用
+        this.container = container;
     }
 
     async init(container: HTMLElement) {
-        this.container = container;
-        this.container.classList.add('settings-root'); // 添加根样式类
+        this.container = container; // 确保 container 被设置
+        this.container.classList.add('settings-root');
 
         // 订阅数据变化，实现自动刷新
         const unsubscribe = this.service.onChange(() => this.render());
+        
         // 初始渲染
-        this.render();
+        await this.render();
 
         // Hook into destroy to clean up subscription
         const originalDestroy = this.destroy;
@@ -31,7 +34,7 @@ export abstract class BaseSettingsEditor implements IEditor {
         };
     }
 
-    abstract render(): void;
+    abstract render(): void | Promise<void>;
 
     /**
      * [修改] 实现 focus 方法，允许子类覆盖
