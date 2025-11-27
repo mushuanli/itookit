@@ -54,7 +54,7 @@ export class VFSStorage {
   }
 
   /**
-   * [新增] 销毁存储层（删除数据库）
+   * 销毁存储层（删除数据库）
    */
   async destroyDatabase(): Promise<void> {
     await this.db.destroy();
@@ -89,7 +89,6 @@ export class VFSStorage {
     this.ensureConnected();
     const vnode = await this.inodeStore.loadVNode(nodeId, transaction);
     if (vnode) {
-      // 在这里，getTagsForNode会创建自己的只读事务，这是可接受的，因为我们不在一个写事务中。
       vnode.tags = await this.nodeTagStore.getTagsForNode(vnode.nodeId, transaction);
     }
     return vnode;
@@ -116,10 +115,8 @@ export class VFSStorage {
    */
   async getChildren(parentId: string, transaction?: Transaction | null): Promise<VNode[]> {
     this.ensureConnected();
-    // 1. 先从 InodeStore 获取基础的 VNode 列表 (传递 transaction)
     const children = await this.inodeStore.getChildren(parentId, transaction);
     
-    // 2. 并行地为每个子节点获取它们的标签并填充 (传递 transaction)
     await Promise.all(children.map(async (child) => {
         child.tags = await this.nodeTagStore.getTagsForNode(child.nodeId, transaction);
     }));
@@ -178,59 +175,73 @@ export class VFSStorage {
 
   /**
    * 为节点添加标签
-   * [修改] 支持传入外部事务
+   * [修改] 增加引用计数逻辑
    */
   async addTagToNode(nodeId: string, tagName: string, transaction?: Transaction): Promise<void> {
     this.ensureConnected();
     
-    // 如果传入了外部事务，直接使用；否则开启新事务
     const tx = transaction || await this.beginTransaction([
         VFS_STORES.VNODES, VFS_STORES.TAGS, VFS_STORES.NODE_TAGS
     ]);
     
     try {
+      // 1. 确保标签定义存在，如果不存在则创建（refCount 默认为0）
       const existingTag = await this.tagStore.get(tagName, tx);
       if (!existingTag) {
-        await this.tagStore.create({ name: tagName, createdAt: Date.now() }, tx);
+        await this.tagStore.create({ name: tagName, createdAt: Date.now(), refCount: 0 }, tx);
       }
       
-      // 2. 建立关联（如果已存在，会因唯一索引而失败，正好可以捕获）
-      await this.nodeTagStore.add(nodeId, tagName, tx);
+      // 2. 建立关联，并获取是否为新建关联的标志
+      // NodeTagStore.add 现在返回 boolean
+      const isNewAssociation = await this.nodeTagStore.add(nodeId, tagName, tx);
       
-      // 3. 更新 VNode 上的冗余字段
+      // 3. 只有在新建立关联时，才增加引用计数
+      if (isNewAssociation) {
+          await this.tagStore.adjustRefCount(tagName, 1, tx);
+      }
+
+      // 4. 更新 VNode 上的冗余字段
       const vnode = await this.inodeStore.loadVNode(nodeId, tx); 
       if (vnode && !vnode.tags.includes(tagName)) {
         vnode.tags.push(tagName);
         await this.inodeStore.save(vnode, tx);
       }
       
-      // 只有当我们自己开启事务时才等待 done
       if (!transaction) await tx.done;
     } catch (e) {
       console.error("Failed to add tag to node:", e);
-      // 其他非约束性错误仍需抛出
       throw e;
     }
   }
   
   /**
    * 从节点移除标签
-   * [修改] 支持传入外部事务
+   * [修改] 增加引用计数减少逻辑
    */
   async removeTagFromNode(nodeId: string, tagName: string, transaction?: Transaction): Promise<void> {
     this.ensureConnected();
-    const tx = transaction || await this.beginTransaction([VFS_STORES.VNODES, VFS_STORES.NODE_TAGS]);
+    const tx = transaction || await this.beginTransaction([
+        VFS_STORES.VNODES, VFS_STORES.TAGS, VFS_STORES.NODE_TAGS
+    ]);
     
     try {
-      await this.nodeTagStore.remove(nodeId, tagName, tx);
-      
+      // 为了安全起见，先检查是否有关联，或者依赖上层确保。
+      // 最准确的做法是先检查 VNode tags 数组（因为我们有冗余字段），或直接查询 node_tags
       const vnode = await this.inodeStore.loadVNode(nodeId, tx);
-      if (vnode) {
-        const index = vnode.tags.indexOf(tagName);
-        if (index > -1) {
-          vnode.tags.splice(index, 1);
-          await this.inodeStore.save(vnode, tx);
-        }
+      
+      if (vnode && vnode.tags.includes(tagName)) {
+          // 1. 移除关联
+          await this.nodeTagStore.remove(nodeId, tagName, tx);
+          
+          // 2. 减少引用计数
+          await this.tagStore.adjustRefCount(tagName, -1, tx);
+          
+          // 3. 更新 VNode
+          const index = vnode.tags.indexOf(tagName);
+          if (index > -1) {
+            vnode.tags.splice(index, 1);
+            await this.inodeStore.save(vnode, tx);
+          }
       }
       
       if (!transaction) await tx.done;
@@ -238,6 +249,25 @@ export class VFSStorage {
       console.error("Failed to remove tag from node:", e);
       throw e;
     }
+  }
+
+  /**
+   * [新增] 清理节点的所有标签关联（用于删除节点时，同时更新计数）
+   */
+  async cleanupNodeTags(nodeId: string, transaction: Transaction): Promise<void> {
+      // 1. 获取该节点当前所有标签
+      const tags = await this.nodeTagStore.getTagsForNode(nodeId, transaction);
+      
+      if (tags.length > 0) {
+          // 2. 批量移除关联
+          await this.nodeTagStore.removeAllForNode(nodeId, transaction);
+          
+          // 3. 批量减少计数
+          // 注意：adjustRefCount 内部是异步的，需要等待
+          for (const tagName of tags) {
+              await this.tagStore.adjustRefCount(tagName, -1, transaction);
+          }
+      }
   }
 
   /**
@@ -251,10 +281,7 @@ export class VFSStorage {
   }
 
   /**
-   * [修改] 根据复合条件搜索节点
-   * @param query 搜索查询对象
-   * @param moduleName (可选) 限制在特定模块。如果不传，则搜索所有模块。
-   * @returns {Promise<VNode[]>} 匹配的节点数组
+   * 根据复合条件搜索节点
    */
   async searchNodes(query: SearchQuery, moduleName?: string): Promise<VNode[]> {
     this.ensureConnected();
@@ -263,11 +290,6 @@ export class VFSStorage {
     const tx = await this.db.getTransaction(VFS_STORES.VNODES, 'readonly');
     const store = tx.getStore(VFS_STORES.VNODES);
 
-    // 优化策略：
-    // 1. 如果指定了 moduleName，使用 'moduleId' 索引（最高效）。
-    // 2. 如果未指定 moduleName 但指定了 type，使用 'type' 索引。
-    // 3. 否则，使用全表游标。
-    
     let cursorRequest: IDBRequest<IDBCursorWithValue | null>;
 
     if (moduleName) {

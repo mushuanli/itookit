@@ -15,10 +15,10 @@ export const WORKSPACES: WorkspaceConfig[] = [
     // [新增] Anki Workspace 配置
     {
         elementId: 'anki-workspace',
-        moduleName: 'anki', // 对应的 VFS 模块名
+        moduleName: 'anki',
         title: 'Anki Memory Cards',
-        // [重点] 这里指定需要的插件
-        plugins: ['cloze:cloze','cloze:cloze-controls','cloze:cloze-controls'], 
+        // [修复] 去除重复的 'cloze:cloze-controls'
+        plugins: ['cloze:cloze', 'cloze:cloze-controls'], 
         defaultFileName: 'Anki Guide.md',
         defaultFileContent: `### 挖空填词 (Cloze)
 
