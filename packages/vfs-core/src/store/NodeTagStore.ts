@@ -1,6 +1,6 @@
 /**
  * @file vfs/store/NodeTagStore.ts
- * [新增] Node-Tag 关联存储
+ * Node-Tag 关联存储
  * 管理 VNode 和 Tag 之间的多对多关系
  */
 
@@ -15,19 +15,21 @@ export class NodeTagStore extends BaseStore {
 
   /**
    * 为节点添加一个标签关联
-   * [修改] 现在如果关联已存在，将静默成功（幂等性）
+   * [修改] 返回 boolean，表示是否实际插入了新记录
+   * true: 成功插入 (之前不存在)
+   * false: 已存在
    */
-  async add(nodeId: string, tagName: string, transaction?: Transaction | null): Promise<void> {
+  async add(nodeId: string, tagName: string, transaction?: Transaction | null): Promise<boolean> {
     const data: NodeTagData = { nodeId, tagName };
 
     const tx = transaction ? transaction : await this.db.getTransaction(this.storeName, 'readwrite');
     const store = tx.getStore(this.storeName);
 
-    return new Promise((resolve, reject) => {
+    return new Promise<boolean>((resolve, reject) => {
       const request = store.add(data);
 
       request.onsuccess = () => {
-        resolve(undefined);
+        resolve(true); // 实际增加了记录
       };
 
       request.onerror = (event) => {
@@ -35,15 +37,16 @@ export class NodeTagStore extends BaseStore {
         if (error && error.name === 'ConstraintError') {
           event.preventDefault();
           event.stopPropagation();
-          resolve(undefined);
+          resolve(false); // 已存在，未增加记录
         } else {
           reject(error);
         }
       };
-    }).then(async () => {
+    }).then(async (result) => {
       if (!transaction) {
         await tx.done;
       }
+      return result;
     });
   }
 
@@ -69,10 +72,8 @@ export class NodeTagStore extends BaseStore {
 
   /**
    * 获取一个节点的所有标签名
-   * [修复] 增加 transaction 参数，确保在批量操作中保持事务活性
    */
   async getTagsForNode(nodeId: string, transaction?: Transaction | null): Promise<string[]> {
-    // 使用 execute 包装器，它会自动处理 "使用传入事务" 或 "创建新只读事务" 的逻辑
     const results = await this.execute<NodeTagData[]>(
         'readonly',
         (store) => store.index('nodeId').getAll(nodeId),

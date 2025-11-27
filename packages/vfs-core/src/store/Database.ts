@@ -1,7 +1,7 @@
 /**
  * @file vfs/store/Database.ts
  */
-import { VFS_STORES, TransactionMode, Transaction } from './types.js';
+import { VFS_STORES, TransactionMode, Transaction, TagData, NodeTagData } from './types.js';
 
 /**
  * IndexedDB 数据库封装层
@@ -9,7 +9,7 @@ import { VFS_STORES, TransactionMode, Transaction } from './types.js';
  */
 export class Database {
   private db: IDBDatabase | null = null;
-  private readonly version = 4; // [修改] 版本升级以添加新索引
+  private readonly version = 5; // [修改] 版本升级以添加引用计数迁移
 
   constructor(private dbName: string = 'vfs_database') {}
 
@@ -46,7 +46,6 @@ export class Database {
 
         // 版本 2: 添加额外索引或结构调整
         if (oldVersion < 2) {
-          // 可以在这里添加新的索引或修改
           console.log('Upgrading to version 2...');
         }
         
@@ -57,22 +56,58 @@ export class Database {
           this.createNodeTagsStore(db);
         }
         
-        // [新增] 版本 4: 为 vnodes 添加用于搜索的索引
+        // 版本 4: 为 vnodes 添加用于搜索的索引
         if (oldVersion < 4) {
           console.log('Upgrading to version 4...');
           const transaction = (event.target as IDBOpenDBRequest).transaction;
           if (transaction && db.objectStoreNames.contains(VFS_STORES.VNODES)) {
               const vnodeStore = transaction.objectStore(VFS_STORES.VNODES);
-              // 索引 `name` 用于按名称搜索
               if (!vnodeStore.indexNames.contains('name')) {
                   vnodeStore.createIndex('name', 'name', { unique: false });
-                  console.log("Created 'name' index on vnodes store.");
               }
-              // 索引 `tags` 用于按标签搜索，multiEntry 允许索引数组中的每个值
               if (!vnodeStore.indexNames.contains('tags')) {
                   vnodeStore.createIndex('tags', 'tags', { multiEntry: true });
-                  console.log("Created 'tags' index on vnodes store.");
               }
+          }
+        }
+
+        // [新增] 版本 5: 初始化 Tag 引用计数
+        if (oldVersion < 5) {
+          console.log('Upgrading to version 5: Initializing tag refCounts...');
+          const transaction = (event.target as IDBOpenDBRequest).transaction;
+          
+          if (transaction && db.objectStoreNames.contains(VFS_STORES.TAGS) && db.objectStoreNames.contains(VFS_STORES.NODE_TAGS)) {
+            const tagStore = transaction.objectStore(VFS_STORES.TAGS);
+            const nodeTagStore = transaction.objectStore(VFS_STORES.NODE_TAGS);
+
+            // 1. 获取所有标签
+            const tagRequest = tagStore.getAll();
+            tagRequest.onsuccess = () => {
+                const tags: TagData[] = tagRequest.result;
+                const countMap = new Map<string, number>();
+
+                // 初始化 Map
+                tags.forEach(t => countMap.set(t.name, 0));
+
+                // 2. 遍历所有关联，计算引用
+                const cursorRequest = nodeTagStore.openCursor();
+                cursorRequest.onsuccess = (e) => {
+                    const cursor = (e.target as IDBRequest).result;
+                    if (cursor) {
+                        const entry = cursor.value as NodeTagData;
+                        const currentCount = countMap.get(entry.tagName) || 0;
+                        countMap.set(entry.tagName, currentCount + 1);
+                        cursor.continue();
+                    } else {
+                        // 3. 更新 Tags 表
+                        tags.forEach(tag => {
+                            tag.refCount = countMap.get(tag.name) || 0;
+                            tagStore.put(tag);
+                        });
+                        console.log('Tag refCounts initialized.');
+                    }
+                };
+            };
           }
         }
       };
@@ -86,7 +121,6 @@ export class Database {
     if (!db.objectStoreNames.contains(VFS_STORES.VNODES)) {
       const store = db.createObjectStore(VFS_STORES.VNODES, { keyPath: 'nodeId' });
       
-      // 创建索引
       store.createIndex('path', 'path', { unique: true });
       store.createIndex('parentId', 'parentId', { unique: false });
       store.createIndex('moduleId', 'moduleId', { unique: false });
@@ -108,7 +142,7 @@ export class Database {
     }
   }
 
-  // [新增] 创建 tags 对象存储
+  // 创建 tags 对象存储
   private createTagsStore(db: IDBDatabase): void {
     if (!db.objectStoreNames.contains(VFS_STORES.TAGS)) {
       db.createObjectStore(VFS_STORES.TAGS, { keyPath: 'name' });
@@ -116,13 +150,12 @@ export class Database {
     }
   }
 
-  // [新增] 创建 node_tags 对象存储
+  // 创建 node_tags 对象存储
   private createNodeTagsStore(db: IDBDatabase): void {
     if (!db.objectStoreNames.contains(VFS_STORES.NODE_TAGS)) {
       const store = db.createObjectStore(VFS_STORES.NODE_TAGS, { autoIncrement: true });
       store.createIndex('nodeId', 'nodeId', { unique: false });
       store.createIndex('tagName', 'tagName', { unique: false });
-      // 复合索引防止重复关联
       store.createIndex('nodeId_tagName', ['nodeId', 'tagName'], { unique: true });
       console.log('Created node_tags store with indexes');
     }
@@ -140,11 +173,9 @@ export class Database {
   }
 
   /**
-   * [新增] 销毁数据库
-   * 物理删除整个 IndexedDB 数据库，用于重置应用
+   * 销毁数据库
    */
   async destroy(): Promise<void> {
-    // 1. 必须先关闭当前连接，否则 deleteDatabase 会被阻塞
     this.disconnect();
 
     return new Promise((resolve, reject) => {

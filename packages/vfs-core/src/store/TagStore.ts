@@ -1,6 +1,6 @@
 /**
  * @file vfs/store/TagStore.ts
- * [新增] Tag 数据存储
+ * Tag 数据存储
  * 管理所有唯一的标签
  */
 
@@ -15,9 +15,40 @@ export class TagStore extends BaseStore {
 
   /**
    * 创建一个新标签（如果不存在）
+   * [修改] 初始化引用计数
    */
-  async create(tag: TagData, transaction?: Transaction | null): Promise<void> {
-    await this.execute('readwrite', (store) => store.add(tag), transaction);
+  async create(tag: Omit<TagData, 'refCount'> & { refCount?: number }, transaction?: Transaction | null): Promise<void> {
+    const newTag: TagData = {
+      ...tag,
+      refCount: tag.refCount || 0
+    };
+    await this.execute('readwrite', (store) => store.add(newTag), transaction);
+  }
+
+  /**
+   * [新增] 原子调整引用计数
+   * 注意：必须在传入的事务上下文中执行以保证原子性
+   */
+  async adjustRefCount(tagName: string, delta: number, transaction: Transaction): Promise<void> {
+    const store = transaction.getStore(this.storeName);
+    
+    // 我们必须在事务内读取-修改-写入以保证原子性
+    const tag = await this.promisifyRequest<TagData>(store.get(tagName));
+    
+    if (tag) {
+      tag.refCount = (tag.refCount || 0) + delta;
+      // 防止计数为负（理论上不应发生，除非数据不一致）
+      if (tag.refCount < 0) tag.refCount = 0;
+      await this.promisifyRequest(store.put(tag));
+    } else if (delta > 0) {
+      // 罕见情况：添加标签时标签定义不存在（通常由上层逻辑预先创建）
+      // 这里作为容错处理
+      await this.promisifyRequest(store.add({ 
+        name: tagName, 
+        refCount: delta, 
+        createdAt: Date.now() 
+      }));
+    }
   }
 
   /**
@@ -36,7 +67,6 @@ export class TagStore extends BaseStore {
 
   /**
    * 删除一个标签定义
-   * 注意：这不会自动删除与节点的关联，应在更高级别的服务中处理
    */
   async deleteTag(tagName: string, transaction?: Transaction | null): Promise<void> {
     await this.delete(tagName, transaction);
