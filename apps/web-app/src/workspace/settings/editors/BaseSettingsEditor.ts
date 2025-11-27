@@ -33,6 +33,14 @@ export abstract class BaseSettingsEditor implements IEditor {
 
     abstract render(): void;
 
+    /**
+     * [修改] 实现 focus 方法，允许子类覆盖
+     * 当编辑器所在的 Tab 被激活时可能会被调用
+     */
+    focus() {
+        // 默认不执行任何操作，由子类按需实现（如 TagSettingsEditor 需要刷新数据）
+    }
+
     // 辅助方法：绑定事件并自动管理清理
     protected addEventListener(el: Element | null, type: string, handler: EventListener) {
         if (el) {
@@ -54,7 +62,7 @@ export abstract class BaseSettingsEditor implements IEditor {
     
     getText() { return ''; }
     setText(_text: string) {}
-    focus() {}
+    
     getMode(): 'edit' | 'render' { return 'render'; }
     async switchToMode(_mode: 'edit' | 'render') {}
     setTitle(_title: string) {}
@@ -62,7 +70,6 @@ export abstract class BaseSettingsEditor implements IEditor {
     isDirty() { return false; }
     setDirty(_dirty: boolean) {}
     
-    // [修复] 补全缺失的分析方法
     get commands() { return {}; }
     async getHeadings(): Promise<Heading[]> { return []; }
     async getSearchableText(): Promise<string> { return ''; }

@@ -84,13 +84,9 @@ export class VFSCore {
     this.moduleRegistry = new ModuleRegistry();
     this.middlewareFactory = new MiddlewareFactory(this.vfs.storage, this.eventBus);
 
-    // 3. 加载持久化的模块信息
     await this._loadModuleRegistry();
-
-    // 4. 注册默认 Providers
     await this._registerDefaultMiddlewares();
 
-    // 注册自定义 Middlewares
     if (this.config.middlewares) {
       for (const MiddlewareClass of this.config.middlewares) {
         const middleware = this.middlewareFactory.create(MiddlewareClass);
@@ -106,16 +102,9 @@ export class VFSCore {
    */
   async shutdown(): Promise<void> {
     if (!this.initialized) return;
-
-    // 持久化模块注册表
     await this._saveModuleRegistry();
-
-    // 清理 Providers
     await this.middlewareRegistry.clear();
-
-    // 关闭 VFS
     this.vfs.destroy();
-
     this.initialized = false;
     VFSCore.instance = null;
   }
@@ -139,13 +128,11 @@ export class VFSCore {
    */
   async createSystemBackup(): Promise<string> {
     this._ensureInitialized();
-
     const backupData = {
       version: 1,
       timestamp: Date.now(),
       modules: [] as any[]
     };
-
     const modules = this.moduleRegistry.getAll();
     for (const mod of modules) {
       try {
@@ -155,7 +142,6 @@ export class VFSCore {
         console.warn(`Skipping module ${mod.name} in backup:`, e);
       }
     }
-
     return JSON.stringify(backupData, null, 2);
   }
 
@@ -190,30 +176,25 @@ export class VFSCore {
    */
   async mount(moduleName: string, description?: string): Promise<ModuleInfo> {
     this._ensureInitialized();
-
     if (this.moduleRegistry.has(moduleName)) {
       throw new VFSError(
         VFSErrorCode.ALREADY_EXISTS,
         `Module '${moduleName}' already mounted`
       );
     }
-
     const rootNode = await this.vfs.createNode({
       module: moduleName,
       path: '/',
       type: VNodeType.DIRECTORY
     });
-
     const moduleInfo: ModuleInfo = {
       name: moduleName,
       rootNodeId: rootNode.nodeId,
       description,
       createdAt: Date.now()
     };
-
     this.moduleRegistry.register(moduleInfo);
     await this._saveModuleRegistry();
-
     return moduleInfo;
   }
 
@@ -522,7 +503,38 @@ export class VFSCore {
     this._ensureInitialized();
     return this.vfs.storage.tagStore.getAll();
   }
+
+  /**
+   * [新增] 更新标签定义（如颜色）
+   */
+  async updateTag(tagName: string, updates: { color?: string }): Promise<void> {
+      this._ensureInitialized();
+      const tag = await this.vfs.storage.tagStore.get(tagName);
+      if (tag) {
+          if (updates.color !== undefined) tag.color = updates.color;
+          // 使用 create 方法覆写，因为它实际上是 put 操作 (idb 的 put 会更新)
+          await this.vfs.storage.tagStore.create(tag);
+      } else {
+          // 如果标签不存在，可以选择创建它，或者抛错。通常在设置页面编辑时，它应该已存在或即将被创建。
+          // 这里我们允许创建
+          await this.vfs.storage.tagStore.create({
+              name: tagName,
+              color: updates.color,
+              refCount: 0,
+              createdAt: Date.now()
+          });
+      }
+  }
+
+  /**
+   * [新增] 删除标签定义
+   */
+  async deleteTagDefinition(tagName: string): Promise<void> {
+      this._ensureInitialized();
+      await this.vfs.storage.tagStore.deleteTag(tagName);
+  }
   
+
   /**
    * [修改] 按条件搜索节点
    * @param query 搜索条件

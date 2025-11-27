@@ -13,8 +13,8 @@ export interface DatabaseConfig {
 export const VFS_STORES = {
   VNODES: 'vnodes',
   CONTENTS: 'vfs_contents',
-  TAGS: 'tags', // [新增]
-  NODE_TAGS: 'node_tags' // [新增]
+  TAGS: 'tags',
+  NODE_TAGS: 'node_tags'
 } as const;
 
 /** 事务模式 */
@@ -39,7 +39,7 @@ export interface VNodeData {
   createdAt: number;
   modifiedAt: number;
   metadata?: Record<string, any>;
-  tags?: string[]; // [新增]
+  tags?: string[];
 }
 
 /** VNode 类 */
@@ -56,7 +56,7 @@ export class VNode {
     public createdAt: number = Date.now(),
     public modifiedAt: number = Date.now(),
     public metadata: Record<string, any> = {},
-    public tags: string[] = [] // [新增]
+    public tags: string[] = []
   ) {}
 
   toJSON(): VNodeData {
@@ -72,7 +72,7 @@ export class VNode {
       createdAt: this.createdAt,
       modifiedAt: this.modifiedAt,
       metadata: this.metadata,
-      tags: this.tags // [新增]
+      tags: this.tags
     };
   }
 
@@ -89,7 +89,7 @@ export class VNode {
       data.createdAt,
       data.modifiedAt,
       data.metadata || {},
-      data.tags || [] // [新增]
+      data.tags || []
     );
   }
 }
@@ -107,10 +107,11 @@ export interface ContentData {
 export interface TagData {
   name: string;
   color?: string; // 可选，用于UI展示
+  refCount: number; // [新增] 引用计数
   createdAt: number;
 }
 
-// [新增] 节点-标签关联数据结构
+// 节点-标签关联数据结构
 export interface NodeTagData {
   id?: number; // 主键 (auto-increment)
   nodeId: string;
