@@ -2,7 +2,7 @@
  * @file: app/workspace/settings/services/SettingsService.ts
  */
 import { VFSCore, VFSErrorCode, VFSEventType, VFSEvent } from '@itookit/vfs-core';
-import { SettingsState, LLMConnection, MCPServer, Executable, Tag, Contact } from '../types';
+import { SettingsState, LLMConnection, MCPServer, Executable, Tag, AgentFolder,Contact } from '../types';
 import { 
     LLM_DEFAULT_CONNECTIONS, 
     LLM_DEFAULT_AGENTS, 
@@ -21,6 +21,7 @@ const FILES = {
     connections: '/connections.json',
     mcpServers: '/mcp_servers.json',
     executables: '/executables.json',
+    agentFolders: '/agent_folders.json',
     tags: '/tags.json',
     contacts: '/contacts.json'
 };
@@ -40,12 +41,13 @@ export class SettingsService {
         connections: [],
         mcpServers: [],
         executables: [],
+        agentFolders: [],
         tags: [],
         contacts: []
     };
     private listeners: Set<ChangeListener> = new Set();
     private initialized = false;
-    private syncTimer: any = null; // 用于防抖
+    private syncTimer: any = null;
 
     constructor(vfs: VFSCore) {
         this.vfs = vfs;
@@ -67,6 +69,7 @@ export class SettingsService {
             this.loadEntity('connections'),
             this.loadEntity('mcpServers'),
             this.loadEntity('executables'),
+            this.loadEntity('agentFolders'),
             this.loadEntity('contacts'),
             // Tags 不需要 loadEntity，直接在 syncTags 中处理
         ]);
@@ -108,7 +111,7 @@ export class SettingsService {
             this.syncTimer = setTimeout(() => {
                 // 重新同步标签并通知 UI 更新
                 this.syncTags().then(() => this.notify());
-            }, 1000); // 1秒防抖
+            }, 1000); 
         };
 
         // 订阅事件总线
@@ -138,7 +141,7 @@ export class SettingsService {
             const mergedTags: Tag[] = vfsTags.map(vTag => {
                 const configTag = configTags.find(ct => ct.name === vTag.name);
                 return {
-                    id: vTag.name, // 使用名称作为 ID
+                    id: vTag.name,
                     name: vTag.name,
                     color: vTag.color || configTag?.color || '#3b82f6',
                     description: configTag?.description || '',
@@ -206,16 +209,20 @@ export class SettingsService {
         const requiredAgentIds = [LLM_DEFAULT_ID, LLM_TEMP_DEFAULT_ID];
         
         for (const agentId of requiredAgentIds) {
-            const hasAgent = this.state.executables.some(e => e.id === agentId);
-            if (!hasAgent) {
+            if (!this.state.executables.some(e => e.id === agentId)) {
                 const template = LLM_DEFAULT_AGENTS.find(a => a.id === agentId);
                 if (template) {
+                    // 适配新的 Executable 接口
                     const newAgent: Executable = {
                         id: template.id,
                         name: template.name,
                         type: 'agent',
                         icon: template.icon,
                         description: template.description,
+                        tags: template.tags,
+                        createdAt: Date.now(),
+                        modifiedAt: Date.now(),
+                        parentId: null,
                         config: {
                             connectionId: template.config.connectionId || LLM_DEFAULT_ID,
                             modelName: template.config.modelName,
@@ -270,53 +277,47 @@ export class SettingsService {
                 throw e;
             }
         }
-        // notify 由调用者决定是否需要，或者在这里统一通知
-        // 对于 syncTags 这种可能引发循环的，我们在 syncTags 内部控制
-        if (key !== 'tags') {
-            this.notify();
-        }
+        if (key !== 'tags') this.notify();
     }
 
-    // --- 具体的 CRUD 操作 ---
+    private updateOrAdd<T extends { id: string }>(list: T[], item: T) {
+        const idx = list.findIndex(i => i.id === item.id);
+        if (idx >= 0) list[idx] = item;
+        else list.push(item);
+        this.notify();
+    }
+
+    // --- CRUD Operations ---
 
     // Connections
     getConnections() { return [...this.state.connections]; }
-    async saveConnection(conn: LLMConnection) {
-        const idx = this.state.connections.findIndex(c => c.id === conn.id);
-        if (idx >= 0) this.state.connections[idx] = conn;
-        else this.state.connections.push(conn);
-        await this.saveEntity('connections');
-        this.notify();
+    async saveConnection(conn: LLMConnection) { 
+        this.updateOrAdd(this.state.connections, conn); 
+        await this.saveEntity('connections'); 
     }
-    async deleteConnection(id: string) {
-        this.state.connections = this.state.connections.filter(c => c.id !== id);
+    async deleteConnection(id: string) { 
+        this.state.connections = this.state.connections.filter(c => c.id !== id); 
         await this.saveEntity('connections');
         this.notify();
     }
 
     // MCP Servers
     getMCPServers() { return [...this.state.mcpServers]; }
-    async saveMCPServer(server: MCPServer) {
-        const idx = this.state.mcpServers.findIndex(s => s.id === server.id);
-        if (idx >= 0) this.state.mcpServers[idx] = server;
-        else this.state.mcpServers.push(server);
-        await this.saveEntity('mcpServers');
-        this.notify();
+    async saveMCPServer(s: MCPServer) { 
+        this.updateOrAdd(this.state.mcpServers, s); 
+        await this.saveEntity('mcpServers'); 
     }
-    async deleteMCPServer(id: string) {
-        this.state.mcpServers = this.state.mcpServers.filter(s => s.id !== id);
+    async deleteMCPServer(id: string) { 
+        this.state.mcpServers = this.state.mcpServers.filter(s => s.id !== id); 
         await this.saveEntity('mcpServers');
-        this.notify();
+        this.notify(); 
     }
 
     // Executables
     getExecutables() { return [...this.state.executables]; }
     async saveExecutable(exec: Executable) {
-        const idx = this.state.executables.findIndex(e => e.id === exec.id);
-        if (idx >= 0) this.state.executables[idx] = exec;
-        else this.state.executables.push(exec);
+        this.updateOrAdd(this.state.executables, exec);
         await this.saveEntity('executables');
-        this.notify();
     }
     async deleteExecutable(id: string) {
         this.state.executables = this.state.executables.filter(e => e.id !== id);
@@ -324,47 +325,87 @@ export class SettingsService {
         this.notify();
     }
 
-    // Tag CRUD - 同步 VFS
-    getTags() { return [...this.state.tags]; }
-    
-    async saveTag(tag: Tag) {
-        // 1. 更新内存状态
-        const idx = this.state.tags.findIndex(t => t.id === tag.id);
-        if (idx >= 0) this.state.tags[idx] = tag;
-        else this.state.tags.push(tag);
+    getAgentFolders() { return [...(this.state.agentFolders || [])]; }
 
-        // 2. 同步更新底层 VFS (更新颜色等)
-        await this.vfs.updateTag(tag.name, { color: tag.color });
+    async saveAgentFolder(folder: AgentFolder) {
+        if (!this.state.agentFolders) this.state.agentFolders = [];
+        this.updateOrAdd(this.state.agentFolders, folder);
+        await this.saveEntity('agentFolders');
+    }
 
-        // 3. 持久化到 JSON
-        await this.saveEntity('tags');
+    async deleteAgentFolder(id: string) {
+        if (!this.state.agentFolders) return;
+        this.state.agentFolders = this.state.agentFolders.filter(f => f.id !== id);
+        await this.saveEntity('agentFolders');
         this.notify();
     }
 
-    async deleteTag(id: string) {
-        const tagName = id;
-        // 1. 更新内存
-        this.state.tags = this.state.tags.filter(t => t.id !== id);
-        // 2. 从底层 VFS 删除
-        await this.vfs.deleteTagDefinition(tagName);
-        // 3. 持久化
-        await this.saveEntity('tags');
-        this.notify();
-    }
+    // ==========================================
+    // 修复缺失的方法: Contacts & Tags
+    // ==========================================
 
     // Contacts
     getContacts() { return [...this.state.contacts]; }
     async saveContact(contact: Contact) {
-        const idx = this.state.contacts.findIndex(c => c.id === contact.id);
-        if (idx >= 0) this.state.contacts[idx] = contact;
-        else this.state.contacts.push(contact);
+        this.updateOrAdd(this.state.contacts, contact);
         await this.saveEntity('contacts');
-        this.notify();
     }
     async deleteContact(id: string) {
         this.state.contacts = this.state.contacts.filter(c => c.id !== id);
         await this.saveEntity('contacts');
         this.notify();
+    }
+
+    // Tags
+    getTags() { return [...this.state.tags]; }
+    
+    async saveTag(tag: Tag) {
+        // 1. 更新 VFS Core 中的定义 (颜色等)
+        await this.vfs.updateTag(tag.name, { color: tag.color });
+        
+        // 2. 更新本地状态 (描述等) 并持久化到 tags.json
+        this.updateOrAdd(this.state.tags, tag);
+        await this.saveEntity('tags');
+    }
+
+    async deleteTag(tagId: string) {
+        // Tag.id 在这里通常等于 Tag.name
+        const tag = this.state.tags.find(t => t.id === tagId);
+        if (!tag) return;
+
+        // 1. 从 VFS Core 删除定义
+        await this.vfs.deleteTagDefinition(tag.name);
+
+        // 2. 从本地状态删除
+        this.state.tags = this.state.tags.filter(t => t.id !== tagId);
+        await this.saveEntity('tags');
+        this.notify();
+    }
+    // ==========================================
+
+    async moveItems(items: { id: string, isFolder: boolean }[], targetParentId: string | null) {
+        let execChanged = false;
+        let folderChanged = false;
+
+        for (const item of items) {
+            if (item.isFolder) {
+                const folder = this.state.agentFolders.find(f => f.id === item.id);
+                if (folder && folder.parentId !== targetParentId) {
+                    folder.parentId = targetParentId;
+                    folderChanged = true;
+                }
+            } else {
+                const exec = this.state.executables.find(e => e.id === item.id);
+                if (exec && exec.parentId !== targetParentId) {
+                    exec.parentId = targetParentId;
+                    execChanged = true;
+                }
+            }
+        }
+
+        if (execChanged) await this.saveEntity('executables');
+        if (folderChanged) await this.saveEntity('agentFolders');
+        if (execChanged || folderChanged) this.notify();
     }
 
     // --- Export/Import Logic (Enhanced) ---
@@ -373,7 +414,7 @@ export class SettingsService {
      * 获取可导出的配置项键名 (Logical Settings)
      */
     getAvailableSettingsKeys(): (keyof SettingsState)[] {
-        return ['connections', 'mcpServers', 'executables', 'tags', 'contacts'];
+        return ['connections', 'mcpServers', 'executables', 'tags', 'contacts', 'agentFolders'];
     }
 
     /**
