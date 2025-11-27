@@ -367,10 +367,10 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
                     }
                     break;
                 // ✨ [新增] 处理批量更新事件
-                case 'node:batch_updated' as any: {
+                case 'node:batch_updated': {
                     const { updatedNodeIds } = event.payload;
                     if (updatedNodeIds && Array.isArray(updatedNodeIds)) {
-                        updatedNodeIds.forEach(id => this.updateQueue.add(id));
+                        updatedNodeIds.forEach((id: string) => this.updateQueue.add(id));
                         if (!this.updateTimer) {
                             this.updateTimer = setTimeout(processUpdateQueue, 50);
                         }
@@ -383,7 +383,7 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
                     break;
                 
                 // ✨ [新增] 处理批量移动事件
-                case 'node:batch_moved' as any:
+                case 'node:batch_moved':
                     this._loadData();
                     this.store.dispatch({ type: 'MOVE_OPERATION_END' });
                     break;
@@ -395,8 +395,8 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
             this.engine.on('node:updated', handleEvent),
             this.engine.on('node:deleted', handleEvent),
             this.engine.on('node:moved', handleEvent),
-            this.engine.on('node:batch_updated' as any, handleEvent),
-            this.engine.on('node:batch_moved' as any, handleEvent)
+            this.engine.on('node:batch_updated', handleEvent),
+            this.engine.on('node:batch_moved', handleEvent)
         ];
         this.engineUnsubscribe = () => unsubs.forEach(u => u());
     }
