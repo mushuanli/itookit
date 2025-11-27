@@ -39,18 +39,6 @@ export class VFSCoreAdapter implements ISessionEngine {
         };
     }
 
-    private async getParentPath(parentId: string | null): Promise<string> {
-        if (!parentId) return ''; 
-        const parent = await this.vfs.storage.loadVNode(parentId);
-        if (!parent) throw new Error(`Parent node ${parentId} not found`);
-        
-        const modulePathPrefix = `/${this.moduleName}`;
-        let relativePath = parent.path;
-        if (relativePath.startsWith(modulePathPrefix)) {
-            relativePath = relativePath.substring(modulePathPrefix.length);
-        }
-        return relativePath.startsWith('/') ? relativePath.substring(1) : relativePath;
-    }
 
     // --- Implementation ---
 
@@ -119,7 +107,7 @@ export class VFSCoreAdapter implements ISessionEngine {
     }
 
     async createFile(name: string, parentId: string | null, content: string | ArrayBuffer = ''): Promise<EngineNode> {
-        const parentPath = await this.getParentPath(parentId);
+        const parentPath = parentId ? await this.getParentPath(parentId) : '';
         const fullRelativePath = this.vfs.pathResolver.join(parentPath, name);
         const vnode = await this.vfsCore.createFile(this.moduleName, fullRelativePath, content);
         const node = this.toEngineNode(vnode);
@@ -128,7 +116,7 @@ export class VFSCoreAdapter implements ISessionEngine {
     }
 
     async createDirectory(name: string, parentId: string | null): Promise<EngineNode> {
-        const parentPath = await this.getParentPath(parentId);
+        const parentPath = parentId ? await this.getParentPath(parentId) : '';
         const fullRelativePath = this.vfs.pathResolver.join(parentPath, name);
         const vnode = await this.vfsCore.createDirectory(this.moduleName, fullRelativePath);
         const node = this.toEngineNode(vnode);
@@ -143,8 +131,7 @@ export class VFSCoreAdapter implements ISessionEngine {
     async rename(id: string, newName: string): Promise<void> {
         const node = await this.vfs.storage.loadVNode(id);
         if (!node) throw new Error('Node not found');
-        
-        const parentRelativePath = await this.getParentPath(node.parentId);
+        const parentRelativePath = node.parentId ? await this.getParentPath(node.parentId) : '';
         const newRelativePath = this.vfs.pathResolver.join(parentRelativePath, newName);
         
         await this.vfs.move(id, newRelativePath);
@@ -177,7 +164,7 @@ export class VFSCoreAdapter implements ISessionEngine {
      * 即使 ISessionEngine 接口定义中可能没有这个方法，
      * 我们可以在 Service 层通过类型转换调用它。
      */
-    async setTagsBatch(updates: { id: string; tags: string[] }[]): Promise<void> {
+    async setTagsBatch(updates: Array<{ id: string; tags: string[] }>): Promise<void> {
         const batchData = updates.map(u => ({ nodeId: u.id, tags: u.tags }));
         await this.vfsCore.batchSetNodeTags(batchData);
     }
@@ -203,19 +190,33 @@ export class VFSCoreAdapter implements ISessionEngine {
             [VFSEventType.NODE_UPDATED]: (e: any) => mapAndEmit('node:updated', e),
             [VFSEventType.NODE_DELETED]: (e: any) => mapAndEmit('node:deleted', e),
             [VFSEventType.NODE_MOVED]: (e: any) => mapAndEmit('node:moved', e),
-            [VFSEventType.NODE_COPIED]: (e: any) => mapAndEmit('node:moved', e),
+            [VFSEventType.NODE_COPIED]: (e: any) => mapAndEmit('node:moved', e), // Copy 视为 move/create
             
-            // ✨ [新增] 映射批量更新事件
-            // 我们将其映射为自定义类型 'node:batch_updated'
+            // ✨ [已更新] 不再需要 'as any'，因为 EngineEventType 现在包含这些类型
             [VFSEventType.NODES_BATCH_UPDATED]: (e: any) => {
-                // 直接透传 payload，包含 updatedNodeIds
-                callback({ type: 'node:batch_updated' as any, payload: e.data });
+                callback({ type: 'node:batch_updated', payload: e.data });
             },
-            [VFSEventType.NODES_BATCH_MOVED]: (e: any) => callback({ type: 'node:batch_moved' as any, payload: e.data })
+            [VFSEventType.NODES_BATCH_MOVED]: (e: any) => {
+                callback({ type: 'node:batch_moved', payload: e.data });
+            }
         };
 
         const unsubs = Object.entries(handlers).map(([evt, handler]) => bus.on(evt as any, handler));
         
         return () => unsubs.forEach(u => u());
+    }
+    
+    // 补全缺失的辅助方法定义以确保代码编译通过
+    private async getParentPath(parentId: string): Promise<string> {
+        if (!parentId) return ''; 
+        const parent = await this.vfs.storage.loadVNode(parentId);
+        if (!parent) throw new Error(`Parent node ${parentId} not found`);
+        
+        const modulePathPrefix = `/${this.moduleName}`;
+        let relativePath = parent.path;
+        if (relativePath.startsWith(modulePathPrefix)) {
+            relativePath = relativePath.substring(modulePathPrefix.length);
+        }
+        return relativePath.startsWith('/') ? relativePath.substring(1) : relativePath;
     }
 }

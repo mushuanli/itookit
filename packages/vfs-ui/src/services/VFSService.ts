@@ -1,5 +1,7 @@
 /**
  * @file vfs-ui/services/VFSService.ts
+ * @desc Implements the service logic and provides a clean API for
+ * all mutation operations required by the VFS-UI.
  */
 import type { ISessionEngine, EngineNode } from '@itookit/common';
 
@@ -61,7 +63,13 @@ export class VFSService {
 
   public async createFiles({ parentId = null, files }: CreateMultipleFilesOptions): Promise<EngineNode[]> {
     if (!files || files.length === 0) return [];
-    // Engine 接口是原子的，这里做并发调用
+    
+    // [优化] 检查 Engine 是否支持原子批量创建
+    if (typeof this.engine.createFiles === 'function') {
+        return this.engine.createFiles(files, parentId);
+    }
+
+    // 回退逻辑：并发调用原子接口
     return Promise.all(
         files.map(file => this.engine.createFile(file.title, parentId, file.content))
     );
@@ -84,12 +92,10 @@ export class VFSService {
   }
 
   public async updateMultipleItemsTags({ itemIds, tags }: { itemIds: string[]; tags: string[] }): Promise<void> {
-    const engineAny = this.engine as any;
-    
-    // 检查是否存在批量接口 (VFSCoreAdapter 实现了它)
-    if (typeof engineAny.setTagsBatch === 'function') {
+    // [优化] 检查 Engine 是否支持批量设置标签，现在这是类型安全的
+    if (typeof this.engine.setTagsBatch === 'function') {
         const updates = itemIds.map(id => ({ id, tags }));
-        await engineAny.setTagsBatch(updates);
+        await this.engine.setTagsBatch(updates);
     } else {
         // 回退逻辑
         await Promise.all(itemIds.map(id => this.engine.setTags(id, tags)));

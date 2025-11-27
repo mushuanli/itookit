@@ -64,11 +64,13 @@ export type EngineEventType =
     | 'node:updated' 
     | 'node:deleted' 
     | 'node:moved'
+    | 'node:batch_updated' // ✨ [新增] 批量更新 (如批量打标签)
+    | 'node:batch_moved'   // ✨ [新增] 批量移动
     | 'error';
 
 export interface EngineEvent {
     type: EngineEventType;
-    /** 具体的事件载荷，通常包含 nodeId, parentId 等信息 */
+    /** 具体的事件载荷，通常包含 nodeId, parentId, updatedNodeIds 等信息 */
     payload: any;
 }
 
@@ -101,6 +103,12 @@ export interface ISessionEngine {
     /** 创建文件 (路径计算通常由 engine 内部根据 parentId 处理) */
     createFile(name: string, parentId: string | null, content?: string | ArrayBuffer): Promise<EngineNode>;
     
+    /** 
+     * [新增] 批量创建文件 (可选实现)
+     * 允许后端优化为单次事务/请求。如果未实现，Service 层会回退到 Promise.all 并发调用。
+     */
+    createFiles?(files: Array<{ title: string; content: string | ArrayBuffer }>, parentId: string | null): Promise<EngineNode[]>;
+
     /** 创建目录 */
     createDirectory(name: string, parentId: string | null): Promise<EngineNode>;
     
@@ -110,10 +118,10 @@ export interface ISessionEngine {
     /** 重命名节点 */
     rename(id: string, newName: string): Promise<void>;
     
-    /** 移动节点到新父节点下 */
+    /** 移动节点到新父节点下 (支持批量 ID) */
     move(ids: string[], targetParentId: string | null): Promise<void>;
     
-    /** 删除节点 */
+    /** 删除节点 (支持批量 ID) */
     delete(ids: string[]): Promise<void>;
     
     /** 更新元数据 (通常是合并更新) */
@@ -121,6 +129,13 @@ export interface ISessionEngine {
     
     /** 设置节点的标签 (全量替换) */
     setTags(id: string, tags: string[]): Promise<void>;
+
+    /** 
+     * [新增] 批量设置标签
+     * 用于解决 Service 层不得不使用 (engine as any).setTagsBatch 的问题。
+     * 定义为可选，以便兼容旧的 Engine 实现。
+     */
+    setTagsBatch?(updates: Array<{ id: string; tags: string[] }>): Promise<void>;
 
     // --- Events ---
     
