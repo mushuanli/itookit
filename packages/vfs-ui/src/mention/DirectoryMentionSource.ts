@@ -56,11 +56,15 @@ export class DirectoryMentionSource extends IMentionSource {
       });
 
       const filteredResults = results.filter(node => {
-        if (node.moduleId && (node.moduleId[0] === '.' || node.moduleId.startsWith('__'))) {
+        // [优化] 过滤逻辑同步更新
+        if (node.moduleId && (node.moduleId.startsWith('.') || node.moduleId.startsWith('__'))) {
           return false;
         }
-        if (node.path && node.path.split('/').some(part => (part.startsWith('.')||part.startsWith('_'))) ) {
+        if (node.path && node.path.split('/').some(part => (part.startsWith('.') || part.startsWith('__')))) {
           return false;
+        }
+        if (node.name.startsWith('.') || node.name.startsWith('__')) {
+            return false;
         }
         return true;
       });
