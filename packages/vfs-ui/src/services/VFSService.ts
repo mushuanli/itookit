@@ -14,6 +14,8 @@ import type { ISessionEngine, EngineNode } from '@itookit/common';
 export interface VFSServiceDependencies {
   engine: ISessionEngine;
   newFileContent?: string;
+  /** [新增] 创建文件时的默认扩展名，默认为 .md */
+  defaultExtension?: string;
 }
 
 /**
@@ -50,28 +52,49 @@ export interface CreateDirectoryOptions {
 export class VFSService {
   private readonly engine: ISessionEngine;
   private readonly newFileContent: string;
+  private readonly defaultExtension: string;
 
-  constructor({ engine, newFileContent = '' }: VFSServiceDependencies) {
+  constructor({ engine, newFileContent = '', defaultExtension = '.md' }: VFSServiceDependencies) {
     if (!engine) throw new Error("VFSService requires an ISessionEngine.");
     this.engine = engine;
     this.newFileContent = newFileContent;
+    // 确保扩展名以 . 开头
+    this.defaultExtension = defaultExtension.startsWith('.') ? defaultExtension : `.${defaultExtension}`;
+  }
+
+  /**
+   * 辅助方法：确保文件名有扩展名
+   */
+  private ensureExtension(filename: string): string {
+    // 简单判断：如果文件名包含 . 且不在开头，认为已有扩展名
+    // 更严谨的逻辑可以根据需要调整
+    if (filename.lastIndexOf('.') > 0) {
+        return filename;
+    }
+    return `${filename}${this.defaultExtension}`;
   }
 
   public async createFile({ title = 'Untitled', parentId = null, content = this.newFileContent }: CreateFileOptions): Promise<EngineNode> {
-    return this.engine.createFile(title, parentId, content);
+    // [优化] 自动补全扩展名
+    const finalTitle = this.ensureExtension(title);
+    return this.engine.createFile(finalTitle, parentId, content);
   }
 
   public async createFiles({ parentId = null, files }: CreateMultipleFilesOptions): Promise<EngineNode[]> {
     if (!files || files.length === 0) return [];
+
+    // [优化] 批量处理时也补全扩展名
+    const processedFiles = files.map(f => ({
+        ...f,
+        title: this.ensureExtension(f.title)
+    }));
     
-    // [优化] 检查 Engine 是否支持原子批量创建
     if (typeof this.engine.createFiles === 'function') {
-        return this.engine.createFiles(files, parentId);
+        return this.engine.createFiles(processedFiles, parentId);
     }
 
-    // 回退逻辑：并发调用原子接口
     return Promise.all(
-        files.map(file => this.engine.createFile(file.title, parentId, file.content))
+        processedFiles.map(file => this.engine.createFile(file.title, parentId, file.content))
     );
   }
 
@@ -80,6 +103,8 @@ export class VFSService {
   }
 
   public async renameItem(nodeId: string, newTitle: string): Promise<void> {
+    // 注意：renameItem 这里不自动补全扩展名，因为 Manager 层会处理好带扩展名的全名
+    // 或者我们假定传入的 newTitle 已经是完整的
     await this.engine.rename(nodeId, newTitle);
   }
 
@@ -92,12 +117,10 @@ export class VFSService {
   }
 
   public async updateMultipleItemsTags({ itemIds, tags }: { itemIds: string[]; tags: string[] }): Promise<void> {
-    // [优化] 检查 Engine 是否支持批量设置标签，现在这是类型安全的
     if (typeof this.engine.setTagsBatch === 'function') {
         const updates = itemIds.map(id => ({ id, tags }));
         await this.engine.setTagsBatch(updates);
     } else {
-        // 回退逻辑
         await Promise.all(itemIds.map(id => this.engine.setTags(id, tags)));
     }
   }
