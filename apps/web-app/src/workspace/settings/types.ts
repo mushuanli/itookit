@@ -38,40 +38,6 @@ export interface MCPServer {
     resources?: any[];
 }
 
-export interface AgentConfig {
-    connectionId: string;
-    modelName: string;
-    systemPrompt?: string;
-    maxHistoryLength?: number;
-    autoPrompts?: string[];
-    mcpServers?: string[];
-}
-
-// [修改] Executable 增加层级和元数据支持
-export interface Executable {
-    id: string;
-    parentId?: string | null; // [新增] 支持层级
-    name: string;
-    type: 'agent' | 'orchestrator';
-    icon?: string;
-    description?: string;
-    config?: AgentConfig;
-    mode?: 'serial' | 'parallel';
-    children?: string[]; // Orchestrator 的子节点（逻辑引用）
-    
-    tags?: string[]; // [新增] 支持标签
-    createdAt?: number; // [新增] 创建时间
-    modifiedAt?: number; // [新增] 修改时间
-}
-
-// [新增] 专门用于 Agent 管理界面的文件夹结构
-export interface AgentFolder {
-    id: string;
-    parentId: string | null;
-    name: string;
-    createdAt: number;
-}
-
 export interface Tag {
     id: string;
     name: string;
@@ -90,11 +56,33 @@ export interface Contact {
     notes?: string;
 }
 
+// --- Agent 文件结构 ---
+
+export interface AgentConfig {
+    connectionId: string;
+    modelName: string;
+    systemPrompt?: string;
+    maxHistoryLength?: number;
+    autoPrompts?: string[];
+    mcpServers?: string[];
+}
+
+// 这是保存在 .agent 文件中的 JSON 结构
+export interface AgentFileContent {
+    id: string;
+    name: string;
+    type: 'agent' | 'orchestrator';
+    description?: string;
+    icon?: string; // 可选，用于 UI 展示
+    config: AgentConfig;
+    // Tags 现在由 VFS 原生管理，文件内可以保留一份副本用于导出，但运行时以 VFS 为准
+    tags?: string[]; 
+}
+
+
 export interface SettingsState {
     connections: LLMConnection[];
     mcpServers: MCPServer[];
-    executables: Executable[];
-    agentFolders: AgentFolder[]; // [新增] 存储文件夹结构
     tags: Tag[];
     contacts: Contact[];
 }

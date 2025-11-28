@@ -3,63 +3,55 @@
  */
 import { MemoryManager } from '@itookit/memory-manager';
 import { initVFS } from './services/vfs';
-import { defaultEditorFactory } from './factories/editorFactory';
+import { defaultEditorFactory, createSmartEditorFactory } from './factories/editorFactory';
 import { initSidebarNavigation } from './utils/layout';
 import { WORKSPACES } from './config/modules';
-
 import { SettingsEngine } from './workspace/settings/engines/SettingsEngine';
 import { SettingsService } from './workspace/settings/services/SettingsService';
 import { createSettingsFactory } from './factories/settingsFactory';
+// [Removed] AgentEngine 移除
+// import { AgentEngine } from './workspace/agents/AgentEngine'; 
 
-// 引入样式
 import '@itookit/vfs-ui/style.css';
 import '@itookit/mdxeditor/style.css';
 import '@itookit/memory-manager/style.css'; 
 import './styles/index.css'; 
 
-// 状态缓存：记录已经初始化的 Manager，防止重复创建
 const managerCache = new Map<string, MemoryManager>();
+
+// 全局单例 SettingsService
+let sharedSettingsService: SettingsService | null = null;
 
 async function bootstrap() {
     try {
-        // 1. 核心初始化 (VFS 必须先就绪)
+        // 1. 初始化核心层
         const vfsCore = await initVFS();
         
-        // 2. 定义单个工作区的加载函数
-        const loadWorkspace = async (targetId: string) => {
-            // 1. 检查缓存
-            if (managerCache.has(targetId)) return;
+        // 2. 优先初始化全局设置服务 (Connection 数据源)
+        sharedSettingsService = new SettingsService(vfsCore);
+        await sharedSettingsService.init();
 
+        const loadWorkspace = async (targetId: string) => {
+            if (managerCache.has(targetId)) return;
             const container = document.getElementById(targetId);
             if (!container) return;
 
-            // 确保容器可见以便正确渲染
+            // 样式处理
             const wasActive = container.classList.contains('active');
             if (!wasActive) container.classList.add('active');
 
             let manager: MemoryManager;
 
-            // [核心修改] 针对 Settings Workspace 的特殊初始化
+            // 3. 特殊处理：Settings Workspace
             if (targetId === 'settings-workspace') {
-                console.log('Initializing Settings Workspace with Custom Engine...');
-                
-                // 1. 创建 Service (核心数据逻辑)
-                const settingsService = new SettingsService(vfsCore);
-                
-                // 2. 创建 Engine (适配层，注入 Service)
-                const settingsEngine = new SettingsEngine(settingsService);
-
-                // 3. 创建 Factory (UI 层，注入 Service)
-                const settingsFactory = createSettingsFactory(settingsService);
-
-                // 清空静态 HTML (如果有)
+                const settingsEngine = new SettingsEngine(sharedSettingsService!);
+                const settingsFactory = createSettingsFactory(sharedSettingsService!);
                 container.innerHTML = '';
-
+                
                 manager = new MemoryManager({
                     container: container,
-                    customEngine: settingsEngine, // 传入 Engine
-                    editorFactory: settingsFactory, // 传入 Factory
-                    
+                    customEngine: settingsEngine,
+                    editorFactory: settingsFactory,
                     uiOptions: {
                         title: 'Settings',
                         // 设置页面不需要上下文菜单
@@ -71,42 +63,56 @@ async function bootstrap() {
                         // 因为设置项列表是固定的（Connections, Tags...）。
                         readOnly: true, 
                     },
-                    editorConfig: {
-                        // 设置页面可能只需要基本的 Markdown 插件
-                        plugins: ['core:titlebar'], 
-                        // ✨ [保持] false。
-                        // 右侧编辑器区域必须是可交互的（填写表单），不能只读。
-                        readOnly: false 
-                    },
-                    aiConfig: { enabled: false } // 设置页面不需要 AI 扫描
+                    editorConfig: { plugins: ['core:titlebar'] },
+                    aiConfig: { enabled: false }
                 });
 
+            // 4. Agent Workspace - 架构简化
+            // 不再使用 AgentEngine，直接使用标准 MemoryManager + SmartEditorFactory
+            } else if (targetId === 'agent-workspace') {
+                const agentFactory = createSmartEditorFactory(sharedSettingsService!);
+                container.innerHTML = '';
+
+                // 获取配置 (确保 defaultFileContent 存在)
+                const agentConfig = WORKSPACES.find(w => w.elementId === 'agent-workspace')!;
+
+                manager = new MemoryManager({
+                    container: container,
+                    // [修改] 使用标准的 vfsCore + moduleName 模式
+                    // MemoryManager 内部会自动创建 VFSCoreAdapter
+                    vfsCore: vfsCore,
+                    moduleName: 'agents', 
+                    
+                    editorFactory: agentFactory,
+                    uiOptions: {
+                        title: 'Agents',
+                        // 使用 config 中定义的 .agent 文件名和 JSON 模板
+                        defaultFileName: agentConfig.defaultFileName, 
+                        defaultFileContent: agentConfig.defaultFileContent,
+                        
+                        searchPlaceholder: 'Search agents...',
+                        initialSidebarCollapsed: false,
+                        readOnly: false,
+                        // 可选：定制上下文菜单，只保留文件操作，移除文件夹操作
+                        contextMenu: {
+                            items: (_item, defaults) => {
+                                // Agent 列表通常是扁平的，或者我们不希望用户建立深层目录
+                                return defaults; 
+                            }
+                        }
+                    },
+                    editorConfig: {
+                        plugins: ['core:titlebar'], 
+                        readOnly: false
+                    },
+                    aiConfig: { enabled: false }
+                });
+
+            // 5. 通用 Workspace
             } else {
-
-                // 2.2 检查是否已经加载过
-                if (managerCache.has(targetId)) {
-                    return;
-                }
-
-                // 2.3 查找配置
                 const wsConfig = WORKSPACES.find(w => w.elementId === targetId);
-                if (!wsConfig) {
-                    console.warn(`No configuration found for workspace: ${targetId}`);
-                    return;
-                }
+                if (!wsConfig) return;
 
-                const container = document.getElementById(wsConfig.elementId);
-                if (!container) return;
-
-                console.log(`Lazy loading workspace: ${wsConfig.title}...`);
-
-                // ✅ 关键修改：确保容器在初始化时可见
-                const wasActive = container.classList.contains('active');
-                if (!wasActive) {
-                    container.classList.add('active');
-                }
-
-                // 2.4 创建实例
                 manager = new MemoryManager({
                     container: container,
                     vfsCore: vfsCore,
@@ -114,24 +120,15 @@ async function bootstrap() {
                     editorFactory: defaultEditorFactory,
                     uiOptions: {
                         title: wsConfig.title,
+                        defaultFileName: wsConfig.defaultFileName,
+                        defaultFileContent: wsConfig.defaultFileContent,
                         initialSidebarCollapsed: false,
-                        searchPlaceholder: `Search inside ${wsConfig.title}...`,
-                        // 普通工作区默认为可读写
                         readOnly: false
                     },
-
-                    // 2. [核心] 编辑器静态配置 (插件配置在此传递)
                     editorConfig: {
                         plugins: wsConfig.plugins, 
                         readOnly: false
                     },
-
-                    // 3. [架构修正] 默认内容策略
-                    defaultContentConfig: wsConfig.defaultFileName ? {
-                        fileName: wsConfig.defaultFileName,
-                        content: wsConfig.defaultFileContent || ''
-                    } : undefined,
-
                     aiConfig: {
                         enabled: true,
                         activeRules: ['user', 'tag', 'file']
@@ -139,36 +136,24 @@ async function bootstrap() {
                 });
             }
 
-            // 2.5 启动并缓存
             await manager.start();
             managerCache.set(targetId, manager);
 
-            // ✅ 如果原本不是 active，在渲染完成后检查是否需要移除 active 类
             if (!wasActive) {
                 requestAnimationFrame(() => {
                     const currentActiveBtn = document.querySelector('.app-nav-btn.active');
                     const currentTarget = currentActiveBtn?.getAttribute('data-target');
-                    
-                    // 只有当前激活的不是这个工作区时，才移除 active
-                    if (currentTarget !== targetId) {
-                        container.classList.remove('active');
-                    }
+                    if (currentTarget !== targetId) container.classList.remove('active');
                 });
             }
         };
 
-        // 3. 先加载第一个工作区
-        const firstWorkspace = WORKSPACES[0];
-        if (firstWorkspace) {
-            await loadWorkspace(firstWorkspace.elementId);
-        }
-
-        // 4. 然后初始化导航系统
+        // 启动
+        if (WORKSPACES[0]) await loadWorkspace(WORKSPACES[0].elementId);
+        
         initSidebarNavigation(async (targetId) => {
             await loadWorkspace(targetId);
         });
-
-        console.log('Application bootstrapped. Waiting for user interaction...');
 
     } catch (error) {
         console.error('Failed to bootstrap application:', error);
