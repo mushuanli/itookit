@@ -20,6 +20,8 @@ import type { TagInfo,VFSNodeUI, ContextMenuConfig, VFSUIState, TagEditorOptions
 type VFSUIOptions = SessionUIOptions & { 
     initialState?: Partial<VFSUIState>,
     defaultUiSettings?: Partial<UISettings>,
+    defaultFileName?: string;
+    defaultFileContent?: string;
 };
 
 /**
@@ -291,10 +293,19 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
                     // 注意：这里我们重新获取节点，这会触发一次 DB 读操作
                     // 如果这个开销仍然太大，未来可以考虑仅获取 metadata (如果 Engine 支持)
                     const node = await this.engine.getNode(id);
+                    // [优化] 如果节点被重命名为隐藏文件（如 .开头），getNode可能会返回但 mapEngineNodeToUIItem 会保留
+                    // 这里我们不在这里过滤，而是依赖 mapEngineNodeToUIItem 的结果。
+                    // 实际上 mapEngineNodeToUIItem 本身不负责过滤，过滤是在 List 渲染层面或 mapTree 层面
+                    // 但单个更新时，我们假设如果能 getNode 到，就应该尝试更新
                     if (node) {
-                        // 为了准确性，对于当前激活的文件，可能还是需要最新的 content
-                        // 但为了性能，如果是 metadata 更新风暴，我们尽量减少 readContent
-                        // 在这里保持默认逻辑：全量更新以确保一致性
+                        // [新增] 如果是隐藏文件，不再推送到 UI
+                        if (node.name.startsWith('.') || node.name.startsWith('__')) {
+                            // 这里可以发一个 delete 事件来从 UI 移除它，或者什么都不做
+                            // 简单起见，如果变成隐藏文件，我们在 UI 视为删除
+                             this.store.dispatch({ type: 'ITEM_DELETE_SUCCESS', payload: { itemIds: [id] } });
+                             return null;
+                        }
+
                         if (node.type === 'file') {
                             node.content = await this.engine.readContent(id);
                         } else {
@@ -321,11 +332,11 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
                     const nodeId = event.payload.nodeId;
                     try {
                         const newNode = await this.engine.getNode(nodeId);
-                        if (!newNode) {
-                            console.warn(`[VFSUIManager] Node created event received but node ${nodeId} not found.`);
-                            return;
-                        }
+                        if (!newNode) return;
                         
+                        // [新增] 忽略隐藏文件的创建事件
+                        if (newNode.name.startsWith('.') || newNode.name.startsWith('__')) return;
+
                         if (newNode.type === 'file') {
                             newNode.content = await this.engine.readContent(nodeId);
                         } else if (newNode.type === 'directory') {
@@ -522,17 +533,28 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
                     const cleanTitle = newDisplayTitle.trim();
                     let finalName = cleanTitle;
 
-                    // [优化] 如果是文件，且原文件有扩展名，尝试恢复扩展名
+                    // [优化] 智能重命名逻辑
                     if (item?.type === 'file') {
-                        const originalExtension = item.metadata.custom?._extension || '';
-                        
-                        // 如果用户没有自己输入扩展名，则追加原扩展名
-                        if (originalExtension && !cleanTitle.endsWith(originalExtension)) {
-                            finalName = `${cleanTitle}${originalExtension}`;
+                        // 1. 检查用户输入是否显式包含了扩展名
+                        const hasExplicitExtension = /\.[a-zA-Z0-9]{1,10}$/.test(cleanTitle);
+
+                        if (hasExplicitExtension) {
+                            // 情况 A: 用户显式输入了扩展名 (如 "style.css")，直接使用
+                            finalName = cleanTitle;
+                        } else {
+                            // 情况 B: 用户未输入扩展名，尝试补全原有扩展名
+                            const originalExtension = item.metadata.custom?._extension || '';
+                            if (originalExtension) {
+                                finalName = `${cleanTitle}${originalExtension}`;
+                            }
                         }
                     }
 
-                    await this._vfsService.renameItem(itemId, finalName);
+                    try {
+                        await this._vfsService.renameItem(itemId, finalName);
+                    } catch (err: any) {
+                        alert(`Rename failed: ${err.message}`);
+                    }
                 }
             }
         });
