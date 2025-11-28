@@ -54,11 +54,17 @@ export class FileMentionSource extends IMentionSource {
       });
 
       const filteredResults = results.filter(node => {
-        if (node.moduleId && (node.moduleId[0] === '.' || node.moduleId.startsWith('__'))) {
+        // [优化] 过滤掉隐藏模块
+        if (node.moduleId && (node.moduleId.startsWith('.') || node.moduleId.startsWith('__'))) {
           return false;
         }
-        if (node.path && node.path.split('/').some(part => (part.startsWith('.')||part.startsWith('_'))) ) {
+        // [优化] 过滤掉路径中包含隐藏文件夹的情况
+        if (node.path && node.path.split('/').some(part => (part.startsWith('.') || part.startsWith('__')))) {
           return false;
+        }
+        // [优化] 过滤掉隐藏文件本身
+        if (node.name.startsWith('.') || node.name.startsWith('__')) {
+            return false;
         }
         return true;
       });
@@ -66,7 +72,7 @@ export class FileMentionSource extends IMentionSource {
       return filteredResults.map(node => ({
         id: node.id,
         label: this.formatLabel(node),
-        title: node.name,
+        title: node.name, // 这里可以保持显示带后缀的完整名称，或者也使用 stripExtension 处理
         type: 'file',
         path: node.path,
         module: node.moduleId

@@ -514,9 +514,25 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
                     await this._vfsService.deleteItems([itemId]);
                 }
             } else if (action === 'rename') {
-                const newTitle = prompt('Enter new name:', item?.metadata.title || '');
-                if (newTitle?.trim()) {
-                    await this._vfsService.renameItem(itemId, newTitle.trim());
+                // UI 中显示的 title 已经没有扩展名了
+                const currentDisplayTitle = item?.metadata.title || '';
+                const newDisplayTitle = prompt('Enter new name:', currentDisplayTitle);
+                
+                if (newDisplayTitle && newDisplayTitle.trim() !== currentDisplayTitle) {
+                    const cleanTitle = newDisplayTitle.trim();
+                    let finalName = cleanTitle;
+
+                    // [优化] 如果是文件，且原文件有扩展名，尝试恢复扩展名
+                    if (item?.type === 'file') {
+                        const originalExtension = item.metadata.custom?._extension || '';
+                        
+                        // 如果用户没有自己输入扩展名，则追加原扩展名
+                        if (originalExtension && !cleanTitle.endsWith(originalExtension)) {
+                            finalName = `${cleanTitle}${originalExtension}`;
+                        }
+                    }
+
+                    await this._vfsService.renameItem(itemId, finalName);
                 }
             }
         });
