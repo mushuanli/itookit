@@ -6,7 +6,7 @@ import { SettingsService } from '../workspace/settings/services/SettingsService'
 import { MCPSettingsEditor } from '../workspace/settings/editors/MCPSettingsEditor';
 import { TagSettingsEditor } from '../workspace/settings/editors/TagSettingsEditor';
 import { ConnectionSettingsEditor } from '../workspace/settings/editors/ConnectionSettingsEditor';
-import { ExecutableSettingsEditor } from '../workspace/settings/editors/ExecutableSettingsEditor';
+// import { ExecutableSettingsEditor } from '../workspace/settings/editors/ExecutableSettingsEditor'; // Removed
 import { ContactSettingsEditor } from '../workspace/settings/editors/ContactSettingsEditor';
 import { StorageSettingsEditor } from '../workspace/settings/editors/StorageSettingsEditor';
 import { AboutSettingsEditor } from '../workspace/settings/editors/AboutSettingsEditor';
@@ -24,7 +24,7 @@ export const createSettingsFactory = (service: SettingsService): EditorFactory =
             case 'tags':        editor = new TagSettingsEditor(container, service, options); break;
             case 'contacts':    editor = new ContactSettingsEditor(container, service, options); break;
             case 'connections': editor = new ConnectionSettingsEditor(container, service, options); break;
-            case 'executables': editor = new ExecutableSettingsEditor(container, service, options); break;
+            // case 'executables': editor = new ExecutableSettingsEditor(container, service, options); break; // Removed
             case 'mcp-servers': editor = new MCPSettingsEditor(container, service, options); break;
             case 'about':       editor = new AboutSettingsEditor(container, service, options); break;
             default:

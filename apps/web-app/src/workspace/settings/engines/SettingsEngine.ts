@@ -8,7 +8,7 @@ export const SETTINGS_PAGES: Record<string, { name: string, icon: string }> = {
     'tags':        { name: 'Tags',        icon: '🏷️' },
     'contacts':    { name: 'Contacts',    icon: '📒' },
     'connections': { name: 'Connections', icon: '🔗' },
-    'executables': { name: 'Executables', icon: '🤖' },
+    // 'executables': { name: 'Agents',      icon: '🤖' }, // Removed
     'mcp-servers': { name: 'MCP Servers', icon: '🔌' },
     'about':       { name: 'About',       icon: 'ℹ️' },
 };

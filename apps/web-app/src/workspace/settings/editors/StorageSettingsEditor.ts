@@ -7,10 +7,8 @@ import { LocalSnapshot } from '../services/SettingsService';
 const SETTINGS_LABELS: Record<keyof SettingsState, string> = {
     connections: '🤖 连接 (Connections)',
     mcpServers: '🔌 MCP 服务器',
-    executables: '🧠 智能体 (Agents)',
     tags: '🏷️ 标签 (Tags)',
-    contacts: '📒 通讯录',
-    agentFolders: '📂 Agent 文件夹' // 修复：补充缺失的键
+    contacts: '📒 通讯录'
 };
 
 export class StorageSettingsEditor extends BaseSettingsEditor {

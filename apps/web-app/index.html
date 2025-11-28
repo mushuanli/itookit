@@ -43,12 +43,6 @@
                 </a>
             </li>
 
-            <!-- 注意：第一个元素默认添加 active 类 -->
-            <li>
-                <a class="app-nav-btn" data-target="prompt-workspace" title="Prompts">
-                    <i class="fas fa-pen-to-square"></i>
-                </a>
-            </li>
             <li>
                 <a class="app-nav-btn" data-target="project-workspace" title="Projects">
                     <i class="fas fa-folder-tree"></i>
@@ -67,6 +61,16 @@
             <li>
                 <a class="app-nav-btn" data-target="llm-workspace" title="LLM Agents">
                     <i class="fas fa-robot"></i>
+                </a>
+            </li>
+            <li>
+                <a class="app-nav-btn" data-target="prompt-workspace" title="Prompts">
+                    <i class="fas fa-pen-to-square"></i>
+                </a>
+            </li>
+            <li>
+                <a class="app-nav-btn" data-target="agent-workspace" title="Agents">
+                    <i class="fas fa-user-secret"></i>
                 </a>
             </li>
             <li>
@@ -89,8 +93,6 @@
         -->
         <div id="anki-workspace" class="workspace-view active"></div>
 
-        <!-- (A) Prompt Workspace (默认激活) -->
-        <div id="prompt-workspace" class="workspace-view"></div>
 
         <!-- (B) Project Workspace -->
         <div id="project-workspace" class="workspace-view"></div>
@@ -104,6 +106,11 @@
         <!-- (E) LLM Workspace -->
         <div id="llm-workspace" class="workspace-view"></div>
 
+        <!-- (A) Prompt Workspace (默认激活) -->
+        <div id="prompt-workspace" class="workspace-view"></div>
+
+        <!-- (A) Agent Workspace (默认激活) -->
+        <div id="agent-workspace" class="workspace-view"></div>
         <!-- 
            Settings Workspace 
            这是一个特殊的视图，不使用 MemoryManager 文件管理，
@@ -114,7 +121,6 @@
                 <!-- Settings UI 将被挂载到这里 -->
             </div>
         </div>
-
     </main>
 
     <!-- 主应用程序脚本 -->

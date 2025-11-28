@@ -1,18 +1,48 @@
 /**
  * @file apps/web-app/src/config/modules.ts
  */
+import { AgentFileContent } from '../workspace/settings/types';
+
 export interface WorkspaceConfig {
     elementId: string;
     moduleName: string;
     title: string;
     defaultFileName?: string;
     defaultFileContent?: string;
-    // [新增] 允许配置额外的插件列表
+    // 允许配置额外的插件列表
     plugins?: string[]; 
 }
 
+// 默认的 Agent 模板
+const DEFAULT_AGENT_CONTENT: AgentFileContent = {
+    id: 'template', // Editor 加载时通常会重置此 ID
+    name: 'New Assistant',
+    type: 'agent',
+    description: 'A helpful AI assistant.',
+    icon: '🤖',
+    config: {
+        connectionId: '',
+        modelName: '',
+        systemPrompt: 'You are a helpful assistant.'
+    },
+    tags: []
+};
+
 export const WORKSPACES: WorkspaceConfig[] = [
-    // [新增] Anki Workspace 配置
+    // [新增] Agent 独立工作区
+    // 数据存储在 /agents 模块，每个 Agent 是一个独立文件
+    {
+        elementId: 'agent-workspace',
+        moduleName: 'agents', 
+        title: 'Agents',
+        // 显式指定扩展名，以便 SmartEditorFactory 识别
+        defaultFileName: 'New Assistant.agent',
+        // 默认内容为合法的 JSON 字符串
+        defaultFileContent: JSON.stringify(DEFAULT_AGENT_CONTENT, null, 2),
+        // Agent 编辑器只需要最基础的 Titlebar 插件
+        plugins: ['core:titlebar'] 
+    },
+    // [原有] Anki Workspace
     {
         elementId: 'anki-workspace',
         moduleName: 'anki',
@@ -139,30 +169,4 @@ Anything you write here is stored locally in your browser and is not sent to any
 Feel free to jot down anything that comes to mind!
 `
     },
-    {
-        elementId: 'llm-workspace',
-        moduleName: 'agents',
-        title: 'LLM Agents',
-        defaultFileName: 'Defining an LLM Agent.md',
-        defaultFileContent: `# How to Define an LLM Agent
-
-An LLM Agent is a blueprint for an autonomous AI that can perform tasks. You can define its personality, tools, and goals here.
-
-## Agent Structure (Example)
-
-You can define an agent using a structured format like Markdown or JSON.
-
-### Example Agent: Research Assistant
-
-*   **Role**: A friendly and knowledgeable research assistant.
-*   **Goal**: To find and summarize information on any given topic.
-*   **Tools**:
-    *   \`web_search\`: Can search the internet for information.
-    *   \`document_reader\`: Can read and understand PDF or text documents.
-*   **Constraints**:
-    *   Must cite all sources.
-    *   Should provide unbiased summaries.
-`
-    }
-    // Settings 通常不需要 VFS 文件管理，可以在 main.ts 单独处理
 ];
