@@ -63,14 +63,18 @@ export class VFSService {
   }
 
   /**
-   * 辅助方法：确保文件名有扩展名
+   * 核心逻辑：智能追加扩展名
    */
   private ensureExtension(filename: string): string {
-    // 简单判断：如果文件名包含 . 且不在开头，认为已有扩展名
-    // 更严谨的逻辑可以根据需要调整
-    if (filename.lastIndexOf('.') > 0) {
-        return filename;
+    // 正则检查：是否以 .加上1-10位字母/数字 结尾
+    // 例如：匹配 .js, .html, .ts, .d.ts 但不匹配 "Ver 1.0"
+    const hasExtension = /\.[a-zA-Z0-9]{1,10}$/.test(filename);
+    
+    if (hasExtension) {
+        return filename; // 用户显式指定了扩展名
     }
+    
+    // 用户未指定，追加默认扩展名 (例如 "script" -> "script.md")
     return `${filename}${this.defaultExtension}`;
   }
 
@@ -82,8 +86,8 @@ export class VFSService {
 
   public async createFiles({ parentId = null, files }: CreateMultipleFilesOptions): Promise<EngineNode[]> {
     if (!files || files.length === 0) return [];
-
-    // [优化] 批量处理时也补全扩展名
+    
+    // [优化] 批量创建时也进行扩展名处理
     const processedFiles = files.map(f => ({
         ...f,
         title: this.ensureExtension(f.title)
@@ -93,6 +97,7 @@ export class VFSService {
         return this.engine.createFiles(processedFiles, parentId);
     }
 
+    // 回退逻辑：并发调用原子接口
     return Promise.all(
         processedFiles.map(file => this.engine.createFile(file.title, parentId, file.content))
     );
@@ -103,8 +108,7 @@ export class VFSService {
   }
 
   public async renameItem(nodeId: string, newTitle: string): Promise<void> {
-    // 注意：renameItem 这里不自动补全扩展名，因为 Manager 层会处理好带扩展名的全名
-    // 或者我们假定传入的 newTitle 已经是完整的
+    // 这里直接使用传入的 newTitle，因为 Manager 层已经处理好了扩展名逻辑
     await this.engine.rename(nodeId, newTitle);
   }
 
