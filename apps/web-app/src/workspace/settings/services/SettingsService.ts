@@ -2,13 +2,11 @@
  * @file: app/workspace/settings/services/SettingsService.ts
  */
 import { VFSCore, VFSErrorCode, VFSEventType, VFSEvent } from '@itookit/vfs-core';
-import { SettingsState, LLMConnection, MCPServer, Executable, Tag, AgentFolder,Contact } from '../types';
+import { SettingsState, LLMConnection, MCPServer, Contact, Tag } from '../types';
 import { 
     LLM_DEFAULT_CONNECTIONS, 
-    LLM_DEFAULT_AGENTS, 
     PROTECTED_TAGS, 
     LLM_DEFAULT_ID,
-    LLM_TEMP_DEFAULT_ID
 } from '../constants';
 
 const CONFIG_MODULE = '__config';
@@ -20,8 +18,6 @@ const SNAPSHOT_PREFIX = 'snapshot_';
 const FILES = {
     connections: '/connections.json',
     mcpServers: '/mcp_servers.json',
-    executables: '/executables.json',
-    agentFolders: '/agent_folders.json',
     tags: '/tags.json',
     contacts: '/contacts.json'
 };
@@ -40,8 +36,6 @@ export class SettingsService {
     private state: SettingsState = {
         connections: [],
         mcpServers: [],
-        executables: [],
-        agentFolders: [],
         tags: [],
         contacts: []
     };
@@ -68,14 +62,10 @@ export class SettingsService {
         await Promise.all([
             this.loadEntity('connections'),
             this.loadEntity('mcpServers'),
-            this.loadEntity('executables'),
-            this.loadEntity('agentFolders'),
             this.loadEntity('contacts'),
-            // Tags 不需要 loadEntity，直接在 syncTags 中处理
+            this.syncTags() // Tags 需要特殊处理
         ]);
 
-        // 同步标签数据：合并底层 VFS refCount 与 JSON 配置
-        await this.syncTags();
 
         // [新增] 启动 VFS 事件监听，确保标签计数等实时同步
         this.bindVFSEvents();
@@ -119,6 +109,102 @@ export class SettingsService {
             bus.on(type, handler);
         });
     }
+
+    // --- 通用持久化方法 ---
+
+    private async loadEntity<K extends keyof SettingsState>(key: K) {
+        const path = FILES[key];
+        try {
+            const content = await this.vfs.read(CONFIG_MODULE, path);
+            const jsonStr = typeof content === 'string' ? content : new TextDecoder().decode(content);
+            this.state[key] = JSON.parse(jsonStr);
+        } catch (e: any) {
+            if (e.code === VFSErrorCode.NOT_FOUND) {
+                this.state[key] = [];
+            } else {
+                console.error(`Failed to load ${key}`, e);
+            }
+        }
+    }
+
+    private async saveEntity<K extends keyof SettingsState>(key: K) {
+        const path = FILES[key];
+        const content = JSON.stringify(this.state[key], null, 2);
+        try {
+            await this.vfs.write(CONFIG_MODULE, path, content);
+        } catch (e: any) {
+            if (e.code === VFSErrorCode.NOT_FOUND) {
+                await this.vfs.createFile(CONFIG_MODULE, path, content);
+            } else {
+                throw e;
+            }
+        }
+        if (key !== 'tags') this.notify();
+    }
+
+
+    private async ensureDefaults(): Promise<void> {
+        // 1. 默认连接
+        if (!this.state.connections.some(c => c.id === LLM_DEFAULT_ID)) {
+            const def = LLM_DEFAULT_CONNECTIONS.find(c => c.id === LLM_DEFAULT_ID);
+            if (def) {
+                this.state.connections.push(def);
+                await this.saveEntity('connections');
+            }
+        }
+        // 2. 默认 Tags (Protected)
+        for (const tagName of PROTECTED_TAGS) {
+            if (!this.state.tags.some(t => t.name === tagName)) {
+                await this.vfs.updateTag(tagName, { color: '#9ca3af' });
+            }
+        }
+    }
+
+    // --- CRUD Operations ---
+
+    // Connections
+    getConnections() { return [...this.state.connections]; }
+    async saveConnection(conn: LLMConnection) { 
+        this.updateOrAdd(this.state.connections, conn); 
+        await this.saveEntity('connections'); 
+    }
+    async deleteConnection(id: string) { 
+        this.state.connections = this.state.connections.filter(c => c.id !== id); 
+        await this.saveEntity('connections');
+        this.notify();
+    }
+
+    // MCP Servers
+    getMCPServers() { return [...this.state.mcpServers]; }
+    async saveMCPServer(s: MCPServer) { 
+        this.updateOrAdd(this.state.mcpServers, s); 
+        await this.saveEntity('mcpServers'); 
+    }
+    async deleteMCPServer(id: string) { 
+        this.state.mcpServers = this.state.mcpServers.filter(s => s.id !== id); 
+        await this.saveEntity('mcpServers');
+        this.notify(); 
+    }
+
+    // ==========================================
+    // 修复缺失的方法: Contacts & Tags
+    // ==========================================
+
+    // Contacts
+    getContacts() { return [...this.state.contacts]; }
+    async saveContact(contact: Contact) {
+        this.updateOrAdd(this.state.contacts, contact);
+        await this.saveEntity('contacts');
+    }
+    async deleteContact(id: string) {
+        this.state.contacts = this.state.contacts.filter(c => c.id !== id);
+        await this.saveEntity('contacts');
+        this.notify();
+    }
+
+    // Tags
+    getTags() { return [...this.state.tags]; }
+    
 
     /**
      * [修改] 公开此方法，允许 Editor 获得焦点时强制刷新
@@ -169,196 +255,6 @@ export class SettingsService {
         }
     }
 
-    private async ensureDefaults(): Promise<void> {
-        let connectionsChanged = false;
-        let executablesChanged = false;
-        let tagsChanged = false;
-
-        // 1. 默认连接
-        const defaultConnId = LLM_DEFAULT_ID;
-        const hasDefaultConn = this.state.connections.some(c => c.id === defaultConnId);
-        if (!hasDefaultConn) {
-            const defaultConnTemplate = LLM_DEFAULT_CONNECTIONS.find(c => c.id === defaultConnId);
-            if (defaultConnTemplate) {
-                this.state.connections.push(defaultConnTemplate);
-                connectionsChanged = true;
-                console.log('[SettingsService] Initialized default connection.');
-            }
-        }
-
-        // 2. 确保受保护的 Tag 存在
-        for (const tagName of PROTECTED_TAGS) {
-            const hasTag = this.state.tags.some(t => t.name === tagName);
-            if (!hasTag) {
-                // 1. 写入底层 (确保它存在且有颜色)
-                await this.vfs.updateTag(tagName, { color: '#9ca3af' });
-                
-                // 2. 写入状态
-                this.state.tags.push({
-                    id: tagName,
-                    name: tagName,
-                    color: '#9ca3af',
-                    description: 'System protected tag',
-                    count: 0
-                });
-                tagsChanged = true;
-            }
-        }
-
-        // 3. 确保默认 Agents (Executables) 存在
-        const requiredAgentIds = [LLM_DEFAULT_ID, LLM_TEMP_DEFAULT_ID];
-        
-        for (const agentId of requiredAgentIds) {
-            if (!this.state.executables.some(e => e.id === agentId)) {
-                const template = LLM_DEFAULT_AGENTS.find(a => a.id === agentId);
-                if (template) {
-                    // 适配新的 Executable 接口
-                    const newAgent: Executable = {
-                        id: template.id,
-                        name: template.name,
-                        type: 'agent',
-                        icon: template.icon,
-                        description: template.description,
-                        tags: template.tags,
-                        createdAt: Date.now(),
-                        modifiedAt: Date.now(),
-                        parentId: null,
-                        config: {
-                            connectionId: template.config.connectionId || LLM_DEFAULT_ID,
-                            modelName: template.config.modelName,
-                            systemPrompt: template.config.systemPrompt,
-                            maxHistoryLength: template.maxHistoryLength
-                        }
-                    };
-                    this.state.executables.push(newAgent);
-                    executablesChanged = true;
-                    console.log(`[SettingsService] Initialized default agent: ${agentId}`);
-                }
-            }
-        }
-
-        // 4. 如果有变更，持久化到存储
-        const savePromises = [];
-        if (connectionsChanged) savePromises.push(this.saveEntity('connections'));
-        if (tagsChanged) savePromises.push(this.saveEntity('tags'));
-        if (executablesChanged) savePromises.push(this.saveEntity('executables'));
-
-        if (savePromises.length > 0) {
-            await Promise.all(savePromises);
-        }
-    }
-
-    // --- 通用持久化方法 ---
-
-    private async loadEntity<K extends keyof SettingsState>(key: K) {
-        const path = FILES[key];
-        try {
-            const content = await this.vfs.read(CONFIG_MODULE, path);
-            const jsonStr = typeof content === 'string' ? content : new TextDecoder().decode(content);
-            this.state[key] = JSON.parse(jsonStr);
-        } catch (e: any) {
-            if (e.code === VFSErrorCode.NOT_FOUND) {
-                this.state[key] = [];
-            } else {
-                console.error(`Failed to load ${key}`, e);
-            }
-        }
-    }
-
-    private async saveEntity<K extends keyof SettingsState>(key: K) {
-        const path = FILES[key];
-        const content = JSON.stringify(this.state[key], null, 2);
-        try {
-            await this.vfs.write(CONFIG_MODULE, path, content);
-        } catch (e: any) {
-            if (e.code === VFSErrorCode.NOT_FOUND) {
-                await this.vfs.createFile(CONFIG_MODULE, path, content);
-            } else {
-                throw e;
-            }
-        }
-        if (key !== 'tags') this.notify();
-    }
-
-    private updateOrAdd<T extends { id: string }>(list: T[], item: T) {
-        const idx = list.findIndex(i => i.id === item.id);
-        if (idx >= 0) list[idx] = item;
-        else list.push(item);
-        this.notify();
-    }
-
-    // --- CRUD Operations ---
-
-    // Connections
-    getConnections() { return [...this.state.connections]; }
-    async saveConnection(conn: LLMConnection) { 
-        this.updateOrAdd(this.state.connections, conn); 
-        await this.saveEntity('connections'); 
-    }
-    async deleteConnection(id: string) { 
-        this.state.connections = this.state.connections.filter(c => c.id !== id); 
-        await this.saveEntity('connections');
-        this.notify();
-    }
-
-    // MCP Servers
-    getMCPServers() { return [...this.state.mcpServers]; }
-    async saveMCPServer(s: MCPServer) { 
-        this.updateOrAdd(this.state.mcpServers, s); 
-        await this.saveEntity('mcpServers'); 
-    }
-    async deleteMCPServer(id: string) { 
-        this.state.mcpServers = this.state.mcpServers.filter(s => s.id !== id); 
-        await this.saveEntity('mcpServers');
-        this.notify(); 
-    }
-
-    // Executables
-    getExecutables() { return [...this.state.executables]; }
-    async saveExecutable(exec: Executable) {
-        this.updateOrAdd(this.state.executables, exec);
-        await this.saveEntity('executables');
-    }
-    async deleteExecutable(id: string) {
-        this.state.executables = this.state.executables.filter(e => e.id !== id);
-        await this.saveEntity('executables');
-        this.notify();
-    }
-
-    getAgentFolders() { return [...(this.state.agentFolders || [])]; }
-
-    async saveAgentFolder(folder: AgentFolder) {
-        if (!this.state.agentFolders) this.state.agentFolders = [];
-        this.updateOrAdd(this.state.agentFolders, folder);
-        await this.saveEntity('agentFolders');
-    }
-
-    async deleteAgentFolder(id: string) {
-        if (!this.state.agentFolders) return;
-        this.state.agentFolders = this.state.agentFolders.filter(f => f.id !== id);
-        await this.saveEntity('agentFolders');
-        this.notify();
-    }
-
-    // ==========================================
-    // 修复缺失的方法: Contacts & Tags
-    // ==========================================
-
-    // Contacts
-    getContacts() { return [...this.state.contacts]; }
-    async saveContact(contact: Contact) {
-        this.updateOrAdd(this.state.contacts, contact);
-        await this.saveEntity('contacts');
-    }
-    async deleteContact(id: string) {
-        this.state.contacts = this.state.contacts.filter(c => c.id !== id);
-        await this.saveEntity('contacts');
-        this.notify();
-    }
-
-    // Tags
-    getTags() { return [...this.state.tags]; }
-    
     async saveTag(tag: Tag) {
         // 1. 更新 VFS Core 中的定义 (颜色等)
         await this.vfs.updateTag(tag.name, { color: tag.color });
@@ -381,51 +277,8 @@ export class SettingsService {
         await this.saveEntity('tags');
         this.notify();
     }
-    // ==========================================
-
-    async moveItems(items: { id: string, isFolder: boolean }[], targetParentId: string | null) {
-        let execChanged = false;
-        let folderChanged = false;
-
-        for (const item of items) {
-            if (item.isFolder) {
-                const folder = this.state.agentFolders.find(f => f.id === item.id);
-                if (folder && folder.parentId !== targetParentId) {
-                    folder.parentId = targetParentId;
-                    folderChanged = true;
-                }
-            } else {
-                const exec = this.state.executables.find(e => e.id === item.id);
-                if (exec && exec.parentId !== targetParentId) {
-                    exec.parentId = targetParentId;
-                    execChanged = true;
-                }
-            }
-        }
-
-        if (execChanged) await this.saveEntity('executables');
-        if (folderChanged) await this.saveEntity('agentFolders');
-        if (execChanged || folderChanged) this.notify();
-    }
 
     // --- Export/Import Logic (Enhanced) ---
-
-    /**
-     * 获取可导出的配置项键名 (Logical Settings)
-     */
-    getAvailableSettingsKeys(): (keyof SettingsState)[] {
-        return ['connections', 'mcpServers', 'executables', 'tags', 'contacts', 'agentFolders'];
-    }
-
-    /**
-     * 获取可导出的用户工作区模块列表 (VFS Modules)
-     */
-    getAvailableWorkspaces(): { name: string, description?: string }[] {
-        const allModules = this.vfs.getAllModules();
-        return allModules
-            .filter(m => !SYSTEM_MODULES.includes(m.name))
-            .map(m => ({ name: m.name, description: m.description }));
-    }
 
     /**
      * 混合导出：支持配置项 + VFS 模块
@@ -582,6 +435,13 @@ export class SettingsService {
     }
 
     // --- Reactivity ---
+    private updateOrAdd<T extends { id: string }>(list: T[], item: T) {
+        const idx = list.findIndex(i => i.id === item.id);
+        if (idx >= 0) list[idx] = item;
+        else list.push(item);
+        this.notify();
+    }
+
     onChange(listener: ChangeListener): () => void {
         this.listeners.add(listener);
         return () => this.listeners.delete(listener);
@@ -589,5 +449,17 @@ export class SettingsService {
 
     private notify() {
         this.listeners.forEach(l => l());
+    }
+
+    // 辅助: 获取可导出数据的 Keys
+    getAvailableSettingsKeys(): (keyof SettingsState)[] {
+        return ['connections', 'mcpServers', 'tags', 'contacts'];
+    }
+
+    // 辅助: 获取所有用户工作区
+    getAvailableWorkspaces() {
+        return this.vfs.getAllModules()
+            .filter(m => !SYSTEM_MODULES.includes(m.name))
+            .map(m => ({ name: m.name, description: m.description }));
     }
 }
