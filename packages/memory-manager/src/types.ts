@@ -1,39 +1,73 @@
 /**
- * @file memory-manager/types.ts (或者 MemoryManager 同级目录)
+ * @file memory-manager/types.ts
  */
 import { EditorFactory, SessionUIOptions, ISessionEngine } from '@itookit/common';
 import { VFSCore } from '@itookit/vfs-core';
+import type { FileTypeDefinition, CustomEditorResolver } from '@itookit/vfs-ui';
 
 export interface MemoryManagerConfig {
+    /** 挂载容器 */
     container: HTMLElement;
-    editorFactory: EditorFactory;
-    // [修改] 变为可选，因为如果提供了 customEngine，就不需要 vfsCore
+
+    // --- 引擎配置 (二选一) ---
+    /** 
+     * 自定义引擎实例 (推荐)。
+     * 如果提供，将忽略 vfsCore 和 moduleName。
+     */
+    customEngine?: ISessionEngine;
+    
+    /** 传统方式: 基于 VFSCore 的配置 */
     vfsCore?: VFSCore;
-    // [修改] 变为可选
     moduleName?: string;
 
-    // [新增] 允许直接传入 ISessionEngine 实现
-    customEngine?: ISessionEngine;
+    // --- 编辑器配置 ---
+    /** 
+     * 编辑器工厂函数。
+     * @default createMDxEditor (内置的 MDxEditor)
+     */
+    editorFactory?: EditorFactory;
 
-    // [新增] 这里的 options 会透传给 VFSUIManager
-    uiOptions?: Partial<SessionUIOptions>;
-
-    // [核心改进] 专门用于存放传递给 EditorFactory 的静态配置
-    // 包含 plugins, defaultPluginOptions 等
+    /**
+     * 传递给 EditorFactory 的静态配置。
+     * 包含插件列表、默认插件选项等。
+     */
     editorConfig?: {
-        plugins?: string[];
+        plugins?: any[];
+        defaultPluginOptions?: Record<string, any>;
         [key: string]: any;
     };
 
-    aiConfig?: {
-        enabled: boolean;
-        activeRules?: string[];
-    };
-    
-    // [架构修正] 将“默认文件”逻辑从 UI 层移回业务层配置
+    // --- VFS UI 配置 ---
+    /** 
+     * 透传给 VFSUIManager 的 UI 选项 
+     */
+    uiOptions?: Partial<SessionUIOptions>;
+
+    /**
+     * [透传] 注册自定义文件类型、图标和对应的编辑器
+     */
+    fileTypes?: FileTypeDefinition[];
+
+    /**
+     * [透传] 自定义编辑器解析逻辑 (用于多编辑器共存)
+     */
+    customEditorResolver?: CustomEditorResolver;
+
+    // --- 业务功能配置 ---
+    /**
+     * 默认文件内容配置 (当列表为空时自动创建)
+     */
     defaultContentConfig?: {
         fileName: string;
         content: string;
+    };
+
+    /**
+     * 后台 AI 处理器配置
+     */
+    aiConfig?: {
+        enabled: boolean;
+        activeRules?: string[];
     };
 }
 

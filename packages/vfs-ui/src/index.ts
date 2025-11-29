@@ -7,14 +7,17 @@ import '@itookit/common/style.css';
 
 import { VFSUIManager } from './core/VFSUIManager.js';
 
-import type { SessionUIOptions, ISessionUI, ISessionEngine } from '@itookit/common';
+import type { SessionUIOptions, ISessionUI, ISessionEngine,EditorFactory } from '@itookit/common';
 import type { VFSNodeUI, VFSUIState, UISettings } from './types/types.js';
 import { VFSService } from './services/VFSService.js';
+
+// [新增] 导入类型
+import type { FileTypeDefinition, CustomEditorResolver } from './services/IFileTypeRegistry';
 
 export {FileMentionSource} from './mention/FileMentionSource';
 export {DirectoryMentionSource} from './mention/DirectoryMentionSource';
 
-// ✨ [修改] 扩展 VFSUIOptions 类型，增加默认文件配置
+// 修改 Options 类型定义以包含新的配置项
 type VFSUIOptions = SessionUIOptions & { 
     initialState?: Partial<VFSUIState>,
     defaultUiSettings?: Partial<UISettings>,
@@ -22,6 +25,10 @@ type VFSUIOptions = SessionUIOptions & {
     defaultFileName?: string;
     /** [新增] 默认文件的内容，可以是一段帮助文本或模板。 */
     defaultFileContent?: string;
+    // [新增]
+    fileTypes?: FileTypeDefinition[];
+    defaultEditorFactory: EditorFactory;
+    customEditorResolver?: CustomEditorResolver;
 };
 
 
@@ -35,5 +42,7 @@ export function createVFSUI(options: VFSUIOptions, engine: ISessionEngine): ISes
 export { VFSService, VFSUIManager };
 export * from './types/types.js';
 
-// [新增] 导出编辑器集成相关的功能和类型
+// [新增] 导出文件注册相关接口
+export type { FileTypeDefinition, CustomEditorResolver, IFileTypeRegistry } from './services/IFileTypeRegistry';
+
 export { connectEditorLifecycle } from './integrations/editor-connector.js';

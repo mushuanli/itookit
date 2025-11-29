@@ -4,7 +4,7 @@
  * sub-components, bridges UI events with vfs-core data events, and provides
  * a unified public API by implementing ISessionUI.
  */
-import { ISessionUI, TagEditorComponent, type SessionUIOptions, type SessionManagerEvent, type SessionManagerCallback, type ISessionEngine, type EngineEvent} from '@itookit/common';
+import { ISessionUI,EditorFactory, TagEditorComponent, type SessionUIOptions, type SessionManagerEvent, type SessionManagerCallback, type ISessionEngine, type EngineEvent} from '@itookit/common';
 import { EngineTagSource } from '../mention/EngineTagSource';
 
 // --- 内部模块 ---
@@ -15,13 +15,24 @@ import { mapEngineNodeToUIItem, mapEngineTreeToUIItems } from '../mappers/NodeMa
 import { NodeList } from '../components/NodeList/NodeList';
 import { FileOutline } from '../components/FileOutline/FileOutline';
 import { MoveToModal } from '../components/MoveToModal/MoveToModal';
-import type { TagInfo,VFSNodeUI, ContextMenuConfig, VFSUIState, TagEditorOptions, UISettings  } from '../types/types';
+import type { TagInfo, VFSNodeUI, ContextMenuConfig, VFSUIState, UISettings } from '../types/types';
+
+// 新增依赖
+import { FileTypeRegistry } from '../services/FileTypeRegistry';
+import { FileTypeDefinition, CustomEditorResolver } from '../services/IFileTypeRegistry';
 
 type VFSUIOptions = SessionUIOptions & { 
     initialState?: Partial<VFSUIState>,
     defaultUiSettings?: Partial<UISettings>,
     defaultFileName?: string;
     defaultFileContent?: string;
+    
+    // [新增] 文件类型注册配置
+    fileTypes?: FileTypeDefinition[];
+    // [新增] 默认编辑器工厂 (兜底)
+    defaultEditorFactory: EditorFactory;
+    // [新增] 用户自定义编辑器解析器
+    customEditorResolver?: CustomEditorResolver;
 };
 
 /**
@@ -36,6 +47,9 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
     public readonly store: VFSStore;
     
     private readonly _vfsService: VFSService;
+    
+    // [新增] 文件类型注册表
+    public readonly fileTypeRegistry: FileTypeRegistry;
 
     private reloadDebounce: any = null;
 
@@ -59,10 +73,19 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
         this.options = options;
         this.engine = engine;
 
+        // 1. 初始化文件类型注册表
+        this.fileTypeRegistry = new FileTypeRegistry(
+            options.defaultEditorFactory,
+            options.customEditorResolver
+        );
+
+        // 2. 注册用户定义的文件类型
+        if (options.fileTypes) {
+            options.fileTypes.forEach(def => this.fileTypeRegistry.register(def));
+        }
+
         this.coordinator = new Coordinator();
         const persistedUiState = this._loadUiState();
-
-        // ✨ [修改] 构造 VFSStore 的初始状态，以支持可配置的默认排序
         const finalUiSettings = {
             ...(options.defaultUiSettings),         // 1. 优先级最低的编程默认值
             ...(persistedUiState.uiSettings),       // 2. 用户上次会话保存的设置
@@ -127,7 +150,14 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
         this._connectToStoreForUiPersistence();
     }
 
-    // --- ISessionUI Interface Implementation ---
+    // --- Public API 扩展 ---
+
+    /**
+     * [新增] 暴露编辑器解析能力供 EditorConnector 使用
+     */
+    public resolveEditorFactory(node: VFSNodeUI): EditorFactory {
+        return this.fileTypeRegistry.resolveEditorFactory(node);
+    }
 
     public get sessionService(): VFSService {
         return this._vfsService;
@@ -236,7 +266,13 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
         try {
             this.store.dispatch({ type: 'ITEMS_LOAD_START' });
             const rootChildren = await this.engine.loadTree();
-            const uiItems = mapEngineTreeToUIItems(rootChildren);
+            
+            // [关键修改] 传入图标解析器
+            // 逻辑：NodeMapper 会先看 node.icon，如果没有，则调用此回调
+            const iconResolver = (name: string, isDir: boolean) => this.fileTypeRegistry.getIcon(name, isDir);
+            
+            const uiItems = mapEngineTreeToUIItems(rootChildren, iconResolver);
+            
             const tags = this._buildTagsMap(uiItems);
             this.store.dispatch({ type: 'STATE_LOAD_SUCCESS', payload: { items: uiItems, tags } });
         } catch (error) {
@@ -278,7 +314,9 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
     
     // [修正] 完全重写事件连接逻辑以匹配 vfs-core 的实际实现
     private _connectToEngineEvents(): void {
-        // ✨ [新增] 批量处理函数
+        // [新增] 图标解析器引用
+        const iconResolver = (name: string, isDir: boolean) => this.fileTypeRegistry.getIcon(name, isDir);
+
         const processUpdateQueue = async () => {
             if (this.updateQueue.size === 0) return;
 
@@ -311,7 +349,9 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
                         } else {
                             node.children = [];
                         }
-                        return { itemId: id, data: mapEngineNodeToUIItem(node) };
+                        
+                        // [关键修改] 单个更新时也传入 iconResolver
+                        return { itemId: id, data: mapEngineNodeToUIItem(node, iconResolver) };
                     }
                     return null;
                 } catch { return null; }
@@ -342,7 +382,10 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
                         } else if (newNode.type === 'directory') {
                             newNode.children = [];
                         }
-                        const newItem = mapEngineNodeToUIItem(newNode);
+                        
+                        // [关键修改] 创建节点时传入 iconResolver
+                        const newItem = mapEngineNodeToUIItem(newNode, iconResolver);
+                        
                         this.store.dispatch({
                             type: newItem.type === 'directory' ? 'FOLDER_CREATE_SUCCESS' : 'SESSION_CREATE_SUCCESS',
                             payload: newItem,
