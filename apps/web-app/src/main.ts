@@ -11,10 +11,13 @@ import { SettingsEngine } from './workspace/settings/engines/SettingsEngine';
 import { SettingsService } from './workspace/settings/services/SettingsService';
 import { createSettingsFactory } from './factories/settingsFactory';
 import { FileTypeDefinition } from '@itookit/vfs-ui';
+import { createLLMFactory } from './factories/llmFactory';
 
 import '@itookit/vfs-ui/style.css';
 import '@itookit/mdxeditor/style.css';
 import '@itookit/memory-manager/style.css'; 
+// 如果有 llm-ui 的样式，也请引入
+import '@itookit/llm-ui/style.css'; 
 import './styles/index.css'; 
 
 const managerCache = new Map<string, MemoryManager>();
@@ -33,6 +36,7 @@ async function bootstrap() {
 
         // 3. 准备 Agent 编辑器工厂 (依赖 SettingsService)
         const agentEditorFactory = createAgentEditorFactory(sharedSettingsService);
+	const llmEditorFactory = createLLMFactory(sharedSettingsService); // 新增
 
         // 4. 定义全局通用的文件类型注册表
         // 这将告诉 vfs-ui：遇到 .agent 文件时，使用 agentEditorFactory 创建编辑器，图标显示为 🤖
@@ -41,7 +45,13 @@ async function bootstrap() {
                 extensions: ['.agent'],
                 icon: '🤖',
                 editorFactory: agentEditorFactory
-            }
+            },
+	    {
+	        // 新增 .chat 文件的支持
+	        extensions: ['.chat', '.session'], 
+	        icon: '💬',
+	        editorFactory: llmEditorFactory
+	    }
         ];
 
         const loadWorkspace = async (targetId: string) => {
@@ -109,11 +119,40 @@ async function bootstrap() {
                         readOnly: false,
                         contextMenu: { items: (_item, defaults) => defaults }
                     },
-                    editorConfig: {
-                        plugins: ['core:titlebar'], 
+                    editorConfig: { plugins: ['core:titlebar'], readOnly: false },
+                    aiConfig: { enabled: false }
+                });
+
+            // --- [新增] C. LLM Workspace (AI 会话) ---
+            } else if (targetId === 'llm-workspace') {
+                container.innerHTML = '';
+                // 获取配置
+                const llmConfig = WORKSPACES.find(w => w.elementId === 'llm-workspace')!;
+
+                manager = new MemoryManager({
+                    container: container,
+                    vfsCore: vfsCore,
+                    moduleName: llmConfig.moduleName, // 'chats'
+                    
+                    // [关键] 使用 LLM 专用工厂作为默认编辑器
+                    editorFactory: llmEditorFactory,
+                    fileTypes: globalFileTypes, // 允许打开其他类型
+
+                    uiOptions: {
+                        title: llmConfig.title,
+                        createFileLabel: llmConfig.itemLabel,
+                        defaultFileName: llmConfig.defaultFileName,
+                        defaultFileContent: llmConfig.defaultFileContent,
+                        searchPlaceholder: 'Search chats...',
+                        initialSidebarCollapsed: false,
                         readOnly: false
                     },
-                    aiConfig: { enabled: false }
+                    // LLM 编辑器通常自带 Titlebar，或者在 factory 内部处理
+                    editorConfig: {
+                        plugins: [], 
+                        readOnly: false
+                    },
+                    aiConfig: { enabled: false } // 不需要后台 Brain 扫描 .chat 文件
                 });
 
             // --- C. 通用 Workspace (Notes, Projects, etc.) ---
