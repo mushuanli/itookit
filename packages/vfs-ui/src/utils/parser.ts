@@ -53,6 +53,18 @@ export function extractTaskCounts(content: string): { total: number; completed: 
   return { total, completed };
 }
 
+// [新增] 尝试解析 JSON
+function tryParseJson(text: string): any | null {
+    const trimmed = text.trim();
+    if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+        try {
+            return JSON.parse(text);
+        } catch (e) {
+            return null;
+        }
+    }
+    return null;
+}
 
 /**
  * Extracts summary, headings, and other metadata from a file's content string.
@@ -73,19 +85,39 @@ export function parseFileInfo(contentString: string | null | undefined): ParseRe
     return defaultResult;
   }
 
-  // 1. Attempt to parse as Chat JSON first.
-  try {
-    const data = JSON.parse(contentString);
-    if (data && typeof data === 'object' && Array.isArray(data.pairs)) {
-      const summary = (data.description || '').substring(0, 120) + (data.description?.length > 120 ? '…' : '');
+  // 1. [修改] 优先尝试解析为 JSON
+  const json = tryParseJson(contentString);
+  if (json) {
+      // 提取摘要策略
+      let summary = '';
       
-      const searchableText = data.pairs
-        .map((p: { human?: string, ai?: string }) => `${p.human || ''}\n${p.ai || ''}`)
-        .join('\n');
-      return { summary, searchableText, headings: [], metadata: {} };
-    }
-  } catch (e) {
-    // Not valid JSON, fall through to parse as Markdown.
+      // 策略 A: 优先查找描述性字段
+      if (typeof json.description === 'string') summary = json.description;
+      else if (typeof json.desc === 'string') summary = json.desc; // 增加 desc
+      else if (typeof json.summary === 'string') summary = json.summary;
+      
+      // 策略 B: Chat History 特殊处理
+      else if (Array.isArray(json.pairs) && json.pairs.length > 0) {
+          summary = json.pairs[0].human || '';
+      }
+      
+      // 策略 C: 实在没有描述，尝试使用 name
+      else if (typeof json.name === 'string') {
+          summary = json.name;
+      }
+
+      // 策略 D (兜底): 如果上面都没找到，截取部分 JSON 文本作为摘要
+      // 去掉换行符，让其在一行内显示紧凑点
+      if (!summary) {
+          summary = contentString.replace(/\s+/g, ' ').substring(0, 100);
+      }
+
+      return {
+          summary: summary.substring(0, 150),
+          searchableText: contentString, // 搜索还是搜全文比较好
+          headings: [], // JSON 不支持大纲解析
+          metadata: {} // 暂不提取复杂元数据
+      };
   }
 
   // 2. Fallback to parsing as standard Markdown.
