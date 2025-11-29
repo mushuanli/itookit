@@ -26,6 +26,12 @@ export interface VFSConfig {
 // [新增] 导出 SearchQuery 接口，方便库的使用者进行类型提示
 export type { SearchQuery };
 
+// [新增] Mount 选项接口
+export interface MountOptions {
+    description?: string;
+    isProtected?: boolean;
+}
+
 /**
  * VFS 顶层管理器（单例）
  */
@@ -173,8 +179,9 @@ export class VFSCore {
 
   /**
    * 挂载模块
+   * [修改] description 参数改为 options 对象 (兼容旧 string 形式)
    */
-  async mount(moduleName: string, description?: string): Promise<ModuleInfo> {
+  async mount(moduleName: string, optionsOrDesc?: string | MountOptions): Promise<ModuleInfo> {
     this._ensureInitialized();
     if (this.moduleRegistry.has(moduleName)) {
       throw new VFSError(
@@ -182,15 +189,28 @@ export class VFSCore {
         `Module '${moduleName}' already mounted`
       );
     }
+
+    let desc = '';
+    let isProtected = false;
+
+    if (typeof optionsOrDesc === 'string') {
+        desc = optionsOrDesc;
+    } else if (optionsOrDesc) {
+        desc = optionsOrDesc.description || '';
+        isProtected = !!optionsOrDesc.isProtected;
+    }
+
     const rootNode = await this.vfs.createNode({
       module: moduleName,
       path: '/',
       type: VNodeType.DIRECTORY
     });
+    
     const moduleInfo: ModuleInfo = {
       name: moduleName,
       rootNodeId: rootNode.nodeId,
-      description,
+      description: desc,
+      isProtected, // 保存属性
       createdAt: Date.now()
     };
     this.moduleRegistry.register(moduleInfo);
@@ -538,15 +558,31 @@ export class VFSCore {
   /**
    * [修改] 按条件搜索节点
    * @param query 搜索条件
-   * @param moduleName (可选) 模块名称。不传则搜索全部模块。
-   * @returns {Promise<VNode[]>} 匹配的节点数组
+   * @param targetModule 目标搜索范围（undefined 表示全库）
+   * @param callerModule 发起搜索的模块名（用于权限校验）
    */
-  async searchNodes(query: SearchQuery, moduleName?: string): Promise<VNode[]> {
+  async searchNodes(query: SearchQuery, targetModule?: string, callerModule?: string): Promise<VNode[]> {
     this._ensureInitialized();
-    if (moduleName) {
-        this._ensureModuleExists(moduleName);
-    }
-    return this.vfs.searchNodes(query, moduleName);
+    
+    // 1. 执行底层搜索
+    const results = await this.vfs.searchNodes(query, targetModule);
+
+    // 2. [新增] 权限过滤
+    return results.filter(node => {
+        // 如果节点属于发起者自己的模块，总是可见
+        if (node.moduleId === callerModule) return true;
+
+        // 如果节点属于其他模块，检查该模块是否受保护
+        if (node.moduleId) {
+            const modInfo = this.moduleRegistry.get(node.moduleId);
+            // 如果模块受保护，且发起者不是该模块本身 -> 不可见
+            if (modInfo?.isProtected) {
+                return false;
+            }
+        }
+        
+        return true;
+    });
   }
 
   /**

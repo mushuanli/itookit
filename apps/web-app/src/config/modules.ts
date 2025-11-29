@@ -6,6 +6,8 @@ import { AgentFileContent } from '../workspace/settings/types';
 export interface WorkspaceConfig {
     elementId: string;
     moduleName: string;
+    isProtected?: boolean; 
+
     title: string;
     // [新增] 定义该工作区中"项目"的单数名词
     itemLabel: string; 
@@ -14,6 +16,7 @@ export interface WorkspaceConfig {
     defaultFileContent?: string;
     // 允许配置额外的插件列表
     plugins?: string[]; 
+    mentionScope?: string[];
 }
 
 // 默认的 Agent 模板
@@ -43,7 +46,9 @@ export const WORKSPACES: WorkspaceConfig[] = [
         // 默认内容为合法的 JSON 字符串
         defaultFileContent: JSON.stringify(DEFAULT_AGENT_CONTENT, null, 2),
         // Agent 编辑器只需要最基础的 Titlebar 插件
-        plugins: ['core:titlebar'] 
+        plugins: ['core:titlebar'],
+        // Agent 可能需要引用 Prompts 和 Knowledge Base (Projects)
+        mentionScope: ['agents', 'prompts', 'projects'],
     },
     // [原有] Anki Workspace
     {
@@ -87,7 +92,8 @@ MDxEditor 识别 \`¶\` 字符作为挖空内部的换行符。
 | **HTML** | --超文本标记语言 (HyperText Markup Language)-- | 网页的基础结构 |
 | **CSS** | --层叠样式表 (Cascading Style Sheets)-- | 用于样式设计 |
 | **JS** | --JavaScript-- | 用于交互逻辑 |
-`
+`,
+        mentionScope: ['*'], 
     },
     {
         elementId: 'prompt-workspace',
@@ -170,6 +176,8 @@ Best regards,
     {
         elementId: 'private-workspace',
         moduleName: 'private',
+        isProtected: true, 
+
         title: 'Private Notes',
         itemLabel: 'Note', // + Note
         defaultFileName: 'My First Note.md',
@@ -180,6 +188,7 @@ This is a secure and private space for your thoughts, ideas, and personal remind
 Anything you write here is stored locally in your browser and is not sent to any server.
 
 Feel free to jot down anything that comes to mind!
-`
+`,
+        mentionScope: [], // 空数组表示仅当前模块
     },
 ];

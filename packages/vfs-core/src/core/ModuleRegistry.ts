@@ -14,6 +14,13 @@ export interface ModuleInfo {
   description?: string;
   createdAt: number;
   metadata?: Record<string, any>;
+  
+  /**
+   * [新增] 模块保护标识
+   * true: 该模块仅允许被自己访问 (mention/search)，即使别人指定了 globalSearch 也不可见。
+   * false/undefined: 公开，允许被其他模块搜索到。
+   */
+  isProtected?: boolean; 
 }
 
 /**
