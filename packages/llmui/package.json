@@ -1,13 +1,71 @@
 {
-  "name": "llmui",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+  "name": "@itookit/llm-ui",
+  "version": "0.1.0",
+  "description": "A specialized UI library for Large Language Model workspaces, featuring chat interfaces, streaming history views, and session orchestration visualization",
+  "type": "module",
+  "main": "./dist/llm-ui.umd.cjs",
+  "module": "./dist/llm-ui.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/llm-ui.js",
+      "require": "./dist/llm-ui.umd.cjs"
+    },
+    "./style.css": "./dist/style.css"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "packageManager": "pnpm@10.20.0"
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "prepublishOnly": "pnpm build"
+  },
+  "keywords": [
+    "llm-ui",
+    "ai-workspace",
+    "chat-interface",
+    "streaming-ui",
+    "agent-visualization",
+    "session-manager",
+    "editor-adapter",
+    "typescript"
+  ],
+  "author": "lizlok@gmail.com",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mushuanli/itookit.git",
+    "directory": "packages/llm-ui"
+  },
+  "bugs": {
+    "url": "https://github.com/mushuanli/itookit/issues"
+  },
+  "homepage": "https://github.com/mushuanli/itookit/tree/main/packages/llm-ui#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "peerDependencies": {
+    "@itookit/common": "workspace:*"
+  },
+  "dependencies": {
+    "@itookit/common": "workspace:*",
+    "marked": "^12.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.12",
+    "@vitest/coverage-v8": "^1.6.0",
+    "typescript": "^5.4.5",
+    "vite": "^5.2.11",
+    "vite-plugin-checker": "^0.11.0",
+    "vite-plugin-dts": "^3.9.1",
+    "vitest": "^1.6.0"
+  }
 }

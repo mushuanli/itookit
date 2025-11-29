@@ -191,4 +191,16 @@ Feel free to jot down anything that comes to mind!
 `,
         mentionScope: [], // 空数组表示仅当前模块
     },
+    {
+        elementId: 'llm-workspace',
+        moduleName: 'chats',       // 数据存储在 /chats 模块
+        title: 'AI Sessions',
+        itemLabel: 'Chat',         // 按钮显示 "+ Chat"
+        defaultFileName: 'New Chat.chat',
+        // 初始化为一个空的 JSON 会话结构
+        defaultFileContent: JSON.stringify({ version: 1, sessions: [] }, null, 2),
+        mentionScope: ['*'],       // 允许引用所有内容
+        plugins: []                // LLM 编辑器内部管理插件，此处留空
+    },
+
 ];
