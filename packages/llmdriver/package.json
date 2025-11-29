@@ -19,7 +19,9 @@
     "dev": "pnpm build --watch",
     "build": "tsup src/index.ts --format cjs,esm --dts --clean",
     "prepublishOnly": "pnpm build",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "verify": "tsx scripts/verify.ts" 
   },
   "keywords": [
     "itookit",
@@ -49,7 +51,10 @@
   },
   "devDependencies": {
     "tsup": "^8.5.1",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^1.6.1",
+    "tsx": "^4.0.0", 
+    "dotenv": "^16.0.0"
   },
   "engines": {
     "node": ">=18.0.0"
