@@ -1,6 +1,6 @@
 // @file: llmdriver/driver.ts
 
-import { LLMClientConfig, ChatCompletionParams, ChatCompletionResponse, ChatCompletionChunk } from './types';
+import { LLMClientConfig, LLMProviderConfig, ChatCompletionParams, ChatCompletionResponse, ChatCompletionChunk } from './types';
 import { BaseProvider } from './providers/base';
 import { createProvider } from './providers/registry';
 import { LLMError } from './errors';
@@ -11,16 +11,37 @@ export class LLMDriver {
     public config: LLMClientConfig;
 
     constructor(config: LLMClientConfig) {
-        if (!config.provider || !config.apiKey) {
-            throw new Error('LLMDriver requires provider and apiKey.');
+        // 1. 优先解析 Connection 对象中的参数，如果不存在则使用顶层参数
+        const provider = config.connection?.provider || config.provider;
+        const apiKey = config.connection?.apiKey || config.apiKey;
+        const apiBaseUrl = config.connection?.baseURL || config.apiBaseUrl;
+        const model = config.connection?.model || config.model;
+
+        // 2. 校验必填项
+        if (!provider || !apiKey) {
+            throw new Error('LLMDriver requires provider and apiKey (either directly or via connection object).');
         }
+
+        // 3. 构建内部使用的严格配置 (ProviderConfig)
+        const providerConfig: LLMProviderConfig = {
+            provider,
+            apiKey,
+            apiBaseUrl,
+            model,
+            headers: config.headers,
+            // 复制其他可能的自定义字段
+            ...config.connection?.metadata 
+        };
+
+        // 4. 保存配置并初始化 Provider
         this.config = {
             maxRetries: DEFAULT_MAX_RETRIES,
             retryDelay: DEFAULT_RETRY_DELAY,
             timeout: DEFAULT_TIMEOUT,
             ...config
         };
-        this.provider = createProvider(config, config.customProviderDefaults);
+
+        this.provider = createProvider(providerConfig, config.customProviderDefaults);
     }
 
     public get chat() {
