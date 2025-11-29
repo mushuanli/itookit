@@ -16,8 +16,13 @@ import {
  */
 export interface DirectorySourceDependencies {
   engine: ISessionEngine;
-  /** 是否进行全局搜索，默认为 true */
-  globalSearch?: boolean;
+  /** 
+   * 搜索范围
+   * - true: 全局搜索 (['*'])
+   * - false: 仅当前模块 (undefined)
+   * - string[]: 指定范围 (e.g. ['*'] or ['wiki', 'notes'])
+   */
+  scope?: boolean | string[]; 
 }
 
 /**
@@ -30,15 +35,21 @@ export class DirectoryMentionSource extends IMentionSource {
   public readonly triggerChar = '@';
 
   private engine: ISessionEngine;
-  private globalSearch: boolean;
+  private searchScope: string[] | undefined;
 
-  constructor({ engine, globalSearch = true }: DirectorySourceDependencies) {
+  constructor({ engine, scope = true }: DirectorySourceDependencies) {
     super();
     if (!engine) {
       throw new Error("DirectoryMentionSource requires an ISessionEngine instance.");
     }
     this.engine = engine;
-    this.globalSearch = globalSearch;
+    
+    // 解析 scope 参数
+    if (Array.isArray(scope)) {
+        this.searchScope = scope;
+    } else {
+        this.searchScope = scope ? ['*'] : undefined;
+    }
   }
 
   /**
@@ -52,7 +63,7 @@ export class DirectoryMentionSource extends IMentionSource {
           type: 'directory',
           text: query,
           limit: 20,
-          scope: this.globalSearch ? ['*'] : undefined
+          scope: this.searchScope // 直接传递数组
       });
 
       const filteredResults = results.filter(node => {

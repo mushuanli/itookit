@@ -97,7 +97,7 @@ export class VFSCoreAdapter implements ISessionEngine {
             targetModule = query.scope[0];
         }
 
-        const results = await this.vfsCore.searchNodes(coreQuery, targetModule);
+        const results = await this.vfsCore.searchNodes(coreQuery, targetModule, this.moduleName);
         return results.map(n => this.toEngineNode(n));
     }
 
