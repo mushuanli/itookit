@@ -20,6 +20,15 @@ export interface MemoryManagerConfig {
     vfsCore?: VFSCore;
     moduleName?: string;
 
+    /**
+     * 定义 @mention 的搜索范围
+     * - undefined: 默认为 global (['*'])
+     * - ['*']: 全局搜索 (所有挂载的模块)
+     * - []: 仅当前模块
+     * - ['modA', 'modB']: 指定模块 + 当前模块(如果逻辑包含的话)
+     */
+    mentionScope?: string[];
+
     // --- 编辑器配置 ---
     /** 
      * 编辑器工厂函数。

@@ -129,6 +129,9 @@ async function bootstrap() {
                     editorFactory: defaultEditorFactory,
                     // 注入全局文件类型，使得普通笔记区也能打开 Agent 文件 (如果被移动过去)
                     fileTypes: globalFileTypes,
+                    
+                    // [新增] 传递 mentionScope
+                    mentionScope: wsConfig.mentionScope,
 
                     uiOptions: {
                         title: wsConfig.title,

@@ -92,7 +92,7 @@ export class MemoryManager {
      * 此时 this.vfsUI 可能还在初始化中，但当此函数被实际调用时(打开文件时)，它一定已经可用。
      */
     private enhancedEditorFactory = async (container: HTMLElement, runtimeOptions: EditorOptions): Promise<IEditor> => {
-        const { editorConfig } = this.config;
+        const { editorConfig, mentionScope } = this.config; // [新增] 读取 mentionScope
         
         // 1. 准备注入给编辑器的能力 (Capabilities)
         const contextFeatures = {
@@ -127,8 +127,15 @@ export class MemoryManager {
                     // @ts-ignore
                     ...(editorConfig?.defaultPluginOptions?.['autocomplete:mention'] || {}),
                     providers: [
-                        new FileMentionSource({ engine: this.engine }),
-                        new DirectoryMentionSource({ engine: this.engine })
+                        // [修改] 传递 scope
+                        new FileMentionSource({ 
+                            engine: this.engine, 
+                            scope: mentionScope ?? ['*'] // 默认为全局
+                        }),
+                        new DirectoryMentionSource({ 
+                            engine: this.engine, 
+                            scope: mentionScope ?? ['*'] 
+                        })
                     ]
                 },
 

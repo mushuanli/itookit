@@ -18,11 +18,18 @@ export async function initVFS(): Promise<VFSCore> {
         const exists = vfsInstance.getModule(ws.moduleName);
         if (!exists) {
             try {
-                await vfsInstance.mount(ws.moduleName, ws.title);
-                console.log(`Mounted module: ${ws.moduleName}`);
+                // [修改] 传递对象参数
+                await vfsInstance.mount(ws.moduleName, {
+                    description: ws.title,
+                    isProtected: ws.isProtected
+                });
+                console.log(`Mounted module: ${ws.moduleName} (Protected: ${!!ws.isProtected})`);
             } catch (e) {
                 console.error(`Failed to mount ${ws.moduleName}`, e);
             }
+        } else {
+            // [可选] 如果模块已存在，检查是否需要更新属性
+            // vfsInstance.updateModule(ws.moduleName, { isProtected: ws.isProtected });
         }
     }
 
