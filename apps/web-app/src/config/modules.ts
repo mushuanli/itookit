@@ -18,7 +18,7 @@ export interface WorkspaceConfig {
 
 // 默认的 Agent 模板
 const DEFAULT_AGENT_CONTENT: AgentFileContent = {
-    id: 'template', // Editor 加载时通常会重置此 ID
+    id: 'template',
     name: 'New Assistant',
     type: 'agent',
     description: 'A helpful AI assistant.',
@@ -50,8 +50,14 @@ export const WORKSPACES: WorkspaceConfig[] = [
         elementId: 'anki-workspace',
         moduleName: 'anki',
         title: 'Anki Memory Cards',
-        itemLabel: 'Card', // + Card
-        plugins: ['cloze:cloze', 'cloze:cloze-controls'], 
+        itemLabel: 'Card',
+        // [修改] 显式添加 mention 和 tag 插件
+        plugins: [
+            'cloze:cloze', 
+            'cloze:cloze-controls', 
+            'autocomplete:mention', // <--- 关键：启用 @mention
+            'autocomplete:tag'      // <--- 建议：启用 #tag
+        ], 
         defaultFileName: 'Anki Guide.md',
         defaultFileContent: `### 挖空填词 (Cloze)
 

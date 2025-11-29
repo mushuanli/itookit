@@ -201,6 +201,19 @@ export class MDxEditor extends IEditor {
     }
   }
 
+  // --- Helper: JSON Parsing ---
+  private tryParseJson(text: string): any | null {
+      const trimmed = text.trim();
+      if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+          try {
+              return JSON.parse(text);
+          } catch (e) {
+              return null;
+          }
+      }
+      return null;
+  }
+
   // --- IEditor Implementation ---
 
   get commands(): Readonly<Record<string, Function>> {
@@ -238,6 +251,12 @@ export class MDxEditor extends IEditor {
   async getHeadings(): Promise<Heading[]> {
     const text = this.getText();
     const headings: Heading[] = [];
+    
+    // [改进] 如果是 JSON，不提取 Heading
+    if (this.tryParseJson(text)) {
+        return [];
+    }
+
     const slugCount = new Map<string, number>();
 
     for (const line of text.split('\n')) {
@@ -256,6 +275,65 @@ export class MDxEditor extends IEditor {
       }
     }
     return headings;
+  }
+
+  // [改进] 获取搜索文本摘要，智能处理 JSON
+  async getSearchableText(): Promise<string> {
+      const content = this.getText();
+      const json = this.tryParseJson(content);
+      
+      if (json) {
+          // 策略：提取常见字段
+          const parts: string[] = [];
+          if (json.name) parts.push(json.name);
+          if (json.description) parts.push(json.description);
+          if (json.summary) parts.push(json.summary);
+          
+          // Chat history 格式
+          if (Array.isArray(json.pairs)) {
+              json.pairs.forEach((p: any) => {
+                  if (p.human) parts.push(p.human);
+                  if (p.ai) parts.push(p.ai);
+              });
+          }
+          
+          return parts.join('\n');
+      }
+
+      return content
+          .replace(/^#+\s/gm, '')
+          .replace(/\[(.*?)\]\(.*?\)/g, '$1')
+          .replace(/```[\s\S]*?```/g, '')
+          .replace(/`[^`]+`/g, '')
+          .trim();
+  }
+  
+  // [改进] 获取摘要，智能处理 JSON
+  async getSummary(): Promise<string | null> {
+      const content = this.getText();
+      const json = this.tryParseJson(content);
+
+      if (json) {
+          if (json.description) return json.description;
+          if (json.summary) return json.summary;
+          // 如果是 Chat，取第一句话
+          if (Array.isArray(json.pairs) && json.pairs.length > 0) {
+              return json.pairs[0].human || null;
+          }
+          return null;
+      }
+
+      // 普通 Markdown 摘要逻辑
+      // 取第一段非标题、非代码块的文本
+      const lines = content.split('\n');
+      for (const line of lines) {
+          const trimmed = line.trim();
+          if (trimmed && !trimmed.startsWith('#') && !trimmed.startsWith('```') && !trimmed.startsWith('---')) {
+              // 移除 Markdown 标记
+              return trimmed.replace(/\[(.*?)\]\(.*?\)/g, '$1').replace(/[*_~`]/g, '').substring(0, 150);
+          }
+      }
+      return null;
   }
 
   setTitle(newTitle: string): void { this.renderer.getPluginManager().emit('setTitle', { title: newTitle }); }
@@ -296,6 +374,8 @@ export class MDxEditor extends IEditor {
     this.clearSearch();
     if (!query) return [];
 
+    // [注] 编辑器内的即时搜索仍然针对源码（JSON字符串）进行
+    // 这样用户才能定位到具体的字段进行修改
     if (this.currentMode === 'edit' && this.editorView) {
       this.editorView.dispatch({
         effects: this.searchCompartment.reconfigure(search({ top: true }))
