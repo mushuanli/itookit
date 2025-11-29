@@ -15,7 +15,7 @@ import { mapEngineNodeToUIItem, mapEngineTreeToUIItems } from '../mappers/NodeMa
 import { NodeList } from '../components/NodeList/NodeList';
 import { FileOutline } from '../components/FileOutline/FileOutline';
 import { MoveToModal } from '../components/MoveToModal/MoveToModal';
-import type { TagInfo, VFSNodeUI, ContextMenuConfig, VFSUIState, UISettings } from '../types/types';
+import type { TagInfo, VFSNodeUI, ContextMenuConfig, VFSUIState, UISettings, TagEditorFactory, TagEditorOptions } from '../types/types';
 
 // 新增依赖
 import { FileTypeRegistry } from '../services/FileTypeRegistry';
@@ -106,18 +106,54 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
 
         const tagProvider = new EngineTagSource(this.engine);
         
-        const tagEditorFactory = this.options.components?.tagEditor || (({ container, initialTags, onSave, onCancel }: any) => {
-            const editor = new TagEditorComponent({ container, initialItems: initialTags, suggestionProvider: tagProvider, onSave, onCancel });
+        // [修复] 类型匹配问题
+        // TagEditorFactory 是一个函数类型: (options: TagEditorOptions) => any
+        // options.components.tagEditor 可能是一个类构造函数 (new (...) => any)
+        
+        // 默认的工厂函数实现
+        const defaultTagEditorFactory: TagEditorFactory = ({ container, initialTags, onSave, onCancel }: TagEditorOptions) => {
+            const editor = new TagEditorComponent({ 
+                container, 
+                initialItems: initialTags, 
+                suggestionProvider: tagProvider, 
+                onSave, 
+                onCancel 
+            });
             editor.init();
             return editor;
-        });
+        };
+
+        // 如果用户提供了自定义组件类，我们需要将其包装成工厂函数
+        let finalTagEditorFactory: TagEditorFactory = defaultTagEditorFactory;
+
+        if (this.options.components?.tagEditor) {
+            const CustomTagEditorClass = this.options.components.tagEditor;
+            // 包装为工厂函数
+            finalTagEditorFactory = (opts: TagEditorOptions) => {
+                // 假设自定义组件的构造函数接收类似的参数结构，或者需要适配
+                // 这里做一个简单的透传，具体取决于自定义组件的签名约定
+                // 如果自定义组件遵循 TagEditorComponent 的接口，这样是可行的
+                const instance = new CustomTagEditorClass({
+                    container: opts.container,
+                    initialItems: opts.initialTags,
+                    suggestionProvider: tagProvider, // 注入 Provider
+                    onSave: opts.onSave,
+                    onCancel: opts.onCancel
+                });
+                
+                if (typeof instance.init === 'function') {
+                    instance.init();
+                }
+                return instance;
+            };
+        }
 
         this.nodeList = new NodeList({
             container: this.options.sessionListContainer,
             store: this.store,
             coordinator: this.coordinator,
             contextMenu: this.options.contextMenu as ContextMenuConfig,
-            tagEditorFactory: tagEditorFactory,
+            tagEditorFactory: finalTagEditorFactory, // 使用修复后的类型
             searchPlaceholder: this.options.searchPlaceholder || 'Search (tag:xx type:file|dir)...',
             // 新增传参
             createFileLabel: this.options.createFileLabel,
