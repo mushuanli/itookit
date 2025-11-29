@@ -3,7 +3,7 @@
  * @desc Container component that orchestrates the rendering and interaction of the node list.
  */
 import { BaseComponent, BaseComponentParams } from '../../core/BaseComponent';
-import { VFSNodeUI, ContextMenuConfig, MenuItem, UISettings, VFSUIState } from '../../types/types';
+import { VFSNodeUI, ContextMenuConfig, MenuItem, UISettings,TagEditorFactory, VFSUIState } from '../../types/types';
 import { debounce, escapeHTML } from '@itookit/common';
 
 import { createContextMenuHTML, createSettingsPopoverHTML, createItemInputHTML } from './templates';
@@ -12,15 +12,13 @@ import { BaseNodeItem } from './items/BaseNodeItem';
 import { FileItem, FileItemProps } from './items/FileItem';
 import { DirectoryItem, DirectoryItemProps } from './items/DirectoryItem';
 
-interface NodeListParams extends BaseComponentParams {
-    contextMenu?: ContextMenuConfig;
-    tagEditorFactory: ((options: {
-        container: HTMLElement;
-        initialTags: string[];
-        onSave: (tags: string[]) => void;
-        onCancel: () => void;
-    }) => void) | any; 
-    searchPlaceholder?: string;
+interface NodeListOptions extends BaseComponentParams {
+    contextMenu: ContextMenuConfig;
+    tagEditorFactory: TagEditorFactory;
+    searchPlaceholder: string;
+    title?: string;
+    // [新增] 接收 label 配置
+    createFileLabel?: string;
 }
 
 
@@ -31,7 +29,7 @@ interface NodeListState {
     searchQuery: string;
     activeId: string | null;
     expandedFolderIds: Set<string>;
-    expandedOutlineIds: Set<string>; // <--- [修复] 新增这一行
+    expandedOutlineIds: Set<string>;
     selectedItemIds: Set<string>;
     creatingItem: { type: 'file' | 'directory'; parentId: string | null } | null;
     selectionStatus: 'none' | 'partial' | 'all';
@@ -39,6 +37,8 @@ interface NodeListState {
     readOnly: boolean;
     status: 'idle' | 'loading' | 'success' | 'error';
     uiSettings: UISettings;
+    // [新增]
+    createFileLabel: string;
 }
 
 export class NodeList extends BaseComponent<NodeListState> {
@@ -47,7 +47,7 @@ export class NodeList extends BaseComponent<NodeListState> {
     private tagEditorPopover: HTMLElement | null = null;
     private lastClickedItemId: string | null = null;
     private folderExpandTimer: number | null = null;
-    private options: NodeListParams;
+    private options: NodeListOptions;
 
     private readonly bodyEl: HTMLElement;
     private readonly searchEl: HTMLInputElement;
@@ -58,20 +58,32 @@ export class NodeList extends BaseComponent<NodeListState> {
     private readonly footer: Footer;
     private itemInstances: Map<string, BaseNodeItem> = new Map();
 
-    constructor(params: NodeListParams) {
-        super(params);
-        this.options = params;
+    // 缓存当前的 Label 以检测变化
+    private currentCreateFileLabel: string = 'File';
+
+    constructor(options: NodeListOptions) {
+        super(options);
+        this.options = options;
+        if (options.title) this.setTitle(options.title);
+
+        // 设置默认 label
+        this.currentCreateFileLabel = options.createFileLabel || 'File';
+
+        const searchPlaceholder = options.searchPlaceholder || '搜索 (tag:xx type:file|dir)...';
         
-        const searchPlaceholder = params.searchPlaceholder || '搜索 (tag:xx type:file|dir)...';
+        // [修改] new-btn 的内容在构造时使用初始配置
+        // 如果状态更新导致 label 变化，将在 render 中更新
         this.container.innerHTML = `
             <div class="vfs-node-list">
                 <div class="vfs-node-list__title-bar">
-                    <h2 class="vfs-node-list__title" data-ref="title">文件列表</h2>
+                    <h2 class="vfs-node-list__title" data-ref="title">${escapeHTML(options.title || '文件列表')}</h2>
                 </div>
                 <div class="vfs-node-list__header">
                     <input type="search" class="vfs-node-list__search" placeholder="${escapeHTML(searchPlaceholder)}" />
                     <div class="vfs-node-list__new-controls" data-ref="new-controls">
-                        <button class="vfs-node-list__new-btn" data-action="create-file"><span>+</span><span>文件</span></button>
+                        <button class="vfs-node-list__new-btn" data-action="create-file" title="新建 ${escapeHTML(this.currentCreateFileLabel)}">
+                            <span>+</span><span class="btn-label">${escapeHTML(this.currentCreateFileLabel)}</span>
+                        </button>
                         <button class="vfs-node-list__new-btn vfs-node-list__new-btn--folder" data-action="create-directory" title="新建目录"><span>📁+</span></button>
                         <button class="vfs-node-list__new-btn vfs-node-list__new-btn--icon" data-action="import" title="导入文件"><i class="fas fa-upload"></i></button>
                     </div>
@@ -130,7 +142,7 @@ export class NodeList extends BaseComponent<NodeListState> {
             searchQuery, 
             activeId, 
             expandedFolderIds, 
-            expandedOutlineIds, // <--- [修复] 传递给局部状态
+            expandedOutlineIds, 
             uiSettings, 
             status,
             selectedItemIds, 
@@ -138,6 +150,8 @@ export class NodeList extends BaseComponent<NodeListState> {
             selectionStatus, 
             visibleItemIds, 
             readOnly,
+            // [新增] 始终使用构造时传入的配置，除非支持动态更改配置
+            createFileLabel: this.options.createFileLabel || 'File' 
         };
     }
 
@@ -530,9 +544,12 @@ export class NodeList extends BaseComponent<NodeListState> {
 
     private _getDefaultContextMenuItems(item: VFSNodeUI): MenuItem[] {
         const items: MenuItem[] = [];
+        // [修改] 根据 createFileLabel 动态生成菜单项文本
+        const label = this.state.createFileLabel;
+        
         if (item.type === 'directory') {
             items.push(
-                { id: 'create-in-folder-session', label: '新建文件', iconHTML: '<i class="fas fa-file-alt"></i>' },
+                { id: 'create-in-folder-session', label: `新建 ${escapeHTML(label)}`, iconHTML: '<i class="fas fa-file-alt"></i>' },
                 { id: 'create-in-folder-folder', label: '新建目录', iconHTML: '<i class="fas fa-folder-plus"></i>' },
                 { type: 'separator' }
             );
@@ -759,6 +776,15 @@ export class NodeList extends BaseComponent<NodeListState> {
         this.newControlsEl.style.display = this.state.readOnly ? 'none' : '';
         
         this.footerEl.style.display = this.state.readOnly ? 'none' : '';
+
+        // [修改] 检查 Label 变更并更新按钮
+        if (this.state.createFileLabel !== this.currentCreateFileLabel) {
+            this.currentCreateFileLabel = this.state.createFileLabel;
+            const btnLabel = this.newControlsEl.querySelector('[data-action="create-file"] .btn-label');
+            const btn = this.newControlsEl.querySelector('[data-action="create-file"]') as HTMLButtonElement;
+            if (btnLabel) btnLabel.textContent = this.currentCreateFileLabel;
+            if (btn) btn.title = `新建 ${this.currentCreateFileLabel}`;
+        }
 
         this.footer.render({
             selectionStatus: this.state.selectionStatus,

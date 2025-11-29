@@ -7,6 +7,9 @@ export interface WorkspaceConfig {
     elementId: string;
     moduleName: string;
     title: string;
+    // [新增] 定义该工作区中"项目"的单数名词
+    itemLabel: string; 
+    
     defaultFileName?: string;
     defaultFileContent?: string;
     // 允许配置额外的插件列表
@@ -35,7 +38,7 @@ export const WORKSPACES: WorkspaceConfig[] = [
         elementId: 'agent-workspace',
         moduleName: 'agents', 
         title: 'Agents',
-        // 显式指定扩展名，以便 SmartEditorFactory 识别
+        itemLabel: 'Agent', // + Agent
         defaultFileName: 'New Assistant.agent',
         // 默认内容为合法的 JSON 字符串
         defaultFileContent: JSON.stringify(DEFAULT_AGENT_CONTENT, null, 2),
@@ -47,7 +50,7 @@ export const WORKSPACES: WorkspaceConfig[] = [
         elementId: 'anki-workspace',
         moduleName: 'anki',
         title: 'Anki Memory Cards',
-        // [修复] 去除重复的 'cloze:cloze-controls'
+        itemLabel: 'Card', // + Card
         plugins: ['cloze:cloze', 'cloze:cloze-controls'], 
         defaultFileName: 'Anki Guide.md',
         defaultFileContent: `### 挖空填词 (Cloze)
@@ -84,6 +87,7 @@ MDxEditor 识别 \`¶\` 字符作为挖空内部的换行符。
         elementId: 'prompt-workspace',
         moduleName: 'prompts',
         title: 'Prompt Library',
+        itemLabel: 'Prompt', // + Prompt
         defaultFileName: 'Welcome to Prompts.md',
         defaultFileContent: `# Welcome to Your Prompt Library!
 
@@ -112,6 +116,7 @@ Translate the following English text to French:
         elementId: 'project-workspace',
         moduleName: 'projects',
         title: 'Projects',
+        itemLabel: 'Project', // + Project
         defaultFileName: 'Getting Started with Projects.md',
         defaultFileContent: `# Manage Your Projects
 
@@ -133,6 +138,7 @@ Start by creating your first project folder using the folder icon in the sidebar
         elementId: 'email-workspace',
         moduleName: 'emails',
         title: 'Email Drafts',
+        itemLabel: 'Email', // + Email
         defaultFileName: 'How to Use Email Templates.md',
         defaultFileContent: `# Email Drafts & Templates
 
@@ -159,6 +165,7 @@ Best regards,
         elementId: 'private-workspace',
         moduleName: 'private',
         title: 'Private Notes',
+        itemLabel: 'Note', // + Note
         defaultFileName: 'My First Note.md',
         defaultFileContent: `# Your Private Notes
 

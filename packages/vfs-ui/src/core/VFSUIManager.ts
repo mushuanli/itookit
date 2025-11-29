@@ -119,6 +119,9 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
             contextMenu: this.options.contextMenu as ContextMenuConfig,
             tagEditorFactory: tagEditorFactory,
             searchPlaceholder: this.options.searchPlaceholder || 'Search (tag:xx type:file|dir)...',
+            // 新增传参
+            createFileLabel: this.options.createFileLabel,
+            title: this.options.title
         });
 
         if (this.options.documentOutlineContainer) {
