@@ -1,10 +1,10 @@
 {
   "name": "@itookit/llmdriver",
-  "version": "1.0.0",
-  "description": "A versatile, provider-agnostic library for interacting with Large Language Models.",
-  "main": "./dist/index.js",
-  "module": "./dist/index.mjs",
-  "types": "./dist/index.d.ts",
+  "version": "0.1.0",
+  "description": "A unified, TypeScript-based LLM interface driver supporting OpenAI, Anthropic, Gemini and more.",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -16,20 +16,19 @@
     "dist"
   ],
   "scripts": {
-    "dev": "tsup src/index.js --format cjs,esm --dts --watch",
-    "build": "tsup src/index.js --format cjs,esm --dts",
-    "test": "vitest run",
-    "prepublishOnly": "npm run build"
+    "dev": "pnpm build --watch",
+    "build": "tsup src/index.ts --format cjs,esm --dts --clean",
+    "prepublishOnly": "pnpm build",
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
+    "itookit",
     "llm",
-    "ai",
+    "driver",
     "openai",
     "anthropic",
     "gemini",
-    "llm-client",
-    "driver",
-    "typescript"
+    "ai"
   ],
   "author": "lizlok@gmail.com",
   "license": "MIT",
@@ -45,13 +44,14 @@
   "publishConfig": {
     "access": "public"
   },
-  "engines": {
-    "node": ">=16.0.0"
+  "dependencies": {
+    "@itookit/common": "workspace:*"
   },
-  "dependencies": {},
   "devDependencies": {
-    "tsup": "^8.5.0",
-    "typescript": "^5.9.3",
-    "vitest": "^1.6.0"
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }

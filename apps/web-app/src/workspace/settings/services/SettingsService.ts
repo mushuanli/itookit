@@ -1,12 +1,12 @@
 /**
  * @file: app/workspace/settings/services/SettingsService.ts
  */
+import {LLM_DEFAULT_ID} from '@itookit/common';
 import { VFSCore, VFSErrorCode, VFSEventType, VFSEvent } from '@itookit/vfs-core';
 import { SettingsState, LLMConnection, MCPServer, Contact, Tag } from '../types';
 import { 
     LLM_DEFAULT_CONNECTIONS, 
     PROTECTED_TAGS, 
-    LLM_DEFAULT_ID,
 } from '../constants';
 
 const CONFIG_MODULE = '__config';

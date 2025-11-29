@@ -48,21 +48,21 @@
     },
     "peerDependencies": {
         "@itookit/common": "workspace:*",
+        "@itookit/mdxeditor": "workspace:*",
         "@itookit/vfs-core": "workspace:*",
-        "@itookit/vfs-ui": "workspace:*",
-        "@itookit/mdxeditor": "workspace:*"
+        "@itookit/vfs-ui": "workspace:*"
     },
     "dependencies": {
-        "immer": "^10.1.1"
+        "immer": "^10.2.0"
     },
     "devDependencies": {
         "@itookit/common": "workspace:*",
+        "@itookit/mdxeditor": "workspace:*",
         "@itookit/vfs-core": "workspace:*",
         "@itookit/vfs-ui": "workspace:*",
-        "@itookit/mdxeditor": "workspace:*",
-        "@types/node": "^20.12.12",
-        "typescript": "^5.4.5",
-        "vite": "^5.2.11",
+        "@types/node": "^20.19.25",
+        "typescript": "^5.9.3",
+        "vite": "^5.4.21",
         "vite-plugin-dts": "^3.9.1"
     }
 }

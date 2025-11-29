@@ -1,9 +1,11 @@
 /**
- * @file src/constants.js
- * @description Contains self-contained default configurations for the library.
+ * @file packages/common/src/constants/llmDefaults.ts
+ * @description LLM 提供商的默认配置注册表。
  */
 
-export const LLM_PROVIDER_DEFAULTS = {
+import { LLMProviderDefinition } from '../interfaces/llm/ILLM';
+
+export const LLM_PROVIDER_DEFAULTS: Record<string, LLMProviderDefinition> = {
     openai: {
         name: "OpenAI",
         implementation: 'openai-compatible',
@@ -23,6 +25,7 @@ export const LLM_PROVIDER_DEFAULTS = {
         baseURL: 'https://api.rdsec.trendmicro.com/prod/aiendpoint/v1/chat/completions',
         supportsThinking: true,
         models: [
+            { id: 'claude-4.5-sonnet', name: 'Claude 4.5 Sonnet' },
             { id: 'gpt-4o', name: 'GPT-4o (OpenAI)' },
             { id: 'claude-3-haiku', name: 'Claude 3 Haiku' },
             { id: 'claude-3.5-sonnet', name: 'Claude 3.5 Sonnet' },
@@ -32,7 +35,6 @@ export const LLM_PROVIDER_DEFAULTS = {
             { id: 'claude-4-sonnet', name: 'Claude 4 Sonnet' },
             { id: 'claude-4.1-opus', name: 'Claude 4.1 Opus' },
             { id: 'claude-4.5-haiku', name: 'Claude 4.5 Haiku' },
-            { id: 'claude-4.5-sonnet', name: 'Claude 4.5 Sonnet' },
             { id: 'deepseek-r1', name: 'DeepSeek R1' },
             { id: 'deepseek-r1-0528', name: 'DeepSeek R1 0528' },
             { id: 'deepseek-r1-aws', name: 'DeepSeek R1 AWS' },
@@ -54,13 +56,13 @@ export const LLM_PROVIDER_DEFAULTS = {
     },
     anthropic: {
         name: "Anthropic (Claude)",
-        implementation: 'anthropic',
+        implementation: 'anthropic', // 改为专用实现
         baseURL: 'https://api.anthropic.com/v1/messages',
         supportsThinking: true,
         models: [
+            { id: 'claude-sonnet-4-5-20250929', name: 'Claude Sonnet 4.5' },
             { id: 'claude-opus-4-1-20250805', name: 'Claude Opus 4.1' },
             { id: 'claude-opus-4-20250514', name: 'Claude Opus 4' },
-            { id: 'claude-sonnet-4-5-20250929', name: 'Claude Sonnet 4.5' },
             { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4' },
             { id: 'claude-3-7-sonnet-latest', name: 'Claude Sonnet 3.7 (Latest)' },
             { id: 'claude-3-7-sonnet-20250219', name: 'Claude Sonnet 3.7' },
@@ -84,10 +86,7 @@ export const LLM_PROVIDER_DEFAULTS = {
         supportsThinking: true,
         models: [
             { id: 'deepseek-chat', name: 'DeepSeek Chat' },
-            { id: 'deepseek-reasoner', name: 'DeepSeek Reasoner' },
-            //{ id: 'deepseek-v3.2-exp', name: 'DeepSeek V3.2 Exp' },
-            //{ id: 'deepseek-v3.1-terminus', name: 'DeepSeek V3.1 Terminus' },
-            //{ id: 'deepseek-coder', name: 'DeepSeek Coder' },
+            { id: 'deepseek-reasoner', name: 'DeepSeek Reasoner' }
         ]
     },
     openrouter: {
@@ -95,9 +94,7 @@ export const LLM_PROVIDER_DEFAULTS = {
         implementation: 'openai-compatible',
         baseURL: 'https://openrouter.ai/api/v1/chat/completions',
         requiresReferer: true,
-        supportsThinking: false,
         models: [
-            // --- Auto Router ---
             { id: 'openrouter/auto', name: 'Auto (Best Model)' },
             
             // --- OpenAI Models via OpenRouter ---
@@ -123,26 +120,21 @@ export const LLM_PROVIDER_DEFAULTS = {
     },
     cloudapi: {
         name: "CloudAPI",
-        implementation: 'openai-compatible', // 新增
+        implementation: 'openai-compatible',
         baseURL: 'https://chat.cloudapi.vip/v1/chat/completions',
-        supportsThinking: false,
         models: [
             { id: 'claude-sonnet-4-5-20250929-thinking', name: 'Sonnet 4.5 Think' },
-            { id: 'claude-opus-4-1-20250805-thinking-code', name: 'Opus 4.1 Think' },
-            //{ id: 'deepseek-v3.2-exp', name: 'DeepSeek V3.2 Exp' },
-            //{ id: 'deepseek-v3.1-terminus', name: 'DeepSeek V3.1 Terminus' },
-            //{ id: 'deepseek-coder', name: 'DeepSeek Coder' },
+            { id: 'claude-opus-4-1-20250805-thinking-code', name: 'Opus 4.1 Think' }
         ]
     },
     custom_openai_compatible: {
         name: "Custom (OpenAI Compatible)",
         implementation: 'openai-compatible',
         baseURL: '',
-        supportsThinking: false,
         models: []
     }
 };
 
-export const DEFAULT_MAX_RETRIES = 3;
-export const DEFAULT_RETRY_DELAY = 1000;
-export const DEFAULT_TIMEOUT = 60000;
+// 预设 ID 常量
+export const LLM_DEFAULT_ID = 'default';
+export const LLM_TEMP_DEFAULT_ID = 'default-temp';
