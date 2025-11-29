@@ -1,16 +1,16 @@
 /**
  * @file apps/web-app/src/main.ts
+ * @description Main entry point for the web application.
  */
 import { MemoryManager } from '@itookit/memory-manager';
 import { initVFS } from './services/vfs';
-import { defaultEditorFactory, createSmartEditorFactory } from './factories/editorFactory';
+import { defaultEditorFactory, createAgentEditorFactory } from './factories/editorFactory';
 import { initSidebarNavigation } from './utils/layout';
 import { WORKSPACES } from './config/modules';
 import { SettingsEngine } from './workspace/settings/engines/SettingsEngine';
 import { SettingsService } from './workspace/settings/services/SettingsService';
 import { createSettingsFactory } from './factories/settingsFactory';
-// [Removed] AgentEngine 移除
-// import { AgentEngine } from './workspace/agents/AgentEngine'; 
+import { FileTypeDefinition } from '@itookit/vfs-ui';
 
 import '@itookit/vfs-ui/style.css';
 import '@itookit/mdxeditor/style.css';
@@ -24,12 +24,25 @@ let sharedSettingsService: SettingsService | null = null;
 
 async function bootstrap() {
     try {
-        // 1. 初始化核心层
+        // 1. 初始化核心层 VFS
         const vfsCore = await initVFS();
         
-        // 2. 优先初始化全局设置服务 (Connection 数据源)
+        // 2. 优先初始化全局设置服务 (Connection, Tags 数据源)
         sharedSettingsService = new SettingsService(vfsCore);
         await sharedSettingsService.init();
+
+        // 3. 准备 Agent 编辑器工厂 (依赖 SettingsService)
+        const agentEditorFactory = createAgentEditorFactory(sharedSettingsService);
+
+        // 4. 定义全局通用的文件类型注册表
+        // 这将告诉 vfs-ui：遇到 .agent 文件时，使用 agentEditorFactory 创建编辑器，图标显示为 🤖
+        const globalFileTypes: FileTypeDefinition[] = [
+            {
+                extensions: ['.agent'],
+                icon: '🤖',
+                editorFactory: agentEditorFactory
+            }
+        ];
 
         const loadWorkspace = async (targetId: string) => {
             if (managerCache.has(targetId)) return;
@@ -42,7 +55,7 @@ async function bootstrap() {
 
             let manager: MemoryManager;
 
-            // 3. 特殊处理：Settings Workspace
+            // --- A. 特殊处理：Settings Workspace ---
             if (targetId === 'settings-workspace') {
                 const settingsEngine = new SettingsEngine(sharedSettingsService!);
                 const settingsFactory = createSettingsFactory(sharedSettingsService!);
@@ -51,10 +64,9 @@ async function bootstrap() {
                 manager = new MemoryManager({
                     container: container,
                     customEngine: settingsEngine,
-                    editorFactory: settingsFactory,
+                    editorFactory: settingsFactory, // Settings 使用专用的路由工厂
                     uiOptions: {
                         title: 'Settings',
-                        // 设置页面不需要上下文菜单
                         contextMenu: { items: () => [] }, 
                         searchPlaceholder: 'Search settings...',
                         
@@ -67,10 +79,8 @@ async function bootstrap() {
                     aiConfig: { enabled: false }
                 });
 
-            // 4. Agent Workspace - 架构简化
-            // 不再使用 AgentEngine，直接使用标准 MemoryManager + SmartEditorFactory
+            // --- B. Agent Workspace ---
             } else if (targetId === 'agent-workspace') {
-                const agentFactory = createSmartEditorFactory(sharedSettingsService!);
                 container.innerHTML = '';
 
                 // 获取配置 (确保 defaultFileContent 存在)
@@ -78,12 +88,14 @@ async function bootstrap() {
 
                 manager = new MemoryManager({
                     container: container,
-                    // [修改] 使用标准的 vfsCore + moduleName 模式
-                    // MemoryManager 内部会自动创建 VFSCoreAdapter
                     vfsCore: vfsCore,
                     moduleName: 'agents', 
                     
-                    editorFactory: agentFactory,
+                    // [核心修改] 使用标准工厂作为默认值
+                    editorFactory: defaultEditorFactory,
+                    // [核心修改] 注入文件类型注册表，让系统自动识别 .agent
+                    fileTypes: globalFileTypes,
+
                     uiOptions: {
                         title: 'Agents',
                         // 使用 config 中定义的 .agent 文件名和 JSON 模板
@@ -93,12 +105,9 @@ async function bootstrap() {
                         searchPlaceholder: 'Search agents...',
                         initialSidebarCollapsed: false,
                         readOnly: false,
-                        // 可选：定制上下文菜单，只保留文件操作，移除文件夹操作
+                        // 简化上下文菜单
                         contextMenu: {
-                            items: (_item, defaults) => {
-                                // Agent 列表通常是扁平的，或者我们不希望用户建立深层目录
-                                return defaults; 
-                            }
+                            items: (_item, defaults) => defaults 
                         }
                     },
                     editorConfig: {
@@ -108,7 +117,7 @@ async function bootstrap() {
                     aiConfig: { enabled: false }
                 });
 
-            // 5. 通用 Workspace
+            // --- C. 通用 Workspace (Notes, Projects, etc.) ---
             } else {
                 const wsConfig = WORKSPACES.find(w => w.elementId === targetId);
                 if (!wsConfig) return;
@@ -117,7 +126,11 @@ async function bootstrap() {
                     container: container,
                     vfsCore: vfsCore,
                     moduleName: wsConfig.moduleName,
+                    
                     editorFactory: defaultEditorFactory,
+                    // 注入全局文件类型，使得普通笔记区也能打开 Agent 文件 (如果被移动过去)
+                    fileTypes: globalFileTypes,
+
                     uiOptions: {
                         title: wsConfig.title,
                         defaultFileName: wsConfig.defaultFileName,
@@ -139,6 +152,7 @@ async function bootstrap() {
             await manager.start();
             managerCache.set(targetId, manager);
 
+            // 恢复 Tab 状态
             if (!wasActive) {
                 requestAnimationFrame(() => {
                     const currentActiveBtn = document.querySelector('.app-nav-btn.active');
@@ -148,7 +162,7 @@ async function bootstrap() {
             }
         };
 
-        // 启动
+        // 启动逻辑
         if (WORKSPACES[0]) await loadWorkspace(WORKSPACES[0].elementId);
         
         initSidebarNavigation(async (targetId) => {

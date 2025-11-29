@@ -35,14 +35,17 @@ function quickExtractTaskCounts(content: string): { total: number; completed: nu
 }
 
 /**
- * Connects a session manager to an editor, automatically handling the lifecycle of
- * creating, saving, and destroying the editor instance when the user selects different files.
+ * Connects a session manager to an editor.
+ * 
+ * [Updated] Now supports dynamic editor factory resolution via vfsManager.
  */
 export function connectEditorLifecycle(
-    vfsManager: ISessionUI<VFSNodeUI, VFSService>,
+    // 使用扩展类型，以便访问 resolveEditorFactory
+    vfsManager: ISessionUI<VFSNodeUI, VFSService> & { resolveEditorFactory?: (node: VFSNodeUI) => EditorFactory },
     engine: ISessionEngine,
     editorContainer: HTMLElement,
-    editorFactory: EditorFactory,
+    // [Change] This parameter is now optional or acts as a fallback default
+    defaultEditorFactory?: EditorFactory, 
     options: ConnectOptions = {}
 ): () => void {
     let activeEditor: IEditor | null = null;
@@ -51,10 +54,7 @@ export function connectEditorLifecycle(
     let saveTimer: any = null;
     let currentSessionToken = 0;
 
-    // 状态缓存，用于比较和影子脏检查
     let lastKnownTaskStats: { total: number; completed: number } | null = null;
-    
-    // ✨ [关键] 影子脏状态：标记是否有“乐观更新”导致的数据变更尚未保存
     let hasUnsavedOptimisticChanges = false;
 
     const { onEditorCreated, saveDebounceMs = 500, ...factoryExtraOptions } = options;
@@ -71,11 +71,9 @@ export function connectEditorLifecycle(
         const currentStats = lastKnownTaskStats || activeNode.metadata.custom.taskCount || { total: 0, completed: 0 };
         
         if (stats.total !== currentStats.total || stats.completed !== currentStats.completed) {
-            // 1. 标记本地状态
             lastKnownTaskStats = stats;
-            hasUnsavedOptimisticChanges = true; // 标记需要保存，但暂不执行
+            hasUnsavedOptimisticChanges = true;
 
-            // 2. 更新 UI
             const store = (vfsManager as any).store;
             if (store && typeof store.dispatch === 'function') {
                 const newCustom = { ...activeNode.metadata.custom, taskCount: stats };
@@ -102,7 +100,6 @@ export function connectEditorLifecycle(
         if (!activeEditor || !activeNode) return;
         if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
 
-        // ✨ [关键] 保存条件：编辑器本身 Dirty (打字)  OR  有未保存的乐观变更 (Checkbox)
         const shouldSave = (activeEditor.isDirty && activeEditor.isDirty()) || hasUnsavedOptimisticChanges;
 
         if (!shouldSave) {
@@ -117,11 +114,8 @@ export function connectEditorLifecycle(
 
             if (exists) {
                 const contentToSave = activeEditor.getText();
-                
-                // 1. 写内容
                 await engine.writeContent(activeNode.id, contentToSave);
                 
-                // 2. 解析并写元数据
                 const parseResult = parseFileInfo(contentToSave);
                 const metadataUpdates = {
                     taskCount: parseResult.metadata.taskCount,
@@ -131,7 +125,6 @@ export function connectEditorLifecycle(
                 };
                 await engine.updateMetadata(activeNode.id, metadataUpdates);
                 
-                // 3. 重置所有脏状态
                 if (activeEditor.setDirty) activeEditor.setDirty(false);
                 hasUnsavedOptimisticChanges = false;
             }
@@ -147,7 +140,6 @@ export function connectEditorLifecycle(
     const teardownActiveEditor = async () => {
         currentSessionToken++;
         if (activeEditor) {
-            // 切换文件前，必须执行保存检查 (此时 hasUnsavedOptimisticChanges 发挥作用)
             await saveCurrentSession(); 
             
             activeEditorUnsubscribers.forEach(unsub => unsub());
@@ -175,15 +167,34 @@ export function connectEditorLifecycle(
             const initEditor = async () => {
                 if (myToken !== currentSessionToken) return;
                 try {
+                    // [核心修改] 动态解析 Factory
+                    let targetFactory: EditorFactory | undefined;
+
+                    // 1. 优先尝试使用 Manager 的解析器 (支持扩展名注册和自定义 resolver)
+                    if (typeof vfsManager.resolveEditorFactory === 'function') {
+                        targetFactory = vfsManager.resolveEditorFactory(item);
+                    }
+                    
+                    // 2. 回退到传入 connector 的默认 factory
+                    if (!targetFactory) {
+                        targetFactory = defaultEditorFactory;
+                    }
+
+                    if (!targetFactory) {
+                        throw new Error("No suitable editor factory found.");
+                    }
+
                     const content = item.content?.data || '';
                     const editorOptions: EditorOptions = {
                         ...factoryExtraOptions,
                         initialContent: content,
                         title: item.metadata.title,
                         nodeId: item.id,
+                        // 传递扩展名给编辑器 (可选，用于语法高亮等)
+                        language: item.metadata.custom?._extension || ''
                     };
 
-                    const editorInstance = await editorFactory(editorContainer, editorOptions);
+                    const editorInstance = await targetFactory(editorContainer, editorOptions);
 
                     if (myToken !== currentSessionToken) {
                         if (editorInstance) editorInstance.destroy();
@@ -196,26 +207,20 @@ export function connectEditorLifecycle(
                     hasUnsavedOptimisticChanges = false;
 
                     if (activeEditor) {
-                        // 1. 失焦/模糊 -> 触发保存
                         const unsubBlur = activeEditor.on('blur', () => scheduleSave());
                         if (unsubBlur) activeEditorUnsubscribers.push(unsubBlur);
 
-                        // 2. 模式切换 -> 触发保存
                         const unsubMode = activeEditor.on('modeChanged', (payload: any) => {
                             if (payload && payload.mode === 'render') saveCurrentSession();
                         });
                         if (unsubMode) activeEditorUnsubscribers.push(unsubMode);
                         
-                        // 3. 常规输入 -> 更新 UI + 启动保存计时器
                         const unsubChange = activeEditor.on('interactiveChange', () => { 
                             performOptimisticUpdate();
                             scheduleSave(); 
                         });
                         if (unsubChange) activeEditorUnsubscribers.push(unsubChange);
 
-                        // 4. ✨ Checkbox 点击 -> 仅更新 UI
-                        // 不调用 scheduleSave。
-                        // 数据只会留在内存中，直到上述 1, 2, 3 发生，或者切换文件 (teardown)。
                         const unsubOptimistic = activeEditor.on('optimisticUpdate', () => {
                              performOptimisticUpdate();
                         });
@@ -227,7 +232,7 @@ export function connectEditorLifecycle(
                 } catch (error) {
                     if (myToken === currentSessionToken) {
                         console.error(`[EditorConnector] Create failed:`, error);
-                        editorContainer.innerHTML = `<div class="editor-placeholder editor-placeholder--error">Error loading file</div>`;
+                        editorContainer.innerHTML = `<div class="editor-placeholder editor-placeholder--error">Error loading file: ${(error as Error).message}</div>`;
                     }
                 }
             };
@@ -240,9 +245,6 @@ export function connectEditorLifecycle(
     // 监听导航事件
     const unsubscribeNav = vfsManager.on('navigateToHeading', async (payload: { elementId: string }) => {
         if (activeEditor) {
-            // 如果需要，可以在这里自动切换到 render 模式
-            // if (activeEditor.getMode() === 'edit') await activeEditor.switchToMode('render');
-            
             console.log('[EditorConnector] Navigating to:', payload.elementId);
             await activeEditor.navigateTo({ elementId: payload.elementId });
         }
