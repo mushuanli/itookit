@@ -137,16 +137,47 @@ export interface LLMHooks {
 }
 
 /**
- * Driver 初始化配置
- * 可以传入完整的 connection 对象，也可以传入分散的参数
+ * 传给 BaseProvider 的配置，必须包含 provider 和 apiKey
  */
-export interface LLMClientConfig extends LLMProviderConfig {
-    /** 
-     * 允许直接传入完整的 Connection 对象
-     * Driver 会自动从中解构 provider, apiKey, baseURL 等
-     */
+export interface LLMProviderConfig {
+    provider: string;
+    apiKey: string;
+    apiBaseUrl?: string;
+    model?: string;
+    
+    // 能力开关
+    supportsThinking?: boolean;
+    requiresReferer?: boolean;
+    
+    // 额外的 HTTP Headers
+    headers?: Record<string, string>;
+    
+    // 移除 [key: string]: any; 以避免索引签名冲突
+    // 如果需要传递额外元数据，使用 metadata 字段
+    metadata?: Record<string, any>;
+}
+
+// --- [FIXED] 用户输入的宽松配置 ---
+/**
+ * Driver 构造函数接收的配置。
+ * provider 和 apiKey 是可选的，因为可以通过 connection 对象传入。
+ */
+export interface LLMClientConfig {
+    /** 方式 A: 传入完整的连接对象 */
     connection?: LLMConnection;
 
+    /** 方式 B: 直接传入参数 (如果提供了 connection，这些可选) */
+    provider?: string;
+    apiKey?: string;
+    
+    apiBaseUrl?: string;
+    model?: string;
+
+    // [FIXED] 允许在初始化 Client 时覆盖 Provider 的默认能力设置
+    supportsThinking?: boolean;
+    requiresReferer?: boolean;
+
+    // 通用设置
     maxRetries?: number;
     /** 重试延迟 (ms)，默认 1000 */
     retryDelay?: number;
@@ -164,4 +195,5 @@ export interface LLMClientConfig extends LLMProviderConfig {
     
     /** 文件存储适配器 (用于多模态上传) */
     storageAdapter?: any;
+    headers?: Record<string, string>;
 }
