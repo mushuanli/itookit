@@ -30,3 +30,9 @@ export { slugify, simpleHash, escapeHTML, generateUUID, generateShortUUID,genera
 
 // Export all components
 export { TagEditorComponent, type TagEditorParams } from './components/TagEditor/TagEditorComponent'; // UPDATE: Export TagEditorParams type
+
+// LLM Interfaces
+export * from './interfaces/llm/ILLM';
+
+// LLM Constants
+export * from './constants/llmDefaults';
