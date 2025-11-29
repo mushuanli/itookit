@@ -98,17 +98,16 @@ async function bootstrap() {
 
                     uiOptions: {
                         title: 'Agents',
-                        // 使用 config 中定义的 .agent 文件名和 JSON 模板
+                        // [核心修改] 注入自定义 Label
+                        createFileLabel: agentConfig.itemLabel, 
+                        
                         defaultFileName: agentConfig.defaultFileName, 
                         defaultFileContent: agentConfig.defaultFileContent,
                         
                         searchPlaceholder: 'Search agents...',
                         initialSidebarCollapsed: false,
                         readOnly: false,
-                        // 简化上下文菜单
-                        contextMenu: {
-                            items: (_item, defaults) => defaults 
-                        }
+                        contextMenu: { items: (_item, defaults) => defaults }
                     },
                     editorConfig: {
                         plugins: ['core:titlebar'], 
@@ -133,6 +132,9 @@ async function bootstrap() {
 
                     uiOptions: {
                         title: wsConfig.title,
+                        // [核心修改] 注入自定义 Label
+                        createFileLabel: wsConfig.itemLabel,
+
                         defaultFileName: wsConfig.defaultFileName,
                         defaultFileContent: wsConfig.defaultFileContent,
                         initialSidebarCollapsed: false,

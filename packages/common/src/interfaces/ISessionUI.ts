@@ -51,6 +51,13 @@ export interface SessionUIOptions {
     defaultFileName?: string;
     /** 默认文件的初始内容 */
     defaultFileContent?: string;
+
+    /** 
+     * [新增] 创建按钮的标签名词
+     * 例如: "Agent" -> 按钮显示 "+ Agent"
+     * 默认为 "File" -> 按钮显示 "+ File"
+     */
+    createFileLabel?: string;
 }
 
 export type SessionManagerEvent = 
