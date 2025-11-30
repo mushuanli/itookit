@@ -19,36 +19,33 @@ export class ChatInput {
 
     private render() {
         this.container.innerHTML = `
-            <div class="chat-input-wrapper">
-                <div class="chat-toolbar">
-                    <button class="tool-btn" title="Upload File" id="btn-upload">📎</button>
-                    <!-- 可以在这里加 @ 提及功能触发器 -->
+            <div class="llm-ui-chat-input">
+                <div class="llm-ui-chat-input__toolbar">
+                    <button class="llm-ui-btn-icon" title="Upload File" id="llm-ui-btn-upload">📎</button>
                 </div>
-                <div class="input-area">
-                    <textarea placeholder="Message... (Shift+Enter for new line)" rows="1"></textarea>
-                    <div class="action-buttons">
-                        <button class="send-btn">➤</button>
-                        <button class="stop-btn" style="display:none;">⏹</button>
+                <div class="llm-ui-chat-input__body">
+                    <textarea class="llm-ui-chat-input__textarea" placeholder="Message... (Shift+Enter for new line)" rows="1"></textarea>
+                    <div class="llm-ui-chat-input__actions">
+                        <button class="llm-ui-btn-send">➤</button>
+                        <button class="llm-ui-btn-stop" style="display:none;">⏹</button>
                     </div>
                 </div>
-                <input type="file" multiple style="display:none;" id="hidden-file-input">
+                <input type="file" multiple style="display:none;" id="llm-ui-hidden-file-input">
             </div>
         `;
 
         this.textarea = this.container.querySelector('textarea')!;
-        this.sendBtn = this.container.querySelector('.send-btn')!;
-        this.stopBtn = this.container.querySelector('.stop-btn')!;
-        this.fileInput = this.container.querySelector('#hidden-file-input')!;
+        this.sendBtn = this.container.querySelector('.llm-ui-btn-send')!;
+        this.stopBtn = this.container.querySelector('.llm-ui-btn-stop')!;
+        this.fileInput = this.container.querySelector('#llm-ui-hidden-file-input')!;
     }
 
     private bindEvents() {
-        // Auto-resize
         this.textarea.addEventListener('input', () => {
             this.textarea.style.height = 'auto';
             this.textarea.style.height = Math.min(this.textarea.scrollHeight, 200) + 'px';
         });
 
-        // Send on Enter
         this.textarea.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
@@ -59,8 +56,7 @@ export class ChatInput {
         this.sendBtn.addEventListener('click', () => this.triggerSend());
         this.stopBtn.addEventListener('click', () => this.options.onStop());
         
-        // File Upload
-        this.container.querySelector('#btn-upload')?.addEventListener('click', () => {
+        this.container.querySelector('#llm-ui-btn-upload')?.addEventListener('click', () => {
             this.fileInput.click();
         });
     }
@@ -72,7 +68,7 @@ export class ChatInput {
         this.textarea.value = '';
         this.textarea.style.height = 'auto';
         
-        await this.options.onSend(text, []); // TODO: handle files
+        await this.options.onSend(text, []); 
     }
 
     setLoading(loading: boolean) {

@@ -58,7 +58,9 @@
   "dependencies": {
     "@itookit/common": "workspace:*",
     "@itookit/llmdriver": "workspace:*",
-    "marked": "^12.0.2"
+    "@itookit/mdxeditor": "workspace:*",
+    "marked": "^12.0.2",
+    "react": "^19.2.0"
   },
   "devDependencies": {
     "@types/node": "^20.19.25",

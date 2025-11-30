@@ -1,36 +1,36 @@
 // @file llm-ui/components/HistoryView.ts
 import { OrchestratorEvent, SessionGroup, ExecutionNode } from '../types';
 import { NodeRenderer } from './NodeRenderer';
+import { MDxController } from './mdx/MDxController';
 
 export class HistoryView {
-    // 缓存 DOM 引用以便快速更新 (nodeId -> HTMLElement)
     private nodeMap = new Map<string, HTMLElement>();
+    private editorMap = new Map<string, MDxController>();
     private container: HTMLElement;
+    private onContentChange?: (id: string, content: string, type: 'user' | 'node') => void;
 
-    constructor(container: HTMLElement) {
+    constructor(container: HTMLElement, onContentChange?: (id: string, content: string, type: 'user' | 'node') => void) {
         this.container = container;
+        this.onContentChange = onContentChange;
     }
 
     clear() {
         this.container.innerHTML = '';
         this.nodeMap.clear();
+        this.editorMap.forEach(editor => editor.destroy());
+        this.editorMap.clear();
     }
 
-    /**
-     * 渲染完整历史 (用于加载存档)
-     */
     renderFull(sessions: SessionGroup[]) {
         this.clear();
         if (sessions.length === 0) {
             this.renderWelcome();
             return;
         }
-        
         sessions.forEach(session => {
             this.appendSessionGroup(session);
             if (session.executionRoot) {
-                // 递归渲染树 (简化版，实际需要遍历树)
-                this.renderExecutionTree(session.executionRoot, `container-${session.id}`);
+                this.renderExecutionTree(session.executionRoot);
             }
         });
         this.scrollToBottom();
@@ -38,98 +38,107 @@ export class HistoryView {
 
     renderWelcome() {
         this.container.innerHTML = `
-            <div class="llm-welcome">
-                <div class="welcome-icon">👋</div>
-                <h2>How can I help you today?</h2>
-                <p>Ask me anything or use @ to call a specific agent.</p>
+            <div class="llm-ui-welcome">
+                <div class="llm-ui-welcome__icon">👋</div>
+                <h2>Ready to chat</h2>
             </div>
         `;
     }
 
     renderError(error: Error) {
         const div = document.createElement('div');
-        div.className = 'system-error-banner';
+        div.className = 'llm-ui-banner llm-ui-banner--error';
         div.innerText = `Error: ${error.message}`;
         this.container.appendChild(div);
     }
 
-    /**
-     * 处理实时事件
-     */
     processEvent(event: OrchestratorEvent) {
-        // 如果有欢迎页，先清除
-        if (this.container.querySelector('.llm-welcome')) {
-            this.container.innerHTML = '';
-        }
+        if (this.container.querySelector('.llm-ui-welcome')) this.container.innerHTML = '';
 
         switch (event.type) {
             case 'session_start':
                 this.appendSessionGroup(event.payload);
                 break;
-            
             case 'node_start':
                 this.appendNode(event.payload.parentId, event.payload.node);
                 break;
-
             case 'node_update':
                 this.updateNodeContent(event.payload.nodeId, event.payload.chunk, event.payload.field);
                 break;
-
             case 'node_status':
                 this.updateNodeStatus(event.payload.nodeId, event.payload.status, event.payload.result);
                 break;
+            case 'finished':
+                this.editorMap.forEach(editor => editor.finishStream());
+                break;
         }
         
-        this.scrollToBottom();
+        if (event.type !== 'node_update') this.scrollToBottom();
     }
 
     private appendSessionGroup(group: SessionGroup) {
         const wrapper = document.createElement('div');
-        wrapper.className = `session-wrapper role-${group.role}`;
+        wrapper.className = `llm-ui-session llm-ui-session--${group.role}`;
         wrapper.dataset.sessionId = group.id;
 
         if (group.role === 'user') {
             wrapper.innerHTML = `
-                <div class="user-avatar">👤</div>
-                <div class="user-bubble">${this.escapeHtml(group.content || '')}</div>
+                <div class="llm-ui-avatar">👤</div>
+                <div class="llm-ui-bubble--user">
+                    <div class="llm-ui-actions">
+                         <button class="llm-ui-btn-action llm-ui-action-edit">✎</button>
+                    </div>
+                    <div class="llm-ui-mount-point" id="user-mount-${group.id}"></div>
+                </div>
             `;
+            this.container.appendChild(wrapper);
+            
+            const mountPoint = wrapper.querySelector(`#user-mount-${group.id}`) as HTMLElement;
+            const controller = new MDxController(mountPoint, group.content || '', {
+                readOnly: true,
+                onChange: (text) => this.onContentChange?.(group.id, text, 'user')
+            });
+            this.editorMap.set(group.id, controller);
+
+            wrapper.querySelector('.llm-ui-action-edit')?.addEventListener('click', () => {
+                controller.toggleEdit();
+            });
+
         } else {
-            // AI 响应容器
             wrapper.innerHTML = `
-                <div class="ai-avatar">🤖</div>
-                <div class="execution-root" id="container-${group.id}"></div>
+                <div class="llm-ui-avatar">🤖</div>
+                <div class="llm-ui-execution-root" id="container-${group.id}"></div>
             `;
+            this.container.appendChild(wrapper);
         }
-        this.container.appendChild(wrapper);
     }
 
     private appendNode(parentId: string | undefined, node: ExecutionNode) {
-        // 确定挂载点
         let parentEl: HTMLElement | null = null;
-
         if (parentId) {
-            // 尝试找父节点
-            const parentNodeEl = this.nodeMap.get(parentId);
-            if (parentNodeEl) {
-                parentEl = parentNodeEl.querySelector('.node-children');
-            }
+            parentEl = this.nodeMap.get(parentId)?.querySelector('.llm-ui-node__children') || null;
         }
-
-        // 如果没有指定父节点或找不到父节点，挂载到最后一个 session container
         if (!parentEl) {
-            const sessions = this.container.querySelectorAll('.execution-root');
-            if (sessions.length > 0) {
-                parentEl = sessions[sessions.length - 1] as HTMLElement;
-            }
+            const roots = this.container.querySelectorAll('.llm-ui-execution-root');
+            if (roots.length > 0) parentEl = roots[roots.length - 1] as HTMLElement;
         }
 
         if (parentEl) {
-            const nodeEl = NodeRenderer.create(node);
-            this.nodeMap.set(node.id, nodeEl);
-            parentEl.appendChild(nodeEl);
-            
-            // 动画效果
-            requestAnimationFrame(() => nodeEl.classList.add('visible'));
+            const { element, mountPoints } = NodeRenderer.create(node);
+            this.nodeMap.set(node.id, element);
+            parentEl.appendChild(element);
+
+            if (mountPoints.output) {
+                const controller = new MDxController(mountPoints.output, node.data.output || '', {
+                    readOnly: true,
+                    onChange: (text) => this.onContentChange?.(node.id, text, 'node')
+                });
+                this.editorMap.set(node.id, controller);
+
+                element.querySelector('.llm-ui-action-edit')?.addEventListener('click', () => {
+                    controller.toggleEdit();
+                });
+            }
         }
     }
 
@@ -137,55 +146,62 @@ export class HistoryView {
         const el = this.nodeMap.get(nodeId);
         if (!el) return;
 
-        const selector = field === 'thought' ? '.node-thought-content' : '.node-output-content';
-        const target = el.querySelector(selector);
-        if (target) {
-            // 如果是 thought，确保容器可见
-            if (field === 'thought') {
-                el.querySelector('.agent-thought-container')?.setAttribute('style', 'display:block');
+        if (field === 'thought') {
+            const container = el.querySelector('.llm-ui-thought') as HTMLElement;
+            const contentEl = el.querySelector('.llm-ui-thought__content') as HTMLElement;
+            
+            if (container.style.display === 'none') container.style.display = 'block';
+            contentEl.innerHTML += this.escapeHtml(chunk).replace(/\n/g, '<br>');
+            container.scrollTop = container.scrollHeight;
+        } else if (field === 'output') {
+            const editor = this.editorMap.get(nodeId);
+            if (editor) {
+                editor.appendStream(chunk);
             }
-            // 简单的文本追加，实际项目应接入 Markdown 流式解析
-            target.innerHTML += this.escapeHtml(chunk).replace(/\n/g, '<br>');
+            this.scrollToBottom();
         }
     }
 
     private updateNodeStatus(nodeId: string, status: string, result?: any) {
         const el = this.nodeMap.get(nodeId);
-        if (!el) return;
+        if (el) {
+            el.dataset.status = status;
+            // 更新 class 实现样式变化
+            el.classList.remove('llm-ui-node--running', 'llm-ui-node--success', 'llm-ui-node--failed');
+            el.classList.add(`llm-ui-node--${status}`);
+            
+            const statusText = el.querySelector('.llm-ui-node__status');
+            if (statusText) {
+                statusText.textContent = status;
+                statusText.className = `llm-ui-node__status llm-ui-node__status--${status}`;
+            }
 
-        el.dataset.status = status;
-        const statusText = el.querySelector('.agent-status-text') || el.querySelector('.tool-status');
-        if (statusText) statusText.textContent = status;
-
-        if (status === 'success') {
-            el.classList.add('finished');
-        } else if (status === 'failed') {
-            el.classList.add('error');
-        }
-
-        // 如果是工具，显示结果
-        if (result && el.classList.contains('node-type-tool')) {
-            const resEl = el.querySelector('.tool-result') as HTMLElement;
-            if (resEl) {
-                resEl.style.display = 'block';
-                resEl.textContent = typeof result === 'string' ? result : JSON.stringify(result);
+            // 工具结果显示
+            if (result && el.classList.contains('llm-ui-node--tool')) {
+                 const resEl = el.querySelector('.llm-ui-node__result') as HTMLElement;
+                 if (resEl) {
+                     resEl.style.display = 'block';
+                     resEl.textContent = typeof result === 'string' ? result : JSON.stringify(result);
+                 }
             }
         }
-    }
-
-    // 辅助: 递归渲染树 (用于加载历史)
-    private renderExecutionTree(node: ExecutionNode, containerId: string) {
-        // ... (递归逻辑类似于 appendNode，此处略以节省篇幅) ...
-    }
-
-    scrollToBottom() {
-        const lastEl = this.container.lastElementChild;
-        if (lastEl) {
-            lastEl.scrollIntoView({ behavior: 'smooth', block: 'end' });
+        
+        const editor = this.editorMap.get(nodeId);
+        if (editor && (status === 'success' || status === 'failed')) {
+            editor.finishStream();
         }
     }
 
-    private escapeHtml(str: string): string {
+    private renderExecutionTree(node: ExecutionNode) {
+        this.appendNode(node.parentId, node);
+        node.children?.forEach(c => this.renderExecutionTree(c));
+    }
+    
+    scrollToBottom() {
+        this.container.scrollTop = this.container.scrollHeight;
+    }
+    
+    private escapeHtml(str: string) {
         return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
 }
