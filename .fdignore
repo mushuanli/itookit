@@ -6,6 +6,8 @@ vite.config.js
 vite.config.ts
 vitest.config.ts
 test/
+tests/
+scripts/
 
 # mdx plugins:
 plugin.ts
