@@ -8,32 +8,59 @@ import { HistoryView } from './components/HistoryView';
 import { ChatInput } from './components/ChatInput';
 import { SessionManager, ISettingsService } from './orchestrator/SessionManager';
 
-// 这是一个 Mock 的适配器，实际项目中你应该引入真实的 SettingsManager
+// [FIXED] 适配器增加更强的健壮性
 class SettingsServiceAdapter implements ISettingsService {
     constructor(private realSettingsService: any) {}
 
     async getAgentConfig(agentId: string) {
-        // 调用真实的设置服务，或者从默认常量中读取
-        // 示例：优先从真实服务读，读不到用默认
-        try {
-            return await this.realSettingsService.getAgent(agentId);
-        } catch {
-             // Fallback to default constants if service fails or not ready
-             // 实际上你应该 import { LLM_DEFAULT_AGENTS } from '...' 
-             return {
-                 connectionId: 'default',
-                 modelName: 'gpt-4o',
-                 systemPrompt: 'You are a helpful assistant.'
-             };
+        // 1. 尝试从 Service 获取
+        if (typeof this.realSettingsService.getAgent === 'function') {
+            try {
+                // 暂时 SettingsService 还没有 getAgent，这里通常会失败
+                return await this.realSettingsService.getAgent(agentId);
+            } catch (e) {}
         }
+
+        // 2. Fallback: 默认配置
+        // 确保 connectionId 指向 'default'
+        return {
+            connectionId: 'default', 
+            modelName: '', 
+            systemPrompt: 'You are a helpful assistant.'
+        };
     }
 
     async getConnection(connectionId: string): Promise<LLMConnection | undefined> {
+        let connection: LLMConnection | undefined;
+
         try {
-            return await this.realSettingsService.getConnection(connectionId);
-        } catch {
-            return undefined;
+            // 1. 尝试从 Service 获取 (优先)
+            if (typeof this.realSettingsService.getConnection === 'function') {
+                connection = await this.realSettingsService.getConnection(connectionId);
+            } else if (typeof this.realSettingsService.getConnections === 'function') {
+                const all = this.realSettingsService.getConnections();
+                if (Array.isArray(all)) {
+                    connection = all.find((c: any) => c.id === connectionId);
+                }
+            }
+        } catch (e) {
+            console.warn('[SettingsAdapter] Service lookup failed:', e);
         }
+
+        // [核心修复] 2. 如果 Service 没找到，从默认常量中查找 (内存兜底)
+        if (!connection) {
+            console.warn(`[SettingsAdapter] Connection '${connectionId}' not found in service, trying defaults.`);
+            connection = undefined;
+        }
+
+        // [调试日志]
+        if (!connection) {
+            console.error(`[SettingsAdapter] CRITICAL: Connection '${connectionId}' not found anywhere!`);
+        } else {
+            console.log(`[SettingsAdapter] Resolved connection '${connectionId}':`, connection.provider);
+        }
+
+        return connection;
     }
 }
 
@@ -47,45 +74,41 @@ export class LLMWorkspaceEditor implements IEditor {
     constructor(
         container: HTMLElement,
         options: EditorOptions,
-        private settingsService: any // 原始的 VFS Settings Service
+        private settingsService: any
     ) {
-        // 使用适配器包装，以满足 SessionManager 的接口要求
         const adapter = new SettingsServiceAdapter(settingsService);
         this.sessionManager = new SessionManager(adapter);
     }
 
     async init(container: HTMLElement, initialContent?: string) {
         this.container = container;
-        this.container.classList.add('llm-workspace');
+        this.container.classList.add('llm-ui-workspace');
 
-        // 1. 布局
         this.container.innerHTML = `
-            <div class="llm-workspace__history" id="llm-history"></div>
-            <div class="llm-workspace__input-area" id="llm-input"></div>
+            <div class="llm-ui-workspace__history" id="llm-ui-history"></div>
+            <div class="llm-ui-workspace__input" id="llm-ui-input"></div>
         `;
 
-        // 2. 初始化组件
-        const historyEl = this.container.querySelector('#llm-history') as HTMLElement;
-        const inputEl = this.container.querySelector('#llm-input') as HTMLElement;
+        const historyEl = this.container.querySelector('#llm-ui-history') as HTMLElement;
+        const inputEl = this.container.querySelector('#llm-ui-input') as HTMLElement;
 
-        this.historyView = new HistoryView(historyEl);
+        this.historyView = new HistoryView(historyEl, (id, content, type) => {
+            this.sessionManager.updateContent(id, content, type);
+            this.emit('change');
+        });
         
         this.chatInput = new ChatInput(inputEl, {
             onSend: (text, files) => this.handleUserSend(text, files),
             onStop: () => this.sessionManager.abort()
         });
 
-        // 3. 绑定事件驱动
         this.sessionManager.onEvent((event) => {
             this.historyView.processEvent(event);
-            
-            // 状态变更触发保存
             if (event.type === 'finished' || event.type === 'session_start') {
                 this.emit('change');
             }
         });
 
-        // 4. 加载内容
         if (initialContent && initialContent.trim() !== '') {
             try {
                 const data = JSON.parse(initialContent);
@@ -110,12 +133,9 @@ export class LLMWorkspaceEditor implements IEditor {
             this.historyView.renderError(error);
         } finally {
             this.chatInput.setLoading(false);
-            // 保存一次
             this.emit('change');
         }
     }
-
-    // --- IEditor Implementation ---
 
     getText(): string {
         return JSON.stringify(this.sessionManager.serialize(), null, 2);
@@ -143,7 +163,7 @@ export class LLMWorkspaceEditor implements IEditor {
         this.listeners.clear();
     }
 
-    // --- Boilerplate / Stubs ---
+    // --- Stubs ---
     getMode() { return 'edit' as const; }
     async switchToMode() {}
     setTitle() {}

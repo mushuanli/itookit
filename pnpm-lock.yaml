@@ -225,9 +225,15 @@ importers:
       '@itookit/llmdriver':
         specifier: workspace:*
         version: link:../llmdriver
+      '@itookit/mdxeditor':
+        specifier: workspace:*
+        version: link:../mdx
       marked:
         specifier: ^12.0.2
         version: 12.0.2
+      react:
+        specifier: ^19.2.0
+        version: 19.2.0
     devDependencies:
       '@types/node':
         specifier: ^20.19.25
@@ -2878,6 +2884,10 @@ packages:
 
   react-is@18.3.1:
     resolution: {integrity: sha512-/LLMVyas0ljjAtoYiPqYiL8VWXzUUdThrmU5+n20DZv+a+ClRoevUzw5JxU+Ieh5/c87ytoTBV9G1FiKfNJdmg==}
+
+  react@19.2.0:
+    resolution: {integrity: sha512-tmbWg6W31tQLeB5cdIBOicJDJRR2KzXsV7uSK9iNfLWQ5bIZfxuPEHp7M8wiHyHnn0DD1i7w3Zmin0FtkrwoCQ==}
+    engines: {node: '>=0.10.0'}
 
   readable-stream@2.3.8:
     resolution: {integrity: sha512-8p0AUk4XODgIewSi0l8Epjs+EVnWiK7NoDIEGU0HhE7+ZyY8D1IMY7odu5lRrFXGg71L15KG8QrPmum45RTtdA==}
@@ -6260,6 +6270,8 @@ snapshots:
       math-random: 1.0.4
 
   react-is@18.3.1: {}
+
+  react@19.2.0: {}
 
   readable-stream@2.3.8:
     dependencies:
