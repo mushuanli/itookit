@@ -4,6 +4,8 @@ import { LLMConnection } from '../types';
 import { generateShortUUID } from '@itookit/common'; 
 import { Modal, Toast } from '../components/UIComponents';
 import { LLM_PROVIDER_DEFAULTS } from '../constants';
+// [新增] 引入测试函数
+import { testLLMConnection } from '@itookit/llmdriver';
 
 export class ConnectionSettingsEditor extends BaseSettingsEditor {
     private testingConnections = new Set<string>();
@@ -208,6 +210,12 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor {
     private async testConnection(card: HTMLElement, connection: LLMConnection) {
         if (this.testingConnections.has(connection.id)) return;
         
+        // 检查 API Key 是否存在
+        if (!connection.apiKey) {
+            Toast.warning('请先配置 API Key');
+            return;
+        }
+        
         this.testingConnections.add(connection.id);
         const testBtn = card.querySelector('.settings-btn-test') as HTMLButtonElement;
         const originalText = testBtn.innerHTML;
@@ -215,23 +223,40 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor {
         testBtn.disabled = true;
 
         try {
-            const result = {success:false,message:'TODO'};// TODO: = await testLLMConnection(connection);
+            // [修复] 调用真实的测试函数
+            // 注意：connection 对象结构需符合 testLLMConnection 的参数要求
+            // testLLMConnection(config: { provider: string; apiKey: string; baseURL?: string; model?: string; })
+            const result = await testLLMConnection({
+                provider: connection.provider,
+                apiKey: connection.apiKey,
+                baseURL: connection.baseURL,
+                model: connection.model
+            });
+
             if (result.success) {
-                Toast.success('连接测试成功！');
+                Toast.success(result.message || '连接测试成功！');
                 testBtn.innerHTML = '✅ 成功';
+                testBtn.classList.remove('settings-btn--secondary');
+                testBtn.classList.add('settings-btn--success'); // 假设有这个样式
             } else {
                 Toast.error(`测试失败: ${result.message}`);
                 testBtn.innerHTML = '❌ 失败';
+                testBtn.classList.remove('settings-btn--secondary');
+                testBtn.classList.add('settings-btn--danger');
             }
         } catch (error: any) {
+            console.error(error);
             Toast.error(`测试出错: ${error.message}`);
             testBtn.innerHTML = '❌ 出错';
         } finally {
             setTimeout(() => {
                 testBtn.innerHTML = originalText;
                 testBtn.disabled = false;
+                // 恢复样式
+                testBtn.classList.remove('settings-btn--success', 'settings-btn--danger');
+                testBtn.classList.add('settings-btn--secondary');
                 this.testingConnections.delete(connection.id);
-            }, 2000);
+            }, 3000);
         }
     }
 

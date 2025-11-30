@@ -1,4 +1,5 @@
 // @file llm-ui/components/NodeRenderer.ts
+import {escapeHTML} from '@itookit/common';
 import { ExecutionNode } from '../types';
 
 export class NodeRenderer {
@@ -23,6 +24,8 @@ export class NodeRenderer {
     }
 
     private static renderAgent(el: HTMLElement, node: ExecutionNode) {
+        const hasThought = node.data.thought && node.data.thought.length > 0;
+        
         el.innerHTML = `
             <div class="agent-card">
                 <div class="agent-header">
@@ -35,17 +38,18 @@ export class NodeRenderer {
                 </div>
                 
                 <!-- 思维链区域 -->
-                <div class="agent-thought-container collapsed" style="display:none;">
+                <div class="agent-thought-container ${hasThought ? '' : 'collapsed'}" 
+                     style="${hasThought ? 'display:block' : 'display:none;'}">
                     <div class="thought-header">
                         <span class="icon">💭</span> Thinking Process
                         <span class="toggle-icon">▼</span>
                     </div>
-                    <div class="node-thought-content markdown-body"></div>
+                    <div class="node-thought-content markdown-body">${escapeHTML(node.data.thought || '')}</div>
                 </div>
 
                 <!-- 输出区域 -->
                 <div class="agent-output-container">
-                    <div class="node-output-content markdown-body"></div>
+                    <div class="node-output-content markdown-body">${escapeHTML(node.data.output || '')}</div>
                 </div>
 
                 <!-- 子任务容器 -->
