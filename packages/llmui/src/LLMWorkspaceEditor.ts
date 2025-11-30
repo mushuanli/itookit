@@ -2,14 +2,40 @@
 
 import { 
     IEditor, EditorOptions, UnifiedSearchResult, Heading, 
-    EditorEvent, EditorEventCallback 
+    EditorEvent, EditorEventCallback, LLMConnection
 } from '@itookit/common';
 import { HistoryView } from './components/HistoryView';
 import { ChatInput } from './components/ChatInput';
-import { SessionManager } from './orchestrator/SessionManager';
+import { SessionManager, ISettingsService } from './orchestrator/SessionManager';
 
-// 假设 SettingsService 类型可用
-type SettingsService = any; 
+// 这是一个 Mock 的适配器，实际项目中你应该引入真实的 SettingsManager
+class SettingsServiceAdapter implements ISettingsService {
+    constructor(private realSettingsService: any) {}
+
+    async getAgentConfig(agentId: string) {
+        // 调用真实的设置服务，或者从默认常量中读取
+        // 示例：优先从真实服务读，读不到用默认
+        try {
+            return await this.realSettingsService.getAgent(agentId);
+        } catch {
+             // Fallback to default constants if service fails or not ready
+             // 实际上你应该 import { LLM_DEFAULT_AGENTS } from '...' 
+             return {
+                 connectionId: 'default',
+                 modelName: 'gpt-4o',
+                 systemPrompt: 'You are a helpful assistant.'
+             };
+        }
+    }
+
+    async getConnection(connectionId: string): Promise<LLMConnection | undefined> {
+        try {
+            return await this.realSettingsService.getConnection(connectionId);
+        } catch {
+            return undefined;
+        }
+    }
+}
 
 export class LLMWorkspaceEditor implements IEditor {
     private container!: HTMLElement;
@@ -21,10 +47,11 @@ export class LLMWorkspaceEditor implements IEditor {
     constructor(
         container: HTMLElement,
         options: EditorOptions,
-        private settingsService: SettingsService
+        private settingsService: any // 原始的 VFS Settings Service
     ) {
-        // 创建会话管理器
-        this.sessionManager = new SessionManager(this.settingsService);
+        // 使用适配器包装，以满足 SessionManager 的接口要求
+        const adapter = new SettingsServiceAdapter(settingsService);
+        this.sessionManager = new SessionManager(adapter);
     }
 
     async init(container: HTMLElement, initialContent?: string) {

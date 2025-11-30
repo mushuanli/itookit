@@ -164,6 +164,12 @@ export class SettingsService {
 
     // Connections
     getConnections() { return [...this.state.connections]; }
+    
+    // [FIXED] 新增单个获取方法，供 SessionManager Adapter 使用
+    getConnection(id: string): LLMConnection | undefined {
+        return this.state.connections.find(c => c.id === id);
+    }
+
     async saveConnection(conn: LLMConnection) { 
         this.updateOrAdd(this.state.connections, conn); 
         await this.saveEntity('connections'); 
@@ -367,12 +373,11 @@ export class SettingsService {
             await Promise.all(tasks);
         }
         
-        // 导入可能改变了 Tag 使用情况，重新同步一次
         await this.syncTags();
         this.notify();
     }
 
-    // --- [新增] 本地快照管理 ---
+    // --- 本地快照管理 ---
 
     async listLocalSnapshots(): Promise<LocalSnapshot[]> {
         if (!window.indexedDB.databases) {
