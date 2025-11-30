@@ -231,6 +231,14 @@ export class MDxEditor extends IEditor {
         changes: { from: 0, to: this.editorView.state.doc.length, insert: markdown }
       });
       this.setDirty(false);
+
+      // 2. 如果当前是 render 模式，必须手动触发渲染
+      if (this.currentMode === 'render') {
+          // 使用异步调用，不阻塞主流程，并捕获可能的错误
+          this.renderContent().catch(err => {
+              console.error('[MDxEditor] Failed to update render view:', err);
+          });
+      }
     }
   }
 

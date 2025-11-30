@@ -2,6 +2,7 @@
 import { SessionGroup, OrchestratorEvent, ExecutionNode, NodeStatus } from '../types';
 import { generateUUID, LLMConnection } from '@itookit/common';
 import { LLMDriver, ChatMessage, ChatCompletionChunk } from '@itookit/llmdriver';
+import { AgentExecutor } from './AgentExecutor';
 
 type EventHandler = (event: OrchestratorEvent) => void;
 
@@ -46,10 +47,7 @@ export class SessionManager {
     }
 
     serialize() {
-        return {
-            version: 1,
-            sessions: this.sessions
-        };
+        return { version: 1, sessions: this.sessions };
     }
 
     abort() {
@@ -67,24 +65,15 @@ export class SessionManager {
     }
 
     /**
-     * 将 Session 历史转换为 LLM 消息格式
+     * 将 Session 历史转换为 LLM 消息格式 (System Prompt 由 Executor 处理)
      */
-    private buildMessageHistory(systemPrompt?: string): ChatMessage[] {
+    private buildMessageHistory(): ChatMessage[] {
         const messages: ChatMessage[] = [];
-
-        // 1. System Prompt
-        if (systemPrompt) {
-            messages.push({ role: 'system', content: systemPrompt });
-        }
-
-        // 2. Chat History
         for (const session of this.sessions) {
             if (session.role === 'user' && session.content) {
                 messages.push({ role: 'user', content: session.content });
             } else if (session.role === 'assistant' && session.executionRoot) {
-                // 从执行树中提取最终回复
-                // 简单起见，我们假设 output 字段存储了最终文本
-                // 实际场景可能需要遍历 children 找到最终的 text 输出
+                // 提取 AI 回复。简化逻辑：直接取 rootNode.data.output
                 const content = session.executionRoot.data.output;
                 if (content) {
                     messages.push({ role: 'assistant', content });
@@ -96,7 +85,7 @@ export class SessionManager {
     }
 
     /**
-     * 执行用户请求 (使用 LLMDriver)
+     * 执行用户请求
      */
     async runUserQuery(text: string, files: File[]) {
         if (this.isGenerating) return;
@@ -105,18 +94,17 @@ export class SessionManager {
         this.dirty = true;
 
         try {
-            // 1. 创建 User Session
+            // 1. 创建并展示 User Session
             const userSession: SessionGroup = {
                 id: generateUUID(),
                 timestamp: Date.now(),
                 role: 'user',
-                content: text,
-                // files: [] // TODO: 处理文件上传并转换
+                content: text
             };
             this.sessions.push(userSession);
             this.emit({ type: 'session_start', payload: userSession });
 
-            // 2. 获取配置
+            // 2. 加载配置
             const agentConfig = await this.settingsService.getAgentConfig(this.currentAgentId);
             const connection = await this.settingsService.getConnection(agentConfig.connectionId);
 
@@ -124,21 +112,7 @@ export class SessionManager {
                 throw new Error(`Connection not found: ${agentConfig.connectionId}`);
             }
 
-            // 3. 初始化 LLM Driver
-            const driver = new LLMDriver({
-                connection: connection,
-                
-                // 显式填充必填字段 (从 connection 中获取)
-                provider: connection.provider,
-                apiKey: connection.apiKey || '', // 处理可能为 undefined 的情况
-                
-                // 覆盖模型和其他配置
-                model: agentConfig.modelName || connection.model,
-                // 强制开启 Thinking，或者根据 connection.metadata 判断
-                supportsThinking: true 
-            });
-
-            // 4. 准备 Assistant Session UI
+            // 3. 创建并展示 Assistant Session (Root Node)
             const agentRootId = generateUUID();
             const rootNode: ExecutionNode = {
                 id: agentRootId,
@@ -150,7 +124,7 @@ export class SessionManager {
                 data: { output: '', thought: '' },
                 children: []
             };
-
+            
             const aiSession: SessionGroup = {
                 id: generateUUID(),
                 timestamp: Date.now(),
@@ -158,75 +132,102 @@ export class SessionManager {
                 executionRoot: rootNode
             };
             this.sessions.push(aiSession);
+            
             this.emit({ type: 'session_start', payload: aiSession });
             this.emit({ type: 'node_start', payload: { node: rootNode } });
 
-            // 5. 调用 LLM
-            const messages = this.buildMessageHistory(agentConfig.systemPrompt);
-            
-            // 确保包含当前用户输入 (虽然已经在 history 里了，但为了清晰，buildHistory 应该包含最新一条)
-            // 检查 buildMessageHistory 逻辑，如果上面 push 了 userSession，那里已经包含了。
-            
-            const stream = await driver.chat.create({
-                messages,
-                stream: true,
-                thinking: true, // 启用思考
-                signal: this.abortController.signal
-            });
+            // 4. 委托 Executor 执行
+            const executor = new AgentExecutor(
+                connection,
+                agentConfig.modelName || connection.model,
+                agentConfig.systemPrompt
+            );
 
-            // 6. 处理流式响应
-            for await (const chunk of stream) {
-                if (this.abortController.signal.aborted) break;
+            // 获取历史记录 (此时已包含最新的 userSession)
+            const history = this.buildMessageHistory();
 
-                const delta = chunk.choices[0].delta;
-
-                // 处理思考过程
-                if (delta.thinking) {
-                    rootNode.data.thought = (rootNode.data.thought || '') + delta.thinking;
+            await executor.run(history, {
+        onStart: () => {
+            console.log('[SessionManager] Executor started');
+        },
+                
+                onThinking: (delta) => {
+            console.log('[SessionManager] onThinking called, delta length:', delta.length);
+                    rootNode.data.thought = (rootNode.data.thought || '') + delta;
                     this.emit({ 
                         type: 'node_update', 
-                        payload: { nodeId: agentRootId, chunk: delta.thinking, field: 'thought' } 
+                        payload: { nodeId: agentRootId, chunk: delta, field: 'thought' } 
                     });
-                }
-
-                // 处理内容输出
-                if (delta.content) {
-                    rootNode.data.output = (rootNode.data.output || '') + delta.content;
+                },
+                
+                onOutput: (delta) => {
+            console.log('[SessionManager] onOutput called, delta length:', delta.length);
+                    rootNode.data.output = (rootNode.data.output || '') + delta;
                     this.emit({ 
                         type: 'node_update', 
-                        payload: { nodeId: agentRootId, chunk: delta.content, field: 'output' } 
+                        payload: { nodeId: agentRootId, chunk: delta, field: 'output' } 
                     });
-                }
-            }
-
-            // 7. 完成
-            rootNode.status = 'success';
-            rootNode.endTime = Date.now();
-            this.emit({ type: 'node_status', payload: { nodeId: agentRootId, status: 'success' } });
-            this.emit({ type: 'finished', payload: { sessionId: aiSession.id } });
-
-        } catch (error: any) {
-            console.error("LLM Execution Error:", error);
-            
-            // 如果出错，更新 UI 状态
-            if (this.sessions.length > 0) {
-                const lastSession = this.sessions[this.sessions.length - 1];
-                if (lastSession.role === 'assistant' && lastSession.executionRoot) {
-                    const rootNode = lastSession.executionRoot;
+                },
+                
+                onSuccess: () => {
+            console.log('[SessionManager] Executor success, final output length:', rootNode.data.output?.length);
+                    rootNode.status = 'success';
+                    rootNode.endTime = Date.now();
+                    this.emit({ type: 'node_status', payload: { nodeId: agentRootId, status: 'success' } });
+                    this.emit({ type: 'finished', payload: { sessionId: aiSession.id } });
+                },
+                
+                onFailure: (error) => {
+            console.error('[SessionManager] Executor failed:', error);
                     rootNode.status = 'failed';
                     rootNode.data.output += `\n\n**Error**: ${error.message}`;
-                    this.emit({ type: 'node_status', payload: { nodeId: rootNode.id, status: 'failed' } });
-                    // 更新错误信息到界面
+                    this.emit({ type: 'node_status', payload: { nodeId: agentRootId, status: 'failed' } });
+                    // 将错误也作为内容的一部分追加，或者可以使用专门的 error field
                     this.emit({ 
                         type: 'node_update', 
-                        payload: { nodeId: rootNode.id, chunk: `\n\nError: ${error.message}`, field: 'output' } 
+                        payload: { nodeId: agentRootId, chunk: `\n\nError: ${error.message}`, field: 'output' } 
                     });
                 }
-            }
-            throw error;
+            }, this.abortController.signal);
+
+        } catch (error: any) {
+            console.error("SessionManager Error:", error);
+            // Executor 的 onFailure 已经处理了 UI 更新，这里主要负责兜底
         } finally {
             this.isGenerating = false;
             this.abortController = null;
+        }
+    }
+
+    updateContent(id: string, content: string, type: 'user' | 'node') {
+        this.dirty = true;
+        if (type === 'user') {
+            const session = this.sessions.find(s => s.id === id);
+            if (session) session.content = content;
+        } else {
+            // 递归查找节点并更新 (简化版)
+            const findAndUpdate = (nodes: ExecutionNode[]): boolean => {
+                for (const node of nodes) {
+                    if (node.id === id) {
+                        node.data.output = content;
+                        return true;
+                    }
+                    if (node.children && findAndUpdate(node.children)) return true;
+                }
+                return false;
+            };
+            
+            for (const session of this.sessions) {
+                if (session.executionRoot) {
+                    if (session.executionRoot.id === id) {
+                        session.executionRoot.data.output = content;
+                        break;
+                    }
+                    if (session.executionRoot.children) {
+                        findAndUpdate(session.executionRoot.children);
+                    }
+                }
+            }
         }
     }
 }
