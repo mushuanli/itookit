@@ -37,6 +37,12 @@ export class MDxRenderer {
     this.instanceId = `renderer-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     this.pluginManager = new PluginManager(this);
 
+    // ✨ [新增] 优先独立设置 NodeID
+    if (config.nodeId) {
+        this.pluginManager.setNodeId(config.nodeId);
+    }
+
+    // 保持旧逻辑兼容 (如果 vfsCore 存在)
     if (config.vfsCore && config.nodeId) {
       this.pluginManager.setVFSCore(config.vfsCore, config.nodeId);
     }
