@@ -83,32 +83,91 @@ export class MemoryPlugin implements MDxPlugin {
     if (removeDomUpdated) this.cleanupFns.push(removeDomUpdated);
   }
 
+  /**
+   * ✨ [重构] 同步逻辑
+   * 优先使用 Engine.getSRSStatus，否则回退到 storeRef (metadata)
+   */
   private async syncWithStore(context: PluginContext): Promise<void> {
-    if (!this.storeRef) return;
-    try {
-      const srsData = (await this.storeRef.get('_mdx_srs')) || {};
-      const cache = this.getCache(context);
-      cache.clear();
-      for (const [key, value] of Object.entries(srsData)) {
-        cache.set(key, value as SRSCardState);
+    const engine = context.getSessionEngine?.();
+    const fileId = context.getCurrentNodeId();
+    const cache = this.getCache(context);
+    cache.clear();
+
+    // 1. 尝试使用 Engine 加载 SRS (VFS SRS Store)
+    if (engine && engine.getSRSStatus && fileId) {
+        try {
+            const srsItems = await engine.getSRSStatus(fileId);
+            // 转换为 plugin 内部格式 (Timestamp -> ISO String)
+            for (const [clozeId, item] of Object.entries(srsItems)) {
+                cache.set(clozeId, {
+                    dueAt: new Date(item.dueAt).toISOString(),
+                    lastReviewedAt: new Date(item.lastReviewedAt).toISOString(),
+                    lastGrade: 0, // VFS 未存储上一次评分具体数值，这通常不影响核心算法
+                    reviewCount: item.reviewCount,
+                    interval: item.interval,
+                    easeFactor: item.ease
+                });
+            }
+            return;
+        } catch (e) {
+            console.warn('[MemoryPlugin] Failed to sync from Engine, falling back to Metadata store.', e);
+        }
+    }
+
+    // 2. 降级：使用旧的元数据存储
+    if (this.storeRef) {
+      try {
+        const srsData = (await this.storeRef.get('_mdx_srs')) || {};
+        for (const [key, value] of Object.entries(srsData)) {
+          cache.set(key, value as SRSCardState);
+        }
+      } catch (error) {
+        console.warn('[MemoryPlugin] Metadata sync error:', error);
       }
-    } catch (error) {
-      console.warn('[MemoryPlugin] sync error:', error);
     }
   }
 
-  private async saveToStore(context: PluginContext): Promise<void> {
-    if (!this.storeRef) return;
-    try {
-      const cache = this.getCache(context);
-      const data: Record<string, SRSCardState> = {};
-      cache.forEach((value, key) => {
-        data[key] = value;
-      });
-      await this.storeRef.set('_mdx_srs', data);
-    } catch (error) {
-      console.error('[MemoryPlugin] save error:', error);
-    }
+  /**
+   * ✨ [重构] 保存逻辑
+   * 单个卡片评分后触发
+   */
+  private async saveCardState(context: PluginContext, clozeId: string, newState: SRSCardState): Promise<void> {
+      const engine = context.getSessionEngine?.();
+      const fileId = context.getCurrentNodeId();
+
+      // 1. 尝试使用 Engine 保存 (VFS SRS Store)
+      if (engine && engine.updateSRSStatus && fileId) {
+          try {
+              // 转换 plugin 状态 -> VFS 状态
+              await engine.updateSRSStatus(fileId, clozeId, {
+                  dueAt: newState.dueAt ? new Date(newState.dueAt).getTime() : Date.now(),
+                  lastReviewedAt: newState.lastReviewedAt ? new Date(newState.lastReviewedAt).getTime() : Date.now(),
+                  interval: newState.interval,
+                  ease: newState.easeFactor,
+                  reviewCount: newState.reviewCount
+                  // snippet: ... (可选) 如果有 DOM 上下文，这里可以提取并传入
+              });
+              return;
+          } catch (e) {
+              console.error('[MemoryPlugin] Failed to save to Engine:', e);
+              // 继续执行降级保存
+          }
+      }
+
+      // 2. 降级：全量保存到元数据 (旧逻辑)
+      if (this.storeRef) {
+          try {
+            const cache = this.getCache(context);
+            // 此时 cache 已经通过 gradeCard 更新了内存状态
+            const data: Record<string, SRSCardState> = {};
+            cache.forEach((value, key) => {
+              data[key] = value;
+            });
+            await this.storeRef.set('_mdx_srs', data);
+          } catch (error) {
+            console.error('[MemoryPlugin] Metadata save error:', error);
+          }
+      }
   }
 
   /**
@@ -314,21 +373,23 @@ export class MemoryPlugin implements MDxPlugin {
       const currentState = cache.get(locator);
       const newState = this.calculateNextReview(currentState, grade);
 
+      // 1. 更新内存缓存
       cache.set(locator, newState);
-      await this.saveToStore(context);
+      
+      // 2. ✨ [重构] 调用新的保存逻辑
+      await this.saveCardState(context, locator, newState);
 
-      // 立即更新视觉
+      // 3. 立即更新视觉
       clozeElement.classList.remove('is-new', 'is-cooling', 'is-learning', 'is-due', 'is-danger', 'is-cleared');
       const stateClass = this.determineStateClass(newState);
       clozeElement.classList.add(stateClass);
       clozeElement.dataset.stateClass = stateClass;
 
-      // 行为：Cleared 保持打开，Cooling 也保持打开（刚看过）
       if (stateClass === 'is-cleared' || stateClass === 'is-cooling') {
         clozeElement.classList.remove('hidden');
       }
 
-      console.log(`[MemoryPlugin] Graded "${locator}" with ${grade}. State: ${stateClass}, Due: ${newState.dueAt}`);
+      console.log(`[MemoryPlugin] Graded "${locator}" with ${grade}. State: ${stateClass}`);
 
     } catch (error) {
       console.error('[MemoryPlugin] grading error:', error);

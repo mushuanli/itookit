@@ -16,7 +16,7 @@ export class VFSCoreAdapter implements ISessionEngine {
         private vfsCore: VFSCore, 
         private moduleName: string
     ) {}
-
+    
     private get vfs() { return this.vfsCore.getVFS(); }
 
     private toEngineNode(vnode: VNode): EngineNode {
@@ -167,6 +167,22 @@ export class VFSCoreAdapter implements ISessionEngine {
     async setTagsBatch(updates: Array<{ id: string; tags: string[] }>): Promise<void> {
         const batchData = updates.map(u => ({ nodeId: u.id, tags: u.tags }));
         await this.vfsCore.batchSetNodeTags(batchData);
+    }
+
+    // --- ✨ [新增] SRS 实现 ---
+
+    async getSRSStatus(fileId: string): Promise<Record<string, any>> {
+        // 直接使用 VFSCore 新增的基于 ID 的 API
+        return this.vfsCore.getSRSItemsByNodeId(fileId);
+    }
+
+    async updateSRSStatus(fileId: string, clozeId: string, status: any): Promise<void> {
+        await this.vfsCore.updateSRSItemById(fileId, clozeId, status);
+    }
+
+    async getDueCards(limit: number = 50): Promise<any[]> {
+        // 默认只获取当前模块的复习卡片，如果需要全局，可以扩展 ISessionEngine 传入 scope
+        return this.vfsCore.getDueSRSItems(this.moduleName, limit);
     }
 
     on(_event: EngineEventType, callback: (event: EngineEvent) => void): () => void {

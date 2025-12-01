@@ -6,6 +6,7 @@ import { InodeStore } from './InodeStore.js';
 import { ContentStore } from './ContentStore.js';
 import { TagStore } from './TagStore.js';
 import { NodeTagStore } from './NodeTagStore.js';
+import { SRSStore } from './SRSStore.js'; // ✨ [新增]
 import { VFS_STORES, VNode, VNodeData, ContentData, Transaction, TransactionMode } from './types.js';
 import { SearchQuery } from '../core/types.js';
 
@@ -19,6 +20,8 @@ export class VFSStorage {
   private contentStore!: ContentStore;
   public tagStore!: TagStore;
   public nodeTagStore!: NodeTagStore;
+  public srsStore!: SRSStore; // ✨ [新增] Public 暴露
+
   private connected = false;
 
   constructor(dbName: string = 'vfs_database') {
@@ -39,6 +42,7 @@ export class VFSStorage {
     this.contentStore = new ContentStore(this.db);
     this.tagStore = new TagStore(this.db);
     this.nodeTagStore = new NodeTagStore(this.db);
+    this.srsStore = new SRSStore(this.db); // ✨ [新增]
     this.connected = true;
     
     console.log('VFSStorage connected successfully');

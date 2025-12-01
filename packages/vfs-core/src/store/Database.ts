@@ -9,7 +9,7 @@ import { VFS_STORES, TransactionMode, Transaction, TagData, NodeTagData } from '
  */
 export class Database {
   private db: IDBDatabase | null = null;
-  private readonly version = 5; // [修改] 版本升级以添加引用计数迁移
+  private readonly version = 6; // ✨ [修改] 升级到版本 6
 
   constructor(private dbName: string = 'vfs_database') {}
 
@@ -28,7 +28,7 @@ export class Database {
       request.onsuccess = () => {
         this.db = request.result;
         console.log(`Database '${this.dbName}' connected successfully`);
-        this.verifyDatabaseStructure();
+        // this.verifyDatabaseStructure(); // 调试用
         resolve();
       };
 
@@ -110,6 +110,11 @@ export class Database {
             };
           }
         }
+        // ✨ [新增] 版本 6: 创建 SRS 存储
+        if (oldVersion < 6) {
+          console.log('Upgrading to version 6: Creating SRS store...');
+          this.createSRSStore(db);
+        }
       };
     });
   }
@@ -158,6 +163,30 @@ export class Database {
       store.createIndex('tagName', 'tagName', { unique: false });
       store.createIndex('nodeId_tagName', ['nodeId', 'tagName'], { unique: true });
       console.log('Created node_tags store with indexes');
+    }
+  }
+
+  /**
+   * [新增] 创建 srs_items 对象存储
+   */
+  private createSRSStore(db: IDBDatabase): void {
+    if (!db.objectStoreNames.contains(VFS_STORES.SRS_ITEMS)) {
+      // 复合主键: nodeId + clozeId
+      const store = db.createObjectStore(VFS_STORES.SRS_ITEMS, { keyPath: ['nodeId', 'clozeId'] });
+      
+      // 索引1: nodeId - 用于快速查找某文件的所有卡片，以及级联删除
+      store.createIndex('nodeId', 'nodeId', { unique: false });
+      
+      // 索引2: moduleId - 用于按模块筛选
+      store.createIndex('moduleId', 'moduleId', { unique: false });
+      
+      // 索引3: dueAt - 用于查询到期卡片
+      store.createIndex('dueAt', 'dueAt', { unique: false });
+      
+      // 索引4: 复合查询 (某模块下的到期卡片)
+      store.createIndex('moduleId_dueAt', ['moduleId', 'dueAt'], { unique: false });
+
+      console.log('Created srs_items store with indexes');
     }
   }
 
@@ -253,7 +282,7 @@ export class Database {
 
   /**
    * 验证数据库结构（调试用）
-   */
+   *
   private verifyDatabaseStructure(): void {
     if (!this.db) return;
 
@@ -273,6 +302,7 @@ export class Database {
     
     console.log('========================');
   }
+  */
 
   /**
    * 获取数据库实例（仅供内部使用）

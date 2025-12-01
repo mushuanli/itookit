@@ -276,9 +276,9 @@ export class VFS {
     
     const allRemovedIds = nodesToDelete.map(n => n.nodeId);
     
-    // [修改] 事务范围增加 TAGS，以便清理引用计数
     const tx = await this.storage.beginTransaction([
-        VFS_STORES.VNODES, VFS_STORES.CONTENTS, VFS_STORES.NODE_TAGS, VFS_STORES.TAGS
+        VFS_STORES.VNODES, VFS_STORES.CONTENTS, VFS_STORES.NODE_TAGS, VFS_STORES.TAGS,
+        VFS_STORES.SRS_ITEMS
     ]);
 
     try {
@@ -287,8 +287,9 @@ export class VFS {
 
         if (node.contentRef) await this.storage.deleteContent(node.contentRef, tx);
         
-        // [修改] 使用 cleanupNodeTags 替代直接 removeAllForNode，以确保引用计数正确减少
         await this.storage.cleanupNodeTags(node.nodeId, tx);
+        
+        await this.storage.srsStore.deleteForNode(node.nodeId, tx);
         
         await this.storage.deleteVNode(node.nodeId, tx);
 
@@ -322,29 +323,47 @@ export class VFS {
       throw new VFSError(VFSErrorCode.INVALID_PATH, `Invalid path: ${newPath}`);
     }
 
-    const module = vnode.moduleId!;
-    const existingId = await this.pathResolver.resolve(module, normalizedPath);
+    const oldModuleId = vnode.moduleId!;
+    // move 操作通常是在同一模块下，但也可能通过路径隐含改变模块
+    // 目前 PathResolver.resolveParent 基于传入的 module 参数，这限制了 move 在同一模块内
+    // 除非我们扩展 PathResolver 解析绝对路径（包含模块前缀）的能力。
+    // 在本实现中，我们假定单参数 move 通常在同模块内。
+    // 若需跨模块，应使用 batchMove 或明确的新 API。
+    
+    // 暂定：如果 oldModuleId 不变，则 targetModuleId = oldModuleId
+    // 如果上层逻辑需要跨模块，请使用 batchMove 传入明确的 targetParentId
+    const targetModuleId = oldModuleId; 
+
+    const existingId = await this.pathResolver.resolve(targetModuleId, normalizedPath);
     if (existingId && existingId !== vnode.nodeId) {
       throw new VFSError(VFSErrorCode.ALREADY_EXISTS, `Node already exists at path: ${normalizedPath}`);
     }
-    const newParentId = await this.pathResolver.resolveParent(module, normalizedPath);
+    const newParentId = await this.pathResolver.resolveParent(targetModuleId, normalizedPath);
 
-    const tx = await this.storage.beginTransaction();
+    const tx = await this.storage.beginTransaction([
+        VFS_STORES.VNODES, VFS_STORES.SRS_ITEMS // 包含 SRS
+    ]);
 
     try {
       const newName = this.pathResolver.basename(normalizedPath);
-      const newFullPath = `/${module}${normalizedPath}`;
+      const newFullPath = `/${targetModuleId}${normalizedPath}`;
       const oldPath = vnode.path;
 
       vnode.parentId = newParentId;
       vnode.name = newName;
       vnode.path = newFullPath;
       vnode.modifiedAt = Date.now();
+      
+      // 虽然通常 module 不变，但为了逻辑统一，检查一下
+      if (vnode.moduleId !== targetModuleId) {
+          vnode.moduleId = targetModuleId;
+          await this.storage.srsStore.updateModuleIdForNode(vnode.nodeId, targetModuleId, tx);
+      }
 
       await this.storage.saveVNode(vnode, tx);
 
       if (vnode.type === VNodeType.DIRECTORY) {
-        await this._updateDescendantPaths(vnode, oldPath, newFullPath, tx);
+        await this._updateDescendantPathsAndModules(vnode, oldPath, newFullPath, targetModuleId, tx);
       }
       
       await tx.done;
@@ -362,6 +381,7 @@ export class VFS {
   }
 
   // 批量移动节点
+  // [修改] 增加 SRS ModuleId 同步逻辑，并包含 SRS Store 事务
   async batchMove(nodeIds: string[], targetParentId: string | null): Promise<void> {
     if (nodeIds.length === 0) return;
 
@@ -376,7 +396,11 @@ export class VFS {
         }
     }
 
-    const tx = await this.storage.beginTransaction([VFS_STORES.VNODES, VFS_STORES.NODE_TAGS]);
+    const tx = await this.storage.beginTransaction([
+        VFS_STORES.VNODES, 
+        VFS_STORES.NODE_TAGS, 
+        VFS_STORES.SRS_ITEMS // ✨ [修复] 包含 SRS Store
+    ]);
 
     try {
         const movedNodeIds: string[] = [];
@@ -398,15 +422,28 @@ export class VFS {
                 }
             }
 
-            const module = vnode.moduleId!;
-            const targetPath = targetParentNode ? targetParentNode.path : `/${module}`;
+            const oldModuleId = vnode.moduleId!;
+            // 确定目标模块：如果移入某个目录，跟随该目录；如果是移到根目录(null)，假设为当前模块（或需要额外参数指定跨模块到根）
+            // 在此实现中，如果 targetParentId 为空，我们保持原模块不变（即模块内移动到根）
+            let targetModuleId = oldModuleId;
+            if (targetParentNode) {
+                targetModuleId = targetParentNode.moduleId!;
+            }
+
+            const targetPathPrefix = targetParentNode ? targetParentNode.path : `/${targetModuleId}`;
             
-            const newFullPath = this.pathResolver.join(targetPath, vnode.name);
+            const newFullPath = this.pathResolver.join(targetPathPrefix, vnode.name);
             const oldPath = vnode.path;
 
             const existingId = await this.storage.getNodeIdByPath(newFullPath, tx);
             if (existingId && existingId !== nodeId) {
                 throw new VFSError(VFSErrorCode.ALREADY_EXISTS, `Node already exists at ${newFullPath}`);
+            }
+
+            // ✨ [修复] 跨模块移动处理
+            if (targetModuleId !== oldModuleId) {
+                vnode.moduleId = targetModuleId;
+                await this.storage.srsStore.updateModuleIdForNode(nodeId, targetModuleId, tx);
             }
 
             vnode.parentId = targetParentId;
@@ -416,7 +453,8 @@ export class VFS {
             await this.storage.saveVNode(vnode, tx);
 
             if (vnode.type === VNodeType.DIRECTORY) {
-                await this._updateDescendantPaths(vnode, oldPath, newFullPath, tx);
+                // ✨ [修复] 递归更新使用新的带模块处理的方法
+                await this._updateDescendantPathsAndModules(vnode, oldPath, newFullPath, targetModuleId, tx);
             }
 
             movedNodeIds.push(nodeId);
@@ -696,15 +734,33 @@ export class VFS {
     }
   }
 
-  private async _updateDescendantPaths(parent: VNode, oldPath: string, newPath: string, tx: Transaction): Promise<void> {
+  /**
+   * [修复] 更新子孙节点路径和模块ID
+   */
+  private async _updateDescendantPathsAndModules(
+      parent: VNode, 
+      oldPath: string, 
+      newPath: string, 
+      newModuleId: string, 
+      tx: Transaction
+  ): Promise<void> {
       const children = await this.storage.getChildren(parent.nodeId, tx);
       for (const child of children) {
           const childOldPath = this.pathResolver.join(oldPath, child.name);
           const childNewPath = this.pathResolver.join(newPath, child.name);
+          
           child.path = childNewPath;
+          
+          // ✨ 更新子节点模块ID并同步 SRS
+          if (child.moduleId !== newModuleId) {
+              child.moduleId = newModuleId;
+              await this.storage.srsStore.updateModuleIdForNode(child.nodeId, newModuleId, tx);
+          }
+
           await this.storage.saveVNode(child, tx);
+          
           if (child.type === VNodeType.DIRECTORY) {
-              await this._updateDescendantPaths(child, childOldPath, childNewPath, tx);
+              await this._updateDescendantPathsAndModules(child, childOldPath, childNewPath, newModuleId, tx);
           }
       }
   }

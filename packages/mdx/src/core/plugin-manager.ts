@@ -5,7 +5,7 @@ import type { MarkedExtension } from 'marked';
 import type { Extension } from '@codemirror/state';
 import { ServiceContainer } from './service-container';
 import type { VFSCore, NodeStat } from '@itookit/vfs-core';
-import type { IPersistenceAdapter } from '@itookit/common';
+import type { IPersistenceAdapter, ISessionEngine } from '@itookit/common'; // ✨ [新增] 导入 ISessionEngine
 import type {
   MDxPlugin,
   PluginContext,
@@ -178,6 +178,10 @@ export class PluginManager {
   private vfsCore: VFSCore | null = null;
   private currentNodeId: string | null = null;
   private dataAdapter: IPersistenceAdapter | null = null;
+  
+  // ✨ [新增] SessionEngine 引用
+  private sessionEngine: ISessionEngine | null = null;
+
   private coreInstance: any;
   private instanceId: string;
   
@@ -218,6 +222,13 @@ export class PluginManager {
    */
   setDataAdapter(adapter: IPersistenceAdapter): void {
     this.dataAdapter = adapter;
+  }
+
+  /**
+   * ✨ [新增] 设置 Session Engine
+   */
+  setSessionEngine(engine: ISessionEngine): void {
+    this.sessionEngine = engine;
   }
 
   /**
@@ -336,6 +347,9 @@ export class PluginManager {
       // VFS 集成
       getVFSCore: () => this.vfsCore,
       getCurrentNodeId: () => this.currentNodeId,
+      
+      // ✨ [新增] 获取 Session Engine
+      getSessionEngine: () => this.sessionEngine,
 
       // 清理函数（插件销毁时调用）
       _cleanup: () => {

@@ -9,6 +9,7 @@ export { BaseStore } from './BaseStore.js';
 export { InodeStore } from './InodeStore.js';
 export { ContentStore } from './ContentStore.js';
 export { VFSStorage } from './VFSStorage.js';
+export { SRSStore } from './SRSStore.js'; // ✨ [新增]
 
 export {
   VFS_STORES,
@@ -17,6 +18,7 @@ export {
   Transaction,
   type VNodeData,
   type ContentData,
+  type SRSItemData, // ✨ [新增]
   type TransactionMode,
   type DatabaseConfig
 } from './types.js';
