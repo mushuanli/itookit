@@ -33,31 +33,39 @@ export class NodeRenderer {
     private static renderAgent(el: HTMLElement, node: ExecutionNode, mounts: any) {
         const hasThought = node.data.thought && node.data.thought.length > 0;
         
+        // 头部：图标 + 名称 (Chat Title) + 工具栏
         el.innerHTML = `
             <div class="llm-ui-node__header">
-                <div class="llm-ui-node__icon">${node.icon || '🤖'}</div>
-                <div class="llm-ui-node__title">${node.name}</div>
+                <div class="llm-ui-node__title">${escapeHTML(node.name || 'Assistant')}</div>
                 <div class="llm-ui-node__status llm-ui-node__status--${node.status}">${node.status}</div>
                 
-                <div class="llm-ui-actions">
-                    <button class="llm-ui-btn-action llm-ui-action-edit" title="Edit Output">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+                <div class="llm-ui-node__toolbar">
+                    <button class="llm-ui-btn-tool" data-action="edit" title="Edit Mode">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+                    </button>
+                    <button class="llm-ui-btn-tool" data-action="copy" title="Copy Content">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                    </button>
+                    <button class="llm-ui-btn-tool" data-action="collapse" title="Collapse/Expand">
+                        <svg class="icon-collapse" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
                     </button>
                 </div>
             </div>
             
-            <details class="llm-ui-thought" ${hasThought ? 'open' : ''} style="${hasThought ? 'display:block' : 'display:none'}">
-                <summary class="llm-ui-thought__summary">
-                    <span>💭 Thinking Process</span>
-                </summary>
-                <div class="llm-ui-thought__content">${escapeHTML(node.data.thought || '')}</div>
-            </details>
+            <div class="llm-ui-node__body">
+                <details class="llm-ui-thought" ${hasThought ? 'open' : ''} style="${hasThought ? 'display:block' : 'display:none'}">
+                    <summary class="llm-ui-thought__summary">
+                        <span>💭 Thinking Process</span>
+                    </summary>
+                    <div class="llm-ui-thought__content">${escapeHTML(node.data.thought || '')}</div>
+                </details>
 
-            <div class="llm-ui-node__output">
-                <div class="llm-ui-mount-point" id="mount-${node.id}"></div>
+                <div class="llm-ui-node__output">
+                    <div class="llm-ui-mount-point" id="mount-${node.id}"></div>
+                </div>
+
+                <div class="llm-ui-node__children"></div>
             </div>
-
-            <div class="llm-ui-node__children"></div>
         `;
 
         mounts.output = el.querySelector(`#mount-${node.id}`);
@@ -67,11 +75,13 @@ export class NodeRenderer {
         el.innerHTML = `
             <div class="llm-ui-node__header">
                 <span class="llm-ui-node__icon">🔧</span>
-                <span class="llm-ui-node__title">${node.name}</span>
+                <span class="llm-ui-node__title">${escapeHTML(node.name)}</span>
                 <span class="llm-ui-node__status llm-ui-node__status--${node.status}">${node.status}</span>
             </div>
-            <div class="llm-ui-node__args"><code>${JSON.stringify(node.data.toolCall?.args || {})}</code></div>
-            <div class="llm-ui-node__result"></div>
+            <div class="llm-ui-node__body">
+                <div class="llm-ui-node__args"><code>${escapeHTML(JSON.stringify(node.data.toolCall?.args || {}))}</code></div>
+                <div class="llm-ui-node__result"></div>
+            </div>
         `;
     }
 

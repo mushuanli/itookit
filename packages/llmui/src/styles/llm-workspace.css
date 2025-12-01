@@ -8,13 +8,13 @@
   --llm-ui-text-primary: #333333;
   --llm-ui-text-secondary: #666666;
   --llm-ui-border-color: #e5e7eb;
-  
+
   /* 状态颜色 */
   --llm-ui-color-primary: #3b82f6;
   --llm-ui-color-success: #10b981;
   --llm-ui-color-error: #ef4444;
   --llm-ui-color-warning: #f59e0b;
-  
+
   --llm-ui-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
@@ -86,13 +86,26 @@
 .llm-ui-bubble--user {
   background: var(--llm-ui-color-primary);
   color: white;
-  padding: 8px 16px;
+  padding: 10px 16px; /* 增加 padding 以容纳 Header */
   border-radius: 12px;
   border-top-right-radius: 2px;
   max-width: 80%;
   min-width: 120px;
   position: relative;
   box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+  display: flex;
+  flex-direction: column;
+  transition: all 0.2s; /* 增加过渡效果 */
+}
+
+/* [新增] 用户气泡折叠逻辑 */
+.llm-ui-bubble--user.is-collapsed .llm-ui-mount-point {
+  display: none;
+}
+.llm-ui-bubble--user.is-collapsed .llm-ui-bubble__header {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
 }
 
 /* MDxEditor 在用户气泡内的适配 */
@@ -108,6 +121,64 @@
   min-width: 0; /* 防止 flex 子项溢出 */
 }
 
+/* --- [新增] User Bubble Header --- */
+.llm-ui-bubble__header {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+  padding-bottom: 6px;
+  margin-bottom: 8px;
+  font-size: 0.85rem;
+}
+
+.llm-ui-bubble__icon {
+  margin-right: 6px;
+  font-size: 1.1em;
+}
+
+.llm-ui-bubble__title {
+  font-weight: 600;
+  flex: 1;
+}
+
+.llm-ui-bubble__toolbar {
+  display: flex;
+  gap: 2px;
+  opacity: 0; /* 默认隐藏工具栏，保持整洁 */
+  transition: opacity 0.2s;
+}
+
+/* 悬停气泡时显示工具栏 */
+.llm-ui-bubble--user:hover .llm-ui-bubble__toolbar {
+  opacity: 1;
+}
+
+.llm-ui-btn-bubble-tool {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 2px;
+  color: rgba(255, 255, 255, 0.7);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  transition: all 0.2s;
+}
+
+.llm-ui-btn-bubble-tool:hover,
+.llm-ui-btn-bubble-tool.active {
+  background-color: rgba(255, 255, 255, 0.2);
+  color: white;
+}
+
+.llm-ui-btn-bubble-tool svg {
+  width: 14px;
+  height: 14px;
+}
+
 /* =========================================
    执行节点样式 (Nodes: Agent/Tool/Thought)
    ========================================= */
@@ -119,12 +190,17 @@
   border-radius: 8px;
   background: var(--llm-ui-bg-primary);
   overflow: hidden;
-  transition: box-shadow 0.2s, border-color 0.2s;
+  transition: box-shadow 0.2s, border-color 0.2s, height 0.3s ease;
 }
 
 .llm-ui-node:hover {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
   border-color: #d1d5db;
+}
+
+/* 折叠状态 */
+.llm-ui-node.is-collapsed .llm-ui-node__body {
+  display: none;
 }
 
 /* 节点状态边框指示器 */
@@ -144,8 +220,13 @@
   height: 36px; /* 固定高度以保持整洁 */
 }
 
-.llm-ui-node__icon { margin-right: 8px; font-size: 1.1em; }
-.llm-ui-node__title { font-weight: 600; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 移除折叠时的底部边框，使其看起来像个条 */
+.llm-ui-node.is-collapsed .llm-ui-node__header {
+  border-bottom: none;
+}
+
+.llm-ui-node__icon { margin-right: 8px; font-size: 1.1em; line-height: 1; }
+.llm-ui-node__title { font-weight: 600; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--llm-ui-text-primary); }
 
 /* 状态标签 */
 .llm-ui-node__status {
@@ -155,11 +236,54 @@
   text-transform: uppercase;
   font-weight: 600;
   letter-spacing: 0.02em;
+  margin-right: 8px;
 }
 
 .llm-ui-node__status--success { color: var(--llm-ui-color-success); background: #d1fae5; }
 .llm-ui-node__status--running { color: var(--llm-ui-color-primary); background: #dbeafe; }
 .llm-ui-node__status--failed { color: var(--llm-ui-color-error); background: #fee2e2; }
+
+/* --- 节点工具栏 (右侧按钮组) --- */
+.llm-ui-node__toolbar {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+}
+
+.llm-ui-btn-tool {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  color: #94a3b8;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  transition: all 0.2s;
+}
+
+.llm-ui-btn-tool:hover {
+  background-color: rgba(0,0,0,0.05);
+  color: var(--llm-ui-text-primary);
+}
+
+.llm-ui-btn-tool.active {
+  color: var(--llm-ui-color-primary);
+  background-color: #eff6ff;
+}
+
+.llm-ui-btn-tool svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* --- 节点主体 (包含 Thought 和 Output) --- */
+.llm-ui-node__body {
+  /* 主要用于折叠控制 */
+}
 
 /* --- 思考过程 (Thought / Chain of Thought) --- */
 .llm-ui-thought {
@@ -230,48 +354,14 @@
 }
 
 /* =========================================
-   悬浮操作栏 (Hover Actions)
+   悬浮操作栏 (Hover Actions - User Message Only)
    ========================================= */
+/* 旧的 llm-ui-actions 类名可能已经不需要了，因为现在用户消息也有专用 header toolbar */
+/* 但为了兼容旧的渲染逻辑（如果还有地方用），暂时保留，设置为 hidden 如果不需要 */
 .llm-ui-actions {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  display: flex;
-  gap: 4px;
-  opacity: 0;
-  transition: opacity 0.2s;
-  background: rgba(255, 255, 255, 0.95);
-  border: 1px solid var(--llm-ui-border-color);
-  border-radius: 6px;
-  padding: 2px;
-  z-index: 20;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+  display: none; /* [修改] 既然都放入 Header Toolbar 了，旧的悬浮栏可以隐藏 */
 }
 
-/* 仅在悬停会话或节点时显示操作栏 */
-.llm-ui-session:hover .llm-ui-actions,
-.llm-ui-node:hover .llm-ui-actions {
-  opacity: 1;
-}
-
-.llm-ui-btn-action {
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  padding: 4px;
-  color: #94a3b8;
-  border-radius: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-}
-
-.llm-ui-btn-action:hover {
-  background: #f1f5f9;
-  color: var(--llm-ui-color-primary);
-}
 
 /* =========================================
    空状态/欢迎页
