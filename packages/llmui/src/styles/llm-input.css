@@ -1,0 +1,169 @@
+/* @file llm-ui/styles/llm-input.css */
+
+:root {
+  --llm-input-bg: #ffffff;
+  --llm-input-border: #e5e7eb;
+  --llm-input-focus-ring: #3b82f6;
+  --llm-input-text: #374151;
+  --llm-input-placeholder: #9ca3af;
+  --llm-input-radius: 12px;
+  --llm-input-padding: 12px;
+}
+
+/* --- Block: 主容器 --- */
+.llm-input {
+  display: flex;
+  align-items: flex-end; /* 底部对齐，适应多行输入 */
+  gap: 8px;
+  background: var(--llm-input-bg);
+  border: 1px solid var(--llm-input-border);
+  border-radius: var(--llm-input-radius);
+  padding: 8px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+  transition: box-shadow 0.2s, border-color 0.2s;
+  position: relative;
+}
+
+.llm-input:focus-within {
+  border-color: var(--llm-input-focus-ring);
+  box-shadow: 0 4px 12px -2px rgba(59, 130, 246, 0.15);
+}
+
+/* --- Element: 左侧执行器选择器 --- */
+.llm-input__executor-wrapper {
+  flex-shrink: 0;
+  position: relative;
+  margin-bottom: 4px; /* 视觉微调 */
+}
+
+.llm-input__executor-select {
+  appearance: none;
+  background-color: #f3f4f6;
+  border: 1px solid transparent;
+  padding: 6px 24px 6px 10px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--llm-input-text);
+  cursor: pointer;
+  max-width: 120px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+  transition: all 0.2s;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23666' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 6px center;
+}
+
+.llm-input__executor-select:hover {
+  background-color: #e5e7eb;
+}
+
+.llm-input__executor-select:focus {
+  outline: none;
+  border-color: var(--llm-input-focus-ring);
+}
+
+/* --- Element: 输入框区域 --- */
+.llm-input__field-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0; /* 防止 flex 子项溢出 */
+}
+
+.llm-input__textarea {
+  width: 100%;
+  border: none;
+  background: transparent;
+  resize: none;
+  padding: 8px 0;
+  font-family: inherit;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: var(--llm-input-text);
+  outline: none;
+  max-height: 200px; /* 限制最大高度 */
+  overflow-y: auto;
+}
+
+.llm-input__textarea::placeholder {
+  color: var(--llm-input-placeholder);
+}
+
+/* --- Element: 附件预览区域 (新增) --- */
+.llm-input__attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.llm-input__attachment-tag {
+  font-size: 0.75rem;
+  background: #eff6ff;
+  color: #1d4ed8;
+  padding: 2px 8px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* --- Element: 右侧操作区 --- */
+.llm-input__actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  margin-bottom: 4px;
+}
+
+/* 通用图标按钮样式 */
+.llm-input__btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #6b7280;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.llm-input__btn:hover {
+  background-color: #f3f4f6;
+  color: #111827;
+}
+
+/* 附件按钮 */
+.llm-input__btn--attach {
+  /* 特定样式 */
+}
+
+/* 发送按钮 */
+.llm-input__btn--send {
+  background-color: var(--llm-input-focus-ring);
+  color: white;
+  margin-left: 4px;
+}
+
+.llm-input__btn--send:hover {
+  background-color: #2563eb;
+}
+
+.llm-input__btn--send:disabled {
+  background-color: #93c5fd;
+  cursor: not-allowed;
+}
+
+/* 停止按钮 */
+.llm-input__btn--stop {
+  background-color: #ef4444;
+  color: white;
+}
+.llm-input__btn--stop:hover { background-color: #dc2626; }

@@ -1,2 +1,4 @@
+/* @file llmui/styles/index.css */
+@import 'llm-input.css';
 @import 'chat-styles.css';
 @import 'llm-workspace.css';
