@@ -125,7 +125,7 @@ export const LLM_PROVIDER_DEFAULTS: Record<string, LLMProviderDefinition> = {
         baseURL: 'https://chat.cloudapi.vip/v1/chat/completions',
         models: [
             { id: 'claude-sonnet-4-5-20250929-thinking', name: 'Sonnet 4.5 Think' },
-            { id: 'claude-opus-4-1-20250805-thinking-code', name: 'Opus 4.1 Think' }
+            { id: 'claude-opus-4-5-20251101', name: 'Opus 4.5' }
         ]
     },
     custom_openai_compatible: {
@@ -136,6 +136,5 @@ export const LLM_PROVIDER_DEFAULTS: Record<string, LLMProviderDefinition> = {
     }
 };
 
-// 预设 ID 常量
+// 预设 connection/agent ID 常量,不可被删除
 export const LLM_DEFAULT_ID = 'default';
-export const LLM_TEMP_DEFAULT_ID = 'default-temp';

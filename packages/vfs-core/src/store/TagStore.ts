@@ -69,6 +69,20 @@ export class TagStore extends BaseStore {
    * 删除一个标签定义
    */
   async deleteTag(tagName: string, transaction?: Transaction | null): Promise<void> {
+    // 1. 获取标签数据以检查保护状态
+    const tag = await this.get(tagName, transaction);
+    
+    if (tag) {
+        // 2. 如果受保护，抛出异常
+        if (tag.isProtected) {
+            throw new Error(`Permission denied: Tag '${tagName}' is protected and cannot be deleted.`);
+        }
+    } else {
+        // 标签不存在，直接返回
+        return;
+    }
+
+    // 3. 执行删除
     await this.delete(tagName, transaction);
   }
 }
