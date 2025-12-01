@@ -25,6 +25,7 @@ export const LLM_PROVIDER_DEFAULTS: Record<string, LLMProviderDefinition> = {
         baseURL: 'https://api.rdsec.trendmicro.com/prod/aiendpoint/v1/chat/completions',
         supportsThinking: true,
         models: [
+            { id: 'claude-4.5-opus', name: 'Claude 4.5 Opus' },
             { id: 'claude-4.5-sonnet', name: 'Claude 4.5 Sonnet' },
             { id: 'gpt-4o', name: 'GPT-4o (OpenAI)' },
             { id: 'claude-3-haiku', name: 'Claude 3 Haiku' },
