@@ -8,6 +8,8 @@ export interface MemoryPluginOptions {
   coolingPeriod?: number;
   /** 严重过期的天数阈值 */
   dangerThresholdDays?: number;
+  /** 是否启用调试日志 */
+  debug?: boolean;
 }
 
 interface SRSCardState {
@@ -40,7 +42,14 @@ export class MemoryPlugin implements MDxPlugin {
       className: options.className || 'mdx-memory',
       coolingPeriod: options.coolingPeriod || 60000, // 默认1分钟冷却
       dangerThresholdDays: options.dangerThresholdDays || 7, // 超过7天为严重过期
+      debug: options.debug ?? true, // 🟢 默认开启调试，生产环境可关闭
     };
+  }
+
+  private log(message: string, ...args: any[]) {
+    if (this.options.debug) {
+      console.log(`🧠 [MemoryPlugin] ${message}`, ...args);
+    }
   }
 
   private getCache(context: PluginContext): Map<string, SRSCardState> {
@@ -59,7 +68,7 @@ export class MemoryPlugin implements MDxPlugin {
       
       // 冷却中的卡片不显示评分面板
       if (stateClass === 'is-cooling') {
-        console.log('[MemoryPlugin] Card is cooling, skip grading panel');
+        this.log('Card is cooling, skip grading panel', data.clozeId);
         return;
       }
       
@@ -77,6 +86,7 @@ export class MemoryPlugin implements MDxPlugin {
 
     // DOM 更新时应用状态
     const removeDomUpdated = context.on('domUpdated', async ({ element }: { element: HTMLElement }) => {
+      this.log('DOM updated, starting sync...');
       await this.syncWithStore(context);
       this.applyVisualsAndState(element, context);
     });
@@ -93,16 +103,21 @@ export class MemoryPlugin implements MDxPlugin {
     const cache = this.getCache(context);
     cache.clear();
 
+    this.log(`Syncing store. FileID: ${fileId || 'N/A'}, Engine Available: ${!!engine}`);
+
     // 1. 尝试使用 Engine 加载 SRS (VFS SRS Store)
     if (engine && engine.getSRSStatus && fileId) {
         try {
             const srsItems = await engine.getSRSStatus(fileId);
+            const count = Object.keys(srsItems).length;
+            this.log(`Loaded ${count} items from Engine VFS.`);
+
             // 转换为 plugin 内部格式 (Timestamp -> ISO String)
             for (const [clozeId, item] of Object.entries(srsItems)) {
                 cache.set(clozeId, {
                     dueAt: new Date(item.dueAt).toISOString(),
                     lastReviewedAt: new Date(item.lastReviewedAt).toISOString(),
-                    lastGrade: 0, // VFS 未存储上一次评分具体数值，这通常不影响核心算法
+                    lastGrade: 0, // VFS 未存储上一次评分具体数值
                     reviewCount: item.reviewCount,
                     interval: item.interval,
                     easeFactor: item.ease
@@ -112,12 +127,17 @@ export class MemoryPlugin implements MDxPlugin {
         } catch (e) {
             console.warn('[MemoryPlugin] Failed to sync from Engine, falling back to Metadata store.', e);
         }
+    } else {
+        this.log('Skipping Engine sync (Conditions not met). Fallback to metadata?');
     }
 
     // 2. 降级：使用旧的元数据存储
     if (this.storeRef) {
       try {
         const srsData = (await this.storeRef.get('_mdx_srs')) || {};
+        const count = Object.keys(srsData).length;
+        this.log(`Loaded ${count} items from Metadata Store (Fallback).`);
+        
         for (const [key, value] of Object.entries(srsData)) {
           cache.set(key, value as SRSCardState);
         }
@@ -135,6 +155,8 @@ export class MemoryPlugin implements MDxPlugin {
       const engine = context.getSessionEngine?.();
       const fileId = context.getCurrentNodeId();
 
+      this.log(`Saving card ${clozeId} to FileID: ${fileId}`);
+
       // 1. 尝试使用 Engine 保存 (VFS SRS Store)
       if (engine && engine.updateSRSStatus && fileId) {
           try {
@@ -147,6 +169,7 @@ export class MemoryPlugin implements MDxPlugin {
                   reviewCount: newState.reviewCount
                   // snippet: ... (可选) 如果有 DOM 上下文，这里可以提取并传入
               });
+              this.log(`Saved successfully to Engine VFS.`);
               return;
           } catch (e) {
               console.error('[MemoryPlugin] Failed to save to Engine:', e);
@@ -164,6 +187,7 @@ export class MemoryPlugin implements MDxPlugin {
               data[key] = value;
             });
             await this.storeRef.set('_mdx_srs', data);
+            this.log(`Saved successfully to Metadata Store (Fallback).`);
           } catch (error) {
             console.error('[MemoryPlugin] Metadata save error:', error);
           }
@@ -184,14 +208,15 @@ export class MemoryPlugin implements MDxPlugin {
     const lastReviewedAt = state.lastReviewedAt ? new Date(state.lastReviewedAt) : null;
 
     // 2. 检查是否在冷却期 (刚点了 Again，且还没到 dueAt)
-    if (state.lastGrade === 1 && dueAt > now) {
-      // 额外检查：是否刚刚复习过（在冷却期内）
-      if (lastReviewedAt) {
-        const timeSinceReview = now.getTime() - lastReviewedAt.getTime();
-        if (timeSinceReview < this.options.coolingPeriod) {
-          return 'is-cooling';
-        }
-      }
+    // 注意：这里逻辑微调，只要是上次 Again 且未到期，视为冷却
+    // 并且检查时间间隔，防止无限冷却
+    if (state.interval * 24 * 60 * 60 * 1000 < this.options.coolingPeriod * 2 && dueAt > now) {
+         if (lastReviewedAt) {
+            const timeSinceReview = now.getTime() - lastReviewedAt.getTime();
+            if (timeSinceReview < this.options.coolingPeriod) {
+              return 'is-cooling';
+            }
+         }
     }
 
     // 3. 未到期 -> Green (已掌握)
@@ -223,11 +248,16 @@ export class MemoryPlugin implements MDxPlugin {
     const cache = this.getCache(context);
     const clozes = element.querySelectorAll('.mdx-cloze');
 
+    let matchedCount = 0;
+
     clozes.forEach(cloze => {
       const locator = cloze.getAttribute('data-cloze-locator');
       if (!locator) return;
 
       const state = cache.get(locator);
+      
+      if (state) matchedCount++;
+
       const stateClass = this.determineStateClass(state);
 
       // 清除旧状态
@@ -240,17 +270,16 @@ export class MemoryPlugin implements MDxPlugin {
       // 视觉行为
       if (!isGlobalLocked) {
         if (stateClass === 'is-cleared') {
-          // 已掌握的默认显示，方便阅读
           cloze.classList.remove('hidden');
         } else if (stateClass === 'is-cooling') {
-          // 冷却中的保持当前状态（如果刚打开就保持打开）
-          // 不做任何改变
+          // 冷却中的保持当前状态
         } else {
-          // 其他状态默认隐藏，强迫回忆
           cloze.classList.add('hidden');
         }
       }
     });
+
+    this.log(`Applied visuals. Found ${clozes.length} clozes in DOM. Matched ${matchedCount} from Store.`);
   }
 
   private showGradingPanel(clozeElement: HTMLElement, context: PluginContext, timeoutDuration: number = 0): void {
@@ -316,37 +345,25 @@ export class MemoryPlugin implements MDxPlugin {
     let nextInterval: number;
 
     if (grade === 1) {
-      // Again: 重置到1分钟，进入冷却
       state.easeFactor = Math.max(1.3, state.easeFactor - 0.2);
       nextInterval = ONE_MINUTE;
-      
     } else if (state.interval < 1) {
-      // 学习阶段
       switch (grade) {
-        case 2: // Hard
-          nextInterval = ONE_MINUTE * 5;
-          break;
-        case 3: // Good
-          nextInterval = state.interval >= TEN_MINUTES * 0.9 ? 1 : TEN_MINUTES;
-          break;
-        case 4: // Easy
-          nextInterval = 4;
-          break;
-        default:
-          nextInterval = ONE_MINUTE;
+        case 2: nextInterval = ONE_MINUTE * 5; break;
+        case 3: nextInterval = state.interval >= TEN_MINUTES * 0.9 ? 1 : TEN_MINUTES; break;
+        case 4: nextInterval = 4; break;
+        default: nextInterval = ONE_MINUTE;
       }
-      
     } else {
-      // 复习阶段
       switch (grade) {
-        case 2: // Hard
+        case 2:
           state.easeFactor = Math.max(1.3, state.easeFactor - 0.15);
           nextInterval = state.interval * 1.2;
           break;
-        case 3: // Good
+        case 3:
           nextInterval = state.interval * state.easeFactor;
           break;
-        case 4: // Easy
+        case 4:
           state.easeFactor += 0.15;
           nextInterval = state.interval * state.easeFactor * 1.3;
           break;
@@ -389,7 +406,7 @@ export class MemoryPlugin implements MDxPlugin {
         clozeElement.classList.remove('hidden');
       }
 
-      console.log(`[MemoryPlugin] Graded "${locator}" with ${grade}. State: ${stateClass}`);
+      this.log(`Graded "${locator}" with ${grade}. State: ${stateClass}`);
 
     } catch (error) {
       console.error('[MemoryPlugin] grading error:', error);

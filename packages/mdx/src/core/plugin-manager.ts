@@ -347,7 +347,7 @@ export class PluginManager {
       // VFS 集成
       getVFSCore: () => this.vfsCore,
       getCurrentNodeId: () => this.currentNodeId,
-      
+
       // ✨ [新增] 获取 Session Engine
       getSessionEngine: () => this.sessionEngine,
 
@@ -529,6 +529,10 @@ export class PluginManager {
    */
   getTitleBarButtons(): TitleBarButtonConfig[] {
     return this.titleBarButtons;
+  }
+
+  setNodeId(nodeId: string): void {
+    this.currentNodeId = nodeId;
   }
 
   destroy(): void {

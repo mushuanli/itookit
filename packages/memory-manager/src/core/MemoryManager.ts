@@ -110,6 +110,9 @@ export class MemoryManager {
         const mergedOptions: EditorOptions = {
             ...editorConfig,       // 静态配置 (Plugins list 等)
             ...runtimeOptions,     // 运行时配置 (Content, Title, NodeId)
+            
+            // ✨ [修复] 显式注入 Session Engine，使插件能够访问全局数据
+            sessionEngine: this.engine, 
 
             // 插件合并策略：连接数组
             plugins: [
