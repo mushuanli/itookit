@@ -618,7 +618,14 @@ export class VFSCore {
   async updateSRSItemById(nodeId: string, clozeId: string, stats: Partial<SRSItemData>): Promise<void> {
     this._ensureInitialized();
     
-    const tx = await this.vfs.storage.beginTransaction([VFS_STORES.SRS_ITEMS, VFS_STORES.VNODES]);
+    // [修复] 添加 VFS_STORES.NODE_TAGS 到事务中
+    // 原因：this.vfs.storage.loadVNode 内部会自动获取 Tags，因此需要 node_tags 表的访问权限
+    const tx = await this.vfs.storage.beginTransaction([
+        VFS_STORES.SRS_ITEMS, 
+        VFS_STORES.VNODES, 
+        VFS_STORES.NODE_TAGS 
+    ]);
+
     try {
         // 我们需要加载 VNode 以获取 moduleId，确保数据一致性
         const vnode = await this.vfs.storage.loadVNode(nodeId, tx);
@@ -639,6 +646,8 @@ export class VFSCore {
         await this.vfs.storage.srsStore.put(newItem, tx);
         await tx.done;
     } catch (e) {
+        // 建议打印原始错误以便调试
+        console.error('[VFSCore] updateSRSItemById failed:', e);
         throw new VFSError(VFSErrorCode.TRANSACTION_FAILED, 'Failed to update SRS', e);
     }
   }
