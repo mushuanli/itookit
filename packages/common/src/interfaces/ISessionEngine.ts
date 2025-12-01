@@ -137,6 +137,24 @@ export interface ISessionEngine {
      */
     setTagsBatch?(updates: Array<{ id: string; tags: string[] }>): Promise<void>;
 
+    // --- ✨ [新增] SRS Support ---
+    
+    /** 
+     * 获取当前文件的所有 SRS 状态 
+     * 返回 Map: { "clozeId": SRSItemData }
+     */
+    getSRSStatus?(fileId: string): Promise<Record<string, any>>;
+    
+    /** 
+     * 更新单个卡片状态 
+     */
+    updateSRSStatus?(fileId: string, clozeId: string, status: any): Promise<void>;
+    
+    /**
+     * 获取全局或当前模块的到期卡片
+     */
+    getDueCards?(limit?: number): Promise<any[]>;
+    
     // --- Events ---
     
     /** 订阅数据变更事件 */

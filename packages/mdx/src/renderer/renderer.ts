@@ -3,7 +3,7 @@ import { Marked } from 'marked';
 import { PluginManager } from '../core/plugin-manager';
 import type { MDxPlugin } from '../core/plugin';
 import type { VFSCore } from '@itookit/vfs-core';
-import type { IPersistenceAdapter } from '@itookit/common';
+import type { IPersistenceAdapter, ISessionEngine } from '@itookit/common';
 import { slugify } from '@itookit/common';
 
 export interface MDxRendererConfig {
@@ -11,6 +11,7 @@ export interface MDxRendererConfig {
   vfsCore?: VFSCore;
   nodeId?: string;
   persistenceAdapter?: IPersistenceAdapter;
+  sessionEngine?: ISessionEngine; // ✨ [新增]
   [key: string]: any;
 }
 
@@ -42,6 +43,11 @@ export class MDxRenderer {
 
     if (config.persistenceAdapter) {
       this.pluginManager.setDataAdapter(config.persistenceAdapter);
+    }
+
+    // ✨ [新增] 注入 Session Engine
+    if (config.sessionEngine) {
+      this.pluginManager.setSessionEngine(config.sessionEngine);
     }
   }
 

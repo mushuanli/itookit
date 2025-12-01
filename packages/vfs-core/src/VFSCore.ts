@@ -11,7 +11,7 @@ import { EnhancedMiddlewareRegistry } from './core/EnhancedMiddlewareRegistry';
 import { MiddlewareFactory } from './core/MiddlewareFactory';
 import { ContentMiddleware } from './middleware/base/ContentMiddleware';
 import { PlainTextMiddleware } from './middleware/PlainTextMiddleware';
-import { VNode, VNodeType, TagData, VFS_STORES } from './store/types'; 
+import { VNode, VNodeType, TagData, VFS_STORES,SRSItemData } from './store/types'; 
 import { VFSError, VFSErrorCode, SearchQuery } from './core/types';
 
 /**
@@ -351,16 +351,12 @@ export class VFSCore {
   }
 
   // [新增] 批量移动节点 API
-  async batchMoveNodes(moduleName: string, nodeIds: string[], targetParentId: string | null): Promise<void> {
+  async batchMoveNodes(_moduleName: string, nodeIds: string[], targetParentId: string | null): Promise<void> {
     this._ensureInitialized();
-    // 确保 targetParentId 属于该模块（如果是 null 则为根目录，无需检查）
-    if (targetParentId) {
-        const node = await this.vfs.storage.loadVNode(targetParentId);
-        if (!node) throw new VFSError(VFSErrorCode.NOT_FOUND, `Target parent ${targetParentId} not found`);
-        if (node.moduleId !== moduleName) throw new VFSError(VFSErrorCode.INVALID_OPERATION, `Cannot move nodes across modules via this API`);
-    }
     
     // 调用底层批量移动
+    // 底层 batchMove 会根据 targetParent 的模块属性，或者当前事务逻辑来处理移动
+    // 跨模块移动时的 SRS 更新逻辑已在 VFS.ts 中处理
     await this.vfs.batchMove(nodeIds, targetParentId);
   }
 
@@ -556,10 +552,8 @@ export class VFSCore {
   
 
   /**
-   * [修改] 按条件搜索节点
-   * @param query 搜索条件
-   * @param targetModule 目标搜索范围（undefined 表示全库）
-   * @param callerModule 发起搜索的模块名（用于权限校验）
+   * 按条件搜索节点
+   * [包含权限过滤逻辑]
    */
   async searchNodes(query: SearchQuery, targetModule?: string, callerModule?: string): Promise<VNode[]> {
     this._ensureInitialized();
@@ -567,7 +561,7 @@ export class VFSCore {
     // 1. 执行底层搜索
     const results = await this.vfs.searchNodes(query, targetModule);
 
-    // 2. [新增] 权限过滤
+    // 2. 权限过滤
     return results.filter(node => {
         // 如果节点属于发起者自己的模块，总是可见
         if (node.moduleId === callerModule) return true;
@@ -584,6 +578,103 @@ export class VFSCore {
         return true;
     });
   }
+
+  // ==================== [新增] SRS 高级 API ====================
+
+  /**
+   * 更新单个 SRS 状态
+   * 自动处理模块 ID 填充
+   */
+  async updateSRSItem(moduleName: string, path: string, clozeId: string, stats: Partial<SRSItemData>): Promise<void> {
+    this._ensureInitialized();
+    const nodeId = await this.vfs.pathResolver.resolve(moduleName, path);
+    if (!nodeId) throw new VFSError(VFSErrorCode.NOT_FOUND, `Node not found: ${moduleName}:${path}`);
+
+    // 使用事务确保原子更新
+    const tx = await this.vfs.storage.beginTransaction([VFS_STORES.SRS_ITEMS]);
+    try {
+        const existing = await this.vfs.storage.srsStore.get(nodeId, clozeId, tx);
+        const newItem: SRSItemData = {
+            nodeId,
+            clozeId,
+            moduleId: moduleName, // 确保存储正确的模块ID
+            dueAt: stats.dueAt ?? Date.now(),
+            interval: stats.interval ?? 0,
+            ease: stats.ease ?? 2.5,
+            reviewCount: (existing?.reviewCount || 0) + 1,
+            lastReviewedAt: Date.now(),
+            ...stats // 允许覆盖
+        };
+        await this.vfs.storage.srsStore.put(newItem, tx);
+        await tx.done;
+    } catch (e) {
+        throw new VFSError(VFSErrorCode.TRANSACTION_FAILED, 'Failed to update SRS', e);
+    }
+  }
+  
+  /**
+   * 通过 NodeId 直接更新 SRS (供 Adapter 使用以提升性能)
+   */
+  async updateSRSItemById(nodeId: string, clozeId: string, stats: Partial<SRSItemData>): Promise<void> {
+    this._ensureInitialized();
+    
+    const tx = await this.vfs.storage.beginTransaction([VFS_STORES.SRS_ITEMS, VFS_STORES.VNODES]);
+    try {
+        // 我们需要加载 VNode 以获取 moduleId，确保数据一致性
+        const vnode = await this.vfs.storage.loadVNode(nodeId, tx);
+        if(!vnode) throw new VFSError(VFSErrorCode.NOT_FOUND, 'Node not found');
+        
+        const existing = await this.vfs.storage.srsStore.get(nodeId, clozeId, tx);
+        const newItem: SRSItemData = {
+            nodeId,
+            clozeId,
+            moduleId: vnode.moduleId!, // 使用 VNode 真实的 moduleId
+            dueAt: stats.dueAt ?? Date.now(),
+            interval: stats.interval ?? 0,
+            ease: stats.ease ?? 2.5,
+            reviewCount: (existing?.reviewCount || 0) + 1,
+            lastReviewedAt: Date.now(),
+            ...stats
+        };
+        await this.vfs.storage.srsStore.put(newItem, tx);
+        await tx.done;
+    } catch (e) {
+        throw new VFSError(VFSErrorCode.TRANSACTION_FAILED, 'Failed to update SRS', e);
+    }
+  }
+
+  /**
+   * 获取某文件的所有 SRS 状态 (Map 形式)
+   */
+  async getSRSItemsForFile(moduleName: string, path: string): Promise<Record<string, SRSItemData>> {
+    this._ensureInitialized();
+    const nodeId = await this.vfs.pathResolver.resolve(moduleName, path);
+    if (!nodeId) return {};
+    return this.getSRSItemsByNodeId(nodeId);
+  }
+
+  /**
+   * 通过 NodeID 获取所有 SRS 状态
+   */
+  async getSRSItemsByNodeId(nodeId: string): Promise<Record<string, SRSItemData>> {
+    const items = await this.vfs.storage.srsStore.getAllForNode(nodeId);
+    return items.reduce((acc, item) => {
+        acc[item.clozeId] = item;
+        return acc;
+    }, {} as Record<string, SRSItemData>);
+  }
+
+  /**
+   * 获取所有到期的复习任务
+   * @param moduleName 可选，仅获取指定模块的任务
+   * @param limit 限制返回数量
+   */
+  async getDueSRSItems(moduleName?: string, limit: number = 50): Promise<SRSItemData[]> {
+      this._ensureInitialized();
+      return this.vfs.storage.srsStore.getDueItems(moduleName, limit);
+  }
+
+  // ==================== 底层访问 ====================
 
   /**
    * 获取底层 VFS 实例（高级用法）
@@ -648,7 +739,7 @@ export class VFSCore {
 
   private async _saveModuleRegistry(): Promise<void> {
     if (!this.moduleRegistry.has('__vfs_meta__')) {
-      await this.mount('__vfs_meta__', 'VFS internal metadata');
+      await this.mount('__vfs_meta__', { description: 'VFS internal metadata', isProtected: true });
     }
     const metaPath = '/modules';
     const data = this.moduleRegistry.toJSON();
@@ -742,7 +833,7 @@ export class VFSCore {
     }
   }
 
-  // --- [新增] 静态工具方法 ---
+  // ==================== 静态工具方法 ====================
 
   /**
    * 数据库克隆 (底层核心能力)
