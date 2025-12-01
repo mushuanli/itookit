@@ -33,6 +33,6 @@ export { TagEditorComponent, type TagEditorParams } from './components/TagEditor
 
 // LLM Interfaces
 export * from './interfaces/llm/ILLM';
-
+export * from './interfaces/llm/IExecutor';
 // LLM Constants
 export * from './constants/llmDefaults';
