@@ -1,6 +1,5 @@
 /* @file: mdx/styles/plugin-cloze.css
- * Styles for the Cloze Plugin with BEM and namespace conventions.
- * Block: mdx-cloze
+ * 5 States: New, Cooling, Learning, Due/Danger, Cleared
  */
 
 .mdx-cloze {
@@ -11,39 +10,136 @@
   border-radius: 3px;
   cursor: pointer;
   transition: all 0.2s ease;
-  border: 1px solid #ddd;
-  background-color: #f9f9f9;
+  border: 2px solid #d0d7de;
+  background-color: #f6f8fa;
   position: relative;
   vertical-align: baseline;
 }
 
-/* 隐藏状态 */
-.mdx-cloze.hidden .mdx-cloze__content {
-  display: none;
-}
+/* Basic visibility */
+.mdx-cloze.hidden .mdx-cloze__content { display: none; }
+.mdx-cloze.hidden .mdx-cloze__placeholder { display: inline; }
+.mdx-cloze:not(.hidden) .mdx-cloze__placeholder { display: none; }
 
-.mdx-cloze.hidden .mdx-cloze__placeholder {
-  display: inline;
-}
-
-.mdx-cloze:not(.hidden) .mdx-cloze__placeholder {
-  display: none;
-}
-
-/* 占位符样式 */
 .mdx-cloze__placeholder {
-  color: #999;
-  font-style: italic;
-  user-select: none;
+  font-weight: 700;
+  font-family: monospace;
+  letter-spacing: 1px;
 }
 
-/* 内容样式 */
 .mdx-cloze__content {
   font-weight: 500;
-  color: #333;
 }
 
-/* 音频图标 */
+/* === STATE 1: New (Blue) - 未探索 === */
+.mdx-cloze.is-new {
+  border-color: #0969da;
+  border-style: dashed;
+  background-color: #ddf4ff;
+}
+.mdx-cloze.is-new .mdx-cloze__placeholder,
+.mdx-cloze.is-new .mdx-cloze__content {
+  color: #0550ae;
+}
+
+/* === STATE 2: Cooling (Yellow) - 冷却中 === */
+.mdx-cloze.is-cooling {
+  border-color: #d4a72c;
+  background-color: #fff8dc;
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+.mdx-cloze.is-cooling .mdx-cloze__placeholder,
+.mdx-cloze.is-cooling .mdx-cloze__content {
+  color: #7c6400;
+}
+.mdx-cloze.is-cooling::after {
+  content: '⏳';
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  font-size: 12px;
+}
+
+/* === STATE 3: Learning (Orange) - 短期攻坚 === */
+.mdx-cloze.is-learning {
+  border-color: #bf8700;
+  border-width: 2px;
+  background-color: #fff8c5;
+  box-shadow: 0 0 6px rgba(191, 135, 0, 0.4);
+}
+.mdx-cloze.is-learning .mdx-cloze__placeholder,
+.mdx-cloze.is-learning .mdx-cloze__content {
+  color: #7c5800;
+}
+
+/* === STATE 4: Due (Red) - 需复习 === */
+.mdx-cloze.is-due {
+  border-color: #cf222e;
+  background-color: #ffebe9;
+  animation: duePulse 2s ease-in-out infinite;
+}
+.mdx-cloze.is-due .mdx-cloze__placeholder,
+.mdx-cloze.is-due .mdx-cloze__content {
+  color: #a40e26;
+}
+.mdx-cloze.is-due:not(.hidden) {
+  animation: none;
+}
+
+/* === STATE 5: Danger (Red Strong) - 严重过期 === */
+.mdx-cloze.is-danger {
+  border-color: #a40e26;
+  border-width: 3px;
+  background-color: #ffcdd2;
+  animation: dangerPulse 1s ease-in-out infinite;
+}
+.mdx-cloze.is-danger .mdx-cloze__placeholder,
+.mdx-cloze.is-danger .mdx-cloze__content {
+  color: #7f0000;
+}
+.mdx-cloze.is-danger::before {
+  content: '⚠️';
+  position: absolute;
+  top: -10px;
+  right: -10px;
+  font-size: 14px;
+  animation: shake 0.5s ease-in-out infinite;
+}
+
+/* === STATE 6: Cleared (Green) - 已掌握 === */
+.mdx-cloze.is-cleared {
+  border-color: transparent;
+  background-color: rgba(218, 251, 225, 0.5);
+}
+.mdx-cloze.is-cleared .mdx-cloze__placeholder,
+.mdx-cloze.is-cleared .mdx-cloze__content {
+  color: #116329;
+}
+/* 如果 Cleared 被强制隐藏（用户测试），显示更明显的绿色 */
+.mdx-cloze.is-cleared.hidden {
+  border-color: #1a7f37;
+  background-color: #dafbe1;
+}
+
+/* === Animations === */
+@keyframes duePulse {
+  0%, 100% { box-shadow: 0 0 4px rgba(207, 34, 46, 0.3); }
+  50% { box-shadow: 0 0 8px rgba(207, 34, 46, 0.6); }
+}
+
+@keyframes dangerPulse {
+  0%, 100% { box-shadow: 0 0 6px rgba(164, 14, 38, 0.5); transform: scale(1); }
+  50% { box-shadow: 0 0 12px rgba(164, 14, 38, 0.8); transform: scale(1.02); }
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-2px); }
+  75% { transform: translateX(2px); }
+}
+
+/* Audio icon */
 .mdx-cloze__audio {
   display: inline-flex;
   align-items: center;
@@ -53,103 +149,84 @@
   margin-left: 0.25em;
   cursor: pointer;
   color: #4a90e2;
-  transition: color 0.2s ease;
+  opacity: 0.7;
 }
-
 .mdx-cloze__audio:hover {
-  color: #357abd;
+  opacity: 1;
+  transform: scale(1.1);
 }
 
-/* 悬停效果 */
-.mdx-cloze:hover {
-  border-color: #4a90e2;
-  background-color: #e8f4fd;
+/* Hover effect */
+.mdx-cloze:not(.is-cooling):hover {
+  filter: brightness(0.97);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
-/* 导航高亮 */
+/* Navigation highlight */
 .mdx-cloze--highlight {
-  animation: clozeHighlight 1s ease;
-  border-color: #f39c12;
-  box-shadow: 0 0 8px rgba(243, 156, 18, 0.5);
+  animation: clozeHighlight 1.5s ease !important;
+  z-index: 10;
 }
 
 @keyframes clozeHighlight {
-  0%, 100% {
-    box-shadow: 0 0 8px rgba(243, 156, 18, 0.5);
-  }
-  50% {
-    box-shadow: 0 0 16px rgba(243, 156, 18, 0.8);
-  }
+  0% { box-shadow: 0 0 0 0 rgba(243, 156, 18, 0.7); transform: scale(1); }
+  50% { box-shadow: 0 0 0 6px rgba(243, 156, 18, 0); transform: scale(1.05); }
+  100% { box-shadow: 0 0 0 0 rgba(243, 156, 18, 0); transform: scale(1); }
 }
 
-/* 记忆状态样式 */
-.mdx-cloze.is-new {
-  border-color: #3498db;
-  background-color: #ebf5fb;
-}
-
-.mdx-cloze.is-learning {
-  border-color: #f39c12;
-  background-color: #fef5e7;
-}
-
-.mdx-cloze.is-mature {
-  border-color: #27ae60;
-  background-color: #eafaf1;
-}
-
-.mdx-cloze.is-due {
-  border-color: #e74c3c;
-  background-color: #fadbd8;
-  animation: duePulse 2s ease-in-out infinite;
-}
-
-@keyframes duePulse {
-  0%, 100% {
-    box-shadow: 0 0 4px rgba(231, 76, 60, 0.3);
-  }
-  50% {
-    box-shadow: 0 0 8px rgba(231, 76, 60, 0.6);
-  }
-}
-
-/* 深色主题支持 */
+/* === Dark Theme === */
 @media (prefers-color-scheme: dark) {
   .mdx-cloze {
-    border-color: #444;
-    background-color: #2d2d2d;
-  }
-
-  .mdx-cloze__content {
-    color: #e0e0e0;
-  }
-
-  .mdx-cloze__placeholder {
-    color: #888;
-  }
-
-  .mdx-cloze:hover {
-    border-color: #4a90e2;
-    background-color: #1a3a52;
+    background-color: #161b22;
+    border-color: #30363d;
   }
 
   .mdx-cloze.is-new {
-    border-color: #5dade2;
-    background-color: #1a3a52;
+    border-color: #58a6ff;
+    background-color: rgba(56, 139, 253, 0.15);
   }
+  .mdx-cloze.is-new .mdx-cloze__placeholder,
+  .mdx-cloze.is-new .mdx-cloze__content { color: #58a6ff; }
+
+  .mdx-cloze.is-cooling {
+    border-color: #d29922;
+    background-color: rgba(210, 153, 34, 0.15);
+  }
+  .mdx-cloze.is-cooling .mdx-cloze__placeholder,
+  .mdx-cloze.is-cooling .mdx-cloze__content { color: #d29922; }
 
   .mdx-cloze.is-learning {
-    border-color: #f5b041;
-    background-color: #4a3c1a;
+    border-color: #d29922;
+    background-color: rgba(187, 128, 9, 0.2);
+    box-shadow: 0 0 6px rgba(210, 153, 34, 0.4);
   }
-
-  .mdx-cloze.is-mature {
-    border-color: #58d68d;
-    background-color: #1a4d2e;
-  }
+  .mdx-cloze.is-learning .mdx-cloze__placeholder,
+  .mdx-cloze.is-learning .mdx-cloze__content { color: #e3b341; }
 
   .mdx-cloze.is-due {
-    border-color: #ec7063;
-    background-color: #4a1a1a;
+    border-color: #f85149;
+    background-color: rgba(248, 81, 73, 0.15);
+  }
+  .mdx-cloze.is-due .mdx-cloze__placeholder,
+  .mdx-cloze.is-due .mdx-cloze__content { color: #f85149; }
+
+  .mdx-cloze.is-danger {
+    border-color: #ff6b6b;
+    background-color: rgba(255, 107, 107, 0.2);
+  }
+  .mdx-cloze.is-danger .mdx-cloze__placeholder,
+  .mdx-cloze.is-danger .mdx-cloze__content { color: #ff8a8a; }
+
+  .mdx-cloze.is-cleared {
+    border-color: transparent;
+    background-color: rgba(46, 160, 67, 0.1);
+  }
+  .mdx-cloze.is-cleared .mdx-cloze__placeholder,
+  .mdx-cloze.is-cleared .mdx-cloze__content { color: #3fb950; }
+  
+  .mdx-cloze.is-cleared.hidden {
+    border-color: #3fb950;
+    background-color: rgba(46, 160, 67, 0.2);
   }
 }
