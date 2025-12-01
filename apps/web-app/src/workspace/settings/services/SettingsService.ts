@@ -6,7 +6,6 @@ import { VFSCore, VFSErrorCode, VFSEventType, VFSEvent } from '@itookit/vfs-core
 import { SettingsState, LLMConnection, MCPServer, Contact, Tag } from '../types';
 import { 
     LLM_DEFAULT_CONNECTIONS, 
-    PROTECTED_TAGS, 
 } from '../constants';
 
 const CONFIG_MODULE = '__config';
@@ -150,12 +149,6 @@ export class SettingsService {
             if (def) {
                 this.state.connections.push(def);
                 await this.saveEntity('connections');
-            }
-        }
-        // 2. 默认 Tags (Protected)
-        for (const tagName of PROTECTED_TAGS) {
-            if (!this.state.tags.some(t => t.name === tagName)) {
-                await this.vfs.updateTag(tagName, { color: '#9ca3af' });
             }
         }
     }

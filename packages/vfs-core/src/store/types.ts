@@ -108,8 +108,13 @@ export interface ContentData {
 export interface TagData {
   name: string;
   color?: string; // 可选，用于UI展示
-  refCount: number; // [新增] 引用计数
+  refCount: number; // 引用计数
   createdAt: number;
+  /**
+   * [新增] 标签保护状态
+   * true: 标签为系统预置或受保护，不可删除
+   */
+  isProtected?: boolean; 
 }
 
 // 节点-标签关联数据结构

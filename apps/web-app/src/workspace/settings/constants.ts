@@ -3,16 +3,14 @@
 import { 
     LLM_PROVIDER_DEFAULTS, 
     LLM_DEFAULT_ID, 
-    LLM_TEMP_DEFAULT_ID,
     LLMConnection 
 } from '@itookit/common';
 
 // 导出常量供应用其他部分使用
 export { LLM_PROVIDER_DEFAULTS };
 
-// 保护的 Tags 和 Agent IDs，不允许用户删除
-export const PROTECTED_TAGS = ['default'];
-export const PROTECTED_AGENT_IDS = [LLM_DEFAULT_ID, LLM_TEMP_DEFAULT_ID];
+// 保护 Agent IDs，不允许用户删除
+export const LLM_TEMP_ID = 'default-temp';
 
 const LLM_DEFAULT_NAME = '默认';
 const LLM_TEMP_DEFAULT_NAME = '临时';
@@ -60,7 +58,7 @@ export const LLM_DEFAULT_AGENTS = [
         }
     },
     {
-        id: LLM_TEMP_DEFAULT_ID,
+        id: LLM_TEMP_ID,
         name: LLM_TEMP_DEFAULT_NAME,
         icon: '⚡️',
         description: '一次性问答，不保留对话历史',

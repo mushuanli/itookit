@@ -1,0 +1,3524 @@
+// file: src/llm/TopicManager.js
+
+import { ConfigManager } from '../config/configManager.js';
+import { generateId } from '../common/utils/utils.js';
+import { IContentProvider } from '../sidebar/IContentProvider.js';
+
+// 定义用于存储所有LLM对话的ConfigManager模块名
+export const LLM_TOPICS_MODULE = 'llm_topics';
+
+/**
+ * @typedef {Object} Session
+ * @property {string} id - Session 唯一标识
+ * @property {string} title - Session 标题
+ * @property {Array<{role: string, content: string}>} history - 对话历史
+ * @property {number} createdAt - 创建时间戳
+ * @property {number} updatedAt - 最后更新时间戳
+ * @property {object} metadata - 附加元数据（如最后使用的 agent）
+ */
+
+
+/**
+ * @class TopicProvider
+ * @implements {IContentProvider}
+ * @description 一个专门用于管理 LLM Topics 的 Content Provider。
+ * 它实现了 IContentProvider 接口，以便能被 Sidebar 等通用组件使用，
+ * 同时封装了 Topic 特有的业务逻辑，如自动生成标签。
+ */
+export class TopicProvider extends IContentProvider {
+    constructor() {
+        super();
+        // 底层存储仍然依赖 ConfigManager
+        this.configManager = ConfigManager.instance();
+        this.moduleName = LLM_TOPICS_MODULE;
+
+        this._listeners = new Map([['change', []], ['create', []], ['delete', []]]);
+        this._configUnsubscribers = [
+            this.configManager.on('module:file:set', p => this._forwardEvent(p, 'change')),
+            this.configManager.on('module:file:delete', p => this._forwardEvent(p, 'delete'))
+        ];
+    }
+
+    _forwardEvent(payload, eventName) {
+        if (payload.module === this.moduleName) {
+            this._emit(eventName, { id: payload.path, data: payload.data });
+        }
+    }
+
+    /**
+     * @override
+     * 创建一个新 Topic。这是 createItem 的一个更具体的别名。
+     * @param {string} title - Topic 的标题
+     * @returns {object} 新创建的 Topic 对象 (topicContent)
+     */
+    createNewTopic(title) { // <--- 移除了 initialPrompt 参数
+        const sanitizedTitle = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').substring(0, 50) || 'new-topic';
+        const topicId = generateId('topic');
+        const path = `/${sanitizedTitle}-${topicId}.json`;
+        
+        const topicContent = {
+            id: topicId,
+            path: path,
+            title: title,
+            history: [], // <--- **核心修改：总是创建一个空的 history**
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+        };
+
+        return topicContent;
+    }
+    
+    /**
+     * @override
+     * IContentProvider 的 createItem 实现。
+     * 为了简单起见，我们假设通过 prompt 创建。
+     */
+    async createItem({ suggestedPath, type, initialContent }) {
+        if (type === 'file') {
+            const topic = this.createNewTopic(suggestedPath.split('/').pop() || 'New Topic');
+            await this.saveItem(topic.path, { content: topic, tags: [] });
+            return { id: topic.path };
+        }
+        throw new Error("TopicProvider does not support creating directories.");
+    }
+    
+    /**
+     * @override
+     */
+    async saveItem(id, itemData) {
+        if (!id || !itemData || !itemData.content) {
+            console.error("Invalid data for saveItem:", { id, itemData });
+            return;
+        }
+        
+        const topicData = itemData.content;
+        topicData.updatedAt = Date.now();
+        
+        // --- Topic 特有的业务逻辑：自动生成标签 ---
+        const agentIds = [...new Set(topicData.history.map(msg => msg.agentId).filter(Boolean))];
+        itemData.tags = agentIds.map(agentId => {
+            const agent = this.configManager.getLLMExecutable(agentId);
+            return {
+                name: agent ? agent.name : agentId,
+                color: this.getRandomColor()
+            };
+        });
+
+        this.configManager.setModuleFile(this.moduleName, id, itemData);
+    }
+
+    /**
+     * @override
+     */
+    async getItem(id) {
+        return this.configManager.getModuleFile(this.moduleName, id);
+    }
+    
+    /**
+     * @override
+     */
+    async listItems() {
+        const allPaths = this.configManager.listModuleFiles(this.moduleName);
+        return allPaths.map(path => ({
+            id: path,
+            path: path,
+            name: this._getTitleFromPath(path),
+            type: 'file',
+            tags: this.configManager.getModuleFile(this.moduleName, path)?.tags || []
+        })).sort((a,b) => a.name.localeCompare(b.name));
+    }
+
+    _getTitleFromPath(path) {
+        try {
+            const content = this.configManager.getModuleFile(this.moduleName, path)?.content;
+            if (content && content.title) return content.title;
+        } catch (e) {}
+        return path.split('/').pop().replace('.json', '');
+    }
+
+    /**
+     * @override
+     */
+    async deleteItem(id) {
+        this.configManager.deleteModuleFile(this.moduleName, id);
+    }
+
+    on(eventName, callback) {
+        if (!this._listeners.has(eventName)) this._listeners.set(eventName, []);
+        this._listeners.get(eventName).push(callback);
+        return () => this.off(eventName, callback);
+    }
+
+    off(eventName, callback) {
+        const listeners = this._listeners.get(eventName);
+        if (listeners) {
+            const index = listeners.indexOf(callback);
+            if (index > -1) listeners.splice(index, 1);
+        }
+    }
+
+    _emit(eventName, payload) {
+        this._listeners.get(eventName)?.forEach(cb => cb(payload));
+    }
+    
+    destroy() {
+        this._configUnsubscribers.forEach(unsub => unsub());
+        this._listeners.clear();
+    }
+
+    getRandomColor() {
+        const colors = ['#ff6b6b', '#4ecdc4', '#45b7d1', '#96ceb4', '#feca57', '#ff9ff3'];
+        return colors[Math.floor(Math.random() * colors.length)];
+    }
+}
+/**
+ * @file src/llm/core/errors.js
+ * @description Defines custom error classes for the library.
+ */
+
+export class LLMError extends Error {
+    /**
+     * Custom error for all library-related issues.
+     * @param {string} message - The error message.
+     * @param {object} details - Additional error details.
+     * @param {Error} [details.cause] - The original error object.
+     * @param {string} details.provider - The name of the LLM provider.
+     * @param {number} [details.statusCode] - The HTTP status code from the API response.
+     */
+    constructor(message, { cause, provider, statusCode }) {
+        super(message);
+        this.name = 'LLMError';
+        this.cause = cause;
+        this.provider = provider;
+        this.statusCode = statusCode;
+    }
+}/**
+ * @file src/llm/chat/plugins/ThinkingPlugin.js
+ * @description An optional plugin for ChatEditor to display "thinking process" streams in a collapsible block.
+ */
+
+export class ThinkingPlugin {
+    /**
+     * @param {object} [options={}]
+     * @param {boolean} [options.autoExpand=false] - Whether to automatically expand the thinking block.
+     */
+    constructor(options = {}) {
+        this.options = {
+            autoExpand: false,
+            ...options
+        };
+        this.name = 'ThinkingPlugin';
+        this.thinkingManagers = new Map();
+    }
+
+    /**
+     * Called by ChatEditor to install the plugin.
+     * @param {ChatEditor} chatEditor - The instance of the ChatEditor.
+     */
+    install(chatEditor) {
+        this.chatEditor = chatEditor;
+
+        // Listen for when a new message block's DOM is ready
+        this.chatEditor.on('messageBlockAdded', ({ blockId, element }) => {
+            // We don't create the UI yet, only when the first thinking chunk arrives.
+            // This prepares a manager for each block.
+            this.thinkingManagers.set(blockId, new ThinkingUIManager(element, this.options));
+        });
+
+        // Listen for thinking chunks for a specific block
+        this.chatEditor.on('thinkingChunkReceived', ({ blockId, chunk }) => {
+            if (this.thinkingManagers.has(blockId)) {
+                this.thinkingManagers.get(blockId).append(chunk);
+            }
+        });
+
+        // Clean up when a block is removed (important for memory management)
+        this.chatEditor.on('messageBlockDestroyed', ({ blockId }) => {
+            if (this.thinkingManagers.has(blockId)) {
+                this.thinkingManagers.get(blockId).destroy();
+                this.thinkingManagers.delete(blockId);
+            }
+        });
+    }
+
+    /**
+     * Called when the ChatEditor is destroyed.
+     */
+    destroy() {
+        this.thinkingManagers.forEach(manager => manager.destroy());
+        this.thinkingManagers.clear();
+        // Unsubscribe from chatEditor events if the `on` method returns an unsubscriber function.
+        // For simplicity, we assume ChatEditor handles listener cleanup on its own destroy.
+        console.log('ThinkingPlugin destroyed.');
+    }
+}
+
+/**
+ * @private
+ * Manages the DOM and state for a single thinking block within a message.
+ */
+class ThinkingUIManager {
+    constructor(blockElement, options) {
+        this.blockElement = blockElement;
+        this.options = options;
+        this.thinkingContent = '';
+        this.detailsElement = null;
+        this.contentElement = null;
+    }
+
+    _ensureElements() {
+        if (this.detailsElement) return;
+
+        // Create DOM structure
+        this.detailsElement = document.createElement('details');
+        this.detailsElement.className = 'chat-thinking-details';
+        this.detailsElement.open = this.options.autoExpand;
+        this.detailsElement.innerHTML = `
+            <summary>
+                <span>🤔 Thinking Process</span>
+            </summary>
+            <pre class="chat-thinking-details-content"></pre>
+        `;
+
+        this.contentElement = this.detailsElement.querySelector('.chat-thinking-details-content');
+        this.contentElement.textContent = this.thinkingContent;
+
+        // Append to the message block's main content area
+        const renderContent = this.blockElement.querySelector('.chat-message-render-content');
+        if (renderContent) {
+            renderContent.appendChild(this.detailsElement);
+        }
+
+        this._addControls();
+    }
+
+    append(chunk) {
+        this._ensureElements();
+        this.thinkingContent += chunk;
+        this.contentElement.textContent = this.thinkingContent;
+        // Auto-scroll the thinking pre block
+        this.contentElement.scrollTop = this.contentElement.scrollHeight;
+    }
+
+    _addControls() {
+        const summary = this.detailsElement.querySelector('summary');
+        const controls = document.createElement('span');
+        controls.className = 'chat-thinking-controls';
+        controls.innerHTML = `
+            <button class="chat-thinking-control-btn" data-action="copy" title="Copy thinking process">
+                <i class="fas fa-copy"></i>
+            </button>
+        `;
+        
+        summary.appendChild(controls);
+
+        const copyBtn = controls.querySelector('[data-action="copy"]');
+        copyBtn.addEventListener('click', this._handleCopyClick);
+    }
+    
+    _handleCopyClick = async (e) => {
+        e.stopPropagation(); // Prevent details toggling
+        e.preventDefault();
+        
+        const button = e.currentTarget;
+        try {
+            await navigator.clipboard.writeText(this.thinkingContent);
+            button.innerHTML = '<i class="fas fa-check"></i>';
+            setTimeout(() => {
+                button.innerHTML = '<i class="fas fa-copy"></i>';
+            }, 2000);
+        } catch (err) {
+            console.error('Failed to copy thinking process:', err);
+        }
+    };
+
+
+    destroy() {
+        // Remove event listeners to prevent memory leaks
+        const copyBtn = this.detailsElement?.querySelector('[data-action="copy"]');
+        if (copyBtn) {
+            copyBtn.removeEventListener('click', this._handleCopyClick);
+        }
+    }
+}/**
+ * @file src/llm/executor/ExecutorFactory.js
+ * @description 根据 Executable 的类型创建具体执行器实例的工厂类
+ */
+
+import { ConfigManager } from '../../config/configManager.js';
+import { AgentExecutor } from './AgentExecutor.js';
+import { AgentGroupExecutor } from './AgentGroupExecutor.js';
+import { IExecutor } from './IExecutor.js';
+
+/**
+ * @class ExecutorFactory
+ * @description 工厂类，负责根据 Executable ID 创建对应的执行器实例
+ * 
+ * 支持的类型：
+ * - 'agent': 创建 AgentExecutor
+ * - 'group': 创建 AgentGroupExecutor
+ */
+export class ExecutorFactory {
+    /**
+     * 根据 Executable ID 创建并返回一个 IExecutor 实例
+     * 
+     * @param {string} executableId - Executable 的 ID
+     * @returns {import('./IExecutor.js').IExecutor} 执行器实例
+     * @throws {Error} 如果 Executable 不存在或类型未知
+     * 
+     * @example
+     * const executor = ExecutorFactory.create('my-agent-id');
+     * const result = await executor.run('用户输入', [], {});
+     */
+    static create(executableId) {
+        const configManager = ConfigManager.instance();
+        const executable = configManager.getLLMExecutable(executableId); 
+
+        if (!executable) {
+            throw new Error(`Executable with ID '${executableId}' not found.`);
+        }
+
+        switch (executable.type) {
+            case 'agent':
+                return new AgentExecutor(executableId);
+            case 'group':
+                return new AgentGroupExecutor(executableId);
+            default:
+                throw new Error(`Unknown executable type: '${executable.type}' for ID '${executableId}'`);
+        }
+    }
+}
+/**
+ * @file src/llm/executor/AgentExecutor.js
+ * @description 单个 Agent 的执行器，负责处理提示词模板、自动步骤和 LLM 调用
+ */
+
+import { IExecutor } from './IExecutor.js';
+import { ConfigManager } from '../../config/configManager.js';
+import { LLMService } from '../core/LLMService.js';
+
+/**
+ * @class AgentExecutor
+ * @extends IExecutor
+ * @description 执行单个 Agent 的逻辑，包括：
+ * - 提示词模板变量替换
+ * - 多步骤自动提示词执行
+ * - 历史记录管理
+ * - 流式响应处理
+ */
+export class AgentExecutor extends IExecutor {
+    /**
+     * @param {string} agentId - 要执行的 Agent 的 ID
+     * @throws {Error} 如果 Agent 不存在或类型不正确
+     */
+    constructor(agentId) {
+        super();
+        this.agentId = agentId;
+        this.configManager = ConfigManager.instance();
+        this.llmService = LLMService.getInstance();
+        
+        // +++ 修改为使用新的统一方法和数据结构 +++
+        this.executable = this.configManager.getLLMExecutable(this.agentId);
+        if (!this.executable || this.executable.type !== 'agent') {
+            throw new Error(`AgentExecutable with ID '${agentId}' not found or is not an agent type.`);
+        }
+        
+        this.client = this.llmService.getClient(this.executable.config.connectionId);
+    }
+
+    /**
+     * 执行 Agent
+     * 
+     * @param {string} userPrompt - 用户的初始输入
+     * @param {Array<import('./IExecutor.js').MessageHistoryItem>} [externalHistory=[]] - 外部传入的对话历史
+     * @param {Object} [initialVariables={}] - 初始变量，用于模板替换
+     * @param {import('./IExecutor.js').ExecutorCallbacks} [callbacks={}] - 用于流式响应和进度的回调
+     * @returns {Promise<import('./IExecutor.js').ExecutorResult>}
+     */
+    async run(userPrompt, externalHistory = [], initialVariables = {}, callbacks = {}) {
+        // ✅ 防御性类型检查：确保 userPrompt 是字符串
+        if (typeof userPrompt !== 'string') {
+            console.error('[AgentExecutor] userPrompt must be a string, received:', {
+                type: typeof userPrompt,
+                value: userPrompt,
+                agentId: this.agentId
+            });
+            
+            // 尝试智能转换
+            if (userPrompt && typeof userPrompt === 'object') {
+                // 如果是 group response 对象，提取文本摘要
+                if (userPrompt.type === 'group_response') {
+                    userPrompt = userPrompt.responses
+                        .map(r => `[${r.agentId}]: ${r.content}`)
+                        .join('\n\n');
+                    console.warn('[AgentExecutor] Converted group_response object to text');
+                } else {
+                    // 其他对象，转为 JSON
+                    userPrompt = JSON.stringify(userPrompt, null, 2);
+                    console.warn('[AgentExecutor] Converted object to JSON string');
+                }
+            } else {
+                // 兜底转换
+                userPrompt = String(userPrompt);
+            }
+        }
+
+        const { config } = this.executable;
+        const displayName = `${this.executable.icon || '🤖'} ${this.executable.name}`;
+        
+        // ✅ 验证和清理 autoPrompts
+        const autoPrompts = (config.autoPrompts || [])
+            .filter(prompt => prompt != null)
+            .map((prompt, index) => {
+                if (typeof prompt !== 'string') {
+                    console.warn(`[AgentExecutor] Auto prompt[${index}] is not a string:`, typeof prompt);
+                    return typeof prompt === 'object' ? JSON.stringify(prompt, null, 2) : String(prompt);
+                }
+                return prompt;
+            });
+        
+        const allPrompts = [userPrompt, ...autoPrompts];
+        const maxHistoryLength = config.maxHistoryLength ?? -1;
+
+        // 深拷贝历史记录，避免修改外部数据
+        const history = JSON.parse(JSON.stringify(externalHistory));
+        
+        // 如果 history 为空且有 system prompt，添加进去
+        if (history.length === 0 && config.systemPrompt) {
+            history.push({ role: 'system', content: config.systemPrompt });
+        }
+
+        let context = { ...initialVariables, user_prompt: userPrompt };
+        let finalResponse = '';
+
+        try {
+            for (let i = 0; i < allPrompts.length; i++) {
+                const isAutoStep = i > 0;
+                const currentPromptTemplate = allPrompts[i];
+                
+                // 执行变量替换
+                const formattedTemplate = this._formatPrompt(currentPromptTemplate, context);
+                
+                // 解析标题和内容
+                const { title, content: finalPrompt } = this._parsePrompt(formattedTemplate);
+                
+                // 触发步骤开始回调
+                callbacks.onStepStart?.(i, { title, prompt: formattedTemplate }, isAutoStep);
+
+                // 将处理后的提示词添加到历史记录
+                history.push({ role: 'user', content: finalPrompt });
+                
+                // 触发响应开始回调
+                callbacks.onResponseStart?.(i, this.agentId, displayName);
+
+                // 应用历史消息限制
+                const messagesToSend = this._limitHistory(history, maxHistoryLength);
+
+                // 调用 LLM API
+                const stream = await this.client.chat.create({
+                    model: config.modelName,
+                    messages: messagesToSend,
+                    stream: true,
+                    temperature: config.temperature,
+                });
+                
+                // 处理流式响应
+                let fullStepResponse = '';
+                for await (const chunk of stream) {
+                    const content = chunk.choices[0]?.delta?.content || '';
+                    if (content) {
+                        fullStepResponse += content;
+                        callbacks.onChunk?.(content);
+                    }
+                }
+                
+                // ✅ 将响应添加到历史记录，包含 agentId
+                history.push({ 
+                    role: 'assistant', 
+                    content: fullStepResponse, 
+                    agentId: this.agentId
+                });
+                
+                finalResponse = fullStepResponse;
+                
+                // 更新上下文变量，供后续步骤使用
+                context[`step_${i}_response`] = fullStepResponse;
+                context['last_response'] = fullStepResponse;
+
+                // 触发步骤结束回调
+                callbacks.onStepEnd?.(i, fullStepResponse, this.agentId);
+            }
+        } catch (error) {
+            console.error(`[AgentExecutor] Error executing agent '${this.agentId}':`, error);
+            callbacks.onError?.(error, this.agentId);
+            return { success: false, history, finalResponse: '' };
+        }
+
+        return { success: true, history, finalResponse };
+    }
+
+    /**
+     * 限制历史消息数量
+     * 
+     * @private
+     * @param {Array<import('./IExecutor.js').MessageHistoryItem>} history - 完整的消息历史
+     * @param {number} maxHistoryLength - 最大历史消息条数（-1 表示不限制）
+     * @returns {Array<import('./IExecutor.js').MessageHistoryItem>} 处理后的消息历史
+     */
+    _limitHistory(history, maxHistoryLength) {
+        // -1 表示不限制，直接返回全部历史
+        if (maxHistoryLength === -1) {
+            return history;
+        }
+        
+        // 0 表示不发送历史，只保留 system prompt（如果有）和最新的用户消息
+        if (maxHistoryLength === 0) {
+            const systemMessage = history.find(msg => msg.role === 'system');
+            const lastUserMessage = [...history].reverse().find(msg => msg.role === 'user');
+            
+            return [
+                ...(systemMessage ? [systemMessage] : []),
+                ...(lastUserMessage ? [lastUserMessage] : [])
+            ];
+        }
+        
+        // 大于 0：保留 system prompt + 最近的 N 条消息
+        const systemMessage = history.find(msg => msg.role === 'system');
+        const conversationMessages = history.filter(msg => msg.role !== 'system');
+        
+        // 计算要保留的消息范围
+        const startIndex = Math.max(0, conversationMessages.length - maxHistoryLength);
+        const recentMessages = conversationMessages.slice(startIndex);
+        
+        return [
+            ...(systemMessage ? [systemMessage] : []),
+            ...recentMessages
+        ];
+    }
+
+    /**
+     * 格式化提示词模板，替换变量占位符
+     * 
+     * @private
+     * @param {string} template - 提示词模板
+     * @param {Object} variables - 变量键值对
+     * @returns {string} 格式化后的提示词
+     */
+    _formatPrompt(template, variables) {
+        // ✅ 最后的防线：类型检查
+        if (template == null) {
+            console.warn('[AgentExecutor] Received null/undefined template');
+            return '';
+        }
+        
+        if (typeof template !== 'string') {
+            console.error('[AgentExecutor] CRITICAL: template is not a string after validation:', {
+                type: typeof template,
+                value: template,
+                agentId: this.agentId
+            });
+            template = String(template);
+        }
+        
+        // 替换 {variable} 格式的占位符
+        return template.replace(/{(\w+)}/g, (_, key) => {
+            return variables[key] !== undefined ? variables[key] : `{${key}}`;
+        });
+    }
+
+    /**
+     * 解析提示词，分离出标题和正文
+     * 如果第一行是 Markdown 标题（以 # 开头），则作为标题，其余作为内容
+     * 
+     * @private
+     * @param {string} rawPrompt - 原始提示词
+     * @returns {{title: string, content: string}}
+     */
+    _parsePrompt(rawPrompt) {
+        const lines = rawPrompt.split('\n');
+        if (lines[0].startsWith('# ')) {
+            return {
+                title: lines[0].substring(2).trim(),
+                content: lines.slice(1).join('\n').trim()
+            };
+        }
+        return {
+            title: `Auto Step: ${rawPrompt.substring(0, 30)}...`,
+            content: rawPrompt
+        };
+    }
+}
+/**
+ * @file src/llm/chat/index.js
+ * @description Chat 编辑器，支持单 Agent 和 Group（串行/并行）执行
+ * 
+ * 核心功能：
+ * - 支持单个 Agent 执行
+ * - 支持 Agent Group 串行执行（前一个输出作为后一个输入）
+ * - 支持 Agent Group 并行执行（同时运行多个 Agent）
+ * - 管理对话历史（Topic）
+ * - 实时流式响应显示
+ * - 自动保存对话记录
+ */
+
+import './styles.css';
+import { IEditor } from '../../common/interfaces/IEditor.js';
+import { BaseEditor } from '../../editor/baseEditor.js';
+import { ConfigManager } from '../../config/configManager.js';
+import { generateId } from '../../common/utils/utils.js';
+import { ExecutorFactory } from '../executor/ExecutorFactory.js';
+import { TopicProvider } from '../TopicProvider.js'; // New import
+
+/**
+ * @typedef {Object} MessageBlock
+ * @property {BaseEditor} editor - BaseEditor 实例
+ * @property {string} blockId - 消息块的唯一 ID
+ * @property {boolean} [isFirstChunk] - 是否为第一个流式数据块（用于并行模式）
+ */
+
+/**
+ * @typedef {Object} TopicContext
+ * @property {string} [preferredAgentId] - 优先使用的 Agent ID
+ */
+
+/**
+ * @enum {string}
+ * @description 定义 ChatEditor 的核心执行状态
+ */
+const ExecutionState = {
+    IDLE: 'idle',
+    EXECUTING_SINGLE: 'executing_single', // 单 Agent 或串行 Group
+    EXECUTING_PARALLEL: 'executing_parallel', // 并行 Group
+};
+
+
+/**
+ * @class ChatEditor
+ * @extends IEditor
+ * @description 
+ * Chat 编辑器类，实现了 IEditor 接口。
+ * 
+ * 执行模式：
+ * - **Agent 模式**：单个 Agent 执行，支持多步骤自动提示词
+ * - **Serial 模式**：多个 Agent 串行执行，前一个的输出作为后一个的输入
+ * - **Parallel 模式**：多个 Agent 并行执行，同时运行并显示各自的响应
+ * 
+ * @example
+ * const container = document.getElementById('chat-container');
+ * const editor = new ChatEditor(container, {
+ *   showSidebarToggle: true
+ * });
+ * 
+ * // 加载一个 Topic
+ * editor.loadTopic(myTopic, { preferredAgentId: 'my-agent-id' });
+ */
+export class ChatEditor extends IEditor {
+    /**
+     * 创建一个新的 ChatEditor 实例
+     * 
+     * @param {HTMLElement} container - 编辑器的容器元素
+     * @param {Object} [options={}] - 配置选项
+     * @param {boolean} [options.showSidebarToggle=true] - 是否显示侧边栏切换按钮
+     */
+    constructor(container, options = {}) {
+        super(container, options);
+
+        this.container = container;
+        this.options = { showSidebarToggle: true, ...options };
+        
+        // --- 核心修改：依赖注入和状态初始化 ---
+        if (!options.topicProvider) {
+            throw new Error("ChatEditor requires a 'topicProvider' in its options.");
+        }
+        this.topicProvider = options.topicProvider;
+        this.configManager = ConfigManager.instance(); // 仍然需要用于获取 Agent 信息
+        this.providerUnsubscribers = [];
+
+        this.currentTopic = null;
+        this.activeTopicId = null;
+        // --- 修改结束 ---
+
+        this._listeners = new Map();
+        this.messageBlocks = new Map();
+        this.currentResponseBlock = null;
+        this.parallelResponseBlocks = new Map();
+
+        // UI 元素引用
+        this.welcomeArea = null; // --- NEW ---
+        this.inputBar = null;
+        this.agentSelect = null;
+        this.promptInput = null;
+        this.sendButton = null;
+        this.charCount = null;
+        this.mainArea = null;
+
+        // 状态管理
+        this.currentTopic = null;
+        this.selectedAgentId = null;
+
+        /**
+         * 核心执行状态机
+         * @type {ExecutionState}
+         * @private
+         */
+        this.executionState = ExecutionState.IDLE;
+
+        /**
+         * 标记是否为第一个流式数据块（用于串行/单 Agent 模式）
+         * @type {boolean}
+         * @private
+         */
+        this._isFirstChunk = true;
+
+        this._setupDOM();
+        this._loadAgents();
+        this._bindEvents();
+        this._bindProviderEvents(); // 绑定 Provider 事件以处理删除冲突
+    }
+
+    /**
+     * 设置编辑器的 DOM 结构
+     * @private
+     */
+    _setupDOM() {
+        this.container.innerHTML = `
+            <div class="chat-editor-wrapper">
+                <div class="chat-editor-welcome">
+                    <div style="padding: 20px; text-align: center; color: #888; height: 100%; display: flex; align-items: center; justify-content: center; flex-direction: column;">
+                        <h2>Welcome to LLM Chat</h2>
+                        <p>Select a conversation from the sidebar or start a new one.</p>
+                    </div>
+                </div>
+                <div class="chat-editor-main"></div>
+                <div class="chat-input-bar">
+                    <select class="chat-agent-select">
+                        <option value="">选择 Agent 或 Group...</option>
+                    </select>
+                    <div class="chat-input-wrapper">
+                        <textarea class="chat-prompt-input" rows="1" 
+                                  placeholder="输入消息... (Shift+Enter 换行)"></textarea>
+                        <span class="char-count">0</span>
+                    </div>
+                    <button class="chat-send-btn">发送</button>
+                </div>
+            </div>
+        `;
+
+        this.welcomeArea = this.container.querySelector('.chat-editor-welcome');
+        this.mainArea = this.container.querySelector('.chat-editor-main');
+        this.inputBar = this.container.querySelector('.chat-input-bar');
+        this.agentSelect = this.container.querySelector('.chat-agent-select');
+        this.promptInput = this.container.querySelector('.chat-prompt-input');
+        this.sendButton = this.container.querySelector('.chat-send-btn');
+        this.charCount = this.container.querySelector('.char-count');
+
+        // Initially, hide the chat interface and show the welcome message
+        this.mainArea.style.display = 'none';
+        this.inputBar.style.display = 'none';
+        this.welcomeArea.style.display = 'flex';
+    }
+
+    /**
+     * --- 新增：绑定 Provider 事件 ---
+     * @private
+     */
+    _bindProviderEvents() {
+        const unsubDelete = this.topicProvider.on('delete', (payload) => {
+            if (payload.id === this.activeTopicId) {
+                console.warn(`Active topic ${this.activeTopicId} was deleted. Clearing ChatEditor state.`);
+                this._clearState();
+            }
+        });
+        this.providerUnsubscribers.push(unsubDelete);
+    }
+    
+    /**
+     * --- 新增：清理状态的方法 ---
+     * @private
+     */
+    _clearState() {
+        this.currentTopic = null;
+        this.activeTopicId = null;
+
+        // Hide chat UI and show a message in the welcome area
+        this.mainArea.style.display = 'none';
+        this.inputBar.style.display = 'none';
+        this.welcomeArea.innerHTML = `<div class="chat-editor-deleted-message" style="padding: 20px; text-align: center; color: #888;">This conversation has been deleted or is unavailable.</div>`;
+        this.welcomeArea.style.display = 'flex';
+
+        this.messageBlocks.forEach(editor => editor.destroy());
+        this.messageBlocks.clear();
+        this.promptInput.disabled = true;
+        this.sendButton.disabled = true;
+        this.agentSelect.disabled = true;
+    }
+
+    /**
+     * --- API 变更：从 loadTopic(topic) 变为 loadTopicById(topicId) ---
+     * @param {string} topicId - 要加载的 Topic 的唯一ID (即其路径)。
+     * @param {object} [context={}] - 外部传入的上下文，如 preferredAgentId。
+     */
+    async loadTopicById(topicId, context = {}) {
+        this.activeTopicId = topicId;
+        try {
+            const itemData = await this.topicProvider.getItem(topicId);
+            if (!itemData || !itemData.content) {
+                throw new Error(`Topic with id ${topicId} not found.`);
+            }
+
+            // Show the chat interface and hide the welcome screen
+            this.welcomeArea.style.display = 'none';
+            this.mainArea.style.display = 'block';
+            this.inputBar.style.display = 'flex';
+
+            const topic = itemData.content;
+            this.currentTopic = topic;
+
+            // --- 以下为原 loadTopic 的渲染逻辑 ---
+            this.promptInput.disabled = false;
+            this.sendButton.disabled = false;
+            this.agentSelect.disabled = false;
+
+            this.mainArea.innerHTML = '';
+            this.messageBlocks.forEach(editor => editor.destroy());
+            this.messageBlocks.clear();
+
+            topic.history.forEach(msg => {
+                if (msg.role === 'system' && msg._isMetadata) return; // Hide metadata system messages
+                if (msg.role === 'system') return; // Hide regular system messages for now
+                let role = msg.role === 'user' ? 'User' : 'Assistant';
+                if (msg.role === 'assistant') {
+                    const agent = this.configManager.getLLMExecutable(msg.agentId);
+                    role = agent ? `${agent.icon || '🤖'} ${agent.name}` : 'Assistant';
+                }
+                if (msg._structuredContent?.type === 'group_response') {
+                    this._renderGroupResponse(msg._structuredContent);
+                } else {
+                    this._addMessageBlock(role, msg.content);
+                }
+            });
+            
+            // 智能选择 Agent 的逻辑保持不变
+            this._selectDefaultAgent(topic, context);
+            
+            this.promptInput.focus();
+
+        } catch (error) {
+            console.error(`Failed to load topic ${topicId}:`, error);
+            this._clearState();
+        }
+    }
+
+    /**
+     * 渲染 Group 的结构化响应（特别是并行模式）
+     * 
+     * @param {Object} structuredContent - 结构化响应内容
+     * @param {string} structuredContent.type - 响应类型（'group_response'）
+     * @param {string} structuredContent.mode - 执行模式（'parallel' | 'serial'）
+     * @param {Array<Object>} structuredContent.responses - 所有 Agent 的响应
+     * @private
+     */
+    _renderGroupResponse(structuredContent) {
+        if (structuredContent.mode === 'parallel') {
+            const blockWrapper = document.createElement('div');
+            blockWrapper.className = 'chat-message-block chat-group-parallel';
+            
+            // ✅ 获取 Group 的名称
+            const groupName = this._getGroupDisplayName(structuredContent);
+            
+            const groupHeader = document.createElement('div');
+            groupHeader.className = 'chat-group-header';
+            groupHeader.innerHTML = `<span class="group-icon">👥</span> ${groupName} (${structuredContent.responses.length} agents)`;
+            blockWrapper.appendChild(groupHeader);
+            
+            const responsesContainer = document.createElement('div');
+            responsesContainer.className = 'chat-parallel-responses';
+            
+            structuredContent.responses.forEach(response => {
+                const agent = this.configManager.getLLMExecutable(response.agentId);
+                const agentName = agent ? `${agent.icon || '🤖'} ${agent.name}` : response.agentId;
+                
+                const responseBlock = document.createElement('div');
+                responseBlock.className = 'chat-parallel-response-item';
+                
+                const agentHeader = document.createElement('div');
+                agentHeader.className = 'parallel-agent-header';
+                agentHeader.textContent = agentName;
+                
+                const contentPre = document.createElement('pre');
+                contentPre.className = 'parallel-agent-content';
+                contentPre.textContent = response.content;
+                
+                responseBlock.appendChild(agentHeader);
+                responseBlock.appendChild(contentPre);
+                responsesContainer.appendChild(responseBlock);
+            });
+            
+            blockWrapper.appendChild(responsesContainer);
+            this.mainArea.appendChild(blockWrapper);
+            blockWrapper.scrollIntoView({ behavior: 'smooth', block: 'end' });
+        }
+    }
+
+    /**
+     * 获取 Group 的显示名称
+     * 
+     * @param {Object} structuredContent - 结构化响应内容
+     * @returns {string} Group 显示名称
+     * @private
+     */
+    _getGroupDisplayName(structuredContent) {
+        // 尝试从第一个响应的 agentId 向上查找父 Group
+        if (structuredContent.responses && structuredContent.responses.length > 0) {
+            const firstAgentId = structuredContent.responses[0].agentId;
+            // 查找包含这个 agent 的 group
+            const allGroups = this.configManager.getAllLLMExecutables().filter(e => e.type === 'group');
+            for (const group of allGroups) {
+                if (group.children && group.children.includes(firstAgentId)) {
+                    return `${group.icon || '👥'} ${group.name}`;
+                }
+            }
+        }
+        return 'Parallel Group';
+    }
+
+    /**
+     * 动态创建一个消息块（使用 BaseEditor）
+     * 
+     * @param {string} role - 消息角色（如 'User', 'Assistant', Agent 名称等）
+     * @param {string} [content=''] - 消息内容
+     * @param {string|null} [customTitle=null] - 自定义标题（如果不提供，会自动生成）
+     * @returns {BaseEditor} 创建的 BaseEditor 实例
+     * @private
+     */
+    _addMessageBlock(role, content = '', customTitle = null) {
+        const blockId = generateId('msg-block');
+        const blockWrapper = document.createElement('div');
+        blockWrapper.className = 'chat-message-block';
+        blockWrapper.id = blockId;
+        
+        this.mainArea.appendChild(blockWrapper);
+
+        const editor = new BaseEditor(blockWrapper, {
+            ...this.options,
+            readOnly: true,
+            showSidebarToggle: this.messageBlocks.size === 0 && this.options.showSidebarToggle,
+            autoHeight: true,
+            minHeight: 100,
+            maxHeight: 600,
+        });
+        
+        if (this.messageBlocks.size === 0) {
+            editor.on('toggle-sidebar-request', () => this._emit('toggle-sidebar-request'));
+        }
+
+        const cleanContent = this._cleanMarkdownForTitle(content);
+        const titlePrefix = cleanContent.substring(0, 40);
+        const defaultTitle = role 
+            ? `${role}: ${titlePrefix}${cleanContent.length > 40 ? '...' : ''}`
+            : titlePrefix + (cleanContent.length > 40 ? '...' : '');
+        
+        editor.setTitle(customTitle || defaultTitle);
+        editor.setText(content);
+        
+        this.messageBlocks.set(blockId, editor);
+        blockWrapper.scrollIntoView({ behavior: 'smooth', block: 'end' });
+        
+        return editor;
+    }
+
+    /**
+     * 为并行模式创建独立的响应块
+     * 
+     * @param {string} agentId - Agent 的 ID
+     * @param {string} agentDisplayName - Agent 的显示名称
+     * @returns {BaseEditor} 创建的 BaseEditor 实例
+     * @private
+     */
+    _createParallelResponseBlock(agentId, agentDisplayName) {
+        const blockId = generateId('parallel-block');
+        const blockWrapper = document.createElement('div');
+        blockWrapper.className = 'chat-message-block chat-parallel-block';
+        blockWrapper.id = blockId;
+        
+        this.mainArea.appendChild(blockWrapper);
+
+        const editor = new BaseEditor(blockWrapper, {
+            ...this.options,
+            readOnly: true,
+            showSidebarToggle: false,
+            autoHeight: true,
+            minHeight: 100,
+            maxHeight: 600,
+        });
+        
+        editor.setTitle(`${agentDisplayName} is typing...`);
+        editor.setText('');
+        
+        this.messageBlocks.set(blockId, editor);
+        this.parallelResponseBlocks.set(agentId, { editor, blockId, isFirstChunk: true });
+        
+        blockWrapper.scrollIntoView({ behavior: 'smooth', block: 'end' });
+        
+        return editor;
+    }
+
+    /**
+     * 创建一个系统消息块（用于显示自动提示词等信息）
+     * 
+     * @param {string} title - 标题，例如 "Auto Step: Extract Keywords"
+     * @param {string} content - 要显示的内容
+     * @private
+     */
+    _addSystemMessageBlock(title, content) {
+        const blockWrapper = document.createElement('div');
+        blockWrapper.className = 'chat-message-block system-message'; 
+        
+        blockWrapper.innerHTML = `
+            <div class="system-message-header">
+                <span class="system-message-icon">⚙️</span>
+                <span class="system-message-title">${title}</span>
+            </div>
+            <pre class="system-message-content">${content}</pre>
+        `;
+        
+        this.mainArea.appendChild(blockWrapper);
+        blockWrapper.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }
+
+    /**
+     * 加载所有可用的 Agents 和 Groups 到下拉列表
+     * @private
+     */
+    _loadAgents() {
+        this.agentSelect.innerHTML = '<option value="">选择 Agent 或 Group...</option>';
+        const executables = this.configManager.getAllLLMExecutables()
+            .sort((a, b) => a.name.localeCompare(b.name));
+        
+        const groups = executables.filter(e => e.type === 'group');
+        const agents = executables.filter(e => e.type === 'agent');
+
+        if (groups.length > 0) {
+            const groupOptgroup = document.createElement('optgroup');
+            groupOptgroup.label = 'Agent Groups';
+            groups.forEach(group => {
+                const option = document.createElement('option');
+                option.value = group.id;
+                option.textContent = `${group.icon || '👥'} ${group.name}`;
+                groupOptgroup.appendChild(option);
+            });
+            this.agentSelect.appendChild(groupOptgroup);
+        }
+
+        if (agents.length > 0) {
+            const agentOptgroup = document.createElement('optgroup');
+            agentOptgroup.label = 'Individual Agents';
+            agents.forEach(agent => {
+                const option = document.createElement('option');
+                option.value = agent.id;
+                option.textContent = `${agent.icon || '🤖'} ${agent.name}`;
+                agentOptgroup.appendChild(option);
+            });
+            this.agentSelect.appendChild(agentOptgroup);
+        }
+    }
+
+    /**
+     * 绑定 UI 事件监听器
+     * @private
+     */
+    _bindEvents() {
+        this.sendButton.addEventListener('click', () => this._sendMessage());
+        
+        this.promptInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                this._sendMessage();
+            }
+        });
+        
+        this.promptInput.addEventListener('input', () => {
+            const length = this.promptInput.value.length;
+            this.charCount.textContent = length;
+            this.charCount.style.color = length > 1000 ? '#ef4444' : '#9ca3af';
+            
+            this.promptInput.style.height = 'auto';
+            this.promptInput.style.height = this.promptInput.scrollHeight + 'px';
+        });
+        
+        this.agentSelect.addEventListener('change', (e) => {
+            this.selectedAgentId = e.target.value;
+        });
+    }
+
+    /**
+     * ✅ 步骤 3: 集中化UI更新
+     * 根据当前执行状态更新UI元素
+     * @private
+     */
+    _updateUIForExecutionState() {
+        const isExecuting = this.executionState !== ExecutionState.IDLE;
+        
+        this.sendButton.disabled = isExecuting;
+        this.promptInput.disabled = isExecuting;
+        
+        if (isExecuting) {
+            this.sendButton.textContent = '思考中...';
+            this.container.classList.add('is-executing');
+        } else {
+            this.sendButton.textContent = '发送';
+            this.container.classList.remove('is-executing');
+            this.promptInput.focus();
+        }
+    }
+
+    /**
+     * 发送用户消息并执行 LLM 请求
+     * 
+     * @private
+     * @async
+     */
+    async _sendMessage() {
+        // ✅ 使用状态机判断，逻辑更清晰
+        if (this.executionState !== ExecutionState.IDLE) return;
+
+        const userInput = this.promptInput.value.trim();
+        if (!userInput || !this.selectedAgentId) {
+            if (!this.selectedAgentId) alert('请先选择一个 Agent 或 Group');
+            return;
+        }
+
+        if (!this.currentTopic || !this.activeTopicId) {
+            alert("无法发送消息：没有活动的对话。");
+            return;
+        }
+
+        // ✅ 步骤 4: 管理状态转换 - 进入执行状态
+        this.executionState = ExecutionState.EXECUTING_SINGLE; // 默认进入单一执行模式
+        this._updateUIForExecutionState();
+
+        this._addMessageBlock('User', userInput);
+        
+        // --- THIS IS THE FIX ---
+        // Step 2: DO NOT modify the history array here.
+        // The Executor is responsible for constructing the new history.
+        // REMOVED: this.currentTopic.history.push({ role: 'user', content: userInput });
+        // --- END OF FIX ---
+
+        this.promptInput.value = '';
+        this.promptInput.style.height = 'auto';
+        this.charCount.textContent = '0';
+
+        this.parallelResponseBlocks.clear();
+        this.currentResponseBlock = null;
+
+        try {
+            const executor = ExecutorFactory.create(this.selectedAgentId);
+
+            // +++ 植入诊断日志 (1/3) +++
+            // 验证我们创建的回调对象是否完整
+            const callbacksForExecutor = this._buildCallbacks();
+            console.log(
+                '%c[ChatEditor._sendMessage] Creating and passing callbacks object:', 
+                'color: blue; font-weight: bold;', 
+                callbacksForExecutor
+            );
+            console.log(
+                `%c[ChatEditor._sendMessage] Does onGroupStart exist before passing? -> ${typeof callbacksForExecutor.onGroupStart}`,
+                'color: blue; font-weight: bold;'
+            );
+            // +++ 结束诊断日志 +++
+
+            const result = await executor.run(
+                userInput,
+                this.currentTopic.history,
+                {},
+                callbacksForExecutor // 使用我们刚刚记录的变量
+            );
+            
+            if (result.success && result.history) {
+                this.currentTopic.history = result.history;
+                
+                if (this.currentTopic.title === 'New Topic' || this.currentTopic.title.startsWith('/New Topic')) {
+                    const firstUserMsg = this.currentTopic.history.find(m => m.role === 'user');
+                    if (firstUserMsg) {
+                        this.currentTopic.title = this._cleanMarkdownForTitle(firstUserMsg.content).substring(0, 50);
+                    }
+                }
+
+                // 关键：使用内部的 provider 和 activeTopicId 保存
+                await this.topicProvider.saveItem(this.activeTopicId, { 
+                    content: this.currentTopic 
+                });
+            }
+            
+        } catch (error) {
+            console.error('Failed to execute:', error);
+            this._addMessageBlock('System Error', `Failed to run: ${error.message}`);
+        } finally {
+            // ✅ 步骤 4: 管理状态转换 - 返回空闲状态
+            this.executionState = ExecutionState.IDLE;
+            this._updateUIForExecutionState();
+        }
+    }
+
+    /**
+     * ✅ 步骤 5: 简化回调逻辑
+     * 构建回调对象，现在使用状态机来决定逻辑分支
+     * 
+     * @returns {Object} 回调对象
+     * @private
+     */
+    _buildCallbacks() {
+        return {
+            onStepStart: (step, data, isAuto, agentId) => {
+                if (isAuto) this._addSystemMessageBlock(data.title, data.prompt);
+            },
+            
+            onError: (error, agentId) => {
+            console.error('[ChatEditor] onError:', error, 'agentId:', agentId);
+                const executable = agentId ? this.configManager.getLLMExecutable(agentId) : null;
+                const displayName = executable ? `${executable.icon || '🤖'} ${executable.name}` : 'Agent';
+                
+                // 使用状态机来处理错误显示
+                if (this.executionState === ExecutionState.EXECUTING_PARALLEL) {
+                    const blockInfo = this.parallelResponseBlocks.get(agentId);
+                    if (blockInfo) {
+                        blockInfo.editor.setText(`\n\n**Error:** ${error.message}`);
+                        blockInfo.editor.setTitle(`${displayName}: Error`);
+                    } else {
+                        // If agentId is not found in parallel blocks, it might be a Group error or something else
+                        console.warn(`[ChatEditor] Error occurred, but no specific parallel block found for agentId: ${agentId}`);
+                        // Optionally, you could create a generic error block or append to a main error log
+                        this._addMessageBlock(`${displayName} Error`, error.message);
+                    }
+                } else if (this.currentResponseBlock) {
+                    this.currentResponseBlock.setText(`\n\n**Error:** ${error.message}`);
+                    this.currentResponseBlock.setTitle(`${displayName}: Error`);
+                } else {
+                    this._addMessageBlock(`${displayName} Error`, error.message);
+                }
+            },
+
+            /**
+             * Group 执行开始回调
+             * @param {Object} data - Group 数据
+             * @param {string} data.mode - 执行模式
+             * @param {Array<string>} data.agents - Agent ID 列表
+             */
+            onGroupStart: (data) => {
+                // 这个日志现在至关重要
+                console.log('%c[ChatEditor.onGroupStart] CALLBACK TRIGGERED!', 'color: green; font-weight: bold;', data);
+                if (data?.mode === 'parallel') {
+                    console.log('[ChatEditor] Switching to PARALLEL execution state.');
+                    this.executionState = ExecutionState.EXECUTING_PARALLEL;
+                    
+                    this.parallelResponseBlocks.clear();
+                    // --- FIX ---
+                    // Ensure we are creating blocks for the direct children agents, not the group itself
+                    if (data.agents && Array.isArray(data.agents)) {
+                         data.agents.forEach(agentId => { // agentId here is the child agentId
+                            const executable = this.configManager.getLLMExecutable(agentId);
+                            const displayName = executable ? `${executable.icon || '🤖'} ${executable.name}` : agentId;
+                            this._createParallelResponseBlock(agentId, displayName); // Use child agentId as key
+                        });
+                    } else {
+                         console.warn('[ChatEditor] onGroupStart received for parallel mode, but data.agents is missing or not an array.');
+                    }
+                    // --- END FIX ---
+                }
+            },
+
+            onResponseStart: (step, agentId, displayName) => { // agentId here is crucial
+                console.log(`[ChatEditor] onResponseStart: State=${this.executionState}, AgentId=${agentId}`);
+                switch (this.executionState) {
+                    case ExecutionState.EXECUTING_PARALLEL: {
+                        const blockInfo = this.parallelResponseBlocks.get(agentId);
+                        if (blockInfo) {
+                            blockInfo.editor.setTitle(`${displayName || 'Agent'} is typing...`);
+                        } else {
+                            console.warn(`[ChatEditor] No parallel block found for agentId: ${agentId}`);
+                        }
+                        break;
+                    }
+                    case ExecutionState.EXECUTING_SINGLE: {
+                        const finalDisplayName = displayName || 'Assistant';
+                        this.currentResponseBlock = this._addMessageBlock(finalDisplayName, '');
+                        this.currentResponseBlock.setTitle(`${finalDisplayName} is typing...`);
+                        this._isFirstChunk = true;
+                        break;
+                    }
+                }
+            },
+            
+            onChunk: (chunk, agentId) => {
+                // ✅ 使用状态机，逻辑分支清晰
+                switch (this.executionState) {
+                    case ExecutionState.EXECUTING_PARALLEL: {
+                        const blockInfo = this.parallelResponseBlocks.get(agentId);
+                        if (blockInfo) {
+                            blockInfo.editor.appendStreamChunk(null, chunk, blockInfo.isFirstChunk);
+                            // 每个块独立管理自己的 isFirstChunk 状态
+                            if (blockInfo.isFirstChunk) {
+                                blockInfo.isFirstChunk = false;
+                            }
+                        } else {
+                            console.warn(`[ChatEditor] Received chunk, but no parallel block found for agentId: ${agentId}`);
+                        }
+                        break;
+                    }
+                    case ExecutionState.EXECUTING_SINGLE: {
+                        if (this.currentResponseBlock) {
+                            this.currentResponseBlock.appendStreamChunk(null, chunk, this._isFirstChunk);
+                            if (this._isFirstChunk) this._isFirstChunk = false;
+                        }
+                        break;
+                    }
+                }
+            },
+            
+            onStepEnd: (step, response, agentId) => {
+                const executable = agentId ? this.configManager.getLLMExecutable(agentId) : null;
+                const displayName = executable ? `${executable.icon || '🤖'} ${executable.name}` : 'Assistant';
+                const cleanResponse = this._cleanMarkdownForTitle(response);
+                // FIX: 确保标题能正确显示 Agent 名称
+                const title = `${displayName}: ${cleanResponse.substring(0, 40)}${cleanResponse.length > 40 ? '...' : ''}`;
+
+                // ✅ 使用状态机，逻辑分支清晰
+                switch (this.executionState) {
+                    case ExecutionState.EXECUTING_PARALLEL: {
+                        const blockInfo = this.parallelResponseBlocks.get(agentId);
+                        if (blockInfo) {
+                             blockInfo.editor.setTitle(title);
+                        } else {
+                             console.warn(`[ChatEditor] Step ended, but no parallel block found for agentId: ${agentId}`);
+                        }
+                        // --- END FIX ---
+                        break;
+                    }
+                    case ExecutionState.EXECUTING_SINGLE: {
+                        if (this.currentResponseBlock) {
+                            this.currentResponseBlock.setTitle(title);
+                            this.currentResponseBlock = null;
+                        }
+                        break;
+                    }
+                }
+            },
+            
+            onGroupEnd: (result) => {
+                console.log('[ChatEditor] onGroupEnd received:', result);
+                // --- FIX ---
+                // We need to differentiate between serial and parallel group ends
+                if (result?.mode === 'parallel' && result?.type === 'group_response') {
+                    // This is the end of a parallel group execution
+                    console.log('[ChatEditor] Handling end of PARALLEL group.');
+                    
+                    // Clean up the temporary parallel response blocks
+                    this.parallelResponseBlocks.forEach((blockInfo) => {
+                        const blockElement = document.getElementById(blockInfo.blockId);
+                        if (blockElement) blockElement.remove();
+                        this.messageBlocks.delete(blockInfo.blockId);
+                    });
+                    this.parallelResponseBlocks.clear();
+                    
+                    // 渲染最终的聚合结果
+                    this._renderGroupResponse(result);
+
+                    // --- 关键修复：重置状态！ ---
+                    // 并行部分已经完全结束，后续的步骤（如果有）应该是串行的。
+                    // 我们将状态切换回 SINGLE，以便正确处理后续的 Agent。
+                    console.log('[ChatEditor] Parallel part finished. Switching back to SINGLE execution state.');
+                    this.executionState = ExecutionState.EXECUTING_SINGLE;
+                    // --- 修复结束 ---
+
+                } else if (result?.finalResponse !== undefined) { 
+                    // This might be the end of a serial group or a single agent final response
+                    // If it's a serial group, the final response is already handled by the last agent's onStepEnd
+                    // We might need to add logic here if serial groups also produce a distinct aggregated view
+                    console.log('[ChatEditor] Handling end of SERIAL group or final response.');
+                    // For now, assume serial group results are implicitly handled by chaining.
+                    // If a serial group needs special aggregation UI, add logic here.
+                } else {
+                    console.warn('[ChatEditor] Received unknown group end result:', result);
+                }
+                // --- END FIX ---
+            }
+        };
+    }
+
+    _selectDefaultAgent(topic, context) {
+        let agentIdToSelect = null;
+        const lastMessageWithAgent = [...(topic?.history || [])].reverse().find(msg => msg.agentId);
+        if (lastMessageWithAgent?.agentId) {
+            agentIdToSelect = lastMessageWithAgent.agentId;
+        } else if (context.preferredAgentId && context.preferredAgentId !== 'all') {
+            agentIdToSelect = context.preferredAgentId;
+        } else {
+            agentIdToSelect = this.agentSelect.options[1]?.value;
+        }
+        if (agentIdToSelect) {
+            this.agentSelect.value = agentIdToSelect;
+            this.selectedAgentId = agentIdToSelect;
+        }
+    }
+
+    /**
+     * 清理 Markdown 标记（用于生成简洁的标题）
+     * 
+     * @param {string} text - 原始文本
+     * @returns {string} 清理后的文本
+     * @private
+     */
+    _cleanMarkdownForTitle(text) {
+        return text
+            .replace(/\*\*(.+?)\*\*/g, '$1')
+            .replace(/\*(.+?)\*/g, '$1')
+            .replace(/__(.+?)__/g, '$1')
+            .replace(/_(.+?)_/g, '$1')
+            .replace(/~~(.+?)~~/g, '$1')
+            .replace(/`(.+?)`/g, '$1')
+            .replace(/\[(.+?)\]\(.+?\)/g, '$1')
+            .replace(/^#+\s+/gm, '')
+            .replace(/\n/g, ' ')
+            .trim();
+    }
+
+    /**
+     * 设置编辑器的文本内容
+     * @param {string} markdown - Markdown 格式的文本
+     */
+    setText(markdown) {
+        this.mainArea.innerHTML = '';
+        this.messageBlocks.clear();
+        if (markdown) {
+            this._addMessageBlock('', markdown);
+        }
+    }
+
+    /**
+     * 获取编辑器的文本内容
+     * @returns {string} 所有消息块的合并内容
+     */
+    getText() {
+        return Array.from(this.messageBlocks.values())
+            .map(editor => editor.getText())
+            .join('\n\n---\n\n');
+    }
+
+    /**
+     * 设置编辑器标题（ChatEditor 不使用此方法）
+     * @param {string} newTitle - 新标题
+     */
+    setTitle(newTitle) { 
+    }
+    
+    /**
+     * 设置只读状态（ChatEditor 的只读状态由内部控制）
+     * @param {boolean} isReadOnly - 是否只读
+     */
+    setReadOnly(isReadOnly) { 
+    }
+    
+    // +++ NEW PUBLIC API METHOD: To set input state while respecting encapsulation +++
+    /**
+     * Sets the initial state of the input bar from an external component.
+     * @param {object} state - The state to set.
+     * @param {string} [state.prompt] - The text to put in the prompt input box.
+     * @param {string} [state.agentId] - The ID of the agent to select.
+     * @param {boolean} [state.submit=false] - If true, immediately triggers the send message action.
+     */
+    setInputState({ prompt, agentId, submit = false }) {
+        if (prompt !== undefined && this.promptInput) {
+            this.promptInput.value = prompt;
+            // Manually trigger the 'input' event to update UI (char count, height)
+            this.promptInput.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+
+        if (agentId !== undefined && this.agentSelect) {
+            // Check if the option exists before setting the value
+            if (this.agentSelect.querySelector(`option[value="${agentId}"]`)) {
+                this.agentSelect.value = agentId;
+                // Manually trigger 'change' event to update internal state (this.selectedAgentId)
+                this.agentSelect.dispatchEvent(new Event('change', { bubbles: true }));
+            } else {
+                console.warn(`[ChatEditor] Attempted to select non-existent agentId: ${agentId}`);
+            }
+        }
+        
+        // --- NEW LOGIC ---
+        // If the submit flag is true, trigger the send message action.
+        // We use a microtask (Promise.resolve) to ensure the DOM and state have updated before sending.
+        if (submit) {
+           Promise.resolve().then(() => {
+               this._sendMessage();
+           });
+        }
+    }
+    // +++ END NEW METHOD +++
+
+    /**
+     * 聚焦到输入框
+     */
+    focus() { 
+        this.promptInput.focus(); 
+    }
+
+    /**
+     * 销毁编辑器并清理资源
+     */
+    destroy() {
+        this.providerUnsubscribers.forEach(unsub => unsub());
+        this.providerUnsubscribers = [];
+        this.messageBlocks.forEach(editor => editor.destroy());
+        this._listeners.clear();
+        this.container.innerHTML = '';
+    }
+
+    /**
+     * 注册事件监听器
+     * 
+     * @param {string} eventName - 事件名称（如 'toggle-sidebar-request'）
+     * @param {Function} callback - 回调函数
+     * @returns {Function} 取消订阅函数
+     * 
+     * @example
+     * const unsubscribe = editor.on('toggle-sidebar-request', () => {
+     *   console.log('Sidebar toggle requested');
+     * });
+     * unsubscribe();
+     */
+    on(eventName, callback) {
+        if (!this._listeners.has(eventName)) {
+            this._listeners.set(eventName, []);
+        }
+        this._listeners.get(eventName).push(callback);
+        return () => this.off(eventName, callback);
+    }
+
+    /**
+     * 移除事件监听器
+     * 
+     * @param {string} eventName - 事件名称
+     * @param {Function} callback - 要移除的回调函数
+     */
+    off(eventName, callback) {
+        if (!this._listeners.has(eventName)) return;
+        const listeners = this._listeners.get(eventName);
+        const index = listeners.indexOf(callback);
+        if (index > -1) listeners.splice(index, 1);
+    }
+
+    /**
+     * 触发事件
+     * 
+     * @param {string} eventName - 事件名称
+     * @param {*} data - 事件数据
+     * @private
+     */
+    _emit(eventName, data) {
+        if (!this._listeners.has(eventName)) return;
+        this._listeners.get(eventName).forEach(callback => {
+            try {
+                callback(data);
+            } catch (error) {
+                console.error(`Error in ChatEditor event listener for ${eventName}:`, error);
+            }
+        });
+    }
+    
+    /**
+     * 获取可搜索的纯文本内容
+     * @returns {Promise<string>} 纯文本内容
+     */
+    async getSearchableText() { 
+        return this.getText().replace(/^#+\s/gm, '').replace(/\[(.*?)\]\(.*?\)/g, '$1').trim(); 
+    }
+    
+    /**
+     * 获取文档标题列表
+     * @returns {Promise<Array>} 标题数组
+     */
+    async getHeadings() { 
+        return []; 
+    }
+    
+    /**
+     * 获取文档摘要
+     * @returns {Promise<string>} 文档摘要
+     */
+    async getSummary() {
+        const text = this.getText();
+        return text.split('\n').slice(0, 5).join('\n');
+    }
+    
+    /**
+     * 导航到指定位置
+     * @param {*} target - 导航目标
+     * @param {Object} options - 导航选项
+     * @returns {Promise<void>}
+     */
+    async navigateTo(target, options) { 
+    }
+    
+    /**
+     * 搜索内容
+     * @param {string} query - 搜索查询
+     * @returns {Promise<Array>} 搜索结果
+     */
+    async search(query) { 
+        return []; 
+    }
+    
+    /**
+     * 跳转到搜索结果
+     * @param {*} result - 搜索结果
+     */
+    gotoMatch(result) { }
+    
+    /**
+     * 清除搜索高亮
+     */
+    clearSearch() { }
+}
+/**
+ * @file src/llm/executor/AgentGroupExecutor.js
+ * @description 负责编排和执行 Agent Group 的逻辑（并行或串行模式）
+ */
+
+import { IExecutor } from './IExecutor.js';
+import { ExecutorFactory } from './ExecutorFactory.js';
+import { ConfigManager } from '../../config/configManager.js';
+
+/**
+ * @typedef {Object} ParallelResponse
+ * @property {string} agentId - Agent ID
+ * @property {string} content - 响应内容
+ * @property {boolean} success - 是否成功
+ */
+
+/**
+ * @typedef {Object} GroupResponseStructure
+ * @property {'group_response'} type - 响应类型标识
+ * @property {'parallel'|'serial'} mode - 执行模式
+ * @property {Array<ParallelResponse>} responses - 所有响应的数组
+ */
+
+/**
+ * @class AgentGroupExecutor
+ * @extends IExecutor
+ * @description 执行 Agent Group 的逻辑，支持：
+ * - 并行模式（parallel）：所有子 Agent 同时执行
+ * - 串行模式（serial）：子 Agent 按顺序执行，前一个的输出作为后一个的输入
+ */
+export class AgentGroupExecutor extends IExecutor {
+    /**
+     * @param {string} groupId - Group 的 ID
+     * @throws {Error} 如果 Group 不存在或类型不正确
+     */
+    constructor(groupId) {
+        super();
+        this.groupId = groupId;
+        this.configManager = ConfigManager.instance();
+        this.group = this.configManager.getLLMExecutable(this.groupId);
+        
+        if (!this.group || this.group.type !== 'group') {
+            throw new Error(`GroupExecutable with ID '${groupId}' not found or is not a group type.`);
+        }
+    }
+
+    /**
+     * 执行 Group（根据模式自动选择并行或串行）
+     * 
+     * @param {string} userPrompt - 用户的初始输入
+     * @param {Array<import('./IExecutor.js').MessageHistoryItem>} [externalHistory=[]] - 外部传入的对话历史
+     * @param {Object} [initialVariables={}] - 初始变量上下文
+     * @param {import('./IExecutor.js').ExecutorCallbacks} [callbacks={}] - 用于流式响应和进度的回调
+     * @returns {Promise<import('./IExecutor.js').ExecutorResult>}
+     */
+    async run(userPrompt, externalHistory = [], initialVariables = {}, callbacks = {}) {
+        // +++ 植入诊断日志 (2/3) +++
+        // 验证我们接收到的回调对象是否完整
+        console.log(
+            '%c[AgentGroupExecutor.run] Received callbacks object:', 
+            'color: orange; font-weight: bold;', 
+            callbacks
+        );
+        console.log(
+            `%c[AgentGroupExecutor.run] Does onGroupStart exist upon reception? -> ${typeof callbacks.onGroupStart}`,
+            'color: orange; font-weight: bold;'
+        );
+        // +++ 结束诊断日志 +++
+
+        if (this.group.mode === 'parallel') {
+            return this._runParallel(userPrompt, externalHistory, initialVariables, callbacks);
+        } else {
+            return this._runSerial(userPrompt, externalHistory, initialVariables, callbacks);
+        }
+    }
+
+    /**
+     * 并行执行模式：所有子 Agent 同时执行
+     * 
+     * @private
+     * @param {string} userPrompt - 用户输入
+     * @param {Array<import('./IExecutor.js').MessageHistoryItem>} externalHistory - 对话历史
+     * @param {Object} initialVariables - 初始变量
+     * @param {import('./IExecutor.js').ExecutorCallbacks} callbacks - 回调函数
+     * @returns {Promise<import('./IExecutor.js').ExecutorResult>}
+     */
+    async _runParallel(userPrompt, externalHistory, initialVariables, callbacks) {
+        console.log(`[AgentGroupExecutor] Starting parallel execution`);
+        console.log(`[AgentGroupExecutor] Group children:`, this.group.children);
+        
+        // +++ 植入诊断日志 (3/3) +++
+        // 在调用前最后一刻，再次检查回调对象
+        console.log(
+            '%c[AgentGroupExecutor._runParallel] About to call onGroupStart. Callbacks object is:', 
+            'color: red; font-weight: bold;', 
+            callbacks
+        );
+        console.log(
+            `%c[AgentGroupExecutor._runParallel] Does onGroupStart exist right before call? -> ${typeof callbacks.onGroupStart}`,
+            'color: red; font-weight: bold;'
+        );
+        // +++ 结束诊断日志 +++
+
+        try {
+            callbacks.onGroupStart?.({
+                mode: 'parallel',
+                agents: this.group.children || [],
+                groupId: this.group.id
+            });
+        } catch (err) {
+            console.error('[AgentGroupExecutor] FATAL: Error calling onGroupStart:', err);
+        }
+
+        const historyWithUserPrompt = [...externalHistory, { role: 'user', content: userPrompt }];
+        
+        const promises = this.group.children.map(childId => {
+            const subExecutor = ExecutorFactory.create(childId);
+            const executable = this.configManager.getLLMExecutable(childId);
+            const displayName = executable ? `${executable.icon || '🤖'} ${executable.name}` : childId;
+            
+    console.log(`[Parallel] Creating executor for agent: ${childId}, displayName: ${displayName}`);
+            return subExecutor.run(
+                userPrompt,
+                externalHistory, 
+                initialVariables,
+                {
+                    ...callbacks, // 继承所有回调以防万一
+                    // 检查下一层是否已提供了 agentId。如果没有，我们才提供自己的 childId。
+                    // 这样最底层的 Agent ID (e.g., 'agent-dreamer') 就能一路冒泡到最顶层。
+                    onStepStart: (step, data, isAuto, agentId) => callbacks.onStepStart?.(step, data, isAuto, agentId || childId),
+                    onResponseStart: (step, agentId, dn) => callbacks.onResponseStart?.(step, agentId || childId, dn || displayName),
+                    onChunk: (chunk, agentId) => callbacks.onChunk?.(chunk, agentId || childId),
+                    onStepEnd: (step, response, agentId) => callbacks.onStepEnd?.(step, response, agentId || childId),
+                    onError: (error, agentId) => callbacks.onError?.(error, agentId || childId),
+                }
+            );
+        });
+
+        const results = await Promise.allSettled(promises);
+
+        const parallelResponses = results.map((result, index) => {
+            if (result.status === 'fulfilled') {
+                return {
+                    agentId: this.group.children[index],
+                    content: result.value.finalResponse,
+                    success: result.value.success
+                };
+            } else {
+                console.error(`Agent ${this.group.children[index]} failed:`, result.reason);
+                return {
+                    agentId: this.group.children[index],
+                    content: `Execution failed: ${result.reason.message}`,
+                    success: false
+                };
+            }
+        });
+
+        /** @type {GroupResponseStructure} */
+        const structuredResponseContent = {
+            type: 'group_response',
+            mode: 'parallel',
+            responses: parallelResponses.filter(r => r.success)
+        };
+
+        const summaryForLLM = "Multiple agents responded in parallel:\n\n" +
+            parallelResponses
+                .filter(r => r.success)
+                .map(r => {
+                    const agent = this.configManager.getLLMExecutable(r.agentId);
+                    const agentName = agent?.name || r.agentId;
+                    return `--- Response from ${agentName} ---\n${r.content}`;
+                }).join('\n\n');
+        
+        const finalHistory = [
+            ...historyWithUserPrompt,
+            {
+                role: 'assistant',
+                content: summaryForLLM,  
+                _structuredContent: structuredResponseContent,  
+                agentId: this.groupId 
+            }
+        ];
+
+        callbacks.onGroupEnd?.(structuredResponseContent);
+        
+        return { 
+            success: true, 
+            history: finalHistory, 
+            finalResponse: summaryForLLM  
+        };
+    }
+
+    /**
+     * 串行执行模式：子 Agent 按顺序执行，前一个的输出作为后一个的输入
+     * 
+     * @private
+     * @param {string} userPrompt - 用户输入
+     * @param {Array<import('./IExecutor.js').MessageHistoryItem>} externalHistory - 对话历史
+     * @param {Object} initialVariables - 初始变量
+     * @param {import('./IExecutor.js').ExecutorCallbacks} callbacks - 回调函数
+     * @returns {Promise<import('./IExecutor.js').ExecutorResult>}
+     */
+    async _runSerial(userPrompt, externalHistory, initialVariables, callbacks) {
+        callbacks.onGroupStart?.({ mode: 'serial', agents: this.group.children });
+
+        let currentPrompt = userPrompt;
+        let cumulativeHistory = JSON.parse(JSON.stringify(externalHistory)); 
+        let lastResponse = '';
+        let context = { ...initialVariables, user_prompt: userPrompt };
+
+        for (const childId of this.group.children) {
+            const subExecutor = ExecutorFactory.create(childId);
+            const executable = this.configManager.getLLMExecutable(childId);
+            const displayName = executable ? `${executable.icon || '🤖'} ${executable.name}` : childId;
+            
+            callbacks.onAgentStart?.(childId, displayName);
+
+            const result = await subExecutor.run(
+                currentPrompt,  
+                cumulativeHistory,
+                context,
+                // --- 核心修复 ---
+                // 使用扩展运算符 `...` 来继承所有原始的回调函数，
+                // 然后只覆盖我们需要修改行为的那些。
+                // 这确保了像 onGroupStart, onGroupEnd 这样的回调能被完整地传递下去。
+                {
+                    ...callbacks,
+                    onStepStart: (step, data, isAuto, agentId) => callbacks.onStepStart?.(step, data, isAuto, agentId || childId),
+                    onResponseStart: (step, agentId, dn) => callbacks.onResponseStart?.(step, agentId || childId, dn || displayName),
+                    onChunk: (chunk, agentId) => callbacks.onChunk?.(chunk, agentId || childId),
+                    onStepEnd: (step, response, agentId) => callbacks.onStepEnd?.(step, response, agentId || childId),
+                    onError: (error, agentId) => callbacks.onError?.(error, agentId || childId),
+                }
+            );
+
+            if (!result.success) {
+                const error = new Error(`Serial execution failed at: ${displayName}`);
+                callbacks.onError?.(error, childId);
+                return { 
+                    success: false, 
+                    history: cumulativeHistory, 
+                    finalResponse: lastResponse 
+                };
+            }
+
+            cumulativeHistory = result.history;
+            currentPrompt = result.finalResponse;  
+            lastResponse = result.finalResponse;
+            context['last_response'] = lastResponse;
+        }
+
+        callbacks.onGroupEnd?.({ finalResponse: lastResponse });
+        
+        return { 
+            success: true, 
+            history: cumulativeHistory, 
+            finalResponse: lastResponse  
+        };
+    }
+}/**
+ * @file src/llm/executor/IExecutor.js
+ * @description 定义所有可执行单元（Agent, Group等）必须实现的统一接口。
+ * 
+ * 核心设计原则：
+ * 1. finalResponse 必须始终是字符串，以便可以串联执行
+ * 2. 结构化数据应该存储在 history 的 _structuredContent 字段中
+ * 3. 所有 Executor 都应该能够无缝组合和嵌套
+ */
+
+/**
+ * @typedef {Object} ExecutorResult
+ * @property {boolean} success - 执行是否成功
+ * @property {Array<MessageHistoryItem>} history - 完整的对话历史记录
+ * @property {string} finalResponse - 最终响应的文本内容（必须是字符串，用于串联）
+ * @property {Object} [metadata] - 可选的执行元数据
+ * @property {number} [metadata.executionTime] - 执行耗时（毫秒）
+ * @property {number} [metadata.tokensUsed] - 消耗的 token 数量
+ */
+
+/**
+ * @typedef {Object} MessageHistoryItem
+ * @property {'system'|'user'|'assistant'} role - 消息角色
+ * @property {string} content - 消息内容（必须是字符串文本）
+ * @property {string} [agentId] - 生成此消息的 Agent ID
+ * @property {Object} [_structuredContent] - 内部结构化数据（不会发送给LLM）
+ */
+
+/**
+ * @typedef {Object} ExecutorCallbacks
+ * @property {(step: number, data: {title: string, prompt: string}, isAuto: boolean, agentId?: string) => void} [onStepStart] - 步骤开始回调
+ * @property {(step: number, agentId?: string, displayName?: string) => void} [onResponseStart] - 响应开始回调
+ * @property {(chunk: string, agentId?: string) => void} [onChunk] - 流式响应片段回调
+ * @property {(step: number, response: string, agentId?: string) => void} [onStepEnd] - 步骤结束回调
+ * @property {(error: Error, agentId?: string) => void} [onError] - 错误回调
+ * @property {(data: {mode: string, agents: string[]}) => void} [onGroupStart] - Group 开始回调
+ * @property {(result: Object) => void} [onGroupEnd] - Group 结束回调
+ * @property {(agentId: string, displayName: string) => void} [onAgentStart] - Agent 开始回调（用于 serial）
+ * @property {(agentId: string, displayName: string) => void} [onAgentResponseStart] - Agent 响应开始（用于 parallel）
+ * @property {(agentId: string, chunk: string) => void} [onAgentChunk] - Agent 响应片段（用于 parallel）
+ * @property {(agentId: string, response: string) => void} [onAgentStepEnd] - Agent 步骤结束（用于 parallel）
+ * @property {(agentId: string, error: Error) => void} [onAgentError] - Agent 错误（用于 parallel）
+ */
+
+/**
+ * @class IExecutor
+ * @description 所有执行器的抽象基类
+ */
+export class IExecutor {
+    /**
+     * 执行单元的核心方法。
+     * 
+     * @param {string} userPrompt - 用户的初始输入（必须是字符串）
+     * @param {Array<MessageHistoryItem>} [externalHistory=[]] - 外部传入的对话历史
+     * @param {Object} [initialVariables={}] - 初始变量上下文，用于模板替换
+     * @param {ExecutorCallbacks} [callbacks={}] - 用于流式响应和进度的回调对象
+     * @returns {Promise<ExecutorResult>}
+     * @throws {Error} 如果子类未实现此方法
+     */
+    async run(userPrompt, externalHistory = [], initialVariables = {}, callbacks = {}) {
+        throw new Error("IExecutor subclass must implement the 'run' method.");
+    }
+}// 文件: src/llm/core/LLMService.js
+
+// [修正] 导入 ConfigManager 类，而不是一个工厂函数
+import { ConfigManager } from '../../config/configManager.js';
+import { LLMClient } from './client.js';
+// [修正] 导入我们之前定义好的 EVENTS
+import { EVENTS } from '../../config/events.js'; // 假设 EVENTS 在这个文件里
+
+// --- 单例控制 ---
+let instance = null;
+
+/**
+ * @class LLMService
+ * @singleton
+ * @description
+ * [V3 - 服务容器架构] 作为配置层 (ConfigManager) 和核心 LLM 逻辑层 (LLMClient) 之间的桥梁。
+ * 它的职责是：
+ * 1. 作为一个全局单例服务存在。
+ * 2. 依赖 `ConfigManager` 单例来获取 LLM 连接配置。
+ * 3. 创建和缓存 `LLMClient` 实例，避免重复实例化。
+ * 4. 响应式地监听来自 `ConfigManager` 的配置变更事件，并自动清理过时的客户端缓存，
+ *    确保系统始终使用最新的连接信息。
+ */
+export class LLMService {
+    constructor() {
+        if (instance) {
+            // [修正] 返回单例实例而不是抛出错误，更符合单例模式
+            return instance;
+        }
+        
+        /** 
+         * @private
+         * @type {import('../../config/configManager.js').ConfigManager} 
+         */
+        // [修正] 使用正确的单例获取方式
+        this.configManager = ConfigManager.instance();
+        if (!this.configManager) {
+            throw new Error("LLMService 无法初始化：ConfigManager 尚未被创建。");
+        }
+
+        /**
+         * @private
+         * @type {Map<string, LLMClient>}
+         */
+        this.clientCache = new Map();
+        
+        this._listenForConfigChanges();
+
+        instance = this; // 确保 instance 被赋值
+    }
+
+    /**
+     * 获取 LLMService 的全局单例实例。
+     * @returns {LLMService}
+     */
+    static getInstance() {
+        if (!instance) {
+            instance = new LLMService();
+        }
+        return instance;
+    }
+
+    /**
+     * 根据 connectionId 获取一个配置好的 LLMClient 实例。
+     * @param {string} connectionId
+     * @returns {LLMClient} // [修正] 返回 LLMClient 而不是 Promise，因为配置是同步获取的
+     * @throws {Error} 如果找不到对应的连接配置。
+     */
+    getClient(connectionId) {
+        if (this.clientCache.has(connectionId)) {
+            return this.clientCache.get(connectionId);
+        }
+
+        // [修正] 使用正确的公共接口获取连接配置
+        const connectionConfig = this.configManager.getLLMConnection(connectionId);
+
+        if (!connectionConfig) {
+            throw new Error(`[LLMService] ID为 '${connectionId}' 的连接配置未找到。`);
+        }
+        
+        // 将存储的配置转换为 LLMClient 需要的运行时配置
+        const clientRuntimeConfig = {
+            provider: connectionConfig.provider,
+            apiKey: connectionConfig.apiKey,
+            apiBaseUrl: connectionConfig.baseURL, // 属性名也需要匹配 LLMClient
+            // 运行时参数可以动态添加
+            referer: typeof window !== 'undefined' ? window.location.href : '',
+            title: typeof document !== 'undefined' ? document.title : 'LLM App',
+        };
+
+        console.log(`[LLMService] 正在为 connectionId '${connectionId}' 创建新的 LLMClient 实例。`);
+        const client = new LLMClient(clientRuntimeConfig);
+        this.clientCache.set(connectionId, client);
+
+        return client;
+    }
+
+    /**
+     * 清除客户端缓存。当连接信息更新时由事件处理器自动调用。
+     * @param {string} [connectionId] - 如果提供，则只清除指定ID的客户端。否则清除所有。
+     * @private
+     */
+    _clearCache(connectionId) {
+        if (connectionId) {
+            if (this.clientCache.delete(connectionId)) {
+                 console.log(`[LLMService] 已清除 Connection '${connectionId}' 的客户端缓存。`);
+            }
+        } else {
+            this.clientCache.clear();
+            console.log('[LLMService] 已清除所有客户端缓存。');
+        }
+    }
+    
+    /**
+     * [修正] 订阅正确的事件并处理新的载荷结构
+     * @private
+     * @description
+     * 这是一个关键的响应式改进。它将 LLMService 从一个被动的服务提供者，
+     * 转变为一个能够响应系统状态变化的主动管理者。
+     */
+    _listenForConfigChanges() {
+        // 监听我们定义的通用更新事件
+        this.configManager.on(EVENTS.LLM_CONFIG_UPDATED, (payload) => {
+            console.log('[LLMService] 检测到 LLM 配置已更新。', payload);
+            
+            // 当一个连接被修改或删除时，清除其缓存
+            if (payload.type === 'connection') {
+                this._clearCache(payload.id);
+            }
+            // 如果是更广泛的变更或不确定，可以清除所有缓存
+            // else { this._clearCache(); }
+        });
+    }
+}
+/**
+ * @file src/llm/core/api.js
+ * @description Provides high-level, standalone functions for interacting with the core library.
+ */
+
+import { LLMClient } from './client.js';
+import { LLMError } from './errors.js';
+import { LLM_PROVIDER_DEFAULTS } from '../../common/configData.js'; // ✅ 添加这行
+
+/**
+ * Tests a given LLM provider connection configuration by making a lightweight API call.
+ * This function is designed to be used independently, for example, in a settings UI.
+ *
+ * @param {object} connectionConfig - The connection configuration to test.
+ * @param {string} connectionConfig.provider - The provider name (e.g., 'openai').
+ * @param {string} connectionConfig.apiKey - The API key.
+ * @param {string} [connectionConfig.baseURL] - The optional base URL for the API.
+ * @returns {Promise<{success: boolean, message: string}>} A result object indicating success or failure.
+ */
+export async function testLLMConnection(connectionConfig) {
+    if (!connectionConfig || !connectionConfig.provider || !connectionConfig.apiKey) {
+        return { success: false, message: "Provider and API Key are required." };
+    }
+
+    try {
+        // 1. Create a temporary client with the provided config.
+        const client = new LLMClient({
+            provider: connectionConfig.provider,
+            apiKey: connectionConfig.apiKey,
+            apiBaseUrl: connectionConfig.baseURL,
+        });
+
+        // ✅ 修复：确保总有一个有效的 model
+        const modelToUse = connectionConfig.model || 
+                          connectionConfig.availableModels?.[0]?.id ||
+                          LLM_PROVIDER_DEFAULTS[connectionConfig.provider]?.models?.[0]?.id ||
+                          'gpt-4o'; // 最后的兜底选项
+
+        console.log(`[Test Connection] Using model: ${modelToUse} for provider: ${connectionConfig.provider}`);
+
+        // ✅ 修复：创建 AbortSignal，但通过正确的方式传递
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+        try {
+            const response = await client.chat.create({
+                messages: [{ role: 'user', content: 'hello' }],
+                model: modelToUse,
+                max_tokens: 1, // ✅ 直接作为顶层参数
+                signal: controller.signal // ✅ signal 作为顶层参数，不在 options 里
+            });
+            
+            clearTimeout(timeoutId);
+            
+            if (response.choices && response.choices.length > 0) {
+                return { success: true, message: 'Connection successful!' };
+            } else {
+                return { success: false, message: 'Connection succeeded, but response was empty.' };
+            }
+        } catch (error) {
+            clearTimeout(timeoutId);
+            throw error;
+        }
+
+    } catch (error) {
+        // 4. If an error occurs, format it into a user-friendly message.
+        console.error("Connection test failed:", error);
+        if (error instanceof LLMError) {
+            let message = `API Error: ${error.message}`;
+            if (error.statusCode) {
+                message += ` (HTTP Status: ${error.statusCode})`;
+            }
+            return { success: false, message };
+        }
+        if (error.name === 'AbortError') {
+            return { success: false, message: 'Connection failed: The request timed out.' };
+        }
+        return { success: false, message: `An unexpected error occurred: ${error.message}` };
+    }
+}/**
+ * @file src/llm/core/chain.js
+ * @description Provides a simple sequential chaining mechanism for LLM calls.
+ */
+
+import { LLMClient } from './client.js';
+
+/**
+ * A simple prompt template function.
+ * @private
+ */
+function templatize(template, variables) {
+    return template.replace(/{(\w+)}/g, (_, key) => {
+        if (variables[key] === undefined) {
+            throw new Error(`Template variable "${key}" not found in context.`);
+        }
+        return variables[key];
+    });
+}
+
+export class LLMChain {
+    /**
+     * @param {LLMClient} client - An instance of LLMClient to execute steps.
+     */
+    constructor(client) {
+        if (!client || typeof client.chat?.create !== 'function') {
+            throw new Error('LLMChain requires a valid instance of LLMClient.');
+        }
+        this.client = client;
+        this.steps = [];
+    }
+
+    /**
+     * Adds a processing step to the chain.
+     * @param {object} stepConfig
+     * @param {string} stepConfig.promptTemplate - The prompt template for this step.
+     * @param {string[]} stepConfig.inputVariables - Variables from the context to use in the template.
+     * @param {string} stepConfig.outputVariable - The key under which to save the LLM output in the context.
+     * @param {object} [llmConfig] - Additional parameters for the client.chat.create call (e.g., model, temperature).
+     * @returns {LLMChain} - The chain instance for fluent chaining.
+     */
+    add(stepConfig, llmConfig = {}) {
+        const { promptTemplate, inputVariables, outputVariable } = stepConfig;
+        if (!promptTemplate || !inputVariables || !outputVariable) {
+            throw new Error("Step config must include 'promptTemplate', 'inputVariables', and 'outputVariable'.");
+        }
+        this.steps.push({ ...stepConfig, llmConfig });
+        return this;
+    }
+
+    /**
+     * Executes the chain with an initial context.
+     * @param {object} initialContext - The initial key-value pairs for the run.
+     * @returns {Promise<object>} - The final context containing inputs and all generated outputs.
+     */
+    async run(initialContext = {}) {
+        let context = { ...initialContext };
+
+        for (const step of this.steps) {
+            const promptInput = {};
+            step.inputVariables.forEach(key => {
+                promptInput[key] = context[key];
+            });
+
+            const formattedPrompt = templatize(step.promptTemplate, promptInput);
+            
+            const response = await this.client.chat.create({
+                messages: [{ role: 'user', content: formattedPrompt }],
+                ...step.llmConfig
+            });
+
+            const result = response.choices[0].message.content;
+            context[step.outputVariable] = result;
+        }
+
+        return context;
+    }
+}
+/**
+ * @file src/llm/core/index.js
+ * @description Main entry point for the llm-fusion-kit library.
+ */
+
+export { LLMClient } from './client.js';
+export { LLMChain } from './chain.js';
+export { LLMService } from './LLMService.js'; // 假设 LLMService 的路径
+export {testLLMConnection} from './api.js';/**
+ * @file src/llm/core/utils/file-processor.js
+ * @description Handles conversion of various attachment sources to base64 data URI.
+ * This is an isomorphic utility, designed to work in both Node.js and Browser environments.
+ */
+
+/**
+ * Converts a value to a Buffer in a platform-agnostic way.
+ * @param {Blob | ArrayBuffer} value - The value to convert.
+ * @returns {Promise<Buffer>}
+ */
+async function toBuffer(value) {
+    if (typeof Buffer !== 'undefined' && value instanceof Buffer) {
+        return value;
+    }
+    if (typeof Blob !== 'undefined' && value instanceof Blob) {
+        const arrayBuffer = await value.arrayBuffer();
+        return Buffer.from(arrayBuffer);
+    }
+    if (value instanceof ArrayBuffer) {
+        return Buffer.from(value);
+    }
+    throw new Error('Unsupported type for buffer conversion.');
+}
+
+
+/**
+ * Processes various attachment sources (File, Blob, Buffer, URL, base64 string)
+ * into a uniform format required by LLM APIs.
+ *
+ * @param {File | Blob | Buffer | string} source - The attachment source.
+ * @param {string} [mimeType='application/octet-stream'] - Default MIME type if not detectable.
+ * @returns {Promise<{mimeType: string, base64: string}>} - The processed attachment data.
+ */
+export async function processAttachment(source, mimeType) {
+    // 1. Handle string inputs (base64 URI, http URL, or raw base64)
+    if (typeof source === 'string') {
+        if (source.startsWith('data:')) {
+            const parts = source.match(/^data:(.+?);base64,(.+)$/);
+            if (!parts) throw new Error('Invalid base64 data URI format.');
+            return { mimeType: parts[1], base64: parts[2] };
+        }
+        if (source.startsWith('http')) {
+            const response = await fetch(source);
+            if (!response.ok) throw new Error(`Failed to fetch image from ${source}: ${response.statusText}`);
+            const blob = await response.blob();
+            const buffer = await blob.arrayBuffer();
+            const base64 = (typeof Buffer !== 'undefined' ? Buffer.from(buffer) : btoa(String.fromCharCode(...new Uint8Array(buffer)))).toString('base64');
+            return { mimeType: response.headers.get('content-type') || blob.type || mimeType, base64 };
+        }
+        // Assume it's a raw base64 string
+        return { mimeType: mimeType || 'application/octet-stream', base64: source };
+    }
+
+    // 2. Handle Blob or File (Browser environment)
+    if (typeof Blob !== 'undefined' && source instanceof Blob) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+                const result = reader.result;
+                const base64 = result.substring(result.indexOf(',') + 1);
+                resolve({ mimeType: source.type || mimeType, base64 });
+            };
+            reader.onerror = (error) => reject(error);
+            reader.readAsDataURL(source);
+        });
+    }
+
+    // 3. Handle Buffer (Node.js environment)
+    if (typeof Buffer !== 'undefined' && source instanceof Buffer) {
+      return { mimeType: mimeType || 'application/octet-stream', base64: source.toString('base64') };
+    }
+
+    throw new Error('Unsupported attachment source type. Please provide a URL, base64 string, File/Blob, or Buffer.');
+}
+/* file: src/llm/chat/styles.css */
+
+.chat-editor-wrapper {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    background: #f9fafb;
+}
+
+.chat-editor-main {
+    flex-grow: 1;
+    overflow-y: auto;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    scroll-behavior: smooth;
+}
+
+/* 消息块样式改进 */
+.chat-message-block {
+    border-radius: 12px;
+    overflow: visible;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    transition: all 0.2s;
+    animation: slideIn 0.3s ease;
+    flex-shrink: 0;
+    min-height: 100px;
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.chat-message-block:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* 用户消息 */
+.chat-message-block.user {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+
+/* AI 回复 */
+.chat-message-block.assistant {
+    background: white;
+    border: 2px solid #e5e7eb;
+    position: relative;
+}
+
+/* 为不同 Agent 添加不同的强调色 */
+.chat-message-block[data-agent]::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    background: var(--agent-color, #3b82f6);
+}
+
+/* Agent 图标显示 */
+.chat-message-block .agent-icon {
+    font-size: 20px;
+    margin-right: 8px;
+}
+
+/* 输入区域改进 */
+.chat-input-bar {
+    background: white;
+    border-top: 1px solid #e5e7eb;
+    padding: 16px 20px;
+    display: flex;
+    gap: 12px;
+    align-items: flex-end;
+    box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.05);
+}
+
+.chat-agent-select {
+    min-width: 180px;
+    padding: 10px;
+    border: 2px solid #e5e7eb;
+    border-radius: 8px;
+    font-size: 14px;
+    background: white;
+    cursor: pointer;
+    transition: border-color 0.2s;
+    flex-shrink: 0;
+}
+
+.chat-agent-select:focus {
+    outline: none;
+    border-color: #3b82f6;
+}
+
+.chat-add-agent-btn {
+    padding: 10px 14px;
+    background: #10b981;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 18px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.2s;
+    flex-shrink: 0;
+}
+
+.chat-add-agent-btn:hover {
+    background: #059669;
+    transform: scale(1.05);
+}
+
+/* 输入框容器 */
+.chat-input-wrapper {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    min-width: 0;
+}
+
+.chat-prompt-input {
+    width: 100%;
+    padding: 12px 60px 12px 12px;
+    border: 2px solid #e5e7eb;
+    border-radius: 8px;
+    font-size: 14px;
+    resize: none;
+    min-height: 44px;
+    max-height: 200px;
+    transition: border-color 0.2s;
+    font-family: inherit;
+    box-sizing: border-box;
+}
+
+.chat-prompt-input:focus {
+    outline: none;
+    border-color: #3b82f6;
+}
+
+/* 字数统计 */
+.char-count {
+    position: absolute;
+    bottom: 12px;
+    right: 12px;
+    font-size: 11px;
+    color: #9ca3af;
+    pointer-events: none;
+}
+
+.chat-send-btn {
+    padding: 12px 24px;
+    background: #3b82f6;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
+.chat-send-btn:hover:not(:disabled) {
+    background: #2563eb;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+}
+
+.chat-send-btn:disabled {
+    background: #d1d5db;
+    cursor: not-allowed;
+}
+
+/* +++ NEW STYLES for System Message Block +++ */
+.chat-message-block.system-message {
+    background-color: #f8f9fa; /* A light grey background */
+    border-left: 4px solid #6c757d; /* A subtle grey left border */
+    padding: 12px 16px;
+    margin: 8px 0;
+    border-radius: 4px;
+}
+
+.system-message-header {
+    display: flex;
+    align-items: center;
+    font-size: 0.9em;
+    font-weight: bold;
+    color: #495057; /* Darker grey for text */
+    margin-bottom: 8px;
+}
+
+.system-message-icon {
+    margin-right: 8px;
+}
+
+.system-message-title {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+.system-message-content {
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+    font-size: 0.85em;
+    background-color: #e9ecef; /* A slightly darker grey for the code block */
+    padding: 8px 12px;
+    border-radius: 4px;
+    color: #343a40;
+    max-height: 200px; /* Limit height for very long prompts */
+    overflow-y: auto;
+}
+
+/* ✅ 新增：Group 响应样式 */
+.chat-group-parallel {
+    border-left: 3px solid #8b5cf6;
+    background: linear-gradient(to right, rgba(139, 92, 246, 0.05), transparent);
+}
+
+.chat-group-header {
+    padding: 12px 16px;
+    background: rgba(139, 92, 246, 0.1);
+    border-bottom: 1px solid rgba(139, 92, 246, 0.2);
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.group-icon {
+    font-size: 1.2em;
+}
+
+.chat-parallel-responses {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 16px;
+    padding: 16px;
+}
+
+.chat-parallel-response-item {
+    border: 1px solid rgba(139, 92, 246, 0.2);
+    border-radius: 8px;
+    overflow: hidden;
+    background: white;
+}
+
+.parallel-agent-header {
+    padding: 8px 12px;
+    background: rgba(139, 92, 246, 0.1);
+    font-weight: 500;
+    font-size: 0.9em;
+    color: #6d28d9;
+}
+
+.parallel-agent-content {
+    padding: 12px;
+    margin: 0;
+    font-size: 0.9em;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+/* ✅ 新增：并行响应块样式 */
+.chat-parallel-block {
+    border-left: 3px solid #10b981;
+    background: linear-gradient(to right, rgba(16, 185, 129, 0.05), transparent);
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+    .chat-input-bar {
+        padding: 12px;
+        gap: 8px;
+    }
+    
+    .chat-agent-select {
+        min-width: 120px;
+        font-size: 13px;
+    }
+    
+    .chat-send-btn {
+        padding: 12px 16px;
+    }
+    .chat-parallel-responses {
+        grid-template-columns: 1fr;
+    }
+}
+/**
+ * @file src/llm/core/providers/openai.js
+ * @description Adapter for OpenAI and OpenAI-compatible APIs (DeepSeek, OpenRouter).
+ */
+import { BaseProvider } from './base.js';
+import { LLMError } from '../errors.js';
+import { processAttachment } from '../utils/file-processor.js';
+// +++ 导入共享数据
+import { LLM_PROVIDER_DEFAULTS } from '../../../common/configData.js';
+
+// --- 删除旧的 PROVIDER_URLS 常量 ---
+
+export class OpenAICompatibleProvider extends BaseProvider {
+    constructor(config) {
+        super(config);
+        this.providerName = config.provider;
+        const defaultBaseURL = LLM_PROVIDER_DEFAULTS[this.providerName]?.baseURL;
+        this.apiBaseUrl = config.apiBaseUrl || defaultBaseURL;
+
+        // ✅ 添加默认模型处理
+        const providerDefaults = LLM_PROVIDER_DEFAULTS[this.providerName];
+        this.defaultModel = this.model || providerDefaults?.models?.[0]?.id || 'gpt-4o';
+
+        if (!this.apiBaseUrl) {
+            throw new Error(`Base URL for provider '${this.providerName}' is not defined.`);
+        }
+    }
+
+    async _prepareMessages(messages) {
+        const processedMessages = [];
+        for (const message of messages) {
+            if (!Array.isArray(message.content)) {
+                processedMessages.push(message);
+                continue;
+            }
+
+            const newContent = [];
+            for (const part of message.content) {
+                if (part.type === 'text') {
+                    newContent.push(part);
+                } else if (part.type === 'image_url') {
+                    const source = part.image_url.url;
+                    const { mimeType, base64 } = await processAttachment(source);
+                    newContent.push({
+                        type: 'image_url',
+                        image_url: {
+                            url: `data:${mimeType};base64,${base64}`
+                        }
+                    });
+                }
+            }
+            processedMessages.push({ ...message, content: newContent });
+        }
+        return processedMessages;
+    }
+
+    async _fetchAPI(body, signal) { // +++ Add signal parameter
+        const headers = {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${this.apiKey}`,
+        };
+        if (this.providerName === 'openrouter') {
+            headers['HTTP-Referer'] = this.config.referer || 'http://localhost:3000';
+            headers['X-Title'] = this.config.title || 'LLM Fusion Kit';
+        }
+
+        const response = await fetch(this.apiBaseUrl, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(body),
+            signal, // +++ Use the signal here
+        });
+
+        if (!response.ok) {
+            // --- START: MODIFIED ERROR HANDLING ---
+            let errorData = null;
+            let errorMessage = response.statusText; // Default to the HTTP status text
+
+            try {
+                // Try to parse the error body as JSON
+                errorData = await response.json();
+                
+                // Intelligently find the error message from various possible structures
+                errorMessage =
+                    errorData?.error?.message || // Standard OpenAI format: { error: { message: '...' } }
+                    errorData?.message ||         // Simple format: { message: '...' }
+                    errorData?.error ||           // Another simple format: { error: '...' }
+                    JSON.stringify(errorData);    // Fallback to the full error object
+            } catch (e) {
+                // If JSON parsing fails, the body might be plain text.
+                // We already have the statusText as a fallback, which is sufficient.
+                console.error("Failed to parse error response as JSON.", e);
+            }
+
+            throw new LLMError(errorMessage, {
+                cause: errorData, // Attach the full error data for debugging
+                provider: this.providerName,
+                statusCode: response.status,
+            });
+        }
+        return response;
+    }
+
+    async create(params, signal) { // +++ Add signal parameter
+        const messages = await this._prepareMessages(params.messages);
+        
+        // ✅ 确保 model 不为空
+        const modelToUse = params.model || this.defaultModel;
+        
+        if (!modelToUse) {
+            throw new LLMError('No model specified and no default model available', {
+                provider: this.providerName,
+                statusCode: 400
+            });
+        }
+        
+        const body = {
+            model: modelToUse, // ✅ 使用处理后的模型名称
+            messages,
+            stream: false,
+            // Conditionally add tool parameters if they exist
+            ...(params.tools && { tools: params.tools }),
+            ...(params.tool_choice && { tool_choice: params.tool_choice }),
+            ...(params.options || {}),
+        };
+        
+        console.log(`[OpenAI Provider] Using model: ${modelToUse}`);
+        
+        const response = await this._fetchAPI(body, signal);
+        return response.json();
+    }
+
+    async* stream(params, signal) { // +++ Add signal parameter
+            // --- SIMULATION LOGIC FOR DEMO ---
+        const modelToUse = params.model || this.defaultModel;
+        
+        if (!modelToUse) {
+            throw new LLMError('No model specified and no default model available', {
+                provider: this.providerName,
+                statusCode: 400
+            });
+        }
+    
+        // In a real implementation, you would not add this block.
+        // Instead, you'd parse the actual stream from the provider which might contain
+        // special tokens or tags (like <thinking>...</thinking>) and yield them as thinking chunks.
+        if (params.include_thinking && params.tools) {
+            yield { choices: [{ delta: { thinking: "User asked a question. I should check if any tools can help." } }] };
+            await new Promise(res => setTimeout(res, 300)); // Simulate processing delay
+            yield { choices: [{ delta: { thinking: "The `get_current_weather` tool seems relevant." } }] };
+            await new Promise(res => setTimeout(res, 300));
+        }
+        // --- END OF SIMULATION LOGIC ---
+
+        const messages = await this._prepareMessages(params.messages);
+        const body = {
+            model: modelToUse,
+            messages,
+            stream: true,
+            // Conditionally add tool parameters if they exist
+            ...(params.tools && { tools: params.tools }),
+            ...(params.tool_choice && { tool_choice: params.tool_choice }),
+            ...(params.options || {}),
+        };
+        
+        const response = await this._fetchAPI(body, signal); // +++ Pass signal
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop(); // Keep potentially incomplete line
+
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    const data = line.substring(6).trim();
+                    if (data === '[DONE]') {
+                        return;
+                    }
+                    try {
+                        // 2. 在这里加入真实解析逻辑
+                        const parsedData = JSON.parse(data);
+                        
+        const delta = parsedData.choices?.[0]?.delta;
+        
+        if (!delta) {
+            continue;
+        }
+        
+        
+        let hasYielded = false;
+        
+        if (params.include_thinking && delta.reasoning_content) {
+            yield { choices: [{ delta: { thinking: delta.reasoning_content } }] };
+            hasYielded = true;
+        }
+        
+        if (delta.content) {
+
+            yield {
+                choices: [{
+                    delta: { content: delta.content },
+                    finish_reason: parsedData.choices[0]?.finish_reason || null
+                }]
+            };
+            hasYielded = true;
+        }
+
+                        // 3. 正常 yield 原始数据，或者只 yield content 部分
+                    if (!hasYielded && (delta.tool_calls || delta.function_call)) {
+                        yield parsedData;
+                    }
+
+                    } catch (e) {
+                        console.error('Failed to parse stream chunk:', data);
+                    }
+                }
+            }
+        }
+    }
+}
+/**
+ * @file src/llm/core/client.js
+ * @description The main client class and entry point for the library.
+ */
+
+import { OpenAICompatibleProvider } from './providers/openai.js';
+import { AnthropicProvider } from './providers/anthropic.js';
+import { GeminiProvider } from './providers/gemini.js';
+import { LLM_PROVIDER_DEFAULTS } from '../../common/configData.js';
+
+
+// +++ 2. 用一个更小的、基于实现类型的映射替换 PROVIDER_MAP +++
+/**
+ * Maps an implementation type string to its corresponding provider class.
+ * This allows multiple providers in LLM_PROVIDER_DEFAULTS to share a single implementation.
+ * @type {Object.<string, import('./providers/base.js').BaseProvider>}
+ */
+const PROVIDER_IMPLEMENTATIONS = {
+    'openai-compatible': OpenAICompatibleProvider,
+    'anthropic': AnthropicProvider,
+    'gemini': GeminiProvider,
+};
+
+/**
+ * Factory function to create a provider instance based on configuration.
+ * @param {object} config - The client configuration.
+ * @returns {import('./providers/base.js').BaseProvider} An instance of a provider adapter.
+ */
+function createProvider(config) {
+    const providerId = config.provider;
+
+    // Step 1: Get the provider's metadata from our single source of truth.
+    const providerInfo = LLM_PROVIDER_DEFAULTS[providerId];
+    if (!providerInfo) {
+        throw new Error(`Provider '${providerId}' is not defined in LLM_PROVIDER_DEFAULTS.`);
+    }
+
+    // Step 2: Determine which implementation class to use.
+    const implementationType = providerInfo.implementation;
+    if (!implementationType) {
+        throw new Error(`Provider '${providerId}' is missing the 'implementation' property in LLM_PROVIDER_DEFAULTS.`);
+    }
+
+    // Step 3: Find the corresponding class from our implementation map.
+    const ProviderClass = PROVIDER_IMPLEMENTATIONS[implementationType];
+    if (!ProviderClass) {
+        throw new Error(`No provider implementation found for type '${implementationType}'. Supported types are: ${Object.keys(PROVIDER_IMPLEMENTATIONS).join(', ')}`);
+    }
+    return new ProviderClass(config);
+}
+
+export class LLMClient {
+    /**
+     * Initializes a new LLM client.
+     * @param {object} config - The client configuration.
+     * @param {string} config.provider - The name of the LLM provider.
+     * @param {string} config.apiKey - The API key for the selected provider.
+     * @param {string} [config.model] - The default model to use.
+     * @param {object} [config.hooks] - Lifecycle hooks for requests.
+     * @param {function(object): Promise<object>} [config.hooks.beforeRequest]
+     * @param {function(object): Promise<object>} [config.hooks.afterResponse]
+     * @param {function(Error, object): Promise<void>} [config.hooks.onError]
+     */
+    constructor(config) {
+        if (!config || !config.provider || !config.apiKey) {
+            throw new Error('Configuration object with `provider` and `apiKey` is required.');
+        }
+        this.provider = createProvider(config);
+        this.hooks = config.hooks || {};
+        
+        this.chat = {
+            create: this.createChatCompletion.bind(this)
+        };
+    }
+
+    /**
+     * Executes the provider call, wrapping it with hooks.
+     * @private
+     */
+    async _execute(params) {
+        let finalParams = params;
+        try {
+            if (this.hooks.beforeRequest) {
+                finalParams = await this.hooks.beforeRequest(params);
+            }
+            
+            // Pass the signal down to the provider call
+            const response = params.stream 
+                ? this.provider.stream(finalParams, params.options?.signal) 
+                : await this.provider.create(finalParams, params.options?.signal);
+
+            // Note: afterResponse hook does not apply to streams in this implementation
+            // as it would require wrapping the async generator.
+            if (this.hooks.afterResponse && !params.stream) {
+                 return await this.hooks.afterResponse(response);
+            }
+            return response;
+
+        } catch (error) {
+            if (this.hooks.onError) {
+                await this.hooks.onError(error, finalParams);
+            }
+            throw error; // Re-throw the error after the hook
+        }
+    }
+
+    /**
+     * Creates a chat completion. This is the primary method for interacting with LLMs.
+     * @param {object} params
+     * @param {Array<object>} params.messages - The conversation history.
+     * @param {string} [params.model] - Overrides the client's default model.
+     * @param {boolean} [params.stream=false] - If true, returns an async generator.
+     * @param {boolean} [params.include_thinking=false] - If true, requests the model's thinking process.
+     * @param {number} [params.temperature] - The sampling temperature.
+     * @param {number} [params.max_tokens] - The maximum number of tokens to generate.
+     * @param {number} [params.top_p] - The nucleus sampling probability.
+     * @param {Array<object>} [params.tools] - A list of tools the model may call.
+     * @param {object | string} [params.tool_choice] - Controls which tool is called.
+     * @param {object} [params.options] - Provider-specific or less common options.
+     * @returns {Promise<object> | AsyncGenerator<object>}
+     */
+    createChatCompletion({
+        messages,
+        model,
+        stream = false,
+        include_thinking = false, // NEW PARAMETER
+        temperature,
+        max_tokens,
+        top_p,
+        tools,
+        tool_choice,
+    signal, // ✅ 新增：signal 作为顶层参数
+        options = {}
+    }) {
+        const providerParams = {
+            messages,
+            model,
+            stream,
+            include_thinking, // Pass it down to the provider
+            tools,
+            tool_choice,
+        signal, // ✅ 传递 signal
+            // This allows users to use top-level args for convenience
+            // while still allowing overrides via the options object.
+            options: {
+                temperature,
+                max_tokens,
+                top_p,
+                ...options,
+            }
+        };
+
+        // Remove undefined top-level keys so they don't override provider defaults
+        Object.keys(providerParams.options).forEach(key => 
+            providerParams.options[key] === undefined && delete providerParams.options[key]
+        );
+
+        return this._execute(providerParams);
+    }
+}
+/**
+ * @file src/llm/core/providers/base.js
+ * @description Defines the abstract base class for all provider adapters.
+ */
+
+export class BaseProvider {
+    /**
+     * @param {object} config - The provider configuration.
+     * @param {string} config.apiKey - The API key for the provider.
+     * @param {string} config.model - The default model to use.
+     */
+    constructor(config) {
+        if (this.constructor === BaseProvider) {
+            throw new Error("Abstract class 'BaseProvider' cannot be instantiated directly.");
+        }
+        this.apiKey = config.apiKey;
+        this.model = config.model;
+        this.config = config;
+    }
+
+    /**
+     * Creates a standard (non-streaming) chat completion.
+     * @abstract
+     * @param {object} params - The standardized request parameters from LLMClient.
+     * @param {boolean} params.include_thinking - Flag to include thinking process.
+     * @returns {Promise<object>}
+     */
+    async create(params) {
+        throw new Error("Method 'create()' must be implemented by subclasses.");
+    }
+
+    /**
+     * Creates a streaming chat completion.
+     * @abstract
+     * @param {object} params - The standardized request parameters from LLMClient.
+     * @param {boolean} params.include_thinking - Flag to include thinking process.
+     * @returns {AsyncGenerator<object>}
+     */
+    async* stream(params) {
+        throw new Error("Method 'stream()' must be implemented by subclasses.");
+    }
+}
+/**
+ * @file src/llm/core/providers/anthropic.js
+ * @description Adapter for Anthropic Claude API with its specific message format.
+ */
+import { BaseProvider } from './base.js';
+import { LLMError } from '../errors.js';
+import { processAttachment } from '../utils/file-processor.js';
+import { LLM_PROVIDER_DEFAULTS } from '../../../common/configData.js';
+
+export class AnthropicProvider extends BaseProvider {
+    constructor(config) {
+        super(config);
+        this.providerName = config.provider;
+        const defaultBaseURL = LLM_PROVIDER_DEFAULTS[this.providerName]?.baseURL;
+        this.apiBaseUrl = config.apiBaseUrl || defaultBaseURL;
+        this.apiVersion = '2023-06-01';
+
+        if (!this.apiBaseUrl) {
+            throw new Error(`Base URL for provider '${this.providerName}' is not defined.`);
+        }
+    }
+
+    /**
+     * Transform OpenAI-style messages to Anthropic format
+     */
+    _transformMessages(messages) {
+        const systemMessages = messages.filter(m => m.role === 'system');
+        const conversationMessages = messages.filter(m => m.role !== 'system');
+        
+        const systemPrompt = systemMessages.map(m => m.content).join('\n');
+        
+        return {
+            system: systemPrompt || undefined,
+            messages: conversationMessages.map(msg => ({
+                role: msg.role === 'assistant' ? 'assistant' : 'user',
+                content: this._transformContent(msg.content)
+            }))
+        };
+    }
+
+    _transformContent(content) {
+        if (typeof content === 'string') {
+            return content;
+        }
+        
+        if (Array.isArray(content)) {
+            return content.map(part => {
+                if (part.type === 'text') {
+                    return { type: 'text', text: part.text };
+                } else if (part.type === 'image_url') {
+                    return {
+                        type: 'image',
+                        source: {
+                            type: 'base64',
+                            media_type: 'image/jpeg',
+                            data: part.image_url.url.split(',')[1]
+                        }
+                    };
+                }
+                return part;
+            });
+        }
+        
+        return content;
+    }
+
+    async _prepareMessages(messages) {
+        const processedMessages = [];
+        for (const message of messages) {
+            if (!Array.isArray(message.content)) {
+                processedMessages.push(message);
+                continue;
+            }
+
+            const newContent = [];
+            for (const part of message.content) {
+                if (part.type === 'text') {
+                    newContent.push(part);
+                } else if (part.type === 'image_url') {
+                    const source = part.image_url.url;
+                    const { mimeType, base64 } = await processAttachment(source);
+                    newContent.push({
+                        type: 'image_url',
+                        image_url: {
+                            url: `data:${mimeType};base64,${base64}`
+                        }
+                    });
+                }
+            }
+            processedMessages.push({ ...message, content: newContent });
+        }
+        return processedMessages;
+    }
+
+    async _fetchAPI(body, signal) {
+        const headers = {
+            'Content-Type': 'application/json',
+            'x-api-key': this.apiKey,
+            'anthropic-version': this.apiVersion,
+        };
+
+        const response = await fetch(this.apiBaseUrl, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(body),
+            signal,
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ 
+                error: { message: response.statusText } 
+            }));
+            throw new LLMError(errorData.error?.message || 'Anthropic API error', {
+                cause: errorData,
+                provider: this.providerName,
+                statusCode: response.status,
+            });
+        }
+        return response;
+    }
+
+    async create(params, signal) {
+        const messages = await this._prepareMessages(params.messages);
+        const transformed = this._transformMessages(messages);
+        
+        const body = {
+            model: params.model || this.model,
+            max_tokens: params.options?.max_tokens || 1024,
+            ...transformed,
+            stream: false,
+            temperature: params.options?.temperature,
+            top_p: params.options?.top_p,
+        };
+        
+        // Remove undefined values
+        Object.keys(body).forEach(key => 
+            body[key] === undefined && delete body[key]
+        );
+        
+        const response = await this._fetchAPI(body, signal);
+        const data = await response.json();
+        
+        // Transform Anthropic response to OpenAI format
+        return {
+            choices: [{
+                message: {
+                    role: 'assistant',
+                    content: data.content[0]?.text || ''
+                },
+                finish_reason: data.stop_reason
+            }],
+            usage: data.usage,
+            model: data.model
+        };
+    }
+
+    async* stream(params, signal) {
+        const messages = await this._prepareMessages(params.messages);
+        const transformed = this._transformMessages(messages);
+        
+        const body = {
+            model: params.model || this.model,
+            max_tokens: params.options?.max_tokens || 1024,
+            ...transformed,
+            stream: true,
+            temperature: params.options?.temperature,
+            top_p: params.options?.top_p,
+        };
+        
+        Object.keys(body).forEach(key => 
+            body[key] === undefined && delete body[key]
+        );
+        
+        const response = await this._fetchAPI(body, signal);
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop();
+
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    const data = line.substring(6).trim();
+                    
+                    try {
+                        const parsedData = JSON.parse(data);
+                        
+                        if (parsedData.type === 'content_block_delta') {
+                            const content = parsedData.delta?.text || '';
+                            if (content) {
+                                yield {
+                                    choices: [{
+                                        delta: { content },
+                                        finish_reason: null
+                                    }]
+                                };
+                            }
+                        } else if (parsedData.type === 'message_stop') {
+                            yield {
+                                choices: [{
+                                    delta: {},
+                                    finish_reason: 'stop'
+                                }]
+                            };
+                        }
+                    } catch (e) {
+                        console.error('Failed to parse Anthropic stream chunk:', data);
+                    }
+                }
+            }
+        }
+    }
+}
+/**
+ * @file src/llm/core/providers/gemini.js
+ * @description Adapter for Google Gemini API with its specific format.
+ */
+import { BaseProvider } from './base.js';
+import { LLMError } from '../errors.js';
+import { processAttachment } from '../utils/file-processor.js';
+import { LLM_PROVIDER_DEFAULTS } from '../../../common/configData.js';
+
+export class GeminiProvider extends BaseProvider {
+    constructor(config) {
+        super(config);
+        this.providerName = config.provider;
+        const defaultBaseURL = LLM_PROVIDER_DEFAULTS[this.providerName]?.baseURL;
+        this.apiBaseUrl = config.apiBaseUrl || defaultBaseURL;
+
+        if (!this.apiBaseUrl) {
+            throw new Error(`Base URL for provider '${this.providerName}' is not defined.`);
+        }
+    }
+
+    /**
+     * Transform OpenAI-style messages to Gemini format
+     */
+    async _transformMessages(messages) {
+        const contents = [];
+        
+        for (const message of messages) {
+            if (message.role === 'system') {
+                // Gemini doesn't have system role, prepend to first user message
+                continue;
+            }
+            
+            const parts = [];
+            
+            if (typeof message.content === 'string') {
+                parts.push({ text: message.content });
+            } else if (Array.isArray(message.content)) {
+                for (const part of message.content) {
+                    if (part.type === 'text') {
+                        parts.push({ text: part.text });
+                    } else if (part.type === 'image_url') {
+                        const source = part.image_url.url;
+                        const { mimeType, base64 } = await processAttachment(source);
+                        parts.push({
+                            inline_data: {
+                                mime_type: mimeType,
+                                data: base64
+                            }
+                        });
+                    }
+                }
+            }
+            
+            contents.push({
+                role: message.role === 'assistant' ? 'model' : 'user',
+                parts
+            });
+        }
+        
+        // Prepend system message to first user message if exists
+        const systemMessage = messages.find(m => m.role === 'system');
+        if (systemMessage && contents.length > 0) {
+            const firstUserIdx = contents.findIndex(c => c.role === 'user');
+            if (firstUserIdx !== -1) {
+                contents[firstUserIdx].parts.unshift({
+                    text: `System Instructions: ${systemMessage.content}\n\n`
+                });
+            }
+        }
+        
+        return contents;
+    }
+
+    _buildURL(model, stream = false) {
+        const method = stream ? 'streamGenerateContent' : 'generateContent';
+        return `${this.apiBaseUrl}/${model}:${method}?key=${this.apiKey}`;
+    }
+
+    async _fetchAPI(url, body, signal) {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(body),
+            signal,
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ 
+                error: { message: response.statusText } 
+            }));
+            throw new LLMError(errorData.error?.message || 'Gemini API error', {
+                cause: errorData,
+                provider: this.providerName,
+                statusCode: response.status,
+            });
+        }
+        return response;
+    }
+
+    async create(params, signal) {
+        const contents = await this._transformMessages(params.messages);
+        const model = params.model || this.model;
+        
+        const body = {
+            contents,
+            generationConfig: {
+                temperature: params.options?.temperature,
+                maxOutputTokens: params.options?.max_tokens,
+                topP: params.options?.top_p,
+            }
+        };
+        
+        // Remove undefined values
+        Object.keys(body.generationConfig).forEach(key => 
+            body.generationConfig[key] === undefined && delete body.generationConfig[key]
+        );
+        
+        const url = this._buildURL(model, false);
+        const response = await this._fetchAPI(url, body, signal);
+        const data = await response.json();
+        
+        // Transform Gemini response to OpenAI format
+        const candidate = data.candidates?.[0];
+        return {
+            choices: [{
+                message: {
+                    role: 'assistant',
+                    content: candidate?.content?.parts?.map(p => p.text).join('') || ''
+                },
+                finish_reason: candidate?.finishReason?.toLowerCase()
+            }],
+            usage: {
+                prompt_tokens: data.usageMetadata?.promptTokenCount,
+                completion_tokens: data.usageMetadata?.candidatesTokenCount,
+                total_tokens: data.usageMetadata?.totalTokenCount
+            },
+            model: model
+        };
+    }
+
+    async* stream(params, signal) {
+        const contents = await this._transformMessages(params.messages);
+        const model = params.model || this.model;
+        
+        const body = {
+            contents,
+            generationConfig: {
+                temperature: params.options?.temperature,
+                maxOutputTokens: params.options?.max_tokens,
+                topP: params.options?.top_p,
+            }
+        };
+        
+        Object.keys(body.generationConfig).forEach(key => 
+            body.generationConfig[key] === undefined && delete body.generationConfig[key]
+        );
+        
+        const url = this._buildURL(model, true);
+        const response = await this._fetchAPI(url, body, signal);
+        
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop();
+
+            for (const line of lines) {
+                if (line.trim() === '') continue;
+                
+                try {
+                    const parsedData = JSON.parse(line);
+                    const candidate = parsedData.candidates?.[0];
+                    const content = candidate?.content?.parts?.map(p => p.text).join('') || '';
+                    
+                    if (content) {
+                        yield {
+                            choices: [{
+                                delta: { content },
+                                finish_reason: candidate?.finishReason?.toLowerCase() || null
+                            }]
+                        };
+                    }
+                } catch (e) {
+                    console.error('Failed to parse Gemini stream chunk:', line);
+                }
+            }
+        }
+    }
+}

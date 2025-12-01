@@ -274,6 +274,18 @@ export class VFS {
       );
     }
     
+    // ================== ✨ [新增] 保护检查逻辑开始 ==================
+    for (const node of nodesToDelete) {
+        // 1. 检查元数据保护标识 (Metadata Protection)
+        if (node.metadata?.isProtected === true) {
+             throw new VFSError(
+                VFSErrorCode.PERMISSION_DENIED,
+                `Operation failed: Node '${node.name}' is protected via metadata.`
+            );
+        }
+    }
+    // ================== ✨ [新增] 保护检查逻辑结束 ==================
+    
     const allRemovedIds = nodesToDelete.map(n => n.nodeId);
     
     const tx = await this.storage.beginTransaction([

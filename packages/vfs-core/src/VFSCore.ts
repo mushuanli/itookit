@@ -296,6 +296,36 @@ export class VFSCore {
   }
 
   /**
+   * 设置节点保护状态
+   * 受保护的节点将无法被删除
+   * @param moduleName 模块名
+   * @param path 文件路径
+   * @param isProtected 是否保护
+   */
+  async setNodeProtection(moduleName: string, path: string, isProtected: boolean): Promise<void> {
+    this._ensureInitialized();
+    const nodeId = await this.vfs.pathResolver.resolve(moduleName, path);
+    if (!nodeId) {
+      throw new VFSError(VFSErrorCode.NOT_FOUND, `Node not found: ${moduleName}:${path}`);
+    }
+
+    // 1. 获取当前节点以读取现有 metadata
+    const node = await this.vfs.storage.loadVNode(nodeId);
+    if (!node) {
+        throw new VFSError(VFSErrorCode.NOT_FOUND, `Node data missing: ${nodeId}`);
+    }
+
+    // 2. 合并 metadata (防止覆盖其他元数据)
+    const newMetadata = {
+        ...(node.metadata || {}),
+        isProtected: isProtected
+    };
+
+    // 3. 更新
+    await this.vfs.updateMetadata(nodeId, newMetadata);
+  }
+
+  /**
    * 读取文件
    */
   async read(moduleName: string, path: string): Promise<string | ArrayBuffer> {
@@ -518,6 +548,23 @@ export class VFSCore {
   async getAllTags(): Promise<TagData[]> {
     this._ensureInitialized();
     return this.vfs.storage.tagStore.getAll();
+  }
+
+  /**
+   * 设置标签保护状态
+   * 受保护的标签将无法被删除定义
+   */
+  async setTagProtection(tagName: string, isProtected: boolean): Promise<void> {
+      this._ensureInitialized();
+      const tag = await this.vfs.storage.tagStore.get(tagName);
+      if (!tag) {
+          throw new VFSError(VFSErrorCode.NOT_FOUND, `Tag '${tagName}' not found`);
+      }
+      
+      // 更新属性并保存
+      tag.isProtected = isProtected;
+      // create 方法底层是 put，可以用于更新
+      await this.vfs.storage.tagStore.create(tag);
   }
 
   /**
