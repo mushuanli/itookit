@@ -82,11 +82,23 @@ export class HistoryView {
         wrapper.dataset.sessionId = group.id;
 
         if (group.role === 'user') {
+            // [修改] 增加 Copy 和 Collapse 按钮
             wrapper.innerHTML = `
                 <div class="llm-ui-avatar">👤</div>
                 <div class="llm-ui-bubble--user">
-                    <div class="llm-ui-actions">
-                         <button class="llm-ui-btn-action llm-ui-action-edit">✎</button>
+                    <div class="llm-ui-bubble__header">
+                        <span class="llm-ui-bubble__title">You</span>
+                        <div class="llm-ui-bubble__toolbar">
+                             <button class="llm-ui-btn-bubble-tool" data-action="edit" title="Edit">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+                             </button>
+                             <button class="llm-ui-btn-bubble-tool" data-action="copy" title="Copy">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                             </button>
+                             <button class="llm-ui-btn-bubble-tool" data-action="collapse" title="Collapse/Expand">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                             </button>
+                        </div>
                     </div>
                     <div class="llm-ui-mount-point" id="user-mount-${group.id}"></div>
                 </div>
@@ -100,8 +112,66 @@ export class HistoryView {
             });
             this.editorMap.set(group.id, controller);
 
-            wrapper.querySelector('.llm-ui-action-edit')?.addEventListener('click', () => {
+            // --- 绑定事件 ---
+            const bubbleEl = wrapper.querySelector('.llm-ui-bubble--user') as HTMLElement;
+            const editBtn = wrapper.querySelector('[data-action="edit"]');
+            const copyBtn = wrapper.querySelector('[data-action="copy"]');
+            const collapseBtn = wrapper.querySelector('[data-action="collapse"]');
+
+            // 1. Edit
+            editBtn?.addEventListener('click', () => {
                 controller.toggleEdit();
+                editBtn.classList.toggle('active');
+            });
+
+            // 2. Copy
+            copyBtn?.addEventListener('click', async () => {
+                const text = controller.content; 
+                try {
+                    await navigator.clipboard.writeText(text);
+                    const originalHtml = copyBtn.innerHTML;
+                    copyBtn.innerHTML = '✓'; 
+                    setTimeout(() => copyBtn.innerHTML = originalHtml, 1500);
+                } catch (err) {
+                    console.error('Copy failed', err);
+                }
+            });
+
+            // 3. Collapse
+            // 修正初始图标为 Up Arrow (因为默认是展开的)
+            if (collapseBtn) {
+                 collapseBtn.querySelector('svg')!.innerHTML = '<polyline points="18 15 12 9 6 15"></polyline>';
+            }
+
+            collapseBtn?.addEventListener('click', () => {
+                bubbleEl.classList.toggle('is-collapsed');
+                const svg = collapseBtn.querySelector('svg');
+                if (bubbleEl.classList.contains('is-collapsed')) {
+                    // 向下箭头 (点击展开) - User Bubble 默认箭头是向下的 (open state)
+                    // 所以 collapse 后应该是向上? 或者反过来。保持和 Agent 一致：
+                    // 折叠后 -> 箭头变为 "Show More" 意图
+                    // 这里我们定义: 
+                    // 初始状态 (Open): 箭头 <polyline points="6 9 12 15 18 9"></polyline> (Down arrow, meaning collapse content below?)
+                    // 其实 Agent 的实现是: 默认显示 "Down V", 点击后变成 "Up ^"? 
+                    // 让我们统一逻辑：
+                    // Expanded State: 显示 "Chevron Up" (收起) 或 "Chevron Down" (展开)? 
+                    // 通常: Chevron Up = 收起; Chevron Down = 展开.
+                    
+                    // 修正逻辑以符合直觉：
+                    // 当前是折叠态 -> 显示向下箭头 (表示点击展开)
+                    // 当前是展开态 -> 显示向上箭头 (表示点击收起)
+                    
+                    // 这里代码里初始SVG是 Down (6 9 12 15 18 9)。 
+                    // 如果初始是展开的，应该显示 UP icon。
+                    // 让我们调整一下初始图标。
+                    // 假设初始SVG改为 UP: <polyline points="18 15 12 9 6 15"></polyline>
+                    
+                    // is-collapsed = true (Hidden) -> Show Down Arrow
+                    svg!.innerHTML = '<polyline points="6 9 12 15 18 9"></polyline>'; 
+                } else {
+                    // is-collapsed = false (Visible) -> Show Up Arrow
+                    svg!.innerHTML = '<polyline points="18 15 12 9 6 15"></polyline>';
+                }
             });
 
         } else {
@@ -128,6 +198,28 @@ export class HistoryView {
             this.nodeMap.set(node.id, element);
             parentEl.appendChild(element);
 
+            // --- 绑定头部工具栏事件 ---
+            const editBtn = element.querySelector('[data-action="edit"]');
+            const copyBtn = element.querySelector('[data-action="copy"]');
+            const collapseBtn = element.querySelector('[data-action="collapse"]');
+
+            // 修正初始图标为 Up Arrow (因为默认是展开的)
+            if (collapseBtn) {
+                 collapseBtn.querySelector('svg')!.innerHTML = '<polyline points="18 15 12 9 6 15"></polyline>';
+            }
+
+            collapseBtn?.addEventListener('click', () => {
+                element.classList.toggle('is-collapsed');
+                const svg = collapseBtn.querySelector('svg');
+                if (element.classList.contains('is-collapsed')) {
+                    // 折叠了 -> 显示向下箭头 (展开)
+                    svg!.innerHTML = '<polyline points="6 9 12 15 18 9"></polyline>'; 
+                } else {
+                    // 展开了 -> 显示向上箭头 (收起)
+                    svg!.innerHTML = '<polyline points="18 15 12 9 6 15"></polyline>';
+                }
+            });
+
             if (mountPoints.output) {
                 const controller = new MDxController(mountPoints.output, node.data.output || '', {
                     readOnly: true,
@@ -135,9 +227,29 @@ export class HistoryView {
                 });
                 this.editorMap.set(node.id, controller);
 
-                element.querySelector('.llm-ui-action-edit')?.addEventListener('click', () => {
+                // Edit 逻辑
+                editBtn?.addEventListener('click', () => {
                     controller.toggleEdit();
+                    editBtn.classList.toggle('active');
                 });
+
+                // Copy 逻辑
+                copyBtn?.addEventListener('click', async () => {
+                    const text = controller.content; // Access content via getter
+                    try {
+                        await navigator.clipboard.writeText(text);
+                        // 临时反馈动画
+                        const originalHtml = copyBtn.innerHTML;
+                        copyBtn.innerHTML = '✓'; 
+                        setTimeout(() => copyBtn.innerHTML = originalHtml, 1500);
+                    } catch (err) {
+                        console.error('Copy failed', err);
+                    }
+                });
+            } else {
+                // 如果没有输出挂载点 (例如 Thought only node), 禁用 Edit/Copy
+                if (editBtn) (editBtn as HTMLButtonElement).style.display = 'none';
+                if (copyBtn) (copyBtn as HTMLButtonElement).style.display = 'none';
             }
         }
     }

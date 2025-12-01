@@ -9,6 +9,8 @@ export interface ChatInputOptions {
 export interface ExecutorOption {
     id: string;
     name: string;
+    icon?: string; // Emoji or URL
+    category?: string; // e.g., "Agents", "Workflows", "Tools"
 }
 
 export class ChatInput {
@@ -36,7 +38,7 @@ export class ChatInput {
                 <!-- 左侧：执行器选择 -->
                 <div class="llm-input__executor-wrapper">
                     <select class="llm-input__executor-select" title="Select Agent/Executor">
-                        <option value="default">Default</option>
+                        <option value="default">🤖 Assistant</option>
                     </select>
                 </div>
 
@@ -115,15 +117,49 @@ export class ChatInput {
         });
     }
 
+    /**
+     * 更新执行器列表，支持分组
+     */
     public updateExecutors(executors: ExecutorOption[], activeId?: string) {
         this.executors = executors;
-        this.executorSelect.innerHTML = executors.map(e => 
-            `<option value="${e.id}">${e.name}</option>`
-        ).join('');
+        
+        // 分组逻辑
+        const groups: Record<string, ExecutorOption[]> = {};
+        const uncategorized: ExecutorOption[] = [];
+
+        executors.forEach(e => {
+            if (e.category) {
+                if (!groups[e.category]) groups[e.category] = [];
+                groups[e.category].push(e);
+            } else {
+                uncategorized.push(e);
+            }
+        });
+
+        let html = '';
+
+        // 1. 未分类 (Default agents)
+        if (uncategorized.length > 0) {
+            html += uncategorized.map(e => this.renderOption(e)).join('');
+        }
+
+        // 2. 分类组
+        Object.entries(groups).forEach(([category, items]) => {
+            html += `<optgroup label="${category}">`;
+            html += items.map(e => this.renderOption(e)).join('');
+            html += `</optgroup>`;
+        });
+
+        this.executorSelect.innerHTML = html;
         
         if (activeId) {
             this.executorSelect.value = activeId;
         }
+    }
+
+    private renderOption(e: ExecutorOption): string {
+        const icon = e.icon ? `${e.icon} ` : '';
+        return `<option value="${e.id}">${icon}${e.name}</option>`;
     }
 
     private addFiles(newFiles: File[]) {

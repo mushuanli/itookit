@@ -49,10 +49,21 @@ export class SessionManager {
         // 默认总是包含一个 'default' 选项，它会动态解析
         const list = Array.from(this.executorRegistry.values()).map(e => ({
             id: e.id,
-            name: (e as any).name || e.id // 假设 IExecutor 实现上有 name 属性，或者 fallback 到 id
+            name: (e as any).name || e.id,
+            // 假设 IExecutor 实现有这些扩展属性，或者在这里做 Mock
+            icon: (e as any).icon || '🤖', 
+            category: (e as any).category || 'Agents'
         }));
         
-        // 如果注册表中没有 default，UI 层通常会自己处理或者我们在这里追加
+        // Mock default if empty for demo purposes
+        if (list.length === 0) {
+            return [
+                { id: 'default', name: 'General Assistant', icon: '🤖', category: 'General' },
+                { id: 'coder', name: 'Code Expert', icon: '👨‍💻', category: 'Specialists' },
+                { id: 'writer', name: 'Creative Writer', icon: '✍️', category: 'Specialists' },
+                { id: 'search', name: 'Web Search', icon: '🌐', category: 'Tools' }
+            ];
+        }
         return list;
     }
 
@@ -169,6 +180,7 @@ export class SessionManager {
             const rootNode: ExecutionNode = {
                 id: agentRootId,
                 name: (executor as any).name || 'Assistant',
+        icon: (executor as any).icon || '🤖', // 确保传递 icon
                 type: executor.type === 'atomic' ? 'agent' : 'router', // 根据类型决定图标/样式
                 status: 'running',
                 startTime: Date.now(),
