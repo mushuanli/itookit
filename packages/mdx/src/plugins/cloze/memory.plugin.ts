@@ -10,6 +10,12 @@ export interface MemoryPluginOptions {
   dangerThresholdDays?: number;
   /** 是否启用调试日志 */
   debug?: boolean;
+
+  /** 
+   * 在到期前多少小时自动隐藏卡片（即使还没完全到期）。
+   * @default 12 
+   */
+  hideBeforeDueHours?: number;
 }
 
 interface SRSCardState {
@@ -50,7 +56,8 @@ export class MemoryPlugin implements MDxPlugin {
       coolingPeriod: options.coolingPeriod || 60000, // 默认1分钟冷却
       dangerThresholdDays: options.dangerThresholdDays || 7, // 超过7天为严重过期
       debug: options.debug ?? true, // 🟢 默认开启调试，生产环境可关闭
-    };
+      hideBeforeDueHours: options.hideBeforeDueHours ?? 12, // 默认提前12小时隐藏
+  };
   }
 
   private log(message: string, ...args: any[]) {
@@ -219,10 +226,10 @@ export class MemoryPlugin implements MDxPlugin {
     const dueAt = state.dueAt ? new Date(state.dueAt) : now;
     const lastReviewedAt = state.lastReviewedAt ? new Date(state.lastReviewedAt) : null;
 
-    // 冷却逻辑：如果刚刚复习过（interval 很短）且还没到期
-    // 防止用户狂点 Again
-    if (state.interval * 24 * 60 * 60 * 1000 < this.options.coolingPeriod * 2 && dueAt > now) {
-         if (lastReviewedAt) {
+    // 2. 冷却逻辑
+    // 如果是刚刚复习过的短间隔卡片，且在冷却期内，保持 is-cooling (显示)
+    if (state.interval * 24 * 60 * 60 * 1000 < this.options.coolingPeriod * 2) {
+         if (lastReviewedAt && dueAt > now) {
             const timeSinceReview = now.getTime() - lastReviewedAt.getTime();
             if (timeSinceReview < this.options.coolingPeriod) {
               return 'is-cooling';
@@ -230,23 +237,29 @@ export class MemoryPlugin implements MDxPlugin {
          }
     }
 
-    // 未到期 -> is-cleared (Easy/Good 之后)
-    if (dueAt > now) {
+    // 3. 计算“提前隐藏”逻辑
+    const timeRemaining = dueAt.getTime() - now.getTime();
+    const safetyThreshold = this.options.hideBeforeDueHours * 60 * 60 * 1000;
+
+    // 4. 只有当剩余时间 大于 阈值 (12小时) 时，才显示内容
+    if (timeRemaining > safetyThreshold) {
       return 'is-cleared';
     }
 
-    // 4. 短间隔到期 (学习中) -> Orange
+    // 5. 否则，进入隐藏状态 (包含 Learning, Due, Danger)
+    
+    // 学习中 (间隔小于1天)
     if (state.interval < 1) {
       return 'is-learning';
     }
 
-    // 5. 长间隔到期 -> Red
-    // 检查是否严重过期
-    const overdueDays = (now.getTime() - dueAt.getTime()) / (24 * 60 * 60 * 1000);
+    // 严重过期
+    const overdueDays = -timeRemaining / (24 * 60 * 60 * 1000);
     if (overdueDays >= this.options.dangerThresholdDays) {
       return 'is-danger';
     }
 
+    // 普通到期 (或即将到期)
     return 'is-due';
   }
 
