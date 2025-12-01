@@ -1,7 +1,7 @@
 // mdx/core/plugin.ts
 import type { Extension } from '@codemirror/state';
 import type { Marked, MarkedExtension } from 'marked';
-import type { IPersistenceAdapter } from '@itookit/common';
+import type { IPersistenceAdapter, ISessionEngine } from '@itookit/common'; // 确保引入 ISessionEngine
 import type { VFSCore } from '@itookit/vfs-core';
 import type { PluginManager } from './plugin-manager';
 
@@ -65,7 +65,7 @@ export interface PluginContext {
   // 语法扩展
   registerSyntaxExtension(ext: MarkedExtension): void;
   
-  // 💡 新增：为编辑器注册 CodeMirror 扩展
+  // 为编辑器注册 CodeMirror 扩展
   registerCodeMirrorExtension?(extension: Extension | Extension[]): void;
 
   // 生命周期钩子
@@ -85,6 +85,9 @@ export interface PluginContext {
   // VFS 集成 - 增强类型
   getVFSCore(): VFSCore | null;
   getCurrentNodeId(): string | null;
+
+  // ✨ [修复] 新增 Session Engine 访问接口
+  getSessionEngine?(): ISessionEngine | null;
   
   // 编辑器专用（仅在 MDxEditor 中可用）
   registerCommand?(name: string, fn: Function): void;

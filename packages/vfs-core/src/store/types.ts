@@ -14,7 +14,8 @@ export const VFS_STORES = {
   VNODES: 'vnodes',
   CONTENTS: 'vfs_contents',
   TAGS: 'tags',
-  NODE_TAGS: 'node_tags'
+  NODE_TAGS: 'node_tags',
+  SRS_ITEMS: 'srs_items' // ✨ [新增] SRS 专用存储
 } as const;
 
 /** 事务模式 */
@@ -116,6 +117,26 @@ export interface NodeTagData {
   id?: number; // 主键 (auto-increment)
   nodeId: string;
   tagName: string;
+}
+
+/**
+ * [新增] SRS 记忆卡片数据结构
+ * 复合主键: [nodeId, clozeId]
+ */
+export interface SRSItemData {
+  nodeId: string;    // 关联的文件 ID
+  clozeId: string;   // 文件内的挖空 ID (e.g., "auto-1")
+  moduleId: string;  // [冗余字段] 用于按模块查询复习任务
+  
+  // SRS 核心数据
+  dueAt: number;     // 下次复习时间戳
+  interval: number;  // 间隔天数
+  ease: number;      // 易读性因子
+  reviewCount: number;
+  lastReviewedAt: number;
+  
+  // 上下文快照 (可选)
+  snippet?: string;  
 }
 
 /** 事务包装类 */

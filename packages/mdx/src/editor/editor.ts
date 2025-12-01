@@ -5,7 +5,7 @@ import { EditorState, Extension, Compartment } from '@codemirror/state';
 import { EditorView } from 'codemirror';
 import { markdown } from '@codemirror/lang-markdown';
 import { search } from '@codemirror/search';
-import type { IPersistenceAdapter } from '@itookit/common';
+import type { IPersistenceAdapter, ISessionEngine } from '@itookit/common';
 import type { VFSCore } from '@itookit/vfs-core';
 import { MDxRenderer } from '../renderer/renderer';
 import type { MDxPlugin } from '../core/plugin';
@@ -24,6 +24,7 @@ export interface MDxEditorConfig extends EditorOptions {
   searchMarkClass?: string;
   vfsCore?: VFSCore;
   persistenceAdapter?: IPersistenceAdapter;
+  sessionEngine?: ISessionEngine; // ✨ [新增] 支持传入 Engine
 }
 
 /**
@@ -54,6 +55,7 @@ export class MDxEditor extends IEditor {
       vfsCore: options.vfsCore,
       nodeId: options.nodeId,
       persistenceAdapter: options.persistenceAdapter,
+      sessionEngine: options.sessionEngine, // ✨ [传递]
     });
     this.renderer.setEditorInstance(this);
   }
