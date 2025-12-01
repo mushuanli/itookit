@@ -27,6 +27,13 @@ interface SRSCardState {
   easeFactor: number;
 }
 
+// 状态定义：
+// is-new: 新卡片 (Hidden)
+// is-cooling: 冷却中 (Visible, 无菜单)
+// is-learning: 学习中/短间隔 (Hidden)
+// is-due: 到期 (Hidden)
+// is-danger: 严重过期 (Hidden, 红色)
+// is-cleared: 已掌握/Easy (Visible, 点击关闭，再次打开显示菜单)
 type ClozeStateClass = 'is-new' | 'is-cooling' | 'is-learning' | 'is-due' | 'is-danger' | 'is-cleared';
 
 export class MemoryPlugin implements MDxPlugin {
@@ -62,29 +69,34 @@ export class MemoryPlugin implements MDxPlugin {
   install(context: PluginContext): void {
     this.storeRef = context.getScopedStore();
 
-    // 监听 Cloze 打开事件
+    // --- 关键逻辑 1: 监听 Cloze 打开事件 ---
+    // 这个事件只有在 Cloze 从 [隐藏] -> [显示] 状态切换时才会触发 (由 ClozePlugin 发出)
     const removeClozeRevealed = context.listen('clozeRevealed', (data: any) => {
       const stateClass = data.element.dataset.stateClass as ClozeStateClass;
       
-      // 冷却中的卡片不显示评分面板
+      // 1. 冷却中的卡片 (Again 之后) 打开时不显示菜单，避免干扰
       if (stateClass === 'is-cooling') {
         this.log('Card is cooling, skip grading panel', data.clozeId);
         return;
       }
       
+      // 2. is-cleared (Easy) 的卡片，如果是用户手动点击打开的，应该显示菜单
+      // 这样用户可以修改之前的评分，或者重新复习
+      
       const isLocked = data.element.closest('.is-global-override');
       const timeout = isLocked ? 0 : this.options.gradingTimeout;
+      
       this.showGradingPanel(data.element, context, timeout);
     });
     if (removeClozeRevealed) this.cleanupFns.push(removeClozeRevealed);
 
-    // 批量评分
+    // 批量评分支持
     const removeBatchToggle = context.listen('clozeBatchGradeToggle', (data: { container?: HTMLElement }) => {
       this.showBatchGrading(context, data.container);
     });
     if (removeBatchToggle) this.cleanupFns.push(removeBatchToggle);
 
-    // DOM 更新时应用状态
+    // DOM 更新时应用状态 (初始化渲染)
     const removeDomUpdated = context.on('domUpdated', async ({ element }: { element: HTMLElement }) => {
       this.log('DOM updated, starting sync...');
       await this.syncWithStore(context);
@@ -207,9 +219,8 @@ export class MemoryPlugin implements MDxPlugin {
     const dueAt = state.dueAt ? new Date(state.dueAt) : now;
     const lastReviewedAt = state.lastReviewedAt ? new Date(state.lastReviewedAt) : null;
 
-    // 2. 检查是否在冷却期 (刚点了 Again，且还没到 dueAt)
-    // 注意：这里逻辑微调，只要是上次 Again 且未到期，视为冷却
-    // 并且检查时间间隔，防止无限冷却
+    // 冷却逻辑：如果刚刚复习过（interval 很短）且还没到期
+    // 防止用户狂点 Again
     if (state.interval * 24 * 60 * 60 * 1000 < this.options.coolingPeriod * 2 && dueAt > now) {
          if (lastReviewedAt) {
             const timeSinceReview = now.getTime() - lastReviewedAt.getTime();
@@ -219,7 +230,7 @@ export class MemoryPlugin implements MDxPlugin {
          }
     }
 
-    // 3. 未到期 -> Green (已掌握)
+    // 未到期 -> is-cleared (Easy/Good 之后)
     if (dueAt > now) {
       return 'is-cleared';
     }
@@ -240,7 +251,8 @@ export class MemoryPlugin implements MDxPlugin {
   }
 
   /**
-   * 应用视觉状态
+   * --- 关键逻辑 2: 应用视觉状态 ---
+   * 负责初始化 DOM 时的显隐控制
    */
   private applyVisualsAndState(element: HTMLElement, context: PluginContext): void {
     const isGlobalLocked = element.classList.contains('is-global-override') ||
@@ -260,20 +272,23 @@ export class MemoryPlugin implements MDxPlugin {
 
       const stateClass = this.determineStateClass(state);
 
-      // 清除旧状态
+      // 1. 更新 CSS 类
       cloze.classList.remove('is-new', 'is-cooling', 'is-learning', 'is-due', 'is-danger', 'is-cleared');
       cloze.classList.add(stateClass);
       
-      // 存储状态到 dataset，供事件处理使用
+      // 2. 存储状态到 dataset，供点击事件使用
       (cloze as HTMLElement).dataset.stateClass = stateClass;
 
-      // 视觉行为
+      // 3. 控制显隐 (仅在非全局锁定模式下)
       if (!isGlobalLocked) {
         if (stateClass === 'is-cleared') {
+          // Easy 卡片：默认移除 hidden，显示内容
           cloze.classList.remove('hidden');
         } else if (stateClass === 'is-cooling') {
-          // 冷却中的保持当前状态
+          // 冷却中：也保持显示，方便阅读
+          cloze.classList.remove('hidden');
         } else {
+          // 其他 (New, Due, Learning)：默认隐藏，等待点击
           cloze.classList.add('hidden');
         }
       }
@@ -288,14 +303,15 @@ export class MemoryPlugin implements MDxPlugin {
 
     const panel = document.createElement('div');
     panel.className = `${this.options.className}__panel`;
+    // 阻止冒泡非常重要，否则点击按钮会触发 ClozePlugin 的 toggle，导致卡片立马关上
+    panel.addEventListener('click', (e) => e.stopPropagation());
+
     panel.innerHTML = `
       <button data-grade="1" title="忘记 (1分钟后重试)">Again</button>
       <button data-grade="2" title="困难 (10分钟后)">Hard</button>
       <button data-grade="3" title="一般 (明天)">Good</button>
       <button data-grade="4" title="简单 (4天后)">Easy</button>
     `;
-
-    panel.addEventListener('click', (e) => e.stopPropagation());
 
     let timeout: ReturnType<typeof setTimeout> | null = null;
     if (timeoutDuration > 0) {
@@ -308,8 +324,12 @@ export class MemoryPlugin implements MDxPlugin {
       if (timeout) clearTimeout(timeout);
 
       const grade = parseInt(btn.getAttribute('data-grade') || '3', 10);
-      await this.gradeCard(clozeElement, grade, context);
+      
+      // 评分后移除面板
       panel.remove();
+      
+      // 执行评分逻辑
+      await this.gradeCard(clozeElement, grade, context);
     });
 
     clozeElement.appendChild(panel);
@@ -402,9 +422,15 @@ export class MemoryPlugin implements MDxPlugin {
       clozeElement.classList.add(stateClass);
       clozeElement.dataset.stateClass = stateClass;
 
+      // --- 关键逻辑 3: 评分后的显隐控制 ---
+      // 如果变成了 is-cleared (Easy/Good) 或 is-cooling (Again)
+      // 强制保持打开状态 (remove hidden)
+      // 此时因为不是通过 ClozePlugin 的 click 触发的，所以不会发 clozeRevealed 事件，也就不会再次显示 Panel
       if (stateClass === 'is-cleared' || stateClass === 'is-cooling') {
         clozeElement.classList.remove('hidden');
-      }
+      } 
+      // 注意：如果评分结果导致它应该隐藏 (比如某种 logic)，这里可以 add('hidden')
+      // 但对于 SRS，通常评分后我们希望看到结果（或者自动跳到下一个），这里保持显示是合理的。
 
       this.log(`Graded "${locator}" with ${grade}. State: ${stateClass}`);
 
