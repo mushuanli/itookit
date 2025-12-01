@@ -12,7 +12,7 @@
 
 .mdx-code-block-controls {
   display: flex;
-  justify-content: flex-end; /* 🔥 改为右对齐 */
+  justify-content: flex-end; /* 右对齐 */
   align-items: center;
   padding: 0.5rem 0.75rem;
   border-bottom: 1px solid #e1e4e8;
@@ -65,26 +65,68 @@
   font-weight: 600;
 }
 
-/* 折叠状态 */
-.mdx-code-block-wrapper--collapsed pre {
-  position: relative;
-  max-height: 250px; /* 使用配置的默认值 */
-  overflow-y: hidden;
-}
+/* --- 折叠与展开交互样式 [修改] --- */
 
-.mdx-code-block-wrapper--collapsed pre::after {
-  content: '';
+/* 🔥 [新增] 底部展开触发器/遮罩层 */
+.mdx-code-block-expand-trigger {
   position: absolute;
   bottom: 0;
   left: 0;
   right: 0;
-  height: 60px;
+  height: 80px; /* 遮罩高度 */
   background: linear-gradient(
     to bottom,
-    rgba(255, 255, 255, 0),
-    #ffffff
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.9) 40%,
+    #ffffff 100%
   );
-  pointer-events: none;
+  display: flex;
+  align-items: flex-end; /* 内容靠下 */
+  justify-content: center;
+  padding-bottom: 12px;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none; /* 默认不阻挡鼠标 */
+  transition: opacity 0.3s ease;
+  z-index: 10;
+}
+
+/* 悬停时的效果 */
+.mdx-code-block-expand-trigger:hover {
+  background: linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(240, 246, 252, 0.9) 40%,
+    #f0f6fc 100%
+  );
+}
+
+/* 触发器按钮样式 */
+.mdx-code-block-expand-trigger span {
+  font-size: 13px;
+  color: #0969da;
+  font-weight: 500;
+  padding: 6px 16px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid #d0d7de;
+  border-radius: 20px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.mdx-code-block-expand-trigger:hover span {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 5px rgba(0,0,0,0.15);
+  background: #ffffff;
+}
+
+/* 仅在折叠状态下显示触发器 */
+.mdx-code-block-wrapper--collapsed .mdx-code-block-expand-trigger {
+  opacity: 1;
+  pointer-events: auto; /* 允许点击 */
 }
 
 /* 代码块本身 */
@@ -97,12 +139,20 @@
   font-size: 14px;
   line-height: 1.5;
   transition: max-height 0.3s ease;
+  /* 确保 padding-bottom 足够，避免内容贴底 */
+  padding-bottom: 1rem; 
 }
 
 .mdx-code-block-wrapper pre code {
   background: transparent;
   padding: 0;
   border: none;
+}
+
+/* 折叠状态下 pre 的样式 */
+.mdx-code-block-wrapper--collapsed pre {
+  overflow-y: hidden;
+  /* max-height 由 JS 动态控制 */
 }
 
 /* 响应式设计 */
@@ -119,5 +169,55 @@
   .mdx-code-block-controls__button {
     font-size: 13px;
     padding: 0.3rem 0.6rem;
+  }
+}
+
+/* 深色模式适配建议 (如需) */
+@media (prefers-color-scheme: dark) {
+  .mdx-code-block-wrapper {
+    border-color: #30363d;
+    background: #0d1117;
+  }
+  .mdx-code-block-controls {
+    border-bottom-color: #30363d;
+  }
+  .mdx-code-block-controls__button {
+    background-color: #21262d;
+    border-color: #30363d;
+    color: #c9d1d9;
+  }
+  .mdx-code-block-controls__button:hover {
+    background-color: #30363d;
+    border-color: #8b949e;
+  }
+  .mdx-code-block-wrapper pre {
+    background: #0d1117;
+    color: #c9d1d9;
+  }
+  
+  /* 遮罩层深色适配 */
+  .mdx-code-block-expand-trigger {
+    background: linear-gradient(
+      to bottom,
+      rgba(13, 17, 23, 0) 0%,
+      rgba(13, 17, 23, 0.9) 40%,
+      #0d1117 100%
+    );
+  }
+  .mdx-code-block-expand-trigger:hover {
+     background: linear-gradient(
+      to bottom,
+      rgba(13, 17, 23, 0) 0%,
+      rgba(22, 27, 34, 0.9) 40%,
+      #161b22 100%
+    );
+  }
+  .mdx-code-block-expand-trigger span {
+    background: #21262d;
+    border-color: #30363d;
+    color: #58a6ff;
+  }
+  .mdx-code-block-expand-trigger:hover span {
+    background: #30363d;
   }
 }
