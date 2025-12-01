@@ -34,6 +34,11 @@ export interface ExecutionResult {
     duration?: number;
     tokenUsage?: number;
     confidence?: number;
+    /** 
+     * [FIX] 显式定义思考长度，保证类型安全。
+     * 如果 UI 依赖它，它就应该在接口里。
+     */
+    thinkingLength?: number; 
   };
 }
 

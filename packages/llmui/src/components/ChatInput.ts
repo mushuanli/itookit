@@ -1,16 +1,28 @@
 // @file llm-ui/components/ChatInput.ts
 
 export interface ChatInputOptions {
-    onSend: (text: string, files: File[]) => Promise<void>;
+    onSend: (text: string, files: File[], executorId: string) => Promise<void>;
     onStop: () => void;
+    onExecutorChange?: (executorId: string) => void;
+}
+
+export interface ExecutorOption {
+    id: string;
+    name: string;
 }
 
 export class ChatInput {
     private textarea!: HTMLTextAreaElement;
     private sendBtn!: HTMLButtonElement;
     private stopBtn!: HTMLButtonElement;
+    private attachBtn!: HTMLButtonElement;
+    private executorSelect!: HTMLSelectElement;
     private fileInput!: HTMLInputElement;
+    private attachmentContainer!: HTMLElement;
+    
     private loading = false;
+    private files: File[] = [];
+    private executors: ExecutorOption[] = [];
 
     constructor(private container: HTMLElement, private options: ChatInputOptions) {
         this.render();
@@ -18,34 +30,65 @@ export class ChatInput {
     }
 
     private render() {
+        // 使用 BEM 结构重构 DOM
         this.container.innerHTML = `
-            <div class="llm-ui-chat-input">
-                <div class="llm-ui-chat-input__toolbar">
-                    <button class="llm-ui-btn-icon" title="Upload File" id="llm-ui-btn-upload">📎</button>
+            <div class="llm-input">
+                <!-- 左侧：执行器选择 -->
+                <div class="llm-input__executor-wrapper">
+                    <select class="llm-input__executor-select" title="Select Agent/Executor">
+                        <option value="default">Default</option>
+                    </select>
                 </div>
-                <div class="llm-ui-chat-input__body">
-                    <textarea class="llm-ui-chat-input__textarea" placeholder="Message... (Shift+Enter for new line)" rows="1"></textarea>
-                    <div class="llm-ui-chat-input__actions">
-                        <button class="llm-ui-btn-send">➤</button>
-                        <button class="llm-ui-btn-stop" style="display:none;">⏹</button>
-                    </div>
+
+                <!-- 中间：输入区域 + 附件预览 -->
+                <div class="llm-input__field-wrapper">
+                    <div class="llm-input__attachments" style="display:none"></div>
+                    <textarea 
+                        class="llm-input__textarea" 
+                        placeholder="Message... (Shift+Enter for new line)" 
+                        rows="1"
+                    ></textarea>
                 </div>
+
+                <!-- 右侧：操作按钮 -->
+                <div class="llm-input__actions">
+                    <button class="llm-input__btn llm-input__btn--attach" title="Attach File">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg>
+                    </button>
+                    
+                    <button class="llm-input__btn llm-input__btn--send" title="Send">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                    </button>
+                    
+                    <button class="llm-input__btn llm-input__btn--stop" title="Stop Generation" style="display:none;">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect></svg>
+                    </button>
+                </div>
+
                 <input type="file" multiple style="display:none;" id="llm-ui-hidden-file-input">
             </div>
         `;
 
-        this.textarea = this.container.querySelector('textarea')!;
-        this.sendBtn = this.container.querySelector('.llm-ui-btn-send')!;
-        this.stopBtn = this.container.querySelector('.llm-ui-btn-stop')!;
+        // 绑定元素引用
+        this.textarea = this.container.querySelector('.llm-input__textarea')!;
+        this.sendBtn = this.container.querySelector('.llm-input__btn--send')!;
+        this.stopBtn = this.container.querySelector('.llm-input__btn--stop')!;
+        this.attachBtn = this.container.querySelector('.llm-input__btn--attach')!;
+        this.executorSelect = this.container.querySelector('.llm-input__executor-select')!;
         this.fileInput = this.container.querySelector('#llm-ui-hidden-file-input')!;
+        this.attachmentContainer = this.container.querySelector('.llm-input__attachments')!;
     }
 
     private bindEvents() {
-        this.textarea.addEventListener('input', () => {
+        // 1. 自动高度调整
+        const adjustHeight = () => {
             this.textarea.style.height = 'auto';
-            this.textarea.style.height = Math.min(this.textarea.scrollHeight, 200) + 'px';
-        });
+            const newHeight = Math.min(this.textarea.scrollHeight, 200); // Max height 200px
+            this.textarea.style.height = `${newHeight}px`;
+        };
+        this.textarea.addEventListener('input', adjustHeight);
 
+        // 2. 键盘事件
         this.textarea.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
@@ -53,29 +96,90 @@ export class ChatInput {
             }
         });
 
+        // 3. 按钮事件
         this.sendBtn.addEventListener('click', () => this.triggerSend());
         this.stopBtn.addEventListener('click', () => this.options.onStop());
         
-        this.container.querySelector('#llm-ui-btn-upload')?.addEventListener('click', () => {
-            this.fileInput.click();
+        // 4. 附件处理
+        this.attachBtn.addEventListener('click', () => this.fileInput.click());
+        this.fileInput.addEventListener('change', () => {
+            if (this.fileInput.files) {
+                this.addFiles(Array.from(this.fileInput.files));
+                this.fileInput.value = ''; // Reset
+            }
+        });
+
+        // 5. Executor 选择变化
+        this.executorSelect.addEventListener('change', () => {
+            this.options.onExecutorChange?.(this.executorSelect.value);
+        });
+    }
+
+    public updateExecutors(executors: ExecutorOption[], activeId?: string) {
+        this.executors = executors;
+        this.executorSelect.innerHTML = executors.map(e => 
+            `<option value="${e.id}">${e.name}</option>`
+        ).join('');
+        
+        if (activeId) {
+            this.executorSelect.value = activeId;
+        }
+    }
+
+    private addFiles(newFiles: File[]) {
+        this.files = [...this.files, ...newFiles];
+        this.renderAttachments();
+    }
+
+    private removeFile(index: number) {
+        this.files.splice(index, 1);
+        this.renderAttachments();
+    }
+
+    private renderAttachments() {
+        if (this.files.length === 0) {
+            this.attachmentContainer.style.display = 'none';
+            return;
+        }
+        this.attachmentContainer.style.display = 'flex';
+        this.attachmentContainer.innerHTML = this.files.map((f, i) => `
+            <div class="llm-input__attachment-tag">
+                <span>📄 ${f.name}</span>
+                <span style="cursor:pointer;margin-left:4px;" data-index="${i}">×</span>
+            </div>
+        `).join('');
+
+        this.attachmentContainer.querySelectorAll('span[data-index]').forEach(el => {
+            el.addEventListener('click', (e) => {
+                const idx = parseInt((e.target as HTMLElement).dataset.index!);
+                this.removeFile(idx);
+            });
         });
     }
 
     private async triggerSend() {
         const text = this.textarea.value.trim();
-        if (!text || this.loading) return;
+        if ((!text && this.files.length === 0) || this.loading) return;
 
+        const currentExecutor = this.executorSelect.value;
+        const currentFiles = [...this.files]; // Copy
+
+        // Reset UI
         this.textarea.value = '';
         this.textarea.style.height = 'auto';
+        this.files = [];
+        this.renderAttachments();
         
-        await this.options.onSend(text, []); 
+        await this.options.onSend(text, currentFiles, currentExecutor); 
     }
 
     setLoading(loading: boolean) {
         this.loading = loading;
-        this.sendBtn.style.display = loading ? 'none' : 'block';
-        this.stopBtn.style.display = loading ? 'block' : 'none';
+        this.sendBtn.style.display = loading ? 'none' : 'flex';
+        this.stopBtn.style.display = loading ? 'flex' : 'none';
         this.textarea.disabled = loading;
+        this.executorSelect.disabled = loading;
+        this.attachBtn.disabled = loading;
     }
 
     focus() {

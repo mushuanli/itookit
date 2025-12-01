@@ -1,137 +1,123 @@
 // @file llm-ui/orchestrator/AgentExecutor.ts
+
+import { 
+    IExecutor, 
+    ExecutorType, 
+    ExecutionContext, 
+    ExecutionResult, 
+    LLMConnection 
+} from '@itookit/common';
 import { LLMDriver, ChatMessage } from '@itookit/llmdriver';
-import { LLMConnection } from '@itookit/common';
 
-export interface ExecutorCallbacks {
-    onStart: () => void;
-    onThinking: (delta: string) => void;
-    onOutput: (delta: string) => void;
-    onSuccess: () => void;
-    onFailure: (error: Error) => void;
-}
+// 导入本地定义的上下文接口，确保 TS 类型检查通过
+import { StreamingContext } from './SessionManager'; 
 
-export class AgentExecutor {
+export class AgentExecutor implements IExecutor {
+    readonly id: string;
+    readonly type: ExecutorType = 'atomic';
+    public name: string = 'Agent';
+
     constructor(
         private connection: LLMConnection,
         private model: string,
         private systemPrompt?: string
-    ) {}
-
-    async run(
-        messages: ChatMessage[], 
-        callbacks: ExecutorCallbacks, 
-        signal?: AbortSignal
     ) {
-        callbacks.onStart();
+        this.id = `agent-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+    }
+
+    /**
+     * IExecutor 接口实现
+     * @param input 通常是用户最新的输入 (string)
+     * @param context 执行上下文，包含历史记录、文件和回调
+     */
+    async execute(input: unknown, context: StreamingContext): Promise<ExecutionResult> {
+        // 1. 准备上下文和输入
+        const history = (context.variables.get('history') as ChatMessage[]) || [];
+        const userMessageContent = input as string;
+        
+        // 构建完整的 LLM 消息链
+        const fullMessages: ChatMessage[] = [];
+        
+        // 插入 System Prompt
+        if (this.systemPrompt) {
+            fullMessages.push({ role: 'system', content: this.systemPrompt });
+        }
+        
+        // 插入历史记录
+        fullMessages.push(...history);
+        
+        // 插入当前用户消息 (如果 input 不为空，且历史记录里还没包含这最后一条)
+        // 注意：SessionManager 的 buildMessageHistory 通常不包含尚未处理的当前 user session
+        // 所以我们需要把 input 作为当前消息加入
+        // 但如果 SessionManager 的实现是在调用 execute 前已经把 user session 加入了 history，这里就要小心重复
+        // *本实现假设 context.history 是"过去"的历史，当前 input 是"现在"的消息*
+        if (userMessageContent) {
+             fullMessages.push({ role: 'user', content: userMessageContent });
+        }
+
+        // 2. 初始化 Driver
+        console.log('[AgentExecutor] Creating LLMDriver with model:', this.model);
+        const driver = new LLMDriver({
+            connection: this.connection,
+            provider: this.connection.provider,
+            apiKey: this.connection.apiKey || '',
+            model: this.model,
+            supportsThinking: true // 强制开启思考能力检测
+        });
+
+        // 3. 准备回调函数
+        // 如果 Context 中没有提供回调，使用空函数防止报错
+        const onThinking = context.callbacks?.onThinking || (() => {});
+        const onOutput = context.callbacks?.onOutput || (() => {});
+
+        let totalContent = '';
+        let totalThinking = '';
 
         try {
-            console.log('[AgentExecutor] Creating LLMDriver with config:', {
-                provider: this.connection.provider,
-                model: this.model,
-                hasApiKey: !!this.connection.apiKey,
-                baseURL: this.connection.baseURL
-            });
-
-            const driver = new LLMDriver({
-                connection: this.connection,
-                provider: this.connection.provider,
-                apiKey: this.connection.apiKey || '',
-                model: this.model,
-                supportsThinking: true // 强制开启 Thinking 能力
-            });
-
-            // 构造完整的消息历史（包含 System Prompt）
-            const fullHistory: ChatMessage[] = [];
-            if (this.systemPrompt) {
-                fullHistory.push({ role: 'system', content: this.systemPrompt });
-            }
-            fullHistory.push(...messages);
-
-            console.log('[AgentExecutor] Sending request with messages:', 
-                fullHistory.map(m => ({ role: m.role, contentLength: m.content?.length }))
-            );
-
+            // 4. 发起流式请求
             const stream = await driver.chat.create({
-                messages: fullHistory,
+                messages: fullMessages,
                 stream: true,
                 thinking: true,
-                signal
+                // 这里可以透传 AbortSignal，如果 Context 支持的话
+                // signal: context.signal 
             });
 
-            console.log('[AgentExecutor] Stream created, starting iteration...');
-
-            let chunkCount = 0;
-            let totalContent = '';
-            let totalThinking = '';
-
+            // 5. 处理流
             for await (const chunk of stream) {
-                chunkCount++;
-                
-                if (signal?.aborted) {
-                    console.log('[AgentExecutor] Aborted by signal');
-                    break;
-                }
-
-                // 详细日志：打印原始 chunk 结构
-                console.log(`[AgentExecutor] Chunk #${chunkCount}:`, JSON.stringify(chunk, null, 2));
-
                 // 安全检查
-                if (!chunk.choices || chunk.choices.length === 0) {
-                    console.warn('[AgentExecutor] Chunk has no choices:', chunk);
-                    continue;
-                }
-
+                if (!chunk.choices || chunk.choices.length === 0) continue;
+                
                 const delta = chunk.choices[0].delta;
-                
-                if (!delta) {
-                    console.warn('[AgentExecutor] Chunk has no delta:', chunk.choices[0]);
-                    continue;
-                }
+                if (!delta) continue;
 
+                // 处理思考过程
                 if (delta.thinking) {
-                    console.log(`[AgentExecutor] Thinking delta: "${delta.thinking.substring(0, 50)}..."`);
                     totalThinking += delta.thinking;
-                    callbacks.onThinking(delta.thinking);
+                    onThinking(delta.thinking);
                 }
-                
+
+                // 处理正文输出
                 if (delta.content) {
-                    console.log(`[AgentExecutor] Content delta: "${delta.content.substring(0, 50)}..."`);
                     totalContent += delta.content;
-                    callbacks.onOutput(delta.content);
-                }
-
-                // 检查是否有其他字段
-                const knownFields = ['role', 'content', 'thinking', 'function_call', 'tool_calls'];
-                const unknownFields = Object.keys(delta).filter(k => !knownFields.includes(k));
-                if (unknownFields.length > 0) {
-                    console.log('[AgentExecutor] Unknown delta fields:', unknownFields, delta);
+                    onOutput(delta.content);
                 }
             }
 
-            console.log('[AgentExecutor] Stream completed:', {
-                totalChunks: chunkCount,
-                totalContentLength: totalContent.length,
-                totalThinkingLength: totalThinking.length
-            });
-
-            if (chunkCount === 0) {
-                console.error('[AgentExecutor] WARNING: No chunks received from stream!');
-            }
-
-            if (totalContent.length === 0 && totalThinking.length === 0) {
-                console.error('[AgentExecutor] WARNING: No content or thinking received!');
-            }
-
-            callbacks.onSuccess();
+            // 6. 返回标准执行结果
+            return {
+                status: 'success',
+                output: totalContent, // 返回完整内容，供后续流程或非流式场景使用
+                control: { action: 'end' },
+                metadata: {
+                    tokenUsage: 0, // 暂无 Token 统计
+                    thinkingLength: totalThinking.length
+                }
+            };
 
         } catch (error: any) {
-            console.error('[AgentExecutor] Error during execution:', {
-                name: error.name,
-                message: error.message,
-                stack: error.stack,
-                response: error.response?.data
-            });
-            callbacks.onFailure(error);
+            console.error('[AgentExecutor] LLM Error:', error);
+            // 抛出错误，交给 SessionManager 处理 UI 状态
             throw error;
         }
     }
