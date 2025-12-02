@@ -6,11 +6,12 @@ import { VFSCore, VFSErrorCode, VFSEventType, VFSEvent } from '@itookit/vfs-core
 import { SettingsState, LLMConnection, MCPServer, Contact, Tag } from '../types';
 import { 
     LLM_PROVIDER_DEFAULTS, // 引入提供商定义
-    // LLM_DEFAULT_CONNECTIONS, // [修改] 不再需要这个静态数组
+    LLM_AGENT_TARGET_DIR,
     LLM_DEFAULT_AGENTS 
 } from '../constants';
 
 const CONFIG_MODULE = '__config';
+const AGENT_MODULE = 'agents';
 
 // 定义不向用户展示的系统内部模块
 const SYSTEM_MODULES = ['__config', '__vfs_meta__', 'settings_ui'];
@@ -143,200 +144,229 @@ export class SettingsService {
         if (key !== 'tags') this.notify();
     }
 
-/**
- * 同步 LLM 连接和模型配置
- * 1. 如果 common 有新的 connection (provider)，会同步到数据库中
- * 2. 如果 common 已有的 connection 的 models 有更新，那么也会同步到数据库中
- */
-private async _syncLLMProvidersWithDefaults(): Promise<void> {
-    console.log('[SettingsService] Syncing LLM providers with defaults...');
-    
-    const existingConnections = this.state.connections;
-    const defaultProviders = LLM_PROVIDER_DEFAULTS;
-    const updatedConnections: LLMConnection[] = [];
-    const processedProviderKeys = new Set<string>();
-    
-    // 处理每个预设的 Provider
-    for (const [providerKey, providerDef] of Object.entries(defaultProviders)) {
-        processedProviderKeys.add(providerKey);
-        
-        // 检查该 Provider 是否已有对应的连接
-        let existingConnectionsForProvider = existingConnections.filter(
-            conn => conn.provider === providerKey
-        );
-        
-        if (existingConnectionsForProvider.length === 0) {
-            // 1. 新的 Provider: 创建默认连接
-            console.log(`[SettingsService] Creating new default connection for provider: ${providerKey}`);
-            
-            const defaultConnId = providerKey === 'rdsec' ? LLM_DEFAULT_ID : `conn-${providerKey}-default`;
-            
-            const newConnection: LLMConnection = {
-                id: defaultConnId,
-                name: providerDef.name,
-                provider: providerKey,
-                apiKey: '', // 用户需要填写
-                baseURL: providerDef.baseURL,
-                model: providerDef.models[0]?.id || '',
-                availableModels: [...providerDef.models],
-                metadata: {
-                    ...providerDef,
-                    isSystemDefault: true // 标记为系统默认连接
-                }
-            };
-            
-            updatedConnections.push(newConnection);
-            
-            // 为部分重要的 Provider 自动创建 Agent
-            if (['rdsec', 'openai', 'anthropic', 'gemini'].includes(providerKey)) {
-                await this._ensureDefaultAgentForProvider(providerKey, defaultConnId, providerDef);
-            }
-            
-        } else {
-            // 2. 已有的 Provider: 检查并更新模型列表
-            for (const existingConn of existingConnectionsForProvider) {
-                console.log(`[SettingsService] Checking updates for connection: ${existingConn.name} (${providerKey})`);
-                
-                const updatedConn = { ...existingConn };
-                let hasUpdates = false;
-                
-                // 检查 BaseURL 是否需要更新
-                if (existingConn.baseURL !== providerDef.baseURL && 
-                    !existingConn.baseURL) { // 仅当用户未自定义时才更新
-                    updatedConn.baseURL = providerDef.baseURL;
-                    hasUpdates = true;
-                }
-                
-                // 检查模型列表是否需要同步
-                const existingModelIds = new Set(
-                    existingConn.availableModels?.map(m => m.id) || []
-                );
-                const defaultModelIds = new Set(providerDef.models.map(m => m.id));
-                
-                // 检测新增的模型
-                for (const defaultModel of providerDef.models) {
-                    if (!existingModelIds.has(defaultModel.id)) {
-                        console.log(`[SettingsService] Adding new model: ${defaultModel.name} (${defaultModel.id})`);
-                        if (!updatedConn.availableModels) {
-                            updatedConn.availableModels = [];
-                        }
-                        updatedConn.availableModels.push({ ...defaultModel });
-                        hasUpdates = true;
-                    }
-                }
-                
-                // 检查模型名称是否更新（如果ID相同但名称不同）
-                for (const existingModel of (existingConn.availableModels || [])) {
-                    const defaultModel = providerDef.models.find(m => m.id === existingModel.id);
-                    if (defaultModel && defaultModel.name !== existingModel.name) {
-                        console.log(`[SettingsService] Updating model name: ${existingModel.name} -> ${defaultModel.name}`);
-                        existingModel.name = defaultModel.name;
-                        hasUpdates = true;
-                    }
-                }
-                
-                // 检查当前选择的模型是否仍然有效
-                if (existingConn.model && !defaultModelIds.has(existingConn.model)) {
-                    console.log(`[SettingsService] Current model ${existingConn.model} no longer available, updating to ${providerDef.models[0]?.id}`);
-                    updatedConn.model = providerDef.models[0]?.id || '';
-                    hasUpdates = true;
-                }
-                
-                // 更新额外的 Provider 元数据
-                if (!updatedConn.metadata || !updatedConn.metadata.isSystemDefault) {
-                    updatedConn.metadata = {
-                        ...(updatedConn.metadata || {}),
-                        ...providerDef,
-                        isSystemDefault: true,
-                        lastSynced: Date.now()
-                    };
-                    hasUpdates = true;
-                }
-                
-                if (hasUpdates) {
-                    updatedConnections.push(updatedConn);
-                } else {
-                    updatedConnections.push(existingConn);
-                }
-            }
-        }
-    }
-    
-    // 保留用户自定义的非预设 Provider 连接
-    for (const existingConn of existingConnections) {
-        if (!processedProviderKeys.has(existingConn.provider)) {
-            console.log(`[SettingsService] Preserving custom provider: ${existingConn.provider}`);
-            updatedConnections.push(existingConn);
-        }
-    }
-    
-    // 更新状态并保存
-    if (JSON.stringify(this.state.connections) !== JSON.stringify(updatedConnections)) {
-        console.log('[SettingsService] LLM connections updated with latest defaults');
-        this.state.connections = updatedConnections;
-        await this.saveEntity('connections');
-    }
-}
+    // =========================================================================
+    // ✨ [新增/修改] 核心修复：递归创建目录辅助方法
+    // =========================================================================
+    private async _ensureDirectoryHierarchy(moduleName: string, fullPath: string): Promise<void> {
+        // 移除开头和结尾的斜杠，按 / 分割
+        const parts = fullPath.split('/').filter(p => p);
+        let currentPath = '';
 
-/**
- * 为 Provider 创建默认的 Agent
- */
-private async _ensureDefaultAgentForProvider(
-    providerKey: string, 
-    connectionId: string, 
-    providerDef: any
-): Promise<void> {
-    const AGENT_MODULE = 'agents';
-    
-    if (!this.vfs.getModule(AGENT_MODULE)) {
-        return;
-    }
-    
-    const agentId = `agent-${providerKey}-default`;
-    const fileName = `${agentId}.agent`;
-    
-    // 检查文件是否已存在
-    const fileId = await this.vfs.getVFS().pathResolver.resolve(AGENT_MODULE, `/${fileName}`);
-    if (fileId) {
-        return; // 已存在
-    }
-    
-    // 创建默认 Agent
-    const agentName = `${providerDef.name} 助手`;
-    const agentIcon = this._getProviderIcon(providerKey);
-    
-    const agentContent = {
-        id: agentId,
-        name: agentName,
-        type: 'agent',
-        description: `基于 ${providerDef.name} 的默认助手`,
-        icon: agentIcon,
-        config: {
-            connectionId: connectionId,
-            modelId: providerDef.models[0]?.id || '',
-            systemPrompt: `You are a helpful assistant powered by ${providerDef.name}.`,
-            maxHistoryLength: -1
-        },
-        interface: {
-            inputs: [{ name: "prompt", type: "string" }],
-            outputs: [{ name: "response", type: "string" }]
+        for (const part of parts) {
+            currentPath += `/${part}`;
+            try {
+                // 逐级创建目录: /default -> /default/providers
+                await this.vfs.createDirectory(moduleName, currentPath);
+            } catch (e: any) {
+                // 只有当错误不是 "已存在" 时才警告
+                if (e.code !== VFSErrorCode.ALREADY_EXISTS && 
+                    (!e.message || e.message.indexOf('exists') === -1)) {
+                    // 如果是其他错误，记录警告但不中断（尝试继续创建下一级）
+                    console.warn(`[SettingsService] Warning creating directory ${currentPath}:`, e);
+                }
+            }
         }
-    };
-    
-    const content = JSON.stringify(agentContent, null, 2);
-    
-    try {
-        await this.vfs.createFile(AGENT_MODULE, `/${fileName}`, content, {
-            isProtected: true,
-            isSystem: true,
-            version: 1
-        });
-        
-        console.log(`[SettingsService] Created default agent for ${providerKey}`);
-    } catch (error) {
-        console.error(`[SettingsService] Failed to create default agent for ${providerKey}:`, error);
     }
-}
+
+    /**
+     * 同步 LLM 连接和模型配置
+     * 1. 如果 common 有新的 connection (provider)，会同步到数据库中
+     * 2. 如果 common 已有的 connection 的 models 有更新，那么也会同步到数据库中
+     */
+    private async _syncLLMProvidersWithDefaults(): Promise<void> {
+        console.log('[SettingsService] Syncing LLM providers with defaults...');
+        
+        const existingConnections = this.state.connections;
+        const defaultProviders = LLM_PROVIDER_DEFAULTS;
+        const updatedConnections: LLMConnection[] = [];
+        const processedProviderKeys = new Set<string>();
+        
+        // 处理每个预设的 Provider
+        for (const [providerKey, providerDef] of Object.entries(defaultProviders)) {
+            processedProviderKeys.add(providerKey);
+            
+            // 检查该 Provider 是否已有对应的连接
+            let existingConnectionsForProvider = existingConnections.filter(
+                conn => conn.provider === providerKey
+            );
+            
+            if (existingConnectionsForProvider.length === 0) {
+                // 1. 新的 Provider: 创建默认连接
+                console.log(`[SettingsService] Creating new default connection for provider: ${providerKey}`);
+                
+                const defaultConnId = providerKey === 'rdsec' ? LLM_DEFAULT_ID : `conn-${providerKey}-default`;
+                
+                const newConnection: LLMConnection = {
+                    id: defaultConnId,
+                    name: providerDef.name,
+                    provider: providerKey,
+                    apiKey: '', // 用户需要填写
+                    baseURL: providerDef.baseURL,
+                    model: providerDef.models[0]?.id || '',
+                    availableModels: [...providerDef.models],
+                    metadata: {
+                        ...providerDef,
+                        isSystemDefault: true // 标记为系统默认连接
+                    }
+                };
+                
+                updatedConnections.push(newConnection);
+                
+                // 为部分重要的 Provider 自动创建 Agent
+                if (['deepseek', 'openai', 'anthropic', 'gemini'].includes(providerKey)) {
+                    await this._ensureDefaultAgentForProvider(providerKey, defaultConnId, providerDef);
+                }
+                
+            } else {
+                // 2. 已有的 Provider: 检查并更新模型列表
+                for (const existingConn of existingConnectionsForProvider) {
+                    console.log(`[SettingsService] Checking updates for connection: ${existingConn.name} (${providerKey})`);
+                    
+                    const updatedConn = { ...existingConn };
+                    let hasUpdates = false;
+                    
+                    // 检查 BaseURL 是否需要更新
+                    if (existingConn.baseURL !== providerDef.baseURL && 
+                        !existingConn.baseURL) { // 仅当用户未自定义时才更新
+                        updatedConn.baseURL = providerDef.baseURL;
+                        hasUpdates = true;
+                    }
+                    
+                    // 检查模型列表是否需要同步
+                    const existingModelIds = new Set(
+                        existingConn.availableModels?.map(m => m.id) || []
+                    );
+                    const defaultModelIds = new Set(providerDef.models.map(m => m.id));
+                    
+                    // 检测新增的模型
+                    for (const defaultModel of providerDef.models) {
+                        if (!existingModelIds.has(defaultModel.id)) {
+                            console.log(`[SettingsService] Adding new model: ${defaultModel.name} (${defaultModel.id})`);
+                            if (!updatedConn.availableModels) {
+                                updatedConn.availableModels = [];
+                            }
+                            updatedConn.availableModels.push({ ...defaultModel });
+                            hasUpdates = true;
+                        }
+                    }
+                    
+                    // 检查模型名称是否更新（如果ID相同但名称不同）
+                    for (const existingModel of (existingConn.availableModels || [])) {
+                        const defaultModel = providerDef.models.find(m => m.id === existingModel.id);
+                        if (defaultModel && defaultModel.name !== existingModel.name) {
+                            console.log(`[SettingsService] Updating model name: ${existingModel.name} -> ${defaultModel.name}`);
+                            existingModel.name = defaultModel.name;
+                            hasUpdates = true;
+                        }
+                    }
+                    
+                    // 检查当前选择的模型是否仍然有效
+                    if (existingConn.model && !defaultModelIds.has(existingConn.model)) {
+                        console.log(`[SettingsService] Current model ${existingConn.model} no longer available, updating to ${providerDef.models[0]?.id}`);
+                        updatedConn.model = providerDef.models[0]?.id || '';
+                        hasUpdates = true;
+                    }
+                    
+                    // 更新额外的 Provider 元数据
+                    if (!updatedConn.metadata || !updatedConn.metadata.isSystemDefault) {
+                        updatedConn.metadata = {
+                            ...(updatedConn.metadata || {}),
+                            ...providerDef,
+                            isSystemDefault: true,
+                            lastSynced: Date.now()
+                        };
+                        hasUpdates = true;
+                    }
+                    
+                    if (hasUpdates) {
+                        updatedConnections.push(updatedConn);
+                    } else {
+                        updatedConnections.push(existingConn);
+                    }
+                }
+            }
+        }
+        
+        // 保留用户自定义的非预设 Provider 连接
+        for (const existingConn of existingConnections) {
+            if (!processedProviderKeys.has(existingConn.provider)) {
+                console.log(`[SettingsService] Preserving custom provider: ${existingConn.provider}`);
+                updatedConnections.push(existingConn);
+            }
+        }
+        
+        // 更新状态并保存
+        if (JSON.stringify(this.state.connections) !== JSON.stringify(updatedConnections)) {
+            console.log('[SettingsService] LLM connections updated with latest defaults');
+            this.state.connections = updatedConnections;
+            await this.saveEntity('connections');
+        }
+    }
+
+    /**
+     * 为 Provider 创建默认的 Agent
+     */
+    private async _ensureDefaultAgentForProvider(
+        providerKey: string, 
+        connectionId: string, 
+        providerDef: any
+    ): Promise<void> {        
+        if (!this.vfs.getModule(AGENT_MODULE)) {
+            return;
+        }
+        
+        const agentId = `agent-${providerKey}-default`;
+        const fileName = `${agentId}.agent`;
+        const fullPath = `${LLM_AGENT_TARGET_DIR}/${fileName}`; 
+        
+        // 检查文件是否已存在
+        const fileId = await this.vfs.getVFS().pathResolver.resolve(AGENT_MODULE, fullPath);
+        if (fileId) {
+            return; 
+        }
+        
+        const agentName = `${providerDef.name} 助手`;
+        const agentIcon = this._getProviderIcon(providerKey);
+        
+        const agentContent = {
+            id: agentId,
+            name: agentName,
+            type: 'agent',
+            description: `基于 ${providerDef.name} 的默认助手`,
+            icon: agentIcon,
+            config: {
+                connectionId: connectionId,
+                modelId: providerDef.models[0]?.id || '',
+                systemPrompt: `You are a helpful assistant powered by ${providerDef.name}.`,
+                maxHistoryLength: -1
+            },
+            interface: {
+                inputs: [{ name: "prompt", type: "string" }],
+                outputs: [{ name: "response", type: "string" }]
+            }
+        };
+        
+        const content = JSON.stringify(agentContent, null, 2);
+        
+        try {
+            // ✨ [修复] 使用递归目录创建方法
+            await this._ensureDirectoryHierarchy(AGENT_MODULE, LLM_AGENT_TARGET_DIR);
+
+            const node = await this.vfs.createFile(AGENT_MODULE, fullPath, content, {
+                isProtected: true,
+                isSystem: true,
+                version: 1
+            });
+            
+            if (node && node.nodeId) {
+                 await this.vfs.setNodeTagsById(node.nodeId, ['default', 'system', providerKey]);
+            }
+
+            console.log(`[SettingsService] Created default agent for ${providerKey} at ${fullPath}`);
+        } catch (error) {
+            console.error(`[SettingsService] Failed to create default agent for ${providerKey}:`, error);
+        }
+    }
 
 /**
  * 获取 Provider 对应的图标
@@ -365,34 +395,55 @@ private _getProviderIcon(providerKey: string): string {
         // =========================================================
         // 2. 确保默认 Agents (保持之前的逻辑)
         // =========================================================
-        const AGENT_MODULE = 'agents';
         
         // 检查 agents 模块是否存在
         if (this.vfs.getModule(AGENT_MODULE)) {
             for (const agentDef of LLM_DEFAULT_AGENTS) {
                 const fileName = `${agentDef.id}.agent`;
+
+                // [修改] 处理路径逻辑
+                // 获取 initPath，如果未定义则默认为根目录 ''
+                const dirPath = agentDef.initPath || ''; 
+                // 规范化完整路径： /default/providers/agentName.agent
+                const fullPath = `${dirPath}/${fileName}`.replace(/\/+/g, '/');
                 
                 // 检查文件是否存在
-                const fileId = await this.vfs.getVFS().pathResolver.resolve(AGENT_MODULE, `/${fileName}`);
+                const fileId = await this.vfs.getVFS().pathResolver.resolve(AGENT_MODULE, fullPath);
                 
                 if (!fileId) {
                     // 不存在则创建
-                    console.log(`Creating default agent: ${fileName}`);
+                    console.log(`Creating default agent: ${fullPath}`);
                     
-                    // 1. 分离业务数据和标签数据
-                    const { initialTags, ...contentData } = agentDef;
+                    // 1. 分离业务数据、标签数据和路径配置
+                    // [关键] 确保 initPath 不被写入文件 JSON 内容中
+                    const { initialTags, initPath, ...contentData } = agentDef;
                     
                     // 2. 写入文件内容 (只包含纯业务数据)
                     const content = JSON.stringify(contentData, null, 2);
                     
-                    // 3. 创建文件
-                    const node = await this.vfs.createFile(AGENT_MODULE, `/${fileName}`, content, {
+                    // 3. [新增] 确保目录存在
+                    if (dirPath && dirPath !== '/') {
+                        try {
+                            // 尝试创建目录。如果 VFS 支持 recursive 最好，
+                            // 如果不支持，这里假设 VFSCore.createDirectory 能处理或目录层级不深。
+                            // 通常我们会忽略 "目录已存在" 的错误。
+                            await this.vfs.createDirectory(AGENT_MODULE, dirPath);
+                        } catch (e: any) {
+                            // 忽略目录已存在的错误 (VFSErrorCode.ALREADY_EXISTS)
+                            if (e.code !== VFSErrorCode.ALREADY_EXISTS && e.message?.indexOf('exists') === -1) {
+                                console.warn(`Failed to create directory ${dirPath}, trying to create file anyway.`, e);
+                            }
+                        }
+                    }
+
+                    // 4. 创建文件 (使用 fullPath)
+                    const node = await this.vfs.createFile(AGENT_MODULE, fullPath, content, {
                         isProtected: true,
                         isSystem: true,
                         version: 1
                     });
 
-                    // 4. [关键] 使用 VFS API 设置标签
+                    // 5. [关键] 使用 VFS API 设置标签
                     if (initialTags && initialTags.length > 0) {
                         // createFile 返回的是 VNode，直接用 node.nodeId
                         await this.vfs.setNodeTagsById(node.nodeId, initialTags);
