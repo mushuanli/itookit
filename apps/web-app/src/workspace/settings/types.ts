@@ -1,10 +1,20 @@
 // @file app/workspace/settings/types.ts
 
 // 从 common 导入类型
-import type { LLMConnection as CommonLLMConnection } from '@itookit/common';
+import type { 
+    LLMConnection as CommonLLMConnection,
+    IAgentDefinition,    // ✨ 从 common 导入
+    AgentStorageConfig   // ✨ 从 common 导入
+} from '@itookit/common';
 
-// 重新导出，保持向后兼容
+// 重新导出 LLMConnection，保持向后兼容
 export type LLMConnection = CommonLLMConnection;
+
+// ✨ 使用 Common 定义的 Agent 结构，不再本地定义
+// AgentFileContent 对应整个 .agent 文件的 JSON 结构
+export type AgentFileContent = IAgentDefinition;
+// AgentConfig 对应文件中的 config 字段
+export type AgentConfig = AgentStorageConfig;
 
 export interface MCPServer {
     id: string;
@@ -42,36 +52,6 @@ export interface Contact {
     group?: string;
     notes?: string;
 }
-
-// --- Agent 文件结构 ---
-
-export interface AgentConfig {
-    connectionId: string;
-    modelId: string;
-    systemPrompt?: string;
-    maxHistoryLength?: number;
-    autoPrompts?: string[];
-    mcpServers?: string[];
-    temperature?: number; // [新增]
-}
-
-// 这是保存在 .agent 文件中的 JSON 结构
-export interface AgentFileContent {
-    id: string;
-    name: string;
-    type: 'agent' | 'orchestrator'; // 对应 ExecutorType 'atomic' | 'composite'
-    description?: string;
-    icon?: string; 
-    config: AgentConfig; // 存储态配置
-    
-    // [新增] 运行时接口定义 (Inputs/Outputs)，用于转换成 ExecutorConfig
-    interface?: {
-        inputs: Array<{ name: string; type: string }>;
-        outputs: Array<{ name: string; type: string }>;
-    };
-    
-}
-
 
 export interface SettingsState {
     connections: LLMConnection[];

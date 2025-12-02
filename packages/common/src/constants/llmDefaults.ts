@@ -93,7 +93,7 @@ export const LLM_PROVIDER_DEFAULTS: Record<string, LLMProviderDefinition> = {
     'deepseek-Speciale': {
         name: "DeepSeek-Speciale",
         implementation: 'openai-compatible',
-        baseURL: 'https://api.deepseek.com/v3.2_speciale_expires_on_20251215',
+        baseURL: 'https://api.deepseek.com/v3.2_speciale_expires_on_20251215/v1/chat/completions',
         supportsThinking: true,
         models: [
             { id: 'deepseek-reasoner', name: 'DeepSeek Reasoner' }
