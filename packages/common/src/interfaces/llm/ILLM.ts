@@ -85,7 +85,7 @@ export interface LLMConnection {
  */
 export interface LLMAgentConfig {
     connectionId: string;
-    modelName: string;
+    modelId: string;
     systemPrompt?: string;
     maxHistoryLength?: number; // -1 表示无限
     temperature?: number;

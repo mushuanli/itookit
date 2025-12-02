@@ -6,7 +6,8 @@ import {
     Heading, 
     EditorEvent, 
     EditorEventCallback,
-    generateUUID // [新增] 引入 UUID 生成工具
+    generateUUID,
+    LLMModel
 } from '@itookit/common';
 import { AgentFileContent } from '../types';
 import { SettingsService } from '../services/SettingsService';
@@ -69,7 +70,7 @@ export class AgentConfigEditor implements IEditor {
                 icon: parsed.icon || '🤖',
                 config: {
                     connectionId: parsed.config?.connectionId || '',
-                    modelName: parsed.config?.modelName || '',
+                    modelId: parsed.config?.modelId || '',
                     systemPrompt: parsed.config?.systemPrompt || 'You are a helpful assistant.',
                     mcpServers: parsed.config?.mcpServers || [],
                     maxHistoryLength: parsed.config?.maxHistoryLength ?? -1,
@@ -100,8 +101,45 @@ export class AgentConfigEditor implements IEditor {
         const config = agent.config;
         
         const connections = this.service.getConnections();
-        const selectedConn = connections.find(c => c.id === config.connectionId);
+        
+        // [修复] 确保有有效的连接选择
+        let selectedConn = connections.find(c => c.id === config.connectionId);
+        
+        // 如果没有选中的连接，或者连接ID为空，使用第一个可用连接
+        if (!selectedConn && connections.length > 0) {
+            selectedConn = connections[0];
+            // 更新内部状态
+            if (this.content && this.content.config) {
+                this.content.config.connectionId = selectedConn.id;
+            }
+        }
+        
         const models = selectedConn?.availableModels || [];
+        
+        // [修复] 确保有有效的模型选择
+        let selectedModelId = config.modelId;
+        if (models.length > 0) {
+            const modelExists = models.some(m => m.id === selectedModelId);
+            if (!modelExists) {
+                // 尝试通过名称匹配
+                const currentModel = this.findModelById(config.modelId, connections);
+                if (currentModel) {
+                    const matchedModel = models.find(m => m.name === currentModel.name);
+                    if (matchedModel) {
+                        selectedModelId = matchedModel.id;
+                    } else {
+                        selectedModelId = models[0].id;
+                    }
+                } else {
+                    selectedModelId = models[0].id;
+                }
+                // 更新内部状态
+                if (this.content && this.content.config) {
+                    this.content.config.modelId = selectedModelId;
+                }
+            }
+        }
+        
         const allMCPServers = this.service.getMCPServers();
 
         this.container.innerHTML = `
@@ -159,10 +197,10 @@ export class AgentConfigEditor implements IEditor {
                             <label class="agent-form-label">
                                 连接 <small>选择已配置的 LLM 服务</small>
                             </label>
-                            <select class="agent-form-select" name="connectionId">
+                            <select class="agent-form-select" name="connectionId" id="connection-select">
                                 <option value="">-- 选择连接 --</option>
                                 ${connections.map(c => `
-                                    <option value="${c.id}" ${config.connectionId === c.id ? 'selected' : ''}>
+                                    <option value="${c.id}" ${(selectedConn?.id === c.id) ? 'selected' : ''}>
                                         ${this.escapeHtml(c.name)} (${c.provider})
                                     </option>
                                 `).join('')}
@@ -176,10 +214,10 @@ export class AgentConfigEditor implements IEditor {
                             <label class="agent-form-label">
                                 模型 <small>选择具体的模型</small>
                             </label>
-                            <select class="agent-form-select" name="modelName" id="model-select">
+                            <select class="agent-form-select" name="modelId" id="model-select">
                                 ${models.length > 0 
                                     ? models.map(m => `
-                                        <option value="${m.id}" ${config.modelName === m.id ? 'selected' : ''}>
+                                        <option value="${m.id}" ${selectedModelId === m.id ? 'selected' : ''}>
                                             ${m.name}
                                         </option>
                                     `).join('')
@@ -285,6 +323,27 @@ export class AgentConfigEditor implements IEditor {
         this.bindEvents();
     }
 
+    /**
+     * 辅助方法：根据模型ID在所有连接中查找模型信息
+     */
+    private findModelById(modelId: string, connections: any[]): LLMModel | null {
+        if (!modelId) return null;
+        for (const conn of connections) {
+            const models = conn.availableModels || [];
+            const found = models.find((m: LLMModel) => m.id === modelId);
+            if (found) return found;
+        }
+        return null;
+    }
+
+    /**
+     * 辅助方法：根据模型名称在模型列表中查找
+     */
+    private findModelByName(modelId: string, models: LLMModel[]): LLMModel | null {
+        if (!modelId) return null;
+        return models.find(m => m.name === modelId) || null;
+    }
+
     private renderError(message: string) {
         this.container.innerHTML = `
             <div class="agent-editor-container">
@@ -348,44 +407,54 @@ export class AgentConfigEditor implements IEditor {
         });
 
         // Connection 与 Model 联动
-        const connSelect = this.container.querySelector('select[name="connectionId"]') as HTMLSelectElement;
+        const connSelect = this.container.querySelector('#connection-select') as HTMLSelectElement;
         const modelSelect = this.container.querySelector('#model-select') as HTMLSelectElement;
         
         if (connSelect && modelSelect) {
             connSelect.addEventListener('change', () => {
                 const connId = connSelect.value;
-                const conn = this.service.getConnections().find(c => c.id === connId);
-                const models = conn?.availableModels || [];
+                const connections = this.service.getConnections();
+                const conn = connections.find(c => c.id === connId);
+                const newModels = conn?.availableModels || [];
                 
-                // 1. 重新渲染选项
-                modelSelect.innerHTML = models.length > 0
-                    ? models.map(m => `<option value="${m.id}">${m.name}</option>`).join('')
+                // 1. 获取当前选中的模型信息（用于跨连接匹配）
+                const currentModelId = this.content?.config.modelId;
+                const currentModel = this.findModelById(currentModelId || '', connections);
+                const currentModelName = currentModel?.name;
+                
+                // 2. 重新渲染模型选项
+                modelSelect.innerHTML = newModels.length > 0
+                    ? newModels.map(m => `<option value="${m.id}">${m.name}</option>`).join('')
                     : '<option value="">请先选择连接</option>';
                 
-                // 2. [改进] 智能重置模型选择
-                // 获取当前 Agent 配置中记录的模型 ID
-                const currentModelId = this.content?.config.modelName;
+                // 3. 智能选择模型
+                let newModelId = '';
                 
-                // 检查当前模型是否在新列表中有效
-                const isModelValid = models.some(m => m.id === currentModelId);
-
-                if (isModelValid && currentModelId) {
-                    // 如果有效，保持选中
-                    modelSelect.value = currentModelId;
-                } else if (models.length > 0) {
-                    // 如果无效 (比如切换了 Provider)，默认选中第一个
-                    modelSelect.value = models[0].id;
-                    
-                    // [重要] 立即更新内部状态，否则 syncModelFromUI 可能取不到正确的值
-                    // 或者只是为了触发 dirty 状态
-                    if (this.content && this.content.config) {
-                         this.content.config.modelName = models[0].id;
+                if (newModels.length > 0) {
+                    if (currentModelName) {
+                        // 尝试通过名称匹配（解决不同供应商对相同模型命名不同的情况）
+                        const matchedModel = this.findModelByName(currentModelName, newModels);
+                        if (matchedModel) {
+                            newModelId = matchedModel.id;
+                        } else {
+                            // 名称不匹配，使用新连接的第一个模型
+                            newModelId = newModels[0].id;
+                        }
+                    } else {
+                        // 没有当前模型，使用第一个
+                        newModelId = newModels[0].id;
                     }
-                } else {
-                    modelSelect.value = "";
+                    
+                    modelSelect.value = newModelId;
                 }
                 
-                // 3. 触发变更事件，标记为 Dirty 并通知外部
+                // 4. 更新内部状态
+                if (this.content && this.content.config) {
+                    this.content.config.connectionId = connId;
+                    this.content.config.modelId = newModelId;
+                }
+                
+                // 5. 触发变更事件
                 handleChange();
             });
         }
@@ -483,7 +552,7 @@ export class AgentConfigEditor implements IEditor {
         if (type === 'agent') {
             this.content.config = {
                 connectionId: getVal('connectionId'),
-                modelName: getVal('modelName'),
+                modelId: getVal('modelId'),
                 systemPrompt: getVal('systemPrompt'),
                 maxHistoryLength: parseInt(getVal('maxHistoryLength')) || -1,
                 mcpServers: getCheckedValues('mcpServers'),

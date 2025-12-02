@@ -28,7 +28,7 @@ const DEFAULT_AGENT_CONTENT: AgentFileContent = {
     icon: '🤖',
     config: {
         connectionId: '',
-        modelName: '',
+        modelId: '',
         systemPrompt: 'You are a helpful assistant.'
     },
     // tags: [] // [已移除] Tags 由 VFS 元数据管理

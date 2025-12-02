@@ -1,23 +1,10 @@
 // @file app/workspace/settings/types.ts
 
-// [新增] 定义 Provider 的结构
-export interface LLMProviderDef {
-    name: string;
-    implementation?: string;
-    baseURL: string;
-    models: { id: string; name: string }[];
-    requiresReferer?: boolean;
-}
+// 从 common 导入类型
+import type { LLMConnection as CommonLLMConnection } from '@itookit/common';
 
-export interface LLMConnection {
-    id: string;
-    name: string;
-    provider: string; // 'openai', 'anthropic', etc.
-    model: string;
-    apiKey?: string;
-    baseURL?: string;
-    availableModels?: { id: string; name: string }[];
-}
+// 重新导出，保持向后兼容
+export type LLMConnection = CommonLLMConnection;
 
 export interface MCPServer {
     id: string;
@@ -60,7 +47,7 @@ export interface Contact {
 
 export interface AgentConfig {
     connectionId: string;
-    modelName: string;
+    modelId: string;
     systemPrompt?: string;
     maxHistoryLength?: number;
     autoPrompts?: string[];
