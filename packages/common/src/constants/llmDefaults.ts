@@ -90,6 +90,15 @@ export const LLM_PROVIDER_DEFAULTS: Record<string, LLMProviderDefinition> = {
             { id: 'deepseek-reasoner', name: 'DeepSeek Reasoner' }
         ]
     },
+    'deepseek-Speciale': {
+        name: "DeepSeek-Speciale",
+        implementation: 'openai-compatible',
+        baseURL: 'https://api.deepseek.com/v3.2_speciale_expires_on_20251215',
+        supportsThinking: true,
+        models: [
+            { id: 'deepseek-reasoner', name: 'DeepSeek Reasoner' }
+        ]
+    },
     openrouter: {
         name: "OpenRouter",
         implementation: 'openai-compatible',
@@ -124,8 +133,8 @@ export const LLM_PROVIDER_DEFAULTS: Record<string, LLMProviderDefinition> = {
         implementation: 'openai-compatible',
         baseURL: 'https://chat.cloudapi.vip/v1/chat/completions',
         models: [
+            { id: 'claude-opus-4-5-20251101', name: 'Opus 4.5' },
             { id: 'claude-sonnet-4-5-20250929-thinking', name: 'Sonnet 4.5 Think' },
-            { id: 'claude-opus-4-5-20251101', name: 'Opus 4.5' }
         ]
     },
     custom_openai_compatible: {
