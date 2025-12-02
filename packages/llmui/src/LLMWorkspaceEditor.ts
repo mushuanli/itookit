@@ -25,7 +25,7 @@ class SettingsServiceAdapter implements ISettingsService {
         // 确保 connectionId 指向 'default'
         return {
             connectionId: 'default', 
-            modelName: '', 
+            modelId: '', 
             systemPrompt: 'You are a helpful assistant.'
         };
     }

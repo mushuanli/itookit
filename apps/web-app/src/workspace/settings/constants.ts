@@ -59,7 +59,7 @@ export const LLM_DEFAULT_AGENTS: InitialAgentDef[] = [
         initialTags: ['default', 'system'], // 初始化时应用到 VFS
         config: {
             connectionId: LLM_DEFAULT_ID,
-            modelName: LLM_PROVIDER_DEFAULTS.rdsec.models[0]?.id || "",
+            modelId: LLM_PROVIDER_DEFAULTS.rdsec.models[0]?.id || "",
             systemPrompt: "You are a helpful assistant.",
             maxHistoryLength: -1
         },
@@ -77,7 +77,7 @@ export const LLM_DEFAULT_AGENTS: InitialAgentDef[] = [
         initialTags: ['default'],
         config: {
             connectionId: LLM_DEFAULT_ID,
-            modelName: LLM_PROVIDER_DEFAULTS.rdsec.models[0]?.id || "",
+            modelId: LLM_PROVIDER_DEFAULTS.rdsec.models[0]?.id || "",
             systemPrompt: "You are a helpful assistant. Answer the user's current prompt concisely and accurately, without referring to any past conversation history.",
             maxHistoryLength: 0
         },
@@ -96,7 +96,7 @@ export const LLM_DEFAULT_AGENTS: InitialAgentDef[] = [
         initialTags: ['default', 'deepseek'],
         config: {
             connectionId: 'deepseek-default',
-            modelName: LLM_PROVIDER_DEFAULTS.deepseek.models[0]?.id || '',
+            modelId: LLM_PROVIDER_DEFAULTS.deepseek.models[0]?.id || '',
             systemPrompt: "You are a helpful assistant powered by DeepSeek.",
             maxHistoryLength: -1
         },
@@ -114,7 +114,7 @@ export const LLM_DEFAULT_AGENTS: InitialAgentDef[] = [
         initialTags: ['default', 'claude'],
         config: {
             connectionId: 'claude-default',
-            modelName: LLM_PROVIDER_DEFAULTS.anthropic.models[0]?.id || '',
+            modelId: LLM_PROVIDER_DEFAULTS.anthropic.models[0]?.id || '',
             systemPrompt: "You are a helpful, harmless, and honest assistant.",
             maxHistoryLength: 20
         },
@@ -132,7 +132,7 @@ export const LLM_DEFAULT_AGENTS: InitialAgentDef[] = [
         initialTags: ['default', 'gemini'],
         config: {
             connectionId: 'gemini-default',
-            modelName: LLM_PROVIDER_DEFAULTS.gemini.models[0]?.id || '',
+            modelId: LLM_PROVIDER_DEFAULTS.gemini.models[0]?.id || '',
             systemPrompt: "You are a helpful assistant powered by Google Gemini.",
             maxHistoryLength: -1
         },
@@ -150,7 +150,7 @@ export const LLM_DEFAULT_AGENTS: InitialAgentDef[] = [
         initialTags: ['default', 'router'],
         config: {
             connectionId: 'openrouter-default',
-            modelName: LLM_PROVIDER_DEFAULTS.openrouter.models[0]?.id || '',
+            modelId: LLM_PROVIDER_DEFAULTS.openrouter.models[0]?.id || '',
             systemPrompt: "You are a helpful assistant, routed through OpenRouter.",
             maxHistoryLength: -1
         },
@@ -168,7 +168,7 @@ export const LLM_DEFAULT_AGENTS: InitialAgentDef[] = [
         initialTags: ['default', 'cloudapi'],
         config: {
             connectionId: 'cloudapi-default',
-            modelName: LLM_PROVIDER_DEFAULTS.cloudapi.models[0]?.id || '',
+            modelId: LLM_PROVIDER_DEFAULTS.cloudapi.models[0]?.id || '',
             systemPrompt: "You are a helpful assistant, routed through CloudAPI.",
             maxHistoryLength: -1
         },
