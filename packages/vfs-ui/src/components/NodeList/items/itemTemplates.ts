@@ -50,14 +50,6 @@ export function createFileItemHTML(
     const summary = content?.summary || '';
     const { isPinned = false, hasUnreadUpdate = false, taskCount } = custom;
 
-    // 🔥 [DEBUG] 检查渲染时的输入数据
-    if (custom.taskCount) {
-        console.log(`[ItemTemplate] Rendering file ${id}:`, { 
-            taskCount: custom.taskCount, 
-            showBadges: uiSettings.showBadges 
-        });
-    }
-
     const checkboxHTML = !isReadOnly && isSelectionMode
         ? `<div class="vfs-node-item__checkbox-wrapper"><input type="checkbox" class="vfs-node-item__checkbox" data-item-id="${id}" ${isSelected ? 'checked' : ''} data-action="toggle-selection"></div>`
         : '';
