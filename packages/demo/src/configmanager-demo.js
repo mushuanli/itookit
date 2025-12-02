@@ -21,13 +21,13 @@ const LLM_DEFAULT_AGENTS = [
     {
         id: 'default', name: 'Default Agent', icon: '🤖', description: '系统默认智能体',
         tags: ['default'],
-        config: { connectionId: 'default', modelName: 'gpt-4o', systemPrompt: "You are a helpful assistant." },
+        config: { connectionId: 'default', modelId: 'gpt-4o', systemPrompt: "You are a helpful assistant." },
         interface: { inputs: [{ name: "prompt", type: "string" }], outputs: [{ name: "response", type: "string" }] }
     },
     {
         id: 'default-temp', name: 'Temp Chat', icon: '⚡️', description: '一次性问答。',
         tags: ['default'], maxHistoryLength: 0,
-        config: { connectionId: 'default', modelName: 'gpt-4o', systemPrompt: "You are a helpful assistant. Answer concisely." },
+        config: { connectionId: 'default', modelId: 'gpt-4o', systemPrompt: "You are a helpful assistant. Answer concisely." },
         interface: { inputs: [{ name: "prompt", type: "string" }], outputs: [{ name: "response", type: "string" }] }
     }
 ];
@@ -309,7 +309,7 @@ async function demoLLMOperations(cm) {
         tags: ['写作', '助手'],
         config: {
             connectionId: 'custom-openai',
-            modelName: 'gpt-4',
+            modelId: 'gpt-4',
             systemPrompt: '你是一个专业的写作助手。',
             temperature: 0.7,
             maxTokens: 2000

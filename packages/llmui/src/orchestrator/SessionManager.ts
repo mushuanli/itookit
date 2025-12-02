@@ -164,7 +164,7 @@ export class SessionManager {
                 if (connection) {
                     executor = new AgentExecutor(
                         connection, 
-                        agentConfig.modelName || connection.model, 
+                        agentConfig.modelId || connection.model, 
                         agentConfig.systemPrompt
                     );
                     (executor as any).name = agentConfig.name || 'Assistant';

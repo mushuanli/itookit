@@ -143,49 +143,224 @@ export class SettingsService {
         if (key !== 'tags') this.notify();
     }
 
-
-    private async ensureDefaults(): Promise<void> {
-        // =========================================================
-        // 1. [改进] 确保默认连接及所有预设提供商
-        // =========================================================
-        if (!this.state.connections.some(c => c.id === LLM_DEFAULT_ID)) {
-            console.log('Initializing default connections from providers...');
+/**
+ * 同步 LLM 连接和模型配置
+ * 1. 如果 common 有新的 connection (provider)，会同步到数据库中
+ * 2. 如果 common 已有的 connection 的 models 有更新，那么也会同步到数据库中
+ */
+private async _syncLLMProvidersWithDefaults(): Promise<void> {
+    console.log('[SettingsService] Syncing LLM providers with defaults...');
+    
+    const existingConnections = this.state.connections;
+    const defaultProviders = LLM_PROVIDER_DEFAULTS;
+    const updatedConnections: LLMConnection[] = [];
+    const processedProviderKeys = new Set<string>();
+    
+    // 处理每个预设的 Provider
+    for (const [providerKey, providerDef] of Object.entries(defaultProviders)) {
+        processedProviderKeys.add(providerKey);
+        
+        // 检查该 Provider 是否已有对应的连接
+        let existingConnectionsForProvider = existingConnections.filter(
+            conn => conn.provider === providerKey
+        );
+        
+        if (existingConnectionsForProvider.length === 0) {
+            // 1. 新的 Provider: 创建默认连接
+            console.log(`[SettingsService] Creating new default connection for provider: ${providerKey}`);
             
-            const newConnections: LLMConnection[] = [];
-
-            // 遍历所有预设的 Provider 定义
-            for (const [providerKey, def] of Object.entries(LLM_PROVIDER_DEFAULTS)) {
-                // 判断是否为系统默认 ID (这里指定 rdsec 为默认)
-                const isDefault = providerKey === 'rdsec';
-                
-                // 生成 ID: 默认的用 'default'，其他的用 'conn-openai', 'conn-anthropic' 等
-                // 检查该 ID 是否已存在（防止部分数据丢失后的重复添加）
-                const id = isDefault ? LLM_DEFAULT_ID : `conn-${providerKey}`;
-                
-                if (this.state.connections.some(c => c.id === id)) {
-                    continue; 
+            const defaultConnId = providerKey === 'rdsec' ? LLM_DEFAULT_ID : `conn-${providerKey}-default`;
+            
+            const newConnection: LLMConnection = {
+                id: defaultConnId,
+                name: providerDef.name,
+                provider: providerKey,
+                apiKey: '', // 用户需要填写
+                baseURL: providerDef.baseURL,
+                model: providerDef.models[0]?.id || '',
+                availableModels: [...providerDef.models],
+                metadata: {
+                    ...providerDef,
+                    isSystemDefault: true // 标记为系统默认连接
                 }
-
-                newConnections.push({
-                    id: id,
-                    name: def.name,
-                    provider: providerKey,
-                    // 默认 API Key 为空，用户需填
-                    apiKey: '', 
-                    // 使用定义中的 baseURL
-                    baseURL: def.baseURL,
-                    // 默认选中第一个模型
-                    model: def.models[0]?.id || '',
-                    // 复制可用模型列表
-                    availableModels: [...def.models]
-                });
+            };
+            
+            updatedConnections.push(newConnection);
+            
+            // 为部分重要的 Provider 自动创建 Agent
+            if (['rdsec', 'openai', 'anthropic', 'gemini'].includes(providerKey)) {
+                await this._ensureDefaultAgentForProvider(providerKey, defaultConnId, providerDef);
             }
-
-            if (newConnections.length > 0) {
-                this.state.connections.push(...newConnections);
-                await this.saveEntity('connections');
+            
+        } else {
+            // 2. 已有的 Provider: 检查并更新模型列表
+            for (const existingConn of existingConnectionsForProvider) {
+                console.log(`[SettingsService] Checking updates for connection: ${existingConn.name} (${providerKey})`);
+                
+                const updatedConn = { ...existingConn };
+                let hasUpdates = false;
+                
+                // 检查 BaseURL 是否需要更新
+                if (existingConn.baseURL !== providerDef.baseURL && 
+                    !existingConn.baseURL) { // 仅当用户未自定义时才更新
+                    updatedConn.baseURL = providerDef.baseURL;
+                    hasUpdates = true;
+                }
+                
+                // 检查模型列表是否需要同步
+                const existingModelIds = new Set(
+                    existingConn.availableModels?.map(m => m.id) || []
+                );
+                const defaultModelIds = new Set(providerDef.models.map(m => m.id));
+                
+                // 检测新增的模型
+                for (const defaultModel of providerDef.models) {
+                    if (!existingModelIds.has(defaultModel.id)) {
+                        console.log(`[SettingsService] Adding new model: ${defaultModel.name} (${defaultModel.id})`);
+                        if (!updatedConn.availableModels) {
+                            updatedConn.availableModels = [];
+                        }
+                        updatedConn.availableModels.push({ ...defaultModel });
+                        hasUpdates = true;
+                    }
+                }
+                
+                // 检查模型名称是否更新（如果ID相同但名称不同）
+                for (const existingModel of (existingConn.availableModels || [])) {
+                    const defaultModel = providerDef.models.find(m => m.id === existingModel.id);
+                    if (defaultModel && defaultModel.name !== existingModel.name) {
+                        console.log(`[SettingsService] Updating model name: ${existingModel.name} -> ${defaultModel.name}`);
+                        existingModel.name = defaultModel.name;
+                        hasUpdates = true;
+                    }
+                }
+                
+                // 检查当前选择的模型是否仍然有效
+                if (existingConn.model && !defaultModelIds.has(existingConn.model)) {
+                    console.log(`[SettingsService] Current model ${existingConn.model} no longer available, updating to ${providerDef.models[0]?.id}`);
+                    updatedConn.model = providerDef.models[0]?.id || '';
+                    hasUpdates = true;
+                }
+                
+                // 更新额外的 Provider 元数据
+                if (!updatedConn.metadata || !updatedConn.metadata.isSystemDefault) {
+                    updatedConn.metadata = {
+                        ...(updatedConn.metadata || {}),
+                        ...providerDef,
+                        isSystemDefault: true,
+                        lastSynced: Date.now()
+                    };
+                    hasUpdates = true;
+                }
+                
+                if (hasUpdates) {
+                    updatedConnections.push(updatedConn);
+                } else {
+                    updatedConnections.push(existingConn);
+                }
             }
         }
+    }
+    
+    // 保留用户自定义的非预设 Provider 连接
+    for (const existingConn of existingConnections) {
+        if (!processedProviderKeys.has(existingConn.provider)) {
+            console.log(`[SettingsService] Preserving custom provider: ${existingConn.provider}`);
+            updatedConnections.push(existingConn);
+        }
+    }
+    
+    // 更新状态并保存
+    if (JSON.stringify(this.state.connections) !== JSON.stringify(updatedConnections)) {
+        console.log('[SettingsService] LLM connections updated with latest defaults');
+        this.state.connections = updatedConnections;
+        await this.saveEntity('connections');
+    }
+}
+
+/**
+ * 为 Provider 创建默认的 Agent
+ */
+private async _ensureDefaultAgentForProvider(
+    providerKey: string, 
+    connectionId: string, 
+    providerDef: any
+): Promise<void> {
+    const AGENT_MODULE = 'agents';
+    
+    if (!this.vfs.getModule(AGENT_MODULE)) {
+        return;
+    }
+    
+    const agentId = `agent-${providerKey}-default`;
+    const fileName = `${agentId}.agent`;
+    
+    // 检查文件是否已存在
+    const fileId = await this.vfs.getVFS().pathResolver.resolve(AGENT_MODULE, `/${fileName}`);
+    if (fileId) {
+        return; // 已存在
+    }
+    
+    // 创建默认 Agent
+    const agentName = `${providerDef.name} 助手`;
+    const agentIcon = this._getProviderIcon(providerKey);
+    
+    const agentContent = {
+        id: agentId,
+        name: agentName,
+        type: 'agent',
+        description: `基于 ${providerDef.name} 的默认助手`,
+        icon: agentIcon,
+        config: {
+            connectionId: connectionId,
+            modelId: providerDef.models[0]?.id || '',
+            systemPrompt: `You are a helpful assistant powered by ${providerDef.name}.`,
+            maxHistoryLength: -1
+        },
+        interface: {
+            inputs: [{ name: "prompt", type: "string" }],
+            outputs: [{ name: "response", type: "string" }]
+        }
+    };
+    
+    const content = JSON.stringify(agentContent, null, 2);
+    
+    try {
+        await this.vfs.createFile(AGENT_MODULE, `/${fileName}`, content, {
+            isProtected: true,
+            isSystem: true,
+            version: 1
+        });
+        
+        console.log(`[SettingsService] Created default agent for ${providerKey}`);
+    } catch (error) {
+        console.error(`[SettingsService] Failed to create default agent for ${providerKey}:`, error);
+    }
+}
+
+/**
+ * 获取 Provider 对应的图标
+ */
+private _getProviderIcon(providerKey: string): string {
+    const iconMap: Record<string, string> = {
+        'openai': '🤖',
+        'rdsec': '🔐',
+        'anthropic': '📚',
+        'gemini': '💎',
+        'deepseek': '🌊',
+        'openrouter': '🔀',
+        'cloudapi': '☁️',
+        'custom_openai_compatible': '⚙️'
+    };
+    
+    return iconMap[providerKey] || '🤖';
+}
+    private async ensureDefaults(): Promise<void> {
+    // =========================================================
+    // 1. 同步 LLM Providers (连接和模型)
+    // =========================================================
+    await this._syncLLMProvidersWithDefaults();
+
 
         // =========================================================
         // 2. 确保默认 Agents (保持之前的逻辑)
