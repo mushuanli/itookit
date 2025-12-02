@@ -5,7 +5,8 @@ import {
     UnifiedSearchResult, 
     Heading, 
     EditorEvent, 
-    EditorEventCallback 
+    EditorEventCallback,
+    generateUUID // [新增] 引入 UUID 生成工具
 } from '@itookit/common';
 import { AgentFileContent } from '../types';
 import { SettingsService } from '../services/SettingsService';
@@ -53,8 +54,15 @@ export class AgentConfigEditor implements IEditor {
     setText(text: string) {
         try {
             const parsed = JSON.parse(text);
+            
+            // [核心修改] ID 生成逻辑
+            // 如果 parsed.id 为空字符串 (来自模板) 或 undefined，则生成 UUID
+            const agentId = (parsed.id && parsed.id.trim() !== '') 
+                ? parsed.id 
+                : generateUUID();
+
             this.content = {
-                id: parsed.id || `agent-${Date.now()}`,
+                id: agentId, 
                 name: parsed.name || 'New Agent',
                 type: parsed.type || 'agent',
                 description: parsed.description || '',
@@ -65,9 +73,14 @@ export class AgentConfigEditor implements IEditor {
                     systemPrompt: parsed.config?.systemPrompt || 'You are a helpful assistant.',
                     mcpServers: parsed.config?.mcpServers || [],
                     maxHistoryLength: parsed.config?.maxHistoryLength ?? -1,
+                    autoPrompts: parsed.config?.autoPrompts || [],
                     ...parsed.config
                 },
-                tags: parsed.tags || []
+                interface: parsed.interface || {
+                    inputs: [],
+                    outputs: []
+                }
+                // 注意：这里不再处理 tags
             };
             this.render();
         } catch (e) {
@@ -344,10 +357,35 @@ export class AgentConfigEditor implements IEditor {
                 const conn = this.service.getConnections().find(c => c.id === connId);
                 const models = conn?.availableModels || [];
                 
+                // 1. 重新渲染选项
                 modelSelect.innerHTML = models.length > 0
                     ? models.map(m => `<option value="${m.id}">${m.name}</option>`).join('')
                     : '<option value="">请先选择连接</option>';
                 
+                // 2. [改进] 智能重置模型选择
+                // 获取当前 Agent 配置中记录的模型 ID
+                const currentModelId = this.content?.config.modelName;
+                
+                // 检查当前模型是否在新列表中有效
+                const isModelValid = models.some(m => m.id === currentModelId);
+
+                if (isModelValid && currentModelId) {
+                    // 如果有效，保持选中
+                    modelSelect.value = currentModelId;
+                } else if (models.length > 0) {
+                    // 如果无效 (比如切换了 Provider)，默认选中第一个
+                    modelSelect.value = models[0].id;
+                    
+                    // [重要] 立即更新内部状态，否则 syncModelFromUI 可能取不到正确的值
+                    // 或者只是为了触发 dirty 状态
+                    if (this.content && this.content.config) {
+                         this.content.config.modelName = models[0].id;
+                    }
+                } else {
+                    modelSelect.value = "";
+                }
+                
+                // 3. 触发变更事件，标记为 Dirty 并通知外部
                 handleChange();
             });
         }

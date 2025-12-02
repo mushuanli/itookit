@@ -2,10 +2,12 @@
  * @file: app/workspace/settings/services/SettingsService.ts
  */
 import {LLM_DEFAULT_ID} from '@itookit/common';
-import { VFSCore, VFSErrorCode, VFSEventType, VFSEvent } from '@itookit/vfs-core';
+import { VFSCore, VFSErrorCode, VFSEventType, VFSEvent } from '@itookit/vfs-core'; // 引入 VNodeType
 import { SettingsState, LLMConnection, MCPServer, Contact, Tag } from '../types';
 import { 
-    LLM_DEFAULT_CONNECTIONS, 
+    LLM_PROVIDER_DEFAULTS, // 引入提供商定义
+    // LLM_DEFAULT_CONNECTIONS, // [修改] 不再需要这个静态数组
+    LLM_DEFAULT_AGENTS 
 } from '../constants';
 
 const CONFIG_MODULE = '__config';
@@ -143,12 +145,84 @@ export class SettingsService {
 
 
     private async ensureDefaults(): Promise<void> {
-        // 1. 默认连接
+        // =========================================================
+        // 1. [改进] 确保默认连接及所有预设提供商
+        // =========================================================
         if (!this.state.connections.some(c => c.id === LLM_DEFAULT_ID)) {
-            const def = LLM_DEFAULT_CONNECTIONS.find(c => c.id === LLM_DEFAULT_ID);
-            if (def) {
-                this.state.connections.push(def);
+            console.log('Initializing default connections from providers...');
+            
+            const newConnections: LLMConnection[] = [];
+
+            // 遍历所有预设的 Provider 定义
+            for (const [providerKey, def] of Object.entries(LLM_PROVIDER_DEFAULTS)) {
+                // 判断是否为系统默认 ID (这里指定 rdsec 为默认)
+                const isDefault = providerKey === 'rdsec';
+                
+                // 生成 ID: 默认的用 'default'，其他的用 'conn-openai', 'conn-anthropic' 等
+                // 检查该 ID 是否已存在（防止部分数据丢失后的重复添加）
+                const id = isDefault ? LLM_DEFAULT_ID : `conn-${providerKey}`;
+                
+                if (this.state.connections.some(c => c.id === id)) {
+                    continue; 
+                }
+
+                newConnections.push({
+                    id: id,
+                    name: def.name,
+                    provider: providerKey,
+                    // 默认 API Key 为空，用户需填
+                    apiKey: '', 
+                    // 使用定义中的 baseURL
+                    baseURL: def.baseURL,
+                    // 默认选中第一个模型
+                    model: def.models[0]?.id || '',
+                    // 复制可用模型列表
+                    availableModels: [...def.models]
+                });
+            }
+
+            if (newConnections.length > 0) {
+                this.state.connections.push(...newConnections);
                 await this.saveEntity('connections');
+            }
+        }
+
+        // =========================================================
+        // 2. 确保默认 Agents (保持之前的逻辑)
+        // =========================================================
+        const AGENT_MODULE = 'agents';
+        
+        // 检查 agents 模块是否存在
+        if (this.vfs.getModule(AGENT_MODULE)) {
+            for (const agentDef of LLM_DEFAULT_AGENTS) {
+                const fileName = `${agentDef.id}.agent`;
+                
+                // 检查文件是否存在
+                const fileId = await this.vfs.getVFS().pathResolver.resolve(AGENT_MODULE, `/${fileName}`);
+                
+                if (!fileId) {
+                    // 不存在则创建
+                    console.log(`Creating default agent: ${fileName}`);
+                    
+                    // 1. 分离业务数据和标签数据
+                    const { initialTags, ...contentData } = agentDef;
+                    
+                    // 2. 写入文件内容 (只包含纯业务数据)
+                    const content = JSON.stringify(contentData, null, 2);
+                    
+                    // 3. 创建文件
+                    const node = await this.vfs.createFile(AGENT_MODULE, `/${fileName}`, content, {
+                        isProtected: true,
+                        isSystem: true,
+                        version: 1
+                    });
+
+                    // 4. [关键] 使用 VFS API 设置标签
+                    if (initialTags && initialTags.length > 0) {
+                        // createFile 返回的是 VNode，直接用 node.nodeId
+                        await this.vfs.setNodeTagsById(node.nodeId, initialTags);
+                    }
+                }
             }
         }
     }
@@ -168,6 +242,11 @@ export class SettingsService {
         await this.saveEntity('connections'); 
     }
     async deleteConnection(id: string) { 
+        // [新增] 保护默认连接
+        if (id === LLM_DEFAULT_ID) {
+            throw new Error(`Cannot delete system default connection (${id}).`);
+        }
+
         this.state.connections = this.state.connections.filter(c => c.id !== id); 
         await this.saveEntity('connections');
         this.notify();

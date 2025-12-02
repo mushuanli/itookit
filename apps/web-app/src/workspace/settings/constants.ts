@@ -1,10 +1,13 @@
-// @file: app/workspace/settings/constants.ts
+/**
+ * @file: app/workspace/settings/constants.ts
+ */
 
 import { 
     LLM_PROVIDER_DEFAULTS, 
     LLM_DEFAULT_ID, 
     LLMConnection 
 } from '@itookit/common';
+import { AgentFileContent } from './types'; // 引入类型
 
 // 导出常量供应用其他部分使用
 export { LLM_PROVIDER_DEFAULTS };
@@ -12,12 +15,11 @@ export { LLM_PROVIDER_DEFAULTS };
 // 保护 Agent IDs，不允许用户删除
 export const LLM_TEMP_ID = 'default-temp';
 
-const LLM_DEFAULT_NAME = '默认';
+const LLM_DEFAULT_NAME = '默认助手';
 const LLM_TEMP_DEFAULT_NAME = '临时';
 
 /**
- * [MODIFIED] 系统初始化时会创建的所有默认连接。
- * 数据源自 Common 定义的 RDSEC 配置。
+ * 系统初始化时会创建的所有默认连接。
  */
 export const LLM_DEFAULT_CONNECTIONS: LLMConnection[] = [
     {
@@ -36,21 +38,30 @@ export const LLM_DEFAULT_CONNECTIONS: LLMConnection[] = [
 ];
 
 /**
- * [MODIFIED] 默认智能体的模板数组，如果不存在则会被创建。
+ * 辅助类型：仅用于初始化时的 Agent 定义
+ * 包含 initialTags 用于在创建文件后调用 VFS API 设置标签
  */
-export const LLM_DEFAULT_AGENTS = [
-    // 原始默认 Agent (受删除保护)
+export type InitialAgentDef = AgentFileContent & { 
+    initialTags?: string[];
+};
+
+/**
+ * 默认智能体的模板数组。
+ * 注意：tags 字段已移至 initialTags，不再存在于 config 或根对象中作为持久化数据。
+ */
+export const LLM_DEFAULT_AGENTS: InitialAgentDef[] = [
     {
         id: LLM_DEFAULT_ID,
         name: LLM_DEFAULT_NAME,
+        type: 'agent',
         icon: '🤖',
         description: '系统默认智能体',
-        tags: ['default'],
-        maxHistoryLength: -1, // 不限制历史消息
+        initialTags: ['default', 'system'], // 初始化时应用到 VFS
         config: {
             connectionId: LLM_DEFAULT_ID,
-            modelName: LLM_PROVIDER_DEFAULTS.rdsec.models[0]?.id || "", // <-- 修改为 rdsec 的模型
-            systemPrompt: "You are a helpful assistant."
+            modelName: LLM_PROVIDER_DEFAULTS.rdsec.models[0]?.id || "",
+            systemPrompt: "You are a helpful assistant.",
+            maxHistoryLength: -1
         },
         interface: {
             inputs: [{ name: "prompt", type: "string" }],
@@ -60,14 +71,15 @@ export const LLM_DEFAULT_AGENTS = [
     {
         id: LLM_TEMP_ID,
         name: LLM_TEMP_DEFAULT_NAME,
+        type: 'agent',
         icon: '⚡️',
         description: '一次性问答，不保留对话历史',
-        tags: ['default'],
-        maxHistoryLength: 0,
+        initialTags: ['default'],
         config: {
             connectionId: LLM_DEFAULT_ID,
-            modelName: LLM_PROVIDER_DEFAULTS.rdsec.models[0]?.id || "", // <-- 修改为 rdsec 的模型
-            systemPrompt: "You are a helpful assistant. Answer the user's current prompt concisely and accurately, without referring to any past conversation history."
+            modelName: LLM_PROVIDER_DEFAULTS.rdsec.models[0]?.id || "",
+            systemPrompt: "You are a helpful assistant. Answer the user's current prompt concisely and accurately, without referring to any past conversation history.",
+            maxHistoryLength: 0
         },
         interface: {
             inputs: [{ name: "prompt", type: "string" }],
@@ -78,14 +90,15 @@ export const LLM_DEFAULT_AGENTS = [
     {
         id: 'deepseek-default',
         name: 'DeepSeek',
+        type: 'agent',
         icon: '🌊',
         description: '使用 DeepSeek 模型的智能体',
-        tags: ['default', 'deepseek'],
-        maxHistoryLength: -1, // 不限制
+        initialTags: ['default', 'deepseek'],
         config: {
             connectionId: 'deepseek-default',
             modelName: LLM_PROVIDER_DEFAULTS.deepseek.models[0]?.id || '',
-            systemPrompt: "You are a helpful assistant powered by DeepSeek."
+            systemPrompt: "You are a helpful assistant powered by DeepSeek.",
+            maxHistoryLength: -1
         },
         interface: {
             inputs: [{ name: "prompt", type: "string" }],
@@ -95,14 +108,15 @@ export const LLM_DEFAULT_AGENTS = [
     {
         id: 'claude-default',
         name: 'Claude',
+        type: 'agent',
         icon: '📚',
         description: '使用 Claude 模型的智能体',
-        tags: ['default', 'claude'],
-        maxHistoryLength: 10, // 保留最近 10 条消息
+        initialTags: ['default', 'claude'],
         config: {
             connectionId: 'claude-default',
             modelName: LLM_PROVIDER_DEFAULTS.anthropic.models[0]?.id || '',
-            systemPrompt: "You are a helpful, harmless, and honest assistant."
+            systemPrompt: "You are a helpful, harmless, and honest assistant.",
+            maxHistoryLength: 20
         },
         interface: {
             inputs: [{ name: "prompt", type: "string" }],
@@ -112,14 +126,15 @@ export const LLM_DEFAULT_AGENTS = [
     {
         id: 'gemini-default',
         name: 'Gemini',
+        type: 'agent',
         icon: '💎',
         description: '使用 Gemini 模型的智能体',
-        tags: ['default', 'gemini'],
-        maxHistoryLength: -1, // 不限制
+        initialTags: ['default', 'gemini'],
         config: {
             connectionId: 'gemini-default',
             modelName: LLM_PROVIDER_DEFAULTS.gemini.models[0]?.id || '',
-            systemPrompt: "You are a helpful assistant powered by Google Gemini."
+            systemPrompt: "You are a helpful assistant powered by Google Gemini.",
+            maxHistoryLength: -1
         },
         interface: {
             inputs: [{ name: "prompt", type: "string" }],
@@ -129,31 +144,33 @@ export const LLM_DEFAULT_AGENTS = [
     {
         id: 'openrouter-default',
         name: 'OpenRouter',
+        type: 'agent',
         icon: '🔀',
         description: '使用 OpenRouter 自动选择最佳模型的智能体',
-        tags: ['default', 'router'],
-        maxHistoryLength: -1, // 不限制
+        initialTags: ['default', 'router'],
         config: {
             connectionId: 'openrouter-default',
             modelName: LLM_PROVIDER_DEFAULTS.openrouter.models[0]?.id || '',
-            systemPrompt: "You are a helpful assistant, routed through OpenRouter."
+            systemPrompt: "You are a helpful assistant, routed through OpenRouter.",
+            maxHistoryLength: -1
         },
         interface: {
             inputs: [{ name: "prompt", type: "string" }],
             outputs: [{ name: "response", type: "string" }]
         }
     },
-        {
+    {
         id: 'cloudapi-default',
         name: 'CloudAPI',
+        type: 'agent',
         icon: '☁️',
         description: '使用 CloudAPI 模型的智能体',
-        tags: ['default', 'cloudapi'],
-        maxHistoryLength: -1, // 不限制
+        initialTags: ['default', 'cloudapi'],
         config: {
             connectionId: 'cloudapi-default',
             modelName: LLM_PROVIDER_DEFAULTS.cloudapi.models[0]?.id || '',
-            systemPrompt: "You are a helpful assistant, routed through CloudAPI."
+            systemPrompt: "You are a helpful assistant, routed through CloudAPI.",
+            maxHistoryLength: -1
         },
         interface: {
             inputs: [{ name: "prompt", type: "string" }],

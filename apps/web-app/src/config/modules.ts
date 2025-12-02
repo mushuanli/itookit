@@ -21,7 +21,7 @@ export interface WorkspaceConfig {
 
 // 默认的 Agent 模板
 const DEFAULT_AGENT_CONTENT: AgentFileContent = {
-    id: 'template',
+    id: '', // 空 ID 会触发编辑器生成新的 UUID
     name: 'New Assistant',
     type: 'agent',
     description: 'A helpful AI assistant.',
@@ -31,7 +31,7 @@ const DEFAULT_AGENT_CONTENT: AgentFileContent = {
         modelName: '',
         systemPrompt: 'You are a helpful assistant.'
     },
-    tags: []
+    // tags: [] // [已移除] Tags 由 VFS 元数据管理
 };
 
 export const WORKSPACES: WorkspaceConfig[] = [
