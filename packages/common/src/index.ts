@@ -29,10 +29,13 @@ export { ISettingsWidget } from './interfaces/ISettingsWidget';
 export { slugify, simpleHash, escapeHTML, generateUUID, generateShortUUID,generateId, debounce, isClass } from './utils/utils';
 
 // Export all components
-export { TagEditorComponent, type TagEditorParams } from './components/TagEditor/TagEditorComponent'; // UPDATE: Export TagEditorParams type
+export { TagEditorComponent, type TagEditorParams } from './components/TagEditor/TagEditorComponent'; 
 
 // LLM Interfaces
 export * from './interfaces/llm/ILLM';
 export * from './interfaces/llm/IExecutor';
+// ✨ [新增] 导出 Agent 定义
+export * from './interfaces/llm/IAgent';
+
 // LLM Constants
 export * from './constants/llmDefaults';

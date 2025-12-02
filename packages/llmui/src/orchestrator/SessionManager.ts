@@ -1,6 +1,13 @@
 // @file llm-ui/orchestrator/SessionManager.ts
 import { SessionGroup, OrchestratorEvent, ExecutionNode } from '../types';
-import { generateUUID, LLMConnection, IExecutor, ExecutionResult, ExecutionContext } from '@itookit/common';
+import { 
+    generateUUID, 
+    LLMConnection, 
+    IExecutor, 
+    // ExecutionResult, // 未使用可移除
+    ExecutionContext,
+    IAgentDefinition // ✨ 引入 Agent 定义接口
+} from '@itookit/common';
 import { ChatMessage } from '@itookit/llmdriver';
 import { AgentExecutor } from './AgentExecutor';
 
@@ -18,8 +25,11 @@ export interface StreamingContext extends ExecutionContext {
 
 // 解耦 Settings 服务
 export interface ISettingsService {
-    getAgentConfig(agentId: string): Promise<any>;
+    // ✨ 返回类型明确为 IAgentDefinition
+    getAgentConfig(agentId: string): Promise<IAgentDefinition | null>;
     getConnection(connectionId: string): Promise<LLMConnection | undefined>;
+    // 获取所有可用 Agent 列表
+    getAgents(): Promise<Array<{ id: string; name: string; icon?: string; description?: string }>>;
 }
 
 // --- 类实现 ---
@@ -44,26 +54,39 @@ export class SessionManager {
         this.executorRegistry.set(executor.id, executor);
     }
 
-    public getAvailableExecutors() {
-        // 转换 Registry 为 UI 可用的列表
-        // 默认总是包含一个 'default' 选项，它会动态解析
-        const list = Array.from(this.executorRegistry.values()).map(e => ({
-            id: e.id,
-            name: (e as any).name || e.id,
-            // 假设 IExecutor 实现有这些扩展属性，或者在这里做 Mock
-            icon: (e as any).icon || '🤖', 
-            category: (e as any).category || 'Agents'
-        }));
-        
-        // Mock default if empty for demo purposes
-        if (list.length === 0) {
-            return [
-                { id: 'default', name: 'General Assistant', icon: '🤖', category: 'General' },
-                { id: 'coder', name: 'Code Expert', icon: '👨‍💻', category: 'Specialists' },
-                { id: 'writer', name: 'Creative Writer', icon: '✍️', category: 'Specialists' },
-                { id: 'search', name: 'Web Search', icon: '🌐', category: 'Tools' }
-            ];
+    // 改为异步方法，从 SettingsService 获取真实数据
+    public async getAvailableExecutors() {
+        const list: any[] = [];
+
+        // 1. 获取注册表中的硬编码 Executor (如有)
+        for (const e of this.executorRegistry.values()) {
+            list.push({
+                id: e.id,
+                name: (e as any).name || e.id,
+                icon: (e as any).icon || '🤖', 
+                category: (e as any).category || 'System'
+            });
         }
+
+        // 2. 从 SettingsService 获取文件系统中的 Agents
+        try {
+            const fileAgents = await this.settingsService.getAgents();
+            for (const agent of fileAgents) {
+                // 避免重复
+                if (!this.executorRegistry.has(agent.id)) {
+                    list.push({
+                        id: agent.id,
+                        name: agent.name,
+                        icon: agent.icon || '🤖',
+                        description: agent.description,
+                        category: 'Agents'
+                    });
+                }
+            }
+        } catch (e) {
+            console.warn('Failed to load agents from settings:', e);
+        }
+        
         return list;
     }
 
@@ -135,7 +158,7 @@ export class SessionManager {
      * @param files 用户上传附件
      * @param executorId 选择的执行器 ID
      */
-    async runUserQuery(text: string, files: File[], executorId: string = 'default') {
+    async runUserQuery(text: string, files: File[], executorId: string) {
         if (this.isGenerating) return;
         this.isGenerating = true;
         this.abortController = new AbortController();
@@ -153,26 +176,52 @@ export class SessionManager {
             this.sessions.push(userSession);
             this.emit({ type: 'session_start', payload: userSession });
 
-            // 2. 解析 Executor
+            // 2. 解析 Executor 和 配置信息
             let executor = this.executorRegistry.get(executorId);
+            let metaInfo: any = {};
 
-            // Fallback: 如果是 'default' 且未注册，尝试动态从 Settings 构建 AgentExecutor
-            if (!executor && executorId === 'default') {
-                const agentConfig = await this.settingsService.getAgentConfig('default');
-                const connection = await this.settingsService.getConnection(agentConfig.connectionId);
-                
-                if (connection) {
-                    executor = new AgentExecutor(
-                        connection, 
-                        agentConfig.modelId || connection.model, 
-                        agentConfig.systemPrompt
-                    );
-                    (executor as any).name = agentConfig.name || 'Assistant';
+            // 尝试动态从 Settings 构建 AgentExecutor (如果是文件 Agent)
+            if (!executor) {
+                try {
+                    // ✨ 使用强类型 IAgentDefinition 接收配置
+                    const agentDef = await this.settingsService.getAgentConfig(executorId);
+                    
+                    // 检查 config 属性是否存在
+                    if (agentDef && agentDef.config) {
+                        const connection = await this.settingsService.getConnection(agentDef.config.connectionId);
+                        
+                        if (connection) {
+                            executor = new AgentExecutor(
+                                connection, 
+                                agentDef.config.modelId || connection.model, 
+                                agentDef.config.systemPrompt
+                            );
+                            (executor as any).name = agentDef.name || 'Assistant';
+                            (executor as any).icon = agentDef.icon || '🤖';
+
+                            // [新增] 收集元数据供 UI 显示
+                            metaInfo = {
+                                provider: connection.provider,
+                                connectionName: connection.name,
+                                model: agentDef.config.modelId || connection.model,
+                                systemPrompt: agentDef.config.systemPrompt
+                            };
+                        }
+                    }
+                } catch (e) {
+                    console.warn(`Failed to resolve dynamic agent ${executorId}:`, e);
                 }
             }
 
             if (!executor) {
-                throw new Error(`Executor '${executorId}' not found or configured incorrectly.`);
+                // Fallback (通常不应发生，除非 ID 无效)
+                 const defaultConn = await this.settingsService.getConnection('default');
+                 if (defaultConn) {
+                     executor = new AgentExecutor(defaultConn, defaultConn.model || '');
+                     metaInfo = { note: "Fallback to default connection" };
+                 } else {
+                     throw new Error(`Executor '${executorId}' not found and no default connection available.`);
+                 }
             }
 
             // 3. 创建 Assistant Session (Root Node) 并 UI 上屏
@@ -180,11 +229,16 @@ export class SessionManager {
             const rootNode: ExecutionNode = {
                 id: agentRootId,
                 name: (executor as any).name || 'Assistant',
-        icon: (executor as any).icon || '🤖', // 确保传递 icon
-                type: executor.type === 'atomic' ? 'agent' : 'router', // 根据类型决定图标/样式
+                icon: (executor as any).icon || '🤖',
+                type: executor.type === 'atomic' ? 'agent' : 'router',
                 status: 'running',
                 startTime: Date.now(),
-                data: { output: '', thought: '' },
+                data: { 
+                    output: '', 
+                    thought: '',
+                    // [新增] 注入元数据
+                    metaInfo: metaInfo
+                },
                 children: []
             };
             

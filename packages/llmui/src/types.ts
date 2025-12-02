@@ -19,6 +19,15 @@ export interface ExecutionNode {
         output?: string;  // 最终输出内容
         toolCall?: { name: string; args: any; result?: any };
         artifacts?: any[];
+        
+        // [新增] 供 UI 显示的元数据
+        metaInfo?: {
+            provider?: string;       // e.g., 'deepseek', 'openai'
+            connectionName?: string; // e.g., 'My DeepSeek'
+            model?: string;          // e.g., 'deepseek-chat'
+            systemPrompt?: string;   // e.g., 'You are a helpful...'
+            [key: string]: any;
+        };
     };
     
     // 子节点（用于并行任务或嵌套编排）
