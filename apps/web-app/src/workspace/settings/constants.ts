@@ -12,6 +12,8 @@ import { AgentFileContent } from './types'; // 引入类型
 // 导出常量供应用其他部分使用
 export { LLM_PROVIDER_DEFAULTS };
 
+export const LLM_AGENT_TARGET_DIR = '/default/providers'; // [改进] 统一存放到此目录
+
 // 保护 Agent IDs，不允许用户删除
 export const LLM_TEMP_ID = 'default-temp';
 
@@ -40,9 +42,11 @@ export const LLM_DEFAULT_CONNECTIONS: LLMConnection[] = [
 /**
  * 辅助类型：仅用于初始化时的 Agent 定义
  * 包含 initialTags 用于在创建文件后调用 VFS API 设置标签
+ * [新增] initPath 用于指定初始化时的存放目录
  */
 export type InitialAgentDef = AgentFileContent & { 
     initialTags?: string[];
+    initPath?: string; 
 };
 
 /**
@@ -57,6 +61,7 @@ export const LLM_DEFAULT_AGENTS: InitialAgentDef[] = [
         icon: '🤖',
         description: '系统默认智能体',
         initialTags: ['default', 'system'], // 初始化时应用到 VFS
+        initPath: '/default',     // [新增]
         config: {
             connectionId: LLM_DEFAULT_ID,
             modelId: LLM_PROVIDER_DEFAULTS.rdsec.models[0]?.id || "",
@@ -73,13 +78,14 @@ export const LLM_DEFAULT_AGENTS: InitialAgentDef[] = [
         name: LLM_TEMP_DEFAULT_NAME,
         type: 'agent',
         icon: '⚡️',
-        description: '一次性问答，不保留对话历史',
+        description: '一次性问答，保留4次对话历史',
         initialTags: ['default'],
+        initPath: '/default',     // [新增]
         config: {
             connectionId: LLM_DEFAULT_ID,
             modelId: LLM_PROVIDER_DEFAULTS.rdsec.models[0]?.id || "",
             systemPrompt: "You are a helpful assistant. Answer the user's current prompt concisely and accurately, without referring to any past conversation history.",
-            maxHistoryLength: 0
+            maxHistoryLength: 4
         },
         interface: {
             inputs: [{ name: "prompt", type: "string" }],
@@ -94,6 +100,7 @@ export const LLM_DEFAULT_AGENTS: InitialAgentDef[] = [
         icon: '🌊',
         description: '使用 DeepSeek 模型的智能体',
         initialTags: ['default', 'deepseek'],
+        initPath: LLM_AGENT_TARGET_DIR,     // [新增]
         config: {
             connectionId: 'deepseek-default',
             modelId: LLM_PROVIDER_DEFAULTS.deepseek.models[0]?.id || '',
@@ -112,6 +119,7 @@ export const LLM_DEFAULT_AGENTS: InitialAgentDef[] = [
         icon: '📚',
         description: '使用 Claude 模型的智能体',
         initialTags: ['default', 'claude'],
+        initPath: LLM_AGENT_TARGET_DIR,     // [新增]
         config: {
             connectionId: 'claude-default',
             modelId: LLM_PROVIDER_DEFAULTS.anthropic.models[0]?.id || '',
@@ -130,6 +138,7 @@ export const LLM_DEFAULT_AGENTS: InitialAgentDef[] = [
         icon: '💎',
         description: '使用 Gemini 模型的智能体',
         initialTags: ['default', 'gemini'],
+        initPath: LLM_AGENT_TARGET_DIR,     // [新增]
         config: {
             connectionId: 'gemini-default',
             modelId: LLM_PROVIDER_DEFAULTS.gemini.models[0]?.id || '',
@@ -148,6 +157,7 @@ export const LLM_DEFAULT_AGENTS: InitialAgentDef[] = [
         icon: '🔀',
         description: '使用 OpenRouter 自动选择最佳模型的智能体',
         initialTags: ['default', 'router'],
+        initPath: LLM_AGENT_TARGET_DIR,     // [新增]
         config: {
             connectionId: 'openrouter-default',
             modelId: LLM_PROVIDER_DEFAULTS.openrouter.models[0]?.id || '',
@@ -166,6 +176,7 @@ export const LLM_DEFAULT_AGENTS: InitialAgentDef[] = [
         icon: '☁️',
         description: '使用 CloudAPI 模型的智能体',
         initialTags: ['default', 'cloudapi'],
+        initPath: LLM_AGENT_TARGET_DIR,     // [新增]
         config: {
             connectionId: 'cloudapi-default',
             modelId: LLM_PROVIDER_DEFAULTS.cloudapi.models[0]?.id || '',

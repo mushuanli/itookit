@@ -55,9 +55,9 @@ export class MemoryPlugin implements MDxPlugin {
       className: options.className || 'mdx-memory',
       coolingPeriod: options.coolingPeriod || 60000, // 默认1分钟冷却
       dangerThresholdDays: options.dangerThresholdDays || 7, // 超过7天为严重过期
-      debug: options.debug ?? true, // 🟢 默认开启调试，生产环境可关闭
+      debug: options.debug ?? false, // 🟢 默认开启调试，生产环境可关闭
       hideBeforeDueHours: options.hideBeforeDueHours ?? 12, // 默认提前12小时隐藏
-  };
+    };
   }
 
   private log(message: string, ...args: any[]) {
