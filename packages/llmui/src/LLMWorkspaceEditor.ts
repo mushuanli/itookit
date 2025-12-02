@@ -12,21 +12,33 @@ import { SessionManager, ISettingsService } from './orchestrator/SessionManager'
 class SettingsServiceAdapter implements ISettingsService {
     constructor(private realSettingsService: any) {}
 
+    // 辅助：获取 VFSCore 实例
+    private get vfs() {
+        return this.realSettingsService.vfs;
+    }
+
     async getAgentConfig(agentId: string) {
-        // 1. 尝试从 Service 获取
-        if (typeof this.realSettingsService.getAgent === 'function') {
-            try {
-                // 暂时 SettingsService 还没有 getAgent，这里通常会失败
-                return await this.realSettingsService.getAgent(agentId);
-            } catch (e) {}
+        try {
+            // 使用 getAgents 获取所有 agent，然后过滤
+            const agents = await this.getAgents();
+            const agent = agents.find(a => a.id === agentId);
+            
+            if (agent && (agent as any)._fullConfig) {
+                return (agent as any)._fullConfig;
+            }
+        } catch (e) {
+            console.warn('[SettingsAdapter] Failed to load agent config:', e);
         }
 
-        // 2. Fallback: 默认配置
-        // 确保 connectionId 指向 'default'
+        // Fallback: 默认配置
         return {
-            connectionId: 'default', 
-            modelId: '', 
-            systemPrompt: 'You are a helpful assistant.'
+            id: agentId,
+            name: 'Default Assistant',
+            config: {
+                connectionId: 'default', 
+                modelId: '', 
+                systemPrompt: 'You are a helpful assistant.'
+            }
         };
     }
 
@@ -47,20 +59,66 @@ class SettingsServiceAdapter implements ISettingsService {
             console.warn('[SettingsAdapter] Service lookup failed:', e);
         }
 
-        // [核心修复] 2. 如果 Service 没找到，从默认常量中查找 (内存兜底)
-        if (!connection) {
-            console.warn(`[SettingsAdapter] Connection '${connectionId}' not found in service, trying defaults.`);
-            connection = undefined;
-        }
-
-        // [调试日志]
-        if (!connection) {
-            console.error(`[SettingsAdapter] CRITICAL: Connection '${connectionId}' not found anywhere!`);
-        } else {
-            console.log(`[SettingsAdapter] Resolved connection '${connectionId}':`, connection.provider);
-        }
-
         return connection;
+    }
+
+    // [FIXED] 修复路径处理和错误容忍
+    async getAgents(): Promise<Array<{ id: string; name: string; icon?: string; description?: string }>> {
+        const agents: any[] = [];
+        
+        // 检查 VFS 是否可用
+        if (!this.vfs) {
+            console.warn('[SettingsAdapter] VFS not available');
+            return agents;
+        }
+
+        try {
+            // 搜索 agents 模块下的所有 .agent 文件
+            const results = await this.vfs.searchNodes({
+                nameContains: '.agent'
+            }, 'agents');
+
+            for (const node of results) {
+                try {
+                    // [FIXED] 确保路径格式正确
+                    // node.path 应该已经是相对于模块的路径，如 "/default/default.agent"
+                    let filePath = node.path;
+                    
+                    // 如果路径以模块名开头，移除它
+                    if (filePath.startsWith('/agents/')) {
+                        filePath = filePath.substring('/agents'.length);
+                    }
+                    
+                    // 确保路径以 / 开头
+                    if (!filePath.startsWith('/')) {
+                        filePath = '/' + filePath;
+                    }
+
+                    const content = await this.vfs.read('agents', filePath);
+                    
+                    if (typeof content === 'string') {
+                        const data = JSON.parse(content);
+                        if (data.id && data.name) {
+                            agents.push({
+                                id: data.id,
+                                name: data.name,
+                                icon: data.icon,
+                                description: data.description,
+                                // 存储完整配置供后续使用
+                                _fullConfig: data
+                            });
+                        }
+                    }
+                } catch (readErr) {
+                    // [FIXED] 降低日志级别，这可能是正常的时序问题
+                    // 文件可能正在被创建中
+                    console.debug(`[SettingsAdapter] Skipping agent ${node.path}:`, readErr);
+                }
+            }
+        } catch (e) {
+            console.error('[SettingsAdapter] Failed to scan agents:', e);
+        }
+        return agents;
     }
 }
 
@@ -97,9 +155,21 @@ export class LLMWorkspaceEditor implements IEditor {
             this.emit('change');
         });
         
+        // [FIXED] 延迟获取 Agent 列表，给 SettingsService 时间完成初始化
+        // 使用 setTimeout 或在用户实际需要时再获取
+        let initialAgents: any[] = [];
+        try {
+            // 短暂延迟，等待 SettingsService 完成 Agent 创建
+            await new Promise(resolve => setTimeout(resolve, 100));
+            initialAgents = await this.sessionManager.getAvailableExecutors();
+        } catch (e) {
+            console.warn('[LLMWorkspaceEditor] Failed to get initial agents:', e);
+        }
+
         this.chatInput = new ChatInput(inputEl, {
-            onSend: (text, files) => this.handleUserSend(text, files),
-            onStop: () => this.sessionManager.abort()
+            onSend: (text, files, agentId) => this.handleUserSend(text, files, agentId),
+            onStop: () => this.sessionManager.abort(),
+            initialAgents: initialAgents // 传入 Agent 列表
         });
 
         this.sessionManager.onEvent((event) => {
@@ -125,10 +195,10 @@ export class LLMWorkspaceEditor implements IEditor {
         this.emit('ready');
     }
 
-    private async handleUserSend(text: string, files: File[]) {
+    private async handleUserSend(text: string, files: File[], agentId?: string) {
         this.chatInput.setLoading(true);
         try {
-            await this.sessionManager.runUserQuery(text, files);
+            await this.sessionManager.runUserQuery(text, files, agentId || 'default');
         } catch (error: any) {
             this.historyView.renderError(error);
         } finally {

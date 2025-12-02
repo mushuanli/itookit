@@ -4,6 +4,8 @@ export interface ChatInputOptions {
     onSend: (text: string, files: File[], executorId: string) => Promise<void>;
     onStop: () => void;
     onExecutorChange?: (executorId: string) => void;
+    // ✨ 新增这一行
+    initialAgents?: ExecutorOption[]; 
 }
 
 export interface ExecutorOption {
@@ -29,6 +31,15 @@ export class ChatInput {
     constructor(private container: HTMLElement, private options: ChatInputOptions) {
         this.render();
         this.bindEvents();
+
+        // ✨ 2. 新增初始化逻辑 (在 bindEvents 之后)
+        // 如果传入了初始列表，立即渲染
+        if (this.options.initialAgents && this.options.initialAgents.length > 0) {
+            this.updateExecutors(this.options.initialAgents);
+        } else {
+            // 否则渲染一个默认的
+            this.updateExecutors([{ id: 'default', name: 'Assistant', category: 'System' }]);
+        }
     }
 
     private render() {
