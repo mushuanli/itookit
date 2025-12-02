@@ -65,18 +65,24 @@ export interface AgentConfig {
     maxHistoryLength?: number;
     autoPrompts?: string[];
     mcpServers?: string[];
+    temperature?: number; // [新增]
 }
 
 // 这是保存在 .agent 文件中的 JSON 结构
 export interface AgentFileContent {
     id: string;
     name: string;
-    type: 'agent' | 'orchestrator';
+    type: 'agent' | 'orchestrator'; // 对应 ExecutorType 'atomic' | 'composite'
     description?: string;
-    icon?: string; // 可选，用于 UI 展示
-    config: AgentConfig;
-    // Tags 现在由 VFS 原生管理，文件内可以保留一份副本用于导出，但运行时以 VFS 为准
-    tags?: string[]; 
+    icon?: string; 
+    config: AgentConfig; // 存储态配置
+    
+    // [新增] 运行时接口定义 (Inputs/Outputs)，用于转换成 ExecutorConfig
+    interface?: {
+        inputs: Array<{ name: string; type: string }>;
+        outputs: Array<{ name: string; type: string }>;
+    };
+    
 }
 
 
