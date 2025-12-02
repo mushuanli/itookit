@@ -20,6 +20,10 @@ export const LLM_TEMP_ID = 'default-temp';
 const LLM_DEFAULT_NAME = '默认助手';
 const LLM_TEMP_DEFAULT_NAME = '临时';
 
+// [新增] 默认配置的版本号。
+// 每当修改 LLM_PROVIDER_DEFAULTS 或 LLM_DEFAULT_AGENTS 时，请增加此数字以触发更新。
+export const DEFAULT_CONFIG_VERSION = 1;
+
 /**
  * 系统初始化时会创建的所有默认连接。
  */

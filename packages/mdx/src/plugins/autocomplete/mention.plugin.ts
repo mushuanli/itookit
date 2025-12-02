@@ -1,11 +1,10 @@
-
 // mdx/plugins/autocomplete/mention.plugin.ts
 
-import {type HoverPreviewData} from '@itookit/common';
-import type { MDxPlugin, PluginContext } from '../../core/plugin';
-import { AutocompletePlugin, AutocompleteProvider } from './autocomplete.plugin';
+import type { HoverPreviewData } from '@itookit/common';
 import type { Completion } from '@codemirror/autocomplete';
 import type { MarkedExtension, Token } from 'marked';
+import type { MDxPlugin, PluginContext } from '../../core/plugin';
+import { AutocompletePlugin } from './autocomplete.plugin';
 
 /**
  * 提及项
@@ -13,11 +12,11 @@ import type { MarkedExtension, Token } from 'marked';
 export interface MentionItem {
   id: string;
   label: string;
-  /** 
+  /**
    * ✨ [新增] 纯文本标题，用于插入到 Markdown 中。
    * 如果未提供，则回退使用 label。
    */
-  title?: string; 
+  title?: string;
   /**
    * 类型：用于 UI 显示和分组，例如 'file', 'directory', 'user'
    */
@@ -109,96 +108,94 @@ export class MentionPlugin implements MDxPlugin {
     // 1. 按 triggerChar 对 Provider 进行分组
     // 解决多个 Provider 使用相同触发字符（如 '@'）时只有第一个生效的问题
     const groupedProviders = new Map<string, MentionProvider[]>();
-    
-    this.options.providers.forEach(provider => {
-        if (!groupedProviders.has(provider.triggerChar)) {
-            groupedProviders.set(provider.triggerChar, []);
-        }
-        groupedProviders.get(provider.triggerChar)!.push(provider);
+
+    this.options.providers.forEach((provider) => {
+      if (!groupedProviders.has(provider.triggerChar)) {
+        groupedProviders.set(provider.triggerChar, []);
+      }
+      groupedProviders.get(provider.triggerChar)!.push(provider);
     });
 
     // 2. 为每个触发字符创建一个聚合的 Source
     const sources = Array.from(groupedProviders.entries()).map(([triggerChar, providers]) => {
-        return {
-            triggerChar: triggerChar,
-            
-            // 聚合 Provider
-            provider: {
-                getSuggestions: async (query: string): Promise<Completion[]> => {
-                    // 并行调用该组下所有 Provider 的查询
-                    const promises = providers.map(async (p) => {
-                        try {
-                            const results = await p.getSuggestions(query);
-                            // 注入 providerKey，以便后续 applyTemplate 知道用哪个 key
-                            return results.map(item => ({
-                                ...item,
-                                _providerKey: p.key, // 内部标记
-                                // 确保 detail 有值，优先使用 item.type，否则用 provider.key
-                                detail: item.type ? this.formatType(item.type) : this.formatType(p.key),
-                                // 利用 section 属性进行 UI 分组 (CodeMirror 特性)
-                                section: this.getSectionName(item.type || p.key)
-                            }));
-                        } catch (e) {
-                            console.warn(`[MentionPlugin] Provider ${p.key} failed:`, e);
-                            return [];
-                        }
-                    });
+      return {
+        triggerChar: triggerChar,
 
-                    const nestedResults = await Promise.all(promises);
-                    // 扁平化结果
-                    return nestedResults.flat() as Completion[];
-                },
+        // 聚合 Provider
+        provider: {
+          getSuggestions: async (query: string): Promise<Completion[]> => {
+            // 并行调用该组下所有 Provider 的查询
+            const promises = providers.map(async (p) => {
+              try {
+                const results = await p.getSuggestions(query);
+                // 注入 providerKey，以便后续 applyTemplate 知道用哪个 key
+                return results.map((item) => ({
+                  ...item,
+                  _providerKey: p.key, // 内部标记
+                  // 确保 detail 有值，优先使用 item.type，否则用 provider.key
+                  detail: item.type ? this.formatType(item.type) : this.formatType(p.key),
+                  // 利用 section 属性进行 UI 分组 (CodeMirror 特性)
+                  section: this.getSectionName(item.type || p.key),
+                }));
+              } catch (e) {
+                console.warn(`[MentionPlugin] Provider ${p.key} failed:`, e);
+                return [];
+              }
+            });
 
-                // 聚合 HoverPreview (针对 Autocomplete 菜单侧边的预览，如果有的话)
-                getHoverPreview: async (item: Completion) => {
-                    const mentionItem = item as any;
-                    const providerKey = mentionItem._providerKey;
-                    const provider = providers.find(p => p.key === providerKey);
-                    
-                    if (provider && provider.getHoverPreview) {
-                        // ✅ 修复：构造标准 URI 字符串
-                        const uri = `mdx://${providerKey}/${mentionItem.id}`;
-                        return provider.getHoverPreview(uri);
-                    }
-                    return Promise.resolve(null);
-                }
-            },
+            const nestedResults = await Promise.all(promises);
+            // 扁平化结果
+            return nestedResults.flat() as Completion[];
+          },
 
-            // 模板应用：生成 Markdown
-            applyTemplate: (completion: Completion) => {
-                const item = completion as any;
-                const providerKey = item._providerKey || providers[0].key; // Fallback safety
-                
-                // ✨ [修改] 优先使用 title (纯文本)，如果不存在则回退到 label
-                const textToInsert = item.title || item.label;
-                
-                // 生成标准格式: [Label](mdx://provider/id)
-                return `[${textToInsert}](mdx://${providerKey}/${item.id}) `;
+          // 聚合 HoverPreview (针对 Autocomplete 菜单侧边的预览，如果有的话)
+          getHoverPreview: async (item: Completion) => {
+            const mentionItem = item as any;
+            const providerKey = mentionItem._providerKey;
+            const provider = providers.find((p) => p.key === providerKey);
+
+            if (provider && provider.getHoverPreview) {
+              const uri = `mdx://${providerKey}/${mentionItem.id}`;
+              return provider.getHoverPreview(uri);
             }
-        };
+            return Promise.resolve(null);
+          },
+        },
+
+        // 模板应用：生成 Markdown
+        applyTemplate: (completion: Completion) => {
+          const item = completion as any;
+          const providerKey = item._providerKey || providers[0].key; // Fallback safety
+
+          // 优先使用 title (纯文本)，如果不存在则回退到 label
+          const textToInsert = item.title || item.label;
+
+          // 生成标准格式: [Label](mdx://provider/id)
+          return `[${textToInsert}](mdx://${providerKey}/${item.id}) `;
+        },
+      };
     });
 
     this.autocompletePlugin = new AutocompletePlugin({ sources });
   }
-  
+
   /**
    * 格式化类型显示 (例如 'directory' -> 'Directory')
    */
   private formatType(type: string): string {
-      if (!type) return '';
-      return type.charAt(0).toUpperCase() + type.slice(1);
+    if (!type) return '';
+    return type.charAt(0).toUpperCase() + type.slice(1);
   }
 
   /**
    * 获取分组名称，用于排序和展示
-   * 你可以在这里定义排序逻辑，例如 Directory 永远在 File 前面
    */
   private getSectionName(type: string): string {
-      const t = type.toLowerCase();
-      if (t.includes('dir') || t.includes('folder')) return 'Folders';
-      if (t.includes('file') || t.includes('doc')) return 'Files';
-      if (t.includes('user') || t.includes('contact')) return 'People';
-      return 'Others';
+    const t = type.toLowerCase();
+    if (t.includes('dir') || t.includes('folder')) return 'Folders';
+    if (t.includes('file') || t.includes('doc')) return 'Files';
+    if (t.includes('user') || t.includes('contact')) return 'People';
+    return 'Others';
   }
 
   /**
@@ -231,28 +228,30 @@ export class MentionPlugin implements MDxPlugin {
             return `<a href="${uri}" class="mdx-mention" data-mdx-uri="${uri}" data-provider="${token.provider}" data-id="${token.id}">${token.text}</a>`;
           },
         },
-        this.options.enableTransclusion ? {
-          name: 'mdxTransclusion',
-          level: 'block',
-          start: (src: string) => src.match(/!@/)?.index,
-          tokenizer(src: string): Token | undefined {
-            const rule = /^!@(\w+):(\S+)(?:\n|$)/;
-            const match = rule.exec(src);
-            if (match) {
-              const [raw, providerKey, id] = match;
-              return {
-                type: 'mdxTransclusion',
-                raw,
-                providerKey,
-                id,
-              } as any;
+        this.options.enableTransclusion
+          ? {
+              name: 'mdxTransclusion',
+              level: 'block',
+              start: (src: string) => src.match(/!@/)?.index,
+              tokenizer(src: string): Token | undefined {
+                const rule = /^!@(\w+):(\S+)(?:\n|$)/;
+                const match = rule.exec(src);
+                if (match) {
+                  const [raw, providerKey, id] = match;
+                  return {
+                    type: 'mdxTransclusion',
+                    raw,
+                    providerKey,
+                    id,
+                  } as any;
+                }
+                return undefined;
+              },
+              renderer(token: any) {
+                return `<div class="mdx-transclusion" data-provider-key="${token.providerKey}" data-id="${token.id}">Loading...</div>`;
+              },
             }
-            return undefined;
-          },
-          renderer(token: any) {
-            return `<div class="mdx-transclusion" data-provider-key="${token.providerKey}" data-id="${token.id}">Loading...</div>`;
-          },
-        } : undefined,
+          : undefined,
       ].filter(Boolean) as MarkedExtension['extensions'],
     };
   }
@@ -283,36 +282,21 @@ export class MentionPlugin implements MDxPlugin {
   /**
    * 显示悬浮预览 (针对已渲染的 DOM 元素)
    */
-  private async showHoverPreview(
-    element: HTMLElement,
-    provider: MentionProvider,
-    id: string
-  ): Promise<void> {
+  private async showHoverPreview(element: HTMLElement, provider: MentionProvider, id: string): Promise<void> {
     if (!this.options.enableHoverPreview || !provider.getHoverPreview) {
-      console.log('[MentionPlugin] Hover preview disabled or not supported');
       return;
     }
 
     try {
-      // ✅ 修复：构造标准 URI 字符串
       const uri = `mdx://${provider.key}/${id}`;
-      console.log('[MentionPlugin] Requesting hover preview for:', uri);
-      
-      // ✅ 修复：传递字符串 URI
       const preview = await provider.getHoverPreview(uri);
 
-      if (!preview) {
-        console.log('[MentionPlugin] No preview data returned');
-        return;
-      }
-
-      console.log('[MentionPlugin] Preview data received:', preview);
+      if (!preview) return;
 
       if (!this.hoverCard) {
         this.hoverCard = this.createHoverCard();
       }
 
-      // ✅ 修复：使用 contentHTML 属性
       this.hoverCard.innerHTML = `
         <div class="mdx-mention-hover-card__header" style="padding: 8px 12px; background: #f5f5f5; border-bottom: 1px solid #eee; font-weight: 600;">
             ${preview.icon || ''} ${preview.title}
@@ -323,19 +307,16 @@ export class MentionPlugin implements MDxPlugin {
       `;
 
       const rect = element.getBoundingClientRect();
-      
+
       // 简单的位置计算，防止溢出屏幕底部
       let top = rect.bottom + 5;
       if (top + 200 > window.innerHeight) {
-          top = rect.top - this.hoverCard.offsetHeight - 5;
+        top = rect.top - this.hoverCard.offsetHeight - 5;
       }
 
       this.hoverCard.style.left = `${rect.left}px`;
       this.hoverCard.style.top = `${top}px`;
       this.hoverCard.style.display = 'block';
-      
-      console.log('[MentionPlugin] Hover card displayed at:', { left: rect.left, top });
-      
     } catch (error) {
       console.error('[MentionPlugin] Failed to load hover preview:', error);
     }
@@ -347,7 +328,6 @@ export class MentionPlugin implements MDxPlugin {
   private hideHoverPreview(): void {
     if (this.hoverCard) {
       this.hoverCard.style.display = 'none';
-      console.log('[MentionPlugin] Hover card hidden');
     }
   }
 
@@ -380,7 +360,6 @@ export class MentionPlugin implements MDxPlugin {
         // 递归处理：嵌入的内容里可能还有 Mention
         this.bindMentionInteractions(placeholder);
         await this.processTransclusions(placeholder);
-
       } catch (error) {
         console.error(`[MentionPlugin] Failed to process transclusion for ${providerKey}:${id}:`, error);
         placeholder.textContent = 'Failed to load content';
@@ -388,7 +367,7 @@ export class MentionPlugin implements MDxPlugin {
       }
     }
   }
-  
+
   /**
    * 在指定元素范围内绑定提及的交互事件（悬浮、点击）
    */
@@ -405,11 +384,9 @@ export class MentionPlugin implements MDxPlugin {
 
         if (provider && id) {
           link.addEventListener('mouseenter', () => {
-            console.log('[MentionPlugin] Mouse entered mention:', { providerKey, id });
             this.showHoverPreview(link, provider, id);
           });
           link.addEventListener('mouseleave', () => {
-            console.log('[MentionPlugin] Mouse left mention');
             this.hideHoverPreview();
           });
         }
@@ -428,29 +405,21 @@ export class MentionPlugin implements MDxPlugin {
         const id = target.dataset.id;
 
         if (providerKey && id) {
-          console.log('[MentionPlugin] Mention clicked:', { providerKey, id });
           this.options.onMentionClick(providerKey, id);
         }
       });
     }
   }
 
-
   install(context: PluginContext): void {
-    console.log('[MentionPlugin] Installing plugin with', this.options.providers.length, 'providers');
-    
     this.autocompletePlugin.install(context);
 
     context.registerSyntaxExtension(this.createMarkedExtension());
 
-    const removeDomUpdated = context.on(
-      'domUpdated',
-      async ({ element }: { element: HTMLElement }) => {
-        console.log('[MentionPlugin] DOM updated, binding interactions');
-        this.bindMentionInteractions(element);
-        await this.processTransclusions(element);
-      }
-    );
+    const removeDomUpdated = context.on('domUpdated', async ({ element }: { element: HTMLElement }) => {
+      this.bindMentionInteractions(element);
+      await this.processTransclusions(element);
+    });
 
     if (removeDomUpdated) {
       this.cleanupFns.push(removeDomUpdated);
@@ -458,7 +427,6 @@ export class MentionPlugin implements MDxPlugin {
   }
 
   destroy(): void {
-    console.log('[MentionPlugin] Destroying plugin');
     this.cleanupFns.forEach((fn) => fn());
     this.cleanupFns = [];
 
