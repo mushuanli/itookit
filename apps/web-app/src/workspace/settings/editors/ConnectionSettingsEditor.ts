@@ -170,9 +170,19 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor {
                 const formData = new FormData(form);
                 const data = Object.fromEntries(formData) as any;
                 
+                // ✅ 修复：保留原有的 availableModels，或从 provider 默认值获取
+                const providerDef = LLM_PROVIDER_DEFAULTS[data.provider];
                 const newConn: LLMConnection = {
-                    ...data,
-                    id: connection?.id || `conn-${generateShortUUID()}`
+                    id: connection?.id || `conn-${generateShortUUID()}`,
+                    name: data.name,
+                    provider: data.provider,
+                    apiKey: data.apiKey,
+                    model: data.model,
+                    baseURL: data.baseURL || providerDef?.baseURL || '',
+                    // ✅ 关键修复：确保 availableModels 不丢失
+                    availableModels: connection?.availableModels 
+                        || (providerDef ? [...providerDef.models] : []),
+                    metadata: connection?.metadata
                 };
                 
                 await this.service.saveConnection(newConn);
@@ -180,7 +190,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor {
             }
         }).show();
         
-        // JS Reference Logic: Dynamic Provider Switch
+        // Dynamic Provider Switch
         setTimeout(() => {
             const providerSelect = document.getElementById('conn-provider') as HTMLSelectElement;
             const modelSelect = document.getElementById('conn-model') as HTMLSelectElement;
@@ -200,7 +210,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor {
                     const oldProvider = connection?.provider || providers[0];
                     const oldBaseUrl = LLM_PROVIDER_DEFAULTS[oldProvider]?.baseURL || '';
                     if (!baseUrlInput.value || baseUrlInput.value === oldBaseUrl) {
-                        baseUrlInput.value = defaults.baseURL || '';
+                        baseUrlInput.value = defaults?.baseURL || '';
                     }
                 });
             }

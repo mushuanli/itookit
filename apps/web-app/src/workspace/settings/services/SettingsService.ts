@@ -15,13 +15,15 @@ const CONFIG_MODULE = '__config';
 const AGENT_MODULE = 'agents';
 const VERSION_FILE_PATH = '/.defaults_version.json';
 
+// 目录常量
+const CONNECTIONS_DIR = '/connections';
+const MCP_SERVERS_DIR = '/mcp_servers';
+
 // 定义不向用户展示的系统内部模块
 const SYSTEM_MODULES = ['__config', '__vfs_meta__', 'settings_ui'];
 const SNAPSHOT_PREFIX = 'snapshot_';
 
 const FILES = {
-  connections: '/connections.json',
-  mcpServers: '/mcp_servers.json',
   tags: '/tags.json',
   contacts: '/contacts.json',
 };
@@ -65,19 +67,37 @@ export class SettingsService {
       }
     }
 
+    // 确保目录存在
+    await this.ensureDirectories();
+
     await Promise.all([
-      this.loadEntity('connections'),
-      this.loadEntity('mcpServers'),
+      this.loadConnections(),
+      this.loadMCPServers(),
       this.loadEntity('contacts'),
-      this.syncTags(), // Tags 需要特殊处理
+      this.syncTags(),
     ]);
 
     // 启动 VFS 事件监听，确保标签计数等实时同步
     this.bindVFSEvents();
-
     await this.ensureDefaults();
     this.initialized = true;
     this.notify();
+  }
+
+  /**
+   * 确保必要的目录存在
+   */
+  private async ensureDirectories() {
+    const dirs = [CONNECTIONS_DIR, MCP_SERVERS_DIR];
+    for (const dir of dirs) {
+      try {
+        await this.vfs.createDirectory(CONFIG_MODULE, dir);
+      } catch (e: any) {
+        if (e.code !== VFSErrorCode.ALREADY_EXISTS) {
+          console.warn(`Failed to create directory ${dir}:`, e);
+        }
+      }
+    }
   }
 
   /**
@@ -115,9 +135,178 @@ export class SettingsService {
     });
   }
 
-  // --- 通用持久化方法 ---
+  // --- Connections 目录存储 ---
 
-  private async loadEntity<K extends keyof SettingsState>(key: K) {
+  /**
+   * 加载所有连接（从目录读取所有 JSON 文件）
+   */
+  private async loadConnections() {
+    try {
+      // [修复] 使用 VFSCore 的 getTree 方法替代不存在的 readDirectory
+      const tree = await this.vfs.getTree(CONFIG_MODULE, CONNECTIONS_DIR);
+      const connections: LLMConnection[] = [];
+
+      for (const node of tree) {
+        if (node.type === 'file' && node.path.endsWith('.json')) {
+          try {
+            const content = await this.vfs.read(CONFIG_MODULE, node.path);
+            const jsonStr = typeof content === 'string' ? content : new TextDecoder().decode(content);
+            const conn = JSON.parse(jsonStr);
+            
+            // ✅ 修复：确保 availableModels 存在
+            if (!conn.availableModels || conn.availableModels.length === 0) {
+              const providerDef = LLM_PROVIDER_DEFAULTS[conn.provider];
+              if (providerDef) {
+                conn.availableModels = [...providerDef.models];
+              }
+            }
+            
+            connections.push(conn);
+          } catch (e) {
+            console.error(`Failed to load connection from ${node.path}:`, e);
+          }
+        }
+      }
+
+      this.state.connections = connections;
+    } catch (e: any) {
+      if (e.code === VFSErrorCode.NOT_FOUND) {
+        this.state.connections = [];
+      } else {
+        console.error('Failed to load connections:', e);
+      }
+    }
+  }
+
+  /**
+   * 保存单个连接
+   */
+  async saveConnection(conn: LLMConnection) {
+    const path = `${CONNECTIONS_DIR}/${conn.id}.json`;
+    const content = JSON.stringify(conn, null, 2);
+
+    try {
+      await this.vfs.write(CONFIG_MODULE, path, content);
+    } catch (e: any) {
+      if (e.code === VFSErrorCode.NOT_FOUND) {
+        await this.vfs.createFile(CONFIG_MODULE, path, content);
+      } else {
+        throw e;
+      }
+    }
+
+    // 更新内存状态
+    const idx = this.state.connections.findIndex(c => c.id === conn.id);
+    if (idx >= 0) {
+      this.state.connections[idx] = conn;
+    } else {
+      this.state.connections.push(conn);
+    }
+
+    this.notify();
+  }
+
+  /**
+   * 删除连接
+   */
+  async deleteConnection(id: string) {
+    if (id === LLM_DEFAULT_ID) {
+      throw new Error(`Cannot delete system default connection (${id}).`);
+    }
+
+    const path = `${CONNECTIONS_DIR}/${id}.json`;
+    
+    try {
+      // [修复] delete 方法接收 string，而不是 string[]
+      await this.vfs.delete(CONFIG_MODULE, path);
+    } catch (e) {
+      console.error(`Failed to delete connection ${id}:`, e);
+    }
+
+    this.state.connections = this.state.connections.filter(c => c.id !== id);
+    this.notify();
+  }
+
+  // --- MCP Servers 目录存储 ---
+
+  /**
+   * 加载所有 MCP 服务器
+   */
+  private async loadMCPServers() {
+    try {
+      // [修复] 使用 VFSCore 的 getTree 方法替代不存在的 readDirectory
+      const tree = await this.vfs.getTree(CONFIG_MODULE, MCP_SERVERS_DIR);
+      const servers: MCPServer[] = [];
+
+      for (const node of tree) {
+        if (node.type === 'file' && node.path.endsWith('.json')) {
+          try {
+            const content = await this.vfs.read(CONFIG_MODULE, node.path);
+            const jsonStr = typeof content === 'string' ? content : new TextDecoder().decode(content);
+            servers.push(JSON.parse(jsonStr));
+          } catch (e) {
+            console.error(`Failed to load MCP server from ${node.path}:`, e);
+          }
+        }
+      }
+
+      this.state.mcpServers = servers;
+    } catch (e: any) {
+      if (e.code === VFSErrorCode.NOT_FOUND) {
+        this.state.mcpServers = [];
+      } else {
+        console.error('Failed to load MCP servers:', e);
+      }
+    }
+  }
+
+  /**
+   * 保存单个 MCP 服务器
+   */
+  async saveMCPServer(server: MCPServer) {
+    const path = `${MCP_SERVERS_DIR}/${server.id}.json`;
+    const content = JSON.stringify(server, null, 2);
+
+    try {
+      await this.vfs.write(CONFIG_MODULE, path, content);
+    } catch (e: any) {
+      if (e.code === VFSErrorCode.NOT_FOUND) {
+        await this.vfs.createFile(CONFIG_MODULE, path, content);
+      } else {
+        throw e;
+      }
+    }
+
+    const idx = this.state.mcpServers.findIndex(s => s.id === server.id);
+    if (idx >= 0) {
+      this.state.mcpServers[idx] = server;
+    } else {
+      this.state.mcpServers.push(server);
+    }
+
+    this.notify();
+  }
+
+  /**
+   * 删除 MCP 服务器
+   */
+  async deleteMCPServer(id: string) {
+    const path = `${MCP_SERVERS_DIR}/${id}.json`;
+    
+    try {
+      // [修复] delete 方法接收 string，而不是 string[]
+      await this.vfs.delete(CONFIG_MODULE, path);
+    } catch (e) {
+      console.error(`Failed to delete MCP server ${id}:`, e);
+    }
+
+    this.state.mcpServers = this.state.mcpServers.filter(s => s.id !== id);
+    this.notify();
+  }
+
+  // --- 单文件实体通用方法 ---
+
+  private async loadEntity<K extends keyof Pick<SettingsState, 'tags' | 'contacts'>>(key: K) {
     const path = FILES[key];
     try {
       const content = await this.vfs.read(CONFIG_MODULE, path);
@@ -132,7 +321,7 @@ export class SettingsService {
     }
   }
 
-  private async saveEntity<K extends keyof SettingsState>(key: K) {
+  private async saveEntity<K extends keyof Pick<SettingsState, 'tags' | 'contacts'>>(key: K) {
     const path = FILES[key];
     const content = JSON.stringify(this.state[key], null, 2);
     try {
@@ -253,6 +442,12 @@ export class SettingsService {
           const updatedConn = { ...existingConn };
           let hasUpdates = false;
 
+          // ✅ 修复：如果 availableModels 为空，从默认值初始化
+          if (!updatedConn.availableModels || updatedConn.availableModels.length === 0) {
+            updatedConn.availableModels = [...providerDef.models];
+            hasUpdates = true;
+          }
+
           // 检查 BaseURL
           if (existingConn.baseURL !== providerDef.baseURL && !existingConn.baseURL) {
             updatedConn.baseURL = providerDef.baseURL;
@@ -300,11 +495,7 @@ export class SettingsService {
             hasUpdates = true;
           }
 
-          if (hasUpdates) {
-            updatedConnections.push(updatedConn);
-          } else {
-            updatedConnections.push(existingConn);
-          }
+          updatedConnections.push(hasUpdates ? updatedConn : existingConn);
         }
       }
     }
@@ -318,9 +509,10 @@ export class SettingsService {
 
     // 更新状态并保存
     if (JSON.stringify(this.state.connections) !== JSON.stringify(updatedConnections)) {
-      console.log('[SettingsService] LLM connections updated with latest defaults');
-      this.state.connections = updatedConnections;
-      await this.saveEntity('connections');
+      console.log('[SettingsService] LLM connections updated');
+      for (const conn of updatedConnections) {
+        await this.saveConnection(conn);
+      }
     }
   }
 
@@ -334,93 +526,78 @@ export class SettingsService {
     // 1. 检查版本
     const shouldSkip = await this._shouldSkipDefaultsSync();
     if (shouldSkip) {
-      console.log(`[SettingsService] skip defaults sync (Target v${LLM_DEFAULT_CONFIG_VERSION})...`);
+      console.log(`[SettingsService] Skip defaults sync (v${LLM_DEFAULT_CONFIG_VERSION})`);
       return;
     }
 
-    console.log(`[SettingsService] Syncing defaults (Target v${LLM_DEFAULT_CONFIG_VERSION})...`);
+    console.log(`[SettingsService] Syncing defaults (v${LLM_DEFAULT_CONFIG_VERSION})...`);
 
     // 2. 同步 Connections (确保数据库里有最新的 Connection 列表)
     await this._syncLLMProvidersWithDefaults();
 
     if (this.vfs.getModule(AGENT_MODULE)) {
-        
-        // 用于记录哪些 Connection 已经被定制化 Agent 覆盖了
-        const coveredConnectionIds = new Set<string>();
+      const coveredConnectionIds = new Set<string>();
 
-        // --- 阶段 A: 处理 LLM_DEFAULT_AGENTS (定制化优先) ---
-        for (const agentDef of LLM_DEFAULT_AGENTS) {
-            // 记录此 Custom Agent 占用的 Connection ID
-            if (agentDef.config && agentDef.config.connectionId) {
-                coveredConnectionIds.add(agentDef.config.connectionId);
-            }
-
-            const fileName = `${agentDef.id}.agent`;
-            const dirPath = agentDef.initPath || '';
-            const fullPath = `${dirPath}/${fileName}`.replace(/\/+/g, '/');
-
-            // 检查文件是否存在
-            const fileId = await this.vfs.getVFS().pathResolver.resolve(AGENT_MODULE, fullPath);
-
-            if (!fileId) {
-                // 创建 Custom Agent
-                const { initialTags, initPath, ...contentData } = agentDef;
-                const content = JSON.stringify(contentData, null, 2);
-
-                if (dirPath && dirPath !== '/') {
-                    await this._ensureDirectoryHierarchy(AGENT_MODULE, dirPath);
-                }
-
-                try {
-                    const node = await this.vfs.createFile(AGENT_MODULE, fullPath, content, {
-                        isProtected: true, // 定制化默认文件通常设为保护
-                        isSystem: true,
-                        version: 1,
-                    });
-
-                    if (initialTags && initialTags.length > 0) {
-                        await this.vfs.setNodeTagsById(node.nodeId, initialTags);
-                    }
-                    console.log(`[SettingsService] Created custom agent: ${fullPath}`);
-                } catch (e) {
-                    console.error(`[SettingsService] Failed to create custom agent ${fullPath}`, e);
-                }
-            }
+      // 处理定制化 Agents
+      for (const agentDef of LLM_DEFAULT_AGENTS) {
+        if (agentDef.config && agentDef.config.connectionId) {
+          coveredConnectionIds.add(agentDef.config.connectionId);
         }
 
-        // --- 阶段 B: 为剩余的 Connections 自动生成 Agent (自动化兜底) ---
-        
-        // 获取当前所有可用的连接
-        const allConnections = this.getConnections();
+        const fileName = `${agentDef.id}.agent`;
+        const dirPath = agentDef.initPath || '';
+        const fullPath = `${dirPath}/${fileName}`.replace(/\/+/g, '/');
 
-        for (const conn of allConnections) {
-            // 如果这个连接 ID 已经在阶段 A 被处理过（即有定制 Agent），则跳过
-            if (coveredConnectionIds.has(conn.id)) {
-                continue;
+        const fileId = await this.vfs.getVFS().pathResolver.resolve(AGENT_MODULE, fullPath);
+
+        if (!fileId) {
+          const { initialTags, initPath, ...contentData } = agentDef;
+          const content = JSON.stringify(contentData, null, 2);
+
+          if (dirPath && dirPath !== '/') {
+            await this._ensureDirectoryHierarchy(AGENT_MODULE, dirPath);
+          }
+
+          try {
+            const node = await this.vfs.createFile(AGENT_MODULE, fullPath, content, {
+              isProtected: true,
+              isSystem: true,
+              version: 1,
+            });
+
+            if (initialTags && initialTags.length > 0) {
+              await this.vfs.setNodeTagsById(node.nodeId, initialTags);
             }
-
-            // 同时也跳过系统默认 ID (通常 rdsec 已被处理，这里是双重保险)
-            if (conn.id === LLM_DEFAULT_ID) continue;
-
-            // 执行自动生成逻辑
-            await this._ensureDefaultAgentForConnection(conn);
+            console.log(`[SettingsService] Created custom agent: ${fullPath}`);
+          } catch (e) {
+            console.error(`[SettingsService] Failed to create custom agent ${fullPath}`, e);
+          }
         }
+      }
+
+      // 为剩余连接自动生成 Agent
+      const allConnections = this.getConnections();
+
+      for (const conn of allConnections) {
+        if (coveredConnectionIds.has(conn.id) || conn.id === LLM_DEFAULT_ID) {
+          continue;
+        }
+        await this._ensureDefaultAgentForConnection(conn);
+      }
     }
 
-    // 4. 标记同步完成
     await this._updateConfigVersion();
   }
 
   /**
-   * 为特定的 Connection 自动生成一个通用 Agent
-   * 文件名通常为 providerKey.agent
+   * 为特定连接自动生成 Agent
    */
   private async _ensureDefaultAgentForConnection(conn: LLMConnection): Promise<void> {
     // 构造文件名：使用 Provider Key 作为基础。
     // 如果存在多个相同 Provider 的 Connection，可能会重名冲突，
     // 这里简化处理，假设每个 Provider 只生成一个默认 Agent。
     const safeName = conn.provider.replace(/[^a-zA-Z0-9-]/g, '_');
-    const fileName = `${safeName}.agent`; 
+    const fileName = `${safeName}.agent`;
     const fullPath = `${LLM_AGENT_TARGET_DIR}/${fileName}`;
 
     // 再次检查文件是否存在 (防止 VFS 层面冲突)
@@ -433,41 +610,40 @@ export class SettingsService {
     const agentIcon = this._getProviderIcon(conn.provider);
 
     const agentContent = {
-        id: `agent-auto-${conn.id}`, // 生成一个新的 Agent ID
-        name: agentName,
-        type: 'agent',
-        description: `基于 ${conn.name} 的自动生成助手`,
-        icon: agentIcon,
-        config: {
-            connectionId: conn.id, // 关键：关联到传入的 connection
-            modelId: firstModelId,
-            systemPrompt: `You are a helpful assistant powered by ${conn.name}.`,
-            maxHistoryLength: -1,
-        },
-        interface: {
-            inputs: [{ name: 'prompt', type: 'string' }],
-            outputs: [{ name: 'response', type: 'string' }],
-        },
+      id: `agent-auto-${conn.id}`,
+      name: agentName,
+      type: 'agent',
+      description: `基于 ${conn.name} 的自动生成助手`,
+      icon: agentIcon,
+      config: {
+        connectionId: conn.id,
+        modelId: firstModelId,
+        systemPrompt: `You are a helpful assistant powered by ${conn.name}.`,
+        maxHistoryLength: -1,
+      },
+      interface: {
+        inputs: [{ name: 'prompt', type: 'string' }],
+        outputs: [{ name: 'response', type: 'string' }],
+      },
     };
 
     const content = JSON.stringify(agentContent, null, 2);
 
     try {
-        await this._ensureDirectoryHierarchy(AGENT_MODULE, LLM_AGENT_TARGET_DIR);
+      await this._ensureDirectoryHierarchy(AGENT_MODULE, LLM_AGENT_TARGET_DIR);
 
-        const node = await this.vfs.createFile(AGENT_MODULE, fullPath, content, {
-            isProtected: false, // 自动生成的允许用户删除或修改
-            isSystem: false,
-            version: 1,
-        });
+      const node = await this.vfs.createFile(AGENT_MODULE, fullPath, content, {
+        isProtected: false,
+        isSystem: false,
+        version: 1,
+      });
 
-        if (node && node.nodeId) {
-            // 自动打上标签
-            await this.vfs.setNodeTagsById(node.nodeId, ['auto-generated', conn.provider]);
-        }
-        console.log(`[SettingsService] Auto-generated agent for connection ${conn.id}: ${fullPath}`);
+      if (node && node.nodeId) {
+        await this.vfs.setNodeTagsById(node.nodeId, ['auto-generated', conn.provider]);
+      }
+      console.log(`[SettingsService] Auto-generated agent: ${fullPath}`);
     } catch (error) {
-        console.error(`[SettingsService] Failed to auto-generate agent for ${conn.name}:`, error);
+      console.error(`[SettingsService] Failed to auto-generate agent:`, error);
     }
   }
 
@@ -500,33 +676,8 @@ export class SettingsService {
     return this.state.connections.find((c) => c.id === id);
   }
 
-  async saveConnection(conn: LLMConnection) {
-    this.updateOrAdd(this.state.connections, conn);
-    await this.saveEntity('connections');
-  }
-
-  async deleteConnection(id: string) {
-    if (id === LLM_DEFAULT_ID) {
-      throw new Error(`Cannot delete system default connection (${id}).`);
-    }
-
-    this.state.connections = this.state.connections.filter((c) => c.id !== id);
-    await this.saveEntity('connections');
-    this.notify();
-  }
-
-  // MCP Servers
   getMCPServers() {
     return [...this.state.mcpServers];
-  }
-  async saveMCPServer(s: MCPServer) {
-    this.updateOrAdd(this.state.mcpServers, s);
-    await this.saveEntity('mcpServers');
-  }
-  async deleteMCPServer(id: string) {
-    this.state.mcpServers = this.state.mcpServers.filter((s) => s.id !== id);
-    await this.saveEntity('mcpServers');
-    this.notify();
   }
 
   // Contacts
@@ -618,11 +769,21 @@ export class SettingsService {
       settings: {},
       modules: [],
     };
-    settingsKeys.forEach((key) => {
-      if (this.state[key]) {
-        exportData.settings[key] = JSON.parse(JSON.stringify(this.state[key]));
-      }
-    });
+
+    // 导出 connections 和 mcpServers（目录方式）
+    if (settingsKeys.includes('connections')) {
+      exportData.settings.connections = this.state.connections;
+    }
+    if (settingsKeys.includes('mcpServers')) {
+      exportData.settings.mcpServers = this.state.mcpServers;
+    }
+    if (settingsKeys.includes('tags')) {
+      exportData.settings.tags = this.state.tags;
+    }
+    if (settingsKeys.includes('contacts')) {
+      exportData.settings.contacts = this.state.contacts;
+    }
+
     for (const name of moduleNames) {
       try {
         const moduleDump = await this.vfs.exportModule(name);
@@ -643,26 +804,34 @@ export class SettingsService {
     moduleNames: string[]
   ) {
     const tasks: Promise<void>[] = [];
+    
     if (data.settings) {
-      for (const key of settingsKeys) {
-        const sourceData = data.settings[key];
-        if (sourceData && Array.isArray(sourceData)) {
-          this.state[key] = sourceData as any;
-          tasks.push(this.saveEntity(key));
+      // 处理 connections
+      if (settingsKeys.includes('connections') && data.settings.connections) {
+        for (const conn of data.settings.connections) {
+          tasks.push(this.saveConnection(conn));
         }
       }
-    } else {
-      for (const key of settingsKeys) {
-        const sourceData = data[key];
-        if (sourceData && Array.isArray(sourceData)) {
-          this.state[key] = sourceData as any;
-          tasks.push(this.saveEntity(key));
+      
+      // 处理 mcpServers
+      if (settingsKeys.includes('mcpServers') && data.settings.mcpServers) {
+        for (const server of data.settings.mcpServers) {
+          tasks.push(this.saveMCPServer(server));
         }
+      }
+      
+      // 处理单文件实体
+      if (settingsKeys.includes('tags') && data.settings.tags) {
+        this.state.tags = data.settings.tags;
+        tasks.push(this.saveEntity('tags'));
+      }
+      if (settingsKeys.includes('contacts') && data.settings.contacts) {
+        this.state.contacts = data.settings.contacts;
+        tasks.push(this.saveEntity('contacts'));
       }
     }
 
-    const modulesList = data.modules || (Array.isArray(data) ? data : []);
-
+    const modulesList = data.modules || [];
     if (Array.isArray(modulesList)) {
       for (const modDump of modulesList) {
         const modName = modDump.module?.name;
