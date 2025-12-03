@@ -13,6 +13,11 @@ export type ExecutorType = 'atomic' | 'composite';
  */
 export type OrchestrationMode = 'serial' | 'parallel' | 'router' | 'loop' | 'dag' | 'state-machine';
 
+/*
+* agent节点输出状态
+*/
+export type NodeStatus = 'pending' | 'running' | 'success' | 'failed' | 'waiting_user';
+
 /**
  * 控制指令
  */

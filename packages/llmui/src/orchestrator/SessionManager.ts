@@ -1,29 +1,18 @@
 // @file llm-ui/orchestrator/SessionManager.ts
-import { SessionGroup, OrchestratorEvent, ExecutionNode } from '../types';
+import { SessionGroup, OrchestratorEvent, ExecutionNode, StreamingContext } from '../types';
 import { 
     generateUUID, 
     LLMConnection, 
     IExecutor, 
-    // ExecutionResult, // 未使用可移除
     ExecutionContext,
-    IAgentDefinition // ✨ 引入 Agent 定义接口
+    IAgentDefinition,
+    NodeStatus,
 } from '@itookit/common';
 import { ChatMessage } from '@itookit/llmdriver';
 import { AgentExecutor } from './AgentExecutor';
 
 type SessionVariable = ChatMessage[] | File[]; 
 
-// --- 接口定义 ---
-
-// 扩展标准执行上下文，注入 UI 流式回调能力
-export interface StreamingContext extends ExecutionContext {
-    callbacks?: {
-        onThinking?: (delta: string) => void;
-        onOutput?: (delta: string) => void;
-    }
-}
-
-// 解耦 Settings 服务
 export interface ISettingsService {
     // ✨ 返回类型明确为 IAgentDefinition
     getAgentConfig(agentId: string): Promise<IAgentDefinition | null>;
@@ -258,7 +247,7 @@ export class SessionManager {
             const context: StreamingContext = {
                 executionId: generateUUID(),
                 depth: 0,
-                // 将历史记录和文件放入变量中，供 Executor 使用
+                parentId: agentRootId, // Important: Root is the parent
                 variables: new Map<string, SessionVariable>([
                     ['history', this.buildMessageHistory()],
                     ['files', files]
@@ -267,19 +256,31 @@ export class SessionManager {
                 
                 // --- 关键流式回调 ---
                 callbacks: {
-                    onThinking: (delta) => {
-                        rootNode.data.thought = (rootNode.data.thought || '') + delta;
-                        this.emit({ 
-                            type: 'node_update', 
-                            payload: { nodeId: agentRootId, chunk: delta, field: 'thought' } 
-                        });
+                    // 支持定向更新
+                    onThinking: (delta, nodeId) => {
+                        const targetId = nodeId || agentRootId;
+                        this.updateNodeData(targetId, delta, 'thought');
+                        this.emit({ type: 'node_update', payload: { nodeId: targetId, chunk: delta, field: 'thought' } });
                     },
-                    onOutput: (delta) => {
-                        rootNode.data.output = (rootNode.data.output || '') + delta;
-                        this.emit({ 
-                            type: 'node_update', 
-                            payload: { nodeId: agentRootId, chunk: delta, field: 'output' } 
-                        });
+                    onOutput: (delta, nodeId) => {
+                        const targetId = nodeId || agentRootId;
+                        this.updateNodeData(targetId, delta, 'output');
+                        this.emit({ type: 'node_update', payload: { nodeId: targetId, chunk: delta, field: 'output' } });
+                    },
+                    // 动态节点创建
+                    onNodeStart: (node) => {
+                        this.addNodeToTree(node);
+                        this.emit({ type: 'node_start', payload: { parentId: node.parentId, node: node } });
+                    },
+                    // 状态更新
+                    onNodeStatus: (nodeId, status) => {
+                        this.setNodeStatus(nodeId, status);
+                        this.emit({ type: 'node_status', payload: { nodeId, status } });
+                    },
+                    // 元数据更新 (如设置并行布局)
+                    onNodeMetaUpdate: (nodeId, meta) => {
+                        this.updateNodeMeta(nodeId, meta);
+                        this.emit({ type: 'node_update', payload: { nodeId, metaInfo: meta } });
                     }
                 }
             };
@@ -293,10 +294,7 @@ export class SessionManager {
             if ((!rootNode.data.output || rootNode.data.output === '') && result.output) {
                 const finalOutput = typeof result.output === 'string' ? result.output : JSON.stringify(result.output, null, 2);
                 rootNode.data.output = finalOutput;
-                this.emit({ 
-                    type: 'node_update', 
-                    payload: { nodeId: agentRootId, chunk: finalOutput, field: 'output' } 
-                });
+                this.emit({ type: 'node_update', payload: { nodeId: agentRootId, chunk: finalOutput, field: 'output' } });
             }
 
             // 7. 标记成功
@@ -306,20 +304,15 @@ export class SessionManager {
             this.emit({ type: 'finished', payload: { sessionId: aiSession.id } });
 
         } catch (error: any) {
-            console.error("SessionManager Execution Error:", error);
-            
-            // 尝试找到最后一个运行的节点标记失败 (简化逻辑：直接标记当前 session root)
+            console.error("SessionManager Error:", error);
+            // 这里简化处理：标记当前会话根节点失败
             const currentSession = this.sessions[this.sessions.length - 1];
-            if (currentSession && currentSession.role === 'assistant' && currentSession.executionRoot) {
+            if (currentSession?.role === 'assistant' && currentSession.executionRoot) {
                 const node = currentSession.executionRoot;
                 node.status = 'failed';
                 node.data.output += `\n\n**Error**: ${error.message}`;
-                
                 this.emit({ type: 'node_status', payload: { nodeId: node.id, status: 'failed' } });
-                this.emit({ 
-                    type: 'node_update', 
-                    payload: { nodeId: node.id, chunk: `\n\nError: ${error.message}`, field: 'output' } 
-                });
+                this.emit({ type: 'node_update', payload: { nodeId: node.id, chunk: `\n\nError: ${error.message}`, field: 'output' } });
             }
         } finally {
             this.isGenerating = false;
@@ -333,28 +326,80 @@ export class SessionManager {
             const session = this.sessions.find(s => s.id === id);
             if (session) session.content = content;
         } else {
-            // 简单的递归更新
-            const findAndUpdate = (nodes: ExecutionNode[]): boolean => {
-                for (const node of nodes) {
-                    if (node.id === id) {
-                        node.data.output = content;
-                        return true;
+            this.updateNodeData(id, content, 'output', true); // true for replace
+        }
+    }
+
+    // --- 树操作辅助方法 ---
+
+    // 递归查找并追加数据
+    private updateNodeData(nodeId: string, data: string, field: 'thought' | 'output', replace = false) {
+        const findAndUpdate = (nodes: ExecutionNode[]): boolean => {
+            for (const node of nodes) {
+                if (node.id === nodeId) {
+                    if (replace) {
+                        node.data[field] = data;
+                    } else {
+                        node.data[field] = (node.data[field] || '') + data;
                     }
-                    if (node.children && findAndUpdate(node.children)) return true;
+                    return true;
                 }
-                return false;
-            };
-            
-            for (const session of this.sessions) {
-                if (session.executionRoot) {
-                    if (session.executionRoot.id === id) {
-                        session.executionRoot.data.output = content;
-                        break;
-                    }
-                    if (session.executionRoot.children) {
-                        findAndUpdate(session.executionRoot.children);
-                    }
+                if (node.children && findAndUpdate(node.children)) return true;
+            }
+            return false;
+        };
+        this.traverseAllTrees(findAndUpdate);
+    }
+
+    private updateNodeMeta(nodeId: string, meta: any) {
+        const findAndUpdate = (nodes: ExecutionNode[]): boolean => {
+            for (const node of nodes) {
+                if (node.id === nodeId) {
+                    node.data.metaInfo = { ...node.data.metaInfo, ...meta };
+                    return true;
                 }
+                if (node.children && findAndUpdate(node.children)) return true;
+            }
+            return false;
+        };
+        this.traverseAllTrees(findAndUpdate);
+    }
+
+    private setNodeStatus(nodeId: string, status: NodeStatus) {
+        const findAndUpdate = (nodes: ExecutionNode[]): boolean => {
+            for (const node of nodes) {
+                if (node.id === nodeId) {
+                    node.status = status;
+                    if (status === 'success' || status === 'failed') node.endTime = Date.now();
+                    return true;
+                }
+                if (node.children && findAndUpdate(node.children)) return true;
+            }
+            return false;
+        };
+        this.traverseAllTrees(findAndUpdate);
+    }
+
+    private addNodeToTree(node: ExecutionNode) {
+        if (!node.parentId) return;
+        const findAndAdd = (candidates: ExecutionNode[]): boolean => {
+            for (const parent of candidates) {
+                if (parent.id === node.parentId) {
+                    if (!parent.children) parent.children = [];
+                    parent.children.push(node);
+                    return true;
+                }
+                if (parent.children && findAndAdd(parent.children)) return true;
+            }
+            return false;
+        };
+        this.traverseAllTrees(findAndAdd);
+    }
+
+    private traverseAllTrees(callback: (nodes: ExecutionNode[]) => boolean) {
+        for (const s of this.sessions) {
+            if (s.executionRoot) {
+                if (callback([s.executionRoot])) return;
             }
         }
     }
