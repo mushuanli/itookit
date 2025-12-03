@@ -63,7 +63,10 @@ export class HistoryView {
                 this.appendNode(event.payload.parentId, event.payload.node);
                 break;
             case 'node_update':
-                this.updateNodeContent(event.payload.nodeId, event.payload.chunk, event.payload.field);
+                // [修复] 增加空值检查，因为 node_update 可能仅包含 metaInfo 而没有文本 chunk
+                if (event.payload.chunk !== undefined && event.payload.field !== undefined) {
+                    this.updateNodeContent(event.payload.nodeId, event.payload.chunk, event.payload.field);
+                }
                 break;
             case 'node_status':
                 this.updateNodeStatus(event.payload.nodeId, event.payload.status, event.payload.result);
@@ -73,7 +76,12 @@ export class HistoryView {
                 break;
         }
         
-        if (event.type !== 'node_update') this.scrollToBottom();
+        // 只有产生内容更新时才滚动，避免元数据更新导致频繁跳动
+        if (event.type === 'node_update' && event.payload.chunk) {
+             this.scrollToBottom();
+        } else if (event.type !== 'node_update') {
+             this.scrollToBottom();
+        }
     }
 
     private appendSessionGroup(group: SessionGroup) {
@@ -140,12 +148,15 @@ export class HistoryView {
             // 3. Collapse
             // 修正初始图标为 Up Arrow (因为默认是展开的)
             if (collapseBtn) {
-                 collapseBtn.querySelector('svg')!.innerHTML = '<polyline points="18 15 12 9 6 15"></polyline>';
+                 const svg = collapseBtn.querySelector('svg');
+                 if (svg) svg.innerHTML = '<polyline points="18 15 12 9 6 15"></polyline>';
             }
 
             collapseBtn?.addEventListener('click', () => {
                 bubbleEl.classList.toggle('is-collapsed');
                 const svg = collapseBtn.querySelector('svg');
+                if (!svg) return;
+
                 if (bubbleEl.classList.contains('is-collapsed')) {
                     // 向下箭头 (点击展开) - User Bubble 默认箭头是向下的 (open state)
                     // 所以 collapse 后应该是向上? 或者反过来。保持和 Agent 一致：
@@ -205,18 +216,21 @@ export class HistoryView {
 
             // 修正初始图标为 Up Arrow (因为默认是展开的)
             if (collapseBtn) {
-                 collapseBtn.querySelector('svg')!.innerHTML = '<polyline points="18 15 12 9 6 15"></polyline>';
+                 const svg = collapseBtn.querySelector('svg');
+                 if (svg) svg.innerHTML = '<polyline points="18 15 12 9 6 15"></polyline>';
             }
 
             collapseBtn?.addEventListener('click', () => {
                 element.classList.toggle('is-collapsed');
                 const svg = collapseBtn.querySelector('svg');
+                if (!svg) return;
+
                 if (element.classList.contains('is-collapsed')) {
                     // 折叠了 -> 显示向下箭头 (展开)
-                    svg!.innerHTML = '<polyline points="6 9 12 15 18 9"></polyline>'; 
+                    svg.innerHTML = '<polyline points="6 9 12 15 18 9"></polyline>'; 
                 } else {
                     // 展开了 -> 显示向上箭头 (收起)
-                    svg!.innerHTML = '<polyline points="18 15 12 9 6 15"></polyline>';
+                    svg.innerHTML = '<polyline points="18 15 12 9 6 15"></polyline>';
                 }
             });
 
@@ -270,7 +284,6 @@ export class HistoryView {
             if (editor) {
                 editor.appendStream(chunk);
             }
-            this.scrollToBottom();
         }
     }
 

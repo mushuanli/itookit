@@ -142,6 +142,47 @@ export class SessionManager {
     }
 
     /**
+     * ✨ [新增] 导出 Markdown 功能
+     */
+    public exportToMarkdown(): string {
+        let md = `# Chat Session Export\n\n`;
+        const now = new Date().toLocaleString();
+        md += `> Exported at: ${now}\n\n---\n\n`;
+        
+        for (const session of this.sessions) {
+            const role = session.role === 'user' ? '👤 User' : '🤖 Assistant';
+            // 时间戳格式化
+            const ts = new Date(session.timestamp).toLocaleTimeString();
+            
+            md += `### ${role} <small>(${ts})</small>\n\n`;
+            
+            if (session.role === 'user') {
+                if (session.files && session.files.length > 0) {
+                    const files = session.files.map(f => `\`[File: ${f.name}]\``).join(' ');
+                    md += `> Attachments: ${files}\n\n`;
+                }
+                md += `${session.content || '(Empty)'}\n\n`;
+            } else if (session.role === 'assistant' && session.executionRoot) {
+                const node = session.executionRoot;
+                
+                // 如果有思考过程 (CoT)
+                if (node.data.thought) {
+                    md += `> **Thinking Process:**\n> \n`;
+                    // 简单的引用格式处理
+                    md += node.data.thought.split('\n').map(l => `> ${l}`).join('\n');
+                    md += `\n\n`;
+                }
+                
+                md += `${node.data.output || '(No output)'}\n\n`;
+            }
+            
+            md += `---\n\n`;
+        }
+        
+        return md;
+    }
+
+    /**
      * 核心执行逻辑
      * @param text 用户输入文本
      * @param files 用户上传附件

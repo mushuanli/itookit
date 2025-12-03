@@ -30,6 +30,91 @@
   overflow: hidden; /* 防止双重滚动条 */
 }
 
+/* --- Isolated Titlebar --- */
+.llm-workspace-titlebar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.5rem 1rem;
+    background-color: #f6f8fa;
+    border-bottom: 1px solid #d0d7de;
+    min-height: 48px;
+    z-index: 10;
+}
+
+.llm-workspace-titlebar__left,
+.llm-workspace-titlebar__right {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+/* Titlebar Buttons */
+.llm-workspace-titlebar__btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: transparent;
+    color: #57606a;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.llm-workspace-titlebar__btn:hover {
+    background-color: #eaeef2;
+    color: #24292f;
+}
+
+.llm-workspace-titlebar__btn:active {
+    background-color: #dbe0e6;
+}
+
+.llm-workspace-titlebar__btn svg {
+    width: 16px;
+    height: 16px;
+    pointer-events: none; /* ✨ 新增：防止 SVG 拦截点击事件 */
+}
+
+/* Separator */
+.llm-workspace-titlebar__sep {
+    width: 1px;
+    height: 20px;
+    background-color: #d0d7de;
+    margin: 0 4px;
+}
+
+/* Editable Title Input */
+.llm-workspace-titlebar__input {
+    border: 1px solid transparent;
+    background: transparent;
+    font-size: 14px;
+    font-weight: 600;
+    color: #24292f;
+    padding: 4px 8px;
+    border-radius: 4px;
+    min-width: 150px;
+    max-width: 400px; /* 已有 */
+    flex: 1; /* ✨ 新增：允许自适应宽度 */
+    max-width: min(400px, 50vw); /* ✨ 改进：响应式限制 */
+}
+
+.llm-workspace-titlebar__input:hover {
+    background-color: #fff;
+    border-color: #d0d7de;
+}
+
+.llm-workspace-titlebar__input:focus {
+    outline: none;
+    background-color: #fff;
+    border-color: #0969da;
+    box-shadow: 0 0 0 2px rgba(9, 105, 218, 0.3);
+}
+
 /* --- 历史记录滚动区域 --- */
 .llm-ui-workspace__history {
   flex: 1;
@@ -48,6 +133,79 @@
   border-top: 1px solid var(--llm-ui-border-color);
   background: var(--llm-ui-bg-primary);
   z-index: 10;
+}
+
+/* --- Bubble Collapse Logic --- */
+
+/* 
+   假设 HistoryView 生成的每一条消息容器都有 .llm-history-item 类
+   如果没有，请在 HistoryView.ts 中添加该类名 
+*/
+
+/* 折叠状态下的样式 */
+.llm-history-item.is-collapsed .llm-history-item__content, 
+.llm-history-item.is-collapsed .mdx-editor-renderer {
+    display: none !important;
+}
+
+.llm-history-item {
+    transition: margin 0.2s;
+}
+
+.llm-history-item.is-collapsed {
+    margin-bottom: 0.5rem; /* 折叠后减少间距 */
+    opacity: 0.8;
+}
+
+/* --- Print Styles --- */
+@media print {
+    .llm-workspace-titlebar,
+    .llm-ui-workspace__input {
+        display: none !important;
+    }
+
+    .llm-ui-workspace__history {
+        overflow: visible !important;
+        height: auto !important;
+    }
+
+    /* 打印时强制展开所有内容 */
+    .llm-history-item.is-collapsed .llm-history-item__content {
+        display: block !important;
+    }
+}
+
+/* --- Dark Mode Support --- */
+@media (prefers-color-scheme: dark) {
+    .llm-ui-workspace { background-color: #0d1117; }
+    
+    .llm-workspace-titlebar {
+        background-color: #161b22;
+        border-bottom-color: #30363d;
+    }
+
+    .llm-workspace-titlebar__btn { color: #8b949e; }
+    .llm-workspace-titlebar__btn:hover {
+        background-color: #21262d;
+        color: #c9d1d9;
+    }
+
+    .llm-workspace-titlebar__sep { background-color: #30363d; }
+
+    .llm-workspace-titlebar__input { color: #c9d1d9; }
+    .llm-workspace-titlebar__input:hover {
+        background-color: #0d1117;
+        border-color: #30363d;
+    }
+    .llm-workspace-titlebar__input:focus {
+        background-color: #0d1117;
+        border-color: #1f6feb;
+    }
+    
+    .llm-ui-workspace__input {
+        background-color: #0d1117;
+        border-top-color: #30363d;
+    }
 }
 
 /* =========================================
@@ -450,4 +608,33 @@
   .llm-ui-node__children--parallel {
     grid-template-columns: 1fr; 
   }
+}
+
+/* ✨ 折叠时显示的特殊按钮样式 */
+.llm-ui-btn-tool--delete,
+.llm-ui-btn-tool--resend {
+    display: none; /* 默认隐藏 */
+}
+
+/* 折叠状态下显示 Delete 和 Resend 按钮 */
+.llm-ui-node.is-collapsed .llm-ui-btn-tool--delete,
+.llm-ui-node.is-collapsed .llm-ui-btn-tool--resend {
+    display: flex;
+}
+
+/* Delete 按钮特殊样式 */
+.llm-ui-btn-tool--delete:hover {
+    color: var(--llm-ui-color-error);
+    background-color: #fee2e2;
+}
+
+/* Resend 按钮特殊样式 */
+.llm-ui-btn-tool--resend:hover {
+    color: var(--llm-ui-color-primary);
+    background-color: #eff6ff;
+}
+
+/* 折叠时工具栏始终可见 */
+.llm-ui-node.is-collapsed .llm-ui-node__toolbar {
+    opacity: 1;
 }

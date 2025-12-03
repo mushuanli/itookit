@@ -8,6 +8,11 @@ import { HistoryView } from './components/HistoryView';
 import { ChatInput } from './components/ChatInput';
 import { SessionManager, ISettingsService } from './orchestrator/SessionManager';
 
+export interface LLMEditorOptions extends EditorOptions {
+    onSidebarToggle?: () => void;
+    title?: string;
+}
+
 // [FIXED] 适配器增加更强的健壮性
 class SettingsServiceAdapter implements ISettingsService {
     constructor(private realSettingsService: any) {}
@@ -128,25 +133,35 @@ export class LLMWorkspaceEditor implements IEditor {
     private chatInput!: ChatInput;
     private sessionManager: SessionManager;
     private listeners = new Map<string, Set<EditorEventCallback>>();
+    
+    // UI Elements
+    private titleInput!: HTMLInputElement;
+    private sidebarToggleBtn!: HTMLButtonElement;
+    
+    // State
+    private currentTitle: string = 'New Chat';
+    private isAllExpanded: boolean = true;
 
     constructor(
         container: HTMLElement,
-        options: EditorOptions,
+        private options: LLMEditorOptions, // 使用扩展后的接口
         private settingsService: any
     ) {
         const adapter = new SettingsServiceAdapter(settingsService);
         this.sessionManager = new SessionManager(adapter);
+        if (options.title) {
+            this.currentTitle = options.title;
+        }
     }
 
     async init(container: HTMLElement, initialContent?: string) {
         this.container = container;
         this.container.classList.add('llm-ui-workspace');
-
-        this.container.innerHTML = `
-            <div class="llm-ui-workspace__history" id="llm-ui-history"></div>
-            <div class="llm-ui-workspace__input" id="llm-ui-input"></div>
-        `;
-
+        
+        // 1. 渲染布局：TitleBar + History + Input
+        this.renderLayout();
+        
+        // 2. 初始化组件
         const historyEl = this.container.querySelector('#llm-ui-history') as HTMLElement;
         const inputEl = this.container.querySelector('#llm-ui-input') as HTMLElement;
 
@@ -172,6 +187,17 @@ export class LLMWorkspaceEditor implements IEditor {
             initialAgents: initialAgents // 传入 Agent 列表
         });
 
+        // 异步更新 Agents，防止初始化时 VFS 未就绪
+        setTimeout(async () => {
+            const agents = await this.sessionManager.getAvailableExecutors();
+            if (agents.length > 0) {
+                this.chatInput.updateExecutors(agents);
+            }
+        }, 1000);
+
+        // 3. 绑定 TitleBar 事件
+        this.bindTitleBarEvents();
+
         this.sessionManager.onEvent((event) => {
             this.historyView.processEvent(event);
             if (event.type === 'finished' || event.type === 'session_start') {
@@ -182,6 +208,11 @@ export class LLMWorkspaceEditor implements IEditor {
         if (initialContent && initialContent.trim() !== '') {
             try {
                 const data = JSON.parse(initialContent);
+                // 恢复 Title
+                if (data.title) {
+                    this.currentTitle = data.title;
+                    this.titleInput.value = data.title;
+                }
                 this.sessionManager.load(data);
                 this.historyView.renderFull(this.sessionManager.getSessions());
             } catch (e) {
@@ -193,6 +224,135 @@ export class LLMWorkspaceEditor implements IEditor {
         }
 
         this.emit('ready');
+    }
+
+    private renderLayout() {
+        // 使用 llm-workspace-titlebar 命名空间，避免与 mdx 冲突
+        this.container.innerHTML = `
+            <div class="llm-workspace-titlebar">
+                <div class="llm-workspace-titlebar__left">
+                    <!-- Toggle Sidebar -->
+                    <button class="llm-workspace-titlebar__btn" id="llm-btn-sidebar" title="Toggle Sidebar">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg>
+                    </button>
+                    
+                    <div class="llm-workspace-titlebar__sep"></div>
+                    
+                    <!-- Editable Title -->
+                    <input type="text" class="llm-workspace-titlebar__input" id="llm-title-input" value="${this.currentTitle}" placeholder="Untitled Chat" />
+                </div>
+
+                <div class="llm-workspace-titlebar__right">
+                    <!-- Collapse/Expand All Bubbles -->
+                    <button class="llm-workspace-titlebar__btn" id="llm-btn-collapse" title="Collapse/Expand All Messages">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 14 10 14 10 20"></polyline><polyline points="20 10 14 10 14 4"></polyline></svg>
+                    </button>
+
+                    <!-- Copy Markdown -->
+                    <button class="llm-workspace-titlebar__btn" id="llm-btn-copy" title="Copy as Markdown">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                    </button>
+
+                    <!-- Print -->
+                    <button class="llm-workspace-titlebar__btn" id="llm-btn-print" title="Print">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+                    </button>
+                </div>
+            </div>
+
+            <div class="llm-ui-workspace__history" id="llm-ui-history"></div>
+            <div class="llm-ui-workspace__input" id="llm-ui-input"></div>
+        `;
+
+        this.titleInput = this.container.querySelector('#llm-title-input') as HTMLInputElement;
+        this.sidebarToggleBtn = this.container.querySelector('#llm-btn-sidebar') as HTMLButtonElement;
+    }
+
+    private bindTitleBarEvents() {
+        // 1. Sidebar Toggle
+        this.sidebarToggleBtn.addEventListener('click', () => {
+            if (this.options.onSidebarToggle) {
+                this.options.onSidebarToggle();
+            }
+        });
+
+        // 2. Title Edit
+        this.titleInput.addEventListener('change', () => {
+            this.currentTitle = this.titleInput.value;
+            this.setDirty(true);
+            this.emit('change');
+        });
+
+        // 3. Collapse/Expand All (Bubbles)
+        const btnCollapse = this.container.querySelector('#llm-btn-collapse')!;
+        btnCollapse.addEventListener('click', () => {
+            this.toggleAllBubbles(btnCollapse);
+        });
+
+        // 4. Copy as Markdown
+        const btnCopy = this.container.querySelector('#llm-btn-copy')!;
+        btnCopy.addEventListener('click', async () => {
+            const md = this.sessionManager.exportToMarkdown();
+            try {
+                await navigator.clipboard.writeText(md);
+                // 视觉反馈
+                const originalHtml = btnCopy.innerHTML;
+                btnCopy.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:#2da44e"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
+                setTimeout(() => btnCopy.innerHTML = originalHtml, 2000);
+            } catch (err) {
+                console.error('Failed to copy', err);
+            }
+        });
+
+        // 5. Print
+        const btnPrint = this.container.querySelector('#llm-btn-print')!;
+        btnPrint.addEventListener('click', () => {
+            window.print();
+        });
+    }
+
+    /**
+     * 切换所有气泡的折叠状态
+     */
+    private toggleAllBubbles(btn: Element) {
+        this.isAllExpanded = !this.isAllExpanded;
+    
+    const historyContainer = this.container.querySelector('#llm-ui-history');
+    if (!historyContainer) return;
+
+    // ✨ 修复：查找所有会话容器（包括用户和助手消息）
+    const userSessions = historyContainer.querySelectorAll('.llm-ui-session--user .llm-ui-bubble--user');
+    const aiSessions = historyContainer.querySelectorAll('.llm-ui-execution-root');
+    
+    // 折叠/展开用户消息
+    userSessions.forEach(bubble => {
+        if (this.isAllExpanded) {
+            bubble.classList.remove('is-collapsed');
+        } else {
+            bubble.classList.add('is-collapsed');
+        }
+    });
+    
+    // ✨ 新增：递归折叠/展开所有 ExecutionNode
+    aiSessions.forEach(root => {
+        const nodes = root.querySelectorAll('.llm-ui-node');
+        nodes.forEach(node => {
+            if (this.isAllExpanded) {
+                node.classList.remove('is-collapsed');
+            } else {
+                node.classList.add('is-collapsed');
+            }
+        });
+    });
+
+    // 更新按钮图标（保持原逻辑）
+    if (this.isAllExpanded) {
+        btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 14 10 14 10 20"></polyline><polyline points="20 10 14 10 14 4"></polyline></svg>`;
+        btn.setAttribute('title', 'Collapse All');
+    } else {
+        btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>`;
+        btn.setAttribute('title', 'Expand All');
+	}
     }
 
     private async handleUserSend(text: string, files: File[], agentId?: string) {
@@ -208,13 +368,22 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     getText(): string {
-        return JSON.stringify(this.sessionManager.serialize(), null, 2);
+        const data = this.sessionManager.serialize();
+        // 将 title 注入到序列化数据中
+        return JSON.stringify({
+            ...data,
+            title: this.currentTitle
+        }, null, 2);
     }
 
     setText(text: string): void {
         this.historyView.clear();
         try {
             const data = JSON.parse(text);
+            if (data.title) {
+                this.currentTitle = data.title;
+                if (this.titleInput) this.titleInput.value = data.title;
+            }
             this.sessionManager.load(data);
             this.historyView.renderFull(this.sessionManager.getSessions());
         } catch (e) {
@@ -236,7 +405,14 @@ export class LLMWorkspaceEditor implements IEditor {
     // --- Stubs ---
     getMode() { return 'edit' as const; }
     async switchToMode() {}
-    setTitle() {}
+
+    setTitle(title: string) {
+        this.currentTitle = title;
+        if (this.titleInput) {
+            this.titleInput.value = title;
+        }
+    }
+
     setReadOnly() {}
     get commands() { return {}; }
     async getHeadings() { return []; }
