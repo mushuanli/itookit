@@ -365,6 +365,46 @@ export class VFSCore {
     await this.vfs.unlink(nodeId, { recursive });
   }
 
+    /**
+     * [新增] 重命名节点 (便捷方法)
+     * 本质上是在同一目录下移动
+     * @param nodeId 节点 ID
+     * @param newName 新的文件名 (不含路径)
+     */
+    async rename(nodeId: string, newName: string): Promise<void> {
+        this._ensureInitialized();
+
+        // 1. 获取节点信息
+        const node = await this.vfs.storage.loadVNode(nodeId);
+        if (!node) throw new VFSError(VFSErrorCode.NOT_FOUND, `Node ${nodeId} not found`);
+
+        // 2. 解析当前路径信息
+        // 注意：这里需要处理模块内的相对路径逻辑
+        const currentSystemPath = node.path;
+        
+        // 获取父目录的系统路径
+        // 如果是 "/moduleName/foo.txt", parentPath 是 "/moduleName"
+        // 如果是 "/moduleName/dir/foo.txt", parentPath 是 "/moduleName/dir"
+        const lastSlashIndex = currentSystemPath.lastIndexOf('/');
+        const parentSystemPath = lastSlashIndex <= 0 ? '/' : currentSystemPath.substring(0, lastSlashIndex);
+        
+        // 3. 拼接新的系统路径
+        // PathResolver.join 会处理多余的斜杠
+        // 这里我们直接用字符串拼接，因为我们是在操作 System Path (绝对路径)
+        const newSystemPath = parentSystemPath === '/' 
+            ? `/${newName}` 
+            : `${parentSystemPath}/${newName}`;
+
+        // 4. 调用底层的 move 操作
+        // move 接口接收的是 "User Path"，所以我们这里需要做一个转换，或者 VFS.move 应该支持直接传 path？
+        // 回看 VFS.move 的定义：它接收 (vnodeOrId, newUserPath)。
+        // 所以我们需要把 newSystemPath 转回 newUserPath。
+        
+        const newUserPath = this.vfs.pathResolver.toUserPath(newSystemPath, node.moduleId!);
+        
+        await this.vfs.move(nodeId, newUserPath);
+    }
+
   // [新增] 批量移动节点 API
   async batchMoveNodes(_moduleName: string, nodeIds: string[], targetParentId: string | null): Promise<void> {
     this._ensureInitialized();

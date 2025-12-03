@@ -5,7 +5,7 @@
 import type { VFSNodeUI } from '../types/types.js';
 import { parseFileInfo } from '../utils/parser.js';
 import type { EngineNode } from '@itookit/common';
-import type { IconResolver } from '../services/IFileTypeRegistry'; // 引入类型
+import type { IconResolver } from '../services/IFileTypeRegistry';
 
 /**
  * 判断是否为隐藏文件 (以 . 或 __ 开头)
@@ -36,8 +36,15 @@ export function mapEngineNodeToUIItem(node: EngineNode, iconResolver?: IconResol
         ? { summary: '', searchableText: '', headings: [], metadata: {} } 
         : parseFileInfo(node.content as string);
 
-    // 1. 计算显示标题
-    const displayTitle = isDirectory ? node.name : stripExtension(node.name);
+    // [关键修改] 计算显示标题
+    // 1. 优先使用 Engine 显式提供的 metadata.title (用于 LLM Session 显示名与文件名分离)
+    // 2. 其次使用文件名 (目录原样显示，文件去除扩展名)
+    let displayTitle = '';
+    if (node.metadata && typeof node.metadata.title === 'string' && node.metadata.title) {
+        displayTitle = node.metadata.title;
+    } else {
+        displayTitle = isDirectory ? node.name : stripExtension(node.name);
+    }
 
     // 2. 决定图标 (优先级逻辑)
     // 优先级 1: Node 自带 Metadata (node.icon)
