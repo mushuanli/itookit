@@ -1,6 +1,6 @@
 // @file llm-ui/types.ts
 
-export type NodeStatus = 'pending' | 'running' | 'success' | 'failed' | 'waiting_user';
+import { ExecutionContext, NodeStatus } from '@itookit/common';
 
 export interface ExecutionNode {
     id: string;
@@ -20,12 +20,18 @@ export interface ExecutionNode {
         toolCall?: { name: string; args: any; result?: any };
         artifacts?: any[];
         
-        // [新增] 供 UI 显示的元数据
+        // [修改] 供 UI 显示的元数据
         metaInfo?: {
-            provider?: string;       // e.g., 'deepseek', 'openai'
-            connectionName?: string; // e.g., 'My DeepSeek'
-            model?: string;          // e.g., 'deepseek-chat'
-            systemPrompt?: string;   // e.g., 'You are a helpful...'
+            provider?: string;       
+            connectionName?: string; 
+            model?: string;          
+            systemPrompt?: string;   
+            
+            // [新增] 布局提示，用于 UI 决定如何渲染子节点容器
+            // 'parallel' -> Grid 布局
+            // 'serial' -> 垂直列表 (默认)
+            layout?: 'parallel' | 'serial';
+            
             [key: string]: any;
         };
     };
@@ -45,11 +51,29 @@ export interface SessionGroup {
     executionRoot?: ExecutionNode;
 }
 
+// [新增] 扩展标准执行上下文，注入 UI 流式回调能力和节点生命周期管理
+export interface StreamingContext extends ExecutionContext {
+    callbacks?: {
+        // 增加 nodeId 参数，支持定向输出
+        onThinking?: (delta: string, nodeId?: string) => void;
+        onOutput?: (delta: string, nodeId?: string) => void;
+        
+        // [新增] 允许 Executor 动态创建子节点 UI
+        onNodeStart?: (node: ExecutionNode) => void;
+        
+        // [新增] 允许 Executor 更新节点状态
+        onNodeStatus?: (nodeId: string, status: NodeStatus) => void;
+        
+        // [新增] 允许更新元数据 (如设置布局模式)
+        onNodeMetaUpdate?: (nodeId: string, meta: any) => void;
+    }
+}
+
 // 事件总线定义
 export type OrchestratorEvent = 
     | { type: 'session_start'; payload: SessionGroup }
     | { type: 'node_start'; payload: { parentId?: string; node: ExecutionNode } }
-    | { type: 'node_update'; payload: { nodeId: string; chunk: string; field: 'thought' | 'output' } }
+    | { type: 'node_update'; payload: { nodeId: string; chunk?: string; field?: 'thought' | 'output'; metaInfo?: any } }
     | { type: 'node_status'; payload: { nodeId: string; status: NodeStatus; result?: any } }
     | { type: 'request_input'; payload: { nodeId: string; schema: any } }
     | { type: 'finished'; payload: { sessionId: string } };

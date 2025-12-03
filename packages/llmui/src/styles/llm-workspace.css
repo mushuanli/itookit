@@ -402,3 +402,52 @@
   from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: translateY(0); }
 }
+/* =========================================
+   并行执行布局支持 (Grid Layout)
+   ========================================= */
+
+/* 
+   当节点元数据 layout='parallel' 时，
+   JS 应在渲染 children 容器时添加此 CSS 类 
+*/
+.llm-ui-node__children--parallel {
+  display: grid;
+  /* 自动填充列，每列最小 300px，空间不足时换行 */
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 16px;
+  padding: 12px;
+  background-color: rgba(0, 0, 0, 0.02); /* 微弱的背景区分 */
+  border-top: 1px solid var(--llm-ui-border-color);
+}
+
+/* 并行模式下的子节点样式调整 */
+.llm-ui-node__children--parallel > .llm-ui-node {
+  margin-bottom: 0; /* 移除底部间距，由 Grid gap 控制 */
+  height: 100%;     /* 强制高度拉伸，使同一行的卡片等高 */
+  display: flex;
+  flex-direction: column;
+}
+
+/* 确保内部结构也伸缩以填满高度 */
+.llm-ui-node__children--parallel > .llm-ui-node .llm-ui-node__body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 输出区域填满剩余空间，避免卡片底部出现空白 */
+.llm-ui-node__children--parallel > .llm-ui-node .llm-ui-node__output {
+  flex: 1; 
+}
+
+/* 可选：为并行节点添加特殊的左侧边框颜色区分 */
+.llm-ui-node__children--parallel > .llm-ui-node {
+  border-left-width: 4px;
+}
+
+/* 移动端适配：屏幕过窄时回退到单列堆叠 */
+@media (max-width: 768px) {
+  .llm-ui-node__children--parallel {
+    grid-template-columns: 1fr; 
+  }
+}
