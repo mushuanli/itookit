@@ -5,16 +5,16 @@
 
 import { VFSError, VFSErrorCode } from './types.js';
 import type { VFS } from './VFS.js';
-import { VNode } from '../store/types.js';
 
 export class PathResolver {
   constructor(private vfs: VFS) {}
 
   /**
    * 标准化路径
+   * 移除多余斜杠，处理 . 和 ..，确保以 / 开头
    */
   normalize(path: string): string {
-    if (!path) return '/';
+    if (!path || path === '.') return '/';
     
     // 移除多余斜杠，处理 . 和 ..
     const parts = path.split('/').filter(p => p && p !== '.');
@@ -32,39 +32,45 @@ export class PathResolver {
   }
 
   /**
-   * 获取目录名
+   * [核心] 将 (模块, 用户相对路径) 转换为 (系统内部绝对路径)
+   * Input: ('config', '/settings.json')
+   * Output: '/config/settings.json'
    */
-  dirname(path: string): string {
-    const normalized = this.normalize(path);
-    if (normalized === '/') return '/';
-    
-    const lastSlash = normalized.lastIndexOf('/');
-    return lastSlash === 0 ? '/' : normalized.substring(0, lastSlash);
+  toSystemPath(module: string, userPath: string): string {
+    const normalized = this.normalize(userPath);
+    // 如果是根目录，系统路径就是 /moduleName
+    if (normalized === '/') {
+        return `/${module}`;
+    }
+    return `/${module}${normalized}`;
   }
 
   /**
-   * 获取基础名
+   * [核心] 将 (系统内部绝对路径) 还原为 (用户相对路径)
+   * Input: ('/config/settings.json', 'config')
+   * Output: '/settings.json'
    */
-  basename(path: string): string {
-    const normalized = this.normalize(path);
-    if (normalized === '/') return '/';
+  toUserPath(systemPath: string, module: string): string {
+    const prefix = `/${module}`;
     
-    const lastSlash = normalized.lastIndexOf('/');
-    return normalized.substring(lastSlash + 1);
-  }
+    if (!systemPath.startsWith(prefix)) {
+        // 防御性编程：如果路径不属于该模块，原样返回或报错
+        // 这里选择报错，保证严格的模块隔离
+        console.warn(`PathResolver: System path '${systemPath}' does not belong to module '${module}'`);
+        return systemPath; 
+    }
 
-  /**
-   * 连接路径
-   */
-  join(...segments: string[]): string {
-    return this.normalize(segments.join('/'));
+    const relative = systemPath.slice(prefix.length);
+    return relative === '' ? '/' : relative;
   }
 
   /**
    * 校验路径合法性
    */
   isValid(path: string): boolean {
-    if (!path || typeof path !== 'string') return false;
+    if (typeof path !== 'string') return false;
+    // 允许 '/'
+    if (path === '/') return true;
     if (!path.startsWith('/')) return false;
     if (path.includes('//')) return false;
     if (/[<>:"|?*\x00-\x1f]/.test(path)) return false;
@@ -74,101 +80,47 @@ export class PathResolver {
   /**
    * 解析路径为节点ID
    */
-  async resolve(module: string, path: string): Promise<string | null> {
-    const normalized = this.normalize(path);
+  async resolve(module: string, userPath: string): Promise<string | null> {
+    const normalized = this.normalize(userPath);
     
     if (!this.isValid(normalized)) {
       throw new VFSError(
         VFSErrorCode.INVALID_PATH,
-        `Invalid path: ${path}`
+        `Invalid user path: ${userPath}`
       );
     }
 
-    // 构造完整路径（包含模块）
-    const fullPath = `/${module}${normalized}`;
-    return await this.vfs.storage.getNodeIdByPath(fullPath);
+    const systemPath = this.toSystemPath(module, normalized);
+    return await this.vfs.storage.getNodeIdByPath(systemPath);
   }
 
   /**
    * 解析父节点ID
    */
-  async resolveParent(module: string, path: string): Promise<string | null> {
-    const parentPath = this.dirname(path);
-    if (parentPath === path) return null; // 根节点
-    return await this.resolve(module, parentPath);
+  async resolveParent(module: string, userPath: string): Promise<string | null> {
+    const normalized = this.normalize(userPath);
+    if (normalized === '/') return null; // 根节点没有父节点（在模块视角下）
+
+    const lastSlash = normalized.lastIndexOf('/');
+    const parentUserPath = lastSlash === 0 ? '/' : normalized.substring(0, lastSlash);
+
+    return await this.resolve(module, parentUserPath);
   }
 
   /**
-   * 计算节点的完整路径（带缓存）
+   * 获取基础名
    */
-  async resolvePath(vnode: VNode): Promise<string> {
-    // 使用缓存
-    if (vnode.path) return vnode.path;
-
-    const segments: string[] = [];
-    let current: VNode | null = vnode;
-
-    while (current) {
-      segments.unshift(current.name);
-      
-      if (!current.parentId) break;
-      current = await this.vfs.storage.loadVNode(current.parentId);
-    }
-
-    const path = '/' + segments.join('/');
-    vnode.path = path; // 缓存路径
-    return path;
+  basename(path: string): string {
+    const normalized = this.normalize(path);
+    if (normalized === '/') return '';
+    const lastSlash = normalized.lastIndexOf('/');
+    return normalized.substring(lastSlash + 1);
   }
-
-  /**
-   * [新增] 批量解析路径（优化 N+1 问题）
-   */
-  async resolvePaths(vnodes: VNode[]): Promise<Map<string, string>> {
-    const pathMap = new Map<string, string>();
     
-    // 收集所有需要加载的节点ID
-    const allNodeIds = new Set<string>();
-    for (const vnode of vnodes) {
-      if (vnode.path) {
-        pathMap.set(vnode.nodeId, vnode.path);
-        continue;
-      }
-      
-      let current: VNode | null = vnode;
-      while (current) {
-        allNodeIds.add(current.nodeId);
-        if (!current.parentId) break;
-        allNodeIds.add(current.parentId);
-        
-        // 如果已经有缓存的路径，可以停止
-        if (current.path) break;
-        current = null; // 需要继续加载
-      }
-    }
-
-    // 批量加载所有节点
-    const loadedNodes = await this.vfs.storage.loadVNodes(Array.from(allNodeIds));
-    const nodeMap = new Map(loadedNodes.map(n => [n.nodeId, n]));
-
-    // 在内存中构建路径
-    for (const vnode of vnodes) {
-      if (pathMap.has(vnode.nodeId)) continue;
-
-      const segments: string[] = [];
-      let current: VNode | null = vnode;
-
-      while (current) {
-        segments.unshift(current.name);
-        
-        if (!current.parentId) break;
-        current = nodeMap.get(current.parentId) || null;
-      }
-
-      const path = '/' + segments.join('/');
-      vnode.path = path;
-      pathMap.set(vnode.nodeId, path);
-    }
-
-    return pathMap;
+  /**
+   * 连接路径
+   */
+  join(...segments: string[]): string {
+      return this.normalize(segments.join('/'));
   }
 }

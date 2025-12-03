@@ -86,20 +86,26 @@ export class VFS {
   async createNode(options: CreateNodeOptions): Promise<VNode> {
     const { module, path, type, content, metadata = {} } = options;
 
-    const normalizedPath = this.pathResolver.normalize(path);
-    if (!this.pathResolver.isValid(normalizedPath)) {
+    // 1. 标准化用户路径
+    const normalizedUserPath = this.pathResolver.normalize(path);
+    if (!this.pathResolver.isValid(normalizedUserPath)) {
       throw new VFSError(VFSErrorCode.INVALID_PATH, `Invalid path: ${path}`);
     }
 
-    const existingId = await this.pathResolver.resolve(module, normalizedPath);
+    // 2. 转换为系统绝对路径 (System Path: /<module>/docs/file.txt)
+    const systemPath = this.pathResolver.toSystemPath(module, normalizedUserPath);
+
+    // 3. 检查系统路径是否存在
+    const existingId = await this.storage.getNodeIdByPath(systemPath);
     if (existingId) {
       throw new VFSError(
         VFSErrorCode.ALREADY_EXISTS,
-        `Node already exists at path: ${normalizedPath}`
+        `Node already exists at path: ${normalizedUserPath}`
       );
     }
 
-    const parentId = await this.pathResolver.resolveParent(module, normalizedPath);
+    // 4. 解析父节点 (使用用户路径在模块内解析)
+    const parentId = await this.pathResolver.resolveParent(module, normalizedUserPath);
     if (parentId) {
         const parentNode = await this.storage.loadVNode(parentId);
         if (parentNode && parentNode.type !== VNodeType.DIRECTORY) {
@@ -107,14 +113,13 @@ export class VFS {
         }
     }
     
-    const name = this.pathResolver.basename(normalizedPath);
-    const fullPath = `/${module}${normalizedPath}`;
-    
+    const name = this.pathResolver.basename(normalizedUserPath);
     const nodeId = this._generateId();
     const contentRef = type === VNodeType.FILE ? ContentStore.createContentRef(nodeId) : null;
     
+    // 5. 创建 VNode (存储的是 System Path)
     const vnode = new VNode(
-      nodeId, parentId, name, type, fullPath, module, contentRef,
+      nodeId, parentId, name, type, systemPath, module, contentRef,
       0, Date.now(), Date.now(), metadata, []
     );
 
@@ -134,23 +139,18 @@ export class VFS {
       }
       await this.storage.saveVNode(vnode, tx);
       await tx.done;
+
       this.events.emit({
         type: VFSEventType.NODE_CREATED,
         nodeId: vnode.nodeId,
-        path: fullPath,
+        path: systemPath,
         timestamp: Date.now(),
         data: { type, module }
       });
       return vnode;
     } catch (error) {
-      if (error instanceof VFSError) {
-        throw error;
-      }
-      throw new VFSError(
-        VFSErrorCode.TRANSACTION_FAILED,
-        'Failed to create node',
-        error
-      );
+      if (error instanceof VFSError) throw error;
+      throw new VFSError(VFSErrorCode.TRANSACTION_FAILED, 'Failed to create node', error);
     }
   }
 
@@ -177,7 +177,7 @@ export class VFS {
 
       return vnode;
     } catch (error) {
-      if (error instanceof VFSError) { throw error; }
+      if (error instanceof VFSError) throw error;
       throw new VFSError(VFSErrorCode.TRANSACTION_FAILED, 'Failed to update metadata', error);
     }
   }
@@ -189,22 +189,14 @@ export class VFS {
     const vnode = await this._resolveVNode(vnodeOrId);
 
     if (vnode.type !== VNodeType.FILE) {
-      throw new VFSError(
-        VFSErrorCode.INVALID_OPERATION,
-        `Cannot read content from directory: ${vnode.nodeId}`
-      );
+      throw new VFSError(VFSErrorCode.INVALID_OPERATION, `Cannot read directory: ${vnode.nodeId}`);
     }
 
-    if (!vnode.contentRef) {
-      return '';
-    }
+    if (!vnode.contentRef) return '';
 
     const contentData = await this.storage.loadContent(vnode.contentRef);
     if (!contentData) {
-      throw new VFSError(
-        VFSErrorCode.NOT_FOUND,
-        `Content not found for node: ${vnode.nodeId}`
-      );
+      throw new VFSError(VFSErrorCode.NOT_FOUND, `Content not found for node: ${vnode.nodeId}`);
     }
 
     return contentData.content;
@@ -217,10 +209,7 @@ export class VFS {
     const vnode = await this._resolveVNode(vnodeOrId);
 
     if (vnode.type !== VNodeType.FILE) {
-      throw new VFSError(
-        VFSErrorCode.INVALID_OPERATION,
-        `Cannot write content to directory: ${vnode.nodeId}`
-      );
+      throw new VFSError(VFSErrorCode.INVALID_OPERATION, `Cannot write to directory: ${vnode.nodeId}`);
     }
     
     await this.middlewares.runValidation(vnode, content);
@@ -246,14 +235,8 @@ export class VFS {
 
       return vnode;
     } catch (error) {
-      if (error instanceof VFSError) {
-        throw error;
-      }
-      throw new VFSError(
-        VFSErrorCode.TRANSACTION_FAILED,
-        'Failed to write content',
-        error
-      );
+      if (error instanceof VFSError) throw error;
+      throw new VFSError(VFSErrorCode.TRANSACTION_FAILED, 'Failed to write content', error);
     }
   }
 
@@ -268,43 +251,28 @@ export class VFS {
     await this._collectNodesToDelete(vnode, nodesToDelete);
 
     if (vnode.type === VNodeType.DIRECTORY && nodesToDelete.length > 1 && !recursive) {
-      throw new VFSError(
-        VFSErrorCode.INVALID_OPERATION,
-        `Directory is not empty: ${vnode.nodeId}`
-      );
+      throw new VFSError(VFSErrorCode.INVALID_OPERATION, `Directory is not empty: ${vnode.nodeId}`);
     }
     
-    // ================== ✨ [新增] 保护检查逻辑开始 ==================
     for (const node of nodesToDelete) {
-        // 1. 检查元数据保护标识 (Metadata Protection)
         if (node.metadata?.isProtected === true) {
-             throw new VFSError(
-                VFSErrorCode.PERMISSION_DENIED,
-                `Operation failed: Node '${node.name}' is protected via metadata.`
-            );
+             throw new VFSError(VFSErrorCode.PERMISSION_DENIED, `Node '${node.name}' is protected.`);
         }
     }
-    // ================== ✨ [新增] 保护检查逻辑结束 ==================
     
     const allRemovedIds = nodesToDelete.map(n => n.nodeId);
     
     const tx = await this.storage.beginTransaction([
-        VFS_STORES.VNODES, VFS_STORES.CONTENTS, VFS_STORES.NODE_TAGS, VFS_STORES.TAGS,
-        VFS_STORES.SRS_ITEMS
+        VFS_STORES.VNODES, VFS_STORES.CONTENTS, VFS_STORES.NODE_TAGS, VFS_STORES.TAGS, VFS_STORES.SRS_ITEMS
     ]);
 
     try {
       for (const node of nodesToDelete) {
         await this.middlewares.runBeforeDelete(node, tx);
-
         if (node.contentRef) await this.storage.deleteContent(node.contentRef, tx);
-        
         await this.storage.cleanupNodeTags(node.nodeId, tx);
-        
         await this.storage.srsStore.deleteForNode(node.nodeId, tx);
-        
         await this.storage.deleteVNode(node.nodeId, tx);
-
         await this.middlewares.runAfterDelete(node, tx);
       }
       
@@ -319,75 +287,63 @@ export class VFS {
       });
       return { removedNodeId: vnode.nodeId, allRemovedIds };
     } catch (error) {
-      if (error instanceof VFSError) { throw error; }
+      if (error instanceof VFSError) throw error;
       throw new VFSError(VFSErrorCode.TRANSACTION_FAILED, 'Failed to delete node', error);
     }
   }
 
   /**
    * 移动节点
+   * @param newUserPath 目标相对路径 (e.g. "/new-dir/file.txt")
    */
-  async move(vnodeOrId: VNode | string, newPath: string): Promise<VNode> {
+  async move(vnodeOrId: VNode | string, newUserPath: string): Promise<VNode> {
     const vnode = await this._resolveVNode(vnodeOrId);
-    const normalizedPath = this.pathResolver.normalize(newPath);
-
-    if (!this.pathResolver.isValid(normalizedPath)) {
-      throw new VFSError(VFSErrorCode.INVALID_PATH, `Invalid path: ${newPath}`);
-    }
-
-    const oldModuleId = vnode.moduleId!;
-    // move 操作通常是在同一模块下，但也可能通过路径隐含改变模块
-    // 目前 PathResolver.resolveParent 基于传入的 module 参数，这限制了 move 在同一模块内
-    // 除非我们扩展 PathResolver 解析绝对路径（包含模块前缀）的能力。
-    // 在本实现中，我们假定单参数 move 通常在同模块内。
-    // 若需跨模块，应使用 batchMove 或明确的新 API。
     
-    // 暂定：如果 oldModuleId 不变，则 targetModuleId = oldModuleId
-    // 如果上层逻辑需要跨模块，请使用 batchMove 传入明确的 targetParentId
-    const targetModuleId = oldModuleId; 
+    // 假设 move 操作如果不指定模块，则在同模块下进行
+    const moduleName = vnode.moduleId!;
+    const normalizedUserPath = this.pathResolver.normalize(newUserPath);
 
-    const existingId = await this.pathResolver.resolve(targetModuleId, normalizedPath);
-    if (existingId && existingId !== vnode.nodeId) {
-      throw new VFSError(VFSErrorCode.ALREADY_EXISTS, `Node already exists at path: ${normalizedPath}`);
+    if (!this.pathResolver.isValid(normalizedUserPath)) {
+      throw new VFSError(VFSErrorCode.INVALID_PATH, `Invalid path: ${newUserPath}`);
     }
-    const newParentId = await this.pathResolver.resolveParent(targetModuleId, normalizedPath);
 
-    const tx = await this.storage.beginTransaction([
-        VFS_STORES.VNODES, VFS_STORES.SRS_ITEMS // 包含 SRS
-    ]);
+    // 计算新的系统路径
+    const newSystemPath = this.pathResolver.toSystemPath(moduleName, normalizedUserPath);
+
+    const existingId = await this.storage.getNodeIdByPath(newSystemPath);
+    if (existingId && existingId !== vnode.nodeId) {
+      throw new VFSError(VFSErrorCode.ALREADY_EXISTS, `Node already exists at path: ${normalizedUserPath}`);
+    }
+
+    const newParentId = await this.pathResolver.resolveParent(moduleName, normalizedUserPath);
+
+    const tx = await this.storage.beginTransaction([VFS_STORES.VNODES, VFS_STORES.SRS_ITEMS]);
 
     try {
-      const newName = this.pathResolver.basename(normalizedPath);
-      const newFullPath = `/${targetModuleId}${normalizedPath}`;
-      const oldPath = vnode.path;
+      const newName = this.pathResolver.basename(normalizedUserPath);
+      const oldSystemPath = vnode.path;
 
       vnode.parentId = newParentId;
       vnode.name = newName;
-      vnode.path = newFullPath;
+      vnode.path = newSystemPath;
       vnode.modifiedAt = Date.now();
       
-      // 虽然通常 module 不变，但为了逻辑统一，检查一下
-      if (vnode.moduleId !== targetModuleId) {
-          vnode.moduleId = targetModuleId;
-          await this.storage.srsStore.updateModuleIdForNode(vnode.nodeId, targetModuleId, tx);
-      }
-
       await this.storage.saveVNode(vnode, tx);
 
       if (vnode.type === VNodeType.DIRECTORY) {
-        await this._updateDescendantPathsAndModules(vnode, oldPath, newFullPath, targetModuleId, tx);
+        await this._updateDescendantPathsAndModules(vnode, oldSystemPath, newSystemPath, moduleName, tx);
       }
       
       await tx.done;
 
       this.events.emit({
         type: VFSEventType.NODE_MOVED,
-        nodeId: vnode.nodeId, path: newFullPath, timestamp: Date.now(), data: { oldPath, newPath: newFullPath }
+        nodeId: vnode.nodeId, path: newSystemPath, timestamp: Date.now(), data: { oldPath: oldSystemPath, newPath: newSystemPath }
       });
 
       return vnode;
     } catch (error) {
-      if (error instanceof VFSError) { throw error; }
+      if (error instanceof VFSError) throw error;
       throw new VFSError(VFSErrorCode.TRANSACTION_FAILED, 'Failed to move node', error);
     }
   }
@@ -408,11 +364,7 @@ export class VFS {
         }
     }
 
-    const tx = await this.storage.beginTransaction([
-        VFS_STORES.VNODES, 
-        VFS_STORES.NODE_TAGS, 
-        VFS_STORES.SRS_ITEMS // ✨ [修复] 包含 SRS Store
-    ]);
+    const tx = await this.storage.beginTransaction([VFS_STORES.VNODES, VFS_STORES.NODE_TAGS, VFS_STORES.SRS_ITEMS]);
 
     try {
         const movedNodeIds: string[] = [];
@@ -422,51 +374,53 @@ export class VFS {
             if (!vnode) continue; 
 
             if (targetParentId) {
-                if (nodeId === targetParentId) {
-                    throw new VFSError(VFSErrorCode.INVALID_OPERATION, `Cannot move directory ${vnode.name} into itself`);
-                }
+                if (nodeId === targetParentId) throw new VFSError(VFSErrorCode.INVALID_OPERATION, `Cannot move directory into itself`);
                 let current = targetParentNode;
                 while (current && current.parentId) {
-                    if (current.parentId === nodeId) {
-                         throw new VFSError(VFSErrorCode.INVALID_OPERATION, `Cannot move directory ${vnode.name} into its own child`);
-                    }
+                    if (current.parentId === nodeId) throw new VFSError(VFSErrorCode.INVALID_OPERATION, `Cannot move directory into its own child`);
                     current = await this.storage.loadVNode(current.parentId, tx);
                 }
             }
 
             const oldModuleId = vnode.moduleId!;
-            // 确定目标模块：如果移入某个目录，跟随该目录；如果是移到根目录(null)，假设为当前模块（或需要额外参数指定跨模块到根）
-            // 在此实现中，如果 targetParentId 为空，我们保持原模块不变（即模块内移动到根）
+            // 确定目标模块
             let targetModuleId = oldModuleId;
+            if (targetParentNode && targetParentNode.moduleId) {
+                targetModuleId = targetParentNode.moduleId;
+            }
+
+            // 构造目标系统路径：
+            // 如果有父节点，则是 ParentSystemPath / NodeName
+            // 如果无父节点(根)，则是 /TargetModule / NodeName
+            let newSystemPath: string;
             if (targetParentNode) {
-                targetModuleId = targetParentNode.moduleId!;
+                newSystemPath = this.pathResolver.join(targetParentNode.path, vnode.name); // join 只是字符串拼接
+            } else {
+                // 移动到模块根目录
+                newSystemPath = this.pathResolver.toSystemPath(targetModuleId, '/' + vnode.name);
             }
-
-            const targetPathPrefix = targetParentNode ? targetParentNode.path : `/${targetModuleId}`;
             
-            const newFullPath = this.pathResolver.join(targetPathPrefix, vnode.name);
-            const oldPath = vnode.path;
+            const oldSystemPath = vnode.path;
 
-            const existingId = await this.storage.getNodeIdByPath(newFullPath, tx);
+            const existingId = await this.storage.getNodeIdByPath(newSystemPath, tx);
             if (existingId && existingId !== nodeId) {
-                throw new VFSError(VFSErrorCode.ALREADY_EXISTS, `Node already exists at ${newFullPath}`);
+                throw new VFSError(VFSErrorCode.ALREADY_EXISTS, `Node already exists at ${newSystemPath}`);
             }
 
-            // ✨ [修复] 跨模块移动处理
+            // 跨模块处理
             if (targetModuleId !== oldModuleId) {
                 vnode.moduleId = targetModuleId;
                 await this.storage.srsStore.updateModuleIdForNode(nodeId, targetModuleId, tx);
             }
 
             vnode.parentId = targetParentId;
-            vnode.path = newFullPath;
+            vnode.path = newSystemPath;
             vnode.modifiedAt = Date.now();
             
             await this.storage.saveVNode(vnode, tx);
 
             if (vnode.type === VNodeType.DIRECTORY) {
-                // ✨ [修复] 递归更新使用新的带模块处理的方法
-                await this._updateDescendantPathsAndModules(vnode, oldPath, newFullPath, targetModuleId, tx);
+                await this._updateDescendantPathsAndModules(vnode, oldSystemPath, newSystemPath, targetModuleId, tx);
             }
 
             movedNodeIds.push(nodeId);
@@ -477,13 +431,10 @@ export class VFS {
         if (movedNodeIds.length > 0) {
             this.events.emit({
                 type: VFSEventType.NODES_BATCH_MOVED,
-                nodeId: null,
-                path: null,
-                timestamp: Date.now(),
+                nodeId: null, path: null, timestamp: Date.now(),
                 data: { movedNodeIds, targetParentId }
             });
         }
-
     } catch (error) {
         if (error instanceof VFSError) throw error;
         throw new VFSError(VFSErrorCode.TRANSACTION_FAILED, 'Failed to batch move nodes', error);
@@ -492,38 +443,37 @@ export class VFS {
 
   /**
    * 复制节点
+   * @param targetUserPath 目标相对路径
    */
-  async copy(sourceId: string, targetPath: string): Promise<CopyResult> {
+  async copy(sourceId: string, targetUserPath: string): Promise<CopyResult> {
     const sourceNode = await this._resolveVNode(sourceId);
-    const normalizedPath = this.pathResolver.normalize(targetPath);
-  
-    if (!this.pathResolver.isValid(normalizedPath)) {
-      throw new VFSError(VFSErrorCode.INVALID_PATH, `Invalid path: ${targetPath}`);
-    }
-  
-    const module = sourceNode.moduleId!;
     
-    const existingId = await this.pathResolver.resolve(module, normalizedPath);
-    if (existingId) {
-      throw new VFSError(VFSErrorCode.ALREADY_EXISTS, `Node already exists at path: ${normalizedPath}`);
+    // 假设复制在同模块内进行
+    const module = sourceNode.moduleId!;
+    const normalizedUserPath = this.pathResolver.normalize(targetUserPath);
+  
+    if (!this.pathResolver.isValid(normalizedUserPath)) {
+      throw new VFSError(VFSErrorCode.INVALID_PATH, `Invalid path: ${targetUserPath}`);
     }
   
-    const targetParentId = await this.pathResolver.resolveParent(module, normalizedPath);
+    // 转换为系统路径
+    const targetSystemPath = this.pathResolver.toSystemPath(module, normalizedUserPath);
+    
+    const existingId = await this.storage.getNodeIdByPath(targetSystemPath);
+    if (existingId) {
+      throw new VFSError(VFSErrorCode.ALREADY_EXISTS, `Node already exists at path: ${normalizedUserPath}`);
+    }
+  
+    const targetParentId = await this.pathResolver.resolveParent(module, normalizedUserPath);
     const sourceTree = await this._loadNodeTree(sourceNode);
 
     const operations: CopyOperation[] = [];
-    this._planCopyFromTree(sourceTree, targetParentId, normalizedPath, module, operations);
+    this._planCopyFromTree(sourceTree, targetParentId, normalizedUserPath, module, operations);
     
     const copiedIds = operations.map(op => op.newNodeData.nodeId);
     const targetId = operations[0]?.newNodeData.nodeId;
-  
-    if (!targetId) {
-      throw new VFSError(VFSErrorCode.INVALID_OPERATION, "Cannot generate copy plan for the source node.");
-    }
     
-    const tx = await this.storage.beginTransaction([
-        VFS_STORES.VNODES, VFS_STORES.CONTENTS, VFS_STORES.NODE_TAGS
-    ]);
+    const tx = await this.storage.beginTransaction([VFS_STORES.VNODES, VFS_STORES.CONTENTS, VFS_STORES.NODE_TAGS]);
     
     try {
       for (const op of operations) {
@@ -536,20 +486,13 @@ export class VFS {
   
         if (op.type === 'copy_content' && op.sourceContent && newNode.contentRef) {
           await this.storage.saveContent({
-            contentRef: newNode.contentRef,
-            nodeId: newNode.nodeId,
-            content: op.sourceContent.content,
-            size: op.sourceContent.size,
-            createdAt: Date.now()
+            contentRef: newNode.contentRef, nodeId: newNode.nodeId, content: op.sourceContent.content,
+            size: op.sourceContent.size, createdAt: Date.now()
           }, tx);
         }
 
         if (op.newNodeData.tags.length > 0) {
             for (const tagName of op.newNodeData.tags) {
-                // copy 操作我们暂时不处理引用计数自动增加（假设复制不带标签，或者调用方单独处理）
-                // 这里的原始逻辑是直接写入 node_tags 
-                // [优化建议] 如果需要 copy 时也增加计数，需要在这里调用 adjustRefCount
-                // 鉴于目前逻辑未修改 copy，我们保持原样调用底层 add
                 await this.storage.nodeTagStore.add(newNode.nodeId, tagName, tx);
             }
         }
@@ -559,15 +502,12 @@ export class VFS {
 
       this.events.emit({
         type: VFSEventType.NODE_COPIED,
-        nodeId: targetId,
-        path: `/${module}${normalizedPath}`,
-        timestamp: Date.now(),
-        data: { sourceId, copiedIds }
+        nodeId: targetId, path: targetSystemPath, timestamp: Date.now(), data: { sourceId, copiedIds }
       });
 
       return { sourceId, targetId, copiedIds };
     } catch (error) {
-      if (error instanceof VFSError) { throw error; }
+      if (error instanceof VFSError) throw error;
       throw new VFSError(VFSErrorCode.TRANSACTION_FAILED, 'Failed to copy node', error);
     }
   }
@@ -578,10 +518,7 @@ export class VFS {
   async readdir(vnodeOrId: VNode | string): Promise<VNode[]> {
     const vnode = await this._resolveVNode(vnodeOrId);
     if (vnode.type !== VNodeType.DIRECTORY) {
-      throw new VFSError(
-        VFSErrorCode.INVALID_OPERATION,
-        `Cannot read directory from file: ${vnode.nodeId}`
-      );
+      throw new VFSError(VFSErrorCode.INVALID_OPERATION, `Cannot read directory from file: ${vnode.nodeId}`);
     }
     return await this.storage.getChildren(vnode.nodeId);
   }
@@ -592,13 +529,9 @@ export class VFS {
   async stat(vnodeOrId: VNode | string): Promise<NodeStat> {
     const vnode = await this._resolveVNode(vnodeOrId);
     return {
-      nodeId: vnode.nodeId,
-      name: vnode.name,
-      type: vnode.type,
-      size: vnode.size,
-      path: vnode.path,
-      createdAt: new Date(vnode.createdAt),
-      modifiedAt: new Date(vnode.modifiedAt),
+      nodeId: vnode.nodeId, name: vnode.name, type: vnode.type, size: vnode.size,
+      path: vnode.path, // 注意：这里返回的是 System Path (Internal usage)
+      createdAt: new Date(vnode.createdAt), modifiedAt: new Date(vnode.modifiedAt),
       metadata: { ...vnode.metadata }
     };
   }
@@ -617,12 +550,7 @@ export class VFS {
    */
   async batchSetTags(batchData: { nodeId: string, tags: string[] }[]): Promise<void> {
     if (!batchData || batchData.length === 0) return;
-
-    // 开启一个写事务，包含所有涉及的 Store
-    const tx = await this.storage.beginTransaction([
-        VFS_STORES.VNODES, VFS_STORES.TAGS, VFS_STORES.NODE_TAGS
-    ]);
-
+    const tx = await this.storage.beginTransaction([VFS_STORES.VNODES, VFS_STORES.TAGS, VFS_STORES.NODE_TAGS]);
     const updatedNodeIds: string[] = [];
 
     try {
@@ -649,10 +577,7 @@ export class VFS {
                     hasChanges = true;
                 }
             }
-            
-            if (hasChanges) {
-                updatedNodeIds.push(nodeId);
-            }
+            if (hasChanges) updatedNodeIds.push(nodeId);
         }
 
         await tx.done;
@@ -660,10 +585,7 @@ export class VFS {
         if (updatedNodeIds.length > 0) {
             this.events.emit({
                 type: VFSEventType.NODES_BATCH_UPDATED,
-                nodeId: null,
-                path: null,
-                timestamp: Date.now(),
-                data: { updatedNodeIds }
+                nodeId: null, path: null, timestamp: Date.now(), data: { updatedNodeIds }
             });
         }
     } catch (error) {
@@ -676,11 +598,8 @@ export class VFS {
    */
   async setTags(vnodeOrId: VNode | string, newTags: string[]): Promise<void> {
     let nodeId: string;
-    if (typeof vnodeOrId === 'string') {
-        nodeId = vnodeOrId;
-    } else {
-        nodeId = vnodeOrId.nodeId;
-    }
+    if (typeof vnodeOrId === 'string') nodeId = vnodeOrId;
+    else nodeId = vnodeOrId.nodeId;
     await this.batchSetTags([{ nodeId, tags: newTags }]);
   }
 
@@ -688,8 +607,7 @@ export class VFS {
     const vnode = await this._resolveVNode(vnodeOrId);
     await this.storage.addTagToNode(vnode.nodeId, tagName);
     this.events.emit({
-        type: VFSEventType.NODE_UPDATED,
-        nodeId: vnode.nodeId, path: vnode.path, timestamp: Date.now(),
+        type: VFSEventType.NODE_UPDATED, nodeId: vnode.nodeId, path: vnode.path, timestamp: Date.now(),
         data: { tagAdded: tagName }
     });
   }
@@ -698,8 +616,7 @@ export class VFS {
     const vnode = await this._resolveVNode(vnodeOrId);
     await this.storage.removeTagFromNode(vnode.nodeId, tagName);
     this.events.emit({
-        type: VFSEventType.NODE_UPDATED,
-        nodeId: vnode.nodeId, path: vnode.path, timestamp: Date.now(),
+        type: VFSEventType.NODE_UPDATED, nodeId: vnode.nodeId, path: vnode.path, timestamp: Date.now(),
         data: { tagRemoved: tagName }
     });
   }
@@ -718,11 +635,7 @@ export class VFS {
   /**
    * [变更] 处理 Middleware 写入流程
    */
-  private async _processWriteWithMiddlewares(
-    vnode: VNode,
-    content: string | ArrayBuffer,
-    tx: Transaction
-  ): Promise<{ processedContent: string | ArrayBuffer; derivedData: Record<string, any> }> {
+  private async _processWriteWithMiddlewares(vnode: VNode, content: string | ArrayBuffer, tx: Transaction): Promise<{ processedContent: string | ArrayBuffer; derivedData: Record<string, any> }> {
     const processedContent = await this.middlewares.runBeforeWrite(vnode, content, tx);
     
     if (vnode.contentRef) {
@@ -749,17 +662,14 @@ export class VFS {
   /**
    * [修复] 更新子孙节点路径和模块ID
    */
-  private async _updateDescendantPathsAndModules(
-      parent: VNode, 
-      oldPath: string, 
-      newPath: string, 
-      newModuleId: string, 
-      tx: Transaction
-  ): Promise<void> {
+  private async _updateDescendantPathsAndModules(parent: VNode, oldSystemPath: string, newSystemPath: string, newModuleId: string, tx: Transaction): Promise<void> {
       const children = await this.storage.getChildren(parent.nodeId, tx);
       for (const child of children) {
-          const childOldPath = this.pathResolver.join(oldPath, child.name);
-          const childNewPath = this.pathResolver.join(newPath, child.name);
+          // 路径拼接：直接字符串替换前缀，确保准确
+          let childNewPath = child.path;
+          if (child.path.startsWith(oldSystemPath)) {
+             childNewPath = newSystemPath + child.path.substring(oldSystemPath.length);
+          }
           
           child.path = childNewPath;
           
@@ -772,7 +682,7 @@ export class VFS {
           await this.storage.saveVNode(child, tx);
           
           if (child.type === VNodeType.DIRECTORY) {
-              await this._updateDescendantPathsAndModules(child, childOldPath, childNewPath, newModuleId, tx);
+              await this._updateDescendantPathsAndModules(child, oldSystemPath, newSystemPath, newModuleId, tx);
           }
       }
   }
@@ -781,12 +691,7 @@ export class VFS {
    * [NEW] Recursively pre-loads an entire node tree into memory.
    */
   private async _loadNodeTree(node: VNode): Promise<NodeTreeData> {
-    const result: NodeTreeData = {
-      node,
-      content: null,
-      children: []
-    };
-    
+    const result: NodeTreeData = { node, content: null, children: [] };
     if (node.type === VNodeType.FILE && node.contentRef) {
       result.content = await this.storage.loadContent(node.contentRef);
     } else if (node.type === VNodeType.DIRECTORY) {
@@ -802,16 +707,11 @@ export class VFS {
   /**
    * [NEW] Plans copy operations from a pre-loaded in-memory tree.
    */
-  private _planCopyFromTree(
-    tree: NodeTreeData,
-    targetParentId: string | null,
-    targetPath: string,
-    module: string,
-    operations: CopyOperation[]
-  ): string {
+  private _planCopyFromTree(tree: NodeTreeData, targetParentId: string | null, targetUserPath: string, module: string, operations: CopyOperation[]): string {
     const sourceNode = tree.node;
-    const targetName = this.pathResolver.basename(targetPath);
-    const targetFullPath = `/${module}${targetPath}`;
+    const targetName = this.pathResolver.basename(targetUserPath);
+    // 生成系统路径
+    const targetSystemPath = this.pathResolver.toSystemPath(module, targetUserPath);
     const newNodeId = this._generateId();
     let newContentRef: string | null = null;
     let operationType: 'create_node' | 'copy_content' = 'create_node';
@@ -826,17 +726,15 @@ export class VFS {
       sourceContent: tree.content,
       newNodeData: {
         nodeId: newNodeId, parentId: targetParentId, name: targetName, type: sourceNode.type,
-        path: targetFullPath, moduleId: module, contentRef: newContentRef, size: sourceNode.size,
-        metadata: { ...sourceNode.metadata },
-        tags: [...sourceNode.tags]
+        path: targetSystemPath, moduleId: module, contentRef: newContentRef, size: sourceNode.size,
+        metadata: { ...sourceNode.metadata }, tags: [...sourceNode.tags]
       }
     });
   
     for (const childTree of tree.children) {
-      const childTargetPath = this.pathResolver.join(targetPath, childTree.node.name);
-      this._planCopyFromTree(childTree, newNodeId, childTargetPath, module, operations);
+      const childUserPath = this.pathResolver.join(targetUserPath, childTree.node.name);
+      this._planCopyFromTree(childTree, newNodeId, childUserPath, module, operations);
     }
-    
     return newNodeId;
   }
 
@@ -846,9 +744,7 @@ export class VFS {
   private async _resolveVNode(vnodeOrId: VNode | string): Promise<VNode> {
     if (typeof vnodeOrId === 'string') {
       const vnode = await this.storage.loadVNode(vnodeOrId);
-      if (!vnode) {
-        throw new VFSError(VFSErrorCode.NOT_FOUND, `Node not found: ${vnodeOrId}`);
-      }
+      if (!vnode) throw new VFSError(VFSErrorCode.NOT_FOUND, `Node not found: ${vnodeOrId}`);
       return vnode;
     }
     return vnodeOrId;
@@ -865,9 +761,7 @@ export class VFS {
    * 获取内容大小
    */
   private _getContentSize(content: string | ArrayBuffer): number {
-    if (typeof content === 'string') {
-      return new Blob([content]).size;
-    }
+    if (typeof content === 'string') return new Blob([content]).size;
     return content.byteLength;
   }
 }

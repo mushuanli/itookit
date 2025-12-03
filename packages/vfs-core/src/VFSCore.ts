@@ -120,9 +120,7 @@ export class VFSCore {
    * 警告：这将永久删除所有数据！
    */
   async systemReset(): Promise<void> {
-    if (this.initialized) {
-        await this.shutdown();
-    }
+    if (this.initialized) await this.shutdown();
     const tempStorage = new VFSStorage(this.config.dbName);
     await tempStorage.destroyDatabase();
     console.log('System reset complete.');
@@ -177,6 +175,49 @@ export class VFSCore {
     }
   }
 
+  // ==================================================================================
+  // 核心转换逻辑：将内部 System Path 转换为外部 User Path
+  // ==================================================================================
+
+  /**
+   * 将内部 VNode 转换为公开 API 使用的 VNode
+   * 主要是剥离 path 中的模块前缀
+   */
+  private _toPublicVNode(internalNode: VNode): VNode {
+    // 必须有 moduleId 才能反解路径
+    if (!internalNode.moduleId) return internalNode;
+
+    // 浅拷贝对象，避免污染内部引用
+    const publicNode = new VNode(
+        internalNode.nodeId,
+        internalNode.parentId,
+        internalNode.name,
+        internalNode.type,
+        '', // 占位
+        internalNode.moduleId,
+        internalNode.contentRef,
+        internalNode.size,
+        internalNode.createdAt,
+        internalNode.modifiedAt,
+        { ...internalNode.metadata },
+        [ ...internalNode.tags ]
+    );
+
+    // 转换路径: /module/foo/bar -> /foo/bar
+    publicNode.path = this.vfs.pathResolver.toUserPath(internalNode.path, internalNode.moduleId);
+    
+    return publicNode;
+  }
+
+  private _toPublicVNodes(internalNodes: VNode[]): VNode[] {
+      return internalNodes.map(n => this._toPublicVNode(n));
+  }
+
+  // ==================================================================================
+  // 公开 API
+  // ==================================================================================
+
+
   /**
    * 挂载模块
    * [修改] description 参数改为 options 对象 (兼容旧 string 形式)
@@ -184,10 +225,7 @@ export class VFSCore {
   async mount(moduleName: string, optionsOrDesc?: string | MountOptions): Promise<ModuleInfo> {
     this._ensureInitialized();
     if (this.moduleRegistry.has(moduleName)) {
-      throw new VFSError(
-        VFSErrorCode.ALREADY_EXISTS,
-        `Module '${moduleName}' already mounted`
-      );
+      throw new VFSError(VFSErrorCode.ALREADY_EXISTS, `Module '${moduleName}' already mounted`);
     }
 
     let desc = '';
@@ -200,6 +238,7 @@ export class VFSCore {
         isProtected = !!optionsOrDesc.isProtected;
     }
 
+    // 创建根目录，path 传入 '/'，底层会自动转换为 '/moduleName'
     const rootNode = await this.vfs.createNode({
       module: moduleName,
       path: '/',
@@ -210,7 +249,7 @@ export class VFSCore {
       name: moduleName,
       rootNodeId: rootNode.nodeId,
       description: desc,
-      isProtected, // 保存属性
+      isProtected,
       createdAt: Date.now()
     };
     this.moduleRegistry.register(moduleInfo);
@@ -223,17 +262,9 @@ export class VFSCore {
    */
   async unmount(moduleName: string): Promise<void> {
     this._ensureInitialized();
-
     const moduleInfo = this.moduleRegistry.get(moduleName);
-    if (!moduleInfo) {
-      throw new VFSError(
-        VFSErrorCode.NOT_FOUND,
-        `Module '${moduleName}' not found`
-      );
-    }
-
+    if (!moduleInfo) throw new VFSError(VFSErrorCode.NOT_FOUND, `Module '${moduleName}' not found`);
     await this.vfs.unlink(moduleInfo.rootNodeId, { recursive: true });
-
     this.moduleRegistry.unregister(moduleName);
     await this._saveModuleRegistry();
   }
@@ -241,41 +272,32 @@ export class VFSCore {
   /**
    * 创建文件（高级 API）
    */
-  async createFile(
-    moduleName: string,
-    path: string,
-    content: string | ArrayBuffer = '', 
-    metadata?: Record<string, any>
-  ): Promise<VNode> {
+  async createFile(moduleName: string, path: string, content: string | ArrayBuffer = '', metadata?: Record<string, any>): Promise<VNode> {
     this._ensureInitialized();
     this._ensureModuleExists(moduleName);
-
-    return await this.vfs.createNode({
+    const internalNode = await this.vfs.createNode({
       module: moduleName,
-      path,
+      path, // 传入用户路径
       type: VNodeType.FILE,
       content,
       metadata
     });
+    return this._toPublicVNode(internalNode);
   }
 
   /**
    * 创建目录（高级 API）
    */
-  async createDirectory(
-    moduleName: string,
-    path: string,
-    metadata?: Record<string, any>
-  ): Promise<VNode> {
+  async createDirectory(moduleName: string, path: string, metadata?: Record<string, any>): Promise<VNode> {
     this._ensureInitialized();
     this._ensureModuleExists(moduleName);
-
-    return await this.vfs.createNode({
+    const internalNode = await this.vfs.createNode({
       module: moduleName,
-      path,
+      path, // 传入用户路径
       type: VNodeType.DIRECTORY,
       metadata
     });
+    return this._toPublicVNode(internalNode);
   }
 
   /**
@@ -283,10 +305,9 @@ export class VFSCore {
    */
   async updateMetadata(moduleName: string, path: string, metadata: Record<string, any>): Promise<void> {
     this._ensureInitialized();
+    // 使用 pathResolver 解析用户路径 -> NodeID
     const nodeId = await this.vfs.pathResolver.resolve(moduleName, path);
-    if (!nodeId) {
-      throw new VFSError(VFSErrorCode.NOT_FOUND, `Node not found: ${moduleName}:${path}`);
-    }
+    if (!nodeId) throw new VFSError(VFSErrorCode.NOT_FOUND, `Node not found: ${moduleName}:${path}`);
     await this.vfs.updateMetadata(nodeId, metadata);
   }
   
@@ -305,23 +326,10 @@ export class VFSCore {
   async setNodeProtection(moduleName: string, path: string, isProtected: boolean): Promise<void> {
     this._ensureInitialized();
     const nodeId = await this.vfs.pathResolver.resolve(moduleName, path);
-    if (!nodeId) {
-      throw new VFSError(VFSErrorCode.NOT_FOUND, `Node not found: ${moduleName}:${path}`);
-    }
-
-    // 1. 获取当前节点以读取现有 metadata
+    if (!nodeId) throw new VFSError(VFSErrorCode.NOT_FOUND, `Node not found: ${moduleName}:${path}`);
     const node = await this.vfs.storage.loadVNode(nodeId);
-    if (!node) {
-        throw new VFSError(VFSErrorCode.NOT_FOUND, `Node data missing: ${nodeId}`);
-    }
-
-    // 2. 合并 metadata (防止覆盖其他元数据)
-    const newMetadata = {
-        ...(node.metadata || {}),
-        isProtected: isProtected
-    };
-
-    // 3. 更新
+    if (!node) throw new VFSError(VFSErrorCode.NOT_FOUND, `Node data missing: ${nodeId}`);
+    const newMetadata = { ...(node.metadata || {}), isProtected: isProtected };
     await this.vfs.updateMetadata(nodeId, newMetadata);
   }
 
@@ -331,13 +339,7 @@ export class VFSCore {
   async read(moduleName: string, path: string): Promise<string | ArrayBuffer> {
     this._ensureInitialized();
     const nodeId = await this.vfs.pathResolver.resolve(moduleName, path);
-    
-    if (!nodeId) {
-      throw new VFSError(
-        VFSErrorCode.NOT_FOUND,
-        `File not found: ${moduleName}:${path}`
-      );
-    }
+    if (!nodeId) throw new VFSError(VFSErrorCode.NOT_FOUND, `File not found: ${moduleName}:${path}`);
 
     return await this.vfs.read(nodeId);
   }
@@ -345,22 +347,12 @@ export class VFSCore {
   /**
    * 写入文件
    */
-  async write(
-    moduleName: string,
-    path: string,
-    content: string | ArrayBuffer
-  ): Promise<VNode> {
+  async write(moduleName: string, path: string, content: string | ArrayBuffer): Promise<VNode> {
     this._ensureInitialized();
     const nodeId = await this.vfs.pathResolver.resolve(moduleName, path);
-    
-    if (!nodeId) {
-      throw new VFSError(
-        VFSErrorCode.NOT_FOUND,
-        `File not found: ${moduleName}:${path}`
-      );
-    }
-
-    return await this.vfs.write(nodeId, content);
+    if (!nodeId) throw new VFSError(VFSErrorCode.NOT_FOUND, `File not found: ${moduleName}:${path}`);
+    const internalNode = await this.vfs.write(nodeId, content);
+    return this._toPublicVNode(internalNode);
   }
 
   /**
@@ -369,24 +361,14 @@ export class VFSCore {
   async delete(moduleName: string, path: string, recursive = false): Promise<void> {
     this._ensureInitialized();
     const nodeId = await this.vfs.pathResolver.resolve(moduleName, path);
-    
-    if (!nodeId) {
-      throw new VFSError(
-        VFSErrorCode.NOT_FOUND,
-        `Node not found: ${moduleName}:${path}`
-      );
-    }
-
+    if (!nodeId) throw new VFSError(VFSErrorCode.NOT_FOUND, `Node not found: ${moduleName}:${path}`);
     await this.vfs.unlink(nodeId, { recursive });
   }
 
   // [新增] 批量移动节点 API
   async batchMoveNodes(_moduleName: string, nodeIds: string[], targetParentId: string | null): Promise<void> {
     this._ensureInitialized();
-    
-    // 调用底层批量移动
-    // 底层 batchMove 会根据 targetParent 的模块属性，或者当前事务逻辑来处理移动
-    // 跨模块移动时的 SRS 更新逻辑已在 VFS.ts 中处理
+    // 底层 batchMove 自动处理 system path 和 module id 更新
     await this.vfs.batchMove(nodeIds, targetParentId);
   }
 
@@ -396,15 +378,11 @@ export class VFSCore {
   async getTree(moduleName: string, path: string = '/'): Promise<VNode[]> {
     this._ensureInitialized();
     const nodeId = await this.vfs.pathResolver.resolve(moduleName, path);
+    if (!nodeId) throw new VFSError(VFSErrorCode.NOT_FOUND, `Directory not found: ${moduleName}:${path}`);
     
-    if (!nodeId) {
-      throw new VFSError(
-        VFSErrorCode.NOT_FOUND,
-        `Directory not found: ${moduleName}:${path}`
-      );
-    }
-
-    return await this.vfs.readdir(nodeId);
+    // 获取的是内部节点，必须转换
+    const internalChildren = await this.vfs.readdir(nodeId);
+    return this._toPublicVNodes(internalChildren);
   }
 
   /**
@@ -412,29 +390,15 @@ export class VFSCore {
    */
   async exportModule(moduleName: string): Promise<Record<string, any>> {
     this._ensureInitialized();
-    
     const moduleInfo = this.moduleRegistry.get(moduleName);
-    if (!moduleInfo) {
-      throw new VFSError(
-        VFSErrorCode.NOT_FOUND,
-        `Module '${moduleName}' not found`
-      );
-    }
-
+    if (!moduleInfo) throw new VFSError(VFSErrorCode.NOT_FOUND, `Module '${moduleName}' not found`);
     const rootNode = await this.vfs.storage.loadVNode(moduleInfo.rootNodeId);
-    if (!rootNode) {
-      throw new VFSError(
-        VFSErrorCode.NOT_FOUND,
-        `Root node not found for module '${moduleName}'`
-      );
-    }
-
-    const exportData = {
-      module: moduleInfo,
-      tree: await this._exportTree(rootNode)
-    };
-
-    return exportData;
+    if (!rootNode) throw new VFSError(VFSErrorCode.NOT_FOUND, `Root node not found for module '${moduleName}'`);
+    
+    // 导出时，树结构中的 path 最好也是用户视角的相对路径，或者不依赖 path 字段
+    // 这里的 _exportTree 使用递归读取，其内部 logic 需要适配
+    const tree = await this._exportTree(rootNode);
+    return { module: moduleInfo, tree };
   }
 
   /**
@@ -442,17 +406,12 @@ export class VFSCore {
    */
   async importModule(data: Record<string, any>): Promise<void> {
     this._ensureInitialized();
-    
     const moduleInfo = data.module as ModuleInfo;
-    
     if (this.moduleRegistry.has(moduleInfo.name)) {
-        throw new VFSError(
-            VFSErrorCode.ALREADY_EXISTS,
-            `Module '${moduleInfo.name}' already exists. Cannot import.`
-        );
+        throw new VFSError(VFSErrorCode.ALREADY_EXISTS, `Module '${moduleInfo.name}' already exists.`);
     }
-
     await this.mount(moduleInfo.name, moduleInfo.description);
+    // import 逻辑使用的是 API 层面的 createFile/Directory，所以它们期望相对路径
     await this._importTree(moduleInfo.name, '/', data.tree);
   }
 
@@ -486,10 +445,7 @@ export class VFSCore {
   async setNodeTags(moduleName: string, path: string, tags: string[]): Promise<void> {
     this._ensureInitialized();
     const nodeId = await this.vfs.pathResolver.resolve(moduleName, path);
-    if (!nodeId) {
-      throw new VFSError(VFSErrorCode.NOT_FOUND, `Node not found: ${moduleName}:${path}`);
-    }
-    // 直接通过 ID 调用 VFS 的 setTags
+    if (!nodeId) throw new VFSError(VFSErrorCode.NOT_FOUND, `Node not found: ${moduleName}:${path}`);
     await this.vfs.setTags(nodeId, tags);
   }
   
@@ -504,9 +460,7 @@ export class VFSCore {
   async addTag(moduleName: string, path: string, tagName: string): Promise<void> {
     this._ensureInitialized();
     const nodeId = await this.vfs.pathResolver.resolve(moduleName, path);
-    if (!nodeId) {
-      throw new VFSError(VFSErrorCode.NOT_FOUND, `Node not found: ${moduleName}:${path}`);
-    }
+    if (!nodeId) throw new VFSError(VFSErrorCode.NOT_FOUND, `Node not found: ${moduleName}:${path}`);
     await this.vfs.addTag(nodeId, tagName.trim());
   }
 
@@ -516,9 +470,7 @@ export class VFSCore {
   async removeTag(moduleName: string, path: string, tagName: string): Promise<void> {
     this._ensureInitialized();
     const nodeId = await this.vfs.pathResolver.resolve(moduleName, path);
-    if (!nodeId) {
-      throw new VFSError(VFSErrorCode.NOT_FOUND, `Node not found: ${moduleName}:${path}`);
-    }
+    if (!nodeId) throw new VFSError(VFSErrorCode.NOT_FOUND, `Node not found: ${moduleName}:${path}`);
     await this.vfs.removeTag(nodeId, tagName.trim());
   }
 
@@ -528,9 +480,7 @@ export class VFSCore {
   async getTags(moduleName: string, path: string): Promise<string[]> {
     this._ensureInitialized();
     const nodeId = await this.vfs.pathResolver.resolve(moduleName, path);
-    if (!nodeId) {
-      throw new VFSError(VFSErrorCode.NOT_FOUND, `Node not found: ${moduleName}:${path}`);
-    }
+    if (!nodeId) throw new VFSError(VFSErrorCode.NOT_FOUND, `Node not found: ${moduleName}:${path}`);
     return await this.vfs.getTags(nodeId);
   }
 
@@ -539,7 +489,8 @@ export class VFSCore {
    */
   async findByTag(tagName: string): Promise<VNode[]> {
     this._ensureInitialized();
-    return this.vfs.findByTag(tagName.trim());
+    const internalNodes = await this.vfs.findByTag(tagName.trim());
+    return this._toPublicVNodes(internalNodes);
   }
 
   /**
@@ -557,13 +508,8 @@ export class VFSCore {
   async setTagProtection(tagName: string, isProtected: boolean): Promise<void> {
       this._ensureInitialized();
       const tag = await this.vfs.storage.tagStore.get(tagName);
-      if (!tag) {
-          throw new VFSError(VFSErrorCode.NOT_FOUND, `Tag '${tagName}' not found`);
-      }
-      
-      // 更新属性并保存
+      if (!tag) throw new VFSError(VFSErrorCode.NOT_FOUND, `Tag '${tagName}' not found`);
       tag.isProtected = isProtected;
-      // create 方法底层是 put，可以用于更新
       await this.vfs.storage.tagStore.create(tag);
   }
 
@@ -575,11 +521,8 @@ export class VFSCore {
       const tag = await this.vfs.storage.tagStore.get(tagName);
       if (tag) {
           if (updates.color !== undefined) tag.color = updates.color;
-          // 使用 create 方法覆写，因为它实际上是 put 操作 (idb 的 put 会更新)
           await this.vfs.storage.tagStore.create(tag);
       } else {
-          // 如果标签不存在，可以选择创建它，或者抛错。通常在设置页面编辑时，它应该已存在或即将被创建。
-          // 这里我们允许创建
           await this.vfs.storage.tagStore.create({
               name: tagName,
               color: updates.color,
@@ -605,25 +548,20 @@ export class VFSCore {
   async searchNodes(query: SearchQuery, targetModule?: string, callerModule?: string): Promise<VNode[]> {
     this._ensureInitialized();
     
-    // 1. 执行底层搜索
-    const results = await this.vfs.searchNodes(query, targetModule);
+    // 1. 底层搜索 (返回内部节点)
+    const internalResults = await this.vfs.searchNodes(query, targetModule);
 
-    // 2. 权限过滤
-    return results.filter(node => {
-        // 如果节点属于发起者自己的模块，总是可见
+    // 2. 权限过滤 + 路径净化
+    const filtered = internalResults.filter(node => {
         if (node.moduleId === callerModule) return true;
-
-        // 如果节点属于其他模块，检查该模块是否受保护
         if (node.moduleId) {
             const modInfo = this.moduleRegistry.get(node.moduleId);
-            // 如果模块受保护，且发起者不是该模块本身 -> 不可见
-            if (modInfo?.isProtected) {
-                return false;
-            }
+            if (modInfo?.isProtected) return false;
         }
-        
         return true;
     });
+
+    return this._toPublicVNodes(filtered);
   }
 
   // ==================== [新增] SRS 高级 API ====================
@@ -642,15 +580,10 @@ export class VFSCore {
     try {
         const existing = await this.vfs.storage.srsStore.get(nodeId, clozeId, tx);
         const newItem: SRSItemData = {
-            nodeId,
-            clozeId,
-            moduleId: moduleName, // 确保存储正确的模块ID
-            dueAt: stats.dueAt ?? Date.now(),
-            interval: stats.interval ?? 0,
-            ease: stats.ease ?? 2.5,
-            reviewCount: (existing?.reviewCount || 0) + 1,
-            lastReviewedAt: Date.now(),
-            ...stats // 允许覆盖
+            nodeId, clozeId, moduleId: moduleName,
+            dueAt: stats.dueAt ?? Date.now(), interval: stats.interval ?? 0, ease: stats.ease ?? 2.5,
+            reviewCount: (existing?.reviewCount || 0) + 1, lastReviewedAt: Date.now(),
+            ...stats
         };
         await this.vfs.storage.srsStore.put(newItem, tx);
         await tx.done;
@@ -664,15 +597,7 @@ export class VFSCore {
    */
   async updateSRSItemById(nodeId: string, clozeId: string, stats: Partial<SRSItemData>): Promise<void> {
     this._ensureInitialized();
-    
-    // [修复] 添加 VFS_STORES.NODE_TAGS 到事务中
-    // 原因：this.vfs.storage.loadVNode 内部会自动获取 Tags，因此需要 node_tags 表的访问权限
-    const tx = await this.vfs.storage.beginTransaction([
-        VFS_STORES.SRS_ITEMS, 
-        VFS_STORES.VNODES, 
-        VFS_STORES.NODE_TAGS 
-    ]);
-
+    const tx = await this.vfs.storage.beginTransaction([VFS_STORES.SRS_ITEMS, VFS_STORES.VNODES, VFS_STORES.NODE_TAGS]);
     try {
         // 我们需要加载 VNode 以获取 moduleId，确保数据一致性
         const vnode = await this.vfs.storage.loadVNode(nodeId, tx);
@@ -680,14 +605,9 @@ export class VFSCore {
         
         const existing = await this.vfs.storage.srsStore.get(nodeId, clozeId, tx);
         const newItem: SRSItemData = {
-            nodeId,
-            clozeId,
-            moduleId: vnode.moduleId!, // 使用 VNode 真实的 moduleId
-            dueAt: stats.dueAt ?? Date.now(),
-            interval: stats.interval ?? 0,
-            ease: stats.ease ?? 2.5,
-            reviewCount: (existing?.reviewCount || 0) + 1,
-            lastReviewedAt: Date.now(),
+            nodeId, clozeId, moduleId: vnode.moduleId!,
+            dueAt: stats.dueAt ?? Date.now(), interval: stats.interval ?? 0, ease: stats.ease ?? 2.5,
+            reviewCount: (existing?.reviewCount || 0) + 1, lastReviewedAt: Date.now(),
             ...stats
         };
         await this.vfs.storage.srsStore.put(newItem, tx);
@@ -757,31 +677,22 @@ export class VFSCore {
   }
 
   // ==================== 私有方法 ====================
-
   private _ensureInitialized(): void {
-    if (!this.initialized) {
-      throw new VFSError(
-        VFSErrorCode.INVALID_OPERATION,
-        'VFS not initialized. Call init() first.'
-      );
-    }
+    if (!this.initialized) throw new VFSError(VFSErrorCode.INVALID_OPERATION, 'VFS not initialized. Call init() first.');
   }
 
   private _ensureModuleExists(moduleName: string): void {
-    if (!this.moduleRegistry.has(moduleName)) {
-      throw new VFSError(
-        VFSErrorCode.NOT_FOUND,
-        `Module '${moduleName}' not found`
-      );
-    }
+    if (!this.moduleRegistry.has(moduleName)) throw new VFSError(VFSErrorCode.NOT_FOUND, `Module '${moduleName}' not found`);
   }
 
   private async _loadModuleRegistry(): Promise<void> {
     if (!this.moduleRegistry.has('__vfs_meta__')) {
-       const metaNodeId = await this.vfs.pathResolver.resolve('__vfs_meta__', '/');
-       if (!metaNodeId) {
-          return;
-       }
+       // 检查底层是否存在，如果不存在则忽略（首次启动）
+       // 这里必须用底层 API 绕过检查，或者手动构造 PathResolver 调用
+       // 为了简单，我们尝试解析路径，如果失败则说明未初始化
+       const metaSystemPath = '/__vfs_meta__';
+       const nodeId = await this.vfs.storage.getNodeIdByPath(metaSystemPath);
+       if (!nodeId) return;
     }
     const metaNodeId = await this.vfs.pathResolver.resolve('__vfs_meta__', '/modules');
     if (metaNodeId) {
@@ -797,7 +708,7 @@ export class VFSCore {
     if (!this.moduleRegistry.has('__vfs_meta__')) {
       await this.mount('__vfs_meta__', { description: 'VFS internal metadata', isProtected: true });
     }
-    const metaPath = '/modules';
+    const metaPath = '/modules'; // User Path
     const data = this.moduleRegistry.toJSON();
     const content = JSON.stringify(data, null, 2);
 
@@ -806,7 +717,8 @@ export class VFSCore {
       if (nodeId) {
         await this.vfs.write(nodeId, content);
       } else {
-        await this.vfs.createNode({ module: '__vfs_meta__', path: metaPath, type: VNodeType.FILE, content });
+        // 创建文件，使用 user path
+        await this.createFile('__vfs_meta__', metaPath, content);
       }
     } catch (error) { console.error('Failed to save module registry:', error); }
   }
@@ -819,33 +731,26 @@ export class VFSCore {
   private async _ensureDefaultModule(): Promise<void> {
     const defaultModule = this.config.defaultModule!;
     if (!this.moduleRegistry.has(defaultModule)) {
-      const rootNode = await this.vfs.createNode({
-        module: defaultModule,
-        path: '/',
-        type: VNodeType.DIRECTORY
-      });
-      const moduleInfo: ModuleInfo = {
-        name: defaultModule,
-        rootNodeId: rootNode.nodeId,
-        description: 'Default module',
-        createdAt: Date.now()
-      };
-      this.moduleRegistry.register(moduleInfo);
-      await this._saveModuleRegistry();
+      await this.mount(defaultModule, 'Default module');
     }
   }
 
   private async _exportTree(node: VNode): Promise<any> {
+    // 这里的 node 应该是已经转为 Public VNode 的，或者是 Internal VNode
+    // 为了安全，假设我们正在导出内部结构，但 path 应该是相对的
+    // 由于递归逻辑，我们使用 _toPublicVNode 清洗当前节点
+    const publicNode = this._toPublicVNode(node);
+
     const result: any = {
-      name: node.name,
-      type: node.type,
-      metadata: node.metadata,
-      tags: node.tags
+      name: publicNode.name,
+      type: publicNode.type,
+      metadata: publicNode.metadata,
+      tags: publicNode.tags
     };
-    if (node.type === VNodeType.FILE) {
-      result.content = await this.vfs.read(node.nodeId);
+    if (publicNode.type === VNodeType.FILE) {
+      result.content = await this.vfs.read(publicNode.nodeId);
     } else {
-      const children = await this.vfs.readdir(node.nodeId);
+      const children = await this.vfs.readdir(publicNode.nodeId);
       result.children = await Promise.all(
         children.map(child => this._exportTree(child))
       );
@@ -853,11 +758,7 @@ export class VFSCore {
     return result;
   }
 
-  private async _importTree(
-    moduleName: string,
-    parentPath: string,
-    treeData: any
-  ): Promise<void> {
+  private async _importTree(moduleName: string, parentPath: string, treeData: any): Promise<void> {
     if (treeData.name === '/' || (parentPath === '/' && treeData.name === moduleName)) {
       if (treeData.children) {
         for (const child of treeData.children) {
@@ -870,9 +771,7 @@ export class VFSCore {
 
     let createdNode: VNode;
     if (treeData.type === VNodeType.FILE) {
-      createdNode = await this.createFile(
-        moduleName, nodePath, treeData.content, treeData.metadata
-      );
+      createdNode = await this.createFile(moduleName, nodePath, treeData.content, treeData.metadata);
     } else {
       createdNode = await this.createDirectory(moduleName, nodePath, treeData.metadata);
       if (treeData.children) {
@@ -897,11 +796,6 @@ export class VFSCore {
    */
   static async copyDatabase(sourceDbName: string, targetDbName: string): Promise<void> {
     console.log(`[VFSCore] Starting DB copy: ${sourceDbName} -> ${targetDbName}`);
-
-    // 1. 关闭可能存在的源连接（虽然这里不持有实例，但为了安全）
-    // 真实场景中，如果是本机复制，通常不需要显式关闭外部连接，除非触发了 versionchange
-
-    // 2. 删除目标数据库 (确保干净)
     await new Promise<void>((resolve, reject) => {
         const delReq = indexedDB.deleteDatabase(targetDbName);
         delReq.onsuccess = () => resolve();
@@ -928,24 +822,15 @@ export class VFSCore {
         req.onerror = () => reject(req.error);
     });
 
-    // 遍历所有定义的 Store 进行复制
     const stores = Object.values(VFS_STORES);
-    
     for (const storeName of stores) {
-        if (!srcDb.objectStoreNames.contains(storeName) || !tgtDb.objectStoreNames.contains(storeName)) {
-            continue;
-        }
-
+        if (!srcDb.objectStoreNames.contains(storeName) || !tgtDb.objectStoreNames.contains(storeName)) continue;
         await new Promise<void>((resolve, reject) => {
             const readTx = srcDb.transaction(storeName, 'readonly');
             const writeTx = tgtDb.transaction(storeName, 'readwrite');
-            
             const sourceStore = readTx.objectStore(storeName);
             const targetStore = writeTx.objectStore(storeName);
-
-            // 使用游标流式复制
             const cursorReq = sourceStore.openCursor();
-            
             cursorReq.onsuccess = (e) => {
                 const cursor = (e.target as IDBRequest).result;
                 if (cursor) {
@@ -953,8 +838,6 @@ export class VFSCore {
                     cursor.continue();
                 }
             };
-
-            // 监听写事务完成
             writeTx.oncomplete = () => resolve();
             writeTx.onerror = () => reject(writeTx.error);
             readTx.onerror = () => reject(readTx.error);
