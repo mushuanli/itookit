@@ -19,7 +19,7 @@ export class NodeRenderer {
 
         const mountPoints: { output?: HTMLElement } = {};
 
-        if (node.type === 'agent') {
+        if (node.type === 'agent' || node.type === 'router') { // router 也可以有工具栏
             this.renderAgent(el, node, mountPoints);
         } else if (node.type === 'tool') {
             this.renderTool(el, node);
@@ -36,16 +36,29 @@ export class NodeRenderer {
         // 头部：图标 + 名称 (Chat Title) + 工具栏
         el.innerHTML = `
             <div class="llm-ui-node__header">
-                <div class="llm-ui-node__title">${escapeHTML(node.name || 'Assistant')}</div>
+                <div class="llm-ui-node__title">
+                    <span class="llm-ui-node__icon">${node.icon || '🤖'}</span>
+                    ${escapeHTML(node.name || 'Assistant')}
+                </div>
                 <div class="llm-ui-node__status llm-ui-node__status--${node.status}">${node.status}</div>
                 
                 <div class="llm-ui-node__toolbar">
+                    <button class="llm-ui-btn-tool" data-action="retry" title="Retry / Regenerate">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                    </button>
+                    
                     <button class="llm-ui-btn-tool" data-action="edit" title="Edit Mode">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
                     </button>
+                    
                     <button class="llm-ui-btn-tool" data-action="copy" title="Copy Content">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
                     </button>
+
+                    <button class="llm-ui-btn-tool" data-action="delete" title="Delete">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-red-500"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                    </button>
+
                     <button class="llm-ui-btn-tool" data-action="collapse" title="Collapse/Expand">
                         <svg class="icon-collapse" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
                     </button>
@@ -72,11 +85,17 @@ export class NodeRenderer {
     }
 
     private static renderTool(el: HTMLElement, node: ExecutionNode) {
+        // Tool 节点通常不需要 Retry 整个 Chat，但可以考虑 Delete
         el.innerHTML = `
             <div class="llm-ui-node__header">
                 <span class="llm-ui-node__icon">🔧</span>
                 <span class="llm-ui-node__title">${escapeHTML(node.name)}</span>
                 <span class="llm-ui-node__status llm-ui-node__status--${node.status}">${node.status}</span>
+                <div class="llm-ui-node__toolbar">
+                     <button class="llm-ui-btn-tool" data-action="delete" title="Delete">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                    </button>
+                </div>
             </div>
             <div class="llm-ui-node__body">
                 <div class="llm-ui-node__args"><code>${escapeHTML(JSON.stringify(node.data.toolCall?.args || {}))}</code></div>

@@ -3,15 +3,28 @@ import { OrchestratorEvent, SessionGroup, ExecutionNode } from '../types';
 import { NodeRenderer } from './NodeRenderer';
 import { MDxController } from './mdx/MDxController';
 
+// ✨ [新增] 定义节点动作接口
+export interface NodeActionCallback {
+    (action: 'retry' | 'delete', nodeId: string): void;
+}
+
 export class HistoryView {
     private nodeMap = new Map<string, HTMLElement>();
     private editorMap = new Map<string, MDxController>();
     private container: HTMLElement;
+    
+    // Callbacks
     private onContentChange?: (id: string, content: string, type: 'user' | 'node') => void;
+    private onNodeAction?: NodeActionCallback; // ✨ 新增
 
-    constructor(container: HTMLElement, onContentChange?: (id: string, content: string, type: 'user' | 'node') => void) {
+    constructor(
+        container: HTMLElement, 
+        onContentChange?: (id: string, content: string, type: 'user' | 'node') => void,
+        onNodeAction?: NodeActionCallback // ✨ 新增
+    ) {
         this.container = container;
         this.onContentChange = onContentChange;
+        this.onNodeAction = onNodeAction;
     }
 
     clear() {
@@ -213,6 +226,23 @@ export class HistoryView {
             const editBtn = element.querySelector('[data-action="edit"]');
             const copyBtn = element.querySelector('[data-action="copy"]');
             const collapseBtn = element.querySelector('[data-action="collapse"]');
+            
+            // ✨ [新增] 绑定 Retry 和 Delete
+            const retryBtn = element.querySelector('[data-action="retry"]');
+            const deleteBtn = element.querySelector('[data-action="delete"]');
+
+            retryBtn?.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.onNodeAction?.('retry', node.id);
+            });
+
+            deleteBtn?.addEventListener('click', (e) => {
+                e.stopPropagation();
+                // 简单的 UI 确认 (可选，也可以在业务层做)
+                if (confirm('Delete this message?')) {
+                    this.onNodeAction?.('delete', node.id);
+                }
+            });
 
             // 修正初始图标为 Up Arrow (因为默认是展开的)
             if (collapseBtn) {
