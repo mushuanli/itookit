@@ -80,6 +80,7 @@ export interface EngineEvent {
 export interface ISessionEngine {
     // --- Read Operations ---
     
+    init():Promise<void> ;
     /** 加载当前的根节点树结构 */
     loadTree(): Promise<EngineNode[]>;
     

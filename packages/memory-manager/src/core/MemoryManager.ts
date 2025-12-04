@@ -1,7 +1,7 @@
 /**
  * @file memory-manager/core/MemoryManager.ts
  */
-import { VFSCoreAdapter } from '@itookit/vfs-core';
+import { VFSModuleEngine } from '@itookit/vfs-core';
 import { 
     createVFSUI, 
     connectEditorLifecycle, 
@@ -32,8 +32,8 @@ export class MemoryManager {
         // 2. 确定 SessionEngine
         if (config.customEngine) {
             this.engine = config.customEngine;
-        } else if (config.vfsCore && config.moduleName) {
-            this.engine = new VFSCoreAdapter(config.vfsCore, config.moduleName);
+        } else if ( config.moduleName) {
+            this.engine = new VFSModuleEngine(config.moduleName);
         } else {
             throw new Error("[MemoryManager] You must provide either 'customEngine' or both 'vfsCore' and 'moduleName'.");
         }
@@ -170,21 +170,8 @@ export class MemoryManager {
     }
 
     public async start() {
-        // 兼容旧模式：确保模块挂载
-        if (!this.config.customEngine && this.config.vfsCore && this.config.moduleName) {
-            await this._ensureModuleMounted(this.config.vfsCore, this.config.moduleName);
-        }
+        await this.engine.init();
         await this.vfsUI.start(); 
-    }
-
-    private async _ensureModuleMounted(vfsCore: any, moduleName: string) {
-        if (!vfsCore.getModule(moduleName)) {
-            try {
-                await vfsCore.mount(moduleName, 'Memory Manager Module');
-            } catch (error: any) {
-                if (error.code !== 'ALREADY_EXISTS') console.error(`[MemoryManager] Mount failed:`, error);
-            }
-        }
     }
 
     public destroy() {
