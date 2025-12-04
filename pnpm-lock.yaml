@@ -228,6 +228,9 @@ importers:
       '@itookit/mdxeditor':
         specifier: workspace:*
         version: link:../mdx
+      '@itookit/vfs-core':
+        specifier: workspace:*
+        version: link:../vfs-core
       marked:
         specifier: ^12.0.2
         version: 12.0.2
