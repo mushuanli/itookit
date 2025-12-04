@@ -1,4 +1,4 @@
-// @file core/llm/LLMSessionEngine.ts
+// @file llm-ui/engine/LLMSessionEngine.ts
 
 import { VFSCore, VNode, VNodeType,SearchQuery } from '@itookit/vfs-core';
 import { 
@@ -283,8 +283,8 @@ export class LLMSessionEngine implements ILLMSessionEngine {
         const internalNodes = await this.vfsCore.getTree(this.moduleName, '/');
         
         return internalNodes
-            .filter(node => node.name.endsWith('.chat') && node.type === VNodeType.FILE)
-            .map(node => this.toEngineNode(node));
+            .filter((node: VNode) => node.name.endsWith('.chat') && node.type === VNodeType.FILE)
+            .map((node: VNode) => this.toEngineNode(node));
     }
 
     // 辅助转换方法
@@ -398,15 +398,15 @@ export class LLMSessionEngine implements ILLMSessionEngine {
         
         // 3. 过滤并转换结果
         return results
-            .filter(n => n.name.endsWith('.chat'))
+            .filter((n: VNode) => n.name.endsWith('.chat'))
             // 如果 vfsQuery 没搜到 metadata.title，这里可以在内存中二次过滤
-            .filter(n => {
+            .filter((n: VNode) => {
                 if (!query.text) return true;
                 const title = n.metadata?.title || '';
                 // 简单的内存补救搜索，以防 VFS 搜索未命中 metadata
                 return n.name.includes(query.text) || title.includes(query.text); 
             })
-            .map(n => this.toEngineNode(n));
+            .map((n: VNode) => this.toEngineNode(n));
     }
 
     // 其他代理方法
@@ -443,10 +443,10 @@ export class LLMSessionEngine implements ILLMSessionEngine {
     // Stub for getAllTags - optional but good to have
     async getAllTags(): Promise<Array<{ name: string; color?: string }>> {
         const tags = await this.vfsCore.getAllTags();
-        return tags.map(t => ({ name: t.name, color: t.color }));
+        return tags.map((t: any) => ({ name: t.name, color: t.color }));
     }
 
     on(event: EngineEventType, callback: (event: EngineEvent) => void): () => void {
-        return this.vfs.events.on(event as any, (e) => callback(e as any));
+        return this.vfs.events.on(event as any, (e: any) => callback(e as any));
     }
 }

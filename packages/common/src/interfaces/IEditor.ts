@@ -67,6 +67,7 @@ export abstract class IEditor {
 
     abstract getText(): string;
     abstract setText(markdown: string): void;
+
     abstract focus(): void;
 
     // --- 状态与UI交互 ---
