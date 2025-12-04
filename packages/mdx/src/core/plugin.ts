@@ -82,12 +82,9 @@ export interface PluginContext {
   // 持久化存储
   getScopedStore(): ScopedPersistenceStore;
   
-  // VFS 集成 - 增强类型
-  getVFSCore(): VFSCore | null;
+  getSessionEngine?(): ISessionEngine | null;
   getCurrentNodeId(): string | null;
 
-  // ✨ [修复] 新增 Session Engine 访问接口
-  getSessionEngine?(): ISessionEngine | null;
   
   // 编辑器专用（仅在 MDxEditor 中可用）
   registerCommand?(name: string, fn: Function): void;

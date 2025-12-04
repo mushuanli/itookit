@@ -5,8 +5,7 @@ import { EditorState, Extension, Compartment } from '@codemirror/state';
 import { EditorView } from 'codemirror';
 import { markdown } from '@codemirror/lang-markdown';
 import { search } from '@codemirror/search';
-import type { IPersistenceAdapter, ISessionEngine } from '@itookit/common';
-import type { VFSCore } from '@itookit/vfs-core';
+import type { IPersistenceAdapter } from '@itookit/common';
 import { MDxRenderer } from '../renderer/renderer';
 import type { MDxPlugin } from '../core/plugin';
 import type { TaskToggleResult } from '../plugins/interactions/task-list.plugin';
@@ -23,9 +22,7 @@ import { CoreEditorPlugin } from '../plugins/core/core-editor.plugin';
 
 export interface MDxEditorConfig extends EditorOptions {
   searchMarkClass?: string;
-  vfsCore?: VFSCore;
   persistenceAdapter?: IPersistenceAdapter;
-  sessionEngine?: ISessionEngine;
 }
 
 /**
@@ -47,7 +44,6 @@ export class MDxEditor extends IEditor {
   private isDestroying = false;
   private _isDirty = false;
 
-  // ✨ [新增] 渲染锁，防止并发渲染导致的 DOM 冲突
   private renderPromise: Promise<void> = Promise.resolve();
 
   constructor(options: MDxEditorConfig = {}) {
@@ -56,7 +52,6 @@ export class MDxEditor extends IEditor {
     this.currentMode = options.initialMode || 'edit';
     this.renderer = new MDxRenderer({
       searchMarkClass: options.searchMarkClass,
-      vfsCore: options.vfsCore,
       nodeId: options.nodeId,
       persistenceAdapter: options.persistenceAdapter,
       sessionEngine: options.sessionEngine,
@@ -324,20 +319,16 @@ export class MDxEditor extends IEditor {
       const json = this.tryParseJson(content);
       
       if (json) {
-          // 策略：提取常见字段
           const parts: string[] = [];
           if (json.name) parts.push(json.name);
           if (json.description) parts.push(json.description);
           if (json.summary) parts.push(json.summary);
-          
-          // Chat history 格式
           if (Array.isArray(json.pairs)) {
               json.pairs.forEach((p: any) => {
                   if (p.human) parts.push(p.human);
                   if (p.ai) parts.push(p.ai);
               });
           }
-          
           return parts.join('\n');
       }
 
@@ -485,13 +476,8 @@ export class MDxEditor extends IEditor {
       
       console.log(`[MDxEditor] Destroying instance for node ${this.config.nodeId || 'unknown'}.`);
 
-        // 在这里可以添加一个最后的、非阻塞的保存尝试，作为双重保险，
-        // 但主要保存逻辑已移至连接器中。
-        // if (this.config.vfsCore && this.config.nodeId) {
-        //     this.config.vfsCore.getVFS().write(this.config.nodeId, this.getText()).catch(e => {
-        //         console.warn('[MDxEditor] Non-critical background save on destroy failed.', e);
-        //     });
-        // }
+      // ✨ [清理] 移除了原有的 VFS 直接保存逻辑
+      // 现在应由调用者（如 Connector 或 App 层）通过 sessionEngine 处理最终保存
 
       this.editorView?.destroy();
       this.renderer.destroy();

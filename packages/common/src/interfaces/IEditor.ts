@@ -4,6 +4,8 @@
  * @interface
  */
 
+import { ISessionEngine } from './ISessionEngine';
+
 export type SearchResultSource = 'editor' | 'renderer';
 
 export interface UnifiedSearchResult {
@@ -19,14 +21,35 @@ export interface Heading {
     id: string; // ID必须在文档内唯一
 }
 
-// ✨ [最终] 合并为一个统一、可扩展的配置接口
+// ✨ [重构] 提升 sessionEngine 和 nodeId 为核心配置
 export interface EditorOptions {
+  /** 初始 Markdown 内容 */
   initialContent?: string;
+  
+  /** 初始模式 */
   initialMode?: 'edit' | 'render';
+  
+  /** 标题（可选） */
   title?: string;
+  
+  /** 
+   * 当前编辑器绑定的节点/文件 ID 
+   * 结合 sessionEngine 使用，用于定位存储位置、元数据和上下文。
+   */
   nodeId?: string;
+  
+  /**
+   * 会话引擎实例。
+   * 提供文件系统操作、元数据读写、资源搜索等核心能力。
+   * 这是编辑器与数据层交互的统一接口。
+   */
+  sessionEngine?: ISessionEngine;
+  
+  /** 是否只读 */
   readOnly?: boolean;
-  [key: string]: any; // 允许传递任何特定于实现的选项
+  
+  /** 允许传递任何特定于实现的选项 */
+  [key: string]: any; 
 }
 
 // ✨ [核心修改] 增加 'blur' 和 'focus' 事件类型

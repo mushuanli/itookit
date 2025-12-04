@@ -4,8 +4,7 @@
 import type { MarkedExtension } from 'marked';
 import type { Extension } from '@codemirror/state';
 import { ServiceContainer } from './service-container';
-import type { VFSCore, NodeStat } from '@itookit/vfs-core';
-import type { IPersistenceAdapter, ISessionEngine } from '@itookit/common'; // ✨ [新增] 导入 ISessionEngine
+import type { IPersistenceAdapter, ISessionEngine } from '@itookit/common';
 import type {
   MDxPlugin,
   PluginContext,
@@ -43,11 +42,12 @@ class GlobalMemoryStore {
 }
 
 /**
- * VFS 存储实现 - 使用 VNode metadata
+ * ✨ [新增] 基于 Engine 的元数据存储实现
+ * 替代了原有的 VFSStore，解耦了具体的 VFS 实现
  */
-class VFSStore implements ScopedPersistenceStore {
+class EngineMetadataStore implements ScopedPersistenceStore {
   constructor(
-    private vfsCore: VFSCore,
+    private engine: ISessionEngine,
     private nodeId: string,
     private pluginNamespace: string
   ) {}
@@ -58,44 +58,51 @@ class VFSStore implements ScopedPersistenceStore {
 
   async get(key: string): Promise<any> {
     try {
-      // [修复] stat 方法在底层的 VFS 实例上，通过 getVFS() 访问
-      const nodeStat: NodeStat = await this.vfsCore.getVFS().stat(this.nodeId);
-      const pluginData = nodeStat.metadata?.[this.getMetaKey()];
+      const node = await this.engine.getNode(this.nodeId);
+      if (!node) return undefined;
+
+      const pluginData = node.metadata?.[this.getMetaKey()];
       return pluginData?.[key];
     } catch (error) {
-      console.warn(`VFSStore: Failed to get key "${key}"`, error);
+      console.warn(`EngineMetadataStore: Failed to get key "${key}"`, error);
       return undefined;
     }
   }
 
   async set(key: string, value: any): Promise<void> {
     try {
-      // [修复] 先获取当前元数据
-      const nodeStat: NodeStat = await this.vfsCore.getVFS().stat(this.nodeId);
+      // 1. 获取最新节点数据
+      const node = await this.engine.getNode(this.nodeId);
+      if (!node) throw new Error(`Node ${this.nodeId} not found`);
+
+      // 2. 准备数据
       const metaKey = this.getMetaKey();
-      const currentMetadata = nodeStat.metadata || {};
+      const currentMetadata = node.metadata || {};
       const pluginData = currentMetadata[metaKey] || {};
+      
       pluginData[key] = value;
       
+      // 3. 构建新的元数据对象（保留其他元数据）
       const newMetadata = {
           ...currentMetadata,
           [metaKey]: pluginData,
       };
 
-      // [修复] 使用新增的 updateNodeMetadata 方法
-      await this.vfsCore.updateNodeMetadata(this.nodeId, newMetadata);
+      // 4. 调用 Engine 更新
+      await this.engine.updateMetadata(this.nodeId, newMetadata);
     } catch (error) {
-      console.error(`VFSStore: Failed to set key "${key}"`, error);
+      console.error(`EngineMetadataStore: Failed to set key "${key}"`, error);
       throw error;
     }
   }
 
   async remove(key: string): Promise<void> {
     try {
-      // [修复] 先获取当前元数据
-      const nodeStat: NodeStat = await this.vfsCore.getVFS().stat(this.nodeId);
+      const node = await this.engine.getNode(this.nodeId);
+      if (!node) return;
+
       const metaKey = this.getMetaKey();
-      const currentMetadata = nodeStat.metadata || {};
+      const currentMetadata = node.metadata || {};
       const pluginData = currentMetadata[metaKey];
       
       if (pluginData && key in pluginData) {
@@ -104,11 +111,10 @@ class VFSStore implements ScopedPersistenceStore {
             ...currentMetadata,
             [metaKey]: pluginData,
         };
-        // [修复] 使用新增的 updateNodeMetadata 方法
-        await this.vfsCore.updateNodeMetadata(this.nodeId, newMetadata);
+        await this.engine.updateMetadata(this.nodeId, newMetadata);
       }
     } catch (error) {
-      console.warn(`VFSStore: Failed to remove key "${key}"`, error);
+      console.warn(`EngineMetadataStore: Failed to remove key "${key}"`, error);
     }
   }
 }
@@ -175,12 +181,12 @@ export class PluginManager {
   private hooks: Map<string, Map<symbol, Function>> = new Map();
   private eventBus: Map<string, Map<symbol, Function>> = new Map();
   private serviceContainer: ServiceContainer;
-  private vfsCore: VFSCore | null = null;
-  private currentNodeId: string | null = null;
-  private dataAdapter: IPersistenceAdapter | null = null;
   
-  // ✨ [新增] SessionEngine 引用
+  // ✨ [重构] 核心数据源依赖 ISessionEngine
   private sessionEngine: ISessionEngine | null = null;
+  private currentNodeId: string | null = null;
+  
+  private dataAdapter: IPersistenceAdapter | null = null;
 
   private coreInstance: any;
   private instanceId: string;
@@ -210,25 +216,19 @@ export class PluginManager {
   }
 
   /**
-   * 设置 VFS 核心实例
+   * ✨ [重构] 设置编辑器上下文 (Engine + NodeID)
+   * 替代原有的 setVFSCore
    */
-  setVFSCore(vfsCore: VFSCore, nodeId: string): void {
-    this.vfsCore = vfsCore;
-    this.currentNodeId = nodeId;
+  setContext(nodeId: string | undefined, engine: ISessionEngine | undefined): void {
+    if (nodeId) this.currentNodeId = nodeId;
+    if (engine) this.sessionEngine = engine;
   }
-
+  
   /**
    * 设置数据适配器（使用 @itookit/common 的标准接口）
    */
   setDataAdapter(adapter: IPersistenceAdapter): void {
     this.dataAdapter = adapter;
-  }
-
-  /**
-   * ✨ [新增] 设置 Session Engine
-   */
-  setSessionEngine(engine: ISessionEngine): void {
-    this.sessionEngine = engine;
   }
 
   /**
@@ -291,16 +291,10 @@ export class PluginManager {
       // 生命周期钩子（支持移除）
       on: (hook: string, callback: Function) => {
         const handlerId = Symbol(`${plugin.name}:${hook}`);
-        if (!this.hooks.has(hook)) {
-          this.hooks.set(hook, new Map());
-        }
+        if (!this.hooks.has(hook)) this.hooks.set(hook, new Map());
         this.hooks.get(hook)!.set(handlerId, callback);
-        
         hookHandlers.set(hook, handlerId);
-
-        return () => {
-          this.hooks.get(hook)?.delete(handlerId);
-        };
+        return () => { this.hooks.get(hook)?.delete(handlerId); };
       },
 
       // 依赖注入
@@ -344,23 +338,15 @@ export class PluginManager {
         return this._createStore(plugin.name);
       },
 
-      // VFS 集成
-      getVFSCore: () => this.vfsCore,
+      // ✨ [重构] 暴露标准 Engine 接口
+      getSessionEngine: () => this.sessionEngine,
       getCurrentNodeId: () => this.currentNodeId,
 
-      // ✨ [新增] 获取 Session Engine
-      getSessionEngine: () => this.sessionEngine,
 
       // 清理函数（插件销毁时调用）
       _cleanup: () => {
-        hookHandlers.forEach((handlerId, hook) => {
-          this.hooks.get(hook)?.delete(handlerId);
-        });
-
-        eventHandlers.forEach((handlerId, eventName) => {
-          this.eventBus.get(eventName)?.delete(handlerId);
-        });
-
+        hookHandlers.forEach((id, hook) => this.hooks.get(hook)?.delete(id));
+        eventHandlers.forEach((id, evt) => this.eventBus.get(evt)?.delete(id));
         hookHandlers.clear();
         eventHandlers.clear();
       },
@@ -368,22 +354,22 @@ export class PluginManager {
   }
 
   /**
-   * 创建存储实例（优先级：VFS > Adapter > Memory）
+   * 创建存储实例（优先级：Engine > Adapter > Memory）
    */
   private _createStore(pluginName: string): ScopedPersistenceStore {
     const storeNamespace = `${this.instanceId}:${pluginName}`;
 
-    // 优先使用 VFS
-    if (this.vfsCore && this.currentNodeId) {
-      return new VFSStore(this.vfsCore, this.currentNodeId, storeNamespace);
+    // 1. 优先使用 Engine Metadata (标准方式)
+    if (this.sessionEngine && this.currentNodeId) {
+      return new EngineMetadataStore(this.sessionEngine, this.currentNodeId, pluginName);
     }
 
-    // 其次使用外部适配器
+    // 2. 其次使用外部适配器 (兼容模式)
     if (this.dataAdapter) {
       return new AdapterStore(this.dataAdapter, storeNamespace);
     }
 
-    // 最后使用实例隔离的内存存储
+    // 3. 最后使用内存存储
     if (!this.instanceStores.has(pluginName)) {
       this.instanceStores.set(pluginName, new MemoryStore());
     }
@@ -410,22 +396,14 @@ export class PluginManager {
   unregister(pluginName: string): void {
     const entry = this.plugins.get(pluginName);
     if (!entry) return;
-
     const { plugin, context } = entry;
+    plugin.destroy?.();
+    context._cleanup?.();
 
-    if (plugin.destroy) {
-      plugin.destroy();
-    }
-
-    if (context._cleanup) {
-      context._cleanup();
-    }
-
+    // 清理内存存储
     const store = this.instanceStores.get(pluginName);
-    if (store) {
-      store.clear();
-      this.instanceStores.delete(pluginName);
-    }
+    store?.clear?.();
+    this.instanceStores.delete(pluginName);
 
     this.plugins.delete(pluginName);
   }
@@ -436,13 +414,10 @@ export class PluginManager {
   executeTransformHook<T>(hookName: string, initialValue: T): T {
     const callbacks = this.hooks.get(hookName);
     if (!callbacks) return initialValue;
-
     let value = initialValue;
     for (const callback of callbacks.values()) {
       const result = callback(value);
-      if (result !== undefined) {
-        value = result;
-      }
+      if (result !== undefined) value = result;
     }
     return value;
   }
@@ -452,11 +427,7 @@ export class PluginManager {
    */
   executeActionHook(hookName: string, payload: any): void {
     const callbacks = this.hooks.get(hookName);
-    if (!callbacks) return;
-
-    for (const callback of callbacks.values()) {
-      callback(payload);
-    }
+    callbacks?.forEach(cb => cb(payload));
   }
 
   /**
@@ -464,10 +435,10 @@ export class PluginManager {
    */
   async executeHookAsync(hookName: string, payload: any): Promise<void> {
     const callbacks = this.hooks.get(hookName);
-    if (!callbacks) return;
-
-    for (const callback of callbacks.values()) {
-      await callback(payload);
+    if (callbacks) {
+        for (const callback of callbacks.values()) {
+            await callback(payload);
+        }
     }
   }
 
@@ -476,11 +447,7 @@ export class PluginManager {
    */
   emit(eventName: string, payload: any): void {
     const listeners = this.eventBus.get(eventName);
-    if (!listeners) return;
-
-    for (const listener of listeners.values()) {
-      listener(payload);
-    }
+    listeners?.forEach(cb => cb(payload));
   }
 
 
@@ -492,59 +459,44 @@ export class PluginManager {
    */
   listen(eventName: string, callback: Function): () => void {
     const handlerId = Symbol(`external-listener:${eventName}`);
-    
-    if (!this.eventBus.has(eventName)) {
-      this.eventBus.set(eventName, new Map());
-    }
+    if (!this.eventBus.has(eventName)) this.eventBus.set(eventName, new Map());
     this.eventBus.get(eventName)!.set(handlerId, callback);
-
-    return () => {
-      this.eventBus.get(eventName)?.delete(handlerId);
-    };
+    return () => { this.eventBus.get(eventName)?.delete(handlerId); };
   }
 
   /**
    * 获取命令
    */
-  getCommand(name: string): Function | undefined {
-    return this.commands.get(name);
-  }
+  getCommand(name: string): Function | undefined { return this.commands.get(name); }
 
   /**
    * 获取所有已注册的命令
    */
-  getCommands(): Map<string, Function> {
-    return this.commands;
-  }
+  getCommands(): Map<string, Function> { return this.commands; }
 
   /**
    * 获取所有工具栏按钮配置
    */
-  getToolbarButtons(): ToolbarButtonConfig[] {
-    return this.toolbarButtons;
-  }
+  getToolbarButtons(): ToolbarButtonConfig[] { return this.toolbarButtons; }
+
 
   /**
    * 获取所有标题栏按钮配置
    */
-  getTitleBarButtons(): TitleBarButtonConfig[] {
-    return this.titleBarButtons;
-  }
+  getTitleBarButtons(): TitleBarButtonConfig[] { return this.titleBarButtons; }
 
-  setNodeId(nodeId: string): void {
-    this.currentNodeId = nodeId;
-  }
+  setNodeId(nodeId: string): void { this.currentNodeId = nodeId; }
+  
+  // ✨ [新增] 设置 Session Engine (方便外部单独调用)
+  setSessionEngine(engine: ISessionEngine): void { this.sessionEngine = engine; }
 
   destroy(): void {
-    const pluginNames = Array.from(this.plugins.keys());
-    pluginNames.forEach(name => this.unregister(name));
-
+    Array.from(this.plugins.keys()).forEach(name => this.unregister(name));
     this.hooks.clear();
     this.eventBus.clear();
     this.serviceContainer.clear();
     this.instanceStores.clear();
     this.codemirrorExtensions = [];
-
     this.commands.clear();
     this.toolbarButtons = [];
     this.titleBarButtons = [];
@@ -553,7 +505,5 @@ export class PluginManager {
   /**
    * 获取实例 ID
    */
-  getInstanceId(): string {
-    return this.instanceId;
-  }
+  getInstanceId(): string { return this.instanceId; }
 }
