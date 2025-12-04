@@ -12,12 +12,11 @@ export interface MemoryManagerConfig {
     // --- 引擎配置 (二选一) ---
     /** 
      * 自定义引擎实例 (推荐)。
-     * 如果提供，将忽略 vfsCore 和 moduleName。
+     * 如果提供，将忽略 moduleName。
      */
     customEngine?: ISessionEngine;
-    
-    /** 传统方式: 基于 VFSCore 的配置 */
-    vfsCore?: VFSCore;
+
+    /* 创建默认engine */
     moduleName?: string;
 
     /**
