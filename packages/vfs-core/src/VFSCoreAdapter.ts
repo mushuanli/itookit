@@ -2,7 +2,11 @@
  * @file vfs-core/VFSCoreAdapter.ts
  * @desc Adapts the specific @itookit/vfs-core implementation to the generic ISessionEngine interface.
  */
-import { VFSCore, VNode, VNodeType, VFSEventType } from '@itookit/vfs-core';
+// [修复] 使用相对路径导入，避免读取到旧的构建产物
+import { VFSCore } from './VFSCore'; 
+import { VNode, VNodeType } from './store/types';
+import { VFSEventType } from './core/types';
+
 import type { 
     ISessionEngine, 
     EngineNode, 
