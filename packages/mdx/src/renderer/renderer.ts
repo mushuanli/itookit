@@ -2,16 +2,25 @@
 import { Marked } from 'marked';
 import { PluginManager } from '../core/plugin-manager';
 import type { MDxPlugin } from '../core/plugin';
-import type { VFSCore } from '@itookit/vfs-core';
 import type { IPersistenceAdapter, ISessionEngine } from '@itookit/common';
 import { slugify } from '@itookit/common';
 
 export interface MDxRendererConfig {
   searchMarkClass?: string;
-  vfsCore?: VFSCore;
+  
+  /** 当前渲染内容所属的节点 ID */
   nodeId?: string;
+  
+  /** 
+   * 会话引擎实例 
+   * 用于解析资源、获取元数据等
+   */
+  sessionEngine?: ISessionEngine;
+  
+  /** @deprecated 请使用 sessionEngine */
+  vfsCore?: any;
+  
   persistenceAdapter?: IPersistenceAdapter;
-  sessionEngine?: ISessionEngine; // ✨ [新增]
   [key: string]: any;
 }
 
@@ -37,23 +46,16 @@ export class MDxRenderer {
     this.instanceId = `renderer-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     this.pluginManager = new PluginManager(this);
 
-    // ✨ [新增] 优先独立设置 NodeID
-    if (config.nodeId) {
-        this.pluginManager.setNodeId(config.nodeId);
-    }
+    // ✨ [重构] 统一设置 PluginManager 上下文
+    // 优先使用 config.sessionEngine，如果不存在则检查 deprecated vfsCore (不推荐)
+    const engine = config.sessionEngine;
+    const nodeId = config.nodeId;
+    
+    this.pluginManager.setContext(nodeId, engine);
 
-    // 保持旧逻辑兼容 (如果 vfsCore 存在)
-    if (config.vfsCore && config.nodeId) {
-      this.pluginManager.setVFSCore(config.vfsCore, config.nodeId);
-    }
 
     if (config.persistenceAdapter) {
       this.pluginManager.setDataAdapter(config.persistenceAdapter);
-    }
-
-    // ✨ [新增] 注入 Session Engine
-    if (config.sessionEngine) {
-      this.pluginManager.setSessionEngine(config.sessionEngine);
     }
   }
 
@@ -93,12 +95,9 @@ export class MDxRenderer {
    * 配置 Marked 实例
    */
   private configureMarked(markedInstance: Marked, options: RenderOptions): void {
-    // [重构] 自定义渲染器，确保 ID 生成规则与 Editor/UI 一致
     const renderer = {
         heading(text: string, level: number) {
-            // 1. 使用公共 slugify
             const rawSlug = slugify(text);
-            // 2. [强制约定] 添加 heading- 前缀
             const id = `heading-${rawSlug}`;
             return `<h${level} id="${id}">${text}</h${level}>`;
         }
