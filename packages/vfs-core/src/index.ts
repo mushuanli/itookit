@@ -9,7 +9,8 @@ import { VFSCore } from './VFSCore.js';
 // 导出 VFS 核心组件
 export { VFS } from './core/VFS.js';
 export { VFSCore } from './VFSCore.js';
-export { VFSCoreAdapter } from './VFSCoreAdapter';
+export { VFSModuleEngine } from './helper/VFSModuleEngine';
+export {BaseModuleService} from './helper/BaseModuleService.js';
 
 export { PathResolver } from './core/PathResolver.js';
 export { MiddlewareRegistry } from './core/MiddlewareRegistry.js'; // [变更]

@@ -1,11 +1,11 @@
 /**
- * @file vfs-core/VFSCoreAdapter.ts
+ * @file vfs-core/helper/VFSModuleEngine.ts
  * @desc Adapts the specific @itookit/vfs-core implementation to the generic ISessionEngine interface.
  */
 // [修复] 使用相对路径导入，避免读取到旧的构建产物
-import { VFSCore } from './VFSCore'; 
-import { VNode, VNodeType } from './store/types';
-import { VFSEventType } from './core/types';
+import { VFSCore } from '../VFSCore'; 
+import { VNode, VNodeType } from '../store/types';
+import { VFSEventType } from '../core/types';
 
 import type { 
     ISessionEngine, 
@@ -15,13 +15,28 @@ import type {
     EngineEvent 
 } from '@itookit/common';
 
-export class VFSCoreAdapter implements ISessionEngine {
+export class VFSModuleEngine implements ISessionEngine {
+    private vfsCore: VFSCore;
     constructor(
-        private vfsCore: VFSCore, 
-        private moduleName: string
-    ) {}
+        private moduleName: string, 
+        vfsCore?: VFSCore
+    ) {
+        this.vfsCore = vfsCore || VFSCore.getInstance();
+    }
     
     private get vfs() { return this.vfsCore.getVFS(); }
+
+    // 【新增】一个简单的检查方法，用于快速失败
+    async init(): Promise<void> {
+        if (this.moduleName && !this.vfsCore.getModule(this.moduleName)) {
+            try {
+                await this.vfsCore.mount(this.moduleName, 'Memory Manager Module');
+            } catch (error: any) {
+                if (error.code !== 'ALREADY_EXISTS') console.error(`[MemoryManager] Mount failed:`, error);
+                throw new Error(`[Adapter Error] Module '${this.moduleName}' is not mounted.`);
+            }
+        }
+    }
 
     private toEngineNode(vnode: VNode): EngineNode {
         return {

@@ -24,7 +24,7 @@ import { createMDxEditor } from '@itookit/mdxeditor';
 import '@itookit/mdxeditor/style.css';
 
 // --- 导入 vfs-core 的便利函数 ---
-import { createVFSCore,VFSCoreAdapter } from '@itookit/vfs-core';
+import { createVFSCore,VFSModuleEngine } from '@itookit/vfs-core';
 
 //-----------------------------------------------------------------
 
@@ -154,7 +154,7 @@ async function main() {
     console.log('vfs-core initialized and "notes" module is ready.');
 
     // 初始化引擎适配器 (ISessionEngine 实现)
-    const engine = new VFSCoreAdapter(vfsCore, moduleName);
+    const engine = new VFSModuleEngine(moduleName);
     
     // --- 步骤 2: 初始化 VFS-UI ---
     // [修正] createVFSUI 签名: (options, engine)
