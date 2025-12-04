@@ -19,12 +19,13 @@ import {
     EditorEventCallback,
     slugify 
 } from '@itookit/common';
+import { CoreEditorPlugin } from '../plugins/core/core-editor.plugin';
 
 export interface MDxEditorConfig extends EditorOptions {
   searchMarkClass?: string;
   vfsCore?: VFSCore;
   persistenceAdapter?: IPersistenceAdapter;
-  sessionEngine?: ISessionEngine; // ✨ [新增] 支持传入 Engine
+  sessionEngine?: ISessionEngine;
 }
 
 /**
@@ -46,6 +47,9 @@ export class MDxEditor extends IEditor {
   private isDestroying = false;
   private _isDirty = false;
 
+  // ✨ [新增] 渲染锁，防止并发渲染导致的 DOM 冲突
+  private renderPromise: Promise<void> = Promise.resolve();
+
   constructor(options: MDxEditorConfig = {}) {
     super(); 
     this.config = options;
@@ -55,7 +59,7 @@ export class MDxEditor extends IEditor {
       vfsCore: options.vfsCore,
       nodeId: options.nodeId,
       persistenceAdapter: options.persistenceAdapter,
-      sessionEngine: options.sessionEngine, // ✨ [传递]
+      sessionEngine: options.sessionEngine,
     });
     this.renderer.setEditorInstance(this);
   }
@@ -234,13 +238,40 @@ export class MDxEditor extends IEditor {
       });
       this.setDirty(false);
 
-      // 2. 如果当前是 render 模式，必须手动触发渲染
       if (this.currentMode === 'render') {
-          // 使用异步调用，不阻塞主流程，并捕获可能的错误
-          this.renderContent().catch(err => {
-              console.error('[MDxEditor] Failed to update render view:', err);
-          });
+          // 普通 setText 仍使用 Fire-and-forget，但建议流式场景使用 setStreamingText
+          this.renderContent().catch(console.error);
       }
+    }
+  }
+
+
+  /**
+   * ✨ [核心实现] 专门用于流式输出的文本设置方法。
+   * 实现了 Promise 链式调用，确保渲染过程串行化。
+   */
+  async setStreamingText(markdown: string): Promise<void> {
+    // 1. 更新编辑器状态 (轻量同步操作)
+    if (this.editorView && markdown !== this.getText()) {
+      this.editorView.dispatch({
+        changes: { from: 0, to: this.editorView.state.doc.length, insert: markdown }
+      });
+      this.setDirty(false); 
+    }
+
+    // 2. 如果处于渲染模式，将渲染操作加入 Promise 队列
+    if (this.currentMode === 'render') {
+        // 链接到上一个 Promise
+        this.renderPromise = this.renderPromise.then(async () => {
+            try {
+                await this.renderContent();
+            } catch (e) {
+                console.error('[MDxEditor] Streaming render failed:', e);
+            }
+        });
+        
+        // 等待当前操作完成
+        await this.renderPromise;
     }
   }
 
