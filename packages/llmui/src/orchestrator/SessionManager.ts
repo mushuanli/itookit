@@ -13,7 +13,7 @@ import {
 } from '@itookit/common';
 import { ChatMessage } from '@itookit/llmdriver';
 import { AgentExecutor } from './AgentExecutor';
-import { IAgentService } from '../services/IAgentService'; // 新增引用
+import { IAgentService } from '../services/IAgentService';
 
 type SessionVariable = ChatMessage[] | File[]; 
 
@@ -23,8 +23,9 @@ export class SessionManager {
     private isGenerating = false;
     private abortController: AbortController | null = null;
     
-    // ✨ [新增] 当前会话 ID（对应 .chat 文件）
+    // [修复] 同时保存 File Node ID 和 Session UUID
     private currentSessionId: string | null = null;
+    private currentNodeId: string | null = null;
 
     // Executor 注册表：用于管理可用的 Agent/Tool/Workflow
     private executorRegistry = new Map<string, IExecutor>();
@@ -116,14 +117,15 @@ export class SessionManager {
      * ✨ [重构] 从 Engine 加载指定会话
      * @param sessionId .chat 文件对应的 UUID
      */
-    async loadSession(sessionId: string): Promise<void> {
-        console.log(`[SessionManager] Loading session: ${sessionId}`);
+    async loadSession(nodeId: string, sessionId: string): Promise<void> {
+        console.log(`[SessionManager] Loading session. Node: ${nodeId}, ID: ${sessionId}`);
+        this.currentNodeId = nodeId;
         this.currentSessionId = sessionId;
         this.sessions = [];
 
         try {
-            // 1. 从 Engine 获取上下文（节点链表）
-            const context = await this.sessionEngine.getSessionContext(sessionId);
+            // [修复] 调用 Engine 时传递 nodeId
+            const context = await this.sessionEngine.getSessionContext(nodeId, sessionId);
             
             // 2. 转换为 UI SessionGroup 格式
             for (const item of context) {
@@ -212,22 +214,19 @@ export class SessionManager {
      * @param excludeLastUserMessage 是否排除最后一条用户消息（默认 true）
      */
     private async buildMessageHistory(excludeLastUserMessage: boolean = true): Promise<ChatMessage[]> {
-        if (!this.currentSessionId) return [];
+        if (!this.currentNodeId || !this.currentSessionId) return [];
         
         try {
-            const context = await this.sessionEngine.getSessionContext(this.currentSessionId);
+            // [修复] 传入 nodeId
+            const context = await this.sessionEngine.getSessionContext(this.currentNodeId, this.currentSessionId);
             const messages: ChatMessage[] = [];
             
             for (const item of context) {
                 const node = item.node;
                 if (node.status !== 'active') continue;
                 
-                if (node.role === 'system') {
-                    messages.push({ role: 'system', content: node.content });
-                } else if (node.role === 'user') {
-                    messages.push({ role: 'user', content: node.content });
-                } else if (node.role === 'assistant') {
-                    messages.push({ role: 'assistant', content: node.content });
+                if (node.role === 'system' || node.role === 'user' || node.role === 'assistant') {
+                    messages.push({ role: node.role as any, content: node.content });
                 }
             }
             
@@ -294,7 +293,7 @@ export class SessionManager {
      */
     async runUserQuery(text: string, files: File[], executorId: string) {
         if (this.isGenerating) return;
-        if (!this.currentSessionId) {
+        if (!this.currentNodeId || !this.currentSessionId) {
             throw new Error('No session loaded. Call loadSession() first.');
         }
         
@@ -308,6 +307,7 @@ export class SessionManager {
             // 1. 持久化 User Message 到 Engine
             // ============================================
             const userNodeId = await this.sessionEngine.appendMessage(
+                this.currentNodeId,
                 this.currentSessionId,
                 'user',
                 text,
@@ -386,6 +386,7 @@ export class SessionManager {
             // 4. 预创建 Assistant Message（空内容）
             // ============================================
             const assistantNodeId = await this.sessionEngine.appendMessage(
+                this.currentNodeId,
                 this.currentSessionId,
                 'assistant',
                 '', // 初始为空，流式更新

@@ -22,17 +22,27 @@ export interface ILLMSessionEngine extends ISessionEngine {
     createSession(title: string, systemPrompt?: string): Promise<string>;
     
     /**
+     * 初始化已存在的空文件为有效的 session
+     * @param nodeId VFS 文件节点 ID
+     * @param title 标题
+     * @param systemPrompt 系统提示词
+     * @returns 生成的 sessionId
+     */
+    initializeExistingFile(nodeId: string, title: string, systemPrompt?: string): Promise<string>;
+
+    /**
      * 获取会话上下文（消息链）
-     * @param sessionId 会话 ID
+     * @param nodeId VFS 文件节点 ID (用于读取 Manifest 获取 current_head)
+     * @param sessionId 会话 UUID (用于读取隐藏目录中的消息数据)
      * @returns 按时间顺序排列的消息列表
      */
-    getSessionContext(sessionId: string): Promise<ChatContextItem[]>;
+    getSessionContext(nodeId: string, sessionId: string): Promise<ChatContextItem[]>;
     
     /**
      * 获取会话 Manifest
-     * @param sessionId 会话 ID
+     * @param nodeId VFS 文件节点 ID (直接读取文件内容)
      */
-    getManifest(sessionId: string): Promise<ChatManifest>;
+    getManifest(nodeId: string): Promise<ChatManifest>;
 
     // ============================================
     // 消息操作
@@ -40,13 +50,15 @@ export interface ILLMSessionEngine extends ISessionEngine {
     
     /**
      * 追加消息到会话
-     * @param sessionId 会话 ID
+     * @param nodeId VFS 文件节点 ID (用于更新 Manifest 指针)
+     * @param sessionId 会话 UUID (用于写入隐藏消息文件)
      * @param role 消息角色
      * @param content 消息内容
      * @param meta 元数据
-     * @returns 新消息的 nodeId
+     * @returns 新消息的 messageId
      */
     appendMessage(
+        nodeId: string,
         sessionId: string, 
         role: ChatNode['role'], 
         content: string, 
@@ -55,31 +67,38 @@ export interface ILLMSessionEngine extends ISessionEngine {
     
     /**
      * 更新消息节点（支持流式更新）
-     * @param sessionId 会话 ID
-     * @param nodeId 消息节点 ID
+     * 注意：此操作只更新隐藏目录下的消息文件，不修改 Manifest，因此不需要 VFS nodeId
+     * @param sessionId 会话 UUID
+     * @param messageId 消息节点 ID
      * @param updates 更新内容
      */
     updateNode(
         sessionId: string, 
-        nodeId: string, 
+        messageId: string, 
         updates: Partial<Pick<ChatNode, 'content' | 'meta' | 'status'>>
     ): Promise<void>;
     
     /**
      * 编辑消息（创建分支）
-     * @param sessionId 会话 ID
-     * @param originalNodeId 原始消息节点 ID
+     * @param nodeId VFS 文件节点 ID (用于更新 Manifest 指针)
+     * @param sessionId 会话 UUID
+     * @param originalMessageId 原始消息节点 ID
      * @param newContent 新内容
-     * @returns 新消息的 nodeId
+     * @returns 新消息的 messageId
      */
-    editMessage(sessionId: string, originalNodeId: string, newContent: string): Promise<string>;
+    editMessage(
+        nodeId: string, 
+        sessionId: string, 
+        originalMessageId: string, 
+        newContent: string
+    ): Promise<string>;
     
     /**
      * 删除消息（软删除）
-     * @param sessionId 会话 ID
-     * @param nodeId 消息节点 ID
+     * @param sessionId 会话 UUID
+     * @param messageId 消息节点 ID
      */
-    deleteMessage(sessionId: string, nodeId: string): Promise<void>;
+    deleteMessage(sessionId: string, messageId: string): Promise<void>;
 
     // ============================================
     // 分支操作
@@ -87,24 +106,26 @@ export interface ILLMSessionEngine extends ISessionEngine {
     
     /**
      * 切换分支
-     * @param sessionId 会话 ID
+     * @param nodeId VFS 文件节点 ID (用于更新 Manifest 指针)
+     * @param sessionId 会话 UUID
      * @param branchName 分支名称
      */
-    switchBranch(sessionId: string, branchName: string): Promise<void>;
+    switchBranch(nodeId: string, sessionId: string, branchName: string): Promise<void>;
     
     /**
      * 获取节点的兄弟节点（用于分支导航）
-     * @param sessionId 会话 ID
-     * @param nodeId 节点 ID
+     * @param sessionId 会话 UUID
+     * @param messageId 消息节点 ID
      */
-    getNodeSiblings(sessionId: string, nodeId: string): Promise<ChatNode[]>;
+    getNodeSiblings(sessionId: string, messageId: string): Promise<ChatNode[]>;
 
     // ============================================
-    // ✨ [新增] ID 转换
+    // ID 转换与工具
     // ============================================
     
     /**
      * 从 VFS nodeId 获取 sessionId
+     * 需要读取文件内容解析 Manifest
      * @param nodeId VFS 节点 ID
      * @returns sessionId 或 null
      */
