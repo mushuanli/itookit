@@ -60,10 +60,12 @@
     "@itookit/llmdriver": "workspace:*",
     "@itookit/mdxeditor": "workspace:*",
     "@itookit/vfs-core": "workspace:*",
+    "js-yaml": "^4.1.1",
     "marked": "^12.0.2",
     "react": "^19.2.0"
   },
   "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.19.25",
     "@vitest/coverage-v8": "^1.6.1",
     "typescript": "^5.9.3",

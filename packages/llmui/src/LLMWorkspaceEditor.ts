@@ -33,6 +33,11 @@ export class LLMWorkspaceEditor implements IEditor {
     
     // 保存引用
     private options: LLMEditorOptions;
+    
+    // ✨ [新增] 初始化状态 Promise
+    private initPromise: Promise<void> | null = null;
+    private initResolve: (() => void) | null = null;
+    private initReject: ((e: Error) => void) | null = null;
 
     constructor(
         container: HTMLElement,
@@ -55,66 +60,81 @@ export class LLMWorkspaceEditor implements IEditor {
         this.container = container;
         this.container.classList.add('llm-ui-workspace');
         
-        // 1. 渲染布局：TitleBar + History + Input
-        this.renderLayout();
+        // ✨ [新增] 创建初始化 Promise
+        this.initPromise = new Promise((resolve, reject) => {
+            this.initResolve = resolve;
+            this.initReject = reject;
+        });
         
-        // 2. 初始化组件
-        const historyEl = this.container.querySelector('#llm-ui-history') as HTMLElement;
-        const inputEl = this.container.querySelector('#llm-ui-input') as HTMLElement;
-
-        // ✨ [新增] 传入节点操作回调
-        this.historyView = new HistoryView(
-            historyEl, 
-            (id, content, type) => this.handleContentChange(id, content, type),
-            (action, nodeId) => this.handleNodeAction(action, nodeId)
-        );
-        
-        // 获取初始 Agent 列表
-        let initialAgents: any[] = [];
         try {
-            console.log('[LLMWorkspaceEditor] Fetching initial agents...');
-            initialAgents = await this.sessionManager.getAvailableExecutors();
-            console.log('[LLMWorkspaceEditor] Initial agents:', initialAgents);
-        } catch (e) {
-            console.warn('[LLMWorkspaceEditor] Failed to get initial agents:', e);
+            // 1. 渲染布局
+            this.renderLayout();
+            
+            // 2. 初始化组件
+            const historyEl = this.container.querySelector('#llm-ui-history') as HTMLElement;
+            const inputEl = this.container.querySelector('#llm-ui-input') as HTMLElement;
+
+            this.historyView = new HistoryView(
+                historyEl, 
+                (id, content, type) => this.handleContentChange(id, content, type),
+                (action, nodeId) => this.handleNodeAction(action, nodeId)
+            );
+            
+            let initialAgents: any[] = [];
+            try {
+                console.log('[LLMWorkspaceEditor] Fetching initial agents...');
+                initialAgents = await this.sessionManager.getAvailableExecutors();
+                console.log('[LLMWorkspaceEditor] Initial agents:', initialAgents);
+            } catch (e) {
+                console.warn('[LLMWorkspaceEditor] Failed to get initial agents:', e);
+            }
+
+            this.chatInput = new ChatInput(inputEl, {
+                onSend: (text, files, agentId) => this.handleUserSend(text, files, agentId),
+                onStop: () => this.sessionManager.abort(),
+                initialAgents: initialAgents
+            });
+
+            // 异步更新 Agents
+            setTimeout(async () => {
+                const agents = await this.sessionManager.getAvailableExecutors();
+                if (agents.length > 0) {
+                    this.chatInput.updateExecutors(agents);
+                }
+            }, 1000);
+
+            // 3. 绑定事件
+            this.bindTitleBarEvents();
+
+            // 4. 绑定 SessionManager 事件
+            this.sessionManager.onEvent((event) => {
+                this.historyView.processEvent(event);
+                if (event.type === 'finished' || event.type === 'session_start') {
+                    this.emit('change');
+                }
+            });
+
+            // 5. 从 Engine 加载会话数据
+            await this.loadSessionFromEngine(initialContent);
+
+            this.emit('ready');
+            this.initResolve?.();
+            
+        } catch (e: any) {
+            console.error('[LLMWorkspaceEditor] init failed:', e);
+            this.initReject?.(e);
+            throw e;
         }
-
-        this.chatInput = new ChatInput(inputEl, {
-            onSend: (text, files, agentId) => this.handleUserSend(text, files, agentId),
-            onStop: () => this.sessionManager.abort(),
-            initialAgents: initialAgents
-        });
-
-        // 异步更新 Agents，防止初始化时 VFS 未就绪
-        setTimeout(async () => {
-            const agents = await this.sessionManager.getAvailableExecutors();
-            if (agents.length > 0) {
-                this.chatInput.updateExecutors(agents);
-            }
-        }, 1000);
-
-        // 3. 绑定 TitleBar 事件
-        this.bindTitleBarEvents();
-
-        // 4. 绑定 SessionManager 事件
-        this.sessionManager.onEvent((event) => {
-            this.historyView.processEvent(event);
-            if (event.type === 'finished' || event.type === 'session_start') {
-                this.emit('change');
-            }
-        });
-
-        // ============================================
-        // ✨ [关键变更] 从 Engine 加载会话数据
-        // ============================================
-        await this.loadSessionFromEngine(initialContent);
-
-        this.emit('ready');
     }
 
-    /**
-     * [修复] 从 Engine 加载会话，必须使用 options.nodeId
-     */
+    // ✨ [新增] 等待初始化完成
+    async waitUntilReady(): Promise<void> {
+        if (this.initPromise) {
+            return this.initPromise;
+        }
+        return Promise.resolve();
+    }
+
     private async loadSessionFromEngine(initialContent?: string, knownSessionId?: string) {
         if (!this.options.nodeId) {
             throw new Error('[LLMWorkspaceEditor] nodeId is required.');
@@ -360,17 +380,24 @@ export class LLMWorkspaceEditor implements IEditor {
      * ✨ 重定向到 loadSessionFromEngine
      */
     setText(text: string): void {
-        // 异步加载，但 setText 是同步接口
-        // 使用 Promise 但不等待
-        this.loadSessionFromEngine(text).catch(e => {
-            console.error('[LLMWorkspaceEditor] setText failed:', e);
-            this.historyView.renderError(e);
-        });
+        // 使用 Promise 处理但不阻塞
+        this.loadSessionFromEngine(text)
+            .then(() => {
+                // [修复 Code 2345] 强制断言为 EditorEvent 以绕过严格类型检查
+                this.emit('contentLoaded' as EditorEvent);
+            })
+            .catch(e => {
+                console.error('[LLMWorkspaceEditor] setText failed:', e);
+                this.historyView.renderError(e);
+                // [修复 Code 2345] 强制断言为 EditorEvent
+                this.emit('error' as EditorEvent, e);
+            });
     }
 
-    // ============================================
-    // IEditor 接口实现
-    // ============================================
+    // ✨ [新增] 异步版本的 setText
+    async setTextAsync(text: string): Promise<void> {
+        await this.loadSessionFromEngine(text);
+    }
 
     isDirty(): boolean { 
         // Engine 自动保存，始终返回 false
@@ -382,11 +409,12 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     focus(): void { 
-        this.chatInput.focus(); 
+        this.chatInput?.focus(); 
     }
 
     async destroy(): Promise<void> {
         this.sessionManager.destroy();
+        this.historyView?.destroy();
         this.container.innerHTML = '';
         this.listeners.clear();
     }

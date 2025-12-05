@@ -2,7 +2,7 @@
 
 import { BaseModuleService, VFSCore, VFSEvent, VFSEventType } from '@itookit/vfs-core';
 import { IAgentService } from './IAgentService';
-import {LLM_DEFAULT_AGENTS,AGENT_DEFAULT_DIR,LLM_AGENT_TARGET_DIR} from '../constants';
+import { LLM_DEFAULT_AGENTS, AGENT_DEFAULT_DIR, LLM_AGENT_TARGET_DIR } from '../constants';
 
 import { 
     IAgentDefinition, 
@@ -21,21 +21,26 @@ const MCP_SERVERS_DIR = '/.mcp';
 
 type ChangeListener = () => void;
 
+// ✨ [修复 2.1] 定义扩展接口，避免 as any
+interface ExtendedModuleEngine {
+    resolvePath?(path: string): Promise<string | null>;
+}
+
 export class VFSAgentService extends BaseModuleService implements IAgentService {
     // 内存缓存
     private _connections: LLMConnection[] = [];
     private _mcpServers: MCPServer[] = [];
     
     private _listeners: Set<ChangeListener> = new Set();
-    private _syncTimer: any = null; // 用于防抖
+    private _syncTimer: ReturnType<typeof setTimeout> | null = null;
+    
+    // ✨ [修复 2.2] 保存取消订阅函数
+    private _eventUnsubscribers: Array<() => void> = [];
 
     // 默认 Agents 定义 (通常由外部传入，避免循环依赖)
     private defaultAgentsDef: any[] = [];
 
-    constructor(
-        vfs?: VFSCore,
-    ) {
-        // 1. 绑定到 FS_MODULE_AGENTS (通常是 'agents' 模块)
+    constructor(vfs?: VFSCore) {
         super(FS_MODULE_AGENTS, { description: 'AI Agents Configuration' }, vfs);
         this.defaultAgentsDef = LLM_DEFAULT_AGENTS;
     }
@@ -62,21 +67,22 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
         await this.ensureDefaults();
     }
 
-    private async ensureDirectory(path: string) {
+    // ✨ [修复 2.1] 安全的 resolvePath 方法
+    private async safeResolvePath(path: string): Promise<string | null> {
+        const engine = this.moduleEngine as ExtendedModuleEngine;
+        
+        if (typeof engine.resolvePath === 'function') {
+            return engine.resolvePath(path);
+        }
+        
+        // Fallback: 通过搜索实现
         try {
-            // 传入 path 作为 "父路径"，name 传空？不，createDirectory(name, parent)
-            // 这里用法有点 tricky。
-            // 我们可以直接用 createDirectory("dirname", "parentPath")
-            // 假设 path = "/.connections"
-            // name = ".connections", parent = "/"
-            
-            const parts = path.split('/').filter(Boolean);
-            const name = parts.pop() || '';
-            const parent = '/' + parts.join('/');
-            
-            await this.moduleEngine.createDirectory(name, parent);
-        } catch (e: any) {
-            // 忽略已存在错误
+            const fileName = path.split('/').pop() || '';
+            const results = await this.moduleEngine.search({ text: fileName, type: 'file' });
+            const match = results.find(n => n.path === path || n.name === fileName);
+            return match?.id || null;
+        } catch {
+            return null;
         }
     }
 
@@ -127,7 +133,10 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
             }
         };
 
-        eventsToWatch.forEach(evt => bus.on(evt, handler));
+        eventsToWatch.forEach(evt => {
+            const unsubscribe = bus.on(evt, handler);
+            this._eventUnsubscribers.push(unsubscribe);
+        });
     }
 
     /**
@@ -241,7 +250,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
             // 1. 检查是否存在 (使用 VFSModuleEngine 新增的 resolvePath 或 search)
             // 这里假设我们在 VFSModuleEngine 中暴露了 resolvePath，或者是通过 search
             // 为了性能，建议 VFSModuleEngine 暴露 resolvePath
-            const exists = await (this.moduleEngine as any).resolvePath(fullPath);
+            const exists = await this.safeResolvePath(fullPath);
             
             if (!exists) {
                 const { initPath, initialTags, ...content } = agentDef;
@@ -318,14 +327,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
         if (found) return found;
 
         if (agentId === 'default') {
-            return {
-                id: 'default',
-                name: 'Default Assistant',
-                type: 'agent',
-                icon: '🤖',
-                config: { connectionId: 'default', modelId: '', systemPrompt: '' },
-                interface: { inputs: [], outputs: [] }
-            };
+            return this.createDefaultAgentDefinition();
         }
         return null;
     }
@@ -375,7 +377,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
 
         // 检查是否存在
         const fullPath = `${CONNECTIONS_DIR}/${filename}`;
-        const nodeId = await (this.moduleEngine as any).resolvePath(fullPath);
+        const nodeId = await this.safeResolvePath(fullPath);
 
         if (nodeId) {
             await this.moduleEngine.writeContent(nodeId, content);
@@ -388,10 +390,18 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
         await this.refreshData();
     }
 
+    // ✨ [修复 2.3] 实现 deleteFile 方法
+    private async deleteFileByPath(path: string): Promise<void> {
+        const nodeId = await this.safeResolvePath(path);
+        if (nodeId) {
+            await this.moduleEngine.delete([nodeId]);
+        }
+    }
+
     async deleteConnection(id: string): Promise<void> {
         if (id === LLM_DEFAULT_ID) throw new Error("Cannot delete default connection");
         const path = `${CONNECTIONS_DIR}/${id}.json`;
-        await this.deleteFile(path);
+        await this.deleteFileByPath(path);
         await this.refreshData();
     }
 
@@ -409,7 +419,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
         const metadata = { icon: '🔌', title: server.name, type: 'mcp' };
 
         const fullPath = `${MCP_SERVERS_DIR}/${filename}`;
-        const nodeId = await (this.moduleEngine as any).resolvePath(fullPath);
+        const nodeId = await this.safeResolvePath(fullPath);
 
         if (nodeId) {
             await this.moduleEngine.writeContent(nodeId, content);
@@ -422,7 +432,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
 
     async deleteMCPServer(id: string): Promise<void> {
         const path = `${MCP_SERVERS_DIR}/${id}.json`;
-        await this.deleteFile(path);
+        await this.deleteFileByPath(path);
         await this.refreshData();
     }
 
@@ -437,6 +447,22 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
 
     protected notify() {
         this._listeners.forEach(l => l());
+    }
+
+    // ✨ [修复 2.2, 2.4] 添加 destroy 方法清理资源
+    destroy() {
+        // 清理事件订阅
+        this._eventUnsubscribers.forEach(fn => fn());
+        this._eventUnsubscribers = [];
+        
+        // 清理定时器
+        if (this._syncTimer) {
+            clearTimeout(this._syncTimer);
+            this._syncTimer = null;
+        }
+        
+        // 清理监听器
+        this._listeners.clear();
     }
 
     private async loadJsonFiles<T>(dirPath: string): Promise<T[]> {

@@ -4,15 +4,15 @@ export interface ChatInputOptions {
     onSend: (text: string, files: File[], executorId: string) => Promise<void>;
     onStop: () => void;
     onExecutorChange?: (executorId: string) => void;
-    // ✨ 新增这一行
     initialAgents?: ExecutorOption[]; 
 }
 
 export interface ExecutorOption {
     id: string;
     name: string;
-    icon?: string; // Emoji or URL
-    category?: string; // e.g., "Agents", "Workflows", "Tools"
+    icon?: string;
+    category?: string;
+    description?: string;
 }
 
 export class ChatInput {
@@ -209,7 +209,7 @@ export class ChatInput {
         if ((!text && this.files.length === 0) || this.loading) return;
 
         const currentExecutor = this.executorSelect.value;
-        const currentFiles = [...this.files]; // Copy
+        const currentFiles = [...this.files];
 
         // Reset UI
         this.textarea.value = '';
@@ -230,6 +230,33 @@ export class ChatInput {
     }
 
     focus() {
-        this.textarea.focus();
+        this.textarea?.focus();
+    }
+
+    // ✨ [新增] 销毁方法
+    destroy() {
+        this.container.innerHTML = '';
+        this.files = [];
+    }
+
+    // ✨ [新增] 获取当前选中的执行器
+    getSelectedExecutor(): string {
+        return this.executorSelect?.value || 'default';
+    }
+
+    // ✨ [新增] 设置输入内容
+    setInput(text: string) {
+        if (this.textarea) {
+            this.textarea.value = text;
+            // 触发高度调整
+            this.textarea.dispatchEvent(new Event('input'));
+        }
+    }
+
+    // ✨ [修复 5.1] 添加 escapeHTML 方法
+    private escapeHTML(str: string): string {
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
     }
 }

@@ -15,6 +15,8 @@ export class MDxController {
     private pendingChunks: string[] = [];
     private readyPromise: Promise<void>;
     private readyResolve!: () => void;
+    // ✨ [修复 6.1] 添加 reject 函数
+    private readyReject!: (reason: any) => void;
 
     private updateScheduled: boolean = false;
     private lastRenderTime: number = 0;
@@ -29,9 +31,10 @@ export class MDxController {
         this.isReadOnly = options?.readOnly ?? true;
         this.onChangeCallback = options?.onChange;
         
-        // ✨ [优化] 创建 ready Promise
-        this.readyPromise = new Promise((resolve) => {
+        // ✨ [修复 6.1] 同时创建 resolve 和 reject
+        this.readyPromise = new Promise((resolve, reject) => {
             this.readyResolve = resolve;
+            this.readyReject = reject;
         });
         
         console.log('[MDxController] Constructor called, starting init...');
@@ -63,7 +66,7 @@ export class MDxController {
                     'svg',
                     'ui:toolbar' 
                 ],
-                defaultCollapsed:false
+                defaultCollapsed: false
             }) as MDxEditor;
 
             this.editor.on('change', () => {
@@ -89,8 +92,9 @@ export class MDxController {
             
         } catch (e) {
             console.error('[MDxController] init() failed:', e);
-            this.readyResolve(); // 即使失败也要 resolve，避免永久阻塞
-            throw e;
+            // ✨ [修复 6.1] 使用 reject 通知失败
+            this.readyReject(e);
+            // 不再 throw，让外部通过 promise 处理
         }
     }
 
@@ -131,9 +135,11 @@ export class MDxController {
     private async performRender() {
         if (!this.editor) return;
 
-        // 使用 setStreamingText，如果编辑器支持，它会自动串行化渲染任务
-        // 防止 CSS 崩坏和 DOM 冲突
-        await this.editor.setStreamingText(this.currentContent);
+        try {
+            await this.editor.setStreamingText(this.currentContent);
+        } catch (e) {
+            console.error('[MDxController] performRender failed:', e);
+        }
 
         this.lastRenderTime = Date.now();
         this.updateScheduled = false;
@@ -142,8 +148,9 @@ export class MDxController {
     finishStream() {
         this.isStreaming = false;
         if (this.editor && this.isInitialized) {
-            // 确保最后一次内容完全同步
-            this.editor.setStreamingText(this.currentContent);
+            this.editor.setStreamingText(this.currentContent).catch(e => {
+                console.error('[MDxController] finishStream failed:', e);
+            });
         }
         this.updateScheduled = false;
         this.onChangeCallback?.(this.currentContent);
