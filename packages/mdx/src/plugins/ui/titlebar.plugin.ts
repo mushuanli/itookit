@@ -19,7 +19,7 @@ export interface CoreTitleBarPluginOptions {
   /**
    * 切换侧边栏回调函数
    */
-  toggleSidebarCallback?: (editor: MDxEditor) => void;
+  onSidebarToggle?: (editor: MDxEditor) => void;
 
   /**
    * AI 功能回调函数
@@ -103,13 +103,13 @@ export class CoreTitleBarPlugin implements MDxPlugin {
   }): void {
     const { editor } = payload;
 
-    if (this.options.toggleSidebarCallback) {
+    if (this.options.onSidebarToggle) {
       context.registerTitleBarButton?.({
         id: 'toggle-sidebar',
         title: '切换侧边栏',
         icon: '<i class="fas fa-bars"></i>',
         location: 'left',
-        onClick: () => this.options.toggleSidebarCallback?.(editor),
+        onClick: () => this.options.onSidebarToggle?.(editor),
       });
     }
 
