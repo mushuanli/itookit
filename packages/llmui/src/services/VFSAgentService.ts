@@ -2,7 +2,7 @@
 
 import { BaseModuleService, VFSCore, VFSEvent, VFSEventType } from '@itookit/vfs-core';
 import { IAgentService } from './IAgentService';
-import {LLM_DEFAULT_AGENTS} from '../constants';
+import {LLM_DEFAULT_AGENTS,AGENT_DEFAULT_DIR,LLM_AGENT_TARGET_DIR} from '../constants';
 
 import { 
     IAgentDefinition, 
@@ -16,8 +16,8 @@ import {
 // 内部常量
 const LLM_DEFAULT_CONFIG_VERSION = 9;
 const VERSION_FILE_PATH = '/.defaults_version.json';
-const CONNECTIONS_DIR = '/connections';
-const MCP_SERVERS_DIR = '/mcp';
+const CONNECTIONS_DIR = '/.connections';
+const MCP_SERVERS_DIR = '/.mcp';
 
 type ChangeListener = () => void;
 
@@ -48,11 +48,10 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
      * 初始化钩子
      */
     protected async onLoad(): Promise<void> {
-        // 1. 确保基础目录存在
-        await this.ensureDirectory(CONNECTIONS_DIR);
-        await this.ensureDirectory(MCP_SERVERS_DIR);
-
-        // 2. 初次加载数据到缓存
+        // [移除] 不再需要手动 ensureDirectory，Engine 会在写文件时自动处理
+        // 除非我们想保留空目录占位，但通常不需要。
+        // 如果确实需要空目录，可以调 this.moduleEngine.createDirectory(DIR_NAME, null);
+        
         await this.refreshData();
 
         // 3. 启动事件监听 (解决多端/多UI同步问题)
@@ -64,10 +63,20 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
     }
 
     private async ensureDirectory(path: string) {
-        try { 
-            await this.moduleEngine.createDirectory(path, null); 
+        try {
+            // 传入 path 作为 "父路径"，name 传空？不，createDirectory(name, parent)
+            // 这里用法有点 tricky。
+            // 我们可以直接用 createDirectory("dirname", "parentPath")
+            // 假设 path = "/.connections"
+            // name = ".connections", parent = "/"
+            
+            const parts = path.split('/').filter(Boolean);
+            const name = parts.pop() || '';
+            const parent = '/' + parts.join('/');
+            
+            await this.moduleEngine.createDirectory(name, parent);
         } catch (e: any) {
-            // 忽略目录已存在的错误
+            // 忽略已存在错误
         }
     }
 
@@ -136,10 +145,6 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
             console.error('[VFSAgentService] Failed to refresh data', e);
         }
     }
-
-    // =================================================================
-    // 初始化与版本控制
-    // =================================================================
 
     private async ensureDefaults(): Promise<void> {
         if (await this._isConfigUpToDate()) {
@@ -226,27 +231,37 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
 
         for (const agentDef of this.defaultAgentsDef) {
             const fileName = `${agentDef.id}.agent`;
-            const dir = agentDef.initPath || '/default';
-            const fullPath = `${dir}/${fileName}`.replace(/\/+/g, '/');
+            const parentDir = agentDef.initPath || AGENT_DEFAULT_DIR; // e.g., "/default"
 
-            // 检查文件是否存在
-            const nodeId = await this.coreVfs.pathResolver.resolve(this.moduleName, fullPath);
+            // 1. 检查是否存在 (使用 Search 或 直接 try read)
+            // 这里最快的方法是搜一下，或者通过 path 查 ID
+            // 为了利用 ModuleEngine，我们假设 search 是高效的
+            const fullPath = `${parentDir}/${fileName}`.replace(/\/+/g, '/');
+            const exists = await this.vfs.getVFS().pathResolver.resolve(this.moduleName, fullPath);
             
-            if (!nodeId) {
-                // 确保目录
-                if (dir !== '/') await this.ensureDirectory(dir);
-                
-                // 准备内容
+            if (!exists) {
                 const { initPath, initialTags, ...content } = agentDef;
                 
-                // 创建文件
-                const node = await this.moduleEngine.createFile(fileName, dir === '/' ? null : dir, JSON.stringify(content, null, 2));
-                
-                // 设置 Tags
-                if (node && initialTags) {
-                    await this.vfs.setNodeTagsById(node.id, initialTags); // node.id 是 EngineNode 的属性
+                // 2. [核心修复] 调用 ModuleEngine
+                // 参数1: 文件名
+                // 参数2: 父级标识 (这里传入路径字符串，ModuleEngine 现在能识别它了！)
+                // 参数3: 内容
+                try {
+                    const node = await this.moduleEngine.createFile(
+                        fileName, 
+                        parentDir, // <-- 传入路径常量，Engine 会自动递归创建此目录
+                        JSON.stringify(content, null, 2)
+                    );
+
+                    // 3. 设置 Tags
+                    if (initialTags && initialTags.length > 0) {
+                        // 使用 moduleEngine 的 ID 操作
+                        await this.moduleEngine.setTags(node.id, initialTags);
+                    }
+                    console.log(`[VFSAgentService] Created default agent: ${fullPath}`);
+                } catch (e) {
+                    console.error(`[VFSAgentService] Failed to create ${fullPath}`, e);
                 }
-                console.log(`[VFSAgentService] Created default agent: ${fullPath}`);
             }
         }
     }
@@ -308,15 +323,18 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
         // 根据 ID 查找文件，如果找不到则新建
         // 这里简化实现：假设文件名 = ID.agent，实际可能需要索引查找
         const filename = `${agent.id}.agent`;
-        // 尝试搜索
-        const nodes = await this.moduleEngine.search({ text: filename, type: 'file' });
-        const existingNode = nodes.find(n => n.name === filename);
+        
+        // 先尝试查找现有文件 ID
+        const results = await this.moduleEngine.search({ text: filename, type: 'file' });
+        const existingNode = results.find(n => n.name === filename);
 
         if (existingNode) {
-            await this.writeJson(existingNode.path, agent);
+            // 如果存在，按 ID 更新
+            await this.moduleEngine.writeContent(existingNode.id, JSON.stringify(agent, null, 2));
         } else {
-            // 新建在根目录
-            await this.writeJson(`/${filename}`, agent);
+            // 如果不存在，创建在根目录
+            // 同样利用 ModuleEngine，传入 null 表示根目录
+            await this.moduleEngine.createFile(filename, null, JSON.stringify(agent, null, 2));
         }
         this.notify();
     }
@@ -334,9 +352,28 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
     }
 
     async saveConnection(conn: LLMConnection): Promise<void> {
-        const path = `${CONNECTIONS_DIR}/${conn.id}.json`;
-        await this.writeJson(path, conn);
-        await this.refreshData(); // 刷新缓存
+        const filename = `${conn.id}.json`;
+        // 使用 CONNECTIONS_DIR 常量作为父路径
+        // 如果文件已存在，createFile 会报错吗？ 
+        // VFSModuleEngine.createFile -> VFSCore.createFile -> 报错 ALREADY_EXISTS
+        
+        // 所以我们还是得先检查存在性，或者让 ModuleEngine 提供 upsert 能力。
+        // 为了简单，我们先查后写。
+        
+        // 技巧：我们可以直接构造路径来查 ID，这比 search 快
+        const fullPath = `${CONNECTIONS_DIR}/${filename}`;
+        const nodeId = await this.vfs.getVFS().pathResolver.resolve(this.moduleName, fullPath);
+
+        const content = JSON.stringify(conn, null, 2);
+
+        if (nodeId) {
+            await this.moduleEngine.writeContent(nodeId, content);
+        } else {
+            // 传入父目录路径，Engine 自动处理目录创建
+            await this.moduleEngine.createFile(filename, CONNECTIONS_DIR, content);
+        }
+        
+        await this.refreshData();
     }
 
     async deleteConnection(id: string): Promise<void> {
