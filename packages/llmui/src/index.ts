@@ -49,23 +49,71 @@ export const createLLMFactory = (
     };
 
     return async (container: HTMLElement, options: EditorOptions) => {
-        // 1. 获取或创建 Engine
-        const engine = await getOrCreateEngine();
+        console.log(`[LLMFactory] START: nodeId=${options.nodeId}`);
+        
+        const engine = await getOrCreateEngine() as LLMSessionEngine;
 
-        // 2. 构建编辑器选项
+        // ============================================
+        // ✨ [核心修复] 在创建 Editor 之前确保 session 存在
+        // ============================================
+        let effectiveNodeId = options.nodeId;
+        
+        if (options.nodeId) {
+            // 第一次检查
+            console.log(`[LLMFactory] Checking session for nodeId: ${options.nodeId}`);
+            let sessionId = await engine.getSessionIdFromNodeId(options.nodeId);
+            console.log(`[LLMFactory] First check result: sessionId=${sessionId}`);
+            
+            if (!sessionId) {
+                // ✨ [修复] 使用 initializeExistingFile，不创建新文件
+                console.log('[LLMFactory] No valid session found. Initializing existing file...');
+                
+                const title = options.title || 'New Chat';
+                const newSessionId = await engine.initializeExistingFile(options.nodeId, title);
+                
+                console.log(`[LLMFactory] initializeExistingFile returned: ${newSessionId}`);
+                
+                // ✨ [关键修复] 等待一小段时间让 IndexedDB 同步
+                // 这是一个临时方案，更好的方案是确保 writeContent 是同步完成的
+                await new Promise(resolve => setTimeout(resolve, 50));
+                
+                // ✨ [关键修复] 再次验证
+                sessionId = await engine.getSessionIdFromNodeId(options.nodeId);
+                console.log(`[LLMFactory] Verification check result: sessionId=${sessionId}`);
+                
+                if (!sessionId) {
+                    // 如果还是失败，说明有更深层的问题
+                    console.error(`[LLMFactory] CRITICAL: Session still not found after initialization!`);
+                    throw new Error(`Failed to initialize session for nodeId: ${options.nodeId}`);
+                }
+            }
+            // 保持原有的 effectiveNodeId，不变
+        } else {
+            // 没有 nodeId，创建新文件
+            console.log('[LLMFactory] No nodeId provided. Creating new chat file...');
+            const newNode = await engine.createFile(options.title || 'New Chat', null);
+            effectiveNodeId = newNode.id;
+            console.log(`[LLMFactory] New file created: ${effectiveNodeId}`);
+        }
+
+        console.log(`[LLMFactory] Creating editor for nodeId: ${effectiveNodeId}`);
+        
         const editorOptions = {
             ...options,
             agentService,
             sessionEngine: engine,
-            nodeId: options.nodeId // 确保传递 nodeId
+            nodeId: effectiveNodeId
         };
+        
+        console.log(`[LLMFactory] Creating editor for nodeId: ${effectiveNodeId}`);
 
         // 3. 创建编辑器
         const editor = new LLMWorkspaceEditor(container, editorOptions);
-        
+
         // 4. 初始化
         await editor.init(container, options.initialContent);
-        
+        console.log(`[LLMFactory] Editor created successfully`);
+
         return editor;
     };
 };

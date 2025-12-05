@@ -38,7 +38,7 @@
         <ul class="main-nav-list">
             <!-- [新增] Anki Workspace 按钮 (放在第一个) -->
             <li>
-                <a class="app-nav-btn active" data-target="anki-workspace" title="Anki Memory">
+                <a class="app-nav-btn" data-target="anki-workspace" title="Anki Memory">
                     <i class="fas fa-brain"></i>
                 </a>
             </li>
@@ -59,7 +59,7 @@
                 </a>
             </li>
             <li>
-                <a class="app-nav-btn" data-target="llm-workspace" title="AI 会话">
+                <a class="app-nav-btn active" data-target="llm-workspace" title="AI 会话">
                     <i class="fas fa-robot"></i>
                 </a>
             </li>
@@ -92,7 +92,7 @@
            由 MemoryManager 接管的容器现在是空的。
            JS 会自动在其中创建 Sidebar 和 Editor。
         -->
-        <div id="anki-workspace" class="workspace-view active"></div>
+        <div id="anki-workspace" class="workspace-view"></div>
 
 
         <!-- (B) Project Workspace -->
@@ -105,7 +105,7 @@
         <div id="private-workspace" class="workspace-view"></div>
 
         <!-- (E) LLM Workspace -->
-        <div id="llm-workspace" class="workspace-view"></div>
+        <div id="llm-workspace" class="workspace-view active"></div>
 
         <!-- (A) Prompt Workspace (默认激活) -->
         <div id="prompt-workspace" class="workspace-view"></div>

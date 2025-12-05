@@ -13,14 +13,13 @@ export class HistoryView {
     private editorMap = new Map<string, MDxController>();
     private container: HTMLElement;
     
-    // Callbacks
     private onContentChange?: (id: string, content: string, type: 'user' | 'node') => void;
-    private onNodeAction?: NodeActionCallback; // ✨ 新增
+    private onNodeAction?: NodeActionCallback;
 
     constructor(
         container: HTMLElement, 
         onContentChange?: (id: string, content: string, type: 'user' | 'node') => void,
-        onNodeAction?: NodeActionCallback // ✨ 新增
+        onNodeAction?: NodeActionCallback
     ) {
         this.container = container;
         this.onContentChange = onContentChange;
@@ -246,8 +245,8 @@ export class HistoryView {
 
             // 修正初始图标为 Up Arrow (因为默认是展开的)
             if (collapseBtn) {
-                 const svg = collapseBtn.querySelector('svg');
-                 if (svg) svg.innerHTML = '<polyline points="18 15 12 9 6 15"></polyline>';
+                const svg = collapseBtn.querySelector('svg');
+                if (svg) svg.innerHTML = '<polyline points="18 15 12 9 6 15"></polyline>';
             }
 
             collapseBtn?.addEventListener('click', () => {

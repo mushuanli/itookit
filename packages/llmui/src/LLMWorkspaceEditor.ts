@@ -113,64 +113,57 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     /**
-     * ✨ [新增] 从 Engine 加载会话
+     * ✨ [核心修复] 从 Engine 加载会话
+     * 移除了 fallback 创建逻辑，确保 session 必须由 Engine.createFile 创建
      */
-    private async loadSessionFromEngine(initialContent?: string) {
-        // 尝试从 nodeId 获取 sessionId
-        if (this.options.nodeId) {
-            try {
-                const sessionId = await (this.options.sessionEngine as any).getSessionIdFromNodeId(
-                    this.options.nodeId
-                );
-                
-                if (sessionId) {
-                    this.currentSessionId = sessionId;
-                    
-                    // 加载 Manifest 获取 title
-                    const manifest = await this.options.sessionEngine.getManifest(sessionId);
-                    if (manifest.title) {
-                        this.currentTitle = manifest.title;
-                        this.titleInput.value = manifest.title;
-                    }
-                    
-                    // 加载会话内容
-                    await this.sessionManager.loadSession(sessionId);
-                    this.historyView.renderFull(this.sessionManager.getSessions());
-                    
-                    console.log(`[LLMWorkspaceEditor] Session loaded: ${sessionId}`);
-                    return;
-                }
-            } catch (e) {
-                console.warn('[LLMWorkspaceEditor] Failed to load from nodeId:', e);
-            }
+private async loadSessionFromEngine(initialContent?: string, knownSessionId?: string) {
+        // 1. 必须有 nodeId
+        if (!this.options.nodeId) {
+            throw new Error('[LLMWorkspaceEditor] nodeId is required. Cannot load session without it.');
         }
 
-        // Fallback: 尝试从 initialContent 解析
-        if (initialContent && initialContent.trim() !== '') {
-            try {
-                const data = JSON.parse(initialContent);
-                
-                // 检查是否是 Manifest 格式
-                if (data.id && data.current_head) {
-                    this.currentSessionId = data.id;
-                    
-                    if (data.title) {
-                        this.currentTitle = data.title;
-                        this.titleInput.value = data.title;
-                    }
-                    
-                    await this.sessionManager.loadSession(data.id);
-                    this.historyView.renderFull(this.sessionManager.getSessions());
-                    return;
-                }
-            } catch (e) {
-                console.error('[LLMWorkspaceEditor] Failed to parse initialContent:', e);
-            }
+    // ✨ [修复] 如果已知 sessionId，直接使用，不再检测
+    let sessionId = knownSessionId??null;
+    
+    if (!sessionId) {
+        sessionId = await this.options.sessionEngine.getSessionIdFromNodeId(this.options.nodeId);
+    }
+        
+        if (!sessionId) {
+            // ✨ [关键变更] 不再 fallback 创建，而是抛出明确错误
+            throw new Error(
+                `[LLMWorkspaceEditor] Invalid chat file: No session found for nodeId "${this.options.nodeId}". ` +
+                'Please ensure the file was created properly via LLMSessionEngine.createFile()'
+            );
         }
 
+        this.currentSessionId = sessionId;
+        console.log(`[LLMWorkspaceEditor] Session ID resolved: ${sessionId}`);
 
-
-    this.historyView.renderWelcome();
+        try {
+            // 3. 加载 Manifest 获取 title
+            const manifest = await this.options.sessionEngine.getManifest(sessionId);
+            if (manifest.title) {
+                this.currentTitle = manifest.title;
+                this.titleInput.value = manifest.title;
+            }
+            
+            // 4. 加载会话内容
+            await this.sessionManager.loadSession(sessionId);
+            
+            // 5. 渲染历史
+            const sessions = this.sessionManager.getSessions();
+            if (sessions.length > 0) {
+                this.historyView.renderFull(sessions);
+            } else {
+                this.historyView.renderWelcome();
+            }
+            
+            console.log(`[LLMWorkspaceEditor] Session loaded successfully: ${sessionId}`);
+        } catch (e) {
+            console.error('[LLMWorkspaceEditor] Failed to load session:', e);
+            throw e;
+        }
     }
 
     /**
@@ -374,7 +367,7 @@ export class LLMWorkspaceEditor implements IEditor {
         // 使用 Promise 但不等待
         this.loadSessionFromEngine(text).catch(e => {
             console.error('[LLMWorkspaceEditor] setText failed:', e);
-            this.historyView.renderWelcome();
+            this.historyView.renderError(e);
         });
     }
 
