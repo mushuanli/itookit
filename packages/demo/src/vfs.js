@@ -207,7 +207,7 @@ async function main() {
             defaultPluginOptions: {
                 'core:titlebar': {
                     title: options.title, 
-                    toggleSidebarCallback: () => vfsUIManager.toggleSidebar(),
+                    onSidebarToggle: () => vfsUIManager.toggleSidebar(),
                     enableToggleEditMode: true
                 }
             }

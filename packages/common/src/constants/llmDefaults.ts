@@ -147,3 +147,5 @@ export const LLM_PROVIDER_DEFAULTS: Record<string, LLMProviderDefinition> = {
 
 // 预设 connection/agent ID 常量,不可被删除
 export const LLM_DEFAULT_ID = 'default';
+export const FS_MODULE_CHAT='chats';
+export const FS_MODULE_AGENTS='agents';

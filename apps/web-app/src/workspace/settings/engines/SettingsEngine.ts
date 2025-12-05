@@ -21,6 +21,8 @@ export class SettingsEngine implements ISessionEngine {
 
     constructor(private service: SettingsService) {}
 
+    async init(){}
+    
     // 只读 Tree，不需要 VFS，直接返回静态结构
     async loadTree(): Promise<EngineNode[]> {
         // 确保 Service 数据已加载

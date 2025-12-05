@@ -248,7 +248,7 @@ MDxEditor 识别 \`¶\` 字符作为挖空内部的换行符。
 *   **如何操作**:
     1.  点击标题栏左上角的 **汉堡菜单图标** (<i class="fas fa-bars"></i>)。
     2.  观察左侧的“会话列表”侧边栏会平滑地展开和收起。
-    3.  这是通过在编辑器配置中传入 \`toggleSidebarCallback\` 实现的，展示了编辑器与外部 UI 解耦的能力。
+    3.  这是通过在编辑器配置中传入 \`onSidebarToggle\` 实现的，展示了编辑器与外部 UI 解耦的能力。
 
 ### 源码同步跳转
 在预览模式下，按住键盘上的 \`Ctrl\` 键 (Windows/Linux) 或 \`Cmd\` 键 (Mac)，同时**用鼠标双击本段落中的任意文字**，编辑器会自动切换回 **编辑模式**，并高亮你刚才双击的文本所在的源码行。
@@ -420,7 +420,7 @@ async function initEditor() {
         defaultPluginOptions: {
             'core:titlebar': {
                 enableToggleEditMode: true,
-                toggleSidebarCallback: toggleSidebar,
+                onSidebarToggle: toggleSidebar,
                 saveCallback: (edt) => {
                     const content = edt.getText();
                     localStorage.setItem('mdx-editor-content', content);

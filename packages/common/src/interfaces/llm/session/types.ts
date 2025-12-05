@@ -63,3 +63,23 @@ export interface IYamlParser {
     parse<T>(text: string): T;
     stringify(obj: any): string;
 }
+
+
+export interface MCPServer {
+    id: string;
+    name: string;
+    icon?: string;
+    description?: string;
+    transport: 'stdio' | 'http' | 'sse';
+    command?: string;
+    args?: string;
+    cwd?: string;
+    endpoint?: string;
+    apiKey?: string;
+    headers?: Record<string, string>;
+    autoConnect?: boolean;
+    timeout?: number;
+    status?: 'idle' | 'connected' | 'error';
+    tools?: any[];
+    resources?: any[];
+}

@@ -97,7 +97,7 @@ export class MemoryManager {
         // 1. 准备注入给编辑器的能力 (Capabilities)
         const contextFeatures = {
             // 允许编辑器控制侧边栏
-            toggleSidebarCallback: () => this.vfsUI.toggleSidebar(),
+            onSidebarToggle: () => this.vfsUI.toggleSidebar(),
             // 允许编辑器触发保存 (虽然 Connector 会自动保存，但某些插件可能需要手动触发)
             saveCallback: async (editorInstance: any) => {
                 if (runtimeOptions.nodeId && typeof editorInstance.getText === 'function') {

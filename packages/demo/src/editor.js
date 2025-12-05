@@ -584,7 +584,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         titleBar: {
             title: "My Document.md",
             enableToggleEditMode: true,
-            toggleSidebarCallback: () => {
+            onSidebarToggle: () => {
                 alert("Sidebar toggled! (This is a demo callback)");
             }
         }

@@ -4,7 +4,8 @@
 import type { 
     LLMConnection as CommonLLMConnection,
     IAgentDefinition,    // ✨ 从 common 导入
-    AgentStorageConfig   // ✨ 从 common 导入
+    AgentStorageConfig, // ✨ 从 common 导入
+    MCPServer
 } from '@itookit/common';
 
 // 重新导出 LLMConnection，保持向后兼容
@@ -16,24 +17,6 @@ export type AgentFileContent = IAgentDefinition;
 // AgentConfig 对应文件中的 config 字段
 export type AgentConfig = AgentStorageConfig;
 
-export interface MCPServer {
-    id: string;
-    name: string;
-    icon?: string;
-    description?: string;
-    transport: 'stdio' | 'http' | 'sse';
-    command?: string;
-    args?: string;
-    cwd?: string;
-    endpoint?: string;
-    apiKey?: string;
-    headers?: Record<string, string>;
-    autoConnect?: boolean;
-    timeout?: number;
-    status?: 'idle' | 'connected' | 'error';
-    tools?: any[];
-    resources?: any[];
-}
 
 export interface Tag {
     id: string;
