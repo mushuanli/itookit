@@ -1,130 +1,18 @@
 // @file llm-ui/LLMWorkspaceEditor.ts
 
 import { 
-    IEditor, EditorOptions, UnifiedSearchResult, Heading, 
-    EditorEvent, EditorEventCallback, LLMConnection
+    IEditor, EditorOptions, EditorEvent, EditorEventCallback, 
+    ILLMSessionEngine 
 } from '@itookit/common';
 import { HistoryView } from './components/HistoryView';
 import { ChatInput } from './components/ChatInput';
-import { SessionManager, ISettingsService } from './orchestrator/SessionManager';
+import { SessionManager } from './orchestrator/SessionManager';
+import { IAgentService } from './services/IAgentService';
 
 export interface LLMEditorOptions extends EditorOptions {
-    onSidebarToggle?: () => void;
-    title?: string;
-}
-
-// [FIXED] 适配器增加更强的健壮性
-class SettingsServiceAdapter implements ISettingsService {
-    constructor(private realSettingsService: any) {}
-
-    // 辅助：获取 VFSCore 实例
-    private get vfs() {
-        return this.realSettingsService.vfs;
-    }
-
-    async getAgentConfig(agentId: string) {
-        try {
-            // 使用 getAgents 获取所有 agent，然后过滤
-            const agents = await this.getAgents();
-            const agent = agents.find(a => a.id === agentId);
-            
-            if (agent && (agent as any)._fullConfig) {
-                return (agent as any)._fullConfig;
-            }
-        } catch (e) {
-            console.warn('[SettingsAdapter] Failed to load agent config:', e);
-        }
-
-        // Fallback: 默认配置
-        return {
-            id: agentId,
-            name: 'Default Assistant',
-            config: {
-                connectionId: 'default', 
-                modelId: '', 
-                systemPrompt: 'You are a helpful assistant.'
-            }
-        };
-    }
-
-    async getConnection(connectionId: string): Promise<LLMConnection | undefined> {
-        let connection: LLMConnection | undefined;
-
-        try {
-            // 1. 尝试从 Service 获取 (优先)
-            if (typeof this.realSettingsService.getConnection === 'function') {
-                connection = await this.realSettingsService.getConnection(connectionId);
-            } else if (typeof this.realSettingsService.getConnections === 'function') {
-                const all = this.realSettingsService.getConnections();
-                if (Array.isArray(all)) {
-                    connection = all.find((c: any) => c.id === connectionId);
-                }
-            }
-        } catch (e) {
-            console.warn('[SettingsAdapter] Service lookup failed:', e);
-        }
-
-        return connection;
-    }
-
-    // [FIXED] 修复路径处理和错误容忍
-    async getAgents(): Promise<Array<{ id: string; name: string; icon?: string; description?: string }>> {
-        const agents: any[] = [];
-        
-        // 检查 VFS 是否可用
-        if (!this.vfs) {
-            console.warn('[SettingsAdapter] VFS not available');
-            return agents;
-        }
-
-        try {
-            // 搜索 agents 模块下的所有 .agent 文件
-            const results = await this.vfs.searchNodes({
-                nameContains: '.agent'
-            }, 'agents');
-
-            for (const node of results) {
-                try {
-                    // [FIXED] 确保路径格式正确
-                    // node.path 应该已经是相对于模块的路径，如 "/default/default.agent"
-                    let filePath = node.path;
-                    
-                    // 如果路径以模块名开头，移除它
-                    if (filePath.startsWith('/agents/')) {
-                        filePath = filePath.substring('/agents'.length);
-                    }
-                    
-                    // 确保路径以 / 开头
-                    if (!filePath.startsWith('/')) {
-                        filePath = '/' + filePath;
-                    }
-
-                    const content = await this.vfs.read('agents', filePath);
-                    
-                    if (typeof content === 'string') {
-                        const data = JSON.parse(content);
-                        if (data.id && data.name) {
-                            agents.push({
-                                id: data.id,
-                                name: data.name,
-                                icon: data.icon,
-                                description: data.description,
-                                // 存储完整配置供后续使用
-                                _fullConfig: data
-                            });
-                        }
-                    }
-                } catch (readErr) {
-                    // [FIXED] 降低日志级别，这可能是正常的时序问题
-                    // 文件可能正在被创建中
-                    console.debug(`[SettingsAdapter] Skipping agent ${node.path}:`, readErr);
-                }
-            }
-        } catch (e) {
-            console.error('[SettingsAdapter] Failed to scan agents:', e);
-        }
-        return agents;
-    }
+    // 强制要求这两个服务存在，不允许 undefined
+    sessionEngine: ILLMSessionEngine;
+    agentService: IAgentService;
 }
 
 export class LLMWorkspaceEditor implements IEditor {
@@ -141,14 +29,19 @@ export class LLMWorkspaceEditor implements IEditor {
     // State
     private currentTitle: string = 'New Chat';
     private isAllExpanded: boolean = true;
+    
+    // 保存引用
+    private options: LLMEditorOptions;
 
     constructor(
         container: HTMLElement,
-        private options: LLMEditorOptions, // 使用扩展后的接口
-        private settingsService: any
+        options: LLMEditorOptions, 
     ) {
-        const adapter = new SettingsServiceAdapter(settingsService);
-        this.sessionManager = new SessionManager(adapter);
+        this.options = options; // 保存 options
+        // [修复] Code 2532: options.agentService 现在是必须的，无需检查，
+        // 如果 TypeScript 仍报错，说明 options 类型传递有问题，这里假设类型正确
+        this.sessionManager = new SessionManager(options.agentService);
+
         if (options.title) {
             this.currentTitle = options.title;
         }
@@ -170,13 +63,12 @@ export class LLMWorkspaceEditor implements IEditor {
             this.emit('change');
         });
         
-        // [FIXED] 延迟获取 Agent 列表，给 SettingsService 时间完成初始化
-        // 使用 setTimeout 或在用户实际需要时再获取
+        // 获取初始 Agent 列表
         let initialAgents: any[] = [];
         try {
-            // 短暂延迟，等待 SettingsService 完成 Agent 创建
-            await new Promise(resolve => setTimeout(resolve, 100));
+            console.log('[LLMWorkspaceEditor] Fetching initial agents...');
             initialAgents = await this.sessionManager.getAvailableExecutors();
+            console.log('[LLMWorkspaceEditor] Initial agents:', initialAgents);
         } catch (e) {
             console.warn('[LLMWorkspaceEditor] Failed to get initial agents:', e);
         }
@@ -281,6 +173,11 @@ export class LLMWorkspaceEditor implements IEditor {
             this.currentTitle = this.titleInput.value;
             this.setDirty(true);
             this.emit('change');
+
+            // 触发 Engine 重命名逻辑 (更新 Metadata 和 Manifest)
+            if (this.options.nodeId) {
+                 this.options.sessionEngine.rename(this.options.nodeId, this.currentTitle);
+            }
         });
 
         // 3. Collapse/Expand All (Bubbles)
