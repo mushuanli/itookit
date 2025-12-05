@@ -144,6 +144,7 @@ export class VFS {
         type: VFSEventType.NODE_CREATED,
         nodeId: vnode.nodeId,
         path: systemPath,
+        moduleId: module, // ✨ [新增]
         timestamp: Date.now(),
         data: { type, module }
       });
@@ -171,6 +172,7 @@ export class VFS {
         type: VFSEventType.NODE_UPDATED,
         nodeId: vnode.nodeId,
         path: vnode.path,
+        moduleId: vnode.moduleId || undefined, // ✨ [新增]
         timestamp: Date.now(),
         data: { metadataOnly: true }
       });
@@ -230,6 +232,7 @@ export class VFS {
         type: VFSEventType.NODE_UPDATED,
         nodeId: vnode.nodeId,
         path: vnode.path,
+        moduleId: vnode.moduleId || undefined, // ✨ [新增]
         timestamp: Date.now()
       });
 
@@ -282,6 +285,7 @@ export class VFS {
         type: VFSEventType.NODE_DELETED,
         nodeId: vnode.nodeId,
         path: vnode.path,
+        moduleId: vnode.moduleId || undefined, // ✨ [新增]
         timestamp: Date.now(),
         data: { removedIds: allRemovedIds }
       });
@@ -338,7 +342,8 @@ export class VFS {
 
       this.events.emit({
         type: VFSEventType.NODE_MOVED,
-        nodeId: vnode.nodeId, path: newSystemPath, timestamp: Date.now(), data: { oldPath: oldSystemPath, newPath: newSystemPath }
+        nodeId: vnode.nodeId, path: newSystemPath, timestamp: Date.now(), data: { oldPath: oldSystemPath, newPath: newSystemPath },
+        moduleId: moduleName, // ✨ [新增]
       });
 
       return vnode;
@@ -608,6 +613,7 @@ export class VFS {
     await this.storage.addTagToNode(vnode.nodeId, tagName);
     this.events.emit({
         type: VFSEventType.NODE_UPDATED, nodeId: vnode.nodeId, path: vnode.path, timestamp: Date.now(),
+        moduleId: vnode.moduleId || undefined,
         data: { tagAdded: tagName }
     });
   }
@@ -617,6 +623,7 @@ export class VFS {
     await this.storage.removeTagFromNode(vnode.nodeId, tagName);
     this.events.emit({
         type: VFSEventType.NODE_UPDATED, nodeId: vnode.nodeId, path: vnode.path, timestamp: Date.now(),
+        moduleId: vnode.moduleId || undefined,
         data: { tagRemoved: tagName }
     });
   }

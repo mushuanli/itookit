@@ -111,6 +111,7 @@ export interface VFSEvent {
   type: VFSEventType;
   nodeId: string | null;
   path: string | null;
+  moduleId?: string; // ✨ [新增] 允许事件携带模块ID，方便上层过滤
   timestamp: number;
   data?: any;
 }
