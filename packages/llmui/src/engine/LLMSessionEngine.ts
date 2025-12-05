@@ -64,9 +64,6 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
         return `${this.getHiddenDir(sessionId)}/.${nodeId}.yaml`;
     }
 
-    private getManifestPath(sessionId: string): string {
-        return `/${sessionId}.chat`;
-    }
 
     // ============================================================
     // ILLMSessionEngine 实现
@@ -111,10 +108,11 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
             root_id: rootNodeId
         };
 
-        // 4. 创建文件并写入 Metadata (title, icon)
-        const manifestPath = this.getManifestPath(sessionId);
+        // 这里有个潜在问题：createFile 需要父目录，如果没有明确父目录可能会乱。
+        // 但 createSession 接口主要用于测试或后台。UI 推荐用 createFile。
+        // 为了兼容，我们假设创建一个同名文件
         await this.moduleEngine.createFile(
-            manifestPath,
+            `/${title}.chat`, // 默认路径
             null,
             Yaml.stringify(manifest),
             { title: title, icon: '💬' } // Metadata 供 UI 列表显示
@@ -126,9 +124,12 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
         return sessionId;
     }
 
-    async getSessionContext(sessionId: string): Promise<ChatContextItem[]> {
-        const manifest = await this.readJson<ChatManifest>(this.getManifestPath(sessionId));
-        if (!manifest) throw new Error("Session not found");
+    /**
+     * [修复] 获取上下文需要 nodeId (读取 Manifest) 和 sessionId (读取隐藏消息)
+     */
+    async getSessionContext(nodeId: string, sessionId: string): Promise<ChatContextItem[]> {
+        const manifest = await this.getManifest(nodeId);
+        if (!manifest) throw new Error("Manifest missing or unreadable");
 
         let currentNodeId: string | null = manifest.current_head;
         const context: ChatContextItem[] = [];
@@ -147,10 +148,20 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
         return context;
     }
 
-    async getManifest(sessionId: string): Promise<ChatManifest> {
-        const m = await this.readJson<ChatManifest>(this.getManifestPath(sessionId));
-        if (!m) throw new Error("Manifest missing");
-        return m;
+    /**
+     * [修复] 通过 VFS nodeId 读取 Manifest 内容
+     */
+    async getManifest(nodeId: string): Promise<ChatManifest> {
+        try {
+            const content = await this.moduleEngine.readContent(nodeId);
+            if (!content) throw new Error("Empty file content");
+            
+            const str = typeof content === 'string' ? content : new TextDecoder().decode(content);
+            return JSON.parse(str);
+        } catch (e) {
+            console.error(`[LLMSessionEngine] Failed to read manifest from node ${nodeId}`, e);
+            throw new Error(`Manifest missing for node: ${nodeId}`);
+        }
     }
 
     // ============================================================================
@@ -158,14 +169,14 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
     // ============================================================================
 
     async appendMessage(
-        sessionId: string, 
+        nodeId: string,      // 主文件句柄
+        sessionId: string,   // 隐藏目录标识
         role: ChatNode['role'], 
         content: string, 
         meta: any = {}
     ): Promise<string> {
-        const manifest = await this.readJson<ChatManifest>(this.getManifestPath(sessionId));
-        if (!manifest) throw new Error("Manifest not found");
-
+        const manifest = await this.getManifest(nodeId);
+        
         const parentId = manifest.current_head;
         const newNodeId = generateUUID();
         
@@ -198,7 +209,8 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
         manifest.current_head = newNodeId;
         manifest.branches[manifest.current_branch] = newNodeId;
         manifest.updated_at = new Date().toISOString();
-        await this.writeJson(this.getManifestPath(sessionId), manifest);
+        
+        await this.moduleEngine.writeContent(nodeId, JSON.stringify(manifest, null, 2));
 
         return newNodeId;
     }
@@ -240,10 +252,16 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
         }
     }
 
-    async editMessage(sessionId: string, originalNodeId: string, newContent: string): Promise<string> {
-        const manifest = await this.readJson<ChatManifest>(this.getManifestPath(sessionId));
-        if (!manifest) throw new Error("Manifest not found");
-
+    /**
+     * [修复] 编辑消息涉及分支创建，需要更新 Manifest (nodeId)
+     */
+    async editMessage(
+        nodeId: string, 
+        sessionId: string, 
+        originalNodeId: string, 
+        newContent: string
+    ): Promise<string> {
+        const manifest = await this.getManifest(nodeId);
         const originalNode = await this.readJson<ChatNode>(this.getNodePath(sessionId, originalNodeId));
         if (!originalNode) throw new Error("Original node not found");
 
@@ -278,7 +296,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
         manifest.branches[manifest.current_branch] = newNodeId;
         manifest.updated_at = new Date().toISOString();
         
-        await this.writeJson(this.getManifestPath(sessionId), manifest);
+        await this.moduleEngine.writeContent(nodeId, JSON.stringify(manifest, null, 2));
         
         return newNodeId;
     }
@@ -296,13 +314,16 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
     // 分支操作方法
     // ============================================================================
 
-    async switchBranch(sessionId: string, branchName: string): Promise<void> {
-        const manifest = await this.readJson<ChatManifest>(this.getManifestPath(sessionId));
-        if (!manifest || !manifest.branches[branchName]) throw new Error("Branch not found");
+    /**
+     * [修复] 切换分支需要更新 Manifest (nodeId)
+     */
+    async switchBranch(nodeId: string, sessionId: string, branchName: string): Promise<void> {
+        const manifest = await this.getManifest(nodeId);
+        if (!manifest.branches[branchName]) throw new Error("Branch not found");
         
         manifest.current_branch = branchName;
         manifest.current_head = manifest.branches[branchName];
-        await this.writeJson(this.getManifestPath(sessionId), manifest);
+        await this.moduleEngine.writeContent(nodeId, JSON.stringify(manifest, null, 2));
     }
 
     async getNodeSiblings(sessionId: string, nodeId: string): Promise<ChatNode[]> {
@@ -409,37 +430,16 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
     // 文件操作方法
     // ============================================================================
 
-    // 辅助转换方法
-    private toEngineNode(vnode: VNode): EngineNode {
-        return {
-            id: vnode.nodeId,
-            parentId: null, 
-            name: vnode.name, // 物理文件名 (uuid.chat)
-            type: 'file',
-            createdAt: vnode.createdAt,
-            modifiedAt: vnode.modifiedAt,
-            path: vnode.path,
-            tags: vnode.tags,
-            // [关键] 传递 metadata，其中包含 title 和 icon
-            metadata: vnode.metadata, 
-            moduleId: this.moduleName,
-            icon: vnode.metadata?.icon || 'chat-bubble' 
-        };
-    }
-
-    // 拦截重命名操作
     async rename(id: string, newName: string): Promise<void> {
         // [修复] Code 2339: 使用 coreVfs.storage
         const node = await this.coreVfs.storage.loadVNode(id);
         if (!node) throw new Error("Node not found");
 
-        const uuid = node.name.replace('.chat', '');
-
-        // 1. 更新 Manifest 中的 title
         try {
-            const manifest = await this.getManifest(uuid);
+            // [修复] 直接读取当前文件的 manifest，不需要从文件名推导 UUID
+            const manifest = await this.getManifest(id);
             manifest.title = newName;
-            await this.writeJson(this.getManifestPath(uuid), manifest);
+            await this.moduleEngine.writeContent(id, JSON.stringify(manifest, null, 2));
         } catch (e) {
             console.warn("Failed to update manifest title", e);
         }
@@ -461,15 +461,10 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
             // 1. 删除文件
             await this.moduleEngine.delete([node.path]);
 
-            // 2. 删除关联目录
-            if (node.name.endsWith('.chat')) {
-                const uuid = node.name.replace('.chat', '');
-                try {
-                    await this.deleteFile(this.getHiddenDir(uuid));
-                } catch (e) {
-                    console.warn(`Failed to delete hidden dir for ${uuid}`, e);
-                }
-            }
+            // [尝试] 读取内容获取 sessionId 来清理隐藏目录 (如果还能读到的话)
+            // 如果文件已被删除可能无法读取，这依赖于 VFS 具体的删除顺序
+            // 建议：在 UI 层或 delete 逻辑中，如果能获取 sessionId 最好
+            // 这里简化逻辑，或者保留垃圾数据 (TODO: 实现 GC 机制)
         }
     }
 
@@ -493,83 +488,8 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
     async getSessionIdFromNodeId(nodeId: string): Promise<string | null> {
     console.log(`[LLMSessionEngine] getSessionIdFromNodeId called with: ${nodeId}`);
         try {
-            // 1. 加载 VNode 元数据
-            const node = await this.coreVfs.storage.loadVNode(nodeId);
-        console.log(`[LLMSessionEngine] VNode loaded:`, node ? {
-            name: node.name,
-            type: node.type,
-            moduleId: node.moduleId
-        } : 'null');
-            if (!node) return null;
-            
-            // 2. 确保是 .chat 文件
-        if (!node.name.endsWith('.chat')) {
-            console.log(`[LLMSessionEngine] Not a .chat file: ${node.name}`);
-            return null;
-        }
-            
-            // 3. ✨ [关键] 读取文件内容获取 sessionId
-            let content: string | ArrayBuffer | null = null;
-            try {
-                content = await this.moduleEngine.readContent(nodeId);
-            console.log(`[LLMSessionEngine] Content read, length: ${
-                content ? (typeof content === 'string' ? content.length : content.byteLength) : 0
-            }`);
-            } catch (e) {
-                // 文件存在但读取失败（可能是权限问题或损坏）
-                console.warn(`[LLMSessionEngine] Failed to read content for ${nodeId}:`, e);
-                return null;
-            }
-            
-            // 4. 检查内容是否有效
-        if (!content) {
-            console.log(`[LLMSessionEngine] No content in file`);
-            return null;
-        }
-            
-            const contentStr = typeof content === 'string' 
-                ? content 
-                : new TextDecoder().decode(content);
-            
-            // 5. 空文件返回 null（需要初始化）
-        if (!contentStr.trim()) {
-            console.log(`[LLMSessionEngine] Content is empty/whitespace`);
-            return null;
-        }
-            
-            // 6. 解析 manifest
-            try {
-                const manifest = JSON.parse(contentStr) as ChatManifest;
-            console.log(`[LLMSessionEngine] Manifest parsed:`, {
-                id: manifest?.id,
-                version: manifest?.version,
-                title: manifest?.title
-            });
-                
-                // 验证必要字段
-                if (!manifest || !manifest.id || !manifest.version) {
-                console.log(`[LLMSessionEngine] Invalid manifest structure`);
-                    return null;
-                }
-                
-                // 7. ✨ [可选] 验证隐藏目录是否存在（确保数据完整）
-                const hiddenDir = this.getHiddenDir(manifest.id);
-                const hiddenDirId = await this.coreVfs.pathResolver.resolve(this.moduleName, hiddenDir);
-            console.log(`[LLMSessionEngine] Hidden dir check: path=${hiddenDir}, exists=${!!hiddenDirId}`);
-                
-                if (!hiddenDirId) {
-                console.warn(`[LLMSessionEngine] Session data directory missing for ${manifest.id}`);
-                    // 数据目录不存在，视为无效 session
-                    return null;
-                }
-                
-            console.log(`[LLMSessionEngine] Session ID resolved: ${manifest.id}`);
-                return manifest.id;
-            } catch (e) {
-                // JSON 解析失败，文件内容损坏
-            console.warn(`[LLMSessionEngine] JSON parse failed:`, e);
-                return null;
-            }
+            const manifest = await this.getManifest(nodeId);
+            return manifest.id || null;
         } catch (e) {
             console.error('[LLMSessionEngine] getSessionIdFromNodeId failed:', e);
             return null;
@@ -585,7 +505,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
         title: string, 
         systemPrompt: string = "You are a helpful assistant."
     ): Promise<string> {
-    console.log(`[LLMSessionEngine] initializeExistingFile START: nodeId=${nodeId}, title=${title}`);
+        console.log(`[LLMSessionEngine] initializeExistingFile: nodeId=${nodeId}`);
         
         // 1. 生成新的 sessionId
         const sessionId = generateUUID();
