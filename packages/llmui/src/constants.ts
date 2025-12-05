@@ -5,9 +5,10 @@
 import { 
     LLM_PROVIDER_DEFAULTS, 
     LLM_DEFAULT_ID, 
-    LLMConnection 
+    LLMConnection,
+    IAgentDefinition
 } from '@itookit/common';
-import { AgentFileContent } from './types';
+export type AgentFileContent = IAgentDefinition;
 
 // 导出常量供应用其他部分使用
 export { LLM_PROVIDER_DEFAULTS };
@@ -42,6 +43,22 @@ export const LLM_DEFAULT_CONNECTIONS: LLMConnection[] = [
         availableModels: [...(LLM_PROVIDER_DEFAULTS.rdsec?.models || [])]
     },
 ];
+
+
+// 默认的 Agent 模板
+export const DEFAULT_AGENT_CONTENT: AgentFileContent = {
+    id: '', // 空 ID 会触发编辑器生成新的 UUID
+    name: 'New Assistant',
+    type: 'agent',
+    description: 'A helpful AI assistant.',
+    icon: '🤖',
+    config: {
+        connectionId: 'default',
+        modelId: '',
+        systemPrompt: 'You are a helpful assistant.'
+    },
+    // tags: [] // [已移除] Tags 由 VFS 元数据管理
+};
 
 /**
  * 辅助类型：仅用于初始化时的 Agent 定义
