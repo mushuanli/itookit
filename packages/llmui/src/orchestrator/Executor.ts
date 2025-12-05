@@ -81,6 +81,11 @@ export class UnifiedExecutor implements IExecutor {
     }
     
     for (const childConfig of config.children) {
+      // ✨ [修复] 检查是否被中断
+      if (context.signal?.aborted) {
+        throw new DOMException('Aborted', 'AbortError');
+      }
+
       const child = new UnifiedExecutor(childConfig);
       const childRuntimeId = generateUUID();
 
@@ -230,37 +235,115 @@ export class UnifiedExecutor implements IExecutor {
     };
   }
   
+  // ✨ [修复 7.1] 实现 router 模式
   private async executeRouter(
     input: unknown, 
-    context: ExecutionContext, 
+    context: StreamingContext, 
     config: CompositeConfig
   ): Promise<ExecutionResult> {
-    // 路由逻辑
-    throw new Error('Implementation needed');
+    const modeConfig = config.modeConfig?.router;
+    
+    if (!modeConfig) {
+      throw new Error('Router mode requires modeConfig.router configuration');
+    }
+
+    // 简单实现：选择第一个子节点执行
+    // 实际应用中应该根据 strategy 进行路由决策
+    if (config.children.length === 0) {
+      return {
+        status: 'success',
+        output: input,
+        control: { action: 'end' }
+      };
+    }
+
+    // 默认选择第一个
+    let selectedIndex = 0;
+    
+    if (modeConfig.strategy === 'rule' && modeConfig.rules) {
+      // 基于规则选择
+      for (let i = 0; i < modeConfig.rules.length; i++) {
+        const rule = modeConfig.rules[i];
+        // 简单的条件匹配（实际应用中可以更复杂）
+        if (rule.condition && this.evaluateCondition(rule.condition, input)) {
+          selectedIndex = i;
+          break;
+        }
+      }
+    }
+
+    const selectedChild = config.children[selectedIndex];
+    const executor = new UnifiedExecutor(selectedChild);
+    
+    return executor.execute(input, context);
+  }
+
+  private evaluateCondition(condition: string, input: unknown): boolean {
+    // 简单实现：检查输入中是否包含条件关键字
+    if (typeof input === 'string') {
+      return input.toLowerCase().includes(condition.toLowerCase());
+    }
+    return false;
   }
   
+  // ✨ [修复 7.1] 实现 loop 模式
   private async executeLoop(
     input: unknown, 
-    context: ExecutionContext, 
+    context: StreamingContext, 
     config: CompositeConfig
   ): Promise<ExecutionResult> {
-    // 循环逻辑
-    throw new Error('Implementation needed');
+    const modeConfig = config.modeConfig?.loop;
+    const maxIterations = modeConfig?.maxIterations || 10;
+    
+    let currentInput = input;
+    let lastResult: ExecutionResult | null = null;
+    let iteration = 0;
+
+    while (iteration < maxIterations) {
+      // 检查是否被中断
+      if (context.signal?.aborted) {
+        throw new DOMException('Aborted', 'AbortError');
+      }
+
+      iteration++;
+
+      // 执行所有子节点
+      for (const childConfig of config.children) {
+        const child = new UnifiedExecutor(childConfig);
+        lastResult = await child.execute(currentInput, {
+          ...context,
+          depth: context.depth + 1
+        });
+
+        if (lastResult.control.action === 'end') {
+          return lastResult;
+        }
+
+        currentInput = lastResult.output;
+      }
+
+      // 检查终止条件
+      if (modeConfig?.exitCondition) {
+        if (this.evaluateCondition(modeConfig.exitCondition, currentInput)) {
+          break;
+        }
+      }
+    }
+
+    return lastResult || {
+      status: 'success',
+      output: currentInput,
+      control: { action: 'end' }
+    };
   }
 }
 
-// ==================== 工厂函数 - 简洁的创建接口 ====================
+// 工厂函数
 
-/**
- * 创建原子 Agent
- */
 export function createAgent(config: BaseExecutorConfig & { config: AtomicConfig }): ExecutorConfig {
   return { ...config, type: 'atomic' };
 }
 
-/**
- * 创建编排器
- */
 export function createOrchestrator(
   config: BaseExecutorConfig & { config: Omit<CompositeConfig, 'children'> },
   children: ExecutorConfig[]
@@ -272,9 +355,6 @@ export function createOrchestrator(
   };
 }
 
-/**
- * 便捷方法：串行组合
- */
 export function serial(id: string, children: ExecutorConfig[]): ExecutorConfig {
   return createOrchestrator(
     { id, name: id, config: { mode: 'serial' } },
@@ -282,9 +362,6 @@ export function serial(id: string, children: ExecutorConfig[]): ExecutorConfig {
   );
 }
 
-/**
- * 便捷方法：并行组合
- */
 export function parallel(id: string, children: ExecutorConfig[]): ExecutorConfig {
   return createOrchestrator(
     { id, name: id, config: { mode: 'parallel' } },
@@ -292,9 +369,6 @@ export function parallel(id: string, children: ExecutorConfig[]): ExecutorConfig
   );
 }
 
-/**
- * 便捷方法：路由
- */
 export function router(
   id: string, 
   children: ExecutorConfig[], 
@@ -305,3 +379,27 @@ export function router(
     children
   );
 }
+
+export function loop(
+  id: string,
+  children: ExecutorConfig[],
+  options: { maxIterations?: number; exitCondition?: string } = {}
+): ExecutorConfig {
+  return createOrchestrator(
+    { 
+      id, 
+      name: id, 
+      config: { 
+        mode: 'loop', 
+        modeConfig: { 
+          loop: { 
+            maxIterations: options.maxIterations || 10,
+            exitCondition: options.exitCondition
+          } 
+        } 
+      } 
+    },
+    children
+  );
+}
+

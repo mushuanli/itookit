@@ -68,6 +68,9 @@ export interface StreamingContext extends ExecutionContext {
     // 当前会话 ID，用于持久化
     sessionId?: string;
     
+    // ✨ [修复 3.1] 添加 AbortSignal 支持
+    signal?: AbortSignal;
+    
     callbacks?: {
         // 增加 nodeId 参数，支持定向输出
         onThinking?: (delta: string, nodeId?: string) => void;
@@ -91,4 +94,6 @@ export type OrchestratorEvent =
     | { type: 'node_update'; payload: { nodeId: string; chunk?: string; field?: 'thought' | 'output'; metaInfo?: any } }
     | { type: 'node_status'; payload: { nodeId: string; status: NodeStatus; result?: any } }
     | { type: 'request_input'; payload: { nodeId: string; schema: any } }
-    | { type: 'finished'; payload: { sessionId: string } };
+    | { type: 'finished'; payload: { sessionId: string } }
+    // ✨ [新增] 错误事件
+    | { type: 'error'; payload: { message: string; error?: Error } };

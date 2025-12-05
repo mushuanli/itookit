@@ -2,10 +2,43 @@
 import { OrchestratorEvent, SessionGroup, ExecutionNode } from '../types';
 import { NodeRenderer } from './NodeRenderer';
 import { MDxController } from './mdx/MDxController';
+import { escapeHTML } from '@itookit/common';
 
 // ✨ [新增] 定义节点动作接口
 export interface NodeActionCallback {
     (action: 'retry' | 'delete' | 'edit', nodeId: string): void;
+}
+
+// ✨ [修复 5.2] 自定义确认对话框
+class ConfirmDialog {
+    static async show(message: string): Promise<boolean> {
+        return new Promise((resolve) => {
+            const overlay = document.createElement('div');
+            overlay.className = 'llm-ui-confirm-overlay';
+            overlay.innerHTML = `
+                <div class="llm-ui-confirm-dialog">
+                    <p class="llm-ui-confirm-message">${escapeHTML(message)}</p>
+                    <div class="llm-ui-confirm-actions">
+                        <button class="llm-ui-confirm-btn llm-ui-confirm-btn--cancel">Cancel</button>
+                        <button class="llm-ui-confirm-btn llm-ui-confirm-btn--confirm">Confirm</button>
+                    </div>
+                </div>
+            `;
+            
+            document.body.appendChild(overlay);
+            
+            const cleanup = (result: boolean) => {
+                overlay.remove();
+                resolve(result);
+            };
+            
+            overlay.querySelector('.llm-ui-confirm-btn--cancel')?.addEventListener('click', () => cleanup(false));
+            overlay.querySelector('.llm-ui-confirm-btn--confirm')?.addEventListener('click', () => cleanup(true));
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) cleanup(false);
+            });
+        });
+    }
 }
 
 export class HistoryView {
@@ -15,7 +48,10 @@ export class HistoryView {
     
     // [新增] 滚动控制相关
     private shouldAutoScroll = true; 
-    private scrollThreshold = 50; // 距离底部多少像素内视为“正在底部”
+    private scrollThreshold = 50;
+    
+    // ✨ [修复 5.4] 防抖滚动
+    private scrollDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
     private onContentChange?: (id: string, content: string, type: 'user' | 'node') => void;
     private onNodeAction?: NodeActionCallback;
@@ -179,13 +215,14 @@ export class HistoryView {
 
             wrapper.querySelector('[data-action="retry"]')?.addEventListener('click', (e) => {
                 e.stopPropagation();
-                // User Retry 通常意味着重新发送
-                this.onNodeAction?.('retry', group.id); // 注意: group.id 应该是持久化的 ID 最好，这里演示用
+                this.onNodeAction?.('retry', group.id);
             });
 
-            wrapper.querySelector('[data-action="delete"]')?.addEventListener('click', (e) => {
+            // ✨ [修复 5.2] 使用自定义对话框
+            wrapper.querySelector('[data-action="delete"]')?.addEventListener('click', async (e) => {
                 e.stopPropagation();
-                if(confirm('Delete this message?')) {
+                const confirmed = await ConfirmDialog.show('Delete this message?');
+                if (confirmed) {
                     this.onNodeAction?.('delete', group.id);
                 }
             });
@@ -281,10 +318,11 @@ export class HistoryView {
                 this.onNodeAction?.('retry', node.id);
             });
 
-            deleteBtn?.addEventListener('click', (e) => {
+            // ✨ [修复 5.2] 使用自定义对话框
+            deleteBtn?.addEventListener('click', async (e) => {
                 e.stopPropagation();
-                // 简单的 UI 确认 (可选，也可以在业务层做)
-                if (confirm('Delete this message?')) {
+                const confirmed = await ConfirmDialog.show('Delete this message?');
+                if (confirmed) {
                     this.onNodeAction?.('delete', node.id);
                 }
             });
@@ -329,7 +367,7 @@ export class HistoryView {
 
                 // Copy 逻辑
                 copyBtn?.addEventListener('click', async () => {
-                    const text = controller.content; // Access content via getter
+                    const text = controller.content;
                     try {
                         await navigator.clipboard.writeText(text);
                         // 临时反馈动画
@@ -356,9 +394,12 @@ export class HistoryView {
             const container = el.querySelector('.llm-ui-thought') as HTMLElement;
             const contentEl = el.querySelector('.llm-ui-thought__content') as HTMLElement;
             
-            if (container.style.display === 'none') container.style.display = 'block';
-            contentEl.innerHTML += this.escapeHtml(chunk).replace(/\n/g, '<br>');
-            container.scrollTop = container.scrollHeight;
+            if (container && container.style.display === 'none') container.style.display = 'block';
+            if (contentEl) {
+                // ✨ [修复 5.1] 使用 escapeHTML
+                contentEl.innerHTML += escapeHTML(chunk).replace(/\n/g, '<br>');
+                if (container) container.scrollTop = container.scrollHeight;
+            }
         } else if (field === 'output') {
             const editor = this.editorMap.get(nodeId);
             if (editor) {
@@ -409,10 +450,15 @@ export class HistoryView {
     
     scrollToBottom(force: boolean = false) {
         if (force || this.shouldAutoScroll) {
-            // 使用 requestAnimationFrame 确保在 DOM 渲染后执行
-            requestAnimationFrame(() => {
-                this.container.scrollTop = this.container.scrollHeight;
-            });
+            if (this.scrollDebounceTimer) {
+                clearTimeout(this.scrollDebounceTimer);
+            }
+            
+            this.scrollDebounceTimer = setTimeout(() => {
+                requestAnimationFrame(() => {
+                    this.container.scrollTop = this.container.scrollHeight;
+                });
+            }, 16); // 约一帧的时间
         }
     }
 
@@ -421,10 +467,16 @@ export class HistoryView {
         if (!content) return '';
         // 移除 Markdown 符号 (简单处理)
         const plain = content.replace(/[#*`]/g, '').replace(/\n/g, ' ').trim();
-        return plain.length > 50 ? plain.substring(0, 50) + '...' : plain;
+        const truncated = plain.length > 50 ? plain.substring(0, 50) + '...' : plain;
+        // 返回纯文本，由调用方决定是否需要转义
+        return truncated;
     }
 
-    private escapeHtml(str: string) {
-        return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    // ✨ [新增] 销毁方法
+    destroy() {
+        if (this.scrollDebounceTimer) {
+            clearTimeout(this.scrollDebounceTimer);
+        }
+        this.clear();
     }
 }

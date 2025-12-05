@@ -17,6 +17,21 @@ import { IAgentService } from '../services/IAgentService';
 
 type SessionVariable = ChatMessage[] | File[]; 
 
+// ✨ [修复 3.4] 持久化队列管理
+class PersistQueue {
+    private queue: Promise<void> = Promise.resolve();
+    
+    enqueue(fn: () => Promise<void>): void {
+        this.queue = this.queue.then(fn).catch(e => {
+            console.error('[PersistQueue] Error:', e);
+        });
+    }
+    
+    async flush(): Promise<void> {
+        await this.queue;
+    }
+}
+
 export class SessionManager {
     private sessions: SessionGroup[] = [];
     private listeners: Set<(event: OrchestratorEvent) => void> = new Set();
@@ -29,6 +44,9 @@ export class SessionManager {
 
     // Executor 注册表：用于管理可用的 Agent/Tool/Workflow
     private executorRegistry = new Map<string, IExecutor>();
+    
+    // ✨ [修复 3.4] 持久化队列
+    private persistQueue = new PersistQueue();
 
     constructor(
         private agentService: IAgentService,
@@ -101,7 +119,20 @@ export class SessionManager {
             this.abortController.abort();
             this.abortController = null;
             this.isGenerating = false;
-            // 可以在这里发出一个状态更新，标记最后节点为 interrupted
+            
+            // 标记最后一个正在运行的节点为中断状态
+            const lastSession = this.sessions[this.sessions.length - 1];
+            if (lastSession?.role === 'assistant' && lastSession.executionRoot) {
+                const node = lastSession.executionRoot;
+                if (node.status === 'running') {
+                    node.status = 'failed';
+                    node.data.output += '\n\n*[Generation interrupted by user]*';
+                    this.emit({ 
+                        type: 'node_status', 
+                        payload: { nodeId: node.id, status: 'failed' } 
+                    });
+                }
+            }
         }
     }
 
@@ -213,7 +244,7 @@ export class SessionManager {
      * ✨ [修复] 从 Engine 构建消息历史（不包含当前正在处理的消息）
      * @param excludeLastUserMessage 是否排除最后一条用户消息（默认 true）
      */
-    private async buildMessageHistory(excludeLastUserMessage: boolean = true): Promise<ChatMessage[]> {
+    private async buildMessageHistory(includeLastUserMessage: boolean = false): Promise<ChatMessage[]> {
         if (!this.currentNodeId || !this.currentSessionId) return [];
         
         try {
@@ -230,8 +261,8 @@ export class SessionManager {
                 }
             }
             
-            // ✨ [修复] 排除最后一条用户消息（避免重复）
-            if (excludeLastUserMessage && messages.length > 0) {
+            // ✨ [修复 3.3] 参数名更清晰：是否包含最后一条用户消息
+            if (!includeLastUserMessage && messages.length > 0) {
                 const lastMsg = messages[messages.length - 1];
                 if (lastMsg.role === 'user') {
                     messages.pop();
@@ -302,6 +333,9 @@ export class SessionManager {
         this.isGenerating = true;
         this.abortController = new AbortController();
 
+        // ✨ [修复 3.2] 用于回滚的索引
+        const sessionIndexBeforeQuery = this.sessions.length;
+
         try {
             // ============================================
             // 1. 持久化 User Message 到 Engine
@@ -351,7 +385,8 @@ export class SessionManager {
                             executor = new AgentExecutor(
                                 connection, 
                                 agentDef.config.modelId || connection.model, 
-                                agentDef.config.systemPrompt
+                                agentDef.config.systemPrompt,
+                                this.abortController.signal // ✨ [修复 3.1] 传递 signal
                             );
                             agentName = agentDef.name || 'Assistant';
                             agentIcon = agentDef.icon || '🤖';
@@ -375,7 +410,12 @@ export class SessionManager {
                 const defaultConn = await this.agentService.getConnection('default');
                 
                 if (defaultConn) {
-                    executor = new AgentExecutor(defaultConn, defaultConn.model || '');
+                    executor = new AgentExecutor(
+                        defaultConn, 
+                        defaultConn.model || '',
+                        undefined,
+                        this.abortController.signal // ✨ [修复 3.1] 传递 signal
+                    );
                     metaInfo = { note: "Fallback to default connection" };
                 } else {
                     throw new Error(`Executor '${executorId}' not found and no default connection available.`);
@@ -440,34 +480,41 @@ export class SessionManager {
             let lastPersistTime = Date.now();
             const PERSIST_INTERVAL = 500; // 每 500ms 持久化一次
 
-            const persistAccumulated = async () => {
+            // ✨ [修复 3.4] 使用队列确保持久化顺序
+            const persistAccumulated = () => {
                 if (!accumulatedOutput && !accumulatedThinking) return;
                 
-                try {
-                    await this.sessionEngine.updateNode(
-                        this.currentSessionId!,
-                        assistantNodeId,
-                        {
-                            content: accumulatedOutput,
-                            meta: {
-                                thinking: accumulatedThinking,
-                                status: 'running'
+                const outputSnapshot = accumulatedOutput;
+                const thinkingSnapshot = accumulatedThinking;
+                
+                this.persistQueue.enqueue(async () => {
+                    try {
+                        await this.sessionEngine.updateNode(
+                            this.currentSessionId!,
+                            assistantNodeId,
+                            {
+                                content: outputSnapshot,
+                                meta: {
+                                    thinking: thinkingSnapshot,
+                                    status: 'running'
+                                }
                             }
-                        }
-                    );
-                } catch (e) {
-                    console.warn('[SessionManager] Failed to persist streaming content:', e);
-                }
+                        );
+                    } catch (e) {
+                        console.warn('[SessionManager] Failed to persist streaming content:', e);
+                    }
+                });
             };
 
-            // ✨ [修复] 构建历史时排除最后一条用户消息（因为我们会单独传入）
-            const history = await this.buildMessageHistory(true);
+            // ✨ [修复 3.3] 使用更清晰的参数名
+            const history = await this.buildMessageHistory(false);
 
             const context: StreamingContext = {
                 executionId: generateUUID(),
                 depth: 0,
                 parentId: uiRootId,
                 sessionId: this.currentSessionId,
+                signal: this.abortController.signal, // ✨ [修复 3.1] 添加 signal
                 variables: new Map<string, SessionVariable>([
                     ['history', history],
                     ['files', files]
@@ -559,7 +606,9 @@ export class SessionManager {
                 });
             }
 
-            // 最终持久化到 Engine
+            // ✨ [修复 3.4] 确保队列刷新后再进行最终持久化
+            await this.persistQueue.flush();
+
             await this.sessionEngine.updateNode(
                 this.currentSessionId!,
                 assistantNodeId,
@@ -586,11 +635,19 @@ export class SessionManager {
         } catch (error: any) {
             console.error("[SessionManager] Error:", error);
             
+            // ✨ [修复 3.2] 处理错误状态
             const currentSession = this.sessions[this.sessions.length - 1];
             if (currentSession?.role === 'assistant' && currentSession.executionRoot) {
                 const node = currentSession.executionRoot;
                 node.status = 'failed';
-                node.data.output += `\n\n**Error**: ${error.message}`;
+                
+                // 检查是否是中断错误
+                const isAborted = error.name === 'AbortError' || this.abortController?.signal.aborted;
+                const errorMessage = isAborted 
+                    ? '*[Generation interrupted by user]*' 
+                    : `**Error**: ${error.message}`;
+                
+                node.data.output += `\n\n${errorMessage}`;
                 
                 // 持久化错误状态
                 if (currentSession.persistedNodeId) {
@@ -601,7 +658,10 @@ export class SessionManager {
                             {
                                 content: node.data.output,
                                 status: 'active',
-                                meta: { status: 'failed', error: error.message }
+                                meta: { 
+                                    status: isAborted ? 'interrupted' : 'failed', 
+                                    error: error.message 
+                                }
                             }
                         );
                     } catch (e) {

@@ -69,22 +69,24 @@ export const createLLMFactory = (
                 console.log('[LLMFactory] No valid session found. Initializing existing file...');
                 
                 const title = options.title || 'New Chat';
-                const newSessionId = await engine.initializeExistingFile(options.nodeId, title);
                 
-                console.log(`[LLMFactory] initializeExistingFile returned: ${newSessionId}`);
-                
-                // ✨ [关键修复] 等待一小段时间让 IndexedDB 同步
-                // 这是一个临时方案，更好的方案是确保 writeContent 是同步完成的
-                await new Promise(resolve => setTimeout(resolve, 50));
-                
-                // ✨ [关键修复] 再次验证
-                sessionId = await engine.getSessionIdFromNodeId(options.nodeId);
-                console.log(`[LLMFactory] Verification check result: sessionId=${sessionId}`);
-                
-                if (!sessionId) {
-                    // 如果还是失败，说明有更深层的问题
-                    console.error(`[LLMFactory] CRITICAL: Session still not found after initialization!`);
-                    throw new Error(`Failed to initialize session for nodeId: ${options.nodeId}`);
+                try {
+                    const newSessionId = await engine.initializeExistingFile(options.nodeId, title);
+                    console.log(`[LLMFactory] initializeExistingFile returned: ${newSessionId}`);
+                    
+                    // ✨ [修复] 使用更可靠的等待方式
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    
+                    sessionId = await engine.getSessionIdFromNodeId(options.nodeId);
+                    console.log(`[LLMFactory] Verification check result: sessionId=${sessionId}`);
+                    
+                    if (!sessionId) {
+                        console.error(`[LLMFactory] CRITICAL: Session still not found after initialization!`);
+                        throw new Error(`Failed to initialize session for nodeId: ${options.nodeId}`);
+                    }
+                } catch (e: any) {
+                    console.error(`[LLMFactory] Failed to initialize file:`, e);
+                    throw e;
                 }
             }
             // 保持原有的 effectiveNodeId，不变
@@ -132,3 +134,7 @@ export const createAgentEditorFactory = (agentService: VFSAgentService): EditorF
 // 导出 Engine 类供外部使用
 export { LLMSessionEngine };
 export { VFSAgentService };
+export { LLMWorkspaceEditor };
+export { SessionManager } from './orchestrator/SessionManager';
+export { AgentExecutor } from './orchestrator/AgentExecutor';
+export { UnifiedExecutor, createAgent, createOrchestrator, serial, parallel, router, loop } from './orchestrator/Executor';

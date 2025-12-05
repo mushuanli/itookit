@@ -20,7 +20,9 @@ export class AgentExecutor implements IExecutor {
     constructor(
         private connection: LLMConnection,
         private model: string,
-        private systemPrompt?: string
+        private systemPrompt?: string,
+        // ✨ [修复 3.1] 添加 signal 参数
+        private signal?: AbortSignal
     ) {
         this.id = `agent-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
     }
@@ -31,9 +33,11 @@ export class AgentExecutor implements IExecutor {
      * @param context 执行上下文，包含历史记录、文件和回调
      */
     async execute(input: unknown, context: StreamingContext): Promise<ExecutionResult> {
-        // 1. 准备上下文和输入
-        const history = (context.variables.get('history') as ChatMessage[]) || [];
-        const userMessageContent = input as string;
+        // ✨ [修复 4.1] 安全的类型处理
+        const userMessageContent = this.safeStringify(input);
+        
+        // ✨ [修复 4.2] 安全的 history 获取
+        const history = this.safeGetHistory(context);
         
         // 构建完整的 LLM 消息链
         const fullMessages: ChatMessage[] = [];
@@ -71,18 +75,23 @@ export class AgentExecutor implements IExecutor {
         let totalThinking = '';
 
         try {
-            // 4. 发起流式请求
+            // ✨ [修复 3.1] 传递 signal 给 LLM 请求
+            const effectiveSignal = this.signal || context.signal;
+            
             const stream = await driver.chat.create({
                 messages: fullMessages,
                 stream: true,
                 thinking: true,
-                // 这里可以透传 AbortSignal，如果 Context 支持的话
-                // signal: context.signal 
+                signal: effectiveSignal
             });
 
             // 5. 处理流
             for await (const chunk of stream) {
-                // 安全检查
+                // ✨ [修复 3.1] 检查是否被中断
+                if (effectiveSignal?.aborted) {
+                    throw new DOMException('Aborted', 'AbortError');
+                }
+                
                 if (!chunk.choices || chunk.choices.length === 0) continue;
                 
                 const delta = chunk.choices[0].delta;
@@ -117,5 +126,48 @@ export class AgentExecutor implements IExecutor {
             // 抛出错误，交给 SessionManager 处理 UI 状态
             throw error;
         }
+    }
+
+    // ✨ [修复 4.1] 安全的字符串转换
+    private safeStringify(input: unknown): string {
+        if (typeof input === 'string') {
+            return input;
+        }
+        if (input === null || input === undefined) {
+            return '';
+        }
+        if (typeof input === 'object') {
+            try {
+                return JSON.stringify(input);
+            } catch {
+                return String(input);
+            }
+        }
+        return String(input);
+    }
+
+    // ✨ [修复 4.2] 安全的 history 获取
+    private safeGetHistory(context: StreamingContext): ChatMessage[] {
+        const historyValue = context.variables.get('history');
+        
+        if (!historyValue) {
+            return [];
+        }
+        
+        if (!Array.isArray(historyValue)) {
+            console.warn('[AgentExecutor] history is not an array:', typeof historyValue);
+            return [];
+        }
+        
+        // 验证每个消息的结构
+        return historyValue.filter((msg): msg is ChatMessage => {
+            return (
+                msg !== null &&
+                typeof msg === 'object' &&
+                typeof msg.role === 'string' &&
+                typeof msg.content === 'string' &&
+                ['system', 'user', 'assistant'].includes(msg.role)
+            );
+        });
     }
 }
