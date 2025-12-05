@@ -638,3 +638,77 @@
 .llm-ui-node.is-collapsed .llm-ui-node__toolbar {
     opacity: 1;
 }
+/* =========================================
+   [新增] 3. 折叠时的内容预览 (Content Preview)
+   ========================================= */
+
+/* 默认隐藏预览 */
+.llm-ui-header-preview {
+    display: none;
+    font-weight: 400;
+    color: var(--llm-ui-text-secondary);
+    font-size: 0.85em;
+    margin-left: 8px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 300px;
+    opacity: 0.8;
+}
+
+/* 当父容器折叠时，显示预览 */
+.is-collapsed .llm-ui-header-preview {
+    display: inline-block;
+}
+
+/* 折叠时，隐藏原始 Title 的一部分以节省空间 (可选) */
+/* .is-collapsed .llm-ui-bubble__title span { display: none; } */
+
+
+/* =========================================
+   [新增] 2. 分支导航 UI (Branch Nav)
+   ========================================= */
+.llm-ui-branch-nav {
+    display: flex;
+    align-items: center;
+    font-size: 0.75rem;
+    color: var(--llm-ui-text-secondary);
+    background: rgba(0,0,0,0.05);
+    border-radius: 4px;
+    margin-right: 8px;
+    padding: 0 4px;
+}
+
+.llm-ui-branch-btn {
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    padding: 2px 4px;
+    font-size: 10px;
+    color: inherit;
+}
+.llm-ui-branch-btn:hover { color: var(--llm-ui-text-primary); background: rgba(0,0,0,0.05); }
+
+/* =========================================
+   [新增] 1. User Bubble Toolbar 增强
+   ========================================= */
+
+/* 确保 User Bubble 的工具栏样式与 AI 的一致 */
+.llm-ui-bubble__toolbar {
+    display: flex;
+    gap: 2px;
+    opacity: 0; 
+    transition: opacity 0.2s;
+}
+
+/* 始终显示工具栏如果处于折叠状态，或者鼠标悬停 */
+.llm-ui-bubble--user:hover .llm-ui-bubble__toolbar,
+.llm-ui-bubble--user.is-collapsed .llm-ui-bubble__toolbar {
+    opacity: 1;
+}
+
+/* 红色删除按钮 */
+.llm-ui-btn-bubble-tool[data-action="delete"]:hover {
+    color: #ef4444 !important;
+    background-color: #fee2e2 !important;
+}

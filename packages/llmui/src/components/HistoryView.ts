@@ -5,7 +5,7 @@ import { MDxController } from './mdx/MDxController';
 
 // ✨ [新增] 定义节点动作接口
 export interface NodeActionCallback {
-    (action: 'retry' | 'delete', nodeId: string): void;
+    (action: 'retry' | 'delete' | 'edit', nodeId: string): void;
 }
 
 export class HistoryView {
@@ -13,6 +13,10 @@ export class HistoryView {
     private editorMap = new Map<string, MDxController>();
     private container: HTMLElement;
     
+    // [新增] 滚动控制相关
+    private shouldAutoScroll = true; 
+    private scrollThreshold = 50; // 距离底部多少像素内视为“正在底部”
+
     private onContentChange?: (id: string, content: string, type: 'user' | 'node') => void;
     private onNodeAction?: NodeActionCallback;
 
@@ -24,6 +28,14 @@ export class HistoryView {
         this.container = container;
         this.onContentChange = onContentChange;
         this.onNodeAction = onNodeAction;
+
+        // [新增] 监听用户手动滚动
+        this.container.addEventListener('scroll', () => {
+            const { scrollTop, scrollHeight, clientHeight } = this.container;
+            // 如果用户向上滚动离开了底部，禁用自动滚动
+            const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+            this.shouldAutoScroll = distanceFromBottom < this.scrollThreshold;
+        });
     }
 
     clear() {
@@ -45,7 +57,8 @@ export class HistoryView {
                 this.renderExecutionTree(session.executionRoot);
             }
         });
-        this.scrollToBottom();
+        // 初始渲染强制滚动到底部
+        this.scrollToBottom(true);
     }
 
     renderWelcome() {
@@ -65,7 +78,9 @@ export class HistoryView {
     }
 
     processEvent(event: OrchestratorEvent) {
-        if (this.container.querySelector('.llm-ui-welcome')) this.container.innerHTML = '';
+        // 在更新 DOM 前，先判断是否需要滚动
+        // 如果是新 session 或新 node，通常强制滚动
+        const forceScroll = event.type === 'session_start' || event.type === 'node_start';
 
         switch (event.type) {
             case 'session_start':
@@ -88,12 +103,7 @@ export class HistoryView {
                 break;
         }
         
-        // 只有产生内容更新时才滚动，避免元数据更新导致频繁跳动
-        if (event.type === 'node_update' && event.payload.chunk) {
-             this.scrollToBottom();
-        } else if (event.type !== 'node_update') {
-             this.scrollToBottom();
-        }
+        this.scrollToBottom(forceScroll);
     }
 
     private appendSessionGroup(group: SessionGroup) {
@@ -102,21 +112,39 @@ export class HistoryView {
         wrapper.dataset.sessionId = group.id;
 
         if (group.role === 'user') {
-            // [修改] 增加 Copy 和 Collapse 按钮
+            const contentPreview = this.getPreviewText(group.content || '');
+
             wrapper.innerHTML = `
                 <div class="llm-ui-avatar">👤</div>
                 <div class="llm-ui-bubble--user">
                     <div class="llm-ui-bubble__header">
                         <span class="llm-ui-bubble__title">You</span>
+                        
+                        <!-- [新增] 3. 预览文本区域 -->
+                        <span class="llm-ui-header-preview">${contentPreview}</span>
+                        
+                        <div style="flex:1"></div>
+
                         <div class="llm-ui-bubble__toolbar">
+                             <!-- [新增] 1. Retry (Resend) -->
+                             <button class="llm-ui-btn-bubble-tool" data-action="retry" title="Resend">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                             </button>
+
                              <button class="llm-ui-btn-bubble-tool" data-action="edit" title="Edit">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
                              </button>
                              <button class="llm-ui-btn-bubble-tool" data-action="copy" title="Copy">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
                              </button>
-                             <button class="llm-ui-btn-bubble-tool" data-action="collapse" title="Collapse/Expand">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+
+                             <!-- [新增] 1. Delete -->
+                             <button class="llm-ui-btn-bubble-tool" data-action="delete" title="Delete">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                             </button>
+
+                             <button class="llm-ui-btn-bubble-tool" data-action="collapse" title="Collapse">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
                              </button>
                         </div>
                     </div>
@@ -128,7 +156,12 @@ export class HistoryView {
             const mountPoint = wrapper.querySelector(`#user-mount-${group.id}`) as HTMLElement;
             const controller = new MDxController(mountPoint, group.content || '', {
                 readOnly: true,
-                onChange: (text) => this.onContentChange?.(group.id, text, 'user')
+                onChange: (text) => {
+                    this.onContentChange?.(group.id, text, 'user');
+                    // [新增] 更新预览文本
+                    const previewEl = wrapper.querySelector('.llm-ui-header-preview');
+                    if(previewEl) previewEl.textContent = this.getPreviewText(text);
+                }
             });
             this.editorMap.set(group.id, controller);
 
@@ -142,6 +175,19 @@ export class HistoryView {
             editBtn?.addEventListener('click', () => {
                 controller.toggleEdit();
                 editBtn.classList.toggle('active');
+            });
+
+            wrapper.querySelector('[data-action="retry"]')?.addEventListener('click', (e) => {
+                e.stopPropagation();
+                // User Retry 通常意味着重新发送
+                this.onNodeAction?.('retry', group.id); // 注意: group.id 应该是持久化的 ID 最好，这里演示用
+            });
+
+            wrapper.querySelector('[data-action="delete"]')?.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if(confirm('Delete this message?')) {
+                    this.onNodeAction?.('delete', group.id);
+                }
             });
 
             // 2. Copy
@@ -266,7 +312,12 @@ export class HistoryView {
             if (mountPoints.output) {
                 const controller = new MDxController(mountPoints.output, node.data.output || '', {
                     readOnly: true,
-                    onChange: (text) => this.onContentChange?.(node.id, text, 'node')
+                    onChange: (text) => {
+                        this.onContentChange?.(node.id, text, 'node');
+                        // [新增] 更新预览文本
+                        const previewEl = element.querySelector('.llm-ui-header-preview');
+                        if(previewEl) previewEl.textContent = this.getPreviewText(text);
+                    }
                 });
                 this.editorMap.set(node.id, controller);
 
@@ -312,6 +363,11 @@ export class HistoryView {
             const editor = this.editorMap.get(nodeId);
             if (editor) {
                 editor.appendStream(chunk);
+                // [新增] 实时更新 Header Preview
+                const previewEl = el.querySelector('.llm-ui-header-preview');
+                if (previewEl) {
+                    previewEl.textContent = this.getPreviewText(editor.content);
+                }
             }
         }
     }
@@ -351,10 +407,23 @@ export class HistoryView {
         node.children?.forEach(c => this.renderExecutionTree(c));
     }
     
-    scrollToBottom() {
-        this.container.scrollTop = this.container.scrollHeight;
+    scrollToBottom(force: boolean = false) {
+        if (force || this.shouldAutoScroll) {
+            // 使用 requestAnimationFrame 确保在 DOM 渲染后执行
+            requestAnimationFrame(() => {
+                this.container.scrollTop = this.container.scrollHeight;
+            });
+        }
     }
-    
+
+    // [新增] 辅助：截取预览文本
+    private getPreviewText(content: string): string {
+        if (!content) return '';
+        // 移除 Markdown 符号 (简单处理)
+        const plain = content.replace(/[#*`]/g, '').replace(/\n/g, ' ').trim();
+        return plain.length > 50 ? plain.substring(0, 50) + '...' : plain;
+    }
+
     private escapeHtml(str: string) {
         return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }

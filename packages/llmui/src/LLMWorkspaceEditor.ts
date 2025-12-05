@@ -170,7 +170,7 @@ export class LLMWorkspaceEditor implements IEditor {
     /**
      * ✨ [新增] 处理节点操作（重试、删除）
      */
-    private async handleNodeAction(action: 'retry' | 'delete', nodeId: string) {
+    private async handleNodeAction(action: 'retry' | 'delete' | 'edit', nodeId: string) {
         if (action === 'retry') {
             // TODO: 实现重新生成逻辑
             console.log('[LLMWorkspaceEditor] Retry requested for node:', nodeId);
@@ -178,7 +178,11 @@ export class LLMWorkspaceEditor implements IEditor {
         } else if (action === 'delete') {
             // TODO: 实现删除逻辑
             console.log('[LLMWorkspaceEditor] Delete requested for node:', nodeId);
-            // 从 Engine 删除节点，刷新 UI
+            // 逻辑: 调用 sessionManager.deleteNode(nodeId) -> Engine.deleteMessage
+        } else if (action === 'edit') {
+            // 编辑模式通常由 HistoryView 内部的 MDxController 处理切换，
+            // 但这里接收事件可以用于记录日志或处理其他全局状态
+            console.log('[LLMWorkspaceEditor] Edit mode toggled for node:', nodeId);
         }
     }
 
