@@ -1,5 +1,5 @@
 // mdx/index.ts
-export { createMDxEditor, registerPlugin } from './factory';
+export { createMDxEditor,defaultEditorFactory, registerPlugin } from './factory';
 export type { MDxEditorFactoryConfig, PluginConfig } from './factory';
 
 export { PluginManager } from './core/plugin-manager';

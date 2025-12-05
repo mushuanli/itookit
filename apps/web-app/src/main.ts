@@ -4,7 +4,7 @@
  */
 import { MemoryManager } from '@itookit/memory-manager';
 import { initVFS } from './services/vfs';
-import { defaultEditorFactory,  } from './factories/editorFactory';
+import { defaultEditorFactory,  } from '@itookit/mdxeditor';
 import { initSidebarNavigation } from './utils/layout';
 import { WORKSPACES } from './config/modules';
 import { SettingsEngine } from './workspace/settings/engines/SettingsEngine';
