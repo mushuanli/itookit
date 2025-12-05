@@ -62,7 +62,8 @@ export class MDxController {
                     'media',
                     'svg',
                     'ui:toolbar' 
-                ]
+                ],
+                defaultCollapsed:false
             }) as MDxEditor;
 
             this.editor.on('change', () => {
