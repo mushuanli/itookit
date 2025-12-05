@@ -74,7 +74,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
 
     async createSession(title: string, systemPrompt: string = "You are a helpful assistant."): Promise<string> {
         const sessionId = generateUUID();
-        
+        console.log(`createSession call: ${title} - id: ${sessionId}`);
         // 1. 创建隐藏数据目录: /.uuid/
         // 使用 moduleEngine 提供的接口，它会自动处理 parentId 逻辑
         // 但这里我们是在根目录下创建，可以直接用 vfs.createDirectory 或者 moduleEngine.createDirectory
@@ -171,12 +171,14 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
         // 1. 写入新节点
         await this.writeJson(this.getNodePath(sessionId, newNodeId), newNode);
 
-        // 2. 更新父节点
-        const parentNode = await this.readJson<ChatNode>(this.getNodePath(sessionId, parentId));
-        if (parentNode) {
-            if (!parentNode.children_ids) parentNode.children_ids = [];
-            parentNode.children_ids.push(newNodeId);
-            await this.writeJson(this.getNodePath(sessionId, parentId), parentNode);
+        // 2. 更新父节点的 children_ids
+        if (parentId) {
+            const parentNode = await this.readJson<ChatNode>(this.getNodePath(sessionId, parentId));
+            if (parentNode) {
+                if (!parentNode.children_ids) parentNode.children_ids = [];
+                parentNode.children_ids.push(newNodeId);
+                await this.writeJson(this.getNodePath(sessionId, parentId), parentNode);
+            }
         }
 
         // 3. 更新 Manifest
@@ -186,6 +188,43 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
         await this.writeJson(this.getManifestPath(sessionId), manifest);
 
         return newNodeId;
+    }
+
+    /**
+     * ✨ [核心方法] 原地更新节点内容（支持流式持久化）
+     */
+    async updateNode(
+        sessionId: string, 
+        nodeId: string, 
+        updates: Partial<Pick<ChatNode, 'content' | 'meta' | 'status'>>
+    ): Promise<void> {
+        const path = this.getNodePath(sessionId, nodeId);
+        const node = await this.readJson<ChatNode>(path);
+        if (!node) {
+            console.warn(`[LLMSessionEngine] Node ${nodeId} not found, skipping update`);
+            return;
+        }
+
+        let hasChanges = false;
+        
+        if (updates.content !== undefined && updates.content !== node.content) {
+            node.content = updates.content;
+            hasChanges = true;
+        }
+        
+        if (updates.status !== undefined && updates.status !== node.status) {
+            node.status = updates.status;
+            hasChanges = true;
+        }
+        
+        if (updates.meta) {
+            node.meta = { ...node.meta, ...updates.meta };
+            hasChanges = true;
+        }
+
+        if (hasChanges) {
+            await this.writeJson(path, node);
+        }
     }
 
     async editMessage(sessionId: string, originalNodeId: string, newContent: string): Promise<string> {
@@ -236,31 +275,6 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
         const node = await this.readJson<ChatNode>(path);
         if (node) {
             node.status = 'deleted';
-            await this.writeJson(path, node);
-        }
-    }
-    
-    // ✨ [实现] 原地更新节点内容
-    async updateNode(sessionId: string, nodeId: string, updates: Partial<Pick<ChatNode, 'content' | 'meta' | 'status'>>): Promise<void> {
-        const path = this.getNodePath(sessionId, nodeId);
-        const node = await this.readJson<ChatNode>(path);
-        if (!node) throw new Error(`Node ${nodeId} not found`);
-
-        let hasChanges = false;
-        if (updates.content !== undefined && updates.content !== node.content) {
-            node.content = updates.content;
-            hasChanges = true;
-        }
-        if (updates.status !== undefined && updates.status !== node.status) {
-            node.status = updates.status;
-            hasChanges = true;
-        }
-        if (updates.meta) {
-            node.meta = { ...node.meta, ...updates.meta };
-            hasChanges = true;
-        }
-
-        if (hasChanges) {
             await this.writeJson(path, node);
         }
     }
@@ -380,7 +394,11 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
             // 2. 删除关联目录
             if (node.name.endsWith('.chat')) {
                 const uuid = node.name.replace('.chat', '');
-                await this.deleteFile(this.getHiddenDir(uuid)); // vfs.delete 支持递归
+                try {
+                    await this.deleteFile(this.getHiddenDir(uuid));
+                } catch (e) {
+                    console.warn(`Failed to delete hidden dir for ${uuid}`, e);
+                }
             }
         }
     }
@@ -476,5 +494,22 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
     
     on(event: EngineEventType, cb: (e: EngineEvent) => void): () => void { 
         return this.moduleEngine.on(event, cb); 
+    }
+
+    // ============================================================
+    // ✨ [新增] 辅助方法：从 nodeId 获取 sessionId
+    // ============================================================
+    
+    /**
+     * 根据 VFS nodeId 获取 chat sessionId (UUID)
+     */
+    async getSessionIdFromNodeId(nodeId: string): Promise<string | null> {
+        try {
+            const node = await this.coreVfs.storage.loadVNode(nodeId);
+            if (!node || !node.name.endsWith('.chat')) return null;
+            return node.name.replace('.chat', '');
+        } catch (e) {
+            return null;
+        }
     }
 }

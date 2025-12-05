@@ -1,7 +1,11 @@
 // @file llm-ui/types.ts
 
-import { ExecutionContext, NodeStatus } from '@itookit/common';
+import { ExecutionContext, NodeStatus, ChatNode } from '@itookit/common';
 
+/**
+ * UI 层的执行节点（用于渲染）
+ * 与 ChatNode（持久化层）分离，但可以互相转换
+ */
 export interface ExecutionNode {
     id: string;
     parentId?: string;
@@ -40,6 +44,9 @@ export interface ExecutionNode {
     children?: ExecutionNode[];
 }
 
+/**
+ * UI 会话组（对应一轮对话）
+ */
 export interface SessionGroup {
     id: string;
     timestamp: number;
@@ -49,10 +56,16 @@ export interface SessionGroup {
     
     // 系统的执行树根节点（如果是 assistant 角色）
     executionRoot?: ExecutionNode;
+    
+    // ✨ [新增] 关联到持久化节点的 ID
+    persistedNodeId?: string;
 }
 
 // [新增] 扩展标准执行上下文，注入 UI 流式回调能力和节点生命周期管理
 export interface StreamingContext extends ExecutionContext {
+    // ✨ [新增] 当前会话 ID，用于持久化
+    sessionId?: string;
+    
     callbacks?: {
         // 增加 nodeId 参数，支持定向输出
         onThinking?: (delta: string, nodeId?: string) => void;
@@ -66,7 +79,7 @@ export interface StreamingContext extends ExecutionContext {
         
         // [新增] 允许更新元数据 (如设置布局模式)
         onNodeMetaUpdate?: (nodeId: string, meta: any) => void;
-    }
+    };
 }
 
 // 事件总线定义

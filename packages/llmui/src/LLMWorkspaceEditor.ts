@@ -2,9 +2,9 @@
 
 import { 
     IEditor, EditorOptions, EditorEvent, EditorEventCallback, 
-    ILLMSessionEngine 
+    ILLMSessionEngine,escapeHTML
 } from '@itookit/common';
-import { HistoryView } from './components/HistoryView';
+import { HistoryView, NodeActionCallback } from './components/HistoryView';
 import { ChatInput } from './components/ChatInput';
 import { SessionManager } from './orchestrator/SessionManager';
 import { IAgentService } from './services/IAgentService';
@@ -29,6 +29,7 @@ export class LLMWorkspaceEditor implements IEditor {
     // State
     private currentTitle: string = 'New Chat';
     private isAllExpanded: boolean = true;
+    private currentSessionId: string | null = null;
     
     // 保存引用
     private options: LLMEditorOptions;
@@ -37,10 +38,13 @@ export class LLMWorkspaceEditor implements IEditor {
         container: HTMLElement,
         options: LLMEditorOptions, 
     ) {
-        this.options = options; // 保存 options
-        // [修复] Code 2532: options.agentService 现在是必须的，无需检查，
-        // 如果 TypeScript 仍报错，说明 options 类型传递有问题，这里假设类型正确
-        this.sessionManager = new SessionManager(options.agentService);
+        this.options = options;
+        
+        // ✨ [关键变更] 传入 sessionEngine
+        this.sessionManager = new SessionManager(
+            options.agentService,
+            options.sessionEngine
+        );
 
         if (options.title) {
             this.currentTitle = options.title;
@@ -58,10 +62,12 @@ export class LLMWorkspaceEditor implements IEditor {
         const historyEl = this.container.querySelector('#llm-ui-history') as HTMLElement;
         const inputEl = this.container.querySelector('#llm-ui-input') as HTMLElement;
 
-        this.historyView = new HistoryView(historyEl, (id, content, type) => {
-            this.sessionManager.updateContent(id, content, type);
-            this.emit('change');
-        });
+        // ✨ [新增] 传入节点操作回调
+        this.historyView = new HistoryView(
+            historyEl, 
+            (id, content, type) => this.handleContentChange(id, content, type),
+            (action, nodeId) => this.handleNodeAction(action, nodeId)
+        );
         
         // 获取初始 Agent 列表
         let initialAgents: any[] = [];
@@ -76,7 +82,7 @@ export class LLMWorkspaceEditor implements IEditor {
         this.chatInput = new ChatInput(inputEl, {
             onSend: (text, files, agentId) => this.handleUserSend(text, files, agentId),
             onStop: () => this.sessionManager.abort(),
-            initialAgents: initialAgents // 传入 Agent 列表
+            initialAgents: initialAgents
         });
 
         // 异步更新 Agents，防止初始化时 VFS 未就绪
@@ -90,6 +96,7 @@ export class LLMWorkspaceEditor implements IEditor {
         // 3. 绑定 TitleBar 事件
         this.bindTitleBarEvents();
 
+        // 4. 绑定 SessionManager 事件
         this.sessionManager.onEvent((event) => {
             this.historyView.processEvent(event);
             if (event.type === 'finished' || event.type === 'session_start') {
@@ -97,25 +104,96 @@ export class LLMWorkspaceEditor implements IEditor {
             }
         });
 
+        // ============================================
+        // ✨ [关键变更] 从 Engine 加载会话数据
+        // ============================================
+        await this.loadSessionFromEngine(initialContent);
+
+        this.emit('ready');
+    }
+
+    /**
+     * ✨ [新增] 从 Engine 加载会话
+     */
+    private async loadSessionFromEngine(initialContent?: string) {
+        // 尝试从 nodeId 获取 sessionId
+        if (this.options.nodeId) {
+            try {
+                const sessionId = await (this.options.sessionEngine as any).getSessionIdFromNodeId(
+                    this.options.nodeId
+                );
+                
+                if (sessionId) {
+                    this.currentSessionId = sessionId;
+                    
+                    // 加载 Manifest 获取 title
+                    const manifest = await this.options.sessionEngine.getManifest(sessionId);
+                    if (manifest.title) {
+                        this.currentTitle = manifest.title;
+                        this.titleInput.value = manifest.title;
+                    }
+                    
+                    // 加载会话内容
+                    await this.sessionManager.loadSession(sessionId);
+                    this.historyView.renderFull(this.sessionManager.getSessions());
+                    
+                    console.log(`[LLMWorkspaceEditor] Session loaded: ${sessionId}`);
+                    return;
+                }
+            } catch (e) {
+                console.warn('[LLMWorkspaceEditor] Failed to load from nodeId:', e);
+            }
+        }
+
+        // Fallback: 尝试从 initialContent 解析
         if (initialContent && initialContent.trim() !== '') {
             try {
                 const data = JSON.parse(initialContent);
-                // 恢复 Title
-                if (data.title) {
-                    this.currentTitle = data.title;
-                    this.titleInput.value = data.title;
+                
+                // 检查是否是 Manifest 格式
+                if (data.id && data.current_head) {
+                    this.currentSessionId = data.id;
+                    
+                    if (data.title) {
+                        this.currentTitle = data.title;
+                        this.titleInput.value = data.title;
+                    }
+                    
+                    await this.sessionManager.loadSession(data.id);
+                    this.historyView.renderFull(this.sessionManager.getSessions());
+                    return;
                 }
-                this.sessionManager.load(data);
-                this.historyView.renderFull(this.sessionManager.getSessions());
             } catch (e) {
-                console.error('Failed to parse chat history', e);
-                this.historyView.renderWelcome();
+                console.error('[LLMWorkspaceEditor] Failed to parse initialContent:', e);
             }
-        } else {
-            this.historyView.renderWelcome();
         }
 
-        this.emit('ready');
+
+
+    this.historyView.renderWelcome();
+    }
+
+    /**
+     * ✨ [新增] 处理内容编辑
+     */
+    private async handleContentChange(id: string, content: string, type: 'user' | 'node') {
+        await this.sessionManager.updateContent(id, content, type);
+        this.emit('change');
+    }
+
+    /**
+     * ✨ [新增] 处理节点操作（重试、删除）
+     */
+    private async handleNodeAction(action: 'retry' | 'delete', nodeId: string) {
+        if (action === 'retry') {
+            // TODO: 实现重新生成逻辑
+            console.log('[LLMWorkspaceEditor] Retry requested for node:', nodeId);
+            // 可以获取该节点对应的 user message，重新发送
+        } else if (action === 'delete') {
+            // TODO: 实现删除逻辑
+            console.log('[LLMWorkspaceEditor] Delete requested for node:', nodeId);
+            // 从 Engine 删除节点，刷新 UI
+        }
     }
 
     private renderLayout() {
@@ -123,29 +201,24 @@ export class LLMWorkspaceEditor implements IEditor {
         this.container.innerHTML = `
             <div class="llm-workspace-titlebar">
                 <div class="llm-workspace-titlebar__left">
-                    <!-- Toggle Sidebar -->
                     <button class="llm-workspace-titlebar__btn" id="llm-btn-sidebar" title="Toggle Sidebar">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg>
                     </button>
                     
                     <div class="llm-workspace-titlebar__sep"></div>
                     
-                    <!-- Editable Title -->
-                    <input type="text" class="llm-workspace-titlebar__input" id="llm-title-input" value="${this.currentTitle}" placeholder="Untitled Chat" />
+                    <input type="text" class="llm-workspace-titlebar__input" id="llm-title-input" value="${escapeHTML(this.currentTitle)}" placeholder="Untitled Chat" />
                 </div>
 
                 <div class="llm-workspace-titlebar__right">
-                    <!-- Collapse/Expand All Bubbles -->
                     <button class="llm-workspace-titlebar__btn" id="llm-btn-collapse" title="Collapse/Expand All Messages">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 14 10 14 10 20"></polyline><polyline points="20 10 14 10 14 4"></polyline></svg>
                     </button>
 
-                    <!-- Copy Markdown -->
                     <button class="llm-workspace-titlebar__btn" id="llm-btn-copy" title="Copy as Markdown">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
                     </button>
 
-                    <!-- Print -->
                     <button class="llm-workspace-titlebar__btn" id="llm-btn-print" title="Print">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
                     </button>
@@ -168,19 +241,22 @@ export class LLMWorkspaceEditor implements IEditor {
             }
         });
 
-        // 2. Title Edit
-        this.titleInput.addEventListener('change', () => {
+        // 2. Title Edit - ✨ 持久化到 Engine
+        this.titleInput.addEventListener('change', async () => {
             this.currentTitle = this.titleInput.value;
-            this.setDirty(true);
             this.emit('change');
 
-            // 触发 Engine 重命名逻辑 (更新 Metadata 和 Manifest)
+            // 更新 Engine
             if (this.options.nodeId) {
-                 this.options.sessionEngine.rename(this.options.nodeId, this.currentTitle);
+                try {
+                    await this.options.sessionEngine.rename(this.options.nodeId, this.currentTitle);
+                } catch (e) {
+                    console.error('[LLMWorkspaceEditor] Failed to rename:', e);
+                }
             }
         });
 
-        // 3. Collapse/Expand All (Bubbles)
+        // 3. Collapse/Expand All
         const btnCollapse = this.container.querySelector('#llm-btn-collapse')!;
         btnCollapse.addEventListener('click', () => {
             this.toggleAllBubbles(btnCollapse);
@@ -192,7 +268,6 @@ export class LLMWorkspaceEditor implements IEditor {
             const md = this.sessionManager.exportToMarkdown();
             try {
                 await navigator.clipboard.writeText(md);
-                // 视觉反馈
                 const originalHtml = btnCopy.innerHTML;
                 btnCopy.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:#2da44e"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
                 setTimeout(() => btnCopy.innerHTML = originalHtml, 2000);
@@ -214,45 +289,50 @@ export class LLMWorkspaceEditor implements IEditor {
     private toggleAllBubbles(btn: Element) {
         this.isAllExpanded = !this.isAllExpanded;
     
-    const historyContainer = this.container.querySelector('#llm-ui-history');
-    if (!historyContainer) return;
+        const historyContainer = this.container.querySelector('#llm-ui-history');
+        if (!historyContainer) return;
 
-    // ✨ 修复：查找所有会话容器（包括用户和助手消息）
-    const userSessions = historyContainer.querySelectorAll('.llm-ui-session--user .llm-ui-bubble--user');
-    const aiSessions = historyContainer.querySelectorAll('.llm-ui-execution-root');
-    
-    // 折叠/展开用户消息
-    userSessions.forEach(bubble => {
-        if (this.isAllExpanded) {
-            bubble.classList.remove('is-collapsed');
-        } else {
-            bubble.classList.add('is-collapsed');
-        }
-    });
-    
-    // ✨ 新增：递归折叠/展开所有 ExecutionNode
-    aiSessions.forEach(root => {
-        const nodes = root.querySelectorAll('.llm-ui-node');
-        nodes.forEach(node => {
+        const userSessions = historyContainer.querySelectorAll('.llm-ui-session--user .llm-ui-bubble--user');
+        const aiSessions = historyContainer.querySelectorAll('.llm-ui-execution-root');
+        
+        // 折叠/展开用户消息
+        userSessions.forEach(bubble => {
             if (this.isAllExpanded) {
-                node.classList.remove('is-collapsed');
+                bubble.classList.remove('is-collapsed');
             } else {
-                node.classList.add('is-collapsed');
+                bubble.classList.add('is-collapsed');
             }
         });
-    });
+        
+        // 递归折叠/展开所有 ExecutionNode
+        aiSessions.forEach(root => {
+            const nodes = root.querySelectorAll('.llm-ui-node');
+            nodes.forEach(node => {
+                if (this.isAllExpanded) {
+                    node.classList.remove('is-collapsed');
+                } else {
+                    node.classList.add('is-collapsed');
+                }
+            });
+        });
 
-    // 更新按钮图标（保持原逻辑）
-    if (this.isAllExpanded) {
-        btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 14 10 14 10 20"></polyline><polyline points="20 10 14 10 14 4"></polyline></svg>`;
-        btn.setAttribute('title', 'Collapse All');
-    } else {
-        btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>`;
-        btn.setAttribute('title', 'Expand All');
-	}
+        // 更新按钮图标
+        if (this.isAllExpanded) {
+            btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 14 10 14 10 20"></polyline><polyline points="20 10 14 10 14 4"></polyline></svg>`;
+            btn.setAttribute('title', 'Collapse All');
+        } else {
+            btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>`;
+            btn.setAttribute('title', 'Expand All');
+        }
     }
 
     private async handleUserSend(text: string, files: File[], agentId?: string) {
+        // ✨ [关键] 确保有 sessionId
+        if (!this.currentSessionId) {
+            console.error('[LLMWorkspaceEditor] No session loaded!');
+            return;
+        }
+
         this.chatInput.setLoading(true);
         try {
             await this.sessionManager.runUserQuery(text, files, agentId || 'default');
@@ -264,34 +344,56 @@ export class LLMWorkspaceEditor implements IEditor {
         }
     }
 
+    // ============================================
+    // ✨ [重构] getText/setText - 不再用于持久化
+    // ============================================
+
+    /**
+     * 获取当前会话的 Manifest（用于外部读取）
+     * 注意：实际数据已通过 Engine 自动持久化
+     */
     getText(): string {
-        const data = this.sessionManager.serialize();
-        // 将 title 注入到序列化数据中
+        if (!this.currentSessionId) {
+            return JSON.stringify({ error: 'No session loaded' });
+        }
+        
+        // 返回基本信息，实际数据在 Engine 中
         return JSON.stringify({
-            ...data,
-            title: this.currentTitle
+            sessionId: this.currentSessionId,
+            title: this.currentTitle,
+            messageCount: this.sessionManager.getSessions().length
         }, null, 2);
     }
 
+    /**
+     * 设置内容（通常在打开新文件时由框架调用）
+     * ✨ 重定向到 loadSessionFromEngine
+     */
     setText(text: string): void {
-        this.historyView.clear();
-        try {
-            const data = JSON.parse(text);
-            if (data.title) {
-                this.currentTitle = data.title;
-                if (this.titleInput) this.titleInput.value = data.title;
-            }
-            this.sessionManager.load(data);
-            this.historyView.renderFull(this.sessionManager.getSessions());
-        } catch (e) {
+        // 异步加载，但 setText 是同步接口
+        // 使用 Promise 但不等待
+        this.loadSessionFromEngine(text).catch(e => {
+            console.error('[LLMWorkspaceEditor] setText failed:', e);
             this.historyView.renderWelcome();
-        }
+        });
     }
 
-    isDirty(): boolean { return this.sessionManager.hasUnsavedChanges(); }
-    setDirty(dirty: boolean) { this.sessionManager.setDirty(dirty); }
+    // ============================================
+    // IEditor 接口实现
+    // ============================================
 
-    focus(): void { this.chatInput.focus(); }
+    isDirty(): boolean { 
+        // Engine 自动保存，始终返回 false
+        return false; 
+    }
+    
+    setDirty(dirty: boolean) { 
+        // no-op
+    }
+
+    focus(): void { 
+        this.chatInput.focus(); 
+    }
 
     async destroy(): Promise<void> {
         this.sessionManager.destroy();
@@ -313,7 +415,7 @@ export class LLMWorkspaceEditor implements IEditor {
     setReadOnly() {}
     get commands() { return {}; }
     async getHeadings() { return []; }
-    async getSearchableText() { return this.getText(); }
+    async getSearchableText() { return this.sessionManager.exportToMarkdown(); }
     async getSummary() { return null; }
     async navigateTo() {}
     async search() { return []; }
@@ -329,4 +431,5 @@ export class LLMWorkspaceEditor implements IEditor {
     private emit(event: EditorEvent, payload?: any) {
         this.listeners.get(event)?.forEach(cb => cb(payload));
     }
+
 }
