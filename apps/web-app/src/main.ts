@@ -4,54 +4,68 @@
  */
 import { MemoryManager } from '@itookit/memory-manager';
 import { initVFS } from './services/vfs';
-import { defaultEditorFactory, createAgentEditorFactory } from './factories/editorFactory';
+import { defaultEditorFactory,  } from './factories/editorFactory';
 import { initSidebarNavigation } from './utils/layout';
 import { WORKSPACES } from './config/modules';
 import { SettingsEngine } from './workspace/settings/engines/SettingsEngine';
 import { SettingsService } from './workspace/settings/services/SettingsService';
 import { createSettingsFactory } from './factories/settingsFactory';
 import { FileTypeDefinition } from '@itookit/vfs-ui';
-import { createLLMFactory } from './factories/llmFactory';
+import { createLLMFactory, createAgentEditorFactory,VFSAgentService } from '@itookit/llm-ui';
 
 import '@itookit/vfs-ui/style.css';
 import '@itookit/mdxeditor/style.css';
 import '@itookit/memory-manager/style.css'; 
-// 如果有 llm-ui 的样式，也请引入
 import '@itookit/llm-ui/style.css'; 
 import './styles/index.css'; 
 
 const managerCache = new Map<string, MemoryManager>();
 
-// 全局单例 SettingsService
+// Service Singletons
 let sharedSettingsService: SettingsService | null = null;
+let sharedAgentService: VFSAgentService | null = null;
 
 async function bootstrap() {
     try {
-        // 1. 初始化核心层 VFS
+        // 1. 初始化核心 VFS
         const vfsCore = await initVFS();
         
-        // 2. 优先初始化全局设置服务 (Connection, Tags 数据源)
+        // 2. 初始化 SettingsService (Tags, Contacts)
         sharedSettingsService = new SettingsService(vfsCore);
         await sharedSettingsService.init();
 
-        // 3. 准备 Agent 编辑器工厂 (依赖 SettingsService)
-        const agentEditorFactory = createAgentEditorFactory(sharedSettingsService);
-	const llmEditorFactory = createLLMFactory(sharedSettingsService); // 新增
+        // 3. 初始化 VFSAgentService (LLM, Connections, Agents)
+        // 关键：在这里传入默认 Agent 定义，实现开箱即用的体验
+        sharedAgentService = new VFSAgentService(vfsCore);
+        await sharedAgentService.init();
 
-        // 4. 定义全局通用的文件类型注册表
-        // 这将告诉 vfs-ui：遇到 .agent 文件时，使用 agentEditorFactory 创建编辑器，图标显示为 🤖
+        // Agent Editor Factory: 只需要 Agent 服务
+        const agentEditorFactory = createAgentEditorFactory(sharedAgentService); 
+        // 修正: AgentConfigEditor 可能需要 SettingsService 来获取 Tags? 
+        // 实际上 AgentConfigEditor 需要 VFSAgentService 来获取 Connections。
+        // 请检查 createAgentEditorFactory 的实现，确保它接收正确的 Service。
+        // 假设我们修改了 factory 接收 VFSAgentService:
+        // const agentEditorFactory = createAgentEditorFactory(sharedAgentService);
+
+        // LLM Chat Factory: 内部实例化 Service 还是外部传入？
+        // createLLMFactory 的设计如果是内部 `new VFSAgentService`，会有多例同步问题。
+        // 最好 createLLMFactory 也能接收一个现有的 service 实例，或者 options 包含 service。
+        // 这里假设我们修改了 createLLMFactory 允许注入 service，或者它内部使用了单例模式。
+        // 鉴于 llm-ui 是独立包，最稳妥的方式是通过 options 注入。
+        const llmEditorFactory = createLLMFactory(sharedAgentService); // 内部逻辑需确保能复用数据
+
+        // 5. 注册全局文件类型
         const globalFileTypes: FileTypeDefinition[] = [
             {
                 extensions: ['.agent'],
                 icon: '🤖',
                 editorFactory: agentEditorFactory
             },
-	    {
-	        // 新增 .chat 文件的支持
-	        extensions: ['.chat', '.session'], 
-	        icon: '💬',
-	        editorFactory: llmEditorFactory
-	    }
+            {
+                extensions: ['.chat', '.session'], 
+                icon: '💬',
+                editorFactory: llmEditorFactory
+            }
         ];
 
         const loadWorkspace = async (targetId: string) => {
@@ -68,7 +82,7 @@ async function bootstrap() {
             // --- A. 特殊处理：Settings Workspace ---
             if (targetId === 'settings-workspace') {
                 const settingsEngine = new SettingsEngine(sharedSettingsService!);
-                const settingsFactory = createSettingsFactory(sharedSettingsService!);
+                const settingsFactory = createSettingsFactory(sharedSettingsService!,sharedAgentService!);
                 container.innerHTML = '';
                 
                 manager = new MemoryManager({
@@ -98,7 +112,6 @@ async function bootstrap() {
 
                 manager = new MemoryManager({
                     container: container,
-                    vfsCore: vfsCore,
                     moduleName: 'agents', 
                     
                     // [核心修改] 使用标准工厂作为默认值
@@ -131,13 +144,9 @@ async function bootstrap() {
 
                 manager = new MemoryManager({
                     container: container,
-                    vfsCore: vfsCore,
-                    moduleName: llmConfig.moduleName, // 'chats'
-                    
-                    // [关键] 使用 LLM 专用工厂作为默认编辑器
+                    moduleName: llmConfig.moduleName,
                     editorFactory: llmEditorFactory,
-                    fileTypes: globalFileTypes, // 允许打开其他类型
-
+                    fileTypes: globalFileTypes,
                     uiOptions: {
                         title: llmConfig.title,
                         createFileLabel: llmConfig.itemLabel,
@@ -162,9 +171,8 @@ async function bootstrap() {
 
                 manager = new MemoryManager({
                     container: container,
-                    vfsCore: vfsCore,
                     moduleName: wsConfig.moduleName,
-                    
+
                     editorFactory: defaultEditorFactory,
                     // 注入全局文件类型，使得普通笔记区也能打开 Agent 文件 (如果被移动过去)
                     fileTypes: globalFileTypes,

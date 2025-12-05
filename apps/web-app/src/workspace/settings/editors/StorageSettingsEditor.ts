@@ -1,8 +1,7 @@
 // @file: app/workspace/settings/editors/StorageSettingsEditor.ts
-import { BaseSettingsEditor } from './BaseSettingsEditor';
-import { Modal, Toast } from '../components/UIComponents';
+import { BaseSettingsEditor, Modal, Toast } from '@itookit/common';
+import { SettingsService, LocalSnapshot } from '../services/SettingsService'; // 引入具体 Service
 import { SettingsState } from '../types';
-import { LocalSnapshot } from '../services/SettingsService';
 
 const SETTINGS_LABELS: Record<keyof SettingsState, string> = {
     connections: '🤖 连接 (Connections)',
@@ -11,7 +10,7 @@ const SETTINGS_LABELS: Record<keyof SettingsState, string> = {
     contacts: '📒 通讯录'
 };
 
-export class StorageSettingsEditor extends BaseSettingsEditor {
+export class StorageSettingsEditor extends BaseSettingsEditor<SettingsService> {
     private storageInfo: any = null;
     private snapshots: LocalSnapshot[] = []; 
 

@@ -129,27 +129,50 @@ export class VFSModuleEngine implements ISessionEngine {
     // 核心写操作重构：利用 VFS 层的递归能力，并兼容 ID/Path
     // ==================================================================================
 
-    async createFile(name: string, parentIdOrPath: string | null, content: string | ArrayBuffer = ''): Promise<EngineNode> {
+    /**
+     * [增强] 支持传入 metadata
+     */
+    async createFile(
+        name: string, 
+        parentIdOrPath: string | null, 
+        content: string | ArrayBuffer = '', 
+        metadata?: Record<string, any> // ✨ [新增]
+    ): Promise<EngineNode> {
         // 1. 智能解析父路径
         const parentPath = await this.resolveParentPath(parentIdOrPath);
         
-        // 2. 拼接完整相对路径 (e.g., "/default/config.json")
+        // 2. 拼接完整相对路径
         const fullRelativePath = this.vfs.pathResolver.join(parentPath, name);
         
-        // 3. 调用 VFSCore，它底层现在已经支持自动递归创建父目录了
-        const vnode = await this.vfsCore.createFile(this.moduleName, fullRelativePath, content);
+        // 3. 调用 VFSCore (利用其递归创建能力 + Metadata 支持)
+        const vnode = await this.vfsCore.createFile(
+            this.moduleName, 
+            fullRelativePath, 
+            content,
+            metadata // ✨ [透传]
+        );
         
         const node = this.toEngineNode(vnode);
         node.content = content;
         return node;
     }
 
-    async createDirectory(name: string, parentIdOrPath: string | null): Promise<EngineNode> {
+    /**
+     * [增强] 支持传入 metadata
+     */
+    async createDirectory(
+        name: string, 
+        parentIdOrPath: string | null,
+        metadata?: Record<string, any> // ✨ [新增]
+    ): Promise<EngineNode> {
         const parentPath = await this.resolveParentPath(parentIdOrPath);
         const fullRelativePath = this.vfs.pathResolver.join(parentPath, name);
         
-        // 同样利用 VFSCore 的递归能力
-        const vnode = await this.vfsCore.createDirectory(this.moduleName, fullRelativePath);
+        const vnode = await this.vfsCore.createDirectory(
+            this.moduleName, 
+            fullRelativePath,
+            metadata // ✨ [透传]
+        );
         
         const node = this.toEngineNode(vnode);
         node.children = [];
@@ -176,6 +199,14 @@ export class VFSModuleEngine implements ISessionEngine {
 
     async updateMetadata(id: string, metadata: Record<string, any>): Promise<void> {
         await this.vfsCore.updateNodeMetadata(id, metadata);
+    }
+
+    /**
+     * [新增] 暴露 pathResolver 能力给上层，方便检查文件是否存在
+     * 避免 Service 层必须去获取 coreVfs
+     */
+    async resolvePath(path: string): Promise<string | null> {
+        return this.vfs.pathResolver.resolve(this.moduleName, path);
     }
 
     /**
