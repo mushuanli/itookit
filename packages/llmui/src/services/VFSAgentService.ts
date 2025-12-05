@@ -2,6 +2,8 @@
 
 import { BaseModuleService, VFSCore, VFSEvent, VFSEventType } from '@itookit/vfs-core';
 import { IAgentService } from './IAgentService';
+import {LLM_DEFAULT_AGENTS} from '../constants';
+
 import { 
     IAgentDefinition, 
     LLMConnection, 
@@ -32,13 +34,10 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
 
     constructor(
         vfs?: VFSCore,
-        defaultAgents?: any[]
     ) {
         // 1. 绑定到 FS_MODULE_AGENTS (通常是 'agents' 模块)
         super(FS_MODULE_AGENTS, { description: 'AI Agents Configuration' }, vfs);
-        if (defaultAgents) {
-            this.defaultAgentsDef = defaultAgents;
-        }
+        this.defaultAgentsDef = LLM_DEFAULT_AGENTS;
     }
 
     private get coreVfs() {
