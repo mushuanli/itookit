@@ -80,7 +80,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
         // 但这里我们是在根目录下创建，可以直接用 vfs.createDirectory 或者 moduleEngine.createDirectory
         // 为了方便，直接调用底层 vfs.createDirectory (BaseModuleService 提供了 protected vfs)
         // 注意：vfs.createDirectory 接受的是相对于模块的路径
-        await this.vfs.createDirectory(this.moduleName, this.getHiddenDir(sessionId));
+        await this.moduleEngine.createDirectory(this.getHiddenDir(sessionId),null);
 
         // 2. 创建根节点 (System Prompt)
         const rootNodeId = `node-${Date.now()}-root`;
@@ -112,12 +112,10 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
         };
 
         // 4. 创建文件并写入 Metadata (title, icon)
-        // 使用 moduleEngine.createFile 也可以，但这里为了利用 writeJson 的便捷性，
-        // 我们需要手动 updateMetadata，或者直接调用 vfs.createFile
         const manifestPath = this.getManifestPath(sessionId);
-        await this.vfs.createFile(
-            this.moduleName,
+        await this.moduleEngine.createFile(
             manifestPath,
+            null,
             Yaml.stringify(manifest),
             { title: title, icon: '💬' } // Metadata 供 UI 列表显示
         );
@@ -149,7 +147,22 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
         return context;
     }
 
-    async appendMessage(sessionId: string, role: ChatNode['role'], content: string, meta: any = {}): Promise<string> {
+    async getManifest(sessionId: string): Promise<ChatManifest> {
+        const m = await this.readJson<ChatManifest>(this.getManifestPath(sessionId));
+        if (!m) throw new Error("Manifest missing");
+        return m;
+    }
+
+    // ============================================================================
+    // 消息操作方法
+    // ============================================================================
+
+    async appendMessage(
+        sessionId: string, 
+        role: ChatNode['role'], 
+        content: string, 
+        meta: any = {}
+    ): Promise<string> {
         const manifest = await this.readJson<ChatManifest>(this.getManifestPath(sessionId));
         if (!manifest) throw new Error("Manifest not found");
 
@@ -279,6 +292,10 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
         }
     }
 
+    // ============================================================================
+    // 分支操作方法
+    // ============================================================================
+
     async switchBranch(sessionId: string, branchName: string): Promise<void> {
         const manifest = await this.readJson<ChatManifest>(this.getManifestPath(sessionId));
         if (!manifest || !manifest.branches[branchName]) throw new Error("Branch not found");
@@ -301,16 +318,9 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
         return siblings.filter((n): n is ChatNode => n !== null);
     }
 
-    async getManifest(sessionId: string): Promise<ChatManifest> {
-        const m = await this.readJson<ChatManifest>(this.getManifestPath(sessionId));
-        if (!m) throw new Error("Manifest missing");
-        return m;
-    }
-
-
-    // ============================================================
+    // ============================================================================
     // ISessionEngine Overrides (UI List Logic)
-    // ============================================================
+    // ============================================================================
 
     async loadTree(): Promise<EngineNode[]> {
         // 使用 moduleEngine 获取原始树
@@ -321,9 +331,83 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
         );
     }
 
-    // --- Internal Helpers ---
+    /**
+     * ✨ [重构] createFile - 供 VFS UI 创建新文件时调用
+     * 确保创建的文件一定有完整的 session 结构
+     */
+    async createFile(
+        name: string, 
+        parentId: string | null, 
+        content?: string | ArrayBuffer
+    ): Promise<EngineNode> {
+        // 从文件名提取标题
+        const title = (name || "New Chat").replace(/\.chat$/i, '');
+        
+        console.log(`[LLMSessionEngine] createFile: name="${name}", title="${title}"`);
+        
+        // 1. 生成 sessionId
+        const sessionId = generateUUID();
+        
+        // 2. 创建隐藏数据目录和根节点
+        await this.moduleEngine.createDirectory(this.getHiddenDir(sessionId), null);
+        
+        const rootNodeId = `node-${Date.now()}-root`;
+        const rootNode: ChatNode = {
+            id: rootNodeId,
+            type: 'message',
+            role: 'system',
+            content: "You are a helpful assistant.",
+            created_at: new Date().toISOString(),
+            parent_id: null,
+            children_ids: [],
+            status: 'active'
+        };
+        await this.writeJson(this.getNodePath(sessionId, rootNodeId), rootNode);
 
+        // 3. 构建 Manifest
+        const manifest: ChatManifest = {
+            version: "1.0",
+            id: sessionId,
+            title: title,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            settings: { model: "gpt-4", temperature: 0.7 },
+            branches: { "main": rootNodeId },
+            current_branch: "main",
+            current_head: rootNodeId,
+            root_id: rootNodeId
+        };
 
+        // 4. 创建 .chat 文件（包含 manifest 内容）
+        const manifestContent = JSON.stringify(manifest, null, 2);
+        const chatFileName = name.endsWith('.chat') ? name : `${name}.chat`;
+        
+        const node = await this.moduleEngine.createFile(
+            chatFileName,
+            parentId,
+            manifestContent,
+            {
+                title: title,
+                icon: '💬',
+                sessionId: sessionId
+            }
+        );
+
+        this.notify();
+        
+        return node;
+    }
+
+    /**
+     * 重写 createDirectory: 禁用在 UI 上创建文件夹
+     */
+    async createDirectory(name: string, parentId: string | null): Promise<EngineNode> {
+        throw new Error("Chat list does not support sub-directories.");
+    }
+
+    // ============================================================================
+    // 文件操作方法
+    // ============================================================================
 
     // 辅助转换方法
     private toEngineNode(vnode: VNode): EngineNode {
@@ -367,20 +451,6 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
         });
     }
 
-    // 拦截创建文件操作 (来自 UI 的 New 按钮)
-    async createFile(name: string, parentId: string | null, content?: string | ArrayBuffer): Promise<EngineNode> {
-        const title = name || "New Chat";
-        const sessionId = await this.createSession(title);
-        
-        // 返回 EngineNode 供 UI 选中
-        const manifestPath = this.getManifestPath(sessionId);
-        // [修复] Code 2339: 使用 coreVfs.pathResolver
-        const nodeId = await this.coreVfs.pathResolver.resolve(this.moduleName, manifestPath);
-        if (!nodeId) throw new Error("Failed to resolve created session node");
-        
-        return this.moduleEngine.getNode(nodeId) as Promise<EngineNode>;
-    }
-
     // 删除逻辑
     async delete(ids: string[]): Promise<void> {
         for (const id of ids) {
@@ -389,7 +459,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
             if (!node) continue;
 
             // 1. 删除文件
-            await this.vfs.delete(this.moduleName, node.path);
+            await this.moduleEngine.delete([node.path]);
 
             // 2. 删除关联目录
             if (node.name.endsWith('.chat')) {
@@ -410,53 +480,197 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
         return results.filter((node: EngineNode) => 
             node.type === 'file' && node.name.endsWith('.chat')
         );
-
-    /*
-        // 1. 手动将 EngineSearchQuery (通用层) 转换为 SearchQuery (VFS层)
-        const vfsQuery: SearchQuery = {
-            limit: query.limit,
-            tags: query.tags,
-            // 映射通用的 text 搜索到 nameContains
-            // 注意：因为我们只改了 metadata.title 而没改文件名，
-            // vfsCore 默认的 searchNodes 主要是搜 name。
-            // 如果要搜 title，可能需要 vfsCore 支持 metadata 搜索或在此处做后处理。
-            // 简单起见，这里假设搜文件名，或者 vfsCore 支持 metadata 搜索
-            nameContains: query.text,
-            type: query.type === 'file' ? VNodeType.FILE : 
-                  query.type === 'directory' ? VNodeType.DIRECTORY : undefined,
-            metadata: undefined 
-        };
-
-        // 2. 调用 VFS 搜索
-        const results = await this.vfsCore.searchNodes(vfsQuery, this.moduleName);
-        
-        // 3. 过滤并转换结果
-        return results
-            .filter((n: VNode) => n.name.endsWith('.chat'))
-            // 如果 vfsQuery 没搜到 metadata.title，这里可以在内存中二次过滤
-            .filter((n: VNode) => {
-                if (!query.text) return true;
-                const title = n.metadata?.title || '';
-                // 简单的内存补救搜索，以防 VFS 搜索未命中 metadata
-                return n.name.includes(query.text) || title.includes(query.text); 
-            })
-            .map((n: VNode) => this.toEngineNode(n));
-            */
     }
 
-    // 其他代理方法
+    // ============================================================================
+    // ✨ [新增] 辅助方法：从 nodeId 获取 sessionId
+    // ============================================================================
+    
+    /**
+     * ✨ [核心修复] 从 VFS nodeId 获取 sessionId
+     * 必须读取文件内容，因为 sessionId 存储在 manifest 中，与文件名无关
+     */
+    async getSessionIdFromNodeId(nodeId: string): Promise<string | null> {
+    console.log(`[LLMSessionEngine] getSessionIdFromNodeId called with: ${nodeId}`);
+        try {
+            // 1. 加载 VNode 元数据
+            const node = await this.coreVfs.storage.loadVNode(nodeId);
+        console.log(`[LLMSessionEngine] VNode loaded:`, node ? {
+            name: node.name,
+            type: node.type,
+            moduleId: node.moduleId
+        } : 'null');
+            if (!node) return null;
+            
+            // 2. 确保是 .chat 文件
+        if (!node.name.endsWith('.chat')) {
+            console.log(`[LLMSessionEngine] Not a .chat file: ${node.name}`);
+            return null;
+        }
+            
+            // 3. ✨ [关键] 读取文件内容获取 sessionId
+            let content: string | ArrayBuffer | null = null;
+            try {
+                content = await this.moduleEngine.readContent(nodeId);
+            console.log(`[LLMSessionEngine] Content read, length: ${
+                content ? (typeof content === 'string' ? content.length : content.byteLength) : 0
+            }`);
+            } catch (e) {
+                // 文件存在但读取失败（可能是权限问题或损坏）
+                console.warn(`[LLMSessionEngine] Failed to read content for ${nodeId}:`, e);
+                return null;
+            }
+            
+            // 4. 检查内容是否有效
+        if (!content) {
+            console.log(`[LLMSessionEngine] No content in file`);
+            return null;
+        }
+            
+            const contentStr = typeof content === 'string' 
+                ? content 
+                : new TextDecoder().decode(content);
+            
+            // 5. 空文件返回 null（需要初始化）
+        if (!contentStr.trim()) {
+            console.log(`[LLMSessionEngine] Content is empty/whitespace`);
+            return null;
+        }
+            
+            // 6. 解析 manifest
+            try {
+                const manifest = JSON.parse(contentStr) as ChatManifest;
+            console.log(`[LLMSessionEngine] Manifest parsed:`, {
+                id: manifest?.id,
+                version: manifest?.version,
+                title: manifest?.title
+            });
+                
+                // 验证必要字段
+                if (!manifest || !manifest.id || !manifest.version) {
+                console.log(`[LLMSessionEngine] Invalid manifest structure`);
+                    return null;
+                }
+                
+                // 7. ✨ [可选] 验证隐藏目录是否存在（确保数据完整）
+                const hiddenDir = this.getHiddenDir(manifest.id);
+                const hiddenDirId = await this.coreVfs.pathResolver.resolve(this.moduleName, hiddenDir);
+            console.log(`[LLMSessionEngine] Hidden dir check: path=${hiddenDir}, exists=${!!hiddenDirId}`);
+                
+                if (!hiddenDirId) {
+                console.warn(`[LLMSessionEngine] Session data directory missing for ${manifest.id}`);
+                    // 数据目录不存在，视为无效 session
+                    return null;
+                }
+                
+            console.log(`[LLMSessionEngine] Session ID resolved: ${manifest.id}`);
+                return manifest.id;
+            } catch (e) {
+                // JSON 解析失败，文件内容损坏
+            console.warn(`[LLMSessionEngine] JSON parse failed:`, e);
+                return null;
+            }
+        } catch (e) {
+            console.error('[LLMSessionEngine] getSessionIdFromNodeId failed:', e);
+            return null;
+        }
+    }
+
+    /**
+     * ✨ [新增] 初始化已存在的空文件为有效的 session
+     * 不创建新的 VFS 文件，而是写入到指定的 nodeId
+     */
+    async initializeExistingFile(
+        nodeId: string, 
+        title: string, 
+        systemPrompt: string = "You are a helpful assistant."
+    ): Promise<string> {
+    console.log(`[LLMSessionEngine] initializeExistingFile START: nodeId=${nodeId}, title=${title}`);
+        
+        // 1. 生成新的 sessionId
+        const sessionId = generateUUID();
+    console.log(`[LLMSessionEngine] Generated sessionId: ${sessionId}`);
+        
+    // 创建隐藏目录
+    const hiddenDirPath = this.getHiddenDir(sessionId);
+    console.log(`[LLMSessionEngine] Creating hidden dir: ${hiddenDirPath}`);
+        try {
+        await this.moduleEngine.createDirectory(hiddenDirPath, null);
+        console.log(`[LLMSessionEngine] Hidden dir created`);
+        } catch (e: any) {
+        console.log(`[LLMSessionEngine] Hidden dir creation result:`, e.message);
+            if (!e.message?.includes('exists')) {
+                throw e;
+            }
+        }
+
+        // 3. 创建根节点 (System Prompt)
+        const rootNodeId = `node-${Date.now()}-root`;
+    console.log(`[LLMSessionEngine] Creating root node: ${rootNodeId}`);
+        const rootNode: ChatNode = {
+            id: rootNodeId,
+            type: 'message',
+            role: 'system',
+            content: systemPrompt,
+            created_at: new Date().toISOString(),
+            parent_id: null,
+            children_ids: [],
+            status: 'active'
+        };
+        
+        await this.writeJson(this.getNodePath(sessionId, rootNodeId), rootNode);
+    console.log(`[LLMSessionEngine] Root node written`);
+
+        // 4. 创建 Manifest 内容
+        const manifest: ChatManifest = {
+            version: "1.0",
+            id: sessionId,
+            title: title,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            settings: { model: "gpt-4", temperature: 0.7 },
+            branches: { "main": rootNodeId },
+            current_branch: "main",
+            current_head: rootNodeId,
+            root_id: rootNodeId
+        };
+
+        // 5. ✨ [关键] 写入到已存在的文件节点
+    console.log(`[LLMSessionEngine] Writing manifest to nodeId: ${nodeId}`);
+        await this.moduleEngine.writeContent(nodeId, JSON.stringify(manifest, null, 2));
+    console.log(`[LLMSessionEngine] Manifest written`);
+        
+        // 6. 更新文件的 metadata（用于 UI 显示）
+    console.log(`[LLMSessionEngine] Updating metadata`);
+        await this.moduleEngine.updateMetadata(nodeId, {
+            title: title,
+            icon: '💬',
+            sessionId: sessionId  // 额外冗余，方便后续快速访问
+        });
+    console.log(`[LLMSessionEngine] Metadata updated`);
+
+    // 验证写入成功
+    console.log(`[LLMSessionEngine] Verifying write...`);
+    const verifyContent = await this.moduleEngine.readContent(nodeId);
+    console.log(`[LLMSessionEngine] Verification read, content length: ${
+        verifyContent ? (typeof verifyContent === 'string' ? verifyContent.length : (verifyContent as ArrayBuffer).byteLength) : 0
+    }`);
+        this.notify();
+        
+    console.log(`[LLMSessionEngine] initializeExistingFile COMPLETE: sessionId=${sessionId}`);
+        return sessionId;
+    }
+
+    // ============================================================================
+    // 代理方法 (委托给 moduleEngine)
+    // ============================================================================
+
     async readContent(id: string): Promise<string | ArrayBuffer> { 
         return this.moduleEngine.readContent(id); 
     }
     
     async getNode(id: string): Promise<EngineNode | null> { 
         return this.moduleEngine.getNode(id); 
-    }
-    /**
-     * 重写 createDirectory: 禁用在 UI 上创建文件夹
-     */
-    async createDirectory(name: string, parentId: string | null): Promise<EngineNode> {
-        throw new Error("Chat list does not support sub-directories.");
     }
     
     async writeContent(id: string, c: string | ArrayBuffer): Promise<void> { 
@@ -495,21 +709,5 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
     on(event: EngineEventType, cb: (e: EngineEvent) => void): () => void { 
         return this.moduleEngine.on(event, cb); 
     }
-
-    // ============================================================
-    // ✨ [新增] 辅助方法：从 nodeId 获取 sessionId
-    // ============================================================
-    
-    /**
-     * 根据 VFS nodeId 获取 chat sessionId (UUID)
-     */
-    async getSessionIdFromNodeId(nodeId: string): Promise<string | null> {
-        try {
-            const node = await this.coreVfs.storage.loadVNode(nodeId);
-            if (!node || !node.name.endsWith('.chat')) return null;
-            return node.name.replace('.chat', '');
-        } catch (e) {
-            return null;
-        }
-    }
 }
+

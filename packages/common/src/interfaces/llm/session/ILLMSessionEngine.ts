@@ -9,57 +9,104 @@ export interface ChatContextItem {
 }
 
 export interface ILLMSessionEngine extends ISessionEngine {
+    // ============================================
+    // Session 生命周期
+    // ============================================
+    
     /**
-     * 创建一个新的 LLM 会话
-     * 1. 创建 .uuid/ 目录
-     * 2. 创建根节点 (System Prompt)
-     * 3. 创建 uuid.chat Manifest 文件
+     * 创建新会话
+     * @param title 会话标题
+     * @param systemPrompt 系统提示词
+     * @returns 新创建的 sessionId
      */
     createSession(title: string, systemPrompt?: string): Promise<string>;
-
+    
     /**
-     * 获取完整的对话上下文链 (从 Root 到 Current Head)
-     * 用于构建发送给 LLM 的 messages 数组
+     * 获取会话上下文（消息链）
+     * @param sessionId 会话 ID
+     * @returns 按时间顺序排列的消息列表
      */
     getSessionContext(sessionId: string): Promise<ChatContextItem[]>;
-
+    
     /**
-     * 获取会话清单信息
+     * 获取会话 Manifest
+     * @param sessionId 会话 ID
      */
     getManifest(sessionId: string): Promise<ChatManifest>;
 
+    // ============================================
+    // 消息操作
+    // ============================================
+    
     /**
-     * 追加新消息
-     * @returns 新创建的节点 ID
+     * 追加消息到会话
+     * @param sessionId 会话 ID
+     * @param role 消息角色
+     * @param content 消息内容
+     * @param meta 元数据
+     * @returns 新消息的 nodeId
      */
-    appendMessage(sessionId: string, role: ChatNode['role'], content: string, meta?: any): Promise<string>;
-
+    appendMessage(
+        sessionId: string, 
+        role: ChatNode['role'], 
+        content: string, 
+        meta?: any
+    ): Promise<string>;
+    
     /**
-     * 修改/重新生成消息 (分支逻辑)
-     * 这不会修改原文件，而是创建一个兄弟节点，并切换当前分支 Head 指向新节点
-     * @param originalNodeId 被修改的节点 ID
-     * @returns 新创建的分支节点 ID
+     * 更新消息节点（支持流式更新）
+     * @param sessionId 会话 ID
+     * @param nodeId 消息节点 ID
+     * @param updates 更新内容
+     */
+    updateNode(
+        sessionId: string, 
+        nodeId: string, 
+        updates: Partial<Pick<ChatNode, 'content' | 'meta' | 'status'>>
+    ): Promise<void>;
+    
+    /**
+     * 编辑消息（创建分支）
+     * @param sessionId 会话 ID
+     * @param originalNodeId 原始消息节点 ID
+     * @param newContent 新内容
+     * @returns 新消息的 nodeId
      */
     editMessage(sessionId: string, originalNodeId: string, newContent: string): Promise<string>;
-
+    
     /**
-     * 删除消息 (软删除)
+     * 删除消息（软删除）
+     * @param sessionId 会话 ID
+     * @param nodeId 消息节点 ID
      */
     deleteMessage(sessionId: string, nodeId: string): Promise<void>;
 
+    // ============================================
+    // 分支操作
+    // ============================================
+    
     /**
      * 切换分支
+     * @param sessionId 会话 ID
+     * @param branchName 分支名称
      */
     switchBranch(sessionId: string, branchName: string): Promise<void>;
-
+    
     /**
-     * 获取某节点的所有兄弟节点 (用于 UI 展示 < 2/5 > 切换)
+     * 获取节点的兄弟节点（用于分支导航）
+     * @param sessionId 会话 ID
+     * @param nodeId 节点 ID
      */
     getNodeSiblings(sessionId: string, nodeId: string): Promise<ChatNode[]>;
 
+    // ============================================
+    // ✨ [新增] ID 转换
+    // ============================================
+    
     /**
-     * ✨ [新增] 原地更新节点内容
-     * 用于流式输出或状态更新，不会创建新节点分支
+     * 从 VFS nodeId 获取 sessionId
+     * @param nodeId VFS 节点 ID
+     * @returns sessionId 或 null
      */
-    updateNode(sessionId: string, nodeId: string, updates: Partial<Pick<ChatNode, 'content' | 'meta' | 'status'>>): Promise<void>;
+    getSessionIdFromNodeId(nodeId: string): Promise<string | null>;
 }

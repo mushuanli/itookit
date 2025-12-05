@@ -13,6 +13,8 @@ export class MDxController {
     
     private isInitialized: boolean = false;
     private pendingChunks: string[] = [];
+    private readyPromise: Promise<void>;
+    private readyResolve!: () => void;
 
     private updateScheduled: boolean = false;
     private lastRenderTime: number = 0;
@@ -27,45 +29,67 @@ export class MDxController {
         this.isReadOnly = options?.readOnly ?? true;
         this.onChangeCallback = options?.onChange;
         
+        // ✨ [优化] 创建 ready Promise
+        this.readyPromise = new Promise((resolve) => {
+            this.readyResolve = resolve;
+        });
+        
         console.log('[MDxController] Constructor called, starting init...');
         this.init();
+    }
+
+    /**
+     * ✨ [新增] 等待初始化完成
+     */
+    async waitUntilReady(): Promise<void> {
+        return this.readyPromise;
     }
 
     private async init() {
         console.log('[MDxController] init() started');
         
-        this.editor = await createMDxEditor(this.container, {
-            initialContent: this.currentContent,
-            initialMode: this.isReadOnly ? 'render' : 'edit',
-            plugins: [
-                'editor:core',
-                'ui:formatting',
-                'mathjax',
-                'mermaid',
-                'codeblock-controls',
-                'task-list',
-                'media',
-                'svg',
-                'ui:toolbar' 
-            ]
-        })as MDxEditor;
+        try {
+            this.editor = await createMDxEditor(this.container, {
+                initialContent: this.currentContent,
+                initialMode: this.isReadOnly ? 'render' : 'edit',
+                plugins: [
+                    'editor:core',
+                    'ui:formatting',
+                    'mathjax',
+                    'mermaid',
+                    'codeblock-controls',
+                    'task-list',
+                    'media',
+                    'svg',
+                    'ui:toolbar' 
+                ]
+            }) as MDxEditor;
 
-        this.editor.on('change', () => {
-            if (!this.isStreaming) {
-                const text = this.editor!.getText();
-                this.currentContent = text;
-                this.onChangeCallback?.(text);
+            this.editor.on('change', () => {
+                if (!this.isStreaming) {
+                    const text = this.editor!.getText();
+                    this.currentContent = text;
+                    this.onChangeCallback?.(text);
+                }
+            });
+
+            this.isInitialized = true;
+            console.log('[MDxController] init() completed');
+
+            // 处理待处理的 chunks
+            if (this.pendingChunks.length > 0) {
+                console.log('[MDxController] Applying pending chunks, count:', this.pendingChunks.length);
+                this.pendingChunks = [];
+                await this.editor.setStreamingText(this.currentContent);
             }
-        });
 
-        this.isInitialized = true;
-        console.log('[MDxController] init() completed, isInitialized:', this.isInitialized);
-
-        if (this.pendingChunks.length > 0) {
-            console.log('[MDxController] Applying pending chunks, count:', this.pendingChunks.length);
-            this.pendingChunks = [];
-            // 使用新方法
-            this.editor.setStreamingText(this.currentContent);
+            // ✨ [优化] 解析 ready Promise
+            this.readyResolve();
+            
+        } catch (e) {
+            console.error('[MDxController] init() failed:', e);
+            this.readyResolve(); // 即使失败也要 resolve，避免永久阻塞
+            throw e;
         }
     }
 

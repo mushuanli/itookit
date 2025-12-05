@@ -57,13 +57,15 @@ export interface SessionGroup {
     // 系统的执行树根节点（如果是 assistant 角色）
     executionRoot?: ExecutionNode;
     
-    // ✨ [新增] 关联到持久化节点的 ID
+    // 关联到持久化节点的 ID
     persistedNodeId?: string;
 }
 
-// [新增] 扩展标准执行上下文，注入 UI 流式回调能力和节点生命周期管理
+/**
+ * 扩展标准执行上下文，注入 UI 流式回调能力和节点生命周期管理
+ */
 export interface StreamingContext extends ExecutionContext {
-    // ✨ [新增] 当前会话 ID，用于持久化
+    // 当前会话 ID，用于持久化
     sessionId?: string;
     
     callbacks?: {
@@ -71,13 +73,13 @@ export interface StreamingContext extends ExecutionContext {
         onThinking?: (delta: string, nodeId?: string) => void;
         onOutput?: (delta: string, nodeId?: string) => void;
         
-        // [新增] 允许 Executor 动态创建子节点 UI
+        // 允许 Executor 动态创建子节点 UI
         onNodeStart?: (node: ExecutionNode) => void;
         
-        // [新增] 允许 Executor 更新节点状态
+        // 允许 Executor 更新节点状态
         onNodeStatus?: (nodeId: string, status: NodeStatus) => void;
         
-        // [新增] 允许更新元数据 (如设置布局模式)
+        // 允许更新元数据 (如设置布局模式)
         onNodeMetaUpdate?: (nodeId: string, meta: any) => void;
     };
 }
