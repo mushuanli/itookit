@@ -37,7 +37,7 @@ export * from './interfaces/llm/IExecutor';
 // ✨ [新增] 导出 Agent 定义
 export * from './interfaces/llm/IAgent';
 export type { ILLMSessionEngine, ChatContextItem } from './interfaces/llm/session/ILLMSessionEngine';
-export type { ChatManifest, ChatNode, IYamlParser } from './interfaces/llm/session/types';
+export type { ChatManifest, ChatNode, IYamlParser,MCPServer } from './interfaces/llm/session/types';
 
 // LLM Constants
 export * from './constants/llmDefaults';
