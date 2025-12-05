@@ -25,6 +25,7 @@ import { MentionPlugin, MentionPluginOptions } from './plugins/autocomplete/ment
 import { SvgPlugin, SvgPluginOptions } from './plugins/syntax-extensions/svg.plugin';
 import { VegaPlugin, VegaPluginOptions } from './plugins/syntax-extensions/vega.plugin';
 import type { MDxPlugin } from './core/plugin';
+import { EditorFactory } from '@itookit/common';
 
 type MDxPluginConstructor = new (...args: any[]) => MDxPlugin;
 
@@ -316,3 +317,26 @@ export async function createMDxEditor(
 
   return editor;
 }
+
+
+/**
+ * 1. 标准 Markdown 编辑器工厂
+ * 封装了 createMDxEditor，注入了默认的插件配置。
+ */
+export const defaultEditorFactory: EditorFactory = async (container, options) => {
+    const config = {
+        ...options,
+        // 确保核心 UI 插件被加载
+        plugins: ['core:titlebar', ...(options.plugins || [])],
+        initialMode: 'render' as const,
+        defaultPluginOptions: {
+            ...options.defaultPluginOptions,
+            'core:titlebar': {
+                title: options.title || 'Untitled',
+                enableToggleEditMode: true,
+                ...(options.defaultPluginOptions?.['core:titlebar'] || {})
+            }
+        }
+    };
+    return await createMDxEditor(container, config);
+};
