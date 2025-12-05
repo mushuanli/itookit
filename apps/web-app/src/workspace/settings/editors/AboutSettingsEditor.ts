@@ -1,7 +1,8 @@
 // @file: app/workspace/settings/editors/AboutSettingsEditor.ts
-import { BaseSettingsEditor } from './BaseSettingsEditor';
+import { BaseSettingsEditor} from '@itookit/common';
+import { SettingsService } from '../services/SettingsService';
 
-export class AboutSettingsEditor extends BaseSettingsEditor {
+export class AboutSettingsEditor extends BaseSettingsEditor<SettingsService> {
     render() {
         this.container.innerHTML = `
             <div class="settings-page">

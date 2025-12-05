@@ -1,7 +1,8 @@
 /**
  * @file apps/web-app/src/config/modules.ts
  */
-import { AgentFileContent } from '../workspace/settings/types';
+import {FS_MODULE_CHAT,FS_MODULE_AGENTS} from '@itookit/common';
+import {DEFAULT_AGENT_CONTENT} from '@itookit/llm-ui';
 
 export interface WorkspaceConfig {
     elementId: string;
@@ -19,27 +20,13 @@ export interface WorkspaceConfig {
     mentionScope?: string[];
 }
 
-// 默认的 Agent 模板
-const DEFAULT_AGENT_CONTENT: AgentFileContent = {
-    id: '', // 空 ID 会触发编辑器生成新的 UUID
-    name: 'New Assistant',
-    type: 'agent',
-    description: 'A helpful AI assistant.',
-    icon: '🤖',
-    config: {
-        connectionId: '',
-        modelId: '',
-        systemPrompt: 'You are a helpful assistant.'
-    },
-    // tags: [] // [已移除] Tags 由 VFS 元数据管理
-};
 
 export const WORKSPACES: WorkspaceConfig[] = [
     // [新增] Agent 独立工作区
     // 数据存储在 /agents 模块，每个 Agent 是一个独立文件
     {
         elementId: 'agent-workspace',
-        moduleName: 'agents', 
+        moduleName: FS_MODULE_AGENTS, 
         title: 'Agents',
         itemLabel: 'Agent', // + Agent
         defaultFileName: 'New Assistant.agent',
@@ -193,7 +180,7 @@ Feel free to jot down anything that comes to mind!
     },
     {
         elementId: 'llm-workspace',
-        moduleName: 'chats',       // 数据存储在 /chats 模块
+        moduleName: FS_MODULE_CHAT,       // 数据存储在 /chats 模块
         title: 'AI Sessions',
         itemLabel: 'Chat',         // 按钮显示 "+ Chat"
         defaultFileName: 'New Chat.chat',
