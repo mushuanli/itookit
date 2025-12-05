@@ -1,9 +1,9 @@
 // @file: app/workspace/settings/editors/TagSettingsEditor.ts
-import { BaseSettingsEditor } from './BaseSettingsEditor';
-import { Modal, Toast } from '../components/UIComponents';
+import { BaseSettingsEditor,Modal, Toast } from '@itookit/common';
+import { SettingsService } from '../services/SettingsService';
 import { Tag } from '../types';
 
-export class TagSettingsEditor extends BaseSettingsEditor {
+export class TagSettingsEditor extends BaseSettingsEditor<SettingsService> {
     
     // [新增] 覆盖 init 方法
     // 在 Editor 初始化时，强制从底层 VFS 拉取最新数据

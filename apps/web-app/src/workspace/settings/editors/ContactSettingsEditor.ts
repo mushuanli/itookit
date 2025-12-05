@@ -1,10 +1,9 @@
 // @file: apps/web-app/src/workspace/settings/editors/ContactSettingsEditor.ts
-import { BaseSettingsEditor } from './BaseSettingsEditor';
 import { Contact } from '../types';
-import { generateShortUUID } from '@itookit/common';
-import { Modal, Toast } from '../components/UIComponents';
+import { BaseSettingsEditor,Modal, Toast,generateShortUUID } from '@itookit/common';
+import { SettingsService } from '../services/SettingsService';
 
-export class ContactSettingsEditor extends BaseSettingsEditor {
+export class ContactSettingsEditor extends BaseSettingsEditor<SettingsService> {
     private searchTerm = '';
     private selectedGroup = 'all';
 

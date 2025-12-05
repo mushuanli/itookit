@@ -237,20 +237,31 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
             // 这里最快的方法是搜一下，或者通过 path 查 ID
             // 为了利用 ModuleEngine，我们假设 search 是高效的
             const fullPath = `${parentDir}/${fileName}`.replace(/\/+/g, '/');
-            const exists = await this.vfs.getVFS().pathResolver.resolve(this.moduleName, fullPath);
+
+            // 1. 检查是否存在 (使用 VFSModuleEngine 新增的 resolvePath 或 search)
+            // 这里假设我们在 VFSModuleEngine 中暴露了 resolvePath，或者是通过 search
+            // 为了性能，建议 VFSModuleEngine 暴露 resolvePath
+            const exists = await (this.moduleEngine as any).resolvePath(fullPath);
             
             if (!exists) {
                 const { initPath, initialTags, ...content } = agentDef;
+                const contentStr = JSON.stringify(content, null, 2);
                 
                 // 2. [核心修复] 调用 ModuleEngine
                 // 参数1: 文件名
                 // 参数2: 父级标识 (这里传入路径字符串，ModuleEngine 现在能识别它了！)
                 // 参数3: 内容
                 try {
+                    // 2. [统一] 创建文件并带 Metadata (Icon)
                     const node = await this.moduleEngine.createFile(
                         fileName, 
-                        parentDir, // <-- 传入路径常量，Engine 会自动递归创建此目录
-                        JSON.stringify(content, null, 2)
+                        parentDir, 
+                        contentStr,
+                        {
+                            icon: agentDef.icon || '🤖',
+                            title: agentDef.name,
+                            description: agentDef.description
+                        }
                     );
 
                     // 3. 设置 Tags
@@ -323,18 +334,24 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
         // 根据 ID 查找文件，如果找不到则新建
         // 这里简化实现：假设文件名 = ID.agent，实际可能需要索引查找
         const filename = `${agent.id}.agent`;
+        const contentStr = JSON.stringify(agent, null, 2);
         
-        // 先尝试查找现有文件 ID
+        const metadata = {
+            icon: agent.icon || '🤖',
+            title: agent.name,
+            description: agent.description
+        };
+
+        // 使用 search 查找 (Engine 通用方法)
         const results = await this.moduleEngine.search({ text: filename, type: 'file' });
         const existingNode = results.find(n => n.name === filename);
 
         if (existingNode) {
-            // 如果存在，按 ID 更新
-            await this.moduleEngine.writeContent(existingNode.id, JSON.stringify(agent, null, 2));
+            await this.moduleEngine.writeContent(existingNode.id, contentStr);
+            await this.moduleEngine.updateMetadata(existingNode.id, metadata);
         } else {
-            // 如果不存在，创建在根目录
-            // 同样利用 ModuleEngine，传入 null 表示根目录
-            await this.moduleEngine.createFile(filename, null, JSON.stringify(agent, null, 2));
+            // 新建：直接传入 metadata
+            await this.moduleEngine.createFile(filename, null, contentStr, metadata);
         }
         this.notify();
     }
@@ -353,24 +370,19 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
 
     async saveConnection(conn: LLMConnection): Promise<void> {
         const filename = `${conn.id}.json`;
-        // 使用 CONNECTIONS_DIR 常量作为父路径
-        // 如果文件已存在，createFile 会报错吗？ 
-        // VFSModuleEngine.createFile -> VFSCore.createFile -> 报错 ALREADY_EXISTS
-        
-        // 所以我们还是得先检查存在性，或者让 ModuleEngine 提供 upsert 能力。
-        // 为了简单，我们先查后写。
-        
-        // 技巧：我们可以直接构造路径来查 ID，这比 search 快
-        const fullPath = `${CONNECTIONS_DIR}/${filename}`;
-        const nodeId = await this.vfs.getVFS().pathResolver.resolve(this.moduleName, fullPath);
-
         const content = JSON.stringify(conn, null, 2);
+        const metadata = { icon: '🔌', title: conn.name, type: 'connection' };
+
+        // 检查是否存在
+        const fullPath = `${CONNECTIONS_DIR}/${filename}`;
+        const nodeId = await (this.moduleEngine as any).resolvePath(fullPath);
 
         if (nodeId) {
             await this.moduleEngine.writeContent(nodeId, content);
+            await this.moduleEngine.updateMetadata(nodeId, metadata);
         } else {
-            // 传入父目录路径，Engine 自动处理目录创建
-            await this.moduleEngine.createFile(filename, CONNECTIONS_DIR, content);
+            // 新建：传入父路径常量和 metadata
+            await this.moduleEngine.createFile(filename, CONNECTIONS_DIR, content, metadata);
         }
         
         await this.refreshData();
@@ -392,8 +404,19 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
     }
 
     async saveMCPServer(server: MCPServer): Promise<void> {
-        const path = `${MCP_SERVERS_DIR}/${server.id}.json`;
-        await this.writeJson(path, server);
+        const filename = `${server.id}.json`;
+        const content = JSON.stringify(server, null, 2);
+        const metadata = { icon: '🔌', title: server.name, type: 'mcp' };
+
+        const fullPath = `${MCP_SERVERS_DIR}/${filename}`;
+        const nodeId = await (this.moduleEngine as any).resolvePath(fullPath);
+
+        if (nodeId) {
+            await this.moduleEngine.writeContent(nodeId, content);
+            await this.moduleEngine.updateMetadata(nodeId, metadata);
+        } else {
+            await this.moduleEngine.createFile(filename, MCP_SERVERS_DIR, content, metadata);
+        }
         await this.refreshData();
     }
 

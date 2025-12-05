@@ -1,32 +1,35 @@
 // @file app/factories/settingsFactory.ts
 import { EditorFactory, IEditor } from '@itookit/common';
 import { SettingsService } from '../workspace/settings/services/SettingsService';
+import { MCPSettingsEditor,ConnectionSettingsEditor,VFSAgentService } from '@itookit/llm-ui'; // 服务来自 llm-ui
 
-// 导入所有具体的 Editor 类
-import { MCPSettingsEditor } from '../workspace/settings/editors/MCPSettingsEditor';
 import { TagSettingsEditor } from '../workspace/settings/editors/TagSettingsEditor';
-import { ConnectionSettingsEditor } from '../workspace/settings/editors/ConnectionSettingsEditor';
 // import { ExecutableSettingsEditor } from '../workspace/settings/editors/ExecutableSettingsEditor'; // Removed
 import { ContactSettingsEditor } from '../workspace/settings/editors/ContactSettingsEditor';
 import { StorageSettingsEditor } from '../workspace/settings/editors/StorageSettingsEditor';
 import { AboutSettingsEditor } from '../workspace/settings/editors/AboutSettingsEditor';
 
-export const createSettingsFactory = (service: SettingsService): EditorFactory => {
-    return async (container: HTMLElement, options: any): Promise<IEditor> => {
+export const createSettingsFactory = (
+    settingsService: SettingsService,
+    agentService: VFSAgentService
+): EditorFactory => {
+    return async (container: HTMLElement, options: any) => {
         const nodeId = options.nodeId;
         
-        await service.init();
+        // 确保服务已初始化
+        await settingsService.init();
+        await agentService.init();
 
         let editor: IEditor | null = null;
 
         switch (nodeId) {
-            case 'storage':     editor = new StorageSettingsEditor(container, service, options); break;
-            case 'tags':        editor = new TagSettingsEditor(container, service, options); break;
-            case 'contacts':    editor = new ContactSettingsEditor(container, service, options); break;
-            case 'connections': editor = new ConnectionSettingsEditor(container, service, options); break;
+            case 'storage':     editor = new StorageSettingsEditor(container, settingsService, options); break;
+            case 'tags':        editor = new TagSettingsEditor(container, settingsService, options); break;
+            case 'contacts':    editor = new ContactSettingsEditor(container, settingsService, options); break;
+            case 'connections': editor = new ConnectionSettingsEditor(container, agentService, options); break;
             // case 'executables': editor = new ExecutableSettingsEditor(container, service, options); break; // Removed
-            case 'mcp-servers': editor = new MCPSettingsEditor(container, service, options); break;
-            case 'about':       editor = new AboutSettingsEditor(container, service, options); break;
+            case 'mcp-servers': editor = new MCPSettingsEditor(container, agentService, options); break;
+            case 'about':       editor = new AboutSettingsEditor(container, settingsService, options); break;
             default:
                 container.innerHTML = `<div style="padding:2rem;text-align:center;color:#666">Select a setting category</div>`;
                 // 返回一个 Dummy Editor 存根
