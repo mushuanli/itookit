@@ -113,27 +113,20 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     /**
-     * ✨ [核心修复] 从 Engine 加载会话
-     * 移除了 fallback 创建逻辑，确保 session 必须由 Engine.createFile 创建
+     * [修复] 从 Engine 加载会话，必须使用 options.nodeId
      */
-private async loadSessionFromEngine(initialContent?: string, knownSessionId?: string) {
-        // 1. 必须有 nodeId
+    private async loadSessionFromEngine(initialContent?: string, knownSessionId?: string) {
         if (!this.options.nodeId) {
-            throw new Error('[LLMWorkspaceEditor] nodeId is required. Cannot load session without it.');
+            throw new Error('[LLMWorkspaceEditor] nodeId is required.');
         }
 
-    // ✨ [修复] 如果已知 sessionId，直接使用，不再检测
-    let sessionId = knownSessionId??null;
-    
-    if (!sessionId) {
-        sessionId = await this.options.sessionEngine.getSessionIdFromNodeId(this.options.nodeId);
-    }
+        let sessionId = knownSessionId || await this.options.sessionEngine.getSessionIdFromNodeId(this.options.nodeId);
         
         if (!sessionId) {
             // ✨ [关键变更] 不再 fallback 创建，而是抛出明确错误
             throw new Error(
                 `[LLMWorkspaceEditor] Invalid chat file: No session found for nodeId "${this.options.nodeId}". ` +
-                'Please ensure the file was created properly via LLMSessionEngine.createFile()'
+                'Please ensure the file was created properly.'
             );
         }
 
@@ -141,15 +134,15 @@ private async loadSessionFromEngine(initialContent?: string, knownSessionId?: st
         console.log(`[LLMWorkspaceEditor] Session ID resolved: ${sessionId}`);
 
         try {
-            // 3. 加载 Manifest 获取 title
-            const manifest = await this.options.sessionEngine.getManifest(sessionId);
+            // [修复] 直接通过 nodeId 读取 Manifest
+            const manifest = await this.options.sessionEngine.getManifest(this.options.nodeId);
             if (manifest.title) {
                 this.currentTitle = manifest.title;
                 this.titleInput.value = manifest.title;
             }
             
-            // 4. 加载会话内容
-            await this.sessionManager.loadSession(sessionId);
+            // [修复] 将 nodeId 和 sessionId 都传给 Manager
+            await this.sessionManager.loadSession(this.options.nodeId, sessionId);
             
             // 5. 渲染历史
             const sessions = this.sessionManager.getSessions();
