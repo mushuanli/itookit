@@ -208,9 +208,10 @@ export class SessionManager {
     // ================== 构建 LLM 消息历史 ==================
 
     /**
-     * ✨ [重构] 从 Engine 构建消息历史
+     * ✨ [修复] 从 Engine 构建消息历史（不包含当前正在处理的消息）
+     * @param excludeLastUserMessage 是否排除最后一条用户消息（默认 true）
      */
-    private async buildMessageHistory(): Promise<ChatMessage[]> {
+    private async buildMessageHistory(excludeLastUserMessage: boolean = true): Promise<ChatMessage[]> {
         if (!this.currentSessionId) return [];
         
         try {
@@ -227,6 +228,14 @@ export class SessionManager {
                     messages.push({ role: 'user', content: node.content });
                 } else if (node.role === 'assistant') {
                     messages.push({ role: 'assistant', content: node.content });
+                }
+            }
+            
+            // ✨ [修复] 排除最后一条用户消息（避免重复）
+            if (excludeLastUserMessage && messages.length > 0) {
+                const lastMsg = messages[messages.length - 1];
+                if (lastMsg.role === 'user') {
+                    messages.pop();
                 }
             }
             
@@ -450,8 +459,8 @@ export class SessionManager {
                 }
             };
 
-            // 从 Engine 获取历史记录
-            const history = await this.buildMessageHistory();
+            // ✨ [修复] 构建历史时排除最后一条用户消息（因为我们会单独传入）
+            const history = await this.buildMessageHistory(true);
 
             const context: StreamingContext = {
                 executionId: generateUUID(),

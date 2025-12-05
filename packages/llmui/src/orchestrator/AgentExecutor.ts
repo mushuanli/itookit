@@ -46,16 +46,13 @@ export class AgentExecutor implements IExecutor {
         // 插入历史记录
         fullMessages.push(...history);
         
-        // 插入当前用户消息 (如果 input 不为空，且历史记录里还没包含这最后一条)
-        // 注意：SessionManager 的 buildMessageHistory 通常不包含尚未处理的当前 user session
-        // 所以我们需要把 input 作为当前消息加入
-        // 但如果 SessionManager 的实现是在调用 execute 前已经把 user session 加入了 history，这里就要小心重复
-        // *本实现假设 context.history 是"过去"的历史，当前 input 是"现在"的消息*
+        // 3. 插入当前用户消息
+        // ✨ [修复] 不再检查是否重复，因为 buildMessageHistory 已经排除了最后一条用户消息
         if (userMessageContent) {
-             fullMessages.push({ role: 'user', content: userMessageContent });
+            fullMessages.push({ role: 'user', content: userMessageContent });
         }
 
-        // 2. 初始化 Driver
+        console.log('[AgentExecutor] Message chain length:', fullMessages.length);
         console.log('[AgentExecutor] Creating LLMDriver with model:', this.model);
         const driver = new LLMDriver({
             connection: this.connection,

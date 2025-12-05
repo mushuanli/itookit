@@ -26,12 +26,13 @@ type VFSUIOptions = SessionUIOptions & {
     defaultUiSettings?: Partial<UISettings>,
     defaultFileName?: string;
     defaultFileContent?: string;
-    
-    // [新增] 文件类型注册配置
+    defaultExtension?: string;
+
+    // 文件类型注册配置
     fileTypes?: FileTypeDefinition[];
-    // [新增] 默认编辑器工厂 (兜底)
+    // 默认编辑器工厂 (兜底)
     defaultEditorFactory: EditorFactory;
-    // [新增] 用户自定义编辑器解析器
+    // 用户自定义编辑器解析器
     customEditorResolver?: CustomEditorResolver;
 };
 
@@ -42,16 +43,14 @@ type VFSUIOptions = SessionUIOptions & {
 export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
     private readonly options: VFSUIOptions;
     private readonly engine: ISessionEngine;
-    
+
     public readonly coordinator: Coordinator;
     public readonly store: VFSStore;
-    
-    private readonly _vfsService: VFSService;
-    
-    // [新增] 文件类型注册表
-    public readonly fileTypeRegistry: FileTypeRegistry;
 
-    private reloadDebounce: any = null;
+    private readonly _vfsService: VFSService;
+
+    // 文件类型注册表
+    public readonly fileTypeRegistry: FileTypeRegistry;
 
     private nodeList: NodeList;
     private fileOutline?: FileOutline;
@@ -60,12 +59,18 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
     private lastActiveId: string | null = null;
     private lastSidebarCollapsedState: boolean;
     private lastForceUpdateTimestamp?: number;
-    
+
     private lastSessionSelectWasUserAction = false;
 
-    // ✨ [新增] 更新去重队列
+    // ✨ [优化] 事件批处理队列
     private updateQueue: Set<string> = new Set();
     private updateTimer: any = null;
+
+    private deleteQueue: Set<string> = new Set();
+    private deleteTimer: any = null;
+
+    private createQueue: Set<string> = new Set();
+    private createTimer: any = null;
 
     constructor(options: VFSUIOptions, engine: ISessionEngine) {
         super();
@@ -102,22 +107,23 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
         this.lastActiveId = this.store.getState().activeId;
         this.lastSidebarCollapsedState = this.store.getState().isSidebarCollapsed;
 
-        this._vfsService = new VFSService({ engine: this.engine, newFileContent: options.newSessionContent });
+        console.log('>>> VFS opt:', options);
+        this._vfsService = new VFSService({
+            engine: this.engine,
+            defaultExtension: options.defaultExtension,
+            newFileContent: options.newSessionContent
+        });
 
         const tagProvider = new EngineTagSource(this.engine);
-        
-        // [修复] 类型匹配问题
-        // TagEditorFactory 是一个函数类型: (options: TagEditorOptions) => any
-        // options.components.tagEditor 可能是一个类构造函数 (new (...) => any)
-        
-        // 默认的工厂函数实现
+
+        // 默认的 TagEditor 工厂函数实现
         const defaultTagEditorFactory: TagEditorFactory = ({ container, initialTags, onSave, onCancel }: TagEditorOptions) => {
-            const editor = new TagEditorComponent({ 
-                container, 
-                initialItems: initialTags, 
-                suggestionProvider: tagProvider, 
-                onSave, 
-                onCancel 
+            const editor = new TagEditorComponent({
+                container,
+                initialItems: initialTags,
+                suggestionProvider: tagProvider,
+                onSave,
+                onCancel
             });
             editor.init();
             return editor;
@@ -128,19 +134,15 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
 
         if (this.options.components?.tagEditor) {
             const CustomTagEditorClass = this.options.components.tagEditor;
-            // 包装为工厂函数
             finalTagEditorFactory = (opts: TagEditorOptions) => {
-                // 假设自定义组件的构造函数接收类似的参数结构，或者需要适配
-                // 这里做一个简单的透传，具体取决于自定义组件的签名约定
-                // 如果自定义组件遵循 TagEditorComponent 的接口，这样是可行的
                 const instance = new CustomTagEditorClass({
                     container: opts.container,
                     initialItems: opts.initialTags,
-                    suggestionProvider: tagProvider, // 注入 Provider
+                    suggestionProvider: tagProvider,
                     onSave: opts.onSave,
                     onCancel: opts.onCancel
                 });
-                
+
                 if (typeof instance.init === 'function') {
                     instance.init();
                 }
@@ -153,9 +155,8 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
             store: this.store,
             coordinator: this.coordinator,
             contextMenu: this.options.contextMenu as ContextMenuConfig,
-            tagEditorFactory: finalTagEditorFactory, // 使用修复后的类型
+            tagEditorFactory: finalTagEditorFactory,
             searchPlaceholder: this.options.searchPlaceholder || 'Search (tag:xx type:file|dir)...',
-            // 新增传参
             createFileLabel: this.options.createFileLabel,
             title: this.options.title
         });
@@ -167,7 +168,7 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
                 coordinator: this.coordinator
             });
         }
-        
+
         let modalContainer = document.getElementById('vfs-modal-container');
         if (!modalContainer) {
             modalContainer = document.createElement('div');
@@ -180,7 +181,7 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
             coordinator: this.coordinator,
         });
 
-        if(options.title) this.nodeList.setTitle(options.title);
+        if (options.title) this.nodeList.setTitle(options.title);
 
         this._connectUIEvents();
         if (!this.options.readOnly) {
@@ -192,7 +193,7 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
     // --- Public API 扩展 ---
 
     /**
-     * [新增] 暴露编辑器解析能力供 EditorConnector 使用
+     * 暴露编辑器解析能力供 EditorConnector 使用
      */
     public resolveEditorFactory(node: VFSNodeUI): EditorFactory {
         return this.fileTypeRegistry.resolveEditorFactory(node);
@@ -225,7 +226,7 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
                 console.error('[VFSUIManager] Failed to create the default file:', error);
             }
         }
-        
+
         let activeItem = this.getActiveSession();
         if (!activeItem) {
             const newState = this.store.getState();
@@ -244,11 +245,11 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
                 }
             }
         }
-        
+
         console.log(`[VFSUIManager] Start completed. Initial active session:`, activeItem);
         return activeItem;
     }
-    
+
     public getActiveSession(): VFSNodeUI | undefined {
         const state = this.store.getState();
         if (!state.activeId) return undefined;
@@ -272,11 +273,11 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
     public toggleSidebar(): void {
         this.store.dispatch({ type: 'SIDEBAR_TOGGLE' });
     }
-    
+
     public setTitle(newTitle: string): void {
         this.nodeList.setTitle(newTitle);
     }
-    
+
     public on(eventName: SessionManagerEvent, callback: SessionManagerCallback): () => void {
         const map: Record<SessionManagerEvent, string> = {
             'sessionSelected': 'PUBLIC_SESSION_SELECTED',
@@ -288,9 +289,9 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
         };
         const channel = map[eventName];
         if (channel) return this.coordinator.subscribe(channel, (e: any) => callback(e.data));
-        return () => {};
+        return () => { };
     }
-    
+
     public destroy(): void {
         this.nodeList.destroy();
         this.fileOutline?.destroy();
@@ -305,13 +306,12 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
         try {
             this.store.dispatch({ type: 'ITEMS_LOAD_START' });
             const rootChildren = await this.engine.loadTree();
-            
-            // [关键修改] 传入图标解析器
-            // 逻辑：NodeMapper 会先看 node.icon，如果没有，则调用此回调
+
+            // 传入图标解析器
             const iconResolver = (name: string, isDir: boolean) => this.fileTypeRegistry.getIcon(name, isDir);
-            
+
             const uiItems = mapEngineTreeToUIItems(rootChildren, iconResolver);
-            
+
             const tags = this._buildTagsMap(uiItems);
             this.store.dispatch({ type: 'STATE_LOAD_SUCCESS', payload: { items: uiItems, tags } });
         } catch (error) {
@@ -405,61 +405,86 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
             }
         };
 
+        // 2. ✨ [优化] 批量删除
+        const processDeleteQueue = () => {
+            if (this.deleteQueue.size === 0) return;
+            const itemIds = Array.from(this.deleteQueue);
+            this.deleteQueue.clear();
+            this.deleteTimer = null;
+            
+            // console.log(`[VFSUIManager] Processing batch delete for ${itemIds.length} items`);
+            this.store.dispatch({ type: 'ITEM_DELETE_SUCCESS', payload: { itemIds } });
+        };
+
+        // 3. ✨ [优化] 批量创建
+        const processCreateQueue = async () => {
+            if (this.createQueue.size === 0) return;
+            const idsToCreate = Array.from(this.createQueue);
+            this.createQueue.clear();
+            this.createTimer = null;
+
+            // 并发加载新节点数据
+            const createdItems = await Promise.all(idsToCreate.map(async (nodeId) => {
+                try {
+                    const newNode = await this.engine.getNode(nodeId);
+                    if (!newNode) return null;
+
+                    // 忽略隐藏文件的创建事件
+                    if (newNode.name.startsWith('.') || newNode.name.startsWith('__')) return null;
+
+                    if (newNode.type === 'file') {
+                        newNode.content = await this.engine.readContent(nodeId);
+                    } else if (newNode.type === 'directory') {
+                        newNode.children = [];
+                    }
+                    return mapEngineNodeToUIItem(newNode, iconResolver);
+                } catch (e) {
+                    console.warn(`[VFSUIManager] Failed to load created node ${nodeId}`, e);
+                    return null;
+                }
+            }));
+
+            // 分发事件 (Store暂未提供批量创建接口，逐个分发，但已减少了IO延迟)
+            createdItems.forEach(newItem => {
+                if (newItem) {
+                    this.store.dispatch({
+                        type: newItem.type === 'directory' ? 'FOLDER_CREATE_SUCCESS' : 'SESSION_CREATE_SUCCESS',
+                        payload: newItem,
+                    });
+                }
+            });
+        };
+
         const handleEvent = async (event: EngineEvent) => {
             switch (event.type) {
                 case 'node:created': {
                     const nodeId = event.payload.nodeId;
-                    try {
-                        const newNode = await this.engine.getNode(nodeId);
-                        if (!newNode) return;
-                        
-                        // [新增] 忽略隐藏文件的创建事件
-                        if (newNode.name.startsWith('.') || newNode.name.startsWith('__')) return;
-
-                        if (newNode.type === 'file') {
-                            newNode.content = await this.engine.readContent(nodeId);
-                        } else if (newNode.type === 'directory') {
-                            newNode.children = [];
-                        }
-                        
-                        // [关键修改] 创建节点时传入 iconResolver
-                        const newItem = mapEngineNodeToUIItem(newNode, iconResolver);
-                        
-                        this.store.dispatch({
-                            type: newItem.type === 'directory' ? 'FOLDER_CREATE_SUCCESS' : 'SESSION_CREATE_SUCCESS',
-                            payload: newItem,
-                        });
-                    } catch (e) {
-                        console.error(`[VFSUIManager] Failed to handle node:created for ${nodeId}:`, e);
+                    this.createQueue.add(nodeId);
+                    if (!this.createTimer) {
+                        this.createTimer = setTimeout(processCreateQueue, 50); // 50ms 防抖
                     }
                     break;
                 }
                 case 'node:deleted':
                     const removedIds = event.payload.removedIds || [event.payload.nodeId];
-                    this.store.dispatch({ type: 'ITEM_DELETE_SUCCESS', payload: { itemIds: removedIds } });
-                    break;
-                case 'node:updated':
-                    // ✨ [优化] 不要立即处理，而是加入队列进行防抖
-                    const updatedId = event.payload.nodeId;
+                    removedIds.forEach((id: string) => this.deleteQueue.add(id));
                     
-                    // 检查本地 Store 是否存在此 Item，过滤无关更新
-                    const currentItems = this.store.getState().items;
-                    const itemExists = (items: VFSNodeUI[]): boolean => {
-                        for (const item of items) {
-                            if (item.id === updatedId) return true;
-                            if (item.children && itemExists(item.children)) return true;
-                        }
-                        return false;
-                    };
-                    
-                    if (itemExists(currentItems)) {
-                        this.updateQueue.add(updatedId);
-                        if (!this.updateTimer) {
-                            this.updateTimer = setTimeout(processUpdateQueue, 50); // 50ms 防抖
-                        }
+                    if (!this.deleteTimer) {
+                        // 删除响应要快，但仍需合并极短时间内的突发事件
+                        this.deleteTimer = setTimeout(processDeleteQueue, 20); 
                     }
                     break;
-                // ✨ [新增] 处理批量更新事件
+                
+                case 'node:updated':
+                    const updatedId = event.payload.nodeId;
+                    // 检查本地 Store 是否存在此 Item，过滤无关更新
+                    // (此处简化判断，依赖 processUpdateQueue 内部的验证)
+                    this.updateQueue.add(updatedId);
+                    if (!this.updateTimer) {
+                        this.updateTimer = setTimeout(processUpdateQueue, 50);
+                    }
+                    break;
+                
                 case 'node:batch_updated': {
                     const { updatedNodeIds } = event.payload;
                     if (updatedNodeIds && Array.isArray(updatedNodeIds)) {
@@ -497,14 +522,14 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
     private _connectUIEvents(): void {
         this.store.subscribe(newState => {
             const currentActiveItem = this.getActiveSession();
-            
+
             const activeIdChanged = newState.activeId !== this.lastActiveId;
             const activeItemNowAvailable = this.lastActiveId && !this.getActiveSession() && !!currentActiveItem;
-        
-            const forceUpdateDetected = newState._forceUpdateTimestamp !== undefined && 
-                                       newState._forceUpdateTimestamp !== this.lastForceUpdateTimestamp;
-        
-        console.log(`[VFSUIManager] Old activeId: ${this.lastActiveId}, New activeId: ${newState.activeId}. activeIdChanged: ${activeIdChanged}, userAction: ${this.lastSessionSelectWasUserAction}, forceUpdate: ${forceUpdateDetected}`);
+
+            const forceUpdateDetected = newState._forceUpdateTimestamp !== undefined &&
+                newState._forceUpdateTimestamp !== this.lastForceUpdateTimestamp;
+
+            console.log(`[VFSUIManager] Old activeId: ${this.lastActiveId}, New activeId: ${newState.activeId}. activeIdChanged: ${activeIdChanged}, userAction: ${this.lastSessionSelectWasUserAction}, forceUpdate: ${forceUpdateDetected}`);
             if (activeIdChanged || activeItemNowAvailable || this.lastSessionSelectWasUserAction || forceUpdateDetected) {
                 this.lastActiveId = newState.activeId;
                 if (forceUpdateDetected) {
@@ -521,7 +546,7 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
             }
             this.coordinator.publish('PUBLIC_STATE_CHANGED', { state: newState });
         });
-        
+
         this.coordinator.subscribe('PUBLIC_IMPORT_REQUESTED', async (e) => {
             const { parentId } = e.data;
             const input = document.createElement('input');
@@ -529,13 +554,13 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
             input.multiple = true;
             input.accept = '*/*';
             input.style.display = 'none';
-            
+
             input.onchange = async (event) => {
                 const files = (event.target as HTMLInputElement).files;
                 if (!files || files.length === 0) return;
-                
+
                 console.log(`[VFSUIManager] Importing ${files.length} file(s)`);
-                
+
                 try {
                     const filesWithContent = await Promise.all(
                         Array.from(files).map(async (file) => {
@@ -543,19 +568,19 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
                             return { title: file.name, content };
                         })
                     );
-                    
-                    const createdNodes = await this._vfsService.createFiles({ 
-                        parentId, 
-                        files: filesWithContent 
+
+                    const createdNodes = await this._vfsService.createFiles({
+                        parentId,
+                        files: filesWithContent
                     });
-                    
+
                     await this._loadData();
-                    
+
                     if (createdNodes.length > 0 && createdNodes[0].type === 'file') {
                         setTimeout(() => {
-                            this.store.dispatch({ 
-                                type: 'SESSION_SELECT', 
-                                payload: { sessionId: createdNodes[0].id } 
+                            this.store.dispatch({
+                                type: 'SESSION_SELECT',
+                                payload: { sessionId: createdNodes[0].id }
                             });
                         }, 50);
                     }
@@ -566,7 +591,7 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
                     input.remove();
                 }
             };
-            
+
             document.body.appendChild(input);
             input.click();
         });
@@ -574,7 +599,7 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
         this.coordinator.subscribe('CREATE_ITEM_CONFIRMED', async (e) => {
             const { type, title, parentId } = e.data;
             console.log('[VFSUIManager] CREATE_ITEM_CONFIRMED:', e.data);
-            
+
             try {
                 if (type === 'file') {
                     await this._vfsService.createFile({ title, parentId, content: this.options.newSessionContent || '' });
@@ -588,13 +613,13 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
                 this.store.dispatch({ type: 'CREATE_ITEM_START', payload: { type, parentId } });
             }
         });
-        
+
         this.coordinator.subscribe('ITEM_ACTION_REQUESTED', async (e) => {
             const { action, itemId } = e.data;
             const findItem = (items: VFSNodeUI[], id: string): VFSNodeUI | undefined => {
-                for(const item of items) {
+                for (const item of items) {
                     if (item.id === id) return item;
-                    if(item.children) {
+                    if (item.children) {
                         const found = findItem(item.children, id);
                         if (found) return found;
                     }
@@ -607,24 +632,19 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
                     await this._vfsService.deleteItems([itemId]);
                 }
             } else if (action === 'rename') {
-                // UI 中显示的 title 已经没有扩展名了
                 const currentDisplayTitle = item?.metadata.title || '';
                 const newDisplayTitle = prompt('Enter new name:', currentDisplayTitle);
-                
+
                 if (newDisplayTitle && newDisplayTitle.trim() !== currentDisplayTitle) {
                     const cleanTitle = newDisplayTitle.trim();
                     let finalName = cleanTitle;
 
-                    // [优化] 智能重命名逻辑
                     if (item?.type === 'file') {
-                        // 1. 检查用户输入是否显式包含了扩展名
                         const hasExplicitExtension = /\.[a-zA-Z0-9]{1,10}$/.test(cleanTitle);
 
                         if (hasExplicitExtension) {
-                            // 情况 A: 用户显式输入了扩展名 (如 "style.css")，直接使用
                             finalName = cleanTitle;
                         } else {
-                            // 情况 B: 用户未输入扩展名，尝试补全原有扩展名
                             const originalExtension = item.metadata.custom?._extension || '';
                             if (originalExtension) {
                                 finalName = `${cleanTitle}${originalExtension}`;
@@ -640,25 +660,25 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
                 }
             }
         });
-        
+
         this.coordinator.subscribe('BULK_ACTION_REQUESTED', async e => {
             const itemIds = Array.from(this.store.getState().selectedItemIds);
             if (e.data.action === 'delete') {
-                 if (confirm(`Are you sure you want to delete ${itemIds.length} items?`)) {
+                if (confirm(`Are you sure you want to delete ${itemIds.length} items?`)) {
                     await this._vfsService.deleteItems(itemIds);
-                 }
+                }
             }
         });
-        
+
         this.coordinator.subscribe('ITEMS_MOVE_REQUESTED', async (e) => await this._vfsService.moveItems(e.data));
         this.coordinator.subscribe('ITEM_TAGS_UPDATE_REQUESTED', async (e) => await this._vfsService.updateMultipleItemsTags(e.data));
 
         this.coordinator.subscribe('SESSION_SELECT_REQUESTED', e => {
             console.log('[VFSUIManager] Received SESSION_SELECT_REQUESTED, dispatching to store with payload:', e.data);
-            this.lastSessionSelectWasUserAction = true; 
+            this.lastSessionSelectWasUserAction = true;
             this.store.dispatch({ type: 'SESSION_SELECT', payload: { sessionId: e.data.sessionId } })
         });
-        
+
         this.coordinator.subscribe('CREATE_ITEM_REQUESTED', e => this.store.dispatch({ type: 'CREATE_ITEM_START', payload: e.data }));
         this.coordinator.subscribe('MOVE_OPERATION_START_REQUESTED', e => this.store.dispatch({ type: 'MOVE_OPERATION_START', payload: e.data }));
         this.coordinator.subscribe('MOVE_OPERATION_END_REQUESTED', () => this.store.dispatch({ type: 'MOVE_OPERATION_END' }));
@@ -667,7 +687,7 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
         this.coordinator.subscribe('OUTLINE_TOGGLE_REQUESTED', e => this.store.dispatch({ type: 'OUTLINE_TOGGLE', payload: e.data }));
         this.coordinator.subscribe('OUTLINE_H1_TOGGLE_REQUESTED', e => this.store.dispatch({ type: 'OUTLINE_H1_TOGGLE', payload: e.data }));
         this.coordinator.subscribe('SEARCH_QUERY_CHANGED', e => this.store.dispatch({ type: 'SEARCH_QUERY_UPDATE', payload: { query: e.data.query } }));
-        
+
         this.coordinator.subscribe('NAVIGATE_TO_HEADING_REQUESTED', e => this.coordinator.publish('PUBLIC_NAVIGATE_TO_HEADING', e.data));
         this.coordinator.subscribe('CUSTOM_MENU_ACTION_REQUESTED', e => this.coordinator.publish('PUBLIC_MENU_ITEM_CLICKED', { actionId: e.data.action, item: e.data.item }));
     }
@@ -675,12 +695,12 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
     private _buildTagsMap(items: VFSNodeUI[]): Map<string, TagInfo> {
         const tagsMap = new Map();
         const traverse = (list: VFSNodeUI[]) => {
-            for(const i of list) {
+            for (const i of list) {
                 i.metadata.tags.forEach(t => {
-                    if(!tagsMap.has(t)) tagsMap.set(t, {name: t, color: null, itemIds: new Set()});
+                    if (!tagsMap.has(t)) tagsMap.set(t, { name: t, color: null, itemIds: new Set() });
                     tagsMap.get(t).itemIds.add(i.id);
                 });
-                if(i.children) traverse(i.children);
+                if (i.children) traverse(i.children);
             }
         };
         traverse(items);
@@ -696,9 +716,9 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
             const reader = new FileReader();
             reader.onload = () => resolve(reader.result as string | ArrayBuffer);
             reader.onerror = () => reject(new Error(`Failed to read file: ${file.name}`));
-            
-            if (file.type.startsWith('text/') || 
-                file.name.endsWith('.md') || 
+
+            if (file.type.startsWith('text/') ||
+                file.name.endsWith('.md') ||
                 file.name.endsWith('.txt') ||
                 file.name.endsWith('.json') ||
                 file.name.endsWith('.html') ||

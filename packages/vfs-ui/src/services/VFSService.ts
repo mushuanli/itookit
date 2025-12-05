@@ -55,6 +55,7 @@ export class VFSService {
   private readonly defaultExtension: string;
 
   constructor({ engine, newFileContent = '', defaultExtension = '.md' }: VFSServiceDependencies) {
+    console.log('VFSService option:',defaultExtension)
     if (!engine) throw new Error("VFSService requires an ISessionEngine.");
     this.engine = engine;
     this.newFileContent = newFileContent;
@@ -81,6 +82,7 @@ export class VFSService {
   public async createFile({ title = 'Untitled', parentId = null, content = this.newFileContent }: CreateFileOptions): Promise<EngineNode> {
     // [优化] 自动补全扩展名
     const finalTitle = this.ensureExtension(title);
+    console.log(`>>>>> createFile: ${title} - ${finalTitle}`)
     return this.engine.createFile(finalTitle, parentId, content);
   }
 

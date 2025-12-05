@@ -1,56 +1,95 @@
 /**
  * @file apps/web-app/src/config/modules.ts
  */
-import {FS_MODULE_CHAT,FS_MODULE_AGENTS} from '@itookit/common';
-import {DEFAULT_AGENT_CONTENT} from '@itookit/llm-ui';
+import { FS_MODULE_CHAT, FS_MODULE_AGENTS } from '@itookit/common';
+import { DEFAULT_AGENT_CONTENT } from '@itookit/llm-ui';
 
-export interface WorkspaceConfig {
+// 1. 定义工作区行为类型
+export type WorkspaceType = 'standard' | 'settings' | 'agent' | 'chat';
+
+// 2. 定义必须从 UI 选项中分离出来的系统逻辑字段
+export interface SystemConfig {
     elementId: string;
     moduleName: string;
-    isProtected?: boolean; 
-
-    title: string;
-    // [新增] 定义该工作区中"项目"的单数名词
-    itemLabel: string; 
     
-    defaultFileName?: string;
-    defaultFileContent?: string;
-    // 允许配置额外的插件列表
+    // 核心逻辑控制
+    type?: WorkspaceType; 
+    isProtected?: boolean;
+    
+    // 插件与 AI 逻辑
     plugins?: string[]; 
     mentionScope?: string[];
+    aiEnabled?: boolean; // 控制是否启用后台 Brain
+}
+
+// 3. 混合类型：SystemConfig + UI 参数
+// 注意：这里的字段名必须与 MemoryManager 的 UIOptions 接口保持一致
+// 这样在 main.ts 中可以直接透传，无需逐个映射
+export interface WorkspaceConfig extends SystemConfig {
+    // --- 直接透传给 MemoryManager 的 UI 字段 ---
+    title: string;
+    createFileLabel: string; // (原 itemLabel，改名以匹配组件接口)
+    
+    defaultFileName?: string;
+    defaultExtension?: string;
+    defaultFileContent?: string;
+    
+    searchPlaceholder?: string;
+    readOnly?: boolean;
+    initialSidebarCollapsed?: boolean;
+    
+    // 如果 MemoryManager 将来支持 sidebarWidth, 只需要在这里加定义即可：
+    // sidebarWidth?: number;
 }
 
 
 export const WORKSPACES: WorkspaceConfig[] = [
-    // [新增] Agent 独立工作区
-    // 数据存储在 /agents 模块，每个 Agent 是一个独立文件
+    // --- Settings (配置化管理) ---
+    {
+        elementId: 'settings-workspace',
+        moduleName: 'settings_root', // 对应 SettingsEngine 的 moduleName
+        type: 'settings',
+        title: 'Settings',
+        createFileLabel: 'Setting',
+        readOnly: true, // 整个列表只读
+        aiEnabled: false,
+        plugins: ['core:titlebar'],
+        initialSidebarCollapsed: false
+    },
+
+    // --- Agent Workspace ---
     {
         elementId: 'agent-workspace',
-        moduleName: FS_MODULE_AGENTS, 
+        moduleName: FS_MODULE_AGENTS,
+        type: 'agent',
         title: 'Agents',
-        itemLabel: 'Agent', // + Agent
+        createFileLabel: 'Agent',
         defaultFileName: 'New Assistant.agent',
+        defaultExtension: '.agent',
         // 默认内容为合法的 JSON 字符串
         defaultFileContent: JSON.stringify(DEFAULT_AGENT_CONTENT, null, 2),
         // Agent 编辑器只需要最基础的 Titlebar 插件
         plugins: ['core:titlebar'],
         // Agent 可能需要引用 Prompts 和 Knowledge Base (Projects)
         mentionScope: ['agents', 'prompts', 'projects'],
+        aiEnabled: false
     },
-    // [原有] Anki Workspace
+
+    // --- Anki Workspace ---
     {
         elementId: 'anki-workspace',
         moduleName: 'anki',
+        type: 'standard',
         title: 'Anki Memory Cards',
-        itemLabel: 'Card',
-        // [修改] 显式添加 mention 和 tag 插件
+        createFileLabel: 'Card',
         plugins: [
             'cloze:cloze', 
             'cloze:cloze-controls', 
-            'autocomplete:mention', // <--- 关键：启用 @mention
-            'autocomplete:tag'      // <--- 建议：启用 #tag
+            'autocomplete:mention', 
+            'autocomplete:tag'
         ], 
         defaultFileName: 'Anki Guide.md',
+        defaultExtension: '.md',
         defaultFileContent: `### 挖空填词 (Cloze)
 
 这是通过 \`cloze\` 插件启用的功能。在预览模式下，点击挖空部分即可显示/隐藏答案。
@@ -81,13 +120,18 @@ MDxEditor 识别 \`¶\` 字符作为挖空内部的换行符。
 | **JS** | --JavaScript-- | 用于交互逻辑 |
 `,
         mentionScope: ['*'], 
+        aiEnabled: true
     },
+
+    // --- Prompt Workspace ---
     {
         elementId: 'prompt-workspace',
         moduleName: 'prompts',
+        type: 'standard',
         title: 'Prompt Library',
-        itemLabel: 'Prompt', // + Prompt
+        createFileLabel: 'Prompt',
         defaultFileName: 'Welcome to Prompts.md',
+        defaultExtension: '.md',
         defaultFileContent: `# Welcome to Your Prompt Library!
 
 This is your personal space to create, manage, and reuse powerful prompts for Large Language Models (LLMs).
@@ -109,14 +153,19 @@ Translate the following English text to French:
 
 "{{text_to_translate}}"
 \`\`\`
-`
+`,
+        aiEnabled: true
     },
+
+    // --- Projects Workspace ---
     {
         elementId: 'project-workspace',
         moduleName: 'projects',
+        type: 'standard',
         title: 'Projects',
-        itemLabel: 'Project', // + Project
+        createFileLabel: 'Project',
         defaultFileName: 'Getting Started with Projects.md',
+        defaultExtension: '.md',
         defaultFileContent: `# Manage Your Projects
 
 This workspace helps you organize all your project-related documents, notes, and plans.
@@ -131,14 +180,19 @@ We suggest creating a folder for each project. Inside each project folder, you c
 *   **Research.md**: Links, summaries, and important findings.
 
 Start by creating your first project folder using the folder icon in the sidebar!
-`
+`,
+        aiEnabled: true
     },
+
+    // --- Email Workspace ---
     {
         elementId: 'email-workspace',
         moduleName: 'emails',
+        type: 'standard',
         title: 'Email Drafts',
-        itemLabel: 'Email', // + Email
+        createFileLabel: 'Email',
         defaultFileName: 'How to Use Email Templates.md',
+        defaultExtension: '.md',
         defaultFileContent: `# Email Drafts & Templates
 
 Draft your important emails here before sending them. You can also create reusable templates to save time.
@@ -158,16 +212,20 @@ Best regards,
 
 [Your Name]
 \`\`\`
-`
+`,
+        aiEnabled: true
     },
+
+    // --- Private Workspace ---
     {
         elementId: 'private-workspace',
         moduleName: 'private',
         isProtected: true, 
-
+        type: 'standard',
         title: 'Private Notes',
-        itemLabel: 'Note', // + Note
+        createFileLabel: 'Note',
         defaultFileName: 'My First Note.md',
+        defaultExtension: '.md',
         defaultFileContent: `# Your Private Notes
 
 This is a secure and private space for your thoughts, ideas, and personal reminders.
@@ -177,17 +235,21 @@ Anything you write here is stored locally in your browser and is not sent to any
 Feel free to jot down anything that comes to mind!
 `,
         mentionScope: [], // 空数组表示仅当前模块
+        aiEnabled: true
     },
+
+    // --- LLM Workspace ---
     {
         elementId: 'llm-workspace',
         moduleName: FS_MODULE_CHAT,       // 数据存储在 /chats 模块
+        type: 'chat',
         title: 'AI Sessions',
-        itemLabel: 'Chat',         // 按钮显示 "+ Chat"
+        createFileLabel: 'Chat',
         defaultFileName: 'New Chat.chat',
-        // 初始化为一个空的 JSON 会话结构
+        defaultExtension: '.chat',
         defaultFileContent: JSON.stringify({ version: 1, sessions: [] }, null, 2),
         mentionScope: ['*'],       // 允许引用所有内容
-        plugins: []                // LLM 编辑器内部管理插件，此处留空
+        plugins: [],               // LLM 编辑器内部管理插件，此处留空
+        aiEnabled: false
     },
-
 ];
