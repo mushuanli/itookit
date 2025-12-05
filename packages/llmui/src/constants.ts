@@ -13,6 +13,7 @@ export type AgentFileContent = IAgentDefinition;
 // 导出常量供应用其他部分使用
 export { LLM_PROVIDER_DEFAULTS };
 
+export const AGENT_DEFAULT_DIR = '/default';
 export const LLM_AGENT_TARGET_DIR = '/default/providers'; 
 
 // 保护 Agent IDs，不允许用户删除
@@ -82,7 +83,7 @@ export const LLM_DEFAULT_AGENTS: InitialAgentDef[] = [
         icon: '🤖',
         description: '系统默认智能体',
         initialTags: ['default', 'system'], 
-        initPath: '/default',
+        initPath: AGENT_DEFAULT_DIR,
         config: {
             connectionId: LLM_DEFAULT_ID,
             modelId: LLM_PROVIDER_DEFAULTS.rdsec.models[0]?.id || "",
@@ -101,7 +102,7 @@ export const LLM_DEFAULT_AGENTS: InitialAgentDef[] = [
         icon: '⚡️',
         description: '一次性问答，保留4次对话历史',
         initialTags: ['default'],
-        initPath: '/default', 
+        initPath: AGENT_DEFAULT_DIR, 
         config: {
             connectionId: LLM_DEFAULT_ID,
             modelId: LLM_PROVIDER_DEFAULTS.rdsec.models[0]?.id || "",

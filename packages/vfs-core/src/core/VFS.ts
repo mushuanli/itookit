@@ -81,6 +81,54 @@ export class VFS {
   }
 
   /**
+   * [辅助] 获取父目录路径字符串
+   */
+  private _dirname(path: string): string {
+    const lastSlash = path.lastIndexOf('/');
+    if (lastSlash <= 0) return '/';
+    return path.substring(0, lastSlash);
+  }
+
+  /**
+   * [新增] 递归确保父目录存在
+   * 如果目录不存在，自动创建
+   */
+  private async _ensureParentDirectory(module: string, path: string): Promise<string> {
+    // 1. 检查当前路径是否已存在
+    const existingId = await this.pathResolver.resolve(module, path);
+    if (existingId) {
+        // 确保它是一个目录
+        const node = await this.storage.loadVNode(existingId);
+        if (node && node.type !== VNodeType.DIRECTORY) {
+            throw new VFSError(VFSErrorCode.INVALID_OPERATION, `Path exists but is not a directory: ${path}`);
+        }
+        return existingId;
+    }
+
+    // 2. 如果是根路径且不存在，这是一个严重错误（模块未挂载）
+    if (path === '/') {
+        throw new VFSError(VFSErrorCode.NOT_FOUND, `Root directory for module '${module}' not found. Is the module mounted?`);
+    }
+
+    // 3. 递归：确保上一级目录存在
+    const parentPath = this._dirname(path);
+    // 递归调用，获取父目录 ID
+    await this._ensureParentDirectory(module, parentPath);
+
+    // 4. 创建当前层级的目录
+    // 注意：这里调用 createNode 会开启一个新的事务。
+    // 虽然不是最高效的（每个目录一个事务），但在自动恢复场景下是安全的且逻辑复用性最高。
+    const newDirNode = await this.createNode({
+        module,
+        path: path,
+        type: VNodeType.DIRECTORY,
+        metadata: { createdBy: 'system_recursive_ensure' }
+    });
+
+    return newDirNode.nodeId;
+  }
+
+  /**
    * 创建节点
    */
   async createNode(options: CreateNodeOptions): Promise<VNode> {
@@ -104,12 +152,36 @@ export class VFS {
       );
     }
 
-    // 4. 解析父节点 (使用用户路径在模块内解析)
-    const parentId = await this.pathResolver.resolveParent(module, normalizedUserPath);
-    if (parentId) {
-        const parentNode = await this.storage.loadVNode(parentId);
-        if (parentNode && parentNode.type !== VNodeType.DIRECTORY) {
-            throw new VFSError(VFSErrorCode.INVALID_OPERATION, `Cannot create node inside a file: ${parentNode.path}`);
+    // 4. 解析父节点
+    // [修改] 替换原有的 pathResolver.resolveParent 逻辑，增加递归创建支持
+    let parentId: string | null = null;
+    
+    // 如果不是创建根节点，则必须有父节点
+    if (normalizedUserPath !== '/') {
+        const parentPath = this._dirname(normalizedUserPath);
+        
+        // 尝试直接获取父节点 ID
+        parentId = await this.pathResolver.resolve(module, parentPath);
+
+        // 如果父节点不存在，启动递归创建逻辑
+        if (!parentId) {
+            try {
+                parentId = await this._ensureParentDirectory(module, parentPath);
+            } catch (error: any) {
+                // 包装错误信息，使其更清晰
+                throw new VFSError(
+                    VFSErrorCode.INVALID_OPERATION, 
+                    `Failed to create parent directories for '${path}': ${error.message}`
+                );
+            }
+        }
+        
+        // 再次确认父节点是目录 (防御性检查)
+        if (parentId) {
+            const parentNode = await this.storage.loadVNode(parentId);
+            if (parentNode && parentNode.type !== VNodeType.DIRECTORY) {
+                throw new VFSError(VFSErrorCode.INVALID_OPERATION, `Cannot create node inside a file: ${parentNode.path}`);
+            }
         }
     }
     
@@ -144,7 +216,7 @@ export class VFS {
         type: VFSEventType.NODE_CREATED,
         nodeId: vnode.nodeId,
         path: systemPath,
-        moduleId: module, // ✨ [新增]
+        moduleId: module, 
         timestamp: Date.now(),
         data: { type, module }
       });
@@ -172,7 +244,7 @@ export class VFS {
         type: VFSEventType.NODE_UPDATED,
         nodeId: vnode.nodeId,
         path: vnode.path,
-        moduleId: vnode.moduleId || undefined, // ✨ [新增]
+        moduleId: vnode.moduleId || undefined, 
         timestamp: Date.now(),
         data: { metadataOnly: true }
       });
@@ -232,7 +304,7 @@ export class VFS {
         type: VFSEventType.NODE_UPDATED,
         nodeId: vnode.nodeId,
         path: vnode.path,
-        moduleId: vnode.moduleId || undefined, // ✨ [新增]
+        moduleId: vnode.moduleId || undefined, 
         timestamp: Date.now()
       });
 
@@ -285,7 +357,7 @@ export class VFS {
         type: VFSEventType.NODE_DELETED,
         nodeId: vnode.nodeId,
         path: vnode.path,
-        moduleId: vnode.moduleId || undefined, // ✨ [新增]
+        moduleId: vnode.moduleId || undefined, 
         timestamp: Date.now(),
         data: { removedIds: allRemovedIds }
       });
@@ -343,7 +415,7 @@ export class VFS {
       this.events.emit({
         type: VFSEventType.NODE_MOVED,
         nodeId: vnode.nodeId, path: newSystemPath, timestamp: Date.now(), data: { oldPath: oldSystemPath, newPath: newSystemPath },
-        moduleId: moduleName, // ✨ [新增]
+        moduleId: moduleName, 
       });
 
       return vnode;
@@ -469,7 +541,15 @@ export class VFS {
       throw new VFSError(VFSErrorCode.ALREADY_EXISTS, `Node already exists at path: ${normalizedUserPath}`);
     }
   
-    const targetParentId = await this.pathResolver.resolveParent(module, normalizedUserPath);
+    // 复制操作是否需要自动创建父目录？通常需要。
+    // 这里为了保持与 createNode 行为一致，我们添加自动创建逻辑
+    const parentPath = this._dirname(normalizedUserPath);
+    let targetParentId = await this.pathResolver.resolve(module, parentPath);
+    
+    if (!targetParentId && normalizedUserPath !== '/') {
+        targetParentId = await this._ensureParentDirectory(module, parentPath);
+    }
+
     const sourceTree = await this._loadNodeTree(sourceNode);
 
     const operations: CopyOperation[] = [];

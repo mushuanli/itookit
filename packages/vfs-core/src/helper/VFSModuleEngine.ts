@@ -125,19 +125,32 @@ export class VFSModuleEngine implements ISessionEngine {
         return tags.map(t => ({ name: t.name, color: t.color }));
     }
 
-    async createFile(name: string, parentId: string | null, content: string | ArrayBuffer = ''): Promise<EngineNode> {
-        const parentPath = parentId ? await this.getParentPath(parentId) : '';
+    // ==================================================================================
+    // 核心写操作重构：利用 VFS 层的递归能力，并兼容 ID/Path
+    // ==================================================================================
+
+    async createFile(name: string, parentIdOrPath: string | null, content: string | ArrayBuffer = ''): Promise<EngineNode> {
+        // 1. 智能解析父路径
+        const parentPath = await this.resolveParentPath(parentIdOrPath);
+        
+        // 2. 拼接完整相对路径 (e.g., "/default/config.json")
         const fullRelativePath = this.vfs.pathResolver.join(parentPath, name);
+        
+        // 3. 调用 VFSCore，它底层现在已经支持自动递归创建父目录了
         const vnode = await this.vfsCore.createFile(this.moduleName, fullRelativePath, content);
+        
         const node = this.toEngineNode(vnode);
         node.content = content;
         return node;
     }
 
-    async createDirectory(name: string, parentId: string | null): Promise<EngineNode> {
-        const parentPath = parentId ? await this.getParentPath(parentId) : '';
+    async createDirectory(name: string, parentIdOrPath: string | null): Promise<EngineNode> {
+        const parentPath = await this.resolveParentPath(parentIdOrPath);
         const fullRelativePath = this.vfs.pathResolver.join(parentPath, name);
+        
+        // 同样利用 VFSCore 的递归能力
         const vnode = await this.vfsCore.createDirectory(this.moduleName, fullRelativePath);
+        
         const node = this.toEngineNode(vnode);
         node.children = [];
         return node;
@@ -148,12 +161,8 @@ export class VFSModuleEngine implements ISessionEngine {
     }
 
     async rename(id: string, newName: string): Promise<void> {
-        const node = await this.vfs.storage.loadVNode(id);
-        if (!node) throw new Error('Node not found');
-        const parentRelativePath = node.parentId ? await this.getParentPath(node.parentId) : '';
-        const newRelativePath = this.vfs.pathResolver.join(parentRelativePath, newName);
-        
-        await this.vfs.move(id, newRelativePath);
+        // 使用 VFSCore 的 rename 便捷方法
+        await this.vfsCore.rename(id, newName);
     }
 
     async move(ids: string[], targetParentId: string | null): Promise<void> {
@@ -237,21 +246,46 @@ export class VFSModuleEngine implements ISessionEngine {
         };
 
         const unsubs = Object.entries(handlers).map(([evt, handler]) => bus.on(evt as any, handler));
-        
         return () => unsubs.forEach(u => u());
     }
     
-    // 补全缺失的辅助方法定义以确保代码编译通过
-    private async getParentPath(parentId: string): Promise<string> {
-        if (!parentId) return ''; 
-        const parent = await this.vfs.storage.loadVNode(parentId);
-        if (!parent) throw new Error(`Parent node ${parentId} not found`);
+    // ============================================================
+    // 核心修复逻辑：智能解析 Parent
+    // ============================================================
+    
+    /**
+     * 解析父节点参数，返回相对路径字符串。
+     * 1. 如果是 null/undefined -> 返回空字符串 (根目录)
+     * 2. 如果是路径字符串 (以 / 开头) -> 直接返回路径 (支持 Service 层传常量)
+     * 3. 如果是 ID -> 从数据库加载节点并获取其路径
+     */
+    private async resolveParentPath(parentIdOrPath: string | null | undefined): Promise<string> {
+        if (!parentIdOrPath) return ''; 
+
+        // 策略 A: 看起来像路径，直接信任它
+        // 注意：因为我们在 VFS Core 实现了递归创建，所以即使这个路径目前不存在，
+        // 后续的 createFile 调用也会自动创建它。这完美解决了 bootstrap 问题。
+        if (parentIdOrPath.startsWith('/')) {
+            // 如果传入 "/default"，我们需要确保返回的是相对模块根的路径？
+            // PathResolver.join 会处理拼接。
+            // 这里我们假设传入的是相对于模块根的路径。
+            return parentIdOrPath;
+        }
+
+        // 策略 B: 看起来像 ID，去数据库查
+        const parent = await this.vfs.storage.loadVNode(parentIdOrPath);
+        if (!parent) {
+            // 这里我们选择抛出错误，因为既然传了 ID，就期望 ID 存在。
+            // 如果 ID 无效，说明逻辑有误。
+            throw new Error(`Parent node ID '${parentIdOrPath}' not found`);
+        }
         
+        // 转换回模块相对路径
         const modulePathPrefix = `/${this.moduleName}`;
         let relativePath = parent.path;
         if (relativePath.startsWith(modulePathPrefix)) {
             relativePath = relativePath.substring(modulePathPrefix.length);
         }
-        return relativePath.startsWith('/') ? relativePath.substring(1) : relativePath;
+        return relativePath.startsWith('/') ? relativePath : '/' + relativePath;
     }
 }
