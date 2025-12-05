@@ -10,18 +10,9 @@ import {
 } from '@itookit/common';
 import { ChatMessage } from '@itookit/llmdriver';
 import { AgentExecutor } from './AgentExecutor';
+import { IAgentService } from '../services/IAgentService'; // 新增引用
 
 type SessionVariable = ChatMessage[] | File[]; 
-
-export interface ISettingsService {
-    // ✨ 返回类型明确为 IAgentDefinition
-    getAgentConfig(agentId: string): Promise<IAgentDefinition | null>;
-    getConnection(connectionId: string): Promise<LLMConnection | undefined>;
-    // 获取所有可用 Agent 列表
-    getAgents(): Promise<Array<{ id: string; name: string; icon?: string; description?: string }>>;
-}
-
-// --- 类实现 ---
 
 export class SessionManager {
     private sessions: SessionGroup[] = [];
@@ -33,8 +24,11 @@ export class SessionManager {
     // Executor 注册表：用于管理可用的 Agent/Tool/Workflow
     private executorRegistry = new Map<string, IExecutor>();
 
-    constructor(private settingsService: ISettingsService) {
-        // 在实际应用中，这里可能会初始化加载一些默认的 Executor
+    constructor(
+        // ✨ [修改] 明确依赖 AgentService
+        private agentService: IAgentService
+    ) {
+        // 初始化逻辑...
     }
 
     // --- Executor 管理 ---
@@ -57,9 +51,9 @@ export class SessionManager {
             });
         }
 
-        // 2. 从 SettingsService 获取文件系统中的 Agents
+        // 2. 从 AgentService 获取
         try {
-            const fileAgents = await this.settingsService.getAgents();
+            const fileAgents = await this.agentService.getAgents();
             for (const agent of fileAgents) {
                 // 避免重复
                 if (!this.executorRegistry.has(agent.id)) {
@@ -73,7 +67,7 @@ export class SessionManager {
                 }
             }
         } catch (e) {
-            console.warn('Failed to load agents from settings:', e);
+            console.warn('Failed to load agents:', e);
         }
         
         return list;
@@ -190,6 +184,8 @@ export class SessionManager {
      */
     async runUserQuery(text: string, files: File[], executorId: string) {
         if (this.isGenerating) return;
+        console.group(`[SessionManager] runUserQuery: "${executorId}"`);
+        
         this.isGenerating = true;
         this.abortController = new AbortController();
         this.dirty = true;
@@ -210,15 +206,22 @@ export class SessionManager {
             let executor = this.executorRegistry.get(executorId);
             let metaInfo: any = {};
 
-            // 尝试动态从 Settings 构建 AgentExecutor (如果是文件 Agent)
-            if (!executor) {
+            if (executor) {
+                console.log('Executor found in registry:', executor);
+            } else {
+                console.log(`Executor "${executorId}" not in registry. Trying dynamic resolution...`);
                 try {
-                    // ✨ 使用强类型 IAgentDefinition 接收配置
-                    const agentDef = await this.settingsService.getAgentConfig(executorId);
+                    // 获取 Agent 定义
+                    const agentDef = await this.agentService.getAgentConfig(executorId);
+                    console.log('Agent Definition resolved:', agentDef);
                     
                     // 检查 config 属性是否存在
                     if (agentDef && agentDef.config) {
-                        const connection = await this.settingsService.getConnection(agentDef.config.connectionId);
+                        const targetConnId = agentDef.config.connectionId;
+                        console.log(`Requesting connection: "${targetConnId}"`);
+                        
+                        const connection = await this.agentService.getConnection(targetConnId);
+                        console.log('Connection resolved:', connection);
                         
                         if (connection) {
                             executor = new AgentExecutor(
@@ -236,6 +239,8 @@ export class SessionManager {
                                 model: agentDef.config.modelId || connection.model,
                                 systemPrompt: agentDef.config.systemPrompt
                             };
+                        } else {
+                            console.error(`Connection "${targetConnId}" returned undefined.`);
                         }
                     }
                 } catch (e) {
@@ -244,12 +249,15 @@ export class SessionManager {
             }
 
             if (!executor) {
-                // Fallback (通常不应发生，除非 ID 无效)
-                 const defaultConn = await this.settingsService.getConnection('default');
+                 console.log('Fallback: Attempting to use "default" connection directly.');
+                 const defaultConn = await this.agentService.getConnection('default');
+                 
                  if (defaultConn) {
+                     console.log('Fallback success using default connection.');
                      executor = new AgentExecutor(defaultConn, defaultConn.model || '');
                      metaInfo = { note: "Fallback to default connection" };
                  } else {
+                     console.error('Fallback failed: "default" connection is missing.');
                      throw new Error(`Executor '${executorId}' not found and no default connection available.`);
                  }
             }
