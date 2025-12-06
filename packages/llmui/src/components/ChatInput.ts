@@ -252,11 +252,4 @@ export class ChatInput {
             this.textarea.dispatchEvent(new Event('input'));
         }
     }
-
-    // ✨ [修复 5.1] 添加 escapeHTML 方法
-    private escapeHTML(str: string): string {
-        const div = document.createElement('div');
-        div.textContent = str;
-        return div.innerHTML;
-    }
 }

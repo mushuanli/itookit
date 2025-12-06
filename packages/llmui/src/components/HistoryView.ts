@@ -2,7 +2,8 @@
 import { OrchestratorEvent, SessionGroup, ExecutionNode,NodeAction, NodeActionCallback } from '../core/types';
 import { NodeRenderer } from './NodeRenderer';
 import { MDxController } from './mdx/MDxController';
-// ✨ [修改] 引入 Modal
+import { NodeTemplates } from './templates/NodeTemplates';
+import { LayoutTemplates } from './templates/LayoutTemplates';
 import { escapeHTML, Modal } from '@itookit/common';
 
 /**
@@ -111,20 +112,13 @@ export class HistoryView {
     }
 
     renderWelcome() {
-        this.container.innerHTML = `
-            <div class="llm-ui-welcome">
-                <div class="llm-ui-welcome__icon">👋</div>
-                <h2>Ready to chat</h2>
-                <p>Send a message to start the conversation</p>
-            </div>
-        `;
+        this.container.innerHTML = LayoutTemplates.renderWelcome();
     }
 
     renderError(error: Error) {
         const div = document.createElement('div');
-        div.className = 'llm-ui-banner llm-ui-banner--error';
-        div.innerText = `Error: ${error.message}`;
-        this.container.appendChild(div);
+        div.innerHTML = LayoutTemplates.renderErrorBanner(error.message);
+        this.container.appendChild(div.firstElementChild!);
         this.scrollToBottom(true);
     }
 
@@ -187,103 +181,22 @@ export class HistoryView {
         wrapper.dataset.sessionId = group.id;
 
         if (group.role === 'user') {
-            this.renderUserBubble(wrapper, group);
+            const preview = this.getPreviewText(group.content || '');
+            wrapper.innerHTML = NodeTemplates.renderUserBubble(group, preview);
+            this.container.appendChild(wrapper);
+            this.initUserBubble(wrapper, group);
         } else {
             wrapper.innerHTML = `
                 <div class="llm-ui-avatar">🤖</div>
                 <div class="llm-ui-execution-root" id="container-${group.id}"></div>
             `;
+            this.container.appendChild(wrapper);
         }
 
         this.container.appendChild(wrapper);
     }
 
-    private renderUserBubble(wrapper: HTMLElement, group: SessionGroup) {
-        const contentPreview = this.getPreviewText(group.content || '');
-        const hasSiblings = (group.siblingCount ?? 1) > 1;
-        const siblingIndex = group.siblingIndex ?? 0;
-        const siblingCount = group.siblingCount ?? 1;
-
-        wrapper.innerHTML = `
-            <div class="llm-ui-avatar">👤</div>
-            <div class="llm-ui-bubble--user">
-                <div class="llm-ui-bubble__header">
-                    <span class="llm-ui-bubble__title">You</span>
-                    <span class="llm-ui-header-preview">${escapeHTML(contentPreview)}</span>
-                    <div style="flex:1"></div>
-
-                    ${hasSiblings ? `
-                        <div class="llm-ui-branch-nav">
-                            <button class="llm-ui-branch-btn" data-action="prev-sibling" 
-                                    ${siblingIndex === 0 ? 'disabled' : ''} title="Previous version">
-                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-                                    <polyline points="15 18 9 12 15 6"></polyline>
-                                </svg>
-                            </button>
-                            <span class="llm-ui-branch-indicator">${siblingIndex + 1}/${siblingCount}</span>
-                            <button class="llm-ui-branch-btn" data-action="next-sibling"
-                                    ${siblingIndex === siblingCount - 1 ? 'disabled' : ''} title="Next version">
-                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-                                    <polyline points="9 18 15 12 9 6"></polyline>
-                                </svg>
-                            </button>
-                        </div>
-                    ` : ''}
-
-                    <div class="llm-ui-bubble__toolbar">
-                        <button class="llm-ui-btn-bubble-tool" data-action="retry" title="Resend">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path>
-                                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
-                            </svg>
-                        </button>
-                        <button class="llm-ui-btn-bubble-tool" data-action="edit" title="Edit">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-                            </svg>
-                        </button>
-                        <button class="llm-ui-btn-bubble-tool" data-action="copy" title="Copy">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                            </svg>
-                        </button>
-                        <button class="llm-ui-btn-bubble-tool" data-action="delete" title="Delete">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <polyline points="3 6 5 6 21 6"></polyline>
-                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                            </svg>
-                        </button>
-                        <button class="llm-ui-btn-bubble-tool" data-action="collapse" title="Collapse">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <polyline points="18 15 12 9 6 15"></polyline>
-                            </svg>
-                        </button>
-                    </div>
-                </div>
-                <div class="llm-ui-bubble__body">
-                    <div class="llm-ui-mount-point" id="user-mount-${group.id}"></div>
-                    
-                    <!-- ✨ [新增] 编辑确认按钮 -->
-                    <div class="llm-ui-edit-actions" style="display:none;">
-                        <button class="llm-ui-btn llm-ui-btn--primary" data-action="confirm-edit">
-                            Save & Regenerate
-                        </button>
-                        <button class="llm-ui-btn llm-ui-btn--secondary" data-action="save-only">
-                            Save Only
-                        </button>
-                        <button class="llm-ui-btn llm-ui-btn--ghost" data-action="cancel-edit">
-                            Cancel
-                        </button>
-                    </div>
-                </div>
-            </div>
-        `;
-
-        this.container.appendChild(wrapper);
-
-        // 初始化 MDxController
+    private initUserBubble(wrapper: HTMLElement, group: SessionGroup) {
         const mountPoint = wrapper.querySelector(`#user-mount-${group.id}`) as HTMLElement;
         const controller = new MDxController(mountPoint, group.content || '', {
             readOnly: true,
@@ -725,24 +638,6 @@ export class HistoryView {
         // 返回纯文本，由调用方决定是否需要转义
         return truncated;
     }
-
-private findSessionGroupByNode(nodeId: string): SessionGroup | null {
-    // 这需要 HistoryView 持有对 sessions 的引用
-    // 或者通过 DOM 属性查找
-    
-    // 方法1：通过 DOM 向上查找 data-session-id
-    const nodeEl = this.nodeMap.get(nodeId);
-    if (nodeEl) {
-        const sessionEl = nodeEl.closest('[data-session-id]');
-        if (sessionEl) {
-            const sessionId = (sessionEl as HTMLElement).dataset.sessionId;
-            // 返回对应的 SessionGroup（但 HistoryView 可能没有直接访问 sessions）
-            // 这里可以返回 sessionId 让上层处理
-        }
-    }
-    
-    return null;
-}
 
     // ✨ [新增] 销毁方法
     destroy() {
