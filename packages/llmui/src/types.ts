@@ -59,6 +59,13 @@ export interface SessionGroup {
     
     // 关联到持久化节点的 ID
     persistedNodeId?: string;
+    
+    // ✨ [新增] 分支导航支持
+    siblingIndex?: number;      // 当前在兄弟节点中的索引
+    siblingCount?: number;      // 兄弟节点总数
+    
+    // ✨ [新增] 关联的用户消息 ID（对于 assistant）
+    parentUserSessionId?: string;
 }
 
 /**
@@ -87,13 +94,37 @@ export interface StreamingContext extends ExecutionContext {
     };
 }
 
+export type NodeAction = 
+    | 'retry' 
+    | 'delete' 
+    | 'edit' 
+    | 'edit-and-retry' 
+    | 'resend' 
+    | 'prev-sibling' 
+    | 'next-sibling';
+
+export interface NodeActionCallback {
+    (action: NodeAction, nodeId: string): void;
+}
+
 // 事件总线定义
 export type OrchestratorEvent = 
+    // 会话事件
     | { type: 'session_start'; payload: SessionGroup }
+    | { type: 'session_cleared'; payload: Record<string, never> }
+    
+    // 节点事件
     | { type: 'node_start'; payload: { parentId?: string; node: ExecutionNode } }
     | { type: 'node_update'; payload: { nodeId: string; chunk?: string; field?: 'thought' | 'output'; metaInfo?: any } }
     | { type: 'node_status'; payload: { nodeId: string; status: NodeStatus; result?: any } }
+    
+    // 交互事件
     | { type: 'request_input'; payload: { nodeId: string; schema: any } }
     | { type: 'finished'; payload: { sessionId: string } }
-    // ✨ [新增] 错误事件
-    | { type: 'error'; payload: { message: string; error?: Error } };
+    | { type: 'error'; payload: { message: string; error?: Error } }
+    
+    // ✨ [新增] 编辑/删除/重试事件
+    | { type: 'messages_deleted'; payload: { deletedIds: string[] } }
+    | { type: 'message_edited'; payload: { sessionId: string; newContent: string } }
+    | { type: 'retry_started'; payload: { originalId: string; newId: string } }
+    | { type: 'sibling_switch'; payload: { sessionId: string; newIndex: number; total: number } };
