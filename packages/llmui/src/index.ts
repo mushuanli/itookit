@@ -24,7 +24,7 @@ interface LLMFactoryOptions extends EditorOptions {
 export const chatFileParser = (content: string): any => {
     try {
         const json = JSON.parse(content);
-        
+        console.log(`parse content: ${content}`);
         // 1. 时间格式化
         const fmt = (ts: string) => {
             if (!ts) return '';
@@ -35,6 +35,7 @@ export const chatFileParser = (content: string): any => {
 
         const lastMod = fmt(json.updated_at);
         const created = fmt(json.created_at);
+        let summaryText = json.summary || '';
         
         // 2. 标题与分支
         const title = json.title || 'Untitled';
@@ -42,16 +43,16 @@ export const chatFileParser = (content: string): any => {
         
         // 3. 组合 Summary (这正是你想要的定制格式)
         // 使用 Unicode 空格或其他分隔符让 UI 更整洁
-        const summary = `${lastMod} | 创建: ${created} | ${title} ${branches}`;
+        const finalSummary = `${summaryText}`;
 
         return {
-            summary: summary,
-            // 还可以自定义 metadata 供 UI 使用 badges 显示
+            summary: finalSummary,
+            // 将 Manifest 的关键字段暴露给 search 索引
+            searchableText: `${json.title} ${summaryText} ${json.id}`, 
             metadata: {
-                ...(json.settings || {}), // 将 model 等设置提升到 metadata
-                custom: {
-                   // 可以在这里塞入 taskCount 或其他 vfs-ui 支持的通用字段
-                }
+                ...(json.settings || {}),
+                // 标记这是一个 chat 类型，UI 可以据此显示特定 Badge
+                type: 'chat'
             }
         };
     } catch (e) {
