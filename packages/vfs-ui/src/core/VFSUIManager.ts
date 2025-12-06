@@ -309,8 +309,12 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
 
             // 传入图标解析器
             const iconResolver = (name: string, isDir: boolean) => this.fileTypeRegistry.getIcon(name, isDir);
+            
+            // 2. ✨ [新增] 获取内容解析器 (用于自定义 Summary 等)
+            const parserResolver = (name: string) => this.fileTypeRegistry.resolveContentParser(name);
 
-            const uiItems = mapEngineTreeToUIItems(rootChildren, iconResolver);
+            // 3. 传入 Mapper
+            const uiItems = mapEngineTreeToUIItems(rootChildren, iconResolver, parserResolver);
 
             const tags = this._buildTagsMap(uiItems);
             this.store.dispatch({ type: 'STATE_LOAD_SUCCESS', payload: { items: uiItems, tags } });
@@ -355,6 +359,8 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
     private _connectToEngineEvents(): void {
         // [新增] 图标解析器引用
         const iconResolver = (name: string, isDir: boolean) => this.fileTypeRegistry.getIcon(name, isDir);
+        // [新增] 解析器查找函数引用
+        const parserResolver = (name: string) => this.fileTypeRegistry.resolveContentParser(name);
 
         const processUpdateQueue = async () => {
             if (this.updateQueue.size === 0) return;
@@ -389,8 +395,8 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
                             node.children = [];
                         }
                         
-                        // [关键修改] 单个更新时也传入 iconResolver
-                        return { itemId: id, data: mapEngineNodeToUIItem(node, iconResolver) };
+                        // [关键修改] 更新时传入 parserResolver，确保持续使用自定义解析逻辑
+                        return { itemId: id, data: mapEngineNodeToUIItem(node, iconResolver, parserResolver) };
                     }
                     return null;
                 } catch { return null; }
@@ -437,7 +443,8 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
                     } else if (newNode.type === 'directory') {
                         newNode.children = [];
                     }
-                    return mapEngineNodeToUIItem(newNode, iconResolver);
+                    // [关键修改] 创建时传入 parserResolver
+                    return mapEngineNodeToUIItem(newNode, iconResolver, parserResolver);
                 } catch (e) {
                     console.warn(`[VFSUIManager] Failed to load created node ${nodeId}`, e);
                     return null;

@@ -3,7 +3,7 @@
  * @desc Container component that orchestrates the rendering and interaction of the node list.
  */
 import { BaseComponent, BaseComponentParams } from '../../core/BaseComponent';
-import { VFSNodeUI, ContextMenuConfig, MenuItem, UISettings,TagEditorFactory, VFSUIState } from '../../types/types';
+import { VFSNodeUI, ContextMenuConfig, MenuItem, UISettings, TagEditorFactory, VFSUIState } from '../../types/types';
 import { debounce, escapeHTML } from '@itookit/common';
 
 import { createContextMenuHTML, createSettingsPopoverHTML, createItemInputHTML } from './templates';
@@ -772,7 +772,11 @@ export class NodeList extends BaseComponent<NodeListState> {
 
     protected render(): void {
         this.mainContainerEl.classList.toggle('vfs-node-list--density-compact', this.state.uiSettings.density === 'compact');
-        this.mainContainerEl.classList.toggle('vfs-node-list--bulk-mode', !this.state.readOnly && this.state.selectedItemIds.size > 0);
+        
+        // ✨ [修复] 逻辑统一：只有当选中项 > 1 时，才添加 bulk-mode 类名
+        const isBulkMode = !this.state.readOnly && this.state.selectedItemIds.size > 1;
+        this.mainContainerEl.classList.toggle('vfs-node-list--bulk-mode', isBulkMode);
+        
         this.newControlsEl.style.display = this.state.readOnly ? 'none' : '';
         
         this.footerEl.style.display = this.state.readOnly ? 'none' : '';

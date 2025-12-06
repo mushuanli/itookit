@@ -2,7 +2,7 @@
  * @file vfs-ui/services/FileTypeRegistry.ts
  * @description Centralized registry for file type mappings (icons, editors).
  */
-import type { FileTypeDefinition, CustomEditorResolver, IFileTypeRegistry } from './IFileTypeRegistry';
+import type { FileTypeDefinition, CustomEditorResolver, IFileTypeRegistry, ContentParser } from './IFileTypeRegistry';
 import type { EditorFactory } from '@itookit/common';
 import type { VFSNodeUI } from '../types/types';
 
@@ -109,6 +109,15 @@ export class FileTypeRegistry implements IFileTypeRegistry {
 
         // 3. Fallback to Default
         return this.defaultFactory;
+    }
+
+    /**
+     * [新增] 解析内容解析器
+     */
+    public resolveContentParser(filename: string): ContentParser | undefined {
+        const ext = this._getExtension(filename);
+        const def = this.extensionMap.get(ext);
+        return def?.contentParser;
     }
 
     private _getExtension(filename: string): string {

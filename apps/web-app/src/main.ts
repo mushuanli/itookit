@@ -11,7 +11,7 @@ import { SettingsEngine } from './workspace/settings/engines/SettingsEngine';
 import { SettingsService } from './workspace/settings/services/SettingsService';
 import { createSettingsFactory } from './factories/settingsFactory';
 import { FileTypeDefinition } from '@itookit/vfs-ui';
-import { createLLMFactory, createAgentEditorFactory, VFSAgentService } from '@itookit/llm-ui';
+import { chatFileParser,createLLMFactory, createAgentEditorFactory, VFSAgentService } from '@itookit/llm-ui';
 import { ISessionEngine,EditorFactory } from '@itookit/common';
 
 import '@itookit/vfs-ui/style.css';
@@ -54,7 +54,9 @@ async function bootstrap() {
             {
                 extensions: ['.chat', '.session'], 
                 icon: '💬',
-                editorFactory: llmEditorFactory
+                editorFactory: llmEditorFactory,
+                // [高亮] 注入自定义解析器
+                contentParser: chatFileParser
             }
         ];
 
