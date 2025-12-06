@@ -20,6 +20,8 @@ import {
     FS_MODULE_CHAT
 } from '@itookit/common';
 
+import {LockManager} from '../core/utils/LockManager';
+
 // ✨ [修复 1.1] 引入真正的 YAML 库，或使用严格的 JSON 模式
 // 如果项目中有 js-yaml，使用它；否则明确只支持 JSON
 import * as yaml from 'js-yaml'; // 需要安装: npm install js-yaml @types/js-yaml
@@ -39,31 +41,6 @@ const Yaml: IYamlParser = {
 // ✨ [修复 1.4] DEBUG 标志控制日志
 const DEBUG = process.env.NODE_ENV === 'development';
 const log = (...args: any[]) => DEBUG && console.log(...args);
-
-// ✨ [修复 1.2] 简单的锁实现
-class LockManager {
-    private locks = new Map<string, Promise<void>>();
-
-    async acquire<T>(key: string, fn: () => Promise<T>): Promise<T> {
-        // 等待现有锁释放
-        while (this.locks.has(key)) {
-            await this.locks.get(key);
-        }
-
-        let release: () => void;
-        const lockPromise = new Promise<void>(resolve => {
-            release = resolve;
-        });
-        this.locks.set(key, lockPromise);
-
-        try {
-            return await fn();
-        } finally {
-            this.locks.delete(key);
-            release!();
-        }
-    }
-}
 
 export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEngine {
     

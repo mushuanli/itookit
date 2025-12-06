@@ -47,6 +47,25 @@ export function generateId(prefix: string = 'item'): string {
     return `${prefix}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 }
 
+
+// ✨ [修复 4.1] 安全的字符串转换
+export function safeStringify(input: unknown): string {
+    if (typeof input === 'string') {
+        return input;
+    }
+    if (input === null || input === undefined) {
+        return '';
+    }
+    if (typeof input === 'object') {
+        try {
+            return JSON.stringify(input);
+        } catch {
+            return String(input);
+        }
+    }
+    return String(input);
+}
+
 export function debounce<T extends (...args: any[]) => any>(func: T, delay: number): ((...args: Parameters<T>) => void) & { cancel: () => void } {
     let timeout: ReturnType<typeof setTimeout>;
     // 必须使用 function 关键字才能动态绑定 this
