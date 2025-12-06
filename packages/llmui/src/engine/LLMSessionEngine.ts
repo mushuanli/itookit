@@ -245,10 +245,10 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
                 status: 'active'
             };
 
-            // 1. 写入新节点
+            // 2. 写入新节点到隐藏目录 (e.g. /.uuid/.node-xxx.json)
             await this.writeJson(this.getNodePath(sessionId, newNodeId), newNode);
 
-            // 2. 更新父节点的 children_ids
+            // 3. 更新父节点的 children_ids 指针
             if (parentId) {
                 const parentNode = await this.readJson<ChatNode>(this.getNodePath(sessionId, parentId));
                 if (parentNode) {
@@ -258,11 +258,55 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
                 }
             }
 
-            // 3. 更新 Manifest
+            // 4. ✨ [核心逻辑] 智能更新 Summary 和 Title (冗余存储策略)
+            // 仅在用户发送消息时尝试提取，避免 System Prompt 或 Assistant 的输出覆盖用户意图
+            if (role === 'user') {
+                let needMetaUpdate = false;
+                const metaUpdates: any = {};
+
+                // A. 处理 Summary (用于列表快速预览)
+                // 如果摘要为空，或者还是初始默认值，则从当前内容提取
+                // 同时也处理了用户清空摘要后重新生成的情况
+                if (!manifest.summary || manifest.summary === "New conversation") {
+                    // 取前100个字符，将换行符替换为空格，去除首尾空白
+                    manifest.summary = content.substring(0, 100).replace(/[\r\n]+/g, ' ').trim();
+                }
+
+                // B. 处理 Title (用于列表显示)
+                // 检查是否是默认标题
+                const defaultTitles = new Set(['New Chat', 'Untitled', 'New conversation']);
+                if (defaultTitles.has(manifest.title)) {
+                    // 取前30个字符作为标题
+                    let newTitle = content.substring(0, 30).replace(/[\r\n]+/g, ' ').trim();
+                    
+                    // 如果内容全是符号或空，回退默认
+                    if (newTitle.length === 0) newTitle = "Chat"; 
+                    
+                    manifest.title = newTitle;
+                    
+                    // 标记需要更新 VFS 元数据
+                    // 这样文件列表组件不需要解析文件内容就能显示新标题
+                    metaUpdates.title = newTitle;
+                    needMetaUpdate = true;
+                }
+
+                // 如果 Title 发生了变化，同步更新 VFS Node 的 Metadata
+                if (needMetaUpdate) {
+                    try {
+                        await this.moduleEngine.updateMetadata(nodeId, metaUpdates);
+                    } catch (e) {
+                        console.warn(`[LLMSessionEngine] Failed to update metadata for ${nodeId}`, e);
+                    }
+                }
+            }
+
+            // 5. 更新 Manifest 的状态指针
             manifest.current_head = newNodeId;
             manifest.branches[manifest.current_branch] = newNodeId;
             manifest.updated_at = new Date().toISOString();
             
+            // 6. 回写 Manifest 到 .chat 文件
+            // 此时 .chat 文件包含了最新的 summary 和 title，parser 可以直接读取
             await this.moduleEngine.writeContent(nodeId, JSON.stringify(manifest, null, 2));
 
             return newNodeId;

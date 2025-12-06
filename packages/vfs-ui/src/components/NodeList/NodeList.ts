@@ -3,7 +3,7 @@
  * @desc Container component that orchestrates the rendering and interaction of the node list.
  */
 import { BaseComponent, BaseComponentParams } from '../../core/BaseComponent';
-import { VFSNodeUI, ContextMenuConfig, MenuItem, UISettings, TagEditorFactory, VFSUIState } from '../../types/types';
+import { VFSNodeUI, ContextMenuConfig, MenuItem, UISettings, TagEditorFactory, VFSUIState,SearchFilter } from '../../types/types';
 import { debounce, escapeHTML } from '@itookit/common';
 
 import { createContextMenuHTML, createSettingsPopoverHTML, createItemInputHTML } from './templates';
@@ -19,6 +19,8 @@ interface NodeListOptions extends BaseComponentParams {
     title?: string;
     // [新增] 接收 label 配置
     createFileLabel?: string;
+    /** [新增] 自定义搜索匹配逻辑 */
+    searchFilter?: SearchFilter;
 }
 
 
@@ -185,6 +187,7 @@ export class NodeList extends BaseComponent<NodeListState> {
         uiSettings: UISettings,
         isReadOnly: boolean
     ): VFSNodeUI[] {
+        // 深拷贝以避免修改原始数据 (注意：对于大列表这可能有性能影响，但对于 UI state 转换是安全的)
         let processedItems: VFSNodeUI[] = JSON.parse(JSON.stringify(items));
         const { textQueries, tagQueries, typeQueries } = queries;
         const { sortBy } = uiSettings;
@@ -193,57 +196,94 @@ export class NodeList extends BaseComponent<NodeListState> {
 
         if (hasQuery) {
             const itemMatches = (item: VFSNodeUI): boolean => {
+                // 1. 类型过滤 (type:file, type:dir)
                 if (typeQueries.length > 0) {
                     const itemType = item.type === 'directory' ? 'dir' : 'file';
                     if (!typeQueries.includes(itemType)) return false;
                 }
+
+                // 2. 标签过滤 (tag:xxx)
                 if (tagQueries.length > 0) {
                     const itemTags = (item.metadata?.tags || []).map(t => t.toLowerCase());
                     if (!tagQueries.every(qTag => itemTags.includes(qTag))) return false;
                 }
+
+                // 3. 文本搜索 (关键字)
                 if (textQueries.length > 0) {
-                    const corpus = [ item.metadata?.title || '', item.content?.summary || '', item.content?.searchableText || '' ].join(' ').toLowerCase();
-                    if (!textQueries.every(qText => corpus.includes(qText))) return false;
+                    // ✨ [新增] 自定义搜索过滤器接口
+                    // 允许外部模块（如 llm-ui）定义 "如何判断匹配"
+                    // 例如：同时匹配 metadata.model 或其他非标准字段
+                    if (this.options.searchFilter) {
+                        // 如果过滤器返回 false，说明不匹配
+                        if (!this.options.searchFilter(item, textQueries)) {
+                            return false;
+                        }
+                    } else {
+                        // ✨ [增强] 默认搜索逻辑
+                        // 构建语料库：标题 + 摘要 + 可搜索文本
+                        const corpus = [ 
+                            item.metadata?.title || '', 
+                            item.content?.summary || '', // 确保摘要也能被搜到
+                            item.content?.searchableText || '' 
+                        ].join(' ').toLowerCase();
+                        
+                        // 检查所有关键字是否都在语料库中
+                        if (!textQueries.every(qText => corpus.includes(qText))) return false;
+                    }
                 }
+                
                 return true;
             };
 
+            // 递归过滤函数
+            // 目录的处理逻辑：如果目录本身匹配，或者其任何子节点匹配，则保留该目录
             const filterRecursively = (itemList: VFSNodeUI[]): VFSNodeUI[] => {
                 return itemList.map(item => {
                     if (item.type === 'directory') {
                         const filteredChildren = filterRecursively(item.children || []);
+                        
+                        // 如果目录本身匹配查询，或者它包含匹配的子项，则保留
                         if (itemMatches(item) || filteredChildren.length > 0) {
                             return { ...item, children: filteredChildren };
                         }
-                        return null;
+                        return null; // 过滤掉空且不匹配的目录
                     }
+                    // 文件节点直接检查匹配
                     return itemMatches(item) ? item : null;
                 }).filter((item): item is VFSNodeUI => item !== null);
             };
+            
             processedItems = filterRecursively(processedItems);
         }
 
         // [修改] 如果是只读模式，跳过排序逻辑，保持原始顺序
+        // 或者如果用户没有选择特定的排序方式，可以保持默认
         if (!isReadOnly) {
             const sortRecursively = (itemList: VFSNodeUI[]) => {
                 if (!itemList) return;
                 itemList.sort((a, b) => {
+                    // 1. 置顶逻辑 (Pinned items first)
                     const aIsPinned = a.metadata?.custom?.isPinned || false;
                     const bIsPinned = b.metadata?.custom?.isPinned || false;
                     if (aIsPinned !== bIsPinned) return aIsPinned ? -1 : 1;
                     
+                    // 2. 根据设置排序
                     if (sortBy === 'title') {
                         return (a.metadata?.title || '').localeCompare(b.metadata?.title || '', 'zh-CN');
                     }
                     
+                    // 默认按最后修改时间降序 (最新的在上面)
                     const aDate = new Date(a.metadata?.lastModified || 0).getTime();
                     const bDate = new Date(b.metadata?.lastModified || 0).getTime();
                     return bDate - aDate;
                 });
+                
+                // 递归排序子目录
                 itemList.forEach(item => {
                     if (item.type === 'directory' && item.children) sortRecursively(item.children);
                 });
             };
+            
             sortRecursively(processedItems);
         }
         

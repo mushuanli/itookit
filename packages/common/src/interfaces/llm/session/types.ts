@@ -7,6 +7,8 @@ export interface ChatManifest {
     version: "1.0";
     id: string;              // Session UUID
     title: string;
+    // ✨ [新增] 冗余存储摘要，用于列表显示和快速搜索
+    summary?: string; 
     created_at: string;      // ISO Date
     updated_at: string;      // ISO Date
     
