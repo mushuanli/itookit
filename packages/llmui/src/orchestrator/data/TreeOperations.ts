@@ -1,8 +1,8 @@
 // @file llm-ui/orchestrator/TreeOperations.ts
 
-import { ExecutionNode } from '../core/types';
+import { ExecutionNode } from '../../core/types';
 import { NodeStatus } from '@itookit/common';
-import { SessionState } from './SessionState';
+import { SessionState } from '../core/SessionState';
 
 /**
  * 节点树操作管理器

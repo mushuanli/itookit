@@ -1,6 +1,6 @@
 // @file llm-ui/orchestrator/SessionState.ts
 
-import { SessionGroup, ExecutionNode } from '../core/types';
+import { SessionGroup, ExecutionNode } from '../../core/types';
 import { generateUUID } from '@itookit/common';
 
 /**
