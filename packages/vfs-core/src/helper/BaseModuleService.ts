@@ -64,16 +64,22 @@ export abstract class BaseModuleService {
      */
     protected async writeJson(path: string, data: any): Promise<void> {
         const content = JSON.stringify(data, null, 2);
-        try {
-            await this.vfs.write(this.moduleName, path, content);
-        } catch (e: any) {
-            if (e.code === VFSErrorCode.NOT_FOUND) {
-                // 简单处理：尝试创建文件（VFS createDirectory 逻辑略，假设扁平或已存在）
-                await this.vfs.createFile(this.moduleName, path, content);
-            } else {
-                throw e;
-            }
-        }
+    
+    // 先检查文件是否存在
+    const existingId = await this.moduleEngine.resolvePath(path);
+    
+    if (existingId) {
+        // 文件存在，直接更新内容
+        await this.moduleEngine.writeContent(existingId, content);
+    } else {
+        // 文件不存在，创建新文件
+        // 提取父目录路径
+        const lastSlash = path.lastIndexOf('/');
+        const parentPath = lastSlash > 0 ? path.slice(0, lastSlash) : null;
+        const fileName = path.slice(lastSlash + 1);
+        
+        await this.moduleEngine.createFile(fileName, parentPath, content);
+    }
     }
 
     protected async deleteFile(path: string): Promise<void> {

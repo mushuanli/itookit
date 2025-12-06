@@ -35,15 +35,28 @@ export interface RetryOptions {
 // 持久化队列
 class PersistQueue {
     private queue: Promise<void> = Promise.resolve();
+    private hasPendingWork = false;  // ✨ 新增标志
     
     enqueue(fn: () => Promise<void>): void {
-        this.queue = this.queue.then(fn).catch(e => {
-            console.error('[PersistQueue] Error:', e);
-        });
+        this.hasPendingWork = true;
+        this.queue = this.queue
+            .then(fn)
+            .catch(e => {
+                console.error('[PersistQueue] Error:', e);
+                // ✨ 可选：抛出错误或记录失败
+            })
+            .finally(() => {
+                // 检查是否还有待处理的任务
+            });
     }
     
     async flush(): Promise<void> {
         await this.queue;
+        this.hasPendingWork = false;
+    }
+    
+    get isPending(): boolean {
+        return this.hasPendingWork;
     }
 }
 
@@ -396,14 +409,22 @@ private findNodeInTree(node: ExecutionNode, targetId: string): ExecutionNode | n
         newContent: string,
         autoRerun: boolean = false
     ): Promise<void> {
-        const check = this.canEdit(sessionGroupId);
-        if (!check.allowed) {
-            throw new Error(check.reason);
-        }
-        
-        const session = this.sessions.find(s => s.id === sessionGroupId);
-        if (!session) return;
-        
+    // ✨ [修复] 先查找 session，再检查权限
+    const result = this.findSessionByAnyId(sessionGroupId);
+    
+    if (!result) {
+        console.warn(`[SessionManager] editMessage: Session not found for id: ${sessionGroupId}`);
+        return;  // 静默返回而不是抛出错误
+    }
+    
+    const { session } = result;
+    
+    // 正在生成中不能编辑
+    if (session.role === 'assistant' && session.executionRoot?.status === 'running') {
+        console.warn('[SessionManager] Cannot edit while generating');
+        return;
+    }
+
         // 更新内存状态
         if (session.role === 'user') {
             session.content = newContent;
@@ -824,6 +845,12 @@ private findNodeInTree(node: ExecutionNode, targetId: string): ExecutionNode | n
         } finally {
             this.isGenerating = false;
             this.abortController = null;
+            // ✨ [新增] 确保所有待处理的持久化完成
+            try {
+                await this.persistQueue.flush();
+            } catch (e) {
+                console.error('[SessionManager] Final flush failed:', e);
+            }
         }
     }
 
@@ -927,6 +954,11 @@ private findNodeInTree(node: ExecutionNode, targetId: string): ExecutionNode | n
                 // 跳过 system prompt（不在 UI 中显示）
                 if (chatNode.role === 'system') continue;
                 
+        // ✨ [新增] 跳过空内容的 assistant 消息（可能是中断的流）
+        if (chatNode.role === 'assistant' && !chatNode.content?.trim()) {
+            console.warn(`[SessionManager] Skipping empty assistant message: ${chatNode.id}`);
+            continue;
+        }
                 const sessionGroup = this.chatNodeToSessionGroup(chatNode);
                 if (sessionGroup) {
                     this.sessions.push(sessionGroup);

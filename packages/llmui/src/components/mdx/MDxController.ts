@@ -145,7 +145,7 @@ export class MDxController {
         this.updateScheduled = false;
     }
 
-    finishStream() {
+    finishStream(emitChange: boolean = false) {
         this.isStreaming = false;
         if (this.editor && this.isInitialized) {
             this.editor.setStreamingText(this.currentContent).catch(e => {
@@ -153,7 +153,11 @@ export class MDxController {
             });
         }
         this.updateScheduled = false;
-        this.onChangeCallback?.(this.currentContent);
+        
+        // [修复] 只有在需要时才触发回调
+        if (emitChange) {
+            this.onChangeCallback?.(this.currentContent);
+        }
     }
 
     async toggleEdit() {
