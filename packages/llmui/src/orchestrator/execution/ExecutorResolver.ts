@@ -1,7 +1,7 @@
 // @file llm-ui/orchestrator/ExecutorResolver.ts
 
 import { IExecutor, LLMConnection, IAgentDefinition } from '@itookit/common';
-import { IAgentService } from '../services/IAgentService';
+import { IAgentService } from '../../services/IAgentService';
 import { AgentExecutor } from './AgentExecutor';
 
 /**

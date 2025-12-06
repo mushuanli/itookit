@@ -5,16 +5,16 @@ import { IExecutor, ILLMSessionEngine, ChatNode } from '@itookit/common';
 import { IAgentService } from '../services/IAgentService';
 
 // 导入拆分后的模块
-import { SessionState } from './SessionState';
-import { SessionEventEmitter } from './EventEmitter';
-import { PersistenceManager } from './PersistenceManager';
-import { ExecutorResolver } from './ExecutorResolver';
-import { TreeOperations } from './TreeOperations';
-import { MessageOperations, DeleteOptions } from './MessageOperations';
-import { BranchNavigator } from './BranchNavigator';
-import { QueryRunner, RunOptions } from './QueryRunner';
-import { ExportService } from './ExportService';
-import { Converters } from './Converters';
+import { SessionState } from './core/SessionState';
+import { SessionEventEmitter } from './core/EventEmitter';
+import { PersistenceManager } from './data/PersistenceManager';
+import { ExecutorResolver } from './execution/ExecutorResolver';
+import { TreeOperations } from './data/TreeOperations';
+import { MessageOperations, DeleteOptions } from './features/MessageOperations';
+import { BranchNavigator } from './features/BranchNavigator';
+import { QueryRunner, RunOptions } from './execution/QueryRunner';
+import { ExportService } from './features/ExportService';
+import { Converters } from './core/Converters';
 
 // 重试选项
 export interface RetryOptions {

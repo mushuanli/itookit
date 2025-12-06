@@ -1,7 +1,7 @@
 // @file llm-ui/orchestrator/ExportService.ts
 
-import { SessionGroup } from '../core/types';
-import { Converters } from './Converters';
+import { SessionGroup } from '../../core/types';
+import { Converters } from '../core/Converters';
 
 /**
  * 导出服务
