@@ -1,6 +1,6 @@
 // @file llm-ui/orchestrator/EventEmitter.ts
 
-import { OrchestratorEvent } from '../core/types';
+import { OrchestratorEvent } from '../../core/types';
 
 type EventHandler = (event: OrchestratorEvent) => void;
 

@@ -1,10 +1,10 @@
 // @file llm-ui/orchestrator/MessageOperations.ts
 
-import { SessionGroup } from '../core/types';
-import { SessionState } from './SessionState';
-import { SessionEventEmitter } from './EventEmitter';
-import { PersistenceManager } from './PersistenceManager';
-import { Converters } from './Converters';
+import { SessionGroup } from '../../core/types';
+import { SessionState } from '../core/SessionState';
+import { SessionEventEmitter } from '../core/EventEmitter';
+import { PersistenceManager } from '../data/PersistenceManager';
+import { Converters } from '../core/Converters';
 
 export interface DeleteOptions {
     mode: 'soft' | 'hard';

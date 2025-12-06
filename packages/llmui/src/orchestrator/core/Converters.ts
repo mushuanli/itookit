@@ -1,6 +1,6 @@
 // @file llm-ui/orchestrator/Converters.ts
 
-import { SessionGroup, ExecutionNode } from '../core/types';
+import { SessionGroup, ExecutionNode } from '../../core/types';
 import { ChatNode, generateUUID } from '@itookit/common';
 
 /**

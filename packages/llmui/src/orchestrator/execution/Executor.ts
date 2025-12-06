@@ -14,7 +14,7 @@ import {
 } from '@itookit/common';
 
 // [修改] 从 types 导入 StreamingContext
-import { StreamingContext } from '../core/types';
+import { StreamingContext } from '../../core/types';
 
 export class UnifiedExecutor implements IExecutor {
   readonly id: string;

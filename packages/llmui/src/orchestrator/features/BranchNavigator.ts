@@ -1,11 +1,11 @@
 // @file llm-ui/orchestrator/BranchNavigator.ts
 
-import { SessionGroup } from '../core/types';
+import { SessionGroup } from '../../core/types';
 import { ChatNode } from '@itookit/common';
-import { SessionState } from './SessionState';
-import { SessionEventEmitter } from './EventEmitter';
-import { PersistenceManager } from './PersistenceManager';
-import { Converters } from './Converters';
+import { SessionState } from '../core/SessionState';
+import { SessionEventEmitter } from '../core/EventEmitter';
+import { PersistenceManager } from '../data/PersistenceManager';
+import { Converters } from '../core/Converters';
 
 /**
  * 分支导航管理器

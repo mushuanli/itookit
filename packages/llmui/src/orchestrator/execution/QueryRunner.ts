@@ -1,14 +1,14 @@
 // @file llm-ui/orchestrator/QueryRunner.ts
 
-import { SessionGroup, ExecutionNode, StreamingContext } from '../core/types';
+import { SessionGroup, ExecutionNode, StreamingContext } from '../../core/types';
 import { generateUUID, NodeStatus } from '@itookit/common';
 import { ChatMessage } from '@itookit/llmdriver';
-import { SessionState } from './SessionState';
-import { SessionEventEmitter } from './EventEmitter';
-import { PersistenceManager } from './PersistenceManager';
+import { SessionState } from '../core/SessionState';
+import { SessionEventEmitter } from '../core/EventEmitter';
+import { PersistenceManager } from '../data/PersistenceManager';
 import { ExecutorResolver, ResolvedExecutor } from './ExecutorResolver';
-import { TreeOperations } from './TreeOperations';
-import { Converters } from './Converters';
+import { TreeOperations } from '../data/TreeOperations';
+import { Converters } from '../core/Converters';
 
 export interface RunOptions {
     skipUserMessage?: boolean;
