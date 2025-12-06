@@ -11,7 +11,7 @@ import { LLMAgentConfig } from './ILLM';
  * - agent: 单一原子智能体 (对应 ExecutorType 'atomic')
  * - orchestrator: 编排器 (对应 ExecutorType 'composite')
  */
-export type AgentType = 'agent' | 'orchestrator';
+export type AgentType = 'agent' | 'composite' | 'tool' | 'workflow' | 'orchestrator' ;// TODO: 'agent' | 'orchestrator';
 
 /**
  * Agent 存储配置接口

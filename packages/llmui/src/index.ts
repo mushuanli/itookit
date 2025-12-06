@@ -156,9 +156,9 @@ export const createAgentEditorFactory = (agentService: VFSAgentService): EditorF
 };
 
 // 导出 Engine 类供外部使用
-export { LLMSessionEngine };
+//export { LLMSessionEngine };
 export { VFSAgentService };
-export { LLMWorkspaceEditor };
-export { SessionManager } from './orchestrator/SessionManager';
-export { AgentExecutor } from './orchestrator/AgentExecutor';
-export { UnifiedExecutor, createAgent, createOrchestrator, serial, parallel, router, loop } from './orchestrator/Executor';
+//export { LLMWorkspaceEditor };
+//export { SessionManager } from './orchestrator/SessionManager';
+//export { AgentExecutor } from './orchestrator/AgentExecutor';
+//export { UnifiedExecutor, createAgent, createOrchestrator, serial, parallel, router, loop } from './orchestrator/Executor';
