@@ -302,31 +302,49 @@ export class LLMWorkspaceEditor implements IEditor {
         const historyContainer = this.container.querySelector('#llm-ui-history');
         if (!historyContainer) return;
 
-        const userSessions = historyContainer.querySelectorAll('.llm-ui-session--user .llm-ui-bubble--user');
-        const aiSessions = historyContainer.querySelectorAll('.llm-ui-execution-root');
+    // ✨ [修复] 统一处理 User Bubbles 和 Agent Nodes
+    const userBubbles = historyContainer.querySelectorAll('.llm-ui-bubble--user');
+    const agentNodes = historyContainer.querySelectorAll('.llm-ui-node');
+    
+    // 折叠/展开用户消息
+    userBubbles.forEach(bubble => {
+        if (this.isAllExpanded) {
+            bubble.classList.remove('is-collapsed');
+        } else {
+            bubble.classList.add('is-collapsed');
+        }
         
-        // 折叠/展开用户消息
-        userSessions.forEach(bubble => {
+        // ✨ [新增] 同步更新折叠按钮图标
+        const collapseBtn = bubble.querySelector('[data-action="collapse"] svg');
+        if (collapseBtn) {
             if (this.isAllExpanded) {
-                bubble.classList.remove('is-collapsed');
+                collapseBtn.innerHTML = '<polyline points="18 15 12 9 6 15"></polyline>'; // Up arrow
             } else {
-                bubble.classList.add('is-collapsed');
+                collapseBtn.innerHTML = '<polyline points="6 9 12 15 18 9"></polyline>'; // Down arrow
             }
-        });
+        }
+    });
+    
+    // 折叠/展开 Agent 节点
+    agentNodes.forEach(node => {
+        if (this.isAllExpanded) {
+            node.classList.remove('is-collapsed');
+        } else {
+            node.classList.add('is-collapsed');
+        }
         
-        // 递归折叠/展开所有 ExecutionNode
-        aiSessions.forEach(root => {
-            const nodes = root.querySelectorAll('.llm-ui-node');
-            nodes.forEach(node => {
-                if (this.isAllExpanded) {
-                    node.classList.remove('is-collapsed');
-                } else {
-                    node.classList.add('is-collapsed');
-                }
-            });
-        });
+        // ✨ [新增] 同步更新折叠按钮图标
+        const collapseBtn = node.querySelector('[data-action="collapse"] svg');
+        if (collapseBtn) {
+            if (this.isAllExpanded) {
+                collapseBtn.innerHTML = '<polyline points="18 15 12 9 6 15"></polyline>'; // Up arrow
+            } else {
+                collapseBtn.innerHTML = '<polyline points="6 9 12 15 18 9"></polyline>'; // Down arrow
+            }
+        }
+    });
 
-        // 更新按钮图标
+    // 更新顶部工具栏按钮图标
         if (this.isAllExpanded) {
             btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 14 10 14 10 20"></polyline><polyline points="20 10 14 10 14 4"></polyline></svg>`;
             btn.setAttribute('title', 'Collapse All');

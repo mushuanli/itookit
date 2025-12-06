@@ -2,43 +2,32 @@
 import { OrchestratorEvent, SessionGroup, ExecutionNode } from '../types';
 import { NodeRenderer } from './NodeRenderer';
 import { MDxController } from './mdx/MDxController';
-import { escapeHTML } from '@itookit/common';
+// ✨ [修改] 引入 Modal
+import { escapeHTML, Modal } from '@itookit/common';
 
 // ✨ [新增] 定义节点动作接口
 export interface NodeActionCallback {
     (action: 'retry' | 'delete' | 'edit', nodeId: string): void;
 }
 
-// ✨ [修复 5.2] 自定义确认对话框
-class ConfirmDialog {
-    static async show(message: string): Promise<boolean> {
-        return new Promise((resolve) => {
-            const overlay = document.createElement('div');
-            overlay.className = 'llm-ui-confirm-overlay';
-            overlay.innerHTML = `
-                <div class="llm-ui-confirm-dialog">
-                    <p class="llm-ui-confirm-message">${escapeHTML(message)}</p>
-                    <div class="llm-ui-confirm-actions">
-                        <button class="llm-ui-confirm-btn llm-ui-confirm-btn--cancel">Cancel</button>
-                        <button class="llm-ui-confirm-btn llm-ui-confirm-btn--confirm">Confirm</button>
-                    </div>
-                </div>
-            `;
-            
-            document.body.appendChild(overlay);
-            
-            const cleanup = (result: boolean) => {
-                overlay.remove();
-                resolve(result);
-            };
-            
-            overlay.querySelector('.llm-ui-confirm-btn--cancel')?.addEventListener('click', () => cleanup(false));
-            overlay.querySelector('.llm-ui-confirm-btn--confirm')?.addEventListener('click', () => cleanup(true));
-            overlay.addEventListener('click', (e) => {
-                if (e.target === overlay) cleanup(false);
-            });
-        });
-    }
+/**
+ * ✨ [新增] 包装 common Modal 为 Promise 形式，
+ * 以便保持原有代码的 await 逻辑不变。
+ */
+async function showConfirmDialog(message: string): Promise<boolean> {
+    return new Promise((resolve) => {
+        new Modal('Confirmation', `<p>${escapeHTML(message)}</p>`, {
+            type: 'danger',     // 危险操作，使用红色按钮
+            confirmText: 'Delete',
+            cancelText: 'Cancel',
+            onConfirm: () => {
+                resolve(true);
+            },
+            onCancel: () => {
+                resolve(false);
+            }
+        }).show();
+    });
 }
 
 export class HistoryView {
@@ -157,7 +146,7 @@ export class HistoryView {
                         <span class="llm-ui-bubble__title">You</span>
                         
                         <!-- [新增] 3. 预览文本区域 -->
-                        <span class="llm-ui-header-preview">${contentPreview}</span>
+                    <span class="llm-ui-header-preview">${escapeHTML(contentPreview)}</span>
                         
                         <div style="flex:1"></div>
 
@@ -184,8 +173,10 @@ export class HistoryView {
                              </button>
                         </div>
                     </div>
+                <div class="llm-ui-bubble__body">
                     <div class="llm-ui-mount-point" id="user-mount-${group.id}"></div>
                 </div>
+            </div>
             `;
             this.container.appendChild(wrapper);
             
@@ -218,10 +209,11 @@ export class HistoryView {
                 this.onNodeAction?.('retry', group.id);
             });
 
-            // ✨ [修复 5.2] 使用自定义对话框
+            // ✨ [修复 5.2] 使用 Common Modal (通过辅助函数)
             wrapper.querySelector('[data-action="delete"]')?.addEventListener('click', async (e) => {
                 e.stopPropagation();
-                const confirmed = await ConfirmDialog.show('Delete this message?');
+                // 替换原来的 ConfirmDialog.show
+                const confirmed = await showConfirmDialog('Delete this message?');
                 if (confirmed) {
                     this.onNodeAction?.('delete', group.id);
                 }
@@ -240,45 +232,18 @@ export class HistoryView {
                 }
             });
 
-            // 3. Collapse
-            // 修正初始图标为 Up Arrow (因为默认是展开的)
-            if (collapseBtn) {
-                 const svg = collapseBtn.querySelector('svg');
-                 if (svg) svg.innerHTML = '<polyline points="18 15 12 9 6 15"></polyline>';
+        // ✨ [简化] 折叠逻辑
+        collapseBtn?.addEventListener('click', () => {
+            bubbleEl.classList.toggle('is-collapsed');
+            const svg = collapseBtn.querySelector('svg');
+            if (!svg) return;
+
+            if (bubbleEl.classList.contains('is-collapsed')) {
+                svg.innerHTML = '<polyline points="6 9 12 15 18 9"></polyline>'; 
+            } else {
+                svg.innerHTML = '<polyline points="18 15 12 9 6 15"></polyline>';
             }
-
-            collapseBtn?.addEventListener('click', () => {
-                bubbleEl.classList.toggle('is-collapsed');
-                const svg = collapseBtn.querySelector('svg');
-                if (!svg) return;
-
-                if (bubbleEl.classList.contains('is-collapsed')) {
-                    // 向下箭头 (点击展开) - User Bubble 默认箭头是向下的 (open state)
-                    // 所以 collapse 后应该是向上? 或者反过来。保持和 Agent 一致：
-                    // 折叠后 -> 箭头变为 "Show More" 意图
-                    // 这里我们定义: 
-                    // 初始状态 (Open): 箭头 <polyline points="6 9 12 15 18 9"></polyline> (Down arrow, meaning collapse content below?)
-                    // 其实 Agent 的实现是: 默认显示 "Down V", 点击后变成 "Up ^"? 
-                    // 让我们统一逻辑：
-                    // Expanded State: 显示 "Chevron Up" (收起) 或 "Chevron Down" (展开)? 
-                    // 通常: Chevron Up = 收起; Chevron Down = 展开.
-                    
-                    // 修正逻辑以符合直觉：
-                    // 当前是折叠态 -> 显示向下箭头 (表示点击展开)
-                    // 当前是展开态 -> 显示向上箭头 (表示点击收起)
-                    
-                    // 这里代码里初始SVG是 Down (6 9 12 15 18 9)。 
-                    // 如果初始是展开的，应该显示 UP icon。
-                    // 让我们调整一下初始图标。
-                    // 假设初始SVG改为 UP: <polyline points="18 15 12 9 6 15"></polyline>
-                    
-                    // is-collapsed = true (Hidden) -> Show Down Arrow
-                    svg!.innerHTML = '<polyline points="6 9 12 15 18 9"></polyline>'; 
-                } else {
-                    // is-collapsed = false (Visible) -> Show Up Arrow
-                    svg!.innerHTML = '<polyline points="18 15 12 9 6 15"></polyline>';
-                }
-            });
+        });
 
         } else {
             wrapper.innerHTML = `
@@ -318,10 +283,11 @@ export class HistoryView {
                 this.onNodeAction?.('retry', node.id);
             });
 
-            // ✨ [修复 5.2] 使用自定义对话框
+            // ✨ [修复 5.2] 使用 Common Modal (通过辅助函数)
             deleteBtn?.addEventListener('click', async (e) => {
                 e.stopPropagation();
-                const confirmed = await ConfirmDialog.show('Delete this message?');
+                // 替换原来的 ConfirmDialog.show
+                const confirmed = await showConfirmDialog('Delete this message?');
                 if (confirmed) {
                     this.onNodeAction?.('delete', node.id);
                 }

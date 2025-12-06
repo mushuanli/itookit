@@ -105,6 +105,8 @@ export interface VFSUIState {
   _forceUpdateTimestamp?: number; // 🔧 FIX: Internal timestamp to force updates
 }
 
+export type SearchFilter = (item: VFSNodeUI, queryTokens: string[]) => boolean;
+
 // --- Component Configuration Types ---
 
 /**

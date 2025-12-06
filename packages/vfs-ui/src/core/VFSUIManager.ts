@@ -15,7 +15,7 @@ import { mapEngineNodeToUIItem, mapEngineTreeToUIItems } from '../mappers/NodeMa
 import { NodeList } from '../components/NodeList/NodeList';
 import { FileOutline } from '../components/FileOutline/FileOutline';
 import { MoveToModal } from '../components/MoveToModal/MoveToModal';
-import type { TagInfo, VFSNodeUI, ContextMenuConfig, VFSUIState, UISettings, TagEditorFactory, TagEditorOptions } from '../types/types';
+import type { SearchFilter,TagInfo, VFSNodeUI, ContextMenuConfig, VFSUIState, UISettings, TagEditorFactory, TagEditorOptions } from '../types/types';
 
 // 新增依赖
 import { FileTypeRegistry } from '../services/FileTypeRegistry';
@@ -34,6 +34,8 @@ type VFSUIOptions = SessionUIOptions & {
     defaultEditorFactory: EditorFactory;
     // 用户自定义编辑器解析器
     customEditorResolver?: CustomEditorResolver;
+    /** [新增] 自定义搜索匹配逻辑 */
+    searchFilter?: SearchFilter;
 };
 
 /**
@@ -107,7 +109,6 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
         this.lastActiveId = this.store.getState().activeId;
         this.lastSidebarCollapsedState = this.store.getState().isSidebarCollapsed;
 
-        console.log('>>> VFS opt:', options);
         this._vfsService = new VFSService({
             engine: this.engine,
             defaultExtension: options.defaultExtension,
@@ -158,7 +159,8 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
             tagEditorFactory: finalTagEditorFactory,
             searchPlaceholder: this.options.searchPlaceholder || 'Search (tag:xx type:file|dir)...',
             createFileLabel: this.options.createFileLabel,
-            title: this.options.title
+            title: this.options.title,
+            searchFilter: options.searchFilter, // 传递下去
         });
 
         if (this.options.documentOutlineContainer) {
