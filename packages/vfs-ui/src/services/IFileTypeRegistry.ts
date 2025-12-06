@@ -1,10 +1,27 @@
 /**
- * @file common/interfaces/IFileTypeRegistry.ts
+ * @file vfs-ui/services/IFileTypeRegistry.ts
  * @description Defines interfaces for registering file types, icons, and editors.
  */
 
 import { EditorFactory } from '@itookit/common';
-import { VFSNodeUI } from '../types/types';
+import { VFSNodeUI, Heading, FileMetadata } from '../types/types';
+
+/**
+ * 解析结果结构
+ */
+export interface ParseResult {
+    summary: string;
+    searchableText: string;
+    headings: Heading[];
+    metadata: FileMetadata;
+}
+
+/**
+ * [新增] 内容解析器函数签名
+ * @param content 文件原始内容
+ * @param fileExtension 文件扩展名 (e.g., '.json', '.chat')
+ */
+export type ContentParser = (content: string, fileExtension: string) => Partial<ParseResult>;
 
 /**
  * 文件类型定义
@@ -18,6 +35,8 @@ export interface FileTypeDefinition {
     icon?: string;
     /** 该类型对应的编辑器工厂函数 */
     editorFactory?: EditorFactory;
+    /** [新增] 自定义内容解析逻辑，用于生成摘要、大纲等 */
+    contentParser?: ContentParser; 
 }
 
 /**
@@ -31,6 +50,8 @@ export type CustomEditorResolver = (node: VFSNodeUI) => EditorFactory | null | u
  * 图标解析器函数签名
  */
 export type IconResolver = (filename: string, isDirectory: boolean) => string;
+// [新增] 解析器获取接口
+export type ContentParserResolver = (filename: string) => ContentParser | undefined;
 
 /**
  * 注册表服务接口
@@ -42,4 +63,6 @@ export interface IFileTypeRegistry {
     getIcon(filename: string, isDirectory?: boolean): string;
     /** 根据文件节点获取最匹配的 EditorFactory (Custom -> Registry -> Default Fallback) */
     resolveEditorFactory(node: VFSNodeUI): EditorFactory;
+    /** [新增] 获取解析器 */
+    resolveContentParser(filename: string): ContentParser | undefined;
 }

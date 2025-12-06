@@ -19,6 +19,47 @@ interface LLMFactoryOptions extends EditorOptions {
 }
 
 /**
+ * 专门针对 .chat 文件的解析逻辑
+ */
+export const chatFileParser = (content: string): any => {
+    try {
+        const json = JSON.parse(content);
+        
+        // 1. 时间格式化
+        const fmt = (ts: string) => {
+            if (!ts) return '';
+            const d = new Date(ts);
+            const pad = (n: number) => n.toString().padStart(2, '0');
+            return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        };
+
+        const lastMod = fmt(json.updated_at);
+        const created = fmt(json.created_at);
+        
+        // 2. 标题与分支
+        const title = json.title || 'Untitled';
+        const branches = json.branches ? Object.keys(json.branches).map(b => `# ${b}`).join(' ') : '';
+        
+        // 3. 组合 Summary (这正是你想要的定制格式)
+        // 使用 Unicode 空格或其他分隔符让 UI 更整洁
+        const summary = `${lastMod} | 创建: ${created} | ${title} ${branches}`;
+
+        return {
+            summary: summary,
+            // 还可以自定义 metadata 供 UI 使用 badges 显示
+            metadata: {
+                ...(json.settings || {}), // 将 model 等设置提升到 metadata
+                custom: {
+                   // 可以在这里塞入 taskCount 或其他 vfs-ui 支持的通用字段
+                }
+            }
+        };
+    } catch (e) {
+        return {}; // 解析失败回退到默认
+    }
+};
+
+/**
  * ✨ [重构] 创建 LLM 编辑器工厂
  * 
  * @param agentService - Agent 服务（外部注入，确保单例）
