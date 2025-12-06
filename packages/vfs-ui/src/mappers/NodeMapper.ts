@@ -5,7 +5,8 @@
 import type { VFSNodeUI } from '../types/types.js';
 import { parseFileInfo } from '../utils/parser.js';
 import type { EngineNode } from '@itookit/common';
-import type { IconResolver } from '../services/IFileTypeRegistry';
+// ✨ [Fix] 导入 ParseResult 接口
+import type { IconResolver, ContentParserResolver, ParseResult } from '../services/IFileTypeRegistry';
 
 /**
  * 判断是否为隐藏文件 (以 . 或 __ 开头)
@@ -29,16 +30,47 @@ function stripExtension(name: string): string {
  * @param node 引擎节点
  * @param iconResolver 注入的图标解析器 (来自 FileTypeRegistry)
  */
-export function mapEngineNodeToUIItem(node: EngineNode, iconResolver?: IconResolver): VFSNodeUI {
+export function mapEngineNodeToUIItem(
+    node: EngineNode, 
+    iconResolver?: IconResolver,
+    parserResolver?: ContentParserResolver
+): VFSNodeUI {
     const isDirectory = node.type === 'directory';
 
-    const parsedInfo = isDirectory 
-        ? { summary: '', searchableText: '', headings: [], metadata: {} } 
-        : parseFileInfo(node.content as string);
+    // ✨ [Fix 2322] 显式指定类型为 ParseResult
+    // 否则 headings: [] 会被推断为 headings: never[]，导致后续赋值报错
+    let parsedInfo: ParseResult = { 
+        summary: '', 
+        searchableText: '', 
+        headings: [], 
+        metadata: {} 
+    };
 
-    // [关键修改] 计算显示标题
-    // 1. 优先使用 Engine 显式提供的 metadata.title (用于 LLM Session 显示名与文件名分离)
-    // 2. 其次使用文件名 (目录原样显示，文件去除扩展名)
+    if (!isDirectory && node.content) {
+        const contentStr = typeof node.content === 'string' ? node.content : '';
+        
+        // 1. 尝试获取自定义解析器
+        const customParser = parserResolver ? parserResolver(node.name) : undefined;
+        
+        if (customParser) {
+            // [高亮] 使用自定义逻辑
+            // 获取扩展名用于传递给 parser (可选)
+            const ext = node.name.includes('.') ? node.name.substring(node.name.lastIndexOf('.')) : '';
+            const customResult = customParser(contentStr, ext);
+            
+            // 合并默认值，防止自定义解析器返回不完整数据
+            parsedInfo = {
+                ...parseFileInfo(contentStr), // 基础解析作为兜底 (如 searchableText)
+                ...customResult // 自定义结果覆盖
+            };
+        } else {
+            // 2. 使用默认逻辑
+            parsedInfo = parseFileInfo(contentStr);
+        }
+    }
+
+    // --- 2. 计算显示标题 (修复 displayTitle 未定义错误) ---
+    // ✨ [Fix 2304] 确保 displayTitle 在此处定义
     let displayTitle = '';
     if (node.metadata && typeof node.metadata.title === 'string' && node.metadata.title) {
         displayTitle = node.metadata.title;
@@ -46,22 +78,20 @@ export function mapEngineNodeToUIItem(node: EngineNode, iconResolver?: IconResol
         displayTitle = isDirectory ? node.name : stripExtension(node.name);
     }
 
-    // 2. 决定图标 (优先级逻辑)
-    // 优先级 1: Node 自带 Metadata (node.icon)
-    // 优先级 2: 通过 iconResolver 查注册表 (Registry -> Default)
-    // 优先级 3: 如果没有 resolver，使用硬编码兜底 (Folder/File)
+    // --- 3. 决定图标 (修复 displayIcon 未定义错误) ---
+    // ✨ [Fix 2304] 确保 displayIcon 在此处定义
     let displayIcon = node.icon;
     
     if (!displayIcon) {
         if (iconResolver) {
             displayIcon = iconResolver(node.name, isDirectory);
         } else {
-            // 极端的兜底，防止调用方没传 resolver
+            // 兜底
             displayIcon = isDirectory ? '📁' : '📄'; 
         }
     }
 
-    // 3. 保存原始文件名和扩展名
+    // --- 4. 构建元数据 ---
     const customMetadata = {
         ...(node.metadata || {}),
         ...parsedInfo.metadata,
@@ -99,15 +129,19 @@ export function mapEngineNodeToUIItem(node: EngineNode, iconResolver?: IconResol
         headings: parsedInfo.headings || [],
 
         children: (isDirectory && node.children)
-            ? mapEngineTreeToUIItems(node.children, iconResolver) // 递归传递
+            ? mapEngineTreeToUIItems(node.children, iconResolver, parserResolver) // 递归传递
             : undefined,
     };
 }
 
-export function mapEngineTreeToUIItems(nodes: EngineNode[], iconResolver?: IconResolver): VFSNodeUI[] {
+export function mapEngineTreeToUIItems(
+    nodes: EngineNode[], 
+    iconResolver?: IconResolver,
+    parserResolver?: ContentParserResolver
+): VFSNodeUI[] {
     if (!nodes || nodes.length === 0) return [];
 
     const visibleNodes = nodes.filter(node => !isHiddenFile(node.name));
 
-    return visibleNodes.map(node => mapEngineNodeToUIItem(node, iconResolver));
+    return visibleNodes.map(node => mapEngineNodeToUIItem(node, iconResolver, parserResolver));
 }
