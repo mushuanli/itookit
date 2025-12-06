@@ -5,12 +5,13 @@ import {
     ExecutorType, 
     ExecutionContext, 
     ExecutionResult, 
-    LLMConnection 
+    LLMConnection,
+    safeStringify
 } from '@itookit/common';
 import { LLMDriver, ChatMessage } from '@itookit/llmdriver';
 
 // 导入本地定义的上下文接口，确保 TS 类型检查通过
-import { StreamingContext } from '../types'; 
+import { StreamingContext } from '../core/types'; 
 
 export class AgentExecutor implements IExecutor {
     readonly id: string;
@@ -34,7 +35,7 @@ export class AgentExecutor implements IExecutor {
      */
     async execute(input: unknown, context: StreamingContext): Promise<ExecutionResult> {
         // ✨ [修复 4.1] 安全的类型处理
-        const userMessageContent = this.safeStringify(input);
+        const userMessageContent = safeStringify(input);
         
         // ✨ [修复 4.2] 安全的 history 获取
         const history = this.safeGetHistory(context);
@@ -126,24 +127,6 @@ export class AgentExecutor implements IExecutor {
             // 抛出错误，交给 SessionManager 处理 UI 状态
             throw error;
         }
-    }
-
-    // ✨ [修复 4.1] 安全的字符串转换
-    private safeStringify(input: unknown): string {
-        if (typeof input === 'string') {
-            return input;
-        }
-        if (input === null || input === undefined) {
-            return '';
-        }
-        if (typeof input === 'object') {
-            try {
-                return JSON.stringify(input);
-            } catch {
-                return String(input);
-            }
-        }
-        return String(input);
     }
 
     // ✨ [修复 4.2] 安全的 history 获取

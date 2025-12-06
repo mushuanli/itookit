@@ -1,6 +1,6 @@
 // @file llm-ui/orchestrator/SessionManager.ts
 
-import { SessionGroup, OrchestratorEvent, ExecutionNode, StreamingContext } from '../types';
+import { SessionGroup, OrchestratorEvent, ExecutionNode, StreamingContext } from '../core/types';
 import { 
     generateUUID, 
     LLMConnection, 

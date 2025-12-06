@@ -26,7 +26,7 @@ export {type EngineNode,type EngineSearchQuery,type EngineEventType,type EngineE
 export { ISettingsWidget } from './interfaces/ISettingsWidget';
 
 // Export all utils
-export { slugify, simpleHash, escapeHTML, generateUUID, generateShortUUID,generateId, debounce, isClass } from './utils/utils';
+export { slugify, simpleHash, escapeHTML, generateUUID, generateShortUUID,generateId,safeStringify, debounce, isClass } from './utils/utils';
 
 // Export all components
 export { TagEditorComponent, type TagEditorParams } from './components/TagEditor/TagEditorComponent'; 

@@ -8,7 +8,7 @@ import { HistoryView } from './components/HistoryView';
 import { ChatInput } from './components/ChatInput';
 import { SessionManager } from './orchestrator/SessionManager';
 import { IAgentService } from './services/IAgentService';
-import { NodeAction } from './types'; // ✨ 从统一位置导入
+import { NodeAction } from './core/types'; // ✨ 从统一位置导入
 
 export interface LLMEditorOptions extends EditorOptions {
     // 强制要求这两个服务存在，不允许 undefined

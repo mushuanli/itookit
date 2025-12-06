@@ -1,7 +1,7 @@
 // @file llm-ui/index.ts
 
 import './styles/index.css';
-export * from './types';
+export * from './core/types';
 import { LLMWorkspaceEditor } from './LLMWorkspaceEditor';
 import { VFSAgentService } from './services/VFSAgentService';
 import { LLMSessionEngine } from './engine/LLMSessionEngine';

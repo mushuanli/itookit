@@ -1,5 +1,5 @@
 // @file llm-ui/components/HistoryView.ts
-import { OrchestratorEvent, SessionGroup, ExecutionNode,NodeAction, NodeActionCallback } from '../types';
+import { OrchestratorEvent, SessionGroup, ExecutionNode,NodeAction, NodeActionCallback } from '../core/types';
 import { NodeRenderer } from './NodeRenderer';
 import { MDxController } from './mdx/MDxController';
 // ✨ [修改] 引入 Modal

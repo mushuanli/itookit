@@ -1,4 +1,4 @@
-// @file llm-ui/types.ts
+// @file: llm-ui/core/types.ts
 
 import { ExecutionContext, NodeStatus, ChatNode } from '@itookit/common';
 

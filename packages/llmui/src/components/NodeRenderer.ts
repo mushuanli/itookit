@@ -1,6 +1,6 @@
 // @file llm-ui/components/NodeRenderer.ts
 import { escapeHTML } from '@itookit/common';
-import { ExecutionNode } from '../types';
+import { ExecutionNode } from '../core/types';
 
 export interface RenderResult {
     element: HTMLElement;
