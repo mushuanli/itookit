@@ -1,0 +1,190 @@
+/* @file llm-ui/styles/history.css */
+
+/* 删除动画 */
+.llm-ui-session--deleting {
+    animation: fadeOut 0.3s ease-out forwards;
+}
+
+@keyframes fadeOut {
+    from {
+        opacity: 1;
+        transform: translateX(0);
+    }
+    to {
+        opacity: 0;
+        transform: translateX(-20px);
+        height: 0;
+        margin: 0;
+        padding: 0;
+    }
+}
+
+/* 分支导航 */
+.llm-ui-branch-nav {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-right: 8px;
+    padding: 2px 6px;
+    background: var(--llm-ui-bg-secondary, #f5f5f5);
+    border-radius: 4px;
+    font-size: 12px;
+}
+
+.llm-ui-branch-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    border-radius: 3px;
+    cursor: pointer;
+    color: var(--llm-ui-text-secondary, #666);
+    transition: all 0.15s ease;
+}
+
+.llm-ui-branch-btn:hover:not(:disabled) {
+    background: var(--llm-ui-bg-hover, #e0e0e0);
+    color: var(--llm-ui-text-primary, #333);
+}
+
+.llm-ui-branch-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+}
+
+.llm-ui-branch-indicator {
+    color: var(--llm-ui-text-secondary, #666);
+    font-weight: 500;
+    min-width: 24px;
+    text-align: center;
+}
+
+/* 编辑操作按钮 */
+.llm-ui-edit-actions {
+    display: none;
+    gap: 8px;
+    padding: 12px 0 0 0;
+    border-top: 1px solid var(--llm-ui-border, #e0e0e0);
+    margin-top: 12px;
+}
+
+.llm-ui-edit-actions .llm-ui-btn {
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.llm-ui-btn--primary {
+    background: var(--llm-ui-primary, #2563eb);
+    color: white;
+    border: none;
+}
+
+.llm-ui-btn--primary:hover {
+    background: var(--llm-ui-primary-hover, #1d4ed8);
+}
+
+.llm-ui-btn--secondary {
+    background: var(--llm-ui-bg-secondary, #f5f5f5);
+    color: var(--llm-ui-text-primary, #333);
+    border: 1px solid var(--llm-ui-border, #e0e0e0);
+}
+
+.llm-ui-btn--secondary:hover {
+    background: var(--llm-ui-bg-hover, #e8e8e8);
+}
+
+.llm-ui-btn--ghost {
+    background: transparent;
+    color: var(--llm-ui-text-secondary, #666);
+    border: none;
+}
+
+.llm-ui-btn--ghost:hover {
+    color: var(--llm-ui-text-primary, #333);
+    background: var(--llm-ui-bg-hover, #f0f0f0);
+}
+
+/* 工具栏按钮激活状态 */
+.llm-ui-btn-bubble-tool.active,
+.llm-ui-btn-tool.active {
+    background: var(--llm-ui-primary-light, #dbeafe);
+    color: var(--llm-ui-primary, #2563eb);
+}
+
+/* 编辑模式下的气泡样式 */
+.llm-ui-bubble--user.is-editing {
+    border: 2px solid var(--llm-ui-primary, #2563eb);
+    box-shadow: 0 0 0 3px var(--llm-ui-primary-light, rgba(37, 99, 235, 0.1));
+}
+
+/* 错误横幅 */
+.llm-ui-banner--error {
+    padding: 12px 16px;
+    margin: 12px;
+    background: var(--llm-ui-error-bg, #fef2f2);
+    color: var(--llm-ui-error, #dc2626);
+    border: 1px solid var(--llm-ui-error-border, #fecaca);
+    border-radius: 6px;
+    font-size: 14px;
+}
+
+/* 欢迎界面 */
+.llm-ui-welcome {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    min-height: 300px;
+    color: var(--llm-ui-text-secondary, #666);
+    text-align: center;
+}
+
+.llm-ui-welcome__icon {
+    font-size: 48px;
+    margin-bottom: 16px;
+}
+
+.llm-ui-welcome h2 {
+    margin: 0 0 8px 0;
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--llm-ui-text-primary, #333);
+}
+
+.llm-ui-welcome p {
+    margin: 0;
+    font-size: 14px;
+}
+
+/* 折叠状态下的预览显示 */
+.llm-ui-session.is-collapsed .llm-ui-header-preview,
+.llm-ui-node.is-collapsed .llm-ui-header-preview {
+    display: inline;
+    opacity: 1;
+}
+
+.llm-ui-session:not(.is-collapsed) .llm-ui-header-preview,
+.llm-ui-node:not(.is-collapsed) .llm-ui-header-preview {
+    display: none;
+}
+
+/* 节点状态颜色 */
+.llm-ui-node__status--running {
+    color: var(--llm-ui-warning, #f59e0b);
+}
+
+.llm-ui-node__status--success {
+    color: var(--llm-ui-success, #10b981);
+}
+
+.llm-ui-node__status--failed {
+    color: var(--llm-ui-error, #ef4444);
+}
