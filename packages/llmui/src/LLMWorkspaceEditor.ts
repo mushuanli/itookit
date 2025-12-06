@@ -2,12 +2,13 @@
 
 import { 
     IEditor, EditorOptions, EditorEvent, EditorEventCallback, 
-    ILLMSessionEngine,escapeHTML
+    ILLMSessionEngine, escapeHTML
 } from '@itookit/common';
-import { HistoryView, NodeActionCallback } from './components/HistoryView';
+import { HistoryView } from './components/HistoryView';
 import { ChatInput } from './components/ChatInput';
 import { SessionManager } from './orchestrator/SessionManager';
 import { IAgentService } from './services/IAgentService';
+import { NodeAction } from './types'; // ✨ 从统一位置导入
 
 export interface LLMEditorOptions extends EditorOptions {
     // 强制要求这两个服务存在，不允许 undefined
@@ -77,7 +78,7 @@ export class LLMWorkspaceEditor implements IEditor {
             this.historyView = new HistoryView(
                 historyEl, 
                 (id, content, type) => this.handleContentChange(id, content, type),
-                (action, nodeId) => this.handleNodeAction(action, nodeId)
+            (action: NodeAction, nodeId: string) => this.handleNodeAction(action, nodeId)
             );
             
             let initialAgents: any[] = [];
@@ -190,19 +191,126 @@ export class LLMWorkspaceEditor implements IEditor {
     /**
      * ✨ [新增] 处理节点操作（重试、删除）
      */
-    private async handleNodeAction(action: 'retry' | 'delete' | 'edit', nodeId: string) {
-        if (action === 'retry') {
-            // TODO: 实现重新生成逻辑
-            console.log('[LLMWorkspaceEditor] Retry requested for node:', nodeId);
-            // 可以获取该节点对应的 user message，重新发送
-        } else if (action === 'delete') {
-            // TODO: 实现删除逻辑
-            console.log('[LLMWorkspaceEditor] Delete requested for node:', nodeId);
-            // 逻辑: 调用 sessionManager.deleteNode(nodeId) -> Engine.deleteMessage
-        } else if (action === 'edit') {
-            // 编辑模式通常由 HistoryView 内部的 MDxController 处理切换，
-            // 但这里接收事件可以用于记录日志或处理其他全局状态
-            console.log('[LLMWorkspaceEditor] Edit mode toggled for node:', nodeId);
+    private async handleNodeAction(action: NodeAction, nodeId: string) {
+        try {
+            switch (action) {
+                case 'retry':
+                    await this.handleRetry(nodeId);
+                    break;
+                    
+                case 'delete':
+                    await this.handleDelete(nodeId);
+                    break;
+                    
+                case 'edit':
+                    // 编辑模式由 HistoryView 内部的 MDxController 处理
+                    console.log('[LLMWorkspaceEditor] Edit mode toggled:', nodeId);
+                    break;
+                    
+                case 'edit-and-retry':
+                    await this.handleEditAndRetry(nodeId);
+                    break;
+                    
+                case 'resend':
+                    await this.handleResend(nodeId);
+                    break;
+
+                case 'prev-sibling':
+                    await this.handleSiblingSwitch(nodeId, 'prev');
+                    break;
+
+                case 'next-sibling':
+                    await this.handleSiblingSwitch(nodeId, 'next');
+                    break;
+
+                default:
+                    // TypeScript exhaustive check
+                    const _exhaustive: never = action;
+                    console.warn('[LLMWorkspaceEditor] Unknown action:', _exhaustive);
+            }
+        } catch (e: any) {
+            console.error('[LLMWorkspaceEditor] Action failed:', e);
+            this.historyView.renderError(e);
+        }
+    }
+
+    private async handleRetry(nodeId: string) {
+        const sessions = this.sessionManager.getSessions();
+        const session = sessions.find(s => s.id === nodeId);
+
+        if (!session) return;
+
+        this.chatInput.setLoading(true);
+        try {
+            if (session.role === 'user') {
+                await this.sessionManager.resendUserMessage(nodeId);
+            } else {
+                await this.sessionManager.retryGeneration(nodeId, {
+                    preserveCurrent: true,
+                    navigateToNew: true
+                });
+            }
+        } finally {
+            this.chatInput.setLoading(false);
+            this.emit('change');
+        }
+    }
+
+    private async handleDelete(nodeId: string) {
+        await this.sessionManager.deleteMessage(nodeId, {
+            mode: 'soft',
+            cascade: false,
+            deleteAssociatedResponses: true
+        });
+        this.emit('change');
+    }
+
+    private async handleEditAndRetry(nodeId: string) {
+        // 获取编辑后的新内容
+        const session = this.sessionManager.getSessions().find(s => s.id === nodeId);
+        if (!session || session.role !== 'user') return;
+
+        this.chatInput.setLoading(true);
+        try {
+            await this.sessionManager.editMessage(nodeId, session.content || '', true);
+        } finally {
+            this.chatInput.setLoading(false);
+            this.emit('change');
+        }
+    }
+
+    private async handleResend(nodeId: string) {
+        this.chatInput.setLoading(true);
+        try {
+            await this.sessionManager.resendUserMessage(nodeId);
+        } finally {
+            this.chatInput.setLoading(false);
+            this.emit('change');
+        }
+    }
+
+    /**
+     * ✨ [新增] 处理分支切换
+     */
+    private async handleSiblingSwitch(nodeId: string, direction: 'prev' | 'next') {
+        const sessions = this.sessionManager.getSessions();
+        const session = sessions.find(s => s.id === nodeId);
+
+        if (!session) return;
+
+        const currentIndex = session.siblingIndex ?? 0;
+        const total = session.siblingCount ?? 1;
+
+        let newIndex: number;
+        if (direction === 'prev') {
+            newIndex = Math.max(0, currentIndex - 1);
+        } else {
+            newIndex = Math.min(total - 1, currentIndex + 1);
+        }
+
+        if (newIndex !== currentIndex) {
+            await this.sessionManager.switchToSibling(nodeId, newIndex);
+            this.emit('change');
         }
     }
 

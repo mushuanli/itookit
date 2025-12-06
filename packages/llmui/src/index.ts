@@ -23,40 +23,22 @@ interface LLMFactoryOptions extends EditorOptions {
  */
 export const chatFileParser = (content: string): any => {
     try {
-        const json = JSON.parse(content);
-        console.log(`parse content: ${content}`);
-        // 1. 时间格式化
-        const fmt = (ts: string) => {
-            if (!ts) return '';
-            const d = new Date(ts);
-            const pad = (n: number) => n.toString().padStart(2, '0');
-            return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-        };
-
-        const lastMod = fmt(json.updated_at);
-        const created = fmt(json.created_at);
-        let summaryText = json.summary || '';
+        // 快速解析，不需要 YAML
+        const data = JSON.parse(content);
         
-        // 2. 标题与分支
-        const title = json.title || 'Untitled';
-        const branches = json.branches ? Object.keys(json.branches).map(b => `# ${b}`).join(' ') : '';
-        
-        // 3. 组合 Summary (这正是你想要的定制格式)
-        // 使用 Unicode 空格或其他分隔符让 UI 更整洁
-        const finalSummary = `${summaryText}`;
-
         return {
-            summary: finalSummary,
-            // 将 Manifest 的关键字段暴露给 search 索引
-            searchableText: `${json.title} ${summaryText} ${json.id}`, 
+            summary: data.summary || '',
+            searchableText: `${data.title} ${data.summary || ''} ${data.id}`.toLowerCase(),
             metadata: {
-                ...(json.settings || {}),
-                // 标记这是一个 chat 类型，UI 可以据此显示特定 Badge
-                type: 'chat'
+                ...data.settings,
+                type: 'chat',
+                updatedAt: data.updated_at,
+                messageCount: Object.keys(data.branches || {}).length
             }
         };
     } catch (e) {
-        return {}; // 解析失败回退到默认
+        console.warn('[chatFileParser] Parse failed:', e);
+        return { summary: 'Parse error', metadata: { type: 'chat' } };
     }
 };
 

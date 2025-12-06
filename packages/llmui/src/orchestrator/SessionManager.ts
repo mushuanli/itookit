@@ -1,4 +1,5 @@
 // @file llm-ui/orchestrator/SessionManager.ts
+
 import { SessionGroup, OrchestratorEvent, ExecutionNode, StreamingContext } from '../types';
 import { 
     generateUUID, 
@@ -17,7 +18,21 @@ import { IAgentService } from '../services/IAgentService';
 
 type SessionVariable = ChatMessage[] | File[]; 
 
-// ✨ [修复 3.4] 持久化队列管理
+// 删除选项
+export interface DeleteOptions {
+    mode: 'soft' | 'hard';
+    cascade: boolean;
+    deleteAssociatedResponses: boolean;
+}
+
+// 重试选项
+export interface RetryOptions {
+    agentId?: string;
+    preserveCurrent: boolean;
+    navigateToNew: boolean;
+}
+
+// 持久化队列
 class PersistQueue {
     private queue: Promise<void> = Promise.resolve();
     
@@ -54,9 +69,774 @@ export class SessionManager {
         private sessionEngine: ILLMSessionEngine
     ) {}
 
-    // --- Executor 管理 ---
+    // --- 状态管理 ---
 
-    public registerExecutor(executor: IExecutor) {
+    getSessions() { return this.sessions; }
+    getCurrentSessionId() { return this.currentSessionId; }
+    
+    // ✨ [重构] isDirty 不再由 SessionManager 管理，由外部判断
+    hasUnsavedChanges() { return false; }
+    setDirty(d: boolean) { /* no-op, Engine 自动保存 */ }
+
+    onEvent(handler: (event: OrchestratorEvent) => void) {
+        this.listeners.add(handler);
+        return () => this.listeners.delete(handler);
+    }
+
+    private emit(event: OrchestratorEvent) {
+        this.listeners.forEach(h => h(event));
+    }
+
+    // ================== 删除功能 ==================
+/**
+ * ✨ [修复] 增强的 session 查找方法
+ * 支持通过 SessionGroup.id 或 ExecutionNode.id 查找
+ */
+private findSessionByAnyId(id: string): { session: SessionGroup; index: number } | null {
+    // 1. 先尝试直接匹配 SessionGroup.id
+    let index = this.sessions.findIndex(s => s.id === id);
+    if (index !== -1) {
+        return { session: this.sessions[index], index };
+    }
+    
+    // 2. 尝试匹配 ExecutionNode.id (对于 assistant 消息)
+    index = this.sessions.findIndex(s => 
+        s.role === 'assistant' && s.executionRoot?.id === id
+    );
+    if (index !== -1) {
+        return { session: this.sessions[index], index };
+    }
+    
+    // 3. 尝试匹配 persistedNodeId
+    index = this.sessions.findIndex(s => s.persistedNodeId === id);
+    if (index !== -1) {
+        return { session: this.sessions[index], index };
+    }
+    
+    // 4. 递归搜索嵌套的 ExecutionNode
+    for (let i = 0; i < this.sessions.length; i++) {
+        const session = this.sessions[i];
+        if (session.executionRoot && this.findNodeInTree(session.executionRoot, id)) {
+            return { session, index: i };
+        }
+    }
+    
+    return null;
+}
+
+/**
+ * 在 ExecutionNode 树中查找节点
+ */
+private findNodeInTree(node: ExecutionNode, targetId: string): ExecutionNode | null {
+    if (node.id === targetId) return node;
+    
+    if (node.children) {
+        for (const child of node.children) {
+            const found = this.findNodeInTree(child, targetId);
+            if (found) return found;
+        }
+    }
+    
+    return null;
+}
+
+    /**
+     * 检查是否可以删除
+     */
+    canDeleteMessage(id: string): { allowed: boolean; reason?: string } {
+    const result = this.findSessionByAnyId(id);
+    
+    if (!result) {
+        return { allowed: false, reason: 'Message not found' };
+    }
+    
+    const { session } = result;
+        // 正在生成中不能删除
+        if (session.role === 'assistant' && session.executionRoot?.status === 'running') {
+            return { allowed: false, reason: 'Cannot delete while generating' };
+        }
+        
+        return { allowed: true };
+    }
+
+    /**
+     * 删除消息
+     */
+    async deleteMessage(
+        id: string, 
+        options: DeleteOptions = { 
+            mode: 'soft', 
+            cascade: false, 
+            deleteAssociatedResponses: true 
+        }
+    ): Promise<void> {
+    const result = this.findSessionByAnyId(id);
+    
+    if (!result) {
+        console.warn(`[SessionManager] Session not found for id: ${id}`);
+        return; // 改为静默返回而不是抛出错误
+    }
+    
+    const { session, index: sessionIndex } = result;
+    
+    // 检查权限
+    const check = this.canDeleteMessage(id);
+        if (!check.allowed) {
+            throw new Error(check.reason || 'Cannot delete');
+        }
+        
+        const toDelete: SessionGroup[] = [session];
+        
+        // 确定删除范围
+        if (session.role === 'user' && options.deleteAssociatedResponses) {
+            for (let i = sessionIndex + 1; i < this.sessions.length; i++) {
+                if (this.sessions[i].role === 'assistant') {
+                    toDelete.push(this.sessions[i]);
+                } else {
+                    break;
+                }
+            }
+        }
+        
+        if (options.cascade) {
+            toDelete.push(...this.sessions.slice(sessionIndex + 1));
+        }
+        
+        // 持久化删除
+        for (const s of toDelete) {
+            if (s.persistedNodeId && this.currentSessionId) {
+                if (options.mode === 'soft') {
+                    await this.sessionEngine.deleteMessage(this.currentSessionId, s.persistedNodeId);
+                } else {
+                    await (this.sessionEngine as any).hardDeleteMessage?.(
+                        this.currentSessionId, 
+                        s.persistedNodeId
+                    );
+                }
+            }
+        }
+        
+        // 更新内存
+        const deleteIds = new Set(toDelete.map(s => s.id));
+        this.sessions = this.sessions.filter(s => !deleteIds.has(s.id));
+        
+        // 通知 UI
+        this.emit({ 
+            type: 'messages_deleted', 
+            payload: { deletedIds: Array.from(deleteIds) } 
+        } as any);
+        
+        if (this.sessions.length === 0) {
+            this.emit({ type: 'session_cleared', payload: {} } as any);
+        }
+    }
+
+    // ================== 重试功能 ==================
+
+    /**
+     * 检查是否可以重试
+     */
+    canRetry(sessionGroupId: string): { allowed: boolean; reason?: string } {
+        const session = this.sessions.find(s => s.id === sessionGroupId);
+        if (!session) {
+            return { allowed: false, reason: 'Message not found' };
+        }
+        
+        if (session.role === 'user') {
+            return { allowed: true }; // User message 使用 resend
+        }
+        
+        if (session.executionRoot?.status === 'running') {
+            return { allowed: false, reason: 'Already generating' };
+        }
+        
+        // 检查是否有对应的 user message
+        const idx = this.sessions.indexOf(session);
+        for (let i = idx - 1; i >= 0; i--) {
+            if (this.sessions[i].role === 'user') {
+                return { allowed: true };
+            }
+        }
+        
+        return { allowed: false, reason: 'No user message found' };
+    }
+
+    /**
+     * 重试生成（针对 Assistant）
+     */
+    async retryGeneration(
+        assistantSessionId: string,
+        options: RetryOptions = { preserveCurrent: true, navigateToNew: true }
+    ): Promise<void> {
+        const check = this.canRetry(assistantSessionId);
+        if (!check.allowed) {
+            throw new Error(check.reason);
+        }
+        
+        const assistantSession = this.sessions.find(s => s.id === assistantSessionId);
+        if (!assistantSession || assistantSession.role !== 'assistant') {
+            throw new Error('Invalid assistant session');
+        }
+        
+        // 找到对应的 user message
+        const assistantIndex = this.sessions.indexOf(assistantSession);
+        let userSession: SessionGroup | null = null;
+        
+        for (let i = assistantIndex - 1; i >= 0; i--) {
+            if (this.sessions[i].role === 'user') {
+                userSession = this.sessions[i];
+                break;
+            }
+        }
+        
+        if (!userSession) {
+            throw new Error('No user message found');
+        }
+        
+        // 处理当前回复
+        if (!options.preserveCurrent) {
+            await this.deleteMessage(assistantSessionId, {
+                mode: 'soft',
+                cascade: false,
+                deleteAssociatedResponses: false
+            });
+        }
+
+        // 获取 agent ID
+        const agentId = options.agentId || 
+            assistantSession.executionRoot?.data.metaInfo?.agentId ||
+            'default';
+        
+        // 通知 UI 重试开始
+        this.emit({ 
+            type: 'retry_started', 
+            payload: { originalId: assistantSessionId, newId: '' } 
+        } as any);
+        
+        // 重新执行（不添加新的 user message）
+        await this.runUserQueryInternal(
+            userSession.content || '',
+            [],
+            agentId,
+            {
+                skipUserMessage: true,
+                parentUserNodeId: userSession.persistedNodeId
+            }
+        );
+    }
+
+    /**
+     * 重新发送用户消息
+     */
+    async resendUserMessage(userSessionId: string): Promise<void> {
+        const session = this.sessions.find(s => s.id === userSessionId);
+        if (!session || session.role !== 'user') {
+            throw new Error('Invalid user session');
+        }
+        
+        // 删除该消息之后的所有回复
+        const sessionIndex = this.sessions.indexOf(session);
+        const toDelete: string[] = [];
+        
+        for (let i = sessionIndex + 1; i < this.sessions.length; i++) {
+            toDelete.push(this.sessions[i].id);
+        }
+        
+        for (const id of toDelete) {
+            await this.deleteMessage(id, {
+                mode: 'soft',
+                cascade: false,
+                deleteAssociatedResponses: false
+            });
+        }
+        
+        // 重新发送
+    // 2. ✨ [核心修复] 重新生成回复，但不创建新的用户消息
+    await this.runUserQueryInternal(
+        session.content || '',    // 使用现有用户消息的内容
+        [],                       // 不需要文件（已经存储在原消息中）
+        'default',                // 使用默认 executor
+        {
+            skipUserMessage: true,                    // ✨ 跳过用户消息创建
+            parentUserNodeId: session.persistedNodeId // ✨ 关联到现有用户消息
+        }
+    );
+    }
+
+    // ================== 编辑功能 ==================
+
+    /**
+     * 检查是否可以编辑
+     */
+    canEdit(sessionGroupId: string): { allowed: boolean; reason?: string } {
+        const session = this.sessions.find(s => s.id === sessionGroupId);
+        if (!session) {
+            return { allowed: false, reason: 'Message not found' };
+        }
+        
+        if (session.role === 'assistant' && session.executionRoot?.status === 'running') {
+            return { allowed: false, reason: 'Cannot edit while generating' };
+        }
+        
+        return { allowed: true };
+    }
+
+    /**
+     * 更新内容（兼容旧接口）
+     */
+    async updateContent(id: string, content: string, type: 'user' | 'node'): Promise<void> {
+        await this.editMessage(id, content, false);
+    }
+
+    /**
+     * 编辑消息
+     */
+    async editMessage(
+        sessionGroupId: string, 
+        newContent: string,
+        autoRerun: boolean = false
+    ): Promise<void> {
+        const check = this.canEdit(sessionGroupId);
+        if (!check.allowed) {
+            throw new Error(check.reason);
+        }
+        
+        const session = this.sessions.find(s => s.id === sessionGroupId);
+        if (!session) return;
+        
+        // 更新内存状态
+        if (session.role === 'user') {
+            session.content = newContent;
+        } else if (session.executionRoot) {
+            session.executionRoot.data.output = newContent;
+        }
+        
+        // 持久化
+        if (session.persistedNodeId && this.currentSessionId && this.currentNodeId) {
+            if (session.role === 'user') {
+                // 创建新分支
+                const newNodeId = await this.sessionEngine.editMessage(
+                    this.currentNodeId,
+                    this.currentSessionId,
+                    session.persistedNodeId,
+                    newContent
+                );
+                
+                session.persistedNodeId = newNodeId;
+                
+                if (autoRerun) {
+                    // 删除关联的 assistant responses
+                    const sessionIndex = this.sessions.indexOf(session);
+                    const toDelete: string[] = [];
+                    
+                    for (let i = sessionIndex + 1; i < this.sessions.length; i++) {
+                        if (this.sessions[i].role === 'assistant') {
+                            toDelete.push(this.sessions[i].id);
+                        } else {
+                            break;
+                        }
+                    }
+                    
+                    for (const id of toDelete) {
+                        await this.deleteMessage(id, {
+                            mode: 'soft',
+                            cascade: false,
+                            deleteAssociatedResponses: false
+                        });
+                    }
+                    
+                    // 重新生成
+                    await this.runUserQueryInternal(newContent, [], 'default', {
+                        skipUserMessage: true,
+                        parentUserNodeId: newNodeId
+                    });
+                }
+            } else {
+                // Assistant 消息直接更新
+                await this.sessionEngine.updateNode(
+                    this.currentSessionId,
+                    session.persistedNodeId,
+                    { content: newContent }
+                );
+            }
+        }
+        
+        // 通知 UI
+        this.emit({ 
+            type: 'message_edited', 
+            payload: { sessionId: sessionGroupId, newContent } 
+        } as any);
+    }
+
+    // ================== 分支导航 ==================
+
+    /**
+     * 获取兄弟分支
+     */
+    async getSiblings(sessionGroupId: string): Promise<SessionGroup[]> {
+        const session = this.sessions.find(s => s.id === sessionGroupId);
+        if (!session?.persistedNodeId || !this.currentSessionId) {
+            return session ? [session] : [];
+        }
+        
+        const siblings = await this.sessionEngine.getNodeSiblings(
+            this.currentSessionId, 
+            session.persistedNodeId
+        );
+        
+        return siblings.map(node => this.chatNodeToSessionGroup(node)).filter(Boolean) as SessionGroup[];
+    }
+
+    /**
+     * 切换到兄弟分支
+     */
+    async switchToSibling(sessionGroupId: string, siblingIndex: number): Promise<void> {
+        const siblings = await this.getSiblings(sessionGroupId);
+        
+        if (siblingIndex < 0 || siblingIndex >= siblings.length) {
+            throw new Error('Invalid sibling index');
+        }
+        
+        const targetSibling = siblings[siblingIndex];
+        const currentIndex = this.sessions.findIndex(s => s.id === sessionGroupId);
+        
+        if (currentIndex !== -1) {
+            // 替换当前 session
+            this.sessions[currentIndex] = {
+                ...targetSibling,
+                siblingIndex,
+                siblingCount: siblings.length
+            };
+            
+            // 通知 UI
+            this.emit({
+                type: 'sibling_switch',
+                payload: { 
+                    sessionId: sessionGroupId, 
+                    newIndex: siblingIndex, 
+                    total: siblings.length 
+                }
+            } as any);
+        }
+    }
+
+    // ================== 核心执行逻辑 ==================
+
+    /**
+     * 内部执行方法（支持更多选项）
+     */
+    private async runUserQueryInternal(
+        text: string,
+        files: File[],
+        executorId: string,
+        options: {
+            skipUserMessage?: boolean;
+            parentUserNodeId?: string;
+        } = {}
+    ): Promise<void> {
+        if (this.isGenerating) return;
+        if (!this.currentNodeId || !this.currentSessionId) {
+            throw new Error('No session loaded');
+        }
+        
+    // ✨ [新增] 参数一致性检查
+    if (options.skipUserMessage && !options.parentUserNodeId) {
+        console.warn('[SessionManager] skipUserMessage=true but no parentUserNodeId provided');
+    }
+        this.isGenerating = true;
+        this.abortController = new AbortController();
+        
+        try {
+            let userNodeId = options.parentUserNodeId;
+            
+            // 1. 创建 User Message（如果需要）
+            if (!options.skipUserMessage) {
+                userNodeId = await this.sessionEngine.appendMessage(
+                    this.currentNodeId,
+                    this.currentSessionId,
+                    'user',
+                    text,
+                    { files: files.map(f => ({ name: f.name, type: f.type })) }
+                );
+                
+                const userSession: SessionGroup = {
+                    id: generateUUID(),
+                    timestamp: Date.now(),
+                    role: 'user',
+                    content: text,
+                    files: files.map(f => ({ name: f.name, type: f.type })),
+                    persistedNodeId: userNodeId
+                };
+                this.sessions.push(userSession);
+                this.emit({ type: 'session_start', payload: userSession });
+            }
+                    // ✨ [修复] 如果跳过用户消息但没有 userNodeId，抛出明确错误
+        else if (!userNodeId) {
+            throw new Error('skipUserMessage=true requires a valid parentUserNodeId');
+        }
+
+            if (!userNodeId) {
+                throw new Error('No user node ID available');
+            }
+            
+            // 2. 解析 Executor
+            let executor = this.executorRegistry.get(executorId);
+            let metaInfo: any = {};
+            let agentName = 'Assistant';
+            let agentIcon = '🤖';
+
+            if (!executor) {
+                try {
+                    const agentDef = await this.agentService.getAgentConfig(executorId);
+                    
+                    if (agentDef?.config) {
+                        const connection = await this.agentService.getConnection(agentDef.config.connectionId);
+                        
+                        if (connection) {
+                            executor = new AgentExecutor(
+                                connection,
+                                agentDef.config.modelId || connection.model,
+                                agentDef.config.systemPrompt,
+                                this.abortController.signal
+                            );
+                            agentName = agentDef.name || 'Assistant';
+                            agentIcon = agentDef.icon || '🤖';
+                            metaInfo = {
+                                provider: connection.provider,
+                                connectionName: connection.name,
+                                model: agentDef.config.modelId || connection.model,
+                                agentId: executorId
+                            };
+                        }
+                    }
+                } catch (e) {
+                    console.warn(`Failed to resolve agent ${executorId}:`, e);
+                }
+            }
+
+            // Fallback
+            if (!executor) {
+                const defaultConn = await this.agentService.getConnection('default');
+                if (defaultConn) {
+                    executor = new AgentExecutor(
+                        defaultConn,
+                        defaultConn.model || '',
+                        undefined,
+                        this.abortController.signal
+                    );
+                    metaInfo = { agentId: 'default' };
+                } else {
+                    throw new Error('No executor available');
+                }
+            }
+
+            // 3. 创建 Assistant Message
+            const assistantNodeId = await this.sessionEngine.appendMessage(
+                this.currentNodeId,
+                this.currentSessionId,
+                'assistant',
+                '',
+                { agentId: executorId, agentName, agentIcon, metaInfo, status: 'running' }
+            );
+
+            // 4. 创建 UI 节点
+            const uiRootId = generateUUID();
+            const rootNode: ExecutionNode = {
+                id: uiRootId,
+                name: agentName,
+                icon: agentIcon,
+                type: executor.type === 'atomic' ? 'agent' : 'router',
+                status: 'running',
+                startTime: Date.now(),
+                data: { output: '', thought: '', metaInfo },
+                children: []
+            };
+
+            const aiSession: SessionGroup = {
+                id: generateUUID(),
+                timestamp: Date.now(),
+                role: 'assistant',
+                executionRoot: rootNode,
+                persistedNodeId: assistantNodeId
+            };
+            this.sessions.push(aiSession);
+
+            this.emit({ type: 'session_start', payload: aiSession });
+            this.emit({ type: 'node_start', payload: { node: rootNode } });
+
+            // 5. 执行
+            let accumulatedOutput = '';
+            let accumulatedThinking = '';
+            let lastPersistTime = Date.now();
+            const PERSIST_INTERVAL = 500;
+
+            const persistAccumulated = () => {
+                if (!accumulatedOutput && !accumulatedThinking) return;
+                
+                const outputSnapshot = accumulatedOutput;
+                const thinkingSnapshot = accumulatedThinking;
+                
+                this.persistQueue.enqueue(async () => {
+                    try {
+                        await this.sessionEngine.updateNode(
+                            this.currentSessionId!,
+                            assistantNodeId,
+                            {
+                                content: outputSnapshot,
+                                meta: { thinking: thinkingSnapshot, status: 'running' }
+                            }
+                        );
+                    } catch (e) {
+                        console.warn('[SessionManager] Persist failed:', e);
+                    }
+                });
+            };
+
+            const history = await this.buildMessageHistory(false);
+
+            const context: StreamingContext = {
+                executionId: generateUUID(),
+                depth: 0,
+                parentId: uiRootId,
+                sessionId: this.currentSessionId,
+                signal: this.abortController.signal,
+                variables: new Map<string, SessionVariable>([
+                    ['history', history],
+                    ['files', files]
+                ]),
+                results: new Map(),
+                callbacks: {
+                    onThinking: (delta, nodeId) => {
+                        accumulatedThinking += delta;
+                        this.updateNodeData(nodeId || uiRootId, delta, 'thought');
+                        this.emit({ 
+                            type: 'node_update', 
+                            payload: { nodeId: nodeId || uiRootId, chunk: delta, field: 'thought' } 
+                        });
+                        
+                        if (Date.now() - lastPersistTime > PERSIST_INTERVAL) {
+                            lastPersistTime = Date.now();
+                            persistAccumulated();
+                        }
+                    },
+                    onOutput: (delta, nodeId) => {
+                        accumulatedOutput += delta;
+                        this.updateNodeData(nodeId || uiRootId, delta, 'output');
+                        this.emit({ 
+                            type: 'node_update', 
+                            payload: { nodeId: nodeId || uiRootId, chunk: delta, field: 'output' } 
+                        });
+                        
+                        if (Date.now() - lastPersistTime > PERSIST_INTERVAL) {
+                            lastPersistTime = Date.now();
+                            persistAccumulated();
+                        }
+                    },
+                    onNodeStart: (node) => {
+                        this.addNodeToTree(node);
+                        this.emit({ type: 'node_start', payload: { parentId: node.parentId, node } });
+                    },
+                    onNodeStatus: (nodeId, status) => {
+                        this.setNodeStatus(nodeId, status);
+                        this.emit({ type: 'node_status', payload: { nodeId, status } });
+                    },
+                    onNodeMetaUpdate: (nodeId, meta) => {
+                        this.updateNodeMeta(nodeId, meta);
+                        this.emit({ type: 'node_update', payload: { nodeId, metaInfo: meta } });
+                    }
+                }
+            };
+
+            const result = await executor.execute(text, context);
+
+            // 6. 最终持久化
+            if ((!rootNode.data.output || rootNode.data.output === '') && result.output) {
+                const finalOutput = typeof result.output === 'string' 
+                    ? result.output 
+                    : JSON.stringify(result.output, null, 2);
+                accumulatedOutput = finalOutput;
+                rootNode.data.output = finalOutput;
+                this.emit({ 
+                    type: 'node_update', 
+                    payload: { nodeId: uiRootId, chunk: finalOutput, field: 'output' } 
+                });
+            }
+
+            await this.persistQueue.flush();
+
+            await this.sessionEngine.updateNode(
+                this.currentSessionId!,
+                assistantNodeId,
+                {
+                    content: accumulatedOutput,
+                    status: 'active',
+                    meta: {
+                        thinking: accumulatedThinking,
+                        status: 'success',
+                        endTime: Date.now(),
+                        tokenUsage: result.metadata?.tokenUsage
+                    }
+                }
+            );
+
+            rootNode.status = 'success';
+            rootNode.endTime = Date.now();
+            this.emit({ type: 'node_status', payload: { nodeId: uiRootId, status: 'success' } });
+            this.emit({ type: 'finished', payload: { sessionId: aiSession.id } });
+
+        } catch (error: any) {
+            console.error("[SessionManager] Error:", error);
+            
+            const currentSession = this.sessions[this.sessions.length - 1];
+            if (currentSession?.role === 'assistant' && currentSession.executionRoot) {
+                const node = currentSession.executionRoot;
+                node.status = 'failed';
+                
+                const isAborted = error.name === 'AbortError' || this.abortController?.signal.aborted;
+                const errorMessage = isAborted 
+                    ? '*[Generation interrupted by user]*' 
+                    : `**Error**: ${error.message}`;
+                
+                node.data.output += `\n\n${errorMessage}`;
+                
+                if (currentSession.persistedNodeId) {
+                    try {
+                        await this.sessionEngine.updateNode(
+                            this.currentSessionId!,
+                            currentSession.persistedNodeId,
+                            {
+                                content: node.data.output,
+                                status: 'active',
+                                meta: { status: isAborted ? 'interrupted' : 'failed', error: error.message }
+                            }
+                        );
+                    } catch (e) {
+                        console.error('[SessionManager] Failed to persist error state:', e);
+                    }
+                }
+
+                this.emit({ type: 'node_status', payload: { nodeId: node.id, status: 'failed' } });
+                this.emit({ 
+                    type: 'node_update', 
+                    payload: { nodeId: node.id, chunk: `\n\nError: ${error.message}`, field: 'output' } 
+                });
+            }
+        } finally {
+            this.isGenerating = false;
+            this.abortController = null;
+        }
+    }
+
+    /**
+     * 公共执行方法（向后兼容）
+     */
+    async runUserQuery(text: string, files: File[], executorId: string): Promise<void> {
+        return this.runUserQueryInternal(text, files, executorId, {});
+    }
+
+    // ================== 其他现有方法保持不变 ==================
+
+    registerExecutor(executor: IExecutor) {
         this.executorRegistry.set(executor.id, executor);
     }
 
@@ -94,24 +874,6 @@ export class SessionManager {
         }
         
         return list;
-    }
-
-    // --- 状态管理 ---
-
-    getSessions() { return this.sessions; }
-    getCurrentSessionId() { return this.currentSessionId; }
-    
-    // ✨ [重构] isDirty 不再由 SessionManager 管理，由外部判断
-    hasUnsavedChanges() { return false; }
-    setDirty(d: boolean) { /* no-op, Engine 自动保存 */ }
-
-    onEvent(handler: (event: OrchestratorEvent) => void) {
-        this.listeners.add(handler);
-        return () => this.listeners.delete(handler);
-    }
-
-    private emit(event: OrchestratorEvent) {
-        this.listeners.forEach(h => h(event));
     }
 
     abort() {
@@ -216,34 +978,6 @@ export class SessionManager {
         return null;
     }
 
-    // ================== 兼容旧的 load 方法 ==================
-
-    /**
-     * @deprecated 使用 loadSession(sessionId) 替代
-     * 保留此方法仅为向后兼容
-     */
-    load(data: any) {
-        console.warn('[SessionManager] load() is deprecated. Use loadSession(sessionId) instead.');
-        
-        if (Array.isArray(data)) {
-            this.sessions = data;
-        } else if (data && data.sessions) {
-            this.sessions = data.sessions;
-        }
-    }
-
-    serialize() {
-        // 此方法不再需要，持久化由 Engine 处理
-        console.warn('[SessionManager] serialize() is deprecated.');
-        return { version: 1, sessions: this.sessions };
-    }
-
-    // ================== 构建 LLM 消息历史 ==================
-
-    /**
-     * ✨ [修复] 从 Engine 构建消息历史（不包含当前正在处理的消息）
-     * @param excludeLastUserMessage 是否排除最后一条用户消息（默认 true）
-     */
     private async buildMessageHistory(includeLastUserMessage: boolean = false): Promise<ChatMessage[]> {
         if (!this.currentNodeId || !this.currentSessionId) return [];
         
@@ -275,6 +1009,7 @@ export class SessionManager {
             return [];
         }
     }
+
 
     // ================== 导出 Markdown ==================
 
@@ -316,411 +1051,7 @@ export class SessionManager {
         return md;
     }
 
-    /**
-     * 核心执行逻辑
-     * @param text 用户输入文本
-     * @param files 用户上传附件
-     * @param executorId 选择的执行器 ID
-     */
-    async runUserQuery(text: string, files: File[], executorId: string) {
-        if (this.isGenerating) return;
-        if (!this.currentNodeId || !this.currentSessionId) {
-            throw new Error('No session loaded. Call loadSession() first.');
-        }
-        
-        console.group(`[SessionManager] runUserQuery: "${executorId}"`);
-        
-        this.isGenerating = true;
-        this.abortController = new AbortController();
-
-        // ✨ [修复 3.2] 用于回滚的索引
-        const sessionIndexBeforeQuery = this.sessions.length;
-
-        try {
-            // ============================================
-            // 1. 持久化 User Message 到 Engine
-            // ============================================
-            const userNodeId = await this.sessionEngine.appendMessage(
-                this.currentNodeId,
-                this.currentSessionId,
-                'user',
-                text,
-                { 
-                    files: files.map(f => ({ name: f.name, type: f.type })),
-                    timestamp: Date.now()
-                }
-            );
-            console.log(`[SessionManager] User message persisted: ${userNodeId}`);
-
-            // 2. 创建 User Session 并通知 UI
-            const userSession: SessionGroup = {
-                id: generateUUID(),
-                timestamp: Date.now(),
-                role: 'user',
-                content: text,
-                files: files.map(f => ({ name: f.name, type: f.type })),
-                persistedNodeId: userNodeId
-            };
-            this.sessions.push(userSession);
-            this.emit({ type: 'session_start', payload: userSession });
-
-            // ============================================
-            // 3. 解析 Executor
-            // ============================================
-            let executor = this.executorRegistry.get(executorId);
-            let metaInfo: any = {};
-            let agentName = 'Assistant';
-            let agentIcon = '🤖';
-
-            if (!executor) {
-                console.log(`Executor "${executorId}" not in registry. Trying dynamic resolution...`);
-                try {
-                    const agentDef = await this.agentService.getAgentConfig(executorId);
-                    
-                    if (agentDef && agentDef.config) {
-                        const targetConnId = agentDef.config.connectionId;
-                        const connection = await this.agentService.getConnection(targetConnId);
-                        
-                        if (connection) {
-                            executor = new AgentExecutor(
-                                connection, 
-                                agentDef.config.modelId || connection.model, 
-                                agentDef.config.systemPrompt,
-                                this.abortController.signal // ✨ [修复 3.1] 传递 signal
-                            );
-                            agentName = agentDef.name || 'Assistant';
-                            agentIcon = agentDef.icon || '🤖';
-                            
-                            metaInfo = {
-                                provider: connection.provider,
-                                connectionName: connection.name,
-                                model: agentDef.config.modelId || connection.model,
-                                systemPrompt: agentDef.config.systemPrompt
-                            };
-                        }
-                    }
-                } catch (e) {
-                    console.warn(`Failed to resolve agent ${executorId}:`, e);
-                }
-            }
-
-            // Fallback to default
-            if (!executor) {
-                console.log('Fallback: Using default connection.');
-                const defaultConn = await this.agentService.getConnection('default');
-                
-                if (defaultConn) {
-                    executor = new AgentExecutor(
-                        defaultConn, 
-                        defaultConn.model || '',
-                        undefined,
-                        this.abortController.signal // ✨ [修复 3.1] 传递 signal
-                    );
-                    metaInfo = { note: "Fallback to default connection" };
-                } else {
-                    throw new Error(`Executor '${executorId}' not found and no default connection available.`);
-                }
-            }
-
-            // ============================================
-            // 4. 预创建 Assistant Message（空内容）
-            // ============================================
-            const assistantNodeId = await this.sessionEngine.appendMessage(
-                this.currentNodeId,
-                this.currentSessionId,
-                'assistant',
-                '', // 初始为空，流式更新
-                { 
-                    agentId: executorId,
-                    agentName: agentName,
-                    agentIcon: agentIcon,
-                    metaInfo: metaInfo,
-                    thinking: '',
-                    status: 'running'
-                }
-            );
-            console.log(`[SessionManager] Assistant node created: ${assistantNodeId}`);
-
-            // 5. 创建 UI Root Node
-            const uiRootId = generateUUID();
-            const rootNode: ExecutionNode = {
-                id: uiRootId,
-                name: agentName,
-                icon: agentIcon,
-                type: executor.type === 'atomic' ? 'agent' : 'router',
-                status: 'running',
-                startTime: Date.now(),
-                data: { 
-                    output: '', 
-                    thought: '',
-                    metaInfo: metaInfo
-                },
-                children: []
-            };
-            
-            const aiSession: SessionGroup = {
-                id: generateUUID(),
-                timestamp: Date.now(),
-                role: 'assistant',
-                executionRoot: rootNode,
-                persistedNodeId: assistantNodeId
-            };
-            this.sessions.push(aiSession);
-            
-            this.emit({ type: 'session_start', payload: aiSession });
-            this.emit({ type: 'node_start', payload: { node: rootNode } });
-
-            // ============================================
-            // 6. 构建 StreamingContext（带持久化回调）
-            // ============================================
-            
-            // 累积器：用于批量持久化
-            let accumulatedOutput = '';
-            let accumulatedThinking = '';
-            let lastPersistTime = Date.now();
-            const PERSIST_INTERVAL = 500; // 每 500ms 持久化一次
-
-            // ✨ [修复 3.4] 使用队列确保持久化顺序
-            const persistAccumulated = () => {
-                if (!accumulatedOutput && !accumulatedThinking) return;
-                
-                const outputSnapshot = accumulatedOutput;
-                const thinkingSnapshot = accumulatedThinking;
-                
-                this.persistQueue.enqueue(async () => {
-                    try {
-                        await this.sessionEngine.updateNode(
-                            this.currentSessionId!,
-                            assistantNodeId,
-                            {
-                                content: outputSnapshot,
-                                meta: {
-                                    thinking: thinkingSnapshot,
-                                    status: 'running'
-                                }
-                            }
-                        );
-                    } catch (e) {
-                        console.warn('[SessionManager] Failed to persist streaming content:', e);
-                    }
-                });
-            };
-
-            // ✨ [修复 3.3] 使用更清晰的参数名
-            const history = await this.buildMessageHistory(false);
-
-            const context: StreamingContext = {
-                executionId: generateUUID(),
-                depth: 0,
-                parentId: uiRootId,
-                sessionId: this.currentSessionId,
-                signal: this.abortController.signal, // ✨ [修复 3.1] 添加 signal
-                variables: new Map<string, SessionVariable>([
-                    ['history', history],
-                    ['files', files]
-                ]),
-                results: new Map(),
-                
-                callbacks: {
-                    onThinking: (delta, nodeId) => {
-                        const targetId = nodeId || uiRootId;
-                        accumulatedThinking += delta;
-                        
-                        // 更新内存状态
-                        this.updateNodeData(targetId, delta, 'thought');
-                        this.emit({ 
-                            type: 'node_update', 
-                            payload: { nodeId: targetId, chunk: delta, field: 'thought' } 
-                        });
-
-                        // 节流持久化
-                        const now = Date.now();
-                        if (now - lastPersistTime > PERSIST_INTERVAL) {
-                            lastPersistTime = now;
-                            persistAccumulated();
-                        }
-                    },
-                    
-                    onOutput: (delta, nodeId) => {
-                        const targetId = nodeId || uiRootId;
-                        accumulatedOutput += delta;
-                        
-                        this.updateNodeData(targetId, delta, 'output');
-                        this.emit({ 
-                            type: 'node_update', 
-                            payload: { nodeId: targetId, chunk: delta, field: 'output' } 
-                        });
-
-                        const now = Date.now();
-                        if (now - lastPersistTime > PERSIST_INTERVAL) {
-                            lastPersistTime = now;
-                            persistAccumulated();
-                        }
-                    },
-                    
-                    onNodeStart: (node) => {
-                        this.addNodeToTree(node);
-                        this.emit({ 
-                            type: 'node_start', 
-                            payload: { parentId: node.parentId, node: node } 
-                        });
-                    },
-                    
-                    onNodeStatus: (nodeId, status) => {
-                        this.setNodeStatus(nodeId, status);
-                        this.emit({ 
-                            type: 'node_status', 
-                            payload: { nodeId, status } 
-                        });
-                    },
-                    
-                    onNodeMetaUpdate: (nodeId, meta) => {
-                        this.updateNodeMeta(nodeId, meta);
-                        this.emit({ 
-                            type: 'node_update', 
-                            payload: { nodeId, metaInfo: meta } 
-                        });
-                    }
-                }
-            };
-
-            // ============================================
-            // 7. 执行 Agent
-            // ============================================
-            const result = await executor.execute(text, context);
-
-            // ============================================
-            // 8. 最终持久化
-            // ============================================
-            
-            // 确保所有内容都被持久化
-            if ((!rootNode.data.output || rootNode.data.output === '') && result.output) {
-                const finalOutput = typeof result.output === 'string' 
-                    ? result.output 
-                    : JSON.stringify(result.output, null, 2);
-                accumulatedOutput = finalOutput;
-                rootNode.data.output = finalOutput;
-                this.emit({ 
-                    type: 'node_update', 
-                    payload: { nodeId: uiRootId, chunk: finalOutput, field: 'output' } 
-                });
-            }
-
-            // ✨ [修复 3.4] 确保队列刷新后再进行最终持久化
-            await this.persistQueue.flush();
-
-            await this.sessionEngine.updateNode(
-                this.currentSessionId!,
-                assistantNodeId,
-                {
-                    content: accumulatedOutput,
-                    status: 'active',
-                    meta: {
-                        thinking: accumulatedThinking,
-                        status: 'success',
-                        endTime: Date.now(),
-                        tokenUsage: result.metadata?.tokenUsage
-                    }
-                }
-            );
-
-            // 9. 更新 UI 状态
-            rootNode.status = 'success';
-            rootNode.endTime = Date.now();
-            this.emit({ type: 'node_status', payload: { nodeId: uiRootId, status: 'success' } });
-            this.emit({ type: 'finished', payload: { sessionId: aiSession.id } });
-
-            console.log('[SessionManager] Query completed successfully');
-
-        } catch (error: any) {
-            console.error("[SessionManager] Error:", error);
-            
-            // ✨ [修复 3.2] 处理错误状态
-            const currentSession = this.sessions[this.sessions.length - 1];
-            if (currentSession?.role === 'assistant' && currentSession.executionRoot) {
-                const node = currentSession.executionRoot;
-                node.status = 'failed';
-                
-                // 检查是否是中断错误
-                const isAborted = error.name === 'AbortError' || this.abortController?.signal.aborted;
-                const errorMessage = isAborted 
-                    ? '*[Generation interrupted by user]*' 
-                    : `**Error**: ${error.message}`;
-                
-                node.data.output += `\n\n${errorMessage}`;
-                
-                // 持久化错误状态
-                if (currentSession.persistedNodeId) {
-                    try {
-                        await this.sessionEngine.updateNode(
-                            this.currentSessionId!,
-                            currentSession.persistedNodeId,
-                            {
-                                content: node.data.output,
-                                status: 'active',
-                                meta: { 
-                                    status: isAborted ? 'interrupted' : 'failed', 
-                                    error: error.message 
-                                }
-                            }
-                        );
-                    } catch (e) {
-                        console.error('[SessionManager] Failed to persist error state:', e);
-                    }
-                }
-
-                this.emit({ type: 'node_status', payload: { nodeId: node.id, status: 'failed' } });
-                this.emit({ 
-                    type: 'node_update', 
-                    payload: { nodeId: node.id, chunk: `\n\nError: ${error.message}`, field: 'output' } 
-                });
-            }
-        } finally {
-            this.isGenerating = false;
-            this.abortController = null;
-            console.groupEnd();
-        }
-    }
-
-    // ================== 编辑内容 ==================
-
-    /**
-     * ✨ [重构] 更新内容并持久化
-     */
-    async updateContent(id: string, content: string, type: 'user' | 'node') {
-        if (type === 'user') {
-            const session = this.sessions.find(s => s.id === id);
-            if (session) {
-                session.content = content;
-                
-                // 持久化
-                if (session.persistedNodeId && this.currentSessionId) {
-                    await this.sessionEngine.updateNode(
-                        this.currentSessionId,
-                        session.persistedNodeId,
-                        { content }
-                    );
-                }
-            }
-        } else {
-            this.updateNodeData(id, content, 'output', true);
-            
-            // 查找对应的 session 并持久化
-            for (const session of this.sessions) {
-                if (session.executionRoot?.id === id && session.persistedNodeId) {
-                    await this.sessionEngine.updateNode(
-                        this.currentSessionId!,
-                        session.persistedNodeId,
-                        { content }
-                    );
-                    break;
-                }
-            }
-        }
-    }
-
-    // ================== 树操作辅助方法 ==================
-
+    // 树操作辅助方法
     private updateNodeData(nodeId: string, data: string, field: 'thought' | 'output', replace = false) {
         const findAndUpdate = (nodes: ExecutionNode[]): boolean => {
             for (const node of nodes) {

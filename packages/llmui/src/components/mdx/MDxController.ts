@@ -170,6 +170,36 @@ export class MDxController {
 
     get content() { return this.currentContent; }
 
+    /**
+     * ✨ [新增] 设置内容（用于编辑取消时恢复）
+     */
+    setContent(content: string) {
+        this.currentContent = content;
+        if (this.isInitialized && this.editor) {
+            this.editor.setText(content);
+        }
+    }
+
+    /**
+     * ✨ [新增] 获取当前是否处于编辑模式
+     */
+    isEditing(): boolean {
+        return !this.isReadOnly;
+    }
+
+    /**
+     * ✨ [新增] 强制进入指定模式
+     */
+    async setMode(mode: 'edit' | 'render') {
+        if (!this.editor) return;
+        
+        const shouldBeReadOnly = mode === 'render';
+        if (this.isReadOnly !== shouldBeReadOnly) {
+            this.isReadOnly = shouldBeReadOnly;
+            await this.editor.switchToMode(mode);
+        }
+    }
+
     destroy() {
         this.editor?.destroy();
         this.editor = null;

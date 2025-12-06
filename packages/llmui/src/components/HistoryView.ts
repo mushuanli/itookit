@@ -1,14 +1,9 @@
 // @file llm-ui/components/HistoryView.ts
-import { OrchestratorEvent, SessionGroup, ExecutionNode } from '../types';
+import { OrchestratorEvent, SessionGroup, ExecutionNode,NodeAction, NodeActionCallback } from '../types';
 import { NodeRenderer } from './NodeRenderer';
 import { MDxController } from './mdx/MDxController';
 // ✨ [修改] 引入 Modal
 import { escapeHTML, Modal } from '@itookit/common';
-
-// ✨ [新增] 定义节点动作接口
-export interface NodeActionCallback {
-    (action: 'retry' | 'delete' | 'edit', nodeId: string): void;
-}
 
 /**
  * ✨ [新增] 包装 common Modal 为 Promise 形式，
@@ -17,16 +12,43 @@ export interface NodeActionCallback {
 async function showConfirmDialog(message: string): Promise<boolean> {
     return new Promise((resolve) => {
         new Modal('Confirmation', `<p>${escapeHTML(message)}</p>`, {
-            type: 'danger',     // 危险操作，使用红色按钮
+            type: 'danger',
             confirmText: 'Delete',
             cancelText: 'Cancel',
-            onConfirm: () => {
-                resolve(true);
-            },
-            onCancel: () => {
-                resolve(false);
-            }
+            onConfirm: () => resolve(true),
+            onCancel: () => resolve(false)
         }).show();
+    });
+}
+
+async function showEditConfirmDialog(options: {
+    title: string;
+    message: string;
+    options: Array<{ id: string; label: string; primary?: boolean }>;
+}): Promise<string> {
+    return new Promise((resolve) => {
+        const buttonsHtml = options.options.map(opt => 
+            `<button class="modal-btn ${opt.primary ? 'modal-btn--primary' : ''}" data-action="${opt.id}">${opt.label}</button>`
+        ).join('');
+        
+        const modal = new Modal(options.title, `
+            <p>${options.message}</p>
+            <div class="modal-actions">${buttonsHtml}</div>
+        `, {
+            //showFooter: false,
+            onCancel: () => resolve('cancel')
+        });
+        
+        modal.show();
+        
+        // 绑定按钮事件
+        const modalEl = document.querySelector('.modal-content');
+        modalEl?.querySelectorAll('[data-action]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                resolve((btn as HTMLElement).dataset.action || 'cancel');
+                modal.hide();
+            });
+        });
     });
 }
 
@@ -35,18 +57,21 @@ export class HistoryView {
     private editorMap = new Map<string, MDxController>();
     private container: HTMLElement;
     
-    // [新增] 滚动控制相关
-    private shouldAutoScroll = true; 
+    private shouldAutoScroll = true;
     private scrollThreshold = 50;
-    
-    // ✨ [修复 5.4] 防抖滚动
     private scrollDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
     private onContentChange?: (id: string, content: string, type: 'user' | 'node') => void;
     private onNodeAction?: NodeActionCallback;
+    
+    // ✨ [新增] 保存原始内容用于取消编辑
+    private originalContentMap = new Map<string, string>();
+    
+    // ✨ [新增] 编辑状态跟踪
+    private editingNodes = new Set<string>();
 
     constructor(
-        container: HTMLElement, 
+        container: HTMLElement,
         onContentChange?: (id: string, content: string, type: 'user' | 'node') => void,
         onNodeAction?: NodeActionCallback
     ) {
@@ -54,10 +79,8 @@ export class HistoryView {
         this.onContentChange = onContentChange;
         this.onNodeAction = onNodeAction;
 
-        // [新增] 监听用户手动滚动
         this.container.addEventListener('scroll', () => {
             const { scrollTop, scrollHeight, clientHeight } = this.container;
-            // 如果用户向上滚动离开了底部，禁用自动滚动
             const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
             this.shouldAutoScroll = distanceFromBottom < this.scrollThreshold;
         });
@@ -68,6 +91,8 @@ export class HistoryView {
         this.nodeMap.clear();
         this.editorMap.forEach(editor => editor.destroy());
         this.editorMap.clear();
+        this.originalContentMap.clear();
+        this.editingNodes.clear();
     }
 
     renderFull(sessions: SessionGroup[]) {
@@ -82,7 +107,6 @@ export class HistoryView {
                 this.renderExecutionTree(session.executionRoot);
             }
         });
-        // 初始渲染强制滚动到底部
         this.scrollToBottom(true);
     }
 
@@ -91,6 +115,7 @@ export class HistoryView {
             <div class="llm-ui-welcome">
                 <div class="llm-ui-welcome__icon">👋</div>
                 <h2>Ready to chat</h2>
+                <p>Send a message to start the conversation</p>
             </div>
         `;
     }
@@ -100,11 +125,10 @@ export class HistoryView {
         div.className = 'llm-ui-banner llm-ui-banner--error';
         div.innerText = `Error: ${error.message}`;
         this.container.appendChild(div);
+        this.scrollToBottom(true);
     }
 
     processEvent(event: OrchestratorEvent) {
-        // 在更新 DOM 前，先判断是否需要滚动
-        // 如果是新 session 或新 node，通常强制滚动
         const forceScroll = event.type === 'session_start' || event.type === 'node_start';
 
         switch (event.type) {
@@ -115,7 +139,6 @@ export class HistoryView {
                 this.appendNode(event.payload.parentId, event.payload.node);
                 break;
             case 'node_update':
-                // [修复] 增加空值检查，因为 node_update 可能仅包含 metaInfo 而没有文本 chunk
                 if (event.payload.chunk !== undefined && event.payload.field !== undefined) {
                     this.updateNodeContent(event.payload.nodeId, event.payload.chunk, event.payload.field);
                 }
@@ -126,8 +149,35 @@ export class HistoryView {
             case 'finished':
                 this.editorMap.forEach(editor => editor.finishStream());
                 break;
+        case 'error':
+            this.renderError(new Error(event.payload.message));
+            break;
+            // ✨ [新增] 处理删除事件
+            case 'messages_deleted':
+            this.handleMessagesDeleted(event.payload.deletedIds);
+                break;
+            // ✨ [新增] 处理编辑事件
+            case 'message_edited':
+            this.handleMessageEdited(event.payload.sessionId, event.payload.newContent);
+                break;
+            // ✨ [新增] 处理会话清空
+            case 'session_cleared':
+                this.renderWelcome();
+                break;
+            // ✨ [新增] 处理分支切换
+            case 'sibling_switch':
+            this.handleSiblingSwitch(event.payload);
+                break;
+        case 'retry_started':
+            // 可选：显示重试中的提示
+            console.log('[HistoryView] Retry started:', event.payload);
+            break;
+        case 'request_input':
+            // 处理输入请求（如果需要）
+            console.log('[HistoryView] Input requested:', event.payload);
+            break;
         }
-        
+
         this.scrollToBottom(forceScroll);
     }
 
@@ -137,128 +187,313 @@ export class HistoryView {
         wrapper.dataset.sessionId = group.id;
 
         if (group.role === 'user') {
-            const contentPreview = this.getPreviewText(group.content || '');
-
-            wrapper.innerHTML = `
-                <div class="llm-ui-avatar">👤</div>
-                <div class="llm-ui-bubble--user">
-                    <div class="llm-ui-bubble__header">
-                        <span class="llm-ui-bubble__title">You</span>
-                        
-                        <!-- [新增] 3. 预览文本区域 -->
-                    <span class="llm-ui-header-preview">${escapeHTML(contentPreview)}</span>
-                        
-                        <div style="flex:1"></div>
-
-                        <div class="llm-ui-bubble__toolbar">
-                             <!-- [新增] 1. Retry (Resend) -->
-                             <button class="llm-ui-btn-bubble-tool" data-action="retry" title="Resend">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
-                             </button>
-
-                             <button class="llm-ui-btn-bubble-tool" data-action="edit" title="Edit">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
-                             </button>
-                             <button class="llm-ui-btn-bubble-tool" data-action="copy" title="Copy">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                             </button>
-
-                             <!-- [新增] 1. Delete -->
-                             <button class="llm-ui-btn-bubble-tool" data-action="delete" title="Delete">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-                             </button>
-
-                             <button class="llm-ui-btn-bubble-tool" data-action="collapse" title="Collapse">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
-                             </button>
-                        </div>
-                    </div>
-                <div class="llm-ui-bubble__body">
-                    <div class="llm-ui-mount-point" id="user-mount-${group.id}"></div>
-                </div>
-            </div>
-            `;
-            this.container.appendChild(wrapper);
-            
-            const mountPoint = wrapper.querySelector(`#user-mount-${group.id}`) as HTMLElement;
-            const controller = new MDxController(mountPoint, group.content || '', {
-                readOnly: true,
-                onChange: (text) => {
-                    this.onContentChange?.(group.id, text, 'user');
-                    // [新增] 更新预览文本
-                    const previewEl = wrapper.querySelector('.llm-ui-header-preview');
-                    if(previewEl) previewEl.textContent = this.getPreviewText(text);
-                }
-            });
-            this.editorMap.set(group.id, controller);
-
-            // --- 绑定事件 ---
-            const bubbleEl = wrapper.querySelector('.llm-ui-bubble--user') as HTMLElement;
-            const editBtn = wrapper.querySelector('[data-action="edit"]');
-            const copyBtn = wrapper.querySelector('[data-action="copy"]');
-            const collapseBtn = wrapper.querySelector('[data-action="collapse"]');
-
-            // 1. Edit
-            editBtn?.addEventListener('click', () => {
-                controller.toggleEdit();
-                editBtn.classList.toggle('active');
-            });
-
-            wrapper.querySelector('[data-action="retry"]')?.addEventListener('click', (e) => {
-                e.stopPropagation();
-                this.onNodeAction?.('retry', group.id);
-            });
-
-            // ✨ [修复 5.2] 使用 Common Modal (通过辅助函数)
-            wrapper.querySelector('[data-action="delete"]')?.addEventListener('click', async (e) => {
-                e.stopPropagation();
-                // 替换原来的 ConfirmDialog.show
-                const confirmed = await showConfirmDialog('Delete this message?');
-                if (confirmed) {
-                    this.onNodeAction?.('delete', group.id);
-                }
-            });
-
-            // 2. Copy
-            copyBtn?.addEventListener('click', async () => {
-                const text = controller.content; 
-                try {
-                    await navigator.clipboard.writeText(text);
-                    const originalHtml = copyBtn.innerHTML;
-                    copyBtn.innerHTML = '✓'; 
-                    setTimeout(() => copyBtn.innerHTML = originalHtml, 1500);
-                } catch (err) {
-                    console.error('Copy failed', err);
-                }
-            });
-
-        // ✨ [简化] 折叠逻辑
-        collapseBtn?.addEventListener('click', () => {
-            bubbleEl.classList.toggle('is-collapsed');
-            const svg = collapseBtn.querySelector('svg');
-            if (!svg) return;
-
-            if (bubbleEl.classList.contains('is-collapsed')) {
-                svg.innerHTML = '<polyline points="6 9 12 15 18 9"></polyline>'; 
-            } else {
-                svg.innerHTML = '<polyline points="18 15 12 9 6 15"></polyline>';
-            }
-        });
-
+            this.renderUserBubble(wrapper, group);
         } else {
             wrapper.innerHTML = `
                 <div class="llm-ui-avatar">🤖</div>
                 <div class="llm-ui-execution-root" id="container-${group.id}"></div>
             `;
-            this.container.appendChild(wrapper);
+        }
+
+        this.container.appendChild(wrapper);
+    }
+
+    private renderUserBubble(wrapper: HTMLElement, group: SessionGroup) {
+        const contentPreview = this.getPreviewText(group.content || '');
+        const hasSiblings = (group.siblingCount ?? 1) > 1;
+        const siblingIndex = group.siblingIndex ?? 0;
+        const siblingCount = group.siblingCount ?? 1;
+
+        wrapper.innerHTML = `
+            <div class="llm-ui-avatar">👤</div>
+            <div class="llm-ui-bubble--user">
+                <div class="llm-ui-bubble__header">
+                    <span class="llm-ui-bubble__title">You</span>
+                    <span class="llm-ui-header-preview">${escapeHTML(contentPreview)}</span>
+                    <div style="flex:1"></div>
+
+                    ${hasSiblings ? `
+                        <div class="llm-ui-branch-nav">
+                            <button class="llm-ui-branch-btn" data-action="prev-sibling" 
+                                    ${siblingIndex === 0 ? 'disabled' : ''} title="Previous version">
+                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polyline points="15 18 9 12 15 6"></polyline>
+                                </svg>
+                            </button>
+                            <span class="llm-ui-branch-indicator">${siblingIndex + 1}/${siblingCount}</span>
+                            <button class="llm-ui-branch-btn" data-action="next-sibling"
+                                    ${siblingIndex === siblingCount - 1 ? 'disabled' : ''} title="Next version">
+                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polyline points="9 18 15 12 9 6"></polyline>
+                                </svg>
+                            </button>
+                        </div>
+                    ` : ''}
+
+                    <div class="llm-ui-bubble__toolbar">
+                        <button class="llm-ui-btn-bubble-tool" data-action="retry" title="Resend">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path>
+                                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                            </svg>
+                        </button>
+                        <button class="llm-ui-btn-bubble-tool" data-action="edit" title="Edit">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                            </svg>
+                        </button>
+                        <button class="llm-ui-btn-bubble-tool" data-action="copy" title="Copy">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                            </svg>
+                        </button>
+                        <button class="llm-ui-btn-bubble-tool" data-action="delete" title="Delete">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="3 6 5 6 21 6"></polyline>
+                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                            </svg>
+                        </button>
+                        <button class="llm-ui-btn-bubble-tool" data-action="collapse" title="Collapse">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="18 15 12 9 6 15"></polyline>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="llm-ui-bubble__body">
+                    <div class="llm-ui-mount-point" id="user-mount-${group.id}"></div>
+                    
+                    <!-- ✨ [新增] 编辑确认按钮 -->
+                    <div class="llm-ui-edit-actions" style="display:none;">
+                        <button class="llm-ui-btn llm-ui-btn--primary" data-action="confirm-edit">
+                            Save & Regenerate
+                        </button>
+                        <button class="llm-ui-btn llm-ui-btn--secondary" data-action="save-only">
+                            Save Only
+                        </button>
+                        <button class="llm-ui-btn llm-ui-btn--ghost" data-action="cancel-edit">
+                            Cancel
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        this.container.appendChild(wrapper);
+
+        // 初始化 MDxController
+        const mountPoint = wrapper.querySelector(`#user-mount-${group.id}`) as HTMLElement;
+        const controller = new MDxController(mountPoint, group.content || '', {
+            readOnly: true,
+            onChange: (text) => {
+                this.onContentChange?.(group.id, text, 'user');
+                const previewEl = wrapper.querySelector('.llm-ui-header-preview');
+                if (previewEl) previewEl.textContent = this.getPreviewText(text);
+            }
+        });
+        this.editorMap.set(group.id, controller);
+
+        // 绑定事件
+        this.bindUserBubbleEvents(wrapper, group, controller);
+    }
+
+    private bindUserBubbleEvents(wrapper: HTMLElement, group: SessionGroup, controller: MDxController) {
+        const bubbleEl = wrapper.querySelector('.llm-ui-bubble--user') as HTMLElement;
+        const editActionsEl = wrapper.querySelector('.llm-ui-edit-actions') as HTMLElement;
+
+        // Retry (Resend)
+        wrapper.querySelector('[data-action="retry"]')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.onNodeAction?.('resend', group.id);
+        });
+
+        // Edit
+        wrapper.querySelector('[data-action="edit"]')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.toggleEditMode(group.id, controller, editActionsEl, wrapper);
+        });
+
+        // Copy
+        wrapper.querySelector('[data-action="copy"]')?.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            await this.handleCopy(controller.content, e.target as HTMLElement);
+        });
+
+        // Delete
+        wrapper.querySelector('[data-action="delete"]')?.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            await this.handleDeleteConfirm(group.id, 'user');
+        });
+
+        // Collapse
+        wrapper.querySelector('[data-action="collapse"]')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.toggleCollapse(bubbleEl, e.target as HTMLElement);
+        });
+
+        // 分支导航
+        wrapper.querySelector('[data-action="prev-sibling"]')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.onNodeAction?.('prev-sibling', group.id);
+        });
+
+        wrapper.querySelector('[data-action="next-sibling"]')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.onNodeAction?.('next-sibling', group.id);
+        });
+
+        // 编辑确认按钮
+        wrapper.querySelector('[data-action="confirm-edit"]')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.confirmEdit(group.id, controller, editActionsEl, wrapper, true);
+        });
+
+        wrapper.querySelector('[data-action="save-only"]')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.confirmEdit(group.id, controller, editActionsEl, wrapper, false);
+        });
+
+        wrapper.querySelector('[data-action="cancel-edit"]')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.cancelEdit(group.id, controller, editActionsEl, wrapper);
+        });
+    }
+
+    private toggleEditMode(
+        nodeId: string, 
+        controller: MDxController, 
+        editActionsEl: HTMLElement,
+        wrapper: HTMLElement
+    ) {
+        const isEditing = this.editingNodes.has(nodeId);
+
+        if (!isEditing) {
+            // 进入编辑模式
+            this.originalContentMap.set(nodeId, controller.content);
+            this.editingNodes.add(nodeId);
+            controller.toggleEdit();
+            editActionsEl.style.display = 'flex';
+            wrapper.querySelector('[data-action="edit"]')?.classList.add('active');
+        } else {
+            // 已经在编辑模式，切换回只读
+            this.cancelEdit(nodeId, controller, editActionsEl, wrapper);
+        }
+    }
+
+    private confirmEdit(
+        nodeId: string,
+        controller: MDxController,
+        editActionsEl: HTMLElement,
+        wrapper: HTMLElement,
+        regenerate: boolean
+    ) {
+        // 退出编辑模式
+        this.editingNodes.delete(nodeId);
+        this.originalContentMap.delete(nodeId);
+        controller.toggleEdit();
+        editActionsEl.style.display = 'none';
+        wrapper.querySelector('[data-action="edit"]')?.classList.remove('active');
+
+        // 通知外部
+        if (regenerate) {
+            this.onNodeAction?.('edit-and-retry', nodeId);
+        } else {
+            this.onNodeAction?.('edit', nodeId);
+        }
+    }
+
+    private cancelEdit(
+        nodeId: string,
+        controller: MDxController,
+        editActionsEl: HTMLElement,
+        wrapper: HTMLElement
+    ) {
+        // 恢复原始内容
+        const originalContent = this.originalContentMap.get(nodeId);
+        if (originalContent !== undefined) {
+            // 需要在 MDxController 中添加 setContent 方法
+            (controller as any).currentContent = originalContent;
+            controller.finishStream(); // 触发重新渲染
+        }
+
+        this.editingNodes.delete(nodeId);
+        this.originalContentMap.delete(nodeId);
+        controller.toggleEdit();
+        editActionsEl.style.display = 'none';
+        wrapper.querySelector('[data-action="edit"]')?.classList.remove('active');
+    }
+
+    private async handleCopy(content: string, btnElement: HTMLElement) {
+        try {
+            await navigator.clipboard.writeText(content);
+            const originalHtml = btnElement.innerHTML;
+            btnElement.innerHTML = '✓';
+            setTimeout(() => btnElement.innerHTML = originalHtml, 1500);
+        } catch (err) {
+            console.error('Copy failed', err);
+        }
+    }
+
+    private async handleDeleteConfirm(nodeId: string, type: 'user' | 'assistant') {
+        let message = 'Delete this message?';
+        
+        if (type === 'user') {
+            const associatedCount = this.countAssociatedResponses(nodeId);
+            if (associatedCount > 0) {
+                message = `Delete this message and ${associatedCount} response(s)?`;
+            }
+        }
+
+        const confirmed = await showConfirmDialog(message);
+        if (confirmed) {
+            this.onNodeAction?.('delete', nodeId);
+        }
+    }
+
+    private countAssociatedResponses(userNodeId: string): number {
+        const sessions = this.container.querySelectorAll('.llm-ui-session');
+        let count = 0;
+        let foundUser = false;
+
+        sessions.forEach(session => {
+            const sessionId = (session as HTMLElement).dataset.sessionId;
+            if (sessionId === userNodeId) {
+                foundUser = true;
+                return;
+            }
+            if (foundUser) {
+                if (session.classList.contains('llm-ui-session--assistant')) {
+                    count++;
+                } else {
+                    foundUser = false; // 遇到下一个 user，停止计数
+                }
+            }
+        });
+
+        return count;
+    }
+
+    private toggleCollapse(element: HTMLElement, btn: HTMLElement) {
+        element.classList.toggle('is-collapsed');
+        const svg = btn.closest('button')?.querySelector('svg');
+        if (!svg) return;
+
+        if (element.classList.contains('is-collapsed')) {
+            svg.innerHTML = '<polyline points="6 9 12 15 18 9"></polyline>';
+        } else {
+            svg.innerHTML = '<polyline points="18 15 12 9 6 15"></polyline>';
         }
     }
 
     private appendNode(parentId: string | undefined, node: ExecutionNode) {
         let parentEl: HTMLElement | null = null;
+        
         if (parentId) {
             parentEl = this.nodeMap.get(parentId)?.querySelector('.llm-ui-node__children') || null;
         }
+        
         if (!parentEl) {
             const roots = this.container.querySelectorAll('.llm-ui-execution-root');
             if (roots.length > 0) parentEl = roots[roots.length - 1] as HTMLElement;
@@ -269,86 +504,73 @@ export class HistoryView {
             this.nodeMap.set(node.id, element);
             parentEl.appendChild(element);
 
-            // --- 绑定头部工具栏事件 ---
-            const editBtn = element.querySelector('[data-action="edit"]');
-            const copyBtn = element.querySelector('[data-action="copy"]');
-            const collapseBtn = element.querySelector('[data-action="collapse"]');
-            
-            // ✨ [新增] 绑定 Retry 和 Delete
-            const retryBtn = element.querySelector('[data-action="retry"]');
-            const deleteBtn = element.querySelector('[data-action="delete"]');
+            this.bindNodeEvents(element, node, mountPoints);
+        }
+    }
 
-            retryBtn?.addEventListener('click', (e) => {
-                e.stopPropagation();
-                this.onNodeAction?.('retry', node.id);
-            });
+    private bindNodeEvents(element: HTMLElement, node: ExecutionNode, mountPoints: any) {
+        const editBtn = element.querySelector('[data-action="edit"]');
+        const copyBtn = element.querySelector('[data-action="copy"]');
+        const collapseBtn = element.querySelector('[data-action="collapse"]');
+        const retryBtn = element.querySelector('[data-action="retry"]');
+        const deleteBtn = element.querySelector('[data-action="delete"]');
 
-            // ✨ [修复 5.2] 使用 Common Modal (通过辅助函数)
-            deleteBtn?.addEventListener('click', async (e) => {
-                e.stopPropagation();
-                // 替换原来的 ConfirmDialog.show
-                const confirmed = await showConfirmDialog('Delete this message?');
-                if (confirmed) {
-                    this.onNodeAction?.('delete', node.id);
+    // ✨ [关键] 找到这个节点所属的 SessionGroup
+    const sessionGroup = this.findSessionGroupByNode(node.id);
+    const effectiveId = sessionGroup?.id || node.id; // 优先使用 SessionGroup.id
+
+        // Retry
+        retryBtn?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.onNodeAction?.('retry', effectiveId);
+        });
+
+        // Delete
+        deleteBtn?.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            await this.handleDeleteConfirm(effectiveId, 'assistant');
+        });
+
+        // Collapse
+        collapseBtn?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.toggleCollapse(element, e.target as HTMLElement);
+        });
+
+        // 分支导航
+        element.querySelector('[data-action="prev-sibling"]')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.onNodeAction?.('prev-sibling', node.id);
+        });
+
+        element.querySelector('[data-action="next-sibling"]')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.onNodeAction?.('next-sibling', node.id);
+        });
+
+        // 初始化内容编辑器
+        if (mountPoints.output) {
+            const controller = new MDxController(mountPoints.output, node.data.output || '', {
+                readOnly: true,
+                onChange: (text) => {
+                    this.onContentChange?.(node.id, text, 'node');
+                    const previewEl = element.querySelector('.llm-ui-header-preview');
+                    if (previewEl) previewEl.textContent = this.getPreviewText(text);
                 }
             });
+            this.editorMap.set(node.id, controller);
 
-            // 修正初始图标为 Up Arrow (因为默认是展开的)
-            if (collapseBtn) {
-                const svg = collapseBtn.querySelector('svg');
-                if (svg) svg.innerHTML = '<polyline points="18 15 12 9 6 15"></polyline>';
-            }
-
-            collapseBtn?.addEventListener('click', () => {
-                element.classList.toggle('is-collapsed');
-                const svg = collapseBtn.querySelector('svg');
-                if (!svg) return;
-
-                if (element.classList.contains('is-collapsed')) {
-                    // 折叠了 -> 显示向下箭头 (展开)
-                    svg.innerHTML = '<polyline points="6 9 12 15 18 9"></polyline>'; 
-                } else {
-                    // 展开了 -> 显示向上箭头 (收起)
-                    svg.innerHTML = '<polyline points="18 15 12 9 6 15"></polyline>';
-                }
+            editBtn?.addEventListener('click', () => {
+                controller.toggleEdit();
+                editBtn.classList.toggle('active');
             });
 
-            if (mountPoints.output) {
-                const controller = new MDxController(mountPoints.output, node.data.output || '', {
-                    readOnly: true,
-                    onChange: (text) => {
-                        this.onContentChange?.(node.id, text, 'node');
-                        // [新增] 更新预览文本
-                        const previewEl = element.querySelector('.llm-ui-header-preview');
-                        if(previewEl) previewEl.textContent = this.getPreviewText(text);
-                    }
-                });
-                this.editorMap.set(node.id, controller);
-
-                // Edit 逻辑
-                editBtn?.addEventListener('click', () => {
-                    controller.toggleEdit();
-                    editBtn.classList.toggle('active');
-                });
-
-                // Copy 逻辑
-                copyBtn?.addEventListener('click', async () => {
-                    const text = controller.content;
-                    try {
-                        await navigator.clipboard.writeText(text);
-                        // 临时反馈动画
-                        const originalHtml = copyBtn.innerHTML;
-                        copyBtn.innerHTML = '✓'; 
-                        setTimeout(() => copyBtn.innerHTML = originalHtml, 1500);
-                    } catch (err) {
-                        console.error('Copy failed', err);
-                    }
-                });
-            } else {
-                // 如果没有输出挂载点 (例如 Thought only node), 禁用 Edit/Copy
-                if (editBtn) (editBtn as HTMLButtonElement).style.display = 'none';
-                if (copyBtn) (copyBtn as HTMLButtonElement).style.display = 'none';
-            }
+            copyBtn?.addEventListener('click', async () => {
+                await this.handleCopy(controller.content, copyBtn as HTMLElement);
+            });
+        } else {
+            if (editBtn) (editBtn as HTMLButtonElement).style.display = 'none';
+            if (copyBtn) (copyBtn as HTMLButtonElement).style.display = 'none';
         }
     }
 
@@ -359,10 +581,11 @@ export class HistoryView {
         if (field === 'thought') {
             const container = el.querySelector('.llm-ui-thought') as HTMLElement;
             const contentEl = el.querySelector('.llm-ui-thought__content') as HTMLElement;
-            
-            if (container && container.style.display === 'none') container.style.display = 'block';
+
+            if (container && container.style.display === 'none') {
+                container.style.display = 'block';
+            }
             if (contentEl) {
-                // ✨ [修复 5.1] 使用 escapeHTML
                 contentEl.innerHTML += escapeHTML(chunk).replace(/\n/g, '<br>');
                 if (container) container.scrollTop = container.scrollHeight;
             }
@@ -370,7 +593,6 @@ export class HistoryView {
             const editor = this.editorMap.get(nodeId);
             if (editor) {
                 editor.appendStream(chunk);
-                // [新增] 实时更新 Header Preview
                 const previewEl = el.querySelector('.llm-ui-header-preview');
                 if (previewEl) {
                     previewEl.textContent = this.getPreviewText(editor.content);
@@ -383,43 +605,103 @@ export class HistoryView {
         const el = this.nodeMap.get(nodeId);
         if (el) {
             el.dataset.status = status;
-            // 更新 class 实现样式变化
             el.classList.remove('llm-ui-node--running', 'llm-ui-node--success', 'llm-ui-node--failed');
             el.classList.add(`llm-ui-node--${status}`);
-            
+
             const statusText = el.querySelector('.llm-ui-node__status');
             if (statusText) {
                 statusText.textContent = status;
                 statusText.className = `llm-ui-node__status llm-ui-node__status--${status}`;
             }
 
-            // 工具结果显示
             if (result && el.classList.contains('llm-ui-node--tool')) {
-                 const resEl = el.querySelector('.llm-ui-node__result') as HTMLElement;
-                 if (resEl) {
-                     resEl.style.display = 'block';
-                     resEl.textContent = typeof result === 'string' ? result : JSON.stringify(result);
-                 }
+                const resEl = el.querySelector('.llm-ui-node__result') as HTMLElement;
+                if (resEl) {
+                    resEl.style.display = 'block';
+                    resEl.textContent = typeof result === 'string' ? result : JSON.stringify(result);
+                }
             }
         }
-        
+
         const editor = this.editorMap.get(nodeId);
         if (editor && (status === 'success' || status === 'failed')) {
             editor.finishStream();
         }
     }
 
+    // ✨ [新增] 处理消息删除
+    private handleMessagesDeleted(deletedIds: string[]) {
+        for (const id of deletedIds) {
+            // 从 DOM 中移除
+            const sessionEl = this.container.querySelector(`[data-session-id="${id}"]`);
+            if (sessionEl) {
+                sessionEl.classList.add('llm-ui-session--deleting');
+                setTimeout(() => sessionEl.remove(), 300);
+            }
+
+            // 清理编辑器
+            const editor = this.editorMap.get(id);
+            if (editor) {
+                editor.destroy();
+                this.editorMap.delete(id);
+            }
+
+            // 清理节点映射
+            this.nodeMap.delete(id);
+            this.originalContentMap.delete(id);
+            this.editingNodes.delete(id);
+        }
+
+        // 检查是否需要显示欢迎界面
+        const remainingSessions = this.container.querySelectorAll('.llm-ui-session');
+        if (remainingSessions.length === 0) {
+            this.renderWelcome();
+        }
+    }
+
+    // ✨ [新增] 处理消息编辑
+    private handleMessageEdited(sessionId: string, newContent: string) {
+        const sessionEl = this.container.querySelector(`[data-session-id="${sessionId}"]`);
+        if (sessionEl) {
+            const previewEl = sessionEl.querySelector('.llm-ui-header-preview');
+            if (previewEl) {
+                previewEl.textContent = this.getPreviewText(newContent);
+            }
+        }
+    }
+
+    // ✨ [新增] 处理分支切换
+    private handleSiblingSwitch(payload: { sessionId: string; newIndex: number; total: number }) {
+        const sessionEl = this.container.querySelector(`[data-session-id="${payload.sessionId}"]`);
+        if (!sessionEl) return;
+
+        // 更新分支导航显示
+        const indicator = sessionEl.querySelector('.llm-ui-branch-indicator');
+        if (indicator) {
+            indicator.textContent = `${payload.newIndex + 1}/${payload.total}`;
+        }
+
+        // 更新按钮禁用状态
+        const prevBtn = sessionEl.querySelector('[data-action="prev-sibling"]') as HTMLButtonElement;
+        const nextBtn = sessionEl.querySelector('[data-action="next-sibling"]') as HTMLButtonElement;
+
+        if (prevBtn) prevBtn.disabled = payload.newIndex === 0;
+        if (nextBtn) nextBtn.disabled = payload.newIndex === payload.total - 1;
+
+        // 刷新内容（如果需要的话，由 SessionManager 处理）
+    }
+
     private renderExecutionTree(node: ExecutionNode) {
         this.appendNode(node.parentId, node);
         node.children?.forEach(c => this.renderExecutionTree(c));
     }
-    
+
     scrollToBottom(force: boolean = false) {
         if (force || this.shouldAutoScroll) {
             if (this.scrollDebounceTimer) {
                 clearTimeout(this.scrollDebounceTimer);
             }
-            
+
             this.scrollDebounceTimer = setTimeout(() => {
                 requestAnimationFrame(() => {
                     this.container.scrollTop = this.container.scrollHeight;
@@ -437,6 +719,24 @@ export class HistoryView {
         // 返回纯文本，由调用方决定是否需要转义
         return truncated;
     }
+
+private findSessionGroupByNode(nodeId: string): SessionGroup | null {
+    // 这需要 HistoryView 持有对 sessions 的引用
+    // 或者通过 DOM 属性查找
+    
+    // 方法1：通过 DOM 向上查找 data-session-id
+    const nodeEl = this.nodeMap.get(nodeId);
+    if (nodeEl) {
+        const sessionEl = nodeEl.closest('[data-session-id]');
+        if (sessionEl) {
+            const sessionId = (sessionEl as HTMLElement).dataset.sessionId;
+            // 返回对应的 SessionGroup（但 HistoryView 可能没有直接访问 sessions）
+            // 这里可以返回 sessionId 让上层处理
+        }
+    }
+    
+    return null;
+}
 
     // ✨ [新增] 销毁方法
     destroy() {
