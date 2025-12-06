@@ -324,6 +324,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
         return this.lockManager.acquire(`node:${sessionId}:${nodeId}`, async () => {
             const path = this.getNodePath(sessionId, nodeId);
             const node = await this.readJson<ChatNode>(path);
+            log(`[LLMSessionEngine] updateNode: path=${path}, updates=`, updates);
             if (!node) {
                 console.warn(`[LLMSessionEngine] Node ${nodeId} not found, skipping update`);
                 return;
@@ -347,6 +348,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
             }
 
             if (hasChanges) {
+	        log(`[LLMSessionEngine] Writing updated node to ${path}`);
                 await this.writeJson(path, node);
             }
         });

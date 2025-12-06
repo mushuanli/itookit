@@ -516,8 +516,12 @@ export class HistoryView {
         const deleteBtn = element.querySelector('[data-action="delete"]');
 
     // ✨ [关键] 找到这个节点所属的 SessionGroup
-    const sessionGroup = this.findSessionGroupByNode(node.id);
-    const effectiveId = sessionGroup?.id || node.id; // 优先使用 SessionGroup.id
+    const getSessionId = (): string => {
+        const sessionEl = element.closest('[data-session-id]');
+        return (sessionEl as HTMLElement)?.dataset.sessionId || node.id;
+    };
+    
+    const effectiveId = getSessionId();
 
         // Retry
         retryBtn?.addEventListener('click', (e) => {
@@ -553,7 +557,7 @@ export class HistoryView {
             const controller = new MDxController(mountPoints.output, node.data.output || '', {
                 readOnly: true,
                 onChange: (text) => {
-                    this.onContentChange?.(node.id, text, 'node');
+                    this.onContentChange?.(effectiveId, text, 'node');
                     const previewEl = element.querySelector('.llm-ui-header-preview');
                     if (previewEl) previewEl.textContent = this.getPreviewText(text);
                 }
@@ -625,7 +629,9 @@ export class HistoryView {
 
         const editor = this.editorMap.get(nodeId);
         if (editor && (status === 'success' || status === 'failed')) {
-            editor.finishStream();
+            // [修复] 传入 false，表示这是流式传输结束，不是用户手动编辑
+            // 这样就不会触发 SessionManager.editMessage -> 抛出 ID 错误
+            editor.finishStream(false);
         }
     }
 

@@ -246,19 +246,32 @@ export class VFSModuleEngine implements ISessionEngine {
 
     on(_event: EngineEventType, callback: (event: EngineEvent) => void): () => void {
         const bus = this.vfsCore.getEventBus();
-        const mapAndEmit = (type: EngineEventType, originalPayload: any) => {
-            const path = originalPayload.path as string;
-            // 对于批量事件，path 可能是 null，直接通过
-            if (path === null || path === undefined) {
-                 callback({ type, payload: originalPayload });
-                 return;
-            }
-            const expectedPrefix = `/${this.moduleName}`;
-            
-            if (path && (path === expectedPrefix || path.startsWith(`${expectedPrefix}/`))) {
-                callback({ type, payload: originalPayload });
-            }
-        };
+    const shouldEmit = (path: string | null | undefined): boolean => {
+        if (path === null || path === undefined) return true;
+        
+        const expectedPrefix = `/${this.moduleName}`;
+        if (!path.startsWith(expectedPrefix)) return false;
+        
+        // ✨ [关键修复] 过滤隐藏目录
+        const relativePath = path.slice(expectedPrefix.length);
+        
+        // 隐藏目录特征：
+        // - 以 /. 开头 (如 /.sessionId)
+        // - 或者路径中包含 /. (如 /foo/.hidden/bar)
+        if (relativePath.startsWith('/.') || relativePath.includes('/.')) {
+            return false;
+        }
+        
+        return true;
+    };
+    
+    const mapAndEmit = (type: EngineEventType, originalPayload: any) => {
+        const path = originalPayload.path as string;
+        
+        if (!shouldEmit(path)) return;
+        
+        callback({ type, payload: originalPayload });
+    };
 
         const handlers = {
             [VFSEventType.NODE_CREATED]: (e: any) => mapAndEmit('node:created', e),
