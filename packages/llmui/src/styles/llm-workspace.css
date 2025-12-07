@@ -1,6 +1,8 @@
 /* @file llm-ui/styles/llm-workspace.css */
 
-/* --- 基础变量定义 --- */
+/* =========================================
+   1. 基础变量 (Variables)
+   ========================================= */
 :root {
   --llm-ui-bg-primary: #ffffff;
   --llm-ui-bg-secondary: #f9fafb;
@@ -18,7 +20,9 @@
   --llm-ui-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
-/* --- 工作区主布局 --- */
+/* =========================================
+   2. 工作区布局 (Workspace Layout)
+   ========================================= */
 .llm-ui-workspace {
   display: flex;
   flex-direction: column;
@@ -27,91 +31,7 @@
   background-color: var(--llm-ui-bg-primary);
   color: var(--llm-ui-text-primary);
   font-family: var(--llm-ui-font-family);
-  overflow: hidden; /* 防止双重滚动条 */
-}
-
-/* --- Isolated Titlebar --- */
-.llm-workspace-titlebar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0.5rem 1rem;
-    background-color: #f6f8fa;
-    border-bottom: 1px solid #d0d7de;
-    min-height: 48px;
-    z-index: 10;
-}
-
-.llm-workspace-titlebar__left,
-.llm-workspace-titlebar__right {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-}
-
-/* Titlebar Buttons */
-.llm-workspace-titlebar__btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 32px;
-    height: 32px;
-    padding: 0;
-    border: 1px solid transparent;
-    border-radius: 6px;
-    background: transparent;
-    color: #57606a;
-    cursor: pointer;
-    transition: all 0.2s;
-}
-
-.llm-workspace-titlebar__btn:hover {
-    background-color: #eaeef2;
-    color: #24292f;
-}
-
-.llm-workspace-titlebar__btn:active {
-    background-color: #dbe0e6;
-}
-
-.llm-workspace-titlebar__btn svg {
-    width: 16px;
-    height: 16px;
-    pointer-events: none; /* ✨ 新增：防止 SVG 拦截点击事件 */
-}
-
-/* Separator */
-.llm-workspace-titlebar__sep {
-    width: 1px;
-    height: 20px;
-    background-color: #d0d7de;
-    margin: 0 4px;
-}
-
-/* Editable Title Input */
-.llm-workspace-titlebar__input {
-    border: 1px solid transparent;
-    background: transparent;
-    font-size: 14px;
-    font-weight: 600;
-    color: #24292f;
-    padding: 4px 8px;
-    border-radius: 4px;
-    min-width: 150px;
-    max-width: min(400px, 50vw);
-    flex: 1;
-}
-
-.llm-workspace-titlebar__input:hover {
-    background-color: #fff;
-    border-color: #d0d7de;
-}
-
-.llm-workspace-titlebar__input:focus {
-    outline: none;
-    background-color: #fff;
-    border-color: #0969da;
-    box-shadow: 0 0 0 2px rgba(9, 105, 218, 0.3);
+  overflow: hidden;
 }
 
 /* --- 历史记录滚动区域 --- */
@@ -132,63 +52,77 @@
   z-index: 10;
 }
 
-/* --- Print Styles --- */
-@media print {
-    .llm-workspace-titlebar,
-    .llm-ui-workspace__input {
-        display: none !important;
-    }
-
-    .llm-ui-workspace__history {
-        overflow: visible !important;
-        height: auto !important;
-    }
-
-    /* 打印时强制展开所有内容 */
-    .llm-ui-bubble--user.is-collapsed .llm-ui-mount-point,
-    .llm-ui-node.is-collapsed .llm-ui-node__body {
-        display: block !important;
-    }
+/* =========================================
+   3. 标题栏 (Titlebar)
+   ========================================= */
+.llm-workspace-titlebar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.5rem 1rem;
+    background-color: #f6f8fa;
+    border-bottom: 1px solid #d0d7de;
+    min-height: 48px;
+    z-index: 10;
 }
 
-/* --- Dark Mode Support --- */
-@media (prefers-color-scheme: dark) {
-    .llm-ui-workspace { background-color: #0d1117; }
-    
-    .llm-workspace-titlebar {
-        background-color: #161b22;
-        border-bottom-color: #30363d;
-    }
+.llm-workspace-titlebar__left,
+.llm-workspace-titlebar__right {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
 
-    .llm-workspace-titlebar__btn { color: #8b949e; }
-    .llm-workspace-titlebar__btn:hover {
-        background-color: #21262d;
-        color: #c9d1d9;
-    }
+.llm-workspace-titlebar__btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: transparent;
+    color: #57606a;
+    cursor: pointer;
+    transition: all 0.2s;
+}
 
-    .llm-workspace-titlebar__sep { background-color: #30363d; }
+.llm-workspace-titlebar__btn:hover { background-color: #eaeef2; color: #24292f; }
+.llm-workspace-titlebar__btn:active { background-color: #dbe0e6; }
+.llm-workspace-titlebar__btn svg { width: 16px; height: 16px; pointer-events: none; }
 
-    .llm-workspace-titlebar__input { color: #c9d1d9; }
-    .llm-workspace-titlebar__input:hover {
-        background-color: #0d1117;
-        border-color: #30363d;
-    }
-    .llm-workspace-titlebar__input:focus {
-        background-color: #0d1117;
-        border-color: #1f6feb;
-    }
-    
-    .llm-ui-workspace__input {
-        background-color: #0d1117;
-        border-top-color: #30363d;
-    }
+.llm-workspace-titlebar__sep {
+    width: 1px;
+    height: 20px;
+    background-color: #d0d7de;
+    margin: 0 4px;
+}
+
+.llm-workspace-titlebar__input {
+    border: 1px solid transparent;
+    background: transparent;
+    font-size: 14px;
+    font-weight: 600;
+    color: #24292f;
+    padding: 4px 8px;
+    border-radius: 4px;
+    min-width: 150px;
+    max-width: min(400px, 50vw);
+    flex: 1;
+}
+
+.llm-workspace-titlebar__input:hover { background-color: #fff; border-color: #d0d7de; }
+.llm-workspace-titlebar__input:focus {
+    outline: none;
+    background-color: #fff;
+    border-color: #0969da;
+    box-shadow: 0 0 0 2px rgba(9, 105, 218, 0.3);
 }
 
 /* =========================================
-   会话流样式 (Session Flow)
+   4. 会话流组件 (Session Bubbles)
    ========================================= */
-
-/* 单条会话包装器 */
 .llm-ui-session {
   display: flex;
   gap: 12px;
@@ -197,12 +131,8 @@
   position: relative;
 }
 
-/* 用户会话：右对齐/反向排列 */
-.llm-ui-session--user {
-  flex-direction: row-reverse;
-}
+.llm-ui-session--user { flex-direction: row-reverse; }
 
-/* 头像 */
 .llm-ui-avatar {
   width: 32px;
   height: 32px;
@@ -216,147 +146,183 @@
   user-select: none;
 }
 
-/* 
-   用户消息气泡容器 
-*/
+/* --- User Bubble --- */
 .llm-ui-bubble--user {
   background: var(--llm-ui-color-primary);
   color: white;
   border-radius: 12px;
   border-top-right-radius: 2px;
   max-width: 80%;
-  min-width: 120px;
+  min-width: 300px; /* 增加最小宽度以容纳工具栏 */
   position: relative;
   box-shadow: 0 1px 2px rgba(0,0,0,0.1);
   overflow: hidden;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* ✨ 用户气泡折叠状态 - 样式修正 */
+/* User Bubble 折叠状态 */
 .llm-ui-bubble--user.is-collapsed {
-  padding: 8px 16px; /* 减少内边距，使其紧凑如标题栏 */
+  padding: 0; /* Header自带padding */
   min-height: auto;
   gap: 0;
 }
-
-.llm-ui-bubble--user.is-collapsed .llm-ui-mount-point {
+.llm-ui-bubble--user.is-collapsed .llm-ui-mount-point,
+.llm-ui-bubble--user.is-collapsed .llm-ui-bubble__body {
   display: none !important;
 }
-
 .llm-ui-bubble--user.is-collapsed .llm-ui-bubble__header {
   border-bottom: none;
-  margin-bottom: 0;
-  padding-bottom: 0;
 }
 
-/* MDxEditor 在用户气泡内的适配 */
-.llm-ui-bubble--user .mdx-editor {
-  color: white;
-  --base: white;
-}
+/* MDxEditor 适配 */
+.llm-ui-bubble--user .mdx-editor { color: white; --base: white; }
 
-/* AI 执行树根容器 */
-.llm-ui-execution-root {
-  flex: 1;
-  max-width: 90%;
-  min-width: 0;
-}
+/* AI Root Container */
+.llm-ui-execution-root { flex: 1; max-width: 90%; min-width: 0; }
 
-/* --- User Bubble Header --- */
-.llm-ui-bubble__header {
+/* =========================================
+   5. 头部通用样式 (Headers & Actions)
+   ========================================= */
+
+/* 通用 Header 结构 */
+.llm-ui-bubble__header,
+.llm-ui-node__header {
   display: flex;
   align-items: center;
   padding: 8px 12px;
+  min-height: 36px;
+  font-size: 0.85rem;
+}
+
+.llm-ui-bubble__header {
   background: rgba(0, 0, 0, 0.1);
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-  font-size: 0.85rem;
-  min-height: 36px;
 }
 
-.llm-ui-bubble__icon {
-  margin-right: 6px;
-  font-size: 1em;
+.llm-ui-node__header {
+  background: var(--llm-ui-bg-secondary);
+  border-bottom: 1px solid var(--llm-ui-border-color);
 }
 
-.llm-ui-bubble__title {
+.llm-ui-node.is-collapsed .llm-ui-node__header { border-bottom: none; }
+
+/* 标题 */
+.llm-ui-bubble__title,
+.llm-ui-node__title {
   font-weight: 600;
-  margin-right: 4px;
+  margin-right: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.llm-ui-node__title { color: var(--llm-ui-text-primary); }
+
+/* 图标 */
+.llm-ui-bubble__icon,
+.llm-ui-node__icon {
+  margin-right: 8px;
+  font-size: 1.1em;
+  line-height: 1;
 }
 
-/* User Bubble Body - 折叠时隐藏 */
-.llm-ui-bubble__body {
-  padding: 10px 16px;
+/* --- 预览文本 (Content Preview) --- */
+.llm-ui-header-preview {
+    display: none; /* 默认隐藏 (展开状态) */
+    font-weight: 400;
+    font-size: 0.85em;
+    margin-right: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 1; /* 占据剩余中间空间 */
+    min-width: 0;
+    opacity: 0.8;
 }
 
-/* ✨ [核心修复] 折叠状态 - 仅隐藏 body */
-.llm-ui-bubble--user.is-collapsed .llm-ui-bubble__body {
-  display: none;
+.llm-ui-node .llm-ui-header-preview { color: var(--llm-ui-text-secondary); }
+.llm-ui-bubble--user .llm-ui-header-preview { color: rgba(255, 255, 255, 0.9); }
+
+/* 仅在折叠时显示预览 */
+.llm-ui-bubble--user.is-collapsed .llm-ui-header-preview,
+.llm-ui-node.is-collapsed .llm-ui-header-preview {
+    display: block;
 }
 
-/* 折叠时移除 header 底部边框 */
-.llm-ui-bubble--user.is-collapsed .llm-ui-bubble__header {
-  border-bottom: none;
-}
+/* 折叠时隐藏不重要的元数据以节省空间 */
+.llm-ui-node.is-collapsed .llm-ui-node__status { display: none; }
 
-/* 工具栏容器 */
-.llm-ui-bubble__toolbar {
+/* --- 时间显示 (Time) --- */
+.llm-ui-time {
+    font-size: 0.75rem;
+    color: var(--llm-ui-text-secondary);
+    opacity: 0.7;
+    white-space: nowrap;
+    margin-right: 8px;
+    font-variant-numeric: tabular-nums;
+}
+.llm-ui-bubble--user .llm-ui-time { color: rgba(255, 255, 255, 0.7); }
+
+/* --- 操作按钮组 (Actions) --- */
+.llm-ui-actions {
   display: flex;
+  align-items: center;
   gap: 2px;
-  opacity: 0;
+  margin-left: auto; /* ✨ 核心：强制右对齐 */
+  flex-shrink: 0;
+  opacity: 0; /* 默认隐藏，hover显示 */
   transition: opacity 0.2s;
 }
 
 /* 悬停或折叠时显示工具栏 */
-.llm-ui-bubble--user:hover .llm-ui-bubble__toolbar,
-.llm-ui-bubble--user.is-collapsed .llm-ui-bubble__toolbar {
+.llm-ui-bubble--user:hover .llm-ui-actions,
+.llm-ui-bubble--user.is-collapsed .llm-ui-actions,
+.llm-ui-node:hover .llm-ui-actions,
+.llm-ui-node.is-collapsed .llm-ui-actions {
   opacity: 1;
 }
 
-/* 气泡内的工具按钮 */
-.llm-ui-btn-bubble-tool {
+/* --- 通用图标按钮 (Icon Buttons) --- */
+.llm-icon-btn {
   background: transparent;
   border: none;
   cursor: pointer;
-  padding: 2px;
-  color: rgba(255, 255, 255, 0.7);
+  padding: 4px;
+  color: inherit; /* 跟随父级字体颜色 */
   border-radius: 4px;
   display: flex;
   align-items: center;
   justify-content: center;
   width: 24px;
   height: 24px;
+  opacity: 0.6;
   transition: all 0.2s;
 }
 
-.llm-ui-btn-bubble-tool:hover,
-.llm-ui-btn-bubble-tool.active {
-  background-color: rgba(255, 255, 255, 0.2);
-  color: white;
-}
+.llm-icon-btn:hover { opacity: 1; background-color: rgba(0,0,0,0.08); }
+.llm-icon-btn svg { width: 14px; height: 14px; pointer-events: none; }
 
-/* 红色删除按钮 */
-.llm-ui-btn-bubble-tool[data-action="delete"]:hover {
-    color: #fca5a5 !important;
-    background-color: rgba(239, 68, 68, 0.3) !important;
-}
+/* User Bubble 按钮特化 (白色) */
+.llm-ui-bubble--user .llm-icon-btn { color: white; opacity: 0.7; }
+.llm-ui-bubble--user .llm-icon-btn:hover { background-color: rgba(255,255,255,0.2); opacity: 1; }
 
-.llm-ui-btn-bubble-tool svg {
-  width: 14px;
-  height: 14px;
-}
+/* Agent Node 按钮特化 (灰色) */
+.llm-ui-node .llm-icon-btn { color: #64748b; }
+.llm-ui-node .llm-icon-btn:hover { color: var(--llm-ui-text-primary); }
+
+/* 特殊按钮样式 */
+.llm-icon-btn[data-action="delete"]:hover { color: var(--llm-ui-color-error) !important; background-color: #fee2e2 !important; }
+.llm-icon-btn[data-action="edit"] { font-size: 14px; } /* 调整铅笔图标大小 */
 
 /* =========================================
-   执行节点样式 (Nodes: Agent/Tool/Thought)
+   6. 执行节点 (Agent/Tool Nodes)
    ========================================= */
-
-/* 节点通用卡片 */
 .llm-ui-node {
   margin-bottom: 12px;
   border: 1px solid var(--llm-ui-border-color);
   border-radius: 8px;
   background: var(--llm-ui-bg-primary);
   overflow: hidden;
-  transition: box-shadow 0.2s, border-color 0.2s, height 0.3s ease;
+  transition: box-shadow 0.2s, border-color 0.2s;
 }
 
 .llm-ui-node:hover {
@@ -364,35 +330,13 @@
   border-color: #d1d5db;
 }
 
-/* 折叠状态 */
-.llm-ui-node.is-collapsed .llm-ui-node__body {
-  display: none;
-}
+/* 折叠状态：隐藏 body */
+.llm-ui-node.is-collapsed .llm-ui-node__body { display: none; }
 
-/* 节点状态边框指示器 */
+/* 状态边框指示器 */
 .llm-ui-node--success { border-left: 3px solid var(--llm-ui-color-success); }
 .llm-ui-node--failed { border-left: 3px solid var(--llm-ui-color-error); }
 .llm-ui-node--running { border-left: 3px solid var(--llm-ui-color-primary); }
-
-/* --- 节点头部 --- */
-.llm-ui-node__header {
-  display: flex;
-  align-items: center;
-  padding: 8px 12px;
-  background: var(--llm-ui-bg-secondary);
-  border-bottom: 1px solid var(--llm-ui-border-color);
-  font-size: 0.9rem;
-  position: relative;
-  height: 36px;
-}
-
-/* 移除折叠时的底部边框 */
-.llm-ui-node.is-collapsed .llm-ui-node__header {
-  border-bottom: none;
-}
-
-.llm-ui-node__icon { margin-right: 8px; font-size: 1.1em; line-height: 1; }
-.llm-ui-node__title { font-weight: 600; margin-right: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--llm-ui-text-primary); }
 
 /* 状态标签 */
 .llm-ui-node__status {
@@ -404,75 +348,21 @@
   letter-spacing: 0.02em;
   margin-right: 8px;
 }
-
 .llm-ui-node__status--success { color: var(--llm-ui-color-success); background: #d1fae5; }
 .llm-ui-node__status--running { color: var(--llm-ui-color-primary); background: #dbeafe; }
 .llm-ui-node__status--failed { color: var(--llm-ui-color-error); background: #fee2e2; }
 
-/* --- 节点工具栏 --- */
-.llm-ui-node__toolbar {
-  display: flex;
-  gap: 2px;
-  align-items: center;
-}
-
-.llm-ui-btn-tool {
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  padding: 4px;
-  color: #94a3b8;
-  border-radius: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  transition: all 0.2s;
-}
-
-.llm-ui-btn-tool:hover {
-  background-color: rgba(0,0,0,0.05);
-  color: var(--llm-ui-text-primary);
-}
-
-.llm-ui-btn-tool.active {
-  color: var(--llm-ui-color-primary);
-  background-color: #eff6ff;
-}
-
-.llm-ui-btn-tool svg {
-  width: 14px;
-  height: 14px;
-}
-
-/* --- 思考过程 (Thought) --- */
+/* 思考过程 */
 .llm-ui-thought {
   background: #f8fafc;
   border-bottom: 1px solid var(--llm-ui-border-color);
   font-size: 0.9em;
   color: var(--llm-ui-text-secondary);
 }
-
-.llm-ui-thought__summary {
-  padding: 6px 12px;
-  cursor: pointer;
-  user-select: none;
-  display: flex;
-  align-items: center;
-  font-weight: 500;
-  font-size: 0.85rem;
-  opacity: 0.8;
-  transition: opacity 0.2s;
-}
-
-.llm-ui-thought__summary:hover { opacity: 1; background: #f1f5f9; }
-
 .llm-ui-thought__content {
   padding: 12px;
   max-height: 300px;
   overflow-y: auto;
-  border-top: 1px solid var(--llm-ui-border-color);
   white-space: pre-wrap;
   font-family: monospace;
   font-size: 0.85em;
@@ -480,14 +370,14 @@
   background: #fff;
 }
 
-/* --- 节点内容输出区域 --- */
+/* 内容输出区域 */
 .llm-ui-node__output {
   padding: 0;
   min-height: 40px;
   background: #fff;
 }
 
-/* --- 工具 (Tool) 节点特定样式 --- */
+/* 工具节点内容 */
 .llm-ui-node--tool .llm-ui-node__args {
   padding: 8px 12px;
   background: #fdfdfd;
@@ -497,26 +387,97 @@
   overflow-x: auto;
   border-bottom: 1px dashed var(--llm-ui-border-color);
 }
-
 .llm-ui-node--tool .llm-ui-node__result {
   padding: 8px 12px;
   font-size: 0.85em;
   color: #666;
   background: #fafafa;
-  display: none;
   max-height: 200px;
   overflow-y: auto;
 }
 
-/* --- 编辑器挂载点 --- */
-.llm-ui-mount-point {
-  position: relative;
-  width: 100%;
+/* 并行布局支持 (Grid) */
+.llm-ui-node__children--parallel {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 16px;
+  padding: 12px;
+  background-color: rgba(0, 0, 0, 0.02);
+  border-top: 1px solid var(--llm-ui-border-color);
+}
+.llm-ui-node__children--parallel > .llm-ui-node {
+  margin-bottom: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
 /* =========================================
-   空状态/欢迎页
+   7. 状态指示器与 Badge (Status & Badges)
    ========================================= */
+.llm-workspace-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: 12px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    background: #f5f5f5;
+    font-size: 12px;
+    color: #666;
+}
+
+.llm-workspace-status__dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #999;
+    transition: background-color 0.2s ease;
+}
+.llm-workspace-status__dot.--running { background: var(--llm-ui-color-primary); animation: pulse 1.5s ease-in-out infinite; }
+.llm-workspace-status__dot.--completed { background: var(--llm-ui-color-success); }
+.llm-workspace-status__dot.--failed { background: var(--llm-ui-color-error); }
+
+.llm-workspace-titlebar__bg-indicator { display: flex; align-items: center; margin-right: 8px; }
+.llm-bg-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: var(--llm-ui-color-primary);
+    color: white;
+    font-size: 11px;
+    font-weight: 500;
+    animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.6; transform: scale(1.1); }
+}
+
+/* =========================================
+   8. 其他组件 (Branch Nav, Error, Welcome)
+   ========================================= */
+.llm-ui-branch-indicator {
+    font-size: 11px;
+    color: inherit;
+    opacity: 0.8;
+    margin: 0 2px;
+    min-width: 24px;
+    text-align: center;
+}
+
+.llm-ui-file-badge {
+    display: inline-block;
+    font-size: 11px;
+    background: rgba(255,255,255,0.2);
+    padding: 2px 6px;
+    border-radius: 4px;
+    margin-right: 6px;
+    margin-bottom: 4px;
+}
+
 .llm-ui-welcome {
   display: flex;
   flex-direction: column;
@@ -527,15 +488,8 @@
   text-align: center;
   user-select: none;
 }
-.llm-ui-welcome__icon { 
-  font-size: 48px; 
-  margin-bottom: 16px; 
-  opacity: 0.8;
-}
+.llm-ui-welcome__icon { font-size: 48px; margin-bottom: 16px; opacity: 0.8; }
 
-/* =========================================
-   错误横幅
-   ========================================= */
 .llm-ui-banner--error {
   margin: 20px;
   padding: 12px;
@@ -546,226 +500,19 @@
   font-size: 0.9rem;
 }
 
-/* =========================================
-   动画
-   ========================================= */
-@keyframes llm-ui-fadeIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
+/* 打印与深色模式支持 */
+@media print {
+    .llm-workspace-titlebar, .llm-ui-workspace__input { display: none !important; }
+    .llm-ui-workspace__history { overflow: visible !important; height: auto !important; }
+    .is-collapsed .llm-ui-node__body, .is-collapsed .llm-ui-bubble__body { display: block !important; }
 }
 
-/* =========================================
-   并行执行布局支持 (Grid Layout)
-   ========================================= */
-.llm-ui-node__children--parallel {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  gap: 16px;
-  padding: 12px;
-  background-color: rgba(0, 0, 0, 0.02);
-  border-top: 1px solid var(--llm-ui-border-color);
-}
-
-.llm-ui-node__children--parallel > .llm-ui-node {
-  margin-bottom: 0;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  border-left-width: 4px;
-}
-
-.llm-ui-node__children--parallel > .llm-ui-node .llm-ui-node__body {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-}
-
-.llm-ui-node__children--parallel > .llm-ui-node .llm-ui-node__output {
-  flex: 1; 
-}
-
-@media (max-width: 768px) {
-  .llm-ui-node__children--parallel {
-    grid-template-columns: 1fr; 
-  }
-}
-
-/* =========================================
-   ✨ 折叠时的特殊按钮显示逻辑
-   ========================================= */
-.llm-ui-btn-tool--delete,
-.llm-ui-btn-tool--resend {
-    display: none; /* 默认隐藏 */
-}
-
-/* 折叠状态下显示 Delete 和 Resend 按钮 */
-.llm-ui-node.is-collapsed .llm-ui-btn-tool--delete,
-.llm-ui-node.is-collapsed .llm-ui-btn-tool--resend {
-    display: flex;
-}
-
-/* Delete 按钮特殊样式 */
-.llm-ui-btn-tool--delete:hover {
-    color: var(--llm-ui-color-error);
-    background-color: #fee2e2;
-}
-
-/* Resend 按钮特殊样式 */
-.llm-ui-btn-tool--resend:hover {
-    color: var(--llm-ui-color-primary);
-    background-color: #eff6ff;
-}
-
-/* 折叠时工具栏始终可见 */
-.llm-ui-node.is-collapsed .llm-ui-node__toolbar {
-    opacity: 1;
-}
-
-/* =========================================
-   ✨ 折叠时的内容预览 (Content Preview)
-   ========================================= */
-
-/* 默认隐藏预览 */
-.llm-ui-header-preview {
-    display: none;
-    font-weight: 400;
-    font-size: 0.85em;
-    margin-left: 8px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 300px;
-    opacity: 0.8;
-}
-
-/* AI 节点预览文字颜色 */
-.llm-ui-node .llm-ui-header-preview {
-    color: var(--llm-ui-text-secondary);
-}
-
-/* User 气泡预览文字颜色 */
-.llm-ui-bubble--user .llm-ui-header-preview {
-    color: rgba(255, 255, 255, 0.8);
-}
-
-/* ✨ [核心] 折叠时显示预览 */
-.llm-ui-bubble--user.is-collapsed .llm-ui-header-preview,
-.llm-ui-node.is-collapsed .llm-ui-header-preview {
-    display: inline-block;
-    flex: 1; 
-    min-width: 0;
-}
-
-/* MDxEditor 在用户气泡内的适配 */
-.llm-ui-bubble--user .mdx-editor,
-.llm-ui-bubble__body .mdx-editor {
-  color: white;
-  --base: white;
-}
-
-/* =========================================
-   分支导航 UI (Branch Nav)
-   ========================================= */
-.llm-ui-branch-nav {
-    display: flex;
-    align-items: center;
-    font-size: 0.75rem;
-    color: var(--llm-ui-text-secondary);
-    background: rgba(0,0,0,0.05);
-    border-radius: 4px;
-    margin-right: 8px;
-    padding: 0 4px;
-}
-
-.llm-ui-branch-btn {
-    border: none;
-    background: transparent;
-    cursor: pointer;
-    padding: 2px 4px;
-    font-size: 10px;
-    color: inherit;
-}
-.llm-ui-branch-btn:hover { color: var(--llm-ui-text-primary); background: rgba(0,0,0,0.05); }
-
-/* @file llm-ui/styles/workspace.css */
-
-/* 状态指示器 */
-.llm-workspace-status {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-left: 12px;
-    padding: 4px 8px;
-    border-radius: 4px;
-    background: var(--bg-secondary, #f5f5f5);
-    font-size: 12px;
-    color: var(--text-secondary, #666);
-}
-
-.llm-workspace-status__dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--color-idle, #999);
-    transition: background-color 0.2s ease;
-}
-
-.llm-workspace-status__dot.--running {
-    background: var(--color-running, #3b82f6);
-    animation: pulse 1.5s ease-in-out infinite;
-}
-
-.llm-workspace-status__dot.--queued {
-    background: var(--color-queued, #f59e0b);
-}
-
-.llm-workspace-status__dot.--completed {
-    background: var(--color-success, #22c55e);
-}
-
-.llm-workspace-status__dot.--failed {
-    background: var(--color-error, #ef4444);
-}
-
-.llm-workspace-status__dot.--idle {
-    background: var(--color-idle, #999);
-}
-
-@keyframes pulse {
-    0%, 100% { opacity: 1; transform: scale(1); }
-    50% { opacity: 0.6; transform: scale(1.1); }
-}
-
-/* 后台运行指示器 */
-.llm-workspace-titlebar__bg-indicator {
-    display: flex;
-    align-items: center;
-    margin-right: 8px;
-}
-
-.llm-bg-badge {
-    display: inline-flex;
-    align-items: center;
-    padding: 2px 8px;
-    border-radius: 10px;
-    background: var(--color-running, #3b82f6);
-    color: white;
-    font-size: 11px;
-    font-weight: 500;
-    animation: pulse 2s ease-in-out infinite;
-}
-
-.llm-bg-badge::before {
-    content: '';
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: white;
-    margin-right: 6px;
-    animation: blink 1s ease-in-out infinite;
-}
-
-@keyframes blink {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.3; }
+@media (prefers-color-scheme: dark) {
+    .llm-ui-workspace { background-color: #0d1117; color: #c9d1d9; }
+    .llm-workspace-titlebar { background-color: #161b22; border-bottom-color: #30363d; }
+    .llm-workspace-titlebar__btn { color: #8b949e; }
+    .llm-ui-node { background-color: #161b22; border-color: #30363d; }
+    .llm-ui-node__header { background-color: #0d1117; border-bottom-color: #30363d; }
+    .llm-ui-node__output { background-color: #161b22; }
+    .llm-ui-node:hover { border-color: #58a6ff; }
 }

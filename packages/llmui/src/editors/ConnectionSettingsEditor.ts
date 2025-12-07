@@ -1,6 +1,6 @@
 // @file llm-ui/editors/ConnectionSettingsEditor.ts
 import { Modal, Toast,BaseSettingsEditor, LLMConnection, generateShortUUID, LLM_PROVIDER_DEFAULTS } from '@itookit/common';
-import { IAgentService } from '../services/IAgentService';
+import { IAgentService } from '@itookit/llm-engine';
 // [新增] 引入测试函数
 import { testLLMConnection } from '@itookit/llmdriver';
 

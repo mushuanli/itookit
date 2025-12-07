@@ -1,18 +1,17 @@
 {
-  "name": "@itookit/llm-ui",
+  "name": "@itookit/llm-engine",
   "version": "0.1.0",
-  "description": "A specialized UI library for Large Language Model workspaces, featuring chat interfaces, streaming history views, and session orchestration visualization",
+  "description": "The headless orchestration core for LLM workspaces. Handles session state management, LLM execution, VFS persistence, and agent logic without UI dependencies.",
   "type": "module",
-  "main": "./dist/llm-ui.umd.cjs",
-  "module": "./dist/llm-ui.js",
+  "main": "./dist/llm-engine.umd.cjs",
+  "module": "./dist/llm-engine.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/llm-ui.js",
-      "require": "./dist/llm-ui.umd.cjs"
-    },
-    "./style.css": "./dist/style.css"
+      "import": "./dist/llm-engine.js",
+      "require": "./dist/llm-engine.umd.cjs"
+    }
   },
   "files": [
     "dist",
@@ -22,17 +21,16 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview",
+    "test": "vitest",
     "prepublishOnly": "pnpm build"
   },
   "keywords": [
-    "llm-ui",
-    "ai-workspace",
-    "chat-interface",
-    "streaming-ui",
-    "agent-visualization",
-    "session-manager",
-    "editor-adapter",
+    "llm-engine",
+    "headless",
+    "agent-orchestrator",
+    "session-management",
+    "vfs",
+    "llm-driver",
     "typescript"
   ],
   "author": "lizlok@gmail.com",
@@ -40,12 +38,12 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/mushuanli/itookit.git",
-    "directory": "packages/llm-ui"
+    "directory": "packages/llm-engine"
   },
   "bugs": {
     "url": "https://github.com/mushuanli/itookit/issues"
   },
-  "homepage": "https://github.com/mushuanli/itookit/tree/main/packages/llm-ui#readme",
+  "homepage": "https://github.com/mushuanli/itookit/tree/main/packages/llm-engine#readme",
   "publishConfig": {
     "access": "public"
   },
@@ -53,17 +51,15 @@
     "node": ">=16.0.0"
   },
   "peerDependencies": {
-    "@itookit/common": "workspace:*"
+    "@itookit/common": "workspace:*",
+    "@itookit/vfs-core": "workspace:*",
+    "@itookit/llmdriver": "workspace:*"
   },
   "dependencies": {
     "@itookit/common": "workspace:*",
     "@itookit/llmdriver": "workspace:*",
-    "@itookit/llm-engine": "workspace:*",
-    "@itookit/mdxeditor": "workspace:*",
     "@itookit/vfs-core": "workspace:*",
-    "js-yaml": "^4.1.1",
-    "marked": "^12.0.2",
-    "react": "^19.2.0"
+    "js-yaml": "^4.1.1"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",

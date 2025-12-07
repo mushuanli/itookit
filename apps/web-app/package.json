@@ -14,6 +14,7 @@
         "@fortawesome/fontawesome-free": "^7.1.0",
         "@itookit/common": "workspace:*",
         "@itookit/llmdriver": "workspace:*",
+        "@itookit/llm-engine": "workspace:*",
         "@itookit/llm-ui": "workspace:*",
         "@itookit/mdxeditor": "workspace:*",
         "@itookit/memory-manager": "workspace:*",

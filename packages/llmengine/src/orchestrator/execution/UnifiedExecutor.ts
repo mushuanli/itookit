@@ -1,0 +1,420 @@
+// @file: llm-engine/orchestrator/execution/UnifiedExecutor.ts
+
+import {
+  IExecutor,
+  ExecutorType,
+  ExecutorConfig,
+  ExecutionResult,
+  AtomicConfig,
+  CompositeConfig,
+  BaseExecutorConfig,
+  generateUUID,
+  NodeStatus,
+  ExecutionContext
+} from '@itookit/common';
+
+// [修改] 从 types 导入 StreamingContext
+import { StreamingContext } from '../../core/types';
+
+export class UnifiedExecutor implements IExecutor {
+  readonly id: string;
+  readonly type: ExecutorType;
+  public config: ExecutorConfig;
+  
+  constructor(config: ExecutorConfig) {
+    this.id = config.id;
+    this.type = config.type;
+    this.config = config;
+  }
+  
+  // [修复] 签名必须匹配 IExecutor (context: ExecutionContext)
+  async execute(input: unknown, context: ExecutionContext): Promise<ExecutionResult> {
+    // [修复] 内部断言为 StreamingContext
+    const streamingContext = context as StreamingContext;
+
+    if (this.type === 'atomic') {
+      return this.executeAtomic(input, streamingContext);
+    } else {
+      return this.executeComposite(input, streamingContext);
+    }
+  }
+  
+  private async executeAtomic(input: unknown, context: StreamingContext): Promise<ExecutionResult> {
+    // 实际项目中，这里应该调用 LLMDriver 或 AgentExecutor
+    // 为了演示，我们假设这会调用外部注入的 AgentExecutor 逻辑
+    // 或者抛出错误提示这是一个纯编排器实现，需要外部 AgentExecutor 配合
+    
+    // 如果这个 UnifiedExecutor 是为了配合 AgentExecutor 使用的，
+    // 那么它通常只负责编排。
+    // 如果它包含原子逻辑，应该在这里实现 LLM 调用。
+    throw new Error('Atomic executor logic not implemented in UnifiedExecutor. Use AgentExecutor for direct LLM calls.');
+  }
+  
+  private async executeComposite(input: unknown, context: StreamingContext): Promise<ExecutionResult> {
+    const compositeConfig = (this.config as Extract<ExecutorConfig, { type: 'composite' }>).config;
+    
+    switch (compositeConfig.mode) {
+      case 'serial':
+        return this.executeSerial(input, context, compositeConfig);
+      case 'parallel':
+        return this.executeParallel(input, context, compositeConfig);
+      case 'router':
+        return this.executeRouter(input, context, compositeConfig);
+      case 'loop':
+        return this.executeLoop(input, context, compositeConfig);
+      default:
+        throw new Error(`Unknown mode: ${(compositeConfig as any).mode}`);
+    }
+  }
+  
+  private async executeSerial(
+    input: unknown, 
+    context: StreamingContext, 
+    config: CompositeConfig
+  ): Promise<ExecutionResult> {
+    let currentInput = input;
+    let lastResult: ExecutionResult | null = null;
+    
+    // 通知 UI 当前容器是串行布局（默认）
+    if (context.parentId) {
+        context.callbacks?.onNodeMetaUpdate?.(context.parentId, { 
+            executionMode: 'sequential' 
+        });
+    }
+    
+    for (const childConfig of config.children) {
+      // ✨ [修复] 检查是否被中断
+      if (context.signal?.aborted) {
+        throw new DOMException('Aborted', 'AbortError');
+      }
+
+      const child = new UnifiedExecutor(childConfig);
+      const childRuntimeId = generateUUID();
+
+      // 1. 创建子节点 UI
+      context.callbacks?.onNodeStart?.({
+        id: childRuntimeId,
+        parentId: context.parentId, // 挂载到当前编排器节点下
+        type: child.type === 'atomic' ? 'agent' : 'router',
+        name: child.config.name,
+        status: 'running',
+        startTime: Date.now(),
+        // [修复] 移除 icon 属性
+        // icon: (child.config as any).icon, 
+        data: { 
+            output: '', 
+            metaInfo: {
+                agentId: child.config.id,
+                // [可选] 如果 config 中有 icon，传递到 metaInfo
+                agentIcon: (child.config as any).icon
+            } 
+        },
+        children: []
+      });
+
+      // 2. 准备上下文 [关键修复：提取变量并指定类型，避免对象字面量检查报错]
+      const childContext: StreamingContext = {
+        ...context,
+        parentId: childRuntimeId,
+        depth: context.depth + 1,
+        callbacks: {
+            ...context.callbacks,
+            // [关键修复：显式添加参数类型]
+            onThinking: (delta: string, nodeId?: string) => 
+                context.callbacks?.onThinking?.(delta, nodeId || childRuntimeId),
+            
+            onOutput: (delta: string, nodeId?: string) => 
+                context.callbacks?.onOutput?.(delta, nodeId || childRuntimeId),
+            
+            onNodeStatus: (nodeId: string, status: NodeStatus) => 
+                context.callbacks?.onNodeStatus?.(nodeId || childRuntimeId, status),
+            
+            onNodeMetaUpdate: (nodeId: string, meta: any) => 
+                context.callbacks?.onNodeMetaUpdate?.(nodeId || childRuntimeId, meta)
+        }
+      };
+
+      // 3. 执行子节点
+      lastResult = await child.execute(currentInput, childContext);
+      
+      // 更新完成状态
+      context.callbacks?.onNodeStatus?.(childRuntimeId, lastResult.status as any);
+
+      if (lastResult.control.action === 'end') {
+        break;
+      }
+      
+      currentInput = lastResult.output;
+    }
+    
+    // 如果 children 为空，需要处理 lastResult 为 null 的情况
+    if (!lastResult) {
+         return {
+            status: 'success',
+            output: currentInput,
+            control: { action: 'continue' }
+         };
+    }
+
+    return lastResult;
+  }
+  
+  private async executeParallel(
+    input: unknown, 
+    context: StreamingContext, 
+    config: CompositeConfig
+  ): Promise<ExecutionResult> {
+    
+    // 1. 设置当前父节点为并行布局
+    if (context.parentId) {
+        context.callbacks?.onNodeMetaUpdate?.(context.parentId, { 
+            executionMode: 'concurrent',
+            batchSize: config.children.length // 提供额外信息供 UI 决策
+        });
+    }
+
+    // 2. 预生成所有子节点的 Runtime ID 和 Executor
+    const childrenWorkItems = config.children.map(childConfig => ({
+        executor: new UnifiedExecutor(childConfig),
+        runtimeId: generateUUID()
+    }));
+
+    // 3. 批量通知 UI 创建子节点占位符
+    childrenWorkItems.forEach(({ executor, runtimeId }) => {
+        context.callbacks?.onNodeStart?.({
+            id: runtimeId,
+            parentId: context.parentId, // 挂载到当前节点下
+            name: executor.config.name,
+            type: executor.type === 'atomic' ? 'agent' : 'router',
+            status: 'running',
+            startTime: Date.now(),
+            // [修复] 移除 icon 属性
+            // icon: (executor.config as any).icon,
+            data: { 
+                output: '',
+                metaInfo: {
+                    agentId: executor.config.id,
+                    // [可选] 如果 config 中有 icon，传递到 metaInfo
+                    agentIcon: (executor.config as any).icon
+                }
+            },
+            children: []
+        });
+    });
+
+    // 4. 并发执行
+    const promises = childrenWorkItems.map(async ({ executor, runtimeId }) => {
+        // 创建上下文切片，将输出路由到对应的 runtimeId
+        const childContext: StreamingContext = {
+            ...context,
+            parentId: runtimeId,
+            depth: context.depth + 1,
+            callbacks: {
+                ...context.callbacks,
+                // [关键修复：显式参数类型]
+                onThinking: (delta: string, nodeId?: string) => 
+                    context.callbacks?.onThinking?.(delta, nodeId || runtimeId),
+                
+                onOutput: (delta: string, nodeId?: string) => 
+                    context.callbacks?.onOutput?.(delta, nodeId || runtimeId),
+                
+                onNodeStatus: (nodeId: string, status: NodeStatus) => 
+                    context.callbacks?.onNodeStatus?.(nodeId || runtimeId, status),
+                
+                onNodeMetaUpdate: (nodeId: string, meta: any) => 
+                    context.callbacks?.onNodeMetaUpdate?.(nodeId || runtimeId, meta)
+            }
+        };
+
+        try {
+            const result = await executor.execute(input, childContext);
+            context.callbacks?.onNodeStatus?.(runtimeId, result.status as any);
+            return result;
+        } catch (e: any) {
+            context.callbacks?.onNodeStatus?.(runtimeId, 'failed');
+            context.callbacks?.onOutput?.(`\nError: ${e.message}`, runtimeId);
+            return {
+                status: 'failed',
+                output: null,
+                control: { action: 'continue' } 
+            } as ExecutionResult;
+        }
+    });
+
+    const results = await Promise.all(promises);
+    
+    return {
+      status: results.every(r => r.status === 'success') ? 'success' : 'partial',
+      output: results.map(r => r.output),
+      control: { action: 'end' }
+    };
+  }
+  
+  // ✨ [修复 7.1] 实现 router 模式
+  private async executeRouter(
+    input: unknown, 
+    context: StreamingContext, 
+    config: CompositeConfig
+  ): Promise<ExecutionResult> {
+    const modeConfig = config.modeConfig?.router;
+    
+    if (!modeConfig) {
+      throw new Error('Router mode requires modeConfig.router configuration');
+    }
+
+    // 简单实现：选择第一个子节点执行
+    // 实际应用中应该根据 strategy 进行路由决策
+    if (config.children.length === 0) {
+      return {
+        status: 'success',
+        output: input,
+        control: { action: 'end' }
+      };
+    }
+
+    // 默认选择第一个
+    let selectedIndex = 0;
+    
+    if (modeConfig.strategy === 'rule' && modeConfig.rules) {
+      // 基于规则选择
+      for (let i = 0; i < modeConfig.rules.length; i++) {
+        const rule = modeConfig.rules[i];
+        // 简单的条件匹配（实际应用中可以更复杂）
+        if (rule.condition && this.evaluateCondition(rule.condition, input)) {
+          selectedIndex = i;
+          break;
+        }
+      }
+    }
+
+    const selectedChild = config.children[selectedIndex];
+    const executor = new UnifiedExecutor(selectedChild);
+    
+    return executor.execute(input, context);
+  }
+
+  private evaluateCondition(condition: string, input: unknown): boolean {
+    // 简单实现：检查输入中是否包含条件关键字
+    if (typeof input === 'string') {
+      return input.toLowerCase().includes(condition.toLowerCase());
+    }
+    return false;
+  }
+  
+  // ✨ [修复 7.1] 实现 loop 模式
+  private async executeLoop(
+    input: unknown, 
+    context: StreamingContext, 
+    config: CompositeConfig
+  ): Promise<ExecutionResult> {
+    const modeConfig = config.modeConfig?.loop;
+    const maxIterations = modeConfig?.maxIterations || 10;
+    
+    let currentInput = input;
+    let lastResult: ExecutionResult | null = null;
+    let iteration = 0;
+
+    while (iteration < maxIterations) {
+      // 检查是否被中断
+      if (context.signal?.aborted) {
+        throw new DOMException('Aborted', 'AbortError');
+      }
+
+      iteration++;
+
+      // 执行所有子节点
+      for (const childConfig of config.children) {
+        const child = new UnifiedExecutor(childConfig);
+        lastResult = await child.execute(currentInput, {
+          ...context,
+          depth: context.depth + 1
+        });
+
+        if (lastResult.control.action === 'end') {
+          return lastResult;
+        }
+
+        currentInput = lastResult.output;
+      }
+
+      // 检查终止条件
+      if (modeConfig?.exitCondition) {
+        if (this.evaluateCondition(modeConfig.exitCondition, currentInput)) {
+          break;
+        }
+      }
+    }
+
+    return lastResult || {
+      status: 'success',
+      output: currentInput,
+      control: { action: 'end' }
+    };
+  }
+}
+
+// 工厂函数
+
+export function createAgent(config: BaseExecutorConfig & { config: AtomicConfig }): ExecutorConfig {
+  return { ...config, type: 'atomic' };
+}
+
+export function createOrchestrator(
+  config: BaseExecutorConfig & { config: Omit<CompositeConfig, 'children'> },
+  children: ExecutorConfig[]
+): ExecutorConfig {
+  return {
+    ...config,
+    type: 'composite',
+    config: { ...config.config, children }
+  };
+}
+
+export function serial(id: string, children: ExecutorConfig[]): ExecutorConfig {
+  return createOrchestrator(
+    { id, name: id, config: { mode: 'serial' } },
+    children
+  );
+}
+
+export function parallel(id: string, children: ExecutorConfig[]): ExecutorConfig {
+  return createOrchestrator(
+    { id, name: id, config: { mode: 'parallel' } },
+    children
+  );
+}
+
+export function router(
+  id: string, 
+  children: ExecutorConfig[], 
+  strategy: 'llm' | 'rule' = 'llm'
+): ExecutorConfig {
+  return createOrchestrator(
+    { id, name: id, config: { mode: 'router', modeConfig: { router: { strategy } } } },
+    children
+  );
+}
+
+export function loop(
+  id: string,
+  children: ExecutorConfig[],
+  options: { maxIterations?: number; exitCondition?: string } = {}
+): ExecutorConfig {
+  return createOrchestrator(
+    { 
+      id, 
+      name: id, 
+      config: { 
+        mode: 'loop', 
+        modeConfig: { 
+          loop: { 
+            maxIterations: options.maxIterations || 10,
+            exitCondition: options.exitCondition
+          } 
+        } 
+      } 
+    },
+    children
+  );
+}
+

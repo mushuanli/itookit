@@ -1,5 +1,6 @@
-// @file llm-ui/components/HistoryView.ts
-import { OrchestratorEvent, SessionGroup, ExecutionNode,NodeAction, NodeActionCallback } from '../core/types';
+// @file: llm-ui/components/HistoryView.ts
+
+import { OrchestratorEvent, SessionGroup, ExecutionNode, NodeAction, NodeActionCallback } from '../core/types';
 import { NodeRenderer } from './NodeRenderer';
 import { MDxController } from './mdx/MDxController';
 import { NodeTemplates } from './templates/NodeTemplates';
@@ -102,12 +103,36 @@ export class HistoryView {
             this.renderWelcome();
             return;
         }
-        sessions.forEach(session => {
-            this.appendSessionGroup(session);
+
+        // --- 智能折叠策略 ---
+        // 规则：找到最后一条 User 消息，它以及它之后的所有消息保持展开 (Expanded)。
+        // 之前的所有消息默认折叠 (Collapsed)。
+        let lastUserIndex = -1;
+        for (let i = sessions.length - 1; i >= 0; i--) {
+            if (sessions[i].role === 'user') {
+                lastUserIndex = i;
+                break;
+            }
+        }
+
+        // 如果没有 user 消息（全是 agent?），则默认展开最后一条
+        if (lastUserIndex === -1 && sessions.length > 0) {
+            lastUserIndex = sessions.length - 1;
+        }
+
+        sessions.forEach((session, index) => {
+            // 如果 index < lastUserIndex，则折叠 (true)
+            // 否则展开 (false)
+            const shouldCollapse = index < lastUserIndex;
+
+            this.appendSessionGroup(session, shouldCollapse);
+            
             if (session.executionRoot) {
-                this.renderExecutionTree(session.executionRoot);
+                // Agent 执行树跟随 Session 的折叠状态
+                this.renderExecutionTree(session.executionRoot, shouldCollapse);
             }
         });
+
         this.scrollToBottom(true);
     }
 
@@ -127,10 +152,12 @@ export class HistoryView {
 
         switch (event.type) {
             case 'session_start':
-                this.appendSessionGroup(event.payload);
+                // [修复] 新开始的会话始终展开 (isCollapsed = false)
+                this.appendSessionGroup(event.payload, false);
                 break;
             case 'node_start':
-                this.appendNode(event.payload.parentId, event.payload.node);
+                // [修复] 新开始的节点始终展开 (isCollapsed = false)
+                this.appendNode(event.payload.parentId, event.payload.node, false);
                 break;
             case 'node_update':
                 if (event.payload.chunk !== undefined && event.payload.field !== undefined) {
@@ -175,15 +202,20 @@ export class HistoryView {
         this.scrollToBottom(forceScroll);
     }
 
-    private appendSessionGroup(group: SessionGroup) {
+    private appendSessionGroup(group: SessionGroup, isCollapsed: boolean) {
         const wrapper = document.createElement('div');
         wrapper.className = `llm-ui-session llm-ui-session--${group.role}`;
         wrapper.dataset.sessionId = group.id;
 
         if (group.role === 'user') {
             const preview = this.getPreviewText(group.content || '');
-            wrapper.innerHTML = NodeTemplates.renderUserBubble(group, preview);
+            // 传入 isCollapsed
+            wrapper.innerHTML = NodeTemplates.renderUserBubble(group, preview, isCollapsed);
             this.container.appendChild(wrapper);
+            
+            // 只有当未折叠时，才立即初始化编辑器 (懒加载优化)
+            // 或者：总是初始化，但在 CSS 中隐藏。为了兼容搜索，通常需要初始化。
+            // 这里为了简单，我们总是初始化，依赖 CSS display:none 隐藏
             this.initUserBubble(wrapper, group);
         } else {
             wrapper.innerHTML = `
@@ -192,8 +224,6 @@ export class HistoryView {
             `;
             this.container.appendChild(wrapper);
         }
-
-        this.container.appendChild(wrapper);
     }
 
     private initUserBubble(wrapper: HTMLElement, group: SessionGroup) {
@@ -274,24 +304,25 @@ export class HistoryView {
         });
     }
 
-    private toggleEditMode(
-        nodeId: string, 
-        controller: MDxController, 
-        editActionsEl: HTMLElement,
-        wrapper: HTMLElement
-    ) {
-        const isEditing = this.editingNodes.has(nodeId);
-
-        if (!isEditing) {
-            // 进入编辑模式
+    private toggleEditMode(nodeId: string, controller: MDxController, actionsEl: HTMLElement, wrapper: HTMLElement) {
+        if (!this.editingNodes.has(nodeId)) {
+            // Enter Edit
             this.originalContentMap.set(nodeId, controller.content);
             this.editingNodes.add(nodeId);
             controller.toggleEdit();
-            editActionsEl.style.display = 'flex';
+            actionsEl.style.display = 'flex';
             wrapper.querySelector('[data-action="edit"]')?.classList.add('active');
+            
+            // 如果是折叠状态，先展开以便编辑
+            const bubble = wrapper.querySelector('.llm-ui-bubble--user');
+            if (bubble && bubble.classList.contains('is-collapsed')) {
+                // 模拟点击折叠按钮
+                const collapseBtn = wrapper.querySelector('[data-action="collapse"]');
+                if (collapseBtn) (collapseBtn as HTMLElement).click();
+            }
         } else {
-            // 已经在编辑模式，切换回只读
-            this.cancelEdit(nodeId, controller, editActionsEl, wrapper);
+            // Cancel Edit
+            this.cancelEdit(nodeId, controller, actionsEl, wrapper);
         }
     }
 
@@ -400,7 +431,19 @@ export class HistoryView {
         }
     }
 
-    private appendNode(parentId: string | undefined, node: ExecutionNode) {
+    /**
+     * 递归渲染执行树
+     */
+    private renderExecutionTree(node: ExecutionNode, isCollapsed: boolean = false) {
+        this.appendNode(node.parentId, node, isCollapsed);
+        node.children?.forEach(c => this.renderExecutionTree(c, isCollapsed));
+    }
+
+    /**
+     * 添加执行节点 DOM
+     * [修改] 接受 isCollapsed 参数
+     */
+    private appendNode(parentId: string | undefined, node: ExecutionNode, isCollapsed: boolean) {
         let parentEl: HTMLElement | null = null;
         
         if (parentId) {
@@ -413,7 +456,17 @@ export class HistoryView {
         }
 
         if (parentEl) {
+            // 需要修改 NodeRenderer.create 接口以接受 isCollapsed
+            // 或者手动添加 class
             const { element, mountPoints } = NodeRenderer.create(node);
+            
+            if (isCollapsed) {
+                element.classList.add('is-collapsed');
+                // 更新 SVG 图标
+                const svg = element.querySelector('[data-action="collapse"] svg');
+                if (svg) svg.innerHTML = '<polyline points="6 9 12 15 18 9"></polyline>';
+            }
+
             this.nodeMap.set(node.id, element);
             parentEl.appendChild(element);
 
@@ -610,11 +663,6 @@ export class HistoryView {
         // 刷新内容（如果需要的话，由 SessionManager 处理）
     }
 
-    private renderExecutionTree(node: ExecutionNode) {
-        this.appendNode(node.parentId, node);
-        node.children?.forEach(c => this.renderExecutionTree(c));
-    }
-
     scrollToBottom(force: boolean = false) {
         if (force || this.shouldAutoScroll) {
             if (this.scrollDebounceTimer) {
@@ -632,11 +680,12 @@ export class HistoryView {
     // [新增] 辅助：截取预览文本
     private getPreviewText(content: string): string {
         if (!content) return '';
-        // 移除 Markdown 符号 (简单处理)
-        const plain = content.replace(/[#*`]/g, '').replace(/\n/g, ' ').trim();
-        const truncated = plain.length > 50 ? plain.substring(0, 50) + '...' : plain;
-        // 返回纯文本，由调用方决定是否需要转义
-        return truncated;
+        // 1. 替换换行为空格
+        let plain = content.replace(/[\r\n]+/g, ' ');
+        // 2. 移除常见的 Markdown 符号
+        plain = plain.replace(/[*#`_~[\]()]/g, '');
+        // 3. 截断
+        return plain.length > 60 ? plain.substring(0, 60) + '...' : plain;
     }
 
     // ✨ [新增] 销毁方法
