@@ -7,7 +7,7 @@ import {
     Heading,              // [修复] 添加导入
     UnifiedSearchResult   // [修复] 添加导入
 } from '@itookit/common';
-import { IAgentService } from '../services/IAgentService';
+import { IAgentService } from '@itookit/llm-engine';
 
 /**
  * Agent 配置编辑器

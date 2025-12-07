@@ -1,6 +1,6 @@
 // @file llm-ui/editors/MCPSettingsEditor.ts
 import { BaseSettingsEditor, Toast, Modal, MCPServer, generateShortUUID } from '@itookit/common';
-import { IAgentService } from '../services/IAgentService';
+import { IAgentService } from '@itookit/llm-engine';
 
 export class MCPSettingsEditor extends BaseSettingsEditor<IAgentService> {
     // [修复] 添加缺失的属性

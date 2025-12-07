@@ -1,19 +1,14 @@
 // @file llm-ui/index.ts
 
 import './styles/index.css';
-export * from './core/types';
 
 import { LLMWorkspaceEditor, LLMEditorOptions } from './LLMWorkspaceEditor';
-import { VFSAgentService } from './services/VFSAgentService';
-import { LLMSessionEngine } from './engine/LLMSessionEngine';
-import { SessionRegistry, getSessionRegistry } from './orchestrator/SessionRegistry';
+import { VFSAgentService,initializeLLMModule } from '@itookit/llm-engine';
 import { EditorFactory, EditorOptions, ILLMSessionEngine } from '@itookit/common';
-import { VFSCore } from '@itookit/vfs-core';
 import { AgentConfigEditor } from './editors/AgentConfigEditor';
 
 export { ConnectionSettingsEditor } from './editors/ConnectionSettingsEditor';
 export { MCPSettingsEditor } from './editors/MCPSettingsEditor';
-export { DEFAULT_AGENT_CONTENT } from './constants';
 
 // 扩展 EditorOptions
 interface LLMFactoryOptions extends EditorOptions {
@@ -21,60 +16,6 @@ interface LLMFactoryOptions extends EditorOptions {
 }
 
 
-/**
- * 专门针对 .chat 文件的解析逻辑
- */
-export const chatFileParser = (content: string): any => {
-    try {
-        // 快速解析，不需要 YAML
-        const data = JSON.parse(content);
-        
-        return {
-            summary: data.summary || '',
-            searchableText: `${data.title} ${data.summary || ''} ${data.id}`.toLowerCase(),
-            metadata: {
-                ...data.settings,
-                type: 'chat',
-                updatedAt: data.updated_at,
-                messageCount: Object.keys(data.branches || {}).length
-            }
-        };
-    } catch (e) {
-        console.warn('[chatFileParser] Parse failed:', e);
-        return { summary: 'Parse error', metadata: { type: 'chat' } };
-    }
-};
-
-/**
- * 初始化 LLM 模块
- * 
- * 必须在使用任何 LLM 功能之前调用
- */
-export async function initializeLLMModule(
-    agentService: VFSAgentService,
-    sessionEngine?: ILLMSessionEngine,
-    options?: { maxConcurrent?: number }
-): Promise<{
-    registry: SessionRegistry;
-    engine: ILLMSessionEngine;
-}> {
-    // 获取或创建 Engine
-    let engine = sessionEngine;
-    if (!engine) {
-        const vfsCore = VFSCore.getInstance();
-        const llmEngine = new LLMSessionEngine(vfsCore);
-        await llmEngine.init();
-        engine = llmEngine;
-    }
-
-    // 初始化 Registry
-    const registry = getSessionRegistry();
-    registry.initialize(agentService, engine, options);
-
-    console.log('[LLM Module] Initialized');
-
-    return { registry, engine };
-}
 
 /**
  * 创建 LLM 编辑器工厂
