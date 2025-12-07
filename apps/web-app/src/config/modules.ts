@@ -2,7 +2,7 @@
  * @file apps/web-app/src/config/modules.ts
  */
 import { FS_MODULE_CHAT, FS_MODULE_AGENTS } from '@itookit/common';
-import { DEFAULT_AGENT_CONTENT } from '@itookit/llm-ui';
+import { DEFAULT_AGENT_CONTENT } from '@itookit/llm-engine';
 
 // 1. 定义工作区行为类型
 export type WorkspaceType = 'standard' | 'settings' | 'agent' | 'chat';

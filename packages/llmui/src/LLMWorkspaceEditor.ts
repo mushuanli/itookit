@@ -6,11 +6,8 @@ import {
 } from '@itookit/common';
 import { HistoryView } from './components/HistoryView';
 import { ChatInput } from './components/ChatInput';
-import { SessionManager } from './orchestrator/SessionManager';
-import { getSessionRegistry, SessionRegistry } from './orchestrator/SessionRegistry';
-import { IAgentService } from './services/IAgentService';
-import { NodeAction, OrchestratorEvent } from './core/types';
-import {SessionRegistryEvent} from './core/session';
+import { SessionManager,getSessionRegistry, SessionRegistry,IAgentService, } from '@itookit/llm-engine';
+import { NodeAction, OrchestratorEvent,SessionRegistryEvent } from './core/types';
 export interface LLMEditorOptions extends EditorOptions {
     sessionEngine: ILLMSessionEngine;
     agentService: IAgentService;

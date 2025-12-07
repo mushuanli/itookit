@@ -11,7 +11,8 @@ import { SettingsEngine } from './workspace/settings/engines/SettingsEngine';
 import { SettingsService } from './workspace/settings/services/SettingsService';
 import { createSettingsFactory } from './factories/settingsFactory';
 import { FileTypeDefinition } from '@itookit/vfs-ui';
-import { chatFileParser,createLLMFactory, createAgentEditorFactory, VFSAgentService,initializeLLMModule } from '@itookit/llm-ui';
+import {chatFileParser,initializeLLMModule} from '@itookit/llm-engine';
+import { createLLMFactory, createAgentEditorFactory, VFSAgentService } from '@itookit/llm-ui';
 import { ISessionEngine,EditorFactory } from '@itookit/common';
 
 import '@itookit/vfs-ui/style.css';
@@ -40,8 +41,11 @@ async function bootstrap() {
         await sharedAgentService.init();
 
     const { registry, engine } = await initializeLLMModule(sharedAgentService, undefined, {
-        maxConcurrent: 3  // 最多同时运行 6 个会话
+        maxConcurrent: 8  // 最多同时运行 6 个会话
     });
+    if( !registry){
+        console.log('init LLM Module failed.');
+    }
 /*
     // 6. 监听全局事件（可选）
     registry.onGlobalEvent((event) => {
