@@ -13,6 +13,7 @@ import { Converters } from '../core/Converters';
 export interface RunOptions {
     skipUserMessage?: boolean;
     parentUserNodeId?: string;
+    signal?: AbortSignal
 }
 
 /**

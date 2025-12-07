@@ -1,0 +1,111 @@
+/* @file llm-ui/styles/recovery.css */
+
+.llm-recovery-dialog {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.llm-recovery-dialog__overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(2px);
+}
+
+.llm-recovery-dialog__content {
+    position: relative;
+    background: var(--bg-primary, white);
+    border-radius: 12px;
+    padding: 24px;
+    max-width: 400px;
+    width: 90%;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+    animation: slideUp 0.3s ease;
+}
+
+@keyframes slideUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.llm-recovery-dialog__content h3 {
+    margin: 0 0 12px;
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.llm-recovery-dialog__content p {
+    margin: 0 0 16px;
+    color: var(--text-secondary, #666);
+    font-size: 14px;
+}
+
+.llm-recovery-dialog__list {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 20px;
+    max-height: 150px;
+    overflow-y: auto;
+}
+
+.llm-recovery-dialog__list li {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background: var(--bg-secondary, #f5f5f5);
+    border-radius: 6px;
+    margin-bottom: 6px;
+    font-size: 13px;
+}
+
+.llm-recovery-dialog__list .session-status {
+    color: var(--color-running, #3b82f6);
+    font-weight: 500;
+}
+
+.llm-recovery-dialog__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+}
+
+.llm-recovery-dialog__actions .btn {
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    border: none;
+    transition: all 0.2s ease;
+}
+
+.llm-recovery-dialog__actions .btn--secondary {
+    background: var(--bg-secondary, #e5e5e5);
+    color: var(--text-primary, #333);
+}
+
+.llm-recovery-dialog__actions .btn--primary {
+    background: var(--color-primary, #3b82f6);
+    color: white;
+}
+
+.llm-recovery-dialog__actions .btn:hover {
+    opacity: 0.9;
+    transform: translateY(-1px);
+}

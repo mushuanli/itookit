@@ -1,75 +1,82 @@
 // @file llm-ui/orchestrator/SessionManager.ts
 
-import { SessionGroup, OrchestratorEvent, ExecutionNode } from '../core/types';
-import { IExecutor, ILLMSessionEngine, ChatNode } from '@itookit/common';
-import { IAgentService } from '../services/IAgentService';
+import { SessionGroup, OrchestratorEvent } from '../core/types';
+import { IExecutor } from '@itookit/common';
+import { SessionRegistry, getSessionRegistry } from './SessionRegistry';
+import { DeleteOptions } from './features/MessageOperations';
 
-// 导入拆分后的模块
-import { SessionState } from './core/SessionState';
-import { SessionEventEmitter } from './core/EventEmitter';
-import { PersistenceManager } from './data/PersistenceManager';
-import { ExecutorResolver } from './execution/ExecutorResolver';
-import { TreeOperations } from './data/TreeOperations';
-import { MessageOperations, DeleteOptions } from './features/MessageOperations';
-import { BranchNavigator } from './features/BranchNavigator';
-import { QueryRunner, RunOptions } from './execution/QueryRunner';
-import { ExportService } from './features/ExportService';
-import { Converters } from './core/Converters';
-
-// 重试选项
 export interface RetryOptions {
     agentId?: string;
     preserveCurrent: boolean;
     navigateToNew: boolean;
 }
 
-// 重新导出 DeleteOptions 供外部使用
-//export { DeleteOptions };
-
 /**
- * SessionManager - 门面类
+ * SessionManager - 会话管理器（代理层）
  * 
- * 职责：协调各个子模块，提供统一的对外接口
+ * 重构后的职责：
+ * 1. 作为单个会话的代理，封装对 SessionRegistry 的调用
+ * 2. 提供与原有 API 兼容的接口
+ * 3. 管理当前绑定的会话 ID
  * 
- * 设计原则：
- * 1. 门面模式 - 简化复杂子系统的使用
- * 2. 单一职责 - 每个子模块只负责一个功能领域
- * 3. 依赖注入 - 便于测试和扩展
+ * 设计理念：
+ * - SessionManager 是 "轻量级视图代理"
+ * - SessionRegistry 是 "全局状态管理中心"
+ * - 一个 Editor 对应一个 SessionManager，但多个 SessionManager 共享一个 Registry
  */
 export class SessionManager {
-    // 核心状态
-    private state: SessionState;
-    private emitter: SessionEventEmitter;
-    
-    // 功能模块
-    private persistence: PersistenceManager;
-    private executorResolver: ExecutorResolver;
-    private treeOps: TreeOperations;
-    private messageOps: MessageOperations;
-    private branchNav: BranchNavigator;
-    private queryRunner: QueryRunner;
+    private registry: SessionRegistry;
+    private sessionId: string | null = null;
+    private nodeId: string | null = null;
+    private eventUnsubscribe: (() => void) | null = null;
 
-    constructor(
-        private agentService: IAgentService,
-        sessionEngine: ILLMSessionEngine
-    ) {
-        // 初始化核心组件
-        this.state = new SessionState();
-        this.emitter = new SessionEventEmitter();
-        this.persistence = new PersistenceManager(sessionEngine);
-        this.executorResolver = new ExecutorResolver(agentService);
+    constructor() {
+        this.registry = getSessionRegistry();
+    }
+
+    // ================================================================
+    // 会话绑定
+    // ================================================================
+
+    /**
+     * 绑定到特定会话
+     */
+    async bindSession(nodeId: string, sessionId: string): Promise<void> {
+        // 解绑之前的会话
+        this.unbindSession();
+
+        // 注册并绑定
+        await this.registry.registerSession(nodeId, sessionId);
         
-        // 初始化功能模块
-        this.treeOps = new TreeOperations(this.state);
-        this.messageOps = new MessageOperations(this.state, this.emitter, this.persistence);
-        this.branchNav = new BranchNavigator(this.state, this.emitter, this.persistence);
-        this.queryRunner = new QueryRunner(
-            this.state,
-            this.emitter,
-            this.persistence,
-            this.executorResolver,
-            this.treeOps
-        );
+        this.nodeId = nodeId;
+        this.sessionId = sessionId;
+
+        // 设置为当前激活会话
+        this.registry.setActiveSession(sessionId);
+
+        console.log(`[SessionManager] Bound to session: ${sessionId}`);
+    }
+
+    /**
+     * 解绑当前会话
+     */
+    unbindSession(): void {
+        if (this.eventUnsubscribe) {
+            this.eventUnsubscribe();
+            this.eventUnsubscribe = null;
+        }
+
+        // 注意：不注销会话，只是解除绑定
+        // 会话可能在后台继续运行
+        this.sessionId = null;
+        this.nodeId = null;
+    }
+
+    /**
+     * 加载会话（兼容旧接口）
+     */
+    async loadSession(nodeId: string, sessionId: string): Promise<void> {
+        await this.bindSession(nodeId, sessionId);
     }
 
     // ================================================================
@@ -77,115 +84,103 @@ export class SessionManager {
     // ================================================================
 
     getSessions(): SessionGroup[] {
-        return this.state.getSessions();
+        if (!this.sessionId) return [];
+        return this.registry.getSessionMessages(this.sessionId);
     }
 
     getCurrentSessionId(): string | null {
-        return this.state.getCurrentSessionId();
+        return this.sessionId;
     }
 
     hasUnsavedChanges(): boolean {
         return false; // Engine 自动保存
     }
 
+    /**
+     * 获取当前会话状态
+     */
+    getStatus(): string {
+        if (!this.sessionId) return 'unbound';
+        const runtime = this.registry.getSessionRuntime(this.sessionId);
+        return runtime?.status || 'unknown';
+    }
+
+    /**
+     * 是否正在生成
+     */
+    isGenerating(): boolean {
+        if (!this.sessionId) return false;
+        const runtime = this.registry.getSessionRuntime(this.sessionId);
+        return runtime?.status === 'running' || runtime?.status === 'queued';
+    }
+
     // ================================================================
     // 事件订阅 API
     // ================================================================
 
+    /**
+     * 订阅当前会话的事件
+     */
     onEvent(handler: (event: OrchestratorEvent) => void): () => void {
-        return this.emitter.subscribe(handler);
-    }
-
-    // ================================================================
-    // 执行器管理 API
-    // ================================================================
-
-    registerExecutor(executor: IExecutor): void {
-        this.executorResolver.register(executor);
-    }
-
-    async getAvailableExecutors(): Promise<Array<{
-        id: string;
-        name: string;
-        icon: string;
-        description?: string;
-        category: string;
-    }>> {
-        return this.executorResolver.getAvailableExecutors();
-    }
-
-    // ================================================================
-    // 会话加载 API
-    // ================================================================
-
-    async loadSession(nodeId: string, sessionId: string): Promise<void> {
-        console.log(`[SessionManager] Loading session. Node: ${nodeId}, ID: ${sessionId}`);
-        
-        this.state.setCurrentSession(nodeId, sessionId);
-        this.state.clearSessions();
-
-        try {
-            const context = await this.persistence.getSessionContext(nodeId, sessionId);
-
-            for (const item of context) {
-                const chatNode = item.node;
-
-                // 跳过 system prompt
-                if (chatNode.role === 'system') continue;
-
-                // 跳过空内容的 assistant 消息
-                if (chatNode.role === 'assistant' && !chatNode.content?.trim()) {
-                    console.warn(`[SessionManager] Skipping empty assistant message: ${chatNode.id}`);
-                    continue;
-                }
-
-                const sessionGroup = Converters.chatNodeToSessionGroup(chatNode);
-                if (sessionGroup) {
-                    this.state.addSession(sessionGroup);
-                }
-            }
-
-            console.log(`[SessionManager] Loaded ${this.state.getSessions().length} session groups`);
-        } catch (e) {
-            console.error('[SessionManager] Failed to load session:', e);
-            throw e;
+        if (!this.sessionId) {
+            console.warn('[SessionManager] Cannot subscribe: no session bound');
+            return () => {};
         }
+
+        // 取消之前的订阅
+        if (this.eventUnsubscribe) {
+            this.eventUnsubscribe();
+        }
+
+        this.eventUnsubscribe = this.registry.onSessionEvent(this.sessionId, handler);
+        return this.eventUnsubscribe;
     }
 
     // ================================================================
-    // 查询执行 API
+    // 执行 API
     // ================================================================
 
+    /**
+     * 运行用户查询
+     */
     async runUserQuery(text: string, files: File[], executorId: string): Promise<void> {
-        return this.queryRunner.run(text, files, executorId, {});
+        if (!this.sessionId) {
+            throw new Error('No session bound');
+        }
+
+        await this.registry.submitTask(this.sessionId, {
+            text,
+            files,
+            executorId
+        });
     }
 
+    /**
+     * 中止当前执行
+     */
     abort(): void {
-        this.queryRunner.abort();
+        if (this.sessionId) {
+            this.registry.abortSession(this.sessionId).catch(console.error);
+        }
     }
 
     // ================================================================
     // 消息操作 API
     // ================================================================
 
-    canDeleteMessage(id: string): { allowed: boolean; reason?: string } {
-        return this.messageOps.canDeleteMessage(id);
-    }
-
     async deleteMessage(id: string, options?: DeleteOptions): Promise<void> {
-        return this.messageOps.deleteMessage(id, options || {
+        if (!this.sessionId) throw new Error('No session bound');
+        
+        await this.registry.deleteMessage(this.sessionId, id, options || {
             mode: 'soft',
             cascade: false,
             deleteAssociatedResponses: true
         });
     }
 
-    canEdit(sessionGroupId: string): { allowed: boolean; reason?: string } {
-        return this.messageOps.canEdit(sessionGroupId);
-    }
-
     async updateContent(id: string, content: string, type: 'user' | 'node'): Promise<void> {
-        await this.messageOps.editMessage(id, content, false);
+        if (!this.sessionId) throw new Error('No session bound');
+        await this.registry.editMessage(this.sessionId, id, content, false);
     }
 
     async editMessage(
@@ -193,109 +188,80 @@ export class SessionManager {
         newContent: string,
         autoRerun: boolean = false
     ): Promise<void> {
-        const result = await this.messageOps.editMessage(sessionGroupId, newContent, false);
-        
-        if (result.success && autoRerun) {
-            // 删除关联的回复
-            await this.messageOps.deleteAssociatedResponses(sessionGroupId);
-            
-            // 重新生成
-            const session = this.state.findSessionById(sessionGroupId);
-            if (session && session.role === 'user') {
-                await this.queryRunner.run(newContent, [], 'default', {
-                    skipUserMessage: true,
-                    parentUserNodeId: result.newNodeId || session.persistedNodeId
-                });
-            }
-        }
+        if (!this.sessionId) throw new Error('No session bound');
+        await this.registry.editMessage(this.sessionId, sessionGroupId, newContent, autoRerun);
     }
 
     // ================================================================
     // 重试 API
     // ================================================================
 
+    canDeleteMessage(id: string): { allowed: boolean; reason?: string } {
+        // 委托给 Registry 内部的 MessageOperations
+        // 简化实现：检查状态
+        if (this.isGenerating()) {
+            return { allowed: false, reason: 'Cannot delete while generating' };
+        }
+        return { allowed: true };
+    }
+
     canRetry(sessionGroupId: string): { allowed: boolean; reason?: string } {
-        return this.messageOps.canRetry(sessionGroupId);
+        if (this.isGenerating()) {
+            return { allowed: false, reason: 'Already generating' };
+        }
+        return { allowed: true };
     }
 
     async retryGeneration(
         assistantSessionId: string,
         options: RetryOptions = { preserveCurrent: true, navigateToNew: true }
     ): Promise<void> {
-        const check = this.messageOps.canRetry(assistantSessionId);
-        if (!check.allowed) {
-            throw new Error(check.reason);
-        }
-
-        const assistantSession = this.state.findSessionById(assistantSessionId);
-        if (!assistantSession || assistantSession.role !== 'assistant') {
-            throw new Error('Invalid assistant session');
-        }
-
-        // 找到对应的 user message
-        const userSession = this.messageOps.findUserMessageForAssistant(assistantSessionId);
-        if (!userSession) {
-            throw new Error('No user message found');
-        }
-
-        // 处理当前回复
-        if (!options.preserveCurrent) {
-            await this.deleteMessage(assistantSessionId, {
-                mode: 'soft',
-                cascade: false,
-                deleteAssociatedResponses: false
-            });
-        }
-
-        // 获取 agent ID
-        const agentId = options.agentId ||
-            assistantSession.executionRoot?.data.metaInfo?.agentId ||
-            'default';
-
-        // 通知 UI 重试开始
-        this.emitter.emit({
-            type: 'retry_started',
-            payload: { originalId: assistantSessionId, newId: '' }
-        } as any);
-
-        // 重新执行
-        await this.queryRunner.run(userSession.content || '', [], agentId, {
-            skipUserMessage: true,
-            parentUserNodeId: userSession.persistedNodeId
+        if (!this.sessionId) throw new Error('No session bound');
+        
+        await this.registry.retryGeneration(this.sessionId, assistantSessionId, {
+            agentId: options.agentId,
+            preserveCurrent: options.preserveCurrent
         });
     }
 
     async resendUserMessage(userSessionId: string): Promise<void> {
-        const session = this.state.findSessionById(userSessionId);
+        if (!this.sessionId) throw new Error('No session bound');
+        
+        const sessions = this.getSessions();
+        const session = sessions.find(s => s.id === userSessionId);
+        
         if (!session || session.role !== 'user') {
             throw new Error('Invalid user session');
         }
 
-        // 删除关联的回复
-        await this.messageOps.deleteAssociatedResponses(userSessionId);
-
-        // 重新生成回复
-        await this.queryRunner.run(
-            session.content || '',
-            [],
-            'default',
-            {
-                skipUserMessage: true,
-                parentUserNodeId: session.persistedNodeId
-            }
-        );
+        // 删除关联的回复并重新生成
+        await this.registry.editMessage(this.sessionId, userSessionId, session.content || '', true);
     }
 
     // ================================================================
-    // 分支导航 API
+    // 分支导航 API (简化实现)
     // ================================================================
 
     async getSiblings(sessionGroupId: string): Promise<SessionGroup[]> {
-        return this.branchNav.getSiblings(sessionGroupId);
+        // TODO: 需要在 Registry 中实现
+        return [];
     }
 
     async switchToSibling(sessionGroupId: string, siblingIndex: number): Promise<void> {
-        return this.branchNav.switchToSibling(sessionGroupId, siblingIndex);
+        // TODO: 需要在 Registry 中实现
+    }
+
+    // ================================================================
+    // 执行器 API
+    // ================================================================
+
+    registerExecutor(executor: IExecutor): void {
+        // 委托给 Registry 的 ExecutorResolver
+        console.warn('[SessionManager] registerExecutor should be called on Registry directly');
+    }
+
+    async getAvailableExecutors() {
+        return this.registry.getAvailableExecutors();
     }
 
     // ================================================================
@@ -303,24 +269,15 @@ export class SessionManager {
     // ================================================================
 
     exportToMarkdown(): string {
-        return ExportService.toMarkdown(this.state.getSessions());
-    }
-
-    exportToJSON(): string {
-        return ExportService.toJSON(this.state.getSessions());
-    }
-
-    exportToPlainText(): string {
-        return ExportService.toPlainText(this.state.getSessions());
+        if (!this.sessionId) return '';
+        return this.registry.exportToMarkdown(this.sessionId);
     }
 
     // ================================================================
-    // 生命周期 API
+    // 生命周期
     // ================================================================
 
     destroy(): void {
-        this.queryRunner.abort();
-        this.emitter.clear();
-        this.state.clearSessions();
+        this.unbindSession();
     }
 }

@@ -11,7 +11,7 @@ import { SettingsEngine } from './workspace/settings/engines/SettingsEngine';
 import { SettingsService } from './workspace/settings/services/SettingsService';
 import { createSettingsFactory } from './factories/settingsFactory';
 import { FileTypeDefinition } from '@itookit/vfs-ui';
-import { chatFileParser,createLLMFactory, createAgentEditorFactory, VFSAgentService } from '@itookit/llm-ui';
+import { chatFileParser,createLLMFactory, createAgentEditorFactory, VFSAgentService,initializeLLMModule } from '@itookit/llm-ui';
 import { ISessionEngine,EditorFactory } from '@itookit/common';
 
 import '@itookit/vfs-ui/style.css';
@@ -39,9 +39,25 @@ async function bootstrap() {
         sharedAgentService = new VFSAgentService(vfsCore);
         await sharedAgentService.init();
 
+    const { registry, engine } = await initializeLLMModule(sharedAgentService, undefined, {
+        maxConcurrent: 3  // 最多同时运行 6 个会话
+    });
+/*
+    // 6. 监听全局事件（可选）
+    registry.onGlobalEvent((event) => {
+        switch (event.type) {
+            case 'pool_status_changed':
+                updateGlobalStatusBar(event.payload);
+                break;
+            case 'session_unread_updated':
+                updateSidebarBadge(event.payload.sessionId, event.payload.count);
+                break;
+        }
+    });
+    */
         // 4. 创建专用 Factory
+        const llmEditorFactory = createLLMFactory(sharedAgentService,engine);
         const agentEditorFactory = createAgentEditorFactory(sharedAgentService); 
-        const llmEditorFactory = createLLMFactory(sharedAgentService);
         const settingsFactory = createSettingsFactory(sharedSettingsService, sharedAgentService);
 
         // 5. 注册全局文件类型 (允许跨工作区识别特殊文件)
