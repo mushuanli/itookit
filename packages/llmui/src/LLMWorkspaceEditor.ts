@@ -350,8 +350,21 @@ export class LLMWorkspaceEditor implements IEditor {
      * 处理内容编辑
      */
     private async handleContentChange(id: string, content: string, type: 'user' | 'node'): Promise<void> {
+    console.log('[DEBUG] handleContentChange called:', { id, contentLength: content.length, type });
+    
+    if (typeof this.sessionManager.updateContent !== 'function') {
+        console.error('[ERROR] sessionManager.updateContent is not a function!');
+        console.log('[DEBUG] sessionManager methods:', Object.keys(this.sessionManager));
+        return;
+    }
+    
+    try {
         await this.sessionManager.updateContent(id, content, type);
+        console.log('[DEBUG] Content updated successfully');
         this.emit('change');
+    } catch (e) {
+        console.error('[ERROR] updateContent failed:', e);
+    }
     }
 
     /**
