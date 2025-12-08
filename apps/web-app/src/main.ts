@@ -206,11 +206,21 @@ async function bootstrap() {
         };
 
         // --- 6. 启动应用 ---
+        
+        // 1. 初始化导航监听
+        // 注意：initSidebarNavigation 内部逻辑是：如果发现 DOM 中有 .active 按钮，
+        // 它会立即调用回调函数 loadWorkspace(targetId)。
         initSidebarNavigation(loadWorkspace);
         
-        // 加载默认工作区
-        if (WORKSPACES[0]) {
+        // 2. 检查 DOM 状态：是否已经有激活的按钮？
+        const hasActiveState = document.querySelector('.app-nav-btn.active');
+        
+        // 3. 只有在 DOM 中找不到任何激活状态时，才回退到默认加载第一个工作区
+        if (!hasActiveState && WORKSPACES[0]) {
+            console.log('No active state found in HTML, loading default workspace.');
             await loadWorkspace(WORKSPACES[0].elementId);
+        } else {
+            console.log('Restored active workspace from HTML state.');
         }
 
     } catch (error) {
