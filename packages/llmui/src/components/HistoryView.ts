@@ -245,6 +245,10 @@ export class HistoryView {
     private bindUserBubbleEvents(wrapper: HTMLElement, group: SessionGroup, controller: MDxController) {
         const bubbleEl = wrapper.querySelector('.llm-ui-bubble--user') as HTMLElement;
         const editActionsEl = wrapper.querySelector('.llm-ui-edit-actions') as HTMLElement;
+    if (!bubbleEl) {
+        console.error('[HistoryView] bubbleEl not found for group:', group.id);
+        return;
+    }
 
         // Retry (Resend)
         wrapper.querySelector('[data-action="retry"]')?.addEventListener('click', (e) => {
@@ -261,7 +265,7 @@ export class HistoryView {
         // Copy
         wrapper.querySelector('[data-action="copy"]')?.addEventListener('click', async (e) => {
             e.stopPropagation();
-            await this.handleCopy(controller.content, e.target as HTMLElement);
+        await this.handleCopy(controller.content, e.currentTarget as HTMLElement);
         });
 
         // Delete
@@ -270,11 +274,20 @@ export class HistoryView {
             await this.handleDeleteConfirm(group.id, 'user');
         });
 
-        // Collapse
-        wrapper.querySelector('[data-action="collapse"]')?.addEventListener('click', (e) => {
+    // ✅ 修复：Collapse 使用 currentTarget
+    const collapseBtn = wrapper.querySelector('[data-action="collapse"]');
+    if (collapseBtn) {
+        collapseBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            this.toggleCollapse(bubbleEl, e.target as HTMLElement);
+            const btn = e.currentTarget as HTMLElement;
+            console.log('[DEBUG] User bubble collapse clicked');
+            console.log('[DEBUG] bubbleEl:', bubbleEl);
+            console.log('[DEBUG] btn:', btn);
+            this.toggleCollapse(bubbleEl, btn);
         });
+    } else {
+        console.warn('[HistoryView] Collapse button not found for group:', group.id);
+    }
 
         // 分支导航
         wrapper.querySelector('[data-action="prev-sibling"]')?.addEventListener('click', (e) => {
@@ -333,6 +346,8 @@ export class HistoryView {
         wrapper: HTMLElement,
         regenerate: boolean
     ) {
+    // 获取编辑后的内容
+    const newContent = controller.content;
         // 退出编辑模式
         this.editingNodes.delete(nodeId);
         this.originalContentMap.delete(nodeId);
@@ -340,11 +355,11 @@ export class HistoryView {
         editActionsEl.style.display = 'none';
         wrapper.querySelector('[data-action="edit"]')?.classList.remove('active');
 
+    // ✅ 关键修复：无论是否重新生成，都先保存内容
+    this.onContentChange?.(nodeId, newContent, 'user');
         // 通知外部
         if (regenerate) {
             this.onNodeAction?.('edit-and-retry', nodeId);
-        } else {
-            this.onNodeAction?.('edit', nodeId);
         }
     }
 
@@ -420,15 +435,38 @@ export class HistoryView {
     }
 
     private toggleCollapse(element: HTMLElement, btn: HTMLElement) {
+    console.log('[DEBUG] toggleCollapse called');
+    console.log('[DEBUG] Element classList before:', element.classList.toString());
         element.classList.toggle('is-collapsed');
-        const svg = btn.closest('button')?.querySelector('svg');
-        if (!svg) return;
+    
+    const isCollapsed = element.classList.contains('is-collapsed');
+    console.log('[DEBUG] Is now collapsed:', isCollapsed);
+    
+    // 检查预览元素
+    const previewEl = element.querySelector('.llm-ui-header-preview');
+    if (previewEl) {
+        console.log('[DEBUG] Preview element found, content:', previewEl.textContent);
+        // 强制检查 computed style
+        const computedStyle = window.getComputedStyle(previewEl);
+        console.log('[DEBUG] Preview display:', computedStyle.display);
+    } else {
+        console.warn('[DEBUG] Preview element NOT found!');
+    }
+    
+    // 更新 SVG 图标
+    const svg = btn.querySelector('svg');
+    if (!svg) {
+        console.warn('[DEBUG] SVG not found in button:', btn.innerHTML);
+        return;
+    }
 
-        if (element.classList.contains('is-collapsed')) {
-            svg.innerHTML = '<polyline points="6 9 12 15 18 9"></polyline>';
-        } else {
-            svg.innerHTML = '<polyline points="18 15 12 9 6 15"></polyline>';
-        }
+    if (isCollapsed) {
+        svg.innerHTML = '<polyline points="6 9 12 15 18 9"></polyline>';
+    } else {
+        svg.innerHTML = '<polyline points="18 15 12 9 6 15"></polyline>';
+    }
+    
+    console.log('[DEBUG] Toggle complete');
     }
 
     /**
@@ -684,6 +722,8 @@ export class HistoryView {
         let plain = content.replace(/[\r\n]+/g, ' ');
         // 2. 移除常见的 Markdown 符号
         plain = plain.replace(/[*#`_~[\]()]/g, '');
+    plain = plain.trim();
+    if (!plain) return '';  // ← 添加默认值
         // 3. 截断
         return plain.length > 60 ? plain.substring(0, 60) + '...' : plain;
     }

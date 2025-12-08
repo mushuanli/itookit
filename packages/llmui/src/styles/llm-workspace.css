@@ -164,12 +164,19 @@
 .llm-ui-bubble--user.is-collapsed {
   padding: 0; /* Header自带padding */
   min-height: auto;
-  gap: 0;
 }
-.llm-ui-bubble--user.is-collapsed .llm-ui-mount-point,
-.llm-ui-bubble--user.is-collapsed .llm-ui-bubble__body {
+
+/* ✅ 修复：使用正确的选择器 .llm-ui-bubble__content */
+.llm-ui-bubble--user.is-collapsed .llm-ui-bubble__content {
   display: none !important;
 }
+
+/* 折叠时隐藏 mount-point（双重保险） */
+.llm-ui-bubble--user.is-collapsed .llm-ui-mount-point {
+  display: none !important;
+}
+
+/* 折叠时移除 header 底部边框 */
 .llm-ui-bubble--user.is-collapsed .llm-ui-bubble__header {
   border-bottom: none;
 }
@@ -230,23 +237,38 @@
     display: none; /* 默认隐藏 (展开状态) */
     font-weight: 400;
     font-size: 0.85em;
-    margin-right: 12px;
+    margin-left: 8px;
+    margin-right: auto; /* 推开右侧元素 */
+    padding-right: 12px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    flex: 1; /* 占据剩余中间空间 */
+    flex: 1;
     min-width: 0;
+    max-width: 300px; /* 限制最大宽度 */
+}
+
+.llm-ui-node .llm-ui-header-preview { 
+    color: var(--llm-ui-text-secondary); 
     opacity: 0.8;
 }
 
-.llm-ui-node .llm-ui-header-preview { color: var(--llm-ui-text-secondary); }
-.llm-ui-bubble--user .llm-ui-header-preview { color: rgba(255, 255, 255, 0.9); }
+.llm-ui-bubble--user .llm-ui-header-preview { 
+    color: rgba(255, 255, 255, 0.85); 
+}
 
 /* 仅在折叠时显示预览 */
 .llm-ui-bubble--user.is-collapsed .llm-ui-header-preview,
 .llm-ui-node.is-collapsed .llm-ui-header-preview {
     display: block;
 }
+/* ✅ 展开时隐藏预览（可选，作为双重保险） */
+.llm-ui-bubble--user:not(.is-collapsed) .llm-ui-header-preview,
+.llm-ui-node:not(.is-collapsed) .llm-ui-header-preview {
+    display: none;
+}
+
+
 
 /* 折叠时隐藏不重要的元数据以节省空间 */
 .llm-ui-node.is-collapsed .llm-ui-node__status { display: none; }
