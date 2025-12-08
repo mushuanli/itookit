@@ -38,10 +38,22 @@ export function initSidebarNavigation(onTabChange?: OnTabChangeCallback) {
         });
     });
 
-    // 初始化默认激活的 Tab
-    const activeBtn = document.querySelector('.app-nav-btn.active');
-    if (activeBtn) {
-        const target = (activeBtn as HTMLElement).dataset.target;
-        if (target) activateWorkspace(target);
+    // ✨ [修改] 初始化逻辑：优先从 LocalStorage 读取，其次是 DOM
+    const lastActiveId = localStorage.getItem('active_workspace_id');
+    let targetIdToActivate: string | null = null;
+
+    if (lastActiveId && document.querySelector(`.app-nav-btn[data-target="${lastActiveId}"]`)) {
+        // 如果本地存储有记录，且该记录在当前页面有效
+        targetIdToActivate = lastActiveId;
+    } else {
+        // 否则回退到 DOM 中的 .active
+        const activeBtn = document.querySelector('.app-nav-btn.active');
+        if (activeBtn) {
+            targetIdToActivate = (activeBtn as HTMLElement).dataset.target || null;
+        }
+    }
+
+    if (targetIdToActivate) {
+        activateWorkspace(targetIdToActivate);
     }
 }
