@@ -1,4 +1,4 @@
-// @file: app/workspace/settings/editors/AboutSettingsEditor.ts
+// @file: app-settings/editors/AboutSettingsEditor.ts
 import { BaseSettingsEditor} from '@itookit/common';
 import { SettingsService } from '../services/SettingsService';
 

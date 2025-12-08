@@ -1,4 +1,4 @@
-// @file app/workspace/settings/types.ts
+// @file app-settings/types.ts
 
 // 从 common 导入类型
 import type { 
