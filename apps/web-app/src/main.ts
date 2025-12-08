@@ -77,7 +77,7 @@ async function bootstrap() {
             'chat':     new ChatWorkspaceStrategy(llmFactory)
         };
 
-        // 获取标准编辑器工厂 (作为 fallback)
+        // 获取标准编辑器工厂 (作为 fallback 或特定用途)
         const standardFactory = strategies['standard'].getFactory();
 
         // ✨ 建立字符串 Key 到实际 Factory 的映射表
@@ -87,11 +87,25 @@ async function bootstrap() {
             'chat': llmFactory
         };
 
-        // --- 4. 动态生成全局文件能力 (Global Capabilities) ---
-        // 将 Config 中的纯数据转换为 UI 组件需要的对象，无需手动维护 globalFileTypes 数组
-        const globalFileTypes: FileTypeDefinition[] = Object.values(FILE_REGISTRY).map(def => {
-            // 根据注册表的 editorType 找到对应的 Factory
-            const factory = editorFactoryMap[def.editorType] || standardFactory;
+        // --- 4. 辅助函数：根据 Registry ID 生成 UI 所需的 FileTypeDefinition ---
+        // 注意：此函数需要在 bootstrap 内部，因为它依赖于上面创建的 runtime factories
+        const getFileTypeDefinition = (typeId: string): FileTypeDefinition | null => {
+            const def = FILE_REGISTRY[typeId];
+            if (!def) {
+                console.warn(`File type definition not found for id: ${typeId}`);
+                return null;
+            }
+
+            // ✨ [核心修复逻辑] 决定使用哪个 Factory
+            // 1. 如果类型是 'standard' (如 .md, .anki)：
+            //    我们返回 undefined。这会告诉 vfs-ui 使用 defaultEditorFactory。
+            //    而 MemoryManager 的 defaultEditorFactory 已经被 "Enhanced"，包含了当前工作区的 plugins 配置。
+            // 2. 如果类型是特定的 (如 'agent', 'chat')：
+            //    我们直接使用对应的专用 Factory。这些通常是定制 UI，不依赖通用插件系统。
+            let factory = undefined;
+            if (def.editorType !== 'standard') {
+                 factory = editorFactoryMap[def.editorType];
+            }
             
             // 特殊处理：Chat 文件需要 parser
             // (如果逻辑更复杂，可以在 Registry 中增加 parserType 字段，此处为简化直接判断 ID)
@@ -99,13 +113,11 @@ async function bootstrap() {
 
             return {
                 extensions: [def.extension],
-                icon: def.icon, // 如果 registry 没配，UI 组件会有默认值
-                editorFactory: factory,
+                icon: def.icon,
+                editorFactory: factory, // undefined for 'standard', specific for others
                 contentParser: parser
-                // 注意：这里定义的是“如何打开已存在的文件”，
-                // 默认内容 (defaultContent) 仅在创建新文件时使用，稍后传递给 MemoryManager
             };
-        });
+        };
 
         // --- 5. 通用加载逻辑 (The Loader) ---
         const loadWorkspace = async (targetId: string) => {
@@ -135,12 +147,18 @@ async function bootstrap() {
                 ...uiPassThrough 
             } = wsConfig;
 
-            // ✨ 解析默认文件配置
-            // 取 supportedFileTypes 的第一个作为默认创建类型
-            const primaryFileKey = supportedFileTypes[0];
+            // ✨ [核心功能] 动态生成当前工作区的"文件类型白名单"
+            // 只有在 supportedFileTypes 中列出的类型，才会被视为特殊文件。
+            // 未列出的扩展名将回退到本模块的 Default Factory (即本模块配置的 MDxEditor)。
+            const workspaceFileTypes: FileTypeDefinition[] = (supportedFileTypes || [])
+                .map(typeId => getFileTypeDefinition(typeId))
+                .filter((item): item is FileTypeDefinition => !!item);
+
+            // 解析默认文件配置 (取第一个支持的类型作为新建按钮的默认行为)
+            const primaryFileKey = supportedFileTypes?.[0];
             const primaryFileDef = primaryFileKey ? FILE_REGISTRY[primaryFileKey] : undefined;
 
-            // 构造 UI Options，合并 Config 与 Registry 信息
+            // 构造 UI Options
             const uiOptions = {
                 ...uiPassThrough, // title, readOnly 等
                 
@@ -169,8 +187,8 @@ async function bootstrap() {
                 // 3. 配置增强 (解耦关键): 注入 HostContext, Mentions 等
                 configEnhancer: strategy.getConfigEnhancer?.(mentionScope),
 
-                // 4. 全局能力
-                fileTypes: globalFileTypes,
+                // 4. ✨ 传入白名单 (替代了之前的 globalFileTypes)
+                fileTypes: workspaceFileTypes,
                 
                 uiOptions: uiOptions,
                 editorConfig: {
