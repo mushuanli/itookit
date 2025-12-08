@@ -164,17 +164,6 @@
     font-size: 14px;
 }
 
-/* 折叠状态下的预览显示 */
-.llm-ui-session.is-collapsed .llm-ui-header-preview,
-.llm-ui-node.is-collapsed .llm-ui-header-preview {
-    display: inline;
-    opacity: 1;
-}
-
-.llm-ui-session:not(.is-collapsed) .llm-ui-header-preview,
-.llm-ui-node:not(.is-collapsed) .llm-ui-header-preview {
-    display: none;
-}
 
 /* 节点状态颜色 */
 .llm-ui-node__status--running {

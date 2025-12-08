@@ -19,6 +19,17 @@ export class NodeTemplates {
         const collapsedClass = isCollapsed ? 'is-collapsed' : '';
         const timeStr = this.formatTime(group.timestamp);
 
+    // ✅ 修复：只有多分支时才显示导航器
+    const hasSiblings = (group.siblingCount ?? 1) > 1;
+    const siblingIndex = group.siblingIndex ?? 0;
+    const siblingCount = group.siblingCount ?? 1;
+    
+    const branchNavHtml = hasSiblings ? `
+        <button class="llm-icon-btn" data-action="prev-sibling" title="Previous" ${siblingIndex === 0 ? 'disabled' : ''}>←</button>
+        <span class="llm-ui-branch-indicator">${siblingIndex + 1}/${siblingCount}</span>
+        <button class="llm-icon-btn" data-action="next-sibling" title="Next" ${siblingIndex === siblingCount - 1 ? 'disabled' : ''}>→</button>
+        <div class="llm-ui-sep" style="width:1px;background:rgba(255,255,255,0.2);margin:0 4px;"></div>
+    ` : '';
         return `
             <div class="llm-ui-bubble llm-ui-bubble--user ${collapsedClass}">
                 <div class="llm-ui-bubble__header">
@@ -29,15 +40,12 @@ export class NodeTemplates {
 
                     <!-- 使用 margin-left: auto 将 actions 推到右边 -->
                     <div class="llm-ui-actions" style="margin-left: auto; display: flex; gap: 4px;">
-                         <button class="llm-icon-btn" data-action="prev-sibling" title="Previous" disabled>←</button>
-                         <span class="llm-ui-branch-indicator">1/1</span>
-                         <button class="llm-icon-btn" data-action="next-sibling" title="Next" disabled>→</button>
-                         
-                         <div class="llm-ui-sep" style="width:1px;background:rgba(255,255,255,0.2);margin:0 4px;"></div>
+                     ${branchNavHtml}
+                     
                          
                          <button class="llm-icon-btn" data-action="delete" title="Delete">🗑️</button>
-                         <button class="llm-icon-btn" data-action="edit" title="Edit">✎</button>
                          <button class="llm-icon-btn" data-action="retry" title="Resend">↻</button>
+                         <button class="llm-icon-btn" data-action="edit" title="Edit">✎</button>
                          <button class="llm-icon-btn" data-action="copy" title="Copy">📋</button>
                          <button class="llm-icon-btn" data-action="collapse" title="Toggle">
                             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
@@ -85,8 +93,8 @@ export class NodeTemplates {
                 <div class="llm-ui-actions" style="margin-left: auto; display: flex; gap: 4px;">
                     <button class="llm-icon-btn" data-action="delete" title="Delete">🗑️</button>
                     <!-- 新增 Edit 按钮 (用于修改输出结果) -->
-                    <button class="llm-icon-btn" data-action="edit" title="Edit Result">✎</button>
                     <button class="llm-icon-btn" data-action="retry" title="Retry">↻</button>
+                    <button class="llm-icon-btn" data-action="edit" title="Edit Result">✎</button>
                     <button class="llm-icon-btn" data-action="copy" title="Copy">📋</button>
                     <button class="llm-icon-btn" data-action="collapse" title="Toggle">
                         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
