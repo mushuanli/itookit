@@ -23,6 +23,9 @@ import {
 // ✨ [修复 1] 引入接口用于显式类型声明
 import { WorkspaceStrategy } from './strategies/types'; 
 
+// ✨ 引入新文件
+import { FILE_REGISTRY, EditorTypeKey } from './config/file-registry';
+
 import '@itookit/vfs-ui/style.css';
 import '@itookit/mdxeditor/style.css';
 import '@itookit/memory-manager/style.css'; 
@@ -62,6 +65,7 @@ async function bootstrap() {
     });
     */
         const llmFactory = createLLMFactory(agentService, llmEngine);
+        const agentFactory = createAgentEditorFactory(agentService);
         
         // ✨ [修复 1] 显式声明类型 Record<string, WorkspaceStrategy>
         // 这告诉 TS：这里面的所有值都遵循 WorkspaceStrategy 接口
@@ -73,21 +77,35 @@ async function bootstrap() {
             'chat':     new ChatWorkspaceStrategy(llmFactory)
         };
 
-        // --- 4. 全局文件能力 (Global Capabilities) ---
-        // 定义跨工作区的文件打开行为 (如在 Projects 里双击 .agent 文件)
-        const globalFileTypes: FileTypeDefinition[] = [
-            {
-                extensions: ['.agent'],
-                icon: '🤖',
-                editorFactory: createAgentEditorFactory(agentService)
-            },
-            {
-                extensions: ['.chat', '.session'], 
-                icon: '💬',
-                editorFactory: llmFactory,
-                contentParser: chatFileParser
-            }
-        ];
+        // 获取标准编辑器工厂 (作为 fallback)
+        const standardFactory = strategies['standard'].getFactory();
+
+        // ✨ 建立字符串 Key 到实际 Factory 的映射表
+        const editorFactoryMap: Record<EditorTypeKey, any> = {
+            'standard': standardFactory,
+            'agent': agentFactory,
+            'chat': llmFactory
+        };
+
+        // --- 4. 动态生成全局文件能力 (Global Capabilities) ---
+        // 将 Config 中的纯数据转换为 UI 组件需要的对象，无需手动维护 globalFileTypes 数组
+        const globalFileTypes: FileTypeDefinition[] = Object.values(FILE_REGISTRY).map(def => {
+            // 根据注册表的 editorType 找到对应的 Factory
+            const factory = editorFactoryMap[def.editorType] || standardFactory;
+            
+            // 特殊处理：Chat 文件需要 parser
+            // (如果逻辑更复杂，可以在 Registry 中增加 parserType 字段，此处为简化直接判断 ID)
+            const parser = (def.id === 'chat') ? chatFileParser : undefined;
+
+            return {
+                extensions: [def.extension],
+                icon: def.icon, // 如果 registry 没配，UI 组件会有默认值
+                editorFactory: factory,
+                contentParser: parser
+                // 注意：这里定义的是“如何打开已存在的文件”，
+                // 默认内容 (defaultContent) 仅在创建新文件时使用，稍后传递给 MemoryManager
+            };
+        });
 
         // --- 5. 通用加载逻辑 (The Loader) ---
         const loadWorkspace = async (targetId: string) => {
@@ -104,8 +122,7 @@ async function bootstrap() {
             if (!container || !wsConfig) return;
 
             // UI Tab 激活状态处理
-            const wasActive = container.classList.contains('active');
-            if (!wasActive) container.classList.add('active');
+            if (!container.classList.contains('active')) container.classList.add('active');
 
             // 获取策略
             // 如果 wsConfig.type 没有对应策略，回退到 standard
@@ -114,13 +131,31 @@ async function bootstrap() {
 
             // 提取非 UI 参数
             const { 
-                elementId, moduleName, type, plugins, mentionScope, aiEnabled, 
-                ...uiPassThrough // 剩余的都是 title, defaultFileName 等 UI 字段
+                moduleName, plugins, mentionScope, aiEnabled, supportedFileTypes, 
+                ...uiPassThrough 
             } = wsConfig;
 
-            // [核心] 初始化 MemoryManager
-            // 此时 main.ts 不再需要知道如何注入 contextFeatures，
-            // 也不需要知道哪个类型对应哪个 Factory，全权交给 Strategy 处理。
+            // ✨ 解析默认文件配置
+            // 取 supportedFileTypes 的第一个作为默认创建类型
+            const primaryFileKey = supportedFileTypes[0];
+            const primaryFileDef = primaryFileKey ? FILE_REGISTRY[primaryFileKey] : undefined;
+
+            // 构造 UI Options，合并 Config 与 Registry 信息
+            const uiOptions = {
+                ...uiPassThrough, // title, readOnly 等
+                
+                // 如果 Registry 有定义，优先使用 Registry 的 label/filename/content
+                createFileLabel: primaryFileDef?.label || 'File', 
+                defaultFileName: primaryFileDef?.defaultFileName,
+                defaultExtension: primaryFileDef?.extension,
+                defaultFileContent: primaryFileDef?.defaultContent,
+                
+                contextMenu: { 
+                    items: (_item: any, defaults: any[]) => uiPassThrough.readOnly ? [] : defaults 
+                }
+            };
+
+            // 初始化 MemoryManager
             const manager = new MemoryManager({
                 container,
                 
@@ -137,18 +172,10 @@ async function bootstrap() {
                 // 4. 全局能力
                 fileTypes: globalFileTypes,
                 
-                // 5. 选项透传
-                uiOptions: {
-                    ...uiPassThrough,
-                    contextMenu: { 
-                        // Settings 等只读视图禁用右键菜单
-                        items: (_item, defaults) => uiPassThrough.readOnly ? [] : defaults 
-                    }
-                },
-                
+                uiOptions: uiOptions,
                 editorConfig: {
                     plugins: plugins || [],
-                    readOnly: false // 编辑器本身不仅读 (由上层 UI 控制)
+                    readOnly: false
                 },
                 
                 aiConfig: { enabled: aiEnabled ?? true }
