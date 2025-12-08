@@ -1,13 +1,13 @@
-// @file app/factories/settingsFactory.ts
+// @file app-settings/factories/settingsFactory.ts
 import { EditorFactory, IEditor } from '@itookit/common';
-import { SettingsService } from '../workspace/settings/services/SettingsService';
+import { SettingsService } from '../services/SettingsService';
 import { MCPSettingsEditor,ConnectionSettingsEditor,VFSAgentService } from '@itookit/llm-ui'; // 服务来自 llm-ui
 
-import { TagSettingsEditor } from '../workspace/settings/editors/TagSettingsEditor';
+import { TagSettingsEditor } from '../editors/TagSettingsEditor';
 // import { ExecutableSettingsEditor } from '../workspace/settings/editors/ExecutableSettingsEditor'; // Removed
-import { ContactSettingsEditor } from '../workspace/settings/editors/ContactSettingsEditor';
-import { StorageSettingsEditor } from '../workspace/settings/editors/StorageSettingsEditor';
-import { AboutSettingsEditor } from '../workspace/settings/editors/AboutSettingsEditor';
+import { ContactSettingsEditor } from '../editors/ContactSettingsEditor';
+import { StorageSettingsEditor } from '../editors/StorageSettingsEditor';
+import { AboutSettingsEditor } from '../editors/AboutSettingsEditor';
 
 export const createSettingsFactory = (
     settingsService: SettingsService,

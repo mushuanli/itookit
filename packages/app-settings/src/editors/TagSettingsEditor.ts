@@ -1,4 +1,4 @@
-// @file: app/workspace/settings/editors/TagSettingsEditor.ts
+// @file: app-settings/editors/TagSettingsEditor.ts
 import { BaseSettingsEditor,Modal, Toast } from '@itookit/common';
 import { SettingsService } from '../services/SettingsService';
 import { Tag } from '../types';

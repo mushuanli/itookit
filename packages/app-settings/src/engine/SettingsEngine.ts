@@ -1,4 +1,4 @@
-// @file src/workspace/settings/engines/SettingsEngine.ts
+// @file app-settings/engines/SettingsEngine.ts
 import { ISessionEngine, EngineNode, EngineSearchQuery, EngineEvent, EngineEventType } from '@itookit/common';
 import { SettingsService } from '../services/SettingsService';
 

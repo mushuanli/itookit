@@ -7,9 +7,7 @@ import { initVFS } from './services/vfs';
 import { defaultEditorFactory } from '@itookit/mdxeditor';
 import { initSidebarNavigation } from './utils/layout';
 import { WORKSPACES, WorkspaceConfig } from './config/modules';
-import { SettingsEngine } from './workspace/settings/engines/SettingsEngine';
-import { SettingsService } from './workspace/settings/services/SettingsService';
-import { createSettingsFactory } from './factories/settingsFactory';
+import { SettingsEngine,SettingsService,createSettingsFactory } from '@itookit/app-settings';
 import { FileTypeDefinition } from '@itookit/vfs-ui';
 import {chatFileParser,initializeLLMModule} from '@itookit/llm-engine';
 import { createLLMFactory, createAgentEditorFactory, VFSAgentService } from '@itookit/llm-ui';
@@ -19,6 +17,7 @@ import '@itookit/vfs-ui/style.css';
 import '@itookit/mdxeditor/style.css';
 import '@itookit/memory-manager/style.css'; 
 import '@itookit/llm-ui/style.css'; 
+import '@itookit/app-settings/style.css'; 
 import './styles/index.css'; 
 
 const managerCache = new Map<string, MemoryManager>();

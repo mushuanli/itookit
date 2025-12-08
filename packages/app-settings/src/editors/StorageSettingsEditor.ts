@@ -1,4 +1,4 @@
-// @file: app/workspace/settings/editors/StorageSettingsEditor.ts
+// @file: app-settings/editors/StorageSettingsEditor.ts
 import { BaseSettingsEditor, Modal, Toast } from '@itookit/common';
 import { SettingsService, LocalSnapshot } from '../services/SettingsService'; // 引入具体 Service
 import { SettingsState } from '../types';

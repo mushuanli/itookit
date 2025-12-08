@@ -29,7 +29,7 @@ export interface WorkspaceConfig extends SystemConfig {
     // --- 直接透传给 MemoryManager 的 UI 字段 ---
     title: string;
     createFileLabel: string; // (原 itemLabel，改名以匹配组件接口)
-    
+
     defaultFileName?: string;
     defaultExtension?: string;
     defaultFileContent?: string;
