@@ -1,15 +1,37 @@
 /**
  * @file memory-manager/types.ts
  */
-import { EditorFactory, SessionUIOptions, ISessionEngine } from '@itookit/common';
-import { VFSCore } from '@itookit/vfs-core';
+import { EditorFactory, EditorOptions, ISessionEngine, SessionUIOptions } from '@itookit/common';
 import type { FileTypeDefinition, CustomEditorResolver } from '@itookit/vfs-ui';
+
+/**
+ * 注入给编辑器的上下文能力接口。
+ * 这些能力通常会被混入 EditorOptions 或其插件配置中。
+ */
+export interface EditorHostContext {
+    /** 切换侧边栏 (无参则 toggle，有参则强制设为该状态) */
+    toggleSidebar: (collapsed?: boolean) => void;
+    /** 手动触发保存 (用于编辑器内部按钮) */
+    saveContent: (nodeId: string, content: string) => Promise<void>;
+}
+
+/**
+ * [修改] 增强器类型定义
+ * context 中不再包含原始 layout，而是标准化的 host 接口
+ */
+export type EditorConfigEnhancer = (
+    currentOptions: EditorOptions, 
+    context: { 
+        engine: ISessionEngine; 
+        host: EditorHostContext; // ✅ 优雅传递宿主能力
+    }
+) => EditorOptions;
 
 export interface MemoryManagerConfig {
     /** 挂载容器 */
     container: HTMLElement;
 
-    // --- 引擎配置 (二选一) ---
+    // --- 引擎配置 ---
     /** 
      * 自定义引擎实例 (推荐)。
      * 如果提供，将忽略 moduleName。
@@ -18,15 +40,6 @@ export interface MemoryManagerConfig {
 
     /* 创建默认engine */
     moduleName?: string;
-
-    /**
-     * 定义 @mention 的搜索范围
-     * - undefined: 默认为 global (['*'])
-     * - ['*']: 全局搜索 (所有挂载的模块)
-     * - []: 仅当前模块
-     * - ['modA', 'modB']: 指定模块 + 当前模块(如果逻辑包含的话)
-     */
-    mentionScope?: string[];
 
     // --- 编辑器配置 ---
     /** 
@@ -44,6 +57,11 @@ export interface MemoryManagerConfig {
         defaultPluginOptions?: Record<string, any>;
         [key: string]: any;
     };
+
+    // [新增] 配置增强策略
+    // 如果不传，MemoryManager 将根据 editorFactory 使用默认策略或空策略
+    configEnhancer?: EditorConfigEnhancer;
+
 
     // --- VFS UI 配置 ---
     /** 
@@ -77,15 +95,4 @@ export interface MemoryManagerConfig {
         enabled: boolean;
         activeRules?: string[];
     };
-}
-
-/**
- * 注入给编辑器的上下文能力接口。
- * 这些能力通常会被混入 EditorOptions 或其插件配置中。
- */
-export interface EditorHostContext {
-    /** 切换侧边栏可见性 */
-    toggleSidebar: () => void;
-    /** 手动触发保存 */
-    saveContent: () => Promise<void>;
 }
