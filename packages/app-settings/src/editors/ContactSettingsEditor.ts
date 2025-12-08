@@ -1,4 +1,4 @@
-// @file: apps/web-app/src/workspace/settings/editors/ContactSettingsEditor.ts
+// @file: apps-settings/editors/ContactSettingsEditor.ts
 import { Contact } from '../types';
 import { BaseSettingsEditor,Modal, Toast,generateShortUUID } from '@itookit/common';
 import { SettingsService } from '../services/SettingsService';

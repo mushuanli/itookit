@@ -1,5 +1,5 @@
 /**
- * @file: app/workspace/settings/services/SettingsService.ts
+ * @file: app-settings/services/SettingsService.ts
  */
 import { FS_MODULE_AGENTS } from '@itookit/common';
 import { VFSCore, VFSErrorCode, VFSEventType, VFSEvent } from '@itookit/vfs-core';

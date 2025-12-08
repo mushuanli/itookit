@@ -20,6 +20,7 @@
         "@itookit/memory-manager": "workspace:*",
         "@itookit/vfs-core": "workspace:*",
         "@itookit/vfs-ui": "workspace:*",
+        "@itookit/app-settings": "workspace:*",
         "codemirror": "^6.0.2",
         "dexie": "^4.2.1",
         "dotenv": "^17.2.3",
