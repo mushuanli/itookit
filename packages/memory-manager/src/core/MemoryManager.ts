@@ -2,62 +2,59 @@
  * @file memory-manager/core/MemoryManager.ts
  */
 import { VFSModuleEngine } from '@itookit/vfs-core';
-import { 
-    createVFSUI, 
-    connectEditorLifecycle, 
-    VFSUIManager, 
-    FileMentionSource, 
-    DirectoryMentionSource 
-} from '@itookit/vfs-ui';
-import { EditorOptions, IEditor, ISessionEngine } from '@itookit/common';
-
-// 假设 createMDxEditor 位于同级或引用的包中
+import { createVFSUI, connectEditorLifecycle, VFSUIManager } from '@itookit/vfs-ui';
 import { createMDxEditor } from '@itookit/mdxeditor'; 
-import { MemoryManagerConfig } from '../types';
+import { MemoryManagerConfig, EditorHostContext,EditorConfigEnhancer } from '../types';
+import { createMDxEnhancer } from '../enhancers/mdx'; // 默认回退
 import { BackgroundBrain } from './BackgroundBrain';
 import { Layout } from './Layout';
+import { EditorOptions, IEditor, ISessionEngine } from '@itookit/common';
 
 export class MemoryManager {
     private vfsUI: VFSUIManager;
     private engine: ISessionEngine;
     private brain?: BackgroundBrain;
     private layout: Layout;
+    private configEnhancer: EditorConfigEnhancer;
     private lifecycleUnsubscribe: () => void;
     private baseEditorFactory: any; // EditorFactory 类型
 
     constructor(private config: MemoryManagerConfig) {
-        // 1. 初始化布局
         this.layout = new Layout(config.container);
 
-        // 2. 确定 SessionEngine
+        // 1. Engine 解析
         if (config.customEngine) {
             this.engine = config.customEngine;
-        } else if ( config.moduleName) {
+        } else if (config.moduleName) {
             this.engine = new VFSModuleEngine(config.moduleName);
         } else {
-            throw new Error("[MemoryManager] You must provide either 'customEngine' or both 'vfsCore' and 'moduleName'.");
+            throw new Error("Missing engine configuration");
         }
 
-        // 3. 确定基础编辑器工厂 (默认使用 MDxEditor)
+        // 2. Factory 解析
         this.baseEditorFactory = config.editorFactory || createMDxEditor;
 
-        // 4. 初始化 VFS-UI
-        // 注意：我们将 this.enhancedEditorFactory 传给 VFS-UI 作为默认工厂
+        // 3. [关键] Enhancer 解析
+        // 如果未提供 enhancer 且使用的是默认 MDxEditor，则使用默认 MDx 增强器（保持向后兼容）
+        // 否则使用空增强器 (不做任何注入)
+        if (config.configEnhancer) {
+            this.configEnhancer = config.configEnhancer;
+        } else if (!config.editorFactory) {
+             // 默认情况：使用 MDx 且注入 Mentions (默认全局范围)
+            this.configEnhancer = createMDxEnhancer(['*']);
+        } else {
+            // 自定义 Factory 但没给 Enhancer，默认不做处理
+            this.configEnhancer = (opts) => opts;
+        }
+
+        // 4. 初始化 UI (注入 enhancedEditorFactory)
         this.vfsUI = createVFSUI(
             {
                 ...config.uiOptions,
-                // 容器挂载
                 sessionListContainer: this.layout.sidebarContainer,
-                initialSidebarCollapsed: false,
-                
-                // 默认文件逻辑
                 defaultFileName: config.defaultContentConfig?.fileName,
                 defaultFileContent: config.defaultContentConfig?.content,
-
-                // [关键] 注入增强后的编辑器工厂作为兜底
-                defaultEditorFactory: this.enhancedEditorFactory,
-                
-                // [透传] 高级文件类型支持
+                defaultEditorFactory: this.enhancedEditorFactory, // 注入拦截器
                 fileTypes: config.fileTypes,
                 customEditorResolver: config.customEditorResolver,
             },
@@ -92,66 +89,38 @@ export class MemoryManager {
      * 此时 this.vfsUI 可能还在初始化中，但当此函数被实际调用时(打开文件时)，它一定已经可用。
      */
     private enhancedEditorFactory = async (container: HTMLElement, runtimeOptions: EditorOptions): Promise<IEditor> => {
-        const { editorConfig, mentionScope } = this.config; // [新增] 读取 mentionScope
-        
-        // 1. 准备注入给编辑器的能力 (Capabilities)
-        const contextFeatures = {
-            // 允许编辑器控制侧边栏
-            onSidebarToggle: () => this.vfsUI.toggleSidebar(),
-            // 允许编辑器触发保存 (虽然 Connector 会自动保存，但某些插件可能需要手动触发)
-            saveCallback: async (editorInstance: any) => {
-                if (runtimeOptions.nodeId && typeof editorInstance.getText === 'function') {
-                    await this.engine.writeContent(runtimeOptions.nodeId, editorInstance.getText());
-                }
+        const { editorConfig } = this.config;
+
+        // 1. 准备宿主能力 (生产)
+        // 这些函数封装了 MemoryManager 内部的 Layout 和 VFSUI 操作
+        const hostContext: EditorHostContext = {
+            toggleSidebar: (collapsed?: boolean) => {
+                // 调用 VFSUI 或 Layout 的方法
+                this.vfsUI.toggleSidebar(); 
+            },
+            saveContent: async (nodeId: string, content: string) => {
+                await this.engine.writeContent(nodeId, content);
             }
         };
 
-        // 2. 深度合并配置
-        const mergedOptions: EditorOptions = {
-            ...editorConfig,       // 静态配置 (Plugins list 等)
-            ...runtimeOptions,     // 运行时配置 (Content, Title, NodeId)
-            
-            // ✨ [修复] 显式注入 Session Engine，使插件能够访问全局数据
-            sessionEngine: this.engine, 
-
-            // 插件合并策略：连接数组
-            plugins: [
-                ...(editorConfig?.plugins || []),
-                ...(runtimeOptions?.plugins || [])
-            ],
-
-            // 插件选项合并策略
+        // 2. 基础配置合并
+        let mergedOptions: EditorOptions = {
+            ...editorConfig,
+            ...runtimeOptions,
+            plugins: [ ...(editorConfig?.plugins || []), ...(runtimeOptions?.plugins || []) ],
             defaultPluginOptions: {
                 ...(editorConfig?.defaultPluginOptions || {}),
                 ...(runtimeOptions?.defaultPluginOptions || {}),
-
-                // [自动注入] 提及插件的数据源 (连接到当前 Engine)
-                'autocomplete:mention': {
-                    // @ts-ignore
-                    ...(editorConfig?.defaultPluginOptions?.['autocomplete:mention'] || {}),
-                    providers: [
-                        // [修改] 传递 scope
-                        new FileMentionSource({ 
-                            engine: this.engine, 
-                            scope: mentionScope ?? ['*'] // 默认为全局
-                        }),
-                        new DirectoryMentionSource({ 
-                            engine: this.engine, 
-                            scope: mentionScope ?? ['*'] 
-                        })
-                    ]
-                },
-
-                // [自动注入] 标题栏能力
-                'core:titlebar': {
-                    // @ts-ignore
-                    ...(editorConfig?.defaultPluginOptions?.['core:titlebar'] || {}),
-                    ...contextFeatures
-                }
             }
         };
 
-        // 3. 调用具体的基础工厂 (MDxEditor 或 用户自定义)
+        // 3. 执行增强策略 (分发)
+        // 将标准化的 hostContext 传递给 Enhancer，由 Enhancer 决定怎么塞给编辑器
+        mergedOptions = this.configEnhancer(mergedOptions, {
+            engine: this.engine,
+            host: hostContext // ✅ 注入
+        });
+
         return this.baseEditorFactory(container, mergedOptions);
     }
 

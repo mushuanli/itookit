@@ -4,14 +4,24 @@
  */
 import { MemoryManager } from '@itookit/memory-manager';
 import { initVFS } from './services/vfs';
-import { defaultEditorFactory } from '@itookit/mdxeditor';
 import { initSidebarNavigation } from './utils/layout';
-import { WORKSPACES, WorkspaceConfig } from './config/modules';
-import { SettingsEngine,SettingsService,createSettingsFactory } from '@itookit/app-settings';
+import { WORKSPACES } from './config/modules';
 import { FileTypeDefinition } from '@itookit/vfs-ui';
-import {chatFileParser,initializeLLMModule} from '@itookit/llm-engine';
+
+// 模块引入
+import { createSettingsModule } from '@itookit/app-settings';
 import { createLLMFactory, createAgentEditorFactory, VFSAgentService } from '@itookit/llm-ui';
-import { ISessionEngine,EditorFactory } from '@itookit/common';
+import { initializeLLMModule, chatFileParser } from '@itookit/llm-engine';
+
+// 策略引入
+import { 
+    StandardWorkspaceStrategy, 
+    SettingsWorkspaceStrategy, 
+    ChatWorkspaceStrategy,
+    AgentWorkspaceStrategy 
+} from './strategies';
+// ✨ [修复 1] 引入接口用于显式类型声明
+import { WorkspaceStrategy } from './strategies/types'; 
 
 import '@itookit/vfs-ui/style.css';
 import '@itookit/mdxeditor/style.css';
@@ -22,29 +32,22 @@ import './styles/index.css';
 
 const managerCache = new Map<string, MemoryManager>();
 
-// Service Singletons
-let sharedSettingsService: SettingsService | null = null;
-let sharedAgentService: VFSAgentService | null = null;
-
 async function bootstrap() {
     try {
-        // 1. 初始化核心 VFS
+        // --- 1. 基础设施初始化 ---
         const vfsCore = await initVFS();
+
+        // --- 2. 核心服务层初始化 ---
+        // 2.1 Agent & LLM Services
+        const agentService = new VFSAgentService(vfsCore);
+        await agentService.init();
         
-        // 2. 初始化 SettingsService (Tags, Contacts)
-        sharedSettingsService = new SettingsService(vfsCore);
-        await sharedSettingsService.init();
+        // LLM Engine 初始化
+        const { engine: llmEngine } = await initializeLLMModule(agentService, undefined, { maxConcurrent: 8 });
 
-        // 3. 初始化 VFSAgentService (LLM, Connections, Agents)
-        sharedAgentService = new VFSAgentService(vfsCore);
-        await sharedAgentService.init();
+        // 2.2 Settings 模块 (Facade 一键初始化)
+        const settingsModule = await createSettingsModule(vfsCore, agentService);
 
-    const { registry, engine } = await initializeLLMModule(sharedAgentService, undefined, {
-        maxConcurrent: 8  // 最多同时运行 6 个会话
-    });
-    if( !registry){
-        console.log('init LLM Module failed.');
-    }
 /*
     // 6. 监听全局事件（可选）
     registry.onGlobalEvent((event) => {
@@ -58,138 +61,112 @@ async function bootstrap() {
         }
     });
     */
-        // 4. 创建专用 Factory
-        const llmEditorFactory = createLLMFactory(sharedAgentService,engine);
-        const agentEditorFactory = createAgentEditorFactory(sharedAgentService); 
-        const settingsFactory = createSettingsFactory(sharedSettingsService, sharedAgentService);
+        const llmFactory = createLLMFactory(agentService, llmEngine);
+        
+        // ✨ [修复 1] 显式声明类型 Record<string, WorkspaceStrategy>
+        // 这告诉 TS：这里面的所有值都遵循 WorkspaceStrategy 接口
+        // 即使 Standard 策略没写 getEngine，访问它也是安全的（返回 undefined）
+        const strategies: Record<string, WorkspaceStrategy> = {
+            'standard': new StandardWorkspaceStrategy(),
+            'agent':    new AgentWorkspaceStrategy(),
+            'settings': new SettingsWorkspaceStrategy(settingsModule.factory, settingsModule.engine),
+            'chat':     new ChatWorkspaceStrategy(llmFactory)
+        };
 
-        // 5. 注册全局文件类型 (允许跨工作区识别特殊文件)
+        // --- 4. 全局文件能力 (Global Capabilities) ---
+        // 定义跨工作区的文件打开行为 (如在 Projects 里双击 .agent 文件)
         const globalFileTypes: FileTypeDefinition[] = [
             {
                 extensions: ['.agent'],
                 icon: '🤖',
-                editorFactory: agentEditorFactory
+                editorFactory: createAgentEditorFactory(agentService)
             },
             {
                 extensions: ['.chat', '.session'], 
                 icon: '💬',
-                editorFactory: llmEditorFactory,
-                // [高亮] 注入自定义解析器
+                editorFactory: llmFactory,
                 contentParser: chatFileParser
             }
         ];
 
-        // 策略模式：根据配置类型解析所需的 Factory 和 Engine
-        const resolveWorkspaceComponents = (config: WorkspaceConfig) => {
-            let factory: EditorFactory = defaultEditorFactory;
-            let customEngine: ISessionEngine | undefined = undefined;
-
-            switch (config.type) {
-                case 'settings':
-                    factory = settingsFactory;
-                    customEngine = new SettingsEngine(sharedSettingsService!);
-                    break;
-                case 'chat':
-                    factory = llmEditorFactory;
-                    break;
-                case 'agent':
-                    // Agent 工作区依然使用 defaultEditorFactory 来渲染列表，
-                    // 但具体的 .agent 文件编辑由 fileTypes 控制
-                    factory = defaultEditorFactory; 
-                    break;
-                case 'standard':
-                default:
-                    factory = defaultEditorFactory;
-                    break;
-            }
-            return { factory, customEngine };
-        };
-
+        // --- 5. 通用加载逻辑 (The Loader) ---
         const loadWorkspace = async (targetId: string) => {
-            if (managerCache.has(targetId)) return;
-            
-            const wsConfig = WORKSPACES.find(w => w.elementId === targetId);
+            // ✨ [修复 2] 缓存检查：如果已经初始化过，直接返回
+            // initSidebarNavigation 负责处理 DOM 的 classList 切换，
+            // 这里只需要确保逻辑对象存在即可。
+            if (managerCache.has(targetId)) {
+                return;
+            }
+
             const container = document.getElementById(targetId);
+            const wsConfig = WORKSPACES.find(w => w.elementId === targetId);
             
             if (!container || !wsConfig) return;
 
-            // UI 处理：激活 Tab 样式
+            // UI Tab 激活状态处理
             const wasActive = container.classList.contains('active');
             if (!wasActive) container.classList.add('active');
 
-            // 获取组件策略
-            const { factory, customEngine } = resolveWorkspaceComponents(wsConfig);
+            // 获取策略
+            // 如果 wsConfig.type 没有对应策略，回退到 standard
+            const strategyType = wsConfig.type || 'standard';
+            const strategy = strategies[strategyType] || strategies['standard'];
 
-            // [核心优化] 解构赋值与剩余参数分离
-            // 提取 "系统逻辑参数"，剩下的 "uiPassThrough" 将包含所有 UI 字段
-            // (title, createFileLabel, defaultFileName, readOnly 等)
+            // 提取非 UI 参数
             const { 
-                elementId, 
-                moduleName, 
-                type, 
-                plugins, 
-                mentionScope, 
-                aiEnabled, 
-                ...uiPassThrough 
+                elementId, moduleName, type, plugins, mentionScope, aiEnabled, 
+                ...uiPassThrough // 剩余的都是 title, defaultFileName 等 UI 字段
             } = wsConfig;
 
+            // [核心] 初始化 MemoryManager
+            // 此时 main.ts 不再需要知道如何注入 contextFeatures，
+            // 也不需要知道哪个类型对应哪个 Factory，全权交给 Strategy 处理。
             const manager = new MemoryManager({
-                container: container,
-                moduleName: wsConfig.moduleName, // 系统参数显式传递
+                container,
+                
+                // 1. Engine 注入: 策略提供(如Settings) 或 自动创建(如Standard)
+                customEngine: strategy.getEngine?.(moduleName),
+                moduleName: moduleName, // 作为 fallback 或 key
 
-                // 核心组件注入
-                editorFactory: factory,
-                customEngine: customEngine,
-                fileTypes: globalFileTypes, // 注入全局文件支持
+                // 2. Factory 注入
+                editorFactory: strategy.getFactory(),
+                
+                // 3. 配置增强 (解耦关键): 注入 HostContext, Mentions 等
+                configEnhancer: strategy.getConfigEnhancer?.(mentionScope),
 
-                // 逻辑参数显式传递
-                mentionScope: wsConfig.mentionScope,
-
-                // UI 参数自动透传 (同构映射)
-                // 任何 modules.ts 里定义的非系统字段，都会自动 spread 到这里
+                // 4. 全局能力
+                fileTypes: globalFileTypes,
+                
+                // 5. 选项透传
                 uiOptions: {
                     ...uiPassThrough,
-
-                    // 动态计算的默认值 (如果配置里未指定)
-                    searchPlaceholder: uiPassThrough.searchPlaceholder ?? `Search ${uiPassThrough.title.toLowerCase()}...`,
-                    
-                    // 复杂逻辑无法 JSON 化，需在此处理
                     contextMenu: { 
+                        // Settings 等只读视图禁用右键菜单
                         items: (_item, defaults) => uiPassThrough.readOnly ? [] : defaults 
                     }
                 },
-
+                
                 editorConfig: {
-                    plugins: wsConfig.plugins || [],
-                    readOnly: false // 编辑器自身是否只读 (不同于列表只读)
+                    plugins: plugins || [],
+                    readOnly: false // 编辑器本身不仅读 (由上层 UI 控制)
                 },
-
-                aiConfig: {
-                    enabled: wsConfig.aiEnabled ?? true, // 默认为 true
-                    activeRules: ['user', 'tag', 'file']
-                }
+                
+                aiConfig: { enabled: aiEnabled ?? true }
             });
 
             await manager.start();
+            
+            // ✨ [修复 2] 存入缓存
             managerCache.set(targetId, manager);
-
-            // 恢复 Tab 状态
-            if (!wasActive) {
-                requestAnimationFrame(() => {
-                    const currentActiveBtn = document.querySelector('.app-nav-btn.active');
-                    const currentTarget = currentActiveBtn?.getAttribute('data-target');
-                    if (currentTarget !== targetId) container.classList.remove('active');
-                });
-            }
         };
 
-        // 启动逻辑
-        const initialWorkspace = WORKSPACES[0]; // 默认取第一个配置
-        if (initialWorkspace) await loadWorkspace(initialWorkspace.elementId);
+        // --- 6. 启动应用 ---
+        initSidebarNavigation(loadWorkspace);
         
-        initSidebarNavigation(async (targetId) => {
-            await loadWorkspace(targetId);
-        });
+        // 加载默认工作区
+        if (WORKSPACES[0]) {
+            await loadWorkspace(WORKSPACES[0].elementId);
+        }
 
     } catch (error) {
         console.error('Failed to bootstrap application:', error);

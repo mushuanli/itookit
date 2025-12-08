@@ -3,16 +3,27 @@
 import { IEditor, EditorOptions, UnifiedSearchResult, Heading, EditorEvent, EditorEventCallback } from '../interfaces/IEditor';
 
 /**
+ * 定义宿主能力接口 (与 MemoryManager 的 EditorHostContext 保持结构兼容)
+ */
+export interface IEditorHostContext {
+    toggleSidebar: (collapsed?: boolean) => void;
+    saveContent: (nodeId: string, content: string) => Promise<void>;
+}
+
+/**
  * 设置类编辑器的基类
  * @template TService 服务层的类型
  */
 export abstract class BaseSettingsEditor<TService> implements IEditor {
     protected listeners: Array<{ el: Element, type: string, handler: EventListener }> = [];
     protected container!: HTMLElement;
+    
+    // [新增] 宿主能力引用
+    protected hostContext?: IEditorHostContext;
 
     constructor(
         container: HTMLElement,
-        protected service: TService, // 注入泛型 Service
+        protected service: TService, 
         protected options: EditorOptions
     ) {
         this.container = container;
@@ -22,8 +33,13 @@ export abstract class BaseSettingsEditor<TService> implements IEditor {
         this.container = container;
         this.container.classList.add('settings-root');
 
-        // 约定：所有 Service 必须提供 onChange 方法用于订阅更新
-        // 如果 TService 没有 onChange，子类需要覆盖 init 或自行处理
+        // [新增] 消费宿主能力
+        // 策略层(Strategy)会将 hostContext 注入到 options 中
+        if (this.options.hostContext) {
+            this.hostContext = this.options.hostContext as IEditorHostContext;
+        }
+
+        // Service 变更订阅
         if (this.service && typeof (this.service as any).onChange === 'function') {
             const unsubscribe = (this.service as any).onChange(() => this.render());
             
@@ -36,6 +52,11 @@ export abstract class BaseSettingsEditor<TService> implements IEditor {
         }
         
         await this.render();
+    }
+    
+    // [新增] 辅助方法：切换侧边栏
+    protected toggleSidebar() {
+        this.hostContext?.toggleSidebar();
     }
 
     abstract render(): void | Promise<void>;
