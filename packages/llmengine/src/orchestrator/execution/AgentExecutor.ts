@@ -5,10 +5,9 @@ import {
     ExecutorType, 
     ExecutionContext, 
     ExecutionResult, 
-    LLMConnection,
-    safeStringify
 } from '@itookit/common';
-import { LLMDriver, ChatMessage } from '@itookit/llmdriver';
+import { LLMDriver, ChatMessage,LLMConnection,
+    safeStringify } from '@itookit/llmdriver';
 
 // 导入本地定义的上下文接口，确保 TS 类型检查通过
 import { StreamingContext } from '../../core/types'; 

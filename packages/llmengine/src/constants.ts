@@ -3,15 +3,12 @@
  */
 
 import { 
-    LLM_PROVIDER_DEFAULTS, 
-    LLM_DEFAULT_ID, 
-    LLMConnection,
     IAgentDefinition
 } from '@itookit/common';
 export type AgentFileContent = IAgentDefinition;
 
-// 导出常量供应用其他部分使用
-export { LLM_PROVIDER_DEFAULTS };
+import {    LLM_PROVIDER_DEFAULTS, LLM_DEFAULT_ID,
+    LLMConnection,} from '@itookit/llmdriver';
 
 export const AGENT_DEFAULT_DIR = '/default';
 export const LLM_AGENT_TARGET_DIR = '/default/providers'; 

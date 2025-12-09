@@ -6,12 +6,14 @@ import { LLM_DEFAULT_AGENTS, AGENT_DEFAULT_DIR, LLM_AGENT_TARGET_DIR } from '../
 
 import { 
     IAgentDefinition, 
-    LLMConnection, 
     MCPServer,
     FS_MODULE_AGENTS, 
+} from '@itookit/common';
+import {
+    LLMConnection, 
     LLM_PROVIDER_DEFAULTS,
     LLM_DEFAULT_ID 
-} from '@itookit/common';
+} from '@itookit/llmdriver';
 
 // 内部常量
 const LLM_DEFAULT_CONFIG_VERSION = 9;
