@@ -3,10 +3,10 @@
 import { 
     IEditor, EditorOptions, EditorEvent, EditorEventCallback, 
     IAgentDefinition, generateUUID,
-    LLMModel,
     Heading,              // [修复] 添加导入
     UnifiedSearchResult   // [修复] 添加导入
 } from '@itookit/common';
+import {LLMModel} from '@itookit/llmdriver';
 import { IAgentService } from '@itookit/llm-engine';
 
 /**

@@ -15,7 +15,7 @@ export interface RetryOptions {
 /**
  * SessionManager - 会话管理器（代理层）
  * 
- * 重构后的职责：
+ * 职责：
  * 1. 作为单个会话的代理，封装对 SessionRegistry 的调用
  * 2. 提供与原有 API 兼容的接口
  * 3. 管理当前绑定的会话 ID
@@ -49,11 +49,9 @@ export class SessionManager {
         // 自增版本号，标记新的绑定操作开始
         const currentVersion = ++this.bindingVersion;
 
-        // 解绑之前的会话
+        // 解绑之前的会话 (清理监听器)
         this.unbindSession();
-        // 注意：unbindSession 也会自增版本号，所以这里要重新获取或调整逻辑
-        // 实际上 unbindSession 只是为了清理监听，我们可以手动清理
-        // 重新设置版本号为本次操作的版本
+        // 重置回当前版本，因为 unbind 会自增
         this.bindingVersion = currentVersion;
 
         try {
@@ -93,7 +91,7 @@ export class SessionManager {
             this.eventUnsubscribe = null;
         }
 
-        // 注意：不注销会话，只是解除绑定
+        // 注意：不注销 Registry 中的会话，只是解除本地绑定
         // 会话可能在后台继续运行
         this.sessionId = null;
         this.nodeId = null;
@@ -150,7 +148,7 @@ export class SessionManager {
      */
     onEvent(handler: (event: OrchestratorEvent) => void): () => void {
         if (!this.sessionId) {
-            console.warn('[SessionManager] Cannot subscribe: no session bound');
+            // console.warn('[SessionManager] Cannot subscribe: no session bound');
             return () => {};
         }
 
@@ -224,8 +222,6 @@ export class SessionManager {
     // ================================================================
 
     canDeleteMessage(id: string): { allowed: boolean; reason?: string } {
-        // 委托给 Registry 内部的 MessageOperations
-        // 简化实现：检查状态
         if (this.isGenerating()) {
             return { allowed: false, reason: 'Cannot delete while generating' };
         }
@@ -261,21 +257,32 @@ export class SessionManager {
             throw new Error('Invalid user session');
         }
 
-        // 删除关联的回复并重新生成
+        // 重发相当于：编辑原消息(内容不变) + 自动运行
         await this.registry.editMessage(this.sessionId, userSessionId, session.content || '', true);
     }
 
     // ================================================================
-    // 分支导航 API (简化实现)
+    // 分支导航 API
     // ================================================================
 
+    /**
+     * 获取兄弟分支
+     * (需要在 SessionRegistry -> BranchNavigator 中实现)
+     */
     async getSiblings(sessionGroupId: string): Promise<SessionGroup[]> {
-        // TODO: 需要在 Registry 中实现
+        if (!this.sessionId) return [];
+        // [TODO] 临时返回空，等待 Registry 完整实现 BranchNavigator 代理
+        // 理想调用：return this.registry.getNodeSiblings(this.sessionId, sessionGroupId);
         return [];
     }
 
+    /**
+     * 切换到兄弟分支
+     */
     async switchToSibling(sessionGroupId: string, siblingIndex: number): Promise<void> {
-        // TODO: 需要在 Registry 中实现
+        if (!this.sessionId) return;
+        // [TODO] 临时存根
+        // await this.registry.switchBranch(this.sessionId, sessionGroupId, siblingIndex);
     }
 
     // ================================================================
@@ -283,8 +290,8 @@ export class SessionManager {
     // ================================================================
 
     registerExecutor(executor: IExecutor): void {
-        // 委托给 Registry 的 ExecutorResolver
-        console.warn('[SessionManager] registerExecutor should be called on Registry directly');
+        // [Warning] 这是旧 API，现在应直接在 Engine 初始化时注册，或通过 AgentService
+        console.warn('[SessionManager] registerExecutor is deprecated. Use AgentService or Registry directly.');
     }
 
     async getAvailableExecutors() {
