@@ -41,3 +41,5 @@ export * from './interfaces/llm/IAgent';
 export type { ILLMSessionEngine, ChatContextItem } from './interfaces/llm/session/ILLMSessionEngine';
 export type { ChatManifest, ChatNode, IYamlParser,MCPServer } from './interfaces/llm/session/types';
 
+export const FS_MODULE_CHAT='chats';
+export const FS_MODULE_AGENTS='agents';
