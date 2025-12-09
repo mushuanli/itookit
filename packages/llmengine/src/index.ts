@@ -10,9 +10,6 @@ import { VFSAgentService } from './services/VFSAgentService';
 
 // 导出编排器与管理器 (UI 主要与 SessionManager 交互)
 import { SessionRegistry, getSessionRegistry } from './orchestrator/SessionRegistry';
-import { ExecutorResolver } from './orchestrator/execution/ExecutorResolver';
-import { AgentExecutor } from './orchestrator/execution/AgentExecutor';
-import { UnifiedExecutor, createAgent, createOrchestrator, serial, parallel, router, loop } from './orchestrator/execution/UnifiedExecutor';
 
 export * from './core/types';
 export * from './core/session';
