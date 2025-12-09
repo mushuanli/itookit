@@ -11,5 +11,5 @@ export { safeStringify, validateMessageHistory } from './utils/input';
 export { AgentExecutor } from './executors/agent-executor';
 
 // Data & Constants
-export { LLM_PROVIDER_DEFAULTS } from './constants';
+export { LLM_PROVIDER_DEFAULTS,LLM_DEFAULT_ID } from './constants';
 export * from './types';

@@ -5,6 +5,7 @@ import { LLMProviderDefinition } from './types';
 export const DEFAULT_TIMEOUT = 60000;
 export const DEFAULT_MAX_RETRIES = 3;
 export const DEFAULT_RETRY_DELAY = 1000;
+export const LLM_DEFAULT_ID = 'default';
 
 
 export const LLM_PROVIDER_DEFAULTS: Record<string, LLMProviderDefinition> = {
