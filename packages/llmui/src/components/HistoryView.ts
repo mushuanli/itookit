@@ -8,8 +8,7 @@ import { LayoutTemplates } from './templates/LayoutTemplates';
 import { escapeHTML, Modal } from '@itookit/common';
 
 /**
- * ✨ [新增] 包装 common Modal 为 Promise 形式，
- * 以便保持原有代码的 await 逻辑不变。
+ * 包装 common Modal 为 Promise 形式
  */
 async function showConfirmDialog(message: string): Promise<boolean> {
     return new Promise((resolve) => {
@@ -23,45 +22,15 @@ async function showConfirmDialog(message: string): Promise<boolean> {
     });
 }
 
-async function showEditConfirmDialog(options: {
-    title: string;
-    message: string;
-    options: Array<{ id: string; label: string; primary?: boolean }>;
-}): Promise<string> {
-    return new Promise((resolve) => {
-        const buttonsHtml = options.options.map(opt => 
-            `<button class="modal-btn ${opt.primary ? 'modal-btn--primary' : ''}" data-action="${opt.id}">${opt.label}</button>`
-        ).join('');
-        
-        const modal = new Modal(options.title, `
-            <p>${options.message}</p>
-            <div class="modal-actions">${buttonsHtml}</div>
-        `, {
-            //showFooter: false,
-            onCancel: () => resolve('cancel')
-        });
-        
-        modal.show();
-        
-        // 绑定按钮事件
-        const modalEl = document.querySelector('.modal-content');
-        modalEl?.querySelectorAll('[data-action]').forEach(btn => {
-            btn.addEventListener('click', () => {
-                resolve((btn as HTMLElement).dataset.action || 'cancel');
-                modal.hide();
-            });
-        });
-    });
-}
-
 export class HistoryView {
     private nodeMap = new Map<string, HTMLElement>();
     private editorMap = new Map<string, MDxController>();
     private container: HTMLElement;
     
     private shouldAutoScroll = true;
-    private scrollThreshold = 50;
-    private scrollDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+    private scrollThreshold = 150; // 增加阈值，容错率更高
+    private scrollFrameId: number | null = null;
+    private resizeObserver: ResizeObserver;
 
     private onContentChange?: (id: string, content: string, type: 'user' | 'node') => void;
     private onNodeAction?: NodeActionCallback;
@@ -83,9 +52,20 @@ export class HistoryView {
 
         this.container.addEventListener('scroll', () => {
             const { scrollTop, scrollHeight, clientHeight } = this.container;
-            const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
-            this.shouldAutoScroll = distanceFromBottom < this.scrollThreshold;
+            // 距离底部的距离
+            const distance = scrollHeight - scrollTop - clientHeight;
+            // 如果距离小于阈值，说明用户在底部，开启自动滚动
+            // 注意：这里使用 Math.abs 是防止某些缩放比例下的精度误差
+            this.shouldAutoScroll = Math.abs(distance) < this.scrollThreshold;
         });
+
+        // 2. 监听内容高度变化 (处理图片加载、MDX渲染导致的高度突变)
+        this.resizeObserver = new ResizeObserver(() => {
+            if (this.shouldAutoScroll) {
+                this.scrollToBottom(false);
+            }
+        });
+        this.resizeObserver.observe(this.container);
     }
 
     clear() {
@@ -170,36 +150,54 @@ export class HistoryView {
             case 'finished':
                 this.editorMap.forEach(editor => editor.finishStream());
                 break;
-        case 'error':
-            this.renderError(new Error(event.payload.message));
-            break;
-            // ✨ [新增] 处理删除事件
+            case 'error':
+                this.renderError(new Error(event.payload.message));
+                break;
             case 'messages_deleted':
-            this.handleMessagesDeleted(event.payload.deletedIds);
+                this.handleMessagesDeleted(event.payload.deletedIds);
                 break;
-            // ✨ [新增] 处理编辑事件
             case 'message_edited':
-            this.handleMessageEdited(event.payload.sessionId, event.payload.newContent);
+                this.handleMessageEdited(event.payload.sessionId, event.payload.newContent);
                 break;
-            // ✨ [新增] 处理会话清空
             case 'session_cleared':
                 this.renderWelcome();
                 break;
-            // ✨ [新增] 处理分支切换
             case 'sibling_switch':
-            this.handleSiblingSwitch(event.payload);
+                this.handleSiblingSwitch(event.payload);
                 break;
-        case 'retry_started':
-            // 可选：显示重试中的提示
-            console.log('[HistoryView] Retry started:', event.payload);
-            break;
-        case 'request_input':
-            // 处理输入请求（如果需要）
-            console.log('[HistoryView] Input requested:', event.payload);
-            break;
+            case 'retry_started':
+                console.log('[HistoryView] Retry started:', event.payload);
+                break;
         }
 
-        this.scrollToBottom(forceScroll);
+        if (forceScroll) {
+            this.shouldAutoScroll = true; // 强制开启吸附
+            this.scrollToBottom(true);
+        }
+    }
+
+    /**
+     * ✨ [核心优化] 滚动到底部
+     * @param force 是否强制滚动（忽略用户当前位置）
+     */
+    scrollToBottom(force: boolean = false) {
+        if (!force && !this.shouldAutoScroll) return;
+
+        // 如果已经有挂起的滚动任务，取消它（防抖）
+        if (this.scrollFrameId) {
+            cancelAnimationFrame(this.scrollFrameId);
+        }
+
+        this.scrollFrameId = requestAnimationFrame(() => {
+            this.scrollFrameId = null;
+            
+            // 使用瞬时滚动以避免流式输出时的抖动 (behavior: 'auto')
+            // 如果是 force=true (如初始加载)，也不建议用 smooth，因为可能会很慢
+            this.container.scrollTo({
+                top: this.container.scrollHeight,
+                behavior: 'auto' 
+            });
+        });
     }
 
     private appendSessionGroup(group: SessionGroup, isCollapsed: boolean) {
@@ -237,59 +235,45 @@ export class HistoryView {
             }
         });
         this.editorMap.set(group.id, controller);
-
-        // 绑定事件
         this.bindUserBubbleEvents(wrapper, group, controller);
     }
 
     private bindUserBubbleEvents(wrapper: HTMLElement, group: SessionGroup, controller: MDxController) {
         const bubbleEl = wrapper.querySelector('.llm-ui-bubble--user') as HTMLElement;
         const editActionsEl = wrapper.querySelector('.llm-ui-edit-actions') as HTMLElement;
-    if (!bubbleEl) {
-        console.error('[HistoryView] bubbleEl not found for group:', group.id);
-        return;
-    }
+        
+        if (!bubbleEl) return;
 
-        // Retry (Resend)
+        // Action Bindings
         wrapper.querySelector('[data-action="retry"]')?.addEventListener('click', (e) => {
             e.stopPropagation();
             this.onNodeAction?.('resend', group.id);
         });
 
-        // Edit
         wrapper.querySelector('[data-action="edit"]')?.addEventListener('click', (e) => {
             e.stopPropagation();
             this.toggleEditMode(group.id, controller, editActionsEl, wrapper);
         });
 
-        // Copy
         wrapper.querySelector('[data-action="copy"]')?.addEventListener('click', async (e) => {
             e.stopPropagation();
-        await this.handleCopy(controller.content, e.currentTarget as HTMLElement);
+            await this.handleCopy(controller.content, e.currentTarget as HTMLElement);
         });
 
-        // Delete
         wrapper.querySelector('[data-action="delete"]')?.addEventListener('click', async (e) => {
             e.stopPropagation();
             await this.handleDeleteConfirm(group.id, 'user');
         });
 
-    // ✅ 修复：Collapse 使用 currentTarget
-    const collapseBtn = wrapper.querySelector('[data-action="collapse"]');
-    if (collapseBtn) {
-        collapseBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const btn = e.currentTarget as HTMLElement;
-            console.log('[DEBUG] User bubble collapse clicked');
-            console.log('[DEBUG] bubbleEl:', bubbleEl);
-            console.log('[DEBUG] btn:', btn);
-            this.toggleCollapse(bubbleEl, btn);
-        });
-    } else {
-        console.warn('[HistoryView] Collapse button not found for group:', group.id);
-    }
+        const collapseBtn = wrapper.querySelector('[data-action="collapse"]');
+        if (collapseBtn) {
+            collapseBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.toggleCollapse(bubbleEl, e.currentTarget as HTMLElement);
+            });
+        }
 
-        // 分支导航
+        // Branch Nav
         wrapper.querySelector('[data-action="prev-sibling"]')?.addEventListener('click', (e) => {
             e.stopPropagation();
             this.onNodeAction?.('prev-sibling', group.id);
@@ -300,7 +284,7 @@ export class HistoryView {
             this.onNodeAction?.('next-sibling', group.id);
         });
 
-        // 编辑确认按钮
+        // Edit Confirm/Cancel
         wrapper.querySelector('[data-action="confirm-edit"]')?.addEventListener('click', (e) => {
             e.stopPropagation();
             this.confirmEdit(group.id, controller, editActionsEl, wrapper, true);
@@ -397,14 +381,12 @@ export class HistoryView {
 
     private async handleDeleteConfirm(nodeId: string, type: 'user' | 'assistant') {
         let message = 'Delete this message?';
-        
         if (type === 'user') {
             const associatedCount = this.countAssociatedResponses(nodeId);
             if (associatedCount > 0) {
                 message = `Delete this message and ${associatedCount} response(s)?`;
             }
         }
-
         const confirmed = await showConfirmDialog(message);
         if (confirmed) {
             this.onNodeAction?.('delete', nodeId);
@@ -426,61 +408,30 @@ export class HistoryView {
                 if (session.classList.contains('llm-ui-session--assistant')) {
                     count++;
                 } else {
-                    foundUser = false; // 遇到下一个 user，停止计数
+                    foundUser = false;
                 }
             }
         });
-
         return count;
     }
 
     private toggleCollapse(element: HTMLElement, btn: HTMLElement) {
-    console.log('[DEBUG] toggleCollapse called');
-    console.log('[DEBUG] Element classList before:', element.classList.toString());
         element.classList.toggle('is-collapsed');
-    
-    const isCollapsed = element.classList.contains('is-collapsed');
-    console.log('[DEBUG] Is now collapsed:', isCollapsed);
-    
-    // 检查预览元素
-    const previewEl = element.querySelector('.llm-ui-header-preview');
-    if (previewEl) {
-        console.log('[DEBUG] Preview element found, content:', previewEl.textContent);
-        // 强制检查 computed style
-        const computedStyle = window.getComputedStyle(previewEl);
-        console.log('[DEBUG] Preview display:', computedStyle.display);
-    } else {
-        console.warn('[DEBUG] Preview element NOT found!');
-    }
-    
-    // 更新 SVG 图标
-    const svg = btn.querySelector('svg');
-    if (!svg) {
-        console.warn('[DEBUG] SVG not found in button:', btn.innerHTML);
-        return;
+        const isCollapsed = element.classList.contains('is-collapsed');
+        
+        const svg = btn.querySelector('svg');
+        if (svg) {
+            svg.innerHTML = isCollapsed 
+                ? '<polyline points="6 9 12 15 18 9"></polyline>'
+                : '<polyline points="18 15 12 9 6 15"></polyline>';
+        }
     }
 
-    if (isCollapsed) {
-        svg.innerHTML = '<polyline points="6 9 12 15 18 9"></polyline>';
-    } else {
-        svg.innerHTML = '<polyline points="18 15 12 9 6 15"></polyline>';
-    }
-    
-    console.log('[DEBUG] Toggle complete');
-    }
-
-    /**
-     * 递归渲染执行树
-     */
     private renderExecutionTree(node: ExecutionNode, isCollapsed: boolean = false) {
         this.appendNode(node.parentId, node, isCollapsed);
         node.children?.forEach(c => this.renderExecutionTree(c, isCollapsed));
     }
 
-    /**
-     * 添加执行节点 DOM
-     * [修改] 接受 isCollapsed 参数
-     */
     private appendNode(parentId: string | undefined, node: ExecutionNode, isCollapsed: boolean) {
         let parentEl: HTMLElement | null = null;
         
@@ -494,13 +445,10 @@ export class HistoryView {
         }
 
         if (parentEl) {
-            // 需要修改 NodeRenderer.create 接口以接受 isCollapsed
-            // 或者手动添加 class
             const { element, mountPoints } = NodeRenderer.create(node);
             
             if (isCollapsed) {
                 element.classList.add('is-collapsed');
-                // 更新 SVG 图标
                 const svg = element.querySelector('[data-action="collapse"] svg');
                 if (svg) svg.innerHTML = '<polyline points="6 9 12 15 18 9"></polyline>';
             }
@@ -519,13 +467,11 @@ export class HistoryView {
         const retryBtn = element.querySelector('[data-action="retry"]');
         const deleteBtn = element.querySelector('[data-action="delete"]');
 
-    // ✨ [关键] 找到这个节点所属的 SessionGroup
-    const getSessionId = (): string => {
-        const sessionEl = element.closest('[data-session-id]');
-        return (sessionEl as HTMLElement)?.dataset.sessionId || node.id;
-    };
-    
-    const effectiveId = getSessionId();
+        const getSessionId = (): string => {
+            const sessionEl = element.closest('[data-session-id]');
+            return (sessionEl as HTMLElement)?.dataset.sessionId || node.id;
+        };
+        const effectiveId = getSessionId();
 
         // Retry
         retryBtn?.addEventListener('click', (e) => {
@@ -701,38 +647,19 @@ export class HistoryView {
         // 刷新内容（如果需要的话，由 SessionManager 处理）
     }
 
-    scrollToBottom(force: boolean = false) {
-        if (force || this.shouldAutoScroll) {
-            if (this.scrollDebounceTimer) {
-                clearTimeout(this.scrollDebounceTimer);
-            }
-
-            this.scrollDebounceTimer = setTimeout(() => {
-                requestAnimationFrame(() => {
-                    this.container.scrollTop = this.container.scrollHeight;
-                });
-            }, 16); // 约一帧的时间
-        }
-    }
-
-    // [新增] 辅助：截取预览文本
     private getPreviewText(content: string): string {
         if (!content) return '';
-        // 1. 替换换行为空格
         let plain = content.replace(/[\r\n]+/g, ' ');
-        // 2. 移除常见的 Markdown 符号
         plain = plain.replace(/[*#`_~[\]()]/g, '');
-    plain = plain.trim();
-    if (!plain) return '';  // ← 添加默认值
-        // 3. 截断
+        plain = plain.trim();
+        if (!plain) return ''; 
         return plain.length > 60 ? plain.substring(0, 60) + '...' : plain;
     }
 
     // ✨ [新增] 销毁方法
     destroy() {
-        if (this.scrollDebounceTimer) {
-            clearTimeout(this.scrollDebounceTimer);
-        }
+        if (this.scrollFrameId) cancelAnimationFrame(this.scrollFrameId);
+        this.resizeObserver.disconnect();
         this.clear();
     }
 }
