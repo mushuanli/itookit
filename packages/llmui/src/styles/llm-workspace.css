@@ -39,8 +39,12 @@
   flex: 1;
   overflow-y: auto;
   padding: 20px;
-  scroll-behavior: smooth;
+  /* 移除下面这行，完全由 JS 控制 */
+  /* scroll-behavior: smooth; */ 
   scrollbar-width: thin; 
+
+  /* 新增：滚动锚定，防止顶部内容加载导致视口跳动 */
+  overflow-anchor: auto;
 }
 
 /* --- 输入区域容器 --- */

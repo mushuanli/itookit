@@ -293,6 +293,7 @@ export class LLMWorkspaceEditor implements IEditor {
      * 绑定全局事件（监听其他会话的状态变化）
      */
     private bindGlobalEvents(): void {
+        console.log('[LLMWorkspaceEditor] Binding global events');
         this.globalEventUnsubscribe = this.registry.onGlobalEvent((event) => {
             this.handleGlobalEvent(event);
         });
@@ -306,22 +307,26 @@ export class LLMWorkspaceEditor implements IEditor {
      * 处理当前会话的事件
      */
     private handleSessionEvent(event: OrchestratorEvent): void {
-        // 转发给 HistoryView
+        // 转发给 HistoryView (处理消息流、状态图标等)
         this.historyView.processEvent(event);
         
-        // 更新状态指示器
-        if (event.type === 'session_start' || event.type === 'finished' || event.type === 'node_status') {
-            this.updateStatusIndicator();
+        // ✨ [Log] 记录会话事件
+        if (event.type === 'finished' || event.type === 'session_start' || event.type === 'error') {
+            console.log(`[LLMWorkspaceEditor] Session Event: ${event.type}`, event.payload);
         }
 
         // 通知外部
         if (event.type === 'finished' || event.type === 'session_start') {
             this.emit('change');
         }
+
+        // ✨ [修改] 移除了在此处调用 updateStatusIndicator 的逻辑
+        // 我们改为完全依赖 handleGlobalEvent 中的 session_status_changed 来更新顶栏状态
+        // 这样可以避免 "QueryRunner 发出 finished" 和 "Registry 更新 status" 之间的时序问题
     }
 
     /**
-     * 处理全局事件（其他会话的状态变化）
+     * 处理全局事件（状态同步核心）
      */
     private handleGlobalEvent(event: SessionRegistryEvent): void {
         switch (event.type) {
@@ -329,18 +334,20 @@ export class LLMWorkspaceEditor implements IEditor {
                 this.updateBackgroundIndicator(event.payload);
                 break;
                 
-            case 'session_unread_updated':
-                // 可以在标签页或侧边栏显示未读标记
-                if (event.payload.sessionId !== this.currentSessionId && event.payload.count > 0) {
-                    this.showNotification(`Session has ${event.payload.count} new message(s)`);
+            case 'session_status_changed':
+                console.log(`[LLMWorkspaceEditor] Status Changed: ${event.payload.sessionId} -> ${event.payload.status}`);
+                // ✨ [修复] 如果是当前会话的状态变更，立即更新 UI
+                if (event.payload.sessionId === this.currentSessionId) {
+                    this.updateStatusIndicator();
+                } else if (event.payload.status === 'completed') {
+                    // 其他会话完成时显示轻提示
+                    this.showNotification('Background task completed');
                 }
                 break;
-                
-            case 'session_status_changed':
-                // 其他会话完成时可以显示通知
-                if (event.payload.sessionId !== this.currentSessionId && 
-                    event.payload.status === 'completed') {
-                    this.showNotification('Background task completed');
+
+            case 'session_unread_updated':
+                if (event.payload.sessionId !== this.currentSessionId && event.payload.count > 0) {
+                    // console.log(`[LLMWorkspaceEditor] Unread: ${event.payload.count} in ${event.payload.sessionId}`);
                 }
                 break;
         }
@@ -350,21 +357,13 @@ export class LLMWorkspaceEditor implements IEditor {
      * 处理内容编辑
      */
     private async handleContentChange(id: string, content: string, type: 'user' | 'node'): Promise<void> {
-    console.log('[DEBUG] handleContentChange called:', { id, contentLength: content.length, type });
-    
-    if (typeof this.sessionManager.updateContent !== 'function') {
-        console.error('[ERROR] sessionManager.updateContent is not a function!');
-        console.log('[DEBUG] sessionManager methods:', Object.keys(this.sessionManager));
-        return;
-    }
-    
-    try {
-        await this.sessionManager.updateContent(id, content, type);
-        console.log('[DEBUG] Content updated successfully');
-        this.emit('change');
-    } catch (e) {
-        console.error('[ERROR] updateContent failed:', e);
-    }
+        // console.log('[DEBUG] handleContentChange:', { id, len: content.length, type });
+        try {
+            await this.sessionManager.updateContent(id, content, type);
+            this.emit('change');
+        } catch (e) {
+            console.error('[LLMWorkspaceEditor] updateContent failed:', e);
+        }
     }
 
     /**
@@ -416,8 +415,7 @@ export class LLMWorkspaceEditor implements IEditor {
                 });
             }
         } finally {
-            this.chatInput.setLoading(false);
-            this.emit('change');
+            this.updateStatusIndicator(); // 手动触发一次状态检查
         }
     }
 
@@ -438,8 +436,7 @@ export class LLMWorkspaceEditor implements IEditor {
         try {
             await this.sessionManager.editMessage(nodeId, session.content || '', true);
         } finally {
-            this.chatInput.setLoading(false);
-            this.emit('change');
+            this.updateStatusIndicator();
         }
     }
 
@@ -448,15 +445,13 @@ export class LLMWorkspaceEditor implements IEditor {
         try {
             await this.sessionManager.resendUserMessage(nodeId);
         } finally {
-            this.chatInput.setLoading(false);
-            this.emit('change');
+            this.updateStatusIndicator();
         }
     }
 
     private async handleSiblingSwitch(nodeId: string, direction: 'prev' | 'next'): Promise<void> {
         const sessions = this.sessionManager.getSessions();
         const session = sessions.find(s => s.id === nodeId);
-
         if (!session) return;
 
         const currentIndex = session.siblingIndex ?? 0;
@@ -484,14 +479,17 @@ export class LLMWorkspaceEditor implements IEditor {
             return;
         }
 
-        this.chatInput.setLoading(true);
+        console.log('[LLMWorkspaceEditor] User sending message...');
+        this.chatInput.setLoading(true); // 立即锁定输入框
+        
         try {
             await this.sessionManager.runUserQuery(text, files, agentId || 'default');
+            // 注意：不要在这里 setLoading(false)
+            // 状态应该完全由 handleGlobalEvent -> session_status_changed 驱动
         } catch (error: any) {
+            console.error('[LLMWorkspaceEditor] Send failed:', error);
             this.historyView.renderError(error);
-        } finally {
-            // 注意：不立即 setLoading(false)，等待 session 事件
-            // 但如果出错需要恢复
+            this.chatInput.setLoading(false); // 仅在同步错误时手动解锁
         }
     }
 
@@ -500,11 +498,12 @@ export class LLMWorkspaceEditor implements IEditor {
     // ================================================================
 
     /**
-     * 更新状态指示器
+     * 更新状态指示器 (Ready / Generating...)
      */
     private updateStatusIndicator(): void {
         if (!this.statusIndicator) return;
 
+        // 从 Manager 获取最新状态 (它会查 Registry)
         const status = this.sessionManager.getStatus();
         const dot = this.statusIndicator.querySelector('.llm-workspace-status__dot') as HTMLElement;
         const text = this.statusIndicator.querySelector('.llm-workspace-status__text') as HTMLElement;
@@ -549,7 +548,7 @@ export class LLMWorkspaceEditor implements IEditor {
 
         // 计算当前会话之外的运行数
         const otherRunning = this.sessionManager.isGenerating() 
-            ? payload.running - 1 
+            ? Math.max(0, payload.running - 1)
             : payload.running;
 
         if (otherRunning > 0 || payload.queued > 0) {
