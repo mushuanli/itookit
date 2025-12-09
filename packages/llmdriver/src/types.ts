@@ -1,10 +1,85 @@
 // @file: llmdriver/types.ts
-import { LLMConnection, LLMProviderDefinition } from '@itookit/common';
 
-// 重新导出 Common 类型
-export type { LLMConnection, LLMProviderDefinition };
+// ==========================================
+// 1. 从 Common 迁移过来的核心数据结构
+// ==========================================
 
-// --- 运行时配置结构 ---
+/**
+ * 基础模型定义
+ */
+export interface LLMModel {
+    id: string;
+    name: string;
+    /** 上下文窗口大小 (可选) */
+    contextWindow?: number;
+    /** 是否支持视觉/多模态 (可选) */
+    supportsVision?: boolean;
+}
+
+/**
+ * LLM 提供商的静态定义 (元数据)
+ * 用于 UI 展示默认列表，以及 Driver 初始化默认配置
+ */
+export interface LLMProviderDefinition {
+    /** 显示名称 (e.g., "OpenAI") */
+    name: string;
+    /** 
+     * 底层实现策略 
+     * 对应 Driver 中的 Provider 类 
+     */
+    implementation: 'openai-compatible' | 'anthropic' | 'gemini';
+    
+    /** 默认 API 地址 */
+    baseURL: string;
+    
+    /** 预设模型列表 */
+    models: LLMModel[];
+    
+    /** 特性开关: 是否支持思维链/思考过程 */
+    supportsThinking?: boolean;
+    
+    /** 特性开关: 是否需要 Referer 头 (如 OpenRouter) */
+    requiresReferer?: boolean;
+}
+
+/**
+ * LLM 连接配置 (用户实例)
+ * 这是保存在用户设置(Settings)中的实际数据结构
+ */
+export interface LLMConnection {
+    /** UUID */
+    id: string;
+    
+    /** 用户自定义名称 (e.g., "我的 OpenAI") */
+    name: string;
+    
+    /** 对应 LLMProviderDefinition 的 key (e.g., 'openai', 'custom') */
+    provider: string; 
+    
+    /** API Key */
+    apiKey: string;
+    
+    /** 选中的默认模型 ID */
+    model: string;
+    
+    /** API 地址 (用户可覆盖默认值) */
+    baseURL?: string;
+    
+    /** 当前连接可用的模型列表 */
+    availableModels?: LLMModel[];
+    
+    /** 额外的高级配置 */
+    metadata?: {
+        thinkingBudget?: number;
+        reasoningEffort?: 'low' | 'medium' | 'high';
+        organizationId?: string;
+        [key: string]: any;
+    };
+}
+
+// ==========================================
+// 2. Driver 运行时类型 (原有内容)
+// ==========================================
 
 /**
  * [FIXED] LLMProviderConfig
@@ -34,7 +109,7 @@ export interface LLMProviderConfig extends Partial<LLMConnection> {
 
 // --- 基础消息结构 ---
 
-export type Role = 'system' | 'user' | 'assistant';
+export type Role = 'system' | 'user' | 'assistant' | 'tool';
 
 export interface MessageContentText {
     type: 'text';
@@ -58,6 +133,7 @@ export interface ChatMessage {
     role: Role;
     content: MessageContent;
     name?: string;
+    tool_call_id?: string;
 }
 
 export interface ToolCall {
@@ -126,6 +202,28 @@ export interface ChatCompletionChunk {
         };
         finish_reason: string | null;
     }>;
+}
+
+/**
+ * 通用的执行回调接口
+ * 允许上层 (Engine/UI) 监听底层执行器的流式输出
+ */
+export interface ExecutionCallbacks {
+    onThinking?: (delta: string, nodeId?: string) => void;
+    onOutput?: (delta: string, nodeId?: string) => void;
+    // Driver 层不关心 UI 的 onNodeStart 等事件，只关心文本流
+}
+
+/**
+ * Driver 层视角的执行上下文
+ * 兼容 Engine 层的 StreamingContext
+ */
+export interface DriverExecutionContext {
+    signal?: AbortSignal;
+    variables?: Map<string, any>;
+    callbacks?: ExecutionCallbacks;
+    parentId?: string; // 用于回传给 callback 的 nodeId
+    [key: string]: any;
 }
 
 // --- Client 配置 ---

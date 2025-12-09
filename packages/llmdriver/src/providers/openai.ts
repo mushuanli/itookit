@@ -153,7 +153,7 @@ export class OpenAICompatibleProvider extends BaseProvider {
                                         thinking: delta.reasoning_content, // DeepSeek
                                         tool_calls: delta.tool_calls
                                     },
-                                    finish_reason: data.choices[0].finish_reason
+                                    finish_reason: data.choices[0]?.finish_reason || null
                                 }]
                             };
                         }
