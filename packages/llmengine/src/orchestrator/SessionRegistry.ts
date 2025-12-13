@@ -874,13 +874,12 @@ getFailedSessions(): SessionRuntime[] {
 /**
  * 自动清理空闲会话
  */
-startAutoCleanup(intervalMs: number = 5 * 60 * 1000): () => void {
-    const timer = setInterval(() => {
-        this.cleanupIdleSessions();
-    }, intervalMs);
-
-    return () => clearInterval(timer);
-}
+    startAutoCleanup(intervalMs: number = 5 * 60 * 1000): () => void {
+        const timer = setInterval(() => {
+            this.cleanupIdleSessions();
+        }, intervalMs);
+        return () => clearInterval(timer);
+    }
     /**
      * 清理空闲会话（内存优化）
      */
@@ -895,7 +894,7 @@ startAutoCleanup(intervalMs: number = 5 * 60 * 1000): () => void {
             // 跳过运行中的会话
             if (runtime.status === 'running' || runtime.status === 'queued') continue;
         // 跳过有未读消息的会话
-        if (runtime.unreadCount > 0) continue;
+            if (runtime.unreadCount > 0) continue;
 
             // 检查空闲时间
             if (now - runtime.lastActiveTime > maxIdleTime) {

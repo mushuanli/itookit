@@ -3,7 +3,7 @@
  * @description 输入处理与清洗工具
  */
 
-import { ChatMessage } from '../types';
+import { ChatMessage } from '@itookit/common'; // ✨ 直接引用 common
 
 /**
  * 安全地将任意输入转换为字符串

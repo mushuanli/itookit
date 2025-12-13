@@ -3,12 +3,13 @@
  */
 
 import { 
-    IAgentDefinition
+    IAgentDefinition, 
+    LLMConnection,
+    AgentType 
 } from '@itookit/common';
-export type AgentFileContent = IAgentDefinition;
+import { LLM_PROVIDER_DEFAULTS, LLM_DEFAULT_ID } from '@itookit/llmdriver';
 
-import {    LLM_PROVIDER_DEFAULTS, LLM_DEFAULT_ID,
-    LLMConnection,} from '@itookit/llmdriver';
+export type AgentFileContent = IAgentDefinition;
 
 export const AGENT_DEFAULT_DIR = '/default';
 export const LLM_AGENT_TARGET_DIR = '/default/providers'; 
@@ -47,7 +48,7 @@ export const LLM_DEFAULT_CONNECTIONS: LLMConnection[] = [
 export const DEFAULT_AGENT_CONTENT: AgentFileContent = {
     id: '', // 空 ID 会触发编辑器生成新的 UUID
     name: 'New Assistant',
-    type: 'agent',
+    type: 'atomic', 
     description: 'A helpful AI assistant.',
     icon: '🤖',
     config: {
@@ -76,7 +77,7 @@ export const LLM_DEFAULT_AGENTS: InitialAgentDef[] = [
     {
         id: LLM_DEFAULT_ID,
         name: LLM_DEFAULT_NAME,
-        type: 'agent',
+        type: 'atomic',
         icon: '🤖',
         description: '系统默认智能体',
         initialTags: ['default', 'system'], 
@@ -95,7 +96,7 @@ export const LLM_DEFAULT_AGENTS: InitialAgentDef[] = [
     {
         id: LLM_TEMP_ID,
         name: LLM_TEMP_DEFAULT_NAME,
-        type: 'agent',
+        type: 'atomic',
         icon: '⚡️',
         description: '一次性问答，保留4次对话历史',
         initialTags: ['default'],
@@ -115,7 +116,7 @@ export const LLM_DEFAULT_AGENTS: InitialAgentDef[] = [
     {
         id: 'deepseek',
         name: 'DeepSeek',
-        type: 'agent',
+        type: 'atomic',
         icon: '🌊',
         description: '使用 DeepSeek 模型的智能体',
         initialTags: ['default', 'deepseek'],
@@ -134,7 +135,7 @@ export const LLM_DEFAULT_AGENTS: InitialAgentDef[] = [
     {
         id: 'claude',
         name: 'Claude',
-        type: 'agent',
+        type: 'atomic',
         icon: '📚',
         description: '使用 Claude 模型的智能体',
         initialTags: ['default', 'claude'],
@@ -153,7 +154,7 @@ export const LLM_DEFAULT_AGENTS: InitialAgentDef[] = [
     {
         id: 'gemini',
         name: 'Gemini',
-        type: 'agent',
+        type: 'atomic',
         icon: '💎',
         description: '使用 Gemini 模型的智能体',
         initialTags: ['default', 'gemini'],
@@ -172,7 +173,7 @@ export const LLM_DEFAULT_AGENTS: InitialAgentDef[] = [
     {
         id: 'openrouter',
         name: 'OpenRouter',
-        type: 'agent',
+        type: 'atomic',
         icon: '🔀',
         description: '使用 OpenRouter 自动选择最佳模型的智能体',
         initialTags: ['default', 'router'],
@@ -191,7 +192,7 @@ export const LLM_DEFAULT_AGENTS: InitialAgentDef[] = [
     {
         id: 'cloudapi',
         name: 'CloudAPI',
-        type: 'agent',
+        type: 'atomic',
         icon: '☁️',
         description: '使用 CloudAPI 模型的智能体',
         initialTags: ['default', 'cloudapi'],

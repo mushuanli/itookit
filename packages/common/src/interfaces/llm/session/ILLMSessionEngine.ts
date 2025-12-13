@@ -101,6 +101,16 @@ export interface ILLMSessionEngine extends ISessionEngine {
     deleteMessage(sessionId: string, messageId: string): Promise<void>;
 
     // ============================================
+    // 运行时控制
+    // ============================================
+    
+    /**
+     * [新增] 中断当前会话的生成任务
+     * 对应 IExecutionContext 中的 AbortSignal 触发
+     */
+    abortGeneration?(sessionId: string): Promise<void>;
+
+    // ============================================
     // 分支操作
     // ============================================
     

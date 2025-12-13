@@ -2,15 +2,15 @@
 
 import { BaseModuleService, VFSCore, VFSEvent, VFSEventType } from '@itookit/vfs-core';
 import { IAgentService } from './IAgentService';
-import { LLM_DEFAULT_AGENTS, AGENT_DEFAULT_DIR, LLM_AGENT_TARGET_DIR } from '../constants';
+import { LLM_DEFAULT_AGENTS, AGENT_DEFAULT_DIR } from '../constants';
 
 import { 
     IAgentDefinition, 
     MCPServer,
     FS_MODULE_AGENTS, 
+    LLMConnection
 } from '@itookit/common';
 import {
-    LLMConnection, 
     LLM_PROVIDER_DEFAULTS,
     LLM_DEFAULT_ID 
 } from '@itookit/llmdriver';
@@ -76,13 +76,24 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
         if (typeof engine.resolvePath === 'function') {
             return engine.resolvePath(path);
         }
-        
-        // Fallback: 通过搜索实现
         try {
-            const fileName = path.split('/').pop() || '';
-            const results = await this.moduleEngine.search({ text: fileName, type: 'file' });
-            const match = results.find(n => n.path === path || n.name === fileName);
-            return match?.id || null;
+            // 这里我们尝试通过底层 VFS 核心来解析，比 search 更准确
+            return await this.coreVfs.pathResolver.resolve(this.moduleName, path);
+        } catch {
+            return null;
+        }
+    }
+
+    // [新增] 辅助方法：确保目录存在并返回 ID
+    private async ensureDirectoryId(path: string): Promise<string | null> {
+        const id = await this.safeResolvePath(path);
+        if (id) return id;
+        
+        // 如果不存在，尝试创建（假设是根目录下的子目录）
+        // 注意：BaseModuleService 的 createDirectory 接受 parentId，这里处理根目录情况
+        try {
+             // 根目录 parentId 为 null
+            return (await this.moduleEngine.createDirectory(path, null)).id;
         } catch {
             return null;
         }
@@ -99,7 +110,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
             VFSEventType.NODE_CREATED,
             VFSEventType.NODE_UPDATED,
             VFSEventType.NODE_DELETED,
-            VFSEventType.NODES_BATCH_UPDATED // 如果有批量操作
+            VFSEventType.NODES_BATCH_UPDATED
         ];
 
         const handler = (event: VFSEvent) => {
@@ -196,7 +207,13 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
      * 同步默认连接配置
      */
     private async _syncLLMProviders(): Promise<void> {
-        // 读取当前磁盘上的连接
+        // [修复] 确保连接目录存在
+        const connectionsDirId = await this.ensureDirectoryId(CONNECTIONS_DIR);
+        if (!connectionsDirId) {
+            console.error('[VFSAgentService] Failed to ensure connections directory');
+            return;
+        }
+
         const currentConns = await this.loadJsonFiles<LLMConnection>(CONNECTIONS_DIR);
         
         for (const [providerKey, def] of Object.entries(LLM_PROVIDER_DEFAULTS)) {
@@ -214,7 +231,8 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
                     availableModels: [...def.models],
                     metadata: { isSystemDefault: true }
                 };
-                await this.saveConnection(newConn);
+                // [修复] 传入目录 ID
+                await this.saveConnectionWithDirId(newConn, connectionsDirId);
             } else {
                 // 合并模型列表 (Add missing models)
                 let changed = false;
@@ -228,7 +246,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
                     }
                 }
                 if (changed) {
-                    await this.saveConnection(existing);
+                    await this.saveConnectionWithDirId(existing, connectionsDirId);
                 }
             }
         }
@@ -242,19 +260,19 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
 
         for (const agentDef of this.defaultAgentsDef) {
             const fileName = `${agentDef.id}.agent`;
-            const parentDir = agentDef.initPath || AGENT_DEFAULT_DIR; // e.g., "/default"
+            const parentDir = agentDef.initPath || AGENT_DEFAULT_DIR;
+            
+            // [修复] 解析父目录 ID
+            const parentId = await this.ensureDirectoryId(parentDir);
+            if (!parentId) continue;
 
             // 1. 检查是否存在 (使用 Search 或 直接 try read)
             // 这里最快的方法是搜一下，或者通过 path 查 ID
             // 为了利用 ModuleEngine，我们假设 search 是高效的
             const fullPath = `${parentDir}/${fileName}`.replace(/\/+/g, '/');
-
-            // 1. 检查是否存在 (使用 VFSModuleEngine 新增的 resolvePath 或 search)
-            // 这里假设我们在 VFSModuleEngine 中暴露了 resolvePath，或者是通过 search
-            // 为了性能，建议 VFSModuleEngine 暴露 resolvePath
-            const exists = await this.safeResolvePath(fullPath);
+            const existsId = await this.safeResolvePath(fullPath);
             
-            if (!exists) {
+            if (!existsId) {
                 const { initPath, initialTags, ...content } = agentDef;
                 const contentStr = JSON.stringify(content, null, 2);
                 
@@ -266,7 +284,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
                     // 2. [统一] 创建文件并带 Metadata (Icon)
                     const node = await this.moduleEngine.createFile(
                         fileName, 
-                        parentDir, 
+                        parentId, 
                         contentStr,
                         {
                             icon: agentDef.icon || '🤖',
@@ -373,26 +391,32 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
     }
 
     async saveConnection(conn: LLMConnection): Promise<void> {
-        const filename = `${conn.id}.json`;
-        const content = JSON.stringify(conn, null, 2);
-        const metadata = { icon: '🔌', title: conn.name, type: 'connection' };
-
-        // 检查是否存在
-        const fullPath = `${CONNECTIONS_DIR}/${filename}`;
-        const nodeId = await this.safeResolvePath(fullPath);
-
-        if (nodeId) {
-            await this.moduleEngine.writeContent(nodeId, content);
-            await this.moduleEngine.updateMetadata(nodeId, metadata);
-        } else {
-            // 新建：传入父路径常量和 metadata
-            await this.moduleEngine.createFile(filename, CONNECTIONS_DIR, content, metadata);
+        const dirId = await this.ensureDirectoryId(CONNECTIONS_DIR);
+        if (dirId) {
+            await this.saveConnectionWithDirId(conn, dirId);
         }
-        
         await this.refreshData();
     }
 
-    // ✨ [修复 2.3] 实现 deleteFile 方法
+    // [新增] 内部保存方法，避免重复解析目录
+    private async saveConnectionWithDirId(conn: LLMConnection, dirId: string): Promise<void> {
+        const filename = `${conn.id}.json`;
+        const content = JSON.stringify(conn, null, 2);
+        const metadata = { icon: '🔌', title: conn.name, type: 'connection' };
+        
+        // 检查文件是否存在
+        // 构造完整路径来检查 (BaseModuleService 没有直接通过 name + parentId 查找的 API)
+        const fullPath = `${CONNECTIONS_DIR}/${filename}`;
+        const existingNodeId = await this.safeResolvePath(fullPath);
+
+        if (existingNodeId) {
+            await this.moduleEngine.writeContent(existingNodeId, content);
+            await this.moduleEngine.updateMetadata(existingNodeId, metadata);
+        } else {
+            await this.moduleEngine.createFile(filename, dirId, content, metadata);
+        }
+    }
+
     private async deleteFileByPath(path: string): Promise<void> {
         const nodeId = await this.safeResolvePath(path);
         if (nodeId) {
@@ -416,6 +440,9 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
     }
 
     async saveMCPServer(server: MCPServer): Promise<void> {
+        const dirId = await this.ensureDirectoryId(MCP_SERVERS_DIR);
+        if (!dirId) return;
+
         const filename = `${server.id}.json`;
         const content = JSON.stringify(server, null, 2);
         const metadata = { icon: '🔌', title: server.name, type: 'mcp' };
@@ -427,7 +454,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
             await this.moduleEngine.writeContent(nodeId, content);
             await this.moduleEngine.updateMetadata(nodeId, metadata);
         } else {
-            await this.moduleEngine.createFile(filename, MCP_SERVERS_DIR, content, metadata);
+            await this.moduleEngine.createFile(filename, dirId, content, metadata);
         }
         await this.refreshData();
     }
@@ -509,7 +536,8 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
         return {
             id: 'default',
             name: 'Default Assistant',
-            type: 'agent',
+            // [修复] atomic
+            type: 'atomic',
             icon: '🤖',
             description: 'Built-in default assistant',
             config: {

@@ -5,12 +5,9 @@ import {
   ExecutorType,
   ExecutorConfig,
   ExecutionResult,
-  AtomicConfig,
   CompositeConfig,
-  BaseExecutorConfig,
   generateUUID,
-  NodeStatus,
-  ExecutionContext
+  IExecutionContext // 使用 IExecutionContext
 } from '@itookit/common';
 
 // [修改] 从 types 导入 StreamingContext
@@ -27,18 +24,22 @@ export type ExecutorFactory = (config: ExecutorConfig) => IExecutor;
 export class UnifiedExecutor implements IExecutor {
   readonly id: string;
   readonly type: ExecutorType;
+  // ✨ [修复] 添加 name 属性
+  public name: string;
   public config: ExecutorConfig;
   
   constructor(
       config: ExecutorConfig,
-      private childFactory?: ExecutorFactory // ✨ [关键] 注入工厂
+      private childFactory?: ExecutorFactory 
   ) {
     this.id = config.id;
     this.type = config.type;
+    // ✨ [修复] 初始化 name
+    this.name = config.name || config.id;
     this.config = config;
   }
   
-  async execute(input: unknown, context: ExecutionContext): Promise<ExecutionResult> {
+  async execute(input: unknown, context: IExecutionContext): Promise<ExecutionResult> {
     const streamingContext = context as StreamingContext;
 
     if (this.type === 'atomic') {

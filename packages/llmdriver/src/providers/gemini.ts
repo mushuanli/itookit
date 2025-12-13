@@ -35,14 +35,45 @@ export class GeminiProvider extends BaseProvider {
                     } else if (part.type === 'image_url') {
                         const { mimeType, base64 } = await processAttachment(part.image_url.url);
                         parts.push({
-                            inline_data: {
-                                mime_type: mimeType,
-                                data: base64
-                            }
+                            inline_data: { mime_type: mimeType, data: base64 }
                         });
                     }
-                    // Document support varies by version, usually inline_data for PDF works
                 }
+            }
+
+            // 2. 处理工具调用 (Assistant -> functionCall)
+            if (msg.role === 'assistant' && msg.toolCalls) {
+                for (const call of msg.toolCalls) {
+                    parts.push({
+                        functionCall: {
+                            name: call.function.name,
+                            args: JSON.parse(call.function.arguments || '{}')
+                        }
+                    });
+                }
+            }
+
+            // 3. 处理工具结果 (Tool -> functionResponse)
+            if (msg.role === 'tool') {
+                const responseContent = typeof msg.content === 'string' 
+                    ? { content: msg.content } 
+                    : { content: JSON.stringify(msg.content) };
+
+                // Gemini 需要函数名。Common `ChatMessage` 在 Tool 角色时通常只有 toolCallId。
+                // 这是一个限制，如果 Driver 上下文没有缓存，这里无法得知函数名。
+                // 假设我们只能尽力而为，或者 API 允许仅传 ID (Gemini REST API 实际上比较严格，通常需要 name)
+                // 这里暂时用一个占位符或尝试从 ID 推断（如果 ID 包含名字），实际生产需要更复杂的 Session 状态管理
+                const functionName = "unknown_function"; // TODO: 需要从 context 或 toolCallId 映射
+
+                parts.push({
+                    functionResponse: {
+                        name: functionName, 
+                        response: responseContent
+                    }
+                });
+                
+                contents.push({ role: 'function', parts });
+                continue; 
             }
 
             contents.push({
@@ -100,12 +131,23 @@ export class GeminiProvider extends BaseProvider {
         // Parse parts for text and thought
         let text = '';
         let thought = '';
+        const toolCalls: any[] = [];
         
         if (candidate?.content?.parts) {
             for (const part of candidate.content.parts) {
                 if (part.text) text += part.text;
                 // Check for thought property (might vary by API version/model)
                 if (part.thought) thought += part.thought; 
+                if (part.functionCall) {
+                    toolCalls.push({
+                        id: `call_${Date.now()}`, // Gemini doesn't always return an ID in REST
+                        type: 'function',
+                        function: {
+                            name: part.functionCall.name,
+                            arguments: JSON.stringify(part.functionCall.args)
+                        }
+                    });
+                }
             }
         }
 
@@ -114,7 +156,8 @@ export class GeminiProvider extends BaseProvider {
                 message: {
                     role: 'assistant',
                     content: text,
-                    thinking: thought || undefined
+                    thinking: thought || undefined,
+                    tool_calls: toolCalls.length > 0 ? toolCalls : undefined
                 },
                 finish_reason: candidate?.finishReason?.toLowerCase() || 'stop'
             }],

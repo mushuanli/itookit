@@ -1,8 +1,7 @@
-// @file llm-engine/orchestrator/QueryRunner.ts
+// @file llm-engine/orchestrator/execution/QueryRunner.ts
 
 import { SessionGroup, ExecutionNode, StreamingContext } from '../../core/types';
-import { generateUUID, NodeStatus } from '@itookit/common';
-import { ChatMessage } from '@itookit/llmdriver';
+import { generateUUID, ChatMessage,NodeStatus } from '@itookit/common';
 import { SessionState } from '../core/SessionState';
 import { SessionEventEmitter } from '../core/EventEmitter';
 import { PersistenceManager } from '../data/PersistenceManager';
@@ -359,7 +358,8 @@ export class QueryRunner {
                 if (node.status !== 'active') continue;
 
                 if (node.role === 'system' || node.role === 'user' || node.role === 'assistant') {
-                    messages.push({ role: node.role as any, content: node.content });
+                    // [修复] 处理可能为 undefined 的 content
+                    messages.push({ role: node.role as any, content: node.content || '' });
                 }
             }
 

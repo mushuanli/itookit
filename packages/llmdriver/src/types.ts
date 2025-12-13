@@ -1,25 +1,19 @@
 // @file: llmdriver/types.ts
 
+import { 
+    LLMConnection, 
+    LLMModel, 
+    ChatMessage, 
+    MessageContent, 
+    ToolCall, 
+    Role,
+    IExecutionContext // ✨ [新增] 导入基础接口
+} from '@itookit/common';
+
 // ==========================================
-// 1. 从 Common 迁移过来的核心数据结构
+// 1. Provider 定义
 // ==========================================
 
-/**
- * 基础模型定义
- */
-export interface LLMModel {
-    id: string;
-    name: string;
-    /** 上下文窗口大小 (可选) */
-    contextWindow?: number;
-    /** 是否支持视觉/多模态 (可选) */
-    supportsVision?: boolean;
-}
-
-/**
- * LLM 提供商的静态定义 (元数据)
- * 用于 UI 展示默认列表，以及 Driver 初始化默认配置
- */
 export interface LLMProviderDefinition {
     /** 显示名称 (e.g., "OpenAI") */
     name: string;
@@ -42,53 +36,17 @@ export interface LLMProviderDefinition {
     requiresReferer?: boolean;
 }
 
-/**
- * LLM 连接配置 (用户实例)
- * 这是保存在用户设置(Settings)中的实际数据结构
- */
-export interface LLMConnection {
-    /** UUID */
-    id: string;
-    
-    /** 用户自定义名称 (e.g., "我的 OpenAI") */
-    name: string;
-    
-    /** 对应 LLMProviderDefinition 的 key (e.g., 'openai', 'custom') */
-    provider: string; 
-    
-    /** API Key */
-    apiKey: string;
-    
-    /** 选中的默认模型 ID */
-    model: string;
-    
-    /** API 地址 (用户可覆盖默认值) */
-    baseURL?: string;
-    
-    /** 当前连接可用的模型列表 */
-    availableModels?: LLMModel[];
-    
-    /** 额外的高级配置 */
-    metadata?: {
-        thinkingBudget?: number;
-        reasoningEffort?: 'low' | 'medium' | 'high';
-        organizationId?: string;
-        [key: string]: any;
-    };
-}
-
 // ==========================================
-// 2. Driver 运行时类型 (原有内容)
+// 2. Driver 运行时类型
 // ==========================================
 
 /**
- * [FIXED] LLMProviderConfig
- * 这是传给 BaseProvider 及其子类的配置对象。
- * 它继承自 LLMConnection，因此你可以直接把存数数据的 connection 对象传进去，
- * 同时它增加了 Driver 运行时特有的字段（如 headers, supportsThinking）。
+ * LLMProviderConfig
+ * 传给 BaseProvider 的配置。
+ * 继承自 Partial<LLMConnection> 以复用通用字段，但强制要求 provider 和 apiKey。
  */
 export interface LLMProviderConfig extends Partial<LLMConnection> {
-    // 必填字段 (虽然继承自 Partial LLMConnection，但在运行时这些是必须的)
+    // 必填字段
     provider: string;
     apiKey: string;
     
@@ -96,56 +54,20 @@ export interface LLMProviderConfig extends Partial<LLMConnection> {
     apiBaseUrl?: string; // 对应 LLMConnection.baseURL
     model?: string;
     
-    // 从 LLMProviderDefinition 继承的能力开关
+    // 能力开关
     supportsThinking?: boolean;
     requiresReferer?: boolean;
 
     // 额外的 HTTP 请求头
     headers?: Record<string, string>;
     
-    // 允许任意额外参数
+    // 允许额外元数据
     [key: string]: any;
 }
 
-// --- 基础消息结构 ---
-
-export type Role = 'system' | 'user' | 'assistant' | 'tool';
-
-export interface MessageContentText {
-    type: 'text';
-    text: string;
-}
-
-export interface MessageContentImage {
-    type: 'image_url';
-    image_url: { url: string };
-}
-
-export interface MessageContentDocument {
-    type: 'document';
-    document: { url: string; mime_type?: string };
-}
-
-export type MessageContentPart = MessageContentText | MessageContentImage | MessageContentDocument;
-export type MessageContent = string | MessageContentPart[];
-
-export interface ChatMessage {
-    role: Role;
-    content: MessageContent;
-    name?: string;
-    tool_call_id?: string;
-}
-
-export interface ToolCall {
-    id: string;
-    type: 'function';
-    function: {
-        name: string;
-        arguments: string;
-    };
-}
-
-// --- 请求参数 ---
+// ==========================================
+// 3. 请求与响应 (Driver 特有)
+// ==========================================
 
 export interface ChatCompletionParams {
     messages: ChatMessage[];
@@ -162,7 +84,12 @@ export interface ChatCompletionParams {
     temperature?: number;
     maxTokens?: number;
     topP?: number;
-    tools?: any[];
+    
+    /** 
+     * 输入时允许宽泛的类型，但在发送给 API 前
+     * Driver 的 BaseProvider 会处理它与 ChatMessage.toolCalls 的映射 
+     */
+    tools?: any[]; 
     toolChoice?: any;
     
     /** AbortSignal 用于取消请求 */
@@ -205,25 +132,36 @@ export interface ChatCompletionChunk {
 }
 
 /**
- * 通用的执行回调接口
- * 允许上层 (Engine/UI) 监听底层执行器的流式输出
+ * 驱动层执行上下文
  */
+export interface DriverExecutionContext extends IExecutionContext {
+    // IExecutionContext 已包含:
+    // - executionId: string
+    // - depth: number
+    // - signal?: AbortSignal
+    // - variables: ReadonlyMap<string, unknown>
+    
+    /**
+     * [扩展] LLM 驱动特有的回调函数
+     * 用于处理流式思考过程(Thinking)和输出
+     */
+    callbacks?: ExecutionCallbacks;
+    
+    /**
+     * [扩展] 父节点 ID (用于追踪调用链)
+     * 注：IExecutionContext 中有 parentId (可选)，这里可以省略或者是为了明确覆盖
+     */
+    parentId?: string;
+
+    /**
+     * 允许额外的驱动层元数据
+     */
+    [key: string]: any;
+}
+
 export interface ExecutionCallbacks {
     onThinking?: (delta: string, nodeId?: string) => void;
     onOutput?: (delta: string, nodeId?: string) => void;
-    // Driver 层不关心 UI 的 onNodeStart 等事件，只关心文本流
-}
-
-/**
- * Driver 层视角的执行上下文
- * 兼容 Engine 层的 StreamingContext
- */
-export interface DriverExecutionContext {
-    signal?: AbortSignal;
-    variables?: Map<string, any>;
-    callbacks?: ExecutionCallbacks;
-    parentId?: string; // 用于回传给 callback 的 nodeId
-    [key: string]: any;
 }
 
 // --- Client 配置 ---
@@ -235,30 +173,7 @@ export interface LLMHooks {
 }
 
 /**
- * 传给 BaseProvider 的配置，必须包含 provider 和 apiKey
- */
-export interface LLMProviderConfig {
-    provider: string;
-    apiKey: string;
-    apiBaseUrl?: string;
-    model?: string;
-    
-    // 能力开关
-    supportsThinking?: boolean;
-    requiresReferer?: boolean;
-    
-    // 额外的 HTTP Headers
-    headers?: Record<string, string>;
-    
-    // 移除 [key: string]: any; 以避免索引签名冲突
-    // 如果需要传递额外元数据，使用 metadata 字段
-    metadata?: Record<string, any>;
-}
-
-// --- [FIXED] 用户输入的宽松配置 ---
-/**
- * Driver 构造函数接收的配置。
- * provider 和 apiKey 是可选的，因为可以通过 connection 对象传入。
+ * Driver 构造函数配置
  */
 export interface LLMClientConfig {
     /** 方式 A: 传入完整的连接对象 */

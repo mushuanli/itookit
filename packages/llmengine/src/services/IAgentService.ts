@@ -1,6 +1,5 @@
 // @file: llm-engine/services/IAgentService.ts
-import { IAgentDefinition, MCPServer } from '@itookit/common';
-import {LLMConnection} from '@itookit/llmdriver';
+import { IAgentDefinition, MCPServer,LLMConnection } from '@itookit/common';
 export interface IAgentService {
     // --- Init ---
     init(): Promise<void>;

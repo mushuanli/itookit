@@ -3,7 +3,7 @@
  * @description Defines the public interface that a session management module must implement.
  */
 
-interface IRegularMenuItem {
+export interface IRegularMenuItem {
     id: string;
     label: string;
     iconHTML?: string;
@@ -12,7 +12,7 @@ interface IRegularMenuItem {
 }
 
 // 定义一个分割线
-interface ISeparatorMenuItem {
+export interface ISeparatorMenuItem {
     type: 'separator';
 }
 

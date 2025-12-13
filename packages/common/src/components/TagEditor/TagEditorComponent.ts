@@ -24,6 +24,8 @@ export class TagEditorComponent {
 
     private suggestions: Suggestion[] = [];
     private activeIndex: number = -1;
+    // [新增] 用于处理搜索竞态条件
+    private lastRequestId: number = 0; 
 
     private pillsContainerEl!: HTMLElement;
     private inputWrapperEl!: HTMLElement;
@@ -86,16 +88,31 @@ export class TagEditorComponent {
         }
     };
 
-    private _handleInput = async (/*e: Event*/): Promise<void> => {
+    private _handleInput = async (): Promise<void> => {
         const query = this.inputEl.value;
+        // [修改] 增加请求ID，处理竞态条件
+        const currentRequestId = ++this.lastRequestId;
+
         if (query) {
-            const allSuggestions = await this.suggestionProvider.getSuggestions(query);
-            this.suggestions = allSuggestions.filter(s => !this.items.has(s.label));
+            try {
+                const allSuggestions = await this.suggestionProvider.getSuggestions(query);
+                
+                // 如果当前请求ID不等于最新ID，说明有新的输入，废弃此次结果
+                if (currentRequestId !== this.lastRequestId) return;
+
+                this.suggestions = allSuggestions.filter(s => !this.items.has(s.label));
+            } catch (err) {
+                console.error("Failed to fetch suggestions:", err);
+                if (currentRequestId === this.lastRequestId) this.suggestions = [];
+            }
         } else {
-            this.suggestions = [];
+            if (currentRequestId === this.lastRequestId) this.suggestions = [];
         }
-        this.activeIndex = -1;
-        this._renderSuggestions();
+        
+        if (currentRequestId === this.lastRequestId) {
+            this.activeIndex = -1;
+            this._renderSuggestions();
+        }
     };
 
     private _handleKeyDown = (e: KeyboardEvent): void => {

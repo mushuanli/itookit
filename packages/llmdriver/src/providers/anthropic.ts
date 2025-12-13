@@ -45,14 +45,40 @@ export class AnthropicProvider extends BaseProvider {
                         const { mimeType, base64 } = await processAttachment(part.document.url);
                         contentParts.push({
                             type: 'document',
-                            source: {
-                                type: 'base64',
-                                media_type: mimeType,
-                                data: base64
-                            }
+                            source: { type: 'base64', media_type: mimeType, data: base64 }
                         });
                     }
                 }
+            }
+
+            // 3. 处理工具调用 (Common `toolCalls` -> Anthropic `tool_use`)
+            if (msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
+                for (const toolCall of msg.toolCalls) {
+                    contentParts.push({
+                        type: 'tool_use',
+                        id: toolCall.id,
+                        name: toolCall.function.name,
+                        input: JSON.parse(toolCall.function.arguments || '{}')
+                    });
+                }
+            }
+
+            // 4. 处理工具结果 (Common `role: tool` -> Anthropic `tool_result`)
+            // Anthropic 要求工具结果在 'user' 消息块中，类型为 'tool_result'
+            if (msg.role === 'tool') {
+                const toolContent = typeof msg.content === 'string' 
+                    ? msg.content 
+                    : (Array.isArray(msg.content) && msg.content[0].type === 'text' ? msg.content[0].text : JSON.stringify(msg.content));
+                
+                anthropicMessages.push({
+                    role: 'user',
+                    content: [{
+                        type: 'tool_result',
+                        tool_use_id: msg.toolCallId,
+                        content: toolContent
+                    }]
+                });
+                continue; // 已作为 user 消息添加，跳过默认 push
             }
 
             anthropicMessages.push({
@@ -136,11 +162,22 @@ export class AnthropicProvider extends BaseProvider {
         // 解析响应内容
         let content = '';
         let thinking = '';
+        const toolCalls: any[] = [];
         
         if (Array.isArray(data.content)) {
             data.content.forEach((block: any) => {
                 if (block.type === 'text') content += block.text;
                 if (block.type === 'thinking') thinking += block.thinking;
+                if (block.type === 'tool_use') {
+                    toolCalls.push({
+                        id: block.id,
+                        type: 'function',
+                        function: {
+                            name: block.name,
+                            arguments: JSON.stringify(block.input)
+                        }
+                    });
+                }
             });
         }
 
@@ -150,7 +187,7 @@ export class AnthropicProvider extends BaseProvider {
                     role: 'assistant',
                     content: content,
                     thinking: thinking || undefined,
-                    // Tool calls mapping needs to be handled if strictly required
+                    tool_calls: toolCalls.length > 0 ? toolCalls : undefined
                 },
                 finish_reason: data.stop_reason
             }],
@@ -214,6 +251,9 @@ export class AnthropicProvider extends BaseProvider {
                                     chunk.choices[0].delta.content = event.delta.text;
                                 } else if (event.delta?.type === 'thinking_delta') {
                                     chunk.choices[0].delta.thinking = event.delta.thinking;
+                                } else if (event.delta?.type === 'input_json_delta') {
+                                    // 处理流式工具参数拼接 (复杂，这里暂略简化处理)
+                                    // 实际实现需要维护一个 buffer 来拼接 partial json
                                 }
                                 
                                 if (chunk.choices[0].delta.content || chunk.choices[0].delta.thinking) {

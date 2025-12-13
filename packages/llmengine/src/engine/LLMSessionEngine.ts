@@ -2,9 +2,7 @@
 
 import { 
     BaseModuleService, 
-    VFSCore, 
-    VNode, 
-    VNodeType 
+    VFSCore
 } from '@itookit/vfs-core';
 import { 
     ILLMSessionEngine, 
@@ -17,14 +15,16 @@ import {
     ChatManifest, 
     ChatNode, 
     IYamlParser,
-    FS_MODULE_CHAT
+    FS_MODULE_CHAT,
+    MessageNode,
+    ToolResultNode,
+    ToolCallNode
 } from '@itookit/common';
 
 import {LockManager} from '../core/utils/LockManager';
 
-// ✨ [修复 1.1] 引入真正的 YAML 库，或使用严格的 JSON 模式
-// 如果项目中有 js-yaml，使用它；否则明确只支持 JSON
-import * as yaml from 'js-yaml'; // 需要安装: npm install js-yaml @types/js-yaml
+// 引入 yaml 库 (假设环境已提供或 polyfill)
+import * as yaml from 'js-yaml'; 
 
 const Yaml: IYamlParser = {
     parse: (t) => {
@@ -96,7 +96,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
 
         // 2. 创建根节点 (System Prompt)
         const rootNodeId = `node-${Date.now()}-root`;
-        const rootNode: ChatNode = {
+        const rootNode: MessageNode = {
             id: rootNodeId,
             type: 'message',
             role: 'system',
@@ -147,18 +147,13 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
         if (!manifest) throw new Error("Manifest missing or unreadable");
 
         let currentNodeId: string | null = manifest.current_head;
-        const context: ChatContextItem[] = [];
-
-        // ✨ [修复 1.5] 批量读取优化 - 收集所有节点ID后一次性读取
         const nodeIds: string[] = [];
-        let tempNodeId: string | null = currentNodeId;
         
-        // 先收集所有需要读取的节点ID
-        while (tempNodeId) {
-            nodeIds.push(tempNodeId);
-            const tempNode: ChatNode | null = await this.readJson<ChatNode>(this.getNodePath(sessionId, tempNodeId));
+        while (currentNodeId) {
+            nodeIds.push(currentNodeId);
+            const tempNode: ChatNode | null = await this.readJson<ChatNode>(this.getNodePath(sessionId, currentNodeId));
             if (!tempNode) break;
-            tempNodeId = tempNode.parent_id;
+            currentNodeId = tempNode.parent_id;
         }
 
         // 批量读取（如果 VFS 支持批量读取的话）
@@ -166,7 +161,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
             nodeIds.map(id => this.readJson<ChatNode>(this.getNodePath(sessionId, id)))
         );
 
-        // 按顺序构建上下文
+        const context: ChatContextItem[] = [];
         for (let i = nodes.length - 1; i >= 0; i--) {
             const node = nodes[i];
             if (node && node.status === 'active') {
@@ -188,7 +183,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
             const str = typeof content === 'string' ? content : new TextDecoder().decode(content);
             return Yaml.parse(str) as ChatManifest;
         } catch (e) {
-            console.error(`[LLMSessionEngine] Failed to read manifest from node ${nodeId}`, e);
+            console.error(`[LLMSessionEngine] Failed to read manifest ${nodeId}`, e);
             throw new Error(`Manifest missing for node: ${nodeId}`);
         }
     }
@@ -210,19 +205,47 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
             const parentId = manifest.current_head;
             const newNodeId = generateUUID();
             
-            const newNode: ChatNode = {
+            const commonProps = {
                 id: newNodeId,
-                type: 'message',
-                role,
-                content,
                 created_at: new Date().toISOString(),
                 parent_id: parentId,
                 children_ids: [],
-                meta,
-                status: 'active'
+                status: 'active' as const,
+                meta
             };
 
-            // 2. 写入新节点到隐藏目录 (e.g. /.uuid/.node-xxx.json)
+            // ✨ [修复] 根据 role 构造正确的 Discriminated Union 类型
+            let newNode: ChatNode;
+
+            if (role === 'tool') {
+                newNode = {
+                    ...commonProps,
+                    type: 'tool_result',
+                    role: 'tool',
+                    tool_call_id: meta?.tool_call_id || 'unknown', // 必须从 meta 中获取 tool_call_id
+                    content: content
+                } as ToolResultNode;
+            } else if (role === 'assistant' && meta?.tool_calls) {
+                // 如果是 Assistant 且有工具调用
+                newNode = {
+                    ...commonProps,
+                    type: 'tool_call',
+                    role: 'assistant',
+                    tool_call_id: meta.tool_calls[0]?.id || generateUUID(), // 简化处理，实际可能有多个
+                    name: meta.tool_calls[0]?.function?.name || 'unknown',
+                    arguments: meta.tool_calls[0]?.function?.arguments || '{}',
+                    content: content // Assistant 的思考过程或文本
+                } as ToolCallNode;
+            } else {
+                // 默认为普通文本消息
+                newNode = {
+                    ...commonProps,
+                    type: 'message',
+                    role: role as 'system' | 'user' | 'assistant',
+                    content: content
+                } as MessageNode;
+            }
+
             await this.writeJson(this.getNodePath(sessionId, newNodeId), newNode);
 
             // 3. 更新父节点的 children_ids 指针
@@ -513,57 +536,47 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
     // ============================================================================
 
     async rename(id: string, newName: string): Promise<void> {
-        // [修复] Code 2339: 使用 coreVfs.storage
-        const node = await this.coreVfs.storage.loadVNode(id);
+        // [修正] 通过 moduleEngine 获取节点，避免直接访问底层 coreVfs 导致类型不匹配
+        const node = await this.moduleEngine.getNode(id);
         if (!node) throw new Error("Node not found");
 
         try {
             // [修复] 直接读取当前文件的 manifest，不需要从文件名推导 UUID
             const manifest = await this.getManifest(id);
             manifest.title = newName;
+            // 回写 .chat 文件内容
             await this.moduleEngine.writeContent(id, JSON.stringify(manifest, null, 2));
+            
+            // 更新 VFS Metadata (UI 侧边栏显示的标题)
+            await this.moduleEngine.updateMetadata(id, {
+                ...node.metadata,
+                title: newName
+            });
         } catch (e) {
-            console.warn("Failed to update manifest title", e);
+            console.warn("[LLMSessionEngine] Rename manifest update failed", e);
         }
-
-        // 2. 更新 VNode Metadata (UI 列表标题)
-        await this.moduleEngine.updateMetadata(id, {
-            ...node.metadata,
-            title: newName
-        });
     }
 
     // 删除逻辑
     async delete(ids: string[]): Promise<void> {
         for (const id of ids) {
-            // [修复] Code 2339: 使用 coreVfs.storage
-            const node = await this.coreVfs.storage.loadVNode(id);
+            const node = await this.moduleEngine.getNode(id);
             if (!node) continue;
 
             // 先尝试读取 manifest 获取 sessionId
             try {
-                const content = await this.moduleEngine.readContent(id);
-                if (content) {
-                    const str = typeof content === 'string' ? content : new TextDecoder().decode(content);
-                    const manifest = JSON.parse(str) as ChatManifest;
-                    
-                    if (manifest.id) {
-                        // 删除隐藏目录及其所有内容
-                        const hiddenDirPath = this.getHiddenDir(manifest.id);
-                        try {
-                            await this.moduleEngine.delete([hiddenDirPath]);
-                            log(`[LLMSessionEngine] Cleaned up hidden directory: ${hiddenDirPath}`);
-                        } catch (cleanupError) {
-                            console.warn(`[LLMSessionEngine] Failed to cleanup hidden dir ${hiddenDirPath}:`, cleanupError);
-                        }
-                    }
+                const sessionId = await this.getSessionIdFromNodeId(id);
+                if (sessionId) {
+                    const hiddenDirPath = this.getHiddenDir(sessionId);
+                    // 尝试删除隐藏消息目录
+                    await this.moduleEngine.delete([hiddenDirPath]);
                 }
             } catch (e) {
                 console.warn('[LLMSessionEngine] Could not read manifest for cleanup:', e);
             }
 
-            // 删除主文件
-            await this.moduleEngine.delete([node.path]);
+            // 删除 .chat 主文件
+            await this.moduleEngine.delete([id]);
 
             // [尝试] 读取内容获取 sessionId 来清理隐藏目录 (如果还能读到的话)
             // 如果文件已被删除可能无法读取，这依赖于 VFS 具体的删除顺序
@@ -632,7 +645,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
         const rootNodeId = `node-${Date.now()}-root`;
         log(`[LLMSessionEngine] Creating root node: ${rootNodeId}`);
         
-        const rootNode: ChatNode = {
+        const rootNode: MessageNode = {
             id: rootNodeId,
             type: 'message',
             role: 'system',
@@ -668,7 +681,8 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
         await this.moduleEngine.updateMetadata(nodeId, {
             title: title,
             icon: '💬',
-            sessionId: sessionId
+            sessionId: sessionId,
+            type: 'chat' // 明确标记类型
         });
         log(`[LLMSessionEngine] Metadata updated`);
 

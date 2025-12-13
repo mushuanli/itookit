@@ -1,14 +1,15 @@
-// @file llm-engine/orchestrator/ExecutorResolver.ts
+// @file llm-engine/orchestrator/execution/ExecutorResolver.ts
 
 import { 
     IExecutor, 
     IAgentDefinition,
-    ExecutorConfig
+    ExecutorConfig,
+    LLMConnection
 } from '@itookit/common';
 import { IAgentService } from '../../services/IAgentService';
 
 // ✨ [关键变更] 从 llmdriver 导入通用的 AgentExecutor
-import { LLMConnection, AgentExecutor } from '@itookit/llmdriver';
+import { AgentExecutor } from '@itookit/llmdriver';
 
 // ✨ [关键变更] 导入 UnifiedExecutor (本地编排逻辑)
 import { UnifiedExecutor } from './UnifiedExecutor';
@@ -117,16 +118,14 @@ export class ExecutorResolver {
     // 私有工厂方法
     // ================================================================
 
-    private async resolveFromService(executorId: string, signal?: AbortSignal): Promise<ResolvedExecutor | null> {
+    private async resolveFromService(executorId: string, _signal?: AbortSignal): Promise<ResolvedExecutor | null> {
         try {
             const agentDef = await this.agentService.getAgentConfig(executorId);
             if (!agentDef || !agentDef.config) return null;
 
             // Case A: Atomic Agent
-            if (agentDef.type === 'agent' || agentDef.type === 'tool') {
+            if (agentDef.type === 'atomic' || agentDef.type === 'tool') {
                 const connId = agentDef.config.connectionId;
-                if (!connId) return null;
-
                 const connection = await this.agentService.getConnection(connId);
                 if (!connection) return null;
 
@@ -141,10 +140,21 @@ export class ExecutorResolver {
                 });
             }
 
-            // Case B: Composite (Workflow/Orchestrator)
-            // TODO: 实现从配置加载 UnifiedExecutor 的逻辑
-            // const executor = this.createUnifiedExecutor(agentDef.config as any);
-            // return { ... };
+            // Case B: Composite
+            if (agentDef.type === 'orchestrator' || (agentDef.type as string) === 'composite') {
+                const executor = this.createUnifiedExecutor({
+                    id: agentDef.id,
+                    name: agentDef.name,
+                    type: 'composite',
+                    config: agentDef.config as any
+                });
+                return {
+                    executor,
+                    agentName: agentDef.name,
+                    agentIcon: agentDef.icon || '🧬',
+                    metaInfo: { agentId: agentDef.id, type: agentDef.type }
+                };
+            }
 
             return null;
         } catch (e) {
@@ -183,7 +193,6 @@ export class ExecutorResolver {
                 agentId: options.id,
                 description: options.description,
                 provider: conn.provider,
-                connectionName: conn.name,
                 model: options.model || conn.model,
                 isDefault: options.isDefault,
                 tags: options.tags

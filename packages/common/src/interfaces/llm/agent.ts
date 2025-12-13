@@ -1,17 +1,19 @@
 /**
- * @file common/interfaces/llm/IAgent.ts
+ * @file common/interfaces/llm/agent.ts
  * @description 定义 Agent 的持久化存储结构（即 .agent 文件的内容标准）。
  * 这充当了存储层(App)和执行层(LLM-UI)之间的共享数据契约。
  */
 
-import { LLMAgentConfig } from './ILLM';
+import { LLMAgentConfig } from './config';
 
 /**
  * Agent 的类型定义
- * - agent: 单一原子智能体 (对应 ExecutorType 'atomic')
- * - orchestrator: 编排器 (对应 ExecutorType 'composite')
+ * - atomic: 原子智能体 (对应 ExecutorType 'atomic')
+ * - workflow: 工作流
+ * - tool: 纯工具封装
+ * - orchestrator: 复杂编排器 (对应 ExecutorType 'composite')
  */
-export type AgentType = 'agent' | 'composite' | 'tool' | 'workflow' | 'orchestrator' ;// TODO: 'agent' | 'orchestrator';
+export type AgentType = 'atomic' | 'workflow' | 'tool' | 'orchestrator';
 
 /**
  * Agent 存储配置接口

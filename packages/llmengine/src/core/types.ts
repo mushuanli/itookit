@@ -1,6 +1,6 @@
 // @file: llm-engine/core/types.ts
 
-import { ExecutionContext, NodeStatus, ChatNode } from '@itookit/common';
+import { IExecutionContext, NodeStatus } from '@itookit/common';
 export * from './errors';
 
 /**
@@ -77,7 +77,7 @@ export interface SessionGroup {
 /**
  * 扩展标准执行上下文，注入 UI 流式回调能力和节点生命周期管理
  */
-export interface StreamingContext extends ExecutionContext {
+export interface StreamingContext extends IExecutionContext {
     // 当前会话 ID，用于持久化
     sessionId?: string;
     

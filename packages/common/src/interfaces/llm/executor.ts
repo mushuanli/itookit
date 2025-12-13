@@ -1,39 +1,52 @@
-// @file: common/interfaces/llm/IExecutor.ts
-// ==================== 核心统一类型定义 ====================
+// @file: common/interfaces/llm/executor.ts
 
 /**
- * 执行单元的类型
- * - 'atomic': 原子 Agent，直接执行任务
- * - 'composite': 复合单元，包含子节点（即编排器）
+ * ========================================================
+ * 核心定义
+ * ========================================================
+ */
+
+/**
+ * 执行单元类型
+ * - 'atomic': 原子节点 (Agent/Tool)
+ * - 'composite': 复合节点 (Orchestrator)
  */
 export type ExecutorType = 'atomic' | 'composite';
 
 /**
- * 复合单元的编排模式
+ * 编排模式 (用于 Composite 节点)
  */
 export type OrchestrationMode = 'serial' | 'parallel' | 'router' | 'loop' | 'dag' | 'state-machine';
 
-/*
-* agent节点输出状态
-*/
-export type NodeStatus = 'pending' | 'running' | 'success' | 'failed' | 'waiting_user';
+/**
+ * 节点/步骤状态
+ * Agent Runtime 使用 StepStatus，UI/Engine 使用 NodeStatus，两者保持一致
+ */
+export type StepStatus = 'pending' | 'running' | 'success' | 'failed' | 'cancelled' | 'waiting_user';
+
+/**
+ * ✨ [新增] NodeStatus
+ * UI 层和持久化层常用的状态定义，与 StepStatus 兼容
+ */
+export type NodeStatus = StepStatus;
 
 /**
  * 控制指令
+ * 用于告诉运行时下一步该做什么
  */
 export interface ControlDirective {
-  action: 'continue' | 'end' | 'route' | 'retry' | 'pause';
-  target?: string;           // 路由目标
+  action: 'continue' | 'break' | 'delegate' | 'end' | 'route' | 'retry' | 'pause';
+  target?: string;           // 路由目标 ID
   reason?: string;           // 原因说明
-  context?: Record<string, unknown>;  // 传递的上下文
+  context?: Record<string, unknown>;  // 传递给下一步的上下文
 }
 
 /**
- * 执行结果
+ * 执行结果 (泛型)
  */
-export interface ExecutionResult {
-  status: 'success' | 'partial' | 'failed';
-  output: unknown;
+export interface ExecutionResult<T = unknown> {
+  status: 'success' | 'failed' | 'partial';
+  output: T;
   control: ControlDirective;
   metadata?: {
     duration?: number;
@@ -48,16 +61,10 @@ export interface ExecutionResult {
 }
 
 /**
- * 统一的执行单元接口
- * Agent 和 Orchestrator 都实现此接口
+ * ========================================================
+ * 配置结构 (持久化/定义层)
+ * ========================================================
  */
-export interface IExecutor {
-  readonly id: string;
-  readonly type: ExecutorType;
-  execute(input: unknown, context: ExecutionContext): Promise<ExecutionResult>;
-}
-
-// ==================== 统一配置结构 ====================
 
 /**
  * 基础配置 - Agent 和 Orchestrator 共享
@@ -67,7 +74,7 @@ export interface BaseExecutorConfig {
   name: string;
   description?: string;
   
-  // 输入输出定义
+  // 输入输出 Schema 定义
   input?: {
     schema?: Record<string, unknown>;  // JSON Schema
     required?: string[];
@@ -151,12 +158,37 @@ export type ExecutorConfig = BaseExecutorConfig & (
   | { type: 'composite'; config: CompositeConfig }
 );
 
-// ==================== 执行上下文 ====================
+/**
+ * ========================================================
+ * 运行时接口
+ * ========================================================
+ */
 
-export interface ExecutionContext {
-  executionId: string;
-  parentId?: string;
-  variables: Map<string, unknown>;
-  results: Map<string, ExecutionResult>;
-  depth: number;  // 嵌套深度
+/**
+ * 执行上下文
+ */
+export interface IExecutionContext {
+  readonly executionId: string;
+  readonly parentId?: string; // 父节点执行 ID
+  readonly depth: number;
+  
+  readonly signal?: AbortSignal; // 用于取消操作
+  
+  // 变量域
+  readonly variables: ReadonlyMap<string, unknown>;
+  
+  // 历史结果 (用于 DAG 或后续步骤引用)
+  readonly results?: ReadonlyMap<string, ExecutionResult>;
 }
+
+/**
+ * 执行器接口 (Runtime)
+ */
+export interface IExecutor<TInput = unknown, TOutput = unknown> {
+  readonly id: string;
+  readonly name: string;
+  readonly type: ExecutorType;
+  
+  execute(input: TInput, context: IExecutionContext): Promise<ExecutionResult<TOutput>>;
+}
+

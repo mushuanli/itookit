@@ -53,35 +53,6 @@ export class Converters {
         return null;
     }
 
-    /**
-     * 将 SessionGroup 转换为 Markdown 格式
-     */
-    static sessionToMarkdown(session: SessionGroup): string {
-        const role = session.role === 'user' ? '👤 User' : '🤖 Assistant';
-        const ts = new Date(session.timestamp).toLocaleTimeString();
-        let md = `### ${role} <small>(${ts})</small>\n\n`;
-
-        if (session.role === 'user') {
-            if (session.files && session.files.length > 0) {
-                const files = session.files.map(f => `\`[File: ${f.name}]\``).join(' ');
-                md += `> Attachments: ${files}\n\n`;
-            }
-            md += `${session.content || '(Empty)'}\n\n`;
-        } else if (session.role === 'assistant' && session.executionRoot) {
-            const node = session.executionRoot;
-
-            if (node.data.thought) {
-                md += `> **Thinking Process:**\n> \n`;
-                md += node.data.thought.split('\n').map(l => `> ${l}`).join('\n');
-                md += `\n\n`;
-            }
-
-            md += `${node.data.output || '(No output)'}\n\n`;
-        }
-
-        md += `---\n\n`;
-        return md;
-    }
 
     /**
      * 创建用户 SessionGroup
@@ -136,5 +107,35 @@ export class Converters {
             data: { output: '', thought: '', metaInfo },
             children: []
         };
+    }
+
+    /**
+     * 将 SessionGroup 转换为 Markdown 格式
+     */
+    static sessionToMarkdown(session: SessionGroup): string {
+        const role = session.role === 'user' ? '👤 User' : '🤖 Assistant';
+        const ts = new Date(session.timestamp).toLocaleTimeString();
+        let md = `### ${role} <small>(${ts})</small>\n\n`;
+
+        if (session.role === 'user') {
+            if (session.files && session.files.length > 0) {
+                const files = session.files.map(f => `\`[File: ${f.name}]\``).join(' ');
+                md += `> Attachments: ${files}\n\n`;
+            }
+            md += `${session.content || '(Empty)'}\n\n`;
+        } else if (session.role === 'assistant' && session.executionRoot) {
+            const node = session.executionRoot;
+
+            if (node.data.thought) {
+                md += `> **Thinking Process:**\n> \n`;
+                md += node.data.thought.split('\n').map(l => `> ${l}`).join('\n');
+                md += `\n\n`;
+            }
+
+            md += `${node.data.output || '(No output)'}\n\n`;
+        }
+
+        md += `---\n\n`;
+        return md;
     }
 }

@@ -9,11 +9,11 @@ export class OpenAICompatibleProvider extends BaseProvider {
     // 兼容 OpenAI 格式、DeepSeek、OpenRouter 等
     
     private async prepareMessages(messages: ChatCompletionParams['messages']) {
-        // 在此处处理 processAttachment 逻辑，将文件转为 Base64 或 URL
-        // 代码复用原有的 processAttachment 逻辑，此处略简写
-        return Promise.all(messages.map(async (msg) => {
-            if (typeof msg.content === 'string') return msg;
-            if (!Array.isArray(msg.content)) return msg;
+        // 1. 处理附件 (Base64 转换)
+        const processedMessages = await Promise.all(messages.map(async (msg) => {
+            // 如果是纯字符串，无需处理附件，但需保留对象结构以便后续处理字段映射
+            if (typeof msg.content === 'string') return { ...msg };
+            if (!Array.isArray(msg.content)) return { ...msg };
 
             const newContent: any[] = [];
             for (const part of msg.content) {
@@ -26,13 +26,28 @@ export class OpenAICompatibleProvider extends BaseProvider {
                         image_url: { url: `data:${mimeType};base64,${base64}` }
                     });
                 } else if (part.type === 'document') {
-                    // OpenAI 本身不支持 document type，但这通常是用来适配兼容接口的
-                     // 如果是兼容 DeepSeek 或其他支持文档的，保留原样或转换
-                     newContent.push(part); 
+                    // OpenAI 暂不支持 document，但在 DeepSeek/Compatible 模式下可能支持
+                    // 如果不支持，通常需要转为 text 或忽略
+                    newContent.push(part); 
                 }
             }
             return { ...msg, content: newContent };
         }));
+
+        // 2. 处理字段映射 (Common: CamelCase -> API: SnakeCase)
+        return processedMessages.map((msg: any) => {
+            // 映射 toolCalls -> tool_calls
+            if (msg.role === 'assistant' && msg.toolCalls) {
+                msg.tool_calls = msg.toolCalls;
+                delete msg.toolCalls;
+            }
+            // 映射 toolCallId -> tool_call_id
+            if (msg.role === 'tool' && msg.toolCallId) {
+                msg.tool_call_id = msg.toolCallId;
+                delete msg.toolCallId;
+            }
+            return msg;
+        });
     }
 
     async create(params: ChatCompletionParams): Promise<ChatCompletionResponse> {
@@ -83,8 +98,10 @@ export class OpenAICompatibleProvider extends BaseProvider {
                 message: {
                     role: 'assistant',
                     content: choice?.message?.content || '',
-                    // Normalize DeepSeek or OpenAI reasoning
-                    thinking: choice?.message?.reasoning_content || undefined, 
+                    thinking: choice?.message?.reasoning_content || undefined,
+                    // 将 API 的 snake_case 转回 Common 的 camelCase (如果需要)
+                    // 但 ChatCompletionResponse 定义里目前用的是 tool_calls (snake_case) 以匹配大多数 API 响应习惯
+                    // 这里保持 types.ts 中的定义。
                     tool_calls: choice?.message?.tool_calls
                 },
                 finish_reason: choice?.finish_reason || 'stop'

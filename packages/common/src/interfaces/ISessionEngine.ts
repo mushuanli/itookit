@@ -4,6 +4,12 @@
  * 这使得 UI 和插件（如自动完成）可以透明地与不同的后端工作
  * （例如 vfs-core, REST API, Electron FS, 纯内存实现等）。
  */
+/**
+ * 搜索作用域常量
+ */
+export const SEARCH_SCOPE_GLOBAL = '*';
+export const SEARCH_SCOPE_CURRENT = 'current';
+
 
 /**
  * 通用的节点数据结构
@@ -53,7 +59,7 @@ export interface EngineSearchQuery {
      * [新增] 搜索作用域
      * 用于支持 Mention 功能的上下文控制。
      * - undefined / 空数组: 默认为 Engine 当前绑定的上下文 (当前模块)
-     * - ['*']: 全局搜索 (所有模块)
+     * - ['*'] (SEARCH_SCOPE_GLOBAL): 全局搜索 (所有模块)
      * - ['modA', 'modB']: 特定模块范围
      */
     scope?: string[]; 

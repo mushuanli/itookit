@@ -31,35 +31,62 @@ export interface ChatManifest {
 }
 
 /**
- * 对应 .{uuid}/.{node_id}.yaml 消息节点文件
+ * 基础节点属性
  */
-export interface ChatNode {
+interface BaseNode {
     id: string;
-    type: "message" | "tool_call" | "tool_result";
-    role: "system" | "user" | "assistant" | "tool";
     created_at: string;
-    
-    // DAG 链接
     parent_id: string | null;
-    children_ids: string[];  // 可选，用于加速向下遍历
-    
-    // 内容
-    content: string;
-    
-    // 扩展信息
+    children_ids: string[];
+    status: "active" | "deleted";
     meta?: {
         model?: string;
         tokens?: number;
         finish_reason?: string;
         [key: string]: any;
     };
-    
-    // 状态
-    status: "active" | "deleted";
 }
 
 /**
- * 简单的 YAML 工具接口 (假设外部已提供或使用 js-yaml)
+ * 普通对话消息节点
+ */
+export interface MessageNode extends BaseNode {
+    type: "message";
+    role: "system" | "user" | "assistant";
+    content: string;
+}
+
+/**
+ * 工具调用节点 (Assistant 发起)
+ */
+export interface ToolCallNode extends BaseNode {
+    type: "tool_call";
+    role: "assistant";
+    // 兼容 OpenAI ToolCall 结构
+    tool_call_id: string; 
+    name: string;
+    arguments: string; // JSON String
+    content?: string;  // 通常为空，或者是思考过程
+}
+
+/**
+ * 工具结果节点 (Tool 反馈)
+ */
+export interface ToolResultNode extends BaseNode {
+    type: "tool_result";
+    role: "tool";
+    tool_call_id: string; // 关联到上面的 tool_call_id
+    content: string;      // 执行结果
+}
+
+/**
+ * 对应 .{uuid}/.{node_id}.yaml 消息节点文件
+ * 使用 Discriminated Unions 增强类型安全
+ */
+export type ChatNode = MessageNode | ToolCallNode | ToolResultNode;
+
+/**
+ * 简单的 YAML 工具接口
  */
 export interface IYamlParser {
     parse<T>(text: string): T;
