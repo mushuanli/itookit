@@ -44,13 +44,13 @@ importers:
         version: link:../../packages/common
       '@itookit/llm-engine':
         specifier: workspace:*
-        version: link:../../packages/llmengine
+        version: link:../../packages/llm-engine
       '@itookit/llm-ui':
         specifier: workspace:*
-        version: link:../../packages/llmui
+        version: link:../../packages/llm-ui
       '@itookit/llmdriver':
         specifier: workspace:*
-        version: link:../../packages/llmdriver
+        version: link:../../packages/llm-driver
       '@itookit/mdxeditor':
         specifier: workspace:*
         version: link:../../packages/mdx
@@ -120,10 +120,10 @@ importers:
         version: link:../common
       '@itookit/llm-ui':
         specifier: workspace:*
-        version: link:../llmui
+        version: link:../llm-ui
       '@itookit/llmdriver':
         specifier: workspace:*
-        version: link:../llmdriver
+        version: link:../llm-driver
       '@itookit/vfs-core':
         specifier: workspace:*
         version: link:../vfs-core
@@ -223,7 +223,7 @@ importers:
         specifier: ^7.2.4
         version: 7.2.4(@types/node@20.19.25)(jiti@1.21.7)(tsx@4.20.6)(yaml@2.8.1)
 
-  packages/llmdriver:
+  packages/llm-driver:
     dependencies:
       '@itookit/common':
         specifier: workspace:*
@@ -257,14 +257,14 @@ importers:
         specifier: ^1.6.1
         version: 1.6.1(@types/node@20.19.25)(jsdom@27.2.0)
 
-  packages/llmengine:
+  packages/llm-engine:
     dependencies:
       '@itookit/common':
         specifier: workspace:*
         version: link:../common
       '@itookit/llmdriver':
         specifier: workspace:*
-        version: link:../llmdriver
+        version: link:../llm-driver
       '@itookit/vfs-core':
         specifier: workspace:*
         version: link:../vfs-core
@@ -294,17 +294,17 @@ importers:
         specifier: ^1.6.1
         version: 1.6.1(@types/node@20.19.25)(jsdom@27.2.0)
 
-  packages/llmui:
+  packages/llm-ui:
     dependencies:
       '@itookit/common':
         specifier: workspace:*
         version: link:../common
       '@itookit/llm-engine':
         specifier: workspace:*
-        version: link:../llmengine
+        version: link:../llm-engine
       '@itookit/llmdriver':
         specifier: workspace:*
-        version: link:../llmdriver
+        version: link:../llm-driver
       '@itookit/mdxeditor':
         specifier: workspace:*
         version: link:../mdx
