@@ -35,6 +35,14 @@ export class BackgroundBrain {
     }
 
     private handleNodeUpdate = (event: EngineEvent) => {
+        // ✨ [修复] 核心修复点：
+        // 如果更新事件仅仅是元数据变更（例如 AI 自己刚刚更新了 _ai_last_scan，或者用户改了标题/标签），
+        // 且没有修改文件内容，则忽略此次事件，防止死循环。
+        // VFSCore 在 updateMetadata 时会发出 { metadataOnly: true }
+        if (event.payload.data?.metadataOnly) {
+            return;
+        }
+
         // [修改] 通过 Adapter 转发的事件，原始 VFSEvent 在 payload 中
         const nodeId = event.payload.nodeId;
 
