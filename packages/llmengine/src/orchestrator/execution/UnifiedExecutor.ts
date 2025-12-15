@@ -1,6 +1,9 @@
 // @file: llm-engine/orchestrator/execution/UnifiedExecutor.ts
 
 import {
+  generateUUID,
+} from '@itookit/common';
+import {
   IExecutor,
   ExecutorType,
   ExecutorConfig,
@@ -8,10 +11,9 @@ import {
   AtomicConfig,
   CompositeConfig,
   BaseExecutorConfig,
-  generateUUID,
   NodeStatus,
   ExecutionContext
-} from '@itookit/common';
+} from '@itookit/llmdriver';
 
 // [修改] 从 types 导入 StreamingContext
 import { StreamingContext } from '../../core/types';

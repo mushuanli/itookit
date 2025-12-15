@@ -1,7 +1,8 @@
 // @file: llm-engine/orchestrator/core/Converters.ts
 
 import { SessionGroup, ExecutionNode } from '../../core/types';
-import { ChatNode, generateUUID } from '@itookit/common';
+import { generateUUID } from '@itookit/common';
+import {ChatNode} from '@itookit/llmdriver';
 
 /**
  * 数据转换器

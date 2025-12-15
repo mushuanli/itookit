@@ -2,8 +2,8 @@ import {
     IExecutor, 
     ExecutorType, 
     ExecutionResult, 
-} from '@itookit/common';
-import { LLMDriver } from '../driver';
+} from '../base';
+import { LLMDriver } from '../core/driver';
 import { LLMConnection,ChatMessage, DriverExecutionContext } from '../types';
 import { safeStringify, validateMessageHistory } from '../utils/input';
 

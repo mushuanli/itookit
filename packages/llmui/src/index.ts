@@ -4,7 +4,8 @@ import './styles/index.css';
 
 import { LLMWorkspaceEditor, LLMEditorOptions } from './LLMWorkspaceEditor';
 import { VFSAgentService,initializeLLMModule } from '@itookit/llm-engine';
-import { EditorFactory, EditorOptions, ILLMSessionEngine } from '@itookit/common';
+import { EditorFactory, EditorOptions } from '@itookit/common';
+import {ILLMSessionEngine} from '@itookit/llmdriver';
 import { AgentConfigEditor } from './editors/AgentConfigEditor';
 
 export { ConnectionSettingsEditor } from './editors/ConnectionSettingsEditor';

@@ -7,20 +7,20 @@ import {
     VNodeType 
 } from '@itookit/vfs-core';
 import { 
-    ILLMSessionEngine, 
     EngineNode, 
     EngineSearchQuery, 
     EngineEvent, 
     EngineEventType, 
     generateUUID, 
+    FS_MODULE_CHAT
+} from '@itookit/common';
+import {ILLMSessionEngine,
     ChatContextItem,
     ChatManifest, 
     ChatNode, 
     IYamlParser,
-    FS_MODULE_CHAT
-} from '@itookit/common';
-
-import {LockManager} from '../core/utils/LockManager';
+} from '../base';
+import {LockManager} from '../utils/LockManager';
 
 // ✨ [修复 1.1] 引入真正的 YAML 库，或使用严格的 JSON 模式
 // 如果项目中有 js-yaml，使用它；否则明确只支持 JSON
@@ -43,7 +43,7 @@ const DEBUG = process.env.NODE_ENV === 'development';
 const log = (...args: any[]) => DEBUG && console.log(...args);
 
 export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEngine {
-    
+
     // ✨ [修复 1.2] 添加锁管理器
     private lockManager = new LockManager();
     

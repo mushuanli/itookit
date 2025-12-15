@@ -21,7 +21,7 @@
     "prepublishOnly": "pnpm build",
     "test": "vitest run",
     "test:watch": "vitest",
-    "verify": "tsx scripts/verify.ts" 
+    "verify": "tsx scripts/verify.ts"
   },
   "keywords": [
     "itookit",
@@ -47,14 +47,18 @@
     "access": "public"
   },
   "dependencies": {
-    "@itookit/common": "workspace:*"
+    "@itookit/common": "workspace:*",
+    "@itookit/vfs-core": "workspace:*",
+    "@types/js-yaml": "^4.0.9",
+    "js-yaml": "^4.1.1"
   },
   "devDependencies": {
+    "@types/node": "^20.19.25",
+    "dotenv": "^16.0.0",
     "tsup": "^8.5.1",
+    "tsx": "^4.0.0",
     "typescript": "^5.9.3",
-    "vitest": "^1.6.1",
-    "tsx": "^4.0.0", 
-    "dotenv": "^16.0.0"
+    "vitest": "^1.6.1"
   },
   "engines": {
     "node": ">=18.0.0"

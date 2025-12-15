@@ -1,7 +1,7 @@
 // @file: llmdriver/chain.ts
 
 import { LLMDriver } from './driver';
-import { ChatCompletionParams, ChatCompletionResponse } from './types';
+import { ChatCompletionParams, ChatCompletionResponse } from '../types';
 
 interface ChainStep {
     promptTemplate: string;

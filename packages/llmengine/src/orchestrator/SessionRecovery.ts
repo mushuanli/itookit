@@ -1,6 +1,6 @@
 // @file llm-engine/orchestrator/SessionRecovery.ts
 
-import { SessionRuntime, SessionStatus } from '../core/session';
+import {  SessionStatus } from '../core/session';
 import { SessionRegistry } from './SessionRegistry';
 
 /**

@@ -1,6 +1,6 @@
 // @file: llm-engine/core/types.ts
 
-import { ExecutionContext, NodeStatus, ChatNode } from '@itookit/common';
+import { ExecutionContext, NodeStatus, ChatNode } from '@itookit/llmdriver';
 export * from './errors';
 
 /**

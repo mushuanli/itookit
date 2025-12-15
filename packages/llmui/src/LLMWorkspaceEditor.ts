@@ -2,11 +2,12 @@
 
 import { 
     IEditor, EditorOptions, EditorEvent, EditorEventCallback, 
-    ILLMSessionEngine, escapeHTML
+    escapeHTML
 } from '@itookit/common';
 import { HistoryView } from './components/HistoryView';
 import { ChatInput } from './components/ChatInput';
-import { SessionManager,getSessionRegistry, SessionRegistry,IAgentService, } from '@itookit/llm-engine';
+import {ILLMSessionEngine,IAgentService} from '@itookit/llmdriver';
+import { SessionManager,getSessionRegistry, SessionRegistry, } from '@itookit/llm-engine';
 import { NodeAction, OrchestratorEvent,SessionRegistryEvent } from './core/types';
 export interface LLMEditorOptions extends EditorOptions {
     sessionEngine: ILLMSessionEngine;

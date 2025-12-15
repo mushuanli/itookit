@@ -1,7 +1,7 @@
 // @file: llm-engine/orchestrator/SessionManager.ts
 
 import { SessionGroup, OrchestratorEvent } from '../core/types';
-import { IExecutor } from '@itookit/common';
+import { IExecutor } from '@itookit/llmdriver';
 import { SessionRegistry, getSessionRegistry } from './SessionRegistry';
 import { DeleteOptions } from './features/MessageOperations';
 import { EngineError } from '../core/errors';

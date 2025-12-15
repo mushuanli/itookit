@@ -14,8 +14,7 @@ import { PersistenceManager } from './data/PersistenceManager';
 import { ExecutorResolver } from './execution/ExecutorResolver';
 import { TreeOperations } from './data/TreeOperations';
 import { QueryRunner } from './execution/QueryRunner';
-import { IAgentService } from '../services/IAgentService';
-import { ILLMSessionEngine } from '@itookit/common';
+import { IAgentService,ILLMSessionEngine } from '@itookit/llmdriver';
 import { Converters } from './core/Converters';
 import { VFSCore, VFSEventType } from '@itookit/vfs-core';
 

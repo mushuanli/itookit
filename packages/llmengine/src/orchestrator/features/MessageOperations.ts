@@ -4,7 +4,6 @@ import { SessionGroup } from '../../core/types';
 import { SessionState } from '../core/SessionState';
 import { SessionEventEmitter } from '../core/EventEmitter';
 import { PersistenceManager } from '../data/PersistenceManager';
-import { Converters } from '../core/Converters';
 
 export interface DeleteOptions {
     mode: 'soft' | 'hard';

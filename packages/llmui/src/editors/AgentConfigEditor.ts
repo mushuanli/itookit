@@ -2,12 +2,11 @@
 
 import { 
     IEditor, EditorOptions, EditorEvent, EditorEventCallback, 
-    IAgentDefinition, generateUUID,
+    generateUUID,
     Heading,              // [修复] 添加导入
     UnifiedSearchResult   // [修复] 添加导入
 } from '@itookit/common';
-import {LLMModel} from '@itookit/llmdriver';
-import { IAgentService } from '@itookit/llm-engine';
+import {LLMModel,IAgentDefinition,IAgentService} from '@itookit/llmdriver';
 
 /**
  * Agent 配置编辑器

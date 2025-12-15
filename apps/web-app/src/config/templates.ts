@@ -2,7 +2,7 @@
  * @file apps/web-app/src/config/templates.ts
  * @description 存储所有文件类型的默认模版内容
  */
-import { DEFAULT_AGENT_CONTENT } from '@itookit/llm-engine';
+import { DEFAULT_AGENT_CONTENT } from '@itookit/llmdriver';
 
 export const TPL_AGENT = JSON.stringify(DEFAULT_AGENT_CONTENT, null, 2);
 

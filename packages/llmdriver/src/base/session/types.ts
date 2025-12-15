@@ -1,4 +1,4 @@
-// @file common/interfaces/llm/session/types.ts
+// @file llmdriver/base/session/types.ts
 
 /**
  * 对应 {uuid}.chat 清单文件

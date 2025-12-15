@@ -5,8 +5,7 @@ import {
     ExecutorType, 
     ExecutionContext, 
     ExecutionResult, 
-} from '@itookit/common';
-import { LLMDriver, ChatMessage,LLMConnection,
+    LLMDriver, ChatMessage,LLMConnection,
     safeStringify } from '@itookit/llmdriver';
 
 // 导入本地定义的上下文接口，确保 TS 类型检查通过

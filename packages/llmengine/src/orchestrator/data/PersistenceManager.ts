@@ -1,6 +1,6 @@
 // @file llm-engine/orchestrator/PersistenceManager.ts
 
-import { ILLMSessionEngine, ChatNode } from '@itookit/common';
+import { ILLMSessionEngine, ChatNode } from '@itookit/llmdriver';
 
 /**
  * 持久化队列
