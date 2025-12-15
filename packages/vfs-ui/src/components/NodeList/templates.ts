@@ -44,7 +44,7 @@ export function createFooterHTML(options: { selectionStatus: 'none' | 'partial' 
                     <button data-action="deselect-all" class="vfs-node-list__bulk-bar-btn--text" title="全部取消">取消</button>
                 </div>
                 <div class="vfs-node-list__bulk-bar-actions">
-                    <button class="vfs-node-list__bulk-bar-btn" data-action="bulk-move" title="移动..."><i class="fas fa-folder-open"></i></button>
+                    <button class="vfs-node-list__bulk-bar-btn" data-action="bulk-move" title="移动..."><i class="fas fa-share-square"></i></button>
                     <button class="vfs-node-list__bulk-bar-btn vfs-node-list__bulk-bar-btn--danger" data-action="bulk-delete" title="删除"><i class="fas fa-trash"></i></button>
                 </div>
             </div>`;

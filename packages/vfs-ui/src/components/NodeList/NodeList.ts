@@ -597,7 +597,7 @@ export class NodeList extends BaseComponent<NodeListState> {
         items.push(
             { id: 'rename', label: '重命名', iconHTML: '<i class="fas fa-pencil-alt"></i>' },
             { id: 'edit-tags', label: '编辑标签...', iconHTML: '<i class="fas fa-tags"></i>' },
-            { id: 'moveTo', label: '移动到...', iconHTML: '<i class="fas fa-folder-open"></i>' },
+            { id: 'moveTo', label: '移动到...', iconHTML: '<i class="fas fa-share-square"></i>' },
             { type: 'separator' },
             { id: 'delete', label: '删除', iconHTML: '<i class="fas fa-trash-alt"></i>' }
         );
@@ -607,7 +607,7 @@ export class NodeList extends BaseComponent<NodeListState> {
     private _getBulkContextMenuItems(count: number): MenuItem[] {
         return [
             { id: 'bulk-edit-tags', label: `编辑 ${count} 个项目的标签...`, iconHTML: '<i class="fas fa-tags"></i>' },
-            { id: 'bulk-move', label: `移动 ${count} 个项目...`, iconHTML: '<i class="fas fa-folder-open"></i>' },
+            { id: 'bulk-move', label: `移动 ${count} 个项目...`, iconHTML: '<i class="fas fa-share-square"></i>' },
             { type: 'separator' },
             { id: 'bulk-delete', label: `删除 ${count} 个项目`, iconHTML: '<i class="fas fa-trash-alt"></i>' }
         ];

@@ -85,16 +85,6 @@ export const WORKSPACES: WorkspaceConfig[] = [
         aiEnabled: true
     },
     {
-        elementId: 'private-workspace',
-        moduleName: 'private',
-        isProtected: true, 
-        type: 'standard',
-        title: 'Private Notes',
-        supportedFileTypes: ['prompt'],
-
-        aiEnabled: true
-    },
-    {
         elementId: 'project-workspace',
         moduleName: 'projects',
         type: 'standard',

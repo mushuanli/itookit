@@ -5,6 +5,7 @@ package.json
 vite.config.js
 vite.config.ts
 vitest.config.ts
+constants.ts
 test/
 tests/
 scripts/
@@ -21,7 +22,7 @@ toolbar.plugin.ts
 codeblock-controls.plugin.ts
 # mdx plugins/autocomplete
 #autocomplete.plugin.ts
-#mention.plugin.ts
+mention.plugin.ts
 #tag.plugin.ts
 # mdx plugins/function
 plugins/cloze/
@@ -53,3 +54,7 @@ vfs-ui/src/mappers/
 vfs-ui/src/types/
 vfs-ui/src/utils/
 vfs-ui/src/components/
+
+#llm:
+LLMSessionEngine.ts
+providers/
