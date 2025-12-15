@@ -1,14 +1,9 @@
 // @file llm-engine/orchestrator/ExecutorResolver.ts
 
-import { 
-    IExecutor, 
-    IAgentDefinition,
-    ExecutorConfig
-} from '@itookit/common';
-import { IAgentService } from '../../services/IAgentService';
-
 // ✨ [关键变更] 从 llmdriver 导入通用的 AgentExecutor
-import { LLMConnection, AgentExecutor } from '@itookit/llmdriver';
+import {     IExecutor, IAgentService,
+    IAgentDefinition,
+    ExecutorConfig,LLMConnection, AgentExecutor } from '@itookit/llmdriver';
 
 // ✨ [关键变更] 导入 UnifiedExecutor (本地编排逻辑)
 import { UnifiedExecutor } from './UnifiedExecutor';

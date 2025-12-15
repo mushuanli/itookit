@@ -1,4 +1,4 @@
-// @file: common/interfaces/llm/IExecutor.ts
+// @file: llmdriver/base/executor.ts
 // ==================== 核心统一类型定义 ====================
 
 /**

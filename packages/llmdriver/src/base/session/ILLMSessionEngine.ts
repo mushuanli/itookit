@@ -1,6 +1,6 @@
-// @file common/interfaces/llm/session/ILLMSessionEngine.ts
+// @file llmdriver/base/session/ILLMSessionEngine.ts
 
-import { ISessionEngine } from '../../ISessionEngine';
+import { ISessionEngine } from '@itookit/common';
 import { ChatManifest, ChatNode } from './types';
 
 export interface ChatContextItem {

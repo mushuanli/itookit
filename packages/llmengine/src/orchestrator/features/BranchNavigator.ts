@@ -1,7 +1,6 @@
 // @file llm-engine/orchestrator/BranchNavigator.ts
 
 import { SessionGroup } from '../../core/types';
-import { ChatNode } from '@itookit/common';
 import { SessionState } from '../core/SessionState';
 import { SessionEventEmitter } from '../core/EventEmitter';
 import { PersistenceManager } from '../data/PersistenceManager';

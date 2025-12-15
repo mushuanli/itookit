@@ -57,9 +57,7 @@
   },
   "dependencies": {
     "@itookit/common": "workspace:*",
-    "@itookit/llmdriver": "workspace:*",
-    "@itookit/vfs-core": "workspace:*",
-    "js-yaml": "^4.1.1"
+    "@itookit/llmdriver": "workspace:*"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",

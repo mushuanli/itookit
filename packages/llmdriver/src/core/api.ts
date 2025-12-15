@@ -1,7 +1,7 @@
 // @file: llmdriver/api.ts
 import { LLMDriver } from './driver';
-import { LLM_PROVIDER_DEFAULTS } from './constants';
-import { LLMError } from './errors';
+import { LLM_PROVIDER_DEFAULTS } from '../constants';
+import { LLMError } from '../errors';
 
 export async function testLLMConnection(config: {
     provider: string;

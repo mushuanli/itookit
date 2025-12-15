@@ -5,7 +5,7 @@ import type {
     LLMConnection as CommonLLMConnection,
     AgentStorageConfig, // ✨ 从 common 导入
     MCPServer
-} from '@itookit/common';
+} from '@itookit/llmdriver';
 
 // 重新导出 LLMConnection，保持向后兼容
 export type LLMConnection = CommonLLMConnection;
