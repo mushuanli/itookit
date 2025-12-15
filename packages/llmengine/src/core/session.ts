@@ -1,6 +1,6 @@
 // @file llm-engine/core/types/session.ts
 
-import { NodeStatus } from '@itookit/common';
+import { NodeStatus } from '@itookit/llmdriver';
 
 /**
  * 会话运行状态

@@ -1,10 +1,10 @@
 /**
- * @file common/interfaces/llm/IAgent.ts
+ * @file llmdriver/base/agent.ts
  * @description 定义 Agent 的持久化存储结构（即 .agent 文件的内容标准）。
  * 这充当了存储层(App)和执行层(LLM-UI)之间的共享数据契约。
  */
 
-import { LLMAgentConfig } from './ILLM';
+import { LLMAgentConfig } from './config';
 
 /**
  * Agent 的类型定义

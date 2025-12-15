@@ -1,7 +1,7 @@
 // @file llm-engine/orchestrator/TreeOperations.ts
 
 import { ExecutionNode } from '../../core/types';
-import { NodeStatus } from '@itookit/common';
+import { NodeStatus } from '@itookit/llmdriver';
 import { SessionState } from '../core/SessionState';
 
 /**

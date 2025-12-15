@@ -1,10 +1,10 @@
 // @file: llmdriver/driver.ts
 
-import { LLMClientConfig, LLMProviderConfig, ChatCompletionParams, ChatCompletionResponse, ChatCompletionChunk } from './types';
-import { BaseProvider } from './providers/base';
-import { createProvider } from './providers/registry';
-import { LLMError } from './errors';
-import { DEFAULT_MAX_RETRIES, DEFAULT_RETRY_DELAY, DEFAULT_TIMEOUT } from './constants';
+import { LLMClientConfig, LLMProviderConfig, ChatCompletionParams, ChatCompletionResponse, ChatCompletionChunk } from '../types';
+import { BaseProvider } from '../providers/base';
+import { createProvider } from '../providers/registry';
+import { LLMError } from '../errors';
+import { DEFAULT_MAX_RETRIES, DEFAULT_RETRY_DELAY, DEFAULT_TIMEOUT } from '../constants';
 
 export class LLMDriver {
     private provider: BaseProvider;

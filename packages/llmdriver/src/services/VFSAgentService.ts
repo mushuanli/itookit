@@ -2,18 +2,18 @@
 
 import { BaseModuleService, VFSCore, VFSEvent, VFSEventType } from '@itookit/vfs-core';
 import { IAgentService } from './IAgentService';
-import { LLM_DEFAULT_AGENTS, AGENT_DEFAULT_DIR, LLM_AGENT_TARGET_DIR } from '../constants';
+import { LLM_DEFAULT_AGENTS, AGENT_DEFAULT_DIR, } from '../constants';
 
 import { 
-    IAgentDefinition, 
-    MCPServer,
     FS_MODULE_AGENTS, 
 } from '@itookit/common';
 import {
-    LLMConnection, 
     LLM_PROVIDER_DEFAULTS,
     LLM_DEFAULT_ID 
-} from '@itookit/llmdriver';
+} from '../constants';
+import {LLMConnection} from '../types';
+import {    IAgentDefinition, 
+    MCPServer,} from '../base';
 
 // 内部常量
 const LLM_DEFAULT_CONFIG_VERSION = 9;

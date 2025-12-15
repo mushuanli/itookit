@@ -1,22 +1,18 @@
 // @file llm-engine/index.ts
 
 // 导出核心类型
-import { EditorFactory, EditorOptions, ILLMSessionEngine } from '@itookit/common';
 import { VFSCore } from '@itookit/vfs-core';
 
 // 导出引擎与服务
-import { LLMSessionEngine } from './engine/LLMSessionEngine';
-import { VFSAgentService } from './services/VFSAgentService';
+import { LLMSessionEngine,ILLMSessionEngine,VFSAgentService} from '@itookit/llmdriver';
 
 // 导出编排器与管理器 (UI 主要与 SessionManager 交互)
 import { SessionRegistry, getSessionRegistry } from './orchestrator/SessionRegistry';
 
 export * from './core/types';
 export * from './core/session';
-export type {IAgentService} from './services/IAgentService';
+export type {} from './services/IAgentService';
 export { SessionManager } from './orchestrator/SessionManager';
-
-export { DEFAULT_AGENT_CONTENT } from './constants';
 
 
 /**

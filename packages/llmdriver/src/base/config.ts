@@ -1,5 +1,5 @@
 /**
- * @file common/interfaces/llm/ILLM.ts
+ * @file llmdriver/base/config.ts
  * @description 仅保留应用层特有的配置定义。底层连接定义已移至 llmdriver。
  */
 
