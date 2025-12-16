@@ -356,6 +356,28 @@ export class NodeList extends BaseComponent<NodeListState> {
 
         const itemEl = target.closest<HTMLElement>('[data-item-id]');
         if (!itemEl) {
+        // 1. 防御性检查：如果是只读模式，不做任何改变
+        if (this.state.readOnly) return;
+
+        // 2. 防御性检查：如果点击的是输入框（例如正在重命名或新建文件时的输入框），不要清除选中
+        // 输入框的点击通常是为了聚焦，不应破坏选中状态
+        if (target.closest('input') || target.closest('.vfs-node-list__item-creator')) {
+            return;
+        }
+
+        // 3. 核心逻辑：如果有选中的项目，则清除选中
+        if (this.state.selectedItemIds.size > 0) {
+            console.log('[NodeList] Clicked empty space, clearing selection.');
+            this.store.dispatch({ type: 'ITEM_SELECTION_CLEAR' });
+            
+            // 可选：如果之前有处于“确认删除”状态的项目，也应该重置
+            if (this.confirmDeleteId) {
+                this.confirmDeleteId = null;
+                this.render(); // 需要重绘以移除删除确认样式
+            }
+        }
+        
+        // 记得 return，因为没有 itemEl，后续逻辑无法执行
             console.log('[NodeList] No item container [data-item-id] found. Aborting.');
             return;
         }
