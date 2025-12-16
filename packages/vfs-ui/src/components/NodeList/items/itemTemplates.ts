@@ -43,12 +43,26 @@ function highlightText(text: string | undefined, queries: string[]): string {
 
 export function createFileItemHTML(
     file: VFSNodeUI, isActive: boolean, isSelected: boolean, uiSettings: UISettings,
-    isOutlineExpanded: boolean, isSelectionMode: boolean, searchQueries: string[] = [], isReadOnly: boolean = false
+    isOutlineExpanded: boolean, isSelectionMode: boolean, searchQueries: string[] = [], isReadOnly: boolean = false,
+    isConfirmingDelete: boolean = false 
 ): string {
     const { id, metadata, content, headings = [], icon } = file;
     const { title, lastModified, tags = [], custom = {} } = metadata;
     const summary = content?.summary || '';
     const { isPinned = false, hasUnreadUpdate = false, taskCount } = custom;
+
+    // ✨ [新增] 删除按钮逻辑
+    let deleteBtnHTML = '';
+    if (!isReadOnly) {
+        // 如果正在确认，显示垃圾桶图标和 delete-confirm 动作
+        // 否则，显示 × 和 delete-start 动作
+        const action = isConfirmingDelete ? 'delete-direct' : 'delete-init';
+        const iconHtml = isConfirmingDelete ? '<i class="fas fa-trash"></i>' : '×';
+        const className = isConfirmingDelete ? 'vfs-node-item__delete-btn is-confirming' : 'vfs-node-item__delete-btn';
+        const titleText = isConfirmingDelete ? '点击立即删除' : '移除';
+        
+        deleteBtnHTML = `<button class="${className}" data-action="${action}" title="${titleText}">${iconHtml}</button>`;
+    }
 
     const checkboxHTML = !isReadOnly && isSelectionMode
         ? `<div class="vfs-node-item__checkbox-wrapper"><input type="checkbox" class="vfs-node-item__checkbox" data-item-id="${id}" ${isSelected ? 'checked' : ''} data-action="toggle-selection"></div>`
@@ -93,6 +107,7 @@ export function createFileItemHTML(
                         <span class="vfs-node-item__timestamp" title="${new Date(lastModified).toLocaleString()}">${formatRelativeTime(lastModified)}</span>
                         ${badgesHTML}
                     </div>
+                    ${deleteBtnHTML}
                     ${outlineToggleHTML}
                 </div>
             </div>

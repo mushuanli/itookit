@@ -187,3 +187,44 @@ a { color: inherit; text-decoration: none; }
 .vfs-tag-editor__btn:hover { background-color: var(--color-gray-50); }
 .vfs-tag-editor__btn--primary { background-color: var(--color-primary-default); color: var(--color-white); border-color: var(--color-primary-default); }
 .vfs-tag-editor__btn--primary:hover { background-color: var(--color-primary-hover); }
+
+/* --- Delete Button (Two-step) --- */
+.vfs-node-item__delete-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 4px;
+    margin-left: var(--spacing-2);
+    color: var(--color-gray-400);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0; /* 默认隐藏，hover显示 */
+    transition: all 0.2s ease;
+}
+
+/* 鼠标悬停在 Item 上时显示按钮 */
+.vfs-node-item:hover .vfs-node-item__delete-btn {
+    opacity: 1;
+}
+
+/* 按钮自身的 Hover */
+.vfs-node-item__delete-btn:hover {
+    background-color: var(--color-gray-200);
+    color: var(--color-gray-600);
+}
+
+/* 确认状态 (变为红色垃圾桶) */
+.vfs-node-item__delete-btn.is-confirming {
+    opacity: 1; /* 确认状态下常驻显示 */
+    background-color: #fee2e2;
+    color: #ef4444;
+    font-size: 12px; /* 图标稍微小一点 */
+}
+
+.vfs-node-item__delete-btn.is-confirming:hover {
+    background-color: #fecaca;
+    color: #dc2626;
+}

@@ -13,6 +13,7 @@ export interface FileItemProps {
     isSelectionMode: boolean;
     searchQueries: string[];
     uiSettings: UISettings;
+    isConfirmingDelete: boolean;
 }
 
 export class FileItem extends BaseNodeItem {
@@ -67,7 +68,8 @@ export class FileItem extends BaseNodeItem {
             this.currentProps.isOutlineExpanded,
             this.currentProps.isSelectionMode,
             this.currentProps.searchQueries,
-            this.isReadOnly
+            this.isReadOnly,
+            this.currentProps.isConfirmingDelete
         );
 
         const tempDiv = document.createElement('div');

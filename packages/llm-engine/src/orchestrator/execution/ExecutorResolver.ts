@@ -1,4 +1,4 @@
-// @file llm-engine/orchestrator/ExecutorResolver.ts
+// @file llm-engine/orchestrator/execution/ExecutorResolver.ts
 
 // ✨ [关键变更] 从 llmdriver 导入通用的 AgentExecutor
 import {     IExecutor, IAgentService,
