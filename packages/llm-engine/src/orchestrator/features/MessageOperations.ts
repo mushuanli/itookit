@@ -1,4 +1,4 @@
-// @file llm-engine/orchestrator/MessageOperations.ts
+// @file llm-engine/orchestrator/features/MessageOperations.ts
 
 import { SessionGroup } from '../../core/types';
 import { SessionState } from '../core/SessionState';
