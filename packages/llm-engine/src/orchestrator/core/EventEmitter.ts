@@ -1,4 +1,4 @@
-// @file llm-engine/orchestrator/EventEmitter.ts
+// @file llm-engine/orchestrator/core/EventEmitter.ts
 
 import { OrchestratorEvent } from '../../core/types';
 

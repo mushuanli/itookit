@@ -1,4 +1,4 @@
-// @file llm-engine/orchestrator/BranchNavigator.ts
+// @file llm-engine/orchestrator/features/BranchNavigator.ts
 
 import { SessionGroup } from '../../core/types';
 import { SessionState } from '../core/SessionState';

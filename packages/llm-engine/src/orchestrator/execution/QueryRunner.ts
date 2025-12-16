@@ -1,4 +1,4 @@
-// @file llm-engine/orchestrator/QueryRunner.ts
+// @file llm-engine/orchestrator/execution/QueryRunner.ts
 
 import { SessionGroup, ExecutionNode, StreamingContext } from '../../core/types';
 import { generateUUID } from '@itookit/common';
