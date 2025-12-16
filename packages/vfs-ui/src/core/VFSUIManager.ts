@@ -640,6 +640,10 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
                 if (confirm(`Are you sure you want to delete "${item?.metadata.title || 'this item'}"?`)) {
                     await this._vfsService.deleteItems([itemId]);
                 }
+	    } else if (action === 'delete-direct') {
+	        console.log(`[VFSUIManager] Direct delete requested for ${itemId}`);
+	        // 跳过 confirm，直接调用 service
+	        await this._vfsService.deleteItems([itemId]);
             } else if (action === 'rename') {
                 const currentDisplayTitle = item?.metadata.title || '';
                 const newDisplayTitle = prompt('Enter new name:', currentDisplayTitle);

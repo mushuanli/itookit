@@ -62,6 +62,12 @@ export class Database {
           const transaction = (event.target as IDBOpenDBRequest).transaction;
           if (transaction && db.objectStoreNames.contains(VFS_STORES.VNODES)) {
               const vnodeStore = transaction.objectStore(VFS_STORES.VNODES);
+      // [修复开始]：显式检查并补充缺失的 path 索引
+      if (!vnodeStore.indexNames.contains('path')) {
+          console.log('Repairing missing path index...');
+          // 注意：path 必须是唯一的
+          vnodeStore.createIndex('path', 'path', { unique: true });
+      }
               if (!vnodeStore.indexNames.contains('name')) {
                   vnodeStore.createIndex('name', 'name', { unique: false });
               }

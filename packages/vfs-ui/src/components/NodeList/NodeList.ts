@@ -63,6 +63,9 @@ export class NodeList extends BaseComponent<NodeListState> {
     // 缓存当前的 Label 以检测变化
     private currentCreateFileLabel: string = 'File';
 
+    // ✨ [新增] 记录当前正在等待确认删除的项目 ID
+    private confirmDeleteId: string | null = null;
+
     constructor(options: NodeListOptions) {
         super(options);
         this.options = options;
@@ -363,6 +366,37 @@ export class NodeList extends BaseComponent<NodeListState> {
         const action = actionEl?.dataset.action;
         console.log(`[NodeList] Item clicked: ID=${itemId}, Action=${action || 'none'}`);
 
+        // ✨ [逻辑 A] 如果点击的不是删除相关的按钮，且当前有确认状态，先取消确认
+        if (this.confirmDeleteId && action !== 'delete-init' && action !== 'delete-direct') {
+            this.confirmDeleteId = null;
+            this.render(); // 重新渲染以恢复图标状态
+            // 注意：这里不 return，继续执行后续逻辑（如选中、打开等）
+        }
+
+        // ✨ [逻辑 B] 点击了 X 按钮 -> 进入确认状态
+        if (action === 'delete-init') {
+            event.stopPropagation(); // 阻止选中/打开
+            this.confirmDeleteId = itemId;
+            this.render(); // 重新渲染该 Item (BaseNodeItem 会处理局部更新)
+            return;
+        }
+
+        // ✨ [逻辑 C] 点击了 垃圾桶 按钮 -> 执行删除
+        if (action === 'delete-direct') {
+            event.stopPropagation();
+            this.confirmDeleteId = null; // 清除状态
+            
+            // 发送特定事件：delete-direct (暗示无需弹窗)
+            this.coordinator.publish('ITEM_ACTION_REQUESTED', { action: 'delete-direct', itemId });
+            return;
+        }
+        // 如果点击了该项目的其他区域，且当前该项目处于确认状态，是否取消确认？
+        // 通常用户体验是：点击别处取消。点击自己(非删除按钮)也取消比较合理。
+        if (this.confirmDeleteId === itemId && action !== 'delete-confirm' && action !== 'delete-start') {
+             this.confirmDeleteId = null;
+             this.render();
+        }
+
         // 特定子元素动作的优先处理
         if (action === 'toggle-folder') {
             console.log(`[NodeList] Publishing FOLDER_TOGGLE_REQUESTED for ${itemId}`);
@@ -648,6 +682,12 @@ export class NodeList extends BaseComponent<NodeListState> {
         if (this.settingsPopoverEl && !target.closest('.vfs-settings-popover, [data-action="settings"]')) this._hideSettingsPopover();
         if (this.contextMenuEl && !target.closest('.vfs-context-menu')) this._hideContextMenu();
         if (this.tagEditorPopover && !target.closest('.vfs-tag-editor--popover')) this._hideTagEditor();
+
+        if (this.confirmDeleteId && !target.closest(`[data-item-id="${this.confirmDeleteId}"]`)) {
+            this.confirmDeleteId = null;
+            this.render();
+        }
+
     }
 
     private _showAdvancedTagEditor(options: { initialTags: string[], onSave: (tags: string[]) => void, onCancel: () => void, position: { x: number, y: number } }): void {
@@ -955,6 +995,7 @@ export class NodeList extends BaseComponent<NodeListState> {
             
             searchQueries: this.state.textSearchQueries,
             uiSettings: this.state.uiSettings,
+            isConfirmingDelete: this.confirmDeleteId === item.id
         };
     }
 
