@@ -7,7 +7,7 @@ import {
 import { HistoryView } from './components/HistoryView';
 import { ChatInput } from './components/ChatInput';
 import {ILLMSessionEngine,IAgentService} from '@itookit/llmdriver';
-import { SessionManager,getSessionRegistry, SessionRegistry, } from '@itookit/llm-engine';
+import { SessionManager,getSessionRegistry, SessionRegistry,SessionGroup } from '@itookit/llm-engine';
 import { NodeAction, OrchestratorEvent,SessionRegistryEvent } from './core/types';
 export interface LLMEditorOptions extends EditorOptions {
     sessionEngine: ILLMSessionEngine;
@@ -421,12 +421,64 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     private async handleDelete(nodeId: string): Promise<void> {
-        await this.sessionManager.deleteMessage(nodeId, {
-            mode: 'soft',
-            cascade: false,
-            deleteAssociatedResponses: true
-        });
-        this.emit('change');
+        console.log(`[LLMWorkspaceEditor] Deleting: ${nodeId}`);
+        
+        try {
+            // 1. 获取要删除的所有 ID（包括关联响应）
+            const sessions = this.sessionManager.getSessions();
+            const idsToDelete = this.collectDeletionIds(nodeId, sessions);
+            
+            console.log(`[LLMWorkspaceEditor] IDs to delete:`, idsToDelete);
+            
+            // 2. 立即从 UI 移除（乐观更新）
+            this.historyView.removeMessages(idsToDelete, true);
+            
+            // 3. 调用后端删除
+            await this.sessionManager.deleteMessage(nodeId, {
+                mode: 'soft',
+                cascade: false,
+                deleteAssociatedResponses: true
+            });
+            
+            // 4. 通知外部保存
+            this.emit('change');
+            
+        } catch (e: any) {
+            console.error('[LLMWorkspaceEditor] Delete failed:', e);
+            
+            // 5. 删除失败，回滚 UI
+            const sessions = this.sessionManager.getSessions();
+            this.historyView.renderFull(sessions);
+            
+            this.historyView.renderError(e);
+        }
+    }
+
+    /**
+     * ✅ 新增：收集需要删除的所有 ID（用户消息 + 关联的响应）
+     */
+    private collectDeletionIds(nodeId: string, sessions: SessionGroup[]): string[] {
+        const ids: string[] = [nodeId];
+        
+        // 找到目标 session
+        const targetIndex = sessions.findIndex(s => s.id === nodeId);
+        if (targetIndex === -1) return ids;
+        
+        const target = sessions[targetIndex];
+        
+        // 如果是用户消息，收集后续的 assistant 响应
+        if (target.role === 'user') {
+            for (let i = targetIndex + 1; i < sessions.length; i++) {
+                const s = sessions[i];
+                if (s.role === 'assistant') {
+                    ids.push(s.id);
+                } else {
+                    break; // 遇到下一个用户消息就停止
+                }
+            }
+        }
+        
+        return ids;
     }
 
     private async handleEditAndRetry(nodeId: string): Promise<void> {
