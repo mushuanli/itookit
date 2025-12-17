@@ -12,13 +12,20 @@ import { escapeHTML, Modal } from '@itookit/common';
  */
 async function showConfirmDialog(message: string): Promise<boolean> {
     return new Promise((resolve) => {
-        new Modal('Confirmation', `<p>${escapeHTML(message)}</p>`, {
+        const modal = new Modal('Confirmation', `<p>${escapeHTML(message)}</p>`, {
             type: 'danger',
             confirmText: 'Delete',
             cancelText: 'Cancel',
-            onConfirm: () => resolve(true),
-            onCancel: () => resolve(false)
-        }).show();
+            onConfirm: () => {
+                resolve(true);
+                return true; // 关闭 Modal
+            },
+            onCancel: () => {
+                resolve(false);
+                return true; // 关闭 Modal
+            }
+        });
+        modal.show();
     });
 }
 
@@ -507,16 +514,24 @@ export class HistoryView {
             const controller = new MDxController(mountPoints.output, node.data.output || '', {
                 readOnly: true,
                 onChange: (text) => {
+                if (controller.isEditing()) {
                     this.onContentChange?.(effectiveId, text, 'node');
+                }
                     const previewEl = element.querySelector('.llm-ui-header-preview');
                     if (previewEl) previewEl.textContent = this.getPreviewText(text);
                 }
             });
             this.editorMap.set(node.id, controller);
 
-            editBtn?.addEventListener('click', () => {
-                controller.toggleEdit();
-                editBtn.classList.toggle('active');
+            editBtn?.addEventListener('click', async () => {
+            const wasEditing = controller.isEditing();
+            await controller.toggleEdit();
+            editBtn.classList.toggle('active');
+            
+            // 退出编辑模式时保存
+            if (wasEditing) {
+                this.onContentChange?.(effectiveId, controller.content, 'node');
+            }
             });
 
             copyBtn?.addEventListener('click', async () => {
