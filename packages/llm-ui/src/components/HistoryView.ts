@@ -12,19 +12,28 @@ import { escapeHTML, Modal } from '@itookit/common';
  */
 async function showConfirmDialog(message: string): Promise<boolean> {
     return new Promise((resolve) => {
+        let resolved = false;
+        
         const modal = new Modal('Confirmation', `<p>${escapeHTML(message)}</p>`, {
             type: 'danger',
             confirmText: 'Delete',
             cancelText: 'Cancel',
             onConfirm: () => {
-                resolve(true);
-                return true; // 关闭 Modal
+                if (!resolved) {
+                    resolved = true;
+                    resolve(true);
+                }
+                return true; // 返回 true 关闭 Modal
             },
             onCancel: () => {
-                resolve(false);
-                return true; // 关闭 Modal
+                if (!resolved) {
+                    resolved = true;
+                    resolve(false);
+                }
+                return true;
             }
         });
+        
         modal.show();
     });
 }
@@ -601,33 +610,70 @@ export class HistoryView {
     }
 
     // ✨ [新增] 处理消息删除
-    private handleMessagesDeleted(deletedIds: string[]) {
-        for (const id of deletedIds) {
-            // 从 DOM 中移除
-            const sessionEl = this.container.querySelector(`[data-session-id="${id}"]`);
+
+    /**
+     * ✅ 新增：公开方法，允许外部直接删除消息
+     * @param ids 要删除的消息 ID 数组
+     * @param animated 是否使用动画
+     */
+    public removeMessages(ids: string[], animated: boolean = true): void {
+        for (const id of ids) {
+            // 1. 处理 Session 元素
+            const sessionEl = this.container.querySelector(`[data-session-id="${id}"]`) as HTMLElement;
             if (sessionEl) {
-                sessionEl.classList.add('llm-ui-session--deleting');
-                setTimeout(() => sessionEl.remove(), 300);
+                this.removeElement(sessionEl, animated);
             }
 
-            // 清理编辑器
+            // 2. 处理 Node 元素
+            const nodeEl = this.nodeMap.get(id);
+            if (nodeEl) {
+                this.removeElement(nodeEl, animated);
+                this.nodeMap.delete(id);
+            }
+
+            // 3. 清理编辑器
             const editor = this.editorMap.get(id);
             if (editor) {
                 editor.destroy();
                 this.editorMap.delete(id);
             }
 
-            // 清理节点映射
-            this.nodeMap.delete(id);
+            // 4. 清理状态
             this.originalContentMap.delete(id);
             this.editingNodes.delete(id);
         }
 
-        // 检查是否需要显示欢迎界面
-        const remainingSessions = this.container.querySelectorAll('.llm-ui-session');
-        if (remainingSessions.length === 0) {
+        // 5. 延迟检查是否需要显示欢迎界面
+        const delay = animated ? 350 : 0;
+        setTimeout(() => this.checkEmpty(), delay);
+    }
+
+    /**
+     * 移除单个元素
+     */
+    private removeElement(el: HTMLElement, animated: boolean): void {
+        if (animated) {
+            el.classList.add('llm-ui-session--deleting');
+            setTimeout(() => el.remove(), 300);
+        } else {
+            el.remove();
+        }
+    }
+
+    /**
+     * 检查是否为空并显示欢迎界面
+     */
+    private checkEmpty(): void {
+        const remaining = this.container.querySelectorAll(
+            '.llm-ui-session:not(.llm-ui-session--deleting)'
+        );
+        if (remaining.length === 0) {
             this.renderWelcome();
         }
+    }
+
+    private handleMessagesDeleted(deletedIds: string[]) {
+        this.removeMessages(deletedIds, true);
     }
 
     // ✨ [新增] 处理消息编辑
