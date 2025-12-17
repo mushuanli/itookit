@@ -7,7 +7,7 @@ import {
 import { HistoryView } from './components/HistoryView';
 import { ChatInput } from './components/ChatInput';
 import {ILLMSessionEngine,IAgentService} from '@itookit/llmdriver';
-import { SessionManager,getSessionRegistry, SessionRegistry,SessionGroup } from '@itookit/llm-engine';
+import { SessionManager,getSessionRegistry, SessionRegistry,SessionGroup,ExecutionNode } from '@itookit/llm-engine';
 import { NodeAction, OrchestratorEvent,SessionRegistryEvent } from './core/types';
 export interface LLMEditorOptions extends EditorOptions {
     sessionEngine: ILLMSessionEngine;
@@ -472,6 +472,10 @@ export class LLMWorkspaceEditor implements IEditor {
                 const s = sessions[i];
                 if (s.role === 'assistant') {
                     ids.push(s.id);
+                // 同时收集该 assistant 下的所有执行节点
+                if (s.executionRoot) {
+                    this.collectNodeIds(s.executionRoot, ids);
+                }
                 } else {
                     break; // 遇到下一个用户消息就停止
                 }
@@ -479,6 +483,18 @@ export class LLMWorkspaceEditor implements IEditor {
         }
         
         return ids;
+    }
+
+    /**
+     * ✅ 新增：递归收集执行节点 ID
+     */
+    private collectNodeIds(node: ExecutionNode, ids: string[]): void {
+        ids.push(node.id);
+        if (node.children) {
+            for (const child of node.children) {
+                this.collectNodeIds(child, ids);
+            }
+        }
     }
 
     private async handleEditAndRetry(nodeId: string): Promise<void> {

@@ -14,7 +14,7 @@ async function showConfirmDialog(message: string): Promise<boolean> {
     return new Promise((resolve) => {
         let resolved = false;
         
-        const modal = new Modal('Confirmation', `<p>${escapeHTML(message)}</p>`, {
+        new Modal('Confirmation', `<p>${escapeHTML(message)}</p>`, {
             type: 'danger',
             confirmText: 'Delete',
             cancelText: 'Cancel',
@@ -23,7 +23,7 @@ async function showConfirmDialog(message: string): Promise<boolean> {
                     resolved = true;
                     resolve(true);
                 }
-                return true; // 返回 true 关闭 Modal
+                return true;
             },
             onCancel: () => {
                 if (!resolved) {
@@ -32,9 +32,7 @@ async function showConfirmDialog(message: string): Promise<boolean> {
                 }
                 return true;
             }
-        });
-        
-        modal.show();
+        }).show();
     });
 }
 
@@ -47,6 +45,15 @@ export class HistoryView {
     private scrollThreshold = 150; // 增加阈值，容错率更高
     private scrollFrameId: number | null = null;
     private resizeObserver: ResizeObserver;
+    
+    // ✅ 新增：流式模式控制
+    private isStreamingMode = false;
+    private lastScrollHeight = 0;
+    private scrollLockUntil = 0;
+    
+    // ✅ 新增：预览更新节流
+    private previewUpdateTimers = new Map<string, number>();
+    private readonly PREVIEW_UPDATE_INTERVAL = 200;
 
     private onContentChange?: (id: string, content: string, type: 'user' | 'node') => void;
     private onNodeAction?: NodeActionCallback;
@@ -66,31 +73,19 @@ export class HistoryView {
         this.onContentChange = onContentChange;
         this.onNodeAction = onNodeAction;
 
-        this.container.addEventListener('scroll', () => {
-            const { scrollTop, scrollHeight, clientHeight } = this.container;
-            // 距离底部的距离
-            const distance = scrollHeight - scrollTop - clientHeight;
-            // 如果距离小于阈值，说明用户在底部，开启自动滚动
-            // 注意：这里使用 Math.abs 是防止某些缩放比例下的精度误差
-            this.shouldAutoScroll = Math.abs(distance) < this.scrollThreshold;
-        });
+        // ✅ 优化：使用 passive 监听器
+        this.container.addEventListener('scroll', this.handleScroll.bind(this), { passive: true });
 
         // 2. 监听内容高度变化 (处理图片加载、MDX渲染导致的高度突变)
         this.resizeObserver = new ResizeObserver(() => {
-            if (this.shouldAutoScroll) {
-                this.scrollToBottom(false);
-            }
+            if (this.scrollFrameId !== null) return;
+            
+            this.scrollFrameId = requestAnimationFrame(() => {
+                this.scrollFrameId = null;
+                this.handleResize();
+            });
         });
         this.resizeObserver.observe(this.container);
-    }
-
-    clear() {
-        this.container.innerHTML = '';
-        this.nodeMap.clear();
-        this.editorMap.forEach(editor => editor.destroy());
-        this.editorMap.clear();
-        this.originalContentMap.clear();
-        this.editingNodes.clear();
     }
 
     renderFull(sessions: SessionGroup[]) {
@@ -143,77 +138,106 @@ export class HistoryView {
         this.scrollToBottom(true);
     }
 
-    processEvent(event: OrchestratorEvent) {
-        const forceScroll = event.type === 'session_start' || event.type === 'node_start';
+    // ================================================================
+    // ✅ 滚动控制（核心优化）
+    // ================================================================
 
-        switch (event.type) {
-            case 'session_start':
-                // [修复] 新开始的会话始终展开 (isCollapsed = false)
-                this.appendSessionGroup(event.payload, false);
-                break;
-            case 'node_start':
-                // [修复] 新开始的节点始终展开 (isCollapsed = false)
-                this.appendNode(event.payload.parentId, event.payload.node, false);
-                break;
-            case 'node_update':
-                if (event.payload.chunk !== undefined && event.payload.field !== undefined) {
-                    this.updateNodeContent(event.payload.nodeId, event.payload.chunk, event.payload.field);
-                }
-                break;
-            case 'node_status':
-                this.updateNodeStatus(event.payload.nodeId, event.payload.status, event.payload.result);
-                break;
-            case 'finished':
-                this.editorMap.forEach(editor => editor.finishStream());
-                break;
-            case 'error':
-                this.renderError(new Error(event.payload.message));
-                break;
-            case 'messages_deleted':
-                this.handleMessagesDeleted(event.payload.deletedIds);
-                break;
-            case 'message_edited':
-                this.handleMessageEdited(event.payload.sessionId, event.payload.newContent);
-                break;
-            case 'session_cleared':
-                this.renderWelcome();
-                break;
-            case 'sibling_switch':
-                this.handleSiblingSwitch(event.payload);
-                break;
-            case 'retry_started':
-                console.log('[HistoryView] Retry started:', event.payload);
-                break;
-        }
+    /**
+     * 处理用户滚动
+     */
+    private handleScroll(): void {
+        // 流式输出期间，锁定自动滚动状态
+        if (this.isStreamingMode) return;
+        
+        // 滚动锁定期间不更新状态
+        if (Date.now() < this.scrollLockUntil) return;
+        
+        const { scrollTop, scrollHeight, clientHeight } = this.container;
+        const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+        
+        this.shouldAutoScroll = distanceFromBottom < this.scrollThreshold;
+    }
 
-        if (forceScroll) {
-            this.shouldAutoScroll = true; // 强制开启吸附
-            this.scrollToBottom(true);
+    /**
+     * 处理内容高度变化
+     */
+    private handleResize(): void {
+        if (!this.shouldAutoScroll && !this.isStreamingMode) return;
+        
+        const currentScrollHeight = this.container.scrollHeight;
+        
+        // 只有当高度增加时才滚动（避免内容收缩时的抖动）
+        if (currentScrollHeight > this.lastScrollHeight) {
+            this.lastScrollHeight = currentScrollHeight;
+            this.instantScrollToBottom();
         }
+    }
+
+    /**
+     * ✅ 新增：瞬时滚动到底部（无动画，用于流式输出）
+     */
+    private instantScrollToBottom(): void {
+        this.container.scrollTop = this.container.scrollHeight;
     }
 
     /**
      * ✨ [核心优化] 滚动到底部
      * @param force 是否强制滚动（忽略用户当前位置）
      */
-    scrollToBottom(force: boolean = false) {
+    scrollToBottom(force: boolean = false): void {
         if (!force && !this.shouldAutoScroll) return;
 
         // 如果已经有挂起的滚动任务，取消它（防抖）
-        if (this.scrollFrameId) {
+        if (this.scrollFrameId !== null) {
             cancelAnimationFrame(this.scrollFrameId);
         }
 
         this.scrollFrameId = requestAnimationFrame(() => {
             this.scrollFrameId = null;
+            this.container.scrollTop = this.container.scrollHeight;
+            this.lastScrollHeight = this.container.scrollHeight;
             
-            // 使用瞬时滚动以避免流式输出时的抖动 (behavior: 'auto')
-            // 如果是 force=true (如初始加载)，也不建议用 smooth，因为可能会很慢
-            this.container.scrollTo({
-                top: this.container.scrollHeight,
-                behavior: 'auto' 
-            });
+            // 滚动后短暂锁定状态检测
+            this.scrollLockUntil = Date.now() + 100;
         });
+    }
+
+    /**
+     * ✅ 新增：进入流式输出模式
+     */
+    public enterStreamingMode(): void {
+        if (this.isStreamingMode) return;
+        
+        this.isStreamingMode = true;
+        this.shouldAutoScroll = true;
+        this.lastScrollHeight = this.container.scrollHeight;
+        
+        // 添加 CSS 类优化渲染
+        this.container.classList.add('llm-ui-history--streaming');
+    }
+
+    /**
+     * ✅ 新增：退出流式输出模式
+     */
+    public exitStreamingMode(): void {
+        if (!this.isStreamingMode) return;
+        
+        this.isStreamingMode = false;
+        
+        // 移除 CSS 类
+        this.container.classList.remove('llm-ui-history--streaming');
+        
+        // 最终滚动确保到底部
+        this.scrollToBottom(true);
+        
+        // 清理所有流式状态类
+        this.container.querySelectorAll('.llm-ui-node--streaming').forEach(el => {
+            el.classList.remove('llm-ui-node--streaming');
+        });
+        
+        // 清理预览定时器
+        this.previewUpdateTimers.forEach(timer => clearTimeout(timer));
+        this.previewUpdateTimers.clear();
     }
 
     private appendSessionGroup(group: SessionGroup, isCollapsed: boolean) {
@@ -556,6 +580,11 @@ export class HistoryView {
         const el = this.nodeMap.get(nodeId);
         if (!el) return;
 
+        // ✅ 添加流式状态类（只在首次）
+        if (!el.classList.contains('llm-ui-node--streaming')) {
+            el.classList.add('llm-ui-node--streaming');
+        }
+
         if (field === 'thought') {
             const container = el.querySelector('.llm-ui-thought') as HTMLElement;
             const contentEl = el.querySelector('.llm-ui-thought__content') as HTMLElement;
@@ -564,24 +593,46 @@ export class HistoryView {
                 container.style.display = 'block';
             }
             if (contentEl) {
-                contentEl.innerHTML += escapeHTML(chunk).replace(/\n/g, '<br>');
+                // ✅ 使用 insertAdjacentText 更高效
+                contentEl.insertAdjacentText('beforeend', chunk);
                 if (container) container.scrollTop = container.scrollHeight;
             }
         } else if (field === 'output') {
             const editor = this.editorMap.get(nodeId);
             if (editor) {
                 editor.appendStream(chunk);
-                const previewEl = el.querySelector('.llm-ui-header-preview');
-                if (previewEl) {
-                    previewEl.textContent = this.getPreviewText(editor.content);
-                }
+                
+                // ✅ 使用节流更新预览
+                this.schedulePreviewUpdate(nodeId, el, editor);
             }
         }
+    }
+
+    /**
+     * ✅ 新增：节流更新预览文本
+     */
+    private schedulePreviewUpdate(nodeId: string, el: HTMLElement, editor: MDxController): void {
+        // 如果已有定时器，跳过
+        if (this.previewUpdateTimers.has(nodeId)) return;
+
+        const timerId = window.setTimeout(() => {
+            this.previewUpdateTimers.delete(nodeId);
+            
+            const previewEl = el.querySelector('.llm-ui-header-preview');
+            if (previewEl) {
+                previewEl.textContent = this.getPreviewText(editor.content);
+            }
+        }, this.PREVIEW_UPDATE_INTERVAL);
+
+        this.previewUpdateTimers.set(nodeId, timerId);
     }
 
     private updateNodeStatus(nodeId: string, status: string, result?: any) {
         const el = this.nodeMap.get(nodeId);
         if (el) {
+            // ✅ 移除流式状态类
+            el.classList.remove('llm-ui-node--streaming');
+            
             el.dataset.status = status;
             el.classList.remove('llm-ui-node--running', 'llm-ui-node--success', 'llm-ui-node--failed');
             el.classList.add(`llm-ui-node--${status}`);
@@ -599,6 +650,20 @@ export class HistoryView {
                     resEl.textContent = typeof result === 'string' ? result : JSON.stringify(result);
                 }
             }
+            
+            // ✅ 清理该节点的预览更新定时器
+            const timer = this.previewUpdateTimers.get(nodeId);
+            if (timer) {
+                clearTimeout(timer);
+                this.previewUpdateTimers.delete(nodeId);
+            }
+            
+            // ✅ 立即更新最终预览
+            const editor = this.editorMap.get(nodeId);
+            const previewEl = el.querySelector('.llm-ui-header-preview');
+            if (editor && previewEl) {
+                previewEl.textContent = this.getPreviewText(editor.content);
+            }
         }
 
         const editor = this.editorMap.get(nodeId);
@@ -608,6 +673,7 @@ export class HistoryView {
             editor.finishStream(false);
         }
     }
+
 
     // ✨ [新增] 处理消息删除
 
@@ -638,12 +704,19 @@ export class HistoryView {
                 this.editorMap.delete(id);
             }
 
-            // 4. 清理状态
+            // 4. 清理预览更新定时器
+            const timer = this.previewUpdateTimers.get(id);
+            if (timer) {
+                clearTimeout(timer);
+                this.previewUpdateTimers.delete(id);
+            }
+
+            // 5. 清理状态
             this.originalContentMap.delete(id);
             this.editingNodes.delete(id);
         }
 
-        // 5. 延迟检查是否需要显示欢迎界面
+        // 6. 延迟检查是否需要显示欢迎界面
         const delay = animated ? 350 : 0;
         setTimeout(() => this.checkEmpty(), delay);
     }
@@ -654,7 +727,11 @@ export class HistoryView {
     private removeElement(el: HTMLElement, animated: boolean): void {
         if (animated) {
             el.classList.add('llm-ui-session--deleting');
-            setTimeout(() => el.remove(), 300);
+            el.addEventListener('animationend', () => el.remove(), { once: true });
+            // 备用：如果动画没触发，300ms 后强制删除
+            setTimeout(() => {
+                if (el.parentNode) el.remove();
+            }, 350);
         } else {
             el.remove();
         }
@@ -717,9 +794,88 @@ export class HistoryView {
         return plain.length > 60 ? plain.substring(0, 60) + '...' : plain;
     }
 
+
+    processEvent(event: OrchestratorEvent) {
+        switch (event.type) {
+            case 'session_start':
+                this.enterStreamingMode();
+                this.appendSessionGroup(event.payload, false);
+                this.scrollToBottom(true);
+                break;
+            case 'node_start':
+                // [修复] 新开始的节点始终展开 (isCollapsed = false)
+                this.appendNode(event.payload.parentId, event.payload.node, false);
+                break;
+            case 'node_update':
+                if (event.payload.chunk !== undefined && event.payload.field !== undefined) {
+                    this.updateNodeContent(event.payload.nodeId, event.payload.chunk, event.payload.field);
+                }
+                break;
+            case 'node_status':
+                this.updateNodeStatus(event.payload.nodeId, event.payload.status, event.payload.result);
+                break;
+            case 'finished':
+                this.exitStreamingMode();
+                this.editorMap.forEach(editor => editor.finishStream());
+                break;
+            case 'error':
+                this.exitStreamingMode();
+                this.renderError(new Error(event.payload.message));
+                break;
+            case 'messages_deleted':
+                this.handleMessagesDeleted(event.payload.deletedIds);
+                break;
+            case 'message_edited':
+                this.handleMessageEdited(event.payload.sessionId, event.payload.newContent);
+                break;
+            case 'session_cleared':
+                this.renderWelcome();
+                break;
+            case 'sibling_switch':
+                this.handleSiblingSwitch(event.payload);
+                break;
+            case 'retry_started':
+                this.enterStreamingMode();
+                break;
+        }
+    }
+
+    clear() {
+        // 取消所有挂起的操作
+        if (this.scrollFrameId !== null) {
+            cancelAnimationFrame(this.scrollFrameId);
+            this.scrollFrameId = null;
+        }
+        
+        // 清理预览更新定时器
+        this.previewUpdateTimers.forEach(timer => clearTimeout(timer));
+        this.previewUpdateTimers.clear();
+        
+        // 清理编辑器
+        this.editorMap.forEach(editor => editor.destroy());
+        this.editorMap.clear();
+        
+        // 清理其他状态
+        this.nodeMap.clear();
+        this.originalContentMap.clear();
+        this.editingNodes.clear();
+        
+        // 重置滚动状态
+        this.isStreamingMode = false;
+        this.shouldAutoScroll = true;
+        this.lastScrollHeight = 0;
+        this.container.classList.remove('llm-ui-history--streaming');
+        
+        // 清空 DOM
+        this.container.innerHTML = '';
+    }
+
+
     // ✨ [新增] 销毁方法
     destroy() {
-        if (this.scrollFrameId) cancelAnimationFrame(this.scrollFrameId);
+        if (this.scrollFrameId !== null) {
+            cancelAnimationFrame(this.scrollFrameId);
+        }
         this.resizeObserver.disconnect();
         this.clear();
     }
