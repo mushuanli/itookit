@@ -18,9 +18,15 @@ export class MDxController {
     // ✨ [修复 6.1] 添加 reject 函数
     private readyReject!: (reason: any) => void;
 
-    private updateScheduled: boolean = false;
+    // ✅ 优化：增加节流间隔
+    private readonly RENDER_INTERVAL = 150;
     private lastRenderTime: number = 0;
-    private readonly RENDER_INTERVAL = 100;
+    private rafId: number | null = null;
+    private renderScheduled: boolean = false;
+    
+    // ✅ 新增：批量缓冲
+    private contentSnapshot: string = '';
+    private snapshotTime: number = 0;
 
     constructor(container: HTMLElement, initialContent: string, options?: { 
         readOnly?: boolean,
@@ -98,7 +104,10 @@ export class MDxController {
         }
     }
 
-    appendStream(delta: string) {
+    /**
+     * ✅ 优化：追加流式内容
+     */
+    appendStream(delta: string): void {
         this.isStreaming = true;
         this.currentContent += delta;
         
@@ -106,55 +115,84 @@ export class MDxController {
             this.pendingChunks.push(delta);
             return;
         }
-        this.scheduleUpdate();
+        
+        this.scheduleRender();
     }
 
-    private scheduleUpdate() {
-        if (this.updateScheduled) return;
-        this.updateScheduled = true;
+    /**
+     * ✅ 优化：智能渲染调度
+     */
+    private scheduleRender(): void {
+        if (this.renderScheduled) return;
+        this.renderScheduled = true;
 
-        requestAnimationFrame(() => {
+        // 取消之前的 RAF
+        if (this.rafId !== null) {
+            cancelAnimationFrame(this.rafId);
+        }
+
+        this.rafId = requestAnimationFrame(() => {
+            this.rafId = null;
+            
             const now = Date.now();
-            const timeSinceLastRender = now - this.lastRenderTime;
+            const elapsed = now - this.lastRenderTime;
 
-            if (timeSinceLastRender >= this.RENDER_INTERVAL) {
-                this.performRender();
+            if (elapsed >= this.RENDER_INTERVAL) {
+                this.doRender();
             } else {
-                const delay = this.RENDER_INTERVAL - timeSinceLastRender;
-                setTimeout(() => {
-                    this.performRender();
-                }, delay);
+                // 延迟到下一个间隔点
+                const delay = this.RENDER_INTERVAL - elapsed;
+                setTimeout(() => this.doRender(), delay);
             }
         });
     }
 
     /**
-     * ✨ [核心修复] 执行实际的渲染操作
-     * 改为 async 并等待 editor.setStreamingText 完成
+     * ✅ 优化：执行渲染
      */
-    private async performRender() {
-        if (!this.editor) return;
+    private async doRender(): Promise<void> {
+        this.renderScheduled = false;
+        
+        if (!this.editor || !this.isInitialized) return;
+        
+        // 检查内容是否有变化（避免无谓渲染）
+        if (this.currentContent === this.contentSnapshot) return;
 
         try {
+            // 提示浏览器优化渲染
+            this.container.style.contain = 'content';
+            
             await this.editor.setStreamingText(this.currentContent);
+            
+            this.contentSnapshot = this.currentContent;
+            this.lastRenderTime = Date.now();
+            
         } catch (e) {
-            console.error('[MDxController] performRender failed:', e);
+            console.error('[MDxController] Render failed:', e);
+        } finally {
+            // 恢复默认
+            this.container.style.contain = '';
         }
-
-        this.lastRenderTime = Date.now();
-        this.updateScheduled = false;
     }
 
-    finishStream(emitChange: boolean = false) {
+    /**
+     * ✅ 优化：结束流式输出
+     */
+    finishStream(emitChange: boolean = false): void {
         this.isStreaming = false;
-        if (this.editor && this.isInitialized) {
-            this.editor.setStreamingText(this.currentContent).catch(e => {
-                console.error('[MDxController] finishStream failed:', e);
-            });
-        }
-        this.updateScheduled = false;
         
-        // [修复] 只有在需要时才触发回调
+        // 取消挂起的渲染
+        if (this.rafId !== null) {
+            cancelAnimationFrame(this.rafId);
+            this.rafId = null;
+        }
+        this.renderScheduled = false;
+        
+        // 最终渲染（同步）
+        if (this.editor && this.isInitialized) {
+            this.editor.setStreamingText(this.currentContent).catch(console.error);
+        }
+        
         if (emitChange) {
             this.onChangeCallback?.(this.currentContent);
         }
@@ -179,6 +217,7 @@ export class MDxController {
      */
     setContent(content: string) {
         this.currentContent = content;
+        this.contentSnapshot = content;
         if (this.isInitialized && this.editor) {
             this.editor.setText(content);
         }
@@ -205,10 +244,16 @@ export class MDxController {
     }
 
     destroy() {
+        // 清理定时器
+        if (this.rafId !== null) {
+            cancelAnimationFrame(this.rafId);
+            this.rafId = null;
+        }
+        
         this.editor?.destroy();
         this.editor = null;
         this.isInitialized = false;
         this.pendingChunks = [];
-        this.updateScheduled = false;
+        this.renderScheduled = false;
     }
 }
