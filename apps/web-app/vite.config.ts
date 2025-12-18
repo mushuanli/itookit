@@ -1,28 +1,58 @@
-import { defineConfig } from 'vite';
+import { defineConfig, searchForWorkspaceRoot } from 'vite'; 
 import path from 'path';
 
 export default defineConfig({
+    // ✅ 关键 1: 相对路径，确保在非根目录或通过简单 server 启动时能找到 assets
+    base: './', 
+
     resolve: {
         alias: {
             '@': path.resolve(__dirname, './src'),
         },
+        // ✅ 建议: 防止 React/Vue 等库在 Monorepo 中被打包两次 (双重实例问题)
+        dedupe: ['react', 'react-dom', 'dexie', 'mermaid'] 
     },
     server: {
         port: 3000,
         open: true,
+        // ✅ 关键 2: Monorepo 必须配置文件系统权限
+        // 因为你的依赖代码在 ../../packages/ 目录下，超出了当前项目根目录
+        fs: {
+            allow: [
+                // 自动搜索 workspace 根目录并允许访问
+                searchForWorkspaceRoot(process.cwd()),
+            ],
+        },
     },
     build: {
         target: 'esnext',
-        // 如果你的 monorepo 依赖中有未编译的 TS 文件，可能需要配置 optimizeDeps
+        // 生产环境构建配置
+        rollupOptions: {
+            output: {
+                // 可选：把所有 node_modules 依赖打成一个 vendor 包，减少碎片文件
+                manualChunks: (id) => {
+                    if (id.includes('node_modules')) {
+                        return 'vendor';
+                    }
+                }
+            }
+        }
     },
-    // 如果 @itookit 包是源码形式引入，可能需要此选项来强制预构建
+
+    // 关于 optimizeDeps 的说明见下方解释
     optimizeDeps: {
         include: [
-            '@itookit/common',
-            '@itookit/vfs-core',
-            '@itookit/mdxeditor',
-            '@itookit/memory-manager',
-            '@itookit/vfs-ui'
+            // 如果这些包已经编译成了 JS (dist)，加在这里没问题。
+            // 如果这些包 main 指向的是 .ts 源码，建议从这里移除，
+            // 让 Vite 直接把它们当源码处理，这样热更新 (HMR) 会更快。
+            // '@itookit/common', 
+            // '@itookit/vfs-core',
+            // ...
+            
+            // 建议保留第三方纯 JS 库的预构建
+            'mermaid',
+            'dexie',
+            'marked'
         ]
     }
 });
