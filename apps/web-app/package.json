@@ -12,15 +12,15 @@
         "@codemirror/lang-markdown": "^6.5.0",
         "@codemirror/state": "^6.5.2",
         "@fortawesome/fontawesome-free": "^7.1.0",
+        "@itookit/app-settings": "workspace:*",
         "@itookit/common": "workspace:*",
-        "@itookit/llmdriver": "workspace:*",
         "@itookit/llm-engine": "workspace:*",
         "@itookit/llm-ui": "workspace:*",
+        "@itookit/llmdriver": "workspace:*",
         "@itookit/mdxeditor": "workspace:*",
         "@itookit/memory-manager": "workspace:*",
         "@itookit/vfs-core": "workspace:*",
         "@itookit/vfs-ui": "workspace:*",
-        "@itookit/app-settings": "workspace:*",
         "codemirror": "^6.0.2",
         "dexie": "^4.2.1",
         "dotenv": "^17.2.3",
@@ -39,6 +39,7 @@
         "@codemirror/state": "^6.5.2",
         "@codemirror/view": "^6.38.8",
         "typescript": "^5.9.3",
-        "vite": "^6.4.1"
+        "vite": "^6.4.1",
+        "vite-plugin-singlefile": "^2.3.0"
     }
 }
