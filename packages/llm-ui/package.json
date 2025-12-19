@@ -57,7 +57,7 @@
   },
   "dependencies": {
     "@itookit/common": "workspace:*",
-    "@itookit/llmdriver": "workspace:*",
+    "@itookit/llm-driver": "workspace:*",
     "@itookit/llm-engine": "workspace:*",
     "@itookit/mdxeditor": "workspace:*",
     "@itookit/vfs-core": "workspace:*",

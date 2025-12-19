@@ -1,14 +1,24 @@
-// @file llm-ui/LLMWorkspaceEditor.ts
+// @file: llm-ui/LLMWorkspaceEditor.ts
 
 import { 
     IEditor, EditorOptions, EditorEvent, EditorEventCallback, 
     escapeHTML
 } from '@itookit/common';
 import { HistoryView } from './components/HistoryView';
-import { ChatInput } from './components/ChatInput';
-import {ILLMSessionEngine,IAgentService} from '@itookit/llmdriver';
-import { SessionManager,getSessionRegistry, SessionRegistry,SessionGroup,ExecutionNode } from '@itookit/llm-engine';
-import { NodeAction, OrchestratorEvent,SessionRegistryEvent } from './core/types';
+import { ChatInput, ExecutorOption } from './components/ChatInput';
+import { 
+    ILLMSessionEngine, 
+    IAgentService,
+    SessionManager, 
+    getSessionRegistry, 
+    SessionRegistry,
+    SessionGroup,
+    ExecutionNode,
+    OrchestratorEvent,
+    RegistryEvent,
+    DeleteOptions
+} from '@itookit/llm-engine';
+import { NodeAction} from './core/types';
 export interface LLMEditorOptions extends EditorOptions {
     sessionEngine: ILLMSessionEngine;
     agentService: IAgentService;
@@ -113,32 +123,63 @@ export class LLMWorkspaceEditor implements IEditor {
             (action: NodeAction, nodeId: string) => this.handleNodeAction(action, nodeId)
         );
 
-        // 获取初始执行器列表
-        let initialAgents: any[] = [];
+        // ✅ 修复：获取初始执行器列表
+        let initialAgents: ExecutorOption[] = [];
         try {
-            initialAgents = await this.registry.getAvailableExecutors();
+            // 使用 agentService 直接获取
+            const agents = await this.options.agentService.getAgents();
+            
+            initialAgents = agents.map(agent => ({
+                id: agent.id,
+                name: agent.name,
+                icon: agent.icon,
+                category: agent.type === 'agent' ? 'Agents' : 'Workflows',
+                description: agent.description
+            }));
+
+            // 添加默认执行器
+            initialAgents.unshift({
+                id: 'default',
+                name: 'Default Assistant',
+                icon: '🤖',
+                category: 'System'
+            });
+
         } catch (e) {
             console.warn('[LLMWorkspaceEditor] Failed to get initial agents:', e);
+            initialAgents = [{
+                id: 'default',
+                name: 'Default Assistant',
+                icon: '🤖',
+                category: 'System'
+            }];
         }
 
-        // 初始化输入组件
         this.chatInput = new ChatInput(inputEl, {
             onSend: (text, files, agentId) => this.handleUserSend(text, files, agentId),
             onStop: () => this.sessionManager.abort(),
-            initialAgents
+            initialAgents 
         });
     }
 
+    // 2. 完善 loadSessionFromEngine 方法
     private async loadSessionFromEngine(initialContent?: string): Promise<void> {
         if (!this.options.nodeId) {
             throw new Error('[LLMWorkspaceEditor] nodeId is required.');
         }
 
-        // 获取 sessionId
-        let sessionId = await this.options.sessionEngine.getSessionIdFromNodeId(this.options.nodeId);
+        let sessionId: string | null = null;
+
+        // 尝试从 NodeId 获取 SessionId (通过 Manifest)
+        try {
+            sessionId = await this.options.sessionEngine.getSessionIdFromNodeId(this.options.nodeId);
+        } catch (e) {
+            console.warn('[LLMWorkspaceEditor] Error reading manifest:', e);
+        }
         
         if (!sessionId) {
-            // 初始化新会话
+            // 如果文件是空的或者损坏，重新初始化
+            console.log('[LLMWorkspaceEditor] Initializing file structure...');
             sessionId = await this.options.sessionEngine.initializeExistingFile(
                 this.options.nodeId, 
                 this.currentTitle
@@ -147,10 +188,11 @@ export class LLMWorkspaceEditor implements IEditor {
 
         this.currentSessionId = sessionId;
 
-        // 绑定会话
+        // [关键] 绑定 SessionManager 到该会话
+        // 这会触发 Registry 的注册逻辑，如果会话不在内存中，会从磁盘加载
         await this.sessionManager.bindSession(this.options.nodeId, sessionId);
 
-        // 订阅会话事件
+        // 订阅事件
         this.sessionManager.onEvent((event) => this.handleSessionEvent(event));
 
         // 加载 Manifest
@@ -329,7 +371,7 @@ export class LLMWorkspaceEditor implements IEditor {
     /**
      * 处理全局事件（状态同步核心）
      */
-    private handleGlobalEvent(event: SessionRegistryEvent): void {
+    private handleGlobalEvent(event: RegistryEvent): void {
         switch (event.type) {
             case 'pool_status_changed':
                 this.updateBackgroundIndicator(event.payload);
@@ -405,6 +447,13 @@ export class LLMWorkspaceEditor implements IEditor {
 
         if (!session) return;
 
+        // ✅ 检查是否可以重试
+        const canRetry = this.sessionManager.canRetry(nodeId);
+        if (!canRetry.allowed) {
+            console.warn(`[LLMWorkspaceEditor] Cannot retry: ${canRetry.reason}`);
+            return;
+        }
+
         this.chatInput.setLoading(true);
         try {
             if (session.role === 'user') {
@@ -415,8 +464,11 @@ export class LLMWorkspaceEditor implements IEditor {
                     navigateToNew: true
                 });
             }
+        } catch (e: any) {
+            console.error('[LLMWorkspaceEditor] Retry failed:', e);
+            this.historyView.renderError(e);
         } finally {
-            this.updateStatusIndicator(); // 手动触发一次状态检查
+            this.updateStatusIndicator();
         }
     }
 
@@ -472,10 +524,9 @@ export class LLMWorkspaceEditor implements IEditor {
                 const s = sessions[i];
                 if (s.role === 'assistant') {
                     ids.push(s.id);
-                // 同时收集该 assistant 下的所有执行节点
-                if (s.executionRoot) {
-                    this.collectNodeIds(s.executionRoot, ids);
-                }
+                    if (s.executionRoot) {
+                        this.collectNodeIds(s.executionRoot, ids);
+                    }
                 } else {
                     break; // 遇到下一个用户消息就停止
                 }
@@ -534,8 +585,14 @@ export class LLMWorkspaceEditor implements IEditor {
         }
 
         if (newIndex !== currentIndex) {
-            await this.sessionManager.switchToSibling(nodeId, newIndex);
-            this.emit('change');
+            try {
+                // ✅ 使用正确的方法
+                await this.sessionManager.switchToSibling(nodeId, newIndex);
+                this.emit('change');
+            } catch (e: any) {
+                console.error('[LLMWorkspaceEditor] Sibling switch failed:', e);
+                this.historyView.renderError(e);
+            }
         }
     }
 

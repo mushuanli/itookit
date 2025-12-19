@@ -21,17 +21,33 @@ export { ISessionUI,
     type SessionManagerEvent,
     type SessionManagerCallback
  } from './interfaces/ISessionUI';
-export {type EngineNode,type EngineSearchQuery,type EngineEventType,type EngineEvent,type ISessionEngine} from './interfaces/ISessionEngine';
+export {
+    type EngineNode,
+    type EngineSearchQuery,
+    type EngineEventType,
+    type EngineEvent,
+    type ISessionEngine
+} from './interfaces/ISessionEngine';
 
 export { ISettingsWidget } from './interfaces/ISettingsWidget';
 
 // Export all utils
-export { slugify, simpleHash, escapeHTML, generateUUID, generateShortUUID, generateId, debounce, isClass } from './utils/utils';
+export { 
+    slugify, 
+    simpleHash, 
+    escapeHTML, 
+    generateUUID, 
+    generateShortUUID, 
+    generateId, 
+    debounce, 
+    isClass 
+} from './utils/utils';
 
 // Export all components
 export { TagEditorComponent, type TagEditorParams } from './components/TagEditor/TagEditorComponent'; 
 export * from './components/BaseSettingsEditor';
 export * from './components/UIComponents';
 
-export const FS_MODULE_CHAT='chats';
-export const FS_MODULE_AGENTS='agents';
+// Constants
+export const FS_MODULE_CHAT = 'chats';
+export const FS_MODULE_AGENTS = 'agents';

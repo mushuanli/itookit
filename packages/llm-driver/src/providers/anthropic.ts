@@ -1,240 +1,361 @@
-// @file: llmdriver/providers/anthropic.ts
+// @file: llm-driver/providers/anthropic.ts
 
 import { BaseProvider } from './base';
-import { ChatCompletionParams, ChatCompletionResponse, ChatCompletionChunk } from '../types';
-import { LLMError } from '../errors';
-import { processAttachment } from '../utils/attachment';
+import {
+    LLMProviderConfig,
+    ChatCompletionParams,
+    ChatCompletionResponse,
+    ChatCompletionChunk,
+    ChatMessage
+} from '../types';
+import { parseSSEStream } from '../utils/stream';
 
+/**
+ * Anthropic Provider
+ * 
+ * 特点：
+ * 1. 使用不同的 API 结构
+ * 2. 支持 extended thinking
+ * 3. System message 单独处理
+ */
 export class AnthropicProvider extends BaseProvider {
-    private apiVersion = '2023-06-01';
-
-    // 1. 消息预处理：提取 System Prompt，转换图片格式
-    private async prepareRequest(params: ChatCompletionParams) {
-        let systemPrompt: string | undefined = undefined;
-        const anthropicMessages: any[] = [];
-
-        for (const msg of params.messages) {
-            if (msg.role === 'system') {
-                // Anthropic 支持多个 system 消息，这里简单合并
-                const content = typeof msg.content === 'string' 
-                    ? msg.content 
-                    : msg.content.map(c => c.type === 'text' ? c.text : '').join('\n');
-                systemPrompt = systemPrompt ? `${systemPrompt}\n${content}` : content;
-                continue;
-            }
-
-            const contentParts: any[] = [];
-            if (typeof msg.content === 'string') {
-                contentParts.push({ type: 'text', text: msg.content });
-            } else if (Array.isArray(msg.content)) {
-                for (const part of msg.content) {
-                    if (part.type === 'text') {
-                        contentParts.push({ type: 'text', text: part.text });
-                    } else if (part.type === 'image_url') {
-                        const { mimeType, base64 } = await processAttachment(part.image_url.url);
-                        contentParts.push({
-                            type: 'image',
-                            source: {
-                                type: 'base64',
-                                media_type: mimeType,
-                                data: base64
-                            }
-                        });
-                    } else if (part.type === 'document') {
-                        // Claude 支持 PDF 文档
-                        const { mimeType, base64 } = await processAttachment(part.document.url);
-                        contentParts.push({
-                            type: 'document',
-                            source: {
-                                type: 'base64',
-                                media_type: mimeType,
-                                data: base64
-                            }
-                        });
+    readonly name = 'anthropic';
+    
+    private readonly API_VERSION = '2023-06-01';
+    
+    constructor(config: LLMProviderConfig) {
+        super(config);
+        if (!this.baseURL) {
+            this.baseURL = 'https://api.anthropic.com';
+        }
+    }
+    
+    async create(params: ChatCompletionParams): Promise<ChatCompletionResponse> {
+        const url = `${this.baseURL}/v1/messages`;
+        const body = this.buildRequestBody(params);
+        
+        const response = await this.fetchJSON<any>(url, {
+            method: 'POST',
+            headers: this.buildHeaders(),
+            body: JSON.stringify(body),
+            signal: params.signal
+        });
+        
+        return this.normalizeResponse(response);
+    }
+    
+    async *stream(params: ChatCompletionParams): AsyncGenerator<ChatCompletionChunk> {
+        const url = `${this.baseURL}/v1/messages`;
+        const body = this.buildRequestBody({ ...params, stream: true });
+        
+        const stream = await this.fetchStream(url, {
+            method: 'POST',
+            headers: this.buildHeaders(),
+            body: JSON.stringify(body),
+            signal: params.signal
+        });
+        
+        let currentThinking = '';
+        let currentContent = '';
+        
+        for await (const data of parseSSEStream(stream)) {
+            try {
+                const event = JSON.parse(data);
+                const chunk = this.normalizeStreamEvent(event, currentThinking, currentContent);
+                
+                if (chunk) {
+                    // 更新累积状态
+                    if (chunk.choices[0]?.delta.thinking) {
+                        currentThinking += chunk.choices[0].delta.thinking;
                     }
+                    if (chunk.choices[0]?.delta.content) {
+                        currentContent += chunk.choices[0].delta.content;
+                    }
+                    
+                    yield chunk;
                 }
+            } catch {
+                // 忽略解析错误
             }
-
-            anthropicMessages.push({
-                role: msg.role === 'assistant' ? 'assistant' : 'user',
-                content: contentParts
-            });
         }
-
-        const body: any = {
-            model: this.getModel(params),
-            messages: anthropicMessages,
-            max_tokens: params.maxTokens || 4096, // Anthropic 必需字段
-            temperature: params.temperature,
-            top_p: params.topP,
+    }
+    
+    // ============== 请求构建 ==============
+    
+    protected buildHeaders(): Record<string, string> {
+        return {
+            ...super.buildHeaders(),
+            'x-api-key': this.config.apiKey,
+            'anthropic-version': this.API_VERSION
         };
-
-        if (systemPrompt) {
-            body.system = systemPrompt;
+    }
+    
+    protected buildRequestBody(params: ChatCompletionParams): Record<string, any> {
+        const { systemMessage, userMessages } = this.separateMessages(params.messages);
+        
+        const body: Record<string, any> = {
+            model: this.getModel(params),
+            messages: userMessages,
+            max_tokens: params.maxTokens || 4096
+        };
+        
+        // System message
+        if (systemMessage) {
+            body.system = systemMessage;
         }
-
-        // Thinking Logic
-        if (params.thinking && this.config.supportsThinking) {
+        
+        // 基础参数
+        if (params.temperature !== undefined) body.temperature = params.temperature;
+        if (params.topP !== undefined) body.top_p = params.topP;
+        if (params.stop !== undefined) body.stop_sequences = Array.isArray(params.stop) ? params.stop : [params.stop];
+        
+        // 流式
+        if (params.stream) {
+            body.stream = true;
+        }
+        
+        // Extended Thinking
+        if (params.thinking) {
+            const budget = params.thinkingBudget || this.config.metadata?.thinkingBudget || 10000;
             body.thinking = {
                 type: 'enabled',
-                budget_tokens: params.thinkingBudget || 1024
+                budget_tokens: budget
             };
-            // 确保 max_tokens 大于 budget_tokens
-            if (body.max_tokens <= body.thinking.budget_tokens) {
-                body.max_tokens = body.thinking.budget_tokens + 4096;
+        }
+        
+        // 工具
+        if (params.tools && params.tools.length > 0) {
+            body.tools = params.tools.map(tool => ({
+                name: tool.function.name,
+                description: tool.function.description,
+                input_schema: tool.function.parameters
+            }));
+            
+            if (params.toolChoice === 'required') {
+                body.tool_choice = { type: 'any' };
+            } else if (params.toolChoice === 'none') {
+                body.tool_choice = { type: 'none' };
+            } else if (typeof params.toolChoice === 'object') {
+                body.tool_choice = { 
+                    type: 'tool', 
+                    name: params.toolChoice.function.name 
+                };
             }
         }
-
-        // Tools format transformation (Simplified)
-        if (params.tools) {
-            body.tools = params.tools.map((t: any) => ({
-                name: t.function.name,
-                description: t.function.description,
-                input_schema: t.function.parameters
-            }));
-        }
-
+        
         return body;
     }
-
-    private getHeaders(isThinking: boolean) {
-        const headers: Record<string, string> = {
-            'Content-Type': 'application/json',
-            'x-api-key': this.config.apiKey,
-            'anthropic-version': this.apiVersion,
-            ...this.config.headers
-        };
-        // Thinking models might require specific beta headers
-        if (isThinking) {
-             // 截至目前 Claude 3.7 可能不再需要 beta header，但旧版可能需要
-             // headers['anthropic-beta'] = 'output-128k-2025-02-19'; 
-        }
-        return headers;
-    }
-
-    async create(params: ChatCompletionParams): Promise<ChatCompletionResponse> {
-        const body = await this.prepareRequest(params);
-        body.stream = false;
-
-        const response = await fetch(this.config.apiBaseUrl!, {
-            method: 'POST',
-            headers: this.getHeaders(!!params.thinking),
-            body: JSON.stringify(body),
-            signal: params.signal
-        });
-
-        if (!response.ok) {
-            const err = await response.json().catch(() => ({}));
-            throw new LLMError(err.error?.message || response.statusText, {
-                provider: 'anthropic',
-                statusCode: response.status
-            });
-        }
-
-        const data = await response.json();
+    
+    /**
+     * 分离 System 消息
+     */
+    private separateMessages(messages: ChatMessage[]): {
+        systemMessage: string | null;
+        userMessages: any[];
+    } {
+        let systemMessage: string | null = null;
+        const userMessages: any[] = [];
         
-        // 解析响应内容
+        for (const msg of messages) {
+            if (msg.role === 'system') {
+                // 合并多个 system 消息
+                const content = typeof msg.content === 'string' 
+                    ? msg.content 
+                    : msg.content.map(p => p.type === 'text' ? p.text : '').join('\n');
+                    
+                systemMessage = systemMessage 
+                    ? `${systemMessage}\n\n${content}` 
+                    : content;
+            } else {
+                userMessages.push({
+                    role: msg.role === 'assistant' ? 'assistant' : 'user',
+                    content: this.convertContent(msg.content)
+                });
+            }
+        }
+        
+        return { systemMessage, userMessages };
+    }
+    
+    /**
+     * 转换内容格式
+     */
+    private convertContent(content: ChatMessage['content']): any {
+        if (typeof content === 'string') {
+            return content;
+        }
+        
+        return content.map(part => {
+            if (part.type === 'text') {
+                return { type: 'text', text: part.text };
+            }
+            if (part.type === 'image_url') {
+                // Anthropic 使用 base64
+                const url = part.image_url.url;
+                if (url.startsWith('data:')) {
+                    const [header, data] = url.split(',');
+                    const mediaType = header.match(/data:(.*?);/)?.[1] || 'image/jpeg';
+                    return {
+                        type: 'image',
+                        source: {
+                            type: 'base64',
+                            media_type: mediaType,
+                            data
+                        }
+                    };
+                }
+                return {
+                    type: 'image',
+                    source: {
+                        type: 'url',
+                        url
+                    }
+                };
+            }
+            return { type: 'text', text: '' };
+        });
+    }
+    
+    // ============== 响应标准化 ==============
+    
+    protected normalizeResponse(response: any): ChatCompletionResponse {
         let content = '';
         let thinking = '';
+        const toolCalls: any[] = [];
         
-        if (Array.isArray(data.content)) {
-            data.content.forEach((block: any) => {
-                if (block.type === 'text') content += block.text;
-                if (block.type === 'thinking') thinking += block.thinking;
-            });
+        // 处理 content blocks
+        for (const block of response.content || []) {
+            if (block.type === 'text') {
+                content += block.text;
+            } else if (block.type === 'thinking') {
+                thinking += block.thinking;
+            } else if (block.type === 'tool_use') {
+                toolCalls.push({
+                    id: block.id,
+                    type: 'function',
+                    function: {
+                        name: block.name,
+                        arguments: JSON.stringify(block.input)
+                    }
+                });
+            }
         }
-
+        
         return {
+            id: response.id,
+            model: response.model,
             choices: [{
+                index: 0,
                 message: {
                     role: 'assistant',
-                    content: content,
+                    content,
                     thinking: thinking || undefined,
-                    // Tool calls mapping needs to be handled if strictly required
+                    tool_calls: toolCalls.length > 0 ? toolCalls : undefined
                 },
-                finish_reason: data.stop_reason
+                finish_reason: this.mapStopReason(response.stop_reason)
             }],
-            usage: {
-                prompt_tokens: data.usage?.input_tokens || 0,
-                completion_tokens: data.usage?.output_tokens || 0,
-                total_tokens: (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0)
-            },
-            model: data.model
+            usage: response.usage ? {
+                prompt_tokens: response.usage.input_tokens,
+                completion_tokens: response.usage.output_tokens,
+                total_tokens: response.usage.input_tokens + response.usage.output_tokens
+            } : undefined
         };
     }
-
-    async *stream(params: ChatCompletionParams): AsyncGenerator<ChatCompletionChunk> {
-        const body = await this.prepareRequest(params);
-        body.stream = true;
-
-        const response = await fetch(this.config.apiBaseUrl!, {
-            method: 'POST',
-            headers: this.getHeaders(!!params.thinking),
-            body: JSON.stringify(body),
-            signal: params.signal
-        });
-
-        if (!response.ok) {
-            throw new LLMError(response.statusText, { provider: 'anthropic', statusCode: response.status });
-        }
-
-        const reader = response.body?.getReader();
-        if (!reader) throw new Error('No response body');
+    
+    protected normalizeStreamEvent(
+        event: any,
+        currentThinking: string,
+        currentContent: string
+    ): ChatCompletionChunk | null {
+        const type = event.type;
         
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n\n'); // Anthropic SSE uses double newline
-            buffer = lines.pop() || '';
-
-            for (const line of lines) {
-                const parts = line.split('\n');
-                for (const part of parts) {
-                    if (part.startsWith('data: ')) {
-                        const dataStr = part.slice(6).trim();
-                        if (dataStr === '[DONE]') return;
-                        
-                        try {
-                            const event = JSON.parse(dataStr);
-                            
-                            // Handle various event types
-                            if (event.type === 'content_block_start') {
-                                if (event.content_block?.type === 'thinking') {
-                                    // Thinking started
-                                }
-                            } else if (event.type === 'content_block_delta') {
-                                const chunk: ChatCompletionChunk = { choices: [{ delta: {}, finish_reason: null }] };
-                                
-                                if (event.delta?.type === 'text_delta') {
-                                    chunk.choices[0].delta.content = event.delta.text;
-                                } else if (event.delta?.type === 'thinking_delta') {
-                                    chunk.choices[0].delta.thinking = event.delta.thinking;
-                                }
-                                
-                                if (chunk.choices[0].delta.content || chunk.choices[0].delta.thinking) {
-                                    yield chunk;
-                                }
-                            } else if (event.type === 'message_delta') {
-                                if (event.delta?.stop_reason) {
-                                    yield {
-                                        choices: [{
-                                            delta: {},
-                                            finish_reason: event.delta.stop_reason
-                                        }]
-                                    };
-                                }
-                            }
-                        } catch (e) {
-                            // ignore
-                        }
-                    }
+        switch (type) {
+            case 'message_start':
+                return {
+                    id: event.message?.id,
+                    model: event.message?.model,
+                    choices: [{
+                        index: 0,
+                        delta: { role: 'assistant' },
+                        finish_reason: null
+                    }]
+                };
+                
+            case 'content_block_delta':
+                const delta = event.delta;
+                
+                if (delta?.type === 'thinking_delta') {
+                    return {
+                        choices: [{
+                            index: 0,
+                            delta: { thinking: delta.thinking },
+                            finish_reason: null
+                        }]
+                    };
                 }
-            }
+                
+                if (delta?.type === 'text_delta') {
+                    return {
+                        choices: [{
+                            index: 0,
+                            delta: { content: delta.text },
+                            finish_reason: null
+                        }]
+                    };
+                }
+                
+                if (delta?.type === 'input_json_delta') {
+                    // 工具调用参数增量
+                    return {
+                        choices: [{
+                            index: 0,
+                            delta: {
+                                tool_calls: [{
+                                    index: event.index || 0,
+                                    function: { arguments: delta.partial_json }
+                                }]
+                            },
+                            finish_reason: null
+                        }]
+                    };
+                }
+                
+                return null;
+                
+            case 'message_delta':
+                return {
+                    choices: [{
+                        index: 0,
+                        delta: {},
+                        finish_reason: this.mapStopReason(event.delta?.stop_reason)
+                    }],
+                    usage: event.usage ? {
+                        prompt_tokens: 0,
+                        completion_tokens: event.usage.output_tokens,
+                        total_tokens: event.usage.output_tokens
+                    } : undefined
+                };
+                
+            case 'message_stop':
+                return {
+                    choices: [{
+                        index: 0,
+                        delta: {},
+                        finish_reason: 'stop'
+                    }]
+                };
+                
+            default:
+                return null;
+        }
+    }
+    
+    private mapStopReason(reason: string | null): 'stop' | 'length' | 'tool_calls' | null {
+        switch (reason) {
+            case 'end_turn': return 'stop';
+            case 'max_tokens': return 'length';
+            case 'tool_use': return 'tool_calls';
+            default: return null;
         }
     }
 }

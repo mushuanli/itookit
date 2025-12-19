@@ -1,11 +1,16 @@
-// @file llm-ui/index.ts
+// @file: llm-ui/index.ts
 
 import './styles/index.css';
 
 import { LLMWorkspaceEditor, LLMEditorOptions } from './LLMWorkspaceEditor';
-import { VFSAgentService,initializeLLMModule } from '@itookit/llm-engine';
+import { 
+    VFSAgentService, 
+    ILLMSessionEngine, 
+    initializeLLMEngine,
+    SessionRegistry,
+    getSessionRegistry
+} from '@itookit/llm-engine';
 import { EditorFactory, EditorOptions } from '@itookit/common';
-import {ILLMSessionEngine} from '@itookit/llmdriver';
 import { AgentConfigEditor } from './editors/AgentConfigEditor';
 
 export { ConnectionSettingsEditor } from './editors/ConnectionSettingsEditor';
@@ -20,27 +25,34 @@ interface LLMFactoryOptions extends EditorOptions {
 
 /**
  * 创建 LLM 编辑器工厂
+ * @param agentService 已初始化的 AgentService
+ * @param sessionEngine 已初始化的 SessionEngine
  */
 export const createLLMFactory = (
     agentService: VFSAgentService,
-    sessionEngine?: ILLMSessionEngine
+    sessionEngine: ILLMSessionEngine
 ): EditorFactory => {
-    // 缓存 Engine 实例
-    let cachedEngine: ILLMSessionEngine | null = sessionEngine || null;
-    let engineInitPromise: Promise<ILLMSessionEngine> | null = null;
+    // 缓存初始化状态
     let moduleInitialized = false;
+    let engineInitPromise: Promise<void> | null = null;
 
-    const ensureModuleInitialized = async (): Promise<ILLMSessionEngine> => {
-        if (moduleInitialized && cachedEngine) {
-            return cachedEngine;
+    /**
+     * ✅ 修复：确保模块正确初始化
+     */
+    const ensureModuleInitialized = async (): Promise<void> => {
+        if (moduleInitialized) {
+            return;
         }
 
         if (!engineInitPromise) {
             engineInitPromise = (async () => {
-                const { engine } = await initializeLLMModule(agentService, cachedEngine!);
-                cachedEngine = engine;
+                // ✅ 修复：使用正确的参数格式
+                await initializeLLMEngine({
+                    agentService,
+                    sessionEngine,
+                    maxConcurrent: 3
+                });
                 moduleInitialized = true;
-                return engine;
             })();
         }
 
@@ -48,50 +60,25 @@ export const createLLMFactory = (
     };
 
     return async (container: HTMLElement, options: EditorOptions) => {
-        console.log(`[LLMFactory] Creating editor for nodeId=${options.nodeId}`);
-
-        const engine = await ensureModuleInitialized();
-
-        // 确保 session 存在
+        // 确保引擎初始化
+        await ensureModuleInitialized();
+        
         let effectiveNodeId = options.nodeId;
 
-        if (options.nodeId) {
-            let sessionId = await engine.getSessionIdFromNodeId(options.nodeId);
-
-            if (!sessionId) {
-                console.log('[LLMFactory] Initializing new session...');
-                const title = options.title || 'New Chat';
-
-                try {
-                    const newSessionId = await engine.initializeExistingFile(options.nodeId, title);
-                    console.log(`[LLMFactory] Session initialized: ${newSessionId}`);
-
-                    // 等待初始化完成
-                    await new Promise(resolve => setTimeout(resolve, 100));
-
-                    sessionId = await engine.getSessionIdFromNodeId(options.nodeId);
-
-                    if (!sessionId) {
-                        throw new Error(`Failed to initialize session for nodeId: ${options.nodeId}`);
-                    }
-                } catch (e: any) {
-                    console.error(`[LLMFactory] Failed to initialize file:`, e);
-                    throw e;
-                }
-            }
-        } else {
-            // 没有 nodeId，创建新文件
-            console.log('[LLMFactory] Creating new chat file...');
-            const newNode = await engine.createFile(options.title || 'New Chat', null);
+        if (!effectiveNodeId) {
+            // 如果没有 nodeId，创建新文件
+            const newNode = await sessionEngine.createFile(options.title || 'New Chat', null);
             effectiveNodeId = newNode.id;
             console.log(`[LLMFactory] New file created: ${effectiveNodeId}`);
         }
 
-        // 创建编辑器
+        // 此时 sessionEngine 应该已经在 main.ts 中通过 initializeLLMEngine 准备好了
+        // 我们不需要在这里再次调用初始化逻辑，直接使用
+
         const editorOptions: LLMEditorOptions = {
             ...options,
             agentService,
-            sessionEngine: engine,
+            sessionEngine,
             nodeId: effectiveNodeId
         };
 
@@ -114,10 +101,6 @@ export const createAgentEditorFactory = (agentService: VFSAgentService): EditorF
     };
 };
 
-// 导出 Engine 类供外部使用
-//export { LLMSessionEngine };
+// 导出类型和类
 export { VFSAgentService };
-//export { LLMWorkspaceEditor };
-//export { SessionManager } from './orchestrator/SessionManager';
-//export { AgentExecutor } from './orchestrator/AgentExecutor';
-//export { UnifiedExecutor, createAgent, createOrchestrator, serial, parallel, router, loop } from './orchestrator/Executor';
+export type { LLMEditorOptions };

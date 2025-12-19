@@ -1,6 +1,6 @@
 // @file: llm-ui/components/templates/NodeTemplates.ts
 
-import { ExecutionNode, SessionGroup } from '../../core/types';
+import { ExecutionNode, SessionGroup } from '@itookit/llm-engine';
 import { escapeHTML } from '@itookit/common';
 
 export class NodeTemplates {
