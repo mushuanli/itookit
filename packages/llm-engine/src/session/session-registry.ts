@@ -460,7 +460,15 @@ export class SessionRegistry {
                     signal: task.abortController.signal
                 }
             );
-            
+
+            // ✅ 修复：检查执行结果是否有错误（使用 errors 数组）
+            if (result.status === 'failed') {
+                const firstError = result.errors?.[0];
+                const error = new Error(firstError?.message || 'Execution failed');
+                (error as any).status = firstError?.code;
+                throw error;
+            }
+
             // 7. 最终持久化
             await finalize();
             
@@ -516,10 +524,14 @@ export class SessionRegistry {
                 });
             }
             
-            // 发送错误事件
+            // ✅ 修复：发送错误事件，不包含 code 属性（因为类型定义不支持）
+            const errorMessage = this.formatErrorMessage(error);
             this.emitSessionEvent(sessionId, {
                 type: 'error',
-                payload: { message: error.message, error }
+                payload: { 
+                    message: errorMessage, 
+                    error: error instanceof Error ? error : new Error(String(error))
+                }
             });
             
         } finally {
@@ -529,7 +541,36 @@ export class SessionRegistry {
             this.processQueue();
         }
     }
-    
+
+    /**
+     * 格式化错误消息
+     */
+    private formatErrorMessage(error: any): string {
+        // HTTP 错误（从 error.status 或 error.code 获取）
+        const statusCode = error.status || error.code;
+        
+        if (statusCode === 401) {
+            return 'Authentication failed: Invalid API key or token expired. Please check your connection settings.';
+        }
+        if (statusCode === 403) {
+            return 'Access denied: You do not have permission to use this API.';
+        }
+        if (statusCode === 429) {
+            return 'Rate limit exceeded: Too many requests. Please wait and try again.';
+        }
+        if (statusCode === 500 || statusCode === 502 || statusCode === 503) {
+            return `Server error (${statusCode}): The LLM service is temporarily unavailable.`;
+        }
+        
+        // 网络错误
+        if (error.message?.includes('fetch') || error.message?.includes('network')) {
+            return 'Network error: Unable to connect to the LLM service. Please check your internet connection.';
+        }
+        
+        // 通用错误
+        return error.message || 'An unknown error occurred';
+    }
+
     /**
      * 解析执行器配置
      */
