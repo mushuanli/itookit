@@ -21,7 +21,8 @@
   "peerDependencies": {
     "@itookit/common": "workspace:*",
     "@itookit/vfs-core": "workspace:*",
-    "@itookit/llmdriver": "workspace:*",
+    "@itookit/llm-driver": "workspace:*",
+    "@itookit/llm-engine": "workspace:*",
     "@itookit/llm-ui": "workspace:*"
   },
   "devDependencies": {

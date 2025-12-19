@@ -1,7 +1,5 @@
 // @file: llm-ui/core/types.ts
 
-export type {OrchestratorEvent, SessionGroup, ExecutionNode,SessionRegistryEvent} from '@itookit/llm-engine';
-
 export type NodeAction = 
     | 'retry' 
     | 'delete' 

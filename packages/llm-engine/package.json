@@ -1,16 +1,16 @@
 {
   "name": "@itookit/llm-engine",
   "version": "0.1.0",
-  "description": "The headless orchestration core for LLM workspaces. Handles session state management, LLM execution, VFS persistence, and agent logic without UI dependencies.",
+  "description": "LLM Session Engine - UI Adapter Layer",
   "type": "module",
-  "main": "./dist/llm-engine.umd.cjs",
-  "module": "./dist/llm-engine.js",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/llm-engine.js",
-      "require": "./dist/llm-engine.umd.cjs"
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "types": "./dist/index.d.ts"
     }
   },
   "files": [
@@ -19,10 +19,12 @@
     "LICENSE"
   ],
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && tsc --emitDeclarationOnly",
+    "dev": "vite build --watch",
     "test": "vitest",
-    "prepublishOnly": "pnpm build"
+    "prepublishOnly": "pnpm build",
+    "lint": "eslint src --ext .ts",
+    "clean": "rm -rf dist"
   },
   "keywords": [
     "llm-engine",
@@ -53,11 +55,13 @@
   "peerDependencies": {
     "@itookit/common": "workspace:*",
     "@itookit/vfs-core": "workspace:*",
-    "@itookit/llmdriver": "workspace:*"
+    "@itookit/llm-kernel": "workspace:*",
+    "@itookit/llm-driver": "workspace:*"
   },
   "dependencies": {
     "@itookit/common": "workspace:*",
-    "@itookit/llmdriver": "workspace:*"
+    "@itookit/llm-driver": "workspace:*",
+    "@itookit/vfs-core": "workspace:*"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",

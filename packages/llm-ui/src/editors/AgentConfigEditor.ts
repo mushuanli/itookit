@@ -6,8 +6,8 @@ import {
     Heading,              // [修复] 添加导入
     UnifiedSearchResult   // [修复] 添加导入
 } from '@itookit/common';
-import {LLMModel,IAgentDefinition,IAgentService} from '@itookit/llmdriver';
-
+import {LLMModel} from '@itookit/llm-driver';
+import {AgentType,AgentDefinition,IAgentService} from '@itookit/llm-engine';
 /**
  * Agent 配置编辑器
  * 它实现了 IEditor 接口，而不是继承 BaseSettingsEditor，
@@ -15,7 +15,7 @@ import {LLMModel,IAgentDefinition,IAgentService} from '@itookit/llmdriver';
  */
 export class AgentConfigEditor implements IEditor {
     private container!: HTMLElement;
-    private content: IAgentDefinition | null = null;
+    private content: AgentDefinition | null = null;
     private _isDirty = false;
     private listeners = new Map<string, Set<EditorEventCallback>>();
     
@@ -59,10 +59,13 @@ export class AgentConfigEditor implements IEditor {
                 ? parsed.id 
                 : generateUUID();
 
+            // ✅ 修复：使用有效的 AgentType
+            const validType = this.normalizeAgentType(parsed.type);
+
             this.content = {
                 id: agentId, 
                 name: parsed.name || 'New Agent',
-                type: parsed.type || 'agent',
+                type: validType,
                 description: parsed.description || '',
                 icon: parsed.icon || '🤖',
                 config: {
@@ -71,8 +74,8 @@ export class AgentConfigEditor implements IEditor {
                     systemPrompt: parsed.config?.systemPrompt || 'You are a helpful assistant.',
                     mcpServers: parsed.config?.mcpServers || [],
                     maxHistoryLength: parsed.config?.maxHistoryLength ?? -1,
-                    autoPrompts: parsed.config?.autoPrompts || [],
-                    ...parsed.config
+                    temperature: parsed.config?.temperature
+                    // ✅ 修复：移除 autoPrompts，它不在 AgentConfig 中
                 },
                 interface: parsed.interface || {
                     inputs: [],
@@ -84,6 +87,26 @@ export class AgentConfigEditor implements IEditor {
         } catch (e) {
             this.renderError((e as Error).message);
             this.content = null;
+        }
+    }
+
+    /**
+     * ✅ 新增：规范化 AgentType
+     * 将旧的 'orchestrator' 映射到 'composite'
+     */
+    private normalizeAgentType(type: string | undefined): AgentType {
+        switch (type) {
+            case 'agent':
+                return 'agent';
+            case 'composite':
+            case 'orchestrator':  // 兼容旧数据
+                return 'composite';
+            case 'tool':
+                return 'tool';
+            case 'workflow':
+                return 'workflow';
+            default:
+                return 'agent';
         }
     }
 
@@ -169,17 +192,22 @@ export class AgentConfigEditor implements IEditor {
                                 <div class="agent-type-option__title">Agent</div>
                                 <div class="agent-type-option__desc">单一 LLM 驱动的智能体</div>
                             </div>
-                            <div class="agent-type-option ${agent.type === 'orchestrator' ? 'selected' : ''}" data-type="orchestrator">
+                            <div class="agent-type-option ${agent.type === 'composite' ? 'selected' : ''}" data-type="composite">
                                 <div class="agent-type-option__icon">🕸️</div>
-                                <div class="agent-type-option__title">Orchestrator</div>
+                                <div class="agent-type-option__title">Composite</div>
                                 <div class="agent-type-option__desc">协调多个 Agent 协作</div>
+                            </div>
+                            <div class="agent-type-option ${agent.type === 'workflow' ? 'selected' : ''}" data-type="workflow">
+                                <div class="agent-type-option__icon">📋</div>
+                                <div class="agent-type-option__title">Workflow</div>
+                                <div class="agent-type-option__desc">预定义的工作流程</div>
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <!-- LLM Configuration (only for agent type) -->
-                <div class="agent-section" id="llm-config-section" style="${agent.type === 'orchestrator' ? 'display:none' : ''}">
+                <!-- LLM Configuration (hide for composite/workflow) -->
+                <div class="agent-section" id="llm-config-section" style="${agent.type !== 'agent' ? 'display:none' : ''}">
                     <div class="agent-section__header">
                         <span class="agent-section__icon">🧠</span>
                         <span class="agent-section__title">LLM 配置</span>
@@ -245,8 +273,8 @@ export class AgentConfigEditor implements IEditor {
                     </div>
                 </div>
 
-                <!-- MCP Tools -->
-                <div class="agent-section" id="mcp-section" style="${agent.type === 'orchestrator' ? 'display:none' : ''}">
+                <!-- MCP Tools (hide for composite/workflow) -->
+                <div class="agent-section" id="mcp-section" style="${agent.type !== 'agent' ? 'display:none' : ''}">
                     <div class="agent-section__header">
                         <span class="agent-section__icon">🔧</span>
                         <span class="agent-section__title">工具能力 (MCP)</span>
@@ -374,8 +402,8 @@ export class AgentConfigEditor implements IEditor {
         // Type 选择
         this.container.querySelectorAll('.agent-type-option').forEach(option => {
             option.addEventListener('click', () => {
-                const type = (option as HTMLElement).dataset.type;
-                if (!type) return;
+                const typeStr = (option as HTMLElement).dataset.type;
+                if (!typeStr) return;
 
                 // 更新 UI
                 this.container.querySelectorAll('.agent-type-option').forEach(o => 
@@ -387,12 +415,19 @@ export class AgentConfigEditor implements IEditor {
                 const llmSection = this.container.querySelector('#llm-config-section') as HTMLElement;
                 const mcpSection = this.container.querySelector('#mcp-section') as HTMLElement;
                 
-                if (type === 'orchestrator') {
+                // ✅ 修复：composite 和 workflow 类型隐藏 LLM 配置
+                if (typeStr === 'composite' || typeStr === 'workflow') {
                     llmSection?.style.setProperty('display', 'none');
                     mcpSection?.style.setProperty('display', 'none');
                 } else {
                     llmSection?.style.setProperty('display', 'block');
                     mcpSection?.style.setProperty('display', 'block');
+                }
+
+                // ✅ 更新内部状态
+                const type = this.normalizeAgentType(typeStr);  // ✅ 确保返回有效的 AgentType
+                if (this.content) {
+                    this.content.type = type;
                 }
 
                 handleChange();
@@ -530,7 +565,8 @@ export class AgentConfigEditor implements IEditor {
 
         // 获取选中的类型
         const selectedType = this.container.querySelector('.agent-type-option.selected') as HTMLElement;
-        const type = selectedType?.dataset.type as 'agent' | 'orchestrator' || 'agent';
+        // ✅ 修复：使用 normalizeAgentType 确保类型有效
+        const type = this.normalizeAgentType(selectedType?.dataset.type);
 
         this.content.name = getVal('name');
         this.content.icon = getVal('icon');
@@ -543,8 +579,8 @@ export class AgentConfigEditor implements IEditor {
                 modelId: getVal('modelId'),
                 systemPrompt: getVal('systemPrompt'),
                 maxHistoryLength: parseInt(getVal('maxHistoryLength')) || -1,
-                mcpServers: getCheckedValues('mcpServers'),
-                autoPrompts: this.content.config?.autoPrompts || []
+                mcpServers: getCheckedValues('mcpServers')
+                // ✅ 修复：移除 autoPrompts
             };
         }
     }

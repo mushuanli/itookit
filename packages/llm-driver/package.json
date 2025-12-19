@@ -1,5 +1,5 @@
 {
-  "name": "@itookit/llmdriver",
+  "name": "@itookit/llm-driver",
   "version": "0.1.0",
   "description": "A unified, TypeScript-based LLM interface driver supporting OpenAI, Anthropic, Gemini and more.",
   "main": "dist/index.js",
@@ -37,12 +37,12 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/mushuanli/itookit.git",
-    "directory": "packages/llmdriver"
+    "directory": "packages/llm-driver"
   },
   "bugs": {
     "url": "https://github.com/mushuanli/itookit/issues"
   },
-  "homepage": "https://github.com/mushuanli/itookit/tree/main/packages/llmdriver#readme",
+  "homepage": "https://github.com/mushuanli/itookit/tree/main/packages/llm-driver#readme",
   "publishConfig": {
     "access": "public"
   },

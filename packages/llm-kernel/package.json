@@ -1,0 +1,69 @@
+{
+  "name": "@itookit/llm-kernel",
+  "version": "0.1.0",
+  "description": "LLM execution kernel - executors, orchestrators, and runtime",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "types": "./dist/index.d.ts"
+    },
+    "./cli": {
+      "import": "./dist/cli/index.js",
+      "require": "./dist/cli/index.cjs",
+      "types": "./dist/cli/index.d.ts"
+    },
+    "./worker": {
+      "import": "./dist/worker/index.js",
+      "require": "./dist/worker/index.cjs",
+      "types": "./dist/worker/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "dev": "vite build --watch",
+    "build": "vite build && tsc --emitDeclarationOnly",
+    "test": "vitest",
+    "test:coverage": "vitest --coverage",
+    "lint": "eslint src --ext .ts",
+    "typecheck": "tsc --noEmit",
+    "clean": "rimraf dist"
+  },
+  "dependencies": {
+    "@itookit/common": "workspace:*",
+    "@itookit/llm-driver": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "rimraf": "^5.0.5",
+    "typescript": "^5.3.0",
+    "vite": "^5.4.0",
+    "vite-plugin-dts": "^3.9.0",
+    "vitest": "^1.6.0"
+  },
+  "peerDependencies": {
+    "@itookit/llm-driver": "workspace:*"
+  },
+  "keywords": [
+    "llm",
+    "kernel",
+    "executor",
+    "orchestrator",
+    "ai",
+    "agent"
+  ],
+  "author": "iTookit",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/itookit/itookit.git",
+    "directory": "packages/llm-kernel"
+  }
+}

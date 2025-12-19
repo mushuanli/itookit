@@ -1,167 +1,209 @@
-// @file: llmdriver/providers/openai.ts
+// @file: llm-driver/providers/openai.ts
 
 import { BaseProvider } from './base';
-import { ChatCompletionParams, ChatCompletionResponse, ChatCompletionChunk } from '../types';
-import { LLMError } from '../errors';
-import { processAttachment } from '../utils/attachment';
+import {
+    LLMProviderConfig,
+    ChatCompletionParams,
+    ChatCompletionResponse,
+    ChatCompletionChunk,
+    ChatMessage
+} from '../types';
+import { parseSSEStream } from '../utils/stream';
 
-export class OpenAICompatibleProvider extends BaseProvider {
-    // 兼容 OpenAI 格式、DeepSeek、OpenRouter 等
+/**
+ * OpenAI Compatible Provider
+ * 
+ * 支持：OpenAI, DeepSeek, Groq, OpenRouter, Ollama 等
+ */
+export class OpenAIProvider extends BaseProvider {
+    readonly name = 'openai';
     
-    private async prepareMessages(messages: ChatCompletionParams['messages']) {
-        // 在此处处理 processAttachment 逻辑，将文件转为 Base64 或 URL
-        // 代码复用原有的 processAttachment 逻辑，此处略简写
-        return Promise.all(messages.map(async (msg) => {
-            if (typeof msg.content === 'string') return msg;
-            if (!Array.isArray(msg.content)) return msg;
-
-            const newContent: any[] = [];
-            for (const part of msg.content) {
-                if (part.type === 'text') {
-                    newContent.push(part);
-                } else if (part.type === 'image_url') {
-                    const { mimeType, base64 } = await processAttachment(part.image_url.url);
-                    newContent.push({
-                        type: 'image_url',
-                        image_url: { url: `data:${mimeType};base64,${base64}` }
-                    });
-                } else if (part.type === 'document') {
-                    // OpenAI 本身不支持 document type，但这通常是用来适配兼容接口的
-                     // 如果是兼容 DeepSeek 或其他支持文档的，保留原样或转换
-                     newContent.push(part); 
-                }
-            }
-            return { ...msg, content: newContent };
-        }));
-    }
-
-    async create(params: ChatCompletionParams): Promise<ChatCompletionResponse> {
-        const body: any = {
-            model: this.getModel(params),
-            messages: await this.prepareMessages(params.messages),
-            stream: false,
-            temperature: params.temperature,
-            max_tokens: params.maxTokens,
-            top_p: params.topP,
-            tools: params.tools,
-            tool_choice: params.toolChoice
-        };
-
-        // Thinking Logic
-        if (params.thinking && this.config.supportsThinking) {
-             // DeepSeek uses reasoning_content (no specific request param usually needed if supported)
-             // OpenAI o1 uses reasoning_effort
-             if (params.reasoningEffort) body.reasoning_effort = params.reasoningEffort;
+    constructor(config: LLMProviderConfig) {
+        super(config);
+        if (!this.baseURL) {
+            this.baseURL = 'https://api.openai.com/v1';
         }
-
-        const headers = {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${this.config.apiKey}`,
-            ...this.config.headers
-        };
-
-        const response = await fetch(this.config.apiBaseUrl!, {
+    }
+    
+    /**
+     * 非流式请求
+     */
+    async create(params: ChatCompletionParams): Promise<ChatCompletionResponse> {
+        const url = `${this.baseURL}/chat/completions`;
+        const body = this.buildRequestBody(params);
+        
+        const response = await this.fetchJSON<any>(url, {
             method: 'POST',
-            headers,
+            headers: this.buildHeaders(),
             body: JSON.stringify(body),
             signal: params.signal
         });
-
-        if (!response.ok) {
-            const error = await response.json().catch(() => ({}));
-            throw new LLMError(error.error?.message || response.statusText, {
-                provider: this.config.provider,
-                statusCode: response.status
-            });
+        
+        return this.normalizeResponse(response);
+    }
+    
+    /**
+     * 流式请求
+     */
+    async *stream(params: ChatCompletionParams): AsyncGenerator<ChatCompletionChunk> {
+        const url = `${this.baseURL}/chat/completions`;
+        const body = this.buildRequestBody({ ...params, stream: true });
+        
+        const stream = await this.fetchStream(url, {
+            method: 'POST',
+            headers: this.buildHeaders(),
+            body: JSON.stringify(body),
+            signal: params.signal
+        });
+        
+        for await (const data of parseSSEStream(stream)) {
+            if (data === '[DONE]') break;
+            
+            try {
+                const chunk = JSON.parse(data);
+                yield this.normalizeChunk(chunk);
+            } catch {
+                // 忽略解析错误
+            }
         }
-
-        const data = await response.json();
-        const choice = data.choices?.[0];
-
+    }
+    
+    // ============== 请求构建 ==============
+    
+    protected buildHeaders(): Record<string, string> {
+        const headers = super.buildHeaders();
+        headers['Authorization'] = `Bearer ${this.config.apiKey}`;
+        
+        // OpenRouter 需要 Referer
+        if (this.config.requiresReferer) {
+            headers['HTTP-Referer'] = 'https://itookit.com';
+            headers['X-Title'] = 'iTookit';
+        }
+        
+        // Organization ID
+        if (this.config.metadata?.organizationId) {
+            headers['OpenAI-Organization'] = this.config.metadata.organizationId;
+        }
+        
+        return headers;
+    }
+    
+    protected buildRequestBody(params: ChatCompletionParams): Record<string, any> {
+        const body: Record<string, any> = {
+            model: this.getModel(params),
+            messages: this.convertMessages(params.messages),
+            stream: params.stream || false
+        };
+        
+        // 基础参数
+        if (params.temperature !== undefined) body.temperature = params.temperature;
+        if (params.maxTokens !== undefined) body.max_tokens = params.maxTokens;
+        if (params.topP !== undefined) body.top_p = params.topP;
+        if (params.stop !== undefined) body.stop = params.stop;
+        if (params.frequencyPenalty !== undefined) body.frequency_penalty = params.frequencyPenalty;
+        if (params.presencePenalty !== undefined) body.presence_penalty = params.presencePenalty;
+        if (params.seed !== undefined) body.seed = params.seed;
+        if (params.user !== undefined) body.user = params.user;
+        
+        // 响应格式
+        if (params.responseFormat) {
+            body.response_format = params.responseFormat;
+        }
+        
+        // 工具
+        if (params.tools && params.tools.length > 0) {
+            body.tools = params.tools;
+            if (params.toolChoice) body.tool_choice = params.toolChoice;
+        }
+        
+        // 思考模式 (o1/o3)
+        if (params.thinking && params.reasoningEffort) {
+            body.reasoning_effort = params.reasoningEffort;
+        }
+        
+        // 流式选项
+        if (params.stream) {
+            body.stream_options = { include_usage: true };
+        }
+        
+        return body;
+    }
+    
+    protected convertMessages(messages: ChatMessage[]): any[] {
+        return messages.map(msg => {
+            const converted: any = {
+                role: msg.role,
+                content: msg.content
+            };
+            
+            if (msg.name) converted.name = msg.name;
+            if (msg.tool_call_id) converted.tool_call_id = msg.tool_call_id;
+            
+            return converted;
+        });
+    }
+    
+    // ============== 响应标准化 ==============
+    
+    protected normalizeResponse(response: any): ChatCompletionResponse {
+        const choice = response.choices?.[0];
+        const message = choice?.message || {};
+        
+        // 提取思考内容 (DeepSeek R1 使用 reasoning_content)
+        let thinking: string | undefined;
+        if (message.reasoning_content) {
+            thinking = message.reasoning_content;
+        }
+        
         return {
+            id: response.id,
+            object: response.object,
+            created: response.created,
+            model: response.model,
             choices: [{
+                index: choice?.index || 0,
                 message: {
                     role: 'assistant',
-                    content: choice?.message?.content || '',
-                    // Normalize DeepSeek or OpenAI reasoning
-                    thinking: choice?.message?.reasoning_content || undefined, 
-                    tool_calls: choice?.message?.tool_calls
+                    content: message.content || '',
+                    thinking,
+                    tool_calls: message.tool_calls
                 },
                 finish_reason: choice?.finish_reason || 'stop'
             }],
-            usage: data.usage,
-            model: data.model
+            usage: response.usage ? {
+                prompt_tokens: response.usage.prompt_tokens,
+                completion_tokens: response.usage.completion_tokens,
+                total_tokens: response.usage.total_tokens
+            } : undefined
         };
     }
-
-    async *stream(params: ChatCompletionParams): AsyncGenerator<ChatCompletionChunk> {
-        const body: any = {
-            model: this.getModel(params),
-            messages: await this.prepareMessages(params.messages),
-            stream: true,
-            temperature: params.temperature,
-            max_tokens: params.maxTokens,
-            top_p: params.topP,
-            tools: params.tools,
-            tool_choice: params.toolChoice,
-            stream_options: { include_usage: true }
-        };
-
-        const headers = {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${this.config.apiKey}`,
-            ...this.config.headers
-        };
-
-        const response = await fetch(this.config.apiBaseUrl!, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify(body),
-            signal: params.signal
-        });
-
-        if (!response.ok) {
-            throw new LLMError(response.statusText, { provider: this.config.provider, statusCode: response.status });
+    
+    protected normalizeChunk(chunk: any): ChatCompletionChunk {
+        const choice = chunk.choices?.[0];
+        const delta = choice?.delta || {};
+        
+        // 处理思考内容
+        let thinking: string | undefined;
+        if (delta.reasoning_content) {
+            thinking = delta.reasoning_content;
         }
-
-        const reader = response.body?.getReader();
-        if (!reader) throw new Error('Response body is null');
-
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
-
-            for (const line of lines) {
-                if (line.startsWith('data: ')) {
-                    const dataStr = line.slice(6).trim();
-                    if (dataStr === '[DONE]') return;
-                    try {
-                        const data = JSON.parse(dataStr);
-                        const delta = data.choices?.[0]?.delta;
-                        if (delta) {
-                            yield {
-                                choices: [{
-                                    delta: {
-                                        content: delta.content,
-                                        thinking: delta.reasoning_content, // DeepSeek
-                                        tool_calls: delta.tool_calls
-                                    },
-                                    finish_reason: data.choices[0]?.finish_reason || null
-                                }]
-                            };
-                        }
-                    } catch (e) {
-                        // ignore parse errors
-                    }
-                }
-            }
-        }
+        
+        return {
+            id: chunk.id,
+            object: chunk.object,
+            created: chunk.created,
+            model: chunk.model,
+            choices: [{
+                index: choice?.index || 0,
+                delta: {
+                    role: delta.role,
+                    content: delta.content,
+                    thinking,
+                    tool_calls: delta.tool_calls
+                },
+                finish_reason: choice?.finish_reason
+            }],
+            usage: chunk.usage
+        };
     }
 }
