@@ -30,7 +30,7 @@ export { ENGINE_DEFAULTS, STORAGE_KEYS, DEFAULT_AGENTS } from './core/constants'
 // ============================================
 
 export { SessionManager } from './session/session-manager';
-export type { DeleteOptions,RetryOptions } from './session/session-manager';
+export type { DeleteOptions,RetryOptions,SessionSnapshot, SessionManagerOptions } from './session/session-manager';
 
 export { SessionRegistry, getSessionRegistry } from './session/session-registry';
 export { SessionState } from './session/session-state';
