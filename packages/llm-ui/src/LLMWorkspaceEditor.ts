@@ -203,8 +203,6 @@ export class LLMWorkspaceEditor implements IEditor {
 
         this.currentSessionId = sessionId;
 
-        // ✅ 关键修改：bindSession 现在返回快照
-        const snapshot = await this.sessionManager.bindSession(this.options.nodeId, sessionId);
 
         // ✅ 取消之前的事件订阅
         if (this.sessionEventUnsubscribe) {
@@ -212,10 +210,8 @@ export class LLMWorkspaceEditor implements IEditor {
             this.sessionEventUnsubscribe = null;
         }
 
-        // ✅ 订阅增量事件（用于后续的流式更新）
-        this.sessionEventUnsubscribe = this.sessionManager.onEvent(
-            (event) => this.handleSessionEvent(event)
-        );
+    // ✅ 步骤 2：绑定会话并获取快照（此时还没有订阅事件）
+    const snapshot = await this.sessionManager.bindSession(this.options.nodeId, sessionId);
 
         // 加载 Manifest 获取标题
         try {
@@ -235,6 +231,12 @@ export class LLMWorkspaceEditor implements IEditor {
             this.historyView.renderWelcome();
         }
 
+    // ✅ 步骤 5：渲染完成后，再订阅增量事件
+    // 此时 renderedSessionIds 已经包含了所有历史消息的 ID
+    // 后续的 session_start 事件如果重复，会被 appendSessionGroup 过滤
+    this.sessionEventUnsubscribe = this.sessionManager.onEvent(
+        (event) => this.handleSessionEvent(event)
+    );
         // ✅ 根据快照状态更新 UI
         this.updateStatusFromSnapshot(snapshot);
 
