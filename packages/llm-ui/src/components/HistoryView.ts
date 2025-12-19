@@ -65,6 +65,9 @@ export class HistoryView {
     // ✨ [新增] 编辑状态跟踪
     private editingNodes = new Set<string>();
 
+    // ✅ 新增：已渲染的 Session ID 集合（用于去重）
+    private renderedSessionIds = new Set<string>();
+
     constructor(
         container: HTMLElement,
         onContentChange?: (id: string, content: string, type: 'user' | 'node') => void,
@@ -267,6 +270,13 @@ export class HistoryView {
     }
 
     private appendSessionGroup(group: SessionGroup, isCollapsed: boolean) {
+        // ✅ 关键修复：检查是否已渲染
+        if (this.renderedSessionIds.has(group.id)) {
+            console.warn(`[HistoryView] Duplicate session skipped: ${group.id}`);
+            return;
+        }
+        this.renderedSessionIds.add(group.id);
+        
         const wrapper = document.createElement('div');
         wrapper.className = `llm-ui-session llm-ui-session--${group.role}`;
         wrapper.dataset.sessionId = group.id;
@@ -499,6 +509,12 @@ export class HistoryView {
     }
 
     private appendNode(parentId: string | undefined, node: ExecutionNode, isCollapsed: boolean) {
+        // ✅ 关键修复：检查是否已渲染
+        if (this.nodeMap.has(node.id)) {
+            console.warn(`[HistoryView] Duplicate node skipped: ${node.id}`);
+            return;
+        }
+        
         let parentEl: HTMLElement | null = null;
         
         if (parentId) {
@@ -710,7 +726,10 @@ export class HistoryView {
      */
     public removeMessages(ids: string[], animated: boolean = true): void {
         for (const id of ids) {
-            // 1. 处理 Session 元素
+            // ✅ 从去重集合移除
+            this.renderedSessionIds.delete(id);
+            
+            // 处理 Session 元素
             const sessionEl = this.container.querySelector(`[data-session-id="${id}"]`) as HTMLElement;
             if (sessionEl) {
                 this.removeElement(sessionEl, animated);
