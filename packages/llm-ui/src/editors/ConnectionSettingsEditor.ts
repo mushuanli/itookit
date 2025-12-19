@@ -1,7 +1,8 @@
 // @file llm-ui/editors/ConnectionSettingsEditor.ts
 import { Modal, Toast,BaseSettingsEditor,generateShortUUID } from '@itookit/common';
 // [新增] 引入测试函数
-import { testLLMConnection,IAgentService, LLMConnection, LLM_PROVIDER_DEFAULTS } from '@itookit/llmdriver';
+import { testLLMConnection, LLMConnection, LLM_PROVIDER_DEFAULTS } from '@itookit/llm-driver';
+import {IAgentService} from '@itookit/llm-engine';
 
 export class ConnectionSettingsEditor extends BaseSettingsEditor<IAgentService> {
     private testingConnections = new Set<string>();

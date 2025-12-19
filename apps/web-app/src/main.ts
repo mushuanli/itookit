@@ -11,7 +11,8 @@ import { FileTypeDefinition } from '@itookit/vfs-ui';
 // 模块引入
 import { createSettingsModule } from '@itookit/app-settings';
 import { createLLMFactory, createAgentEditorFactory, VFSAgentService } from '@itookit/llm-ui';
-import { initializeLLMModule, chatFileParser } from '@itookit/llm-engine';
+// 引入 Engine 核心初始化方法和 SessionEngine
+import { initializeLLMEngine, LLMSessionEngine, chatFileParser } from '@itookit/llm-engine';
 
 // 策略引入
 import { 
@@ -40,31 +41,30 @@ async function bootstrap() {
         // --- 1. 基础设施初始化 ---
         const vfsCore = await initVFS();
 
-        // --- 2. 核心服务层初始化 ---
-        // 2.1 Agent & LLM Services
-        const agentService = new VFSAgentService(vfsCore);
-        await agentService.init();
+        // --- 2. 核心服务层初始化 (重构关键点) ---
         
-        // LLM Engine 初始化
-        const { engine: llmEngine } = await initializeLLMModule(agentService, undefined, { maxConcurrent: 8 });
+        // 2.1 初始化 Agent Service (管理 Prompt, Connection, Tools)
+        const agentService = new VFSAgentService(vfsCore);
+        
+        // 2.2 初始化 Session Engine (管理 .chat 文件持久化)
+        const sessionEngine = new LLMSessionEngine(vfsCore);
 
-        // 2.2 Settings 模块 (Facade 一键初始化)
+        // 2.3 !!! 初始化 LLM Kernel & Registry !!!
+        // 这一步至关重要，它会启动全局 SessionRegistry 和 Kernel
+        await initializeLLMEngine({
+            agentService,
+            sessionEngine,
+            maxConcurrent: 4, // 配置最大并发任务数
+            // plugins: [...] // 如果有 Kernel 插件在此传入
+        });
+
+        // 2.4 Settings 模块
         const settingsModule = await createSettingsModule(vfsCore, agentService);
 
-/*
-    // 6. 监听全局事件（可选）
-    registry.onGlobalEvent((event) => {
-        switch (event.type) {
-            case 'pool_status_changed':
-                updateGlobalStatusBar(event.payload);
-                break;
-            case 'session_unread_updated':
-                updateSidebarBadge(event.payload.sessionId, event.payload.count);
-                break;
-        }
-    });
-    */
-        const llmFactory = createLLMFactory(agentService, llmEngine);
+        // --- 3. 创建 UI Factories ---
+        
+        // 将初始化好的单例 service 传入 UI Factory
+        const llmFactory = createLLMFactory(agentService, sessionEngine);
         const agentFactory = createAgentEditorFactory(agentService);
         
         // ✨ [修复 1] 显式声明类型 Record<string, WorkspaceStrategy>

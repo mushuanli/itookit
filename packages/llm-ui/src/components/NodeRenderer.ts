@@ -1,6 +1,7 @@
-// @file llm-ui/components/NodeRenderer.ts
+// @file: llm-ui/components/NodeRenderer.ts
+
 import { escapeHTML } from '@itookit/common';
-import { ExecutionNode } from '../core/types';
+import { ExecutionNode } from '@itookit/llm-engine';
 import { NodeTemplates } from './templates/NodeTemplates';
 
 export interface RenderResult {
@@ -23,11 +24,12 @@ class IconResolver {
         // 2. 其次检查 agentId
         if (node.data.metaInfo?.agentId === 'default') return '🤖';
         
-        switch (node.type) {
+        switch (node.executorType) {
             case 'agent': return '🤖'; 
             case 'tool': return '🔧';
-            case 'router': return '🔀';
-            case 'thought': return '💭';
+            case 'composite': return '🔀';  // 原 router
+            case 'http': return '🌐';
+            case 'script': return '📜';
             default: return '📄';
         }
     }
@@ -49,25 +51,27 @@ export class NodeRenderer {
         const layoutClass = IconResolver.getLayoutClass(node);
         
         // BEM: llm-ui-node llm-ui-node--[type] [layout]
-        el.className = `llm-ui-node llm-ui-node--${node.type} ${layoutClass}`;
+        el.className = `llm-ui-node llm-ui-node--${node.executorType} ${layoutClass}`;
         el.dataset.id = node.id;
         el.dataset.status = node.status;
 
         const mountPoints: { output?: HTMLElement } = {};
 
-        if (node.type === 'agent' || node.type === 'router') {
+        // ✅ 修复：使用有效的 executorType 值
+        if (node.executorType === 'agent' || node.executorType === 'composite') {
             this.renderAgent(el, node, mountPoints, icon);
-        } else if (node.type === 'tool') {
+        } else if (node.executorType === 'tool') {
             el.innerHTML = NodeTemplates.renderTool(node, icon);
-        } else if (node.type === 'thought') {
-            el.innerHTML = NodeTemplates.renderThinking(node.data.thought || '', true);
+        } else {
+            // http, script 等其他类型：使用通用渲染
+            this.renderAgent(el, node, mountPoints, icon);
         }
 
         return { element: el, mountPoints };
     }
 
     private static renderAgent(el: HTMLElement, node: ExecutionNode, mounts: any, icon: string) {
-        const hasThought = node.data.thought && node.data.thought.length > 0 ? true:false;
+        const hasThought = !!(node.data.thought && node.data.thought.length > 0);
         const previewText = node.data.output ? node.data.output.substring(0, 50).replace(/\n/g, ' ') : '';
 
         el.innerHTML = `

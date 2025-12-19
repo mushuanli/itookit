@@ -1,106 +1,98 @@
-// @file: llm-engine/core/types.ts
+// @file: llm-engine/src/core/types.ts
 
-import { ExecutionContext, NodeStatus, ChatNode } from '@itookit/llmdriver';
-export * from './errors';
+import { NodeStatus } from '@itookit/llm-kernel';
 
 /**
- * UI 层的执行节点（用于渲染）
- * 与 ChatNode（持久化层）分离，但可以互相转换
+ * 执行节点（UI 层表示）
  */
 export interface ExecutionNode {
+    /** 节点 ID */
     id: string;
+    
+    /** 父节点 ID */
     parentId?: string;
-    type: 'agent' | 'tool' | 'thought' | 'router';
+    
+    /** 执行器 ID */
+    executorId: string;
+    
+    /** 执行器类型 */
+    executorType: 'agent' | 'tool' | 'http' | 'script' | 'composite';
+    
+    /** 显示名称 */
     name: string;
+    
+    /** 节点状态 */
     status: NodeStatus;
+    
+    /** 开始时间 */
     startTime: number;
+    
+    /** 结束时间 */
     endTime?: number;
     
-    // 动态数据
+    /** 节点数据 */
     data: {
-        input?: any;
-        thought?: string; // CoT 推理内容
-        output?: string;  // 最终输出内容
-        toolCall?: { name: string; args: any; result?: any };
-        artifacts?: any[];
+        /** 输入 */
+        input?: unknown;
         
-        // [修改] 语义化元数据，替代 UI 布局属性
-        metaInfo?: {
-            provider?: string;       
-            connectionName?: string; 
-            model?: string;          
-            systemPrompt?: string;   
-            
-            // [修改] 语义化执行模式
-            // 'concurrent' -> 并行执行 (UI 可据此渲染 Grid)
-            // 'sequential' -> 串行执行 (UI 可据此渲染 List)
-            executionMode?: 'concurrent' | 'sequential';
-            
-            // 原始 Agent ID，UI 可据此查找图标
-            agentId?: string;
-            
-            // 批处理大小（针对并发模式）
-            batchSize?: number;
-
-            [key: string]: any;
+        /** 思考过程 */
+        thought?: string;
+        
+        /** 输出内容 */
+        output?: string;
+        
+        /** 工具调用 */
+        toolCall?: {
+            name: string;
+            args: any;
+            result?: any;
         };
+        
+        /** 元数据 */
+        metaInfo?: Record<string, any>;
     };
     
-    // 子节点（用于并行任务或嵌套编排）
+    /** 子节点 */
     children?: ExecutionNode[];
 }
 
 /**
- * UI 会话组（对应一轮对话）
+ * 会话组（一轮对话）
  */
 export interface SessionGroup {
+    /** 会话组 ID */
     id: string;
-    timestamp: number;
-    role: 'user' | 'assistant';
-    content?: string; // 用户输入的纯文本
-    files?: Array<{ name: string; type: string }>; // 附件
     
-    // 系统的执行树根节点（如果是 assistant 角色）
+    /** 时间戳 */
+    timestamp: number;
+    
+    /** 角色 */
+    role: 'user' | 'assistant';
+    
+    /** 用户输入内容 */
+    content?: string;
+    
+    /** 附件 */
+    files?: Array<{ name: string; type: string }>;
+    
+    /** 执行树根节点（assistant 角色） */
     executionRoot?: ExecutionNode;
     
-    // 关联到持久化节点的 ID
+    /** 持久化节点 ID */
     persistedNodeId?: string;
     
-    // ✨ [新增] 分支导航支持
-    siblingIndex?: number;      // 当前在兄弟节点中的索引
-    siblingCount?: number;      // 兄弟节点总数
+    /** 分支导航 */
+    siblingIndex?: number;
+    siblingCount?: number;
     
-    // ✨ [新增] 关联的用户消息 ID（对于 assistant）
+    /** 关联的用户消息 ID */
     parentUserSessionId?: string;
 }
 
 /**
- * 扩展标准执行上下文，注入 UI 流式回调能力和节点生命周期管理
+ * UI 事件类型
  */
-export interface StreamingContext extends ExecutionContext {
-    // 当前会话 ID，用于持久化
-    sessionId?: string;
-    
-    // ✨ [修复 3.1] 添加 AbortSignal 支持
-    signal?: AbortSignal;
-    
-    callbacks?: {
-        // 增加 nodeId 参数，支持定向输出
-        onThinking?: (delta: string, nodeId?: string) => void;
-        onOutput?: (delta: string, nodeId?: string) => void;
-        
-        // 允许 Executor 动态创建子节点 UI
-        onNodeStart?: (node: ExecutionNode) => void;
-        
-        // 允许 Executor 更新节点状态
-        onNodeStatus?: (nodeId: string, status: NodeStatus) => void;
-        
-        // 允许更新元数据 (如设置布局模式)
-        onNodeMetaUpdate?: (nodeId: string, meta: any) => void;
-    };
-}
-// 事件总线定义
-export type OrchestratorEvent = 
+export type OrchestratorEvent =
     // 会话事件
     | { type: 'session_start'; payload: SessionGroup }
     | { type: 'session_cleared'; payload: Record<string, never> }
@@ -115,8 +107,76 @@ export type OrchestratorEvent =
     | { type: 'finished'; payload: { sessionId: string } }
     | { type: 'error'; payload: { message: string; error?: Error } }
     
-    // ✨ [新增] 编辑/删除/重试事件
+    // 编辑/删除事件
     | { type: 'messages_deleted'; payload: { deletedIds: string[] } }
     | { type: 'message_edited'; payload: { sessionId: string; newContent: string } }
     | { type: 'retry_started'; payload: { originalId: string; newId: string } }
     | { type: 'sibling_switch'; payload: { sessionId: string; newIndex: number; total: number } };
+
+/**
+ * 会话运行状态
+ */
+export type SessionStatus =
+    | 'idle'
+    | 'queued'
+    | 'running'
+    | 'completed'
+    | 'failed'
+    | 'aborted';
+
+/**
+ * 会话运行时信息
+ */
+export interface SessionRuntime {
+    /** 会话 ID */
+    sessionId: string;
+    
+    /** VFS 节点 ID */
+    nodeId: string;
+    
+    /** 当前状态 */
+    status: SessionStatus;
+    
+    /** 当前任务 ID */
+    currentTaskId?: string;
+    
+    /** 最后活跃时间 */
+    lastActiveTime: number;
+    
+    /** 未读消息数 */
+    unreadCount: number;
+    
+    /** 错误信息 */
+    error?: Error;
+}
+
+/**
+ * 执行任务
+ */
+export interface ExecutionTask {
+    id: string;
+    sessionId: string;
+    nodeId: string;
+    input: {
+        text: string;
+        files: File[];
+        executorId: string;
+    };
+    options: {
+        skipUserMessage?: boolean;
+        parentUserNodeId?: string;
+    };
+    priority: number;
+    createdAt: number;
+    abortController: AbortController;
+}
+
+/**
+ * 注册表事件
+ */
+export type RegistryEvent =
+    | { type: 'session_registered'; payload: { sessionId: string } }
+    | { type: 'session_unregistered'; payload: { sessionId: string } }
+    | { type: 'session_status_changed'; payload: { sessionId: string; status: SessionStatus; prevStatus?: SessionStatus } }
+    | { type: 'session_unread_updated'; payload: { sessionId: string; count: number } }
+    | { type: 'pool_status_changed'; payload: { running: number; queued: number; maxConcurrent: number } };
