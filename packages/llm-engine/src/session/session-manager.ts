@@ -12,6 +12,17 @@ import {
 import { EngineError, EngineErrorCode } from '../core/errors';
 
 /**
+ * 会话快照
+ */
+export interface SessionSnapshot {
+    sessionId: string;
+    nodeId: string;
+    sessions: SessionGroup[];
+    status: SessionStatus;
+    isRunning: boolean;
+}
+
+/**
  * 删除选项
  */
 export interface DeleteOptions {
@@ -36,6 +47,17 @@ export interface RetryOptions {
 }
 
 /**
+ * SessionManager 配置选项
+ */
+export interface SessionManagerOptions {
+    /** 当绑定到会话时的回调，用于 UI 初始化 */
+    onSessionBound?: (snapshot: SessionSnapshot) => void;
+    
+    /** 当会话解绑时的回调 */
+    onSessionUnbound?: () => void;
+}
+
+/**
  * 会话管理器
  * 单会话视图代理，封装对 SessionRegistry 的调用
  */
@@ -45,9 +67,14 @@ export class SessionManager {
     private nodeId: string | null = null;
     private eventUnsubscribe: (() => void) | null = null;
     private bindingVersion = 0;
+    private options: SessionManagerOptions;
     
-    constructor() {
+    // ✅ 新增：外部事件处理器引用（用于状态恢复时发送事件）
+    private externalEventHandler: ((event: OrchestratorEvent) => void) | null = null;
+    
+    constructor(options: SessionManagerOptions = {}) {
         this.registry = getSessionRegistry();
+        this.options = options;
     }
     
     // ================================================================
@@ -56,8 +83,9 @@ export class SessionManager {
     
     /**
      * 绑定到会话
+     * 返回会话快照，供 UI 层直接使用
      */
-    async bindSession(nodeId: string, sessionId: string): Promise<void> {
+    async bindSession(nodeId: string, sessionId: string): Promise<SessionSnapshot> {
         const currentVersion = ++this.bindingVersion;
         
         // 解绑之前的会话
@@ -71,7 +99,7 @@ export class SessionManager {
             if (this.bindingVersion !== currentVersion) {
                 console.log(`[SessionManager] Bind cancelled (stale version)`);
                 this.registry.unregisterSession(sessionId, { keepInBackground: true }).catch(() => {});
-                return;
+                throw new EngineError(EngineErrorCode.ABORTED, 'Bind cancelled');
             }
             
             this.nodeId = nodeId;
@@ -79,9 +107,103 @@ export class SessionManager {
             this.registry.setActiveSession(sessionId);
             
             console.log(`[SessionManager] Bound to session: ${sessionId}`);
+            
+            // ✅ 返回完整快照
+            return this.getSnapshot();
+            
         } catch (e) {
             console.error('[SessionManager] Bind failed:', e);
             throw EngineError.from(e);
+        }
+    }
+    
+    /**
+     * ✅ 新增：通知会话已绑定
+     */
+    private notifySessionBound(): void {
+        if (!this.sessionId || !this.nodeId) return;
+        
+        const snapshot = this.getSnapshot();
+        
+        // 调用配置的回调
+        if (this.options.onSessionBound) {
+            this.options.onSessionBound(snapshot);
+        }
+        
+        // ✅ 如果已经有事件订阅者，发送历史消息
+        if (this.externalEventHandler) {
+            this.replayHistoryToHandler(this.externalEventHandler);
+        }
+    }
+    
+    /**
+     * ✅ 新增：获取当前会话快照
+     */
+    getSnapshot(): SessionSnapshot {
+        if (!this.sessionId || !this.nodeId) {
+            return {
+                sessionId: '',
+                nodeId: '',
+                sessions: [],
+                status: 'idle',
+                isRunning: false
+            };
+        }
+        
+        const runtime = this.registry.getSessionRuntime(this.sessionId);
+        const status = runtime?.status || 'idle';
+        
+        return {
+            sessionId: this.sessionId,
+            nodeId: this.nodeId,
+            sessions: this.registry.getSessionMessages(this.sessionId),
+            status,
+            isRunning: status === 'running' || status === 'queued'
+        };
+    }
+    
+    /**
+     * ✅ 新增：向处理器重放历史消息
+     * 用于切换会话后恢复 UI 状态
+     */
+    private replayHistoryToHandler(handler: (event: OrchestratorEvent) => void): void {
+        if (!this.sessionId) return;
+        
+        const sessions = this.registry.getSessionMessages(this.sessionId);
+        
+        for (const session of sessions) {
+            // 发送 session_start 事件
+            handler({
+                type: 'session_start',
+                payload: session
+            });
+            
+            // 如果是 assistant 消息，发送节点状态
+            if (session.role === 'assistant' && session.executionRoot) {
+                handler({
+                    type: 'node_start',
+                    payload: { node: session.executionRoot }
+                });
+                
+                // 发送最终状态
+                handler({
+                    type: 'node_status',
+                    payload: {
+                        nodeId: session.executionRoot.id,
+                        status: session.executionRoot.status,
+                        result: session.executionRoot.data.output
+                    }
+                });
+            }
+        }
+        
+        // 如果会话已完成，发送 finished 事件
+        const runtime = this.registry.getSessionRuntime(this.sessionId);
+        if (runtime?.status === 'completed') {
+            handler({
+                type: 'finished',
+                payload: { sessionId: this.sessionId }
+            });
         }
     }
     
@@ -108,12 +230,31 @@ export class SessionManager {
     }
     
     // ================================================================
-    // 状态查询
+    // 事件订阅
     // ================================================================
     
     /**
-     * 获取所有消息
+     * 订阅会话事件
+     * ✅ 修复：保存外部处理器引用，支持状态恢复
      */
+    onEvent(handler: (event: OrchestratorEvent) => void): () => void {
+        if (!this.sessionId) {
+            return () => {};
+        }
+        
+        // 取消之前的订阅
+        if (this.eventUnsubscribe) {
+            this.eventUnsubscribe();
+        }
+        
+        this.eventUnsubscribe = this.registry.onSessionEvent(this.sessionId, handler);
+        return this.eventUnsubscribe;
+    }
+    
+    // ================================================================
+    // 状态查询
+    // ================================================================
+    
     getSessions(): SessionGroup[] {
         if (!this.sessionId) return [];
         return this.registry.getSessionMessages(this.sessionId);
@@ -154,27 +295,7 @@ export class SessionManager {
      * 是否有未保存的更改
      */
     hasUnsavedChanges(): boolean {
-        return false; // Engine 自动保存
-    }
-    
-    // ================================================================
-    // 事件订阅
-    // ================================================================
-    
-    /**
-     * 订阅会话事件
-     */
-    onEvent(handler: (event: OrchestratorEvent) => void): () => void {
-        if (!this.sessionId) {
-            return () => {};
-        }
-        
-        if (this.eventUnsubscribe) {
-            this.eventUnsubscribe();
-        }
-        
-        this.eventUnsubscribe = this.registry.onSessionEvent(this.sessionId, handler);
-        return this.eventUnsubscribe;
+        return false;
     }
     
     // ================================================================
@@ -346,10 +467,7 @@ export class SessionManager {
      */
     async getSiblings(sessionGroupId: string): Promise<SessionGroup[]> {
         if (!this.sessionId) return [];
-        
-        // 通过 Registry 获取
-        const siblings = await this.registry.getNodeSiblings(this.sessionId, sessionGroupId);
-        return siblings;
+        return await this.registry.getNodeSiblings(this.sessionId, sessionGroupId);
     }
     
     /**
