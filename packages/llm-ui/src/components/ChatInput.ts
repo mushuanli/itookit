@@ -26,7 +26,7 @@ export class ChatInput {
     
     private loading = false;
     private files: File[] = [];
-    private executors: ExecutorOption[] = [];
+    //private executors: ExecutorOption[] = [];
 
     constructor(private container: HTMLElement, private options: ChatInputOptions) {
         this.render();
@@ -132,7 +132,7 @@ export class ChatInput {
      * 更新执行器列表，支持分组
      */
     public updateExecutors(executors: ExecutorOption[], activeId?: string) {
-        this.executors = executors;
+        //this.executors = executors;
         
         // 分组逻辑
         const groups: Record<string, ExecutorOption[]> = {};

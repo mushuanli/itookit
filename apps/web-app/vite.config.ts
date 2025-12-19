@@ -8,10 +8,28 @@ export default defineConfig({
     resolve: {
         alias: {
             '@': path.resolve(__dirname, './src'),
+            
+            // ✅ 映射所有 workspace 包到源码
+            '@itookit/vfs-ui/style.css': path.resolve(__dirname, '../../packages/vfs-ui/src/styles/vfs-ui.unified.css'),
+            '@itookit/mdxeditor/style.css': path.resolve(__dirname, '../../packages/mdx/src/styles/index.css'),
+            '@itookit/memory-manager/style.css': path.resolve(__dirname, '../../packages/memory-manager/src/styles/memory-manager.css'),
+            '@itookit/llm-ui/style.css': path.resolve(__dirname, '../../packages/llm-ui/src/styles/index.css'),
+            '@itookit/app-settings/style.css': path.resolve(__dirname, '../../packages/app-settings/src/styles/styles.css'),
+            '@itookit/common/style.css': path.resolve(__dirname, '../../packages/common/src/styles/index.css'),
+
+            '@itookit/common': path.resolve(__dirname, '../../packages/common/src/index.ts'),
+            '@itookit/vfs-core': path.resolve(__dirname, '../../packages/vfs-core/src/index.ts'),
+            '@itookit/mdxeditor': path.resolve(__dirname, '../../packages/mdx/src/index.ts'),
+            '@itookit/vfs-ui': path.resolve(__dirname, '../../packages/vfs-ui/src/index.ts'),
+            '@itookit/llm-driver': path.resolve(__dirname, '../../packages/llm-driver/src/index.ts'),
+            '@itookit/llm-kernel': path.resolve(__dirname, '../../packages/llm-kernel/src/index.ts'),
             '@itookit/llm-engine': path.resolve(__dirname, '../../packages/llm-engine/src/index.ts'),
+            '@itookit/llm-ui': path.resolve(__dirname, '../../packages/llm-ui/src/index.ts'),
+            '@itookit/app-settings': path.resolve(__dirname, '../../packages/app-settings/src/index.ts'),
+            '@itookit/memory-manager': path.resolve(__dirname, '../../packages/memory-manager/src/index.ts'),
         },
         // ✅ 建议: 防止 React/Vue 等库在 Monorepo 中被打包两次 (双重实例问题)
-        dedupe: ['react', 'react-dom', 'dexie', 'mermaid'] 
+        dedupe: ['react', 'react-dom', 'dexie', 'mermaid', '@codemirror/state', '@codemirror/view'] 
     },
     server: {
         port: 3000,

@@ -5,10 +5,8 @@ import {
     getRuntime,
     ExecutorConfig,
     ExecutionResult,
-    KernelEvent,
-    getEventBus
 } from '@itookit/llm-kernel';
-import { OrchestratorEvent, ExecutionNode } from '../core/types';
+import { OrchestratorEvent } from '../core/types';
 import { UIEventAdapter } from './ui-event-adapter';
 
 /**

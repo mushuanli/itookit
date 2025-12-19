@@ -94,7 +94,7 @@ export class MemoryManager {
         // 1. 准备宿主能力 (生产)
         // 这些函数封装了 MemoryManager 内部的 Layout 和 VFSUI 操作
         const hostContext: EditorHostContext = {
-            toggleSidebar: (collapsed?: boolean) => {
+            toggleSidebar: (_collapsed?: boolean) => {
                 // 调用 VFSUI 或 Layout 的方法
                 this.vfsUI.toggleSidebar(); 
             },

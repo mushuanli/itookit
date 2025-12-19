@@ -16,7 +16,6 @@ import {
     ExecutionNode,
     OrchestratorEvent,
     RegistryEvent,
-    DeleteOptions,
     SessionSnapshot  // ✅ 新增导入
 } from '@itookit/llm-engine';
 import { NodeAction } from './core/types';
@@ -68,7 +67,7 @@ export class LLMWorkspaceEditor implements IEditor {
     private initResolve: (() => void) | null = null;
     private initReject: ((e: Error) => void) | null = null;
 
-    constructor(container: HTMLElement, options: LLMEditorOptions) {
+    constructor(_container: HTMLElement, options: LLMEditorOptions) {
         this.options = options;
         this.registry = getSessionRegistry();
         this.sessionManager = new SessionManager();
@@ -178,7 +177,7 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     // 2. 完善 loadSessionFromEngine 方法
-    private async loadSessionFromEngine(initialContent?: string): Promise<void> {
+    private async loadSessionFromEngine(_initialContent?: string): Promise<void> {
         if (!this.options.nodeId) {
             throw new Error('[LLMWorkspaceEditor] nodeId is required.');
         }
@@ -838,7 +837,7 @@ export class LLMWorkspaceEditor implements IEditor {
         return false; // Engine 自动保存
     }
 
-    setDirty(dirty: boolean): void {
+    setDirty(_dirty: boolean): void {
         // no-op
     }
 
