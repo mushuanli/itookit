@@ -110,6 +110,13 @@ export class SessionRegistry {
         if (this.sessions.has(sessionId)) {
             const existing = this.sessions.get(sessionId)!;
             existing.lastActiveTime = Date.now();
+            
+            // ✅ 关键修复：确保 listeners 集合存在
+            // （可能被 keepInBackground 清空过）
+            if (!this.sessionListeners.has(sessionId)) {
+                this.sessionListeners.set(sessionId, new Set());
+            }
+            
             return existing;
         }
         
@@ -1278,7 +1285,26 @@ export class SessionRegistry {
             estimatedMB: Math.round(estimatedMB * 100) / 100
         };
     }
-    
+
+// ✅ 新增：获取会话快照的方法
+    getSessionSnapshot(sessionId: string): {
+        runtime: SessionRuntime | undefined;
+        sessions: SessionGroup[];
+        status: SessionStatus;
+        isRunning: boolean;
+    } {
+        const runtime = this.sessions.get(sessionId);
+        const state = this.sessionStates.get(sessionId);
+        const status = runtime?.status || 'idle';
+        
+        return {
+            runtime,
+            sessions: state?.getSessions() || [],
+            status,
+            isRunning: status === 'running' || status === 'queued'
+        };
+    }
+
     /**
      * 销毁
      */

@@ -16,9 +16,11 @@ import {
     ExecutionNode,
     OrchestratorEvent,
     RegistryEvent,
-    DeleteOptions
+    DeleteOptions,
+    SessionSnapshot  // ✅ 新增导入
 } from '@itookit/llm-engine';
-import { NodeAction} from './core/types';
+import { NodeAction } from './core/types';
+
 export interface LLMEditorOptions extends EditorOptions {
     sessionEngine: ILLMSessionEngine;
     agentService: IAgentService;
@@ -47,7 +49,8 @@ export class LLMWorkspaceEditor implements IEditor {
     // 事件监听器
     private listeners = new Map<string, Set<EditorEventCallback>>();
     private globalEventUnsubscribe: (() => void) | null = null;
-    
+    private sessionEventUnsubscribe: (() => void) | null = null;
+
     // UI Elements
     private titleInput!: HTMLInputElement;
     private statusIndicator!: HTMLElement;
@@ -133,31 +136,29 @@ export class LLMWorkspaceEditor implements IEditor {
                 id: agent.id,
                 name: agent.name,
                 icon: agent.icon,
-            category: agent.type === 'agent' ? 'Agents' : 
-                     agent.type === 'workflow' ? 'Workflows' : 'Other',
+                category: agent.type === 'agent' ? 'Agents' : 
+                         agent.type === 'workflow' ? 'Workflows' : 'Other',
                 description: agent.description
             }));
 
         // ✅ 修复：检查是否已存在 default，如果不存在才添加
-        const hasDefault = initialAgents.some(a => a.id === 'default');
-        if (!hasDefault) {
-            initialAgents.unshift({
-                id: 'default',
-                name: 'Default Assistant',
-                icon: '🤖',
-                category: 'System'
-            });
-        }
+            const hasDefault = initialAgents.some(a => a.id === 'default');
+            if (!hasDefault) {
+                initialAgents.unshift({
+                    id: 'default',
+                    name: 'Default Assistant',
+                    icon: '🤖',
+                    category: 'System'
+                });
+            }
 
         // ✅ 修复：去重（基于 id）
-        const seen = new Set<string>();
-        initialAgents = initialAgents.filter(agent => {
-            if (seen.has(agent.id)) {
-                return false;
-            }
-            seen.add(agent.id);
-            return true;
-        });
+            const seen = new Set<string>();
+            initialAgents = initialAgents.filter(agent => {
+                if (seen.has(agent.id)) return false;
+                seen.add(agent.id);
+                return true;
+            });
 
         } catch (e) {
             console.warn('[LLMWorkspaceEditor] Failed to get initial agents:', e);
@@ -202,14 +203,21 @@ export class LLMWorkspaceEditor implements IEditor {
 
         this.currentSessionId = sessionId;
 
-        // [关键] 绑定 SessionManager 到该会话
-        // 这会触发 Registry 的注册逻辑，如果会话不在内存中，会从磁盘加载
-        await this.sessionManager.bindSession(this.options.nodeId, sessionId);
+        // ✅ 关键修改：bindSession 现在返回快照
+        const snapshot = await this.sessionManager.bindSession(this.options.nodeId, sessionId);
 
-        // 订阅事件
-        this.sessionManager.onEvent((event) => this.handleSessionEvent(event));
+        // ✅ 取消之前的事件订阅
+        if (this.sessionEventUnsubscribe) {
+            this.sessionEventUnsubscribe();
+            this.sessionEventUnsubscribe = null;
+        }
 
-        // 加载 Manifest
+        // ✅ 订阅增量事件（用于后续的流式更新）
+        this.sessionEventUnsubscribe = this.sessionManager.onEvent(
+            (event) => this.handleSessionEvent(event)
+        );
+
+        // 加载 Manifest 获取标题
         try {
             const manifest = await this.options.sessionEngine.getManifest(this.options.nodeId);
             if (manifest.title) {
@@ -220,18 +228,72 @@ export class LLMWorkspaceEditor implements IEditor {
             console.warn('[LLMWorkspaceEditor] Failed to load manifest:', e);
         }
 
-        // 渲染历史
-        const sessions = this.sessionManager.getSessions();
-        if (sessions.length > 0) {
-            this.historyView.renderFull(sessions);
+        // ✅ 关键修改：使用快照渲染历史（而不是再次调用 getSessions）
+        if (snapshot.sessions.length > 0) {
+            this.historyView.renderFull(snapshot.sessions);
         } else {
             this.historyView.renderWelcome();
         }
 
-        // 更新状态指示器
-        this.updateStatusIndicator();
+        // ✅ 根据快照状态更新 UI
+        this.updateStatusFromSnapshot(snapshot);
 
-        console.log(`[LLMWorkspaceEditor] Session loaded: ${sessionId}`);
+        console.log(`[LLMWorkspaceEditor] Session loaded: ${sessionId}, messages: ${snapshot.sessions.length}, status: ${snapshot.status}`);
+    }
+
+    /**
+     * ✅ 新增：根据快照更新状态
+     */
+    private updateStatusFromSnapshot(snapshot: SessionSnapshot): void {
+        // 更新状态指示器
+        this.updateStatusIndicatorFromStatus(snapshot.status);
+        
+        // 如果正在运行，设置输入框为 loading 状态
+        if (snapshot.isRunning) {
+            this.chatInput.setLoading(true);
+            
+            // ✅ 关键：如果正在运行，HistoryView 需要进入流式模式
+            this.historyView.enterStreamingMode();
+        }
+    }
+
+    /**
+     * ✅ 新增：根据状态字符串更新指示器
+     */
+    private updateStatusIndicatorFromStatus(status: string): void {
+        if (!this.statusIndicator) return;
+
+        const dot = this.statusIndicator.querySelector('.llm-workspace-status__dot') as HTMLElement;
+        const text = this.statusIndicator.querySelector('.llm-workspace-status__text') as HTMLElement;
+
+        dot?.classList.remove('--running', '--queued', '--completed', '--failed', '--idle');
+
+        switch (status) {
+            case 'running':
+                dot?.classList.add('--running');
+                text.textContent = 'Generating...';
+                this.chatInput.setLoading(true);
+                break;
+            case 'queued':
+                dot?.classList.add('--queued');
+                text.textContent = 'Queued';
+                this.chatInput.setLoading(true);
+                break;
+            case 'completed':
+                dot?.classList.add('--completed');
+                text.textContent = 'Ready';
+                this.chatInput.setLoading(false);
+                break;
+            case 'failed':
+                dot?.classList.add('--failed');
+                text.textContent = 'Error';
+                this.chatInput.setLoading(false);
+                break;
+            default:
+                dot?.classList.add('--idle');
+                text.textContent = 'Ready';
+                this.chatInput.setLoading(false);
+        }
     }
 
     // ================================================================
@@ -377,9 +439,12 @@ export class LLMWorkspaceEditor implements IEditor {
             this.emit('change');
         }
 
-        // ✨ [修改] 移除了在此处调用 updateStatusIndicator 的逻辑
-        // 我们改为完全依赖 handleGlobalEvent 中的 session_status_changed 来更新顶栏状态
-        // 这样可以避免 "QueryRunner 发出 finished" 和 "Registry 更新 status" 之间的时序问题
+        // ✅ 修复：在 finished 和 error 时更新状态
+        if (event.type === 'finished') {
+            this.updateStatusIndicatorFromStatus('completed');
+        } else if (event.type === 'error') {
+            this.updateStatusIndicatorFromStatus('failed');
+        }
     }
 
     /**
@@ -393,19 +458,16 @@ export class LLMWorkspaceEditor implements IEditor {
                 
             case 'session_status_changed':
                 console.log(`[LLMWorkspaceEditor] Status Changed: ${event.payload.sessionId} -> ${event.payload.status}`);
-                // ✨ [修复] 如果是当前会话的状态变更，立即更新 UI
+                
                 if (event.payload.sessionId === this.currentSessionId) {
-                    this.updateStatusIndicator();
+                    this.updateStatusIndicatorFromStatus(event.payload.status);
                 } else if (event.payload.status === 'completed') {
-                    // 其他会话完成时显示轻提示
                     this.showNotification('Background task completed');
                 }
                 break;
 
             case 'session_unread_updated':
-                if (event.payload.sessionId !== this.currentSessionId && event.payload.count > 0) {
-                    // console.log(`[LLMWorkspaceEditor] Unread: ${event.payload.count} in ${event.payload.sessionId}`);
-                }
+                // 其他会话有未读消息（可用于侧边栏显示）
                 break;
         }
     }
@@ -569,8 +631,9 @@ export class LLMWorkspaceEditor implements IEditor {
         this.chatInput.setLoading(true);
         try {
             await this.sessionManager.editMessage(nodeId, session.content || '', true);
-        } finally {
-            this.updateStatusIndicator();
+        } catch (e: any) {
+            console.error('[LLMWorkspaceEditor] Edit and retry failed:', e);
+            this.historyView.renderError(e);
         }
     }
 
@@ -578,8 +641,9 @@ export class LLMWorkspaceEditor implements IEditor {
         this.chatInput.setLoading(true);
         try {
             await this.sessionManager.resendUserMessage(nodeId);
-        } finally {
-            this.updateStatusIndicator();
+        } catch (e: any) {
+            console.error('[LLMWorkspaceEditor] Resend failed:', e);
+            this.historyView.renderError(e);
         }
     }
 
@@ -641,42 +705,8 @@ export class LLMWorkspaceEditor implements IEditor {
      * 更新状态指示器 (Ready / Generating...)
      */
     private updateStatusIndicator(): void {
-        if (!this.statusIndicator) return;
-
-        // 从 Manager 获取最新状态 (它会查 Registry)
         const status = this.sessionManager.getStatus();
-        const dot = this.statusIndicator.querySelector('.llm-workspace-status__dot') as HTMLElement;
-        const text = this.statusIndicator.querySelector('.llm-workspace-status__text') as HTMLElement;
-
-        // 移除所有状态类
-        dot?.classList.remove('--running', '--queued', '--completed', '--failed', '--idle');
-
-        switch (status) {
-            case 'running':
-                dot?.classList.add('--running');
-                text.textContent = 'Generating...';
-                this.chatInput.setLoading(true);
-                break;
-            case 'queued':
-                dot?.classList.add('--queued');
-                text.textContent = 'Queued';
-                this.chatInput.setLoading(true);
-                break;
-            case 'completed':
-                dot?.classList.add('--completed');
-                text.textContent = 'Ready';
-                this.chatInput.setLoading(false);
-                break;
-            case 'failed':
-                dot?.classList.add('--failed');
-                text.textContent = 'Error';
-                this.chatInput.setLoading(false);
-                break;
-            default:
-                dot?.classList.add('--idle');
-                text.textContent = 'Ready';
-                this.chatInput.setLoading(false);
-        }
+        this.updateStatusIndicatorFromStatus(status === 'unbound' ? 'idle' : status);
     }
 
     /**
@@ -815,7 +845,13 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     async destroy(): Promise<void> {
-        // 解绑事件
+        // ✅ 解绑会话事件
+        if (this.sessionEventUnsubscribe) {
+            this.sessionEventUnsubscribe();
+            this.sessionEventUnsubscribe = null;
+        }
+
+        // 解绑全局事件
         if (this.globalEventUnsubscribe) {
             this.globalEventUnsubscribe();
             this.globalEventUnsubscribe = null;
@@ -826,6 +862,7 @@ export class LLMWorkspaceEditor implements IEditor {
         
         // 清理 UI
         this.historyView?.destroy();
+        this.chatInput?.destroy();
         this.container.innerHTML = '';
         this.listeners.clear();
     }
