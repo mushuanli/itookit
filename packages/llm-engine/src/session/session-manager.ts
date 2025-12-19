@@ -67,14 +67,9 @@ export class SessionManager {
     private nodeId: string | null = null;
     private eventUnsubscribe: (() => void) | null = null;
     private bindingVersion = 0;
-    private options: SessionManagerOptions;
-    
-    // ✅ 新增：外部事件处理器引用（用于状态恢复时发送事件）
-    private externalEventHandler: ((event: OrchestratorEvent) => void) | null = null;
-    
-    constructor(options: SessionManagerOptions = {}) {
+
+    constructor(_options: SessionManagerOptions = {}) {
         this.registry = getSessionRegistry();
-        this.options = options;
     }
     
     // ================================================================
@@ -116,26 +111,7 @@ export class SessionManager {
             throw EngineError.from(e);
         }
     }
-    
-    /**
-     * ✅ 新增：通知会话已绑定
-     */
-    private notifySessionBound(): void {
-        if (!this.sessionId || !this.nodeId) return;
-        
-        const snapshot = this.getSnapshot();
-        
-        // 调用配置的回调
-        if (this.options.onSessionBound) {
-            this.options.onSessionBound(snapshot);
-        }
-        
-        // ✅ 如果已经有事件订阅者，发送历史消息
-        if (this.externalEventHandler) {
-            this.replayHistoryToHandler(this.externalEventHandler);
-        }
-    }
-    
+
     /**
      * ✅ 新增：获取当前会话快照
      */
@@ -160,51 +136,6 @@ export class SessionManager {
             status,
             isRunning: status === 'running' || status === 'queued'
         };
-    }
-    
-    /**
-     * ✅ 新增：向处理器重放历史消息
-     * 用于切换会话后恢复 UI 状态
-     */
-    private replayHistoryToHandler(handler: (event: OrchestratorEvent) => void): void {
-        if (!this.sessionId) return;
-        
-        const sessions = this.registry.getSessionMessages(this.sessionId);
-        
-        for (const session of sessions) {
-            // 发送 session_start 事件
-            handler({
-                type: 'session_start',
-                payload: session
-            });
-            
-            // 如果是 assistant 消息，发送节点状态
-            if (session.role === 'assistant' && session.executionRoot) {
-                handler({
-                    type: 'node_start',
-                    payload: { node: session.executionRoot }
-                });
-                
-                // 发送最终状态
-                handler({
-                    type: 'node_status',
-                    payload: {
-                        nodeId: session.executionRoot.id,
-                        status: session.executionRoot.status,
-                        result: session.executionRoot.data.output
-                    }
-                });
-            }
-        }
-        
-        // 如果会话已完成，发送 finished 事件
-        const runtime = this.registry.getSessionRuntime(this.sessionId);
-        if (runtime?.status === 'completed') {
-            handler({
-                type: 'finished',
-                payload: { sessionId: this.sessionId }
-            });
-        }
     }
     
     /**
@@ -357,7 +288,7 @@ export class SessionManager {
      * @param content 新内容
      * @param type 消息类型
      */
-    async updateContent(id: string, content: string, type: 'user' | 'node'): Promise<void> {
+    async updateContent(id: string, content: string, _type: 'user' | 'node'): Promise<void> {
         if (!this.sessionId) {
             throw new EngineError(EngineErrorCode.SESSION_INVALID, 'No session bound');
         }
@@ -430,7 +361,7 @@ export class SessionManager {
     /**
      * 检查是否可以删除
      */
-    canDeleteMessage(id: string): { allowed: boolean; reason?: string } {
+    canDeleteMessage(_id: string): { allowed: boolean; reason?: string } {
         if (this.isGenerating()) {
             return { allowed: false, reason: 'Cannot delete while generating' };
         }
@@ -440,7 +371,7 @@ export class SessionManager {
     /**
      * 检查是否可以重试
      */
-    canRetry(sessionGroupId: string): { allowed: boolean; reason?: string } {
+    canRetry(_sessionGroupId: string): { allowed: boolean; reason?: string } {
         if (this.isGenerating()) {
             return { allowed: false, reason: 'Already generating' };
         }
@@ -450,7 +381,7 @@ export class SessionManager {
     /**
      * 检查是否可以编辑
      */
-    canEdit(sessionGroupId: string): { allowed: boolean; reason?: string } {
+    canEdit(_sessionGroupId: string): { allowed: boolean; reason?: string } {
         if (this.isGenerating()) {
             return { allowed: false, reason: 'Cannot edit while generating' };
         }

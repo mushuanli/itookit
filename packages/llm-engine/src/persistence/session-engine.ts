@@ -524,7 +524,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
     async createFile(
         name: string, 
         parentId: string | null, 
-        content?: string | ArrayBuffer
+        _content?: string | ArrayBuffer
     ): Promise<EngineNode> {
         const title = (name || "New Chat").replace(/\.chat$/i, '');
         

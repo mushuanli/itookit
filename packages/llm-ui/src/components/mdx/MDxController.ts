@@ -1,6 +1,5 @@
 // @file llm-ui/components/mdx/MDxController.ts
 import { createMDxEditor, MDxEditor } from '@itookit/mdxeditor';
-import { IEditor } from '@itookit/common';
 
 export class MDxController {
     // ✨ [修改] 类型定义放宽为 IEditor，以便使用通用接口
@@ -26,7 +25,6 @@ export class MDxController {
     
     // ✅ 新增：批量缓冲
     private contentSnapshot: string = '';
-    private snapshotTime: number = 0;
 
     constructor(container: HTMLElement, initialContent: string, options?: { 
         readOnly?: boolean,

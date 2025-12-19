@@ -5,7 +5,7 @@ import type {
     LLMConnection as CommonLLMConnection,
 } from '@itookit/llm-driver';
 
-import {    AgentConfig,MCPServer} from '@itookit/llm-engine';
+import { MCPServer} from '@itookit/llm-engine';
 
 // 重新导出 LLMConnection，保持向后兼容
 export type LLMConnection = CommonLLMConnection;

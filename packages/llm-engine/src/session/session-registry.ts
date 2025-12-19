@@ -1,6 +1,5 @@
 // @file: llm-engine/session/session-registry.ts
 
-import { generateUUID } from '@itookit/common';
 import { 
     SessionGroup, 
     SessionRuntime, 
@@ -15,7 +14,7 @@ import { ENGINE_DEFAULTS } from '../core/constants';
 import { SessionState } from './session-state';
 import { KernelAdapter, getKernelAdapter } from '../adapters/kernel-adapter';
 import { PersistenceAdapter } from '../adapters/persistence-adapter';
-import { ILLMSessionEngine, ChatNode } from '../persistence/types';
+import { ILLMSessionEngine } from '../persistence/types';
 import { IAgentService } from '../services/agent-service';
 import { ExecutorConfig } from '@itookit/llm-kernel';
 import { Converters } from '../utils/converters';
@@ -49,7 +48,7 @@ export class SessionRegistry {
     private kernelAdapter!: KernelAdapter;
     private persistence!: PersistenceAdapter;
     private agentService!: IAgentService;
-    private sessionEngine!: ILLMSessionEngine;
+    //private sessionEngine!: ILLMSessionEngine;
     private initialized = false;
     
     private constructor() {}
@@ -74,7 +73,7 @@ export class SessionRegistry {
         this.kernelAdapter = getKernelAdapter();
         this.persistence = new PersistenceAdapter(sessionEngine);
         this.agentService = agentService;
-        this.sessionEngine = sessionEngine;
+        //this.sessionEngine = sessionEngine;
         
         if (options?.maxConcurrent) {
             this.maxConcurrent = options.maxConcurrent;

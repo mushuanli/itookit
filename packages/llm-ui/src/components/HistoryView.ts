@@ -1,6 +1,6 @@
 // @file: llm-ui/components/HistoryView.ts
 
-import { NodeAction, NodeActionCallback } from '../core/types';
+import { NodeActionCallback } from '../core/types';
 import {OrchestratorEvent, SessionGroup, ExecutionNode, } from '@itookit/llm-engine';
 import { NodeRenderer } from './NodeRenderer';
 import { MDxController } from './mdx/MDxController';

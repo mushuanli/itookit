@@ -92,7 +92,7 @@ export class PersistenceAdapter {
     /**
      * 切换分支
      */
-    async switchToBranch(nodeId: string, sessionId: string, targetNodeId: string): Promise<void> {
+    async switchToBranch(nodeId: string, _sessionId: string, targetNodeId: string): Promise<void> {
         // 获取 manifest
         const manifest = await this.engine.getManifest(nodeId);
         

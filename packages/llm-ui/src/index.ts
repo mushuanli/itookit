@@ -7,8 +7,6 @@ import {
     VFSAgentService, 
     ILLMSessionEngine, 
     initializeLLMEngine,
-    SessionRegistry,
-    getSessionRegistry
 } from '@itookit/llm-engine';
 import { EditorFactory, EditorOptions } from '@itookit/common';
 import { AgentConfigEditor } from './editors/AgentConfigEditor';
@@ -17,9 +15,9 @@ export { ConnectionSettingsEditor } from './editors/ConnectionSettingsEditor';
 export { MCPSettingsEditor } from './editors/MCPSettingsEditor';
 
 // 扩展 EditorOptions
-interface LLMFactoryOptions extends EditorOptions {
+//interface LLMFactoryOptions extends EditorOptions {
     // 工厂特定配置
-}
+//}
 
 
 
