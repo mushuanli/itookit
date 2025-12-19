@@ -36,15 +36,19 @@ export class KernelAdapter {
             files?: File[];
             onEvent?: (event: OrchestratorEvent) => void;
             signal?: AbortSignal;
+            /** ✨ [新增] 根节点 ID */
+            rootNodeId?: string;
         }
     ): Promise<ExecutionResult> {
-        const { sessionId, history, files, onEvent, signal } = options;
-        
+        const { sessionId, history, files, onEvent, signal, rootNodeId } = options;
+
         // 订阅事件并转换为 UI 事件
         let unsubscribe: (() => void) | undefined;
         
         if (onEvent) {
-            unsubscribe = this.uiAdapter.bridge(sessionId, onEvent);
+            unsubscribe = this.uiAdapter.bridge(sessionId, (uiEvent) => {
+                onEvent(uiEvent);
+            });
         }
         
         try {
@@ -57,7 +61,10 @@ export class KernelAdapter {
                         files: files || [],
                         sessionId
                     },
-                    signal
+                    signal,
+                    executionId: sessionId,
+                    // ✨ [新增] 传递给 Kernel
+                    rootNodeId: rootNodeId 
                 }
             );
             

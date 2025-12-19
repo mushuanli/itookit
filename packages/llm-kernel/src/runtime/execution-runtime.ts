@@ -17,6 +17,10 @@ export interface ExecutionOptions {
     timeout?: number;
     /** 外部中止信号 */
     signal?: AbortSignal;
+    /** 自定义执行 ID（用于事件关联） */
+    executionId?: string;
+    /** ✨ [新增] 根节点 ID（用于关联 UI 预创建的节点） */
+    rootNodeId?: string;
 }
 
 /**
@@ -40,7 +44,11 @@ export class ExecutionRuntime {
         input: unknown,
         options: ExecutionOptions = {}
     ): Promise<ExecutionResult> {
-        const executionId = generateUUID();
+        // ✅ 修复：允许外部传入 executionId
+        const executionId = options.executionId 
+            || options.variables?.sessionId 
+            || generateUUID();
+        
         const abortController = new AbortController();
         
         // 链接外部信号
@@ -72,6 +80,12 @@ export class ExecutionRuntime {
             undefined,
             abortController
         );
+
+        // ✨ [核心修复] 如果提供了 rootNodeId，设置当前节点 ID
+        // 这样后续的 emitContent/emitThinking 就会携带这个 ID
+        if (options.rootNodeId) {
+            context.setCurrentNode(options.rootNodeId);
+        }
         
         // 注入初始变量
         if (options.variables) {

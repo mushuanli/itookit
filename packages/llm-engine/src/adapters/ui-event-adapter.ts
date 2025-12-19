@@ -73,8 +73,8 @@ export class UIEventAdapter {
                 return {
                     type: 'node_update',
                     payload: {
-                        nodeId: nodeId || '',
-                        chunk: payload.delta,
+                        nodeId: nodeId || payload?.nodeId || '',  // 保留 fallback
+                        chunk: payload.delta || payload.content,  // 保留兼容性
                         field: 'output'
                     }
                 };

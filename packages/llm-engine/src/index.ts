@@ -68,7 +68,7 @@ export type {
     MCPServer 
 } from './services/agent-service';
 
-export { VFSAgentService } from './services/vfs-agent-service';
+import { VFSAgentService } from './services/vfs-agent-service';
 
 // ============================================
 // 工具
@@ -97,6 +97,7 @@ import { SessionRegistry, getSessionRegistry } from './session/session-registry'
 import { IAgentService } from './services/agent-service';
 import { ILLMSessionEngine } from './persistence/types';
 import { initializeKernel, KernelInitOptions } from '@itookit/llm-kernel';
+import { LLMSessionEngine } from './persistence/session-engine';
 
 /**
  * Engine 初始化选项
@@ -155,8 +156,6 @@ export async function quickInitialize(options: {
     agentService: IAgentService;
     sessionEngine: ILLMSessionEngine;
 }> {
-    const { VFSAgentService } = await import('./services/vfs-agent-service');
-    const { LLMSessionEngine } = await import('./persistence/session-engine');
     
     const agentService = new VFSAgentService(options.vfs);
     const sessionEngine = new LLMSessionEngine(options.vfs);
@@ -170,3 +169,5 @@ export async function quickInitialize(options: {
     
     return { registry, agentService, sessionEngine };
 }
+
+export {VFSAgentService};
