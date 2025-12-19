@@ -133,10 +133,35 @@ export class HistoryView {
     }
 
     renderError(error: Error) {
-        const div = document.createElement('div');
-        div.innerHTML = LayoutTemplates.renderErrorBanner(error.message);
-        this.container.appendChild(div.firstElementChild!);
-        this.scrollToBottom(true);
+    // 创建可关闭的错误横幅
+    const existingBanner = this.container.querySelector('.llm-ui-error-banner');
+    if (existingBanner) {
+        existingBanner.remove();
+    }
+    
+    const banner = document.createElement('div');
+    banner.className = 'llm-ui-error-banner';
+    banner.innerHTML = `
+        <div class="llm-ui-error-banner__content">
+            <span class="llm-ui-error-banner__icon">⚠️</span>
+            <span class="llm-ui-error-banner__message">${escapeHTML(error.message)}</span>
+            <button class="llm-ui-error-banner__close" title="Dismiss">×</button>
+        </div>
+    `;
+    
+    // 绑定关闭按钮
+    banner.querySelector('.llm-ui-error-banner__close')?.addEventListener('click', () => {
+        banner.remove();
+    });
+    
+    // 5秒后自动消失（但保留严重错误）
+    const isSerious = error.message.includes('401') || error.message.includes('API key');
+    if (!isSerious) {
+        setTimeout(() => banner.remove(), 5000);
+    }
+    
+    this.container.insertBefore(banner, this.container.firstChild);
+    this.scrollToBottom(true);
     }
 
     // ================================================================
@@ -821,7 +846,21 @@ export class HistoryView {
                 break;
             case 'error':
                 this.exitStreamingMode();
-                this.renderError(new Error(event.payload.message));
+            // ✅ 修复：显示更详细的错误信息
+            const errorMessage = event.payload.message || 'Unknown error';
+            const errorCode = (event.payload as any).code;
+            
+            // 根据错误类型显示不同的提示
+            if (errorCode === 401) {
+                this.renderError(new Error(`🔐 ${errorMessage}`));
+            } else if (errorCode === 429) {
+                this.renderError(new Error(`⏳ ${errorMessage}`));
+            } else {
+                this.renderError(new Error(errorMessage));
+            }
+            
+            // ✅ 同时结束所有流式编辑器
+            this.editorMap.forEach(editor => editor.finishStream(false));
                 break;
             case 'messages_deleted':
                 this.handleMessagesDeleted(event.payload.deletedIds);

@@ -46,7 +46,9 @@ export class OpenAIProvider extends BaseProvider {
      * 流式请求
      */
     async *stream(params: ChatCompletionParams): AsyncGenerator<ChatCompletionChunk> {
-        const url = `${this.baseURL}/chat/completions`;
+	const url = this.baseURL.endsWith('/chat/completions') 
+        ? this.baseURL 
+        : `${this.baseURL}/chat/completions`;
         const body = this.buildRequestBody({ ...params, stream: true });
         
         const stream = await this.fetchStream(url, {

@@ -105,7 +105,8 @@ export type OrchestratorEvent =
     // 交互事件
     | { type: 'request_input'; payload: { nodeId: string; schema: any } }
     | { type: 'finished'; payload: { sessionId: string } }
-    | { type: 'error'; payload: { message: string; error?: Error } }
+    // ✅ 修复：扩展 error payload 以支持 code
+    | { type: 'error'; payload: { message: string; error?: Error; code?: string | number } }
     
     // 编辑/删除事件
     | { type: 'messages_deleted'; payload: { deletedIds: string[] } }

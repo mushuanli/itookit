@@ -133,17 +133,31 @@ export class LLMWorkspaceEditor implements IEditor {
                 id: agent.id,
                 name: agent.name,
                 icon: agent.icon,
-                category: agent.type === 'agent' ? 'Agents' : 'Workflows',
+            category: agent.type === 'agent' ? 'Agents' : 
+                     agent.type === 'workflow' ? 'Workflows' : 'Other',
                 description: agent.description
             }));
 
-            // 添加默认执行器
+        // ✅ 修复：检查是否已存在 default，如果不存在才添加
+        const hasDefault = initialAgents.some(a => a.id === 'default');
+        if (!hasDefault) {
             initialAgents.unshift({
                 id: 'default',
                 name: 'Default Assistant',
                 icon: '🤖',
                 category: 'System'
             });
+        }
+
+        // ✅ 修复：去重（基于 id）
+        const seen = new Set<string>();
+        initialAgents = initialAgents.filter(agent => {
+            if (seen.has(agent.id)) {
+                return false;
+            }
+            seen.add(agent.id);
+            return true;
+        });
 
         } catch (e) {
             console.warn('[LLMWorkspaceEditor] Failed to get initial agents:', e);
