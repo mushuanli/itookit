@@ -14,9 +14,9 @@
         "@fortawesome/fontawesome-free": "^7.1.0",
         "@itookit/app-settings": "workspace:*",
         "@itookit/common": "workspace:*",
+        "@itookit/llm-driver": "workspace:*",
         "@itookit/llm-engine": "workspace:*",
         "@itookit/llm-ui": "workspace:*",
-        "@itookit/llm-driver": "workspace:*",
         "@itookit/mdxeditor": "workspace:*",
         "@itookit/memory-manager": "workspace:*",
         "@itookit/vfs-core": "workspace:*",
@@ -38,6 +38,7 @@
         "@codemirror/language": "^6.11.3",
         "@codemirror/state": "^6.5.2",
         "@codemirror/view": "^6.38.8",
+        "@types/node": "^25.0.3",
         "typescript": "^5.9.3",
         "vite": "^6.4.1",
         "vite-plugin-singlefile": "^2.3.0"

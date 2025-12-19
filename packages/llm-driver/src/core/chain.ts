@@ -1,7 +1,7 @@
 // @file: llm-driver/core/chain.ts
 
 import { LLMDriver } from './driver';
-import { ChatCompletionParams, ChatCompletionResponse, ChatMessage } from '../types';
+import { ChatCompletionParams } from '../types';
 
 /**
  * 链式步骤配置

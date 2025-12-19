@@ -1,6 +1,5 @@
 // @file: llm-ui/components/NodeRenderer.ts
 
-import { escapeHTML } from '@itookit/common';
 import { ExecutionNode } from '@itookit/llm-engine';
 import { NodeTemplates } from './templates/NodeTemplates';
 

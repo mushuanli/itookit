@@ -2,10 +2,6 @@
 
 import { 
     ISessionEngine as IBaseSessionEngine,
-    EngineNode, 
-    EngineSearchQuery, 
-    EngineEvent, 
-    EngineEventType 
 } from '@itookit/common';
 
 /**

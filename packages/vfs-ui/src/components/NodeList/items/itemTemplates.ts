@@ -49,7 +49,7 @@ export function createFileItemHTML(
     const { id, metadata, content, headings = [], icon } = file;
     const { title, lastModified, tags = [], custom = {} } = metadata;
     const summary = content?.summary || '';
-    const { isPinned = false, hasUnreadUpdate = false, taskCount } = custom;
+    const { isPinned = false, hasUnreadUpdate = false } = custom;
 
     // ✨ [新增] 删除按钮逻辑
     let deleteBtnHTML = '';

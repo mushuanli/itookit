@@ -264,8 +264,8 @@ export class AnthropicProvider extends BaseProvider {
     
     protected normalizeStreamEvent(
         event: any,
-        currentThinking: string,
-        currentContent: string
+        _currentThinking: string,
+        _currentContent: string
     ): ChatCompletionChunk | null {
         const type = event.type;
         

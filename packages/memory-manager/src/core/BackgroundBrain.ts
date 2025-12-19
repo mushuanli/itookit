@@ -13,7 +13,7 @@ export class BackgroundBrain {
     private unsubscribe: (() => void) | null = null;
 
     // [修改] 接收 ISessionEngine 接口
-    constructor(private engine: ISessionEngine, activeRules: string[] = ['*']) {
+    constructor(private engine: ISessionEngine, _activeRules: string[] = ['*']) {
         // [修改] 适配新的 MentionSource 签名
         const fileProvider = new FileMentionSource({ engine: this.engine });
         

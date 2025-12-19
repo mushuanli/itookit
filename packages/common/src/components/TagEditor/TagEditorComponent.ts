@@ -1,7 +1,7 @@
 /**
  * @file common/components/TagEditor/TagEditorComponent.ts
  */
-import './TagEditorComponent.css';
+import '../../styles/TagEditorComponent.css';
 
 import { escapeHTML } from '../../utils/utils';
 import { IAutocompleteSource, Suggestion } from '../../interfaces/IAutocompleteSource';
