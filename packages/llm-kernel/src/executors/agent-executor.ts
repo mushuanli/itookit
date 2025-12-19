@@ -109,6 +109,7 @@ export class AgentExecutor implements IExecutor {
             };
             
         } catch (error: any) {
+            console.error('[AgentExecutor] Error:', error);
             context.emitError(error);
             
             return {

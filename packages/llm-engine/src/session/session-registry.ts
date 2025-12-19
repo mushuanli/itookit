@@ -136,7 +136,6 @@ export class SessionRegistry {
         // 发送事件
         this.emitGlobal({ type: 'session_registered', payload: { sessionId } });
         
-        console.log(`[SessionRegistry] Session registered: ${sessionId}`);
         return runtime;
     }
     
@@ -155,7 +154,6 @@ export class SessionRegistry {
             if (options?.keepInBackground) {
                 // 保持后台运行
                 this.sessionListeners.get(sessionId)?.clear();
-                console.log(`[SessionRegistry] Session ${sessionId} moved to background`);
                 return;
             }
             
@@ -181,8 +179,6 @@ export class SessionRegistry {
         
         // 发送事件
         this.emitGlobal({ type: 'session_unregistered', payload: { sessionId } });
-        
-        console.log(`[SessionRegistry] Session unregistered: ${sessionId}`);
     }
     
     /**
@@ -231,8 +227,6 @@ export class SessionRegistry {
                 
                 state.loadFromChatNode(node);
             }
-            
-            console.log(`[SessionRegistry] Loaded ${state.getSessions().length} messages for ${sessionId}`);
         } catch (e) {
             console.error(`[SessionRegistry] Failed to load session ${sessionId}:`, e);
         }
@@ -397,7 +391,7 @@ export class SessionRegistry {
             // 2. 解析执行器配置
             const executorConfig = await this.resolveExecutorConfig(input.executorId);
             
-            // 3. 创建助手消息
+            // 3. 创建助手消息 (UI 上的第一个气泡)
             const assistantNodeId = await this.persistence.appendMessage(
                 nodeId,
                 sessionId,
@@ -412,7 +406,7 @@ export class SessionRegistry {
             
             const rootNode = state.createAssistantMessage(executorConfig, assistantNodeId);
             
-            // 发送助手消息开始事件
+            // 发送助手消息开始事件 (通知 UI 渲染这个气泡)
             this.emitSessionEvent(sessionId, {
                 type: 'session_start',
                 payload: state.getLastSession()!
@@ -432,19 +426,44 @@ export class SessionRegistry {
             
             // 5. 设置事件转发
             const onEvent = (event: OrchestratorEvent) => {
-                // 更新累积器
-                if (event.type === 'node_update' && event.payload.chunk) {
-                    if (event.payload.field === 'thought') {
-                        accumulator.thinking += event.payload.chunk;
-                        state.appendToNode(rootNode.id, event.payload.chunk, 'thought');
-                    } else if (event.payload.field === 'output') {
-                        accumulator.output += event.payload.chunk;
-                        state.appendToNode(rootNode.id, event.payload.chunk, 'output');
+                // 拦截重复的根 node_start
+                if (event.type === 'node_start') {
+                    const p = event.payload as { parentId?: string; node?: ExecutionNode };
+                    const hasParent = !!(p.parentId || p.node?.parentId);
+                    
+                    if (!hasParent) {
+                        return; // ⛔️ 不转发给 UI
                     }
-                    persist();
+                }
+
+                // 修正空 nodeId
+                if (event.type === 'node_update') {
+                    if (!event.payload.nodeId || event.payload.nodeId === '') {
+                        event.payload.nodeId = rootNode.id;
+                    }
+                }
+
+                if (event.type === 'node_status') {
+                    if (!event.payload.nodeId || event.payload.nodeId === '') {
+                        event.payload.nodeId = rootNode.id;
+                    }
+                }
+
+                // 更新累积器（用于持久化）
+                if (event.type === 'node_update' && event.payload.chunk) {
+                    if (event.payload.nodeId === rootNode.id) {
+                        if (event.payload.field === 'thought') {
+                            accumulator.thinking += event.payload.chunk;
+                            state.appendToNode(rootNode.id, event.payload.chunk, 'thought');
+                        } else if (event.payload.field === 'output') {
+                            accumulator.output += event.payload.chunk;
+                            state.appendToNode(rootNode.id, event.payload.chunk, 'output');
+                        }
+                        persist();
+                    }
                 }
                 
-                // 转发事件
+                // 转发事件给 UI
                 this.emitSessionEvent(sessionId, event);
             };
             
@@ -457,11 +476,13 @@ export class SessionRegistry {
                     history: state.getHistory(),
                     files: input.files,
                     onEvent,
-                    signal: task.abortController.signal
+                    signal: task.abortController.signal,
+                    // 尝试传递 ID，但即使失败，上面的 onEvent 拦截也会兜底
+                    rootNodeId: rootNode.id 
                 }
             );
 
-            // ✅ 修复：检查执行结果是否有错误（使用 errors 数组）
+            // [错误处理] 检查执行结果
             if (result.status === 'failed') {
                 const firstError = result.errors?.[0];
                 const error = new Error(firstError?.message || 'Execution failed');

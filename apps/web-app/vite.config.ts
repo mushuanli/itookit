@@ -8,6 +8,7 @@ export default defineConfig({
     resolve: {
         alias: {
             '@': path.resolve(__dirname, './src'),
+            '@itookit/llm-engine': path.resolve(__dirname, '../../packages/llm-engine/src/index.ts'),
         },
         // ✅ 建议: 防止 React/Vue 等库在 Monorepo 中被打包两次 (双重实例问题)
         dedupe: ['react', 'react-dom', 'dexie', 'mermaid'] 
