@@ -2,7 +2,6 @@
 import type { MDxPlugin, PluginContext } from '../../core/plugin';
 import type { MarkedExtension, Tokens } from 'marked';
 import * as commands from '../../editor/commands';
-import type { MDxEditor } from '../../editor/editor';
 
 export interface ClozePluginOptions {
   className?: string;

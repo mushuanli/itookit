@@ -152,7 +152,7 @@ export class TaskListPlugin implements MDxPlugin {
 
           // 全局替换当前单元格内的所有 [ ] 或 [x]
           // 使用 replace 的回调函数，确保每次匹配时 index 都能递增
-          const processedContent = content.replace(/\[([ xX])\]/gi, (match, state) => {
+          const processedContent = content.replace(/\[([ xX])\]/gi, (_match, state) => {
             const isChecked = state.toLowerCase() === 'x';
             const index = self.renderTaskCounter++;
 

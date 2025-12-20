@@ -227,7 +227,7 @@ export class TablePlugin implements MDxPlugin {
     /**
      * 执行筛选逻辑
      */
-    private handleFilter(table: HTMLTableElement, tbody: HTMLTableSectionElement, filterRow: HTMLTableRowElement): void {
+    private handleFilter(table: HTMLTableElement, _tbody: HTMLTableSectionElement, filterRow: HTMLTableRowElement): void {
         const state = this.tableStateMap.get(table);
         if (!state) return;
 

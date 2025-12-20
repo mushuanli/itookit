@@ -285,7 +285,7 @@ export class CoreEditorPlugin implements MDxPlugin {
   /**
    * 编辑器初始化后的回调
    */
-  private onEditorInitialized(payload: any): void {
+  private onEditorInitialized(_payload: any): void {
     // 可以在这里执行一些初始化后的操作，例如：设置焦点、加载用户偏好设置等
   }
 
@@ -344,7 +344,7 @@ export class CoreEditorPlugin implements MDxPlugin {
           const completion: Completion = {
             label: item.label,
             type: item.type,
-            apply: (view: EditorView, completion: Completion, from: number, to: number) => {
+            apply: (view: EditorView, _completion: Completion, _from: number, to: number) => {
               const text = applyTemplate(item);
               view.dispatch({
                 changes: { from: start, to, insert: text },

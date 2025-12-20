@@ -82,7 +82,7 @@ export class MediaPlugin implements MDxPlugin {
     // 这里假设用户使用 Markdown 图片语法 ![embed](url) 来触发嵌入
     const embedRegex = /<img\s+[^>]*src="([^"]+)"[^>]*alt="embed"[^>]*\/?>/gi;
     
-    processedHtml = processedHtml.replace(embedRegex, (match, src) => {
+    processedHtml = processedHtml.replace(embedRegex, (_match, src) => {
       return this.renderEmbed(src);
     });
 

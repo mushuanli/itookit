@@ -2,14 +2,14 @@
  * @file mdx/factory.ts
  */
 import { IEditor, EditorOptions } from '@itookit/common';
-import { MDxEditor, MDxEditorConfig } from './editor/editor';
+import { MDxEditor } from './editor/editor';
 import { CoreEditorPlugin, CoreEditorPluginOptions } from './plugins/core/core-editor.plugin';
 import { FoldablePlugin, FoldablePluginOptions } from './plugins/syntax-extensions/foldable.plugin';
 import { MathJaxPlugin, MathJaxPluginOptions } from './plugins/syntax-extensions/mathjax.plugin';
 import { MediaPlugin, MediaPluginOptions } from './plugins/syntax-extensions/media.plugin';
 import { MermaidPlugin, MermaidPluginOptions } from './plugins/syntax-extensions/mermaid.plugin';
-import { CalloutPlugin, CalloutPluginOptions } from './plugins/syntax-extensions/callout.plugin';
-import { PlantUMLPlugin, PlantUMLPluginOptions } from './plugins/syntax-extensions/plantuml.plugin';
+import { CalloutPlugin } from './plugins/syntax-extensions/callout.plugin';
+import { PlantUMLPlugin } from './plugins/syntax-extensions/plantuml.plugin';
 import { ClozePlugin } from './plugins/cloze/cloze.plugin';
 import { ClozeControlsPlugin } from './plugins/cloze/cloze-control-ui.plugin';
 import { MemoryPlugin } from './plugins/cloze/memory.plugin';
@@ -23,7 +23,7 @@ import { SourceSyncPlugin } from './plugins/interactions/source-jump.plugin';
 import { TagPlugin, TagPluginOptions } from './plugins/autocomplete/tag.plugin';
 import { MentionPlugin, MentionPluginOptions } from './plugins/autocomplete/mention.plugin';
 import { SvgPlugin, SvgPluginOptions } from './plugins/syntax-extensions/svg.plugin';
-import { VegaPlugin, VegaPluginOptions } from './plugins/syntax-extensions/vega.plugin';
+import { VegaPlugin } from './plugins/syntax-extensions/vega.plugin';
 import type { MDxPlugin } from './core/plugin';
 import { EditorFactory } from '@itookit/common';
 
