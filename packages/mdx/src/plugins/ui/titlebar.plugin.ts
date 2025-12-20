@@ -2,7 +2,7 @@
  * @file mdx/plugins/ui/titlebar.plugin.ts
  */
 
-import type { MDxPlugin, PluginContext, TitleBarButtonConfig } from '../../core/plugin';
+import type { MDxPlugin, PluginContext } from '../../core/plugin';
 import type { MDxEditor } from '../../editor/editor';
 import type { PluginManager } from '../../core/plugin-manager';
 

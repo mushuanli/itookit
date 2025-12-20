@@ -2,17 +2,31 @@
   "name": "@itookit/mdxeditor",
   "version": "0.4.1",
   "description": "A powerful, plugin-driven MDX editor component based on CodeMirror 6, designed for extensibility and rich content creation.",
-  "main": "dist/index.js",
-  "module": "dist/index.mjs",
-  "types": "dist/index.d.ts",
+  "type": "module",
+  "main": "./src/index.ts",
+  "module": "./src/index.ts",
+  "types": "./src/index.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.mjs",
-      "require": "./dist/index.js"
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
     },
-    "./style.css": "./dist/style.css",
-    "./styles/*": "./styles/*"
+    "./style.css": "./src/styles/index.css"
+  },
+  "publishConfig": {
+    "access": "public",
+    "main": "./dist/mdxeditor.umd.cjs",
+    "module": "./dist/mdxeditor.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/mdxeditor.js",
+        "require": "./dist/mdxeditor.umd.cjs"
+      },
+      "./style.css": "./dist/style.css"
+    }
   },
   "files": [
     "dist",
@@ -22,8 +36,8 @@
     "**/*.css"
   ],
   "scripts": {
-    "build": "tsup",
-    "dev": "tsup --watch",
+    "build": "vite build",
+    "dev": "vite build --watch",
     "type-check": "tsc --noEmit",
     "prepublishOnly": "pnpm build"
   },
@@ -54,9 +68,6 @@
     "url": "https://github.com/mushuanli/itookit/issues"
   },
   "homepage": "https://github.com/mushuanli/itookit/tree/main/packages/mdxeditor#readme",
-  "publishConfig": {
-    "access": "public"
-  },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.0",
     "@codemirror/commands": "^6.10.0",
@@ -74,18 +85,14 @@
     "marked": "^11.2.0",
     "mermaid": "^10.9.5"
   },
-  "devDependencies": {
-    "@types/node": "^20.19.25",
-    "esbuild": "^0.27.0",
-    "tsup": "^8.5.1",
-    "typescript": "^5.9.3"
-  },
   "peerDependencies": {
-    "@itookit/vfs-core": "^1.0.0"
+    "@itookit/vfs-core": "workspace:*"
   },
-  "peerDependenciesMeta": {
-    "@itookit/vfs-core": {
-      "optional": true
-    }
+  "devDependencies": {
+    "@itookit/vfs-core": "workspace:*",
+    "@types/node": "^20.19.25",
+    "typescript": "^5.9.3",
+    "vite": "^5.4.21",
+    "vite-plugin-dts": "^3.9.1"
   }
 }

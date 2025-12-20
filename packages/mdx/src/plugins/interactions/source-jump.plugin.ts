@@ -1,7 +1,6 @@
 // mdx/plugins/interactions/source-jump.plugin.ts
 
 import type { MDxPlugin, PluginContext } from '../../core/plugin';
-import type { MDxEditor } from '../../editor/editor';
 
 /**
  * 源码同步插件

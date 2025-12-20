@@ -4,38 +4,29 @@
   "version": "0.4.1",
   "type": "module",
   "scripts": {
-    "dev": "vite --force",
+    "dev": "vite",
+    "build": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {
-    "@codemirror/lang-markdown": "^6.5.0",
-    "@codemirror/state": "^6.5.2",
-    "@fortawesome/fontawesome-free": "^7.1.0",
     "@itookit/common": "workspace:*",
     "@itookit/mdxeditor": "workspace:*",
     "@itookit/memory-manager": "workspace:*",
     "@itookit/vfs-core": "workspace:*",
     "@itookit/vfs-ui": "workspace:*",
-    "codemirror": "^6.0.2",
+    "@itookit/llm-driver": "workspace:*",
+    "@itookit/llm-kernel": "workspace:*",
+    "@itookit/llm-engine": "workspace:*",
+    "@itookit/llm-ui": "workspace:*",
+    "@itookit/app-settings": "workspace:*",
     "dexie": "^4.2.1",
-    "dotenv": "^17.2.3",
     "immer": "^10.2.0",
     "marked": "^16.4.2",
-    "mermaid": "^11.12.1",
-    "openai": "^5.23.2",
-    "yaml": "^2.8.1",
-    "zod": "^3.25.76"
+    "mermaid": "^11.12.1"
   },
   "devDependencies": {
-    "@codemirror/autocomplete": "^6.20.0",
-    "@codemirror/commands": "^6.10.0",
-    "@codemirror/lang-javascript": "^6.2.4",
-    "@codemirror/language": "^6.11.3",
-    "@codemirror/state": "^6.5.2",
-    "@codemirror/view": "^6.38.8",
+    "@types/node": "^20.19.25",
     "typescript": "^5.9.3",
-    "vite": "^7.2.4"
-  },
-  "author": "",
-  "license": "ISC"
+    "vite": "^5.4.21"
+  }
 }

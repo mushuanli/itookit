@@ -3,22 +3,22 @@ import { createLibConfig } from '../../scripts/vite-lib.config';
 
 export default defineConfig(
   createLibConfig({
-    name: 'MemoryManager',
-    fileName: 'memory-manager',
+    name: 'AppSettings',
+    fileName: 'app-settings',
     rootDir: __dirname,
     external: [
       '@itookit/common',
       '@itookit/vfs-core',
-      '@itookit/vfs-ui',
-      '@itookit/mdxeditor',
-      'immer'
+      '@itookit/llm-driver',
+      '@itookit/llm-engine',
+      '@itookit/llm-ui'
     ],
     globals: {
       '@itookit/common': 'ItookitCommon',
       '@itookit/vfs-core': 'VFSCore',
-      '@itookit/vfs-ui': 'VFSUI',
-      '@itookit/mdxeditor': 'MDxEditor',
-      'immer': 'immer'
+      '@itookit/llm-driver': 'LLMDriver',
+      '@itookit/llm-engine': 'LLMEngine',
+      '@itookit/llm-ui': 'LLMUI'
     }
   })
 );
