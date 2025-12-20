@@ -135,7 +135,7 @@ export class FoldablePlugin implements MDxPlugin {
 
       const processedMarkdown = markdown.replace(
         foldableRegex,
-        (match, checkmark, label, rawContent) => {
+        (_match, checkmark, label, rawContent) => {
           const placeholder = this.generatePlaceholder(state);
           
           state.storedBlocks.set(placeholder, {

@@ -14,34 +14,6 @@ import type {
 } from './plugin';
 
 /**
- * 全局内存存储（所有实例共享，但通过键隔离）
- */
-class GlobalMemoryStore {
-  private static data: Map<string, any> = new Map();
-
-  static get(key: string): any {
-    return GlobalMemoryStore.data.get(key);
-  }
-
-  static set(key: string, value: any): void {
-    GlobalMemoryStore.data.set(key, value);
-  }
-
-  static remove(key: string): void {
-    GlobalMemoryStore.data.delete(key);
-  }
-
-  static clear(prefix: string): void {
-    const keys = Array.from(GlobalMemoryStore.data.keys());
-    keys.forEach(key => {
-      if (key.startsWith(prefix)) {
-        GlobalMemoryStore.data.delete(key);
-      }
-    });
-  }
-}
-
-/**
  * ✨ [新增] 基于 Engine 的元数据存储实现
  * 替代了原有的 VFSStore，解耦了具体的 VFS 实现
  */
