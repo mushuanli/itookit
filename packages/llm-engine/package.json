@@ -3,14 +3,27 @@
   "version": "0.1.0",
   "description": "LLM Session Engine - UI Adapter Layer",
   "type": "module",
-  "main": "./dist/index.cjs",
-  "module": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./src/index.ts",
+  "module": "./src/index.ts",
+  "types": "./src/index.ts",
   "exports": {
     ".": {
-      "import": "./dist/index.js",
-      "require": "./dist/index.cjs",
-      "types": "./dist/index.d.ts"
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "publishConfig": {
+    "access": "public",
+    "main": "./dist/index.js",
+    "module": "./dist/index.mjs",
+    "types": "./dist/index.d.ts",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.mjs",
+        "require": "./dist/index.js"
+      }
     }
   },
   "files": [
@@ -19,8 +32,8 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "vite build && tsc --emitDeclarationOnly",
-    "dev": "vite build --watch",
+    "build": "tsup",
+    "dev": "tsup --watch",
     "test": "vitest",
     "prepublishOnly": "pnpm build",
     "lint": "eslint src --ext .ts",
@@ -46,9 +59,6 @@
     "url": "https://github.com/mushuanli/itookit/issues"
   },
   "homepage": "https://github.com/mushuanli/itookit/tree/main/packages/llm-engine#readme",
-  "publishConfig": {
-    "access": "public"
-  },
   "engines": {
     "node": ">=16.0.0"
   },
@@ -61,6 +71,7 @@
   "dependencies": {
     "@itookit/common": "workspace:*",
     "@itookit/llm-driver": "workspace:*",
+    "@itookit/llm-kernel": "workspace:*",
     "@itookit/vfs-core": "workspace:*"
   },
   "devDependencies": {

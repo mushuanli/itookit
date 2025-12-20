@@ -2,15 +2,28 @@
   "name": "@itookit/vfs-core",
   "version": "1.0.1",
   "description": "A powerful virtual file system manager with plugin architecture for browser-based applications using IndexedDB",
-  "main": "./dist/vfs-core.umd.js",
-  "module": "./dist/vfs-core.es.js",
   "type": "module",
-  "types": "./dist/index.d.ts",
+  "main": "./src/index.ts",
+  "module": "./src/index.ts",
+  "types": "./src/index.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/vfs-core.es.js",
-      "require": "./dist/vfs-core.umd.js"
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "publishConfig": {
+    "access": "public",
+    "main": "./dist/index.js",
+    "module": "./dist/index.mjs",
+    "types": "./dist/index.d.ts",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.mjs",
+        "require": "./dist/index.js"
+      }
     }
   },
   "files": [
@@ -19,12 +32,13 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "vite build",
+    "build": "tsup",
+    "dev": "tsup --watch",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "type-check": "tsc --noEmit",
-    "prepublishOnly": "npm run test && npm run build"
+    "prepublishOnly": "pnpm test && pnpm build"
   },
   "keywords": [
     "vfs",
@@ -50,9 +64,6 @@
     "url": "https://github.com/mushuanli/itookit/issues"
   },
   "homepage": "https://github.com/mushuanli/itookit/tree/main/packages/vfs-core#readme",
-  "publishConfig": {
-    "access": "public"
-  },
   "engines": {
     "node": ">=16.0.0"
   },
