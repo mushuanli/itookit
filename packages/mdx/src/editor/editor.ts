@@ -18,7 +18,6 @@ import {
     EditorEventCallback,
     slugify 
 } from '@itookit/common';
-import { CoreEditorPlugin } from '../plugins/core/core-editor.plugin';
 
 export interface MDxEditorConfig extends EditorOptions {
   searchMarkClass?: string;

@@ -1,13 +1,9 @@
 // mdx/plugins/autocomplete/autocomplete.plugin.ts
 import {type HoverPreviewData} from '@itookit/common';
 import type { MDxPlugin, PluginContext } from '../../core/plugin';
-import type { Extension } from '@codemirror/state';
 import {
-  CompletionContext,
-  CompletionResult,
   Completion,
 } from '@codemirror/autocomplete';
-import { EditorView } from '@codemirror/view';
 
 /**
  * 自动完成数据提供者接口

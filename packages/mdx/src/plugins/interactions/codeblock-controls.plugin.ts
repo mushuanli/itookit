@@ -214,7 +214,7 @@ export class CodeBlockControlsPlugin implements MDxPlugin {
    * 更新 UI 状态（按钮图标、Pre高度）
    */
   private _updateState(
-    wrapper: HTMLElement, 
+    _wrapper: HTMLElement, 
     button: HTMLButtonElement, 
     pre: HTMLPreElement,
     isExpanded: boolean

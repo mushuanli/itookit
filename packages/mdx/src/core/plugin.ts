@@ -1,8 +1,7 @@
 // mdx/core/plugin.ts
 import type { Extension } from '@codemirror/state';
-import type { Marked, MarkedExtension } from 'marked';
-import type { IPersistenceAdapter, ISessionEngine } from '@itookit/common'; // 确保引入 ISessionEngine
-import type { VFSCore } from '@itookit/vfs-core';
+import type { MarkedExtension } from 'marked';
+import type { ISessionEngine } from '@itookit/common'; // 确保引入 ISessionEngine
 import type { PluginManager } from './plugin-manager';
 
 /**

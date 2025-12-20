@@ -32,16 +32,13 @@ export interface RenderOptions {
  * Markdown 渲染器
  */
 export class MDxRenderer {
-  private config: MDxRendererConfig;
   private pluginManager: PluginManager;
   private renderRoot: HTMLElement | null = null;
   private searchMarkClass: string;
   public markedExtensions: any[] = [];
   private instanceId: string;
-  private editorInstance: any = null;
 
   constructor(config: MDxRendererConfig = {}) {
-    this.config = config;
     this.searchMarkClass = config.searchMarkClass || 'mdx-editor-search-highlight';
     this.instanceId = `renderer-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     this.pluginManager = new PluginManager(this);
@@ -87,7 +84,6 @@ export class MDxRenderer {
    * 设置编辑器实例引用
    */
   setEditorInstance(editor: any): void {
-    this.editorInstance = editor;
     (this.pluginManager as any).editorInstance = editor;
   }
 
