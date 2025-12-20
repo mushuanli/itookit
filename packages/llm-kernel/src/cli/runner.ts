@@ -2,7 +2,6 @@
 
 import { ExecutionRuntime, getRuntime } from '../runtime/execution-runtime';
 import { ExecutorConfig } from '../core/interfaces';
-import { ExecutionResult } from '../core/types';
 import { getEventBus, KernelEvent } from '../core/event-bus';
 
 /**

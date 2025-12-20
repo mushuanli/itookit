@@ -3,8 +3,7 @@
  */
 import '../../styles/TagEditorComponent.css';
 
-import { escapeHTML } from '../../utils/utils';
-import { IAutocompleteSource, Suggestion } from '../../interfaces/IAutocompleteSource';
+import { escapeHTML,IAutocompleteSource, Suggestion } from '@itookit/common';
 
 /** UPDATE: Exported the params interface for use in other modules. */
 export interface TagEditorParams {

@@ -160,7 +160,7 @@ export class HttpExecutor implements IExecutor {
         return typeof input === 'string' ? input : undefined;
     }
     
-    private buildHeaders(context: IExecutionContext): Record<string, string> {
+    private buildHeaders(_context: IExecutionContext): Record<string, string> {
         return {
             'Content-Type': 'application/json',
             ...this.config.headers

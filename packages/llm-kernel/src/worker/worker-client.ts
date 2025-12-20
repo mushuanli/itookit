@@ -208,7 +208,7 @@ export class WorkerClient {
      */
     terminate(): void {
         // 拒绝所有待处理请求
-        for (const [id, pending] of this.pendingRequests) {
+        for (const [_id, pending] of this.pendingRequests) {
             if (pending.timeoutId) clearTimeout(pending.timeoutId);
             pending.reject(new Error('Worker terminated'));
         }
@@ -280,7 +280,7 @@ export class WorkerClient {
         console.error('[WorkerClient] Worker error:', event.message);
         
         // 拒绝所有待处理请求
-        for (const [id, pending] of this.pendingRequests) {
+        for (const [_sid, pending] of this.pendingRequests) {
             if (pending.timeoutId) clearTimeout(pending.timeoutId);
             pending.reject(new Error(`Worker error: ${event.message}`));
         }

@@ -265,7 +265,7 @@ export class ScriptExecutor extends BaseExecutor {
     /**
      * 验证输入
      */
-    validate(input: unknown): { valid: boolean; errors?: string[] } {
+    validate(_input: unknown): { valid: boolean; errors?: string[] } {
         // 脚本执行器允许任何输入
         return { valid: true };
     }
