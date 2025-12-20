@@ -35,7 +35,7 @@ export class MDxEditor extends IEditor {
   private editorContainer: HTMLElement | null = null;
   private renderContainer: HTMLElement | null = null;
   private currentMode: 'edit' | 'render';
-  private config: MDxEditorConfig;
+  public readonly config: MDxEditorConfig;
   private cleanupListeners: Array<() => void> = [];
   private eventEmitter = new Map<EditorEvent, Set<EditorEventCallback>>();
   private readOnlyCompartment = new Compartment();

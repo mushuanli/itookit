@@ -7,7 +7,7 @@
  */
 
 import type { MDxPlugin, PluginContext } from '../../core/plugin';
-import type { MarkedExtension, Tokens } from 'marked';
+import type { MarkedExtension } from 'marked';
 
 export interface CalloutPluginOptions {
     /** 是否默认折叠 (暂未实现，保留接口) */
@@ -34,7 +34,7 @@ const CALLOUT_TYPES: Record<string, string> = {
 export class CalloutPlugin implements MDxPlugin {
     name = 'syntax:callout';
 
-    constructor(private options: CalloutPluginOptions = {}) { }
+    constructor() { }
 
     install(context: PluginContext): void {
         // 注册 Marked 扩展

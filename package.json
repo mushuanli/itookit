@@ -6,9 +6,12 @@
   "main": "index.js",
   "scripts": {
     "dev": "vite",
-    "build": "pnpm -r --filter \"./packages/*\" run build",
+    "build": "pnpm -r build",
+    "build:libs": "pnpm --filter './packages/*' build",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "release": "pnpm --filter ./apps/web-app build && node scripts/release.js"
+    "release": "pnpm --filter ./apps/web-app build && node scripts/release.js",
+    "clean": "pnpm -r clean && rm -rf node_modules",
+    "typecheck": "pnpm -r typecheck"
   },
   "keywords": [],
   "author": "",
