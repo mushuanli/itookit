@@ -1,39 +1,31 @@
 {
-    "compilerOptions": {
-        "target": "es2022",
-        "useDefineForClassFields": true,
-        "module": "ESNext",
-        "lib": [
-            "es2022",
-            "DOM",
-            "DOM.Iterable"
-        ],
-        "skipLibCheck": true,
-        "moduleResolution": "bundler",
-        "allowImportingTsExtensions": true,
-        "resolveJsonModule": true,
-        "isolatedModules": true,
-        "noEmit": true,
-        "strict": true,
-        "noUnusedLocals": true,
-        "noUnusedParameters": true,
-        "noFallthroughCasesInSwitch": true,
-        "baseUrl": ".",
-        "paths": {
-            "@/*": ["src/*"],
-            
-            "@itookit/app-settings": ["../../packages/app-settings/src/index.ts"],
-            "@itookit/common": ["../../packages/common/src/index.ts"],
-            "@itookit/llm-engine": ["../../packages/llm-engine/src/index.ts"],
-            "@itookit/llm-ui": ["../../packages/llm-ui/src/index.ts"],
-            "@itookit/llm-driver": ["../../packages/llm-driver/src/index.ts"],
-            "@itookit/mdxeditor": ["../../packages/mdxeditor/src/index.ts"],
-            "@itookit/memory-manager": ["../../packages/memory-manager/src/index.ts"],
-            "@itookit/vfs-core": ["../../packages/vfs-core/src/index.ts"],
-            "@itookit/vfs-ui": ["../../packages/vfs-ui/src/index.ts"]
-        }
-    },
-    "include": [
-        "src"
-    ]
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"],
+      "@itookit/common": ["../../packages/common/src/index.ts"],
+      "@itookit/common/*": ["../../packages/common/src/*"],
+      "@itookit/vfs-core": ["../../packages/vfs-core/src/index.ts"],
+      "@itookit/vfs-ui": ["../../packages/vfs-ui/src/index.ts"],
+      "@itookit/mdxeditor": ["../../packages/mdx/src/index.ts"],
+      "@itookit/memory-manager": ["../../packages/memory-manager/src/index.ts"],
+      "@itookit/llm-driver": ["../../packages/llm-driver/src/index.ts"],
+      "@itookit/llm-kernel": ["../../packages/llm-kernel/src/index.ts"],
+      "@itookit/llm-engine": ["../../packages/llm-engine/src/index.ts"],
+      "@itookit/llm-ui": ["../../packages/llm-ui/src/index.ts"],
+      "@itookit/app-settings": ["../../packages/app-settings/src/index.ts"]
+    }
+  },
+  "include": ["src"],
+  "exclude": ["node_modules", "dist"]
 }

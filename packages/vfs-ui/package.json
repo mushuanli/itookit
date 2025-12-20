@@ -3,16 +3,30 @@
   "version": "0.4.1",
   "description": "A modular UI library for managing Virtual File System interfaces with components for file/folder navigation, tagging, and content outline",
   "type": "module",
-  "main": "./dist/vfs-ui.umd.cjs",
-  "module": "./dist/vfs-ui.js",
-  "types": "./dist/index.d.ts",
+  "main": "./src/index.ts",
+  "module": "./src/index.ts",
+  "types": "./src/index.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/vfs-ui.js",
-      "require": "./dist/vfs-ui.umd.cjs"
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
     },
-    "./style.css": "./dist/style.css"
+    "./style.css": "./src/styles/index.css"
+  },
+  "publishConfig": {
+    "access": "public",
+    "main": "./dist/vfs-ui.umd.cjs",
+    "module": "./dist/vfs-ui.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/vfs-ui.js",
+        "require": "./dist/vfs-ui.umd.cjs"
+      },
+      "./style.css": "./dist/style.css"
+    }
   },
   "files": [
     "dist",
@@ -20,8 +34,8 @@
     "LICENSE"
   ],
   "scripts": {
-    "dev": "vite",
     "build": "vite build",
+    "dev": "vite build --watch",
     "preview": "vite preview",
     "prepublishOnly": "pnpm build"
   },
@@ -50,18 +64,15 @@
     "url": "https://github.com/mushuanli/itookit/issues"
   },
   "homepage": "https://github.com/mushuanli/itookit/tree/main/packages/vfs-ui#readme",
-  "publishConfig": {
-    "access": "public"
-  },
   "engines": {
     "node": ">=16.0.0"
-  },
-  "peerDependencies": {
-    "@itookit/vfs-core": "workspace:*"
   },
   "dependencies": {
     "@itookit/common": "workspace:*",
     "immer": "^10.2.0"
+  },
+  "peerDependencies": {
+    "@itookit/vfs-core": "workspace:*"
   },
   "devDependencies": {
     "@itookit/vfs-core": "workspace:*",

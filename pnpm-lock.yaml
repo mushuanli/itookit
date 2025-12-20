@@ -120,7 +120,7 @@ importers:
         version: 2.3.0(rollup@4.53.3)(vite@6.4.1(@types/node@25.0.3)(jiti@1.21.7)(tsx@4.20.6)(yaml@2.8.1))
 
   packages/app-settings:
-    dependencies:
+    devDependencies:
       '@itookit/common':
         specifier: workspace:*
         version: link:../common
@@ -136,13 +136,18 @@ importers:
       '@itookit/vfs-core':
         specifier: workspace:*
         version: link:../vfs-core
-    devDependencies:
-      tsup:
-        specifier: ^8.0.0
-        version: 8.5.1(@microsoft/api-extractor@7.55.1(@types/node@25.0.3))(jiti@1.21.7)(postcss@8.5.6)(tsx@4.20.6)(typescript@5.9.3)(yaml@2.8.1)
+      '@types/node':
+        specifier: ^20.19.25
+        version: 20.19.25
       typescript:
-        specifier: ^5.0.0
+        specifier: ^5.9.3
         version: 5.9.3
+      vite:
+        specifier: ^5.4.21
+        version: 5.4.21(@types/node@20.19.25)
+      vite-plugin-dts:
+        specifier: ^3.9.1
+        version: 3.9.1(@types/node@20.19.25)(rollup@4.53.3)(typescript@5.9.3)(vite@5.4.21(@types/node@20.19.25))
 
   packages/common:
     devDependencies:
@@ -339,9 +344,6 @@ importers:
       '@itookit/llm-engine':
         specifier: workspace:*
         version: link:../llm-engine
-      '@itookit/mdxeditor':
-        specifier: workspace:*
-        version: link:../mdx
       '@itookit/vfs-core':
         specifier: workspace:*
         version: link:../vfs-core
@@ -351,10 +353,10 @@ importers:
       marked:
         specifier: ^12.0.2
         version: 12.0.2
-      react:
-        specifier: ^19.2.0
-        version: 19.2.0
     devDependencies:
+      '@itookit/mdxeditor':
+        specifier: workspace:*
+        version: link:../mdx
       '@types/js-yaml':
         specifier: ^4.0.9
         version: 4.0.9
@@ -431,15 +433,15 @@ importers:
       '@types/node':
         specifier: ^20.19.25
         version: 20.19.25
-      esbuild:
-        specifier: ^0.27.0
-        version: 0.27.0
-      tsup:
-        specifier: ^8.5.1
-        version: 8.5.1(@microsoft/api-extractor@7.55.1(@types/node@20.19.25))(jiti@1.21.7)(postcss@8.5.6)(tsx@4.20.6)(typescript@5.9.3)(yaml@2.8.1)
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
+      vite:
+        specifier: ^5.4.21
+        version: 5.4.21(@types/node@20.19.25)
+      vite-plugin-dts:
+        specifier: ^3.9.1
+        version: 3.9.1(@types/node@20.19.25)(rollup@4.53.3)(typescript@5.9.3)(vite@5.4.21(@types/node@20.19.25))
 
   packages/memory-manager:
     dependencies:
@@ -3102,10 +3104,6 @@ packages:
 
   react-is@18.3.1:
     resolution: {integrity: sha512-/LLMVyas0ljjAtoYiPqYiL8VWXzUUdThrmU5+n20DZv+a+ClRoevUzw5JxU+Ieh5/c87ytoTBV9G1FiKfNJdmg==}
-
-  react@19.2.0:
-    resolution: {integrity: sha512-tmbWg6W31tQLeB5cdIBOicJDJRR2KzXsV7uSK9iNfLWQ5bIZfxuPEHp7M8wiHyHnn0DD1i7w3Zmin0FtkrwoCQ==}
-    engines: {node: '>=0.10.0'}
 
   readable-stream@2.3.8:
     resolution: {integrity: sha512-8p0AUk4XODgIewSi0l8Epjs+EVnWiK7NoDIEGU0HhE7+ZyY8D1IMY7odu5lRrFXGg71L15KG8QrPmum45RTtdA==}
@@ -6709,8 +6707,6 @@ snapshots:
       math-random: 1.0.4
 
   react-is@18.3.1: {}
-
-  react@19.2.0: {}
 
   readable-stream@2.3.8:
     dependencies:

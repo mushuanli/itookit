@@ -2,21 +2,34 @@
   "name": "@itookit/app-settings",
   "version": "1.0.0",
   "private": true,
-  "main": "dist/index.js",
-  "module": "dist/index.mjs",
-  "types": "dist/index.d.ts",
-  "style": "./dist/style.css",
+  "type": "module",
+  "main": "./src/index.ts",
+  "module": "./src/index.ts",
+  "types": "./src/index.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.mjs",
-      "require": "./dist/index.js"
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
     },
-    "./style.css": "./dist/index.css"
+    "./style.css": "./src/styles/styles.css"
+  },
+  "publishConfig": {
+    "main": "./dist/app-settings.umd.cjs",
+    "module": "./dist/app-settings.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/app-settings.js",
+        "require": "./dist/app-settings.umd.cjs"
+      },
+      "./style.css": "./dist/style.css"
+    }
   },
   "scripts": {
-    "build": "tsup src/index.ts --format cjs,esm --dts",
-    "dev": "tsup src/index.ts --format cjs,esm --dts --watch"
+    "build": "vite build",
+    "dev": "vite build --watch"
   },
   "peerDependencies": {
     "@itookit/common": "workspace:*",
@@ -26,7 +39,14 @@
     "@itookit/llm-ui": "workspace:*"
   },
   "devDependencies": {
-    "tsup": "^8.0.0",
-    "typescript": "^5.0.0"
+    "@itookit/common": "workspace:*",
+    "@itookit/vfs-core": "workspace:*",
+    "@itookit/llm-driver": "workspace:*",
+    "@itookit/llm-engine": "workspace:*",
+    "@itookit/llm-ui": "workspace:*",
+    "@types/node": "^20.19.25",
+    "typescript": "^5.9.3",
+    "vite": "^5.4.21",
+    "vite-plugin-dts": "^3.9.1"
   }
 }

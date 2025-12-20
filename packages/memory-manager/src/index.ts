@@ -1,5 +1,4 @@
 // @file memory-manager/index.ts
-import '@itookit/vfs-ui/style.css';
 import './styles/memory-manager.css';
 
 export * from './types';
