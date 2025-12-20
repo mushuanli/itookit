@@ -2,8 +2,7 @@
  * @file vfs-ui/index.ts
  * @desc Public API entry point for the VFS-UI library.
  */
-import './styles/vfs-ui.unified.css';
-import '@itookit/common/style.css';
+import './styles/index.css';
 
 import { VFSUIManager } from './core/VFSUIManager.js';
 

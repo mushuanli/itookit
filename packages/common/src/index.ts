@@ -44,7 +44,6 @@ export {
 } from './utils/utils';
 
 // Export all components
-export { TagEditorComponent, type TagEditorParams } from './components/TagEditor/TagEditorComponent'; 
 export * from './components/BaseSettingsEditor';
 export * from './components/UIComponents';
 

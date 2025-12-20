@@ -1,17 +1,9 @@
 {
+  "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "target": "ES2020",
-    "module": "ESNext",
-    "moduleResolution": "node",  // <--- 关键：告诉 TS 像 Node 一样查找模块
-    "esModuleInterop": true,
-    "strict": true,
-    "declaration": true,
-    "skipLibCheck": true,
-    "baseUrl": ".",
-    // 如果你的 workspace 依赖没有构建出 .d.ts，有时需要 paths 映射（通常 moduleResolution: node 配合 pnpm 足够了）
-    "paths": {
-      "@itookit/*": ["../../*"] // 可选：如果标准解析失败，手动指定 monorepo 路径
-    }
+    "outDir": "./dist",
+    "rootDir": "./src"
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["node_modules", "dist"]
 }

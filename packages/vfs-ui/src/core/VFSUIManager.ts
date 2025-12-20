@@ -4,8 +4,9 @@
  * sub-components, bridges UI events with vfs-core data events, and provides
  * a unified public API by implementing ISessionUI.
  */
-import { ISessionUI,EditorFactory, TagEditorComponent, type SessionUIOptions, type SessionManagerEvent, type SessionManagerCallback, type ISessionEngine, type EngineEvent} from '@itookit/common';
+import { ISessionUI,EditorFactory, type SessionUIOptions, type SessionManagerEvent, type SessionManagerCallback, type ISessionEngine, type EngineEvent} from '@itookit/common';
 import { EngineTagSource } from '../mention/EngineTagSource';
+import {TagEditorComponent} from '../components/TagEditor/TagEditorComponent';
 
 // --- 内部模块 ---
 import { Coordinator } from './Coordinator';
