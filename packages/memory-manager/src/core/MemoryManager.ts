@@ -4,18 +4,16 @@
 import { VFSModuleEngine } from '@itookit/vfs-core';
 import { createVFSUI, connectEditorLifecycle, VFSUIManager } from '@itookit/vfs-ui';
 import { createMDxEditor } from '@itookit/mdxeditor'; 
-import { MemoryManagerConfig, EditorHostContext,EditorConfigEnhancer } from '../types';
-import { createMDxEnhancer } from '../enhancers/mdx'; // 默认回退
+import { MemoryManagerConfig } from '../types';
 import { BackgroundBrain } from './BackgroundBrain';
 import { Layout } from './Layout';
-import { EditorOptions, IEditor, ISessionEngine } from '@itookit/common';
+import { EditorHostContext, EditorOptions, IEditor, ISessionEngine } from '@itookit/common';
 
 export class MemoryManager {
     private vfsUI: VFSUIManager;
     private engine: ISessionEngine;
     private brain?: BackgroundBrain;
     private layout: Layout;
-    private configEnhancer: EditorConfigEnhancer;
     private lifecycleUnsubscribe: () => void;
     private baseEditorFactory: any; // EditorFactory 类型
 
@@ -34,23 +32,17 @@ export class MemoryManager {
         // 2. Factory 解析
         this.baseEditorFactory = config.editorFactory || createMDxEditor;
 
-        // 3. [关键] Enhancer 解析
-        // 如果未提供 enhancer 且使用的是默认 MDxEditor，则使用默认 MDx 增强器（保持向后兼容）
-        // 否则使用空增强器 (不做任何注入)
-        if (config.configEnhancer) {
-            this.configEnhancer = config.configEnhancer;
-        } else if (!config.editorFactory) {
-             // 默认情况：使用 MDx 且注入 Mentions (默认全局范围)
-            this.configEnhancer = createMDxEnhancer(['*']);
-        } else {
-            // 自定义 Factory 但没给 Enhancer，默认不做处理
-            this.configEnhancer = (opts) => opts;
-        }
+        // 3. 计算 Scope ID (用于多实例隔离)
+        // 优先使用传入的 scopeId，否则回退到 moduleName，最后 default
+        const scopeId = config.scopeId || config.moduleName || 'default';
 
-        // 4. 初始化 UI (注入 enhancedEditorFactory)
+        // 4. 初始化 UI
         this.vfsUI = createVFSUI(
             {
                 ...config.uiOptions,
+                // ✅ [关键] 传递 scopeId 确保 UI 状态 (LocalStorage) 隔离
+                scopeId: scopeId,
+
                 sessionListContainer: this.layout.sidebarContainer,
                 defaultFileName: config.defaultContentConfig?.fileName,
                 defaultFileContent: config.defaultContentConfig?.content,
@@ -104,23 +96,22 @@ export class MemoryManager {
         };
 
         // 2. 基础配置合并
-        let mergedOptions: EditorOptions = {
+        const mergedOptions: EditorOptions = {
             ...editorConfig,
             ...runtimeOptions,
             plugins: [ ...(editorConfig?.plugins || []), ...(runtimeOptions?.plugins || []) ],
             defaultPluginOptions: {
                 ...(editorConfig?.defaultPluginOptions || {}),
                 ...(runtimeOptions?.defaultPluginOptions || {}),
-            }
+            },
+
+            // ✅ [关键] 强制注入当前环境的依赖 (Dependency Injection)
+            // 这让编辑器可以无感知地使用 engine 和 UI 控制能力
+            sessionEngine: this.engine,
+            hostContext: hostContext
         };
 
-        // 3. 执行增强策略 (分发)
-        // 将标准化的 hostContext 传递给 Enhancer，由 Enhancer 决定怎么塞给编辑器
-        mergedOptions = this.configEnhancer(mergedOptions, {
-            engine: this.engine,
-            host: hostContext // ✅ 注入
-        });
-
+        // 3. 直接调用原始工厂
         return this.baseEditorFactory(container, mergedOptions);
     }
 
