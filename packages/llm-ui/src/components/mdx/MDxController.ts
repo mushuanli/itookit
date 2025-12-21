@@ -70,7 +70,9 @@ export class MDxController {
                     'svg',
                     'ui:toolbar' 
                 ],
-                defaultCollapsed: false
+                defaultPluginOptions:{
+                    'codeblock-controls':{defaultCollapsed: false}
+                }
             }) as MDxEditor;
 
             this.editor.on('change', () => {
