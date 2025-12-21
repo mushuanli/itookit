@@ -1,7 +1,7 @@
 // @file: llm-ui/LLMWorkspaceEditor.ts
 
 import { 
-    IEditor, EditorOptions, EditorEvent, EditorEventCallback, 
+    IEditor, EditorOptions,EditorHostContext, EditorEvent, EditorEventCallback, 
     escapeHTML
 } from '@itookit/common';
 import { HistoryView } from './components/HistoryView';
@@ -66,6 +66,15 @@ export class LLMWorkspaceEditor implements IEditor {
     private initPromise: Promise<void> | null = null;
     private initResolve: (() => void) | null = null;
     private initReject: ((e: Error) => void) | null = null;
+
+    private get hostContext(): EditorHostContext | undefined {
+        return this.options.hostContext;
+    }
+    
+    private get engine(): ILLMSessionEngine {
+        // 这里的断言是安全的，因为策略层保证了注入的是 LLM Engine
+        return this.options.sessionEngine as ILLMSessionEngine;
+    }
 
     constructor(_container: HTMLElement, options: LLMEditorOptions) {
         this.options = options;
@@ -214,7 +223,7 @@ export class LLMWorkspaceEditor implements IEditor {
 
         // 加载 Manifest 获取标题
         try {
-            const manifest = await this.options.sessionEngine.getManifest(this.options.nodeId);
+            const manifest = await this.engine.getManifest(this.options.nodeId);
             if (manifest.title) {
                 this.currentTitle = manifest.title;
                 this.titleInput.value = manifest.title;
@@ -369,7 +378,8 @@ export class LLMWorkspaceEditor implements IEditor {
     private bindTitleBarEvents(): void {
         // Sidebar Toggle
         this.container.querySelector('#llm-btn-sidebar')?.addEventListener('click', () => {
-            this.options.onSidebarToggle?.();
+            // ✅ 使用标准宿主能力
+            this.hostContext?.toggleSidebar();
         });
 
         // Title Edit
@@ -379,7 +389,7 @@ export class LLMWorkspaceEditor implements IEditor {
 
             if (this.options.nodeId) {
                 try {
-                    await this.options.sessionEngine.rename(this.options.nodeId, this.currentTitle);
+                await this.engine.rename(this.options.nodeId, this.currentTitle);
                 } catch (e) {
                     console.error('[LLMWorkspaceEditor] Failed to rename:', e);
                 }

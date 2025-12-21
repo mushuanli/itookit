@@ -1,4 +1,4 @@
-// mdx/renderer/renderer.ts
+// @file: mdx/renderer/renderer.ts
 import { Marked } from 'marked';
 import { PluginManager } from '../core/plugin-manager';
 import type { MDxPlugin } from '../core/plugin';
@@ -43,8 +43,7 @@ export class MDxRenderer {
     this.instanceId = `renderer-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     this.pluginManager = new PluginManager(this);
 
-    // ✨ [重构] 统一设置 PluginManager 上下文
-    // 优先使用 config.sessionEngine，如果不存在则检查 deprecated vfsCore (不推荐)
+    // ✅ [核心] 优先使用 sessionEngine
     const engine = config.sessionEngine;
     const nodeId = config.nodeId;
     

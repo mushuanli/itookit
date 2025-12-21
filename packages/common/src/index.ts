@@ -4,6 +4,7 @@
 export { 
     IEditor, 
     type EditorOptions, 
+    type EditorHostContext, // ✅ 导出
     type EditorEvent, 
     type EditorEventCallback, 
     type SearchResultSource, 

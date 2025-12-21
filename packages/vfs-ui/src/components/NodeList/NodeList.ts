@@ -21,6 +21,8 @@ interface NodeListOptions extends BaseComponentParams {
     createFileLabel?: string;
     /** [新增] 自定义搜索匹配逻辑 */
     searchFilter?: SearchFilter;
+    /** [新增] 实例ID，用于拖拽源验证 */
+    instanceId: string;
 }
 
 
@@ -50,6 +52,9 @@ export class NodeList extends BaseComponent<NodeListState> {
     private lastClickedItemId: string | null = null;
     private folderExpandTimer: number | null = null;
     private options: NodeListOptions;
+    
+    // [新增] 保存实例ID
+    private instanceId: string;
 
     private readonly bodyEl: HTMLElement;
     private readonly searchEl: HTMLInputElement;
@@ -69,6 +74,8 @@ export class NodeList extends BaseComponent<NodeListState> {
     constructor(options: NodeListOptions) {
         super(options);
         this.options = options;
+        this.instanceId = options.instanceId;
+
         if (options.title) this.setTitle(options.title);
 
         // 设置默认 label
@@ -355,30 +362,19 @@ export class NodeList extends BaseComponent<NodeListState> {
         console.log('[NodeList] Click target:', target);
 
         const itemEl = target.closest<HTMLElement>('[data-item-id]');
-        if (!itemEl) {
-        // 1. 防御性检查：如果是只读模式，不做任何改变
-        if (this.state.readOnly) return;
-
-        // 2. 防御性检查：如果点击的是输入框（例如正在重命名或新建文件时的输入框），不要清除选中
-        // 输入框的点击通常是为了聚焦，不应破坏选中状态
-        if (target.closest('input') || target.closest('.vfs-node-list__item-creator')) {
-            return;
-        }
-
-        // 3. 核心逻辑：如果有选中的项目，则清除选中
-        if (this.state.selectedItemIds.size > 0) {
-            console.log('[NodeList] Clicked empty space, clearing selection.');
-            this.store.dispatch({ type: 'ITEM_SELECTION_CLEAR' });
-            
-            // 可选：如果之前有处于“确认删除”状态的项目，也应该重置
-            if (this.confirmDeleteId) {
-                this.confirmDeleteId = null;
-                this.render(); // 需要重绘以移除删除确认样式
-            }
-        }
         
-        // 记得 return，因为没有 itemEl，后续逻辑无法执行
-            console.log('[NodeList] No item container [data-item-id] found. Aborting.');
+        if (!itemEl) {
+            if (this.state.readOnly) return;
+            if (target.closest('input') || target.closest('.vfs-node-list__item-creator')) {
+                return;
+            }
+            if (this.state.selectedItemIds.size > 0) {
+                this.store.dispatch({ type: 'ITEM_SELECTION_CLEAR' });
+                if (this.confirmDeleteId) {
+                    this.confirmDeleteId = null;
+                    this.render(); 
+                }
+            }
             return;
         }
 
@@ -788,11 +784,9 @@ export class NodeList extends BaseComponent<NodeListState> {
 
         if (this.settingsPopoverEl) {
             const updatedFullSettings = { ...this.state.uiSettings, ...newSettings };
-            
             const tempDiv = document.createElement('div');
             tempDiv.innerHTML = createSettingsPopoverHTML(updatedFullSettings);
             const newContent = tempDiv.firstElementChild as HTMLElement;
-
             this.settingsPopoverEl.innerHTML = newContent.innerHTML;
         }
     }
@@ -809,8 +803,15 @@ export class NodeList extends BaseComponent<NodeListState> {
         if (itemEl && event.dataTransfer) {
             const itemId = itemEl.dataset.itemId!;
             const ids = this.state.selectedItemIds.has(itemId) && this.state.selectedItemIds.size > 1 ? [...this.state.selectedItemIds] : [itemId];
-            event.dataTransfer.setData('application/json', JSON.stringify(ids));
+            
+            // [修改] 包装实例ID
+            const payload = {
+                sourceInstanceId: this.instanceId,
+                itemIds: ids
+            };
+            event.dataTransfer.setData('application/json', JSON.stringify(payload));
             event.dataTransfer.effectAllowed = 'move';
+            
             setTimeout(() => ids.forEach(id => this.container.querySelector(`[data-item-id="${id}"]`)?.classList.add('is-dragging')), 0);
         }
     }
@@ -850,8 +851,21 @@ export class NodeList extends BaseComponent<NodeListState> {
         if(this.folderExpandTimer) clearTimeout(this.folderExpandTimer);
         try {
             if (!event.dataTransfer) throw new Error("No dataTransfer object");
-            const itemIds = JSON.parse(event.dataTransfer.getData('application/json'));
+            
+            const rawData = event.dataTransfer.getData('application/json');
+            const payload = JSON.parse(rawData);
+
+            // [新增] 检查来源实例 ID
+            // 如果数据格式不包含 sourceInstanceId（例如旧代码）或者 ID 不匹配，则认为是跨实例拖拽，忽略或报错
+            if (!payload.sourceInstanceId || payload.sourceInstanceId !== this.instanceId) {
+                console.warn('[VFS NodeList] Cross-instance drag-and-drop detected and ignored.');
+                this._clearDropIndicators();
+                return;
+            }
+
+            const itemIds = payload.itemIds;
             const targetEl = this.container.querySelector<HTMLElement>('.drop-target-above, .drop-target-below, .drop-target-folder');
+            
             if (targetEl && itemIds?.length > 0 && targetEl.dataset.itemId) {
                 const targetId = targetEl.dataset.itemId;
                 let position = targetEl.classList.contains('drop-target-above') ? 'before' : targetEl.classList.contains('drop-target-below') ? 'after' : 'into';
