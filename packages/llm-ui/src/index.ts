@@ -6,7 +6,6 @@ import { LLMWorkspaceEditor, LLMEditorOptions } from './LLMWorkspaceEditor';
 import { 
     VFSAgentService, 
     ILLMSessionEngine, 
-    initializeLLMEngine,
 } from '@itookit/llm-engine';
 import { EditorFactory, EditorOptions } from '@itookit/common';
 import { AgentConfigEditor } from './editors/AgentConfigEditor';
@@ -14,58 +13,28 @@ import { AgentConfigEditor } from './editors/AgentConfigEditor';
 export { ConnectionSettingsEditor } from './editors/ConnectionSettingsEditor';
 export { MCPSettingsEditor } from './editors/MCPSettingsEditor';
 
-// 扩展 EditorOptions
-//interface LLMFactoryOptions extends EditorOptions {
-    // 工厂特定配置
-//}
-
-
-
 /**
  * 创建 LLM 编辑器工厂
  * @param agentService 已初始化的 AgentService
- * @param sessionEngine 已初始化的 SessionEngine
  */
 export const createLLMFactory = (
-    agentService: VFSAgentService,
-    sessionEngine: ILLMSessionEngine
+    agentService: VFSAgentService
 ): EditorFactory => {
-    // 缓存初始化状态
-    let moduleInitialized = false;
-    let engineInitPromise: Promise<void> | null = null;
-
-    /**
-     * ✅ 修复：确保模块正确初始化
-     */
-    const ensureModuleInitialized = async (): Promise<void> => {
-        if (moduleInitialized) {
-            return;
-        }
-
-        if (!engineInitPromise) {
-            engineInitPromise = (async () => {
-                // ✅ 修复：使用正确的参数格式
-                await initializeLLMEngine({
-                    agentService,
-                    sessionEngine,
-                    maxConcurrent: 3
-                });
-                moduleInitialized = true;
-            })();
-        }
-
-        return engineInitPromise;
-    };
-
+    
     return async (container: HTMLElement, options: EditorOptions) => {
-        // 确保引擎初始化
-        await ensureModuleInitialized();
-        
         let effectiveNodeId = options.nodeId;
+        
+        // 类型转换，此时 sessionEngine 应该已经在 MemoryManager 中通过 Dependency Injection 注入
+        const llmOptions = options as LLMEditorOptions;
+        const engine = llmOptions.sessionEngine as ILLMSessionEngine;
 
-        if (!effectiveNodeId) {
+        if (!engine) {
+            console.error('[LLMFactory] Critical: sessionEngine missing in options. Make sure MemoryManager is injecting it correctly.');
+        }
+
+        if (!effectiveNodeId && engine) {
             // 如果没有 nodeId，创建新文件
-            const newNode = await sessionEngine.createFile(options.title || 'New Chat', null);
+            const newNode = await engine.createFile(options.title || 'New Chat', null);
             effectiveNodeId = newNode.id;
             console.log(`[LLMFactory] New file created: ${effectiveNodeId}`);
         }
@@ -74,10 +43,11 @@ export const createLLMFactory = (
         // 我们不需要在这里再次调用初始化逻辑，直接使用
 
         const editorOptions: LLMEditorOptions = {
-            ...options,
+            ...llmOptions,
             agentService,
-            sessionEngine,
-            nodeId: effectiveNodeId
+            nodeId: effectiveNodeId,
+            // 确保 engine 存在 (虽然 options 中已有，显式赋值更清晰)
+            sessionEngine: engine 
         };
 
         const editor = new LLMWorkspaceEditor(container, editorOptions);

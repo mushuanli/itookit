@@ -21,6 +21,20 @@ export interface Heading {
     id: string; // ID必须在文档内唯一
 }
 
+/**
+ * 定义编辑器宿主环境提供的标准能力
+ * 任何接管编辑器的容器（如 MemoryManager）都应提供这些能力
+ */
+export interface EditorHostContext {
+    /** 切换侧边栏 (无参则 toggle，有参则强制设为该状态) */
+    toggleSidebar: (collapsed?: boolean) => void;
+    
+    /** 手动触发保存 (用于编辑器内部的 Save 按钮) */
+    saveContent: (nodeId: string, content: string) => Promise<void>;
+    
+    // 未来可扩展: openFile, showNotification 等
+}
+
 // ✨ [重构] 提升 sessionEngine 和 nodeId 为核心配置
 export interface EditorOptions {
   /** 初始 Markdown 内容 */
@@ -48,6 +62,18 @@ export interface EditorOptions {
   /** 是否只读 */
   readOnly?: boolean;
   
+    /** 
+     * [标准注入] 宿主上下文
+     * 编辑器通过它控制外部 UI（如侧边栏、全局提示）
+     */
+    hostContext?: EditorHostContext;
+    
+    /** 插件列表 */
+    plugins?: any[];
+    
+    /** 插件配置 */
+    defaultPluginOptions?: Record<string, any>;
+    
   /** 允许传递任何特定于实现的选项 */
   [key: string]: any; 
 }

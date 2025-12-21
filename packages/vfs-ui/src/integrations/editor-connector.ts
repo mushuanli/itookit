@@ -3,7 +3,7 @@
  * @desc Provides a high-level function to connect a VFS-UI manager with any IEditor-compatible editor.
  *       Optimized with debounce saving and async initialization, guarded against race conditions.
  */
-import type { IEditor, EditorFactory, EditorOptions, ISessionUI, ISessionEngine } from '@itookit/common';
+import type { IEditor, EditorFactory, EditorOptions, ISessionUI, ISessionEngine, EditorHostContext } from '@itookit/common';
 import type { VFSNodeUI, VFSUIState } from '../types/types';
 import type { VFSService } from '../services/VFSService';
 import { parseFileInfo } from '../utils/parser';
@@ -184,14 +184,31 @@ export function connectEditorLifecycle(
                         throw new Error("No suitable editor factory found.");
                     }
 
+                    // ✅ [关键新增] 组装标准的 HostContext
+                    // 这确保了无论是什么 Editor，都能获得切换侧边栏和保存的能力
+                    const hostContext: EditorHostContext = {
+                        toggleSidebar: (collapsed?: boolean) => vfsManager.toggleSidebar(),
+                        saveContent: async (nodeId, content) => {
+                            // 编辑器主动调用保存时，我们直接写入 Engine
+                            // 注意：这不会触发 optimistic update 的清理，如果需要更复杂的逻辑，
+                            // 可以调用 saveCurrentSession()，但需要注意上下文
+                            await engine.writeContent(nodeId, content);
+                        }
+                    };
+
                     const content = item.content?.data || '';
+                    
                     const editorOptions: EditorOptions = {
                         ...factoryExtraOptions,
                         initialContent: content,
                         title: item.metadata.title,
                         nodeId: item.id,
-                        // 传递扩展名给编辑器 (可选，用于语法高亮等)
-                        language: item.metadata.custom?._extension || ''
+                        // 传递扩展名给编辑器
+                        language: item.metadata.custom?._extension || '',
+                        
+                        // ✅ [关键新增] 注入标准依赖
+                        sessionEngine: engine,
+                        hostContext: hostContext
                     };
 
                     const editorInstance = await targetFactory(editorContainer, editorOptions);

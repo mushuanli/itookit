@@ -18,7 +18,7 @@ import { TaskListPlugin, TaskListPluginOptions } from './plugins/interactions/ta
 import { CodeBlockControlsPlugin, CodeBlockControlsPluginOptions } from './plugins/interactions/codeblock-controls.plugin';
 import { ToolbarPlugin } from './plugins/ui/toolbar.plugin';
 import { FormattingPlugin } from './plugins/ui/formatting.plugin';
-import { CoreTitleBarPlugin } from './plugins/ui/titlebar.plugin';
+import { CoreTitleBarPlugin, CoreTitleBarPluginOptions } from './plugins/ui/titlebar.plugin';
 import { SourceSyncPlugin } from './plugins/interactions/source-jump.plugin';
 import { TagPlugin, TagPluginOptions } from './plugins/autocomplete/tag.plugin';
 import { MentionPlugin, MentionPluginOptions } from './plugins/autocomplete/mention.plugin';
@@ -117,6 +117,7 @@ export interface MDxEditorFactoryConfig extends EditorOptions {
   plugins?: PluginConfig[];
   defaultPluginOptions?: {
     'editor:core'?: CoreEditorPluginOptions;
+    'core:titlebar'?: CoreTitleBarPluginOptions;
     folder?: FoldablePluginOptions;
     mathjax?: MathJaxPluginOptions;
     media?: MediaPluginOptions;
@@ -144,7 +145,7 @@ const DEFAULT_PLUGINS: PluginConfig[] = [
   'media',
   'callout',
   'mermaid',
-  'svg', // [新增] 默认启用
+  'svg',
   'codeblock-controls',
   'task-list'
 ];
@@ -238,9 +239,35 @@ export async function createMDxEditor(
 ): Promise<IEditor> {
   const userPlugins = config.plugins || [];
 
-  // 🔥 添加日志
-  console.log(`[createMDxEditor] Received config.Plugin:${userPlugins} Content length: ${(config.initialContent || '').length}. Preview: "${(config.initialContent || '').substring(0, 50)}..."`);
+  console.log(`[createMDxEditor] Received config.Plugin:${userPlugins} Content length: ${(config.initialContent || '').length}.`);
 
+  // ✅ [核心变更] 自动桥接 HostContext 到 CoreTitleBar 插件
+  // 这替代了之前 Enhancer 的作用，将标准的 Host 能力映射为 UI 插件的具体配置
+  if (config.hostContext) {
+    config.defaultPluginOptions = config.defaultPluginOptions || {};
+    
+    const existingTitleBarOpts = config.defaultPluginOptions['core:titlebar'] || {};
+    
+    config.defaultPluginOptions['core:titlebar'] = {
+        ...existingTitleBarOpts,
+        
+        // 1. 侧边栏切换：如果插件没配，就用 Host 的
+        onSidebarToggle: existingTitleBarOpts.onSidebarToggle 
+            || ((_editor) => config.hostContext?.toggleSidebar()),
+            
+        // 2. 保存：如果插件没配，且有 nodeId，就用 Host 的
+        saveCallback: existingTitleBarOpts.saveCallback 
+            || (async (editor) => {
+                if (config.nodeId) {
+                    await config.hostContext?.saveContent(config.nodeId, editor.getText());
+                } else {
+                    console.warn('[MDxEditor] Cannot save: No nodeId provided.');
+                }
+            })
+    };
+  }
+
+  // 初始化编辑器实例
   const editor = new MDxEditor(config);
 
   const coreOptions = config.defaultPluginOptions?.['editor:core'] || {};
@@ -324,7 +351,7 @@ export async function createMDxEditor(
  * 封装了 createMDxEditor，注入了默认的插件配置。
  */
 export const defaultEditorFactory: EditorFactory = async (container, options) => {
-    const config = {
+    const config: MDxEditorFactoryConfig = {
         ...options,
         // 确保核心 UI 插件被加载
         plugins: ['core:titlebar', ...(options.plugins || [])],

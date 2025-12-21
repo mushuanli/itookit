@@ -1,7 +1,8 @@
 // @file app-settings/factories/settingsFactory.ts
-import { EditorFactory, IEditor } from '@itookit/common';
+import { EditorFactory, IEditor, EditorOptions } from '@itookit/common';
 import { SettingsService } from '../services/SettingsService';
-import { MCPSettingsEditor,ConnectionSettingsEditor,VFSAgentService } from '@itookit/llm-ui'; // 服务来自 llm-ui
+import { VFSAgentService } from '@itookit/llm-engine'; // ✅ 修正：逻辑服务从 engine 导入
+import { MCPSettingsEditor, ConnectionSettingsEditor } from '@itookit/llm-ui'; // ✅ 修正：UI 组件从 ui 导入
 
 import { TagSettingsEditor } from '../editors/TagSettingsEditor';
 // import { ExecutableSettingsEditor } from '../workspace/settings/editors/ExecutableSettingsEditor'; // Removed
@@ -13,12 +14,11 @@ export const createSettingsFactory = (
     settingsService: SettingsService,
     agentService: VFSAgentService
 ): EditorFactory => {
-    return async (container: HTMLElement, options: any) => {
+    return async (container: HTMLElement, options: EditorOptions) => {
         const nodeId = options.nodeId;
         
         // 确保服务已初始化
         await settingsService.init();
-        await agentService.init();
 
         let editor: IEditor | null = null;
 
@@ -46,6 +46,9 @@ export const createSettingsFactory = (
                     isDirty: () => false,
                     setDirty: () => {},
                     commands: {},
+                    getHeadings: async () => [],
+                    getSearchableText: async () => '',
+                    getSummary: async () => null,
                     search: async () => [],
                     gotoMatch: () => {},
                     clearSearch: () => {},

@@ -61,10 +61,9 @@ async function bootstrap() {
         // 2.4 Settings 模块
         const settingsModule = await createSettingsModule(vfsCore, agentService);
 
-        // --- 3. 创建 UI Factories ---
-        
-        // 将初始化好的单例 service 传入 UI Factory
-        const llmFactory = createLLMFactory(agentService, sessionEngine);
+        // 2. 创建 UI Factories
+        // ✅ 优化：Factory 只需关注 AgentService
+        const llmFactory = createLLMFactory(agentService);
         const agentFactory = createAgentEditorFactory(agentService);
         
         // ✨ [修复 1] 显式声明类型 Record<string, WorkspaceStrategy>
@@ -74,7 +73,7 @@ async function bootstrap() {
             'standard': new StandardWorkspaceStrategy(),
             'agent':    new AgentWorkspaceStrategy(),
             'settings': new SettingsWorkspaceStrategy(settingsModule.factory, settingsModule.engine),
-            'chat':     new ChatWorkspaceStrategy(llmFactory)
+            'chat':     new ChatWorkspaceStrategy(llmFactory, sessionEngine)
         };
 
         // 获取标准编辑器工厂 (作为 fallback 或特定用途)
@@ -183,17 +182,18 @@ async function bootstrap() {
 
                 // 2. Factory 注入
                 editorFactory: strategy.getFactory(),
-                
-                // 3. 配置增强 (解耦关键): 注入 HostContext, Mentions 等
-                configEnhancer: strategy.getConfigEnhancer?.(mentionScope),
+                // 4. ✅ [新增] ScopeId (多实例隔离关键)
+                // 使用 targetId (如 'workspace-sidebar') 确保每个实例的 UI 状态独立存储
+                scopeId: targetId,
 
-                // 4. ✨ 传入白名单 (替代了之前的 globalFileTypes)
                 fileTypes: workspaceFileTypes,
                 
                 uiOptions: uiOptions,
                 editorConfig: {
                     plugins: plugins || [],
-                    readOnly: false
+                    readOnly: false,
+                    // ✅ [新增] 将 mentionScope 放入 config，供支持它的编辑器读取
+                    mentionScope: mentionScope
                 },
                 
                 aiConfig: { enabled: aiEnabled ?? true }

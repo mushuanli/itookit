@@ -4,7 +4,7 @@
  * sub-components, bridges UI events with vfs-core data events, and provides
  * a unified public API by implementing ISessionUI.
  */
-import { ISessionUI,EditorFactory, type SessionUIOptions, type SessionManagerEvent, type SessionManagerCallback, type ISessionEngine, type EngineEvent} from '@itookit/common';
+import { ISessionUI,EditorFactory, type SessionUIOptions, type SessionManagerEvent, type SessionManagerCallback, type ISessionEngine, type EngineEvent, generateShortUUID} from '@itookit/common';
 import { EngineTagSource } from '../mention/EngineTagSource';
 import {TagEditorComponent} from '../components/TagEditor/TagEditorComponent';
 
@@ -37,6 +37,9 @@ type VFSUIOptions = SessionUIOptions & {
     customEditorResolver?: CustomEditorResolver;
     /** [新增] 自定义搜索匹配逻辑 */
     searchFilter?: SearchFilter;
+    
+    // ✅ [新增] 必须显式声明，否则 TS 会报错
+    scopeId?: string;
 };
 
 /**
@@ -55,6 +58,9 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
     // 文件类型注册表
     public readonly fileTypeRegistry: FileTypeRegistry;
 
+    // 实例唯一标识，用于拖拽隔离等运行时检查
+    public readonly instanceId: string;
+
     private nodeList: NodeList;
     private fileOutline?: FileOutline;
     private moveToModal: MoveToModal;
@@ -65,7 +71,10 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
 
     private lastSessionSelectWasUserAction = false;
 
-    // ✨ [优化] 事件批处理队列
+    // 模态框的独立容器引用，用于销毁时清理
+    private instanceModalContainer: HTMLElement;
+
+    // 事件批处理队列
     private updateQueue: Set<string> = new Set();
     private updateTimer: any = null;
 
@@ -80,6 +89,7 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
         if (!options.sessionListContainer) throw new Error("VFSUIManager requires 'sessionListContainer'.");
         this.options = options;
         this.engine = engine;
+        this.instanceId = generateShortUUID(); // 生成运行时唯一ID
 
         // 1. 初始化文件类型注册表
         this.fileTypeRegistry = new FileTypeRegistry(
@@ -161,7 +171,8 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
             searchPlaceholder: this.options.searchPlaceholder || 'Search (tag:xx type:file|dir)...',
             createFileLabel: this.options.createFileLabel,
             title: this.options.title,
-            searchFilter: options.searchFilter, // 传递下去
+            searchFilter: options.searchFilter,
+            instanceId: this.instanceId, // [新增] 传入实例ID，用于拖拽隔离
         });
 
         if (this.options.documentOutlineContainer) {
@@ -172,14 +183,28 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
             });
         }
 
-        let modalContainer = document.getElementById('vfs-modal-container');
-        if (!modalContainer) {
-            modalContainer = document.createElement('div');
-            modalContainer.id = 'vfs-modal-container';
-            document.body.appendChild(modalContainer);
+        // --- 修复模态框多实例冲突 ---
+        let globalModalAnchor = document.getElementById('vfs-modal-container');
+        if (!globalModalAnchor) {
+            globalModalAnchor = document.createElement('div');
+            globalModalAnchor.id = 'vfs-modal-container';
+            // 确保锚点本身不占据空间，且层级最高
+            globalModalAnchor.style.position = 'absolute';
+            globalModalAnchor.style.top = '0';
+            globalModalAnchor.style.left = '0';
+            globalModalAnchor.style.width = '0';
+            globalModalAnchor.style.height = '0';
+            globalModalAnchor.style.zIndex = '9999';
+            document.body.appendChild(globalModalAnchor);
         }
+
+        // ✅ 关键：为当前实例创建一个独立的容器 div
+        this.instanceModalContainer = document.createElement('div');
+        this.instanceModalContainer.className = `vfs-modal-wrapper-${this.instanceId}`;
+        globalModalAnchor.appendChild(this.instanceModalContainer);
+
         this.moveToModal = new MoveToModal({
-            container: modalContainer,
+            container: this.instanceModalContainer, // 传入独立的容器
             store: this.store,
             coordinator: this.coordinator,
         });
@@ -299,6 +324,12 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
         this.nodeList.destroy();
         this.fileOutline?.destroy();
         this.moveToModal.destroy();
+        
+        // [新增] 清理独立的模态框容器
+        if (this.instanceModalContainer && this.instanceModalContainer.parentNode) {
+            this.instanceModalContainer.parentNode.removeChild(this.instanceModalContainer);
+        }
+
         this.coordinator.clearAll();
         this.engineUnsubscribe?.();
     }
@@ -746,5 +777,9 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
         });
     }
 
-    private get uiStorageKey() { return `vfs_ui_state_${(this.engine as any).moduleName || 'default'}`; }
+    // [修改] 优先使用 scopeId，否则回退到 moduleName
+    private get uiStorageKey() { 
+        const scope = this.options.scopeId || (this.engine as any).moduleName || 'default';
+        return `vfs_ui_state_${scope}`; 
+    }
 }

@@ -28,6 +28,12 @@ type VFSUIOptions = SessionUIOptions & {
     fileTypes?: FileTypeDefinition[];
     defaultEditorFactory: EditorFactory;
     customEditorResolver?: CustomEditorResolver;
+    
+    /** 
+     * [新增] 必须在此处定义，以便 createVFSUI 能够识别
+     * 用于多实例隔离标识
+     */
+    scopeId?: string; 
 };
 
 
