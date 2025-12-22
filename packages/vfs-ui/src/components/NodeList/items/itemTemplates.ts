@@ -25,7 +25,7 @@ function createOutlinePreviewHTML(headings: Heading[]): string {
         const hasChildren = h.children && h.children.length > 0;
         return `
         <li class="vfs-node-item__outline-item vfs-node-item__outline-item--level-${h.level}">
-            <a href="#" data-action="navigate-to-heading" data-element-id="${escapeHTML(h.elementId)}">
+            <a href="javascript:void(0)" data-action="navigate-to-heading" data-element-id="${escapeHTML(h.elementId)}">
                 <span class="vfs-node-item__outline-text">${escapeHTML(h.text)}</span>
             </a>
             ${hasChildren ? `<ul class="vfs-node-item__outline-list">${createLinks(h.children!)}</ul>` : ''}
@@ -107,8 +107,10 @@ export function createFileItemHTML(
                         <span class="vfs-node-item__timestamp" title="${new Date(lastModified).toLocaleString()}">${formatRelativeTime(lastModified)}</span>
                         ${badgesHTML}
                     </div>
-                    ${deleteBtnHTML}
+                <div class="vfs-node-item__actions">
                     ${outlineToggleHTML}
+                    ${deleteBtnHTML}
+                </div>
                 </div>
             </div>
             ${outlinePreviewHTML}
