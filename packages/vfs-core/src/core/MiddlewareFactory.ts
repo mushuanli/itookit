@@ -8,6 +8,8 @@ import { VFSStorage } from '../store/VFSStorage';
 import { EventBus } from './EventBus';
 import { ContentMiddleware } from '../middleware/base/ContentMiddleware';
 import { CompositeMiddleware } from '../middleware/CompositeMiddleware';
+// ✨ [新增] 引入接口
+import { IVFSMiddleware } from './types';
 
 export class MiddlewareFactory {
   constructor(
@@ -17,10 +19,16 @@ export class MiddlewareFactory {
 
   /**
    * 创建并初始化 Middleware
+   * ✨ [修改] 泛型 T 现在扩展自 IVFSMiddleware，不再局限于 ContentMiddleware
    */
-  create<T extends ContentMiddleware>(MiddlewareClass: new () => T): T {
+  create<T extends IVFSMiddleware>(MiddlewareClass: new () => T): T {
     const middleware = new MiddlewareClass();
-    middleware.initialize(this.storage, this.eventBus);
+    
+    // IVFSMiddleware 的 initialize 是可选的，所以要检查
+    if (middleware.initialize) {
+        middleware.initialize(this.storage, this.eventBus);
+    }
+    
     return middleware;
   }
 

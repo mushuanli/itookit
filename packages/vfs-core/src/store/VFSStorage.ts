@@ -16,8 +16,8 @@ import { SearchQuery } from '../core/types.js';
  */
 export class VFSStorage {
   private db: Database;
-  private inodeStore!: InodeStore;
-  private contentStore!: ContentStore;
+  public inodeStore!: InodeStore;
+  public contentStore!: ContentStore;
   public tagStore!: TagStore;
   public nodeTagStore!: NodeTagStore;
   public srsStore!: SRSStore; // ✨ [新增] Public 暴露

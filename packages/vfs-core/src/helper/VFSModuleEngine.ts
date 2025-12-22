@@ -84,6 +84,12 @@ export class VFSModuleEngine implements ISessionEngine {
         return rootNode.children || [];
     }
 
+    async getChildren(parentId: string): Promise<EngineNode[]> {
+        // VFS.readdir 支持传入 ID 字符串
+        const children = await this.vfs.readdir(parentId);
+        return children.map(node => this.toEngineNode(node));
+    }
+
     async readContent(id: string): Promise<string | ArrayBuffer> {
         return this.vfs.read(id);
     }
@@ -179,6 +185,77 @@ export class VFSModuleEngine implements ISessionEngine {
         return node;
     }
 
+    /**
+     * ✨ [核心] 创建资产文件
+     * 自动处理路径映射：owner.md -> .owner.md/filename
+     * 自动处理 MIME 类型
+     */
+    async createAsset(ownerNodeId: string, filename: string, content: string | ArrayBuffer): Promise<EngineNode> {
+        // 1. 获取主文件
+        const ownerNode = await this.vfs.storage.loadVNode(ownerNodeId);
+        if (!ownerNode) throw new Error(`Owner node ${ownerNodeId} not found`);
+        if (ownerNode.type !== VNodeType.FILE) throw new Error(`Cannot create asset for a directory`);
+
+        // 2. 计算相对路径 (User Path)
+        // 获取 owner 在模块内的路径 /folder/note.md
+        const ownerUserPath = this.vfs.pathResolver.toUserPath(ownerNode.path, this.moduleName);
+        
+        // 提取父目录 /folder
+        const lastSlash = ownerUserPath.lastIndexOf('/');
+        const parentUserPath = lastSlash <= 0 ? '' : ownerUserPath.substring(0, lastSlash);
+        
+        // 构造伴生目录名 .note.md
+        const sidecarDirName = `.${ownerNode.name}`;
+        
+        // 构造资产完整路径: /folder/.note.md/image.png
+        // pathResolver.join 会自动处理根路径的斜杠
+        const assetUserPath = this.vfs.pathResolver.join(
+            parentUserPath || '/', 
+            sidecarDirName, 
+            filename
+        );
+
+        // 3. 猜测 MIME 类型
+        const mimeType = this.guessMimeType(filename);
+
+        // 4. 调用 VFS 创建文件 (VFS 递归创建逻辑会确保 .note.md 目录被创建)
+        const assetNode = await this.vfsCore.createFile(
+            this.moduleName,
+            assetUserPath,
+            content,
+            {
+                isAsset: true,
+                ownerId: ownerNodeId,
+                mimeType: mimeType
+            }
+        );
+
+        return this.toEngineNode(assetNode);
+    }
+
+    async getAssetDirectoryId(ownerNodeId: string): Promise<string | null> {
+        const ownerNode = await this.vfs.storage.loadVNode(ownerNodeId);
+        if (!ownerNode) return null;
+        
+        const sidecarPath = this.vfs.pathResolver.join(
+            this.getParentSystemPath(ownerNode.path),
+            `.${ownerNode.name}`
+        );
+        
+        return await this.vfs.storage.getNodeIdByPath(sidecarPath);
+    }
+
+    private guessMimeType(filename: string): string {
+        const ext = filename.split('.').pop()?.toLowerCase();
+        const map: Record<string, string> = {
+            'png': 'image/png', 'jpg': 'image/jpeg', 'jpeg': 'image/jpeg',
+            'gif': 'image/gif', 'svg': 'image/svg+xml', 'webp': 'image/webp',
+            'pdf': 'application/pdf', 'txt': 'text/plain', 'md': 'text/markdown',
+            'json': 'application/json'
+        };
+        return map[ext || ''] || 'application/octet-stream';
+    }
+
     async writeContent(id: string, content: string | ArrayBuffer): Promise<void> {
         await this.vfs.write(id, content);
     }
@@ -199,14 +276,6 @@ export class VFSModuleEngine implements ISessionEngine {
 
     async updateMetadata(id: string, metadata: Record<string, any>): Promise<void> {
         await this.vfsCore.updateNodeMetadata(id, metadata);
-    }
-
-    /**
-     * [新增] 暴露 pathResolver 能力给上层，方便检查文件是否存在
-     * 避免 Service 层必须去获取 coreVfs
-     */
-    async resolvePath(path: string): Promise<string | null> {
-        return this.vfs.pathResolver.resolve(this.moduleName, path);
     }
 
     /**
@@ -292,11 +361,34 @@ export class VFSModuleEngine implements ISessionEngine {
         const unsubs = Object.entries(handlers).map(([evt, handler]) => bus.on(evt as any, handler));
         return () => unsubs.forEach(u => u());
     }
-    
+
+    /**
+     * [新增/公开] 解析 User Path 为 Node ID
+     * AssetResolverPlugin 会用到这个能力
+     */
+    async resolvePath(path: string): Promise<string | null> {
+        // VFS Core 的 resolve 接受的是 User Path (相对于模块根)
+        // 但我们在 AssetResolver 中构造的是 System Path (包含模块前缀的逻辑有点乱)
+        
+        // 让我们理清 AssetResolver 中的路径：
+        // ownerNode.path 是 System Path (VFS 内部路径，如 /moduleName/folder/test.md)
+        // 所以我们构造的 fullVfsPath 也是 System Path。
+        
+        // VFS.pathResolver.resolve 默认接收 (moduleName, userPath)
+        // VFS.storage.getIdByPath 接收 System Path
+        
+        // 因此，最直接的方法是直接查 Storage
+        return this.vfs.storage.getNodeIdByPath(path);
+    }
+
     // ============================================================
     // 核心修复逻辑：智能解析 Parent
     // ============================================================
-    
+    private getParentSystemPath(path: string): string {
+        const idx = path.lastIndexOf('/');
+        return idx <= 0 ? '/' : path.substring(0, idx);
+    }
+
     /**
      * 解析父节点参数，返回相对路径字符串。
      * 1. 如果是 null/undefined -> 返回空字符串 (根目录)

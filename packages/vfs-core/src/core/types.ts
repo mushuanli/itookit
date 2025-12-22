@@ -92,6 +92,27 @@ export interface IVFSMiddleware {
   onAfterWrite?(vnode: VNode, content: string | ArrayBuffer, transaction: Transaction): Promise<Record<string, any>>;
   onBeforeDelete?(vnode: VNode, transaction: Transaction): Promise<void>;
   onAfterDelete?(vnode: VNode, transaction: Transaction): Promise<void>;
+
+  /** 
+   * [新增] 移动/重命名后触发 (在事务提交前)
+   * 用于处理伴生资源的移动和内容链接的更新
+   */
+  onAfterMove?(
+    vnode: VNode, 
+    oldPath: string, 
+    newPath: string, 
+    transaction: Transaction
+  ): Promise<void>;
+
+  /** 
+   * [新增] 复制后触发 (在事务提交前)
+   * 用于处理伴生资源的递归复制
+   */
+  onAfterCopy?(
+    sourceNode: VNode, 
+    targetNode: VNode, 
+    transaction: Transaction
+  ): Promise<void>;
 }
 
 /** 事件类型 */

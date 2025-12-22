@@ -45,6 +45,11 @@ export class MiddlewareRegistry {
    */
   async runValidation(vnode: VNode, content: string | ArrayBuffer): Promise<void> {
     for (const middleware of this.middlewares.values()) {
+      // ✨ [修复] 如果中间件定义了筛选规则，且当前节点不符合规则，则跳过
+      if (middleware.canHandle && !middleware.canHandle(vnode)) {
+        continue;
+      }
+
       if (middleware.onValidate) {
         await middleware.onValidate(vnode, content);
       }
@@ -61,6 +66,9 @@ export class MiddlewareRegistry {
   ): Promise<string | ArrayBuffer> {
     let processedContent = content;
     for (const middleware of this.middlewares.values()) {
+      // ✨ [修复]
+      if (middleware.canHandle && !middleware.canHandle(vnode)) continue;
+
       if (middleware.onBeforeWrite) {
         processedContent = await middleware.onBeforeWrite(vnode, processedContent, transaction);
       }
@@ -78,6 +86,9 @@ export class MiddlewareRegistry {
   ): Promise<Record<string, any>> {
     const derivedData: Record<string, any> = {};
     for (const middleware of this.middlewares.values()) {
+      // ✨ [修复]
+      if (middleware.canHandle && !middleware.canHandle(vnode)) continue;
+
       if (middleware.onAfterWrite) {
         const data = await middleware.onAfterWrite(vnode, content, transaction);
         Object.assign(derivedData, data);
@@ -91,6 +102,9 @@ export class MiddlewareRegistry {
    */
   async runBeforeDelete(vnode: VNode, transaction: Transaction): Promise<void> {
     for (const middleware of this.middlewares.values()) {
+      // ✨ [修复]
+      if (middleware.canHandle && !middleware.canHandle(vnode)) continue;
+
       if (middleware.onBeforeDelete) {
         await middleware.onBeforeDelete(vnode, transaction);
       }
@@ -102,9 +116,39 @@ export class MiddlewareRegistry {
    */
   async runAfterDelete(vnode: VNode, transaction: Transaction): Promise<void> {
     for (const middleware of this.middlewares.values()) {
+      // ✨ [修复]
+      if (middleware.canHandle && !middleware.canHandle(vnode)) continue;
+
       if (middleware.onAfterDelete) {
         await middleware.onAfterDelete(vnode, transaction);
       }
     }
   }
+
+  async runAfterMove(
+    vnode: VNode, 
+    oldPath: string, 
+    newPath: string, 
+    transaction: Transaction
+  ): Promise<void> {
+    for (const middleware of this.middlewares.values()) {
+      if (middleware.canHandle && !middleware.canHandle(vnode)) continue;
+      if (middleware.onAfterMove) await middleware.onAfterMove(vnode, oldPath, newPath, transaction);
+    }
+  }
+
+  async runAfterCopy(
+    sourceNode: VNode, 
+    targetNode: VNode, 
+    transaction: Transaction
+  ): Promise<void> {
+    for (const middleware of this.middlewares.values()) {
+      // 注意：这里通常检查源节点或目标节点，视业务而定。通常检查目标节点。
+      if (middleware.canHandle && !middleware.canHandle(targetNode)) continue;
+      if (middleware.onAfterCopy) await middleware.onAfterCopy(sourceNode, targetNode, transaction);
+    }
+  }
+
+
+
 }

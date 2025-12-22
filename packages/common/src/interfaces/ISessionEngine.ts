@@ -83,7 +83,10 @@ export interface ISessionEngine {
     init():Promise<void> ;
     /** 加载当前的根节点树结构 */
     loadTree(): Promise<EngineNode[]>;
-    
+
+    /** 获取指定目录下的子节点列表 */
+    getChildren(parentId: string): Promise<EngineNode[]>;
+
     /** 读取单个节点的内容 */
     readContent(id: string): Promise<string | ArrayBuffer>;
     
@@ -112,7 +115,23 @@ export interface ISessionEngine {
 
     /** 创建目录 */
     createDirectory(name: string, parentId: string | null): Promise<EngineNode>;
-    
+
+    /**
+     * [新增] 为指定节点创建关联资产（如图片、附件）
+     * Engine 会自动计算存储位置 (例如 .filename/asset.png) 并处理目录的惰性创建
+     * @param ownerNodeId - 归属的主节点 ID (如 Markdown 文件的 ID)
+     * @param filename - 资产文件名 (如 image.png)
+     * @param content - 二进制内容
+     * @returns 创建的资产节点
+     */
+    createAsset(ownerNodeId: string, filename: string, content: string | ArrayBuffer): Promise<EngineNode>;
+
+    /**
+     * [新增] 获取指定节点的资产目录 ID
+     * 如果不存在则返回 null
+     */
+    getAssetDirectoryId?(ownerNodeId: string): Promise<string | null>;
+
     /** 写入/覆盖文件内容 */
     writeContent(id: string, content: string | ArrayBuffer): Promise<void>;
     
