@@ -17,15 +17,15 @@ service-container.ts
 # mdx plugins/ui
 formatting.plugin.ts
 source-jump.plugin.ts
-titlebar.plugin.ts
+#titlebar.plugin.ts
 toolbar.plugin.ts
 codeblock-controls.plugin.ts
 # mdx plugins/autocomplete
-#autocomplete.plugin.ts
+autocomplete.plugin.ts
 mention.plugin.ts
-#tag.plugin.ts
+tag.plugin.ts
 # mdx plugins/function
-plugins/cloze/
+cloze/
 mathjax.plugin.ts
 mermaid.plugin.ts
 media.plugin.ts
@@ -36,10 +36,7 @@ callout.plugin.ts
 plantuml.plugin.ts
 svg.plugin.ts
 vega.plugin.ts
-#mention
-autocomplete.plugin.ts
-mention.plugin.ts
-tag.plugin.ts
+
 # mdx main:
 
 
