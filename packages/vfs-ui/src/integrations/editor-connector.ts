@@ -201,7 +201,7 @@ export function connectEditorLifecycle(
                             // 调用 VFS 内部侧边栏切换
                             vfsManager.toggleSidebar();
                             // 如果外部也需要感知，透传调用
-                            externalHostContext?.toggleSidebar?.(collapsed);
+                            //externalHostContext?.toggleSidebar?.(collapsed);
                         },
                         saveContent: async (nodeId, content) => {
                             // 直接写入 Engine
