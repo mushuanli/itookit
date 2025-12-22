@@ -427,6 +427,7 @@ export class NodeList extends BaseComponent<NodeListState> {
             return;
         }
         if (action === 'navigate-to-heading' && actionEl?.dataset.elementId) {
+            event.preventDefault(); // 🛑 阻止浏览器修改 URL Hash
             console.log(`[NodeList] Publishing NAVIGATE_TO_HEADING_REQUESTED for ${actionEl.dataset.elementId}`);
             this.coordinator.publish('NAVIGATE_TO_HEADING_REQUESTED', { elementId: actionEl.dataset.elementId });
             return;
