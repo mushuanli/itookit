@@ -1,14 +1,35 @@
-// @file llm-ui/editors/ConnectionSettingsEditor.ts
-import { Modal, Toast,BaseSettingsEditor,generateShortUUID } from '@itookit/common';
-// [新增] 引入测试函数
+// @file: llm-ui/editors/ConnectionSettingsEditor.ts
+
+import { Modal, Toast, BaseSettingsEditor, generateShortUUID } from '@itookit/common';
 import { testLLMConnection, LLMConnection, LLM_PROVIDER_DEFAULTS } from '@itookit/llm-driver';
-import {IAgentService} from '@itookit/llm-engine';
+import { IAgentService } from '@itookit/llm-engine';
 
 export class ConnectionSettingsEditor extends BaseSettingsEditor<IAgentService> {
     private testingConnections = new Set<string>();
 
     async render() {
-        const connections = await this.service.getConnections();
+        let connections = await this.service.getConnections();
+
+        // ✅ [新增] 排序逻辑
+        // 1. Default first
+        // 2. Has API Key second
+        // 3. No API Key last
+        // 4. Name alphabetical within groups
+        connections.sort((a, b) => {
+            // Rule 1: Default always on top
+            if (a.id === 'default') return -1;
+            if (b.id === 'default') return 1;
+
+            // Rule 2: Has API Key ?
+            const aHasKey = !!(a.apiKey && a.apiKey.trim().length > 0);
+            const bHasKey = !!(b.apiKey && b.apiKey.trim().length > 0);
+
+            if (aHasKey && !bHasKey) return -1;
+            if (!aHasKey && bHasKey) return 1;
+
+            // Rule 3: Alphabetical by name (Fallback)
+            return (a.name || '').localeCompare(b.name || '');
+        });
 
         this.container.innerHTML = `
             <div class="settings-page">
@@ -41,16 +62,33 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IAgentService> 
 
     private renderConnectionCard(conn: LLMConnection) {
         const isDefault = conn.id === 'default';
+        const hasKey = !!(conn.apiKey && conn.apiKey.trim().length > 0);
+        
         const provider = LLM_PROVIDER_DEFAULTS[conn.provider];
         const modelList = provider?.models || [];
         const model = modelList.find(m => m.id === conn.model);
         const modelName = model ? model.name : (conn.model || '未设置');
         
+        // ✅ [新增] 状态类名，用于 CSS 样式区分 (例如让未配置的稍微变灰)
+        const statusClass = !hasKey ? 'settings-connection-card--incomplete' : '';
+
+        // ✅ [新增] 状态标签
+        let badgeHtml = '';
+        if (isDefault) {
+            badgeHtml = '<span class="settings-badge settings-badge--success">默认</span>';
+        } else if (!hasKey) {
+            badgeHtml = '<span class="settings-badge settings-badge--warning">需配置</span>';
+        }
+
+        // ✅ [新增] 按钮文案优化
+        const editBtnText = hasKey ? '✏️ 编辑' : '⚙️ 去配置';
+        const editBtnClass = hasKey ? 'settings-btn--secondary' : 'settings-btn--primary'; // 未配置的用主色调引导
+
         return `
-            <div class="settings-connection-card ${isDefault ? 'settings-connection-card--default' : ''}" data-id="${conn.id}">
+            <div class="settings-connection-card ${isDefault ? 'settings-connection-card--default' : ''} ${statusClass}" data-id="${conn.id}">
                 <div class="settings-connection-card__header">
                     <h3 class="settings-connection-card__title">${conn.name}</h3>
-                    ${isDefault ? '<span class="settings-badge settings-badge--success">默认</span>' : ''}
+                    ${badgeHtml}
                 </div>
                 
                 <div class="settings-connection-card__details">
@@ -64,13 +102,15 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IAgentService> 
                     </div>
                     <div class="settings-detail-item">
                         <span class="settings-detail-item__label">API Key</span>
-                        <span class="settings-detail-item__value masked">${conn.apiKey ? '••••••••' : '未设置'}</span>
+                        <span class="settings-detail-item__value masked">
+                            ${hasKey ? '••••••••' : '<span style="color:var(--st-text-disabled)">未设置</span>'}
+                        </span>
                     </div>
                 </div>
                 
                 <div class="settings-page__actions" style="margin-top:auto; width:100%">
-                    <button class="settings-btn settings-btn--secondary settings-btn--sm settings-btn-edit" style="flex:1">✏️ 编辑</button>
-                    <button class="settings-btn settings-btn--secondary settings-btn--sm settings-btn-test" style="flex:1">🔍 测试</button>
+                    <button class="settings-btn ${editBtnClass} settings-btn--sm settings-btn-edit" style="flex:1">${editBtnText}</button>
+                    <button class="settings-btn settings-btn--secondary settings-btn--sm settings-btn-test" style="flex:1" ${!hasKey ? 'disabled' : ''}>🔍 测试</button>
                     ${!isDefault ? '<button class="settings-btn settings-btn--danger settings-btn--sm settings-btn-delete" style="flex:1">🗑️ 删除</button>' : ''}
                 </div>
             </div>
@@ -167,7 +207,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IAgentService> 
                 const formData = new FormData(form);
                 const data = Object.fromEntries(formData) as any;
                 
-                // ✅ 修复：保留原有的 availableModels，或从 provider 默认值获取
+                // 保留原有的 availableModels，或从 provider 默认值获取
                 const providerDef = LLM_PROVIDER_DEFAULTS[data.provider];
                 const newConn: LLMConnection = {
                     id: connection?.id || `conn-${generateShortUUID()}`,
@@ -176,7 +216,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IAgentService> 
                     apiKey: data.apiKey,
                     model: data.model,
                     baseURL: data.baseURL || providerDef?.baseURL || '',
-                    // ✅ 关键修复：确保 availableModels 不丢失
+                    // 确保 availableModels 不丢失
                     availableModels: connection?.availableModels 
                         || (providerDef ? [...providerDef.models] : []),
                     metadata: connection?.metadata
@@ -184,6 +224,8 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IAgentService> 
                 
                 await this.service.saveConnection(newConn);
                 Toast.success(isNew ? '连接已创建！' : '连接已更新！');
+                // 刷新列表以应用排序
+                this.render();
             }
         }).show();
         
@@ -230,9 +272,6 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IAgentService> 
         testBtn.disabled = true;
 
         try {
-            // [修复] 调用真实的测试函数
-            // 注意：connection 对象结构需符合 testLLMConnection 的参数要求
-            // testLLMConnection(config: { provider: string; apiKey: string; baseURL?: string; model?: string; })
             const result = await testLLMConnection({
                 provider: connection.provider,
                 apiKey: connection.apiKey,
@@ -244,7 +283,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IAgentService> 
                 Toast.success(result.message || '连接测试成功！');
                 testBtn.innerHTML = '✅ 成功';
                 testBtn.classList.remove('settings-btn--secondary');
-                testBtn.classList.add('settings-btn--success'); // 假设有这个样式
+                testBtn.classList.add('settings-btn--success');
             } else {
                 Toast.error(`测试失败: ${result.message}`);
                 testBtn.innerHTML = '❌ 失败';
@@ -259,7 +298,6 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IAgentService> 
             setTimeout(() => {
                 testBtn.innerHTML = originalText;
                 testBtn.disabled = false;
-                // 恢复样式
                 testBtn.classList.remove('settings-btn--success', 'settings-btn--danger');
                 testBtn.classList.add('settings-btn--secondary');
                 this.testingConnections.delete(connection.id);
@@ -271,6 +309,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IAgentService> 
         Modal.confirm('确认删除', `确定要删除连接"${name}"吗？此操作无法撤销。`, async () => {
             await this.service.deleteConnection(id);
             Toast.success('连接已删除');
+            this.render(); // 重新渲染列表
         });
     }
 
