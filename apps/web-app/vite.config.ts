@@ -15,7 +15,6 @@ export default defineConfig({
             '@itookit/memory-manager/style.css': path.resolve(__dirname, '../../packages/memory-manager/src/styles/memory-manager.css'),
             '@itookit/llm-ui/style.css': path.resolve(__dirname, '../../packages/llm-ui/src/styles/index.css'),
             '@itookit/app-settings/style.css': path.resolve(__dirname, '../../packages/app-settings/src/styles/styles.css'),
-            '@itookit/common/style.css': path.resolve(__dirname, '../../packages/common/src/styles/index.css'),
 
             '@itookit/common': path.resolve(__dirname, '../../packages/common/src/index.ts'),
             '@itookit/vfs-core': path.resolve(__dirname, '../../packages/vfs-core/src/index.ts'),
