@@ -258,8 +258,9 @@ export async function createMDxEditor(
         // 2. 保存：如果插件没配，且有 nodeId，就用 Host 的
         saveCallback: existingTitleBarOpts.saveCallback 
             || (async (editor) => {
-                if (config.nodeId) {
-                    await config.hostContext?.saveContent(config.nodeId, editor.getText());
+                if (config.nodeId && config.hostContext) {
+                    await config.hostContext.saveContent(config.nodeId, editor.getText());
+		    editor.setDirty(false);
                 } else {
                     console.warn('[MDxEditor] Cannot save: No nodeId provided.');
                 }

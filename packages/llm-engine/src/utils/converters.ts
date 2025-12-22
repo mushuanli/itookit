@@ -33,12 +33,17 @@ export class Converters {
                     executorId: node.meta?.agentId || 'unknown',
                     executorType: 'agent',
                     name: node.meta?.agentName || 'Assistant',
-                    status: 'success',
+                    status: (node.meta?.status as any) || 'success', // 优先使用 meta 中的状态
                     startTime: new Date(node.created_at).getTime(),
+                    // 如果有 error，endTime 可能需要处理，这里简化
+                    endTime: new Date(node.created_at).getTime(),
                     data: {
                         output: node.content,
                         thought: node.meta?.thinking || '',
-                        metaInfo: node.meta || {}
+                        metaInfo: node.meta || {},
+                        
+                        /** ✅ 映射错误信息 */
+                        error: node.meta?.error
                     },
                     children: []
                 },

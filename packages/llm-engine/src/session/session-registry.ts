@@ -536,23 +536,42 @@ export class SessionRegistry {
             console.error('[SessionRegistry] Task execution failed:', error);
             
             const isAborted = error.name === 'AbortError' || task.abortController.signal.aborted;
-            this.updateStatus(sessionId, isAborted ? 'aborted' : 'failed');
+            const status = isAborted ? 'aborted' : 'failed';
+            this.updateStatus(sessionId, status);
             
             runtime.error = error;
             
-            // 更新节点状态
+            // ✅ 修复：格式化错误信息
+            const errorMessage = this.formatErrorMessage(error);
+            
+            // 更新节点状态和数据
             const lastSession = state.getLastSession();
             if (lastSession?.executionRoot) {
-                state.updateNodeStatus(lastSession.executionRoot.id, 'failed');
+                const rootId = lastSession.executionRoot.id;
+                
+                // 1. 更新内存状态
+                state.updateNodeStatus(rootId, 'failed');
+                state.updateNodeError(rootId, errorMessage); // ✅ 写入错误信息到内存
                 
                 this.emitSessionEvent(sessionId, {
                     type: 'node_status',
-                    payload: { nodeId: lastSession.executionRoot.id, status: 'failed' }
+                    payload: { nodeId: rootId, status: 'failed', result: errorMessage }
                 });
+
+                // 3. 持久化错误信息 (确保刷新后错误依然存在)
+                const assistantNodeId = lastSession.persistedNodeId;
+                if (assistantNodeId) {
+                    await this.persistence.updateMessage(sessionId, assistantNodeId, {
+                        meta: {
+                            status: 'failed',
+                            error: errorMessage, // ✅ 写入错误信息到文件
+                            endTime: Date.now()
+                        }
+                    });
+                }
             }
             
-            // ✅ 修复：发送错误事件，不包含 code 属性（因为类型定义不支持）
-            const errorMessage = this.formatErrorMessage(error);
+            // 4. 发送全局错误事件 (触发 Error Bubble)
             this.emitSessionEvent(sessionId, {
                 type: 'error',
                 payload: { 

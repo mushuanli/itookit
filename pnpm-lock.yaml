@@ -27,12 +27,6 @@ importers:
 
   apps/web-app:
     dependencies:
-      '@codemirror/lang-markdown':
-        specifier: ^6.5.0
-        version: 6.5.0
-      '@codemirror/state':
-        specifier: ^6.5.2
-        version: 6.5.2
       '@fortawesome/fontawesome-free':
         specifier: ^7.1.0
         version: 7.1.0
@@ -48,6 +42,9 @@ importers:
       '@itookit/llm-engine':
         specifier: workspace:*
         version: link:../../packages/llm-engine
+      '@itookit/llm-kernel':
+        specifier: workspace:*
+        version: link:../../packages/llm-kernel
       '@itookit/llm-ui':
         specifier: workspace:*
         version: link:../../packages/llm-ui
@@ -63,15 +60,9 @@ importers:
       '@itookit/vfs-ui':
         specifier: workspace:*
         version: link:../../packages/vfs-ui
-      codemirror:
-        specifier: ^6.0.2
-        version: 6.0.2
       dexie:
         specifier: ^4.2.1
         version: 4.2.1
-      dotenv:
-        specifier: ^17.2.3
-        version: 17.2.3
       immer:
         specifier: ^10.2.0
         version: 10.2.0
@@ -81,43 +72,16 @@ importers:
       mermaid:
         specifier: ^11.12.1
         version: 11.12.1
-      openai:
-        specifier: ^5.23.2
-        version: 5.23.2(ws@8.18.3)(zod@3.25.76)
-      yaml:
-        specifier: ^2.8.1
-        version: 2.8.1
-      zod:
-        specifier: ^3.25.76
-        version: 3.25.76
     devDependencies:
-      '@codemirror/autocomplete':
-        specifier: ^6.20.0
-        version: 6.20.0
-      '@codemirror/commands':
-        specifier: ^6.10.0
-        version: 6.10.0
-      '@codemirror/lang-javascript':
-        specifier: ^6.2.4
-        version: 6.2.4
-      '@codemirror/language':
-        specifier: ^6.11.3
-        version: 6.11.3
-      '@codemirror/view':
-        specifier: ^6.38.8
-        version: 6.38.8
       '@types/node':
-        specifier: ^25.0.3
-        version: 25.0.3
+        specifier: ^20.19.25
+        version: 20.19.25
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
       vite:
-        specifier: ^6.4.1
-        version: 6.4.1(@types/node@25.0.3)(jiti@1.21.7)(tsx@4.20.6)(yaml@2.8.1)
-      vite-plugin-singlefile:
-        specifier: ^2.3.0
-        version: 2.3.0(rollup@4.53.3)(vite@6.4.1(@types/node@25.0.3)(jiti@1.21.7)(tsx@4.20.6)(yaml@2.8.1))
+        specifier: ^5.4.21
+        version: 5.4.21(@types/node@20.19.25)
 
   packages/app-settings:
     devDependencies:
@@ -163,18 +127,24 @@ importers:
 
   packages/demo:
     dependencies:
-      '@codemirror/lang-markdown':
-        specifier: ^6.5.0
-        version: 6.5.0
-      '@codemirror/state':
-        specifier: ^6.5.2
-        version: 6.5.2
-      '@fortawesome/fontawesome-free':
-        specifier: ^7.1.0
-        version: 7.1.0
+      '@itookit/app-settings':
+        specifier: workspace:*
+        version: link:../app-settings
       '@itookit/common':
         specifier: workspace:*
         version: link:../common
+      '@itookit/llm-driver':
+        specifier: workspace:*
+        version: link:../llm-driver
+      '@itookit/llm-engine':
+        specifier: workspace:*
+        version: link:../llm-engine
+      '@itookit/llm-kernel':
+        specifier: workspace:*
+        version: link:../llm-kernel
+      '@itookit/llm-ui':
+        specifier: workspace:*
+        version: link:../llm-ui
       '@itookit/mdxeditor':
         specifier: workspace:*
         version: link:../mdx
@@ -187,15 +157,9 @@ importers:
       '@itookit/vfs-ui':
         specifier: workspace:*
         version: link:../vfs-ui
-      codemirror:
-        specifier: ^6.0.2
-        version: 6.0.2
       dexie:
         specifier: ^4.2.1
         version: 4.2.1
-      dotenv:
-        specifier: ^17.2.3
-        version: 17.2.3
       immer:
         specifier: ^10.2.0
         version: 10.2.0
@@ -205,37 +169,16 @@ importers:
       mermaid:
         specifier: ^11.12.1
         version: 11.12.1
-      openai:
-        specifier: ^5.23.2
-        version: 5.23.2(ws@8.18.3)(zod@3.25.76)
-      yaml:
-        specifier: ^2.8.1
-        version: 2.8.1
-      zod:
-        specifier: ^3.25.76
-        version: 3.25.76
     devDependencies:
-      '@codemirror/autocomplete':
-        specifier: ^6.20.0
-        version: 6.20.0
-      '@codemirror/commands':
-        specifier: ^6.10.0
-        version: 6.10.0
-      '@codemirror/lang-javascript':
-        specifier: ^6.2.4
-        version: 6.2.4
-      '@codemirror/language':
-        specifier: ^6.11.3
-        version: 6.11.3
-      '@codemirror/view':
-        specifier: ^6.38.8
-        version: 6.38.8
+      '@types/node':
+        specifier: ^20.19.25
+        version: 20.19.25
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
       vite:
-        specifier: ^7.2.4
-        version: 7.2.4(@types/node@25.0.3)(jiti@1.21.7)(tsx@4.20.6)(yaml@2.8.1)
+        specifier: ^5.4.21
+        version: 5.4.21(@types/node@20.19.25)
 
   packages/llm-driver:
     dependencies:
@@ -1754,10 +1697,6 @@ packages:
     resolution: {integrity: sha512-aNdbnj9P8PjdXU4ybaWLK2IF3jc/EoDYbC7AazW6to3TRsfXxscC9UXOB5iDiEQrkyIbWp2SLQda4+QAa7nc3w==}
     engines: {node: '>=0.10.0'}
 
-  braces@3.0.3:
-    resolution: {integrity: sha512-yQbXgO/OSZVD2IsiLlro+7Hf6Q18EJrKSEsdoMzKePKXct3gvD8oLcOQdIzGupr5Fj+EDe8gO/lxc1BzfMpxvA==}
-    engines: {node: '>=8'}
-
   bundle-require@5.1.0:
     resolution: {integrity: sha512-3WrrOuZiyaaZPWiEt4G3+IffISVC9HYlWueJEBWED4ZH4aIAC2PnkdnuRrR94M+w6yGWn4AglWtJtBI8YqvgoA==}
     engines: {node: ^12.20.0 || ^14.13.1 || >=16.0.0}
@@ -2127,10 +2066,6 @@ packages:
   dompurify@3.3.0:
     resolution: {integrity: sha512-r+f6MYR1gGN1eJv0TVQbhA7if/U7P87cdPl3HN5rikqaBSBxLiCb/b9O+2eG0cxz0ghyU+mU1QkbsOwERMYlWQ==}
 
-  dotenv@17.2.3:
-    resolution: {integrity: sha512-JVUnt+DUIzu87TABbhPmNfVdBDt18BLOWjMUFJMSi/Qqg7NTYtabbvSNJGOJ7afbRuv9D/lngizHtP7QyLQ+9w==}
-    engines: {node: '>=12'}
-
   duplexer@0.1.2:
     resolution: {integrity: sha512-jtD6YG370ZCIi/9GTaJKQxWTZD045+4R4hTk/x1UyoqadyJ9x9CgSi1RlVDQF8U2sxLLSnFkCaMihqljHIWgMg==}
 
@@ -2252,10 +2187,6 @@ packages:
   fill-range@4.0.0:
     resolution: {integrity: sha512-VcpLTWqWDiTerugjj8e3+esbg+skS3M9e54UuR3iCeIDMXCLTsAH8hTSzDQU/X6/6t3eYkOKoZSef2PlU6U1XQ==}
     engines: {node: '>=0.10.0'}
-
-  fill-range@7.1.1:
-    resolution: {integrity: sha512-YsGpe3WHLK8ZYi4tWDg2Jy3ebRz2rXowDxnld4bkQB00cc/1Zw9AWnC0i9ztDJitivtQvaI9KaLyKrc+hBW0yg==}
-    engines: {node: '>=8'}
 
   find-index@0.1.1:
     resolution: {integrity: sha512-uJ5vWrfBKMcE6y2Z8834dwEZj9mNGxYa3t3I53OwFeuZ8D9oc2E5zcsrkuhX6h4iYrjhiv0T3szQmxlAV9uxDg==}
@@ -2488,10 +2419,6 @@ packages:
   is-number@4.0.0:
     resolution: {integrity: sha512-rSklcAIlf1OmFdyAqbnWTLVelsQ58uvZ66S/ZyawjWqIviTWCjg2PzVGw8WUA+nNuPTqb4wgA+NszrJ+08LlgQ==}
     engines: {node: '>=0.10.0'}
-
-  is-number@7.0.0:
-    resolution: {integrity: sha512-41Cifkg6e8TylSpdtTpeLVMqvSBEVzTttHvERD741+pnZ8ANv0004MRL43QKPDlK9cGvNp6NZWZUBlbGXYxxng==}
-    engines: {node: '>=0.12.0'}
 
   is-plain-object@2.0.4:
     resolution: {integrity: sha512-h5PpgXkWitc38BBMYawTYMWJHFZJVnBquFE57xFpjB8pJFiF6gZ+bU+WyI/yqXiFR5mdLsgYNaPe8uao6Uv9Og==}
@@ -2838,10 +2765,6 @@ packages:
     resolution: {integrity: sha512-MWikgl9n9M3w+bpsY3He8L+w9eF9338xRl8IAO5viDizwSzziFEyUzo2xrrloB64ADbTf8uA8vRqqttDTOmccg==}
     engines: {node: '>=0.10.0'}
 
-  micromatch@4.0.8:
-    resolution: {integrity: sha512-PXwfBhYu0hBCPw8Dn0E+WDYb7af3dSLVWKi3HGv84IdF4TyFoC0ysxFd0Goxw7nSv4T/PzEJQxsYsEiFCKo2BA==}
-    engines: {node: '>=8.6'}
-
   mimic-fn@4.0.0:
     resolution: {integrity: sha512-vqiC06CuhBTUdZH+RYl8sFrL096vA45Ok5ISO6sE/Mr1jRbGH4Csnhi8f3wKVl7x8mO4Au7Ir9D3Oyv1VYMFJw==}
     engines: {node: '>=12'}
@@ -2956,18 +2879,6 @@ packages:
     resolution: {integrity: sha512-1FlR+gjXK7X+AsAHso35MnyN5KqGwJRi/31ft6x0M194ht7S+rWAvd7PHss9xSKMzE0asv1pyIHaJYq+BbacAQ==}
     engines: {node: '>=12'}
 
-  openai@5.23.2:
-    resolution: {integrity: sha512-MQBzmTulj+MM5O8SKEk/gL8a7s5mktS9zUtAkU257WjvobGc9nKcBuVwjyEEcb9SI8a8Y2G/mzn3vm9n1Jlleg==}
-    hasBin: true
-    peerDependencies:
-      ws: ^8.18.0
-      zod: ^3.23.8
-    peerDependenciesMeta:
-      ws:
-        optional: true
-      zod:
-        optional: true
-
   p-limit@5.0.0:
     resolution: {integrity: sha512-/Eaoq+QyLSiXQ4lyYV23f14mZRQcXnxfHrN0vCai+ak9G0pp9iEQukIIZq5NccEvwRB8PUnZT0KsOoDCINS1qQ==}
     engines: {node: '>=18'}
@@ -3025,10 +2936,6 @@ packages:
 
   picocolors@1.1.1:
     resolution: {integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==}
-
-  picomatch@2.3.1:
-    resolution: {integrity: sha512-JU3teHTNjmE2VCGFzuY8EXzCDVwEqB2a8fsIvwaStHhAWJEeVd1o1QD80CU6+ZdEXXSLbSsuLwJjkCBWqRQUVA==}
-    engines: {node: '>=8.6'}
 
   picomatch@4.0.3:
     resolution: {integrity: sha512-5gTmgEY/sqK6gFXLIsQNH19lWb4ebPDLA4SdLP7dsWkIXHWlG66oPuVvXSGFPppYZz8ZDZq0dYYrbHfBCVUb1Q==}
@@ -3414,10 +3321,6 @@ packages:
     resolution: {integrity: sha512-ZZWNfCjUokXXDGXFpZehJIkZqq91BcULFq/Pi7M5i4JnxXdhMKAK682z8bCW3o8Hj1wuuzoKcW3DfVzaP6VuNg==}
     engines: {node: '>=0.10.0'}
 
-  to-regex-range@5.0.1:
-    resolution: {integrity: sha512-65P7iz6X5yEr1cwcgvQxbbIw7Uk3gOy5dIdtZ4rDveLqhrdJP+Li/Hx6tyK0NEb+2GCyneCMJiGqrADCSNk8sQ==}
-    engines: {node: '>=8.0'}
-
   to-regex@3.0.2:
     resolution: {integrity: sha512-FWtleNAtZ/Ki2qtqej2CXTOayOH9bHDQF+Q48VpWyDXjbYxA4Yz8iDB31zXOBUlOHHKidDbqGVrTUvQMPmBGBw==}
     engines: {node: '>=0.10.0'}
@@ -3618,13 +3521,6 @@ packages:
       vite:
         optional: true
 
-  vite-plugin-singlefile@2.3.0:
-    resolution: {integrity: sha512-DAcHzYypM0CasNLSz/WG0VdKOCxGHErfrjOoyIPiNxTPTGmO6rRD/te93n1YL/s+miXq66ipF1brMBikf99c6A==}
-    engines: {node: '>18.0.0'}
-    peerDependencies:
-      rollup: ^4.44.1
-      vite: ^5.4.11 || ^6.0.0 || ^7.0.0
-
   vite@5.4.21:
     resolution: {integrity: sha512-o5a9xKjbtuhY6Bi5S3+HvbRERmouabWbyUcpXXUA1u+GNUKoROi9byOJ8M0nHbHYHkYICiMlqxkg1KkYmm25Sw==}
     engines: {node: ^18.0.0 || >=20.0.0}
@@ -3654,46 +3550,6 @@ packages:
       sugarss:
         optional: true
       terser:
-        optional: true
-
-  vite@6.4.1:
-    resolution: {integrity: sha512-+Oxm7q9hDoLMyJOYfUYBuHQo+dkAloi33apOPP56pzj+vsdJDzr+j1NISE5pyaAuKL4A3UD34qd0lx5+kfKp2g==}
-    engines: {node: ^18.0.0 || ^20.0.0 || >=22.0.0}
-    hasBin: true
-    peerDependencies:
-      '@types/node': ^18.0.0 || ^20.0.0 || >=22.0.0
-      jiti: '>=1.21.0'
-      less: '*'
-      lightningcss: ^1.21.0
-      sass: '*'
-      sass-embedded: '*'
-      stylus: '*'
-      sugarss: '*'
-      terser: ^5.16.0
-      tsx: ^4.8.1
-      yaml: ^2.4.2
-    peerDependenciesMeta:
-      '@types/node':
-        optional: true
-      jiti:
-        optional: true
-      less:
-        optional: true
-      lightningcss:
-        optional: true
-      sass:
-        optional: true
-      sass-embedded:
-        optional: true
-      stylus:
-        optional: true
-      sugarss:
-        optional: true
-      terser:
-        optional: true
-      tsx:
-        optional: true
-      yaml:
         optional: true
 
   vite@7.2.4:
@@ -3878,9 +3734,6 @@ packages:
     resolution: {integrity: sha512-D7eujBWkLa3p2sIpJA0d1pr7es+a7m0vFAnZLlCEKq/Ij2k0MLi9Br2UPxoxdYystm5K1yeBGzub0FlYUEWj2Q==}
     engines: {node: '>=8.0.0'}
     hasBin: true
-
-  zod@3.25.76:
-    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
 
 snapshots:
 
@@ -4816,6 +4669,7 @@ snapshots:
   '@types/node@25.0.3':
     dependencies:
       undici-types: 7.16.0
+    optional: true
 
   '@types/trusted-types@2.0.7':
     optional: true
@@ -5108,10 +4962,6 @@ snapshots:
       to-regex: 3.0.2
     transitivePeerDependencies:
       - supports-color
-
-  braces@3.0.3:
-    dependencies:
-      fill-range: 7.1.1
 
   bundle-require@5.1.0(esbuild@0.27.0):
     dependencies:
@@ -5529,8 +5379,6 @@ snapshots:
     optionalDependencies:
       '@types/trusted-types': 2.0.7
 
-  dotenv@17.2.3: {}
-
   duplexer@0.1.2: {}
 
   eastasianwidth@0.2.0: {}
@@ -5728,10 +5576,6 @@ snapshots:
       is-number: 3.0.0
       repeat-string: 1.6.1
       to-regex-range: 2.1.1
-
-  fill-range@7.1.1:
-    dependencies:
-      to-regex-range: 5.0.1
 
   find-index@0.1.1: {}
 
@@ -5963,8 +5807,6 @@ snapshots:
       kind-of: 3.2.2
 
   is-number@4.0.0: {}
-
-  is-number@7.0.0: {}
 
   is-plain-object@2.0.4:
     dependencies:
@@ -6465,11 +6307,6 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  micromatch@4.0.8:
-    dependencies:
-      braces: 3.0.3
-      picomatch: 2.3.1
-
   mimic-fn@4.0.0: {}
 
   minimatch@10.0.3:
@@ -6591,11 +6428,6 @@ snapshots:
     dependencies:
       mimic-fn: 4.0.0
 
-  openai@5.23.2(ws@8.18.3)(zod@3.25.76):
-    optionalDependencies:
-      ws: 8.18.3
-      zod: 3.25.76
-
   p-limit@5.0.0:
     dependencies:
       yocto-queue: 1.2.2
@@ -6641,8 +6473,6 @@ snapshots:
   pathval@1.1.1: {}
 
   picocolors@1.1.1: {}
-
-  picomatch@2.3.1: {}
 
   picomatch@4.0.3: {}
 
@@ -7030,10 +6860,6 @@ snapshots:
       is-number: 3.0.0
       repeat-string: 1.6.1
 
-  to-regex-range@5.0.1:
-    dependencies:
-      is-number: 7.0.0
-
   to-regex@3.0.2:
     dependencies:
       define-property: 2.0.2
@@ -7137,7 +6963,8 @@ snapshots:
 
   undici-types@6.21.0: {}
 
-  undici-types@7.16.0: {}
+  undici-types@7.16.0:
+    optional: true
 
   unicorn-magic@0.3.0: {}
 
@@ -7272,12 +7099,6 @@ snapshots:
       - rollup
       - supports-color
 
-  vite-plugin-singlefile@2.3.0(rollup@4.53.3)(vite@6.4.1(@types/node@25.0.3)(jiti@1.21.7)(tsx@4.20.6)(yaml@2.8.1)):
-    dependencies:
-      micromatch: 4.0.8
-      rollup: 4.53.3
-      vite: 6.4.1(@types/node@25.0.3)(jiti@1.21.7)(tsx@4.20.6)(yaml@2.8.1)
-
   vite@5.4.21(@types/node@20.19.25):
     dependencies:
       esbuild: 0.21.5
@@ -7295,21 +7116,6 @@ snapshots:
     optionalDependencies:
       '@types/node': 25.0.3
       fsevents: 2.3.3
-
-  vite@6.4.1(@types/node@25.0.3)(jiti@1.21.7)(tsx@4.20.6)(yaml@2.8.1):
-    dependencies:
-      esbuild: 0.25.12
-      fdir: 6.5.0(picomatch@4.0.3)
-      picomatch: 4.0.3
-      postcss: 8.5.6
-      rollup: 4.53.3
-      tinyglobby: 0.2.15
-    optionalDependencies:
-      '@types/node': 25.0.3
-      fsevents: 2.3.3
-      jiti: 1.21.7
-      tsx: 4.20.6
-      yaml: 2.8.1
 
   vite@7.2.4(@types/node@25.0.3)(jiti@1.21.7)(tsx@4.20.6)(yaml@2.8.1):
     dependencies:
@@ -7481,7 +7287,8 @@ snapshots:
 
   yallist@4.0.0: {}
 
-  yaml@2.8.1: {}
+  yaml@2.8.1:
+    optional: true
 
   yocto-queue@1.2.2: {}
 
@@ -7492,5 +7299,3 @@ snapshots:
       validator: 13.15.23
     optionalDependencies:
       commander: 9.5.0
-
-  zod@3.25.76: {}

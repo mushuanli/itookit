@@ -7,7 +7,7 @@ import { createMDxEditor } from '@itookit/mdxeditor';
 import { MemoryManagerConfig } from '../types';
 import { BackgroundBrain } from './BackgroundBrain';
 import { Layout } from './Layout';
-import { EditorHostContext, EditorOptions, IEditor, ISessionEngine } from '@itookit/common';
+import { EditorOptions, IEditor, ISessionEngine, EditorHostContext, NavigationRequest } from '@itookit/common';
 
 export class MemoryManager {
     private vfsUI: VFSUIManager;
@@ -62,16 +62,41 @@ export class MemoryManager {
             this.brain.start();
         }
 
-        // 6. 连接编辑器生命周期 (自动化管理创建、保存、销毁)
-        // 这里的 factory 参数主要用于 connector 内部直接调用，或作为 fallback
+        // ✅ [Fix] 5. Create Host Context Explicitly
+        // 创建通用的宿主上下文，供所有编辑器使用
+        const sharedHostContext: EditorHostContext = {
+            toggleSidebar: (collapsed?: boolean) => {
+                this.vfsUI.toggleSidebar(); 
+            },
+            saveContent: async (nodeId: string, content: string) => {
+                await this.engine.writeContent(nodeId, content);
+            },
+            navigate: async (req: NavigationRequest) => {
+                console.log(`[MemoryManager:${this.config.scopeId}] Handling navigation:`, req);
+                if (this.config.onNavigate) {
+                    await this.config.onNavigate(req);
+                } else {
+                    console.warn('[MemoryManager] onNavigate callback is missing in config.');
+                }
+            }
+        };
+
+        // 6. Connect Editor Lifecycle
+        // 关键：将 hostContext 作为 options 传入，确保 EditorConnector 能接收到它
         this.lifecycleUnsubscribe = connectEditorLifecycle(
             this.vfsUI,
             this.engine,
             this.layout.editorContainer,
-            this.enhancedEditorFactory // 传递增强版工厂
+            this.enhancedEditorFactory,
+            {
+                // ✅ 传递 HostContext
+                hostContext: sharedHostContext,
+                
+                // 传递其他编辑器配置
+                ...config.editorConfig
+            }
         );
 
-        // 7. 绑定布局响应事件
         this.bindLayoutEvents();
     }
 
@@ -83,19 +108,6 @@ export class MemoryManager {
     private enhancedEditorFactory = async (container: HTMLElement, runtimeOptions: EditorOptions): Promise<IEditor> => {
         const { editorConfig } = this.config;
 
-        // 1. 准备宿主能力 (生产)
-        // 这些函数封装了 MemoryManager 内部的 Layout 和 VFSUI 操作
-        const hostContext: EditorHostContext = {
-            toggleSidebar: (_collapsed?: boolean) => {
-                // 调用 VFSUI 或 Layout 的方法
-                this.vfsUI.toggleSidebar(); 
-            },
-            saveContent: async (nodeId: string, content: string) => {
-                await this.engine.writeContent(nodeId, content);
-            }
-        };
-
-        // 2. 基础配置合并
         const mergedOptions: EditorOptions = {
             ...editorConfig,
             ...runtimeOptions,
@@ -104,11 +116,7 @@ export class MemoryManager {
                 ...(editorConfig?.defaultPluginOptions || {}),
                 ...(runtimeOptions?.defaultPluginOptions || {}),
             },
-
-            // ✅ [关键] 强制注入当前环境的依赖 (Dependency Injection)
-            // 这让编辑器可以无感知地使用 engine 和 UI 控制能力
-            sessionEngine: this.engine,
-            hostContext: hostContext
+            sessionEngine: this.engine
         };
 
         // 3. 直接调用原始工厂
@@ -132,6 +140,17 @@ export class MemoryManager {
     public async start() {
         await this.engine.init();
         await this.vfsUI.start(); 
+        
+        // Settings 模块的特殊逻辑：监听来自 Main 的 Tab 切换请求
+        if (this.config.moduleName === 'settings_root') {
+            // 注意：这里需要配合 Main.ts 中的逻辑，如果是通过 openFile 方法调用则不需要这个监听器
+            // 但为了兼容旧的 window dispatch 方式，保留也无妨
+        }
+    }
+
+    public async openFile(nodeId: string) {
+        // 暴露给外部 (Main.ts) 调用
+        await this.vfsUI.store.dispatch({ type: 'SESSION_SELECT', payload: { sessionId: nodeId }});
     }
 
     public destroy() {
