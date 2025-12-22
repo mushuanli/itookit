@@ -3,7 +3,15 @@
  * @desc Provides a high-level function to connect a VFS-UI manager with any IEditor-compatible editor.
  *       Optimized with debounce saving and async initialization, guarded against race conditions.
  */
-import type { IEditor, EditorFactory, EditorOptions, ISessionUI, ISessionEngine, EditorHostContext } from '@itookit/common';
+import type { 
+    IEditor, 
+    EditorFactory, 
+    EditorOptions, 
+    ISessionUI, 
+    ISessionEngine, 
+    EditorHostContext,
+    NavigationRequest 
+} from '@itookit/common';
 import type { VFSNodeUI, VFSUIState } from '../types/types';
 import type { VFSService } from '../services/VFSService';
 import { parseFileInfo } from '../utils/parser';
@@ -13,7 +21,7 @@ export interface ConnectOptions {
     onEditorCreated?: (editor: IEditor | null) => void;
     /** Time in ms to wait before auto-saving after the last keystroke. Default: 500ms */
     saveDebounceMs?: number;
-    /** Any extra options to pass to the editor factory */
+    /** Any extra options to pass to the editor factory (including hostContext from upstream) */
     [key: string]: any;
 }
 
@@ -167,7 +175,7 @@ export function connectEditorLifecycle(
             const initEditor = async () => {
                 if (myToken !== currentSessionToken) return;
                 try {
-                    // [核心修改] 动态解析 Factory
+                    // 动态解析 Factory
                     let targetFactory: EditorFactory | undefined;
 
                     // 1. 优先尝试使用 Manager 的解析器 (支持扩展名注册和自定义 resolver)
@@ -184,15 +192,30 @@ export function connectEditorLifecycle(
                         throw new Error("No suitable editor factory found.");
                     }
 
-                    // ✅ [关键新增] 组装标准的 HostContext
-                    // 这确保了无论是什么 Editor，都能获得切换侧边栏和保存的能力
+                    // ✅ [关键修改] 获取上层(MemoryManager)传入的 HostContext
+                    const externalHostContext = factoryExtraOptions.hostContext as EditorHostContext | undefined;
+
+                    // ✅ [关键修改] 组装混合 HostContext：既包含 VFS 内部能力，也透传外部能力
                     const hostContext: EditorHostContext = {
-                        toggleSidebar: (collapsed?: boolean) => vfsManager.toggleSidebar(),
+                        toggleSidebar: (collapsed?: boolean) => {
+                            // 调用 VFS 内部侧边栏切换
+                            vfsManager.toggleSidebar();
+                            // 如果外部也需要感知，透传调用
+                            externalHostContext?.toggleSidebar?.(collapsed);
+                        },
                         saveContent: async (nodeId, content) => {
-                            // 编辑器主动调用保存时，我们直接写入 Engine
-                            // 注意：这不会触发 optimistic update 的清理，如果需要更复杂的逻辑，
-                            // 可以调用 saveCurrentSession()，但需要注意上下文
+                            // 直接写入 Engine
                             await engine.writeContent(nodeId, content);
+                        },
+                        navigate: async (request: NavigationRequest) => {
+                            // ✅ 关键：如果外部提供了 navigate 处理函数（MemoryManager -> Main），则转发
+                            if (externalHostContext?.navigate) {
+                                console.log('[EditorConnector] Forwarding navigation request:', request);
+                                await externalHostContext.navigate(request);
+                            } else {
+                                // 只有在没有外部宿主时才警告
+                                console.warn('[EditorConnector] Default navigation handler: No host connected.', request);
+                            }
                         }
                     };
 

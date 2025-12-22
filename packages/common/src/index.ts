@@ -12,6 +12,7 @@ export {
     type Heading 
 } from './interfaces/IEditor';
 export { type EditorFactory } from './interfaces/IEditorFactory';
+export {type NavigationRequest} from './interfaces/INavigation';
 
 export { IAutocompleteSource, type Suggestion } from './interfaces/IAutocompleteSource';
 

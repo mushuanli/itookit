@@ -98,7 +98,7 @@ export class MentionPlugin implements MDxPlugin {
 
   constructor(options: MentionPluginOptions) {
     this.options = {
-      providers: options.providers,
+      providers: options.providers || [], 
       enableHoverPreview: options.enableHoverPreview !== false,
       enableClickHandler: options.enableClickHandler !== false,
       enableTransclusion: options.enableTransclusion !== false,
@@ -109,12 +109,15 @@ export class MentionPlugin implements MDxPlugin {
     // 解决多个 Provider 使用相同触发字符（如 '@'）时只有第一个生效的问题
     const groupedProviders = new Map<string, MentionProvider[]>();
 
-    this.options.providers.forEach((provider) => {
-      if (!groupedProviders.has(provider.triggerChar)) {
-        groupedProviders.set(provider.triggerChar, []);
-      }
-      groupedProviders.get(provider.triggerChar)!.push(provider);
-    });
+    // ✅ 修复 2: 只有在有 providers 时才执行遍历 (虽然有了修复1，这个判断是多余的，但更安全)
+    if (this.options.providers && this.options.providers.length > 0) {
+        this.options.providers.forEach((provider) => {
+          if (!groupedProviders.has(provider.triggerChar)) {
+            groupedProviders.set(provider.triggerChar, []);
+          }
+          groupedProviders.get(provider.triggerChar)!.push(provider);
+        });
+    }
 
     // 2. 为每个触发字符创建一个聚合的 Source
     const sources = Array.from(groupedProviders.entries()).map(([triggerChar, providers]) => {

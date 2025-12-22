@@ -5,6 +5,7 @@
  */
 
 import { ISessionEngine } from './ISessionEngine';
+import { NavigationRequest } from './INavigation';
 
 export type SearchResultSource = 'editor' | 'renderer';
 
@@ -32,6 +33,10 @@ export interface EditorHostContext {
     /** 手动触发保存 (用于编辑器内部的 Save 按钮) */
     saveContent: (nodeId: string, content: string) => Promise<void>;
     
+    /** 
+     * [通用] 请求导航到系统内的任意资源
+     */
+    navigate: (request: NavigationRequest) => Promise<void>;
     // 未来可扩展: openFile, showNotification 等
 }
 

@@ -229,7 +229,20 @@ export class SessionState {
             session.executionRoot.data.output = content;
         }
     }
-    
+
+    /**
+     * ✅ 新增：更新节点错误信息
+     */
+    updateNodeError(nodeId: string, error: string): void {
+        for (const session of this.sessions) {
+            const node = this.findNodeInTree(session.executionRoot, nodeId);
+            if (node) {
+                node.data.error = error;
+                return;
+            }
+        }
+    }
+
     // ============== 删除 ==============
     
     removeMessage(messageId: string): void {

@@ -1,5 +1,6 @@
 // @file: llm-ui/components/NodeRenderer.ts
 
+import {escapeHTML} from '@itookit/common';
 import { ExecutionNode } from '@itookit/llm-engine';
 import { NodeTemplates } from './templates/NodeTemplates';
 
@@ -72,12 +73,19 @@ export class NodeRenderer {
     private static renderAgent(el: HTMLElement, node: ExecutionNode, mounts: any, icon: string) {
         const hasThought = !!(node.data.thought && node.data.thought.length > 0);
         const previewText = node.data.output ? node.data.output.substring(0, 50).replace(/\n/g, ' ') : '';
+        // ✅ 检查是否有错误信息需要渲染
+        const errorHtml = node.status === 'failed' && node.data.error 
+            ? `<div class="llm-ui-node__error-embed">
+                 ⚠️ ${escapeHTML(node.data.error)}
+               </div>`
+            : '';
 
         el.innerHTML = `
             ${NodeTemplates.renderAgentHeader(node, previewText, icon)}
 
             <div class="llm-ui-node__body">
                 ${NodeTemplates.renderThinking(node.data.thought || '', hasThought)}
+                ${errorHtml}
 
                 <div class="llm-ui-node__output">
                     <div class="llm-ui-mount-point" id="mount-${node.id}"></div>

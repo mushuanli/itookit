@@ -7,6 +7,7 @@ import { initVFS } from './services/vfs';
 import { initSidebarNavigation } from './utils/layout';
 import { WORKSPACES } from './config/modules';
 import { FileTypeDefinition } from '@itookit/vfs-ui';
+import { NavigationRequest } from '@itookit/common'; // 确保已在 common 中导出
 
 // 模块引入
 import { createSettingsModule } from '@itookit/app-settings';
@@ -35,6 +36,15 @@ import '@itookit/app-settings/style.css';
 import './styles/index.css'; 
 
 const managerCache = new Map<string, MemoryManager>();
+
+// 模块别名映射 (用于通用导航)
+// 将逻辑名称映射到实际的 DOM ID / 模块 ID
+const MODULE_ALIAS_MAP: Record<string, string> = {
+    'settings': 'settings-workspace',
+    'agents': 'agent-workspace',
+    'chat': 'llm-workspace',
+    // 可以添加更多映射，或者默认使用 WORKSPACES 中的 elementId
+};
 
 async function bootstrap() {
     try {
@@ -172,6 +182,47 @@ async function bootstrap() {
                 }
             };
 
+            // ✅ 定义通用导航处理函数 (Central Router)
+            const handleNavigate = async (req: NavigationRequest) => {
+                console.log(`[Router] Navigating to:`, req);
+                
+                // 1. 解析目标 Workspace ID
+                const targetElementId = MODULE_ALIAS_MAP[req.target] || req.target;
+                
+                // 2. 切换主导航 (Tab)
+                const navBtn = document.querySelector(`.app-nav-btn[data-target="${targetElementId}"]`) as HTMLElement;
+                if (navBtn) {
+                    navBtn.click();
+                } else {
+                    console.warn(`[Router] Target workspace not found: ${targetElementId}`);
+                    // 可选：如果找不到别名，尝试直接作为 resourceId 在当前模块打开？
+                    // 或者什么都不做
+                    return;
+                }
+
+                // 3. 确保模块已加载
+                // navBtn.click() 会触发 loadWorkspace，但它是异步的。
+                // 我们需要等待 Manager 实例准备好。
+                if (!managerCache.has(targetElementId)) {
+                    await loadWorkspace(targetElementId);
+                }
+                
+                // 4. 获取目标模块的 Manager
+                const manager = managerCache.get(targetElementId);
+                if (!manager) return;
+
+                // 5. 执行模块内资源跳转
+                if (req.resourceId) {
+                    // 我们假设 VFSUI 的渲染是足够快的，或者 selectFile 内部处理了等待逻辑
+                    // 给一个小延迟以确保 DOM 切换完成（视觉优化）
+                    setTimeout(async () => {
+                        await manager.openFile(req.resourceId!);
+                    }, 50);
+                }
+                
+                // TODO: 处理 req.params (如滚动位置、搜索词等)
+            };
+
             // 初始化 MemoryManager
             const manager = new MemoryManager({
                 container,
@@ -196,7 +247,10 @@ async function bootstrap() {
                     mentionScope: mentionScope
                 },
                 
-                aiConfig: { enabled: aiEnabled ?? true }
+                aiConfig: { enabled: aiEnabled ?? true },
+
+                // ✅ 注入通用导航回调
+                onNavigate: handleNavigate
             });
 
             await manager.start();

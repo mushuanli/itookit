@@ -244,6 +244,33 @@
   line-height: 1;
 }
 
+.llm-ui-node__icon--clickable {
+    cursor: pointer;
+    transition: transform 0.2s, background-color 0.2s;
+    position: relative;
+}
+
+.llm-ui-node__icon--clickable:hover {
+    transform: scale(1.1);
+    background-color: rgba(0, 0, 0, 0.05); /* 轻微背景高亮 */
+    border-radius: 4px;
+}
+
+/* 加上一个小角标提示 */
+.llm-ui-node__icon--clickable::after {
+    content: "⚙️";
+    position: absolute;
+    bottom: -4px;
+    right: -4px;
+    font-size: 8px;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+.llm-ui-node__icon--clickable:hover::after {
+    opacity: 1;
+}
+
 /* --- 预览文本 (Content Preview) --- */
 .llm-ui-header-preview {
     display: none; /* 默认隐藏 (展开状态) */
@@ -549,4 +576,95 @@
     .llm-ui-node__header { background-color: #0d1117; border-bottom-color: #30363d; }
     .llm-ui-node__output { background-color: #161b22; }
     .llm-ui-node:hover { border-color: #58a6ff; }
+}
+/* =========================================
+   9. 系统消息与错误气泡 (System & Error)
+   ========================================= */
+
+/* 系统消息容器 */
+.llm-ui-session--system {
+    justify-content: center;
+    padding: 0 20px;
+    margin-bottom: 16px;
+}
+
+/* 错误气泡 */
+.llm-ui-bubble--error {
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    border-radius: 8px;
+    color: #991b1b;
+    padding: 12px 16px;
+    max-width: 80%;
+    font-size: 0.9rem;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    animation: slideIn 0.3s ease;
+}
+
+.llm-ui-bubble--error strong {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 600;
+}
+
+.llm-ui-bubble--error__content {
+    line-height: 1.5;
+}
+
+.llm-ui-bubble--error__actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 4px;
+}
+
+.llm-ui-error-btn {
+    background: white;
+    border: 1px solid #f87171;
+    color: #dc2626;
+    padding: 4px 12px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-weight: 500;
+}
+
+.llm-ui-error-btn:hover {
+    background: #fee2e2;
+}
+
+.llm-ui-node__error-embed {
+    background: #fff5f5;
+    color: #c53030;
+    padding: 8px 12px;
+    font-size: 0.85rem;
+    border-bottom: 1px solid #fed7d7;
+    font-family: monospace;
+    white-space: pre-wrap;
+}
+
+/* 暗色模式适配 */
+@media (prefers-color-scheme: dark) {
+    .llm-ui-bubble--error {
+        background: #450a0a;
+        border-color: #7f1d1d;
+        color: #fca5a5;
+    }
+    .llm-ui-error-btn {
+        background: #2a0a0a;
+        border-color: #991b1b;
+        color: #fca5a5;
+    }
+    .llm-ui-error-btn:hover {
+        background: #450a0a;
+    }
+}
+
+@keyframes slideIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
 }

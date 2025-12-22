@@ -183,6 +183,36 @@ export class LLMWorkspaceEditor implements IEditor {
             onStop: () => this.sessionManager.abort(),
             initialAgents 
         });
+
+        // ✅ 新增：监听 HistoryView 发出的打开设置请求
+        this.container.addEventListener('open-connection-settings', () => {
+            // 这里我们假设有一个全局命令或者事件总线来打开设置
+            // 或者，如果是在 MemoryManager 环境下，可以请求 Host 打开特定的 Tab
+            console.log('[LLMWorkspaceEditor] Requesting to open connection settings...');
+
+            if (this.hostContext?.navigate) {
+                // 使用通用导航协议跳转到 Settings -> Connections
+                this.hostContext.navigate({ 
+                    target: 'settings', 
+                    resourceId: 'connections' 
+                });
+            } else {
+                console.warn('[LLMWorkspaceEditor] Host does not support navigation');
+            }
+        });
+
+        // ✅ [实现] 监听打开 Agent 配置请求 (来自头像点击)
+        this.container.addEventListener('open-agent-config', (e: any) => {
+            const agentId = e.detail?.agentId;
+            console.log(`[LLMWorkspaceEditor] Requesting to open agent config: ${agentId}`);
+            
+            if (agentId && this.hostContext?.navigate) {
+                this.hostContext.navigate({
+                    target: 'agents', // 对应 Agent Workspace 的 ID
+                    resourceId: agentId // 打开特定 Agent 文件
+                });
+            }
+        });
     }
 
     // 2. 完善 loadSessionFromEngine 方法

@@ -73,13 +73,23 @@ export class NodeTemplates {
     static renderAgentHeader(node: ExecutionNode, preview: string, icon: string, isCollapsed: boolean = false): string {
         const timeStr = this.formatTime(node.startTime);
         
+        // ✨ [修改] 识别 Agent 并添加可点击属性
+        const agentId = node.data.metaInfo?.agentId;
+        // 只有类型为 agent 且有 ID 的（非 Tool）才可点击
+        // 如果是 'default' 也可以点击，前提是我们在 Agent Workspace 有对应的逻辑处理
+        const isClickable = node.executorType === 'agent' && agentId;
+        
+        const iconHtml = isClickable
+            ? `<div class="llm-ui-node__icon llm-ui-node__icon--clickable" title="Edit Agent" data-agent-id="${escapeHTML(agentId)}">${icon}</div>`
+            : `<div class="llm-ui-node__icon">${icon}</div>`;
+
         return `
             <div class="llm-ui-node__header">
                 <div class="llm-ui-node__status-icon">
                     <div class="llm-ui-spinner"></div>
                     <div class="llm-ui-status-dot"></div>
                 </div>
-                <div class="llm-ui-node__icon">${icon}</div>
+                ${iconHtml}
                 <div class="llm-ui-node__title">${escapeHTML(node.name)}</div>
                 
                 <div class="llm-ui-header-preview">${escapeHTML(preview)}</div>
