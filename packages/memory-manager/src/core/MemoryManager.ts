@@ -98,6 +98,7 @@ export class MemoryManager {
         );
 
         this.bindLayoutEvents();
+        this.bindInternalEvents();
     }
 
     /**
@@ -137,6 +138,18 @@ export class MemoryManager {
         };
     }
 
+    /**
+     * ✅ [新增] 监听内部事件，通知上层 (Main) 更新 URL
+     */
+    private bindInternalEvents() {
+        this.vfsUI.on('sessionSelected', (payload: any) => {
+            const sessionId = payload.item ? payload.item.id : null;
+            if (this.config.onSessionChange) {
+                this.config.onSessionChange(sessionId);
+            }
+        });
+    }
+
     public async start() {
         await this.engine.init();
         await this.vfsUI.start(); 
@@ -151,6 +164,14 @@ export class MemoryManager {
     public async openFile(nodeId: string) {
         // 暴露给外部 (Main.ts) 调用
         await this.vfsUI.store.dispatch({ type: 'SESSION_SELECT', payload: { sessionId: nodeId }});
+    }
+
+    /**
+     * ✅ [新增] 获取当前激活的节点 ID (用于同步 URL)
+     */
+    public getActiveSessionId(): string | null {
+        const session = this.vfsUI.getActiveSession();
+        return session ? session.id : null;
     }
 
     public destroy() {
