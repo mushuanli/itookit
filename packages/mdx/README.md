@@ -143,25 +143,55 @@ const editor = await createMDxEditor(container, {
 
 ##🔌 核心插件
 
-下表列出了一些核心插件及其功能。
 
-| 插件名称                  | 描述                                             | 默认启用 |
-| ------------------------- | ------------------------------------------------ | :------: |
-| `ui:toolbar`              | 渲染主工具栏。                                   |    ✅    |
-| `ui:formatting`           | 添加标准格式化按钮（粗体、斜体等）。             |    ✅    |
-| `core:titlebar`           | 添加标题栏及按钮（保存、打印等）。               |    ❌    |
-| `mathjax`                 | 渲染 LaTeX 数学公式。                            |    ✅    |
-| `mermaid`                 | 在代码块中渲染 Mermaid 图表。                    |    ✅    |
-| `folder`                  | 添加对可折叠内容块 (`::>`) 的支持。              |    ✅    |
-| `media`                   | 添加自定义 `!video` 和 `!file` 语法。            |    ✅    |
-| `task-list`               | 使 Markdown 任务列表可交互。                     |    ✅    |
-| `codeblock-controls`      | 为代码块添加复制/下载/折叠按钮。                 |    ✅    |
-| `interaction:source-sync` | 在渲染视图中按住 Ctrl/Cmd 并双击以跳转到源码。     |    ✅    |
-| `cloze`                   | Anki 风格的挖空填词功能。                        |    ❌    |
-| `cloze-controls`          | 为挖空填词提供导航和控制 UI。                    |    ❌    |
-| `memory`                  | 为挖空填词添加间隔重复 (SRS) 评分功能。          |    ❌    |
-| `autocomplete:tag`        | 提供标签的自动完成 (e.g., `#tag`)。              |    ❌    |
-| `autocomplete:mention`    | 提供提及的自动完成 (e.g., `@user`)。             |    ❌    |
+### 模块功能说明表
+
+以下是根据代码 (`factory.ts` 和各插件文件) 整理的模块功能、默认状态及常用配置选项。
+
+| 模块/插件名称 | 注册名称 (Name) | 功能说明 | 默认状态 (Default) | 常用选项 (Common Options) |
+| :--- | :--- | :--- | :--- | :--- |
+| **Core Editor** | `editor:core` | 提供基础编辑能力 (CodeMirror 6)，包括行号、折叠、撤销重做等。 | **已启用**<br>行号: 关闭<br>折叠: 开启 | `enableLineNumbers`: boolean (行号)<br>`enableHistory`: boolean (历史记录)<br>`enableAutocompletion`: boolean (自动补全) |
+| **Title Bar** | `core:titlebar` | 顶部标题栏，包含标题、模式切换、保存、打印及 AI 按钮。 | **已启用**<br>模式切换: 关闭 | `enableToggleEditMode`: boolean<br>`title`: string<br>`onSidebarToggle`: function |
+| **Toolbar** | `ui:toolbar` | 编辑器工具栏容器，用于放置格式化按钮。 | **已启用** | `className`: string (自定义样式类) |
+| **Formatting** | `ui:formatting` | 提供加粗、斜体、列表、链接等基础 Markdown 格式化按钮和命令。 | **已启用**<br>功能: All | `enabledFormats`: string[] (如 `['bold', 'italic']`)<br>`customIcons`: object (自定义图标) |
+| **Source Sync** | `interaction:source-sync` | **双击**渲染内容可跳转至编辑模式对应的源码位置。 | **已启用** | 无配置项 (依赖 DOM 结构查找) |
+| **Table** | `interaction:table` | 增强表格功能，支持点击表头**排序**和表头下方输入框**筛选**。 | **已启用**<br>排序: 开启<br>筛选: 关闭 | `enableSorting`: boolean<br>`enableFiltering`: boolean (开启筛选行) |
+| **Foldable** | `folder` | 支持折叠块语法 `::> 标题`，可包含复选框。 | **已启用**<br>默认: 展开 | `defaultOpen`: boolean<br>`enableTaskCheckbox`: boolean (标题是否支持任务框) |
+| **MathJax** | `mathjax` | 渲染 LaTeX 数学公式 (`$$...$$`, `$..$`)。 | **已启用**<br>自动加载 CDN | `cdnUrl`: string (自定义 CDN)<br>`config`: object (MathJax 配置) |
+| **Media** | `media` | 渲染视频、音频、嵌入内容 (YouTube/Bilibili/Office/PDF)。 | **已启用**<br>视频控制条: 开启 | `videoAutoplay`: boolean<br>`videoControls`: boolean |
+| **Callout** | `callout` | 支持 GitHub/Obsidian 风格的提示块 (`> [!NOTE]`)。 | **已启用** | `defaultFolded`: boolean (暂未实现) |
+| **Mermaid** | `mermaid` | 渲染 Mermaid 流程图、时序图等。 | **已启用**<br>自动加载 CDN | `theme`: 'default'\|'dark'等<br>`cdnUrl`: string |
+| **SVG** | `svg` | 将 ` ```svg ` 代码块直接渲染为内联 SVG 图片 (带安全过滤)。 | **已启用**<br>Sanitize: 开启 | `sanitize`: boolean (防XSS)<br>`containerClass`: string |
+| **Code Controls** | `codeblock-controls` | 代码块增强：复制、下载、折叠过长代码。 | **已启用**<br>折叠阈值: 250px | `enableCopy`: boolean<br>`enableCollapse`: boolean<br>`collapseThreshold`: number (高度阈值) |
+| **Task List** | `task-list` | 交互式任务列表 (`- [ ]`)，支持点击勾选并**回写 Markdown**。 | **已启用**<br>自动回写: 开启 | `autoUpdateMarkdown`: boolean (点击更新源码)<br>`checkboxSelector`: string |
+| **Cloze (Core)** | `cloze:cloze` | 挖空插件核心 (`--text--`)，支持点击显示/隐藏，支持 TTS 发音。 | **按需加载**<br>(需在 plugins 列表) | `className`: string<br>`audioIconClass`: string |
+| **Cloze UI** | `cloze:cloze-controls` | 挖空控制面板（全显/全隐/导航）。 | **按需加载** | `className`: string |
+| **Memory** | `cloze:memory` | 记忆卡片/SRS (间隔重复) 功能，为挖空添加“忘记/简单”评分面板。 | **按需加载** | `gradingTimeout`: number<br>`coolingPeriod`: number (冷却时间)<br>`hideBeforeDueHours`: number |
+| **PlantUML** | `plantuml` | 将 PlantUML 代码块转换为图片 (依赖外部 Server)。 | **默认未启用**<br>(不在 DEFAULT_PLUGINS) | `serverUrl`: string (默认 plantuml.com)<br>`format`: 'svg'\|'png' |
+| **Vega** | `vega` | 渲染 Vega/Vega-Lite 数据可视化图表。 | **默认未启用**<br>(不在 DEFAULT_PLUGINS) | `theme`: 'quartz'等<br>`actions`: boolean (显示导出菜单) |
+| **Autocomplete**| `autocomplete:tag/mention` | 自动补全 (`#tag`, `@mention`)。 | **默认未启用** | `getTags`: function (标签源)<br>`providers`: array (提及源配置) |
+
+### 3. 如何配置默认选项
+
+在调用 `createMDxEditor` 或 `defaultEditorFactory` 时，可以通过 `defaultPluginOptions` 修改上述默认状态。
+
+**示例：开启行号并禁用表格排序**
+
+```typescript
+createMDxEditor(container, {
+  plugins: [/* ... */], // 如果不传则使用 DEFAULT_PLUGINS
+  defaultPluginOptions: {
+    'editor:core': {
+      enableLineNumbers: true, // 开启行号
+      enableFolding: true
+    },
+    'interaction:table': {
+      enableSorting: false, // 禁用表格排序
+      enableFiltering: true // 开启表格筛选
+    }
+  }
+});
+```
 
 ## API
 

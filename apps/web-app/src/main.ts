@@ -4,7 +4,6 @@
  */
 import { MemoryManager } from '@itookit/memory-manager';
 import { initVFS } from './services/vfs';
-import { initSidebarNavigation } from './utils/layout';
 import { WORKSPACES } from './config/modules';
 import { FileTypeDefinition } from '@itookit/vfs-ui';
 import { NavigationRequest } from '@itookit/common'; // 确保已在 common 中导出
@@ -35,16 +34,28 @@ import '@itookit/llm-ui/style.css';
 import '@itookit/app-settings/style.css'; 
 import './styles/index.css'; 
 
-const managerCache = new Map<string, MemoryManager>();
+// --- Router Definition ---
 
-// 模块别名映射 (用于通用导航)
-// 将逻辑名称映射到实际的 DOM ID / 模块 ID
-const MODULE_ALIAS_MAP: Record<string, string> = {
+interface RouterState {
+    workspace: string; 
+    resource?: string;
+}
+
+// 别名映射 (URL slug -> elementId)
+const ROUTE_MAP: Record<string, string> = {
+    'chat': 'llm-workspace',
     'settings': 'settings-workspace',
     'agents': 'agent-workspace',
-    'chat': 'llm-workspace',
     // 可以添加更多映射，或者默认使用 WORKSPACES 中的 elementId
 };
+
+// 反向映射 (elementId -> URL slug)
+const REVERSE_ROUTE_MAP = Object.entries(ROUTE_MAP).reduce((acc, [k, v]) => {
+    acc[v] = k;
+    return acc;
+}, {} as Record<string, string>);
+
+const managerCache = new Map<string, MemoryManager>();
 
 async function bootstrap() {
     try {
@@ -128,33 +139,55 @@ async function bootstrap() {
             };
         };
 
+        // --- 4. 路由状态管理 ---
+
+        /**
+         * 更新浏览器 URL (不触发跳转，仅更新显示)
+         */
+        const updateBrowserHistory = (workspaceId: string, resourceId: string | null, mode: 'push' | 'replace' = 'push') => {
+            const slug = REVERSE_ROUTE_MAP[workspaceId] || 'home';
+            // 过滤掉 null/undefined/空字符串
+            const hash = resourceId ? `#/${slug}/${resourceId}` : `#/${slug}`;
+            
+            if (location.hash !== hash) {
+                if (mode === 'push') {
+                    history.pushState({ workspaceId, resourceId }, '', hash);
+                } else {
+                    history.replaceState({ workspaceId, resourceId }, '', hash);
+                }
+            }
+        };
+
+        /**
+         * 解析 URL Hash
+         */
+        const parseHash = (): RouterState => {
+            const parts = location.hash.slice(2).split('/'); // slice(2) to remove #/
+            const slug = parts[0] || 'chat'; // default
+            const resource = parts[1] ? decodeURIComponent(parts[1]) : undefined;
+            
+            return {
+                workspace: ROUTE_MAP[slug] || 'llm-workspace',
+                resource
+            };
+        };
+
         // --- 5. 通用加载逻辑 (The Loader) ---
-        const loadWorkspace = async (targetId: string) => {
-            // ✨ [修复 2] 缓存检查：如果已经初始化过，直接返回
-            // initSidebarNavigation 负责处理 DOM 的 classList 切换，
-            // 这里只需要确保逻辑对象存在即可。
+        
+        const loadWorkspace = async (targetId: string): Promise<MemoryManager | undefined> => {
             if (managerCache.has(targetId)) {
-                return;
+                return managerCache.get(targetId);
             }
 
             const container = document.getElementById(targetId);
             const wsConfig = WORKSPACES.find(w => w.elementId === targetId);
             
-            if (!container || !wsConfig) return;
+            if (!container || !wsConfig) return undefined;
 
-            // UI Tab 激活状态处理
-            if (!container.classList.contains('active')) container.classList.add('active');
-
-            // 获取策略
-            // 如果 wsConfig.type 没有对应策略，回退到 standard
             const strategyType = wsConfig.type || 'standard';
             const strategy = strategies[strategyType] || strategies['standard'];
 
-            // 提取非 UI 参数
-            const { 
-                moduleName, plugins, mentionScope, aiEnabled, supportedFileTypes, 
-                ...uiPassThrough 
-            } = wsConfig;
+            const { moduleName, plugins, mentionScope, aiEnabled, supportedFileTypes, ...uiPassThrough } = wsConfig;
 
             // ✨ [核心功能] 动态生成当前工作区的"文件类型白名单"
             // 只有在 supportedFileTypes 中列出的类型，才会被视为特殊文件。
@@ -182,48 +215,6 @@ async function bootstrap() {
                 }
             };
 
-            // ✅ 定义通用导航处理函数 (Central Router)
-            const handleNavigate = async (req: NavigationRequest) => {
-                console.log(`[Router] Navigating to:`, req);
-                
-                // 1. 解析目标 Workspace ID
-                const targetElementId = MODULE_ALIAS_MAP[req.target] || req.target;
-                
-                // 2. 切换主导航 (Tab)
-                const navBtn = document.querySelector(`.app-nav-btn[data-target="${targetElementId}"]`) as HTMLElement;
-                if (navBtn) {
-                    navBtn.click();
-                } else {
-                    console.warn(`[Router] Target workspace not found: ${targetElementId}`);
-                    // 可选：如果找不到别名，尝试直接作为 resourceId 在当前模块打开？
-                    // 或者什么都不做
-                    return;
-                }
-
-                // 3. 确保模块已加载
-                // navBtn.click() 会触发 loadWorkspace，但它是异步的。
-                // 我们需要等待 Manager 实例准备好。
-                if (!managerCache.has(targetElementId)) {
-                    await loadWorkspace(targetElementId);
-                }
-                
-                // 4. 获取目标模块的 Manager
-                const manager = managerCache.get(targetElementId);
-                if (!manager) return;
-
-                // 5. 执行模块内资源跳转
-                if (req.resourceId) {
-                    // 我们假设 VFSUI 的渲染是足够快的，或者 selectFile 内部处理了等待逻辑
-                    // 给一个小延迟以确保 DOM 切换完成（视觉优化）
-                    setTimeout(async () => {
-                        await manager.openFile(req.resourceId!);
-                    }, 50);
-                }
-                
-                // TODO: 处理 req.params (如滚动位置、搜索词等)
-            };
-
-            // 初始化 MemoryManager
             const manager = new MemoryManager({
                 container,
                 
@@ -249,33 +240,89 @@ async function bootstrap() {
                 
                 aiConfig: { enabled: aiEnabled ?? true },
 
-                // ✅ 注入通用导航回调
-                onNavigate: handleNavigate
+                // ✅ [关键] 注入导航处理器
+                onNavigate: async (req: NavigationRequest) => {
+                    const targetWsId = ROUTE_MAP[req.target] || req.target;
+                    // 跳转意味着 Push 新历史
+                    updateBrowserHistory(targetWsId, req.resourceId || null, 'push');
+                    await performNavigation(targetWsId, req.resourceId);
+                },
+
+                // ✅ [关键] 注入会话变更监听
+                onSessionChange: (sessionId) => {
+                    // 内部切换文件意味着 Replace 当前历史
+                    updateBrowserHistory(targetId, sessionId, 'replace');
+                }
             });
 
             await manager.start();
             
             // ✨ [修复 2] 存入缓存
             managerCache.set(targetId, manager);
+            return manager;
         };
 
-        // --- 6. 启动应用 ---
+        // --- 6. 导航执行逻辑 ---
+
+        const performNavigation = async (workspaceId: string, resourceId?: string) => {
+            console.log(`[Router] Navigating to: ${workspaceId} -> ${resourceId || '(root)'}`);
+
+            // 1. UI Tab 切换
+            document.querySelectorAll('.workspace-view').forEach(ws => {
+                ws.classList.toggle('active', ws.id === workspaceId);
+            });
+            document.querySelectorAll('.app-nav-btn').forEach(btn => {
+                const btnTarget = (btn as HTMLElement).dataset.target;
+                btn.classList.toggle('active', btnTarget === workspaceId);
+            });
+
+            // 2. 加载模块
+            const manager = await loadWorkspace(workspaceId);
+
+            // 3. 打开内部资源
+            if (manager && resourceId) {
+                // 微小的延时确保 UI 渲染就绪
+                setTimeout(() => {
+                    manager.openFile(resourceId);
+                }, 10);
+            }
+        };
+
+        // --- 7. 启动 ---
+
+        // 绑定浏览器历史事件 (Back/Forward)
+        window.addEventListener('popstate', (event) => {
+            const state = event.state as { workspaceId: string, resourceId?: string } | null;
+            if (state) {
+                performNavigation(state.workspaceId, state.resourceId);
+            } else {
+                const route = parseHash();
+                performNavigation(route.workspace, route.resource);
+            }
+        });
+
+        // 绑定侧边栏点击
+        document.querySelectorAll('.app-nav-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                const targetId = (e.currentTarget as HTMLElement).dataset.target;
+                if (targetId) {
+                    // 获取该模块上次的状态（如果已加载）
+                    const manager = managerCache.get(targetId);
+                    const lastActiveId = manager?.getActiveSessionId() || null;
+                    
+                    updateBrowserHistory(targetId, lastActiveId, 'push');
+                    performNavigation(targetId, lastActiveId || undefined);
+                }
+            });
+        });
+
+        // 初始路由解析与加载
+        const initialRoute = parseHash();
+        await performNavigation(initialRoute.workspace, initialRoute.resource);
         
-        // 1. 初始化导航监听
-        // 注意：initSidebarNavigation 内部逻辑是：如果发现 DOM 中有 .active 按钮，
-        // 它会立即调用回调函数 loadWorkspace(targetId)。
-        initSidebarNavigation(loadWorkspace);
-        
-        // 2. 检查 DOM 状态：是否已经有激活的按钮？
-        const hasActiveState = document.querySelector('.app-nav-btn.active');
-        
-        // 3. 只有在 DOM 中找不到任何激活状态时，才回退到默认加载第一个工作区
-        if (!hasActiveState && WORKSPACES[0]) {
-            console.log('No active state found in HTML, loading default workspace.');
-            await loadWorkspace(WORKSPACES[0].elementId);
-        } else {
-            console.log('Restored active workspace from HTML state.');
-        }
+        // 替换当前的空白历史记录，确保后续 Back 操作正常
+        updateBrowserHistory(initialRoute.workspace, initialRoute.resource || null, 'replace');
 
     } catch (error) {
         console.error('Failed to bootstrap application:', error);

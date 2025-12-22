@@ -8,6 +8,11 @@ export interface MemoryManagerConfig {
     /** 挂载容器 */
     container: HTMLElement;
 
+    /** 
+     * [关键] Scope ID 用于多实例隔离 (localStorage key, modal ID 等)
+     */
+    scopeId?: string;
+
     // --- 引擎配置 ---
     /** 
      * 自定义引擎实例 (推荐)。
@@ -17,9 +22,6 @@ export interface MemoryManagerConfig {
 
     /* 创建默认engine */
     moduleName?: string;
-    
-    // ✅ [新增] Scope ID 用于多实例隔离 (特别是 UI 状态持久化)
-    scopeId?: string;
 
     // --- 编辑器配置 ---
     /** 
@@ -38,7 +40,17 @@ export interface MemoryManagerConfig {
         [key: string]: any;
     };
 
+    /**
+     * [通用] 宿主导航回调
+     * 当编辑器请求跳转到其他模块时触发
+     */
+    onNavigate?: (request: NavigationRequest) => Promise<void>;
 
+    /**
+     * [新增] 会话变更回调
+     * 当模块内部激活的文件/会话发生变化时触发 (用于同步 URL)
+     */
+    onSessionChange?: (sessionId: string | null) => void;
 
     // --- VFS UI 配置 ---
     /** 
@@ -72,9 +84,4 @@ export interface MemoryManagerConfig {
         enabled: boolean;
         activeRules?: string[];
     };
-
-    /**
-     * [通用] 宿主导航回调
-     */
-    onNavigate?: (request: NavigationRequest) => Promise<void>;
 }
