@@ -319,7 +319,20 @@ export class VFS {
    * 删除节点
    */
   async unlink(vnodeOrId: VNode | string, options: UnlinkOptions = {}): Promise<UnlinkResult> {
-    const vnode = await this._resolveVNode(vnodeOrId);
+    let vnode: VNode;
+
+    // 1. 尝试解析节点，如果不存在则视为删除成功 (幂等性)
+    try {
+      vnode = await this._resolveVNode(vnodeOrId);
+    } catch (error) {
+      if (error instanceof VFSError && error.code === VFSErrorCode.NOT_FOUND) {
+        const id = typeof vnodeOrId === 'string' ? vnodeOrId : vnodeOrId.nodeId;
+        // 返回空结果，表示没有节点被实际删除，但操作算作成功
+        return { removedNodeId: id, allRemovedIds: [] };
+      }
+      throw error;
+    }
+
     const { recursive = false } = options;
 
     const nodesToDelete: VNode[] = [];

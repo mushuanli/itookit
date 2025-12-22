@@ -507,7 +507,10 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
                     break;
                 }
                 case 'node:deleted':
-                    const removedIds = event.payload.removedIds || [event.payload.nodeId];
+                    const removedIds = event.payload.data?.removedIds 
+                        || event.payload.removedIds 
+                        || [event.payload.nodeId];
+    
                     removedIds.forEach((id: string) => this.deleteQueue.add(id));
                     
                     if (!this.deleteTimer) {

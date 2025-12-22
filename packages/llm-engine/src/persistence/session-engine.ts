@@ -219,25 +219,25 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
      */
     async getSessionContext(nodeId: string, sessionId: string): Promise<ChatContextItem[]> {
         const manifest = await this.getManifest(nodeId);
-    if (!manifest) throw new Error("Manifest missing");
+        if (!manifest) throw new Error("Manifest missing");
 
-    const nodes: ChatNode[] = [];
-    let currentNodeId: string | null = manifest.current_head;
-    
-    while (currentNodeId) {
-        const chatNode: ChatNode | null = await this.readJson<ChatNode>(
-            this.getNodePath(sessionId, currentNodeId)
-        );
-        if (!chatNode) break;
-        nodes.push(chatNode);
-        currentNodeId = chatNode.parent_id;
-    }
+        const nodes: ChatNode[] = [];
+        let currentNodeId: string | null = manifest.current_head;
+        
+        while (currentNodeId) {
+            const chatNode: ChatNode | null = await this.readJson<ChatNode>(
+                this.getNodePath(sessionId, currentNodeId)
+            );
+            if (!chatNode) break;
+            nodes.push(chatNode);
+            currentNodeId = chatNode.parent_id;
+        }
 
-    // 反转并过滤
-    return nodes
-        .reverse()
-        .filter(node => node.status === 'active')
-        .map((node, index) => ({ node, depth: index }));
+        // 反转并过滤
+        return nodes
+            .reverse()
+            .filter(node => node.status === 'active')
+            .map((node, index) => ({ node, depth: index }));
     }
 
     /**
@@ -620,7 +620,10 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
         for (const id of ids) {
             const coreVfs = this.vfs.getVFS();
             const node = await coreVfs.storage.loadVNode(id);
-            if (!node) continue;
+            if (!node) {
+                console.warn(`[LLMSessionEngine] Node ${id} not found, skipping`);
+                continue;
+            }
 
             // 尝试清理隐藏目录
             try {
@@ -630,12 +633,11 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
                     const manifest = JSON.parse(str) as ChatManifest;
                     
                     if (manifest.id) {
+                        // 清理隐藏目录
                         const hiddenDirPath = this.getHiddenDir(manifest.id);
-                        try {
-                            await this.moduleEngine.delete([hiddenDirPath]);
-                            log(`Cleaned up hidden directory: ${hiddenDirPath}`);
-                        } catch (cleanupError) {
-                            console.warn(`Failed to cleanup hidden dir ${hiddenDirPath}:`, cleanupError);
+                        const hiddenDirId = await this.moduleEngine.resolvePath(hiddenDirPath);
+                        if (hiddenDirId) {
+                            await this.moduleEngine.delete([hiddenDirId]);
                         }
                     }
                 }
@@ -643,9 +645,11 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
                 console.warn('Could not read manifest for cleanup:', e);
             }
 
-            // 删除主文件
-            await this.moduleEngine.delete([node.path]);
+            // 2. 删除主文件 - 使用节点 ID
+            await this.moduleEngine.delete([id]);
         }
+    
+        this.notify();
     }
 
     /**

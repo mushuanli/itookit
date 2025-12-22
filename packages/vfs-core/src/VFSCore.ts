@@ -361,7 +361,10 @@ export class VFSCore {
   async delete(moduleName: string, path: string, recursive = false): Promise<void> {
     this._ensureInitialized();
     const nodeId = await this.vfs.pathResolver.resolve(moduleName, path);
-    if (!nodeId) throw new VFSError(VFSErrorCode.NOT_FOUND, `Node not found: ${moduleName}:${path}`);
+    if (!nodeId) {
+        // 节点不存在，认为删除操作已成功完成
+        return;
+    }
     await this.vfs.unlink(nodeId, { recursive });
   }
 
