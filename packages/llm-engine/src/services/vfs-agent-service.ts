@@ -146,12 +146,16 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
      * 同步默认连接
      */
     private async syncDefaultConnections(): Promise<void> {
+        // 获取配置中的第一个 provider 作为系统默认 (id='default')
+        const defaultProviderKey = Object.keys(LLM_PROVIDER_DEFAULTS)[0];
+
         for (const [providerKey, def] of Object.entries(LLM_PROVIDER_DEFAULTS)) {
             const existing = this._connections.find(c => c.provider === providerKey);
-            
+
             if (!existing) {
                 const newConn: LLMConnection = {
-                    id: providerKey === 'openai' ? 'default' : `conn-${providerKey}`,
+                    // 如果是列表中的第一个，则 ID 为 'default'，否则为 'conn-{provider}'
+                    id: providerKey === defaultProviderKey ? 'default' : `conn-${providerKey}`,
                     name: def.name,
                     provider: providerKey,
                     apiKey: '',
@@ -186,6 +190,9 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
      * 同步默认 Agents
      */
     private async syncDefaultAgents(): Promise<void> {
+        // 使用默认连接 ID 修正初始数据
+        const defaultConnId = this.getDefaultConnectionId();
+
         for (const agentDef of DEFAULT_AGENTS) {
             const filename = `${agentDef.id}.agent`;
             const fullPath = `${agentDef.initPath || AGENT_DEFAULT_DIR}/${filename}`.replace(/\/+/g, '/');
@@ -194,6 +201,11 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
             
             if (!exists) {
                 const { initPath, initialTags, ...content } = agentDef;
+
+                // 确保默认 agent 指向正确的 connection
+                if (!content.config.connectionId) {
+                    content.config.connectionId = defaultConnId;
+                }
                 
                 try {
                     // 确保目录存在
@@ -226,6 +238,51 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
     }
 
     // ================================================================
+    // 逻辑辅助
+    // ================================================================
+
+    /**
+     * 获取默认 Connection ID
+     * 规则：使用 DEFAULT_AGENTS[0] 的 connectionId，如果未配置则回退到 'default'
+     */
+    private getDefaultConnectionId(): string {
+        if (DEFAULT_AGENTS && DEFAULT_AGENTS.length > 0) {
+            return DEFAULT_AGENTS[0].config.connectionId || 'default';
+        }
+        return 'default';
+    }
+
+    /**
+     * 解析并验证 ModelName
+     * 规则：
+     * 1. 如果 modelName 为空，使用 connection 的第一个 model
+     * 2. 如果 modelName 在 connection 中不存在，使用 connection 的第一个 model
+     * 3. 如果 modelName 存在，继续使用
+     */
+    private async resolveModelName(connectionId: string, currentModelName: string | undefined): Promise<string> {
+        // 获取连接信息
+        const connection = await this.getConnection(connectionId);
+        
+        // 如果连接不存在或没有可用模型，直接返回当前值（无法校验）
+        if (!connection || !connection.availableModels || connection.availableModels.length === 0) {
+            return currentModelName || '';
+        }
+
+        const firstModelId = connection.availableModels[0].id;
+
+        // 1. 如果当前为空，使用第一个
+        if (!currentModelName) {
+            return firstModelId;
+        }
+
+        // 2. 检查是否存在
+        const exists = connection.availableModels.some(m => m.id === currentModelName);
+
+        // 3. 不存在则回退，存在则保持
+        return exists ? currentModelName : firstModelId;
+    }
+
+    // ================================================================
     // Agents API
     // ================================================================
 
@@ -247,6 +304,11 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
                         : new TextDecoder().decode(content);
                     const data = JSON.parse(jsonStr) as AgentDefinition;
                     
+                    // 兼容旧数据 modelId -> modelName
+                    if ((data.config as any).modelId && !data.config.modelName) {
+                        data.config.modelName = (data.config as any).modelId;
+                    }
+
                     if (data.id) {
                         return { ...data, tags: node.tags };
                     }
@@ -267,19 +329,50 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
 
     async getAgentConfig(agentId: string): Promise<AgentDefinition | null> {
         const agents = await this.getAgents();
-        const found = agents.find(a => a.id === agentId);
+        let found = agents.find(a => a.id === agentId);
         
-        if (found) return found;
+        // 返回默认配置模板
+        if (!found && agentId === 'default') {
+            found = this.createDefaultAgentDefinition();
+        }
 
-        // 返回默认配置
-        if (agentId === 'default') {
-            return this.createDefaultAgentDefinition();
+        if (found) {
+            // === 运行时数据修正 ===
+            
+            // 1. 确保 connectionId 存在
+            if (!found.config.connectionId) {
+                found.config.connectionId = this.getDefaultConnectionId();
+            }
+
+            // 2. 修正 ModelName (读取时校验，防止 Connection 变更导致模型无效)
+            const resolvedModel = await this.resolveModelName(
+                found.config.connectionId, 
+                found.config.modelName
+            );
+            
+            // 如果解析出的模型与当前不同，更新内存中的对象（UI显示正确），但不强制写回文件
+            if (resolvedModel !== found.config.modelName) {
+                found.config.modelName = resolvedModel;
+            }
+            
+            return found;
         }
         
         return null;
     }
 
     async saveAgent(agent: AgentDefinition): Promise<void> {
+        // 1. 确保 ConnectionId
+        if (!agent.config.connectionId) {
+            agent.config.connectionId = this.getDefaultConnectionId();
+        }
+
+        // 2. 修正 ModelName 并固化
+        agent.config.modelName = await this.resolveModelName(
+            agent.config.connectionId,
+            agent.config.modelName
+        );
+
         const filename = `${agent.id}.agent`;
         const contentStr = JSON.stringify(agent, null, 2);
         
@@ -324,6 +417,24 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
 
     async getConnection(connectionId: string): Promise<LLMConnection | undefined> {
         return this._connections.find(c => c.id === connectionId);
+    }
+
+    /**
+     * ✅ 实现：获取默认或回退的 Connection
+     * 规则：
+     * 1. 优先查找 ID 为 'default' 的连接。
+     * 2. 如果找不到，返回内存中缓存的第一个连接。
+     * 3. 如果缓存为空，返回 null。
+     */
+    async getDefaultConnection(): Promise<LLMConnection | null> {
+        if (this._connections.length === 0) {
+            return null; // 没有任何连接
+        }
+        
+        const defaultConn = this._connections.find(c => c.id === 'default');
+        
+        // 返回找到的 'default' 连接，或者回退到列表中的第一个
+        return defaultConn || this._connections[0];
     }
 
     async saveConnection(conn: LLMConnection): Promise<void> {
@@ -563,8 +674,8 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
             icon: '🤖',
             description: 'Built-in default assistant',
             config: {
-                connectionId: 'default',
-                modelId: '',
+                connectionId: this.getDefaultConnectionId(),
+                modelName: '', // 会由 getAgentConfig 自动解析为 connection 的第一个模型
                 systemPrompt: 'You are a helpful assistant.'
             }
         };

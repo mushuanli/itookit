@@ -34,7 +34,11 @@ export class SessionRegistry {
     private sessions = new Map<string, SessionRuntime>();
     private sessionStates = new Map<string, SessionState>();
     private activeSessionId: string | null = null;
-    
+
+    // ✅ 新增：模型 ID 解析缓存
+    // Key: `${connectionId}:${modelName}` -> Value: realModelId
+    private modelResolutionCache = new Map<string, string>();
+
     // 执行池
     private taskQueue: ExecutionTask[] = [];
     private runningTasks = new Map<string, ExecutionTask>();
@@ -79,6 +83,13 @@ export class SessionRegistry {
             this.maxConcurrent = options.maxConcurrent;
         }
         
+        // ✅ 新增：监听 AgentService 变更，清空缓存
+        // 当用户修改了连接配置（如更新了 API Key 或刷新了模型列表）时，缓存必须失效
+        this.agentService.onChange(() => {
+            this.modelResolutionCache.clear();
+            // 也可以选择在这里只清理受影响的 connection，但全量清除最安全且成本极低
+        });
+
         this.initialized = true;
         console.log('[SessionRegistry] Initialized');
     }
@@ -629,31 +640,108 @@ export class SessionRegistry {
                     agentDef.config.connectionId
                 );
                 
+                if (!connection) {
+                    throw new EngineError(
+                        EngineErrorCode.EXECUTOR_NOT_FOUND,
+                        `Connection '${agentDef.config.connectionId}' for agent '${agentDef.name}' not found.`
+                    );
+                }
+
+                // ... (Model Name -> Model ID 转换逻辑保持不变)
+                const realModelId = this.resolveModelIdWithCache(connection, agentDef.config.modelName);
+
                 return {
                     id: agentDef.id,
                     name: agentDef.name,
                     type: agentDef.type === 'agent' ? 'agent' : 'composite',
                     connection,
-                    model: agentDef.config.modelId,
+                    model: realModelId,
                     systemPrompt: agentDef.config.systemPrompt
                 } as ExecutorConfig;
             }
         } catch (e) {
-            console.warn(`[SessionRegistry] Failed to resolve executor ${executorId}:`, e);
+            console.warn(`[SessionRegistry] Failed to resolve executor ${executorId}, using fallback.`, e);
         }
         
-        // 使用默认
-        const defaultConn = await this.agentService.getConnection('default');
+        // ✅ 使用健壮的回退逻辑
+        return this.getFallbackExecutorConfig();
+    }
+
+    /**
+     * ✅ 新增：基于 IAgentService 的健壮回退逻辑
+     */
+    private async getFallbackExecutorConfig(): Promise<ExecutorConfig> {
+        // 调用新接口方法，无需关心实现细节
+        const fallbackConnection = await this.agentService.getDefaultConnection();
+
+        if (!fallbackConnection) {
+            // 这是一个严重错误，表示系统一个连接都没有
+            console.error("[SessionRegistry] CRITICAL: No connections available. Cannot create a fallback executor.");
+            // 返回一个明确表示错误的配置，UI可以据此显示错误信息
+            return {
+                id: 'default',
+                name: 'Error: No Connection',
+                type: 'agent',
+                connection: null,
+                model: ''
+            } as ExecutorConfig;
+        }
+
+        // 使用默认连接的默认模型
+        const modelId = fallbackConnection.model || (fallbackConnection.availableModels?.[0]?.id || '');
         
         return {
             id: 'default',
             name: 'Default Assistant',
             type: 'agent',
-            connection: defaultConn,
-            model: defaultConn?.model
+            connection: fallbackConnection,
+            model: modelId
         } as ExecutorConfig;
     }
-    
+
+    /**
+     * ✅ 新增：带缓存的模型 ID 解析
+     */
+    private resolveModelIdWithCache(connection: any, modelName: string): string {
+        if (!modelName) return ''; // 如果未配置，留空让 Driver 使用默认
+
+        const cacheKey = `${connection.id}:${modelName}`;
+        
+        // 1. 查缓存
+        if (this.modelResolutionCache.has(cacheKey)) {
+            return this.modelResolutionCache.get(cacheKey)!;
+        }
+
+        // 2. 查找逻辑
+        // 策略：
+        // A. 假设 modelName 就是 id (兼容旧数据或直接输入 ID 的情况)
+        // B. 假设 modelName 是 display name (name 字段)
+        let realId = modelName; // 默认 fallback
+        
+        if (connection.availableModels && Array.isArray(connection.availableModels)) {
+            // 优先匹配 Name (因为这符合"modelName"的语义)
+            const matchedByName = connection.availableModels.find(
+                (m: any) => m.name === modelName
+            );
+            
+            if (matchedByName) {
+                realId = matchedByName.id;
+            } else {
+                // 如果 Name 没匹配上，检查是否它本身就是一个有效的 ID
+                const matchedById = connection.availableModels.find(
+                    (m: any) => m.id === modelName
+                );
+                if (matchedById) {
+                    realId = matchedById.id;
+                }
+            }
+        }
+
+        // 3. 写缓存
+        this.modelResolutionCache.set(cacheKey, realId);
+        return realId;
+    }
+
     // ================================================================
     // 状态管理
     // ================================================================

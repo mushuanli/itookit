@@ -29,9 +29,11 @@ export class OpenAIProvider extends BaseProvider {
      * 非流式请求
      */
     async create(params: ChatCompletionParams): Promise<ChatCompletionResponse> {
-        const url = `${this.baseURL}/chat/completions`;
+        const url = this.baseURL.endsWith('/chat/completions') 
+            ? this.baseURL 
+            : `${this.baseURL}/chat/completions`;
         const body = this.buildRequestBody(params);
-        
+
         const response = await this.fetchJSON<any>(url, {
             method: 'POST',
             headers: this.buildHeaders(),
