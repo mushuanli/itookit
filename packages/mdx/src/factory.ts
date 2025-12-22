@@ -24,6 +24,8 @@ import { TagPlugin, TagPluginOptions } from './plugins/autocomplete/tag.plugin';
 import { MentionPlugin, MentionPluginOptions } from './plugins/autocomplete/mention.plugin';
 import { SvgPlugin, SvgPluginOptions } from './plugins/syntax-extensions/svg.plugin';
 import { VegaPlugin } from './plugins/syntax-extensions/vega.plugin';
+import { UploadPlugin, UploadPluginOptions } from './plugins/interactions/upload.plugin';
+import { AssetResolverPlugin } from './plugins/core/asset-resolver.plugin';
 import type { MDxPlugin } from './core/plugin';
 import { EditorFactory } from '@itookit/common';
 
@@ -129,13 +131,20 @@ export interface MDxEditorFactoryConfig extends EditorOptions {
     'codeblock-controls'?: CodeBlockControlsPluginOptions;
     'autocomplete:tag'?: TagPluginOptions;
     'autocomplete:mention'?: MentionPluginOptions;
+    'interaction:upload'?: UploadPluginOptions;
     [key: string]: Record<string, any> | undefined;
   };
 }
 
+// 注册插件
+// Asset Resolver 优先级要高，确保 DOM 更新后立即替换 URL，但在 Media 之后
+registerPlugin('core:asset-resolver', AssetResolverPlugin, { priority: 95 }); 
+registerPlugin('interaction:upload', UploadPlugin, { priority: 60 });
 
 // --- 工厂函数 ---
 const DEFAULT_PLUGINS: PluginConfig[] = [
+  'core:asset-resolver', // 核心能力
+  'interaction:upload',  // 交互能力
   'ui:toolbar',
   'ui:formatting',
   'interaction:source-sync',

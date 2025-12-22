@@ -125,16 +125,17 @@ export class MediaPlugin implements MDxPlugin {
       return `
         <div class="${this.options.embedClassName} ${extraClass}">
           <iframe src="${url}" frameborder="0" title="PDF Preview">
-            <p>您的浏览器不支持 PDF 预览，<a href="${url}">点击下载</a>。</p>
+            <p>您的浏览器不支持 PDF 预览，<a href="${url}" target="_blank">点击下载</a>。</p>
           </iframe>
         </div>`;
     }
 
-    // 2. Office 文档 (Word, Excel, PPT) - 需公网可访问
+    // 2. Office 文档 -> 强制转换为文件卡片样式
+    // 因为本地 Blob URL 无法被微软在线预览服务访问
     if (/\.(doc|docx|xls|xlsx|ppt|pptx)$/.test(lowerUrl)) {
-      extraClass = 'mdx-embed-office';
-      // 使用微软 Office Web Viewer
-      embedSrc = `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(url)}`;
+       // 提取文件名
+       const filename = decodeURIComponent(url.split('/').pop() || 'Document');
+       return this.renderFile(url, filename);
     }
     // 3. YouTube
     else if (url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]+)/)) {
