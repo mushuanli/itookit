@@ -10,12 +10,14 @@ export interface LLMModel {
     /** 显示名称 */
     name: string;
     
+    icon?: string;
+
     /** 上下文窗口大小 (tokens) */
     contextWindow?: number;
     
     /** 最大输出 tokens */
     maxOutput?: number;
-    
+
     /** 是否支持视觉/多模态 */
     supportsVision?: boolean;
     

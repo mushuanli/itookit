@@ -6,6 +6,7 @@ import { LLMProviderDefinition } from './types';
  * 默认连接 ID
  */
 export const LLM_DEFAULT_ID = 'default';
+export const LLM_DEFAULT_NAME = '默认';
 
 /**
  * 默认超时时间 (ms)
@@ -26,254 +27,157 @@ export const DEFAULT_RETRY_DELAY = 1000;
  * Provider 默认配置
  */
 export const LLM_PROVIDER_DEFAULTS: Record<string, LLMProviderDefinition> = {
-    openai: {
-        name: 'OpenAI',
+    rdsec: {
+        name: "RDSec",
         implementation: 'openai-compatible',
-        baseURL: 'https://api.openai.com/v1',
-        icon: '🤖',
+        baseURL: 'https://api.rdsec.trendmicro.com/prod/aiendpoint/v1/chat/completions',
+        icon: '🛡️',
+        supportsThinking: true,
         models: [
-            {
-                id: 'gpt-4o',
-                name: 'GPT-4o',
-                contextWindow: 128000,
-                maxOutput: 16384,
-                supportsVision: true,
-                supportsTools: true,
-                inputPrice: 2.5,
-                outputPrice: 10
-            },
-            {
-                id: 'gpt-4o-mini',
-                name: 'GPT-4o Mini',
-                contextWindow: 128000,
-                maxOutput: 16384,
-                supportsVision: true,
-                supportsTools: true,
-                inputPrice: 0.15,
-                outputPrice: 0.6
-            },
-            {
-                id: 'o1',
-                name: 'o1',
-                contextWindow: 200000,
-                maxOutput: 100000,
-                supportsThinking: true,
-                inputPrice: 15,
-                outputPrice: 60
-            },
-            {
-                id: 'o1-mini',
-                name: 'o1 Mini',
-                contextWindow: 128000,
-                maxOutput: 65536,
-                supportsThinking: true,
-                inputPrice: 3,
-                outputPrice: 12
-            },
-            {
-                id: 'o3-mini',
-                name: 'o3 Mini',
-                contextWindow: 200000,
-                maxOutput: 100000,
-                supportsThinking: true,
-                inputPrice: 1.1,
-                outputPrice: 4.4
-            }
+            { id: 'claude-4.5-opus', name: 'Claude 4.5 Opus', icon: '👑' },
+            { id: 'claude-4.5-sonnet', name: 'Claude 4.5 Sonnet', icon: '🎭' },
+            { id: 'gpt-4o', name: 'GPT-4o (OpenAI)', icon: '🤖' },
+            { id: 'claude-3-haiku', name: 'Claude 3 Haiku', icon: '📜' },
+            { id: 'claude-3.5-sonnet', name: 'Claude 3.5 Sonnet', icon: '🎭' },
+            { id: 'claude-3.5-sonnet-v2', name: 'Claude 3.5 Sonnet v2', icon: '🎭' },
+            { id: 'claude-3.7-sonnet', name: 'Claude 3.7 Sonnet', icon: '⚡' },
+            { id: 'claude-4-opus', name: 'Claude 4 Opus', icon: '💎' },
+            { id: 'claude-4-sonnet', name: 'Claude 4 Sonnet', icon: '🏺' },
+            { id: 'claude-4.1-opus', name: 'Claude 4.1 Opus', icon: '🏰' },
+            { id: 'claude-4.5-haiku', name: 'Claude 4.5 Haiku', icon: '🍃' },
+            { id: 'deepseek-r1', name: 'DeepSeek R1', icon: '🧠', supportsThinking: true },
+            { id: 'deepseek-r1-0528', name: 'DeepSeek R1 0528', icon: '🧠', supportsThinking: true },
+            { id: 'deepseek-r1-aws', name: 'DeepSeek R1 AWS', icon: '☁️', supportsThinking: true },
+            { id: 'deepseek-v3.1', name: 'DeepSeek v3.1', icon: '🐋' },
+            { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', icon: '✨' },
+            { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', icon: '🌟' },
+            { id: 'gpt-4', name: 'GPT-4', icon: '🧱' },
+            { id: 'gpt-4-32k', name: 'GPT-4 32k', icon: '📦' },
+            { id: 'gpt-4.1', name: 'GPT-4.1', icon: '🔧' },
+            { id: 'gpt-4.1-mini', name: 'GPT-4.1 Mini', icon: '🍃' },
+            { id: 'gpt-4.1-nano', name: 'GPT-4.1 Nano', icon: '🧬' },
+            { id: 'gpt-4o-mini', name: 'GPT-4o Mini', icon: '⚡' },
+            { id: 'gpt-5', name: 'GPT-5', icon: '🚀' },
+            { id: 'gpt-5-chat', name: 'GPT-5 Chat', icon: '💬' },
+            { id: 'gpt-5-codex', name: 'GPT-5 Codex', icon: '💻' },
+            { id: 'gpt-5-mini', name: 'GPT-5 Mini', icon: '🍃' },
+            { id: 'gpt-5-nano', name: 'GPT-5 Nano', icon: '🧬' },
         ]
     },
-    
     anthropic: {
         name: 'Anthropic',
         implementation: 'anthropic',
-        baseURL: 'https://api.anthropic.com',
-        icon: '🔮',
+        baseURL: 'https://api.anthropic.com/v1/messages',
+        icon: '🏺',
         supportsThinking: true,
         models: [
-            {
-                id: 'claude-sonnet-4-20250514',
-                name: 'Claude Sonnet 4',
-                contextWindow: 200000,
-                maxOutput: 16000,
-                supportsVision: true,
-                supportsThinking: true,
-                supportsTools: true,
-                inputPrice: 3,
-                outputPrice: 15
-            },
-            {
-                id: 'claude-3-5-sonnet-20241022',
-                name: 'Claude 3.5 Sonnet',
-                contextWindow: 200000,
-                maxOutput: 8192,
-                supportsVision: true,
-                supportsTools: true,
-                inputPrice: 3,
-                outputPrice: 15
-            },
-            {
-                id: 'claude-3-5-haiku-20241022',
-                name: 'Claude 3.5 Haiku',
-                contextWindow: 200000,
-                maxOutput: 8192,
-                supportsVision: true,
-                supportsTools: true,
-                inputPrice: 0.8,
-                outputPrice: 4
-            }
+            { id: 'claude-sonnet-4-5-20250929', name: 'Claude Sonnet 4.5', icon: '🎭' },
+            { id: 'claude-opus-4-1-20250805', name: 'Claude Opus 4.1', icon: '👑' },
+            { id: 'claude-opus-4-20250514', name: 'Claude Opus 4', icon: '💎' },
+            { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4', icon: '🎨' },
+            { id: 'claude-3-7-sonnet-latest', name: 'Claude Sonnet 3.7 (Latest)', icon: '🔥' },
+            { id: 'claude-3-7-sonnet-20250219', name: 'Claude Sonnet 3.7', icon: '⚡' },
         ]
     },
     
     gemini: {
         name: 'Google Gemini',
         implementation: 'gemini',
-        baseURL: 'https://generativelanguage.googleapis.com/v1beta',
+        baseURL: 'https://generativelanguage.googleapis.com/v1beta/models',
         icon: '💎',
         supportsThinking: true,
         models: [
-            {
-                id: 'gemini-2.5-pro-preview-06-05',
-                name: 'Gemini 2.5 Pro',
-                contextWindow: 1048576,
-                maxOutput: 65536,
-                supportsVision: true,
-                supportsThinking: true,
-                supportsTools: true
-            },
-            {
-                id: 'gemini-2.5-flash-preview-05-20',
-                name: 'Gemini 2.5 Flash',
-                contextWindow: 1048576,
-                maxOutput: 65536,
-                supportsVision: true,
-                supportsThinking: true,
-                supportsTools: true
-            },
-            {
-                id: 'gemini-2.0-flash',
-                name: 'Gemini 2.0 Flash',
-                contextWindow: 1048576,
-                maxOutput: 8192,
-                supportsVision: true,
-                supportsTools: true
-            }
+            { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', icon: '🌟' },
+            { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', icon: '⚡' },
+            { id: 'gemini-pro', name: 'Gemini Pro', icon: '🌌' },
         ]
     },
     
     deepseek: {
         name: 'DeepSeek',
         implementation: 'openai-compatible',
-        baseURL: 'https://api.deepseek.com',
-        icon: '🔍',
+        baseURL: 'https://api.deepseek.com/v1/chat/completions',
+        icon: '🐋',
         supportsThinking: true,
         models: [
-            {
-                id: 'deepseek-chat',
-                name: 'DeepSeek V3',
-                contextWindow: 65536,
-                maxOutput: 8192,
-                supportsTools: true,
-                inputPrice: 0.27,
-                outputPrice: 1.1
-            },
-            {
-                id: 'deepseek-reasoner',
-                name: 'DeepSeek R1',
-                contextWindow: 65536,
-                maxOutput: 8192,
-                supportsThinking: true,
-                inputPrice: 0.55,
-                outputPrice: 2.19
-            }
+            { id: 'deepseek-chat', name: 'DeepSeek Chat', icon: '💬' },
+            { id: 'deepseek-reasoner', name: 'DeepSeek Reasoner', icon: '🧠', supportsThinking: true }
         ]
     },
-    
+    'deepseek-Speciale': {
+        name: "DeepSeek-Speciale",
+        implementation: 'openai-compatible',
+        baseURL: 'https://api.deepseek.com/v3.2_speciale_expires_on_20251215/v1/chat/completions',
+        icon: '✨',
+        supportsThinking: true,
+        models: [
+            { id: 'deepseek-reasoner', name: 'DeepSeek Reasoner', icon: '🧠', supportsThinking: true }
+        ]
+    },
+
     openrouter: {
         name: 'OpenRouter',
         implementation: 'openai-compatible',
-        baseURL: 'https://openrouter.ai/api/v1',
+        baseURL: 'https://openrouter.ai/api/v1/chat/completions',
         icon: '🌐',
         requiresReferer: true,
+        supportsThinking: true,
         models: [
-            {
-                id: 'anthropic/claude-sonnet-4',
-                name: 'Claude Sonnet 4 (via OpenRouter)',
-                contextWindow: 200000,
-                supportsVision: true,
-                supportsThinking: true
-            },
-            {
-                id: 'openai/gpt-4o',
-                name: 'GPT-4o (via OpenRouter)',
-                contextWindow: 128000,
-                supportsVision: true
-            },
-            {
-                id: 'google/gemini-2.5-pro-preview',
-                name: 'Gemini 2.5 Pro (via OpenRouter)',
-                contextWindow: 1048576,
-                supportsVision: true,
-                supportsThinking: true
-            }
+            { id: 'openrouter/auto', name: 'Auto (Best Model)', icon: '🪄' },
+            
+            // --- OpenAI Models via OpenRouter ---
+            { id: 'openai/gpt-5-pro', name: 'OpenAI: GPT-5 Pro', icon: '👑' },
+            { id: 'openai/gpt-5-codex', name: 'OpenAI: GPT-5 Codex', icon: '💻' },
+            { id: 'openai/gpt-5-mini', name: 'OpenAI: GPT-5 Mini', icon: '🍃' },
+            
+            // --- Anthropic Models via OpenRouter ---
+            { id: 'anthropic/claude-sonnet-4.5', name: 'Anthropic: Claude Sonnet 4.5', icon: '🎭' },
+            { id: 'anthropic/claude-opus-4.1', name: 'Anthropic: Claude Opus 4.1', icon: '👑' },
+            
+            // --- Google Models via OpenRouter ---
+            { id: 'google/gemini-2.5-pro', name: 'Google: Gemini 2.5 Pro', icon: '🌟' },
+            { id: 'google/gemini-2.5-flash', name: 'Google: Gemini 2.5 Flash', icon: '⚡' },
+
+            // --- Other Top Models from the List ---
+            { id: 'meta-llama/llama-4-maverick', name: 'Meta: Llama 4 Maverick', icon: '🦙' },
+            { id: 'nousresearch/hermes-4-405b', name: 'Nous: Hermes 4 405B', icon: '🧪' },
+            { id: 'mistralai/mistral-large-2411', name: 'Mistral: Mistral Large 2411', icon: '⛵' },
+            { id: 'z-ai/glm-4.6', name: 'Z.AI: GLM 4.6', icon: '🌏' },
+            { id: 'x-ai/grok-4', name: 'xAI: Grok 4', icon: '🏴‍☠️' }
         ]
     },
-    
-    groq: {
-        name: 'Groq',
+    cloudapi: {
+        name: "CloudAPI",
         implementation: 'openai-compatible',
-        baseURL: 'https://api.groq.com/openai/v1',
-        icon: '⚡',
+        baseURL: 'https://chat.cloudapi.vip/v1/chat/completions',
+        supportsThinking: true,
+        icon: '☁️',
         models: [
-            {
-                id: 'llama-3.3-70b-versatile',
-                name: 'Llama 3.3 70B',
-                contextWindow: 128000,
-                maxOutput: 32768
-            },
-            {
-                id: 'llama-3.1-8b-instant',
-                name: 'Llama 3.1 8B Instant',
-                contextWindow: 128000,
-                maxOutput: 8192
-            },
-            {
-                id: 'mixtral-8x7b-32768',
-                name: 'Mixtral 8x7B',
-                contextWindow: 32768,
-                maxOutput: 32768
-            }
+            { id: 'claude-opus-4-5-20251101', name: 'Opus 4.5', icon: '👑' },
+            { id: 'claude-sonnet-4-5-20250929-thinking', name: 'Sonnet 4.5 Think', icon: '🧠', supportsThinking: true },
         ]
     },
-    
-    ollama: {
-        name: 'Ollama (Local)',
+    	
+    openai: {
+        name: 'OpenAI',
         implementation: 'openai-compatible',
-        baseURL: 'http://localhost:11434/v1',
-        icon: '🦙',
+        baseURL: 'https://api.openai.com/v1/chat/completions',
+        icon: '🤖',
+        supportsThinking: true,
         models: [
-            {
-                id: 'llama3.2',
-                name: 'Llama 3.2',
-                contextWindow: 128000
-            },
-            {
-                id: 'qwen2.5',
-                name: 'Qwen 2.5',
-                contextWindow: 32768
-            },
-            {
-                id: 'deepseek-r1',
-                name: 'DeepSeek R1',
-                contextWindow: 65536,
-                supportsThinking: true
-            }
+            { id: 'gpt-4o', name: 'GPT-4o', icon: '⚡' },
+            { id: 'gpt-5-pro', name: 'GPT-5 Pro', icon: '👑' },
+            { id: 'gpt-5', name: 'GPT-5', icon: '🚀' },
+            { id: 'gpt-5-mini', name: 'GPT-5 Mini', icon: '🍃' },
+            { id: 'gpt-5-codex', name: 'GPT-5 CodeX', icon: '💻' },
         ]
     },
-    
+        
     custom: {
         name: 'Custom (OpenAI Compatible)',
         implementation: 'openai-compatible',
         baseURL: '',
-        icon: '🔧',
+        icon: '🛠️',
         models: []
     }
 };
