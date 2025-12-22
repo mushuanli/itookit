@@ -50,6 +50,9 @@ export interface ExecutionNode {
         
         /** 元数据 */
         metaInfo?: Record<string, any>;
+        
+        /** ✅ 新增：错误信息 */
+        error?: string;
     };
     
     /** 子节点 */

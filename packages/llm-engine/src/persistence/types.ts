@@ -47,6 +47,10 @@ export interface ChatNode {
         tokens?: number;
         finish_reason?: string;
         thinking?: string;
+        
+        /** ✅ 新增：持久化的错误信息 */
+        error?: string;
+        
         agentId?: string;
         agentName?: string;
         agentIcon?: string;

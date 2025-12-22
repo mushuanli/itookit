@@ -394,8 +394,8 @@ export class HistoryView {
                 if (collapseBtn) (collapseBtn as HTMLElement).click();
             }
         } else {
-            // Cancel Edit
-            this.cancelEdit(nodeId, controller, actionsEl, wrapper);
+            // (Save-only)
+            this.confirmEdit(nodeId, controller, actionsEl, wrapper, false);
         }
     }
 
@@ -407,7 +407,7 @@ export class HistoryView {
         regenerate: boolean
     ) {
     // 获取编辑后的内容
-    const newContent = controller.content;
+        const newContent = controller.content;
         // 退出编辑模式
         this.editingNodes.delete(nodeId);
         this.originalContentMap.delete(nodeId);
@@ -416,7 +416,7 @@ export class HistoryView {
         wrapper.querySelector('[data-action="edit"]')?.classList.remove('active');
 
     // ✅ 关键修复：无论是否重新生成，都先保存内容
-    this.onContentChange?.(nodeId, newContent, 'user');
+        this.onContentChange?.(nodeId, newContent, 'user');
         // 通知外部
         if (regenerate) {
             this.onNodeAction?.('edit-and-retry', nodeId);
@@ -554,6 +554,23 @@ export class HistoryView {
             return (sessionEl as HTMLElement)?.dataset.sessionId || node.id;
         };
         const effectiveId = getSessionId();
+
+        // ✨ [新增] 绑定 Agent 图标点击事件
+        const iconEl = element.querySelector('.llm-ui-node__icon--clickable');
+        if (iconEl) {
+            iconEl.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const agentId = (e.currentTarget as HTMLElement).dataset.agentId;
+                if (agentId) {
+                    console.log(`[HistoryView] Clicked agent: ${agentId}`);
+                    // 向上派发自定义事件
+                    this.container.dispatchEvent(new CustomEvent('open-agent-config', {
+                        bubbles: true,
+                        detail: { agentId }
+                    }));
+                }
+            });
+        }
 
         // Retry
         retryBtn?.addEventListener('click', (e) => {
@@ -840,6 +857,81 @@ export class HistoryView {
     }
 
 
+    // ✅ 新增：将错误渲染进聊天流
+    public appendErrorBubble(error: Error) {
+        // 移除旧的流式状态
+        this.exitStreamingMode();
+
+        const wrapper = document.createElement('div');
+        wrapper.className = 'llm-ui-session llm-ui-session--system';
+        
+        const isAuthError = error.message.includes('apiKey') || error.message.includes('401');
+        
+        // [修复] 删除未使用的 isConnectionError 变量
+        // const isConnectionError = error.message.includes('ECONNREFUSED') || error.message.includes('Network');
+
+        let actionButtons = '';
+        
+        // 根据错误类型提供快捷操作按钮
+        if (isAuthError) {
+            actionButtons = `
+                <button class="llm-ui-error-btn" data-action="open-settings">⚙️ 配置连接</button>
+            `;
+        }
+        
+        // 总是提供重试按钮
+        actionButtons += `
+            <button class="llm-ui-error-btn" data-action="retry-last">↻ 重试</button>
+        `;
+
+        wrapper.innerHTML = `
+            <div class="llm-ui-bubble llm-ui-bubble--error">
+                <strong>⚠️ 执行失败</strong>
+                <div class="llm-ui-bubble--error__content">
+                    ${escapeHTML(error.message)}
+                </div>
+                <div class="llm-ui-bubble--error__actions">
+                    ${actionButtons}
+                </div>
+            </div>
+        `;
+
+        this.container.appendChild(wrapper);
+        this.scrollToBottom(true);
+
+        // 绑定按钮事件
+        const settingsBtn = wrapper.querySelector('[data-action="open-settings"]');
+        if (settingsBtn) {
+            settingsBtn.addEventListener('click', () => {
+                // ✅ 这里触发的事件会被 LLMWorkspaceEditor 捕获
+                this.container.dispatchEvent(new CustomEvent('open-connection-settings', { bubbles: true }));
+            });
+        }
+
+        const retryBtn = wrapper.querySelector('[data-action="retry-last"]');
+        if (retryBtn) {
+            retryBtn.addEventListener('click', () => {
+                // 简单的重试逻辑：移除错误气泡，触发重试
+                wrapper.remove();
+                // 找到最后一个可重试的节点
+                const lastNode = this.findLastRetryableId();
+                if (lastNode) {
+                    this.onNodeAction?.('retry', lastNode);
+                }
+            });
+        }
+    }
+
+    private findLastRetryableId(): string | null {
+        // 简单的查找逻辑：找最后一个 user session 或 assistant node
+        // 实际逻辑可能需要根据你的 SessionManager 结构调整
+        const allSessions = Array.from(this.container.querySelectorAll('[data-session-id]'));
+        if (allSessions.length > 0) {
+            return (allSessions[allSessions.length - 1] as HTMLElement).dataset.sessionId || null;
+        }
+        return null;
+    }
+
     processEvent(event: OrchestratorEvent) {
         switch (event.type) {
             case 'session_start':
@@ -866,20 +958,20 @@ export class HistoryView {
             case 'error':
                 this.exitStreamingMode();
             // ✅ 修复：显示更详细的错误信息
-            const errorMessage = event.payload.message || 'Unknown error';
-            const errorCode = (event.payload as any).code;
+                const errorMessage = event.payload.message || 'Unknown error';
+                const errorCode = (event.payload as any).code;
             
             // 根据错误类型显示不同的提示
             if (errorCode === 401) {
-                this.renderError(new Error(`🔐 ${errorMessage}`));
+                this.appendErrorBubble(new Error(`🔐 ${errorMessage}`));
             } else if (errorCode === 429) {
-                this.renderError(new Error(`⏳ ${errorMessage}`));
+                this.appendErrorBubble(new Error(`⏳ ${errorMessage}`));
             } else {
-                this.renderError(new Error(errorMessage));
+                this.appendErrorBubble(new Error(errorMessage));
             }
-            
-            // ✅ 同时结束所有流式编辑器
-            this.editorMap.forEach(editor => editor.finishStream(false));
+                
+                // 同时结束所有流式编辑器
+                this.editorMap.forEach(editor => editor.finishStream(false));
                 break;
             case 'messages_deleted':
                 this.handleMessagesDeleted(event.payload.deletedIds);

@@ -1,7 +1,7 @@
 /**
  * @file memory-manager/types.ts
  */
-import { EditorFactory, ISessionEngine, SessionUIOptions } from '@itookit/common';
+import { EditorFactory, ISessionEngine, SessionUIOptions,NavigationRequest } from '@itookit/common';
 import type { FileTypeDefinition, CustomEditorResolver } from '@itookit/vfs-ui';
 
 export interface MemoryManagerConfig {
@@ -72,4 +72,9 @@ export interface MemoryManagerConfig {
         enabled: boolean;
         activeRules?: string[];
     };
+
+    /**
+     * [通用] 宿主导航回调
+     */
+    onNavigate?: (request: NavigationRequest) => Promise<void>;
 }
