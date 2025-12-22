@@ -80,6 +80,10 @@ export class VFS {
     this.middlewares.register(middleware);
   }
 
+  // ==================================================================================
+  // 核心路径辅助
+  // ==================================================================================
+
   /**
    * [辅助] 获取父目录路径字符串
    */
@@ -91,7 +95,7 @@ export class VFS {
 
   /**
    * [新增] 递归确保父目录存在
-   * 如果目录不存在，自动创建
+   * 如果目录不存在，自动创建 (Lazy Creation Support)
    */
   private async _ensureParentDirectory(module: string, path: string): Promise<string> {
     // 1. 检查当前路径是否已存在
@@ -195,6 +199,7 @@ export class VFS {
       0, Date.now(), Date.now(), metadata, []
     );
 
+    // 6. 中间件验证
     if (type === VNodeType.FILE && content !== undefined) {
       await this.middlewares.runValidation(vnode, content);
     }
@@ -203,6 +208,7 @@ export class VFS {
     try {
       if (type === VNodeType.FILE) {
         const fileContent = content !== undefined ? content : '';
+        // 中间件处理写入
         const { processedContent, derivedData } = await this._processWriteWithMiddlewares(
           vnode, fileContent, tx
         );
@@ -257,7 +263,7 @@ export class VFS {
   }
 
   /**
-   * 读取节点内容
+   * 读取节点内容 (支持字符串和二进制)
    */
   async read(vnodeOrId: VNode | string): Promise<string | ArrayBuffer> {
     const vnode = await this._resolveVNode(vnodeOrId);
@@ -270,7 +276,8 @@ export class VFS {
 
     const contentData = await this.storage.loadContent(vnode.contentRef);
     if (!contentData) {
-      throw new VFSError(VFSErrorCode.NOT_FOUND, `Content not found for node: ${vnode.nodeId}`);
+      // 允许内容不存在的情况，返回空
+      return '';
     }
 
     return contentData.content;
@@ -316,7 +323,7 @@ export class VFS {
   }
 
   /**
-   * 删除节点
+   * 删除节点 (级联删除)
    */
   async unlink(vnodeOrId: VNode | string, options: UnlinkOptions = {}): Promise<UnlinkResult> {
     let vnode: VNode;
@@ -327,7 +334,6 @@ export class VFS {
     } catch (error) {
       if (error instanceof VFSError && error.code === VFSErrorCode.NOT_FOUND) {
         const id = typeof vnodeOrId === 'string' ? vnodeOrId : vnodeOrId.nodeId;
-        // 返回空结果，表示没有节点被实际删除，但操作算作成功
         return { removedNodeId: id, allRemovedIds: [] };
       }
       throw error;
@@ -361,6 +367,8 @@ export class VFS {
         await this.storage.cleanupNodeTags(node.nodeId, tx);
         await this.storage.srsStore.deleteForNode(node.nodeId, tx);
         await this.storage.deleteVNode(node.nodeId, tx);
+        
+        // [Middleware] After Delete (如处理伴生目录)
         await this.middlewares.runAfterDelete(node, tx);
       }
       
@@ -380,6 +388,10 @@ export class VFS {
       throw new VFSError(VFSErrorCode.TRANSACTION_FAILED, 'Failed to delete node', error);
     }
   }
+
+  // ==================================================================================
+  // 高级操作：移动、复制
+  // ==================================================================================
 
   /**
    * 移动节点
@@ -406,11 +418,16 @@ export class VFS {
 
     const newParentId = await this.pathResolver.resolveParent(moduleName, normalizedUserPath);
 
-    const tx = await this.storage.beginTransaction([VFS_STORES.VNODES, VFS_STORES.SRS_ITEMS]);
+    // [重要] 在事务开始前保存旧路径，供中间件使用
+    const oldSystemPath = vnode.path;
+
+    // 增加 CONTENTS Store 以支持中间件可能进行的内容重写（如链接更新）
+    const tx = await this.storage.beginTransaction([
+        VFS_STORES.VNODES, VFS_STORES.SRS_ITEMS, VFS_STORES.CONTENTS
+    ]);
 
     try {
       const newName = this.pathResolver.basename(normalizedUserPath);
-      const oldSystemPath = vnode.path;
 
       vnode.parentId = newParentId;
       vnode.name = newName;
@@ -419,16 +436,23 @@ export class VFS {
       
       await this.storage.saveVNode(vnode, tx);
 
+      // 如果是目录，递归更新子节点路径
       if (vnode.type === VNodeType.DIRECTORY) {
         await this._updateDescendantPathsAndModules(vnode, oldSystemPath, newSystemPath, moduleName, tx);
       }
       
+      // ✨ [Middleware Hook] 移动后处理 (e.g., 移动伴生目录, 更新引用)
+      await this.middlewares.runAfterMove(vnode, oldSystemPath, newSystemPath, tx);
+
       await tx.done;
 
       this.events.emit({
         type: VFSEventType.NODE_MOVED,
-        nodeId: vnode.nodeId, path: newSystemPath, timestamp: Date.now(), data: { oldPath: oldSystemPath, newPath: newSystemPath },
+        nodeId: vnode.nodeId, 
+        path: newSystemPath, 
+        timestamp: Date.now(), 
         moduleId: moduleName, 
+        data: { oldPath: oldSystemPath, newPath: newSystemPath }
       });
 
       return vnode;
@@ -438,8 +462,9 @@ export class VFS {
     }
   }
 
-  // 批量移动节点
-  // [修改] 增加 SRS ModuleId 同步逻辑，并包含 SRS Store 事务
+  /**
+   * 批量移动节点
+   */
   async batchMove(nodeIds: string[], targetParentId: string | null): Promise<void> {
     if (nodeIds.length === 0) return;
 
@@ -454,7 +479,9 @@ export class VFS {
         }
     }
 
-    const tx = await this.storage.beginTransaction([VFS_STORES.VNODES, VFS_STORES.NODE_TAGS, VFS_STORES.SRS_ITEMS]);
+    const tx = await this.storage.beginTransaction([
+        VFS_STORES.VNODES, VFS_STORES.NODE_TAGS, VFS_STORES.SRS_ITEMS, VFS_STORES.CONTENTS
+    ]);
 
     try {
         const movedNodeIds: string[] = [];
@@ -463,6 +490,7 @@ export class VFS {
             const vnode = await this.storage.loadVNode(nodeId, tx);
             if (!vnode) continue; 
 
+            // 循环检测
             if (targetParentId) {
                 if (nodeId === targetParentId) throw new VFSError(VFSErrorCode.INVALID_OPERATION, `Cannot move directory into itself`);
                 let current = targetParentNode;
@@ -473,7 +501,6 @@ export class VFS {
             }
 
             const oldModuleId = vnode.moduleId!;
-            // 确定目标模块
             let targetModuleId = oldModuleId;
             if (targetParentNode && targetParentNode.moduleId) {
                 targetModuleId = targetParentNode.moduleId;
@@ -512,6 +539,9 @@ export class VFS {
             if (vnode.type === VNodeType.DIRECTORY) {
                 await this._updateDescendantPathsAndModules(vnode, oldSystemPath, newSystemPath, targetModuleId, tx);
             }
+
+            // ✨ [Middleware Hook] 批量移动中，每个节点也需要触发 Hook 以处理其伴生资源
+            await this.middlewares.runAfterMove(vnode, oldSystemPath, newSystemPath, tx);
 
             movedNodeIds.push(nodeId);
         }
@@ -596,11 +626,19 @@ export class VFS {
         }
       }
   
+      // ✨ [Middleware Hook] 复制后处理 (e.g. 递归复制伴生目录)
+      // 需要重新加载节点实例以传入 Hook
+      const targetNode = await this.storage.loadVNode(targetId, tx);
+      if (sourceNode && targetNode) {
+          await this.middlewares.runAfterCopy(sourceNode, targetNode, tx);
+      }
+
       await tx.done;
 
       this.events.emit({
         type: VFSEventType.NODE_COPIED,
-        nodeId: targetId, path: targetSystemPath, timestamp: Date.now(), data: { sourceId, copiedIds }
+        nodeId: targetId, path: targetSystemPath, timestamp: Date.now(), 
+        data: { sourceId, copiedIds }
       });
 
       return { sourceId, targetId, copiedIds };
@@ -609,6 +647,10 @@ export class VFS {
       throw new VFSError(VFSErrorCode.TRANSACTION_FAILED, 'Failed to copy node', error);
     }
   }
+
+  // ==================================================================================
+  // 读取与搜索
+  // ==================================================================================
 
   /**
    * 读取目录
@@ -641,7 +683,9 @@ export class VFS {
     return this.storage.searchNodes(query, moduleName);
   }
 
-  // ==================== Tag 核心方法 ====================
+  // ==================================================================================
+  // Tag 操作
+  // ==================================================================================
 
   /**
    * 批量原子化设置多个节点的标签

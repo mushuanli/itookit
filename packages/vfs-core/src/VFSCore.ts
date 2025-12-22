@@ -11,6 +11,7 @@ import { EnhancedMiddlewareRegistry } from './core/EnhancedMiddlewareRegistry';
 import { MiddlewareFactory } from './core/MiddlewareFactory';
 import { ContentMiddleware } from './middleware/base/ContentMiddleware';
 import { PlainTextMiddleware } from './middleware/PlainTextMiddleware';
+import { ResourceBundleMiddleware } from './middleware/ResourceBundleMiddleware';
 import { VNode, VNodeType, TagData, VFS_STORES,SRSItemData } from './store/types'; 
 import { VFSError, VFSErrorCode, SearchQuery } from './core/types';
 
@@ -767,8 +768,14 @@ export class VFSCore {
   }
 
   private async _registerDefaultMiddlewares(): Promise<void> {
+    // 1. 注册纯文本处理
     const plainTextMiddleware = this.middlewareFactory.create(PlainTextMiddleware);
     this.middlewareRegistry.register(plainTextMiddleware);
+    
+    // 2. ✨ 注册资源包管理中间件
+    // 确保它有正确的优先级 (ResourceBundleMiddleware 设为 100)
+    const bundleMiddleware = this.middlewareFactory.create(ResourceBundleMiddleware);
+    this.middlewareRegistry.register(bundleMiddleware);
   }
 
   private async _ensureDefaultModule(): Promise<void> {

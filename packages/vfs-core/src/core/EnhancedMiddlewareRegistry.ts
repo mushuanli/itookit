@@ -3,9 +3,10 @@
  * 增强的 Middleware 注册表（支持优先级、类型映射和钩子）
  */
 
-import { ContentMiddleware } from '../middleware/base/ContentMiddleware';
 import { VNode } from '../store/types';
 import { MiddlewareRegistry } from './MiddlewareRegistry';
+// ✨ [新增] 引入通用接口
+import { IVFSMiddleware } from './types';
 
 /**
  * Middleware 钩子类型
@@ -24,7 +25,10 @@ export class EnhancedMiddlewareRegistry extends MiddlewareRegistry {
   private typeMapping: Map<string, string[]> = new Map();
   private hooks: Map<MiddlewareHook, Set<HookHandler>> = new Map();
 
-  register(middleware: ContentMiddleware): void {
+  /**
+   * [修改] 参数类型放宽为 IVFSMiddleware
+   */
+  register(middleware: IVFSMiddleware): void {
     super.register(middleware);
     this._triggerHook(MiddlewareHook.REGISTERED, middleware.name);
   }
@@ -33,7 +37,7 @@ export class EnhancedMiddlewareRegistry extends MiddlewareRegistry {
    * 注销 Middleware
    */
   async unregister(name: string): Promise<boolean> {
-    const middleware = this.get(name) as ContentMiddleware | undefined;
+    const middleware = this.get(name);
     if (!middleware) return false;
 
     // 执行清理
@@ -48,28 +52,30 @@ export class EnhancedMiddlewareRegistry extends MiddlewareRegistry {
   }
 
   /**
-   * 获取 Middleware
+   * [修改] 返回类型改为 IVFSMiddleware
    */
-  get(name: string): ContentMiddleware | undefined {
-    // 因为我们知道在这个注册表里只注册 ContentMiddleware 实例，
-    // 所以这个类型转换是安全的。
-    return super.get(name) as ContentMiddleware | undefined;
+  get(name: string): IVFSMiddleware | undefined {
+    return super.get(name);
   }
 
   /**
-   * 获取所有 Middlewares
+   * [修改] 返回类型改为 IVFSMiddleware[]
    */
-  getAll(): ContentMiddleware[] {
-    return super.getAll() as unknown as ContentMiddleware[];
+  getAll(): IVFSMiddleware[] {
+    return super.getAll();
   }
 
   /**
    * 获取适用于指定节点的 Middlewares（按优先级排序）
+   * [修改] 增加安全检查，因为并非所有中间件都有 canHandle
    */
-  getMiddlewaresForNode(vnode: VNode): ContentMiddleware[] {
+  getMiddlewaresForNode(vnode: VNode): IVFSMiddleware[] {
     return this.getAll()
-      .filter(middleware => middleware.canHandle(vnode))
-      .sort((a, b) => b.priority - a.priority);
+      .filter(middleware => {
+          // 安全检查：如果 middleware 实现了 canHandle 则调用，否则视为不处理内容
+          return typeof middleware.canHandle === 'function' && middleware.canHandle(vnode);
+      })
+      .sort((a, b) => (b.priority || 0) - (a.priority || 0));
   }
 
   /**
@@ -81,12 +87,13 @@ export class EnhancedMiddlewareRegistry extends MiddlewareRegistry {
 
   /**
    * 获取内容类型的默认 Middlewares
+   * [修改] 返回类型修正
    */
-  getMiddlewaresForType(contentType: string): ContentMiddleware[] {
+  getMiddlewaresForType(contentType: string): IVFSMiddleware[] {
     const names = this.typeMapping.get(contentType) || [];
     return names
-      .map(name => this.get(name) as ContentMiddleware | undefined)
-      .filter((p): p is ContentMiddleware => p !== undefined);
+      .map(name => this.get(name))
+      .filter((p): p is IVFSMiddleware => p !== undefined);
   }
 
   /**

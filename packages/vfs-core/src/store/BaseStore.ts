@@ -11,7 +11,7 @@ import { Transaction, TransactionMode } from './types.js';
 export abstract class BaseStore {
   protected constructor(
     protected db: Database,
-    protected storeName: string
+    public readonly storeName: string 
   ) {}
 
   /**
