@@ -10,6 +10,9 @@ export class MDxController {
     private isReadOnly: boolean = true;
     private onChangeCallback?: (text: string) => void;
     
+    // ✅ 新增：记录初始化时是否为流式模式
+    private isStreamingInit: boolean = false;
+
     private isInitialized: boolean = false;
     private pendingChunks: string[] = [];
     private readyPromise: Promise<void>;
@@ -28,20 +31,23 @@ export class MDxController {
 
     constructor(container: HTMLElement, initialContent: string, options?: { 
         readOnly?: boolean,
-        onChange?: (text: string) => void 
+        onChange?: (text: string) => void,
+        streaming?: boolean // ✨ 新增参数
     }) {
         this.container = container;
         this.currentContent = initialContent;
         this.isReadOnly = options?.readOnly ?? true;
         this.onChangeCallback = options?.onChange;
         
-        // ✨ [修复 6.1] 同时创建 resolve 和 reject
+        // ✅ 获取流式状态，默认为 false
+        this.isStreamingInit = options?.streaming ?? false;
+        
         this.readyPromise = new Promise((resolve, reject) => {
             this.readyResolve = resolve;
             this.readyReject = reject;
         });
         
-        console.log('[MDxController] Constructor called, starting init...');
+        console.log('[MDxController] Constructor called, starting init...',this.isStreamingInit);
         this.init();
     }
 
@@ -71,7 +77,12 @@ export class MDxController {
                     'ui:toolbar' 
                 ],
                 defaultPluginOptions:{
-                    'codeblock-controls':{defaultCollapsed: false}
+                    // ✅ 动态控制 defaultCollapsed
+                    // 如果是正在输出的流(isStreamingInit=true)，则折叠(true)
+                    // 否则(历史记录/编辑)，则展开(false)
+                    'codeblock-controls': { 
+                        defaultCollapsed: !this.isStreamingInit 
+                    }
                 }
             }) as MDxEditor;
 
