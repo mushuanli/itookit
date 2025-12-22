@@ -12,7 +12,12 @@ export type AgentType = 'agent' | 'composite' | 'tool' | 'workflow';
  */
 export interface AgentConfig {
     connectionId: string;
-    modelId: string;
+    /** 
+     * 修改: modelId -> modelName 
+     * 避免不同供应商 ID 不同但模型名称含义一致或混淆的问题，
+     * 同时语义上更倾向于"使用的模型名称标识"
+     */
+    modelName: string; 
     systemPrompt?: string;
     maxHistoryLength?: number;
     temperature?: number;
@@ -89,6 +94,11 @@ export interface IAgentService {
     // Connections
     getConnections(): Promise<LLMConnection[]>;
     getConnection(connectionId: string): Promise<LLMConnection | undefined>;
+    /**
+     * ✅ 新增：获取默认或回退的 Connection
+     * 保证总能返回一个可用的 Connection，除非一个都没有。
+     */
+    getDefaultConnection(): Promise<LLMConnection | null>;
     saveConnection(conn: LLMConnection): Promise<void>;
     deleteConnection(id: string): Promise<void>;
     
