@@ -603,12 +603,16 @@ export class HistoryView {
 
         // 初始化内容编辑器
         if (mountPoints.output) {
+            // ✅ 判断是否为正在运行的流 (running 或 queued)
+            const isStreamingNode = node.status === 'running' || node.status === 'queued';
+
             const controller = new MDxController(mountPoints.output, node.data.output || '', {
                 readOnly: true,
+                streaming: isStreamingNode, // ✨ 传递参数：如果是流式，则 defaultCollapsed = true
                 onChange: (text) => {
-                if (controller.isEditing()) {
-                    this.onContentChange?.(effectiveId, text, 'node');
-                }
+                    if (controller.isEditing()) {
+                        this.onContentChange?.(effectiveId, text, 'node');
+                    }
                     const previewEl = element.querySelector('.llm-ui-header-preview');
                     if (previewEl) previewEl.textContent = this.getPreviewText(text);
                 }
@@ -616,14 +620,14 @@ export class HistoryView {
             this.editorMap.set(node.id, controller);
 
             editBtn?.addEventListener('click', async () => {
-            const wasEditing = controller.isEditing();
-            await controller.toggleEdit();
-            editBtn.classList.toggle('active');
-            
-            // 退出编辑模式时保存
-            if (wasEditing) {
-                this.onContentChange?.(effectiveId, controller.content, 'node');
-            }
+                const wasEditing = controller.isEditing();
+                await controller.toggleEdit();
+                editBtn.classList.toggle('active');
+                
+                // 退出编辑模式时保存
+                if (wasEditing) {
+                    this.onContentChange?.(effectiveId, controller.content, 'node');
+                }
             });
 
             copyBtn?.addEventListener('click', async () => {
