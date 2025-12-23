@@ -21,9 +21,9 @@ export class AssetResolverPlugin implements MDxPlugin {
       await this.resolveAssets(element);
     });
 
-    // 2. [新增] 注册清理命令
+    // 注册清理命令，使其可被 MDxEditor.pruneAssets 调用
     context.registerCommand?.('pruneAssets', async (editor: any) => {
-        await this.pruneUnusedAssets(editor);
+        return await this.pruneUnusedAssets(editor);
     });
     
     // 可以在工具栏或标题栏加一个按钮 (可选)
@@ -140,44 +140,41 @@ export class AssetResolverPlugin implements MDxPlugin {
 
   /**
    * 清理未引用的资源
+   * @returns 被删除的文件数量
    */
-  private async pruneUnusedAssets(editor: any): Promise<void> {
+  private async pruneUnusedAssets(editor: any): Promise<number> {
       const engine = this.context.getSessionEngine?.();
       const currentNodeId = this.context.getCurrentNodeId();
-      if (!engine || !currentNodeId) return;
+      if (!engine || !currentNodeId) return 0;
 
-      if (!confirm('确定要清理未引用的附件吗？此操作不可撤销。')) return;
+      // [变更] 移除 confirm，交由调用者处理交互
+      // if (!confirm('...')) return 0;
 
       try {
-          // 1. 获取所有附件
-          // 需要 Engine 提供 listAssets 接口，或者 getAssetDirectoryId 后 list children
+          // 1. 获取资源目录 ID
           let assetDirId: string | null = null;
           if ('getAssetDirectoryId' in engine) {
               assetDirId = await (engine as any).getAssetDirectoryId(currentNodeId);
           }
           
           if (!assetDirId) {
-              alert('当前文档没有资源目录。');
-              return;
+              console.log('[AssetResolver] No asset directory found.');
+              return 0;
           }
           
-          // 2. 获取目录下的所有文件 (利用我们在 ISessionEngine 中新增的 getChildren)
+          // 2. 获取目录下的所有文件
           let assets: any[] = [];
           if (engine.getChildren) {
               assets = await engine.getChildren(assetDirId);
           } else {
-              console.warn('[AssetResolver] Engine does not support getChildren, cannot prune.');
-              return;
+              console.warn('[AssetResolver] Engine does not support getChildren.');
+              return 0;
           }
           
-          if (assets.length === 0) {
-              alert('资源目录为空。');
-              return;
-          }
+          if (assets.length === 0) return 0;
 
           // 3. 扫描 Markdown 文本中的引用
           const content = editor.getText();
-          // 匹配 @asset/filename
           const usedAssets = new Set<string>();
           const regex = /@asset\/([^\s)"]+)/g;
           let match;
@@ -187,19 +184,24 @@ export class AssetResolverPlugin implements MDxPlugin {
           
           // 4. 比较并删除
           let deletedCount = 0;
+          const deletePromises: Promise<void>[] = [];
+
           for (const asset of assets) {
-              // 确保只处理文件，且不在引用列表中
               if (asset.type === 'file' && !usedAssets.has(asset.name)) {
-                  await engine.delete([asset.id]);
+                  deletePromises.push(engine.delete([asset.id]));
                   deletedCount++;
               }
           }
           
-          alert(`清理完成，删除了 ${deletedCount} 个未引用文件。`);
+          await Promise.all(deletePromises);
+          
+          // [变更] 移除 alert，返回数量
+          console.log(`[AssetResolver] Pruned ${deletedCount} unused assets.`);
+          return deletedCount;
 
       } catch (e) {
-          console.error('Prune failed', e);
-          alert('清理失败，请查看控制台。');
+          console.error('[AssetResolver] Prune failed', e);
+          throw e; // 抛出异常供上层捕获
       }
   }
 

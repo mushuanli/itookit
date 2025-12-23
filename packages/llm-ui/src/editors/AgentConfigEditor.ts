@@ -647,6 +647,10 @@ export class AgentConfigEditor implements IEditor {
     gotoMatch() {}
     clearSearch() {}
 
+    async pruneAssets(): Promise<number | null> {
+        return null;
+    }
+
     // Events
     on(event: EditorEvent, cb: EditorEventCallback) { 
         if (!this.listeners.has(event)) this.listeners.set(event, new Set());

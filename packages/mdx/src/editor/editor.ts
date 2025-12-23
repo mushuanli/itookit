@@ -454,6 +454,34 @@ export class MDxEditor extends IEditor {
     } else { this.renderer.clearSearch(); }
   }
 
+  /**
+   * 实现清理接口
+   * 委托给 AssetResolverPlugin 处理
+   */
+  async pruneAssets(): Promise<number | null> {
+      // 尝试获取清理命令 (通过 PluginManager 的命令系统)
+      // 在 AssetResolverPlugin 中，我们注册了 'pruneAssets' 命令
+      const pruneCommand = this.renderer.getPluginManager().getCommand('pruneAssets');
+      
+      if (pruneCommand) {
+          // 调用命令，并期待它返回清理数量 (需要 AssetResolverPlugin 配合修改返回值)
+          // 注意：pruneCommand 签名通常是 (editor) => void，我们需要调整一下约定
+          // 或者我们直接通过 plugin name 获取实例调用方法（如果架构允许）
+          
+          // 方案 A: 通过 command 调用 (最解耦)
+          // 需要 AssetResolverPlugin 的 pruneAssets 命令返回 Promise<number>
+          try {
+              return await pruneCommand(this);
+          } catch (e) {
+              console.error('[MDxEditor] Prune assets failed:', e);
+              return 0;
+          }
+      }
+      
+      console.warn('[MDxEditor] Prune capability not available (AssetResolverPlugin missing?)');
+      return null;
+  }
+
   on(eventName: EditorEvent, callback: EditorEventCallback): () => void {
     if (!this.eventEmitter.has(eventName)) this.eventEmitter.set(eventName, new Set());
     this.eventEmitter.get(eventName)!.add(callback);
