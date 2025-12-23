@@ -143,6 +143,15 @@ export abstract class IEditor {
      */
     abstract setDirty(isDirty: boolean): void;
 
+    /**
+     * [新增] 清理未引用的伴生资源 (可选实现)
+     * 用于移除当前文档中不再被引用但仍存在于伴生目录中的文件。
+     * 这是一个维护性操作，通常由用户手动触发。
+     * @returns 返回清理掉的文件数量，不支持则返回 null
+     */
+    async pruneAssets(): Promise<number | null> {
+        return null;
+    }
 
     // --- 内容分析 ---
     abstract readonly commands: Readonly<Record<string, Function>>;

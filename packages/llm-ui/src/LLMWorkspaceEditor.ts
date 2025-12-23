@@ -1002,6 +1002,10 @@ export class LLMWorkspaceEditor implements IEditor {
     gotoMatch() {}
     clearSearch() {}
 
+    async pruneAssets(): Promise<number | null> {
+        return null;
+    }
+
     on(event: EditorEvent, cb: EditorEventCallback): () => void {
         if (!this.listeners.has(event)) {
             this.listeners.set(event, new Set());

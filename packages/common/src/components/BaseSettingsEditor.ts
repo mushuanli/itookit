@@ -99,6 +99,10 @@ export abstract class BaseSettingsEditor<TService> implements IEditor {
     async search(_query: string): Promise<UnifiedSearchResult[]> { return []; }
     gotoMatch(_result: UnifiedSearchResult) {}
     clearSearch() {}
-    
+
+    async pruneAssets(): Promise<number | null> {
+        return null; // 设置页面通常没有附件需要清理
+    }
+
     on(_eventName: EditorEvent, _callback: EditorEventCallback) { return () => {}; }
 }
