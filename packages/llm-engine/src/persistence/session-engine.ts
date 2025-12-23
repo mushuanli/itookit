@@ -665,6 +665,18 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
     // ============================================================
     // 代理方法（实现 ISessionEngine 接口）
     // ============================================================
+    async getChildren(parentId: string): Promise<EngineNode[]> {
+        return this.moduleEngine.getChildren(parentId);
+    }
+
+    async createAsset(ownerNodeId: string, filename: string, content: string | ArrayBuffer): Promise<EngineNode> {
+        return this.moduleEngine.createAsset(ownerNodeId, filename, content);
+    }
+
+    // 建议同时加上这个（虽然可能是可选的，但加上更完整）
+    async getAssetDirectoryId(ownerNodeId: string): Promise<string | null> {
+        return this.moduleEngine.getAssetDirectoryId ? this.moduleEngine.getAssetDirectoryId(ownerNodeId) : null;
+    }
 
     async readContent(id: string): Promise<string | ArrayBuffer> { 
         return this.moduleEngine.readContent(id); 
