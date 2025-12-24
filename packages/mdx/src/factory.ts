@@ -27,6 +27,9 @@ import { MentionPlugin, MentionPluginOptions } from './plugins/autocomplete/ment
 import { SvgPlugin, SvgPluginOptions } from './plugins/syntax-extensions/svg.plugin';
 import { VegaPlugin } from './plugins/syntax-extensions/vega.plugin';
 import { AssetResolverPlugin } from './plugins/core/asset-resolver.plugin';
+// [新增]
+import { AutoSavePlugin, AutoSavePluginOptions } from './plugins/interactions/auto-save.plugin'; 
+
 import type { MDxPlugin } from './core/plugin';
 import { EditorFactory } from '@itookit/common';
 
@@ -107,8 +110,13 @@ registerPlugin('task-list', TaskListPlugin, { priority: 51 });
 registerPlugin('codeblock-controls', CodeBlockControlsPlugin, { priority: 52 });
 registerPlugin('autocomplete:tag', TagPlugin, { priority: 53 });
 registerPlugin('autocomplete:mention', MentionPlugin, { priority: 54 });
+registerPlugin('interaction:clipboard', ClipboardPlugin, { priority: 55 });
+registerPlugin('interaction:upload', UploadPlugin, { priority: 60 });
 registerPlugin('plantuml', PlantUMLPlugin, { priority: 70 });
 registerPlugin('vega', VegaPlugin, { priority: 71 });
+// [新增] 注册自动保存插件
+registerPlugin('interaction:auto-save', AutoSavePlugin, { priority: 90 }); 
+registerPlugin('core:asset-resolver', AssetResolverPlugin, { priority: 95 });
 
 export type PluginConfig =
   | string
@@ -118,16 +126,22 @@ export type PluginConfig =
 
 export interface MDxEditorFactoryConfig extends EditorOptions {
   plugins?: PluginConfig[];
+  /** 
+   * [新增] 编辑器保存回调，工厂函数会优先使用此回调或通过 hostContext 自动生成 
+   */
+  onSave?: (content: string) => Promise<void>; 
+
   defaultPluginOptions?: {
     'editor:core'?: CoreEditorPluginOptions;
     'core:titlebar'?: CoreTitleBarPluginOptions;
+    'interaction:auto-save'?: AutoSavePluginOptions;
     folder?: FoldablePluginOptions;
     mathjax?: MathJaxPluginOptions;
     media?: MediaPluginOptions;
     mermaid?: MermaidPluginOptions;
     // [新增] SVG 选项类型
     svg?: SvgPluginOptions;
-    table?: TablePluginOptions; // 新增
+    table?: TablePluginOptions;
     'task-list'?: TaskListPluginOptions;
     'codeblock-controls'?: CodeBlockControlsPluginOptions;
     'autocomplete:tag'?: TagPluginOptions;
@@ -137,18 +151,12 @@ export interface MDxEditorFactoryConfig extends EditorOptions {
   };
 }
 
-// 注册插件
-// Asset Resolver 优先级要高，确保 DOM 更新后立即替换 URL，但在 Media 之后
-registerPlugin('core:asset-resolver', AssetResolverPlugin, { priority: 95 }); 
-registerPlugin('interaction:upload', UploadPlugin, { priority: 60 });
-// 注册插件（优先级要高于 UploadPlugin，这样先处理 HTML）
-registerPlugin('interaction:clipboard', ClipboardPlugin, { priority: 55 });
-
 // --- 工厂函数 ---
 const DEFAULT_PLUGINS: PluginConfig[] = [
-  'core:asset-resolver', // 核心能力
-  'interaction:clipboard',  // 新增
-  'interaction:upload',  // 交互能力
+  'core:asset-resolver',
+  'interaction:auto-save', // [新增] 默认启用自动保存
+  'interaction:clipboard',
+  'interaction:upload',
   'ui:toolbar',
   'ui:formatting',
   'interaction:source-sync',
@@ -232,8 +240,10 @@ function sortPlugins(pluginNames: string[]): string[] {
   }
 
   if (sorted.length !== pluginNames.length) {
-    const remaining = pluginNames.filter(p => !sorted.includes(p));
-    throw new Error(`Circular dependency detected among plugins: ${remaining.join(', ')}`);
+      // 简单处理循环依赖，防止崩溃
+      const remaining = pluginNames.filter(p => !sorted.includes(p));
+      console.warn(`Circular or missing dependency for: ${remaining.join(', ')}`);
+      sorted.push(...remaining);
   }
 
   return sorted;
@@ -254,11 +264,23 @@ export async function createMDxEditor(
 
   console.log(`[createMDxEditor] Received config.Plugin:${userPlugins} Content length: ${(config.initialContent || '').length}.`);
 
-  // ✅ [核心变更] 自动桥接 HostContext 到 CoreTitleBar 插件
-  // 这替代了之前 Enhancer 的作用，将标准的 Host 能力映射为 UI 插件的具体配置
+  // ✅ [核心变更] 自动桥接 HostContext 的保存能力
+  // 1. 确定保存处理器
+  let onSaveHandler = config.onSave;
+  
+  if (!onSaveHandler && config.hostContext && config.nodeId) {
+      onSaveHandler = async (content: string) => {
+          await config.hostContext!.saveContent(config.nodeId!, content);
+      };
+  }
+  
+  // 2. 将保存处理器注入编辑器配置，供 Editor.save() 使用
+  config.onSave = onSaveHandler;
+
+  // 3. 配置 TitleBar 插件，使其按钮调用 editor.save()
+  // 这样无论点击按钮还是自动保存，都走同一个入口
+  config.defaultPluginOptions = config.defaultPluginOptions || {};
   if (config.hostContext) {
-    config.defaultPluginOptions = config.defaultPluginOptions || {};
-    
     const existingTitleBarOpts = config.defaultPluginOptions['core:titlebar'] || {};
     
     config.defaultPluginOptions['core:titlebar'] = {
@@ -268,16 +290,11 @@ export async function createMDxEditor(
         onSidebarToggle: existingTitleBarOpts.onSidebarToggle 
             || ((_editor) => config.hostContext?.toggleSidebar()),
             
-        // 2. 保存：如果插件没配，且有 nodeId，就用 Host 的
-        saveCallback: existingTitleBarOpts.saveCallback 
-            || (async (editor) => {
-                if (config.nodeId && config.hostContext) {
-                    await config.hostContext.saveContent(config.nodeId, editor.getText());
-		    editor.setDirty(false);
-                } else {
-                    console.warn('[MDxEditor] Cannot save: No nodeId provided.');
-                }
-            })
+        // 保存按钮：调用 editor.save()
+        saveCallback: async (editor) => {
+             // 这里调用 editor.save() 会触发 config.onSave
+             await editor.save(); 
+        }
     };
   }
 
@@ -367,8 +384,8 @@ export async function createMDxEditor(
 export const defaultEditorFactory: EditorFactory = async (container, options) => {
     const config: MDxEditorFactoryConfig = {
         ...options,
-        // 确保核心 UI 插件被加载
-        plugins: ['core:titlebar', ...(options.plugins || [])],
+        // 确保 TitleBar 和 AutoSave 存在
+        plugins: ['core:titlebar', 'interaction:auto-save', ...(options.plugins || [])],
         initialMode: 'render' as const,
         defaultPluginOptions: {
             ...options.defaultPluginOptions,

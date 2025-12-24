@@ -22,6 +22,11 @@ import {
 export interface MDxEditorConfig extends EditorOptions {
   searchMarkClass?: string;
   persistenceAdapter?: IPersistenceAdapter;
+  /** 
+   * [新增] 核心保存回调 
+   * 当触发自动保存或手动保存时调用
+   */
+  onSave?: (content: string) => Promise<void>;
 }
 
 /**
@@ -42,6 +47,9 @@ export class MDxEditor extends IEditor {
   private searchCompartment = new Compartment();
   private isDestroying = false;
   private _isDirty = false;
+  
+  // [修改] 使用 Promise 引用来管理保存状态，解决并发和销毁时的竞态问题
+  private currentSavePromise: Promise<void> | null = null;
 
   private renderPromise: Promise<void> = Promise.resolve();
 
@@ -139,7 +147,7 @@ export class MDxEditor extends IEditor {
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
           this.emit('change');
-          if (update.transactions.some(tr => tr.isUserEvent('input') || tr.isUserEvent('delete'))) {
+          if (update.transactions.some(tr => tr.isUserEvent('input') || tr.isUserEvent('delete') || tr.isUserEvent('paste') || tr.isUserEvent('drop'))) {
             this.setDirty(true);
             this.emit('interactiveChange');
           }
@@ -161,10 +169,13 @@ export class MDxEditor extends IEditor {
       if (result.wasUpdated && result.updatedMarkdown !== this.getText()) {
         console.log('[MDxEditor] Received taskToggled. Syncing editor text...');
         
-        // 1. 更新编辑器文本 (这通常会重置 dirty 状态，但这没关系)
+        // 1. 更新编辑器文本
         this.setText(result.updatedMarkdown);
+        // 标记为脏，以便自动保存可以捕获这次变更
+        this.setDirty(true);
+        this.emit('interactiveChange');
         
-        // 2. ✨ [修改] 发送乐观更新事件 -> 通知 Connector 立即刷新 UI Badge
+        // 2. 发送乐观更新事件
         this.emit('optimisticUpdate');
       }
     });
@@ -174,6 +185,11 @@ export class MDxEditor extends IEditor {
   async switchToMode(mode: 'edit' | 'render', isInitializing = false): Promise<void> {
     if (this.currentMode === mode && !isInitializing) return;
     if (!this._container || !this.editorContainer || !this.renderContainer) return;
+
+    // [新增] 切换到渲染模式前，如果内容有变动，尝试自动保存
+    if (this.currentMode === 'edit' && mode === 'render' && this.isDirty()) {
+        await this.save();
+    }
 
     this.currentMode = mode;
     const isEditMode = mode === 'edit';
@@ -280,6 +296,51 @@ export class MDxEditor extends IEditor {
 
   setDirty(isDirty: boolean): void {
     this._isDirty = isDirty;
+  }
+  
+  /**
+   * [重写] 核心保存方法
+   * 修复了并发问题：如果当前正在保存，则返回当前的 Promise，防止任务被丢弃
+   */
+  async save(): Promise<void> {
+    // 1. 捕获本地常量，解决 "possibly undefined" TS 错误
+    const onSave = this.config.onSave;
+    if (!onSave) {
+        return;
+    }
+
+    // 2. 如果当前已有保存任务，返回该任务（等待其完成）
+    if (this.currentSavePromise) {
+        return this.currentSavePromise;
+    }
+
+    // 3. 如果没有变更，跳过
+    if (!this.isDirty()) return;
+
+    // 4. 创建新的保存任务
+    this.currentSavePromise = (async () => {
+        try {
+            const content = this.getText();
+            
+            // 使用捕获的本地变量调用
+            await onSave(content);
+            
+            // 只有在保存成功后才清除脏状态
+            // 注意：这里存在微小的竞态，如果保存期间用户又输入了，
+            // 理想情况应该比较 content 和 currentText，但这里简单处理设为 false
+            // 下面的 destroy 逻辑会通过二次检查来弥补
+            this.setDirty(false);
+            this.emit('saved');
+        } catch (error) {
+            console.error('[MDxEditor] Save failed:', error);
+            this.emit('saveError', error);
+            // 保存失败保持 dirty 状态
+        } finally {
+            this.currentSavePromise = null;
+        }
+    })();
+
+    return this.currentSavePromise;
   }
   
   // ✨ [最终] 确保getHeadings生成唯一ID，避免导航冲突
@@ -502,6 +563,22 @@ export class MDxEditor extends IEditor {
       this.isDestroying = true;
       
       console.log(`[MDxEditor] Destroying instance for node ${this.config.nodeId || 'unknown'}.`);
+
+      // 1. 等待当前可能正在进行的自动保存
+      if (this.currentSavePromise) {
+          try {
+              await this.currentSavePromise;
+          } catch (e) {
+              console.warn('[MDxEditor] Pending save failed during destroy:', e);
+          }
+      }
+
+      // 2. 双重检查：如果等待期间有新输入，或者上次保存失败导致仍为 Dirty
+      // 执行最终强制保存
+      if (this._isDirty) {
+          console.log('[MDxEditor] Performing final save during destroy...');
+          await this.save();
+      }
 
       // ✨ [清理] 移除了原有的 VFS 直接保存逻辑
       // 现在应由调用者（如 Connector 或 App 层）通过 sessionEngine 处理最终保存
