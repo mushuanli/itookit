@@ -13,6 +13,8 @@ import { PlantUMLPlugin } from './plugins/syntax-extensions/plantuml.plugin';
 import { ClozePlugin } from './plugins/cloze/cloze.plugin';
 import { ClozeControlsPlugin } from './plugins/cloze/cloze-control-ui.plugin';
 import { MemoryPlugin } from './plugins/cloze/memory.plugin';
+import { ClipboardPlugin } from './plugins/interactions/clipboard.plugin';
+import { UploadPlugin, UploadPluginOptions } from './plugins/interactions/upload.plugin';
 import { TablePlugin, TablePluginOptions } from './plugins/interactions/table.plugin';
 import { TaskListPlugin, TaskListPluginOptions } from './plugins/interactions/task-list.plugin';
 import { CodeBlockControlsPlugin, CodeBlockControlsPluginOptions } from './plugins/interactions/codeblock-controls.plugin';
@@ -24,7 +26,6 @@ import { TagPlugin, TagPluginOptions } from './plugins/autocomplete/tag.plugin';
 import { MentionPlugin, MentionPluginOptions } from './plugins/autocomplete/mention.plugin';
 import { SvgPlugin, SvgPluginOptions } from './plugins/syntax-extensions/svg.plugin';
 import { VegaPlugin } from './plugins/syntax-extensions/vega.plugin';
-import { UploadPlugin, UploadPluginOptions } from './plugins/interactions/upload.plugin';
 import { AssetResolverPlugin } from './plugins/core/asset-resolver.plugin';
 import type { MDxPlugin } from './core/plugin';
 import { EditorFactory } from '@itookit/common';
@@ -140,10 +141,13 @@ export interface MDxEditorFactoryConfig extends EditorOptions {
 // Asset Resolver 优先级要高，确保 DOM 更新后立即替换 URL，但在 Media 之后
 registerPlugin('core:asset-resolver', AssetResolverPlugin, { priority: 95 }); 
 registerPlugin('interaction:upload', UploadPlugin, { priority: 60 });
+// 注册插件（优先级要高于 UploadPlugin，这样先处理 HTML）
+registerPlugin('interaction:clipboard', ClipboardPlugin, { priority: 55 });
 
 // --- 工厂函数 ---
 const DEFAULT_PLUGINS: PluginConfig[] = [
   'core:asset-resolver', // 核心能力
+  'interaction:clipboard',  // 新增
   'interaction:upload',  // 交互能力
   'ui:toolbar',
   'ui:formatting',
