@@ -17,6 +17,13 @@ export interface CoreTitleBarPluginOptions {
   enableToggleEditMode?: boolean;
 
   /**
+   * 是否启用附件管理功能
+   * 如果为 true，工厂函数会自动加载 ui:asset-manager 插件
+   * @default true
+   */
+  enableAssetManager?: boolean;
+
+  /**
    * 切换侧边栏回调函数
    */
   onSidebarToggle?: (editor: MDxEditor) => void;
