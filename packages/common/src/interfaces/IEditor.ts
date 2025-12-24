@@ -91,7 +91,9 @@ export type EditorEvent =
     | 'modeChanged'       // 编辑/预览模式切换
     | 'blur'              // 失去焦点 (用于自动保存)
     | 'focus'             // 获得焦点
-    | 'optimisticUpdate'; // ✨ [新增] 乐观更新事件，用于通知外部：内容发生了微小变化（如 checkbox），建议立即刷新 UI 统计，但不需要触发昂贵的立即保存或重载。
+    | 'optimisticUpdate'  // ✨ [新增] 乐观更新事件，用于通知外部：内容发生了微小变化（如 checkbox），建议立即刷新 UI 统计，但不需要触发昂贵的立即保存或重载。
+    | 'saved'             // ✨ [新增] 保存成功
+    | 'saveError';        // ✨ [新增] 保存失败
 
 export type EditorEventCallback = (payload?: any) => void;
 
