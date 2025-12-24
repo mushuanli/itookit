@@ -271,7 +271,10 @@ export class VFSModuleEngine implements ISessionEngine {
     }
 
     async delete(ids: string[]): Promise<void> {
-        await Promise.all(ids.map(id => this.vfs.unlink(id, { recursive: true })));
+        // 旧实现: await Promise.all(ids.map(id => this.vfs.unlink(id, { recursive: true })));
+        
+        // 新实现: 使用原子批量删除
+        await this.vfsCore.deleteNodes(ids);
     }
 
     async updateMetadata(id: string, metadata: Record<string, any>): Promise<void> {

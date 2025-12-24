@@ -124,7 +124,8 @@ export enum VFSEventType {
   NODE_COPIED = 'node:copied',
   NODES_BATCH_UPDATED = 'nodes:batch_updated',
   // ✨ [新增] 批量移动事件
-  NODES_BATCH_MOVED = 'nodes:batch_moved' 
+  NODES_BATCH_MOVED = 'nodes:batch_moved',
+  NODES_BATCH_DELETED = 'nodes:batch_deleted' // ✨ [新增]
 }
 
 /** VFS 事件 */
