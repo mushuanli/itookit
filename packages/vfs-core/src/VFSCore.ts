@@ -369,6 +369,14 @@ export class VFSCore {
     await this.vfs.unlink(nodeId, { recursive });
   }
 
+  /**
+   * [新增] 批量删除节点 (原子操作)
+   */
+  async deleteNodes(nodeIds: string[]): Promise<number> {
+    this._ensureInitialized();
+    return await this.vfs.batchDelete(nodeIds);
+  }
+
     /**
      * [新增] 重命名节点 (便捷方法)
      * 本质上是在同一目录下移动

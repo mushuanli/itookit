@@ -13,6 +13,7 @@ export {
 } from './interfaces/IEditor';
 export { type EditorFactory } from './interfaces/IEditorFactory';
 export {type NavigationRequest} from './interfaces/INavigation';
+export type {DocumentInfo,ReferenceExtractionResult,IDocumentAnalyzer,GCResult,AnalysisContext} from './interfaces/IDocumentAnalyzer';
 
 export { IAutocompleteSource, type Suggestion } from './interfaces/IAutocompleteSource';
 

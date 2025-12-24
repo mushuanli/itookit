@@ -4,26 +4,31 @@
  */
 
 // 首先，导入需要用于创建单例的 VFSCore
-import { VFSCore } from './VFSCore.js';
+import { VFSCore,VFSConfig } from './VFSCore';
 
 // 导出 VFS 核心组件
-export { VFS } from './core/VFS.js';
-export { VFSCore } from './VFSCore.js';
+export { VFS } from './core/VFS';
+export { VFSCore,type VFSConfig } from './VFSCore';
 export { VFSModuleEngine } from './helper/VFSModuleEngine';
-export {BaseModuleService} from './helper/BaseModuleService.js';
+export {BaseModuleService} from './helper/BaseModuleService';
 
-export { PathResolver } from './core/PathResolver.js';
-export { MiddlewareRegistry } from './core/MiddlewareRegistry.js'; // [变更]
-export { EnhancedMiddlewareRegistry, MiddlewareHook } from './core/EnhancedMiddlewareRegistry.js'; // [变更]
-export { EventBus } from './core/EventBus.js';
-export { ModuleRegistry } from './core/ModuleRegistry.js';
-export { MiddlewareFactory } from './core/MiddlewareFactory.js'; // [变更]
-export { VNode, VNodeType } from './store/types.js';
+// 从 ModuleRegistry 文件导出 ModuleInfo 类型
+export type { ModuleInfo } from './core/ModuleRegistry';
+
+export { PathResolver } from './core/PathResolver';
+export { MiddlewareRegistry } from './core/MiddlewareRegistry'; // [变更]
+export { EnhancedMiddlewareRegistry, MiddlewareHook } from './core/EnhancedMiddlewareRegistry'; // [变更]
+export { EventBus } from './core/EventBus';
+export { ModuleRegistry } from './core/ModuleRegistry';
+export { MiddlewareFactory } from './core/MiddlewareFactory'; // [变更]
+export { VNode, VNodeType } from './store/types';
 
 // 导出 Middleware 相关组件 [变更]
-export { ContentMiddleware } from './middleware/base/ContentMiddleware.js';
-export { CompositeMiddleware } from './middleware/CompositeMiddleware.js';
-export { PlainTextMiddleware } from './middleware/PlainTextMiddleware.js';
+export { ContentMiddleware } from './middleware/base/ContentMiddleware';
+export { CompositeMiddleware } from './middleware/CompositeMiddleware';
+export { PlainTextMiddleware } from './middleware/PlainTextMiddleware';
+
+export { SystemGarbageCollector } from './maintenance/SystemGarbageCollector';
 
 // 导出核心类型和接口
 export {
@@ -40,7 +45,6 @@ export {
   type SearchQuery,
 } from './core/types.js';
 
-import {VFSConfig} from './VFSCore.js';
 /**
  * 创建并初始化一个 VFSCore 实例的便利函数。
  * 此函数封装了获取单例、异步初始化的标准流程。
@@ -86,7 +90,4 @@ export async function createVFSCore(
   return vfs;
 }
 
-// 单独从 VFSCore 文件导出 VFSConfig 类型
-export type { VFSConfig } from './VFSCore.js';
-// 从 ModuleRegistry 文件导出 ModuleInfo 类型
-export type { ModuleInfo } from './core/ModuleRegistry.js';
+
