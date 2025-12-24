@@ -389,6 +389,81 @@ export class VFS {
     }
   }
 
+/**
+   * [新增] 批量原子删除节点
+   * @returns 被实际删除的节点总数（包含子节点）
+   */
+  async batchDelete(nodeIds: string[]): Promise<number> {
+    if (!nodeIds || nodeIds.length === 0) return 0;
+
+    // 1. 开启大事务
+    const tx = await this.storage.beginTransaction([
+        VFS_STORES.VNODES, 
+        VFS_STORES.CONTENTS, 
+        VFS_STORES.NODE_TAGS, 
+        VFS_STORES.TAGS, 
+        VFS_STORES.SRS_ITEMS
+    ]);
+
+    const allDeletedNodeIds: Set<string> = new Set();
+
+    try {
+      for (const nodeId of nodeIds) {
+        // 防止重复处理（例如列表中既有父目录又有子文件）
+        if (allDeletedNodeIds.has(nodeId)) continue;
+
+        // 尝试加载节点
+        const vnode = await this.storage.loadVNode(nodeId, tx);
+        if (!vnode) continue; // 节点不存在则跳过
+
+        // 递归收集所有需要删除的节点（处理目录）
+        const nodesToDelete: VNode[] = [];
+        await this._collectNodesToDelete(vnode, nodesToDelete); // 复用现有的递归收集方法
+
+        for (const node of nodesToDelete) {
+          // 检查保护状态
+          if (node.metadata?.isProtected === true) {
+             throw new VFSError(VFSErrorCode.PERMISSION_DENIED, `Node '${node.name}' is protected and cannot be deleted.`);
+          }
+          
+          if (allDeletedNodeIds.has(node.nodeId)) continue;
+
+          // Middleware Hook: 删除前
+          await this.middlewares.runBeforeDelete(node, tx);
+
+          // 执行删除操作
+          if (node.contentRef) await this.storage.deleteContent(node.contentRef, tx);
+          await this.storage.cleanupNodeTags(node.nodeId, tx);
+          await this.storage.srsStore.deleteForNode(node.nodeId, tx);
+          await this.storage.deleteVNode(node.nodeId, tx);
+
+          // Middleware Hook: 删除后
+          await this.middlewares.runAfterDelete(node, tx);
+
+          allDeletedNodeIds.add(node.nodeId);
+        }
+      }
+
+      await tx.done;
+
+      // 发送批量事件
+      if (allDeletedNodeIds.size > 0) {
+        this.events.emit({
+          type: VFSEventType.NODES_BATCH_DELETED,
+          nodeId: null, 
+          path: null, 
+          timestamp: Date.now(),
+          data: { removedNodeIds: Array.from(allDeletedNodeIds) }
+        });
+      }
+
+      return allDeletedNodeIds.size;
+    } catch (error) {
+      if (error instanceof VFSError) throw error;
+      throw new VFSError(VFSErrorCode.TRANSACTION_FAILED, 'Failed to batch delete nodes', error);
+    }
+  }
+
   // ==================================================================================
   // 高级操作：移动、复制
   // ==================================================================================
