@@ -1,51 +1,48 @@
 /**
  * @file mdx/plugins/core/asset-resolver.plugin.ts
- * @desc 负责将 VFS 中的相对路径资源解析为浏览器可预览的 Blob URL
+ * @desc 负责将资源路径 (@asset/ 或 ./) 解析为 Blob URL
  */
-
 import type { MDxPlugin, PluginContext } from '../../core/plugin';
+import { resolveAssetDirectory, AssetConfigOptions } from '../../core/asset-helper';
+
+export interface AssetResolverPluginOptions extends AssetConfigOptions {}
 
 export class AssetResolverPlugin implements MDxPlugin {
   name = 'core:asset-resolver';
-  priority = 95; // 必须在 MediaPlugin 之前或之后，视情况而定。
-  // MediaPlugin 生成的 HTML 可能是 <img src="@asset/...">，所以我们需要处理 DOM。
-
+  priority = 95; 
   private createdUrls: Set<string> = new Set();
-  private context!: PluginContext;
+  private options: AssetResolverPluginOptions;
 
-  install(context: PluginContext): void {
-    this.context = context;
-
-    // 监听 DOM 更新事件 (Renderer 渲染完成后)
-    context.on('domUpdated', async ({ element }: { element: HTMLElement }) => {
-      await this.resolveAssets(element);
-    });
-
-    // 注册清理命令，使其可被 MDxEditor.pruneAssets 调用
-    context.registerCommand?.('pruneAssets', async (editor: any) => {
-        return await this.pruneUnusedAssets(editor);
-    });
-    
-    // 可以在工具栏或标题栏加一个按钮 (可选)
-    // context.registerTitleBarButton?.({ ... });
+  constructor(options: AssetResolverPluginOptions = {}) {
+      this.options = options;
   }
 
-  /**
-   * 扫描并替换 DOM 中的 VFS 路径
-   */
-  private async resolveAssets(root: HTMLElement): Promise<void> {
-    const engine = this.context.getSessionEngine ? this.context.getSessionEngine():undefined;
-    const currentNodeId = this.context.getCurrentNodeId();
+  install(context: PluginContext): void {
+    // [修复] 显式定义 payload 类型
+    context.on('domUpdated', async (payload: any) => {
+      const { element } = payload as { element: HTMLElement };
+      await this.resolveAssets(element, context);
+    });
+  }
+
+  private async resolveAssets(root: HTMLElement, context: PluginContext): Promise<void> {
+    const engine = context.getSessionEngine ? context.getSessionEngine() : undefined;
+    const currentNodeId = context.getCurrentNodeId();
     
     if (!engine || !currentNodeId) return;
 
-    // 获取当前节点，为了计算相对路径的基准 (虽然 VFS 设计中资源通常是 .filename/xxx)
-    const ownerNode = await engine.getNode(currentNodeId);
-    if (!ownerNode) return;
+    // ✨ 1. 解析资源根目录
+    const assetDirId = await resolveAssetDirectory(engine, currentNodeId, this.options);
+    if (!assetDirId) return;
 
-    // 1. 计算伴生目录的物理名称：.ownerName
-    // 例如 ownerNode.name = "test.md", sidecarDir = ".test.md"
-    const sidecarDirName = `.${ownerNode.name}`;
+    // 缓存目录下的文件列表，减少多次调用 getChildren
+    let dirAssets: any[] = [];
+    try {
+        dirAssets = await engine.getChildren(assetDirId);
+    } catch (e) {
+        // console.warn('AssetResolver: cannot list children of', assetDirId);
+        return;
+    }
 
     const elements = root.querySelectorAll<HTMLElement>('[src], [href]');
     
@@ -56,71 +53,44 @@ export class AssetResolverPlugin implements MDxPlugin {
 
       if (!rawUrl) continue;
 
-      // [核心修改] 拦截 @asset/ 前缀
+      // ✨ 2. 识别目标文件名
+      let targetFilename: string | null = null;
+
       if (rawUrl.startsWith('@asset/')) {
-          const filename = rawUrl.replace('@asset/', '');
-          
+          targetFilename = rawUrl.replace('@asset/', '');
+      } else if (rawUrl.startsWith('./')) {
+          // 仅在组件模式下 (target='./') 或明确支持相对路径时处理
+          // 这里为了通用性，如果找到文件就解析
+          targetFilename = rawUrl.substring(2);
+      } else if (!rawUrl.includes('/') && !rawUrl.startsWith('http') && !rawUrl.startsWith('data:') && !rawUrl.startsWith('#')) {
+           // 纯文件名
+           targetFilename = rawUrl;
+      }
+
+      if (targetFilename) {
           try {
-             // 2. 构造 VFS 真实路径
-             // 逻辑：当前文件父目录 + 伴生目录名 + 文件名
-             // ownerNode.path = "/docs/test.md"
-             // realPath = "/docs/.test.md/image.png"
-             
-             const parentPath = ownerNode.path.substring(0, ownerNode.path.lastIndexOf('/'));
-             // 处理根目录情况
-             const basePath = parentPath === '' ? '' : parentPath;
-             const fullVfsPath = `${basePath}/${sidecarDirName}/${filename}`;
+             // 3. 在缓存中查找文件节点
+             const targetNode = dirAssets.find(n => n.name === targetFilename && n.type === 'file');
 
-             // 3. 获取 Blob
-             // 这里我们需要 Engine 提供一个通过 Path 获取 Blob 的能力
-             // 如果 Engine 没有暴露 resolvePath，我们只能尝试遍历或者 hack
-             
-             // 假设我们在 VFSModuleEngine 中增加了 resolveAsset(ownerId, filename) 更好？
-             // 为了解耦，我们尝试扩展 Engine 接口，或者使用现有的 search/readContent
-             
-             // [Hack] 尝试直接通过 engine 读取 (如果 engine 支持路径读取最好，不支持则需先 resolve ID)
-             // 我们在 UploadPlugin 阶段其实知道 ID，但这里是渲染阶段，只有 URL。
-             
-             // 最佳实践：扩展 ISessionEngine 增加 getAssetContent(ownerId, filename)
-             // 但为了不改动太多接口，我们使用一个约定的 resolve 逻辑
-             
-             let assetContent: string | ArrayBuffer | null = null;
-             
-             // 尝试调用 engine.readContentByPath (如果存在)
-             if ('readContentByPath' in engine) {
-                 assetContent = await (engine as any).readContentByPath(fullVfsPath);
-             } 
-             // 否则尝试解析 ID (VFSModuleEngine 特有)
-             else if ('resolvePath' in engine) {
-                 const assetId = await (engine as any).resolvePath(fullVfsPath);
-                 if (assetId) {
-                     assetContent = await engine.readContent(assetId);
+             if (targetNode) {
+                 const assetContent = await engine.readContent(targetNode.id);
+                 if (assetContent) {
+                     const mimeType = this.guessMimeType(targetFilename!);
+                     const blob = new Blob([assetContent], { type: mimeType });
+                     const blobUrl = URL.createObjectURL(blob);
+                     
+                     this.createdUrls.add(blobUrl);
+                     
+                     el.setAttribute(srcAttr, blobUrl);
+                     el.setAttribute('data-original-src', rawUrl);
+                     
+                     if (el.tagName === 'IMG') {
+                         el.removeAttribute('srcset');
+                     }
                  }
              }
-
-             if (assetContent) {
-                 const mimeType = this.guessMimeType(filename);
-                 // 必须指定 MIME 类型，否则浏览器可能无法正确渲染图片
-                 const blob = new Blob([assetContent], { type: mimeType });
-                 const blobUrl = URL.createObjectURL(blob);
-                 
-                 this.createdUrls.add(blobUrl);
-                 
-                 el.setAttribute(srcAttr, blobUrl);
-                 el.setAttribute('data-original-src', rawUrl);
-                 
-                 // [Fix] 如果是 Image，可能需要重置 srcset 以防干扰
-                 if (el.tagName === 'IMG') {
-                     el.removeAttribute('srcset');
-                 }
-             } else {
-                 console.warn(`[AssetResolver] Asset not found: ${fullVfsPath}`);
-                 // 可以设置一个 404 图片
-                 // el.setAttribute(srcAttr, 'path/to/404.png');
-             }
-
           } catch (e) {
-              console.warn('[AssetResolver] Failed to resolve:', rawUrl, e);
+              // ignore
           }
       }
     }
@@ -133,80 +103,12 @@ export class AssetResolverPlugin implements MDxPlugin {
             'gif': 'image/gif', 'svg': 'image/svg+xml', 'webp': 'image/webp',
             'pdf': 'application/pdf', 'doc': 'application/msword',
             'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-	    'mp4': 'video/mp4', 'webm': 'video/webm'
+            'mp4': 'video/mp4', 'webm': 'video/webm'
         };
         return map[ext || ''] || 'application/octet-stream';
   }
 
-  /**
-   * 清理未引用的资源
-   * @returns 被删除的文件数量
-   */
-  private async pruneUnusedAssets(editor: any): Promise<number> {
-      const engine = this.context.getSessionEngine?.();
-      const currentNodeId = this.context.getCurrentNodeId();
-      if (!engine || !currentNodeId) return 0;
-
-      // [变更] 移除 confirm，交由调用者处理交互
-      // if (!confirm('...')) return 0;
-
-      try {
-          // 1. 获取资源目录 ID
-          let assetDirId: string | null = null;
-          if ('getAssetDirectoryId' in engine) {
-              assetDirId = await (engine as any).getAssetDirectoryId(currentNodeId);
-          }
-          
-          if (!assetDirId) {
-              console.log('[AssetResolver] No asset directory found.');
-              return 0;
-          }
-          
-          // 2. 获取目录下的所有文件
-          let assets: any[] = [];
-          if (engine.getChildren) {
-              assets = await engine.getChildren(assetDirId);
-          } else {
-              console.warn('[AssetResolver] Engine does not support getChildren.');
-              return 0;
-          }
-          
-          if (assets.length === 0) return 0;
-
-          // 3. 扫描 Markdown 文本中的引用
-          const content = editor.getText();
-          const usedAssets = new Set<string>();
-          const regex = /@asset\/([^\s)"]+)/g;
-          let match;
-          while ((match = regex.exec(content)) !== null) {
-              usedAssets.add(match[1]);
-          }
-          
-          // 4. 比较并删除
-          let deletedCount = 0;
-          const deletePromises: Promise<void>[] = [];
-
-          for (const asset of assets) {
-              if (asset.type === 'file' && !usedAssets.has(asset.name)) {
-                  deletePromises.push(engine.delete([asset.id]));
-                  deletedCount++;
-              }
-          }
-          
-          await Promise.all(deletePromises);
-          
-          // [变更] 移除 alert，返回数量
-          console.log(`[AssetResolver] Pruned ${deletedCount} unused assets.`);
-          return deletedCount;
-
-      } catch (e) {
-          console.error('[AssetResolver] Prune failed', e);
-          throw e; // 抛出异常供上层捕获
-      }
-  }
-
   destroy(): void {
-    // 清理 Blob URLs
     this.createdUrls.forEach(url => URL.revokeObjectURL(url));
     this.createdUrls.clear();
   }
