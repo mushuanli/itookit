@@ -7,6 +7,7 @@ import { MDxController } from './mdx/MDxController';
 import { NodeTemplates } from './templates/NodeTemplates';
 import { LayoutTemplates } from './templates/LayoutTemplates';
 import { escapeHTML, Modal } from '@itookit/common';
+import { AssetConfigOptions } from '@itookit/mdxeditor';
 
 /**
  * 包装 common Modal 为 Promise 形式
@@ -71,7 +72,9 @@ export class HistoryView {
     constructor(
         container: HTMLElement,
         onContentChange?: (id: string, content: string, type: 'user' | 'node') => void,
-        onNodeAction?: NodeActionCallback
+        onNodeAction?: NodeActionCallback,
+        // ✅ [新增] 接收附件目录上下文获取器
+        private getAttachmentContext?: () => Promise<{ id: string; pathPrefix: string } | null>
     ) {
         this.container = container;
         this.onContentChange = onContentChange;
@@ -136,35 +139,23 @@ export class HistoryView {
     }
 
     renderError(error: Error) {
-    // 创建可关闭的错误横幅
-    const existingBanner = this.container.querySelector('.llm-ui-error-banner');
-    if (existingBanner) {
-        existingBanner.remove();
-    }
-    
-    const banner = document.createElement('div');
-    banner.className = 'llm-ui-error-banner';
-    banner.innerHTML = `
-        <div class="llm-ui-error-banner__content">
-            <span class="llm-ui-error-banner__icon">⚠️</span>
-            <span class="llm-ui-error-banner__message">${escapeHTML(error.message)}</span>
-            <button class="llm-ui-error-banner__close" title="Dismiss">×</button>
-        </div>
-    `;
-    
-    // 绑定关闭按钮
-    banner.querySelector('.llm-ui-error-banner__close')?.addEventListener('click', () => {
-        banner.remove();
-    });
-    
-    // 5秒后自动消失（但保留严重错误）
-    const isSerious = error.message.includes('401') || error.message.includes('API key');
-    if (!isSerious) {
-        setTimeout(() => banner.remove(), 5000);
-    }
-    
-    this.container.insertBefore(banner, this.container.firstChild);
-    this.scrollToBottom(true);
+        const existingBanner = this.container.querySelector('.llm-ui-error-banner');
+        if (existingBanner) existingBanner.remove();
+        
+        const banner = document.createElement('div');
+        banner.className = 'llm-ui-error-banner';
+        banner.innerHTML = `
+            <div class="llm-ui-error-banner__content">
+                <span class="llm-ui-error-banner__icon">⚠️</span>
+                <span class="llm-ui-error-banner__message">${escapeHTML(error.message)}</span>
+                <button class="llm-ui-error-banner__close" title="Dismiss">×</button>
+            </div>
+        `;
+        banner.querySelector('.llm-ui-error-banner__close')?.addEventListener('click', () => banner.remove());
+        const isSerious = error.message.includes('401') || error.message.includes('API key');
+        if (!isSerious) setTimeout(() => banner.remove(), 5000);
+        this.container.insertBefore(banner, this.container.firstChild);
+        this.scrollToBottom(true);
     }
 
     // ================================================================
@@ -300,10 +291,25 @@ export class HistoryView {
         }
     }
 
-    private initUserBubble(wrapper: HTMLElement, group: SessionGroup) {
+    private async initUserBubble(wrapper: HTMLElement, group: SessionGroup) {
         const mountPoint = wrapper.querySelector(`#user-mount-${group.id}`) as HTMLElement;
+        
+        // ✅ 1. 动态获取附件配置
+        let assetConfig: AssetConfigOptions | undefined;
+        if (this.getAttachmentContext) {
+            const ctx = await this.getAttachmentContext();
+            if (ctx) {
+                assetConfig = {
+                    targetAttachmentDirectoryId: ctx.id,
+                    pathStrategy: (filename) => `${ctx.pathPrefix}${filename}`,
+                    uploadLimit: { maxSize: 20 * 1024 * 1024 }
+                };
+            }
+        }
+
         const controller = new MDxController(mountPoint, group.content || '', {
             readOnly: true,
+            assetConfig, // ✅ 传入配置
             onChange: (text) => {
                 this.onContentChange?.(group.id, text, 'user');
                 const previewEl = wrapper.querySelector('.llm-ui-header-preview');
@@ -542,7 +548,7 @@ export class HistoryView {
         }
     }
 
-    private bindNodeEvents(element: HTMLElement, node: ExecutionNode, mountPoints: any) {
+    private async bindNodeEvents(element: HTMLElement, node: ExecutionNode, mountPoints: any) {
         const editBtn = element.querySelector('[data-action="edit"]');
         const copyBtn = element.querySelector('[data-action="copy"]');
         const collapseBtn = element.querySelector('[data-action="collapse"]');
@@ -605,10 +611,24 @@ export class HistoryView {
         if (mountPoints.output) {
             // ✅ 判断是否为正在运行的流 (running 或 queued)
             const isStreamingNode = node.status === 'running' || node.status === 'queued';
+            
+            // ✅ 1. 动态获取附件配置 (同上)
+            let assetConfig: AssetConfigOptions | undefined;
+            if (this.getAttachmentContext) {
+                const ctx = await this.getAttachmentContext();
+                if (ctx) {
+                    assetConfig = {
+                        targetAttachmentDirectoryId: ctx.id,
+                        pathStrategy: (filename) => `${ctx.pathPrefix}${filename}`,
+                        uploadLimit: { maxSize: 20 * 1024 * 1024 }
+                    };
+                }
+            }
 
             const controller = new MDxController(mountPoints.output, node.data.output || '', {
                 readOnly: true,
-                streaming: isStreamingNode, // ✨ 传递参数：如果是流式，则 defaultCollapsed = true
+                streaming: isStreamingNode,
+                assetConfig, // ✅ 传入配置
                 onChange: (text) => {
                     if (controller.isEditing()) {
                         this.onContentChange?.(effectiveId, text, 'node');

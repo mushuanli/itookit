@@ -90,6 +90,44 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     // ================================================================
+    // 附件目录管理 (核心逻辑)
+    // ================================================================
+
+    /**
+     * 获取或创建当前会话的附件目录 (./attach/)
+     */
+    private async ensureAttachmentDir(): Promise<{ id: string; pathPrefix: string } | null> {
+        if (!this.options.nodeId) return null;
+
+        try {
+            // 1. 获取当前 .chat 文件的父目录
+            const chatNode = await this.engine.getNode(this.options.nodeId);
+            if (!chatNode || !chatNode.parentId) return null;
+
+            const parentId = chatNode.parentId;
+            const attachDirName = 'attach';
+
+            // 2. 检查 attach 目录是否存在
+            const children = await this.engine.getChildren(parentId);
+            let attachNode = children.find(c => c.name === attachDirName && c.type === 'directory');
+
+            // 3. 不存在则创建
+            if (!attachNode) {
+                attachNode = await this.engine.createDirectory(attachDirName, parentId);
+            }
+
+            return { 
+                id: attachNode.id, 
+                // 相对路径前缀 (用于 Markdown 引用)
+                pathPrefix: `./${attachDirName}/` 
+            };
+        } catch (e) {
+            console.error('[LLMWorkspaceEditor] Failed to ensure attachment dir:', e);
+            return null;
+        }
+    }
+
+    // ================================================================
     // 初始化
     // ================================================================
 
@@ -130,11 +168,13 @@ export class LLMWorkspaceEditor implements IEditor {
         const historyEl = this.container.querySelector('#llm-ui-history') as HTMLElement;
         const inputEl = this.container.querySelector('#llm-ui-input') as HTMLElement;
 
-        // 初始化历史视图
+        // 初始化历史视图，传入获取附件上下文的回调
         this.historyView = new HistoryView(
             historyEl,
             (id, content, type) => this.handleContentChange(id, content, type),
-            (action: NodeAction, nodeId: string) => this.handleNodeAction(action, nodeId)
+            (action: NodeAction, nodeId: string) => this.handleNodeAction(action, nodeId),
+            // ✅ [新增] Context Getter
+            () => this.ensureAttachmentDir()
         );
 
         // ✅ 修复：获取初始执行器列表
@@ -184,6 +224,11 @@ export class LLMWorkspaceEditor implements IEditor {
         this.chatInput = new ChatInput(inputEl, {
             onSend: (text, files, agentId) => this.handleUserSend(text, files, agentId),
             onStop: () => this.sessionManager.abort(),
+            // ✅ [新增] 限制配置
+            uploadConfig: {
+                maxSize: 20 * 1024 * 1024, // 20MB
+                accept: ['image/*', '.pdf', '.txt', '.md', '.json', '.csv', '.doc', '.docx']
+            },
             initialAgents 
         });
 
@@ -794,7 +839,11 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     /**
-     * 处理用户发送消息
+     * ✅ [审查 & 修正] 处理用户发送消息
+     * 变更点：
+     * 1. 使用 ensureAttachmentDir 获取 ./attach/ 目录 ID
+     * 2. 上传文件到该 ID
+     * 3. 构造 ChatFile 时 path 加上 ./attach/ 前缀
      */
     private async handleUserSend(text: string, files: File[], agentId?: string): Promise<void> {
         if (!this.currentSessionId) {
@@ -802,74 +851,96 @@ export class LLMWorkspaceEditor implements IEditor {
             return;
         }
 
-        console.log('[LLMWorkspaceEditor] User sending message...');
-        this.chatInput.setLoading(true); // 立即锁定输入框
+        this.chatInput.setLoading(true);
         
         try {
-            // ✨ 将 File[] 转换为 ChatFile[]，并执行相对路径上传
             const chatFiles: ChatFile[] = [];
-            const parentId = await this.getCurrentDirectoryId();
+            
+            // 1. 获取附件目录上下文
+            // 如果没有文件，跳过目录检查优化性能
+            let attachContext = null;
+            if (files.length > 0) {
+                attachContext = await this.ensureAttachmentDir();
+                if (!attachContext) {
+                    throw new Error('无法创建附件目录 ./attach/');
+                }
+            }
 
-            if (files.length > 0 && parentId) {
+            if (files.length > 0 && attachContext) {
                 for (const file of files) {
-                    // 1. 生成防冲突文件名
-                    const safeName = `${Date.now()}-${file.name}`;
+                    // 2. 生成防冲突文件名
+                    const timestamp = Date.now();
+                    const lastDotIndex = file.name.lastIndexOf('.');
+                    
+                    let nameWithoutExt = file.name;
+                    let extension = '';
+
+                    if (lastDotIndex !== -1) {
+                        nameWithoutExt = file.name.substring(0, lastDotIndex);
+                        extension = file.name.substring(lastDotIndex); // 包含点，例如 ".png"
+                    }
+
+                    // 清理文件名中的特殊字符，只保留字母数字、横杠和下划线
+                    const safeBaseName = nameWithoutExt.replace(/[^a-zA-Z0-9-_]/g, '_');
+                    
+                    // 组合：时间戳-原名(清理后).扩展名
+                    const safeName = `${timestamp}-${safeBaseName}${extension}`; 
+                    
                     const arrayBuffer = await file.arrayBuffer();
                     
-                    // 2. 上传到当前目录 (parentId)
-                    // 使用 engine.createFile 直接创建，而不是 createAsset
-                    const node = await this.engine.createFile(safeName, parentId, arrayBuffer);
+                    // 3. 上传到 ./attach/ 目录 (使用 attachContext.id)
+                    const node = await this.engine.createFile(safeName, attachContext.id, arrayBuffer);
                     
-                    // 3. 构建 ChatFile 对象
+                    // 4. 构建 ChatFile
                     chatFiles.push({
                         name: file.name,
                         type: file.type,
                         size: file.size,
-                        // ✨ 关键：path 为 './filename'
-                        path: `./${node.name}`, 
-                        fileRef: file // 传递给 Kernel 执行时使用
+                        // ✨ 关键变更：路径变为 ./attach/filename
+                        // 这样 SessionRegistry 持久化后，Markdown 渲染时能正确找到位置
+                        path: `${attachContext.pathPrefix}${node.name}`, 
+                        fileRef: file // 传递给 Kernel 用于执行
                     });
                 }
             }
 
-            // 4. 发送给 SessionManager
+            // 5. 发送给 SessionManager
+            // 审查：SessionManager -> SessionRegistry -> Kernel/Persistence
+            // ChatFile[] 会被透传。Persistence 存储 path 字符串，Kernel 使用 fileRef。
+            // 逻辑正确。
             await this.sessionManager.runUserQuery(text, chatFiles, agentId || 'default');
 
         } catch (error: any) {
             console.error('[LLMWorkspaceEditor] Send failed:', error);
             this.historyView.renderError(error);
-            this.chatInput.setLoading(false); // 仅在同步错误时手动解锁
-        }
-    }
-
-    // 辅助方法：获取当前会话文件的父目录 ID
-    private async getCurrentDirectoryId(): Promise<string | null> {
-        if (!this.options.nodeId) return null;
-        try {
-            const node = await this.engine.getNode(this.options.nodeId);
-            return node ? node.parentId : null;
-        } catch {
-            return null;
+            this.chatInput.setLoading(false);
         }
     }
 
     /**
-     * ✅ [新增] 打开附件管理器
+     * ✅ [修正] 打开附件管理器
+     * 变更：打开的是 ./attach/ 目录，而不是根目录
      */
     private async openAssetManager() {
         if (!this.options.nodeId) return;
 
-        // 配置对象
-        const assetOptions: AssetConfigOptions = {
-            targetAttachmentDirectoryId: './',
-            
-            // [新增] 路径策略：因为我们是在根目录下混用，使用 relative 更符合直觉
-            // 如果你希望在 Markdown 中看到 ![img](./img.png) 而不是 @asset/img.png
-            pathStrategy: 'relative', 
+        // 1. 获取附件目录 ID
+        const attachContext = await this.ensureAttachmentDir();
+        if (!attachContext) {
+            Toast.error('无法访问附件目录');
+            return;
+        }
 
-            // [新增] 视图过滤：只显示多媒体文件，隐藏 .chat, .json 等
+        // 2. 配置选项
+        const assetOptions: AssetConfigOptions = {
+            targetAttachmentDirectoryId: attachContext.id, // 指向 ./attach/
+            
+            // 生成 Markdown 链接时的策略：./attach/filename
+            pathStrategy: (filename) => `${attachContext.pathPrefix}${filename}`,
+
             viewFilter: {
-                extensions: ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.pdf', '.docx', '.txt', '.md']
+                // 排除系统文件，虽然在 attach 目录里应该都是纯附件
+                excludePattern: /^\./ 
             }
         };
 
@@ -885,10 +956,8 @@ export class LLMWorkspaceEditor implements IEditor {
         // 我们这里将其桥接到 SessionManager 和 ChatInput
         const mockEditorAdapter = {
             // 获取全文：用于判断附件是否“已引用”
-            getText: () => {
-                // 返回 Markdown 格式的完整会话记录
-                return this.sessionManager.exportToMarkdown();
-            },
+            getText: () => this.sessionManager.exportToMarkdown(),
+
             
             // 获取 EditorView：AssetManagerUI 用它来 dispatch insert 操作
             // 我们这里返回 null，并拦截 insertText 调用（如果 AssetManagerUI 支持的话）
@@ -907,9 +976,7 @@ export class LLMWorkspaceEditor implements IEditor {
             // *解决方案*: 
             // 我们构造一个伪造的 view 对象，只包含 dispatch 方法
             getEditorViewMock: () => ({
-                state: {
-                    selection: { main: { from: 0, to: 0 } }
-                },
+                state: { selection: { main: { from: 0, to: 0 } } },
                 dispatch: (transaction: any) => {
                     if (transaction.changes && transaction.changes.insert) {
                         this.chatInput.insertAtCursor(transaction.changes.insert);
@@ -930,7 +997,7 @@ export class LLMWorkspaceEditor implements IEditor {
         (mockEditorAdapter as any).getEditorView = (mockEditorAdapter as any).getEditorViewMock;
 
         // 3. 显示 UI
-        await ui.show(assetDirId);
+        await ui.show(attachContext.id);
     }
 
     // ================================================================

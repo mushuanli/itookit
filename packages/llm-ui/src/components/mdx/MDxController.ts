@@ -28,11 +28,15 @@ export class MDxController {
     
     // ✅ 新增：批量缓冲
     private contentSnapshot: string = '';
+    
+    // ✅ [新增] 接收外部资源配置
+    private assetConfig?: AssetConfigOptions;
 
     constructor(container: HTMLElement, initialContent: string, options?: { 
         readOnly?: boolean,
         onChange?: (text: string) => void,
-        streaming?: boolean // ✨ 新增参数
+        streaming?: boolean,
+        assetConfig?: AssetConfigOptions // 新增参数
     }) {
         this.container = container;
         this.currentContent = initialContent;
@@ -41,6 +45,7 @@ export class MDxController {
         
         // ✅ 获取流式状态，默认为 false
         this.isStreamingInit = options?.streaming ?? false;
+        this.assetConfig = options?.assetConfig;
         
         this.readyPromise = new Promise((resolve, reject) => {
             this.readyResolve = resolve;
@@ -62,8 +67,9 @@ export class MDxController {
         console.log('[MDxController] init() started');
         
         try {
-            // ✅ [核心配置] 统一资源管理策略
-            const assetConfig: AssetConfigOptions = { 
+            // ✅ 使用传入的配置，或者回退到默认 (默认 ./ 表示当前目录)
+            // 注意：如果上层没有传入具体的 attach 目录 ID，这里默认也是安全的
+            const finalAssetConfig: AssetConfigOptions = this.assetConfig || { 
                 targetAttachmentDirectoryId: './',
                 pathStrategy: 'relative', // 使用 ./filename，兼容性更好
                 
@@ -109,11 +115,10 @@ export class MDxController {
                     'codeblock-controls': { 
                         defaultCollapsed: !this.isStreamingInit 
                     },
-                    // ✨ [新增] 注入相对路径配置
-                    'ui:asset-manager': assetConfig,
-                    'interaction:upload': assetConfig,
-                    'core:asset-resolver': assetConfig,
-                    // TitleBar 开启附件管理按钮
+                    // ✅ 将配置分发给各插件
+                    'ui:asset-manager': finalAssetConfig,
+                    'interaction:upload': finalAssetConfig,
+                    'core:asset-resolver': finalAssetConfig,
                     'core:titlebar': {
                         enableAssetManager: true
                     }

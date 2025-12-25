@@ -59,9 +59,11 @@ export class AssetResolverPlugin implements MDxPlugin {
       if (rawUrl.startsWith('@asset/')) {
           targetFilename = rawUrl.replace('@asset/', '');
       } else if (rawUrl.startsWith('./')) {
-          // 仅在组件模式下 (target='./') 或明确支持相对路径时处理
-          // 这里为了通用性，如果找到文件就解析
-          targetFilename = rawUrl.substring(2);
+          // ✅ [修复] 兼容路径中包含目录的情况 (e.g. ./attach/image.png)
+          // 如果我们的 assetDirId 已经指向了 ./attach 目录，
+          // 我们只需要提取最后的文件名部分。
+          const parts = rawUrl.split('/');
+          targetFilename = parts[parts.length - 1]; 
       } else if (!rawUrl.includes('/') && !rawUrl.startsWith('http') && !rawUrl.startsWith('data:') && !rawUrl.startsWith('#')) {
            // 纯文件名
            targetFilename = rawUrl;
