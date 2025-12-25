@@ -5,6 +5,12 @@ export interface ChatInputOptions {
     onStop: () => void;
     onExecutorChange?: (executorId: string) => void;
     initialAgents?: ExecutorOption[]; 
+
+    /** [新增] 上传限制配置 */
+    uploadConfig?: {
+        accept?: string[]; // e.g. ['.pdf', 'image/*']
+        maxSize?: number;  // bytes, default 10MB
+    };
 }
 
 export interface ExecutorOption {
@@ -26,7 +32,9 @@ export class ChatInput {
     
     private loading = false;
     private files: File[] = [];
-    //private executors: ExecutorOption[] = [];
+
+    // 默认 10MB
+    private readonly DEFAULT_MAX_SIZE = 10 * 1024 * 1024;
 
     constructor(private container: HTMLElement, private options: ChatInputOptions) {
         this.render();
@@ -44,6 +52,8 @@ export class ChatInput {
 
     private render() {
         // 使用 BEM 结构重构 DOM
+        // 1. 处理 accept 属性
+        const acceptAttr = this.options.uploadConfig?.accept?.join(',') || '';
         this.container.innerHTML = `
             <div class="llm-input">
                 <!-- 左侧：执行器选择 -->
@@ -78,7 +88,11 @@ export class ChatInput {
                     </button>
                 </div>
 
-                <input type="file" multiple style="display:none;" id="llm-ui-hidden-file-input">
+                <!-- 隐藏的文件输入框，应用 accept 属性 -->
+                <input type="file" multiple 
+                       accept="${acceptAttr}"
+                       style="display:none;" 
+                       id="llm-ui-hidden-file-input">
             </div>
         `;
 
@@ -117,7 +131,8 @@ export class ChatInput {
         this.attachBtn.addEventListener('click', () => this.fileInput.click());
         this.fileInput.addEventListener('change', () => {
             if (this.fileInput.files) {
-                this.addFiles(Array.from(this.fileInput.files));
+                // [修改] 调用处理函数进行校验
+                this.handleFilesSelection(Array.from(this.fileInput.files));
                 this.fileInput.value = ''; // Reset
             }
         });
@@ -126,6 +141,32 @@ export class ChatInput {
         this.executorSelect.addEventListener('change', () => {
             this.options.onExecutorChange?.(this.executorSelect.value);
         });
+    }
+
+    /**
+     * [新增] 处理文件选择并校验
+     */
+    private handleFilesSelection(files: File[]) {
+        const maxSize = this.options.uploadConfig?.maxSize ?? this.DEFAULT_MAX_SIZE;
+        const validFiles: File[] = [];
+
+        for (const file of files) {
+            // 校验大小
+            if (file.size > maxSize) {
+                const sizeMB = (maxSize / (1024 * 1024)).toFixed(1);
+                console.warn(`File ${file.name} is too large. Max: ${sizeMB}MB`);
+                // 这里可以引入 Toast，如果环境支持
+                alert(`文件 "${file.name}" 超过大小限制 (${sizeMB}MB)`);
+                continue; 
+            }
+            
+            // 校验类型 (input accept 已经做了基础过滤，这里可不做深度校验)
+            validFiles.push(file);
+        }
+
+        if (validFiles.length > 0) {
+            this.addFiles(validFiles);
+        }
     }
 
     /**
@@ -244,12 +285,31 @@ export class ChatInput {
         return this.executorSelect?.value || 'default';
     }
 
-    // ✨ [新增] 设置输入内容
     setInput(text: string) {
         if (this.textarea) {
             this.textarea.value = text;
-            // 触发高度调整
             this.textarea.dispatchEvent(new Event('input'));
         }
+    }
+
+    // [新增] 获取当前值
+    getValue(): string {
+        return this.textarea ? this.textarea.value : '';
+    }
+    
+    // [新增] 在光标处插入文本 (用于 AssetManager 插入)
+    insertAtCursor(text: string) {
+        if (!this.textarea) return;
+        
+        const start = this.textarea.selectionStart;
+        const end = this.textarea.selectionEnd;
+        const current = this.textarea.value;
+        
+        const newValue = current.substring(0, start) + text + current.substring(end);
+        
+        this.textarea.value = newValue;
+        this.textarea.selectionStart = this.textarea.selectionEnd = start + text.length;
+        this.textarea.focus();
+        this.textarea.dispatchEvent(new Event('input'));
     }
 }

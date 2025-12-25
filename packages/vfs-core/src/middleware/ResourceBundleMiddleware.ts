@@ -141,10 +141,6 @@ export class ResourceBundleMiddleware implements IVFSMiddleware {
     return path.substring(lastSlash + 1);
   }
 
-  private escapeRegExp(string: string) {
-    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); 
-  }
-
   private generateId(): string {
       return `node_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   }

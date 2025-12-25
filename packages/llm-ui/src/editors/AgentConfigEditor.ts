@@ -6,7 +6,7 @@ import {
     Heading,
     UnifiedSearchResult
 } from '@itookit/common';
-import { LLMModel } from '@itookit/llm-driver';
+import { LLMConnection,LLMModel } from '@itookit/llm-driver';
 import { AgentType, AgentDefinition, IAgentService } from '@itookit/llm-engine';
 
 /**
@@ -379,7 +379,7 @@ export class AgentConfigEditor implements IEditor {
     /**
      * 辅助方法：根据模型ID在所有连接中查找模型信息
      */
-    private findModelById(modelIdentifier: string, connections: any[]): LLMModel | null {
+    private findModelById(modelIdentifier: string, connections: LLMConnection[]): LLMModel | null {
         if (!modelIdentifier) return null;
         for (const conn of connections) {
             const models = conn.availableModels || [];

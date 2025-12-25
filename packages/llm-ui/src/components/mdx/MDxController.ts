@@ -1,5 +1,5 @@
 // @file llm-ui/components/mdx/MDxController.ts
-import { createMDxEditor, MDxEditor } from '@itookit/mdxeditor';
+import { AssetConfigOptions,createMDxEditor, MDxEditor } from '@itookit/mdxeditor';
 
 export class MDxController {
     // ✨ [修改] 类型定义放宽为 IEditor，以便使用通用接口
@@ -62,6 +62,28 @@ export class MDxController {
         console.log('[MDxController] init() started');
         
         try {
+            // ✅ [核心配置] 统一资源管理策略
+            const assetConfig: AssetConfigOptions = { 
+                targetAttachmentDirectoryId: './',
+                pathStrategy: 'relative', // 使用 ./filename，兼容性更好
+                
+                // [新增] 限制配置
+                uploadLimit: {
+                    maxSize: 10 * 1024 * 1024, // 10MB
+                    accept: [
+                        'image/*', 
+                        '.pdf', '.txt', '.md', '.json', '.csv', 
+                        '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx'
+                    ]
+                },
+                
+                // [新增] 视图过滤 (如果在气泡中打开 Asset Manager)
+                viewFilter: {
+                    excludePattern: /^\./, // 隐藏点文件
+                    // extensions: [...] // 可选：只允许查看特定类型
+                }
+            };
+
             this.editor = await createMDxEditor(this.container, {
                 initialContent: this.currentContent,
                 initialMode: this.isReadOnly ? 'render' : 'edit',
@@ -74,7 +96,11 @@ export class MDxController {
                     'task-list',
                     'media',
                     'svg',
-                    'ui:toolbar' 
+                    'ui:toolbar',
+                    // ✨ [新增] 附件管理与上传
+                    'ui:asset-manager',
+                    'interaction:upload',
+                    'core:asset-resolver'
                 ],
                 defaultPluginOptions:{
                     // ✅ 动态控制 defaultCollapsed
@@ -82,6 +108,14 @@ export class MDxController {
                     // 否则(历史记录/编辑)，则展开(false)
                     'codeblock-controls': { 
                         defaultCollapsed: !this.isStreamingInit 
+                    },
+                    // ✨ [新增] 注入相对路径配置
+                    'ui:asset-manager': assetConfig,
+                    'interaction:upload': assetConfig,
+                    'core:asset-resolver': assetConfig,
+                    // TitleBar 开启附件管理按钮
+                    'core:titlebar': {
+                        enableAssetManager: true
                     }
                 }
             }) as MDxEditor;
@@ -172,12 +206,9 @@ export class MDxController {
         try {
             // 提示浏览器优化渲染
             this.container.style.contain = 'content';
-            
             await this.editor.setStreamingText(this.currentContent);
-            
             this.contentSnapshot = this.currentContent;
             this.lastRenderTime = Date.now();
-            
         } catch (e) {
             console.error('[MDxController] Render failed:', e);
         } finally {

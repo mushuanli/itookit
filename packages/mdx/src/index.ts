@@ -28,6 +28,8 @@ export type {
   ProcessResult
 } from './core/processor';
 
+export {type AssetConfigOptions,resolveAssetDirectory} from './core/asset-helper';
+
 export { CoreEditorPlugin } from './plugins/core/core-editor.plugin';
 export type { CoreEditorPluginOptions } from './plugins/core/core-editor.plugin';
 
@@ -69,6 +71,8 @@ export type { ToolbarPluginOptions } from './plugins/ui/toolbar.plugin';
 
 export { FormattingPlugin } from './plugins/ui/formatting.plugin';
 export type { FormattingPluginOptions } from './plugins/ui/formatting.plugin';
+
+export {AssetManagerUI} from './plugins/ui/asset-manager.ui';
 
 export { AutocompletePlugin } from './plugins/autocomplete/autocomplete.plugin';
 export type { AutocompletePluginOptions, AutocompleteProvider, AutocompleteSourceConfig } from './plugins/autocomplete/autocomplete.plugin';

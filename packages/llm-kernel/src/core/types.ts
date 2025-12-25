@@ -26,6 +26,7 @@ export type OrchestrationMode =
  */
 export type NodeStatus = 
     | 'pending' 
+    | 'queued'        // ✅ 新增：对应任务队列状态
     | 'running' 
     | 'success' 
     | 'failed' 

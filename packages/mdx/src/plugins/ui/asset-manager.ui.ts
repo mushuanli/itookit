@@ -4,6 +4,7 @@
  */
 import { Toast, type ISessionEngine, type EngineNode } from '@itookit/common';
 import type { MDxEditor } from '../../editor/editor';
+import { isAssetVisible, generateAssetPath, AssetConfigOptions } from '../../core/asset-helper';
 
 interface AssetDisplayItem {
     node: EngineNode;
@@ -22,7 +23,8 @@ export class AssetManagerUI {
 
     constructor(
         private engine: ISessionEngine,
-        private editor: MDxEditor 
+        private editor: MDxEditor,
+        private options: AssetConfigOptions = {} // 注入配置
     ) {}
 
     /**
@@ -70,7 +72,10 @@ export class AssetManagerUI {
              return;
         }
         
-        const assetFiles = files.filter(f => f.type === 'file');
+        const assetFiles = files.filter(f => {
+            if (f.type !== 'file') return false;
+            return isAssetVisible(f.name, this.options.viewFilter);
+        });
 
         if (assetFiles.length === 0) {
             this.listContainer.innerHTML = '<div class="mdx-empty-state">暂无附件</div>';
@@ -182,11 +187,12 @@ export class AssetManagerUI {
             insertBtn.className = 'mdx-btn';
             insertBtn.textContent = '插入';
             insertBtn.onclick = () => {
-                // 默认使用 @asset/ 语法，它由 Resolver 统一处理，兼容性最好
-                // 如果需要支持 ./ 语法，可以通过配置注入或简单的判断
+                // [修改] 使用统一的路径生成策略
+                const path = generateAssetPath(item.node.name, this.options.pathStrategy);
+                
                 const text = this.isImage(item.node.name) 
-                    ? `![${item.node.name}](@asset/${item.node.name})`
-                    : `[${item.node.name}](@asset/${item.node.name})`;
+                    ? `![${item.node.name}](${path})`
+                    : `[${item.node.name}](${path})`;
                 this.insertText(text);
                 this.close();
             };

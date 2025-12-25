@@ -1,8 +1,8 @@
 // @file: llm-ui/LLMWorkspaceEditor.ts
 
 import { 
-    IEditor, EditorOptions,EditorHostContext, EditorEvent, EditorEventCallback, 
-    escapeHTML
+    IEditor, EditorOptions, EditorHostContext, EditorEvent, EditorEventCallback, 
+    escapeHTML,Toast
 } from '@itookit/common';
 import { HistoryView } from './components/HistoryView';
 import { ChatInput, ExecutorOption } from './components/ChatInput';
@@ -16,8 +16,11 @@ import {
     ExecutionNode,
     OrchestratorEvent,
     RegistryEvent,
-    SessionSnapshot  // ✅ 新增导入
+    SessionSnapshot,
+    ChatFile // ✅ 引入新类型
 } from '@itookit/llm-engine';
+import { AssetConfigOptions,AssetManagerUI,resolveAssetDirectory } from '@itookit/mdxeditor'; // 路径需根据实际情况调整，或从包导出
+
 import { NodeAction } from './core/types';
 
 export interface LLMEditorOptions extends EditorOptions {
@@ -208,8 +211,8 @@ export class LLMWorkspaceEditor implements IEditor {
             
             if (agentId && this.hostContext?.navigate) {
                 this.hostContext.navigate({
-                    target: 'agents', // 对应 Agent Workspace 的 ID
-                    resourceId: agentId // 打开特定 Agent 文件
+                    target: 'agents', 
+                    resourceId: agentId 
                 });
             }
         });
@@ -249,7 +252,7 @@ export class LLMWorkspaceEditor implements IEditor {
         }
 
     // ✅ 步骤 2：绑定会话并获取快照（此时还没有订阅事件）
-    const snapshot = await this.sessionManager.bindSession(this.options.nodeId, sessionId);
+        const snapshot = await this.sessionManager.bindSession(this.options.nodeId, sessionId);
 
         // 加载 Manifest 获取标题
         try {
@@ -272,9 +275,9 @@ export class LLMWorkspaceEditor implements IEditor {
     // ✅ 步骤 5：渲染完成后，再订阅增量事件
     // 此时 renderedSessionIds 已经包含了所有历史消息的 ID
     // 后续的 session_start 事件如果重复，会被 appendSessionGroup 过滤
-    this.sessionEventUnsubscribe = this.sessionManager.onEvent(
-        (event) => this.handleSessionEvent(event)
-    );
+        this.sessionEventUnsubscribe = this.sessionManager.onEvent(
+            (event) => this.handleSessionEvent(event)
+        );
         // ✅ 根据快照状态更新 UI
         this.updateStatusFromSnapshot(snapshot);
 
@@ -347,39 +350,38 @@ export class LLMWorkspaceEditor implements IEditor {
                     <button class="llm-workspace-titlebar__btn" id="llm-btn-sidebar" title="Toggle Sidebar">
                     <i class="fas fa-bars"></i>
                     </button>
-                    
                     <div class="llm-workspace-titlebar__sep"></div>
-                    
                     <input type="text" class="llm-workspace-titlebar__input" id="llm-title-input" 
                            value="${escapeHTML(this.currentTitle)}" placeholder="Untitled Chat" />
-                    
                     <!-- 状态指示器 -->
                     <div class="llm-workspace-status" id="llm-status-indicator">
                         <span class="llm-workspace-status__dot"></span>
                         <span class="llm-workspace-status__text">Ready</span>
                     </div>
                 </div>
-
                 <div class="llm-workspace-titlebar__right">
                     <!-- 后台运行指示器 -->
                     <div class="llm-workspace-titlebar__bg-indicator" id="llm-bg-indicator" style="display:none;">
                         <span class="llm-bg-badge">2 running</span>
                     </div>
-                    
+                    <button class="llm-workspace-titlebar__btn" id="llm-btn-assets" title="Manage Attachments">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
+                        </svg>
+                    </button>
+
                     <button class="llm-workspace-titlebar__btn" id="llm-btn-collapse" title="Collapse/Expand All">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <polyline points="4 14 10 14 10 20"></polyline>
                             <polyline points="20 10 14 10 14 4"></polyline>
                         </svg>
                     </button>
-
                     <button class="llm-workspace-titlebar__btn" id="llm-btn-copy" title="Copy as Markdown">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
                             <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
                         </svg>
                     </button>
-
                     <button class="llm-workspace-titlebar__btn" id="llm-btn-print" title="Print">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <polyline points="6 9 6 2 18 2 18 9"></polyline>
@@ -389,7 +391,6 @@ export class LLMWorkspaceEditor implements IEditor {
                     </button>
                 </div>
             </div>
-
             <div class="llm-ui-workspace__history" id="llm-ui-history"></div>
             <div class="llm-ui-workspace__input" id="llm-ui-input"></div>
         `;
@@ -459,6 +460,11 @@ export class LLMWorkspaceEditor implements IEditor {
                     console.error('[LLMWorkspaceEditor] Failed to rename:', e);
                 }
             }
+        });
+
+        // ✅ [新增] 附件管理按钮事件
+        this.container.querySelector('#llm-btn-assets')?.addEventListener('click', () => {
+            this.openAssetManager();
         });
 
         // Collapse/Expand All
@@ -800,14 +806,131 @@ export class LLMWorkspaceEditor implements IEditor {
         this.chatInput.setLoading(true); // 立即锁定输入框
         
         try {
-            await this.sessionManager.runUserQuery(text, files, agentId || 'default');
-            // 注意：不要在这里 setLoading(false)
-            // 状态应该完全由 handleGlobalEvent -> session_status_changed 驱动
+            // ✨ 将 File[] 转换为 ChatFile[]，并执行相对路径上传
+            const chatFiles: ChatFile[] = [];
+            const parentId = await this.getCurrentDirectoryId();
+
+            if (files.length > 0 && parentId) {
+                for (const file of files) {
+                    // 1. 生成防冲突文件名
+                    const safeName = `${Date.now()}-${file.name}`;
+                    const arrayBuffer = await file.arrayBuffer();
+                    
+                    // 2. 上传到当前目录 (parentId)
+                    // 使用 engine.createFile 直接创建，而不是 createAsset
+                    const node = await this.engine.createFile(safeName, parentId, arrayBuffer);
+                    
+                    // 3. 构建 ChatFile 对象
+                    chatFiles.push({
+                        name: file.name,
+                        type: file.type,
+                        size: file.size,
+                        // ✨ 关键：path 为 './filename'
+                        path: `./${node.name}`, 
+                        fileRef: file // 传递给 Kernel 执行时使用
+                    });
+                }
+            }
+
+            // 4. 发送给 SessionManager
+            await this.sessionManager.runUserQuery(text, chatFiles, agentId || 'default');
+
         } catch (error: any) {
             console.error('[LLMWorkspaceEditor] Send failed:', error);
             this.historyView.renderError(error);
             this.chatInput.setLoading(false); // 仅在同步错误时手动解锁
         }
+    }
+
+    // 辅助方法：获取当前会话文件的父目录 ID
+    private async getCurrentDirectoryId(): Promise<string | null> {
+        if (!this.options.nodeId) return null;
+        try {
+            const node = await this.engine.getNode(this.options.nodeId);
+            return node ? node.parentId : null;
+        } catch {
+            return null;
+        }
+    }
+
+    /**
+     * ✅ [新增] 打开附件管理器
+     */
+    private async openAssetManager() {
+        if (!this.options.nodeId) return;
+
+        // 配置对象
+        const assetOptions: AssetConfigOptions = {
+            targetAttachmentDirectoryId: './',
+            
+            // [新增] 路径策略：因为我们是在根目录下混用，使用 relative 更符合直觉
+            // 如果你希望在 Markdown 中看到 ![img](./img.png) 而不是 @asset/img.png
+            pathStrategy: 'relative', 
+
+            // [新增] 视图过滤：只显示多媒体文件，隐藏 .chat, .json 等
+            viewFilter: {
+                extensions: ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.pdf', '.docx', '.txt', '.md']
+            }
+        };
+
+        const assetDirId = await resolveAssetDirectory(this.engine, this.options.nodeId, assetOptions);
+
+        if (!assetDirId) {
+            Toast.error('无法解析附件目录');
+            return;
+        }
+
+        // 2. 创建 Mock Editor 适配器
+        // AssetManagerUI 依赖 MDxEditor 实例来获取全文内容(用于统计引用)和插入文本
+        // 我们这里将其桥接到 SessionManager 和 ChatInput
+        const mockEditorAdapter = {
+            // 获取全文：用于判断附件是否“已引用”
+            getText: () => {
+                // 返回 Markdown 格式的完整会话记录
+                return this.sessionManager.exportToMarkdown();
+            },
+            
+            // 获取 EditorView：AssetManagerUI 用它来 dispatch insert 操作
+            // 我们这里返回 null，并拦截 insertText 调用（如果 AssetManagerUI 支持的话）
+            // 或者更 hack 一点：我们修改 AssetManagerUI 让它不强依赖 view.dispatch
+            getEditorView: () => null,
+
+            // 为了支持 AssetManagerUI 的 insertText，我们需要这个 trick：
+            // AssetManagerUI 中调用的是 this.editor.getEditorView() 
+            // 我们无法直接覆盖 AssetManagerUI 内部逻辑，
+            // 但我们可以利用 JS 的动态性，或者如果 AssetManagerUI 代码是我们控制的，建议给它增加一个 insertText 接口。
+            
+            // *基于你提供的 AssetManagerUI 代码*:
+            // 它调用 `const view = this.editor.getEditorView(); if(view) ...`
+            // 所以如果我们返回 null，点击“插入”按钮没反应。
+            
+            // *解决方案*: 
+            // 我们构造一个伪造的 view 对象，只包含 dispatch 方法
+            getEditorViewMock: () => ({
+                state: {
+                    selection: { main: { from: 0, to: 0 } }
+                },
+                dispatch: (transaction: any) => {
+                    if (transaction.changes && transaction.changes.insert) {
+                        this.chatInput.insertAtCursor(transaction.changes.insert);
+                    }
+                },
+                focus: () => this.chatInput.focus()
+            })
+        };
+
+        // TypeScript 强转，适配 AssetManagerUI 构造函数签名
+        const ui = new AssetManagerUI(
+            this.engine, 
+            mockEditorAdapter as any,
+            assetOptions // 传入配置
+        );
+
+        // 动态替换 getEditorView 为我们的 Mock
+        (mockEditorAdapter as any).getEditorView = (mockEditorAdapter as any).getEditorViewMock;
+
+        // 3. 显示 UI
+        await ui.show(assetDirId);
     }
 
     // ================================================================
@@ -869,12 +992,10 @@ export class LLMWorkspaceEditor implements IEditor {
      */
     private toggleAllBubbles(btn: Element): void {
         this.isAllExpanded = !this.isAllExpanded;
-
         const historyContainer = this.container.querySelector('#llm-ui-history');
         if (!historyContainer) return;
 
         const bubbles = historyContainer.querySelectorAll('.llm-ui-bubble--user, .llm-ui-node');
-        
         bubbles.forEach(bubble => {
             if (this.isAllExpanded) {
                 bubble.classList.remove('is-collapsed');

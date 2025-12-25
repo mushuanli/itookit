@@ -6,21 +6,83 @@ import type { ISessionEngine } from '@itookit/common';
 
 export interface AssetConfigOptions {
     /** 
-     * 指定附件存储的目标目录 ID 或相对路径 ('./')。
-     * 如果设置了此项，将覆盖默认的“伴生目录”逻辑。
-     * - ID: 直接使用该目录 ID
-     * - './': 使用当前编辑文件所在的目录 (parentId)
+     * 目标附件目录 ID
+     * - specific ID: 存入指定目录
+     * - './': 存入当前文档同级目录 (默认行为)
      */
     targetAttachmentDirectoryId?: string;
+
+    /**
+     * [新增] 路径生成策略 (决定插入 Markdown 的链接格式)
+     * - 'protocol': 使用 @asset/filename (默认，适合 VFS 内部解析)
+     * - 'relative': 使用 ./filename (适合标准 Markdown兼容)
+     * - custom function: 自定义生成逻辑
+     */
+    pathStrategy?: 'protocol' | 'relative' | ((filename: string) => string);
+
+    /**
+     * [新增] 视图过滤器 (决定在管理器中显示哪些文件)
+     * 默认会忽略 .json, .chat 等系统文件
+     */
+    viewFilter?: {
+        // 白名单：只显示这些扩展名 (e.g. ['.png', '.jpg', '.pdf'])
+        extensions?: string[];
+        // 黑名单正则：排除匹配的文件 (e.g. /^\./ 排除点文件)
+        excludePattern?: RegExp;
+    };
+
+    /**
+     * [新增] 上传限制
+     */
+    uploadLimit?: {
+        // 允许的 MIME 类型或扩展名
+        accept?: string[]; 
+        // 最大字节数
+        maxSize?: number; 
+    };
 }
 
 /**
- * 统一解析附件目录 ID
- * @param engine 会话引擎
- * @param currentNodeId 当前编辑的节点 ID
- * @param options 配置选项
- * @returns 解析出的目录 ID，如果无法解析则返回 null
+ * 默认的视图过滤逻辑
  */
+export function isAssetVisible(filename: string, filter?: AssetConfigOptions['viewFilter']): boolean {
+    // 1. 默认安全策略：总是隐藏以 . 开头的系统文件 (除非显式白名单覆盖)
+    if (filename.startsWith('.')) return false;
+
+    // 2. 黑名单优先
+    if (filter?.excludePattern && filter.excludePattern.test(filename)) {
+        return false;
+    }
+
+    // 3. 白名单 (如果有定义，必须匹配)
+    if (filter?.extensions && filter.extensions.length > 0) {
+        const ext = '.' + filename.split('.').pop()?.toLowerCase();
+        return filter.extensions.includes(ext);
+    }
+
+    // 4. 默认允许其他所有
+    return true;
+}
+
+/**
+ * 生成插入到 Markdown 的路径
+ */
+export function generateAssetPath(
+    filename: string, 
+    strategy: AssetConfigOptions['pathStrategy'] = 'protocol'
+): string {
+    if (typeof strategy === 'function') {
+        return strategy(filename);
+    }
+
+    if (strategy === 'relative') {
+        return `./${filename}`;
+    }
+
+    // Default 'protocol'
+    return `@asset/${filename}`;
+}
+
 export async function resolveAssetDirectory(
     engine: ISessionEngine,
     currentNodeId: string | undefined,
