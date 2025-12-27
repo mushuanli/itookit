@@ -12,9 +12,9 @@ import type {
     EngineNode, 
     EngineSearchQuery, 
     EngineEventType, 
-    EngineEvent 
+    EngineEvent,
 } from '@itookit/common';
-
+import {guessMimeType} from '@itookit/common';
 export class VFSModuleEngine implements ISessionEngine {
     private vfsCore: VFSCore;
     constructor(
@@ -47,6 +47,7 @@ export class VFSModuleEngine implements ISessionEngine {
             createdAt: vnode.createdAt,
             modifiedAt: vnode.modifiedAt,
             path: vnode.path,
+            size: vnode.size, // ✨ [新增] 映射 size 属性
             tags: vnode.tags,
             metadata: vnode.metadata,
             moduleId: vnode.moduleId || undefined,
@@ -142,7 +143,7 @@ export class VFSModuleEngine implements ISessionEngine {
         name: string, 
         parentIdOrPath: string | null, 
         content: string | ArrayBuffer = '', 
-        metadata?: Record<string, any> // ✨ [新增]
+        metadata?: Record<string, any>
     ): Promise<EngineNode> {
         // 1. 智能解析父路径
         const parentPath = await this.resolveParentPath(parentIdOrPath);
@@ -150,12 +151,21 @@ export class VFSModuleEngine implements ISessionEngine {
         // 2. 拼接完整相对路径
         const fullRelativePath = this.vfs.pathResolver.join(parentPath, name);
         
+    // ✅ [关键] 检测并标记二进制内容
+        const isBinary = content instanceof ArrayBuffer;
+        const mimeType = metadata?.mimeType || guessMimeType(name);
+        
+        const enhancedMetadata = {
+            ...metadata,
+            mimeType: mimeType,
+            isBinary: isBinary
+        };
         // 3. 调用 VFSCore (利用其递归创建能力 + Metadata 支持)
         const vnode = await this.vfsCore.createFile(
             this.moduleName, 
             fullRelativePath, 
             content,
-            metadata // ✨ [透传]
+            enhancedMetadata
         );
         
         const node = this.toEngineNode(vnode);
@@ -186,39 +196,51 @@ export class VFSModuleEngine implements ISessionEngine {
     }
 
     /**
-     * ✨ [核心] 创建资产文件
-     * 自动处理路径映射：owner.md -> .owner.md/filename
-     * 自动处理 MIME 类型
+     * [辅助方法] 根据主节点计算资产目录的 User Path
+     */
+    private _getAssetDirUserPath(ownerNode: VNode): string {
+        // 1. 获取主节点在模块内的 User Path
+        const ownerUserPath = this.vfs.pathResolver.toUserPath(ownerNode.path, this.moduleName);
+
+        if (ownerNode.type === VNodeType.DIRECTORY) {
+            // 情况 A: 主节点是目录 -> 资产目录为 ownerNodeId/.assets/
+            // pathResolver.join 会自动处理路径分隔符
+            return this.vfs.pathResolver.join(ownerUserPath, '.assets');
+        } else {
+            // 情况 B: 主节点是文件 -> 资产目录为同级隐藏目录 .ownerNodeId/ (即 .filename)
+            // 提取父目录路径
+            const lastSlash = ownerUserPath.lastIndexOf('/');
+            const parentUserPath = lastSlash <= 0 ? '/' : ownerUserPath.substring(0, lastSlash);
+            
+            // 构造隐藏目录名
+            const sidecarDirName = `.${ownerNode.name}`;
+            
+            return this.vfs.pathResolver.join(parentUserPath, sidecarDirName);
+        }
+    }
+
+    /**
+     * ✨ [更新] 创建资产文件
+     * 自动适配目录 (.assets) 或文件 (.filename) 作为主节点的情况
+     * 写入时如果目录不存在，VFSCore.createFile 会自动创建
      */
     async createAsset(ownerNodeId: string, filename: string, content: string | ArrayBuffer): Promise<EngineNode> {
-        // 1. 获取主文件
+        // 1. 获取主节点
         const ownerNode = await this.vfs.storage.loadVNode(ownerNodeId);
         if (!ownerNode) throw new Error(`Owner node ${ownerNodeId} not found`);
-        if (ownerNode.type !== VNodeType.FILE) throw new Error(`Cannot create asset for a directory`);
 
-        // 2. 计算相对路径 (User Path)
-        // 获取 owner 在模块内的路径 /folder/note.md
-        const ownerUserPath = this.vfs.pathResolver.toUserPath(ownerNode.path, this.moduleName);
+        // 2. 计算资产目录 User Path
+        const assetDirUserPath = this._getAssetDirUserPath(ownerNode);
         
-        // 提取父目录 /folder
-        const lastSlash = ownerUserPath.lastIndexOf('/');
-        const parentUserPath = lastSlash <= 0 ? '' : ownerUserPath.substring(0, lastSlash);
-        
-        // 构造伴生目录名 .note.md
-        const sidecarDirName = `.${ownerNode.name}`;
-        
-        // 构造资产完整路径: /folder/.note.md/image.png
-        // pathResolver.join 会自动处理根路径的斜杠
-        const assetUserPath = this.vfs.pathResolver.join(
-            parentUserPath || '/', 
-            sidecarDirName, 
-            filename
-        );
+        // 3. 构造资产完整路径
+        const assetUserPath = this.vfs.pathResolver.join(assetDirUserPath, filename);
 
-        // 3. 猜测 MIME 类型
-        const mimeType = this.guessMimeType(filename);
+        // 4. 猜测 MIME 类型
+        const mimeType = guessMimeType(filename);
 
-        // 4. 调用 VFS 创建文件 (VFS 递归创建逻辑会确保 .note.md 目录被创建)
+        // 5. 调用 VFS 创建文件 
+        // VFSCore 的 createFile 内部调用 createNode，具备递归创建父目录的能力 (_ensureParentDirectory)
+        // 所以如果 .assets 或 .filename 目录不存在，这里会自动创建
         const assetNode = await this.vfsCore.createFile(
             this.moduleName,
             assetUserPath,
@@ -233,27 +255,19 @@ export class VFSModuleEngine implements ISessionEngine {
         return this.toEngineNode(assetNode);
     }
 
+    /**
+     * ✨ [更新] 获取关联资产目录 ID
+     */
     async getAssetDirectoryId(ownerNodeId: string): Promise<string | null> {
         const ownerNode = await this.vfs.storage.loadVNode(ownerNodeId);
         if (!ownerNode) return null;
         
-        const sidecarPath = this.vfs.pathResolver.join(
-            this.getParentSystemPath(ownerNode.path),
-            `.${ownerNode.name}`
-        );
-        
-        return await this.vfs.storage.getNodeIdByPath(sidecarPath);
-    }
+        // 1. 计算理论上的资产目录 User Path
+        const assetDirUserPath = this._getAssetDirUserPath(ownerNode);
 
-    private guessMimeType(filename: string): string {
-        const ext = filename.split('.').pop()?.toLowerCase();
-        const map: Record<string, string> = {
-            'png': 'image/png', 'jpg': 'image/jpeg', 'jpeg': 'image/jpeg',
-            'gif': 'image/gif', 'svg': 'image/svg+xml', 'webp': 'image/webp',
-            'pdf': 'application/pdf', 'txt': 'text/plain', 'md': 'text/markdown',
-            'json': 'application/json'
-        };
-        return map[ext || ''] || 'application/octet-stream';
+        // 2. 解析为 Node ID
+        // 注意：resolvePath 接受 User Path 或 System Path，这里传入 User Path (开头无模块名)
+        return await this.resolvePath(assetDirUserPath);
     }
 
     async writeContent(id: string, content: string | ArrayBuffer): Promise<void> {
@@ -318,32 +332,31 @@ export class VFSModuleEngine implements ISessionEngine {
 
     on(_event: EngineEventType, callback: (event: EngineEvent) => void): () => void {
         const bus = this.vfsCore.getEventBus();
-    const shouldEmit = (path: string | null | undefined): boolean => {
-        if (path === null || path === undefined) return true;
         
-        const expectedPrefix = `/${this.moduleName}`;
-        if (!path.startsWith(expectedPrefix)) return false;
+        const shouldEmit = (path: string | null | undefined): boolean => {
+            if (path === null || path === undefined) return true;
+            
+            const expectedPrefix = `/${this.moduleName}`;
+            if (!path.startsWith(expectedPrefix)) return false;
+            
+            const relativePath = path.slice(expectedPrefix.length);
+            
+            // 过滤隐藏目录 (/.xxx)
+            // 注意：现在资产目录可能是 .assets (目录内) 或 .filename (同级)
+            // 这里的过滤规则会把这些操作的事件屏蔽掉，UI 层如果需要刷新资产列表，可能需要调整此处的策略
+            // 但为了保持文件树整洁，默认过滤是合理的
+            if (relativePath.startsWith('/.') || relativePath.includes('/.')) {
+                return false;
+            }
+            
+            return true;
+        };
         
-        // ✨ [关键修复] 过滤隐藏目录
-        const relativePath = path.slice(expectedPrefix.length);
-        
-        // 隐藏目录特征：
-        // - 以 /. 开头 (如 /.sessionId)
-        // - 或者路径中包含 /. (如 /foo/.hidden/bar)
-        if (relativePath.startsWith('/.') || relativePath.includes('/.')) {
-            return false;
-        }
-        
-        return true;
-    };
-    
-    const mapAndEmit = (type: EngineEventType, originalPayload: any) => {
-        const path = originalPayload.path as string;
-        
-        if (!shouldEmit(path)) return;
-        
-        callback({ type, payload: originalPayload });
-    };
+        const mapAndEmit = (type: EngineEventType, originalPayload: any) => {
+            const path = originalPayload.path as string;
+            if (!shouldEmit(path)) return;
+            callback({ type, payload: originalPayload });
+        };
 
         const handlers = {
             [VFSEventType.NODE_CREATED]: (e: any) => mapAndEmit('node:created', e),
@@ -366,30 +379,30 @@ export class VFSModuleEngine implements ISessionEngine {
     }
 
     /**
-     * [新增/公开] 解析 User Path 为 Node ID
-     * AssetResolverPlugin 会用到这个能力
+     * ✅ [修复] 解析路径为 Node ID
+     * 自动处理 User Path 到 System Path 的转换
      */
     async resolvePath(path: string): Promise<string | null> {
-        // VFS Core 的 resolve 接受的是 User Path (相对于模块根)
-        // 但我们在 AssetResolver 中构造的是 System Path (包含模块前缀的逻辑有点乱)
+        let systemPath = path;
         
-        // 让我们理清 AssetResolver 中的路径：
-        // ownerNode.path 是 System Path (VFS 内部路径，如 /moduleName/folder/test.md)
-        // 所以我们构造的 fullVfsPath 也是 System Path。
+        // 如果是 User Path（以 / 开头但不包含模块名），转换为 System Path
+        if (path.startsWith('/') && !path.startsWith(`/${this.moduleName}/`) && path !== `/${this.moduleName}`) {
+            systemPath = `/${this.moduleName}${path}`;
+        }
         
-        // VFS.pathResolver.resolve 默认接收 (moduleName, userPath)
-        // VFS.storage.getIdByPath 接收 System Path
-        
-        // 因此，最直接的方法是直接查 Storage
-        return this.vfs.storage.getNodeIdByPath(path);
+        try {
+            return await this.vfs.storage.getNodeIdByPath(systemPath);
+        } catch {
+            return null;
+        }
     }
 
-    // ============================================================
-    // 核心修复逻辑：智能解析 Parent
-    // ============================================================
-    private getParentSystemPath(path: string): string {
-        const idx = path.lastIndexOf('/');
-        return idx <= 0 ? '/' : path.substring(0, idx);
+    /**
+     * ✅ [新增] 检查路径是否存在
+     */
+    async pathExists(path: string): Promise<boolean> {
+        const nodeId = await this.resolvePath(path);
+        return nodeId !== null;
     }
 
     /**

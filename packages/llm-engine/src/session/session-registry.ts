@@ -7,7 +7,8 @@ import {
     ExecutionTask,
     OrchestratorEvent,
     RegistryEvent,
-    ExecutionNode
+    ExecutionNode,
+    ChatFile
 } from '../core/types';
 import { EngineError, EngineErrorCode } from '../core/errors';
 import { ENGINE_DEFAULTS } from '../core/constants';
@@ -258,7 +259,7 @@ export class SessionRegistry {
      */
     async submitTask(
         sessionId: string,
-        input: { text: string; files: File[]; executorId: string },
+        input: { text: string; files: ChatFile[]; executorId: string }, // <--- Fixed here
         options?: { priority?: number; skipUserMessage?: boolean; parentUserNodeId?: string }
     ): Promise<string> {
         this.ensureInitialized();
@@ -388,12 +389,20 @@ export class SessionRegistry {
             let userNodeId = options.parentUserNodeId;
             
             if (!options.skipUserMessage) {
+                // [优化]: 持久化前剥离 fileRef，避免 JSON 中出现空对象，并确保数据纯净
+                const persistedFiles = input.files.map(f => ({
+                    name: f.name,
+                    type: f.type,
+                    path: f.path,
+                    size: f.size
+                }));
+
                 userNodeId = await this.persistence.appendMessage(
                     nodeId,
                     sessionId,
                     'user',
                     input.text,
-                    { files: input.files.map(f => ({ name: f.name, type: f.type })) }
+                    { files: persistedFiles } // 传递剥离后的 ChatFile[]
                 );
                 
                 const userSession = state.addUserMessage(input.text, input.files, userNodeId);
@@ -485,13 +494,25 @@ export class SessionRegistry {
             };
             
             // 6. 执行
+            // ⚠️ 注意：KernelAdapter.executeQuery 可能还需要原始 File 对象用于读取内容
+            // 我们在 ChatFile 中添加了可选的 fileRef?: File | Blob
+            // 所以我们需要提取出 fileRef 传递给 Kernel
+            
+            const rawFiles: File[] = [];
+            input.files.forEach(cf => {
+                // 确保 fileRef 存在且是 File 实例 (Blob 也可以，视 Kernel 定义而定)
+                if (cf.fileRef instanceof File || cf.fileRef instanceof Blob) {
+                    rawFiles.push(cf.fileRef as File);
+                }
+            });
+
             const result = await this.kernelAdapter.executeQuery(
                 input.text,
                 executorConfig,
                 {
                     sessionId,
                     history: state.getHistory(),
-                    files: input.files,
+                    files: rawFiles, // ✅ 传递原始 File 对象给 Kernel
                     onEvent,
                     signal: task.abortController.signal,
                     // 尝试传递 ID，但即使失败，上面的 onEvent 拦截也会兜底

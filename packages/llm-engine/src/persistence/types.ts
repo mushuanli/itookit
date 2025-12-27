@@ -1,8 +1,7 @@
 // @file: llm-engine/src/persistence/types.ts
 
-import { 
-    ISessionEngine as IBaseSessionEngine,
-} from '@itookit/common';
+import { ISessionEngine as IBaseSessionEngine } from '@itookit/common';
+import { ChatFile } from '../core/types'; // 引入新类型
 
 /**
  * 聊天清单（.chat 文件）
@@ -54,7 +53,10 @@ export interface ChatNode {
         agentId?: string;
         agentName?: string;
         agentIcon?: string;
-        files?: Array<{ name: string; type: string }>;
+        
+        /** ✅ [修改] 使用 ChatFile[]，支持 path 字段 */
+        files?: ChatFile[];
+        
         status?: string;
         [key: string]: any;
     };

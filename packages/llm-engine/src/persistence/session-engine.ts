@@ -10,13 +10,13 @@ import {
     EngineEvent, 
     EngineEventType, 
     FS_MODULE_CHAT,
-    generateUUID  // 从 common 导入
+    generateUUID,
 } from '@itookit/common';
 import { 
     ChatManifest, 
     ChatNode, 
     ChatContextItem, 
-    ILLMSessionEngine 
+    ILLMSessionEngine,
 } from './types';
 
 // 调试日志
@@ -51,6 +51,14 @@ class LockManager {
         } finally {
             if (this.locks.get(key) === lockPromise) {
                 this.locks.delete(key);
+            }
+            const queue = this.waitQueues.get(key);
+            if (queue && queue.length > 0) {
+                const next = queue.shift();
+                if (queue.length === 0) {
+                    this.waitQueues.delete(key);
+                }
+                next?.();
             }
             release!();
         }
