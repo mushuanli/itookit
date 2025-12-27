@@ -1,7 +1,7 @@
 // @file: llm-engine/session/session-state.ts
 
 import { generateUUID } from '@itookit/common';
-import { SessionGroup, ExecutionNode } from '../core/types';
+import { SessionGroup, ExecutionNode, ChatFile } from '../core/types';
 import { ChatNode } from '../persistence/types';
 import { ExecutorConfig } from '@itookit/llm-kernel';
 
@@ -81,7 +81,7 @@ export class SessionState {
     
     addUserMessage(
         content: string,
-        files: File[],
+        files: ChatFile[], 
         persistedNodeId: string
     ): SessionGroup {
         const session: SessionGroup = {
@@ -89,7 +89,13 @@ export class SessionState {
             timestamp: Date.now(),
             role: 'user',
             content,
-            files: files.map(f => ({ name: f.name, type: f.type })),
+            // 剥离 fileRef，只存储可序列化数据到内存状态中
+            files: files.map(f => ({ 
+                name: f.name, 
+                type: f.type, 
+                path: f.path,
+                size: f.size 
+            })),
             persistedNodeId
         };
         

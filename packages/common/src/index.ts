@@ -43,7 +43,8 @@ export {
     generateShortUUID, 
     generateId, 
     debounce, 
-    isClass 
+    isClass,
+    guessMimeType
 } from './utils/utils';
 
 // Export all components
