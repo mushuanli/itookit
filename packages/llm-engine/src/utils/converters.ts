@@ -1,7 +1,7 @@
 // @file: llm-engine/src/utils/converters.ts
 
 import { generateUUID } from '@itookit/common';
-import { SessionGroup, ExecutionNode } from '../core/types';
+import { SessionGroup, ExecutionNode, ChatFile } from '../core/types';
 import { ChatNode } from '../persistence/types';
 
 /**
@@ -13,12 +13,20 @@ export class Converters {
      */
     static chatNodeToSessionGroup(node: ChatNode): SessionGroup | null {
         if (node.role === 'user') {
+            // ✅ [修复] 确保类型安全转换
+            const files: ChatFile[] = (node.meta?.files || []).map((f: any) => ({
+                name: f.name,
+                type: f.type,
+                path: f.path,
+                size: f.size
+            }));
+
             return {
                 id: generateUUID(),
                 timestamp: new Date(node.created_at).getTime(),
                 role: 'user',
                 content: node.content,
-                files: node.meta?.files || [],
+                files,
                 persistedNodeId: node.id
             };
         }
@@ -64,7 +72,12 @@ export class Converters {
         
         if (session.role === 'user') {
             if (session.files && session.files.length > 0) {
-                const files = session.files.map(f => `\`[File: ${f.name}]\``).join(' ');
+                // ✅ [优化] 如果有路径，生成链接
+                const files = session.files.map(f => 
+                    f.path 
+                    ? `[${f.name}](${f.path})` 
+                    : `\`[File: ${f.name}]\``
+                ).join(', ');
                 md += `> Attachments: ${files}\n\n`;
             }
             md += `${session.content || '(Empty)'}\n\n`;

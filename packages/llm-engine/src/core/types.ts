@@ -3,6 +3,24 @@
 import { NodeStatus } from '@itookit/llm-kernel';
 
 /**
+ * ✅ [新增] 聊天附件定义
+ */
+export interface ChatFile {
+    name: string;
+    type: string;
+    /** 
+     * 存储路径 (相对路径 ./xxx 或 协议路径 @asset/xxx) 
+     */
+    path?: string;
+    size?: number;
+    /** 
+     * 运行时使用的原始文件对象 (不持久化)
+     * 用于 Kernel 执行时读取内容
+     */
+    fileRef?: File | Blob;
+}
+
+/**
  * 执行节点（UI 层表示）
  */
 export interface ExecutionNode {
@@ -75,8 +93,8 @@ export interface SessionGroup {
     /** 用户输入内容 */
     content?: string;
     
-    /** 附件 */
-    files?: Array<{ name: string; type: string }>;
+    /** ✅ [修改] 使用 ChatFile 类型 */
+    files?: ChatFile[];
     
     /** 执行树根节点（assistant 角色） */
     executionRoot?: ExecutionNode;
@@ -163,7 +181,8 @@ export interface ExecutionTask {
     nodeId: string;
     input: {
         text: string;
-        files: File[];
+        /** ✅ [修改] 传递 ChatFile 数组 */
+        files: ChatFile[];
         executorId: string;
     };
     options: {

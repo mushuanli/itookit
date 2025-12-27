@@ -276,12 +276,23 @@ export class VFSCore {
   async createFile(moduleName: string, path: string, content: string | ArrayBuffer = '', metadata?: Record<string, any>): Promise<VNode> {
     this._ensureInitialized();
     this._ensureModuleExists(moduleName);
+    // ✅ [关键] 根据内容类型选择正确的处理方式
+    const isBinary = content instanceof ArrayBuffer;
+    
+    // 确保 metadata 中包含必要的类型信息
+    const finalMetadata = {
+        ...metadata,
+        isBinary: isBinary,
+        // 如果没有指定 mimeType，根据是否为二进制设置默认值
+        mimeType: metadata?.mimeType || (isBinary ? 'application/octet-stream' : 'text/plain')
+    };
+
     const internalNode = await this.vfs.createNode({
       module: moduleName,
       path, // 传入用户路径
       type: VNodeType.FILE,
       content,
-      metadata
+      metadata: finalMetadata
     });
     return this._toPublicVNode(internalNode);
   }

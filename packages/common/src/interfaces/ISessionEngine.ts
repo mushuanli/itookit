@@ -26,6 +26,13 @@ export interface EngineNode {
     /** 节点的完整路径 (逻辑路径) */
     path: string;
     
+    /** 
+     * [新增] 文件大小 (字节数)
+     * 对于文件节点，表示文件内容的大小；
+     * 对于目录节点，可以为 0 或表示目录下所有文件的总大小（取决于实现）
+     */
+    size: number;
+    
     tags?: string[];
     metadata?: Record<string, any>;
     

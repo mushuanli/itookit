@@ -7,7 +7,8 @@ import {
 import { 
     SessionGroup, 
     SessionStatus, 
-    OrchestratorEvent 
+    OrchestratorEvent,
+    ChatFile
 } from '../core/types';
 import { EngineError, EngineErrorCode } from '../core/errors';
 
@@ -236,7 +237,11 @@ export class SessionManager {
     /**
      * 运行用户查询
      */
-    async runUserQuery(text: string, files: File[], executorId: string): Promise<void> {
+    async runUserQuery(
+        text: string, 
+        files: ChatFile[], // Changed from File[]
+        executorId: string
+    ): Promise<void> {
         if (!this.sessionId) {
             throw new EngineError(EngineErrorCode.SESSION_INVALID, 'No session bound');
         }

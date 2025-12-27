@@ -4,50 +4,52 @@
  * 负责计算文本文件的统计信息，并拒绝非法的二进制写入
  */
 import { ContentMiddleware } from './base/ContentMiddleware.js';
-import { VNode, Transaction, VNodeType } from '../store/types.js';
+import { VNode, Transaction } from '../store/types.js';
+import { guessMimeType } from '@itookit/common'; 
 
 export class PlainTextMiddleware extends ContentMiddleware {
   readonly name = 'plain-text';
   readonly priority = 0;
 
+  /**
+   * 判断是否处理该节点
+   * [修复] 使用 guessMimeType 统一逻辑，并解决 vnode 未使用的问题
+   */
   canHandle(vnode: VNode): boolean {
-    // 1. 如果是目录，不处理
-    if (vnode.type === VNodeType.DIRECTORY) return false;
-
-    // 2. ✨ [关键] 如果被标记为资产 (Image/PDF/Zip 等)，明确不处理
-    // 这与 UploadPlugin 和 VFSModuleEngine.createAsset 配合
-    if (vnode.metadata?.isAsset) return false;
-
-    // 3. 如果明确标记了非文本的 contentType，不处理 (兼容旧逻辑)
-    if (vnode.metadata?.contentType && !vnode.metadata.contentType.startsWith('text/')) {
-        return false;
-    }
-
-    // 4. 其他情况默认视为文本处理 (比如 .md, .txt, .json, .js)
-    return true;
+    // [修复 TS6133 & TS2552]: 使用 vnode.name
+    const mimeType = guessMimeType(vnode.name);
+    
+    // 简单的文本类型判断逻辑
+    return (
+      mimeType.startsWith('text/') || 
+      mimeType === 'application/json' || 
+      mimeType === 'application/xml' ||
+      mimeType === 'application/javascript'
+    );
   }
 
   async onValidate(_vnode: VNode, content: string | ArrayBuffer): Promise<void> {
-    if (typeof content !== 'string') {
+    if (content instanceof ArrayBuffer) {
       // 只有当 canHandle 返回 true 时，这里抛出错误才是合理的
       throw new Error('Plain text middleware received binary content. This should have been filtered by canHandle.');
     }
   }
 
   async onAfterWrite(
-    _vnode: VNode,
-    content: string | ArrayBuffer,
+    _vnode: VNode, 
+    content: string | ArrayBuffer, 
     _transaction: Transaction
   ): Promise<Record<string, any>> {
-    // 此时可以安全断言为 string
-    if (typeof content !== 'string') return {};
+    // [修复 TS2552]: node -> vnode
+    const metadata: Record<string, any> = {};
 
-    const text = content as string;
-    return {
-      characterCount: text.length,
-      wordCount: text.split(/\s+/).filter(Boolean).length,
-      lineCount: text.split('\n').length,
-      updatedAt: Date.now() // 自动更新时间戳
-    };
+    // 示例：如果是文本，统计字数
+    if (typeof content === 'string') {
+        metadata.wordCount = content.length;
+        // [修复 TS2552]: node -> vnode
+        metadata.lineCount = content.split('\n').length;
+    }
+
+    return metadata;
   }
 }
