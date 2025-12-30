@@ -11,6 +11,7 @@ tests/
 scripts/
 
 # mdx plugins:
+MarkdownAnalyzer.ts
 plugin.ts
 commands.ts
 service-container.ts
@@ -37,6 +38,15 @@ plantuml.plugin.ts
 svg.plugin.ts
 vega.plugin.ts
 
+auto-save.plugin.ts
+clipboard.plugin.ts
+table.plugin.ts
+upload.plugin.ts
+asset-helper.ts
+asset-resolver.plugin.ts
+asset-manager.plugin.ts
+asset-manager.ui.ts
+shims-turndown.d.ts
 # mdx main:
 
 

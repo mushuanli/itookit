@@ -17,6 +17,13 @@ export interface CoreTitleBarPluginOptions {
   enableToggleEditMode?: boolean;
 
   /**
+   * 是否启用附件管理功能
+   * 如果为 true，工厂函数会自动加载 ui:asset-manager 插件
+   * @default true
+   */
+  enableAssetManager?: boolean;
+
+  /**
    * 切换侧边栏回调函数
    */
   onSidebarToggle?: (editor: MDxEditor) => void;
@@ -265,33 +272,15 @@ export class CoreTitleBarPlugin implements MDxPlugin {
    * 默认打印处理函数
    */
   private defaultPrintHandler(editor: MDxEditor): void {
-    const renderContainer = editor.getRenderContainer();
-    if (!renderContainer) {
-      console.warn('Render container not found for printing');
-      return;
-    }
-
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) return;
-
-    printWindow.document.write(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>打印预览</title>
-          <style>
-            body { font-family: sans-serif; padding: 20px; }
-            /* 复制编辑器样式 */
-          </style>
-        </head>
-        <body>
-          ${renderContainer.innerHTML}
-        </body>
-      </html>
-    `);
-
-    printWindow.document.close();
-    printWindow.print();
+        editor.print({
+            title: editor.config.title || 'Document',
+            showHeader: true,
+            headerMeta: {
+                date: new Date().toLocaleDateString(),
+            },
+        }).catch(err => {
+            console.error('[TitleBarPlugin] Print failed:', err);
+        });
   }
 
   destroy(): void {

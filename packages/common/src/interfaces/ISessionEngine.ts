@@ -137,7 +137,7 @@ export interface ISessionEngine {
      * [新增] 获取指定节点的资产目录 ID
      * 如果不存在则返回 null
      */
-    getAssetDirectoryId?(ownerNodeId: string): Promise<string | null>;
+    getAssetDirectoryId(ownerNodeId: string): Promise<string | null>;
 
     /** 写入/覆盖文件内容 */
     writeContent(id: string, content: string | ArrayBuffer): Promise<void>;

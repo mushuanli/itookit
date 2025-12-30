@@ -157,6 +157,8 @@ export class PluginManager {
   // ✨ [重构] 核心数据源依赖 ISessionEngine
   private sessionEngine: ISessionEngine | null = null;
   private currentNodeId: string | null = null;
+  // ✨ [新增] 资产归属 ID
+  private ownerNodeId: string | null = null;
   
   private dataAdapter: IPersistenceAdapter | null = null;
 
@@ -188,12 +190,21 @@ export class PluginManager {
   }
 
   /**
-   * ✨ [重构] 设置编辑器上下文 (Engine + NodeID)
-   * 替代原有的 setVFSCore
+   * ✨ [重构] 设置编辑器上下文
+   * @param nodeId 当前文档节点 ID
+   * @param ownerNodeId 资产归属节点 ID (可选，默认回退到 nodeId)
+   * @param engine 会话引擎
    */
-  setContext(nodeId: string | undefined, engine: ISessionEngine | undefined): void {
+  setContext(
+    nodeId: string | undefined, 
+    ownerNodeId: string | undefined,
+    engine: ISessionEngine | undefined
+  ): void {
     if (nodeId) this.currentNodeId = nodeId;
     if (engine) this.sessionEngine = engine;
+    
+    // 逻辑：优先使用显式传入的 ownerNodeId，否则回退到 nodeId
+    this.ownerNodeId = ownerNodeId || nodeId || null;
   }
   
   /**
@@ -313,6 +324,8 @@ export class PluginManager {
       // ✨ [重构] 暴露标准 Engine 接口
       getSessionEngine: () => this.sessionEngine,
       getCurrentNodeId: () => this.currentNodeId,
+      // ✨ [新增] 获取资产归属 ID
+      getOwnerNodeId: () => this.ownerNodeId,
 
 
       // 清理函数（插件销毁时调用）
@@ -457,7 +470,12 @@ export class PluginManager {
    */
   getTitleBarButtons(): TitleBarButtonConfig[] { return this.titleBarButtons; }
 
-  setNodeId(nodeId: string): void { this.currentNodeId = nodeId; }
+  setNodeId(nodeId: string): void {
+      if( this.ownerNodeId === this.currentNodeId ) this.ownerNodeId = null;
+      this.currentNodeId = nodeId; 
+      // 如果未设置 ownerNodeId，更新它以保持同步
+      if (!this.ownerNodeId) this.ownerNodeId = nodeId;
+  }
   
   // ✨ [新增] 设置 Session Engine (方便外部单独调用)
   setSessionEngine(engine: ISessionEngine): void { this.sessionEngine = engine; }
