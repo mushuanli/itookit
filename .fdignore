@@ -37,6 +37,9 @@ callout.plugin.ts
 plantuml.plugin.ts
 svg.plugin.ts
 vega.plugin.ts
+# print 
+#print.service.ts
+#print.styles.ts
 
 auto-save.plugin.ts
 clipboard.plugin.ts
@@ -65,3 +68,4 @@ vfs-ui/src/components/
 #llm:
 LLMSessionEngine.ts
 providers/
+editors/

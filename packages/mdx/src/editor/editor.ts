@@ -144,12 +144,25 @@ export class MDxEditor extends IEditor {
      * 打印当前文档
      */
     async print(options?: PrintOptions): Promise<void> {
-        const content = this.getText();
-        await this.getPrintService().print(content, {
-            title: this.config.title,
-            showHeader: true,
-            ...options,
-        });
+    // 如果在编辑模式，先渲染内容
+    if (this.currentMode === 'edit' && this.renderContainer) {
+        await this.renderContent();
+    }
+    
+    // 直接使用渲染容器的 HTML，确保与预览一致
+    const contentHtml = this.renderContainer?.innerHTML || '';
+    
+    if (!contentHtml.trim()) {
+        console.warn('[MDxEditor] No content to print');
+        return;
+    }
+    
+    await this.getPrintService().printFromHtml(contentHtml, {
+        title: this.config.title,
+        showHeader: true,
+        ...options,
+    });
+
     }
 
     /**

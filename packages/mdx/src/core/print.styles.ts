@@ -10,16 +10,35 @@ export const PRINT_STYLES = `
    ============================================ */
 
 .mdx-print {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, 
-                 "Helvetica Neue", Arial, sans-serif,
-                 "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+    font-family: 
+        -apple-system, 
+        BlinkMacSystemFont, 
+        "Segoe UI", 
+        Roboto, 
+        "Helvetica Neue", 
+        Arial, 
+        /* ✅ 添加中文字体支持 */
+        "PingFang SC",           /* macOS 中文 */
+        "Hiragino Sans GB",      /* macOS 中文备选 */
+        "Microsoft YaHei",       /* Windows 中文 */
+        "WenQuanYi Micro Hei",   /* Linux 中文 */
+        "Noto Sans SC",          /* Google 中文字体 */
+        sans-serif,
+        "Apple Color Emoji", 
+        "Segoe UI Emoji", 
+        "Segoe UI Symbol";
     font-size: 14px;
-    line-height: 1.6;
+    line-height: 1.8;  /* ✅ 中文适当增加行高 */
     color: #24292f;
     background: #ffffff;
     max-width: 800px;
     margin: 0 auto;
     padding: 40px 20px;
+    
+    /* ✅ 确保文本渲染正常 */
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
 }
 
 .mdx-print * {
