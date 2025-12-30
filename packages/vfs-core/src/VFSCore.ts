@@ -12,6 +12,8 @@ import { MiddlewareFactory } from './core/MiddlewareFactory';
 import { ContentMiddleware } from './middleware/base/ContentMiddleware';
 import { PlainTextMiddleware } from './middleware/PlainTextMiddleware';
 import { ResourceBundleMiddleware } from './middleware/ResourceBundleMiddleware';
+import { SidecarMiddleware } from './middleware/SidecarMiddleware';
+
 import { VNode, VNodeType, TagData, VFS_STORES,SRSItemData } from './store/types'; 
 import { VFSError, VFSErrorCode, SearchQuery } from './core/types';
 
@@ -795,7 +797,10 @@ export class VFSCore {
     // 确保它有正确的优先级 (ResourceBundleMiddleware 设为 100)
     const bundleMiddleware = this.middlewareFactory.create(ResourceBundleMiddleware);
     this.middlewareRegistry.register(bundleMiddleware);
-  }
+    
+    const sidecarMiddleware = this.middlewareFactory.create(SidecarMiddleware);
+    this.middlewareRegistry.register(sidecarMiddleware);
+ }
 
   private async _ensureDefaultModule(): Promise<void> {
     const defaultModule = this.config.defaultModule!;

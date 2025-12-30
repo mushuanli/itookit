@@ -4,6 +4,7 @@ import {
     IEditor, EditorOptions,EditorHostContext, EditorEvent, EditorEventCallback, 
     escapeHTML
 } from '@itookit/common';
+import { LLMPrintService, type PrintService } from '@itookit/mdxeditor';
 import { HistoryView } from './components/HistoryView';
 import { ChatInput, ExecutorOption } from './components/ChatInput';
 import { 
@@ -38,7 +39,8 @@ export class LLMWorkspaceEditor implements IEditor {
     private container!: HTMLElement;
     private historyView!: HistoryView;
     private chatInput!: ChatInput;
-    
+    private printService: PrintService | null = null;
+
     // 会话管理器（代理层）
     private sessionManager: SessionManager;
     
@@ -131,7 +133,13 @@ export class LLMWorkspaceEditor implements IEditor {
         this.historyView = new HistoryView(
             historyEl,
             (id, content, type) => this.handleContentChange(id, content, type),
-            (action: NodeAction, nodeId: string) => this.handleNodeAction(action, nodeId)
+            (action: NodeAction, nodeId: string) => this.handleNodeAction(action, nodeId),
+        {
+            // ✅ 关键：传递上下文
+            nodeId: this.options.nodeId,
+            ownerNodeId: this.options.ownerNodeId || this.options.nodeId,
+            sessionEngine: this.options.sessionEngine,
+        }
         );
 
         // ✅ 修复：获取初始执行器列表
@@ -398,47 +406,22 @@ export class LLMWorkspaceEditor implements IEditor {
         this.statusIndicator = this.container.querySelector('#llm-status-indicator') as HTMLElement;
     }
 
+    /**
+     * 获取打印服务（使用 LLM 专用服务）
+     */
+    private getPrintService(): PrintService {
+        if (!this.printService) {
+            this.printService = new LLMPrintService(
+                this.options.sessionEngine,
+                this.options.nodeId
+            );
+        }
+        return this.printService;
+    }
+
     // ================================================================
     // 事件绑定
     // ================================================================
-
-    /**
-     * @description 简化的 Markdown 到 HTML 转换，用于打印。
-     *              在实际应用中，您会使用专用的 Markdown-to-HTML 库（如 'markdown-it'）
-     *              或 '@itookit/mdxeditor' 中提供的无头渲染组件，以确保一致且丰富的格式。
-     */
-    private _renderMarkdownForPrint(markdown: string): string {
-        let html = '';
-        const lines = markdown.split('\n');
-        let inCodeBlock = false;
-        let currentCodeLang = '';
-
-        for (const line of lines) {
-            if (line.startsWith('```')) {
-                inCodeBlock = !inCodeBlock;
-                if (inCodeBlock) {
-                    currentCodeLang = line.substring(3).trim();
-                    html += `<pre><code${currentCodeLang ? ` class="language-${currentCodeLang}"` : ''}>`;
-                } else {
-                    html += `</code></pre>`;
-                    currentCodeLang = '';
-                }
-            } else if (inCodeBlock) {
-                html += escapeHTML(line) + '\n';
-            } else if (line.startsWith('# ')) {
-                html += `<h1>${escapeHTML(line.substring(2))}</h1>`;
-            } else if (line.startsWith('## ')) {
-                html += `<h2>${escapeHTML(line.substring(3))}</h2>`;
-            } else if (line.startsWith('### ')) {
-                html += `<h3>${escapeHTML(line.substring(4))}</h3>`;
-            } else if (line.trim() === '') {
-                html += '<p></p>';
-            } else {
-                html += `<p>${escapeHTML(line)}</p>`;
-            }
-        }
-        return html;
-    }
 
     private bindTitleBarEvents(): void {
         // Sidebar Toggle
@@ -480,44 +463,19 @@ export class LLMWorkspaceEditor implements IEditor {
 
         // Print
         this.container.querySelector('#llm-btn-print')?.addEventListener('click', async () => {
-            const md = this.sessionManager.exportToMarkdown();
-            const printableHtml = this._renderMarkdownForPrint(md); // 使用新添加的辅助方法
-
-            const printWindow = window.open('', '_blank');
-            if (!printWindow) {
-                console.error('Failed to open print window.');
-                return;
+            try {
+                const md = this.sessionManager.exportToMarkdown();
+                
+                await this.getPrintService().print(md, {
+                    title: this.currentTitle || 'Chat Conversation',
+                    showHeader: true,
+                    headerMeta: {
+                        date: new Date().toLocaleString(),
+                    },
+                });
+            } catch (err) {
+                console.error('[LLMWorkspaceEditor] Print failed:', err);
             }
-
-            printWindow.document.write(`
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <title>${escapeHTML(this.currentTitle)} - Print</title>
-                    <style>
-                        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol"; margin: 20mm; color: #333; }
-                        h1, h2, h3, h4, h5, h6 { margin-top: 1em; margin-bottom: 0.5em; line-height: 1.2; }
-                        p { margin-top: 0.5em; margin-bottom: 0.5em; line-height: 1.6; }
-                        pre { background-color: #f6f8fa; border: 1px solid #e1e4e8; border-radius: 3px; padding: 16px; overflow-x: auto; font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace; font-size: 0.9em; line-height: 1.4; }
-                        code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace; background-color: rgba(27,31,35,.05); border-radius: 3px; padding: .2em .4em; }
-                        /* 添加更多打印专用样式以确保良好的呈现效果 */
-                        @page { margin: 15mm; }
-                    </style>
-                </head>
-                <body>
-                    ${printableHtml}
-                </body>
-                </html>
-            `);
-            printWindow.document.close(); // 这很重要，确保内容被解析和渲染
-
-            // 等待内容可能加载（例如，如果 Markdown 中包含图片）
-            // 一个简单的超时可能足够，或者检查 `printWindow.document.readyState`
-            await new Promise(resolve => setTimeout(resolve, 500)); // 稍等片刻让内容渲染
-
-            printWindow.focus(); // 在打印前聚焦窗口
-            printWindow.print(); // 触发打印对话框
-            printWindow.close(); // 打印后（或用户取消）关闭窗口
         });
     }
 
@@ -968,6 +926,12 @@ export class LLMWorkspaceEditor implements IEditor {
         if (this.globalEventUnsubscribe) {
             this.globalEventUnsubscribe();
             this.globalEventUnsubscribe = null;
+        }
+
+        // ✅ 清理打印服务
+        if (this.printService) {
+            this.printService.destroy?.();
+            this.printService = null;
         }
 
         // 解绑会话（但不注销，允许后台运行）

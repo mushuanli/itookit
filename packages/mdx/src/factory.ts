@@ -21,6 +21,7 @@ import { CodeBlockControlsPlugin, CodeBlockControlsPluginOptions } from './plugi
 import { ToolbarPlugin } from './plugins/ui/toolbar.plugin';
 import { FormattingPlugin } from './plugins/ui/formatting.plugin';
 import { CoreTitleBarPlugin, CoreTitleBarPluginOptions } from './plugins/ui/titlebar.plugin';
+import { AssetManagerPlugin } from './plugins/ui/asset-manager.plugin';
 import { SourceSyncPlugin } from './plugins/interactions/source-jump.plugin';
 import { TagPlugin, TagPluginOptions } from './plugins/autocomplete/tag.plugin';
 import { MentionPlugin, MentionPluginOptions } from './plugins/autocomplete/mention.plugin';
@@ -116,6 +117,7 @@ registerPlugin('plantuml', PlantUMLPlugin, { priority: 70 });
 registerPlugin('vega', VegaPlugin, { priority: 71 });
 // [新增] 注册自动保存插件
 registerPlugin('interaction:auto-save', AutoSavePlugin, { priority: 90 }); 
+registerPlugin('ui:asset-manager', AssetManagerPlugin, { priority: 90,dependencies: ['core:titlebar'] });
 registerPlugin('core:asset-resolver', AssetResolverPlugin, { priority: 95 });
 
 export type PluginConfig =
@@ -261,6 +263,35 @@ export async function createMDxEditor(
   config: MDxEditorFactoryConfig = {}
 ): Promise<IEditor> {
   const userPlugins = config.plugins || [];
+
+  // 获取 TitleBar 的配置
+  const titleBarOptions = config.defaultPluginOptions?.['core:titlebar'] || {};
+  
+  // --- ✨ 自动加载逻辑开始 ---
+  
+  // 检查是否应该加载 Asset Manager
+  // 逻辑：
+  // 1. 默认开启 (undefined === true)
+  // 2. 除非用户显式设置为 false
+  // 3. 并且当前环境确实加载了 titlebar (无论是通过默认还是显式指定)
+  
+  const isTitleBarEnabled = userPlugins.includes('core:titlebar') || 
+                            // 检查默认插件列表是否包含 titlebar (假设 DEFAULT_PLUGINS 里有)
+                            DEFAULT_PLUGINS.includes('core:titlebar');
+
+  const shouldLoadAssetManager = 
+      isTitleBarEnabled && 
+      titleBarOptions.enableAssetManager !== false; // 默认为 true
+
+  // 检查列表中是否已经存在 (避免重复)
+  const hasAssetManager = userPlugins.some(p => getPluginName(p) === 'ui:asset-manager');
+
+  if (shouldLoadAssetManager && !hasAssetManager) {
+      // 自动注入插件
+      userPlugins.push('ui:asset-manager');
+      console.log('[Factory] Auto-injecting AssetManagerPlugin based on configuration.');
+  }
+  config.plugins = userPlugins;
 
   console.log(`[createMDxEditor] Received config.Plugin:${userPlugins} Content length: ${(config.initialContent || '').length}.`);
 

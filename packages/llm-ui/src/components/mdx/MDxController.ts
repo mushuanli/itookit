@@ -1,5 +1,16 @@
 // @file llm-ui/components/mdx/MDxController.ts
 import { createMDxEditor, MDxEditor } from '@itookit/mdxeditor';
+import type { ISessionEngine } from '@itookit/common';
+
+export interface MDxControllerOptions {
+    readOnly?: boolean;
+    onChange?: (text: string) => void;
+    streaming?: boolean;
+    // ✅ 新增：编辑器上下文
+    nodeId?: string;
+    ownerNodeId?: string;
+    sessionEngine?: ISessionEngine;
+}
 
 export class MDxController {
     // ✨ [修改] 类型定义放宽为 IEditor，以便使用通用接口
@@ -12,6 +23,9 @@ export class MDxController {
     
     // ✅ 新增：记录初始化时是否为流式模式
     private isStreamingInit: boolean = false;
+    
+    // ✅ 新增：保存上下文
+    private options: MDxControllerOptions;
 
     private isInitialized: boolean = false;
     private pendingChunks: string[] = [];
@@ -29,13 +43,14 @@ export class MDxController {
     // ✅ 新增：批量缓冲
     private contentSnapshot: string = '';
 
-    constructor(container: HTMLElement, initialContent: string, options?: { 
-        readOnly?: boolean,
-        onChange?: (text: string) => void,
-        streaming?: boolean // ✨ 新增参数
-    }) {
+    constructor(
+        container: HTMLElement, 
+        initialContent: string, 
+        options?: MDxControllerOptions  // ✅ 使用新的选项接口
+    ) {
         this.container = container;
         this.currentContent = initialContent;
+        this.options = options || {};
         this.isReadOnly = options?.readOnly ?? true;
         this.onChangeCallback = options?.onChange;
         
@@ -65,6 +80,12 @@ export class MDxController {
             this.editor = await createMDxEditor(this.container, {
                 initialContent: this.currentContent,
                 initialMode: this.isReadOnly ? 'render' : 'edit',
+                
+                // ✅ 关键修复：传递上下文
+                nodeId: this.options.nodeId,
+                ownerNodeId: this.options.ownerNodeId,
+                sessionEngine: this.options.sessionEngine,
+                
                 plugins: [
                     'editor:core',
                     'ui:formatting',

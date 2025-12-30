@@ -11,14 +11,13 @@ export interface MDxRendererConfig {
   /** 当前渲染内容所属的节点 ID */
   nodeId?: string;
   
+  ownerNodeId?: string;  // ✅ 新增
+
   /** 
    * 会话引擎实例 
    * 用于解析资源、获取元数据等
    */
   sessionEngine?: ISessionEngine;
-  
-  /** @deprecated 请使用 sessionEngine */
-  vfsCore?: any;
   
   persistenceAdapter?: IPersistenceAdapter;
   [key: string]: any;
@@ -46,9 +45,9 @@ export class MDxRenderer {
     // ✅ [核心] 优先使用 sessionEngine
     const engine = config.sessionEngine;
     const nodeId = config.nodeId;
-    
-    this.pluginManager.setContext(nodeId, engine);
 
+    const ownerNodeId = config.ownerNodeId ?? config.nodeId;
+    this.pluginManager.setContext(nodeId, ownerNodeId, engine);
 
     if (config.persistenceAdapter) {
       this.pluginManager.setDataAdapter(config.persistenceAdapter);

@@ -69,20 +69,23 @@ export interface PluginContext {
 
   // 生命周期钩子
   on(hook: string, callback: Function): () => void;
-  
+
   // 依赖注入
   provide(key: string | symbol, service: any): void;
   inject(key: string | symbol): any;
-  
+
   // 事件总线
   emit(eventName: string, payload: any): void;
   listen(eventName: string, callback: Function): () => void;
-  
+
   // 持久化存储
   getScopedStore(): ScopedPersistenceStore;
   
   getSessionEngine?(): ISessionEngine | null;
+  /** 获取当前节点 ID */
   getCurrentNodeId(): string | null;
+  /** 获取资产归属节点 ID */
+  getOwnerNodeId?: () => string | null;  // ✅ 新增这一行
 
   
   // 编辑器专用（仅在 MDxEditor 中可用）
