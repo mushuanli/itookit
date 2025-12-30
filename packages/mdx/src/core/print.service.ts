@@ -50,9 +50,14 @@ export interface PrintService {
     renderForPrint(markdown: string, options?: PrintOptions): Promise<string>;
     
     /**
-     * 打开打印预览窗口并触发打印
+     * 打开打印预览窗口并触发打印（从 Markdown 渲染）
      */
     print(markdown: string, options?: PrintOptions): Promise<void>;
+    
+    /**
+     * ✅ [新增] 直接使用 HTML 内容打印（跳过渲染步骤）
+     */
+    printFromHtml(html: string, options?: PrintOptions): Promise<void>;
     
     /**
      * 销毁服务，释放资源
@@ -179,6 +184,13 @@ export class DefaultPrintService implements PrintService {
      */
     async print(markdown: string, options: PrintOptions = {}): Promise<void> {
         const contentHtml = await this.renderForPrint(markdown, options);
+        await this.printFromHtml(contentHtml, options);
+    }
+
+    /**
+     * ✅ [新增] 直接使用 HTML 内容打印
+     */
+    async printFromHtml(contentHtml: string, options: PrintOptions = {}): Promise<void> {
         const title = options.title || 'Print';
         const styles = this.getStyles(options);
         const header = this.buildHeader(options);
