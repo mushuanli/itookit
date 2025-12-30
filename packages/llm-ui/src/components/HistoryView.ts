@@ -337,7 +337,7 @@ export class HistoryView {
         if (!bubbleEl) return;
 
         // Action Bindings
-        wrapper.querySelector('[data-action="retry"]')?.addEventListener('click', (e) => {
+        wrapper.querySelector('[data-action="resend"]')?.addEventListener('click', (e) => {
             e.stopPropagation();
             this.onNodeAction?.('resend', group.id);
         });

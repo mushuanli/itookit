@@ -343,20 +343,8 @@ export class SessionManager {
             throw new EngineError(EngineErrorCode.SESSION_INVALID, 'No session bound');
         }
         
-        const sessions = this.getSessions();
-        const session = sessions.find(s => s.id === userSessionId);
-        
-        if (!session || session.role !== 'user') {
-            throw new EngineError(EngineErrorCode.SESSION_INVALID, 'Invalid user session');
-        }
-        
-        // 重发 = 编辑(内容不变) + 自动运行
-        await this.registry.editMessage(
-            this.sessionId, 
-            userSessionId, 
-            session.content || '', 
-            true
-        );
+    // ✅ 使用专门的方法，不再通过 editMessage 间接调用
+    await this.registry.resendUserMessage(this.sessionId, userSessionId);
     }
     
     // ================================================================
