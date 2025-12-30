@@ -37,6 +37,13 @@ async function showConfirmDialog(message: string): Promise<boolean> {
     });
 }
 
+export interface HistoryViewOptions {
+    // ✅ 新增：编辑器上下文
+    nodeId?: string;
+    ownerNodeId?: string;
+    sessionEngine?: ISessionEngine;
+}
+
 export class HistoryView {
     private nodeMap = new Map<string, HTMLElement>();
     private editorMap = new Map<string, MDxController>();
@@ -68,14 +75,19 @@ export class HistoryView {
     // ✅ 新增：已渲染的 Session ID 集合（用于去重）
     private renderedSessionIds = new Set<string>();
 
+    // ✅ 新增：保存上下文
+    private contextOptions: HistoryViewOptions;
+
     constructor(
         container: HTMLElement,
         onContentChange?: (id: string, content: string, type: 'user' | 'node') => void,
-        onNodeAction?: NodeActionCallback
+        onNodeAction?: NodeActionCallback,
+        options?: HistoryViewOptions  // ✅ 新增参数
     ) {
         this.container = container;
         this.onContentChange = onContentChange;
         this.onNodeAction = onNodeAction;
+        this.contextOptions = options || {};
 
         // ✅ 优化：使用 passive 监听器
         this.container.addEventListener('scroll', this.handleScroll.bind(this), { passive: true });
@@ -308,7 +320,11 @@ export class HistoryView {
                 this.onContentChange?.(group.id, text, 'user');
                 const previewEl = wrapper.querySelector('.llm-ui-header-preview');
                 if (previewEl) previewEl.textContent = this.getPreviewText(text);
-            }
+            },
+            // ✅ 关键：传递上下文
+            nodeId: this.contextOptions.nodeId,
+            ownerNodeId: this.contextOptions.ownerNodeId,
+            sessionEngine: this.contextOptions.sessionEngine,
         });
         this.editorMap.set(group.id, controller);
         this.bindUserBubbleEvents(wrapper, group, controller);
@@ -615,7 +631,11 @@ export class HistoryView {
                     }
                     const previewEl = element.querySelector('.llm-ui-header-preview');
                     if (previewEl) previewEl.textContent = this.getPreviewText(text);
-                }
+                },
+                // ✅ 关键：传递上下文
+                nodeId: this.contextOptions.nodeId,
+                ownerNodeId: this.contextOptions.ownerNodeId,
+                sessionEngine: this.contextOptions.sessionEngine,
             });
             this.editorMap.set(node.id, controller);
 

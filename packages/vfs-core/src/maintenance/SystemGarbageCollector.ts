@@ -111,11 +111,16 @@ export class SystemGarbageCollector {
 
     /**
      * 判断是否为伴生资源节点
-     * 规则：路径中包含 /.xxx/ 结构的目录
+     * [修复] 优先检查元数据，解决路径误判问题
      */
     private isAssetNode(node: EngineNode): boolean {
-        // 排除自己是伴生目录本身的情况 (type check needed if node has type)
-        // 简单的正则匹配路径
+        // 1. 优先检查元数据 (createAsset 时写入)
+        if (node.metadata?.isAsset === true) {
+            return true;
+        }
+
+        // 2. 兼容性回退：检查路径是否包含隐藏目录结构
+        // 匹配 /.filename/ 或 /.assets/ 结构
         if (!node.path) return false;
         // 匹配 /foo/.bar/baz.png 或 /.bar/baz.png
         return /\/\.[^/]+\//.test(node.path);

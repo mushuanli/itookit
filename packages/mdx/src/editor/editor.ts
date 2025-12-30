@@ -19,6 +19,13 @@ import {
     slugify 
 } from '@itookit/common';
 
+import { 
+    DefaultPrintService, 
+    type PrintService, 
+    type PrintOptions 
+} from '../core/print.service';
+
+
 export interface MDxEditorConfig extends EditorOptions {
   searchMarkClass?: string;
   persistenceAdapter?: IPersistenceAdapter;
@@ -47,7 +54,8 @@ export class MDxEditor extends IEditor {
   private searchCompartment = new Compartment();
   private isDestroying = false;
   private _isDirty = false;
-  
+  private printService: PrintService | null = null;
+
   // [修改] 使用 Promise 引用来管理保存状态，解决并发和销毁时的竞态问题
   private currentSavePromise: Promise<void> | null = null;
 
@@ -56,10 +64,15 @@ export class MDxEditor extends IEditor {
   constructor(options: MDxEditorConfig = {}) {
     super(); 
     this.config = options;
+    
+    // ✅ 安全获取 ownerNodeId，优先使用显式传入的值，否则回退到 nodeId
+    this.config.ownerNodeId = options.ownerNodeId ?? options.nodeId;
+    
     this.currentMode = options.initialMode || 'edit';
     this.renderer = new MDxRenderer({
       searchMarkClass: options.searchMarkClass,
       nodeId: options.nodeId,
+      ownerNodeId: this.config.ownerNodeId,
       persistenceAdapter: options.persistenceAdapter,
       sessionEngine: options.sessionEngine,
     });
@@ -113,6 +126,42 @@ export class MDxEditor extends IEditor {
     this.renderer.usePlugin(plugin);
     return this;
   }
+
+    /**
+     * 获取打印服务实例（延迟初始化）
+     */
+    private getPrintService(): PrintService {
+        if (!this.printService) {
+            this.printService = new DefaultPrintService(
+                this.config.sessionEngine,
+                this.config.nodeId
+            );
+        }
+        return this.printService;
+    }
+
+    /**
+     * 打印当前文档
+     */
+    async print(options?: PrintOptions): Promise<void> {
+        const content = this.getText();
+        await this.getPrintService().print(content, {
+            title: this.config.title,
+            showHeader: true,
+            ...options,
+        });
+    }
+
+    /**
+     * 获取可打印的 HTML
+     */
+    async getHtmlForPrint(options?: PrintOptions): Promise<string> {
+        const content = this.getText();
+        return await this.getPrintService().renderForPrint(content, {
+            title: this.config.title,
+            ...options,
+        });
+    }
 
   /**
    * 创建编辑器和渲染器的 DOM 容器。
@@ -579,6 +628,12 @@ export class MDxEditor extends IEditor {
           console.log('[MDxEditor] Performing final save during destroy...');
           await this.save();
       }
+
+        // 清理打印服务
+        if (this.printService) {
+            this.printService.destroy?.();
+            this.printService = null;
+        }
 
       // ✨ [清理] 移除了原有的 VFS 直接保存逻辑
       // 现在应由调用者（如 Connector 或 App 层）通过 sessionEngine 处理最终保存

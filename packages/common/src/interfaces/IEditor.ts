@@ -56,6 +56,15 @@ export interface EditorOptions {
    * 结合 sessionEngine 使用，用于定位存储位置、元数据和上下文。
    */
   nodeId?: string;
+
+  /**
+   * [新增] 资产归属节点 ID
+   * 用于确定图片/附件上传到哪里，以及 @asset/ 路径解析的上下文。
+   * - 如果编辑器作为独立页面，通常 ownerNodeId === nodeId。
+   * - 如果编辑器是某个大表单的子控件（如评论区、卡片描述），ownerNodeId 可能是父级 ID。
+   * - 如果未提供，默认回退使用 nodeId。
+   */
+  ownerNodeId?: string;
   
   /**
    * 会话引擎实例。
@@ -71,13 +80,13 @@ export interface EditorOptions {
      * [标准注入] 宿主上下文
      * 编辑器通过它控制外部 UI（如侧边栏、全局提示）
      */
-    hostContext?: EditorHostContext;
-    
-    /** 插件列表 */
-    plugins?: any[];
-    
-    /** 插件配置 */
-    defaultPluginOptions?: Record<string, any>;
+  hostContext?: EditorHostContext;
+  
+  /** 插件列表 */
+  plugins?: any[];
+  
+  /** 插件配置 */
+  defaultPluginOptions?: Record<string, any>;
     
   /** 允许传递任何特定于实现的选项 */
   [key: string]: any; 
