@@ -6,7 +6,7 @@ import { NodeRenderer } from './NodeRenderer';
 import { MDxController } from './mdx/MDxController';
 import { NodeTemplates } from './templates/NodeTemplates';
 import { LayoutTemplates } from './templates/LayoutTemplates';
-import { escapeHTML, Modal } from '@itookit/common';
+import { escapeHTML, Modal,ISessionEngine } from '@itookit/common';
 
 /**
  * 包装 common Modal 为 Promise 形式
