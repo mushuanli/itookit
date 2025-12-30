@@ -44,7 +44,7 @@ export class NodeTemplates {
                          ${branchNavHtml}
                          
                          <button class="llm-icon-btn" data-action="delete" title="Delete">🗑️</button>
-                         <button class="llm-icon-btn" data-action="retry" title="Resend">↻</button>
+                         <button class="llm-icon-btn" data-action="resend" title="Resend">↻</button>
                          <button class="llm-icon-btn" data-action="edit" title="Edit">✎</button>
                          <button class="llm-icon-btn" data-action="copy" title="Copy">📋</button>
                          <button class="llm-icon-btn" data-action="collapse" title="Toggle">

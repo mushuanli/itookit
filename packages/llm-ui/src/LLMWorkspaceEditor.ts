@@ -589,35 +589,60 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     private async handleRetry(nodeId: string): Promise<void> {
-        const sessions = this.sessionManager.getSessions();
-        const session = sessions.find(s => s.id === nodeId);
+    const sessions = this.sessionManager.getSessions();
+    let session = sessions.find(s => s.id === nodeId);
 
-        if (!session) return;
-
-        // ✅ 检查是否可以重试
-        const canRetry = this.sessionManager.canRetry(nodeId);
-        if (!canRetry.allowed) {
-            console.warn(`[LLMWorkspaceEditor] Cannot retry: ${canRetry.reason}`);
-            return;
-        }
-
-        this.chatInput.setLoading(true);
-        try {
-            if (session.role === 'user') {
-                await this.sessionManager.resendUserMessage(nodeId);
-            } else {
-                await this.sessionManager.retryGeneration(nodeId, {
-                    preserveCurrent: true,
-                    navigateToNew: true
-                });
-            }
-        } catch (e: any) {
-            console.error('[LLMWorkspaceEditor] Retry failed:', e);
-            this.historyView.renderError(e);
-        } finally {
-            this.updateStatusIndicator();
+    // ✅ 新增: 通过执行节点 ID 回退查找
+    if (!session) {
+        session = sessions.find(s => 
+            s.executionRoot?.id === nodeId ||
+            this.findNodeInTree(s.executionRoot, nodeId)
+        );
+        
+        if (session) {
+            console.log(`[LLMWorkspaceEditor] Found session via execution node: ${session.id}`);
         }
     }
+
+    if (!session) {
+        console.warn(`[LLMWorkspaceEditor] Cannot retry: session not found for ${nodeId}`);
+        this.historyView.renderError(new Error('Message not found'));
+        return;
+    }
+
+    const canRetry = this.sessionManager.canRetry(session.id);
+    if (!canRetry.allowed) {
+        console.warn(`[LLMWorkspaceEditor] Cannot retry: ${canRetry.reason}`);
+        return;
+    }
+
+    this.chatInput.setLoading(true);
+    try {
+        if (session.role === 'user') {
+            await this.sessionManager.resendUserMessage(session.id);
+        } else {
+            await this.sessionManager.retryGeneration(session.id, {
+                preserveCurrent: true,
+                navigateToNew: true
+            });
+        }
+        // ✅ 成功时不在这里解锁，由事件驱动
+    } catch (e: any) {
+        console.error('[LLMWorkspaceEditor] Retry failed:', e);
+        this.historyView.renderError(e);
+        this.chatInput.setLoading(false);  // ✅ 仅错误时解锁
+    }
+    }
+
+// =====================================================
+// 新增: 辅助方法 - 在执行树中查找节点
+// =====================================================
+
+private findNodeInTree(node: ExecutionNode | undefined, targetId: string): boolean {
+    if (!node) return false;
+    if (node.id === targetId) return true;
+    return node.children?.some(c => this.findNodeInTree(c, targetId)) ?? false;
+}
 
     private async handleDelete(nodeId: string): Promise<void> {
         console.log(`[LLMWorkspaceEditor] Deleting: ${nodeId}`);
@@ -702,9 +727,11 @@ export class LLMWorkspaceEditor implements IEditor {
         this.chatInput.setLoading(true);
         try {
             await this.sessionManager.editMessage(nodeId, session.content || '', true);
+        // 成功时由事件驱动解锁
         } catch (e: any) {
             console.error('[LLMWorkspaceEditor] Edit and retry failed:', e);
             this.historyView.renderError(e);
+        this.chatInput.setLoading(false);  // ✅ 仅错误时解锁
         }
     }
 
@@ -712,9 +739,11 @@ export class LLMWorkspaceEditor implements IEditor {
         this.chatInput.setLoading(true);
         try {
             await this.sessionManager.resendUserMessage(nodeId);
+        // 成功时由事件驱动解锁
         } catch (e: any) {
             console.error('[LLMWorkspaceEditor] Resend failed:', e);
             this.historyView.renderError(e);
+        this.chatInput.setLoading(false);  // ✅ 仅错误时解锁
         }
     }
 
@@ -771,14 +800,6 @@ export class LLMWorkspaceEditor implements IEditor {
     // ================================================================
     // UI 更新
     // ================================================================
-
-    /**
-     * 更新状态指示器 (Ready / Generating...)
-     */
-    private updateStatusIndicator(): void {
-        const status = this.sessionManager.getStatus();
-        this.updateStatusIndicatorFromStatus(status === 'unbound' ? 'idle' : status);
-    }
 
     /**
      * 更新后台运行指示器

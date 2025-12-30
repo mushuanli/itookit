@@ -38,8 +38,8 @@ plantuml.plugin.ts
 svg.plugin.ts
 vega.plugin.ts
 # print 
-#print.service.ts
-#print.styles.ts
+print.service.ts
+print.styles.ts
 
 auto-save.plugin.ts
 clipboard.plugin.ts

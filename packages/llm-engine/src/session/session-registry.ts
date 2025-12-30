@@ -920,7 +920,7 @@ export class SessionRegistry {
             // 重新提交任务
             await this.submitTask(sessionId, {
                 text: newContent,
-                files: [],
+                files: session.files || [],  // ← 修复点
                 executorId: 'default'
             }, {
                 skipUserMessage: true,
@@ -928,7 +928,51 @@ export class SessionRegistry {
             });
         }
     }
+
+// =====================================================
+// 新增 3: resendUserMessage 专门方法
+// =====================================================
+
+/**
+ * 重发用户消息
+ * 删除当前响应，重新生成（不创建新的用户消息）
+ */
+async resendUserMessage(
+    sessionId: string,
+    userMessageId: string,
+    options?: { agentId?: string }
+): Promise<void> {
+    const state = this.sessionStates.get(sessionId);
     
+    if (!state) {
+        throw new EngineError(EngineErrorCode.SESSION_NOT_FOUND, 'Session not found');
+    }
+
+    const session = state.findSessionById(userMessageId);
+    if (!session || session.role !== 'user') {
+        throw new EngineError(EngineErrorCode.SESSION_INVALID, 'Invalid user session');
+    }
+
+    // 删除当前用户消息后的所有 assistant 响应
+    await this.deleteAssociatedResponses(sessionId, userMessageId, state);
+
+    // 发送重试开始事件
+    this.emitSessionEvent(sessionId, {
+        type: 'retry_started',
+        payload: { originalId: userMessageId, newId: '' }
+    });
+
+    // 重新提交任务
+    await this.submitTask(sessionId, {
+        text: session.content || '',
+        files: session.files || [],
+        executorId: options?.agentId || 'default'
+    }, {
+        skipUserMessage: true,
+        parentUserNodeId: session.persistedNodeId
+    });
+}
+
     /**
      * 删除关联的响应消息
      */
@@ -1019,7 +1063,7 @@ export class SessionRegistry {
         // 重新提交任务
         await this.submitTask(sessionId, {
             text: userMessage.content || '',
-            files: [],
+            files: userMessage.files || [],  // ← 修复点
             executorId: options?.agentId || 'default'
         }, {
             skipUserMessage: true,
