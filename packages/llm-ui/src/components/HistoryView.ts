@@ -609,12 +609,14 @@ export class HistoryView {
         // 分支导航
         element.querySelector('[data-action="prev-sibling"]')?.addEventListener('click', (e) => {
             e.stopPropagation();
-            this.onNodeAction?.('prev-sibling', node.id);
+        const sessionId = getSessionId();
+        this.onNodeAction?.('prev-sibling', sessionId);
         });
 
         element.querySelector('[data-action="next-sibling"]')?.addEventListener('click', (e) => {
             e.stopPropagation();
-            this.onNodeAction?.('next-sibling', node.id);
+        const sessionId = getSessionId();
+        this.onNodeAction?.('next-sibling', sessionId);
         });
 
         // 初始化内容编辑器

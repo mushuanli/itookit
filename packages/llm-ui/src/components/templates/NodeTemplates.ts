@@ -72,7 +72,20 @@ export class NodeTemplates {
 
     static renderAgentHeader(node: ExecutionNode, preview: string, icon: string, isCollapsed: boolean = false): string {
         const timeStr = this.formatTime(node.startTime);
-        
+
+    // ✅ 新增：获取分支信息
+    const siblingIndex = node.data.metaInfo?.siblingIndex ?? 0;
+    const siblingCount = node.data.metaInfo?.siblingCount ?? 1;
+    const hasSiblings = siblingCount > 1;
+    
+    // ✅ 新增：分支导航 HTML
+    const branchNavHtml = hasSiblings ? `
+        <button class="llm-icon-btn" data-action="prev-sibling" title="Previous" ${siblingIndex === 0 ? 'disabled' : ''}>←</button>
+        <span class="llm-ui-branch-indicator">${siblingIndex + 1}/${siblingCount}</span>
+        <button class="llm-icon-btn" data-action="next-sibling" title="Next" ${siblingIndex === siblingCount - 1 ? 'disabled' : ''}>→</button>
+        <div class="llm-ui-sep"></div>
+    ` : '';
+
         // ✨ [修改] 识别 Agent 并添加可点击属性
         const agentId = node.data.metaInfo?.agentId;
         // 只有类型为 agent 且有 ID 的（非 Tool）才可点击
@@ -101,6 +114,7 @@ export class NodeTemplates {
 
                 <!-- 使用 margin-left: auto 将 actions 推到右边 -->
                 <div class="llm-ui-actions" style="margin-left: auto; display: flex; gap: 4px;">
+                ${branchNavHtml}
                     <button class="llm-icon-btn" data-action="delete" title="Delete">🗑️</button>
                     <!-- 新增 Edit 按钮 (用于修改输出结果) -->
                     <button class="llm-icon-btn" data-action="retry" title="Retry">↻</button>

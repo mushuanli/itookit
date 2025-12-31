@@ -520,14 +520,6 @@
 /* =========================================
    8. 其他组件 (Branch Nav, Error, Welcome)
    ========================================= */
-.llm-ui-branch-indicator {
-    font-size: 11px;
-    color: inherit;
-    opacity: 0.8;
-    margin: 0 2px;
-    min-width: 24px;
-    text-align: center;
-}
 
 .llm-ui-file-badge {
     display: inline-block;

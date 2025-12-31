@@ -3,7 +3,7 @@
 import { NodeStatus } from '@itookit/llm-kernel';
 
 /**
- * ✅ [新增] 聊天附件定义
+ * 聊天附件定义
  */
 export interface ChatFile {
     name: string;
@@ -18,6 +18,15 @@ export interface ChatFile {
      * 用于 Kernel 执行时读取内容
      */
     fileRef?: File | Blob;
+}
+
+/**
+ * ✅ 新增：分支信息
+ */
+export interface BranchInfo {
+    siblingIndex: number;
+    siblingCount: number;
+    parentAssistantId?: string;
 }
 
 /**
@@ -132,7 +141,16 @@ export type OrchestratorEvent =
     // 编辑/删除事件
     | { type: 'messages_deleted'; payload: { deletedIds: string[] } }
     | { type: 'message_edited'; payload: { sessionId: string; newContent: string } }
-    | { type: 'retry_started'; payload: { originalId: string; newId: string } }
+    // ✅ 修复：扩展 payload
+    | { 
+        type: 'retry_started'; 
+        payload: { 
+            originalId: string; 
+            newId: string;
+            siblingIndex?: number;
+            siblingCount?: number;
+        } 
+      }
     | { type: 'sibling_switch'; payload: { sessionId: string; newIndex: number; total: number } };
 
 /**
@@ -185,9 +203,11 @@ export interface ExecutionTask {
         files: ChatFile[];
         executorId: string;
     };
+    // ✅ 修复：添加 branchInfo
     options: {
         skipUserMessage?: boolean;
         parentUserNodeId?: string;
+        branchInfo?: BranchInfo;
     };
     priority: number;
     createdAt: number;
