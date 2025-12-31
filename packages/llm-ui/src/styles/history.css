@@ -57,10 +57,27 @@
 }
 
 .llm-ui-branch-indicator {
-    color: var(--llm-ui-text-secondary, #666);
-    font-weight: 500;
-    min-width: 24px;
-    text-align: center;
+    font-size: 12px;
+    color: var(--llm-text-secondary, #888);
+    padding: 2px 6px;
+    background: var(--llm-bg-tertiary, rgba(0,0,0,0.1));
+    border-radius: 4px;
+    font-family: monospace;
+}
+
+/* 分隔符 */
+.llm-ui-sep {
+    width: 1px;
+    height: 16px;
+    background: var(--llm-border-color, rgba(255,255,255,0.2));
+    margin: 0 4px;
+}
+
+/* 禁用的导航按钮 */
+.llm-icon-btn[disabled] {
+    opacity: 0.3;
+    cursor: not-allowed;
+    pointer-events: none;
 }
 
 /* 编辑操作按钮 */
