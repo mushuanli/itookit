@@ -105,7 +105,8 @@ export class SessionState {
     
     createAssistantMessage(
         config: ExecutorConfig,
-        persistedNodeId: string
+    persistedNodeId: string,
+    branchInfo?: { siblingIndex: number; siblingCount: number }  // ✅ 新增
     ): ExecutionNode {
         const rootNode: ExecutionNode = {
             id: generateUUID(),
@@ -119,7 +120,9 @@ export class SessionState {
                 thought: '',
                 metaInfo: {
                     agentId: config.id,
-                    agentName: config.name
+                agentName: config.name,
+                siblingIndex: branchInfo?.siblingIndex ?? 0,      // ✅ 新增
+                siblingCount: branchInfo?.siblingCount ?? 1       // ✅ 新增
                 }
             },
             children: []
@@ -130,7 +133,9 @@ export class SessionState {
             timestamp: Date.now(),
             role: 'assistant',
             executionRoot: rootNode,
-            persistedNodeId
+        persistedNodeId,
+        siblingIndex: branchInfo?.siblingIndex,    // ✅ 新增
+        siblingCount: branchInfo?.siblingCount     // ✅ 新增
         };
         
         this.sessions.push(session);

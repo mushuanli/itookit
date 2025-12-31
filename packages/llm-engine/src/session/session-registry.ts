@@ -259,8 +259,17 @@ export class SessionRegistry {
      */
     async submitTask(
         sessionId: string,
-        input: { text: string; files: ChatFile[]; executorId: string }, // <--- Fixed here
-        options?: { priority?: number; skipUserMessage?: boolean; parentUserNodeId?: string }
+    input: { text: string; files: ChatFile[]; executorId: string },
+    options?: { 
+        priority?: number; 
+        skipUserMessage?: boolean; 
+        parentUserNodeId?: string;
+        branchInfo?: {  // ✅ 新增
+            siblingIndex: number;
+            siblingCount: number;
+            parentAssistantId?: string;
+        }
+    }
     ): Promise<string> {
         this.ensureInitialized();
         
@@ -290,7 +299,8 @@ export class SessionRegistry {
             input,
             options: {
                 skipUserMessage: options?.skipUserMessage,
-                parentUserNodeId: options?.parentUserNodeId
+            parentUserNodeId: options?.parentUserNodeId,
+            branchInfo: options?.branchInfo  // ✅ 传递
             },
             priority: options?.priority ?? 0,
             createdAt: Date.now(),
@@ -417,7 +427,8 @@ export class SessionRegistry {
             // 2. 解析执行器配置
             const executorConfig = await this.resolveExecutorConfig(input.executorId);
             
-            // 3. 创建助手消息 (UI 上的第一个气泡)
+    // 3. 创建助手消息时附带分支信息
+    const branchInfo = options.branchInfo;
             const assistantNodeId = await this.persistence.appendMessage(
                 nodeId,
                 sessionId,
@@ -426,12 +437,22 @@ export class SessionRegistry {
                 {
                     agentId: executorConfig.id,
                     agentName: executorConfig.name,
-                    status: 'running'
+            status: 'running',
+            // ✅ 新增：分支元数据
+            siblingIndex: branchInfo?.siblingIndex ?? 0,
+            siblingCount: branchInfo?.siblingCount ?? 1,
+            parentAssistantId: branchInfo?.parentAssistantId
                 }
             );
             
-            const rootNode = state.createAssistantMessage(executorConfig, assistantNodeId);
-            
+            //const rootNode = state.createAssistantMessage(executorConfig, assistantNodeId);
+	const rootNode = state.createAssistantMessage(
+	    executorConfig, 
+	    assistantNodeId,
+	    branchInfo  // ✅ 传递分支信息
+	);
+
+
             // 发送助手消息开始事件 (通知 UI 渲染这个气泡)
             this.emitSessionEvent(sessionId, {
                 type: 'session_start',
@@ -1028,47 +1049,108 @@ async resendUserMessage(
         options?: { agentId?: string; preserveCurrent?: boolean }
     ): Promise<void> {
         const state = this.sessionStates.get(sessionId);
+    const runtime = this.sessions.get(sessionId);
         
-        if (!state) {
+    if (!state || !runtime) {
             throw new EngineError(EngineErrorCode.SESSION_NOT_FOUND, 'Session not found');
         }
 
         // 找到对应的用户消息
         const userMessage = state.findUserMessageBefore(assistantMessageId);
         if (!userMessage) {
-            throw new EngineError(EngineErrorCode.SESSION_INVALID, 'No user message found');
-        }
+        throw new EngineError(EngineErrorCode.SESSION_INVALID, 'No user message found');
+    }
 
-        // 如果不保留当前回复，删除它
-        if (!options?.preserveCurrent) {
-            state.removeMessage(assistantMessageId);
+    // 找到当前的 assistant 消息
+    const currentAssistant = state.findSessionById(assistantMessageId);
+    
+    // ✅ 关键：计算兄弟数量
+    let siblingCount = 1;
+    let siblingIndex = 0;
+    
+    if (currentAssistant) {
+        siblingCount = (currentAssistant.siblingCount || 1) + 1;
+        siblingIndex = siblingCount - 1; // 新分支是最后一个
+        
+        // 更新旧消息的 siblingCount
+        if (options?.preserveCurrent) {
+            currentAssistant.siblingCount = siblingCount;
             
-            const session = state.findSessionById(assistantMessageId);
-            if (session?.persistedNodeId) {
-                await this.persistence.deleteMessage(sessionId, session.persistedNodeId);
+            // ✅ 关键修复：同步更新 ExecutionNode 的 metaInfo
+            if (currentAssistant.executionRoot) {
+                currentAssistant.executionRoot.data.metaInfo = {
+                    ...currentAssistant.executionRoot.data.metaInfo,
+                    siblingIndex: currentAssistant.siblingIndex || 0,
+                    siblingCount
+                };
             }
             
+            // 持久化更新
+            if (currentAssistant.persistedNodeId) {
+                await this.persistence.updateMessage(sessionId, currentAssistant.persistedNodeId, {
+                    meta: { 
+                        siblingIndex: currentAssistant.siblingIndex || 0,
+                        siblingCount 
+                    }
+                });
+            }
+            
+            // ✅ 关键修复：发送事件通知 UI 更新分支导航
             this.emitSessionEvent(sessionId, {
-                type: 'messages_deleted',
-                payload: { deletedIds: [assistantMessageId] }
+                type: 'sibling_switch',
+                payload: { 
+                    sessionId: assistantMessageId, 
+                    newIndex: currentAssistant.siblingIndex || 0, 
+                    total: siblingCount 
+                }
             });
         }
+    }
 
-        // 发送重试开始事件
+    // 如果不保留当前回复，删除它
+    if (!options?.preserveCurrent) {
+        state.removeMessage(assistantMessageId);
+        
+        if (currentAssistant?.persistedNodeId) {
+            await this.persistence.deleteMessage(sessionId, currentAssistant.persistedNodeId);
+        }
+        
         this.emitSessionEvent(sessionId, {
-            type: 'retry_started',
-            payload: { originalId: assistantMessageId, newId: '' }
+            type: 'messages_deleted',
+            payload: { deletedIds: [assistantMessageId] }
         });
+        
+        // 不保留时，重置计数
+        siblingCount = 1;
+        siblingIndex = 0;
+    }
 
-        // 重新提交任务
-        await this.submitTask(sessionId, {
-            text: userMessage.content || '',
-            files: userMessage.files || [],  // ← 修复点
-            executorId: options?.agentId || 'default'
-        }, {
-            skipUserMessage: true,
-            parentUserNodeId: userMessage.persistedNodeId
-        });
+    // 发送重试开始事件
+    this.emitSessionEvent(sessionId, {
+        type: 'retry_started',
+        payload: { 
+            originalId: assistantMessageId, 
+            newId: '',
+            siblingIndex,
+            siblingCount
+        }
+    });
+
+    // 重新提交任务，附带分支信息
+    await this.submitTask(sessionId, {
+        text: userMessage.content || '',
+        files: userMessage.files || [],
+        executorId: options?.agentId || 'default'
+    }, {
+        skipUserMessage: true,
+        parentUserNodeId: userMessage.persistedNodeId,
+        // ✅ 传递分支信息
+        branchInfo: {
+            siblingIndex,
+            siblingCount,
+            parentAssistantId: options?.preserveCurrent ? assistantMessageId : undefined
+        }
+    });
     }
 
     // ================================================================
