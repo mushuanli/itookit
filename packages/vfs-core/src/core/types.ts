@@ -114,6 +114,20 @@ export interface IVFSMiddleware {
     transaction: Transaction
   ): Promise<void>;
 }
+/** [新增] 增量导入/恢复选项 */
+export interface IncrementalRestoreOptions {
+    /** 
+     * 如果路径已存在，是否覆盖内容和元数据 
+     * @default false (跳过)
+     */
+    overwrite?: boolean;
+    
+    /**
+     * 是否合并标签 (保留现有标签并添加新标签)
+     * @default true
+     */
+    mergeTags?: boolean;
+}
 
 /** 事件类型 */
 export enum VFSEventType {

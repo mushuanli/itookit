@@ -19,5 +19,6 @@ export {
   type CopyResult,
   type IVFSMiddleware,
   type VFSEvent,
-  type SearchQuery, // [修改]
+  type SearchQuery,
+  type IncrementalRestoreOptions
 } from './types.js';
