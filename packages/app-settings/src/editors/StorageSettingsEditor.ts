@@ -1,6 +1,6 @@
 // @file: app-settings/editors/StorageSettingsEditor.ts
 import { BaseSettingsEditor, Modal, Toast } from '@itookit/common';
-import { SettingsService, LocalSnapshot } from '../services/SettingsService'; // 引入具体 Service
+import { SettingsService, LocalSnapshot, SyncConfig, SyncStatus } from '../services/SettingsService'; 
 import { SettingsState } from '../types';
 
 const SETTINGS_LABELS: Record<keyof SettingsState, string> = {
@@ -13,12 +13,22 @@ const SETTINGS_LABELS: Record<keyof SettingsState, string> = {
 export class StorageSettingsEditor extends BaseSettingsEditor<SettingsService> {
     private storageInfo: any = null;
     private snapshots: LocalSnapshot[] = []; 
+    // [新增] 同步配置缓存
+    private syncConfig: SyncConfig = {
+        serverUrl: '',
+        username: '',
+        password: '',
+        strategy: 'manual',
+        autoSync: false
+    };
+    private syncStatus: SyncStatus = { state: 'idle', lastSyncTime: null };
 
     async init(container: HTMLElement) {
         await super.init(container);
         await Promise.all([
             this.loadStorageInfo(),
-            this.loadSnapshots()
+            this.loadSnapshots(),
+            this.loadSyncConfig()
         ]);
     }
 
@@ -26,20 +36,24 @@ export class StorageSettingsEditor extends BaseSettingsEditor<SettingsService> {
         if (navigator.storage && navigator.storage.estimate) {
             try {
                 this.storageInfo = await navigator.storage.estimate();
-                // 仅更新部分UI或整体重绘
                 this.render();
             } catch (e) { console.error(e); }
         }
     }
 
-    // [新增] 加载快照
     async loadSnapshots() {
         try {
             this.snapshots = await this.service.listLocalSnapshots();
             this.render();
-        } catch (e) {
-            console.error('Failed to list snapshots', e);
-        }
+        } catch (e) { console.error('Failed to list snapshots', e); }
+    }
+
+    async loadSyncConfig() {
+        try {
+            this.syncConfig = await this.service.getSyncConfig();
+            this.syncStatus = await this.service.getSyncStatus();
+            this.render();
+        } catch (e) { console.error('Failed to load sync config', e); }
     }
 
     render() {
@@ -51,49 +65,136 @@ export class StorageSettingsEditor extends BaseSettingsEditor<SettingsService> {
         // 2. [核心修复] 安全获取 Snapshots，防止 undefined
         const snapshots = this.snapshots || [];
 
+        // 同步状态 UI 辅助
+        const syncStateColors: Record<string, string> = {
+            'idle': '#aaa',
+            'syncing': 'var(--st-color-primary)',
+            'error': 'var(--st-color-danger)',
+            'success': 'var(--st-color-success)'
+        };
+        
+        const syncLabelMap: Record<string, string> = {
+            'idle': '就绪',
+            'syncing': '同步中...',
+            'error': '错误',
+            'success': '同步成功'
+        };
+        const syncStateLabel = syncLabelMap[this.syncStatus.state] || '未知';
+
         this.container.innerHTML = `
             <div class="settings-page">
                 <div class="settings-page__header">
-                    <h2 class="settings-page__title">存储与备份</h2>
+                    <h2 class="settings-page__title">存储与数据</h2>
                 </div>
 
                 <div class="settings-storage-overview">
                     <div class="settings-storage-visual">
-                        <svg width="120" height="120" viewBox="0 0 36 36" class="settings-circular-chart">
+                        <svg width="100" height="100" viewBox="0 0 36 36" class="settings-circular-chart">
                             <path class="settings-chart-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
                             <path class="settings-chart-fill" stroke-dasharray="${percent}, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
                             <text x="18" y="20.35" class="settings-chart-text">${percent}%</text>
                         </svg>
-                        <div>
+                        <div style="margin-left: 20px;">
                             <div class="settings-stat-item">
-                                <span class="settings-detail-item__label">已用空间</span>
-                                <span class="settings-detail-item__value">${usageMB} MB</span>
+                                <span class="settings-detail-item__label">本地占用</span>
+                                <span class="settings-detail-item__value" style="font-size:1.5em; font-weight:bold;">${usageMB} MB</span>
+                            </div>
+                            <div style="font-size:0.85em; color:var(--st-text-secondary); margin-top:5px;">
+                                浏览器配额: ${(quota / 1024 / 1024 / 1024).toFixed(1)} GB
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <!-- 统一的数据管理 -->
+                <!-- 2. 远程同步 (Remote Sync) -->
                 <div class="settings-section">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
                         <div>
-                            <h3 class="settings-section__title" style="margin:0">⚡️ 秒级快照</h3>
-                            <p class="settings-page__description" style="margin:5px 0 0 0">在浏览器内部直接复制数据库，速度极快，适合高频备份。</p>
+                            <h3 class="settings-section__title" style="margin:0">☁️ 远程同步</h3>
+                            <div style="display:flex; align-items:center; gap:8px; margin-top:5px; font-size:0.85em; color:var(--st-text-secondary);">
+                                <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:${syncStateColors[this.syncStatus.state]}"></span>
+                                <span>${syncStateLabel}</span>
+                                ${this.syncStatus.lastSyncTime ? `<span>• 上次同步: ${new Date(this.syncStatus.lastSyncTime).toLocaleTimeString()}</span>` : ''}
+                            </div>
                         </div>
-                        <button id="btn-create-snapshot" class="settings-btn settings-btn--primary"><i class="fas fa-camera"></i> 创建快照</button>
+                        <div style="display:flex; gap:10px;">
+                            <button id="btn-sync-now" class="settings-btn settings-btn--primary" ${this.syncStatus.state === 'syncing' ? 'disabled' : ''}>
+                                <i class="fas fa-sync ${this.syncStatus.state === 'syncing' ? 'fa-spin' : ''}"></i> 同步
+                            </button>
+                            <button id="btn-toggle-sync-config" class="settings-btn settings-btn--secondary">配置</button>
+                        </div>
+                    </div>
+
+                    <!-- 同步配置表单 -->
+                    <div id="sync-config-panel" style="display:none; background:var(--st-bg-tertiary); padding:15px; border-radius:8px; margin-bottom:15px;">
+                        <div class="settings-form-group">
+                            <label>服务器地址 (Endpoint)</label>
+                            <input type="text" id="inp-sync-url" class="settings-input" placeholder="https://sync.example.com" value="${this.syncConfig.serverUrl || ''}">
+                            <small style="color:var(--st-text-secondary); font-size:0.75em;">建议使用 HTTPS 以确保传输安全。</small>
+                        </div>
+                        
+                        <div class="settings-form-row">
+                            <div class="settings-form-group" style="flex:1;">
+                                <label>用户名</label>
+                                <input type="text" id="inp-sync-user" class="settings-input" placeholder="username" value="${this.syncConfig.username || ''}">
+                            </div>
+                            <div class="settings-form-group" style="flex:1;">
+                                <label>密码</label>
+                                <input type="password" id="inp-sync-pass" class="settings-input" placeholder="••••••••" value="${this.syncConfig.password || ''}">
+                            </div>
+                        </div>
+
+                        <div class="settings-form-row">
+                            <div class="settings-form-group" style="flex:1">
+                                <label>同步策略</label>
+                                <select id="sel-sync-strategy" class="settings-select">
+                                    <option value="manual" ${this.syncConfig.strategy === 'manual' ? 'selected' : ''}>手动同步 (Manual)</option>
+                                    <option value="bidirectional" ${this.syncConfig.strategy === 'bidirectional' ? 'selected' : ''}>双向同步 (Smart)</option>
+                                    <option value="push" ${this.syncConfig.strategy === 'push' ? 'selected' : ''}>仅上传 (Push)</option>
+                                    <option value="pull" ${this.syncConfig.strategy === 'pull' ? 'selected' : ''}>仅下载 (Pull)</option>
+                                </select>
+                            </div>
+                            <div class="settings-form-group" style="flex:0 0 auto; display:flex; align-items:flex-end;">
+                                <label class="settings-checkbox-row" style="margin-bottom:10px;">
+                                    <input type="checkbox" id="chk-auto-sync" ${this.syncConfig.autoSync ? 'checked' : ''}>
+                                    <span>自动同步</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        ${this.syncStatus.errorMessage ? `<div style="color:var(--st-color-danger); font-size:0.85em; margin-top:10px;">❌ ${this.syncStatus.errorMessage}</div>` : ''}
+
+                        <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:15px; padding-top:10px; border-top:1px solid var(--st-border-color);">
+                            <button id="btn-test-conn" class="settings-btn settings-btn--sm settings-btn--secondary">测试连接</button>
+                            <button id="btn-save-sync" class="settings-btn settings-btn--sm settings-btn--primary">保存配置</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 3. 本地快照 -->
+                <div class="settings-section">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+                        <div>
+                            <h3 class="settings-section__title" style="margin:0">📦 本地快照</h3>
+                            <p class="settings-page__description" style="margin:5px 0 0 0">浏览器内的秒级数据库备份，用于快速回滚。</p>
+                        </div>
+                        <button id="btn-create-snapshot" class="settings-btn settings-btn--secondary"><i class="fas fa-camera"></i> 新建快照</button>
                     </div>
                     
                     <div class="settings-snapshot-list">
                         ${snapshots.length === 0
-                            ? `<div class="settings-empty settings-empty--mini" style="background:var(--st-bg-secondary);">暂无快照</div>` 
-                            : snapshots.map(s => `<div class="settings-list-item snapshot-item" style="cursor:default;">
-                                    <div class="settings-list-item__icon">📦</div>
+                            ? `<div class="settings-empty settings-empty--mini">暂无快照</div>` 
+                            : snapshots.map(s => `
+                                <div class="settings-list-item snapshot-item">
+                                    <div class="settings-list-item__icon">🕰️</div>
                                     <div class="settings-list-item__info">
                                         <p class="settings-list-item__title">${s.displayName}</p>
-                                        <p class="settings-list-item__desc">${s.name}</p>
+                                        <p class="settings-list-item__desc">
+                                            ${new Date(s.createdAt).toLocaleString()} • ${(s.size / 1024 / 1024).toFixed(2)} MB
+                                        </p>
                                     </div>
-                                    <div class="settings-snapshot-actions" style="display:flex; gap:8px;">
-                                        <button class="settings-btn settings-btn--sm settings-btn--secondary btn-restore-snap" data-name="${s.name}">恢复</button>
+                                    <div class="settings-snapshot-actions">
+                                        <button class="settings-btn settings-btn--sm settings-btn--secondary btn-restore-snap" data-name="${s.name}" title="回滚到此状态">恢复</button>
                                         <button class="settings-btn settings-btn--sm settings-btn--danger btn-del-snap" data-name="${s.name}"><i class="fas fa-trash"></i></button>
                                     </div>
                                 </div>
@@ -102,39 +203,63 @@ export class StorageSettingsEditor extends BaseSettingsEditor<SettingsService> {
                     </div>
                 </div>
 
-                <!-- 数据迁移 (JSON) -->
+                <!-- 4. 导入/导出 -->
                 <div class="settings-section" style="border-top: 1px solid var(--st-border-color); padding-top: 20px;">
-                    <h3 class="settings-section__title">文件迁移 (JSON)</h3>
-                    <p class="settings-page__description" style="margin-bottom: 15px;">
-                        细粒度地导入/导出系统配置或特定的文档工作区。生成的 JSON 文件可用于迁移或备份。
-                    </p>
+                    <h3 class="settings-section__title">数据迁移 (JSON)</h3>
                     <div class="settings-storage-actions">
                         <div class="settings-action-card">
                             <div class="settings-action-card__icon">📤</div>
-                            <h3>自定义导出</h3>
-                            <button id="btn-export-mixed" class="settings-btn settings-btn--primary">选择数据...</button>
+                            <div style="flex:1;">
+                                <h3 style="margin:0 0 5px 0; font-size:1em;">导出备份</h3>
+                                <p style="margin:0; font-size:0.8em; color:var(--st-text-secondary);">导出系统配置和文档为 JSON 文件</p>
+                            </div>
+                            <button id="btn-export-mixed" class="settings-btn settings-btn--secondary">选择内容...</button>
                         </div>
                         <div class="settings-action-card">
                             <div class="settings-action-card__icon">📥</div>
-                            <h3>恢复/导入</h3>
-                            <button id="btn-import-mixed" class="settings-btn settings-btn--primary">选择文件...</button>
+                            <div style="flex:1;">
+                                <h3 style="margin:0 0 5px 0; font-size:1em;">恢复/导入</h3>
+                                <p style="margin:0; font-size:0.8em; color:var(--st-text-secondary);">支持增量合并或全量覆盖</p>
+                            </div>
+                            <button id="btn-import-mixed" class="settings-btn settings-btn--primary">导入文件...</button>
                         </div>
                     </div>
                 </div>
 
-                <!-- 危险区 -->
+                <!-- 5. 危险区 -->
                 <div class="settings-section" style="margin-top: 40px; border-top: 1px solid var(--st-border-color); padding-top: 20px;">
-                    <h3 class="settings-section__title" style="color: var(--st-color-danger);">危险操作</h3>
-                    <div class="settings-storage-actions">
-                        <div class="settings-action-card settings-action-card--danger">
-                            <div class="settings-action-card__icon">💣</div>
-                            <h3>工厂重置</h3>
-                            <p style="font-size:0.8em; color:#666; margin-bottom:10px;">抹除所有数据并重置为初始状态</p>
-                            <button id="btn-reset" class="settings-btn settings-btn--danger">清空所有数据</button>
+                    <details>
+                        <summary style="cursor:pointer; color:var(--st-text-secondary); font-size:0.9em;">高级选项 / 危险操作</summary>
+                        <div class="settings-storage-actions" style="margin-top:15px;">
+                            <div class="settings-action-card settings-action-card--danger">
+                                <div class="settings-action-card__icon">💣</div>
+                                <div style="flex:1">
+                                    <h3>工厂重置</h3>
+                                    <p style="font-size:0.8em; color:#666;">抹除所有数据并重置为初始状态</p>
+                                </div>
+                                <button id="btn-reset" class="settings-btn settings-btn--danger">清空所有数据</button>
+                            </div>
                         </div>
-                    </div>
+                    </details>
                 </div>
             </div>
+            <style>
+                .settings-storage-visual { display: flex; align-items: center; padding: 20px; background: var(--st-bg-secondary); border-radius: 12px; }
+                .settings-circular-chart { display: block; margin: 0 auto; max-width: 80%; max-height: 250px; }
+                .settings-chart-bg { fill: none; stroke: var(--st-border-color); stroke-width: 3.8; }
+                .settings-chart-fill { fill: none; stroke: var(--st-color-primary); stroke-width: 2.8; stroke-linecap: round; transition: stroke-dasharray 0.5s ease; }
+                .settings-chart-text { fill: var(--st-text-primary); font-family: sans-serif; font-weight: bold; font-size: 0.5em; text-anchor: middle; }
+                
+                .settings-snapshot-list { display: flex; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto; }
+                .snapshot-item { display: flex; align-items: center; padding: 10px; background: var(--st-bg-tertiary); border-radius: 8px; border: 1px solid transparent; }
+                .snapshot-item:hover { border-color: var(--st-border-color); }
+                .settings-snapshot-actions { display: flex; gap: 8px; margin-left: auto; }
+                
+                .settings-form-row { display: flex; gap: 15px; flex-wrap: wrap; margin-bottom: 15px; }
+                .settings-action-card { display: flex; align-items: center; gap: 15px; padding: 15px; background: var(--st-bg-tertiary); border-radius: 8px; margin-bottom: 10px; }
+                .settings-action-card--danger { background: #fee2e2; border: 1px solid #fca5a5; }
+                .settings-action-card--danger h3 { color: #991b1b; }
+            </style>
         `;
         
         this.bindEvents();
@@ -151,18 +276,81 @@ export class StorageSettingsEditor extends BaseSettingsEditor<SettingsService> {
         // Snapshot Actions
         this.bindButton('#btn-create-snapshot', () => this.createSnapshot());
 
-        // Snapshot List Actions
+        // Snapshot List Delegation
         const list = this.container.querySelector('.settings-snapshot-list');
         if (list) {
             this.addEventListener(list, 'click', (e) => {
                 const target = e.target as HTMLElement;
                 const restoreBtn = target.closest('.btn-restore-snap') as HTMLElement;
                 const delBtn = target.closest('.btn-del-snap') as HTMLElement;
-
                 if (restoreBtn) this.restoreSnapshot(restoreBtn.dataset.name!);
                 if (delBtn) this.deleteSnapshot(delBtn.dataset.name!);
             });
         }
+
+        // Sync Actions
+        this.bindButton('#btn-toggle-sync-config', () => {
+            const panel = this.container.querySelector('#sync-config-panel') as HTMLElement;
+            panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+        });
+
+        this.bindButton('#btn-save-sync', async () => {
+            const url = this.getVal('#inp-sync-url');
+            const user = this.getVal('#inp-sync-user');
+            const pass = this.getVal('#inp-sync-pass');
+            const strategy = (this.container.querySelector('#sel-sync-strategy') as HTMLSelectElement).value;
+            const autoSync = (this.container.querySelector('#chk-auto-sync') as HTMLInputElement).checked;
+
+            if (!url || !user) {
+                return Toast.warning('地址和用户名必填');
+            }
+
+            try {
+                await this.service.saveSyncConfig({
+                    serverUrl: url,
+                    username: user,
+                    password: pass,
+                    strategy: strategy as any,
+                    autoSync
+                });
+                Toast.success('配置已保存');
+                await this.loadSyncConfig();
+            } catch(e) { Toast.error('保存失败'); }
+        });
+
+        this.bindButton('#btn-test-conn', async () => {
+            const btn = this.container.querySelector('#btn-test-conn') as HTMLButtonElement;
+            const originalText = btn.innerText;
+            btn.innerText = '连接中...';
+            btn.disabled = true;
+            try {
+                const url = this.getVal('#inp-sync-url');
+                const user = this.getVal('#inp-sync-user');
+                const pass = this.getVal('#inp-sync-pass');
+                const success = await this.service.testConnection(url, user, pass);
+                if (success) Toast.success('连接成功');
+                else Toast.error('认证失败');
+            } catch (e) {
+                Toast.error('连接错误: ' + (e as any).message);
+            } finally {
+                btn.innerText = originalText;
+                btn.disabled = false;
+            }
+        });
+
+        this.bindButton('#btn-sync-now', async () => {
+            try {
+                this.syncStatus.state = 'syncing';
+                this.render();
+                await this.service.triggerSync();
+                Toast.success('同步完成');
+            } catch(e) {
+                Toast.error('同步失败');
+                console.error(e);
+            } finally {
+                await this.loadSyncConfig();
+            }
+        });
     }
 
     private bindButton(selector: string, handler: () => void) {
@@ -170,7 +358,9 @@ export class StorageSettingsEditor extends BaseSettingsEditor<SettingsService> {
         if (btn) this.addEventListener(btn, 'click', handler);
     }
 
-    // --- Snapshot Logic ---
+    private getVal(selector: string): string {
+        return (this.container.querySelector(selector) as HTMLInputElement)?.value || '';
+    }
 
     private async createSnapshot() {
         const btn = this.container.querySelector('#btn-create-snapshot') as HTMLButtonElement;
@@ -332,18 +522,6 @@ export class StorageSettingsEditor extends BaseSettingsEditor<SettingsService> {
             return;
         }
 
-        const settingsHtml = availableSettings.map(key => {
-            const count = (json.settings?.[key] || json[key])?.length || 0;
-            return `
-            <label class="settings-checkbox-row">
-                <input type="checkbox" name="import-settings" value="${key}" checked>
-                <div style="flex:1; display:flex; justify-content:space-between;">
-                    <span>${SETTINGS_LABELS[key] || key}</span>
-                    <span class="settings-badge">${count}</span>
-                </div>
-            </label>`;
-        }).join('');
-
         const modulesHtml = availableModules.map(mod => {
             const name = mod.module?.name || 'Unknown';
             if (['__vfs_meta__', '__config'].includes(name)) return '';
@@ -357,39 +535,73 @@ export class StorageSettingsEditor extends BaseSettingsEditor<SettingsService> {
             </label>`;
         }).join('');
 
+        // [新增] 策略选择区域
+        const strategyHtml = `
+            <div style="background:var(--st-bg-tertiary); padding:10px; border-radius:6px; margin-bottom:15px; border-left:4px solid var(--st-color-primary);">
+                <h4 style="margin:0 0 8px 0;">合并策略</h4>
+                <label class="settings-checkbox-row" style="margin:0;">
+                    <input type="checkbox" id="chk-overwrite-mode">
+                    <div>
+                        <span style="font-weight:bold;">覆盖现有文件 (Overwrite)</span>
+                        <p style="margin:0; font-size:0.8em; color:var(--st-text-secondary);">
+                            默认：仅添加新文件，合并元数据和标签。<br>
+                            勾选：如果文件路径相同，强制用导入文件的内容覆盖本地内容。
+                        </p>
+                    </div>
+                </label>
+            </div>
+        `;
+
         const content = `
-            <div class="settings-export-modal-content" style="padding: 0 10px;">
-                <p style="color:var(--st-text-secondary); margin-bottom:15px;">检测到以下数据，请选择要恢复的项目：</p>
+            <div class="settings-export-modal-content" style="padding: 0 5px;">
+                ${strategyHtml}
                 
-                ${settingsHtml ? `
-                <div style="margin-bottom: 20px;">
-                    <h4 style="margin:0 0 10px 0; border-bottom:1px solid var(--st-border-color);">⚙️ 配置数据 (Settings)</h4>
-                    <div class="settings-checklist-grid">${settingsHtml}</div>
+                ${modulesHtml ? `
+                <div style="margin-top:10px;">
+                    <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
+                        <h4 style="margin:0;">📚 选择要导入的模块</h4>
+                        <div>
+                            <small class="settings-link-btn" onclick="document.querySelectorAll('input[name=import-modules]').forEach(c=>c.checked=true)">全选</small>
+                            <small class="settings-link-btn" onclick="document.querySelectorAll('input[name=import-modules]').forEach(c=>c.checked=false)">清空</small>
+                        </div>
+                    </div>
+                    <div class="settings-checklist-grid">${modulesHtml}</div>
                 </div>` : ''}
 
-                ${modulesHtml ? `
-                <div>
-                    <h4 style="margin:0 0 10px 0; border-bottom:1px solid var(--st-border-color);">📚 工作区 (Workspaces) <small style="color:var(--st-color-danger); font-weight:normal;">(同名工作区将被覆盖)</small></h4>
-                    <div class="settings-checklist-grid">${modulesHtml}</div>
+                ${availableSettings.length > 0 ? `
+                <div style="margin-top:20px;">
+                    <h4 style="margin:0 0 5px 0;">⚙️ 系统配置</h4>
+                    <p style="font-size:0.8em; color:var(--st-text-secondary);">配置项将始终合并/覆盖</p>
+                    <div class="settings-checklist-grid">
+                        ${availableSettings.map(k => `<label class="settings-checkbox-row"><input type="checkbox" name="import-settings" value="${k}" checked><span>${SETTINGS_LABELS[k]||k}</span></label>`).join('')}
+                    </div>
                 </div>` : ''}
             </div>
             <style>.settings-checklist-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }</style>
         `;
 
         new Modal('导入数据', content, {
-            confirmText: '执行导入',
-            type: 'danger',
+            confirmText: '开始导入',
             onConfirm: async () => {
                 const sInputs = document.querySelectorAll<HTMLInputElement>('input[name="import-settings"]:checked');
                 const mInputs = document.querySelectorAll<HTMLInputElement>('input[name="import-modules"]:checked');
+                const overwriteChk = document.querySelector<HTMLInputElement>('#chk-overwrite-mode');
                 
                 const keysToImport = Array.from(sInputs).map(i => i.value as keyof SettingsState);
                 const modulesToImport = Array.from(mInputs).map(i => i.value);
+                const isOverwrite = overwriteChk ? overwriteChk.checked : false;
 
-                if (keysToImport.length === 0 && modulesToImport.length === 0) return true;
+                if (keysToImport.length === 0 && modulesToImport.length === 0) {
+                    Toast.warning('未选择任何内容');
+                    return false;
+                }
 
                 try {
-                    await this.service.importMixedData(json, keysToImport, modulesToImport);
+                    // [重要] 传递 overwrite 选项给 Service
+                    await this.service.importMixedData(json, keysToImport, modulesToImport, {
+                        overwrite: isOverwrite,
+                        mergeTags: true
+                    });
                     Toast.success('导入成功，应用正在刷新...');
                     setTimeout(() => window.location.reload(), 1500);
                 } catch (e) {

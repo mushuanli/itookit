@@ -15,7 +15,7 @@ import { ResourceBundleMiddleware } from './middleware/ResourceBundleMiddleware'
 import { SidecarMiddleware } from './middleware/SidecarMiddleware';
 
 import { VNode, VNodeType, TagData, VFS_STORES,SRSItemData } from './store/types'; 
-import { VFSError, VFSErrorCode, SearchQuery } from './core/types';
+import { VFSError, VFSErrorCode, SearchQuery,IncrementalRestoreOptions } from './core/types';
 
 /**
  * VFS 配置选项
@@ -175,6 +175,143 @@ export class VFSCore {
           console.error(`Failed to restore module ${modData?.module?.name}:`, e);
         }
       }
+    }
+  }
+
+  /**
+   * [新增] 增量恢复系统备份
+   * 将备份数据合并到当前系统中
+   */
+  async restoreSystemBackupIncrementally(jsonString: string, options: IncrementalRestoreOptions = {}): Promise<void> {
+    this._ensureInitialized();
+    
+    let backupData;
+    try {
+      backupData = JSON.parse(jsonString);
+    } catch (e) {
+      throw new VFSError(VFSErrorCode.INVALID_OPERATION, 'Invalid backup JSON');
+    }
+
+    const modules = Array.isArray(backupData.modules) ? backupData.modules : [];
+    
+    console.log(`[VFSCore] Starting incremental restore for ${modules.length} modules...`);
+
+    // 1. 先确保所有需要的模块都已存在
+    for (const modData of modules) {
+        const modName = modData.module.name;
+        if (!this.moduleRegistry.has(modName)) {
+            await this.mount(modName, {
+                description: modData.module.description,
+                isProtected: modData.module.isProtected
+            });
+        }
+    }
+
+    for (const modData of modules) {
+      try {
+        await this._mergeTree(modData.module.name, '/', modData.tree, options);
+      } catch (e) {
+        console.error(`[VFSCore] Failed to incrementally restore module ${modData?.module?.name}:`, e);
+      }
+    }
+    
+    console.log(`[VFSCore] Incremental restore complete.`);
+  }
+
+  /**
+   * [新增] 内部递归合并树逻辑
+   */
+  private async _mergeTree(
+      moduleName: string, 
+      parentPath: string, 
+      nodeData: any, 
+      options: IncrementalRestoreOptions
+  ): Promise<void> {
+    const { overwrite = false, mergeTags = true } = options;
+
+    // 1. 计算当前节点的 User Path
+    // 注意：exportTree 导出的结构中，顶层通常是根目录本身。
+    // 如果 parentPath 是 '/' 且 nodeData.name 是模块名或 '/'，则视作根。
+    let currentNodePath: string;
+    
+    if (nodeData.name === '/' || (parentPath === '/' && nodeData.name === moduleName)) {
+        // 处理根节点：根节点总是存在，我们只需处理其子节点
+        if (nodeData.children) {
+            for (const child of nodeData.children) await this._mergeTree(moduleName, '/', child, options);
+        }
+        return;
+    } else {
+        currentNodePath = parentPath === '/' ? `/${nodeData.name}` : `${parentPath}/${nodeData.name}`;
+    }
+
+    // 2. 检查节点存在性
+    const existingNodeId = await this.vfs.pathResolver.resolve(moduleName, currentNodePath);
+    let targetNodeId: string | null = existingNodeId;
+
+    if (existingNodeId) {
+        // --- 节点已存在 ---
+        const existingNode = await this.vfs.storage.loadVNode(existingNodeId);
+        if (existingNode && existingNode.type === nodeData.type) {
+            // A. 覆盖内容 (仅文件)
+            if (nodeData.type === VNodeType.FILE && overwrite && nodeData.content !== undefined) {
+                await this.write(moduleName, currentNodePath, nodeData.content);
+            }
+            
+            // B. 合并元数据
+            if (nodeData.metadata) {
+                const mergedMeta = overwrite 
+                    ? { ...existingNode.metadata, ...nodeData.metadata }
+                    : { ...nodeData.metadata, ...existingNode.metadata };
+                await this.updateMetadata(moduleName, currentNodePath, mergedMeta);
+            }
+
+            // C. 合并标签
+            if (mergeTags && Array.isArray(nodeData.tags)) {
+                for (const tag of nodeData.tags) {
+                    if (!existingNode.tags.includes(tag)) {
+                        await this.addTag(moduleName, currentNodePath, tag);
+                    }
+                }
+            }
+        }
+    } else {
+        // --- 节点不存在，创建 ---
+        let newNode: VNode;
+        if (nodeData.type === VNodeType.FILE) {
+            newNode = await this.createFile(moduleName, currentNodePath, nodeData.content, nodeData.metadata);
+        } else {
+            newNode = await this.createDirectory(moduleName, currentNodePath, nodeData.metadata);
+        }
+        targetNodeId = newNode.nodeId;
+
+        // 恢复标签
+        if (Array.isArray(nodeData.tags) && nodeData.tags.length > 0) {
+            await this.vfs.setTags(targetNodeId, nodeData.tags);
+        }
+    }
+
+    // 3. 处理 SRS 数据 (如果导出数据中包含 srs 字段)
+    if (targetNodeId && nodeData.srs) {
+        const shouldRestoreSRS = !existingNodeId || overwrite; // 仅在新创建或覆盖模式下恢复进度
+        if (shouldRestoreSRS) {
+             const srsMap = nodeData.srs; // 假设结构为 Record<clozeId, SRSItemData>
+             for (const [clozeId, item] of Object.entries(srsMap)) {
+                 const srsItem = item as any;
+                 // 强制修正 ID 关联
+                 await this.updateSRSItemById(targetNodeId, clozeId, {
+                     ...srsItem,
+                     nodeId: targetNodeId,
+                     moduleId: moduleName
+                 });
+             }
+        }
+    }
+
+    // 4. 递归处理子节点
+    if (nodeData.type === VNodeType.DIRECTORY && Array.isArray(nodeData.children)) {
+        for (const child of nodeData.children) {
+            await this._mergeTree(moduleName, currentNodePath, child, options);
+        }
     }
   }
 
@@ -815,11 +952,15 @@ export class VFSCore {
     // 由于递归逻辑，我们使用 _toPublicVNode 清洗当前节点
     const publicNode = this._toPublicVNode(node);
 
+    // [新增] 获取该节点关联的 SRS 数据
+    const srsItems = await this.getSRSItemsByNodeId(node.nodeId);
+
     const result: any = {
       name: publicNode.name,
       type: publicNode.type,
       metadata: publicNode.metadata,
-      tags: publicNode.tags
+      tags: publicNode.tags,
+      srs: srsItems // [新增] 导出 SRS 数据
     };
     if (publicNode.type === VNodeType.FILE) {
       result.content = await this.vfs.read(publicNode.nodeId);
