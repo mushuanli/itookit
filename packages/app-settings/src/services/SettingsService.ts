@@ -2,7 +2,7 @@
  * @file: app-settings/services/SettingsService.ts
  */
 import { FS_MODULE_AGENTS } from '@itookit/common';
-import { VFSCore, VFSErrorCode, VFSEventType, VFSEvent } from '@itookit/vfs-core';
+import { VFSCore, VFSErrorCode, VFSEventType, VFSEvent, IncrementalRestoreOptions, VNodeType } from '@itookit/vfs-core';
 import { SettingsState, Contact, Tag } from '../types';
 
 const CONFIG_MODULE = '__config';
@@ -15,13 +15,39 @@ const SNAPSHOT_PREFIX = 'snapshot_';
 const FILES = {
   tags: '/tags.json',
   contacts: '/contacts.json',
+  sync: '/sync_config.json', // [新增] 同步配置文件
 };
 
-// 快照接口
+// [新增] 同步配置接口 (Fix Error 1)
+export interface SyncConfig {
+  serverUrl: string;
+  username: string; // Changed from apiKey
+  password?: string; // Optional (store carefully)
+  strategy: 'manual' | 'bidirectional' | 'push' | 'pull';
+  autoSync: boolean;
+}
+
+// [新增] 同步状态接口 (Fix Error 2)
+export interface SyncStatus {
+  state: 'idle' | 'syncing' | 'error' | 'success';
+  lastSyncTime: number | null;
+  errorMessage?: string;
+}
+
+// [修改] 快照接口 (Fix Error 5, 6)
 export interface LocalSnapshot {
   name: string;
   displayName: string;
-  timestamp: number;
+  createdAt: number; // UI 使用 createdAt 而非 timestamp
+  size: number;      // UI 需要 size
+}
+
+// Helper types for Sync Protocol
+interface FileMeta {
+    path: string;
+    hash: string;
+    mtime: number;
+    is_deleted: boolean;
 }
 
 type ChangeListener = () => void;
@@ -43,6 +69,16 @@ export class SettingsService {
     tags: [],
     contacts: [],
   };
+  
+  // [新增] 同步状态缓存
+  private syncConfig: SyncConfig = {
+    serverUrl: '',
+    username: '',
+    strategy: 'manual',
+    autoSync: false
+  };
+  private syncStatus: SyncStatus = { state: 'idle', lastSyncTime: null };
+
   private listeners: Set<ChangeListener> = new Set();
   private initialized = false;
   private syncTimer: any = null;
@@ -70,6 +106,7 @@ export class SettingsService {
     await Promise.all([
       this.loadEntity('contacts'),
       this.syncTags(),
+      this.loadSyncConfig(),
     ]);
 
     // 3. 启动 VFS 事件监听 (主要用于 Tag 计数同步)
@@ -84,14 +121,6 @@ export class SettingsService {
    */
   private bindVFSEvents() {
     const bus = this.vfs.getEventBus();
-
-    const eventsToWatch = [
-      VFSEventType.NODE_CREATED,
-      VFSEventType.NODE_DELETED,
-      VFSEventType.NODE_UPDATED,
-      VFSEventType.NODES_BATCH_UPDATED,
-    ];
-
     const handler = (event: VFSEvent) => {
       // 过滤掉配置模块自身的变更，防止循环
       if (event.path && event.path.startsWith(`/${CONFIG_MODULE}`)) {
@@ -102,12 +131,16 @@ export class SettingsService {
       if (this.syncTimer) clearTimeout(this.syncTimer);
       this.syncTimer = setTimeout(() => {
         this.syncTags().then(() => this.notify());
-      }, 1000);
+        
+        // Simple Auto-Sync Debounce
+        if (this.syncConfig.autoSync && this.syncStatus.state !== 'syncing' && this.syncConfig.serverUrl) {
+            console.log('[AutoSync] Triggered');
+            this.triggerSync().catch(e => console.error('AutoSync failed', e));
+        }
+      }, 2000);
     };
 
-    eventsToWatch.forEach((type) => {
-      bus.on(type, handler);
-    });
+    [VFSEventType.NODE_CREATED, VFSEventType.NODE_UPDATED, VFSEventType.NODE_DELETED].forEach(t => bus.on(t, handler));
   }
 
   // =========================================================
@@ -236,6 +269,229 @@ export class SettingsService {
   }
 
   // =========================================================
+  // [新增] 同步功能 (Fix Errors 3, 4, 7, 8)
+  // =========================================================
+
+  async getSyncConfig(): Promise<SyncConfig> {
+    return { ...this.syncConfig };
+  }
+
+  async getSyncStatus(): Promise<SyncStatus> {
+    return { ...this.syncStatus };
+  }
+
+  async loadSyncConfig() {
+      try {
+        const content = await this.vfs.read(CONFIG_MODULE, FILES.sync);
+        const jsonStr = typeof content === 'string' ? content : new TextDecoder().decode(content);
+        const loaded = JSON.parse(jsonStr);
+        this.syncConfig = { ...this.syncConfig, ...loaded };
+      } catch (e) { /* ignore */ }
+  }
+
+  async saveSyncConfig(config: SyncConfig): Promise<void> {
+    this.syncConfig = config;
+    try { await this.vfs.write(CONFIG_MODULE, FILES.sync, JSON.stringify(config, null, 2)); }
+    catch (e: any) { if (e.code === VFSErrorCode.NOT_FOUND) await this.vfs.createFile(CONFIG_MODULE, FILES.sync, JSON.stringify(config, null, 2)); }
+  }
+
+  // Test connection by attempting to login
+  async testConnection(url: string, user: string, pass: string): Promise<boolean> {
+      try {
+          const token = await this.performLogin(url, user, pass);
+          return !!token;
+      } catch (e) {
+          console.error(e);
+          return false;
+      }
+  }
+
+  private async performLogin(baseUrl: string, username: string, password?: string): Promise<string> {
+      const res = await fetch(`${baseUrl}/api/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+      });
+      if (!res.ok) throw new Error('Auth failed');
+      const data = await res.json();
+      return data.token;
+  }
+
+  /**
+   * 触发同步
+   * 注意：此处仅为示例实现，实际同步逻辑需要对接具体的后端 API
+   */
+  async triggerSync(): Promise<void> {
+    if (!this.syncConfig.serverUrl) throw new Error('No server URL');
+    
+    try {
+        this.syncStatus = { state: 'syncing', lastSyncTime: this.syncStatus.lastSyncTime };
+        this.notify();
+
+        // 1. Auth
+        const token = await this.performLogin(this.syncConfig.serverUrl, this.syncConfig.username, this.syncConfig.password);
+
+        // 2. Index Local Files
+        const localFiles = await this.indexAllLocalFiles();
+        
+        // 3. Check Diff
+        const checkRes = await fetch(`${this.syncConfig.serverUrl}/api/sync/check`, {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify(localFiles)
+        });
+        
+        if (!checkRes.ok) throw new Error('Sync check failed');
+        const diff: { files_to_upload: string[], files_to_download: FileMeta[] } = await checkRes.json();
+
+        // 4. Handle Uploads (Push)
+        if (this.syncConfig.strategy !== 'pull') {
+            for (const path of diff.files_to_upload) {
+                await this.uploadFile(path, token);
+            }
+        }
+
+        // 5. Handle Downloads (Pull)
+        if (this.syncConfig.strategy !== 'push') {
+            for (const meta of diff.files_to_download) {
+                await this.downloadFile(meta, token);
+            }
+        }
+
+        this.syncStatus = { state: 'success', lastSyncTime: Date.now() };
+    } catch (e: any) {
+        console.error('Sync Error', e);
+        this.syncStatus = { state: 'error', lastSyncTime: this.syncStatus.lastSyncTime, errorMessage: e.message };
+    } finally {
+        this.notify();
+    }
+  }
+
+  private async indexAllLocalFiles(): Promise<FileMeta[]> {
+      const files: FileMeta[] = [];
+      const modules = this.vfs.getAllModules().filter(m => !SYSTEM_MODULES.includes(m.name));
+      
+      // 获取底层 VFS 实例，以便直接使用 ID 进行高效读取
+      const lowLevelVFS = this.vfs.getVFS();
+
+      for (const mod of modules) {
+          // [Fix Error 1]: 使用 getModule 获取信息，然后通过 rootNodeId 加载 VNode
+          const modInfo = this.vfs.getModule(mod.name);
+          if (modInfo && modInfo.rootNodeId) {
+              const rootNode = await lowLevelVFS.storage.loadVNode(modInfo.rootNodeId);
+              if (rootNode) {
+                  await this._traverseAndIndex(lowLevelVFS, mod.name, rootNode, files);
+              }
+          }
+      }
+      return files;
+  }
+
+  private async _traverseAndIndex(vfs: any, moduleName: string, node: any, list: FileMeta[]) {
+      if (node.type === VNodeType.FILE) {
+          // [Fix Error 2]: 调用底层 vfs.read(nodeId)
+          const content = await vfs.read(node.nodeId);
+          
+          let buffer: ArrayBuffer;
+          if (typeof content === 'string') {
+              buffer = new TextEncoder().encode(content).buffer;
+          } else {
+              buffer = content;
+          }
+          
+          const hash = await this.computeSHA256(buffer);
+          
+          // 注意：node.path 已经是系统路径 (e.g., /module/path)，直接使用即可作为唯一标识
+          list.push({
+              path: node.path,
+              hash: hash,
+              mtime: node.modifiedAt,
+              is_deleted: false
+          });
+      } else if (node.type === VNodeType.DIRECTORY) {
+          // [Fix Error 3]: 调用底层 vfs.readdir(nodeId)
+          const children = await vfs.readdir(node.nodeId);
+          for (const child of children) {
+              await this._traverseAndIndex(vfs, moduleName, child, list);
+          }
+      }
+  }
+
+  private async uploadFile(systemPath: string, token: string) {
+      // 这里的 systemPath 格式为 /moduleName/path/to/file
+      // 我们需要解析出 moduleName 和 relativePath 来调用高层 API 读取，
+      // 或者直接使用底层的 getNodeIdByPath + read
+      
+      try {
+          // 使用底层 API 更直接
+          const lowLevelVFS = this.vfs.getVFS();
+          const nodeId = await lowLevelVFS.storage.getNodeIdByPath(systemPath);
+          
+          if (nodeId) {
+              const content = await lowLevelVFS.read(nodeId);
+              const blob = new Blob([content]);
+              
+              const formData = new FormData();
+              formData.append(systemPath, blob); 
+
+              await fetch(`${this.syncConfig.serverUrl}/api/sync/upload`, {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${token}` },
+                  body: formData
+              });
+          }
+      } catch (e) {
+          console.warn(`Failed to upload ${systemPath}`, e);
+      }
+  }
+
+  private async downloadFile(meta: FileMeta, token: string) {
+      try {
+          const res = await fetch(`${this.syncConfig.serverUrl}/api/sync/download`, {
+              method: 'POST',
+              headers: { 
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${token}`
+              },
+              body: JSON.stringify({ path: meta.path })
+          });
+          
+          if (!res.ok) throw new Error('Download failed');
+          const arrayBuffer = await res.arrayBuffer();
+          
+          // meta.path 是系统路径 /moduleName/relative/path
+          // 解析模块名
+          const parts = meta.path.split('/'); // ["", "moduleName", "file.txt"]
+          const moduleName = parts[1];
+          // 将系统路径转换为用户路径 (去除 /moduleName)
+          const userPath = `/${parts.slice(2).join('/')}`;
+
+          if (this.vfs.getModule(moduleName)) {
+              // 使用高层 API 写入，会自动处理父目录创建
+              await this.vfs.write(moduleName, userPath, arrayBuffer);
+              
+              // 更新元数据
+              // 需要先解析出 NodeID
+              const nodeId = await this.vfs.getVFS().pathResolver.resolve(moduleName, userPath);
+              if (nodeId) {
+                  await this.vfs.updateMetadata(moduleName, userPath, { syncedAt: meta.mtime });
+              }
+          }
+      } catch (e) {
+          console.error(`Failed to download ${meta.path}`, e);
+      }
+  }
+
+  private async computeSHA256(buffer: ArrayBuffer): Promise<string> {
+      const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  // =========================================================
   // Export/Import Logic
   // =========================================================
 
@@ -272,19 +528,22 @@ export class SettingsService {
   }
 
   /**
-   * 混合导入
+   * [修改] 混合导入 (Fix Error 9)
+   * 增加 options 参数支持，并使用 VFS 的 restoreSystemBackupIncrementally
    */
   async importMixedData(
     data: any,
     settingsKeys: (keyof SettingsState)[],
-    moduleNames: string[]
+    moduleNames: string[],
+    options: IncrementalRestoreOptions = {} // [新增参数]
   ) {
     const tasks: Promise<void>[] = [];
     
+    // 1. 恢复配置 (Tags, Contacts) - 始终覆盖/合并内存状态
     if (data.settings) {
-      // 仅导入由 SettingsService 管理的数据
       if (settingsKeys.includes('tags') && data.settings.tags) {
-        this.state.tags = data.settings.tags;
+        // Tag 比较特殊，建议合并而非直接覆盖，这里简单处理为读取
+        this.state.tags = data.settings.tags; 
         tasks.push(this.saveEntity('tags'));
       }
       if (settingsKeys.includes('contacts') && data.settings.contacts) {
@@ -293,21 +552,28 @@ export class SettingsService {
       }
     }
 
-    const modulesList = data.modules || [];
-    if (Array.isArray(modulesList)) {
-      for (const modDump of modulesList) {
-        const modName = modDump.module?.name;
-        if (modName && moduleNames.includes(modName)) {
-          try {
-            // 如果模块已存在，先卸载以清除旧数据
-            if (this.vfs.getModule(modName)) {
-              await this.vfs.unmount(modName);
-            }
-            await this.vfs.importModule(modDump);
-          } catch (e) {
-            console.error(`Failed to import module ${modName}`, e);
-          }
-        }
+    // 2. 恢复模块 (Workspaces)
+    const allModulesList = data.modules || [];
+    if (Array.isArray(allModulesList)) {
+      // 筛选出用户选中的模块数据
+      const selectedModulesData = allModulesList.filter((m: any) => 
+          m.module && moduleNames.includes(m.module.name)
+      );
+
+      if (selectedModulesData.length > 0) {
+          // 构造一个临时的备份对象传递给 VFS 核心
+          const partialBackup = {
+              version: data.version,
+              timestamp: data.timestamp,
+              modules: selectedModulesData
+          };
+
+          // 调用 VFS 核心的新增量恢复接口
+          // 这里会自动处理 覆盖(overwrite) vs 增量(skip/merge) 的逻辑
+          await this.vfs.restoreSystemBackupIncrementally(
+              JSON.stringify(partialBackup),
+              options
+          );
       }
     }
 
@@ -324,6 +590,7 @@ export class SettingsService {
   // 本地快照管理 (IndexedDB Level)
   // =========================================================
 
+  // [修改] 修复 LocalSnapshot 类型不匹配 (Fix Error 5, 6)
   async listLocalSnapshots(): Promise<LocalSnapshot[]> {
     if (!window.indexedDB.databases) {
       return [];
@@ -338,19 +605,18 @@ export class SettingsService {
           snapshots.push({
             name: db.name,
             displayName: new Date(timestamp).toLocaleString(),
-            timestamp,
+            createdAt: timestamp, // 映射 timestamp -> createdAt
+            size: 0 // 浏览器标准API不支持直接获取 DB 大小，暂置为 0 或需额外实现估算逻辑
           });
         }
       }
     }
-    return snapshots.sort((a, b) => b.timestamp - a.timestamp);
+    return snapshots.sort((a, b) => b.createdAt - a.createdAt);
   }
-
-  async createSnapshot(): Promise<void> {
-    const currentDbName = this.vfs.dbName;
-    const timestamp = Date.now();
-    const targetDbName = `${SNAPSHOT_PREFIX}${timestamp}`;
-    await VFSCore.copyDatabase(currentDbName, targetDbName);
+  async createSnapshot() { 
+      const currentDbName = this.vfs.dbName;
+      const targetDbName = `${SNAPSHOT_PREFIX}${Date.now()}`;
+      await VFSCore.copyDatabase(currentDbName, targetDbName);
   }
 
   async restoreSnapshot(snapshotName: string): Promise<void> {

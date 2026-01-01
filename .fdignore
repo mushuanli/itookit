@@ -57,6 +57,7 @@ shims-turndown.d.ts
 #store/
 #provider/
 middleware/
+SystemGarbageCollector.ts
 
 #vfs-ui
 vfs-ui/src/mappers/

@@ -43,6 +43,7 @@ export {
   type IVFSMiddleware, // [变更]
   type VFSEvent,
   type SearchQuery,
+  type IncrementalRestoreOptions
 } from './core/types.js';
 
 /**
