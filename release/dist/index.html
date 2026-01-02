@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi-Workspace Application</title>
+
+    <!-- 1. 图标库 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+    <!-- 2. 基础依赖 (Markdown/Graph) -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
+    
+    <!-- LiteGraph 依赖 -->
+    <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/gh/jagenjo/litegraph.js/css/litegraph.css">
+    <script type="text/javascript" src="https://cdn.jsdelivr.net/gh/jagenjo/litegraph.js/build/litegraph.min.js" defer></script>
+    
+    <!-- Immer -->
+    <script src="https://cdn.jsdelivr.net/npm/immer/dist/immer.umd.production.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            if (window.immer) { window.immer.enableMapSet(); }
+        });
+    </script>
+
+    <!-- 3. 应用样式 -->
+  <script type="module" crossorigin src="./assets/index-qSUbUdyz.js"></script>
+  <link rel="modulepreload" crossorigin href="./assets/vendor-BtkpvKMz.js">
+  <link rel="stylesheet" crossorigin href="./assets/index-Btb5iJaR.css">
+</head>
+
+<body>
+
+    <!-- ============================================= -->
+    <!--          1. 左侧主导航栏 (App Sidebar)         -->
+    <!-- ============================================= -->
+    <nav class="app-sidebar">
+        <ul class="main-nav-list">
+            <!-- [新增] Anki Workspace 按钮 (放在第一个) -->
+            <li>
+                <a class="app-nav-btn" data-target="anki-workspace" title="Anki Memory">
+                    <i class="fas fa-brain"></i>
+                </a>
+            </li>
+
+            <li>
+                <a class="app-nav-btn" data-target="project-workspace" title="Projects">
+                    <i class="fas fa-folder-tree"></i>
+                </a>
+            </li>
+            <li>
+                <a class="app-nav-btn" data-target="email-workspace" title="Emails">
+                    <i class="fas fa-envelope"></i>
+                </a>
+            </li>
+            <li>
+                <a class="app-nav-btn" data-target="private-workspace" title="Private Notes">
+                    <i class="fas fa-lock"></i>
+                </a>
+            </li>
+            <li>
+                <a class="app-nav-btn active" data-target="llm-workspace" title="AI 会话">
+                    <i class="fas fa-robot"></i>
+                </a>
+            </li>
+            
+            <li>
+                <a class="app-nav-btn" data-target="prompt-workspace" title="Prompts">
+                    <i class="fas fa-pen-to-square"></i>
+                </a>
+            </li>
+            <li>
+                <a class="app-nav-btn" data-target="agent-workspace" title="Agents">
+                    <i class="fas fa-user-secret"></i>
+                </a>
+            </li>
+            <li>
+                <a class="app-nav-btn" data-target="settings-workspace" title="Settings">
+                    <i class="fas fa-cog"></i>
+                </a>
+            </li>
+        </ul>
+    </nav>
+
+    <!-- ============================================= -->
+    <!--         2. 主内容区域 (Workspace Area)         -->
+    <!-- ============================================= -->
+    <main class="main-content-area">
+
+        <!-- 
+           [重要修改] 
+           由 MemoryManager 接管的容器现在是空的。
+           JS 会自动在其中创建 Sidebar 和 Editor。
+        -->
+        <div id="anki-workspace" class="workspace-view"></div>
+
+
+        <!-- (B) Project Workspace -->
+        <div id="project-workspace" class="workspace-view"></div>
+
+        <!-- (C) Email Workspace -->
+        <div id="email-workspace" class="workspace-view"></div>
+
+        <!-- (D) Private Workspace -->
+        <div id="private-workspace" class="workspace-view"></div>
+
+        <!-- (E) LLM Workspace -->
+        <div id="llm-workspace" class="workspace-view active"></div>
+
+        <!-- (A) Prompt Workspace (默认激活) -->
+        <div id="prompt-workspace" class="workspace-view"></div>
+
+        <!-- (A) Agent Workspace (默认激活) -->
+        <div id="agent-workspace" class="workspace-view"></div>
+        <!-- 
+           Settings Workspace 
+           这是一个特殊的视图，不使用 MemoryManager 文件管理，
+           所以保留内部结构供 React/Vue 或原生 JS 渲染内容。
+        -->
+        <div id="settings-workspace" class="workspace-view">
+            <div id="settings-content">
+                <!-- Settings UI 将被挂载到这里 -->
+            </div>
+        </div>
+    </main>
+
+    <!-- 主应用程序脚本 -->
+
+</body>
+</html>
