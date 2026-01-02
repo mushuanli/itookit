@@ -1,6 +1,6 @@
 // @file: app-settings/editors/StorageSettingsEditor.ts
 import { BaseSettingsEditor, Modal, Toast } from '@itookit/common';
-import { SettingsService, LocalSnapshot, SyncConfig, SyncStatus } from '../services/SettingsService'; 
+import { SettingsService, LocalSnapshot, SyncConfig, SyncStatus, SyncMode } from '../services/SettingsService'; 
 import { SettingsState } from '../types';
 
 const SETTINGS_LABELS: Record<keyof SettingsState, string> = {
@@ -80,6 +80,23 @@ export class StorageSettingsEditor extends BaseSettingsEditor<SettingsService> {
             'success': '同步成功'
         };
         const syncStateLabel = syncLabelMap[this.syncStatus.state] || '未知';
+        // 新增的部分：高级修复区
+        const advancedOpsHtml = `
+            <div style="margin-top:20px; padding-top:15px; border-top:1px dashed var(--st-border-color);">
+                <div style="font-size:0.85em; color:var(--st-text-secondary); margin-bottom:10px;">🛡️ 数据修复与强制同步</div>
+                <div style="display:flex; gap:10px;">
+                    <button id="btn-force-push" class="settings-btn settings-btn--sm settings-btn--secondary" title="将本地所有文件覆盖到服务器">
+                        <i class="fas fa-arrow-up"></i> 强制上传 (Local ➔ Server)
+                    </button>
+                    <button id="btn-force-pull" class="settings-btn settings-btn--sm settings-btn--secondary" title="下载服务器所有文件覆盖本地">
+                        <i class="fas fa-arrow-down"></i> 强制下载 (Server ➔ Local)
+                    </button>
+                </div>
+                <small style="display:block; margin-top:5px; color:#999; font-size:0.75em;">
+                    注意：强制操作会忽略版本冲突，直接覆盖目标端的数据。
+                </small>
+            </div>
+        `;
 
         this.container.innerHTML = `
             <div class="settings-page">
@@ -129,8 +146,8 @@ export class StorageSettingsEditor extends BaseSettingsEditor<SettingsService> {
                     <div id="sync-config-panel" style="display:none; background:var(--st-bg-tertiary); padding:15px; border-radius:8px; margin-bottom:15px;">
                         <div class="settings-form-group">
                             <label>服务器地址 (Endpoint)</label>
-                            <input type="text" id="inp-sync-url" class="settings-input" placeholder="https://sync.example.com" value="${this.syncConfig.serverUrl || ''}">
-                            <small style="color:var(--st-text-secondary); font-size:0.75em;">建议使用 HTTPS 以确保传输安全。</small>
+                            <input type="text" id="inp-sync-url" class="settings-input" placeholder="https://127.0.0.1:3443" value="${this.syncConfig.serverUrl || ''}">
+                            <small style="color:var(--st-text-secondary); font-size:0.75em;">若是本地自签名证书，请先在浏览器访问一次该地址并接受证书。</small>
                         </div>
                         
                         <div class="settings-form-row">
@@ -146,10 +163,10 @@ export class StorageSettingsEditor extends BaseSettingsEditor<SettingsService> {
 
                         <div class="settings-form-row">
                             <div class="settings-form-group" style="flex:1">
-                                <label>同步策略</label>
+                                <label>常规同步策略</label>
                                 <select id="sel-sync-strategy" class="settings-select">
                                     <option value="manual" ${this.syncConfig.strategy === 'manual' ? 'selected' : ''}>手动同步 (Manual)</option>
-                                    <option value="bidirectional" ${this.syncConfig.strategy === 'bidirectional' ? 'selected' : ''}>双向同步 (Smart)</option>
+                                    <option value="bidirectional" ${this.syncConfig.strategy === 'bidirectional' ? 'selected' : ''}>双向智能 (Smart)</option>
                                     <option value="push" ${this.syncConfig.strategy === 'push' ? 'selected' : ''}>仅上传 (Push)</option>
                                     <option value="pull" ${this.syncConfig.strategy === 'pull' ? 'selected' : ''}>仅下载 (Pull)</option>
                                 </select>
@@ -168,6 +185,8 @@ export class StorageSettingsEditor extends BaseSettingsEditor<SettingsService> {
                             <button id="btn-test-conn" class="settings-btn settings-btn--sm settings-btn--secondary">测试连接</button>
                             <button id="btn-save-sync" class="settings-btn settings-btn--sm settings-btn--primary">保存配置</button>
                         </div>
+
+                        ${advancedOpsHtml} <!-- 插入强制同步区域 -->
                     </div>
                 </div>
 
@@ -289,32 +308,31 @@ export class StorageSettingsEditor extends BaseSettingsEditor<SettingsService> {
         }
 
         // Sync Actions
-        this.bindButton('#btn-toggle-sync-config', () => {
+        this.bindButton('#btn-toggle-sync-config', async () => {
             const panel = this.container.querySelector('#sync-config-panel') as HTMLElement;
-            panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+            const isHidden = panel.style.display === 'none';
+            
+            if (isHidden) {
+                // 此时要打开
+                panel.style.display = 'block';
+            } else {
+                // 此时要关闭 -> 触发自动保存
+                try {
+                    await this.saveConfigFromUI(); // 保存
+                    Toast.success('配置已自动保存');
+                    panel.style.display = 'none';
+                } catch (e: any) {
+                    // 如果校验失败（比如没填地址），不关闭面板
+                    console.warn('Auto-save skipped:', e.message);
+                    panel.style.display = 'none'; // 依然关闭，或者也可以选择保持打开并报错
+                }
+            }
         });
 
         this.bindButton('#btn-save-sync', async () => {
-            const url = this.getVal('#inp-sync-url');
-            const user = this.getVal('#inp-sync-user');
-            const pass = this.getVal('#inp-sync-pass');
-            const strategy = (this.container.querySelector('#sel-sync-strategy') as HTMLSelectElement).value;
-            const autoSync = (this.container.querySelector('#chk-auto-sync') as HTMLInputElement).checked;
-
-            if (!url || !user) {
-                return Toast.warning('地址和用户名必填');
-            }
-
             try {
-                await this.service.saveSyncConfig({
-                    serverUrl: url,
-                    username: user,
-                    password: pass,
-                    strategy: strategy as any,
-                    autoSync
-                });
+                await this.saveConfigFromUI();
                 Toast.success('配置已保存');
-                await this.loadSyncConfig();
             } catch(e) { Toast.error('保存失败'); }
         });
 
@@ -338,18 +356,79 @@ export class StorageSettingsEditor extends BaseSettingsEditor<SettingsService> {
             }
         });
 
-        this.bindButton('#btn-sync-now', async () => {
-            try {
-                this.syncStatus.state = 'syncing';
-                this.render();
-                await this.service.triggerSync();
-                Toast.success('同步完成');
-            } catch(e) {
-                Toast.error('同步失败');
-                console.error(e);
-            } finally {
-                await this.loadSyncConfig();
+        this.bindButton('#btn-sync-now', () => this.handleSyncAction('standard'));
+
+        // [改进 3] 强制同步按钮绑定
+        this.bindButton('#btn-force-push', () => this.confirmForceSync('force_push'));
+        this.bindButton('#btn-force-pull', () => this.confirmForceSync('force_pull'));
+    }
+
+    // 新增：通用的 UI 保存逻辑
+    private async saveConfigFromUI() {
+        const url = this.getVal('#inp-sync-url');
+        const user = this.getVal('#inp-sync-user');
+        const pass = this.getVal('#inp-sync-pass');
+        const strategy = (this.container.querySelector('#sel-sync-strategy') as HTMLSelectElement).value;
+        const autoSync = (this.container.querySelector('#chk-auto-sync') as HTMLInputElement).checked;
+
+        if (!url || !user) {
+            throw new Error('Required fields missing');
+        }
+
+        await this.service.saveSyncConfig({
+            serverUrl: url,
+            username: user,
+            password: pass,
+            strategy: strategy as any,
+            autoSync
+        });
+        await this.loadSyncConfig(); // 刷新本地状态
+    }
+
+    // 新增：统一同步处理逻辑
+    private async handleSyncAction(mode: SyncMode) {
+        try {
+            // 同步前尝试自动保存（如果面板开着）
+            const panel = this.container.querySelector('#sync-config-panel') as HTMLElement;
+            if (panel && panel.style.display !== 'none') {
+                await this.saveConfigFromUI().catch(() => {}); // 忽略保存错误，继续尝试同步
             }
+
+            if (!this.syncConfig.serverUrl) {
+                Toast.warning('请先填写服务器地址');
+                // 自动展开面板
+                if (panel) panel.style.display = 'block';
+                return;
+            }
+
+            this.syncStatus.state = 'syncing';
+            this.render(); // 更新 UI 状态
+            
+            await this.service.triggerSync(mode);
+            
+            Toast.success(mode === 'standard' ? '同步完成' : '强制同步完成');
+        } catch(e: any) {
+            console.error(e);
+            let msg = '同步失败';
+            if (e.message.includes('Failed to fetch')) msg += ': 网络错误或证书未信任';
+            else msg += ': ' + e.message;
+            Toast.error(msg);
+        } finally {
+            await this.loadSyncConfig(); // 刷新状态显示
+        }
+    }
+
+
+    // 新增：强制同步确认弹窗
+    private confirmForceSync(mode: SyncMode) {
+        const isPush = mode === 'force_push';
+        const title = isPush ? '⚠️ 确认强制上传？' : '⚠️ 确认强制下载？';
+        const msg = isPush 
+            ? '此操作将把<b>本地的所有文件</b>上传到服务器。<br>服务器上已存在的同名文件将被<b>直接覆盖</b>。'
+            : '此操作将从服务器下载所有文件。<br>本地已存在的同名文件将被<b>直接覆盖</b>。';
+
+        Modal.confirm(title, msg, async () => {
+            await this.handleSyncAction(mode);
         });
     }
 

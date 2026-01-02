@@ -18,6 +18,9 @@ const FILES = {
   sync: '/sync_config.json', // [新增] 同步配置文件
 };
 
+// 定义同步模式类型
+export type SyncMode = 'standard' | 'force_push' | 'force_pull';
+
 // [新增] 同步配置接口 (Fix Error 1)
 export interface SyncConfig {
   serverUrl: string;
@@ -319,55 +322,93 @@ export class SettingsService {
 
   /**
    * 触发同步
-   * 注意：此处仅为示例实现，实际同步逻辑需要对接具体的后端 API
+   * @param mode 同步模式：
+   *  - 'standard': 双向智能对比 (默认)
+   *  - 'force_push': 强制用本地文件覆盖服务器 (Client -> Server)
+   *  - 'force_pull': 强制用服务器文件覆盖本地 (Server -> Client)
    */
-  async triggerSync(): Promise<void> {
+  async triggerSync(mode: SyncMode = 'standard'): Promise<void> {
     if (!this.syncConfig.serverUrl) throw new Error('No server URL');
     
     try {
         this.syncStatus = { state: 'syncing', lastSyncTime: this.syncStatus.lastSyncTime };
         this.notify();
 
-        // 1. Auth
+        // 1. 认证
         const token = await this.performLogin(this.syncConfig.serverUrl, this.syncConfig.username, this.syncConfig.password);
 
-        // 2. Index Local Files
+        // 2. 索引本地文件
         const localFiles = await this.indexAllLocalFiles();
         
-        // 3. Check Diff
-        const checkRes = await fetch(`${this.syncConfig.serverUrl}/api/sync/check`, {
-            method: 'POST',
-            headers: { 
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`
-            },
-            body: JSON.stringify(localFiles)
-        });
-        
-        if (!checkRes.ok) throw new Error('Sync check failed');
-        const diff: { files_to_upload: string[], files_to_download: FileMeta[] } = await checkRes.json();
+        let uploadList: string[] = [];
+        let downloadList: FileMeta[] = [];
 
-        // 4. Handle Uploads (Push)
-        if (this.syncConfig.strategy !== 'pull') {
-            for (const path of diff.files_to_upload) {
-                await this.uploadFile(path, token);
+        if (mode === 'force_push') {
+            // [模式: 强制上传]
+            // 不询问服务器，直接把所有本地文件的路径加入上传列表
+            console.log('[Sync] Force Push Mode: Uploading all local files...');
+            uploadList = localFiles.map(f => f.path);
+            // 暂不支持强制推送删除（即不删除服务器上多余的文件，只覆盖内容）
+            downloadList = [];
+        } 
+        else if (mode === 'force_pull') {
+            // [模式: 强制下载]
+            // 技巧：发给服务器一个空的本地文件列表。
+            // 服务器会认为你什么都没有，从而把服务器上所有文件都加入 "files_to_download" 返回给你。
+            console.log('[Sync] Force Pull Mode: Downloading all server files...');
+            const checkRes = await this.checkDiff([], token); // 发送空列表
+            uploadList = []; // 忽略服务器让你上传的指令
+            downloadList = checkRes.files_to_download;
+        } 
+        else {
+            // [模式: 标准双向]
+            console.log('[Sync] Standard Mode: Checking diff...');
+            const checkRes = await this.checkDiff(localFiles, token);
+            
+            // 根据策略微调
+            if (this.syncConfig.strategy !== 'pull') {
+                uploadList = checkRes.files_to_upload;
+            }
+            if (this.syncConfig.strategy !== 'push') {
+                downloadList = checkRes.files_to_download;
             }
         }
 
-        // 5. Handle Downloads (Pull)
-        if (this.syncConfig.strategy !== 'push') {
-            for (const meta of diff.files_to_download) {
-                await this.downloadFile(meta, token);
-            }
+        console.log(`[Sync] Plan: Upload ${uploadList.length}, Download ${downloadList.length}`);
+
+        // 4. 执行上传
+        for (const path of uploadList) {
+            await this.uploadFile(path, token);
+        }
+
+        // 5. 执行下载
+        for (const meta of downloadList) {
+            await this.downloadFile(meta, token);
         }
 
         this.syncStatus = { state: 'success', lastSyncTime: Date.now() };
     } catch (e: any) {
         console.error('Sync Error', e);
         this.syncStatus = { state: 'error', lastSyncTime: this.syncStatus.lastSyncTime, errorMessage: e.message };
+        throw e; // 抛出异常供 UI 捕获显示
     } finally {
         this.notify();
     }
+  }
+
+  // 抽离 API 调用逻辑
+  private async checkDiff(clientFiles: FileMeta[], token: string) {
+      const checkRes = await fetch(`${this.syncConfig.serverUrl}/api/sync/check`, {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify(clientFiles)
+        });
+        
+        if (!checkRes.ok) throw new Error('Sync check failed');
+        return await checkRes.json();
   }
 
   private async indexAllLocalFiles(): Promise<FileMeta[]> {
