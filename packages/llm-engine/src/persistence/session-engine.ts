@@ -11,6 +11,7 @@ import {
     EngineEventType, 
     FS_MODULE_CHAT,
     generateUUID,
+    guessMimeType,
 } from '@itookit/common';
 import { 
     ChatManifest, 
@@ -684,6 +685,37 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
     // 建议同时加上这个（虽然可能是可选的，但加上更完整）
     async getAssetDirectoryId(ownerNodeId: string): Promise<string | null> {
         return this.moduleEngine.getAssetDirectoryId ? this.moduleEngine.getAssetDirectoryId(ownerNodeId) : null;
+    }
+    /**
+     * ✅ 实现：读取会话资产
+     */
+    async readSessionAsset(sessionId: string, assetPath: string): Promise<Blob | null> {
+        // 清理路径：去掉开头的 ./ 
+        const cleanPath = assetPath.startsWith('./') ? assetPath.slice(2) : assetPath;
+        
+        // 构造 VFS 内部路径： /.sessionId/filename
+        // 注意：这必须与 createAsset 的存储逻辑一致
+        const internalPath = `${this.getHiddenDir(sessionId)}/${cleanPath}`;
+        
+        try {
+            // 1. 获取 NodeID
+            const nodeId = await this.moduleEngine.resolvePath(internalPath);
+            if (!nodeId) return null;
+
+            // 2. 读取内容
+            const content = await this.moduleEngine.readContent(nodeId);
+            if (!content) return null;
+
+            // 3. 转换为 Blob (UI/Kernel 需要)
+            // 如果 content 是 string，转 Blob
+            // 如果 content 是 ArrayBuffer，转 Blob
+            const mimeType = guessMimeType(cleanPath);
+            return new Blob([content], { type: mimeType });
+            
+        } catch (e) {
+            console.warn(`[LLMSessionEngine] Failed to read asset: ${internalPath}`, e);
+            return null;
+        }
     }
 
     async readContent(id: string): Promise<string | ArrayBuffer> { 

@@ -126,6 +126,11 @@ export interface ILLMSessionEngine extends IBaseSessionEngine {
     
     /** 从 VFS nodeId 获取 sessionId */
     getSessionIdFromNodeId(nodeId: string): Promise<string | null>;
+    /** 
+     * ✅ 新增：根据相对路径读取会话内的资产内容 
+     * 用于 Engine 在运行时解析 Markdown 引用
+     */
+    readSessionAsset(sessionId: string, assetPath: string): Promise<Blob | null>;
 }
 
 // 为了向后兼容，导出别名
