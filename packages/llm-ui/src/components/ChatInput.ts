@@ -23,6 +23,7 @@ export class ChatInput {
     private executorSelect!: HTMLSelectElement;
     private fileInput!: HTMLInputElement;
     private attachmentContainer!: HTMLElement;
+    private inputWrapper!: HTMLElement; // 新增：用于拖拽高亮
     
     private loading = false;
     private files: File[] = [];
@@ -55,10 +56,11 @@ export class ChatInput {
 
                 <!-- 中间：输入区域 + 附件预览 -->
                 <div class="llm-input__field-wrapper">
+                    <!--div class="llm-input__drag-overlay">Drop files here</div--> <!-- 新增：拖拽提示遮罩 -->
                     <div class="llm-input__attachments" style="display:none"></div>
                     <textarea 
                         class="llm-input__textarea" 
-                        placeholder="Message... (Shift+Enter for new line)" 
+                        placeholder="Message... (Paste images or Drag & Drop)" 
                         rows="1"
                     ></textarea>
                 </div>
@@ -90,6 +92,7 @@ export class ChatInput {
         this.executorSelect = this.container.querySelector('.llm-input__executor-select')!;
         this.fileInput = this.container.querySelector('#llm-ui-hidden-file-input')!;
         this.attachmentContainer = this.container.querySelector('.llm-input__attachments')!;
+        this.inputWrapper = this.container.querySelector('.llm-input__field-wrapper')!;
     }
 
     private bindEvents() {
@@ -109,10 +112,16 @@ export class ChatInput {
             }
         });
 
-        // 3. 按钮事件
+        // ✨ 3. 增强：粘贴事件监听 (Paste Support)
+        this.textarea.addEventListener('paste', (e) => this.handlePaste(e));
+
+        // ✨ 4. 增强：拖拽事件监听 (Drag & Drop Support)
+        this.bindDragEvents();
+
+        // 5. 按钮事件
         this.sendBtn.addEventListener('click', () => this.triggerSend());
         this.stopBtn.addEventListener('click', () => this.options.onStop());
-        
+
         // 4. 附件处理
         this.attachBtn.addEventListener('click', () => this.fileInput.click());
         this.fileInput.addEventListener('change', () => {
@@ -126,6 +135,89 @@ export class ChatInput {
         this.executorSelect.addEventListener('change', () => {
             this.options.onExecutorChange?.(this.executorSelect.value);
         });
+    }
+
+    /**
+     * ✨ 处理粘贴事件
+     */
+    private handlePaste(e: ClipboardEvent) {
+        // 如果正在加载中，不允许粘贴文件（可选）
+        if (this.loading) return;
+
+        const items = e.clipboardData?.items;
+        if (!items) return;
+
+        const pastedFiles: File[] = [];
+
+        for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            if (item.kind === 'file') {
+                const file = item.getAsFile();
+                if (file) {
+                    // 如果是截图，通常文件名是 image.png，容易重名覆盖
+                    // 我们可以给它重命名
+                    const finalFile = this.renameFileIfNeeded(file);
+                    pastedFiles.push(finalFile);
+                }
+            }
+        }
+
+        if (pastedFiles.length > 0) {
+            // 如果粘贴包含文件，阻止默认行为（防止有些浏览器尝试在 textarea 显示图片乱码）
+            // 但如果同时包含文本，我们通常希望文本能进去。
+            // 现代浏览器中，粘贴文件不会影响文本粘贴，除非我们 preventDefault。
+            // 这里我们只处理文件，文本让浏览器默认处理。
+            this.addFiles(pastedFiles);
+        }
+    }
+
+    /**
+     * ✨ 绑定拖拽事件
+     */
+    private bindDragEvents() {
+        const wrapper = this.inputWrapper;
+
+        // 拖入
+        wrapper.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!this.loading) {
+                wrapper.classList.add('llm-input__field-wrapper--drag-active');
+            }
+        });
+
+        // 拖出
+        wrapper.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            wrapper.classList.remove('llm-input__field-wrapper--drag-active');
+        });
+
+        // 放下
+        wrapper.addEventListener('drop', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            wrapper.classList.remove('llm-input__field-wrapper--drag-active');
+
+            if (this.loading) return;
+
+            const droppedFiles = e.dataTransfer?.files;
+            if (droppedFiles && droppedFiles.length > 0) {
+                this.addFiles(Array.from(droppedFiles));
+            }
+        });
+    }
+
+    /**
+     * ✨ 辅助：重命名截图文件
+     */
+    private renameFileIfNeeded(file: File): File {
+        if (file.name === 'image.png' || file.name === 'image.jpg') {
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+            const newName = `paste_${timestamp}.${file.name.split('.').pop()}`;
+            return new File([file], newName, { type: file.type });
+        }
+        return file;
     }
 
     /**
@@ -191,17 +283,31 @@ export class ChatInput {
         this.attachmentContainer.style.display = 'flex';
         this.attachmentContainer.innerHTML = this.files.map((f, i) => `
             <div class="llm-input__attachment-tag">
-                <span>📄 ${f.name}</span>
-                <span style="cursor:pointer;margin-left:4px;" data-index="${i}">×</span>
+                <span class="llm-input__file-icon">
+                   ${f.type.startsWith('image/') ? '🖼️' : '📄'}
+                </span>
+                <span class="llm-input__filename">${f.name}</span>
+                <span class="llm-input__filesize">(${this.formatSize(f.size)})</span>
+                <span class="llm-input__remove-btn" data-index="${i}" title="Remove">×</span>
             </div>
         `).join('');
 
-        this.attachmentContainer.querySelectorAll('span[data-index]').forEach(el => {
+        this.attachmentContainer.querySelectorAll('.llm-input__remove-btn').forEach(el => {
             el.addEventListener('click', (e) => {
+                e.stopPropagation(); // 防止触发输入框聚焦
                 const idx = parseInt((e.target as HTMLElement).dataset.index!);
                 this.removeFile(idx);
             });
         });
+    }
+
+    // ✨ 辅助：格式化文件大小
+    private formatSize(bytes: number): string {
+        if (bytes === 0) return '0 B';
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
     }
 
     private async triggerSend() {
@@ -227,6 +333,13 @@ export class ChatInput {
         this.textarea.disabled = loading;
         this.executorSelect.disabled = loading;
         this.attachBtn.disabled = loading;
+        
+        // 禁用/启用拖拽样式
+        if (loading) {
+            this.inputWrapper.classList.add('llm-input__field-wrapper--disabled');
+        } else {
+            this.inputWrapper.classList.remove('llm-input__field-wrapper--disabled');
+        }
     }
 
     focus() {
