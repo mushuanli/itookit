@@ -12,17 +12,16 @@ export class NodeTemplates {
     }
 
     static renderUserBubble(group: SessionGroup, preview: string, isCollapsed: boolean = false): string {
-        const fileBadges = (group.files || []).map(f => 
-            `<span class="llm-ui-file-badge">📄 ${escapeHTML(f.name)}</span>`
-        ).join('');
+        // ✨ [移除] 移除了 fileBadges 的生成逻辑
+        // 因为附件已经转换为 Markdown 语法包含在 content 中，由 MDxEditor 统一渲染
 
         const collapsedClass = isCollapsed ? 'is-collapsed' : '';
         const timeStr = this.formatTime(group.timestamp);
 
         // ✅ 修复：只有多分支时才显示导航器
-        const hasSiblings = (group.siblingCount ?? 1) > 1;
         const siblingIndex = group.siblingIndex ?? 0;
         const siblingCount = group.siblingCount ?? 1;
+        const hasSiblings = siblingCount > 1;
         
         const branchNavHtml = hasSiblings ? `
             <button class="llm-icon-btn" data-action="prev-sibling" title="Previous" ${siblingIndex === 0 ? 'disabled' : ''}>←</button>
@@ -57,7 +56,8 @@ export class NodeTemplates {
                     </div>
                 </div>
                 <div class="llm-ui-bubble__content">
-                    ${fileBadges ? `<div class="llm-ui-files">${fileBadges}</div>` : ''}
+                    <!-- ✨ [移除] 移除了 <div class="llm-ui-files">...</div> -->
+                    
                     <div class="llm-ui-mount-point" id="user-mount-${group.id}"></div>
                     
                     <div class="llm-ui-edit-actions" style="display:none;">
@@ -73,18 +73,18 @@ export class NodeTemplates {
     static renderAgentHeader(node: ExecutionNode, preview: string, icon: string, isCollapsed: boolean = false): string {
         const timeStr = this.formatTime(node.startTime);
 
-    // ✅ 新增：获取分支信息
-    const siblingIndex = node.data.metaInfo?.siblingIndex ?? 0;
-    const siblingCount = node.data.metaInfo?.siblingCount ?? 1;
-    const hasSiblings = siblingCount > 1;
-    
-    // ✅ 新增：分支导航 HTML
-    const branchNavHtml = hasSiblings ? `
-        <button class="llm-icon-btn" data-action="prev-sibling" title="Previous" ${siblingIndex === 0 ? 'disabled' : ''}>←</button>
-        <span class="llm-ui-branch-indicator">${siblingIndex + 1}/${siblingCount}</span>
-        <button class="llm-icon-btn" data-action="next-sibling" title="Next" ${siblingIndex === siblingCount - 1 ? 'disabled' : ''}>→</button>
-        <div class="llm-ui-sep"></div>
-    ` : '';
+        // ✅ 新增：获取分支信息
+        const siblingIndex = node.data.metaInfo?.siblingIndex ?? 0;
+        const siblingCount = node.data.metaInfo?.siblingCount ?? 1;
+        const hasSiblings = siblingCount > 1;
+        
+        // ✅ 新增：分支导航 HTML
+        const branchNavHtml = hasSiblings ? `
+            <button class="llm-icon-btn" data-action="prev-sibling" title="Previous" ${siblingIndex === 0 ? 'disabled' : ''}>←</button>
+            <span class="llm-ui-branch-indicator">${siblingIndex + 1}/${siblingCount}</span>
+            <button class="llm-icon-btn" data-action="next-sibling" title="Next" ${siblingIndex === siblingCount - 1 ? 'disabled' : ''}>→</button>
+            <div class="llm-ui-sep"></div>
+        ` : '';
 
         // ✨ [修改] 识别 Agent 并添加可点击属性
         const agentId = node.data.metaInfo?.agentId;

@@ -2,9 +2,9 @@
 
 import { 
     IEditor, EditorOptions,EditorHostContext, EditorEvent, EditorEventCallback, 
-    escapeHTML
+    escapeHTML,Toast
 } from '@itookit/common';
-import { LLMPrintService, type PrintService } from '@itookit/mdxeditor';
+import { LLMPrintService, type PrintService,AssetManagerUI } from '@itookit/mdxeditor';
 import { HistoryView } from './components/HistoryView';
 import { ChatInput, ExecutorOption } from './components/ChatInput';
 import { 
@@ -55,7 +55,8 @@ export class LLMWorkspaceEditor implements IEditor {
     // UI Elements
     private titleInput!: HTMLInputElement;
     private statusIndicator!: HTMLElement;
-    
+    private assetManagerUI: AssetManagerUI | null = null;
+
     // State
     private currentTitle: string = 'New Chat';
     private isAllExpanded: boolean = true;
@@ -374,6 +375,12 @@ export class LLMWorkspaceEditor implements IEditor {
                         <span class="llm-bg-badge">2 running</span>
                     </div>
                     
+                    <button class="llm-workspace-titlebar__btn" id="llm-btn-assets" title="附件管理">
+                        <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18">
+                            <path d="M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5a2.5 2.5 0 0 1 5 0v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5a2.5 2.5 0 0 0 5 0V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5z"/>
+                        </svg>
+                    </button>
+
                     <button class="llm-workspace-titlebar__btn" id="llm-btn-collapse" title="Collapse/Expand All">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <polyline points="4 14 10 14 10 20"></polyline>
@@ -440,6 +447,11 @@ export class LLMWorkspaceEditor implements IEditor {
             }
         });
 
+        // ✅ 新增：绑定附件管理按钮事件
+        this.container.querySelector('#llm-btn-assets')?.addEventListener('click', async () => {
+            await this.handleOpenAssetManager();
+        });
+
         // Collapse/Expand All
         this.container.querySelector('#llm-btn-collapse')?.addEventListener('click', (e) => {
             this.toggleAllBubbles(e.currentTarget as Element);
@@ -488,6 +500,50 @@ export class LLMWorkspaceEditor implements IEditor {
     // ================================================================
     // 事件处理
     // ================================================================
+
+    // ================================================================
+    // ✅ [5] 新增：附件管理核心逻辑 (移植自 AssetManagerPlugin)
+    // ================================================================
+
+    private async handleOpenAssetManager(): Promise<void> {
+        const engine = this.engine; // 获取 ILLMSessionEngine 实例
+        const ownerNodeId = this.options.ownerNodeId || this.options.nodeId; 
+
+        if (!engine || ! ownerNodeId ) {
+            Toast.error('Engine not connected or no session');
+            return;
+        }
+
+        try {
+            // 1. 获取目录 ID
+            // 注意：ILLMSessionEngine 必须继承或包含 getAssetDirectoryId 方法
+            const assetDirId = await engine.getAssetDirectoryId(ownerNodeId);
+
+            if (!assetDirId) {
+                // 如果没有目录 ID，通常意味着还没上传过任何附件
+                Toast.info('No attachments found in this chat');
+                return;
+            }
+
+            // 2. 关闭旧实例
+            if (this.assetManagerUI) {
+                this.assetManagerUI.close();
+            }
+
+            // 3. 实例化并显示
+            // 注意：AssetManagerUI 通常第二个参数是 editorInstance，用于点击图片时插入到编辑器。
+            // 在 LLM 对话模式下，我们没有单一的 MDxEditor 实例供插入，
+            // 且主要目的是“管理/删除”附件，因此这里传 null (需要类型断言) 或 传入 undefined。
+            // 如果 AssetManagerUI 内部强依赖 editor，可能需要传入一个 Dummy 对象。
+            this.assetManagerUI = new AssetManagerUI(engine, null as any, {});
+            
+            await this.assetManagerUI.show(assetDirId);
+
+        } catch (e: any) {
+            console.error('[LLMWorkspaceEditor] Failed to open Asset Manager:', e);
+            Toast.error('Failed to open Asset Manager');
+        }
+    }
 
     /**
      * 处理当前会话的事件
@@ -774,18 +830,60 @@ private findNodeInTree(node: ExecutionNode | undefined, targetId: string): boole
      * 处理用户发送消息
      */
     private async handleUserSend(text: string, files: File[], agentId?: string): Promise<void> {
-        if (!this.currentSessionId) {
+            const ownerNodeId = this.options.ownerNodeId || this.options.nodeId; 
+        if (!ownerNodeId ) {
             console.error('[LLMWorkspaceEditor] No session loaded!');
             return;
         }
 
         console.log('[LLMWorkspaceEditor] User sending message...');
-        this.chatInput.setLoading(true); // 立即锁定输入框
+        this.chatInput.setLoading(true); 
         
         try {
-            await this.sessionManager.runUserQuery(text, files, agentId || 'default');
-            // 注意：不要在这里 setLoading(false)
-            // 状态应该完全由 handleGlobalEvent -> session_status_changed 驱动
+            // 1. 准备文本缓冲区，如果 text 为空，也可以发送纯图片
+            let finalText = text || ''; 
+            
+            // 2. 上传附件并生成 Markdown 引用
+            if (files.length > 0) {
+                const engine = this.options.sessionEngine;
+                
+                // 串行或并行上传均可，这里用并行
+                await Promise.all(files.map(async (file) => {
+                    try {
+                        const arrayBuffer = await file.arrayBuffer();
+                        // 确保文件名安全（简单的去空格或替换，视 createAsset 实现而定）
+                        // 假设 createAsset 只是保存，不返回新路径，我们使用相对路径
+                        await engine.createAsset(ownerNodeId, file.name, arrayBuffer);
+                        
+                        console.log(`[LLMWorkspaceEditor] Asset saved: ${file.name}`);
+                        
+                        // ✨ 追加 Markdown 引用
+                        // 注意：加换行符确保 markdown 渲染正确
+                        const isImage = file.type.startsWith('image/');
+                        const ref = isImage 
+                            ? `\n\n![${file.name}](@asset/${file.name})` 
+                            : `\n\n[📄 ${file.name}](@asset/${file.name})`;
+                            
+                        finalText += ref;
+                        
+                    } catch (uploadErr) {
+                        console.error(`[LLMWorkspaceEditor] Failed to save asset ${file.name}:`, uploadErr);
+                        Toast.error(`Failed to upload ${file.name}`);
+                        // 即使上传失败，是否中断？通常继续发送文本比较好
+                    }
+                }));
+            }
+            
+            // 如果既没有文本，也没有成功处理的附件，则不发送
+            if (!finalText.trim()) {
+                 this.chatInput.setLoading(false);
+                 return;
+            }
+
+            // 3. 发送给 Engine
+            // 依然传递 files，以防 Engine 需要为某些 Provider (如 Claude/OpenAI) 构造特定的 multipart payload
+            await this.sessionManager.runUserQuery(finalText.trim(), files, agentId || 'default');
+            
         } catch (error: any) {
             console.error('[LLMWorkspaceEditor] Send failed:', error);
             this.historyView.renderError(error);
@@ -933,6 +1031,11 @@ private findNodeInTree(node: ExecutionNode | undefined, targetId: string): boole
     }
 
     async destroy(): Promise<void> {
+        // ✅ [6] 清理 AssetManagerUI
+        if (this.assetManagerUI) {
+            this.assetManagerUI.close();
+            this.assetManagerUI = null;
+        }
         // ✅ 解绑会话事件
         if (this.sessionEventUnsubscribe) {
             this.sessionEventUnsubscribe();
