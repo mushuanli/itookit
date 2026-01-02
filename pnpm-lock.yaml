@@ -27,6 +27,30 @@ importers:
 
   apps/web-app:
     dependencies:
+      '@codemirror/autocomplete':
+        specifier: ^6.20.0
+        version: 6.20.0
+      '@codemirror/commands':
+        specifier: ^6.10.0
+        version: 6.10.0
+      '@codemirror/lang-markdown':
+        specifier: ^6.5.0
+        version: 6.5.0
+      '@codemirror/language':
+        specifier: ^6.11.3
+        version: 6.11.3
+      '@codemirror/lint':
+        specifier: ^6.9.2
+        version: 6.9.2
+      '@codemirror/search':
+        specifier: ^6.5.11
+        version: 6.5.11
+      '@codemirror/state':
+        specifier: ^6.5.2
+        version: 6.5.2
+      '@codemirror/view':
+        specifier: ^6.38.8
+        version: 6.38.8
       '@fortawesome/fontawesome-free':
         specifier: ^7.1.0
         version: 7.1.0
@@ -60,6 +84,9 @@ importers:
       '@itookit/vfs-ui':
         specifier: workspace:*
         version: link:../../packages/vfs-ui
+      codemirror:
+        specifier: ^6.0.2
+        version: 6.0.2
       dexie:
         specifier: ^4.2.1
         version: 4.2.1

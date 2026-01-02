@@ -9,12 +9,22 @@ export default defineConfig(
     external: [
       '@itookit/common',
       '@itookit/vfs-core',
-      /^@codemirror\//,      // 正则匹配所有 codemirror 包
+      // 建议保留正则作为兜底，但必须显式添加报错的包
+      /^@codemirror\//,      
       'codemirror',
       'marked',
       'mermaid',
       'front-matter',
-      'gray-matter'
+      'gray-matter',
+      // --- 👇 显式添加这些 CodeMirror 子包 ---
+      '@codemirror/state',
+      '@codemirror/view',
+      '@codemirror/commands',
+      '@codemirror/language',
+      '@codemirror/autocomplete',
+      '@codemirror/lint',
+      '@codemirror/search',
+      '@codemirror/lang-markdown'
     ],
     globals: {
       '@itookit/common': 'ItookitCommon',

@@ -67,6 +67,6 @@ vfs-ui/src/utils/
 vfs-ui/src/components/
 
 #llm:
-LLMSessionEngine.ts
 providers/
 editors/
+#templates/
