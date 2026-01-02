@@ -191,3 +191,33 @@ export function timeAgo(date: Date | number): string {
     const d = typeof date === 'number' ? new Date(date) : date;
     return d.toLocaleDateString();
 }
+
+
+/**
+ * 解析 Markdown 中的附件引用
+ * 提取 ![alt](./path) 或 [alt](./path) 形式的路径
+ */
+export function parseMarkdownAttachments(text: string): string[] {
+    const paths = new Set<string>();
+    
+    // 匹配图片: ![alt](url)
+    const imgRegex = /!\[.*?\]\((.*?)\)/g;
+    let match;
+    while ((match = imgRegex.exec(text)) !== null) {
+        if (match[1]) paths.add(match[1]);
+    }
+
+    // 匹配链接: [alt](url) (通常用于非图片附件)
+    // 注意：需要避免匹配到图片，虽然 Set 会去重，但为了精确可以区分
+    const linkRegex = /\[.*?\]\((.*?)\)/g;
+    while ((match = linkRegex.exec(text)) !== null) {
+        // 简单过滤：如果链接以 http 开头，通常是外链，忽略
+        // 我们只关心相对路径或 VFS 路径
+        const p = match[1];
+        if (p && !p.startsWith('http') && !p.startsWith('#')) {
+            paths.add(p);
+        }
+    }
+
+    return Array.from(paths);
+}

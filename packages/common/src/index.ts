@@ -46,6 +46,7 @@ export {
     isClass,
     guessMimeType
 } from './utils/utils';
+export {MarkdownAnalyzer} from './utils/MarkdownAnalyzer';
 
 // Export all components
 export * from './components/BaseSettingsEditor';

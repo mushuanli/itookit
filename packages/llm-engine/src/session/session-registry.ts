@@ -1,5 +1,7 @@
 // @file: llm-engine/session/session-registry.ts
 
+import {guessMimeType,MarkdownAnalyzer} from '@itookit/common';
+
 import { 
     SessionGroup, 
     SessionRuntime, 
@@ -55,7 +57,10 @@ export class SessionRegistry {
     private agentService!: IAgentService;
     //private sessionEngine!: ILLMSessionEngine;
     private initialized = false;
-    
+
+    // 实例化分析器 (单例或按需)
+    private markdownAnalyzer = new MarkdownAnalyzer();
+
     private constructor() {}
     
     static getInstance(): SessionRegistry {
@@ -395,12 +400,76 @@ export class SessionRegistry {
         this.emitPoolStatus();
         
         try {
-            // 1. 创建用户消息
+            // ============================================================
+            // 1. 解析 Markdown 并准备文件上下文
+            // ============================================================
+            
+            const contextFiles: ChatFile[] = [];
+            const processedFilenames = new Set<string>();
+
+            // 使用 MarkdownAnalyzer 提取引用
+            // context.filePath 设为虚拟路径，仅用于辅助分析器判断相对路径逻辑
+            const analysisResult = await this.markdownAnalyzer.analyze(
+                input.text, 
+                { filePath: 'message.md' } 
+            );
+
+            // 遍历分析出的文件名列表 (e.g., ['image.png', 'data.csv'])
+            for (const filename of analysisResult.references) {
+                if (processedFilenames.has(filename)) continue;
+                processedFilenames.add(filename);
+
+                // 策略 A: 优先从 input.files (内存中刚上传的) 查找
+                // 场景：用户刚发送一条带附件的消息
+                const memoryFile = input.files.find(f => f.name === filename);
+
+                if (memoryFile) {
+                    contextFiles.push(memoryFile);
+                } else {
+                    // 策略 B: 从 VFS 持久化层读取 (Asset)
+                    // 场景：用户重试历史消息，或者编辑了历史消息
+                    try {
+                        // 注意：Analyzer 返回的是文件名，readAsset 需要相对路径或文件名
+                        // LLMSessionEngine 内部会将 filename 映射到 /.sessionId/filename
+                        const blob = await this.persistence.readAsset(sessionId, filename);
+                        
+                        if (blob) {
+                            contextFiles.push({
+                                name: filename,
+                                type: blob.type || guessMimeType(filename), // 使用统一的 getMimeType
+                                path: `./${filename}`, // 补全为相对路径格式，方便 UI 显示或后续处理
+                                size: blob.size,
+                                fileRef: blob // 关键：KernelAdapter 需要这个 Blob 来读取内容
+                            });
+                        } else {
+                            // 仅警告，不中断（可能是外部链接或无效引用）
+                            console.warn(`[SessionRegistry] Asset not found in VFS: ${filename}`);
+                        }
+                    } catch (e) {
+                        console.error(`[SessionRegistry] Failed to load asset: ${filename}`, e);
+                    }
+                }
+            }
+
+            // 策略 C: 隐式包含 (Implicit Inclusion)
+            // 如果 input.files 中有文件未在 Markdown 中引用，依然将其加入上下文。
+            // 场景：用户拖拽了文件但 LLM UI 尚未生成 Markdown，或者作为隐式上下文发送。
+            for (const inFile of input.files) {
+                if (!processedFilenames.has(inFile.name)) {
+                    contextFiles.push(inFile);
+                    processedFilenames.add(inFile.name);
+                }
+            }
+
+            // ============================================================
+            // 2. 创建用户消息 (持久化 & 内存更新)
+            // ============================================================
+            
             let userNodeId = options.parentUserNodeId;
             
             if (!options.skipUserMessage) {
                 // [优化]: 持久化前剥离 fileRef，避免 JSON 中出现空对象，并确保数据纯净
-                const persistedFiles = input.files.map(f => ({
+                const persistedFiles = contextFiles.map(f => ({
                     name: f.name,
                     type: f.type,
                     path: f.path,
@@ -415,7 +484,7 @@ export class SessionRegistry {
                     { files: persistedFiles } // 传递剥离后的 ChatFile[]
                 );
                 
-                const userSession = state.addUserMessage(input.text, input.files, userNodeId);
+                const userSession = state.addUserMessage(input.text, contextFiles, userNodeId);
                 
                 // 发送用户消息事件
                 this.emitSessionEvent(sessionId, {
@@ -424,11 +493,13 @@ export class SessionRegistry {
                 });
             }
             
-            // 2. 解析执行器配置
-            const executorConfig = await this.resolveExecutorConfig(input.executorId);
+            // ============================================================
+            // 3. 准备执行器配置 & 助手节点
+            // ============================================================
             
-    // 3. 创建助手消息时附带分支信息
-    const branchInfo = options.branchInfo;
+            const executorConfig = await this.resolveExecutorConfig(input.executorId);
+            const branchInfo = options.branchInfo;
+
             const assistantNodeId = await this.persistence.appendMessage(
                 nodeId,
                 sessionId,
@@ -437,20 +508,18 @@ export class SessionRegistry {
                 {
                     agentId: executorConfig.id,
                     agentName: executorConfig.name,
-            status: 'running',
-            // ✅ 新增：分支元数据
-            siblingIndex: branchInfo?.siblingIndex ?? 0,
-            siblingCount: branchInfo?.siblingCount ?? 1,
-            parentAssistantId: branchInfo?.parentAssistantId
+                    status: 'running',
+                    siblingIndex: branchInfo?.siblingIndex ?? 0,
+                    siblingCount: branchInfo?.siblingCount ?? 1,
+                    parentAssistantId: branchInfo?.parentAssistantId
                 }
             );
             
-            //const rootNode = state.createAssistantMessage(executorConfig, assistantNodeId);
-	const rootNode = state.createAssistantMessage(
-	    executorConfig, 
-	    assistantNodeId,
-	    branchInfo  // ✅ 传递分支信息
-	);
+            const rootNode = state.createAssistantMessage(
+                executorConfig, 
+                assistantNodeId,
+                branchInfo
+            );
 
 
             // 发送助手消息开始事件 (通知 UI 渲染这个气泡)
@@ -476,24 +545,12 @@ export class SessionRegistry {
                 // 拦截重复的根 node_start
                 if (event.type === 'node_start') {
                     const p = event.payload as { parentId?: string; node?: ExecutionNode };
-                    const hasParent = !!(p.parentId || p.node?.parentId);
-                    
-                    if (!hasParent) {
-                        return; // ⛔️ 不转发给 UI
-                    }
+                    if (!p.parentId && !p.node?.parentId) return;
                 }
 
                 // 修正空 nodeId
-                if (event.type === 'node_update') {
-                    if (!event.payload.nodeId || event.payload.nodeId === '') {
-                        event.payload.nodeId = rootNode.id;
-                    }
-                }
-
-                if (event.type === 'node_status') {
-                    if (!event.payload.nodeId || event.payload.nodeId === '') {
-                        event.payload.nodeId = rootNode.id;
-                    }
+                if ((event.type === 'node_update' || event.type === 'node_status') && !event.payload.nodeId) {
+                    event.payload.nodeId = rootNode.id;
                 }
 
                 // 更新累积器（用于持久化）
@@ -520,10 +577,13 @@ export class SessionRegistry {
             // 所以我们需要提取出 fileRef 传递给 Kernel
             
             const rawFiles: File[] = [];
-            input.files.forEach(cf => {
-                // 确保 fileRef 存在且是 File 实例 (Blob 也可以，视 Kernel 定义而定)
-                if (cf.fileRef instanceof File || cf.fileRef instanceof Blob) {
-                    rawFiles.push(cf.fileRef as File);
+            contextFiles.forEach(cf => {
+                if (cf.fileRef instanceof File) {
+                    rawFiles.push(cf.fileRef);
+                } else if (cf.fileRef instanceof Blob) {
+                    // 如果是 Blob，需要伪装成 File (Kernel 某些插件可能依赖 name 属性)
+                    const file = new File([cf.fileRef], cf.name, { type: cf.type });
+                    rawFiles.push(file);
                 }
             });
 
@@ -612,9 +672,8 @@ export class SessionRegistry {
                 });
 
                 // 3. 持久化错误信息 (确保刷新后错误依然存在)
-                const assistantNodeId = lastSession.persistedNodeId;
-                if (assistantNodeId) {
-                    await this.persistence.updateMessage(sessionId, assistantNodeId, {
+                if (lastSession.persistedNodeId) {
+                    await this.persistence.updateMessage(sessionId, lastSession.persistedNodeId, {
                         meta: {
                             status: 'failed',
                             error: errorMessage, // ✅ 写入错误信息到文件

@@ -86,7 +86,14 @@ export class PersistenceAdapter {
     async getNodeSiblings(sessionId: string, messageId: string): Promise<ChatNode[]> {
         return this.engine.getNodeSiblings(sessionId, messageId);
     }
-    
+
+    /**
+     * ✅ 新增：读取资产
+     */
+    async readAsset(sessionId: string, path: string): Promise<Blob | null> {
+        return this.engine.readSessionAsset(sessionId, path);
+    }
+
     // ============== 分支操作 ==============
     
     /**

@@ -1,5 +1,5 @@
 /**
- * @file core/maintenance/analysis/MarkdownAnalyzer.ts
+ * @file common/utils/MarkdownAnalyzer.ts
  */
 import { 
     IDocumentAnalyzer, 
