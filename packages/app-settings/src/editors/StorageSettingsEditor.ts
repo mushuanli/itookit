@@ -17,7 +17,7 @@ export class StorageSettingsEditor extends BaseSettingsEditor<SettingsService> {
     private syncConfig: SyncConfig = {
         serverUrl: '',
         username: '',
-        password: '',
+        token: '', // Changed
         strategy: 'manual',
         autoSync: false
     };
@@ -156,8 +156,8 @@ export class StorageSettingsEditor extends BaseSettingsEditor<SettingsService> {
                                 <input type="text" id="inp-sync-user" class="settings-input" placeholder="username" value="${this.syncConfig.username || ''}">
                             </div>
                             <div class="settings-form-group" style="flex:1;">
-                                <label>密码</label>
-                                <input type="password" id="inp-sync-pass" class="settings-input" placeholder="••••••••" value="${this.syncConfig.password || ''}">
+                                <label>Token / API Key</label>
+                                <input type="password" id="inp-sync-token" class="settings-input" placeholder="sk-..." value="${this.syncConfig.token || ''}">
                             </div>
                         </div>
 
@@ -186,7 +186,7 @@ export class StorageSettingsEditor extends BaseSettingsEditor<SettingsService> {
                             <button id="btn-save-sync" class="settings-btn settings-btn--sm settings-btn--primary">保存配置</button>
                         </div>
 
-                        ${advancedOpsHtml} <!-- 插入强制同步区域 -->
+                        ${advancedOpsHtml}
                     </div>
                 </div>
 
@@ -344,10 +344,10 @@ export class StorageSettingsEditor extends BaseSettingsEditor<SettingsService> {
             try {
                 const url = this.getVal('#inp-sync-url');
                 const user = this.getVal('#inp-sync-user');
-                const pass = this.getVal('#inp-sync-pass');
-                const success = await this.service.testConnection(url, user, pass);
+                const token = this.getVal('#inp-sync-token'); // Changed from pass
+                const success = await this.service.testConnection(url, user, token);
                 if (success) Toast.success('连接成功');
-                else Toast.error('认证失败');
+                else Toast.error('认证失败 (Token 无效或网络错误)');
             } catch (e) {
                 Toast.error('连接错误: ' + (e as any).message);
             } finally {
@@ -367,7 +367,7 @@ export class StorageSettingsEditor extends BaseSettingsEditor<SettingsService> {
     private async saveConfigFromUI() {
         const url = this.getVal('#inp-sync-url');
         const user = this.getVal('#inp-sync-user');
-        const pass = this.getVal('#inp-sync-pass');
+        const token = this.getVal('#inp-sync-token'); // Changed from pass
         const strategy = (this.container.querySelector('#sel-sync-strategy') as HTMLSelectElement).value;
         const autoSync = (this.container.querySelector('#chk-auto-sync') as HTMLInputElement).checked;
 
@@ -378,7 +378,7 @@ export class StorageSettingsEditor extends BaseSettingsEditor<SettingsService> {
         await this.service.saveSyncConfig({
             serverUrl: url,
             username: user,
-            password: pass,
+            token: token, // Changed
             strategy: strategy as any,
             autoSync
         });

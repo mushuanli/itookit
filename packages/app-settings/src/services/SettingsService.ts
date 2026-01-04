@@ -24,8 +24,8 @@ export type SyncMode = 'standard' | 'force_push' | 'force_pull';
 // [新增] 同步配置接口 (Fix Error 1)
 export interface SyncConfig {
   serverUrl: string;
-  username: string; // Changed from apiKey
-  password?: string; // Optional (store carefully)
+  username: string; 
+  token?: string; // Changed from password
   strategy: 'manual' | 'bidirectional' | 'push' | 'pull';
   autoSync: boolean;
 }
@@ -298,27 +298,26 @@ export class SettingsService {
     catch (e: any) { if (e.code === VFSErrorCode.NOT_FOUND) await this.vfs.createFile(CONFIG_MODULE, FILES.sync, JSON.stringify(config, null, 2)); }
   }
 
-  // Test connection by attempting to login
-  async testConnection(url: string, user: string, pass: string): Promise<boolean> {
+  // [修改] 测试连接：使用 Token 直接请求接口
+  async testConnection(url: string, user: string, token: string): Promise<boolean> {
       try {
-          const token = await this.performLogin(url, user, pass);
-          return !!token;
+          // 尝试发送一个空的 Check 请求来验证 Token 是否有效
+          const res = await fetch(`${url}/api/sync/check`, {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify([]) // Empty file list
+          });
+          return res.ok;
       } catch (e) {
           console.error(e);
           return false;
       }
   }
 
-  private async performLogin(baseUrl: string, username: string, password?: string): Promise<string> {
-      const res = await fetch(`${baseUrl}/api/auth/login`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username, password })
-      });
-      if (!res.ok) throw new Error('Auth failed');
-      const data = await res.json();
-      return data.token;
-  }
+  // [移除] performLogin: 不再需要，Token 直接提供
 
   /**
    * 触发同步
@@ -329,14 +328,16 @@ export class SettingsService {
    */
   async triggerSync(mode: SyncMode = 'standard'): Promise<void> {
     if (!this.syncConfig.serverUrl) throw new Error('No server URL');
+    // [修改] 直接使用 Config 中的 Token
+    const token = this.syncConfig.token;
+    if (!token) throw new Error('No Access Token configured');
     
     try {
         this.syncStatus = { state: 'syncing', lastSyncTime: this.syncStatus.lastSyncTime };
         this.notify();
 
-        // 1. 认证
-        const token = await this.performLogin(this.syncConfig.serverUrl, this.syncConfig.username, this.syncConfig.password);
-
+        // 1. (已移除登录步骤) 直接使用 Token
+        
         // 2. 索引本地文件
         const localFiles = await this.indexAllLocalFiles();
         
@@ -407,7 +408,7 @@ export class SettingsService {
             body: JSON.stringify(clientFiles)
         });
         
-        if (!checkRes.ok) throw new Error('Sync check failed');
+        if (!checkRes.ok) throw new Error('Sync check failed (Invalid Token or Server Error)');
         return await checkRes.json();
   }
 
