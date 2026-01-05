@@ -522,9 +522,31 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
      */
     async loadTree(): Promise<EngineNode[]> {
         const allNodes = (await this.moduleEngine.loadTree()) as EngineNode[];
-        return allNodes.filter((node: EngineNode) => 
-            node.type === 'file' && node.name.endsWith('.chat')
-        );
+        
+        return allNodes.filter((node: EngineNode) => {
+            // 1. 总是排除以 . 开头的隐藏文件/文件夹 (系统数据)
+            if (node.name.startsWith('.')) return false;
+
+            // 2. 如果是文件，只保留 .chat
+            if (node.type === 'file') {
+                return node.name.endsWith('.chat');
+            }
+
+            // 3. 如果是目录，保留（用于分类）
+            if (node.type === 'directory') {
+                return true;
+            }
+
+            return false;
+        });
+    }
+
+    /**
+     * [修改 2] 启用创建目录
+     */
+    async createDirectory(name: string, parentId: string | null): Promise<EngineNode> {
+        // 直接调用底层引擎创建目录
+        return this.moduleEngine.createDirectory(name, parentId);
     }
 
     /**
@@ -592,12 +614,6 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
         return node;
     }
 
-    /**
-     * 禁用创建目录
-     */
-    async createDirectory(_name: string, _parentId: string | null): Promise<EngineNode> {
-        throw new Error("Chat list does not support sub-directories.");
-    }
 
     /**
      * 重命名
@@ -626,37 +642,58 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
      * 删除
      */
     async delete(ids: string[]): Promise<void> {
-        for (const id of ids) {
-            const coreVfs = this.vfs.getVFS();
-            const node = await coreVfs.storage.loadVNode(id);
-            if (!node) {
-                console.warn(`[LLMSessionEngine] Node ${id} not found, skipping`);
-                continue;
-            }
+        const coreVfs = this.vfs.getVFS();
 
-            // 尝试清理隐藏目录
-            try {
-                const content = await this.moduleEngine.readContent(id);
-                if (content) {
-                    const str = typeof content === 'string' ? content : new TextDecoder().decode(content);
-                    const manifest = JSON.parse(str) as ChatManifest;
+        // 定义递归清理函数
+        const cleanupRecursively = async (nodeId: string) => {
+            const node = await coreVfs.storage.loadVNode(nodeId);
+            if (!node) return;
+
+            // [潜在隐患修正] 建议转为字符串比较或导入 VNodeType
+            const isDirectory = String(node.type) === 'directory';
+            const isFile = String(node.type) === 'file';
+
+            if (isDirectory) {
+                // 如果是目录，获取子节点并递归
+                // 注意：this.moduleEngine.getChildren 返回的是 EngineNode[]，所以这里用 child.id 是对的
+                const children = await this.moduleEngine.getChildren(nodeId);
+                for (const child of children) {
+                    await cleanupRecursively(child.id);
+                }
+            } else if (isFile && node.name.endsWith('.chat')) {
+                // 如果是 chat 文件，执行清理逻辑
+                try {
+                    // [❌ 错误修正点] node 是 VNode 类型，属性是 nodeId，不是 id
+                    const content = await this.moduleEngine.readContent(node.nodeId); 
                     
-                    if (manifest.id) {
-                        // 清理隐藏目录
-                        const hiddenDirPath = this.getHiddenDir(manifest.id);
-                        const hiddenDirId = await this.moduleEngine.resolvePath(hiddenDirPath);
-                        if (hiddenDirId) {
-                            await this.moduleEngine.delete([hiddenDirId]);
+                    if (content) {
+                        const str = typeof content === 'string' ? content : new TextDecoder().decode(content);
+                        const manifest = JSON.parse(str) as ChatManifest;
+                        
+                        if (manifest.id) {
+                            // 删除对应的隐藏数据目录
+                            const hiddenDirPath = this.getHiddenDir(manifest.id);
+                            const hiddenDirId = await this.moduleEngine.resolvePath(hiddenDirPath);
+                            if (hiddenDirId) {
+                                await this.moduleEngine.delete([hiddenDirId]);
+                                if (DEBUG) console.log(`[LLMSessionEngine] Cleaned up hidden data for session ${manifest.id}`);
+                            }
                         }
                     }
+                } catch (e) {
+                    console.warn(`[LLMSessionEngine] Failed to cleanup data for ${node.name}`, e);
                 }
-            } catch (e) {
-                console.warn('Could not read manifest for cleanup:', e);
             }
+        };
 
-            // 2. 删除主文件 - 使用节点 ID
-            await this.moduleEngine.delete([id]);
+        // 1. 先执行逻辑清理 (删除 Hidden Data)
+        for (const id of ids) {
+            await cleanupRecursively(id);
         }
+
+        // 2. 再执行物理删除 (删除 VFS 节点)
+        // moduleEngine.delete 通常支持删除目录及其内容
+        await this.moduleEngine.delete(ids);
     
         this.notify();
     }
