@@ -44,7 +44,17 @@ export {
     generateId, 
     debounce, 
     isClass,
-    guessMimeType
+    guessMimeType,
+    sleep, 
+    throttle, 
+    retry, 
+    withTimeout, 
+    safeJsonParse, 
+    deepClone, 
+    truncate, 
+    formatFileSize, 
+    formatDuration, 
+    timeAgo
 } from './utils/utils';
 export {MarkdownAnalyzer} from './utils/MarkdownAnalyzer';
 

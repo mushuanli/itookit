@@ -75,18 +75,6 @@ import { VFSAgentService } from './services/vfs-agent-service';
 // ============================================
 
 export { Converters } from './utils/converters';
-export { 
-    sleep, 
-    throttle, 
-    retry, 
-    withTimeout, 
-    safeJsonParse, 
-    deepClone, 
-    truncate, 
-    formatFileSize, 
-    formatDuration, 
-    timeAgo 
-} from './utils/helpers';
 export {chatFileParser} from './utils/parsers';
 
 // ============================================
