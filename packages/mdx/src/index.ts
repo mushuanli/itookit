@@ -1,3 +1,5 @@
+/// <reference path="./types/shims-turndown.d.ts" />
+
 // mdx/index.ts
 export { createMDxEditor,defaultEditorFactory, registerPlugin } from './factory';
 export type { MDxEditorFactoryConfig, PluginConfig } from './factory';
