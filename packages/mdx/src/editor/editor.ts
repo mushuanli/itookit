@@ -37,6 +37,16 @@ export interface MDxEditorConfig extends EditorOptions {
 }
 
 /**
+ * Markdown 行解析结果
+ */
+interface ParsedMarkdownLines {
+  /** 代码块外的行 */
+  linesOutsideCode: string[];
+  /** 所有行 */
+  allLines: string[];
+}
+
+/**
  * MDx 编辑器
  * 集成 CodeMirror 和 MDxRenderer，并实现 IEditor 接口
  */
@@ -127,54 +137,53 @@ export class MDxEditor extends IEditor {
     return this;
   }
 
-    /**
-     * 获取打印服务实例（延迟初始化）
-     */
-    private getPrintService(): PrintService {
-        if (!this.printService) {
-            this.printService = new DefaultPrintService(
-                this.config.sessionEngine,
-                this.config.nodeId
-            );
-        }
-        return this.printService;
+  /**
+   * 获取打印服务实例（延迟初始化）
+   */
+  private getPrintService(): PrintService {
+    if (!this.printService) {
+      this.printService = new DefaultPrintService(
+        this.config.sessionEngine,
+        this.config.nodeId
+      );
     }
+    return this.printService;
+  }
 
-    /**
-     * 打印当前文档
-     */
-    async print(options?: PrintOptions): Promise<void> {
+  /**
+   * 打印当前文档
+   */
+  async print(options?: PrintOptions): Promise<void> {
     // 如果在编辑模式，先渲染内容
     if (this.currentMode === 'edit' && this.renderContainer) {
-        await this.renderContent();
+      await this.renderContent();
     }
     
     // 直接使用渲染容器的 HTML，确保与预览一致
     const contentHtml = this.renderContainer?.innerHTML || '';
     
     if (!contentHtml.trim()) {
-        console.warn('[MDxEditor] No content to print');
-        return;
+      console.warn('[MDxEditor] No content to print');
+      return;
     }
     
     await this.getPrintService().printFromHtml(contentHtml, {
-        title: this.config.title,
-        showHeader: true,
-        ...options,
+      title: this.config.title,
+      showHeader: true,
+      ...options,
     });
+  }
 
-    }
-
-    /**
-     * 获取可打印的 HTML
-     */
-    async getHtmlForPrint(options?: PrintOptions): Promise<string> {
-        const content = this.getText();
-        return await this.getPrintService().renderForPrint(content, {
-            title: this.config.title,
-            ...options,
-        });
-    }
+  /**
+   * 获取可打印的 HTML
+   */
+  async getHtmlForPrint(options?: PrintOptions): Promise<string> {
+    const content = this.getText();
+    return await this.getPrintService().renderForPrint(content, {
+      title: this.config.title,
+      ...options,
+    });
+  }
 
   /**
    * 创建编辑器和渲染器的 DOM 容器。
@@ -222,7 +231,6 @@ export class MDxEditor extends IEditor {
     });
   }
 
-
   /**
    * 监听来自插件的事件，以保持编辑器内容同步
    */
@@ -250,7 +258,7 @@ export class MDxEditor extends IEditor {
 
     // [新增] 切换到渲染模式前，如果内容有变动，尝试自动保存
     if (this.currentMode === 'edit' && mode === 'render' && this.isDirty()) {
-        await this.save();
+      await this.save();
     }
 
     this.currentMode = mode;
@@ -281,15 +289,59 @@ export class MDxEditor extends IEditor {
 
   // --- Helper: JSON Parsing ---
   private tryParseJson(text: string): any | null {
-      const trimmed = text.trim();
-      if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
-          try {
-              return JSON.parse(text);
-          } catch (e) {
-              return null;
-          }
+    const trimmed = text.trim();
+    if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+      try {
+        return JSON.parse(text);
+      } catch (e) {
+        return null;
       }
-      return null;
+    }
+    return null;
+  }
+
+  // --- Helper: Markdown Parsing ---
+  
+  /**
+   * 解析 Markdown 文本，区分代码块内外的行
+   * 用于 getHeadings、getSummary、getSearchableText 等方法
+   * 
+   * @param text - 原始 Markdown 文本
+   * @returns 解析结果，包含代码块外的行和所有行
+   */
+  private parseMarkdownLines(text: string): ParsedMarkdownLines {
+    const lines = text.split('\n');
+    const linesOutsideCode: string[] = [];
+    let inCodeBlock = false;
+    let codeBlockMarker = ''; // 记录是 ` 还是 ~
+
+    for (const line of lines) {
+      // 检测代码块边界（支持 ``` 和 ~~~，至少3个字符）
+      const fenceMatch = line.match(/^(`{3,}|~{3,})/);
+      
+      if (fenceMatch) {
+        const marker = fenceMatch[1].charAt(0);
+        const markerLength = fenceMatch[1].length;
+        
+        if (!inCodeBlock) {
+          // 进入代码块
+          inCodeBlock = true;
+          codeBlockMarker = marker;
+        } else if (marker === codeBlockMarker && line.trim().length >= markerLength) {
+          // 退出代码块（使用相同类型的标记符，且长度足够）
+          inCodeBlock = false;
+          codeBlockMarker = '';
+        }
+        // 代码块边界行不加入 linesOutsideCode
+        continue;
+      }
+      
+      if (!inCodeBlock) {
+        linesOutsideCode.push(line);
+      }
+    }
+
+    return { linesOutsideCode, allLines: lines };
   }
 
   // --- IEditor Implementation ---
@@ -301,7 +353,9 @@ export class MDxEditor extends IEditor {
     return Object.freeze(commands);
   }
   
-  getText(): string { return this.editorView ? this.editorView.state.doc.toString() : ''; }
+  getText(): string { 
+    return this.editorView ? this.editorView.state.doc.toString() : ''; 
+  }
   
   setText(markdown: string): void {
     if (this.editorView && markdown !== this.getText()) {
@@ -311,12 +365,11 @@ export class MDxEditor extends IEditor {
       this.setDirty(false);
 
       if (this.currentMode === 'render') {
-          // 普通 setText 仍使用 Fire-and-forget，但建议流式场景使用 setStreamingText
-          this.renderContent().catch(console.error);
+        // 普通 setText 仍使用 Fire-and-forget，但建议流式场景使用 setStreamingText
+        this.renderContent().catch(console.error);
       }
     }
   }
-
 
   /**
    * ✨ [核心实现] 专门用于流式输出的文本设置方法。
@@ -333,17 +386,17 @@ export class MDxEditor extends IEditor {
 
     // 2. 如果处于渲染模式，将渲染操作加入 Promise 队列
     if (this.currentMode === 'render') {
-        // 链接到上一个 Promise
-        this.renderPromise = this.renderPromise.then(async () => {
-            try {
-                await this.renderContent();
-            } catch (e) {
-                console.error('[MDxEditor] Streaming render failed:', e);
-            }
-        });
-        
-        // 等待当前操作完成
-        await this.renderPromise;
+      // 链接到上一个 Promise
+      this.renderPromise = this.renderPromise.then(async () => {
+        try {
+          await this.renderContent();
+        } catch (e) {
+          console.error('[MDxEditor] Streaming render failed:', e);
+        }
+      });
+      
+      // 等待当前操作完成
+      await this.renderPromise;
     }
   }
 
@@ -373,7 +426,7 @@ export class MDxEditor extends IEditor {
 
     // 2. 如果当前已有保存任务，返回该任务（等待其完成）
     if (this.currentSavePromise) {
-        return this.currentSavePromise;
+      return this.currentSavePromise;
     }
 
     // 3. 如果没有变更，跳过
@@ -381,47 +434,59 @@ export class MDxEditor extends IEditor {
 
     // 4. 创建新的保存任务
     this.currentSavePromise = (async () => {
-        try {
-            const content = this.getText();
-            
-            // 使用捕获的本地变量调用
-            await onSave(content);
-            
-            // 只有在保存成功后才清除脏状态
+      try {
+        const content = this.getText();
+        
+        // 使用捕获的本地变量调用
+        await onSave(content);
+        
+        // 只有在保存成功后才清除脏状态
             // 注意：这里存在微小的竞态，如果保存期间用户又输入了，
             // 理想情况应该比较 content 和 currentText，但这里简单处理设为 false
             // 下面的 destroy 逻辑会通过二次检查来弥补
-            this.setDirty(false);
-            this.emit('saved');
-        } catch (error) {
-            console.error('[MDxEditor] Save failed:', error);
-            this.emit('saveError', error);
-            // 保存失败保持 dirty 状态
-        } finally {
-            this.currentSavePromise = null;
-        }
+        this.setDirty(false);
+        this.emit('saved');
+      } catch (error) {
+        console.error('[MDxEditor] Save failed:', error);
+        this.emit('saveError', error);
+        // 保存失败保持 dirty 状态
+      } finally {
+        this.currentSavePromise = null;
+      }
     })();
 
     return this.currentSavePromise;
   }
   
-  // ✨ [最终] 确保getHeadings生成唯一ID，避免导航冲突
+  /**
+   * ✨ [重构] 获取文档标题列表
+   * 
+   * 修复问题：
+   * 1. 正确处理代码块内的 # 注释（Python、Shell、YAML 等）
+   * 2. 限制标题层级为 1-6（符合 Markdown 标准）
+   * 3. 生成唯一 ID，避免导航冲突
+   */
   async getHeadings(): Promise<Heading[]> {
     const text = this.getText();
     const headings: Heading[] = [];
     
     // [改进] 如果是 JSON，不提取 Heading
     if (this.tryParseJson(text)) {
-        return [];
+      return [];
     }
 
     const slugCount = new Map<string, number>();
+    
+    // 使用状态机解析，正确过滤代码块内的内容
+    const { linesOutsideCode } = this.parseMarkdownLines(text);
 
-    for (const line of text.split('\n')) {
-      const match = line.match(/^(#+)\s+(.*)/);
+    for (const line of linesOutsideCode) {
+      // 修复：限制标题层级为 1-6，且要求标题内容非空
+      const match = line.match(/^(#{1,6})\s+(.+)/);
       if (match) {
         const level = match[1].length;
         const textContent = match[2].trim();
+        
         if (textContent) {
           const rawSlug = slugify(textContent);
           const baseSlug = `heading-${rawSlug}`;
@@ -432,82 +497,102 @@ export class MDxEditor extends IEditor {
         }
       }
     }
+    
     return headings;
   }
 
-  // [改进] 获取搜索文本摘要，智能处理 JSON
+  /**
+   * [重构] 获取搜索文本摘要，智能处理 JSON 和代码块
+   */
   async getSearchableText(): Promise<string> {
-      const content = this.getText();
-      const json = this.tryParseJson(content);
-      
-      if (json) {
-          const parts: string[] = [];
-          if (json.name) parts.push(json.name);
-          if (json.description) parts.push(json.description);
-          if (json.summary) parts.push(json.summary);
-          if (Array.isArray(json.pairs)) {
-              json.pairs.forEach((p: any) => {
-                  if (p.human) parts.push(p.human);
-                  if (p.ai) parts.push(p.ai);
-              });
-          }
-          return parts.join('\n');
+    const content = this.getText();
+    const json = this.tryParseJson(content);
+    
+    if (json) {
+      const parts: string[] = [];
+      if (json.name) parts.push(json.name);
+      if (json.description) parts.push(json.description);
+      if (json.summary) parts.push(json.summary);
+      if (Array.isArray(json.pairs)) {
+        json.pairs.forEach((p: any) => {
+          if (p.human) parts.push(p.human);
+          if (p.ai) parts.push(p.ai);
+        });
       }
+      return parts.join('\n');
+    }
 
-      return content
-          .replace(/^#+\s/gm, '')
-          .replace(/\[(.*?)\]\(.*?\)/g, '$1')
-          .replace(/```[\s\S]*?```/g, '')
-          .replace(/`[^`]+`/g, '')
-          .trim();
+    // 使用解析器获取代码块外的内容
+    const { linesOutsideCode } = this.parseMarkdownLines(content);
+    
+    return linesOutsideCode
+      .join('\n')
+      .replace(/^#{1,6}\s+/gm, '')           // 移除标题标记
+      .replace(/\[(.*?)\]\(.*?\)/g, '$1')    // 提取链接文本
+      .replace(/`[^`]+`/g, '')               // 移除行内代码
+      .replace(/[*_~]+/g, '')                // 移除强调标记
+      .trim();
   }
   
-  // [改进] 获取摘要，智能处理 JSON
+  /**
+   * [重构] 获取摘要，智能处理 JSON 和代码块
+   */
   async getSummary(): Promise<string | null> {
-      const content = this.getText();
-      const json = this.tryParseJson(content);
+    const content = this.getText();
+    const json = this.tryParseJson(content);
 
-      if (json) {
-          if (json.description) return json.description;
-          if (json.summary) return json.summary;
-          // 如果是 Chat，取第一句话
-          if (Array.isArray(json.pairs) && json.pairs.length > 0) {
-              return json.pairs[0].human || null;
-          }
-          return null;
-      }
-
-      // 普通 Markdown 摘要逻辑
-      // 取第一段非标题、非代码块的文本
-      const lines = content.split('\n');
-      for (const line of lines) {
-          const trimmed = line.trim();
-          if (trimmed && !trimmed.startsWith('#') && !trimmed.startsWith('```') && !trimmed.startsWith('---')) {
-              // 移除 Markdown 标记
-              return trimmed.replace(/\[(.*?)\]\(.*?\)/g, '$1').replace(/[*_~`]/g, '').substring(0, 150);
-          }
+    if (json) {
+      if (json.description) return json.description;
+      if (json.summary) return json.summary;
+      // 如果是 Chat，取第一句话
+      if (Array.isArray(json.pairs) && json.pairs.length > 0) {
+        return json.pairs[0].human || null;
       }
       return null;
+    }
+
+    // 使用解析器获取代码块外的内容
+    const { linesOutsideCode } = this.parseMarkdownLines(content);
+    
+    // 取第一段非标题、非分隔线的文本
+    for (const line of linesOutsideCode) {
+      const trimmed = line.trim();
+      
+      // 跳过空行、标题、分隔线
+      if (!trimmed || trimmed.match(/^#{1,6}\s/) || trimmed === '---' || trimmed === '***' || trimmed === '___') {
+        continue;
+      }
+      
+      // 移除 Markdown 标记并返回摘要
+      return trimmed
+        .replace(/\[(.*?)\]\(.*?\)/g, '$1')  // 提取链接文本
+        .replace(/[*_~`]/g, '')               // 移除格式标记
+        .substring(0, 150);
+    }
+    
+    return null;
   }
 
-  setTitle(newTitle: string): void { this.renderer.getPluginManager().emit('setTitle', { title: newTitle }); }
+  setTitle(newTitle: string): void { 
+    this.renderer.getPluginManager().emit('setTitle', { title: newTitle }); 
+  }
   
   async navigateTo(target: { elementId: string }): Promise<void> {
     if (this.currentMode === 'render' && this.renderContainer) {
       try {
-          const element = this.renderContainer.querySelector(`#${CSS.escape(target.elementId)}`);
-          if (element) {
-              element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              element.classList.add('highlight-pulse');
-              setTimeout(() => element.classList.remove('highlight-pulse'), 1500);
-          } else {
-              console.warn(`[MDxEditor] Target element not found: #${target.elementId}`);
-          }
+        const element = this.renderContainer.querySelector(`#${CSS.escape(target.elementId)}`);
+        if (element) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          element.classList.add('highlight-pulse');
+          setTimeout(() => element.classList.remove('highlight-pulse'), 1500);
+        } else {
+          console.warn(`[MDxEditor] Target element not found: #${target.elementId}`);
+        }
       } catch (e) {
-          console.error('[MDxEditor] Navigation error:', e);
+        console.error('[MDxEditor] Navigation error:', e);
       }
     } else { 
-        console.warn('Navigation is only supported in render mode.'); 
+      console.warn('Navigation is only supported in render mode.'); 
     }
   }
 
@@ -573,8 +658,10 @@ export class MDxEditor extends IEditor {
 
   clearSearch(): void {
     if (this.currentMode === 'edit' && this.editorView) {
-       this.editorView.dispatch({ effects: this.searchCompartment.reconfigure([]) });
-    } else { this.renderer.clearSearch(); }
+      this.editorView.dispatch({ effects: this.searchCompartment.reconfigure([]) });
+    } else { 
+      this.renderer.clearSearch(); 
+    }
   }
 
   /**
@@ -619,34 +706,34 @@ export class MDxEditor extends IEditor {
    * 销毁编辑器实例，释放资源。
    */
   async destroy(): Promise<void> {
-      if (this.isDestroying) {
-          return;
-      }
-      this.isDestroying = true;
-      
-      console.log(`[MDxEditor] Destroying instance for node ${this.config.nodeId || 'unknown'}.`);
+    if (this.isDestroying) {
+      return;
+    }
+    this.isDestroying = true;
+    
+    console.log(`[MDxEditor] Destroying instance for node ${this.config.nodeId || 'unknown'}.`);
 
-      // 1. 等待当前可能正在进行的自动保存
-      if (this.currentSavePromise) {
-          try {
-              await this.currentSavePromise;
-          } catch (e) {
-              console.warn('[MDxEditor] Pending save failed during destroy:', e);
-          }
+    // 1. 等待当前可能正在进行的自动保存
+    if (this.currentSavePromise) {
+      try {
+        await this.currentSavePromise;
+      } catch (e) {
+        console.warn('[MDxEditor] Pending save failed during destroy:', e);
       }
+    }
 
-      // 2. 双重检查：如果等待期间有新输入，或者上次保存失败导致仍为 Dirty
-      // 执行最终强制保存
-      if (this._isDirty) {
-          console.log('[MDxEditor] Performing final save during destroy...');
-          await this.save();
-      }
+    // 2. 双重检查：如果等待期间有新输入，或者上次保存失败导致仍为 Dirty
+    // 执行最终强制保存
+    if (this._isDirty) {
+      console.log('[MDxEditor] Performing final save during destroy...');
+      await this.save();
+    }
 
-        // 清理打印服务
-        if (this.printService) {
-            this.printService.destroy?.();
-            this.printService = null;
-        }
+    // 清理打印服务
+    if (this.printService) {
+      this.printService.destroy?.();
+      this.printService = null;
+    }
 
       // ✨ [清理] 移除了原有的 VFS 直接保存逻辑
       // 现在应由调用者（如 Connector 或 App 层）通过 sessionEngine 处理最终保存
