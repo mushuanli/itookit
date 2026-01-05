@@ -10,19 +10,17 @@ import {
     EngineNode,
     FS_MODULE_AGENTS
 } from '@itookit/common';
-import { LLMConnection, LLM_PROVIDER_DEFAULTS } from '@itookit/llm-driver';
+import { LLMConnection,AgentDefinition,  
+    CONST_CONFIG_VERSION,LLM_PROVIDER_DEFAULTS,DEFAULT_AGENTS, AGENT_DEFAULT_DIR } from '@itookit/llm-driver';
 import { 
     IAgentService, 
-    AgentDefinition, 
     MCPServer 
 } from './agent-service';
-import { DEFAULT_AGENTS, AGENT_DEFAULT_DIR } from '../core/constants';
 
 // ============================================
 // 常量
 // ============================================
 
-const CONFIG_VERSION = 1;
 const VERSION_FILE = '/.defaults_version.json';
 const CONNECTIONS_DIR = '/.connections';
 const MCP_DIR = '/.mcp';
@@ -116,27 +114,38 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
 
     /**
      * 确保默认配置存在
+     * 
+     * 策略说明:
+     * - 版本号用于触发完整同步检查
+     * - 每次同步都是增量的：只添加缺失的 connection/model/agent
+     * - 不会覆盖用户已修改的数据
      */
     private async ensureDefaults(): Promise<void> {
         try {
             const versionData = await this.readJson<{ version: number }>(VERSION_FILE);
-            if (versionData && versionData.version >= CONFIG_VERSION) {
+            
+            // 如果版本相同，跳过同步（假设配置变化时会递增版本号）
+            if (versionData && versionData.version >= CONST_CONFIG_VERSION) {
+                console.log('[VFSAgentService] Defaults are up to date, skipping sync.');
                 return;
             }
 
-            console.log('[VFSAgentService] Syncing defaults...');
+            console.log(`[VFSAgentService] Syncing defaults from version ${versionData?.version || 0} to ${CONST_CONFIG_VERSION}...`);
 
+            // 执行增量同步
             await this.syncDefaultConnections();
             await this.syncDefaultAgents();
             
-            // 更新版本
+            // 更新版本号
             await this.writeJson(VERSION_FILE, { 
-                version: CONFIG_VERSION, 
+                version: CONST_CONFIG_VERSION, 
                 updatedAt: Date.now() 
             });
             
-            // 刷新数据
+            // 刷新内存缓存
             await this.refreshData();
+            
+            console.log('[VFSAgentService] Defaults sync completed.');
         } catch (e) {
             console.error('[VFSAgentService] ensureDefaults error:', e);
         }
@@ -144,43 +153,75 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
 
     /**
      * 同步默认连接
+     * 
+     * 修正点:
+     * 1. 在每次处理前重新从磁盘加载最新数据
+     * 2. 使用深拷贝避免污染缓存
+     * 3. 正确处理新增 connection 和新增 model 两种情况
      */
     private async syncDefaultConnections(): Promise<void> {
-        // 获取配置中的第一个 provider 作为系统默认 (id='default')
-        const defaultProviderKey = Object.keys(LLM_PROVIDER_DEFAULTS)[0];
+        // 确保目录存在
+        await this.ensureDirectory(CONNECTIONS_DIR);
+        
+        // 从磁盘重新加载最新的 connections 数据
+        const currentConnections = await this.loadJsonFiles<LLMConnection>(CONNECTIONS_DIR);
+        
+        // 构建 provider -> connection 的映射，便于快速查找
+        const connectionsByProvider = new Map<string, LLMConnection>();
+        for (const conn of currentConnections) {
+            connectionsByProvider.set(conn.provider, conn);
+        }
 
-        for (const [providerKey, def] of Object.entries(LLM_PROVIDER_DEFAULTS)) {
-            const existing = this._connections.find(c => c.provider === providerKey);
+        // 获取第一个 provider key，用于确定 default connection
+        const providerKeys = Object.keys(LLM_PROVIDER_DEFAULTS);
+        const defaultProviderKey = providerKeys[0];
+
+        for (const [providerKey, providerDef] of Object.entries(LLM_PROVIDER_DEFAULTS)) {
+            const existing = connectionsByProvider.get(providerKey);
 
             if (!existing) {
+                // === 场景 1: 新增 Connection ===
                 const newConn: LLMConnection = {
                     // 如果是列表中的第一个，则 ID 为 'default'，否则为 'conn-{provider}'
                     id: providerKey === defaultProviderKey ? 'default' : `conn-${providerKey}`,
-                    name: def.name,
+                    name: providerDef.name,
                     provider: providerKey,
                     apiKey: '',
-                    baseURL: def.baseURL,
-                    model: def.models[0]?.id || '',
-                    availableModels: [...def.models],
+                    baseURL: providerDef.baseURL,
+                    model: providerDef.models[0]?.id || '',
+                    availableModels: [...providerDef.models],
                     metadata: { isSystemDefault: true }
                 };
                 
                 await this.saveConnection(newConn);
+                console.log(`[VFSAgentService] Created new connection: ${newConn.id} (${providerKey})`);
             } else {
-                // 合并缺失的模型
-                let changed = false;
-                if (!existing.availableModels) existing.availableModels = [];
+                // === 场景 2: Connection 已存在，检查是否需要合并新模型 ===
                 
-                const existingIds = new Set(existing.availableModels.map(m => m.id));
-                for (const model of def.models) {
-                    if (!existingIds.has(model.id)) {
-                        existing.availableModels.push(model);
-                        changed = true;
+                // 使用深拷贝，避免直接修改缓存对象
+                const updatedConn: LLMConnection = JSON.parse(JSON.stringify(existing));
+                
+                // 确保 availableModels 数组存在
+                if (!updatedConn.availableModels) {
+                    updatedConn.availableModels = [];
+                }
+                
+                // 获取已存在的模型 ID 集合
+                const existingModelIds = new Set(updatedConn.availableModels.map(m => m.id));
+                
+                // 检查并添加新模型
+                let hasNewModels = false;
+                for (const model of providerDef.models) {
+                    if (!existingModelIds.has(model.id)) {
+                        updatedConn.availableModels.push({ ...model });
+                        hasNewModels = true;
+                        console.log(`[VFSAgentService] Added new model "${model.id}" to connection "${existing.id}"`);
                     }
                 }
                 
-                if (changed) {
-                    await this.saveConnection(existing);
+                // 只有在有变化时才保存
+                if (hasNewModels) {
+                    await this.saveConnection(updatedConn);
                 }
             }
         }
@@ -188,51 +229,69 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
 
     /**
      * 同步默认 Agents
+     * 
+     * 修正点:
+     * 1. 检查 agent 是否存在时使用 ID 匹配，而非路径
+     * 2. 支持用户删除后不再重建的场景（可选，通过 metadata 标记）
      */
     private async syncDefaultAgents(): Promise<void> {
-        // 使用默认连接 ID 修正初始数据
+        // 获取默认连接 ID
         const defaultConnId = this.getDefaultConnectionId();
+        
+        // 加载当前所有 agents
+        const currentAgents = await this.getAgents();
+        const currentAgentIds = new Set(currentAgents.map(a => a.id));
 
         for (const agentDef of DEFAULT_AGENTS) {
+            // 检查 agent 是否已存在（基于 ID）
+            if (currentAgentIds.has(agentDef.id)) {
+                // Agent 已存在，跳过（不覆盖用户可能的修改）
+                continue;
+            }
+
+            // 构建文件路径
             const filename = `${agentDef.id}.agent`;
-            const fullPath = `${agentDef.initPath || AGENT_DEFAULT_DIR}/${filename}`.replace(/\/+/g, '/');
+            const parentDir = agentDef.initPath || AGENT_DEFAULT_DIR;
+            const fullPath = `${parentDir}/${filename}`.replace(/\/+/g, '/');
 
-            const exists = await this.fileExists(fullPath);
+            // 再次确认文件不存在（双重检查）
+            const fileExists = await this.fileExists(fullPath);
+            if (fileExists) {
+                continue;
+            }
+
+            // 准备 agent 内容
+            const { initPath, initialTags, ...content } = agentDef;
+
+            // 确保默认 agent 指向正确的 connection
+            if (!content.config.connectionId) {
+                content.config.connectionId = defaultConnId;
+            }
             
-            if (!exists) {
-                const { initPath, initialTags, ...content } = agentDef;
+            try {
+                // 确保目录存在
+                await this.ensureDirectory(parentDir);
+                
+                // 创建 agent 文件
+                const node = await this.moduleEngine.createFile(
+                    filename,
+                    parentDir,
+                    JSON.stringify(content, null, 2),
+                    {
+                        icon: agentDef.icon || '🤖',
+                        title: agentDef.name,
+                        description: agentDef.description
+                    }
+                );
 
-                // 确保默认 agent 指向正确的 connection
-                if (!content.config.connectionId) {
-                    content.config.connectionId = defaultConnId;
+                // 设置标签
+                if (initialTags && initialTags.length > 0 && node?.id) {
+                    await this.moduleEngine.setTags(node.id, initialTags);
                 }
                 
-                try {
-                    // 确保目录存在
-                    const parentDir = agentDef.initPath || AGENT_DEFAULT_DIR;
-                    await this.ensureDirectory(parentDir);
-                    
-                    // 创建文件
-                    const node = await this.moduleEngine.createFile(
-                        filename,
-                        parentDir,
-                        JSON.stringify(content, null, 2),
-                        {
-                            icon: agentDef.icon || '🤖',
-                            title: agentDef.name,
-                            description: agentDef.description
-                        }
-                    );
-
-                    // 设置标签
-                    if (initialTags && initialTags.length > 0 && node?.id) {
-                        await this.moduleEngine.setTags(node.id, initialTags);
-                    }
-                    
-                    console.log(`[VFSAgentService] Created default agent: ${fullPath}`);
-                } catch (e) {
-                    console.error(`[VFSAgentService] Failed to create ${fullPath}`, e);
-                }
+                console.log(`[VFSAgentService] Created default agent: ${agentDef.id} at ${fullPath}`);
+            } catch (e) {
+                console.error(`[VFSAgentService] Failed to create agent ${agentDef.id}:`, e);
             }
         }
     }

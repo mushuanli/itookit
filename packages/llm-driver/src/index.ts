@@ -93,6 +93,7 @@ export {
 // ============================================
 
 export {
+    CONST_CONFIG_VERSION,
     LLM_PROVIDER_DEFAULTS,
     LLM_DEFAULT_ID,
     LLM_DEFAULT_NAME,
@@ -100,7 +101,12 @@ export {
     DEFAULT_MAX_RETRIES,
     DEFAULT_RETRY_DELAY,
     getProviderDefinition,
-    getModelDefinition
+    getModelDefinition,
+
+    type AgentType,
+    AGENT_DEFAULT_DIR,
+    DEFAULT_AGENTS,
+    type AgentDefinition
 } from './constants';
 
 // ============================================

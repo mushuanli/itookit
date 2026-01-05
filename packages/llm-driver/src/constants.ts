@@ -2,6 +2,9 @@
 
 import { LLMProviderDefinition } from './types';
 
+// 修改配置必须增加版本号，才能同步数据库
+export const CONST_CONFIG_VERSION = 10;
+
 /**
  * 默认连接 ID
  */
@@ -196,3 +199,202 @@ export function getModelDefinition(provider: string, modelId: string): import('.
     const providerDef = LLM_PROVIDER_DEFAULTS[provider];
     return providerDef?.models.find(m => m.id === modelId);
 }
+
+
+/**
+ * Agent 类型
+ */
+export type AgentType = 'agent' | 'composite' | 'tool' | 'workflow';
+
+/**
+ * Agent 配置
+ */
+export interface AgentConfig {
+    connectionId: string;
+    /** 
+     * 修改: modelId -> modelName 
+     * 避免不同供应商 ID 不同但模型名称含义一致或混淆的问题，
+     * 同时语义上更倾向于"使用的模型名称标识"
+     */
+    modelName: string; 
+    systemPrompt?: string;
+    maxHistoryLength?: number;
+    temperature?: number;
+    // optional
+    mcpServers?: string[];
+}
+
+/**
+ * 运行时接口定义 (Inputs/Outputs)
+ * 用于 UI 生成表单、校验输入或在编排器中连线
+ */
+export interface AgentInterfaceDef {
+    inputs: Array<{ name: string; type: string }>;
+    outputs: Array<{ name: string; type: string }>;
+}
+
+/**
+ * Agent 定义
+ */
+export interface AgentDefinition {
+    id: string;
+    name: string;
+    type: AgentType;
+    description?: string;
+    icon?: string;
+    config: AgentConfig;
+    tags?: string[];
+
+    /** 输入输出接口定义 */
+    interface?: AgentInterfaceDef;
+    
+    /** VFS 元数据 (可选，通常由文件系统管理，但导出时可能包含) */
+    createdAt?: number;
+    modifiedAt?: number;
+}
+
+/**
+ * Agent 默认目录
+ */
+export const AGENT_DEFAULT_DIR = '/default';
+export const LLM_AGENT_TARGET_DIR = '/default/providers'; 
+
+export type InitialAgentDef = AgentDefinition & { 
+    initialTags?: string[];
+    initPath?: string; 
+};
+
+/**
+ * 默认 Agent 定义
+ */
+export const DEFAULT_AGENTS:InitialAgentDef[] = [
+    {
+        id: LLM_DEFAULT_ID,
+        name: LLM_DEFAULT_NAME,
+        type: 'agent',
+        icon: '🤖',
+        description: 'A helpful AI assistant',
+        initPath: AGENT_DEFAULT_DIR,
+        initialTags: ['system', 'default'],
+        config: {
+            connectionId: LLM_DEFAULT_ID,
+            modelName: '',
+            systemPrompt: 'You are a helpful assistant.'
+        }
+    },
+    {
+        id: 'tmp-id',
+        name: '临时',
+        type: 'agent',
+        icon: '⚡️',
+        description: '一次性问答，保留4次对话历史',
+        initialTags: ['default'],
+        initPath: AGENT_DEFAULT_DIR, 
+        config: {
+            connectionId: LLM_DEFAULT_ID,
+            modelName: "",
+            systemPrompt: "You are a helpful assistant. Answer the user's current prompt concisely and accurately, without referring to any past conversation history.",
+            maxHistoryLength: 4
+        },
+        interface: {
+            inputs: [{ name: "prompt", type: "string" }],
+            outputs: [{ name: "response", type: "string" }]
+        }
+    },
+    // 新增的默认 Agent (无删除保护)
+    {
+        id: 'deepseek',
+        name: 'DeepSeek',
+        type: 'agent',
+        icon: '🌊',
+        description: '使用 DeepSeek 模型的智能体',
+        initialTags: ['default', 'deepseek'],
+        initPath: LLM_AGENT_TARGET_DIR,
+        config: {
+            connectionId: 'conn-deepseek', 
+            modelName: '',
+            systemPrompt: "You are a helpful assistant powered by DeepSeek.",
+            maxHistoryLength: -1
+        },
+        interface: {
+            inputs: [{ name: "prompt", type: "string" }],
+            outputs: [{ name: "response", type: "string" }]
+        }
+    },
+    {
+        id: 'claude',
+        name: 'Claude',
+        type: 'agent',
+        icon: '📚',
+        description: '使用 Claude 模型的智能体',
+        initialTags: ['default', 'claude'],
+        initPath: LLM_AGENT_TARGET_DIR,
+        config: {
+            connectionId: 'conn-anthropic',
+            modelName: '',
+            systemPrompt: "You are a helpful, harmless, and honest assistant.",
+            maxHistoryLength: 20
+        },
+        interface: {
+            inputs: [{ name: "prompt", type: "string" }],
+            outputs: [{ name: "response", type: "string" }]
+        }
+    },
+    {
+        id: 'gemini',
+        name: 'Gemini',
+        type: 'agent',
+        icon: '💎',
+        description: '使用 Gemini 模型的智能体',
+        initialTags: ['default', 'gemini'],
+        initPath: LLM_AGENT_TARGET_DIR,
+        config: {
+            connectionId: 'conn-gemini',
+            modelName: '',
+            systemPrompt: "You are a helpful assistant powered by Google Gemini.",
+            maxHistoryLength: -1
+        },
+        interface: {
+            inputs: [{ name: "prompt", type: "string" }],
+            outputs: [{ name: "response", type: "string" }]
+        }
+    },
+    {
+        id: 'openrouter',
+        name: 'OpenRouter',
+        type: 'agent',
+        icon: '🔀',
+        description: '使用 OpenRouter 自动选择最佳模型的智能体',
+        initialTags: ['default', 'router'],
+        initPath: LLM_AGENT_TARGET_DIR,
+        config: {
+            connectionId: 'conn-openrouter',
+            modelName: '',
+            systemPrompt: "You are a helpful assistant, routed through OpenRouter.",
+            maxHistoryLength: -1
+        },
+        interface: {
+            inputs: [{ name: "prompt", type: "string" }],
+            outputs: [{ name: "response", type: "string" }]
+        }
+    },
+    {
+        id: 'cloudapi',
+        name: 'CloudAPI',
+        type: 'agent',
+        icon: '☁️',
+        description: '使用 CloudAPI 模型的智能体',
+        initialTags: ['default', 'cloudapi'],
+        initPath: LLM_AGENT_TARGET_DIR,
+        config: {
+            connectionId: 'conn-cloudapi',
+            modelName: '',
+            systemPrompt: "You are a helpful assistant, routed through CloudAPI.",
+            maxHistoryLength: -1
+        },
+        interface: {
+            inputs: [{ name: "prompt", type: "string" }],
+            outputs: [{ name: "response", type: "string" }]
+        }
+    }
+];
