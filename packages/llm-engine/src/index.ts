@@ -23,7 +23,7 @@
 
 export * from './core/types';
 export * from './core/errors';
-export { ENGINE_DEFAULTS, STORAGE_KEYS, DEFAULT_AGENTS } from './core/constants';
+export { ENGINE_DEFAULTS, STORAGE_KEYS } from './core/constants';
 
 // ============================================
 // 会话管理
@@ -62,9 +62,6 @@ export type {
 
 export type { 
     IAgentService, 
-    AgentDefinition, 
-    AgentConfig, 
-    AgentType,
     MCPServer 
 } from './services/agent-service';
 

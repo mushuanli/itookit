@@ -6,8 +6,8 @@ import {
     Heading,
     UnifiedSearchResult
 } from '@itookit/common';
-import { LLMModel } from '@itookit/llm-driver';
-import { AgentType, AgentDefinition, IAgentService } from '@itookit/llm-engine';
+import { LLMModel,type AgentType, AgentDefinition, } from '@itookit/llm-driver';
+import {  IAgentService } from '@itookit/llm-engine';
 
 /**
  * Agent 配置编辑器

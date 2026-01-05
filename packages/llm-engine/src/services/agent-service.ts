@@ -1,58 +1,6 @@
 // @file: llm-engine/src/services/agent-service.ts
 
-import { LLMConnection } from '@itookit/llm-driver';
-
-/**
- * Agent 类型
- */
-export type AgentType = 'agent' | 'composite' | 'tool' | 'workflow';
-
-/**
- * Agent 配置
- */
-export interface AgentConfig {
-    connectionId: string;
-    /** 
-     * 修改: modelId -> modelName 
-     * 避免不同供应商 ID 不同但模型名称含义一致或混淆的问题，
-     * 同时语义上更倾向于"使用的模型名称标识"
-     */
-    modelName: string; 
-    systemPrompt?: string;
-    maxHistoryLength?: number;
-    temperature?: number;
-    // optional
-    mcpServers?: string[];
-}
-
-/**
- * 运行时接口定义 (Inputs/Outputs)
- * 用于 UI 生成表单、校验输入或在编排器中连线
- */
-export interface AgentInterfaceDef {
-    inputs: Array<{ name: string; type: string }>;
-    outputs: Array<{ name: string; type: string }>;
-}
-
-/**
- * Agent 定义
- */
-export interface AgentDefinition {
-    id: string;
-    name: string;
-    type: AgentType;
-    description?: string;
-    icon?: string;
-    config: AgentConfig;
-    tags?: string[];
-
-    /** 输入输出接口定义 */
-    interface?: AgentInterfaceDef;
-    
-    /** VFS 元数据 (可选，通常由文件系统管理，但导出时可能包含) */
-    createdAt?: number;
-    modifiedAt?: number;
-}
+import { LLMConnection,AgentDefinition } from '@itookit/llm-driver';
 
 /**
  * MCP 服务器
