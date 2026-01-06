@@ -35,11 +35,18 @@ export class SettingsEngine implements ISessionEngine {
             type: 'file',
             icon: config.icon,
             content: '', 
+            size:0,
             createdAt: Date.now(),
             modifiedAt: Date.now(),
             path: `/${config.name}`,
             moduleId: 'settings_ui'
         }));
+    }
+
+    // [新增] 实现接口缺失方法：获取子节点
+    // Settings 结构是扁平的，页面下没有子页面，因此返回空数组
+    async getChildren(_parentId: string): Promise<EngineNode[]> {
+        return [];
     }
 
     // 这是一个空操作，因为真正的读写通过 Service 直接进行，
@@ -61,6 +68,7 @@ export class SettingsEngine implements ISessionEngine {
                 name: conf.name,
                 type: 'file',
                 path: `/${conf.name}`,
+                size:0,
                 createdAt: Date.now(),
                 modifiedAt: Date.now()
             }));
@@ -76,6 +84,7 @@ export class SettingsEngine implements ISessionEngine {
             type: 'file',
             icon: config.icon,
             path: `/${config.name}`,
+            size:0,
             createdAt: Date.now(),
             modifiedAt: Date.now()
         };
@@ -100,6 +109,17 @@ export class SettingsEngine implements ISessionEngine {
     async createDirectory(_name: string, _parentId: string | null): Promise<EngineNode> {
         throw new Error("Cannot create directories in settings.");
     }
+
+    // [新增] 实现接口缺失方法：创建资产
+    async createAsset(_ownerNodeId: string, _filename: string, _content: string | ArrayBuffer): Promise<EngineNode> {
+        throw new Error("Assets are not supported in settings engine.");
+    }
+
+    // [新增] 实现接口缺失方法：获取资产目录ID
+    async getAssetDirectoryId(_ownerNodeId: string): Promise<string | null> {
+        return null;
+    }
+
     async rename(_id: string, _newName: string): Promise<void> {
         throw new Error("Cannot rename settings.");
     }
