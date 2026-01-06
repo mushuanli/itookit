@@ -341,15 +341,26 @@ export class StorageSettingsEditor extends BaseSettingsEditor<SettingsService> {
             const originalText = btn.innerText;
             btn.innerText = '连接中...';
             btn.disabled = true;
+            
+            // [修复] 增加 trim() 并处理 URL 可能存在的尾部斜杠
+            let url = this.getVal('#inp-sync-url').trim();
+            if (url.endsWith('/')) url = url.slice(0, -1);
+
             try {
-                const url = this.getVal('#inp-sync-url');
-                const user = this.getVal('#inp-sync-user');
-                const token = this.getVal('#inp-sync-token'); // Changed from pass
+                // [修复] 增加 trim() 去除复制粘贴带来的空格
+                const user = this.getVal('#inp-sync-user').trim();
+                const token = this.getVal('#inp-sync-token').trim(); 
+                
                 const success = await this.service.testConnection(url, user, token);
                 if (success) Toast.success('连接成功');
                 else Toast.error('认证失败 (Token 无效或网络错误)');
-            } catch (e) {
-                Toast.error('连接错误: ' + (e as any).message);
+            } catch (e:any) {
+        // 更详细的错误处理
+                if (e.message.includes('Failed to fetch')) {
+                    Toast.error('连接失败: 请先在浏览器中访问 ' + url + ' 并接受证书');
+                } else {
+                    Toast.error('连接错误: ' + e.message);
+                }
             } finally {
                 btn.innerText = originalText;
                 btn.disabled = false;
@@ -365,9 +376,13 @@ export class StorageSettingsEditor extends BaseSettingsEditor<SettingsService> {
 
     // 新增：通用的 UI 保存逻辑
     private async saveConfigFromUI() {
-        const url = this.getVal('#inp-sync-url');
-        const user = this.getVal('#inp-sync-user');
-        const token = this.getVal('#inp-sync-token'); // Changed from pass
+        // [修复] 增加 trim()
+        let url = this.getVal('#inp-sync-url').trim();
+        if (url.endsWith('/')) url = url.slice(0, -1); // 规范化 URL
+
+        const user = this.getVal('#inp-sync-user').trim(); // [修复] 去除空格
+        const token = this.getVal('#inp-sync-token').trim(); // [修复] 去除空格
+        
         const strategy = (this.container.querySelector('#sel-sync-strategy') as HTMLSelectElement).value;
         const autoSync = (this.container.querySelector('#chk-auto-sync') as HTMLInputElement).checked;
 
@@ -378,7 +393,7 @@ export class StorageSettingsEditor extends BaseSettingsEditor<SettingsService> {
         await this.service.saveSyncConfig({
             serverUrl: url,
             username: user,
-            token: token, // Changed
+            token: token, 
             strategy: strategy as any,
             autoSync
         });
