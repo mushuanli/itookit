@@ -1,29 +1,36 @@
 /**
  * @file vfs/core/MiddlewareRegistry.ts
- * Middleware 注册管理
+ * 统一的中间件注册表
  */
 
 import { IVFSMiddleware } from './types';
-import { VNode, Transaction } from '../store/types';
+import { VNodeData, Transaction } from '../store/types';
+
+type MiddlewareHookHandler = (name: string) => void;
 
 export class MiddlewareRegistry {
-  protected middlewares: Map<string, IVFSMiddleware> = new Map();
+  private middlewares = new Map<string, IVFSMiddleware>();
+  private hooks = new Map<string, Set<MiddlewareHookHandler>>();
 
   /**
    * 注册 Middleware
    */
   register(middleware: IVFSMiddleware): void {
-    if (this.middlewares.has(middleware.name)) {
-      console.warn(`Middleware '${middleware.name}' already registered, overwriting`);
-    }
     this.middlewares.set(middleware.name, middleware);
+    this.triggerHook('registered', middleware.name);
   }
 
   /**
    * 注销 Middleware
    */
   async unregister(name: string): Promise<boolean> {
-    return this.middlewares.delete(name);
+    const middleware = this.middlewares.get(name);
+    if (!middleware) return false;
+    
+    await middleware.cleanup?.();
+    this.middlewares.delete(name);
+    this.triggerHook('unregistered', name);
+    return true;
   }
 
   /**
@@ -40,115 +47,82 @@ export class MiddlewareRegistry {
     return Array.from(this.middlewares.values());
   }
 
-  /**
-   * 执行所有 Middleware 的验证
-   */
-  async runValidation(vnode: VNode, content: string | ArrayBuffer): Promise<void> {
-    for (const middleware of this.middlewares.values()) {
-      // ✨ [修复] 如果中间件定义了筛选规则，且当前节点不符合规则，则跳过
-      if (middleware.canHandle && !middleware.canHandle(vnode)) {
-        continue;
-      }
+  // 获取适用于节点的中间件（按优先级排序）
+  getForNode(vnode: VNodeData): IVFSMiddleware[] {
+    return this.getAll()
+      .filter(m => !m.canHandle || m.canHandle(vnode))
+      .sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
+  }
 
-      if (middleware.onValidate) {
-        await middleware.onValidate(vnode, content);
-      }
+  // ==================== 批量执行钩子 ====================
+
+  async runValidation(vnode: VNodeData, content: string | ArrayBuffer): Promise<void> {
+    for (const m of this.getForNode(vnode)) {
+      await m.onValidate?.(vnode, content);
     }
   }
 
-  /**
-   * 执行所有 Middleware 的写入前处理
-   */
-  async runBeforeWrite(
-    vnode: VNode,
-    content: string | ArrayBuffer,
-    transaction: Transaction
-  ): Promise<string | ArrayBuffer> {
-    let processedContent = content;
-    for (const middleware of this.middlewares.values()) {
-      // ✨ [修复]
-      if (middleware.canHandle && !middleware.canHandle(vnode)) continue;
-
-      if (middleware.onBeforeWrite) {
-        processedContent = await middleware.onBeforeWrite(vnode, processedContent, transaction);
+  async runBeforeWrite(vnode: VNodeData, content: string | ArrayBuffer, tx: Transaction): Promise<string | ArrayBuffer> {
+    let result = content;
+    for (const m of this.getForNode(vnode)) {
+      if (m.onBeforeWrite) {
+        result = await m.onBeforeWrite(vnode, result, tx);
       }
     }
-    return processedContent;
+    return result;
   }
 
-  /**
-   * 执行所有 Middleware 的写入后处理
-   */
-  async runAfterWrite(
-    vnode: VNode,
-    content: string | ArrayBuffer,
-    transaction: Transaction
-  ): Promise<Record<string, any>> {
-    const derivedData: Record<string, any> = {};
-    for (const middleware of this.middlewares.values()) {
-      // ✨ [修复]
-      if (middleware.canHandle && !middleware.canHandle(vnode)) continue;
-
-      if (middleware.onAfterWrite) {
-        const data = await middleware.onAfterWrite(vnode, content, transaction);
-        Object.assign(derivedData, data);
+  async runAfterWrite(vnode: VNodeData, content: string | ArrayBuffer, tx: Transaction): Promise<Record<string, unknown>> {
+    const derivedData: Record<string, unknown> = {};
+    for (const m of this.getForNode(vnode)) {
+      if (m.onAfterWrite) {
+        Object.assign(derivedData, await m.onAfterWrite(vnode, content, tx));
       }
     }
     return derivedData;
   }
 
-  /**
-   * [MODIFIED] 执行所有 Middleware 的删除前处理
-   */
-  async runBeforeDelete(vnode: VNode, transaction: Transaction): Promise<void> {
-    for (const middleware of this.middlewares.values()) {
-      // ✨ [修复]
-      if (middleware.canHandle && !middleware.canHandle(vnode)) continue;
-
-      if (middleware.onBeforeDelete) {
-        await middleware.onBeforeDelete(vnode, transaction);
-      }
+  async runBeforeDelete(vnode: VNodeData, tx: Transaction): Promise<void> {
+    for (const m of this.getForNode(vnode)) {
+      await m.onBeforeDelete?.(vnode, tx);
     }
   }
 
-  /**
-   * [MODIFIED] 执行所有 Middleware 的删除后处理
-   */
-  async runAfterDelete(vnode: VNode, transaction: Transaction): Promise<void> {
-    for (const middleware of this.middlewares.values()) {
-      // ✨ [修复]
-      if (middleware.canHandle && !middleware.canHandle(vnode)) continue;
-
-      if (middleware.onAfterDelete) {
-        await middleware.onAfterDelete(vnode, transaction);
-      }
+  async runAfterDelete(vnode: VNodeData, tx: Transaction): Promise<void> {
+    for (const m of this.getForNode(vnode)) {
+      await m.onAfterDelete?.(vnode, tx);
     }
   }
 
-  async runAfterMove(
-    vnode: VNode, 
-    oldPath: string, 
-    newPath: string, 
-    transaction: Transaction
-  ): Promise<void> {
-    for (const middleware of this.middlewares.values()) {
-      if (middleware.canHandle && !middleware.canHandle(vnode)) continue;
-      if (middleware.onAfterMove) await middleware.onAfterMove(vnode, oldPath, newPath, transaction);
+  async runAfterMove(vnode: VNodeData, oldPath: string, newPath: string, tx: Transaction): Promise<void> {
+    for (const m of this.getForNode(vnode)) {
+      await m.onAfterMove?.(vnode, oldPath, newPath, tx);
     }
   }
 
-  async runAfterCopy(
-    sourceNode: VNode, 
-    targetNode: VNode, 
-    transaction: Transaction
-  ): Promise<void> {
-    for (const middleware of this.middlewares.values()) {
-      // 注意：这里通常检查源节点或目标节点，视业务而定。通常检查目标节点。
-      if (middleware.canHandle && !middleware.canHandle(targetNode)) continue;
-      if (middleware.onAfterCopy) await middleware.onAfterCopy(sourceNode, targetNode, transaction);
+  async runAfterCopy(source: VNodeData, target: VNodeData, tx: Transaction): Promise<void> {
+    for (const m of this.getForNode(target)) {
+      await m.onAfterCopy?.(source, target, tx);
     }
   }
 
+  // ==================== 生命周期钩子 ====================
 
+  onHook(event: 'registered' | 'unregistered', handler: MiddlewareHookHandler): () => void {
+    if (!this.hooks.has(event)) this.hooks.set(event, new Set());
+    this.hooks.get(event)!.add(handler);
+    return () => this.hooks.get(event)?.delete(handler);
+  }
 
+  private triggerHook(event: string, name: string): void {
+    this.hooks.get(event)?.forEach(h => {
+      try { h(name); } catch (e) { console.error(e); }
+    });
+  }
+
+  async clear(): Promise<void> {
+    await Promise.all(this.getAll().map(m => m.cleanup?.()));
+    this.middlewares.clear();
+    this.hooks.clear();
+  }
 }

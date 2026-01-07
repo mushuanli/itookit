@@ -3,23 +3,18 @@
  * VFS 存储层类型定义
  */
 
-/** 数据库配置 */
-export interface DatabaseConfig {
-  dbName: string;
-  version: number;
-}
-
 /** VFS ObjectStore 名称常量 */
 export const VFS_STORES = {
   VNODES: 'vnodes',
-  CONTENTS: 'vfs_contents',
+  CONTENTS: 'vfs_contents', 
   TAGS: 'tags',
   NODE_TAGS: 'node_tags',
-  SRS_ITEMS: 'srs_items' // ✨ [新增] SRS 专用存储
+  SRS_ITEMS: 'srs_items'
 } as const;
 
 /** 事务模式 */
 export type TransactionMode = 'readonly' | 'readwrite';
+export type StoreNames = typeof VFS_STORES[keyof typeof VFS_STORES];
 
 /** VNode 类型 */
 export enum VNodeType {
@@ -39,61 +34,30 @@ export interface VNodeData {
   size: number;
   createdAt: number;
   modifiedAt: number;
-  metadata?: Record<string, any>;
-  tags?: string[];
+  metadata: Record<string, unknown>;
+  tags: string[];
 }
 
 /** VNode 类 */
-export class VNode {
-  constructor(
-    public nodeId: string,
-    public parentId: string | null,
-    public name: string,
-    public type: VNodeType,
-    public path: string,
-    public moduleId: string | null = null,
-    public contentRef: string | null = null,
-    public size: number = 0,
-    public createdAt: number = Date.now(),
-    public modifiedAt: number = Date.now(),
-    public metadata: Record<string, any> = {},
-    public tags: string[] = []
-  ) {}
-
-  toJSON(): VNodeData {
+export const VNode = {
+  create(data: Partial<VNodeData> & Pick<VNodeData, 'nodeId' | 'name' | 'type' | 'path'>): VNodeData {
     return {
-      nodeId: this.nodeId,
-      parentId: this.parentId,
-      name: this.name,
-      type: this.type,
-      path: this.path,
-      moduleId: this.moduleId,
-      contentRef: this.contentRef,
-      size: this.size,
-      createdAt: this.createdAt,
-      modifiedAt: this.modifiedAt,
-      metadata: this.metadata,
-      tags: this.tags
+      parentId: null,
+      moduleId: null,
+      contentRef: null,
+      size: 0,
+      createdAt: Date.now(),
+      modifiedAt: Date.now(),
+      metadata: {},
+      tags: [],
+      ...data
     };
+  },
+  
+  clone(node: VNodeData, updates?: Partial<VNodeData>): VNodeData {
+    return { ...node, ...updates, metadata: { ...node.metadata }, tags: [...node.tags] };
   }
-
-  static fromJSON(data: VNodeData): VNode {
-    return new VNode(
-      data.nodeId,
-      data.parentId,
-      data.name,
-      data.type,
-      data.path,
-      data.moduleId,
-      data.contentRef,
-      data.size,
-      data.createdAt,
-      data.modifiedAt,
-      data.metadata || {},
-      data.tags || []
-    );
-  }
-}
+};
 
 /** 文件内容数据结构 */
 export interface ContentData {
@@ -146,17 +110,17 @@ export interface SRSItemData {
 
 /** 事务包装类 */
 export class Transaction {
-  constructor(private transaction: IDBTransaction) {}
-
-  getStore(storeName: string): IDBObjectStore {
-    return this.transaction.objectStore(storeName);
+  constructor(private tx: IDBTransaction) {}
+  
+  getStore(name: string): IDBObjectStore {
+    return this.tx.objectStore(name);
   }
 
   get done(): Promise<void> {
     return new Promise((resolve, reject) => {
-      this.transaction.oncomplete = () => resolve();
-      this.transaction.onerror = () => reject(this.transaction.error);
-      this.transaction.onabort = () => reject(new Error('Transaction aborted'));
+      this.tx.oncomplete = () => resolve();
+      this.tx.onerror = () => reject(this.tx.error);
+      this.tx.onabort = () => reject(new Error('Transaction aborted'));
     });
   }
 }

@@ -1,409 +1,275 @@
 /**
  * @file vfs-core/helper/VFSModuleEngine.ts
- * @desc Adapts the specific @itookit/vfs-core implementation to the generic ISessionEngine interface.
+ * 模块引擎适配器（精简版）
  */
-// [修复] 使用相对路径导入，避免读取到旧的构建产物
-import { VFSCore } from '../VFSCore'; 
-import { VNode, VNodeType } from '../store/types';
+import { VFSCore } from '../VFSCore';
+import { VNodeData, VNodeType } from '../store/types';
 import { VFSEventType } from '../core/types';
-
-import type { 
-    ISessionEngine, 
-    EngineNode, 
-    EngineSearchQuery, 
-    EngineEventType, 
-    EngineEvent,
-} from '@itookit/common';
+import type { ISessionEngine, EngineNode, EngineSearchQuery, EngineEventType, EngineEvent } from '@itookit/common';
 import {guessMimeType} from '@itookit/common';
 export class VFSModuleEngine implements ISessionEngine {
-    private vfsCore: VFSCore;
-    constructor(
-        private moduleName: string, 
-        vfsCore?: VFSCore
-    ) {
-        this.vfsCore = vfsCore || VFSCore.getInstance();
+  private vfs: VFSCore;
+
+  constructor(private moduleName: string, vfs?: VFSCore) {
+    this.vfs = vfs ?? VFSCore.getInstance();
+  }
+
+  private get core() { return this.vfs.getVFS(); }
+
+  async init(): Promise<void> {
+    if (this.moduleName && !this.vfs.getModule(this.moduleName)) {
+      await this.vfs.mount(this.moduleName, 'Module');
     }
-    
-    private get vfs() { return this.vfsCore.getVFS(); }
+  }
 
-    // 【新增】一个简单的检查方法，用于快速失败
-    async init(): Promise<void> {
-        if (this.moduleName && !this.vfsCore.getModule(this.moduleName)) {
-            try {
-                await this.vfsCore.mount(this.moduleName, 'Memory Manager Module');
-            } catch (error: any) {
-                if (error.code !== 'ALREADY_EXISTS') console.error(`[MemoryManager] Mount failed:`, error);
-                throw new Error(`[Adapter Error] Module '${this.moduleName}' is not mounted.`);
-            }
-        }
-    }
+  // ==================== 读操作 ====================
 
-    private toEngineNode(vnode: VNode): EngineNode {
-        return {
-            id: vnode.nodeId,
-            parentId: vnode.parentId,
-            name: vnode.name,
-            type: vnode.type === VNodeType.DIRECTORY ? 'directory' : 'file',
-            createdAt: vnode.createdAt,
-            modifiedAt: vnode.modifiedAt,
-            path: vnode.path,
-            size: vnode.size, // ✨ [新增] 映射 size 属性
-            tags: vnode.tags,
-            metadata: vnode.metadata,
-            moduleId: vnode.moduleId || undefined,
-            // [映射] 优先使用 metadata 中的 icon
-            icon: vnode.metadata?.icon,
-            // content 和 children 需要在特定上下文中填充
-            children: (vnode as any).children?.map((c: VNode) => this.toEngineNode(c)),
-            content: (vnode as any).content
-        };
-    }
+  async loadTree(): Promise<EngineNode[]> {
+    const info = this.vfs.getModule(this.moduleName);
+    if (!info) throw new Error(`Module ${this.moduleName} not found`);
 
+    const buildTree = async (nodeId: string): Promise<EngineNode> => {
+      const node = await this.core.storage.loadVNode(nodeId);
+      if (!node) throw new Error(`Node ${nodeId} missing`);
 
-    // --- Implementation ---
+      const engineNode = this.toEngineNode(node);
 
-    async loadTree(): Promise<EngineNode[]> {
-        const moduleInfo = this.vfsCore.getModule(this.moduleName);
-        if (!moduleInfo) throw new Error(`Module ${this.moduleName} not found`);
+      if (node.type === VNodeType.FILE) {
+        engineNode.content = await this.core.read(nodeId);
+      } else {
+        const children = await this.core.readdir(nodeId);
+        engineNode.children = await Promise.all(children.map(c => buildTree(c.nodeId)));
+      }
 
-        const buildTree = async (nodeId: string): Promise<EngineNode> => {
-            const node = await this.vfs.storage.loadVNode(nodeId);
-            if (!node) throw new Error(`Node ${nodeId} missing`);
-            
-            const engineNode = this.toEngineNode(node);
-            
-            if (node.type === VNodeType.FILE) {
-                engineNode.content = await this.vfs.read(nodeId);
-            } else if (node.type === VNodeType.DIRECTORY) {
-                const children = await this.vfs.readdir(nodeId);
-                engineNode.children = await Promise.all(children.map(c => buildTree(c.nodeId)));
-            }
-            return engineNode;
-        };
+      return engineNode;
+    };
 
-        const rootNode = await buildTree(moduleInfo.rootNodeId);
-        return rootNode.children || [];
-    }
+    const root = await buildTree(info.rootNodeId);
+    return root.children ?? [];
+  }
 
-    async getChildren(parentId: string): Promise<EngineNode[]> {
-        // VFS.readdir 支持传入 ID 字符串
-        const children = await this.vfs.readdir(parentId);
-        return children.map(node => this.toEngineNode(node));
-    }
+  async getChildren(parentId: string): Promise<EngineNode[]> {
+    const children = await this.core.readdir(parentId);
+    return children.map(n => this.toEngineNode(n));
+  }
 
-    async readContent(id: string): Promise<string | ArrayBuffer> {
-        return this.vfs.read(id);
-    }
+  async readContent(id: string): Promise<string | ArrayBuffer> {
+    return this.core.read(id);
+  }
 
-    async getNode(id: string): Promise<EngineNode | null> {
-        try {
-            const vnode = await this.vfs.storage.loadVNode(id);
-            // [安全检查] 确保获取的节点属于当前模块
-            if (vnode && vnode.moduleId !== this.moduleName) {
-                return null;
-            }
-            return vnode ? this.toEngineNode(vnode) : null;
-        } catch { return null; }
-    }
+  async getNode(id: string): Promise<EngineNode | null> {
+    const node = await this.core.storage.loadVNode(id);
+    if (node?.moduleId !== this.moduleName) return null;
+    return node ? this.toEngineNode(node) : null;
+  }
 
-    async search(query: EngineSearchQuery): Promise<EngineNode[]> {
-        const coreQuery: any = {
-            limit: query.limit
-        };
-        if (query.type) coreQuery.type = query.type === 'directory' ? VNodeType.DIRECTORY : VNodeType.FILE;
-        if (query.text) coreQuery.nameContains = query.text;
-        if (query.tags) coreQuery.tags = query.tags;
+  async search(query: EngineSearchQuery): Promise<EngineNode[]> {
+    const coreQuery: any = { limit: query.limit };
+    if (query.type) coreQuery.type = query.type === 'directory' ? VNodeType.DIRECTORY : VNodeType.FILE;
+    if (query.text) coreQuery.nameContains = query.text;
+    if (query.tags) coreQuery.tags = query.tags;
 
-        // [核心] 处理 scope
-        let targetModule: string | undefined = this.moduleName;
+    const targetModule = query.scope?.includes('*') ? undefined : (query.scope?.[0] ?? this.moduleName);
+    const results = await this.vfs.searchNodes(coreQuery, targetModule, this.moduleName);
+    return results.map(n => this.toEngineNode(n));
+  }
 
-        if (query.scope && query.scope.includes('*')) {
-            targetModule = undefined; // Search all modules
-        } else if (query.scope && query.scope.length > 0) {
-            targetModule = query.scope[0];
-        }
+  async getAllTags(): Promise<Array<{ name: string; color?: string }>> {
+    const tags = await this.vfs.getAllTags();
+    return tags.map(t => ({ name: t.name, color: t.color }));
+  }
 
-        const results = await this.vfsCore.searchNodes(coreQuery, targetModule, this.moduleName);
-        return results.map(n => this.toEngineNode(n));
-    }
+  // ==================== 写操作 ====================
 
-    async getAllTags(): Promise<Array<{ name: string; color?: string }>> {
-        const tags = await this.vfsCore.getAllTags();
-        return tags.map(t => ({ name: t.name, color: t.color }));
-    }
+  async createFile(name: string, parentIdOrPath: string | null, content: string | ArrayBuffer = '', metadata?: Record<string, unknown>): Promise<EngineNode> {
+    const parentPath = await this.resolveParentPath(parentIdOrPath);
+    const fullPath = this.core.pathResolver.join(parentPath, name);
 
-    // ==================================================================================
-    // 核心写操作重构：利用 VFS 层的递归能力，并兼容 ID/Path
-    // ==================================================================================
+    const isBinary = content instanceof ArrayBuffer;
+    const enhancedMeta = {
+      ...metadata,
+      mimeType: metadata?.mimeType ?? guessMimeType(name),
+      isBinary
+    };
 
-    /**
-     * [增强] 支持传入 metadata
-     */
-    async createFile(
-        name: string, 
-        parentIdOrPath: string | null, 
-        content: string | ArrayBuffer = '', 
-        metadata?: Record<string, any>
-    ): Promise<EngineNode> {
-        // 1. 智能解析父路径
-        const parentPath = await this.resolveParentPath(parentIdOrPath);
-        
-        // 2. 拼接完整相对路径
-        const fullRelativePath = this.vfs.pathResolver.join(parentPath, name);
-        
-    // ✅ [关键] 检测并标记二进制内容
-        const isBinary = content instanceof ArrayBuffer;
-        const mimeType = metadata?.mimeType || guessMimeType(name);
-        
-        const enhancedMetadata = {
-            ...metadata,
-            mimeType: mimeType,
-            isBinary: isBinary
-        };
-        // 3. 调用 VFSCore (利用其递归创建能力 + Metadata 支持)
-        const vnode = await this.vfsCore.createFile(
-            this.moduleName, 
-            fullRelativePath, 
-            content,
-            enhancedMetadata
-        );
-        
-        const node = this.toEngineNode(vnode);
-        node.content = content;
-        return node;
-    }
+    const node = await this.vfs.createFile(this.moduleName, fullPath, content, enhancedMeta);
+    const result = this.toEngineNode(node);
+    result.content = content;
+    return result;
+  }
 
-    /**
-     * [增强] 支持传入 metadata
-     */
-    async createDirectory(
-        name: string, 
-        parentIdOrPath: string | null,
-        metadata?: Record<string, any> // ✨ [新增]
-    ): Promise<EngineNode> {
-        const parentPath = await this.resolveParentPath(parentIdOrPath);
-        const fullRelativePath = this.vfs.pathResolver.join(parentPath, name);
-        
-        const vnode = await this.vfsCore.createDirectory(
-            this.moduleName, 
-            fullRelativePath,
-            metadata // ✨ [透传]
-        );
-        
-        const node = this.toEngineNode(vnode);
-        node.children = [];
-        return node;
-    }
+  async createDirectory(name: string, parentIdOrPath: string | null, metadata?: Record<string, unknown>): Promise<EngineNode> {
+    const parentPath = await this.resolveParentPath(parentIdOrPath);
+    const fullPath = this.core.pathResolver.join(parentPath, name);
 
-    /**
-     * [辅助方法] 根据主节点计算资产目录的 User Path
-     */
-    private _getAssetDirUserPath(ownerNode: VNode): string {
-        // 1. 获取主节点在模块内的 User Path
-        const ownerUserPath = this.vfs.pathResolver.toUserPath(ownerNode.path, this.moduleName);
-
-        if (ownerNode.type === VNodeType.DIRECTORY) {
-            // 情况 A: 主节点是目录 -> 资产目录为 ownerNodeId/.assets/
-            // pathResolver.join 会自动处理路径分隔符
-            return this.vfs.pathResolver.join(ownerUserPath, '.assets');
-        } else {
-            // 情况 B: 主节点是文件 -> 资产目录为同级隐藏目录 .ownerNodeId/ (即 .filename)
-            // 提取父目录路径
-            const lastSlash = ownerUserPath.lastIndexOf('/');
-            const parentUserPath = lastSlash <= 0 ? '/' : ownerUserPath.substring(0, lastSlash);
-            
-            // 构造隐藏目录名
-            const sidecarDirName = `.${ownerNode.name}`;
-            
-            return this.vfs.pathResolver.join(parentUserPath, sidecarDirName);
-        }
-    }
+    const node = await this.vfs.createDirectory(this.moduleName, fullPath, metadata);
+    const result = this.toEngineNode(node);
+    result.children = [];
+    return result;
+  }
 
     /**
      * ✨ [更新] 创建资产文件
      * 自动适配目录 (.assets) 或文件 (.filename) 作为主节点的情况
      * 写入时如果目录不存在，VFSCore.createFile 会自动创建
      */
-    async createAsset(ownerNodeId: string, filename: string, content: string | ArrayBuffer): Promise<EngineNode> {
-        // 1. 获取主节点
-        const ownerNode = await this.vfs.storage.loadVNode(ownerNodeId);
-        if (!ownerNode) throw new Error(`Owner node ${ownerNodeId} not found`);
+  async createAsset(ownerNodeId: string, filename: string, content: string | ArrayBuffer): Promise<EngineNode> {
+    const owner = await this.core.storage.loadVNode(ownerNodeId);
+    if (!owner) throw new Error(`Owner node ${ownerNodeId} not found`);
 
-        // 2. 计算资产目录 User Path
-        const assetDirUserPath = this._getAssetDirUserPath(ownerNode);
-        
-        // 3. 构造资产完整路径
-        const assetUserPath = this.vfs.pathResolver.join(assetDirUserPath, filename);
+    const assetDirPath = this.getAssetDirPath(owner);
+    const assetPath = this.core.pathResolver.join(assetDirPath, filename);
 
-        // 4. 猜测 MIME 类型
-        const mimeType = guessMimeType(filename);
+    const node = await this.vfs.createFile(this.moduleName, assetPath, content, {
+      isAsset: true,
+      ownerId: ownerNodeId,
+      mimeType: guessMimeType(filename)
+    });
 
-        // 5. 调用 VFS 创建文件 
-        // VFSCore 的 createFile 内部调用 createNode，具备递归创建父目录的能力 (_ensureParentDirectory)
-        // 所以如果 .assets 或 .filename 目录不存在，这里会自动创建
-        const assetNode = await this.vfsCore.createFile(
-            this.moduleName,
-            assetUserPath,
-            content,
-            {
-                isAsset: true,
-                ownerId: ownerNodeId,
-                mimeType: mimeType
-            }
-        );
-
-        return this.toEngineNode(assetNode);
-    }
+    return this.toEngineNode(node);
+  }
 
     /**
      * ✨ [更新] 获取关联资产目录 ID
      */
-    async getAssetDirectoryId(ownerNodeId: string): Promise<string | null> {
-        const ownerNode = await this.vfs.storage.loadVNode(ownerNodeId);
-        if (!ownerNode) return null;
-        
-        // 1. 计算理论上的资产目录 User Path
-        const assetDirUserPath = this._getAssetDirUserPath(ownerNode);
+  async getAssetDirectoryId(ownerNodeId: string): Promise<string | null> {
+    const owner = await this.core.storage.loadVNode(ownerNodeId);
+    if (!owner) return null;
 
-        // 2. 解析为 Node ID
-        // 注意：resolvePath 接受 User Path 或 System Path，这里传入 User Path (开头无模块名)
-        return await this.resolvePath(assetDirUserPath);
-    }
+    const assetDirPath = this.getAssetDirPath(owner);
+    return this.resolvePath(assetDirPath);
+  }
 
-    async writeContent(id: string, content: string | ArrayBuffer): Promise<void> {
-        await this.vfs.write(id, content);
-    }
+  async writeContent(id: string, content: string | ArrayBuffer): Promise<void> {
+    await this.core.write(id, content);
+  }
 
-    async rename(id: string, newName: string): Promise<void> {
-        // 使用 VFSCore 的 rename 便捷方法
-        await this.vfsCore.rename(id, newName);
-    }
+  async rename(id: string, newName: string): Promise<void> {
+    await this.vfs.rename(id, newName);
+  }
 
-    async move(ids: string[], targetParentId: string | null): Promise<void> {
-        // 直接调用批量移动接口
-        await this.vfsCore.batchMoveNodes(this.moduleName, ids, targetParentId);
-    }
+  async move(ids: string[], targetParentId: string | null): Promise<void> {
+    await this.vfs.batchMoveNodes(this.moduleName, ids, targetParentId);
+  }
 
-    async delete(ids: string[]): Promise<void> {
-        // 旧实现: await Promise.all(ids.map(id => this.vfs.unlink(id, { recursive: true })));
-        
-        // 新实现: 使用原子批量删除
-        await this.vfsCore.deleteNodes(ids);
-    }
+  async delete(ids: string[]): Promise<void> {
+    await this.vfs.deleteNodes(ids);
+  }
 
-    async updateMetadata(id: string, metadata: Record<string, any>): Promise<void> {
-        await this.vfsCore.updateNodeMetadata(id, metadata);
-    }
+  async updateMetadata(id: string, metadata: Record<string, unknown>): Promise<void> {
+    await this.vfs.updateNodeMetadata(id, metadata);
+  }
 
     /**
      * [优化] 使用核心层的 setTags 接口
      * 这将操作合并为一个事务，并只触发一次事件
      */
-    async setTags(id: string, tags: string[]): Promise<void> {
-        // 单个设置也走批量通道，逻辑更统一
-        await this.vfsCore.batchSetNodeTags([{ nodeId: id, tags }]);
-    }
+  async setTags(id: string, tags: string[]): Promise<void> {
+    await this.vfs.batchSetNodeTags([{ nodeId: id, tags }]);
+  }
 
     /**
      * [新增] 专门的批量接口
      * 即使 ISessionEngine 接口定义中可能没有这个方法，
      * 我们可以在 Service 层通过类型转换调用它。
      */
-    async setTagsBatch(updates: Array<{ id: string; tags: string[] }>): Promise<void> {
-        const batchData = updates.map(u => ({ nodeId: u.id, tags: u.tags }));
-        await this.vfsCore.batchSetNodeTags(batchData);
-    }
+  async setTagsBatch(updates: Array<{ id: string; tags: string[] }>): Promise<void> {
+    await this.vfs.batchSetNodeTags(updates.map(u => ({ nodeId: u.id, tags: u.tags })));
+  }
 
-    // --- ✨ [新增] SRS 实现 ---
+  // ==================== SRS 操作 ====================
 
-    async getSRSStatus(fileId: string): Promise<Record<string, any>> {
-        // 直接使用 VFSCore 新增的基于 ID 的 API
-        return this.vfsCore.getSRSItemsByNodeId(fileId);
-    }
+  async getSRSStatus(fileId: string): Promise<Record<string, unknown>> {
+    return this.vfs.getSRSItemsByNodeId(fileId);
+  }
 
-    async updateSRSStatus(fileId: string, clozeId: string, status: any): Promise<void> {
-        await this.vfsCore.updateSRSItemById(fileId, clozeId, status);
-    }
+  async updateSRSStatus(fileId: string, clozeId: string, status: unknown): Promise<void> {
+    await this.vfs.updateSRSItemById(fileId, clozeId, status as any);
+  }
 
-    async getDueCards(limit: number = 50): Promise<any[]> {
-        // 默认只获取当前模块的复习卡片，如果需要全局，可以扩展 ISessionEngine 传入 scope
-        return this.vfsCore.getDueSRSItems(this.moduleName, limit);
-    }
+  async getDueCards(limit = 50): Promise<unknown[]> {
+    return this.vfs.getDueSRSItems(this.moduleName, limit);
+  }
 
-    on(_event: EngineEventType, callback: (event: EngineEvent) => void): () => void {
-        const bus = this.vfsCore.getEventBus();
-        
-        const shouldEmit = (path: string | null | undefined): boolean => {
-            if (path === null || path === undefined) return true;
-            
-            const expectedPrefix = `/${this.moduleName}`;
-            if (!path.startsWith(expectedPrefix)) return false;
-            
-            const relativePath = path.slice(expectedPrefix.length);
-            
-            // 过滤隐藏目录 (/.xxx)
-            // 注意：现在资产目录可能是 .assets (目录内) 或 .filename (同级)
-            // 这里的过滤规则会把这些操作的事件屏蔽掉，UI 层如果需要刷新资产列表，可能需要调整此处的策略
-            // 但为了保持文件树整洁，默认过滤是合理的
-            if (relativePath.startsWith('/.') || relativePath.includes('/.')) {
-                return false;
-            }
-            
-            return true;
-        };
-        
-        const mapAndEmit = (type: EngineEventType, originalPayload: any) => {
-            const path = originalPayload.path as string;
-            if (!shouldEmit(path)) return;
-            callback({ type, payload: originalPayload });
-        };
+  // ==================== 事件订阅 ====================
 
-        const handlers = {
-            [VFSEventType.NODE_CREATED]: (e: any) => mapAndEmit('node:created', e),
-            [VFSEventType.NODE_UPDATED]: (e: any) => mapAndEmit('node:updated', e),
-            [VFSEventType.NODE_DELETED]: (e: any) => mapAndEmit('node:deleted', e),
-            [VFSEventType.NODE_MOVED]: (e: any) => mapAndEmit('node:moved', e),
-            [VFSEventType.NODE_COPIED]: (e: any) => mapAndEmit('node:moved', e), // Copy 视为 move/create
-            
-            // ✨ [已更新] 不再需要 'as any'，因为 EngineEventType 现在包含这些类型
-            [VFSEventType.NODES_BATCH_UPDATED]: (e: any) => {
-                callback({ type: 'node:batch_updated', payload: e.data });
-            },
-            [VFSEventType.NODES_BATCH_MOVED]: (e: any) => {
-                callback({ type: 'node:batch_moved', payload: e.data });
-            }
-        };
+  on(_event: EngineEventType, callback: (event: EngineEvent) => void): () => void {
+    const bus = this.vfs.getEventBus();
+    const modulePrefix = `/${this.moduleName}`;
 
-        const unsubs = Object.entries(handlers).map(([evt, handler]) => bus.on(evt as any, handler));
-        return () => unsubs.forEach(u => u());
-    }
+    const shouldEmit = (path: string | null | undefined): boolean => {
+      if (!path) return true;
+      if (!path.startsWith(modulePrefix)) return false;
+      
+      const relativePath = path.slice(modulePrefix.length);
+      // 过滤隐藏目录
+      return !relativePath.startsWith('/.') && !relativePath.includes('/.');
+    };
 
+    const mapEvent = (type: EngineEventType) => (e: any) => {
+      if (shouldEmit(e.path)) {
+        callback({ type, payload: e });
+      }
+    };
+
+    const handlers: Record<string, (e: any) => void> = {
+      [VFSEventType.NODE_CREATED]: mapEvent('node:created'),
+      [VFSEventType.NODE_UPDATED]: mapEvent('node:updated'),
+      [VFSEventType.NODE_DELETED]: mapEvent('node:deleted'),
+      [VFSEventType.NODE_MOVED]: mapEvent('node:moved'),
+      [VFSEventType.NODE_COPIED]: mapEvent('node:moved'),
+      [VFSEventType.NODES_BATCH_UPDATED]: (e) => callback({ type: 'node:batch_updated', payload: e.data }),
+      [VFSEventType.NODES_BATCH_MOVED]: (e) => callback({ type: 'node:batch_moved', payload: e.data })
+    };
+
+    const unsubs = Object.entries(handlers).map(([evt, handler]) => bus.on(evt as any, handler));
+    return () => unsubs.forEach(u => u());
+  }
+
+  // ==================== 路径解析 ====================
     /**
      * ✅ [修复] 解析路径为 Node ID
      * 自动处理 User Path 到 System Path 的转换
      */
-    async resolvePath(path: string): Promise<string | null> {
-        let systemPath = path;
-        
-        // 如果是 User Path（以 / 开头但不包含模块名），转换为 System Path
-        if (path.startsWith('/') && !path.startsWith(`/${this.moduleName}/`) && path !== `/${this.moduleName}`) {
-            systemPath = `/${this.moduleName}${path}`;
-        }
-        
-        try {
-            return await this.vfs.storage.getNodeIdByPath(systemPath);
-        } catch {
-            return null;
-        }
+  async resolvePath(path: string): Promise<string | null> {
+    let systemPath = path;
+    
+    if (path.startsWith('/') && !path.startsWith(`/${this.moduleName}/`) && path !== `/${this.moduleName}`) {
+      systemPath = `/${this.moduleName}${path}`;
     }
+
+    try {
+      return await this.core.storage.getNodeIdByPath(systemPath);
+    } catch {
+      return null;
+    }
+  }
 
     /**
      * ✅ [新增] 检查路径是否存在
      */
-    async pathExists(path: string): Promise<boolean> {
-        const nodeId = await this.resolvePath(path);
-        return nodeId !== null;
-    }
+  async pathExists(path: string): Promise<boolean> {
+    return (await this.resolvePath(path)) !== null;
+  }
+
+  // ==================== 私有辅助方法 ====================
+
+  private toEngineNode(node: VNodeData): EngineNode {
+    return {
+      id: node.nodeId,
+      parentId: node.parentId,
+      name: node.name,
+      type: node.type === VNodeType.DIRECTORY ? 'directory' : 'file',
+      createdAt: node.createdAt,
+      modifiedAt: node.modifiedAt,
+      path: node.path,
+      size: node.size,
+      tags: node.tags,
+      metadata: node.metadata,
+      moduleId: node.moduleId ?? undefined,
+      icon: node.metadata?.icon as string | undefined
+    };
+  }
 
     /**
      * 解析父节点参数，返回相对路径字符串。
@@ -411,33 +277,41 @@ export class VFSModuleEngine implements ISessionEngine {
      * 2. 如果是路径字符串 (以 / 开头) -> 直接返回路径 (支持 Service 层传常量)
      * 3. 如果是 ID -> 从数据库加载节点并获取其路径
      */
-    private async resolveParentPath(parentIdOrPath: string | null | undefined): Promise<string> {
-        if (!parentIdOrPath) return ''; 
+  private async resolveParentPath(parentIdOrPath: string | null | undefined): Promise<string> {
+    if (!parentIdOrPath) return '';
 
-        // 策略 A: 看起来像路径，直接信任它
-        // 注意：因为我们在 VFS Core 实现了递归创建，所以即使这个路径目前不存在，
-        // 后续的 createFile 调用也会自动创建它。这完美解决了 bootstrap 问题。
-        if (parentIdOrPath.startsWith('/')) {
-            // 如果传入 "/default"，我们需要确保返回的是相对模块根的路径？
-            // PathResolver.join 会处理拼接。
-            // 这里我们假设传入的是相对于模块根的路径。
-            return parentIdOrPath;
-        }
-
-        // 策略 B: 看起来像 ID，去数据库查
-        const parent = await this.vfs.storage.loadVNode(parentIdOrPath);
-        if (!parent) {
-            // 这里我们选择抛出错误，因为既然传了 ID，就期望 ID 存在。
-            // 如果 ID 无效，说明逻辑有误。
-            throw new Error(`Parent node ID '${parentIdOrPath}' not found`);
-        }
-        
-        // 转换回模块相对路径
-        const modulePathPrefix = `/${this.moduleName}`;
-        let relativePath = parent.path;
-        if (relativePath.startsWith(modulePathPrefix)) {
-            relativePath = relativePath.substring(modulePathPrefix.length);
-        }
-        return relativePath.startsWith('/') ? relativePath : '/' + relativePath;
+    // 如果是路径，直接返回
+    if (parentIdOrPath.startsWith('/')) {
+      return parentIdOrPath;
     }
+
+    // 如果是 ID，查询节点获取路径
+    const parent = await this.core.storage.loadVNode(parentIdOrPath);
+    if (!parent) {
+      throw new Error(`Parent node '${parentIdOrPath}' not found`);
+    }
+
+    const modulePrefix = `/${this.moduleName}`;
+    let relativePath = parent.path;
+    
+    if (relativePath.startsWith(modulePrefix)) {
+      relativePath = relativePath.substring(modulePrefix.length);
+    }
+    
+    return relativePath.startsWith('/') ? relativePath : '/' + relativePath;
+  }
+
+  private getAssetDirPath(owner: VNodeData): string {
+    const ownerUserPath = this.core.pathResolver.toUserPath(owner.path, this.moduleName);
+
+    if (owner.type === VNodeType.DIRECTORY) {
+      return this.core.pathResolver.join(ownerUserPath, '.assets');
+    }
+
+    // 文件的伴生目录：同级隐藏目录
+    const lastSlash = ownerUserPath.lastIndexOf('/');
+    const parentPath = lastSlash <= 0 ? '/' : ownerUserPath.substring(0, lastSlash);
+    return this.core.pathResolver.join(parentPath, `.${owner.name}`);
+  }
+
 }
