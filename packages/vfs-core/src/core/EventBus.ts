@@ -2,13 +2,12 @@
  * @file vfs/core/EventBus.ts
  * 事件总线
  */
-
-import { VFSEvent, VFSEventType } from './types.js';
+import { VFSEvent, VFSEventType } from './types';
 
 type EventHandler = (event: VFSEvent) => void;
 
 export class EventBus {
-  private listeners: Map<VFSEventType, Set<EventHandler>> = new Map();
+  private listeners = new Map<VFSEventType, Set<EventHandler>>();
 
   /**
    * 订阅事件
@@ -17,10 +16,7 @@ export class EventBus {
     if (!this.listeners.has(type)) {
       this.listeners.set(type, new Set());
     }
-    
     this.listeners.get(type)!.add(handler);
-    
-    // 返回取消订阅函数
     return () => this.off(type, handler);
   }
 
@@ -28,31 +24,16 @@ export class EventBus {
    * 取消订阅
    */
   off(type: VFSEventType, handler: EventHandler): void {
-    const handlers = this.listeners.get(type);
-    if (handlers) {
-      handlers.delete(handler);
-    }
+    this.listeners.get(type)?.delete(handler);
   }
 
-  /**
-   * 发布事件
-   */
   emit(event: VFSEvent): void {
-    const handlers = this.listeners.get(event.type);
-    if (handlers) {
-      handlers.forEach(handler => {
-        try {
-          handler(event);
-        } catch (error) {
-          console.error(`Error in event handler for ${event.type}:`, error);
-        }
-      });
-    }
+    this.listeners.get(event.type)?.forEach(handler => {
+      try { handler(event); } 
+      catch (e) { console.error(`Event handler error for ${event.type}:`, e); }
+    });
   }
 
-  /**
-   * 清空所有监听器
-   */
   clear(): void {
     this.listeners.clear();
   }
