@@ -2,60 +2,28 @@
  * @file vfs/core/VFS.ts
  * VFS 核心门面类
  */
-
-import { VFSStorage } from '../store/VFSStorage.js';
-import { VNode, VNodeType, ContentData, Transaction, VFS_STORES } from '../store/types.js';
-import { ContentStore } from '../store/ContentStore.js';
-import { PathResolver } from './PathResolver.js';
-import { MiddlewareRegistry } from './MiddlewareRegistry.js';
-import { EventBus } from './EventBus.js';
+import { VFSStorage } from '../store/VFSStorage';
+import { VNodeData, VNodeType, VNode, ContentData, Transaction, VFS_STORES } from '../store/types';
+import { ContentStore } from '../store/stores';
+import { PathResolver } from './PathResolver';
+import { MiddlewareRegistry } from './MiddlewareRegistry';
+import { EventBus } from './EventBus';
 import {
-  VFSError,
-  VFSErrorCode,
-  CreateNodeOptions,
-  UnlinkOptions,
-  UnlinkResult,
-  CopyResult,
-  VFSEventType,
-  IVFSMiddleware,
-  SearchQuery,
-  NodeStat
-} from './types.js';
-
-interface NodeTreeData {
-  node: VNode;
-  content: ContentData | null;
-  children: NodeTreeData[];
-}
-
-interface CopyOperation {
-  type: 'create_node' | 'copy_content';
-  sourceContent?: ContentData | null;
-  newNodeData: {
-    nodeId: string;
-    parentId: string | null;
-    name: string;
-    type: VNodeType;
-    path: string;
-    moduleId: string;
-    contentRef: string | null;
-    size: number;
-    metadata: Record<string, any>;
-    tags: string[];
-  };
-}
+  VFSError, VFSErrorCode, CreateNodeOptions, UnlinkOptions, 
+  UnlinkResult, CopyResult, VFSEventType, SearchQuery
+} from './types';
 
 export class VFS {
-  public readonly storage: VFSStorage;
-  public readonly pathResolver: PathResolver;
-  public readonly middlewares: MiddlewareRegistry;
-  public readonly events: EventBus;
+  readonly storage: VFSStorage;
+  readonly pathResolver: PathResolver;
+  readonly middlewares: MiddlewareRegistry;
+  readonly events: EventBus;
 
   constructor(storage: VFSStorage, middlewares: MiddlewareRegistry, events: EventBus) {
     this.storage = storage;
     this.middlewares = middlewares;
     this.events = events;
-    this.pathResolver = new PathResolver(this);
+    this.pathResolver = new PathResolver((path) => storage.getNodeIdByPath(path));
   }
 
   /**
@@ -74,263 +42,119 @@ export class VFS {
   }
 
   /**
-   * 注册 Middleware
-   */
-  registerMiddleware(middleware: IVFSMiddleware): void {
-    this.middlewares.register(middleware);
-  }
-
-  // ==================================================================================
-  // 核心路径辅助
-  // ==================================================================================
-
-  /**
-   * [辅助] 获取父目录路径字符串
-   */
-  private _dirname(path: string): string {
-    const lastSlash = path.lastIndexOf('/');
-    if (lastSlash <= 0) return '/';
-    return path.substring(0, lastSlash);
-  }
-
-  /**
-   * [新增] 递归确保父目录存在
-   * 如果目录不存在，自动创建 (Lazy Creation Support)
-   */
-  private async _ensureParentDirectory(module: string, path: string): Promise<string> {
-    // 1. 检查当前路径是否已存在
-    const existingId = await this.pathResolver.resolve(module, path);
-    if (existingId) {
-        // 确保它是一个目录
-        const node = await this.storage.loadVNode(existingId);
-        if (node && node.type !== VNodeType.DIRECTORY) {
-            throw new VFSError(VFSErrorCode.INVALID_OPERATION, `Path exists but is not a directory: ${path}`);
-        }
-        return existingId;
-    }
-
-    // 2. 如果是根路径且不存在，这是一个严重错误（模块未挂载）
-    if (path === '/') {
-        throw new VFSError(VFSErrorCode.NOT_FOUND, `Root directory for module '${module}' not found. Is the module mounted?`);
-    }
-
-    // 3. 递归：确保上一级目录存在
-    const parentPath = this._dirname(path);
-    // 递归调用，获取父目录 ID
-    await this._ensureParentDirectory(module, parentPath);
-
-    // 4. 创建当前层级的目录
-    // 注意：这里调用 createNode 会开启一个新的事务。
-    // 虽然不是最高效的（每个目录一个事务），但在自动恢复场景下是安全的且逻辑复用性最高。
-    const newDirNode = await this.createNode({
-        module,
-        path: path,
-        type: VNodeType.DIRECTORY,
-        metadata: { createdBy: 'system_recursive_ensure' }
-    });
-
-    return newDirNode.nodeId;
-  }
-
-  /**
    * 创建节点
    */
-  async createNode(options: CreateNodeOptions): Promise<VNode> {
+  async createNode(options: CreateNodeOptions): Promise<VNodeData> {
     const { module, path, type, content, metadata = {} } = options;
-
-    // 1. 标准化用户路径
-    const normalizedUserPath = this.pathResolver.normalize(path);
-    if (!this.pathResolver.isValid(normalizedUserPath)) {
+    
+    const userPath = this.pathResolver.normalize(path);
+    if (!this.pathResolver.isValid(userPath)) {
       throw new VFSError(VFSErrorCode.INVALID_PATH, `Invalid path: ${path}`);
     }
 
-    // 2. 转换为系统绝对路径 (System Path: /<module>/docs/file.txt)
-    const systemPath = this.pathResolver.toSystemPath(module, normalizedUserPath);
-
-    // 3. 检查系统路径是否存在
-    const existingId = await this.storage.getNodeIdByPath(systemPath);
-    if (existingId) {
-      throw new VFSError(
-        VFSErrorCode.ALREADY_EXISTS,
-        `Node already exists at path: ${normalizedUserPath}`
-      );
+    const systemPath = this.pathResolver.toSystemPath(module, userPath);
+    
+    // 检查是否存在
+    if (await this.storage.getNodeIdByPath(systemPath)) {
+      throw new VFSError(VFSErrorCode.ALREADY_EXISTS, `Node exists: ${userPath}`);
     }
 
-    // 4. 解析父节点
-    // [修改] 替换原有的 pathResolver.resolveParent 逻辑，增加递归创建支持
+    // 确保父目录存在
     let parentId: string | null = null;
-    
-    // 如果不是创建根节点，则必须有父节点
-    if (normalizedUserPath !== '/') {
-        const parentPath = this._dirname(normalizedUserPath);
-        
-        // 尝试直接获取父节点 ID
-        parentId = await this.pathResolver.resolve(module, parentPath);
-
-        // 如果父节点不存在，启动递归创建逻辑
-        if (!parentId) {
-            try {
-                parentId = await this._ensureParentDirectory(module, parentPath);
-            } catch (error: any) {
-                // 包装错误信息，使其更清晰
-                throw new VFSError(
-                    VFSErrorCode.INVALID_OPERATION, 
-                    `Failed to create parent directories for '${path}': ${error.message}`
-                );
-            }
-        }
-        
-        // 再次确认父节点是目录 (防御性检查)
-        if (parentId) {
-            const parentNode = await this.storage.loadVNode(parentId);
-            if (parentNode && parentNode.type !== VNodeType.DIRECTORY) {
-                throw new VFSError(VFSErrorCode.INVALID_OPERATION, `Cannot create node inside a file: ${parentNode.path}`);
-            }
-        }
+    if (userPath !== '/') {
+      parentId = await this.ensureParentDirectory(module, this.pathResolver.dirname(userPath));
     }
-    
-    const name = this.pathResolver.basename(normalizedUserPath);
-    const nodeId = this._generateId();
-    const contentRef = type === VNodeType.FILE ? ContentStore.createContentRef(nodeId) : null;
-    
-    // 5. 创建 VNode (存储的是 System Path)
-    const vnode = new VNode(
-      nodeId, parentId, name, type, systemPath, module, contentRef,
-      0, Date.now(), Date.now(), metadata, []
-    );
 
-    // 6. 中间件验证
+    const nodeId = this.generateId();
+    const contentRef = type === VNodeType.FILE ? ContentStore.createRef(nodeId) : null;
+    
+    const node = VNode.create({
+      nodeId, parentId,
+      name: this.pathResolver.basename(userPath),
+      type, path: systemPath, moduleId: module,
+      contentRef, metadata
+    });
+
+    // Middleware 验证
     if (type === VNodeType.FILE && content !== undefined) {
-      await this.middlewares.runValidation(vnode, content);
+      await this.middlewares.runValidation(node, content);
     }
-    
-    const tx = await this.storage.beginTransaction();
+
+    const tx = this.storage.beginTransaction();
     try {
       if (type === VNodeType.FILE) {
-        const fileContent = content !== undefined ? content : '';
-        // 中间件处理写入
-        const { processedContent, derivedData } = await this._processWriteWithMiddlewares(
-          vnode, fileContent, tx
-        );
-        vnode.metadata = { ...vnode.metadata, ...derivedData };
-        vnode.size = this._getContentSize(processedContent);
+        const fileContent = content ?? '';
+        const { processedContent, derivedData } = await this.processWrite(node, fileContent, tx);
+        node.metadata = { ...node.metadata, ...derivedData };
+        node.size = this.getContentSize(processedContent);
       }
-      await this.storage.saveVNode(vnode, tx);
+      
+      await this.storage.inodeStore.put(node, tx);
       await tx.done;
 
-      this.events.emit({
-        type: VFSEventType.NODE_CREATED,
-        nodeId: vnode.nodeId,
-        path: systemPath,
-        moduleId: module, 
-        timestamp: Date.now(),
-        data: { type, module }
-      });
-      return vnode;
+      this.emitEvent(VFSEventType.NODE_CREATED, node, { type, module });
+      return node;
     } catch (error) {
-      if (error instanceof VFSError) throw error;
-      throw new VFSError(VFSErrorCode.TRANSACTION_FAILED, 'Failed to create node', error);
+      throw this.wrapError(error, 'Failed to create node');
     }
   }
 
-  /**
-   * 更新节点元数据
-   */
-  async updateMetadata(vnodeOrId: VNode | string, metadata: Record<string, any>): Promise<VNode> {
-    const vnode = await this._resolveVNode(vnodeOrId);
-    
-    const tx = await this.storage.beginTransaction();
-    try {
-      vnode.metadata = metadata;
-      vnode.modifiedAt = Date.now();
-      await this.storage.saveVNode(vnode, tx);
-      await tx.done;
-
-      this.events.emit({
-        type: VFSEventType.NODE_UPDATED,
-        nodeId: vnode.nodeId,
-        path: vnode.path,
-        moduleId: vnode.moduleId || undefined, 
-        timestamp: Date.now(),
-        data: { metadataOnly: true }
-      });
-
-      return vnode;
-    } catch (error) {
-      if (error instanceof VFSError) throw error;
-      throw new VFSError(VFSErrorCode.TRANSACTION_FAILED, 'Failed to update metadata', error);
-    }
-  }
 
   /**
    * 读取节点内容 (支持字符串和二进制)
    */
-  async read(vnodeOrId: VNode | string): Promise<string | ArrayBuffer> {
-    const vnode = await this._resolveVNode(vnodeOrId);
-
-    if (vnode.type !== VNodeType.FILE) {
-      throw new VFSError(VFSErrorCode.INVALID_OPERATION, `Cannot read directory: ${vnode.nodeId}`);
+  async read(vnodeOrId: VNodeData | string): Promise<string | ArrayBuffer> {
+    const node = await this.resolveNode(vnodeOrId);
+    
+    if (node.type !== VNodeType.FILE) {
+      throw new VFSError(VFSErrorCode.INVALID_OPERATION, `Cannot read directory: ${node.nodeId}`);
     }
 
-    if (!vnode.contentRef) return '';
-
-    const contentData = await this.storage.loadContent(vnode.contentRef);
-    if (!contentData) {
-      // 允许内容不存在的情况，返回空
-      return '';
-    }
-
-    return contentData.content;
+    if (!node.contentRef) return '';
+    
+    const data = await this.storage.contentStore.get(node.contentRef);
+    return data?.content ?? '';
   }
 
   /**
    * 写入节点内容
    */
-  async write(vnodeOrId: VNode | string, content: string | ArrayBuffer): Promise<VNode> {
-    const vnode = await this._resolveVNode(vnodeOrId);
-
-    if (vnode.type !== VNodeType.FILE) {
-      throw new VFSError(VFSErrorCode.INVALID_OPERATION, `Cannot write to directory: ${vnode.nodeId}`);
-    }
+  async write(vnodeOrId: VNodeData | string, content: string | ArrayBuffer): Promise<VNodeData> {
+    const node = await this.resolveNode(vnodeOrId);
     
-    await this.middlewares.runValidation(vnode, content);
+    if (node.type !== VNodeType.FILE) {
+      throw new VFSError(VFSErrorCode.INVALID_OPERATION, `Cannot write to directory: ${node.nodeId}`);
+    }
 
-    const tx = await this.storage.beginTransaction();
+    await this.middlewares.runValidation(node, content);
+
+    const tx = this.storage.beginTransaction();
     try {
-      const { processedContent, derivedData } = await this._processWriteWithMiddlewares(
-        vnode, content, tx
-      );
-
-      vnode.metadata = { ...vnode.metadata, ...derivedData };
-      vnode.size = this._getContentSize(processedContent);
-      vnode.modifiedAt = Date.now();
-      await this.storage.saveVNode(vnode, tx);
+      const { processedContent, derivedData } = await this.processWrite(node, content, tx);
+      
+      node.metadata = { ...node.metadata, ...derivedData };
+      node.size = this.getContentSize(processedContent);
+      node.modifiedAt = Date.now();
+      
+      await this.storage.inodeStore.put(node, tx);
       await tx.done;
 
-      this.events.emit({
-        type: VFSEventType.NODE_UPDATED,
-        nodeId: vnode.nodeId,
-        path: vnode.path,
-        moduleId: vnode.moduleId || undefined, 
-        timestamp: Date.now()
-      });
-
-      return vnode;
+      this.emitEvent(VFSEventType.NODE_UPDATED, node);
+      return node;
     } catch (error) {
-      if (error instanceof VFSError) throw error;
-      throw new VFSError(VFSErrorCode.TRANSACTION_FAILED, 'Failed to write content', error);
+      throw this.wrapError(error, 'Failed to write content');
     }
   }
+
 
   /**
    * 删除节点 (级联删除)
    */
-  async unlink(vnodeOrId: VNode | string, options: UnlinkOptions = {}): Promise<UnlinkResult> {
-    let vnode: VNode;
-
-    // 1. 尝试解析节点，如果不存在则视为删除成功 (幂等性)
+  async unlink(vnodeOrId: VNodeData | string, options: UnlinkOptions = {}): Promise<UnlinkResult> {
+    let node: VNodeData;
+    
     try {
-      vnode = await this._resolveVNode(vnodeOrId);
+      node = await this.resolveNode(vnodeOrId);
     } catch (error) {
       if (error instanceof VFSError && error.code === VFSErrorCode.NOT_FOUND) {
         const id = typeof vnodeOrId === 'string' ? vnodeOrId : vnodeOrId.nodeId;
@@ -339,201 +163,143 @@ export class VFS {
       throw error;
     }
 
-    const { recursive = false } = options;
-
-    const nodesToDelete: VNode[] = [];
-    await this._collectNodesToDelete(vnode, nodesToDelete);
-
-    if (vnode.type === VNodeType.DIRECTORY && nodesToDelete.length > 1 && !recursive) {
-      throw new VFSError(VFSErrorCode.INVALID_OPERATION, `Directory is not empty: ${vnode.nodeId}`);
-    }
+    const nodesToDelete = await this.collectDescendants(node);
     
-    for (const node of nodesToDelete) {
-        if (node.metadata?.isProtected === true) {
-             throw new VFSError(VFSErrorCode.PERMISSION_DENIED, `Node '${node.name}' is protected.`);
-        }
+    if (node.type === VNodeType.DIRECTORY && nodesToDelete.length > 1 && !options.recursive) {
+      throw new VFSError(VFSErrorCode.INVALID_OPERATION, `Directory not empty: ${node.nodeId}`);
     }
-    
+
+    // 检查保护状态
+    for (const n of nodesToDelete) {
+      if (n.metadata?.isProtected) {
+        throw new VFSError(VFSErrorCode.PERMISSION_DENIED, `Node '${n.name}' is protected`);
+      }
+    }
+
     const allRemovedIds = nodesToDelete.map(n => n.nodeId);
-    
-    const tx = await this.storage.beginTransaction([
-        VFS_STORES.VNODES, VFS_STORES.CONTENTS, VFS_STORES.NODE_TAGS, VFS_STORES.TAGS, VFS_STORES.SRS_ITEMS
+    const tx = this.storage.beginTransaction([
+      VFS_STORES.VNODES, VFS_STORES.CONTENTS, VFS_STORES.NODE_TAGS, 
+      VFS_STORES.TAGS, VFS_STORES.SRS_ITEMS
     ]);
 
     try {
-      for (const node of nodesToDelete) {
-        await this.middlewares.runBeforeDelete(node, tx);
-        if (node.contentRef) await this.storage.deleteContent(node.contentRef, tx);
-        await this.storage.cleanupNodeTags(node.nodeId, tx);
-        await this.storage.srsStore.deleteForNode(node.nodeId, tx);
-        await this.storage.deleteVNode(node.nodeId, tx);
-        
-        // [Middleware] After Delete (如处理伴生目录)
-        await this.middlewares.runAfterDelete(node, tx);
+      for (const n of nodesToDelete) {
+        await this.middlewares.runBeforeDelete(n, tx);
+        if (n.contentRef) await this.storage.contentStore.delete(n.contentRef, tx);
+        await this.storage.cleanupNodeTags(n.nodeId, tx);
+        await this.storage.srsStore.deleteForNode(n.nodeId, tx);
+        await this.storage.inodeStore.delete(n.nodeId, tx);
+        await this.middlewares.runAfterDelete(n, tx);
       }
       
       await tx.done;
-
-      this.events.emit({
-        type: VFSEventType.NODE_DELETED,
-        nodeId: vnode.nodeId,
-        path: vnode.path,
-        moduleId: vnode.moduleId || undefined, 
-        timestamp: Date.now(),
-        data: { removedIds: allRemovedIds }
-      });
-      return { removedNodeId: vnode.nodeId, allRemovedIds };
+      this.emitEvent(VFSEventType.NODE_DELETED, node, { removedIds: allRemovedIds });
+      return { removedNodeId: node.nodeId, allRemovedIds };
     } catch (error) {
-      if (error instanceof VFSError) throw error;
-      throw new VFSError(VFSErrorCode.TRANSACTION_FAILED, 'Failed to delete node', error);
+      throw this.wrapError(error, 'Failed to delete node');
     }
   }
-
-/**
+  
+  /**
    * [新增] 批量原子删除节点
    * @returns 被实际删除的节点总数（包含子节点）
    */
   async batchDelete(nodeIds: string[]): Promise<number> {
-    if (!nodeIds || nodeIds.length === 0) return 0;
+    if (!nodeIds.length) return 0;
 
-    // 1. 开启大事务
-    const tx = await this.storage.beginTransaction([
-        VFS_STORES.VNODES, 
-        VFS_STORES.CONTENTS, 
-        VFS_STORES.NODE_TAGS, 
-        VFS_STORES.TAGS, 
-        VFS_STORES.SRS_ITEMS
+    const tx = this.storage.beginTransaction([
+      VFS_STORES.VNODES, VFS_STORES.CONTENTS, VFS_STORES.NODE_TAGS,
+      VFS_STORES.TAGS, VFS_STORES.SRS_ITEMS
     ]);
 
-    const allDeletedNodeIds: Set<string> = new Set();
+    const deleted = new Set<string>();
 
     try {
       for (const nodeId of nodeIds) {
-        // 防止重复处理（例如列表中既有父目录又有子文件）
-        if (allDeletedNodeIds.has(nodeId)) continue;
+        if (deleted.has(nodeId)) continue;
 
-        // 尝试加载节点
-        const vnode = await this.storage.loadVNode(nodeId, tx);
-        if (!vnode) continue; // 节点不存在则跳过
+        const node = await this.storage.loadVNode(nodeId, tx);
+        if (!node) continue;
 
-        // 递归收集所有需要删除的节点（处理目录）
-        const nodesToDelete: VNode[] = [];
-        await this._collectNodesToDelete(vnode, nodesToDelete); // 复用现有的递归收集方法
-
-        for (const node of nodesToDelete) {
-          // 检查保护状态
-          if (node.metadata?.isProtected === true) {
-             throw new VFSError(VFSErrorCode.PERMISSION_DENIED, `Node '${node.name}' is protected and cannot be deleted.`);
+        const descendants = await this.collectDescendants(node, tx);
+        
+        for (const n of descendants) {
+          if (n.metadata?.isProtected) {
+            throw new VFSError(VFSErrorCode.PERMISSION_DENIED, `Node '${n.name}' is protected`);
           }
+          if (deleted.has(n.nodeId)) continue;
+
+          await this.middlewares.runBeforeDelete(n, tx);
+          if (n.contentRef) await this.storage.contentStore.delete(n.contentRef, tx);
+          await this.storage.cleanupNodeTags(n.nodeId, tx);
+          await this.storage.srsStore.deleteForNode(n.nodeId, tx);
+          await this.storage.inodeStore.delete(n.nodeId, tx);
+          await this.middlewares.runAfterDelete(n, tx);
           
-          if (allDeletedNodeIds.has(node.nodeId)) continue;
-
-          // Middleware Hook: 删除前
-          await this.middlewares.runBeforeDelete(node, tx);
-
-          // 执行删除操作
-          if (node.contentRef) await this.storage.deleteContent(node.contentRef, tx);
-          await this.storage.cleanupNodeTags(node.nodeId, tx);
-          await this.storage.srsStore.deleteForNode(node.nodeId, tx);
-          await this.storage.deleteVNode(node.nodeId, tx);
-
-          // Middleware Hook: 删除后
-          await this.middlewares.runAfterDelete(node, tx);
-
-          allDeletedNodeIds.add(node.nodeId);
+          deleted.add(n.nodeId);
         }
       }
 
       await tx.done;
 
-      // 发送批量事件
-      if (allDeletedNodeIds.size > 0) {
+      if (deleted.size > 0) {
         this.events.emit({
           type: VFSEventType.NODES_BATCH_DELETED,
-          nodeId: null, 
-          path: null, 
-          timestamp: Date.now(),
-          data: { removedNodeIds: Array.from(allDeletedNodeIds) }
+          nodeId: null, path: null, timestamp: Date.now(),
+          data: { removedNodeIds: Array.from(deleted) }
         });
       }
 
-      return allDeletedNodeIds.size;
+      return deleted.size;
     } catch (error) {
-      if (error instanceof VFSError) throw error;
-      throw new VFSError(VFSErrorCode.TRANSACTION_FAILED, 'Failed to batch delete nodes', error);
+      throw this.wrapError(error, 'Failed to batch delete');
     }
   }
-
-  // ==================================================================================
-  // 高级操作：移动、复制
-  // ==================================================================================
 
   /**
    * 移动节点
    * @param newUserPath 目标相对路径 (e.g. "/new-dir/file.txt")
    */
-  async move(vnodeOrId: VNode | string, newUserPath: string): Promise<VNode> {
-    const vnode = await this._resolveVNode(vnodeOrId);
-    
-    // 假设 move 操作如果不指定模块，则在同模块下进行
-    const moduleName = vnode.moduleId!;
-    const normalizedUserPath = this.pathResolver.normalize(newUserPath);
+  async move(vnodeOrId: VNodeData | string, newUserPath: string): Promise<VNodeData> {
+    const node = await this.resolveNode(vnodeOrId);
+    const module = node.moduleId!;
+    const userPath = this.pathResolver.normalize(newUserPath);
 
-    if (!this.pathResolver.isValid(normalizedUserPath)) {
+    if (!this.pathResolver.isValid(userPath)) {
       throw new VFSError(VFSErrorCode.INVALID_PATH, `Invalid path: ${newUserPath}`);
     }
 
-    // 计算新的系统路径
-    const newSystemPath = this.pathResolver.toSystemPath(moduleName, normalizedUserPath);
-
+    const newSystemPath = this.pathResolver.toSystemPath(module, userPath);
     const existingId = await this.storage.getNodeIdByPath(newSystemPath);
-    if (existingId && existingId !== vnode.nodeId) {
-      throw new VFSError(VFSErrorCode.ALREADY_EXISTS, `Node already exists at path: ${normalizedUserPath}`);
+    
+    if (existingId && existingId !== node.nodeId) {
+      throw new VFSError(VFSErrorCode.ALREADY_EXISTS, `Node exists: ${userPath}`);
     }
 
-    const newParentId = await this.pathResolver.resolveParent(moduleName, normalizedUserPath);
+    const newParentId = await this.pathResolver.resolveParent(module, userPath);
+    const oldSystemPath = node.path;
 
-    // [重要] 在事务开始前保存旧路径，供中间件使用
-    const oldSystemPath = vnode.path;
-
-    // 增加 CONTENTS Store 以支持中间件可能进行的内容重写（如链接更新）
-    const tx = await this.storage.beginTransaction([
-        VFS_STORES.VNODES, VFS_STORES.SRS_ITEMS, VFS_STORES.CONTENTS
-    ]);
+    const tx = this.storage.beginTransaction([VFS_STORES.VNODES, VFS_STORES.SRS_ITEMS, VFS_STORES.CONTENTS]);
 
     try {
-      const newName = this.pathResolver.basename(normalizedUserPath);
+      node.parentId = newParentId;
+      node.name = this.pathResolver.basename(userPath);
+      node.path = newSystemPath;
+      node.modifiedAt = Date.now();
 
-      vnode.parentId = newParentId;
-      vnode.name = newName;
-      vnode.path = newSystemPath;
-      vnode.modifiedAt = Date.now();
-      
-      await this.storage.saveVNode(vnode, tx);
+      await this.storage.inodeStore.put(node, tx);
 
-      // 如果是目录，递归更新子节点路径
-      if (vnode.type === VNodeType.DIRECTORY) {
-        await this._updateDescendantPathsAndModules(vnode, oldSystemPath, newSystemPath, moduleName, tx);
+      if (node.type === VNodeType.DIRECTORY) {
+        await this.updateDescendantPaths(node, oldSystemPath, newSystemPath, module, tx);
       }
-      
-      // ✨ [Middleware Hook] 移动后处理 (e.g., 移动伴生目录, 更新引用)
-      await this.middlewares.runAfterMove(vnode, oldSystemPath, newSystemPath, tx);
 
+      await this.middlewares.runAfterMove(node, oldSystemPath, newSystemPath, tx);
       await tx.done;
 
-      this.events.emit({
-        type: VFSEventType.NODE_MOVED,
-        nodeId: vnode.nodeId, 
-        path: newSystemPath, 
-        timestamp: Date.now(), 
-        moduleId: moduleName, 
-        data: { oldPath: oldSystemPath, newPath: newSystemPath }
-      });
-
-      return vnode;
+      this.emitEvent(VFSEventType.NODE_MOVED, node, { oldPath: oldSystemPath, newPath: newSystemPath });
+      return node;
     } catch (error) {
-      if (error instanceof VFSError) throw error;
-      throw new VFSError(VFSErrorCode.TRANSACTION_FAILED, 'Failed to move node', error);
+      throw this.wrapError(error, 'Failed to move node');
     }
   }
 
@@ -541,98 +307,87 @@ export class VFS {
    * 批量移动节点
    */
   async batchMove(nodeIds: string[], targetParentId: string | null): Promise<void> {
-    if (nodeIds.length === 0) return;
+    if (!nodeIds.length) return;
 
-    let targetParentNode: VNode | null = null;
+    let targetParent: VNodeData | null = null;
     if (targetParentId) {
-        targetParentNode = await this.storage.loadVNode(targetParentId);
-        if (!targetParentNode) {
-            throw new VFSError(VFSErrorCode.NOT_FOUND, `Target parent node ${targetParentId} not found`);
-        }
-        if (targetParentNode.type !== VNodeType.DIRECTORY) {
-            throw new VFSError(VFSErrorCode.INVALID_OPERATION, `Cannot move into a file`);
-        }
+      targetParent = await this.storage.loadVNode(targetParentId);
+      if (!targetParent) {
+        throw new VFSError(VFSErrorCode.NOT_FOUND, `Target parent not found: ${targetParentId}`);
+      }
+      if (targetParent.type !== VNodeType.DIRECTORY) {
+        throw new VFSError(VFSErrorCode.INVALID_OPERATION, 'Cannot move into a file');
+      }
     }
 
-    const tx = await this.storage.beginTransaction([
-        VFS_STORES.VNODES, VFS_STORES.NODE_TAGS, VFS_STORES.SRS_ITEMS, VFS_STORES.CONTENTS
+    const tx = this.storage.beginTransaction([
+      VFS_STORES.VNODES, VFS_STORES.NODE_TAGS, VFS_STORES.SRS_ITEMS, VFS_STORES.CONTENTS
     ]);
 
+    const movedIds: string[] = [];
+
     try {
-        const movedNodeIds: string[] = [];
+      for (const nodeId of nodeIds) {
+        const node = await this.storage.loadVNode(nodeId, tx);
+        if (!node) continue;
 
-        for (const nodeId of nodeIds) {
-            const vnode = await this.storage.loadVNode(nodeId, tx);
-            if (!vnode) continue; 
-
-            // 循环检测
-            if (targetParentId) {
-                if (nodeId === targetParentId) throw new VFSError(VFSErrorCode.INVALID_OPERATION, `Cannot move directory into itself`);
-                let current = targetParentNode;
-                while (current && current.parentId) {
-                    if (current.parentId === nodeId) throw new VFSError(VFSErrorCode.INVALID_OPERATION, `Cannot move directory into its own child`);
-                    current = await this.storage.loadVNode(current.parentId, tx);
-                }
+        // 循环检测
+        if (targetParentId) {
+          if (nodeId === targetParentId) {
+            throw new VFSError(VFSErrorCode.INVALID_OPERATION, 'Cannot move into itself');
+          }
+          let current = targetParent;
+          while (current?.parentId) {
+            if (current.parentId === nodeId) {
+              throw new VFSError(VFSErrorCode.INVALID_OPERATION, 'Cannot move into descendant');
             }
-
-            const oldModuleId = vnode.moduleId!;
-            let targetModuleId = oldModuleId;
-            if (targetParentNode && targetParentNode.moduleId) {
-                targetModuleId = targetParentNode.moduleId;
-            }
-
-            // 构造目标系统路径：
-            // 如果有父节点，则是 ParentSystemPath / NodeName
-            // 如果无父节点(根)，则是 /TargetModule / NodeName
-            let newSystemPath: string;
-            if (targetParentNode) {
-                newSystemPath = this.pathResolver.join(targetParentNode.path, vnode.name); // join 只是字符串拼接
-            } else {
-                // 移动到模块根目录
-                newSystemPath = this.pathResolver.toSystemPath(targetModuleId, '/' + vnode.name);
-            }
-            
-            const oldSystemPath = vnode.path;
-
-            const existingId = await this.storage.getNodeIdByPath(newSystemPath, tx);
-            if (existingId && existingId !== nodeId) {
-                throw new VFSError(VFSErrorCode.ALREADY_EXISTS, `Node already exists at ${newSystemPath}`);
-            }
-
-            // 跨模块处理
-            if (targetModuleId !== oldModuleId) {
-                vnode.moduleId = targetModuleId;
-                await this.storage.srsStore.updateModuleIdForNode(nodeId, targetModuleId, tx);
-            }
-
-            vnode.parentId = targetParentId;
-            vnode.path = newSystemPath;
-            vnode.modifiedAt = Date.now();
-            
-            await this.storage.saveVNode(vnode, tx);
-
-            if (vnode.type === VNodeType.DIRECTORY) {
-                await this._updateDescendantPathsAndModules(vnode, oldSystemPath, newSystemPath, targetModuleId, tx);
-            }
-
-            // ✨ [Middleware Hook] 批量移动中，每个节点也需要触发 Hook 以处理其伴生资源
-            await this.middlewares.runAfterMove(vnode, oldSystemPath, newSystemPath, tx);
-
-            movedNodeIds.push(nodeId);
+            current = await this.storage.loadVNode(current.parentId, tx);
+          }
         }
 
-        await tx.done;
+        const oldModuleId = node.moduleId!;
+        const targetModuleId = targetParent?.moduleId ?? oldModuleId;
+        const oldSystemPath = node.path;
 
-        if (movedNodeIds.length > 0) {
-            this.events.emit({
-                type: VFSEventType.NODES_BATCH_MOVED,
-                nodeId: null, path: null, timestamp: Date.now(),
-                data: { movedNodeIds, targetParentId }
-            });
+        const newSystemPath = targetParent
+          ? this.pathResolver.join(targetParent.path, node.name)
+          : this.pathResolver.toSystemPath(targetModuleId, '/' + node.name);
+
+        const existingId = await this.storage.getNodeIdByPath(newSystemPath, tx);
+        if (existingId && existingId !== nodeId) {
+          throw new VFSError(VFSErrorCode.ALREADY_EXISTS, `Node exists: ${newSystemPath}`);
         }
+
+        if (targetModuleId !== oldModuleId) {
+          node.moduleId = targetModuleId;
+          await this.storage.srsStore.updateModuleIdForNode(nodeId, targetModuleId, tx);
+        }
+
+        node.parentId = targetParentId;
+        node.path = newSystemPath;
+        node.modifiedAt = Date.now();
+
+        await this.storage.inodeStore.put(node, tx);
+
+        if (node.type === VNodeType.DIRECTORY) {
+          await this.updateDescendantPaths(node, oldSystemPath, newSystemPath, targetModuleId, tx);
+        }
+
+        await this.middlewares.runAfterMove(node, oldSystemPath, newSystemPath, tx);
+        movedIds.push(nodeId);
+      }
+
+      await tx.done;
+
+      if (movedIds.length > 0) {
+        this.events.emit({
+          type: VFSEventType.NODES_BATCH_MOVED,
+          nodeId: null, path: null, timestamp: Date.now(),
+          data: { movedNodeIds: movedIds, targetParentId }
+        });
+      }
     } catch (error) {
-        if (error instanceof VFSError) throw error;
-        throw new VFSError(VFSErrorCode.TRANSACTION_FAILED, 'Failed to batch move nodes', error);
+      throw this.wrapError(error, 'Failed to batch move');
     }
   }
 
@@ -641,346 +396,415 @@ export class VFS {
    * @param targetUserPath 目标相对路径
    */
   async copy(sourceId: string, targetUserPath: string): Promise<CopyResult> {
-    const sourceNode = await this._resolveVNode(sourceId);
-    
-    // 假设复制在同模块内进行
-    const module = sourceNode.moduleId!;
-    const normalizedUserPath = this.pathResolver.normalize(targetUserPath);
-  
-    if (!this.pathResolver.isValid(normalizedUserPath)) {
+    const source = await this.resolveNode(sourceId);
+    const module = source.moduleId!;
+    const userPath = this.pathResolver.normalize(targetUserPath);
+
+    if (!this.pathResolver.isValid(userPath)) {
       throw new VFSError(VFSErrorCode.INVALID_PATH, `Invalid path: ${targetUserPath}`);
     }
-  
-    // 转换为系统路径
-    const targetSystemPath = this.pathResolver.toSystemPath(module, normalizedUserPath);
+
+    const targetSystemPath = this.pathResolver.toSystemPath(module, userPath);
     
-    const existingId = await this.storage.getNodeIdByPath(targetSystemPath);
-    if (existingId) {
-      throw new VFSError(VFSErrorCode.ALREADY_EXISTS, `Node already exists at path: ${normalizedUserPath}`);
+    if (await this.storage.getNodeIdByPath(targetSystemPath)) {
+      throw new VFSError(VFSErrorCode.ALREADY_EXISTS, `Node exists: ${userPath}`);
     }
-  
-    // 复制操作是否需要自动创建父目录？通常需要。
-    // 这里为了保持与 createNode 行为一致，我们添加自动创建逻辑
-    const parentPath = this._dirname(normalizedUserPath);
+
+    // 确保父目录存在
+    const parentPath = this.pathResolver.dirname(userPath);
     let targetParentId = await this.pathResolver.resolve(module, parentPath);
-    
-    if (!targetParentId && normalizedUserPath !== '/') {
-        targetParentId = await this._ensureParentDirectory(module, parentPath);
+    if (!targetParentId && userPath !== '/') {
+      targetParentId = await this.ensureParentDirectory(module, parentPath);
     }
 
-    const sourceTree = await this._loadNodeTree(sourceNode);
+    // 加载源树
+    const sourceTree = await this.loadNodeTree(source);
+    const operations = this.planCopyOperations(sourceTree, targetParentId, userPath, module);
+    
+    const copiedIds = operations.map(op => op.newNode.nodeId);
+    const targetId = operations[0]?.newNode.nodeId;
 
-    const operations: CopyOperation[] = [];
-    this._planCopyFromTree(sourceTree, targetParentId, normalizedUserPath, module, operations);
-    
-    const copiedIds = operations.map(op => op.newNodeData.nodeId);
-    const targetId = operations[0]?.newNodeData.nodeId;
-    
-    const tx = await this.storage.beginTransaction([VFS_STORES.VNODES, VFS_STORES.CONTENTS, VFS_STORES.NODE_TAGS]);
-    
+    const tx = this.storage.beginTransaction([VFS_STORES.VNODES, VFS_STORES.CONTENTS, VFS_STORES.NODE_TAGS]);
+
     try {
       for (const op of operations) {
-        const newNode = new VNode(
-          op.newNodeData.nodeId, op.newNodeData.parentId, op.newNodeData.name, op.newNodeData.type,
-          op.newNodeData.path, op.newNodeData.moduleId, op.newNodeData.contentRef, op.newNodeData.size,
-          Date.now(), Date.now(), op.newNodeData.metadata, op.newNodeData.tags
-        );
-        await this.storage.saveVNode(newNode, tx);
-  
-        if (op.type === 'copy_content' && op.sourceContent && newNode.contentRef) {
-          await this.storage.saveContent({
-            contentRef: newNode.contentRef, nodeId: newNode.nodeId, content: op.sourceContent.content,
-            size: op.sourceContent.size, createdAt: Date.now()
+        await this.storage.inodeStore.put(op.newNode, tx);
+
+        if (op.sourceContent && op.newNode.contentRef) {
+          await this.storage.contentStore.put({
+            contentRef: op.newNode.contentRef,
+            nodeId: op.newNode.nodeId,
+            content: op.sourceContent.content,
+            size: op.sourceContent.size,
+            createdAt: Date.now()
           }, tx);
         }
 
-        if (op.newNodeData.tags.length > 0) {
-            for (const tagName of op.newNodeData.tags) {
-                await this.storage.nodeTagStore.add(newNode.nodeId, tagName, tx);
-            }
+        for (const tag of op.newNode.tags) {
+          await this.storage.nodeTagStore.add(op.newNode.nodeId, tag, tx);
         }
       }
-  
-      // ✨ [Middleware Hook] 复制后处理 (e.g. 递归复制伴生目录)
-      // 需要重新加载节点实例以传入 Hook
+
+      // Middleware hook
       const targetNode = await this.storage.loadVNode(targetId, tx);
-      if (sourceNode && targetNode) {
-          await this.middlewares.runAfterCopy(sourceNode, targetNode, tx);
+      if (source && targetNode) {
+        await this.middlewares.runAfterCopy(source, targetNode, tx);
       }
 
       await tx.done;
-
-      this.events.emit({
-        type: VFSEventType.NODE_COPIED,
-        nodeId: targetId, path: targetSystemPath, timestamp: Date.now(), 
-        data: { sourceId, copiedIds }
-      });
-
+      this.emitEvent(VFSEventType.NODE_COPIED, { nodeId: targetId, path: targetSystemPath } as VNodeData, { sourceId, copiedIds });
+      
       return { sourceId, targetId, copiedIds };
     } catch (error) {
-      if (error instanceof VFSError) throw error;
-      throw new VFSError(VFSErrorCode.TRANSACTION_FAILED, 'Failed to copy node', error);
+      throw this.wrapError(error, 'Failed to copy node');
     }
   }
 
-  // ==================================================================================
-  // 读取与搜索
-  // ==================================================================================
+  // ==================== 读取操作 ====================
 
   /**
    * 读取目录
    */
-  async readdir(vnodeOrId: VNode | string): Promise<VNode[]> {
-    const vnode = await this._resolveVNode(vnodeOrId);
-    if (vnode.type !== VNodeType.DIRECTORY) {
-      throw new VFSError(VFSErrorCode.INVALID_OPERATION, `Cannot read directory from file: ${vnode.nodeId}`);
+  async readdir(vnodeOrId: VNodeData | string): Promise<VNodeData[]> {
+    const node = await this.resolveNode(vnodeOrId);
+    if (node.type !== VNodeType.DIRECTORY) {
+      throw new VFSError(VFSErrorCode.INVALID_OPERATION, `Not a directory: ${node.nodeId}`);
     }
-    return await this.storage.getChildren(vnode.nodeId);
-  }
-
-  /**
-   * 获取节点统计信息
-   */
-  async stat(vnodeOrId: VNode | string): Promise<NodeStat> {
-    const vnode = await this._resolveVNode(vnodeOrId);
-    return {
-      nodeId: vnode.nodeId, name: vnode.name, type: vnode.type, size: vnode.size,
-      path: vnode.path, // 注意：这里返回的是 System Path (Internal usage)
-      createdAt: new Date(vnode.createdAt), modifiedAt: new Date(vnode.modifiedAt),
-      metadata: { ...vnode.metadata }
-    };
+    return this.storage.getChildren(node.nodeId);
   }
 
   /**
    * 搜索节点
    */
-  async searchNodes(query: SearchQuery, moduleName?: string): Promise<VNode[]> {
+  async searchNodes(query: SearchQuery, moduleName?: string): Promise<VNodeData[]> {
     return this.storage.searchNodes(query, moduleName);
   }
 
-  // ==================================================================================
-  // Tag 操作
-  // ==================================================================================
 
   /**
-   * 批量原子化设置多个节点的标签
+   * 更新节点元数据
    */
-  async batchSetTags(batchData: { nodeId: string, tags: string[] }[]): Promise<void> {
-    if (!batchData || batchData.length === 0) return;
-    const tx = await this.storage.beginTransaction([VFS_STORES.VNODES, VFS_STORES.TAGS, VFS_STORES.NODE_TAGS]);
-    const updatedNodeIds: string[] = [];
-
+  async updateMetadata(vnodeOrId: VNodeData | string, metadata: Record<string, unknown>): Promise<VNodeData> {
+    const node = await this.resolveNode(vnodeOrId);
+    
+    const tx = this.storage.beginTransaction();
     try {
-        for (const { nodeId, tags } of batchData) {
-            const vnode = await this.storage.loadVNode(nodeId, tx);
-            if (!vnode) continue;
+      node.metadata = metadata;
+      node.modifiedAt = Date.now();
+      await this.storage.inodeStore.put(node, tx);
+      await tx.done;
 
-            const currentTags = new Set(vnode.tags);
-            const newTagsSet = new Set(tags);
-            let hasChanges = false;
-
-            // 1. 计算需要添加的 (内部调用 addTagToNode 处理了引用计数)
-            for (const tag of newTagsSet) {
-                if (!currentTags.has(tag)) {
-                    await this.storage.addTagToNode(nodeId, tag, tx);
-                    hasChanges = true;
-                }
-            }
-
-            // 2. 计算需要删除的 (内部调用 removeTagFromNode 处理了引用计数)
-            for (const tag of currentTags) {
-                if (!newTagsSet.has(tag)) {
-                    await this.storage.removeTagFromNode(nodeId, tag, tx);
-                    hasChanges = true;
-                }
-            }
-            if (hasChanges) updatedNodeIds.push(nodeId);
-        }
-
-        await tx.done;
-
-        if (updatedNodeIds.length > 0) {
-            this.events.emit({
-                type: VFSEventType.NODES_BATCH_UPDATED,
-                nodeId: null, path: null, timestamp: Date.now(), data: { updatedNodeIds }
-            });
-        }
+      this.emitEvent(VFSEventType.NODE_UPDATED, node, { metadataOnly: true });
+      return node;
     } catch (error) {
-        throw new VFSError(VFSErrorCode.TRANSACTION_FAILED, 'Failed to batch set tags', error);
+      throw this.wrapError(error, 'Failed to update metadata');
     }
   }
+
+  // ==================== Tag 操作 ====================
+
 
   /**
    * 原子化设置标签（覆盖模式）
    */
-  async setTags(vnodeOrId: VNode | string, newTags: string[]): Promise<void> {
-    let nodeId: string;
-    if (typeof vnodeOrId === 'string') nodeId = vnodeOrId;
-    else nodeId = vnodeOrId.nodeId;
-    await this.batchSetTags([{ nodeId, tags: newTags }]);
+  async setTags(vnodeOrId: VNodeData | string, tags: string[]): Promise<void> {
+    const nodeId = typeof vnodeOrId === 'string' ? vnodeOrId : vnodeOrId.nodeId;
+    await this.batchSetTags([{ nodeId, tags }]);
   }
 
-  async addTag(vnodeOrId: VNode | string, tagName: string): Promise<void> {
-    const vnode = await this._resolveVNode(vnodeOrId);
-    await this.storage.addTagToNode(vnode.nodeId, tagName);
-    this.events.emit({
-        type: VFSEventType.NODE_UPDATED, nodeId: vnode.nodeId, path: vnode.path, timestamp: Date.now(),
-        moduleId: vnode.moduleId || undefined,
-        data: { tagAdded: tagName }
-    });
-  }
-  
-  async removeTag(vnodeOrId: VNode | string, tagName: string): Promise<void> {
-    const vnode = await this._resolveVNode(vnodeOrId);
-    await this.storage.removeTagFromNode(vnode.nodeId, tagName);
-    this.events.emit({
-        type: VFSEventType.NODE_UPDATED, nodeId: vnode.nodeId, path: vnode.path, timestamp: Date.now(),
-        moduleId: vnode.moduleId || undefined,
-        data: { tagRemoved: tagName }
-    });
+  /**
+   * 批量原子化设置多个节点的标签
+   */
+  async batchSetTags(updates: Array<{ nodeId: string; tags: string[] }>): Promise<void> {
+    if (!updates.length) return;
+
+    const tx = this.storage.beginTransaction([VFS_STORES.VNODES, VFS_STORES.TAGS, VFS_STORES.NODE_TAGS]);
+    const updatedIds: string[] = [];
+
+    try {
+      for (const { nodeId, tags } of updates) {
+        const node = await this.storage.loadVNode(nodeId, tx);
+        if (!node) continue;
+
+        const current = new Set(node.tags);
+        const target = new Set(tags);
+        let changed = false;
+
+        // 添加新标签
+        for (const tag of target) {
+          if (!current.has(tag)) {
+            await this.storage.addTagToNode(nodeId, tag, tx);
+            changed = true;
+          }
+        }
+
+        // 移除旧标签
+        for (const tag of current) {
+          if (!target.has(tag)) {
+            await this.storage.removeTagFromNode(nodeId, tag, tx);
+            changed = true;
+          }
+        }
+
+        if (changed) updatedIds.push(nodeId);
+      }
+
+      await tx.done;
+
+      if (updatedIds.length > 0) {
+        this.events.emit({
+          type: VFSEventType.NODES_BATCH_UPDATED,
+          nodeId: null, path: null, timestamp: Date.now(),
+          data: { updatedNodeIds: updatedIds }
+        });
+      }
+    } catch (error) {
+      throw this.wrapError(error, 'Failed to batch set tags');
+    }
   }
 
-  async getTags(vnodeOrId: VNode | string): Promise<string[]> {
-    const vnode = await this._resolveVNode(vnodeOrId);
-    return vnode.tags;
+  async addTag(vnodeOrId: VNodeData | string, tagName: string): Promise<void> {
+    const node = await this.resolveNode(vnodeOrId);
+    await this.storage.addTagToNode(node.nodeId, tagName);
+    this.emitEvent(VFSEventType.NODE_UPDATED, node, { tagAdded: tagName });
   }
 
-  async findByTag(tagName: string): Promise<VNode[]> {
-      return this.storage.findNodesByTag(tagName);
+  async removeTag(vnodeOrId: VNodeData | string, tagName: string): Promise<void> {
+    const node = await this.resolveNode(vnodeOrId);
+    await this.storage.removeTagFromNode(node.nodeId, tagName);
+    this.emitEvent(VFSEventType.NODE_UPDATED, node, { tagRemoved: tagName });
+  }
+
+  async getTags(vnodeOrId: VNodeData | string): Promise<string[]> {
+    const node = await this.resolveNode(vnodeOrId);
+    return node.tags;
+  }
+
+  async findByTag(tagName: string): Promise<VNodeData[]> {
+    const nodeIds = await this.storage.nodeTagStore.getNodesForTag(tagName);
+    if (!nodeIds.length) return [];
+    
+    const nodes: VNodeData[] = [];
+    for (const id of nodeIds) {
+      const node = await this.storage.loadVNode(id);
+      if (node) nodes.push(node);
+    }
+    return nodes;
   }
 
   // ==================== 私有辅助方法 ====================
 
   /**
-   * [变更] 处理 Middleware 写入流程
+   * 解析 VNode（支持 ID 或实例）
    */
-  private async _processWriteWithMiddlewares(vnode: VNode, content: string | ArrayBuffer, tx: Transaction): Promise<{ processedContent: string | ArrayBuffer; derivedData: Record<string, any> }> {
-    const processedContent = await this.middlewares.runBeforeWrite(vnode, content, tx);
+  private async resolveNode(vnodeOrId: VNodeData | string): Promise<VNodeData> {
+    if (typeof vnodeOrId !== 'string') return vnodeOrId;
     
-    if (vnode.contentRef) {
-      await this.storage.saveContent({
-        contentRef: vnode.contentRef, nodeId: vnode.nodeId, content: processedContent,
-        size: this._getContentSize(processedContent), createdAt: Date.now()
-      }, tx);
-    }
-
-    const derivedData = await this.middlewares.runAfterWrite(vnode, processedContent, tx);
-    return { processedContent, derivedData };
-  }
-
-  private async _collectNodesToDelete(vnode: VNode, collection: VNode[]): Promise<void> {
-    collection.push(vnode);
-    if (vnode.type === VNodeType.DIRECTORY) {
-      const children = await this.storage.getChildren(vnode.nodeId);
-      for (const child of children) {
-        await this._collectNodesToDelete(child, collection);
-      }
-    }
+    const node = await this.storage.loadVNode(vnodeOrId);
+    if (!node) throw new VFSError(VFSErrorCode.NOT_FOUND, `Node not found: ${vnodeOrId}`);
+    return node;
   }
 
   /**
-   * [修复] 更新子孙节点路径和模块ID
+   * [新增] 递归确保父目录存在
+   * 如果目录不存在，自动创建 (Lazy Creation Support)
    */
-  private async _updateDescendantPathsAndModules(parent: VNode, oldSystemPath: string, newSystemPath: string, newModuleId: string, tx: Transaction): Promise<void> {
-      const children = await this.storage.getChildren(parent.nodeId, tx);
-      for (const child of children) {
-          // 路径拼接：直接字符串替换前缀，确保准确
-          let childNewPath = child.path;
-          if (child.path.startsWith(oldSystemPath)) {
-             childNewPath = newSystemPath + child.path.substring(oldSystemPath.length);
-          }
-          
-          child.path = childNewPath;
-          
-          // ✨ 更新子节点模块ID并同步 SRS
-          if (child.moduleId !== newModuleId) {
-              child.moduleId = newModuleId;
-              await this.storage.srsStore.updateModuleIdForNode(child.nodeId, newModuleId, tx);
-          }
-
-          await this.storage.saveVNode(child, tx);
-          
-          if (child.type === VNodeType.DIRECTORY) {
-              await this._updateDescendantPathsAndModules(child, oldSystemPath, newSystemPath, newModuleId, tx);
-          }
+  private async ensureParentDirectory(module: string, path: string): Promise<string> {
+    const existingId = await this.pathResolver.resolve(module, path);
+    if (existingId) {
+      const node = await this.storage.loadVNode(existingId);
+      if (node?.type !== VNodeType.DIRECTORY) {
+        throw new VFSError(VFSErrorCode.INVALID_OPERATION, `Not a directory: ${path}`);
       }
+      return existingId;
+    }
+
+    if (path === '/') {
+      throw new VFSError(VFSErrorCode.NOT_FOUND, `Root not found for module: ${module}`);
+    }
+
+    // 递归创建父目录
+    await this.ensureParentDirectory(module, this.pathResolver.dirname(path));
+    
+    const newDir = await this.createNode({
+      module, path, type: VNodeType.DIRECTORY,
+      metadata: { createdBy: 'system_recursive' }
+    });
+    
+    return newDir.nodeId;
   }
-  
-  /**
-   * [NEW] Recursively pre-loads an entire node tree into memory.
-   */
-  private async _loadNodeTree(node: VNode): Promise<NodeTreeData> {
-    const result: NodeTreeData = { node, content: null, children: [] };
-    if (node.type === VNodeType.FILE && node.contentRef) {
-      result.content = await this.storage.loadContent(node.contentRef);
-    } else if (node.type === VNodeType.DIRECTORY) {
-      const children = await this.storage.getChildren(node.nodeId);
+
+  private async collectDescendants(node: VNodeData, tx?: Transaction): Promise<VNodeData[]> {
+    const result: VNodeData[] = [node];
+    
+    if (node.type === VNodeType.DIRECTORY) {
+      const children = await this.storage.getChildren(node.nodeId, tx);
       for (const child of children) {
-        result.children.push(await this._loadNodeTree(child));
+        result.push(...await this.collectDescendants(child, tx));
       }
     }
     
     return result;
   }
-  
+
+
   /**
-   * [NEW] Plans copy operations from a pre-loaded in-memory tree.
+   * [修复] 更新子孙节点路径和模块ID
    */
-  private _planCopyFromTree(tree: NodeTreeData, targetParentId: string | null, targetUserPath: string, module: string, operations: CopyOperation[]): string {
-    const sourceNode = tree.node;
-    const targetName = this.pathResolver.basename(targetUserPath);
-    // 生成系统路径
-    const targetSystemPath = this.pathResolver.toSystemPath(module, targetUserPath);
-    const newNodeId = this._generateId();
-    let newContentRef: string | null = null;
-    let operationType: 'create_node' | 'copy_content' = 'create_node';
-  
-    if (sourceNode.type === VNodeType.FILE && sourceNode.contentRef) {
-      newContentRef = ContentStore.createContentRef(newNodeId);
-      operationType = 'copy_content';
-    }
-  
-    operations.push({
-      type: operationType,
-      sourceContent: tree.content,
-      newNodeData: {
-        nodeId: newNodeId, parentId: targetParentId, name: targetName, type: sourceNode.type,
-        path: targetSystemPath, moduleId: module, contentRef: newContentRef, size: sourceNode.size,
-        metadata: { ...sourceNode.metadata }, tags: [...sourceNode.tags]
+  private async updateDescendantPaths(
+    parent: VNodeData, 
+    oldPrefix: string, 
+    newPrefix: string, 
+    newModuleId: string, 
+    tx: Transaction
+  ): Promise<void> {
+    const children = await this.storage.getChildren(parent.nodeId, tx);
+    
+    for (const child of children) {
+      if (child.path.startsWith(oldPrefix)) {
+        child.path = newPrefix + child.path.substring(oldPrefix.length);
       }
-    });
-  
-    for (const childTree of tree.children) {
-      const childUserPath = this.pathResolver.join(targetUserPath, childTree.node.name);
-      this._planCopyFromTree(childTree, newNodeId, childUserPath, module, operations);
+
+      if (child.moduleId !== newModuleId) {
+        child.moduleId = newModuleId;
+        await this.storage.srsStore.updateModuleIdForNode(child.nodeId, newModuleId, tx);
+      }
+
+      await this.storage.inodeStore.put(child, tx);
+
+      if (child.type === VNodeType.DIRECTORY) {
+        await this.updateDescendantPaths(child, oldPrefix, newPrefix, newModuleId, tx);
+      }
     }
-    return newNodeId;
   }
 
   /**
-   * 解析 VNode（支持 ID 或实例）
+   * [变更] 处理 Middleware 写入流程
    */
-  private async _resolveVNode(vnodeOrId: VNode | string): Promise<VNode> {
-    if (typeof vnodeOrId === 'string') {
-      const vnode = await this.storage.loadVNode(vnodeOrId);
-      if (!vnode) throw new VFSError(VFSErrorCode.NOT_FOUND, `Node not found: ${vnodeOrId}`);
-      return vnode;
+  private async processWrite(
+    node: VNodeData, 
+    content: string | ArrayBuffer, 
+    tx: Transaction
+  ): Promise<{ processedContent: string | ArrayBuffer; derivedData: Record<string, unknown> }> {
+    const processedContent = await this.middlewares.runBeforeWrite(node, content, tx);
+
+    if (node.contentRef) {
+      await this.storage.contentStore.put({
+        contentRef: node.contentRef,
+        nodeId: node.nodeId,
+        content: processedContent,
+        size: this.getContentSize(processedContent),
+        createdAt: Date.now()
+      }, tx);
     }
-    return vnodeOrId;
+
+    const derivedData = await this.middlewares.runAfterWrite(node, processedContent, tx);
+    return { processedContent, derivedData };
+  }
+
+  /**
+   * [NEW] Recursively pre-loads an entire node tree into memory.
+   */
+  private async loadNodeTree(node: VNodeData): Promise<NodeTreeData> {
+    const result: NodeTreeData = { node, content: null, children: [] };
+    
+    if (node.type === VNodeType.FILE && node.contentRef) {
+      result.content = await this.storage.contentStore.get(node.contentRef) ?? null;
+    } else if (node.type === VNodeType.DIRECTORY) {
+      const children = await this.storage.getChildren(node.nodeId);
+      result.children = await Promise.all(children.map(c => this.loadNodeTree(c)));
+    }
+    
+    return result;
+  }
+
+  private planCopyOperations(
+    tree: NodeTreeData, 
+    parentId: string | null, 
+    userPath: string, 
+    module: string
+  ): CopyOperation[] {
+    const operations: CopyOperation[] = [];
+    this.buildCopyOperations(tree, parentId, userPath, module, operations);
+    return operations;
+  }
+
+  private buildCopyOperations(
+    tree: NodeTreeData,
+    parentId: string | null,
+    userPath: string,
+    module: string,
+    ops: CopyOperation[]
+  ): string {
+    const { node: source, content, children } = tree;
+    const newNodeId = this.generateId();
+    const systemPath = this.pathResolver.toSystemPath(module, userPath);
+    const contentRef = source.type === VNodeType.FILE && source.contentRef 
+      ? ContentStore.createRef(newNodeId) 
+      : null;
+
+    const newNode = VNode.create({
+      nodeId: newNodeId,
+      parentId,
+      name: this.pathResolver.basename(userPath),
+      type: source.type,
+      path: systemPath,
+      moduleId: module,
+      contentRef,
+      size: source.size,
+      metadata: { ...source.metadata },
+      tags: [...source.tags]
+    });
+
+    ops.push({ newNode, sourceContent: content });
+
+    for (const childTree of children) {
+      const childPath = this.pathResolver.join(userPath, childTree.node.name);
+      this.buildCopyOperations(childTree, newNodeId, childPath, module, ops);
+    }
+
+    return newNodeId;
+  }
+
+  private emitEvent(type: VFSEventType, node: VNodeData, data?: unknown): void {
+    this.events.emit({
+      type,
+      nodeId: node.nodeId,
+      path: node.path,
+      moduleId: node.moduleId ?? undefined,
+      timestamp: Date.now(),
+      data
+    });
+  }
+
+  private wrapError(error: unknown, message: string): VFSError {
+    if (error instanceof VFSError) return error;
+    return new VFSError(VFSErrorCode.TRANSACTION_FAILED, message, error);
   }
 
   /**
    * 生成唯一 ID
    */
-  private _generateId(): string {
+  private generateId(): string {
     return `node_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
   }
 
   /**
    * 获取内容大小
    */
-  private _getContentSize(content: string | ArrayBuffer): number {
-    if (typeof content === 'string') return new Blob([content]).size;
-    return content.byteLength;
+  private getContentSize(content: string | ArrayBuffer): number {
+    return typeof content === 'string' ? new Blob([content]).size : content.byteLength;
   }
+}
+
+// 辅助类型
+interface NodeTreeData {
+  node: VNodeData;
+  content: ContentData | null;
+  children: NodeTreeData[];
+}
+
+interface CopyOperation {
+  newNode: VNodeData;
+  sourceContent: ContentData | null;
 }

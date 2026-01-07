@@ -2,12 +2,10 @@
  * @file vfs/core/PathResolver.ts
  * 路径解析服务
  */
-
-import { VFSError, VFSErrorCode } from './types.js';
-import type { VFS } from './VFS.js';
+import { VFSError, VFSErrorCode } from './types';
 
 export class PathResolver {
-  constructor(private vfs: VFS) {}
+  constructor(private getNodeIdByPath: (path: string) => Promise<string | null>) {}
 
   /**
    * 标准化路径
@@ -21,14 +19,22 @@ export class PathResolver {
     const normalized: string[] = [];
     
     for (const part of parts) {
-      if (part === '..') {
-        normalized.pop();
-      } else {
-        normalized.push(part);
-      }
+      if (part === '..') normalized.pop();
+      else normalized.push(part);
     }
     
     return '/' + normalized.join('/');
+  }
+
+  /**
+   * 校验路径合法性
+   */
+  isValid(path: string): boolean {
+    if (typeof path !== 'string') return false;
+    // 允许 '/'
+    if (path === '/') return true;
+    if (!path.startsWith('/') || path.includes('//')) return false;
+    return !/[<>:"|?*\x00-\x1f]/.test(path);
   }
 
   /**
@@ -39,10 +45,7 @@ export class PathResolver {
   toSystemPath(module: string, userPath: string): string {
     const normalized = this.normalize(userPath);
     // 如果是根目录，系统路径就是 /moduleName
-    if (normalized === '/') {
-        return `/${module}`;
-    }
-    return `/${module}${normalized}`;
+    return normalized === '/' ? `/${module}` : `/${module}${normalized}`;
   }
 
   /**
@@ -61,50 +64,7 @@ export class PathResolver {
     }
 
     const relative = systemPath.slice(prefix.length);
-    return relative === '' ? '/' : relative;
-  }
-
-  /**
-   * 校验路径合法性
-   */
-  isValid(path: string): boolean {
-    if (typeof path !== 'string') return false;
-    // 允许 '/'
-    if (path === '/') return true;
-    if (!path.startsWith('/')) return false;
-    if (path.includes('//')) return false;
-    if (/[<>:"|?*\x00-\x1f]/.test(path)) return false;
-    return true;
-  }
-
-  /**
-   * 解析路径为节点ID
-   */
-  async resolve(module: string, userPath: string): Promise<string | null> {
-    const normalized = this.normalize(userPath);
-    
-    if (!this.isValid(normalized)) {
-      throw new VFSError(
-        VFSErrorCode.INVALID_PATH,
-        `Invalid user path: ${userPath}`
-      );
-    }
-
-    const systemPath = this.toSystemPath(module, normalized);
-    return await this.vfs.storage.getNodeIdByPath(systemPath);
-  }
-
-  /**
-   * 解析父节点ID
-   */
-  async resolveParent(module: string, userPath: string): Promise<string | null> {
-    const normalized = this.normalize(userPath);
-    if (normalized === '/') return null; // 根节点没有父节点（在模块视角下）
-
-    const lastSlash = normalized.lastIndexOf('/');
-    const parentUserPath = lastSlash === 0 ? '/' : normalized.substring(0, lastSlash);
-
-    return await this.resolve(module, parentUserPath);
+    return relative || '/';
   }
 
   /**
@@ -113,14 +73,37 @@ export class PathResolver {
   basename(path: string): string {
     const normalized = this.normalize(path);
     if (normalized === '/') return '';
-    const lastSlash = normalized.lastIndexOf('/');
-    return normalized.substring(lastSlash + 1);
+    return normalized.substring(normalized.lastIndexOf('/') + 1);
   }
-    
+
+  dirname(path: string): string {
+    const lastSlash = path.lastIndexOf('/');
+    return lastSlash <= 0 ? '/' : path.substring(0, lastSlash);
+  }
+
   /**
    * 连接路径
    */
   join(...segments: string[]): string {
-      return this.normalize(segments.join('/'));
+    return this.normalize(segments.join('/'));
+  }
+  /**
+   * 解析路径为节点ID
+   */
+  async resolve(module: string, userPath: string): Promise<string | null> {
+    const normalized = this.normalize(userPath);
+    if (!this.isValid(normalized)) {
+      throw new VFSError(VFSErrorCode.INVALID_PATH, `Invalid path: ${userPath}`);
+    }
+    return this.getNodeIdByPath(this.toSystemPath(module, normalized));
+  }
+
+  /**
+   * 解析父节点ID
+   */
+  async resolveParent(module: string, userPath: string): Promise<string | null> {
+    const normalized = this.normalize(userPath);
+    if (normalized === '/') return null;
+    return this.resolve(module, this.dirname(normalized));
   }
 }

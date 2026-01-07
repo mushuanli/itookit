@@ -1,7 +1,9 @@
 /**
  * @file vfs/store/Database.ts
  */
-import { VFS_STORES, TransactionMode, Transaction, TagData, NodeTagData } from './types.js';
+import { VFS_STORES, Transaction, TransactionMode,TagData,NodeTagData } from './types';
+
+type StoreCreator = (db: IDBDatabase, tx: IDBTransaction | null) => void;
 
 /**
  * IndexedDB 数据库封装层
@@ -9,167 +11,146 @@ import { VFS_STORES, TransactionMode, Transaction, TagData, NodeTagData } from '
  */
 export class Database {
   private db: IDBDatabase | null = null;
-  private readonly version = 6; // ✨ [修改] 升级到版本 6
-
+  private static readonly VERSION = 6;
+  
   constructor(private dbName: string = 'vfs_database') {}
+
+  // 统一的 Promise 化方法
+  static promisify<T>(request: IDBRequest<T>): Promise<T> {
+    return new Promise((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
 
   /**
    * 连接数据库
    */
   async connect(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const request = indexedDB.open(this.dbName, this.version);
-
-      request.onerror = () => {
-        console.error('Database connection failed:', request.error);
-        reject(request.error);
-      };
-
-      request.onsuccess = () => {
-        this.db = request.result;
-        console.log(`Database '${this.dbName}' connected successfully`);
-        // this.verifyDatabaseStructure(); // 调试用
-        resolve();
-      };
-
-      request.onupgradeneeded = (event) => {
-        const db = (event.target as IDBOpenDBRequest).result;
-        const oldVersion = event.oldVersion;
-        
-        console.log(`Upgrading database from version ${oldVersion} to ${this.version}`);
-
-        // 版本 1: 创建基础表结构
-        if (oldVersion < 1) {
-          this.createVNodesStore(db);
-          this.createContentsStore(db);
-        }
-
-        // 版本 2: 添加额外索引或结构调整
-        if (oldVersion < 2) {
-          console.log('Upgrading to version 2...');
-        }
-        
-        // 版本 3: 添加 Tag 功能相关的表
-        if (oldVersion < 3) {
-          console.log('Upgrading to version 3...');
-          this.createTagsStore(db);
-          this.createNodeTagsStore(db);
-        }
-        
-        // 版本 4: 为 vnodes 添加用于搜索的索引
-        if (oldVersion < 4) {
-          console.log('Upgrading to version 4...');
-          const transaction = (event.target as IDBOpenDBRequest).transaction;
-          if (transaction && db.objectStoreNames.contains(VFS_STORES.VNODES)) {
-              const vnodeStore = transaction.objectStore(VFS_STORES.VNODES);
-      // [修复开始]：显式检查并补充缺失的 path 索引
-      if (!vnodeStore.indexNames.contains('path')) {
-          console.log('Repairing missing path index...');
-          // 注意：path 必须是唯一的
-          vnodeStore.createIndex('path', 'path', { unique: true });
-      }
-              if (!vnodeStore.indexNames.contains('name')) {
-                  vnodeStore.createIndex('name', 'name', { unique: false });
-              }
-              if (!vnodeStore.indexNames.contains('tags')) {
-                  vnodeStore.createIndex('tags', 'tags', { multiEntry: true });
-              }
-          }
-        }
-
-        // [新增] 版本 5: 初始化 Tag 引用计数
-        if (oldVersion < 5) {
-          console.log('Upgrading to version 5: Initializing tag refCounts...');
-          const transaction = (event.target as IDBOpenDBRequest).transaction;
-          
-          if (transaction && db.objectStoreNames.contains(VFS_STORES.TAGS) && db.objectStoreNames.contains(VFS_STORES.NODE_TAGS)) {
-            const tagStore = transaction.objectStore(VFS_STORES.TAGS);
-            const nodeTagStore = transaction.objectStore(VFS_STORES.NODE_TAGS);
-
-            // 1. 获取所有标签
-            const tagRequest = tagStore.getAll();
-            tagRequest.onsuccess = () => {
-                const tags: TagData[] = tagRequest.result;
-                const countMap = new Map<string, number>();
-
-                // 初始化 Map
-                tags.forEach(t => countMap.set(t.name, 0));
-
-                // 2. 遍历所有关联，计算引用
-                const cursorRequest = nodeTagStore.openCursor();
-                cursorRequest.onsuccess = (e) => {
-                    const cursor = (e.target as IDBRequest).result;
-                    if (cursor) {
-                        const entry = cursor.value as NodeTagData;
-                        const currentCount = countMap.get(entry.tagName) || 0;
-                        countMap.set(entry.tagName, currentCount + 1);
-                        cursor.continue();
-                    } else {
-                        // 3. 更新 Tags 表
-                        tags.forEach(tag => {
-                            tag.refCount = countMap.get(tag.name) || 0;
-                            tagStore.put(tag);
-                        });
-                        console.log('Tag refCounts initialized.');
-                    }
-                };
-            };
-          }
-        }
-        // ✨ [新增] 版本 6: 创建 SRS 存储
-        if (oldVersion < 6) {
-          console.log('Upgrading to version 6: Creating SRS store...');
-          this.createSRSStore(db);
-        }
-      };
+    if (this.db) return;
+    
+    this.db = await new Promise((resolve, reject) => {
+      const request = indexedDB.open(this.dbName, Database.VERSION);
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve(request.result);
+      request.onupgradeneeded = (e) => this.handleUpgrade(e);
     });
   }
 
-  /**
-   * 创建 vnodes 对象存储
-   */
-  private createVNodesStore(db: IDBDatabase): void {
+  private handleUpgrade(event: IDBVersionChangeEvent): void {
+    const db = (event.target as IDBOpenDBRequest).result;
+    const tx = (event.target as IDBOpenDBRequest).transaction;
+    const oldVersion = event.oldVersion;
+
+    // 使用配置驱动的迁移
+    const migrations: Array<{ version: number; migrate: StoreCreator }> = [
+      { version: 1, migrate: (db) => this.createBaseStores(db) },
+      { version: 3, migrate: (db) => this.createTagStores(db) },
+      { version: 4, migrate: (db, tx) => this.addSearchIndexes(db, tx) },
+      { version: 5, migrate: (_, tx) => this.initTagRefCounts(tx!) },
+      { version: 6, migrate: (db) => this.createSRSStore(db) },
+    ];
+
+    for (const { version, migrate } of migrations) {
+      if (oldVersion < version) migrate(db, tx);
+    }
+  }
+
+  private createBaseStores(db: IDBDatabase): void {
     if (!db.objectStoreNames.contains(VFS_STORES.VNODES)) {
       const store = db.createObjectStore(VFS_STORES.VNODES, { keyPath: 'nodeId' });
-      
       store.createIndex('path', 'path', { unique: true });
-      store.createIndex('parentId', 'parentId', { unique: false });
-      store.createIndex('moduleId', 'moduleId', { unique: false });
-      store.createIndex('type', 'type', { unique: false });
-      
+      store.createIndex('parentId', 'parentId');
+      store.createIndex('moduleId', 'moduleId');
+      store.createIndex('type', 'type');
       console.log('Created vnodes store with indexes');
     }
-  }
-
-  /**
-   * 创建 contents 对象存储
-   */
-  private createContentsStore(db: IDBDatabase): void {
     if (!db.objectStoreNames.contains(VFS_STORES.CONTENTS)) {
       const store = db.createObjectStore(VFS_STORES.CONTENTS, { keyPath: 'contentRef' });
-      store.createIndex('nodeId', 'nodeId', { unique: false });
-      
-      console.log('Created contents store with indexes');
+      store.createIndex('nodeId', 'nodeId');
     }
   }
 
-  // 创建 tags 对象存储
-  private createTagsStore(db: IDBDatabase): void {
+  private createTagStores(db: IDBDatabase): void {
     if (!db.objectStoreNames.contains(VFS_STORES.TAGS)) {
       db.createObjectStore(VFS_STORES.TAGS, { keyPath: 'name' });
       console.log('Created tags store');
     }
-  }
-
-  // 创建 node_tags 对象存储
-  private createNodeTagsStore(db: IDBDatabase): void {
     if (!db.objectStoreNames.contains(VFS_STORES.NODE_TAGS)) {
       const store = db.createObjectStore(VFS_STORES.NODE_TAGS, { autoIncrement: true });
-      store.createIndex('nodeId', 'nodeId', { unique: false });
-      store.createIndex('tagName', 'tagName', { unique: false });
+      store.createIndex('nodeId', 'nodeId');
+      store.createIndex('tagName', 'tagName');
       store.createIndex('nodeId_tagName', ['nodeId', 'tagName'], { unique: true });
       console.log('Created node_tags store with indexes');
     }
+  }
+
+  private addSearchIndexes(db: IDBDatabase, tx: IDBTransaction | null): void {
+    if (!tx || !db.objectStoreNames.contains(VFS_STORES.VNODES)) return;
+    const store = tx.objectStore(VFS_STORES.VNODES);
+    if (!store.indexNames.contains('name')) store.createIndex('name', 'name');
+    if (!store.indexNames.contains('tags')) store.createIndex('tags', 'tags', { multiEntry: true });
+  }
+
+  /**
+   * 初始化标签引用计数
+   * 用于数据库升级时，统计每个标签被引用的次数
+   */
+  private initTagRefCounts(tx: IDBTransaction): void {
+    const tagStoreName = VFS_STORES.TAGS;
+    const nodeTagStoreName = VFS_STORES.NODE_TAGS;
+
+    // 确保两个 Store 都存在
+    if (!tx.objectStoreNames.contains(tagStoreName) || 
+        !tx.objectStoreNames.contains(nodeTagStoreName)) {
+      return;
+    }
+
+    const tagStore = tx.objectStore(tagStoreName);
+    const nodeTagStore = tx.objectStore(nodeTagStoreName);
+
+    // 1. 获取所有标签
+    const tagRequest = tagStore.getAll();
+    
+    tagRequest.onsuccess = () => {
+      const tags: TagData[] = tagRequest.result;
+      
+      if (!tags.length) return;
+
+      // 初始化计数 Map
+      const countMap = new Map<string, number>();
+      tags.forEach(t => countMap.set(t.name, 0));
+
+      // 2. 遍历所有关联记录，统计引用次数
+      const cursorRequest = nodeTagStore.openCursor();
+      
+      cursorRequest.onsuccess = () => {
+        const cursor = cursorRequest.result;
+        
+        if (cursor) {
+          const entry = cursor.value as NodeTagData;
+          const currentCount = countMap.get(entry.tagName) ?? 0;
+          countMap.set(entry.tagName, currentCount + 1);
+          cursor.continue();
+        } else {
+          // 3. 游标遍历完成，更新所有标签的引用计数
+          tags.forEach(tag => {
+            tag.refCount = countMap.get(tag.name) ?? 0;
+            tagStore.put(tag);
+          });
+          
+          console.log(`[Database] Initialized refCount for ${tags.length} tags`);
+        }
+      };
+
+      cursorRequest.onerror = () => {
+        console.error('[Database] Failed to count tag references:', cursorRequest.error);
+      };
+    };
+
+    tagRequest.onerror = () => {
+      console.error('[Database] Failed to load tags:', tagRequest.error);
+    };
   }
 
   /**
@@ -177,34 +158,31 @@ export class Database {
    */
   private createSRSStore(db: IDBDatabase): void {
     if (!db.objectStoreNames.contains(VFS_STORES.SRS_ITEMS)) {
-      // 复合主键: nodeId + clozeId
       const store = db.createObjectStore(VFS_STORES.SRS_ITEMS, { keyPath: ['nodeId', 'clozeId'] });
-      
-      // 索引1: nodeId - 用于快速查找某文件的所有卡片，以及级联删除
-      store.createIndex('nodeId', 'nodeId', { unique: false });
-      
-      // 索引2: moduleId - 用于按模块筛选
-      store.createIndex('moduleId', 'moduleId', { unique: false });
-      
-      // 索引3: dueAt - 用于查询到期卡片
-      store.createIndex('dueAt', 'dueAt', { unique: false });
-      
-      // 索引4: 复合查询 (某模块下的到期卡片)
-      store.createIndex('moduleId_dueAt', ['moduleId', 'dueAt'], { unique: false });
-
-      console.log('Created srs_items store with indexes');
+      store.createIndex('nodeId', 'nodeId');
+      store.createIndex('moduleId', 'moduleId');
+      store.createIndex('dueAt', 'dueAt');
+      store.createIndex('moduleId_dueAt', ['moduleId', 'dueAt']);
     }
+  }
+
+
+  /**
+   * 获取事务
+   */
+  getTransaction(storeNames: string | string[], mode: TransactionMode = 'readonly'): Transaction {
+    if (!this.db) throw new Error('Database not connected');
+    const stores = Array.isArray(storeNames) ? storeNames : [storeNames];
+    return new Transaction(this.db.transaction(stores, mode));
   }
 
   /**
    * 断开数据库连接
    */
   disconnect(): void {
-    if (this.db) {
-      this.db.close();
-      this.db = null;
-      console.log('Database disconnected');
-    }
+    this.db?.close();
+    this.db = null;
+    console.log('Database disconnected');
   }
 
   /**
@@ -230,93 +208,5 @@ export class Database {
         console.warn('Delete database blocked. Please close other tabs of this app.');
       };
     });
-  }
-
-  /**
-   * 获取事务
-   */
-  async getTransaction(
-    storeNames: string | string[],
-    mode: TransactionMode = 'readonly'
-  ): Promise<Transaction> {
-    if (!this.db) {
-      throw new Error('Database not connected');
-    }
-
-    const stores = Array.isArray(storeNames) ? storeNames : [storeNames];
-    const transaction = this.db.transaction(stores, mode);
-    
-    return new Transaction(transaction);
-  }
-
-  /**
-   * 获取指定存储中的所有记录
-   */
-  async getAll<T = any>(storeName: string): Promise<T[]> {
-    const tx = await this.getTransaction(storeName, 'readonly');
-    const store = tx.getStore(storeName);
-    
-    return this.promisifyRequest<T[]>(store.getAll());
-  }
-
-  /**
-   * 通过索引获取所有匹配记录
-   */
-  async getAllByIndex<T = any>(
-    storeName: string,
-    indexName: string,
-    query?: IDBValidKey | IDBKeyRange
-  ): Promise<T[]> {
-    const tx = await this.getTransaction(storeName, 'readonly');
-    const store = tx.getStore(storeName);
-    const index = store.index(indexName);
-    
-    return this.promisifyRequest<T[]>(
-      query ? index.getAll(query) : index.getAll()
-    );
-  }
-
-  /**
-   * 将 IDBRequest 包装为 Promise
-   */
-  promisifyRequest<T>(request: IDBRequest<T>): Promise<T> {
-    return new Promise((resolve, reject) => {
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-  }
-
-  /**
-   * 验证数据库结构（调试用）
-   *
-  private verifyDatabaseStructure(): void {
-    if (!this.db) return;
-
-    console.log('=== Database Structure ===');
-    console.log('Database name:', this.db.name);
-    console.log('Version:', this.db.version);
-    console.log('Object Stores:', Array.from(this.db.objectStoreNames));
-    
-    const tx = this.db.transaction(Array.from(this.db.objectStoreNames), 'readonly');
-    
-    for (const storeName of this.db.objectStoreNames) {
-      const store = tx.objectStore(storeName);
-      console.log(`\nStore: ${storeName}`);
-      console.log('  Key Path:', store.keyPath);
-      console.log('  Indexes:', Array.from(store.indexNames));
-    }
-    
-    console.log('========================');
-  }
-  */
-
-  /**
-   * 获取数据库实例（仅供内部使用）
-   */
-  get instance(): IDBDatabase {
-    if (!this.db) {
-      throw new Error('Database not connected');
-    }
-    return this.db;
   }
 }

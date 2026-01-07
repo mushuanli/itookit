@@ -1,58 +1,93 @@
 /**
  * @file vfs/store/BaseStore.ts
  */
-import { Database } from './Database.js';
-import { Transaction, TransactionMode } from './types.js';
+import { Database } from './Database';
+import { Transaction, TransactionMode } from './types';
 
-/**
- * 基础存储类
- * 封装通用的事务处理和 Promise 包装逻辑
- */
-export abstract class BaseStore {
-  protected constructor(
+export abstract class BaseStore<T, K extends IDBValidKey = string> {
+  constructor(
     protected db: Database,
-    public readonly storeName: string 
+    protected storeName: string
   ) {}
 
-  /**
-   * 执行存储操作
-   * 如果提供了外部事务则使用它，否则创建新事务
-   */
-  protected async execute<T>(
+  protected async execute<R>(
     mode: TransactionMode,
-    operation: (store: IDBObjectStore) => IDBRequest<T>,
-    transaction?: Transaction | null
-  ): Promise<T> {
-    if (transaction) {
-      const store = transaction.getStore(this.storeName);
-      return this.promisifyRequest(operation(store));
-    } else {
-      const tx = await this.db.getTransaction(this.storeName, mode);
-      const store = tx.getStore(this.storeName);
-      const result = await this.promisifyRequest(operation(store));
-      await tx.done;
-      return result;
-    }
+    operation: (store: IDBObjectStore) => IDBRequest<R>,
+    tx?: Transaction | null
+  ): Promise<R> {
+    const transaction = tx ?? this.db.getTransaction(this.storeName, mode);
+    const store = transaction.getStore(this.storeName);
+    const result = await Database.promisify(operation(store));
+    if (!tx) await transaction.done;
+    return result;
   }
 
-  /**
-   * 将 IDBRequest 包装为 Promise
-   */
-  protected promisifyRequest<T>(request: IDBRequest<T>): Promise<T> {
-    return this.db.promisifyRequest(request);
+  async get(key: K, tx?: Transaction | null): Promise<T | undefined> {
+    return this.execute('readonly', (store) => store.get(key), tx);
   }
 
-  /**
-   * 删除记录
-   */
-  async delete(key: IDBValidKey, transaction?: Transaction | null): Promise<void> {
-    await this.execute('readwrite', (store) => store.delete(key), transaction);
+  async put(data: T, tx?: Transaction | null): Promise<void> {
+    await this.execute('readwrite', (store) => store.put(data), tx);
   }
 
-  /**
-   * 根据主键加载记录
-   */
-  async load<T>(key: IDBValidKey, transaction?: Transaction | null): Promise<T | undefined> {
-    return this.execute('readonly', (store) => store.get(key), transaction);
+  async delete(key: K, tx?: Transaction | null): Promise<void> {
+    await this.execute('readwrite', (store) => store.delete(key), tx);
+  }
+
+  async getAll(tx?: Transaction | null): Promise<T[]> {
+    return this.execute('readonly', (store) => store.getAll(), tx);
+  }
+
+  async getAllByIndex(indexName: string, key: IDBValidKey, tx?: Transaction | null): Promise<T[]> {
+    return this.execute('readonly', (store) => store.index(indexName).getAll(key), tx);
+  }
+
+  // 游标扫描的通用方法
+  protected async scanCursor<R>(
+    source: IDBIndex | IDBObjectStore,
+    range: IDBKeyRange | null,
+    limit: number,
+    transform: (value: T) => R = (v) => v as unknown as R
+  ): Promise<R[]> {
+    return new Promise((resolve, reject) => {
+      const results: R[] = [];
+      const request = source.openCursor(range);
+      
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (cursor && results.length < limit) {
+          results.push(transform(cursor.value));
+          cursor.continue();
+        } else {
+          resolve(results);
+        }
+      };
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  // 批量删除的通用方法
+  protected async deleteByIndex(
+    indexName: string,
+    key: IDBValidKey,
+    tx: Transaction
+  ): Promise<void> {
+    const store = tx.getStore(this.storeName);
+    const index = store.index(indexName);
+    const range = IDBKeyRange.only(key);
+
+    return new Promise((resolve, reject) => {
+      const request = index.openCursor(range);
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (cursor) {
+          cursor.delete();
+          cursor.continue();
+        } else {
+          resolve();
+        }
+      };
+      request.onerror = () => reject(request.error);
+    });
   }
 }
