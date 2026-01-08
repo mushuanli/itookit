@@ -2,11 +2,10 @@
  * @file vfs/middleware/CompositeMiddleware.ts
  * 组合 Middleware（组合模式实现）
  */
-
-import { VNode, Transaction } from '../store/types.js';
-import { VFSStorage } from '../store/VFSStorage.js';
-import { EventBus } from '../core/EventBus.js';
-import { ContentMiddleware } from './base/ContentMiddleware.js';
+import { VNodeData, Transaction } from '../store/types';
+import { VFSStorage } from '../store/VFSStorage';
+import { EventBus } from '../core/EventBus';
+import { ContentMiddleware } from './base/ContentMiddleware';
 
 /**
  * 组合 Middleware
@@ -19,7 +18,9 @@ export class CompositeMiddleware extends ContentMiddleware {
   constructor(private middlewares: ContentMiddleware[]) {
     super();
     this.name = `composite-${middlewares.map(m => m.name).join('-')}`;
-    this.priority = middlewares.length > 0 ? Math.max(...middlewares.map(m => m.priority)) : 0;
+    this.priority = middlewares.length > 0 
+      ? Math.max(...middlewares.map(m => m.priority)) 
+      : 0;
   }
 
   initialize(storage: VFSStorage, eventBus: EventBus): void {
@@ -29,72 +30,84 @@ export class CompositeMiddleware extends ContentMiddleware {
     }
   }
 
-  canHandle(vnode: VNode): boolean {
+  canHandle(vnode: VNodeData): boolean {
     return this.middlewares.some(m => m.canHandle(vnode));
   }
 
-  async onValidate(vnode: VNode, content: string | ArrayBuffer): Promise<void> {
-    for (const middleware of this.middlewares) {
-      if (middleware.canHandle(vnode) && middleware.onValidate) {
-        await middleware.onValidate(vnode, content);
-      }
+  async onValidate(vnode: VNodeData, content: string | ArrayBuffer): Promise<void> {
+    for (const m of this.getApplicable(vnode)) {
+      await (m as any).onValidate?.(vnode, content);
     }
   }
 
   async onBeforeWrite(
-    vnode: VNode,
+    vnode: VNodeData,
     content: string | ArrayBuffer,
-    transaction: Transaction
+    tx: Transaction
   ): Promise<string | ArrayBuffer> {
-    let processedContent = content;
-    for (const middleware of this.middlewares) {
-      if (middleware.canHandle(vnode) && middleware.onBeforeWrite) {
-        processedContent = await middleware.onBeforeWrite(
-          vnode,
-          processedContent,
-          transaction
-        );
+    let result = content;
+    for (const m of this.getApplicable(vnode)) {
+      if ((m as any).onBeforeWrite) {
+        result = await (m as any).onBeforeWrite(vnode, result, tx);
       }
     }
-    return processedContent;
+    return result;
   }
 
   async onAfterWrite(
-    vnode: VNode,
+    vnode: VNodeData,
     content: string | ArrayBuffer,
-    transaction: Transaction
-  ): Promise<Record<string, any>> {
-    const allData: Record<string, any> = {};
-    for (const middleware of this.middlewares) {
-      if (middleware.canHandle(vnode) && middleware.onAfterWrite) {
-        const data = await middleware.onAfterWrite(vnode, content, transaction);
-        Object.assign(allData, data);
+    tx: Transaction
+  ): Promise<Record<string, unknown>> {
+    const allData: Record<string, unknown> = {};
+    for (const m of this.getApplicable(vnode)) {
+      if ((m as any).onAfterWrite) {
+        Object.assign(allData, await (m as any).onAfterWrite(vnode, content, tx));
       }
     }
     return allData;
   }
 
-  async onBeforeDelete(vnode: VNode, transaction: Transaction): Promise<void> {
-    for (const middleware of this.middlewares) {
-      if (middleware.canHandle(vnode) && middleware.onBeforeDelete) {
-        await middleware.onBeforeDelete(vnode, transaction);
-      }
+  async onBeforeDelete(vnode: VNodeData, tx: Transaction): Promise<void> {
+    for (const m of this.getApplicable(vnode)) {
+      await (m as any).onBeforeDelete?.(vnode, tx);
     }
   }
 
-  async onAfterDelete(vnode: VNode, transaction: Transaction): Promise<void> {
-    for (const middleware of this.middlewares) {
-      if (middleware.canHandle(vnode) && middleware.onAfterDelete) {
-        await middleware.onAfterDelete(vnode, transaction);
-      }
+  async onAfterDelete(vnode: VNodeData, tx: Transaction): Promise<void> {
+    for (const m of this.getApplicable(vnode)) {
+      await (m as any).onAfterDelete?.(vnode, tx);
+    }
+  }
+
+  async onAfterMove(
+    vnode: VNodeData,
+    oldPath: string,
+    newPath: string,
+    tx: Transaction
+  ): Promise<void> {
+    for (const m of this.getApplicable(vnode)) {
+      await (m as any).onAfterMove?.(vnode, oldPath, newPath, tx);
+    }
+  }
+
+  async onAfterCopy(
+    sourceNode: VNodeData,
+    targetNode: VNodeData,
+    tx: Transaction
+  ): Promise<void> {
+    for (const m of this.getApplicable(targetNode)) {
+      await (m as any).onAfterCopy?.(sourceNode, targetNode, tx);
     }
   }
 
   async cleanup(): Promise<void> {
-    for (const middleware of this.middlewares) {
-      if (middleware.cleanup) {
-        await middleware.cleanup();
-      }
+    for (const m of this.middlewares) {
+      await m.cleanup?.();
     }
+  }
+
+  private getApplicable(vnode: VNodeData): ContentMiddleware[] {
+    return this.middlewares.filter(m => m.canHandle(vnode));
   }
 }

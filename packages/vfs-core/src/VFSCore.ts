@@ -210,8 +210,23 @@ export class VFSCore {
   }
 
   /**
-   * 读取文件
+   * [新增] 创建资产目录
    */
+  async createAssetDirectory(ownerNodeId: string): Promise<VNodeData> {
+    this.ensureInit();
+    const assetDir = await this.vfs.createAssetDirectory(ownerNodeId);
+    return this.toPublicNode(assetDir);
+  }
+
+  /**
+   * [新增] 获取节点的资产目录
+   */
+  async getAssetDirectory(ownerNodeId: string): Promise<VNodeData | null> {
+    this.ensureInit();
+    const assetDir = await this.vfs.getAssetDirectory(ownerNodeId);
+    return assetDir ? this.toPublicNode(assetDir) : null;
+  }
+
   async read(module: string, path: string): Promise<string | ArrayBuffer> {
     this.ensureInit();
     const nodeId = await this.resolvePath(module, path);
@@ -293,7 +308,10 @@ export class VFSCore {
     this.ensureInit();
     const nodeId = await this.resolvePath(module, path);
     const children = await this.vfs.readdir(nodeId);
-    return children.map(n => this.toPublicNode(n));
+    // 过滤资产目录
+    return children
+      .filter(n => !n.metadata.isAssetDir)
+      .map(n => this.toPublicNode(n));
   }
 
   // ==================== 标签操作 ====================
@@ -400,8 +418,11 @@ export class VFSCore {
     
     const results = await this.vfs.searchNodes(query, targetModule);
     
-    // 权限过滤
+    // 权限过滤 + 资产目录过滤
     const filtered = results.filter(node => {
+      // 过滤资产目录
+      if (node.metadata?.isAssetDir) return false;
+      
       if (node.moduleId === callerModule) return true;
       if (node.moduleId) {
         const info = this.modules.get(node.moduleId);
@@ -486,10 +507,8 @@ export class VFSCore {
     return this.vfs.storage.srsStore.getDueItems(moduleId, limit);
   }
 
-  /**
-   * [新增] 创建全量系统备份
-   * 导出所有已注册模块的数据
-   */
+  // ==================== 备份与恢复 ====================
+
   async createSystemBackup(): Promise<string> {
     this.ensureInit();
     
@@ -719,6 +738,7 @@ export class VFSCore {
       result.content = await this.vfs.read(publicNode.nodeId);
     } else {
       const children = await this.vfs.readdir(publicNode.nodeId);
+      // 导出时包含资产目录（完整备份）
       result.children = await Promise.all(children.map(c => this.exportTree(c)));
     }
 
@@ -750,6 +770,13 @@ export class VFSCore {
     if (data.tags?.length) {
       for (const tag of data.tags) {
         await this.vfs.addTag(node.nodeId, tag);
+      }
+    }
+
+    // 恢复 SRS 数据
+    if (data.srs) {
+      for (const [clozeId, item] of Object.entries(data.srs)) {
+        await this.updateSRSItemById(node.nodeId, clozeId, item as SRSItemData);
       }
     }
   }
