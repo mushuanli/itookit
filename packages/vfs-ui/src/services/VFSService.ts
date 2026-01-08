@@ -31,18 +31,11 @@ export interface CreateFileOptions {
  * ✨ [新增] Options for creating multiple files.
  */
 export interface CreateMultipleFilesOptions {
-    parentId?: string | null;
-    files: { title: string; content: string | ArrayBuffer }[];
-}
-
-
-/**
- * Options for creating a new directory.
- */
-export interface CreateDirectoryOptions {
-  title?: string;
   parentId?: string | null;
+  files: { title: string; content: string | ArrayBuffer }[];
 }
+
+const EXT_REGEX = /\.[a-zA-Z0-9]{1,10}$/;
 
 /**
  * Implements the service logic and provides a clean API for
@@ -63,61 +56,42 @@ export class VFSService {
     this.defaultExtension = defaultExtension.startsWith('.') ? defaultExtension : `.${defaultExtension}`;
   }
 
-  /**
-   * 核心逻辑：智能追加扩展名
-   */
-    private ensureExtension(filename: string): string {
-        return /\.[a-zA-Z0-9]{1,10}$/.test(filename)
-            ? filename
-            : `${filename}${this.defaultExtension}`;
+  private ensureExtension = (filename: string): string =>
+    EXT_REGEX.test(filename) ? filename : `${filename}${this.defaultExtension}`;
+
+  createFile = async ({ title = 'Untitled', parentId = null, content = this.newFileContent }: CreateFileOptions = {}): Promise<EngineNode> =>
+    this.engine.createFile(this.ensureExtension(title), parentId, content);
+
+  createFiles = async ({ parentId = null, files }: CreateMultipleFilesOptions): Promise<EngineNode[]> => {
+    if (!files?.length) return [];
+    const processed = files.map(f => ({ ...f, title: this.ensureExtension(f.title) }));
+    return this.engine.createFiles
+      ? this.engine.createFiles(processed, parentId)
+      : Promise.all(processed.map(f => this.engine.createFile(f.title, parentId, f.content)));
+  };
+
+  createDirectory = ({ title = 'New Directory', parentId = null } = {}): Promise<EngineNode> =>
+    this.engine.createDirectory(title, parentId);
+
+  renameItem = (nodeId: string, newTitle: string): Promise<void> =>
+    this.engine.rename(nodeId, newTitle);
+
+  deleteItems = (nodeIds: string[]): Promise<void> =>
+    this.engine.delete(nodeIds);
+
+  moveItems = ({ itemIds, targetId }: { itemIds: string[]; targetId: string | null }): Promise<void> =>
+    this.engine.move(itemIds, targetId);
+
+  updateMultipleItemsTags = async ({ itemIds, tags }: { itemIds: string[]; tags: string[] }): Promise<void> => {
+    if (this.engine.setTagsBatch) {
+      await this.engine.setTagsBatch(itemIds.map(id => ({ id, tags })));
+    } else {
+      await Promise.all(itemIds.map(id => this.engine.setTags(id, tags)));
     }
+  };
 
-    async createFile({ title = 'Untitled', parentId = null, content = this.newFileContent }: CreateFileOptions): Promise<EngineNode> {
-    // [优化] 自动补全扩展名
-    const finalTitle = this.ensureExtension(title);
-    console.log(`>>>>> createFile: ${title} - ${finalTitle}`)
-    return this.engine.createFile(finalTitle, parentId, content);
-  }
-
-    async createFiles({ parentId = null, files }: CreateMultipleFilesOptions): Promise<EngineNode[]> {
-        if (!files?.length) return [];
-
-        const processedFiles = files.map(f => ({
-            ...f,
-            title: this.ensureExtension(f.title)
-        }));
-
-        return typeof this.engine.createFiles === 'function'
-            ? this.engine.createFiles(processedFiles, parentId)
-            : Promise.all(processedFiles.map(f => this.engine.createFile(f.title, parentId, f.content)));
-    }
-
-    async createDirectory({ title = 'New Directory', parentId = null }: CreateDirectoryOptions): Promise<EngineNode> {
-        return this.engine.createDirectory(title, parentId);
-    }
-
-    async renameItem(nodeId: string, newTitle: string): Promise<void> {
-        await this.engine.rename(nodeId, newTitle);
-    }
-
-    async deleteItems(nodeIds: string[]): Promise<void> {
-        await this.engine.delete(nodeIds);
-    }
-
-    async moveItems({ itemIds, targetId }: { itemIds: string[]; targetId: string | null }): Promise<void> {
-        await this.engine.move(itemIds, targetId);
-    }
-
-    async updateMultipleItemsTags({ itemIds, tags }: { itemIds: string[]; tags: string[] }): Promise<void> {
-        if (typeof this.engine.setTagsBatch === 'function') {
-            await this.engine.setTagsBatch(itemIds.map(id => ({ id, tags })));
-        } else {
-            await Promise.all(itemIds.map(id => this.engine.setTags(id, tags)));
-        }
-    }
-
-    findItemById = (itemId: string) => this.engine.getNode(itemId);
-    updateItemMetadata = (itemId: string, updates: Record<string, any>) => this.engine.updateMetadata(itemId, updates);
-    getAllFolders = () => this.engine.search({ type: 'directory' });
-    getAllFiles = () => this.engine.search({ type: 'file' });
+  findItemById = (itemId: string) => this.engine.getNode(itemId);
+  updateItemMetadata = (itemId: string, updates: Record<string, any>) => this.engine.updateMetadata(itemId, updates);
+  getAllFolders = () => this.engine.search({ type: 'directory' });
+  getAllFiles = () => this.engine.search({ type: 'file' });
 }
