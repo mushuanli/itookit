@@ -25,6 +25,13 @@ export interface Heading {
   children?: Heading[];
 }
 
+export interface ParseResult {
+  summary: string;
+  searchableText: string;
+  headings: Heading[];
+  metadata: FileMetadata;
+}
+
 // --- Core UI Data Model ---
 
 /**
@@ -56,7 +63,7 @@ export interface VFSNodeUI {
     searchableText: string;
     data: any; // The raw content, treated as a black box by the UI list
   };
-  headings?: any[]; // simplified type
+  headings?: Heading[];
   children?: VFSNodeUI[];
 }
 

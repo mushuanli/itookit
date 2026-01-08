@@ -4,52 +4,36 @@
  */
 import { BaseNodeItem } from './BaseNodeItem';
 import type { VFSNodeUI } from '../../../types/types';
-import { createDirectoryItemHTML } from './itemTemplates';
-
-export interface DirectoryItemProps {
-    isExpanded: boolean;
-    dirSelectionState: 'none' | 'partial' | 'all';
-    isSelected: boolean;
-    isSelectionMode: boolean;
-    searchQueries: string[];
-}
+import { createDirectoryItemHTML, DirectoryItemProps } from './itemTemplates';
 
 export class DirectoryItem extends BaseNodeItem {
-    public childrenContainer!: HTMLElement;
-    private props: DirectoryItemProps;
+  public childrenContainer!: HTMLElement;
+  private props: DirectoryItemProps;
 
-    constructor(item: VFSNodeUI, isReadOnly: boolean, initialProps: DirectoryItemProps) {
-        super(item, isReadOnly);
-        this.props = initialProps;
-        this.render();
-    }
+  constructor(item: VFSNodeUI, isReadOnly: boolean, props: DirectoryItemProps) {
+    super(item, isReadOnly);
+    this.props = props;
+    this.render();
+  }
 
-    updateItem(newItem: VFSNodeUI): void {
-        if (this.shouldRerender(this.item, newItem)) {
-            super.updateItem(newItem);
-            this.render();
-        } else {
-            super.updateItem(newItem);
-        }
+  update(nextProps: DirectoryItemProps): void {
+    if (JSON.stringify(this.props) !== JSON.stringify(nextProps)) {
+      this.props = nextProps;
+      this.render();
     }
+  }
 
-    update(nextProps: DirectoryItemProps): void {
-        if (JSON.stringify(this.props) !== JSON.stringify(nextProps)) {
-            this.props = nextProps;
-            this.render();
-        }
+  protected render(): void {
+    const oldChildren = this.childrenContainer;
+    this.replaceElement(createDirectoryItemHTML(this.item, this.props, this.isReadOnly));
+    this.childrenContainer = this.element.querySelector('.vfs-directory-item__children')!;
+    
+    if (oldChildren) {
+      while (oldChildren.firstChild) {
+        this.childrenContainer.appendChild(oldChildren.firstChild);
+      }
     }
-
-    private render(): void {
-        const oldChildren = this.childrenContainer;
-        this.replaceElement(createDirectoryItemHTML(this.item, this.props, this.isReadOnly));
-        this.childrenContainer = this.element.querySelector('.vfs-directory-item__children')!;
-        
-        // Preserve children
-        if (oldChildren) {
-            while (oldChildren.firstChild) {
-                this.childrenContainer.appendChild(oldChildren.firstChild);
-            }
-        }
-    }
+  }
 }
+
+export type { DirectoryItemProps };
