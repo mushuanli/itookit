@@ -220,7 +220,7 @@ export class NodeListStateTransformer {
     readOnly: boolean
   ): 'none' | 'partial' | 'all' {
     const selectedCount = selectedItemIds.size;
-    if (readOnly || selectedCount === 0 || visibleItemIds.length === 0) {
+    if (readOnly || selectedCount <= 1 || visibleItemIds.length === 0) {
       return 'none';
     }
 

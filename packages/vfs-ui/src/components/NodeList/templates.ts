@@ -28,31 +28,22 @@ export const createFooterHTML = ({ selectionStatus, selectedCount, isReadOnly }:
   selectedCount: number;
   isReadOnly: boolean;
 }): string => {
-  if (isReadOnly) return '';
+  if (isReadOnly || selectedCount <= 1) return '';
   
   const checkbox = `<input type="checkbox" class="vfs-node-list__footer-checkbox" data-action="toggle-select-all" 
     title="${selectionStatus === 'all' ? '全部取消' : '全选'}" ${selectionStatus === 'all' ? 'checked' : ''}>`;
 
-  if (selectedCount > 1) {
-    return `
-      <div class="vfs-node-list__bulk-bar">
-        <div class="vfs-node-list__bulk-bar-info">
-          ${checkbox}
-          <span>已选择 ${selectedCount} 项</span>
-          <button data-action="deselect-all" class="vfs-node-list__bulk-bar-btn--text" title="全部取消">取消</button>
-        </div>
-        <div class="vfs-node-list__bulk-bar-actions">
-          <button class="vfs-node-list__bulk-bar-btn" data-action="bulk-move" title="移动..."><i class="fas fa-share-square"></i></button>
-          <button class="vfs-node-list__bulk-bar-btn vfs-node-list__bulk-bar-btn--danger" data-action="bulk-delete" title="删除"><i class="fas fa-trash"></i></button>
-        </div>
-      </div>`;
-  }
-
+  // 多选模式：显示批量操作栏
   return `
-    <div class="vfs-node-list__footer-content">
-      <div class="vfs-node-list__footer-selection-controls">${checkbox}</div>
-      <div class="vfs-node-list__footer-actions-right">
-        <button data-action="settings" title="设置"><i class="fas fa-cog"></i></button>
+    <div class="vfs-node-list__bulk-bar">
+      <div class="vfs-node-list__bulk-bar-info">
+        ${checkbox}
+        <span>已选择 ${selectedCount} 项</span>
+        <button data-action="deselect-all" class="vfs-node-list__bulk-bar-btn--text" title="全部取消">取消</button>
+      </div>
+      <div class="vfs-node-list__bulk-bar-actions">
+        <button class="vfs-node-list__bulk-bar-btn" data-action="bulk-move" title="移动..."><i class="fas fa-share-square"></i></button>
+        <button class="vfs-node-list__bulk-bar-btn vfs-node-list__bulk-bar-btn--danger" data-action="bulk-delete" title="删除"><i class="fas fa-trash"></i></button>
       </div>
     </div>`;
 };
