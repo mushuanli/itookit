@@ -36,7 +36,6 @@ export { ISettingsWidget } from './interfaces/ISettingsWidget';
 
 // Export all utils
 export { 
-    slugify, 
     simpleHash, 
     escapeHTML, 
     generateUUID, 
@@ -57,6 +56,21 @@ export {
     timeAgo
 } from './utils/utils';
 export {MarkdownAnalyzer} from './utils/MarkdownAnalyzer';
+export {
+  type TaskCounts,
+  type MarkdownMetadata,
+  type ParsedMarkdownContent,
+  
+  slugify, 
+  tryParseJson, // 使用新版
+  parseMarkdownContent,
+  extractHeadings,
+  extractTaskCounts,
+  extractSummary,
+  extractSearchableText,
+  parseMarkdown,
+  formatJsonSummary
+} from './utils/MarkdownUtils';
 
 // Export all components
 export * from './components/BaseSettingsEditor';

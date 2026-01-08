@@ -10,13 +10,17 @@ import { MDxRenderer } from '../renderer/renderer';
 import type { MDxPlugin } from '../core/plugin';
 import type { TaskToggleResult } from '../plugins/interactions/task-list.plugin';
 import { 
-    IEditor, 
-    EditorOptions, 
-    UnifiedSearchResult, 
-    Heading, 
-    EditorEvent, 
-    EditorEventCallback,
-    slugify 
+  IEditor, 
+  extractHeadings,
+  type Heading, // 工具接口
+  EditorOptions, 
+  UnifiedSearchResult, 
+  EditorEvent, 
+  EditorEventCallback,
+  // 导入工具函数
+  tryParseJson,
+  extractSummary,
+  extractSearchableText
 } from '@itookit/common';
 
 import { 
@@ -34,16 +38,6 @@ export interface MDxEditorConfig extends EditorOptions {
    * 当触发自动保存或手动保存时调用
    */
   onSave?: (content: string) => Promise<void>;
-}
-
-/**
- * Markdown 行解析结果
- */
-interface ParsedMarkdownLines {
-  /** 代码块外的行 */
-  linesOutsideCode: string[];
-  /** 所有行 */
-  allLines: string[];
 }
 
 /**
@@ -287,62 +281,7 @@ export class MDxEditor extends IEditor {
     }
   }
 
-  // --- Helper: JSON Parsing ---
-  private tryParseJson(text: string): any | null {
-    const trimmed = text.trim();
-    if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
-      try {
-        return JSON.parse(text);
-      } catch (e) {
-        return null;
-      }
-    }
-    return null;
-  }
-
   // --- Helper: Markdown Parsing ---
-  
-  /**
-   * 解析 Markdown 文本，区分代码块内外的行
-   * 用于 getHeadings、getSummary、getSearchableText 等方法
-   * 
-   * @param text - 原始 Markdown 文本
-   * @returns 解析结果，包含代码块外的行和所有行
-   */
-  private parseMarkdownLines(text: string): ParsedMarkdownLines {
-    const lines = text.split('\n');
-    const linesOutsideCode: string[] = [];
-    let inCodeBlock = false;
-    let codeBlockMarker = ''; // 记录是 ` 还是 ~
-
-    for (const line of lines) {
-      // 检测代码块边界（支持 ``` 和 ~~~，至少3个字符）
-      const fenceMatch = line.match(/^(`{3,}|~{3,})/);
-      
-      if (fenceMatch) {
-        const marker = fenceMatch[1].charAt(0);
-        const markerLength = fenceMatch[1].length;
-        
-        if (!inCodeBlock) {
-          // 进入代码块
-          inCodeBlock = true;
-          codeBlockMarker = marker;
-        } else if (marker === codeBlockMarker && line.trim().length >= markerLength) {
-          // 退出代码块（使用相同类型的标记符，且长度足够）
-          inCodeBlock = false;
-          codeBlockMarker = '';
-        }
-        // 代码块边界行不加入 linesOutsideCode
-        continue;
-      }
-      
-      if (!inCodeBlock) {
-        linesOutsideCode.push(line);
-      }
-    }
-
-    return { linesOutsideCode, allLines: lines };
-  }
 
   // --- IEditor Implementation ---
 
@@ -468,109 +407,25 @@ export class MDxEditor extends IEditor {
    */
   async getHeadings(): Promise<Heading[]> {
     const text = this.getText();
-    const headings: Heading[] = [];
-    
-    // [改进] 如果是 JSON，不提取 Heading
-    if (this.tryParseJson(text)) {
-      return [];
-    }
+    if (tryParseJson(text)) return [];
 
-    const slugCount = new Map<string, number>();
-    
-    // 使用状态机解析，正确过滤代码块内的内容
-    const { linesOutsideCode } = this.parseMarkdownLines(text);
-
-    for (const line of linesOutsideCode) {
-      // 修复：限制标题层级为 1-6，且要求标题内容非空
-      const match = line.match(/^(#{1,6})\s+(.+)/);
-      if (match) {
-        const level = match[1].length;
-        const textContent = match[2].trim();
-        
-        if (textContent) {
-          const rawSlug = slugify(textContent);
-          const baseSlug = `heading-${rawSlug}`;
-          const count = slugCount.get(baseSlug) || 0;
-          slugCount.set(baseSlug, count + 1);
-          const uniqueId = count > 0 ? `${baseSlug}-${count}` : baseSlug;
-          headings.push({ level, text: textContent, id: uniqueId });
-        }
-      }
-    }
-    
-    return headings;
+    return extractHeadings(text, { nested: false });
   }
 
   /**
-   * [重构] 获取搜索文本摘要，智能处理 JSON 和代码块
+   * [重构] 获取搜索文本摘要
    */
   async getSearchableText(): Promise<string> {
-    const content = this.getText();
-    const json = this.tryParseJson(content);
-    
-    if (json) {
-      const parts: string[] = [];
-      if (json.name) parts.push(json.name);
-      if (json.description) parts.push(json.description);
-      if (json.summary) parts.push(json.summary);
-      if (Array.isArray(json.pairs)) {
-        json.pairs.forEach((p: any) => {
-          if (p.human) parts.push(p.human);
-          if (p.ai) parts.push(p.ai);
-        });
-      }
-      return parts.join('\n');
-    }
-
-    // 使用解析器获取代码块外的内容
-    const { linesOutsideCode } = this.parseMarkdownLines(content);
-    
-    return linesOutsideCode
-      .join('\n')
-      .replace(/^#{1,6}\s+/gm, '')           // 移除标题标记
-      .replace(/\[(.*?)\]\(.*?\)/g, '$1')    // 提取链接文本
-      .replace(/`[^`]+`/g, '')               // 移除行内代码
-      .replace(/[*_~]+/g, '')                // 移除强调标记
-      .trim();
+    // 逻辑下沉到 common
+    return extractSearchableText(this.getText());
   }
   
   /**
-   * [重构] 获取摘要，智能处理 JSON 和代码块
+   * [重构] 获取摘要
    */
   async getSummary(): Promise<string | null> {
-    const content = this.getText();
-    const json = this.tryParseJson(content);
-
-    if (json) {
-      if (json.description) return json.description;
-      if (json.summary) return json.summary;
-      // 如果是 Chat，取第一句话
-      if (Array.isArray(json.pairs) && json.pairs.length > 0) {
-        return json.pairs[0].human || null;
-      }
-      return null;
-    }
-
-    // 使用解析器获取代码块外的内容
-    const { linesOutsideCode } = this.parseMarkdownLines(content);
-    
-    // 取第一段非标题、非分隔线的文本
-    for (const line of linesOutsideCode) {
-      const trimmed = line.trim();
-      
-      // 跳过空行、标题、分隔线
-      if (!trimmed || trimmed.match(/^#{1,6}\s/) || trimmed === '---' || trimmed === '***' || trimmed === '___') {
-        continue;
-      }
-      
-      // 移除 Markdown 标记并返回摘要
-      return trimmed
-        .replace(/\[(.*?)\]\(.*?\)/g, '$1')  // 提取链接文本
-        .replace(/[*_~`]/g, '')               // 移除格式标记
-        .substring(0, 150);
-    }
-    
-    return null;
+    // 逻辑下沉到 common，包含 JSON 处理和 Markdown 清理
+    return extractSummary(this.getText());
   }
 
   setTitle(newTitle: string): void { 
