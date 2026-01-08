@@ -366,7 +366,7 @@ export class PluginManager {
    */
   register(plugin: MDxPlugin): void {
     if (this.plugins.has(plugin.name)) {
-      console.warn(`Plugin ${plugin.name} is already registered`);
+      //console.warn(`Plugin ${plugin.name} is already registered`);
       return;
     }
 

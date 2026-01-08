@@ -60,9 +60,9 @@ export class MemoryPlugin implements MDxPlugin {
     };
   }
 
-  private log(message: string, ...args: any[]) {
+  private log(_message: string, ..._args: any[]) {
     if (this.options.debug) {
-      console.log(`🧠 [MemoryPlugin] ${message}`, ...args);
+      //console.log(`🧠 [MemoryPlugin] ${message}`, ...args);
     }
   }
 
