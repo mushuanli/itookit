@@ -20,11 +20,10 @@ export interface ConnectOptions {
     [key: string]: any;
 }
 
-type VFSManager = ISessionUI<VFSNodeUI, VFSService> & { 
-    resolveEditorFactory?: (node: VFSNodeUI) => EditorFactory;
-    store?: { getState(): VFSUIState; dispatch(action: any): void };
+type VFSManager = ISessionUI<VFSNodeUI, VFSService> & {
+  resolveEditorFactory?: (node: VFSNodeUI) => EditorFactory;
+  store?: { getState(): VFSUIState; dispatch(action: any): void };
 };
-
 
 /**
  * Connects a session manager to an editor.
@@ -32,194 +31,184 @@ type VFSManager = ISessionUI<VFSNodeUI, VFSService> & {
  * [Updated] Now supports dynamic editor factory resolution via vfsManager.
  */
 export function connectEditorLifecycle(
-    vfsManager: VFSManager,
-    engine: ISessionEngine,
-    editorContainer: HTMLElement,
-    defaultEditorFactory?: EditorFactory,
-    options: ConnectOptions = {}
+  vfsManager: VFSManager,
+  engine: ISessionEngine,
+  editorContainer: HTMLElement,
+  defaultEditorFactory?: EditorFactory,
+  options: ConnectOptions = {}
 ): () => void {
-    const { onEditorCreated, saveDebounceMs = 500, ...factoryExtraOptions } = options;
+  const { onEditorCreated, saveDebounceMs = 500, ...factoryExtraOptions } = options;
 
-    let activeEditor: IEditor | null = null;
-    let activeNode: VFSNodeUI | null = null;
-    let activeEditorUnsubscribers: Array<() => void> = [];
-    let saveTimer: ReturnType<typeof setTimeout> | null = null;
-    let currentSessionToken = 0;
-    let lastKnownTaskStats: { total: number; completed: number } | null = null;
-    let hasUnsavedOptimisticChanges = false;
+  let activeEditor: IEditor | null = null;
+  let activeNode: VFSNodeUI | null = null;
+  let unsubscribers: Array<() => void> = [];
+  let saveTimer: ReturnType<typeof setTimeout> | null = null;
+  let sessionToken = 0;
+  let lastTaskStats: { total: number; completed: number } | null = null;
+  let hasUnsavedChanges = false;
 
-    const dispatchMetadataUpdate = (itemId: string, metadata: any) => {
-        vfsManager.store?.dispatch({ type: 'ITEM_METADATA_UPDATE', payload: { itemId, metadata } });
-    };
+  const dispatch = (itemId: string, metadata: any) => {
+    vfsManager.store?.dispatch({ type: 'ITEM_METADATA_UPDATE', payload: { itemId, metadata } });
+  };
 
-    const performOptimisticUpdate = () => {
-        if (!activeEditor || !activeNode) return;
-        const stats = extractTaskCounts(activeEditor.getText());
-        const current = lastKnownTaskStats || activeNode.metadata.custom.taskCount || { total: 0, completed: 0 };
+  const optimisticUpdate = () => {
+    if (!activeEditor || !activeNode) return;
+    const stats = extractTaskCounts(activeEditor.getText());
+    const current = lastTaskStats || activeNode.metadata.custom.taskCount || { total: 0, completed: 0 };
 
-        if (stats.total !== current.total || stats.completed !== current.completed) {
-            lastKnownTaskStats = stats;
-            hasUnsavedOptimisticChanges = true;
-            dispatchMetadataUpdate(activeNode.id, { custom: { ...activeNode.metadata.custom, taskCount: stats } });
-        }
-    };
+    if (stats.total !== current.total || stats.completed !== current.completed) {
+      lastTaskStats = stats;
+      hasUnsavedChanges = true;
+      dispatch(activeNode.id, { custom: { ...activeNode.metadata.custom, taskCount: stats } });
+    }
+  };
 
     /**
      * 执行保存 (DB Write)
      */
-    const saveCurrentSession = async () => {
-        if (!activeEditor || !activeNode) return;
-        if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+  const save = async () => {
+    if (!activeEditor || !activeNode) return;
+    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+    if (!activeEditor.isDirty?.() && !hasUnsavedChanges) return;
 
-        const shouldSave = activeEditor.isDirty?.() || hasUnsavedOptimisticChanges;
-        if (!shouldSave) return;
+    try {
+      const state = vfsManager.store?.getState();
+      const exists = state?.items.some(function check(n): boolean {
+        return n.id === activeNode!.id || !!n.children?.some(check);
+      });
 
-        try {
-            const state = vfsManager.store?.getState();
-            const exists = state?.items.some(function check(n): boolean {
-                return n.id === activeNode!.id || !!n.children?.some(check);
-            });
+      if (exists) {
+        const content = activeEditor.getText();
+        await engine.writeContent(activeNode.id, content);
 
-            if (exists) {
-                const content = activeEditor.getText();
-                await engine.writeContent(activeNode.id, content);
+        const { metadata, summary } = parseFileInfo(content);
+        await engine.updateMetadata(activeNode.id, {
+          taskCount: metadata.taskCount,
+          clozeCount: metadata.clozeCount,
+          mermaidCount: metadata.mermaidCount,
+          _summary: summary
+        });
 
-                const { metadata, summary } = parseFileInfo(content);
-                await engine.updateMetadata(activeNode.id, {
-                    taskCount: metadata.taskCount,
-                    clozeCount: metadata.clozeCount,
-                    mermaidCount: metadata.mermaidCount,
-                    _summary: summary
-                });
-
-                activeEditor.setDirty?.(false);
-                hasUnsavedOptimisticChanges = false;
-            }
-        } catch (error) {
-            console.error('[EditorConnector] Save failed:', error);
-        }
-    };
+        activeEditor.setDirty?.(false);
+        hasUnsavedChanges = false;
+      }
+    } catch (e) {
+      console.error('[EditorConnector] Save failed:', e);
+    }
+  };
 
     /**
      * Schedules a save operation with debounce.
      */
-    const scheduleSave = () => {
-        if (saveTimer) clearTimeout(saveTimer);
-        saveTimer = setTimeout(saveCurrentSession, saveDebounceMs);
-    };
+  const scheduleSave = () => {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(save, saveDebounceMs);
+  };
     /**
      * Tears down the current editor instance.
      * Performs: Token increment, Forced Save, Event Unbinding, Destruction.
      */
-    const teardownActiveEditor = async () => {
-        currentSessionToken++;
-        if (activeEditor) {
-            await saveCurrentSession();
-            activeEditorUnsubscribers.forEach(unsub => unsub());
-            activeEditorUnsubscribers = [];
-            await activeEditor.destroy();
-            activeEditor = null;
-            activeNode = null;
-            lastKnownTaskStats = null;
-            hasUnsavedOptimisticChanges = false;
-            onEditorCreated?.(null);
-        }
-    };
+  const teardown = async () => {
+    sessionToken++;
+    if (activeEditor) {
+      await save();
+      unsubscribers.forEach(u => u());
+      unsubscribers = [];
+      await activeEditor.destroy();
+      activeEditor = null;
+      activeNode = null;
+      lastTaskStats = null;
+      hasUnsavedChanges = false;
+      onEditorCreated?.(null);
+    }
+  };
 
-    const createHostContext = (): EditorHostContext => {
-        const externalContext = factoryExtraOptions.hostContext as EditorHostContext | undefined;
-        return {
-            toggleSidebar: () => vfsManager.toggleSidebar(),
-            saveContent: (nodeId, content) => engine.writeContent(nodeId, content),
-            navigate: async (request: NavigationRequest) => {
-                if (externalContext?.navigate) {
-                    await externalContext.navigate(request);
-                } else {
-                    console.warn('[EditorConnector] No navigation handler connected.', request);
-                }
-            }
+  const createHostContext = (): EditorHostContext => {
+    const external = factoryExtraOptions.hostContext as EditorHostContext | undefined;
+    return {
+      toggleSidebar: () => vfsManager.toggleSidebar(),
+      saveContent: (nodeId, content) => engine.writeContent(nodeId, content),
+      navigate: async (request: NavigationRequest) => {
+        if (external?.navigate) await external.navigate(request);
+        else console.warn('[EditorConnector] No navigation handler.', request);
+      }
+    };
+  };
+
+  const handleSessionChange = async ({ item }: { item?: VFSNodeUI }) => {
+    await teardown();
+    const myToken = sessionToken;
+    editorContainer.innerHTML = '';
+
+    if (!item || item.type !== 'file') {
+      editorContainer.innerHTML = '<div class="editor-placeholder">Select a file...</div>';
+      return;
+    }
+
+    setTimeout(async () => {
+      if (myToken !== sessionToken) return;
+
+      try {
+        const factory = vfsManager.resolveEditorFactory?.(item) || defaultEditorFactory;
+        if (!factory) throw new Error("No suitable editor factory found.");
+
+        const editorOptions: EditorOptions = {
+          ...factoryExtraOptions,
+          initialContent: item.content?.data || '',
+          title: item.metadata.title,
+          nodeId: item.id,
+          language: item.metadata.custom?._extension || '',
+          sessionEngine: engine,
+          hostContext: createHostContext()
         };
-    };
-    /**
-     * Main handler for session selection events.
-     */
-    const handleSessionChange = async ({ item }: { item?: VFSNodeUI }) => {
-        await teardownActiveEditor();
-        const myToken = currentSessionToken;
-        editorContainer.innerHTML = '';
 
-        if (!item || item.type !== 'file') {
-            editorContainer.innerHTML = '<div class="editor-placeholder">Select a file...</div>';
-            return;
+        const editor = await factory(editorContainer, editorOptions);
+        if (myToken !== sessionToken) { editor?.destroy(); return; }
+
+        activeEditor = editor;
+        activeNode = item;
+        lastTaskStats = item.metadata.custom.taskCount || null;
+        hasUnsavedChanges = false;
+
+        if (activeEditor) {
+          const bindEditorEvent = (eventName: string, handler: (...args: any[]) => void) => {
+            try {
+              // 使用 any 类型绕过严格的类型检查，因为不同编辑器可能有不同的事件签名
+              const unsub = (activeEditor as any).on(eventName, handler);
+              if (typeof unsub === 'function') {
+                unsubscribers.push(unsub);
+              }
+            } catch (e) {
+              console.warn(`[EditorConnector] Failed to bind event '${eventName}':`, e);
+            }
+          };
+
+          bindEditorEvent('blur', scheduleSave);
+          bindEditorEvent('modeChanged', (p: any) => p?.mode === 'render' && save());
+          bindEditorEvent('interactiveChange', () => { optimisticUpdate(); scheduleSave(); });
+          bindEditorEvent('optimisticUpdate', optimisticUpdate);
         }
 
-        setTimeout(async () => {
-            if (myToken !== currentSessionToken) return;
+        onEditorCreated?.(activeEditor);
+      } catch (e) {
+        if (myToken === sessionToken) {
+          console.error('[EditorConnector] Create failed:', e);
+          editorContainer.innerHTML = `<div class="editor-placeholder editor-placeholder--error">Error: ${(e as Error).message}</div>`;
+        }
+      }
+    }, 0);
+  };
 
-            try {
-                // Resolve editor factory
-                let factory = vfsManager.resolveEditorFactory?.(item) || defaultEditorFactory;
-                if (!factory) throw new Error("No suitable editor factory found.");
+  const unsubNav = vfsManager.on('navigateToHeading', async ({ elementId }: { elementId: string }) => {
+    activeEditor?.navigateTo({ elementId });
+  });
 
-                const editorOptions: EditorOptions = {
-                    ...factoryExtraOptions,
-                    initialContent: item.content?.data || '',
-                    title: item.metadata.title,
-                    nodeId: item.id,
-                    language: item.metadata.custom?._extension || '',
-                    sessionEngine: engine,
-                    hostContext: createHostContext()
-                };
+  const unsubSession = vfsManager.on('sessionSelected', handleSessionChange);
+  handleSessionChange({ item: vfsManager.getActiveSession() });
 
-                const editor = await factory(editorContainer, editorOptions);
-
-                if (myToken !== currentSessionToken) {
-                    editor?.destroy();
-                    return;
-                }
-
-                activeEditor = editor;
-                activeNode = item;
-                lastKnownTaskStats = item.metadata.custom.taskCount || null;
-                hasUnsavedOptimisticChanges = false;
-
-                if (activeEditor) {
-                    const events = [
-                        ['blur', scheduleSave],
-                        ['modeChanged', (p: any) => p?.mode === 'render' && saveCurrentSession()],
-                        ['interactiveChange', () => { performOptimisticUpdate(); scheduleSave(); }],
-                        ['optimisticUpdate', performOptimisticUpdate]
-                    ] as const;
-
-                    events.forEach(([event, handler]) => {
-                        const unsub = activeEditor!.on(event, handler as any);
-                        if (unsub) activeEditorUnsubscribers.push(unsub);
-                    });
-                }
-
-                onEditorCreated?.(activeEditor);
-            } catch (error) {
-                if (myToken === currentSessionToken) {
-                    console.error('[EditorConnector] Create failed:', error);
-                    editorContainer.innerHTML = `<div class="editor-placeholder editor-placeholder--error">Error: ${(error as Error).message}</div>`;
-                }
-            }
-        }, 0);
-    };
-
-    // 监听导航事件
-    const unsubNav = vfsManager.on('navigateToHeading', async ({ elementId }: { elementId: string }) => {
-        activeEditor?.navigateTo({ elementId });
-    });
-
-    const unsubSession = vfsManager.on('sessionSelected', handleSessionChange);
-
-    // Initialize with current session
-    handleSessionChange({ item: vfsManager.getActiveSession() });
-
-    return () => {
-        unsubSession();
-        unsubNav();
-        teardownActiveEditor().catch(console.error);
-    };
+  return () => {
+    unsubSession();
+    unsubNav();
+    teardown().catch(console.error);
+  };
 }
