@@ -1,6 +1,6 @@
 /**
  * @file vfs/core/VFS.ts
- * VFS 核心门面类
+ * VFS 核心门面类（内置 Asset 级联逻辑）
  */
 import { VFSStorage } from '../store/VFSStorage';
 import { VNodeData, VNodeType, VNode, ContentData, Transaction, VFS_STORES } from '../store/types';
@@ -8,6 +8,7 @@ import { ContentStore } from '../store/stores';
 import { PathResolver } from './PathResolver';
 import { MiddlewareRegistry } from './MiddlewareRegistry';
 import { EventBus } from './EventBus';
+import { AssetUtils } from '../utils/AssetUtils';
 import {
   VFSError, VFSErrorCode, CreateNodeOptions, UnlinkOptions, 
   UnlinkResult, CopyResult, VFSEventType, SearchQuery
@@ -99,10 +100,86 @@ export class VFS {
     }
   }
 
+  /**
+   * [新增] 创建资产目录
+   * 自动建立双向引用
+   */
+  async createAssetDirectory(ownerNodeId: string): Promise<VNodeData> {
+    const owner = await this.resolveNode(ownerNodeId);
+    
+    // 检查是否已有资产目录
+    if (owner.metadata.assetDirId) {
+      const existing = await this.storage.loadVNode(owner.metadata.assetDirId);
+      if (existing) return existing;
+    }
+
+    const assetPath = AssetUtils.getAssetPath(owner);
+    if (!assetPath) {
+      throw new VFSError(VFSErrorCode.INVALID_OPERATION, 'Cannot create asset directory for this node type');
+    }
+
+    // 检查路径是否已存在
+    const existingId = await this.storage.getNodeIdByPath(assetPath);
+    if (existingId) {
+      throw new VFSError(VFSErrorCode.ALREADY_EXISTS, `Asset directory already exists: ${assetPath}`);
+    }
+
+    const tx = this.storage.beginTransaction();
+    try {
+      // 确定资产目录的 parentId
+      const assetParentId = owner.type === VNodeType.DIRECTORY 
+        ? owner.nodeId  // 目录的 .assets 在目录内
+        : owner.parentId; // 文件的 .filename 与文件同级
+
+      const assetDirId = this.generateId();
+      const assetDir = VNode.create({
+        nodeId: assetDirId,
+        parentId: assetParentId,
+        name: AssetUtils.getAssetDirName(owner),
+        type: VNodeType.DIRECTORY,
+        path: assetPath,
+        moduleId: owner.moduleId,
+        metadata: {
+          isAssetDir: true,
+          ownerId: owner.nodeId
+        }
+      });
+
+      // 更新 owner 的双向引用
+      owner.metadata.assetDirId = assetDirId;
+      owner.modifiedAt = Date.now();
+
+      await this.storage.inodeStore.put(assetDir, tx);
+      await this.storage.inodeStore.put(owner, tx);
+      await tx.done;
+
+      this.emitEvent(VFSEventType.NODE_CREATED, assetDir, { isAssetDir: true, ownerId: owner.nodeId });
+      return assetDir;
+    } catch (error) {
+      throw this.wrapError(error, 'Failed to create asset directory');
+    }
+  }
 
   /**
-   * 读取节点内容 (支持字符串和二进制)
+   * [新增] 获取节点的资产目录（O(1) 查找）
    */
+  async getAssetDirectory(ownerNodeId: string): Promise<VNodeData | null> {
+    const owner = await this.storage.loadVNode(ownerNodeId);
+    if (!owner?.metadata.assetDirId) return null;
+    return this.storage.loadVNode(owner.metadata.assetDirId);
+  }
+
+  /**
+   * [新增] 获取资产目录的所有者（O(1) 查找）
+   */
+  async getAssetOwner(assetDirId: string): Promise<VNodeData | null> {
+    const assetDir = await this.storage.loadVNode(assetDirId);
+    if (!assetDir?.metadata.ownerId) return null;
+    return this.storage.loadVNode(assetDir.metadata.ownerId);
+  }
+
+  // ==================== 读取操作 ====================
+
   async read(vnodeOrId: VNodeData | string): Promise<string | ArrayBuffer> {
     const node = await this.resolveNode(vnodeOrId);
     
@@ -146,9 +223,18 @@ export class VFS {
     }
   }
 
+  async readdir(vnodeOrId: VNodeData | string): Promise<VNodeData[]> {
+    const node = await this.resolveNode(vnodeOrId);
+    if (node.type !== VNodeType.DIRECTORY) {
+      throw new VFSError(VFSErrorCode.INVALID_OPERATION, `Not a directory: ${node.nodeId}`);
+    }
+    return this.storage.getChildren(node.nodeId);
+  }
+
+  // ==================== 删除操作（内置 Asset 级联） ====================
 
   /**
-   * 删除节点 (级联删除)
+   * 删除节点（自动级联删除关联的资产目录）
    */
   async unlink(vnodeOrId: VNodeData | string, options: UnlinkOptions = {}): Promise<UnlinkResult> {
     let node: VNodeData;
@@ -163,27 +249,32 @@ export class VFS {
       throw error;
     }
 
+    // 收集主节点及其子孙
     const nodesToDelete = await this.collectDescendants(node);
     
     if (node.type === VNodeType.DIRECTORY && nodesToDelete.length > 1 && !options.recursive) {
       throw new VFSError(VFSErrorCode.INVALID_OPERATION, `Directory not empty: ${node.nodeId}`);
     }
 
+    // [核心] 收集关联的资产目录
+    const assetNodes = await this.collectAssetNodes(nodesToDelete);
+    const allNodesToDelete = [...nodesToDelete, ...assetNodes];
+
     // 检查保护状态
-    for (const n of nodesToDelete) {
+    for (const n of allNodesToDelete) {
       if (n.metadata?.isProtected) {
         throw new VFSError(VFSErrorCode.PERMISSION_DENIED, `Node '${n.name}' is protected`);
       }
     }
 
-    const allRemovedIds = nodesToDelete.map(n => n.nodeId);
+    const allRemovedIds = allNodesToDelete.map(n => n.nodeId);
     const tx = this.storage.beginTransaction([
       VFS_STORES.VNODES, VFS_STORES.CONTENTS, VFS_STORES.NODE_TAGS, 
       VFS_STORES.TAGS, VFS_STORES.SRS_ITEMS
     ]);
 
     try {
-      for (const n of nodesToDelete) {
+      for (const n of allNodesToDelete) {
         await this.middlewares.runBeforeDelete(n, tx);
         if (n.contentRef) await this.storage.contentStore.delete(n.contentRef, tx);
         await this.storage.cleanupNodeTags(n.nodeId, tx);
@@ -199,10 +290,9 @@ export class VFS {
       throw this.wrapError(error, 'Failed to delete node');
     }
   }
-  
+
   /**
-   * [新增] 批量原子删除节点
-   * @returns 被实际删除的节点总数（包含子节点）
+   * 批量原子删除节点（自动级联删除资产目录）
    */
   async batchDelete(nodeIds: string[]): Promise<number> {
     if (!nodeIds.length) return 0;
@@ -221,9 +311,14 @@ export class VFS {
         const node = await this.storage.loadVNode(nodeId, tx);
         if (!node) continue;
 
+        // 收集节点及其子孙
         const descendants = await this.collectDescendants(node, tx);
         
-        for (const n of descendants) {
+        // 收集关联的资产目录
+        const assetNodes = await this.collectAssetNodes(descendants, tx);
+        const allNodes = [...descendants, ...assetNodes];
+
+        for (const n of allNodes) {
           if (n.metadata?.isProtected) {
             throw new VFSError(VFSErrorCode.PERMISSION_DENIED, `Node '${n.name}' is protected`);
           }
@@ -257,8 +352,40 @@ export class VFS {
   }
 
   /**
-   * 移动节点
-   * @param newUserPath 目标相对路径 (e.g. "/new-dir/file.txt")
+   * [新增] 收集节点关联的资产目录（通过双向引用 O(1) 查找）
+   */
+  private async collectAssetNodes(nodes: VNodeData[], tx?: Transaction): Promise<VNodeData[]> {
+    const assetNodes: VNodeData[] = [];
+    const collected = new Set<string>();
+
+    for (const node of nodes) {
+      // 跳过资产目录本身（避免重复）
+      if (node.metadata.isAssetDir) continue;
+      
+      // 通过双向引用直接获取资产目录
+      const assetDirId = node.metadata.assetDirId;
+      if (!assetDirId || collected.has(assetDirId)) continue;
+
+      const assetDir = await this.storage.loadVNode(assetDirId, tx);
+      if (assetDir) {
+        // 收集资产目录及其所有子节点
+        const assetDescendants = await this.collectDescendants(assetDir, tx);
+        for (const desc of assetDescendants) {
+          if (!collected.has(desc.nodeId)) {
+            assetNodes.push(desc);
+            collected.add(desc.nodeId);
+          }
+        }
+      }
+    }
+
+    return assetNodes;
+  }
+
+  // ==================== 移动操作（内置 Asset 级联） ====================
+
+  /**
+   * 移动节点（自动同步移动资产目录）
    */
   async move(vnodeOrId: VNodeData | string, newUserPath: string): Promise<VNodeData> {
     const node = await this.resolveNode(vnodeOrId);
@@ -282,6 +409,7 @@ export class VFS {
     const tx = this.storage.beginTransaction([VFS_STORES.VNODES, VFS_STORES.SRS_ITEMS, VFS_STORES.CONTENTS]);
 
     try {
+      // 更新主节点
       node.parentId = newParentId;
       node.name = this.pathResolver.basename(userPath);
       node.path = newSystemPath;
@@ -289,9 +417,13 @@ export class VFS {
 
       await this.storage.inodeStore.put(node, tx);
 
+      // 更新子节点路径
       if (node.type === VNodeType.DIRECTORY) {
         await this.updateDescendantPaths(node, oldSystemPath, newSystemPath, module, tx);
       }
+
+      // [核心] 同步移动资产目录
+      await this.syncMoveAssetDirectory(node, oldSystemPath, newSystemPath, tx);
 
       await this.middlewares.runAfterMove(node, oldSystemPath, newSystemPath, tx);
       await tx.done;
@@ -304,7 +436,7 @@ export class VFS {
   }
 
   /**
-   * 批量移动节点
+   * 批量移动节点（自动同步移动资产目录）
    */
   async batchMove(nodeIds: string[], targetParentId: string | null): Promise<void> {
     if (!nodeIds.length) return;
@@ -330,6 +462,9 @@ export class VFS {
       for (const nodeId of nodeIds) {
         const node = await this.storage.loadVNode(nodeId, tx);
         if (!node) continue;
+
+        // 跳过资产目录（它们会随主节点自动移动）
+        if (node.metadata.isAssetDir) continue;
 
         // 循环检测
         if (targetParentId) {
@@ -392,8 +527,54 @@ export class VFS {
   }
 
   /**
-   * 复制节点
-   * @param targetUserPath 目标相对路径
+   * [新增] 同步移动资产目录
+   * 通过双向引用直接定位，无需路径查询
+   */
+  private async syncMoveAssetDirectory(
+    owner: VNodeData,
+    _oldOwnerPath: string,
+    newOwnerPath: string,
+    tx: Transaction
+  ): Promise<void> {
+    const assetDirId = owner.metadata.assetDirId;
+    if (!assetDirId) return;
+
+    const assetDir = await this.storage.loadVNode(assetDirId, tx);
+    if (!assetDir) {
+      // 双向引用失效，清理 owner 的引用
+      delete owner.metadata.assetDirId;
+      await this.storage.inodeStore.put(owner, tx);
+      return;
+    }
+
+    const oldAssetPath = assetDir.path;
+    const newAssetPath = AssetUtils.calculateNewAssetPath(newOwnerPath, owner.type);
+    const newAssetName = AssetUtils.getAssetDirName(owner);
+
+    // 更新资产目录的 parentId
+    if (owner.type === VNodeType.FILE) {
+      // 文件的资产目录与文件同级
+      assetDir.parentId = owner.parentId;
+    } else {
+      // 目录的资产目录在目录内
+      assetDir.parentId = owner.nodeId;
+    }
+
+    assetDir.name = newAssetName;
+    assetDir.path = newAssetPath;
+    assetDir.moduleId = owner.moduleId;
+    assetDir.modifiedAt = Date.now();
+
+    await this.storage.inodeStore.put(assetDir, tx);
+
+    // 递归更新资产目录内的子节点路径
+    await this.updateDescendantPaths(assetDir, oldAssetPath, newAssetPath, owner.moduleId!, tx);
+  }
+
+  // ==================== 复制操作（内置 Asset 级联） ====================
+
+  /**
+   * 复制节点（自动复制资产目录）
    */
   async copy(sourceId: string, targetUserPath: string): Promise<CopyResult> {
     const source = await this.resolveNode(sourceId);
@@ -427,6 +608,7 @@ export class VFS {
     const tx = this.storage.beginTransaction([VFS_STORES.VNODES, VFS_STORES.CONTENTS, VFS_STORES.NODE_TAGS]);
 
     try {
+      // 执行主节点复制
       for (const op of operations) {
         await this.storage.inodeStore.put(op.newNode, tx);
 
@@ -445,6 +627,9 @@ export class VFS {
         }
       }
 
+      // [核心] 复制资产目录并建立新的双向引用
+      await this.syncCopyAssetDirectory(source, targetId, targetSystemPath, module, tx);
+
       // Middleware hook
       const targetNode = await this.storage.loadVNode(targetId, tx);
       if (source && targetNode) {
@@ -460,22 +645,123 @@ export class VFS {
     }
   }
 
-  // ==================== 读取操作 ====================
-
   /**
-   * 读取目录
+   * [新增] 同步复制资产目录
    */
-  async readdir(vnodeOrId: VNodeData | string): Promise<VNodeData[]> {
-    const node = await this.resolveNode(vnodeOrId);
-    if (node.type !== VNodeType.DIRECTORY) {
-      throw new VFSError(VFSErrorCode.INVALID_OPERATION, `Not a directory: ${node.nodeId}`);
+  private async syncCopyAssetDirectory(
+    source: VNodeData,
+    targetId: string,
+    targetPath: string,
+    moduleId: string,
+    tx: Transaction
+  ): Promise<void> {
+    const sourceAssetDirId = source.metadata.assetDirId;
+    if (!sourceAssetDirId) return;
+
+    const sourceAssetDir = await this.storage.loadVNode(sourceAssetDirId, tx);
+    if (!sourceAssetDir) return;
+
+    const targetNode = await this.storage.loadVNode(targetId, tx);
+    if (!targetNode) return;
+
+    // 计算新资产目录路径
+    const newAssetPath = AssetUtils.calculateNewAssetPath(targetPath, source.type);
+
+    // 确定新资产目录的 parentId
+    const newAssetParentId = source.type === VNodeType.DIRECTORY
+      ? targetId         // 目录的资产目录在目录内
+      : targetNode.parentId; // 文件的资产目录与文件同级
+
+    // 递归复制资产目录
+    const newAssetDirId = await this.recursiveCopyNode(
+      sourceAssetDir,
+      newAssetParentId,
+      newAssetPath,
+      moduleId,
+      tx
+    );
+
+    // 建立双向引用
+    targetNode.metadata.assetDirId = newAssetDirId;
+    await this.storage.inodeStore.put(targetNode, tx);
+
+    const newAssetDir = await this.storage.loadVNode(newAssetDirId, tx);
+    if (newAssetDir) {
+      newAssetDir.metadata.ownerId = targetId;
+      newAssetDir.metadata.isAssetDir = true;
+      await this.storage.inodeStore.put(newAssetDir, tx);
     }
-    return this.storage.getChildren(node.nodeId);
   }
 
   /**
-   * 搜索节点
+   * [新增] 递归复制节点
    */
+  private async recursiveCopyNode(
+    source: VNodeData,
+    targetParentId: string | null,
+    targetPath: string,
+    moduleId: string,
+    tx: Transaction
+  ): Promise<string> {
+    const newNodeId = this.generateId();
+    const targetName = this.pathResolver.basename(targetPath);
+
+    const newNode: VNodeData = {
+      nodeId: newNodeId,
+      parentId: targetParentId,
+      name: targetName,
+      type: source.type,
+      path: targetPath,
+      moduleId,
+      contentRef: source.type === VNodeType.FILE && source.contentRef
+        ? ContentStore.createRef(newNodeId)
+        : null,
+      size: source.size,
+      createdAt: Date.now(),
+      modifiedAt: Date.now(),
+      metadata: { ...source.metadata },
+      tags: [...source.tags]
+    };
+
+    // 清除旧的双向引用（复制时不继承）
+    delete newNode.metadata.assetDirId;
+    delete newNode.metadata.ownerId;
+
+    await this.storage.inodeStore.put(newNode, tx);
+
+    // 复制文件内容
+    if (source.contentRef && newNode.contentRef) {
+      const content = await this.storage.contentStore.get(source.contentRef, tx);
+      if (content) {
+        await this.storage.contentStore.put({
+          contentRef: newNode.contentRef,
+          nodeId: newNodeId,
+          content: content.content,
+          size: content.size,
+          createdAt: Date.now()
+        }, tx);
+      }
+    }
+
+    // 复制标签关联
+    for (const tag of newNode.tags) {
+      await this.storage.nodeTagStore.add(newNodeId, tag, tx);
+    }
+
+    // 递归复制子节点
+    if (source.type === VNodeType.DIRECTORY) {
+      const children = await this.storage.getChildren(source.nodeId, tx);
+      for (const child of children) {
+        const childTargetPath = this.pathResolver.join(targetPath, child.name);
+        await this.recursiveCopyNode(child, newNodeId, childTargetPath, moduleId, tx);
+      }
+    }
+
+    return newNodeId;
+  }
+
+  // ==================== 搜索与元数据 ====================
+
   async searchNodes(query: SearchQuery, moduleName?: string): Promise<VNodeData[]> {
     return this.storage.searchNodes(query, moduleName);
   }
@@ -489,7 +775,14 @@ export class VFS {
     
     const tx = this.storage.beginTransaction();
     try {
-      node.metadata = metadata;
+      // 保留 Asset 相关的元数据字段
+      const assetFields = {
+        assetDirId: node.metadata.assetDirId,
+        ownerId: node.metadata.ownerId,
+        isAssetDir: node.metadata.isAssetDir
+      };
+
+      node.metadata = { ...metadata, ...assetFields };
       node.modifiedAt = Date.now();
       await this.storage.inodeStore.put(node, tx);
       await tx.done;
@@ -756,9 +1049,17 @@ export class VFS {
       tags: [...source.tags]
     });
 
+    // 清除旧的双向引用
+    delete newNode.metadata.assetDirId;
+    delete newNode.metadata.ownerId;
+    delete newNode.metadata.isAssetDir;
+
     ops.push({ newNode, sourceContent: content });
 
     for (const childTree of children) {
+      // 跳过资产目录（会单独处理）
+      if (childTree.node.metadata.isAssetDir) continue;
+      
       const childPath = this.pathResolver.join(userPath, childTree.node.name);
       this.buildCopyOperations(childTree, newNodeId, childPath, module, ops);
     }

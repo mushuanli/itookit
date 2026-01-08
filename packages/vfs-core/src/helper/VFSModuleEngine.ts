@@ -1,12 +1,13 @@
 /**
  * @file vfs-core/helper/VFSModuleEngine.ts
- * 模块引擎适配器（精简版）
+ * 模块引擎适配器（使用 AssetUtils 和内置 Asset 功能）
  */
 import { VFSCore } from '../VFSCore';
 import { VNodeData, VNodeType } from '../store/types';
 import { VFSEventType } from '../core/types';
 import type { ISessionEngine, EngineNode, EngineSearchQuery, EngineEventType, EngineEvent } from '@itookit/common';
-import {guessMimeType} from '@itookit/common';
+import { guessMimeType } from '@itookit/common';
+
 export class VFSModuleEngine implements ISessionEngine {
   private vfs: VFSCore;
 
@@ -38,7 +39,9 @@ export class VFSModuleEngine implements ISessionEngine {
         engineNode.content = await this.core.read(nodeId);
       } else {
         const children = await this.core.readdir(nodeId);
-        engineNode.children = await Promise.all(children.map(c => buildTree(c.nodeId)));
+        // 过滤掉资产目录
+        const filteredChildren = children.filter(c => !c.metadata.isAssetDir);
+        engineNode.children = await Promise.all(filteredChildren.map(c => buildTree(c.nodeId)));
       }
 
       return engineNode;
@@ -50,7 +53,10 @@ export class VFSModuleEngine implements ISessionEngine {
 
   async getChildren(parentId: string): Promise<EngineNode[]> {
     const children = await this.core.readdir(parentId);
-    return children.map(n => this.toEngineNode(n));
+    // 过滤掉资产目录
+    return children
+      .filter(c => !c.metadata.isAssetDir)
+      .map(n => this.toEngineNode(n));
   }
 
   async readContent(id: string): Promise<string | ArrayBuffer> {
@@ -71,7 +77,11 @@ export class VFSModuleEngine implements ISessionEngine {
 
     const targetModule = query.scope?.includes('*') ? undefined : (query.scope?.[0] ?? this.moduleName);
     const results = await this.vfs.searchNodes(coreQuery, targetModule, this.moduleName);
-    return results.map(n => this.toEngineNode(n));
+    
+    // 过滤掉资产目录
+    return results
+      .filter(n => !n.metadata.isAssetDir)
+      .map(n => this.toEngineNode(n));
   }
 
   async getAllTags(): Promise<Array<{ name: string; color?: string }>> {
@@ -108,17 +118,25 @@ export class VFSModuleEngine implements ISessionEngine {
     return result;
   }
 
-    /**
-     * ✨ [更新] 创建资产文件
-     * 自动适配目录 (.assets) 或文件 (.filename) 作为主节点的情况
-     * 写入时如果目录不存在，VFSCore.createFile 会自动创建
-     */
+  /**
+   * 创建资产文件
+   * 使用 VFS 核心层的 Asset 功能，自动创建资产目录并建立双向引用
+   */
   async createAsset(ownerNodeId: string, filename: string, content: string | ArrayBuffer): Promise<EngineNode> {
     const owner = await this.core.storage.loadVNode(ownerNodeId);
     if (!owner) throw new Error(`Owner node ${ownerNodeId} not found`);
 
-    const assetDirPath = this.getAssetDirPath(owner);
-    const assetPath = this.core.pathResolver.join(assetDirPath, filename);
+    // 确保资产目录存在（使用核心层 API）
+    let assetDir = await this.core.getAssetDirectory(ownerNodeId);
+    if (!assetDir) {
+      assetDir = await this.core.createAssetDirectory(ownerNodeId);
+    }
+
+    // 在资产目录内创建文件
+    const assetPath = this.core.pathResolver.join(
+      this.core.pathResolver.toUserPath(assetDir.path, this.moduleName),
+      filename
+    );
 
     const node = await this.vfs.createFile(this.moduleName, assetPath, content, {
       isAsset: true,
@@ -129,15 +147,23 @@ export class VFSModuleEngine implements ISessionEngine {
     return this.toEngineNode(node);
   }
 
-    /**
-     * ✨ [更新] 获取关联资产目录 ID
-     */
+  /**
+   * 获取关联资产目录 ID（O(1) 查找）
+   */
   async getAssetDirectoryId(ownerNodeId: string): Promise<string | null> {
-    const owner = await this.core.storage.loadVNode(ownerNodeId);
-    if (!owner) return null;
+    const assetDir = await this.core.getAssetDirectory(ownerNodeId);
+    return assetDir?.nodeId ?? null;
+  }
 
-    const assetDirPath = this.getAssetDirPath(owner);
-    return this.resolvePath(assetDirPath);
+  /**
+   * 获取资产目录中的所有文件
+   */
+  async getAssets(ownerNodeId: string): Promise<EngineNode[]> {
+    const assetDir = await this.core.getAssetDirectory(ownerNodeId);
+    if (!assetDir) return [];
+
+    const children = await this.core.readdir(assetDir.nodeId);
+    return children.map(n => this.toEngineNode(n));
   }
 
   async writeContent(id: string, content: string | ArrayBuffer): Promise<void> {
@@ -202,7 +228,7 @@ export class VFSModuleEngine implements ISessionEngine {
       if (!path.startsWith(modulePrefix)) return false;
       
       const relativePath = path.slice(modulePrefix.length);
-      // 过滤隐藏目录
+      // 过滤隐藏目录（包括资产目录）
       return !relativePath.startsWith('/.') && !relativePath.includes('/.');
     };
 
@@ -212,26 +238,25 @@ export class VFSModuleEngine implements ISessionEngine {
       }
     };
 
-  const handlers: Record<string, (e: any) => void> = {
-    [VFSEventType.NODE_CREATED]: mapEvent('node:created'),
-    [VFSEventType.NODE_UPDATED]: mapEvent('node:updated'),
-    [VFSEventType.NODE_DELETED]: mapEvent('node:deleted'),
-    [VFSEventType.NODE_MOVED]: mapEvent('node:moved'),
-    [VFSEventType.NODE_COPIED]: mapEvent('node:moved'),
-    [VFSEventType.NODES_BATCH_UPDATED]: (e) => callback({ 
-      type: 'node:batch_updated', 
-      payload: e.data 
-    }),
-    [VFSEventType.NODES_BATCH_MOVED]: (e) => callback({ 
-      type: 'node:batch_moved', 
-      payload: e.data 
-    }),
-    // ✅ 新增批量删除事件处理
-    [VFSEventType.NODES_BATCH_DELETED]: (e) => callback({ 
-      type: 'node:batch_deleted', 
-      payload: { removedIds: e.data?.removedNodeIds || [] }  // 统一字段名
-    })
-  };
+    const handlers: Record<string, (e: any) => void> = {
+      [VFSEventType.NODE_CREATED]: mapEvent('node:created'),
+      [VFSEventType.NODE_UPDATED]: mapEvent('node:updated'),
+      [VFSEventType.NODE_DELETED]: mapEvent('node:deleted'),
+      [VFSEventType.NODE_MOVED]: mapEvent('node:moved'),
+      [VFSEventType.NODE_COPIED]: mapEvent('node:moved'),
+      [VFSEventType.NODES_BATCH_UPDATED]: (e) => callback({ 
+        type: 'node:batch_updated', 
+        payload: e.data 
+      }),
+      [VFSEventType.NODES_BATCH_MOVED]: (e) => callback({ 
+        type: 'node:batch_moved', 
+        payload: e.data 
+      }),
+      [VFSEventType.NODES_BATCH_DELETED]: (e) => callback({ 
+        type: 'node:batch_deleted', 
+        payload: { removedIds: e.data?.removedNodeIds || [] }
+      })
+    };
 
     const unsubs = Object.entries(handlers).map(([evt, handler]) => bus.on(evt as any, handler));
     return () => unsubs.forEach(u => u());
@@ -278,7 +303,9 @@ export class VFSModuleEngine implements ISessionEngine {
       tags: node.tags,
       metadata: node.metadata,
       moduleId: node.moduleId ?? undefined,
-      icon: node.metadata?.icon as string | undefined
+      icon: node.metadata?.icon as string | undefined,
+      // 暴露资产目录 ID（如果有）
+      assetDirId: node.metadata?.assetDirId as string | undefined
     };
   }
 
@@ -311,18 +338,4 @@ export class VFSModuleEngine implements ISessionEngine {
     
     return relativePath.startsWith('/') ? relativePath : '/' + relativePath;
   }
-
-  private getAssetDirPath(owner: VNodeData): string {
-    const ownerUserPath = this.core.pathResolver.toUserPath(owner.path, this.moduleName);
-
-    if (owner.type === VNodeType.DIRECTORY) {
-      return this.core.pathResolver.join(ownerUserPath, '.assets');
-    }
-
-    // 文件的伴生目录：同级隐藏目录
-    const lastSlash = ownerUserPath.lastIndexOf('/');
-    const parentPath = lastSlash <= 0 ? '/' : ownerUserPath.substring(0, lastSlash);
-    return this.core.pathResolver.join(parentPath, `.${owner.name}`);
-  }
-
 }

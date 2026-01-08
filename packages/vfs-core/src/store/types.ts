@@ -22,6 +22,29 @@ export enum VNodeType {
   DIRECTORY = 'directory'
 }
 
+/**
+ * [新增] Asset 元数据接口
+ * 用于建立 Owner <-> Asset Directory 的双向引用
+ */
+export interface AssetMetadata {
+  /** 
+   * 资产目录 ID（Owner 节点持有）
+   * 指向关联的资产目录节点
+   */
+  assetDirId?: string;
+  
+  /**
+   * 所有者节点 ID（Asset Directory 持有）
+   * 指向拥有此资产目录的主节点
+   */
+  ownerId?: string;
+  
+  /**
+   * 标记此节点是否为资产目录
+   */
+  isAssetDir?: boolean;
+}
+
 /** VNode 数据结构 */
 export interface VNodeData {
   nodeId: string;
@@ -34,11 +57,11 @@ export interface VNodeData {
   size: number;
   createdAt: number;
   modifiedAt: number;
-  metadata: Record<string, unknown>;
+  metadata: Record<string, unknown> & Partial<AssetMetadata>;
   tags: string[];
 }
 
-/** VNode 类 */
+/** VNode 工厂方法 */
 export const VNode = {
   create(data: Partial<VNodeData> & Pick<VNodeData, 'nodeId' | 'name' | 'type' | 'path'>): VNodeData {
     return {
@@ -68,7 +91,7 @@ export interface ContentData {
   createdAt: number;
 }
 
-// [新增] 标签数据结构
+// 标签数据结构
 export interface TagData {
   name: string;
   color?: string; // 可选，用于UI展示

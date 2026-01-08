@@ -3,11 +3,10 @@
  * @file vfs/middleware/base/ContentMiddleware.ts
  * 内容提供者基类和工厂
  */
-
-import { VNode, Transaction } from '../../store/types.js';
-import { VFSStorage } from '../../store/VFSStorage.js';
-import { EventBus } from '../../core/EventBus.js';
-import { IVFSMiddleware } from '../../core/types.js';
+import { VNodeData, Transaction } from '../../store/types';
+import { VFSStorage } from '../../store/VFSStorage';
+import { EventBus } from '../../core/EventBus';
+import { IVFSMiddleware } from '../../core/types';
 
 /**
  * 内容中间件基类
@@ -37,7 +36,7 @@ export abstract class ContentMiddleware implements IVFSMiddleware {
   /**
    * 检查是否可以处理该节点
    */
-  canHandle(_vnode: VNode): boolean {
+  canHandle(_vnode: VNodeData): boolean {
     return true; // 默认处理所有节点
   }
 
@@ -99,5 +98,5 @@ export abstract class ContentMiddleware implements IVFSMiddleware {
   /**
    * 清理资源（Provider 注销时调用）
    */
-  async cleanup?(): Promise<void>;
+  async cleanup?(): Promise<void>{}
 }
