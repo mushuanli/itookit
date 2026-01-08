@@ -17,9 +17,14 @@ export interface UnifiedSearchResult {
 }
 
 export interface Heading {
+    /** 标题层级 1-6 */
     level: number;
+    /** 标题文本 */
     text: string;
-    id: string; // ID必须在文档内唯一
+    /** 唯一标识符/锚点 (e.g. "heading-introduction-1") */
+    id: string;
+    /** 子标题列表。如果没有子节点，必须为空数组 []，不可为 undefined */
+    children: Heading[];
 }
 
 /**
