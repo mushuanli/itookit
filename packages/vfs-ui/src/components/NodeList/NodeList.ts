@@ -299,9 +299,7 @@ export class NodeList extends BaseComponent<NodeListState> {
   };
 
   private handleBulkDelete(): void {
-    if (confirm(`确定要删除 ${this.state.selectedItemIds.size} 个项目吗?`)) {
-      this.coordinator.publish('BULK_ACTION_REQUESTED', { action: 'delete' });
-    }
+    this.coordinator.publish('BULK_ACTION_REQUESTED', { action: 'delete' });
   }
 
   // --- Helper Methods ---
@@ -378,7 +376,8 @@ export class NodeList extends BaseComponent<NodeListState> {
 
     // Toggle visibility for read-only mode
     this.newControlsEl.style.display = this.state.readOnly ? 'none' : '';
-    this.footerEl.style.display = this.state.readOnly ? 'none' : '';
+    const shouldShowFooter = !this.state.readOnly && this.state.selectedItemIds.size > 1;
+    this.footerEl.style.display = shouldShowFooter ? '' : 'none';
 
     // Update create file label if changed
     if (this.state.createFileLabel !== this.currentCreateFileLabel) {

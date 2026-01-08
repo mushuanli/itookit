@@ -130,7 +130,7 @@ export class NodeListRenderer {
     return {
       isActive: item.id === state.activeId,
       isSelected: state.selectedItemIds.has(item.id),
-      isSelectionMode: !state.readOnly && state.selectedItemIds.size > 0,
+      isSelectionMode: !state.readOnly && state.selectedItemIds.size > 1,
       isOutlineExpanded: state.expandedOutlineIds.has(item.id),
       searchQueries: state.textSearchQueries,
       uiSettings: state.uiSettings,
@@ -146,7 +146,7 @@ export class NodeListRenderer {
         state.selectedItemIds
       ),
       isSelected: state.selectedItemIds.has(item.id),
-      isSelectionMode: !state.readOnly && state.selectedItemIds.size > 0,
+      isSelectionMode: !state.readOnly && state.selectedItemIds.size > 1,
       searchQueries: state.textSearchQueries
     };
   }
