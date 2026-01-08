@@ -91,7 +91,7 @@ export class MDxEditor extends IEditor {
 
   // ✨ [最终] init只负责挂载DOM，不再关心内容
   async init(container: HTMLElement, initialContent: string = ''): Promise<void> {
-    console.log('🎬 [MDxEditor] Starting initialization...');
+    //console.log('🎬 [MDxEditor] Starting initialization...');
     this._container = container;
     this.createContainers(container);
     this._isDirty = false;
@@ -237,7 +237,7 @@ export class MDxEditor extends IEditor {
   private listenToPluginEvents(): void {
     const unlisten = this.renderer.getPluginManager().listen('taskToggled', (result: TaskToggleResult) => {
       if (result.wasUpdated && result.updatedMarkdown !== this.getText()) {
-        console.log('[MDxEditor] Received taskToggled. Syncing editor text...');
+        //console.log('[MDxEditor] Received taskToggled. Syncing editor text...');
         
         // 1. 更新编辑器文本
         this.setText(result.updatedMarkdown);
@@ -711,7 +711,7 @@ export class MDxEditor extends IEditor {
     }
     this.isDestroying = true;
     
-    console.log(`[MDxEditor] Destroying instance for node ${this.config.nodeId || 'unknown'}.`);
+    //console.log(`[MDxEditor] Destroying instance for node ${this.config.nodeId || 'unknown'}.`);
 
     // 1. 等待当前可能正在进行的自动保存
     if (this.currentSavePromise) {
@@ -725,7 +725,7 @@ export class MDxEditor extends IEditor {
     // 2. 双重检查：如果等待期间有新输入，或者上次保存失败导致仍为 Dirty
     // 执行最终强制保存
     if (this._isDirty) {
-      console.log('[MDxEditor] Performing final save during destroy...');
+      //console.log('[MDxEditor] Performing final save during destroy...');
       await this.save();
     }
 
