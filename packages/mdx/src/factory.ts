@@ -76,7 +76,7 @@ export function registerPlugin(
   options: RegisterPluginOptions = {}
 ): void {
   if (pluginRegistry.has(name)) {
-    console.warn(`Plugin with name "${name}" is already registered. Overwriting.`);
+    //console.warn(`Plugin with name "${name}" is already registered. Overwriting.`);
   }
 
   pluginRegistry.set(name, {
@@ -289,11 +289,11 @@ export async function createMDxEditor(
   if (shouldLoadAssetManager && !hasAssetManager) {
       // 自动注入插件
       userPlugins.push('ui:asset-manager');
-      console.log('[Factory] Auto-injecting AssetManagerPlugin based on configuration.');
+      //console.log('[Factory] Auto-injecting AssetManagerPlugin based on configuration.');
   }
   config.plugins = userPlugins;
 
-  console.log(`[createMDxEditor] Received config.Plugin:${userPlugins} Content length: ${(config.initialContent || '').length}.`);
+  //console.log(`[createMDxEditor] Received config.Plugin:${userPlugins} Content length: ${(config.initialContent || '').length}.`);
 
   // ✅ [核心变更] 自动桥接 HostContext 的保存能力
   // 1. 确定保存处理器
@@ -365,7 +365,7 @@ export async function createMDxEditor(
   }
   const finalPluginNames = Array.from(pluginMap.keys());
   const sortedPluginNames = sortPlugins(finalPluginNames);
-  console.log('Plugins loading order:', ['editor:core (forced)', ...sortedPluginNames]);
+  //console.log('Plugins loading order:', ['editor:core (forced)', ...sortedPluginNames]);
 
   for (const pluginName of sortedPluginNames) {
     const pluginConfig = pluginMap.get(pluginName)!;

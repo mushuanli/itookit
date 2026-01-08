@@ -62,7 +62,6 @@ export class MDxController {
             this.readyReject = reject;
         });
         
-        console.log('[MDxController] Constructor called, starting init...',this.isStreamingInit);
         this.init();
     }
 
@@ -74,7 +73,6 @@ export class MDxController {
     }
 
     private async init() {
-        console.log('[MDxController] init() started');
         
         try {
             this.editor = await createMDxEditor(this.container, {
