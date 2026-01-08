@@ -212,15 +212,26 @@ export class VFSModuleEngine implements ISessionEngine {
       }
     };
 
-    const handlers: Record<string, (e: any) => void> = {
-      [VFSEventType.NODE_CREATED]: mapEvent('node:created'),
-      [VFSEventType.NODE_UPDATED]: mapEvent('node:updated'),
-      [VFSEventType.NODE_DELETED]: mapEvent('node:deleted'),
-      [VFSEventType.NODE_MOVED]: mapEvent('node:moved'),
-      [VFSEventType.NODE_COPIED]: mapEvent('node:moved'),
-      [VFSEventType.NODES_BATCH_UPDATED]: (e) => callback({ type: 'node:batch_updated', payload: e.data }),
-      [VFSEventType.NODES_BATCH_MOVED]: (e) => callback({ type: 'node:batch_moved', payload: e.data })
-    };
+  const handlers: Record<string, (e: any) => void> = {
+    [VFSEventType.NODE_CREATED]: mapEvent('node:created'),
+    [VFSEventType.NODE_UPDATED]: mapEvent('node:updated'),
+    [VFSEventType.NODE_DELETED]: mapEvent('node:deleted'),
+    [VFSEventType.NODE_MOVED]: mapEvent('node:moved'),
+    [VFSEventType.NODE_COPIED]: mapEvent('node:moved'),
+    [VFSEventType.NODES_BATCH_UPDATED]: (e) => callback({ 
+      type: 'node:batch_updated', 
+      payload: e.data 
+    }),
+    [VFSEventType.NODES_BATCH_MOVED]: (e) => callback({ 
+      type: 'node:batch_moved', 
+      payload: e.data 
+    }),
+    // ✅ 新增批量删除事件处理
+    [VFSEventType.NODES_BATCH_DELETED]: (e) => callback({ 
+      type: 'node:batch_deleted', 
+      payload: { removedIds: e.data?.removedNodeIds || [] }  // 统一字段名
+    })
+  };
 
     const unsubs = Object.entries(handlers).map(([evt, handler]) => bus.on(evt as any, handler));
     return () => unsubs.forEach(u => u());

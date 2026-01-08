@@ -377,8 +377,18 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
           scheduleProcess(this.queues.create, 'create', 50);
           break;
         case 'node:deleted':
-          (payload.data?.removedIds || payload.removedIds || [payload.nodeId])
-            .forEach((id: string) => this.queues.delete.add(id));
+        // ✅ 修复：统一处理单个删除事件
+        // payload 结构: { nodeId, path, data: { removedIds: [...] } }
+        const singleDeleteIds = payload.data?.removedIds || [payload.nodeId];
+        singleDeleteIds.filter(Boolean).forEach((id: string) => this.queues.delete.add(id));
+        scheduleProcess(this.queues.delete, 'delete', 20);
+        break;
+
+      // ✅ 新增：处理批量删除事件
+      case 'node:batch_deleted':
+        // payload 结构: { removedIds: [...] } (已在 VFSModuleEngine 中统一)
+        const batchDeleteIds = payload.removedIds || [];
+        batchDeleteIds.forEach((id: string) => this.queues.delete.add(id));
           scheduleProcess(this.queues.delete, 'delete', 20);
           break;
         case 'node:updated':
@@ -397,9 +407,16 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
       }
     };
 
-    const eventTypes: EngineEventType[] = [
-      'node:created', 'node:updated', 'node:deleted', 'node:moved', 'node:batch_updated', 'node:batch_moved'
-    ];
+  // ✅ 更新事件类型列表
+  const eventTypes: EngineEventType[] = [
+    'node:created', 
+    'node:updated', 
+    'node:deleted', 
+    'node:moved', 
+    'node:batch_updated', 
+    'node:batch_moved',
+    'node:batch_deleted'  // ✅ 新增
+  ];
 
     const unsubs = eventTypes.map(type => this.engine.on(type, handleEvent));
     this.engineUnsubscribe = () => unsubs.forEach(u => u());

@@ -73,6 +73,7 @@ export type EngineEventType =
     | 'node:moved'
     | 'node:batch_updated' // ✨ [新增] 批量更新 (如批量打标签)
     | 'node:batch_moved'   // ✨ [新增] 批量移动
+    | 'node:batch_deleted'  // ✅ 新增
     | 'error';
 
 export interface EngineEvent {
