@@ -2,8 +2,8 @@
  * @file vfs-ui/components/FileOutline/FileOutline.ts
  */
 import { BaseComponent } from '../../core/BaseComponent';
-import { VFSUIState, Heading, VFSNodeUI } from '../../types/types';
-import { createOutlineHTML } from './templates';
+import type { VFSUIState, Heading } from '../../types/types';
+import { findNodeById } from '../../utils/helpers';
 
 interface FileOutlineState {
     headings: Heading[];
@@ -18,57 +18,72 @@ export class FileOutline extends BaseComponent<FileOutlineState> {
 
     protected _transformState(globalState: VFSUIState): FileOutlineState {
         const { activeId, items, expandedOutlineH1Ids = new Set() } = globalState;
-        let activeHeadings: Heading[] = [];
+        let headings: Heading[] = [];
 
         if (activeId) {
-            const findActive = (itemList: VFSNodeUI[]): VFSNodeUI | null => {
-                for (const item of itemList) {
-                    if (item.id === activeId) return item;
-                    if (item.type === 'directory' && item.children) {
-                        const found = findActive(item.children);
-                        if (found) return found;
-                    }
-                }
-                return null;
-            };
-            const activeItem = findActive(items);
-            
+            const activeItem = findNodeById(items, activeId);
             if (activeItem?.type === 'file') {
-                activeHeadings = activeItem.headings || [];
+                headings = activeItem.headings || [];
             }
         }
-        
-        return {
-            headings: activeHeadings,
-            expandedH1Ids: expandedOutlineH1Ids,
-        };
+
+        return { headings, expandedH1Ids: expandedOutlineH1Ids };
     }
 
     protected _bindEvents(): void {
-        this.container.addEventListener('click', (event: MouseEvent) => {
-            const target = event.target as Element;
-            const actionEl = target.closest<HTMLElement>('[data-action]');
-            if (!actionEl) return;
-            
-            const liEl = target.closest<HTMLElement>('li[data-element-id]');
-            if (!liEl) return;
+        this.container.addEventListener('click', (e: MouseEvent) => {
+            const actionEl = (e.target as Element).closest<HTMLElement>('[data-action]');
+            const liEl = (e.target as Element).closest<HTMLElement>('li[data-element-id]');
+            if (!actionEl || !liEl) return;
 
             const elementId = liEl.dataset.elementId;
+            if (!elementId) return;
+
+            e.preventDefault();
             const action = actionEl.dataset.action;
-            
-            if (elementId) {
-                if (action === 'toggle-expand') {
-                    event.preventDefault();
-                    this.coordinator.publish('OUTLINE_H1_TOGGLE_REQUESTED', { elementId });
-                } else if (action === 'navigate') {
-                    event.preventDefault();
-                    this.coordinator.publish('NAVIGATE_TO_HEADING_REQUESTED', { elementId });
-                }
+
+            if (action === 'toggle-expand') {
+                this.coordinator.publish('OUTLINE_H1_TOGGLE_REQUESTED', { elementId });
+            } else if (action === 'navigate') {
+                this.coordinator.publish('NAVIGATE_TO_HEADING_REQUESTED', { elementId });
             }
         });
     }
 
     protected render(): void {
-        this.container.innerHTML = createOutlineHTML(this.state);
+        const { headings, expandedH1Ids } = this.state;
+
+        if (!headings?.length) {
+            this.container.innerHTML = `
+                <h3 class="vfs-file-outline__title">大纲</h3>
+                <div class="vfs-file-outline__placeholder">文档中暂无标题</div>`;
+            return;
+        }
+
+        const createItem = (h: Heading): string => {
+            const hasChildren = (h.children?.length ?? 0) > 0;
+            const isExpanded = expandedH1Ids.has(h.elementId);
+            
+            const toggleHTML = h.level === 1 && hasChildren
+                ? `<span class="vfs-file-outline__toggle ${isExpanded ? 'is-expanded' : ''}" data-action="toggle-expand"></span>`
+                : '<span class="vfs-file-outline__toggle is-placeholder"></span>';
+
+            const childrenHTML = h.level === 1 && hasChildren && isExpanded
+                ? `<ul class="vfs-file-outline__list">${h.children!.map(createItem).join('')}</ul>`
+                : '';
+
+            return `
+                <li class="vfs-file-outline__item vfs-file-outline__item--level-${h.level}" data-element-id="${h.elementId}">
+                    <a href="#${h.elementId}" class="vfs-file-outline__link" data-action="navigate">
+                        ${toggleHTML}
+                        <span class="vfs-file-outline__text">${h.text}</span>
+                    </a>
+                    ${childrenHTML}
+                </li>`;
+        };
+
+        this.container.innerHTML = `
+            <h3 class="vfs-file-outline__title">大纲</h3>
+            <ul class="vfs-file-outline__list">${headings.map(createItem).join('')}</ul>`;
     }
 }

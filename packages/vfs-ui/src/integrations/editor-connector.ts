@@ -3,18 +3,13 @@
  * @desc Provides a high-level function to connect a VFS-UI manager with any IEditor-compatible editor.
  *       Optimized with debounce saving and async initialization, guarded against race conditions.
  */
-import type { 
-    IEditor, 
-    EditorFactory, 
-    EditorOptions, 
-    ISessionUI, 
-    ISessionEngine, 
-    EditorHostContext,
-    NavigationRequest 
+import type {
+    IEditor, EditorFactory, EditorOptions, ISessionUI, ISessionEngine,
+    EditorHostContext, NavigationRequest
 } from '@itookit/common';
 import type { VFSNodeUI, VFSUIState } from '../types/types';
 import type { VFSService } from '../services/VFSService';
-import { parseFileInfo } from '../utils/parser';
+import { parseFileInfo, extractTaskCounts } from '../utils/parser';
 
 export interface ConnectOptions {
     /** Callback fired when an editor instance is fully created and mounted */
@@ -25,22 +20,11 @@ export interface ConnectOptions {
     [key: string]: any;
 }
 
-// 快速提取任务统计 (内存操作，极快)
-function quickExtractTaskCounts(content: string): { total: number; completed: number } {
-    let total = 0;
-    let completed = 0;
-    const mdRegex = /(?:^|[\s|])(?:[-+*]|\d+\.)?\s*\[([ xX])\]/g;
-    const mdMatches = [...content.matchAll(mdRegex)];
-    total += mdMatches.length;
-    completed += mdMatches.filter(m => m[1].toLowerCase() === 'x').length;
-    
-    const htmlRegex = /<input[^>]+type=["']checkbox["'][^>]*>/gi;
-    const htmlMatches = [...content.matchAll(htmlRegex)];
-    total += htmlMatches.length;
-    htmlMatches.forEach(m => { if (/checked/i.test(m[0])) completed++; });
-  
-    return { total, completed };
-}
+type VFSManager = ISessionUI<VFSNodeUI, VFSService> & { 
+    resolveEditorFactory?: (node: VFSNodeUI) => EditorFactory;
+    store?: { getState(): VFSUIState; dispatch(action: any): void };
+};
+
 
 /**
  * Connects a session manager to an editor.
@@ -48,48 +32,71 @@ function quickExtractTaskCounts(content: string): { total: number; completed: nu
  * [Updated] Now supports dynamic editor factory resolution via vfsManager.
  */
 export function connectEditorLifecycle(
-    // 使用扩展类型，以便访问 resolveEditorFactory
-    vfsManager: ISessionUI<VFSNodeUI, VFSService> & { resolveEditorFactory?: (node: VFSNodeUI) => EditorFactory },
+    vfsManager: VFSManager,
     engine: ISessionEngine,
     editorContainer: HTMLElement,
-    // [Change] This parameter is now optional or acts as a fallback default
-    defaultEditorFactory?: EditorFactory, 
+    defaultEditorFactory?: EditorFactory,
     options: ConnectOptions = {}
 ): () => void {
+    const { onEditorCreated, saveDebounceMs = 500, ...factoryExtraOptions } = options;
+
     let activeEditor: IEditor | null = null;
     let activeNode: VFSNodeUI | null = null;
     let activeEditorUnsubscribers: Array<() => void> = [];
-    let saveTimer: any = null;
+    let saveTimer: ReturnType<typeof setTimeout> | null = null;
     let currentSessionToken = 0;
-
     let lastKnownTaskStats: { total: number; completed: number } | null = null;
     let hasUnsavedOptimisticChanges = false;
 
-    const { onEditorCreated, saveDebounceMs = 500, ...factoryExtraOptions } = options;
+    const dispatchMetadataUpdate = (itemId: string, metadata: any) => {
+        vfsManager.store?.dispatch({ type: 'ITEM_METADATA_UPDATE', payload: { itemId, metadata } });
+    };
 
-    /**
-     * 纯 UI 更新，不涉及任何 IO
-     */
     const performOptimisticUpdate = () => {
         if (!activeEditor || !activeNode) return;
+        const stats = extractTaskCounts(activeEditor.getText());
+        const current = lastKnownTaskStats || activeNode.metadata.custom.taskCount || { total: 0, completed: 0 };
 
-        const content = activeEditor.getText();
-        const stats = quickExtractTaskCounts(content);
-        
-        const currentStats = lastKnownTaskStats || activeNode.metadata.custom.taskCount || { total: 0, completed: 0 };
-        
-        if (stats.total !== currentStats.total || stats.completed !== currentStats.completed) {
+        if (stats.total !== current.total || stats.completed !== current.completed) {
             lastKnownTaskStats = stats;
             hasUnsavedOptimisticChanges = true;
+            dispatchMetadataUpdate(activeNode.id, { custom: { ...activeNode.metadata.custom, taskCount: stats } });
+        }
+    };
 
-            const store = (vfsManager as any).store;
-            if (store && typeof store.dispatch === 'function') {
-                const newCustom = { ...activeNode.metadata.custom, taskCount: stats };
-                store.dispatch({
-                    type: 'ITEM_METADATA_UPDATE',
-                    payload: { itemId: activeNode.id, metadata: { custom: newCustom } }
+    /**
+     * 执行保存 (DB Write)
+     */
+    const saveCurrentSession = async () => {
+        if (!activeEditor || !activeNode) return;
+        if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+
+        const shouldSave = activeEditor.isDirty?.() || hasUnsavedOptimisticChanges;
+        if (!shouldSave) return;
+
+        try {
+            const state = vfsManager.store?.getState();
+            const exists = state?.items.some(function check(n): boolean {
+                return n.id === activeNode!.id || !!n.children?.some(check);
+            });
+
+            if (exists) {
+                const content = activeEditor.getText();
+                await engine.writeContent(activeNode.id, content);
+
+                const { metadata, summary } = parseFileInfo(content);
+                await engine.updateMetadata(activeNode.id, {
+                    taskCount: metadata.taskCount,
+                    clozeCount: metadata.clozeCount,
+                    mermaidCount: metadata.mermaidCount,
+                    _summary: summary
                 });
+
+                activeEditor.setDirty?.(false);
+                hasUnsavedOptimisticChanges = false;
             }
+        } catch (error) {
+            console.error('[EditorConnector] Save failed:', error);
         }
     };
 
@@ -100,47 +107,6 @@ export function connectEditorLifecycle(
         if (saveTimer) clearTimeout(saveTimer);
         saveTimer = setTimeout(saveCurrentSession, saveDebounceMs);
     };
-
-    /**
-     * 执行保存 (DB Write)
-     */
-    const saveCurrentSession = async () => {
-        if (!activeEditor || !activeNode) return;
-        if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
-
-        const shouldSave = (activeEditor.isDirty && activeEditor.isDirty()) || hasUnsavedOptimisticChanges;
-
-        if (!shouldSave) {
-            return;
-        }
-
-        try {
-            const currentState: VFSUIState = (vfsManager as any).store.getState();
-            const exists = currentState.items.some(function check(n): boolean {
-                return n.id === activeNode!.id || (n.children ? n.children.some(check) : false);
-            });
-
-            if (exists) {
-                const contentToSave = activeEditor.getText();
-                await engine.writeContent(activeNode.id, contentToSave);
-                
-                const parseResult = parseFileInfo(contentToSave);
-                const metadataUpdates = {
-                    taskCount: parseResult.metadata.taskCount,
-                    clozeCount: parseResult.metadata.clozeCount,
-                    mermaidCount: parseResult.metadata.mermaidCount,
-                    _summary: parseResult.summary 
-                };
-                await engine.updateMetadata(activeNode.id, metadataUpdates);
-                
-                if (activeEditor.setDirty) activeEditor.setDirty(false);
-                hasUnsavedOptimisticChanges = false;
-            }
-        } catch (error) {
-            console.error(`[EditorConnector] Save failed:`, error);
-        }
-    };
-
     /**
      * Tears down the current editor instance.
      * Performs: Token increment, Forced Save, Event Unbinding, Destruction.
@@ -148,21 +114,32 @@ export function connectEditorLifecycle(
     const teardownActiveEditor = async () => {
         currentSessionToken++;
         if (activeEditor) {
-            await saveCurrentSession(); 
-            
+            await saveCurrentSession();
             activeEditorUnsubscribers.forEach(unsub => unsub());
             activeEditorUnsubscribers = [];
             await activeEditor.destroy();
-            
             activeEditor = null;
             activeNode = null;
             lastKnownTaskStats = null;
             hasUnsavedOptimisticChanges = false;
-            
-            if (onEditorCreated) onEditorCreated(null);
+            onEditorCreated?.(null);
         }
     };
 
+    const createHostContext = (): EditorHostContext => {
+        const externalContext = factoryExtraOptions.hostContext as EditorHostContext | undefined;
+        return {
+            toggleSidebar: () => vfsManager.toggleSidebar(),
+            saveContent: (nodeId, content) => engine.writeContent(nodeId, content),
+            navigate: async (request: NavigationRequest) => {
+                if (externalContext?.navigate) {
+                    await externalContext.navigate(request);
+                } else {
+                    console.warn('[EditorConnector] No navigation handler connected.', request);
+                }
+            }
+        };
+    };
     /**
      * Main handler for session selection events.
      */
@@ -171,135 +148,78 @@ export function connectEditorLifecycle(
         const myToken = currentSessionToken;
         editorContainer.innerHTML = '';
 
-        if (item && item.type === 'file') {
-            const initEditor = async () => {
-                if (myToken !== currentSessionToken) return;
-                try {
-                    // 动态解析 Factory
-                    let targetFactory: EditorFactory | undefined;
-
-                    // 1. 优先尝试使用 Manager 的解析器 (支持扩展名注册和自定义 resolver)
-                    if (typeof vfsManager.resolveEditorFactory === 'function') {
-                        targetFactory = vfsManager.resolveEditorFactory(item);
-                    }
-                    
-                    // 2. 回退到传入 connector 的默认 factory
-                    if (!targetFactory) {
-                        targetFactory = defaultEditorFactory;
-                    }
-
-                    if (!targetFactory) {
-                        throw new Error("No suitable editor factory found.");
-                    }
-
-                    // ✅ [关键修改] 获取上层(MemoryManager)传入的 HostContext
-                    const externalHostContext = factoryExtraOptions.hostContext as EditorHostContext | undefined;
-
-                    // ✅ [关键修改] 组装混合 HostContext：既包含 VFS 内部能力，也透传外部能力
-                    const hostContext: EditorHostContext = {
-                        toggleSidebar: (collapsed?: boolean) => {
-                            // 调用 VFS 内部侧边栏切换
-                            vfsManager.toggleSidebar();
-                            // 如果外部也需要感知，透传调用
-                            //externalHostContext?.toggleSidebar?.(collapsed);
-                        },
-                        saveContent: async (nodeId, content) => {
-                            // 直接写入 Engine
-                            await engine.writeContent(nodeId, content);
-                        },
-                        navigate: async (request: NavigationRequest) => {
-                            // ✅ 关键：如果外部提供了 navigate 处理函数（MemoryManager -> Main），则转发
-                            if (externalHostContext?.navigate) {
-                                console.log('[EditorConnector] Forwarding navigation request:', request);
-                                await externalHostContext.navigate(request);
-                            } else {
-                                // 只有在没有外部宿主时才警告
-                                console.warn('[EditorConnector] Default navigation handler: No host connected.', request);
-                            }
-                        }
-                    };
-
-                    const content = item.content?.data || '';
-                    
-                    const editorOptions: EditorOptions = {
-                        ...factoryExtraOptions,
-                        initialContent: content,
-                        title: item.metadata.title,
-                        nodeId: item.id,
-                        // 传递扩展名给编辑器
-                        language: item.metadata.custom?._extension || '',
-                        
-                        // ✅ [关键新增] 注入标准依赖
-                        sessionEngine: engine,
-                        hostContext: hostContext
-                    };
-
-                    const editorInstance = await targetFactory(editorContainer, editorOptions);
-
-                    if (myToken !== currentSessionToken) {
-                        if (editorInstance) editorInstance.destroy();
-                        return;
-                    }
-
-                    activeEditor = editorInstance;
-                    activeNode = item;
-                    lastKnownTaskStats = item.metadata.custom.taskCount || null;
-                    hasUnsavedOptimisticChanges = false;
-
-                    if (activeEditor) {
-                        const unsubBlur = activeEditor.on('blur', () => scheduleSave());
-                        if (unsubBlur) activeEditorUnsubscribers.push(unsubBlur);
-
-                        const unsubMode = activeEditor.on('modeChanged', (payload: any) => {
-                            if (payload && payload.mode === 'render') saveCurrentSession();
-                        });
-                        if (unsubMode) activeEditorUnsubscribers.push(unsubMode);
-                        
-                        const unsubChange = activeEditor.on('interactiveChange', () => { 
-                            performOptimisticUpdate();
-                            scheduleSave(); 
-                        });
-                        if (unsubChange) activeEditorUnsubscribers.push(unsubChange);
-
-                        const unsubOptimistic = activeEditor.on('optimisticUpdate', () => {
-                             performOptimisticUpdate();
-                        });
-                        if (unsubOptimistic) activeEditorUnsubscribers.push(unsubOptimistic);
-                    }
-
-                    if (onEditorCreated) onEditorCreated(activeEditor);
-
-                } catch (error) {
-                    if (myToken === currentSessionToken) {
-                        console.error(`[EditorConnector] Create failed:`, error);
-                        editorContainer.innerHTML = `<div class="editor-placeholder editor-placeholder--error">Error loading file: ${(error as Error).message}</div>`;
-                    }
-                }
-            };
-            setTimeout(initEditor, 0);
-        } else {
-            editorContainer.innerHTML = `<div class="editor-placeholder">Select a file...</div>`;
+        if (!item || item.type !== 'file') {
+            editorContainer.innerHTML = '<div class="editor-placeholder">Select a file...</div>';
+            return;
         }
+
+        setTimeout(async () => {
+            if (myToken !== currentSessionToken) return;
+
+            try {
+                // Resolve editor factory
+                let factory = vfsManager.resolveEditorFactory?.(item) || defaultEditorFactory;
+                if (!factory) throw new Error("No suitable editor factory found.");
+
+                const editorOptions: EditorOptions = {
+                    ...factoryExtraOptions,
+                    initialContent: item.content?.data || '',
+                    title: item.metadata.title,
+                    nodeId: item.id,
+                    language: item.metadata.custom?._extension || '',
+                    sessionEngine: engine,
+                    hostContext: createHostContext()
+                };
+
+                const editor = await factory(editorContainer, editorOptions);
+
+                if (myToken !== currentSessionToken) {
+                    editor?.destroy();
+                    return;
+                }
+
+                activeEditor = editor;
+                activeNode = item;
+                lastKnownTaskStats = item.metadata.custom.taskCount || null;
+                hasUnsavedOptimisticChanges = false;
+
+                if (activeEditor) {
+                    const events = [
+                        ['blur', scheduleSave],
+                        ['modeChanged', (p: any) => p?.mode === 'render' && saveCurrentSession()],
+                        ['interactiveChange', () => { performOptimisticUpdate(); scheduleSave(); }],
+                        ['optimisticUpdate', performOptimisticUpdate]
+                    ] as const;
+
+                    events.forEach(([event, handler]) => {
+                        const unsub = activeEditor!.on(event, handler as any);
+                        if (unsub) activeEditorUnsubscribers.push(unsub);
+                    });
+                }
+
+                onEditorCreated?.(activeEditor);
+            } catch (error) {
+                if (myToken === currentSessionToken) {
+                    console.error('[EditorConnector] Create failed:', error);
+                    editorContainer.innerHTML = `<div class="editor-placeholder editor-placeholder--error">Error: ${(error as Error).message}</div>`;
+                }
+            }
+        }, 0);
     };
 
     // 监听导航事件
-    const unsubscribeNav = vfsManager.on('navigateToHeading', async (payload: { elementId: string }) => {
-        if (activeEditor) {
-            console.log('[EditorConnector] Navigating to:', payload.elementId);
-            await activeEditor.navigateTo({ elementId: payload.elementId });
-        }
+    const unsubNav = vfsManager.on('navigateToHeading', async ({ elementId }: { elementId: string }) => {
+        activeEditor?.navigateTo({ elementId });
     });
 
-    const unsubscribeSessionListener = vfsManager.on('sessionSelected', handleSessionChange);
+    const unsubSession = vfsManager.on('sessionSelected', handleSessionChange);
 
-    (async () => {
-        const initialItem = vfsManager.getActiveSession();
-        await handleSessionChange({ item: initialItem });
-    })();
+    // Initialize with current session
+    handleSessionChange({ item: vfsManager.getActiveSession() });
 
     return () => {
-        unsubscribeSessionListener();
-        unsubscribeNav();
-        teardownActiveEditor().catch(err => console.error('Error during final teardown:', err));
+        unsubSession();
+        unsubNav();
+        teardownActiveEditor().catch(console.error);
     };
 }

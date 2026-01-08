@@ -15,38 +15,37 @@ export abstract class BaseComponent<TLocalState extends object> {
     protected readonly container: HTMLElement;
     protected readonly store: VFSStore;
     protected readonly coordinator: Coordinator;
-    protected state: TLocalState;
+    protected state: TLocalState = {} as TLocalState;
     private _unsubscribe: (() => void) | null = null;
 
     constructor({ container, store, coordinator }: BaseComponentParams) {
         this.container = container;
         this.store = store;
         this.coordinator = coordinator;
-        this.state = {} as TLocalState;
     }
 
-    public init(): void {
-        this._unsubscribe = this.store.subscribe(globalState => {
-            this._updateStateAndRender(globalState);
-        });
-        this._updateStateAndRender(this.store.getState());
+    init(): void {
+        this._unsubscribe = this.store.subscribe(this._update);
+        this._update(this.store.getState());
         this._bindEvents();
     }
 
-    private _updateStateAndRender(globalState: VFSUIState): void {
+    private _update = (globalState: VFSUIState): void => {
         const newState = this._transformState(globalState);
-        const hasChanged = Object.keys(newState).some(key => this.state[key as keyof TLocalState] !== newState[key as keyof TLocalState]);
+        const hasChanged = Object.keys(newState).some(
+            key => this.state[key as keyof TLocalState] !== newState[key as keyof TLocalState]
+        );
         if (hasChanged) {
             this.state = newState;
             this.render();
         }
-    }
-    
+    };
+
     protected abstract _transformState(globalState: VFSUIState): TLocalState;
     protected abstract render(): void;
-    protected _bindEvents(): void { /* Optional for subclasses */ }
+    protected _bindEvents(): void {}
 
-    public destroy(): void {
+    destroy(): void {
         this._unsubscribe?.();
         this._unsubscribe = null;
         this.container.innerHTML = '';
