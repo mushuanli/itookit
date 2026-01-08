@@ -3,7 +3,7 @@
  * @desc Component representing a single directory in the list.
  */
 import { BaseNodeItem } from './BaseNodeItem';
-import { VFSNodeUI } from '../../../types/types';
+import type { VFSNodeUI } from '../../../types/types';
 import { createDirectoryItemHTML } from './itemTemplates';
 
 export interface DirectoryItemProps {
@@ -15,75 +15,41 @@ export interface DirectoryItemProps {
 }
 
 export class DirectoryItem extends BaseNodeItem {
-    public childrenContainer: HTMLElement;
-    private currentProps: DirectoryItemProps;
+    public childrenContainer!: HTMLElement;
+    private props: DirectoryItemProps;
 
-    // [修正] 构造函数不再接收 callbacks
     constructor(item: VFSNodeUI, isReadOnly: boolean, initialProps: DirectoryItemProps) {
         super(item, isReadOnly);
-        this.currentProps = initialProps;
+        this.props = initialProps;
         this.render();
-        this.childrenContainer = this.element.querySelector('.vfs-directory-item__children')!;
     }
 
-    /**
-     * [新增] 更新数据对象并检查是否需要重绘
-     */
-    public updateItem(newItem: VFSNodeUI): void {
-        const oldTags = JSON.stringify(this.item.metadata.tags);
-        const newTags = JSON.stringify(newItem.metadata.tags);
-        const oldTitle = this.item.metadata.title;
-        const newTitle = newItem.metadata.title;
-        
-        super.updateItem(newItem);
-
-        if (oldTags !== newTags || oldTitle !== newTitle) {
+    updateItem(newItem: VFSNodeUI): void {
+        if (this.shouldRerender(this.item, newItem)) {
+            super.updateItem(newItem);
             this.render();
+        } else {
+            super.updateItem(newItem);
         }
     }
 
-    protected createRootElement(): HTMLElement {
-        const tempDiv = document.createElement('div');
-        tempDiv.innerHTML = '<div></div>';
-        return tempDiv.firstElementChild as HTMLElement;
-    }
-
-    public update(nextProps: DirectoryItemProps): void {
-        if (JSON.stringify(this.currentProps) !== JSON.stringify(nextProps)) {
-            this.currentProps = nextProps;
+    update(nextProps: DirectoryItemProps): void {
+        if (JSON.stringify(this.props) !== JSON.stringify(nextProps)) {
+            this.props = nextProps;
             this.render();
-            this.childrenContainer = this.element.querySelector('.vfs-directory-item__children')!;
         }
     }
 
     private render(): void {
-        const newHTML = createDirectoryItemHTML(
-            this.item,
-            this.currentProps.isExpanded,
-            this.currentProps.dirSelectionState,
-            this.currentProps.isSelected,
-            this.currentProps.isSelectionMode,
-            this.currentProps.searchQueries,
-            this.isReadOnly
-        );
-
-        const tempDiv = document.createElement('div');
-        tempDiv.innerHTML = newHTML;
-        const newElement = tempDiv.firstElementChild as HTMLElement;
+        const oldChildren = this.childrenContainer;
+        this.replaceElement(createDirectoryItemHTML(this.item, this.props, this.isReadOnly));
+        this.childrenContainer = this.element.querySelector('.vfs-directory-item__children')!;
         
-        const oldChildrenContainer = this.element.querySelector('.vfs-directory-item__children');
-        const newChildrenContainer = newElement.querySelector('.vfs-directory-item__children');
-        if (oldChildrenContainer && newChildrenContainer) {
-            while (oldChildrenContainer.firstChild) {
-                newChildrenContainer.appendChild(oldChildrenContainer.firstChild);
+        // Preserve children
+        if (oldChildren) {
+            while (oldChildren.firstChild) {
+                this.childrenContainer.appendChild(oldChildren.firstChild);
             }
         }
-
-        if (this.element.parentNode) {
-            this.element.parentNode.replaceChild(newElement, this.element);
-        }
-
-        Object.defineProperty(this, 'element', { value: newElement, writable: true });
-        this.childrenContainer = newChildrenContainer as HTMLElement;
     }
 }

@@ -19,37 +19,30 @@ export interface FooterCallbacks {
 }
 
 export class Footer {
-    private element: HTMLElement;
-    private callbacks: FooterCallbacks;
-
-    constructor(container: HTMLElement, callbacks: FooterCallbacks) {
-        this.element = container;
-        this.callbacks = callbacks;
+    constructor(private element: HTMLElement, private callbacks: FooterCallbacks) {
         this.bindEvents();
     }
 
     private bindEvents() {
         this.element.addEventListener('click', (e: MouseEvent) => {
-            const target = e.target as Element;
-            const actionEl = target.closest('[data-action]');
-            if (!actionEl || (target as HTMLInputElement).disabled) return;
+            const actionEl = (e.target as Element).closest('[data-action]');
+            if (!actionEl || (e.target as HTMLInputElement).disabled) return;
 
-            const action = actionEl.getAttribute('data-action');
-            switch (action) {
-                case 'toggle-select-all': this.callbacks.onSelectAllToggle(); break;
-                case 'bulk-delete': this.callbacks.onBulkDelete(); break;
-                case 'bulk-move': this.callbacks.onBulkMove(); break;
-                case 'settings': this.callbacks.onSettingsClick(); break;
-                case 'deselect-all': this.callbacks.onDeselectAll(); break;
-            }
+            const handlers: Record<string, () => void> = {
+                'toggle-select-all': this.callbacks.onSelectAllToggle,
+                'bulk-delete': this.callbacks.onBulkDelete,
+                'bulk-move': this.callbacks.onBulkMove,
+                'settings': this.callbacks.onSettingsClick,
+                'deselect-all': this.callbacks.onDeselectAll,
+            };
+
+            handlers[actionEl.getAttribute('data-action') || '']?.();
         });
     }
 
-    public render(props: FooterProps) {
+    render(props: FooterProps) {
         this.element.innerHTML = createFooterHTML(props);
         const checkbox = this.element.querySelector<HTMLInputElement>('.vfs-node-list__footer-checkbox');
-        if (checkbox) {
-            checkbox.indeterminate = props.selectionStatus === 'partial';
-        }
+        if (checkbox) checkbox.indeterminate = props.selectionStatus === 'partial';
     }
 }
