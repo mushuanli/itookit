@@ -3,8 +3,8 @@
  * @description Defines interfaces for registering file types, icons, and editors.
  */
 
-import { EditorFactory } from '@itookit/common';
-import { VFSNodeUI, Heading, FileMetadata } from '../types/types';
+import { EditorFactory,Heading } from '@itookit/common';
+import { VFSNodeUI, FileMetadata } from '../types/types';
 
 /**
  * 解析结果结构

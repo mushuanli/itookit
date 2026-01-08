@@ -1,8 +1,9 @@
 /**
  * @file vfs-ui/components/FileOutline/FileOutline.ts
  */
+import { Heading } from '@itookit/common';
 import { BaseComponent } from '../../core/BaseComponent';
-import type { VFSUIState, Heading } from '../../types/types';
+import type { VFSUIState } from '../../types/types';
 import { findNodeById } from '../../utils/helpers';
 
 interface FileOutlineState {
@@ -60,7 +61,7 @@ export class FileOutline extends BaseComponent<FileOutlineState> {
 
     const createItem = (h: Heading): string => {
       const hasChildren = (h.children?.length ?? 0) > 0;
-      const isExpanded = expandedH1Ids.has(h.elementId);
+      const isExpanded = expandedH1Ids.has(h.id);
 
       const toggle = h.level === 1 && hasChildren
         ? `<span class="vfs-file-outline__toggle ${isExpanded ? 'is-expanded' : ''}" data-action="toggle-expand"></span>`
@@ -71,8 +72,8 @@ export class FileOutline extends BaseComponent<FileOutlineState> {
         : '';
 
       return `
-        <li class="vfs-file-outline__item vfs-file-outline__item--level-${h.level}" data-element-id="${h.elementId}">
-          <a href="#${h.elementId}" class="vfs-file-outline__link" data-action="navigate">
+        <li class="vfs-file-outline__item vfs-file-outline__item--level-${h.level}" data-element-id="${h.id}">
+          <a href="#${h.id}" class="vfs-file-outline__link" data-action="navigate">
             ${toggle}
             <span class="vfs-file-outline__text">${h.text}</span>
           </a>

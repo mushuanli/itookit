@@ -3,27 +3,23 @@
  * @desc Centralized TypeScript type definitions for the VFS-UI library.
  */
 
+import type { 
+  Heading, 
+  TaskCounts, 
+} from '@itookit/common';
+
 // --- Parsed Metadata Types ---
 
 /**
  * Represents structured metadata that can be parsed from a file's content.
  */
 export interface FileMetadata {
-  taskCount?: { total: number; completed: number };
+  taskCount?: TaskCounts;
   clozeCount?: number;
   mermaidCount?: number;
 }
 
-/**
- * Represents a single heading within a document's outline.
- * This is a recursive structure to support nested headings (e.g., H2 under H1).
- */
-export interface Heading {
-  level: 1 | 2 | 3 | 4 | 5 | 6;
-  text: string;
-  elementId: string;
-  children?: Heading[];
-}
+// ❌ 删除本地 Heading 定义（已迁移到 @itookit/common）
 
 export interface ParseResult {
   summary: string;
