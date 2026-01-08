@@ -2,204 +2,127 @@
  * @file vfs-ui/mention/FileMentionSource.ts
  * @desc Implements IMentionSource for files using the generic ISessionEngine.
  */
+import { escapeHTML, type Suggestion, type HoverPreviewData, type EngineNode } from '@itookit/common';
+import { BaseMentionSource, MentionSourceDependencies } from './BaseMentionSource';
 
-import { 
-  IMentionSource, 
-  escapeHTML, 
-  type Suggestion, 
-  type HoverPreviewData,
-  type ISessionEngine,
-  type EngineNode
-} from '@itookit/common';
+export type FileSourceDependencies = MentionSourceDependencies;
 
-export interface FileSourceDependencies {
-  engine: ISessionEngine;
-  /** 
-   * 搜索范围
-   * - true: 全局搜索 (['*'])
-   * - false: 仅当前模块 (undefined)
-   * - string[]: 指定范围 (e.g. ['*'] or ['wiki', 'notes'])
-   */
-  scope?: boolean | string[]; 
-}
+export class FileMentionSource extends BaseMentionSource {
+    public readonly key = 'file';
+    public readonly triggerChar = '@';
 
-/**
- * @class
- * @implements {IMentionSource}
- * Provides @mention style autocompletion, hover previews, and data for files.
- * It communicates directly with vfs-core to ensure data is always accurate and up-to-date.
- */
-export class FileMentionSource extends IMentionSource {
-  public readonly key = 'file';
-  public readonly triggerChar = '@';
+    public async getSuggestions(query: string): Promise<Suggestion[]> {
+        try {
+            const results = await this.engine.search({
+                type: 'file',
+                text: query,
+                limit: 20,
+                scope: this.searchScope
+            });
 
-  private engine: ISessionEngine;
-  private searchScope: string[] | undefined;
-
-  constructor({ engine, scope = true }: FileSourceDependencies) {
-    super();
-    if (!engine) {
-      throw new Error("FileMentionSource requires an ISessionEngine instance.");
-    }
-    this.engine = engine;
-    
-    // 解析 scope 参数
-    if (Array.isArray(scope)) {
-        this.searchScope = scope;
-    } else {
-        this.searchScope = scope ? ['*'] : undefined;
-    }
-  }
-
-  /**
-   * Provides file suggestions based on a query string by searching within the specified module.
-   * @param query - The search string entered by the user.
-   * @returns A promise resolving to an array of file suggestions.
-   */
-  public async getSuggestions(query: string): Promise<Suggestion[]> {
-    try {
-      const results: EngineNode[] = await this.engine.search({
-          type: 'file',
-          text: query,
-          limit: 20,
-          scope: this.searchScope // 直接传递数组
-      });
-
-      const filteredResults = results.filter(node => {
-        // [优化] 过滤掉隐藏模块
-        if (node.moduleId && (node.moduleId.startsWith('.') || node.moduleId.startsWith('__'))) {
-          return false;
+            return this.filterResults(results).map(node => ({
+                id: node.id,
+                label: this.formatLabel(node),
+                title: node.name,
+                type: 'file',
+                path: node.path,
+                module: node.moduleId
+            }));
+        } catch (error) {
+            console.error('[FileMentionSource] Error getting suggestions:', error);
+            return [];
         }
-        // [优化] 过滤掉路径中包含隐藏文件夹的情况
-        if (node.path && node.path.split('/').some(part => (part.startsWith('.') || part.startsWith('__')))) {
-          return false;
-        }
-        // [优化] 过滤掉隐藏文件本身
-        if (node.name.startsWith('.') || node.name.startsWith('__')) {
-            return false;
-        }
-        return true;
-      });
-
-      return filteredResults.map(node => ({
-        id: node.id,
-        label: this.formatLabel(node),
-        title: node.name, // 这里可以保持显示带后缀的完整名称，或者也使用 stripExtension 处理
-        type: 'file',
-        path: node.path,
-        module: node.moduleId
-      }));
-    } catch (error) {
-      console.error(`[FileMentionSource] Error getting suggestions:`, error);
-      return [];
     }
-  }
 
   /**
    * 格式化显示标签，处理同名文件冲突
    */
-  private formatLabel(node: EngineNode): string {
-    const parentPath = node.path.substring(0, node.path.lastIndexOf('/')) || '/';
-    const context = parentPath === '/' ? '' : ` ${parentPath}`;
-    const modulePrefix = node.moduleId ? `[${node.moduleId}]` : '';
-    const icon = node.icon || '📄';
-    return `${icon} ${node.name} (${modulePrefix}${context})`;
-  }
+    private formatLabel(node: EngineNode): string {
+        const parentPath = node.path.substring(0, node.path.lastIndexOf('/')) || '/';
+        const context = parentPath === '/' ? '' : ` ${parentPath}`;
+        const modulePrefix = node.moduleId ? `[${node.moduleId}]` : '';
+        const icon = node.icon || '📄';
+        return `${icon} ${node.name} (${modulePrefix}${context})`;
+    }
 
   /**
    * ✅ 修复：接受字符串 URI，返回统一的类型
    */
-  public async getHoverPreview(uri: string): Promise<HoverPreviewData | null> {
-    if (!uri) return null;
-    
-    let urlObj: URL;
-    try {
-        urlObj = new URL(uri);
-    } catch (e) {
-        return null;
+    public async getHoverPreview(uri: string): Promise<HoverPreviewData | null> {
+        const fileId = this.parseUri(uri);
+        if (!fileId) return null;
+
+        try {
+            const [node, content] = await Promise.all([
+                this.engine.getNode(fileId),
+                this.engine.readContent(fileId)
+            ]);
+
+            if (!node) return null;
+
+            const textContent = typeof content === 'string'
+                ? content
+                : new TextDecoder().decode(content as ArrayBuffer);
+
+            const summary = textContent.substring(0, 150)
+                .replace(/[\r\n]+/g, ' ')
+                .replace(/([#*`])/g, '')
+                + (textContent.length > 150 ? '...' : '');
+
+            const dateStr = new Date(node.modifiedAt).toLocaleDateString();
+            const moduleBadge = node.moduleId
+                ? `<span style="background:#eee;padding:2px 4px;border-radius:3px;font-size:0.8em;margin-right:5px;">${node.moduleId}</span>`
+                : '';
+
+            return {
+                title: node.name,
+                contentHTML: `
+                    <div class="vfs-hover-preview" style="font-size:0.9em;line-height:1.4;">
+                        <div style="margin-bottom:6px;color:#666;font-size:0.85em;display:flex;align-items:center;">
+                            ${moduleBadge}
+                            <span style="font-family:monospace;">${node.path}</span>
+                        </div>
+                        <div style="margin-bottom:8px;color:#333;">${escapeHTML(summary)}</div>
+                        <div style="color:#999;font-size:0.8em;border-top:1px solid #eee;padding-top:4px;">
+                            Updated: ${dateStr}
+                        </div>
+                    </div>`,
+                icon: node.icon || '📄'
+            };
+        } catch (error) {
+            console.error('[FileMentionSource] Error in getHoverPreview:', error);
+            return null;
+        }
     }
 
-    if (!urlObj.pathname) return null;
-
-    const fileId = urlObj.pathname.substring(1);
-
-    try {
-      const [node, content] = await Promise.all([
-        this.engine.getNode(fileId),
-        this.engine.readContent(fileId)
-      ]);
-      
-      if (!node) return null;
-      
-      const textContent = typeof content === 'string' 
-        ? content 
-        : new TextDecoder().decode(content as ArrayBuffer);
-      
-      const summary = textContent.substring(0, 150)
-        .replace(/[\r\n]+/g, ' ') 
-        .replace(/([#*`])/g, '') 
-        + (textContent.length > 150 ? '...' : '');
-
-      const dateStr = new Date(node.modifiedAt).toLocaleDateString();
-      const moduleBadge = node.moduleId 
-        ? `<span style="background:#eee; padding:2px 4px; border-radius:3px; font-size:0.8em; margin-right:5px;">${node.moduleId}</span>` 
-        : '';
-
-      // ✅ 修复：返回统一的数据结构
-      const previewData: HoverPreviewData = {
-        title: node.name,
-        contentHTML: `
-          <div class="vfs-hover-preview" style="font-size: 0.9em; line-height: 1.4;">
-            <div style="margin-bottom: 6px; color: #666; font-size: 0.85em; display: flex; align-items: center;">
-               ${moduleBadge}
-               <span style="font-family: monospace;">${node.path}</span>
-            </div>
-            <div style="margin-bottom: 8px; color: #333;">
-              ${escapeHTML(summary)}
-            </div>
-            <div style="color: #999; font-size: 0.8em; border-top: 1px solid #eee; padding-top: 4px;">
-              Updated: ${dateStr}
-            </div>
-          </div>`,
-        icon: node.icon || '📄'
-      };
-
-      console.log('[FileMentionSource] Returning preview data for:', node.name);
-      return previewData;
-
-    } catch (error) {
-      console.error('[FileMentionSource] Error inside getHoverPreview:', error);
-      return null;
-    }
-  }
-  
   /**
    * Provides raw data for headless processing by tools like MDxProcessor.
    * @param targetURL - The vfs://file/... URI.
    * @returns A promise resolving to the file's data or null.
    */
-  public async getDataForProcess(targetURL: URL): Promise<any | null> {
-    if (!targetURL || !targetURL.pathname) return null;
-    const fileId = targetURL.pathname.substring(1);
-    try {
-      const node = await this.engine.getNode(fileId);
-      if (!node) return null;
-      const content = await this.engine.readContent(fileId);
-      
-      return {
-        id: node.id,
-        title: node.name,
-        content: content,
-        tags: node.tags,
-        module: node.moduleId,
-        path: node.path,
-        createdAt: new Date(node.createdAt),
-        modifiedAt: new Date(node.modifiedAt),
-        ...node.metadata,
-      };
-    } catch (error) {
-      console.warn(`[FileMentionSource] Process data fetch failed for ${fileId}:`, error);
-      return null;
+    public async getDataForProcess(targetURL: URL): Promise<any | null> {
+        const fileId = targetURL?.pathname?.substring(1);
+        if (!fileId) return null;
+
+        try {
+            const node = await this.engine.getNode(fileId);
+            if (!node) return null;
+
+            const content = await this.engine.readContent(fileId);
+            return {
+                id: node.id,
+                title: node.name,
+                content,
+                tags: node.tags,
+                module: node.moduleId,
+                path: node.path,
+                createdAt: new Date(node.createdAt),
+                modifiedAt: new Date(node.modifiedAt),
+                ...node.metadata,
+            };
+        } catch (error) {
+            console.warn(`[FileMentionSource] Process data fetch failed for ${fileId}:`, error);
+            return null;
+        }
     }
-  }
 }

@@ -1,105 +1,92 @@
 /**
- * @file common/components/TagEditor/TagEditorComponent.ts
+ * @file vfs-ui/components/TagEditor/TagEditorComponent.ts
  */
-import '../../styles/TagEditorComponent.css';
+import { escapeHTML, IAutocompleteSource, Suggestion } from '@itookit/common';
 
-import { escapeHTML,IAutocompleteSource, Suggestion } from '@itookit/common';
-
-/** UPDATE: Exported the params interface for use in other modules. */
 export interface TagEditorParams {
     container: HTMLElement;
     initialItems: string[];
     suggestionProvider: IAutocompleteSource;
-    onSave: (newItems: string[]) => void;
+    onSave: (items: string[]) => void;
     onCancel: () => void;
 }
 
 export class TagEditorComponent {
     private container: HTMLElement;
     private items: Set<string>;
-    private suggestionProvider: IAutocompleteSource;
-    private onSave: (newItems: string[]) => void;
+    private provider: IAutocompleteSource;
+    private onSave: (items: string[]) => void;
     private onCancel: () => void;
-
     private suggestions: Suggestion[] = [];
-    private activeIndex: number = -1;
+    private activeIndex = -1;
 
-    private pillsContainerEl!: HTMLElement;
-    private inputWrapperEl!: HTMLElement;
+    private pillsEl!: HTMLElement;
     private inputEl!: HTMLInputElement;
-    private suggestionsListEl!: HTMLElement;
+    private suggestionsEl!: HTMLElement;
 
-    constructor(params: TagEditorParams) {
-        if (!params.suggestionProvider || typeof params.suggestionProvider.getSuggestions !== 'function') {
-            throw new Error("TagEditorComponent requires a valid suggestionProvider with a 'getSuggestions' method.");
+    constructor({ container, initialItems, suggestionProvider, onSave, onCancel }: TagEditorParams) {
+        if (!suggestionProvider?.getSuggestions) {
+            throw new Error("TagEditorComponent requires a valid suggestionProvider");
         }
-        
-        this.container = params.container;
-        this.items = new Set(params.initialItems);
-        this.suggestionProvider = params.suggestionProvider;
-        this.onSave = params.onSave;
-        this.onCancel = params.onCancel;
+        this.container = container;
+        this.items = new Set(initialItems);
+        this.provider = suggestionProvider;
+        this.onSave = onSave;
+        this.onCancel = onCancel;
     }
 
-    public init(): void {
+    init(): void {
         this.render();
-        this._bindEvents();
-        this._renderInitialPills();
+        this.bindEvents();
+        this.items.forEach(item => this.addPill(item));
         this.inputEl.focus();
     }
 
-    private _bindEvents(): void {
-        this.container.addEventListener('keydown', this._handleKeyDown);
-        this.inputEl.addEventListener('input', this._handleInput);
-        this.container.addEventListener('click', this._handleClick);
+    private bindEvents(): void {
+        this.container.addEventListener('keydown', this.handleKeyDown);
+        this.inputEl.addEventListener('input', this.handleInput);
+        this.container.addEventListener('click', this.handleClick);
     }
-    
-    private _handleClick = (e: MouseEvent): void => {
+
+    private handleClick = (e: MouseEvent): void => {
         const target = e.target as HTMLElement;
 
-        const removeBtn = target.closest('.mdx-tag-editor__remove-btn');
-        if (removeBtn) {
+        if (target.closest('.mdx-tag-editor__remove-btn')) {
             e.stopPropagation();
-            const pillEl = removeBtn.closest('.mdx-tag-editor__pill') as HTMLElement;
-            if (pillEl) this._removeItem(pillEl.dataset.item!);
+            const pill = target.closest('.mdx-tag-editor__pill') as HTMLElement;
+            if (pill?.dataset.item) this.removeItem(pill.dataset.item);
             return;
         }
 
-        const suggestionItem = target.closest('.mdx-tag-editor__suggestion') as HTMLElement;
-        if (suggestionItem) {
+        const suggestion = target.closest('.mdx-tag-editor__suggestion') as HTMLElement;
+        if (suggestion?.dataset.item) {
             e.stopPropagation();
-            this._addItem(suggestionItem.dataset.item!);
-            this._clearSuggestions();
+            this.addItem(suggestion.dataset.item);
+            this.clearSuggestions();
             this.inputEl.value = '';
             return;
         }
 
-        const actionBtn = target.closest('.mdx-tag-editor__btn') as HTMLElement;
-        if (actionBtn) {
-            const action = actionBtn.dataset.action;
-            if (action === 'save') {
-                this.onSave(this.getItems());
-            } else if (action === 'cancel') {
-                this.onCancel();
-            }
-        }
+        const action = (target.closest('.mdx-tag-editor__btn') as HTMLElement)?.dataset.action;
+        if (action === 'save') this.onSave(this.getItems());
+        else if (action === 'cancel') this.onCancel();
     };
 
-    private _handleInput = async (/*e: Event*/): Promise<void> => {
+    private handleInput = async (): Promise<void> => {
         const query = this.inputEl.value;
         if (query) {
-            const allSuggestions = await this.suggestionProvider.getSuggestions(query);
-            this.suggestions = allSuggestions.filter(s => !this.items.has(s.label));
+            const all = await this.provider.getSuggestions(query);
+            this.suggestions = all.filter(s => !this.items.has(s.label));
         } else {
             this.suggestions = [];
         }
         this.activeIndex = -1;
-        this._renderSuggestions();
+        this.renderSuggestions();
     };
 
-    private _handleKeyDown = (e: KeyboardEvent): void => {
+    private handleKeyDown = (e: KeyboardEvent): void => {
         if (e.target !== this.inputEl) return;
-        
+
         const hasSuggestions = this.suggestions.length > 0;
 
         switch (e.key) {
@@ -107,123 +94,101 @@ export class TagEditorComponent {
             case ',':
                 e.preventDefault();
                 if (hasSuggestions && this.activeIndex > -1) {
-                    this._addItem(this.suggestions[this.activeIndex].label);
+                    this.addItem(this.suggestions[this.activeIndex].label);
                 } else if (this.inputEl.value.trim()) {
-                    this._addItem(this.inputEl.value.trim());
+                    this.addItem(this.inputEl.value.trim());
                 }
                 this.inputEl.value = '';
-                this._clearSuggestions();
+                this.clearSuggestions();
                 break;
             case 'Backspace':
-                if (this.inputEl.value === '' && this.items.size > 0) {
-                    const lastItem = Array.from(this.items).pop()!;
-                    this._removeItem(lastItem);
+                if (!this.inputEl.value && this.items.size) {
+                    this.removeItem([...this.items].pop()!);
                 }
                 break;
             case 'ArrowDown':
                 if (hasSuggestions) {
                     e.preventDefault();
                     this.activeIndex = (this.activeIndex + 1) % this.suggestions.length;
-                    this._renderSuggestions();
+                    this.renderSuggestions();
                 }
                 break;
             case 'ArrowUp':
                 if (hasSuggestions) {
                     e.preventDefault();
                     this.activeIndex = (this.activeIndex - 1 + this.suggestions.length) % this.suggestions.length;
-                    this._renderSuggestions();
+                    this.renderSuggestions();
                 }
                 break;
             case 'Escape':
                 e.preventDefault();
-                if (this.suggestions.length > 0) {
-                    this._clearSuggestions();
-                } else {
-                    this.onCancel();
-                }
+                this.suggestions.length ? this.clearSuggestions() : this.onCancel();
                 break;
         }
     };
-    
-    private _addItem(itemLabel: string): void {
-        if (!itemLabel) return;
-        const trimmedItem = itemLabel.trim();
-        if (trimmedItem.length === 0 || this.items.has(trimmedItem)) {
+
+    private addItem(label: string): void {
+        const item = label.trim();
+        if (!item || this.items.has(item)) {
             this.inputEl.value = '';
             return;
         }
-        this.items.add(trimmedItem);
-        this._addPill(trimmedItem);
-        this.inputEl.focus();
-    }
-    
-    private _removeItem(item: string): void {
-        this.items.delete(item);
-        const pillToRemove = this.pillsContainerEl.querySelector(`[data-item="${escapeHTML(item)}"]`);
-        if (pillToRemove) {
-            pillToRemove.remove();
-        }
+        this.items.add(item);
+        this.addPill(item);
         this.inputEl.focus();
     }
 
-    private _addPill(item: string): void {
-        const pillEl = document.createElement('li');
-        pillEl.className = 'mdx-tag-editor__pill';
-        pillEl.dataset.item = item;
-        pillEl.innerHTML = `
-            <span>${escapeHTML(item)}</span>
-            <button type="button" class="mdx-tag-editor__remove-btn" aria-label="Remove ${escapeHTML(item)}">&times;</button>
-        `;
-        this.pillsContainerEl.insertBefore(pillEl, this.inputWrapperEl);
+    private removeItem(item: string): void {
+        this.items.delete(item);
+        this.pillsEl.querySelector(`[data-item="${escapeHTML(item)}"]`)?.remove();
+        this.inputEl.focus();
     }
-    
-    private _clearSuggestions(): void {
+
+    private addPill(item: string): void {
+        const pill = document.createElement('li');
+        pill.className = 'mdx-tag-editor__pill';
+        pill.dataset.item = item;
+        pill.innerHTML = `<span>${escapeHTML(item)}</span><button type="button" class="mdx-tag-editor__remove-btn">&times;</button>`;
+        this.pillsEl.insertBefore(pill, this.pillsEl.querySelector('.mdx-tag-editor__input-wrapper'));
+    }
+
+    private clearSuggestions(): void {
         this.suggestions = [];
         this.activeIndex = -1;
-        this._renderSuggestions();
-    }
-    
-    private _renderSuggestions(): void {
-        if (this.suggestions.length === 0) {
-            this.suggestionsListEl.style.display = 'none';
-            return;
-        }
-        this.suggestionsListEl.innerHTML = this.suggestions.map((s, index) =>
-            `<li class="mdx-tag-editor__suggestion ${index === this.activeIndex ? 'is-active' : ''}" data-item="${escapeHTML(s.label)}">
-                ${escapeHTML(s.label)}
-            </li>`
-        ).join('');
-        this.suggestionsListEl.style.display = 'block';
+        this.renderSuggestions();
     }
 
-    private _renderInitialPills(): void {
-        Array.from(this.items).forEach(item => this._addPill(item));
+    private renderSuggestions(): void {
+        if (!this.suggestions.length) {
+            this.suggestionsEl.style.display = 'none';
+            return;
+        }
+        this.suggestionsEl.innerHTML = this.suggestions.map((s, i) =>
+            `<li class="mdx-tag-editor__suggestion ${i === this.activeIndex ? 'is-active' : ''}" data-item="${escapeHTML(s.label)}">${escapeHTML(s.label)}</li>`
+        ).join('');
+        this.suggestionsEl.style.display = 'block';
     }
-    
+
     private render(): void {
         this.container.innerHTML = `
-            <ul class="mdx-tag-editor__pills" data-role="pills-container">
-                <li class="mdx-tag-editor__input-wrapper" data-role="input-wrapper">
+            <ul class="mdx-tag-editor__pills">
+                <li class="mdx-tag-editor__input-wrapper">
                     <input type="text" class="mdx-tag-editor__input" placeholder="Add tag..." autocomplete="off">
                 </li>
             </ul>
-            <ul class="mdx-tag-editor__suggestions" data-role="suggestions-list"></ul>
+            <ul class="mdx-tag-editor__suggestions"></ul>
             <div class="mdx-tag-editor__footer">
                 <button type="button" class="mdx-tag-editor__btn mdx-tag-editor__btn--primary" data-action="save">Save</button>
                 <button type="button" class="mdx-tag-editor__btn" data-action="cancel">Cancel</button>
-            </div>
-        `;
-        this.pillsContainerEl = this.container.querySelector('[data-role="pills-container"]')!;
-        this.inputWrapperEl = this.container.querySelector('[data-role="input-wrapper"]')!;
+            </div>`;
+        this.pillsEl = this.container.querySelector('.mdx-tag-editor__pills')!;
         this.inputEl = this.container.querySelector('.mdx-tag-editor__input')!;
-        this.suggestionsListEl = this.container.querySelector('[data-role="suggestions-list"]')!;
+        this.suggestionsEl = this.container.querySelector('.mdx-tag-editor__suggestions')!;
     }
 
-    public getItems(): string[] {
-        const lastInput = this.inputEl ? this.inputEl.value.trim() : '';
-        if (lastInput && !this.items.has(lastInput)) {
-            this.items.add(lastInput);
-        }
-        return Array.from(this.items);
+    getItems(): string[] {
+        const last = this.inputEl?.value.trim();
+        if (last && !this.items.has(last)) this.items.add(last);
+        return [...this.items];
     }
 }

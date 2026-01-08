@@ -3,9 +3,9 @@
  * @desc HTML template generation functions for NodeList popovers, inputs, and footers.
  */
 import { escapeHTML } from '@itookit/common';
-import { UISettings, MenuItem } from '../../types/types';
+import type { UISettings, MenuItem } from '../../types/types';
 
-export function createItemInputHTML(creatingItem: { type: 'file' | 'directory' }): string {
+export const createItemInputHTML = (creatingItem: { type: 'file' | 'directory' }): string => {
     const icon = creatingItem.type === 'directory' ? '📁' : '📄';
     const placeholder = creatingItem.type === 'directory' ? '新目录名称...' : '新文件名称...';
     return `
@@ -13,23 +13,23 @@ export function createItemInputHTML(creatingItem: { type: 'file' | 'directory' }
             <span class="vfs-node-list__item-creator-icon">${icon}</span>
             <input type="text" class="vfs-node-list__item-creator-input" placeholder="${placeholder}" data-action="create-input" />
         </div>`;
-}
+};
 
-export function createContextMenuHTML(items: MenuItem[]): string {
-    if (!items || items.length === 0) return '';
+export const createContextMenuHTML = (items: MenuItem[]): string => {
+    if (!items?.length) return '';
     return `<div class="vfs-context-menu"><ul>${items.map(item => {
         if (item.type === 'separator') return '<li class="vfs-context-menu__separator"></li>';
         return `<li><button data-action="${escapeHTML(item.id)}">${item.iconHTML || ''}<span>${escapeHTML(item.label)}</span></button></li>`;
     }).join('')}</ul></div>`;
-}
+};
 
-export function createFooterHTML(options: { selectionStatus: 'none' | 'partial' | 'all', selectedCount: number, isReadOnly: boolean }): string {
-    const { selectionStatus, selectedCount, isReadOnly } = options;
-    
-    // ✨ [修改] 只有当选中数量大于 1 时，才进入批量操作模式
-    // 这意味着单选时，底部仍然显示普通的 "设置" 按钮
+export const createFooterHTML = ({ selectionStatus, selectedCount, isReadOnly }: { 
+    selectionStatus: 'none' | 'partial' | 'all'; 
+    selectedCount: number; 
+    isReadOnly: boolean;
+}): string => {
     const isBulkMode = !isReadOnly && selectedCount > 1;
-    
+
     const checkboxHTML = isReadOnly ? '' : `
         <input type="checkbox" class="vfs-node-list__footer-checkbox" data-action="toggle-select-all" 
             title="${selectionStatus === 'all' ? '全部取消' : '全选'}"
@@ -48,23 +48,26 @@ export function createFooterHTML(options: { selectionStatus: 'none' | 'partial' 
                     <button class="vfs-node-list__bulk-bar-btn vfs-node-list__bulk-bar-btn--danger" data-action="bulk-delete" title="删除"><i class="fas fa-trash"></i></button>
                 </div>
             </div>`;
-    } else {
-        return `
-            <div class="vfs-node-list__footer-content">
-                <div class="vfs-node-list__footer-selection-controls">${checkboxHTML}</div>
-                <div class="vfs-node-list__footer-actions-right">
-                    <button data-action="settings" title="设置"><i class="fas fa-cog"></i></button>
-                </div>
-            </div>`;
     }
-}
 
-export function createSettingsPopoverHTML(settings: UISettings): string {
-    const btn = (group: keyof UISettings, value: string, label: string) => `<button data-value="${value}" class="vfs-settings-popover__option-btn ${settings[group] === value ? 'is-active' : ''}">${label}</button>`;
+    return `
+        <div class="vfs-node-list__footer-content">
+            <div class="vfs-node-list__footer-selection-controls">${checkboxHTML}</div>
+            <div class="vfs-node-list__footer-actions-right">
+                <button data-action="settings" title="设置"><i class="fas fa-cog"></i></button>
+            </div>
+        </div>`;
+};
+
+export const createSettingsPopoverHTML = (settings: UISettings): string => {
+    const btn = (group: keyof UISettings, value: string, label: string) => 
+        `<button data-value="${value}" class="vfs-settings-popover__option-btn ${settings[group] === value ? 'is-active' : ''}">${label}</button>`;
+    
     const chk = (key: 'summary' | 'tags' | 'badges', label: string) => {
         const settingKey = `show${key.charAt(0).toUpperCase() + key.slice(1)}` as keyof UISettings;
         return `<label class="vfs-settings-popover__checkbox-label"><input type="checkbox" data-key="${key}" ${settings[settingKey] ? 'checked' : ''}> ${label}</label>`;
     };
+
     return `
         <div class="vfs-settings-popover">
             <div class="vfs-settings-popover__title">排序方式</div>
@@ -74,4 +77,4 @@ export function createSettingsPopoverHTML(settings: UISettings): string {
             <div class="vfs-settings-popover__title">显示内容</div>
             <div class="vfs-settings-popover__checkbox-group" data-setting="show">${chk('summary', '显示摘要')}${chk('tags', '显示标签')}${chk('badges', '显示元数据')}</div>
         </div>`;
-}
+};

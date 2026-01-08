@@ -13,13 +13,13 @@ import { VFSService } from './services/VFSService.js';
 // [新增] 导入类型
 import type { FileTypeDefinition, CustomEditorResolver } from './services/IFileTypeRegistry';
 
-export {FileMentionSource} from './mention/FileMentionSource';
-export {DirectoryMentionSource} from './mention/DirectoryMentionSource';
+export { FileMentionSource } from './mention/FileMentionSource';
+export { DirectoryMentionSource } from './mention/DirectoryMentionSource';
 
 // 修改 Options 类型定义以包含新的配置项
-type VFSUIOptions = SessionUIOptions & { 
-    initialState?: Partial<VFSUIState>,
-    defaultUiSettings?: Partial<UISettings>,
+export type VFSUIOptions = SessionUIOptions & {
+    initialState?: Partial<VFSUIState>;
+    defaultUiSettings?: Partial<UISettings>;
     /** [新增] 当没有文件时，要创建的默认文件的文件名。如果未提供，则不创建。 */
     defaultFileName?: string;
     /** [新增] 默认文件的内容，可以是一段帮助文本或模板。 */
@@ -40,9 +40,8 @@ type VFSUIOptions = SessionUIOptions & {
 /**
  * 创建 VFSUI 实例 (通用引擎模式)
  */
-export function createVFSUI(options: VFSUIOptions, engine: ISessionEngine): ISessionUI<VFSNodeUI, VFSService> {
-    return new VFSUIManager(options, engine);
-}
+export const createVFSUI = (options: VFSUIOptions, engine: ISessionEngine): ISessionUI<VFSNodeUI, VFSService> =>
+    new VFSUIManager(options, engine);
 
 export { VFSService, VFSUIManager };
 export * from './types/types.js';

@@ -3,7 +3,7 @@
  * @desc Component representing a single file in the list.
  */
 import { BaseNodeItem } from './BaseNodeItem';
-import { VFSNodeUI, UISettings } from '../../../types/types';
+import type { VFSNodeUI, UISettings } from '../../../types/types';
 import { createFileItemHTML } from './itemTemplates';
 
 export interface FileItemProps {
@@ -17,69 +17,31 @@ export interface FileItemProps {
 }
 
 export class FileItem extends BaseNodeItem {
-    private currentProps: FileItemProps;
+    private props: FileItemProps;
 
     constructor(item: VFSNodeUI, isReadOnly: boolean, initialProps: FileItemProps) {
         super(item, isReadOnly);
-        this.currentProps = initialProps;
+        this.props = initialProps;
         this.render();
     }
 
-    /**
-     * [新增] 更新数据对象并检查是否需要重绘
-     */
-    public updateItem(newItem: VFSNodeUI): void {
-        const oldTags = JSON.stringify(this.item.metadata.tags);
-        const newTags = JSON.stringify(newItem.metadata.tags);
-        const oldTitle = this.item.metadata.title;
-        const newTitle = newItem.metadata.title;
-        
-        // ✨ [新增] 检查任务统计是否变化
-        const oldTasks = JSON.stringify(this.item.metadata.custom?.taskCount);
-        const newTasks = JSON.stringify(newItem.metadata.custom?.taskCount);
-        
-        super.updateItem(newItem);
-
-        // 如果影响显示的元数据发生了变化，强制重绘
-        if (oldTags !== newTags || oldTitle !== newTitle || oldTasks !== newTasks) {
+    updateItem(newItem: VFSNodeUI): void {
+        if (this.shouldRerender(this.item, newItem)) {
+            super.updateItem(newItem);
             this.render();
+        } else {
+            super.updateItem(newItem);
         }
     }
 
-    protected createRootElement(): HTMLElement {
-        const tempDiv = document.createElement('div');
-        tempDiv.innerHTML = '<div></div>'; 
-        return tempDiv.firstElementChild as HTMLElement;
-    }
-
-    public update(nextProps: FileItemProps): void {
-        if (JSON.stringify(this.currentProps) !== JSON.stringify(nextProps)) {
-            this.currentProps = nextProps;
+    update(nextProps: FileItemProps): void {
+        if (JSON.stringify(this.props) !== JSON.stringify(nextProps)) {
+            this.props = nextProps;
             this.render();
         }
     }
 
     private render(): void {
-        const newHTML = createFileItemHTML(
-            this.item,
-            this.currentProps.isActive,
-            this.currentProps.isSelected,
-            this.currentProps.uiSettings,
-            this.currentProps.isOutlineExpanded,
-            this.currentProps.isSelectionMode,
-            this.currentProps.searchQueries,
-            this.isReadOnly,
-            this.currentProps.isConfirmingDelete
-        );
-
-        const tempDiv = document.createElement('div');
-        tempDiv.innerHTML = newHTML;
-        const newElement = tempDiv.firstElementChild as HTMLElement;
-        
-        if (this.element.parentNode) {
-            this.element.parentNode.replaceChild(newElement, this.element);
-        }
-
-        Object.defineProperty(this, 'element', { value: newElement, writable: true });
+        this.replaceElement(createFileItemHTML(this.item, this.props, this.isReadOnly));
     }
 }

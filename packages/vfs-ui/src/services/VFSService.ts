@@ -66,84 +66,58 @@ export class VFSService {
   /**
    * 核心逻辑：智能追加扩展名
    */
-  private ensureExtension(filename: string): string {
-    // 正则检查：是否以 .加上1-10位字母/数字 结尾
-    // 例如：匹配 .js, .html, .ts, .d.ts 但不匹配 "Ver 1.0"
-    const hasExtension = /\.[a-zA-Z0-9]{1,10}$/.test(filename);
-    
-    if (hasExtension) {
-        return filename; // 用户显式指定了扩展名
+    private ensureExtension(filename: string): string {
+        return /\.[a-zA-Z0-9]{1,10}$/.test(filename)
+            ? filename
+            : `${filename}${this.defaultExtension}`;
     }
-    
-    // 用户未指定，追加默认扩展名 (例如 "script" -> "script.md")
-    return `${filename}${this.defaultExtension}`;
-  }
 
-  public async createFile({ title = 'Untitled', parentId = null, content = this.newFileContent }: CreateFileOptions): Promise<EngineNode> {
+    async createFile({ title = 'Untitled', parentId = null, content = this.newFileContent }: CreateFileOptions): Promise<EngineNode> {
     // [优化] 自动补全扩展名
     const finalTitle = this.ensureExtension(title);
     console.log(`>>>>> createFile: ${title} - ${finalTitle}`)
     return this.engine.createFile(finalTitle, parentId, content);
   }
 
-  public async createFiles({ parentId = null, files }: CreateMultipleFilesOptions): Promise<EngineNode[]> {
-    if (!files || files.length === 0) return [];
-    
-    // [优化] 批量创建时也进行扩展名处理
-    const processedFiles = files.map(f => ({
-        ...f,
-        title: this.ensureExtension(f.title)
-    }));
-    
-    if (typeof this.engine.createFiles === 'function') {
-        return this.engine.createFiles(processedFiles, parentId);
+    async createFiles({ parentId = null, files }: CreateMultipleFilesOptions): Promise<EngineNode[]> {
+        if (!files?.length) return [];
+
+        const processedFiles = files.map(f => ({
+            ...f,
+            title: this.ensureExtension(f.title)
+        }));
+
+        return typeof this.engine.createFiles === 'function'
+            ? this.engine.createFiles(processedFiles, parentId)
+            : Promise.all(processedFiles.map(f => this.engine.createFile(f.title, parentId, f.content)));
     }
 
-    // 回退逻辑：并发调用原子接口
-    return Promise.all(
-        processedFiles.map(file => this.engine.createFile(file.title, parentId, file.content))
-    );
-  }
-
-  public async createDirectory({ title = 'New Directory', parentId = null }: CreateDirectoryOptions): Promise<EngineNode> {
-    return this.engine.createDirectory(title, parentId);
-  }
-
-  public async renameItem(nodeId: string, newTitle: string): Promise<void> {
-    // 这里直接使用传入的 newTitle，因为 Manager 层已经处理好了扩展名逻辑
-    await this.engine.rename(nodeId, newTitle);
-  }
-
-  public async deleteItems(nodeIds: string[]): Promise<void> {
-    await this.engine.delete(nodeIds);
-  }
-
-  public async moveItems({ itemIds, targetId }: { itemIds: string[]; targetId: string | null }): Promise<void> {
-    await this.engine.move(itemIds, targetId);
-  }
-
-  public async updateMultipleItemsTags({ itemIds, tags }: { itemIds: string[]; tags: string[] }): Promise<void> {
-    if (typeof this.engine.setTagsBatch === 'function') {
-        const updates = itemIds.map(id => ({ id, tags }));
-        await this.engine.setTagsBatch(updates);
-    } else {
-        await Promise.all(itemIds.map(id => this.engine.setTags(id, tags)));
+    async createDirectory({ title = 'New Directory', parentId = null }: CreateDirectoryOptions): Promise<EngineNode> {
+        return this.engine.createDirectory(title, parentId);
     }
-  }
-  
-  public async findItemById(itemId: string): Promise<EngineNode | null> {
-      return this.engine.getNode(itemId);
-  }
 
-  public async updateItemMetadata(itemId: string, metadataUpdates: Record<string, any>): Promise<void> {
-      await this.engine.updateMetadata(itemId, metadataUpdates);
-  }
+    async renameItem(nodeId: string, newTitle: string): Promise<void> {
+        await this.engine.rename(nodeId, newTitle);
+    }
 
-  public async getAllFolders(): Promise<EngineNode[]> {
-      return this.engine.search({ type: 'directory' });
-  }
+    async deleteItems(nodeIds: string[]): Promise<void> {
+        await this.engine.delete(nodeIds);
+    }
 
-  public async getAllFiles(): Promise<EngineNode[]> {
-      return this.engine.search({ type: 'file' });
-  }
+    async moveItems({ itemIds, targetId }: { itemIds: string[]; targetId: string | null }): Promise<void> {
+        await this.engine.move(itemIds, targetId);
+    }
+
+    async updateMultipleItemsTags({ itemIds, tags }: { itemIds: string[]; tags: string[] }): Promise<void> {
+        if (typeof this.engine.setTagsBatch === 'function') {
+            await this.engine.setTagsBatch(itemIds.map(id => ({ id, tags })));
+        } else {
+            await Promise.all(itemIds.map(id => this.engine.setTags(id, tags)));
+        }
+    }
+
+    findItemById = (itemId: string) => this.engine.getNode(itemId);
+    updateItemMetadata = (itemId: string, updates: Record<string, any>) => this.engine.updateMetadata(itemId, updates);
+    getAllFolders = () => this.engine.search({ type: 'directory' });
+    getAllFiles = () => this.engine.search({ type: 'file' });
 }

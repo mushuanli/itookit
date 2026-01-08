@@ -4,27 +4,33 @@
  * sub-components, bridges UI events with vfs-core data events, and provides
  * a unified public API by implementing ISessionUI.
  */
-import { ISessionUI,EditorFactory, type SessionUIOptions, type SessionManagerEvent, type SessionManagerCallback, type ISessionEngine, type EngineEvent, generateShortUUID} from '@itookit/common';
-import { EngineTagSource } from '../mention/EngineTagSource';
-import {TagEditorComponent} from '../components/TagEditor/TagEditorComponent';
+import {
+    ISessionUI, EditorFactory, type SessionUIOptions, type SessionManagerEvent,
+    type SessionManagerCallback, type ISessionEngine, type EngineEvent, type EngineEventType,
+    generateShortUUID
+} from '@itookit/common';
 
-// --- 内部模块 ---
 import { Coordinator } from './Coordinator';
 import { VFSStore } from '../stores/VFSStore';
 import { VFSService } from '../services/VFSService';
-import { mapEngineNodeToUIItem, mapEngineTreeToUIItems } from '../mappers/NodeMapper';
+import { FileTypeRegistry } from '../services/FileTypeRegistry';
+import { EngineTagSource } from '../mention/EngineTagSource';
+import { TagEditorComponent } from '../components/TagEditor/TagEditorComponent';
 import { NodeList } from '../components/NodeList/NodeList';
 import { FileOutline } from '../components/FileOutline/FileOutline';
 import { MoveToModal } from '../components/MoveToModal/MoveToModal';
-import type { SearchFilter,TagInfo, VFSNodeUI, ContextMenuConfig, VFSUIState, UISettings, TagEditorFactory, TagEditorOptions } from '../types/types';
+import { mapEngineNodeToUIItem, mapEngineTreeToUIItems } from '../mappers/NodeMapper';
+import { findNodeById, traverseNodes, isHiddenFile } from '../utils/helpers';
 
-// 新增依赖
-import { FileTypeRegistry } from '../services/FileTypeRegistry';
-import { FileTypeDefinition, CustomEditorResolver } from '../services/IFileTypeRegistry';
+import type { FileTypeDefinition, CustomEditorResolver } from '../services/IFileTypeRegistry';
+import type {
+    SearchFilter, TagInfo, VFSNodeUI, ContextMenuConfig, VFSUIState,
+    UISettings, TagEditorFactory, TagEditorOptions
+} from '../types/types';
 
-type VFSUIOptions = SessionUIOptions & { 
-    initialState?: Partial<VFSUIState>,
-    defaultUiSettings?: Partial<UISettings>,
+type VFSUIOptions = SessionUIOptions & {
+    initialState?: Partial<VFSUIState>;
+    defaultUiSettings?: Partial<UISettings>;
     defaultFileName?: string;
     defaultFileContent?: string;
     defaultExtension?: string;
@@ -42,137 +48,144 @@ type VFSUIOptions = SessionUIOptions & {
     scopeId?: string;
 };
 
+const EVENT_MAP: Record<SessionManagerEvent, string> = {
+    'sessionSelected': 'PUBLIC_SESSION_SELECTED',
+    'navigateToHeading': 'PUBLIC_NAVIGATE_TO_HEADING',
+    'importRequested': 'PUBLIC_IMPORT_REQUESTED',
+    'sidebarStateChanged': 'PUBLIC_SIDEBAR_STATE_CHANGED',
+    'menuItemClicked': 'PUBLIC_MENU_ITEM_CLICKED',
+    'stateChanged': 'PUBLIC_STATE_CHANGED',
+};
+
+const defaultUiSettings: UISettings = {
+    sortBy: 'title',
+    density: 'comfortable',
+    showSummary: true,
+    showTags: true,
+    showBadges: true,
+};
+
 /**
  * Manages the entire lifecycle and interaction of the VFS-UI components.
  * @implements {ISessionUI}
  */
 export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
-    private readonly options: VFSUIOptions;
-    private readonly engine: ISessionEngine;
-
     public readonly coordinator: Coordinator;
     public readonly store: VFSStore;
-
-    private readonly _vfsService: VFSService;
-
-    // 文件类型注册表
     public readonly fileTypeRegistry: FileTypeRegistry;
-
-    // 实例唯一标识，用于拖拽隔离等运行时检查
     public readonly instanceId: string;
 
-    private nodeList: NodeList;
+    private readonly options: VFSUIOptions;
+    private readonly engine: ISessionEngine;
+    private readonly _vfsService: VFSService;
+
+    private nodeList!: NodeList;
     private fileOutline?: FileOutline;
-    private moveToModal: MoveToModal;
+    private moveToModal!: MoveToModal;
+    private instanceModalContainer!: HTMLElement;
+
     private engineUnsubscribe: (() => void) | null = null;
     private lastActiveId: string | null = null;
-    private lastSidebarCollapsedState: boolean;
+    private lastSidebarCollapsedState: boolean = false;
     private lastForceUpdateTimestamp?: number;
-
     private lastSessionSelectWasUserAction = false;
 
-    // 模态框的独立容器引用，用于销毁时清理
-    private instanceModalContainer: HTMLElement;
-
-    // 事件批处理队列
-    private updateQueue: Set<string> = new Set();
-    private updateTimer: any = null;
-
-    private deleteQueue: Set<string> = new Set();
-    private deleteTimer: any = null;
-
-    private createQueue: Set<string> = new Set();
-    private createTimer: any = null;
+    // 批处理队列
+    private updateQueue = new Set<string>();
+    private deleteQueue = new Set<string>();
+    private createQueue = new Set<string>();
+    private updateTimer: ReturnType<typeof setTimeout> | null = null;
+    private deleteTimer: ReturnType<typeof setTimeout> | null = null;
+    private createTimer: ReturnType<typeof setTimeout> | null = null;
 
     constructor(options: VFSUIOptions, engine: ISessionEngine) {
         super();
         if (!options.sessionListContainer) throw new Error("VFSUIManager requires 'sessionListContainer'.");
+
         this.options = options;
         this.engine = engine;
-        this.instanceId = generateShortUUID(); // 生成运行时唯一ID
+        this.instanceId = generateShortUUID();
 
-        // 1. 初始化文件类型注册表
-        this.fileTypeRegistry = new FileTypeRegistry(
-            options.defaultEditorFactory,
-            options.customEditorResolver
-        );
+        // 初始化文件类型注册表
+        this.fileTypeRegistry = new FileTypeRegistry(options.defaultEditorFactory, options.customEditorResolver);
+        options.fileTypes?.forEach(def => this.fileTypeRegistry.register(def));
 
-        // 2. 注册用户定义的文件类型
-        if (options.fileTypes) {
-            options.fileTypes.forEach(def => this.fileTypeRegistry.register(def));
-        }
-
+        // 初始化协调器和状态
         this.coordinator = new Coordinator();
-        const persistedUiState = this._loadUiState();
-        const finalUiSettings = {
-            ...(options.defaultUiSettings),         // 1. 优先级最低的编程默认值
-            ...(persistedUiState.uiSettings),       // 2. 用户上次会话保存的设置
-            ...(options.initialState?.uiSettings), // 3. 优先级最高的本次实例强制覆盖值
-        };
+        const persistedState = this.loadUiState();
 
         this.store = new VFSStore({
             ...options.initialState,
-            ...persistedUiState,
-            uiSettings: finalUiSettings,
+            ...persistedState,
+            uiSettings: { 
+	        ...defaultUiSettings,  // 先使用完整默认值
+	        ...options.defaultUiSettings, 
+	        ...persistedState.uiSettings, 
+	        ...options.initialState?.uiSettings 
+	    },
             isSidebarCollapsed: options.initialSidebarCollapsed,
             readOnly: options.readOnly || false,
         });
+
         this.lastActiveId = this.store.getState().activeId;
         this.lastSidebarCollapsedState = this.store.getState().isSidebarCollapsed;
 
+        // 初始化服务
         this._vfsService = new VFSService({
             engine: this.engine,
             defaultExtension: options.defaultExtension,
             newFileContent: options.newSessionContent
         });
 
+        // 初始化组件
+        this.initializeComponents();
+        this.connectUIEvents();
+
+        if (!options.readOnly) {
+            this.connectEngineEvents();
+        }
+
+        this.store.subscribe(() => this.saveUiState());
+    }
+
+    private initializeComponents(): void {
         const tagProvider = new EngineTagSource(this.engine);
 
-        // 默认的 TagEditor 工厂函数实现
-        const defaultTagEditorFactory: TagEditorFactory = ({ container, initialTags, onSave, onCancel }: TagEditorOptions) => {
-            const editor = new TagEditorComponent({
-                container,
-                initialItems: initialTags,
-                suggestionProvider: tagProvider,
-                onSave,
-                onCancel
-            });
-            editor.init();
-            return editor;
-        };
-
-        // 如果用户提供了自定义组件类，我们需要将其包装成工厂函数
-        let finalTagEditorFactory: TagEditorFactory = defaultTagEditorFactory;
-
-        if (this.options.components?.tagEditor) {
-            const CustomTagEditorClass = this.options.components.tagEditor;
-            finalTagEditorFactory = (opts: TagEditorOptions) => {
-                const instance = new CustomTagEditorClass({
+        const tagEditorFactory: TagEditorFactory = this.options.components?.tagEditor
+            ? (opts: TagEditorOptions) => {
+                const instance = new this.options.components!.tagEditor!({
                     container: opts.container,
                     initialItems: opts.initialTags,
                     suggestionProvider: tagProvider,
                     onSave: opts.onSave,
                     onCancel: opts.onCancel
                 });
-
-                if (typeof instance.init === 'function') {
-                    instance.init();
-                }
+                instance.init?.();
                 return instance;
+            }
+            : (opts: TagEditorOptions) => {
+                const editor = new TagEditorComponent({
+                    container: opts.container,
+                    initialItems: opts.initialTags,
+                    suggestionProvider: tagProvider,
+                    onSave: opts.onSave,
+                    onCancel: opts.onCancel
+                });
+                editor.init();
+                return editor;
             };
-        }
 
         this.nodeList = new NodeList({
             container: this.options.sessionListContainer,
             store: this.store,
             coordinator: this.coordinator,
             contextMenu: this.options.contextMenu as ContextMenuConfig,
-            tagEditorFactory: finalTagEditorFactory,
+            tagEditorFactory,
             searchPlaceholder: this.options.searchPlaceholder || 'Search (tag:xx type:file|dir)...',
             createFileLabel: this.options.createFileLabel,
             title: this.options.title,
-            searchFilter: options.searchFilter,
-            instanceId: this.instanceId, // [新增] 传入实例ID，用于拖拽隔离
+            searchFilter: this.options.searchFilter,
+            instanceId: this.instanceId,
         });
 
         if (this.options.documentOutlineContainer) {
@@ -183,454 +196,337 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
             });
         }
 
-        // --- 修复模态框多实例冲突 ---
-        let globalModalAnchor = document.getElementById('vfs-modal-container');
-        if (!globalModalAnchor) {
-            globalModalAnchor = document.createElement('div');
-            globalModalAnchor.id = 'vfs-modal-container';
-            // 确保锚点本身不占据空间，且层级最高
-            globalModalAnchor.style.position = 'absolute';
-            globalModalAnchor.style.top = '0';
-            globalModalAnchor.style.left = '0';
-            globalModalAnchor.style.width = '0';
-            globalModalAnchor.style.height = '0';
-            globalModalAnchor.style.zIndex = '9999';
-            document.body.appendChild(globalModalAnchor);
+        // 模态框容器
+        let globalAnchor = document.getElementById('vfs-modal-container');
+        if (!globalAnchor) {
+            globalAnchor = document.createElement('div');
+            globalAnchor.id = 'vfs-modal-container';
+            Object.assign(globalAnchor.style, { position: 'absolute', top: '0', left: '0', width: '0', height: '0', zIndex: '9999' });
+            document.body.appendChild(globalAnchor);
         }
 
-        // ✅ 关键：为当前实例创建一个独立的容器 div
         this.instanceModalContainer = document.createElement('div');
         this.instanceModalContainer.className = `vfs-modal-wrapper-${this.instanceId}`;
-        globalModalAnchor.appendChild(this.instanceModalContainer);
+        globalAnchor.appendChild(this.instanceModalContainer);
 
         this.moveToModal = new MoveToModal({
-            container: this.instanceModalContainer, // 传入独立的容器
+            container: this.instanceModalContainer,
             store: this.store,
             coordinator: this.coordinator,
         });
 
-        if (options.title) this.nodeList.setTitle(options.title);
-
-        this._connectUIEvents();
-        if (!this.options.readOnly) {
-            this._connectToEngineEvents();
-        }
-        this._connectToStoreForUiPersistence();
+        if (this.options.title) this.nodeList.setTitle(this.options.title);
     }
 
-    // --- Public API 扩展 ---
+    // --- Public API ---
 
-    /**
-     * 暴露编辑器解析能力供 EditorConnector 使用
-     */
-    public resolveEditorFactory(node: VFSNodeUI): EditorFactory {
-        return this.fileTypeRegistry.resolveEditorFactory(node);
-    }
-
-    public get sessionService(): VFSService {
+    get sessionService(): VFSService {
         return this._vfsService;
     }
 
-    public async start(): Promise<VFSNodeUI | undefined> {
+    resolveEditorFactory(node: VFSNodeUI): EditorFactory {
+        return this.fileTypeRegistry.resolveEditorFactory(node);
+    }
+
+    async start(): Promise<VFSNodeUI | undefined> {
         this.nodeList.init();
         this.fileOutline?.init();
         this.moveToModal.init();
 
         if (this.options.readOnly && this.options.initialState?.items) {
-            return this.getActiveSession() || undefined;
+            return this.getActiveSession();
         }
 
-        await this._loadData();
+        await this.loadData();
 
         const state = this.store.getState();
-        if (state.items.length === 0 && !this.options.readOnly && this.options.defaultFileName) {
+        if (!state.items.length && !this.options.readOnly && this.options.defaultFileName) {
             try {
                 await this._vfsService.createFile({
                     title: this.options.defaultFileName,
-                    content: this.options.defaultFileContent || `# Welcome\n\nSelect a file from the list on the left to start editing.`,
+                    content: this.options.defaultFileContent || '# Welcome\n\nSelect a file to start.',
                     parentId: null,
                 });
-            } catch (error) {
-                console.error('[VFSUIManager] Failed to create the default file:', error);
+            } catch (e) {
+                console.error('[VFSUIManager] Failed to create default file:', e);
             }
         }
 
-        let activeItem = this.getActiveSession();
-        if (!activeItem) {
+        let active = this.getActiveSession();
+        if (!active) {
             const newState = this.store.getState();
-            if (newState.items.length > 0) {
-                const findFirstFile = (nodes: VFSNodeUI[]): VFSNodeUI | null => {
-                    for (const node of nodes) {
-                        if (node.type === 'file') return node;
-                        if (node.children) { const f = findFirstFile(node.children); if (f) return f; }
+            const findFirst = (items: VFSNodeUI[]): VFSNodeUI | null => {
+                for (const item of items) {
+                    if (item.type === 'file') return item;
+                    if (item.children) {
+                        const f = findFirst(item.children);
+                        if (f) return f;
                     }
-                    return null;
-                };
-                const first = findFirstFile(newState.items);
-                if (first) {
-                    this.store.dispatch({ type: 'SESSION_SELECT', payload: { sessionId: first.id } });
-                    activeItem = this.getActiveSession();
                 }
+                return null;
+            };
+
+            const first = findFirst(newState.items);
+            if (first) {
+                this.store.dispatch({ type: 'SESSION_SELECT', payload: { sessionId: first.id } });
+                active = this.getActiveSession();
             }
         }
 
-        console.log(`[VFSUIManager] Start completed. Initial active session:`, activeItem);
-        return activeItem;
+        return active;
     }
 
-    public getActiveSession(): VFSNodeUI | undefined {
-        const state = this.store.getState();
-        if (!state.activeId) return undefined;
-        const find = (items: VFSNodeUI[], id: string): VFSNodeUI | undefined => {
-            for (const item of items) {
-                if (item.id === id) return item;
-                if (item.children) {
-                    const found = find(item.children, id);
-                    if (found) return found;
-                }
-            }
-            return undefined;
-        };
-        return find(state.items, state.activeId);
+    getActiveSession(): VFSNodeUI | undefined {
+        const { activeId, items } = this.store.getState();
+        return activeId ? findNodeById(items, activeId) : undefined;
     }
 
-    public async updateSessionContent(sessionId: string, newContent: string): Promise<void> {
-        await this.engine.writeContent(sessionId, newContent);
+    async updateSessionContent(sessionId: string, content: string): Promise<void> {
+        await this.engine.writeContent(sessionId, content);
     }
 
-    public toggleSidebar(): void {
+    toggleSidebar(): void {
         this.store.dispatch({ type: 'SIDEBAR_TOGGLE' });
     }
 
-    public setTitle(newTitle: string): void {
-        this.nodeList.setTitle(newTitle);
+    setTitle(title: string): void {
+        this.nodeList.setTitle(title);
     }
 
-    public on(eventName: SessionManagerEvent, callback: SessionManagerCallback): () => void {
-        const map: Record<SessionManagerEvent, string> = {
-            'sessionSelected': 'PUBLIC_SESSION_SELECTED',
-            'navigateToHeading': 'PUBLIC_NAVIGATE_TO_HEADING',
-            'importRequested': 'PUBLIC_IMPORT_REQUESTED',
-            'sidebarStateChanged': 'PUBLIC_SIDEBAR_STATE_CHANGED',
-            'menuItemClicked': 'PUBLIC_MENU_ITEM_CLICKED',
-            'stateChanged': 'PUBLIC_STATE_CHANGED',
-        };
-        const channel = map[eventName];
-        if (channel) return this.coordinator.subscribe(channel, (e: any) => callback(e.data));
-        return () => { };
+    on(eventName: SessionManagerEvent, callback: SessionManagerCallback): () => void {
+        const channel = EVENT_MAP[eventName];
+        return channel ? this.coordinator.subscribe(channel, e => callback(e.data)) : () => {};
     }
 
-    public destroy(): void {
+    destroy(): void {
         this.nodeList.destroy();
         this.fileOutline?.destroy();
         this.moveToModal.destroy();
-        
-        // [新增] 清理独立的模态框容器
-        if (this.instanceModalContainer && this.instanceModalContainer.parentNode) {
-            this.instanceModalContainer.parentNode.removeChild(this.instanceModalContainer);
-        }
-
+        this.instanceModalContainer?.parentNode?.removeChild(this.instanceModalContainer);
         this.coordinator.clearAll();
         this.engineUnsubscribe?.();
     }
 
-    // --- Private Helper Methods ---
+    // --- Private Methods ---
 
-    private async _loadData(): Promise<void> {
-        try {
-            this.store.dispatch({ type: 'ITEMS_LOAD_START' });
-            const rootChildren = await this.engine.loadTree();
 
-            // 传入图标解析器
-            const iconResolver = (name: string, isDir: boolean) => this.fileTypeRegistry.getIcon(name, isDir);
-            
-            // 2. ✨ [新增] 获取内容解析器 (用于自定义 Summary 等)
-            const parserResolver = (name: string) => this.fileTypeRegistry.resolveContentParser(name);
-
-            // 3. 传入 Mapper
-            const uiItems = mapEngineTreeToUIItems(rootChildren, iconResolver, parserResolver);
-
-            const tags = this._buildTagsMap(uiItems);
-            this.store.dispatch({ type: 'STATE_LOAD_SUCCESS', payload: { items: uiItems, tags } });
-        } catch (error) {
-            console.error('[VFSUIManager] Failed to load module data:', error);
-            this.store.dispatch({ type: 'ITEMS_LOAD_ERROR', payload: { error: error as Error } });
-        }
+    // [修改] 优先使用 scopeId，否则回退到 moduleName
+    private get uiStorageKey(): string {
+        const scope = this.options.scopeId || (this.engine as any).moduleName || 'default';
+        return `vfs_ui_state_${scope}`;
     }
 
-    private _loadUiState(): Partial<any> {
+    private loadUiState(): Partial<VFSUIState> {
         try {
-            const stateJSON = localStorage.getItem(this.uiStorageKey);
-            return stateJSON ? JSON.parse(stateJSON) : {};
-        } catch (e) {
-            console.error("Failed to load or parse UI state:", e);
+            const json = localStorage.getItem(this.uiStorageKey);
+            return json ? JSON.parse(json) : {};
+        } catch {
             return {};
         }
     }
 
-    private _saveUiState(): void {
+    private saveUiState(): void {
         const state = this.store.getState();
-        const stateToPersist = {
-            activeId: state.activeId,
-            expandedFolderIds: Array.from(state.expandedFolderIds),
-            selectedItemIds: Array.from(state.selectedItemIds),
-            uiSettings: state.uiSettings,
-            isSidebarCollapsed: state.isSidebarCollapsed,
-        };
         try {
-            localStorage.setItem(this.uiStorageKey, JSON.stringify(stateToPersist));
+            localStorage.setItem(this.uiStorageKey, JSON.stringify({
+                activeId: state.activeId,
+                expandedFolderIds: [...state.expandedFolderIds],
+                selectedItemIds: [...state.selectedItemIds],
+                uiSettings: state.uiSettings,
+                isSidebarCollapsed: state.isSidebarCollapsed,
+            }));
         } catch (e) {
             console.error("Failed to save UI state:", e);
         }
     }
 
-    private _connectToStoreForUiPersistence(): void {
-        this.store.subscribe(() => this._saveUiState());
+    private async loadData(): Promise<void> {
+        try {
+            this.store.dispatch({ type: 'ITEMS_LOAD_START' });
+            const rootChildren = await this.engine.loadTree();
+
+            const iconResolver = (name: string, isDir: boolean) => this.fileTypeRegistry.getIcon(name, isDir);
+            const parserResolver = (name: string) => this.fileTypeRegistry.resolveContentParser(name);
+
+            const uiItems = mapEngineTreeToUIItems(rootChildren, iconResolver, parserResolver);
+            const tags = this.buildTagsMap(uiItems);
+
+            this.store.dispatch({ type: 'STATE_LOAD_SUCCESS', payload: { items: uiItems, tags } });
+        } catch (error) {
+            console.error('[VFSUIManager] Failed to load data:', error);
+            this.store.dispatch({ type: 'ITEMS_LOAD_ERROR', payload: { error } });
+        }
     }
 
-    
-    // [修正] 完全重写事件连接逻辑以匹配 vfs-core 的实际实现
-    private _connectToEngineEvents(): void {
-        // [新增] 图标解析器引用
+    private buildTagsMap(items: VFSNodeUI[]): Map<string, TagInfo> {
+        const map = new Map<string, TagInfo>();
+        traverseNodes(items, item => {
+            item.metadata.tags?.forEach(tag => {
+                if (!map.has(tag)) map.set(tag, { name: tag, color: null, itemIds: new Set() });
+                map.get(tag)!.itemIds.add(item.id);
+            });
+        });
+        return map;
+    }
+
+    private connectEngineEvents(): void {
         const iconResolver = (name: string, isDir: boolean) => this.fileTypeRegistry.getIcon(name, isDir);
-        // [新增] 解析器查找函数引用
         const parserResolver = (name: string) => this.fileTypeRegistry.resolveContentParser(name);
 
-        const processUpdateQueue = async () => {
-            if (this.updateQueue.size === 0) return;
-
-            const idsToUpdate = Array.from(this.updateQueue);
+        const processUpdates = async () => {
+            if (!this.updateQueue.size) return;
+            const ids = [...this.updateQueue];
             this.updateQueue.clear();
             this.updateTimer = null;
 
-            // console.log(`[VFSUIManager] Processing batch update for ${idsToUpdate.length} items...`);
-
-            const updates = await Promise.all(idsToUpdate.map(async (id) => {
+            const updates = await Promise.all(ids.map(async id => {
                 try {
-                    // 注意：这里我们重新获取节点，这会触发一次 DB 读操作
-                    // 如果这个开销仍然太大，未来可以考虑仅获取 metadata (如果 Engine 支持)
                     const node = await this.engine.getNode(id);
-                    // [优化] 如果节点被重命名为隐藏文件（如 .开头），getNode可能会返回但 mapEngineNodeToUIItem 会保留
-                    // 这里我们不在这里过滤，而是依赖 mapEngineNodeToUIItem 的结果。
-                    // 实际上 mapEngineNodeToUIItem 本身不负责过滤，过滤是在 List 渲染层面或 mapTree 层面
-                    // 但单个更新时，我们假设如果能 getNode 到，就应该尝试更新
-                    if (node) {
-                        // [新增] 如果是隐藏文件，不再推送到 UI
-                        if (node.name.startsWith('.') || node.name.startsWith('__')) {
-                            // 这里可以发一个 delete 事件来从 UI 移除它，或者什么都不做
-                            // 简单起见，如果变成隐藏文件，我们在 UI 视为删除
-                             this.store.dispatch({ type: 'ITEM_DELETE_SUCCESS', payload: { itemIds: [id] } });
-                             return null;
-                        }
-
-                        if (node.type === 'file') {
-                            node.content = await this.engine.readContent(id);
-                        } else {
-                            node.children = [];
-                        }
-                        
-                        // [关键修改] 更新时传入 parserResolver，确保持续使用自定义解析逻辑
-                        return { itemId: id, data: mapEngineNodeToUIItem(node, iconResolver, parserResolver) };
+                    if (!node || isHiddenFile(node.name)) {
+                        this.store.dispatch({ type: 'ITEM_DELETE_SUCCESS', payload: { itemIds: [id] } });
+                        return null;
                     }
+                    if (node.type === 'file') node.content = await this.engine.readContent(id);
+                    else node.children = [];
+                    return { itemId: id, data: mapEngineNodeToUIItem(node, iconResolver, parserResolver) };
+                } catch {
                     return null;
-                } catch { return null; }
+                }
             }));
 
-            const validUpdates = updates.filter(u => u !== null);
-            if (validUpdates.length > 0) {
-                this.store.dispatch({
-                    type: 'ITEMS_BATCH_UPDATE_SUCCESS',
-                    payload: { updates: validUpdates }
-                });
+            const valid = updates.filter(Boolean);
+            if (valid.length) {
+                this.store.dispatch({ type: 'ITEMS_BATCH_UPDATE_SUCCESS', payload: { updates: valid } });
             }
         };
 
-        // 2. ✨ [优化] 批量删除
-        const processDeleteQueue = () => {
-            if (this.deleteQueue.size === 0) return;
-            const itemIds = Array.from(this.deleteQueue);
+        const processDeletes = () => {
+            if (!this.deleteQueue.size) return;
+            const ids = [...this.deleteQueue];
             this.deleteQueue.clear();
             this.deleteTimer = null;
-            
-            // console.log(`[VFSUIManager] Processing batch delete for ${itemIds.length} items`);
-            this.store.dispatch({ type: 'ITEM_DELETE_SUCCESS', payload: { itemIds } });
+            this.store.dispatch({ type: 'ITEM_DELETE_SUCCESS', payload: { itemIds: ids } });
         };
 
-        // 3. ✨ [优化] 批量创建
-        const processCreateQueue = async () => {
-            if (this.createQueue.size === 0) return;
-            const idsToCreate = Array.from(this.createQueue);
+        const processCreates = async () => {
+            if (!this.createQueue.size) return;
+            const ids = [...this.createQueue];
             this.createQueue.clear();
             this.createTimer = null;
 
-            // 并发加载新节点数据
-            const createdItems = await Promise.all(idsToCreate.map(async (nodeId) => {
+            const items = await Promise.all(ids.map(async id => {
                 try {
-                    const newNode = await this.engine.getNode(nodeId);
-                    if (!newNode) return null;
-
-                    // 忽略隐藏文件的创建事件
-                    if (newNode.name.startsWith('.') || newNode.name.startsWith('__')) return null;
-
-                    if (newNode.type === 'file') {
-                        newNode.content = await this.engine.readContent(nodeId);
-                    } else if (newNode.type === 'directory') {
-                        newNode.children = [];
-                    }
-                    // [关键修改] 创建时传入 parserResolver
-                    return mapEngineNodeToUIItem(newNode, iconResolver, parserResolver);
-                } catch (e) {
-                    console.warn(`[VFSUIManager] Failed to load created node ${nodeId}`, e);
+                    const node = await this.engine.getNode(id);
+                    if (!node || isHiddenFile(node.name)) return null;
+                    if (node.type === 'file') node.content = await this.engine.readContent(id);
+                    else node.children = [];
+                    return mapEngineNodeToUIItem(node, iconResolver, parserResolver);
+                } catch {
                     return null;
                 }
             }));
 
-            // 分发事件 (Store暂未提供批量创建接口，逐个分发，但已减少了IO延迟)
-            createdItems.forEach(newItem => {
-                if (newItem) {
-                    this.store.dispatch({
-                        type: newItem.type === 'directory' ? 'FOLDER_CREATE_SUCCESS' : 'SESSION_CREATE_SUCCESS',
-                        payload: newItem,
-                    });
-                }
+            items.filter(Boolean).forEach(item => {
+                this.store.dispatch({
+                    type: item!.type === 'directory' ? 'FOLDER_CREATE_SUCCESS' : 'SESSION_CREATE_SUCCESS',
+                    payload: item
+                });
             });
         };
 
-        const handleEvent = async (event: EngineEvent) => {
+        const handleEvent = (event: EngineEvent) => {
             switch (event.type) {
-                case 'node:created': {
-                    const nodeId = event.payload.nodeId;
-                    this.createQueue.add(nodeId);
-                    if (!this.createTimer) {
-                        this.createTimer = setTimeout(processCreateQueue, 50); // 50ms 防抖
-                    }
+                case 'node:created':
+                    this.createQueue.add(event.payload.nodeId);
+                    if (!this.createTimer) this.createTimer = setTimeout(processCreates, 50);
                     break;
-                }
+
                 case 'node:deleted':
-                    const removedIds = event.payload.data?.removedIds 
-                        || event.payload.removedIds 
-                        || [event.payload.nodeId];
-    
-                    removedIds.forEach((id: string) => this.deleteQueue.add(id));
-                    
-                    if (!this.deleteTimer) {
-                        // 删除响应要快，但仍需合并极短时间内的突发事件
-                        this.deleteTimer = setTimeout(processDeleteQueue, 20); 
-                    }
+                    (event.payload.data?.removedIds || event.payload.removedIds || [event.payload.nodeId])
+                        .forEach((id: string) => this.deleteQueue.add(id));
+                    if (!this.deleteTimer) this.deleteTimer = setTimeout(processDeletes, 20);
                     break;
-                
+
                 case 'node:updated':
-                    const updatedId = event.payload.nodeId;
-                    // 检查本地 Store 是否存在此 Item，过滤无关更新
-                    // (此处简化判断，依赖 processUpdateQueue 内部的验证)
-                    this.updateQueue.add(updatedId);
-                    if (!this.updateTimer) {
-                        this.updateTimer = setTimeout(processUpdateQueue, 50);
-                    }
+                    this.updateQueue.add(event.payload.nodeId);
+                    if (!this.updateTimer) this.updateTimer = setTimeout(processUpdates, 50);
                     break;
-                
-                case 'node:batch_updated': {
-                    const { updatedNodeIds } = event.payload;
-                    if (updatedNodeIds && Array.isArray(updatedNodeIds)) {
-                        updatedNodeIds.forEach((id: string) => this.updateQueue.add(id));
-                        if (!this.updateTimer) {
-                            this.updateTimer = setTimeout(processUpdateQueue, 50);
-                        }
-                    }
+
+                case 'node:batch_updated':
+                    event.payload.updatedNodeIds?.forEach((id: string) => this.updateQueue.add(id));
+                    if (!this.updateTimer) this.updateTimer = setTimeout(processUpdates, 50);
                     break;
-                }
 
                 case 'node:moved':
-                    this._loadData();
-                    break;
-                
-                // ✨ [新增] 处理批量移动事件
                 case 'node:batch_moved':
-                    this._loadData();
+                    this.loadData();
                     this.store.dispatch({ type: 'MOVE_OPERATION_END' });
                     break;
             }
         };
 
-        const unsubs = [
-            this.engine.on('node:created', handleEvent),
-            this.engine.on('node:updated', handleEvent),
-            this.engine.on('node:deleted', handleEvent),
-            this.engine.on('node:moved', handleEvent),
-            this.engine.on('node:batch_updated', handleEvent),
-            this.engine.on('node:batch_moved', handleEvent)
-        ];
+	const eventTypes: EngineEventType[] = [
+	    'node:created', 'node:updated', 'node:deleted',
+	    'node:moved', 'node:batch_updated', 'node:batch_moved'
+	];
+
+        const unsubs = eventTypes.map(type => this.engine.on(type, handleEvent));
+
         this.engineUnsubscribe = () => unsubs.forEach(u => u());
     }
 
-    private _connectUIEvents(): void {
-        this.store.subscribe(newState => {
-            const currentActiveItem = this.getActiveSession();
+    private connectUIEvents(): void {
+        // Store 订阅
+        this.store.subscribe(state => {
+            const currentActive = this.getActiveSession();
+            const activeChanged = state.activeId !== this.lastActiveId;
+            const forceUpdate = state._forceUpdateTimestamp !== this.lastForceUpdateTimestamp;
 
-            const activeIdChanged = newState.activeId !== this.lastActiveId;
-            const activeItemNowAvailable = this.lastActiveId && !this.getActiveSession() && !!currentActiveItem;
-
-            const forceUpdateDetected = newState._forceUpdateTimestamp !== undefined &&
-                newState._forceUpdateTimestamp !== this.lastForceUpdateTimestamp;
-
-            console.log(`[VFSUIManager] Old activeId: ${this.lastActiveId}, New activeId: ${newState.activeId}. activeIdChanged: ${activeIdChanged}, userAction: ${this.lastSessionSelectWasUserAction}, forceUpdate: ${forceUpdateDetected}`);
-            if (activeIdChanged || activeItemNowAvailable || this.lastSessionSelectWasUserAction || forceUpdateDetected) {
-                this.lastActiveId = newState.activeId;
-                if (forceUpdateDetected) {
-                    this.lastForceUpdateTimestamp = newState._forceUpdateTimestamp;
-                }
-                console.log('[VFSUIManager] Active session changed! Publishing PUBLIC_SESSION_SELECTED with item:', currentActiveItem);
-                this.coordinator.publish('PUBLIC_SESSION_SELECTED', { item: currentActiveItem });
+            if (activeChanged || this.lastSessionSelectWasUserAction || forceUpdate) {
+                this.lastActiveId = state.activeId;
+                if (forceUpdate) this.lastForceUpdateTimestamp = state._forceUpdateTimestamp;
+                this.coordinator.publish('PUBLIC_SESSION_SELECTED', { item: currentActive });
                 this.lastSessionSelectWasUserAction = false;
             }
 
-            if (newState.isSidebarCollapsed !== this.lastSidebarCollapsedState) {
-                this.lastSidebarCollapsedState = newState.isSidebarCollapsed;
-                this.coordinator.publish('PUBLIC_SIDEBAR_STATE_CHANGED', { isCollapsed: newState.isSidebarCollapsed });
+            if (state.isSidebarCollapsed !== this.lastSidebarCollapsedState) {
+                this.lastSidebarCollapsedState = state.isSidebarCollapsed;
+                this.coordinator.publish('PUBLIC_SIDEBAR_STATE_CHANGED', { isCollapsed: state.isSidebarCollapsed });
             }
-            this.coordinator.publish('PUBLIC_STATE_CHANGED', { state: newState });
+
+            this.coordinator.publish('PUBLIC_STATE_CHANGED', { state });
         });
 
-        this.coordinator.subscribe('PUBLIC_IMPORT_REQUESTED', async (e) => {
+        // 导入请求
+        this.coordinator.subscribe('PUBLIC_IMPORT_REQUESTED', async e => {
             const { parentId } = e.data;
             const input = document.createElement('input');
-            input.type = 'file';
-            input.multiple = true;
-            input.accept = '*/*';
+            Object.assign(input, { type: 'file', multiple: true, accept: '*/*' });
             input.style.display = 'none';
 
             input.onchange = async (event) => {
                 const files = (event.target as HTMLInputElement).files;
-                if (!files || files.length === 0) return;
-
-                console.log(`[VFSUIManager] Importing ${files.length} file(s)`);
+                if (!files?.length) return;
 
                 try {
                     const filesWithContent = await Promise.all(
-                        Array.from(files).map(async (file) => {
-                            const content = await this._readFileContent(file);
-                            return { title: file.name, content };
-                        })
+                        [...files].map(async file => ({
+                            title: file.name,
+                            content: await this.readFileContent(file)
+                        }))
                     );
 
-                    const createdNodes = await this._vfsService.createFiles({
-                        parentId,
-                        files: filesWithContent
-                    });
+                    const created = await this._vfsService.createFiles({ parentId, files: filesWithContent });
+                    await this.loadData();
 
-                    await this._loadData();
-
-                    if (createdNodes.length > 0 && createdNodes[0].type === 'file') {
+                    if (created.length && created[0].type === 'file') {
                         setTimeout(() => {
-                            this.store.dispatch({
-                                type: 'SESSION_SELECT',
-                                payload: { sessionId: createdNodes[0].id }
-                            });
+                            this.store.dispatch({ type: 'SESSION_SELECT', payload: { sessionId: created[0].id } });
                         }, 50);
                     }
                 } catch (error) {
-                    console.error('[VFSUIManager] Failed to import files:', error);
-                    alert('导入文件失败: ' + (error as Error).message);
+                    console.error('[VFSUIManager] Import failed:', error);
+                    alert('导入失败: ' + (error as Error).message);
                 } finally {
                     input.remove();
                 }
@@ -640,149 +536,100 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
             input.click();
         });
 
-        this.coordinator.subscribe('CREATE_ITEM_CONFIRMED', async (e) => {
+        // 创建项目
+        this.coordinator.subscribe('CREATE_ITEM_CONFIRMED', async e => {
             const { type, title, parentId } = e.data;
-            console.log('[VFSUIManager] CREATE_ITEM_CONFIRMED:', e.data);
-
             try {
                 if (type === 'file') {
                     await this._vfsService.createFile({ title, parentId, content: this.options.newSessionContent || '' });
-                } else if (type === 'directory') {
+                } else {
                     await this._vfsService.createDirectory({ title, parentId });
                 }
-                console.log(`[VFSUIManager] ${type} created successfully`);
             } catch (error) {
                 console.error(`[VFSUIManager] Failed to create ${type}:`, error);
-                alert(`创建${type === 'file' ? '文件' : '目录'}失败: ${(error as Error).message}`);
+                alert(`创建失败: ${(error as Error).message}`);
                 this.store.dispatch({ type: 'CREATE_ITEM_START', payload: { type, parentId } });
             }
         });
 
-        this.coordinator.subscribe('ITEM_ACTION_REQUESTED', async (e) => {
+        // 项目操作
+        this.coordinator.subscribe('ITEM_ACTION_REQUESTED', async e => {
             const { action, itemId } = e.data;
-            const findItem = (items: VFSNodeUI[], id: string): VFSNodeUI | undefined => {
-                for (const item of items) {
-                    if (item.id === id) return item;
-                    if (item.children) {
-                        const found = findItem(item.children, id);
-                        if (found) return found;
-                    }
-                }
-            };
-            const item = findItem(this.store.getState().items, itemId);
+            const item = findNodeById(this.store.getState().items, itemId);
 
-            if (action === 'delete') {
-                if (confirm(`Are you sure you want to delete "${item?.metadata.title || 'this item'}"?`)) {
-                    await this._vfsService.deleteItems([itemId]);
-                }
-	    } else if (action === 'delete-direct') {
-	        console.log(`[VFSUIManager] Direct delete requested for ${itemId}`);
-	        // 跳过 confirm，直接调用 service
-	        await this._vfsService.deleteItems([itemId]);
+            if (action === 'delete' || action === 'delete-direct') {
+                if (action === 'delete' && !confirm(`确定删除 "${item?.metadata.title || 'this item'}"?`)) return;
+                await this._vfsService.deleteItems([itemId]);
             } else if (action === 'rename') {
-                const currentDisplayTitle = item?.metadata.title || '';
-                const newDisplayTitle = prompt('Enter new name:', currentDisplayTitle);
+                const currentTitle = item?.metadata.title || '';
+                const newTitle = prompt('输入新名称:', currentTitle);
 
-                if (newDisplayTitle && newDisplayTitle.trim() !== currentDisplayTitle) {
-                    const cleanTitle = newDisplayTitle.trim();
-                    let finalName = cleanTitle;
+                if (newTitle?.trim() && newTitle.trim() !== currentTitle) {
+                    let finalName = newTitle.trim();
 
                     if (item?.type === 'file') {
-                        const hasExplicitExtension = /\.[a-zA-Z0-9]{1,10}$/.test(cleanTitle);
-
-                        if (hasExplicitExtension) {
-                            finalName = cleanTitle;
-                        } else {
-                            const originalExtension = item.metadata.custom?._extension || '';
-                            if (originalExtension) {
-                                finalName = `${cleanTitle}${originalExtension}`;
-                            }
+                        const hasExt = /\.[a-zA-Z0-9]{1,10}$/.test(finalName);
+                        if (!hasExt) {
+                            const origExt = item.metadata.custom?._extension || '';
+                            if (origExt) finalName += origExt;
                         }
                     }
 
                     try {
                         await this._vfsService.renameItem(itemId, finalName);
                     } catch (err: any) {
-                        alert(`Rename failed: ${err.message}`);
+                        alert(`重命名失败: ${err.message}`);
                     }
                 }
             }
         });
 
+        // 批量操作
         this.coordinator.subscribe('BULK_ACTION_REQUESTED', async e => {
-            const itemIds = Array.from(this.store.getState().selectedItemIds);
-            if (e.data.action === 'delete') {
-                if (confirm(`Are you sure you want to delete ${itemIds.length} items?`)) {
-                    await this._vfsService.deleteItems(itemIds);
-                }
+            const ids = [...this.store.getState().selectedItemIds];
+            if (e.data.action === 'delete' && confirm(`确定删除 ${ids.length} 个项目?`)) {
+                await this._vfsService.deleteItems(ids);
             }
         });
 
-        this.coordinator.subscribe('ITEMS_MOVE_REQUESTED', async (e) => await this._vfsService.moveItems(e.data));
-        this.coordinator.subscribe('ITEM_TAGS_UPDATE_REQUESTED', async (e) => await this._vfsService.updateMultipleItemsTags(e.data));
-
-        this.coordinator.subscribe('SESSION_SELECT_REQUESTED', e => {
-            console.log('[VFSUIManager] Received SESSION_SELECT_REQUESTED, dispatching to store with payload:', e.data);
-            this.lastSessionSelectWasUserAction = true;
-            this.store.dispatch({ type: 'SESSION_SELECT', payload: { sessionId: e.data.sessionId } })
-        });
-
-        this.coordinator.subscribe('CREATE_ITEM_REQUESTED', e => this.store.dispatch({ type: 'CREATE_ITEM_START', payload: e.data }));
-        this.coordinator.subscribe('MOVE_OPERATION_START_REQUESTED', e => this.store.dispatch({ type: 'MOVE_OPERATION_START', payload: e.data }));
-        this.coordinator.subscribe('MOVE_OPERATION_END_REQUESTED', () => this.store.dispatch({ type: 'MOVE_OPERATION_END' }));
-        this.coordinator.subscribe('FOLDER_TOGGLE_REQUESTED', e => this.store.dispatch({ type: 'FOLDER_TOGGLE', payload: { folderId: e.data.folderId } }));
-        this.coordinator.subscribe('SETTINGS_CHANGE_REQUESTED', e => this.store.dispatch({ type: 'SETTINGS_UPDATE', payload: { settings: e.data.settings } }));
-        this.coordinator.subscribe('OUTLINE_TOGGLE_REQUESTED', e => this.store.dispatch({ type: 'OUTLINE_TOGGLE', payload: e.data }));
-        this.coordinator.subscribe('OUTLINE_H1_TOGGLE_REQUESTED', e => this.store.dispatch({ type: 'OUTLINE_H1_TOGGLE', payload: e.data }));
-        this.coordinator.subscribe('SEARCH_QUERY_CHANGED', e => this.store.dispatch({ type: 'SEARCH_QUERY_UPDATE', payload: { query: e.data.query } }));
-
-        this.coordinator.subscribe('NAVIGATE_TO_HEADING_REQUESTED', e => this.coordinator.publish('PUBLIC_NAVIGATE_TO_HEADING', e.data));
-        this.coordinator.subscribe('CUSTOM_MENU_ACTION_REQUESTED', e => this.coordinator.publish('PUBLIC_MENU_ITEM_CLICKED', { actionId: e.data.action, item: e.data.item }));
-    }
-
-    private _buildTagsMap(items: VFSNodeUI[]): Map<string, TagInfo> {
-        const tagsMap = new Map();
-        const traverse = (list: VFSNodeUI[]) => {
-            for (const i of list) {
-                i.metadata.tags.forEach(t => {
-                    if (!tagsMap.has(t)) tagsMap.set(t, { name: t, color: null, itemIds: new Set() });
-                    tagsMap.get(t).itemIds.add(i.id);
-                });
-                if (i.children) traverse(i.children);
-            }
+        // 简单的事件转发
+        const simpleHandlers: Record<string, (data: any) => void | Promise<void>> = {
+            'ITEMS_MOVE_REQUESTED': data => this._vfsService.moveItems(data),
+            'ITEM_TAGS_UPDATE_REQUESTED': data => this._vfsService.updateMultipleItemsTags(data),
+            'SESSION_SELECT_REQUESTED': data => {
+                this.lastSessionSelectWasUserAction = true;
+                this.store.dispatch({ type: 'SESSION_SELECT', payload: { sessionId: data.sessionId } });
+            },
+            'CREATE_ITEM_REQUESTED': data => this.store.dispatch({ type: 'CREATE_ITEM_START', payload: data }),
+            'MOVE_OPERATION_START_REQUESTED': data => this.store.dispatch({ type: 'MOVE_OPERATION_START', payload: data }),
+            'MOVE_OPERATION_END_REQUESTED': () => this.store.dispatch({ type: 'MOVE_OPERATION_END' }),
+            'FOLDER_TOGGLE_REQUESTED': data => this.store.dispatch({ type: 'FOLDER_TOGGLE', payload: { folderId: data.folderId } }),
+            'SETTINGS_CHANGE_REQUESTED': data => this.store.dispatch({ type: 'SETTINGS_UPDATE', payload: { settings: data.settings } }),
+            'OUTLINE_TOGGLE_REQUESTED': data => this.store.dispatch({ type: 'OUTLINE_TOGGLE', payload: data }),
+            'OUTLINE_H1_TOGGLE_REQUESTED': data => this.store.dispatch({ type: 'OUTLINE_H1_TOGGLE', payload: data }),
+            'SEARCH_QUERY_CHANGED': data => this.store.dispatch({ type: 'SEARCH_QUERY_UPDATE', payload: { query: data.query } }),
+            'NAVIGATE_TO_HEADING_REQUESTED': data => this.coordinator.publish('PUBLIC_NAVIGATE_TO_HEADING', data),
+            'CUSTOM_MENU_ACTION_REQUESTED': data => this.coordinator.publish('PUBLIC_MENU_ITEM_CLICKED', { actionId: data.action, item: data.item }),
         };
-        traverse(items);
-        return tagsMap;
+
+        Object.entries(simpleHandlers).forEach(([channel, handler]) => {
+            this.coordinator.subscribe(channel, e => handler(e.data));
+        });
     }
 
     /**
      * 读取文件内容
      * @private
      */
-    private async _readFileContent(file: File): Promise<string | ArrayBuffer> {
+    private async readFileContent(file: File): Promise<string | ArrayBuffer> {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
             reader.onload = () => resolve(reader.result as string | ArrayBuffer);
-            reader.onerror = () => reject(new Error(`Failed to read file: ${file.name}`));
+            reader.onerror = () => reject(new Error(`读取失败: ${file.name}`));
 
-            if (file.type.startsWith('text/') ||
-                file.name.endsWith('.md') ||
-                file.name.endsWith('.txt') ||
-                file.name.endsWith('.json') ||
-                file.name.endsWith('.html') ||
-                file.name.endsWith('.css') ||
-                file.name.endsWith('.js') ||
-                file.name.endsWith('.ts')) {
-                reader.readAsText(file);
-            } else {
-                reader.readAsArrayBuffer(file);
-            }
+            const textExts = ['.md', '.txt', '.json', '.html', '.css', '.js', '.ts'];
+            const isText = file.type.startsWith('text/') || textExts.some(ext => file.name.endsWith(ext));
+            isText ? reader.readAsText(file) : reader.readAsArrayBuffer(file);
         });
-    }
-
-    // [修改] 优先使用 scopeId，否则回退到 moduleName
-    private get uiStorageKey() { 
-        const scope = this.options.scopeId || (this.engine as any).moduleName || 'default';
-        return `vfs_ui_state_${scope}`; 
     }
 }
