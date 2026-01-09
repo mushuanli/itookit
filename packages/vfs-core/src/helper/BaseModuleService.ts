@@ -11,6 +11,7 @@ export type ChangeListener = () => void;
 export interface MountOptions {
   description?: string;
   isProtected?: boolean;
+  syncEnabled?: boolean;
 }
 
 export abstract class BaseModuleService {
@@ -41,17 +42,29 @@ export abstract class BaseModuleService {
     this.notify();
   }
 
-    /**
-     * 子类需实现的加载逻辑
-     */
+  /**
+   * 子类需实现的加载逻辑
+   */
   protected abstract onLoad(): Promise<void>;
+
+  /**
+   * 检查是否已初始化
+   */
+  get isInitialized(): boolean {
+    return this.initialized;
+  }
 
   // ==================== JSON 辅助方法 ====================
 
+  /**
+   * 读取 JSON 文件
+   */
   protected async readJson<T>(path: string): Promise<T | null> {
     try {
       const content = await this.vfs.read(this.moduleName, path);
-      const str = typeof content === 'string' ? content : new TextDecoder().decode(content);
+      const str = typeof content === 'string' 
+        ? content 
+        : new TextDecoder().decode(content as ArrayBuffer);
       return JSON.parse(str);
     } catch (e: any) {
       if (e.code !== VFSErrorCode.NOT_FOUND) {
@@ -61,6 +74,9 @@ export abstract class BaseModuleService {
     }
   }
 
+  /**
+   * 写入 JSON 文件
+   */
   protected async writeJson(path: string, data: unknown): Promise<void> {
     const content = JSON.stringify(data, null, 2);
     const existingId = await this.moduleEngine.resolvePath(path);
@@ -83,6 +99,13 @@ export abstract class BaseModuleService {
     }
   }
 
+  /**
+   * 检查文件是否存在
+   */
+  protected async fileExists(path: string): Promise<boolean> {
+    return this.moduleEngine.pathExists(path);
+  }
+
   // ==================== 变更通知 ====================
 
   onChange(listener: ChangeListener): () => void {
@@ -91,6 +114,20 @@ export abstract class BaseModuleService {
   }
 
   protected notify(): void {
-    this.listeners.forEach(l => l());
+    this.listeners.forEach(l => {
+      try {
+        l();
+      } catch (e) {
+        console.error('Change listener error:', e);
+      }
+    });
+  }
+
+  /**
+   * 清理资源
+   */
+  async dispose(): Promise<void> {
+    this.listeners.clear();
+    this.initialized = false;
   }
 }

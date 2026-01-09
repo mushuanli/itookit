@@ -5,7 +5,13 @@
 import { VFSCore } from '../VFSCore';
 import { VNodeData, VNodeType } from '../store/types';
 import { VFSEventType } from '../core/types';
-import type { ISessionEngine, EngineNode, EngineSearchQuery, EngineEventType, EngineEvent } from '@itookit/common';
+import type { 
+  ISessionEngine, 
+  EngineNode, 
+  EngineSearchQuery, 
+  EngineEventType, 
+  EngineEvent 
+} from '@itookit/common';
 import { guessMimeType } from '@itookit/common';
 
 export class VFSModuleEngine implements ISessionEngine {
@@ -15,7 +21,9 @@ export class VFSModuleEngine implements ISessionEngine {
     this.vfs = vfs ?? VFSCore.getInstance();
   }
 
-  private get core() { return this.vfs.getVFS(); }
+  private get core() { 
+    return this.vfs.getVFS(); 
+  }
 
   async init(): Promise<void> {
     if (this.moduleName && !this.vfs.getModule(this.moduleName)) {
@@ -41,7 +49,9 @@ export class VFSModuleEngine implements ISessionEngine {
         const children = await this.core.readdir(nodeId);
         // 过滤掉资产目录
         const filteredChildren = children.filter(c => !c.metadata.isAssetDir);
-        engineNode.children = await Promise.all(filteredChildren.map(c => buildTree(c.nodeId)));
+        engineNode.children = await Promise.all(
+          filteredChildren.map(c => buildTree(c.nodeId))
+        );
       }
 
       return engineNode;
@@ -70,13 +80,27 @@ export class VFSModuleEngine implements ISessionEngine {
   }
 
   async search(query: EngineSearchQuery): Promise<EngineNode[]> {
-    const coreQuery: any = { limit: query.limit };
-    if (query.type) coreQuery.type = query.type === 'directory' ? VNodeType.DIRECTORY : VNodeType.FILE;
-    if (query.text) coreQuery.nameContains = query.text;
-    if (query.tags) coreQuery.tags = query.tags;
+    const coreQuery: Record<string, unknown> = { limit: query.limit };
+    
+    if (query.type) {
+      coreQuery.type = query.type === 'directory' ? VNodeType.DIRECTORY : VNodeType.FILE;
+    }
+    if (query.text) {
+      coreQuery.nameContains = query.text;
+    }
+    if (query.tags) {
+      coreQuery.tags = query.tags;
+    }
 
-    const targetModule = query.scope?.includes('*') ? undefined : (query.scope?.[0] ?? this.moduleName);
-    const results = await this.vfs.searchNodes(coreQuery, targetModule, this.moduleName);
+    const targetModule = query.scope?.includes('*') 
+      ? undefined 
+      : (query.scope?.[0] ?? this.moduleName);
+      
+    const results = await this.vfs.searchNodes(
+      coreQuery as any, 
+      targetModule, 
+      this.moduleName
+    );
     
     // 过滤掉资产目录
     return results
@@ -91,7 +115,12 @@ export class VFSModuleEngine implements ISessionEngine {
 
   // ==================== 写操作 ====================
 
-  async createFile(name: string, parentIdOrPath: string | null, content: string | ArrayBuffer = '', metadata?: Record<string, unknown>): Promise<EngineNode> {
+  async createFile(
+    name: string, 
+    parentIdOrPath: string | null, 
+    content: string | ArrayBuffer = '', 
+    metadata?: Record<string, unknown>
+  ): Promise<EngineNode> {
     const parentPath = await this.resolveParentPath(parentIdOrPath);
     const fullPath = this.core.pathResolver.join(parentPath, name);
 
@@ -108,7 +137,11 @@ export class VFSModuleEngine implements ISessionEngine {
     return result;
   }
 
-  async createDirectory(name: string, parentIdOrPath: string | null, metadata?: Record<string, unknown>): Promise<EngineNode> {
+  async createDirectory(
+    name: string, 
+    parentIdOrPath: string | null, 
+    metadata?: Record<string, unknown>
+  ): Promise<EngineNode> {
     const parentPath = await this.resolveParentPath(parentIdOrPath);
     const fullPath = this.core.pathResolver.join(parentPath, name);
 
@@ -122,7 +155,11 @@ export class VFSModuleEngine implements ISessionEngine {
    * 创建资产文件
    * 使用 VFS 核心层的 Asset 功能，自动创建资产目录并建立双向引用
    */
-  async createAsset(ownerNodeId: string, filename: string, content: string | ArrayBuffer): Promise<EngineNode> {
+  async createAsset(
+    ownerNodeId: string, 
+    filename: string, 
+    content: string | ArrayBuffer
+  ): Promise<EngineNode> {
     const owner = await this.core.storage.loadVNode(ownerNodeId);
     if (!owner) throw new Error(`Owner node ${ownerNodeId} not found`);
 
@@ -200,7 +237,9 @@ export class VFSModuleEngine implements ISessionEngine {
      * 我们可以在 Service 层通过类型转换调用它。
      */
   async setTagsBatch(updates: Array<{ id: string; tags: string[] }>): Promise<void> {
-    await this.vfs.batchSetNodeTags(updates.map(u => ({ nodeId: u.id, tags: u.tags })));
+    await this.vfs.batchSetNodeTags(
+      updates.map(u => ({ nodeId: u.id, tags: u.tags }))
+    );
   }
 
   // ==================== SRS 操作 ====================
@@ -258,7 +297,10 @@ export class VFSModuleEngine implements ISessionEngine {
       })
     };
 
-    const unsubs = Object.entries(handlers).map(([evt, handler]) => bus.on(evt as any, handler));
+    const unsubs = Object.entries(handlers).map(
+      ([evt, handler]) => bus.on(evt as any, handler)
+    );
+    
     return () => unsubs.forEach(u => u());
   }
 
@@ -270,7 +312,9 @@ export class VFSModuleEngine implements ISessionEngine {
   async resolvePath(path: string): Promise<string | null> {
     let systemPath = path;
     
-    if (path.startsWith('/') && !path.startsWith(`/${this.moduleName}/`) && path !== `/${this.moduleName}`) {
+    if (path.startsWith('/') && 
+        !path.startsWith(`/${this.moduleName}/`) && 
+        path !== `/${this.moduleName}`) {
       systemPath = `/${this.moduleName}${path}`;
     }
 

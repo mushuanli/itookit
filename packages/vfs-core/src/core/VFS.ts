@@ -3,14 +3,15 @@
  * VFS 核心门面类（内置 Asset 级联逻辑）
  */
 import { VFSStorage } from '../store/VFSStorage';
-import { VNodeData, VNodeType, VNode, ContentData, Transaction, VFS_STORES } from '../store/types';
-import { ContentStore } from '../store/stores';
+import { ITransaction } from '../storage/interfaces/IStorageAdapter';
+import { VNodeData, VNodeType, VNode, ContentData, VFS_STORES } from '../store/types';
+import { createContentRef, generateNodeId, getContentSize } from '../store/utils';
 import { PathResolver } from './PathResolver';
 import { MiddlewareRegistry } from './MiddlewareRegistry';
 import { EventBus } from './EventBus';
 import { AssetUtils } from '../utils/AssetUtils';
 import {
-  VFSError, VFSErrorCode, CreateNodeOptions, UnlinkOptions, 
+  VFSError, VFSErrorCode, CreateNodeOptions, UnlinkOptions,
   UnlinkResult, CopyResult, VFSEventType, SearchQuery
 } from './types';
 
@@ -66,8 +67,8 @@ export class VFS {
       parentId = await this.ensureParentDirectory(module, this.pathResolver.dirname(userPath));
     }
 
-    const nodeId = this.generateId();
-    const contentRef = type === VNodeType.FILE ? ContentStore.createRef(nodeId) : null;
+    const nodeId = generateNodeId();
+    const contentRef = type === VNodeType.FILE ? createContentRef(nodeId) : null;
     
     const node = VNode.create({
       nodeId, parentId,
@@ -82,20 +83,22 @@ export class VFS {
     }
 
     const tx = this.storage.beginTransaction();
+    
     try {
       if (type === VNodeType.FILE) {
         const fileContent = content ?? '';
         const { processedContent, derivedData } = await this.processWrite(node, fileContent, tx);
         node.metadata = { ...node.metadata, ...derivedData };
-        node.size = this.getContentSize(processedContent);
+        node.size = getContentSize(processedContent);
       }
       
-      await this.storage.inodeStore.put(node, tx);
-      await tx.done;
+      await this.storage.putVNode(node, tx);
+      await tx.commit();
 
       this.emitEvent(VFSEventType.NODE_CREATED, node, { type, module });
       return node;
     } catch (error) {
+      await tx.abort();
       throw this.wrapError(error, 'Failed to create node');
     }
   }
@@ -109,7 +112,7 @@ export class VFS {
     
     // 检查是否已有资产目录
     if (owner.metadata.assetDirId) {
-      const existing = await this.storage.loadVNode(owner.metadata.assetDirId);
+      const existing = await this.storage.loadVNode(owner.metadata.assetDirId as string);
       if (existing) return existing;
     }
 
@@ -131,7 +134,7 @@ export class VFS {
         ? owner.nodeId  // 目录的 .assets 在目录内
         : owner.parentId; // 文件的 .filename 与文件同级
 
-      const assetDirId = this.generateId();
+      const assetDirId = generateNodeId();
       const assetDir = VNode.create({
         nodeId: assetDirId,
         parentId: assetParentId,
@@ -149,13 +152,14 @@ export class VFS {
       owner.metadata.assetDirId = assetDirId;
       owner.modifiedAt = Date.now();
 
-      await this.storage.inodeStore.put(assetDir, tx);
-      await this.storage.inodeStore.put(owner, tx);
-      await tx.done;
+      await this.storage.putVNode(assetDir, tx);
+      await this.storage.putVNode(owner, tx);
+      await tx.commit();
 
       this.emitEvent(VFSEventType.NODE_CREATED, assetDir, { isAssetDir: true, ownerId: owner.nodeId });
       return assetDir;
     } catch (error) {
+      await tx.abort();
       throw this.wrapError(error, 'Failed to create asset directory');
     }
   }
@@ -166,7 +170,7 @@ export class VFS {
   async getAssetDirectory(ownerNodeId: string): Promise<VNodeData | null> {
     const owner = await this.storage.loadVNode(ownerNodeId);
     if (!owner?.metadata.assetDirId) return null;
-    return this.storage.loadVNode(owner.metadata.assetDirId);
+    return this.storage.loadVNode(owner.metadata.assetDirId as string);
   }
 
   /**
@@ -175,7 +179,7 @@ export class VFS {
   async getAssetOwner(assetDirId: string): Promise<VNodeData | null> {
     const assetDir = await this.storage.loadVNode(assetDirId);
     if (!assetDir?.metadata.ownerId) return null;
-    return this.storage.loadVNode(assetDir.metadata.ownerId);
+    return this.storage.loadVNode(assetDir.metadata.ownerId as string);
   }
 
   // ==================== 读取操作 ====================
@@ -189,7 +193,7 @@ export class VFS {
 
     if (!node.contentRef) return '';
     
-    const data = await this.storage.contentStore.get(node.contentRef);
+    const data = await this.storage.getContent(node.contentRef);
     return data?.content ?? '';
   }
 
@@ -206,19 +210,21 @@ export class VFS {
     await this.middlewares.runValidation(node, content);
 
     const tx = this.storage.beginTransaction();
+    
     try {
       const { processedContent, derivedData } = await this.processWrite(node, content, tx);
       
       node.metadata = { ...node.metadata, ...derivedData };
-      node.size = this.getContentSize(processedContent);
+      node.size = getContentSize(processedContent);
       node.modifiedAt = Date.now();
       
-      await this.storage.inodeStore.put(node, tx);
-      await tx.done;
+      await this.storage.putVNode(node, tx);
+      await tx.commit();
 
       this.emitEvent(VFSEventType.NODE_UPDATED, node);
       return node;
     } catch (error) {
+      await tx.abort();
       throw this.wrapError(error, 'Failed to write content');
     }
   }
@@ -269,24 +275,31 @@ export class VFS {
 
     const allRemovedIds = allNodesToDelete.map(n => n.nodeId);
     const tx = this.storage.beginTransaction([
-      VFS_STORES.VNODES, VFS_STORES.CONTENTS, VFS_STORES.NODE_TAGS, 
+      VFS_STORES.VNODES, VFS_STORES.CONTENTS, VFS_STORES.NODE_TAGS,
       VFS_STORES.TAGS, VFS_STORES.SRS_ITEMS
     ]);
 
     try {
       for (const n of allNodesToDelete) {
         await this.middlewares.runBeforeDelete(n, tx);
-        if (n.contentRef) await this.storage.contentStore.delete(n.contentRef, tx);
+        
+        if (n.contentRef) {
+          await this.storage.deleteContent(n.contentRef, tx);
+        }
+        
         await this.storage.cleanupNodeTags(n.nodeId, tx);
-        await this.storage.srsStore.deleteForNode(n.nodeId, tx);
-        await this.storage.inodeStore.delete(n.nodeId, tx);
+        await this.storage.deleteSRSForNode(n.nodeId, tx);
+        await this.storage.deleteVNode(n.nodeId, tx);
+        
         await this.middlewares.runAfterDelete(n, tx);
       }
       
-      await tx.done;
+      await tx.commit();
+      
       this.emitEvent(VFSEventType.NODE_DELETED, node, { removedIds: allRemovedIds });
       return { removedNodeId: node.nodeId, allRemovedIds };
     } catch (error) {
+      await tx.abort();
       throw this.wrapError(error, 'Failed to delete node');
     }
   }
@@ -325,17 +338,21 @@ export class VFS {
           if (deleted.has(n.nodeId)) continue;
 
           await this.middlewares.runBeforeDelete(n, tx);
-          if (n.contentRef) await this.storage.contentStore.delete(n.contentRef, tx);
-          await this.storage.cleanupNodeTags(n.nodeId, tx);
-          await this.storage.srsStore.deleteForNode(n.nodeId, tx);
-          await this.storage.inodeStore.delete(n.nodeId, tx);
-          await this.middlewares.runAfterDelete(n, tx);
           
+          if (n.contentRef) {
+            await this.storage.deleteContent(n.contentRef, tx);
+          }
+          
+          await this.storage.cleanupNodeTags(n.nodeId, tx);
+          await this.storage.deleteSRSForNode(n.nodeId, tx);
+          await this.storage.deleteVNode(n.nodeId, tx);
+          
+          await this.middlewares.runAfterDelete(n, tx);
           deleted.add(n.nodeId);
         }
       }
 
-      await tx.done;
+      await tx.commit();
 
       if (deleted.size > 0) {
         this.events.emit({
@@ -347,6 +364,7 @@ export class VFS {
 
       return deleted.size;
     } catch (error) {
+      await tx.abort();
       throw this.wrapError(error, 'Failed to batch delete');
     }
   }
@@ -354,7 +372,7 @@ export class VFS {
   /**
    * [新增] 收集节点关联的资产目录（通过双向引用 O(1) 查找）
    */
-  private async collectAssetNodes(nodes: VNodeData[], tx?: Transaction): Promise<VNodeData[]> {
+  private async collectAssetNodes(nodes: VNodeData[], tx?: ITransaction): Promise<VNodeData[]> {
     const assetNodes: VNodeData[] = [];
     const collected = new Set<string>();
 
@@ -363,7 +381,7 @@ export class VFS {
       if (node.metadata.isAssetDir) continue;
       
       // 通过双向引用直接获取资产目录
-      const assetDirId = node.metadata.assetDirId;
+      const assetDirId = node.metadata.assetDirId as string | undefined;
       if (!assetDirId || collected.has(assetDirId)) continue;
 
       const assetDir = await this.storage.loadVNode(assetDirId, tx);
@@ -406,7 +424,9 @@ export class VFS {
     const newParentId = await this.pathResolver.resolveParent(module, userPath);
     const oldSystemPath = node.path;
 
-    const tx = this.storage.beginTransaction([VFS_STORES.VNODES, VFS_STORES.SRS_ITEMS, VFS_STORES.CONTENTS]);
+    const tx = this.storage.beginTransaction([
+      VFS_STORES.VNODES, VFS_STORES.SRS_ITEMS, VFS_STORES.CONTENTS
+    ]);
 
     try {
       // 更新主节点
@@ -415,7 +435,7 @@ export class VFS {
       node.path = newSystemPath;
       node.modifiedAt = Date.now();
 
-      await this.storage.inodeStore.put(node, tx);
+      await this.storage.putVNode(node, tx);
 
       // 更新子节点路径
       if (node.type === VNodeType.DIRECTORY) {
@@ -424,13 +444,14 @@ export class VFS {
 
       // [核心] 同步移动资产目录
       await this.syncMoveAssetDirectory(node, oldSystemPath, newSystemPath, tx);
-
       await this.middlewares.runAfterMove(node, oldSystemPath, newSystemPath, tx);
-      await tx.done;
+      
+      await tx.commit();
 
       this.emitEvent(VFSEventType.NODE_MOVED, node, { oldPath: oldSystemPath, newPath: newSystemPath });
       return node;
     } catch (error) {
+      await tx.abort();
       throw this.wrapError(error, 'Failed to move node');
     }
   }
@@ -495,14 +516,14 @@ export class VFS {
 
         if (targetModuleId !== oldModuleId) {
           node.moduleId = targetModuleId;
-          await this.storage.srsStore.updateModuleIdForNode(nodeId, targetModuleId, tx);
+          await this.storage.updateSRSModuleId(nodeId, targetModuleId, tx);
         }
 
         node.parentId = targetParentId;
         node.path = newSystemPath;
         node.modifiedAt = Date.now();
 
-        await this.storage.inodeStore.put(node, tx);
+        await this.storage.putVNode(node, tx);
 
         if (node.type === VNodeType.DIRECTORY) {
           await this.updateDescendantPaths(node, oldSystemPath, newSystemPath, targetModuleId, tx);
@@ -512,7 +533,7 @@ export class VFS {
         movedIds.push(nodeId);
       }
 
-      await tx.done;
+      await tx.commit();
 
       if (movedIds.length > 0) {
         this.events.emit({
@@ -522,6 +543,7 @@ export class VFS {
         });
       }
     } catch (error) {
+      await tx.abort();
       throw this.wrapError(error, 'Failed to batch move');
     }
   }
@@ -534,16 +556,16 @@ export class VFS {
     owner: VNodeData,
     _oldOwnerPath: string,
     newOwnerPath: string,
-    tx: Transaction
+    tx: ITransaction
   ): Promise<void> {
-    const assetDirId = owner.metadata.assetDirId;
+    const assetDirId = owner.metadata.assetDirId as string | undefined;
     if (!assetDirId) return;
 
     const assetDir = await this.storage.loadVNode(assetDirId, tx);
     if (!assetDir) {
       // 双向引用失效，清理 owner 的引用
       delete owner.metadata.assetDirId;
-      await this.storage.inodeStore.put(owner, tx);
+      await this.storage.putVNode(owner, tx);
       return;
     }
 
@@ -565,7 +587,7 @@ export class VFS {
     assetDir.moduleId = owner.moduleId;
     assetDir.modifiedAt = Date.now();
 
-    await this.storage.inodeStore.put(assetDir, tx);
+    await this.storage.putVNode(assetDir, tx);
 
     // 递归更新资产目录内的子节点路径
     await this.updateDescendantPaths(assetDir, oldAssetPath, newAssetPath, owner.moduleId!, tx);
@@ -605,15 +627,17 @@ export class VFS {
     const copiedIds = operations.map(op => op.newNode.nodeId);
     const targetId = operations[0]?.newNode.nodeId;
 
-    const tx = this.storage.beginTransaction([VFS_STORES.VNODES, VFS_STORES.CONTENTS, VFS_STORES.NODE_TAGS]);
+    const tx = this.storage.beginTransaction([
+      VFS_STORES.VNODES, VFS_STORES.CONTENTS, VFS_STORES.NODE_TAGS
+    ]);
 
     try {
       // 执行主节点复制
       for (const op of operations) {
-        await this.storage.inodeStore.put(op.newNode, tx);
+        await this.storage.putVNode(op.newNode, tx);
 
         if (op.sourceContent && op.newNode.contentRef) {
-          await this.storage.contentStore.put({
+          await this.storage.putContent({
             contentRef: op.newNode.contentRef,
             nodeId: op.newNode.nodeId,
             content: op.sourceContent.content,
@@ -623,7 +647,7 @@ export class VFS {
         }
 
         for (const tag of op.newNode.tags) {
-          await this.storage.nodeTagStore.add(op.newNode.nodeId, tag, tx);
+          await this.storage.addTagToNode(op.newNode.nodeId, tag, tx);
         }
       }
 
@@ -636,7 +660,8 @@ export class VFS {
         await this.middlewares.runAfterCopy(source, targetNode, tx);
       }
 
-      await tx.done;
+      await tx.commit();
+      
       this.emitEvent(VFSEventType.NODE_COPIED, { nodeId: targetId, path: targetSystemPath } as VNodeData, { sourceId, copiedIds });
       
       return { sourceId, targetId, copiedIds };
@@ -653,9 +678,9 @@ export class VFS {
     targetId: string,
     targetPath: string,
     moduleId: string,
-    tx: Transaction
+    tx: ITransaction
   ): Promise<void> {
-    const sourceAssetDirId = source.metadata.assetDirId;
+    const sourceAssetDirId = source.metadata.assetDirId as string | undefined;
     if (!sourceAssetDirId) return;
 
     const sourceAssetDir = await this.storage.loadVNode(sourceAssetDirId, tx);
@@ -683,13 +708,13 @@ export class VFS {
 
     // 建立双向引用
     targetNode.metadata.assetDirId = newAssetDirId;
-    await this.storage.inodeStore.put(targetNode, tx);
+    await this.storage.putVNode(targetNode, tx);
 
     const newAssetDir = await this.storage.loadVNode(newAssetDirId, tx);
     if (newAssetDir) {
       newAssetDir.metadata.ownerId = targetId;
       newAssetDir.metadata.isAssetDir = true;
-      await this.storage.inodeStore.put(newAssetDir, tx);
+      await this.storage.putVNode(newAssetDir, tx);
     }
   }
 
@@ -701,9 +726,9 @@ export class VFS {
     targetParentId: string | null,
     targetPath: string,
     moduleId: string,
-    tx: Transaction
+    tx: ITransaction
   ): Promise<string> {
-    const newNodeId = this.generateId();
+    const newNodeId = generateNodeId();
     const targetName = this.pathResolver.basename(targetPath);
 
     const newNode: VNodeData = {
@@ -714,7 +739,7 @@ export class VFS {
       path: targetPath,
       moduleId,
       contentRef: source.type === VNodeType.FILE && source.contentRef
-        ? ContentStore.createRef(newNodeId)
+        ? createContentRef(newNodeId)
         : null,
       size: source.size,
       createdAt: Date.now(),
@@ -727,13 +752,13 @@ export class VFS {
     delete newNode.metadata.assetDirId;
     delete newNode.metadata.ownerId;
 
-    await this.storage.inodeStore.put(newNode, tx);
+    await this.storage.putVNode(newNode, tx);
 
     // 复制文件内容
     if (source.contentRef && newNode.contentRef) {
-      const content = await this.storage.contentStore.get(source.contentRef, tx);
+      const content = await this.storage.getContent(source.contentRef, tx);
       if (content) {
-        await this.storage.contentStore.put({
+        await this.storage.putContent({
           contentRef: newNode.contentRef,
           nodeId: newNodeId,
           content: content.content,
@@ -745,7 +770,7 @@ export class VFS {
 
     // 复制标签关联
     for (const tag of newNode.tags) {
-      await this.storage.nodeTagStore.add(newNodeId, tag, tx);
+      await this.storage.addTagToNode(newNodeId, tag, tx);
     }
 
     // 递归复制子节点
@@ -774,6 +799,7 @@ export class VFS {
     const node = await this.resolveNode(vnodeOrId);
     
     const tx = this.storage.beginTransaction();
+    
     try {
       // 保留 Asset 相关的元数据字段
       const assetFields = {
@@ -784,12 +810,14 @@ export class VFS {
 
       node.metadata = { ...metadata, ...assetFields };
       node.modifiedAt = Date.now();
-      await this.storage.inodeStore.put(node, tx);
-      await tx.done;
+      
+      await this.storage.putVNode(node, tx);
+      await tx.commit();
 
       this.emitEvent(VFSEventType.NODE_UPDATED, node, { metadataOnly: true });
       return node;
     } catch (error) {
+      await tx.abort();
       throw this.wrapError(error, 'Failed to update metadata');
     }
   }
@@ -811,7 +839,10 @@ export class VFS {
   async batchSetTags(updates: Array<{ nodeId: string; tags: string[] }>): Promise<void> {
     if (!updates.length) return;
 
-    const tx = this.storage.beginTransaction([VFS_STORES.VNODES, VFS_STORES.TAGS, VFS_STORES.NODE_TAGS]);
+    const tx = this.storage.beginTransaction([
+      VFS_STORES.VNODES, VFS_STORES.TAGS, VFS_STORES.NODE_TAGS
+    ]);
+    
     const updatedIds: string[] = [];
 
     try {
@@ -842,7 +873,7 @@ export class VFS {
         if (changed) updatedIds.push(nodeId);
       }
 
-      await tx.done;
+      await tx.commit();
 
       if (updatedIds.length > 0) {
         this.events.emit({
@@ -852,6 +883,7 @@ export class VFS {
         });
       }
     } catch (error) {
+      await tx.abort();
       throw this.wrapError(error, 'Failed to batch set tags');
     }
   }
@@ -874,7 +906,7 @@ export class VFS {
   }
 
   async findByTag(tagName: string): Promise<VNodeData[]> {
-    const nodeIds = await this.storage.nodeTagStore.getNodesForTag(tagName);
+    const nodeIds = await this.storage.getNodeIdsByTag(tagName);
     if (!nodeIds.length) return [];
     
     const nodes: VNodeData[] = [];
@@ -927,7 +959,7 @@ export class VFS {
     return newDir.nodeId;
   }
 
-  private async collectDescendants(node: VNodeData, tx?: Transaction): Promise<VNodeData[]> {
+  private async collectDescendants(node: VNodeData, tx?: ITransaction): Promise<VNodeData[]> {
     const result: VNodeData[] = [node];
     
     if (node.type === VNodeType.DIRECTORY) {
@@ -945,11 +977,11 @@ export class VFS {
    * [修复] 更新子孙节点路径和模块ID
    */
   private async updateDescendantPaths(
-    parent: VNodeData, 
-    oldPrefix: string, 
-    newPrefix: string, 
-    newModuleId: string, 
-    tx: Transaction
+    parent: VNodeData,
+    oldPrefix: string,
+    newPrefix: string,
+    newModuleId: string,
+    tx: ITransaction
   ): Promise<void> {
     const children = await this.storage.getChildren(parent.nodeId, tx);
     
@@ -960,10 +992,10 @@ export class VFS {
 
       if (child.moduleId !== newModuleId) {
         child.moduleId = newModuleId;
-        await this.storage.srsStore.updateModuleIdForNode(child.nodeId, newModuleId, tx);
+        await this.storage.updateSRSModuleId(child.nodeId, newModuleId, tx);
       }
 
-      await this.storage.inodeStore.put(child, tx);
+      await this.storage.putVNode(child, tx);
 
       if (child.type === VNodeType.DIRECTORY) {
         await this.updateDescendantPaths(child, oldPrefix, newPrefix, newModuleId, tx);
@@ -975,18 +1007,18 @@ export class VFS {
    * [变更] 处理 Middleware 写入流程
    */
   private async processWrite(
-    node: VNodeData, 
-    content: string | ArrayBuffer, 
-    tx: Transaction
+    node: VNodeData,
+    content: string | ArrayBuffer,
+    tx: ITransaction
   ): Promise<{ processedContent: string | ArrayBuffer; derivedData: Record<string, unknown> }> {
     const processedContent = await this.middlewares.runBeforeWrite(node, content, tx);
 
     if (node.contentRef) {
-      await this.storage.contentStore.put({
+      await this.storage.putContent({
         contentRef: node.contentRef,
         nodeId: node.nodeId,
         content: processedContent,
-        size: this.getContentSize(processedContent),
+        size: getContentSize(processedContent),
         createdAt: Date.now()
       }, tx);
     }
@@ -1002,7 +1034,7 @@ export class VFS {
     const result: NodeTreeData = { node, content: null, children: [] };
     
     if (node.type === VNodeType.FILE && node.contentRef) {
-      result.content = await this.storage.contentStore.get(node.contentRef) ?? null;
+      result.content = await this.storage.getContent(node.contentRef) ?? null;
     } else if (node.type === VNodeType.DIRECTORY) {
       const children = await this.storage.getChildren(node.nodeId);
       result.children = await Promise.all(children.map(c => this.loadNodeTree(c)));
@@ -1012,9 +1044,9 @@ export class VFS {
   }
 
   private planCopyOperations(
-    tree: NodeTreeData, 
-    parentId: string | null, 
-    userPath: string, 
+    tree: NodeTreeData,
+    parentId: string | null,
+    userPath: string,
     module: string
   ): CopyOperation[] {
     const operations: CopyOperation[] = [];
@@ -1030,10 +1062,10 @@ export class VFS {
     ops: CopyOperation[]
   ): string {
     const { node: source, content, children } = tree;
-    const newNodeId = this.generateId();
+    const newNodeId = generateNodeId();
     const systemPath = this.pathResolver.toSystemPath(module, userPath);
-    const contentRef = source.type === VNodeType.FILE && source.contentRef 
-      ? ContentStore.createRef(newNodeId) 
+    const contentRef = source.type === VNodeType.FILE && source.contentRef
+      ? createContentRef(newNodeId)
       : null;
 
     const newNode = VNode.create({
@@ -1059,7 +1091,6 @@ export class VFS {
     for (const childTree of children) {
       // 跳过资产目录（会单独处理）
       if (childTree.node.metadata.isAssetDir) continue;
-      
       const childPath = this.pathResolver.join(userPath, childTree.node.name);
       this.buildCopyOperations(childTree, newNodeId, childPath, module, ops);
     }
@@ -1082,23 +1113,10 @@ export class VFS {
     if (error instanceof VFSError) return error;
     return new VFSError(VFSErrorCode.TRANSACTION_FAILED, message, error);
   }
-
-  /**
-   * 生成唯一 ID
-   */
-  private generateId(): string {
-    return `node_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
-  }
-
-  /**
-   * 获取内容大小
-   */
-  private getContentSize(content: string | ArrayBuffer): number {
-    return typeof content === 'string' ? new Blob([content]).size : content.byteLength;
-  }
 }
 
-// 辅助类型
+// ==================== 辅助类型 ====================
+
 interface NodeTreeData {
   node: VNodeData;
   content: ContentData | null;

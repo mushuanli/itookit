@@ -2,7 +2,8 @@
  * @file vfs/core/types.ts
  * 核心层类型定义
  */
-import { VNodeType,VNodeData, Transaction } from '../store/types';
+import { VNodeType, VNodeData } from '../store/types';
+import { ITransaction } from '../storage/interfaces/IStorageAdapter';
 
 /** VFS 错误类型 */
 export enum VFSErrorCode {
@@ -49,7 +50,7 @@ export interface VFSEvent {
   data?: unknown;
 }
 
-/** [新增] 搜索查询条件接口 */
+/** 搜索查询条件接口 */
 export interface SearchQuery {
   type?: VNodeType.FILE | VNodeType.DIRECTORY;
   nameContains?: string;
@@ -85,7 +86,7 @@ export interface CopyResult {
   copiedIds: string[];
 }
 
-/** [新增] 增量导入/恢复选项 */
+/** 增量导入/恢复选项 */
 export interface IncrementalRestoreOptions {
     /** 
      * 如果路径已存在，是否覆盖内容和元数据 
@@ -102,7 +103,7 @@ export interface IncrementalRestoreOptions {
 
 // ==================== Middleware 接口 ====================
 /**
- * [重命名] Middleware 接口
+ * Middleware 接口
  * 负责拦截 VFS 操作（验证、写入前后处理、清理）
  */
 export interface IVFSMiddleware {
@@ -114,10 +115,10 @@ export interface IVFSMiddleware {
   cleanup?(): Promise<void>;
 
   onValidate?(vnode: VNodeData, content: string | ArrayBuffer): Promise<void>;
-  onBeforeWrite?(vnode: VNodeData, content: string | ArrayBuffer, tx: Transaction): Promise<string | ArrayBuffer>;
-  onAfterWrite?(vnode: VNodeData, content: string | ArrayBuffer, tx: Transaction): Promise<Record<string, unknown>>;
-  onBeforeDelete?(vnode: VNodeData, tx: Transaction): Promise<void>;
-  onAfterDelete?(vnode: VNodeData, tx: Transaction): Promise<void>;
-  onAfterMove?(vnode: VNodeData, oldPath: string, newPath: string, tx: Transaction): Promise<void>;
-  onAfterCopy?(sourceNode: VNodeData, targetNode: VNodeData, tx: Transaction): Promise<void>;
+  onBeforeWrite?(vnode: VNodeData, content: string | ArrayBuffer, tx: ITransaction): Promise<string | ArrayBuffer>;
+  onAfterWrite?(vnode: VNodeData, content: string | ArrayBuffer, tx: ITransaction): Promise<Record<string, unknown>>;
+  onBeforeDelete?(vnode: VNodeData, tx: ITransaction): Promise<void>;
+  onAfterDelete?(vnode: VNodeData, tx: ITransaction): Promise<void>;
+  onAfterMove?(vnode: VNodeData, oldPath: string, newPath: string, tx: ITransaction): Promise<void>;
+  onAfterCopy?(sourceNode: VNodeData, targetNode: VNodeData, tx: ITransaction): Promise<void>;
 }
