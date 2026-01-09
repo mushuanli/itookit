@@ -1,7 +1,7 @@
 // @file packages/vfs/src/presets/browser.ts
 
 import { VFSInstance, createVFS } from '../VFSFactory';
-import { IPlugin, CollectionSchema } from '../../core';
+import { IPlugin } from '../../core';
 import { IndexedDBStoragePlugin } from '../../storage-indexeddb';
 import { MiddlewarePlugin } from '../../middleware';
 import { TagsPlugin } from '../../tags';

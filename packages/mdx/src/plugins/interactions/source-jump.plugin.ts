@@ -1,13 +1,19 @@
-// mdx/plugins/interactions/source-jump.plugin.ts
-
+/**
+ * @file mdx/plugins/interactions/source-jump.plugin.ts
+ * @description 源码同步插件 - 优化版
+ */
 import type { MDxPlugin, PluginContext } from '../../core/plugin';
 
-/**
- * 源码同步插件
- */
+// [优化] 静态常量提取
+const BLOCK_TAGS = new Set(['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'LI', 'BLOCKQUOTE', 'PRE', 'DIV']);
+
 export class SourceSyncPlugin implements MDxPlugin {
   name = 'interaction:source-sync';
   private cleanupFns: Array<() => void> = [];
+  
+  // [优化] 缓存平台检测结果
+  private readonly isMac = typeof navigator !== 'undefined' && 
+    navigator.platform.toUpperCase().indexOf('MAC') >= 0;
 
   install(context: PluginContext): void {
     const removeDomUpdated = context.on('domUpdated', ({ element }: { element: HTMLElement }) => {
@@ -20,17 +26,15 @@ export class SourceSyncPlugin implements MDxPlugin {
   }
 
   /**
-   * 附加双击事件处理器
+   * [优化] 使用事件委托替代每个元素绑定
    */
   private attachDoubleClickHandler(element: HTMLElement, context: PluginContext): void {
-    const existingHandler = (element as any)._sourceSyncHandler;
-    if (existingHandler) {
-      element.removeEventListener('dblclick', existingHandler);
-    }
+    // 检查是否已绑定
+    if (element.dataset.sourceSyncBound) return;
+    element.dataset.sourceSyncBound = 'true';
 
     const handler = (event: MouseEvent) => {
-      const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-      const isModifierPressed = isMac ? event.metaKey : event.ctrlKey;
+      const isModifierPressed = this.isMac ? event.metaKey : event.ctrlKey;
 
       if (!isModifierPressed) {
         return;
@@ -46,7 +50,11 @@ export class SourceSyncPlugin implements MDxPlugin {
     };
 
     element.addEventListener('dblclick', handler);
-    (element as any)._sourceSyncHandler = handler;
+    
+    this.cleanupFns.push(() => {
+      element.removeEventListener('dblclick', handler);
+      delete element.dataset.sourceSyncBound;
+    });
   }
 
   /**
@@ -79,11 +87,10 @@ export class SourceSyncPlugin implements MDxPlugin {
    * 查找最近的块级父元素
    */
   private findBlockParent(element: HTMLElement): HTMLElement | null {
-    const blockTags = ['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'LI', 'BLOCKQUOTE', 'PRE', 'DIV'];
     let current: HTMLElement | null = element;
 
     while (current && current !== document.body) {
-      if (blockTags.includes(current.tagName)) {
+      if (BLOCK_TAGS.has(current.tagName)) {
         return current;
       }
       current = current.parentElement;

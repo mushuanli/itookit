@@ -36,6 +36,10 @@ export class MDxRenderer {
   private searchMarkClass: string;
   public markedExtensions: any[] = [];
   private instanceId: string;
+  
+  // [优化] 搜索正则缓存
+  private searchRegexCache = new Map<string, RegExp>();
+  private readonly MAX_REGEX_CACHE_SIZE = 30;
 
   constructor(config: MDxRendererConfig = {}) {
     this.searchMarkClass = config.searchMarkClass || 'mdx-editor-search-highlight';
@@ -45,8 +49,8 @@ export class MDxRenderer {
     // ✅ [核心] 优先使用 sessionEngine
     const engine = config.sessionEngine;
     const nodeId = config.nodeId;
-
     const ownerNodeId = config.ownerNodeId ?? config.nodeId;
+    
     this.pluginManager.setContext(nodeId, ownerNodeId, engine);
 
     if (config.persistenceAdapter) {
@@ -90,11 +94,11 @@ export class MDxRenderer {
    */
   private configureMarked(markedInstance: Marked, options: RenderOptions): void {
     const renderer = {
-        heading(text: string, level: number) {
-            const rawSlug = slugify(text);
-            const id = `heading-${rawSlug}`;
-            return `<h${level} id="${id}">${text}</h${level}>`;
-        }
+      heading(text: string, level: number) {
+        const rawSlug = slugify(text);
+        const id = `heading-${rawSlug}`;
+        return `<h${level} id="${id}">${text}</h${level}>`;
+      }
     };
     
     markedInstance.use({ renderer });
@@ -144,7 +148,29 @@ export class MDxRenderer {
   }
 
   /**
-   * 搜索文本
+   * [优化] 获取缓存的搜索正则
+   */
+  private getSearchRegex(query: string): RegExp {
+    let regex = this.searchRegexCache.get(query);
+    if (!regex) {
+      const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      regex = new RegExp(escapedQuery, 'gi');
+      
+      // LRU 缓存
+      if (this.searchRegexCache.size >= this.MAX_REGEX_CACHE_SIZE) {
+        const firstKey = this.searchRegexCache.keys().next().value;
+        if (firstKey) {
+          this.searchRegexCache.delete(firstKey);
+        }
+      }
+      this.searchRegexCache.set(query, regex);
+    }
+    regex.lastIndex = 0;
+    return regex;
+  }
+
+  /**
+   * [优化] 搜索文本 - 使用 DocumentFragment 批量处理
    */
   search(query: string): HTMLElement[] {
     if (!this.renderRoot || !query) return [];
@@ -152,78 +178,136 @@ export class MDxRenderer {
     this.clearSearch();
 
     const matches: HTMLElement[] = [];
+    const regex = this.getSearchRegex(query);
+    
     const walker = document.createTreeWalker(
       this.renderRoot,
       NodeFilter.SHOW_TEXT,
       null
     );
 
-    const regex = new RegExp(query, 'gi');
+    // 收集需要处理的节点信息
+    interface TextNodeInfo {
+      node: Text;
+      parent: Element;
+      matches: RegExpMatchArray[];
+    }
+    
+    const textNodesToProcess: TextNodeInfo[] = [];
     let node: Node | null;
 
     while ((node = walker.nextNode())) {
       const textNode = node as Text;
       const text = textNode.textContent || '';
+      const parent = textNode.parentElement;
       
-      if (regex.test(text)) {
-        const parent = textNode.parentElement;
-        if (!parent) continue;
-
-        const span = document.createElement('span');
-        span.className = this.searchMarkClass;
-        span.innerHTML = text.replace(
-          regex,
-          match => `<mark>${match}</mark>`
-        );
-
-        parent.replaceChild(span, textNode);
-        matches.push(span);
+      if (!parent) continue;
+      
+      // 重置正则 lastIndex
+      regex.lastIndex = 0;
+      const nodeMatches = Array.from(text.matchAll(regex));
+      
+      if (nodeMatches.length > 0) {
+        textNodesToProcess.push({ 
+          node: textNode, 
+          parent,
+          matches: nodeMatches 
+        });
       }
+    }
+
+    // 批量处理 - 使用 DocumentFragment 减少重排
+    for (const { node: textNode, parent, matches: nodeMatches } of textNodesToProcess) {
+      const text = textNode.textContent || '';
+      const fragment = document.createDocumentFragment();
+      
+      let lastIndex = 0;
+      
+      for (const match of nodeMatches) {
+        const matchIndex = match.index!;
+        
+        // 添加匹配前的文本
+        if (matchIndex > lastIndex) {
+          fragment.appendChild(
+            document.createTextNode(text.substring(lastIndex, matchIndex))
+          );
+        }
+        
+        // 添加高亮的匹配文本
+        const mark = document.createElement('mark');
+        mark.textContent = match[0];
+        fragment.appendChild(mark);
+        
+        lastIndex = matchIndex + match[0].length;
+      }
+      
+      // 添加剩余文本
+      if (lastIndex < text.length) {
+        fragment.appendChild(
+          document.createTextNode(text.substring(lastIndex))
+        );
+      }
+      
+      // 创建包装 span
+      const span = document.createElement('span');
+      span.className = this.searchMarkClass;
+      span.appendChild(fragment);
+      
+      // 替换原节点
+      parent.replaceChild(span, textNode);
+      matches.push(span);
     }
 
     return matches;
   }
 
-  /**
-   * 跳转到匹配项
-   */
   gotoMatch(matchElement: HTMLElement): void {
     matchElement.scrollIntoView({
       behavior: 'smooth',
-      block: 'center',});
+      block: 'center',
+    });
     matchElement.classList.add(`${this.searchMarkClass}--active`);
   }
 
   /**
-   * 清除搜索高亮
+   * [优化] 清除搜索高亮 - 批量规范化
    */
   clearSearch(): void {
     if (!this.renderRoot) return;
 
     const highlights = this.renderRoot.querySelectorAll(`.${this.searchMarkClass}`);
+    if (highlights.length === 0) return;
+
+    // 收集需要规范化的父元素
+    const parentsToNormalize = new Set<Element>();
+    
     highlights.forEach(highlight => {
       const parent = highlight.parentElement;
       if (parent) {
-        parent.replaceChild(document.createTextNode(highlight.textContent || ''),
-          highlight
-        );
+        parentsToNormalize.add(parent);
+        
+        // 将高亮内容提取为文本节点
+        const textContent = highlight.textContent || '';
+        const textNode = document.createTextNode(textContent);
+        parent.replaceChild(textNode, highlight);
       }
+    });
+
+    // 合并相邻文本节点
+    parentsToNormalize.forEach(parent => {
+      parent.normalize();
     });
   }
 
-  /**
-   * 获取插件管理器
-   */
   getPluginManager(): PluginManager {
     return this.pluginManager;
   }
 
-  /**
-   * 销毁渲染器
-   */
   destroy(): void {
     this.clearSearch();
     this.pluginManager.destroy();
+    this.searchRegexCache.clear();
+    
     if (this.renderRoot) {
       this.renderRoot.classList.remove('mdx-editor-renderer');
     }

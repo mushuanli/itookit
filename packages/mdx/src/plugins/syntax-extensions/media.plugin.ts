@@ -57,36 +57,32 @@ export class MediaPlugin implements MDxPlugin {
   }
 
   private handleAfterRender({ html, options }: { html: string; options: any }) {
-    let processedHtml = html;
-
-    // 1. 处理 !video[...] 和 !file[...]
-    // 匹配 Marked 渲染后的 <img src="..." alt="type[...]" />
-    const imgTagRegex = /<img\s+[^>]*src="([^"]+)"[^>]*alt="((?:video|file)\[.*?\])"[^>]*\/?>/gi;
-
-    processedHtml = processedHtml.replace(imgTagRegex, (match, src, altText) => {
-      const typeMatch = altText.match(/^(video|file)\[(.*?)\]$/);
-      if (!typeMatch) return match;
-
+  // 合并正则：匹配 video[...], file[...], embed
+  const mediaRegex = /<img\s+[^>]*src="([^"]+)"[^>]*alt="((?:video|file)\[[^\]]*\]|embed)"[^>]*\/?>/gi;
+  
+  const processedHtml = html.replace(mediaRegex, (match, src, altText) => {
+    // 处理 embed
+    if (altText === 'embed') {
+      return this.renderEmbed(src);
+    }
+    
+    // 处理 video[...] 或 file[...]
+    const typeMatch = altText.match(/^(video|file)\[(.*?)\]$/);
+    if (typeMatch) {
       const type = typeMatch[1];
-      const title = this.decodeHTML(typeMatch[2]); // 解码 alt 中的实体字符
-
+      const title = this.decodeHTML(typeMatch[2]);
+      
       if (type === 'video') {
         return this.renderVideo(src, title);
       } else if (type === 'file') {
         return this.renderFile(src, title);
       }
-      return match;
-    });
-
-    // 2. 处理通用 Embeds (检测 ![embed](url) 或特定链接模式)
-    // 这里假设用户使用 Markdown 图片语法 ![embed](url) 来触发嵌入
-    const embedRegex = /<img\s+[^>]*src="([^"]+)"[^>]*alt="embed"[^>]*\/?>/gi;
+    }
     
-    processedHtml = processedHtml.replace(embedRegex, (_match, src) => {
-      return this.renderEmbed(src);
-    });
+    return match;
+  });
 
-    return { html: processedHtml, options };
+  return { html: processedHtml, options };
   }
 
   private renderVideo(src: string, title: string): string {
