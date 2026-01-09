@@ -5,7 +5,8 @@ import {
     escapeHTML,Toast
 } from '@itookit/common';
 import { LLMPrintService, type PrintService,AssetManagerUI } from '@itookit/mdxeditor';
-import { HistoryView } from './components/HistoryView';
+import { FloatingNavPanel } from './components/FloatingNavPanel';
+import { HistoryView,CollapseStateMap } from './components/HistoryView';
 import { ChatInput, ExecutorOption } from './components/ChatInput';
 import { 
     ILLMSessionEngine, 
@@ -56,6 +57,14 @@ export class LLMWorkspaceEditor implements IEditor {
     private titleInput!: HTMLInputElement;
     private statusIndicator!: HTMLElement;
     private assetManagerUI: AssetManagerUI | null = null;
+
+    // ✅ 新增：折叠状态缓存（会话级别）
+    private collapseStatesCache: CollapseStateMap = {};
+    private uiStateSaveTimer: ReturnType<typeof setTimeout> | null = null;
+    private readonly UI_STATE_SAVE_DEBOUNCE = 500;
+
+    // ✅ 新增：浮动导航面板
+    private floatingNav: FloatingNavPanel | null = null;
 
     // State
     private currentTitle: string = 'New Chat';
@@ -126,6 +135,92 @@ export class LLMWorkspaceEditor implements IEditor {
         }
     }
 
+
+    /**
+     * ✅ 新增：根据快照更新状态
+     */
+    private updateStatusFromSnapshot(snapshot: SessionSnapshot): void {
+        // 更新状态指示器
+        this.updateStatusIndicatorFromStatus(snapshot.status);
+        
+        // 如果正在运行，设置输入框为 loading 状态
+        if (snapshot.isRunning) {
+            this.chatInput.setLoading(true);
+            
+            // ✅ 关键：如果正在运行，HistoryView 需要进入流式模式
+            this.historyView.enterStreamingMode();
+        }
+    }
+
+    /**
+     * ✅ 新增：根据状态字符串更新指示器
+     */
+    private updateStatusIndicatorFromStatus(status: string): void {
+        if (!this.statusIndicator) return;
+
+        const dot = this.statusIndicator.querySelector('.llm-workspace-status__dot') as HTMLElement;
+        const text = this.statusIndicator.querySelector('.llm-workspace-status__text') as HTMLElement;
+
+        dot?.classList.remove('--running', '--queued', '--completed', '--failed', '--idle');
+
+        switch (status) {
+            case 'running':
+                dot?.classList.add('--running');
+                text.textContent = 'Generating...';
+                this.chatInput.setLoading(true);
+                break;
+            case 'queued':
+                dot?.classList.add('--queued');
+                text.textContent = 'Queued';
+                this.chatInput.setLoading(true);
+                break;
+            case 'completed':
+                dot?.classList.add('--completed');
+                text.textContent = 'Ready';
+                this.chatInput.setLoading(false);
+                break;
+            case 'failed':
+                dot?.classList.add('--failed');
+                text.textContent = 'Error';
+                this.chatInput.setLoading(false);
+                break;
+            default:
+                dot?.classList.add('--idle');
+                text.textContent = 'Ready';
+                this.chatInput.setLoading(false);
+        }
+    }
+
+    /**
+     * ✅ 新增：防抖保存 UI 状态
+     */
+    private scheduleUIStateSave(states: CollapseStateMap): void {
+        this.collapseStatesCache = states;
+        
+        if (this.uiStateSaveTimer) {
+            clearTimeout(this.uiStateSaveTimer);
+        }
+        
+        this.uiStateSaveTimer = setTimeout(async () => {
+            await this.saveUIState();
+        }, this.UI_STATE_SAVE_DEBOUNCE);
+    }
+
+    /**
+     * ✅ 新增：保存 UI 状态到文件
+     */
+    private async saveUIState(): Promise<void> {
+        if (!this.options.nodeId) return;
+        
+        try {
+            await this.engine.updateUIState(this.options.nodeId, {
+                collapse_states: this.collapseStatesCache
+            });
+        } catch (e) {
+            console.warn('[LLMWorkspaceEditor] Failed to save UI state:', e);
+        }
+    }
+
     private async initComponents(): Promise<void> {
         const historyEl = this.container.querySelector('#llm-ui-history') as HTMLElement;
         const inputEl = this.container.querySelector('#llm-ui-input') as HTMLElement;
@@ -135,12 +230,14 @@ export class LLMWorkspaceEditor implements IEditor {
             historyEl,
             (id, content, type) => this.handleContentChange(id, content, type),
             (action: NodeAction, nodeId: string) => this.handleNodeAction(action, nodeId),
-        {
-            // ✅ 关键：传递上下文
-            nodeId: this.options.nodeId,
-            ownerNodeId: this.options.ownerNodeId || this.options.nodeId,
-            sessionEngine: this.options.sessionEngine,
-        }
+            {
+                nodeId: this.options.nodeId,
+                ownerNodeId: this.options.ownerNodeId || this.options.nodeId,
+                sessionEngine: this.options.sessionEngine,
+                // ✅ 新增：状态回调
+                onCollapseStateChange: (states) => this.scheduleUIStateSave(states),
+                initialCollapseStates: this.collapseStatesCache,
+            }
         );
 
         // ✅ 修复：获取初始执行器列表
@@ -248,6 +345,7 @@ export class LLMWorkspaceEditor implements IEditor {
             );
         }
 
+
         this.currentSessionId = sessionId;
 
 
@@ -271,78 +369,71 @@ export class LLMWorkspaceEditor implements IEditor {
             console.warn('[LLMWorkspaceEditor] Failed to load manifest:', e);
         }
 
-        // ✅ 关键修改：使用快照渲染历史（而不是再次调用 getSessions）
-        if (snapshot.sessions.length > 0) {
-            this.historyView.renderFull(snapshot.sessions);
+    // ================================================================
+    // 步骤 6：恢复 UI 状态（折叠状态等）
+    // ================================================================
+    try {
+        const uiState = await this.engine.getUIState(this.options.nodeId);
+        
+        if (uiState?.collapse_states) {
+            // 存在持久化的折叠状态，使用它
+            this.collapseStatesCache = uiState.collapse_states;
+            this.historyView.setCollapseStates(this.collapseStatesCache);
+            console.log('[LLMWorkspaceEditor] Restored collapse states from file');
         } else {
-            this.historyView.renderWelcome();
+            // 没有持久化状态，清空缓存，让 HistoryView 使用智能折叠策略
+            this.collapseStatesCache = {};
         }
+        
+        // 可选：恢复滚动位置
+        // if (uiState?.scroll_position !== undefined) {
+        //     // 延迟设置，等待渲染完成
+        //     setTimeout(() => {
+        //         const historyEl = this.container.querySelector('#llm-ui-history');
+        //         if (historyEl) {
+        //             historyEl.scrollTop = uiState.scroll_position;
+        //         }
+        //     }, 100);
+        // }
+        
+    } catch (e) {
+        console.warn('[LLMWorkspaceEditor] Failed to restore UI state:', e);
+        this.collapseStatesCache = {};
+    }
 
-    // ✅ 步骤 5：渲染完成后，再订阅增量事件
+    // ================================================================
+    // 步骤 7：渲染历史消息
+    // ================================================================
+    if (snapshot.sessions.length > 0) {
+        // 传递初始折叠状态给 HistoryView
+        // 注意：如果 collapseStatesCache 为空，renderFull 会使用智能折叠策略
+        this.historyView.renderFull(snapshot.sessions);
+    } else {
+        this.historyView.renderWelcome();
+    }
+
+    // ================================================================
+    // 步骤 8：订阅增量事件
+    // 
+    // 关键：在渲染完成后再订阅事件
     // 此时 renderedSessionIds 已经包含了所有历史消息的 ID
     // 后续的 session_start 事件如果重复，会被 appendSessionGroup 过滤
+    // ================================================================
     this.sessionEventUnsubscribe = this.sessionManager.onEvent(
         (event) => this.handleSessionEvent(event)
     );
-        // ✅ 根据快照状态更新 UI
-        this.updateStatusFromSnapshot(snapshot);
 
-        console.log(`[LLMWorkspaceEditor] Session loaded: ${sessionId}, messages: ${snapshot.sessions.length}, status: ${snapshot.status}`);
-    }
+    // ================================================================
+    // 步骤 9：根据快照状态更新 UI
+    // ================================================================
+    this.updateStatusFromSnapshot(snapshot);
 
-    /**
-     * ✅ 新增：根据快照更新状态
-     */
-    private updateStatusFromSnapshot(snapshot: SessionSnapshot): void {
-        // 更新状态指示器
-        this.updateStatusIndicatorFromStatus(snapshot.status);
-        
-        // 如果正在运行，设置输入框为 loading 状态
-        if (snapshot.isRunning) {
-            this.chatInput.setLoading(true);
-            
-            // ✅ 关键：如果正在运行，HistoryView 需要进入流式模式
-            this.historyView.enterStreamingMode();
-        }
-    }
-
-    /**
-     * ✅ 新增：根据状态字符串更新指示器
-     */
-    private updateStatusIndicatorFromStatus(status: string): void {
-        if (!this.statusIndicator) return;
-
-        const dot = this.statusIndicator.querySelector('.llm-workspace-status__dot') as HTMLElement;
-        const text = this.statusIndicator.querySelector('.llm-workspace-status__text') as HTMLElement;
-
-        dot?.classList.remove('--running', '--queued', '--completed', '--failed', '--idle');
-
-        switch (status) {
-            case 'running':
-                dot?.classList.add('--running');
-                text.textContent = 'Generating...';
-                this.chatInput.setLoading(true);
-                break;
-            case 'queued':
-                dot?.classList.add('--queued');
-                text.textContent = 'Queued';
-                this.chatInput.setLoading(true);
-                break;
-            case 'completed':
-                dot?.classList.add('--completed');
-                text.textContent = 'Ready';
-                this.chatInput.setLoading(false);
-                break;
-            case 'failed':
-                dot?.classList.add('--failed');
-                text.textContent = 'Error';
-                this.chatInput.setLoading(false);
-                break;
-            default:
-                dot?.classList.add('--idle');
-                text.textContent = 'Ready';
-                this.chatInput.setLoading(false);
-        }
+    console.log(
+        `[LLMWorkspaceEditor] Session loaded: ${sessionId}, ` +
+        `messages: ${snapshot.sessions.length}, ` +
+        `status: ${snapshot.status}, ` +
+        `collapseStates: ${Object.keys(this.collapseStatesCache).length}`
+    );
     }
 
     // ================================================================
@@ -392,6 +483,15 @@ export class LLMWorkspaceEditor implements IEditor {
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
                             <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                        </svg>
+                    </button>
+
+                    <button class="llm-workspace-titlebar__btn" id="llm-btn-navigator" title="Chat Navigator (Ctrl+G)">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                            <line x1="3" y1="12" x2="21" y2="12"></line>
+                            <line x1="3" y1="6" x2="21" y2="6"></line>
+                            <line x1="3" y1="18" x2="21" y2="18"></line>
+                            <circle cx="9" cy="12" r="2" fill="currentColor"></circle>
                         </svg>
                     </button>
 
@@ -452,6 +552,11 @@ export class LLMWorkspaceEditor implements IEditor {
             await this.handleOpenAssetManager();
         });
 
+        // ✅ 新增：导航按钮
+        this.container.querySelector('#llm-btn-navigator')?.addEventListener('click', () => {
+            this.toggleNavigator();
+        });
+
         // Collapse/Expand All
         this.container.querySelector('#llm-btn-collapse')?.addEventListener('click', (e) => {
             this.toggleAllBubbles(e.currentTarget as Element);
@@ -485,6 +590,230 @@ export class LLMWorkspaceEditor implements IEditor {
                 console.error('[LLMWorkspaceEditor] Print failed:', err);
             }
         });
+
+        // ✅ 新增：全局快捷键
+        this.bindGlobalShortcuts();
+    }
+
+    /**
+     * ✅ 新增：绑定全局快捷键
+     */
+    private globalShortcutHandler: ((e: KeyboardEvent) => void) | null = null;
+    
+    private bindGlobalShortcuts(): void {
+        this.globalShortcutHandler = (e: KeyboardEvent) => {
+            // Ctrl/Cmd + G: 打开导航器
+            if ((e.ctrlKey || e.metaKey) && e.key === 'g') {
+                e.preventDefault();
+                this.toggleNavigator();
+            }
+            
+            // Ctrl/Cmd + Shift + Up/Down: 快速导航（无需打开面板）
+            if ((e.ctrlKey || e.metaKey) && e.shiftKey) {
+                if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    this.navigateToPrevUserChat();
+                } else if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    this.navigateToNextUserChat();
+                }
+            }
+        };
+        
+        document.addEventListener('keydown', this.globalShortcutHandler);
+    }
+
+    /**
+     * ✅ 新增：切换导航面板
+     */
+    private toggleNavigator(): void {
+        if (!this.floatingNav) {
+            this.floatingNav = new FloatingNavPanel(this.container, {
+                onNavigate: (sessionId) => this.scrollToSession(sessionId),
+                onToggleFold: (sessionId) => this.toggleSessionFold(sessionId),
+                onCopy: (sessionId) => this.copySessionContent(sessionId),
+                onFoldAll: () => this.foldAllSessions(),
+                onUnfoldAll: () => this.unfoldAllSessions(),
+            });
+        }
+        
+        // 更新数据
+        const sessions = this.sessionManager.getSessions();
+        const collapseStates = this.historyView.getCollapseStates();
+        this.floatingNav.updateItems(sessions, collapseStates);
+        
+        // 设置当前可见的 chat
+        const visibleSessionId = this.findCurrentVisibleSession();
+        if (visibleSessionId) {
+            this.floatingNav.setCurrentChat(visibleSessionId);
+        }
+        
+        this.floatingNav.toggle();
+    }
+
+    /**
+     * ✅ 新增：查找当前可见的会话
+     */
+    private findCurrentVisibleSession(): string | null {
+        const historyEl = this.container.querySelector('#llm-ui-history');
+        if (!historyEl) return null;
+        
+        const historyRect = historyEl.getBoundingClientRect();
+        const centerY = historyRect.top + historyRect.height / 2;
+        
+        const sessions = historyEl.querySelectorAll('[data-session-id]');
+        for (const session of sessions) {
+            const rect = session.getBoundingClientRect();
+            if (rect.top <= centerY && rect.bottom >= centerY) {
+                return (session as HTMLElement).dataset.sessionId || null;
+            }
+        }
+        
+        // 如果没找到中心的，返回第一个可见的
+        for (const session of sessions) {
+            const rect = session.getBoundingClientRect();
+            if (rect.bottom > historyRect.top && rect.top < historyRect.bottom) {
+                return (session as HTMLElement).dataset.sessionId || null;
+            }
+        }
+        
+        return null;
+    }
+
+    /**
+     * ✅ 新增：滚动到指定会话
+     */
+    private scrollToSession(sessionId: string): void {
+        const historyEl = this.container.querySelector('#llm-ui-history');
+        const sessionEl = historyEl?.querySelector(`[data-session-id="${sessionId}"]`) as HTMLElement;
+        
+        if (sessionEl) {
+            sessionEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            
+            // 添加高亮动画
+            sessionEl.classList.add('llm-ui-session--highlight');
+            setTimeout(() => {
+                sessionEl.classList.remove('llm-ui-session--highlight');
+            }, 1500);
+        }
+    }
+
+    /**
+     * ✅ 新增：切换单个会话的折叠状态
+     */
+    private toggleSessionFold(sessionId: string): void {
+        const historyEl = this.container.querySelector('#llm-ui-history');
+        const sessionEl = historyEl?.querySelector(`[data-session-id="${sessionId}"]`);
+        
+        if (sessionEl) {
+            const bubble = sessionEl.querySelector('.llm-ui-bubble--user, .llm-ui-node');
+            const collapseBtn = sessionEl.querySelector('[data-action="collapse"]') as HTMLElement;
+            
+            if (bubble && collapseBtn) {
+                collapseBtn.click(); // 复用现有逻辑
+            }
+        }
+    }
+
+    /**
+     * ✅ 新增：复制会话内容
+     */
+    private async copySessionContent(sessionId: string): Promise<void> {
+        const sessions = this.sessionManager.getSessions();
+        const session = sessions.find(s => s.id === sessionId);
+        
+        if (session) {
+            let content = session.content || '';
+            
+            // 如果是 assistant，尝试获取执行输出
+            if (session.role === 'assistant' && session.executionRoot) {
+                content = this.extractExecutionOutput(session.executionRoot);
+            }
+            
+            try {
+                await navigator.clipboard.writeText(content);
+                Toast.success('Copied to clipboard');
+            } catch (e) {
+                console.error('Copy failed:', e);
+                Toast.error('Failed to copy');
+            }
+        }
+    }
+
+    /**
+     * ✅ 新增：提取执行树的输出
+     */
+    private extractExecutionOutput(node: ExecutionNode): string {
+        let output = node.data.output || '';
+        
+        if (node.children && node.children.length > 0) {
+            for (const child of node.children) {
+                const childOutput = this.extractExecutionOutput(child);
+                if (childOutput) {
+                    output += '\n\n' + childOutput;
+                }
+            }
+        }
+        
+        return output.trim();
+    }
+
+    /**
+     * ✅ 新增：折叠所有会话
+     */
+    private foldAllSessions(): void {
+        const btn = this.container.querySelector('#llm-btn-collapse') as Element;
+        if (btn && this.isAllExpanded) {
+            this.toggleAllBubbles(btn);
+        }
+    }
+
+    /**
+     * ✅ 新增：展开所有会话
+     */
+    private unfoldAllSessions(): void {
+        const btn = this.container.querySelector('#llm-btn-collapse') as Element;
+        if (btn && !this.isAllExpanded) {
+            this.toggleAllBubbles(btn);
+        }
+    }
+
+    /**
+     * ✅ 新增：快速导航到上一个用户消息
+     */
+    private navigateToPrevUserChat(): void {
+        const sessions = this.sessionManager.getSessions();
+        const currentId = this.findCurrentVisibleSession();
+        
+        if (!currentId) return;
+        
+        const currentIdx = sessions.findIndex(s => s.id === currentId);
+        
+        for (let i = currentIdx - 1; i >= 0; i--) {
+            if (sessions[i].role === 'user') {
+                this.scrollToSession(sessions[i].id);
+                break;
+            }
+        }
+    }
+
+    /**
+     * ✅ 新增：快速导航到下一个用户消息
+     */
+    private navigateToNextUserChat(): void {
+        const sessions = this.sessionManager.getSessions();
+        const currentId = this.findCurrentVisibleSession();
+        
+        if (!currentId) return;
+        
+        const currentIdx = sessions.findIndex(s => s.id === currentId);
+        
+        for (let i = currentIdx + 1; i < sessions.length; i++) {
+            if (sessions[i].role === 'user') {
+                this.scrollToSession(sessions[i].id);
+                break;
+            }
+        }
     }
 
     /**
@@ -1031,7 +1360,14 @@ private findNodeInTree(node: ExecutionNode | undefined, targetId: string): boole
     }
 
     async destroy(): Promise<void> {
-        // ✅ [6] 清理 AssetManagerUI
+        // ✅ 销毁时保存 UI 状态
+        if (this.uiStateSaveTimer) {
+            clearTimeout(this.uiStateSaveTimer);
+            this.uiStateSaveTimer = null;
+            // 确保最后一次保存
+            await this.saveUIState();
+        }
+
         if (this.assetManagerUI) {
             this.assetManagerUI.close();
             this.assetManagerUI = null;
@@ -1053,6 +1389,19 @@ private findNodeInTree(node: ExecutionNode | undefined, targetId: string): boole
             this.printService.destroy?.();
             this.printService = null;
         }
+
+        // 清理浮动导航
+        if (this.floatingNav) {
+            this.floatingNav.destroy();
+            this.floatingNav = null;
+        }
+        
+        // 清理全局快捷键
+        if (this.globalShortcutHandler) {
+            document.removeEventListener('keydown', this.globalShortcutHandler);
+            this.globalShortcutHandler = null;
+        }
+        
 
         // 解绑会话（但不注销，允许后台运行）
         this.sessionManager.destroy();
