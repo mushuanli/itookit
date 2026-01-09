@@ -3,6 +3,7 @@
  * VFS 存储层类型定义
  */
 
+
 /** VFS ObjectStore 名称常量 */
 export const VFS_STORES = {
   VNODES: 'vnodes',
@@ -129,21 +130,4 @@ export interface SRSItemData {
   
   // 上下文快照 (可选)
   snippet?: string;  
-}
-
-/** 事务包装类 */
-export class Transaction {
-  constructor(private tx: IDBTransaction) {}
-  
-  getStore(name: string): IDBObjectStore {
-    return this.tx.objectStore(name);
-  }
-
-  get done(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      this.tx.oncomplete = () => resolve();
-      this.tx.onerror = () => reject(this.tx.error);
-      this.tx.onabort = () => reject(new Error('Transaction aborted'));
-    });
-  }
 }

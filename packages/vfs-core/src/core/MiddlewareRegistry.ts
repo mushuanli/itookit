@@ -4,7 +4,8 @@
  */
 
 import { IVFSMiddleware } from './types';
-import { VNodeData, Transaction } from '../store/types';
+import {ITransaction} from '../storage/interfaces/IStorageAdapter';
+import { VNodeData } from '../store/types';
 
 type MiddlewareHookHandler = (name: string) => void;
 
@@ -62,7 +63,11 @@ export class MiddlewareRegistry {
     }
   }
 
-  async runBeforeWrite(vnode: VNodeData, content: string | ArrayBuffer, tx: Transaction): Promise<string | ArrayBuffer> {
+  async runBeforeWrite(
+    vnode: VNodeData, 
+    content: string | ArrayBuffer, 
+    tx: ITransaction
+  ): Promise<string | ArrayBuffer> {
     let result = content;
     for (const m of this.getForNode(vnode)) {
       if (m.onBeforeWrite) {
@@ -72,7 +77,11 @@ export class MiddlewareRegistry {
     return result;
   }
 
-  async runAfterWrite(vnode: VNodeData, content: string | ArrayBuffer, tx: Transaction): Promise<Record<string, unknown>> {
+  async runAfterWrite(
+    vnode: VNodeData, 
+    content: string | ArrayBuffer, 
+    tx: ITransaction
+  ): Promise<Record<string, unknown>> {
     const derivedData: Record<string, unknown> = {};
     for (const m of this.getForNode(vnode)) {
       if (m.onAfterWrite) {
@@ -82,25 +91,34 @@ export class MiddlewareRegistry {
     return derivedData;
   }
 
-  async runBeforeDelete(vnode: VNodeData, tx: Transaction): Promise<void> {
+  async runBeforeDelete(vnode: VNodeData, tx: ITransaction): Promise<void> {
     for (const m of this.getForNode(vnode)) {
       await m.onBeforeDelete?.(vnode, tx);
     }
   }
 
-  async runAfterDelete(vnode: VNodeData, tx: Transaction): Promise<void> {
+  async runAfterDelete(vnode: VNodeData, tx: ITransaction): Promise<void> {
     for (const m of this.getForNode(vnode)) {
       await m.onAfterDelete?.(vnode, tx);
     }
   }
 
-  async runAfterMove(vnode: VNodeData, oldPath: string, newPath: string, tx: Transaction): Promise<void> {
+  async runAfterMove(
+    vnode: VNodeData, 
+    oldPath: string, 
+    newPath: string, 
+    tx: ITransaction
+  ): Promise<void> {
     for (const m of this.getForNode(vnode)) {
       await m.onAfterMove?.(vnode, oldPath, newPath, tx);
     }
   }
 
-  async runAfterCopy(source: VNodeData, target: VNodeData, tx: Transaction): Promise<void> {
+  async runAfterCopy(
+    source: VNodeData, 
+    target: VNodeData, 
+    tx: ITransaction
+  ): Promise<void> {
     for (const m of this.getForNode(target)) {
       await m.onAfterCopy?.(source, target, tx);
     }
