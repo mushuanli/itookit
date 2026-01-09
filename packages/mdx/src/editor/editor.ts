@@ -1,8 +1,8 @@
 /**
  * @file mdx/editor/editor.ts
  */
-import { EditorState, Extension, Compartment } from '@codemirror/state';
-import { EditorView } from 'codemirror';
+import { EditorState, Extension, Compartment, StateField, StateEffect } from '@codemirror/state';
+import { EditorView, Decoration, DecorationSet } from '@codemirror/view';
 import { markdown } from '@codemirror/lang-markdown';
 import { search } from '@codemirror/search';
 import type { IPersistenceAdapter } from '@itookit/common';
@@ -19,7 +19,8 @@ import {
   EditorEventCallback,
   tryParseJson,
   extractSummary,
-  extractSearchableText
+  extractSearchableText,
+  slugify
 } from '@itookit/common';
 
 import { 
@@ -38,6 +39,67 @@ export interface MDxEditorConfig extends EditorOptions {
    */
   onSave?: (content: string) => Promise<void>;
 }
+
+// =====================================================
+// [新增] 标题高亮 Decoration 系统
+// =====================================================
+
+/** 添加高亮效果 */
+const addHighlightEffect = StateEffect.define<{ from: number; to: number }>();
+
+/** 清除高亮效果 */
+const clearHighlightEffect = StateEffect.define<null>();
+
+/** 高亮 Decoration 样式 */
+const headingHighlightMark = Decoration.mark({
+  class: 'cm-heading-navigation-highlight',
+  attributes: { 'data-highlight-type': 'navigation' }
+});
+
+/** 
+ * StateField 管理导航高亮状态
+ * 这是 CodeMirror 6 推荐的 Decoration 管理方式
+ */
+const navigationHighlightField = StateField.define<DecorationSet>({
+  create() {
+    return Decoration.none;
+  },
+  update(decorations, tr) {
+    // 先映射已有的 decorations 到新文档位置
+    decorations = decorations.map(tr.changes);
+    
+    for (const effect of tr.effects) {
+      if (effect.is(addHighlightEffect)) {
+        const { from, to } = effect.value;
+        // 添加新的高亮 decoration
+        decorations = decorations.update({
+          add: [headingHighlightMark.range(from, to)],
+        });
+      } else if (effect.is(clearHighlightEffect)) {
+        // 清除所有高亮
+        decorations = Decoration.none;
+      }
+    }
+    
+    return decorations;
+  },
+  provide: (field) => EditorView.decorations.from(field),
+});
+
+// =====================================================
+// [新增] 标题位置缓存接口
+// =====================================================
+
+interface HeadingPosition {
+  from: number;
+  to: number;
+  level: number;
+  text: string;
+}
+
+// =====================================================
+// MDxEditor 主类
+// =====================================================
 
 /**
  * MDx 编辑器
@@ -67,6 +129,15 @@ export class MDxEditor extends IEditor {
   // [优化] 使用版本号缓存替代文本比较
   private headingsCache: { version: number; headings: Heading[] } | null = null;
   private docVersion = 0;
+  
+  // [新增] 标题位置缓存
+  private headingPositionsCache: { 
+    version: number; 
+    positions: Map<string, HeadingPosition> 
+  } | null = null;
+  
+  // [新增] 高亮清除定时器
+  private highlightClearTimer: number | null = null;
   
   // [优化] 搜索正则缓存
   private searchRegexCache = new Map<string, RegExp>();
@@ -224,6 +295,8 @@ export class MDxEditor extends IEditor {
       markdown(),
       this.readOnlyCompartment.of(EditorView.editable.of(true)),
       this.searchCompartment.of([]),
+      // [新增] 注册导航高亮 StateField
+      navigationHighlightField,
       EditorView.domEventHandlers({
         blur: (_event, _view) => { this.emit('blur'); },
         focus: (_event, _view) => { this.emit('focus'); }
@@ -449,6 +522,74 @@ export class MDxEditor extends IEditor {
     return headings;
   }
 
+  /**
+   * [新增] 获取标题位置映射（带缓存）
+   * 用于编辑器模式下的标题导航
+   */
+  private getHeadingPositions(): Map<string, HeadingPosition> {
+    // 检查缓存有效性
+    if (this.headingPositionsCache && this.headingPositionsCache.version === this.docVersion) {
+      return this.headingPositionsCache.positions;
+    }
+    
+    const text = this.getText();
+    const positions = new Map<string, HeadingPosition>();
+    
+    if (tryParseJson(text)) {
+      this.headingPositionsCache = { version: this.docVersion, positions };
+      return positions;
+    }
+    
+    const lines = text.split('\n');
+    let currentPos = 0;
+    let inCodeBlock = false;
+    
+    // 用于处理重复标题
+    const slugCounts = new Map<string, number>();
+    
+    for (const line of lines) {
+      const lineStart = currentPos;
+      const lineEnd = currentPos + line.length;
+      
+      const trimmedLine = line.trim();
+      
+      // 检测代码块边界
+      if (trimmedLine.startsWith('```') || trimmedLine.startsWith('~~~')) {
+        inCodeBlock = !inCodeBlock;
+        currentPos = lineEnd + 1;
+        continue;
+      }
+      
+      // 只在代码块外处理标题
+      if (!inCodeBlock) {
+        const headingMatch = line.match(/^(#{1,6})\s+(.+)$/);
+        if (headingMatch) {
+          const level = headingMatch[1].length;
+          const headingText = headingMatch[2].trim();
+          const baseSlug = slugify(headingText);
+          
+          // 处理重复标题：添加数字后缀
+          const count = slugCounts.get(baseSlug) || 0;
+          slugCounts.set(baseSlug, count + 1);
+          
+          const finalSlug = count === 0 ? baseSlug : `${baseSlug}-${count}`;
+          const elementId = `heading-${finalSlug}`;
+          
+          positions.set(elementId, { 
+            from: lineStart, 
+            to: lineEnd,
+            level,
+            text: headingText
+          });
+        }
+      }
+      
+      currentPos = lineEnd + 1; // +1 for newline character
+    }
+    
+    this.headingPositionsCache = { version: this.docVersion, positions };
+    return positions;
+  }
 
   /**
    * [重构] 获取搜索文本摘要
@@ -469,22 +610,153 @@ export class MDxEditor extends IEditor {
     this.renderer.getPluginManager().emit('setTitle', { title: newTitle }); 
   }
   
-  async navigateTo(target: { elementId: string }): Promise<void> {
+  /**
+   * ✨ [重构] 统一的导航方法
+   * 支持 render 模式（DOM 查询）和 edit 模式（CodeMirror 定位）
+   */
+  async navigateTo(target: { elementId: string }, options?: { smooth?: boolean }): Promise<void> {
+    const { elementId } = target;
+    const smooth = options?.smooth ?? true;
+    
     if (this.currentMode === 'render' && this.renderContainer) {
-      try {
-        const element = this.renderContainer.querySelector(`#${CSS.escape(target.elementId)}`);
-        if (element) {
-          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          element.classList.add('highlight-pulse');
-          setTimeout(() => element.classList.remove('highlight-pulse'), 1500);
-        } else {
-          console.warn(`[MDxEditor] Target element not found: #${target.elementId}`);
-        }
-      } catch (e) {
-        console.error('[MDxEditor] Navigation error:', e);
+      // Renderer 模式：使用 DOM 定位
+      await this.navigateInRenderer(elementId, smooth);
+    } else if (this.currentMode === 'edit' && this.editorView) {
+      // Editor 模式：使用 CodeMirror 定位
+      await this.navigateInEditor(elementId);
+    } else {
+      console.warn('[MDxEditor] Navigation unavailable: editor not initialized or in unknown mode');
+    }
+  }
+
+  /**
+   * [新增] 在渲染模式下导航到指定元素
+   */
+  private async navigateInRenderer(elementId: string, smooth: boolean): Promise<void> {
+    if (!this.renderContainer) return;
+    
+    try {
+      const element = this.renderContainer.querySelector(`#${CSS.escape(elementId)}`);
+      if (element) {
+        element.scrollIntoView({ 
+          behavior: smooth ? 'smooth' : 'instant', 
+          block: 'center' 
+        });
+        element.classList.add('highlight-pulse');
+        setTimeout(() => element.classList.remove('highlight-pulse'), 1500);
+      } else {
+        console.warn(`[MDxEditor] Target element not found in renderer: #${elementId}`);
       }
-    } else { 
-      console.warn('Navigation is only supported in render mode.'); 
+    } catch (e) {
+      console.error('[MDxEditor] Navigation error in renderer:', e);
+    }
+  }
+
+  /**
+   * [新增] 在编辑器模式下导航到指定标题
+   * 使用 CodeMirror Decoration 实现专业的高亮效果
+   */
+  private async navigateInEditor(elementId: string): Promise<void> {
+    if (!this.editorView) return;
+    
+    const positions = this.getHeadingPositions();
+    let position = positions.get(elementId);
+    
+    // 如果精确匹配失败，尝试模糊匹配（去掉数字后缀）
+    if (!position) {
+      const baseId = elementId.replace(/-\d+$/, '');
+      for (const [id, pos] of positions) {
+        if (id === baseId || id.startsWith(baseId + '-')) {
+          position = pos;
+          break;
+        }
+      }
+    }
+    
+    if (!position) {
+      console.warn(`[MDxEditor] Heading not found in editor: ${elementId}`);
+      return;
+    }
+    
+    const { from, to } = position;
+    
+    // 1. 清除之前的高亮定时器
+    if (this.highlightClearTimer) {
+      clearTimeout(this.highlightClearTimer);
+      this.highlightClearTimer = null;
+    }
+    
+    // 2. 清除之前的高亮
+    this.editorView.dispatch({
+      effects: clearHighlightEffect.of(null)
+    });
+    
+    // 3. 滚动到目标位置并设置光标
+    // 使用 requestAnimationFrame 确保 DOM 更新后再滚动
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => {
+        if (!this.editorView || this.isDestroying) {
+          resolve();
+          return;
+        }
+        
+        // 设置光标到标题行首
+        this.editorView.dispatch({
+          selection: { anchor: from },
+          effects: EditorView.scrollIntoView(from, { 
+            y: 'center',
+            yMargin: 100 // 上下留白
+          }),
+        });
+        
+        resolve();
+      });
+    });
+    
+    // 4. 添加高亮 Decoration（延迟一帧确保滚动完成）
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => {
+        if (!this.editorView || this.isDestroying) {
+          resolve();
+          return;
+        }
+        
+        this.editorView.dispatch({
+          effects: addHighlightEffect.of({ from, to })
+        });
+        
+        resolve();
+      });
+    });
+    
+    // 5. 聚焦编辑器
+    this.editorView.focus();
+    
+    // 6. 设置定时器清除高亮
+    this.highlightClearTimer = window.setTimeout(() => {
+      if (this.editorView && !this.isDestroying) {
+        this.editorView.dispatch({
+          effects: clearHighlightEffect.of(null)
+        });
+      }
+      this.highlightClearTimer = null;
+    }, 2000);
+  }
+
+  /**
+   * [新增] 手动清除导航高亮
+   * 可在用户开始编辑时调用
+   */
+  clearNavigationHighlight(): void {
+    if (this.highlightClearTimer) {
+      clearTimeout(this.highlightClearTimer);
+      this.highlightClearTimer = null;
+    }
+    
+    if (this.editorView) {
+      this.editorView.dispatch({
+        effects: clearHighlightEffect.of(null)
+      });
     }
   }
 
@@ -650,6 +922,12 @@ export class MDxEditor extends IEditor {
     }
     this.isDestroying = true;
     
+    // 清除高亮定时器
+    if (this.highlightClearTimer) {
+      clearTimeout(this.highlightClearTimer);
+      this.highlightClearTimer = null;
+    }
+    
     if (this.renderDebounceTimer) {
       clearTimeout(this.renderDebounceTimer);
       this.renderDebounceTimer = null;
@@ -688,6 +966,10 @@ export class MDxEditor extends IEditor {
     this.eventEmitter.clear();
     this.searchRegexCache.clear();
     this.pendingEmits.clear();
+    
+    // 清理缓存
+    this.headingsCache = null;
+    this.headingPositionsCache = null;
     
     if (this._container) {
       this._container.innerHTML = '';
