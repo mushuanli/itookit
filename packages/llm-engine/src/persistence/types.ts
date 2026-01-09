@@ -25,6 +25,14 @@ export interface ChatManifest {
     current_branch: string;
     current_head: string;
     root_id: string;
+    
+    // ✅ 新增：UI 状态持久化
+    ui_state?: {
+        /** 折叠状态：messageId -> isCollapsed */
+        collapse_states?: Record<string, boolean>;
+        /** 最后滚动位置（可选） */
+        scroll_position?: number;
+    };
 }
 
 /**
@@ -90,7 +98,13 @@ export interface ILLMSessionEngine extends IBaseSessionEngine {
     
     /** 获取 Manifest */
     getManifest(nodeId: string): Promise<ChatManifest>;
+
+    /** ✅ 新增：读取 UI 状态 */
+    getUIState(nodeId: string): Promise<ChatManifest['ui_state'] | null>;
     
+    /** ✅ 新增：更新 UI 状态 */
+    updateUIState(nodeId: string, updates: Partial<NonNullable<ChatManifest['ui_state']>>): Promise<void>;
+
     /** 追加消息 */
     appendMessage(
         nodeId: string,

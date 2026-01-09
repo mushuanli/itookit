@@ -22,52 +22,11 @@ import {
   ChatContextItem, 
   ILLMSessionEngine,
 } from './types';
+import {LockManager} from './LockManager';
 
 // 调试日志
 const DEBUG = typeof process !== 'undefined' && process.env?.NODE_ENV === 'development';
 const log = (...args: any[]) => DEBUG && console.log('[LLMSessionEngine]', ...args);
-
-// ============================================
-// 锁管理器
-// ============================================
-
-class LockManager {
-  private locks = new Map<string, Promise<void>>();
-  private waitQueues = new Map<string, Array<() => void>>();
-
-  async acquire<T>(key: string, fn: () => Promise<T>): Promise<T> {
-    while (this.locks.has(key)) {
-      await new Promise<void>(resolve => {
-        const queue = this.waitQueues.get(key) || [];
-        queue.push(resolve);
-        this.waitQueues.set(key, queue);
-      });
-    }
-
-    let release: () => void;
-    const lockPromise = new Promise<void>(resolve => {
-      release = resolve;
-    });
-    this.locks.set(key, lockPromise);
-
-    try {
-      return await fn();
-    } finally {
-      if (this.locks.get(key) === lockPromise) {
-        this.locks.delete(key);
-      }
-      const queue = this.waitQueues.get(key);
-      if (queue && queue.length > 0) {
-        const next = queue.shift();
-        if (queue.length === 0) {
-          this.waitQueues.delete(key);
-        }
-        next?.();
-      }
-      release!();
-    }
-  }
-}
 
 // ============================================
 // LLMSessionEngine
@@ -266,6 +225,46 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
       console.error(`[LLMSessionEngine] Failed to read manifest from node ${nodeId}`, e);
       throw new Error(`Manifest missing for node: ${nodeId}`);
     }
+  }
+
+  /**
+   * ✅ 新增：读取 UI 状态
+   */
+  async getUIState(nodeId: string): Promise<ChatManifest['ui_state'] | null> {
+      try {
+          const manifest = await this.getManifest(nodeId);
+          return manifest.ui_state || null;
+      } catch (e) {
+          console.warn('[LLMSessionEngine] getUIState failed:', e);
+          return null;
+      }
+  }
+
+  /**
+   * ✅ 新增：更新 UI 状态（增量合并）
+   */
+  async updateUIState(
+      nodeId: string, 
+      updates: Partial<NonNullable<ChatManifest['ui_state']>>
+  ): Promise<void> {
+      return this.lockManager.acquire(`uistate:${nodeId}`, async () => {
+          const manifest = await this.getManifest(nodeId);
+          
+          // 增量合并
+          manifest.ui_state = {
+              ...manifest.ui_state,
+              ...updates,
+              // 对于 collapse_states，需要深度合并
+              collapse_states: {
+                  ...manifest.ui_state?.collapse_states,
+                  ...updates.collapse_states
+              }
+          };
+          
+          manifest.updated_at = new Date().toISOString();
+          
+          await this.engine.writeContent(nodeId, JSON.stringify(manifest, null, 2));
+      });
   }
 
   // ============================================================
