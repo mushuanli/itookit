@@ -19,6 +19,9 @@ export class ClozePlugin implements MDxPlugin {
   private options: Required<ClozePluginOptions>;
   private cleanupFns: Array<() => void> = [];
   private contextStates = new WeakMap<PluginContext, ClozeState>();
+  
+  // [新增] 事件委托处理器
+  private delegationHandlers = new WeakMap<HTMLElement, (e: Event) => void>();
 
   constructor(options: ClozePluginOptions = {}) {
     this.options = {
@@ -157,62 +160,57 @@ export class ClozePlugin implements MDxPlugin {
     }
 
     const removeDomUpdated = context.on('domUpdated', ({ element }: { element: HTMLElement }) => {
-      this.attachEventListeners(element, context);
+      this.setupEventDelegation(element, context);
     });
     if (removeDomUpdated) this.cleanupFns.push(removeDomUpdated);
   }
 
-  private attachEventListeners(element: HTMLElement, context: PluginContext): void {
-    const clozes = element.querySelectorAll<HTMLElement>(`.${this.options.className}`);
-    
-    clozes.forEach(cloze => {
-      const oldHandler = (cloze as any)._clozeClickHandler;
-      if (oldHandler) {
-        cloze.removeEventListener('click', oldHandler);
+  /**
+   * [优化] 使用事件委托替代逐个绑定
+   */
+  private setupEventDelegation(element: HTMLElement, context: PluginContext): void {
+    // 移除旧的委托处理器
+    const oldHandler = this.delegationHandlers.get(element);
+    if (oldHandler) {
+      element.removeEventListener('click', oldHandler);
+    }
+
+    const handler = (e: Event) => {
+      const target = e.target as HTMLElement;
+      
+      // 检查是否点击了音频按钮
+      const audioSpan = target.closest(`.${this.options.className}__audio`);
+      if (audioSpan) {
+        const text = audioSpan.getAttribute('data-audio-text');
+        if (text && 'speechSynthesis' in window) {
+          e.stopPropagation();
+          const utterance = new SpeechSynthesisUtterance(text);
+          speechSynthesis.speak(utterance);
+        }
+        return;
       }
 
-      const handler = (e: Event) => {
-        const target = e.target as HTMLElement;
-        if (target.closest(`.${this.options.className}__audio`)) {
-          const audioSpan = target.closest(`.${this.options.className}__audio`)!;
-          const text = audioSpan.getAttribute('data-audio-text');
-          if (text && 'speechSynthesis' in window) {
-            e.stopPropagation();
-            const utterance = new SpeechSynthesisUtterance(text);
-            speechSynthesis.speak(utterance);
-          }
-          return;
-        }
+      // 检查是否点击了 cloze 元素
+      const cloze = target.closest(`.${this.options.className}`) as HTMLElement;
+      if (!cloze) return;
 
-        e.stopPropagation();
-        const wasHidden = cloze.classList.contains('hidden');
-        cloze.classList.toggle('hidden');
+      e.stopPropagation();
+      const wasHidden = cloze.classList.contains('hidden');
+      cloze.classList.toggle('hidden');
 
-        if (wasHidden) {
-          context.emit('clozeRevealed', {
-            element: cloze,
-            clozeId: cloze.dataset.clozeLocator, // 使用 clozeLocator 作为唯一ID
-            content: cloze.dataset.clozeContent,
-            /**
-             * [新增] 一个用于重新隐藏此 Cloze 的便捷函数。
-             * 这将实现细节封装在了 ClozePlugin 内部。
-             */
-            hide: () => {
-              cloze.classList.add('hidden');
-            },
-            /**
-             * [新增] 为保持 API 对称性，也提供一个 show 函数。
-             */
-            show: () => {
-              cloze.classList.remove('hidden');
-            }
-          });
-        }
-      };
+      if (wasHidden) {
+        context.emit('clozeRevealed', {
+          element: cloze,
+          clozeId: cloze.dataset.clozeLocator,
+          content: cloze.dataset.clozeContent,
+          hide: () => cloze.classList.add('hidden'),
+          show: () => cloze.classList.remove('hidden'),
+        });
+      }
+    };
 
-      cloze.addEventListener('click', handler);
-      (cloze as any)._clozeClickHandler = handler; // 缓存处理器以便移除
-    });
+    element.addEventListener('click', handler);
+    this.delegationHandlers.set(element, handler);
   }
 
   destroy(): void {

@@ -58,15 +58,6 @@ export class LLMWorkspaceEditor implements IEditor {
     private statusIndicator!: HTMLElement;
     private assetManagerUI: AssetManagerUI | null = null;
 
-    // ✅ 新增：折叠状态缓存（会话级别）
-    private collapseStatesCache: CollapseStateMap = {};
-    private uiStateSaveTimer: ReturnType<typeof setTimeout> | null = null;
-    private readonly UI_STATE_SAVE_DEBOUNCE = 500;
-
-    // ✅ 新增：浮动导航面板
-    private floatingNav: FloatingNavPanel | null = null;
-
-    // State
     private currentTitle: string = 'New Chat';
     private isAllExpanded: boolean = true;
     private currentSessionId: string | null = null;
@@ -78,6 +69,17 @@ export class LLMWorkspaceEditor implements IEditor {
     private initPromise: Promise<void> | null = null;
     private initResolve: (() => void) | null = null;
     private initReject: ((e: Error) => void) | null = null;
+
+    // ✅ 新增：折叠状态缓存
+    private collapseStatesCache: CollapseStateMap = {};
+    
+    // ✅ 新增：UI 状态保存定时器
+    private uiStateSaveTimer: ReturnType<typeof setTimeout> | null = null;
+    private readonly UI_STATE_SAVE_DEBOUNCE = 2000;
+
+    // ✅ 新增：浮动导航面板
+    private floatingNav: FloatingNavPanel | null = null;
+    private globalShortcutHandler: ((e: KeyboardEvent) => void) | null = null;
 
     private get hostContext(): EditorHostContext | undefined {
         return this.options.hostContext;
@@ -132,92 +134,6 @@ export class LLMWorkspaceEditor implements IEditor {
             console.error('[LLMWorkspaceEditor] init failed:', e);
             this.initReject?.(e);
             throw e;
-        }
-    }
-
-
-    /**
-     * ✅ 新增：根据快照更新状态
-     */
-    private updateStatusFromSnapshot(snapshot: SessionSnapshot): void {
-        // 更新状态指示器
-        this.updateStatusIndicatorFromStatus(snapshot.status);
-        
-        // 如果正在运行，设置输入框为 loading 状态
-        if (snapshot.isRunning) {
-            this.chatInput.setLoading(true);
-            
-            // ✅ 关键：如果正在运行，HistoryView 需要进入流式模式
-            this.historyView.enterStreamingMode();
-        }
-    }
-
-    /**
-     * ✅ 新增：根据状态字符串更新指示器
-     */
-    private updateStatusIndicatorFromStatus(status: string): void {
-        if (!this.statusIndicator) return;
-
-        const dot = this.statusIndicator.querySelector('.llm-workspace-status__dot') as HTMLElement;
-        const text = this.statusIndicator.querySelector('.llm-workspace-status__text') as HTMLElement;
-
-        dot?.classList.remove('--running', '--queued', '--completed', '--failed', '--idle');
-
-        switch (status) {
-            case 'running':
-                dot?.classList.add('--running');
-                text.textContent = 'Generating...';
-                this.chatInput.setLoading(true);
-                break;
-            case 'queued':
-                dot?.classList.add('--queued');
-                text.textContent = 'Queued';
-                this.chatInput.setLoading(true);
-                break;
-            case 'completed':
-                dot?.classList.add('--completed');
-                text.textContent = 'Ready';
-                this.chatInput.setLoading(false);
-                break;
-            case 'failed':
-                dot?.classList.add('--failed');
-                text.textContent = 'Error';
-                this.chatInput.setLoading(false);
-                break;
-            default:
-                dot?.classList.add('--idle');
-                text.textContent = 'Ready';
-                this.chatInput.setLoading(false);
-        }
-    }
-
-    /**
-     * ✅ 新增：防抖保存 UI 状态
-     */
-    private scheduleUIStateSave(states: CollapseStateMap): void {
-        this.collapseStatesCache = states;
-        
-        if (this.uiStateSaveTimer) {
-            clearTimeout(this.uiStateSaveTimer);
-        }
-        
-        this.uiStateSaveTimer = setTimeout(async () => {
-            await this.saveUIState();
-        }, this.UI_STATE_SAVE_DEBOUNCE);
-    }
-
-    /**
-     * ✅ 新增：保存 UI 状态到文件
-     */
-    private async saveUIState(): Promise<void> {
-        if (!this.options.nodeId) return;
-        
-        try {
-            await this.engine.updateUIState(this.options.nodeId, {
-                collapse_states: this.collapseStatesCache
-            });
-        } catch (e) {
-            console.warn('[LLMWorkspaceEditor] Failed to save UI state:', e);
         }
     }
 
@@ -310,12 +226,10 @@ export class LLMWorkspaceEditor implements IEditor {
         // ✅ [实现] 监听打开 Agent 配置请求 (来自头像点击)
         this.container.addEventListener('open-agent-config', (e: any) => {
             const agentId = e.detail?.agentId;
-            console.log(`[LLMWorkspaceEditor] Requesting to open agent config: ${agentId}`);
-            
             if (agentId && this.hostContext?.navigate) {
                 this.hostContext.navigate({
-                    target: 'agents', // 对应 Agent Workspace 的 ID
-                    resourceId: agentId // 打开特定 Agent 文件
+                    target: 'agents',
+                    resourceId: agentId
                 });
             }
         });
@@ -369,72 +283,138 @@ export class LLMWorkspaceEditor implements IEditor {
             console.warn('[LLMWorkspaceEditor] Failed to load manifest:', e);
         }
 
-    // ================================================================
-    // 步骤 6：恢复 UI 状态（折叠状态等）
-    // ================================================================
-    try {
-        const uiState = await this.engine.getUIState(this.options.nodeId);
-        
-        if (uiState?.collapse_states) {
-            // 存在持久化的折叠状态，使用它
-            this.collapseStatesCache = uiState.collapse_states;
-            this.historyView.setCollapseStates(this.collapseStatesCache);
-            console.log('[LLMWorkspaceEditor] Restored collapse states from file');
-        } else {
-            // 没有持久化状态，清空缓存，让 HistoryView 使用智能折叠策略
+        // 步骤 6：恢复 UI 状态（折叠状态等）
+        try {
+            const uiState = await this.engine.getUIState(this.options.nodeId);
+            
+            if (uiState?.collapse_states) {
+                this.collapseStatesCache = uiState.collapse_states;
+                this.historyView.setCollapseStates(this.collapseStatesCache);
+                console.log('[LLMWorkspaceEditor] Restored collapse states from file');
+            } else {
+                this.collapseStatesCache = {};
+            }
+        } catch (e) {
+            console.warn('[LLMWorkspaceEditor] Failed to restore UI state:', e);
             this.collapseStatesCache = {};
         }
+
+        // 步骤 7：渲染历史消息
+        if (snapshot.sessions.length > 0) {
+            this.historyView.renderFull(snapshot.sessions);
+        } else {
+            this.historyView.renderWelcome();
+        }
+
+        // 步骤 8：订阅增量事件
+        this.sessionEventUnsubscribe = this.sessionManager.onEvent(
+            (event) => this.handleSessionEvent(event)
+        );
+
+        // 步骤 9：根据快照状态更新 UI
+        this.updateStatusFromSnapshot(snapshot);
+
+        console.log(
+            `[LLMWorkspaceEditor] Session loaded: ${sessionId}, ` +
+            `messages: ${snapshot.sessions.length}, ` +
+            `status: ${snapshot.status}, ` +
+            `collapseStates: ${Object.keys(this.collapseStatesCache).length}`
+        );
+    }
+
+    /**
+     * ✅ 新增：根据快照更新状态
+     */
+    private updateStatusFromSnapshot(snapshot: SessionSnapshot): void {
+        // 更新状态指示器
+        this.updateStatusIndicatorFromStatus(snapshot.status);
         
-        // 可选：恢复滚动位置
-        // if (uiState?.scroll_position !== undefined) {
-        //     // 延迟设置，等待渲染完成
-        //     setTimeout(() => {
-        //         const historyEl = this.container.querySelector('#llm-ui-history');
-        //         if (historyEl) {
-        //             historyEl.scrollTop = uiState.scroll_position;
-        //         }
-        //     }, 100);
-        // }
+        // 如果正在运行，设置输入框为 loading 状态
+        if (snapshot.isRunning) {
+            this.chatInput.setLoading(true);
+            
+            // ✅ 关键：如果正在运行，HistoryView 需要进入流式模式
+            this.historyView.enterStreamingMode();
+        }
+    }
+
+    /**
+     * ✅ 新增：根据状态字符串更新指示器
+     */
+    private updateStatusIndicatorFromStatus(status: string): void {
+        if (!this.statusIndicator) return;
+
+        const dot = this.statusIndicator.querySelector('.llm-workspace-status__dot') as HTMLElement;
+        const text = this.statusIndicator.querySelector('.llm-workspace-status__text') as HTMLElement;
+
+        dot?.classList.remove('--running', '--queued', '--completed', '--failed', '--idle');
+
+        switch (status) {
+            case 'running':
+                dot?.classList.add('--running');
+                text.textContent = 'Generating...';
+                this.chatInput.setLoading(true);
+                break;
+            case 'queued':
+                dot?.classList.add('--queued');
+                text.textContent = 'Queued';
+                this.chatInput.setLoading(true);
+                break;
+            case 'completed':
+                dot?.classList.add('--completed');
+                text.textContent = 'Ready';
+                this.chatInput.setLoading(false);
+                break;
+            case 'failed':
+                dot?.classList.add('--failed');
+                text.textContent = 'Error';
+                this.chatInput.setLoading(false);
+                break;
+            default:
+                dot?.classList.add('--idle');
+                text.textContent = 'Ready';
+                this.chatInput.setLoading(false);
+        }
+    }
+
+    /**
+     * ✅ 新增：防抖保存 UI 状态（只在非流式状态下保存）
+     */
+    private scheduleUIStateSave(states: CollapseStateMap): void {
+        this.collapseStatesCache = states;
         
-    } catch (e) {
-        console.warn('[LLMWorkspaceEditor] Failed to restore UI state:', e);
-        this.collapseStatesCache = {};
+        // 检查是否正在生成，如果是则跳过保存
+        if (this.sessionManager.isGenerating()) {
+            return;
+        }
+        
+        if (this.uiStateSaveTimer) {
+            clearTimeout(this.uiStateSaveTimer);
+        }
+        
+        this.uiStateSaveTimer = setTimeout(async () => {
+            // 再次检查，防止在定时器等待期间开始生成
+            if (!this.sessionManager.isGenerating()) {
+                await this.saveUIState();
+            }
+        }, this.UI_STATE_SAVE_DEBOUNCE);
     }
 
-    // ================================================================
-    // 步骤 7：渲染历史消息
-    // ================================================================
-    if (snapshot.sessions.length > 0) {
-        // 传递初始折叠状态给 HistoryView
-        // 注意：如果 collapseStatesCache 为空，renderFull 会使用智能折叠策略
-        this.historyView.renderFull(snapshot.sessions);
-    } else {
-        this.historyView.renderWelcome();
+    /**
+     * ✅ 新增：保存 UI 状态到文件
+     */
+    private async saveUIState(): Promise<void> {
+        if (!this.options.nodeId) return;
+        
+        try {
+            await this.engine.updateUIState(this.options.nodeId, {
+                collapse_states: this.collapseStatesCache
+            });
+        } catch (e) {
+            console.warn('[LLMWorkspaceEditor] Failed to save UI state:', e);
+        }
     }
 
-    // ================================================================
-    // 步骤 8：订阅增量事件
-    // 
-    // 关键：在渲染完成后再订阅事件
-    // 此时 renderedSessionIds 已经包含了所有历史消息的 ID
-    // 后续的 session_start 事件如果重复，会被 appendSessionGroup 过滤
-    // ================================================================
-    this.sessionEventUnsubscribe = this.sessionManager.onEvent(
-        (event) => this.handleSessionEvent(event)
-    );
-
-    // ================================================================
-    // 步骤 9：根据快照状态更新 UI
-    // ================================================================
-    this.updateStatusFromSnapshot(snapshot);
-
-    console.log(
-        `[LLMWorkspaceEditor] Session loaded: ${sessionId}, ` +
-        `messages: ${snapshot.sessions.length}, ` +
-        `status: ${snapshot.status}, ` +
-        `collapseStates: ${Object.keys(this.collapseStatesCache).length}`
-    );
-    }
 
     // ================================================================
     // 布局渲染
@@ -445,7 +425,7 @@ export class LLMWorkspaceEditor implements IEditor {
             <div class="llm-workspace-titlebar">
                 <div class="llm-workspace-titlebar__left">
                     <button class="llm-workspace-titlebar__btn" id="llm-btn-sidebar" title="Toggle Sidebar">
-                    <i class="fas fa-bars"></i>
+                        <i class="fas fa-bars"></i>
                     </button>
                     
                     <div class="llm-workspace-titlebar__sep"></div>
@@ -596,9 +576,87 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     /**
-     * ✅ 新增：绑定全局快捷键
+     * 绑定全局事件（监听其他会话的状态变化）
      */
-    private globalShortcutHandler: ((e: KeyboardEvent) => void) | null = null;
+    private bindGlobalEvents(): void {
+        this.globalEventUnsubscribe = this.registry.onGlobalEvent((event) => {
+            this.handleGlobalEvent(event);
+        });
+    }
+
+    // ================================================================
+    // 事件处理
+    // ================================================================
+
+    // ================================================================
+    // ✅ [5] 新增：附件管理核心逻辑 (移植自 AssetManagerPlugin)
+    // ================================================================
+
+    private async handleOpenAssetManager(): Promise<void> {
+        const engine = this.engine; // 获取 ILLMSessionEngine 实例
+        const ownerNodeId = this.options.ownerNodeId || this.options.nodeId; 
+
+        if (!engine || ! ownerNodeId ) {
+            Toast.error('Engine not connected or no session');
+            return;
+        }
+
+        try {
+            // 1. 获取目录 ID
+            // 注意：ILLMSessionEngine 必须继承或包含 getAssetDirectoryId 方法
+            const assetDirId = await engine.getAssetDirectoryId(ownerNodeId);
+
+            if (!assetDirId) {
+                // 如果没有目录 ID，通常意味着还没上传过任何附件
+                Toast.info('No attachments found in this chat');
+                return;
+            }
+
+            // 2. 关闭旧实例
+            if (this.assetManagerUI) {
+                this.assetManagerUI.close();
+            }
+
+            // 3. 实例化并显示
+            // 注意：AssetManagerUI 通常第二个参数是 editorInstance，用于点击图片时插入到编辑器。
+            // 在 LLM 对话模式下，我们没有单一的 MDxEditor 实例供插入，
+            // 且主要目的是“管理/删除”附件，因此这里传 null (需要类型断言) 或 传入 undefined。
+            // 如果 AssetManagerUI 内部强依赖 editor，可能需要传入一个 Dummy 对象。
+            this.assetManagerUI = new AssetManagerUI(engine, null as any, {});
+            
+            await this.assetManagerUI.show(assetDirId);
+
+        } catch (e: any) {
+            console.error('[LLMWorkspaceEditor] Failed to open Asset Manager:', e);
+            Toast.error('Failed to open Asset Manager');
+        }
+    }
+
+    /**
+     * 处理当前会话的事件
+     */
+    private handleSessionEvent(event: OrchestratorEvent): void {
+        // 转发给 HistoryView (处理消息流、状态图标等)
+        this.historyView.processEvent(event);
+        
+        // ✨ [Log] 记录会话事件
+        if (event.type === 'finished' || event.type === 'session_start' || event.type === 'error') {
+            console.log(`[LLMWorkspaceEditor] Session Event: ${event.type}`, event.payload);
+        }
+
+        // 通知外部
+        if (event.type === 'finished' || event.type === 'session_start') {
+            this.emit('change');
+        }
+
+        // ✅ 修复：在 finished 和 error 时更新状态
+        if (event.type === 'finished') {
+            this.updateStatusIndicatorFromStatus('completed');
+        } else if (event.type === 'error') {
+            this.updateStatusIndicatorFromStatus('failed');
+        }
+    }
+
     
     private bindGlobalShortcuts(): void {
         this.globalShortcutHandler = (e: KeyboardEvent) => {
@@ -817,89 +875,6 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     /**
-     * 绑定全局事件（监听其他会话的状态变化）
-     */
-    private bindGlobalEvents(): void {
-        console.log('[LLMWorkspaceEditor] Binding global events');
-        this.globalEventUnsubscribe = this.registry.onGlobalEvent((event) => {
-            this.handleGlobalEvent(event);
-        });
-    }
-
-    // ================================================================
-    // 事件处理
-    // ================================================================
-
-    // ================================================================
-    // ✅ [5] 新增：附件管理核心逻辑 (移植自 AssetManagerPlugin)
-    // ================================================================
-
-    private async handleOpenAssetManager(): Promise<void> {
-        const engine = this.engine; // 获取 ILLMSessionEngine 实例
-        const ownerNodeId = this.options.ownerNodeId || this.options.nodeId; 
-
-        if (!engine || ! ownerNodeId ) {
-            Toast.error('Engine not connected or no session');
-            return;
-        }
-
-        try {
-            // 1. 获取目录 ID
-            // 注意：ILLMSessionEngine 必须继承或包含 getAssetDirectoryId 方法
-            const assetDirId = await engine.getAssetDirectoryId(ownerNodeId);
-
-            if (!assetDirId) {
-                // 如果没有目录 ID，通常意味着还没上传过任何附件
-                Toast.info('No attachments found in this chat');
-                return;
-            }
-
-            // 2. 关闭旧实例
-            if (this.assetManagerUI) {
-                this.assetManagerUI.close();
-            }
-
-            // 3. 实例化并显示
-            // 注意：AssetManagerUI 通常第二个参数是 editorInstance，用于点击图片时插入到编辑器。
-            // 在 LLM 对话模式下，我们没有单一的 MDxEditor 实例供插入，
-            // 且主要目的是“管理/删除”附件，因此这里传 null (需要类型断言) 或 传入 undefined。
-            // 如果 AssetManagerUI 内部强依赖 editor，可能需要传入一个 Dummy 对象。
-            this.assetManagerUI = new AssetManagerUI(engine, null as any, {});
-            
-            await this.assetManagerUI.show(assetDirId);
-
-        } catch (e: any) {
-            console.error('[LLMWorkspaceEditor] Failed to open Asset Manager:', e);
-            Toast.error('Failed to open Asset Manager');
-        }
-    }
-
-    /**
-     * 处理当前会话的事件
-     */
-    private handleSessionEvent(event: OrchestratorEvent): void {
-        // 转发给 HistoryView (处理消息流、状态图标等)
-        this.historyView.processEvent(event);
-        
-        // ✨ [Log] 记录会话事件
-        if (event.type === 'finished' || event.type === 'session_start' || event.type === 'error') {
-            console.log(`[LLMWorkspaceEditor] Session Event: ${event.type}`, event.payload);
-        }
-
-        // 通知外部
-        if (event.type === 'finished' || event.type === 'session_start') {
-            this.emit('change');
-        }
-
-        // ✅ 修复：在 finished 和 error 时更新状态
-        if (event.type === 'finished') {
-            this.updateStatusIndicatorFromStatus('completed');
-        } else if (event.type === 'error') {
-            this.updateStatusIndicatorFromStatus('failed');
-        }
-    }
-
-    /**
      * 处理全局事件（状态同步核心）
      */
     private handleGlobalEvent(event: RegistryEvent): void {
@@ -970,60 +945,50 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     private async handleRetry(nodeId: string): Promise<void> {
-    const sessions = this.sessionManager.getSessions();
-    let session = sessions.find(s => s.id === nodeId);
+        const sessions = this.sessionManager.getSessions();
+        let session = sessions.find(s => s.id === nodeId);
 
-    // ✅ 新增: 通过执行节点 ID 回退查找
-    if (!session) {
-        session = sessions.find(s => 
-            s.executionRoot?.id === nodeId ||
-            this.findNodeInTree(s.executionRoot, nodeId)
-        );
-        
-        if (session) {
-            console.log(`[LLMWorkspaceEditor] Found session via execution node: ${session.id}`);
+        if (!session) {
+            session = sessions.find(s => 
+                s.executionRoot?.id === nodeId ||
+                this.findNodeInTree(s.executionRoot, nodeId)
+            );
+        }
+
+        if (!session) {
+            console.warn(`[LLMWorkspaceEditor] Cannot retry: session not found for ${nodeId}`);
+            this.historyView.renderError(new Error('Message not found'));
+            return;
+        }
+
+        const canRetry = this.sessionManager.canRetry(session.id);
+        if (!canRetry.allowed) {
+            console.warn(`[LLMWorkspaceEditor] Cannot retry: ${canRetry.reason}`);
+            return;
+        }
+
+        this.chatInput.setLoading(true);
+        try {
+            if (session.role === 'user') {
+                await this.sessionManager.resendUserMessage(session.id);
+            } else {
+                await this.sessionManager.retryGeneration(session.id, {
+                    preserveCurrent: true,
+                    navigateToNew: true
+                });
+            }
+        } catch (e: any) {
+            console.error('[LLMWorkspaceEditor] Retry failed:', e);
+            this.historyView.renderError(e);
+            this.chatInput.setLoading(false);
         }
     }
 
-    if (!session) {
-        console.warn(`[LLMWorkspaceEditor] Cannot retry: session not found for ${nodeId}`);
-        this.historyView.renderError(new Error('Message not found'));
-        return;
+    private findNodeInTree(node: ExecutionNode | undefined, targetId: string): boolean {
+        if (!node) return false;
+        if (node.id === targetId) return true;
+        return node.children?.some(c => this.findNodeInTree(c, targetId)) ?? false;
     }
-
-    const canRetry = this.sessionManager.canRetry(session.id);
-    if (!canRetry.allowed) {
-        console.warn(`[LLMWorkspaceEditor] Cannot retry: ${canRetry.reason}`);
-        return;
-    }
-
-    this.chatInput.setLoading(true);
-    try {
-        if (session.role === 'user') {
-            await this.sessionManager.resendUserMessage(session.id);
-        } else {
-            await this.sessionManager.retryGeneration(session.id, {
-                preserveCurrent: true,
-                navigateToNew: true
-            });
-        }
-        // ✅ 成功时不在这里解锁，由事件驱动
-    } catch (e: any) {
-        console.error('[LLMWorkspaceEditor] Retry failed:', e);
-        this.historyView.renderError(e);
-        this.chatInput.setLoading(false);  // ✅ 仅错误时解锁
-    }
-    }
-
-// =====================================================
-// 新增: 辅助方法 - 在执行树中查找节点
-// =====================================================
-
-private findNodeInTree(node: ExecutionNode | undefined, targetId: string): boolean {
-    if (!node) return false;
-    if (node.id === targetId) return true;
-    return node.children?.some(c => this.findNodeInTree(c, targetId)) ?? false;
-}
 
     private async handleDelete(nodeId: string): Promise<void> {
         console.log(`[LLMWorkspaceEditor] Deleting: ${nodeId}`);
@@ -1112,7 +1077,7 @@ private findNodeInTree(node: ExecutionNode | undefined, targetId: string): boole
         } catch (e: any) {
             console.error('[LLMWorkspaceEditor] Edit and retry failed:', e);
             this.historyView.renderError(e);
-        this.chatInput.setLoading(false);  // ✅ 仅错误时解锁
+            this.chatInput.setLoading(false);
         }
     }
 
@@ -1124,7 +1089,7 @@ private findNodeInTree(node: ExecutionNode | undefined, targetId: string): boole
         } catch (e: any) {
             console.error('[LLMWorkspaceEditor] Resend failed:', e);
             this.historyView.renderError(e);
-        this.chatInput.setLoading(false);  // ✅ 仅错误时解锁
+            this.chatInput.setLoading(false);
         }
     }
 
@@ -1159,8 +1124,8 @@ private findNodeInTree(node: ExecutionNode | undefined, targetId: string): boole
      * 处理用户发送消息
      */
     private async handleUserSend(text: string, files: File[], agentId?: string): Promise<void> {
-            const ownerNodeId = this.options.ownerNodeId || this.options.nodeId; 
-        if (!ownerNodeId ) {
+        const ownerNodeId = this.options.ownerNodeId || this.options.nodeId; 
+        if (!ownerNodeId) {
             console.error('[LLMWorkspaceEditor] No session loaded!');
             return;
         }
@@ -1205,8 +1170,8 @@ private findNodeInTree(node: ExecutionNode | undefined, targetId: string): boole
             
             // 如果既没有文本，也没有成功处理的附件，则不发送
             if (!finalText.trim()) {
-                 this.chatInput.setLoading(false);
-                 return;
+                this.chatInput.setLoading(false);
+                return;
             }
 
             // 3. 发送给 Engine
@@ -1216,7 +1181,7 @@ private findNodeInTree(node: ExecutionNode | undefined, targetId: string): boole
         } catch (error: any) {
             console.error('[LLMWorkspaceEditor] Send failed:', error);
             this.historyView.renderError(error);
-            this.chatInput.setLoading(false); // 仅在同步错误时手动解锁
+            this.chatInput.setLoading(false);
         }
     }
 
@@ -1307,6 +1272,13 @@ private findNodeInTree(node: ExecutionNode | undefined, targetId: string): boole
                </svg>`;
         
         btn.setAttribute('title', this.isAllExpanded ? 'Collapse All' : 'Expand All');
+
+        // 更新折叠状态缓存
+        const sessions = this.sessionManager.getSessions();
+        sessions.forEach(s => {
+            this.collapseStatesCache[s.id] = !this.isAllExpanded;
+        });
+        this.scheduleUIStateSave(this.collapseStatesCache);
     }
 
     // ================================================================

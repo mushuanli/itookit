@@ -208,10 +208,9 @@ export class CoreTitleBarPlugin implements MDxPlugin {
     const rightGroup = document.createElement('div');
     rightGroup.className = 'mdx-editor-titlebar__right';
 
-    titleBar.innerHTML = '';
-    titleBar.appendChild(leftGroup);
-    titleBar.appendChild(titleContainer); // [新增]
-    titleBar.appendChild(rightGroup);
+    // 使用 DocumentFragment 批量添加按钮
+    const leftFragment = document.createDocumentFragment();
+    const rightFragment = document.createDocumentFragment();
 
     const buttons = pluginManager.getTitleBarButtons();
 
@@ -238,13 +237,27 @@ export class CoreTitleBarPlugin implements MDxPlugin {
         }
       };
 
-      const targetGroup = btnConfig.location === 'right' ? rightGroup : leftGroup;
-      targetGroup.appendChild(button);
-      
+      // 添加到对应的 Fragment
+      if (btnConfig.location === 'right') {
+        rightFragment.appendChild(button);
+      } else {
+        leftFragment.appendChild(button);
+      }
+
       if (btnConfig.id === 'toggle-edit-mode') {
         this.toggleModeBtn = button;
       }
     });
+
+    // 一次性添加所有按钮
+    leftGroup.appendChild(leftFragment);
+    rightGroup.appendChild(rightFragment);
+
+    // 清空并重建标题栏
+    titleBar.innerHTML = '';
+    titleBar.appendChild(leftGroup);
+    titleBar.appendChild(titleContainer);
+    titleBar.appendChild(rightGroup);
 
     if (buttons.length === 0 && !this.titleEl.textContent) {
       titleBar.style.display = 'none';
@@ -261,10 +274,10 @@ export class CoreTitleBarPlugin implements MDxPlugin {
 
     if (mode === 'edit') {
       this.toggleModeBtn.title = '切换到阅读模式';
-    this.toggleModeBtn.innerHTML = '<i class="fas fa-book-open"></i>';
+      this.toggleModeBtn.innerHTML = '<i class="fas fa-book-open"></i>';
     } else {
       this.toggleModeBtn.title = '切换到编辑模式';
-    this.toggleModeBtn.innerHTML = '<i class="fas fa-edit"></i>';
+      this.toggleModeBtn.innerHTML = '<i class="fas fa-edit"></i>';
     }
   }
 
@@ -272,21 +285,21 @@ export class CoreTitleBarPlugin implements MDxPlugin {
    * 默认打印处理函数
    */
   private defaultPrintHandler(editor: MDxEditor): void {
-        editor.print({
-            title: editor.config.title || 'Document',
-            showHeader: true,
-            headerMeta: {
-                date: new Date().toLocaleDateString(),
-            },
-        }).catch(err => {
-            console.error('[TitleBarPlugin] Print failed:', err);
-        });
+    editor.print({
+      title: editor.config.title || 'Document',
+      showHeader: true,
+      headerMeta: {
+        date: new Date().toLocaleDateString(),
+      },
+    }).catch(err => {
+      console.error('[TitleBarPlugin] Print failed:', err);
+    });
   }
 
   destroy(): void {
     this.cleanupFns.forEach(fn => fn());
     this.cleanupFns = [];
     this.toggleModeBtn = null;
-    this.titleEl = null; // [新增]
+    this.titleEl = null;
   }
 }

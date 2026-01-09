@@ -197,10 +197,12 @@ function sortPlugins(pluginNames: string[]): string[] {
   const sorted: string[] = [];
   const inDegrees = new Map<string, number>();
   const graph = new Map<string, string[]>();
+  const priorities = new Map<string, number>();
 
   for (const name of pluginNames) {
     inDegrees.set(name, 0);
     graph.set(name, []);
+    priorities.set(name, pluginRegistry.get(name)?.priority ?? 100);
   }
 
   for (const name of pluginNames) {
@@ -217,10 +219,28 @@ function sortPlugins(pluginNames: string[]): string[] {
     }
   }
 
+  // 二分插入函数
+  const binaryInsert = (arr: string[], item: string): void => {
+    const priority = priorities.get(item)!;
+    let left = 0;
+    let right = arr.length;
+    
+    while (left < right) {
+      const mid = (left + right) >>> 1;
+      if (priorities.get(arr[mid])! <= priority) {
+        left = mid + 1;
+      } else {
+        right = mid;
+      }
+    }
+    arr.splice(left, 0, item);
+  };
+
+  // 初始化队列（入度为0的节点）
   const queue: string[] = [];
   for (const name of pluginNames) {
     if (inDegrees.get(name) === 0) {
-      queue.push(name);
+      binaryInsert(queue, name);
     }
   }
 
@@ -236,16 +256,16 @@ function sortPlugins(pluginNames: string[]): string[] {
       const newDegree = (inDegrees.get(neighbor) || 1) - 1;
       inDegrees.set(neighbor, newDegree);
       if (newDegree === 0) {
-        queue.push(neighbor);
+        binaryInsert(queue, neighbor);
       }
     }
   }
 
   if (sorted.length !== pluginNames.length) {
-      // 简单处理循环依赖，防止崩溃
-      const remaining = pluginNames.filter(p => !sorted.includes(p));
-      console.warn(`Circular or missing dependency for: ${remaining.join(', ')}`);
-      sorted.push(...remaining);
+    const remaining = pluginNames.filter(p => !sorted.includes(p));
+    console.warn(`Circular or missing dependency for: ${remaining.join(', ')}`);
+    remaining.sort((a, b) => (priorities.get(a) || 100) - (priorities.get(b) || 100));
+    sorted.push(...remaining);
   }
 
   return sorted;
@@ -267,42 +287,28 @@ export async function createMDxEditor(
   // 获取 TitleBar 的配置
   const titleBarOptions = config.defaultPluginOptions?.['core:titlebar'] || {};
   
-  // --- ✨ 自动加载逻辑开始 ---
-  
-  // 检查是否应该加载 Asset Manager
-  // 逻辑：
-  // 1. 默认开启 (undefined === true)
-  // 2. 除非用户显式设置为 false
-  // 3. 并且当前环境确实加载了 titlebar (无论是通过默认还是显式指定)
-  
-  const isTitleBarEnabled = userPlugins.includes('core:titlebar') || 
-                            // 检查默认插件列表是否包含 titlebar (假设 DEFAULT_PLUGINS 里有)
+  // Asset Manager 自动加载逻辑
+  const isTitleBarEnabled = userPlugins.some(p => getPluginName(p) === 'core:titlebar') || 
                             DEFAULT_PLUGINS.includes('core:titlebar');
 
   const shouldLoadAssetManager = 
-      isTitleBarEnabled && 
-      titleBarOptions.enableAssetManager !== false; // 默认为 true
+    isTitleBarEnabled && 
+    titleBarOptions.enableAssetManager !== false;
 
-  // 检查列表中是否已经存在 (避免重复)
   const hasAssetManager = userPlugins.some(p => getPluginName(p) === 'ui:asset-manager');
 
   if (shouldLoadAssetManager && !hasAssetManager) {
-      // 自动注入插件
-      userPlugins.push('ui:asset-manager');
-      //console.log('[Factory] Auto-injecting AssetManagerPlugin based on configuration.');
+    userPlugins.push('ui:asset-manager');
   }
   config.plugins = userPlugins;
 
-  //console.log(`[createMDxEditor] Received config.Plugin:${userPlugins} Content length: ${(config.initialContent || '').length}.`);
-
-  // ✅ [核心变更] 自动桥接 HostContext 的保存能力
-  // 1. 确定保存处理器
+  // 自动桥接保存能力
   let onSaveHandler = config.onSave;
   
   if (!onSaveHandler && config.hostContext && config.nodeId) {
-      onSaveHandler = async (content: string) => {
-          await config.hostContext!.saveContent(config.nodeId!, content);
-      };
+    onSaveHandler = async (content: string) => {
+      await config.hostContext!.saveContent(config.nodeId!, content);
+    };
   }
   
   // 2. 将保存处理器注入编辑器配置，供 Editor.save() 使用
@@ -315,17 +321,12 @@ export async function createMDxEditor(
     const existingTitleBarOpts = config.defaultPluginOptions['core:titlebar'] || {};
     
     config.defaultPluginOptions['core:titlebar'] = {
-        ...existingTitleBarOpts,
-        
-        // 1. 侧边栏切换：如果插件没配，就用 Host 的
-        onSidebarToggle: existingTitleBarOpts.onSidebarToggle 
-            || ((_editor) => config.hostContext?.toggleSidebar()),
-            
-        // 保存按钮：调用 editor.save()
-        saveCallback: async (editor) => {
-             // 这里调用 editor.save() 会触发 config.onSave
-             await editor.save(); 
-        }
+      ...existingTitleBarOpts,
+      onSidebarToggle: existingTitleBarOpts.onSidebarToggle 
+        || ((_editor) => config.hostContext?.toggleSidebar()),
+      saveCallback: async (editor) => {
+        await editor.save(); 
+      }
     };
   }
 
@@ -341,23 +342,40 @@ export async function createMDxEditor(
     basePlugins = [];
     userPlugins.shift();
   }
-  const combinedPlugins = [...basePlugins, ...userPlugins];
-  const pluginMap = new Map<string, PluginConfig>();
+
   const exclusions = new Set<string>();
-  for (const pluginConfig of combinedPlugins) {
+  const pluginMap = new Map<string, PluginConfig>();
+
+  // 处理基础插件
+  for (const pluginConfig of basePlugins) {
+    const name = getPluginName(pluginConfig);
+    if (name && !name.startsWith('-')) {
+      pluginMap.set(name, pluginConfig);
+    }
+  }
+
+  // 处理用户插件（可覆盖基础插件）
+  for (const pluginConfig of userPlugins) {
     const name = getPluginName(pluginConfig);
     if (!name) {
-      console.warn('Invalid plugin configuration encountered:', pluginConfig);
+      console.warn('Invalid plugin configuration:', pluginConfig);
       continue;
     }
+    
     if (name.startsWith('-')) {
       exclusions.add(name.substring(1));
-      continue;
-    }
-    pluginMap.set(name, pluginConfig);
-    if (name === 'cloze:cloze') {
-      if (!pluginMap.has('cloze:cloze-controls')) pluginMap.set('cloze:cloze-controls', 'cloze:cloze-controls');
-      if (!pluginMap.has('cloze:memory')) pluginMap.set('cloze:memory', 'cloze:memory');
+    } else {
+      pluginMap.set(name, pluginConfig);
+      
+      // 自动添加 cloze 相关插件
+      if (name === 'cloze:cloze') {
+        if (!pluginMap.has('cloze:cloze-controls')) {
+          pluginMap.set('cloze:cloze-controls', 'cloze:cloze-controls');
+        }
+        if (!pluginMap.has('cloze:memory')) {
+          pluginMap.set('cloze:memory', 'cloze:memory');
+        }
+      }
     }
   }
   for (const excluded of exclusions) {
@@ -376,11 +394,12 @@ export async function createMDxEditor(
       } else {
         const info = pluginRegistry.get(pluginName);
         if (!info) {
-          console.warn(`Plugin with name "${pluginName}" not found in registry.`);
+          console.warn(`Plugin "${pluginName}" not found in registry.`);
           continue;
         }
         const PluginClass = info.constructor;
-        let options = {};
+        let options: Record<string, any> = {};
+        
         if (typeof pluginConfig === 'string') {
           options = config.defaultPluginOptions?.[pluginName] || {};
         } else if (Array.isArray(pluginConfig)) {
@@ -394,9 +413,12 @@ export async function createMDxEditor(
         }
         pluginInstance = new PluginClass(options);
       }
-      if (pluginInstance) editor.use(pluginInstance);
+      
+      if (pluginInstance) {
+        editor.use(pluginInstance);
+      }
     } catch (error) {
-      console.error(`Failed to instantiate plugin "${pluginName}" with config:`, pluginConfig, error);
+      console.error(`Failed to instantiate plugin "${pluginName}":`, pluginConfig, error);
     }
   }
 
@@ -413,19 +435,18 @@ export async function createMDxEditor(
  * 封装了 createMDxEditor，注入了默认的插件配置。
  */
 export const defaultEditorFactory: EditorFactory = async (container, options) => {
-    const config: MDxEditorFactoryConfig = {
-        ...options,
-        // 确保 TitleBar 和 AutoSave 存在
-        plugins: ['core:titlebar', 'interaction:auto-save', ...(options.plugins || [])],
-        initialMode: 'render' as const,
-        defaultPluginOptions: {
-            ...options.defaultPluginOptions,
-            'core:titlebar': {
-                title: options.title || 'Untitled',
-                enableToggleEditMode: true,
-                ...(options.defaultPluginOptions?.['core:titlebar'] || {})
-            }
-        }
-    };
-    return await createMDxEditor(container, config);
+  const config: MDxEditorFactoryConfig = {
+    ...options,
+    plugins: ['core:titlebar', 'interaction:auto-save', ...(options.plugins || [])],
+    initialMode: 'render' as const,
+    defaultPluginOptions: {
+      ...options.defaultPluginOptions,
+      'core:titlebar': {
+        title: options.title || 'Untitled',
+        enableToggleEditMode: true,
+        ...(options.defaultPluginOptions?.['core:titlebar'] || {})
+      }
+    }
+  };
+  return await createMDxEditor(container, config);
 };

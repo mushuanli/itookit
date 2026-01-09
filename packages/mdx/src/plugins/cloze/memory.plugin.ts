@@ -49,6 +49,10 @@ export class MemoryPlugin implements MDxPlugin {
   private cleanupFns: Array<() => void> = [];
   private clozeStatesCache = new WeakMap<PluginContext, Map<string, SRSCardState>>();
   private storeRef: ScopedPersistenceStore | null = null;
+  
+  // [新增] 同步状态追踪
+  private syncedContexts = new WeakSet<PluginContext>();
+  private syncPromise: Promise<void> | null = null;
 
   constructor(options: MemoryPluginOptions = {}) {
     this.options = {
@@ -104,13 +108,34 @@ export class MemoryPlugin implements MDxPlugin {
     });
     if (removeBatchToggle) this.cleanupFns.push(removeBatchToggle);
 
-    // DOM 更新时应用状态 (初始化渲染)
+    // [优化] DOM 更新时的同步逻辑
     const removeDomUpdated = context.on('domUpdated', async ({ element }: { element: HTMLElement }) => {
-      this.log('DOM updated, starting sync...');
-      await this.syncWithStore(context);
+      this.log('DOM updated, checking sync status...');
+      
+      // 只在首次加载时同步
+      if (!this.syncedContexts.has(context)) {
+        // 防止并发同步
+        if (!this.syncPromise) {
+          this.syncPromise = this.syncWithStore(context).finally(() => {
+            this.syncPromise = null;
+          });
+        }
+        await this.syncPromise;
+        this.syncedContexts.add(context);
+      }
+      
       this.applyVisualsAndState(element, context);
     });
     if (removeDomUpdated) this.cleanupFns.push(removeDomUpdated);
+  }
+
+  /**
+   * [新增] 强制重新同步方法（供外部调用）
+   */
+  async forceResync(context: PluginContext): Promise<void> {
+    this.syncedContexts.delete(context);
+    await this.syncWithStore(context);
+    this.syncedContexts.add(context);
   }
 
   /**
@@ -462,5 +487,6 @@ export class MemoryPlugin implements MDxPlugin {
     this.cleanupFns.forEach(fn => fn());
     this.cleanupFns = [];
     this.storeRef = null;
+    this.syncPromise = null;
   }
 }

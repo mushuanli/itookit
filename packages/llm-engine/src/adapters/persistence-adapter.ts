@@ -8,7 +8,7 @@ import { ILLMSessionEngine, ChatNode, ChatContextItem, ChatManifest } from '../p
 class PersistQueue {
     private queue: Promise<void> = Promise.resolve();
     private pendingCount = 0;
-    
+
     enqueue(fn: () => Promise<void>): void {
         this.pendingCount++;
         this.queue = this.queue
@@ -128,7 +128,7 @@ export class PersistenceAdapter {
     createThrottledPersist(
         sessionId: string,
         messageId: string,
-        interval: number = 500
+        interval: number = 1000  // ✅ 从 500ms 增加到 1000ms
     ): {
         accumulator: { output: string; thinking: string };
         persist: () => void;

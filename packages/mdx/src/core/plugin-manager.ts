@@ -22,6 +22,10 @@ type PluginDataRecord = Record<string, unknown>;
  * ✨ 基于 Engine 的元数据存储实现
  */
 class EngineMetadataStore implements ScopedPersistenceStore {
+  private pendingUpdates = new Map<string, unknown>();
+  private flushTimer: number | null = null;
+  private flushPromise: Promise<void> | null = null;
+
   constructor(
     private engine: ISessionEngine,
     private nodeId: string,
@@ -33,6 +37,11 @@ class EngineMetadataStore implements ScopedPersistenceStore {
   }
 
   async get(key: string): Promise<unknown> {
+    // 优先从待更新队列获取
+    if (this.pendingUpdates.has(key)) {
+      return this.pendingUpdates.get(key);
+    }
+    
     try {
       const node = await this.engine.getNode(this.nodeId);
       if (!node) return undefined;
@@ -47,51 +56,65 @@ class EngineMetadataStore implements ScopedPersistenceStore {
   }
 
   async set(key: string, value: unknown): Promise<void> {
-    try {
-      // 1. 获取最新节点数据
-      const node = await this.engine.getNode(this.nodeId);
-      if (!node) throw new Error(`Node ${this.nodeId} not found`);
-
-      // 2. 准备数据
-      const metaKey = this.getMetaKey();
-      const currentMetadata = node.metadata || {};
-      const pluginData = (currentMetadata[metaKey] as PluginDataRecord) || {};
-      
-      pluginData[key] = value;
-      
-      const newMetadata: Record<string, unknown> = {
-        ...currentMetadata,
-        [metaKey]: pluginData,
-      };
-
-      // 4. 调用 Engine 更新
-      await this.engine.updateMetadata(this.nodeId, newMetadata);
-    } catch (error) {
-      console.error(`EngineMetadataStore: Failed to set key "${key}"`, error);
-      throw error;
-    }
+    this.pendingUpdates.set(key, value);
+    this.scheduleFlush();
   }
 
   async remove(key: string): Promise<void> {
-    try {
-      const node = await this.engine.getNode(this.nodeId);
-      if (!node) return;
+    this.pendingUpdates.set(key, undefined); // 标记为删除
+    this.scheduleFlush();
+  }
 
-      const metaKey = this.getMetaKey();
-      const currentMetadata = node.metadata || {};
-      const pluginData = currentMetadata[metaKey] as PluginDataRecord | undefined;
-      
-      if (pluginData && typeof pluginData === 'object' && key in pluginData) {
-        delete pluginData[key];
+  private scheduleFlush(): void {
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+    }
+    this.flushTimer = window.setTimeout(() => this.flush(), 100);
+  }
+
+  private async flush(): Promise<void> {
+    if (this.pendingUpdates.size === 0) return;
+    
+    // 防止并发 flush
+    if (this.flushPromise) {
+      await this.flushPromise;
+    }
+
+    this.flushPromise = (async () => {
+      try {
+        const node = await this.engine.getNode(this.nodeId);
+        if (!node) throw new Error(`Node ${this.nodeId} not found`);
+
+        const metaKey = this.getMetaKey();
+        const currentMetadata = node.metadata || {};
+        const pluginData = { ...(currentMetadata[metaKey] as PluginDataRecord) || {} };
+
+        // 应用所有待更新的数据
+        this.pendingUpdates.forEach((value, key) => {
+          if (value === undefined) {
+            delete pluginData[key];
+          } else {
+            pluginData[key] = value;
+          }
+        });
+
         const newMetadata: Record<string, unknown> = {
           ...currentMetadata,
           [metaKey]: pluginData,
         };
+
         await this.engine.updateMetadata(this.nodeId, newMetadata);
+        this.pendingUpdates.clear();
+      } catch (error) {
+        console.error(`EngineMetadataStore: Flush failed`, error);
+        throw error;
+      } finally {
+        this.flushTimer = null;
+        this.flushPromise = null;
       }
-    } catch (error) {
-      console.warn(`EngineMetadataStore: Failed to remove key "${key}"`, error);
-    }
+    })();
+
+    await this.flushPromise;
   }
 }
 
@@ -126,7 +149,7 @@ class AdapterStore implements ScopedPersistenceStore {
  * 每个实例使用独立的 Map，通过 instanceId 完全隔离
  */
 class MemoryStore implements ScopedPersistenceStore {
-  private data: Map<string, any> = new Map();
+  private data = new Map<string, any>();
 
   async get(key: string): Promise<any> {
     return this.data.get(key);
@@ -153,9 +176,9 @@ class MemoryStore implements ScopedPersistenceStore {
  * 插件管理器
  */
 export class PluginManager {
-  private plugins: Map<string, { plugin: MDxPlugin; context: PluginContext; }> = new Map();
-  private hooks: Map<string, Map<symbol, Function>> = new Map();
-  private eventBus: Map<string, Map<symbol, Function>> = new Map();
+  private plugins = new Map<string, { plugin: MDxPlugin; context: PluginContext }>();
+  private hooks = new Map<string, Map<symbol, Function>>();
+  private eventBus = new Map<string, Map<symbol, Function>>();
   private serviceContainer: ServiceContainer;
   
   // ✨ [重构] 核心数据源依赖 ISessionEngine
@@ -173,24 +196,27 @@ export class PluginManager {
   public editorInstance: any = null;
   
   // 每个实例独立的存储（用于无 VFS/Adapter 场景）
-  private instanceStores: Map<string, MemoryStore> = new Map();
+  private instanceStores = new Map<string, MemoryStore>();
 
   // 💡 新增：用于收集 CodeMirror 扩展的数组
   public codemirrorExtensions: Extension[] = [];
 
   // 新增：命令注册表
-  private commands: Map<string, Function> = new Map();
+  private commands = new Map<string, Function>();
   
   // 新增：工具栏按钮配置列表
   private toolbarButtons: ToolbarButtonConfig[] = [];
   
   // 新增：标题栏按钮配置列表
   private titleBarButtons: TitleBarButtonConfig[] = [];
+  
+  // [优化] 缓存创建的 store
+  private storeCache = new Map<string, ScopedPersistenceStore>();
 
   constructor(coreInstance: any) {
     this.coreInstance = coreInstance;
     this.serviceContainer = new ServiceContainer();
-    this.instanceId = `mdx-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    this.instanceId = `mdx-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
   }
 
   /**
@@ -209,6 +235,9 @@ export class PluginManager {
     
     // 逻辑：优先使用显式传入的 ownerNodeId，否则回退到 nodeId
     this.ownerNodeId = ownerNodeId || nodeId || null;
+    
+    // 清除 store 缓存，因为上下文变了
+    this.storeCache.clear();
   }
   
   /**
@@ -216,6 +245,7 @@ export class PluginManager {
    */
   setDataAdapter(adapter: IPersistenceAdapter): void {
     this.dataAdapter = adapter;
+    this.storeCache.clear();
   }
 
   /**
@@ -346,28 +376,29 @@ export class PluginManager {
    * 创建存储实例（优先级：Engine > Adapter > Memory）
    */
   private _createStore(pluginName: string): ScopedPersistenceStore {
+    // 检查缓存
+    const cached = this.storeCache.get(pluginName);
+    if (cached) return cached;
+    
     const storeNamespace = `${this.instanceId}:${pluginName}`;
+    let store: ScopedPersistenceStore;
 
     // 1. 优先使用 Engine Metadata (标准方式)
     if (this.sessionEngine && this.currentNodeId) {
-      return new EngineMetadataStore(this.sessionEngine, this.currentNodeId, pluginName);
+      store = new EngineMetadataStore(this.sessionEngine, this.currentNodeId, pluginName);
+    } else if (this.dataAdapter) {
+      store = new AdapterStore(this.dataAdapter, storeNamespace);
+    } else {
+      if (!this.instanceStores.has(pluginName)) {
+        this.instanceStores.set(pluginName, new MemoryStore());
+      }
+      store = this.instanceStores.get(pluginName)!;
     }
-
-    // 2. 其次使用外部适配器 (兼容模式)
-    if (this.dataAdapter) {
-      return new AdapterStore(this.dataAdapter, storeNamespace);
-    }
-
-    // 3. 最后使用内存存储
-    if (!this.instanceStores.has(pluginName)) {
-      this.instanceStores.set(pluginName, new MemoryStore());
-    }
-    return this.instanceStores.get(pluginName)!;
+    
+    this.storeCache.set(pluginName, store);
+    return store;
   }
 
-  /**
-   * 注册插件
-   */
   register(plugin: MDxPlugin): void {
     if (this.plugins.has(plugin.name)) {
       //console.warn(`Plugin ${plugin.name} is already registered`);
@@ -436,19 +467,20 @@ export class PluginManager {
    */
   emit(eventName: string, payload: any): void {
     const listeners = this.eventBus.get(eventName);
-    listeners?.forEach(cb => cb(payload));
+    listeners?.forEach(cb => {
+      try {
+        cb(payload);
+      } catch (error) {
+        console.error(`[PluginManager] Event callback error for "${eventName}":`, error);
+      }
+    });
   }
 
-
-  /**
-   * 监听事件（供外部如 MDxEditor 使用）
-   * @param eventName - 事件名称
-   * @param callback - 回调函数
-   * @returns 一个用于取消监听的函数
-   */
   listen(eventName: string, callback: Function): () => void {
     const handlerId = Symbol(`external-listener:${eventName}`);
-    if (!this.eventBus.has(eventName)) this.eventBus.set(eventName, new Map());
+    if (!this.eventBus.has(eventName)) {
+      this.eventBus.set(eventName, new Map());
+    }
     this.eventBus.get(eventName)!.set(handlerId, callback);
     return () => { this.eventBus.get(eventName)?.delete(handlerId); };
   }
@@ -475,14 +507,21 @@ export class PluginManager {
   getTitleBarButtons(): TitleBarButtonConfig[] { return this.titleBarButtons; }
 
   setNodeId(nodeId: string): void {
-      if( this.ownerNodeId === this.currentNodeId ) this.ownerNodeId = null;
-      this.currentNodeId = nodeId; 
-      // 如果未设置 ownerNodeId，更新它以保持同步
-      if (!this.ownerNodeId) this.ownerNodeId = nodeId;
+    if (this.ownerNodeId === this.currentNodeId) {
+      this.ownerNodeId = null;
+    }
+    this.currentNodeId = nodeId; 
+    if (!this.ownerNodeId) {
+      this.ownerNodeId = nodeId;
+    }
+    // 清除 store 缓存
+    this.storeCache.clear();
   }
   
-  // ✨ [新增] 设置 Session Engine (方便外部单独调用)
-  setSessionEngine(engine: ISessionEngine): void { this.sessionEngine = engine; }
+  setSessionEngine(engine: ISessionEngine): void { 
+    this.sessionEngine = engine;
+    this.storeCache.clear();
+  }
 
   destroy(): void {
     Array.from(this.plugins.keys()).forEach(name => this.unregister(name));
@@ -490,6 +529,7 @@ export class PluginManager {
     this.eventBus.clear();
     this.serviceContainer.clear();
     this.instanceStores.clear();
+    this.storeCache.clear();
     this.codemirrorExtensions = [];
     this.commands.clear();
     this.toolbarButtons = [];

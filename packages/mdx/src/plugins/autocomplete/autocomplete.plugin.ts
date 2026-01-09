@@ -84,11 +84,10 @@ export class AutocompletePlugin implements MDxPlugin {
     //console.log('🔧 [AutocompletePlugin] Created _autocompleteSources array');
     }
 
-  //console.log(`🔧 [AutocompletePlugin] Adding ${this.options.sources.length} sources:`, 
-  //  this.options.sources.map(s => s.triggerChar));
-  
-  (pluginManager as any)._autocompleteSources.push(...this.options.sources);
-  
-  //console.log(`🔧 [AutocompletePlugin] Total sources now: ${(pluginManager as any)._autocompleteSources.length}`);
+    // [优化] 直接推入，避免展开操作
+    const sources = (pluginManager as any)._autocompleteSources;
+    for (const source of this.options.sources) {
+      sources.push(source);
+    }
   }
 }

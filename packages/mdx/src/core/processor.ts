@@ -110,11 +110,11 @@ export interface ProcessResult {
  * console.log(result.metadata);
  */
 export class MDxProcessor {
-  private providerRegistry: Map<string, IMentionProviderForProcessor> = new Map();
+  private providerRegistry = new Map<string, IMentionProviderForProcessor>();
+  
+  // [优化] 预编译正则
+  private static readonly MENTION_REGEX = /@(\w+):(\S+)|\[[^\]]+\]\(mdx:\/\/(\w+)\/([^)]+)\)/g;
 
-  /**
-   * @param providers - 一个实现了 `IMentionProviderForProcessor` 接口的 Provider 实例数组。
-   */
   constructor(providers: IMentionProviderForProcessor[] = []) {
     providers.forEach(provider => this.register(provider));
   }
@@ -179,40 +179,64 @@ export class MDxProcessor {
    * @private 在文本中查找所有 mention 语法。
    */
   private _findAllMentions(content: string): MentionMatch[] {
-    // 正则表达式，用于匹配两种格式:
-    // 1. @type:id (e.g., @user:alice)
-    // 2. [text](mdx://type/id)
-    const mentionRegex = /@(\w+):(\S+)|\[[^\]]+\]\(mdx:\/\/(\w+)\/([^)]+)\)/g;
-    return Array.from(content.matchAll(mentionRegex)).map(match => {
+    // 重置正则状态
+    MDxProcessor.MENTION_REGEX.lastIndex = 0;
+    
+    const mentions: MentionMatch[] = [];
+    
+    for (const match of content.matchAll(MDxProcessor.MENTION_REGEX)) {
       const isAtMention = !!match[1];
       const type = isAtMention ? match[1] : match[3];
       const id = isAtMention ? match[2] : match[4];
-      return {
+      
+      mentions.push({
         raw: match[0],
         type,
         id,
         uri: `mdx://${type}/${id}`,
         index: match.index!,
         data: null,
-      };
-    });
+      });
+    }
+    
+    return mentions;
   }
 
   /**
    * @private 并发地为所有找到的 mention 获取数据。
    */
   private async _resolveMentionData(mentions: MentionMatch[]): Promise<void> {
-    await Promise.all(mentions.map(async (mention) => {
-      const provider = this.providerRegistry.get(mention.type);
-      if (provider?.getDataForProcess) {
-        try {
-          mention.data = await provider.getDataForProcess(new URL(mention.uri));
-        } catch (error) {
-          console.error(`[MDxProcessor] Provider "${mention.type}" failed to get data for "${mention.uri}":`, error);
-          mention.data = null; // 确保出错时 data 为 null
-        }
+    // 按 provider 分组以减少重复查找
+    const mentionsByProvider = new Map<string, MentionMatch[]>();
+    
+    for (const mention of mentions) {
+      const existing = mentionsByProvider.get(mention.type) || [];
+      existing.push(mention);
+      mentionsByProvider.set(mention.type, existing);
+    }
+
+    const promises: Promise<void>[] = [];
+    
+    for (const [providerKey, providerMentions] of mentionsByProvider) {
+      const provider = this.providerRegistry.get(providerKey);
+      if (!provider?.getDataForProcess) continue;
+      
+      // 每个 provider 的请求并发执行
+      for (const mention of providerMentions) {
+        promises.push(
+          (async () => {
+            try {
+              mention.data = await provider.getDataForProcess(new URL(mention.uri));
+            } catch (error) {
+              console.error(`[MDxProcessor] Provider "${providerKey}" failed for "${mention.uri}":`, error);
+              mention.data = null;
+            }
+          })()
+        );
       }
-    }));
+    }
+
+    await Promise.all(promises);
   }
 
   /**
@@ -224,38 +248,70 @@ export class MDxProcessor {
     options: ProcessOptions,
     metadata: Record<string, any>
   ): string {
-    let transformed = content;
+    if (mentions.length === 0) {
+      return content.trim();
+    }
+
+    // 从后向前排序
     const sortedMentions = [...mentions].sort((a, b) => b.index - a.index);
+    
+    // 使用数组构建结果
+    const parts: string[] = [];
+    let lastEnd = content.length;
 
     for (const mention of sortedMentions) {
       const rule = options.rules[mention.type] || options.rules['*'];
-      if (!rule) continue;
+      if (!rule) {
+        // 没有规则，保持原样，继续处理下一个
+        continue;
+      }
 
+      // 收集元数据
       if (rule.collectMetadata && mention.id) {
         if (!metadata[mention.type]) {
           metadata[mention.type] = [];
         }
         if (!metadata[mention.type].includes(mention.id)) {
-            metadata[mention.type].push(mention.id);
+          metadata[mention.type].push(mention.id);
         }
       }
 
-      let replacement = '';
+      // 确定替换内容
+      let replacement: string;
       switch (rule.action) {
         case 'replace':
-          replacement = rule.getReplacementContent ? rule.getReplacementContent(mention.data, mention) : mention.raw;
+          replacement = rule.getReplacementContent 
+            ? rule.getReplacementContent(mention.data, mention) 
+            : mention.raw;
           break;
         case 'keep':
           replacement = mention.raw;
           break;
         case 'remove':
+          replacement = '';
           break;
+        default:
+          replacement = mention.raw;
+      }
+
+      const endIndex = mention.index + mention.raw.length;
+      
+      // 添加 mention 之后到上一个处理点的内容
+      if (endIndex < lastEnd) {
+        parts.unshift(content.slice(endIndex, lastEnd));
       }
       
-      const startIndex = mention.index;
-      const endIndex = startIndex + mention.raw.length;
-      transformed = transformed.slice(0, startIndex) + replacement + transformed.slice(endIndex);
+      // 添加替换内容
+      parts.unshift(replacement);
+      
+      lastEnd = mention.index;
     }
-    return transformed.trim();
+
+    // 添加剩余的开头部分
+    if (lastEnd > 0) {
+      parts.unshift(content.slice(0, lastEnd));
+    }
+
+    return parts.join('').trim();
   }
 }

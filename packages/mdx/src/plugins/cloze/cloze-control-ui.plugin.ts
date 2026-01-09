@@ -1,6 +1,7 @@
 // mdx/plugins/cloze/cloze-control-ui.plugin.ts
 import type { MDxPlugin, PluginContext } from '../../core/plugin';
 import { ClozeAPIKey } from './cloze.plugin';
+import {escapeHTML} from '@itookit/common';
 
 export interface ClozeControlsPluginOptions {
   className?: string;
@@ -8,6 +9,7 @@ export interface ClozeControlsPluginOptions {
 
 export class ClozeControlsPlugin implements MDxPlugin {
   name = 'cloze:cloze-controls';
+
   private options: Required<ClozeControlsPluginOptions>;
   private cleanupFns: Array<() => void> = [];
   
@@ -21,6 +23,7 @@ export class ClozeControlsPlugin implements MDxPlugin {
   
   // Track which clozes were manually opened (by locator)
   private manuallyOpenedClozes: Set<string> = new Set();
+  private static readonly MAX_TRACKED_CLOZES = 1000;
 
   constructor(options: ClozeControlsPluginOptions = {}) {
     this.options = {
@@ -39,7 +42,7 @@ export class ClozeControlsPlugin implements MDxPlugin {
     const removeClozeRevealed = context.listen('clozeRevealed', (data: any) => {
       const locator = data.element.getAttribute('data-cloze-locator');
       if (locator) {
-        this.manuallyOpenedClozes.add(locator);
+        this.trackOpenedCloze(locator);
       }
     });
     if (removeClozeRevealed) this.cleanupFns.push(removeClozeRevealed);
@@ -58,6 +61,22 @@ export class ClozeControlsPlugin implements MDxPlugin {
       this.restoreOpenStates(clozeApi, context);
     });
     if (removeDomUpdated) this.cleanupFns.push(removeDomUpdated);
+  }
+
+  /**
+   * [新增] 追踪打开的 cloze，带大小限制
+   */
+  private trackOpenedCloze(locator: string): void {
+    // 如果已存在，先删除再添加（移到末尾）
+    this.manuallyOpenedClozes.delete(locator);
+    this.manuallyOpenedClozes.add(locator);
+    
+    // 超出限制时删除最早的
+    if (this.manuallyOpenedClozes.size > ClozeControlsPlugin.MAX_TRACKED_CLOZES) {
+      const firstKey = this.manuallyOpenedClozes.values().next().value;
+      if( firstKey )
+        this.manuallyOpenedClozes.delete(firstKey);
+    }
   }
 
   /**
@@ -178,16 +197,35 @@ export class ClozeControlsPlugin implements MDxPlugin {
   private updateAllClozeContent(): void {
     if (!this.container) return;
     const contentSpans = this.container.querySelectorAll('.mdx-cloze__content');
+    if (contentSpans.length === 0) return;
+
+    // [优化] 收集所有更新，批量应用
+    const updates: Array<{ span: HTMLElement; html: string }> = [];
+    
     contentSpans.forEach(span => {
       const parent = span.parentElement;
       if (!parent) return;
+      
       const rawContent = parent.getAttribute('data-cloze-content') || '';
+      let newContent: string;
+      
       if (this.isExpanded) {
-        span.innerHTML = rawContent.replace(/¶/g, '<br/>');
+        newContent = rawContent.replace(/¶/g, '<br/>');
       } else {
         let text = rawContent.replace(/¶/g, ' ');
         if (text.length > 100) text = text.substring(0, 100) + '...';
-        (span as HTMLElement).innerText = text;
+        newContent = escapeHTML(text);
+      }
+      
+      updates.push({ span: span as HTMLElement, html: newContent });
+    });
+
+    // 批量应用更新
+    updates.forEach(({ span, html }) => {
+      if (this.isExpanded) {
+        span.innerHTML = html;
+      } else {
+        span.textContent = html;
       }
     });
   }

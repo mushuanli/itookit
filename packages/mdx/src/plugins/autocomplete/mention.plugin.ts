@@ -95,6 +95,12 @@ export class MentionPlugin implements MDxPlugin {
   private autocompletePlugin: AutocompletePlugin;
   private hoverCard: HTMLElement | null = null;
   private cleanupFns: Array<() => void> = [];
+  
+  // [优化] 缓存 provider 查找
+  private providerMap = new Map<string, MentionProvider>();
+  
+  // [优化] 防抖 hover
+  private hoverDebounceTimer: number | null = null;
 
   constructor(options: MentionPluginOptions) {
     this.options = {
@@ -104,6 +110,11 @@ export class MentionPlugin implements MDxPlugin {
       enableTransclusion: options.enableTransclusion !== false,
       onMentionClick: options.onMentionClick || (() => {}),
     };
+    
+    // 构建 provider 查找表
+    for (const provider of this.options.providers) {
+      this.providerMap.set(provider.key, provider);
+    }
 
     // 1. 按 triggerChar 对 Provider 进行分组
     // 解决多个 Provider 使用相同触发字符（如 '@'）时只有第一个生效的问题
@@ -111,12 +122,12 @@ export class MentionPlugin implements MDxPlugin {
 
     // ✅ 修复 2: 只有在有 providers 时才执行遍历 (虽然有了修复1，这个判断是多余的，但更安全)
     if (this.options.providers && this.options.providers.length > 0) {
-        this.options.providers.forEach((provider) => {
-          if (!groupedProviders.has(provider.triggerChar)) {
-            groupedProviders.set(provider.triggerChar, []);
-          }
-          groupedProviders.get(provider.triggerChar)!.push(provider);
-        });
+      this.options.providers.forEach((provider) => {
+        if (!groupedProviders.has(provider.triggerChar)) {
+          groupedProviders.set(provider.triggerChar, []);
+        }
+        groupedProviders.get(provider.triggerChar)!.push(provider);
+      });
     }
 
     // 2. 为每个触发字符创建一个聚合的 Source
@@ -155,13 +166,13 @@ export class MentionPlugin implements MDxPlugin {
           getHoverPreview: async (item: Completion) => {
             const mentionItem = item as any;
             const providerKey = mentionItem._providerKey;
-            const provider = providers.find((p) => p.key === providerKey);
+            const provider = this.providerMap.get(providerKey);
 
-            if (provider && provider.getHoverPreview) {
+            if (provider?.getHoverPreview) {
               const uri = `mdx://${providerKey}/${mentionItem.id}`;
               return provider.getHoverPreview(uri);
             }
-            return Promise.resolve(null);
+            return null;
           },
         },
 
@@ -260,82 +271,116 @@ export class MentionPlugin implements MDxPlugin {
   }
 
   /**
-   * 创建悬浮预览卡片 (DOM)
+   * [优化] 懒加载创建 hover card
    */
-  private createHoverCard(): HTMLElement {
-    const card = document.createElement('div');
-    card.className = 'mdx-mention-hover-card';
-    card.style.cssText = `
-      position: absolute;
-      background: white;
-      border: 1px solid #ddd;
-      border-radius: 6px;
-      padding: 0;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-      z-index: 1000;
-      max-width: 320px;
-      display: none;
-      overflow: hidden;
-      font-family: sans-serif;
-    `;
-    document.body.appendChild(card);
-    return card;
+  private getOrCreateHoverCard(): HTMLElement {
+    if (!this.hoverCard) {
+      const card = document.createElement('div');
+      card.className = 'mdx-mention-hover-card';
+      card.style.cssText = `
+        position: absolute;
+        background: white;
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        padding: 0;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        z-index: 1000;
+        max-width: 320px;
+        display: none;
+        overflow: hidden;
+        font-family: sans-serif;
+      `;
+      document.body.appendChild(card);
+      this.hoverCard = card;
+    }
+    return this.hoverCard;
   }
 
   /**
    * 显示悬浮预览 (针对已渲染的 DOM 元素)
    */
-  private async showHoverPreview(element: HTMLElement, provider: MentionProvider, id: string): Promise<void> {
+  private showHoverPreview(
+    element: HTMLElement, 
+    provider: MentionProvider, 
+    id: string
+  ): void {
     if (!this.options.enableHoverPreview || !provider.getHoverPreview) {
       return;
     }
+  // 保存引用以在闭包中使用
+  const getHoverPreview = provider.getHoverPreview.bind(provider);
 
-    try {
-      const uri = `mdx://${provider.key}/${id}`;
-      const preview = await provider.getHoverPreview(uri);
-
-      if (!preview) return;
-
-      if (!this.hoverCard) {
-        this.hoverCard = this.createHoverCard();
-      }
-
-      this.hoverCard.innerHTML = `
-        <div class="mdx-mention-hover-card__header" style="padding: 8px 12px; background: #f5f5f5; border-bottom: 1px solid #eee; font-weight: 600;">
-            ${preview.icon || ''} ${preview.title}
-        </div>
-        <div class="mdx-mention-hover-card__content" style="padding: 12px;">
-            ${preview.contentHTML}
-        </div>
-      `;
-
-      const rect = element.getBoundingClientRect();
-
-      // 简单的位置计算，防止溢出屏幕底部
-      let top = rect.bottom + 5;
-      if (top + 200 > window.innerHeight) {
-        top = rect.top - this.hoverCard.offsetHeight - 5;
-      }
-
-      this.hoverCard.style.left = `${rect.left}px`;
-      this.hoverCard.style.top = `${top}px`;
-      this.hoverCard.style.display = 'block';
-    } catch (error) {
-      console.error('[MentionPlugin] Failed to load hover preview:', error);
+    // 清除之前的防抖定时器
+    if (this.hoverDebounceTimer) {
+      clearTimeout(this.hoverDebounceTimer);
     }
+
+    // 延迟显示，避免快速滑过时的闪烁
+    this.hoverDebounceTimer = window.setTimeout(async () => {
+      try {
+        const uri = `mdx://${provider.key}/${id}`;
+      const preview = await getHoverPreview(uri);
+
+        if (!preview) return;
+
+        const card = this.getOrCreateHoverCard();
+
+        card.innerHTML = `
+          <div class="mdx-mention-hover-card__header" style="padding: 8px 12px; background: #f5f5f5; border-bottom: 1px solid #eee; font-weight: 600;">
+            ${preview.icon || ''} ${preview.title}
+          </div>
+          <div class="mdx-mention-hover-card__content" style="padding: 12px;">
+            ${preview.contentHTML}
+          </div>
+        `;
+
+        const rect = element.getBoundingClientRect();
+
+        // 计算位置，避免溢出
+        let top = rect.bottom + 5;
+        const cardHeight = card.offsetHeight || 200;
+        
+        if (top + cardHeight > window.innerHeight) {
+          top = rect.top - cardHeight - 5;
+        }
+
+        // 确保不超出左右边界
+        let left = rect.left;
+        const cardWidth = card.offsetWidth || 320;
+        
+        if (left + cardWidth > window.innerWidth) {
+          left = window.innerWidth - cardWidth - 10;
+        }
+        if (left < 10) {
+          left = 10;
+        }
+
+        card.style.left = `${left}px`;
+        card.style.top = `${top}px`;
+        card.style.display = 'block';
+      } catch (error) {
+        console.error('[MentionPlugin] Failed to load hover preview:', error);
+      }
+    }, 150); // 150ms 防抖延迟
   }
 
   /**
    * 隐藏悬浮预览
    */
   private hideHoverPreview(): void {
+    // 清除防抖定时器
+    if (this.hoverDebounceTimer) {
+      clearTimeout(this.hoverDebounceTimer);
+      this.hoverDebounceTimer = null;
+    }
+    
     if (this.hoverCard) {
       this.hoverCard.style.display = 'none';
     }
   }
 
   /**
-   * 处理内容嵌入：查找并填充所有由 Marked Renderer 生成的占位符
+   * [优化] 处理内容嵌入 - 使用并发限制
    */
   private async processTransclusions(element: HTMLElement): Promise<void> {
     if (!this.options.enableTransclusion) return;
@@ -344,65 +389,56 @@ export class MentionPlugin implements MDxPlugin {
       '.mdx-transclusion:not([data-transclusion-processed])'
     );
 
-    for (const placeholder of Array.from(placeholders)) {
+    if (placeholders.length === 0) return;
+
+    // 并发限制
+    const concurrencyLimit = 3;
+    const queue = Array.from(placeholders);
+    
+    const processItem = async (placeholder: HTMLElement) => {
       placeholder.setAttribute('data-transclusion-processed', 'true');
 
       const providerKey = placeholder.dataset.providerKey;
       const id = placeholder.dataset.id;
-      if (!providerKey || !id) continue;
+      if (!providerKey || !id) return;
 
-      // 查找对应的 Provider
-      const provider = this.options.providers.find((p) => p.key === providerKey);
-      if (!provider?.getFullContent) continue;
+      const provider = this.providerMap.get(providerKey);
+      if (!provider?.getFullContent) return;
 
       try {
         const content = await provider.getFullContent(id);
         placeholder.innerHTML = content;
         placeholder.classList.add('mdx-transclusion--loaded');
 
-        // 递归处理：嵌入的内容里可能还有 Mention
+        // 递归处理
         this.bindMentionInteractions(placeholder);
         await this.processTransclusions(placeholder);
       } catch (error) {
-        console.error(`[MentionPlugin] Failed to process transclusion for ${providerKey}:${id}:`, error);
+        console.error(`[MentionPlugin] Transclusion failed for ${providerKey}:${id}:`, error);
         placeholder.textContent = 'Failed to load content';
         placeholder.classList.add('mdx-transclusion--error');
       }
+    };
+
+    // 分批并发处理
+    for (let i = 0; i < queue.length; i += concurrencyLimit) {
+      const batch = queue.slice(i, i + concurrencyLimit);
+      await Promise.all(batch.map(processItem));
     }
   }
 
   /**
-   * 在指定元素范围内绑定提及的交互事件（悬浮、点击）
+   * [优化] 绑定交互事件 - 使用事件委托
    */
   private bindMentionInteractions(element: HTMLElement): void {
-    if (this.options.enableHoverPreview) {
-      const mentionLinks = element.querySelectorAll<HTMLElement>('.mdx-mention');
-      mentionLinks.forEach((link) => {
-        if (link.dataset.eventsBound) return;
-        link.dataset.eventsBound = 'true';
-
-        const providerKey = link.dataset.provider;
-        const id = link.dataset.id;
-        const provider = this.options.providers.find((p) => p.key === providerKey);
-
-        if (provider && id) {
-          link.addEventListener('mouseenter', () => {
-            this.showHoverPreview(link, provider, id);
-          });
-          link.addEventListener('mouseleave', () => {
-            this.hideHoverPreview();
-          });
-        }
-      });
-    }
-
-    if (this.options.enableClickHandler && !element.dataset.clickListenerBound) {
-      element.dataset.clickListenerBound = 'true';
-      element.addEventListener('click', (e) => {
+    // 使用事件委托处理点击
+    if (this.options.enableClickHandler && !element.dataset.mentionClickBound) {
+      element.dataset.mentionClickBound = 'true';
+      
+      const clickHandler = (e: Event) => {
         const target = (e.target as HTMLElement).closest<HTMLElement>('.mdx-mention');
         if (!target) return;
 
-        // 阻止默认链接跳转，改用回调
         e.preventDefault();
         const providerKey = target.dataset.provider;
         const id = target.dataset.id;
@@ -410,6 +446,46 @@ export class MentionPlugin implements MDxPlugin {
         if (providerKey && id) {
           this.options.onMentionClick(providerKey, id);
         }
+      };
+      
+      element.addEventListener('click', clickHandler);
+      this.cleanupFns.push(() => {
+        element.removeEventListener('click', clickHandler);
+      });
+    }
+
+    // 悬浮预览使用事件委托
+    if (this.options.enableHoverPreview && !element.dataset.mentionHoverBound) {
+      element.dataset.mentionHoverBound = 'true';
+      
+      const mouseenterHandler = (e: Event) => {
+        const target = (e.target as HTMLElement).closest<HTMLElement>('.mdx-mention');
+        if (!target) return;
+
+        const providerKey = target.dataset.provider;
+        const id = target.dataset.id;
+        
+        if (providerKey && id) {
+          const provider = this.providerMap.get(providerKey);
+          if (provider) {
+            this.showHoverPreview(target, provider, id);
+          }
+        }
+      };
+      
+      const mouseleaveHandler = (e: Event) => {
+        const target = (e.target as HTMLElement).closest<HTMLElement>('.mdx-mention');
+        if (target) {
+          this.hideHoverPreview();
+        }
+      };
+      
+      element.addEventListener('mouseenter', mouseenterHandler, true);
+      element.addEventListener('mouseleave', mouseleaveHandler, true);
+      
+      this.cleanupFns.push(() => {
+        element.removeEventListener('mouseenter', mouseenterHandler, true);
+        element.removeEventListener('mouseleave', mouseleaveHandler, true);
       });
     }
   }
@@ -430,6 +506,12 @@ export class MentionPlugin implements MDxPlugin {
   }
 
   destroy(): void {
+    // 清除防抖定时器
+    if (this.hoverDebounceTimer) {
+      clearTimeout(this.hoverDebounceTimer);
+      this.hoverDebounceTimer = null;
+    }
+    
     this.cleanupFns.forEach((fn) => fn());
     this.cleanupFns = [];
 
@@ -437,5 +519,7 @@ export class MentionPlugin implements MDxPlugin {
       this.hoverCard.remove();
       this.hoverCard = null;
     }
+    
+    this.providerMap.clear();
   }
 }

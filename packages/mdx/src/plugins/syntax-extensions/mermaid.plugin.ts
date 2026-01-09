@@ -77,9 +77,19 @@ class MermaidManager {
   }
 
   /**
-   * 注销实例
+   * [修复] 注销实例时清理该实例的队列和定时器
    */
-  unregisterInstance(): void {
+  unregisterInstance(instanceId: string): void {
+    // 清理该实例的渲染队列
+    this.renderQueues.delete(instanceId);
+    
+    // 清理该实例的定时器
+    const timer = this.renderTimers.get(instanceId);
+    if (timer) {
+      clearTimeout(timer);
+      this.renderTimers.delete(instanceId);
+    }
+    
     this.instanceCount--;
     
     if (this.instanceCount === 0) {
@@ -159,12 +169,19 @@ class MermaidManager {
       if (window.mermaid?.run) {
         const elementsArray = Array.from(queue);
         
+        // [优化] 检查元素是否仍在 DOM 中
+        const validElements = elementsArray.filter(el => document.contains(el));
+        if (validElements.length === 0) {
+          queue.clear();
+          return;
+        }
+        
         const uniqueAttr = `data-mermaid-instance-${instanceId}`;
-        elementsArray.forEach((el, i) => {
+        validElements.forEach((el, i) => {
           (el as HTMLElement).setAttribute(uniqueAttr, String(i));
         });
 
-        const selector = elementsArray
+        const selector = validElements
           .map((_, i) => `[${uniqueAttr}="${i}"]`)
           .join(',');
         
@@ -172,7 +189,7 @@ class MermaidManager {
         
         await window.mermaid.run({ nodes: nodeList });
 
-        elementsArray.forEach(el => {
+        validElements.forEach(el => {
           (el as HTMLElement).removeAttribute(uniqueAttr);
         });
       }
@@ -263,6 +280,6 @@ export class MermaidPlugin implements MDxPlugin {
   destroy(): void {
     this.cleanupFns.forEach(fn => fn());
     this.cleanupFns = [];
-    this.manager.unregisterInstance();
+    this.manager.unregisterInstance(this.instanceId);
   }
 }

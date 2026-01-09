@@ -98,14 +98,7 @@ export interface ILLMSessionEngine extends IBaseSessionEngine {
     
     /** 获取 Manifest */
     getManifest(nodeId: string): Promise<ChatManifest>;
-
-    /** ✅ 新增：读取 UI 状态 */
-    getUIState(nodeId: string): Promise<ChatManifest['ui_state'] | null>;
     
-    /** ✅ 新增：更新 UI 状态 */
-    updateUIState(nodeId: string, updates: Partial<NonNullable<ChatManifest['ui_state']>>): Promise<void>;
-
-    /** 追加消息 */
     appendMessage(
         nodeId: string,
         sessionId: string,
@@ -145,7 +138,8 @@ export interface ILLMSessionEngine extends IBaseSessionEngine {
      * 用于 Engine 在运行时解析 Markdown 引用
      */
     readSessionAsset(sessionId: string, assetPath: string): Promise<Blob | null>;
+    
+    // ✅ 新增：UI 状态管理
+    getUIState(nodeId: string): Promise<ChatManifest['ui_state'] | null>;
+    updateUIState(nodeId: string, updates: Partial<NonNullable<ChatManifest['ui_state']>>): Promise<void>;
 }
-
-// 为了向后兼容，导出别名
-//export type { ILLMSessionEngine as ISessionEngine };

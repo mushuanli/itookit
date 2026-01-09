@@ -2,7 +2,7 @@
 
 import type { MDxPlugin, PluginContext } from '../../core/plugin';
 import { Marked } from 'marked';
-
+import {escapeHTML} from '@itookit/common';
 /**
  * 可折叠块插件配置选项
  */
@@ -25,31 +25,27 @@ export interface FoldablePluginOptions {
    */
   enableTaskCheckbox?: boolean;
 }
-
 /**
- * HTML 转义函数
+ * [优化] 上下文状态接口 - 只存储位置信息，不存储完整内容
  */
-function escapeHTML(text: string): string {
-  const map: Record<string, string> = {
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#039;',
-  };
-  return text.replace(/[&<>"']/g, char => map[char]);
+interface FoldableBlockRef {
+  checkmark?: string;
+  label: string;
+  /** 原始内容在 markdown 中的起始位置 */
+  contentStart: number;
+  /** 原始内容在 markdown 中的结束位置 */
+  contentEnd: number;
 }
+
 
 /**
  * 上下文状态接口
  */
 interface ContextState {
-  storedBlocks: Map<string, {
-    checkmark?: string;
-    label: string;
-    rawContent: string;
-  }>;
+  storedBlocks: Map<string, FoldableBlockRef>;
   placeholderId: number;
+  /** 保存原始 markdown 用于后续提取内容 */
+  originalMarkdown: string;
 }
 
 /**
@@ -93,6 +89,7 @@ export class FoldablePlugin implements MDxPlugin {
       this.contextStates.set(context, {
         storedBlocks: new Map(),
         placeholderId: 0,
+        originalMarkdown: '',
       });
     }
     return this.contextStates.get(context)!;
@@ -125,6 +122,7 @@ export class FoldablePlugin implements MDxPlugin {
       
       state.storedBlocks.clear();
       state.placeholderId = 0;
+      state.originalMarkdown = markdown; // 保存原始内容
 
       // 正则表达式匹配折叠块语法
       // ^::> 开头
@@ -135,13 +133,19 @@ export class FoldablePlugin implements MDxPlugin {
 
       const processedMarkdown = markdown.replace(
         foldableRegex,
-        (_match, checkmark, label, rawContent) => {
+        (match, checkmark, label, _rawContent, offset) => {
           const placeholder = this.generatePlaceholder(state);
+          
+          // [优化] 只存储位置信息
+          const labelEndPos = match.indexOf('\n');
+          const contentStart = offset + (labelEndPos >= 0 ? labelEndPos + 1 : match.length);
+          const contentEnd = offset + match.length;
           
           state.storedBlocks.set(placeholder, {
             checkmark: checkmark || undefined,
             label: label.trim(),
-            rawContent: rawContent,
+            contentStart,
+            contentEnd,
           });
 
           return `\n\n${placeholder}\n\n`;
@@ -169,14 +173,16 @@ export class FoldablePlugin implements MDxPlugin {
       const innerMarked = new Marked();
       let processedHtml = html;
 
-      for (const [placeholder, blockData] of state.storedBlocks) {
-        const dedentedContent = this.dedentContent(blockData.rawContent);
+      for (const [placeholder, blockRef] of state.storedBlocks) {
+        // [优化] 从原始 markdown 中按需提取内容
+        const rawContent = state.originalMarkdown.substring(blockRef.contentStart, blockRef.contentEnd);
+        const dedentedContent = this.dedentContent(rawContent);
         const innerHtml = innerMarked.parse(dedentedContent) as string;
 
-        let summaryContent = escapeHTML(blockData.label);
+        let summaryContent = escapeHTML(blockRef.label);
         
-        if (this.options.enableTaskCheckbox && blockData.checkmark) {
-          const isChecked = blockData.checkmark.toLowerCase() === 'x';
+        if (this.options.enableTaskCheckbox && blockRef.checkmark) {
+          const isChecked = blockRef.checkmark.toLowerCase() === 'x';
           const checkboxHtml = `<input type="checkbox" class="${this.options.className}__task-checkbox" ${isChecked ? 'checked' : ''}>`;
           summaryContent = `${checkboxHtml} ${summaryContent}`;
         }
@@ -196,6 +202,9 @@ export class FoldablePlugin implements MDxPlugin {
         
         processedHtml = processedHtml.replace(placeholderRegex, detailsHtml);
       }
+
+      // [优化] 清理原始内容引用，允许 GC
+      state.originalMarkdown = '';
 
       return {
         html: processedHtml,
