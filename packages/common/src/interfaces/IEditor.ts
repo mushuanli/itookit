@@ -28,6 +28,18 @@ export interface Heading {
 }
 
 /**
+ * 导航选项
+ */
+export interface NavigateToOptions {
+    /** 是否使用平滑滚动动画 */
+    smooth?: boolean;
+    /** 是否高亮目标元素 */
+    highlight?: boolean;
+    /** 高亮持续时间（毫秒） */
+    highlightDuration?: number;
+}
+
+/**
  * 定义编辑器宿主环境提供的标准能力
  * 任何接管编辑器的容器（如 MemoryManager）都应提供这些能力
  */
@@ -190,7 +202,17 @@ export abstract class IEditor {
         return null;
     }
 
-    abstract navigateTo(target: { elementId: string }, options?: { smooth?: boolean }): Promise<void>;
+    /**
+     * ✨ [重构] 导航到文档内的指定元素
+     * 
+     * 支持两种模式：
+     * - render 模式：通过 DOM querySelector 查找并滚动到目标元素
+     * - edit 模式：通过解析 Markdown 源码定位标题位置，使用 CodeMirror 滚动并高亮
+     * 
+     * @param target - 导航目标，包含 elementId（如 "heading-introduction"）
+     * @param options - 导航选项
+     */
+    abstract navigateTo(target: { elementId: string }, options?: NavigateToOptions): Promise<void>;
 
     // --- 搜索 ---
     abstract search(query: string): Promise<UnifiedSearchResult[]>;
