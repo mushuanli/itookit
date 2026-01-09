@@ -42,7 +42,16 @@ export interface HistoryViewOptions {
     nodeId?: string;
     ownerNodeId?: string;
     sessionEngine?: ISessionEngine;
+    // ✅ 新增：状态持久化回调
+    onCollapseStateChange?: (states: CollapseStateMap) => void;
+    initialCollapseStates?: CollapseStateMap;
+
+    // ✅ 新增：是否在输出结束后强制滚动
+    autoScrollOnFinish?: boolean; // 默认 false
 }
+
+// ✅ 新增：折叠状态类型
+export type CollapseStateMap = Record<string, boolean>; // sessionId -> isCollapsed
 
 export class HistoryView {
     private nodeMap = new Map<string, HTMLElement>();
@@ -63,6 +72,16 @@ export class HistoryView {
     private previewUpdateTimers = new Map<string, number>();
     private readonly PREVIEW_UPDATE_INTERVAL = 200;
 
+    // ✅ 新增：折叠状态存储
+    private collapseStates: CollapseStateMap = {};
+    private onCollapseStateChange?: (states: CollapseStateMap) => void;
+
+    // ✅ 新增：配置选项
+    private autoScrollOnFinish: boolean = false;
+    
+    // ✅ 新增：用户是否正在查看历史内容
+    private userIsScrolledUp: boolean = false;
+
     private onContentChange?: (id: string, content: string, type: 'user' | 'node') => void;
     private onNodeAction?: NodeActionCallback;
     
@@ -82,12 +101,13 @@ export class HistoryView {
         container: HTMLElement,
         onContentChange?: (id: string, content: string, type: 'user' | 'node') => void,
         onNodeAction?: NodeActionCallback,
-        options?: HistoryViewOptions  // ✅ 新增参数
+        options?: HistoryViewOptions
     ) {
         this.container = container;
         this.onContentChange = onContentChange;
         this.onNodeAction = onNodeAction;
         this.contextOptions = options || {};
+        this.autoScrollOnFinish = options?.autoScrollOnFinish ?? false;
 
         // ✅ 优化：使用 passive 监听器
         this.container.addEventListener('scroll', this.handleScroll.bind(this), { passive: true });
@@ -102,6 +122,11 @@ export class HistoryView {
             });
         });
         this.resizeObserver.observe(this.container);
+
+        if (options?.initialCollapseStates) {
+            this.collapseStates = { ...options.initialCollapseStates };
+        }
+        this.onCollapseStateChange = options?.onCollapseStateChange;
     }
 
     renderFull(sessions: SessionGroup[]) {
@@ -111,26 +136,33 @@ export class HistoryView {
             return;
         }
 
-        // --- 智能折叠策略 ---
-        // 规则：找到最后一条 User 消息，它以及它之后的所有消息保持展开 (Expanded)。
-        // 之前的所有消息默认折叠 (Collapsed)。
+        // ✅ 修改：优先使用保存的状态，否则使用智能折叠策略
+        const hasStoredStates = Object.keys(this.collapseStates).length > 0;
+        
         let lastUserIndex = -1;
-        for (let i = sessions.length - 1; i >= 0; i--) {
-            if (sessions[i].role === 'user') {
-                lastUserIndex = i;
-                break;
+        if (!hasStoredStates) {
+            // 智能折叠策略（仅首次加载时使用）
+            for (let i = sessions.length - 1; i >= 0; i--) {
+                if (sessions[i].role === 'user') {
+                    lastUserIndex = i;
+                    break;
+                }
+            }
+            if (lastUserIndex === -1 && sessions.length > 0) {
+                lastUserIndex = sessions.length - 1;
             }
         }
 
-        // 如果没有 user 消息（全是 agent?），则默认展开最后一条
-        if (lastUserIndex === -1 && sessions.length > 0) {
-            lastUserIndex = sessions.length - 1;
-        }
-
         sessions.forEach((session, index) => {
-            // 如果 index < lastUserIndex，则折叠 (true)
-            // 否则展开 (false)
-            const shouldCollapse = index < lastUserIndex;
+            // ✅ 优先使用保存的状态
+            let shouldCollapse: boolean;
+            if (hasStoredStates && this.collapseStates[session.id] !== undefined) {
+                shouldCollapse = this.collapseStates[session.id];
+            } else {
+                shouldCollapse = index < lastUserIndex;
+                // 初始化状态
+                this.collapseStates[session.id] = shouldCollapse;
+            }
 
             this.appendSessionGroup(session, shouldCollapse);
             
@@ -196,7 +228,14 @@ export class HistoryView {
         const { scrollTop, scrollHeight, clientHeight } = this.container;
         const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
         
-        this.shouldAutoScroll = distanceFromBottom < this.scrollThreshold;
+        // ✅ 判断用户是否正在查看历史内容（距离底部超过阈值）
+        this.userIsScrolledUp = distanceFromBottom > this.scrollThreshold;
+        
+        // 非流式模式下才更新自动滚动状态
+        if (!this.isStreamingMode) {
+            if (Date.now() < this.scrollLockUntil) return;
+            this.shouldAutoScroll = distanceFromBottom < this.scrollThreshold;
+        }
     }
 
     /**
@@ -268,8 +307,13 @@ export class HistoryView {
         // 移除 CSS 类
         this.container.classList.remove('llm-ui-history--streaming');
         
-        // 最终滚动确保到底部
-        this.scrollToBottom(true);
+        // ✅ 关键修改：只有当用户没有主动滚动上去时，才滚动到底部
+        if (!this.userIsScrolledUp || this.autoScrollOnFinish) {
+            this.scrollToBottom(true);
+        } else {
+            // 用户正在查看历史，显示一个提示
+            this.showNewContentIndicator();
+        }
         
         // 清理所有流式状态类
         this.container.querySelectorAll('.llm-ui-node--streaming').forEach(el => {
@@ -361,7 +405,7 @@ export class HistoryView {
         if (collapseBtn) {
             collapseBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
-                this.toggleCollapse(bubbleEl, e.currentTarget as HTMLElement);
+                this.toggleCollapse(bubbleEl, e.currentTarget as HTMLElement, group.id);
             });
         }
 
@@ -507,7 +551,7 @@ export class HistoryView {
         return count;
     }
 
-    private toggleCollapse(element: HTMLElement, btn: HTMLElement) {
+    private toggleCollapse(element: HTMLElement, btn: HTMLElement, sessionId?: string) {
         element.classList.toggle('is-collapsed');
         const isCollapsed = element.classList.contains('is-collapsed');
         
@@ -517,6 +561,22 @@ export class HistoryView {
                 ? '<polyline points="6 9 12 15 18 9"></polyline>'
                 : '<polyline points="18 15 12 9 6 15"></polyline>';
         }
+
+        // ✅ 新增：保存状态并通知外部
+        if (sessionId) {
+            this.collapseStates[sessionId] = isCollapsed;
+            this.onCollapseStateChange?.(this.collapseStates);
+        }
+    }
+
+    // ✅ 新增：获取当前折叠状态（用于外部保存）
+    public getCollapseStates(): CollapseStateMap {
+        return { ...this.collapseStates };
+    }
+
+    // ✅ 新增：设置折叠状态（用于恢复）
+    public setCollapseStates(states: CollapseStateMap): void {
+        this.collapseStates = { ...states };
     }
 
     private renderExecutionTree(node: ExecutionNode, isCollapsed: boolean = false) {
@@ -958,6 +1018,49 @@ export class HistoryView {
         return null;
     }
 
+    /**
+     * ✅ 新增：显示新内容提示器
+     */
+    private newContentIndicator: HTMLElement | null = null;
+    
+    private showNewContentIndicator(): void {
+        // 避免重复创建
+        if (this.newContentIndicator) return;
+        
+        this.newContentIndicator = document.createElement('div');
+        this.newContentIndicator.className = 'llm-ui-new-content-indicator';
+        this.newContentIndicator.innerHTML = `
+            <button class="llm-ui-new-content-btn">
+                <span>⬇️ New response available</span>
+            </button>
+        `;
+        
+        this.newContentIndicator.querySelector('button')?.addEventListener('click', () => {
+            this.scrollToBottom(true);
+            this.hideNewContentIndicator();
+        });
+        
+        this.container.appendChild(this.newContentIndicator);
+        
+        // 自动隐藏（如果用户滚动到底部）
+        const checkScroll = () => {
+            const { scrollTop, scrollHeight, clientHeight } = this.container;
+            if (scrollHeight - scrollTop - clientHeight < this.scrollThreshold) {
+                this.hideNewContentIndicator();
+            }
+        };
+        
+        this.container.addEventListener('scroll', checkScroll, { once: true });
+    }
+
+    private hideNewContentIndicator(): void {
+        if (this.newContentIndicator) {
+            this.newContentIndicator.remove();
+            this.newContentIndicator = null;
+        }
+    }
+
+
     processEvent(event: OrchestratorEvent) {
         switch (event.type) {
             case 'session_start':
@@ -972,6 +1075,10 @@ export class HistoryView {
             case 'node_update':
                 if (event.payload.chunk !== undefined && event.payload.field !== undefined) {
                     this.updateNodeContent(event.payload.nodeId, event.payload.chunk, event.payload.field);
+                    // ✅ 流式更新时：只有用户在底部才滚动
+                    if (!this.userIsScrolledUp) {
+                        this.scrollToBottom(false);
+                    }
                 }
                 break;
             case 'node_status':
