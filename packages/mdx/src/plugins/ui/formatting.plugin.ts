@@ -20,6 +20,70 @@ export interface FormattingPluginOptions {
   customIcons?: Record<string, string>;
 }
 
+const DEFAULT_ICONS: Readonly<Record<string, string>> = {
+  bold: '<strong>B</strong>',
+  italic: '<em>I</em>',
+  strikethrough: '<s>S</s>',
+  inlineCode: '<code>`</code>',
+  highlight: '<mark>H</mark>',
+  heading: '<span>H#</span>',
+  unorderedList: '<span>•</span>',
+  orderedList: '<span>1.</span>',
+  taskList: '<span>☐</span>',
+  blockquote: '<span>❝</span>',
+  codeBlock: '<span>{ }</span>',
+  link: '<span>🔗</span>',
+  image: '<span>🖼</span>',
+  table: '<span>⊞</span>',
+  horizontalRule: '<span>―</span>',
+};
+
+const COMMAND_MAP: Readonly<Record<string, { name: string; fn: any }>> = {
+  bold: { name: 'applyBold', fn: commands.applyBold },
+  italic: { name: 'applyItalic', fn: commands.applyItalic },
+  strikethrough: { name: 'applyStrikethrough', fn: commands.applyStrikethrough },
+  inlineCode: { name: 'applyInlineCode', fn: commands.applyInlineCode },
+  highlight: { name: 'applyHighlight', fn: commands.applyHighlight },
+  heading: { name: 'toggleHeading', fn: commands.toggleHeading },
+  unorderedList: { name: 'toggleUnorderedList', fn: commands.toggleUnorderedList },
+  orderedList: { name: 'toggleOrderedList', fn: commands.toggleOrderedList },
+  taskList: { name: 'toggleTaskList', fn: commands.toggleTaskList },
+  blockquote: { name: 'toggleBlockquote', fn: commands.toggleBlockquote },
+  codeBlock: { name: 'applyCodeBlock', fn: commands.applyCodeBlock },
+  link: { name: 'applyLink', fn: commands.applyLink },
+  image: { name: 'insertImage', fn: commands.insertImage },
+  table: { name: 'insertTable', fn: commands.insertTable },
+  horizontalRule: { name: 'insertHorizontalRule', fn: commands.insertHorizontalRule },
+};
+
+const TITLE_MAP: Readonly<Record<string, string>> = {
+  bold: '加粗',
+  italic: '斜体',
+  strikethrough: '删除线',
+  inlineCode: '行内代码',
+  highlight: '高亮',
+  heading: '标题',
+  unorderedList: '无序列表',
+  orderedList: '有序列表',
+  taskList: '任务列表',
+  blockquote: '引用',
+  codeBlock: '代码块',
+  link: '链接',
+  image: '图片',
+  table: '表格',
+  horizontalRule: '分割线',
+};
+
+const DEFAULT_FORMATS: readonly string[] = [
+  'heading', 'bold', 'italic', 'strikethrough', 'highlight', 'inlineCode',
+  'separator',
+  'unorderedList', 'orderedList', 'taskList',
+  'separator',
+  'blockquote', 'codeBlock', 'horizontalRule',
+  'separator',
+  'link', 'image', 'table',
+];
+
 /**
  * 格式化插件
  */
@@ -43,19 +107,22 @@ export class FormattingPlugin implements MDxPlugin {
     const { registerCommand, registerToolbarButton } = context;
     const formats = this.getEnabledFormats();
 
-    formats.forEach(format => {
+    // [优化] 使用 for 循环替代 forEach，避免闭包开销
+    for (let i = 0; i < formats.length; i++) {
+      const format = formats[i];
+      
       if (format === 'separator') {
         registerToolbarButton({
-          id: `sep-${Date.now()}-${Math.random()}`,
+          id: `sep-${i}`,
           type: 'separator'
         });
-        return;
+        continue;
       }
 
-      const commandDef = this.getCommandDefinition(format);
+      const commandDef = COMMAND_MAP[format];
       if (commandDef) {
-    registerCommand(commandDef.name, (view: any) => {
-      return commandDef.fn(view);
+        registerCommand(commandDef.name, (view: any) => {
+          return commandDef.fn(view);
         });
       }
 
@@ -63,7 +130,7 @@ export class FormattingPlugin implements MDxPlugin {
       if (buttonConfig) {
         registerToolbarButton(buttonConfig);
       }
-    });
+    }
   }
 
   /**
@@ -71,116 +138,28 @@ export class FormattingPlugin implements MDxPlugin {
    */
   private getEnabledFormats(): string[] {
     if (this.options.enabledFormats === 'all') {
-      return [
-        'heading', 'bold', 'italic', 'strikethrough', 'highlight', 'inlineCode',
-        'separator',
-        'unorderedList', 'orderedList', 'taskList',
-        'separator',
-        'blockquote', 'codeBlock', 'horizontalRule',
-        'separator',
-        'link', 'image', 'table',
-      ];
+      return [...DEFAULT_FORMATS];
     }
     return this.options.enabledFormats || [];
   }
 
-  /**
-   * 获取命令定义
-   */
-  private getCommandDefinition(format: string): { name: string; fn: any } | null {
-    const commandMap: Record<string, { name: string; fn: any }> = {
-      bold: { name: 'applyBold', fn: commands.applyBold },
-      italic: { name: 'applyItalic', fn: commands.applyItalic },
-      strikethrough: { name: 'applyStrikethrough', fn: commands.applyStrikethrough },
-      inlineCode: { name: 'applyInlineCode', fn: commands.applyInlineCode },
-      highlight: { name: 'applyHighlight', fn: commands.applyHighlight },
-      heading: { name: 'toggleHeading', fn: commands.toggleHeading },
-      unorderedList: { name: 'toggleUnorderedList', fn: commands.toggleUnorderedList },
-      orderedList: { name: 'toggleOrderedList', fn: commands.toggleOrderedList },
-      taskList: { name: 'toggleTaskList', fn: commands.toggleTaskList },
-      blockquote: { name: 'toggleBlockquote', fn: commands.toggleBlockquote },
-      codeBlock: { name: 'applyCodeBlock', fn: commands.applyCodeBlock },
-      link: { name: 'applyLink', fn: commands.applyLink },
-      image: { name: 'insertImage', fn: commands.insertImage },
-      table: { name: 'insertTable', fn: commands.insertTable },
-      horizontalRule: { name: 'insertHorizontalRule', fn: commands.insertHorizontalRule },
-    };
-
-    return commandMap[format] || null;
-  }
-
-  /**
-   * 获取按钮配置
-   */
   private getButtonConfig(format: string): any {
-    const defaultIcons: Record<string, string> = {
-      bold: '<strong>B</strong>',
-      italic: '<em>I</em>',
-      strikethrough: '<s>S</s>',
-      inlineCode: '<code>`</code>',
-      highlight: '<mark>H</mark>',
-      heading: '<span>H#</span>',
-      unorderedList: '<span>•</span>',
-      orderedList: '<span>1.</span>',
-      taskList: '<span>☐</span>',
-      blockquote: '<span>❝</span>',
-      codeBlock: '<span>{ }</span>',
-      link: '<span>🔗</span>',
-      image: '<span>🖼</span>',
-      table: '<span>⊞</span>',
-      horizontalRule: '<span>―</span>',
-    };
+    const icon = this.options.customIcons?.[format] || DEFAULT_ICONS[format];
+    const commandDef = COMMAND_MAP[format];
+    const title = TITLE_MAP[format];
 
-    const commandMap: Record<string, string> = {
-      bold: 'applyBold',
-      italic: 'applyItalic',
-      strikethrough: 'applyStrikethrough',
-      inlineCode: 'applyInlineCode',
-      highlight: 'applyHighlight',
-      heading: 'toggleHeading',
-      unorderedList: 'toggleUnorderedList',
-      orderedList: 'toggleOrderedList',
-      taskList: 'toggleTaskList',
-      blockquote: 'toggleBlockquote',
-      codeBlock: 'applyCodeBlock',
-      link: 'applyLink',
-      image: 'insertImage',
-      table: 'insertTable',
-    };
-
-    const titleMap: Record<string, string> = {
-      bold: '加粗',
-      italic: '斜体',
-      strikethrough: '删除线',
-      inlineCode: '行内代码',
-      highlight: '高亮',
-      heading: '标题',
-      unorderedList: '无序列表',
-      orderedList: '有序列表',
-      taskList: '任务列表',
-      blockquote: '引用',
-      codeBlock: '代码块',
-      link: '链接',
-      image: '图片',
-      table: '表格',
-    };
-
-    const icon = this.options.customIcons?.[format] || defaultIcons[format];
-    const command = commandMap[format];
-    const title = titleMap[format];
-
-    if (!icon || !command) return null;
+    if (!icon || !commandDef) return null;
 
     return {
       id: `format-${format}`,
       title,
       icon,
-      command,
+      command: commandDef.name,
       location: 'main',
     };
   }
 
   destroy(): void {
-    // 清理工作（如果需要）
+    // 无需清理
   }
 }

@@ -302,22 +302,38 @@ export class TaskListPlugin implements MDxPlugin {
    * 更新 Markdown 源码
    */
   private updateMarkdown(loc: TaskLocation, isChecked: boolean): string | null {
-    const lines = this.currentMarkdown.split('\n');
-    const lineIndex = loc.lineNumber - 1;
-
-    if (lineIndex < 0 || lineIndex >= lines.length) {
-      console.warn('[TaskListPlugin] Line number out of bounds:', lineIndex);
+    const markdown = this.currentMarkdown;
+    const newCheckmark = isChecked ? '[x]' : '[ ]';
+    
+    // 计算行的起始和结束位置
+    let lineStart = 0;
+    let lineEnd = 0;
+    let currentLine = 1;
+    
+    for (let i = 0; i < markdown.length; i++) {
+      if (currentLine === loc.lineNumber) {
+        lineStart = i;
+        lineEnd = markdown.indexOf('\n', i);
+        if (lineEnd === -1) lineEnd = markdown.length;
+        break;
+      }
+      if (markdown[i] === '\n') {
+        currentLine++;
+      }
+    }
+    
+    if (currentLine !== loc.lineNumber) {
+      console.warn('[TaskListPlugin] Line number out of bounds:', loc.lineNumber);
       return null;
     }
 
-    let line = lines[lineIndex];
-    const newCheckmark = isChecked ? '[x]' : '[ ]';
+    const line = markdown.substring(lineStart, lineEnd);
+    let newLine: string;
 
     if (loc.isTableTask) {
       // 表格任务：精确替换行内第 N 个任务标记
       let currentIndex = 0;
-      // 使用正则替换回调，只替换对应索引的那一个
-      line = line.replace(/\[[ xX]\]/gi, (match) => {
+      newLine = line.replace(/\[[ xX]\]/gi, (match) => {
         if (currentIndex === loc.indexInLine) {
           currentIndex++;
           return newCheckmark;
@@ -327,11 +343,11 @@ export class TaskListPlugin implements MDxPlugin {
       });
     } else {
       // 标准列表任务：替换行首的标记
-      line = line.replace(/^(\s*[-*+]\s+)\[[ xX]\]/, `$1${newCheckmark}`);
+      newLine = line.replace(/^(\s*[-*+]\s+)\[[ xX]\]/, `$1${newCheckmark}`);
     }
 
-    lines[lineIndex] = line;
-    return lines.join('\n');
+    // [优化] 直接拼接，避免 split/join
+    return markdown.substring(0, lineStart) + newLine + markdown.substring(lineEnd);
   }
 
   /**

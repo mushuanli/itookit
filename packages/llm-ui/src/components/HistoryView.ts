@@ -1,12 +1,12 @@
 // @file: llm-ui/components/HistoryView.ts
 
 import { NodeActionCallback } from '../core/types';
-import {OrchestratorEvent, SessionGroup, ExecutionNode, } from '@itookit/llm-engine';
+import { OrchestratorEvent, SessionGroup, ExecutionNode } from '@itookit/llm-engine';
 import { NodeRenderer } from './NodeRenderer';
 import { MDxController } from './mdx/MDxController';
 import { NodeTemplates } from './templates/NodeTemplates';
 import { LayoutTemplates } from './templates/LayoutTemplates';
-import { escapeHTML, Modal,ISessionEngine } from '@itookit/common';
+import { escapeHTML, Modal, ISessionEngine } from '@itookit/common';
 
 /**
  * 包装 common Modal 为 Promise 形式
@@ -37,21 +37,17 @@ async function showConfirmDialog(message: string): Promise<boolean> {
     });
 }
 
+// ✅ 新增：折叠状态类型
+export type CollapseStateMap = Record<string, boolean>;
+
 export interface HistoryViewOptions {
-    // ✅ 新增：编辑器上下文
     nodeId?: string;
     ownerNodeId?: string;
     sessionEngine?: ISessionEngine;
     // ✅ 新增：状态持久化回调
     onCollapseStateChange?: (states: CollapseStateMap) => void;
     initialCollapseStates?: CollapseStateMap;
-
-    // ✅ 新增：是否在输出结束后强制滚动
-    autoScrollOnFinish?: boolean; // 默认 false
 }
-
-// ✅ 新增：折叠状态类型
-export type CollapseStateMap = Record<string, boolean>; // sessionId -> isCollapsed
 
 export class HistoryView {
     private nodeMap = new Map<string, HTMLElement>();
@@ -59,7 +55,7 @@ export class HistoryView {
     private container: HTMLElement;
     
     private shouldAutoScroll = true;
-    private scrollThreshold = 150; // 增加阈值，容错率更高
+    private scrollThreshold = 150;
     private scrollFrameId: number | null = null;
     private resizeObserver: ResizeObserver;
     
@@ -68,34 +64,45 @@ export class HistoryView {
     private lastScrollHeight = 0;
     private scrollLockUntil = 0;
     
-    // ✅ 新增：预览更新节流
+    // ✅ 新增：用户是否正在查看历史内容
+    private userIsScrolledUp = false;
+    
+    // 预览更新节流
     private previewUpdateTimers = new Map<string, number>();
-    private readonly PREVIEW_UPDATE_INTERVAL = 200;
+
+    private onContentChange?: (id: string, content: string, type: 'user' | 'node') => void;
+    private onNodeAction?: NodeActionCallback;
+    
+    // 保存原始内容用于取消编辑
+    private originalContentMap = new Map<string, string>();
+    
+    // 编辑状态跟踪
+    private editingNodes = new Set<string>();
+
+    // 已渲染的 Session ID 集合（用于去重）
+    private renderedSessionIds = new Set<string>();
+
+    // 保存上下文
+    private contextOptions: HistoryViewOptions;
 
     // ✅ 新增：折叠状态存储
     private collapseStates: CollapseStateMap = {};
     private onCollapseStateChange?: (states: CollapseStateMap) => void;
 
-    // ✅ 新增：配置选项
-    private autoScrollOnFinish: boolean = false;
-    
-    // ✅ 新增：用户是否正在查看历史内容
-    private userIsScrolledUp: boolean = false;
+    // ✅ 新增：事件批量处理
+    private eventQueue: OrchestratorEvent[] = [];
+    private eventProcessTimer: number | null = null;
+    private readonly EVENT_BATCH_INTERVAL = 50;
 
-    private onContentChange?: (id: string, content: string, type: 'user' | 'node') => void;
-    private onNodeAction?: NodeActionCallback;
-    
-    // ✨ [新增] 保存原始内容用于取消编辑
-    private originalContentMap = new Map<string, string>();
-    
-    // ✨ [新增] 编辑状态跟踪
-    private editingNodes = new Set<string>();
+    // ✅ 新增：滚动节流
+    private scrollThrottleTimer: number | null = null;
+    private readonly SCROLL_THROTTLE = 100;
 
-    // ✅ 新增：已渲染的 Session ID 集合（用于去重）
-    private renderedSessionIds = new Set<string>();
+    // ✅ 新增：思考区域滚动节流
+    private thoughtScrollThrottled = false;
 
-    // ✅ 新增：保存上下文
-    private contextOptions: HistoryViewOptions;
+    // ✅ 新增：新内容提示器
+    private newContentIndicator: HTMLElement | null = null;
 
     constructor(
         container: HTMLElement,
@@ -107,12 +114,17 @@ export class HistoryView {
         this.onContentChange = onContentChange;
         this.onNodeAction = onNodeAction;
         this.contextOptions = options || {};
-        this.autoScrollOnFinish = options?.autoScrollOnFinish ?? false;
 
-        // ✅ 优化：使用 passive 监听器
+        // ✅ 恢复初始状态
+        if (options?.initialCollapseStates) {
+            this.collapseStates = { ...options.initialCollapseStates };
+        }
+        this.onCollapseStateChange = options?.onCollapseStateChange;
+
+        // 使用 passive 监听器
         this.container.addEventListener('scroll', this.handleScroll.bind(this), { passive: true });
 
-        // 2. 监听内容高度变化 (处理图片加载、MDX渲染导致的高度突变)
+        // 监听内容高度变化
         this.resizeObserver = new ResizeObserver(() => {
             if (this.scrollFrameId !== null) return;
             
@@ -122,11 +134,16 @@ export class HistoryView {
             });
         });
         this.resizeObserver.observe(this.container);
+    }
 
-        if (options?.initialCollapseStates) {
-            this.collapseStates = { ...options.initialCollapseStates };
-        }
-        this.onCollapseStateChange = options?.onCollapseStateChange;
+    // ✅ 新增：获取当前折叠状态
+    public getCollapseStates(): CollapseStateMap {
+        return { ...this.collapseStates };
+    }
+
+    // ✅ 新增：设置折叠状态
+    public setCollapseStates(states: CollapseStateMap): void {
+        this.collapseStates = { ...states };
     }
 
     renderFull(sessions: SessionGroup[]) {
@@ -141,7 +158,6 @@ export class HistoryView {
         
         let lastUserIndex = -1;
         if (!hasStoredStates) {
-            // 智能折叠策略（仅首次加载时使用）
             for (let i = sessions.length - 1; i >= 0; i--) {
                 if (sessions[i].role === 'user') {
                     lastUserIndex = i;
@@ -154,20 +170,17 @@ export class HistoryView {
         }
 
         sessions.forEach((session, index) => {
-            // ✅ 优先使用保存的状态
             let shouldCollapse: boolean;
             if (hasStoredStates && this.collapseStates[session.id] !== undefined) {
                 shouldCollapse = this.collapseStates[session.id];
             } else {
                 shouldCollapse = index < lastUserIndex;
-                // 初始化状态
                 this.collapseStates[session.id] = shouldCollapse;
             }
 
             this.appendSessionGroup(session, shouldCollapse);
             
             if (session.executionRoot) {
-                // Agent 执行树跟随 Session 的折叠状态
                 this.renderExecutionTree(session.executionRoot, shouldCollapse);
             }
         });
@@ -180,56 +193,52 @@ export class HistoryView {
     }
 
     renderError(error: Error) {
-    // 创建可关闭的错误横幅
-    const existingBanner = this.container.querySelector('.llm-ui-error-banner');
-    if (existingBanner) {
-        existingBanner.remove();
-    }
-    
-    const banner = document.createElement('div');
-    banner.className = 'llm-ui-error-banner';
-    banner.innerHTML = `
-        <div class="llm-ui-error-banner__content">
-            <span class="llm-ui-error-banner__icon">⚠️</span>
-            <span class="llm-ui-error-banner__message">${escapeHTML(error.message)}</span>
-            <button class="llm-ui-error-banner__close" title="Dismiss">×</button>
-        </div>
-    `;
-    
-    // 绑定关闭按钮
-    banner.querySelector('.llm-ui-error-banner__close')?.addEventListener('click', () => {
-        banner.remove();
-    });
-    
-    // 5秒后自动消失（但保留严重错误）
-    const isSerious = error.message.includes('401') || error.message.includes('API key');
-    if (!isSerious) {
-        setTimeout(() => banner.remove(), 5000);
-    }
-    
-    this.container.insertBefore(banner, this.container.firstChild);
-    this.scrollToBottom(true);
+        const existingBanner = this.container.querySelector('.llm-ui-error-banner');
+        if (existingBanner) {
+            existingBanner.remove();
+        }
+        
+        const banner = document.createElement('div');
+        banner.className = 'llm-ui-error-banner';
+        banner.innerHTML = `
+            <div class="llm-ui-error-banner__content">
+                <span class="llm-ui-error-banner__icon">⚠️</span>
+                <span class="llm-ui-error-banner__message">${escapeHTML(error.message)}</span>
+                <button class="llm-ui-error-banner__close" title="Dismiss">×</button>
+            </div>
+        `;
+        
+        banner.querySelector('.llm-ui-error-banner__close')?.addEventListener('click', () => {
+            banner.remove();
+        });
+        
+        const isSerious = error.message.includes('401') || error.message.includes('API key');
+        if (!isSerious) {
+            setTimeout(() => banner.remove(), 5000);
+        }
+        
+        this.container.insertBefore(banner, this.container.firstChild);
+        this.scrollToBottom(true);
     }
 
     // ================================================================
-    // ✅ 滚动控制（核心优化）
+    // 滚动控制
     // ================================================================
 
     /**
-     * 处理用户滚动
+     * 处理用户滚动 - 增强版
      */
     private handleScroll(): void {
-        // 流式输出期间，锁定自动滚动状态
-        if (this.isStreamingMode) return;
-        
-        // 滚动锁定期间不更新状态
-        if (Date.now() < this.scrollLockUntil) return;
-        
         const { scrollTop, scrollHeight, clientHeight } = this.container;
         const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
         
-        // ✅ 判断用户是否正在查看历史内容（距离底部超过阈值）
+        // 判断用户是否正在查看历史内容
         this.userIsScrolledUp = distanceFromBottom > this.scrollThreshold;
+        
+        // 如果用户滚动到底部，隐藏新内容提示
+        if (!this.userIsScrolledUp) {
+            this.hideNewContentIndicator();
+        }
         
         // 非流式模式下才更新自动滚动状态
         if (!this.isStreamingMode) {
@@ -239,35 +248,44 @@ export class HistoryView {
     }
 
     /**
-     * 处理内容高度变化
+     * ✅ 优化：处理内容高度变化
      */
     private handleResize(): void {
         if (!this.shouldAutoScroll && !this.isStreamingMode) return;
         
-        const currentScrollHeight = this.container.scrollHeight;
+        // 节流滚动
+        if (this.scrollThrottleTimer !== null) return;
         
-        // 只有当高度增加时才滚动（避免内容收缩时的抖动）
-        if (currentScrollHeight > this.lastScrollHeight) {
-            this.lastScrollHeight = currentScrollHeight;
-            this.instantScrollToBottom();
-        }
+        this.scrollThrottleTimer = window.setTimeout(() => {
+            this.scrollThrottleTimer = null;
+            
+            const currentScrollHeight = this.container.scrollHeight;
+            
+            if (currentScrollHeight > this.lastScrollHeight) {
+                this.lastScrollHeight = currentScrollHeight;
+                this.instantScrollToBottom();
+            }
+        }, this.SCROLL_THROTTLE);
     }
 
     /**
-     * ✅ 新增：瞬时滚动到底部（无动画，用于流式输出）
+     * ✅ 优化：瞬时滚动到底部
      */
     private instantScrollToBottom(): void {
-        this.container.scrollTop = this.container.scrollHeight;
+        if (this.scrollFrameId !== null) return;
+        
+        this.scrollFrameId = requestAnimationFrame(() => {
+            this.scrollFrameId = null;
+            this.container.scrollTop = this.container.scrollHeight;
+        });
     }
 
     /**
-     * ✨ [核心优化] 滚动到底部
-     * @param force 是否强制滚动（忽略用户当前位置）
+     * 滚动到底部
      */
     scrollToBottom(force: boolean = false): void {
         if (!force && !this.shouldAutoScroll) return;
 
-        // 如果已经有挂起的滚动任务，取消它（防抖）
         if (this.scrollFrameId !== null) {
             cancelAnimationFrame(this.scrollFrameId);
         }
@@ -276,14 +294,12 @@ export class HistoryView {
             this.scrollFrameId = null;
             this.container.scrollTop = this.container.scrollHeight;
             this.lastScrollHeight = this.container.scrollHeight;
-            
-            // 滚动后短暂锁定状态检测
             this.scrollLockUntil = Date.now() + 100;
         });
     }
 
     /**
-     * ✅ 新增：进入流式输出模式
+     * 进入流式输出模式
      */
     public enterStreamingMode(): void {
         if (this.isStreamingMode) return;
@@ -292,38 +308,78 @@ export class HistoryView {
         this.shouldAutoScroll = true;
         this.lastScrollHeight = this.container.scrollHeight;
         
-        // 添加 CSS 类优化渲染
         this.container.classList.add('llm-ui-history--streaming');
     }
 
     /**
-     * ✅ 新增：退出流式输出模式
+     * ✅ 优化：退出流式输出模式（智能滚动）
      */
     public exitStreamingMode(): void {
         if (!this.isStreamingMode) return;
         
         this.isStreamingMode = false;
-        
-        // 移除 CSS 类
         this.container.classList.remove('llm-ui-history--streaming');
         
-        // ✅ 关键修改：只有当用户没有主动滚动上去时，才滚动到底部
-        if (!this.userIsScrolledUp || this.autoScrollOnFinish) {
+        // 只有当用户没有主动滚动上去时，才滚动到底部
+        if (!this.userIsScrolledUp) {
             this.scrollToBottom(true);
         } else {
-            // 用户正在查看历史，显示一个提示
             this.showNewContentIndicator();
         }
         
-        // 清理所有流式状态类
+        // 清理流式状态类
         this.container.querySelectorAll('.llm-ui-node--streaming').forEach(el => {
             el.classList.remove('llm-ui-node--streaming');
         });
         
-        // 清理预览定时器
         this.previewUpdateTimers.forEach(timer => clearTimeout(timer));
         this.previewUpdateTimers.clear();
+
+        // ✅ 流式结束后更新所有预览
+        this.editorMap.forEach((editor, nodeId) => {
+            const el = this.nodeMap.get(nodeId);
+            if (el) {
+                const previewEl = el.querySelector('.llm-ui-header-preview');
+                if (previewEl) {
+                    previewEl.textContent = this.getPreviewText(editor.content);
+                }
+            }
+        });
     }
+
+    /**
+     * ✅ 新增：显示新内容提示器
+     */
+    private showNewContentIndicator(): void {
+        // 避免重复创建
+        if (this.newContentIndicator) return;
+        
+        this.newContentIndicator = document.createElement('div');
+        this.newContentIndicator.className = 'llm-ui-new-content-indicator';
+        this.newContentIndicator.innerHTML = `
+            <button class="llm-ui-new-content-btn">
+                <span>⬇️ New response available</span>
+            </button>
+        `;
+        
+        this.newContentIndicator.querySelector('button')?.addEventListener('click', () => {
+            this.scrollToBottom(true);
+            this.hideNewContentIndicator();
+        });
+        
+        this.container.appendChild(this.newContentIndicator);
+    }
+
+    /**
+     * ✅ 新增：隐藏新内容提示器
+     */
+    private hideNewContentIndicator(): void {
+        if (this.newContentIndicator) {
+            this.newContentIndicator.remove();
+            this.newContentIndicator = null;
+        }
+    }
+
 
     private appendSessionGroup(group: SessionGroup, isCollapsed: boolean) {
         // ✅ 关键修复：检查是否已渲染
@@ -489,12 +545,9 @@ export class HistoryView {
         editActionsEl: HTMLElement,
         wrapper: HTMLElement
     ) {
-        // 恢复原始内容
         const originalContent = this.originalContentMap.get(nodeId);
         if (originalContent !== undefined) {
-            // 需要在 MDxController 中添加 setContent 方法
-            (controller as any).currentContent = originalContent;
-            controller.finishStream(); // 触发重新渲染
+            controller.setContent(originalContent);
         }
 
         this.editingNodes.delete(nodeId);
@@ -551,6 +604,9 @@ export class HistoryView {
         return count;
     }
 
+    /**
+     * ✅ 优化：流式模式下不保存状态
+     */
     private toggleCollapse(element: HTMLElement, btn: HTMLElement, sessionId?: string) {
         element.classList.toggle('is-collapsed');
         const isCollapsed = element.classList.contains('is-collapsed');
@@ -562,21 +618,13 @@ export class HistoryView {
                 : '<polyline points="18 15 12 9 6 15"></polyline>';
         }
 
-        // ✅ 新增：保存状态并通知外部
         if (sessionId) {
             this.collapseStates[sessionId] = isCollapsed;
-            this.onCollapseStateChange?.(this.collapseStates);
+            // 流式模式下不触发回调，等结束后统一保存
+            if (!this.isStreamingMode) {
+                this.onCollapseStateChange?.(this.collapseStates);
+            }
         }
-    }
-
-    // ✅ 新增：获取当前折叠状态（用于外部保存）
-    public getCollapseStates(): CollapseStateMap {
-        return { ...this.collapseStates };
-    }
-
-    // ✅ 新增：设置折叠状态（用于恢复）
-    public setCollapseStates(states: CollapseStateMap): void {
-        this.collapseStates = { ...states };
     }
 
     private renderExecutionTree(node: ExecutionNode, isCollapsed: boolean = false) {
@@ -631,15 +679,12 @@ export class HistoryView {
         };
         const effectiveId = getSessionId();
 
-        // ✨ [新增] 绑定 Agent 图标点击事件
         const iconEl = element.querySelector('.llm-ui-node__icon--clickable');
         if (iconEl) {
             iconEl.addEventListener('click', (e) => {
                 e.stopPropagation();
                 const agentId = (e.currentTarget as HTMLElement).dataset.agentId;
                 if (agentId) {
-                    console.log(`[HistoryView] Clicked agent: ${agentId}`);
-                    // 向上派发自定义事件
                     this.container.dispatchEvent(new CustomEvent('open-agent-config', {
                         bubbles: true,
                         detail: { agentId }
@@ -648,53 +693,49 @@ export class HistoryView {
             });
         }
 
-        // Retry
         retryBtn?.addEventListener('click', (e) => {
             e.stopPropagation();
             this.onNodeAction?.('retry', effectiveId);
         });
 
-        // Delete
         deleteBtn?.addEventListener('click', async (e) => {
             e.stopPropagation();
             await this.handleDeleteConfirm(effectiveId, 'assistant');
         });
 
-        // Collapse
         collapseBtn?.addEventListener('click', (e) => {
             e.stopPropagation();
-            this.toggleCollapse(element, e.target as HTMLElement);
+            this.toggleCollapse(element, e.target as HTMLElement, effectiveId);
         });
 
-        // 分支导航
         element.querySelector('[data-action="prev-sibling"]')?.addEventListener('click', (e) => {
             e.stopPropagation();
-        const sessionId = getSessionId();
-        this.onNodeAction?.('prev-sibling', sessionId);
+            const sessionId = getSessionId();
+            this.onNodeAction?.('prev-sibling', sessionId);
         });
 
         element.querySelector('[data-action="next-sibling"]')?.addEventListener('click', (e) => {
             e.stopPropagation();
-        const sessionId = getSessionId();
-        this.onNodeAction?.('next-sibling', sessionId);
+            const sessionId = getSessionId();
+            this.onNodeAction?.('next-sibling', sessionId);
         });
 
-        // 初始化内容编辑器
         if (mountPoints.output) {
-            // ✅ 判断是否为正在运行的流 (running 或 queued)
             const isStreamingNode = node.status === 'running' || node.status === 'queued';
 
             const controller = new MDxController(mountPoints.output, node.data.output || '', {
                 readOnly: true,
-                streaming: isStreamingNode, // ✨ 传递参数：如果是流式，则 defaultCollapsed = true
+                streaming: isStreamingNode,
                 onChange: (text) => {
                     if (controller.isEditing()) {
                         this.onContentChange?.(effectiveId, text, 'node');
                     }
-                    const previewEl = element.querySelector('.llm-ui-header-preview');
-                    if (previewEl) previewEl.textContent = this.getPreviewText(text);
+                    // 流式模式下不更新预览
+                    if (!this.isStreamingMode) {
+                        const previewEl = element.querySelector('.llm-ui-header-preview');
+                        if (previewEl) previewEl.textContent = this.getPreviewText(text);
+                    }
                 },
-                // ✅ 关键：传递上下文
                 nodeId: this.contextOptions.nodeId,
                 ownerNodeId: this.contextOptions.ownerNodeId,
                 sessionEngine: this.contextOptions.sessionEngine,
@@ -706,7 +747,6 @@ export class HistoryView {
                 await controller.toggleEdit();
                 editBtn.classList.toggle('active');
                 
-                // 退出编辑模式时保存
                 if (wasEditing) {
                     this.onContentChange?.(effectiveId, controller.content, 'node');
                 }
@@ -721,11 +761,13 @@ export class HistoryView {
         }
     }
 
+    /**
+     * ✅ 优化：更新节点内容（减少 DOM 操作）
+     */
     private updateNodeContent(nodeId: string, chunk: string, field: 'thought' | 'output') {
         const el = this.nodeMap.get(nodeId);
         if (!el) return;
 
-        // ✅ 添加流式状态类（只在首次）
         if (!el.classList.contains('llm-ui-node--streaming')) {
             el.classList.add('llm-ui-node--streaming');
         }
@@ -738,38 +780,24 @@ export class HistoryView {
                 container.style.display = 'block';
             }
             if (contentEl) {
-                // ✅ 使用 insertAdjacentText 更高效
-                contentEl.insertAdjacentText('beforeend', chunk);
-                if (container) container.scrollTop = container.scrollHeight;
+                contentEl.textContent = (contentEl.textContent || '') + chunk;
+                
+                // 节流滚动思考区域
+                if (!this.thoughtScrollThrottled) {
+                    this.thoughtScrollThrottled = true;
+                    requestAnimationFrame(() => {
+                        this.thoughtScrollThrottled = false;
+                        if (container) container.scrollTop = container.scrollHeight;
+                    });
+                }
             }
         } else if (field === 'output') {
             const editor = this.editorMap.get(nodeId);
             if (editor) {
                 editor.appendStream(chunk);
-                
-                // ✅ 使用节流更新预览
-                this.schedulePreviewUpdate(nodeId, el, editor);
+                // 流式模式下不更新预览
             }
         }
-    }
-
-    /**
-     * ✅ 新增：节流更新预览文本
-     */
-    private schedulePreviewUpdate(nodeId: string, el: HTMLElement, editor: MDxController): void {
-        // 如果已有定时器，跳过
-        if (this.previewUpdateTimers.has(nodeId)) return;
-
-        const timerId = window.setTimeout(() => {
-            this.previewUpdateTimers.delete(nodeId);
-            
-            const previewEl = el.querySelector('.llm-ui-header-preview');
-            if (previewEl) {
-                previewEl.textContent = this.getPreviewText(editor.content);
-            }
-        }, this.PREVIEW_UPDATE_INTERVAL);
-
-        this.previewUpdateTimers.set(nodeId, timerId);
     }
 
     private updateNodeStatus(nodeId: string, status: string, result?: any) {
@@ -796,14 +824,13 @@ export class HistoryView {
                 }
             }
             
-            // ✅ 清理该节点的预览更新定时器
             const timer = this.previewUpdateTimers.get(nodeId);
             if (timer) {
                 clearTimeout(timer);
                 this.previewUpdateTimers.delete(nodeId);
             }
             
-            // ✅ 立即更新最终预览
+            // 更新最终预览
             const editor = this.editorMap.get(nodeId);
             const previewEl = el.querySelector('.llm-ui-header-preview');
             if (editor && previewEl) {
@@ -813,70 +840,50 @@ export class HistoryView {
 
         const editor = this.editorMap.get(nodeId);
         if (editor && (status === 'success' || status === 'failed')) {
-            // [修复] 传入 false，表示这是流式传输结束，不是用户手动编辑
-            // 这样就不会触发 SessionManager.editMessage -> 抛出 ID 错误
             editor.finishStream(false);
         }
     }
 
-
-    // ✨ [新增] 处理消息删除
-
-    /**
-     * ✅ 新增：公开方法，允许外部直接删除消息
-     * @param ids 要删除的消息 ID 数组
-     * @param animated 是否使用动画
-     */
     public removeMessages(ids: string[], animated: boolean = true): void {
         for (const id of ids) {
-            // ✅ 从去重集合移除
             this.renderedSessionIds.delete(id);
             
-            // 处理 Session 元素
             const sessionEl = this.container.querySelector(`[data-session-id="${id}"]`) as HTMLElement;
             if (sessionEl) {
                 this.removeElement(sessionEl, animated);
             }
 
-            // 2. 处理 Node 元素
             const nodeEl = this.nodeMap.get(id);
             if (nodeEl) {
                 this.removeElement(nodeEl, animated);
                 this.nodeMap.delete(id);
             }
 
-            // 3. 清理编辑器
             const editor = this.editorMap.get(id);
             if (editor) {
                 editor.destroy();
                 this.editorMap.delete(id);
             }
 
-            // 4. 清理预览更新定时器
             const timer = this.previewUpdateTimers.get(id);
             if (timer) {
                 clearTimeout(timer);
                 this.previewUpdateTimers.delete(id);
             }
 
-            // 5. 清理状态
             this.originalContentMap.delete(id);
             this.editingNodes.delete(id);
+            delete this.collapseStates[id];
         }
 
-        // 6. 延迟检查是否需要显示欢迎界面
         const delay = animated ? 350 : 0;
         setTimeout(() => this.checkEmpty(), delay);
     }
 
-    /**
-     * 移除单个元素
-     */
     private removeElement(el: HTMLElement, animated: boolean): void {
         if (animated) {
             el.classList.add('llm-ui-session--deleting');
             el.addEventListener('animationend', () => el.remove(), { once: true });
-            // 备用：如果动画没触发，300ms 后强制删除
             setTimeout(() => {
                 if (el.parentNode) el.remove();
             }, 350);
@@ -885,9 +892,6 @@ export class HistoryView {
         }
     }
 
-    /**
-     * 检查是否为空并显示欢迎界面
-     */
     private checkEmpty(): void {
         const remaining = this.container.querySelectorAll(
             '.llm-ui-session:not(.llm-ui-session--deleting)'
@@ -901,7 +905,6 @@ export class HistoryView {
         this.removeMessages(deletedIds, true);
     }
 
-    // ✨ [新增] 处理消息编辑
     private handleMessageEdited(sessionId: string, newContent: string) {
         const sessionEl = this.container.querySelector(`[data-session-id="${sessionId}"]`);
         if (sessionEl) {
@@ -912,25 +915,20 @@ export class HistoryView {
         }
     }
 
-    // ✨ [新增] 处理分支切换
     private handleSiblingSwitch(payload: { sessionId: string; newIndex: number; total: number }) {
         const sessionEl = this.container.querySelector(`[data-session-id="${payload.sessionId}"]`);
         if (!sessionEl) return;
 
-        // 更新分支导航显示
         const indicator = sessionEl.querySelector('.llm-ui-branch-indicator');
         if (indicator) {
             indicator.textContent = `${payload.newIndex + 1}/${payload.total}`;
         }
 
-        // 更新按钮禁用状态
         const prevBtn = sessionEl.querySelector('[data-action="prev-sibling"]') as HTMLButtonElement;
         const nextBtn = sessionEl.querySelector('[data-action="next-sibling"]') as HTMLButtonElement;
 
         if (prevBtn) prevBtn.disabled = payload.newIndex === 0;
         if (nextBtn) nextBtn.disabled = payload.newIndex === payload.total - 1;
-
-        // 刷新内容（如果需要的话，由 SessionManager 处理）
     }
 
     private getPreviewText(content: string): string {
@@ -942,30 +940,22 @@ export class HistoryView {
         return plain.length > 60 ? plain.substring(0, 60) + '...' : plain;
     }
 
-
-    // ✅ 新增：将错误渲染进聊天流
     public appendErrorBubble(error: Error) {
-        // 移除旧的流式状态
         this.exitStreamingMode();
 
         const wrapper = document.createElement('div');
         wrapper.className = 'llm-ui-session llm-ui-session--system';
         
         const isAuthError = error.message.includes('apiKey') || error.message.includes('401');
-        
-        // [修复] 删除未使用的 isConnectionError 变量
-        // const isConnectionError = error.message.includes('ECONNREFUSED') || error.message.includes('Network');
 
         let actionButtons = '';
         
-        // 根据错误类型提供快捷操作按钮
         if (isAuthError) {
             actionButtons = `
                 <button class="llm-ui-error-btn" data-action="open-settings">⚙️ 配置连接</button>
             `;
         }
         
-        // 总是提供重试按钮
         actionButtons += `
             <button class="llm-ui-error-btn" data-action="retry-last">↻ 重试</button>
         `;
@@ -1018,77 +1008,121 @@ export class HistoryView {
         return null;
     }
 
-    /**
-     * ✅ 新增：显示新内容提示器
-     */
-    private newContentIndicator: HTMLElement | null = null;
-    
-    private showNewContentIndicator(): void {
-        // 避免重复创建
-        if (this.newContentIndicator) return;
-        
-        this.newContentIndicator = document.createElement('div');
-        this.newContentIndicator.className = 'llm-ui-new-content-indicator';
-        this.newContentIndicator.innerHTML = `
-            <button class="llm-ui-new-content-btn">
-                <span>⬇️ New response available</span>
-            </button>
-        `;
-        
-        this.newContentIndicator.querySelector('button')?.addEventListener('click', () => {
-            this.scrollToBottom(true);
-            this.hideNewContentIndicator();
-        });
-        
-        this.container.appendChild(this.newContentIndicator);
-        
-        // 自动隐藏（如果用户滚动到底部）
-        const checkScroll = () => {
-            const { scrollTop, scrollHeight, clientHeight } = this.container;
-            if (scrollHeight - scrollTop - clientHeight < this.scrollThreshold) {
-                this.hideNewContentIndicator();
-            }
-        };
-        
-        this.container.addEventListener('scroll', checkScroll, { once: true });
-    }
+    // ================================================================
+    // ✅ 优化：事件批量处理
+    // ================================================================
 
-    private hideNewContentIndicator(): void {
-        if (this.newContentIndicator) {
-            this.newContentIndicator.remove();
-            this.newContentIndicator = null;
+    /**
+     * ✅ 优化：批量处理事件
+     */
+    processEvent(event: OrchestratorEvent) {
+        // 非流式更新事件直接处理
+        if (event.type !== 'node_update') {
+            this.processEventImmediate(event);
+            return;
+        }
+
+        // 流式更新事件批量处理
+        this.eventQueue.push(event);
+        
+        if (this.eventProcessTimer === null) {
+            this.eventProcessTimer = window.setTimeout(() => {
+                this.flushEventQueue();
+            }, this.EVENT_BATCH_INTERVAL);
         }
     }
 
+    /**
+     * ✅ 新增：批量处理队列中的事件
+     */
+    private flushEventQueue(): void {
+        this.eventProcessTimer = null;
+        
+        if (this.eventQueue.length === 0) return;
+        
+        // 按 nodeId 合并 chunk
+        const mergedChunks = new Map<string, { thought: string; output: string }>();
+        
+        for (const event of this.eventQueue) {
+            if (event.type !== 'node_update') continue;
+            
+            const { nodeId, chunk, field } = event.payload;
+            if (!chunk || !field) continue;
+            
+            if (!mergedChunks.has(nodeId)) {
+                mergedChunks.set(nodeId, { thought: '', output: '' });
+            }
+            
+            const merged = mergedChunks.get(nodeId)!;
+            if (field === 'thought') {
+                merged.thought += chunk;
+            } else if (field === 'output') {
+                merged.output += chunk;
+            }
+        }
+        
+        // 清空队列
+        this.eventQueue = [];
+        
+        // 批量更新
+        for (const [nodeId, chunks] of mergedChunks) {
+            if (chunks.thought) {
+                this.updateNodeContent(nodeId, chunks.thought, 'thought');
+            }
+            if (chunks.output) {
+                this.updateNodeContent(nodeId, chunks.output, 'output');
+            }
+        }
+        
+        // 只滚动一次
+        if (!this.userIsScrolledUp) {
+            this.scrollToBottom(false);
+        }
+    }
 
-    processEvent(event: OrchestratorEvent) {
+    /**
+     * ✅ 原有的处理逻辑
+     */
+    private processEventImmediate(event: OrchestratorEvent) {
         switch (event.type) {
             case 'session_start':
                 this.enterStreamingMode();
                 this.appendSessionGroup(event.payload, false);
                 this.scrollToBottom(true);
                 break;
+                
             case 'node_start':
-                // [修复] 新开始的节点始终展开 (isCollapsed = false)
                 this.appendNode(event.payload.parentId, event.payload.node, false);
                 break;
-            case 'node_update':
-                if (event.payload.chunk !== undefined && event.payload.field !== undefined) {
-                    this.updateNodeContent(event.payload.nodeId, event.payload.chunk, event.payload.field);
-                    // ✅ 流式更新时：只有用户在底部才滚动
-                    if (!this.userIsScrolledUp) {
-                        this.scrollToBottom(false);
-                    }
-                }
-                break;
+                
             case 'node_status':
-                this.updateNodeStatus(event.payload.nodeId, event.payload.status, event.payload.result);
+                this.updateNodeStatus(
+                    event.payload.nodeId, 
+                    event.payload.status, 
+                    event.payload.result
+                );
                 break;
+                
             case 'finished':
+                // 先处理队列中剩余的事件
+                if (this.eventProcessTimer !== null) {
+                    clearTimeout(this.eventProcessTimer);
+                    this.flushEventQueue();
+                }
+                
                 this.exitStreamingMode();
                 this.editorMap.forEach(editor => editor.finishStream());
+                
+                // 流式结束后，保存折叠状态
+                this.onCollapseStateChange?.(this.collapseStates);
                 break;
+                
             case 'error':
+                if (this.eventProcessTimer !== null) {
+                    clearTimeout(this.eventProcessTimer);
+                    this.flushEventQueue();
+                }
+                
                 this.exitStreamingMode();
             // ✅ 修复：显示更详细的错误信息
                 const errorMessage = event.payload.message || 'Unknown error';
@@ -1106,18 +1140,23 @@ export class HistoryView {
                 // 同时结束所有流式编辑器
                 this.editorMap.forEach(editor => editor.finishStream(false));
                 break;
+                
             case 'messages_deleted':
                 this.handleMessagesDeleted(event.payload.deletedIds);
                 break;
+                
             case 'message_edited':
                 this.handleMessageEdited(event.payload.sessionId, event.payload.newContent);
                 break;
+                
             case 'session_cleared':
                 this.renderWelcome();
                 break;
+                
             case 'sibling_switch':
                 this.handleSiblingSwitch(event.payload);
                 break;
+                
             case 'retry_started':
                 this.enterStreamingMode();
                 break;
@@ -1125,42 +1164,72 @@ export class HistoryView {
     }
 
     clear() {
-        // 取消所有挂起的操作
         if (this.scrollFrameId !== null) {
             cancelAnimationFrame(this.scrollFrameId);
             this.scrollFrameId = null;
         }
         
-        // 清理预览更新定时器
         this.previewUpdateTimers.forEach(timer => clearTimeout(timer));
         this.previewUpdateTimers.clear();
         
-        // 清理编辑器
         this.editorMap.forEach(editor => editor.destroy());
         this.editorMap.clear();
         
-        // 清理其他状态
         this.nodeMap.clear();
         this.originalContentMap.clear();
         this.editingNodes.clear();
+        this.renderedSessionIds.clear();
         
-        // 重置滚动状态
         this.isStreamingMode = false;
         this.shouldAutoScroll = true;
+        this.userIsScrolledUp = false;
         this.lastScrollHeight = 0;
         this.container.classList.remove('llm-ui-history--streaming');
         
-        // 清空 DOM
         this.container.innerHTML = '';
     }
 
-
-    // ✨ [新增] 销毁方法
     destroy() {
+        // 清理事件处理定时器
+        if (this.eventProcessTimer !== null) {
+            clearTimeout(this.eventProcessTimer);
+            this.eventProcessTimer = null;
+        }
+        
+        // 清理滚动节流定时器
+        if (this.scrollThrottleTimer !== null) {
+            clearTimeout(this.scrollThrottleTimer);
+            this.scrollThrottleTimer = null;
+        }
+        
         if (this.scrollFrameId !== null) {
             cancelAnimationFrame(this.scrollFrameId);
+            this.scrollFrameId = null;
         }
+        
         this.resizeObserver.disconnect();
-        this.clear();
+        
+        this.previewUpdateTimers.forEach(timer => clearTimeout(timer));
+        this.previewUpdateTimers.clear();
+        
+        this.editorMap.forEach(editor => editor.destroy());
+        this.editorMap.clear();
+        
+        this.nodeMap.clear();
+        this.originalContentMap.clear();
+        this.editingNodes.clear();
+        this.eventQueue = [];
+        this.collapseStates = {};
+        this.renderedSessionIds.clear();
+        
+        this.isStreamingMode = false;
+        this.shouldAutoScroll = true;
+        this.userIsScrolledUp = false;
+        this.lastScrollHeight = 0;
+        this.container.classList.remove('llm-ui-history--streaming');
+        
+        this.hideNewContentIndicator();
+        
+        this.container.innerHTML = '';
     }
 }

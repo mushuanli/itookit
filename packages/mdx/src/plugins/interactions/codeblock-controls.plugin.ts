@@ -1,10 +1,9 @@
-// mdx/plugins/interactions/codeblock-controls.plugin.ts
-
+/**
+ * @file mdx/plugins/interactions/codeblock-controls.plugin.ts
+ * @description 代码块控制插件 - 流式输出优化版
+ */
 import type { MDxPlugin, PluginContext } from '../../core/plugin';
 
-/**
- * 代码块控制插件配置选项
- */
 export interface CodeBlockControlsPluginOptions {
   collapseThreshold?: number;
   collapsedHeight?: number;
@@ -15,6 +14,18 @@ export interface CodeBlockControlsPluginOptions {
   defaultCollapsed?: boolean;
   /** 展开按钮的提示文本 */
   expandText?: string;
+  /**
+   * [新增] 流式模式：始终显示折叠按钮，不检查高度
+   * 适用于流式输出场景，避免频繁的高度计算
+   * @default false
+   */
+  streamingMode?: boolean;
+  /**
+   * [新增] 流式模式下的最小行数阈值
+   * 只有代码行数超过此值才显示折叠按钮
+   * @default 5
+   */
+  streamingMinLines?: number;
   icons?: {
     copy?: string;
     copied?: string;
@@ -46,6 +57,12 @@ export class CodeBlockControlsPlugin implements MDxPlugin {
   name = 'interaction:codeblock-controls';
   private options: ResolvedOptions; 
   private cleanupFns: Array<() => void> = [];
+  
+  // [优化] 存储事件处理器引用以便清理
+  private buttonHandlers = new WeakMap<HTMLElement, () => void>();
+  
+  // [新增] 跟踪已处理的代码块，用于流式更新
+  private processedBlocks = new WeakSet<HTMLElement>();
 
   constructor(options: CodeBlockControlsPluginOptions = {}) {
     this.options = {
@@ -57,6 +74,8 @@ export class CodeBlockControlsPlugin implements MDxPlugin {
       enableCollapse: options.enableCollapse !== false,
       defaultCollapsed: options.defaultCollapsed !== false,
       expandText: options.expandText || '点击展开查看完整代码',
+      streamingMode: options.streamingMode ?? false,
+      streamingMinLines: options.streamingMinLines ?? 5,
       icons: {
         copy: options.icons?.copy || '📋',
         copied: options.icons?.copied || '✓',
@@ -82,11 +101,24 @@ export class CodeBlockControlsPlugin implements MDxPlugin {
     
     const clickHandler = (e: MouseEvent) => {
       e.preventDefault();
+      e.stopPropagation();
       onClick(button, pre);
     };
+    
     button.addEventListener('click', clickHandler);
     
-    this.cleanupFns.push(() => button.removeEventListener('click', clickHandler));
+    // 存储处理器引用
+    this.buttonHandlers.set(button, () => {
+      button.removeEventListener('click', clickHandler);
+    });
+    
+    this.cleanupFns.push(() => {
+      const cleanup = this.buttonHandlers.get(button);
+      if (cleanup) {
+        cleanup();
+        this.buttonHandlers.delete(button);
+      }
+    });
     
     return button;
   }
@@ -104,6 +136,7 @@ export class CodeBlockControlsPlugin implements MDxPlugin {
           btn.innerHTML = this.options.icons.copied;
           btn.title = 'Copied!';
           btn.classList.add(`${this.options.classPrefix}-controls__button--success`);
+          
           setTimeout(() => {
             btn.innerHTML = originalHTML;
             btn.title = originalTitle;
@@ -123,8 +156,7 @@ export class CodeBlockControlsPlugin implements MDxPlugin {
   private _fallbackCopy(text: string): void {
     const textarea = document.createElement('textarea');
     textarea.value = text;
-    textarea.style.position = 'fixed';
-    textarea.style.opacity = '0';
+    textarea.style.cssText = 'position:fixed;opacity:0;pointer-events:none;';
     document.body.appendChild(textarea);
     textarea.select();
     try {
@@ -157,27 +189,43 @@ export class CodeBlockControlsPlugin implements MDxPlugin {
         document.body.appendChild(a);
         a.click();
         
-        setTimeout(() => {
+        // [优化] 使用 requestAnimationFrame 确保点击完成后再清理
+        requestAnimationFrame(() => {
           document.body.removeChild(a);
           URL.revokeObjectURL(url);
-        }, 100);
+        });
       },
       pre
     );
   }
 
   /**
-   * 创建折叠按钮以及底部的遮罩触发器
-   * 返回对象包含顶部按钮和底部触发器 DOM
+   * [优化] 检查是否应该显示折叠按钮
+   * 流式模式下使用行数检查，普通模式下使用高度检查
    */
-  private _createCollapseButton(
+  private _shouldShowCollapseButton(pre: HTMLPreElement): boolean {
+    if (this.options.streamingMode) {
+      // 流式模式：基于行数判断，避免触发 reflow
+      const code = pre.textContent || '';
+      const lineCount = code.split('\n').length;
+      return lineCount >= this.options.streamingMinLines;
+    } else {
+      // 普通模式：基于高度判断
+      return pre.scrollHeight > this.options.collapseThreshold;
+    }
+  }
+
+  /**
+   * [优化] 创建折叠控件
+   * 流式模式下始终创建按钮，不进行高度检查
+   */
+  private _createCollapseControls(
     wrapper: HTMLElement, 
     pre: HTMLPreElement
-  ): { button: HTMLButtonElement, trigger: HTMLElement } | null {
+  ): { button: HTMLButtonElement; trigger: HTMLElement } | null {
     
-    const actualHeight = pre.scrollHeight;
-    // 如果高度不足，不需要折叠功能
-    if (actualHeight <= this.options.collapseThreshold) {
+    // 检查是否应该显示
+    if (!this._shouldShowCollapseButton(pre)) {
       return null;
     }
 
@@ -202,19 +250,20 @@ export class CodeBlockControlsPlugin implements MDxPlugin {
     // 初始化状态
     if (this.options.defaultCollapsed) {
       wrapper.classList.add(`${this.options.classPrefix}-wrapper--collapsed`);
-      this._updateState(wrapper, button, pre, false);
+      this._updateCollapseState(wrapper, button, pre, false);
     } else {
-      this._updateState(wrapper, button, pre, true);
+      this._updateCollapseState(wrapper, button, pre, true);
     }
 
     return { button, trigger };
   }
   
   /**
-   * 更新 UI 状态（按钮图标、Pre高度）
+   * [优化] 更新折叠状态
+   * 流式模式下使用 CSS 类控制，避免直接设置 maxHeight
    */
-  private _updateState(
-    _wrapper: HTMLElement, 
+  private _updateCollapseState(
+    wrapper: HTMLElement, 
     button: HTMLButtonElement, 
     pre: HTMLPreElement,
     isExpanded: boolean
@@ -223,26 +272,48 @@ export class CodeBlockControlsPlugin implements MDxPlugin {
     button.title = isExpanded ? 'Collapse code' : 'Expand code';
     button.setAttribute('aria-expanded', String(isExpanded));
     
-    if (isExpanded) {
-      // 加上 50px 余量，防止因字体加载或样式计算误差导致出现内部滚动条
-      pre.style.maxHeight = `${pre.scrollHeight + 50}px`; 
+    if (this.options.streamingMode) {
+      // 流式模式：使用 CSS 类控制，避免频繁计算 scrollHeight
+      if (isExpanded) {
+        pre.style.maxHeight = 'none';
+        wrapper.classList.remove(`${this.options.classPrefix}-wrapper--height-limited`);
+      } else {
+        pre.style.maxHeight = `${this.options.collapsedHeight}px`;
+        wrapper.classList.add(`${this.options.classPrefix}-wrapper--height-limited`);
+      }
     } else {
-      pre.style.maxHeight = `${this.options.collapsedHeight}px`;
+      // 普通模式：精确设置高度
+      if (isExpanded) {
+        pre.style.maxHeight = `${pre.scrollHeight + 50}px`; 
+      } else {
+        pre.style.maxHeight = `${this.options.collapsedHeight}px`;
+      }
     }
+  }
+
+  private _toggleCollapse(
+    wrapper: HTMLElement, 
+    button: HTMLButtonElement, 
+    pre: HTMLPreElement
+  ): void {
+    const isNowExpanded = !wrapper.classList.toggle(
+      `${this.options.classPrefix}-wrapper--collapsed`
+    );
+    this._updateCollapseState(wrapper, button, pre, isNowExpanded);
   }
 
   /**
-   * 切换折叠状态
+   * [优化] 增强代码块
    */
-  private _toggleCollapse(wrapper: HTMLElement, button: HTMLButtonElement, pre: HTMLPreElement): void {
-    const isNowExpanded = !wrapper.classList.toggle(`${this.options.classPrefix}-wrapper--collapsed`);
-    this._updateState(wrapper, button, pre, isNowExpanded);
-  }
-
   private enhanceCodeBlock(pre: HTMLPreElement): void {
     if (pre.hasAttribute('data-enhanced')) {
+      // 流式模式下，检查是否需要更新折叠按钮
+      if (this.options.streamingMode) {
+        this._updateExistingBlock(pre);
+      }
       return;
     }
+    
     pre.setAttribute('data-enhanced', 'true');
 
     // 创建包裹容器
@@ -259,33 +330,100 @@ export class CodeBlockControlsPlugin implements MDxPlugin {
     const rightButtons = document.createElement('div');
     rightButtons.className = `${this.options.classPrefix}-controls__right`;
     
+    // 使用 Fragment 批量添加按钮
+    const fragment = document.createDocumentFragment();
+    
     if (this.options.enableDownload) {
-      rightButtons.appendChild(this._createDownloadButton(pre));
+      fragment.appendChild(this._createDownloadButton(pre));
     }
     
     if (this.options.enableCopy) {
-      rightButtons.appendChild(this._createCopyButton(pre));
+      fragment.appendChild(this._createCopyButton(pre));
     }
     
     if (this.options.enableCollapse) {
-      const result = this._createCollapseButton(wrapper, pre);
+      const result = this._createCollapseControls(wrapper, pre);
       if (result) {
-        // 添加顶部按钮
-        rightButtons.appendChild(result.button);
-        // 添加底部遮罩触发器
+        fragment.appendChild(result.button);
         wrapper.appendChild(result.trigger);
+        // 标记已添加折叠控件
+        wrapper.setAttribute('data-has-collapse', 'true');
       }
     }
     
-    if (rightButtons.children.length > 0) {
+    if (fragment.childNodes.length > 0) {
+      rightButtons.appendChild(fragment);
       controls.appendChild(rightButtons);
       wrapper.prepend(controls);
     }
+    this.processedBlocks.add(wrapper);
   }
 
+  /**
+   * [新增] 更新已存在的代码块（流式模式专用）
+   * 检查是否需要添加折叠按钮
+   */
+  private _updateExistingBlock(pre: HTMLPreElement): void {
+    const wrapper = pre.closest(`.${this.options.classPrefix}-wrapper`) as HTMLElement;
+    if (!wrapper) return;
+    
+    // 如果已经有折叠控件，跳过
+    if (wrapper.hasAttribute('data-has-collapse')) return;
+    
+    // 检查是否现在应该显示折叠按钮
+    if (!this._shouldShowCollapseButton(pre)) return;
+    
+    // 添加折叠控件
+    if (this.options.enableCollapse) {
+      const result = this._createCollapseControls(wrapper, pre);
+      if (result) {
+        // 找到按钮容器
+        const rightButtons = wrapper.querySelector(
+          `.${this.options.classPrefix}-controls__right`
+        );
+        if (rightButtons) {
+          rightButtons.appendChild(result.button);
+        }
+        wrapper.appendChild(result.trigger);
+        wrapper.setAttribute('data-has-collapse', 'true');
+      }
+    }
+  }
+
+  /**
+   * [优化] 批量增强代码块
+   * 流式模式下使用更轻量的处理方式
+   */
   private enhanceCodeBlocks(element: HTMLElement): void {
-    const codeBlocks = element.querySelectorAll<HTMLPreElement>('pre:not([data-enhanced])');
-    codeBlocks.forEach(pre => this.enhanceCodeBlock(pre));
+    const selector = this.options.streamingMode 
+      ? 'pre' // 流式模式：处理所有 pre，包括已增强的（用于更新）
+      : 'pre:not([data-enhanced])';
+    
+    const codeBlocks = element.querySelectorAll<HTMLPreElement>(selector);
+    
+    if (codeBlocks.length === 0) return;
+    
+    // 流式模式或少量代码块：同步处理
+    if (this.options.streamingMode || codeBlocks.length <= 5) {
+      codeBlocks.forEach(pre => this.enhanceCodeBlock(pre));
+      return;
+    }
+    
+    // 大量代码块：分批异步处理
+    let index = 0;
+    const batchSize = 5;
+    
+    const processBatch = () => {
+      const end = Math.min(index + batchSize, codeBlocks.length);
+      for (; index < end; index++) {
+        this.enhanceCodeBlock(codeBlocks[index]);
+      }
+      if (index < codeBlocks.length) {
+        requestAnimationFrame(processBatch);
+      }
+    };
+    
+    requestAnimationFrame(processBatch);
   }
 
   install(context: PluginContext): void {

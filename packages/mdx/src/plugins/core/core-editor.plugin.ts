@@ -169,14 +169,7 @@ export class CoreEditorPlugin implements MDxPlugin {
       extensions.push(foldGutter());
     }
 
-    // 选择区域绘制
-    extensions.push(drawSelection());
-
-    // 拖放光标显示
-    extensions.push(dropCursor());
-
-    // 当前行高亮
-    extensions.push(highlightActiveLine());
+    extensions.push(drawSelection(), dropCursor(), highlightActiveLine());
 
     // 多光标和多选择
     if (this.options.enableMultipleSelections) {
@@ -265,15 +258,15 @@ export class CoreEditorPlugin implements MDxPlugin {
     context.registerCodeMirrorExtension?.(coreExtensions);
 
     if (this.options.enableAutocompletion) {
-      // 延迟执行以确保其他插件（如自动补全源）有机会先注册
-      setTimeout(() => {
+      // 使用 queueMicrotask 替代 setTimeout，更快执行
+      queueMicrotask(() => {
         const pluginManager = context.pluginManager;
         if (pluginManager) {
           this.registerAutocompletion(context, pluginManager);
         } else {
           context.registerCodeMirrorExtension?.(autocompletion());
         }
-      }, 0);
+      });
     }
 
     const removeEditorInit = context.on('editorPostInit', this.onEditorInitialized.bind(this));
@@ -324,21 +317,48 @@ export class CoreEditorPlugin implements MDxPlugin {
    * 创建统一的补全源函数
    */
   private createUnifiedCompletionSource(sources: AutocompleteSourceConfig[]) {
+    // 预处理 sources，按触发字符分组以加速查找
+    const sourcesByTrigger = new Map<string, AutocompleteSourceConfig[]>();
+    for (const source of sources) {
+      const existing = sourcesByTrigger.get(source.triggerChar) || [];
+      existing.push(source);
+      sourcesByTrigger.set(source.triggerChar, existing);
+    }
+    
+    // 获取所有触发字符用于快速检查
+    const triggerChars = new Set(sourcesByTrigger.keys());
+
     return async (context: CompletionContext): Promise<CompletionResult | null> => {
       const { state, pos } = context;
-      const textBefore = state.sliceDoc(0, pos);
+      // [优化] 只提取当前行到光标位置的文本
+      const line = state.doc.lineAt(pos);
+      const lineStart = line.from;
+      const textInLine = state.sliceDoc(lineStart, pos);
+
+      // 快速检查：行内是否包含任何触发字符
+      let hasTrigger = false;
+      for (const trigger of triggerChars) {
+        if (textInLine.includes(trigger)) {
+          hasTrigger = true;
+          break;
+        }
+      }
+      if (!hasTrigger) return null;
 
       for (const sourceConfig of sources) {
         const { triggerChar, provider, applyTemplate, minQueryLength = 0 } = sourceConfig;
-        const match = this.matchTrigger(textBefore, triggerChar);
+        const match = this.matchTriggerInLine(textInLine, triggerChar);
 
         if (!match) continue;
 
-        const { start, query } = match;
+        const { localStart, query } = match;
         if (query.length < minQueryLength) continue;
 
         const suggestions = await provider.getSuggestions(query);
         if (suggestions.length === 0) continue;
+
+        // 计算文档中的实际起始位置
+        const absoluteStart = lineStart + localStart;
 
         const completions: Completion[] = suggestions.map((item) => {
           const completion: Completion = {
@@ -347,8 +367,8 @@ export class CoreEditorPlugin implements MDxPlugin {
             apply: (view: EditorView, _completion: Completion, _from: number, to: number) => {
               const text = applyTemplate(item);
               view.dispatch({
-                changes: { from: start, to, insert: text },
-                selection: { anchor: start + text.length },
+                changes: { from: absoluteStart, to, insert: text },
+                selection: { anchor: absoluteStart + text.length },
               });
             },
           };
@@ -358,14 +378,38 @@ export class CoreEditorPlugin implements MDxPlugin {
         });
 
         return {
-          from: start,
+          from: absoluteStart,
           options: completions,
           validFor: this.createValidForRegex(triggerChar),
-          filter: false, // 禁用客户端过滤，由 provider 完全控制
+          filter: false,
         };
       }
 
       return null;
+    };
+  }
+
+
+    /**
+   * [优化] 在行内文本中匹配触发字符
+   * 避免搜索整个文档
+     */
+  private matchTriggerInLine(lineText: string, triggerChar: string): { localStart: number; query: string } | null {
+    const lastTriggerIndex = lineText.lastIndexOf(triggerChar);
+    if (lastTriggerIndex === -1) return null;
+
+    // 检查触发字符前是否为空白或行首
+    const charBefore = lineText[lastTriggerIndex - 1];
+    if (charBefore && !/\s/.test(charBefore) && lastTriggerIndex > 0) return null;
+
+    const query = lineText.slice(lastTriggerIndex + triggerChar.length);
+    
+    // 查询中不能有空白
+    if (/\s/.test(query)) return null;
+
+    return {
+      localStart: lastTriggerIndex,
+      query,
     };
   }
 
@@ -375,24 +419,5 @@ export class CoreEditorPlugin implements MDxPlugin {
   private createValidForRegex(triggerChar: string): RegExp {
     const escaped = triggerChar.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     return new RegExp(`^${escaped}[\\w\\u4e00-\\u9fa5-]*$`);
-  }
-
-  /**
-   * 匹配触发字符和查询词
-   */
-  private matchTrigger(text: string, triggerChar: string): { start: number; query: string } | null {
-    const lastTriggerIndex = text.lastIndexOf(triggerChar);
-    if (lastTriggerIndex === -1) return null;
-
-    const charBefore = text[lastTriggerIndex - 1];
-    if (charBefore && !/\s/.test(charBefore) && lastTriggerIndex > 0) return null;
-
-    const query = text.slice(lastTriggerIndex + triggerChar.length);
-    if (/\s/.test(query)) return null;
-
-    return {
-      start: lastTriggerIndex,
-      query,
-    };
   }
 }
