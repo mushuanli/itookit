@@ -63,13 +63,13 @@
   "peerDependencies": {
     "@itookit/common": "workspace:*",
     "@itookit/mdxeditor": "workspace:*",
-    "@itookit/vfs-core": "workspace:*",
+    "@itookit/vfs": "workspace:*",
     "@itookit/vfs-ui": "workspace:*"
   },
   "devDependencies": {
     "@itookit/common": "workspace:*",
     "@itookit/mdxeditor": "workspace:*",
-    "@itookit/vfs-core": "workspace:*",
+    "@itookit/vfs": "workspace:*",
     "@itookit/vfs-ui": "workspace:*",
     "@types/node": "^20.19.25",
     "typescript": "^5.9.3",

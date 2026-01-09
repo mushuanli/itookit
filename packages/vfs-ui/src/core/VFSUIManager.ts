@@ -1,7 +1,7 @@
 /**
  * @file vfs-ui/core/VFSUIManager.ts
  * @description The main controller for the VFS-UI library. It initializes all
- * sub-components, bridges UI events with vfs-core data events, and provides
+ * sub-components, bridges UI events with vfs data events, and provides
  * a unified public API by implementing ISessionUI.
  */
 import {
@@ -53,6 +53,36 @@ const EVENT_MAP: Record<SessionManagerEvent, string> = {
 const DEFAULT_SETTINGS: UISettings = {
   sortBy: 'title', density: 'comfortable', showSummary: true, showTags: true, showBadges: true
 };
+
+/**
+ * 引擎事件 Payload 类型定义
+ */
+interface NodeCreatedPayload {
+  nodeId: string;
+  path?: string;
+}
+
+interface NodeDeletedPayload {
+  nodeId: string;
+  path?: string;
+  data?: {
+    removedIds?: string[];
+  };
+}
+
+interface BatchDeletedPayload {
+  removedIds: string[];
+}
+
+interface NodeUpdatedPayload {
+  nodeId: string;
+  path?: string;
+}
+
+interface BatchUpdatedPayload {
+  updatedNodeIds: string[];
+}
+
 
 /**
  * Manages the entire lifecycle and interaction of the VFS-UI components.
@@ -372,51 +402,65 @@ export class VFSUIManager extends ISessionUI<VFSNodeUI, VFSService> {
       const { type, payload } = event;
 
       switch (type) {
-        case 'node:created':
-          this.queues.create.add(payload.nodeId);
-          scheduleProcess(this.queues.create, 'create', 50);
+        case 'node:created': {
+          const data = payload as NodeCreatedPayload;
+          if (data.nodeId) {
+            this.queues.create.add(data.nodeId);
+            scheduleProcess(this.queues.create, 'create', 50);
+          }
           break;
-        case 'node:deleted':
-        // ✅ 修复：统一处理单个删除事件
-        // payload 结构: { nodeId, path, data: { removedIds: [...] } }
-        const singleDeleteIds = payload.data?.removedIds || [payload.nodeId];
-        singleDeleteIds.filter(Boolean).forEach((id: string) => this.queues.delete.add(id));
-        scheduleProcess(this.queues.delete, 'delete', 20);
-        break;
+        }
 
-      // ✅ 新增：处理批量删除事件
-      case 'node:batch_deleted':
-        // payload 结构: { removedIds: [...] } (已在 VFSModuleEngine 中统一)
-        const batchDeleteIds = payload.removedIds || [];
-        batchDeleteIds.forEach((id: string) => this.queues.delete.add(id));
+        case 'node:deleted': {
+          const data = payload as NodeDeletedPayload;
+          const removedIds = data.data?.removedIds || (data.nodeId ? [data.nodeId] : []);
+          removedIds.filter(Boolean).forEach(id => this.queues.delete.add(id));
           scheduleProcess(this.queues.delete, 'delete', 20);
           break;
-        case 'node:updated':
-          this.queues.update.add(payload.nodeId);
+        }
+
+        case 'node:batch_deleted': {
+          const data = payload as BatchDeletedPayload;
+          const batchDeleteIds = data.removedIds || [];
+          batchDeleteIds.forEach(id => this.queues.delete.add(id));
+          scheduleProcess(this.queues.delete, 'delete', 20);
+          break;
+        }
+
+        case 'node:updated': {
+          const data = payload as NodeUpdatedPayload;
+          if (data.nodeId) {
+            this.queues.update.add(data.nodeId);
+            scheduleProcess(this.queues.update, 'update', 50);
+          }
+          break;
+        }
+
+        case 'node:batch_updated': {
+          const data = payload as BatchUpdatedPayload;
+          data.updatedNodeIds?.forEach(id => this.queues.update.add(id));
           scheduleProcess(this.queues.update, 'update', 50);
           break;
-        case 'node:batch_updated':
-          payload.updatedNodeIds?.forEach((id: string) => this.queues.update.add(id));
-          scheduleProcess(this.queues.update, 'update', 50);
-          break;
+        }
+
         case 'node:moved':
-        case 'node:batch_moved':
+        case 'node:batch_moved': {
           this.loadData();
           this.store.dispatch({ type: 'MOVE_OPERATION_END' });
           break;
+        }
       }
     };
 
-  // ✅ 更新事件类型列表
-  const eventTypes: EngineEventType[] = [
-    'node:created', 
-    'node:updated', 
-    'node:deleted', 
-    'node:moved', 
-    'node:batch_updated', 
-    'node:batch_moved',
-    'node:batch_deleted'  // ✅ 新增
-  ];
+    const eventTypes: EngineEventType[] = [
+      'node:created', 
+      'node:updated', 
+      'node:deleted', 
+      'node:moved', 
+      'node:batch_updated', 
+      'node:batch_moved',
+      'node:batch_deleted'
+    ];
 
     const unsubs = eventTypes.map(type => this.engine.on(type, handleEvent));
     this.engineUnsubscribe = () => unsubs.forEach(u => u());

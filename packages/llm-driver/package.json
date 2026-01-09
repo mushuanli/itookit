@@ -60,7 +60,7 @@
 
   "dependencies": {
     "@itookit/common": "workspace:*",
-    "@itookit/vfs-core": "workspace:*",
+    "@itookit/vfs": "workspace:*",
     "js-yaml": "^4.1.1"
   },
   "devDependencies": {

@@ -78,7 +78,7 @@
     "@codemirror/state": "^6.5.2",
     "@codemirror/view": "^6.38.8",
     "@itookit/common": "workspace:*",
-    "@itookit/vfs-core": "workspace:*",
+    "@itookit/vfs": "workspace:*",
     "codemirror": "^6.0.2",
     "front-matter": "^4.0.2",
     "gray-matter": "^4.0.3",
@@ -88,10 +88,10 @@
     "turndown-plugin-gfm": "^1.0.2"
   },
   "peerDependencies": {
-    "@itookit/vfs-core": "workspace:*"
+    "@itookit/vfs": "workspace:*"
   },
   "devDependencies": {
-    "@itookit/vfs-core": "workspace:*",
+    "@itookit/vfs": "workspace:*",
     "@types/node": "^20.19.25",
     "@types/turndown": "^5.0.6",
     "typescript": "^5.9.3",

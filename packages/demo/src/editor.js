@@ -964,7 +964,7 @@ Let's check the technical specs too: @Technical Spec
 });
 
 /*
-import { getVFSManager,VFSPersistenceAdapter } from '@itookit/vfs-core';
+import { getVFSManager,VFSPersistenceAdapter } from '@itookit/vfs';
 import { MemoryPluginV2 } from './plugins/MemoryPlugin.v2.js';
 
 async function initEditor() {
@@ -1000,7 +1000,7 @@ async function initEditor() {
 
 示例 A：使用 VFSCore（推荐）
 
-import { getVFSManager } from '@itookit/vfs-core';
+import { getVFSManager } from '@itookit/vfs';
 import { MDxEditor } from '@itookit/mdxeditor';
 import { MemoryPluginV2 } from './plugins/MemoryPlugin.v2.js';
 

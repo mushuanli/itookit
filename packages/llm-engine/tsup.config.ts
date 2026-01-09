@@ -10,6 +10,6 @@ export default defineConfig({
     '@itookit/common',
     '@itookit/llm-driver',
     '@itookit/llm-kernel',
-    '@itookit/vfs-core'
+    '@itookit/vfs'
   ]
 });

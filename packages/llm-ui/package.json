@@ -67,7 +67,7 @@
     "@itookit/common": "workspace:*",
     "@itookit/llm-driver": "workspace:*",
     "@itookit/llm-engine": "workspace:*",
-    "@itookit/vfs-core": "workspace:*",
+    "@itookit/vfs": "workspace:*",
     "js-yaml": "^4.1.1",
     "marked": "^12.0.2"
   },

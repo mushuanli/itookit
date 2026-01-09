@@ -1,0 +1,84 @@
+{
+  "name": "@itookit/vfs",
+  "version": "1.0.1",
+  "description": "A powerful virtual file system manager with plugin architecture for browser-based applications using IndexedDB",
+  "type": "module",
+  "main": "./src/index.ts",
+  "module": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "publishConfig": {
+    "access": "public",
+    "main": "./dist/index.js",
+    "module": "./dist/index.mjs",
+    "types": "./dist/index.d.ts",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.mjs",
+        "require": "./dist/index.js"
+      }
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "type-check": "tsc --noEmit",
+    "prepublishOnly": "pnpm test && pnpm build"
+  },
+  "keywords": [
+    "vfs",
+    "virtual-file-system",
+    "indexeddb",
+    "file-manager",
+    "content-provider",
+    "plugin-architecture",
+    "browser-storage",
+    "note-taking",
+    "srs",
+    "task-management",
+    "typescript"
+  ],
+  "author": "lizlok@gmail.com",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mushuanli/itookit.git",
+    "directory": "packages/vfs"
+  },
+  "bugs": {
+    "url": "https://github.com/mushuanli/itookit/issues"
+  },
+  "homepage": "https://github.com/mushuanli/itookit/tree/main/packages/vfs#readme",
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "dependencies": {
+    "@itookit/common": "workspace:*",
+    "uuid": "^10.0.0"
+  },
+  "devDependencies": {
+    "@types/uuid": "^10.0.0",
+    "@vitest/coverage-v8": "^1.6.1",
+    "fake-indexeddb": "^6.2.5",
+    "jsdom": "^27.2.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.4",
+    "vite-plugin-dts": "^4.5.4",
+    "vitest": "^1.6.1"
+  }
+}

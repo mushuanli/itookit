@@ -64,7 +64,7 @@
   },
   "peerDependencies": {
     "@itookit/common": "workspace:*",
-    "@itookit/vfs-core": "workspace:*",
+    "@itookit/vfs": "workspace:*",
     "@itookit/llm-kernel": "workspace:*",
     "@itookit/llm-driver": "workspace:*"
   },
@@ -72,7 +72,7 @@
     "@itookit/common": "workspace:*",
     "@itookit/llm-driver": "workspace:*",
     "@itookit/llm-kernel": "workspace:*",
-    "@itookit/vfs-core": "workspace:*"
+    "@itookit/vfs": "workspace:*"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",

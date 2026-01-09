@@ -17,7 +17,7 @@ export default defineConfig({
             '@itookit/app-settings/style.css': path.resolve(__dirname, '../../packages/app-settings/src/styles/styles.css'),
 
             '@itookit/common': path.resolve(__dirname, '../../packages/common/src/index.ts'),
-            '@itookit/vfs-core': path.resolve(__dirname, '../../packages/vfs-core/src/index.ts'),
+            '@itookit/vfs': path.resolve(__dirname, '../../packages/vfs/src/index.ts'),
             '@itookit/mdxeditor': path.resolve(__dirname, '../../packages/mdx/src/index.ts'),
             '@itookit/vfs-ui': path.resolve(__dirname, '../../packages/vfs-ui/src/index.ts'),
             '@itookit/llm-driver': path.resolve(__dirname, '../../packages/llm-driver/src/index.ts'),
@@ -64,7 +64,7 @@ export default defineConfig({
             // 如果这些包 main 指向的是 .ts 源码，建议从这里移除，
             // 让 Vite 直接把它们当源码处理，这样热更新 (HMR) 会更快。
             // '@itookit/common', 
-            // '@itookit/vfs-core',
+            // '@itookit/vfs',
             // ...
             
             // 建议保留第三方纯 JS 库的预构建

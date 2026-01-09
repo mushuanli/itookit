@@ -14,8 +14,12 @@ import type {
 } from './plugin';
 
 /**
- * ✨ [新增] 基于 Engine 的元数据存储实现
- * 替代了原有的 VFSStore，解耦了具体的 VFS 实现
+ * 插件数据存储类型
+ */
+type PluginDataRecord = Record<string, unknown>;
+
+/**
+ * ✨ 基于 Engine 的元数据存储实现
  */
 class EngineMetadataStore implements ScopedPersistenceStore {
   constructor(
@@ -28,12 +32,13 @@ class EngineMetadataStore implements ScopedPersistenceStore {
     return `_mdx_plugin_${this.pluginNamespace}`;
   }
 
-  async get(key: string): Promise<any> {
+  async get(key: string): Promise<unknown> {
     try {
       const node = await this.engine.getNode(this.nodeId);
       if (!node) return undefined;
 
-      const pluginData = node.metadata?.[this.getMetaKey()];
+      const metaKey = this.getMetaKey();
+      const pluginData = node.metadata?.[metaKey] as PluginDataRecord | undefined;
       return pluginData?.[key];
     } catch (error) {
       console.warn(`EngineMetadataStore: Failed to get key "${key}"`, error);
@@ -41,7 +46,7 @@ class EngineMetadataStore implements ScopedPersistenceStore {
     }
   }
 
-  async set(key: string, value: any): Promise<void> {
+  async set(key: string, value: unknown): Promise<void> {
     try {
       // 1. 获取最新节点数据
       const node = await this.engine.getNode(this.nodeId);
@@ -50,14 +55,13 @@ class EngineMetadataStore implements ScopedPersistenceStore {
       // 2. 准备数据
       const metaKey = this.getMetaKey();
       const currentMetadata = node.metadata || {};
-      const pluginData = currentMetadata[metaKey] || {};
+      const pluginData = (currentMetadata[metaKey] as PluginDataRecord) || {};
       
       pluginData[key] = value;
       
-      // 3. 构建新的元数据对象（保留其他元数据）
-      const newMetadata = {
-          ...currentMetadata,
-          [metaKey]: pluginData,
+      const newMetadata: Record<string, unknown> = {
+        ...currentMetadata,
+        [metaKey]: pluginData,
       };
 
       // 4. 调用 Engine 更新
@@ -75,13 +79,13 @@ class EngineMetadataStore implements ScopedPersistenceStore {
 
       const metaKey = this.getMetaKey();
       const currentMetadata = node.metadata || {};
-      const pluginData = currentMetadata[metaKey];
+      const pluginData = currentMetadata[metaKey] as PluginDataRecord | undefined;
       
-      if (pluginData && key in pluginData) {
+      if (pluginData && typeof pluginData === 'object' && key in pluginData) {
         delete pluginData[key];
-        const newMetadata = {
-            ...currentMetadata,
-            [metaKey]: pluginData,
+        const newMetadata: Record<string, unknown> = {
+          ...currentMetadata,
+          [metaKey]: pluginData,
         };
         await this.engine.updateMetadata(this.nodeId, newMetadata);
       }

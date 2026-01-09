@@ -3,7 +3,7 @@
 // 假设浏览器环境配置了 import map 或者使用 Vite
 
 // --- 模拟导入 ---
-import { createVFSCore, VFSEventType } from '@itookit/vfs-core'; // [修正] 导入工厂函数
+import { createVFSCore, VFSEventType } from '@itookit/vfs'; // [修正] 导入工厂函数
 import { MemoryManager } from '@itookit/memory-manager';
 import '@itookit/memory-manager/style.css';
 import { createMDxEditor } from '@itookit/mdxeditor';

@@ -18,7 +18,7 @@ export default defineConfig({
 
       // ========== 包别名（指向源码）==========
       '@itookit/common': path.resolve(__dirname, '../../packages/common/src/index.ts'),
-      '@itookit/vfs-core': path.resolve(__dirname, '../../packages/vfs-core/src/index.ts'),
+      '@itookit/vfs': path.resolve(__dirname, '../../packages/vfs/src/index.ts'),
       '@itookit/mdxeditor': path.resolve(__dirname, '../../packages/mdx/src/index.ts'),
       '@itookit/vfs-ui': path.resolve(__dirname, '../../packages/vfs-ui/src/index.ts'),
       '@itookit/llm-driver': path.resolve(__dirname, '../../packages/llm-driver/src/index.ts'),
@@ -43,7 +43,7 @@ export default defineConfig({
     // 排除 workspace 包，让 Vite 直接处理源码
     exclude: [
       '@itookit/common',
-      '@itookit/vfs-core',
+      '@itookit/vfs',
       '@itookit/mdxeditor',
       '@itookit/vfs-ui',
       '@itookit/llm-driver',
