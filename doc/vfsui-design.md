@@ -2,7 +2,7 @@
 
 ## 一、架构概览
 
-将 sidebar 重构为 **vfs-ui**，作为 vfs-core 的通用呈现层，支持多种内容类型和编辑器。
+将 sidebar 重构为 **vfs-ui**，作为 vfs 的通用呈现层，支持多种内容类型和编辑器。
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -12,7 +12,7 @@
     ┌────────────┴────────────┐
     │                         │
 ┌───▼──────┐          ┌──────▼─────┐
-│  vfs-ui  │◄────────►│  vfs-core  │
+│  vfs-ui  │◄────────►│  vfs  │
 │ (呈现层)  │          │  (数据层)   │
 └────┬─────┘          └────────────┘
      │
@@ -226,7 +226,7 @@ class VFSUIManager implements IVFSUIManager {
   }
 
   private _bindVFSEvents(): void {
-    // 监听 vfs-core 事件
+    // 监听 vfs 事件
     this.vfs.on('vnode:created', ({ vnode }) => {
       if (vnode.module === this.module) {
         this.treeView.refresh();
@@ -477,11 +477,11 @@ class VFSTreeView extends BaseComponent {
 ### 1. 基础使用
 
 ```typescript
-import { getVFSManager } from '@itookit/vfs-core';
+import { getVFSManager } from '@itookit/vfs';
 import { VFSUIManager } from '@itookit/vfs-ui';
 import { MarkdownEditor } from './editors/MarkdownEditor';
 
-// 初始化 vfs-core
+// 初始化 vfs
 const vfs = getVFSManager();
 await vfs.init();
 await vfs.mount('notes');

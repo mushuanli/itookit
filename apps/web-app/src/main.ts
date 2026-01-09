@@ -6,7 +6,7 @@ import { MemoryManager } from '@itookit/memory-manager';
 import { initVFS } from './services/vfs';
 import { WORKSPACES } from './config/modules';
 import { FileTypeDefinition } from '@itookit/vfs-ui';
-import { NavigationRequest } from '@itookit/common'; // 确保已在 common 中导出
+import { NavigationRequest } from '@itookit/common';
 
 // 模块引入
 import { createSettingsModule } from '@itookit/app-settings';
@@ -91,8 +91,8 @@ async function bootstrap() {
         // 这告诉 TS：这里面的所有值都遵循 WorkspaceStrategy 接口
         // 即使 Standard 策略没写 getEngine，访问它也是安全的（返回 undefined）
         const strategies: Record<string, WorkspaceStrategy> = {
-            'standard': new StandardWorkspaceStrategy(),
-            'agent':    new AgentWorkspaceStrategy(),
+            'standard': new StandardWorkspaceStrategy(vfsCore),      // ← 传入 vfs
+            'agent':    new AgentWorkspaceStrategy(vfsCore),         // ← 传入 vfs
             'settings': new SettingsWorkspaceStrategy(settingsModule.factory, settingsModule.engine),
             'chat':     new ChatWorkspaceStrategy(llmFactory, sessionEngine)
         };

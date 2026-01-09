@@ -42,7 +42,6 @@
   "keywords": [
     "vfs",
     "vfs-ui",
-    "vfs-core",
     "virtual-file-system",
     "ui-components",
     "tree-view",
@@ -72,10 +71,10 @@
     "immer": "^10.2.0"
   },
   "peerDependencies": {
-    "@itookit/vfs-core": "workspace:*"
+    "@itookit/vfs": "workspace:*"
   },
   "devDependencies": {
-    "@itookit/vfs-core": "workspace:*",
+    "@itookit/vfs": "workspace:*",
     "@types/node": "^20.19.25",
     "@vitest/coverage-v8": "^1.6.1",
     "typescript": "^5.9.3",

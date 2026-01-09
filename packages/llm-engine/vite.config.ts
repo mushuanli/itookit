@@ -22,13 +22,13 @@ export default defineConfig({
       external: [
         '@itookit/llm-kernel',
         '@itookit/llm-driver',
-        '@itookit/vfs-core'
+        '@itookit/vfs'
       ],
       output: {
         globals: {
           '@itookit/llm-kernel': 'LLMKernel',
           '@itookit/llm-driver': 'LLMDriver',
-          '@itookit/vfs-core': 'VFSCore'
+          '@itookit/vfs': 'VFSCore'
         }
       }
     },

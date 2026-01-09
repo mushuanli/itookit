@@ -29,7 +29,9 @@ export {
     type EngineSearchQuery,
     type EngineEventType,
     type EngineEvent,
-    type ISessionEngine
+    type ISessionEngine,
+    type NodeType,
+    type SRSItemData
 } from './interfaces/ISessionEngine';
 
 export { ISettingsWidget } from './interfaces/ISettingsWidget';

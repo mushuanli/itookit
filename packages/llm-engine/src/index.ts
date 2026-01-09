@@ -13,7 +13,7 @@
  * 依赖：
  * - @itookit/llm-kernel (执行引擎)
  * - @itookit/llm-driver (LLM 通信)
- * - @itookit/vfs-core (文件系统)
+ * - @itookit/vfs (文件系统)
  * - @itookit/common (公共接口和工具)
  */
 

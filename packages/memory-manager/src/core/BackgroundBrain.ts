@@ -5,11 +5,23 @@ import { FileMentionSource } from '@itookit/vfs-ui';
 import { MDxProcessor, ProcessResult } from '@itookit/mdxeditor';
 import type { ISessionEngine, EngineEvent } from '@itookit/common';
 
+/**
+ * 节点更新事件的 payload 类型
+ */
+interface NodeUpdatePayload {
+    nodeId: string;
+    path?: string;
+    data?: {
+        metadataOnly?: boolean;
+        [key: string]: unknown;
+    };
+}
+
 export class BackgroundBrain {
     private processor: MDxProcessor;
     private isProcessing = false;
     // 使用简单的防抖计时器
-    private debounceTimers = new Map<string, any>();
+    private debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
     private unsubscribe: (() => void) | null = null;
 
     // [修改] 接收 ISessionEngine 接口
@@ -35,18 +47,21 @@ export class BackgroundBrain {
     }
 
     private handleNodeUpdate = (event: EngineEvent) => {
-        // ✨ [修复] 核心修复点：
-        // 如果更新事件仅仅是元数据变更（例如 AI 自己刚刚更新了 _ai_last_scan，或者用户改了标题/标签），
-        // 且没有修改文件内容，则忽略此次事件，防止死循环。
-        // VFSCore 在 updateMetadata 时会发出 { metadataOnly: true }
-        if (event.payload.data?.metadataOnly) {
+        // ✅ 类型断言：将 unknown 转为具体类型
+        const payload = event.payload as NodeUpdatePayload | null;
+        
+        if (!payload || !payload.nodeId) {
             return;
         }
 
-        // [修改] 通过 Adapter 转发的事件，原始 VFSEvent 在 payload 中
-        const nodeId = event.payload.nodeId;
+        // 如果更新事件仅仅是元数据变更，忽略此次事件，防止死循环
+        if (payload.data?.metadataOnly) {
+            return;
+        }
 
-        // 1. 防抖：如果在 2秒内连续触发 (例如用户正在打字)，只处理最后一次
+        const nodeId = payload.nodeId;
+
+        // 防抖：如果在 2秒内连续触发，只处理最后一次
         if (this.debounceTimers.has(nodeId)) {
             clearTimeout(this.debounceTimers.get(nodeId));
         }
@@ -68,11 +83,11 @@ export class BackgroundBrain {
             // 3. 检查是否需要处理 (防止死循环)
             // 如果最近一次更新是我们自己 (AI) 触发的，且距离现在很近，则跳过
             const lastAiScan = node.metadata?._ai_last_scan;
-            const lastModified = new Date(node.modifiedAt).getTime();
+            const lastModified = node.modifiedAt; // 已经是 number (timestamp)
             
             // 如果 AI 扫描时间比文件最后修改时间还晚，说明内容没变，只是 metadata 变了
             // 或者这次变更就是 AI 写入 metadata 导致的
-            if (lastAiScan && lastAiScan >= lastModified) {
+            if (typeof lastAiScan === 'number' && lastAiScan >= lastModified) {
                 return; 
             }
 
@@ -90,8 +105,8 @@ export class BackgroundBrain {
                 }
             });
 
-            // 5. 更新元数据
-            const newMetadata = {
+            // 更新元数据
+            const newMetadata: Record<string, unknown> = {
                 ...(node.metadata || {}),
                 ...result.metadata,
                 _ai_last_scan: Date.now(),

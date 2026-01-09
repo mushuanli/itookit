@@ -10,7 +10,7 @@
  * @typedef {import('@itookit/common').ISessionUI} ISessionUI
  * @typedef {import('@itookit/vfs-ui').VFSNodeUI} VFSNodeUI 
  * @typedef {import('@itookit/vfs-ui').VFSService} VFSService
- * @typedef {import('@itookit/vfs-core').VFSCore} VFSCore
+ * @typedef {import('@itookit/vfs').VFSCore} VFSCore
  */
 
 // --- 导入 VFS-UI 库 ---
@@ -23,8 +23,8 @@ import '@itookit/vfs-ui/style.css';
 import { createMDxEditor } from '@itookit/mdxeditor';
 import '@itookit/mdxeditor/style.css';
 
-// --- 导入 vfs-core 的便利函数 ---
-import { createVFSCore,VFSModuleEngine } from '@itookit/vfs-core';
+// --- 导入 vfs 的便利函数 ---
+import { createVFSCore,VFSModuleEngine } from '@itookit/vfs';
 
 //-----------------------------------------------------------------
 
@@ -146,12 +146,12 @@ function setupAppUIHandlers(vfsUIManager, vfsCore) {
 async function main() {
     const moduleName = 'notes';
     
-    // --- 步骤 1: 初始化 vfs-core ---
+    // --- 步骤 1: 初始化 vfs ---
     const vfsCore = await createVFSCore({
         dbName: 'VFS_Demo_MindOS_Connector',
         defaultModule: moduleName
     });
-    console.log('vfs-core initialized and "notes" module is ready.');
+    console.log('vfs initialized and "notes" module is ready.');
 
     // 初始化引擎适配器 (ISessionEngine 实现)
     const engine = new VFSModuleEngine(moduleName);
