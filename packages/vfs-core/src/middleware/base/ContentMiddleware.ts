@@ -3,10 +3,11 @@
  * @file vfs/middleware/base/ContentMiddleware.ts
  * 内容提供者基类和工厂
  */
-import { VNodeData, Transaction } from '../../store/types';
+import { VNodeData } from '../../store/types';
 import { VFSStorage } from '../../store/VFSStorage';
 import { EventBus } from '../../core/EventBus';
 import { IVFSMiddleware } from '../../core/types';
+import { ITransaction } from '../../storage/interfaces/IStorageAdapter';
 
 /**
  * 内容中间件基类
@@ -43,21 +44,18 @@ export abstract class ContentMiddleware implements IVFSMiddleware {
   /**
    * 验证内容
    */
-  async onValidate?(
-    vnode: VNode,
-    content: string | ArrayBuffer
-  ): Promise<void>;
+  async onValidate?(_vnode: VNodeData, _content: string | ArrayBuffer): Promise<void>;
 
   /**
    * 读取内容前处理
    */
-  async onBeforeRead?(vnode: VNode): Promise<void>;
+  async onBeforeRead?(_vnode: VNodeData): Promise<void>;
 
   /**
    * 读取内容后处理
    */
   async onAfterRead?(
-    vnode: VNode,
+    _vnode: VNodeData,
     content: string | ArrayBuffer
   ): Promise<string | ArrayBuffer>;
 
@@ -65,34 +63,35 @@ export abstract class ContentMiddleware implements IVFSMiddleware {
    * 写入前处理内容
    */
   async onBeforeWrite?(
-    vnode: VNode,
+    _vnode: VNodeData,
     content: string | ArrayBuffer,
-    transaction: Transaction
+    _tx: ITransaction
   ): Promise<string | ArrayBuffer>;
 
   /**
    * 写入后处理（提取派生数据）
    */
   async onAfterWrite?(
-    vnode: VNode,
-    content: string | ArrayBuffer,
-    transaction: Transaction
-  ): Promise<Record<string, any>>;
+    _vnode: VNodeData,
+    _content: string | ArrayBuffer,
+    _tx: ITransaction
+  ): Promise<Record<string, unknown>>;
 
-  /**
-   * 删除前清理
-   */
-  async onBeforeDelete?(
-    vnode: VNode,
-    transaction: Transaction
+  async onBeforeDelete?(_vnode: VNodeData, _tx: ITransaction): Promise<void>;
+
+  async onAfterDelete?(_vnode: VNodeData, _tx: ITransaction): Promise<void>;
+
+  async onAfterMove?(
+    _vnode: VNodeData,
+    _oldPath: string,
+    _newPath: string,
+    _tx: ITransaction
   ): Promise<void>;
 
-  /**
-   * 删除后清理
-   */
-  async onAfterDelete?(
-    vnode: VNode,
-    transaction: Transaction
+  async onAfterCopy?(
+    _sourceNode: VNodeData,
+    _targetNode: VNodeData,
+    _tx: ITransaction
   ): Promise<void>;
 
   /**
