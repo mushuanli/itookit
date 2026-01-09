@@ -1,25 +1,49 @@
 /**
  * @file apps/web-app/src/services/vfs.ts
  */
-import { createVFSCore, VFSCore } from '@itookit/vfs-core';
+import { 
+  VFS, 
+  createBrowserVFSWithAPI,
+  StorageManager,
+  IndexedDBAdapter 
+} from '@itookit/vfs';
 import { WORKSPACES } from '../config/modules';
 
-let vfsInstance: VFSCore | null = null;
+let vfsInstance: VFS | null = null;
 
-export async function initVFS(): Promise<VFSCore> {
+/**
+ * 初始化 VFS
+ * 使用浏览器预设，自动配置 IndexedDB 存储和标准插件
+ */
+export async function initVFS(): Promise<VFS> {
     if (vfsInstance) return vfsInstance;
 
     // 1. 创建或打开数据库
     console.log('Initializing VFS...');
-    vfsInstance = await createVFSCore('MindOS');
+
+    // ✅ 手动注册 IndexedDB 适配器（在创建 VFS 之前）
+    StorageManager.registerAdapter('indexeddb', (config, schemas) => {
+      return new IndexedDBAdapter(
+        (config.dbName as string) ?? 'vfs_database',
+        (config.version as number) ?? 1,
+        schemas
+      );
+    });
+
+    const vfs = await createBrowserVFSWithAPI({
+        dbName: 'MindOS',
+        dbVersion:7,
+        defaultModule: WORKSPACES[0]?.moduleName || 'default',
+        enableTags: true,
+        enableAssets: true
+    });
 
     // 2. 确保所有工作区对应的模块都已挂载
     for (const ws of WORKSPACES) {
-        const exists = vfsInstance.getModule(ws.moduleName);
+        const exists = vfs.getModule(ws.moduleName);
         if (!exists) {
             try {
-                // [修改] 传递对象参数
-                await vfsInstance.mount(ws.moduleName, {
+                await vfs.mount(ws.moduleName, {
                     description: ws.title,
                     isProtected: ws.isProtected
                 });
@@ -27,11 +51,32 @@ export async function initVFS(): Promise<VFSCore> {
             } catch (e) {
                 console.error(`Failed to mount ${ws.moduleName}`, e);
             }
-        } else {
-            // [可选] 如果模块已存在，检查是否需要更新属性
-            // vfsInstance.updateModule(ws.moduleName, { isProtected: ws.isProtected });
         }
     }
 
+    // ✅ 最后赋值给模块变量
+    vfsInstance = vfs;
     return vfsInstance;
+}
+
+/**
+ * 获取 VFS 实例
+ * 如果未初始化则抛出错误
+ */
+export function getVFS(): VFS {
+    if (!vfsInstance) {
+        throw new Error('VFS not initialized. Call initVFS() first.');
+    }
+    return vfsInstance;
+}
+
+/**
+ * 关闭 VFS
+ */
+export async function shutdownVFS(): Promise<void> {
+    if (vfsInstance) {
+        await vfsInstance.shutdown();
+        vfsInstance = null;
+        console.log('VFS shutdown complete.');
+    }
 }

@@ -2,7 +2,7 @@
 // 导出样式 (需要在 web-app 中 import '@itookit/settings/style.css')
 // 注意：你需要配置构建工具支持 css 导出，或者直接拷贝 css 文件
 import './styles/styles.css';
-import { VFSCore } from '@itookit/vfs-core';
+import {    VFS } from '@itookit/vfs';
 import { VFSAgentService } from '@itookit/llm-ui';
 import { SettingsService } from './services/SettingsService';
 import { SettingsEngine } from './engine/SettingsEngine'; 
@@ -17,7 +17,7 @@ export * from './types';
  * [Facade] Settings 模块聚合初始化函数
  * 统一管理内部依赖顺序 (Service -> Engine -> Factory)
  */
-export async function createSettingsModule(vfs: VFSCore, agentService: VFSAgentService) {
+export async function createSettingsModule(vfs: VFS, agentService: VFSAgentService) {
     // 1. 初始化数据服务
     const service = new SettingsService(vfs);
     await service.init();

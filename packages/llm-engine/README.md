@@ -55,7 +55,7 @@ pnpm add @itookit/llm-engine
 ### 1. 初始化
 
 ```typescript
-import { VFSCore } from '@itookit/vfs-core';
+import { VFSCore } from '@itookit/vfs';
 import { 
     initializeLLMEngine, 
     VFSAgentService, 
@@ -1197,7 +1197,7 @@ registry.debug();
 |----|------|------|
 | `@itookit/llm-kernel` | workspace:* | 执行引擎 |
 | `@itookit/llm-driver` | workspace:* | LLM 通信 |
-| `@itookit/vfs-core` | workspace:* | 虚拟文件系统 |
+| `@itookit/vfs` | workspace:* | 虚拟文件系统 |
 
 ## 许可证
 

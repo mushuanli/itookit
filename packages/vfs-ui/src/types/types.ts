@@ -32,7 +32,7 @@ export interface ParseResult {
 
 /**
  * The UI's internal representation of a VFS node.
- * This is the primary view model derived from a vfs-core VNode.
+ * This is the primary view model derived from a vfs VNode.
  */
 export interface VFSNodeUI {
   id: string;

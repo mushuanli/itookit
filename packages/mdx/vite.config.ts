@@ -8,7 +8,7 @@ export default defineConfig(
     rootDir: __dirname,
     external: [
       '@itookit/common',
-      '@itookit/vfs-core',
+      '@itookit/vfs',
       // 建议保留正则作为兜底，但必须显式添加报错的包
       /^@codemirror\//,      
       'codemirror',
@@ -28,7 +28,7 @@ export default defineConfig(
     ],
     globals: {
       '@itookit/common': 'ItookitCommon',
-      '@itookit/vfs-core': 'VFSCore',
+      '@itookit/vfs': 'VFSCore',
       'codemirror': 'CodeMirror',
       'marked': 'marked',
       'mermaid': 'mermaid',

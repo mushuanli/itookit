@@ -78,9 +78,9 @@ importers:
       '@itookit/memory-manager':
         specifier: workspace:*
         version: link:../../packages/memory-manager
-      '@itookit/vfs-core':
+      '@itookit/vfs':
         specifier: workspace:*
-        version: link:../../packages/vfs-core
+        version: link:../../packages/vfs
       '@itookit/vfs-ui':
         specifier: workspace:*
         version: link:../../packages/vfs-ui
@@ -124,9 +124,9 @@ importers:
       '@itookit/llm-ui':
         specifier: workspace:*
         version: link:../llm-ui
-      '@itookit/vfs-core':
+      '@itookit/vfs':
         specifier: workspace:*
-        version: link:../vfs-core
+        version: link:../vfs
       '@types/node':
         specifier: ^20.19.25
         version: 20.19.25
@@ -196,9 +196,9 @@ importers:
       '@itookit/memory-manager':
         specifier: workspace:*
         version: link:../memory-manager
-      '@itookit/vfs-core':
+      '@itookit/vfs':
         specifier: workspace:*
-        version: link:../vfs-core
+        version: link:../vfs
       '@itookit/vfs-ui':
         specifier: workspace:*
         version: link:../vfs-ui
@@ -230,9 +230,9 @@ importers:
       '@itookit/common':
         specifier: workspace:*
         version: link:../common
-      '@itookit/vfs-core':
+      '@itookit/vfs':
         specifier: workspace:*
-        version: link:../vfs-core
+        version: link:../vfs
       js-yaml:
         specifier: ^4.1.1
         version: 4.1.1
@@ -264,9 +264,9 @@ importers:
       '@itookit/llm-kernel':
         specifier: workspace:*
         version: link:../llm-kernel
-      '@itookit/vfs-core':
+      '@itookit/vfs':
         specifier: workspace:*
-        version: link:../vfs-core
+        version: link:../vfs
     devDependencies:
       '@types/js-yaml':
         specifier: ^4.0.9
@@ -332,9 +332,9 @@ importers:
       '@itookit/llm-engine':
         specifier: workspace:*
         version: link:../llm-engine
-      '@itookit/vfs-core':
+      '@itookit/vfs':
         specifier: workspace:*
-        version: link:../vfs-core
+        version: link:../vfs
       js-yaml:
         specifier: ^4.1.1
         version: 4.1.1
@@ -399,9 +399,9 @@ importers:
       '@itookit/common':
         specifier: workspace:*
         version: link:../common
-      '@itookit/vfs-core':
+      '@itookit/vfs':
         specifier: workspace:*
-        version: link:../vfs-core
+        version: link:../vfs
       codemirror:
         specifier: ^6.0.2
         version: 6.0.2
@@ -452,9 +452,9 @@ importers:
       '@itookit/mdxeditor':
         specifier: workspace:*
         version: link:../mdx
-      '@itookit/vfs-core':
+      '@itookit/vfs':
         specifier: workspace:*
-        version: link:../vfs-core
+        version: link:../vfs
       '@itookit/vfs-ui':
         specifier: workspace:*
         version: link:../vfs-ui
@@ -471,7 +471,41 @@ importers:
         specifier: ^3.9.1
         version: 3.9.1(@types/node@20.19.25)(rollup@4.53.3)(typescript@5.9.3)(vite@5.4.21(@types/node@20.19.25))
 
-  packages/vfs-core:
+  packages/tmp:
+    dependencies:
+      '@itookit/common':
+        specifier: workspace:*
+        version: link:../common
+      uuid:
+        specifier: ^10.0.0
+        version: 10.0.0
+    devDependencies:
+      '@types/uuid':
+        specifier: ^10.0.0
+        version: 10.0.0
+      '@vitest/coverage-v8':
+        specifier: ^1.6.1
+        version: 1.6.1(vitest@1.6.1(@types/node@25.0.3)(jsdom@27.2.0))
+      fake-indexeddb:
+        specifier: ^6.2.5
+        version: 6.2.5
+      jsdom:
+        specifier: ^27.2.0
+        version: 27.2.0
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vite:
+        specifier: ^7.2.4
+        version: 7.2.4(@types/node@25.0.3)(jiti@1.21.7)(tsx@4.20.6)(yaml@2.8.1)
+      vite-plugin-dts:
+        specifier: ^4.5.4
+        version: 4.5.4(@types/node@25.0.3)(rollup@4.53.3)(typescript@5.9.3)(vite@7.2.4(@types/node@25.0.3)(jiti@1.21.7)(tsx@4.20.6)(yaml@2.8.1))
+      vitest:
+        specifier: ^1.6.1
+        version: 1.6.1(@types/node@25.0.3)(jsdom@27.2.0)
+
+  packages/vfs:
     dependencies:
       '@itookit/common':
         specifier: workspace:*
@@ -514,9 +548,9 @@ importers:
         specifier: ^10.2.0
         version: 10.2.0
     devDependencies:
-      '@itookit/vfs-core':
+      '@itookit/vfs':
         specifier: workspace:*
-        version: link:../vfs-core
+        version: link:../vfs
       '@types/node':
         specifier: ^20.19.25
         version: 20.19.25
@@ -3732,6 +3766,7 @@ packages:
   whatwg-encoding@3.1.1:
     resolution: {integrity: sha512-6qN4hJdMwfYBtE3YBTTHhoeuUrDBPZmbQaxWAqSALV/MeEnR5z1xd8UKud2RAkFoPkmB+hli1TZSnyi84xz1vQ==}
     engines: {node: '>=18'}
+    deprecated: Use @exodus/bytes instead for a more spec-conformant and faster implementation
 
   whatwg-mimetype@4.0.0:
     resolution: {integrity: sha512-QaKxh0eNIi2mE9p2vEdzfagOKHCcj1pJ56EEHGQOVxp8r9/iszLUUV7v89x9O1p/T+NlTM5W7jW6+cz4Fq1YVg==}

@@ -1,6 +1,6 @@
 /**
  * @file vfs-ui/mappers/NodeMapper.ts
- * @desc Maps data structures from vfs-core to vfs-ui's internal view models.
+ * @desc Maps data structures from vfs to vfs-ui's internal view models.
  */
 import type { EngineNode } from '@itookit/common';
 import type { VFSNodeUI, ParseResult } from '../types/types';

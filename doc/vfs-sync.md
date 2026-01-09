@@ -45,12 +45,12 @@ async mount(
 
 ```typescript
 // 示例：切换到 SQLite 存储
-import { createSQLiteVFS } from '@itookit/vfs-core';
+import { createSQLiteVFS } from '@itookit/vfs';
 
 vfsInstance = await createSQLiteVFS('./data/mindos.db', sqliteDriver);
 
 // 示例：启用远程同步
-import { createSyncableVFS } from '@itookit/vfs-core';
+import { createSyncableVFS } from '@itookit/vfs';
 
 vfsInstance = await createSyncableVFS('https://api.example.com/sync', {
   dbName: 'MindOS',
@@ -62,7 +62,7 @@ vfsInstance = await createSyncableVFS('https://api.example.com/sync', {
 });
 
 // 示例：使用内存存储进行测试
-import { createMemoryVFS } from '@itookit/vfs-core';
+import { createMemoryVFS } from '@itookit/vfs';
 
 vfsInstance = await createMemoryVFS({ defaultModule: 'test' });
 ```

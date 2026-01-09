@@ -1,17 +1,26 @@
 // @file: llm-engine/src/services/vfs-agent-service.ts
 
 import { 
-    BaseModuleService, 
-    VFSCore,
-    VFSEvent,
+    VFS,
+    BaseModuleService,
     VFSEventType
-} from '@itookit/vfs-core';
-import {
+} from '@itookit/vfs';
+import type {
     EngineNode,
+    EngineSearchQuery,
+} from '@itookit/common';
+import {
     FS_MODULE_AGENTS
 } from '@itookit/common';
-import { LLMConnection,AgentDefinition,  
-    CONST_CONFIG_VERSION,LLM_PROVIDER_DEFAULTS,DEFAULT_AGENTS, AGENT_DEFAULT_DIR } from '@itookit/llm-driver';
+import {    VFSEvent } from '@itookit/vfs';
+import { 
+    LLMConnection,
+    AgentDefinition,  
+    CONST_CONFIG_VERSION,
+    LLM_PROVIDER_DEFAULTS,
+    DEFAULT_AGENTS, 
+    AGENT_DEFAULT_DIR 
+} from '@itookit/llm-driver';
 import { 
     IAgentService, 
     MCPServer 
@@ -25,29 +34,26 @@ const VERSION_FILE = '/.defaults_version.json';
 const CONNECTIONS_DIR = '/.connections';
 const MCP_DIR = '/.mcp';
 
-type ChangeListener = () => void;
-
 // ============================================
 // VFSAgentService
 // ============================================
 
 /**
  * VFS Agent 服务
- * 继承 BaseModuleService，通过 moduleEngine 访问文件系统
+ * 继承 BaseModuleService，通过 engine 访问文件系统
  */
 export class VFSAgentService extends BaseModuleService implements IAgentService {
     private _connections: LLMConnection[] = [];
     private _mcpServers: MCPServer[] = [];
-    private _listeners = new Set<ChangeListener>();
     private _syncTimer: ReturnType<typeof setTimeout> | null = null;
     private _eventUnsubscribers: Array<() => void> = [];
     
-    constructor(vfs?: VFSCore) {
+    constructor(vfs: VFS) {
         super(FS_MODULE_AGENTS, { description: 'AI Agents Configuration' }, vfs);
     }
 
     /**
-     * 初始化钩子
+     * 初始化钩子 (BaseModuleService 调用)
      */
     protected async onLoad(): Promise<void> {
         await this.refreshData();
@@ -56,35 +62,33 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
     }
 
     /**
-     * 获取底层 VFS
-     */
-    private get coreVfs() {
-        return this.vfs.getVFS();
-    }
-
-    /**
      * 监听 VFS 事件
      */
     private bindVFSEvents(): void {
-        const bus = this.vfs.getEventBus();
-        
-        const eventsToWatch = [
+        const eventsToWatch: VFSEventType[] = [
             VFSEventType.NODE_CREATED,
             VFSEventType.NODE_UPDATED,
             VFSEventType.NODE_DELETED
         ];
 
         const handler = (event: VFSEvent) => {
-            if (event.moduleId && event.moduleId !== this.moduleName) {
+            const path = event.path || '';
+            
+            // 检查是否属于当前模块
+            const modulePrefix = `/${this.moduleName}`;
+            if (!path.startsWith(modulePrefix)) {
                 return;
             }
 
-            const path = event.path || '';
-            const isConnection = path.startsWith(CONNECTIONS_DIR);
-            const isMcp = path.startsWith(MCP_DIR);
-            const isAgent = path.endsWith('.agent');
+            // 获取模块内的相对路径
+            const relativePath = path.slice(modulePrefix.length);
+            
+            const isConnection = relativePath.startsWith(CONNECTIONS_DIR);
+            const isMcp = relativePath.startsWith(MCP_DIR);
+            const isAgent = relativePath.endsWith('.agent');
 
             if (isConnection || isMcp || isAgent) {
+                // 防抖刷新
                 if (this._syncTimer) clearTimeout(this._syncTimer);
                 
                 this._syncTimer = setTimeout(async () => {
@@ -93,8 +97,9 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
             }
         };
 
+        // 使用 VFS 的事件总线
         eventsToWatch.forEach(evt => {
-            const unsubscribe = bus.on(evt, handler);
+            const unsubscribe = this.vfs.on(evt, handler);
             this._eventUnsubscribers.push(unsubscribe);
         });
     }
@@ -106,7 +111,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
         try {
             this._connections = await this.loadJsonFiles<LLMConnection>(CONNECTIONS_DIR);
             this._mcpServers = await this.loadJsonFiles<MCPServer>(MCP_DIR);
-            this.notifyListeners();
+            this.notify();
         } catch (e) {
             console.error('[VFSAgentService] Failed to refresh data', e);
         }
@@ -254,8 +259,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
             const parentDir = agentDef.initPath || AGENT_DEFAULT_DIR;
             const fullPath = `${parentDir}/${filename}`.replace(/\/+/g, '/');
 
-            // 再次确认文件不存在（双重检查）
-            const fileExists = await this.fileExists(fullPath);
+            const fileExists = await this.engine.pathExists(fullPath);
             if (fileExists) {
                 continue;
             }
@@ -272,8 +276,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
                 // 确保目录存在
                 await this.ensureDirectory(parentDir);
                 
-                // 创建 agent 文件
-                const node = await this.moduleEngine.createFile(
+                const node = await this.engine.createFile(
                     filename,
                     parentDir,
                     JSON.stringify(content, null, 2),
@@ -286,7 +289,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
 
                 // 设置标签
                 if (initialTags && initialTags.length > 0 && node?.id) {
-                    await this.moduleEngine.setTags(node.id, initialTags);
+                    await this.engine.setTags(node.id, initialTags);
                 }
                 
                 console.log(`[VFSAgentService] Created default agent: ${agentDef.id} at ${fullPath}`);
@@ -349,21 +352,26 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
         const agents: AgentDefinition[] = [];
         
         try {
-            const nodes = await this.moduleEngine.search({ text: '.agent', type: 'file' });
+            // 使用正确的搜索查询类型
+            const query: EngineSearchQuery = { 
+                text: '.agent', 
+                type: 'file' 
+            };
+            const nodes = await this.engine.search(query);
             
             const promises = nodes.map(async (node: EngineNode) => {
                 if (!node.name.endsWith('.agent')) return null;
                 
                 try {
-                    const content = await this.moduleEngine.readContent(node.id);
+                    const content = await this.engine.readContent(node.id);
                     if (!content) return null;
                     
                     const jsonStr = typeof content === 'string' 
                         ? content 
-                        : new TextDecoder().decode(content);
+                        : new TextDecoder().decode(content as ArrayBuffer);
                     const data = JSON.parse(jsonStr) as AgentDefinition;
                     
-                    // 兼容旧数据 modelId -> modelName
+                    // 兼容旧数据
                     if ((data.config as any).modelId && !data.config.modelName) {
                         data.config.modelName = (data.config as any).modelId;
                     }
@@ -441,28 +449,29 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
             description: agent.description
         };
 
-        // 搜索现有文件
-        const results = await this.moduleEngine.search({ text: filename, type: 'file' });
+        const query: EngineSearchQuery = { text: filename, type: 'file' };
+        const results = await this.engine.search(query);
         const existingNode = results.find((n: EngineNode) => n.name === filename);
 
         if (existingNode) {
-            await this.moduleEngine.writeContent(existingNode.id, contentStr);
-            await this.moduleEngine.updateMetadata(existingNode.id, metadata);
+            await this.engine.writeContent(existingNode.id, contentStr);
+            await this.engine.updateMetadata(existingNode.id, metadata);
         } else {
-            await this.moduleEngine.createFile(filename, null, contentStr, metadata);
+            await this.engine.createFile(filename, null, contentStr, metadata);
         }
         
-        this.notifyListeners();
+        this.notify();
     }
 
     async deleteAgent(agentId: string): Promise<void> {
         const filename = `${agentId}.agent`;
-        const results = await this.moduleEngine.search({ text: filename, type: 'file' });
+        const query: EngineSearchQuery = { text: filename, type: 'file' };
+        const results = await this.engine.search(query);
         const node = results.find((n: EngineNode) => n.name === filename);
         
         if (node) {
-            await this.moduleEngine.delete([node.id]);
-            this.notifyListeners();
+            await this.engine.delete([node.id]);
+            this.notify();
         }
     }
 
@@ -504,18 +513,17 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
         // 确保目录存在
         await this.ensureDirectory(CONNECTIONS_DIR);
 
-        // 检查是否存在
-        const nodeId = await this.resolvePath(fullPath);
+        const nodeId = await this.engine.resolvePath(fullPath);
 
         if (nodeId) {
-            await this.moduleEngine.writeContent(nodeId, content);
-            await this.moduleEngine.updateMetadata(nodeId, { 
+            await this.engine.writeContent(nodeId, content);
+            await this.engine.updateMetadata(nodeId, { 
                 icon: '🔌', 
                 title: conn.name, 
                 type: 'connection' 
             });
         } else {
-            await this.moduleEngine.createFile(
+            await this.engine.createFile(
                 filename, 
                 CONNECTIONS_DIR, 
                 content, 
@@ -531,7 +539,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
             this._connections.push(conn);
         }
         
-        this.notifyListeners();
+        this.notify();
     }
 
     async deleteConnection(id: string): Promise<void> {
@@ -540,14 +548,14 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
         }
         
         const fullPath = `${CONNECTIONS_DIR}/${id}.json`;
-        const nodeId = await this.resolvePath(fullPath);
+        const nodeId = await this.engine.resolvePath(fullPath);
         
         if (nodeId) {
-            await this.moduleEngine.delete([nodeId]);
+            await this.engine.delete([nodeId]);
         }
         
         this._connections = this._connections.filter(c => c.id !== id);
-        this.notifyListeners();
+        this.notify();
     }
 
     // ================================================================
@@ -565,17 +573,17 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
 
         await this.ensureDirectory(MCP_DIR);
 
-        const nodeId = await this.resolvePath(fullPath);
+        const nodeId = await this.engine.resolvePath(fullPath);
 
         if (nodeId) {
-            await this.moduleEngine.writeContent(nodeId, content);
-            await this.moduleEngine.updateMetadata(nodeId, { 
+            await this.engine.writeContent(nodeId, content);
+            await this.engine.updateMetadata(nodeId, { 
                 icon: '🔌', 
                 title: server.name, 
                 type: 'mcp' 
             });
         } else {
-            await this.moduleEngine.createFile(
+            await this.engine.createFile(
                 filename, 
                 MCP_DIR, 
                 content, 
@@ -591,53 +599,41 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
             this._mcpServers.push(server);
         }
         
-        this.notifyListeners();
+        this.notify();
     }
 
     async deleteMCPServer(id: string): Promise<void> {
         const fullPath = `${MCP_DIR}/${id}.json`;
-        const nodeId = await this.resolvePath(fullPath);
+        const nodeId = await this.engine.resolvePath(fullPath);
         
         if (nodeId) {
-            await this.moduleEngine.delete([nodeId]);
+            await this.engine.delete([nodeId]);
         }
         
         this._mcpServers = this._mcpServers.filter(s => s.id !== id);
-        this.notifyListeners();
+        this.notify();
     }
 
     // ================================================================
-    // 事件
+    // 资源清理
     // ================================================================
-
-    onChange(listener: ChangeListener): () => void {
-        this._listeners.add(listener);
-        return () => this._listeners.delete(listener);
-    }
-
-    private notifyListeners(): void {
-        this._listeners.forEach(l => {
-            try {
-                l();
-            } catch (e) {
-                console.error('[VFSAgentService] Listener error:', e);
-            }
-        });
-    }
 
     /**
-     * 销毁
+     * 销毁服务，清理资源
      */
-    destroy(): void {
+    async dispose(): Promise<void> {
+        // 取消事件订阅
         this._eventUnsubscribers.forEach(fn => fn());
         this._eventUnsubscribers = [];
         
+        // 清理定时器
         if (this._syncTimer) {
             clearTimeout(this._syncTimer);
             this._syncTimer = null;
         }
         
-        this._listeners.clear();
+        // 调用基类的 dispose
+        await super.dispose();
     }
 
     // ================================================================
@@ -652,21 +648,21 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
         const items: T[] = [];
         
         try {
-            const dirId = await this.resolvePath(dirPath);
+            const dirId = await this.engine.resolvePath(dirPath);
             if (!dirId) return [];
 
-            const children = await this.coreVfs.storage.getChildren(dirId);
+            const children = await this.engine.getChildren(dirId);
             
             for (const child of children) {
                 if (child.type === 'file' && child.name.endsWith('.json')) {
                     try {
-                        const content = await this.moduleEngine.readContent(child.nodeId);
+                        const content = await this.engine.readContent(child.id);
                         const jsonStr = typeof content === 'string' 
                             ? content 
-                            : new TextDecoder().decode(content);
+                            : new TextDecoder().decode(content as ArrayBuffer);
                         items.push(JSON.parse(jsonStr));
                     } catch (e) {
-                        console.warn(`Failed to parse ${child.name}`, e);
+                        console.warn(`[VFSAgentService] Failed to parse ${child.name}`, e);
                     }
                 }
             }
@@ -675,51 +671,6 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
         }
         
         return items;
-    }
-
-    /**
-     * 检查文件是否存在
-     */
-    private async fileExists(path: string): Promise<boolean> {
-        const nodeId = await this.resolvePath(path);
-        return nodeId !== null;
-    }
-
-    /**
-     * 解析路径为节点 ID
-     * ✨ [使用 moduleEngine 的能力]
-     */
-    private async resolvePath(path: string): Promise<string | null> {
-        try {
-            return await this.moduleEngine.resolvePath(path);
-        } catch {
-            return null;
-        }
-    }
-
-    /**
-     * 确保目录存在
-     */
-    private async ensureDirectory(path: string): Promise<void> {
-        const parts = path.split('/').filter(Boolean);
-        let currentPath = '';
-        
-        for (const part of parts) {
-            currentPath += '/' + part;
-            const exists = await this.resolvePath(currentPath);
-            
-            if (!exists) {
-                const parentPath = currentPath.substring(0, currentPath.lastIndexOf('/')) || null;
-                try {
-                    await this.moduleEngine.createDirectory(part, parentPath);
-                } catch (e: any) {
-                    // 忽略已存在错误
-                    if (!e.message?.includes('exists')) {
-                        throw e;
-                    }
-                }
-            }
-        }
     }
 
     /**

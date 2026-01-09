@@ -1,5 +1,6 @@
 // mdx/plugins/cloze/memory.plugin.ts
 import type { MDxPlugin, PluginContext, ScopedPersistenceStore } from '../../core/plugin';
+import type { SRSItemData } from '@itookit/common';  // ✅ 导入类型
 
 export interface MemoryPluginOptions {
   gradingTimeout?: number;
@@ -126,39 +127,41 @@ export class MemoryPlugin implements MDxPlugin {
 
     // 1. 尝试使用 Engine 加载 SRS (VFS SRS Store)
     if (engine && engine.getSRSStatus && fileId) {
-        try {
-            const srsItems = await engine.getSRSStatus(fileId);
-            const count = Object.keys(srsItems).length;
-            this.log(`Loaded ${count} items from Engine VFS.`);
+      try {
+        const srsItems = await engine.getSRSStatus(fileId);
+        const count = Object.keys(srsItems).length;
+        this.log(`Loaded ${count} items from Engine VFS.`);
 
-            // 转换为 plugin 内部格式 (Timestamp -> ISO String)
-            for (const [clozeId, item] of Object.entries(srsItems)) {
-                cache.set(clozeId, {
-                    dueAt: new Date(item.dueAt).toISOString(),
-                    lastReviewedAt: new Date(item.lastReviewedAt).toISOString(),
-                    lastGrade: 0, // VFS 未存储上一次评分具体数值
-                    reviewCount: item.reviewCount,
-                    interval: item.interval,
-                    easeFactor: item.ease
-                });
-            }
-            return;
-        } catch (e) {
-            console.warn('[MemoryPlugin] Failed to sync from Engine, falling back to Metadata store.', e);
+        // ✅ 现在 item 的类型是 SRSItemData
+        for (const [clozeId, item] of Object.entries(srsItems)) {
+          cache.set(clozeId, {
+            dueAt: new Date(item.dueAt).toISOString(),
+            lastReviewedAt: new Date(item.lastReviewedAt).toISOString(),
+            lastGrade: 0,
+            reviewCount: item.reviewCount,
+            interval: item.interval,
+            easeFactor: item.ease
+          });
         }
+        return;
+      } catch (e) {
+        console.warn('[MemoryPlugin] Failed to sync from Engine, falling back to Metadata store.', e);
+      }
     } else {
-        this.log('Skipping Engine sync (Conditions not met). Fallback to metadata?');
+      this.log('Skipping Engine sync (Conditions not met). Fallback to metadata?');
     }
 
     // 2. 降级：使用旧的元数据存储
     if (this.storeRef) {
       try {
-        const srsData = (await this.storeRef.get('_mdx_srs')) || {};
-        const count = Object.keys(srsData).length;
+        const srsData = (await this.storeRef.get('_mdx_srs')) as Record<string, SRSCardState> | undefined;
+        const count = srsData ? Object.keys(srsData).length : 0;
         this.log(`Loaded ${count} items from Metadata Store (Fallback).`);
         
-        for (const [key, value] of Object.entries(srsData)) {
-          cache.set(key, value as SRSCardState);
+        if (srsData) {
+          for (const [key, value] of Object.entries(srsData)) {
+            cache.set(key, value);
+          }
         }
       } catch (error) {
         console.warn('[MemoryPlugin] Metadata sync error:', error);
@@ -170,47 +173,50 @@ export class MemoryPlugin implements MDxPlugin {
    * ✨ [重构] 保存逻辑
    * 单个卡片评分后触发
    */
-  private async saveCardState(context: PluginContext, clozeId: string, newState: SRSCardState): Promise<void> {
-      const engine = context.getSessionEngine?.();
-      const fileId = context.getCurrentNodeId();
+  private async saveCardState(
+    context: PluginContext, 
+    clozeId: string, 
+    newState: SRSCardState
+  ): Promise<void> {
+    const engine = context.getSessionEngine?.();
+    const fileId = context.getCurrentNodeId();
 
-      this.log(`Saving card ${clozeId} to FileID: ${fileId}`);
+    this.log(`Saving card ${clozeId} to FileID: ${fileId}`);
 
-      // 1. 尝试使用 Engine 保存 (VFS SRS Store)
-      if (engine && engine.updateSRSStatus && fileId) {
-          try {
-              // 转换 plugin 状态 -> VFS 状态
-              await engine.updateSRSStatus(fileId, clozeId, {
-                  dueAt: newState.dueAt ? new Date(newState.dueAt).getTime() : Date.now(),
-                  lastReviewedAt: newState.lastReviewedAt ? new Date(newState.lastReviewedAt).getTime() : Date.now(),
-                  interval: newState.interval,
-                  ease: newState.easeFactor,
-                  reviewCount: newState.reviewCount
-                  // snippet: ... (可选) 如果有 DOM 上下文，这里可以提取并传入
-              });
-              this.log(`Saved successfully to Engine VFS.`);
-              return;
-          } catch (e) {
-              console.error('[MemoryPlugin] Failed to save to Engine:', e);
-              // 继续执行降级保存
-          }
+    // 1. 尝试使用 Engine 保存
+    if (engine && engine.updateSRSStatus && fileId) {
+      try {
+        // ✅ 构建符合 SRSItemData 类型的对象
+        const srsData: SRSItemData = {
+          dueAt: newState.dueAt ? new Date(newState.dueAt).getTime() : Date.now(),
+          lastReviewedAt: newState.lastReviewedAt ? new Date(newState.lastReviewedAt).getTime() : Date.now(),
+          interval: newState.interval,
+          ease: newState.easeFactor,
+          reviewCount: newState.reviewCount
+        };
+        
+        await engine.updateSRSStatus(fileId, clozeId, srsData);
+        this.log(`Saved successfully to Engine VFS.`);
+        return;
+      } catch (e) {
+        console.error('[MemoryPlugin] Failed to save to Engine:', e);
       }
+    }
 
-      // 2. 降级：全量保存到元数据 (旧逻辑)
-      if (this.storeRef) {
-          try {
-            const cache = this.getCache(context);
-            // 此时 cache 已经通过 gradeCard 更新了内存状态
-            const data: Record<string, SRSCardState> = {};
-            cache.forEach((value, key) => {
-              data[key] = value;
-            });
-            await this.storeRef.set('_mdx_srs', data);
-            this.log(`Saved successfully to Metadata Store (Fallback).`);
-          } catch (error) {
-            console.error('[MemoryPlugin] Metadata save error:', error);
-          }
+    // 2. 降级：全量保存到元数据
+    if (this.storeRef) {
+      try {
+        const cache = this.getCache(context);
+        const data: Record<string, SRSCardState> = {};
+        cache.forEach((value, key) => {
+          data[key] = value;
+        });
+        await this.storeRef.set('_mdx_srs', data);
+        this.log(`Saved successfully to Metadata Store (Fallback).`);
+      } catch (error) {
+        console.error('[MemoryPlugin] Metadata save error:', error);
       }
+    }
   }
 
   /**

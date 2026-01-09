@@ -23,7 +23,7 @@
     "@itookit/llm-ui": "workspace:*",
     "@itookit/mdxeditor": "workspace:*",
     "@itookit/memory-manager": "workspace:*",
-    "@itookit/vfs-core": "workspace:*",
+    "@itookit/vfs": "workspace:*",
     "@itookit/vfs-ui": "workspace:*",
     "dexie": "^4.2.1",
     "immer": "^10.2.0",

@@ -2,8 +2,9 @@
  * @file common/interfaces/ISessionEngine.ts
  * @desc 定义了 Session UI 后端的标准契约。
  * 这使得 UI 和插件（如自动完成）可以透明地与不同的后端工作
- * （例如 vfs-core, REST API, Electron FS, 纯内存实现等）。
+ * （例如 vfs, REST API, Electron FS, 纯内存实现等）。
  */
+export type NodeType = 'file' | 'directory';
 
 /**
  * 通用的节点数据结构
@@ -12,8 +13,14 @@ export interface EngineNode {
   id: string;
   parentId: string | null; // 根节点为 null
   name: string;
-  type: 'file' | 'directory';
-  /** 文件内容 (仅当 type === 'file' 时存在，且根据加载策略可能延迟加载) */
+  
+  /**
+   * 节点类型
+   * 使用字符串字面量，与 VNodeType 枚举的值兼容
+   */
+  type: NodeType;
+  
+  /** 文件内容 (仅当 type === 'file' 时存在) */
   content?: string | ArrayBuffer;
   /** 子节点列表 (仅当 type === 'directory' 时存在) */
   children?: EngineNode[];
@@ -22,13 +29,15 @@ export interface EngineNode {
   /** 节点的完整路径 (逻辑路径) */
   path: string;
   /**
-   * [新增] 文件大小 (字节数)
-   * 对于文件节点，表示文件内容的大小；
-   * 对于目录节点，可以为 0 或表示目录下所有文件的总大小（取决于实现）
+   * 文件大小 (字节数)
+   * - 文件节点：文件内容大小
+   * - 目录节点：0 或子文件总大小（取决于实现）
+   * - 可选，默认为 0
    */
-  size: number;
+  size?: number;
+  
   tags?: string[];
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
   /** 所属模块ID (用于多模块/命名空间系统) */
   moduleId?: string;
 
@@ -53,7 +62,10 @@ export interface EngineNode {
  * 搜索引擎查询参数
  */
 export interface EngineSearchQuery {
-  type?: 'file' | 'directory';
+  /** 节点类型过滤 */
+  type?: NodeType;
+  
+  /** 标签过滤 */
   tags?: string[];
   text?: string;
   limit?: number;
@@ -81,7 +93,25 @@ export type EngineEventType =
 export interface EngineEvent {
   type: EngineEventType;
   /** 具体的事件载荷，通常包含 nodeId, parentId, updatedNodeIds 等信息 */
-  payload: any;
+  payload: unknown;
+}
+
+/**
+ * SRS 状态数据结构
+ */
+export interface SRSItemData {
+  /** 下次复习时间 (Unix 时间戳) */
+  dueAt: number;
+  /** 上次复习时间 (Unix 时间戳) */
+  lastReviewedAt: number;
+  /** 复习次数 */
+  reviewCount: number;
+  /** 当前间隔 (天) */
+  interval: number;
+  /** 难度系数 */
+  ease: number;
+  /** 内容片段 (可选) */
+  snippet?: string;
 }
 
 /**
@@ -151,7 +181,7 @@ export interface ISessionEngine {
   /** 删除节点 (支持批量 ID) */
   delete(ids: string[]): Promise<void>;
   /** 更新元数据 (通常是合并更新) */
-  updateMetadata(id: string, metadata: Record<string, any>): Promise<void>;
+  updateMetadata(id: string, metadata: Record<string, unknown>): Promise<void>;
   /** 设置节点的标签 (全量替换) */
   setTags(id: string, tags: string[]): Promise<void>;
 
@@ -165,17 +195,23 @@ export interface ISessionEngine {
   // --- ✨ [新增] SRS Support ---
   /**
    * 获取当前文件的所有 SRS 状态
-   * 返回 Map: { "clozeId": SRSItemData }
+   * @returns Record<clozeId, SRSItemData>
    */
-  getSRSStatus?(fileId: string): Promise<Record<string, any>>;
+  getSRSStatus?(fileId: string): Promise<Record<string, SRSItemData>>;
+  
   /**
    * 更新单个卡片状态
    */
-  updateSRSStatus?(fileId: string, clozeId: string, status: any): Promise<void>;
+  updateSRSStatus?(fileId: string, clozeId: string, status: SRSItemData): Promise<void>;
+  
   /**
    * 获取全局或当前模块的到期卡片
    */
-  getDueCards?(limit?: number): Promise<any[]>;
+  getDueCards?(limit?: number): Promise<Array<{
+    fileId: string;
+    clozeId: string;
+    status: SRSItemData;
+  }>>;
 
   // --- Events ---
   /** 订阅数据变更事件 */
