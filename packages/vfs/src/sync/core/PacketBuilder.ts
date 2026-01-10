@@ -11,6 +11,33 @@ export class PacketBuilder {
     private config: SyncConfig
   ) {}
 
+  /**
+   * 过滤同步内部元数据
+   */
+  private filterSyncMetadata(metadata: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+    if (!metadata) return undefined;
+    
+    const filtered = { ...metadata };
+    
+    // 移除内部同步控制字段，这些不应发送到远程
+    const internalKeys = [
+      '_sync_v',
+      '_sync_vc', 
+      '_sync_time',
+      '_sync_origin',
+      '_sync_auto_created',
+      '_sync_pending',
+      '_local_only'
+    ];
+    
+    for (const key of internalKeys) {
+      delete filtered[key];
+    }
+    
+    // 如果过滤后为空对象，返回 undefined
+    return Object.keys(filtered).length > 0 ? filtered : undefined;
+  }
+
   async build(logs: SyncLog[]): Promise<SyncPacket> {
     const packet: SyncPacket = {
       packetId: crypto.randomUUID(),
@@ -31,7 +58,9 @@ export class PacketBuilder {
       // 如果节点不存在且不是删除操作，跳过
       if (!node && log.operation !== 'delete') continue;
 
-      // 1. 构建 SyncChange 对象 (SyncLog -> SyncChange)
+      // ✅ 修复: 应用元数据过滤
+      const filteredMetadata = this.filterSyncMetadata(node?.metadata);
+
       const change: SyncChange = {
         logId: log.logId!,
         nodeId: log.nodeId,
@@ -41,11 +70,12 @@ export class PacketBuilder {
         previousPath: log.previousPath,
         version: (node?.metadata?._sync_v as number) || 0,
         vectorClock: (node?.metadata?._sync_vc as any) || {},
-        metadata: node?.metadata
+        metadata: filteredMetadata  // ✅ 使用过滤后的元数据
       };
 
-      // 2. 处理文件内容 (Create/Update)
-      if (node && node.type === VNodeType.FILE && (log.operation === 'create' || log.operation === 'update')) {
+      // 处理文件内容
+      if (node && node.type === VNodeType.FILE && 
+          (log.operation === 'create' || log.operation === 'update')) {
         const content = await this.context.kernel.read(log.nodeId);
         
         // 统一转为 ArrayBuffer
@@ -66,7 +96,7 @@ export class PacketBuilder {
         // 决策: 分片 vs Inline
         // 注意：SyncChange 接口没有 isChunked 字段，我们通过 chunkRefs 数组是否存在该 hash 来隐式表达
         if (this.config.chunking.enabled && size > threshold) {
-          packet.chunkRefs?.push({
+          packet.chunkRefs!.push({
             contentHash: hash,
             nodeId: log.nodeId,
             totalSize: size,

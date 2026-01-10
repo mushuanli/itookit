@@ -3,21 +3,24 @@
 import { Toast, Modal } from '@itookit/common';
 import { syncService } from '../../services/SyncService';
 import { 
-  SyncConfig, 
-  SyncStatus, 
-  SyncMode, 
-  SyncConflict, 
-  SyncLogEntry,
-  SyncStateType // [修复 1] 添加缺少的类型导入
+  AppSyncSettings,
+  AppSyncStatus,
+  SystemLogEntry,
+  SyncMode,
+  SyncUIEvent,
+  UISyncState
 } from '../../types/sync';
+import { SyncConflict } from '@itookit/vfs';
 import { StorageUtils } from './StorageUtils';
 
+/**
+ * 同步配置面板组件
+ */
 export class SyncSection {
-  private syncConfig: SyncConfig;
-  private syncStatus: SyncStatus;
-  private syncLogs: SyncLogEntry[] = [];
+  private syncConfig: AppSyncSettings; // Changed type
+  private syncStatus: AppSyncStatus;   // Changed type
+  private syncLogs: SystemLogEntry[] = []; // Changed type
   private syncConflicts: SyncConflict[] = [];
-  
 
   private uiState = {
     showConfig: false,
@@ -26,11 +29,14 @@ export class SyncSection {
   };
 
   private unsubscribers: Array<() => void> = [];
+  private boundEventHandlers: Map<string, EventListener> = new Map();
 
   constructor(private container: HTMLElement) {
-    this.syncConfig = syncService.getConfig();
+    this.syncConfig = syncService.getSettings(); // Method renamed
     this.syncStatus = syncService.getStatus();
   }
+
+  // ==================== 生命周期 ====================
 
   async init(): Promise<void> {
     this.syncLogs = syncService.getLogs(20);
@@ -40,50 +46,92 @@ export class SyncSection {
   }
 
   destroy(): void {
+    // 取消事件订阅
     this.unsubscribers.forEach(unsub => unsub());
     this.unsubscribers = [];
+    
+    // 清理绑定的 DOM 事件
+    this.boundEventHandlers.clear();
   }
+
+  // ==================== 事件订阅 ====================
 
   private subscribeEvents(): void {
     this.unsubscribers.push(
-      syncService.on('stateChange', (event) => {
-        if (event.data.status) {
+      syncService.on('stateChange', (event: SyncUIEvent) => {
+        if (event.data?.status) {
           this.syncStatus = event.data.status;
-          // 优化：如果是 syncing 状态，可以考虑只更新进度条 DOM，这里简化为全量 render
-          this.render();
+          this.updateStatusUI();
         }
       }),
-      syncService.on('log', () => {
-        this.syncLogs = syncService.getLogs(20);
+
+      syncService.on('progress', (event: SyncUIEvent) => {
+        if (event.data) {
+          this.syncStatus = { ...this.syncStatus, progress: event.data };
+          this.updateProgressUI();
+        }
+      }),
+
+      syncService.on('log', (event: SyncUIEvent) => {
+        if (event.data?.cleared) {
+          this.syncLogs = [];
+        } else {
+          this.syncLogs = syncService.getLogs(20);
+        }
         this.updateLogsUI();
       }),
-      syncService.on('conflict', (event) => {
+
+      syncService.on('conflict', () => {
         this.syncConflicts = syncService.getConflicts();
-        this.render();
-        if (event.data.conflict) Toast.warning(`检测到文件冲突: ${event.data.conflict.path}`);
+        this.updateConflictsUI();
+        
+        if (this.syncConflicts.length > 0) {
+          Toast.warning(`检测到 ${this.syncConflicts.length} 个文件冲突`);
+        }
       }),
-      syncService.on('connected', () => Toast.success('已连接到同步服务器')),
+
+      syncService.on('connected', () => {
+        Toast.success('已连接到同步服务器');
+        this.updateConnectionUI(true);
+      }),
+
       syncService.on('disconnected', () => {
-        if (this.syncConfig.autoSync) Toast.warning('同步连接已断开，正在重连...');
+        if (this.syncConfig.autoSync) {
+          Toast.warning('同步连接已断开，正在重连...');
+        }
+        this.updateConnectionUI(false);
+      }),
+
+      syncService.on('error', (event: SyncUIEvent) => {
+        const message = event.data?.message || '同步发生错误';
+        Toast.error(message);
+      }),
+
+      syncService.on('completed', () => {
+        // 状态已通过 stateChange 更新
       })
     );
   }
+
+  // ==================== 渲染方法 ====================
 
   render(): void {
     const stateInfo = this.getSyncStateInfo();
     const hasConflicts = this.syncConflicts.length > 0;
 
     this.container.innerHTML = `
-      <div class="settings-section">
+      <div class="settings-section sync-section">
         <!-- 同步头部 -->
         <div class="sync-header">
           <div class="sync-header__info">
-            <h3 class="settings-section__title" style="margin:0">☁️ 远程同步</h3>
-            <div class="sync-status">
+            <h3 class="settings-section__title" style="margin:0">
+              <i class="fas fa-cloud"></i> 远程同步
+            </h3>
+            <div class="sync-status" id="sync-status-display">
               <span class="sync-status__dot sync-status__dot--${this.syncStatus.state}"></span>
-              <span>${stateInfo.label}</span>
+              <span class="sync-status__label">${stateInfo.label}</span>
               ${this.syncStatus.lastSyncTime ? 
-                `<span>• ${StorageUtils.formatTime(this.syncStatus.lastSyncTime)}</span>` : ''}
+                `<span class="sync-status__time">• ${StorageUtils.formatTime(this.syncStatus.lastSyncTime)}</span>` : ''}
               ${hasConflicts ? 
                 `<span class="settings-badge settings-badge--warning">
                   ${this.syncConflicts.length} 个冲突
@@ -94,19 +142,24 @@ export class SyncSection {
             <button id="btn-sync-now" class="settings-btn settings-btn--primary" 
               ${this.syncStatus.state === 'syncing' ? 'disabled' : ''}>
               <i class="fas fa-sync ${this.syncStatus.state === 'syncing' ? 'fa-spin' : ''}"></i>
-              ${this.syncStatus.state === 'syncing' ? '同步中...' : '立即同步'}
+              <span>${this.syncStatus.state === 'syncing' ? '同步中...' : '立即同步'}</span>
             </button>
             <button id="btn-toggle-sync-config" class="settings-btn settings-btn--secondary">
-              <i class="fas fa-cog"></i> 配置
+              <i class="fas fa-cog"></i>
+              <span>配置</span>
             </button>
           </div>
         </div>
 
         <!-- 同步进度 -->
-        ${this.renderSyncProgress()}
+        <div id="sync-progress-container">
+          ${this.renderSyncProgress()}
+        </div>
 
         <!-- 冲突列表 -->
-        ${this.renderConflicts()}
+        <div id="sync-conflicts-container">
+          ${this.renderConflicts()}
+        </div>
 
         <!-- 同步配置面板 -->
         <div id="sync-config-panel" class="sync-config-panel ${this.uiState.showConfig ? '' : 'sync-config-panel--hidden'}">
@@ -117,22 +170,18 @@ export class SyncSection {
 
     this.bindEvents();
   }
-  
+
+  /**
+   * 渲染同步进度
+   */
   private renderSyncProgress(): string {
     if (this.syncStatus.state !== 'syncing' || !this.syncStatus.progress) {
       return '';
     }
 
-    const { 
-        phase, 
-        current, 
-        total, 
-        currentFile, 
-        bytesTransferred: _bytesTransferred,  // 前缀下划线
-        bytesTotal: _bytesTotal,              // 前缀下划线
-        speed 
-    } = this.syncStatus.progress;
+    const { phase, current, total, currentFile, bytesTransferred, bytesTotal, speed } = this.syncStatus.progress;
     const percent = total > 0 ? Math.round((current / total) * 100) : 0;
+    
     const phaseLabels: Record<string, string> = {
       'preparing': '准备中...',
       'uploading': '上传中...',
@@ -152,8 +201,15 @@ export class SyncSection {
         </div>
         <div class="sync-progress__details">
           <span>${current} / ${total} 个文件</span>
-          ${currentFile ? `<span title="${currentFile}">${StorageUtils.truncatePath(currentFile, 30)}</span>` : ''}
-          ${speed ? `<span>${StorageUtils.formatSpeed(speed)}</span>` : ''}
+          ${currentFile ? 
+            `<span class="sync-progress__file" title="${StorageUtils.escapeHtml(currentFile)}">
+              ${StorageUtils.truncatePath(currentFile, 30)}
+            </span>` : ''}
+          ${speed ? `<span class="sync-progress__speed">${StorageUtils.formatSpeed(speed)}</span>` : ''}
+          ${bytesTransferred && bytesTotal ? 
+            `<span class="sync-progress__bytes">
+              ${StorageUtils.formatSize(bytesTransferred)} / ${StorageUtils.formatSize(bytesTotal)}
+            </span>` : ''}
         </div>
       </div>
     `;
@@ -169,31 +225,63 @@ export class SyncSection {
 
     return `
       <div class="sync-conflicts">
-        <h4 style="margin: 0 0 10px 0; font-size: 0.9rem;">
-          <i class="fas fa-exclamation-triangle" style="color: var(--st-color-warning)"></i>
-          需要解决的冲突 (${this.syncConflicts.length})
-        </h4>
-        ${this.syncConflicts.map(conflict => `
-          <div class="sync-conflict-item" data-conflict-id="${conflict.id}">
-            <div class="sync-conflict-item__icon">⚠️</div>
-            <div class="sync-conflict-item__info">
-              <div class="sync-conflict-item__path">${conflict.path}</div>
-              <div class="sync-conflict-item__desc">
-                ${this.getConflictDescription(conflict)}
-              </div>
-            </div>
-            <div class="sync-conflict-item__actions">
-              <button class="settings-btn settings-btn--sm settings-btn--secondary btn-resolve-local" 
-                data-id="${conflict.id}" title="保留本地版本">
-                本地
+        <div class="sync-conflicts__header">
+          <h4>
+            <i class="fas fa-exclamation-triangle" style="color: var(--st-color-warning)"></i>
+            需要解决的冲突 (${this.syncConflicts.length})
+          </h4>
+          ${this.syncConflicts.length > 1 ? `
+            <div class="sync-conflicts__batch-actions">
+              <button class="settings-btn settings-btn--sm settings-btn--secondary" id="btn-resolve-all-local">
+                全部保留本地
               </button>
-              <button class="settings-btn settings-btn--sm settings-btn--primary btn-resolve-remote"
-                data-id="${conflict.id}" title="使用远程版本">
-                远程
+              <button class="settings-btn settings-btn--sm settings-btn--primary" id="btn-resolve-all-remote">
+                全部使用远程
               </button>
             </div>
+          ` : ''}
+        </div>
+        <div class="sync-conflicts__list">
+          ${this.syncConflicts.map(conflict => this.renderConflictItem(conflict)).join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  /**
+   * 渲染单个冲突项
+   */
+  private renderConflictItem(conflict: SyncConflict): string {
+    const typeIcons: Record<string, string> = {
+      'content': '📄',
+      'delete': '🗑️',
+      'move': '📁',
+      'metadata': '🏷️',
+      'create': '✨',
+      'update': '✏️'
+    };
+
+    return `
+      <div class="sync-conflict-item" data-conflict-id="${conflict.conflictId}">
+        <div class="sync-conflict-item__icon">${typeIcons[conflict.type] || '⚠️'}</div>
+        <div class="sync-conflict-item__info">
+          <div class="sync-conflict-item__path" title="${StorageUtils.escapeHtml(conflict.path)}">
+            ${StorageUtils.truncatePath(conflict.path, 40)}
           </div>
-        `).join('')}
+          <div class="sync-conflict-item__desc">
+            ${this.getConflictDescription(conflict)}
+          </div>
+        </div>
+        <div class="sync-conflict-item__actions">
+          <button class="settings-btn settings-btn--sm settings-btn--secondary btn-resolve-conflict" 
+            data-id="${conflict.conflictId}" data-resolution="local" title="保留本地版本">
+            <i class="fas fa-laptop"></i> 本地
+          </button>
+          <button class="settings-btn settings-btn--sm settings-btn--primary btn-resolve-conflict"
+            data-id="${conflict.conflictId}" data-resolution="remote" title="使用远程版本">
+            <i class="fas fa-cloud"></i> 远程
+          </button>
+        </div>
       </div>
     `;
   }
@@ -206,13 +294,20 @@ export class SyncSection {
       'content': '内容冲突',
       'delete': '删除冲突',
       'move': '移动冲突',
-      'metadata': '元数据冲突'
+      'metadata': '属性冲突',
+      'create': '创建冲突',
+      'update': '更新冲突'
     };
     
-    const localTime = StorageUtils.formatTime(conflict.localModified);
-    const remoteTime = StorageUtils.formatTime(conflict.remoteModified);
+    const localTime = StorageUtils.formatTime(conflict.localChange.timestamp);
+    const remoteTime = StorageUtils.formatTime(conflict.remoteChange.timestamp);
     
-    return `${typeLabels[conflict.type] || conflict.type} • 本地: ${localTime} • 远程: ${remoteTime}`;
+    let sizeInfo = '';
+    if (conflict.localChange.size !== undefined && conflict.remoteChange.size !== undefined) {
+      sizeInfo = ` | 本地 ${StorageUtils.formatSize(conflict.localChange.size)}, 远程 ${StorageUtils.formatSize(conflict.remoteChange.size)}`;
+    }
+    
+    return `${typeLabels[conflict.type] || conflict.type} • 本地: ${localTime} • 远程: ${remoteTime}${sizeInfo}`;
   }
 
   /**
@@ -221,146 +316,170 @@ export class SyncSection {
   private renderSyncConfigForm(): string {
     return `
       <div class="sync-config-panel__header">
-        <span class="sync-config-panel__title">同步配置</span>
-        <button id="btn-close-sync-config" class="settings-btn-icon">
+        <span class="sync-config-panel__title">
+          <i class="fas fa-cog"></i> 同步配置
+        </span>
+        <button id="btn-close-sync-config" class="settings-btn-icon" title="关闭">
           <i class="fas fa-times"></i>
         </button>
       </div>
 
-      <!-- 连接状态 -->
-      ${this.renderConnectionStatus()}
-
-      <!-- 服务器配置 -->
-      <div class="settings-form-group">
-        <label>服务器地址</label>
-        <input type="text" id="inp-sync-url" class="settings-input" 
-          placeholder="https://sync.example.com" 
-          value="${StorageUtils.escapeHtml(this.syncConfig.serverUrl || '')}">
-        <small style="color: var(--st-text-secondary); font-size: 0.75em; margin-top: 4px; display: block;">
-          若使用自签名证书，请先在浏览器中访问并接受证书
-        </small>
-      </div>
-
-      <div class="settings-form-row">
-        <div class="settings-form-group" style="flex: 1;">
-          <label>用户名</label>
-          <input type="text" id="inp-sync-user" class="settings-input" 
-            placeholder="username" 
-            value="${StorageUtils.escapeHtml(this.syncConfig.username || '')}">
+      <div class="sync-config-panel__body">
+        <!-- 连接状态 -->
+        <div id="connection-status-container">
+          ${this.renderConnectionStatus()}
         </div>
-        <div class="settings-form-group" style="flex: 1;">
-          <label>Token / API Key</label>
-          <input type="password" id="inp-sync-token" class="settings-input" 
-            placeholder="sk-..." 
-            value="${StorageUtils.escapeHtml(this.syncConfig.token || '')}">
-        </div>
-      </div>
 
-      <!-- 同步策略 -->
-      <div class="settings-form-row">
-        <div class="settings-form-group" style="flex: 1;">
-          <label>同步策略</label>
-          <select id="sel-sync-strategy" class="settings-select">
-            <option value="manual" ${this.syncConfig.strategy === 'manual' ? 'selected' : ''}>
-              手动同步 (Manual)
-            </option>
-            <option value="bidirectional" ${this.syncConfig.strategy === 'bidirectional' ? 'selected' : ''}>
-              双向智能 (Bidirectional)
-            </option>
-            <option value="push" ${this.syncConfig.strategy === 'push' ? 'selected' : ''}>
-              仅上传 (Push Only)
-            </option>
-            <option value="pull" ${this.syncConfig.strategy === 'pull' ? 'selected' : ''}>
-              仅下载 (Pull Only)
-            </option>
-          </select>
-        </div>
-        <div class="settings-form-group" style="flex: 1;">
-          <label>冲突解决</label>
-          <select id="sel-conflict-resolution" class="settings-select">
-            <option value="newer-wins" ${this.syncConfig.conflictResolution === 'newer-wins' ? 'selected' : ''}>
-              较新优先 (Newer Wins)
-            </option>
-            <option value="server-wins" ${this.syncConfig.conflictResolution === 'server-wins' ? 'selected' : ''}>
-              服务器优先 (Server Wins)
-            </option>
-            <option value="client-wins" ${this.syncConfig.conflictResolution === 'client-wins' ? 'selected' : ''}>
-              本地优先 (Client Wins)
-            </option>
-            <option value="manual" ${this.syncConfig.conflictResolution === 'manual' ? 'selected' : ''}>
-              手动解决 (Manual)
-            </option>
-          </select>
-        </div>
-      </div>
-
-      <!-- 自动同步 -->
-      <div class="settings-form-row" style="align-items: center;">
-        <label class="settings-checkbox-row" style="flex: 1;">
-          <input type="checkbox" id="chk-auto-sync" ${this.syncConfig.autoSync ? 'checked' : ''}>
-          <span>启用自动同步</span>
-        </label>
-        <div class="settings-form-group" style="flex: 1; margin-bottom: 0;">
-          <label>同步间隔（分钟）</label>
-          <input type="number" id="inp-sync-interval" class="settings-input" 
-            min="1" max="1440" 
-            value="${this.syncConfig.autoSyncInterval || 15}"
-            ${!this.syncConfig.autoSync ? 'disabled' : ''}>
-        </div>
-      </div>
-
-      <!-- 传输方式 -->
-      <div class="settings-form-group">
-        <label>传输方式</label>
-        <div class="settings-form-row" style="gap: 20px; margin-bottom: 0;">
-          <label class="settings-checkbox-row">
-            <input type="radio" name="transport" value="auto" 
-              ${this.syncConfig.transport === 'auto' ? 'checked' : ''}>
-            <span>自动 (推荐)</span>
+        <!-- 服务器配置 -->
+        <div class="settings-form-group">
+          <label for="inp-sync-url">
+            <i class="fas fa-server"></i> 服务器地址
           </label>
-          <label class="settings-checkbox-row">
-            <input type="radio" name="transport" value="websocket"
-              ${this.syncConfig.transport === 'websocket' ? 'checked' : ''}>
-            <span>WebSocket</span>
-          </label>
-          <label class="settings-checkbox-row">
-            <input type="radio" name="transport" value="http"
-              ${this.syncConfig.transport === 'http' ? 'checked' : ''}>
-            <span>HTTP</span>
-          </label>
+          <input type="text" id="inp-sync-url" class="settings-input" 
+            placeholder="https://sync.example.com" 
+            value="${StorageUtils.escapeHtml(this.syncConfig.serverUrl || '')}">
+          <small class="settings-form-hint">
+            使用自签名证书时，请先在浏览器中访问并接受证书
+          </small>
         </div>
-      </div>
 
-      <!-- 错误信息 -->
-      ${this.syncStatus.errorMessage ? `
-        <div style="color: var(--st-color-danger); font-size: 0.85em; margin-top: 10px; 
-          padding: 10px; background: var(--st-color-danger-light); border-radius: 6px;">
-          ❌ ${StorageUtils.escapeHtml(this.syncStatus.errorMessage)}
+        <div class="settings-form-row">
+          <div class="settings-form-group" style="flex: 1;">
+            <label for="inp-sync-user">
+              <i class="fas fa-user"></i> 用户名
+            </label>
+            <input type="text" id="inp-sync-user" class="settings-input" 
+              placeholder="username" 
+              value="${StorageUtils.escapeHtml(this.syncConfig.username || '')}">
+          </div>
+          <div class="settings-form-group" style="flex: 1;">
+            <label for="inp-sync-token">
+              <i class="fas fa-key"></i> Token / API Key
+            </label>
+            <div class="settings-input-group">
+              <input type="password" id="inp-sync-token" class="settings-input" 
+                placeholder="sk-..." 
+                value="${StorageUtils.escapeHtml(this.syncConfig.token || '')}">
+              <button type="button" id="btn-toggle-token-visibility" class="settings-btn-icon" title="显示/隐藏">
+                <i class="fas fa-eye"></i>
+              </button>
+            </div>
+          </div>
         </div>
-      ` : ''}
 
-      <!-- 操作按钮 -->
-      <div style="display: flex; justify-content: space-between; align-items: center; 
-        margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--st-border-color);">
-        <button id="btn-toggle-advanced" class="settings-btn settings-btn--sm settings-btn--secondary">
-          <i class="fas fa-chevron-${this.uiState.showAdvanced ? 'up' : 'down'}"></i>
-          高级选项
-        </button>
-        <div style="display: flex; gap: 10px;">
-          <button id="btn-test-conn" class="settings-btn settings-btn--sm settings-btn--secondary">
-            <i class="fas fa-plug"></i> 测试连接
+        <!-- 同步策略 -->
+        <div class="settings-form-row">
+          <div class="settings-form-group" style="flex: 1;">
+            <label for="sel-sync-strategy">
+              <i class="fas fa-exchange-alt"></i> 同步策略
+            </label>
+            <select id="sel-sync-strategy" class="settings-select">
+              <option value="manual" ${this.syncConfig.strategy === 'manual' ? 'selected' : ''}>
+                手动同步 (Manual)
+              </option>
+              <option value="bidirectional" ${this.syncConfig.strategy === 'bidirectional' ? 'selected' : ''}>
+                双向智能 (Bidirectional)
+              </option>
+              <option value="push" ${this.syncConfig.strategy === 'push' ? 'selected' : ''}>
+                仅上传 (Push Only)
+              </option>
+              <option value="pull" ${this.syncConfig.strategy === 'pull' ? 'selected' : ''}>
+                仅下载 (Pull Only)
+              </option>
+            </select>
+          </div>
+          <div class="settings-form-group" style="flex: 1;">
+            <label for="sel-conflict-resolution">
+              <i class="fas fa-code-branch"></i> 冲突解决
+            </label>
+            <select id="sel-conflict-resolution" class="settings-select">
+              <option value="newer-wins" ${this.syncConfig.conflictResolution === 'newer-wins' ? 'selected' : ''}>
+                较新优先 (Newer Wins)
+              </option>
+              <option value="server-wins" ${this.syncConfig.conflictResolution === 'server-wins' ? 'selected' : ''}>
+                服务器优先 (Server Wins)
+              </option>
+              <option value="client-wins" ${this.syncConfig.conflictResolution === 'client-wins' ? 'selected' : ''}>
+                本地优先 (Client Wins)
+              </option>
+              <option value="manual" ${this.syncConfig.conflictResolution === 'manual' ? 'selected' : ''}>
+                手动解决 (Manual)
+              </option>
+            </select>
+          </div>
+        </div>
+
+        <!-- 自动同步 -->
+        <div class="settings-form-row" style="align-items: center;">
+          <label class="settings-checkbox-row" style="flex: 1;">
+            <input type="checkbox" id="chk-auto-sync" ${this.syncConfig.autoSync ? 'checked' : ''}>
+            <span>启用自动同步</span>
+          </label>
+          <div class="settings-form-group" style="flex: 1; margin-bottom: 0;">
+            <label for="inp-sync-interval">同步间隔（分钟）</label>
+            <input type="number" id="inp-sync-interval" class="settings-input" 
+              min="1" max="1440" 
+              value="${this.syncConfig.autoSyncInterval || 15}"
+              ${!this.syncConfig.autoSync ? 'disabled' : ''}>
+          </div>
+        </div>
+
+        <!-- 传输方式 -->
+        <div class="settings-form-group">
+          <label><i class="fas fa-network-wired"></i> 传输方式</label>
+          <div class="settings-radio-group">
+            <label class="settings-radio-row">
+              <input type="radio" name="transport" value="auto" 
+                ${this.syncConfig.transport === 'auto' ? 'checked' : ''}>
+              <span>自动 (推荐)</span>
+            </label>
+            <label class="settings-radio-row">
+              <input type="radio" name="transport" value="websocket"
+                ${this.syncConfig.transport === 'websocket' ? 'checked' : ''}>
+              <span>WebSocket (实时)</span>
+            </label>
+            <label class="settings-radio-row">
+              <input type="radio" name="transport" value="http"
+                ${this.syncConfig.transport === 'http' ? 'checked' : ''}>
+              <span>HTTP (轮询)</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- 错误信息 -->
+        ${this.syncStatus.errorMessage ? `
+          <div class="sync-error-message">
+            <i class="fas fa-exclamation-circle"></i>
+            <span>${StorageUtils.escapeHtml(this.syncStatus.errorMessage)}</span>
+          </div>
+        ` : ''}
+
+        <!-- 操作按钮 -->
+        <div class="sync-config-panel__actions">
+          <button id="btn-toggle-advanced" class="settings-btn settings-btn--sm settings-btn--text">
+            <i class="fas fa-chevron-${this.uiState.showAdvanced ? 'up' : 'down'}"></i>
+            <span>高级选项</span>
           </button>
-          <button id="btn-save-sync" class="settings-btn settings-btn--sm settings-btn--primary">
-            <i class="fas fa-save"></i> 保存配置
-          </button>
+          <div class="sync-config-panel__buttons">
+            <button id="btn-test-conn" class="settings-btn settings-btn--sm settings-btn--secondary">
+              <i class="fas fa-plug"></i> 测试连接
+            </button>
+            <button id="btn-save-sync" class="settings-btn settings-btn--sm settings-btn--primary">
+              <i class="fas fa-save"></i> 保存配置
+            </button>
+          </div>
+        </div>
+
+        <!-- 高级选项 -->
+        <div id="advanced-options-container" class="${this.uiState.showAdvanced ? '' : 'hidden'}">
+          ${this.renderAdvancedSyncOptions()}
+        </div>
+
+        <!-- 同步日志 -->
+        <div id="sync-logs-section" class="${this.uiState.showLogs ? '' : 'hidden'}">
+          ${this.renderSyncLogs()}
         </div>
       </div>
-
-      <!-- 高级选项 -->
-      ${this.uiState.showAdvanced ? this.renderAdvancedSyncOptions() : ''}
-
-      <!-- 同步日志 -->
-      ${this.uiState.showLogs ? this.renderSyncLogs() : ''}
     `;
   }
 
@@ -381,13 +500,20 @@ export class SyncSection {
 
     return `
       <div class="sync-connection-status sync-connection-status--${statusClass}">
-        <div class="sync-connection-status__icon">${statusIcon}</div>
-        <div class="sync-connection-status__info">
-          <div class="sync-connection-status__title">${statusText}</div>
-          <div class="sync-connection-status__detail">
-            ${typeText}${conn.latency ? ` • ${conn.latency}ms` : ''}
-          </div>
+        <div class="sync-connection-status__indicator">
+          <i class="fas fa-${statusIcon}"></i>
         </div>
+        <div class="sync-connection-status__info">
+          <span class="sync-connection-status__title">${statusText}</span>
+          <span class="sync-connection-status__detail">
+            ${typeText}${conn.latency ? ` • 延迟 ${conn.latency}ms` : ''}
+          </span>
+        </div>
+        ${!conn.connected ? `
+          <button id="btn-reconnect" class="settings-btn settings-btn--sm settings-btn--secondary">
+            <i class="fas fa-redo"></i> 重连
+          </button>
+        ` : ''}
       </div>
     `;
   }
@@ -396,48 +522,59 @@ export class SyncSection {
    * 渲染高级同步选项
    */
   private renderAdvancedSyncOptions(): string {
-    return `
-      <div class="sync-advanced-ops" style="margin-top: 20px;">
-        <div class="sync-advanced-ops__title">
-          🛡️ 数据修复与强制同步
-        </div>
-        
-        <div class="sync-advanced-ops__buttons">
-          <button id="btn-force-push" class="settings-btn settings-btn--sm settings-btn--secondary" 
-            title="将本地所有数据覆盖到服务器">
-            <i class="fas fa-arrow-up"></i> 强制上传 (Local → Server)
-          </button>
-          <button id="btn-force-pull" class="settings-btn settings-btn--sm settings-btn--secondary"
-            title="从服务器下载所有数据覆盖本地">
-            <i class="fas fa-arrow-down"></i> 强制下载 (Server → Local)
-          </button>
-          <button id="btn-toggle-logs" class="settings-btn settings-btn--sm settings-btn--secondary">
-            <i class="fas fa-list"></i> ${this.uiState.showLogs ? '隐藏日志' : '查看日志'}
-          </button>
-        </div>
-        
-        <small class="sync-advanced-ops__warning">
-          ⚠️ 强制操作会忽略版本冲突，直接覆盖目标端的所有数据，请谨慎使用。
-        </small>
+    const filters = this.syncConfig.filters || {};
+    const maxFileSizeMB = (filters.maxFileSize || 100 * 1024 * 1024) / 1024 / 1024;
 
-        <!-- 同步过滤器 -->
-        <div style="margin-top: 15px;">
-          <label style="font-weight: 500; font-size: 0.9rem; display: block; margin-bottom: 8px;">
-            同步过滤
-          </label>
+    return `
+      <div class="sync-advanced-options">
+        <div class="sync-advanced-options__section">
+          <h5><i class="fas fa-filter"></i> 同步过滤</h5>
+          
           <div class="settings-form-row">
             <label class="settings-checkbox-row">
               <input type="checkbox" id="chk-exclude-binary" 
-                ${this.syncConfig.filters?.excludeBinary ? 'checked' : ''}>
+                ${filters.excludeBinary ? 'checked' : ''}>
               <span>排除二进制文件</span>
             </label>
-            <div class="settings-form-group" style="flex: 1; margin-bottom: 0;">
-              <label style="font-size: 0.8rem;">最大文件大小 (MB)</label>
+          </div>
+          
+          <div class="settings-form-row">
+            <div class="settings-form-group" style="flex: 1;">
+              <label for="inp-max-file-size">最大文件大小 (MB)</label>
               <input type="number" id="inp-max-file-size" class="settings-input" 
-                min="1" max="1024" 
-                value="${(this.syncConfig.filters?.maxFileSize || 100 * 1024 * 1024) / 1024 / 1024}"
-                style="width: 100px;">
+                min="1" max="1024" step="1"
+                value="${maxFileSizeMB}"
+                style="width: 120px;">
             </div>
+          </div>
+
+          <div class="settings-form-group">
+            <label for="inp-exclude-paths">排除路径 (每行一个)</label>
+            <textarea id="inp-exclude-paths" class="settings-textarea" rows="3" 
+              placeholder="/temp/**&#10;*.log&#10;/cache/**">${(filters.excludePaths || []).join('\n')}</textarea>
+          </div>
+        </div>
+
+        <div class="sync-advanced-options__section">
+          <h5><i class="fas fa-tools"></i> 数据修复与强制同步</h5>
+          
+          <div class="sync-advanced-options__buttons">
+            <button id="btn-force-push" class="settings-btn settings-btn--sm settings-btn--warning" 
+              title="将本地所有数据覆盖到服务器">
+              <i class="fas fa-arrow-up"></i> 强制上传
+            </button>
+            <button id="btn-force-pull" class="settings-btn settings-btn--sm settings-btn--warning"
+              title="从服务器下载所有数据覆盖本地">
+              <i class="fas fa-arrow-down"></i> 强制下载
+            </button>
+            <button id="btn-toggle-logs" class="settings-btn settings-btn--sm settings-btn--secondary">
+              <i class="fas fa-list"></i> ${this.uiState.showLogs ? '隐藏日志' : '查看日志'}
+            </button>
+          </div>
+          
+          <div class="sync-advanced-options__warning">
+            <i class="fas fa-exclamation-triangle"></i>
+            <span>强制操作会忽略版本冲突，直接覆盖目标端的所有数据，请谨慎使用。</span>
           </div>
         </div>
       </div>
@@ -449,78 +586,273 @@ export class SyncSection {
    */
   private renderSyncLogs(): string {
     return `
-      <div class="sync-logs" id="sync-logs-container">
-        ${this.syncLogs.length === 0 ? 
-          '<div style="text-align: center; color: var(--st-text-secondary); padding: 20px;">暂无日志</div>' :
-          this.syncLogs.map(log => `
-            <div class="sync-log-entry sync-log-entry--${log.level}">
-              <span class="sync-log-entry__time">${StorageUtils.formatLogTime(log.timestamp)}</span>
-              <span class="sync-log-entry__message">${StorageUtils.escapeHtml(log.message)}</span>
-            </div>
-          `).join('')
-        }
+      <div class="sync-logs">
+        <div class="sync-logs__header">
+          <h5><i class="fas fa-history"></i> 同步日志</h5>
+          <button id="btn-clear-logs" class="settings-btn settings-btn--sm settings-btn--text" 
+            ${this.syncLogs.length === 0 ? 'disabled' : ''}>
+            <i class="fas fa-trash"></i> 清空
+          </button>
+        </div>
+        <div class="sync-logs__container" id="sync-logs-list">
+          ${this.renderLogEntries()}
+        </div>
       </div>
     `;
   }
 
-  private bindEvents(): void {
-    // 绑定事件时，注意作用域限制在 this.container 内
-    const q = (sel: string) => this.container.querySelector(sel);
-    
-    q('#btn-sync-now')?.addEventListener('click', () => this.handleSync('standard'));
-    q('#btn-toggle-config')?.addEventListener('click', () => this.toggleSyncConfig());
-    q('#btn-save-sync')?.addEventListener('click', () => this.saveSyncConfig());
-    // 同步操作
-    q('#btn-sync-now')?.addEventListener('click', () => this.handleSync('standard'));
-    q('#btn-toggle-sync-config')?.addEventListener('click', () => this.toggleSyncConfig());
-    q('#btn-close-sync-config')?.addEventListener('click', () => this.toggleSyncConfig(false));
-    q('#btn-save-sync')?.addEventListener('click', () => this.saveSyncConfig());
-    q('#btn-test-conn')?.addEventListener('click', () => this.testConnection());
-    q('#btn-toggle-advanced')?.addEventListener('click', () => this.toggleAdvancedSync());
-    q('#btn-toggle-logs')?.addEventListener('click', () => this.toggleSyncLogs());
-    q('#btn-force-push')?.addEventListener('click', () => this.confirmForceSync('force_push'));
-    q('#btn-force-pull')?.addEventListener('click', () => this.confirmForceSync('force_pull'));
-
-    // 自动同步复选框联动
-    const autoSyncChk = this.container.querySelector('#chk-auto-sync') as HTMLInputElement;
-    if (autoSyncChk) {
-      autoSyncChk.addEventListener( 'change', () => {
-        const intervalInput = this.container.querySelector('#inp-sync-interval') as HTMLInputElement;
-        if (intervalInput) {
-          intervalInput.disabled = !autoSyncChk.checked;
-        }
-      });
+  /**
+   * 渲染日志条目
+   */
+  private renderLogEntries(): string {
+    if (this.syncLogs.length === 0) {
+      return '<div class="sync-logs__empty">暂无日志</div>';
     }
 
-    // 冲突解决
-    this.container.querySelectorAll('.btn-resolve-local').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        const id = (e.currentTarget as HTMLElement).dataset.id!;
-        this.resolveConflict(id, 'local');
-      });
-    });
-
-    this.container.querySelectorAll('.btn-resolve-remote').forEach(btn => {
-      btn.addEventListener( 'click', (e) => {
-        const id = (e.currentTarget as HTMLElement).dataset.id!;
-        this.resolveConflict(id, 'remote');
-      });
-    });
-
+    return this.syncLogs.map(log => `
+      <div class="sync-log-entry sync-log-entry--${log.level}">
+        <span class="sync-log-entry__icon">${this.getLogIcon(log.level)}</span>
+        <span class="sync-log-entry__time">${StorageUtils.formatLogTime(log.timestamp)}</span>
+        <span class="sync-log-entry__message">${StorageUtils.escapeHtml(log.message)}</span>
+      </div>
+    `).join('');
   }
 
-  // 业务逻辑方法
+  /**
+   * 获取日志图标
+   */
+  private getLogIcon(level: SystemLogEntry['level']): string {
+    const icons: Record<string, string> = {
+      'info': 'ℹ️',
+      'success': '✅',
+      'warn': '⚠️',
+      'error': '❌'
+    };
+    return icons[level] || 'ℹ️';
+  }
+
+  // ==================== 事件绑定 ====================
+
+  private bindEvents(): void {
+    // 主要操作按钮
+    this.bindClick('#btn-sync-now', () => this.handleSync('standard'));
+    this.bindClick('#btn-toggle-sync-config', () => this.toggleSyncConfig());
+    this.bindClick('#btn-close-sync-config', () => this.toggleSyncConfig(false));
+    
+    // 配置操作
+    this.bindClick('#btn-save-sync', () => this.saveSyncConfig());
+    this.bindClick('#btn-test-conn', () => this.testConnection());
+    this.bindClick('#btn-reconnect', () => this.handleReconnect());
+    
+    // 高级选项
+    this.bindClick('#btn-toggle-advanced', () => this.toggleAdvanced());
+    this.bindClick('#btn-toggle-logs', () => this.toggleLogs());
+    this.bindClick('#btn-clear-logs', () => this.clearLogs());
+    this.bindClick('#btn-force-push', () => this.confirmForceSync('force_push'));
+    this.bindClick('#btn-force-pull', () => this.confirmForceSync('force_pull'));
+
+    // Token 可见性切换
+    this.bindClick('#btn-toggle-token-visibility', () => this.toggleTokenVisibility());
+
+    // 自动同步复选框联动
+    this.bindChange('#chk-auto-sync', (checked: boolean) => {
+      const intervalInput = this.container.querySelector('#inp-sync-interval') as HTMLInputElement;
+      if (intervalInput) {
+        intervalInput.disabled = !checked;
+      }
+    });
+
+    // 冲突解决按钮
+    this.container.querySelectorAll('.btn-resolve-conflict').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const target = e.currentTarget as HTMLElement;
+        const id = target.dataset.id!;
+        const resolution = target.dataset.resolution as 'local' | 'remote';
+        this.resolveConflict(id, resolution);
+      });
+    });
+
+    // 批量解决冲突
+    this.bindClick('#btn-resolve-all-local', () => this.resolveAllConflicts('local'));
+    this.bindClick('#btn-resolve-all-remote', () => this.resolveAllConflicts('remote'));
+  }
+
+  /**
+   * 绑定点击事件
+   */
+  private bindClick(selector: string, handler: () => void): void {
+    const element = this.container.querySelector(selector);
+    if (element) {
+      element.addEventListener('click', handler);
+    }
+  }
+
+  /**
+   * 绑定变更事件
+   */
+  private bindChange(selector: string, handler: (checked: boolean) => void): void {
+    const element = this.container.querySelector(selector) as HTMLInputElement;
+    if (element) {
+      element.addEventListener('change', () => handler(element.checked));
+    }
+  }
+
+  // ==================== UI 更新方法 ====================
+
+  /**
+   * 更新状态 UI（不重新渲染整个页面）
+   */
+  private updateStatusUI(): void {
+    const stateInfo = this.getSyncStateInfo();
+    const statusDisplay = this.container.querySelector('#sync-status-display');
+    
+    if (statusDisplay) {
+      const hasConflicts = this.syncConflicts.length > 0;
+      statusDisplay.innerHTML = `
+        <span class="sync-status__dot sync-status__dot--${this.syncStatus.state}"></span>
+        <span class="sync-status__label">${stateInfo.label}</span>
+        ${this.syncStatus.lastSyncTime ? 
+          `<span class="sync-status__time">• ${StorageUtils.formatTime(this.syncStatus.lastSyncTime)}</span>` : ''}
+        ${hasConflicts ? 
+          `<span class="settings-badge settings-badge--warning">
+            ${this.syncConflicts.length} 个冲突
+          </span>` : ''}
+      `;
+    }
+
+    // 更新同步按钮状态
+    const syncBtn = this.container.querySelector('#btn-sync-now') as HTMLButtonElement;
+    if (syncBtn) {
+      syncBtn.disabled = this.syncStatus.state === 'syncing';
+      const icon = syncBtn.querySelector('i');
+      const text = syncBtn.querySelector('span');
+      
+      if (icon) {
+        icon.className = `fas fa-sync ${this.syncStatus.state === 'syncing' ? 'fa-spin' : ''}`;
+      }
+      if (text) {
+        text.textContent = this.syncStatus.state === 'syncing' ? '同步中...' : '立即同步';
+      }
+    }
+
+    // 更新错误信息
+    this.updateErrorUI();
+  }
+
+  /**
+   * 更新进度 UI
+   */
+  private updateProgressUI(): void {
+    const container = this.container.querySelector('#sync-progress-container');
+    if (container) {
+      container.innerHTML = this.renderSyncProgress();
+    }
+  }
+
+  /**
+   * 更新冲突 UI
+   */
+  private updateConflictsUI(): void {
+    const container = this.container.querySelector('#sync-conflicts-container');
+    if (container) {
+      container.innerHTML = this.renderConflicts();
+      
+      // 重新绑定冲突解决事件
+      container.querySelectorAll('.btn-resolve-conflict').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          const target = e.currentTarget as HTMLElement;
+          const id = target.dataset.id!;
+          const resolution = target.dataset.resolution as 'local' | 'remote';
+          this.resolveConflict(id, resolution);
+        });
+      });
+
+      this.bindClick('#btn-resolve-all-local', () => this.resolveAllConflicts('local'));
+      this.bindClick('#btn-resolve-all-remote', () => this.resolveAllConflicts('remote'));
+    }
+  }
+
+  /**
+   * 更新日志 UI
+   */
+  private updateLogsUI(): void {
+    const container = this.container.querySelector('#sync-logs-list');
+    if (container && this.uiState.showLogs) {
+      container.innerHTML = this.renderLogEntries();
+    }
+  }
+
+  /**
+   * 更新连接状态 UI
+   */
+  private updateConnectionUI(connected: boolean): void {
+    const container = this.container.querySelector('#connection-status-container');
+    if (container) {
+      this.syncStatus.connection = {
+        type: this.syncConfig.transport === 'http' ? 'http' : 'websocket',
+        connected
+      };
+      container.innerHTML = this.renderConnectionStatus();
+      
+      // 重新绑定重连按钮
+      this.bindClick('#btn-reconnect', () => this.handleReconnect());
+    }
+  }
+
+  /**
+   * 更新错误信息 UI
+   */
+  private updateErrorUI(): void {
+    const existingError = this.container.querySelector('.sync-error-message');
+    const configBody = this.container.querySelector('.sync-config-panel__body');
+    
+    if (this.syncStatus.errorMessage) {
+      const errorHtml = `
+        <div class="sync-error-message">
+          <i class="fas fa-exclamation-circle"></i>
+          <span>${StorageUtils.escapeHtml(this.syncStatus.errorMessage)}</span>
+          <button class="sync-error-message__dismiss" title="关闭">
+            <i class="fas fa-times"></i>
+          </button>
+        </div>
+      `;
+      
+      if (existingError) {
+        existingError.outerHTML = errorHtml;
+      } else if (configBody) {
+        // 插入到配置面板的适当位置
+        const actionsDiv = configBody.querySelector('.sync-config-panel__actions');
+        if (actionsDiv) {
+          actionsDiv.insertAdjacentHTML('beforebegin', errorHtml);
+        }
+      }
+
+      // 绑定关闭按钮
+      const dismissBtn = this.container.querySelector('.sync-error-message__dismiss');
+      if (dismissBtn) {
+        dismissBtn.addEventListener('click', () => {
+          this.syncStatus.errorMessage = undefined;
+          this.updateErrorUI();
+        });
+      }
+    } else if (existingError) {
+      existingError.remove();
+    }
+  }
+
+  // ==================== 业务逻辑方法 ====================
 
   /**
    * 处理同步
    */
   private async handleSync(mode: SyncMode): Promise<void> {
-    // 先尝试保存配置（如果面板打开）
+    // 如果配置面板打开，先尝试保存配置
     if (this.uiState.showConfig) {
       try {
         await this.saveSyncConfigSilent();
       } catch (e) {
         // 忽略保存错误，继续尝试同步
+        console.warn('[SyncSection] Config save failed before sync', e);
       }
     }
 
@@ -533,14 +865,25 @@ export class SyncSection {
 
     try {
       await syncService.triggerSync(mode);
-      Toast.success(mode === 'standard' ? '同步完成' : '强制同步完成');
+      
+      if (mode === 'standard') {
+        Toast.success('同步完成');
+      } else {
+        Toast.success(`${mode === 'force_push' ? '强制上传' : '强制下载'}完成`);
+      }
     } catch (e: any) {
       let msg = '同步失败';
-      if (e.message.includes('Failed to fetch')) {
+      
+      if (e.message?.includes('Failed to fetch')) {
         msg += ': 网络错误或证书未信任';
+      } else if (e.message?.includes('401') || e.message?.includes('Unauthorized')) {
+        msg += ': 认证失败，请检查 Token';
+      } else if (e.message?.includes('timeout')) {
+        msg += ': 连接超时';
       } else {
-        msg += ': ' + e.message;
+        msg += ': ' + (e.message || '未知错误');
       }
+      
       Toast.error(msg);
     }
   }
@@ -551,17 +894,24 @@ export class SyncSection {
   private confirmForceSync(mode: SyncMode): void {
     const isPush = mode === 'force_push';
     const title = isPush ? '⚠️ 确认强制上传？' : '⚠️ 确认强制下载？';
-    const message = isPush
-      ? `<div style="line-height: 1.6;">
-          <p>此操作将把<b>本地的所有数据</b>上传到服务器。</p>
-          <p style="color: var(--st-color-danger);">服务器上已存在的数据将被<b>直接覆盖</b>！</p>
-          <p>建议先创建一个快照以便回滚。</p>
-        </div>`
-      : `<div style="line-height: 1.6;">
-          <p>此操作将从服务器下载所有数据。</p>
-          <p style="color: var(--st-color-danger);">本地已存在的数据将被<b>直接覆盖</b>！</p>
-          <p>建议先创建一个快照以便回滚。</p>
-        </div>`;
+    
+    const message = `
+      <div class="modal-content-warning">
+        <p>${isPush 
+          ? '此操作将把<strong>本地的所有数据</strong>上传到服务器。'
+          : '此操作将从服务器下载所有数据。'
+        }</p>
+        <p class="text-danger">
+          <i class="fas fa-exclamation-triangle"></i>
+          ${isPush 
+            ? '服务器上已存在的数据将被<strong>直接覆盖</strong>！'
+            : '本地已存在的数据将被<strong>直接覆盖</strong>！'
+          }
+        </p>
+        <p class="text-muted">建议先创建一个快照以便回滚。</p>
+      </div>
+    `;
+
 
     Modal.confirm(title, message, async () => {
       await this.handleSync(mode);
@@ -593,27 +943,73 @@ export class SyncSection {
       
       if (success) {
         Toast.success('连接成功！服务器响应正常');
+        this.updateConnectionUI(true);
       } else {
         Toast.error('认证失败，请检查用户名和 Token');
+        this.updateConnectionUI(false);
       }
     } catch (e: any) {
-      if (e.message.includes('Failed to fetch')) {
-        Toast.error(`连接失败: 请先在浏览器中访问服务器地址并接受证书`);
+      let errorMsg = '连接错误';
+      
+      if (e.message?.includes('Failed to fetch')) {
+        errorMsg = '连接失败: 请检查网络或在浏览器中接受证书';
+      } else if (e.message?.includes('CORS')) {
+        errorMsg = '连接失败: 服务器未启用跨域支持';
       } else {
-        Toast.error('连接错误: ' + e.message);
+        errorMsg = '连接错误: ' + e.message;
       }
+      
+      Toast.error(errorMsg);
+      this.updateConnectionUI(false);
     } finally {
       btn.innerHTML = originalHtml;
       btn.disabled = false;
     }
   }
 
+  /**
+   * 处理重新连接
+   */
+  private async handleReconnect(): Promise<void> {
+    const btn = this.container.querySelector('#btn-reconnect') as HTMLButtonElement;
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 连接中...';
+    }
+
+    try {
+      await syncService.reconnect();
+      Toast.success('重新连接成功');
+    } catch (e: any) {
+      Toast.error('重新连接失败: ' + e.message);
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-redo"></i> 重连';
+      }
+    }
+  }
+
+  /**
+   * 保存同步配置
+   */
   private async saveSyncConfig(): Promise<void> {
+    const btn = this.container.querySelector('#btn-save-sync') as HTMLButtonElement;
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 保存中...';
+    }
+
     try {
       await this.saveSyncConfigSilent();
       Toast.success('配置已保存');
     } catch (e: any) {
       Toast.error('保存失败: ' + e.message);
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-save"></i> 保存配置';
+      }
     }
   }
 
@@ -629,29 +1025,44 @@ export class SyncSection {
     const autoSync = this.getCheckboxValue('#chk-auto-sync');
     const autoSyncInterval = parseInt(this.getInputValue('#inp-sync-interval') || '15', 10);
     const transport = this.getRadioValue('transport') as 'auto' | 'websocket' | 'http';
+    
+    // 高级选项
     const excludeBinary = this.getCheckboxValue('#chk-exclude-binary');
     const maxFileSize = parseFloat(this.getInputValue('#inp-max-file-size') || '100') * 1024 * 1024;
+    const excludePathsText = this.getTextareaValue('#inp-exclude-paths');
+    const excludePaths = excludePathsText
+      .split('\n')
+      .map(p => p.trim())
+      .filter(p => p.length > 0);
 
     if (!url) {
       throw new Error('请填写服务器地址');
     }
 
-    const config: SyncConfig = {
+    // 验证 URL 格式
+    try {
+      new URL(url);
+    } catch {
+      throw new Error('服务器地址格式无效');
+    }
+
+     const config: AppSyncSettings = {
       serverUrl: url,
       username,
       token,
-      strategy: strategy as any,
-      conflictResolution: conflictResolution as any,
+      strategy: strategy as AppSyncSettings['strategy'],
+      conflictResolution: conflictResolution as AppSyncSettings['conflictResolution'],
       autoSync,
-      autoSyncInterval,
+      autoSyncInterval: Math.max(1, Math.min(1440, autoSyncInterval)),
       transport,
       filters: {
         excludeBinary,
-        maxFileSize
+        maxFileSize,
+        excludePaths: excludePaths.length > 0 ? excludePaths : undefined
       }
     };
 
-    await syncService.saveConfig(config);
+    await syncService.saveSettings(config);
     this.syncConfig = config;
   }
 
@@ -659,16 +1070,63 @@ export class SyncSection {
    * 解决冲突
    */
   private async resolveConflict(conflictId: string, resolution: 'local' | 'remote'): Promise<void> {
-    try {
-      await syncService.resolveConflict(conflictId, resolution);
-      Toast.success(`冲突已解决: ${resolution === 'local' ? '保留本地版本' : '使用远程版本'}`);
-      this.syncConflicts = syncService.getConflicts();
-      this.render();
-    } catch (e: any) {
-      Toast.error('解决冲突失败: ' + e.message);
+    const btn = this.container.querySelector(`[data-id="${conflictId}"][data-resolution="${resolution}"]`) as HTMLButtonElement;
+    
+    if (btn) {
+      btn.disabled = true;
+      const originalHtml = btn.innerHTML;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+      
+      try {
+        await syncService.resolveConflict(conflictId, resolution);
+        this.syncConflicts = syncService.getConflicts();
+        this.updateConflictsUI();
+        this.updateStatusUI();
+        
+        Toast.success(`冲突已解决: ${resolution === 'local' ? '保留本地版本' : '使用远程版本'}`);
+      } catch (e: any) {
+        Toast.error('解决冲突失败: ' + e.message);
+        btn.innerHTML = originalHtml;
+        btn.disabled = false;
+      }
     }
   }
-  
+
+  /**
+   * 批量解决所有冲突
+   */
+  private async resolveAllConflicts(resolution: 'local' | 'remote'): Promise<void> {
+    const label = resolution === 'local' ? '保留本地' : '使用远程';
+    
+    Modal.confirm(
+      '批量解决冲突',
+      `确定要将所有 ${this.syncConflicts.length} 个冲突都${label}吗？`,
+      async () => {
+        try {
+          await syncService.resolveAllConflicts(resolution);
+          this.syncConflicts = syncService.getConflicts();
+          this.updateConflictsUI();
+          this.updateStatusUI();
+          Toast.success(`已${label}解决所有冲突`);
+        } catch (e: any) {
+          Toast.error('批量解决冲突失败: ' + e.message);
+        }
+      }
+    );
+  }
+
+  /**
+   * 清空日志
+   */
+  private clearLogs(): void {
+    syncService.clearLogs();
+    this.syncLogs = [];
+    this.updateLogsUI();
+    Toast.info('日志已清空');
+  }
+
+  // ==================== UI 切换方法 ====================
+
   /**
    * 切换同步配置面板
    */
@@ -679,85 +1137,130 @@ export class SyncSection {
     if (panel) {
       if (this.uiState.showConfig) {
         panel.classList.remove('sync-config-panel--hidden');
+        // 刷新配置表单
+        this.syncConfig = syncService.getSettings();
       } else {
         panel.classList.add('sync-config-panel--hidden');
         // 关闭时自动保存
-        this.saveSyncConfigSilent().catch(() => {});
+        this.saveSyncConfigSilent().catch(e => {
+          console.warn('[SyncSection] Auto-save on close failed', e);
+        });
       }
+    }
+
+    // 更新按钮状态
+    const toggleBtn = this.container.querySelector('#btn-toggle-sync-config');
+    if (toggleBtn) {
+      toggleBtn.classList.toggle('active', this.uiState.showConfig);
     }
   }
 
   /**
    * 切换高级选项
    */
-  private toggleAdvancedSync(): void {
+  private toggleAdvanced(): void {
     this.uiState.showAdvanced = !this.uiState.showAdvanced;
-    this.render();
+    
+    const container = this.container.querySelector('#advanced-options-container');
+    const btn = this.container.querySelector('#btn-toggle-advanced');
+    
+    if (container) {
+      container.classList.toggle('hidden', !this.uiState.showAdvanced);
+    }
+    
+    if (btn) {
+      const icon = btn.querySelector('i');
+      if (icon) {
+        icon.className = `fas fa-chevron-${this.uiState.showAdvanced ? 'up' : 'down'}`;
+      }
+    }
   }
 
   /**
    * 切换同步日志
    */
-  private toggleSyncLogs(): void {
+  private toggleLogs(): void {
     this.uiState.showLogs = !this.uiState.showLogs;
-    this.render();
+    
+    const section = this.container.querySelector('#sync-logs-section');
+    const btn = this.container.querySelector('#btn-toggle-logs');
+    
+    if (section) {
+      section.classList.toggle('hidden', !this.uiState.showLogs);
+      if (this.uiState.showLogs) {
+        this.syncLogs = syncService.getLogs(50);
+        section.innerHTML = this.renderSyncLogs();
+        this.bindClick('#btn-clear-logs', () => this.clearLogs());
+      }
+    }
+    
+    if (btn) {
+      const text = btn.querySelector('span') || btn;
+      if (text.textContent) {
+        text.textContent = this.uiState.showLogs ? '隐藏日志' : '查看日志';
+      }
+    }
   }
 
   /**
-   * 更新日志 UI（不重新渲染整个页面）
+   * 切换 Token 可见性
    */
-  private updateLogsUI(): void {
-    const container = this.container.querySelector('#sync-logs-container');
-    if (container && this.uiState.showLogs) {
-      container.innerHTML = this.syncLogs.length === 0
-        ? '<div style="text-align: center; color: var(--st-text-secondary); padding: 20px;">暂无日志</div>'
-        : this.syncLogs.map(log => `
-            <div class="sync-log-entry sync-log-entry--${log.level}">
-              <span class="sync-log-entry__time">${StorageUtils.formatLogTime(log.timestamp)}</span>
-              <span class="sync-log-entry__message">${StorageUtils.escapeHtml(log.message)}</span>
-            </div>
-          `).join('');
+  private toggleTokenVisibility(): void {
+    const input = this.container.querySelector('#inp-sync-token') as HTMLInputElement;
+    const btn = this.container.querySelector('#btn-toggle-token-visibility');
+    
+    if (input && btn) {
+      const isPassword = input.type === 'password';
+      input.type = isPassword ? 'text' : 'password';
+      
+      const icon = btn.querySelector('i');
+      if (icon) {
+        icon.className = `fas fa-eye${isPassword ? '-slash' : ''}`;
+      }
     }
   }
+
+  // ==================== 辅助方法 ====================
 
   /**
    * 获取同步状态信息
    */
   private getSyncStateInfo(): { label: string; color: string } {
-    const stateMap: Record<SyncStateType, { label: string; color: string }> = {
-      'idle': { label: '就绪', color: '#aaa' },
+    const stateMap: Record<UISyncState, { label: string; color: string }> = {
+      'idle': { label: '就绪', color: 'var(--st-color-text-secondary)' },
       'connecting': { label: '连接中...', color: 'var(--st-color-primary)' },
       'syncing': { label: '同步中...', color: 'var(--st-color-primary)' },
       'success': { label: '同步成功', color: 'var(--st-color-success)' },
       'error': { label: '同步失败', color: 'var(--st-color-danger)' },
       'offline': { label: '离线', color: 'var(--st-color-warning)' },
-      'paused': { label: '已暂停', color: '#aaa' }
+      'paused': { label: '已暂停', color: 'var(--st-color-text-secondary)' }
     };
 
-    return stateMap[this.syncStatus.state] || { label: '未知', color: '#aaa' };
+    return stateMap[this.syncStatus.state] || { label: '未知', color: 'var(--st-color-text-secondary)' };
   }
-
-  // -- tools --
 
   /**
    * 获取输入框值
    */
   private getInputValue(selector: string): string {
-    return (this.container.querySelector(selector) as HTMLInputElement)?.value || '';
+    const input = this.container.querySelector(selector) as HTMLInputElement;
+    return input?.value || '';
   }
 
   /**
    * 获取选择框值
    */
   private getSelectValue(selector: string): string {
-    return (this.container.querySelector(selector) as HTMLSelectElement)?.value || '';
+    const select = this.container.querySelector(selector) as HTMLSelectElement;
+    return select?.value || '';
   }
 
   /**
    * 获取复选框值
    */
   private getCheckboxValue(selector: string): boolean {
-    return (this.container.querySelector(selector) as HTMLInputElement)?.checked || false;
+    const checkbox = this.container.querySelector(selector) as HTMLInputElement;
+    return checkbox?.checked || false;
   }
 
   /**
@@ -766,5 +1269,13 @@ export class SyncSection {
   private getRadioValue(name: string): string {
     const checked = this.container.querySelector(`input[name="${name}"]:checked`) as HTMLInputElement;
     return checked?.value || '';
+  }
+
+  /**
+   * 获取文本域值
+   */
+  private getTextareaValue(selector: string): string {
+    const textarea = this.container.querySelector(selector) as HTMLTextAreaElement;
+    return textarea?.value || '';
   }
 }

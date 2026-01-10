@@ -14,7 +14,7 @@ import { TagsPlugin } from '../tags';
 import { AssetsPlugin } from '../assets';
 import { MiddlewarePlugin, IMiddleware } from '../middleware';
 import { AssetInfo } from '../assets';
-
+import {IPlugin} from '../core';
 /**
  * VFS 高层门面类
  * 提供简化的 API 访问
@@ -34,6 +34,10 @@ export class VFS {
 
   get events(): EventBus {
     return this.instance.events;
+  }
+  // ✅ 新增：公开获取插件的方法
+  getPlugin<T extends IPlugin>(id: string): T | undefined {
+    return this.instance.getPlugin<T>(id);
   }
 
   // ==================== 模块操作 ====================
