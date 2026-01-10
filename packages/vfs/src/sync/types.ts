@@ -1,6 +1,20 @@
 // @file packages/vfs/sync/types.ts
 
 /**
+ * [新增] 同步进度详情
+ */
+export interface SyncProgress {
+  phase: 'preparing' | 'uploading' | 'downloading' | 'applying' | 'finalizing';
+  current: number;
+  total: number;
+  bytesTransferred: number;
+  bytesTotal: number;
+  // 可选：添加当前处理的文件名或速度
+  currentFile?: string;
+  speed?: number; // bytes per second
+}
+
+/**
  * 同步日志 - 记录所有变更
  */
 export interface SyncLog {

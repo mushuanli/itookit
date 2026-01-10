@@ -1,267 +1,321 @@
 // @file: app-settings/services/SyncService.ts
 
+import { VFS, VFSEventType } from '@itookit/vfs';
+import { SyncPlugin, SyncConfig as PluginSyncConfig, SyncState as PluginSyncState,SyncConflict } from '@itookit/vfs';
 import { 
-  SyncConfig, 
-  SyncStatus, 
+  AppSyncSettings, 
   SyncMode, 
-  SyncConflict, 
-  SyncLogEntry,
-  SyncQueueItem,
+  SyncUIEventHandler,
+  SystemLogEntry,
+  AppSyncStatus,
+  UISyncState,
+  SyncUIEvent
 } from '../types/sync';
 
-type SyncEventHandler = (event: SyncEvent) => void;
-
-interface SyncEvent {
-  type: 'stateChange' | 'progress' | 'conflict' | 'log' | 'error' | 'connected' | 'disconnected';
-  data: any;
-}
+const CONFIG_MODULE = '__config';
+const SYNC_CONFIG_PATH = '/sync_config.json';
 
 /**
- * 同步服务 - 管理远程同步逻辑
+ * 同步服务 - UI 层与 SyncPlugin 的桥接层
  */
 export class SyncService {
-  private config: SyncConfig | null = null;
-  private status: SyncStatus = { state: 'idle', lastSyncTime: null };
-  private conflicts: SyncConflict[] = [];
-  private logs: SyncLogEntry[] = [];
-  private queue: SyncQueueItem[] = [];
-  private eventHandlers: Map<string, Set<SyncEventHandler>> = new Map();
+  private vfs: VFS | null = null;
+  private plugin: SyncPlugin | null = null;
   
-  // WebSocket 连接
-  private ws: WebSocket | null = null;
-  private wsReconnectTimer: any = null;
-  private wsReconnectAttempts = 0;
+  // 使用应用层配置类型
+  private settings: AppSyncSettings | null = null;
+  // 使用应用层状态类型
+  private status: AppSyncStatus = { state: 'idle', lastSyncTime: null };
+  
+  private conflicts: SyncConflict[] = [];
+  private logs: SystemLogEntry[] = []; // 系统日志
+  private readonly maxLogs = 100;
+  
+  private eventHandlers: Map<string, Set<SyncUIEventHandler>> = new Map();
+  private unsubscribers: Array<() => void> = [];
   
   // 自动同步定时器
-  private autoSyncTimer: any = null;
+  private autoSyncTimer: ReturnType<typeof setInterval> | null = null;
 
-  constructor(private storageKey: string = 'vfs_sync_config') {
-    this.loadConfig();
+  constructor() {
+    // 单例模式
+  }
+
+  // ==================== 初始化 ====================
+
+  /**
+   * 初始化服务
+   */
+  async init(vfs: VFS): Promise<void> {
+    this.vfs = vfs;
+    this.plugin = vfs.getPlugin<SyncPlugin>('vfs-sync') ?? null;  // 修复类型问题
+    
+    if (!this.plugin) {
+      console.warn('[SyncService] SyncPlugin not found');
+      this.updateStatus({ state: 'error', errorMessage: 'Sync Plugin Missing' });
+      return;
+    }
+
+    await this.loadSettingsFromVFS();
+    this.bindPluginEvents();
+
+    if (this.settings?.autoSync) {
+      this.startAutoSync();
+    }
+
+    this.log('info', '同步服务已初始化');
+  }
+
+  // ==================== 适配器逻辑 (Adapter Logic) ====================
+
+  /**
+   * 核心：将 PluginSyncState (VFS) 映射回 AppSyncStatus (UI)
+   */
+  private syncFromPluginState(pluginState: PluginSyncState): void {
+    // 状态字符串映射
+    const stateMap: Record<string, UISyncState> = {
+      'idle': 'idle',
+      'syncing': 'syncing',
+      'paused': 'paused',
+      'error': 'error',
+      'offline': 'offline'
+    };
+
+    this.updateStatus({
+      state: stateMap[pluginState.status] || 'idle',
+      // 直接传递 progress 对象，因为类型兼容
+      progress: pluginState.progress,
+      errorMessage: pluginState.error?.message
+    });
+
+    // 同步统计信息
+    if (pluginState.stats.lastSyncTime) {
+      this.status.lastSyncTime = pluginState.stats.lastSyncTime;
+    }
   }
 
   // ==================== 配置管理 ====================
 
   /**
-   * 加载同步配置
+   * 从 VFS 加载配置
    */
-  private loadConfig(): void {
+  private async loadSettingsFromVFS(): Promise<void> {
+    if (!this.vfs) return;
+    
     try {
-      const stored = localStorage.getItem(this.storageKey);
-      if (stored) {
-        this.config = JSON.parse(stored);
+      const exists = await this.vfs.getNode(CONFIG_MODULE, SYNC_CONFIG_PATH);
+      if (exists) {
+        const content = await this.vfs.read(CONFIG_MODULE, SYNC_CONFIG_PATH);
+        const json = typeof content === 'string' ? content : new TextDecoder().decode(content as ArrayBuffer);
+        this.settings = JSON.parse(json);
+        
+        // 加载后立即应用到底层插件
+        if (this.plugin && this.settings) {
+          await this.plugin.reconfigure(this.mapToPluginConfig(this.settings));
+        }
       }
     } catch (e) {
-      console.error('Failed to load sync config:', e);
+      this.settings = this.getDefaultSettings();
     }
   }
 
-  /**
-   * 保存同步配置
-   */
-  async saveConfig(config: SyncConfig): Promise<void> {
-    this.config = config;
-    localStorage.setItem(this.storageKey, JSON.stringify(config));
-    
-    // 重新初始化自动同步
-    this.setupAutoSync();
-    
-    // 如果启用了 WebSocket，重新连接
-    if (config.transport === 'websocket' || config.transport === 'auto') {
-      await this.reconnectWebSocket();
-    }
-    
-    this.log('info', '同步配置已保存');
-  }
-
-  /**
-   * 获取同步配置
-   */
-  getConfig(): SyncConfig {
-    return this.config || {
+  private getDefaultSettings(): AppSyncSettings {
+    return {
       serverUrl: '',
       username: '',
       token: '',
       strategy: 'manual',
-      autoSync: false
+      autoSync: false,
+      conflictResolution: 'server-wins',
+      autoSyncInterval: 15,
+      transport: 'auto',
+      filters: {
+        excludeBinary: false,
+        maxFileSize: 100 * 1024 * 1024 // 100MB
+      }
     };
   }
 
   /**
-   * 获取同步状态
+   * 保存配置
    */
-  getStatus(): SyncStatus {
-    return { ...this.status };
-  }
+  async saveSettings(settings: AppSyncSettings): Promise<void> {
+    if (!this.vfs) throw new Error('VFS not initialized');
 
-  // ==================== 连接管理 ====================
-
-  /**
-   * 测试服务器连接
-   */
-  async testConnection(url: string, username: string, token: string): Promise<boolean> {
+    this.settings = settings;
+    
+    // 1. 持久化到 VFS
+    const content = JSON.stringify(settings, null, 2);
     try {
-      const response = await fetch(`${url}/api/sync/ping`, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'X-Username': username
-        }
-      });
-      
-      if (response.ok) {
-        this.log('success', '服务器连接成功');
-        return true;
+      const exists = await this.vfs.getNode(CONFIG_MODULE, SYNC_CONFIG_PATH);
+      if (exists) {
+        await this.vfs.write(CONFIG_MODULE, SYNC_CONFIG_PATH, content);
       } else {
-        const error = await response.text();
-        this.log('error', `连接失败: ${response.status} ${error}`);
-        return false;
+        await this.vfs.createFile(CONFIG_MODULE, SYNC_CONFIG_PATH, content);
       }
     } catch (e: any) {
-      this.log('error', `连接错误: ${e.message}`);
+      // 如果模块不存在，尝试创建
+      if (e.message?.includes('not found')) {
+        try {
+          await this.vfs.mount(CONFIG_MODULE, { description: 'Configuration Storage' });
+          await this.vfs.createFile(CONFIG_MODULE, SYNC_CONFIG_PATH, content);
+        } catch (mountError) {
+          console.error('[SyncService] Failed to create config module', mountError);
+          throw mountError;
+        }
+      } else {
+        throw e;
+      }
+    }
+
+  // 2. ✅ 使用 applyConfigToPlugin 代替直接调用
+  await this.applyConfigToPlugin(settings);
+
+    // 3. 管理自动同步
+    this.manageAutoSync(this.settings);
+    
+    this.log('info', '同步配置已更新');
+  }
+
+  /**
+   * 应用配置到 Plugin
+   */
+  private async applyConfigToPlugin(config: AppSyncSettings): Promise<void> {
+    if (!this.plugin) return;
+
+    const pluginConfig = this.mapToPluginConfig(config);
+    
+    try {
+      await this.plugin.reconfigure(pluginConfig);
+      
+      // 如果启用了实时同步，重新连接
+      if (config.transport === 'websocket' || config.transport === 'auto') {
+        await this.plugin.reconnect();
+      }
+    } catch (e) {
+      console.error('[SyncService] Failed to apply config to plugin', e);
       throw e;
     }
   }
 
   /**
-   * 建立 WebSocket 连接
+   * 管理自动同步定时器
    */
-  private async connectWebSocket(): Promise<void> {
-    if (!this.config?.serverUrl || !this.config?.token) {
-      return;
-    }
-
-    const wsUrl = this.config.serverUrl
-      .replace(/^http/, 'ws')
-      .replace(/\/$/, '') + '/api/sync/ws';
-
-    try {
-      const url = new URL(wsUrl);
-      url.searchParams.set('token', this.config.token);
-
-      this.ws = new WebSocket(url.toString());
-      
-      this.ws.onopen = () => {
-        this.wsReconnectAttempts = 0;
-        this.updateStatus({ 
-          connection: { type: 'websocket', connected: true }
-        });
-        this.emit('connected', {});
-        this.log('success', 'WebSocket 连接已建立');
-      };
-
-      this.ws.onclose = (event) => {
-        this.updateStatus({
-          connection: { type: 'websocket', connected: false }
-        });
-        this.emit('disconnected', { reason: event.reason });
-        
-        // 自动重连
-        if (this.config?.autoSync) {
-          this.scheduleReconnect();
-        }
-      };
-
-      this.ws.onerror = (error) => {
-        this.log('error', 'WebSocket 错误');
-        console.error('WebSocket error:', error);
-      };
-
-      this.ws.onmessage = (event) => {
-        this.handleWebSocketMessage(event.data);
-      };
-
-    } catch (e: any) {
-      this.log('error', `WebSocket 连接失败: ${e.message}`);
-    }
-  }
-
-  /**
-   * 处理 WebSocket 消息
-   */
-  private handleWebSocketMessage(data: string): void {
-    try {
-      const message = JSON.parse(data);
-      
-      switch (message.type) {
-        case 'sync:changes':
-          // 服务器推送变更
-          this.handleRemoteChanges(message.payload);
-          break;
-
-        case 'sync:conflict':
-          // 冲突通知
-          this.handleConflict(message.payload);
-          break;
-
-        case 'sync:progress':
-          // 进度更新
-          this.updateStatus({ progress: message.payload });
-          break;
-
-        case 'ping':
-          // 心跳响应
-          this.ws?.send(JSON.stringify({ type: 'pong', id: message.id }));
-          break;
-      }
-    } catch (e) {
-      console.error('Failed to parse WebSocket message:', e);
-    }
-  }
-
-  /**
-   * 安排重连
-   */
-  private scheduleReconnect(): void {
-    if (this.wsReconnectAttempts >= 10) {
-      this.log('error', '重连次数过多，停止重连');
-      return;
-    }
-
-    const delay = Math.min(1000 * Math.pow(2, this.wsReconnectAttempts), 30000);
-    this.wsReconnectAttempts++;
-
-    this.log('info', `${delay / 1000}秒后尝试重连...`);
-
-    this.wsReconnectTimer = setTimeout(() => {
-      this.connectWebSocket();
-    }, delay);
-  }
-
-  /**
-   * 重新连接 WebSocket
-   */
-  private async reconnectWebSocket(): Promise<void> {
-    if (this.ws) {
-      this.ws.close();
-      this.ws = null;
-    }
-    
-    if (this.wsReconnectTimer) {
-      clearTimeout(this.wsReconnectTimer);
-    }
-    
-    this.wsReconnectAttempts = 0;
-    await this.connectWebSocket();
-  }
-
-  /**
-   * 断开连接
-   */
-  disconnect(): void {
-    if (this.ws) {
-      this.ws.close();
-      this.ws = null;
-    }
-    
-    if (this.wsReconnectTimer) {
-      clearTimeout(this.wsReconnectTimer);
-    }
-    
+  private manageAutoSync(config: AppSyncSettings): void {
+    // 清理现有定时器
     if (this.autoSyncTimer) {
       clearInterval(this.autoSyncTimer);
+      this.autoSyncTimer = null;
     }
+
+    // 如果启用自动同步，创建新定时器
+    if (config.autoSync && config.autoSyncInterval && config.autoSyncInterval > 0) {
+      this.startAutoSync();
+    }
+  }
+
+  /**
+   * 启动自动同步
+   */
+  private startAutoSync(): void {
+    if (!this.settings?.autoSyncInterval) return;
+
+    const intervalMs = this.settings.autoSyncInterval * 60 * 1000; // 转换为毫秒
     
-    this.updateStatus({ state: 'offline' });
+    this.autoSyncTimer = setInterval(async () => {
+      if (this.status.state === 'syncing') {
+        console.log('[SyncService] Auto-sync skipped: already syncing');
+        return;
+      }
+
+      if (!this.settings?.serverUrl) {
+        console.log('[SyncService] Auto-sync skipped: no server configured');
+        return;
+      }
+
+      try {
+        this.log('info', '自动同步开始...');
+        await this.triggerSync('standard');
+      } catch (e: any) {
+        this.log('error', `自动同步失败: ${e.message}`);
+      }
+    }, intervalMs);
+
+    console.log(`[SyncService] Auto-sync enabled, interval: ${this.settings.autoSyncInterval} minutes`);
+  }
+
+  /**
+   * 获取当前配置
+   */
+  getSettings(): AppSyncSettings {
+    return this.settings || this.getDefaultSettings();
+  }
+
+  // ==================== 状态与日志 ====================
+
+  /**
+   * 获取当前状态
+   */
+  getStatus(): AppSyncStatus {
+    return { ...this.status };
+  }
+
+  /**
+   * 更新状态
+   */
+  private updateStatus(partial: Partial<AppSyncStatus>): void {
+    this.status = { ...this.status, ...partial };
+    this.emit('stateChange', { status: this.status });
+  }
+
+  /**
+   * 获取日志
+   */
+  getLogs(limit: number = 50): SystemLogEntry[] {
+    return this.logs.slice(0, limit);
+  }
+
+  /**
+   * 记录日志
+   */
+  private log(level: SystemLogEntry['level'], message: string, details?: any): void {
+    const entry: SystemLogEntry = {
+      timestamp: Date.now(),
+      level,
+      message,
+      details
+    };
+    
+    this.logs.unshift(entry);
+    if (this.logs.length > this.maxLogs) this.logs.pop();
+    this.emit('log', { entry });
+  }
+
+  /**
+   * 清空日志
+   */
+  clearLogs(): void {
+    this.logs = [];
+    this.emit('log', { cleared: true });
+  }
+
+  /**
+   * 绑定 Plugin 事件
+   */
+  private bindPluginEvents(): void {
+    if (!this.vfs) return;
+
+    // 监听 VFS 事件总线中的同步相关事件
+    const unsub = this.vfs.onAny((type: VFSEventType | string, event: any) => {
+      // 处理自定义同步事件（Plugin 通过 EventBus 发送）
+      const typeStr = String(type);
+      
+    if (typeStr.startsWith('sync:')) {
+      this.handlePluginEvent(typeStr, event);
+    }
+
+    });
+    this.unsubscribers.push(unsub);
   }
 
   // ==================== 同步操作 ====================
@@ -270,76 +324,25 @@ export class SyncService {
    * 触发同步
    */
   async triggerSync(mode: SyncMode = 'standard'): Promise<void> {
-    if (!this.config?.serverUrl) {
-      throw new Error('未配置服务器地址');
+    if (!this.plugin) {
+      throw new Error('Sync plugin not available');
     }
 
-    if (this.status.state === 'syncing') {
-      throw new Error('同步正在进行中');
+    if (!this.settings?.serverUrl) {
+      throw new Error('请先配置同步服务器');
     }
 
-    this.updateStatus({ state: 'syncing', progress: { phase: 'preparing', current: 0, total: 0 } });
-    this.log('info', `开始${this.getModeLabel(mode)}...`);
+    this.updateStatus({ state: 'syncing', progress: undefined });
+    this.log('info', `开始${this.getModeLabel(mode)}同步...`);
 
     try {
-      const endpoint = this.getSyncEndpoint(mode);
-      
-      const response = await fetch(`${this.config.serverUrl}${endpoint}`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${this.config.token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          modules: this.config.modules || ['default'],
-          strategy: this.config.strategy,
-          conflictResolution: this.config.conflictResolution || 'newer-wins'
-        })
-      });
-
-      if (!response.ok) {
-        const error = await response.text();
-        throw new Error(error || `HTTP ${response.status}`);
-      }
-
-      const result = await response.json();
-      
-      this.updateStatus({
-        state: 'success',
-        lastSyncTime: Date.now(),
-        stats: result.stats,
-        progress: undefined
-      });
-      
-      this.log('success', `同步完成: 上传 ${result.stats?.uploadedFiles || 0} 个，下载 ${result.stats?.downloadedFiles || 0} 个`);
-
-      // 处理返回的冲突
-      if (result.conflicts?.length > 0) {
-        this.conflicts = result.conflicts;
-        this.emit('conflict', { conflicts: result.conflicts });
-      }
-
+      await this.plugin.triggerManualSync(mode);
+      this.updateStatus({ state: 'success', lastSyncTime: Date.now() });
+      this.log('success', '同步完成');
     } catch (e: any) {
-      this.updateStatus({
-        state: 'error',
-        errorMessage: e.message
-      });
+      this.updateStatus({ state: 'error', errorMessage: e.message });
       this.log('error', `同步失败: ${e.message}`);
       throw e;
-    }
-  }
-
-  /**
-   * 获取同步端点
-   */
-  private getSyncEndpoint(mode: SyncMode): string {
-    switch (mode) {
-      case 'force_push':
-        return '/api/sync/force-push';
-      case 'force_pull':
-        return '/api/sync/force-pull';
-      default:
-        return '/api/sync/sync';
     }
   }
 
@@ -347,134 +350,154 @@ export class SyncService {
    * 获取模式标签
    */
   private getModeLabel(mode: SyncMode): string {
-    switch (mode) {
-      case 'force_push':
-        return '强制上传';
-      case 'force_pull':
-        return '强制下载';
-      default:
-        return '同步';
+    const labels: Record<SyncMode, string> = {
+      'standard': '标准',
+      'force_push': '强制上传',
+      'force_pull': '强制下载'
+    };
+    return labels[mode] || mode;
+  }
+
+  /**
+   * 测试连接
+   */
+  async testConnection(url: string, _user: string, token: string): Promise<boolean> {
+    if (this.plugin) {
+      return this.plugin.testConnection(url, token);
+    }
+
+    // 降级方案：使用 HTTP 测试
+    try {
+      const response = await fetch(`${url}/api/sync/ping`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      return response.ok;
+    } catch (e) {
+      console.error('[SyncService] Connection test failed', e);
+      return false;
     }
   }
 
   /**
-   * 处理远程变更
+   * 重新连接
    */
-  private async handleRemoteChanges(changes: any[]): Promise<void> {
-    this.log('info', `收到 ${changes.length} 个远程变更`);
-    // 实际应用变更的逻辑由 VFS 处理
-    this.emit('stateChange', { changes });
+  async reconnect(): Promise<void> {
+    if (!this.plugin) {
+      throw new Error('Sync plugin not available');
+    }
+
+    this.log('info', '正在重新连接...');
+    await this.plugin.reconnect();
   }
 
-  /**
-   * 处理冲突
-   */
-  private handleConflict(conflict: SyncConflict): void {
-    this.conflicts.push(conflict);
-    this.emit('conflict', { conflict });
-    this.log('warn', `检测到冲突: ${conflict.path}`);
-  }
+  // ==================== 冲突管理 ====================
 
   /**
    * 解决冲突
    */
   async resolveConflict(conflictId: string, resolution: 'local' | 'remote'): Promise<void> {
-    if (!this.config?.serverUrl) {
-      throw new Error('未配置服务器');
+    if (!this.plugin) {
+      throw new Error('Sync plugin not available');
     }
-
-    const response = await fetch(`${this.config.serverUrl}/api/sync/conflicts/${conflictId}`, {
-      method: 'PUT',
-      headers: {
-        'Authorization': `Bearer ${this.config.token}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ resolution })
-    });
-
-    if (!response.ok) {
-      throw new Error('解决冲突失败');
-    }
-
-    // 移除已解决的冲突
-    this.conflicts = this.conflicts.filter(c => c.id !== conflictId);
-    this.log('success', `冲突已解决: ${resolution === 'local' ? '保留本地' : '使用远程'}`);
+    
+    await this.plugin.resolveConflict(conflictId, resolution);
+    await this.refreshConflicts();
+    
+    const label = resolution === 'local' ? '保留本地版本' : '使用远程版本';
+    this.log('success', `冲突已解决: ${label}`);
   }
+
 
   /**
    * 获取冲突列表
    */
   getConflicts(): SyncConflict[] {
-    return [...this.conflicts];
+    return this.conflicts;
   }
 
-  // ==================== 自动同步 ====================
+  /**
+   * 刷新冲突列表
+   */
+  private async refreshConflicts(): Promise<void> {
+    if (this.plugin) {
+      this.conflicts = await this.plugin.getConflicts();
+      this.emit('conflict', { conflicts: this.conflicts });
+    }
+  }
+
 
   /**
-   * 设置自动同步
+   * 批量解决冲突
    */
-  private setupAutoSync(): void {
-    if (this.autoSyncTimer) {
-      clearInterval(this.autoSyncTimer);
-      this.autoSyncTimer = null;
+  async resolveAllConflicts(resolution: 'local' | 'remote'): Promise<void> {
+    const conflicts = this.getConflicts();
+    
+    for (const conflict of conflicts) {
+      try {
+        await this.resolveConflict(conflict.conflictId, resolution);
+      } catch (e) {
+        console.error(`[SyncService] Failed to resolve conflict ${conflict.conflictId}`, e);
+      }
     }
+  }
 
-    if (this.config?.autoSync && this.config?.autoSyncInterval) {
-      const interval = this.config.autoSyncInterval * 60 * 1000; // 转换为毫秒
-      
-      this.autoSyncTimer = setInterval(() => {
-        this.triggerSync('standard').catch(e => {
-          console.error('Auto sync failed:', e);
+  /**
+   * 处理插件事件
+   */
+  private handlePluginEvent(type: string, event: any): void {
+    switch (type) {
+      case 'sync:state_changed':
+        const pluginState = event.data as PluginSyncState;
+        this.syncFromPluginState(pluginState);
+        break;
+
+      case 'sync:progress':
+        this.updateStatus({ 
+          state: 'syncing', 
+          progress: event.data 
         });
-      }, interval);
-      
-      this.log('info', `自动同步已启用，间隔 ${this.config.autoSyncInterval} 分钟`);
+      this.emit('progress', event.data);
+        break;
+
+      case 'sync:connected':
+        this.updateStatus({ 
+          connection: { type: 'websocket', connected: true } 
+        });
+        this.log('success', '已连接到同步服务器');
+        this.emit('connected', {});
+        break;
+
+      case 'sync:disconnected':
+        this.updateStatus({ 
+          connection: { type: 'websocket', connected: false } 
+        });
+        this.log('warn', '与服务器断开连接');
+        this.emit('disconnected', {});
+        break;
+
+      case 'sync:conflict':
+        this.refreshConflicts();
+        this.log('warn', `发现冲突: ${event.path}`);
+        break;
+
+      case 'sync:error':
+        this.updateStatus({ 
+          state: 'error', 
+          errorMessage: event.data?.message || '未知错误' 
+        });
+        this.log('error', event.data?.message || '同步错误');
+        this.emit('error', { message: event.data?.message });
+        break;
+
+      case 'sync:completed':
+        this.updateStatus({ state: 'success', lastSyncTime: Date.now() });
+        this.log('success', '同步完成');
+        this.emit('completed', {});
+        break;
     }
-  }
-
-  // ==================== 状态和日志 ====================
-
-  /**
-   * 更新状态
-   */
-  private updateStatus(partial: Partial<SyncStatus>): void {
-    this.status = { ...this.status, ...partial };
-    this.emit('stateChange', { status: this.status });
-  }
-
-  /**
-   * 添加日志
-   */
-  private log(level: SyncLogEntry['level'], message: string, details?: any): void {
-    const entry: SyncLogEntry = {
-      timestamp: Date.now(),
-      level,
-      message,
-      details
-    };
-    
-    this.logs.unshift(entry);
-    
-    // 只保留最近 100 条日志
-    if (this.logs.length > 100) {
-      this.logs = this.logs.slice(0, 100);
-    }
-    
-    this.emit('log', { entry });
-  }
-
-  /**
-   * 获取日志
-   */
-  getLogs(limit: number = 50): SyncLogEntry[] {
-    return this.logs.slice(0, limit);
-  }
-
-  /**
-   * 清除日志
-   */
-  clearLogs(): void {
-    this.logs = [];
   }
 
   // ==================== 事件系统 ====================
@@ -482,44 +505,128 @@ export class SyncService {
   /**
    * 订阅事件
    */
-  on(event: string, handler: SyncEventHandler): () => void {
-    if (!this.eventHandlers.has(event)) {
-      this.eventHandlers.set(event, new Set());
-    }
-    this.eventHandlers.get(event)!.add(handler);
-    
-    return () => {
-      this.eventHandlers.get(event)?.delete(handler);
-    };
+  on(type: string, handler: SyncUIEventHandler): () => void {
+      if (!this.eventHandlers.has(type)) this.eventHandlers.set(type, new Set());
+      this.eventHandlers.get(type)!.add(handler);
+      return () => this.eventHandlers.get(type)?.delete(handler);
   }
 
   /**
    * 发送事件
    */
   private emit(type: string, data: any): void {
-    this.eventHandlers.get(type)?.forEach(handler => {
-      try {
-        handler({ type: type as any, data });
-      } catch (e) {
-        console.error('Event handler error:', e);
+    const event: SyncUIEvent = { type: type as SyncUIEvent['type'], data, timestamp: Date.now() };
+    this.eventHandlers.get(type)?.forEach(h => h(event));
+  }
+
+  // ==================== 配置映射 ====================
+
+  /**
+   * 将 UI 配置映射到 Plugin 配置
+   */
+  private mapToPluginConfig(uiConfig: AppSyncSettings): PluginSyncConfig {
+    return {
+      moduleId: 'root',
+      peerId: this.getOrCreatePeerId(),
+      serverUrl: uiConfig.serverUrl,
+      auth: {
+        type: 'jwt',
+        token: uiConfig.token
+      },
+      transport: uiConfig.transport === 'auto' ? 'websocket' : uiConfig.transport,
+      strategy: {
+        direction: this.mapStrategyToDirection(uiConfig.strategy),
+        conflictResolution: uiConfig.conflictResolution,
+        batchSize: 50,
+        maxPacketSize: 5 * 1024 * 1024,
+        maxRetries: 3,
+        retryDelay: 1000,
+        retryBackoff: 'exponential',
+        filters: uiConfig.filters ? {
+          content: {
+            excludeBinary: uiConfig.filters.excludeBinary
+          },
+          sizeLimit: {
+            maxFileSize: uiConfig.filters.maxFileSize
+          },
+          paths: {
+            exclude: uiConfig.filters.excludePaths,
+            include: uiConfig.filters.includePaths
+          }
+        } : undefined
+      },
+      chunking: {
+        enabled: true,
+        chunkSize: 1024 * 1024,      // 1MB
+        threshold: 5 * 1024 * 1024    // 5MB
+      },
+      compression: {
+        enabled: true,
+        algorithm: 'gzip',
+        minSize: 1024                 // 1KB
+      },
+      realtime: {
+        enabled: uiConfig.transport !== 'http',
+        heartbeatInterval: 30000,
+        reconnectDelay: 5000,
+        maxReconnectAttempts: 10
       }
-    });
-  }
-
-  // ==================== 队列管理 ====================
-
-  /**
-   * 获取同步队列
-   */
-  getQueue(): SyncQueueItem[] {
-    return [...this.queue];
+    };
   }
 
   /**
-   * 清空队列
+   * 映射策略到方向
    */
-  clearQueue(): void {
-    this.queue = [];
+  private mapStrategyToDirection(strategy: string): 'push' | 'pull' | 'bidirectional' {
+    switch (strategy) {
+      case 'push': return 'push';
+      case 'pull': return 'pull';
+      case 'bidirectional': return 'bidirectional';
+      default: return 'bidirectional';
+    }
+  }
+
+  /**
+   * 获取或创建 Peer ID
+   */
+  private getOrCreatePeerId(): string {
+    const storageKey = 'vfs_sync_peer_id';
+    let peerId = localStorage.getItem(storageKey);
+    
+    if (!peerId) {
+      peerId = `browser_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+      localStorage.setItem(storageKey, peerId);
+    }
+    
+    return peerId;
+  }
+
+  // ==================== 生命周期 ====================
+
+  /**
+   * 销毁服务
+   */
+  async dispose(): Promise<void> {
+    // 停止自动同步
+    if (this.autoSyncTimer) {
+      clearInterval(this.autoSyncTimer);
+      this.autoSyncTimer = null;
+    }
+
+    // 取消事件订阅
+    this.unsubscribers.forEach(fn => fn());
+    this.unsubscribers = [];
+
+    // 清理事件处理器
+    this.eventHandlers.clear();
+
+    // 清理日志
+    this.logs = [];
+
+    this.vfs = null;
+    this.plugin = null;
+
+    console.log('[SyncService] Disposed');
   }
 }
 
