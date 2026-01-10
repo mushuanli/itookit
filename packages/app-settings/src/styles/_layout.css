@@ -1,0 +1,122 @@
+/* ============================================
+   @file: app-settings/styles/_layout.css
+   通用布局样式
+   ============================================ */
+
+.settings-page {
+    padding: var(--st-space-2xl);
+    height: 100%;
+    overflow-y: auto;
+}
+
+.settings-page__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: var(--st-space-2xl);
+    gap: var(--st-space-xl);
+}
+
+.settings-page__title {
+    margin: 0 0 var(--st-space-sm) 0;
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: var(--st-text-primary);
+}
+
+.settings-page__description {
+    color: var(--st-text-secondary);
+    margin: 0;
+    font-size: 0.875rem;
+    line-height: 1.5;
+}
+
+.settings-page__actions {
+    display: flex;
+    align-items: center;
+    gap: var(--st-space-sm);
+}
+
+/* Section */
+.settings-section {
+    margin-bottom: var(--st-space-3xl);
+}
+
+.settings-section__title {
+    font-size: 1.125rem;
+    font-weight: 600;
+    margin: 0 0 var(--st-space-lg) 0;
+    color: var(--st-text-primary);
+}
+
+/* Split View */
+.settings-split {
+    display: grid;
+    grid-template-columns: 300px 1fr;
+    height: 100%;
+    gap: 0;
+    overflow: hidden;
+}
+
+.settings-split__sidebar {
+    background: var(--st-bg-secondary);
+    border-right: 1px solid var(--st-border-color);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.settings-split__header {
+    padding: var(--st-space-xl);
+    border-bottom: 1px solid var(--st-border-color);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: var(--st-bg-primary);
+}
+
+.settings-split__header h3 {
+    margin: 0;
+    font-size: 1.125rem;
+    font-weight: 600;
+}
+
+.settings-split__list {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--st-space-sm);
+}
+
+.settings-split__content {
+    background: var(--st-bg-primary);
+    overflow-y: auto;
+    padding: var(--st-space-3xl);
+}
+
+/* 响应式布局 */
+@media (max-width: 1024px) {
+    .settings-split {
+        grid-template-columns: 250px 1fr;
+    }
+}
+
+@media (max-width: 768px) {
+    .settings-page {
+        padding: var(--st-space-lg);
+    }
+    .settings-page__header {
+        flex-direction: column;
+        gap: var(--st-space-lg);
+    }
+    .settings-split {
+        grid-template-columns: 1fr;
+    }
+    .settings-split__sidebar {
+        border-right: none;
+        border-bottom: 1px solid var(--st-border-color);
+        max-height: 200px;
+    }
+    .settings-split__content {
+        padding: var(--st-space-lg);
+    }
+}
