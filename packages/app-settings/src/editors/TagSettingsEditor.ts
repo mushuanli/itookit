@@ -1,7 +1,7 @@
 // @file: app-settings/editors/TagSettingsEditor.ts
 import { BaseSettingsEditor,Modal, Toast } from '@itookit/common';
 import { SettingsService } from '../services/SettingsService';
-import { Tag } from '../types';
+import { Tag } from '../types/types';
 
 export class TagSettingsEditor extends BaseSettingsEditor<SettingsService> {
     

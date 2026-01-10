@@ -102,3 +102,4 @@ export type { NodePresetOptions } from './factory/presets/node';
 
 // ==================== 默认导出 ====================
 export { VFS as default } from './factory/VFS';
+export * from './sync';

@@ -1,7 +1,14 @@
-- 增加文件系统支持功能，用于生成应用
+P1:
+- sync 和增量同步功能
+    - vfs: 增加 sync 模块
+    - vfsd: 实现增量 sync 功能
+
+- mentionScope 功能 + 跨页面跳转功能 + 禁止访问功能
+
 - 增加 call AI 功能，
 - agent config时复制当前选中agent为模版功能
 - 生成应用 Quasar Tauri ?
+    - 增加文件系统支持功能，用于生成应用
 - 多媒体功能
 - agent 编排功能
 

@@ -105,4 +105,5 @@ export abstract class BaseSettingsEditor<TService> implements IEditor {
     }
 
     on(_eventName: EditorEvent, _callback: EditorEventCallback) { return () => {}; }
+
 }

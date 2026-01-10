@@ -1,0 +1,88 @@
+/* @file: app-settings/styles/_connections.css */
+/* 连接模块样式 */
+
+.settings-connection-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: var(--st-space-xl);
+}
+
+.settings-connection-card {
+    display: flex;
+    flex-direction: column;
+    background: var(--st-bg-primary);
+    border: 2px solid var(--st-border-color);
+    border-radius: var(--st-radius-lg);
+    padding: var(--st-space-xl);
+    transition: all 0.2s;
+}
+
+.settings-connection-card:hover {
+    border-color: var(--st-color-primary);
+    box-shadow: var(--st-shadow-md);
+    transform: translateY(-2px);
+}
+
+.settings-connection-card--default {
+    border-color: var(--st-color-success);
+    background: #f0fdf4;
+}
+
+.settings-connection-card__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: var(--st-space-lg);
+    gap: var(--st-space-md);
+}
+
+.settings-connection-card__title {
+    font-size: 1.125rem;
+    font-weight: 600;
+    margin: 0;
+    word-break: break-word;
+    flex: 1;
+}
+
+.settings-connection-card__details {
+    margin: var(--st-space-lg) 0;
+    flex-grow: 1;
+}
+
+.settings-detail-item {
+    display: flex;
+    justify-content: space-between;
+    padding: var(--st-space-sm) 0;
+    border-bottom: 1px solid var(--st-bg-tertiary);
+    gap: var(--st-space-md);
+    align-items: center;
+}
+
+.settings-detail-item:last-child {
+    border-bottom: none;
+}
+
+.settings-detail-item__label {
+    color: var(--st-text-secondary);
+    font-size: 0.875rem;
+    flex-shrink: 0;
+}
+
+.settings-detail-item__value {
+    font-weight: 500;
+    font-size: 0.875rem;
+    text-align: right;
+    word-break: break-all;
+}
+
+@media (max-width: 768px) {
+    .settings-connection-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (prefers-color-scheme: dark) {
+    .settings-connection-card--default {
+        background: rgba(16, 185, 129, 0.1);
+    }
+}

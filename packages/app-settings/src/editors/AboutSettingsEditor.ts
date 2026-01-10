@@ -1,7 +1,7 @@
 // @file: app-settings/editors/AboutSettingsEditor.ts
 import { BaseSettingsEditor} from '@itookit/common';
 import { SettingsService } from '../services/SettingsService';
-
+1
 export class AboutSettingsEditor extends BaseSettingsEditor<SettingsService> {
     render() {
         this.container.innerHTML = `

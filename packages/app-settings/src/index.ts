@@ -9,7 +9,7 @@ import { SettingsEngine } from './engine/SettingsEngine';
 import { createSettingsFactory } from './factories/settingsFactory';
 
 // 导出类型定义
-export * from './types';
+export * from './types/types';
 // 导出服务 (可选，如果外部需要直接操作数据)
 //export { SettingsService };
 
