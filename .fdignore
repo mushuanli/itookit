@@ -58,6 +58,10 @@ shims-turndown.d.ts
 #provider/
 middleware/
 SystemGarbageCollector.ts
+tags/
+storage-indexeddb/
+storage-sqlite/
+MemoryAdapter.ts
 
 #vfs-ui
 vfs-ui/src/mappers/

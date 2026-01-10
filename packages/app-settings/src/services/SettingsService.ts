@@ -10,7 +10,7 @@ import {
     VNodeType,
     VFSError
 } from '@itookit/vfs';
-import { SettingsState, Contact, Tag } from '../types';
+import { SettingsState, Contact, Tag } from '../types/types';
 
 const CONFIG_MODULE = '__config';
 
@@ -53,6 +53,7 @@ export interface LocalSnapshot {
     displayName: string;
     createdAt: number;
     size: number;
+    description: string;
 }
 
 // Helper types for Sync Protocol
@@ -713,7 +714,8 @@ export class SettingsService {
                         name: db.name,
                         displayName: new Date(timestamp).toLocaleString(),
                         createdAt: timestamp,
-                        size: 0
+                        size: 0,
+                        description: ''
                     });
                 }
             }
