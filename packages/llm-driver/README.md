@@ -142,7 +142,6 @@ export {
 
 export {
     processAttachment,
-    getMimeType,
     isImageMimeType,
     isSupportedVisionContent,
     buildImageContent

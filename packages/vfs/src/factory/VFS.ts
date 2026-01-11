@@ -1,5 +1,6 @@
 // @file packages/vfs/src/VFS.ts
 
+import {base64ToArrayBuffer,arrayBufferToBase64} from '@itookit/common';
 import { VFSInstance } from './VFSFactory';
 import {
   VFSKernel,
@@ -625,7 +626,7 @@ export class VFS {
     
     let content: string | ArrayBuffer = incomingData.content ?? '';
     if (incomingData.contentEncoding === 'base64' && typeof content === 'string') {
-      content = this.base64ToArrayBuffer(content);
+      content = base64ToArrayBuffer(content);
     }
 
     // 更新内容
@@ -699,7 +700,7 @@ export class VFS {
       let content: string | ArrayBuffer = data.content ?? '';
       
       if (data.contentEncoding === 'base64' && typeof content === 'string') {
-        content = this.base64ToArrayBuffer(content);
+        content = base64ToArrayBuffer(content);
       }
 
       return this.createFile(module, nodePath, content, data.metadata);
@@ -975,7 +976,7 @@ export class VFS {
     if (node.type === VNodeType.FILE) {
       const content = await this.kernel.read(node.nodeId);
       if (content instanceof ArrayBuffer) {
-        result.content = this.arrayBufferToBase64(content);
+        result.content = arrayBufferToBase64(content);
         result.contentEncoding = 'base64';
       } else {
         result.content = content;
@@ -995,61 +996,6 @@ export class VFS {
     return result;
   }
 
-  private async importTree(module: string, parentPath: string, data: TreeData): Promise<void> {
-    // 跳过根节点
-    if (data.name === '/' || (parentPath === '/' && data.name === module)) {
-      for (const child of data.children ?? []) {
-        await this.importTree(module, '/', child);
-      }
-      return;
-    }
-
-    const nodePath = parentPath === '/' 
-      ? `/${data.name}` 
-      : `${parentPath}/${data.name}`;
-
-    let node: VNodeData;
-
-    if (data.type === VNodeType.FILE) {
-      let content: string | ArrayBuffer = data.content ?? '';
-      
-      // 处理 base64 编码的二进制内容
-      if (data.contentEncoding === 'base64' && typeof content === 'string') {
-        content = this.base64ToArrayBuffer(content);
-      }
-
-      node = await this.createFile(module, nodePath, content, data.metadata);
-    } else {
-      node = await this.createDirectory(module, nodePath, data.metadata);
-
-      for (const child of data.children ?? []) {
-        await this.importTree(module, nodePath, child);
-      }
-    }
-
-    // 恢复标签
-    if (data.tags?.length && this.tags) {
-      await this.tags.getTagManager().setNodeTags(node.nodeId, data.tags);
-    }
-  }
-
-  private arrayBufferToBase64(buffer: ArrayBuffer): string {
-    const bytes = new Uint8Array(buffer);
-    let binary = '';
-    for (let i = 0; i < bytes.byteLength; i++) {
-      binary += String.fromCharCode(bytes[i]);
-    }
-    return btoa(binary);
-  }
-
-  private base64ToArrayBuffer(base64: string): ArrayBuffer {
-    const binary = atob(base64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i);
-    }
-    return bytes.buffer;
-  }
 }
 
 // ==================== 辅助类型 ====================

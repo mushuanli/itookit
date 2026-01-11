@@ -2,7 +2,7 @@
  * @file mdx/plugins/ui/asset-manager.ui.ts
  * @desc 独立的资源管理器 UI 类，不绑定 MDxPlugin 上下文
  */
-import { Toast, type ISessionEngine, type EngineNode } from '@itookit/common';
+import { Toast,guessMimeType, type ISessionEngine, type EngineNode } from '@itookit/common';
 import type { MDxEditor } from '../../editor/editor';
 import { 
     isAssetVisible, 
@@ -169,7 +169,7 @@ export class AssetManagerUI {
                 const buffer = await this.engine.readContent(item.node.id);
                 if (!buffer) return;
                 
-                const mimeType = this.getMimeType(item.node.name);
+                const mimeType = guessMimeType(item.node.name);
                 const blob = new Blob([buffer], { type: mimeType });
                 const url = URL.createObjectURL(blob);
                 this.objectUrls.push(url);
@@ -313,7 +313,7 @@ export class AssetManagerUI {
                 return;
             }
 
-            const mimeType = this.getMimeType(node.name);
+            const mimeType = guessMimeType(node.name);
             const blob = new Blob([content], { type: mimeType });
             const url = URL.createObjectURL(blob);
 
@@ -406,41 +406,6 @@ export class AssetManagerUI {
 
     private isPreviewableImage(name: string): boolean {
         return /\.(png|jpg|jpeg|gif|webp|svg|bmp|ico)$/i.test(name);
-    }
-    
-    private getMimeType(filename: string): string {
-        const ext = filename.split('.').pop()?.toLowerCase();
-        const mimeTypes: Record<string, string> = {
-            'png': 'image/png',
-            'jpg': 'image/jpeg',
-            'jpeg': 'image/jpeg',
-            'gif': 'image/gif',
-            'svg': 'image/svg+xml',
-            'webp': 'image/webp',
-            'bmp': 'image/bmp',
-            'ico': 'image/x-icon',
-            'pdf': 'application/pdf',
-            'doc': 'application/msword',
-            'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            'xls': 'application/vnd.ms-excel',
-            'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            'ppt': 'application/vnd.ms-powerpoint',
-            'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-            'mp4': 'video/mp4',
-            'webm': 'video/webm',
-            'mp3': 'audio/mpeg',
-            'wav': 'audio/wav',
-            'ogg': 'audio/ogg',
-            'zip': 'application/zip',
-            'rar': 'application/x-rar-compressed',
-            'txt': 'text/plain',
-            'json': 'application/json',
-            'xml': 'application/xml',
-            'html': 'text/html',
-            'css': 'text/css',
-            'js': 'application/javascript',
-        };
-        return mimeTypes[ext || ''] || 'application/octet-stream';
     }
 
     private getFileIcon(filename: string): string {

@@ -436,7 +436,7 @@ export class SessionRegistry {
                         if (blob) {
                             contextFiles.push({
                                 name: filename,
-                                type: blob.type || guessMimeType(filename), // 使用统一的 getMimeType
+                                type: blob.type || guessMimeType(filename), // 使用统一的 guessMimeType
                                 path: `./${filename}`, // 补全为相对路径格式，方便 UI 显示或后续处理
                                 size: blob.size,
                                 fileRef: blob // 关键：KernelAdapter 需要这个 Blob 来读取内容

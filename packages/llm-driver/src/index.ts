@@ -115,8 +115,6 @@ export {
 
 export {
     processAttachment,
-    getMimeType,
-    isImageMimeType,
     isSupportedVisionContent,
     buildImageContent
 } from './utils/attachment';
