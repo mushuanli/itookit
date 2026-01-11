@@ -55,7 +55,11 @@ export {
     truncate, 
     formatFileSize, 
     formatDuration, 
-    timeAgo
+    timeAgo,
+    isImageMimeType,
+    blobToBase64,
+    arrayBufferToBase64,
+    base64ToArrayBuffer
 } from './utils/utils';
 export {MarkdownAnalyzer} from './utils/MarkdownAnalyzer';
 export {
