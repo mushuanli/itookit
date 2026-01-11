@@ -16,11 +16,12 @@ export class EventBus {
    * 订阅特定类型事件
    */
   on<T = unknown>(type: VFSEventType, handler: EventHandler<T>): () => void {
-    if (!this.handlers.has(type)) {
-      this.handlers.set(type, new Set());
+    let set = this.handlers.get(type);
+    if (!set) {
+      set = new Set();
+      this.handlers.set(type, set);
     }
-    this.handlers.get(type)!.add(handler as EventHandler);
-    
+    set.add(handler as EventHandler);
     return () => this.off(type, handler);
   }
 

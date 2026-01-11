@@ -45,7 +45,14 @@ export enum VFSEventType {
   NODE_DELETED = 'node:deleted',
   NODE_MOVED = 'node:moved',
   NODE_COPIED = 'node:copied',
-  BATCH_OPERATION = 'batch:operation'
+  BATCH_OPERATION = 'batch:operation',
+  // 插件管理器事件
+  PLUGIN_REGISTERED = 'plugin:registered',
+  PLUGIN_INSTALLED = 'plugin:installed',
+  PLUGIN_ACTIVATED = 'plugin:activated',
+  PLUGIN_DEACTIVATED = 'plugin:deactivated',
+  PLUGIN_UNINSTALLED = 'plugin:uninstalled',
+  PLUGIN_ERROR = 'plugin:error'
 }
 
 /**

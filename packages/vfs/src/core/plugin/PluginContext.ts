@@ -18,25 +18,25 @@ export class PluginContext implements IPluginContext {
 
   private extensions = new Map<ExtensionPoint, unknown[]>();
   private storage = new Map<string, unknown>();
-  private pluginGetter: (id: string) => IPlugin | undefined;
 
   constructor(
     kernel: VFSKernel,
     pluginId: string,
-    pluginGetter: (id: string) => IPlugin | undefined
+    private pluginGetter: (id: string) => IPlugin | undefined
   ) {
     this.kernel = kernel;
     this.events = kernel.events;
     this.pluginId = pluginId;
-    this.pluginGetter = pluginGetter;
     this.log = this.createLogger();
   }
 
   registerExtension<T>(point: ExtensionPoint, extension: T): void {
-    if (!this.extensions.has(point)) {
-      this.extensions.set(point, []);
+    let list = this.extensions.get(point);
+    if (!list) {
+      list = [];
+      this.extensions.set(point, list);
     }
-    this.extensions.get(point)!.push(extension);
+    list.push(extension);
   }
 
   getExtensions<T>(point: ExtensionPoint): T[] {
@@ -59,6 +59,11 @@ export class PluginContext implements IPluginContext {
     this.storage.set(key, value);
   }
 
+  dispose(): void {
+    this.extensions.clear();
+    this.storage.clear();
+  }
+
   private createLogger(): PluginLogger {
     const prefix = `[Plugin:${this.pluginId}]`;
     return {
@@ -67,13 +72,5 @@ export class PluginContext implements IPluginContext {
       warn: (msg, ...args) => console.warn(prefix, msg, ...args),
       error: (msg, ...args) => console.error(prefix, msg, ...args)
     };
-  }
-
-  /**
-   * 清理资源
-   */
-  dispose(): void {
-    this.extensions.clear();
-    this.storage.clear();
   }
 }

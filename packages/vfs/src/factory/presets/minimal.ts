@@ -24,41 +24,24 @@ export interface MinimalPresetOptions {
 /**
  * 创建最小化 VFS（用于测试）
  */
-export async function createMinimalVFS(
-  options: MinimalPresetOptions = {}
-): Promise<VFSInstance> {
-  const { 
-    initialData, 
-    extraSchemas = [],
-    extraPlugins = [] 
-  } = options;
+export async function createMinimalVFS(options: MinimalPresetOptions = {}): Promise<VFSInstance> {
+  const { initialData, extraSchemas = [], extraPlugins = [] } = options;
 
-  // 注册内存适配器
-  StorageManager.registerAdapter('memory', (_, schemas) => {
-    const adapter = new MemoryAdapter(schemas);
-    return adapter;
-  });
+  StorageManager.registerAdapter('memory', (_, schemas) => new MemoryAdapter(schemas));
 
-  // 注册额外的 Schema
   for (const schema of extraSchemas) {
     StorageManager.registerDefaultSchema(schema);
   }
 
-  // 明确声明插件类型
-  const plugins: IPlugin[] = [...extraPlugins];
-
   const instance = await createVFS({
-    storage: {
-      type: 'memory',
-      config: {}
-    },
-    plugins
+    storage: { type: 'memory', config: {} },
+    plugins: [...extraPlugins]
   });
 
   // 如果有初始数据，加载到内存适配器
   if (initialData) {
     const storage = (instance.kernel as any).storage as MemoryAdapter;
-    if (storage && typeof storage.load === 'function') {
+    if (storage?.load) {
       storage.load(initialData);
     }
   }
@@ -69,9 +52,7 @@ export async function createMinimalVFS(
 /**
  * 创建最小化 VFS 并包装为高层 API
  */
-export async function createMinimalVFSWithAPI(
-  options: MinimalPresetOptions = {}
-): Promise<VFS> {
+export async function createMinimalVFSWithAPI(options: MinimalPresetOptions = {}): Promise<VFS> {
   const instance = await createMinimalVFS(options);
   return new VFS(instance);
 }

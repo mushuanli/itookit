@@ -1,7 +1,9 @@
 // @file packages/vfs-sync/src/core/AssetDependencyHandler.ts
 
-import { SyncLog, SyncChange } from '../types';
 import { IPluginContext } from '../../core';
+import { SyncLog, SyncChange } from '../types';
+
+const ASSET_PATTERNS = [/\.assets$/, /\.assets\//, /_assets$/, /_assets\//];
 
 export class AssetDependencyHandler {
   constructor(private context: IPluginContext) {}
@@ -11,9 +13,9 @@ export class AssetDependencyHandler {
    */
   sortChanges(changes: SyncChange[]): SyncChange[] {
     // 分离普通文件和资产
-    const regularFiles: SyncChange[] = [];
-    const assetFiles: SyncChange[] = [];
+    const regular: SyncChange[] = [];
     const assetDirs: SyncChange[] = [];
+    const assetFiles: SyncChange[] = [];
 
     for (const change of changes) {
       if (this.isAssetDirectory(change.path)) {
@@ -21,17 +23,18 @@ export class AssetDependencyHandler {
       } else if (this.isAssetFile(change.path)) {
         assetFiles.push(change);
       } else {
-        regularFiles.push(change);
+        regular.push(change);
       }
     }
 
-    // 排序：普通文件 -> 资产目录 -> 资产文件
-    // 删除操作反向：资产文件 -> 资产目录 -> 普通文件
-    const creates = [...regularFiles, ...assetDirs, ...assetFiles]
-      .filter(c => c.operation !== 'delete');
-    
-    const deletes = [...assetFiles, ...assetDirs, ...regularFiles]
-      .filter(c => c.operation === 'delete');
+    // 创建顺序：普通文件 -> 资产目录 -> 资产文件
+    // 删除顺序相反
+    const creates = [...regular, ...assetDirs, ...assetFiles].filter(
+      c => c.operation !== 'delete'
+    );
+    const deletes = [...assetFiles, ...assetDirs, ...regular].filter(
+      c => c.operation === 'delete'
+    );
 
     return [...creates, ...deletes];
   }
@@ -41,22 +44,22 @@ export class AssetDependencyHandler {
    */
   async filterOrphanAssets(logs: SyncLog[]): Promise<SyncLog[]> {
     const result: SyncLog[] = [];
-    
+
     for (const log of logs) {
       if (this.isAssetPath(log.path)) {
         const ownerPath = this.getOwnerPath(log.path);
         const ownerExists = await this.context.kernel.getNodeByPath(ownerPath);
-        
+
         if (!ownerExists && log.operation !== 'delete') {
           // 所有者不存在，跳过资产的创建/更新
           this.context.log.warn(`Skipping orphan asset: ${log.path}`);
           continue;
         }
       }
-      
+
       result.push(log);
     }
-    
+
     return result;
   }
 
@@ -81,21 +84,19 @@ export class AssetDependencyHandler {
   }
 
   private isAssetPath(path: string): boolean {
-    return path.includes('.assets/') || path.endsWith('.assets');
+    return ASSET_PATTERNS.some(p => p.test(path));
   }
 
   private isAssetDirectory(path: string): boolean {
-    return path.endsWith('.assets');
+    return path.endsWith('.assets') || path.endsWith('_assets');
   }
 
   private isAssetFile(path: string): boolean {
-    return path.includes('.assets/');
+    return path.includes('.assets/') || path.includes('_assets/');
   }
 
   private getOwnerPath(assetPath: string): string {
-    // /docs/note.md.assets/image.png -> /docs/note.md
-    // /docs/note.md.assets -> /docs/note.md
-    const match = assetPath.match(/^(.+)\.assets(\/.*)?$/);
+    const match = assetPath.match(/^(.+)[._]assets(\/.*)?$/);
     return match ? match[1] : assetPath;
   }
 }

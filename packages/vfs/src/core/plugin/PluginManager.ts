@@ -4,7 +4,7 @@ import { IPlugin, PluginMetadata, PluginState, PluginType } from './interfaces/I
 import { ExtensionPoint } from './interfaces/IPluginContext';
 import { PluginContext } from './PluginContext';
 import { VFSKernel } from '../kernel/VFSKernel';
-import { EventBus } from '../kernel/EventBus';
+import { VFSEventType } from '../kernel/types';
 
 /**
  * 插件注册表项
@@ -15,31 +15,11 @@ interface PluginEntry {
   state: PluginState;
 }
 
-/**
- * 插件管理器事件
- */
-export enum PluginManagerEvent {
-  PLUGIN_REGISTERED = 'plugin:registered',
-  PLUGIN_INSTALLED = 'plugin:installed',
-  PLUGIN_ACTIVATED = 'plugin:activated',
-  PLUGIN_DEACTIVATED = 'plugin:deactivated',
-  PLUGIN_UNINSTALLED = 'plugin:uninstalled',
-  PLUGIN_ERROR = 'plugin:error'
-}
-
-/**
- * 插件管理器
- */
 export class PluginManager {
   private plugins = new Map<string, PluginEntry>();
-  private kernel: VFSKernel;
-  private events: EventBus;
   private globalExtensions = new Map<ExtensionPoint, unknown[]>();
 
-  constructor(kernel: VFSKernel) {
-    this.kernel = kernel;
-    this.events = kernel.events;
-  }
+  constructor(private kernel: VFSKernel) {}
 
   // ==================== 插件生命周期 ====================
 
@@ -65,7 +45,7 @@ export class PluginManager {
       state: PluginState.REGISTERED
     });
 
-    this.emitEvent(PluginManagerEvent.PLUGIN_REGISTERED, plugin.metadata);
+    this.emitEvent(VFSEventType.PLUGIN_REGISTERED, plugin.metadata);
   }
 
   /**
@@ -78,8 +58,7 @@ export class PluginManager {
       throw new Error(`Plugin ${pluginId} is not in REGISTERED state`);
     }
 
-    // 检查依赖
-    await this.checkDependencies(entry.plugin.metadata);
+    this.checkDependencies(entry.plugin.metadata);
 
     try {
       await entry.plugin.install(entry.context);
@@ -87,15 +66,10 @@ export class PluginManager {
       
       // 收集扩展点
       this.collectExtensions(entry);
-      
-      this.emitEvent(PluginManagerEvent.PLUGIN_INSTALLED, entry.plugin.metadata);
+      this.emitEvent(VFSEventType.PLUGIN_INSTALLED, entry.plugin.metadata);
     } catch (error) {
       entry.state = PluginState.ERROR;
-      this.emitEvent(PluginManagerEvent.PLUGIN_ERROR, { 
-        pluginId, 
-        error,
-        phase: 'install' 
-      });
+      this.emitEvent(VFSEventType.PLUGIN_ERROR, { pluginId, error, phase: 'install' });
       throw error;
     }
   }
@@ -121,14 +95,10 @@ export class PluginManager {
     try {
       await entry.plugin.activate();
       entry.state = PluginState.ACTIVATED;
-      this.emitEvent(PluginManagerEvent.PLUGIN_ACTIVATED, entry.plugin.metadata);
+      this.emitEvent(VFSEventType.PLUGIN_ACTIVATED, entry.plugin.metadata);
     } catch (error) {
       entry.state = PluginState.ERROR;
-      this.emitEvent(PluginManagerEvent.PLUGIN_ERROR, { 
-        pluginId, 
-        error,
-        phase: 'activate' 
-      });
+      this.emitEvent(VFSEventType.PLUGIN_ERROR, { pluginId, error, phase: 'activate' });
       throw error;
     }
   }
@@ -139,29 +109,22 @@ export class PluginManager {
   async deactivate(pluginId: string): Promise<void> {
     const entry = this.getEntry(pluginId);
     
-    if (entry.state !== PluginState.ACTIVATED) {
-      return; // 幂等操作
-    }
+    if (entry.state !== PluginState.ACTIVATED) return;
 
     // 先停用依赖此插件的其他插件
     for (const [id, otherEntry] of this.plugins) {
-      if (otherEntry.plugin.metadata.dependencies?.includes(pluginId)) {
-        if (otherEntry.state === PluginState.ACTIVATED) {
-          await this.deactivate(id);
-        }
+      if (otherEntry.plugin.metadata.dependencies?.includes(pluginId) &&
+          otherEntry.state === PluginState.ACTIVATED) {
+        await this.deactivate(id);
       }
     }
 
     try {
       await entry.plugin.deactivate();
       entry.state = PluginState.DEACTIVATED;
-      this.emitEvent(PluginManagerEvent.PLUGIN_DEACTIVATED, entry.plugin.metadata);
+      this.emitEvent(VFSEventType.PLUGIN_DEACTIVATED, entry.plugin.metadata);
     } catch (error) {
-      this.emitEvent(PluginManagerEvent.PLUGIN_ERROR, { 
-        pluginId, 
-        error,
-        phase: 'deactivate' 
-      });
+      this.emitEvent(VFSEventType.PLUGIN_ERROR, { pluginId, error, phase: 'deactivate' });
       throw error;
     }
   }
@@ -186,15 +149,10 @@ export class PluginManager {
       
       // 清理上下文
       entry.context.dispose();
-      
       this.plugins.delete(pluginId);
-      this.emitEvent(PluginManagerEvent.PLUGIN_UNINSTALLED, entry.plugin.metadata);
+      this.emitEvent(VFSEventType.PLUGIN_UNINSTALLED, entry.plugin.metadata);
     } catch (error) {
-      this.emitEvent(PluginManagerEvent.PLUGIN_ERROR, { 
-        pluginId, 
-        error,
-        phase: 'uninstall' 
-      });
+      this.emitEvent(VFSEventType.PLUGIN_ERROR, { pluginId, error, phase: 'uninstall' });
       throw error;
     }
   }
@@ -224,7 +182,6 @@ export class PluginManager {
    */
   async uninstallAll(): Promise<void> {
     const sorted = this.topologicalSort().reverse();
-    
     for (const pluginId of sorted) {
       await this.uninstall(pluginId);
     }
@@ -271,16 +228,13 @@ export class PluginManager {
 
   private getEntry(pluginId: string): PluginEntry {
     const entry = this.plugins.get(pluginId);
-    if (!entry) {
-      throw new Error(`Plugin not found: ${pluginId}`);
-    }
+    if (!entry) throw new Error(`Plugin not found: ${pluginId}`);
     return entry;
   }
 
-  private async checkDependencies(metadata: PluginMetadata): Promise<void> {
+  private checkDependencies(metadata: PluginMetadata): void {
     for (const depId of metadata.dependencies ?? []) {
-      const dep = this.plugins.get(depId);
-      if (!dep) {
+      if (!this.plugins.has(depId)) {
         throw new Error(`Missing dependency: ${depId} required by ${metadata.id}`);
       }
     }
@@ -293,10 +247,12 @@ export class PluginManager {
     for (const point of Object.values(ExtensionPoint)) {
       const extensions = entry.context.getExtensions(point);
       if (extensions.length > 0) {
-        if (!this.globalExtensions.has(point)) {
-          this.globalExtensions.set(point, []);
+        let list = this.globalExtensions.get(point);
+        if (!list) {
+          list = [];
+          this.globalExtensions.set(point, list);
         }
-        this.globalExtensions.get(point)!.push(...extensions);
+        list.push(...extensions);
       }
     }
   }
@@ -352,9 +308,9 @@ export class PluginManager {
     return result;
   }
 
-  private emitEvent(type: PluginManagerEvent, data: unknown): void {
-    this.events.emit({
-      type: type as any,
+  private emitEvent(type: VFSEventType, data: unknown): void {
+    this.kernel.events.emit({
+      type,
       nodeId: null,
       path: null,
       timestamp: Date.now(),

@@ -38,34 +38,27 @@ export class VFSModuleEngine {
    */
   async loadTree(): Promise<EngineNode[]> {
     const module = this.vfs.getModule(this.moduleName);
-    if (!module) {
-      throw new Error(`Module ${this.moduleName} not found`);
+    if (!module) throw new Error(`Module ${this.moduleName} not found`);
+
+    const root = await this.buildTree(module.rootNodeId);
+    return root.children ?? [];
+  }
+
+  private async buildTree(nodeId: string): Promise<EngineNode> {
+    const node = await this.vfs.getNodeById(nodeId);
+    if (!node) throw new Error(`Node ${nodeId} not found`);
+
+    const engineNode = this.toEngineNode(node);
+
+    if (node.type === VNodeType.FILE) {
+      engineNode.content = await this.vfs.kernel.read(nodeId);
+    } else {
+      const children = await this.vfs.kernel.readdir(nodeId);
+      const filtered = children.filter(c => !c.metadata?.isAssetDir);
+      engineNode.children = await Promise.all(filtered.map(c => this.buildTree(c.nodeId)));
     }
 
-    const buildTree = async (nodeId: string): Promise<EngineNode> => {
-      const node = await this.vfs.getNodeById(nodeId);
-      if (!node) {
-        throw new Error(`Node ${nodeId} not found`);
-      }
-
-      const engineNode = this.toEngineNode(node);
-
-      if (node.type === VNodeType.FILE ) {
-        engineNode.content = await this.vfs.kernel.read(nodeId);
-      } else {
-        const children = await this.vfs.kernel.readdir(nodeId);
-        // 过滤资产目录
-        const filtered = children.filter(c => !c.metadata?.isAssetDir);
-        engineNode.children = await Promise.all(
-          filtered.map(c => buildTree(c.nodeId))
-        );
-      }
-
-      return engineNode;
-    };
-
-    const root = await buildTree(module.rootNodeId);
-    return root.children ?? [];
+    return engineNode;
   }
 
   /**
@@ -103,67 +96,41 @@ export class VFSModuleEngine {
     const results: EngineNode[] = [];
     const limit = query.limit ?? 50;
 
-    const searchNode = async (nodeId: string): Promise<void> => {
-      if (results.length >= limit) return;
-
-      const node = await this.vfs.getNodeById(nodeId);
-      if (!node || node.metadata?.isAssetDir) return;
-
-      // ✅ 类型比较：VNodeType 与字符串比较
-      const nodeType: NodeType = node.type === VNodeType.DIRECTORY 
-        ? 'directory' 
-        : 'file';
-
-      // 类型过滤
-      if (query.type && nodeType !== query.type) {
-        if (node.type === VNodeType.DIRECTORY) {
-          const children = await this.vfs.kernel.readdir(nodeId);
-          for (const child of children) {
-            await searchNode(child.nodeId);
-          }
-        }
-        return;
-      }
-
-      // 文本过滤
-      if (query.text) {
-        if (!node.name.toLowerCase().includes(query.text.toLowerCase())) {
-          if (node.type === VNodeType.DIRECTORY) {
-            const children = await this.vfs.kernel.readdir(nodeId);
-            for (const child of children) {
-              await searchNode(child.nodeId);
-            }
-          }
-          return;
-        }
-      }
-
-      // 标签过滤
-      if (query.tags?.length) {
-        const nodeTags = await this.vfs.getNodeTags(nodeId);
-        if (!query.tags.every(t => nodeTags.includes(t))) {
-          if (node.type === VNodeType.DIRECTORY) {
-            const children = await this.vfs.kernel.readdir(nodeId);
-            for (const child of children) {
-              await searchNode(child.nodeId);
-            }
-          }
-          return;
-        }
-      }
-
-      results.push(this.toEngineNode(node));
-
-      if (node.type === VNodeType.DIRECTORY) {
-        const children = await this.vfs.kernel.readdir(nodeId);
-        for (const child of children) {
-          await searchNode(child.nodeId);
-        }
-      }
-    };
-
-    await searchNode(module.rootNodeId);
+    await this.searchRecursive(module.rootNodeId, query, results, limit);
     return results;
+  }
+
+  private async searchRecursive(
+    nodeId: string,
+    query: EngineSearchQuery,
+    results: EngineNode[],
+    limit: number
+  ): Promise<void> {
+    if (results.length >= limit) return;
+
+    const node = await this.vfs.getNodeById(nodeId);
+    if (!node || node.metadata?.isAssetDir) return;
+
+    const nodeType: NodeType = node.type === VNodeType.DIRECTORY ? 'directory' : 'file';
+    const matchesType = !query.type || nodeType === query.type;
+    const matchesText = !query.text || node.name.toLowerCase().includes(query.text.toLowerCase());
+    
+    let matchesTags = true;
+    if (query.tags?.length) {
+      const nodeTags = await this.vfs.getNodeTags(nodeId);
+      matchesTags = query.tags.every(t => nodeTags.includes(t));
+    }
+
+    if (matchesType && matchesText && matchesTags) {
+      results.push(this.toEngineNode(node));
+    }
+
+    if (node.type === VNodeType.DIRECTORY) {
+      const children = await this.vfs.kernel.readdir(nodeId);
+      for (const child of children) {
+        await this.searchRecursive(child.nodeId, query, results, limit);
+      }
+    }
   }
 
   /**
@@ -240,7 +207,7 @@ export class VFSModuleEngine {
       id: a.nodeId,
       parentId: null,
       name: a.name,
-      type: 'file' as const,                          // ✅ 字符串字面量
+      type: 'file' as const,
       path: a.path,
       size: a.size,
       createdAt: a.createdAt,
@@ -261,9 +228,7 @@ export class VFSModuleEngine {
    */
   async rename(id: string, newName: string): Promise<void> {
     const node = await this.vfs.getNodeById(id);
-    if (!node) {
-      throw new Error(`Node not found: ${id}`);
-    }
+    if (!node) throw new Error(`Node not found: ${id}`);
     
     const parentPath = pathResolver.dirname(node.path);
     const newPath = pathResolver.join(parentPath, newName);
@@ -319,9 +284,7 @@ export class VFSModuleEngine {
    * 批量设置标签
    */
   async setTagsBatch(updates: Array<{ id: string; tags: string[] }>): Promise<void> {
-    await this.vfs.batchSetTags(
-      updates.map(u => ({ nodeId: u.id, tags: u.tags }))
-    );
+    await this.vfs.batchSetTags(updates.map(u => ({ nodeId: u.id, tags: u.tags })));
   }
 
   // ==================== 事件订阅 ====================
@@ -329,11 +292,9 @@ export class VFSModuleEngine {
   /**
    * 订阅事件
    */
-  on(
-    _event: EngineEventType,
-    callback: (event: EngineEvent) => void
-  ): () => void {
+  on(_event: EngineEventType, callback: (event: EngineEvent) => void): () => void {
     const modulePrefix = `/${this.moduleName}`;
+    const unsubscribers: Array<() => void> = [];
 
     const shouldEmit = (path: string | null): boolean => {
       if (!path) return true;
@@ -341,8 +302,6 @@ export class VFSModuleEngine {
       const relativePath = path.slice(modulePrefix.length);
       return !relativePath.startsWith('/.') && !relativePath.includes('/.');
     };
-
-    const unsubscribers: Array<() => void> = [];
 
     // 映射 VFS 事件到 Engine 事件
     const eventMappings: Array<[string, EngineEventType]> = [
@@ -403,18 +362,15 @@ export class VFSModuleEngine {
    * 转换为 Engine 节点格式
    */
   private toEngineNode(node: VNodeData): EngineNode {
-    // VNodeType 枚举值与 NodeType 字符串兼容
-    const nodeType: NodeType = node.type === VNodeType.DIRECTORY 
-      ? 'directory' 
-      : 'file';
+    const nodeType: NodeType = node.type === VNodeType.DIRECTORY ? 'directory' : 'file';
 
     return {
       id: node.nodeId,
       parentId: node.parentId,
       name: node.name,
-      type: nodeType,                                  // ✅ 转换为字符串
+      type: nodeType,
       path: node.path,
-      size: node.size,                                 // ✅ 现在 size 是可选的
+      size: node.size,
       createdAt: node.createdAt,
       modifiedAt: node.modifiedAt,
       tags: (node.metadata?.tags as string[]) ?? [],
@@ -439,16 +395,10 @@ export class VFSModuleEngine {
   private async resolveParentPath(parentIdOrPath: string | null): Promise<string> {
     if (!parentIdOrPath) return '/';
 
-    // 如果是路径
-    if (parentIdOrPath.startsWith('/')) {
-      return parentIdOrPath;
-    }
+    if (parentIdOrPath.startsWith('/')) return parentIdOrPath;
 
-    // 如果是 ID
     const parent = await this.vfs.getNodeById(parentIdOrPath);
-    if (!parent) {
-      throw new Error(`Parent node not found: ${parentIdOrPath}`);
-    }
+    if (!parent) throw new Error(`Parent node not found: ${parentIdOrPath}`);
 
     const modulePrefix = `/${this.moduleName}`;
     let relativePath = parent.path;

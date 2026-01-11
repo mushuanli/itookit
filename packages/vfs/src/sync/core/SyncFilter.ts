@@ -2,6 +2,7 @@
 
 import { SyncFilter, SyncLog } from '../types';
 import { VNodeData } from '../../core';
+import { SYNC_MODULE_NAME } from '../constants';
 
 export class SyncFilterEngine {
   constructor(private filter?: SyncFilter) {}
@@ -10,62 +11,83 @@ export class SyncFilterEngine {
    * 检查日志是否应该被同步
    */
   shouldSync(log: SyncLog, node?: VNodeData): boolean {
+    // 始终排除同步模块自身
+    if (log.path.startsWith(`/${SYNC_MODULE_NAME}`)) {
+      return false;
+    }
+
     if (!this.filter) return true;
 
-    // 时间范围过滤
-    if (this.filter.timeRange) {
-      const { from, to } = this.filter.timeRange;
-      if (from && log.timestamp < from) return false;
-      if (to && log.timestamp > to) return false;
-    }
+    return (
+      this.checkTimeRange(log) &&
+      this.checkPaths(log) &&
+      this.checkFileTypes(log, node) &&
+      this.checkSizeLimit(node) &&
+      this.checkContent(log, node)
+    );
+  }
 
-    // 路径过滤
-    if (this.filter.paths) {
-      const { include, exclude } = this.filter.paths;
-      
-      if (exclude?.some(pattern => this.matchPath(log.path, pattern))) {
-        return false;
-      }
-      
-      if (include && !include.some(pattern => this.matchPath(log.path, pattern))) {
-        return false;
-      }
-    }
+  private checkTimeRange(log: SyncLog): boolean {
+    const range = this.filter?.timeRange;
+    if (!range) return true;
 
-    // 文件类型过滤
-    if (this.filter.fileTypes && node) {
-      const ext = this.getExtension(log.path);
-      const { include, exclude } = this.filter.fileTypes;
-      
-      if (exclude?.includes(ext)) return false;
-      if (include && !include.includes(ext)) return false;
-    }
+    if (range.from && log.timestamp < range.from) return false;
+    if (range.to && log.timestamp > range.to) return false;
 
-    // 大小限制
-    if (this.filter.sizeLimit && node) {
-      const { maxFileSize } = this.filter.sizeLimit;
-      if (maxFileSize && node.size > maxFileSize) return false;
-    }
+    return true;
+  }
 
-    // 内容过滤
-    if (this.filter.content) {
-      // 排除资产目录
-      if (this.filter.content.excludeAssets && log.path.includes('.assets/')) {
-        return false;
-      }
-      
-      // 排除二进制（需要 node 的 MIME 信息）
-      if (this.filter.content.excludeBinary && node?.metadata?.mimeType) {
-        const mime = node.metadata.mimeType as string;
-        if (!mime.startsWith('text/') && !mime.includes('json') && !mime.includes('xml')) {
-          return false;
-        }
-      }
-    }
+  private checkPaths(log: SyncLog): boolean {
+    const paths = this.filter?.paths;
+    if (!paths) return true;
 
-    // 排除同步模块自身
-    if (log.path.startsWith('/__sync')) {
+    if (paths.exclude?.some(p => this.matchPath(log.path, p))) {
       return false;
+    }
+
+    if (paths.include && !paths.include.some(p => this.matchPath(log.path, p))) {
+      return false;
+    }
+
+    return true;
+  }
+
+  private checkFileTypes(log: SyncLog, node?: VNodeData): boolean {
+    const types = this.filter?.fileTypes;
+    if (!types || !node) return true;
+
+    const ext = this.getExtension(log.path);
+
+    if (types.exclude?.includes(ext)) return false;
+    if (types.include && !types.include.includes(ext)) return false;
+
+    return true;
+  }
+
+  private checkSizeLimit(node?: VNodeData): boolean {
+    const limit = this.filter?.sizeLimit;
+    if (!limit || !node) return true;
+
+    if (limit.maxFileSize && node.size > limit.maxFileSize) {
+      return false;
+    }
+
+    return true;
+  }
+
+  private checkContent(log: SyncLog, node?: VNodeData): boolean {
+    const content = this.filter?.content;
+    if (!content) return true;
+
+    if (content.excludeAssets && log.path.includes('.assets/')) {
+      return false;
+    }
+
+    if (content.excludeBinary && node?.metadata?.mimeType) {
+      const mime = node.metadata.mimeType as string;
+      if (!mime.startsWith('text/') && !mime.includes('json') && !mime.includes('xml')) {
+        return false;
+      }
     }
 
     return true;

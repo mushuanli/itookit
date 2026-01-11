@@ -1,12 +1,17 @@
 // @file vfs/core/utils/id.ts
 
-/**
- * 生成唯一节点 ID
- */
+const BASE36_CHARS = '0123456789abcdefghijklmnopqrstuvwxyz';
+
+function randomBase36(length: number): string {
+  let result = '';
+  for (let i = 0; i < length; i++) {
+    result += BASE36_CHARS[Math.floor(Math.random() * 36)];
+  }
+  return result;
+}
+
 export function generateNodeId(): string {
-  const timestamp = Date.now().toString(36);
-  const random = Math.random().toString(36).substring(2, 10);
-  return `node_${timestamp}_${random}`;
+  return `node_${Date.now().toString(36)}_${randomBase36(8)}`;
 }
 
 /**
@@ -20,17 +25,14 @@ export function createContentRef(nodeId: string): string {
  * 生成通用唯一 ID
  */
 export function generateId(prefix = 'id'): string {
-  const timestamp = Date.now().toString(36);
-  const random = Math.random().toString(36).substring(2, 10);
-  return `${prefix}_${timestamp}_${random}`;
+  return `${prefix}_${Date.now().toString(36)}_${randomBase36(8)}`;
 }
 
 /**
  * 计算内容大小
  */
 export function getContentSize(content: string | ArrayBuffer): number {
-  if (typeof content === 'string') {
-    return new Blob([content]).size;
-  }
-  return content.byteLength;
+  return typeof content === 'string' 
+    ? new Blob([content]).size 
+    : content.byteLength;
 }

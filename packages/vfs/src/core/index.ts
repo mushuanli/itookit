@@ -39,7 +39,7 @@ export {
   type IPluginContext,
   type PluginLogger
 } from './plugin/interfaces/IPluginContext';
-export { PluginManager, PluginManagerEvent } from './plugin/PluginManager';
+export { PluginManager } from './plugin/PluginManager';
 export { PluginContext } from './plugin/PluginContext';
 
 // ==================== Errors ====================

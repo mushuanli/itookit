@@ -2,8 +2,6 @@
 
 import { SYNC_CONSTANTS } from '../constants';
 
-type Task = () => Promise<void>;
-
 export interface SchedulerOptions {
   /** 防抖延迟（毫秒） */
   debounceDelay?: number;
@@ -16,23 +14,25 @@ export interface SchedulerOptions {
 }
 
 export class Scheduler {
-  private debounceTimer: any = null;
+  private debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private forceSyncTimer: ReturnType<typeof setTimeout> | null = null;
   private isRunning = false;
   private pendingCount = 0;
-  private lastTriggerTime = 0;
+  private firstTriggerTime = 0;
   private lastSyncTime = 0;
-  private forceSyncTimer: any = null;
 
-  private readonly debounceDelay: number;
-  private readonly maxWaitTime: number;
-  private readonly maxPendingCount: number;
-  private readonly minSyncInterval: number;
+  private readonly options: Required<SchedulerOptions>;
 
-  constructor(private task: Task, options: SchedulerOptions = {}) {
-    this.debounceDelay = options.debounceDelay ?? SYNC_CONSTANTS.DEFAULT_DEBOUNCE;
-    this.maxWaitTime = options.maxWaitTime ?? 60000; // 1分钟
-    this.maxPendingCount = options.maxPendingCount ?? 100;
-    this.minSyncInterval = options.minSyncInterval ?? 5000; // 5秒
+  constructor(
+    private task: () => Promise<void>,
+    options: SchedulerOptions = {}
+  ) {
+    this.options = {
+      debounceDelay: options.debounceDelay ?? SYNC_CONSTANTS.DEFAULT_DEBOUNCE,
+      maxWaitTime: options.maxWaitTime ?? 60000,
+      maxPendingCount: options.maxPendingCount ?? 100,
+      minSyncInterval: options.minSyncInterval ?? 5000
+    };
   }
 
   /**
@@ -43,35 +43,24 @@ export class Scheduler {
     this.pendingCount++;
 
     // 记录首次触发时间（用于计算最大等待）
-    if (this.lastTriggerTime === 0) {
-      this.lastTriggerTime = now;
+    if (this.firstTriggerTime === 0) {
+      this.firstTriggerTime = now;
     }
 
-    // 检查是否需要强制同步
-    const waitTime = now - this.lastTriggerTime;
-    const shouldForceSync = 
-      this.pendingCount >= this.maxPendingCount ||
-      waitTime >= this.maxWaitTime;
-
-    if (shouldForceSync) {
+    // 检查强制同步条件
+    const waitTime = now - this.firstTriggerTime;
+    if (this.pendingCount >= this.options.maxPendingCount || waitTime >= this.options.maxWaitTime) {
       this.forceSync();
       return;
     }
 
-    // 设置防抖定时器
-    if (this.debounceTimer) {
-      clearTimeout(this.debounceTimer);
-    }
+    // 重置防抖定时器
+    this.clearDebounceTimer();
+    this.debounceTimer = setTimeout(() => this.run(), this.options.debounceDelay);
 
-    this.debounceTimer = setTimeout(() => {
-      this.run();
-    }, this.debounceDelay);
-
-    // 设置最大等待保护定时器
+    // 设置最大等待保护
     if (!this.forceSyncTimer) {
-      this.forceSyncTimer = setTimeout(() => {
-        this.forceSync();
-      }, this.maxWaitTime);
+      this.forceSyncTimer = setTimeout(() => this.forceSync(), this.options.maxWaitTime);
     }
   }
 
@@ -79,15 +68,20 @@ export class Scheduler {
    * 强制立即同步
    */
   forceSync(): void {
-    if (this.debounceTimer) {
-      clearTimeout(this.debounceTimer);
-      this.debounceTimer = null;
-    }
-    if (this.forceSyncTimer) {
-      clearTimeout(this.forceSyncTimer);
-      this.forceSyncTimer = null;
-    }
+    this.clearTimers();
     this.run();
+  }
+
+  stop(): void {
+    this.clearTimers();
+    this.reset();
+  }
+
+  getStatus(): { isRunning: boolean; pendingCount: number } {
+    return {
+      isRunning: this.isRunning,
+      pendingCount: this.pendingCount
+    };
   }
 
   /**
@@ -95,61 +89,55 @@ export class Scheduler {
    */
   private async run(): Promise<void> {
     if (this.isRunning) {
-      // 正在运行，稍后重试
-      setTimeout(() => this.trigger(), this.minSyncInterval);
+      // 正在运行，延迟重试
+      setTimeout(() => this.trigger(), this.options.minSyncInterval);
       return;
     }
 
     const now = Date.now();
     const timeSinceLastSync = now - this.lastSyncTime;
 
-    // 防止过于频繁的同步
-    if (this.lastSyncTime > 0 && timeSinceLastSync < this.minSyncInterval) {
-      setTimeout(() => this.run(), this.minSyncInterval - timeSinceLastSync);
+    // 防止过于频繁
+    if (this.lastSyncTime > 0 && timeSinceLastSync < this.options.minSyncInterval) {
+      setTimeout(() => this.run(), this.options.minSyncInterval - timeSinceLastSync);
       return;
     }
 
     this.isRunning = true;
-    this.pendingCount = 0;
-    this.lastTriggerTime = 0;
+    this.reset();
 
     try {
       await this.task();
       this.lastSyncTime = Date.now();
     } catch (e) {
-      console.error('[SyncScheduler] Task failed', e);
+      console.error('[Scheduler] Task failed', e);
     } finally {
       this.isRunning = false;
-      
-      // 清理定时器
-      if (this.forceSyncTimer) {
-        clearTimeout(this.forceSyncTimer);
-        this.forceSyncTimer = null;
-      }
+      this.clearForceSyncTimer();
     }
   }
 
-  /**
-   * 停止调度器
-   */
-  stop(): void {
+  private reset(): void {
+    this.pendingCount = 0;
+    this.firstTriggerTime = 0;
+  }
+
+  private clearTimers(): void {
+    this.clearDebounceTimer();
+    this.clearForceSyncTimer();
+  }
+
+  private clearDebounceTimer(): void {
     if (this.debounceTimer) {
       clearTimeout(this.debounceTimer);
       this.debounceTimer = null;
     }
+  }
+
+  private clearForceSyncTimer(): void {
     if (this.forceSyncTimer) {
       clearTimeout(this.forceSyncTimer);
       this.forceSyncTimer = null;
     }
-  }
-
-  /**
-   * 获取状态
-   */
-  getStatus(): { isRunning: boolean; pendingCount: number } {
-    return {
-      isRunning: this.isRunning,
-      pendingCount: this.pendingCount
-    };
   }
 }

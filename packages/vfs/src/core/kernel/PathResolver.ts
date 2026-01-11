@@ -1,6 +1,6 @@
 // @file vfs/core/kernel/PathResolver.ts
 
-//import { VFSError, ErrorCode } from '../errors/VFSError';
+const INVALID_CHARS_REGEX = /[<>:"|?*\x00-\x1f]/;
 
 /**
  * 路径解析器
@@ -34,7 +34,7 @@ export class PathResolver {
     if (typeof path !== 'string') return false;
     if (path === '/') return true;
     if (!path.startsWith('/') || path.includes('//')) return false;
-    return !/[<>:"|?*\x00-\x1f]/.test(path);
+    return !INVALID_CHARS_REGEX.test(path);
   }
 
   /**
@@ -43,7 +43,7 @@ export class PathResolver {
   basename(path: string): string {
     const normalized = this.normalize(path);
     if (normalized === '/') return '';
-    return normalized.substring(normalized.lastIndexOf('/') + 1);
+    return normalized.slice(normalized.lastIndexOf('/') + 1);
   }
 
   /**
@@ -52,7 +52,7 @@ export class PathResolver {
   dirname(path: string): string {
     const normalized = this.normalize(path);
     const lastSlash = normalized.lastIndexOf('/');
-    return lastSlash <= 0 ? '/' : normalized.substring(0, lastSlash);
+    return lastSlash <= 0 ? '/' : normalized.slice(0, lastSlash);
   }
 
   /**
@@ -70,20 +70,16 @@ export class PathResolver {
     const toParts = this.normalize(to).split('/').filter(Boolean);
     
     let commonLength = 0;
-    while (
-      commonLength < fromParts.length &&
-      commonLength < toParts.length &&
-      fromParts[commonLength] === toParts[commonLength]
-    ) {
+    const minLength = Math.min(fromParts.length, toParts.length);
+    
+    while (commonLength < minLength && fromParts[commonLength] === toParts[commonLength]) {
       commonLength++;
     }
 
     const upCount = fromParts.length - commonLength;
-    const downParts = toParts.slice(commonLength);
-    
     const relativeParts = [
       ...Array(upCount).fill('..'),
-      ...downParts
+      ...toParts.slice(commonLength)
     ];
     
     return relativeParts.length === 0 ? '.' : relativeParts.join('/');

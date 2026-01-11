@@ -2,7 +2,7 @@
 
 import { VNodeData, VNodeType, ContentData, CreateNodeOptions, VFSEventType } from './types';
 import { VNode } from './VNode';
-import { PathResolver, pathResolver } from './PathResolver';
+import { pathResolver } from './PathResolver';
 import { EventBus } from './EventBus';
 import { IStorageAdapter, ITransaction } from '../storage/interfaces/IStorageAdapter';
 import { VFSError, ErrorCode } from '../errors/VFSError';
@@ -25,7 +25,7 @@ export interface KernelConfig {
 export class VFSKernel {
   readonly storage: IStorageAdapter;
   readonly events: EventBus;
-  readonly pathResolver: PathResolver;
+  readonly pathResolver = pathResolver;
 
   private initialized = false;
 
@@ -313,7 +313,6 @@ export class VFSKernel {
       }
 
       await tx.commit();
-      
       this.emitEvent(VFSEventType.NODE_MOVED, node, { oldPath, newPath: normalizedPath });
       return node;
     } catch (error) {
@@ -354,15 +353,8 @@ export class VFSKernel {
     const tx = this.storage.beginTransaction(['vnodes', 'contents'], 'readwrite');
 
     try {
-      const copiedNode = await this.copyNodeRecursive(
-        source, 
-        parentId, 
-        normalizedPath, 
-        tx
-      );
-
+      const copiedNode = await this.copyNodeRecursive(source, parentId, normalizedPath, tx);
       await tx.commit();
-      
       this.emitEvent(VFSEventType.NODE_COPIED, copiedNode, { sourceId: nodeId });
       return copiedNode;
     } catch (error) {
@@ -378,9 +370,7 @@ export class VFSKernel {
    */
   async getNode(nodeId: string): Promise<VNodeData | null> {
     this.ensureInitialized();
-    const node = await this.storage
-      .getCollection<VNodeData>('vnodes')
-      .get(nodeId);
+    const node = await this.storage.getCollection<VNodeData>('vnodes').get(nodeId);
     return node ?? null;
   }
 
@@ -410,8 +400,7 @@ export class VFSKernel {
    */
   async exists(path: string): Promise<boolean> {
     this.ensureInitialized();
-    const node = await this.getNodeByPath(path);
-    return node !== null;
+    return (await this.getNodeByPath(path)) !== null;
   }
 
   /**
@@ -461,13 +450,15 @@ export class VFSKernel {
     });
   }
 
+  // ==================== 私有方法 ====================
+
   private ensureInitialized(): void {
     if (!this.initialized) {
       throw new VFSError(ErrorCode.INVALID_OPERATION, 'VFS not initialized');
     }
   }
 
-    private async ensureRootNode(): Promise<void> {
+  private async ensureRootNode(): Promise<void> {
     const root = await this.storage
       .getCollection<VNodeData>('vnodes')
       .getByIndex('path', '/');
@@ -592,14 +583,7 @@ export class VFSKernel {
     return newNode;
   }
 
-  /**
-   * 发送事件
-   */
-  private emitEvent<T = unknown>(
-    type: VFSEventType, 
-    node: VNodeData, 
-    data?: T
-  ): void {
+  private emitEvent<T = unknown>(type: VFSEventType, node: VNodeData, data?: T): void {
     this.events.emit({
       type,
       nodeId: node.nodeId,
@@ -613,8 +597,6 @@ export class VFSKernel {
    * 包装错误
    */
   private wrapError(error: unknown, message: string): VFSError {
-    if (error instanceof VFSError) return error;
-    return new VFSError(ErrorCode.INTERNAL_ERROR, message, error);
+    return VFSError.wrap(error, ErrorCode.INTERNAL_ERROR, message);
   }
-
 }
