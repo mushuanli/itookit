@@ -77,6 +77,7 @@ export {
 // Export all components
 export * from './components/BaseSettingsEditor';
 export * from './components/UIComponents';
+export {NAVIGATION_EVENTS} from './events/navigation-events';
 
 // Constants
 export const FS_MODULE_CHAT = 'chats';

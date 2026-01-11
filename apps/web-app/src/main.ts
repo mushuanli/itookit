@@ -6,7 +6,7 @@ import { MemoryManager } from '@itookit/memory-manager';
 import { initVFS } from './services/vfs';
 import { WORKSPACES } from './config/modules';
 import { FileTypeDefinition } from '@itookit/vfs-ui';
-import { NavigationRequest } from '@itookit/common';
+import { NavigationRequest, NAVIGATION_EVENTS } from '@itookit/common';
 
 // 模块引入
 import { createSettingsModule } from '@itookit/app-settings';
@@ -36,26 +36,97 @@ import './styles/index.css';
 
 // --- Router Definition ---
 
-interface RouterState {
-    workspace: string; 
-    resource?: string;
-}
-
 // 别名映射 (URL slug -> elementId)
 const ROUTE_MAP: Record<string, string> = {
+    // 核心工作区
     'chat': 'llm-workspace',
-    'settings': 'settings-workspace',
     'agents': 'agent-workspace',
-    // 可以添加更多映射，或者默认使用 WORKSPACES 中的 elementId
+    'settings': 'settings-workspace',
+    
+    // 标准内容工作区
+    'anki': 'anki-workspace',
+    'prompts': 'prompt-workspace',
+    'projects': 'project-workspace',
+    'emails': 'email-workspace',
+    'private': 'private-workspace',
+    
+    // 别名支持
+    'home': 'llm-workspace',  // 默认首页
 };
 
 // 反向映射 (elementId -> URL slug)
-const REVERSE_ROUTE_MAP = Object.entries(ROUTE_MAP).reduce((acc, [k, v]) => {
-    acc[v] = k;
+const REVERSE_ROUTE_MAP = Object.entries(ROUTE_MAP).reduce((acc, [slug, elementId]) => {
+    // 只保留第一个映射（避免 'home' 覆盖 'chat'）
+    if (!acc[elementId]) {
+        acc[elementId] = slug;
+    }
     return acc;
 }, {} as Record<string, string>);
 
 const managerCache = new Map<string, MemoryManager>();
+
+/**
+ * 解析导航目标
+ * 支持多种输入格式：slug、elementId、moduleName
+ */
+function resolveTarget(target: string): string {
+    // 1. 优先检查 slug 映射
+    if (ROUTE_MAP[target]) {
+        return ROUTE_MAP[target];
+    }
+    
+    // 2. 检查是否直接是 elementId
+    if (document.getElementById(target)) {
+        return target;
+    }
+    
+    // 3. 检查 moduleName 映射
+    const wsConfig = WORKSPACES.find(w => w.moduleName === target);
+    if (wsConfig) {
+        return wsConfig.elementId;
+    }
+    
+    // 4. 回退到默认
+    console.warn(`[Router] Unknown target: ${target}, falling back to chat`);
+    return 'llm-workspace';
+}
+
+/**
+ * 解析 URL Hash
+ */
+function parseHash(): { workspace: string; resource?: string; isCreate?: boolean } {
+    const parts = location.hash.slice(2).split('/'); // 去掉 #/
+    const slug = parts[0] || 'chat';
+    const resource = parts[1] ? decodeURIComponent(parts[1]) : undefined;
+    
+    return {
+        workspace: resolveTarget(slug),
+        resource: resource === 'new' ? undefined : resource,
+        isCreate: resource === 'new'
+    };
+}
+
+/**
+ * 更新浏览器历史
+ */
+function updateBrowserHistory(
+    workspaceId: string, 
+    resourceId: string | null, 
+    mode: 'push' | 'replace' = 'push'
+): void {
+    const slug = REVERSE_ROUTE_MAP[workspaceId] || 'home';
+    const hash = resourceId ? `#/${slug}/${encodeURIComponent(resourceId)}` : `#/${slug}`;
+    
+    if (location.hash !== hash) {
+        const state = { workspaceId, resourceId };
+        if (mode === 'push') {
+            history.pushState(state, '', hash);
+        } else {
+            history.replaceState(state, '', hash);
+        }
+    }
+}
+
 
 async function bootstrap() {
     try {
@@ -91,10 +162,10 @@ async function bootstrap() {
         // 这告诉 TS：这里面的所有值都遵循 WorkspaceStrategy 接口
         // 即使 Standard 策略没写 getEngine，访问它也是安全的（返回 undefined）
         const strategies: Record<string, WorkspaceStrategy> = {
-            'standard': new StandardWorkspaceStrategy(vfsCore),      // ← 传入 vfs
-            'agent':    new AgentWorkspaceStrategy(vfsCore),         // ← 传入 vfs
+            'standard': new StandardWorkspaceStrategy(vfsCore),
+            'agent': new AgentWorkspaceStrategy(vfsCore),
             'settings': new SettingsWorkspaceStrategy(settingsModule.factory, settingsModule.engine),
-            'chat':     new ChatWorkspaceStrategy(llmFactory, sessionEngine)
+            'chat': new ChatWorkspaceStrategy(llmFactory, sessionEngine)
         };
 
         // 获取标准编辑器工厂 (作为 fallback 或特定用途)
@@ -124,7 +195,7 @@ async function bootstrap() {
             //    我们直接使用对应的专用 Factory。这些通常是定制 UI，不依赖通用插件系统。
             let factory = undefined;
             if (def.editorType !== 'standard') {
-                 factory = editorFactoryMap[def.editorType];
+                factory = editorFactoryMap[def.editorType];
             }
             
             // 特殊处理：Chat 文件需要 parser
@@ -140,37 +211,6 @@ async function bootstrap() {
         };
 
         // --- 4. 路由状态管理 ---
-
-        /**
-         * 更新浏览器 URL (不触发跳转，仅更新显示)
-         */
-        const updateBrowserHistory = (workspaceId: string, resourceId: string | null, mode: 'push' | 'replace' = 'push') => {
-            const slug = REVERSE_ROUTE_MAP[workspaceId] || 'home';
-            // 过滤掉 null/undefined/空字符串
-            const hash = resourceId ? `#/${slug}/${resourceId}` : `#/${slug}`;
-            
-            if (location.hash !== hash) {
-                if (mode === 'push') {
-                    history.pushState({ workspaceId, resourceId }, '', hash);
-                } else {
-                    history.replaceState({ workspaceId, resourceId }, '', hash);
-                }
-            }
-        };
-
-        /**
-         * 解析 URL Hash
-         */
-        const parseHash = (): RouterState => {
-            const parts = location.hash.slice(2).split('/'); // slice(2) to remove #/
-            const slug = parts[0] || 'chat'; // default
-            const resource = parts[1] ? decodeURIComponent(parts[1]) : undefined;
-            
-            return {
-                workspace: ROUTE_MAP[slug] || 'llm-workspace',
-                resource
-            };
-        };
 
         // --- 5. 通用加载逻辑 (The Loader) ---
         
@@ -209,7 +249,6 @@ async function bootstrap() {
                 defaultFileName: primaryFileDef?.defaultFileName,
                 defaultExtension: primaryFileDef?.extension,
                 defaultFileContent: primaryFileDef?.defaultContent,
-                
                 contextMenu: { 
                     items: (_item: any, defaults: any[]) => uiPassThrough.readOnly ? [] : defaults 
                 }
@@ -227,9 +266,7 @@ async function bootstrap() {
                 // 4. ✅ [新增] ScopeId (多实例隔离关键)
                 // 使用 targetId (如 'workspace-sidebar') 确保每个实例的 UI 状态独立存储
                 scopeId: targetId,
-
                 fileTypes: workspaceFileTypes,
-                
                 uiOptions: uiOptions,
                 editorConfig: {
                     plugins: plugins || [],
@@ -240,17 +277,30 @@ async function bootstrap() {
                 
                 aiConfig: { enabled: aiEnabled ?? true },
 
-                // ✅ [关键] 注入导航处理器
+                // ✅ [核心] 统一导航处理器
                 onNavigate: async (req: NavigationRequest) => {
-                    const targetWsId = ROUTE_MAP[req.target] || req.target;
-                    // 跳转意味着 Push 新历史
-                    updateBrowserHistory(targetWsId, req.resourceId || null, 'push');
-                    await performNavigation(targetWsId, req.resourceId);
+                    const targetWsId = resolveTarget(req.target);
+                    
+                    // 处理创建动作
+                    if (req.params?.action === 'create') {
+                        // 存储创建参数供目标编辑器读取
+                        if (req.params.agentId || req.params.text) {
+                            sessionStorage.setItem('app_create_params', JSON.stringify({
+                                target: req.target,
+                                agentId: req.params.agentId,
+                                text: req.params.text,
+                                timestamp: Date.now()
+                            }));
+                        }
+                        updateBrowserHistory(targetWsId, null, 'push');
+                    } else {
+                        updateBrowserHistory(targetWsId, req.resourceId || null, 'push');
+                    }
+                    
+                    await performNavigation(targetWsId, req.resourceId, req.params);
                 },
 
-                // ✅ [关键] 注入会话变更监听
                 onSessionChange: (sessionId) => {
-                    // 内部切换文件意味着 Replace 当前历史
                     updateBrowserHistory(targetId, sessionId, 'replace');
                 }
             });
@@ -262,10 +312,13 @@ async function bootstrap() {
             return manager;
         };
 
-        // --- 6. 导航执行逻辑 ---
-
-        const performNavigation = async (workspaceId: string, resourceId?: string) => {
-            console.log(`[Router] Navigating to: ${workspaceId} -> ${resourceId || '(root)'}`);
+        // --- 6. 导航执行器 ---
+        const performNavigation = async (
+            workspaceId: string, 
+            resourceId?: string,
+            params?: NavigationRequest['params']
+        ): Promise<void> => {
+            console.log(`[Router] Navigating to: ${workspaceId}`, { resourceId, params });
 
             // 1. UI Tab 切换
             document.querySelectorAll('.workspace-view').forEach(ws => {
@@ -276,21 +329,24 @@ async function bootstrap() {
                 btn.classList.toggle('active', btnTarget === workspaceId);
             });
 
-            // 2. 加载模块
+            // 加载模块
             const manager = await loadWorkspace(workspaceId);
+            if (!manager) {
+                console.error(`[Router] Failed to load workspace: ${workspaceId}`);
+                return;
+            }
 
-            // 3. 打开内部资源
-            if (manager && resourceId) {
-                // 微小的延时确保 UI 渲染就绪
+            // 打开资源
+            if (resourceId) {
                 setTimeout(() => {
                     manager.openFile(resourceId);
                 }, 10);
             }
         };
 
-        // --- 7. 启动 ---
+        // --- 7. 全局事件绑定 ---
 
-        // 绑定浏览器历史事件 (Back/Forward)
+        // 浏览器历史
         window.addEventListener('popstate', (event) => {
             const state = event.state as { workspaceId: string, resourceId?: string } | null;
             if (state) {
@@ -301,7 +357,7 @@ async function bootstrap() {
             }
         });
 
-        // 绑定侧边栏点击
+        // 侧边栏导航按钮
         document.querySelectorAll('.app-nav-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 e.preventDefault();
@@ -317,7 +373,17 @@ async function bootstrap() {
             });
         });
 
-        // 初始路由解析与加载
+        // ✅ [新增] 全局导航事件监听器
+        document.addEventListener(NAVIGATION_EVENTS.NAVIGATE, ((e: CustomEvent) => {
+            const { target, resourceId, params } = e.detail || {};
+            if (target) {
+                const targetWsId = resolveTarget(target);
+                updateBrowserHistory(targetWsId, resourceId || null, 'push');
+                performNavigation(targetWsId, resourceId, params);
+            }
+        }) as EventListener);
+
+        // --- 8. 启动 ---
         const initialRoute = parseHash();
         await performNavigation(initialRoute.workspace, initialRoute.resource);
         
