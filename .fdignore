@@ -73,4 +73,7 @@ vfs-ui/src/components/
 #llm:
 providers/
 editors/
+FloatingNavPanel.ts
 #templates/
+LayoutTemplates.ts
+NodeTemplates.ts

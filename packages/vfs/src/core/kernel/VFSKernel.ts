@@ -40,6 +40,7 @@ export class VFSKernel {
   async initialize(): Promise<void> {
     if (this.initialized) return;
     await this.storage.connect();
+    await this.ensureRootNode();  // ✅ 添加这行
     this.initialized = true;
   }
 
@@ -55,7 +56,6 @@ export class VFSKernel {
   }
 
   // ==================== 节点操作 ====================
-
   /**
    * 创建节点
    */
@@ -409,6 +409,31 @@ export class VFSKernel {
   private ensureInitialized(): void {
     if (!this.initialized) {
       throw new VFSError(ErrorCode.INVALID_OPERATION, 'VFS not initialized');
+    }
+  }
+
+    private async ensureRootNode(): Promise<void> {
+    const root = await this.storage
+      .getCollection<VNodeData>('vnodes')
+      .getByIndex('path', '/');
+    
+    if (!root) {
+      const rootNode = VNode.create({
+        nodeId: 'root',
+        parentId: null,
+        name: '',
+        type: VNodeType.DIRECTORY,
+        path: '/'
+      });
+      
+      const tx = this.storage.beginTransaction(['vnodes'], 'readwrite');
+      try {
+        await tx.getCollection<VNodeData>('vnodes').put(rootNode);
+        await tx.commit();
+      } catch (error) {
+        await tx.abort();
+        throw this.wrapError(error, 'Failed to create root node');
+      }
     }
   }
 
