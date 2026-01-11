@@ -1,19 +1,29 @@
 // @file packages/vfs/sync/types.ts
 
-/**
- * [新增] 同步进度详情
- */
-export interface SyncProgress {
-  phase: 'preparing' | 'uploading' | 'downloading' | 'applying' | 'finalizing';
-  current: number;
-  total: number;
-  bytesTransferred: number;
-  bytesTotal: number;
-  // 可选：添加当前处理的文件名或速度
-  currentFile?: string;
-  speed?: number; // bytes per second
+
+export type SyncOperation = 
+  | 'create' 
+  | 'update' 
+  | 'delete' 
+  | 'move' 
+  | 'copy'
+  | 'tag_add'
+  | 'tag_remove'
+  | 'metadata_update';
+
+export type SyncStatus = 'idle' | 'syncing' | 'paused' | 'error' | 'offline';
+export type SyncPhase = 'preparing' | 'uploading' | 'downloading' | 'applying' | 'finalizing';
+export type ConflictType = 'content' | 'delete' | 'move' | 'metadata';
+export type ConflictResolution = 'local' | 'remote' | 'merged' | 'skipped';
+export type LogStatus = 'pending' | 'syncing' | 'synced' | 'failed';
+
+// ==================== 向量时钟 ====================
+
+export interface VectorClock {
+  [peerId: string]: number;
 }
 
+// ==================== 同步日志 ====================
 /**
  * 同步日志 - 记录所有变更
  */
@@ -27,34 +37,16 @@ export interface SyncLog {
   previousPath?: string;             // 变更前路径（move操作）
   contentHash?: string;              // 内容SHA256哈希
   size?: number;                     // 文件大小
-  isChunked?: boolean;               // 是否分片
-  chunkCount?: number;               // 分片数量
   metadata?: Record<string, unknown>;
   // 版本控制
   version: number;                   // 递增版本号
   vectorClock?: VectorClock;         // 向量时钟（分布式冲突检测）
   // 扩展字段用于本地状态管理，不需导出
-  status?: 'pending' | 'syncing' | 'synced' | 'failed';
+  status?: LogStatus;
   retryCount?: number;
 }
 
-export type SyncOperation = 
-  | 'create' 
-  | 'update' 
-  | 'delete' 
-  | 'move' 
-  | 'copy'
-  | 'tag_add'
-  | 'tag_remove'
-  | 'metadata_update';
-
-/**
- * 向量时钟 - 用于分布式冲突检测
- */
-export interface VectorClock {
-  [peerId: string]: number;
-}
-
+// ==================== 同步游标 ====================
 /**
  * 同步游标 - 追踪同步进度
  */
@@ -65,6 +57,8 @@ export interface SyncCursor {
   lastSyncTime: number;              // 最后同步时间
   lastContentHash?: string;          // 最后同步的内容哈希
 }
+
+// ==================== 内容传输 ====================
 
 /**
  * 内联内容（可序列化版本）
@@ -90,9 +84,35 @@ export interface FileChunk {
   checksum: string;                  // 分片校验和
 }
 
-/**
- * 同步包 - 批量传输单元
- */
+export interface ChunkReference {
+  contentHash: string;
+  nodeId: string;
+  totalSize: number;
+  totalChunks: number;
+  missingChunks?: number[];          // 需要传输的分片索引
+}
+
+// ==================== 同步变更 ====================
+
+export interface SyncChange {
+  logId: number;
+  nodeId: string;
+  operation: SyncOperation;
+  timestamp: number;
+  path: string;
+  previousPath?: string;
+  contentHash?: string;
+  size?: number;
+  metadata?: Record<string, unknown>;
+  version: number;
+  
+  // 冲突检测信息
+  baseVersion?: number;              // 基于哪个版本修改
+  vectorClock?: VectorClock;
+}
+
+// ==================== 同步包 ====================
+
 export interface SyncPacket {
   packetId: string;
   peerId: string;
@@ -115,30 +135,95 @@ export interface SyncPacket {
   signature?: string;
 }
 
-export interface SyncChange {
-  logId: number;
-  nodeId: string;
-  operation: SyncOperation;
-  timestamp: number;
-  path: string;
-  previousPath?: string;
-  contentHash?: string;
-  size?: number;
-  metadata?: Record<string, unknown>;
-  version: number;
-  
-  // 冲突检测信息
-  baseVersion?: number;              // 基于哪个版本修改
-  vectorClock?: VectorClock;
+export interface SyncPacketResponse {
+  success: boolean;
+  missingChunks?: string[];
+  chunkData?: ArrayBuffer;
+  error?: string;
 }
 
-export interface ChunkReference {
-  contentHash: string;
+// ==================== 冲突 ====================
+
+export interface SyncConflict {
+  conflictId: string;
   nodeId: string;
-  totalSize: number;
-  totalChunks: number;
-  missingChunks?: number[];          // 需要传输的分片索引
+  path: string;
+  localChange: SyncChange;
+  remoteChange: SyncChange;
+  
+  // 冲突类型
+  type: ConflictType;
+  
+  // 解决状态
+  resolved: boolean;
+  resolution?: ConflictResolution;
+  timestamp: number;
 }
+
+// ==================== 同步状态 ====================
+
+export interface SyncProgress {
+  phase: SyncPhase;
+  current: number;
+  total: number;
+  bytesTransferred: number;
+  bytesTotal: number;
+  // 可选：添加当前处理的文件名或速度
+  currentFile?: string;
+  speed?: number; // bytes per second
+}
+
+export interface SyncStats {
+  lastSyncTime?: number;
+  totalSynced: number;
+  pendingChanges: number;
+  conflicts: number;
+  errors: number;
+}
+
+export interface SyncError {
+  code: string;
+  message: string;
+  retryable: boolean;
+}
+
+export interface SyncState {
+  status: SyncStatus;
+  progress?: SyncProgress;
+  stats: SyncStats;
+  error?: SyncError;
+}
+
+// ==================== 过滤器 ====================
+
+export interface SyncFilter {
+  timeRange?: {
+    from?: number;
+    to?: number;
+  };
+  paths?: {
+    include?: string[];
+    exclude?: string[];
+  };
+  fileTypes?: {
+    include?: string[];
+    exclude?: string[];
+  };
+  sizeLimit?: {
+    maxFileSize?: number;
+    maxTotalSize?: number;
+  };
+  content?: {
+    excludeBinary?: boolean;
+    excludeAssets?: boolean;
+  };
+  tags?: {
+    include?: string[];
+    exclude?: string[];
+  };
+}
+
+// ==================== 配置 ====================
 
 /**
  * 同步配置
@@ -204,96 +289,12 @@ export interface SyncConfig {
   };
 }
 
-/**
- * 同步过滤器 - 限制同步范围
- */
-export interface SyncFilter {
-  // 时间范围
-  timeRange?: {
-    from?: number;                   // 开始时间戳
-    to?: number;                     // 结束时间戳
-  };
-  
-  // 路径过滤
-  paths?: {
-    include?: string[];              // 包含的路径模式
-    exclude?: string[];              // 排除的路径模式
-  };
-  
-  // 文件类型过滤
-  fileTypes?: {
-    include?: string[];              // 包含的扩展名
-    exclude?: string[];              // 排除的扩展名
-  };
-  
-  // 大小限制
-  sizeLimit?: {
-    maxFileSize?: number;            // 单文件最大大小
-    maxTotalSize?: number;           // 总大小限制
-  };
-  
-  // 内容过滤
-  content?: {
-    excludeBinary?: boolean;         // 排除二进制文件
-    excludeAssets?: boolean;         // 排除资产目录
-  };
-  
-  // 标签过滤
-  tags?: {
-    include?: string[];
-    exclude?: string[];
-  };
-}
+// ==================== 同步事件类型 ====================
 
-/**
- * 冲突信息
- */
-export interface SyncConflict {
-  conflictId: string;
-  nodeId: string;
-  path: string;
-  
-  localChange: SyncChange;
-  remoteChange: SyncChange;
-  
-  // 冲突类型
-  type: 'content' | 'delete' | 'move' | 'metadata';
-  
-  // 解决状态
-  resolved: boolean;
-  resolution?: 'local' | 'remote' | 'merged' | 'skipped';
-  
-  timestamp: number;
-}
-
-/**
- * 同步状态
- */
-export interface SyncState {
-  status: 'idle' | 'syncing' | 'paused' | 'error' | 'offline';
-  
-  // 进度信息
-  progress?: {
-    phase: 'preparing' | 'uploading' | 'downloading' | 'applying' | 'finalizing';
-    current: number;
-    total: number;
-    bytesTransferred: number;
-    bytesTotal: number;
-  };
-  
-  // 统计信息
-  stats: {
-    lastSyncTime?: number;
-    totalSynced: number;
-    pendingChanges: number;
-    conflicts: number;
-    errors: number;
-  };
-  
-  // 错误信息
-  error?: {
-    code: string;
-    message: string;
-    retryable: boolean;
-  };
+export enum SyncEventType {
+  STATE_CHANGED = 'sync:state_changed',
+  CONFLICT = 'sync:conflict',
+  ERROR = 'sync:error',
+  CONNECTED = 'sync:connected',
+  DISCONNECTED = 'sync:disconnected'
 }

@@ -3,16 +3,13 @@
 import { VNodeData, VNodeType } from './types';
 import { generateNodeId, createContentRef } from '../utils/id';
 
+type VNodeCreateInput = Pick<VNodeData, 'name' | 'type' | 'path'> & Partial<VNodeData>;
+
 /**
  * VNode 工厂与工具方法
  */
 export const VNode = {
-  /**
-   * 创建新节点
-   */
-  create(
-    data: Pick<VNodeData, 'name' | 'type' | 'path'> & Partial<VNodeData>
-  ): VNodeData {
+  create(data: VNodeCreateInput): VNodeData {
     const nodeId = data.nodeId ?? generateNodeId();
     const now = Date.now();
     
@@ -54,4 +51,4 @@ export const VNode = {
   isFile(node: VNodeData): boolean {
     return node.type === VNodeType.FILE;
   }
-};
+} as const;

@@ -1,6 +1,6 @@
 // @file vfs/core/plugin/interfaces/IPluginContext.ts
 
-import {IPlugin} from './IPlugin';
+import { IPlugin } from './IPlugin';
 import { VFSKernel } from '../../kernel/VFSKernel';
 import { EventBus } from '../../kernel/EventBus';
 import { CollectionSchema } from '../../storage/interfaces/IStorageAdapter';
@@ -23,9 +23,13 @@ export enum ExtensionPoint {
   SYNC_ADAPTER = 'sync.adapter'
 }
 
-/**
- * 插件上下文接口
- */
+export interface PluginLogger {
+  debug(message: string, ...args: unknown[]): void;
+  info(message: string, ...args: unknown[]): void;
+  warn(message: string, ...args: unknown[]): void;
+  error(message: string, ...args: unknown[]): void;
+}
+
 export interface IPluginContext {
   /** VFS 内核（只读） */
   readonly kernel: VFSKernel;
@@ -66,14 +70,4 @@ export interface IPluginContext {
    * 日志
    */
   log: PluginLogger;
-}
-
-/**
- * 插件日志接口
- */
-export interface PluginLogger {
-  debug(message: string, ...args: unknown[]): void;
-  info(message: string, ...args: unknown[]): void;
-  warn(message: string, ...args: unknown[]): void;
-  error(message: string, ...args: unknown[]): void;
 }

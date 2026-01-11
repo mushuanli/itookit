@@ -3,8 +3,7 @@
 import { IPluginContext, VNodeType } from '../../core';
 import { ModulesPlugin } from '../../modules';
 import { SyncCursor, SyncState } from '../types';
-
-const SYNC_MODULE_NAME = '__sync';
+import { SYNC_MODULE_NAME } from '../constants';
 
 export class SyncStateStorage {
   private moduleReady = false;
@@ -29,126 +28,89 @@ export class SyncStateStorage {
         isProtected: true
       });
 
-      // 创建目录结构
-      await this.context.kernel.createNode({
-        path: `/${SYNC_MODULE_NAME}/cursors`,
-        type: VNodeType.DIRECTORY
-      });
-      await this.context.kernel.createNode({
-        path: `/${SYNC_MODULE_NAME}/state`,
-        type: VNodeType.DIRECTORY
-      });
+      await this.createDirectoryStructure();
     }
 
     this.moduleReady = true;
   }
 
-  /**
-   * 保存游标
-   */
   async saveCursor(cursor: SyncCursor): Promise<void> {
     this.ensureReady();
-    
-    const path = `/${SYNC_MODULE_NAME}/cursors/${cursor.peerId}_${cursor.moduleId}.json`;
-    const content = JSON.stringify(cursor, null, 2);
-
-    try {
-      const node = await this.context.kernel.getNodeByPath(path);
-      if (node) {
-        await this.context.kernel.write(node.nodeId, content);
-      } else {
-        await this.context.kernel.createNode({
-          path,
-          type: VNodeType.FILE,
-          content
-        });
-      }
-    } catch (e) {
-      this.context.log.error('Failed to save cursor', e);
-    }
+    await this.writeJson(
+      `/${SYNC_MODULE_NAME}/cursors/${cursor.peerId}_${cursor.moduleId}.json`,
+      cursor
+    );
   }
 
-  /**
-   * 加载游标
-   */
   async loadCursor(peerId: string, moduleId: string): Promise<SyncCursor | null> {
     this.ensureReady();
-    
-    const path = `/${SYNC_MODULE_NAME}/cursors/${peerId}_${moduleId}.json`;
-    
-    try {
-      const node = await this.context.kernel.getNodeByPath(path);
-      if (!node) return null;
-      
-      const content = await this.context.kernel.read(node.nodeId);
-      if (typeof content === 'string') {
-        return JSON.parse(content);
-      }
-      return null;
-    } catch {
-      return null;
-    }
+    return this.readJson(`/${SYNC_MODULE_NAME}/cursors/${peerId}_${moduleId}.json`);
   }
 
-  /**
-   * 保存同步状态
-   */
   async saveState(peerId: string, state: SyncState): Promise<void> {
     this.ensureReady();
-    
-    const path = `/${SYNC_MODULE_NAME}/state/${peerId}.json`;
-    const content = JSON.stringify(state, null, 2);
-
-    try {
-      const node = await this.context.kernel.getNodeByPath(path);
-      if (node) {
-        await this.context.kernel.write(node.nodeId, content);
-      } else {
-        await this.context.kernel.createNode({
-          path,
-          type: VNodeType.FILE,
-          content
-        });
-      }
-    } catch (e) {
-      this.context.log.error('Failed to save state', e);
-    }
+    await this.writeJson(`/${SYNC_MODULE_NAME}/state/${peerId}.json`, state);
   }
 
-  /**
-   * 加载同步状态
-   */
   async loadState(peerId: string): Promise<SyncState | null> {
     this.ensureReady();
-    
-    const path = `/${SYNC_MODULE_NAME}/state/${peerId}.json`;
-    
-    try {
-      const node = await this.context.kernel.getNodeByPath(path);
-      if (!node) return null;
-      
-      const content = await this.context.kernel.read(node.nodeId);
-      if (typeof content === 'string') {
-        return JSON.parse(content);
-      }
-      return null;
-    } catch {
-      return null;
-    }
+    return this.readJson(`/${SYNC_MODULE_NAME}/state/${peerId}.json`);
   }
 
-  /**
-   * 获取同步模块路径前缀（用于过滤）
-   */
   static getSyncModulePath(): string {
     return `/${SYNC_MODULE_NAME}`;
   }
 
-  /**
-   * 检查路径是否属于同步模块
-   */
   static isSyncModulePath(path: string): boolean {
     return path.startsWith(`/${SYNC_MODULE_NAME}`);
+  }
+
+  private async createDirectoryStructure(): Promise<void> {
+    const dirs = [
+      `/${SYNC_MODULE_NAME}/cursors`,
+      `/${SYNC_MODULE_NAME}/state`
+    ];
+
+    for (const dir of dirs) {
+      await this.context.kernel.createNode({
+        path: dir,
+        type: VNodeType.DIRECTORY
+      });
+    }
+  }
+
+  private async writeJson(path: string, data: unknown): Promise<void> {
+    const content = JSON.stringify(data, null, 2);
+
+    try {
+      const node = await this.context.kernel.getNodeByPath(path);
+      if (node) {
+        await this.context.kernel.write(node.nodeId, content);
+      } else {
+        await this.context.kernel.createNode({
+          path,
+          type: VNodeType.FILE,
+          content
+        });
+      }
+    } catch (e) {
+      this.context.log.error(`Failed to write ${path}`, e);
+    }
+  }
+
+  private async readJson<T>(path: string): Promise<T | null> {
+    try {
+      const node = await this.context.kernel.getNodeByPath(path);
+      if (!node) return null;
+
+      const content = await this.context.kernel.read(node.nodeId);
+      if (typeof content === 'string') {
+        return JSON.parse(content);
+      }
+      return null;
+    } catch {
+      return null;
+    }
   }
 
   private ensureReady(): void {

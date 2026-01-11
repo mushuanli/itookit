@@ -2,23 +2,18 @@
 
 import { SyncState } from '../types';
 
-type BeforeUnloadHandler = (e: BeforeUnloadEvent) => string | undefined;
+export interface BrowserGuardOptions {
+  onVisibilityChange?: (hidden: boolean) => void;
+}
 
 export class BrowserGuard {
-  private handler: BeforeUnloadHandler | null = null;
+  private beforeUnloadHandler: ((e: BeforeUnloadEvent) => string | undefined) | null = null;
   private visibilityHandler: (() => void) | null = null;
-  private getState: () => SyncState;
-  private onVisibilityChange?: (hidden: boolean) => void;
 
   constructor(
-    getState: () => SyncState,
-    options?: {
-      onVisibilityChange?: (hidden: boolean) => void;
-    }
-  ) {
-    this.getState = getState;
-    this.onVisibilityChange = options?.onVisibilityChange;
-  }
+    private getState: () => SyncState,
+    private options?: BrowserGuardOptions
+  ) {}
 
   /**
    * 启用保护
@@ -26,28 +21,8 @@ export class BrowserGuard {
   enable(): void {
     if (typeof window === 'undefined') return;
 
-    // 页面卸载保护
-    this.handler = (e: BeforeUnloadEvent) => {
-      const state = this.getState();
-      
-      if (state.status === 'syncing' || (state.stats.pendingChanges > 0)) {
-        const message = '同步正在进行中，确定要离开吗？未同步的更改可能会丢失。';
-        e.preventDefault();
-        e.returnValue = message;
-        return message;
-      }
-      return undefined;
-    };
-
-    window.addEventListener('beforeunload', this.handler);
-
-    // 可见性变化监听
-    this.visibilityHandler = () => {
-      const hidden = document.hidden;
-      this.onVisibilityChange?.(hidden);
-    };
-
-    document.addEventListener('visibilitychange', this.visibilityHandler);
+    this.setupBeforeUnloadGuard();
+    this.setupVisibilityListener();
   }
 
   /**
@@ -56,15 +31,8 @@ export class BrowserGuard {
   disable(): void {
     if (typeof window === 'undefined') return;
 
-    if (this.handler) {
-      window.removeEventListener('beforeunload', this.handler);
-      this.handler = null;
-    }
-
-    if (this.visibilityHandler) {
-      document.removeEventListener('visibilitychange', this.visibilityHandler);
-      this.visibilityHandler = null;
-    }
+    this.removeBeforeUnloadGuard();
+    this.removeVisibilityListener();
   }
 
   /**
@@ -72,13 +40,51 @@ export class BrowserGuard {
    */
   async safeUnload(syncFn: () => Promise<void>): Promise<void> {
     const state = this.getState();
-    
+
     if (state.stats.pendingChanges > 0) {
       try {
         await syncFn();
       } catch (e) {
         console.error('[BrowserGuard] Final sync failed', e);
       }
+    }
+  }
+
+  private setupBeforeUnloadGuard(): void {
+    this.beforeUnloadHandler = (e: BeforeUnloadEvent) => {
+      const state = this.getState();
+
+      if (state.status === 'syncing' || state.stats.pendingChanges > 0) {
+        const message = '同步正在进行中，确定要离开吗？未同步的更改可能会丢失。';
+        e.preventDefault();
+        e.returnValue = message;
+        return message;
+      }
+      return undefined;
+    };
+
+    window.addEventListener('beforeunload', this.beforeUnloadHandler);
+  }
+
+  private removeBeforeUnloadGuard(): void {
+    if (this.beforeUnloadHandler) {
+      window.removeEventListener('beforeunload', this.beforeUnloadHandler);
+      this.beforeUnloadHandler = null;
+    }
+  }
+
+  private setupVisibilityListener(): void {
+    this.visibilityHandler = () => {
+      this.options?.onVisibilityChange?.(document.hidden);
+    };
+
+    document.addEventListener('visibilitychange', this.visibilityHandler);
+  }
+
+  private removeVisibilityListener(): void {
+    if (this.visibilityHandler) {
+      document.removeEventListener('visibilitychange', this.visibilityHandler);
+      this.visibilityHandler = null;
     }
   }
 }

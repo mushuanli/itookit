@@ -21,7 +21,6 @@ export interface ModuleServiceOptions {
  * 提供模块初始化、JSON 读写、变更通知等通用功能
  */
 export abstract class BaseModuleService {
-  protected vfs: VFS;
   public readonly engine: VFSModuleEngine;
   protected initialized = false;
   protected listeners = new Set<ChangeListener>();
@@ -29,9 +28,8 @@ export abstract class BaseModuleService {
   constructor(
     protected moduleName: string,
     protected options: ModuleServiceOptions = {},
-    vfs: VFS
+    protected vfs: VFS
   ) {
-    this.vfs = vfs;
     this.engine = new VFSModuleEngine(moduleName, vfs);
   }
 
@@ -68,16 +66,12 @@ export abstract class BaseModuleService {
   protected async readJson<T>(path: string): Promise<T | null> {
     try {
       const content = await this.vfs.read(this.moduleName, path);
-      const str = typeof content === 'string'
-        ? content
+      const str = typeof content === 'string' 
+        ? content 
         : new TextDecoder().decode(content as ArrayBuffer);
       return JSON.parse(str);
     } catch (e: any) {
-      // 检查是否是 "not found" 类型的错误
-      const isNotFound = 
-        e.message?.toLowerCase().includes('not found') ||
-        e.code === 'NOT_FOUND';
-      
+      const isNotFound = e.message?.toLowerCase().includes('not found') || e.code === 'NOT_FOUND';
       if (!isNotFound) {
         console.warn(`[${this.constructor.name}] Failed to read ${path}:`, e);
       }
@@ -112,21 +106,9 @@ export abstract class BaseModuleService {
    * 确保目录存在
    */
   protected async ensureDirectory(path: string): Promise<void> {
-    const existingId = await this.engine.resolvePath(path);
-    if (existingId) return;
-
-    const parts = path.split('/').filter(Boolean);
-    let currentPath = '';
-
-    for (const part of parts) {
-      currentPath += '/' + part;
-      const nodeId = await this.engine.resolvePath(currentPath);
-      
-      if (!nodeId) {
-        const parentPath = currentPath.substring(0, currentPath.lastIndexOf('/')) || null;
-        await this.engine.createDirectory(part, parentPath);
-      }
-    }
+    // 委托给内核方法
+    const systemPath = `/${this.moduleName}${path.startsWith('/') ? path : '/' + path}`;
+    await this.vfs.kernel.ensureDirectory(systemPath);
   }
 
   /**

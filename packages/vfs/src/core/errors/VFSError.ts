@@ -1,23 +1,37 @@
 // @file vfs/core/errors/VFSError.ts
 
-import { ErrorCode } from './ErrorCodes';
+export enum ErrorCode {
+  UNKNOWN = 'UNKNOWN',
+  INTERNAL_ERROR = 'INTERNAL_ERROR',
+  NOT_FOUND = 'NOT_FOUND',
+  ALREADY_EXISTS = 'ALREADY_EXISTS',
+  INVALID_PATH = 'INVALID_PATH',
+  INVALID_OPERATION = 'INVALID_OPERATION',
+  PERMISSION_DENIED = 'PERMISSION_DENIED',
+  READ_ONLY = 'READ_ONLY',
+  TRANSACTION_FAILED = 'TRANSACTION_FAILED',
+  TRANSACTION_ABORTED = 'TRANSACTION_ABORTED',
+  PLUGIN_NOT_FOUND = 'PLUGIN_NOT_FOUND',
+  PLUGIN_LOAD_ERROR = 'PLUGIN_LOAD_ERROR',
+  DEPENDENCY_ERROR = 'DEPENDENCY_ERROR',
+  STORAGE_ERROR = 'STORAGE_ERROR',
+  CONNECTION_ERROR = 'CONNECTION_ERROR',
+  SYNC_ERROR = 'SYNC_ERROR',
+  CONFLICT_ERROR = 'CONFLICT_ERROR'
+}
 
 /**
  * VFS 错误基类
  */
 export class VFSError extends Error {
-  readonly code: ErrorCode;
-  readonly details?: unknown;
-  readonly timestamp: number;
-
-  constructor(code: ErrorCode, message: string, details?: unknown) {
+  constructor(
+    readonly code: ErrorCode,
+    message: string,
+    readonly details?: unknown,
+    readonly timestamp = Date.now()
+  ) {
     super(message);
     this.name = 'VFSError';
-    this.code = code;
-    this.details = details;
-    this.timestamp = Date.now();
-    
-    // 保持原型链
     Object.setPrototypeOf(this, VFSError.prototype);
   }
 
@@ -31,21 +45,18 @@ export class VFSError extends Error {
     };
   }
 
-  static isVFSError(error: unknown): error is VFSError {
+  static is(error: unknown): error is VFSError {
     return error instanceof VFSError;
   }
 
   static wrap(error: unknown, code: ErrorCode, message?: string): VFSError {
-    if (error instanceof VFSError) {
-      return error;
-    }
-    
+    if (VFSError.is(error)) return error;
     const msg = message ?? (error instanceof Error ? error.message : String(error));
     return new VFSError(code, msg, error);
   }
 }
 
-// 便捷工厂函数
+// 便捷工厂
 export const Errors = {
   notFound: (resource: string) => 
     new VFSError(ErrorCode.NOT_FOUND, `Not found: ${resource}`),
@@ -70,6 +81,4 @@ export const Errors = {
   
   storageError: (reason: string, details?: unknown) => 
     new VFSError(ErrorCode.STORAGE_ERROR, reason, details)
-};
-
-export { ErrorCode };
+} as const;
