@@ -1,5 +1,7 @@
 // @file: llm-driver/utils/attachment.ts
 
+import {blobToBase64,arrayBufferToBase64} from '@itookit/common';
+
 /**
  * 附件处理结果
  */
@@ -74,104 +76,6 @@ export async function processAttachment(
     }
     
     throw new Error('Unsupported attachment type');
-}
-
-/**
- * Blob 转 Base64
- */
-async function blobToBase64(blob: Blob): Promise<string> {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-            const result = reader.result as string;
-            // 移除 data URI 前缀
-            const base64 = result.split(',')[1];
-            resolve(base64);
-        };
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
-    });
-}
-
-/**
- * ArrayBuffer 转 Base64
- */
-function arrayBufferToBase64(buffer: ArrayBuffer): string {
-    const bytes = new Uint8Array(buffer);
-    
-    // 浏览器环境
-    if (typeof btoa !== 'undefined') {
-        let binary = '';
-        for (let i = 0; i < bytes.byteLength; i++) {
-            binary += String.fromCharCode(bytes[i]);
-        }
-        return btoa(binary);
-    }
-    
-    // Node.js 环境
-    if (typeof Buffer !== 'undefined') {
-        return Buffer.from(bytes).toString('base64');
-    }
-    
-    throw new Error('No base64 encoding method available');
-}
-
-/**
- * 获取文件扩展名对应的 MIME 类型
- */
-export function getMimeType(filename: string): string {
-    const ext = filename.split('.').pop()?.toLowerCase();
-    
-    const mimeTypes: Record<string, string> = {
-        // 图片
-        'jpg': 'image/jpeg',
-        'jpeg': 'image/jpeg',
-        'png': 'image/png',
-        'gif': 'image/gif',
-        'webp': 'image/webp',
-        'svg': 'image/svg+xml',
-        
-        // 文档
-        'pdf': 'application/pdf',
-        'doc': 'application/msword',
-        'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        'txt': 'text/plain',
-        'md': 'text/markdown',
-        
-        // 代码
-        'json': 'application/json',
-        'js': 'text/javascript',
-        'ts': 'text/typescript',
-        'py': 'text/x-python',
-        'html': 'text/html',
-        'css': 'text/css',
-        'xml': 'application/xml',
-        'yaml': 'text/yaml',
-        'yml': 'text/yaml',
-        
-        // 音频
-        'mp3': 'audio/mpeg',
-        'wav': 'audio/wav',
-        'ogg': 'audio/ogg',
-        
-        // 视频
-        'mp4': 'video/mp4',
-        'webm': 'video/webm',
-        
-        // 压缩
-        'zip': 'application/zip',
-        'gz': 'application/gzip',
-        'tar': 'application/x-tar'
-    };
-    
-    return mimeTypes[ext || ''] || 'application/octet-stream';
-}
-
-/**
- * 检查是否为图片类型
- */
-export function isImageMimeType(mimeType: string): boolean {
-    return mimeType.startsWith('image/');
 }
 
 /**

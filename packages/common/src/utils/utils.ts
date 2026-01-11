@@ -66,35 +66,57 @@ export function guessMimeType(filename: string): string {
         'webp': 'image/webp',
         'bmp': 'image/bmp',
         'ico': 'image/x-icon',
-        // 文档
-        'pdf': 'application/pdf', 
-        'txt': 'text/plain', 
-        'md': 'text/markdown',
-        'json': 'application/json',
-        'xml': 'application/xml',
-        'html': 'text/html',
-        'css': 'text/css',
-        'js': 'application/javascript',
-        // Office
+
+        // Office文档
+        'pdf': 'application/pdf',
         'doc': 'application/msword',
         'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         'xls': 'application/vnd.ms-excel',
         'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         'ppt': 'application/vnd.ms-powerpoint',
         'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+
+        'txt': 'text/plain',
+        'md': 'text/markdown',
+        
+        // 代码
+        'json': 'application/json',
+        'js': 'text/javascript',
+        'ts': 'text/typescript',
+        'py': 'text/x-python',
+        'html': 'text/html',
+        'css': 'text/css',
+        'xml': 'application/xml',
+        'yaml': 'text/yaml',
+        'yml': 'text/yaml',
+
         // 音视频
         'mp3': 'audio/mpeg',
         'wav': 'audio/wav',
+        'ogg': 'audio/ogg',
+        
+        // 视频
         'mp4': 'video/mp4',
         'webm': 'video/webm',
+        
         // 压缩
         'zip': 'application/zip',
+        'gz': 'application/gzip',
+        'tar': 'application/x-tar',
         'rar': 'application/x-rar-compressed',
         '7z': 'application/x-7z-compressed',
         };
         return map[ext || ''] || 'application/octet-stream';
     }
 
+
+
+/**
+ * 检查是否为图片类型
+ */
+export function isImageMimeType(mimeType: string): boolean {
+    return mimeType.startsWith('image/');
+}
 
 /**
  * 延迟执行
@@ -271,4 +293,44 @@ export function timeAgo(date: Date | number): string {
     
     const d = typeof date === 'number' ? new Date(date) : date;
     return d.toLocaleDateString();
+}
+
+
+/**
+ * Blob 转 Base64
+ */
+export async function blobToBase64(blob: Blob): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+            const result = reader.result as string;
+            // 移除 data URI 前缀
+            const base64 = result.split(',')[1];
+            resolve(base64);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+    });
+}
+
+/**
+ * ArrayBuffer 转 Base64
+ */
+
+export function arrayBufferToBase64(buffer: ArrayBuffer): string {
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    for (let i = 0; i < bytes.byteLength; i++) {
+        binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
+}
+
+export function base64ToArrayBuffer(base64: string): ArrayBuffer {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes.buffer;
 }
