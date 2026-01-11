@@ -25,6 +25,15 @@ import { NodeAction } from './core/types';
 export interface LLMEditorOptions extends EditorOptions {
     sessionEngine: ILLMSessionEngine;
     agentService: IAgentService;
+    
+    /** 外部指定的初始输入状态（用于动态创建会话） */
+    initialInputState?: {
+        text?: string;
+        agentId?: string;
+    };
+    
+    /** 是否为新创建的会话（跳过恢复已保存状态） */
+    isNewSession?: boolean;
 }
 
 // ✨ 扩充 CollapseStateMap 接口或者直接使用 any
@@ -82,6 +91,10 @@ export class LLMWorkspaceEditor implements IEditor {
     // ✅ 新增：UI 状态保存定时器
     private uiStateSaveTimer: ReturnType<typeof setTimeout> | null = null;
     private readonly UI_STATE_SAVE_DEBOUNCE = 2000;
+
+    // ✨ 新增：输入状态保存定时器
+    private inputStateSaveTimer: ReturnType<typeof setTimeout> | null = null;
+    private readonly INPUT_STATE_SAVE_DEBOUNCE = 1000;
 
     // ✅ 新增：浮动导航面板
     private floatingNav: FloatingNavPanel | null = null;
@@ -209,7 +222,12 @@ export class LLMWorkspaceEditor implements IEditor {
         this.chatInput = new ChatInput(inputEl, {
             onSend: (text, files, agentId) => this.handleUserSend(text, files, agentId),
             onStop: () => this.sessionManager.abort(),
-            initialAgents 
+            initialAgents,
+            // ✨ 新增：输入变化回调
+            onInputChange: () => this.scheduleInputStateSave(),
+            onExecutorChange: (_executorId) => {
+                this.scheduleInputStateSave();
+            }
         });
 
         // ✅ 新增：监听 HistoryView 发出的打开设置请求
@@ -239,6 +257,23 @@ export class LLMWorkspaceEditor implements IEditor {
                 });
             }
         });
+    }
+
+    // ✨ 新增：输入状态保存调度
+    private scheduleInputStateSave(): void {
+        if (this.sessionManager.isGenerating()) {
+            return;
+        }
+        
+        if (this.inputStateSaveTimer) {
+            clearTimeout(this.inputStateSaveTimer);
+        }
+        
+        this.inputStateSaveTimer = setTimeout(async () => {
+            if (!this.sessionManager.isGenerating()) {
+                await this.saveUIState();
+            }
+        }, this.INPUT_STATE_SAVE_DEBOUNCE);
     }
 
     // 2. 完善 loadSessionFromEngine 方法
@@ -301,15 +336,14 @@ export class LLMWorkspaceEditor implements IEditor {
                 this.collapseStatesCache = {};
             }
             
-            // ✨ 恢复 ChatInput 状态 (草稿和 Agent)
-            if (uiState?.input_state && this.chatInput) {
-                this.chatInput.setState(uiState.input_state);
-                console.log('[LLMWorkspaceEditor] Restored chat input state', uiState.input_state);
-            }
+            // ✨ 改进的输入状态恢复逻辑
+            this.restoreInputState(uiState?.input_state);
 
         } catch (e) {
             console.warn('[LLMWorkspaceEditor] Failed to restore UI state:', e);
             this.collapseStatesCache = {};
+            // 即使加载失败，也尝试应用外部状态
+            this.restoreInputState(undefined);
         }
 
         // 步骤 7：渲染历史消息
@@ -333,6 +367,30 @@ export class LLMWorkspaceEditor implements IEditor {
             `status: ${snapshot.status}, ` +
             `collapseStates: ${Object.keys(this.collapseStatesCache).length}`
         );
+    }
+
+    // ✨ 新增：统一的输入状态恢复方法
+    private restoreInputState(savedState?: ChatInputState): void {
+        if (!this.chatInput) return;
+
+        // 优先级：外部参数 > 已保存状态 > 默认值
+        if (this.options.initialInputState) {
+            // 外部指定的状态（如网页动态创建会话）
+            this.chatInput.setState({
+                text: this.options.initialInputState.text || '',
+                agentId: this.options.initialInputState.agentId || 'default'
+            });
+            console.log('[LLMWorkspaceEditor] Applied external initial input state');
+            
+        } else if (!this.options.isNewSession && savedState) {
+            // 恢复已保存的状态（非新会话）
+            this.chatInput.setState(savedState);
+            console.log('[LLMWorkspaceEditor] Restored saved chat input state', savedState);
+            
+        } else {
+            // 新会话或无保存状态，使用默认值
+            console.log('[LLMWorkspaceEditor] Using default input state');
+        }
     }
 
     /**
@@ -1429,10 +1487,20 @@ export class LLMWorkspaceEditor implements IEditor {
         if (this.uiStateSaveTimer) {
             clearTimeout(this.uiStateSaveTimer);
             this.uiStateSaveTimer = null;
-            // 确保最后一次保存
+        }
+        
+        // ✨ 新增：清理输入状态保存定时器
+        if (this.inputStateSaveTimer) {
+            clearTimeout(this.inputStateSaveTimer);
+            this.inputStateSaveTimer = null;
+        }
+        
+        // 确保最后一次保存（非流式模式下）
+        if (!this.sessionManager.isGenerating()) {
             await this.saveUIState();
         }
 
+        // Asset Manager 清理
         if (this.assetManagerUI) {
             this.assetManagerUI.close();
             this.assetManagerUI = null;

@@ -16,6 +16,20 @@ export { MCPSettingsEditor } from './editors/MCPSettingsEditor';
 /**
  * 创建 LLM 编辑器工厂
  * @param agentService 已初始化的 AgentService
+ * 
+ * @example 动态创建带初始状态的会话
+ * ```ts
+ * const factory = createLLMFactory(agentService);
+ * const editor = await factory(container, {
+ *     title: 'New Chat',
+ *     sessionEngine: engine,
+ *     // ✨ 支持外部指定初始输入状态
+ *     initialInputState: {
+ *         text: '请帮我分析这个问题...',
+ *         agentId: 'my-custom-agent'
+ *     }
+ * });
+ * ```
  */
 export const createLLMFactory = (
     agentService: VFSAgentService
@@ -32,10 +46,13 @@ export const createLLMFactory = (
             console.error('[LLMFactory] Critical: sessionEngine missing in options. Make sure MemoryManager is injecting it correctly.');
         }
 
+        let isNewSession = false;
+
         if (!effectiveNodeId && engine) {
             // 如果没有 nodeId，创建新文件
             const newNode = await engine.createFile(options.title || 'New Chat', null);
             effectiveNodeId = newNode.id;
+            isNewSession = true;  // ✨ 标记为新会话
             console.log(`[LLMFactory] New file created: ${effectiveNodeId}`);
         }
 
@@ -46,14 +63,14 @@ export const createLLMFactory = (
             ...llmOptions,
             agentService,
             nodeId: effectiveNodeId,
-            // 确保 engine 存在 (虽然 options 中已有，显式赋值更清晰)
-            sessionEngine: engine 
+            sessionEngine: engine,
+            isNewSession,  // ✨ 传递新会话标记
         };
 
         const editor = new LLMWorkspaceEditor(container, editorOptions);
         await editor.init(container, options.initialContent);
 
-        console.log(`[LLMFactory] Editor created successfully`);
+        console.log(`[LLMFactory] Editor created successfully, isNew: ${isNewSession}`);
         return editor;
     };
 };
