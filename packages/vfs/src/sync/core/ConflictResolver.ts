@@ -1,9 +1,11 @@
 // @file packages/vfs-sync/src/core/ConflictResolver.ts
 
-import { SyncConflict, SyncChange, SyncConfig, VectorClock } from '../types';
-import { VectorClockUtils } from '../utils/vectorClock';
+import { IPluginContext, VNodeData } from '../../core';
+import { SyncConflict, SyncChange, SyncConfig, VectorClock, ConflictType } from '../types';
+import { compareClock, ClockRelation } from '../utils/vectorClock';
 import { SYNC_TABLES } from '../constants';
-import { IPluginContext } from '../../core';
+
+export type ConflictDecision = 'apply' | 'skip' | 'conflict';
 
 export class ConflictResolver {
   constructor(
@@ -15,9 +17,9 @@ export class ConflictResolver {
    * 检测并处理冲突
    */
   async detectAndHandle(
-    localNode: any | null,
+    localNode: VNodeData | null,
     remoteChange: SyncChange
-  ): Promise<'apply' | 'skip' | 'conflict'> {
+  ): Promise<ConflictDecision> {
     if (!localNode) {
       // 本地不存在，直接应用
       return 'apply';
@@ -25,32 +27,89 @@ export class ConflictResolver {
 
     const localVector = (localNode.metadata?._sync_vc as VectorClock) || {};
     const remoteVector = remoteChange.vectorClock || {};
-    const relation = VectorClockUtils.compare(localVector, remoteVector);
+    const relation = compareClock(localVector, remoteVector);
 
+    return this.decideByRelation(relation, localNode, remoteChange);
+  }
+
+  /**
+   * 手动解决冲突
+   */
+  async resolve(
+    conflictId: string,
+    resolution: 'local' | 'remote' | 'merged',
+    mergedContent?: ArrayBuffer
+  ): Promise<void> {
+    const store = this.context.kernel.storage.getCollection<SyncConflict>(SYNC_TABLES.CONFLICTS);
+    const conflict = await store.get(conflictId);
+
+    if (!conflict) {
+      throw new Error(`Conflict not found: ${conflictId}`);
+    }
+
+    const tx = this.context.kernel.storage.beginTransaction(
+      ['vnodes', 'contents', SYNC_TABLES.CONFLICTS],
+      'readwrite'
+    );
+
+    try {
+      if (resolution === 'remote') {
+        await this.applyRemoteChange(conflict.remoteChange);
+      } else if (resolution === 'merged' && mergedContent) {
+        await this.context.kernel.write(conflict.nodeId, mergedContent);
+      }
+
+      // 更新冲突记录
+      conflict.resolved = true;
+      conflict.resolution = resolution;
+      await tx.getCollection<SyncConflict>(SYNC_TABLES.CONFLICTS).put(conflict);
+
+      await tx.commit();
+    } catch (e) {
+      await tx.abort();
+      throw e;
+    }
+  }
+
+  private decideByRelation(
+    relation: ClockRelation,
+    localNode: VNodeData,
+    remoteChange: SyncChange
+  ): ConflictDecision {
     switch (relation) {
       case 'ancestor':
-        // 本地更旧，应用远程
         return 'apply';
-      
+
       case 'descendant':
-        // 本地更新，跳过
-        return 'skip';
-      
       case 'equal':
-        // 相同版本，跳过
         return 'skip';
-      
+
       case 'concurrent':
-        // 并发修改，产生冲突
-        await this.createConflict(localNode, remoteChange);
+        this.createConflict(localNode, remoteChange);
         return this.autoResolve(localNode, remoteChange);
     }
   }
 
-  /**
-   * 创建冲突记录
-   */
-  private async createConflict(localNode: any, remoteChange: SyncChange): Promise<void> {
+  private autoResolve(localNode: VNodeData, remoteChange: SyncChange): ConflictDecision {
+    const strategy = this.config.strategy.conflictResolution;
+
+    switch (strategy) {
+      case 'server-wins':
+        return 'apply';
+
+      case 'client-wins':
+        return 'skip';
+
+      case 'newer-wins':
+        return remoteChange.timestamp > localNode.modifiedAt ? 'apply' : 'skip';
+
+      case 'manual':
+      default:
+        return 'skip';
+    }
+  }
+
+  private async createConflict(localNode: VNodeData, remoteChange: SyncChange): Promise<void> {
     const conflict: SyncConflict = {
       conflictId: `conflict_${Date.now()}_${Math.random().toString(36).slice(2)}`,
       nodeId: remoteChange.nodeId,
@@ -61,8 +120,8 @@ export class ConflictResolver {
         operation: 'update',
         timestamp: localNode.modifiedAt,
         path: localNode.path,
-        version: localNode.metadata?._sync_v || 0,
-        vectorClock: localNode.metadata?._sync_vc || {}
+        version: (localNode.metadata?._sync_v as number) || 0,
+        vectorClock: (localNode.metadata?._sync_vc as VectorClock) || {}
       },
       remoteChange,
       type: this.determineConflictType(remoteChange),
@@ -72,8 +131,7 @@ export class ConflictResolver {
 
     const store = this.context.kernel.storage.getCollection<SyncConflict>(SYNC_TABLES.CONFLICTS);
     await store.put(conflict);
-    
-    // 发送冲突事件
+
     this.context.events.emit({
       type: 'sync:conflict' as any,
       nodeId: remoteChange.nodeId,
@@ -83,31 +141,7 @@ export class ConflictResolver {
     });
   }
 
-  /**
-   * 自动解决冲突
-   */
-  private autoResolve(localNode: any, remoteChange: SyncChange): 'apply' | 'skip' {
-    switch (this.config.strategy.conflictResolution) {
-      case 'server-wins':
-        return 'apply';
-      
-      case 'client-wins':
-        return 'skip';
-      
-      case 'newer-wins':
-        return remoteChange.timestamp > localNode.modifiedAt ? 'apply' : 'skip';
-      
-      case 'manual':
-      default:
-        // 手动解决时，暂时跳过，等待用户决定
-        return 'skip';
-    }
-  }
-
-  /**
-   * 确定冲突类型
-   */
-  private determineConflictType(change: SyncChange): 'content' | 'delete' | 'move' | 'metadata' {
+  private determineConflictType(change: SyncChange): ConflictType {
     switch (change.operation) {
       case 'delete':
         return 'delete';
@@ -122,54 +156,7 @@ export class ConflictResolver {
     }
   }
 
-  /**
-   * 手动解决冲突
-   */
-  async resolve(
-    conflictId: string, 
-    resolution: 'local' | 'remote' | 'merged',
-    mergedContent?: ArrayBuffer
-  ): Promise<void> {
-    const store = this.context.kernel.storage.getCollection<SyncConflict>(SYNC_TABLES.CONFLICTS);
-    const conflict = await store.get(conflictId);
-    
-    if (!conflict) {
-      throw new Error(`Conflict not found: ${conflictId}`);
-    }
-
-    const tx = this.context.kernel.storage.beginTransaction(
-      ['vnodes', 'contents', SYNC_TABLES.CONFLICTS], 
-      'readwrite'
-    );
-
-    try {
-      if (resolution === 'remote') {
-        // 应用远程变更
-        await this.applyRemoteChange(conflict.remoteChange, tx);
-      } else if (resolution === 'merged' && mergedContent) {
-        // 应用合并后的内容
-        await this.context.kernel.write(conflict.nodeId, mergedContent);
-      }
-      // 'local' 不需要任何操作，保持现状
-
-      // 更新冲突记录
-      conflict.resolved = true;
-      conflict.resolution = resolution;
-      await tx.getCollection<SyncConflict>(SYNC_TABLES.CONFLICTS).put(conflict);
-
-      await tx.commit();
-    } catch (e) {
-      await tx.abort();
-      throw e;
-    }
-  }
-
-  /**
-   * 应用远程变更
-   */
-  private async applyRemoteChange(change: SyncChange, _tx: any): Promise<void> {
-    //const vnodes = tx.getCollection('vnodes');
-    
+  private async applyRemoteChange(change: SyncChange): Promise<void> {
     switch (change.operation) {
       case 'delete':
         await this.context.kernel.unlink(change.nodeId, true);

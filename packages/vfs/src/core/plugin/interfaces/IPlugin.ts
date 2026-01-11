@@ -1,6 +1,6 @@
 // @file vfs/core/plugin/interfaces/IPlugin.ts
 
-import { IPluginContext } from '../interfaces/IPluginContext';
+import { IPluginContext } from './IPluginContext';
 import { CollectionSchema } from '../../storage/interfaces/IStorageAdapter';
 
 export enum PluginType {
@@ -10,9 +10,14 @@ export enum PluginType {
   ADAPTER = 'adapter'
 }
 
-/**
- * 插件元数据
- */
+export enum PluginState {
+  REGISTERED = 'registered',
+  INSTALLED = 'installed',
+  ACTIVATED = 'activated',
+  DEACTIVATED = 'deactivated',
+  ERROR = 'error'
+}
+
 export interface PluginMetadata {
   /** 唯一标识 */
   id: string;
@@ -30,20 +35,6 @@ export interface PluginMetadata {
   author?: string;
 }
 
-/**
- * 插件状态
- */
-export enum PluginState {
-  REGISTERED = 'registered',
-  INSTALLED = 'installed',
-  ACTIVATED = 'activated',
-  DEACTIVATED = 'deactivated',
-  ERROR = 'error'
-}
-
-/**
- * 插件接口
- */
 export interface IPlugin {
   readonly metadata: PluginMetadata;
   readonly state: PluginState;

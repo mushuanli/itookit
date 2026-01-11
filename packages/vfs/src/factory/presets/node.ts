@@ -30,9 +30,7 @@ export interface NodePresetOptions {
  * 创建 Node.js 环境 VFS
  * 需要安装 @vfs/storage-sqlite 包
  */
-export async function createNodeVFS(
-  options: NodePresetOptions = {}
-): Promise<VFSInstance> {
+export async function createNodeVFS(options: NodePresetOptions = {}): Promise<VFSInstance> {
   const {
     dbPath = './vfs.db',
     sqliteDriver,
@@ -48,9 +46,7 @@ export async function createNodeVFS(
     const sqliteModule = await import('../../storage-sqlite');
     SQLiteStoragePlugin = sqliteModule.SQLiteStoragePlugin;
   } catch {
-    throw new Error(
-      'SQLite storage plugin not found. Please install @vfs/storage-sqlite'
-    );
+    throw new Error('SQLite storage plugin not found. Please install @vfs/storage-sqlite');
   }
 
   // 构建插件列表 - 明确声明类型为 IPlugin[]
@@ -60,17 +56,9 @@ export async function createNodeVFS(
     new ModulesPlugin()
   ];
 
-  if (enableTags) {
-    plugins.push(new TagsPlugin());
-  }
-
-  if (enableAssets) {
-    plugins.push(new AssetsPlugin());
-  }
-
-  if (extraPlugins.length > 0) {
-    plugins.push(...extraPlugins);
-  }
+  if (enableTags) plugins.push(new TagsPlugin());
+  if (enableAssets) plugins.push(new AssetsPlugin());
+  if (extraPlugins.length) plugins.push(...extraPlugins);
 
   const vfs = await createVFS({
     storage: {
@@ -92,9 +80,7 @@ export async function createNodeVFS(
 /**
  * 创建 Node.js 环境 VFS 并包装为高层 API
  */
-export async function createNodeVFSWithAPI(
-  options: NodePresetOptions = {}
-): Promise<VFS> {
+export async function createNodeVFSWithAPI(options: NodePresetOptions = {}): Promise<VFS> {
   const instance = await createNodeVFS(options);
   return new VFS(instance);
 }

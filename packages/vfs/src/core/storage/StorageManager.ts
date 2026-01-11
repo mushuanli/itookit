@@ -10,13 +10,32 @@ export type StorageAdapterFactory = (
   schemas: CollectionSchema[]
 ) => IStorageAdapter;
 
+// 核心 Schema 定义
+const CORE_SCHEMAS: CollectionSchema[] = [
+  {
+    name: 'vnodes',
+    keyPath: 'nodeId',
+    indexes: [
+      { name: 'path', keyPath: 'path', unique: true },
+      { name: 'parentId', keyPath: 'parentId' },
+      { name: 'type', keyPath: 'type' },
+      { name: 'name', keyPath: 'name' }
+    ]
+  },
+  {
+    name: 'contents',
+    keyPath: 'contentRef',
+    indexes: [{ name: 'nodeId', keyPath: 'nodeId' }]
+  }
+];
+
 /**
  * 存储管理器
  * 负责适配器注册和创建
  */
 export class StorageManager {
   private static factories = new Map<string, StorageAdapterFactory>();
-  private static defaultSchemas: CollectionSchema[] = [];
+  private static schemas: CollectionSchema[] = [...CORE_SCHEMAS];
 
   /**
    * 注册存储适配器工厂
@@ -45,13 +64,10 @@ export class StorageManager {
       throw new Error(`Unknown storage adapter type: ${type}`);
     }
     
-    // ✅ 合并所有 Schema
-    const schemas = [...this.defaultSchemas, ...extraSchemas];
+    const allSchemas = [...this.schemas, ...extraSchemas];
+    console.log(`[StorageManager] Creating ${type} adapter with ${allSchemas.length} schemas`);
     
-    console.log(`[StorageManager] Creating ${type} adapter with ${schemas.length} schemas:`, 
-      schemas.map(s => s.name).join(', '));
-    
-    return factory(config, schemas);
+    return factory(config, allSchemas);
   }
 
   /**
@@ -65,13 +81,11 @@ export class StorageManager {
    * 注册默认 Schema
    */
   static registerDefaultSchema(schema: CollectionSchema): void {
-    const existing = this.defaultSchemas.findIndex(s => s.name === schema.name);
-    if (existing >= 0) {
-      // 更新已存在的 Schema
-      this.defaultSchemas[existing] = schema;
+    const index = this.schemas.findIndex(s => s.name === schema.name);
+    if (index >= 0) {
+      this.schemas[index] = schema;
     } else {
-      this.defaultSchemas.push(schema);
-      console.log(`[StorageManager] Registered schema: ${schema.name}`);
+      this.schemas.push(schema);
     }
   }
 
@@ -79,33 +93,13 @@ export class StorageManager {
    * 获取默认 Schema
    */
   static getDefaultSchemas(): CollectionSchema[] {
-    return [...this.defaultSchemas];
+    return [...this.schemas];
   }
 
   /**
    * ✅ 新增：重置所有 Schema（用于测试）
    */
   static resetSchemas(): void {
-    this.defaultSchemas = [];
+    this.schemas = [...CORE_SCHEMAS];
   }
 }
-
-// 注册核心 Schema
-StorageManager.registerDefaultSchema({
-  name: 'vnodes',
-  keyPath: 'nodeId',
-  indexes: [
-    { name: 'path', keyPath: 'path', unique: true },
-    { name: 'parentId', keyPath: 'parentId' },
-    { name: 'type', keyPath: 'type' },
-    { name: 'name', keyPath: 'name' }
-  ]
-});
-
-StorageManager.registerDefaultSchema({
-  name: 'contents',
-  keyPath: 'contentRef',
-  indexes: [
-    { name: 'nodeId', keyPath: 'nodeId' }
-  ]
-});

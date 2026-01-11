@@ -59,7 +59,8 @@ export {
     isImageMimeType,
     blobToBase64,
     arrayBufferToBase64,
-    base64ToArrayBuffer
+    base64ToArrayBuffer,
+    calculateHash
 } from './utils/utils';
 export {MarkdownAnalyzer} from './utils/MarkdownAnalyzer';
 export {

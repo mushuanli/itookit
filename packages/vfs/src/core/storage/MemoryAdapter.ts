@@ -51,9 +51,8 @@ export class MemoryAdapter implements IStorageAdapter {
   }
 
   beginTransaction(stores: string[], mode: 'readonly' | 'readwrite'): ITransaction {
-    if (!this.connected) throw new Error('Not connected');
-
-    // 创建快照用于可能的回滚
+    this.ensureConnected();
+    
     const snapshot = new Map<string, Map<string, unknown>>();
     for (const name of stores) {
       const collection = this.collections.get(name);
@@ -72,8 +71,8 @@ export class MemoryAdapter implements IStorageAdapter {
   }
 
   getCollection<T>(name: string): ICollection<T> {
-    if (!this.connected) throw new Error('Not connected');
-
+    this.ensureConnected();
+    
     const schema = this.schemas.get(name);
     if (!schema) throw new Error(`Unknown collection: ${name}`);
 
@@ -83,24 +82,20 @@ export class MemoryAdapter implements IStorageAdapter {
       this.collections.set(name, collection);
     }
 
-    return new MemoryCollection<T>(
-      collection,
-      schema,
-      this.autoIncrementCounters
-    );
+    return new MemoryCollection<T>(collection, schema, this.autoIncrementCounters);
   }
 
   /**
    * 动态添加 Schema（用于插件扩展）
    */
   addSchema(schema: CollectionSchema): void {
-    if (!this.schemas.has(schema.name)) {
-      this.schemas.set(schema.name, schema);
-      if (this.connected) {
-        this.collections.set(schema.name, new Map());
-        if (schema.autoIncrement) {
-          this.autoIncrementCounters.set(schema.name, 0);
-        }
+    if (this.schemas.has(schema.name)) return;
+    
+    this.schemas.set(schema.name, schema);
+    if (this.connected) {
+      this.collections.set(schema.name, new Map());
+      if (schema.autoIncrement) {
+        this.autoIncrementCounters.set(schema.name, 0);
       }
     }
   }
@@ -123,25 +118,33 @@ export class MemoryAdapter implements IStorageAdapter {
     for (const [name, items] of Object.entries(data)) {
       const collection = this.collections.get(name);
       const schema = this.schemas.get(name);
-      if (collection && schema) {
-        for (const item of items) {
-          const key = this.extractKey(item, schema);
-          collection.set(key, item);
-        }
+      if (!collection || !schema) continue;
+      
+      for (const item of items) {
+        const key = extractKey(item, schema);
+        collection.set(key, item);
       }
     }
   }
 
-  private extractKey(value: unknown, schema: CollectionSchema): string {
-    const keyPath = schema.keyPath;
-    const record = value as Record<string, unknown>;
-
-    if (Array.isArray(keyPath)) {
-      return keyPath.map(k => record[k]).join('::');
-    }
-
-    return String(record[keyPath]);
+  private ensureConnected(): void {
+    if (!this.connected) throw new Error('Not connected');
   }
+}
+
+// 辅助函数
+function extractKey(value: unknown, schema: CollectionSchema): string {
+  const record = value as Record<string, unknown>;
+  const keyPath = schema.keyPath;
+  
+  if (Array.isArray(keyPath)) {
+    return keyPath.map(k => record[k]).join('::');
+  }
+  return String(record[keyPath]);
+}
+
+function keyToString(key: unknown): string {
+  return Array.isArray(key) ? key.join('::') : String(key);
 }
 
 /**
@@ -162,26 +165,18 @@ class MemoryTransaction implements ITransaction {
   getCollection<T>(name: string): ICollection<T> {
     const schema = this.schemas.get(name);
     if (!schema) throw new Error(`Unknown collection: ${name}`);
-
+    
     const collection = this.collections.get(name) ?? new Map();
-    return new MemoryCollection<T>(
-      collection,
-      schema,
-      this.autoIncrementCounters
-    );
+    return new MemoryCollection<T>(collection, schema, this.autoIncrementCounters);
   }
 
   async commit(): Promise<void> {
-    if (this.aborted) {
-      throw new Error('Transaction already aborted');
-    }
+    if (this.aborted) throw new Error('Transaction already aborted');
     this.committed = true;
   }
 
   async abort(): Promise<void> {
-    if (this.committed) {
-      throw new Error('Transaction already committed');
-    }
+    if (this.committed) throw new Error('Transaction already committed');
     
     if (!this.aborted && this.mode === 'readwrite') {
       // 回滚到快照
@@ -198,103 +193,17 @@ class MemoryTransaction implements ITransaction {
  */
 class MemoryCollection<T> implements ICollection<T> {
   constructor(
-    protected data: Map<string, unknown>,
-    protected schema: CollectionSchema,
-    protected autoIncrementCounters: Map<string, number>
+    private data: Map<string, unknown>,
+    private schema: CollectionSchema,
+    private autoIncrementCounters: Map<string, number>
   ) {}
 
   get name(): string {
     return this.schema.name;
   }
 
-  /**
-   * 从对象中提取主键
-   */
-  protected extractKey(value: T): string {
-    const keyPath = this.schema.keyPath;
-    const record = value as Record<string, unknown>;
-
-    if (Array.isArray(keyPath)) {
-      return keyPath.map(k => record[k]).join('::');
-    }
-
-    let keyValue = record[keyPath];
-
-    // 处理自增主键
-    if (keyValue === undefined && this.schema.autoIncrement) {
-      const counter = (this.autoIncrementCounters.get(this.schema.name) ?? 0) + 1;
-      this.autoIncrementCounters.set(this.schema.name, counter);
-      record[keyPath] = counter;
-      keyValue = counter;
-    }
-
-    return String(keyValue);
-  }
-
-  /**
-   * 获取对象字段值
-   */
-  protected getFieldValue(obj: unknown, path: string | string[]): unknown {
-    const record = obj as Record<string, unknown>;
-    
-    if (Array.isArray(path)) {
-      return path.map(p => record[p]);
-    }
-    return record[path];
-  }
-
-  /**
-   * 比较两个值
-   */
-  protected compare(a: unknown, b: unknown): number {
-    if (a === b) return 0;
-    if (a === undefined) return -1;
-    if (b === undefined) return 1;
-    if (a === null) return -1;
-    if (b === null) return 1;
-
-    if (typeof a === 'number' && typeof b === 'number') {
-      return a - b;
-    }
-    if (typeof a === 'string' && typeof b === 'string') {
-      return a.localeCompare(b);
-    }
-    if (a instanceof Date && b instanceof Date) {
-      return a.getTime() - b.getTime();
-    }
-
-    return String(a).localeCompare(String(b));
-  }
-
-  /**
-   * 检查值是否匹配索引
-   */
-  protected matchesIndex(
-    item: unknown, 
-    index: IndexSchema, 
-    value: unknown
-  ): boolean {
-    const fieldValue = this.getFieldValue(item, index.keyPath);
-
-    // 多值索引（数组字段）
-    if (index.multiEntry && Array.isArray(fieldValue)) {
-      return fieldValue.includes(value);
-    }
-
-    // 复合索引
-    if (Array.isArray(index.keyPath) && Array.isArray(value)) {
-      return JSON.stringify(fieldValue) === JSON.stringify(value);
-    }
-
-    // 普通索引
-    return fieldValue === value;
-  }
-
-  // ==================== ICollection 接口实现 ====================
-
   async get(key: unknown): Promise<T | undefined> {
-    const keyStr = Array.isArray(key) ? key.join('::') : String(key);
-    return this.data.get(keyStr) as T | undefined;
+    return this.data.get(keyToString(key)) as T | undefined;
   }
 
   async getAll(): Promise<T[]> {
@@ -307,8 +216,7 @@ class MemoryCollection<T> implements ICollection<T> {
   }
 
   async delete(key: unknown): Promise<void> {
-    const keyStr = Array.isArray(key) ? key.join('::') : String(key);
-    this.data.delete(keyStr);
+    this.data.delete(keyToString(key));
   }
 
   async clear(): Promise<void> {
@@ -320,9 +228,7 @@ class MemoryCollection<T> implements ICollection<T> {
   }
 
   async getByIndex(indexName: string, value: unknown): Promise<T | undefined> {
-    const index = this.schema.indexes.find(i => i.name === indexName);
-    if (!index) throw new Error(`Unknown index: ${indexName}`);
-
+    const index = this.findIndex(indexName);
     for (const item of this.data.values()) {
       if (this.matchesIndex(item, index, value)) {
         return item as T;
@@ -332,9 +238,7 @@ class MemoryCollection<T> implements ICollection<T> {
   }
 
   async getAllByIndex(indexName: string, value: unknown): Promise<T[]> {
-    const index = this.schema.indexes.find(i => i.name === indexName);
-    if (!index) throw new Error(`Unknown index: ${indexName}`);
-
+    const index = this.findIndex(indexName);
     const results: T[] = [];
     for (const item of this.data.values()) {
       if (this.matchesIndex(item, index, value)) {
@@ -347,31 +251,10 @@ class MemoryCollection<T> implements ICollection<T> {
   async query(options: QueryOptions): Promise<T[]> {
     let items = Array.from(this.data.values()) as T[];
 
-    // 索引范围过滤
     if (options.index && options.range) {
       const index = this.schema.indexes.find(i => i.name === options.index);
       if (index) {
-        items = items.filter(item => {
-          const val = this.getFieldValue(item, index.keyPath);
-
-          // 下界检查
-          if (options.range!.lower !== undefined) {
-            const cmp = this.compare(val, options.range!.lower);
-            if (options.range!.lowerOpen ? cmp <= 0 : cmp < 0) {
-              return false;
-            }
-          }
-
-          // 上界检查
-          if (options.range!.upper !== undefined) {
-            const cmp = this.compare(val, options.range!.upper);
-            if (options.range!.upperOpen ? cmp >= 0 : cmp > 0) {
-              return false;
-            }
-          }
-
-          return true;
-        });
+        items = items.filter(item => this.inRange(item, index, options.range!));
       }
     }
 
@@ -398,99 +281,76 @@ class MemoryCollection<T> implements ICollection<T> {
     return items;
   }
 
-  // ==================== 扩展方法 ====================
+  private extractKey(value: T): string {
+    const record = value as Record<string, unknown>;
+    const keyPath = this.schema.keyPath;
 
-  /**
-   * 批量插入
-   */
-  async bulkPut(values: T[]): Promise<void> {
-    for (const value of values) {
-      await this.put(value);
-    }
-  }
-
-  /**
-   * 批量删除
-   */
-  async bulkDelete(keys: unknown[]): Promise<void> {
-    for (const key of keys) {
-      await this.delete(key);
-    }
-  }
-
-  /**
-   * 条件更新
-   */
-  async updateWhere(
-    predicate: (item: T) => boolean,
-    updater: (item: T) => T
-  ): Promise<number> {
-    let count = 0;
-    const entries = Array.from(this.data.entries());
-
-    for (const [key, item] of entries) {
-      if (predicate(item as T)) {
-        const updated = updater(item as T);
-        this.data.set(key, updated);
-        count++;
-      }
+    if (Array.isArray(keyPath)) {
+      return keyPath.map(k => record[k]).join('::');
     }
 
-    return count;
-  }
-
-  /**
-   * 条件删除
-   */
-  async deleteWhere(predicate: (item: T) => boolean): Promise<number> {
-    let count = 0;
-    const entries = Array.from(this.data.entries());
-
-    for (const [key, item] of entries) {
-      if (predicate(item as T)) {
-        this.data.delete(key);
-        count++;
-      }
+    let keyValue = record[keyPath];
+    if (keyValue === undefined && this.schema.autoIncrement) {
+      const counter = (this.autoIncrementCounters.get(this.schema.name) ?? 0) + 1;
+      this.autoIncrementCounters.set(this.schema.name, counter);
+      record[keyPath] = counter;
+      keyValue = counter;
     }
 
-    return count;
+    return String(keyValue);
   }
 
-  /**
-   * 聚合查询：计数
-   */
-  async countWhere(predicate: (item: T) => boolean): Promise<number> {
-    let count = 0;
-    for (const item of this.data.values()) {
-      if (predicate(item as T)) {
-        count++;
-      }
+  private findIndex(indexName: string): IndexSchema {
+    const index = this.schema.indexes.find(i => i.name === indexName);
+    if (!index) throw new Error(`Unknown index: ${indexName}`);
+    return index;
+  }
+
+  private getFieldValue(obj: unknown, path: string | string[]): unknown {
+    const record = obj as Record<string, unknown>;
+    return Array.isArray(path) ? path.map(p => record[p]) : record[path];
+  }
+
+  private matchesIndex(item: unknown, index: IndexSchema, value: unknown): boolean {
+    const fieldValue = this.getFieldValue(item, index.keyPath);
+
+    if (index.multiEntry && Array.isArray(fieldValue)) {
+      return fieldValue.includes(value);
     }
-    return count;
-  }
 
-  /**
-   * 检查是否存在
-   */
-  async exists(key: unknown): Promise<boolean> {
-    const keyStr = Array.isArray(key) ? key.join('::') : String(key);
-    return this.data.has(keyStr);
-  }
-
-  /**
-   * 获取所有键
-   */
-  async keys(): Promise<string[]> {
-    return Array.from(this.data.keys());
-  }
-
-  /**
-   * 遍历所有项
-   */
-  async forEach(callback: (item: T, key: string) => void): Promise<void> {
-    for (const [key, item] of this.data.entries()) {
-      callback(item as T, key);
+    if (Array.isArray(index.keyPath) && Array.isArray(value)) {
+      return JSON.stringify(fieldValue) === JSON.stringify(value);
     }
+
+    return fieldValue === value;
+  }
+
+  private inRange(item: unknown, index: IndexSchema, range: NonNullable<QueryOptions['range']>): boolean {
+    const val = this.getFieldValue(item, index.keyPath);
+
+    if (range.lower !== undefined) {
+      const cmp = this.compare(val, range.lower);
+      if (range.lowerOpen ? cmp <= 0 : cmp < 0) return false;
+    }
+
+    if (range.upper !== undefined) {
+      const cmp = this.compare(val, range.upper);
+      if (range.upperOpen ? cmp >= 0 : cmp > 0) return false;
+    }
+
+    return true;
+  }
+
+  private compare(a: unknown, b: unknown): number {
+    if (a === b) return 0;
+    if (a == null) return -1;
+    if (b == null) return 1;
+
+    if (typeof a === 'number' && typeof b === 'number') return a - b;
+    if (typeof a === 'string' && typeof b === 'string') return a.localeCompare(b);
+    if (a instanceof Date && b instanceof Date) return a.getTime() - b.getTime();
+
+    return String(a).localeCompare(String(b));
   }
 }
 
