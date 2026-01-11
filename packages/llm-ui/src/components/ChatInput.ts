@@ -4,6 +4,7 @@ export interface ChatInputOptions {
     onSend: (text: string, files: File[], executorId: string) => Promise<void>;
     onStop: () => void;
     onExecutorChange?: (executorId: string) => void;
+    onInputChange?: () => void;  // ✨ 新增：输入内容变化回调
     initialAgents?: ExecutorOption[]; 
 }
 
@@ -29,7 +30,7 @@ export class ChatInput {
     private executorSelect!: HTMLSelectElement;
     private fileInput!: HTMLInputElement;
     private attachmentContainer!: HTMLElement;
-    private inputWrapper!: HTMLElement; // 新增：用于拖拽高亮
+    private inputWrapper!: HTMLElement;
     
     private loading = false;
     private files: File[] = [];
@@ -108,8 +109,13 @@ export class ChatInput {
             const newHeight = Math.min(this.textarea.scrollHeight, 200); // Max height 200px
             this.textarea.style.height = `${newHeight}px`;
         };
-        this.textarea.addEventListener('input', adjustHeight);
-        // ✨ 新增：手动触发 input 事件以调整高度（用于 setState）
+
+        // ✨ 修改：input 事件同时触发高度调整和变化通知
+        this.textarea.addEventListener('input', () => {
+            adjustHeight();
+            this.options.onInputChange?.();  // ✨ 通知外部
+        });
+        
         this.textarea.addEventListener('change', adjustHeight);
 
         // 2. 键盘事件
@@ -139,9 +145,11 @@ export class ChatInput {
             }
         });
 
-        // 5. Executor 选择变化
+        // ✨ 修改：Executor 选择变化时同时通知
         this.executorSelect.addEventListener('change', () => {
             this.options.onExecutorChange?.(this.executorSelect.value);
+            // 注意：onExecutorChange 回调中已经调用了 scheduleInputStateSave
+            // 如果需要单独处理，也可以在这里调用 onInputChange
         });
     }
 
@@ -361,7 +369,7 @@ export class ChatInput {
     }
 
     // ✨ [新增] 获取当前选中的执行器
-    getSelectedExecutor(): string {
+    public getSelectedExecutor(): string {
         return this.executorSelect?.value || 'default';
     }
 
@@ -375,7 +383,7 @@ export class ChatInput {
     }
 
     // ✨ 新增：尝试设置选中的执行器，如果不存在则回退到 default
-    public setExecutor(id: string) {
+    public setExecutor(id: string): void {
         if (!this.executorSelect) return;
         
         const option = this.executorSelect.querySelector(`option[value="${id}"]`);
@@ -391,15 +399,17 @@ export class ChatInput {
     // 注意：暂不持久化未上传的文件，因为 File 对象无法简单序列化到 JSON
     public getState(): ChatInputState {
         return {
-            text: this.textarea.value,
+            text: this.textarea?.value || '',
             agentId: this.getSelectedExecutor()
         };
     }
 
-    // ✨ 新增：恢复状态
-    public setState(state: Partial<ChatInputState>) {
-        if (state.text !== undefined) {
-            this.setInput(state.text);
+    public setState(state: Partial<ChatInputState>): void {
+        if (state.text !== undefined && this.textarea) {
+            this.textarea.value = state.text;
+            // 触发高度调整
+            this.textarea.dispatchEvent(new Event('input', { bubbles: false }));
+            // 注意：这里不触发 onInputChange，避免循环保存
         }
         if (state.agentId) {
             this.setExecutor(state.agentId);
