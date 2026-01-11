@@ -85,6 +85,21 @@ export interface MemoryManagerConfig {
     };
 
     /**
+     * [新增] 创建资源时的初始状态
+     * 用于支持从外部传入预设值
+     */
+    createConfig?: {
+        /** 
+         * 创建 Chat 会话时的初始输入状态
+         * 仅对 Chat 类型工作区有效
+         */
+        initialInputState?: {
+            text?: string;
+            agentId?: string;
+        };
+    };
+
+    /**
      * 后台 AI 处理器配置
      */
     aiConfig?: {
