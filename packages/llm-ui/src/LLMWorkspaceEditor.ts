@@ -2,12 +2,12 @@
 
 import { 
     IEditor, EditorOptions,EditorHostContext, EditorEvent, EditorEventCallback, 
-    escapeHTML,Toast
+    escapeHTML,Toast,showConfirmDialog
 } from '@itookit/common';
 import { LLMPrintService, type PrintService,AssetManagerUI } from '@itookit/mdxeditor';
 import { FloatingNavPanel } from './components/FloatingNavPanel';
 import { HistoryView,CollapseStateMap } from './components/HistoryView';
-import { ChatInput, ExecutorOption } from './components/ChatInput';
+import { ChatInput, ExecutorOption,ChatInputState } from './components/ChatInput';
 import { 
     ILLMSessionEngine, 
     IAgentService,
@@ -25,6 +25,12 @@ import { NodeAction } from './core/types';
 export interface LLMEditorOptions extends EditorOptions {
     sessionEngine: ILLMSessionEngine;
     agentService: IAgentService;
+}
+
+// ✨ 扩充 CollapseStateMap 接口或者直接使用 any
+type UIStatePayload = {
+    collapse_states: CollapseStateMap;
+    input_state?: ChatInputState; // ✨ 新增：输入框状态
 }
 
 /**
@@ -285,7 +291,7 @@ export class LLMWorkspaceEditor implements IEditor {
 
         // 步骤 6：恢复 UI 状态（折叠状态等）
         try {
-            const uiState = await this.engine.getUIState(this.options.nodeId);
+            const uiState = await this.engine.getUIState(this.options.nodeId) as UIStatePayload;
             
             if (uiState?.collapse_states) {
                 this.collapseStatesCache = uiState.collapse_states;
@@ -294,6 +300,13 @@ export class LLMWorkspaceEditor implements IEditor {
             } else {
                 this.collapseStatesCache = {};
             }
+            
+            // ✨ 恢复 ChatInput 状态 (草稿和 Agent)
+            if (uiState?.input_state && this.chatInput) {
+                this.chatInput.setState(uiState.input_state);
+                console.log('[LLMWorkspaceEditor] Restored chat input state', uiState.input_state);
+            }
+
         } catch (e) {
             console.warn('[LLMWorkspaceEditor] Failed to restore UI state:', e);
             this.collapseStatesCache = {};
@@ -406,10 +419,16 @@ export class LLMWorkspaceEditor implements IEditor {
     private async saveUIState(): Promise<void> {
         if (!this.options.nodeId) return;
         
+        // ✨ 获取当前输入框状态
+        const inputState = this.chatInput ? this.chatInput.getState() : undefined;
+
         try {
-            await this.engine.updateUIState(this.options.nodeId, {
-                collapse_states: this.collapseStatesCache
-            });
+            const payload: UIStatePayload = {
+                collapse_states: this.collapseStatesCache,
+                input_state: inputState
+            };
+
+            await this.engine.updateUIState(this.options.nodeId, payload);
         } catch (e) {
             console.warn('[LLMWorkspaceEditor] Failed to save UI state:', e);
         }
@@ -692,6 +711,9 @@ export class LLMWorkspaceEditor implements IEditor {
                 onCopy: (sessionId) => this.copySessionContent(sessionId),
                 onFoldAll: () => this.foldAllSessions(),
                 onUnfoldAll: () => this.unfoldAllSessions(),
+                // ✨ 新增：批量操作
+                onBatchDelete: (ids) => this.handleBatchDelete(ids),
+                onBatchCopy: (ids) => this.handleBatchCopy(ids),
             });
         }
         
@@ -1063,6 +1085,77 @@ export class LLMWorkspaceEditor implements IEditor {
             for (const child of node.children) {
                 this.collectNodeIds(child, ids);
             }
+        }
+    }
+
+    // ✨ 新增：处理批量删除
+    private async handleBatchDelete(ids: string[]): Promise<void> {
+        if (ids.length === 0) return;
+
+        const confirmed = await showConfirmDialog(`Are you sure you want to delete ${ids.length} messages?`);
+        if (!confirmed) return;
+
+        try {
+            // 乐观 UI 更新
+            this.historyView.removeMessages(ids, true);
+            
+            // 后端删除 (假设 deleteMessage 支持单个，循环调用，或 Engine 增加 batchDelete 接口)
+            // 这里为了安全，循环调用 deleteMessage
+            for (const id of ids) {
+                 await this.sessionManager.deleteMessage(id, {
+                    mode: 'soft',
+                    cascade: false,
+                    deleteAssociatedResponses: true
+                });
+            }
+            
+            this.emit('change');
+            Toast.success(`Deleted ${ids.length} messages`);
+            
+            // 刷新 Nav 面板
+            if (this.floatingNav) {
+                const sessions = this.sessionManager.getSessions();
+                this.floatingNav.updateItems(sessions, this.historyView.getCollapseStates());
+            }
+
+        } catch (e) {
+            console.error('Batch delete failed', e);
+            Toast.error('Failed to delete messages');
+            // Reload to restore state
+            const sessions = this.sessionManager.getSessions();
+            this.historyView.renderFull(sessions);
+        }
+    }
+
+    // ✨ 新增：处理批量复制
+    private async handleBatchCopy(ids: string[]): Promise<void> {
+        const sessions = this.sessionManager.getSessions();
+        const contentArr: string[] = [];
+
+        // 按时间顺序排序 IDs
+        const sortedIds = ids.sort((a, b) => {
+            const sA = sessions.find(s => s.id === a);
+            const sB = sessions.find(s => s.id === b);
+            return (sA?.timestamp || 0) - (sB?.timestamp || 0);
+        });
+
+        for (const id of sortedIds) {
+            const session = sessions.find(s => s.id === id);
+            if (session) {
+                let text = session.content || '';
+                if (session.role === 'assistant' && session.executionRoot) {
+                    text = this.extractExecutionOutput(session.executionRoot);
+                }
+                const roleName = session.role === 'user' ? 'User' : 'Assistant';
+                contentArr.push(`### ${roleName}:\n${text}`);
+            }
+        }
+
+        try {
+            await navigator.clipboard.writeText(contentArr.join('\n\n---\n\n'));
+            Toast.success(`Copied ${ids.length} messages`);
+        } catch (e) {
+            Toast.error('Copy failed');
         }
     }
 
