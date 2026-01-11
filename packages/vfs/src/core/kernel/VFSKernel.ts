@@ -405,6 +405,61 @@ export class VFSKernel {
   }
 
   // ==================== 私有辅助方法 ====================
+  /**
+   * 检查路径是否存在（不抛出异常）
+   */
+  async exists(path: string): Promise<boolean> {
+    this.ensureInitialized();
+    const node = await this.getNodeByPath(path);
+    return node !== null;
+  }
+
+  /**
+   * 创建节点（如果不存在）
+   * 返回 { node, created } 指示是否新建
+   */
+  async createNodeIfNotExists(options: CreateNodeOptions): Promise<{ node: VNodeData; created: boolean }> {
+    this.ensureInitialized();
+    
+    const normalizedPath = this.pathResolver.normalize(options.path);
+    const existing = await this.getNodeByPath(normalizedPath);
+    
+    if (existing) {
+      return { node: existing, created: false };
+    }
+
+    const node = await this.createNode(options);
+    return { node, created: true };
+  }
+
+  /**
+   * 确保目录存在（递归创建）
+   */
+  async ensureDirectory(path: string): Promise<VNodeData> {
+    this.ensureInitialized();
+    
+    const normalizedPath = this.pathResolver.normalize(path);
+    const existing = await this.getNodeByPath(normalizedPath);
+    
+    if (existing) {
+      if (existing.type !== VNodeType.DIRECTORY) {
+        throw new VFSError(ErrorCode.INVALID_OPERATION, `Not a directory: ${path}`);
+      }
+      return existing;
+    }
+    
+    // 递归确保父目录存在
+    const parentPath = this.pathResolver.dirname(normalizedPath);
+    if (parentPath !== '/' && parentPath !== normalizedPath) {
+      await this.ensureDirectory(parentPath);
+    }
+    
+    // 创建当前目录
+    return this.createNode({
+      path: normalizedPath,
+      type: VNodeType.DIRECTORY
+    });
+  }
 
   private ensureInitialized(): void {
     if (!this.initialized) {
@@ -561,4 +616,5 @@ export class VFSKernel {
     if (error instanceof VFSError) return error;
     return new VFSError(ErrorCode.INTERNAL_ERROR, message, error);
   }
+
 }
