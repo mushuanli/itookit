@@ -15,6 +15,12 @@ export interface ExecutorOption {
     description?: string;
 }
 
+// ✨ 新增：状态接口
+export interface ChatInputState {
+    text: string;
+    agentId: string;
+}
+
 export class ChatInput {
     private textarea!: HTMLTextAreaElement;
     private sendBtn!: HTMLButtonElement;
@@ -103,6 +109,8 @@ export class ChatInput {
             this.textarea.style.height = `${newHeight}px`;
         };
         this.textarea.addEventListener('input', adjustHeight);
+        // ✨ 新增：手动触发 input 事件以调整高度（用于 setState）
+        this.textarea.addEventListener('change', adjustHeight);
 
         // 2. 键盘事件
         this.textarea.addEventListener('keydown', (e) => {
@@ -256,7 +264,7 @@ export class ChatInput {
         this.executorSelect.innerHTML = html;
         
         if (activeId) {
-            this.executorSelect.value = activeId;
+            this.setExecutor(activeId);
         }
     }
 
@@ -363,6 +371,38 @@ export class ChatInput {
             this.textarea.value = text;
             // 触发高度调整
             this.textarea.dispatchEvent(new Event('input'));
+        }
+    }
+
+    // ✨ 新增：尝试设置选中的执行器，如果不存在则回退到 default
+    public setExecutor(id: string) {
+        if (!this.executorSelect) return;
+        
+        const option = this.executorSelect.querySelector(`option[value="${id}"]`);
+        if (option) {
+            this.executorSelect.value = id;
+        } else {
+            console.warn(`[ChatInput] Agent ${id} not found, falling back to default.`);
+            this.executorSelect.value = 'default';
+        }
+    }
+
+    // ✨ 新增：获取当前状态（文本和 Agent ID）
+    // 注意：暂不持久化未上传的文件，因为 File 对象无法简单序列化到 JSON
+    public getState(): ChatInputState {
+        return {
+            text: this.textarea.value,
+            agentId: this.getSelectedExecutor()
+        };
+    }
+
+    // ✨ 新增：恢复状态
+    public setState(state: Partial<ChatInputState>) {
+        if (state.text !== undefined) {
+            this.setInput(state.text);
+        }
+        if (state.agentId) {
+            this.setExecutor(state.agentId);
         }
     }
 }

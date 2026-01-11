@@ -6,36 +6,7 @@ import { NodeRenderer } from './NodeRenderer';
 import { MDxController } from './mdx/MDxController';
 import { NodeTemplates } from './templates/NodeTemplates';
 import { LayoutTemplates } from './templates/LayoutTemplates';
-import { escapeHTML, Modal, ISessionEngine } from '@itookit/common';
-
-/**
- * 包装 common Modal 为 Promise 形式
- */
-async function showConfirmDialog(message: string): Promise<boolean> {
-    return new Promise((resolve) => {
-        let resolved = false;
-        
-        new Modal('Confirmation', `<p>${escapeHTML(message)}</p>`, {
-            type: 'danger',
-            confirmText: 'Delete',
-            cancelText: 'Cancel',
-            onConfirm: () => {
-                if (!resolved) {
-                    resolved = true;
-                    resolve(true);
-                }
-                return true;
-            },
-            onCancel: () => {
-                if (!resolved) {
-                    resolved = true;
-                    resolve(false);
-                }
-                return true;
-            }
-        }).show();
-    });
-}
+import { escapeHTML, showConfirmDialog, ISessionEngine } from '@itookit/common';
 
 // ✅ 新增：折叠状态类型
 export type CollapseStateMap = Record<string, boolean>;

@@ -1,7 +1,7 @@
 // @file common/components/UIComponents.ts
 
 //import '../styles.css'; // 假设样式文件位置
-
+import {escapeHTML} from '../utils/utils';
 export interface ModalOptions {
     confirmText?: string;
     cancelText?: string;
@@ -120,4 +120,34 @@ export class Toast {
     static error(msg: string) { this.show(msg, 'error'); }
     static warning(msg: string) { this.show(msg, 'warning'); }
     static info(msg: string) { this.show(msg, 'info'); }
+}
+
+
+/**
+ * 包装 common Modal 为 Promise 形式
+ */
+export async function showConfirmDialog(message: string): Promise<boolean> {
+    return new Promise((resolve) => {
+        let resolved = false;
+        
+        new Modal('Confirmation', `<p>${escapeHTML(message)}</p>`, {
+            type: 'danger',
+            confirmText: 'Delete',
+            cancelText: 'Cancel',
+            onConfirm: () => {
+                if (!resolved) {
+                    resolved = true;
+                    resolve(true);
+                }
+                return true;
+            },
+            onCancel: () => {
+                if (!resolved) {
+                    resolved = true;
+                    resolve(false);
+                }
+                return true;
+            }
+        }).show();
+    });
 }

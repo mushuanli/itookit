@@ -9,6 +9,9 @@ export interface FloatingNavPanelOptions {
     onCopy: (sessionId: string) => void;
     onFoldAll: () => void;
     onUnfoldAll: () => void;
+    // ✨ 新增：批量操作回调
+    onBatchDelete?: (sessionIds: string[]) => void;
+    onBatchCopy?: (sessionIds: string[]) => void;
 }
 
 export interface ChatNavItem {
@@ -30,7 +33,10 @@ export class FloatingNavPanel {
     private currentIndex: number = -1;
     private options: FloatingNavPanelOptions;
     
-    // 键盘快捷键绑定
+    // ✨ 新增：多选状态
+    private isSelectionMode: boolean = false;
+    private selectedIds: Set<string> = new Set();
+    
     private keydownHandler: ((e: KeyboardEvent) => void) | null = null;
 
     constructor(container: HTMLElement, options: FloatingNavPanelOptions) {
@@ -53,6 +59,10 @@ export class FloatingNavPanel {
             agentName: session.executionRoot?.name
         }));
         
+        // 清理不再存在的选中 ID
+        const currentIds = new Set(this.items.map(i => i.id));
+        this.selectedIds = new Set([...this.selectedIds].filter(id => currentIds.has(id)));
+
         if (this.isVisible) {
             this.render();
         }
@@ -92,6 +102,8 @@ export class FloatingNavPanel {
     public hide(): void {
         if (!this.isVisible) return;
         this.isVisible = false;
+        this.isSelectionMode = false; // 重置选择模式
+        this.selectedIds.clear();
         this.unbindKeyboard();
         
         if (this.panel) {
@@ -109,6 +121,7 @@ export class FloatingNavPanel {
         
         this.panel = document.createElement('div');
         this.panel.className = 'llm-nav-panel';
+        if (this.isSelectionMode) this.panel.classList.add('llm-nav-panel--selection-mode');
         
         const userItems = this.items.filter(i => i.role === 'user');
         const totalUsers = userItems.length;
@@ -116,9 +129,38 @@ export class FloatingNavPanel {
             ? userItems.findIndex(u => u.index <= this.currentIndex) 
             : -1;
 
+        // ✨ 动态底部工具栏
+        const actionButtons = this.isSelectionMode 
+            ? `
+        <button class="llm-nav-panel__action-btn" data-action="batch-toggle" ${this.selectedIds.size === 0 ? 'disabled' : ''}>
+            📂 Toggle (${this.selectedIds.size})
+        </button>
+        <div style="flex:1"></div> <!-- Spacer -->
+        <button class="llm-nav-panel__action-btn llm-nav-panel__action-btn--danger" data-action="batch-delete" ${this.selectedIds.size === 0 ? 'disabled' : ''}>
+            🗑️ Delete
+        </button>
+        <button class="llm-nav-panel__action-btn" data-action="batch-copy" ${this.selectedIds.size === 0 ? 'disabled' : ''}>
+            📋 Copy
+        </button>
+        <button class="llm-nav-panel__action-btn" data-action="cancel-selection">
+            Done
+        </button>
+            `
+            : `
+                <button class="llm-nav-panel__action-btn" data-action="toggle-current" title="Toggle Current Fold">
+                    📂 Toggle Fold
+                </button>
+                <button class="llm-nav-panel__action-btn" data-action="copy-current" title="Copy Current">
+                    📋 Copy
+                </button>
+                <button class="llm-nav-panel__action-btn" data-action="enter-selection" title="Manage Messages">
+                    ☑️ Select
+                </button>
+            `;
+
         this.panel.innerHTML = `
             <div class="llm-nav-panel__header">
-                <span class="llm-nav-panel__title">Chat Navigator</span>
+                <span class="llm-nav-panel__title">${this.isSelectionMode ? 'Select Messages' : 'Chat Navigator'}</span>
                 <span class="llm-nav-panel__counter">${currentUserIdx + 1} / ${totalUsers}</span>
                 <button class="llm-nav-panel__close" title="Close (Esc)">×</button>
             </div>
@@ -137,16 +179,12 @@ export class FloatingNavPanel {
                     </svg>
                 </button>
                 <div class="llm-nav-panel__sep"></div>
-                <button class="llm-nav-panel__btn" data-action="prev" title="Previous User Chat (↑)">
-                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-                        <polyline points="18 15 12 9 6 15"></polyline>
-                    </svg>
-                </button>
-                <button class="llm-nav-panel__btn" data-action="next" title="Next User Chat (↓)">
-                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-                        <polyline points="6 9 12 15 18 9"></polyline>
-                    </svg>
-                </button>
+                ${this.isSelectionMode ? `
+                    <button class="llm-nav-panel__btn" data-action="select-all" title="Select All">All</button>
+                ` : `
+                    <button class="llm-nav-panel__btn" data-action="prev" title="Previous User Chat (↑)">↑</button>
+                    <button class="llm-nav-panel__btn" data-action="next" title="Next User Chat (↓)">↓</button>
+                `}
             </div>
             
             <div class="llm-nav-panel__list">
@@ -154,19 +192,7 @@ export class FloatingNavPanel {
             </div>
             
             <div class="llm-nav-panel__actions">
-                <button class="llm-nav-panel__action-btn" data-action="toggle-current" title="Toggle Current Fold">
-                    📂 Toggle Fold
-                </button>
-                <button class="llm-nav-panel__action-btn" data-action="copy-current" title="Copy Current">
-                    📋 Copy
-                </button>
-            </div>
-            
-            <div class="llm-nav-panel__hint">
-                <kbd>↑</kbd><kbd>↓</kbd> Navigate &nbsp;
-                <kbd>Enter</kbd> Go to &nbsp;
-                <kbd>Space</kbd> Toggle &nbsp;
-                <kbd>Esc</kbd> Close
+                ${actionButtons}
             </div>
         `;
 
@@ -190,19 +216,20 @@ export class FloatingNavPanel {
             const foldIcon = item.isCollapsed ? '▶' : '▼';
             const activeClass = idx === this.currentIndex ? 'llm-nav-item--active' : '';
             const collapsedClass = item.isCollapsed ? 'llm-nav-item--collapsed' : '';
-            
-            // ✅ 新增：格式化时间
+            const isSelected = this.selectedIds.has(item.id);
             const timeStr = this.formatTime(item.timestamp);
+            const title = item.role === 'user' ? 'You' : (item.agentName || 'Assistant');
             
-            // ✅ 新增：标题（对于 assistant 显示 agent 名称）
-            const title = item.role === 'user' 
-                ? 'You' 
-                : (item.agentName || 'Assistant');
-            
+            // ✨ 复选框 UI
+            const checkboxHtml = this.isSelectionMode 
+                ? `<div class="llm-nav-item__checkbox ${isSelected ? 'checked' : ''}"></div>` 
+                : '';
+
             return `
-                <div class="llm-nav-item ${activeClass} ${collapsedClass}" 
+                <div class="llm-nav-item ${activeClass} ${collapsedClass} ${isSelected ? 'selected' : ''}" 
                      data-id="${item.id}" 
                      data-index="${idx}">
+                    ${checkboxHtml}
                     <span class="llm-nav-item__fold">${foldIcon}</span>
                     <span class="llm-nav-item__icon">${icon}</span>
                     <div class="llm-nav-item__content">
@@ -243,24 +270,12 @@ export class FloatingNavPanel {
     private bindEvents(): void {
         if (!this.panel) return;
 
-        // 关闭按钮
-        this.panel.querySelector('.llm-nav-panel__close')?.addEventListener('click', () => {
-            this.hide();
-        });
+        this.panel.querySelector('.llm-nav-panel__close')?.addEventListener('click', () => this.hide());
 
-        // 工具栏按钮
-        this.panel.querySelectorAll('.llm-nav-panel__btn').forEach(btn => {
+        this.panel.querySelectorAll('.llm-nav-panel__btn, .llm-nav-panel__action-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 const action = (e.currentTarget as HTMLElement).dataset.action;
-                this.handleToolbarAction(action);
-            });
-        });
-
-        // 底部操作按钮
-        this.panel.querySelectorAll('.llm-nav-panel__action-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const action = (e.currentTarget as HTMLElement).dataset.action;
-                this.handleBottomAction(action);
+                this.handleAction(action);
             });
         });
 
@@ -271,67 +286,127 @@ export class FloatingNavPanel {
                 const target = e.target as HTMLElement;
                 const id = (item as HTMLElement).dataset.id!;
                 const idx = parseInt((item as HTMLElement).dataset.index!);
-                
-                // 如果点击的是折叠图标，则切换折叠
-                if (target.classList.contains('llm-nav-item__fold')) {
-                    this.options.onToggleFold(id);
-                    this.toggleItemCollapse(idx);
+
+                if (this.isSelectionMode) {
+                    // 多选模式下，点击任何地方（除了折叠）都是切换选择
+                    if (!target.classList.contains('llm-nav-item__fold')) {
+                        this.toggleSelection(id);
+                    } else {
+                        // 允许在多选模式下折叠
+                        this.options.onToggleFold(id);
+                        this.updateItemUI(idx);
+                    }
                 } else {
-                    // 否则跳转
-                    this.currentIndex = idx;
-                    this.updateHighlight();
-                    this.options.onNavigate(id);
+                    // 普通模式
+                    if (target.classList.contains('llm-nav-item__fold')) {
+                        this.options.onToggleFold(id);
+                        this.updateItemUI(idx);
+                    } else {
+                        this.currentIndex = idx;
+                        this.updateHighlight();
+                        this.options.onNavigate(id);
+                    }
                 }
             });
         });
     }
 
+    // ✨ 统一处理 Action
+    private handleAction(action?: string): void {
+        switch (action) {
+            case 'fold-all':
+                this.options.onFoldAll();
+                this.items.forEach(i => i.isCollapsed = true);
+                this.render();
+                break;
+            case 'unfold-all':
+                this.options.onUnfoldAll();
+                this.items.forEach(i => i.isCollapsed = false);
+                this.render();
+                break;
+            case 'prev': this.navigatePrev(); break;
+            case 'next': this.navigateNext(); break;
+            case 'toggle-current': 
+                if (this.currentIndex >= 0) {
+                     const id = this.items[this.currentIndex].id;
+                     this.options.onToggleFold(id);
+                     this.updateItemUI(this.currentIndex);
+                }
+                break;
+            case 'copy-current': 
+                if (this.currentIndex >= 0) this.options.onCopy(this.items[this.currentIndex].id);
+                break;
+            // ✨ 选择模式 actions
+            case 'enter-selection':
+                this.isSelectionMode = true;
+                this.render();
+                break;
+            case 'cancel-selection':
+                this.isSelectionMode = false;
+                this.selectedIds.clear();
+                this.render();
+                break;
+            case 'select-all':
+                if (this.selectedIds.size === this.items.length) {
+                    this.selectedIds.clear();
+                } else {
+                    this.items.forEach(i => this.selectedIds.add(i.id));
+                }
+                this.render();
+                break;
+        case 'batch-toggle':
+            // 简单的逻辑：全部反转
+            // 或者：如果大部分是折叠的就展开，反之亦然。这里使用全部反转。
+            this.selectedIds.forEach(id => {
+                this.options.onToggleFold(id);
+                // 更新本地数据状态以便 UI 正确渲染
+                const item = this.items.find(i => i.id === id);
+                if (item) item.isCollapsed = !item.isCollapsed;
+            });
+            this.render(); // 刷新整个面板
+            break;
+
+            case 'batch-delete':
+                this.options.onBatchDelete?.(Array.from(this.selectedIds));
+                this.isSelectionMode = false;
+                this.selectedIds.clear();
+                break;
+            case 'batch-copy':
+                this.options.onBatchCopy?.(Array.from(this.selectedIds));
+                this.selectedIds.clear();
+                this.render(); // 刷新 UI 去掉选中态
+                break;
+        }
+    }
+
+    private toggleSelection(id: string) {
+        if (this.selectedIds.has(id)) {
+            this.selectedIds.delete(id);
+        } else {
+            this.selectedIds.add(id);
+        }
+        this.render(); // 重新渲染以更新 UI 状态和按钮可用性
+    }
+
+    private updateItemUI(index: number): void {
+        const item = this.items[index];
+        item.isCollapsed = !item.isCollapsed;
+        // 局部 DOM 更新逻辑略... 为简化直接重新渲染，实际可优化
+        this.render(); 
+    }
+
     private bindKeyboard(): void {
         this.keydownHandler = (e: KeyboardEvent) => {
-            // 忽略输入框内的按键
-            if ((e.target as HTMLElement).tagName === 'INPUT' || 
-                (e.target as HTMLElement).tagName === 'TEXTAREA') {
-                return;
-            }
+            if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'TEXTAREA') return;
 
             switch (e.key) {
-                case 'Escape':
+                case 'Escape': e.preventDefault(); this.hide(); break;
+                case 'ArrowUp': e.preventDefault(); this.navigatePrev(); break;
+                case 'ArrowDown': e.preventDefault(); this.navigateNext(); break;
+                case 'Enter': 
                     e.preventDefault();
-                    this.hide();
-                    break;
-                    
-                case 'ArrowUp':
-                    e.preventDefault();
-                    this.navigatePrev();
-                    break;
-                    
-                case 'ArrowDown':
-                    e.preventDefault();
-                    this.navigateNext();
-                    break;
-                    
-                case 'Enter':
-                    e.preventDefault();
-                    if (this.currentIndex >= 0 && this.items[this.currentIndex]) {
+                    if (!this.isSelectionMode && this.currentIndex >= 0) 
                         this.options.onNavigate(this.items[this.currentIndex].id);
-                    }
-                    break;
-                    
-                case ' ':
-                    e.preventDefault();
-                    if (this.currentIndex >= 0 && this.items[this.currentIndex]) {
-                        this.options.onToggleFold(this.items[this.currentIndex].id);
-                        this.toggleItemCollapse(this.currentIndex);
-                    }
-                    break;
-                    
-                case 'c':
-                    if (e.ctrlKey || e.metaKey) {
-                        e.preventDefault();
-                        if (this.currentIndex >= 0 && this.items[this.currentIndex]) {
-                            this.options.onCopy(this.items[this.currentIndex].id);
-                        }
-                    }
                     break;
             }
         };
@@ -343,51 +418,6 @@ export class FloatingNavPanel {
         if (this.keydownHandler) {
             document.removeEventListener('keydown', this.keydownHandler);
             this.keydownHandler = null;
-        }
-    }
-
-    private handleToolbarAction(action?: string): void {
-        switch (action) {
-            case 'fold-all':
-                this.options.onFoldAll();
-                this.items.forEach((item, _idx) => {
-                    item.isCollapsed = true;
-                });
-                this.render();
-                break;
-                
-            case 'unfold-all':
-                this.options.onUnfoldAll();
-                this.items.forEach(item => {
-                    item.isCollapsed = false;
-                });
-                this.render();
-                break;
-                
-            case 'prev':
-                this.navigatePrev();
-                break;
-                
-            case 'next':
-                this.navigateNext();
-                break;
-        }
-    }
-
-    private handleBottomAction(action?: string): void {
-        if (this.currentIndex < 0 || !this.items[this.currentIndex]) return;
-        
-        const currentId = this.items[this.currentIndex].id;
-        
-        switch (action) {
-            case 'toggle-current':
-                this.options.onToggleFold(currentId);
-                this.toggleItemCollapse(this.currentIndex);
-                break;
-                
-            case 'copy-current':
-                this.options.onCopy(currentId);
-                break;
         }
     }
 
@@ -417,22 +447,6 @@ export class FloatingNavPanel {
         }
     }
 
-    private toggleItemCollapse(index: number): void {
-        if (this.items[index]) {
-            this.items[index].isCollapsed = !this.items[index].isCollapsed;
-            
-            // 更新 DOM
-            const itemEl = this.panel?.querySelector(`[data-index="${index}"]`);
-            if (itemEl) {
-                itemEl.classList.toggle('llm-nav-item--collapsed');
-                const foldIcon = itemEl.querySelector('.llm-nav-item__fold');
-                if (foldIcon) {
-                    foldIcon.textContent = this.items[index].isCollapsed ? '▶' : '▼';
-                }
-            }
-        }
-    }
-
     private updateHighlight(): void {
         if (!this.panel) return;
         
@@ -456,27 +470,13 @@ export class FloatingNavPanel {
     }
 
     private scrollItemIntoView(index: number): void {
-        const listEl = this.panel?.querySelector('.llm-nav-panel__list');
         const itemEl = this.panel?.querySelector(`[data-index="${index}"]`) as HTMLElement;
-        
-        if (listEl && itemEl) {
-            const listRect = listEl.getBoundingClientRect();
-            const itemRect = itemEl.getBoundingClientRect();
-            
-            if (itemRect.top < listRect.top) {
-                itemEl.scrollIntoView({ block: 'start', behavior: 'smooth' });
-            } else if (itemRect.bottom > listRect.bottom) {
-                itemEl.scrollIntoView({ block: 'end', behavior: 'smooth' });
-            }
-        }
+        itemEl?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     }
 
     private getPreview(content: string, maxLen: number): string {
         if (!content) return '(empty)';
-        let plain = content.replace(/[\r\n]+/g, ' ');
-        plain = plain.replace(/[*#`_~[\]()]/g, '');
-        plain = plain.trim();
-        if (!plain) return '(empty)';
+        let plain = content.replace(/[\r\n]+/g, ' ').replace(/[*#`_~[\]()]/g, '').trim();
         return plain.length > maxLen ? plain.substring(0, maxLen) + '...' : plain;
     }
 
