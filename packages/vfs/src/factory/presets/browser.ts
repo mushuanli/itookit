@@ -25,19 +25,22 @@ export interface BrowserPresetOptions {
   enableAssets?: boolean;
   /** 额外插件 */
   extraPlugins?: IPlugin[];
+  syncableModules: string[]
 }
 
 /**
  * 创建浏览器环境 VFS
  */
-export async function createBrowserVFS(options: BrowserPresetOptions = {}): Promise<VFSInstance> {
+export async function createBrowserVFS(options: BrowserPresetOptions): Promise<VFSInstance> {
   const {
     dbName = 'vfs_database',
     dbVersion = 1,
     defaultModule = 'default',
     enableTags = true,
     enableAssets = true,
-    extraPlugins = []
+    extraPlugins = [],
+    syncableModules = []
+
   } = options;
 
   const plugins: IPlugin[] = [
@@ -62,7 +65,7 @@ export async function createBrowserVFS(options: BrowserPresetOptions = {}): Prom
   // ✅ 关键：先初始化模块管理器（加载已有注册表）
   const modulesPlugin = vfs.getPlugin<ModulesPlugin>('vfs-modules');
   if (modulesPlugin) {
-    await modulesPlugin.getModuleManager().ensureDefaultModule(defaultModule);
+    await modulesPlugin.getModuleManager().ensureDefaultModule(defaultModule,syncableModules);
   }
 
   return vfs;
@@ -71,7 +74,7 @@ export async function createBrowserVFS(options: BrowserPresetOptions = {}): Prom
 /**
  * 创建浏览器环境 VFS 并包装为高层 API
  */
-export async function createBrowserVFSWithAPI(options: BrowserPresetOptions = {}): Promise<VFS> {
+export async function createBrowserVFSWithAPI(options: BrowserPresetOptions): Promise<VFS> {
   const instance = await createBrowserVFS(options);
   return new VFS(instance);
 }
