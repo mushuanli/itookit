@@ -18,17 +18,30 @@ interface PendingRequest {
   timeout: ReturnType<typeof setTimeout>;
 }
 
-type MessageType = 'pong' | 'ack' | 'error' | 'sync_packet' | 'request_chunk' | 'chunk_response';
+interface PendingChunkRequest {
+  resolve: (data: ArrayBuffer) => void;
+  reject: (err: Error) => void;
+  timeout: ReturnType<typeof setTimeout>;
+}
+
+type MessageType = 'pong' | 'ack' | 'error' | 'sync_packet' | 'request_chunk' | 
+                   'chunk_response' | 'chunk_header' | 'chunk_ack';
 
 interface IncomingMessage {
   type: MessageType;
-  reqId?: string;
+  req_id?: string;
   payload?: SyncPacket;
-  missingChunks?: string[];
+  response?: SyncPacketResponse;
+  missing_chunks?: string[];
   message?: string;
-  contentHash?: string;
+  content_hash?: string;
   index?: number;
-  nodeId?: string;
+  node_id?: string;
+  total_chunks?: number;
+  checksum?: string;
+  size?: number;
+  success?: boolean;
+  error?: string;
 }
 
 export class WebSocketTransport implements NetworkInterface {
@@ -36,7 +49,8 @@ export class WebSocketTransport implements NetworkInterface {
   private packetHandler?: (p: SyncPacket) => void;
   private chunkRequestHandler?: (req: ChunkRequest) => Promise<ArrayBuffer>;
   private pendingRequests = new Map<string, PendingRequest>();
-  private pendingChunkReqId: string | null = null;
+  private pendingChunkRequests = new Map<string, PendingChunkRequest>();
+  private pendingChunkResponse: { reqId: string; info: IncomingMessage } | null = null;
   
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -74,6 +88,7 @@ export class WebSocketTransport implements NetworkInterface {
 
       try {
         this.ws = new WebSocket(this.config.url);
+        this.ws.binaryType = 'arraybuffer'; // 确保二进制数据以 ArrayBuffer 形式接收
 
         this.ws.onopen = () => {
           clearTimeout(timeoutId);
@@ -120,6 +135,12 @@ export class WebSocketTransport implements NetworkInterface {
       pending.reject(new Error('Connection closed'));
     }
     this.pendingRequests.clear();
+
+    for (const [, pending] of this.pendingChunkRequests) {
+      clearTimeout(pending.timeout);
+      pending.reject(new Error('Connection closed'));
+    }
+    this.pendingChunkRequests.clear();
   }
 
   async sendPacket(packet: SyncPacket): Promise<SyncPacketResponse> {
@@ -139,7 +160,7 @@ export class WebSocketTransport implements NetworkInterface {
 
       this.ws!.send(JSON.stringify({
         type: 'sync_packet',
-        reqId,
+        req_id: reqId,
         payload: packet
       }));
     });
@@ -153,15 +174,70 @@ export class WebSocketTransport implements NetworkInterface {
       throw new Error('WebSocket not connected');
     }
 
-    // 先发送元数据头
-    this.ws!.send(JSON.stringify({
-      type: 'chunk_header',
-      ...header,
-      size: data.byteLength
-    }));
+    const reqId = crypto.randomUUID();
 
-    // 再发送二进制数据
-    this.ws!.send(data);
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.pendingRequests.delete(reqId);
+        reject(new Error('Chunk upload timeout'));
+      }, SYNC_CONSTANTS.DEFAULT_REQUEST_TIMEOUT);
+
+      // 监听 chunk_ack 响应
+      const originalResolve = () => {
+        clearTimeout(timeout);
+        this.pendingRequests.delete(reqId);
+        resolve();
+      };
+
+      this.pendingRequests.set(reqId, { 
+        resolve: originalResolve as any, 
+        reject, 
+        timeout 
+      });
+
+      // 先发送分片上传请求头
+      this.ws!.send(JSON.stringify({
+        type: 'chunk_upload',
+        req_id: reqId,
+        content_hash: header.contentHash,
+        index: header.index,
+        total_chunks: header.totalChunks,
+        checksum: header.checksum,
+        size: data.byteLength,
+        node_id: header.nodeId
+      }));
+
+      // 再发送二进制数据
+      this.ws!.send(data);
+    });
+  }
+
+  /**
+   * 请求单个分片
+   */
+  async requestChunk(contentHash: string, index: number, nodeId: string): Promise<ArrayBuffer> {
+    if (!this.isConnected) {
+      throw new Error('WebSocket not connected');
+    }
+
+    const reqId = crypto.randomUUID();
+
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.pendingChunkRequests.delete(reqId);
+        reject(new Error('Chunk request timeout'));
+      }, SYNC_CONSTANTS.DEFAULT_REQUEST_TIMEOUT);
+
+      this.pendingChunkRequests.set(reqId, { resolve, reject, timeout });
+
+      this.ws!.send(JSON.stringify({
+        type: 'request_chunk',
+        req_id: reqId,
+        content_hash: contentHash,
+        index: index,
+        node_id: nodeId
+      }));
+    });
   }
 
   onPacket(handler: (packet: SyncPacket) => void): void {
@@ -231,14 +307,14 @@ export class WebSocketTransport implements NetworkInterface {
 
   private async handleMessage(event: MessageEvent): Promise<void> {
     // 处理二进制数据
-    if (event.data instanceof Blob) {
-      const buffer = await event.data.arrayBuffer();
-      this.handleBinaryMessage(buffer);
+    if (event.data instanceof ArrayBuffer) {
+      this.handleBinaryMessage(event.data);
       return;
     }
 
-    if (event.data instanceof ArrayBuffer) {
-      this.handleBinaryMessage(event.data);
+    if (event.data instanceof Blob) {
+      const buffer = await event.data.arrayBuffer();
+      this.handleBinaryMessage(buffer);
       return;
     }
 
@@ -258,17 +334,27 @@ export class WebSocketTransport implements NetworkInterface {
         break;
 
       case 'ack':
-        this.resolvePendingRequest(data.reqId!, {
-          success: true,
-          missingChunks: data.missingChunks
-        });
+        if (data.req_id && data.response) {
+          this.resolvePendingRequest(data.req_id, data.response);
+        }
         break;
 
       case 'error':
-        this.resolvePendingRequest(data.reqId!, {
-          success: false,
-          error: data.message
-        });
+        if (data.req_id) {
+          const pending = this.pendingRequests.get(data.req_id);
+          if (pending) {
+            clearTimeout(pending.timeout);
+            pending.reject(new Error(data.message || 'Unknown error'));
+            this.pendingRequests.delete(data.req_id);
+          }
+
+          const pendingChunk = this.pendingChunkRequests.get(data.req_id);
+          if (pendingChunk) {
+            clearTimeout(pendingChunk.timeout);
+            pendingChunk.reject(new Error(data.message || 'Unknown error'));
+            this.pendingChunkRequests.delete(data.req_id);
+          }
+        }
         break;
 
       case 'sync_packet':
@@ -278,28 +364,51 @@ export class WebSocketTransport implements NetworkInterface {
         break;
 
       case 'request_chunk':
-        if (this.chunkRequestHandler && data.contentHash && data.index !== undefined && data.nodeId) {
-          const buffer = await this.chunkRequestHandler({
-            contentHash: data.contentHash,
-            index: data.index,
-            nodeId: data.nodeId
-          });
-          await this.sendChunk(
-            {
-              contentHash: data.contentHash,
+        // 服务器请求分片（P2P 场景或服务器需要客户端提供分片）
+        if (this.chunkRequestHandler && data.content_hash && data.index !== undefined && data.node_id) {
+          try {
+            const buffer = await this.chunkRequestHandler({
+              contentHash: data.content_hash,
               index: data.index,
-              nodeId: data.nodeId,
-              totalChunks: 0,
-              checksum: ''
-            },
-            buffer
-          );
+              nodeId: data.node_id
+            });
+            await this.sendChunk(
+              {
+                contentHash: data.content_hash,
+                index: data.index,
+                nodeId: data.node_id,
+                totalChunks: data.total_chunks || 1,
+                checksum: '' // 服务器会验证
+              },
+              buffer
+            );
+          } catch (e) {
+            console.error('[WebSocket] Failed to handle chunk request', e);
+          }
         }
         break;
 
       case 'chunk_response':
-        // 存储 reqId 以匹配后续的二进制帧
-        this.pendingChunkReqId = data.reqId || null;
+        // 服务器响应分片请求，紧跟着会有二进制数据
+        if (data.req_id) {
+          this.pendingChunkResponse = { reqId: data.req_id, info: data };
+        }
+        break;
+
+      case 'chunk_ack':
+        // 分片上传确认
+        if (data.req_id) {
+          const pending = this.pendingRequests.get(data.req_id);
+          if (pending) {
+            clearTimeout(pending.timeout);
+            if (data.success) {
+              pending.resolve({ success: true } as any);
+            } else {
+              pending.reject(new Error(data.error || 'Chunk upload failed'));
+            }
+            this.pendingRequests.delete(data.req_id);
+          }
+        }
         break;
 
       default:
@@ -308,12 +417,20 @@ export class WebSocketTransport implements NetworkInterface {
   }
 
   private handleBinaryMessage(data: ArrayBuffer): void {
-    if (this.pendingChunkReqId) {
-      this.resolvePendingRequest(this.pendingChunkReqId, {
-        success: true,
-        chunkData: data
-      });
-      this.pendingChunkReqId = null;
+    // 检查是否有待处理的分片响应
+    if (this.pendingChunkResponse) {
+      const { reqId } = this.pendingChunkResponse;
+      const pending = this.pendingChunkRequests.get(reqId);
+      
+      if (pending) {
+        clearTimeout(pending.timeout);
+        pending.resolve(data);
+        this.pendingChunkRequests.delete(reqId);
+      }
+      
+      this.pendingChunkResponse = null;
+    } else {
+      console.warn('[WebSocket] Received unexpected binary data');
     }
   }
 

@@ -27,6 +27,9 @@ export interface NetworkInterface {
   /** 发送分片数据 */
   sendChunk(header: ChunkRequest & { totalChunks: number; checksum: string }, data: ArrayBuffer): Promise<void>;
   
+  /** 请求分片数据 */
+  requestChunk(contentHash: string, index: number, nodeId: string): Promise<ArrayBuffer>;
+  
   /** 监听接收到的同步包 */
   onPacket(handler: (packet: SyncPacket) => void): void;
   
