@@ -1,21 +1,33 @@
 // @file packages/vfs-sync/src/core/SyncFilter.ts
 
 import { SyncFilter, SyncLog } from '../types';
-import { VNodeData } from '../../core';
+import { VNodeData, IPluginContext } from '../../core';
 import { SYNC_MODULE_NAME } from '../constants';
+import { ModulesPlugin } from '../../modules';
 
 export class SyncFilterEngine {
-  constructor(private filter?: SyncFilter) {}
+  private modulesPlugin?: ModulesPlugin;
 
-  /**
-   * 检查日志是否应该被同步
-   */
+  constructor(
+    _context: IPluginContext,
+    private filter?: SyncFilter
+  ) {
+    // 获取模块管理插件
+    this.modulesPlugin = _context.getPlugin<ModulesPlugin>('vfs-modules');
+  }
+
   shouldSync(log: SyncLog, node?: VNodeData): boolean {
-    // 始终排除同步模块自身
+    // 1. 始终排除同步模块自身
     if (log.path.startsWith(`/${SYNC_MODULE_NAME}`)) {
       return false;
     }
 
+    // 2. 检查模块是否启用同步 ← 新增检查
+    if (!this.isModuleSyncEnabled(log.path)) {
+      return false;
+    }
+
+    // 3. 应用用户配置的过滤器
     if (!this.filter) return true;
 
     return (
@@ -26,6 +38,19 @@ export class SyncFilterEngine {
       this.checkContent(log, node)
     );
   }
+
+  /**
+   * 检查路径所属模块是否启用同步
+   */
+  private isModuleSyncEnabled(path: string): boolean {
+    if (!this.modulesPlugin) {
+      return false;  // 没有模块插件时默认不允许
+    }
+
+    const manager = this.modulesPlugin.getModuleManager();
+    return manager.isPathSyncEnabled(path);
+  }
+
 
   private checkTimeRange(log: SyncLog): boolean {
     const range = this.filter?.timeRange;

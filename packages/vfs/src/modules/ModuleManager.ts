@@ -1,123 +1,147 @@
 // @file packages/vfs-modules/src/ModuleManager.ts
 
-import {
-  VFSKernel,
-  VNodeType,
-  VFSError,
-  ErrorCode,
-  pathResolver
-} from '../core';
-import { ModuleInfo, MountOptions } from './types';
+import { IPluginContext, VNodeType } from '../core';
+import { ModuleInfo, ModuleMountOptions, ModuleUpdateOptions } from './types';
+
+const MODULES_REGISTRY_PATH = '/__vfs_meta__/modules.json';
 
 /**
  * 模块管理器
  */
 export class ModuleManager {
   private modules = new Map<string, ModuleInfo>();
-  private metaModuleName = '__vfs_meta__';
   private initialized = false;
 
-  constructor(private kernel: VFSKernel) {}
+  constructor(private context: IPluginContext) {}
 
   /**
    * 初始化模块管理器
    */
   async initialize(): Promise<void> {
     if (this.initialized) return;
-    await this.loadModuleRegistry();
+    
+    await this.ensureMetaModule();
+    await this.loadRegistry();
+    
     this.initialized = true;
   }
 
   /**
    * 挂载模块
    */
-  async mount(moduleName: string, options: MountOptions = {}): Promise<ModuleInfo> {
-    // 确保已初始化
-    if (!this.initialized) {
-      await this.initialize();
+  async mount(name: string, options: ModuleMountOptions = {}): Promise<ModuleInfo> {
+    if (this.modules.has(name)) {
+      return this.modules.get(name)!;
     }
 
-    // 1. 检查内存注册表
-    const existing = this.modules.get(moduleName);
-    if (existing) {
-      // 可选：更新选项
-      if (options.description !== undefined) existing.description = options.description;
-      if (options.isProtected !== undefined) existing.isProtected = options.isProtected;
-      await this.saveModuleRegistry();
-      return existing;
-    }
-
-    // 创建模块根目录
-    const rootPath = `/${moduleName}`;
-    
-    // 2. ✅ 检查节点是否已存在（应用重启后恢复）
-    let rootNode = await this.kernel.getNodeByPath(rootPath);
+    const rootPath = `/${name}`;
+    const now = Date.now();
+      // 2. ✅ 检查节点是否已存在（应用重启后恢复）
+    let rootNode = await this.context.kernel.getNodeByPath(rootPath);
     
     if (rootNode) {
       // ✅ 恢复已存在的模块
-      console.log(`[ModuleManager] Recovering existing module: ${moduleName}`);
-      
+      console.log(`[ModuleManager] Recovering existing module: ${name}`);
+
       const info: ModuleInfo = {
-        name: moduleName,
+        name,
         rootNodeId: rootNode.nodeId,
         description: options.description,
-        isProtected: options.isProtected,
+        isProtected: !options.isProtected,
         syncEnabled: options.syncEnabled ?? true,
         createdAt: rootNode.createdAt,
-        metadata: options.metadata
+        metadata: options.metadata,
+        modifiedAt: now
       };
 
-      this.modules.set(moduleName, info);
-      await this.saveModuleRegistry();
+      this.modules.set(name, info);
+      await this.saveRegistry();
       
       return info;
     }
 
-    // 3. 节点不存在 → 创建新模块
-    rootNode = await this.kernel.createNode({
+    // 创建模块根目录
+    rootNode = await this.context.kernel.createNode({
       path: rootPath,
       type: VNodeType.DIRECTORY,
       metadata: {
         isModuleRoot: true,
-        moduleName
+        moduleName: name
       }
     });
 
-    const info: ModuleInfo = {
-      name: moduleName,
+    const moduleInfo: ModuleInfo = {
+      name,
       rootNodeId: rootNode.nodeId,
       description: options.description,
-      isProtected: options.isProtected,
-      syncEnabled: options.syncEnabled ?? true,
-      createdAt: Date.now(),
-      metadata: options.metadata
+      isProtected: options.isProtected ?? false,
+      syncEnabled: options.syncEnabled ?? true,  // 默认启用同步
+      createdAt: now,
+      metadata: options.metadata,
+      modifiedAt: now
     };
 
-    this.modules.set(moduleName, info);
-    await this.saveModuleRegistry();
+    this.modules.set(name, moduleInfo);
+    await this.saveRegistry();
 
-    return info;
+    this.context.log.info(`Module mounted: ${name} (sync: ${moduleInfo.syncEnabled})`);
+    return moduleInfo;
   }
 
   /**
    * 卸载模块
    */
-  async unmount(moduleName: string): Promise<void> {
-    const info = this.modules.get(moduleName);
-    if (!info) {
-      // 幂等：模块不存在时静默返回
-      return;
+  async unmount(name: string): Promise<void> {
+    const module = this.modules.get(name);
+    if (!module) {
+      throw new Error(`Module not found: ${name}`);
     }
 
-    if (info.isProtected) {
-      throw new VFSError(ErrorCode.PERMISSION_DENIED, `Module '${moduleName}' is protected`);
+    if (module.isProtected) {
+      throw new Error(`Cannot unmount protected module: ${name}`);
     }
 
-    // 删除模块根目录及所有内容
-    await this.kernel.unlink(info.rootNodeId, true);
-    
-    this.modules.delete(moduleName);
-    await this.saveModuleRegistry();
+    await this.context.kernel.unlink(module.rootNodeId, true);
+    this.modules.delete(name);
+    await this.saveRegistry();
+
+    this.context.log.info(`Module unmounted: ${name}`);
+  }
+
+  /**
+   * 更新模块信息
+   */
+  async updateModule(name: string, options: ModuleUpdateOptions): Promise<ModuleInfo> {
+    const module = this.modules.get(name);
+    if (!module) {
+      throw new Error(`Module not found: ${name}`);
+    }
+
+    // 更新字段
+    if (options.description !== undefined) {
+      module.description = options.description;
+    }
+    if (options.isProtected !== undefined) {
+      module.isProtected = options.isProtected;
+    }
+    if (options.syncEnabled !== undefined) {
+      module.syncEnabled = options.syncEnabled;
+    }
+
+    module.modifiedAt = Date.now();
+
+    await this.saveRegistry();
+
+    this.context.log.info(`Module updated: ${name} (sync: ${module.syncEnabled})`);
+    return module;
+  }
+
+  /**
+   * 检查模块是否启用同步
+   */
+  isSyncEnabled(name: string): boolean {
+    const module = this.modules.get(name);
+    return module?.syncEnabled ?? true;  // 默认启用
   }
 
   /**
@@ -135,145 +159,109 @@ export class ModuleManager {
   }
 
   /**
-   * 检查模块是否存在
+   * 获取所有启用同步的模块
    */
-  hasModule(name: string): boolean {
-    return this.modules.has(name);
+  getSyncEnabledModules(): ModuleInfo[] {
+    return this.getAllModules().filter(m => m.syncEnabled);
   }
 
   /**
-   * 更新模块信息
+   * 获取所有禁用同步的模块
    */
-  async updateModule(
-    moduleName: string,
-    updates: Partial<Omit<ModuleInfo, 'name' | 'rootNodeId' | 'createdAt'>>
-  ): Promise<ModuleInfo> {
-    const info = this.modules.get(moduleName);
-    if (!info) {
-      throw new VFSError(ErrorCode.NOT_FOUND, `Module '${moduleName}' not found`);
-    }
-
-    Object.assign(info, updates);
-    await this.saveModuleRegistry();
-
-    return info;
+  getSyncDisabledModules(): ModuleInfo[] {
+    return this.getAllModules().filter(m => !m.syncEnabled);
   }
 
   // ==================== 路径辅助方法 ====================
 
   /**
-   * 将用户路径转换为系统路径
+   * 根据路径获取模块名称
    */
-  toSystemPath(moduleName: string, userPath: string): string {
-    const normalized = pathResolver.normalize(userPath);
-    return normalized === '/'
-      ? `/${moduleName}`
-      : `/${moduleName}${normalized}`;
+  getModuleNameFromPath(path: string): string | null {
+    const parts = path.split('/').filter(Boolean);
+    return parts.length > 0 ? parts[0] : null;
   }
 
   /**
-   * 将系统路径转换为用户路径
+   * 检查路径是否属于可同步模块
    */
-  toUserPath(systemPath: string, moduleName: string): string {
-    const prefix = `/${moduleName}`;
-    if (!systemPath.startsWith(prefix)) {
-      return systemPath;
+  isPathSyncEnabled(path: string): boolean {
+    const moduleName = this.getModuleNameFromPath(path);
+    if (!moduleName) return false;
+    return this.isSyncEnabled(moduleName);
+  }
+
+  /**
+   * 确保默认模块存在
+   */
+  async ensureDefaultModule(name: string): Promise<ModuleInfo> {
+    const existing = this.modules.get(name);
+    if (existing) return existing;
+    
+    return this.mount(name, {
+      description: 'Default module',
+      syncEnabled: true
+    });
+  }
+
+  // ==================== 私有方法 ====================
+
+  private async ensureMetaModule(): Promise<void> {
+    const metaPath = '/__vfs_meta__';
+    const existing = await this.context.kernel.getNodeByPath(metaPath);
+    
+    if (!existing) {
+      await this.context.kernel.createNode({
+        path: metaPath,
+        type: VNodeType.DIRECTORY,
+        metadata: { isSystemModule: true }
+      });
     }
-    const relative = systemPath.slice(prefix.length);
-    return relative || '/';
   }
-
-  /**
-   * 解析模块内路径到节点 ID
-   */
-  async resolvePath(moduleName: string, userPath: string): Promise<string | null> {
-    const systemPath = this.toSystemPath(moduleName, userPath);
-    return this.kernel.resolvePathToId(systemPath);
-  }
-
-  // ==================== 模块注册表持久化 ====================
 
   /**
    * 加载模块注册表
    */
-  private async loadModuleRegistry(): Promise<void> {
+  private async loadRegistry(): Promise<void> {
     try {
-      const metaRoot = await this.kernel.getNodeByPath(`/${this.metaModuleName}`);
-      if (!metaRoot) return;
-
-      const registryNode = await this.kernel.getNodeByPath(
-        `/${this.metaModuleName}/modules.json`
-      );
-      if (!registryNode) return;
-
-      const content = await this.kernel.read(registryNode.nodeId);
-      const data = JSON.parse(
-        typeof content === 'string' ? content : new TextDecoder().decode(content)
-      ) as Record<string, ModuleInfo>;
-
-      this.modules = new Map(Object.entries(data));
-    } catch (error) {
-      console.warn('Failed to load module registry:', error);
+      const node = await this.context.kernel.getNodeByPath(MODULES_REGISTRY_PATH);
+      if (node) {
+        const content = await this.context.kernel.read(node.nodeId);
+        const data = JSON.parse(typeof content === 'string' ? content : new TextDecoder().decode(content));
+        
+        for (const module of data.modules || []) {
+          // 兼容旧数据：如果没有 syncEnabled 字段，默认为 true
+          if (module.syncEnabled === undefined) {
+            module.syncEnabled = true;
+          }
+          this.modules.set(module.name, module);
+        }
+      }
+    } catch (e) {
+      this.context.log.warn('Failed to load modules registry', e);
     }
   }
 
   /**
    * 保存模块注册表
    */
-  private async saveModuleRegistry(): Promise<void> {
-    try {
-      // 确保元数据模块存在
-      if (!this.modules.has(this.metaModuleName)) {
-        const rootPath = `/${this.metaModuleName}`;
-        let rootNode = await this.kernel.getNodeByPath(rootPath);
-        
-        if (!rootNode) {
-          rootNode = await this.kernel.createNode({
-            path: rootPath,
-            type: VNodeType.DIRECTORY,
-            metadata: { isModuleRoot: true, isSystemModule: true }
-          });
-        }
-
-        const metaInfo: ModuleInfo = {
-          name: this.metaModuleName,
-          rootNodeId: rootNode.nodeId,
-          description: 'VFS metadata storage',
-          isProtected: true,
-          syncEnabled: false,
-          createdAt: Date.now()
-        };
-        this.modules.set(this.metaModuleName, metaInfo);
-      }
-
-      // 保存注册表
-      const data = Object.fromEntries(this.modules);
-      const content = JSON.stringify(data, null, 2);
-      const registryPath = `/${this.metaModuleName}/modules.json`;
-
-      const existingNode = await this.kernel.getNodeByPath(registryPath);
-      if (existingNode) {
-        await this.kernel.write(existingNode.nodeId, content);
-      } else {
-        await this.kernel.createNode({
-          path: registryPath,
-          type: VNodeType.FILE,
-          content,
-          metadata: { mimeType: 'application/json' }
-        });
-      }
-    } catch (error) {
-      console.error('Failed to save module registry:', error);
+  private async saveRegistry(): Promise<void> {
+    const data = {
+      version: 2,  // 版本升级
+      modules: Array.from(this.modules.values())
+    };
+    
+    const content = JSON.stringify(data, null, 2);
+    const node = await this.context.kernel.getNodeByPath(MODULES_REGISTRY_PATH);
+    
+    if (node) {
+      await this.context.kernel.write(node.nodeId, content);
+    } else {
+      await this.context.kernel.createNode({
+        path: MODULES_REGISTRY_PATH,
+        type: VNodeType.FILE,
+        content
+      });
     }
-  }
-
-  /**
-   * 确保默认模块存在
-   */
-  async ensureDefaultModule(moduleName: string): Promise<ModuleInfo> {
-    if (this.modules.has(moduleName)) {
-      return this.modules.get(moduleName)!;
-    }
-    return this.mount(moduleName, { description: 'Default module' });
   }
 }
