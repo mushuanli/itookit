@@ -10,15 +10,20 @@ const MODULES_REGISTRY_PATH = '/__vfs_meta__/modules.json';
  */
 export class ModuleManager {
   private modules = new Map<string, ModuleInfo>();
+  private syncableModuleNames = new Set<string>();  // ✅ 新增：存储可同步模块名称
   private initialized = false;
 
   constructor(private context: IPluginContext) {}
 
   /**
    * 初始化模块管理器
+   * @param syncableModules 可同步的模块名称列表
    */
-  async initialize(): Promise<void> {
+  async initialize(syncableModules: string[] = []): Promise<void> {
     if (this.initialized) return;
+    
+    // ✅ 保存可同步模块列表
+    this.syncableModuleNames = new Set(syncableModules);
     
     await this.ensureMetaModule();
     await this.loadRegistry();
@@ -31,12 +36,25 @@ export class ModuleManager {
    */
   async mount(name: string, options: ModuleMountOptions = {}): Promise<ModuleInfo> {
     if (this.modules.has(name)) {
-      return this.modules.get(name)!;
+      const existing = this.modules.get(name)!;
+      
+      // 如果 options 明确指定了 syncEnabled，更新它
+      if (options.syncEnabled !== undefined && existing.syncEnabled !== options.syncEnabled) {
+        existing.syncEnabled = options.syncEnabled;
+        existing.modifiedAt = Date.now();
+        await this.saveRegistry();
+      }
+      
+      return existing;
     }
 
     const rootPath = `/${name}`;
     const now = Date.now();
-      // 2. ✅ 检查节点是否已存在（应用重启后恢复）
+    
+    // ✅ 确定 syncEnabled 的值：优先使用 options，其次检查 syncableModuleNames
+    const syncEnabled = options.syncEnabled ?? this.syncableModuleNames.has(name);
+    
+    // 检查节点是否已存在（应用重启后恢复）
     let rootNode = await this.context.kernel.getNodeByPath(rootPath);
     
     if (rootNode) {
@@ -47,8 +65,8 @@ export class ModuleManager {
         name,
         rootNodeId: rootNode.nodeId,
         description: options.description,
-        isProtected: !options.isProtected,
-        syncEnabled: options.syncEnabled ?? true,
+        isProtected: options.isProtected ?? false,  // ✅ 修复：移除错误的取反
+        syncEnabled,  // ✅ 使用统一的 syncEnabled 值
         createdAt: rootNode.createdAt,
         metadata: options.metadata,
         modifiedAt: now
@@ -75,7 +93,7 @@ export class ModuleManager {
       rootNodeId: rootNode.nodeId,
       description: options.description,
       isProtected: options.isProtected ?? false,
-      syncEnabled: options.syncEnabled ?? true,  // 默认启用同步
+      syncEnabled,  // ✅ 使用统一的 syncEnabled 值
       createdAt: now,
       metadata: options.metadata,
       modifiedAt: now
@@ -141,7 +159,11 @@ export class ModuleManager {
    */
   isSyncEnabled(name: string): boolean {
     const module = this.modules.get(name);
-    return module?.syncEnabled ?? true;  // 默认启用
+    // ✅ 如果模块不存在，检查是否在 syncableModuleNames 中
+    if (!module) {
+      return this.syncableModuleNames.has(name);
+    }
+    return module.syncEnabled;
   }
 
   /**
@@ -193,14 +215,34 @@ export class ModuleManager {
 
   /**
    * 确保默认模块存在
+   * @param name 模块名称
+   * @param syncableModules 可同步的模块名称列表（用于确定此模块是否应启用同步）
    */
-  async ensureDefaultModule(name: string): Promise<ModuleInfo> {
+  async ensureDefaultModule(name: string, syncableModules: string[] = []): Promise<ModuleInfo> {
+    // ✅ 更新 syncableModuleNames
+    for (const moduleName of syncableModules) {
+      this.syncableModuleNames.add(moduleName);
+    }
+    
     const existing = this.modules.get(name);
-    if (existing) return existing;
+    if (existing) {
+      // ✅ 如果模块存在但 sync 状态需要更新
+      const shouldSync = syncableModules.includes(name);
+      if (existing.syncEnabled !== shouldSync) {
+        existing.syncEnabled = shouldSync;
+        existing.modifiedAt = Date.now();
+        await this.saveRegistry();
+        this.context.log.info(`Module sync status updated: ${name} (sync: ${shouldSync})`);
+      }
+      return existing;
+    }
+    
+    // ✅ 根据 syncableModules 决定是否启用同步
+    const syncEnabled = syncableModules.includes(name);
     
     return this.mount(name, {
       description: 'Default module',
-      syncEnabled: true
+      syncEnabled
     });
   }
 
@@ -230,9 +272,12 @@ export class ModuleManager {
         const data = JSON.parse(typeof content === 'string' ? content : new TextDecoder().decode(content));
         
         for (const module of data.modules || []) {
-          // 兼容旧数据：如果没有 syncEnabled 字段，默认为 true
-          if (module.syncEnabled === undefined) {
+          // ✅ 如果模块在 syncableModuleNames 中，强制启用同步
+          if (this.syncableModuleNames.has(module.name)) {
             module.syncEnabled = true;
+          } else if (module.syncEnabled === undefined) {
+            // 兼容旧数据：如果没有 syncEnabled 字段，默认为 false
+            module.syncEnabled = false;
           }
           this.modules.set(module.name, module);
         }

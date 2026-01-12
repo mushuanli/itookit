@@ -1,7 +1,4 @@
 P1:
-- sync 和增量同步功能
-    - vfs: 增加 sync 模块
-    - vfsd: 实现增量 sync 功能
 
 - mentionScope 功能 + 跨页面跳转功能 + 禁止访问功能
 
@@ -12,10 +9,14 @@ P1:
 - 多媒体功能
 - agent 编排功能
 
+
 verifying:
 - 增加数据库增量导入功能
 - mdx附件 - 增加上传按钮
 - llm附件 - ui部分完成， 但是engine部分需要验证。
+- sync 和增量同步功能
+    - vfs: 增加 sync 模块
+    - vfsd: 实现增量 sync 功能
 
 pending:
 1. branch功能，
