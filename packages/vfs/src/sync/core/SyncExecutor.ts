@@ -80,6 +80,8 @@ export class SyncExecutor {
         await this.handlePushSuccess(logs);
       } else if (response.missingChunks) {
         this.context.log.warn('Server requested missing chunks', response.missingChunks);
+        // 重新上传缺失的分片
+        await this.handleMissingChunks(response.missingChunks, packet);
       }
 
       this.updateState({ status: 'idle', progress: undefined });
@@ -233,6 +235,46 @@ export class SyncExecutor {
       }
 
       await this.chunkManager.cleanupChunks(ref.contentHash, ref.totalChunks);
+    }
+  }
+
+  /**
+   * 处理服务器返回的缺失分片
+   */
+  private async handleMissingChunks(missingChunks: string[], packet: SyncPacket): Promise<void> {
+    for (const missingInfo of missingChunks) {
+      const [contentHash, indicesStr] = missingInfo.split(':');
+      const indices = indicesStr.split(',').map(Number);
+
+      const changePath = packet.changes.find(c => c.contentHash === contentHash)?.path;
+      if (!changePath) continue;
+
+      const node = await this.context.kernel.getNodeByPath(changePath);
+      if (!node) continue;
+
+      const content = await this.context.kernel.read(node.nodeId);
+      if (!(content instanceof ArrayBuffer)) continue;
+
+      const chunkSize = this.config.chunking.chunkSize;
+      const totalChunks = Math.ceil(content.byteLength / chunkSize);
+
+      for (const index of indices) {
+        const start = index * chunkSize;
+        const end = Math.min(start + chunkSize, content.byteLength);
+        const chunkData = content.slice(start, end);
+        const checksum = await calculateHash(chunkData);
+
+        await this.transport.sendChunk(
+          {
+            contentHash,
+            index,
+            nodeId: node.nodeId,
+            totalChunks,
+            checksum
+          },
+          chunkData
+        );
+      }
     }
   }
 
@@ -392,25 +434,69 @@ export class SyncExecutor {
     this.context.log.debug(`Updated metadata for: ${change.path}`);
   }
 
+  /**
+   * 解析内容 - 支持内联、分片和 REST API 回退
+   */
   private async resolveContent(
     change: SyncChange,
     packet: SyncPacket
   ): Promise<ArrayBuffer | null> {
     if (!change.contentHash) return null;
 
-    // 检查内联内容
+    // 1. 检查内联内容
     const inline = packet.inlineContents?.[change.contentHash];
     if (inline) {
       return this.decodeInlineContent(inline);
     }
 
-    // 检查分片引用
+    // 2. 检查分片引用
     const chunkRef = packet.chunkRefs?.find(r => r.contentHash === change.contentHash);
     if (chunkRef) {
       return this.downloadAndAssembleChunks(chunkRef);
     }
 
-    return null;
+    // 3. 回退：通过 REST API 或 WebSocket 请求内容
+    return this.fetchContentFromServer(change.contentHash, change.nodeId);
+  }
+
+  /**
+   * 从服务器获取内容（REST API 回退）
+   */
+  private async fetchContentFromServer(contentHash: string, nodeId: string): Promise<ArrayBuffer | null> {
+    try {
+      // 优先使用 WebSocket 请求单个分片（如果是完整文件，index=0, totalChunks=1）
+      if (this.transport.isConnected) {
+        const data = await this.transport.requestChunk(contentHash, 0, nodeId);
+        
+        // 验证哈希
+        const actualHash = await calculateHash(data);
+        if (actualHash === contentHash) {
+          return data;
+        }
+        
+        // 如果哈希不匹配，可能是分片，需要获取全部
+        this.context.log.debug(`Content hash mismatch, may need multiple chunks`);
+      }
+
+      // 回退到 REST API
+      const url = `${this.config.serverUrl}/api/v1/sync/content/${contentHash}`;
+      const response = await fetch(url, {
+        headers: {
+          'Authorization': `Bearer ${this.config.auth.token}`
+        }
+      });
+
+      if (response.ok) {
+        return response.arrayBuffer();
+      }
+
+      this.context.log.warn(`Failed to fetch content ${contentHash}: ${response.status}`);
+      return null;
+
+    } catch (e) {
+      this.context.log.error(`Error fetching content ${contentHash}`, e);
+      return null;
+    }
   }
 
   private async decodeInlineContent(inline: InlineContent): Promise<ArrayBuffer> {
@@ -430,7 +516,7 @@ export class SyncExecutor {
       this.context.log.debug(`Downloading ${missing.length} missing chunks for ${ref.contentHash}`);
 
       for (const index of missing) {
-        const chunkData = await this.requestChunkFromServer(ref.contentHash, index, ref.nodeId);
+        const chunkData = await this.transport.requestChunk(ref.contentHash, index, ref.nodeId);
         const checksum = await calculateHash(chunkData);
         await this.chunkManager.storeChunk(ref.contentHash, index, ref.totalChunks, chunkData, checksum);
       }
@@ -446,43 +532,6 @@ export class SyncExecutor {
 
     await this.chunkManager.cleanupChunks(ref.contentHash, ref.totalChunks);
     return content;
-  }
-
-  private async requestChunkFromServer(
-    contentHash: string,
-    index: number,
-    nodeId: string
-  ): Promise<ArrayBuffer> {
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error(`Chunk request timeout: ${contentHash}[${index}]`));
-      }, SYNC_CONSTANTS.DEFAULT_REQUEST_TIMEOUT);
-
-      this.transport.sendPacket({
-        packetId: crypto.randomUUID(),
-        peerId: this.config.peerId,
-        moduleId: this.config.moduleId,
-        timestamp: Date.now(),
-        changes: [],
-        chunkRefs: [{
-          contentHash,
-          nodeId,
-          totalSize: 0,
-          totalChunks: 0,
-          missingChunks: [index]
-        }]
-      }).then(response => {
-        clearTimeout(timeout);
-        if (response.success && response.chunkData) {
-          resolve(response.chunkData);
-        } else {
-          reject(new Error(`Failed to get chunk: ${contentHash}[${index}]`));
-        }
-      }).catch(e => {
-        clearTimeout(timeout);
-        reject(e);
-      });
-    });
   }
 
   private async ensureParentDirectory(path: string): Promise<void> {
