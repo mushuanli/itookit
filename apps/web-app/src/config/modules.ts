@@ -6,6 +6,10 @@ import { FS_MODULE_CHAT, FS_MODULE_AGENTS } from '@itookit/common';
 // 1. 定义工作区行为类型 (决定 Layout 和 Engine 策略)
 export type WorkspaceType = 'standard' | 'settings' | 'agent' | 'chat';
 
+export interface moduleConfig{
+
+};
+
 // 2. 基础系统配置
 export interface SystemConfig {
     elementId: string;
@@ -24,6 +28,7 @@ export interface WorkspaceConfig extends SystemConfig {
     // ✨ 核心优化：不再硬编码文件属性，而是指定支持的文件类型 ID
     // 数组的第一个元素将作为该工作区 "新建文件" 按钮的默认类型
     supportedFileTypes: string[]; 
+    syncEnabled: boolean,
 
     searchPlaceholder?: string;
     readOnly?: boolean;
@@ -36,6 +41,7 @@ export const WORKSPACES: WorkspaceConfig[] = [
     {
         elementId: 'settings-workspace',
         moduleName: 'settings_root',
+        syncEnabled: false,
         type: 'settings',
         title: 'Settings',
         supportedFileTypes: [], // 不支持创建文件
@@ -48,6 +54,8 @@ export const WORKSPACES: WorkspaceConfig[] = [
     {
         elementId: 'agent-workspace',
         moduleName: FS_MODULE_AGENTS,
+        syncEnabled: true,
+
         type: 'agent',
         title: 'Agents',
         supportedFileTypes: ['agent'], // 仅支持 agent
@@ -61,6 +69,7 @@ export const WORKSPACES: WorkspaceConfig[] = [
     {
         elementId: 'anki-workspace',
         moduleName: 'anki',
+        syncEnabled: true,
         type: 'standard',
         title: 'Anki Memory Cards',
         // 既支持 Anki 卡片，也支持普通 Markdown
@@ -79,6 +88,7 @@ export const WORKSPACES: WorkspaceConfig[] = [
     {
         elementId: 'prompt-workspace',
         moduleName: 'prompts',
+        syncEnabled: true,
         type: 'standard',
         title: 'Prompt Library',
         supportedFileTypes: ['prompt'],
@@ -87,6 +97,7 @@ export const WORKSPACES: WorkspaceConfig[] = [
     {
         elementId: 'project-workspace',
         moduleName: 'projects',
+        syncEnabled: true,
         type: 'standard',
         title: 'Projects',
         supportedFileTypes: ['project'],
@@ -96,6 +107,7 @@ export const WORKSPACES: WorkspaceConfig[] = [
     {
         elementId: 'email-workspace',
         moduleName: 'emails',
+        syncEnabled: true,
         type: 'standard',
         title: 'Email Drafts',
         supportedFileTypes: ['email'],
@@ -106,6 +118,7 @@ export const WORKSPACES: WorkspaceConfig[] = [
     {
         elementId: 'private-workspace',
         moduleName: 'private',
+        syncEnabled: false,
         isProtected: true, 
         type: 'standard',
         title: 'Private Notes',
@@ -118,6 +131,7 @@ export const WORKSPACES: WorkspaceConfig[] = [
     {
         elementId: 'llm-workspace',
         moduleName: FS_MODULE_CHAT,
+        syncEnabled: true,
         type: 'chat',
         title: 'AI Sessions',
         supportedFileTypes: ['chat'],

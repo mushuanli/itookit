@@ -12,6 +12,15 @@ import { WORKSPACES } from '../config/modules';
 let vfsInstance: VFS | null = null;
 
 /**
+ * 从 WORKSPACES 配置中提取启用同步的模块名列表
+ */
+function getSyncableModules(): string[] {
+    return WORKSPACES
+        .filter(ws => ws.syncEnabled)
+        .map(ws => ws.moduleName);
+}
+
+/**
  * 初始化 VFS
  * 使用浏览器预设，自动配置 IndexedDB 存储和标准插件
  */
@@ -30,12 +39,17 @@ export async function initVFS(): Promise<VFS> {
       );
     });
 
+    // ✅ 提取可同步的模块名列表
+    const syncableModules = getSyncableModules();
+    console.log('Syncable modules:', syncableModules);
+
     const vfs = await createBrowserVFSWithAPI({
         dbName: 'MindOS',
         dbVersion:7,
         defaultModule: WORKSPACES[0]?.moduleName || 'default',
         enableTags: true,
-        enableAssets: true
+        enableAssets: true,
+        syncableModules  // ✅ 传入可同步模块列表
     });
 
     // 2. 确保所有工作区对应的模块都已挂载
@@ -45,7 +59,8 @@ export async function initVFS(): Promise<VFS> {
             try {
                 await vfs.mount(ws.moduleName, {
                     description: ws.title,
-                    isProtected: ws.isProtected
+                    isProtected: ws.isProtected,
+                    syncEnabled: ws.syncEnabled  // ✅ 传入同步状态
                 });
                 console.log(`Mounted module: ${ws.moduleName} (Protected: ${!!ws.isProtected})`);
             } catch (e) {
