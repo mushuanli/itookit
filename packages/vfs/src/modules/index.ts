@@ -1,8 +1,9 @@
 // @file packages/vfs-modules/src/index.ts
 
-import { ModulesPlugin } from './ModulesPlugin';
+export { ModulesPlugin } from './ModulesPlugin';
 export { ModuleManager } from './ModuleManager';
-export type { ModuleInfo, MountOptions } from './types';
-
-export { ModulesPlugin };
-export default ModulesPlugin;
+export type { 
+  ModuleInfo, 
+  ModuleMountOptions,
+  ModuleUpdateOptions  // 新增
+} from './types';

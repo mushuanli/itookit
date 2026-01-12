@@ -73,7 +73,7 @@ export class VFS {
     return this.getPlugin('vfs-modules');
   }
 
-  async mount(name: string, options?: { description?: string; isProtected?: boolean }): Promise<ModuleInfo> {
+  async mount(name: string, options?: { description?: string; isProtected?: boolean; syncEnabled?: boolean }): Promise<ModuleInfo> {
     const manager = this.modules?.getModuleManager();
     if (!manager) throw new Error('Modules plugin not available');
     return manager.mount(name, options);
@@ -476,6 +476,30 @@ export class VFS {
         console.error(`Failed to restore ${modData?.module?.name}:`, e);
       }
     }
+  }
+  // ==================== 模块同步控制 ====================
+
+  /**
+   * 检查模块是否启用同步
+   */
+  isModuleSyncEnabled(moduleName: string): boolean {
+    const manager = this.modules?.getModuleManager();
+    if (!manager) return true;  // 默认启用
+    return manager.isSyncEnabled(moduleName);
+  }
+
+  /**
+   * 获取所有启用同步的模块
+   */
+  getSyncEnabledModules(): ModuleInfo[] {
+    return this.modules?.getModuleManager().getSyncEnabledModules() ?? [];
+  }
+
+  /**
+   * 获取所有禁用同步的模块
+   */
+  getSyncDisabledModules(): ModuleInfo[] {
+    return this.modules?.getModuleManager().getSyncDisabledModules() ?? [];
   }
 
   // ==================== 生命周期 ====================

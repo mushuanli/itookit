@@ -247,7 +247,7 @@ export class SyncPlugin implements IPlugin {
     this.builder = new PacketBuilder(this.context, this.config);
     this.chunkManager = new ChunkManager(this.context, this.config);
     this.conflictResolver = new ConflictResolver(this.context, this.config);
-    this.filterEngine = new SyncFilterEngine(this.config.strategy.filters);
+    this.filterEngine = new SyncFilterEngine(this.context, this.config.strategy.filters);
     this.assetHandler = new AssetDependencyHandler(this.context);
     
     // 状态存储（使用 VFS __sync 模块）

@@ -5,10 +5,12 @@ import { SyncConfig, SyncLog, SyncPacket, SyncChange, InlineContent } from '../t
 import { calculateHash, arrayBufferToBase64 } from '@itookit/common';
 import { filterSyncMetadata } from '../utils/metadata';
 import { SYNC_CONSTANTS } from '../constants';
+import { ModulesPlugin } from '../../modules';
 
 export class PacketBuilder {
   private readonly chunkThreshold: number;
   private readonly chunkSize: number;
+  private modulesPlugin?: ModulesPlugin;
 
   constructor(
     private context: IPluginContext,
@@ -16,6 +18,7 @@ export class PacketBuilder {
   ) {
     this.chunkThreshold = config.chunking?.threshold ?? SYNC_CONSTANTS.DEFAULT_CHUNK_THRESHOLD;
     this.chunkSize = config.chunking?.chunkSize ?? SYNC_CONSTANTS.DEFAULT_CHUNK_SIZE;
+    this.modulesPlugin = context.getPlugin<ModulesPlugin>('vfs-modules');
   }
 
   async build(logs: SyncLog[]): Promise<SyncPacket> {
@@ -30,6 +33,12 @@ export class PacketBuilder {
     };
 
     for (const log of logs) {
+      // 再次检查模块同步状态（双重保险）
+      if (!this.isPathSyncEnabled(log.path)) {
+        this.context.log.debug(`Skipping log for disabled sync module: ${log.path}`);
+        continue;
+      }
+
       const change = await this.buildChange(log, packet);
       if (change) {
         packet.changes.push(change);
@@ -37,6 +46,11 @@ export class PacketBuilder {
     }
 
     return packet;
+  }
+
+  private isPathSyncEnabled(path: string): boolean {
+    if (!this.modulesPlugin) return true;
+    return this.modulesPlugin.getModuleManager().isPathSyncEnabled(path);
   }
 
   private async buildChange(
