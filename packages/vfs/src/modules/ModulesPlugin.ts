@@ -49,7 +49,7 @@ export class ModulesPlugin implements IPlugin {
       throw new Error('Plugin not installed');
     }
 
-    this.moduleManager = new ModuleManager(this.context.kernel);
+    this.moduleManager = new ModuleManager(this.context);
     await this.moduleManager.initialize();
 
     this._state = PluginState.ACTIVATED;

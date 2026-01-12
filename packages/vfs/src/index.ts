@@ -76,7 +76,7 @@ export type { AssetMetadata, AssetInfo } from './assets';
 
 // Modules
 export { ModulesPlugin, ModuleManager } from './modules';
-export type { ModuleInfo, MountOptions } from './modules';
+export type { ModuleInfo, ModuleMountOptions } from './modules';
 
 // Session Adapter
 export { VFSModuleEngine, BaseModuleService } from './adapter-session';
