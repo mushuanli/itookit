@@ -8,25 +8,246 @@
   --llm-input-placeholder: #9ca3af;
   --llm-input-radius: 12px;
   --llm-input-padding: 12px;
+  --llm-settings-bg: #f8fafc;
 }
 
 /* --- Block: 主容器 --- */
 .llm-input {
   display: flex;
-  align-items: flex-end; /* 底部对齐，适应多行输入 */
-  gap: 8px;
+  flex-direction: column;
   background: var(--llm-input-bg);
   border: 1px solid var(--llm-input-border);
   border-radius: var(--llm-input-radius);
-  padding: 8px;
   box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
   transition: box-shadow 0.2s, border-color 0.2s;
   position: relative;
+  overflow: hidden;
 }
 
 .llm-input:focus-within {
   border-color: var(--llm-input-focus-ring);
   box-shadow: 0 4px 12px -2px rgba(59, 130, 246, 0.15);
+}
+
+/* ✨ 新增：设置面板 */
+.llm-input__settings-panel {
+  background: var(--llm-settings-bg);
+  border-bottom: 1px solid var(--llm-input-border);
+  padding: 12px 16px;
+  animation: slideDown 0.2s ease-out;
+}
+
+.llm-input__settings-panel--entering {
+  animation: slideDown 0.2s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.llm-input__settings-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.llm-input__settings-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.llm-input__settings-close {
+  background: none;
+  border: none;
+  padding: 4px;
+  cursor: pointer;
+  color: #94a3b8;
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+
+.llm-input__settings-close:hover {
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.llm-input__settings-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.llm-input__setting-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.llm-input__setting-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--llm-input-text);
+}
+
+.llm-input__setting-icon {
+  font-size: 1rem;
+}
+
+.llm-input__setting-hint {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  margin-top: 2px;
+}
+
+/* Model Select */
+.llm-input__model-select {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  background: white;
+  color: var(--llm-input-text);
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.llm-input__model-select:hover {
+  border-color: #cbd5e1;
+}
+
+.llm-input__model-select:focus {
+  outline: none;
+  border-color: var(--llm-input-focus-ring);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+/* History Slider */
+.llm-input__history-value {
+  margin-left: auto;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--llm-input-focus-ring);
+  background: #eff6ff;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.llm-input__slider-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.llm-input__history-slider {
+  width: 100%;
+  height: 6px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: #e2e8f0;
+  border-radius: 3px;
+  outline: none;
+  cursor: pointer;
+}
+
+.llm-input__history-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--llm-input-focus-ring);
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.llm-input__history-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.1);
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+}
+
+.llm-input__history-slider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--llm-input-focus-ring);
+  cursor: pointer;
+  border: none;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.llm-input__slider-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  color: #94a3b8;
+}
+
+/* Preset Buttons */
+.llm-input__presets {
+  flex-direction: row !important;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.llm-input__presets .llm-input__setting-label {
+  font-size: 0.8rem;
+  color: #64748b;
+  margin-right: 8px;
+}
+
+.llm-input__preset-buttons {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.llm-input__preset-btn {
+  padding: 4px 10px;
+  font-size: 0.75rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  background: white;
+  color: #64748b;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.llm-input__preset-btn:hover {
+  border-color: var(--llm-input-focus-ring);
+  color: var(--llm-input-focus-ring);
+}
+
+.llm-input__preset-btn.active {
+  background: var(--llm-input-focus-ring);
+  border-color: var(--llm-input-focus-ring);
+  color: white;
+}
+
+/* ✨ 主输入区域容器 */
+.llm-input__main {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 8px;
 }
 
 /* --- Element: 左侧执行器选择器 --- */
@@ -70,7 +291,48 @@
   flex: 1;
   display: flex;
   flex-direction: column;
-  min-width: 0; /* 防止 flex 子项溢出 */
+  min-width: 0;
+}
+
+/* ✨ 活动设置指示器 */
+.llm-input__active-settings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.llm-input__active-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: 0.75rem;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-radius: 12px;
+  border: 1px solid #bfdbfe;
+}
+
+.llm-input__active-badge[data-type="history"] {
+  background: #fef3c7;
+  color: #92400e;
+  border-color: #fcd34d;
+}
+
+.llm-input__badge-clear {
+  background: none;
+  border: none;
+  padding: 0 2px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 0.15s;
+  line-height: 1;
+}
+
+.llm-input__badge-clear:hover {
+  opacity: 1;
 }
 
 .llm-input__textarea {
@@ -111,6 +373,16 @@
   gap: 4px;
 }
 
+.llm-input__remove-btn {
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 0.15s;
+}
+
+.llm-input__remove-btn:hover {
+  opacity: 1;
+}
+
 /* --- Element: 右侧操作区 --- */
 .llm-input__actions {
   display: flex;
@@ -133,6 +405,7 @@
   color: #6b7280;
   cursor: pointer;
   transition: all 0.2s;
+  position: relative;
 }
 
 .llm-input__btn:hover {
@@ -140,9 +413,28 @@
   color: #111827;
 }
 
-/* 附件按钮 */
-.llm-input__btn--attach {
-  /* 特定样式 */
+.llm-input__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ✨ 设置按钮 */
+.llm-input__btn--settings.active {
+  background-color: #eff6ff;
+  color: var(--llm-input-focus-ring);
+}
+
+/* 设置按钮有覆盖值时的指示器 */
+.llm-input__btn--settings.has-overrides::after {
+  content: '';
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 6px;
+  height: 6px;
+  background: #f59e0b;
+  border-radius: 50%;
+  border: 1px solid white;
 }
 
 /* 发送按钮 */
@@ -166,4 +458,83 @@
   background-color: #ef4444;
   color: white;
 }
-.llm-input__btn--stop:hover { background-color: #dc2626; }
+
+.llm-input__btn--stop:hover {
+  background-color: #dc2626;
+}
+
+/* 拖拽状态 */
+.llm-input__field-wrapper--drag-active {
+  background: #eff6ff;
+  border-radius: 8px;
+}
+
+.llm-input__field-wrapper--disabled {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+/* 响应式调整 */
+@media (max-width: 600px) {
+  .llm-input__settings-body {
+    gap: 12px;
+  }
+  
+  .llm-input__presets {
+    flex-direction: column !important;
+    align-items: flex-start;
+  }
+  
+  .llm-input__preset-buttons {
+    width: 100%;
+  }
+  
+  .llm-input__preset-btn {
+    flex: 1;
+    text-align: center;
+  }
+  
+  .llm-input__executor-select {
+    max-width: 90px;
+  }
+}
+
+/* 暗色模式支持 */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --llm-input-bg: #1e1e1e;
+    --llm-input-border: #3d3d3d;
+    --llm-input-text: #e5e5e5;
+    --llm-input-placeholder: #6b6b6b;
+    --llm-settings-bg: #252525;
+  }
+  
+  .llm-input__executor-select {
+    background-color: #2d2d2d;
+    color: #e5e5e5;
+  }
+  
+  .llm-input__model-select {
+    background: #2d2d2d;
+    border-color: #3d3d3d;
+    color: #e5e5e5;
+  }
+  
+  .llm-input__history-slider {
+    background: #3d3d3d;
+  }
+  
+  .llm-input__preset-btn {
+    background: #2d2d2d;
+    border-color: #3d3d3d;
+    color: #a1a1a1;
+  }
+  
+  .llm-input__preset-btn:hover {
+    border-color: var(--llm-input-focus-ring);
+  }
+  
+  .llm-input__settings-close:hover {
+    background: #3d3d3d;
+  }
+}
