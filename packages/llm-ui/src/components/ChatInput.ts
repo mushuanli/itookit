@@ -96,6 +96,27 @@ export class ChatInput {
             // 否则渲染一个默认的
             this.updateExecutors([{ id: 'default', name: 'Assistant', category: 'System' }]);
         }
+        
+        // ✅ 新增：在 render 和 bindEvents 之后，应用初始设置到 UI
+        this.applyCurrentSettingsToUI();
+    }
+
+    // ✅ 新增：将 currentSettings 应用到 UI 元素
+    private applyCurrentSettingsToUI(): void {
+        // Model select
+        if (this.currentSettings.modelId && this.modelSelect) {
+            this.modelSelect.value = this.currentSettings.modelId;
+        }
+        
+        // History slider
+        if (this.historySlider) {
+            this.historySlider.value = this.currentSettings.historyLength.toString();
+            this.updateHistoryDisplay();
+            this.updatePresetButtons();
+        }
+        
+        // Active badges
+        this.updateActiveBadges();
     }
 
     private render() {
@@ -472,8 +493,21 @@ export class ChatInput {
 
     // ✨ 新增：更新模型选项
     public updateModels(models: ModelOption[]): void {
+        const previousModelId = this.currentSettings.modelId;
         this.models = models;
         this.updateModelOptions();
+        
+        // ✅ 恢复之前的选中状态（如果模型仍然存在）
+        if (previousModelId) {
+            const stillExists = models.some(m => m.id === previousModelId);
+            if (stillExists) {
+                this.modelSelect.value = previousModelId;
+            } else {
+                // 模型不再存在，清除设置
+                this.currentSettings.modelId = undefined;
+                this.updateActiveBadges();
+            }
+        }
     }
 
     private updateModelOptions(): void {
@@ -785,14 +819,7 @@ export class ChatInput {
             this.setExecutor(state.agentId);
         }
         if (state.settings) {
-            this.currentSettings = { ...this.currentSettings, ...state.settings };
-            if (this.currentSettings.modelId) {
-                this.modelSelect.value = this.currentSettings.modelId;
-            }
-            this.historySlider.value = this.currentSettings.historyLength.toString();
-            this.updateHistoryDisplay();
-            this.updatePresetButtons();
-            this.updateActiveBadges();
+        this.setSettings(state.settings);
         }
     }
 
@@ -805,10 +832,23 @@ export class ChatInput {
     public setSettings(settings: Partial<ChatSettings>): void {
         this.currentSettings = { ...this.currentSettings, ...settings };
         
-        if (settings.modelId !== undefined) {
-            this.modelSelect.value = settings.modelId || '';
+        // ✅ 关键：确保 modelSelect 存在且模型在列表中
+        if (settings.modelId !== undefined && this.modelSelect) {
+            // 检查选项是否存在
+            const optionExists = Array.from(this.modelSelect.options).some(
+                opt => opt.value === settings.modelId
+            );
+            
+            if (optionExists || settings.modelId === '') {
+                this.modelSelect.value = settings.modelId || '';
+            } else {
+                console.warn(`[ChatInput] Model ${settings.modelId} not found in options, keeping empty`);
+                this.currentSettings.modelId = undefined;
+                this.modelSelect.value = '';
+            }
         }
-        if (settings.historyLength !== undefined) {
+        
+        if (settings.historyLength !== undefined && this.historySlider) {
             this.historySlider.value = settings.historyLength.toString();
             this.updateHistoryDisplay();
             this.updatePresetButtons();

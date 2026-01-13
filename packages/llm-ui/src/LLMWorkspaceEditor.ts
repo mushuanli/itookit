@@ -1,18 +1,18 @@
 // @file: llm-ui/LLMWorkspaceEditor.ts
 
-import { 
-    IEditor, EditorOptions, EditorHostContext, EditorEvent, EditorEventCallback, 
+import {
+    IEditor, EditorOptions, EditorHostContext, EditorEvent, EditorEventCallback,
     escapeHTML, Toast, showConfirmDialog
 } from '@itookit/common';
 import { LLMPrintService, type PrintService, AssetManagerUI } from '@itookit/mdxeditor';
 import { FloatingNavPanel } from './components/FloatingNavPanel';
 import { HistoryView, CollapseStateMap } from './components/HistoryView';
-import { ChatInput, ExecutorOption, ChatInputState } from './components/ChatInput';
-import { 
-    ILLMSessionEngine, 
+import { ChatInput, ExecutorOption, ChatInputState, ModelOption, ChatSettings } from './components/ChatInput';
+import {
+    ILLMSessionEngine,
     IAgentService,
-    SessionManager, 
-    getSessionRegistry, 
+    SessionManager,
+    getSessionRegistry,
     SessionRegistry,
     SessionGroup,
     ExecutionNode,
@@ -25,13 +25,13 @@ import { NodeAction } from './core/types';
 export interface LLMEditorOptions extends EditorOptions {
     sessionEngine: ILLMSessionEngine;
     agentService: IAgentService;
-    
+
     /** 外部指定的初始输入状态（用于动态创建会话） */
     initialInputState?: {
         text?: string;
         agentId?: string;
     };
-    
+
     /** 是否为新创建的会话（跳过恢复已保存状态） */
     isNewSession?: boolean;
 }
@@ -60,10 +60,10 @@ export class LLMWorkspaceEditor implements IEditor {
 
     // 会话管理器（代理层）
     private sessionManager: SessionManager;
-    
+
     // 全局注册表引用
     private registry: SessionRegistry;
-    
+
     // 事件监听器
     private listeners = new Map<string, Set<EditorEventCallback>>();
     private globalEventUnsubscribe: (() => void) | null = null;
@@ -77,10 +77,10 @@ export class LLMWorkspaceEditor implements IEditor {
     private currentTitle: string = 'New Chat';
     private isAllExpanded: boolean = true;
     private currentSessionId: string | null = null;
-    
+
     // 配置
     private options: LLMEditorOptions;
-    
+
     // 初始化状态
     private initPromise: Promise<void> | null = null;
     private initResolve: (() => void) | null = null;
@@ -88,7 +88,9 @@ export class LLMWorkspaceEditor implements IEditor {
 
     // 折叠状态缓存
     private collapseStatesCache: CollapseStateMap = {};
-    
+    // ✅ 新增：标记是否因为删除而销毁
+    private isBeingDeleted: boolean = false;
+
     // UI 状态保存定时器
     private uiStateSaveTimer: ReturnType<typeof setTimeout> | null = null;
     private readonly UI_STATE_SAVE_DEBOUNCE = 2000;
@@ -104,7 +106,7 @@ export class LLMWorkspaceEditor implements IEditor {
     private get hostContext(): EditorHostContext | undefined {
         return this.options.hostContext;
     }
-    
+
     private get engine(): ILLMSessionEngine {
         return this.options.sessionEngine as ILLMSessionEngine;
     }
@@ -126,29 +128,29 @@ export class LLMWorkspaceEditor implements IEditor {
     async init(container: HTMLElement, initialContent?: string): Promise<void> {
         this.container = container;
         this.container.classList.add('llm-ui-workspace');
-        
+
         this.initPromise = new Promise((resolve, reject) => {
             this.initResolve = resolve;
             this.initReject = reject;
         });
-        
+
         try {
             // 1. 渲染布局
             this.renderLayout();
-            
+
             // 2. 初始化组件
             await this.initComponents();
-            
+
             // 3. 绑定事件
             this.bindTitleBarEvents();
             this.bindGlobalEvents();
-            
+
             // 4. 加载会话
             await this.loadSessionFromEngine(initialContent);
 
             this.emit('ready');
             this.initResolve?.();
-            
+
         } catch (e: any) {
             console.error('[LLMWorkspaceEditor] init failed:', e);
             this.initReject?.(e);
@@ -174,17 +176,32 @@ export class LLMWorkspaceEditor implements IEditor {
             }
         );
 
+        // ✅ 修复：先尝试加载已保存的 UI 状态，获取 initialSettings
+        let initialSettings: ChatSettings | undefined;
+        try {
+            const savedUIState = await this.engine.getUIState(this.options.nodeId!) as UIStatePayload;
+            if (savedUIState?.input_state?.settings && !this.options.isNewSession) {
+                initialSettings = savedUIState.input_state.settings;
+                // 同时保存 collapseStates
+                if (savedUIState.collapse_states) {
+                    this.collapseStatesCache = savedUIState.collapse_states;
+                }
+            }
+        } catch (e) {
+            console.warn('[LLMWorkspaceEditor] Failed to pre-load UI state:', e);
+        }
+
         // 获取初始执行器列表
         let initialAgents: ExecutorOption[] = [];
         try {
             const agents = await this.options.agentService.getAgents();
-            
+
             initialAgents = agents.map(agent => ({
                 id: agent.id,
                 name: agent.name,
                 icon: agent.icon,
-                category: agent.type === 'agent' ? 'Agents' : 
-                         agent.type === 'workflow' ? 'Workflows' : 'Other',
+                category: agent.type === 'agent' ? 'Agents' :
+                    agent.type === 'workflow' ? 'Workflows' : 'Other',
                 description: agent.description
             }));
 
@@ -217,20 +234,95 @@ export class LLMWorkspaceEditor implements IEditor {
             }];
         }
 
-        // 初始化输入组件
+        // ✨ 新增：获取初始模型列表
+        const initialModels = await this.loadAvailableModels();
+
+        // ✨ 修改：初始化输入组件，添加模型和设置回调
         this.chatInput = new ChatInput(inputEl, {
-            onSend: (text, files, agentId) => this.handleUserSend(text, files, agentId),
+            onSend: (text, files, agentId, overrides) => this.handleUserSend(text, files, agentId, overrides),
             onStop: () => this.sessionManager.abort(),
             initialAgents,
-            // 输入变化回调（用于自动保存）
+            initialModels,
+            initialSettings,  // ✅ 传递预加载的设置
             onInputChange: () => this.scheduleInputStateSave(),
-            onExecutorChange: (_executorId) => {
+            onExecutorChange: (executorId) => {
                 this.scheduleInputStateSave();
-            }
+                // ✨ 可选：当 Agent 变化时，更新模型列表（如果不同 Agent 有不同的可用模型）
+                this.updateModelsForAgent(executorId);
+            },
+            // ✨ 新增：设置变化回调
+            onSettingsChange: (settings) => this.handleChatSettingsChange(settings),
         });
 
         // 绑定导航相关事件
         this.bindNavigationEvents();
+    }
+
+    // ✨ 新增：加载所有可用模型
+    private async loadAvailableModels(): Promise<ModelOption[]> {
+        const models: ModelOption[] = [];
+
+        try {
+            const connections = await this.options.agentService.getConnections();
+
+            for (const conn of connections) {
+                if (conn.availableModels && conn.availableModels.length > 0) {
+                    for (const model of conn.availableModels) {
+                        models.push({
+                            id: model.id,
+                            name: model.name,
+                            provider: conn.name,  // 使用连接名称作为分组
+                            description: model.supportsThinking
+                                ? 'Supports extended thinking'
+                                : undefined
+                        });
+                    }
+                }
+            }
+
+            console.log(`[LLMWorkspaceEditor] Loaded ${models.length} models from ${connections.length} connections`);
+
+        } catch (e) {
+            console.warn('[LLMWorkspaceEditor] Failed to load models:', e);
+        }
+
+        return models;
+    }
+
+    // ✨ 新增：根据 Agent 更新模型列表（可选）
+    private async updateModelsForAgent(agentId: string): Promise<void> {
+        try {
+            const agentConfig = await this.options.agentService.getAgentConfig(agentId);
+
+            if (agentConfig?.config.connectionId) {
+                const connection = await this.options.agentService.getConnection(
+                    agentConfig.config.connectionId
+                );
+
+                if (connection?.availableModels) {
+                    const models: ModelOption[] = connection.availableModels.map(m => ({
+                        id: m.id,
+                        name: m.name,
+                        provider: connection.name,
+                    }));
+
+                    this.chatInput.updateModels(models);
+                }
+            }
+        } catch (e) {
+            console.warn('[LLMWorkspaceEditor] Failed to update models for agent:', e);
+        }
+    }
+
+    // ✨ 新增：处理聊天设置变化
+    private async handleChatSettingsChange(settings: ChatSettings): Promise<void> {
+        console.log('[LLMWorkspaceEditor] Chat settings changed:', settings);
+
+        // 保存到 UI 状态
+        this.scheduleInputStateSave();
+
+        // 可选：如果需要实时同步到 Agent 配置，可以在这里处理
+        // 但通常建议只在发送消息时使用 overrides，而非修改 Agent 配置
     }
 
     /**
@@ -241,9 +333,9 @@ export class LLMWorkspaceEditor implements IEditor {
         this.container.addEventListener('open-connection-settings', () => {
             console.log('[LLMWorkspaceEditor] Requesting to open connection settings...');
             if (this.hostContext?.navigate) {
-                this.hostContext.navigate({ 
-                    target: 'settings', 
-                    resourceId: 'connections' 
+                this.hostContext.navigate({
+                    target: 'settings',
+                    resourceId: 'connections'
                 });
             } else {
                 console.warn('[LLMWorkspaceEditor] Host does not support navigation');
@@ -279,12 +371,12 @@ export class LLMWorkspaceEditor implements IEditor {
         } catch (e) {
             console.warn('[LLMWorkspaceEditor] Error reading manifest:', e);
         }
-        
+
         if (!sessionId) {
             // 如果文件是空的或者损坏，重新初始化
             console.log('[LLMWorkspaceEditor] Initializing file structure...');
             sessionId = await this.options.sessionEngine.initializeExistingFile(
-                this.options.nodeId, 
+                this.options.nodeId,
                 this.currentTitle
             );
         }
@@ -343,20 +435,18 @@ export class LLMWorkspaceEditor implements IEditor {
     private async restoreUIState(): Promise<void> {
         // 1. 尝试加载文件中保存的状态
         let savedState: UIStatePayload | null = null;
-        
+
         try {
             savedState = await this.engine.getUIState(this.options.nodeId!) as UIStatePayload;
         } catch (e) {
             console.warn('[LLMWorkspaceEditor] Failed to load UI state:', e);
         }
 
-        // 2. 恢复折叠状态
-        if (savedState?.collapse_states) {
+        // 恢复折叠状态（可能在 initComponents 中已加载）
+        if (savedState?.collapse_states && Object.keys(this.collapseStatesCache).length === 0) {
             this.collapseStatesCache = savedState.collapse_states;
             this.historyView.setCollapseStates(this.collapseStatesCache);
             console.log('[LLMWorkspaceEditor] Restored collapse states from file');
-        } else {
-            this.collapseStatesCache = {};
         }
 
         // 3. 恢复输入状态
@@ -393,7 +483,11 @@ export class LLMWorkspaceEditor implements IEditor {
 
         // 优先级 3：恢复已保存的状态（非新会话）
         if (!this.options.isNewSession && savedState) {
-            this.chatInput.setState(savedState);
+            // ✅ 只恢复 text 和 agentId，settings 已在构造时处理
+            this.chatInput.setState({
+                text: savedState.text,
+                agentId: savedState.agentId
+            });
             console.log('[LLMWorkspaceEditor] Restored saved input state', savedState);
             return;
         }
@@ -408,30 +502,30 @@ export class LLMWorkspaceEditor implements IEditor {
     private getAndClearCreateParams(): { agentId?: string; text?: string } | null {
         const key = 'app_create_params';
         const paramsJson = sessionStorage.getItem(key);
-        
+
         if (!paramsJson) return null;
 
         try {
             const params = JSON.parse(paramsJson);
-            
+
             // 检查时效性（5分钟内有效）
             const isValid = params.timestamp && (Date.now() - params.timestamp < 5 * 60 * 1000);
-            
+
             // 检查目标是否匹配
-            const isTargetMatch = !params.target || 
-                                  params.target === 'chat' || 
-                                  params.target === 'llm-workspace';
-            
+            const isTargetMatch = !params.target ||
+                params.target === 'chat' ||
+                params.target === 'llm-workspace';
+
             // 无论是否有效，都清除
             sessionStorage.removeItem(key);
-            
+
             if (isValid && isTargetMatch) {
                 return {
                     agentId: params.agentId,
                     text: params.text
                 };
             }
-            
+
             return null;
 
         } catch (e) {
@@ -445,7 +539,7 @@ export class LLMWorkspaceEditor implements IEditor {
      */
     private updateStatusFromSnapshot(snapshot: SessionSnapshot): void {
         this.updateStatusIndicatorFromStatus(snapshot.status);
-        
+
         if (snapshot.isRunning) {
             this.chatInput.setLoading(true);
             this.historyView.enterStreamingMode();
@@ -500,15 +594,15 @@ export class LLMWorkspaceEditor implements IEditor {
      */
     private scheduleUIStateSave(states: CollapseStateMap): void {
         this.collapseStatesCache = states;
-        
+
         if (this.sessionManager.isGenerating()) {
             return;
         }
-        
+
         if (this.uiStateSaveTimer) {
             clearTimeout(this.uiStateSaveTimer);
         }
-        
+
         this.uiStateSaveTimer = setTimeout(async () => {
             if (!this.sessionManager.isGenerating()) {
                 await this.saveUIState();
@@ -523,11 +617,11 @@ export class LLMWorkspaceEditor implements IEditor {
         if (this.sessionManager.isGenerating()) {
             return;
         }
-        
+
         if (this.inputStateSaveTimer) {
             clearTimeout(this.inputStateSaveTimer);
         }
-        
+
         this.inputStateSaveTimer = setTimeout(async () => {
             if (!this.sessionManager.isGenerating()) {
                 await this.saveUIState();
@@ -536,11 +630,23 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     /**
+     * ✅ 新增：标记为删除状态（供外部调用）
+     */
+    public markAsDeleted(): void {
+        this.isBeingDeleted = true;
+    }
+
+    /**
      * 保存 UI 状态到文件
      */
     private async saveUIState(): Promise<void> {
+        // ✅ 如果标记为删除，直接跳过
+        if (this.isBeingDeleted) {
+            return;
+        }
+
         if (!this.options.nodeId) return;
-        
+
         const inputState = this.chatInput ? this.chatInput.getState() : undefined;
 
         try {
@@ -551,7 +657,14 @@ export class LLMWorkspaceEditor implements IEditor {
 
             await this.engine.updateUIState(this.options.nodeId, payload);
             console.log('[LLMWorkspaceEditor] UI state saved');
-        } catch (e) {
+        } catch (e: any) {
+            // ✅ 优雅处理节点不存在的情况
+            if (e.message?.includes('not found') ||
+                e.message?.includes('Node not found') ||
+                e.message?.includes('Manifest missing')) {
+                // 静默处理，不输出错误日志
+                return;
+            }
             console.warn('[LLMWorkspaceEditor] Failed to save UI state:', e);
         }
     }
@@ -697,7 +810,7 @@ export class LLMWorkspaceEditor implements IEditor {
         this.container.querySelector('#llm-btn-print')?.addEventListener('click', async () => {
             try {
                 const md = this.sessionManager.exportToMarkdown();
-                
+
                 await this.getPrintService().print(md, {
                     title: this.currentTitle || 'Chat Conversation',
                     showHeader: true,
@@ -733,7 +846,7 @@ export class LLMWorkspaceEditor implements IEditor {
                 e.preventDefault();
                 this.toggleNavigator();
             }
-            
+
             // Ctrl/Cmd + Shift + Up/Down: 快速导航
             if ((e.ctrlKey || e.metaKey) && e.shiftKey) {
                 if (e.key === 'ArrowUp') {
@@ -745,7 +858,7 @@ export class LLMWorkspaceEditor implements IEditor {
                 }
             }
         };
-        
+
         document.addEventListener('keydown', this.globalShortcutHandler);
     }
 
@@ -756,9 +869,9 @@ export class LLMWorkspaceEditor implements IEditor {
 
     private async handleOpenAssetManager(): Promise<void> {
         const engine = this.engine; // 获取 ILLMSessionEngine 实例
-        const ownerNodeId = this.options.ownerNodeId || this.options.nodeId; 
+        const ownerNodeId = this.options.ownerNodeId || this.options.nodeId;
 
-        if (!engine || ! ownerNodeId ) {
+        if (!engine || !ownerNodeId) {
             Toast.error('Engine not connected or no session');
             return;
         }
@@ -785,7 +898,7 @@ export class LLMWorkspaceEditor implements IEditor {
             // 且主要目的是“管理/删除”附件，因此这里传 null (需要类型断言) 或 传入 undefined。
             // 如果 AssetManagerUI 内部强依赖 editor，可能需要传入一个 Dummy 对象。
             this.assetManagerUI = new AssetManagerUI(engine, null as any, {});
-            
+
             await this.assetManagerUI.show(assetDirId);
 
         } catch (e: any) {
@@ -804,7 +917,7 @@ export class LLMWorkspaceEditor implements IEditor {
     private handleSessionEvent(event: OrchestratorEvent): void {
         // 转发给 HistoryView
         this.historyView.processEvent(event);
-        
+
         if (event.type === 'finished' || event.type === 'session_start' || event.type === 'error') {
             console.log(`[LLMWorkspaceEditor] Session Event: ${event.type}`, event.payload);
         }
@@ -830,10 +943,10 @@ export class LLMWorkspaceEditor implements IEditor {
             case 'pool_status_changed':
                 this.updateBackgroundIndicator(event.payload);
                 break;
-                
+
             case 'session_status_changed':
                 console.log(`[LLMWorkspaceEditor] Status Changed: ${event.payload.sessionId} -> ${event.payload.status}`);
-                
+
                 if (event.payload.sessionId === this.currentSessionId) {
                     this.updateStatusIndicatorFromStatus(event.payload.status);
                 } else if (event.payload.status === 'completed') {
@@ -894,7 +1007,7 @@ export class LLMWorkspaceEditor implements IEditor {
         let session = sessions.find(s => s.id === nodeId);
 
         if (!session) {
-            session = sessions.find(s => 
+            session = sessions.find(s =>
                 s.executionRoot?.id === nodeId ||
                 this.findNodeInTree(s.executionRoot, nodeId)
             );
@@ -937,31 +1050,31 @@ export class LLMWorkspaceEditor implements IEditor {
 
     private async handleDelete(nodeId: string): Promise<void> {
         console.log(`[LLMWorkspaceEditor] Deleting: ${nodeId}`);
-        
+
         try {
             const sessions = this.sessionManager.getSessions();
             const idsToDelete = this.collectDeletionIds(nodeId, sessions);
-            
+
             console.log(`[LLMWorkspaceEditor] IDs to delete:`, idsToDelete);
-            
+
             // 乐观更新
             this.historyView.removeMessages(idsToDelete, true);
-            
+
             await this.sessionManager.deleteMessage(nodeId, {
                 mode: 'soft',
                 cascade: false,
                 deleteAssociatedResponses: true
             });
-            
+
             this.emit('change');
-            
+
         } catch (e: any) {
             console.error('[LLMWorkspaceEditor] Delete failed:', e);
-            
+
             // 回滚
             const sessions = this.sessionManager.getSessions();
             this.historyView.renderFull(sessions);
-            
+
             this.historyView.renderError(e);
         }
     }
@@ -971,12 +1084,12 @@ export class LLMWorkspaceEditor implements IEditor {
      */
     private collectDeletionIds(nodeId: string, sessions: SessionGroup[]): string[] {
         const ids: string[] = [nodeId];
-        
+
         const targetIndex = sessions.findIndex(s => s.id === nodeId);
         if (targetIndex === -1) return ids;
-        
+
         const target = sessions[targetIndex];
-        
+
         if (target.role === 'user') {
             for (let i = targetIndex + 1; i < sessions.length; i++) {
                 const s = sessions[i];
@@ -990,7 +1103,7 @@ export class LLMWorkspaceEditor implements IEditor {
                 }
             }
         }
-        
+
         return ids;
     }
 
@@ -1060,51 +1173,62 @@ export class LLMWorkspaceEditor implements IEditor {
     /**
      * 处理用户发送消息
      */
-    private async handleUserSend(text: string, files: File[], agentId?: string): Promise<void> {
-        const ownerNodeId = this.options.ownerNodeId || this.options.nodeId; 
+    private async handleUserSend(
+        text: string,
+        files: File[],
+        agentId?: string,
+        overrides?: { modelId?: string; historyLength?: number; temperature?: number }
+    ): Promise<void> {
+        const ownerNodeId = this.options.ownerNodeId || this.options.nodeId;
         if (!ownerNodeId) {
             console.error('[LLMWorkspaceEditor] No session loaded!');
             return;
         }
 
-        console.log('[LLMWorkspaceEditor] User sending message...');
-        this.chatInput.setLoading(true); 
-        
+        console.log('[LLMWorkspaceEditor] User sending message...', { agentId, overrides });
+        this.chatInput.setLoading(true);
+
         try {
-            let finalText = text || ''; 
-            
+            let finalText = text || '';
+
             // 上传附件
             if (files.length > 0) {
                 const engine = this.options.sessionEngine;
-                
+
                 await Promise.all(files.map(async (file) => {
                     try {
                         const arrayBuffer = await file.arrayBuffer();
                         await engine.createAsset(ownerNodeId, file.name, arrayBuffer);
-                        
+
                         console.log(`[LLMWorkspaceEditor] Asset saved: ${file.name}`);
-                        
+
                         const isImage = file.type.startsWith('image/');
-                        const ref = isImage 
-                            ? `\n\n![${file.name}](@asset/${file.name})` 
+                        const ref = isImage
+                            ? `\n\n![${file.name}](@asset/${file.name})`
                             : `\n\n[📄 ${file.name}](@asset/${file.name})`;
-                            
+
                         finalText += ref;
-                        
+
                     } catch (uploadErr) {
                         console.error(`[LLMWorkspaceEditor] Failed to save asset ${file.name}:`, uploadErr);
                         Toast.error(`Failed to upload ${file.name}`);
                     }
                 }));
             }
-            
+
             if (!finalText.trim()) {
                 this.chatInput.setLoading(false);
                 return;
             }
 
-            await this.sessionManager.runUserQuery(finalText.trim(), files, agentId || 'default');
-            
+            // ✨ 修改：传递 overrides 到 SessionManager
+            await this.sessionManager.runUserQuery(
+                finalText.trim(),
+                files,
+                agentId || 'default',
+                overrides  // ✨ 传递覆盖参数
+            );
+
         } catch (error: any) {
             console.error('[LLMWorkspaceEditor] Send failed:', error);
             this.historyView.renderError(error);
@@ -1131,16 +1255,16 @@ export class LLMWorkspaceEditor implements IEditor {
                 onBatchCopy: (ids) => this.handleBatchCopy(ids),
             });
         }
-        
+
         const sessions = this.sessionManager.getSessions();
         const collapseStates = this.historyView.getCollapseStates();
         this.floatingNav.updateItems(sessions, collapseStates);
-        
+
         const visibleSessionId = this.findCurrentVisibleSession();
         if (visibleSessionId) {
             this.floatingNav.setCurrentChat(visibleSessionId);
         }
-        
+
         this.floatingNav.toggle();
     }
 
@@ -1150,10 +1274,10 @@ export class LLMWorkspaceEditor implements IEditor {
     private findCurrentVisibleSession(): string | null {
         const historyEl = this.container.querySelector('#llm-ui-history');
         if (!historyEl) return null;
-        
+
         const historyRect = historyEl.getBoundingClientRect();
         const centerY = historyRect.top + historyRect.height / 2;
-        
+
         const sessions = historyEl.querySelectorAll('[data-session-id]');
         for (const session of sessions) {
             const rect = session.getBoundingClientRect();
@@ -1161,14 +1285,14 @@ export class LLMWorkspaceEditor implements IEditor {
                 return (session as HTMLElement).dataset.sessionId || null;
             }
         }
-        
+
         for (const session of sessions) {
             const rect = session.getBoundingClientRect();
             if (rect.bottom > historyRect.top && rect.top < historyRect.bottom) {
                 return (session as HTMLElement).dataset.sessionId || null;
             }
         }
-        
+
         return null;
     }
 
@@ -1178,10 +1302,10 @@ export class LLMWorkspaceEditor implements IEditor {
     private scrollToSession(sessionId: string): void {
         const historyEl = this.container.querySelector('#llm-ui-history');
         const sessionEl = historyEl?.querySelector(`[data-session-id="${sessionId}"]`) as HTMLElement;
-        
+
         if (sessionEl) {
             sessionEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            
+
             sessionEl.classList.add('llm-ui-session--highlight');
             setTimeout(() => {
                 sessionEl.classList.remove('llm-ui-session--highlight');
@@ -1195,7 +1319,7 @@ export class LLMWorkspaceEditor implements IEditor {
     private toggleSessionFold(sessionId: string): void {
         const historyEl = this.container.querySelector('#llm-ui-history');
         const sessionEl = historyEl?.querySelector(`[data-session-id="${sessionId}"]`);
-        
+
         if (sessionEl) {
             const collapseBtn = sessionEl.querySelector('[data-action="collapse"]') as HTMLElement;
             if (collapseBtn) {
@@ -1210,14 +1334,14 @@ export class LLMWorkspaceEditor implements IEditor {
     private async copySessionContent(sessionId: string): Promise<void> {
         const sessions = this.sessionManager.getSessions();
         const session = sessions.find(s => s.id === sessionId);
-        
+
         if (session) {
             let content = session.content || '';
-            
+
             if (session.role === 'assistant' && session.executionRoot) {
                 content = this.extractExecutionOutput(session.executionRoot);
             }
-            
+
             try {
                 await navigator.clipboard.writeText(content);
                 Toast.success('Copied to clipboard');
@@ -1233,7 +1357,7 @@ export class LLMWorkspaceEditor implements IEditor {
      */
     private extractExecutionOutput(node: ExecutionNode): string {
         let output = node.data.output || '';
-        
+
         if (node.children && node.children.length > 0) {
             for (const child of node.children) {
                 const childOutput = this.extractExecutionOutput(child);
@@ -1242,7 +1366,7 @@ export class LLMWorkspaceEditor implements IEditor {
                 }
             }
         }
-        
+
         return output.trim();
     }
 
@@ -1272,11 +1396,11 @@ export class LLMWorkspaceEditor implements IEditor {
     private navigateToPrevUserChat(): void {
         const sessions = this.sessionManager.getSessions();
         const currentId = this.findCurrentVisibleSession();
-        
+
         if (!currentId) return;
-        
+
         const currentIdx = sessions.findIndex(s => s.id === currentId);
-        
+
         for (let i = currentIdx - 1; i >= 0; i--) {
             if (sessions[i].role === 'user') {
                 this.scrollToSession(sessions[i].id);
@@ -1291,11 +1415,11 @@ export class LLMWorkspaceEditor implements IEditor {
     private navigateToNextUserChat(): void {
         const sessions = this.sessionManager.getSessions();
         const currentId = this.findCurrentVisibleSession();
-        
+
         if (!currentId) return;
-        
+
         const currentIdx = sessions.findIndex(s => s.id === currentId);
-        
+
         for (let i = currentIdx + 1; i < sessions.length; i++) {
             if (sessions[i].role === 'user') {
                 this.scrollToSession(sessions[i].id);
@@ -1315,7 +1439,7 @@ export class LLMWorkspaceEditor implements IEditor {
 
         try {
             this.historyView.removeMessages(ids, true);
-            
+
             for (const id of ids) {
                 await this.sessionManager.deleteMessage(id, {
                     mode: 'soft',
@@ -1323,10 +1447,10 @@ export class LLMWorkspaceEditor implements IEditor {
                     deleteAssociatedResponses: true
                 });
             }
-            
+
             this.emit('change');
             Toast.success(`Deleted ${ids.length} messages`);
-            
+
             if (this.floatingNav) {
                 const sessions = this.sessionManager.getSessions();
                 this.floatingNav.updateItems(sessions, this.historyView.getCollapseStates());
@@ -1384,7 +1508,7 @@ export class LLMWorkspaceEditor implements IEditor {
         const indicator = this.container.querySelector('#llm-bg-indicator') as HTMLElement;
         if (!indicator) return;
 
-        const otherRunning = this.sessionManager.isGenerating() 
+        const otherRunning = this.sessionManager.isGenerating()
             ? Math.max(0, payload.running - 1)
             : payload.running;
 
@@ -1426,7 +1550,7 @@ export class LLMWorkspaceEditor implements IEditor {
         if (!historyContainer) return;
 
         const bubbles = historyContainer.querySelectorAll('.llm-ui-bubble--user, .llm-ui-node');
-        
+
         bubbles.forEach(bubble => {
             if (this.isAllExpanded) {
                 bubble.classList.remove('is-collapsed');
@@ -1436,7 +1560,7 @@ export class LLMWorkspaceEditor implements IEditor {
 
             const collapseBtn = bubble.querySelector('[data-action="collapse"] svg');
             if (collapseBtn) {
-                collapseBtn.innerHTML = this.isAllExpanded 
+                collapseBtn.innerHTML = this.isAllExpanded
                     ? '<polyline points="18 15 12 9 6 15"></polyline>'
                     : '<polyline points="6 9 12 15 18 9"></polyline>';
             }
@@ -1453,7 +1577,7 @@ export class LLMWorkspaceEditor implements IEditor {
                  <line x1="21" y1="3" x2="14" y2="10"></line>
                  <line x1="3" y1="21" x2="10" y2="14"></line>
                </svg>`;
-        
+
         btn.setAttribute('title', this.isAllExpanded ? 'Collapse All' : 'Expand All');
 
         const sessions = this.sessionManager.getSessions();
@@ -1478,7 +1602,7 @@ export class LLMWorkspaceEditor implements IEditor {
         if (!this.currentSessionId) {
             return JSON.stringify({ error: 'No session loaded' });
         }
-        
+
         return JSON.stringify({
             sessionId: this.currentSessionId,
             title: this.currentTitle,
@@ -1519,16 +1643,19 @@ export class LLMWorkspaceEditor implements IEditor {
             clearTimeout(this.uiStateSaveTimer);
             this.uiStateSaveTimer = null;
         }
-        
+
         // 清理输入状态保存定时器
         if (this.inputStateSaveTimer) {
             clearTimeout(this.inputStateSaveTimer);
             this.inputStateSaveTimer = null;
         }
-        
-        // 确保最后一次保存（非流式模式下）
-        if (!this.sessionManager.isGenerating()) {
-            await this.saveUIState();
+
+        // ✅ 只在非删除、非流式模式下保存状态
+        if (!this.isBeingDeleted && !this.sessionManager.isGenerating()) {
+            // 使用 Promise.resolve().then() 而非 await，避免阻塞
+            this.saveUIState().catch(() => {
+                // 静默处理错误
+            });
         }
 
         // Asset Manager 清理
@@ -1560,7 +1687,7 @@ export class LLMWorkspaceEditor implements IEditor {
             this.floatingNav.destroy();
             this.floatingNav = null;
         }
-        
+
         // 清理全局快捷键
         if (this.globalShortcutHandler) {
             document.removeEventListener('keydown', this.globalShortcutHandler);
@@ -1569,7 +1696,7 @@ export class LLMWorkspaceEditor implements IEditor {
 
         // 解绑会话
         this.sessionManager.destroy();
-        
+
         // 清理 UI
         this.historyView?.destroy();
         this.chatInput?.destroy();
@@ -1580,7 +1707,7 @@ export class LLMWorkspaceEditor implements IEditor {
     // --- 其他 IEditor 方法 ---
 
     getMode() { return 'edit' as const; }
-    async switchToMode() {}
+    async switchToMode() { }
 
     setTitle(title: string): void {
         this.currentTitle = title;
@@ -1589,15 +1716,15 @@ export class LLMWorkspaceEditor implements IEditor {
         }
     }
 
-    setReadOnly() {}
+    setReadOnly() { }
     get commands() { return {}; }
     async getHeadings() { return []; }
     async getSearchableText() { return this.sessionManager.exportToMarkdown(); }
     async getSummary() { return null; }
-    async navigateTo() {}
+    async navigateTo() { }
     async search() { return []; }
-    gotoMatch() {}
-    clearSearch() {}
+    gotoMatch() { }
+    clearSearch() { }
 
     async pruneAssets(): Promise<number | null> {
         return null;
