@@ -30,6 +30,7 @@ export type NodeStatus =
     | 'running' 
     | 'success' 
     | 'failed' 
+    | 'aborted'
     | 'cancelled'
     | 'paused'
     | 'waiting_input';
