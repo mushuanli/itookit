@@ -9,19 +9,19 @@ import { NodeStatus } from '@itookit/llm-kernel';
 export interface ChatSessionSettings {
     /** 配置版本 */
     version: '1.0';
-    
+
     /** 覆盖模型 ID（空表示使用 Agent 默认） */
     modelId?: string;
-    
+
     /** 历史消息数量限制，-1 表示不限制, 0 表示不发送 */
     historyLength: number;
-    
+
     /** 温度参数 */
     temperature?: number;
-    
+
     /** 流式输出开关，默认 true */
     streamMode: boolean;
-    
+
     /** 最后更新时间 */
     updatedAt?: string;
 }
@@ -184,7 +184,7 @@ export type OrchestratorEvent =
 
     // 交互事件
     | { type: 'request_input'; payload: { nodeId: string; schema: any } }
-    | { type: 'finished'; payload: { sessionId: string } }
+    | { type: 'finished'; payload: { sessionId: string, metadata?: object } }
     // ✅ 修复：扩展 error payload 以支持 code
     | { type: 'error'; payload: { message: string; error?: Error; code?: string | number } }
 

@@ -110,7 +110,8 @@ export class ExecutionRuntime {
             scopedEvents.emit('execution:complete', {
                 executionId,
                 status: result.status,
-                output: result.output
+                output: result.output,
+                metadata: result.metadata
             });
 
             return result;
