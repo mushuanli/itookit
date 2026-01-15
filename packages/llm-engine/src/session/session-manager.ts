@@ -9,7 +9,9 @@ import {
     SessionStatus,
     OrchestratorEvent,
     ChatFile,
-    ExecutionOverrides
+    ExecutionOverrides,
+    ChatSessionSettings,
+    DEFAULT_SESSION_SETTINGS,
 } from '../core/types';
 import { EngineError, EngineErrorCode } from '../core/errors';
 
@@ -415,6 +417,37 @@ export class SessionManager {
             sessionGroupId,
             siblingIndex
         );
+    }
+
+    /**
+     * 获取会话设置
+     */
+    async getSessionSettings(): Promise<ChatSessionSettings> {
+        if (!this.sessionId) {
+            return { ...DEFAULT_SESSION_SETTINGS };
+        }
+        return this.registry.getSessionSettings(this.sessionId);
+    }
+
+    /**
+     * 保存会话设置
+     */
+    async saveSessionSettings(settings: Partial<ChatSessionSettings>): Promise<void> {
+        if (!this.sessionId) {
+            throw new EngineError(EngineErrorCode.SESSION_INVALID, 'No session bound');
+        }
+        await this.registry.saveSessionSettings(this.sessionId, settings);
+    }
+
+    /**
+     * ✅ 新增：获取当前 Agent 可用的模型列表
+     */
+    async getAvailableModelsForAgent(agentId: string): Promise<Array<{
+        id: string;
+        name: string;
+        provider?: string;
+    }>> {
+        return this.registry.getAvailableModelsForAgent(agentId);
     }
 
     // ================================================================

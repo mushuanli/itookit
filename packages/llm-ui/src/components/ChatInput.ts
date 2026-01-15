@@ -1,14 +1,62 @@
 // @file llm-ui/components/ChatInput.ts
 
+// @file: llm-ui/components/ChatInput.ts
+
+/**
+ * 聊天输入的完整状态（统一结构）
+ * 包含所有可持久化的配置信息
+ */
+export interface ChatInputConfig {
+    // === 输入内容 ===
+    text: string;
+
+    // === 当前选中的 Agent ===
+    agentId: string;
+
+    // === 会话级设置 ===
+    settings: ChatSessionSettings;
+}
+
+/**
+ * 会话级设置（可覆盖 Agent 默认配置）
+ */
+export interface ChatSessionSettings {
+    modelId?: string;           // 覆盖默认模型
+    historyLength: number;      // -1=不限制, 0=不发送历史
+    temperature?: number;       // 温度参数
+    streamMode: boolean;        // ✨ 新增：流式输出开关，默认 true
+}
+
+/**
+ * 发送时的覆盖参数（从 settings 派生）
+ */
+export interface ChatOverrides {
+    modelId?: string;
+    historyLength?: number;
+    temperature?: number;
+    streamMode?: boolean;       // ✨ 新增
+}
+
+// 默认设置
+export const DEFAULT_SESSION_SETTINGS: ChatSessionSettings = {
+    modelId: undefined,
+    historyLength: -1,
+    temperature: undefined,
+    streamMode: true,           // ✨ 默认开启流式
+};
+
 export interface ChatInputOptions {
     onSend: (text: string, files: File[], executorId: string, overrides?: ChatOverrides) => Promise<void>;
     onStop: () => void;
     onExecutorChange?: (executorId: string) => void;
-    onInputChange?: () => void;
-    onSettingsChange?: (settings: ChatSettings) => void;  // ✨ 新增：设置变化回调
+    onConfigChange?: (config: ChatInputConfig) => void;
+    
+    // ✅ 修改：移除 initialModels，改为动态加载
     initialAgents?: ExecutorOption[];
-    initialModels?: ModelOption[];  // ✨ 新增：初始模型列表
-    initialSettings?: ChatSettings; // ✨ 新增：初始设置
+    initialConfig?: Partial<ChatInputConfig>;
+    
+    // ✅ 新增：获取模型列表的回调
+    onRequestModels?: (agentId: string) => Promise<ModelOption[]>;
 }
 
 export interface ExecutorOption {
@@ -54,75 +102,173 @@ export class ChatInput {
     private sendBtn!: HTMLButtonElement;
     private stopBtn!: HTMLButtonElement;
     private attachBtn!: HTMLButtonElement;
-    private settingsBtn!: HTMLButtonElement;      // ✨ 新增
+    private settingsBtn!: HTMLButtonElement;
     private executorSelect!: HTMLSelectElement;
-    private modelSelect!: HTMLSelectElement;       // ✨ 新增
-    private historySlider!: HTMLInputElement;      // ✨ 新增
-    private historyValue!: HTMLSpanElement;        // ✨ 新增
-    private settingsPanel!: HTMLElement;           // ✨ 新增
+    private modelSelect!: HTMLSelectElement;
+    private historySlider!: HTMLInputElement;
+    private historyValue!: HTMLSpanElement;
+    private streamToggle!: HTMLInputElement;          // ✨ 新增
+    private settingsPanel!: HTMLElement;
     private fileInput!: HTMLInputElement;
     private attachmentContainer!: HTMLElement;
     private inputWrapper!: HTMLElement;
-    
+
+    // === 状态 ===
     private loading = false;
     private files: File[] = [];
-    private settingsExpanded = false;              // ✨ 新增
-    private models: ModelOption[] = [];            // ✨ 新增
-    
-    // ✨ 新增：当前设置
-    private currentSettings: ChatSettings = {
-        modelId: undefined,
-        historyLength: -1,
-        temperature: undefined
+    private settingsExpanded = false;
+    private models: ModelOption[] = [];
+    private currentAgentId: string = 'default';
+    private isLoadingModels: boolean = false;
+
+    // ✨ 统一配置对象
+    private config: ChatInputConfig = {
+        text: '',
+        agentId: 'default',
+        settings: { ...DEFAULT_SESSION_SETTINGS }
     };
 
     constructor(private container: HTMLElement, private options: ChatInputOptions) {
-        // ✨ 初始化设置
-        if (options.initialSettings) {
-            this.currentSettings = { ...this.currentSettings, ...options.initialSettings };
+        // 合并初始配置
+        if (options.initialConfig) {
+            this.config = this.mergeConfig(this.config, options.initialConfig);
         }
-        if (options.initialModels) {
-            this.models = options.initialModels;
-        }
-        
+        this.currentAgentId = this.config.agentId;
+
         this.render();
         this.bindEvents();
+        this.initExecutors();
+        this.syncUIFromConfig();
+        
+        // ✅ 初始加载当前 Agent 的模型
+        this.loadModelsForAgent(this.currentAgentId);
+    }
 
-        // ✨ 2. 新增初始化逻辑 (在 bindEvents 之后)
-        // 如果传入了初始列表，立即渲染
+    /**
+     * 合并配置（深度合并 settings）
+     */
+    private mergeConfig(base: ChatInputConfig, partial: Partial<ChatInputConfig>): ChatInputConfig {
+        return {
+            text: partial.text ?? base.text,
+            agentId: partial.agentId ?? base.agentId,
+            settings: {
+                ...base.settings,
+                ...(partial.settings || {})
+            }
+        };
+    }
+
+    private initExecutors(): void {
         if (this.options.initialAgents && this.options.initialAgents.length > 0) {
             this.updateExecutors(this.options.initialAgents);
         } else {
-            // 否则渲染一个默认的
             this.updateExecutors([{ id: 'default', name: 'Assistant', category: 'System' }]);
         }
-        
-        // ✅ 新增：在 render 和 bindEvents 之后，应用初始设置到 UI
-        this.applyCurrentSettingsToUI();
     }
 
-    // ✅ 新增：将 currentSettings 应用到 UI 元素
-    private applyCurrentSettingsToUI(): void {
-        // Model select
-        if (this.currentSettings.modelId && this.modelSelect) {
-            this.modelSelect.value = this.currentSettings.modelId;
+    /**
+     * ✅ 新增：加载指定 Agent 的可用模型
+     */
+    private async loadModelsForAgent(agentId: string): Promise<void> {
+        if (!this.options.onRequestModels) {
+            console.warn('[ChatInput] onRequestModels not provided');
+            return;
         }
+
+        if (this.isLoadingModels) return;
         
-        // History slider
+        this.isLoadingModels = true;
+        this.setModelSelectLoading(true);
+
+        try {
+            const models = await this.options.onRequestModels(agentId);
+            this.models = models;
+            this.updateModelOptions();
+            
+            // 如果当前选中的模型不在新列表中，清除选择
+            if (this.config.settings.modelId) {
+                const stillExists = models.some(m => m.id === this.config.settings.modelId);
+                if (!stillExists) {
+                    this.config.settings.modelId = undefined;
+                    this.modelSelect.value = '';
+                    this.updateActiveBadges();
+                }
+            }
+            
+        } catch (e) {
+            console.error('[ChatInput] Failed to load models:', e);
+            this.models = [];
+            this.updateModelOptions();
+        } finally {
+            this.isLoadingModels = false;
+            this.setModelSelectLoading(false);
+        }
+    }
+
+    /**
+     * ✅ 新增：设置模型选择器加载状态
+     */
+    private setModelSelectLoading(loading: boolean): void {
+        if (!this.modelSelect) return;
+        
+        this.modelSelect.disabled = loading;
+        
+        if (loading) {
+            this.modelSelect.innerHTML = '<option value="">Loading models...</option>';
+        }
+    }
+
+    /**
+     * 将当前 config 同步到 UI 元素
+     */
+    private syncUIFromConfig(): void {
+        // Text
+        if (this.textarea) {
+            this.textarea.value = this.config.text;
+            this.adjustTextareaHeight();
+        }
+
+        // Agent
+        if (this.executorSelect) {
+            this.setExecutorValue(this.config.agentId);
+        }
+
+        // Model
+        if (this.modelSelect && this.config.settings.modelId) {
+            this.modelSelect.value = this.config.settings.modelId;
+        }
+
+        // History
         if (this.historySlider) {
-            this.historySlider.value = this.currentSettings.historyLength.toString();
+            this.historySlider.value = this.config.settings.historyLength.toString();
             this.updateHistoryDisplay();
             this.updatePresetButtons();
         }
-        
-        // Active badges
+
+        // Stream Mode
+        if (this.streamToggle) {
+            this.streamToggle.checked = this.config.settings.streamMode;
+        }
+
+        // Badges
         this.updateActiveBadges();
+    }
+
+    /**
+     * 从 UI 元素同步到 config
+     */
+    private syncConfigFromUI(): void {
+        this.config.text = this.textarea?.value || '';
+        this.config.agentId = this.executorSelect?.value || 'default';
+        this.config.settings.modelId = this.modelSelect?.value || undefined;
+        this.config.settings.historyLength = parseInt(this.historySlider?.value || '-1');
+        this.config.settings.streamMode = this.streamToggle?.checked ?? true;
     }
 
     private render() {
         this.container.innerHTML = `
             <div class="llm-input">
-                <!-- ✨ 新增：设置面板 -->
+                <!-- 设置面板 -->
                 <div class="llm-input__settings-panel" style="display: none;">
                     <div class="llm-input__settings-header">
                         <span class="llm-input__settings-title">
@@ -151,6 +297,25 @@ export class ChatInput {
                                 <option value="">Use Agent Default</option>
                             </select>
                             <span class="llm-input__setting-hint">Temporarily use a different model</span>
+                        </div>
+
+                        <!-- ✨ 新增：Stream Mode Toggle -->
+                        <div class="llm-input__setting-row">
+                            <label class="llm-input__setting-label">
+                                <span class="llm-input__setting-icon">⚡</span>
+                                Stream Mode
+                            </label>
+                            <div class="llm-input__toggle-wrapper">
+                                <label class="llm-input__toggle">
+                                    <input type="checkbox" 
+                                           class="llm-input__stream-toggle" 
+                                           checked
+                                           title="Enable streaming output">
+                                    <span class="llm-input__toggle-slider"></span>
+                                </label>
+                                <span class="llm-input__toggle-label">Enabled</span>
+                            </div>
+                            <span class="llm-input__setting-hint">Show response as it generates</span>
                         </div>
 
                         <!-- History Length -->
@@ -215,6 +380,10 @@ export class ChatInput {
                                 🧠 <span class="llm-input__badge-text"></span>
                                 <button class="llm-input__badge-clear" data-clear="model">×</button>
                             </span>
+                            <span class="llm-input__active-badge" data-type="stream" style="display:none">
+                                ⏸️ <span class="llm-input__badge-text">Non-stream</span>
+                                <button class="llm-input__badge-clear" data-clear="stream">×</button>
+                            </span>
                             <span class="llm-input__active-badge" data-type="history" style="display:none">
                                 📜 <span class="llm-input__badge-text"></span>
                                 <button class="llm-input__badge-clear" data-clear="history">×</button>
@@ -263,7 +432,15 @@ export class ChatInput {
             </div>
         `;
 
-        // 绑定元素引用
+        this.bindElements();
+        this.updateModelOptions();
+        this.updateHistoryDisplay();
+    }
+
+    /**
+     * 绑定 DOM 元素引用
+     */
+    private bindElements(): void {
         this.textarea = this.container.querySelector('.llm-input__textarea')!;
         this.sendBtn = this.container.querySelector('.llm-input__btn--send')!;
         this.stopBtn = this.container.querySelector('.llm-input__btn--stop')!;
@@ -273,34 +450,21 @@ export class ChatInput {
         this.modelSelect = this.container.querySelector('.llm-input__model-select')!;
         this.historySlider = this.container.querySelector('.llm-input__history-slider')!;
         this.historyValue = this.container.querySelector('.llm-input__history-value')!;
+        this.streamToggle = this.container.querySelector('.llm-input__stream-toggle')!;
         this.settingsPanel = this.container.querySelector('.llm-input__settings-panel')!;
         this.fileInput = this.container.querySelector('#llm-ui-hidden-file-input')!;
         this.attachmentContainer = this.container.querySelector('.llm-input__attachments')!;
         this.inputWrapper = this.container.querySelector('.llm-input__field-wrapper')!;
-        
-        // 初始化模型列表
-        this.updateModelOptions();
-        // 初始化历史滑块
-        this.updateHistoryDisplay();
     }
 
-    private bindEvents() {
-        // 1. 自动高度调整
-        const adjustHeight = () => {
-            this.textarea.style.height = 'auto';
-            const newHeight = Math.min(this.textarea.scrollHeight, 200); // Max height 200px
-            this.textarea.style.height = `${newHeight}px`;
-        };
-
-        // ✨ 修改：input 事件同时触发高度调整和变化通知
+    private bindEvents(): void {
+        // === 文本输入 ===
         this.textarea.addEventListener('input', () => {
-            adjustHeight();
-            this.options.onInputChange?.();  // ✨ 通知外部
+            this.adjustTextareaHeight();
+            this.config.text = this.textarea.value;
+            this.notifyConfigChange();
         });
-        
-        this.textarea.addEventListener('change', adjustHeight);
 
-        // 2. 键盘事件
         this.textarea.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
@@ -320,10 +484,10 @@ export class ChatInput {
 
         // 4. 附件处理
         this.attachBtn.addEventListener('click', () => this.fileInput.click());
-        
+
         // ✨ 5. 设置按钮
         this.settingsBtn.addEventListener('click', () => this.toggleSettings());
-        
+
         // ✨ 6. 设置面板关闭按钮
         this.container.querySelector('.llm-input__settings-close')?.addEventListener('click', () => {
             this.toggleSettings(false);
@@ -337,83 +501,128 @@ export class ChatInput {
             }
         });
 
-        // 8. Executor 变化
-        this.executorSelect.addEventListener('change', () => {
-            this.options.onExecutorChange?.(this.executorSelect.value);
+        // === Agent 选择 ===
+        this.executorSelect.addEventListener('change', async () => {
+            const newAgentId = this.executorSelect.value;
+            this.config.agentId = newAgentId;
+            
+            // ✅ 关键：切换 Agent 时重新加载模型列表
+            if (newAgentId !== this.currentAgentId) {
+                this.currentAgentId = newAgentId;
+                
+                // 清除之前的模型选择（因为不同 Agent 的 Connection 不同）
+                this.config.settings.modelId = undefined;
+                this.modelSelect.value = '';
+                
+                await this.loadModelsForAgent(newAgentId);
+            }
+            
+            this.options.onExecutorChange?.(newAgentId);
+            this.notifyConfigChange();
         });
 
-        // ✨ 9. Model 选择变化
+        // === 设置面板 ===
         this.modelSelect.addEventListener('change', () => {
-            this.currentSettings.modelId = this.modelSelect.value || undefined;
+            this.config.settings.modelId = this.modelSelect.value || undefined;
             this.updateActiveBadges();
-            this.notifySettingsChange();
+            this.notifyConfigChange();
         });
 
-        // ✨ 10. History 滑块变化
         this.historySlider.addEventListener('input', () => {
-            const value = parseInt(this.historySlider.value);
-            this.currentSettings.historyLength = value;
+            this.config.settings.historyLength = parseInt(this.historySlider.value);
             this.updateHistoryDisplay();
             this.updatePresetButtons();
             this.updateActiveBadges();
         });
-        
+
         this.historySlider.addEventListener('change', () => {
-            this.notifySettingsChange();
+            this.notifyConfigChange();
         });
 
-        // ✨ 11. 预设按钮
+        // ✨ 新增：Stream Mode Toggle
+        this.streamToggle.addEventListener('change', () => {
+            this.config.settings.streamMode = this.streamToggle.checked;
+            this.updateStreamToggleLabel();
+            this.updateActiveBadges();
+            this.notifyConfigChange();
+        });
+
+        // === 预设按钮 ===
         this.container.querySelectorAll('.llm-input__preset-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 const value = parseInt((e.currentTarget as HTMLElement).dataset.history || '-1');
                 this.historySlider.value = value.toString();
-                this.currentSettings.historyLength = value;
+                this.config.settings.historyLength = value;
                 this.updateHistoryDisplay();
                 this.updatePresetButtons();
                 this.updateActiveBadges();
-                this.notifySettingsChange();
+                this.notifyConfigChange();
             });
         });
 
-        // ✨ 12. Badge 清除按钮
+        // === Badge 清除按钮 ===
         this.container.querySelectorAll('.llm-input__badge-clear').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 const clearType = (e.currentTarget as HTMLElement).dataset.clear;
-                if (clearType === 'model') {
-                    this.modelSelect.value = '';
-                    this.currentSettings.modelId = undefined;
-                } else if (clearType === 'history') {
-                    this.historySlider.value = '-1';
-                    this.currentSettings.historyLength = -1;
-                    this.updateHistoryDisplay();
-                    this.updatePresetButtons();
-                }
-                this.updateActiveBadges();
-                this.notifySettingsChange();
+                this.clearSetting(clearType as 'model' | 'history' | 'stream');
             });
         });
 
-        // ✨ 13. 点击外部关闭设置面板
+        // === 点击外部关闭设置 ===
         document.addEventListener('click', (e) => {
             if (this.settingsExpanded) {
                 const target = e.target as HTMLElement;
-                const isInsidePanel = this.settingsPanel.contains(target);
-                const isSettingsBtn = this.settingsBtn.contains(target);
-                
-                if (!isInsidePanel && !isSettingsBtn) {
+                if (!this.settingsPanel.contains(target) && !this.settingsBtn.contains(target)) {
                     this.toggleSettings(false);
                 }
             }
         });
     }
 
-    // ✨ 新增：切换设置面板
+    /**
+     * 清除指定设置
+     */
+    private clearSetting(type: 'model' | 'history' | 'stream'): void {
+        switch (type) {
+            case 'model':
+                this.modelSelect.value = '';
+                this.config.settings.modelId = undefined;
+                break;
+            case 'history':
+                this.historySlider.value = '-1';
+                this.config.settings.historyLength = -1;
+                this.updateHistoryDisplay();
+                this.updatePresetButtons();
+                break;
+            case 'stream':
+                this.streamToggle.checked = true;
+                this.config.settings.streamMode = true;
+                this.updateStreamToggleLabel();
+                break;
+        }
+        this.updateActiveBadges();
+        this.notifyConfigChange();
+    }
+
+    /**
+     * 更新 Stream Toggle 标签
+     */
+    private updateStreamToggleLabel(): void {
+        const label = this.container.querySelector('.llm-input__toggle-label');
+        if (label) {
+            label.textContent = this.config.settings.streamMode ? 'Enabled' : 'Disabled';
+        }
+    }
+
+    /**
+     * 切换设置面板
+     */
     private toggleSettings(show?: boolean): void {
         this.settingsExpanded = show ?? !this.settingsExpanded;
         this.settingsPanel.style.display = this.settingsExpanded ? 'block' : 'none';
         this.settingsBtn.classList.toggle('active', this.settingsExpanded);
-        
+
         // 添加动画效果
         if (this.settingsExpanded) {
             this.settingsPanel.classList.add('llm-input__settings-panel--entering');
@@ -423,9 +632,11 @@ export class ChatInput {
         }
     }
 
-    // ✨ 新增：更新历史显示
+    /**
+     * 更新历史长度显示
+     */
     private updateHistoryDisplay(): void {
-        const value = parseInt(this.historySlider.value);
+        const value = this.config.settings.historyLength;
         if (value === -1) {
             this.historyValue.textContent = 'Unlimited';
         } else if (value === 0) {
@@ -435,136 +646,134 @@ export class ChatInput {
         }
     }
 
-    // ✨ 新增：更新预设按钮状态
+    /**
+     * 更新预设按钮状态
+     */
     private updatePresetButtons(): void {
-        const value = parseInt(this.historySlider.value);
+        const value = this.config.settings.historyLength;
         this.container.querySelectorAll('.llm-input__preset-btn').forEach(btn => {
             const btnValue = parseInt((btn as HTMLElement).dataset.history || '-1');
             btn.classList.toggle('active', btnValue === value);
         });
     }
 
-    // ✨ 新增：更新活动设置徽章
+    /**
+     * 更新活动设置徽章
+     */
     private updateActiveBadges(): void {
-        const activeSettingsContainer = this.container.querySelector('.llm-input__active-settings') as HTMLElement;
+        const activeContainer = this.container.querySelector('.llm-input__active-settings') as HTMLElement;
         const modelBadge = this.container.querySelector('.llm-input__active-badge[data-type="model"]') as HTMLElement;
+        const streamBadge = this.container.querySelector('.llm-input__active-badge[data-type="stream"]') as HTMLElement;
         const historyBadge = this.container.querySelector('.llm-input__active-badge[data-type="history"]') as HTMLElement;
-        
+
         let hasActiveSettings = false;
-        
+
         // Model badge
-        if (this.currentSettings.modelId) {
-            const model = this.models.find(m => m.id === this.currentSettings.modelId);
-            const modelText = modelBadge.querySelector('.llm-input__badge-text');
-            if (modelText) {
-                modelText.textContent = model?.name || this.currentSettings.modelId;
-            }
+        if (this.config.settings.modelId) {
+            const model = this.models.find(m => m.id === this.config.settings.modelId);
+            const text = modelBadge.querySelector('.llm-input__badge-text');
+            if (text) text.textContent = model?.name || this.config.settings.modelId;
             modelBadge.style.display = 'inline-flex';
             hasActiveSettings = true;
         } else {
             modelBadge.style.display = 'none';
         }
-        
-        // History badge (只在非默认值时显示)
-        if (this.currentSettings.historyLength !== -1) {
-            const historyText = historyBadge.querySelector('.llm-input__badge-text');
-            if (historyText) {
-                historyText.textContent = this.currentSettings.historyLength === 0 
-                    ? 'No history' 
-                    : `${this.currentSettings.historyLength} msgs`;
+
+        // ✨ Stream badge (只在关闭时显示)
+        if (!this.config.settings.streamMode) {
+            streamBadge.style.display = 'inline-flex';
+            hasActiveSettings = true;
+        } else {
+            streamBadge.style.display = 'none';
+        }
+
+        // History badge
+        if (this.config.settings.historyLength !== -1) {
+            const text = historyBadge.querySelector('.llm-input__badge-text');
+            if (text) {
+                text.textContent = this.config.settings.historyLength === 0
+                    ? 'No history'
+                    : `${this.config.settings.historyLength} msgs`;
             }
             historyBadge.style.display = 'inline-flex';
             hasActiveSettings = true;
         } else {
             historyBadge.style.display = 'none';
         }
-        
-        activeSettingsContainer.style.display = hasActiveSettings ? 'flex' : 'none';
-        
-        // 更新设置按钮指示器
+
+        activeContainer.style.display = hasActiveSettings ? 'flex' : 'none';
         this.settingsBtn.classList.toggle('has-overrides', hasActiveSettings);
     }
 
-    // ✨ 新增：通知设置变化
-    private notifySettingsChange(): void {
-        this.options.onSettingsChange?.(this.currentSettings);
-        this.options.onInputChange?.();
+    /**
+     * 通知配置变化
+     */
+    private notifyConfigChange(): void {
+        this.options.onConfigChange?.(this.getConfig());
     }
 
-    // ✨ 新增：更新模型选项
-    public updateModels(models: ModelOption[]): void {
-        const previousModelId = this.currentSettings.modelId;
-        this.models = models;
-        this.updateModelOptions();
-        
-        // ✅ 恢复之前的选中状态（如果模型仍然存在）
-        if (previousModelId) {
-            const stillExists = models.some(m => m.id === previousModelId);
-            if (stillExists) {
-                this.modelSelect.value = previousModelId;
-            } else {
-                // 模型不再存在，清除设置
-                this.currentSettings.modelId = undefined;
-                this.updateActiveBadges();
-            }
-        }
+    /**
+     * 调整文本框高度
+     */
+    private adjustTextareaHeight(): void {
+        this.textarea.style.height = 'auto';
+        const newHeight = Math.min(this.textarea.scrollHeight, 200);
+        this.textarea.style.height = `${newHeight}px`;
     }
 
-    private updateModelOptions(): void {
-        // 按 provider 分组
-        const groups: Record<string, ModelOption[]> = {};
-        const ungrouped: ModelOption[] = [];
-        
-        this.models.forEach(model => {
-            if (model.provider) {
-                if (!groups[model.provider]) groups[model.provider] = [];
-                groups[model.provider].push(model);
-            } else {
-                ungrouped.push(model);
-            }
-        });
-        
-        let html = '<option value="">Use Agent Default</option>';
-        
-        // 未分组模型
-        ungrouped.forEach(model => {
-            html += `<option value="${model.id}">${model.name}</option>`;
-        });
-        
-        // 分组模型
-        Object.entries(groups).forEach(([provider, models]) => {
-            html += `<optgroup label="${provider}">`;
-            models.forEach(model => {
-                html += `<option value="${model.id}">${model.name}</option>`;
-            });
-            html += `</optgroup>`;
-        });
-        
-        this.modelSelect.innerHTML = html;
-        
-        // 恢复选中状态
-        if (this.currentSettings.modelId) {
-            this.modelSelect.value = this.currentSettings.modelId;
+    /**
+     * 触发发送
+     */
+    private async triggerSend(): Promise<void> {
+        const text = this.textarea.value.trim();
+        if ((!text && this.files.length === 0) || this.loading) return;
+
+        const currentExecutor = this.config.agentId;
+        const currentFiles = [...this.files];
+
+        // 构建覆盖参数
+        const overrides: ChatOverrides = {};
+        if (this.config.settings.modelId) {
+            overrides.modelId = this.config.settings.modelId;
         }
+        if (this.config.settings.historyLength !== -1) {
+            overrides.historyLength = this.config.settings.historyLength;
+        }
+        if (this.config.settings.temperature !== undefined) {
+            overrides.temperature = this.config.settings.temperature;
+        }
+        // ✅ 关键：传递 streamMode
+        if (!this.config.settings.streamMode) {
+            overrides.streamMode = false;
+        }
+
+        // Reset UI
+        this.textarea.value = '';
+        this.textarea.style.height = 'auto';
+        this.config.text = '';
+        this.files = [];
+        this.renderAttachments();
+
+        await this.options.onSend(text, currentFiles, currentExecutor, overrides);
     }
-    private handlePaste(e: ClipboardEvent) {
-        // 如果正在加载中，不允许粘贴文件（可选）
+
+    // ================================================================
+    // 附件处理
+    // ================================================================
+
+    private handlePaste(e: ClipboardEvent): void {
         if (this.loading) return;
 
         const items = e.clipboardData?.items;
         if (!items) return;
 
         const pastedFiles: File[] = [];
-
         for (let i = 0; i < items.length; i++) {
             const item = items[i];
             if (item.kind === 'file') {
                 const file = item.getAsFile();
                 if (file) {
-                    // 如果是截图，通常文件名是 image.png，容易重名覆盖
-                    // 我们可以给它重命名
-                    const finalFile = this.renameFileIfNeeded(file);
-                    pastedFiles.push(finalFile);
+                    pastedFiles.push(this.renameFileIfNeeded(file));
                 }
             }
         }
@@ -578,10 +787,7 @@ export class ChatInput {
         }
     }
 
-    /**
-     * ✨ 绑定拖拽事件
-     */
-    private bindDragEvents() {
+    private bindDragEvents(): void {
         const wrapper = this.inputWrapper;
 
         // 拖入
@@ -627,66 +833,22 @@ export class ChatInput {
         return file;
     }
 
-    /**
-     * 更新执行器列表，支持分组
-     */
-    public updateExecutors(executors: ExecutorOption[], activeId?: string) {
-        //this.executors = executors;
-        
-        // 分组逻辑
-        const groups: Record<string, ExecutorOption[]> = {};
-        const uncategorized: ExecutorOption[] = [];
-
-        executors.forEach(e => {
-            if (e.category) {
-                if (!groups[e.category]) groups[e.category] = [];
-                groups[e.category].push(e);
-            } else {
-                uncategorized.push(e);
-            }
-        });
-
-        let html = '';
-
-        // 1. 未分类 (Default agents)
-        if (uncategorized.length > 0) {
-            html += uncategorized.map(e => this.renderOption(e)).join('');
-        }
-
-        // 2. 分类组
-        Object.entries(groups).forEach(([category, items]) => {
-            html += `<optgroup label="${category}">`;
-            html += items.map(e => this.renderOption(e)).join('');
-            html += `</optgroup>`;
-        });
-
-        this.executorSelect.innerHTML = html;
-        
-        if (activeId) {
-            this.setExecutor(activeId);
-        }
-    }
-
-    private renderOption(e: ExecutorOption): string {
-        const icon = e.icon ? `${e.icon} ` : '';
-        return `<option value="${e.id}">${icon}${e.name}</option>`;
-    }
-
-    private addFiles(newFiles: File[]) {
+    private addFiles(newFiles: File[]): void {
         this.files = [...this.files, ...newFiles];
         this.renderAttachments();
     }
 
-    private removeFile(index: number) {
+    private removeFile(index: number): void {
         this.files.splice(index, 1);
         this.renderAttachments();
     }
 
-    private renderAttachments() {
+    private renderAttachments(): void {
         if (this.files.length === 0) {
             this.attachmentContainer.style.display = 'none';
             return;
         }
+
         this.attachmentContainer.style.display = 'flex';
         this.attachmentContainer.innerHTML = this.files.map((f, i) => `
             <div class="llm-input__attachment-tag">
@@ -717,33 +879,190 @@ export class ChatInput {
         return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
     }
 
-    private async triggerSend() {
-        const text = this.textarea.value.trim();
-        if ((!text && this.files.length === 0) || this.loading) return;
+    // ================================================================
+    // 模型与执行器管理
+    // ================================================================
 
-        const currentExecutor = this.executorSelect.value;
-        const currentFiles = [...this.files];
+    private updateModelOptions(): void {
+        let html = '<option value="">Use Agent Default</option>';
         
-        // ✨ 构建覆盖参数
-        const overrides: ChatOverrides = {};
-        if (this.currentSettings.modelId) {
-            overrides.modelId = this.currentSettings.modelId;
-        }
-        if (this.currentSettings.historyLength !== -1) {
-            overrides.historyLength = this.currentSettings.historyLength;
-        }
-
-        // Reset UI
-        this.textarea.value = '';
-        this.textarea.style.height = 'auto';
-        this.files = [];
-        this.renderAttachments();
+        // 不再分组，因为只显示单个 Connection 的模型
+        this.models.forEach(model => {
+            const displayName = model.provider 
+                ? `${model.name} (${model.provider})`
+                : model.name;
+            html += `<option value="${model.id}">${displayName}</option>`;
+        });
         
-        // ✨ 传递 overrides
-        await this.options.onSend(text, currentFiles, currentExecutor, overrides);
+        this.modelSelect.innerHTML = html;
+        
+        // 恢复选中状态
+        if (this.config.settings.modelId) {
+            const exists = this.models.some(m => m.id === this.config.settings.modelId);
+            if (exists) {
+                this.modelSelect.value = this.config.settings.modelId;
+            }
+        }
     }
 
-    setLoading(loading: boolean) {
+
+    // ✨ 新增：更新模型选项
+    public updateModels(models: ModelOption[]): void {
+        const previousModelId = this.config.settings.modelId;
+        this.models = models;
+        this.updateModelOptions();
+
+        // ✅ 恢复之前的选中状态（如果模型仍然存在）
+        if (previousModelId) {
+            const stillExists = models.some(m => m.id === previousModelId);
+            if (stillExists) {
+                this.modelSelect.value = previousModelId;
+            } else {
+                this.config.settings.modelId = undefined;
+                this.updateActiveBadges();
+            }
+        }
+    }
+
+    public updateExecutors(executors: ExecutorOption[], activeId?: string): void {
+        const groups: Record<string, ExecutorOption[]> = {};
+        const uncategorized: ExecutorOption[] = [];
+
+        executors.forEach(e => {
+            if (e.category) {
+                if (!groups[e.category]) groups[e.category] = [];
+                groups[e.category].push(e);
+            } else {
+                uncategorized.push(e);
+            }
+        });
+
+        let html = '';
+
+        // 1. 未分类 (Default agents)
+        if (uncategorized.length > 0) {
+            html += uncategorized.map(e => this.renderOption(e)).join('');
+        }
+
+        // 2. 分类组
+        Object.entries(groups).forEach(([category, items]) => {
+            html += `<optgroup label="${category}">`;
+            html += items.map(e => this.renderOption(e)).join('');
+            html += `</optgroup>`;
+        });
+
+        this.executorSelect.innerHTML = html;
+
+        if (activeId) {
+            this.setExecutor(activeId);
+        }
+    }
+
+    private renderOption(e: ExecutorOption): string {
+        const icon = e.icon ? `${e.icon} ` : '';
+        return `<option value="${e.id}">${icon}${e.name}</option>`;
+    }
+
+    private setExecutorValue(id: string): void {
+        const option = this.executorSelect.querySelector(`option[value="${id}"]`);
+        if (option) {
+            this.executorSelect.value = id;
+        } else {
+            this.executorSelect.value = 'default';
+        }
+    }
+
+    // ================================================================
+    // 公共 API
+    // ================================================================
+
+    /**
+     * 获取完整配置
+     */
+    public getConfig(): ChatInputConfig {
+        this.syncConfigFromUI();
+        return {
+            text: this.config.text,
+            agentId: this.config.agentId,
+            settings: { ...this.config.settings }
+        };
+    }
+
+    /**
+     * 设置完整配置
+     */
+    public setConfig(config: Partial<ChatInputConfig>): void {
+        this.config = this.mergeConfig(this.config, config);
+        this.syncUIFromConfig();
+        
+        // 如果 agentId 变了，重新加载模型
+        if (config.agentId && config.agentId !== this.currentAgentId) {
+            this.currentAgentId = config.agentId;
+            this.loadModelsForAgent(config.agentId);
+        }
+    }
+
+    /**
+     * ✅ 新增：强制刷新模型列表
+     */
+    public async refreshModels(): Promise<void> {
+        await this.loadModelsForAgent(this.currentAgentId);
+    }
+
+    /**
+     * 获取当前选中的执行器 ID
+     */
+    public getSelectedExecutor(): string {
+        return this.config.agentId;
+    }
+
+    /**
+     * 设置选中的执行器
+     */
+    public setExecutor(id: string): void {
+        this.config.agentId = id;
+        this.setExecutorValue(id);
+    }
+
+    /**
+     * 设置输入文本
+     */
+    public setInput(text: string): void {
+        this.config.text = text;
+        if (this.textarea) {
+            this.textarea.value = text;
+            this.adjustTextareaHeight();
+        }
+    }
+
+    /**
+     * 获取会话设置
+     */
+    public getSettings(): ChatSessionSettings {
+        return { ...this.config.settings };
+    }
+
+    /**
+     * 设置会话设置
+     */
+    public setSettings(settings: Partial<ChatSessionSettings>): void {
+        this.config.settings = { ...this.config.settings, ...settings };
+        this.syncUIFromConfig();
+    }
+
+    /**
+     * 重置设置为默认值
+     */
+    public resetSettings(): void {
+        this.config.settings = { ...DEFAULT_SESSION_SETTINGS };
+        this.syncUIFromConfig();
+        this.notifyConfigChange();
+    }
+
+    /**
+     * 设置加载状态
+     */
+    public setLoading(loading: boolean): void {
         this.loading = loading;
         this.sendBtn.style.display = loading ? 'none' : 'flex';
         this.stopBtn.style.display = loading ? 'flex' : 'none';
@@ -751,124 +1070,41 @@ export class ChatInput {
         this.executorSelect.disabled = loading;
         this.attachBtn.disabled = loading;
         this.settingsBtn.disabled = loading;
-        
-        // 禁用/启用拖拽样式
+
         if (loading) {
             this.inputWrapper.classList.add('llm-input__field-wrapper--disabled');
-            this.toggleSettings(false); // 发送时关闭设置面板
+            this.toggleSettings(false);
         } else {
             this.inputWrapper.classList.remove('llm-input__field-wrapper--disabled');
         }
     }
 
-    focus() {
+    /**
+     * 聚焦输入框
+     */
+    public focus(): void {
         this.textarea?.focus();
     }
 
-    // ✨ [新增] 销毁方法
-    destroy() {
+    /**
+     * 销毁组件
+     */
+    public destroy(): void {
         this.container.innerHTML = '';
         this.files = [];
     }
 
-    // ✨ [新增] 获取当前选中的执行器
-    public getSelectedExecutor(): string {
-        return this.executorSelect?.value || 'default';
+    // ================================================================
+    // 兼容性 API（向后兼容）
+    // ================================================================
+
+    /** @deprecated 使用 getConfig() 代替 */
+    public getState(): ChatInputConfig {
+        return this.getConfig();
     }
 
-    // ✨ [新增] 设置输入内容
-    setInput(text: string) {
-        if (this.textarea) {
-            this.textarea.value = text;
-            // 触发高度调整
-            this.textarea.dispatchEvent(new Event('input'));
-        }
-    }
-
-    // ✨ 新增：尝试设置选中的执行器，如果不存在则回退到 default
-    public setExecutor(id: string): void {
-        if (!this.executorSelect) return;
-        
-        const option = this.executorSelect.querySelector(`option[value="${id}"]`);
-        if (option) {
-            this.executorSelect.value = id;
-        } else {
-            console.warn(`[ChatInput] Agent ${id} not found, falling back to default.`);
-            this.executorSelect.value = 'default';
-        }
-    }
-
-    // ✨ 新增：获取当前状态（文本和 Agent ID）
-    // 注意：暂不持久化未上传的文件，因为 File 对象无法简单序列化到 JSON
-    public getState(): ChatInputState {
-        return {
-            text: this.textarea?.value || '',
-            agentId: this.getSelectedExecutor(),
-            settings: { ...this.currentSettings }
-        };
-    }
-
-    public setState(state: Partial<ChatInputState>): void {
-        if (state.text !== undefined && this.textarea) {
-            this.textarea.value = state.text;
-            // 触发高度调整
-            this.textarea.dispatchEvent(new Event('input', { bubbles: false }));
-            // 注意：这里不触发 onInputChange，避免循环保存
-        }
-        if (state.agentId) {
-            this.setExecutor(state.agentId);
-        }
-        if (state.settings) {
-        this.setSettings(state.settings);
-        }
-    }
-
-    // ✨ 新增：获取当前设置
-    public getSettings(): ChatSettings {
-        return { ...this.currentSettings };
-    }
-
-    // ✨ 新增：设置当前设置
-    public setSettings(settings: Partial<ChatSettings>): void {
-        this.currentSettings = { ...this.currentSettings, ...settings };
-        
-        // ✅ 关键：确保 modelSelect 存在且模型在列表中
-        if (settings.modelId !== undefined && this.modelSelect) {
-            // 检查选项是否存在
-            const optionExists = Array.from(this.modelSelect.options).some(
-                opt => opt.value === settings.modelId
-            );
-            
-            if (optionExists || settings.modelId === '') {
-                this.modelSelect.value = settings.modelId || '';
-            } else {
-                console.warn(`[ChatInput] Model ${settings.modelId} not found in options, keeping empty`);
-                this.currentSettings.modelId = undefined;
-                this.modelSelect.value = '';
-            }
-        }
-        
-        if (settings.historyLength !== undefined && this.historySlider) {
-            this.historySlider.value = settings.historyLength.toString();
-            this.updateHistoryDisplay();
-            this.updatePresetButtons();
-        }
-        
-        this.updateActiveBadges();
-    }
-
-    // ✨ 新增：重置设置到默认值
-    public resetSettings(): void {
-        this.currentSettings = {
-            modelId: undefined,
-            historyLength: -1,
-            temperature: undefined
-        };
-        this.modelSelect.value = '';
-        this.historySlider.value = '-1';
-        this.updateHistoryDisplay();
-        this.updatePresetButtons();
-        this.updateActiveBadges();
-        this.notifySettingsChange();
+    /** @deprecated 使用 setConfig() 代替 */
+    public setState(state: Partial<ChatInputConfig>): void {
+        this.setConfig(state);
     }
 }

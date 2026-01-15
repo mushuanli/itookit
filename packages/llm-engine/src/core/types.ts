@@ -3,6 +3,41 @@
 import { NodeStatus } from '@itookit/llm-kernel';
 
 /**
+ * ✅ 新增：会话级设置（YAML 配置文件格式）
+ * 文件位置: /.{sessionId}/settings.yaml
+ */
+export interface ChatSessionSettings {
+    /** 配置版本 */
+    version: '1.0';
+    
+    /** 覆盖模型 ID（空表示使用 Agent 默认） */
+    modelId?: string;
+    
+    /** 历史消息数量限制，-1 表示不限制, 0 表示不发送 */
+    historyLength: number;
+    
+    /** 温度参数 */
+    temperature?: number;
+    
+    /** 流式输出开关，默认 true */
+    streamMode: boolean;
+    
+    /** 最后更新时间 */
+    updatedAt?: string;
+}
+
+/**
+ * 默认会话设置
+ */
+export const DEFAULT_SESSION_SETTINGS: ChatSessionSettings = {
+    version: '1.0',
+    modelId: undefined,
+    historyLength: -1,
+    temperature: undefined,
+    streamMode: true,
+};
+
+/**
  * 聊天附件定义
  */
 export interface ChatFile {
@@ -20,15 +55,6 @@ export interface ChatFile {
     fileRef?: File | Blob;
 }
 
-/**
- * ✅ 新增：分支信息
- */
-export interface BranchInfo {
-    siblingIndex: number;
-    siblingCount: number;
-    parentAssistantId?: string;
-}
-
 
 /**
  * ✅ 新增：查询覆盖参数
@@ -40,6 +66,17 @@ export interface ExecutionOverrides {
     historyLength?: number;
     /** 温度参数 */
     temperature?: number;
+    /** ✅ 新增：流式输出开关 */
+    streamMode?: boolean;
+}
+
+/**
+ * ✅ 新增：分支信息
+ */
+export interface BranchInfo {
+    siblingIndex: number;
+    siblingCount: number;
+    parentAssistantId?: string;
 }
 
 /**

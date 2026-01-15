@@ -64,15 +64,16 @@
   },
   "peerDependencies": {
     "@itookit/common": "workspace:*",
-    "@itookit/vfs": "workspace:*",
+    "@itookit/llm-driver": "workspace:*",
     "@itookit/llm-kernel": "workspace:*",
-    "@itookit/llm-driver": "workspace:*"
+    "@itookit/vfs": "workspace:*"
   },
   "dependencies": {
     "@itookit/common": "workspace:*",
     "@itookit/llm-driver": "workspace:*",
     "@itookit/llm-kernel": "workspace:*",
-    "@itookit/vfs": "workspace:*"
+    "@itookit/vfs": "workspace:*",
+    "yaml": "^2.8.2"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
