@@ -12,7 +12,7 @@ import {
     ExecutionNode,
     ChatFile,
     ExecutionOverrides,
-
+    ChatSessionSettings,
 } from '../core/types';
 import { EngineError, EngineErrorCode } from '../core/errors';
 import { ENGINE_DEFAULTS } from '../core/constants';
@@ -254,6 +254,76 @@ export class SessionRegistry {
             }
         } catch (e) {
             console.error(`[SessionRegistry] Failed to load session ${sessionId}:`, e);
+        }
+    }
+
+    // ================================================================
+    // ✅ 新增：会话设置管理
+    // ================================================================
+
+    /**
+     * 获取会话设置
+     */
+    async getSessionSettings(sessionId: string): Promise<ChatSessionSettings> {
+        this.ensureInitialized();
+        return this.persistence.getSessionSettings(sessionId);
+    }
+
+    /**
+     * 保存会话设置
+     */
+    async saveSessionSettings(
+        sessionId: string,
+        settings: Partial<ChatSessionSettings>
+    ): Promise<void> {
+        this.ensureInitialized();
+        await this.persistence.saveSessionSettings(sessionId, settings);
+    }
+
+    /**
+     * ✅ 新增：获取 Agent 对应的可用模型
+     */
+    async getAvailableModelsForAgent(agentId: string): Promise<Array<{
+        id: string;
+        name: string;
+        provider?: string;
+    }>> {
+        this.ensureInitialized();
+
+        try {
+            // 获取 Agent 配置
+            const agentConfig = await this.agentService.getAgentConfig(agentId);
+
+            if (!agentConfig?.config.connectionId) {
+                // 如果是 default agent，使用默认连接
+                const defaultConn = await this.agentService.getDefaultConnection();
+                if (!defaultConn?.availableModels) return [];
+
+                return defaultConn.availableModels.map(m => ({
+                    id: m.id,
+                    name: m.name,
+                    provider: defaultConn.name,
+                }));
+            }
+
+            // 获取 Agent 对应的 Connection
+            const connection = await this.agentService.getConnection(
+                agentConfig.config.connectionId
+            );
+
+            if (!connection?.availableModels) {
+                return [];
+            }
+
+            return connection.availableModels.map(m => ({
+                id: m.id,
+                name: m.name,
+                provider: connection.name,
+            }));
+
+        } catch (e) {
+            console.error('[SessionRegistry] getAvailableModelsForAgent failed:', e);
+            return [];
         }
     }
 
@@ -515,13 +585,22 @@ export class SessionRegistry {
                 if (input.overrides.temperature !== undefined) {
                     executorConfig.temperature = input.overrides.temperature;
                 }
+                // ✅ 新增：streamMode 传递到 executorConfig
+                if (input.overrides.streamMode !== undefined) {
+                    executorConfig.stream = input.overrides.streamMode;
+                }
             }
 
             // ✅ 应用 historyLength 到历史消息获取
             let history = state.getHistory();
             if (input.overrides?.historyLength !== undefined && input.overrides.historyLength !== -1) {
-                history = history.slice(-input.overrides.historyLength);
+                if (input.overrides.historyLength === 0) {
+                    history = []; // 不发送历史
+                } else {
+                    history = history.slice(-input.overrides.historyLength);
+                }
             }
+
             const branchInfo = options.branchInfo;
 
             const assistantNodeId = await this.persistence.appendMessage(
@@ -620,12 +699,13 @@ export class SessionRegistry {
                 executorConfig,
                 {
                     sessionId,
-                    history: state.getHistory(),
-                    files: rawFiles, // ✅ 传递原始 File 对象给 Kernel
+                    history,  // ✅ 使用处理后的 history
+                    files: rawFiles,
                     onEvent,
                     signal: task.abortController.signal,
-                    // 尝试传递 ID，但即使失败，上面的 onEvent 拦截也会兜底
-                    rootNodeId: rootNode.id
+                    rootNodeId: rootNode.id,
+                    // ✅ 新增：传递 stream 参数
+                    stream: input.overrides?.streamMode ?? true,
                 }
             );
 

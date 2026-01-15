@@ -3,7 +3,7 @@
 /**
  * 执行器类型枚举
  */
-export type ExecutorType = 
+export type ExecutorType =
     | 'agent'       // LLM Agent
     | 'http'        // HTTP 请求
     | 'tool'        // 工具调用
@@ -13,23 +13,23 @@ export type ExecutorType =
 /**
  * 编排模式
  */
-export type OrchestrationMode = 
-    | 'serial' 
-    | 'parallel' 
-    | 'router' 
-    | 'loop' 
+export type OrchestrationMode =
+    | 'serial'
+    | 'parallel'
+    | 'router'
+    | 'loop'
     | 'dag'
     | 'state-machine';
 
 /**
  * 节点状态
  */
-export type NodeStatus = 
-    | 'pending' 
+export type NodeStatus =
+    | 'pending'
     | 'queued'        // ✅ 新增：对应任务队列状态
-    | 'running' 
-    | 'success' 
-    | 'failed' 
+    | 'running'
+    | 'success'
+    | 'failed'
     | 'aborted'
     | 'cancelled'
     | 'paused'
@@ -55,6 +55,7 @@ export interface ExecutionResult<T = unknown> {
     control: ControlDirective;
     metadata?: ExecutionMetadata;
     errors?: ExecutionError[];
+    stream?: boolean;
 }
 
 export interface ExecutionMetadata {
@@ -94,11 +95,11 @@ export interface ExecutionNode {
     status: NodeStatus;
     startTime: number;
     endTime?: number;
-    
+
     input?: unknown;
     output?: unknown;
     thinking?: string;  // 思考过程
-    
+
     metadata?: Record<string, any>;
     children?: ExecutionNode[];
 }

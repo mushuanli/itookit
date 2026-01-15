@@ -7,7 +7,7 @@ import {
 import { LLMPrintService, type PrintService, AssetManagerUI } from '@itookit/mdxeditor';
 import { FloatingNavPanel } from './components/FloatingNavPanel';
 import { HistoryView, CollapseStateMap } from './components/HistoryView';
-import { ChatInput, ExecutorOption, ChatInputState, ModelOption, ChatSettings } from './components/ChatInput';
+import { ChatInput, ChatInputConfig, ExecutorOption, ModelOption } from './components/ChatInput';
 import {
     ILLMSessionEngine,
     IAgentService,
@@ -18,7 +18,9 @@ import {
     ExecutionNode,
     OrchestratorEvent,
     RegistryEvent,
-    SessionSnapshot
+    SessionSnapshot,
+    ChatSessionSettings,
+    DEFAULT_SESSION_SETTINGS,
 } from '@itookit/llm-engine';
 import { NodeAction } from './core/types';
 
@@ -39,7 +41,8 @@ export interface LLMEditorOptions extends EditorOptions {
 // ✨ 扩充 CollapseStateMap 接口或者直接使用 any
 type UIStatePayload = {
     collapse_states: CollapseStateMap;
-    input_state?: ChatInputState;
+    input_text?: string;  // 只保存文本
+    input_agent_id?: string;  // 只保存 agent ID
 }
 
 /**
@@ -176,27 +179,67 @@ export class LLMWorkspaceEditor implements IEditor {
             }
         );
 
-        // ✅ 修复：先尝试加载已保存的 UI 状态，获取 initialSettings
-        let initialSettings: ChatSettings | undefined;
-        try {
-            const savedUIState = await this.engine.getUIState(this.options.nodeId!) as UIStatePayload;
-            if (savedUIState?.input_state?.settings && !this.options.isNewSession) {
-                initialSettings = savedUIState.input_state.settings;
-                // 同时保存 collapseStates
-                if (savedUIState.collapse_states) {
-                    this.collapseStatesCache = savedUIState.collapse_states;
-                }
+        // ✅ 加载会话设置（从 YAML 文件）
+        let initialSettings: ChatSessionSettings | undefined;
+        if (this.currentSessionId && !this.options.isNewSession) {
+            try {
+                initialSettings = await this.sessionManager.getSessionSettings();
+            } catch (e) {
+                console.warn('[LLMWorkspaceEditor] Failed to load session settings:', e);
             }
-        } catch (e) {
-            console.warn('[LLMWorkspaceEditor] Failed to pre-load UI state:', e);
         }
 
-        // 获取初始执行器列表
-        let initialAgents: ExecutorOption[] = [];
+        // 加载 UI 状态（折叠状态、输入文本）
+        let savedUIState: UIStatePayload | null = null;
+        try {
+            savedUIState = await this.engine.getUIState(this.options.nodeId!) as UIStatePayload;
+            if (savedUIState?.collapse_states) {
+                this.collapseStatesCache = savedUIState.collapse_states;
+            }
+        } catch (e) {
+            console.warn('[LLMWorkspaceEditor] Failed to load UI state:', e);
+        }
+
+        // 获取初始 Agents 列表
+        const initialAgents = await this.loadInitialAgents();
+
+        // 构建初始配置
+        const initialConfig: Partial<ChatInputConfig> = {
+            text: savedUIState?.input_text || '',
+            agentId: savedUIState?.input_agent_id || 'default',
+            settings: initialSettings || { ...DEFAULT_SESSION_SETTINGS },
+        };
+
+        // ✅ 初始化输入组件，提供模型加载回调
+        this.chatInput = new ChatInput(inputEl, {
+            onSend: (text, files, agentId, overrides) =>
+                this.handleUserSend(text, files, agentId, overrides),
+            onStop: () => this.sessionManager.abort(),
+            initialAgents,
+            initialConfig,
+            onConfigChange: (config) => this.handleConfigChange(config),
+            onExecutorChange: (_executorId) => {
+                this.scheduleInputStateSave();
+            },
+            // ✅ 关键：提供模型加载回调
+            onRequestModels: (agentId) => this.loadModelsForAgent(agentId),
+        });
+
+        this.bindNavigationEvents();
+    }
+
+    // ================================================================
+    // ✅ 新增：Agent 和模型加载方法
+    // ================================================================
+
+    /**
+     * 加载初始 Agent 列表
+     */
+    private async loadInitialAgents(): Promise<ExecutorOption[]> {
         try {
             const agents = await this.options.agentService.getAgents();
 
-            initialAgents = agents.map(agent => ({
+            let initialAgents: ExecutorOption[] = agents.map(agent => ({
                 id: agent.id,
                 name: agent.name,
                 icon: agent.icon,
@@ -205,7 +248,7 @@ export class LLMWorkspaceEditor implements IEditor {
                 description: agent.description
             }));
 
-            // 检查是否已存在 default
+            // 确保有默认 Agent
             const hasDefault = initialAgents.some(a => a.id === 'default');
             if (!hasDefault) {
                 initialAgents.unshift({
@@ -218,7 +261,7 @@ export class LLMWorkspaceEditor implements IEditor {
 
             // 去重
             const seen = new Set<string>();
-            initialAgents = initialAgents.filter(agent => {
+            return initialAgents.filter(agent => {
                 if (seen.has(agent.id)) return false;
                 seen.add(agent.id);
                 return true;
@@ -226,103 +269,51 @@ export class LLMWorkspaceEditor implements IEditor {
 
         } catch (e) {
             console.warn('[LLMWorkspaceEditor] Failed to get initial agents:', e);
-            initialAgents = [{
+            return [{
                 id: 'default',
                 name: 'Default Assistant',
                 icon: '🤖',
                 category: 'System'
             }];
         }
-
-        // ✨ 新增：获取初始模型列表
-        const initialModels = await this.loadAvailableModels();
-
-        // ✨ 修改：初始化输入组件，添加模型和设置回调
-        this.chatInput = new ChatInput(inputEl, {
-            onSend: (text, files, agentId, overrides) => this.handleUserSend(text, files, agentId, overrides),
-            onStop: () => this.sessionManager.abort(),
-            initialAgents,
-            initialModels,
-            initialSettings,  // ✅ 传递预加载的设置
-            onInputChange: () => this.scheduleInputStateSave(),
-            onExecutorChange: (executorId) => {
-                this.scheduleInputStateSave();
-                // ✨ 可选：当 Agent 变化时，更新模型列表（如果不同 Agent 有不同的可用模型）
-                this.updateModelsForAgent(executorId);
-            },
-            // ✨ 新增：设置变化回调
-            onSettingsChange: (settings) => this.handleChatSettingsChange(settings),
-        });
-
-        // 绑定导航相关事件
-        this.bindNavigationEvents();
     }
 
-    // ✨ 新增：加载所有可用模型
-    private async loadAvailableModels(): Promise<ModelOption[]> {
-        const models: ModelOption[] = [];
-
+    /**
+     * 加载指定 Agent 的可用模型
+     */
+    private async loadModelsForAgent(agentId: string): Promise<ModelOption[]> {
         try {
-            const connections = await this.options.agentService.getConnections();
-
-            for (const conn of connections) {
-                if (conn.availableModels && conn.availableModels.length > 0) {
-                    for (const model of conn.availableModels) {
-                        models.push({
-                            id: model.id,
-                            name: model.name,
-                            provider: conn.name,  // 使用连接名称作为分组
-                            description: model.supportsThinking
-                                ? 'Supports extended thinking'
-                                : undefined
-                        });
-                    }
-                }
-            }
-
-            console.log(`[LLMWorkspaceEditor] Loaded ${models.length} models from ${connections.length} connections`);
-
+            const models = await this.sessionManager.getAvailableModelsForAgent(agentId);
+            return models.map(m => ({
+                id: m.id,
+                name: m.name,
+                provider: m.provider,
+            }));
         } catch (e) {
-            console.warn('[LLMWorkspaceEditor] Failed to load models:', e);
-        }
-
-        return models;
-    }
-
-    // ✨ 新增：根据 Agent 更新模型列表（可选）
-    private async updateModelsForAgent(agentId: string): Promise<void> {
-        try {
-            const agentConfig = await this.options.agentService.getAgentConfig(agentId);
-
-            if (agentConfig?.config.connectionId) {
-                const connection = await this.options.agentService.getConnection(
-                    agentConfig.config.connectionId
-                );
-
-                if (connection?.availableModels) {
-                    const models: ModelOption[] = connection.availableModels.map(m => ({
-                        id: m.id,
-                        name: m.name,
-                        provider: connection.name,
-                    }));
-
-                    this.chatInput.updateModels(models);
-                }
-            }
-        } catch (e) {
-            console.warn('[LLMWorkspaceEditor] Failed to update models for agent:', e);
+            console.error('[LLMWorkspaceEditor] loadModelsForAgent failed:', e);
+            return [];
         }
     }
 
-    // ✨ 新增：处理聊天设置变化
-    private async handleChatSettingsChange(settings: ChatSettings): Promise<void> {
-        console.log('[LLMWorkspaceEditor] Chat settings changed:', settings);
+    // ================================================================
+    // ✅ 新增：配置变更处理
+    // ================================================================
 
-        // 保存到 UI 状态
+    /**
+     * 处理配置变更，分别保存 settings(YAML) 和 UI状态(JSON)
+     */
+    private async handleConfigChange(config: ChatInputConfig): Promise<void> {
+        // 保存 settings 到 YAML
+        if (this.currentSessionId && config.settings) {
+            try {
+                await this.sessionManager.saveSessionSettings(config.settings);
+            } catch (e) {
+                console.warn('[LLMWorkspaceEditor] Failed to save session settings:', e);
+            }
+        }
+
+        // 触发 UI 状态保存（文本和 agentId）
         this.scheduleInputStateSave();
-
-        // 可选：如果需要实时同步到 Agent 配置，可以在这里处理
-        // 但通常建议只在发送消息时使用 overrides，而非修改 Agent 配置
     }
 
     /**
@@ -429,72 +420,7 @@ export class LLMWorkspaceEditor implements IEditor {
         );
     }
 
-    /**
-     * 统一的 UI 状态恢复方法
-     */
-    private async restoreUIState(): Promise<void> {
-        // 1. 尝试加载文件中保存的状态
-        let savedState: UIStatePayload | null = null;
 
-        try {
-            savedState = await this.engine.getUIState(this.options.nodeId!) as UIStatePayload;
-        } catch (e) {
-            console.warn('[LLMWorkspaceEditor] Failed to load UI state:', e);
-        }
-
-        // 恢复折叠状态（可能在 initComponents 中已加载）
-        if (savedState?.collapse_states && Object.keys(this.collapseStatesCache).length === 0) {
-            this.collapseStatesCache = savedState.collapse_states;
-            this.historyView.setCollapseStates(this.collapseStatesCache);
-            console.log('[LLMWorkspaceEditor] Restored collapse states from file');
-        }
-
-        // 3. 恢复输入状态
-        this.restoreInputState(savedState?.input_state);
-    }
-
-    /**
-     * 统一的输入状态恢复方法
-     * 优先级：options.initialInputState > sessionStorage > 已保存状态 > 默认
-     */
-    private restoreInputState(savedState?: ChatInputState): void {
-        if (!this.chatInput) return;
-
-        // 优先级 1：检查 options 中的 initialInputState
-        if (this.options.initialInputState) {
-            this.chatInput.setState({
-                text: this.options.initialInputState.text || '',
-                agentId: this.options.initialInputState.agentId || 'default'
-            });
-            console.log('[LLMWorkspaceEditor] Applied options.initialInputState');
-            return;
-        }
-
-        // 优先级 2：检查 sessionStorage 中的创建参数
-        const createParams = this.getAndClearCreateParams();
-        if (createParams) {
-            this.chatInput.setState({
-                text: createParams.text || '',
-                agentId: createParams.agentId || 'default'
-            });
-            console.log('[LLMWorkspaceEditor] Applied sessionStorage create params', createParams);
-            return;
-        }
-
-        // 优先级 3：恢复已保存的状态（非新会话）
-        if (!this.options.isNewSession && savedState) {
-            // ✅ 只恢复 text 和 agentId，settings 已在构造时处理
-            this.chatInput.setState({
-                text: savedState.text,
-                agentId: savedState.agentId
-            });
-            console.log('[LLMWorkspaceEditor] Restored saved input state', savedState);
-            return;
-        }
-
-        // 默认：不做任何操作
-        console.log('[LLMWorkspaceEditor] Using default input state');
-    }
 
     /**
      * 获取并清除 sessionStorage 中的创建参数
@@ -640,32 +566,96 @@ export class LLMWorkspaceEditor implements IEditor {
      * 保存 UI 状态到文件
      */
     private async saveUIState(): Promise<void> {
-        // ✅ 如果标记为删除，直接跳过
-        if (this.isBeingDeleted) {
-            return;
-        }
+        if (this.isBeingDeleted || !this.options.nodeId) return;
 
-        if (!this.options.nodeId) return;
-
-        const inputState = this.chatInput ? this.chatInput.getState() : undefined;
+        const inputConfig = this.chatInput ? this.chatInput.getConfig() : undefined;
 
         try {
             const payload: UIStatePayload = {
                 collapse_states: this.collapseStatesCache,
-                input_state: inputState
+                input_text: inputConfig?.text,
+                input_agent_id: inputConfig?.agentId,
+                // ✅ 不再保存 settings，settings 保存到 YAML
             };
 
             await this.engine.updateUIState(this.options.nodeId, payload);
             console.log('[LLMWorkspaceEditor] UI state saved');
         } catch (e: any) {
-            // ✅ 优雅处理节点不存在的情况
-            if (e.message?.includes('not found') ||
-                e.message?.includes('Node not found') ||
-                e.message?.includes('Manifest missing')) {
-                // 静默处理，不输出错误日志
+            if (e.message?.includes('not found') || e.message?.includes('Node not found')) {
                 return;
             }
             console.warn('[LLMWorkspaceEditor] Failed to save UI state:', e);
+        }
+    }
+
+
+    /**
+     * ✅ 修改：恢复 UI 状态
+     */
+    private async restoreUIState(): Promise<void> {
+        // 1. 加载折叠状态
+        let savedState: UIStatePayload | null = null;
+        try {
+            savedState = await this.engine.getUIState(this.options.nodeId!) as UIStatePayload;
+        } catch (e) {
+            console.warn('[LLMWorkspaceEditor] Failed to load UI state:', e);
+        }
+
+        if (savedState?.collapse_states && Object.keys(this.collapseStatesCache).length === 0) {
+            this.collapseStatesCache = savedState.collapse_states;
+            this.historyView.setCollapseStates(this.collapseStatesCache);
+        }
+
+        // 2. 加载会话设置（从 YAML）
+        let sessionSettings: ChatSessionSettings | undefined;
+        if (this.currentSessionId && !this.options.isNewSession) {
+            try {
+                sessionSettings = await this.sessionManager.getSessionSettings();
+            } catch (e) {
+                console.warn('[LLMWorkspaceEditor] Failed to load session settings:', e);
+            }
+        }
+
+        // 3. 恢复输入状态
+        this.restoreInputState(savedState, sessionSettings);
+    }
+
+    /**
+     * ✅ 修改：统一的输入状态恢复方法
+     */
+    private restoreInputState(
+        savedState?: UIStatePayload | null,
+        sessionSettings?: ChatSessionSettings
+    ): void {
+        if (!this.chatInput) return;
+
+        // 优先级 1：options.initialInputState
+        if (this.options.initialInputState) {
+            this.chatInput.setConfig({
+                text: this.options.initialInputState.text || '',
+                agentId: this.options.initialInputState.agentId || 'default',
+            });
+            return;
+        }
+
+        // 优先级 2：sessionStorage 中的创建参数
+        const createParams = this.getAndClearCreateParams();
+        if (createParams) {
+            this.chatInput.setConfig({
+                text: createParams.text || '',
+                agentId: createParams.agentId || 'default',
+            });
+            return;
+        }
+
+        // 优先级 3：恢复已保存的状态（非新会话）
+        if (!this.options.isNewSession && savedState) {
+            this.chatInput.setConfig({
+                text: savedState.input_text || '',
+                agentId: savedState.input_agent_id || 'default',
+                settings: sessionSettings,  // ✅ 从 YAML 加载
+            });
+            return;
         }
     }
 

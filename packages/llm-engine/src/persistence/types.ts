@@ -1,7 +1,7 @@
 // @file: llm-engine/src/persistence/types.ts
 
 import { ISessionEngine as IBaseSessionEngine } from '@itookit/common';
-import { ChatFile } from '../core/types'; // 引入新类型
+import { ChatFile, ChatSessionSettings } from '../core/types';
 
 /**
  * 聊天清单（.chat 文件）
@@ -142,4 +142,29 @@ export interface ILLMSessionEngine extends IBaseSessionEngine {
     // ✅ 新增：UI 状态管理
     getUIState(nodeId: string): Promise<ChatManifest['ui_state'] | null>;
     updateUIState(nodeId: string, updates: Partial<NonNullable<ChatManifest['ui_state']>>): Promise<void>;
+
+    /**
+     * 获取会话设置
+     * @param sessionId 会话 ID
+     * @returns 会话设置，如果不存在返回默认值
+     */
+    getSessionSettings(sessionId: string): Promise<ChatSessionSettings>;
+    
+    /**
+     * 保存会话设置
+     * @param sessionId 会话 ID
+     * @param settings 要保存的设置（增量合并）
+     */
+    saveSessionSettings(sessionId: string, settings: Partial<ChatSessionSettings>): Promise<void>;
+    
+    /**
+     * ✅ 新增：获取 Agent 对应的 Connection 的可用模型
+     * @param agentId Agent ID
+     * @returns 可用模型列表
+     */
+    getAvailableModelsForAgent(agentId: string): Promise<Array<{
+        id: string;
+        name: string;
+        provider?: string;
+    }>>;
 }

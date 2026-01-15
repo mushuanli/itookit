@@ -1,7 +1,7 @@
 // @file packages/vfs-sync/src/core/SyncExecutor.ts
 
 import { IPluginContext, VNodeType, VNodeData } from '../../core';
-import { 
+import {
   SyncConfig, SyncPacket, SyncChange, SyncState, SyncLog,
   ChunkReference, InlineContent, SyncPhase, SyncProgress
 } from '../types';
@@ -16,7 +16,6 @@ import { incrementClock, mergeClock } from '../utils/vectorClock';
 import { base64ToArrayBuffer, calculateHash } from '@itookit/common';
 import { decompress } from '../utils/compression';
 import { filterSyncMetadata, mergeSyncMetadata } from '../utils/metadata';
-import { SYNC_CONSTANTS } from '../constants';
 
 export class SyncExecutor {
   private processingRemoteNodes = new Set<string>();
@@ -34,7 +33,7 @@ export class SyncExecutor {
     private getState: () => SyncState,
     private updateState: (partial: Partial<SyncState>) => void,
     private emitStateChange: () => void
-  ) {}
+  ) { }
 
   /**
    * 执行推送同步
@@ -467,13 +466,13 @@ export class SyncExecutor {
       // 优先使用 WebSocket 请求单个分片（如果是完整文件，index=0, totalChunks=1）
       if (this.transport.isConnected) {
         const data = await this.transport.requestChunk(contentHash, 0, nodeId);
-        
+
         // 验证哈希
         const actualHash = await calculateHash(data);
         if (actualHash === contentHash) {
           return data;
         }
-        
+
         // 如果哈希不匹配，可能是分片，需要获取全部
         this.context.log.debug(`Content hash mismatch, may need multiple chunks`);
       }
