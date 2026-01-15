@@ -21,6 +21,7 @@ export interface ExecutionOptions {
     executionId?: string;
     /** ✨ [新增] 根节点 ID（用于关联 UI 预创建的节点） */
     rootNodeId?: string;
+    stream?: boolean;
 }
 
 /**
@@ -30,12 +31,12 @@ export class ExecutionRuntime {
     private eventBus: EventBus;
     private factory: IExecutorFactory;
     private activeExecutions = new Map<string, AbortController>();
-    
+
     constructor(factory?: IExecutorFactory) {
         this.eventBus = getEventBus();
         this.factory = factory || getExecutorRegistry();
     }
-    
+
     /**
      * 执行配置
      */
@@ -45,19 +46,19 @@ export class ExecutionRuntime {
         options: ExecutionOptions = {}
     ): Promise<ExecutionResult> {
         // ✅ 修复：允许外部传入 executionId
-        const executionId = options.executionId 
-            || options.variables?.sessionId 
+        const executionId = options.executionId
+            || options.variables?.sessionId
             || generateUUID();
-        
+
         const abortController = new AbortController();
-        
+
         // 链接外部信号
         if (options.signal) {
             options.signal.addEventListener('abort', () => {
                 abortController.abort();
             });
         }
-        
+
         // 超时控制
         let timeoutId: ReturnType<typeof setTimeout> | undefined;
         if (options.timeout) {
@@ -65,12 +66,12 @@ export class ExecutionRuntime {
                 abortController.abort();
             }, options.timeout);
         }
-        
+
         this.activeExecutions.set(executionId, abortController);
-        
+
         // 创建事件作用域
         const scopedEvents = this.eventBus.createScope(executionId);
-        
+
         // 创建执行上下文
         const context = new ExecutionContext(
             executionId,
@@ -86,41 +87,41 @@ export class ExecutionRuntime {
         if (options.rootNodeId) {
             context.setCurrentNode(options.rootNodeId);
         }
-        
+
         // 注入初始变量
         if (options.variables) {
             for (const [key, value] of Object.entries(options.variables)) {
                 context.variables.set(key, value);
             }
         }
-        
+
         try {
             // 发送执行开始事件
             scopedEvents.emit('execution:start', {
                 executionId,
                 config: { id: config.id, name: config.name, type: config.type }
             });
-            
+
             // 创建并执行
             const executor = this.factory.create(config);
             const result = await executor.execute(input, context);
-            
+
             // 发送执行完成事件
             scopedEvents.emit('execution:complete', {
                 executionId,
                 status: result.status,
                 output: result.output
             });
-            
+
             return result;
-            
+
         } catch (error: any) {
             scopedEvents.emit('execution:error', {
                 executionId,
                 error: error.message,
                 code: error.code
             });
-            
+
             return {
                 status: 'failed',
                 output: null,
@@ -131,7 +132,7 @@ export class ExecutionRuntime {
                     recoverable: false
                 }]
             };
-            
+
         } finally {
             // 清理
             if (timeoutId) clearTimeout(timeoutId);
@@ -139,7 +140,7 @@ export class ExecutionRuntime {
             this.eventBus.destroyScope(executionId);
         }
     }
-    
+
     /**
      * 取消执行
      */
@@ -151,7 +152,7 @@ export class ExecutionRuntime {
         }
         return false;
     }
-    
+
     /**
      * 取消所有执行
      */
@@ -161,21 +162,21 @@ export class ExecutionRuntime {
         }
         this.activeExecutions.clear();
     }
-    
+
     /**
      * 获取活跃执行数
      */
     getActiveCount(): number {
         return this.activeExecutions.size;
     }
-    
+
     /**
      * 订阅事件
      */
     onEvent(handler: (event: any) => void): () => void {
         return this.eventBus.on('*', handler);
     }
-    
+
     /**
      * 订阅特定执行的事件
      */

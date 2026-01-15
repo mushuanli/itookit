@@ -1,5 +1,6 @@
 // @file: llm-engine/src/persistence/session-engine.ts
 
+import YAML from 'yaml'; // 需要添加依赖: npm install yaml
 import {
   VFS,
   BaseModuleService,
@@ -23,6 +24,7 @@ import {
   ILLMSessionEngine,
 } from './types';
 import { LockManager } from './LockManager';
+import { ChatSessionSettings, DEFAULT_SESSION_SETTINGS } from '../core/types';
 
 // 调试日志
 const DEBUG = typeof process !== 'undefined' && process.env?.NODE_ENV === 'development';
@@ -128,185 +130,185 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
     title: string,
     systemPrompt: string = "You are a helpful assistant."
   ): Promise<string> {
-        // 先检查文件是否已有有效内容
+    // 先检查文件是否已有有效内容
+    try {
+      const content = await this.engine.readContent(nodeId);
+      if (content) {
+        const str = typeof content === 'string' ? content : new TextDecoder().decode(content);
+
+        // 尝试解析 JSON
+        let manifest: ChatManifest;
         try {
-            const content = await this.engine.readContent(nodeId);
-            if (content) {
-                const str = typeof content === 'string' ? content : new TextDecoder().decode(content);
-                
-                // 尝试解析 JSON
-                let manifest: ChatManifest;
-                try {
-                    manifest = JSON.parse(str) as ChatManifest;
-                } catch (parseError) {
-                    log(`Manifest JSON parse failed, will reinitialize:`, parseError);
-                    return await this.createNewSessionStructure(nodeId, title, systemPrompt);
-                }
-                
-                // 验证 manifest 结构完整性
-                if (!this.isValidManifest(manifest)) {
-                    log(`Invalid manifest structure, will reinitialize`);
-                    return await this.createNewSessionStructure(nodeId, title, systemPrompt);
-                }
-                
-                // 检查隐藏目录和根节点
-                const hiddenDirPath = this.getHiddenDir(manifest.id);
-                const hiddenDirId = await this.engine.resolvePath(hiddenDirPath);
-                
-                if (!hiddenDirId) {
-                    log(`Hidden directory missing for session ${manifest.id}, rebuilding...`);
-                    return await this.rebuildSessionStructure(nodeId, manifest, systemPrompt);
-                }
-                
-                // 检查根节点
-                const rootNodePath = this.getNodePath(manifest.id, manifest.root_id);
-                const rootNode = await this.readJson<ChatNode>(rootNodePath);
-                
-                if (!rootNode) {
-                    log(`Root node missing, rebuilding session structure`);
-                    return await this.rebuildSessionStructure(nodeId, manifest, systemPrompt);
-                }
-                
-                log(`Existing valid session found: ${manifest.id}`);
-                return manifest.id;
-            }
-        } catch (e) {
-            log(`Failed to read/validate existing content, will create new:`, e);
+          manifest = JSON.parse(str) as ChatManifest;
+        } catch (parseError) {
+          log(`Manifest JSON parse failed, will reinitialize:`, parseError);
+          return await this.createNewSessionStructure(nodeId, title, systemPrompt);
         }
-        
-        // 文件为空或完全损坏，创建新结构
-        return await this.createNewSessionStructure(nodeId, title, systemPrompt);
+
+        // 验证 manifest 结构完整性
+        if (!this.isValidManifest(manifest)) {
+          log(`Invalid manifest structure, will reinitialize`);
+          return await this.createNewSessionStructure(nodeId, title, systemPrompt);
+        }
+
+        // 检查隐藏目录和根节点
+        const hiddenDirPath = this.getHiddenDir(manifest.id);
+        const hiddenDirId = await this.engine.resolvePath(hiddenDirPath);
+
+        if (!hiddenDirId) {
+          log(`Hidden directory missing for session ${manifest.id}, rebuilding...`);
+          return await this.rebuildSessionStructure(nodeId, manifest, systemPrompt);
+        }
+
+        // 检查根节点
+        const rootNodePath = this.getNodePath(manifest.id, manifest.root_id);
+        const rootNode = await this.readJson<ChatNode>(rootNodePath);
+
+        if (!rootNode) {
+          log(`Root node missing, rebuilding session structure`);
+          return await this.rebuildSessionStructure(nodeId, manifest, systemPrompt);
+        }
+
+        log(`Existing valid session found: ${manifest.id}`);
+        return manifest.id;
+      }
+    } catch (e) {
+      log(`Failed to read/validate existing content, will create new:`, e);
+    }
+
+    // 文件为空或完全损坏，创建新结构
+    return await this.createNewSessionStructure(nodeId, title, systemPrompt);
   }
 
-    /**
-     * ✅ 新增：验证 manifest 结构
-     */
-    private isValidManifest(manifest: any): manifest is ChatManifest {
-        return (
-            manifest &&
-            typeof manifest.id === 'string' &&
-            typeof manifest.root_id === 'string' &&
-            typeof manifest.current_branch === 'string' &&
-            typeof manifest.current_head === 'string' &&
-            manifest.branches &&
-            typeof manifest.branches[manifest.current_branch] === 'string'
-        );
+  /**
+   * ✅ 新增：验证 manifest 结构
+   */
+  private isValidManifest(manifest: any): manifest is ChatManifest {
+    return (
+      manifest &&
+      typeof manifest.id === 'string' &&
+      typeof manifest.root_id === 'string' &&
+      typeof manifest.current_branch === 'string' &&
+      typeof manifest.current_head === 'string' &&
+      manifest.branches &&
+      typeof manifest.branches[manifest.current_branch] === 'string'
+    );
+  }
+
+  /**
+   * ✅ 新增：创建新的会话结构
+   */
+  private async createNewSessionStructure(
+    nodeId: string,
+    title: string,
+    systemPrompt: string
+  ): Promise<string> {
+    const sessionId = generateUUID();
+    const now = new Date().toISOString();
+
+    log(`Creating new session structure: nodeId=${nodeId}, sessionId=${sessionId}`);
+
+    // 创建隐藏目录
+    await this.engine.createDirectory(this.getHiddenDir(sessionId), null);
+
+    // 创建根节点
+    const rootNodeId = `node-${Date.now()}-root`;
+    const rootNode: ChatNode = {
+      id: rootNodeId,
+      type: 'message',
+      role: 'system',
+      content: systemPrompt,
+      created_at: now,
+      parent_id: null,
+      children_ids: [],
+      status: 'active'
+    };
+
+    await this.writeJson(this.getNodePath(sessionId, rootNodeId), rootNode);
+
+    // 创建 Manifest
+    const manifest: ChatManifest = {
+      version: "1.0",
+      id: sessionId,
+      title: title,
+      created_at: now,
+      updated_at: now,
+      settings: { model: "gpt-4", temperature: 0.7 },
+      branches: { "main": rootNodeId },
+      current_branch: "main",
+      current_head: rootNodeId,
+      root_id: rootNodeId
+    };
+
+    await this.engine.writeContent(nodeId, JSON.stringify(manifest, null, 2));
+
+    await this.engine.updateMetadata(nodeId, {
+      title: title,
+      icon: '💬',
+      sessionId: sessionId
+    });
+
+    this.notify();
+    return sessionId;
+  }
+
+  /**
+   * ✅ 新增：重建会话结构（保留 manifest ID，重建隐藏目录）
+   */
+  private async rebuildSessionStructure(
+    nodeId: string,
+    oldManifest: ChatManifest,
+    systemPrompt: string
+  ): Promise<string> {
+    const sessionId = oldManifest.id;
+    const now = new Date().toISOString();
+
+    log(`Rebuilding session structure: sessionId=${sessionId}`);
+
+    // 清理可能存在的残留目录
+    const hiddenDirPath = this.getHiddenDir(sessionId);
+    try {
+      const existingDirId = await this.engine.resolvePath(hiddenDirPath);
+      if (existingDirId) {
+        await this.engine.delete([existingDirId]);
+      }
+    } catch (e) {
+      // 忽略
     }
 
-    /**
-     * ✅ 新增：创建新的会话结构
-     */
-    private async createNewSessionStructure(
-        nodeId: string,
-        title: string,
-        systemPrompt: string
-    ): Promise<string> {
-        const sessionId = generateUUID();
-        const now = new Date().toISOString();
-        
-        log(`Creating new session structure: nodeId=${nodeId}, sessionId=${sessionId}`);
-        
-        // 创建隐藏目录
-        await this.engine.createDirectory(this.getHiddenDir(sessionId), null);
+    // 重新创建隐藏目录
+    await this.engine.createDirectory(hiddenDirPath, null);
 
-        // 创建根节点
-        const rootNodeId = `node-${Date.now()}-root`;
-        const rootNode: ChatNode = {
-            id: rootNodeId,
-            type: 'message',
-            role: 'system',
-            content: systemPrompt,
-            created_at: now,
-            parent_id: null,
-            children_ids: [],
-            status: 'active'
-        };
-        
-        await this.writeJson(this.getNodePath(sessionId, rootNodeId), rootNode);
+    // 创建根节点
+    const rootNodeId = `node-${Date.now()}-root`;
+    const rootNode: ChatNode = {
+      id: rootNodeId,
+      type: 'message',
+      role: 'system',
+      content: systemPrompt,
+      created_at: now,
+      parent_id: null,
+      children_ids: [],
+      status: 'active'
+    };
 
-        // 创建 Manifest
-        const manifest: ChatManifest = {
-            version: "1.0",
-            id: sessionId,
-            title: title,
-            created_at: now,
-            updated_at: now,
-            settings: { model: "gpt-4", temperature: 0.7 },
-            branches: { "main": rootNodeId },
-            current_branch: "main",
-            current_head: rootNodeId,
-            root_id: rootNodeId
-        };
+    await this.writeJson(this.getNodePath(sessionId, rootNodeId), rootNode);
 
-        await this.engine.writeContent(nodeId, JSON.stringify(manifest, null, 2));
-        
-        await this.engine.updateMetadata(nodeId, {
-            title: title,
-            icon: '💬',
-            sessionId: sessionId
-        });
+    // 更新 Manifest（保留原始 ID 和 title）
+    const manifest: ChatManifest = {
+      ...oldManifest,
+      root_id: rootNodeId,
+      branches: { "main": rootNodeId },
+      current_branch: "main",
+      current_head: rootNodeId,
+      updated_at: now
+    };
 
-        this.notify();
-        return sessionId;
-    }
+    await this.engine.writeContent(nodeId, JSON.stringify(manifest, null, 2));
 
-    /**
-     * ✅ 新增：重建会话结构（保留 manifest ID，重建隐藏目录）
-     */
-    private async rebuildSessionStructure(
-        nodeId: string,
-        oldManifest: ChatManifest,
-        systemPrompt: string
-    ): Promise<string> {
-        const sessionId = oldManifest.id;
-        const now = new Date().toISOString();
-        
-        log(`Rebuilding session structure: sessionId=${sessionId}`);
-        
-        // 清理可能存在的残留目录
-        const hiddenDirPath = this.getHiddenDir(sessionId);
-        try {
-            const existingDirId = await this.engine.resolvePath(hiddenDirPath);
-            if (existingDirId) {
-                await this.engine.delete([existingDirId]);
-            }
-        } catch (e) {
-            // 忽略
-        }
-        
-        // 重新创建隐藏目录
-        await this.engine.createDirectory(hiddenDirPath, null);
-
-        // 创建根节点
-        const rootNodeId = `node-${Date.now()}-root`;
-        const rootNode: ChatNode = {
-            id: rootNodeId,
-            type: 'message',
-            role: 'system',
-            content: systemPrompt,
-            created_at: now,
-            parent_id: null,
-            children_ids: [],
-            status: 'active'
-        };
-        
-        await this.writeJson(this.getNodePath(sessionId, rootNodeId), rootNode);
-
-        // 更新 Manifest（保留原始 ID 和 title）
-        const manifest: ChatManifest = {
-            ...oldManifest,
-            root_id: rootNodeId,
-            branches: { "main": rootNodeId },
-            current_branch: "main",
-            current_head: rootNodeId,
-            updated_at: now
-        };
-
-        await this.engine.writeContent(nodeId, JSON.stringify(manifest, null, 2));
-
-        this.notify();
-        return sessionId;
-    }
+    this.notify();
+    return sessionId;
+  }
 
   /**
    * 获取会话上下文
@@ -769,44 +771,44 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
   private async findAvailableFileName(baseName: string, parentId: string | null): Promise<string> {
     const maxAttempts = 100;
 
-        // 获取父目录下的所有文件名
-        const existingNames = new Set<string>();
-        
-        try {
-            let children: EngineNode[];
-            if (parentId) {
-                children = await this.engine.getChildren(parentId);
-            } else {
-                // 根目录
-                const tree = await this.engine.loadTree();
-                children = tree.filter(n => !n.parentId || n.parentId === null);
-            }
-            
-            children.forEach(child => {
-                if (child.name.endsWith('.chat')) {
-                    existingNames.add(child.name.replace(/\.chat$/i, '').toLowerCase());
-                }
-            });
-        } catch (e) {
-            log(`Failed to list existing files:`, e);
-            // 继续执行，假设没有冲突
+    // 获取父目录下的所有文件名
+    const existingNames = new Set<string>();
+
+    try {
+      let children: EngineNode[];
+      if (parentId) {
+        children = await this.engine.getChildren(parentId);
+      } else {
+        // 根目录
+        const tree = await this.engine.loadTree();
+        children = tree.filter(n => !n.parentId || n.parentId === null);
+      }
+
+      children.forEach(child => {
+        if (child.name.endsWith('.chat')) {
+          existingNames.add(child.name.replace(/\.chat$/i, '').toLowerCase());
         }
-        
-        // 检查原始名称
-        if (!existingNames.has(baseName.toLowerCase())) {
-            return baseName;
-        }
-        
-        // 尝试带数字后缀的名称
-        for (let i = 1; i <= maxAttempts; i++) {
-            const numberedName = `${baseName} (${i})`;
-            if (!existingNames.has(numberedName.toLowerCase())) {
-                log(`File name conflict resolved: "${baseName}" -> "${numberedName}"`);
-                return numberedName;
-            }
-        }
-        
-        // 超过最大尝试次数，使用 UUID 后缀
+      });
+    } catch (e) {
+      log(`Failed to list existing files:`, e);
+      // 继续执行，假设没有冲突
+    }
+
+    // 检查原始名称
+    if (!existingNames.has(baseName.toLowerCase())) {
+      return baseName;
+    }
+
+    // 尝试带数字后缀的名称
+    for (let i = 1; i <= maxAttempts; i++) {
+      const numberedName = `${baseName} (${i})`;
+      if (!existingNames.has(numberedName.toLowerCase())) {
+        log(`File name conflict resolved: "${baseName}" -> "${numberedName}"`);
+        return numberedName;
+      }
+    }
+
+    // 超过最大尝试次数，使用 UUID 后缀
     const fallbackName = `${baseName}_${generateUUID().substring(0, 8)}`;
     log(`File name conflict: max attempts exceeded, using fallback: "${fallbackName}"`);
     return fallbackName;
@@ -1000,5 +1002,120 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
 
   on(event: EngineEventType, callback: (e: EngineEvent) => void): () => void {
     return this.engine.on(event, callback);
+  }
+
+  // ============================================================
+  // ✅ 新增：会话设置管理 (YAML)
+  // ============================================================
+
+  private getSettingsPath(sessionId: string): string {
+    return `${this.getHiddenDir(sessionId)}/settings.yaml`;
+  }
+
+  /**
+   * 获取会话设置
+   */
+  async getSessionSettings(sessionId: string): Promise<ChatSessionSettings> {
+    const path = this.getSettingsPath(sessionId);
+
+    try {
+      const nodeId = await this.engine.resolvePath(path);
+      if (!nodeId) {
+        return { ...DEFAULT_SESSION_SETTINGS };
+      }
+
+      const content = await this.engine.readContent(nodeId);
+      if (!content) {
+        return { ...DEFAULT_SESSION_SETTINGS };
+      }
+
+      const yamlStr = typeof content === 'string'
+        ? content
+        : new TextDecoder().decode(content);
+
+      const parsed = YAML.parse(yamlStr) as Partial<ChatSessionSettings>;
+
+      // 合并默认值
+      return {
+        ...DEFAULT_SESSION_SETTINGS,
+        ...parsed,
+      };
+
+    } catch (e) {
+      console.warn('[LLMSessionEngine] Failed to load session settings:', e);
+      return { ...DEFAULT_SESSION_SETTINGS };
+    }
+  }
+
+  /**
+   * 保存会话设置
+   */
+  async saveSessionSettings(
+    sessionId: string,
+    settings: Partial<ChatSessionSettings>
+  ): Promise<void> {
+    return this.lockManager.acquire(`settings:${sessionId}`, async () => {
+      const path = this.getSettingsPath(sessionId);
+
+      // 加载现有设置
+      let current: ChatSessionSettings;
+      try {
+        current = await this.getSessionSettings(sessionId);
+      } catch {
+        current = { ...DEFAULT_SESSION_SETTINGS };
+      }
+
+      // 合并设置
+      const merged: ChatSessionSettings = {
+        ...current,
+        ...settings,
+        version: '1.0',
+        updatedAt: new Date().toISOString(),
+      };
+
+      // 序列化为 YAML
+      const yamlContent = YAML.stringify(merged, {
+        indent: 2,
+        lineWidth: 0, // 不自动换行
+      });
+
+      // 写入文件
+      const nodeId = await this.engine.resolvePath(path);
+      if (nodeId) {
+        await this.engine.writeContent(nodeId, yamlContent);
+      } else {
+        // 确保隐藏目录存在
+        const hiddenDir = this.getHiddenDir(sessionId);
+        const hiddenDirId = await this.engine.resolvePath(hiddenDir);
+        if (!hiddenDirId) {
+          await this.engine.createDirectory(hiddenDir, null);
+        }
+
+        await this.engine.createFile(
+          'settings.yaml',
+          hiddenDir,
+          yamlContent,
+          { type: 'settings' }
+        );
+      }
+
+      log(`Session settings saved for ${sessionId}`);
+    });
+  }
+
+  /**
+   * ✅ 新增：获取 Agent 对应的可用模型
+   */
+  async getAvailableModelsForAgent(_agentId: string): Promise<Array<{
+    id: string;
+    name: string;
+    provider?: string;
+  }>> {
+    // 注意：这个方法需要访问 AgentService，
+    // 但 SessionEngine 不应该直接依赖 AgentService
+    // 因此这个方法应该在 SessionRegistry 或更上层实现
+    // 这里返回空数组，实际实现在 SessionRegistry
+    console.warn('[LLMSessionEngine] getAvailableModelsForAgent should be called via SessionRegistry');
+    return [];
   }
 }
