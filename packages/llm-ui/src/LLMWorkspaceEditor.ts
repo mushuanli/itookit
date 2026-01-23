@@ -2,12 +2,13 @@
 
 import {
     IEditor, EditorOptions, EditorHostContext, EditorEvent, EditorEventCallback,
-    escapeHTML, Toast, showConfirmDialog
+    Toast, showConfirmDialog
 } from '@itookit/common';
 import { LLMPrintService, type PrintService, AssetManagerUI } from '@itookit/mdxeditor';
 import { FloatingNavPanel } from './components/FloatingNavPanel';
 import { HistoryView, CollapseStateMap } from './components/HistoryView';
 import { ChatInput, ChatInputConfig, ExecutorOption, ModelOption } from './components/ChatInput';
+import { LayoutTemplates } from './components/templates/LayoutTemplates'; // 确保导入
 import {
     ILLMSessionEngine,
     IAgentService,
@@ -76,6 +77,8 @@ export class LLMWorkspaceEditor implements IEditor {
     private titleInput!: HTMLInputElement;
     private statusIndicator!: HTMLElement;
     private assetManagerUI: AssetManagerUI | null = null;
+    // ✨ [新增] 用于防抖的 Timer
+    private activeSessionUpdateTimer: number | null = null;
 
     private currentTitle: string = 'New Chat';
     private isAllExpanded: boolean = true;
@@ -164,6 +167,10 @@ export class LLMWorkspaceEditor implements IEditor {
     private async initComponents(): Promise<void> {
         const historyEl = this.container.querySelector('#llm-ui-history') as HTMLElement;
         const inputEl = this.container.querySelector('#llm-ui-input') as HTMLElement;
+
+        historyEl.addEventListener('scroll', () => {
+            this.scheduleActiveSessionUpdate();
+        }, { passive: true });
 
         // 初始化历史视图
         this.historyView = new HistoryView(
@@ -664,70 +671,10 @@ export class LLMWorkspaceEditor implements IEditor {
     // ================================================================
 
     private renderLayout(): void {
-        this.container.innerHTML = `
-            <div class="llm-workspace-titlebar">
-                <div class="llm-workspace-titlebar__left">
-                    <button class="llm-workspace-titlebar__btn" id="llm-btn-sidebar" title="Toggle Sidebar">
-                        <i class="fas fa-bars"></i>
-                    </button>
-                    
-                    <div class="llm-workspace-titlebar__sep"></div>
-                    
-                    <input type="text" class="llm-workspace-titlebar__input" id="llm-title-input" 
-                           value="${escapeHTML(this.currentTitle)}" placeholder="Untitled Chat" />
-                    
-                    <!-- 状态指示器 -->
-                    <div class="llm-workspace-status" id="llm-status-indicator">
-                        <span class="llm-workspace-status__dot"></span>
-                        <span class="llm-workspace-status__text">Ready</span>
-                    </div>
-                </div>
+        // 使用 LayoutTemplates 生成 HTML
+        this.container.innerHTML = LayoutTemplates.renderWorkspace(this.currentTitle);
 
-                <div class="llm-workspace-titlebar__right">
-                    <!-- 后台运行指示器 -->
-                    <div class="llm-workspace-titlebar__bg-indicator" id="llm-bg-indicator" style="display:none;">
-                        <span class="llm-bg-badge">2 running</span>
-                    </div>
-                    
-                    <button class="llm-workspace-titlebar__btn" id="llm-btn-assets" title="附件管理">
-                        <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18">
-                            <path d="M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5a2.5 2.5 0 0 1 5 0v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5a2.5 2.5 0 0 0 5 0V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5z"/>
-                        </svg>
-                    </button>
-
-                    <button class="llm-workspace-titlebar__btn" id="llm-btn-collapse" title="Collapse/Expand All">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <polyline points="4 14 10 14 10 20"></polyline>
-                            <polyline points="20 10 14 10 14 4"></polyline>
-                        </svg>
-                    </button>
-
-                    <button class="llm-workspace-titlebar__btn" id="llm-btn-copy" title="Copy as Markdown">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                        </svg>
-                    </button>
-
-                    <button class="llm-workspace-titlebar__btn" id="llm-btn-navigator" title="Chat Navigator (Ctrl+G)">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
-                            <line x1="3" y1="12" x2="21" y2="12"></line>
-                            <line x1="3" y1="6" x2="21" y2="6"></line>
-                            <line x1="3" y1="18" x2="21" y2="18"></line>
-                            <circle cx="9" cy="12" r="2" fill="currentColor"></circle>
-                        </svg>
-                    </button>
-
-                    <button class="llm-workspace-titlebar__btn" id="llm-btn-print" title="Print">
-                        <i class="fas fa-print"></i>
-                    </button>
-                </div>
-            </div>
-
-            <div class="llm-ui-workspace__history" id="llm-ui-history"></div>
-            <div class="llm-ui-workspace__input" id="llm-ui-input"></div>
-        `;
-
+        // 初始化引用
         this.titleInput = this.container.querySelector('#llm-title-input') as HTMLInputElement;
         this.statusIndicator = this.container.querySelector('#llm-status-indicator') as HTMLElement;
     }
@@ -778,6 +725,52 @@ export class LLMWorkspaceEditor implements IEditor {
         this.container.querySelector('#llm-btn-navigator')?.addEventListener('click', () => {
             this.toggleNavigator();
         });
+
+        // ✅ New: Prev Agent Chat
+        this.container.querySelector('#llm-btn-prev-agent')?.addEventListener('click', () => {
+            const currentId = this.findCurrentVisibleSession();
+            const prevId = this.historyView.getNeighborAgentSessionId(currentId, 'prev');
+            if (prevId) {
+                this.scrollToSession(prevId);
+            } else {
+                Toast.info('No previous agent chat');
+            }
+        });
+
+        // ✅ New: Next Agent Chat
+        this.container.querySelector('#llm-btn-next-agent')?.addEventListener('click', () => {
+            const currentId = this.findCurrentVisibleSession();
+            const nextId = this.historyView.getNeighborAgentSessionId(currentId, 'next');
+            if (nextId) {
+                this.scrollToSession(nextId);
+            } else {
+                Toast.info('No next agent chat');
+            }
+        });
+
+        // ✅ New: Fold First Unfolded
+        this.container.querySelector('#llm-btn-fold-one')?.addEventListener('click', () => {
+            this.historyView.foldFirstUnfolded();
+        });
+
+        // ✅ New: Copy First Unfolded Agent Chat
+        this.container.querySelector('#llm-btn-copy-agent')?.addEventListener('click', async (e) => {
+            const content = this.historyView.getFirstUnfoldedAgentContent();
+            if (content) {
+                try {
+                    await navigator.clipboard.writeText(content);
+                    this.showButtonFeedback(e.currentTarget as HTMLElement, '✓');
+                    Toast.success('Agent chat copied');
+                } catch (err) {
+                    console.error('Copy failed', err);
+                    Toast.error('Failed to copy');
+                }
+            } else {
+                Toast.info('No unfolded agent chat found');
+            }
+        });
+
+
 
         // Collapse/Expand All
         this.container.querySelector('#llm-btn-collapse')?.addEventListener('click', (e) => {
@@ -1258,44 +1251,91 @@ export class LLMWorkspaceEditor implements IEditor {
         this.floatingNav.toggle();
     }
 
+    private scheduleActiveSessionUpdate(): void {
+        if (this.activeSessionUpdateTimer) {
+            cancelAnimationFrame(this.activeSessionUpdateTimer);
+        }
+        
+        this.activeSessionUpdateTimer = requestAnimationFrame(() => {
+            this.updateActiveSessionHighlight();
+            this.activeSessionUpdateTimer = null;
+        });
+    }
+
     /**
-     * 查找当前可见的会话
+     * ✨ [新增] 核心逻辑：计算并高亮当前活跃 Session
+     */
+    private updateActiveSessionHighlight(): void {
+        const currentId = this.findCurrentVisibleSession();
+        if (!currentId) return;
+
+        // 移除旧的高亮
+        const prevActive = this.container.querySelector('.llm-ui-session.is-active');
+        if (prevActive) {
+            // 如果ID一样就不动了，避免闪烁
+            if ((prevActive as HTMLElement).dataset.sessionId === currentId) return;
+            prevActive.classList.remove('is-active');
+        }
+
+        // 添加新高亮
+        const currentEl = this.container.querySelector(`[data-session-id="${currentId}"]`);
+        if (currentEl) {
+            currentEl.classList.add('is-active');
+        }
+    }
+
+    /**
+     * [修改] 优化现有的 findCurrentVisibleSession 算法
+     * 让它更偏向于视口中心偏上的位置，符合阅读习惯
      */
     private findCurrentVisibleSession(): string | null {
         const historyEl = this.container.querySelector('#llm-ui-history');
         if (!historyEl) return null;
 
         const historyRect = historyEl.getBoundingClientRect();
-        const centerY = historyRect.top + historyRect.height / 2;
+        // 视口中心线（稍微偏上一点，比如 40% 的位置，更符合阅读视线）
+        const viewLine = historyRect.top + (historyRect.height * 0.4);
 
-        const sessions = historyEl.querySelectorAll('[data-session-id]');
-        for (const session of sessions) {
-            const rect = session.getBoundingClientRect();
-            if (rect.top <= centerY && rect.bottom >= centerY) {
-                return (session as HTMLElement).dataset.sessionId || null;
-            }
-        }
+        const sessions = historyEl.querySelectorAll('.llm-ui-session');
+        
+        let closestSession: Element | null = null;
+        let minDistance = Infinity;
 
         for (const session of sessions) {
             const rect = session.getBoundingClientRect();
-            if (rect.bottom > historyRect.top && rect.top < historyRect.bottom) {
+            
+            // 简单逻辑：如果 Session 跨越了 viewLine，它就是活跃的
+            if (rect.top <= viewLine && rect.bottom >= viewLine) {
                 return (session as HTMLElement).dataset.sessionId || null;
+            }
+
+            // 备用逻辑：计算哪个 Session 的中心离 viewLine 最近
+            const sessionCenter = rect.top + (rect.height / 2);
+            const distance = Math.abs(sessionCenter - viewLine);
+            if (distance < minDistance) {
+                minDistance = distance;
+                closestSession = session;
             }
         }
 
-        return null;
+        return (closestSession as HTMLElement)?.dataset.sessionId || null;
     }
 
     /**
-     * 滚动到指定会话
+     * [修改] scrollToSession
+     * 跳转后立即手动触发一次高亮更新
      */
     private scrollToSession(sessionId: string): void {
         const historyEl = this.container.querySelector('#llm-ui-history');
         const sessionEl = historyEl?.querySelector(`[data-session-id="${sessionId}"]`) as HTMLElement;
 
         if (sessionEl) {
-            sessionEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            sessionEl.scrollIntoView({ behavior: 'smooth', block: 'start' }); // block: start 让头部对齐顶部
+            
+            // 立即设置为 active
+            this.updateActiveSessionHighlight();
 
+            // 如果还需要之前的闪烁效果（可选）
             sessionEl.classList.add('llm-ui-session--highlight');
             setTimeout(() => {
                 sessionEl.classList.remove('llm-ui-session--highlight');
