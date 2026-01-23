@@ -608,6 +608,82 @@ export class HistoryView {
         }
     }
 
+
+    /**
+     * ✅ New: Get content of the first unfolded Agent chat
+     */
+    public getFirstUnfoldedAgentContent(): string | null {
+        // 1. 查找所有 Assistant 类型的 Session
+        const sessions = Array.from(this.container.querySelectorAll('.llm-ui-session--assistant'));
+        
+        for (const session of sessions) {
+            // 2. 找到该 Session 下的主节点（通常是第一个 ExecutionRoot 下的第一个 Node）
+            // 或者简单点，找里面的 .llm-ui-node
+            const nodes = session.querySelectorAll('.llm-ui-node');
+            
+            for (const node of nodes) {
+                // 3. 检查是否折叠
+                if (!node.classList.contains('is-collapsed')) {
+                    const nodeId = (node as HTMLElement).dataset.id;
+                    // 4. 从 EditorMap 获取纯文本内容（最准确）
+                    if (nodeId && this.editorMap.has(nodeId)) {
+                        return this.editorMap.get(nodeId)!.content;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    // ✨ [新增] 折叠第一个显示的 unfold chat
+    public foldFirstUnfolded(): void {
+        // 查找所有 User Bubble 和 Node
+        const items = this.container.querySelectorAll('.llm-ui-bubble--user, .llm-ui-node');
+        
+        for (const item of items) {
+            if (!item.classList.contains('is-collapsed')) {
+                // 找到对应的折叠按钮并点击
+                const btn = item.querySelector('[data-action="collapse"]') as HTMLElement;
+                if (btn) {
+                    btn.click();
+                    return; // 只折叠一个
+                }
+            }
+        }
+    }
+
+    // ✨ [新增] 获取相邻的 Agent Chat Session ID
+    // direction: 'next' | 'prev'
+    public getNeighborAgentSessionId(currentVisibleId: string | null, direction: 'next' | 'prev'): string | null {
+        const sessions = Array.from(this.container.querySelectorAll('.llm-ui-session'));
+        if (sessions.length === 0) return null;
+
+        let currentIndex = -1;
+        if (currentVisibleId) {
+            currentIndex = sessions.findIndex(el => (el as HTMLElement).dataset.sessionId === currentVisibleId);
+        }
+
+        if (direction === 'next') {
+            // 如果没找到当前，默认从头开始找
+            const start = currentIndex === -1 ? -1 : currentIndex;
+            for (let i = start + 1; i < sessions.length; i++) {
+                if (sessions[i].classList.contains('llm-ui-session--assistant')) {
+                    return (sessions[i] as HTMLElement).dataset.sessionId || null;
+                }
+            }
+        } else {
+            // prev
+            // 如果没找到当前，默认从尾部开始找
+            const start = currentIndex === -1 ? sessions.length : currentIndex;
+            for (let i = start - 1; i >= 0; i--) {
+                if (sessions[i].classList.contains('llm-ui-session--assistant')) {
+                    return (sessions[i] as HTMLElement).dataset.sessionId || null;
+                }
+            }
+        }
+        return null;
+    }
+
     private renderExecutionTree(node: ExecutionNode, isCollapsed: boolean = false) {
         this.appendNode(node.parentId, node, isCollapsed);
         node.children?.forEach(c => this.renderExecutionTree(c, isCollapsed));
