@@ -144,6 +144,34 @@
 }
 
 .llm-ui-session--user { flex-direction: row-reverse; }
+/* 当前活跃/聚焦的会话 */
+.llm-ui-session.is-active {
+    position: relative;
+    background-color: rgba(var(--llm-primary-rgb), 0.03); /* 极淡的背景色 */
+}
+
+/* 左侧指示条 */
+.llm-ui-session.is-active::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background-color: var(--llm-primary-color);
+    border-radius: 0 2px 2px 0;
+    opacity: 0.6;
+    pointer-events: none;
+    z-index: 10;
+}
+
+/* 可选：加个过渡动画让切换更平滑 */
+.llm-ui-session {
+    transition: background-color 0.2s ease;
+}
+.llm-ui-session::before {
+    transition: opacity 0.2s ease;
+}
 
 .llm-ui-avatar {
   width: 32px;
