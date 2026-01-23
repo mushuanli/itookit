@@ -140,21 +140,31 @@ export class HistoryView {
             }
         }
 
-        sessions.forEach((session, index) => {
-            let shouldCollapse: boolean;
-            if (hasStoredStates && this.collapseStates[session.id] !== undefined) {
-                shouldCollapse = this.collapseStates[session.id];
-            } else {
-                shouldCollapse = index < lastUserIndex;
-                this.collapseStates[session.id] = shouldCollapse;
-            }
+    sessions.forEach((session, index) => {
+        let shouldCollapse: boolean;
 
-            this.appendSessionGroup(session, shouldCollapse);
-            
-            if (session.executionRoot) {
-                this.renderExecutionTree(session.executionRoot, shouldCollapse);
+        // 1. 如果有缓存的持久化状态，优先使用
+        if (hasStoredStates && this.collapseStates[session.id] !== undefined) {
+            shouldCollapse = this.collapseStates[session.id];
+        } else {
+            // 2. [新增逻辑]：如果是用户消息，默认折叠
+            if (session.role === 'user') {
+                shouldCollapse = true; 
+            } else {
+                // 3. 助手消息逻辑：如果是最后一条消息则展开，否则折叠
+                shouldCollapse = index < sessions.length - 1;
             }
-        });
+            
+            // 同步到状态 map 中
+            this.collapseStates[session.id] = shouldCollapse;
+        }
+
+        this.appendSessionGroup(session, shouldCollapse);
+        
+        if (session.executionRoot) {
+            this.renderExecutionTree(session.executionRoot, shouldCollapse);
+        }
+    });
 
         this.scrollToBottom(true);
     }
@@ -1058,8 +1068,17 @@ export class HistoryView {
         switch (event.type) {
             case 'session_start':
                 this.enterStreamingMode();
-                this.appendSessionGroup(event.payload, false);
-                this.scrollToBottom(true);
+            // [修改]：新消息产生时，如果是用户消息，强制折叠
+            // 如果希望用户刚发完能看到，这里传 false；如果要求“绝对保持fold”，传 true
+            const isUser = event.payload.role === 'user';
+            const defaultFold = isUser ? true : false; 
+            
+            this.appendSessionGroup(event.payload, defaultFold);
+            
+            // 记录状态
+            this.collapseStates[event.payload.id] = defaultFold;
+            
+            this.scrollToBottom(true);
                 break;
                 
             case 'node_start':
