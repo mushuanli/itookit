@@ -49,6 +49,13 @@ type ResolvedOptions = Required<Omit<CodeBlockControlsPluginOptions, 'icons'>> &
   icons: ResolvedIcons;
 };
 
+/**
+ * ✨ [新增] 折叠/展开操作结果
+ */
+export interface CodeBlockCollapseResult {
+  affectedCount: number;
+  allCollapsed: boolean;
+}
 
 /**
  * 代码块控制插件（多实例安全）
@@ -63,6 +70,9 @@ export class CodeBlockControlsPlugin implements MDxPlugin {
   
   // [新增] 跟踪已处理的代码块，用于流式更新
   private processedBlocks = new WeakSet<HTMLElement>();
+  
+  // ✨ [新增] 存储当前渲染容器的引用
+  private currentRenderContainer: HTMLElement | null = null;
 
   constructor(options: CodeBlockControlsPluginOptions = {}) {
     this.options = {
@@ -303,6 +313,115 @@ export class CodeBlockControlsPlugin implements MDxPlugin {
   }
 
   /**
+   * ✨ [新增] 折叠所有代码块
+   */
+  public collapseAll(container?: HTMLElement): CodeBlockCollapseResult {
+    const root = container || this.currentRenderContainer;
+    if (!root) {
+      return { affectedCount: 0, allCollapsed: true };
+    }
+
+    const wrappers = root.querySelectorAll<HTMLElement>(
+      `.${this.options.classPrefix}-wrapper[data-has-collapse="true"]`
+    );
+    
+    let affectedCount = 0;
+
+    wrappers.forEach(wrapper => {
+      const isCurrentlyCollapsed = wrapper.classList.contains(
+        `${this.options.classPrefix}-wrapper--collapsed`
+      );
+      
+      if (!isCurrentlyCollapsed) {
+        const button = wrapper.querySelector<HTMLButtonElement>(
+          `.${this.options.classPrefix}-controls__button--collapse`
+        );
+        const pre = wrapper.querySelector<HTMLPreElement>('pre');
+        
+        if (button && pre) {
+          wrapper.classList.add(`${this.options.classPrefix}-wrapper--collapsed`);
+          this._updateCollapseState(wrapper, button, pre, false);
+          affectedCount++;
+        }
+      }
+    });
+
+    return { affectedCount, allCollapsed: true };
+  }
+
+  /**
+   * ✨ [新增] 展开所有代码块
+   */
+  public expandAll(container?: HTMLElement): CodeBlockCollapseResult {
+    const root = container || this.currentRenderContainer;
+    if (!root) {
+      return { affectedCount: 0, allCollapsed: false };
+    }
+
+    const wrappers = root.querySelectorAll<HTMLElement>(
+      `.${this.options.classPrefix}-wrapper[data-has-collapse="true"]`
+    );
+    
+    let affectedCount = 0;
+
+    wrappers.forEach(wrapper => {
+      const isCurrentlyCollapsed = wrapper.classList.contains(
+        `${this.options.classPrefix}-wrapper--collapsed`
+      );
+      
+      if (isCurrentlyCollapsed) {
+        const button = wrapper.querySelector<HTMLButtonElement>(
+          `.${this.options.classPrefix}-controls__button--collapse`
+        );
+        const pre = wrapper.querySelector<HTMLPreElement>('pre');
+        
+        if (button && pre) {
+          wrapper.classList.remove(`${this.options.classPrefix}-wrapper--collapsed`);
+          this._updateCollapseState(wrapper, button, pre, true);
+          affectedCount++;
+        }
+      }
+    });
+
+    return { affectedCount, allCollapsed: false };
+  }
+
+  /**
+   * ✨ [新增] 切换所有代码块状态
+   */
+  public toggleAll(container?: HTMLElement): CodeBlockCollapseResult {
+    const root = container || this.currentRenderContainer;
+    if (!root) {
+      return { affectedCount: 0, allCollapsed: false };
+    }
+
+    // 检查是否有任何展开的代码块
+    const hasExpanded = root.querySelector(
+      `.${this.options.classPrefix}-wrapper[data-has-collapse="true"]:not(.${this.options.classPrefix}-wrapper--collapsed)`
+    );
+
+    if (hasExpanded) {
+      return this.collapseAll(container);
+    } else {
+      return this.expandAll(container);
+    }
+  }
+
+  /**
+   * ✨ [新增] 检查是否所有代码块都已折叠
+   */
+  public areAllCollapsed(container?: HTMLElement): boolean {
+    const root = container || this.currentRenderContainer;
+    if (!root) return true;
+
+    const expandedWrapper = root.querySelector(
+      `.${this.options.classPrefix}-wrapper[data-has-collapse="true"]:not(.${this.options.classPrefix}-wrapper--collapsed)`
+    );
+    
+    return !expandedWrapper;
+  }
+
+  /**
    * [优化] 增强代码块
    */
   private enhanceCodeBlock(pre: HTMLPreElement): void {
@@ -395,6 +514,9 @@ export class CodeBlockControlsPlugin implements MDxPlugin {
    * 流式模式下使用更轻量的处理方式
    */
   private enhanceCodeBlocks(element: HTMLElement): void {
+    // ✨ 更新当前容器引用
+    this.currentRenderContainer = element;
+    
     const selector = this.options.streamingMode 
       ? 'pre' // 流式模式：处理所有 pre，包括已增强的（用于更新）
       : 'pre:not([data-enhanced])';
@@ -434,10 +556,28 @@ export class CodeBlockControlsPlugin implements MDxPlugin {
     if (removeDomUpdated) {
       this.cleanupFns.push(removeDomUpdated);
     }
+
+    // ✨ [新增] 注册全局折叠/展开命令
+    context.registerCommand?.('collapseAllCodeBlocks', () => {
+      return this.collapseAll();
+    });
+
+    context.registerCommand?.('expandAllCodeBlocks', () => {
+      return this.expandAll();
+    });
+
+    context.registerCommand?.('toggleAllCodeBlocks', () => {
+      return this.toggleAll();
+    });
+
+    context.registerCommand?.('areAllCodeBlocksCollapsed', () => {
+      return this.areAllCollapsed();
+    });
   }
 
   destroy(): void {
     this.cleanupFns.forEach(fn => fn());
     this.cleanupFns = [];
+    this.currentRenderContainer = null;
   }
 }

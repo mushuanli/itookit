@@ -2,7 +2,8 @@
 
 import {
     IEditor, EditorOptions, EditorHostContext, EditorEvent, EditorEventCallback,
-    Toast, showConfirmDialog
+    CollapseExpandResult,
+    Toast, showConfirmDialog,
 } from '@itookit/common';
 import { LLMPrintService, type PrintService, AssetManagerUI } from '@itookit/mdxeditor';
 import { FloatingNavPanel } from './components/FloatingNavPanel';
@@ -1255,7 +1256,7 @@ export class LLMWorkspaceEditor implements IEditor {
         if (this.activeSessionUpdateTimer) {
             cancelAnimationFrame(this.activeSessionUpdateTimer);
         }
-        
+
         this.activeSessionUpdateTimer = requestAnimationFrame(() => {
             this.updateActiveSessionHighlight();
             this.activeSessionUpdateTimer = null;
@@ -1297,13 +1298,13 @@ export class LLMWorkspaceEditor implements IEditor {
         const viewLine = historyRect.top + (historyRect.height * 0.4);
 
         const sessions = historyEl.querySelectorAll('.llm-ui-session');
-        
+
         let closestSession: Element | null = null;
         let minDistance = Infinity;
 
         for (const session of sessions) {
             const rect = session.getBoundingClientRect();
-            
+
             // 简单逻辑：如果 Session 跨越了 viewLine，它就是活跃的
             if (rect.top <= viewLine && rect.bottom >= viewLine) {
                 return (session as HTMLElement).dataset.sessionId || null;
@@ -1331,7 +1332,7 @@ export class LLMWorkspaceEditor implements IEditor {
 
         if (sessionEl) {
             sessionEl.scrollIntoView({ behavior: 'smooth', block: 'start' }); // block: start 让头部对齐顶部
-            
+
             // 立即设置为 active
             this.updateActiveSessionHighlight();
 
@@ -1758,6 +1759,18 @@ export class LLMWorkspaceEditor implements IEditor {
 
     async pruneAssets(): Promise<number | null> {
         return null;
+    }
+
+    async collapseBlocks(): Promise<CollapseExpandResult> {
+        return { affectedCount: 0, allCollapsed: true };
+    }
+
+    async expandBlocks(): Promise<CollapseExpandResult> {
+        return { affectedCount: 0, allCollapsed: false };
+    }
+
+    async toggleBlocks(): Promise<CollapseExpandResult> {
+        return this.collapseBlocks();
     }
 
     on(event: EditorEvent, cb: EditorEventCallback): () => void {

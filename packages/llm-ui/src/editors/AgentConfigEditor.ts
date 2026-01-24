@@ -1,13 +1,14 @@
 // @file: llm-ui/editors/AgentConfigEditor.ts
 
-import { 
-    IEditor, EditorOptions, EditorEvent, EditorEventCallback, 
+import {
+    IEditor, EditorOptions, EditorEvent, EditorEventCallback,
     generateUUID,
     Heading,
-    UnifiedSearchResult
+    UnifiedSearchResult,
+    CollapseExpandResult
 } from '@itookit/common';
-import { LLMModel,type AgentType, AgentDefinition, } from '@itookit/llm-driver';
-import {  IAgentService } from '@itookit/llm-engine';
+import { LLMModel, type AgentType, AgentDefinition, } from '@itookit/llm-driver';
+import { IAgentService } from '@itookit/llm-engine';
 
 /**
  * Agent 配置编辑器
@@ -19,24 +20,24 @@ export class AgentConfigEditor implements IEditor {
     private content: AgentDefinition | null = null;
     private _isDirty = false;
     private listeners = new Map<string, Set<EditorEventCallback>>();
-    
+
     // [修复] 添加缺失的属性
     private originalContent: string = '';
 
     constructor(
-        _container: HTMLElement, 
+        _container: HTMLElement,
         _options: EditorOptions,
         // 依赖 IAgentService 来获取 Connection 列表和 Model 列表
-        private service: IAgentService 
-    ) {}
+        private service: IAgentService
+    ) { }
 
     async init(container: HTMLElement, initialContent?: string) {
         this.container = container;
         this.container.classList.add('agent-config-editor');
-        
+
         // 保存原始内容用于错误显示
         this.originalContent = initialContent || '{}';
-        
+
         this.setText(this.originalContent);
         this.emit('ready');
     }
@@ -53,18 +54,18 @@ export class AgentConfigEditor implements IEditor {
     setText(text: string) {
         try {
             const parsed = JSON.parse(text);
-            
+
             // [核心修改] ID 生成逻辑
             // 如果 parsed.id 为空字符串 (来自模板) 或 undefined，则生成 UUID
-            const agentId = (parsed.id && parsed.id.trim() !== '') 
-                ? parsed.id 
+            const agentId = (parsed.id && parsed.id.trim() !== '')
+                ? parsed.id
                 : generateUUID();
 
             // ✅ 修复：使用有效的 AgentType
             const validType = this.normalizeAgentType(parsed.type);
 
             this.content = {
-                id: agentId, 
+                id: agentId,
                 name: parsed.name || 'New Agent',
                 type: validType,
                 description: parsed.description || '',
@@ -120,7 +121,7 @@ export class AgentConfigEditor implements IEditor {
         if (!this.content) return;
         const agent = this.content;
         const config = agent.config;
-        
+
         let connections = await this.service.getConnections();
 
         // ✅ [新增] 连接排序逻辑 (User Friendly)
@@ -140,10 +141,10 @@ export class AgentConfigEditor implements IEditor {
 
             return (a.name || '').localeCompare(b.name || '');
         });
-        
+
         // 确保有有效的连接选择
         let selectedConn = connections.find(c => c.id === config.connectionId);
-        
+
         // 如果没有选中的连接，或者连接ID为空，且有可用连接，默认选中列表第一个（即排序后的最优项）
         if (!selectedConn && connections.length > 0) {
             selectedConn = connections[0];
@@ -151,16 +152,16 @@ export class AgentConfigEditor implements IEditor {
                 this.content.config.connectionId = selectedConn.id;
             }
         }
-        
+
         const models = selectedConn?.availableModels || [];
-        
+
         // ✅ [Fix] modelId -> modelName
         let selectedModelIdentifier = config.modelName;
 
         if (models.length > 0) {
             // 检查当前 config 中的 modelName 是否存在于当前连接的模型列表中
             const modelExists = models.some(m => m.id === selectedModelIdentifier);
-            
+
             if (!modelExists) {
                 // 尝试通过 display name 匹配 (以此处理不同 provider 对同一模型的不同 ID 命名)
                 const currentModelInfo = this.findModelById(selectedModelIdentifier, connections);
@@ -170,7 +171,7 @@ export class AgentConfigEditor implements IEditor {
                 } else {
                     selectedModelIdentifier = models[0].id;
                 }
-                
+
                 // 更新内部状态
                 if (this.content && this.content.config) {
                     // ✅ [Fix] modelId -> modelName
@@ -178,7 +179,7 @@ export class AgentConfigEditor implements IEditor {
                 }
             }
         }
-        
+
         const allMCPServers = await this.service.getMCPServers();
 
         this.container.innerHTML = `
@@ -244,14 +245,14 @@ export class AgentConfigEditor implements IEditor {
                             <select class="agent-form-select" name="connectionId" id="connection-select">
                                 <option value="">-- 选择连接 --</option>
                                 ${connections.map(c => {
-                                    const hasKey = !!(c.apiKey && c.apiKey.trim().length > 0);
-                                    const isDefault = c.id === 'default';
-                                    // User Friendly Display
-                                    let displayName = this.escapeHtml(c.name);
-                                    if (isDefault) displayName = `⭐ ${displayName}`;
-                                    if (!hasKey && !isDefault) displayName = `${displayName} (需配置)`;
-                                    
-                                    return `
+            const hasKey = !!(c.apiKey && c.apiKey.trim().length > 0);
+            const isDefault = c.id === 'default';
+            // User Friendly Display
+            let displayName = this.escapeHtml(c.name);
+            if (isDefault) displayName = `⭐ ${displayName}`;
+            if (!hasKey && !isDefault) displayName = `${displayName} (需配置)`;
+
+            return `
                                     <option value="${c.id}" ${(selectedConn?.id === c.id) ? 'selected' : ''}>
                                         ${displayName} - ${c.provider}
                                     </option>
@@ -268,14 +269,14 @@ export class AgentConfigEditor implements IEditor {
                             </label>
                             <!-- ✅ [Fix] name="modelName" -->
                             <select class="agent-form-select" name="modelName" id="model-select">
-                                ${models.length > 0 
-                                    ? models.map(m => `
+                                ${models.length > 0
+                ? models.map(m => `
                                         <option value="${m.id}" ${selectedModelIdentifier === m.id ? 'selected' : ''}>
                                             ${m.name}
                                         </option>
                                     `).join('')
-                                    : '<option value="">请先选择连接</option>'
-                                }
+                : '<option value="">请先选择连接</option>'
+            }
                             </select>
                         </div>
 
@@ -313,13 +314,13 @@ export class AgentConfigEditor implements IEditor {
                         <span class="agent-section__toggle">▼</span>
                     </div>
                     <div class="agent-section__body">
-                        ${allMCPServers.length === 0 
-                            ? `<div class="agent-empty-state">
+                        ${allMCPServers.length === 0
+                ? `<div class="agent-empty-state">
                                     <div class="agent-empty-state__icon">🔌</div>
                                     <p>暂无可用的 MCP 服务器</p>
                                     <p style="font-size:0.8rem; margin-top:8px;">请在设置 → MCP Servers 中添加</p>
                                </div>`
-                            : `<p class="agent-form-help" style="margin-bottom:12px;">
+                : `<p class="agent-form-help" style="margin-bottom:12px;">
                                     选择此 Agent 可以调用的工具服务
                                </p>
                                <div class="agent-mcp-list">
@@ -343,7 +344,7 @@ export class AgentConfigEditor implements IEditor {
                                         </label>
                                     `).join('')}
                                </div>`
-                        }
+            }
                     </div>
                 </div>
 
@@ -438,7 +439,7 @@ export class AgentConfigEditor implements IEditor {
                 if (!typeStr) return;
 
                 // 更新 UI
-                this.container.querySelectorAll('.agent-type-option').forEach(o => 
+                this.container.querySelectorAll('.agent-type-option').forEach(o =>
                     o.classList.remove('selected')
                 );
                 option.classList.add('selected');
@@ -446,7 +447,7 @@ export class AgentConfigEditor implements IEditor {
                 // 显示/隐藏相关配置区域
                 const llmSection = this.container.querySelector('#llm-config-section') as HTMLElement;
                 const mcpSection = this.container.querySelector('#mcp-section') as HTMLElement;
-                
+
                 // ✅ 修复：composite 和 workflow 类型隐藏 LLM 配置
                 if (typeStr === 'composite' || typeStr === 'workflow') {
                     llmSection?.style.setProperty('display', 'none');
@@ -469,27 +470,27 @@ export class AgentConfigEditor implements IEditor {
         // Connection 与 Model 联动
         const connSelect = this.container.querySelector('#connection-select') as HTMLSelectElement;
         const modelSelect = this.container.querySelector('#model-select') as HTMLSelectElement;
-        
+
         if (connSelect && modelSelect) {
             connSelect.addEventListener('change', async () => {
                 const connId = connSelect.value;
                 const connections = await this.service.getConnections();
                 const conn = connections.find(c => c.id === connId);
                 const newModels = conn?.availableModels || [];
-                
+
                 // ✅ [Fix] modelId -> modelName (获取当前存储的 ID)
                 const currentModelIdentifier = this.content?.config.modelName;
                 const currentModel = this.findModelById(currentModelIdentifier || '', connections);
                 const currentModelDisplayName = currentModel?.name;
-                
+
                 // 2. 重新渲染模型选项
                 modelSelect.innerHTML = newModels.length > 0
                     ? newModels.map(m => `<option value="${m.id}">${m.name}</option>`).join('')
                     : '<option value="">请先选择连接</option>';
-                
+
                 // 3. 智能选择模型
                 let newModelIdentifier = '';
-                
+
                 if (newModels.length > 0) {
                     if (currentModelDisplayName) {
                         const matchedModel = this.findModelByName(currentModelDisplayName, newModels);
@@ -499,14 +500,14 @@ export class AgentConfigEditor implements IEditor {
                     }
                     modelSelect.value = newModelIdentifier;
                 }
-                
+
                 // 4. 更新内部状态
                 if (this.content && this.content.config) {
                     this.content.config.connectionId = connId;
                     // ✅ [Fix] modelId -> modelName
                     this.content.config.modelName = newModelIdentifier;
                 }
-                
+
                 // 5. 触发变更事件
                 handleChange();
             });
@@ -555,11 +556,11 @@ export class AgentConfigEditor implements IEditor {
                     // 更新 UI
                     const iconDisplay = this.container.querySelector('#icon-picker');
                     if (iconDisplay) iconDisplay.textContent = icon;
-                    
+
                     // 更新隐藏字段
                     const iconInput = this.container.querySelector('input[name="icon"]') as HTMLInputElement;
                     if (iconInput) iconInput.value = icon;
-                    
+
                     this._isDirty = true;
                     this.emit('interactiveChange');
                 }
@@ -623,42 +624,54 @@ export class AgentConfigEditor implements IEditor {
 
     // --- IEditor Interface Implementation ---
 
-    async destroy() { 
-        this.container.innerHTML = ''; 
-        this.listeners.clear(); 
+    async destroy() {
+        this.container.innerHTML = '';
+        this.listeners.clear();
     }
-    
+
     getMode(): 'edit' | 'render' { return 'edit'; }
-    async switchToMode(_mode: 'edit' | 'render') {}
-    setTitle(_title: string) {}
-    setReadOnly(_readOnly: boolean) {}
-    focus() { 
+    async switchToMode(_mode: 'edit' | 'render') { }
+    setTitle(_title: string) { }
+    setReadOnly(_readOnly: boolean) { }
+    focus() {
         const nameInput = this.container.querySelector('.agent-header__name-input') as HTMLInputElement;
         nameInput?.focus();
     }
     get commands() { return {}; }
-    
+
     async getHeadings(): Promise<Heading[]> { return []; }
     async getSearchableText() { return JSON.stringify(this.content || {}); }
     async getSummary() { return this.content?.description || null; }
-    
-    async navigateTo() {}
+
+    async navigateTo() { }
     async search(): Promise<UnifiedSearchResult[]> { return []; }
-    gotoMatch() {}
-    clearSearch() {}
+    gotoMatch() { }
+    clearSearch() { }
+
+    async collapseBlocks(): Promise<CollapseExpandResult> {
+        return { affectedCount: 0, allCollapsed: true };
+    }
+
+    async expandBlocks(): Promise<CollapseExpandResult> {
+        return { affectedCount: 0, allCollapsed: false };
+    }
+
+    async toggleBlocks(): Promise<CollapseExpandResult> {
+        return this.collapseBlocks();
+    }
 
     async pruneAssets(): Promise<number | null> {
         return null;
     }
 
     // Events
-    on(event: EditorEvent, cb: EditorEventCallback) { 
+    on(event: EditorEvent, cb: EditorEventCallback) {
         if (!this.listeners.has(event)) this.listeners.set(event, new Set());
         this.listeners.get(event)!.add(cb);
         return () => this.listeners.get(event)?.delete(cb);
     }
-    
-    private emit(event: string, payload?: any) { 
-        this.listeners.get(event)?.forEach(cb => cb(payload)); 
+
+    private emit(event: string, payload?: any) {
+        this.listeners.get(event)?.forEach(cb => cb(payload));
     }
 }
