@@ -46,10 +46,10 @@ export interface NavigateToOptions {
 export interface EditorHostContext {
     /** 切换侧边栏 (无参则 toggle，有参则强制设为该状态) */
     toggleSidebar: (collapsed?: boolean) => void;
-    
+
     /** 手动触发保存 (用于编辑器内部的 Save 按钮) */
     saveContent: (nodeId: string, content: string) => Promise<void>;
-    
+
     /** 
      * [通用] 请求导航到系统内的任意资源
      */
@@ -59,69 +59,81 @@ export interface EditorHostContext {
 
 // ✨ [重构] 提升 sessionEngine 和 nodeId 为核心配置
 export interface EditorOptions {
-  /** 初始 Markdown 内容 */
-  initialContent?: string;
-  
-  /** 初始模式 */
-  initialMode?: 'edit' | 'render';
-  
-  /** 标题（可选） */
-  title?: string;
-  
-  /** 
-   * 当前编辑器绑定的节点/文件 ID 
-   * 结合 sessionEngine 使用，用于定位存储位置、元数据和上下文。
-   */
-  nodeId?: string;
+    /** 初始 Markdown 内容 */
+    initialContent?: string;
 
-  /**
-   * [新增] 资产归属节点 ID
-   * 用于确定图片/附件上传到哪里，以及 @asset/ 路径解析的上下文。
-   * - 如果编辑器作为独立页面，通常 ownerNodeId === nodeId。
-   * - 如果编辑器是某个大表单的子控件（如评论区、卡片描述），ownerNodeId 可能是父级 ID。
-   * - 如果未提供，默认回退使用 nodeId。
-   */
-  ownerNodeId?: string;
-  
-  /**
-   * 会话引擎实例。
-   * 提供文件系统操作、元数据读写、资源搜索等核心能力。
-   * 这是编辑器与数据层交互的统一接口。
-   */
-  sessionEngine?: ISessionEngine;
-  
-  /** 是否只读 */
-  readOnly?: boolean;
-  
+    /** 初始模式 */
+    initialMode?: 'edit' | 'render';
+
+    /** 标题（可选） */
+    title?: string;
+
+    /** 
+     * 当前编辑器绑定的节点/文件 ID 
+     * 结合 sessionEngine 使用，用于定位存储位置、元数据和上下文。
+     */
+    nodeId?: string;
+
+    /**
+     * [新增] 资产归属节点 ID
+     * 用于确定图片/附件上传到哪里，以及 @asset/ 路径解析的上下文。
+     * - 如果编辑器作为独立页面，通常 ownerNodeId === nodeId。
+     * - 如果编辑器是某个大表单的子控件（如评论区、卡片描述），ownerNodeId 可能是父级 ID。
+     * - 如果未提供，默认回退使用 nodeId。
+     */
+    ownerNodeId?: string;
+
+    /**
+     * 会话引擎实例。
+     * 提供文件系统操作、元数据读写、资源搜索等核心能力。
+     * 这是编辑器与数据层交互的统一接口。
+     */
+    sessionEngine?: ISessionEngine;
+
+    /** 是否只读 */
+    readOnly?: boolean;
+
     /** 
      * [标准注入] 宿主上下文
      * 编辑器通过它控制外部 UI（如侧边栏、全局提示）
      */
-  hostContext?: EditorHostContext;
-  
-  /** 插件列表 */
-  plugins?: any[];
-  
-  /** 插件配置 */
-  defaultPluginOptions?: Record<string, any>;
-    
-  /** 允许传递任何特定于实现的选项 */
-  [key: string]: any; 
+    hostContext?: EditorHostContext;
+
+    /** 插件列表 */
+    plugins?: any[];
+
+    /** 插件配置 */
+    defaultPluginOptions?: Record<string, any>;
+
+    /** 允许传递任何特定于实现的选项 */
+    [key: string]: any;
 }
 
 // ✨ [核心修改] 增加 'blur' 和 'focus' 事件类型
-export type EditorEvent = 
+export type EditorEvent =
     | 'change'            // 内容变化
     | 'interactiveChange' // 用户交互导致的变化
     | 'ready'             // 初始化完成
     | 'modeChanged'       // 编辑/预览模式切换
     | 'blur'              // 失去焦点 (用于自动保存)
     | 'focus'             // 获得焦点
-    | 'optimisticUpdate'  // ✨ [新增] 乐观更新事件，用于通知外部：内容发生了微小变化（如 checkbox），建议立即刷新 UI 统计，但不需要触发昂贵的立即保存或重载。
-    | 'saved'             // ✨ [新增] 保存成功
-    | 'saveError';        // ✨ [新增] 保存失败
+    | 'optimisticUpdate'  // 乐观更新事件
+    | 'saved'             // 保存成功
+    | 'saveError'         // 保存失败
+    | 'blocksCollapsed'   // ✨ [新增] 所有代码块已折叠
+    | 'blocksExpanded';   // ✨ [新增] 所有代码块已展开
 
 export type EditorEventCallback = (payload?: any) => void;
+
+/**
+ * ✨ [新增] 折叠/展开操作的结果
+ */
+export interface CollapseExpandResult {
+    /** 受影响的代码块数量 */
+    affectedCount: number;
+    /** 当前状态：是否全部折叠 */
+    allCollapsed: boolean;
+}
 
 export abstract class IEditor {
     /**
@@ -139,7 +151,7 @@ export abstract class IEditor {
      * @param container - 编辑器将挂载的HTML元素。
      */
     abstract init(container: HTMLElement, initialContent?: string): Promise<void>;
-    
+
     /**
      * 销毁编辑器实例并释放所有资源。
      * 此方法必须返回一个 Promise，以允许调用者等待异步清理/保存操作完成。
@@ -181,6 +193,51 @@ export abstract class IEditor {
         return null;
     }
 
+    // --- ✨ [新增] 代码块折叠/展开接口 ---
+
+    /**
+     * 折叠编辑器内所有代码块
+     * 
+     * @returns 操作结果，包含受影响的代码块数量
+     * 
+     * @example
+     * ```typescript
+     * const result = await editor.collapseBlocks();
+     * console.log(`已折叠 ${result.affectedCount} 个代码块`);
+     * ```
+     */
+    async collapseBlocks(): Promise<CollapseExpandResult> {
+        // 默认实现：不支持的编辑器返回空结果
+        return { affectedCount: 0, allCollapsed: true };
+    }
+
+    /**
+     * 展开编辑器内所有代码块
+     * 
+     * @returns 操作结果，包含受影响的代码块数量
+     * 
+     * @example
+     * ```typescript
+     * const result = await editor.expandBlocks();
+     * console.log(`已展开 ${result.affectedCount} 个代码块`);
+     * ```
+     */
+    async expandBlocks(): Promise<CollapseExpandResult> {
+        // 默认实现：不支持的编辑器返回空结果
+        return { affectedCount: 0, allCollapsed: false };
+    }
+
+    /**
+     * 切换所有代码块的折叠状态
+     * 如果当前有任何展开的代码块，则全部折叠；否则全部展开
+     * 
+     * @returns 操作结果
+     */
+    async toggleBlocks(): Promise<CollapseExpandResult> {
+        // 默认实现：委托给 collapse
+        return this.collapseBlocks();
+    }
+
     // --- 内容分析 ---
     abstract readonly commands: Readonly<Record<string, Function>>;
 
@@ -197,7 +254,7 @@ export abstract class IEditor {
             .replace(/`[^`]+`/g, '')
             .trim();
     }
-    
+
     async getSummary(): Promise<string | null> {
         return null;
     }

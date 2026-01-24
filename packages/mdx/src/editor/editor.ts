@@ -9,13 +9,14 @@ import type { IPersistenceAdapter } from '@itookit/common';
 import { MDxRenderer } from '../renderer/renderer';
 import type { MDxPlugin } from '../core/plugin';
 import type { TaskToggleResult } from '../plugins/interactions/task-list.plugin';
-import { 
-  IEditor, 
+import {
+  IEditor,
   extractHeadings,
   type Heading,
-  EditorOptions, 
-  UnifiedSearchResult, 
-  EditorEvent, 
+  type CollapseExpandResult,
+  EditorOptions,
+  UnifiedSearchResult,
+  EditorEvent,
   EditorEventCallback,
   tryParseJson,
   extractSummary,
@@ -23,10 +24,10 @@ import {
   slugify
 } from '@itookit/common';
 
-import { 
-    DefaultPrintService, 
-    type PrintService, 
-    type PrintOptions 
+import {
+  DefaultPrintService,
+  type PrintService,
+  type PrintOptions
 } from '../core/print.service';
 
 
@@ -67,7 +68,7 @@ const navigationHighlightField = StateField.define<DecorationSet>({
   update(decorations, tr) {
     // 先映射已有的 decorations 到新文档位置
     decorations = decorations.map(tr.changes);
-    
+
     for (const effect of tr.effects) {
       if (effect.is(addHighlightEffect)) {
         const { from, to } = effect.value;
@@ -80,7 +81,7 @@ const navigationHighlightField = StateField.define<DecorationSet>({
         decorations = Decoration.none;
       }
     }
-    
+
     return decorations;
   },
   provide: (field) => EditorView.decorations.from(field),
@@ -125,39 +126,39 @@ export class MDxEditor extends IEditor {
   private currentSavePromise: Promise<void> | null = null;
 
   private renderDebounceTimer: number | null = null;
-  
+
   // [优化] 使用版本号缓存替代文本比较
   private headingsCache: { version: number; headings: Heading[] } | null = null;
   private docVersion = 0;
-  
+
   // [新增] 标题位置缓存
-  private headingPositionsCache: { 
-    version: number; 
-    positions: Map<string, HeadingPosition> 
+  private headingPositionsCache: {
+    version: number;
+    positions: Map<string, HeadingPosition>
   } | null = null;
-  
+
   // [新增] 高亮清除定时器
   private highlightClearTimer: number | null = null;
-  
+
   // [优化] 搜索正则缓存
   private searchRegexCache = new Map<string, RegExp>();
   private readonly MAX_REGEX_CACHE_SIZE = 50;
-  
+
   // [优化] 流式渲染的批量 Promise 解决
   private pendingRenderResolvers: Array<() => void> = [];
-  
+
   // [优化] 事件批处理
   private pendingEmits = new Map<EditorEvent, any>();
   private emitScheduled = false;
   private readonly HIGH_FREQUENCY_EVENTS: EditorEvent[] = ['change'];
 
   constructor(options: MDxEditorConfig = {}) {
-    super(); 
+    super();
     this.config = options;
-    
+
     // ✅ 安全获取 ownerNodeId，优先使用显式传入的值，否则回退到 nodeId
     this.config.ownerNodeId = options.ownerNodeId ?? options.nodeId;
-    
+
     this.currentMode = options.initialMode || 'edit';
     this.renderer = new MDxRenderer({
       searchMarkClass: options.searchMarkClass,
@@ -179,16 +180,16 @@ export class MDxEditor extends IEditor {
     await Promise.resolve();
 
     this.initCodeMirror(initialContent);
-    
+
     const initialMode = this.config.initialMode || 'edit';
     this.currentMode = initialMode;
     const isEditMode = initialMode === 'edit';
-    
+
     this._container.classList.toggle('is-edit-mode', isEditMode);
     this._container.classList.toggle('is-render-mode', !isEditMode);
     this.editorContainer!.style.display = isEditMode ? 'flex' : 'none';
     this.renderContainer!.style.display = isEditMode ? 'none' : 'block';
-    
+
     if (!isEditMode) {
       await this.renderContent();
     }
@@ -236,15 +237,15 @@ export class MDxEditor extends IEditor {
     if (this.currentMode === 'edit' && this.renderContainer) {
       await this.renderContent();
     }
-    
+
     // 直接使用渲染容器的 HTML，确保与预览一致
     const contentHtml = this.renderContainer?.innerHTML || '';
-    
+
     if (!contentHtml.trim()) {
       console.warn('[MDxEditor] No content to print');
       return;
     }
-    
+
     await this.getPrintService().printFromHtml(contentHtml, {
       title: this.config.title,
       showHeader: true,
@@ -269,10 +270,10 @@ export class MDxEditor extends IEditor {
   private createContainers(container: HTMLElement): void {
     container.innerHTML = '';
     container.className = 'mdx-editor-root-container mdx-editor-container';
-    
+
     // [优化] 使用 DocumentFragment 批量添加
     const fragment = document.createDocumentFragment();
-    
+
     this.editorContainer = document.createElement('div');
     this.editorContainer.className = 'mdx-editor-container__edit-mode';
     fragment.appendChild(this.editorContainer);
@@ -281,7 +282,7 @@ export class MDxEditor extends IEditor {
     this.renderContainer.className = 'mdx-editor-container__render-mode';
     this.renderContainer.tabIndex = -1;
     fragment.appendChild(this.renderContainer);
-    
+
     container.appendChild(fragment);
   }
 
@@ -305,10 +306,10 @@ export class MDxEditor extends IEditor {
         if (update.docChanged) {
           this.docVersion++; // [优化] 递增版本号用于缓存失效
           this.emit('change');
-          if (update.transactions.some(tr => 
-            tr.isUserEvent('input') || 
-            tr.isUserEvent('delete') || 
-            tr.isUserEvent('paste') || 
+          if (update.transactions.some(tr =>
+            tr.isUserEvent('input') ||
+            tr.isUserEvent('delete') ||
+            tr.isUserEvent('paste') ||
             tr.isUserEvent('drop')
           )) {
             this.setDirty(true);
@@ -333,7 +334,7 @@ export class MDxEditor extends IEditor {
         // 标记为脏，以便自动保存可以捕获这次变更
         this.setDirty(true);
         this.emit('interactiveChange');
-        
+
         // 2. 发送乐观更新事件
         this.emit('optimisticUpdate');
       }
@@ -362,7 +363,7 @@ export class MDxEditor extends IEditor {
     if (!isEditMode && !isInitializing) {
       await this.renderContent();
     }
-    
+
     this.renderer.getPluginManager().emit('modeChanged', { mode });
     this.emit('modeChanged', { mode });
   }
@@ -386,11 +387,11 @@ export class MDxEditor extends IEditor {
     commandMap.forEach((fn, name) => { commands[name] = fn; });
     return Object.freeze(commands);
   }
-  
-  getText(): string { 
-    return this.editorView ? this.editorView.state.doc.toString() : ''; 
+
+  getText(): string {
+    return this.editorView ? this.editorView.state.doc.toString() : '';
   }
-  
+
   setText(markdown: string): void {
     if (this.editorView && markdown !== this.getText()) {
       this.editorView.dispatch({
@@ -414,13 +415,13 @@ export class MDxEditor extends IEditor {
       this.editorView.dispatch({
         changes: { from: 0, to: this.editorView.state.doc.length, insert: markdown }
       });
-      this.setDirty(false); 
+      this.setDirty(false);
     }
 
     if (this.currentMode === 'render') {
       return new Promise((resolve) => {
         this.pendingRenderResolvers.push(resolve);
-        
+
         if (!this.renderDebounceTimer) {
           this.renderDebounceTimer = window.setTimeout(async () => {
             this.renderDebounceTimer = null;
@@ -451,7 +452,7 @@ export class MDxEditor extends IEditor {
   setDirty(isDirty: boolean): void {
     this._isDirty = isDirty;
   }
-  
+
   /**
    * [重写] 核心保存方法
    * 修复了并发问题：如果当前正在保存，则返回当前的 Promise，防止任务被丢弃
@@ -475,14 +476,14 @@ export class MDxEditor extends IEditor {
     this.currentSavePromise = (async () => {
       try {
         const content = this.getText();
-        
+
         // 使用捕获的本地变量调用
         await onSave(content);
-        
+
         // 只有在保存成功后才清除脏状态
-            // 注意：这里存在微小的竞态，如果保存期间用户又输入了，
-            // 理想情况应该比较 content 和 currentText，但这里简单处理设为 false
-            // 下面的 destroy 逻辑会通过二次检查来弥补
+        // 注意：这里存在微小的竞态，如果保存期间用户又输入了，
+        // 理想情况应该比较 content 和 currentText，但这里简单处理设为 false
+        // 下面的 destroy 逻辑会通过二次检查来弥补
         this.setDirty(false);
         this.emit('saved');
       } catch (error) {
@@ -496,7 +497,7 @@ export class MDxEditor extends IEditor {
 
     return this.currentSavePromise;
   }
-  
+
   /**
    * ✨ [重构] 获取文档标题列表
    * 
@@ -509,9 +510,9 @@ export class MDxEditor extends IEditor {
     if (this.headingsCache && this.headingsCache.version === this.docVersion) {
       return this.headingsCache.headings;
     }
-    
+
     const text = this.getText();
-    
+
     if (tryParseJson(text)) {
       this.headingsCache = { version: this.docVersion, headings: [] };
       return [];
@@ -531,35 +532,35 @@ export class MDxEditor extends IEditor {
     if (this.headingPositionsCache && this.headingPositionsCache.version === this.docVersion) {
       return this.headingPositionsCache.positions;
     }
-    
+
     const text = this.getText();
     const positions = new Map<string, HeadingPosition>();
-    
+
     if (tryParseJson(text)) {
       this.headingPositionsCache = { version: this.docVersion, positions };
       return positions;
     }
-    
+
     const lines = text.split('\n');
     let currentPos = 0;
     let inCodeBlock = false;
-    
+
     // 用于处理重复标题
     const slugCounts = new Map<string, number>();
-    
+
     for (const line of lines) {
       const lineStart = currentPos;
       const lineEnd = currentPos + line.length;
-      
+
       const trimmedLine = line.trim();
-      
+
       // 检测代码块边界
       if (trimmedLine.startsWith('```') || trimmedLine.startsWith('~~~')) {
         inCodeBlock = !inCodeBlock;
         currentPos = lineEnd + 1;
         continue;
       }
-      
+
       // 只在代码块外处理标题
       if (!inCodeBlock) {
         const headingMatch = line.match(/^(#{1,6})\s+(.+)$/);
@@ -567,26 +568,26 @@ export class MDxEditor extends IEditor {
           const level = headingMatch[1].length;
           const headingText = headingMatch[2].trim();
           const baseSlug = slugify(headingText);
-          
+
           // 处理重复标题：添加数字后缀
           const count = slugCounts.get(baseSlug) || 0;
           slugCounts.set(baseSlug, count + 1);
-          
+
           const finalSlug = count === 0 ? baseSlug : `${baseSlug}-${count}`;
           const elementId = `heading-${finalSlug}`;
-          
-          positions.set(elementId, { 
-            from: lineStart, 
+
+          positions.set(elementId, {
+            from: lineStart,
             to: lineEnd,
             level,
             text: headingText
           });
         }
       }
-      
+
       currentPos = lineEnd + 1; // +1 for newline character
     }
-    
+
     this.headingPositionsCache = { version: this.docVersion, positions };
     return positions;
   }
@@ -597,7 +598,7 @@ export class MDxEditor extends IEditor {
   async getSearchableText(): Promise<string> {
     return extractSearchableText(this.getText());
   }
-  
+
   /**
    * [重构] 获取摘要
    */
@@ -606,10 +607,10 @@ export class MDxEditor extends IEditor {
     return extractSummary(this.getText());
   }
 
-  setTitle(newTitle: string): void { 
-    this.renderer.getPluginManager().emit('setTitle', { title: newTitle }); 
+  setTitle(newTitle: string): void {
+    this.renderer.getPluginManager().emit('setTitle', { title: newTitle });
   }
-  
+
   /**
    * ✨ [重构] 统一的导航方法
    * 支持 render 模式（DOM 查询）和 edit 模式（CodeMirror 定位）
@@ -617,7 +618,7 @@ export class MDxEditor extends IEditor {
   async navigateTo(target: { elementId: string }, options?: { smooth?: boolean }): Promise<void> {
     const { elementId } = target;
     const smooth = options?.smooth ?? true;
-    
+
     if (this.currentMode === 'render' && this.renderContainer) {
       // Renderer 模式：使用 DOM 定位
       await this.navigateInRenderer(elementId, smooth);
@@ -634,13 +635,13 @@ export class MDxEditor extends IEditor {
    */
   private async navigateInRenderer(elementId: string, smooth: boolean): Promise<void> {
     if (!this.renderContainer) return;
-    
+
     try {
       const element = this.renderContainer.querySelector(`#${CSS.escape(elementId)}`);
       if (element) {
-        element.scrollIntoView({ 
-          behavior: smooth ? 'smooth' : 'instant', 
-          block: 'center' 
+        element.scrollIntoView({
+          behavior: smooth ? 'smooth' : 'instant',
+          block: 'center'
         });
         element.classList.add('highlight-pulse');
         setTimeout(() => element.classList.remove('highlight-pulse'), 1500);
@@ -658,10 +659,10 @@ export class MDxEditor extends IEditor {
    */
   private async navigateInEditor(elementId: string): Promise<void> {
     if (!this.editorView) return;
-    
+
     const positions = this.getHeadingPositions();
     let position = positions.get(elementId);
-    
+
     // 如果精确匹配失败，尝试模糊匹配（去掉数字后缀）
     if (!position) {
       const baseId = elementId.replace(/-\d+$/, '');
@@ -672,25 +673,25 @@ export class MDxEditor extends IEditor {
         }
       }
     }
-    
+
     if (!position) {
       console.warn(`[MDxEditor] Heading not found in editor: ${elementId}`);
       return;
     }
-    
+
     const { from, to } = position;
-    
+
     // 1. 清除之前的高亮定时器
     if (this.highlightClearTimer) {
       clearTimeout(this.highlightClearTimer);
       this.highlightClearTimer = null;
     }
-    
+
     // 2. 清除之前的高亮
     this.editorView.dispatch({
       effects: clearHighlightEffect.of(null)
     });
-    
+
     // 3. 滚动到目标位置并设置光标
     // 使用 requestAnimationFrame 确保 DOM 更新后再滚动
     await new Promise<void>((resolve) => {
@@ -699,20 +700,20 @@ export class MDxEditor extends IEditor {
           resolve();
           return;
         }
-        
+
         // 设置光标到标题行首
         this.editorView.dispatch({
           selection: { anchor: from },
-          effects: EditorView.scrollIntoView(from, { 
+          effects: EditorView.scrollIntoView(from, {
             y: 'center',
             yMargin: 100 // 上下留白
           }),
         });
-        
+
         resolve();
       });
     });
-    
+
     // 4. 添加高亮 Decoration（延迟一帧确保滚动完成）
     await new Promise<void>((resolve) => {
       requestAnimationFrame(() => {
@@ -720,18 +721,18 @@ export class MDxEditor extends IEditor {
           resolve();
           return;
         }
-        
+
         this.editorView.dispatch({
           effects: addHighlightEffect.of({ from, to })
         });
-        
+
         resolve();
       });
     });
-    
+
     // 5. 聚焦编辑器
     this.editorView.focus();
-    
+
     // 6. 设置定时器清除高亮
     this.highlightClearTimer = window.setTimeout(() => {
       if (this.editorView && !this.isDestroying) {
@@ -752,7 +753,7 @@ export class MDxEditor extends IEditor {
       clearTimeout(this.highlightClearTimer);
       this.highlightClearTimer = null;
     }
-    
+
     if (this.editorView) {
       this.editorView.dispatch({
         effects: clearHighlightEffect.of(null)
@@ -781,7 +782,7 @@ export class MDxEditor extends IEditor {
     if (!regex) {
       const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       regex = new RegExp(escapedQuery, 'gi');
-      
+
       // 简单的 LRU 实现
       if (this.searchRegexCache.size >= this.MAX_REGEX_CACHE_SIZE) {
         const firstKey = this.searchRegexCache.keys().next().value;
@@ -807,7 +808,7 @@ export class MDxEditor extends IEditor {
       const results: UnifiedSearchResult[] = [];
       const docString = this.editorView.state.doc.toString();
       const regex = this.getSearchRegex(query);
-      
+
       let match: RegExpExecArray | null;
       while ((match = regex.exec(docString)) !== null) {
         const from = match.index;
@@ -847,9 +848,86 @@ export class MDxEditor extends IEditor {
   clearSearch(): void {
     if (this.currentMode === 'edit' && this.editorView) {
       this.editorView.dispatch({ effects: this.searchCompartment.reconfigure([]) });
-    } else { 
-      this.renderer.clearSearch(); 
+    } else {
+      this.renderer.clearSearch();
     }
+  }
+
+  // =====================================================
+  // ✨ [新增] 代码块折叠/展开实现
+  // =====================================================
+
+  /**
+   * 折叠编辑器内所有代码块
+   * 仅在渲染模式下有效
+   */
+  async collapseBlocks(): Promise<CollapseExpandResult> {
+    // 只在渲染模式下支持
+    if (this.currentMode !== 'render') {
+      console.warn('[MDxEditor] collapseBlocks only works in render mode');
+      return { affectedCount: 0, allCollapsed: true };
+    }
+
+    const command = this.renderer.getPluginManager().getCommand('collapseAllCodeBlocks');
+    if (command) {
+      try {
+        const result = command() as { affectedCount: number; allCollapsed: boolean };
+        this.emit('blocksCollapsed', result);
+        return result;
+      } catch (e) {
+        console.error('[MDxEditor] collapseBlocks failed:', e);
+      }
+    }
+
+    return { affectedCount: 0, allCollapsed: true };
+  }
+
+  /**
+   * 展开编辑器内所有代码块
+   * 仅在渲染模式下有效
+   */
+  async expandBlocks(): Promise<CollapseExpandResult> {
+    if (this.currentMode !== 'render') {
+      console.warn('[MDxEditor] expandBlocks only works in render mode');
+      return { affectedCount: 0, allCollapsed: false };
+    }
+
+    const command = this.renderer.getPluginManager().getCommand('expandAllCodeBlocks');
+    if (command) {
+      try {
+        const result = command() as { affectedCount: number; allCollapsed: boolean };
+        this.emit('blocksExpanded', result);
+        return result;
+      } catch (e) {
+        console.error('[MDxEditor] expandBlocks failed:', e);
+      }
+    }
+
+    return { affectedCount: 0, allCollapsed: false };
+  }
+
+  /**
+   * 切换所有代码块的折叠状态
+   */
+  async toggleBlocks(): Promise<CollapseExpandResult> {
+    if (this.currentMode !== 'render') {
+      console.warn('[MDxEditor] toggleBlocks only works in render mode');
+      return { affectedCount: 0, allCollapsed: false };
+    }
+
+    const command = this.renderer.getPluginManager().getCommand('toggleAllCodeBlocks');
+    if (command) {
+      try {
+        const result = command() as { affectedCount: number; allCollapsed: boolean };
+        const eventName = result.allCollapsed ? 'blocksCollapsed' : 'blocksExpanded';
+        this.emit(eventName, result);
+        return result;
+      } catch (e) {
+        console.error('[MDxEditor] toggleBlocks failed:', e);
+      }
+    }
+
+    return { affectedCount: 0, allCollapsed: false };
   }
 
   /**
@@ -858,7 +936,7 @@ export class MDxEditor extends IEditor {
    */
   async pruneAssets(): Promise<number | null> {
     const pruneCommand = this.renderer.getPluginManager().getCommand('pruneAssets');
-    
+
     if (pruneCommand) {
       try {
         return await pruneCommand(this);
@@ -867,7 +945,7 @@ export class MDxEditor extends IEditor {
         return 0;
       }
     }
-    
+
     console.warn('[MDxEditor] Prune capability not available (AssetResolverPlugin missing?)');
     return null;
   }
@@ -884,7 +962,7 @@ export class MDxEditor extends IEditor {
   private emit(eventName: EditorEvent, payload?: any): void {
     const callbacks = this.eventEmitter.get(eventName);
     if (!callbacks || callbacks.size === 0) return;
-    
+
     // 高频事件使用批处理
     if (this.HIGH_FREQUENCY_EVENTS.includes(eventName)) {
       this.pendingEmits.set(eventName, payload);
@@ -921,18 +999,18 @@ export class MDxEditor extends IEditor {
       return;
     }
     this.isDestroying = true;
-    
+
     // 清除高亮定时器
     if (this.highlightClearTimer) {
       clearTimeout(this.highlightClearTimer);
       this.highlightClearTimer = null;
     }
-    
+
     if (this.renderDebounceTimer) {
       clearTimeout(this.renderDebounceTimer);
       this.renderDebounceTimer = null;
     }
-    
+
     // 解决所有等待中的渲染 Promise
     this.pendingRenderResolvers.forEach(r => r());
     this.pendingRenderResolvers = [];
@@ -966,11 +1044,11 @@ export class MDxEditor extends IEditor {
     this.eventEmitter.clear();
     this.searchRegexCache.clear();
     this.pendingEmits.clear();
-    
+
     // 清理缓存
     this.headingsCache = null;
     this.headingPositionsCache = null;
-    
+
     if (this._container) {
       this._container.innerHTML = '';
     }
@@ -979,7 +1057,7 @@ export class MDxEditor extends IEditor {
     this.renderContainer = null;
     this.isDestroying = false;
   }
-  
+
   // --- MDxEditor-specific methods ---
 
 

@@ -1,6 +1,6 @@
 // @file common/components/BaseSettingsEditor.ts
 
-import { IEditor, EditorOptions, UnifiedSearchResult, Heading, EditorEvent, EditorEventCallback } from '../interfaces/IEditor';
+import { IEditor, CollapseExpandResult, EditorOptions, UnifiedSearchResult, Heading, EditorEvent, EditorEventCallback } from '../interfaces/IEditor';
 
 /**
  * 定义宿主能力接口 (与 MemoryManager 的 EditorHostContext 保持结构兼容)
@@ -17,13 +17,13 @@ export interface IEditorHostContext {
 export abstract class BaseSettingsEditor<TService> implements IEditor {
     protected listeners: Array<{ el: Element, type: string, handler: EventListener }> = [];
     protected container!: HTMLElement;
-    
+
     // [新增] 宿主能力引用
     protected hostContext?: IEditorHostContext;
 
     constructor(
         container: HTMLElement,
-        protected service: TService, 
+        protected service: TService,
         protected options: EditorOptions
     ) {
         this.container = container;
@@ -42,7 +42,7 @@ export abstract class BaseSettingsEditor<TService> implements IEditor {
         // Service 变更订阅
         if (this.service && typeof (this.service as any).onChange === 'function') {
             const unsubscribe = (this.service as any).onChange(() => this.render());
-            
+
             // Hook destroy
             const originalDestroy = this.destroy;
             this.destroy = async () => {
@@ -50,10 +50,10 @@ export abstract class BaseSettingsEditor<TService> implements IEditor {
                 await originalDestroy.call(this);
             };
         }
-        
+
         await this.render();
     }
-    
+
     // [新增] 辅助方法：切换侧边栏
     protected toggleSidebar() {
         this.hostContext?.toggleSidebar();
@@ -80,30 +80,42 @@ export abstract class BaseSettingsEditor<TService> implements IEditor {
         this.clearListeners();
         this.container.innerHTML = '';
     }
-    
+
     getText() { return ''; }
-    setText(_text: string) {}
-    
+    setText(_text: string) { }
+
     getMode(): 'edit' | 'render' { return 'render'; }
-    async switchToMode(_mode: 'edit' | 'render') {}
-    setTitle(_title: string) {}
-    setReadOnly(_readOnly: boolean) {}
+    async switchToMode(_mode: 'edit' | 'render') { }
+    setTitle(_title: string) { }
+    setReadOnly(_readOnly: boolean) { }
     isDirty() { return false; }
-    setDirty(_dirty: boolean) {}
-    
+    setDirty(_dirty: boolean) { }
+
     get commands() { return {}; }
     async getHeadings(): Promise<Heading[]> { return []; }
     async getSearchableText(): Promise<string> { return ''; }
     async getSummary(): Promise<string | null> { return null; }
-    async navigateTo(_target: { elementId: string }) {}
+    async navigateTo(_target: { elementId: string }) { }
     async search(_query: string): Promise<UnifiedSearchResult[]> { return []; }
-    gotoMatch(_result: UnifiedSearchResult) {}
-    clearSearch() {}
+    gotoMatch(_result: UnifiedSearchResult) { }
+    clearSearch() { }
+
+    async collapseBlocks(): Promise<CollapseExpandResult> {
+        return { affectedCount: 0, allCollapsed: true };
+    }
+
+    async expandBlocks(): Promise<CollapseExpandResult> {
+        return { affectedCount: 0, allCollapsed: false };
+    }
+
+    async toggleBlocks(): Promise<CollapseExpandResult> {
+        return this.collapseBlocks();
+    }
 
     async pruneAssets(): Promise<number | null> {
         return null; // 设置页面通常没有附件需要清理
     }
 
-    on(_eventName: EditorEvent, _callback: EditorEventCallback) { return () => {}; }
+    on(_eventName: EditorEvent, _callback: EditorEventCallback) { return () => { }; }
 
 }

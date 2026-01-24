@@ -1,6 +1,6 @@
 // @file llm-ui/components/mdx/MDxController.ts
 import { createMDxEditor, MDxEditor } from '@itookit/mdxeditor';
-import type { ISessionEngine } from '@itookit/common';
+import type { ISessionEngine, CollapseExpandResult } from '@itookit/common';
 
 export interface MDxControllerOptions {
     readOnly?: boolean;
@@ -20,10 +20,10 @@ export class MDxController {
     private isStreaming: boolean = false;
     private isReadOnly: boolean = true;
     private onChangeCallback?: (text: string) => void;
-    
+
     // ✅ 新增：记录初始化时是否为流式模式
     private isStreamingInit: boolean = false;
-    
+
     // ✅ 新增：保存上下文
     private options: MDxControllerOptions;
 
@@ -40,14 +40,14 @@ export class MDxController {
     private lastRenderTime: number = 0;
     private rafId: number | null = null;
     private renderScheduled: boolean = false;
-    
+
     // ✅ 新增：批量缓冲
     private contentSnapshot: string = '';
     private pendingContentLength: number = 0;
 
     constructor(
-        container: HTMLElement, 
-        initialContent: string, 
+        container: HTMLElement,
+        initialContent: string,
         options?: MDxControllerOptions  // ✅ 使用新的选项接口
     ) {
         this.container = container;
@@ -55,15 +55,15 @@ export class MDxController {
         this.options = options || {};
         this.isReadOnly = options?.readOnly ?? true;
         this.onChangeCallback = options?.onChange;
-        
+
         // ✅ 获取流式状态，默认为 false
         this.isStreamingInit = options?.streaming ?? false;
-        
+
         this.readyPromise = new Promise((resolve, reject) => {
             this.readyResolve = resolve;
             this.readyReject = reject;
         });
-        
+
         this.init();
     }
 
@@ -75,17 +75,17 @@ export class MDxController {
     }
 
     private async init() {
-        
+
         try {
             this.editor = await createMDxEditor(this.container, {
                 initialContent: this.currentContent,
                 initialMode: this.isReadOnly ? 'render' : 'edit',
-                
+
                 // ✅ 关键修复：传递上下文
                 nodeId: this.options.nodeId,
                 ownerNodeId: this.options.ownerNodeId,
                 sessionEngine: this.options.sessionEngine,
-                
+
                 plugins: [
                     'editor:core',
                     'ui:formatting',
@@ -95,15 +95,15 @@ export class MDxController {
                     'task-list',
                     'media',
                     'svg',
-                    'ui:toolbar' 
+                    'ui:toolbar'
                 ],
-                defaultPluginOptions:{
+                defaultPluginOptions: {
                     // ✅ 动态控制 defaultCollapsed
                     // 如果是正在输出的流(isStreamingInit=true)，则折叠(true)
                     // 否则(历史记录/编辑)，则展开(false)
-                    'codeblock-controls': { 
-                        defaultCollapsed: !this.isStreamingInit ,
-                        streamingMode: this.isStreamingInit 
+                    'codeblock-controls': {
+                        defaultCollapsed: !this.isStreamingInit,
+                        streamingMode: this.isStreamingInit
                     }
                 }
             }) as MDxEditor;
@@ -128,13 +128,64 @@ export class MDxController {
 
             // ✨ [优化] 解析 ready Promise
             this.readyResolve();
-            
+
         } catch (e) {
             console.error('[MDxController] init() failed:', e);
             // ✨ [修复 6.1] 使用 reject 通知失败
             this.readyReject(e);
             // 不再 throw，让外部通过 promise 处理
         }
+    }
+
+    // ✨ ==================== 新增：代码块折叠/展开接口 ====================
+
+    /**
+     * 折叠编辑器内所有代码块
+     * @returns 操作结果
+     */
+    async collapseBlocks(): Promise<CollapseExpandResult> {
+        if (!this.editor || !this.isInitialized) {
+            return { affectedCount: 0, allCollapsed: true };
+        }
+
+        // 确保在 render 模式下才能操作代码块
+        if (this.editor.getMode() !== 'render') {
+            return { affectedCount: 0, allCollapsed: true };
+        }
+
+        return await this.editor.collapseBlocks();
+    }
+
+    /**
+     * 展开编辑器内所有代码块
+     * @returns 操作结果
+     */
+    async expandBlocks(): Promise<CollapseExpandResult> {
+        if (!this.editor || !this.isInitialized) {
+            return { affectedCount: 0, allCollapsed: false };
+        }
+
+        if (this.editor.getMode() !== 'render') {
+            return { affectedCount: 0, allCollapsed: false };
+        }
+
+        return await this.editor.expandBlocks();
+    }
+
+    /**
+     * 切换所有代码块的折叠状态
+     * @returns 操作结果
+     */
+    async toggleBlocks(): Promise<CollapseExpandResult> {
+        if (!this.editor || !this.isInitialized) {
+            return { affectedCount: 0, allCollapsed: false };
+        }
+
+        if (this.editor.getMode() !== 'render') {
+            return { affectedCount: 0, allCollapsed: false };
+        }
+
+        return await this.editor.toggleBlocks();
     }
 
     /**
@@ -144,26 +195,26 @@ export class MDxController {
         this.isStreaming = true;
         this.currentContent += delta;
         this.pendingContentLength += delta.length;
-        
+
         if (!this.isInitialized || !this.editor) {
             this.pendingChunks.push(delta);
             return;
         }
-        
+
         // 更智能的渲染触发条件
         const now = Date.now();
         const timeSinceLastRender = now - this.lastRenderTime;
-        
+
         // 条件1：累积足够多的内容
         const shouldRenderBySize = this.pendingContentLength >= this.BATCH_SIZE_THRESHOLD;
-        
+
         // 条件2：距离上次渲染超过间隔
         const shouldRenderByTime = timeSinceLastRender >= this.RENDER_INTERVAL;
-        
+
         // 条件3：内容以完整句子结束
         const endsWithSentence = /[.!?。！？\n]$/.test(delta);
         const shouldRenderBySentence = endsWithSentence && timeSinceLastRender >= 100;
-        
+
         if (shouldRenderBySize || shouldRenderByTime || shouldRenderBySentence) {
             this.scheduleRender();
         }
@@ -200,19 +251,19 @@ export class MDxController {
      */
     private async doRender(): Promise<void> {
         this.renderScheduled = false;
-        
+
         if (!this.editor || !this.isInitialized) return;
-        
+
         // 检查内容是否有变化（避免无谓渲染）
         if (this.currentContent === this.contentSnapshot) return;
 
         try {
             await this.editor.setStreamingText(this.currentContent);
-            
+
             this.contentSnapshot = this.currentContent;
             this.lastRenderTime = Date.now();
             this.pendingContentLength = 0;
-            
+
         } catch (e) {
             console.error('[MDxController] Render failed:', e);
         }
@@ -223,7 +274,7 @@ export class MDxController {
      */
     finishStream(emitChange: boolean = false): void {
         this.isStreaming = false;
-        
+
         // 取消所有挂起的渲染
         if (this.rafId !== null) {
             cancelAnimationFrame(this.rafId);
@@ -231,7 +282,7 @@ export class MDxController {
         }
         this.renderScheduled = false;
         this.pendingContentLength = 0;
-        
+
         // 最终渲染
         if (this.editor && this.isInitialized && this.currentContent !== this.contentSnapshot) {
             queueMicrotask(async () => {
@@ -243,7 +294,7 @@ export class MDxController {
                 }
             });
         }
-        
+
         if (emitChange) {
             this.onChangeCallback?.(this.currentContent);
         }
@@ -251,11 +302,11 @@ export class MDxController {
 
     async toggleEdit() {
         if (!this.editor) return;
-        
+
         this.isReadOnly = !this.isReadOnly;
         const targetMode = this.isReadOnly ? 'render' : 'edit';
         await this.editor.switchToMode(targetMode);
-        
+
         if (!this.isReadOnly) {
             this.editor.focus();
         }
@@ -286,7 +337,7 @@ export class MDxController {
      */
     async setMode(mode: 'edit' | 'render') {
         if (!this.editor) return;
-        
+
         const shouldBeReadOnly = mode === 'render';
         if (this.isReadOnly !== shouldBeReadOnly) {
             this.isReadOnly = shouldBeReadOnly;
@@ -300,7 +351,7 @@ export class MDxController {
             cancelAnimationFrame(this.rafId);
             this.rafId = null;
         }
-        
+
         this.editor?.destroy();
         this.editor = null;
         this.isInitialized = false;
