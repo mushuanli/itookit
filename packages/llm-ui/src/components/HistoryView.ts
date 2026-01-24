@@ -24,29 +24,29 @@ export class HistoryView {
     private nodeMap = new Map<string, HTMLElement>();
     private editorMap = new Map<string, MDxController>();
     private container: HTMLElement;
-    
+
     private shouldAutoScroll = true;
     private scrollThreshold = 150;
     private scrollFrameId: number | null = null;
     private resizeObserver: ResizeObserver;
-    
+
     // ✅ 新增：流式模式控制
     private isStreamingMode = false;
     private lastScrollHeight = 0;
     private scrollLockUntil = 0;
-    
+
     // ✅ 新增：用户是否正在查看历史内容
     private userIsScrolledUp = false;
-    
+
     // 预览更新节流
     private previewUpdateTimers = new Map<string, number>();
 
     private onContentChange?: (id: string, content: string, type: 'user' | 'node') => void;
     private onNodeAction?: NodeActionCallback;
-    
+
     // 保存原始内容用于取消编辑
     private originalContentMap = new Map<string, string>();
-    
+
     // 编辑状态跟踪
     private editingNodes = new Set<string>();
 
@@ -98,7 +98,7 @@ export class HistoryView {
         // 监听内容高度变化
         this.resizeObserver = new ResizeObserver(() => {
             if (this.scrollFrameId !== null) return;
-            
+
             this.scrollFrameId = requestAnimationFrame(() => {
                 this.scrollFrameId = null;
                 this.handleResize();
@@ -126,7 +126,7 @@ export class HistoryView {
 
         // ✅ 修改：优先使用保存的状态，否则使用智能折叠策略
         const hasStoredStates = Object.keys(this.collapseStates).length > 0;
-        
+
         let lastUserIndex = -1;
         if (!hasStoredStates) {
             for (let i = sessions.length - 1; i >= 0; i--) {
@@ -140,31 +140,31 @@ export class HistoryView {
             }
         }
 
-    sessions.forEach((session, index) => {
-        let shouldCollapse: boolean;
+        sessions.forEach((session, index) => {
+            let shouldCollapse: boolean;
 
-        // 1. 如果有缓存的持久化状态，优先使用
-        if (hasStoredStates && this.collapseStates[session.id] !== undefined) {
-            shouldCollapse = this.collapseStates[session.id];
-        } else {
-            // 2. [新增逻辑]：如果是用户消息，默认折叠
-            if (session.role === 'user') {
-                shouldCollapse = true; 
+            // 1. 如果有缓存的持久化状态，优先使用
+            if (hasStoredStates && this.collapseStates[session.id] !== undefined) {
+                shouldCollapse = this.collapseStates[session.id];
             } else {
-                // 3. 助手消息逻辑：如果是最后一条消息则展开，否则折叠
-                shouldCollapse = index < sessions.length - 1;
-            }
-            
-            // 同步到状态 map 中
-            this.collapseStates[session.id] = shouldCollapse;
-        }
+                // 2. [新增逻辑]：如果是用户消息，默认折叠
+                if (session.role === 'user') {
+                    shouldCollapse = true;
+                } else {
+                    // 3. 助手消息逻辑：如果是最后一条消息则展开，否则折叠
+                    shouldCollapse = index < sessions.length - 1;
+                }
 
-        this.appendSessionGroup(session, shouldCollapse);
-        
-        if (session.executionRoot) {
-            this.renderExecutionTree(session.executionRoot, shouldCollapse);
-        }
-    });
+                // 同步到状态 map 中
+                this.collapseStates[session.id] = shouldCollapse;
+            }
+
+            this.appendSessionGroup(session, shouldCollapse);
+
+            if (session.executionRoot) {
+                this.renderExecutionTree(session.executionRoot, shouldCollapse);
+            }
+        });
 
         this.scrollToBottom(true);
     }
@@ -178,7 +178,7 @@ export class HistoryView {
         if (existingBanner) {
             existingBanner.remove();
         }
-        
+
         const banner = document.createElement('div');
         banner.className = 'llm-ui-error-banner';
         banner.innerHTML = `
@@ -188,16 +188,16 @@ export class HistoryView {
                 <button class="llm-ui-error-banner__close" title="Dismiss">×</button>
             </div>
         `;
-        
+
         banner.querySelector('.llm-ui-error-banner__close')?.addEventListener('click', () => {
             banner.remove();
         });
-        
+
         const isSerious = error.message.includes('401') || error.message.includes('API key');
         if (!isSerious) {
             setTimeout(() => banner.remove(), 5000);
         }
-        
+
         this.container.insertBefore(banner, this.container.firstChild);
         this.scrollToBottom(true);
     }
@@ -212,15 +212,15 @@ export class HistoryView {
     private handleScroll(): void {
         const { scrollTop, scrollHeight, clientHeight } = this.container;
         const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
-        
+
         // 判断用户是否正在查看历史内容
         this.userIsScrolledUp = distanceFromBottom > this.scrollThreshold;
-        
+
         // 如果用户滚动到底部，隐藏新内容提示
         if (!this.userIsScrolledUp) {
             this.hideNewContentIndicator();
         }
-        
+
         // 非流式模式下才更新自动滚动状态
         if (!this.isStreamingMode) {
             if (Date.now() < this.scrollLockUntil) return;
@@ -233,15 +233,15 @@ export class HistoryView {
      */
     private handleResize(): void {
         if (!this.shouldAutoScroll && !this.isStreamingMode) return;
-        
+
         // 节流滚动
         if (this.scrollThrottleTimer !== null) return;
-        
+
         this.scrollThrottleTimer = window.setTimeout(() => {
             this.scrollThrottleTimer = null;
-            
+
             const currentScrollHeight = this.container.scrollHeight;
-            
+
             if (currentScrollHeight > this.lastScrollHeight) {
                 this.lastScrollHeight = currentScrollHeight;
                 this.instantScrollToBottom();
@@ -254,7 +254,7 @@ export class HistoryView {
      */
     private instantScrollToBottom(): void {
         if (this.scrollFrameId !== null) return;
-        
+
         this.scrollFrameId = requestAnimationFrame(() => {
             this.scrollFrameId = null;
             this.container.scrollTop = this.container.scrollHeight;
@@ -284,11 +284,11 @@ export class HistoryView {
      */
     public enterStreamingMode(): void {
         if (this.isStreamingMode) return;
-        
+
         this.isStreamingMode = true;
         this.shouldAutoScroll = true;
         this.lastScrollHeight = this.container.scrollHeight;
-        
+
         this.container.classList.add('llm-ui-history--streaming');
     }
 
@@ -297,22 +297,22 @@ export class HistoryView {
      */
     public exitStreamingMode(): void {
         if (!this.isStreamingMode) return;
-        
+
         this.isStreamingMode = false;
         this.container.classList.remove('llm-ui-history--streaming');
-        
+
         // 只有当用户没有主动滚动上去时，才滚动到底部
         if (!this.userIsScrolledUp) {
             this.scrollToBottom(true);
         } else {
             this.showNewContentIndicator();
         }
-        
+
         // 清理流式状态类
         this.container.querySelectorAll('.llm-ui-node--streaming').forEach(el => {
             el.classList.remove('llm-ui-node--streaming');
         });
-        
+
         this.previewUpdateTimers.forEach(timer => clearTimeout(timer));
         this.previewUpdateTimers.clear();
 
@@ -334,7 +334,7 @@ export class HistoryView {
     private showNewContentIndicator(): void {
         // 避免重复创建
         if (this.newContentIndicator) return;
-        
+
         this.newContentIndicator = document.createElement('div');
         this.newContentIndicator.className = 'llm-ui-new-content-indicator';
         this.newContentIndicator.innerHTML = `
@@ -342,12 +342,12 @@ export class HistoryView {
                 <span>⬇️ New response available</span>
             </button>
         `;
-        
+
         this.newContentIndicator.querySelector('button')?.addEventListener('click', () => {
             this.scrollToBottom(true);
             this.hideNewContentIndicator();
         });
-        
+
         this.container.appendChild(this.newContentIndicator);
     }
 
@@ -369,7 +369,7 @@ export class HistoryView {
             return;
         }
         this.renderedSessionIds.add(group.id);
-        
+
         const wrapper = document.createElement('div');
         wrapper.className = `llm-ui-session llm-ui-session--${group.role}`;
         wrapper.dataset.sessionId = group.id;
@@ -379,7 +379,7 @@ export class HistoryView {
             // 传入 isCollapsed
             wrapper.innerHTML = NodeTemplates.renderUserBubble(group, preview, isCollapsed);
             this.container.appendChild(wrapper);
-            
+
             // 只有当未折叠时，才立即初始化编辑器 (懒加载优化)
             // 或者：总是初始化，但在 CSS 中隐藏。为了兼容搜索，通常需要初始化。
             // 这里为了简单，我们总是初始化，依赖 CSS display:none 隐藏
@@ -414,7 +414,7 @@ export class HistoryView {
     private bindUserBubbleEvents(wrapper: HTMLElement, group: SessionGroup, controller: MDxController) {
         const bubbleEl = wrapper.querySelector('.llm-ui-bubble--user') as HTMLElement;
         const editActionsEl = wrapper.querySelector('.llm-ui-edit-actions') as HTMLElement;
-        
+
         if (!bubbleEl) return;
 
         // Action Bindings
@@ -482,7 +482,7 @@ export class HistoryView {
             controller.toggleEdit();
             actionsEl.style.display = 'flex';
             wrapper.querySelector('[data-action="edit"]')?.classList.add('active');
-            
+
             // 如果是折叠状态，先展开以便编辑
             const bubble = wrapper.querySelector('.llm-ui-bubble--user');
             if (bubble && bubble.classList.contains('is-collapsed')) {
@@ -503,7 +503,7 @@ export class HistoryView {
         wrapper: HTMLElement,
         regenerate: boolean
     ) {
-    // 获取编辑后的内容
+        // 获取编辑后的内容
         const newContent = controller.content;
         // 退出编辑模式
         this.editingNodes.delete(nodeId);
@@ -512,7 +512,7 @@ export class HistoryView {
         editActionsEl.style.display = 'none';
         wrapper.querySelector('[data-action="edit"]')?.classList.remove('active');
 
-    // ✅ 关键修复：无论是否重新生成，都先保存内容
+        // ✅ 关键修复：无论是否重新生成，都先保存内容
         this.onContentChange?.(nodeId, newContent, 'user');
         // 通知外部
         if (regenerate) {
@@ -589,14 +589,20 @@ export class HistoryView {
      * ✅ 优化：流式模式下不保存状态
      */
     private toggleCollapse(element: HTMLElement, btn: HTMLElement, sessionId?: string) {
+        const wasCollapsed = element.classList.contains('is-collapsed');
         element.classList.toggle('is-collapsed');
         const isCollapsed = element.classList.contains('is-collapsed');
-        
+
         const svg = btn.querySelector('svg');
         if (svg) {
-            svg.innerHTML = isCollapsed 
+            svg.innerHTML = isCollapsed
                 ? '<polyline points="6 9 12 15 18 9"></polyline>'
                 : '<polyline points="18 15 12 9 6 15"></polyline>';
+        }
+
+        // ✨ [新增] 当从折叠变为展开时，自动折叠该 chat 内的所有代码块
+        if (wasCollapsed && !isCollapsed && sessionId) {
+            this.collapseCodeBlocksInSession(sessionId);
         }
 
         if (sessionId) {
@@ -610,17 +616,150 @@ export class HistoryView {
 
 
     /**
+     * ✨ [新增] 折叠指定 session 内所有编辑器的代码块
+     * @param sessionId - session 的 ID
+     */
+    private async collapseCodeBlocksInSession(sessionId: string): Promise<void> {
+        // 1. 查找该 session 关联的所有编辑器 ID
+        const editorIds = this.getEditorIdsForSession(sessionId);
+
+        if (editorIds.length === 0) return;
+
+        // 2. 对每个编辑器执行代码块折叠
+        const collapsePromises = editorIds.map(async (editorId) => {
+            const controller = this.editorMap.get(editorId);
+            if (controller) {
+                try {
+                    // 等待编辑器初始化完成
+                    await controller.waitUntilReady();
+                    // 折叠代码块
+                    const result = await controller.collapseBlocks();
+                    if (result.affectedCount > 0) {
+                        console.log(`[HistoryView] Collapsed ${result.affectedCount} code blocks in editor ${editorId}`);
+                    }
+                } catch (e) {
+                    console.warn(`[HistoryView] Failed to collapse code blocks in editor ${editorId}:`, e);
+                }
+            }
+        });
+
+        await Promise.all(collapsePromises);
+    }
+
+    /**
+     * ✨ [新增] 获取指定 session 关联的所有编辑器 ID
+     * @param sessionId - session 的 ID
+     * @returns 编辑器 ID 数组
+     */
+    private getEditorIdsForSession(sessionId: string): string[] {
+        const ids: string[] = [];
+
+        // 1. 检查是否是 user session（直接使用 sessionId）
+        if (this.editorMap.has(sessionId)) {
+            ids.push(sessionId);
+        }
+
+        // 2. 查找该 session 下的所有 node（assistant 消息）
+        const sessionEl = this.container.querySelector(`[data-session-id="${sessionId}"]`);
+        if (sessionEl) {
+            // 查找该 session 内的所有节点
+            const nodes = sessionEl.querySelectorAll('.llm-ui-node[data-id]');
+            nodes.forEach(node => {
+                const nodeId = (node as HTMLElement).dataset.id;
+                if (nodeId && this.editorMap.has(nodeId)) {
+                    ids.push(nodeId);
+                }
+            });
+        }
+
+        return ids;
+    }
+
+    /**
+     * ✨ [新增] 公开方法：折叠指定 session 的所有代码块
+     * 可供外部调用
+     */
+    public async collapseCodeBlocksForSession(sessionId: string): Promise<void> {
+        await this.collapseCodeBlocksInSession(sessionId);
+    }
+
+    /**
+     * ✨ [新增] 公开方法：展开指定 session 的所有代码块
+     */
+    public async expandCodeBlocksForSession(sessionId: string): Promise<void> {
+        const editorIds = this.getEditorIdsForSession(sessionId);
+
+        const expandPromises = editorIds.map(async (editorId) => {
+            const controller = this.editorMap.get(editorId);
+            if (controller) {
+                try {
+                    await controller.waitUntilReady();
+                    await controller.expandBlocks();
+                } catch (e) {
+                    console.warn(`[HistoryView] Failed to expand code blocks in editor ${editorId}:`, e);
+                }
+            }
+        });
+
+        await Promise.all(expandPromises);
+    }
+
+    /**
+     * ✨ [新增] 公开方法：折叠所有 session 的代码块
+     */
+    public async collapseAllCodeBlocks(): Promise<void> {
+        const promises: Promise<void>[] = [];
+
+        this.editorMap.forEach((controller, id) => {
+            promises.push(
+                (async () => {
+                    try {
+                        await controller.waitUntilReady();
+                        await controller.collapseBlocks();
+                    } catch (e) {
+                        console.warn(`[HistoryView] Failed to collapse code blocks in ${id}:`, e);
+                    }
+                })()
+            );
+        });
+
+        await Promise.all(promises);
+    }
+
+    /**
+     * ✨ [新增] 公开方法：展开所有 session 的代码块
+     */
+    public async expandAllCodeBlocks(): Promise<void> {
+        const promises: Promise<void>[] = [];
+
+        this.editorMap.forEach((controller, id) => {
+            promises.push(
+                (async () => {
+                    try {
+                        await controller.waitUntilReady();
+                        await controller.expandBlocks();
+                    } catch (e) {
+                        console.warn(`[HistoryView] Failed to expand code blocks in ${id}:`, e);
+                    }
+                })()
+            );
+        });
+
+        await Promise.all(promises);
+    }
+
+    /**
      * ✅ New: Get content of the first unfolded Agent chat
      */
     public getFirstUnfoldedAgentContent(): string | null {
         // 1. 查找所有 Assistant 类型的 Session
         const sessions = Array.from(this.container.querySelectorAll('.llm-ui-session--assistant'));
-        
+
         for (const session of sessions) {
             // 2. 找到该 Session 下的主节点（通常是第一个 ExecutionRoot 下的第一个 Node）
             // 或者简单点，找里面的 .llm-ui-node
             const nodes = session.querySelectorAll('.llm-ui-node');
-            
+
             for (const node of nodes) {
                 // 3. 检查是否折叠
                 if (!node.classList.contains('is-collapsed')) {
@@ -639,7 +778,7 @@ export class HistoryView {
     public foldFirstUnfolded(): void {
         // 查找所有 User Bubble 和 Node
         const items = this.container.querySelectorAll('.llm-ui-bubble--user, .llm-ui-node');
-        
+
         for (const item of items) {
             if (!item.classList.contains('is-collapsed')) {
                 // 找到对应的折叠按钮并点击
@@ -695,13 +834,13 @@ export class HistoryView {
             console.warn(`[HistoryView] Duplicate node skipped: ${node.id}`);
             return;
         }
-        
+
         let parentEl: HTMLElement | null = null;
-        
+
         if (parentId) {
             parentEl = this.nodeMap.get(parentId)?.querySelector('.llm-ui-node__children') || null;
         }
-        
+
         if (!parentEl) {
             const roots = this.container.querySelectorAll('.llm-ui-execution-root');
             if (roots.length > 0) parentEl = roots[roots.length - 1] as HTMLElement;
@@ -709,7 +848,7 @@ export class HistoryView {
 
         if (parentEl) {
             const { element, mountPoints } = NodeRenderer.create(node);
-            
+
             if (isCollapsed) {
                 element.classList.add('is-collapsed');
                 const svg = element.querySelector('[data-action="collapse"] svg');
@@ -803,7 +942,7 @@ export class HistoryView {
                 const wasEditing = controller.isEditing();
                 await controller.toggleEdit();
                 editBtn.classList.toggle('active');
-                
+
                 if (wasEditing) {
                     this.onContentChange?.(effectiveId, controller.content, 'node');
                 }
@@ -838,7 +977,7 @@ export class HistoryView {
             }
             if (contentEl) {
                 contentEl.textContent = (contentEl.textContent || '') + chunk;
-                
+
                 // 节流滚动思考区域
                 if (!this.thoughtScrollThrottled) {
                     this.thoughtScrollThrottled = true;
@@ -862,7 +1001,7 @@ export class HistoryView {
         if (el) {
             // ✅ 移除流式状态类
             el.classList.remove('llm-ui-node--streaming');
-            
+
             el.dataset.status = status;
             el.classList.remove('llm-ui-node--running', 'llm-ui-node--success', 'llm-ui-node--failed');
             el.classList.add(`llm-ui-node--${status}`);
@@ -880,13 +1019,13 @@ export class HistoryView {
                     resEl.textContent = typeof result === 'string' ? result : JSON.stringify(result);
                 }
             }
-            
+
             const timer = this.previewUpdateTimers.get(nodeId);
             if (timer) {
                 clearTimeout(timer);
                 this.previewUpdateTimers.delete(nodeId);
             }
-            
+
             // 更新最终预览
             const editor = this.editorMap.get(nodeId);
             const previewEl = el.querySelector('.llm-ui-header-preview');
@@ -904,7 +1043,7 @@ export class HistoryView {
     public removeMessages(ids: string[], animated: boolean = true): void {
         for (const id of ids) {
             this.renderedSessionIds.delete(id);
-            
+
             const sessionEl = this.container.querySelector(`[data-session-id="${id}"]`) as HTMLElement;
             if (sessionEl) {
                 this.removeElement(sessionEl, animated);
@@ -993,7 +1132,7 @@ export class HistoryView {
         let plain = content.replace(/[\r\n]+/g, ' ');
         plain = plain.replace(/[*#`_~[\]()]/g, '');
         plain = plain.trim();
-        if (!plain) return ''; 
+        if (!plain) return '';
         return plain.length > 60 ? plain.substring(0, 60) + '...' : plain;
     }
 
@@ -1002,17 +1141,17 @@ export class HistoryView {
 
         const wrapper = document.createElement('div');
         wrapper.className = 'llm-ui-session llm-ui-session--system';
-        
+
         const isAuthError = error.message.includes('apiKey') || error.message.includes('401');
 
         let actionButtons = '';
-        
+
         if (isAuthError) {
             actionButtons = `
                 <button class="llm-ui-error-btn" data-action="open-settings">⚙️ 配置连接</button>
             `;
         }
-        
+
         actionButtons += `
             <button class="llm-ui-error-btn" data-action="retry-last">↻ 重试</button>
         `;
@@ -1081,7 +1220,7 @@ export class HistoryView {
 
         // 流式更新事件批量处理
         this.eventQueue.push(event);
-        
+
         if (this.eventProcessTimer === null) {
             this.eventProcessTimer = window.setTimeout(() => {
                 this.flushEventQueue();
@@ -1094,22 +1233,22 @@ export class HistoryView {
      */
     private flushEventQueue(): void {
         this.eventProcessTimer = null;
-        
+
         if (this.eventQueue.length === 0) return;
-        
+
         // 按 nodeId 合并 chunk
         const mergedChunks = new Map<string, { thought: string; output: string }>();
-        
+
         for (const event of this.eventQueue) {
             if (event.type !== 'node_update') continue;
-            
+
             const { nodeId, chunk, field } = event.payload;
             if (!chunk || !field) continue;
-            
+
             if (!mergedChunks.has(nodeId)) {
                 mergedChunks.set(nodeId, { thought: '', output: '' });
             }
-            
+
             const merged = mergedChunks.get(nodeId)!;
             if (field === 'thought') {
                 merged.thought += chunk;
@@ -1117,10 +1256,10 @@ export class HistoryView {
                 merged.output += chunk;
             }
         }
-        
+
         // 清空队列
         this.eventQueue = [];
-        
+
         // 批量更新
         for (const [nodeId, chunks] of mergedChunks) {
             if (chunks.thought) {
@@ -1130,7 +1269,7 @@ export class HistoryView {
                 this.updateNodeContent(nodeId, chunks.output, 'output');
             }
         }
-        
+
         // 只滚动一次
         if (!this.userIsScrolledUp) {
             this.scrollToBottom(false);
@@ -1144,85 +1283,85 @@ export class HistoryView {
         switch (event.type) {
             case 'session_start':
                 this.enterStreamingMode();
-            // [修改]：新消息产生时，如果是用户消息，强制折叠
-            // 如果希望用户刚发完能看到，这里传 false；如果要求“绝对保持fold”，传 true
-            const isUser = event.payload.role === 'user';
-            const defaultFold = isUser ? true : false; 
-            
-            this.appendSessionGroup(event.payload, defaultFold);
-            
-            // 记录状态
-            this.collapseStates[event.payload.id] = defaultFold;
-            
-            this.scrollToBottom(true);
+                // [修改]：新消息产生时，如果是用户消息，强制折叠
+                // 如果希望用户刚发完能看到，这里传 false；如果要求“绝对保持fold”，传 true
+                const isUser = event.payload.role === 'user';
+                const defaultFold = isUser ? true : false;
+
+                this.appendSessionGroup(event.payload, defaultFold);
+
+                // 记录状态
+                this.collapseStates[event.payload.id] = defaultFold;
+
+                this.scrollToBottom(true);
                 break;
-                
+
             case 'node_start':
                 this.appendNode(event.payload.parentId, event.payload.node, false);
                 break;
-                
+
             case 'node_status':
                 this.updateNodeStatus(
-                    event.payload.nodeId, 
-                    event.payload.status, 
+                    event.payload.nodeId,
+                    event.payload.status,
                     event.payload.result
                 );
                 break;
-                
+
             case 'finished':
                 // 先处理队列中剩余的事件
                 if (this.eventProcessTimer !== null) {
                     clearTimeout(this.eventProcessTimer);
                     this.flushEventQueue();
                 }
-                
+
                 this.exitStreamingMode();
                 this.editorMap.forEach(editor => editor.finishStream());
-                
+
                 // 流式结束后，保存折叠状态
                 this.onCollapseStateChange?.(this.collapseStates);
                 break;
-                
+
             case 'error':
                 if (this.eventProcessTimer !== null) {
                     clearTimeout(this.eventProcessTimer);
                     this.flushEventQueue();
                 }
-                
+
                 this.exitStreamingMode();
-            // ✅ 修复：显示更详细的错误信息
+                // ✅ 修复：显示更详细的错误信息
                 const errorMessage = event.payload.message || 'Unknown error';
                 const errorCode = (event.payload as any).code;
-            
-            // 根据错误类型显示不同的提示
-            if (errorCode === 401) {
-                this.appendErrorBubble(new Error(`🔐 ${errorMessage}`));
-            } else if (errorCode === 429) {
-                this.appendErrorBubble(new Error(`⏳ ${errorMessage}`));
-            } else {
-                this.appendErrorBubble(new Error(errorMessage));
-            }
-                
+
+                // 根据错误类型显示不同的提示
+                if (errorCode === 401) {
+                    this.appendErrorBubble(new Error(`🔐 ${errorMessage}`));
+                } else if (errorCode === 429) {
+                    this.appendErrorBubble(new Error(`⏳ ${errorMessage}`));
+                } else {
+                    this.appendErrorBubble(new Error(errorMessage));
+                }
+
                 // 同时结束所有流式编辑器
                 this.editorMap.forEach(editor => editor.finishStream(false));
                 break;
-                
+
             case 'messages_deleted':
                 this.handleMessagesDeleted(event.payload.deletedIds);
                 break;
-                
+
             case 'message_edited':
                 this.handleMessageEdited(event.payload.sessionId, event.payload.newContent);
                 break;
-                
+
             case 'session_cleared':
                 this.renderWelcome();
                 break;
-                
+
             case 'sibling_switch':
                 this.handleSiblingSwitch(event.payload);
                 break;
-                
+
             case 'retry_started':
                 this.enterStreamingMode();
                 break;
@@ -1234,24 +1373,24 @@ export class HistoryView {
             cancelAnimationFrame(this.scrollFrameId);
             this.scrollFrameId = null;
         }
-        
+
         this.previewUpdateTimers.forEach(timer => clearTimeout(timer));
         this.previewUpdateTimers.clear();
-        
+
         this.editorMap.forEach(editor => editor.destroy());
         this.editorMap.clear();
-        
+
         this.nodeMap.clear();
         this.originalContentMap.clear();
         this.editingNodes.clear();
         this.renderedSessionIds.clear();
-        
+
         this.isStreamingMode = false;
         this.shouldAutoScroll = true;
         this.userIsScrolledUp = false;
         this.lastScrollHeight = 0;
         this.container.classList.remove('llm-ui-history--streaming');
-        
+
         this.container.innerHTML = '';
     }
 
@@ -1261,41 +1400,41 @@ export class HistoryView {
             clearTimeout(this.eventProcessTimer);
             this.eventProcessTimer = null;
         }
-        
+
         // 清理滚动节流定时器
         if (this.scrollThrottleTimer !== null) {
             clearTimeout(this.scrollThrottleTimer);
             this.scrollThrottleTimer = null;
         }
-        
+
         if (this.scrollFrameId !== null) {
             cancelAnimationFrame(this.scrollFrameId);
             this.scrollFrameId = null;
         }
-        
+
         this.resizeObserver.disconnect();
-        
+
         this.previewUpdateTimers.forEach(timer => clearTimeout(timer));
         this.previewUpdateTimers.clear();
-        
+
         this.editorMap.forEach(editor => editor.destroy());
         this.editorMap.clear();
-        
+
         this.nodeMap.clear();
         this.originalContentMap.clear();
         this.editingNodes.clear();
         this.eventQueue = [];
         this.collapseStates = {};
         this.renderedSessionIds.clear();
-        
+
         this.isStreamingMode = false;
         this.shouldAutoScroll = true;
         this.userIsScrolledUp = false;
         this.lastScrollHeight = 0;
         this.container.classList.remove('llm-ui-history--streaming');
-        
+
         this.hideNewContentIndicator();
-        
+
         this.container.innerHTML = '';
     }
 }
