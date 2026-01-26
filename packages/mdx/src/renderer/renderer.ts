@@ -94,8 +94,25 @@ export class MDxRenderer {
    */
   private configureMarked(markedInstance: Marked, options: RenderOptions): void {
     const renderer = {
-      heading(text: string, level: number) {
-        const rawSlug = slugify(text);
+      // @ts-ignore
+      heading(tokenOrText: any, levelOrUndefined: number | undefined) {
+        let text: string;
+        let level: number;
+
+        // 适配 Marked v12+ (对象参数)
+        if (typeof tokenOrText === 'object' && tokenOrText !== null && !Array.isArray(tokenOrText)) {
+          text = tokenOrText.text || '';
+          level = tokenOrText.depth || 1;
+        } 
+        // 适配旧版 (字符串参数)
+        else {
+          text = String(tokenOrText);
+          level = levelOrUndefined || 1;
+        }
+
+        // 移除可能存在的 HTML 标签以生成干净的 ID
+        const cleanText = text.replace(/<[^>]*>/g, '');
+        const rawSlug = slugify(cleanText);
         const id = `heading-${rawSlug}`;
         return `<h${level} id="${id}">${text}</h${level}>`;
       }
