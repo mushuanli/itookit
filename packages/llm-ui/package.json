@@ -69,7 +69,7 @@
     "@itookit/llm-engine": "workspace:*",
     "@itookit/vfs": "workspace:*",
     "js-yaml": "^4.1.1",
-    "marked": "^12.0.2"
+    "marked": "^16.4.2"
   },
   "peerDependencies": {
     "@itookit/mdxeditor": "workspace:*"

@@ -99,14 +99,12 @@ export class TaskListPlugin implements MDxPlugin {
 
   /**
    * 创建 Marked 扩展
-   * 核心逻辑：给每个生成的 checkbox 绑定一个全局递增的 data-task-index
+   * 修复了 Checkbox 与文本分行显示的问题
    */
   private createMarkedExtension(): MarkedExtension {
-    // 捕获 this 上下文
     const self = this;
 
     return {
-      // 钩子：在解析 Markdown 之前重置渲染计数器
       hooks: {
         preprocess(markdown: string) {
           self.renderTaskCounter = 0;
@@ -114,54 +112,75 @@ export class TaskListPlugin implements MDxPlugin {
         },
       },
       renderer: {
-        // 1. 处理标准列表项任务 (- [ ])
-        listitem(text: string): string {
-          // 检查文本是否以 [ ] 或 [x] 开头（可能被其他扩展处理过，或者还是纯文本）
-          const taskRegex = /^\[([ xX])\]/;
-          const match = text.match(taskRegex);
+        // @ts-ignore
+        listitem(token: any): string {
+          let content: string;
+          let isTask = false;
+          let isChecked = false;
 
-          if (match) {
-            const isChecked = match[1] !== ' ';
+          // === 1. 解析 Token ===
+          if (typeof token === 'object' && token !== null) {
+            isTask = token.task || false;
+            isChecked = token.checked || false;
+            // @ts-ignore
+            if (token.tokens && this.parser) {
+              // @ts-ignore
+              content = this.parser.parse(token.tokens);
+            } else {
+              content = token.text || '';
+            }
+          } else {
+            // 旧版兼容
+            const textStr = String(token);
+            const taskRegex = /^\[([ xX])\]/;
+            const match = textStr.match(taskRegex);
+            if (match) {
+              isTask = true;
+              isChecked = match[1] !== ' ';
+              content = textStr.substring(match[0].length);
+            } else {
+              content = textStr;
+            }
+          }
+
+          // === 2. 渲染输出 (核心修复) ===
+          if (isTask) {
             const index = self.renderTaskCounter++;
-
-            // 生成带索引的 input
             const checkbox = `<input type="checkbox" class="mdx-task-item" ${
               isChecked ? 'checked' : ''
             } data-task-index="${index}">`;
 
-            // 移除 [ ] 部分，保留剩余文本
-            const remainingText = text.substring(match[0].length);
-            return `<li class="task-list-item">${checkbox}${remainingText}</li>\n`;
+            // 🔍 检查 content 是否包含段落标签 <p>
+            // 这种情况下，input 是 inline 元素，p 是 block 元素，直接拼接会导致换行
+            if (content.trim().startsWith('<p>')) {
+              // 🛠 修复方案：将 checkbox 注入到第一个 <p> 标签内部
+              // 变成: <li><p><input> text...</p></li>
+              const newContent = content.replace('<p>', `<p>${checkbox} `);
+              return `<li class="task-list-item" style="list-style: none;">${newContent}</li>\n`;
+            } else {
+              // 紧凑模式 (Tight Mode)，直接拼接
+              return `<li class="task-list-item" style="list-style: none;">${checkbox} ${content}</li>\n`;
+            }
           }
 
-          // 兼容性处理：如果 marked 配置已经将 [ ] 转为了 <input>
-          if (text.startsWith('<input')) {
-            const index = self.renderTaskCounter++;
-            // 注入 class 和 data-task-index
-            const newTag = `<input class="mdx-task-item" data-task-index="${index}"`;
-            return `<li class="task-list-item">${text.replace('<input', newTag)}</li>\n`;
-          }
-
-          return `<li>${text}</li>\n`;
+          return `<li>${content}</li>\n`;
         },
 
-        // 2. 处理表格单元格内的任务 (| [ ] |)
         tablecell(content: string, flags): string {
-          const type = flags.header ? 'th' : 'td';
-          const tag = flags.align ? `<${type} align="${flags.align}">` : `<${type}>`;
-
-          // 全局替换当前单元格内的所有 [ ] 或 [x]
-          // 使用 replace 的回调函数，确保每次匹配时 index 都能递增
-          const processedContent = content.replace(/\[([ xX])\]/gi, (_match, state) => {
-            const isChecked = state.toLowerCase() === 'x';
-            const index = self.renderTaskCounter++;
-
-            return `<input type="checkbox" class="mdx-task-item mdx-table-task" ${
-              isChecked ? 'checked' : ''
-            } data-task-index="${index}">`;
-          });
-
-          return `${tag}${processedContent}</${type}>\n`;
+            const safeContent = String(content);
+            const type = flags.header ? 'th' : 'td';
+            const tag = flags.align ? `<${type} align="${flags.align}">` : `<${type}>`;
+  
+            const processedContent = safeContent.replace(/\[([ xX])\]/gi, (_match, state) => {
+              const isChecked = state.toLowerCase() === 'x';
+              const index = self.renderTaskCounter++;
+  
+              return `<input type="checkbox" class="mdx-task-item mdx-table-task" ${
+                isChecked ? 'checked' : ''
+              } data-task-index="${index}">`;
+            });
+  
+            return `${tag}${processedContent}</${type}>\n`;
         },
       },
     };
