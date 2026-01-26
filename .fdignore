@@ -15,6 +15,7 @@ MarkdownAnalyzer.ts
 plugin.ts
 commands.ts
 service-container.ts
+turndown-plugin-gfm.d.ts
 # mdx plugins/ui
 formatting.plugin.ts
 source-jump.plugin.ts
@@ -75,5 +76,6 @@ providers/
 editors/
 FloatingNavPanel.ts
 #templates/
-LayoutTemplates.ts
-NodeTemplates.ts
+#LayoutTemplates.ts
+#NodeTemplates.ts
+ChatInput.ts
