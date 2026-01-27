@@ -20,9 +20,8 @@ export interface ChatNavItem {
     preview: string;
     isCollapsed: boolean;
     index: number;
-    // ✅ 新增
     timestamp: number;
-    agentName?: string;  // 对于 assistant 消息
+    agentName?: string;
 }
 
 export class FloatingNavPanel {
@@ -32,10 +31,9 @@ export class FloatingNavPanel {
     private items: ChatNavItem[] = [];
     private currentIndex: number = -1;
     private options: FloatingNavPanelOptions;
-    private lastSelectedIndex: number = -1; // ✨ 新增：记录最后一次点击
-
-    // ✨ 新增：多选状态
-    private isSelectionMode: boolean = false;
+    private lastSelectedIndex: number = -1;
+    
+    // ✅ 移除 isSelectionMode，checkbox 始终可见
     private selectedIds: Set<string> = new Set();
     
     private keydownHandler: ((e: KeyboardEvent) => void) | null = null;
@@ -86,11 +84,7 @@ export class FloatingNavPanel {
      * 显示/隐藏面板
      */
     public toggle(): void {
-        if (this.isVisible) {
-            this.hide();
-        } else {
-            this.show();
-        }
+        this.isVisible ? this.hide() : this.show();
     }
 
     public show(): void {
@@ -103,7 +97,6 @@ export class FloatingNavPanel {
     public hide(): void {
         if (!this.isVisible) return;
         this.isVisible = false;
-        this.isSelectionMode = false; // 重置选择模式
         this.selectedIds.clear();
         this.unbindKeyboard();
         
@@ -122,7 +115,6 @@ export class FloatingNavPanel {
         
         this.panel = document.createElement('div');
         this.panel.className = 'llm-nav-panel';
-        if (this.isSelectionMode) this.panel.classList.add('llm-nav-panel--selection-mode');
         
         const userItems = this.items.filter(i => i.role === 'user');
         const totalUsers = userItems.length;
@@ -130,70 +122,98 @@ export class FloatingNavPanel {
             ? userItems.findIndex(u => u.index <= this.currentIndex) 
             : -1;
 
-        // ✨ 动态底部工具栏
-        const actionButtons = this.isSelectionMode 
-            ? `
-        <button class="llm-nav-panel__action-btn" data-action="batch-toggle" ${this.selectedIds.size === 0 ? 'disabled' : ''}>
-            📂 Toggle (${this.selectedIds.size})
-        </button>
-        <div style="flex:1"></div> <!-- Spacer -->
-        <button class="llm-nav-panel__action-btn llm-nav-panel__action-btn--danger" data-action="batch-delete" ${this.selectedIds.size === 0 ? 'disabled' : ''}>
-            🗑️ Delete
-        </button>
-        <button class="llm-nav-panel__action-btn" data-action="batch-copy" ${this.selectedIds.size === 0 ? 'disabled' : ''}>
-            📋 Copy
-        </button>
-        <button class="llm-nav-panel__action-btn" data-action="cancel-selection">
-            Done
-        </button>
-            `
-            : `
-                <button class="llm-nav-panel__action-btn" data-action="toggle-current" title="Toggle Current Fold">
-                    📂 Toggle Fold
-                </button>
-                <button class="llm-nav-panel__action-btn" data-action="copy-current" title="Copy Current">
-                    📋 Copy
-                </button>
-                <button class="llm-nav-panel__action-btn" data-action="enter-selection" title="Manage Messages">
-                    ☑️ Select
-                </button>
-            `;
+        const hasSelection = this.selectedIds.size > 0;
+        const isAllSelected = this.selectedIds.size === this.items.length && this.items.length > 0;
 
         this.panel.innerHTML = `
             <div class="llm-nav-panel__header">
-                <span class="llm-nav-panel__title">${this.isSelectionMode ? 'Select Messages' : 'Chat Navigator'}</span>
+                <span class="llm-nav-panel__title">Chat Navigator</span>
                 <span class="llm-nav-panel__counter">${currentUserIdx + 1} / ${totalUsers}</span>
                 <button class="llm-nav-panel__close" title="Close (Esc)">×</button>
             </div>
             
+            <!-- ✅ 统一工具栏 -->
             <div class="llm-nav-panel__toolbar">
-                <button class="llm-nav-panel__btn" data-action="fold-all" title="Fold All">
-                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-                        <polyline points="4 14 10 14 10 20"></polyline>
-                        <polyline points="20 10 14 10 14 4"></polyline>
-                    </svg>
-                </button>
-                <button class="llm-nav-panel__btn" data-action="unfold-all" title="Unfold All">
-                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-                        <polyline points="15 3 21 3 21 9"></polyline>
-                        <polyline points="9 21 3 21 3 15"></polyline>
-                    </svg>
-                </button>
-                <div class="llm-nav-panel__sep"></div>
-                ${this.isSelectionMode ? `
-                    <button class="llm-nav-panel__btn" data-action="select-all" title="Select All">All</button>
-                ` : `
-                    <button class="llm-nav-panel__btn" data-action="prev" title="Previous User Chat (↑)">↑</button>
-                    <button class="llm-nav-panel__btn" data-action="next" title="Next User Chat (↓)">↓</button>
-                `}
+                <!-- 左侧：选择相关 -->
+                <div class="llm-nav-panel__toolbar-group">
+                    <button class="llm-nav-panel__btn llm-nav-panel__btn--checkbox ${isAllSelected ? 'checked' : ''}" 
+                            data-action="toggle-select-all" 
+                            title="${isAllSelected ? 'Deselect All' : 'Select All'}">
+                        <span class="llm-nav-panel__checkbox-icon"></span>
+                    </button>
+                    ${hasSelection ? `
+                        <span class="llm-nav-panel__selection-count">${this.selectedIds.size} selected</span>
+                    ` : ''}
+                </div>
+
+                <div class="llm-nav-panel__toolbar-sep"></div>
+
+                <!-- 中间：批量操作（有选择时显示） -->
+                <div class="llm-nav-panel__toolbar-group llm-nav-panel__toolbar-group--actions ${hasSelection ? 'visible' : ''}">
+                    <button class="llm-nav-panel__btn" data-action="batch-toggle" title="Toggle Fold Selected">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M9 18l6-6-6-6"/>
+                        </svg>
+                    </button>
+                    <button class="llm-nav-panel__btn" data-action="batch-copy" title="Copy Selected">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                        </svg>
+                    </button>
+                    <button class="llm-nav-panel__btn llm-nav-panel__btn--danger" data-action="batch-delete" title="Delete Selected">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="3 6 5 6 21 6"></polyline>
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                        </svg>
+                    </button>
+                    <button class="llm-nav-panel__btn" data-action="clear-selection" title="Clear Selection">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                            <line x1="6" y1="6" x2="18" y2="18"></line>
+                        </svg>
+                    </button>
+                </div>
+
+                <!-- 右侧：视图控制 -->
+                <div class="llm-nav-panel__toolbar-group llm-nav-panel__toolbar-group--view ${hasSelection ? 'hidden' : ''}">
+                    <button class="llm-nav-panel__btn" data-action="fold-all" title="Fold All">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="4 14 10 14 10 20"></polyline>
+                            <polyline points="20 10 14 10 14 4"></polyline>
+                        </svg>
+                    </button>
+                    <button class="llm-nav-panel__btn" data-action="unfold-all" title="Unfold All">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="15 3 21 3 21 9"></polyline>
+                            <polyline points="9 21 3 21 3 15"></polyline>
+                        </svg>
+                    </button>
+                    <div class="llm-nav-panel__toolbar-sep"></div>
+                    <button class="llm-nav-panel__btn" data-action="prev" title="Previous (↑)">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="18 15 12 9 6 15"></polyline>
+                        </svg>
+                    </button>
+                    <button class="llm-nav-panel__btn" data-action="next" title="Next (↓)">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="6 9 12 15 18 9"></polyline>
+                        </svg>
+                    </button>
+                </div>
             </div>
             
             <div class="llm-nav-panel__list">
                 ${this.renderList()}
             </div>
             
-            <div class="llm-nav-panel__actions">
-                ${actionButtons}
+            <!-- ✅ 底部状态栏（可选，显示快捷键提示） -->
+            <div class="llm-nav-panel__footer">
+                <span class="llm-nav-panel__hint">
+                    <kbd>↑↓</kbd> Navigate &nbsp;
+                    <kbd>Shift+Click</kbd> Range Select &nbsp;
+                    <kbd>Esc</kbd> Close
+                </span>
             </div>
         `;
 
@@ -201,7 +221,6 @@ export class FloatingNavPanel {
         this.bindEvents();
         this.updateHighlight();
         
-        // 入场动画
         requestAnimationFrame(() => {
             this.panel?.classList.add('llm-nav-panel--visible');
         });
@@ -220,18 +239,13 @@ export class FloatingNavPanel {
             const isSelected = this.selectedIds.has(item.id);
             const timeStr = this.formatTime(item.timestamp);
             const title = item.role === 'user' ? 'You' : (item.agentName || 'Assistant');
-            
-            // ✨ 复选框 UI
-            const checkboxHtml = this.isSelectionMode 
-                ? `<div class="llm-nav-item__checkbox ${isSelected ? 'checked' : ''}"></div>` 
-                : '';
 
             return `
                 <div class="llm-nav-item ${activeClass} ${collapsedClass} ${isSelected ? 'selected' : ''}" 
                      data-id="${item.id}" 
                      data-index="${idx}">
-                    ${checkboxHtml}
-                    <span class="llm-nav-item__fold">${foldIcon}</span>
+                    <div class="llm-nav-item__checkbox ${isSelected ? 'checked' : ''}" data-checkbox="true"></div>
+                    <span class="llm-nav-item__fold" data-fold="true">${foldIcon}</span>
                     <span class="llm-nav-item__icon">${icon}</span>
                     <div class="llm-nav-item__content">
                         <div class="llm-nav-item__header">
@@ -246,19 +260,14 @@ export class FloatingNavPanel {
         }).join('');
     }
 
-    /**
-     * ✅ 新增：格式化时间
-     */
     private formatTime(timestamp: number): string {
         const date = new Date(timestamp);
         const now = new Date();
         const isToday = date.toDateString() === now.toDateString();
         
         if (isToday) {
-            // 今天只显示时间
             return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         } else {
-            // 其他日期显示日期和时间
             return date.toLocaleDateString([], { 
                 month: 'short', 
                 day: 'numeric',
@@ -273,71 +282,65 @@ export class FloatingNavPanel {
 
         this.panel.querySelector('.llm-nav-panel__close')?.addEventListener('click', () => this.hide());
 
-    // 1. 修复按钮事件绑定 (强制断言为 HTMLElement 以访问 dataset)
-    this.panel.querySelectorAll<HTMLElement>('.llm-nav-panel__btn, .llm-nav-panel__action-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            const action = (e.currentTarget as HTMLElement).dataset.action;
-            this.handleAction(action);
+        // 工具栏按钮
+        this.panel.querySelectorAll<HTMLElement>('.llm-nav-panel__btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const action = btn.dataset.action;
+                this.handleAction(action);
+            });
         });
-    });
 
-    // 2. 修复列表项点击 (使用泛型 <HTMLElement>)
-    // 这样 e 会自动推断为 MouseEvent
-    const items = this.panel.querySelectorAll<HTMLElement>('.llm-nav-item');
-    items.forEach(item => {
-        item.addEventListener('click', (e: MouseEvent) => {
-            const target = e.target as HTMLElement;
-            const id = item.dataset.id!;
-            const idx = parseInt(item.dataset.index!);
+        // 列表项点击
+        const items = this.panel.querySelectorAll<HTMLElement>('.llm-nav-item');
+        items.forEach(item => {
+            item.addEventListener('click', (e: MouseEvent) => {
+                const target = e.target as HTMLElement;
+                const id = item.dataset.id!;
+                const idx = parseInt(item.dataset.index!);
 
-            if (this.isSelectionMode) {
-                // 如果点击的是折叠图标
-                if (target.classList.contains('llm-nav-item__fold')) {
-                    this.options.onToggleFold(id);
-                    this.updateItemUI(idx); // 这个方法里也要改成局部更新，见下文
-                    return;
-                }
-
-                    // ✨ 支持 Shift 多选
+                // 点击 checkbox
+                if (target.closest('[data-checkbox]')) {
                     if (e.shiftKey && this.lastSelectedIndex !== -1) {
                         this.selectRange(this.lastSelectedIndex, idx);
                     } else {
                         this.toggleSelection(id);
                     }
                     this.lastSelectedIndex = idx;
-                } else {
-                    // 普通模式
-                    if (target.classList.contains('llm-nav-item__fold')) {
-                        this.options.onToggleFold(id);
-                        this.updateItemUI(idx);
-                    } else {
-                        this.currentIndex = idx;
-                        this.updateHighlight();
-                        this.options.onNavigate(id);
-                    }
+                    return;
                 }
+
+                // 点击折叠图标
+                if (target.closest('[data-fold]')) {
+                    this.options.onToggleFold(id);
+                    const itemData = this.items[idx];
+                    if (itemData) itemData.isCollapsed = !itemData.isCollapsed;
+                    this.updateFoldIcon(item, itemData.isCollapsed);
+                    return;
+                }
+
+                // 点击其他区域：导航
+                this.currentIndex = idx;
+                this.updateHighlight();
+                this.options.onNavigate(id);
             });
         });
     }
 
-    /**
-     * ✨ 范围选择逻辑
-     */
-    private selectRange(start: number, end: number) {
-        const min = Math.min(start, end);
-        const max = Math.max(start, end);
-        
-        for (let i = min; i <= max; i++) {
-            const item = this.items[i];
-            this.selectedIds.add(item.id);
-        }
-        // 范围选择后更新所有相关 UI 元素，但不重绘整个容器
-        this.syncSelectionUI();
-    }
-
-    // ✨ 统一处理 Action
     private handleAction(action?: string): void {
         switch (action) {
+            case 'toggle-select-all':
+                if (this.selectedIds.size === this.items.length) {
+                    this.selectedIds.clear();
+                } else {
+                    this.items.forEach(i => this.selectedIds.add(i.id));
+                }
+                this.render();
+                break;
+            case 'clear-selection':
+                this.selectedIds.clear();
+                this.render();
+                break;
             case 'fold-all':
                 this.options.onFoldAll();
                 this.items.forEach(i => i.isCollapsed = true);
@@ -348,129 +351,134 @@ export class FloatingNavPanel {
                 this.items.forEach(i => i.isCollapsed = false);
                 this.render();
                 break;
-            case 'prev': this.navigatePrev(); break;
-            case 'next': this.navigateNext(); break;
-            case 'toggle-current': 
-                if (this.currentIndex >= 0) {
-                     const id = this.items[this.currentIndex].id;
-                     this.options.onToggleFold(id);
-                     this.updateItemUI(this.currentIndex);
-                }
+            case 'prev':
+                this.navigatePrev();
                 break;
-            case 'copy-current': 
-                if (this.currentIndex >= 0) this.options.onCopy(this.items[this.currentIndex].id);
+            case 'next':
+                this.navigateNext();
                 break;
-            // ✨ 选择模式 actions
-            case 'enter-selection':
-                this.isSelectionMode = true;
+            case 'batch-toggle':
+                this.selectedIds.forEach(id => {
+                    this.options.onToggleFold(id);
+                    const item = this.items.find(i => i.id === id);
+                    if (item) item.isCollapsed = !item.isCollapsed;
+                });
                 this.render();
                 break;
-            case 'cancel-selection':
-                this.isSelectionMode = false;
-                this.selectedIds.clear();
-                this.render();
-                break;
-            case 'select-all':
-                if (this.selectedIds.size === this.items.length) {
-                    this.selectedIds.clear();
-                } else {
-                    this.items.forEach(i => this.selectedIds.add(i.id));
-                }
-                this.render();
-                break;
-        case 'batch-toggle':
-            // 简单的逻辑：全部反转
-            // 或者：如果大部分是折叠的就展开，反之亦然。这里使用全部反转。
-            this.selectedIds.forEach(id => {
-                this.options.onToggleFold(id);
-                // 更新本地数据状态以便 UI 正确渲染
-                const item = this.items.find(i => i.id === id);
-                if (item) item.isCollapsed = !item.isCollapsed;
-            });
-            this.render(); // 刷新整个面板
-            break;
-
             case 'batch-delete':
-                this.options.onBatchDelete?.(Array.from(this.selectedIds));
-                this.isSelectionMode = false;
-                this.selectedIds.clear();
+                if (this.selectedIds.size > 0) {
+                    this.options.onBatchDelete?.(Array.from(this.selectedIds));
+                    this.selectedIds.clear();
+                }
                 break;
             case 'batch-copy':
-                this.options.onBatchCopy?.(Array.from(this.selectedIds));
-                this.selectedIds.clear();
-                this.render(); // 刷新 UI 去掉选中态
+                if (this.selectedIds.size > 0) {
+                    this.options.onBatchCopy?.(Array.from(this.selectedIds));
+                    this.selectedIds.clear();
+                    this.render();
+                }
                 break;
         }
     }
 
-    private toggleSelection(id: string) {
+    private toggleSelection(id: string): void {
         if (this.selectedIds.has(id)) {
             this.selectedIds.delete(id);
         } else {
             this.selectedIds.add(id);
         }
+        this.syncSelectionUI();
+        this.updateToolbarState();
+    }
+
+    private selectRange(start: number, end: number): void {
+        const min = Math.min(start, end);
+        const max = Math.max(start, end);
         
-    // 直接找到对应的 DOM 节点进行样式操作
-    const itemEl = this.panel?.querySelector(`[data-id="${id}"]`);
-    if (itemEl) {
-        const isSelected = this.selectedIds.has(id);
-        itemEl.classList.toggle('selected', isSelected);
-        const checkbox = itemEl.querySelector('.llm-nav-item__checkbox');
-        checkbox?.classList.toggle('checked', isSelected);
-    }
-    
-    this.updateActionButtonsUI();
-    }
-
-/**
- * ✨ 同步所有项的选中样式 (用于全选或范围选择)
- */
-private syncSelectionUI() {
-    if (!this.panel) return;
-    this.panel.querySelectorAll<HTMLElement>('.llm-nav-item').forEach(el => {
-        const id = el.dataset.id!;
-        const isSelected = this.selectedIds.has(id);
-        el.classList.toggle('selected', isSelected);
-        el.querySelector('.llm-nav-item__checkbox')?.classList.toggle('checked', isSelected);
-    });
-    this.updateActionButtonsUI();
-}
-
-    /**
-     * ✨ 动态更新操作按钮禁用状态
-     */
-private updateActionButtonsUI() {
-    if (!this.panel) return;
-    const size = this.selectedIds.size;
-    const buttons = this.panel.querySelectorAll<HTMLButtonElement>('.llm-nav-panel__action-btn');
-    buttons.forEach(btn => {
-        const action = btn.dataset.action;
-        if (action === 'batch-toggle' || action === 'batch-delete' || action === 'batch-copy') {
-            btn.disabled = size === 0;
-            if (action === 'batch-toggle') btn.textContent = `📂 Toggle (${size})`;
+        for (let i = min; i <= max; i++) {
+            this.selectedIds.add(this.items[i].id);
         }
-    });
+        this.syncSelectionUI();
+        this.updateToolbarState();
     }
 
-    private updateItemUI(index: number): void {
-        const item = this.items[index];
-        item.isCollapsed = !item.isCollapsed;
-        // 局部 DOM 更新逻辑略... 为简化直接重新渲染，实际可优化
-        this.render(); 
+    private syncSelectionUI(): void {
+        if (!this.panel) return;
+        this.panel.querySelectorAll<HTMLElement>('.llm-nav-item').forEach(el => {
+            const id = el.dataset.id!;
+            const isSelected = this.selectedIds.has(id);
+            el.classList.toggle('selected', isSelected);
+            el.querySelector('.llm-nav-item__checkbox')?.classList.toggle('checked', isSelected);
+        });
+    }
+
+    private updateToolbarState(): void {
+        if (!this.panel) return;
+        
+        const hasSelection = this.selectedIds.size > 0;
+        const isAllSelected = this.selectedIds.size === this.items.length && this.items.length > 0;
+        
+        // 更新全选按钮状态
+        const selectAllBtn = this.panel.querySelector('[data-action="toggle-select-all"]');
+        selectAllBtn?.classList.toggle('checked', isAllSelected);
+        
+        // 更新选择计数
+        const countEl = this.panel.querySelector('.llm-nav-panel__selection-count');
+        if (countEl) {
+            countEl.textContent = `${this.selectedIds.size} selected`;
+        }
+        
+        // 显示/隐藏操作按钮组
+        const actionsGroup = this.panel.querySelector('.llm-nav-panel__toolbar-group--actions');
+        const viewGroup = this.panel.querySelector('.llm-nav-panel__toolbar-group--view');
+        
+        actionsGroup?.classList.toggle('visible', hasSelection);
+        viewGroup?.classList.toggle('hidden', hasSelection);
+    }
+
+    private updateFoldIcon(itemEl: HTMLElement, isCollapsed: boolean): void {
+        const foldEl = itemEl.querySelector('.llm-nav-item__fold');
+        if (foldEl) {
+            foldEl.textContent = isCollapsed ? '▶' : '▼';
+        }
+        itemEl.classList.toggle('llm-nav-item--collapsed', isCollapsed);
     }
 
     private bindKeyboard(): void {
         this.keydownHandler = (e: KeyboardEvent) => {
-            if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'TEXTAREA') return;
+            if ((e.target as HTMLElement).tagName === 'INPUT' || 
+                (e.target as HTMLElement).tagName === 'TEXTAREA') return;
 
             switch (e.key) {
-                case 'Escape': e.preventDefault(); this.hide(); break;
-                case 'ArrowUp': e.preventDefault(); this.navigatePrev(); break;
-                case 'ArrowDown': e.preventDefault(); this.navigateNext(); break;
-                case 'Enter': 
+                case 'Escape':
                     e.preventDefault();
-                    if (!this.isSelectionMode && this.currentIndex >= 0) 
+                    if (this.selectedIds.size > 0) {
+                        this.selectedIds.clear();
+                        this.render();
+                    } else {
+                        this.hide();
+                    }
+                    break;
+                case 'ArrowUp':
+                    e.preventDefault();
+                    this.navigatePrev();
+                    break;
+                case 'ArrowDown':
+                    e.preventDefault();
+                    this.navigateNext();
+                    break;
+                case 'Enter':
+                    e.preventDefault();
+                    if (this.currentIndex >= 0) {
                         this.options.onNavigate(this.items[this.currentIndex].id);
+                    }
+                    break;
+                case 'a':
+                    if (e.ctrlKey || e.metaKey) {
+                        e.preventDefault();
+                        this.items.forEach(i => this.selectedIds.add(i.id));
+                        this.render();
+                    }
                     break;
             }
         };
@@ -486,7 +494,6 @@ private updateActionButtonsUI() {
     }
 
     private navigatePrev(): void {
-        // 找到上一个 user chat
         for (let i = this.currentIndex - 1; i >= 0; i--) {
             if (this.items[i].role === 'user') {
                 this.currentIndex = i;
@@ -499,7 +506,6 @@ private updateActionButtonsUI() {
     }
 
     private navigateNext(): void {
-        // 找到下一个 user chat
         for (let i = this.currentIndex + 1; i < this.items.length; i++) {
             if (this.items[i].role === 'user') {
                 this.currentIndex = i;
@@ -515,14 +521,9 @@ private updateActionButtonsUI() {
         if (!this.panel) return;
         
         this.panel.querySelectorAll('.llm-nav-item').forEach((item, idx) => {
-            if (idx === this.currentIndex) {
-                item.classList.add('llm-nav-item--active');
-            } else {
-                item.classList.remove('llm-nav-item--active');
-            }
+            item.classList.toggle('llm-nav-item--active', idx === this.currentIndex);
         });
 
-        // 更新计数器
         const userItems = this.items.filter(i => i.role === 'user');
         const currentUserIdx = this.currentIndex >= 0 
             ? userItems.findIndex(u => u.index <= this.currentIndex)
