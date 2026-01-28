@@ -1,10 +1,10 @@
 // @file: app-settings/services/SyncService.ts
 
 import { VFS, VFSEventType } from '@itookit/vfs';
-import { SyncPlugin, SyncConfig as PluginSyncConfig, SyncState as PluginSyncState,SyncConflict } from '@itookit/vfs';
-import { 
-  AppSyncSettings, 
-  SyncMode, 
+import { SyncPlugin, SyncConfig as PluginSyncConfig, SyncState as PluginSyncState, SyncConflict } from '@itookit/vfs';
+import {
+  AppSyncSettings,
+  SyncMode,
   SyncUIEventHandler,
   SystemLogEntry,
   AppSyncStatus,
@@ -21,19 +21,19 @@ const SYNC_CONFIG_PATH = '/sync_config.json';
 export class SyncService {
   private vfs: VFS | null = null;
   private plugin: SyncPlugin | null = null;
-  
+
   // 使用应用层配置类型
   private settings: AppSyncSettings | null = null;
   // 使用应用层状态类型
   private status: AppSyncStatus = { state: 'idle', lastSyncTime: null };
-  
+
   private conflicts: SyncConflict[] = [];
   private logs: SystemLogEntry[] = []; // 系统日志
   private readonly maxLogs = 100;
-  
+
   private eventHandlers: Map<string, Set<SyncUIEventHandler>> = new Map();
   private unsubscribers: Array<() => void> = [];
-  
+
   // 自动同步定时器
   private autoSyncTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -49,7 +49,7 @@ export class SyncService {
   async init(vfs: VFS): Promise<void> {
     this.vfs = vfs;
     this.plugin = vfs.getPlugin<SyncPlugin>('vfs-sync') ?? null;  // 修复类型问题
-    
+
     if (!this.plugin) {
       console.warn('[SyncService] SyncPlugin not found');
       this.updateStatus({ state: 'error', errorMessage: 'Sync Plugin Missing' });
@@ -101,14 +101,14 @@ export class SyncService {
    */
   private async loadSettingsFromVFS(): Promise<void> {
     if (!this.vfs) return;
-    
+
     try {
       const exists = await this.vfs.getNode(CONFIG_MODULE, SYNC_CONFIG_PATH);
       if (exists) {
         const content = await this.vfs.read(CONFIG_MODULE, SYNC_CONFIG_PATH);
         const json = typeof content === 'string' ? content : new TextDecoder().decode(content as ArrayBuffer);
         this.settings = JSON.parse(json);
-        
+
         // 加载后立即应用到底层插件
         if (this.plugin && this.settings) {
           await this.plugin.reconfigure(this.mapToPluginConfig(this.settings));
@@ -143,7 +143,7 @@ export class SyncService {
     if (!this.vfs) throw new Error('VFS not initialized');
 
     this.settings = settings;
-    
+
     // 1. 持久化到 VFS
     const content = JSON.stringify(settings, null, 2);
     try {
@@ -168,12 +168,12 @@ export class SyncService {
       }
     }
 
-  // 2. ✅ 使用 applyConfigToPlugin 代替直接调用
-  await this.applyConfigToPlugin(settings);
+    // 2. ✅ 使用 applyConfigToPlugin 代替直接调用
+    await this.applyConfigToPlugin(settings);
 
     // 3. 管理自动同步
     this.manageAutoSync(this.settings);
-    
+
     this.log('info', '同步配置已更新');
   }
 
@@ -184,10 +184,10 @@ export class SyncService {
     if (!this.plugin) return;
 
     const pluginConfig = this.mapToPluginConfig(config);
-    
+
     try {
       await this.plugin.reconfigure(pluginConfig);
-      
+
       // 如果启用了实时同步，重新连接
       if (config.transport === 'websocket' || config.transport === 'auto') {
         await this.plugin.reconnect();
@@ -221,7 +221,7 @@ export class SyncService {
     if (!this.settings?.autoSyncInterval) return;
 
     const intervalMs = this.settings.autoSyncInterval * 60 * 1000; // 转换为毫秒
-    
+
     this.autoSyncTimer = setInterval(async () => {
       if (this.status.state === 'syncing') {
         console.log('[SyncService] Auto-sync skipped: already syncing');
@@ -285,7 +285,7 @@ export class SyncService {
       message,
       details
     };
-    
+
     this.logs.unshift(entry);
     if (this.logs.length > this.maxLogs) this.logs.pop();
     this.emit('log', { entry });
@@ -309,10 +309,10 @@ export class SyncService {
     const unsub = this.vfs.onAny((type: VFSEventType | string, event: any) => {
       // 处理自定义同步事件（Plugin 通过 EventBus 发送）
       const typeStr = String(type);
-      
-    if (typeStr.startsWith('sync:')) {
-      this.handlePluginEvent(typeStr, event);
-    }
+
+      if (typeStr.startsWith('sync:')) {
+        this.handlePluginEvent(typeStr, event);
+      }
 
     });
     this.unsubscribers.push(unsub);
@@ -363,7 +363,7 @@ export class SyncService {
    */
   async testConnection(url: string, _user: string, token: string): Promise<boolean> {
     if (this.plugin) {
-      return this.plugin.testConnection(url, token);
+      return this.plugin.testConnection(url);
     }
 
     // 降级方案：使用 HTTP 测试
@@ -402,10 +402,10 @@ export class SyncService {
     if (!this.plugin) {
       throw new Error('Sync plugin not available');
     }
-    
+
     await this.plugin.resolveConflict(conflictId, resolution);
     await this.refreshConflicts();
-    
+
     const label = resolution === 'local' ? '保留本地版本' : '使用远程版本';
     this.log('success', `冲突已解决: ${label}`);
   }
@@ -434,7 +434,7 @@ export class SyncService {
    */
   async resolveAllConflicts(resolution: 'local' | 'remote'): Promise<void> {
     const conflicts = this.getConflicts();
-    
+
     for (const conflict of conflicts) {
       try {
         await this.resolveConflict(conflict.conflictId, resolution);
@@ -455,24 +455,24 @@ export class SyncService {
         break;
 
       case 'sync:progress':
-        this.updateStatus({ 
-          state: 'syncing', 
-          progress: event.data 
+        this.updateStatus({
+          state: 'syncing',
+          progress: event.data
         });
-      this.emit('progress', event.data);
+        this.emit('progress', event.data);
         break;
 
       case 'sync:connected':
-        this.updateStatus({ 
-          connection: { type: 'websocket', connected: true } 
+        this.updateStatus({
+          connection: { type: 'websocket', connected: true }
         });
         this.log('success', '已连接到同步服务器');
         this.emit('connected', {});
         break;
 
       case 'sync:disconnected':
-        this.updateStatus({ 
-          connection: { type: 'websocket', connected: false } 
+        this.updateStatus({
+          connection: { type: 'websocket', connected: false }
         });
         this.log('warn', '与服务器断开连接');
         this.emit('disconnected', {});
@@ -484,9 +484,9 @@ export class SyncService {
         break;
 
       case 'sync:error':
-        this.updateStatus({ 
-          state: 'error', 
-          errorMessage: event.data?.message || '未知错误' 
+        this.updateStatus({
+          state: 'error',
+          errorMessage: event.data?.message || '未知错误'
         });
         this.log('error', event.data?.message || '同步错误');
         this.emit('error', { message: event.data?.message });
@@ -506,9 +506,9 @@ export class SyncService {
    * 订阅事件
    */
   on(type: string, handler: SyncUIEventHandler): () => void {
-      if (!this.eventHandlers.has(type)) this.eventHandlers.set(type, new Set());
-      this.eventHandlers.get(type)!.add(handler);
-      return () => this.eventHandlers.get(type)?.delete(handler);
+    if (!this.eventHandlers.has(type)) this.eventHandlers.set(type, new Set());
+    this.eventHandlers.get(type)!.add(handler);
+    return () => this.eventHandlers.get(type)?.delete(handler);
   }
 
   /**
@@ -592,12 +592,12 @@ export class SyncService {
   private getOrCreatePeerId(): string {
     const storageKey = 'vfs_sync_peer_id';
     let peerId = localStorage.getItem(storageKey);
-    
+
     if (!peerId) {
       peerId = `browser_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
       localStorage.setItem(storageKey, peerId);
     }
-    
+
     return peerId;
   }
 
