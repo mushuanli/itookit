@@ -4,13 +4,14 @@ import { SettingsService } from '../services/SettingsService';
 
 // UI 定义：ID -> 元数据
 export const SETTINGS_PAGES: Record<string, { name: string, icon: string }> = {
-    'storage':     { name: 'Storage',     icon: '💾' },
-    'tags':        { name: 'Tags',        icon: '🏷️' },
-    'contacts':    { name: 'Contacts',    icon: '📒' },
+    'storage': { name: 'Storage', icon: '💾' },
+    'tags': { name: 'Tags', icon: '🏷️' },
+    'contacts': { name: 'Contacts', icon: '📒' },
     'connections': { name: 'Connections', icon: '🔗' },
     // 'executables': { name: 'Agents',      icon: '🤖' }, // Removed
     'mcp-servers': { name: 'MCP Servers', icon: '🔌' },
-    'about':       { name: 'About',       icon: 'ℹ️' },
+    'recovery': { name: 'System Recovery', icon: '🚑' },
+    'about': { name: 'About', icon: 'ℹ️' },
 };
 
 export class SettingsEngine implements ISessionEngine {
@@ -19,10 +20,10 @@ export class SettingsEngine implements ISessionEngine {
 
     private listeners: Map<string, Set<(event: EngineEvent) => void>> = new Map();
 
-    constructor(private service: SettingsService) {}
+    constructor(private service: SettingsService) { }
 
-    async init(){}
-    
+    async init() { }
+
     // 只读 Tree，不需要 VFS，直接返回静态结构
     async loadTree(): Promise<EngineNode[]> {
         // 确保 Service 数据已加载
@@ -34,8 +35,8 @@ export class SettingsEngine implements ISessionEngine {
             name: config.name,
             type: 'file',
             icon: config.icon,
-            content: '', 
-            size:0,
+            content: '',
+            size: 0,
             createdAt: Date.now(),
             modifiedAt: Date.now(),
             path: `/${config.name}`,
@@ -53,7 +54,7 @@ export class SettingsEngine implements ISessionEngine {
     // 或者通过 Factory 中的闭包进行。
     // MemoryManager 需要这个方法返回内容来做一些基本处理，但对于 Settings 来说不是必须的。
     async readContent(id: string): Promise<string> {
-        return id; 
+        return id;
     }
 
     // 简单搜索实现
@@ -68,7 +69,7 @@ export class SettingsEngine implements ISessionEngine {
                 name: conf.name,
                 type: 'file',
                 path: `/${conf.name}`,
-                size:0,
+                size: 0,
                 createdAt: Date.now(),
                 modifiedAt: Date.now()
             }));
@@ -84,12 +85,12 @@ export class SettingsEngine implements ISessionEngine {
             type: 'file',
             icon: config.icon,
             path: `/${config.name}`,
-            size:0,
+            size: 0,
             createdAt: Date.now(),
             modifiedAt: Date.now()
         };
     }
-    
+
     // [修复] 防止 EditorConnector 尝试保存时报错
     async writeContent(_id: string, _content: string | ArrayBuffer): Promise<void> {
         // Settings Engine 是只读的树结构，具体内容修改由 SettingsService 处理
@@ -129,7 +130,7 @@ export class SettingsEngine implements ISessionEngine {
     async delete(_ids: string[]): Promise<void> {
         throw new Error("Cannot delete settings.");
     }
-    async setTags(_id: string, _tags: string[]): Promise<void> {}
+    async setTags(_id: string, _tags: string[]): Promise<void> { }
 
     // --- Events Implementation ---
     on(event: EngineEventType, callback: (event: EngineEvent) => void): () => void {

@@ -9,6 +9,7 @@ import { TagSettingsEditor } from '../editors/TagSettingsEditor';
 import { ContactSettingsEditor } from '../editors/ContactSettingsEditor';
 import { StorageSettingsEditor } from '../editors/StorageSettingsEditor';
 import { AboutSettingsEditor } from '../editors/AboutSettingsEditor';
+import { RecoverySettingsEditor } from '../editors/RecoverySettingsEditor'; // ✅ 导入新编辑器
 
 export const createSettingsFactory = (
     settingsService: SettingsService,
@@ -16,44 +17,45 @@ export const createSettingsFactory = (
 ): EditorFactory => {
     return async (container: HTMLElement, options: EditorOptions) => {
         const nodeId = options.nodeId;
-        
+
         // 确保服务已初始化
         await settingsService.init();
 
         let editor: IEditor | null = null;
 
         switch (nodeId) {
-            case 'storage':     editor = new StorageSettingsEditor(container, settingsService, options); break;
-            case 'tags':        editor = new TagSettingsEditor(container, settingsService, options); break;
-            case 'contacts':    editor = new ContactSettingsEditor(container, settingsService, options); break;
+            case 'storage': editor = new StorageSettingsEditor(container, settingsService, options); break;
+            case 'tags': editor = new TagSettingsEditor(container, settingsService, options); break;
+            case 'contacts': editor = new ContactSettingsEditor(container, settingsService, options); break;
             case 'connections': editor = new ConnectionSettingsEditor(container, agentService, options); break;
             // case 'executables': editor = new ExecutableSettingsEditor(container, service, options); break; // Removed
             case 'mcp-servers': editor = new MCPSettingsEditor(container, agentService, options); break;
-            case 'about':       editor = new AboutSettingsEditor(container, settingsService, options); break;
+            case 'recovery': editor = new RecoverySettingsEditor(container, agentService, options); break;
+            case 'about': editor = new AboutSettingsEditor(container, settingsService, options); break;
             default:
                 container.innerHTML = `<div style="padding:2rem;text-align:center;color:#666">Select a setting category</div>`;
                 // 返回一个 Dummy Editor 存根
                 return {
-                    init: async () => {},
-                    destroy: async () => {},
+                    init: async () => { },
+                    destroy: async () => { },
                     getText: () => '',
-                    setText: () => {},
-                    focus: () => {},
+                    setText: () => { },
+                    focus: () => { },
                     getMode: () => 'render',
-                    switchToMode: async () => {},
-                    setTitle: () => {},
-                    setReadOnly: () => {},
+                    switchToMode: async () => { },
+                    setTitle: () => { },
+                    setReadOnly: () => { },
                     isDirty: () => false,
-                    setDirty: () => {},
+                    setDirty: () => { },
                     commands: {},
                     getHeadings: async () => [],
                     getSearchableText: async () => '',
                     getSummary: async () => null,
                     search: async () => [],
-                    gotoMatch: () => {},
-                    clearSearch: () => {},
-                    on: () => () => {},
-                    navigateTo: async () => {}
+                    gotoMatch: () => { },
+                    clearSearch: () => { },
+                    on: () => () => { },
+                    navigateTo: async () => { }
                 } as unknown as IEditor;
         }
 
