@@ -6,6 +6,8 @@ export interface ModalOptions {
     confirmText?: string;
     cancelText?: string;
     type?: 'default' | 'danger' | 'success';
+    // ✅ [新增] 支持自定义宽度 (例如 '800px' 或 '60vw')
+    width?: string; 
     onConfirm?: () => void | boolean | Promise<void | boolean>;
     onCancel?: () => void;
 }
@@ -22,6 +24,8 @@ export class Modal {
             confirmText: '确认',
             cancelText: '取消',
             type: 'default',
+            // 默认为空，使用 CSS 中的默认宽度
+            width: '', 
             ...options
         };
     }
@@ -29,8 +33,15 @@ export class Modal {
     show() {
         const modal = document.createElement('div');
         modal.className = 'settings-modal-overlay';
+        
+        // ✅ [新增] 处理宽度样式
+        // 如果传入了 width，则设置 width，同时设置 max-width 避免在小屏幕溢出
+        const styleAttr = this.options.width 
+            ? `style="width: ${this.options.width}; max-width: 95vw;"` 
+            : '';
+
         modal.innerHTML = `
-            <div class="settings-modal">
+            <div class="settings-modal" ${styleAttr}>
                 <div class="settings-modal__header">
                     <h3>${this.title}</h3>
                     <button class="settings-modal-close" aria-label="Close">&times;</button>

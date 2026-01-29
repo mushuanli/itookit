@@ -38,21 +38,20 @@ export const LLM_PROVIDER_DEFAULTS: Record<string, LLMProviderDefinition> = {
         supportsThinking: true,
         models: [
             { id: 'claude-4.5-opus', name: 'Claude 4.5 Opus', icon: '👑' },
-    { id: 'gemini-3-pro', name: 'Gemini 3 Pro', icon: '💫' },
-    { id: 'gpt-5.2', name: 'GPT-5.2', icon: '✨' },
+            { id: 'gemini-3-pro', name: 'Gemini 3 Pro', icon: '💫' },
+            { id: 'gpt-5.2', name: 'GPT-5.2', icon: '✨' },
             { id: 'claude-4.5-sonnet', name: 'Claude 4.5 Sonnet', icon: '🎭' },
-    { id: 'gemini-3-flash', name: 'Gemini 3 Flash', icon: '⚡' },
-    { id: 'claude-4.5-haiku', name: 'Claude 4.5 Haiku', icon: '🍃' },
+            { id: 'gemini-3-flash', name: 'Gemini 3 Flash', icon: '⚡' },
+            { id: 'claude-4.5-haiku', name: 'Claude 4.5 Haiku', icon: '🍃' },
             { id: 'gpt-4o', name: 'GPT-4o (OpenAI)', icon: '🤖' },
             { id: 'claude-4-sonnet', name: 'Claude 4 Sonnet', icon: '🏺' },
-            { id: 'claude-4.5-haiku', name: 'Claude 4.5 Haiku', icon: '🍃' },
             { id: 'deepseek-r1', name: 'DeepSeek R1', icon: '🧠', supportsThinking: true },
             { id: 'deepseek-r1-0528', name: 'DeepSeek R1 0528', icon: '🧠', supportsThinking: true },
             { id: 'deepseek-r1-aws', name: 'DeepSeek R1 AWS', icon: '☁️', supportsThinking: true },
             { id: 'deepseek-v3.1', name: 'DeepSeek v3.1', icon: '🐋' },
             { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', icon: '✨' },
             { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', icon: '🌟' },
-    { id: 'gemini-3-flash', name: 'Gemini 3 Flash', icon: '⚡' },
+            { id: 'gemini-3-flash', name: 'Gemini 3 Flash', icon: '⚡' },
             { id: 'gpt-4', name: 'GPT-4', icon: '🧱' },
             { id: 'gpt-4-32k', name: 'GPT-4 32k', icon: '📦' },
             { id: 'gpt-4.1', name: 'GPT-4.1', icon: '🔧' },
@@ -64,7 +63,7 @@ export const LLM_PROVIDER_DEFAULTS: Record<string, LLMProviderDefinition> = {
             { id: 'gpt-5-codex', name: 'GPT-5 Codex', icon: '💻' },
             { id: 'gpt-5-mini', name: 'GPT-5 Mini', icon: '🍃' },
             { id: 'gpt-5-nano', name: 'GPT-5 Nano', icon: '🧬' },
-    { id: 'gpt-5.1', name: 'GPT-5.1', icon: '🎯' },
+            { id: 'gpt-5.1', name: 'GPT-5.1', icon: '🎯' },
         ]
     },
     anthropic: {
@@ -82,7 +81,7 @@ export const LLM_PROVIDER_DEFAULTS: Record<string, LLMProviderDefinition> = {
             { id: 'claude-3-7-sonnet-20250219', name: 'Claude Sonnet 3.7', icon: '⚡' },
         ]
     },
-    
+
     gemini: {
         name: 'Google Gemini',
         implementation: 'gemini',
@@ -95,7 +94,7 @@ export const LLM_PROVIDER_DEFAULTS: Record<string, LLMProviderDefinition> = {
             { id: 'gemini-pro', name: 'Gemini Pro', icon: '🌌' },
         ]
     },
-    
+
     deepseek: {
         name: 'DeepSeek',
         implementation: 'openai-compatible',
@@ -127,16 +126,16 @@ export const LLM_PROVIDER_DEFAULTS: Record<string, LLMProviderDefinition> = {
         supportsThinking: true,
         models: [
             { id: 'openrouter/auto', name: 'Auto (Best Model)', icon: '🪄' },
-            
+
             // --- OpenAI Models via OpenRouter ---
             { id: 'openai/gpt-5-pro', name: 'OpenAI: GPT-5 Pro', icon: '👑' },
             { id: 'openai/gpt-5-codex', name: 'OpenAI: GPT-5 Codex', icon: '💻' },
             { id: 'openai/gpt-5-mini', name: 'OpenAI: GPT-5 Mini', icon: '🍃' },
-            
+
             // --- Anthropic Models via OpenRouter ---
             { id: 'anthropic/claude-sonnet-4.5', name: 'Anthropic: Claude Sonnet 4.5', icon: '🎭' },
             { id: 'anthropic/claude-opus-4.1', name: 'Anthropic: Claude Opus 4.1', icon: '👑' },
-            
+
             // --- Google Models via OpenRouter ---
             { id: 'google/gemini-2.5-pro', name: 'Google: Gemini 2.5 Pro', icon: '🌟' },
             { id: 'google/gemini-2.5-flash', name: 'Google: Gemini 2.5 Flash', icon: '⚡' },
@@ -156,11 +155,17 @@ export const LLM_PROVIDER_DEFAULTS: Record<string, LLMProviderDefinition> = {
         supportsThinking: true,
         icon: '☁️',
         models: [
-            { id: 'claude-opus-4-5-20251101', name: 'Opus 4.5', icon: '👑' },
-            { id: 'claude-sonnet-4-5-20250929-thinking', name: 'Sonnet 4.5 Think', icon: '🧠', supportsThinking: true },
+            { id: 'claude-opus-4-5-20251101', name: 'Claude 4.5 Opus', icon: '👑' },
+            { id: 'gemini-3-pro-thinking', name: 'Gemini 3 Pro', icon: '💫' },
+            { id: 'gpt-5.2', name: 'GPT-5.2', icon: '✨' },
+            { id: 'claude-sonnet-4-5-20250929-thinking', name: 'Claude 4.5 Sonnet', icon: '🎭' },
+            { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash', icon: '⚡' },
+            { id: 'claude-haiku-4-5-20251001-r', name: 'Claude 4.5 Haiku', icon: '🍃' },
+            { id: 'gpt-5.1-high', name: 'GPT-5.1 High (OpenAI)', icon: '🤖' },
+            { id: 'deepseek-v3.2', name: 'DeepSeek R1', icon: '🧠', supportsThinking: true },
         ]
     },
-    	
+
     openai: {
         name: 'OpenAI',
         implementation: 'openai-compatible',
@@ -175,7 +180,7 @@ export const LLM_PROVIDER_DEFAULTS: Record<string, LLMProviderDefinition> = {
             { id: 'gpt-5-codex', name: 'GPT-5 CodeX', icon: '💻' },
         ]
     },
-        
+
     custom: {
         name: 'Custom (OpenAI Compatible)',
         implementation: 'openai-compatible',
@@ -216,7 +221,7 @@ export interface AgentConfig {
      * 避免不同供应商 ID 不同但模型名称含义一致或混淆的问题，
      * 同时语义上更倾向于"使用的模型名称标识"
      */
-    modelName: string; 
+    modelName: string;
     systemPrompt?: string;
     maxHistoryLength?: number;
     temperature?: number;
@@ -247,7 +252,7 @@ export interface AgentDefinition {
 
     /** 输入输出接口定义 */
     interface?: AgentInterfaceDef;
-    
+
     /** VFS 元数据 (可选，通常由文件系统管理，但导出时可能包含) */
     createdAt?: number;
     modifiedAt?: number;
@@ -257,17 +262,17 @@ export interface AgentDefinition {
  * Agent 默认目录
  */
 export const AGENT_DEFAULT_DIR = '/default';
-export const LLM_AGENT_TARGET_DIR = '/default/providers'; 
+export const LLM_AGENT_TARGET_DIR = '/default/providers';
 
-export type InitialAgentDef = AgentDefinition & { 
+export type InitialAgentDef = AgentDefinition & {
     initialTags?: string[];
-    initPath?: string; 
+    initPath?: string;
 };
 
 /**
  * 默认 Agent 定义
  */
-export const DEFAULT_AGENTS:InitialAgentDef[] = [
+export const DEFAULT_AGENTS: InitialAgentDef[] = [
     {
         id: LLM_DEFAULT_ID,
         name: LLM_DEFAULT_NAME,
@@ -289,7 +294,7 @@ export const DEFAULT_AGENTS:InitialAgentDef[] = [
         icon: '⚡️',
         description: '一次性问答，保留4次对话历史',
         initialTags: ['default'],
-        initPath: AGENT_DEFAULT_DIR, 
+        initPath: AGENT_DEFAULT_DIR,
         config: {
             connectionId: LLM_DEFAULT_ID,
             modelName: "",
@@ -311,7 +316,7 @@ export const DEFAULT_AGENTS:InitialAgentDef[] = [
         initialTags: ['default', 'deepseek'],
         initPath: LLM_AGENT_TARGET_DIR,
         config: {
-            connectionId: 'conn-deepseek', 
+            connectionId: 'conn-deepseek',
             modelName: '',
             systemPrompt: "You are a helpful assistant powered by DeepSeek.",
             maxHistoryLength: -1
