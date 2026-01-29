@@ -8,6 +8,7 @@ import {
 import type {
     EngineNode,
     EngineSearchQuery,
+    RestorableItem,
 } from '@itookit/common';
 import {
     FS_MODULE_AGENTS
@@ -634,6 +635,148 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
         
         // 调用基类的 dispose
         await super.dispose();
+    }
+
+    // ================================================================
+    // 恢复/诊断 API
+    // ================================================================
+
+    /**
+     * 获取所有默认资产的状态
+     */
+    async getRestorableItems(): Promise<RestorableItem[]> {
+        const items: RestorableItem[] = [];
+        
+        // 1. 检查 Connections
+        const currentConns = await this.getConnections();
+        const connMap = new Map(currentConns.map(c => [c.id, c]));
+        
+        // 遍历所有默认 Provider 定义
+        for (const [providerKey, providerDef] of Object.entries(LLM_PROVIDER_DEFAULTS)) {
+            // 默认连接 ID 规则：第一个是 'default'，其他是 'conn-{provider}'
+            // 这里我们需要一种方式确定这个 provider 对应的 connection ID 是什么。
+            // 简单起见，我们假设默认连接 ID 规则是固定的。
+            const targetId = providerKey === Object.keys(LLM_PROVIDER_DEFAULTS)[0] ? 'default' : `conn-${providerKey}`;
+            
+            const existing = connMap.get(targetId);
+            let status: 'missing' | 'modified' | 'ok' = 'missing';
+            
+            if (existing) {
+                // 简单判断：如果 provider 变了，或者 models 列表为空，视为 modified
+                // 这里可以根据需求加严判断
+                if (existing.provider !== providerKey) {
+                    status = 'modified';
+                } else {
+                    status = 'ok';
+                }
+            }
+
+            items.push({
+                id: targetId,
+                type: 'connection',
+                name: providerDef.name,
+                description: `预设的 ${providerDef.name} 连接配置`,
+                icon: providerDef.icon || '🔌',
+                status
+            });
+        }
+
+        // 2. 检查 Agents
+        const currentAgents = await this.getAgents();
+        const agentMap = new Map(currentAgents.map(a => [a.id, a]));
+
+        for (const def of DEFAULT_AGENTS) {
+            const existing = agentMap.get(def.id);
+            let status: 'missing' | 'modified' | 'ok' = 'missing';
+
+            if (existing) {
+                // 简单判断：如果名字变了，视为 modified
+                // 实际可以比较 deep equality，但这里从宽处理
+                if (existing.name !== def.name) {
+                    status = 'modified';
+                } else {
+                    status = 'ok';
+                }
+            }
+
+            items.push({
+                id: def.id,
+                type: 'agent',
+                name: def.name,
+                description: def.description,
+                icon: def.icon || '🤖',
+                status
+            });
+        }
+
+        return items;
+    }
+
+    /**
+     * 恢复单个项目
+     */
+    async restoreItem(type: 'connection' | 'agent', id: string): Promise<void> {
+        if (type === 'connection') {
+            await this.restoreConnection(id);
+        } else {
+            await this.restoreAgent(id);
+        }
+    }
+
+    private async restoreConnection(targetId: string): Promise<void> {
+        // 1. 反向查找该 ID 对应的默认 Provider
+        let targetProviderDef: any = null;
+        let targetProviderKey = '';
+        
+        const keys = Object.keys(LLM_PROVIDER_DEFAULTS);
+        if (targetId === 'default') {
+            targetProviderKey = keys[0];
+        } else if (targetId.startsWith('conn-')) {
+            targetProviderKey = targetId.replace('conn-', '');
+        }
+
+        targetProviderDef = LLM_PROVIDER_DEFAULTS[targetProviderKey];
+
+        if (!targetProviderDef) {
+            throw new Error(`无法找到 ID 为 ${targetId} 的默认连接定义`);
+        }
+
+        const newConn: any = {
+            id: targetId,
+            name: targetProviderDef.name,
+            provider: targetProviderKey,
+            apiKey: '', // 恢复时重置 Key? 或者尝试保留？通常恢复默认意味着重置
+            baseURL: targetProviderDef.baseURL,
+            model: targetProviderDef.models[0]?.id || '',
+            availableModels: [...targetProviderDef.models],
+            metadata: { isSystemDefault: true }
+        };
+
+        // 尝试保留旧的 API Key（如果在原文件中存在）
+        const oldConn = await this.getConnection(targetId);
+        if (oldConn && oldConn.apiKey) {
+            newConn.apiKey = oldConn.apiKey;
+        }
+
+        await this.saveConnection(newConn);
+    }
+
+    private async restoreAgent(agentId: string): Promise<void> {
+        const def = DEFAULT_AGENTS.find(a => a.id === agentId);
+        if (!def) {
+            throw new Error(`无法找到 ID 为 ${agentId} 的默认智能体定义`);
+        }
+
+        // 移除初始化专用字段，构建标准 AgentDefinition
+        const { initPath, initialTags, ...agentData } = def;
+        
+        // 确保 connectionId 指向正确（处理 default 引用）
+        if (!agentData.config.connectionId) {
+             // 这里简化处理，实际可以使用 getDefaultConnectionId 逻辑
+             agentData.config.connectionId = 'default'; 
+        }
+
+        await this.saveAgent(agentData as any);
     }
 
     // ================================================================

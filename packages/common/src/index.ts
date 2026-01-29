@@ -86,6 +86,8 @@ export * from './components/BaseSettingsEditor';
 export * from './components/UIComponents';
 export { NAVIGATION_EVENTS } from './events/navigation-events';
 
+export type { RestoreStatus, RestorableItem } from './types/types';
+
 // Constants
 export const FS_MODULE_CHAT = 'chats';
 export const FS_MODULE_AGENTS = 'agents';

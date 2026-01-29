@@ -1,6 +1,7 @@
 // @file: llm-engine/src/services/agent-service.ts
 
-import { LLMConnection,AgentDefinition } from '@itookit/llm-driver';
+import { RestorableItem } from '@itookit/common';
+import { LLMConnection, AgentDefinition } from '@itookit/llm-driver';
 
 /**
  * MCP 服务器
@@ -12,7 +13,7 @@ export interface MCPServer {
     command?: string;
     endpoint?: string;
     status?: 'idle' | 'connected' | 'error';
-// API:
+    // API:
     args?: string;
     cwd?: string;
     apiKey?: string;
@@ -22,7 +23,7 @@ export interface MCPServer {
     tools?: any[];
     resources?: any[];
 
-// UI:
+    // UI:
     icon?: string;
     description?: string;
 }
@@ -32,13 +33,13 @@ export interface MCPServer {
  */
 export interface IAgentService {
     init(): Promise<void>;
-    
+
     // Agents
     getAgents(): Promise<AgentDefinition[]>;
     getAgentConfig(agentId: string): Promise<AgentDefinition | null>;
     saveAgent(agent: AgentDefinition): Promise<void>;
     deleteAgent(agentId: string): Promise<void>;
-    
+
     // Connections
     getConnections(): Promise<LLMConnection[]>;
     getConnection(connectionId: string): Promise<LLMConnection | undefined>;
@@ -49,12 +50,15 @@ export interface IAgentService {
     getDefaultConnection(): Promise<LLMConnection | null>;
     saveConnection(conn: LLMConnection): Promise<void>;
     deleteConnection(id: string): Promise<void>;
-    
+
     // MCP Servers
     getMCPServers(): Promise<MCPServer[]>;
     saveMCPServer(server: MCPServer): Promise<void>;
     deleteMCPServer(id: string): Promise<void>;
-    
+
+    getRestorableItems(): Promise<RestorableItem[]>;
+    restoreItem(type: 'connection' | 'agent', id: string): Promise<void>;
+
     // Events
     onChange(callback: () => void): () => void;
 }
