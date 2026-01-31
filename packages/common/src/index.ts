@@ -8,7 +8,8 @@ export {
     type LogEntry,
     type LogFilter,
     type LoggerStats,
-    type ILogger
+    type ILogger,
+    type ModuleLog
 } from './interfaces/ILogger';
 
 export {

@@ -105,17 +105,22 @@ export interface ILogger {
     getStats(): LoggerStats;
 }
 
+/**
+ * 模块级 Logger 接口
+ */
+export interface ModuleLog {
+    debug(message: string, data?: unknown): void;
+    info(message: string, data?: unknown): void;
+    warn(message: string, data?: unknown): void;
+    error(message: string, data?: unknown): void;
+}
+
 /*
-import { getLogger, LogLevel } from '@itookit/common';
+export const log = createModuleLogger('llm-driver');
 
-// 应用启动时
-const logger = getLogger();
-
-// 记录各种日志
-logger.info('app', '应用启动完成');
-logger.debug('network', '发送请求', { url: '/api/users', method: 'GET' });
-logger.warn('auth', 'Token 即将过期', { expiresIn: 300 });
-logger.error('database', '连接失败', { code: 'ECONNREFUSED', host: 'localhost' });
+// 使用
+import { log } from '../utils/logger';
+log.info('Request sent', { model });
 
 // 在设置界面中：
 // 1. 查看缓冲区使用情况
