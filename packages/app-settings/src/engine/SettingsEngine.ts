@@ -4,13 +4,14 @@ import { SettingsService } from '../services/SettingsService';
 
 // UI 定义：ID -> 元数据
 export const SETTINGS_PAGES: Record<string, { name: string, icon: string }> = {
-    'storage': { name: 'Storage', icon: '💾' },
+    'storage': { name: '文件系统', icon: '💾' },
     'tags': { name: 'Tags', icon: '🏷️' },
     'contacts': { name: 'Contacts', icon: '📒' },
-    'connections': { name: 'Connections', icon: '🔗' },
+    'connections': { name: 'LLM 连接', icon: '🔗' },
     // 'executables': { name: 'Agents',      icon: '🤖' }, // Removed
     'mcp-servers': { name: 'MCP Servers', icon: '🔌' },
-    'recovery': { name: 'System Recovery', icon: '🚑' },
+    'recovery': { name: '系统恢复', icon: '🚑' },
+    'log': { name: '系统日志', icon: '📋' },
     'about': { name: 'About', icon: 'ℹ️' },
 };
 

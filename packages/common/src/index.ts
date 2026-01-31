@@ -1,6 +1,21 @@
 // packages/common/src/index.ts
 
 // Export all interfaces
+
+export {
+    LogLevel,
+    LogLevelNames,
+    type LogEntry,
+    type LogFilter,
+    type LoggerStats,
+    type ILogger
+} from './interfaces/ILogger';
+
+export {
+    getLogger,
+    createModuleLogger
+} from './utils/MemoryLogger';
+
 export {
     IEditor,
     type EditorOptions,
