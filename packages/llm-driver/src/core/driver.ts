@@ -11,6 +11,7 @@ import { BaseProvider } from '../providers/base';
 import { createProvider } from '../providers/registry';
 import { LLMError } from '../errors';
 import { DEFAULT_MAX_RETRIES, DEFAULT_RETRY_DELAY, DEFAULT_TIMEOUT } from '../constants';
+import { log } from '../utils/logger';  // ✅ 简洁导入
 
 /**
  * LLM Driver - 统一的 LLM API 客户端
@@ -62,6 +63,13 @@ export class LLMDriver {
         
         // 5. 创建 Provider
         this.provider = createProvider(providerConfig, config.customProviderDefaults);
+        
+        // ✅ 简洁调用
+        log.debug('LLMDriver initialized', {
+            provider,
+            model,
+            timeout: this.config.timeout
+        });
     }
     
     /**
@@ -95,7 +103,16 @@ export class LLMDriver {
     async createChatCompletion(params: ChatCompletionParams & { stream: true }): Promise<AsyncGenerator<ChatCompletionChunk>>;
     async createChatCompletion(params: ChatCompletionParams & { stream?: false }): Promise<ChatCompletionResponse>;
     async createChatCompletion(params: ChatCompletionParams): Promise<ChatCompletionResponse | AsyncGenerator<ChatCompletionChunk>> {
-        // 1. 应用请求前钩子
+        const requestId = Date.now().toString(36);
+        
+        // ✅ 简洁调用
+        log.debug('Chat request', {
+            requestId,
+            model: params.model || this.currentModel,
+            stream: !!params.stream,
+            messageCount: params.messages.length
+        });
+        
         let finalParams = { ...params };
         if (this.config.hooks?.beforeRequest) {
             finalParams = await this.config.hooks.beforeRequest(finalParams);
@@ -116,15 +133,24 @@ export class LLMDriver {
                 // 流式响应
                 const stream = this.provider.stream(finalParams);
                 clearTimeout(timeoutId);
-                return this.wrapStreamWithTimeout(stream, controller, timeoutId);
+                log.debug('Stream started', { requestId });
+                return this.wrapStreamWithTimeout(stream, controller, timeoutId, requestId);
             } else {
-                // 非流式响应（带重试）
-                const response = await this.executeWithRetry(() => 
-                    this.provider.create(finalParams)
+                const startTime = Date.now();
+                const response = await this.executeWithRetry(
+                    () => this.provider.create(finalParams),
+                    requestId
                 );
                 clearTimeout(timeoutId);
                 
-                // 应用响应后钩子
+                // ✅ 简洁调用
+                log.info('Chat success', {
+                    requestId,
+                    model: response.model,
+                    latency: Date.now() - startTime,
+                    tokens: response.usage?.total_tokens
+                });
+                
                 if (this.config.hooks?.afterResponse) {
                     return this.config.hooks.afterResponse(response);
                 }
@@ -138,7 +164,13 @@ export class LLMDriver {
                 ? error 
                 : LLMError.fromException(this.providerName, error);
             
-            // 应用错误钩子
+            // ✅ 简洁调用
+            log.error('Chat failed', {
+                requestId,
+                code: llmError.code,
+                message: llmError.message
+            });
+            
             if (this.config.hooks?.onError) {
                 await this.config.hooks.onError(llmError, finalParams);
             }
@@ -151,6 +183,7 @@ export class LLMDriver {
     
     private async executeWithRetry<T>(
         fn: () => Promise<T>,
+        requestId: string,
         attempt = 1
     ): Promise<T> {
         try {
@@ -168,10 +201,16 @@ export class LLMDriver {
                 const delay = llmError.retryAfter || 
                     (this.config.retryDelay * Math.pow(2, attempt - 1));
                 
-                console.log(`[LLMDriver] Retrying in ${delay}ms (attempt ${attempt + 1}/${this.config.maxRetries})`);
+                // ✅ 简洁调用
+                log.warn('Retrying', {
+                    requestId,
+                    attempt,
+                    maxRetries: this.config.maxRetries,
+                    delay
+                });
                 
                 await this.sleep(delay);
-                return this.executeWithRetry(fn, attempt + 1);
+                return this.executeWithRetry(fn, requestId, attempt + 1);
             }
             
             throw llmError;
@@ -183,14 +222,18 @@ export class LLMDriver {
     private async *wrapStreamWithTimeout(
         stream: AsyncGenerator<ChatCompletionChunk>,
         _controller: AbortController,
-        timeoutId: ReturnType<typeof setTimeout>
+        timeoutId: ReturnType<typeof setTimeout>,
+        requestId: string
     ): AsyncGenerator<ChatCompletionChunk> {
+        let chunkCount = 0;
         try {
             for await (const chunk of stream) {
                 // 每次收到数据时重置超时
                 clearTimeout(timeoutId);
+                chunkCount++;
                 yield chunk;
             }
+            log.debug('Stream completed', { requestId, chunkCount });
         } finally {
             clearTimeout(timeoutId);
         }
