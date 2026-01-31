@@ -9,6 +9,7 @@ import {
     LogEntry,
     LogFilter,
     LoggerStats,
+    ModuleLog
 } from '../interfaces/ILogger';
 
 /** 默认缓冲区大小: 32KB */
@@ -254,12 +255,27 @@ export function createLogger(maxSize?: number): MemoryLogger {
     return new MemoryLogger(maxSize);
 }
 
-export function createModuleLogger(module: string) {
-    const logger = getLogger();
+/**
+ * 创建模块级 Logger
+ * 
+ * @param module 模块名称（如 'llm-driver', 'vfs'）
+ * @returns 绑定了模块名的日志方法
+ * 
+ * @example
+ * ```typescript
+ * // 在模块入口创建一次
+ * export const log = createModuleLogger('llm-driver');
+ * 
+ * // 在模块内任意文件使用
+ * import { log } from './logger';
+ * log.info('Request sent', { model: 'gpt-4' });
+ * ```
+ */
+export function createModuleLogger(module: string): ModuleLog {
     return {
-        debug: (msg: string, data?: unknown) => logger.debug(module, msg, data),
-        info: (msg: string, data?: unknown) => logger.info(module, msg, data),
-        warn: (msg: string, data?: unknown) => logger.warn(module, msg, data),
-        error: (msg: string, data?: unknown) => logger.error(module, msg, data),
+        debug: (message: string, data?: unknown) => getLogger().debug(module, message, data),
+        info: (message: string, data?: unknown) => getLogger().info(module, message, data),
+        warn: (message: string, data?: unknown) => getLogger().warn(module, message, data),
+        error: (message: string, data?: unknown) => getLogger().error(module, message, data),
     };
 }

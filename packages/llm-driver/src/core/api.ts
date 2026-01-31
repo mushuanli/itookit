@@ -3,6 +3,7 @@
 import { LLMDriver } from './driver';
 import { LLM_PROVIDER_DEFAULTS } from '../constants';
 import { LLMError } from '../errors';
+import { log } from '../utils/logger';  // ✅ 简洁导入
 
 /**
  * 连接测试结果
@@ -39,6 +40,8 @@ export async function testLLMConnection(config: {
         LLM_PROVIDER_DEFAULTS[provider]?.models?.[0]?.id ||
         'gpt-4o-mini';
     
+    log.debug('Testing connection', { provider, model: testModel });
+    
     const startTime = Date.now();
     
     try {
@@ -64,6 +67,7 @@ export async function testLLMConnection(config: {
         
         // 5. 验证响应
         if (response.choices?.length > 0) {
+            log.info('Connection test passed', { provider, latency });
             return {
                 success: true,
                 message: 'Connection successful',
@@ -82,6 +86,7 @@ export async function testLLMConnection(config: {
         const latency = Date.now() - startTime;
         
         if (error instanceof LLMError) {
+            log.warn('Connection test failed', { provider, code: error.code });
             return {
                 success: false,
                 message: `${error.code}: ${error.message}`,
@@ -89,6 +94,8 @@ export async function testLLMConnection(config: {
             };
         }
         
+        log.error('Connection test error', { provider, error: error.message });
+
         if (error.name === 'AbortError') {
             return {
                 success: false,
@@ -117,15 +124,20 @@ export async function testMultipleConnections(
         model?: string;
     }>
 ): Promise<Map<string, ConnectionTestResult>> {
+    log.debug('Testing multiple connections', { count: configs.length });
+    
     const results = new Map<string, ConnectionTestResult>();
     
-    // 并行测试
-    const promises = configs.map(async (config) => {
+    await Promise.all(configs.map(async (config) => {
         const result = await testLLMConnection(config);
         results.set(config.id, result);
-    });
+    }));
     
-    await Promise.all(promises);
+    const successCount = Array.from(results.values()).filter(r => r.success).length;
+    log.info('Batch test completed', {
+        total: configs.length,
+        success: successCount
+    });
     
     return results;
 }
