@@ -51,7 +51,6 @@ export const LLM_PROVIDER_DEFAULTS: Record<string, LLMProviderDefinition> = {
             { id: 'deepseek-v3.1', name: 'DeepSeek v3.1', icon: '🐋' },
             { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', icon: '✨' },
             { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', icon: '🌟' },
-            { id: 'gemini-3-flash', name: 'Gemini 3 Flash', icon: '⚡' },
             { id: 'gpt-4', name: 'GPT-4', icon: '🧱' },
             { id: 'gpt-4-32k', name: 'GPT-4 32k', icon: '📦' },
             { id: 'gpt-4.1', name: 'GPT-4.1', icon: '🔧' },
@@ -73,8 +72,8 @@ export const LLM_PROVIDER_DEFAULTS: Record<string, LLMProviderDefinition> = {
         icon: '🏺',
         supportsThinking: true,
         models: [
-            { id: 'claude-sonnet-4-5-20250929', name: 'Claude Sonnet 4.5', icon: '🎭' },
-            { id: 'claude-opus-4-1-20250805', name: 'Claude Opus 4.1', icon: '👑' },
+            { id: 'claude-sonnet-4-5-20250929', name: 'Claude 4.5 Sonnet', icon: '🎭' },
+            { id: 'claude-opus-4-1-20250805', name: 'Claude 4.5 Opus', icon: '👑' },
             { id: 'claude-opus-4-20250514', name: 'Claude Opus 4', icon: '💎' },
             { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4', icon: '🎨' },
             { id: 'claude-3-7-sonnet-latest', name: 'Claude Sonnet 3.7 (Latest)', icon: '🔥' },
@@ -128,17 +127,17 @@ export const LLM_PROVIDER_DEFAULTS: Record<string, LLMProviderDefinition> = {
             { id: 'openrouter/auto', name: 'Auto (Best Model)', icon: '🪄' },
 
             // --- OpenAI Models via OpenRouter ---
-            { id: 'openai/gpt-5-pro', name: 'OpenAI: GPT-5 Pro', icon: '👑' },
-            { id: 'openai/gpt-5-codex', name: 'OpenAI: GPT-5 Codex', icon: '💻' },
-            { id: 'openai/gpt-5-mini', name: 'OpenAI: GPT-5 Mini', icon: '🍃' },
+            { id: 'openai/gpt-5-pro', name: 'GPT-5.2', icon: '👑' },
+            { id: 'openai/gpt-5-codex', name: 'GPT-5 Codex', icon: '💻' },
+            { id: 'openai/gpt-5-mini', name: 'GPT-5 Mini', icon: '🍃' },
 
             // --- Anthropic Models via OpenRouter ---
-            { id: 'anthropic/claude-sonnet-4.5', name: 'Anthropic: Claude Sonnet 4.5', icon: '🎭' },
-            { id: 'anthropic/claude-opus-4.1', name: 'Anthropic: Claude Opus 4.1', icon: '👑' },
+            { id: 'anthropic/claude-sonnet-4.5', name: 'Claude 4.5 Sonnet', icon: '🎭' },
+            { id: 'anthropic/claude-opus-4.1', name: 'Claude 4.5 Opus', icon: '👑' },
 
             // --- Google Models via OpenRouter ---
-            { id: 'google/gemini-2.5-pro', name: 'Google: Gemini 2.5 Pro', icon: '🌟' },
-            { id: 'google/gemini-2.5-flash', name: 'Google: Gemini 2.5 Flash', icon: '⚡' },
+            { id: 'google/gemini-2.5-pro', name: 'Gemini 3 Pro', icon: '🌟' },
+            { id: 'google/gemini-2.5-flash', name: 'Gemini 3 Flash', icon: '⚡' },
 
             // --- Other Top Models from the List ---
             { id: 'meta-llama/llama-4-maverick', name: 'Meta: Llama 4 Maverick', icon: '🦙' },
@@ -161,7 +160,7 @@ export const LLM_PROVIDER_DEFAULTS: Record<string, LLMProviderDefinition> = {
             { id: 'claude-sonnet-4-5-20250929-thinking', name: 'Claude 4.5 Sonnet', icon: '🎭' },
             { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash', icon: '⚡' },
             { id: 'claude-haiku-4-5-20251001-r', name: 'Claude 4.5 Haiku', icon: '🍃' },
-            { id: 'gpt-5.1-high', name: 'GPT-5.1 High (OpenAI)', icon: '🤖' },
+            { id: 'gpt-5.1-high', name: 'GPT-5.1H', icon: '🤖' },
             { id: 'deepseek-v3.2', name: 'DeepSeek R1', icon: '🧠', supportsThinking: true },
         ]
     },
@@ -174,10 +173,10 @@ export const LLM_PROVIDER_DEFAULTS: Record<string, LLMProviderDefinition> = {
         supportsThinking: true,
         models: [
             { id: 'gpt-4o', name: 'GPT-4o', icon: '⚡' },
-            { id: 'gpt-5-pro', name: 'GPT-5 Pro', icon: '👑' },
+            { id: 'gpt-5-pro', name: 'GPT-5.2', icon: '👑' },
             { id: 'gpt-5', name: 'GPT-5', icon: '🚀' },
             { id: 'gpt-5-mini', name: 'GPT-5 Mini', icon: '🍃' },
-            { id: 'gpt-5-codex', name: 'GPT-5 CodeX', icon: '💻' },
+            { id: 'gpt-5-codex', name: 'GPT-5 Codex', icon: '💻' },
         ]
     },
 
@@ -300,6 +299,25 @@ export const DEFAULT_AGENTS: InitialAgentDef[] = [
             modelName: "",
             systemPrompt: "You are a helpful assistant. Answer the user's current prompt concisely and accurately, without referring to any past conversation history.",
             maxHistoryLength: 4
+        },
+        interface: {
+            inputs: [{ name: "prompt", type: "string" }],
+            outputs: [{ name: "response", type: "string" }]
+        }
+    },
+    {
+        id: 'dev-id',
+        name: '编程大师',
+        type: 'agent',
+        icon: '⚡️',
+        description: '编程大师: 遵循相关的通用开发原则，包括 SOLID（单一职责原则、开闭原则、里氏替换原则、接口隔离原则和依赖倒置原则）、DRY（不要重复自己）、KISS（保持简单直接）、YAGNI（你不需要它）、CoC（约定优于配置）以及 LoD（迪米特法则）',
+        initialTags: ['default'],
+        initPath: AGENT_DEFAULT_DIR,
+        config: {
+            connectionId: LLM_DEFAULT_ID,
+            modelName: "Claude 4.5 Opus",
+            systemPrompt: "You are a helpful sinior developer assistant. Follow common development principles where relevant including SOLID (Single Responsibility Principle, Open/Closed Principle, Liskov Substitution Principle, Interface Segregation Principle, and Dependency Inversion Principle), DRY (Don't Repeat Yourself), KISS (Keep It Simple, Stupid), YAGNI (You Ain't Gonna Need It), CoC (Convention over Configuration), and LoD (Law of Demeter.)",
+            //maxHistoryLength: 4
         },
         interface: {
             inputs: [{ name: "prompt", type: "string" }],

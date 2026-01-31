@@ -685,14 +685,21 @@ export class SessionRegistry {
 
             const rawFiles: File[] = [];
             contextFiles.forEach(cf => {
-                if (cf.fileRef instanceof File) {
+                // 情况 1: cf 本身就是 File 对象 (UI 直接传过来的)
+                if (cf instanceof File) {
+                    rawFiles.push(cf);
+                }
+                // 情况 2: cf 是 ChatFile 包装器，File 在 fileRef 中
+                else if (cf.fileRef instanceof File) {
                     rawFiles.push(cf.fileRef);
-                } else if (cf.fileRef instanceof Blob) {
-                    // 如果是 Blob，需要伪装成 File (Kernel 某些插件可能依赖 name 属性)
-                    const file = new File([cf.fileRef], cf.name, { type: cf.type });
+                }
+                // 情况 3: cf 是 ChatFile 包装器，Blob 在 fileRef 中 (VFS 读取的)
+                else if (cf.fileRef instanceof Blob) {
+                    const file = new File([cf.fileRef], cf.name, { type: cf.type || 'application/octet-stream' });
                     rawFiles.push(file);
                 }
             });
+
 
             const result = await this.kernelAdapter.executeQuery(
                 input.text,
