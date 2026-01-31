@@ -10,6 +10,7 @@ import { ContactSettingsEditor } from '../editors/ContactSettingsEditor';
 import { StorageSettingsEditor } from '../editors/StorageSettingsEditor';
 import { AboutSettingsEditor } from '../editors/AboutSettingsEditor';
 import { RecoverySettingsEditor } from '../editors/RecoverySettingsEditor'; // ✅ 导入新编辑器
+import { LogSettingsEditor } from '../editors/LogSettingsEditor'; // ✅ 导入新编辑器
 
 export const createSettingsFactory = (
     settingsService: SettingsService,
@@ -31,6 +32,7 @@ export const createSettingsFactory = (
             // case 'executables': editor = new ExecutableSettingsEditor(container, service, options); break; // Removed
             case 'mcp-servers': editor = new MCPSettingsEditor(container, agentService, options); break;
             case 'recovery': editor = new RecoverySettingsEditor(container, agentService, options); break;
+            case 'log': editor = new LogSettingsEditor(container, settingsService, options); break;
             case 'about': editor = new AboutSettingsEditor(container, settingsService, options); break;
             default:
                 container.innerHTML = `<div style="padding:2rem;text-align:center;color:#666">Select a setting category</div>`;

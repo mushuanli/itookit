@@ -1,0 +1,389 @@
+/**
+ * @file app-settings/styles/_log.css
+ * @description 日志管理模块样式
+ */
+
+/* ============================================
+   日志概览 - Log Overview
+   ============================================ */
+.log-overview {
+    display: flex;
+    flex-direction: column;
+    gap: var(--st-space-lg);
+}
+
+.log-overview__progress {
+    width: 100%;
+}
+
+.log-overview__progress-bar {
+    height: 12px;
+    background: var(--st-bg-tertiary);
+    border-radius: 6px;
+    overflow: hidden;
+    margin-bottom: 8px;
+}
+
+.log-overview__progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--st-color-primary), var(--st-color-primary-dark));
+    border-radius: 6px;
+    transition: width 0.3s ease;
+}
+
+.log-overview__progress-text {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.85rem;
+    color: var(--st-text-secondary);
+}
+
+/* 继续 _log.css */
+
+.log-overview__stats {
+    display: flex;
+    gap: var(--st-space-2xl);
+    flex-wrap: wrap;
+}
+
+.log-overview__stat {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.log-overview__stat-label {
+    font-size: 0.8rem;
+    color: var(--st-text-secondary);
+}
+
+.log-overview__stat-value {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--st-text-primary);
+}
+
+/* ============================================
+   日志级别配置 - Log Level Config
+   ============================================ */
+.log-level-config {
+    display: flex;
+    flex-direction: column;
+    gap: var(--st-space-xl);
+}
+
+.log-level-config__global {
+    display: flex;
+    align-items: center;
+    gap: var(--st-space-lg);
+    padding: var(--st-space-lg);
+    background: var(--st-bg-tertiary);
+    border-radius: var(--st-radius-md);
+}
+
+.log-level-config__label {
+    font-weight: 500;
+    min-width: 120px;
+}
+
+.log-level-config__modules {
+    display: flex;
+    flex-direction: column;
+    gap: var(--st-space-md);
+}
+
+.log-level-config__modules-header {
+    font-weight: 500;
+    font-size: 0.9rem;
+    color: var(--st-text-secondary);
+    padding-bottom: var(--st-space-sm);
+    border-bottom: 1px solid var(--st-border-color);
+}
+
+.log-level-config__modules-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--st-space-sm);
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.log-level-config__module-item {
+    display: flex;
+    align-items: center;
+    gap: var(--st-space-md);
+    padding: var(--st-space-sm) var(--st-space-md);
+    background: var(--st-bg-secondary);
+    border: 1px solid var(--st-border-color);
+    border-radius: var(--st-radius-md);
+    transition: all 0.15s;
+}
+
+.log-level-config__module-item:hover {
+    border-color: var(--st-color-primary);
+    background: var(--st-bg-tertiary);
+}
+
+.log-level-config__module-name {
+    flex: 1;
+    font-family: monospace;
+    font-size: 0.9rem;
+    color: var(--st-text-primary);
+}
+
+.log-level-config__empty {
+    padding: var(--st-space-xl);
+    text-align: center;
+    color: var(--st-text-tertiary);
+    font-size: 0.9rem;
+}
+
+/* ============================================
+   日志查看器 - Log Viewer
+   ============================================ */
+.log-viewer__filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--st-space-md);
+    align-items: flex-end;
+    padding: var(--st-space-lg);
+    background: var(--st-bg-tertiary);
+    border-radius: var(--st-radius-md);
+    margin-bottom: var(--st-space-lg);
+}
+
+.log-viewer__filter-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.log-viewer__filter-group label {
+    font-size: 0.75rem;
+    color: var(--st-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.log-viewer__filter-group--search {
+    flex: 1;
+    min-width: 150px;
+}
+
+.log-viewer__filter-group--search .settings-input {
+    width: 100%;
+}
+
+/* 日志列表 */
+.log-viewer__list {
+    max-height: 400px;
+    overflow-y: auto;
+    border: 1px solid var(--st-border-color);
+    border-radius: var(--st-radius-md);
+    background: var(--st-bg-secondary);
+    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace;
+    font-size: 0.8rem;
+}
+
+.log-viewer__empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: var(--st-space-3xl);
+    color: var(--st-text-tertiary);
+}
+
+.log-viewer__empty i {
+    font-size: 2.5rem;
+    margin-bottom: var(--st-space-md);
+    opacity: 0.5;
+}
+
+.log-viewer__empty p {
+    margin: 0;
+}
+
+/* 日志条目 */
+.log-viewer__entry {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--st-space-sm);
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--st-border-color);
+    line-height: 1.4;
+    transition: background 0.1s;
+}
+
+.log-viewer__entry:last-child {
+    border-bottom: none;
+}
+
+.log-viewer__entry:hover {
+    background: var(--st-bg-tertiary);
+}
+
+.log-viewer__entry-time {
+    flex-shrink: 0;
+    color: var(--st-text-tertiary);
+    min-width: 70px;
+}
+
+.log-viewer__entry-level {
+    flex-shrink: 0;
+    min-width: 50px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-align: center;
+    text-transform: uppercase;
+}
+
+.log-viewer__entry-level--debug {
+    background: var(--st-bg-tertiary);
+    color: var(--st-text-secondary);
+}
+
+.log-viewer__entry-level--info {
+    background: rgba(59, 130, 246, 0.15);
+    color: #3b82f6;
+}
+
+.log-viewer__entry-level--warn {
+    background: rgba(245, 158, 11, 0.15);
+    color: #f59e0b;
+}
+
+.log-viewer__entry-level--error {
+    background: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+}
+
+.log-viewer__entry-module {
+    flex-shrink: 0;
+    min-width: 80px;
+    max-width: 120px;
+    color: var(--st-color-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.log-viewer__entry-message {
+    flex: 1;
+    color: var(--st-text-primary);
+    word-break: break-word;
+}
+
+/* 日志条目级别样式 */
+.log-viewer__entry--error {
+    background: rgba(239, 68, 68, 0.05);
+}
+
+.log-viewer__entry--warn {
+    background: rgba(245, 158, 11, 0.05);
+}
+
+/* 状态栏 */
+.log-viewer__status {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--st-space-sm) 0;
+    font-size: 0.8rem;
+    color: var(--st-text-secondary);
+}
+
+.log-viewer__limit {
+    display: flex;
+    align-items: center;
+    gap: var(--st-space-sm);
+}
+
+/* ============================================
+   按钮状态
+   ============================================ */
+.settings-btn--active {
+    background: var(--st-color-primary);
+    color: white;
+}
+
+.settings-btn--active:hover {
+    background: var(--st-color-primary-dark);
+}
+
+/* 小尺寸选择框 */
+.settings-select--xs {
+    padding: 2px 8px;
+    font-size: 0.75rem;
+    min-width: 60px;
+}
+
+/* ============================================
+   响应式调整
+   ============================================ */
+@media (max-width: 768px) {
+    .log-overview__stats {
+        flex-direction: column;
+        gap: var(--st-space-md);
+    }
+
+    .log-level-config__global {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .log-viewer__filters {
+        flex-direction: column;
+    }
+
+    .log-viewer__filter-group {
+        width: 100%;
+    }
+
+    .log-viewer__filter-group .settings-select,
+    .log-viewer__filter-group .settings-input {
+        width: 100%;
+    }
+
+    .log-viewer__entry {
+        flex-wrap: wrap;
+    }
+
+    .log-viewer__entry-message {
+        width: 100%;
+        margin-top: 4px;
+    }
+
+    .log-viewer__status {
+        flex-direction: column;
+        gap: var(--st-space-sm);
+        align-items: flex-start;
+    }
+}
+
+/* ============================================
+   暗色模式补充
+   ============================================ */
+@media (prefers-color-scheme: dark) {
+    .log-viewer__entry-level--info {
+        background: rgba(59, 130, 246, 0.2);
+    }
+
+    .log-viewer__entry-level--warn {
+        background: rgba(245, 158, 11, 0.2);
+    }
+
+    .log-viewer__entry-level--error {
+        background: rgba(239, 68, 68, 0.2);
+    }
+
+    .log-viewer__entry--error {
+        background: rgba(239, 68, 68, 0.08);
+    }
+
+    .log-viewer__entry--warn {
+        background: rgba(245, 158, 11, 0.08);
+    }
+}
