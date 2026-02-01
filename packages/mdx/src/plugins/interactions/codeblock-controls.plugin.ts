@@ -215,13 +215,24 @@ export class CodeBlockControlsPlugin implements MDxPlugin {
    */
   private _shouldShowCollapseButton(pre: HTMLPreElement): boolean {
     if (this.options.streamingMode) {
-      // 流式模式：基于行数判断，避免触发 reflow
       const code = pre.textContent || '';
       const lineCount = code.split('\n').length;
-      return lineCount >= this.options.streamingMinLines;
+      // ✅ 同时检查行数和内容长度
+      const hasLongLines = code.split('\n').some(line => line.length > 100);
+      return lineCount >= this.options.streamingMinLines || hasLongLines;
     } else {
-      // 普通模式：基于高度判断
-      return pre.scrollHeight > this.options.collapseThreshold;
+      const scrollHeight = pre.scrollHeight;
+      const threshold = this.options.collapseThreshold;
+      
+      // ✅ 如果 scrollHeight 看起来不可靠，使用备用方案
+      if (scrollHeight <= 0) {
+        const code = pre.textContent || '';
+        const lineCount = code.split('\n').length;
+        const estimatedLineHeight = 20; // 估算每行高度
+        return lineCount * estimatedLineHeight > threshold;
+      }
+      
+      return scrollHeight > threshold;
     }
   }
 
@@ -459,23 +470,72 @@ export class CodeBlockControlsPlugin implements MDxPlugin {
     if (this.options.enableCopy) {
       fragment.appendChild(this._createCopyButton(pre));
     }
-    
-    if (this.options.enableCollapse) {
-      const result = this._createCollapseControls(wrapper, pre);
-      if (result) {
-        fragment.appendChild(result.button);
-        wrapper.appendChild(result.trigger);
-        // 标记已添加折叠控件
-        wrapper.setAttribute('data-has-collapse', 'true');
-      }
-    }
-    
+
     if (fragment.childNodes.length > 0) {
       rightButtons.appendChild(fragment);
       controls.appendChild(rightButtons);
       wrapper.prepend(controls);
     }
+
+    // ✅ 修复：延迟检测并添加折叠控件
+    if (this.options.enableCollapse) {
+      this._deferredAddCollapseControls(wrapper, pre, rightButtons);
+    }
+
     this.processedBlocks.add(wrapper);
+  }
+
+  /**
+  * [新增] 延迟添加折叠控件
+  * 使用多重策略确保正确检测高度
+  */
+  private _deferredAddCollapseControls(
+    wrapper: HTMLElement,
+    pre: HTMLPreElement,
+    rightButtons: HTMLElement
+  ): void {
+    const addControls = (): boolean => {
+      if (wrapper.hasAttribute('data-has-collapse')) return true;
+      
+      if (this._shouldShowCollapseButton(pre)) {
+        const result = this._createCollapseControls(wrapper, pre);
+        if (result) {
+          rightButtons.appendChild(result.button);
+          wrapper.appendChild(result.trigger);
+          wrapper.setAttribute('data-has-collapse', 'true');
+          return true;
+        }
+      }
+      return false;
+    };
+
+    // 策略1：立即尝试（可能成功，如果 DOM 已经稳定）
+    if (addControls()) return;
+
+    // 策略2：下一帧尝试（等待当前 DOM 操作完成）
+    requestAnimationFrame(() => {
+      if (addControls()) return;
+
+      // 策略3：延迟 100ms 尝试（等待样式计算完成）
+      setTimeout(() => {
+        if (addControls()) return;
+
+        // 策略4：使用 ResizeObserver 作为最终兜底
+        if (typeof ResizeObserver !== 'undefined') {
+          const observer = new ResizeObserver(() => {
+            if (addControls()) {
+              observer.disconnect();
+            }
+          });
+          observer.observe(pre);
+          
+          this.cleanupFns.push(() => observer.disconnect());
+          
+          // 3秒后停止观察，避免内存泄漏
+          setTimeout(() => observer.disconnect(), 3000);
+        }
+      }, 100);
+    });
   }
 
   /**
