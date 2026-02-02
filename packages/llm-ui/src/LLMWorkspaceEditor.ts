@@ -986,6 +986,13 @@ export class LLMWorkspaceEditor implements IEditor {
         }
     }
 
+    /**
+     * 获取当前 ChatInput 选择的 AgentId
+     */
+    private getCurrentSelectedAgentId(): string {
+        return this.chatInput?.getSelectedExecutor() || 'default';
+    }
+
     private async handleRetry(nodeId: string): Promise<void> {
         const sessions = this.sessionManager.getSessions();
         let session = sessions.find(s => s.id === nodeId);
@@ -1010,13 +1017,21 @@ export class LLMWorkspaceEditor implements IEditor {
         }
 
         this.chatInput.setLoading(true);
+        
+        // ✅ 获取当前 ChatInput 选择的 AgentId 作为 fallback
+        const fallbackAgentId = this.getCurrentSelectedAgentId();
+        
         try {
             if (session.role === 'user') {
-                await this.sessionManager.resendUserMessage(session.id);
+                await this.sessionManager.resendUserMessage(session.id, {
+                    fallbackAgentId
+                });
             } else {
+                // ✅ 修改：也传入 fallbackAgentId
                 await this.sessionManager.retryGeneration(session.id, {
                     preserveCurrent: true,
-                    navigateToNew: true
+                    navigateToNew: true,
+                    fallbackAgentId  // ✅ 新增
                 });
             }
         } catch (e: any) {
@@ -1119,8 +1134,15 @@ export class LLMWorkspaceEditor implements IEditor {
 
     private async handleResend(nodeId: string): Promise<void> {
         this.chatInput.setLoading(true);
+        
+        // ✅ 获取当前 ChatInput 选择的 AgentId 作为 fallback
+        const fallbackAgentId = this.getCurrentSelectedAgentId();
+        
         try {
-            await this.sessionManager.resendUserMessage(nodeId);
+            // ✅ 修改：传入 fallbackAgentId
+            await this.sessionManager.resendUserMessage(nodeId, {
+                fallbackAgentId
+            });
         } catch (e: any) {
             console.error('[LLMWorkspaceEditor] Resend failed:', e);
             this.historyView.renderError(e);

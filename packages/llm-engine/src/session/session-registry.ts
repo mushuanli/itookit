@@ -32,6 +32,16 @@ type RegistryEventHandler = (event: RegistryEvent) => void;
 type SessionEventHandler = (event: OrchestratorEvent) => void;
 
 /**
+ * ✅ 修改：重发选项接口
+ */
+interface ResendUserMessageOptions {
+    /** 显式指定的 Agent ID（最高优先级） */
+    agentId?: string;
+    /** 当前 ChatInput 选择的 Agent ID（作为 fallback） */
+    fallbackAgentId?: string;
+}
+
+/**
  * 会话注册表
  * 管理多会话生命周期，协调执行池
  */
@@ -563,7 +573,10 @@ export class SessionRegistry {
                     sessionId,
                     'user',
                     input.text,
-                    { files: persistedFiles } // 传递剥离后的 ChatFile[]
+                    {
+                        files: persistedFiles, // 传递剥离后的 ChatFile[]
+                        executorId: input.executorId  // ✅ 新增：保存使用的 executorId
+                    }
                 );
 
                 const userSession = state.addUserMessage(input.text, contextFiles, userNodeId);
@@ -1172,7 +1185,7 @@ export class SessionRegistry {
     async resendUserMessage(
         sessionId: string,
         userMessageId: string,
-        options?: { agentId?: string }
+        options?: ResendUserMessageOptions
     ): Promise<void> {
         const state = this.sessionStates.get(sessionId);
 
@@ -1185,6 +1198,14 @@ export class SessionRegistry {
             throw new EngineError(EngineErrorCode.SESSION_INVALID, 'Invalid user session');
         }
 
+        // ✅ 解析 agentId，传入 fallbackAgentId
+        const resolvedAgentId = this.resolveAgentIdForResend(
+            state,
+            userMessageId,
+            options?.agentId,
+            options?.fallbackAgentId
+        );
+
         // 删除当前用户消息后的所有 assistant 响应
         await this.deleteAssociatedResponses(sessionId, userMessageId, state);
 
@@ -1194,11 +1215,10 @@ export class SessionRegistry {
             payload: { originalId: userMessageId, newId: '' }
         });
 
-        // 重新提交任务
         await this.submitTask(sessionId, {
             text: session.content || '',
             files: session.files || [],
-            executorId: options?.agentId || 'default'
+            executorId: resolvedAgentId
         }, {
             skipUserMessage: true,
             parentUserNodeId: session.persistedNodeId
@@ -1257,7 +1277,11 @@ export class SessionRegistry {
     async retryGeneration(
         sessionId: string,
         assistantMessageId: string,
-        options?: { agentId?: string; preserveCurrent?: boolean }
+        options?: {
+            agentId?: string;
+            preserveCurrent?: boolean;
+            fallbackAgentId?: string;  // ✅ 新增
+        }
     ): Promise<void> {
         const state = this.sessionStates.get(sessionId);
         const runtime = this.sessions.get(sessionId);
@@ -1274,6 +1298,11 @@ export class SessionRegistry {
 
         // 找到当前的 assistant 消息
         const currentAssistant = state.findSessionById(assistantMessageId);
+        // ✅ 解析 agentId：优先级 显式传入 > 当前 assistant > fallback > default
+        const resolvedAgentId = options?.agentId
+            || currentAssistant?.executionRoot?.executorId
+            || options?.fallbackAgentId
+            || 'default';
 
         // ✅ 关键：计算兄弟数量
         let siblingCount = 1;
@@ -1351,7 +1380,7 @@ export class SessionRegistry {
         await this.submitTask(sessionId, {
             text: userMessage.content || '',
             files: userMessage.files || [],
-            executorId: options?.agentId || 'default'
+            executorId: resolvedAgentId  // ✅ 使用解析出的 agentId
         }, {
             skipUserMessage: true,
             parentUserNodeId: userMessage.persistedNodeId,
@@ -1863,6 +1892,51 @@ export class SessionRegistry {
             status,
             isRunning: status === 'running' || status === 'queued'
         };
+    }
+
+    /**
+     * ✅ 新增：辅助方法 - 解析 resend 时的 agentId
+     */
+    private resolveAgentIdForResend(
+        state: SessionState,
+        userMessageId: string,
+        explicitAgentId?: string,
+        fallbackAgentId?: string
+    ): string {
+        // 1. 优先使用显式传入的
+        if (explicitAgentId) {
+            console.log(`[resolveAgentIdForResend] Using explicit agentId: ${explicitAgentId}`);
+            return explicitAgentId;
+        }
+
+        // 2. 尝试从后续的 assistant 消息中获取
+        const sessions = state.getSessions();
+        const userIndex = sessions.findIndex(s =>
+            s.id === userMessageId || s.persistedNodeId === userMessageId
+        );
+
+        if (userIndex !== -1) {
+            for (let i = userIndex + 1; i < sessions.length; i++) {
+                const s = sessions[i];
+                if (s.role === 'assistant' && s.executionRoot?.executorId) {
+                    console.log(`[resolveAgentIdForResend] Found agentId from assistant: ${s.executionRoot.executorId}`);
+                    return s.executionRoot.executorId;
+                }
+                if (s.role === 'user') {
+                    break; // 遇到下一个用户消息就停止
+                }
+            }
+        }
+
+        // 3. 使用 fallback（当前 ChatInput 选择的）
+        if (fallbackAgentId) {
+            console.log(`[resolveAgentIdForResend] Using fallback agentId: ${fallbackAgentId}`);
+            return fallbackAgentId;
+        }
+
+        // 4. 最终兜底
+        console.log(`[resolveAgentIdForResend] No agentId found, using default`);
+        return 'default';
     }
 
     /**

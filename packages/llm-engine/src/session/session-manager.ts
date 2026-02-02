@@ -42,12 +42,24 @@ export interface DeleteOptions {
  * 重试选项
  */
 export interface RetryOptions {
-    /** 使用的 Agent ID */
+    /** 使用的 Agent ID（最高优先级） */
     agentId?: string;
+    /** 当前 ChatInput 选择的 Agent ID（作为 fallback） */
+    fallbackAgentId?: string;  // ✅ 新增
     /** 是否保留当前回复（创建分支） */
     preserveCurrent?: boolean;
     /** 是否导航到新分支 */
     navigateToNew?: boolean;
+}
+
+/**
+ * ✅ 新增：重发选项
+ */
+export interface ResendOptions {
+    /** 显式指定的 Agent ID（最高优先级） */
+    agentId?: string;
+    /** 当前 ChatInput 选择的 Agent ID（作为 fallback） */
+    fallbackAgentId?: string;
 }
 
 /**
@@ -248,7 +260,7 @@ export class SessionManager {
         text: string,
         files: ChatFile[],
         executorId: string,
-        overrides?: ExecutionOverrides  // ✅ 新增可选参数
+        overrides?: ExecutionOverrides
     ): Promise<void> {
         if (!this.sessionId) {
             throw new EngineError(EngineErrorCode.SESSION_INVALID, 'No session bound');
@@ -258,7 +270,7 @@ export class SessionManager {
             text,
             files,
             executorId,
-            overrides  // ✅ 传递给 registry
+            overrides
         });
     }
 
@@ -336,6 +348,7 @@ export class SessionManager {
 
         await this.registry.retryGeneration(this.sessionId, assistantId, {
             agentId: options?.agentId,
+            fallbackAgentId: options?.fallbackAgentId,  // ✅ 新增：传递 fallbackAgentId
             preserveCurrent: options?.preserveCurrent ?? true
         });
 
@@ -344,16 +357,19 @@ export class SessionManager {
     }
 
     /**
-     * 重发用户消息
+     * ✅ 修改：重发用户消息
      * @param userSessionId 用户消息 ID
+     * @param options 重发选项（包含 fallbackAgentId）
      */
-    async resendUserMessage(userSessionId: string): Promise<void> {
+    async resendUserMessage(userSessionId: string, options?: ResendOptions): Promise<void> {
         if (!this.sessionId) {
             throw new EngineError(EngineErrorCode.SESSION_INVALID, 'No session bound');
         }
 
-        // ✅ 使用专门的方法，不再通过 editMessage 间接调用
-        await this.registry.resendUserMessage(this.sessionId, userSessionId);
+        await this.registry.resendUserMessage(this.sessionId, userSessionId, {
+            agentId: options?.agentId,
+            fallbackAgentId: options?.fallbackAgentId
+        });
     }
 
     // ================================================================
