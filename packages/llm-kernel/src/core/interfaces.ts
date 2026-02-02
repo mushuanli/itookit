@@ -2,6 +2,7 @@
 
 import { IExecutionContext } from './execution-context';
 import { ExecutionResult, ExecutorType, OrchestrationMode } from './types';
+import { LLMConnection } from '@itookit/llm-driver';
 
 /**
  * 执行器接口 - 所有执行器的统一契约
@@ -33,15 +34,17 @@ export interface ExecutorConfig {
     temperature?: number;
     stream?: boolean;
 
-    // 运行时约束
+    // ✅ 新增：连接配置（Agent 类型必需）
+    connection?: LLMConnection;
+
+    // ✅ 新增：系统提示（Agent 类型可选）
+    systemPrompt?: string;
+
     constraints?: {
         maxRetries?: number;
         timeout?: number;
         maxTokens?: number;
     };
-
-    // 类型特定配置
-    //[key: string]: any;
 }
 
 /**

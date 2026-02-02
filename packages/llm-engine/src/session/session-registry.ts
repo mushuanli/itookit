@@ -2,6 +2,8 @@
 
 import { guessMimeType, MarkdownAnalyzer } from '@itookit/common';
 
+import { type Attachment, ChatMessage } from '@itookit/llm-driver';
+
 import {
     SessionGroup,
     SessionRuntime,
@@ -24,6 +26,7 @@ import { IAgentService } from '../services/agent-service';
 import { ExecutorConfig } from '@itookit/llm-kernel';
 import { Converters } from '../utils/converters';
 import { DeleteOptions } from './session-manager';
+import { HistoryMessage } from './session-state';
 
 type RegistryEventHandler = (event: RegistryEvent) => void;
 type SessionEventHandler = (event: OrchestratorEvent) => void;
@@ -683,35 +686,55 @@ export class SessionRegistry {
             // 我们在 ChatFile 中添加了可选的 fileRef?: File | Blob
             // 所以我们需要提取出 fileRef 传递给 Kernel
 
-            const rawFiles: File[] = [];
-            contextFiles.forEach(cf => {
-                // 情况 1: cf 本身就是 File 对象 (UI 直接传过来的)
-                if (cf instanceof File) {
-                    rawFiles.push(cf);
-                }
-                // 情况 2: cf 是 ChatFile 包装器，File 在 fileRef 中
-                else if (cf.fileRef instanceof File) {
-                    rawFiles.push(cf.fileRef);
-                }
-                // 情况 3: cf 是 ChatFile 包装器，Blob 在 fileRef 中 (VFS 读取的)
-                else if (cf.fileRef instanceof Blob) {
-                    const file = new File([cf.fileRef], cf.name, { type: cf.type || 'application/octet-stream' });
-                    rawFiles.push(file);
-                }
-            });
+            const currentFiles: File[] = [];
 
+            for (const cf of contextFiles) {
+                if (cf instanceof File) {
+                    currentFiles.push(cf);
+                } else if (cf.fileRef instanceof File) {
+                    currentFiles.push(cf.fileRef);
+                } else if (cf.fileRef instanceof Blob) {
+                    const file = new File([cf.fileRef], cf.name, {
+                        type: cf.type || 'application/octet-stream'
+                    });
+                    currentFiles.push(file);
+                } else if (cf.path) {
+                    // ✅ 新增：尝试从 VFS 加载
+                    try {
+                        const blob = await this.persistence.readAsset(sessionId, cf.name);
+                        if (blob) {
+                            const file = new File([blob], cf.name, {
+                                type: cf.type || blob.type || 'application/octet-stream'
+                            });
+                            currentFiles.push(file);
+                        }
+                    } catch (e) {
+                        console.warn(`[SessionRegistry] Failed to load file ${cf.name} from VFS`);
+                    }
+                }
+            }
+
+            // ============================================================
+            // 8. ✅ 修复：加载历史消息中的附件
+            // ============================================================
+
+            const historyWithFiles = await this.loadHistoryFiles(sessionId, history);
+
+            // ============================================================
+            // 9. 执行
+            // ============================================================
+            const attachments = await this.convertFilesToAttachments(currentFiles);
 
             const result = await this.kernelAdapter.executeQuery(
                 input.text,
                 executorConfig,
                 {
                     sessionId,
-                    history,  // ✅ 使用处理后的 history
-                    files: rawFiles,
+                    history: historyWithFiles,  // ✅ 使用包含附件的历史
+                    attachments,         // ✅ 当前消息的附件
                     onEvent,
                     signal: task.abortController.signal,
                     rootNodeId: rootNode.id,
-                    // ✅ 新增：传递 stream 参数
                     stream: input.overrides?.streamMode ?? true,
                 }
             );
@@ -815,6 +838,14 @@ export class SessionRegistry {
         }
     }
 
+    private mimeToAttachmentType(mimeType: string): 'image' | 'audio' | 'video' | 'file' {
+        if (!mimeType) return 'file';
+        if (mimeType.startsWith('image/')) return 'image';
+        if (mimeType.startsWith('audio/')) return 'audio';
+        if (mimeType.startsWith('video/')) return 'video';
+        return 'file';
+    }
+
     /**
      * 格式化错误消息
      */
@@ -842,6 +873,44 @@ export class SessionRegistry {
 
         // 通用错误
         return error.message || 'An unknown error occurred';
+    }
+
+    // 在 KernelAdapter 或 SessionRegistry 中添加转换逻辑
+    async convertFilesToAttachments(
+        files: (ChatFile | File)[]
+    ): Promise<Attachment[]> {
+        const attachments: Attachment[] = [];
+
+        for (const file of files) {
+            let source: File | Blob;
+            let filename: string;
+            let mimeType: string;
+
+            if (file instanceof File) {
+                source = file;
+                filename = file.name;
+                mimeType = file.type || guessMimeType(file.name);
+            } else if (file.fileRef) {
+                // ChatFile with fileRef
+                source = file.fileRef;
+                filename = file.name;
+                mimeType = file.type || guessMimeType(file.name);
+            } else {
+                // 没有 fileRef，跳过
+                console.warn(`[SessionRegistry] Skipping file without fileRef: ${file.name}`);
+                continue;
+            }
+
+            // ✅ 关键修复：构建正确的 Attachment 结构
+            attachments.push({
+                type: this.mimeToAttachmentType(mimeType),
+                source,  // ← 直接传递 File/Blob，让 Provider 处理转换
+                mimeType,
+                filename
+            });
+        }
+
+        return attachments;
     }
 
     /**
@@ -881,38 +950,6 @@ export class SessionRegistry {
 
         // ✅ 使用健壮的回退逻辑
         return this.getFallbackExecutorConfig();
-    }
-
-    /**
-     * ✅ 新增：基于 IAgentService 的健壮回退逻辑
-     */
-    private async getFallbackExecutorConfig(): Promise<ExecutorConfig> {
-        // 调用新接口方法，无需关心实现细节
-        const fallbackConnection = await this.agentService.getDefaultConnection();
-
-        if (!fallbackConnection) {
-            // 这是一个严重错误，表示系统一个连接都没有
-            console.error("[SessionRegistry] CRITICAL: No connections available. Cannot create a fallback executor.");
-            // 返回一个明确表示错误的配置，UI可以据此显示错误信息
-            return {
-                id: 'default',
-                name: 'Error: No Connection',
-                type: 'agent',
-                connection: null,
-                model: ''
-            } as ExecutorConfig;
-        }
-
-        // 使用默认连接的默认模型
-        const modelId = fallbackConnection.model || (fallbackConnection.availableModels?.[0]?.id || '');
-
-        return {
-            id: 'default',
-            name: 'Default Assistant',
-            type: 'agent',
-            connection: fallbackConnection,
-            model: modelId
-        } as ExecutorConfig;
     }
 
     /**
@@ -1691,6 +1728,102 @@ export class SessionRegistry {
         }
 
         return cleanedCount;
+    }
+
+
+    /**
+     * ✅ 新增：加载历史消息中的附件文件
+     */
+    /**
+     * ✅ 修复：加载历史消息中的附件文件
+     */
+    private async loadHistoryFiles(
+        sessionId: string,
+        history: HistoryMessage[]
+    ): Promise<ChatMessage[]> {
+        const result: ChatMessage[] = [];
+
+        for (const msg of history) {
+            const chatMessage: ChatMessage = {
+                role: msg.role as 'user' | 'assistant',
+                content: msg.content
+            };
+
+            if (msg.files && msg.files.length > 0) {
+                chatMessage.attachments = [];
+
+                for (const file of msg.files) {
+                    try {
+                        // 优先使用内存中的 fileRef
+                        const blob = file.fileRef ||
+                            await this.persistence.readAsset(sessionId, file.name);
+
+                        if (blob) {
+                            // ✅ 使用修复后的方法
+                            const attachment = await this.blobToAttachment(
+                                blob,
+                                file.name,
+                                file.type
+                            );
+                            chatMessage.attachments.push(attachment);
+                        }
+                    } catch (e) {
+                        console.warn(`[SessionRegistry] Failed to load attachment: ${file.name}`, e);
+                    }
+                }
+            }
+
+            result.push(chatMessage);
+        }
+
+        return result;
+    }
+
+    private async blobToAttachment(
+        blob: Blob,
+        filename: string,
+        mimeType: string
+    ): Promise<Attachment> {
+        // ✅ 关键修复：直接使用 blob 作为 source
+        return {
+            type: this.mimeToAttachmentType(mimeType),
+            source: blob,  // ← Attachment.source 接受 Blob
+            mimeType,
+            filename
+        };
+    }
+
+    /**
+ * ✅ 新增：基于 IAgentService 的健壮回退逻辑
+ */
+    /**
+     * ✅ 修复：getFallbackExecutorConfig 中的 null 问题
+     */
+    private async getFallbackExecutorConfig(): Promise<ExecutorConfig> {
+        const fallbackConnection = await this.agentService.getDefaultConnection();
+
+        if (!fallbackConnection) {
+            console.error("[SessionRegistry] CRITICAL: No connections available.");
+            // ✅ 修复：使用 undefined 而不是 null
+            return {
+                id: 'default',
+                name: 'Error: No Connection',
+                type: 'agent',
+                // connection: undefined,  // ← 不设置，而不是设为 null
+                model: ''
+            } as ExecutorConfig;
+        }
+
+        const modelId = fallbackConnection.model ||
+            (fallbackConnection.availableModels?.[0]?.id || '');
+
+        return {
+            id: 'default',
+            name: 'Default Assistant',
+            type: 'agent',
+            connection: fallbackConnection,
+            model: modelId
+        } as ExecutorConfig;
     }
 
     /**

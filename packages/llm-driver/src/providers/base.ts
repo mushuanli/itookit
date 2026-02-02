@@ -4,7 +4,8 @@ import {
     LLMProviderConfig,
     ChatCompletionParams,
     ChatCompletionResponse,
-    ChatCompletionChunk
+    ChatCompletionChunk,
+    ProviderCapabilities
 } from '../types';
 import { LLMError } from '../errors';
 
@@ -19,7 +20,10 @@ import { LLMError } from '../errors';
 export abstract class BaseProvider {
     /** Provider 名称 */
     abstract readonly name: string;
-    
+
+    /** Provider 能力 */
+    abstract readonly capabilities: ProviderCapabilities;
+
     protected config: LLMProviderConfig;
     protected baseURL: string;
     protected defaultModel: string;
@@ -39,12 +43,93 @@ export abstract class BaseProvider {
      * 流式请求
      */
     abstract stream(params: ChatCompletionParams): AsyncGenerator<ChatCompletionChunk>;
-    
-    // ============== 通用方法 ==============
-    
+
+    // ============== 能力检查 (新增) ==============
+
     /**
-     * 解析 API 地址
+     * 检查是否支持某能力
      */
+    supportsCapability(capability: keyof ProviderCapabilities): boolean {
+        return this.capabilities[capability] === true;
+    }
+
+    /**
+     * 验证请求参数
+     */
+    validateParams(params: ChatCompletionParams): void {
+        // 检查音频
+        if (params.audioInput && !this.supportsCapability('audioInput')) {
+            throw new Error(`Provider ${this.name} does not support audio input`);
+        }
+
+        if (params.audioOutput && !this.supportsCapability('audioOutput')) {
+            throw new Error(`Provider ${this.name} does not support audio output`);
+        }
+
+        // 检查工具
+        if (params.tools?.length && !this.supportsCapability('tools')) {
+            throw new Error(`Provider ${this.name} does not support tools`);
+        }
+
+        // 检查结构化输出
+        if (params.responseFormat?.type === 'json_schema' && !this.supportsCapability('structuredOutput')) {
+            throw new Error(`Provider ${this.name} does not support structured output`);
+        }
+
+        // 检查代码执行
+        if (params.codeExecution && !this.supportsCapability('codeExecution')) {
+            throw new Error(`Provider ${this.name} does not support code execution`);
+        }
+
+        // 检查思考模式
+        if (params.thinking && !this.supportsCapability('thinking')) {
+            throw new Error(`Provider ${this.name} does not support thinking mode`);
+        }
+    }
+
+    // ============== 消息预处理 (新增) ==============
+
+    /**
+     * 预处理消息 - 处理附件
+     */
+    protected async preprocessMessages(params: ChatCompletionParams): Promise<ChatCompletionParams> {
+        const processedMessages = await Promise.all(
+            params.messages.map(async (msg) => {
+                // 如果有 attachments 字段，转换为 content parts
+                if (msg.attachments && msg.attachments.length > 0) {
+                    const { processAttachments } = await import('../utils/attachment');
+                    const attachmentParts = await processAttachments(
+                        msg.attachments,
+                        this.getProviderFormat()
+                    );
+
+                    // 合并到 content
+                    const existingContent = typeof msg.content === 'string'
+                        ? [{ type: 'text' as const, text: msg.content }]
+                        : msg.content;
+
+                    return {
+                        ...msg,
+                        content: [...existingContent, ...attachmentParts],
+                        attachments: undefined // 移除已处理的附件
+                    };
+                }
+                return msg;
+            })
+        );
+
+        return { ...params, messages: processedMessages };
+    }
+
+    /**
+     * 获取 Provider 格式标识
+     */
+    protected getProviderFormat(): 'openai' | 'anthropic' | 'gemini' {
+        return 'openai';
+    }
+
+    // ============== 通用方法 ==============
+
     protected resolveBaseURL(config: LLMProviderConfig): string {
         if (config.apiBaseUrl) {
             return config.apiBaseUrl.replace(/\/+$/, ''); // 移除尾部斜杠

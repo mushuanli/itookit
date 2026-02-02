@@ -2,13 +2,16 @@
 
 /**
  * @package @itookit/llm-driver
- * @description 纯粹的 LLM 通信层
+ * @description 纯粹的 LLM 通信层 - v2.0
  * 
  * 职责：
  * - 封装各 LLM Provider 的 API 调用
  * - 统一消息格式和响应结构
  * - 处理流式响应
  * - 提供连接测试能力
+ * - 支持多模态内容 (图片、音频、视频、文档)
+ * - 支持 MCP 协议
+ * - 支持技能/工具系统
  * 
  * 不包含：
  * - 执行逻辑 (→ @itookit/llm-kernel)
@@ -51,24 +54,41 @@ export type {
     MessageContentPart,
     MessageContentText,
     MessageContentImage,
-    MessageContentDocument,
+    MessageContentAudio,      // 新增
+    MessageContentVideo,      // 新增
+    MessageContentFile,       // 新增 (替代 MessageContentDocument)
+    MessageContentToolResult, // 新增
+    MessageContentCodeExecution, // 新增
+    MessageContentCitation,   // 新增
     Role,
     ToolCall,
-    ToolDefinition
+    ToolDefinition,
+    ComputerUseAction,        // 新增
+    MCPToolCall,              // 新增
+    Attachment                // 新增
 } from './types/message';
 
 // Provider 配置
 export type {
     LLMProviderConfig,
     LLMClientConfig,
-    LLMHooks
+    LLMHooks,
+    ProviderCapabilities,     // 新增
+    MCPConfig,                // 新增
+    MCPServerConfig           // 新增
 } from './types/provider';
 
 // 请求/响应
 export type {
     ChatCompletionParams,
     ChatCompletionResponse,
-    ChatCompletionChunk
+    ChatCompletionChunk,
+    AssistantMessage,         // 新增
+    ToolChoice,               // 新增
+    ResponseFormat,           // 新增
+    TokenUsage,               // 新增
+    Citation,                 // 新增
+    FinishReason              // 新增
 } from './types/response';
 
 // ============================================
@@ -87,6 +107,19 @@ export {
     getRegisteredProviders,
     isProviderRegistered
 } from './providers/registry';
+
+// ============================================
+// 技能/MCP 系统 (新增)
+// ============================================
+
+export { SkillRegistry, globalSkillRegistry } from './skills/registry';
+export { MCPClient } from './skills/mcp-client';
+export type {
+    Skill,
+    SkillDefinition,
+    SkillExecutionContext,
+    SkillResult
+} from './skills/types';
 
 // ============================================
 // 常量
@@ -116,7 +149,16 @@ export {
 export {
     processAttachment,
     isSupportedVisionContent,
-    buildImageContent
+    isSupportedAudioContent,   // 新增
+    isSupportedVideoContent,   // 新增
+    buildImageContent,
+    buildAudioContent,         // 新增
+    buildVideoContent,         // 新增
+    buildFileContent,          // 新增
+    attachmentToContentPart,   // 新增
+    processAttachments,        // 新增
+    detectMediaType,           // 新增
+    SUPPORTED_MEDIA_TYPES      // 新增
 } from './utils/attachment';
 
 export {
@@ -124,3 +166,10 @@ export {
     createCancellableStream,
     mergeStreams
 } from './utils/stream';
+
+// ============================================
+// 兼容性导出 (deprecated)
+// ============================================
+
+/** @deprecated 使用 MessageContentFile 代替 */
+export type { MessageContentFile as MessageContentDocument } from './types/message';
