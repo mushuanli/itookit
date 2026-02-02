@@ -1,5 +1,5 @@
 // @file: llm-engine/adapters/kernel-adapter.ts
-
+import { ChatMessage, Attachment } from '@itookit/llm-driver';
 import {
     ExecutionRuntime,
     getRuntime,
@@ -8,6 +8,16 @@ import {
 } from '@itookit/llm-kernel';
 import { OrchestratorEvent } from '../core/types';
 import { UIEventAdapter } from './ui-event-adapter';
+
+export interface KernelAdapterOptions {
+    sessionId: string;
+    history: ChatMessage[];  // ✅ 明确类型是 ChatMessage[]
+    attachments: Attachment[];
+    onEvent: (event: OrchestratorEvent) => void;
+    signal?: AbortSignal;
+    rootNodeId?: string;
+    stream?: boolean;
+}
 
 /**
  * Kernel 适配器
@@ -28,21 +38,12 @@ export class KernelAdapter {
     async executeQuery(
         input: string,
         executorConfig: ExecutorConfig,
-        options: {
-            sessionId: string;
-            history?: Array<{ role: string; content: string }>;
-            files?: File[];
-            onEvent?: (event: OrchestratorEvent) => void;
-            signal?: AbortSignal;
-            /** ✨ [新增] 根节点 ID */
-            rootNodeId?: string;
-            stream?: boolean;  // ✅ 新增
-        }
+        options: KernelAdapterOptions
     ): Promise<ExecutionResult> {
         const {
             sessionId,
             history,
-            files,
+            attachments,  // ✅ 修复：使用 attachments 而不是 files
             onEvent,
             signal,
             rootNodeId,
@@ -71,7 +72,7 @@ export class KernelAdapter {
                 {
                     variables: {
                         history: history || [],
-                        files: files || [],
+                        attachments: attachments || [],  // ✅ 修复：使用 attachments
                         sessionId
                     },
                     signal,

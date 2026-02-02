@@ -6,7 +6,9 @@ import {
     ChatCompletionParams,
     ChatCompletionResponse,
     ChatCompletionChunk,
-    ChatMessage
+    ChatMessage,
+    ProviderCapabilities,
+    ToolDefinition
 } from '../types';
 import { parseSSEStream } from '../utils/stream';
 
@@ -20,58 +22,86 @@ import { parseSSEStream } from '../utils/stream';
  */
 export class AnthropicProvider extends BaseProvider {
     readonly name = 'anthropic';
-    
+
+    readonly capabilities: ProviderCapabilities = {
+        vision: true,
+        audioInput: false,
+        audioOutput: false,
+        video: false,
+        documents: true,
+        tools: true,
+        parallelTools: true,
+        structuredOutput: true,
+        jsonMode: true,
+        thinking: true,
+        codeExecution: false,
+        webSearch: false,
+        computerUse: true,  // Anthropic 特有
+        mcp: true,          // Anthropic 特有
+        caching: true,
+        batch: true,
+        streaming: true
+    };
+
     private readonly API_VERSION = '2023-06-01';
-    
+
     constructor(config: LLMProviderConfig) {
         super(config);
         if (!this.baseURL) {
             this.baseURL = 'https://api.anthropic.com';
         }
     }
-    
+
+    protected getProviderFormat(): 'openai' | 'anthropic' | 'gemini' {
+        return 'anthropic';
+    }
+
     async create(params: ChatCompletionParams): Promise<ChatCompletionResponse> {
+        this.validateParams(params);
+        const processedParams = await this.preprocessMessages(params);
+
         const url = `${this.baseURL}/v1/messages`;
-        const body = this.buildRequestBody(params);
-        
+        const body = this.buildRequestBody(processedParams);
+
         const response = await this.fetchJSON<any>(url, {
             method: 'POST',
             headers: this.buildHeaders(),
             body: JSON.stringify(body),
             signal: params.signal
         });
-        
+
         return this.normalizeResponse(response);
     }
-    
+
     async *stream(params: ChatCompletionParams): AsyncGenerator<ChatCompletionChunk> {
+        this.validateParams(params);
+        const processedParams = await this.preprocessMessages(params);
+
         const url = `${this.baseURL}/v1/messages`;
-        const body = this.buildRequestBody({ ...params, stream: true });
-        
+        const body = this.buildRequestBody({ ...processedParams, stream: true });
+
         const stream = await this.fetchStream(url, {
             method: 'POST',
             headers: this.buildHeaders(),
             body: JSON.stringify(body),
             signal: params.signal
         });
-        
+
         let currentThinking = '';
         let currentContent = '';
-        
+
         for await (const data of parseSSEStream(stream)) {
             try {
                 const event = JSON.parse(data);
                 const chunk = this.normalizeStreamEvent(event, currentThinking, currentContent);
-                
+
                 if (chunk) {
-                    // 更新累积状态
                     if (chunk.choices[0]?.delta.thinking) {
                         currentThinking += chunk.choices[0].delta.thinking;
                     }
                     if (chunk.choices[0]?.delta.content) {
                         currentContent += chunk.choices[0].delta.content;
                     }
-                    
                     yield chunk;
                 }
             } catch {
@@ -79,41 +109,45 @@ export class AnthropicProvider extends BaseProvider {
             }
         }
     }
-    
+
     // ============== 请求构建 ==============
-    
+
     protected buildHeaders(): Record<string, string> {
         return {
             ...super.buildHeaders(),
             'x-api-key': this.config.apiKey,
-            'anthropic-version': this.API_VERSION
+            'anthropic-version': this.API_VERSION,
+            // 启用 beta 功能
+            'anthropic-beta': 'computer-use-2024-10-22,prompt-caching-2024-07-31'
         };
     }
-    
+
     protected buildRequestBody(params: ChatCompletionParams): Record<string, any> {
         const { systemMessage, userMessages } = this.separateMessages(params.messages);
-        
+
         const body: Record<string, any> = {
             model: this.getModel(params),
             messages: userMessages,
             max_tokens: params.maxTokens || 4096
         };
-        
-        // System message
+
+        // System message (支持缓存)
         if (systemMessage) {
-            body.system = systemMessage;
+            body.system = this.buildSystemContent(systemMessage, params.caching);
         }
-        
+
         // 基础参数
         if (params.temperature !== undefined) body.temperature = params.temperature;
         if (params.topP !== undefined) body.top_p = params.topP;
-        if (params.stop !== undefined) body.stop_sequences = Array.isArray(params.stop) ? params.stop : [params.stop];
-        
+        if (params.stop !== undefined) {
+            body.stop_sequences = Array.isArray(params.stop) ? params.stop : [params.stop];
+        }
+
         // 流式
         if (params.stream) {
             body.stream = true;
         }
-        
+
         // Extended Thinking
         if (params.thinking) {
             const budget = params.thinkingBudget || this.config.metadata?.thinkingBudget || 10000;
@@ -122,30 +156,91 @@ export class AnthropicProvider extends BaseProvider {
                 budget_tokens: budget
             };
         }
-        
-        // 工具
+
+        // 工具 (包括 Computer Use)
         if (params.tools && params.tools.length > 0) {
-            body.tools = params.tools.map(tool => ({
-                name: tool.function.name,
-                description: tool.function.description,
-                input_schema: tool.function.parameters
-            }));
-            
+            body.tools = this.convertTools(params.tools);
+
             if (params.toolChoice === 'required') {
                 body.tool_choice = { type: 'any' };
             } else if (params.toolChoice === 'none') {
                 body.tool_choice = { type: 'none' };
-            } else if (typeof params.toolChoice === 'object') {
-                body.tool_choice = { 
-                    type: 'tool', 
-                    name: params.toolChoice.function.name 
+            } else if (typeof params.toolChoice === 'object' && 'function' in params.toolChoice) {
+                body.tool_choice = {
+                    type: 'tool',
+                    name: params.toolChoice.function.name
                 };
             }
         }
-        
+
+        // 元数据
+        if (params.metadata) {
+            body.metadata = params.metadata;
+        }
+
         return body;
     }
-    
+
+    /**
+     * 构建 System 内容 (支持缓存)
+     */
+    private buildSystemContent(
+        systemMessage: string,
+        caching?: boolean | { ttl?: number }
+    ): string | Array<{ type: string; text: string; cache_control?: { type: string } }> {
+        if (!caching) {
+            return systemMessage;
+        }
+
+        // 使用缓存格式
+        return [{
+            type: 'text',
+            text: systemMessage,
+            cache_control: { type: 'ephemeral' }
+        }];
+    }
+
+    /**
+     * 转换工具定义
+     */
+    private convertTools(tools: ToolDefinition[]): any[] {
+        return tools.map(tool => {
+            // Computer Use 工具
+            if (tool.type === 'computer_20241022') {
+                return {
+                    type: 'computer_20241022',
+                    name: 'computer',
+                    display_width_px: tool.computer_use?.display_width || 1024,
+                    display_height_px: tool.computer_use?.display_height || 768,
+                    display_number: tool.computer_use?.display_number || 1
+                };
+            }
+
+            // Bash 工具
+            if (tool.type === 'bash_20241022') {
+                return {
+                    type: 'bash_20241022',
+                    name: 'bash'
+                };
+            }
+
+            // Text Editor 工具
+            if (tool.type === 'text_editor_20241022') {
+                return {
+                    type: 'text_editor_20241022',
+                    name: 'str_replace_editor'
+                };
+            }
+
+            // 普通函数工具
+            return {
+                name: tool.function?.name,
+                description: tool.function?.description,
+                input_schema: tool.function?.parameters
+            };
+        });
+    }
+
     /**
      * 分离 System 消息
      */
@@ -155,17 +250,26 @@ export class AnthropicProvider extends BaseProvider {
     } {
         let systemMessage: string | null = null;
         const userMessages: any[] = [];
-        
+
         for (const msg of messages) {
             if (msg.role === 'system') {
-                // 合并多个 system 消息
-                const content = typeof msg.content === 'string' 
-                    ? msg.content 
+                const content = typeof msg.content === 'string'
+                    ? msg.content
                     : msg.content.map(p => p.type === 'text' ? p.text : '').join('\n');
-                    
-                systemMessage = systemMessage 
-                    ? `${systemMessage}\n\n${content}` 
+
+                systemMessage = systemMessage
+                    ? `${systemMessage}\n\n${content}`
                     : content;
+            } else if (msg.role === 'tool') {
+                // 工具结果
+                userMessages.push({
+                    role: 'user',
+                    content: [{
+                        type: 'tool_result',
+                        tool_use_id: msg.tool_call_id,
+                        content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)
+                    }]
+                });
             } else {
                 userMessages.push({
                     role: msg.role === 'assistant' ? 'assistant' : 'user',
@@ -173,10 +277,10 @@ export class AnthropicProvider extends BaseProvider {
                 });
             }
         }
-        
+
         return { systemMessage, userMessages };
     }
-    
+
     /**
      * 转换内容格式
      */
@@ -184,46 +288,84 @@ export class AnthropicProvider extends BaseProvider {
         if (typeof content === 'string') {
             return content;
         }
-        
+
         return content.map(part => {
-            if (part.type === 'text') {
-                return { type: 'text', text: part.text };
-            }
-            if (part.type === 'image_url') {
-                // Anthropic 使用 base64
-                const url = part.image_url.url;
-                if (url.startsWith('data:')) {
-                    const [header, data] = url.split(',');
-                    const mediaType = header.match(/data:(.*?);/)?.[1] || 'image/jpeg';
-                    return {
-                        type: 'image',
-                        source: {
-                            type: 'base64',
-                            media_type: mediaType,
-                            data
-                        }
-                    };
-                }
-                return {
-                    type: 'image',
-                    source: {
-                        type: 'url',
-                        url
+            switch (part.type) {
+                case 'text':
+                    const textPart: any = { type: 'text', text: part.text };
+                    if ('cache_control' in part && part.cache_control) {
+                        textPart.cache_control = part.cache_control;
                     }
-                };
+                    return textPart;
+
+                case 'image_url':
+                case 'image':
+                    // 处理 OpenAI 格式
+                    if ('image_url' in part && part.image_url) {
+                        const url = part.image_url.url;
+                        if (url.startsWith('data:')) {
+                            const [header, data] = url.split(',');
+                            const mediaType = header.match(/data:(.*?);/)?.[1] || 'image/jpeg';
+                            return {
+                                type: 'image',
+                                source: {
+                                    type: 'base64',
+                                    media_type: mediaType,
+                                    data
+                                }
+                            };
+                        }
+                        return {
+                            type: 'image',
+                            source: { type: 'url', url }
+                        };
+                    }
+                    // 处理 Anthropic 格式
+                    if ('source' in part && part.source) {
+                        return {
+                            type: 'image',
+                            source: part.source
+                        };
+                    }
+                    return { type: 'text', text: '' };
+
+                case 'file':
+                case 'document':
+                    // Anthropic 支持 PDF
+                    const file = 'file' in part ? part.file : part.document;
+                    if (file?.mime_type === 'application/pdf' && file.data) {
+                        return {
+                            type: 'document',
+                            source: {
+                                type: 'base64',
+                                media_type: 'application/pdf',
+                                data: file.data
+                            }
+                        };
+                    }
+                    return { type: 'text', text: `[Document: ${file?.filename || 'unknown'}]` };
+
+                case 'tool_result':
+                    return {
+                        type: 'tool_result',
+                        tool_use_id: part.tool_use_id,
+                        content: part.content,
+                        is_error: part.is_error
+                    };
+
+                default:
+                    return { type: 'text', text: '' };
             }
-            return { type: 'text', text: '' };
         });
     }
-    
+
     // ============== 响应标准化 ==============
-    
+
     protected normalizeResponse(response: any): ChatCompletionResponse {
         let content = '';
         let thinking = '';
         const toolCalls: any[] = [];
-        
-        // 处理 content blocks
+
         for (const block of response.content || []) {
             if (block.type === 'text') {
                 content += block.text;
@@ -240,7 +382,7 @@ export class AnthropicProvider extends BaseProvider {
                 });
             }
         }
-        
+
         return {
             id: response.id,
             model: response.model,
@@ -257,18 +399,26 @@ export class AnthropicProvider extends BaseProvider {
             usage: response.usage ? {
                 prompt_tokens: response.usage.input_tokens,
                 completion_tokens: response.usage.output_tokens,
-                total_tokens: response.usage.input_tokens + response.usage.output_tokens
+                total_tokens: response.usage.input_tokens + response.usage.output_tokens,
+                cached_tokens: response.usage.cache_read_input_tokens,
+                details: {
+                    reasoning_tokens: response.usage.thinking_tokens
+                }
+            } : undefined,
+            cache: response.usage?.cache_creation_input_tokens || response.usage?.cache_read_input_tokens ? {
+                hit: (response.usage.cache_read_input_tokens || 0) > 0,
+                cached_tokens: response.usage.cache_read_input_tokens
             } : undefined
         };
     }
-    
+
     protected normalizeStreamEvent(
         event: any,
         _currentThinking: string,
         _currentContent: string
     ): ChatCompletionChunk | null {
         const type = event.type;
-        
+
         switch (type) {
             case 'message_start':
                 return {
@@ -280,10 +430,32 @@ export class AnthropicProvider extends BaseProvider {
                         finish_reason: null
                     }]
                 };
-                
+
+            case 'content_block_start':
+                if (event.content_block?.type === 'tool_use') {
+                    return {
+                        choices: [{
+                            index: 0,
+                            delta: {
+                                tool_calls: [{
+                                    index: event.index || 0,
+                                    id: event.content_block.id,
+                                    type: 'function',
+                                    function: {
+                                        name: event.content_block.name,
+                                        arguments: ''
+                                    }
+                                }]
+                            },
+                            finish_reason: null
+                        }]
+                    };
+                }
+                return null;
+
             case 'content_block_delta':
                 const delta = event.delta;
-                
+
                 if (delta?.type === 'thinking_delta') {
                     return {
                         choices: [{
@@ -293,7 +465,7 @@ export class AnthropicProvider extends BaseProvider {
                         }]
                     };
                 }
-                
+
                 if (delta?.type === 'text_delta') {
                     return {
                         choices: [{
@@ -303,9 +475,8 @@ export class AnthropicProvider extends BaseProvider {
                         }]
                     };
                 }
-                
+
                 if (delta?.type === 'input_json_delta') {
-                    // 工具调用参数增量
                     return {
                         choices: [{
                             index: 0,
@@ -319,9 +490,9 @@ export class AnthropicProvider extends BaseProvider {
                         }]
                     };
                 }
-                
+
                 return null;
-                
+
             case 'message_delta':
                 return {
                     choices: [{
@@ -330,12 +501,12 @@ export class AnthropicProvider extends BaseProvider {
                         finish_reason: this.mapStopReason(event.delta?.stop_reason)
                     }],
                     usage: event.usage ? {
-                        prompt_tokens: 0,
-                        completion_tokens: event.usage.output_tokens,
-                        total_tokens: event.usage.output_tokens
+                        prompt_tokens: event.usage.input_tokens || 0,
+                        completion_tokens: event.usage.output_tokens || 0,
+                        total_tokens: (event.usage.input_tokens || 0) + (event.usage.output_tokens || 0)
                     } : undefined
                 };
-                
+
             case 'message_stop':
                 return {
                     choices: [{
@@ -344,17 +515,18 @@ export class AnthropicProvider extends BaseProvider {
                         finish_reason: 'stop'
                     }]
                 };
-                
+
             default:
                 return null;
         }
     }
-    
+
     private mapStopReason(reason: string | null): 'stop' | 'length' | 'tool_calls' | null {
         switch (reason) {
             case 'end_turn': return 'stop';
             case 'max_tokens': return 'length';
             case 'tool_use': return 'tool_calls';
+            case 'stop_sequence': return 'stop';
             default: return null;
         }
     }

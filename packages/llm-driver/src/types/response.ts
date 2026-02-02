@@ -1,6 +1,6 @@
 // @file: llm-driver/types/response.ts
 
-import { ChatMessage, ToolCall, ToolDefinition } from './message';
+import { ChatMessage, ToolCall, ToolDefinition, MessageContentPart } from './message';
 
 /**
  * 聊天完成请求参数
@@ -50,9 +50,82 @@ export interface ChatCompletionParams {
     
     /** 可用工具 */
     tools?: ToolDefinition[];
+    toolChoice?: ToolChoice;
     
-    /** 工具选择策略 */
-    toolChoice?: 'none' | 'auto' | 'required' | { type: 'function'; function: { name: string } };
+    /** 并行工具调用 (默认 true) */
+    parallelToolCalls?: boolean;
+    
+    // ===== 结构化输出 (新增) =====
+    
+    /** 响应格式 - 增强版 */
+    responseFormat?: ResponseFormat;
+    
+    // ===== 音频配置 (新增) =====
+    
+    /** 音频输入配置 */
+    audioInput?: {
+        /** 输入格式 */
+        format: 'wav' | 'mp3' | 'flac' | 'opus' | 'pcm16';
+    };
+    
+    /** 音频输出配置 */
+    audioOutput?: {
+        /** 输出格式 */
+        format: 'wav' | 'mp3' | 'flac' | 'opus' | 'pcm16';
+        /** 语音 */
+        voice?: 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer' | string;
+    };
+    
+    /** 输出模态 */
+    modalities?: Array<'text' | 'audio'>;
+    
+    // ===== 缓存控制 (新增) =====
+    
+    /** 启用 Prompt Caching */
+    caching?: boolean | {
+        /** 缓存 TTL (秒) */
+        ttl?: number;
+        /** 缓存键前缀 */
+        keyPrefix?: string;
+    };
+    
+    // ===== 预测输出 (新增) =====
+    
+    /** 预测输出 (OpenAI Predicted Output) */
+    prediction?: {
+        type: 'content';
+        content: string | MessageContentPart[];
+    };
+    
+    // ===== 代码执行 (新增) =====
+    
+    /** 启用代码执行 (Gemini) */
+    codeExecution?: boolean | {
+        /** 允许的语言 */
+        languages?: string[];
+        /** 超时 (秒) */
+        timeout?: number;
+    };
+    
+    // ===== 搜索/检索 (新增) =====
+    
+    /** 启用网络搜索 */
+    webSearch?: boolean | {
+        /** 搜索引擎 */
+        engine?: 'google' | 'bing' | 'duckduckgo';
+        /** 最大结果数 */
+        maxResults?: number;
+    };
+    
+    /** 启用 RAG 检索 */
+    retrieval?: {
+        /** 知识库 ID */
+        knowledgeBaseId?: string;
+        /** 检索数量 */
+        topK?: number;
+        /** 相似度阈值 */
+        threshold?: number;
+    };
     
     // ===== 其他 =====
     
@@ -61,16 +134,46 @@ export interface ChatCompletionParams {
     
     /** 用户标识 */
     user?: string;
-
-    /** 响应格式 */
-    responseFormat?: { type: 'text' | 'json_object' };
     
     /** 种子 (用于可复现输出) */
     seed?: number;
+    
+    /** 服务层级 (OpenAI) */
+    serviceTier?: 'auto' | 'default' | 'flex';
+    
+    /** 元数据 (透传) */
+    metadata?: Record<string, any>;
 }
 
 /**
- * 聊天完成响应（非流式）
+ * 工具选择策略 - 增强版
+ */
+export type ToolChoice = 
+    | 'none' 
+    | 'auto' 
+    | 'required'
+    | { type: 'function'; function: { name: string } }
+    | { type: 'any' }  // Anthropic: 必须调用某个工具
+    | { type: 'tool'; name: string };  // Anthropic: 指定工具
+
+/**
+ * 响应格式 - 增强版
+ */
+export type ResponseFormat = 
+    | { type: 'text' }
+    | { type: 'json_object' }
+    | { 
+        type: 'json_schema'; 
+        json_schema: {
+            name: string;
+            description?: string;
+            schema: Record<string, any>;
+            strict?: boolean;
+        };
+    };
+
+/**
+ * 聊天完成响应 - 增强版
  */
 export interface ChatCompletionResponse {
     /** 响应 ID */
@@ -89,33 +192,141 @@ export interface ChatCompletionResponse {
     choices: Array<{
         /** 索引 */
         index?: number;
-        
-        /** 消息 */
-        message: {
-            role: 'assistant';
-            content: string;
-            /** 思考过程 (标准化后) */
-            thinking?: string;
-            /** 工具调用 */
-            tool_calls?: ToolCall[];
-        };
-        
-        /** 结束原因 */
-        finish_reason: 'stop' | 'length' | 'tool_calls' | 'content_filter' | null;
+        message: AssistantMessage;
+        finish_reason: FinishReason;
+        /** 日志概率 */
+        logprobs?: LogProbs | null;
     }>;
     
-    /** Token 使用统计 */
-    usage?: {
-        prompt_tokens: number;
-        completion_tokens: number;
-        total_tokens: number;
-        /** 思考 tokens (如果支持) */
-        thinking_tokens?: number;
+    usage?: TokenUsage;
+    
+    /** 系统指纹 (OpenAI) */
+    system_fingerprint?: string;
+    
+    /** 服务层级 (OpenAI) */
+    service_tier?: string;
+    
+    /** 缓存信息 (新增) */
+    cache?: {
+        /** 是否命中缓存 */
+        hit: boolean;
+        /** 缓存的 token 数 */
+        cached_tokens?: number;
+        /** 缓存创建时间 */
+        created_at?: number;
+    };
+    
+    /** 引用/来源 (新增) */
+    citations?: Citation[];
+}
+
+/**
+ * Assistant 消息 - 增强版
+ */
+export interface AssistantMessage {
+    role: 'assistant';
+    content: string;
+    
+    /** 思考过程 */
+    thinking?: string;
+    
+    /** 工具调用 */
+    tool_calls?: ToolCall[];
+    
+    /** 音频输出 */
+    audio?: {
+        id: string;
+        data: string;
+        transcript?: string;
+        expires_at?: number;
+    };
+    
+    /** 结构化输出 (解析后) */
+    parsed?: any;
+    
+    /** 拒绝原因 */
+    refusal?: string;
+    
+    /** 代码执行结果 */
+    code_execution?: {
+        code: string;
+        language: string;
+        output?: string;
+        error?: string;
     };
 }
 
 /**
- * 聊天完成流式块
+ * 结束原因 - 扩展
+ */
+export type FinishReason = 
+    | 'stop' 
+    | 'length' 
+    | 'tool_calls' 
+    | 'content_filter'
+    | 'function_call'  // 兼容旧版
+    | 'end_turn'       // Anthropic
+    | 'max_tokens'     // Anthropic
+    | 'stop_sequence'  // Anthropic
+    | null;
+
+/**
+ * Token 使用统计 - 增强版
+ */
+export interface TokenUsage {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+    
+    /** 思考 tokens */
+    thinking_tokens?: number;
+    
+    /** 缓存命中 tokens */
+    cached_tokens?: number;
+    
+    /** 音频 tokens */
+    audio_tokens?: {
+        input: number;
+        output: number;
+    };
+    
+    /** 详细分解 */
+    details?: {
+        reasoning_tokens?: number;
+        accepted_prediction_tokens?: number;
+        rejected_prediction_tokens?: number;
+    };
+}
+
+/**
+ * 引用信息
+ */
+export interface Citation {
+    index: number;
+    url?: string;
+    title?: string;
+    snippet?: string;
+    confidence?: number;
+}
+
+/**
+ * 日志概率
+ */
+export interface LogProbs {
+    content: Array<{
+        token: string;
+        logprob: number;
+        bytes?: number[];
+        top_logprobs?: Array<{
+            token: string;
+            logprob: number;
+            bytes?: number[];
+        }>;
+    }> | null;
+}
+
+/**
+ * 流式块 - 增强版
  */
 export interface ChatCompletionChunk {
     /** 响应 ID */
@@ -147,22 +358,25 @@ export interface ChatCompletionChunk {
             tool_calls?: Array<{
                 index: number;
                 id?: string;
-                type?: 'function';
+                type?: string;
                 function?: {
                     name?: string;
                     arguments?: string;
                 };
             }>;
+            /** 音频增量 */
+            audio?: {
+                id?: string;
+                data?: string;
+                transcript?: string;
+            };
+            /** 拒绝原因 */
+            refusal?: string;
         };
-        
-        /** 结束原因 */
-        finish_reason: 'stop' | 'length' | 'tool_calls' | 'content_filter' | null;
+        finish_reason: FinishReason;
+        logprobs?: LogProbs | null;
     }>;
     
-    /** 使用统计 (最后一个块) */
-    usage?: {
-        prompt_tokens: number;
-        completion_tokens: number;
-        total_tokens: number;
-    };
+    usage?: TokenUsage;
+    service_tier?: string;
 }
