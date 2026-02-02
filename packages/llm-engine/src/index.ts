@@ -30,7 +30,7 @@ export { ENGINE_DEFAULTS, STORAGE_KEYS } from './core/constants';
 // ============================================
 
 export { SessionManager } from './session/session-manager';
-export type { DeleteOptions,RetryOptions,SessionSnapshot, SessionManagerOptions } from './session/session-manager';
+export type { DeleteOptions, RetryOptions, ResendOptions, SessionSnapshot, SessionManagerOptions } from './session/session-manager';
 
 export { SessionRegistry, getSessionRegistry } from './session/session-registry';
 export { SessionState } from './session/session-state';
@@ -49,20 +49,20 @@ export { UIEventAdapter } from './adapters/ui-event-adapter';
 // ============================================
 
 export { LLMSessionEngine } from './persistence/session-engine';
-export type { 
-    ILLMSessionEngine, 
-    ChatManifest, 
-    ChatNode, 
-    ChatContextItem 
+export type {
+    ILLMSessionEngine,
+    ChatManifest,
+    ChatNode,
+    ChatContextItem
 } from './persistence/types';
 
 // ============================================
 // 服务
 // ============================================
 
-export type { 
-    IAgentService, 
-    MCPServer 
+export type {
+    IAgentService,
+    MCPServer
 } from './services/agent-service';
 
 import { VFSAgentService } from './services/vfs-agent-service';
@@ -72,7 +72,7 @@ import { VFSAgentService } from './services/vfs-agent-service';
 // ============================================
 
 export { Converters } from './utils/converters';
-export {chatFileParser} from './utils/parsers';
+export { chatFileParser } from './utils/parsers';
 
 // ============================================
 // 初始化
@@ -90,10 +90,10 @@ import { LLMSessionEngine } from './persistence/session-engine';
 export interface EngineInitOptions extends KernelInitOptions {
     /** Agent 服务 */
     agentService: IAgentService;
-    
+
     /** 会话引擎 */
     sessionEngine: ILLMSessionEngine;
-    
+
     /** 最大并发数 */
     maxConcurrent?: number;
 }
@@ -109,13 +109,13 @@ export async function initializeLLMEngine(options: EngineInitOptions): Promise<{
         plugins: options.plugins,
         config: options.config
     });
-    
+
     // 2. 初始化 Agent 服务
     await options.agentService.init();
-    
+
     // 3. 初始化 Session 引擎
     await options.sessionEngine.init();
-    
+
     // 4. 初始化 Registry
     const registry = getSessionRegistry();
     registry.initialize(
@@ -123,9 +123,9 @@ export async function initializeLLMEngine(options: EngineInitOptions): Promise<{
         options.sessionEngine,
         { maxConcurrent: options.maxConcurrent }
     );
-    
+
     console.log('[LLM Engine] Initialized');
-    
+
     return { registry };
 }
 
@@ -141,18 +141,18 @@ export async function quickInitialize(options: {
     agentService: IAgentService;
     sessionEngine: ILLMSessionEngine;
 }> {
-    
+
     const agentService = new VFSAgentService(options.vfs);
     const sessionEngine = new LLMSessionEngine(options.vfs);
-    
+
     const { registry } = await initializeLLMEngine({
         agentService,
         sessionEngine,
         maxConcurrent: options.maxConcurrent,
         plugins: options.plugins
     });
-    
+
     return { registry, agentService, sessionEngine };
 }
 
-export {VFSAgentService};
+export { VFSAgentService };
