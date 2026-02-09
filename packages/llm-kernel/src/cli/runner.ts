@@ -186,13 +186,13 @@ export class CLIRunner {
                     return;
                 }
                 
-                history.push({ role: 'user', content: input });
                 
                 console.log('\x1b[33mAssistant: \x1b[0m');
                 
                 const result = await this.run(config, input, { history });
                 
                 if (result.success && result.output) {
+                    history.push({ role: 'user', content: input });
                     history.push({ role: 'assistant', content: result.output });
                 }
                 
