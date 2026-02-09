@@ -1488,32 +1488,85 @@ export class LLMWorkspaceEditor implements IEditor {
         if (ids.length === 0) return;
 
         const confirmed = await showConfirmDialog(`Are you sure you want to delete ${ids.length} messages?`);
-        if (!confirmed) return;
+        
+        if (!confirmed) {
+            // ✅ 用户取消，通知导航面板更新（清空选择）
+            if (this.floatingNav) {
+                this.floatingNav.updateItems(
+                    this.sessionManager.getSessions(),
+                    this.historyView.getCollapseStates()
+                );
+            }
+            return;
+        }
+
+        // ✅ 保存原始状态用于回滚
+        const originalSessions = this.sessionManager.getSessions();
+        const successIds: string[] = [];
+        const failedIds: string[] = [];
 
         try {
             this.historyView.removeMessages(ids, true);
 
             for (const id of ids) {
-                await this.sessionManager.deleteMessage(id, {
-                    mode: 'soft',
-                    cascade: false,
-                    deleteAssociatedResponses: true
-                });
+                try {
+                    await this.sessionManager.deleteMessage(id, {
+                        mode: 'soft',
+                        cascade: false,
+                        deleteAssociatedResponses: true
+                    });
+                    
+                    successIds.push(id);
+                    
+                } catch (e: any) {
+                    console.error(`[LLMWorkspaceEditor] Failed to delete ${id}:`, e);
+                    failedIds.push(id);
+                }
             }
 
-            this.emit('change');
-            Toast.success(`Deleted ${ids.length} messages`);
+            // ✅ 处理结果
+            if (failedIds.length === 0) {
+                // 全部成功
+                Toast.success(`Deleted ${successIds.length} message${successIds.length > 1 ? 's' : ''}`);
+                this.emit('change');
+                
+            } else if (successIds.length === 0) {
+                // 全部失败
+                Toast.error('Failed to delete messages');
+                this.historyView.renderFull(originalSessions);
+                
+            } else {
+                // 部分成功
+                Toast.warning(
+                    `Deleted ${successIds.length} messages, ${failedIds.length} failed`
+                );
+                
+                // ✅ 只回滚失败的消息
+                const currentSessions = this.sessionManager.getSessions();
+                this.historyView.renderFull(currentSessions);
+                this.emit('change');
+            }
 
+            // ✅ 更新导航面板（清空选择，刷新列表）
             if (this.floatingNav) {
                 const sessions = this.sessionManager.getSessions();
-                this.floatingNav.updateItems(sessions, this.historyView.getCollapseStates());
+                const collapseStates = this.historyView.getCollapseStates();
+                this.floatingNav.updateItems(sessions, collapseStates);
             }
 
-        } catch (e) {
-            console.error('Batch delete failed', e);
-            Toast.error('Failed to delete messages');
-            const sessions = this.sessionManager.getSessions();
-            this.historyView.renderFull(sessions);
+        } catch (e: any) {
+            // ✅ 意外错误：完全回滚
+            console.error('[LLMWorkspaceEditor] Batch delete critical error:', e);
+            Toast.error('Delete operation failed');
+            
+            this.historyView.renderFull(originalSessions);
+            
+            if (this.floatingNav) {
+                this.floatingNav.updateItems(
+                    originalSessions,
+                    this.historyView.getCollapseStates()
+                );
+            }
         }
     }
 
@@ -1521,6 +1574,8 @@ export class LLMWorkspaceEditor implements IEditor {
      * 处理批量复制
      */
     private async handleBatchCopy(ids: string[]): Promise<void> {
+        if (ids.length === 0) return;
+
         const sessions = this.sessionManager.getSessions();
         const contentArr: string[] = [];
 
@@ -1538,7 +1593,9 @@ export class LLMWorkspaceEditor implements IEditor {
                     text = this.extractExecutionOutput(session.executionRoot);
                 }
                 const roleName = session.role === 'user' ? 'User' : 'Assistant';
-                contentArr.push(`### ${roleName}:\n${text}`);
+                const timestamp = new Date(session.timestamp).toLocaleString();
+                
+                contentArr.push(`### ${roleName} (${timestamp}):\n${text}`);
             }
         }
 
@@ -1546,7 +1603,8 @@ export class LLMWorkspaceEditor implements IEditor {
             await navigator.clipboard.writeText(contentArr.join('\n\n---\n\n'));
             Toast.success(`Copied ${ids.length} messages`);
         } catch (e) {
-            Toast.error('Copy failed');
+            console.error('[LLMWorkspaceEditor] Copy failed:', e);
+            Toast.error('Failed to copy to clipboard');
         }
     }
 
