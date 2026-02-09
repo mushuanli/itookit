@@ -127,11 +127,41 @@ export class TaskListPlugin implements MDxPlugin {
           return `<li>${content}</li>\n`;
         },
 
-        tablecell(content: string, flags): string {
-          const safeContent = String(content);
-          const type = flags.header ? 'th' : 'td';
-          const tag = flags.align ? `<${type} align="${flags.align}">` : `<${type}>`;
+        // ✅ [修复] 兼容 marked v12+ / v16 的 Token 对象签名
+        // @ts-ignore
+        tablecell(tokenOrContent: any, flagsOrUndefined?: any): string {
+          let cellContent: string;
+          let isHeader: boolean;
+          let align: string | null;
 
+          if (typeof tokenOrContent === 'object' && tokenOrContent !== null && 'text' in tokenOrContent) {
+            // ===== marked v12+ Token 对象模式 =====
+            // token 结构: { text: string, tokens: Token[], header: boolean, align: string | null }
+            // @ts-ignore
+            if (tokenOrContent.tokens && this.parser) {
+              // @ts-ignore
+              cellContent = this.parser.parseInline(tokenOrContent.tokens);
+            } else {
+              cellContent = tokenOrContent.text || '';
+            }
+            isHeader = tokenOrContent.header || false;
+            align = tokenOrContent.align || null;
+          } else if (flagsOrUndefined && typeof flagsOrUndefined === 'object') {
+            // ===== marked v4/v5 旧版签名: (content: string, flags: { header, align }) =====
+            cellContent = String(tokenOrContent);
+            isHeader = flagsOrUndefined.header || false;
+            align = flagsOrUndefined.align || null;
+          } else {
+            // ===== 最终降级：将第一个参数当字符串处理 =====
+            cellContent = String(tokenOrContent || '');
+            isHeader = false;
+            align = null;
+          }
+
+          const type = isHeader ? 'th' : 'td';
+          const tag = align ? `<${type} align="${align}">` : `<${type}>`;
+
+          const safeContent = String(cellContent);
           const processedContent = safeContent.replace(/\[([ xX])\]/gi, (_match, state) => {
             const isChecked = state.toLowerCase() === 'x';
             const index = self.renderTaskCounter++;
