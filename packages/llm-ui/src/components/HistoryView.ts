@@ -1040,40 +1040,58 @@ export class HistoryView {
         }
     }
 
-    public removeMessages(ids: string[], animated: boolean = true): void {
-        for (const id of ids) {
-            this.renderedSessionIds.delete(id);
+    public removeMessages(ids: string[], animated: boolean = true): string[] {
+        const actuallyRemoved: string[] = [];
 
-            const sessionEl = this.container.querySelector(`[data-session-id="${id}"]`) as HTMLElement;
-            if (sessionEl) {
-                this.removeElement(sessionEl, animated);
+        for (const id of ids) {
+            // ✅ 检查是否存在
+            const sessionEl = this.container.querySelector(`[data-session-id="${id}"]`);
+            const nodeEl = this.nodeMap.get(id);
+            
+            if (!sessionEl && !nodeEl) {
+                console.warn(`[HistoryView] Cannot remove ${id}: not found in DOM`);
+                continue;
             }
 
-            const nodeEl = this.nodeMap.get(id);
+            // ✅ 清理渲染记录
+            this.renderedSessionIds.delete(id);
+
+            // ✅ 移除 DOM
+            if (sessionEl) {
+                this.removeElement(sessionEl as HTMLElement, animated);
+            }
             if (nodeEl) {
                 this.removeElement(nodeEl, animated);
                 this.nodeMap.delete(id);
             }
 
+            // ✅ 清理编辑器
             const editor = this.editorMap.get(id);
             if (editor) {
                 editor.destroy();
                 this.editorMap.delete(id);
             }
 
+            // ✅ 清理定时器
             const timer = this.previewUpdateTimers.get(id);
             if (timer) {
                 clearTimeout(timer);
                 this.previewUpdateTimers.delete(id);
             }
 
+            // ✅ 清理状态
             this.originalContentMap.delete(id);
             this.editingNodes.delete(id);
             delete this.collapseStates[id];
+
+            actuallyRemoved.push(id);
         }
 
+        // ✅ 检查是否为空
         const delay = animated ? 350 : 0;
         setTimeout(() => this.checkEmpty(), delay);
+
+        return actuallyRemoved;
     }
 
     private removeElement(el: HTMLElement, animated: boolean): void {

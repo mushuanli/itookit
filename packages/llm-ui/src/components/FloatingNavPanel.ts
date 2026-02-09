@@ -10,8 +10,8 @@ export interface FloatingNavPanelOptions {
     onFoldAll: () => void;
     onUnfoldAll: () => void;
     // ✨ 新增：批量操作回调
-    onBatchDelete?: (sessionIds: string[]) => void;
-    onBatchCopy?: (sessionIds: string[]) => void;
+    onBatchDelete?: (sessionIds: string[]) => Promise<void>;
+    onBatchCopy?: (sessionIds: string[]) => Promise<void>;
 }
 
 export interface ChatNavItem {
@@ -327,7 +327,7 @@ export class FloatingNavPanel {
         });
     }
 
-    private handleAction(action?: string): void {
+    private async handleAction(action?: string): Promise<void> {
         switch (action) {
             case 'toggle-select-all':
                 if (this.selectedIds.size === this.items.length) {
@@ -367,13 +367,21 @@ export class FloatingNavPanel {
                 break;
             case 'batch-delete':
                 if (this.selectedIds.size > 0) {
-                    this.options.onBatchDelete?.(Array.from(this.selectedIds));
+                    // ✅ 等待删除完成
+                    await this.options.onBatchDelete?.(Array.from(this.selectedIds));
+                    
+                    // ✅ 删除成功后才清空选择
                     this.selectedIds.clear();
+                    
+                    // ✅ 重新渲染面板
+                    this.render();
                 }
                 break;
             case 'batch-copy':
                 if (this.selectedIds.size > 0) {
-                    this.options.onBatchCopy?.(Array.from(this.selectedIds));
+                    await this.options.onBatchCopy?.(Array.from(this.selectedIds));
+                    
+                    // ✅ 复制后清空选择
                     this.selectedIds.clear();
                     this.render();
                 }
