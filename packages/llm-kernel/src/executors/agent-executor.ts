@@ -343,6 +343,8 @@ export class AgentExecutor implements IExecutor {
 
     /**
      * 构建消息列表
+ * @note history 变量应只包含**之前轮次**的消息，
+ *       不应包含当前轮次的用户消息（当前消息由 input 参数提供）
      */
     private buildMessages(input: unknown, context: IExecutionContext): ChatMessage[] {
         const messages: ChatMessage[] = [];
@@ -363,13 +365,22 @@ export class AgentExecutor implements IExecutor {
 
         // 历史消息 - 增加类型检查
         const history = context.variables.get<ChatMessage[]>('history') || [];
+        const userMessage = this.buildUserMessage(input, context);
 
-        for (const msg of history) {
+    let historyToUse = history;
+    if (history.length > 0) {
+        const last = history[history.length - 1];
+        if (last.role === 'user' && last.content === userMessage.content) {
+            historyToUse = history.slice(0, -1);
+            console.warn('[AgentExecutor] Detected duplicate user message in history, skipping last entry');
+        }
+    }
+
+        for (const msg of historyToUse) {
             messages.push(msg);
         }
 
         // 当前用户消息
-        const userMessage = this.buildUserMessage(input, context);
         messages.push(userMessage);
 
         return messages;
