@@ -2,25 +2,36 @@
 
 import { EditorHostContext } from '@itookit/common';
 
+export interface EventBinderCallbacks {
+    onToggleSidebar: () => void;
+    onTitleChange: (title: string) => void;
+    onOpenAssetManager: () => void;
+    onToggleNavigator: () => void;
+    onPrevAgent: () => void;
+    onNextAgent: () => void;
+    onFoldOne: () => void;
+    onCopyAgent: () => void;
+    onCollapseAll: () => void;
+    onCopy: () => void;
+    onPrint: () => void;
+}
+
+export interface GlobalShortcutCallbacks {
+    onToggleNavigator: () => void;
+    onNavigatePrev: () => void;
+    onNavigateNext: () => void;
+    // ✅ 新增：分支相关快捷键
+    onShowBranchTree?: () => void;
+    onCreateBranch?: () => void;
+}
+
 export class EventBinder {
-    private globalShortcutHandler: ((e: KeyboardEvent) => void) | null = null;
+    private keydownHandler: ((e: KeyboardEvent) => void) | null = null;
 
     constructor(
         private container: HTMLElement,
-        private hostContext: EditorHostContext | undefined,
-        private callbacks: {
-            onToggleSidebar: () => void;
-            onTitleChange: (title: string) => void;
-            onOpenAssetManager: () => void;
-            onToggleNavigator: () => void;
-            onPrevAgent: () => void;
-            onNextAgent: () => void;
-            onFoldOne: () => void;
-            onCopyAgent: () => void;
-            onCollapseAll: () => void;
-            onCopy: () => void;
-            onPrint: () => void;
-        }
+        _hostContext: EditorHostContext | undefined,
+        private callbacks: EventBinderCallbacks
     ) { }
 
     /**
@@ -34,16 +45,28 @@ export class EventBinder {
 
         // Title Edit
         const titleInput = this.container.querySelector('#llm-title-input') as HTMLInputElement;
-        titleInput?.addEventListener('change', () => {
-            this.callbacks.onTitleChange(titleInput.value);
-        });
+        if (titleInput) {
+            titleInput.addEventListener('blur', () => {
+                this.callbacks.onTitleChange(titleInput.value);
+            });
 
-        // 附件管理
+            titleInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    titleInput.blur();
+                }
+            });
+        }
+
+        // 资源管理器
         this.container.querySelector('#llm-btn-assets')?.addEventListener('click', () => {
             this.callbacks.onOpenAssetManager();
         });
+    }
 
-        // 导航按钮
+    /**
+     * 绑定导航栏事件
+     */
+    bindNavigationEvents(): void {
         this.container.querySelector('#llm-btn-navigator')?.addEventListener('click', () => {
             this.callbacks.onToggleNavigator();
         });
@@ -85,83 +108,64 @@ export class EventBinder {
     }
 
     /**
-     * 绑定导航相关事件
-     */
-    bindNavigationEvents(): void {
-        // 打开连接设置
-        this.container.addEventListener('open-connection-settings', () => {
-            console.log('[EventBinder] Requesting to open connection settings...');
-            if (this.hostContext?.navigate) {
-                this.hostContext.navigate({
-                    target: 'settings',
-                    resourceId: 'connections'
-                });
-            } else {
-                console.warn('[EventBinder] Host does not support navigation');
-            }
-        });
-
-        // 打开 Agent 配置
-        this.container.addEventListener('open-agent-config', (e: any) => {
-            const agentId = e.detail?.agentId;
-            if (agentId && this.hostContext?.navigate) {
-                this.hostContext.navigate({
-                    target: 'agents',
-                    resourceId: agentId
-                });
-            }
-        });
-    }
-
-    /**
      * 绑定全局快捷键
      */
-    bindGlobalShortcuts(callbacks: {
-        onToggleNavigator: () => void;
-        onNavigatePrev: () => void;
-        onNavigateNext: () => void;
-    onShowBranchTree: () => void;  // ✅ 新增
-    onCreateBranch: () => void;    // ✅ 新增
-    }): void {
-        this.globalShortcutHandler = (e: KeyboardEvent) => {
-            // Ctrl/Cmd + G: 打开导航器
-            if ((e.ctrlKey || e.metaKey) && e.key === 'g') {
-                e.preventDefault();
-                callbacks.onToggleNavigator();
+    bindGlobalShortcuts(shortcuts: GlobalShortcutCallbacks): void {
+        this.keydownHandler = (e: KeyboardEvent) => {
+            // 忽略输入框中的快捷键
+            const target = e.target as HTMLElement;
+            if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+                return;
             }
-        // ✅ Ctrl/Cmd + B: 打开分支树
-        if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
-            e.preventDefault();
-            callbacks.onShowBranchTree();
-        }
 
-        // ✅ Ctrl/Cmd + Shift + B: 创建分支
-        if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'B') {
-            e.preventDefault();
-            callbacks.onCreateBranch();
-        }
-            // Ctrl/Cmd + Shift + Up/Down: 快速导航
-            if ((e.ctrlKey || e.metaKey) && e.shiftKey) {
-                if (e.key === 'ArrowUp') {
-                    e.preventDefault();
-                    callbacks.onNavigatePrev();
-                } else if (e.key === 'ArrowDown') {
-                    e.preventDefault();
-                    callbacks.onNavigateNext();
-                }
+            const isMod = e.metaKey || e.ctrlKey;
+
+            // Cmd/Ctrl + K: 打开导航器
+            if (isMod && e.key === 'k') {
+                e.preventDefault();
+                shortcuts.onToggleNavigator();
+                return;
+            }
+
+            // Cmd/Ctrl + ↑: 上一个用户消息
+            if (isMod && e.key === 'ArrowUp') {
+                e.preventDefault();
+                shortcuts.onNavigatePrev();
+                return;
+            }
+
+            // Cmd/Ctrl + ↓: 下一个用户消息
+            if (isMod && e.key === 'ArrowDown') {
+                e.preventDefault();
+                shortcuts.onNavigateNext();
+                return;
+            }
+
+            // ✅ Cmd/Ctrl + B: 显示分支树
+            if (isMod && e.key === 'b' && shortcuts.onShowBranchTree) {
+                e.preventDefault();
+                shortcuts.onShowBranchTree();
+                return;
+            }
+
+            // ✅ Cmd/Ctrl + Shift + B: 创建分支
+            if (isMod && e.shiftKey && e.key === 'B' && shortcuts.onCreateBranch) {
+                e.preventDefault();
+                shortcuts.onCreateBranch();
+                return;
             }
         };
 
-        document.addEventListener('keydown', this.globalShortcutHandler);
+        document.addEventListener('keydown', this.keydownHandler);
     }
 
     /**
      * 清理事件监听
      */
     cleanup(): void {
-        if (this.globalShortcutHandler) {
-            document.removeEventListener('keydown', this.globalShortcutHandler);
-            this.globalShortcutHandler = null;
+        if (this.keydownHandler) {
+            document.removeEventListener('keydown', this.keydownHandler);
+            this.keydownHandler = null;
         }
     }
 }

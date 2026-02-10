@@ -1,15 +1,18 @@
 
 // @file: llm-ui/helpers/BranchManager.ts
-import { SessionManager } from '@itookit/llm-engine';
+
+import { BranchService } from '../services';
 import { HistoryView, BranchAction } from '../components/HistoryView';
 import { Toast, showConfirmDialog } from '@itookit/common';
+import { ContentService } from '../services';
 
 export class BranchManager {
     constructor(
-        private sessionManager: SessionManager,
+        private branchService: BranchService,
+        private contentService: ContentService,
         private historyView: HistoryView,
         private scrollToSession: (sessionId: string) => void
-    ) { }
+    ) {}
 
     /**
      * 处理分支操作
@@ -60,7 +63,7 @@ export class BranchManager {
     }
 
     private async showBranchTree(): Promise<void> {
-        const tree = await this.sessionManager.getBranchTree();
+        const tree = await this.branchService.getBranchTree();
         this.historyView.showBranchTree(tree);
     }
 
@@ -71,14 +74,14 @@ export class BranchManager {
             return;
         }
 
-        await this.sessionManager.createBranch(sourceNodeId, {
+        await this.branchService.createBranch(sourceNodeId, {
             name: branchName || undefined,
             copyContent: true
         });
 
         Toast.success(`Branch "${branchName || 'Untitled'}" created`);
 
-        const sessions = this.sessionManager.getSessions();
+        const sessions = this.contentService.getSessions();
         this.historyView.renderFull(sessions);
     }
 
@@ -136,7 +139,7 @@ export class BranchManager {
     }
 
     private async navigateToBranch(nodeId: string): Promise<void> {
-        const sessions = this.sessionManager.getSessions();
+        const sessions = this.contentService.getSessions();
         const targetSession = sessions.find(s =>
             s.id === nodeId ||
             s.persistedNodeId === nodeId ||
@@ -149,7 +152,7 @@ export class BranchManager {
     }
 
     private async renameBranch(nodeId: string, newName: string): Promise<void> {
-        await this.sessionManager.renameBranch(nodeId, newName);
+        await this.branchService.renameBranch(nodeId, newName);
         Toast.success('Branch renamed');
     }
 
@@ -160,16 +163,16 @@ export class BranchManager {
 
         if (!confirmed) return;
 
-        await this.sessionManager.deleteBranch(nodeId, true);
+        await this.branchService.deleteBranch(nodeId, true);
 
-        const sessions = this.sessionManager.getSessions();
+        const sessions = this.contentService.getSessions();
         this.historyView.renderFull(sessions);
 
         Toast.success('Branch deleted');
     }
 
     private async compareBranches(nodeId1: string, nodeId2: string): Promise<void> {
-        const sessions = this.sessionManager.getSessions();
+        const sessions = this.contentService.getSessions();
 
         const branch1 = sessions.find(s =>
             s.id === nodeId1 || s.persistedNodeId === nodeId1
@@ -186,18 +189,18 @@ export class BranchManager {
     }
 
     private async selectBranch(branchId: string): Promise<void> {
-        const sessions = this.sessionManager.getSessions();
+        const sessions = this.contentService.getSessions();
         const targetSession = sessions.find(s =>
             s.id === branchId || s.persistedNodeId === branchId
         );
 
         if (targetSession && targetSession.siblingIndex !== undefined) {
-            await this.sessionManager.switchToSibling(
+            await this.branchService.switchBranch(
                 targetSession.id,
                 targetSession.siblingIndex
             );
 
-            const updatedSessions = this.sessionManager.getSessions();
+            const updatedSessions = this.contentService.getSessions();
             this.historyView.renderFull(updatedSessions);
         }
     }

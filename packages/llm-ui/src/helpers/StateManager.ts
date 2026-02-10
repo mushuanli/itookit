@@ -1,15 +1,14 @@
 // @file: llm-ui/helpers/StateManager.ts
 
-import { ILLMSessionEngine, SessionManager, ChatSessionSettings } from '@itookit/llm-engine';
-import { CollapseStateMap } from '../components/HistoryView';
+import { StateService, UIState } from '../services';
 import { ChatInput } from '../components/ChatInput';
 
-export interface UIStatePayload {
-    collapse_states: CollapseStateMap;
-    input_text?: string;
-    input_agent_id?: string;
-}
+export type CollapseStateMap = Record<string, boolean>;
 
+/**
+ * 状态管理器
+ * 职责：防抖保存、缓存管理、状态恢复
+ */
 export class StateManager {
     private collapseStatesCache: CollapseStateMap = {};
     private uiStateSaveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -19,8 +18,8 @@ export class StateManager {
     private readonly INPUT_STATE_SAVE_DEBOUNCE = 1000;
 
     constructor(
-        private engine: ILLMSessionEngine,
-        private sessionManager: SessionManager,
+        private stateService: StateService,
+        private contentService: any, // 用于检查 isGenerating
         private nodeId: string
     ) { }
 
@@ -44,7 +43,7 @@ export class StateManager {
     scheduleUIStateSave(states: CollapseStateMap): void {
         this.collapseStatesCache = states;
 
-        if (this.sessionManager.isGenerating()) {
+        if (this.contentService.isGenerating()) {
             return;
         }
 
@@ -53,7 +52,7 @@ export class StateManager {
         }
 
         this.uiStateSaveTimer = setTimeout(async () => {
-            if (!this.sessionManager.isGenerating()) {
+            if (!this.contentService.isGenerating()) {
                 await this.saveUIState();
             }
         }, this.UI_STATE_SAVE_DEBOUNCE);
@@ -63,7 +62,7 @@ export class StateManager {
      * 防抖保存输入状态
      */
     scheduleInputStateSave(): void {
-        if (this.sessionManager.isGenerating()) {
+        if (this.contentService.isGenerating()) {
             return;
         }
 
@@ -72,7 +71,7 @@ export class StateManager {
         }
 
         this.inputStateSaveTimer = setTimeout(async () => {
-            if (!this.sessionManager.isGenerating()) {
+            if (!this.contentService.isGenerating()) {
                 await this.saveUIState();
             }
         }, this.INPUT_STATE_SAVE_DEBOUNCE);
@@ -86,39 +85,26 @@ export class StateManager {
 
         const inputConfig = chatInput?.getConfig();
 
-        try {
-            const payload: UIStatePayload = {
-                collapse_states: this.collapseStatesCache,
-                input_text: inputConfig?.text,
-                input_agent_id: inputConfig?.agentId,
-            };
+        const payload: UIState = {
+            collapse_states: this.collapseStatesCache,
+            input_text: inputConfig?.text,
+            input_agent_id: inputConfig?.agentId,
+        };
 
-            await this.engine.updateUIState(this.nodeId, payload);
-            console.log('[StateManager] UI state saved');
-        } catch (e: any) {
-            if (e.message?.includes('not found') || e.message?.includes('Node not found')) {
-                return;
-            }
-            console.warn('[StateManager] Failed to save UI state:', e);
-        }
+        await this.stateService.saveUIState(this.nodeId, payload);
     }
 
     /**
      * 加载 UI 状态
      */
-    async loadUIState(): Promise<UIStatePayload | null> {
-        try {
-            const savedState = await this.engine.getUIState(this.nodeId) as UIStatePayload;
+    async loadUIState(): Promise<UIState | null> {
+        const savedState = await this.stateService.loadUIState(this.nodeId);
 
-            if (savedState?.collapse_states) {
-                this.collapseStatesCache = savedState.collapse_states;
-            }
-
-            return savedState;
-        } catch (e) {
-            console.warn('[StateManager] Failed to load UI state:', e);
-            return null;
+        if (savedState?.collapse_states) {
+            this.collapseStatesCache = savedState.collapse_states;
         }
+
+        return savedState;
     }
 
     /**
@@ -129,8 +115,8 @@ export class StateManager {
         options: {
             initialInputState?: { text?: string; agentId?: string };
             isNewSession?: boolean;
-            savedState?: UIStatePayload | null;
-            sessionSettings?: ChatSessionSettings;
+            savedState?: UIState | null;
+            sessionSettings?: any;
         }
     ): void {
         // 优先级 1：外部指定的初始状态
