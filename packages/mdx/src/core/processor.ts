@@ -150,10 +150,12 @@ export class MDxProcessor {
             body = parsed.body;
         }
     } catch (error) {
-        // 解析失败（例如格式错误的 frontmatter），降级处理：
+    // ✅ 记录警告，但不中断流程
         // 将整个文本视为 body，不提取 attributes
-        // console.warn('[MDxProcessor] Frontmatter parsing failed, treating content as raw body.', error);
+    console.warn('[MDxProcessor] Invalid frontmatter format, treating content as plain body:', error);
         body = markdownText; 
+    // ✅ 在 metadata 中标记错误，便于调试
+    frontmatter._frontmatterError = error instanceof Error ? error.message : String(error);
     }
 
     const metadata: Record<string, any> = { ...frontmatter };

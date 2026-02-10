@@ -1,5 +1,5 @@
 // @file: mdx/renderer/renderer.ts
-import { Marked } from 'marked';
+import { Marked,Tokens } from 'marked';
 import { PluginManager } from '../core/plugin-manager';
 import type { MDxPlugin } from '../core/plugin';
 import type { IPersistenceAdapter, ISessionEngine } from '@itookit/common';
@@ -94,21 +94,10 @@ export class MDxRenderer {
    */
   private configureMarked(markedInstance: Marked, options: RenderOptions): void {
     const renderer = {
-      // @ts-ignore
-      heading(tokenOrText: any, levelOrUndefined: number | undefined) {
-        let text: string;
-        let level: number;
-
-        // 适配 Marked v12+ (对象参数)
-        if (typeof tokenOrText === 'object' && tokenOrText !== null && !Array.isArray(tokenOrText)) {
-          text = tokenOrText.text || '';
-          level = tokenOrText.depth || 1;
-        } 
-        // 适配旧版 (字符串参数)
-        else {
-          text = String(tokenOrText);
-          level = levelOrUndefined || 1;
-        }
+    // ✅ 修复：使用正确的 Marked v16 签名
+    heading(token: Tokens.Heading): string {
+      const text = token.text;
+      const level = token.depth;
 
         // 移除可能存在的 HTML 标签以生成干净的 ID
         const cleanText = text.replace(/<[^>]*>/g, '');
