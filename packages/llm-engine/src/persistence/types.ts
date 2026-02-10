@@ -172,6 +172,7 @@ export interface ILLMSessionEngine extends IBaseSessionEngine {
      */
     getBranchTree(
         sessionId: string,
+        nodeId: string,  // 新增参数
         rootNodeId?: string
     ): Promise<BranchTreeNode>;
 

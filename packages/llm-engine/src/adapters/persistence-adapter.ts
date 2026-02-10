@@ -138,8 +138,8 @@ export class PersistenceAdapter {
     /**
      * ✅ 新增：获取分支树
      */
-    async getBranchTree(sessionId: string): Promise<BranchTreeNode> {
-        return this.engine.getBranchTree(sessionId);
+    async getBranchTree(sessionId: string, nodeId: string): Promise<BranchTreeNode> {
+        return this.engine.getBranchTree(sessionId, nodeId);
     }
 
     /**

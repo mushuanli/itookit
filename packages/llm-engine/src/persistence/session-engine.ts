@@ -598,208 +598,206 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
   // ============================================================
   // 分支操作
   // ============================================================
-     /* ✅ 新增：创建新分支
-     * @param nodeId VFS 节点 ID
-     * @param sessionId 会话 ID
-     * @param sourceMessageId 源消息 ID
-     * @param options 分支选项
-     */
-    async createBranch(
-        nodeId: string,
-        sessionId: string,
-        sourceMessageId: string,
-        options?: {
-            name?: string;
-            copyContent?: boolean;
-            createdFrom?: 'retry' | 'edit' | 'manual';
+  /* ✅ 新增：创建新分支
+  * @param nodeId VFS 节点 ID
+  * @param sessionId 会话 ID
+  * @param sourceMessageId 源消息 ID
+  * @param options 分支选项
+  */
+  async createBranch(
+    nodeId: string,
+    sessionId: string,
+    sourceMessageId: string,
+    options?: {
+      name?: string;
+      copyContent?: boolean;
+      createdFrom?: 'retry' | 'edit' | 'manual';
+    }
+  ): Promise<string> {
+    return this.lockManager.acquire(`session:${sessionId}`, async () => {
+      const manifest = await this.getManifest(nodeId);
+      const sourceNode = await this.readJson<ChatNode>(
+        this.getNodePath(sessionId, sourceMessageId)
+      );
+
+      if (!sourceNode) {
+        throw new Error('Source node not found');
+      }
+
+      // 生成新节点 ID
+      const newNodeId = generateUUID();
+      const now = new Date().toISOString();
+
+      // 创建新节点（复制源节点）
+      const newNode: ChatNode = {
+        ...sourceNode,
+        id: newNodeId,
+        created_at: now,
+        children_ids: [],
+        meta: {
+          ...sourceNode.meta,
+          branchMetadata: {
+            branchName: options?.name,
+            createdFrom: options?.createdFrom || 'manual',
+            createdAt: now
+          }
         }
-    ): Promise<string> {
-        return this.lockManager.acquire(`session:${sessionId}`, async () => {
-            const manifest = await this.getManifest(nodeId);
-            const sourceNode = await this.readJson<ChatNode>(
-                this.getNodePath(sessionId, sourceMessageId)
+      };
+
+      // 如果不复制内容，清空
+      if (!options?.copyContent) {
+        newNode.content = '';
+      }
+
+      // 写入新节点
+      await this.writeJson(this.getNodePath(sessionId, newNodeId), newNode);
+
+      // 更新父节点的 children_ids
+      if (sourceNode.parent_id) {
+        const parent = await this.readJson<ChatNode>(
+          this.getNodePath(sessionId, sourceNode.parent_id)
+        );
+        if (parent) {
+          if (!parent.children_ids.includes(newNodeId)) {
+            parent.children_ids.push(newNodeId);
+            await this.writeJson(
+              this.getNodePath(sessionId, sourceNode.parent_id),
+              parent
             );
-
-            if (!sourceNode) {
-                throw new Error('Source node not found');
-            }
-
-            // 生成新节点 ID
-            const newNodeId = generateUUID();
-            const now = new Date().toISOString();
-
-            // 创建新节点（复制源节点）
-            const newNode: ChatNode = {
-                ...sourceNode,
-                id: newNodeId,
-                created_at: now,
-                children_ids: [],
-                meta: {
-                    ...sourceNode.meta,
-                    branchMetadata: {
-                        branchName: options?.name,
-                        createdFrom: options?.createdFrom || 'manual',
-                        createdAt: now
-                    }
-                }
-            };
-
-            // 如果不复制内容，清空
-            if (!options?.copyContent) {
-                newNode.content = '';
-            }
-
-            // 写入新节点
-            await this.writeJson(this.getNodePath(sessionId, newNodeId), newNode);
-
-            // 更新父节点的 children_ids
-            if (sourceNode.parent_id) {
-                const parent = await this.readJson<ChatNode>(
-                    this.getNodePath(sessionId, sourceNode.parent_id)
-                );
-                if (parent) {
-                    if (!parent.children_ids.includes(newNodeId)) {
-                        parent.children_ids.push(newNodeId);
-                        await this.writeJson(
-                            this.getNodePath(sessionId, sourceNode.parent_id),
-                            parent
-                        );
-                    }
-                }
-            }
-
-            // 更新 Manifest（切换到新分支）
-            manifest.current_head = newNodeId;
-            manifest.branches[manifest.current_branch] = newNodeId;
-            manifest.updated_at = now;
-
-            await this.engine.writeContent(nodeId, JSON.stringify(manifest, null, 2));
-
-            return newNodeId;
-        });
-    }
-
-    /**
-     * ✅ 新增：获取分支树
-     * @param sessionId 会话 ID
-     * @param rootNodeId 根节点 ID（可选，默认从 manifest 获取）
-     */
-    async getBranchTree(
-        sessionId: string,
-        rootNodeId?: string
-    ): Promise<BranchTreeNode> {
-        const manifest = await this.getManifest(
-            // 需要从 sessionId 反查 nodeId，这里简化处理
-            // 实际应该在调用时传入 nodeId
-            '' // TODO: 需要优化
-        );
-
-        const root = rootNodeId || manifest.root_id;
-        return this.buildBranchTreeRecursive(sessionId, root, manifest.current_head);
-    }
-
-    /**
-     * 递归构建分支树
-     */
-    private async buildBranchTreeRecursive(
-        sessionId: string,
-        nodeId: string,
-        activeNodeId: string
-    ): Promise<BranchTreeNode> {
-        const node = await this.readJson<ChatNode>(
-            this.getNodePath(sessionId, nodeId)
-        );
-
-        if (!node) {
-            throw new Error(`Node ${nodeId} not found`);
+          }
         }
+      }
 
-        const children: BranchTreeNode[] = [];
+      // 更新 Manifest（切换到新分支）
+      manifest.current_head = newNodeId;
+      manifest.branches[manifest.current_branch] = newNodeId;
+      manifest.updated_at = now;
+
+      await this.engine.writeContent(nodeId, JSON.stringify(manifest, null, 2));
+
+      return newNodeId;
+    });
+  }
+
+  /**
+   * ✅ 新增：获取分支树
+   * @param sessionId 会话 ID
+* @param nodeId VFS 节点 ID（.chat 文件的 ID）
+   * @param rootNodeId 根节点 ID（可选，默认从 manifest 获取）
+   */
+  async getBranchTree(
+    sessionId: string,
+    nodeId: string,
+    rootNodeId?: string
+  ): Promise<BranchTreeNode> {
+    const manifest = await this.getManifest(nodeId);
+
+    const root = rootNodeId || manifest.root_id;
+    return this.buildBranchTreeRecursive(sessionId, root, manifest.current_head);
+  }
+
+  /**
+   * 递归构建分支树
+   */
+  private async buildBranchTreeRecursive(
+    sessionId: string,
+    nodeId: string,
+    activeNodeId: string
+  ): Promise<BranchTreeNode> {
+    const node = await this.readJson<ChatNode>(
+      this.getNodePath(sessionId, nodeId)
+    );
+
+    if (!node) {
+      throw new Error(`Node ${nodeId} not found`);
+    }
+
+    const children: BranchTreeNode[] = [];
+    for (const childId of node.children_ids) {
+      const childNode = await this.buildBranchTreeRecursive(
+        sessionId,
+        childId,
+        activeNodeId
+      );
+      children.push(childNode);
+    }
+
+    return {
+      id: nodeId,
+      role: node.role,
+      content: node.content,
+      timestamp: new Date(node.created_at).getTime(),
+      isActive: nodeId === activeNodeId,
+      branchName: node.meta?.branchMetadata?.branchName,
+      createdFrom: node.meta?.branchMetadata?.createdFrom,
+      children
+    };
+  }
+
+  /**
+   * ✅ 新增：重命名分支
+   */
+  async renameBranch(
+    sessionId: string,
+    nodeId: string,
+    newName: string
+  ): Promise<void> {
+    return this.lockManager.acquire(`node:${sessionId}:${nodeId}`, async () => {
+      const path = this.getNodePath(sessionId, nodeId);
+      const node = await this.readJson<ChatNode>(path);
+
+      if (!node) {
+        throw new Error('Node not found');
+      }
+
+      if (!node.meta) {
+        node.meta = {};
+      }
+
+      if (!node.meta.branchMetadata) {
+        node.meta.branchMetadata = {};
+      }
+
+      node.meta.branchMetadata.branchName = newName;
+
+      await this.writeJson(path, node);
+    });
+  }
+
+  /**
+   * ✅ 新增：删除分支（级联删除子节点）
+   */
+  async deleteBranch(
+    sessionId: string,
+    nodeId: string,
+    options?: { cascade?: boolean }
+  ): Promise<string[]> {
+    const deletedIds: string[] = [];
+
+    const deleteRecursive = async (id: string) => {
+      const node = await this.readJson<ChatNode>(
+        this.getNodePath(sessionId, id)
+      );
+
+      if (!node) return;
+
+      // 如果启用级联删除，递归删除子节点
+      if (options?.cascade && node.children_ids.length > 0) {
         for (const childId of node.children_ids) {
-            const childNode = await this.buildBranchTreeRecursive(
-                sessionId,
-                childId,
-                activeNodeId
-            );
-            children.push(childNode);
+          await deleteRecursive(childId);
         }
+      }
 
-        return {
-            id: nodeId,
-            role: node.role,
-            content: node.content,
-            timestamp: new Date(node.created_at).getTime(),
-            isActive: nodeId === activeNodeId,
-            branchName: node.meta?.branchMetadata?.branchName,
-            createdFrom: node.meta?.branchMetadata?.createdFrom,
-            children
-        };
-    }
+      // 软删除节点
+      node.status = 'deleted';
+      await this.writeJson(this.getNodePath(sessionId, id), node);
+      deletedIds.push(id);
+    };
 
-    /**
-     * ✅ 新增：重命名分支
-     */
-    async renameBranch(
-        sessionId: string,
-        nodeId: string,
-        newName: string
-    ): Promise<void> {
-        return this.lockManager.acquire(`node:${sessionId}:${nodeId}`, async () => {
-            const path = this.getNodePath(sessionId, nodeId);
-            const node = await this.readJson<ChatNode>(path);
+    await deleteRecursive(nodeId);
 
-            if (!node) {
-                throw new Error('Node not found');
-            }
-
-            if (!node.meta) {
-                node.meta = {};
-            }
-
-            if (!node.meta.branchMetadata) {
-                node.meta.branchMetadata = {};
-            }
-
-            node.meta.branchMetadata.branchName = newName;
-
-            await this.writeJson(path, node);
-        });
-    }
-
-    /**
-     * ✅ 新增：删除分支（级联删除子节点）
-     */
-    async deleteBranch(
-        sessionId: string,
-        nodeId: string,
-        options?: { cascade?: boolean }
-    ): Promise<string[]> {
-        const deletedIds: string[] = [];
-
-        const deleteRecursive = async (id: string) => {
-            const node = await this.readJson<ChatNode>(
-                this.getNodePath(sessionId, id)
-            );
-
-            if (!node) return;
-
-            // 如果启用级联删除，递归删除子节点
-            if (options?.cascade && node.children_ids.length > 0) {
-                for (const childId of node.children_ids) {
-                    await deleteRecursive(childId);
-                }
-            }
-
-            // 软删除节点
-            node.status = 'deleted';
-            await this.writeJson(this.getNodePath(sessionId, id), node);
-            deletedIds.push(id);
-        };
-
-        await deleteRecursive(nodeId);
-
-        return deletedIds;
-    }
+    return deletedIds;
+  }
 
   /**
    * 切换分支
