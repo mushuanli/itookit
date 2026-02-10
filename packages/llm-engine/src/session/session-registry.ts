@@ -150,6 +150,8 @@ export class SessionRegistry {
 
             return existing;
         }
+        // ✅ 新增：加载前验证并清理 manifest
+        await this.validateAndCleanManifest(nodeId, sessionId);
 
         // 创建运行时
         const runtime: SessionRuntime = {
@@ -2063,6 +2065,81 @@ export class SessionRegistry {
         // 4. 最终兜底
         console.log(`[resolveAgentIdForResend] No agentId found, using default`);
         return 'default';
+    }
+
+    /**
+     * ✅ 新增：验证并清理 manifest 中的无效引用
+     */
+    private async validateAndCleanManifest(nodeId: string, sessionId: string): Promise<void> {
+        try {
+            const manifest = await this.persistence.getManifest(nodeId);
+            let needsUpdate = false;
+
+            // 1. 验证 current_head
+            //const currentHeadPath = `${sessionId}/.${manifest.current_head}.json`;
+            const currentHeadExists = await this.checkNodeExists(sessionId, manifest.current_head);
+
+            if (!currentHeadExists) {
+                console.warn(`[SessionRegistry] current_head ${manifest.current_head} not found, resetting to root`);
+                manifest.current_head = manifest.root_id;
+                manifest.branches[manifest.current_branch] = manifest.root_id;
+                needsUpdate = true;
+            }
+
+            // 2. 验证所有分支
+            const validBranches: Record<string, string> = {};
+            for (const [branchName, branchHead] of Object.entries(manifest.branches)) {
+                const branchExists = await this.checkNodeExists(sessionId, branchHead);
+
+                if (branchExists) {
+                    validBranches[branchName] = branchHead;
+                } else {
+                    console.warn(`[SessionRegistry] Branch "${branchName}" head ${branchHead} not found, removing`);
+                    needsUpdate = true;
+
+                    // 如果是当前分支，回退到 root
+                    if (branchName === manifest.current_branch) {
+                        validBranches[branchName] = manifest.root_id;
+                        manifest.current_head = manifest.root_id;
+                    }
+                }
+            }
+
+            // 3. 确保至少有一个分支
+            if (Object.keys(validBranches).length === 0) {
+                console.warn(`[SessionRegistry] No valid branches found, creating default branch`);
+                validBranches['main'] = manifest.root_id;
+                manifest.current_branch = 'main';
+                manifest.current_head = manifest.root_id;
+                needsUpdate = true;
+            }
+
+            manifest.branches = validBranches;
+
+            // 4. 如果有变更，更新 manifest
+            if (needsUpdate) {
+                manifest.updated_at = new Date().toISOString();
+                await this.agentService.updateManifest(nodeId, manifest);
+                console.log(`[SessionRegistry] Cleaned manifest for session ${sessionId}`);
+            }
+
+        } catch (e) {
+            console.error(`[SessionRegistry] Failed to validate manifest for ${sessionId}:`, e);
+            // 不抛出错误，允许继续加载（可能是新会话）
+        }
+    }
+
+    /**
+     * ✅ 新增：检查节点是否存在
+     */
+    private async checkNodeExists(sessionId: string, nodeId: string): Promise<boolean> {
+        try {
+            const nodePath = `/.${sessionId}/.${nodeId}.json`;
+            const resolvedId = await this.agentService.resolvePath(nodePath);
+            return resolvedId !== null;
+        } catch {
+            return false;
+        }
     }
 
     /**

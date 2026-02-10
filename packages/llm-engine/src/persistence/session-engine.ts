@@ -24,7 +24,7 @@ import {
   ILLMSessionEngine,
   BranchTreeNode,
 } from './types';
-import { LockManager } from './LockManager';
+import { LockManager } from '../utils/LockManager';
 import { ChatSessionSettings, DEFAULT_SESSION_SETTINGS } from '../core/types';
 
 // 调试日志
@@ -1067,6 +1067,8 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
             const manifest = JSON.parse(str) as ChatManifest;
 
             if (manifest.id) {
+              // ✅ 新增：清理 manifest 中的节点引用
+              await this.cleanupManifestReferences(nodeId, manifest);
               // 删除对应的隐藏数据目录
               const hiddenDirPath = this.getHiddenDir(manifest.id);
               const hiddenDirId = await this.engine.resolvePath(hiddenDirPath);
@@ -1091,6 +1093,55 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
     await this.engine.delete(ids);
 
     this.notify();
+  }
+
+  /**
+   * ✅ 新增：清理 manifest 中的无效引用
+   */
+  private async cleanupManifestReferences(
+    nodeId: string,
+    manifest: ChatManifest
+  ): Promise<void> {
+    let needsUpdate = false;
+
+    // 1. 检查 current_head 是否存在
+    const currentHeadPath = this.getNodePath(manifest.id, manifest.current_head);
+    const currentHeadExists = await this.readJson<ChatNode>(currentHeadPath);
+
+    if (!currentHeadExists) {
+      // current_head 不存在，回退到 root_id
+      manifest.current_head = manifest.root_id;
+      manifest.branches[manifest.current_branch] = manifest.root_id;
+      needsUpdate = true;
+      log(`Reset current_head to root for session ${manifest.id}`);
+    }
+
+    // 2. 清理 branches 中的无效引用
+    for (const [branchName, branchHead] of Object.entries(manifest.branches)) {
+      const branchPath = this.getNodePath(manifest.id, branchHead);
+      const branchExists = await this.readJson<ChatNode>(branchPath);
+
+      if (!branchExists) {
+        // 分支头节点不存在
+        if (branchName === manifest.current_branch) {
+          // 如果是当前分支，回退到 root
+          manifest.branches[branchName] = manifest.root_id;
+          manifest.current_head = manifest.root_id;
+        } else {
+          // 如果是其他分支，删除该分支
+          delete manifest.branches[branchName];
+        }
+        needsUpdate = true;
+        log(`Cleaned up invalid branch "${branchName}" for session ${manifest.id}`);
+      }
+    }
+
+    // 3. 如果有变更，更新 manifest
+    if (needsUpdate) {
+      manifest.updated_at = new Date().toISOString();
+      await this.engine.writeContent(nodeId, JSON.stringify(manifest, null, 2));
+      log(`Updated manifest for session ${manifest.id}`);
+    }
   }
 
   /**
