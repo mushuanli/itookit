@@ -1,13 +1,14 @@
 // @file: llm-ui/helpers/NodeActionHandler.ts
 
-import { SessionManager, SessionGroup, ExecutionNode } from '@itookit/llm-engine';
+import { ContentService } from '../services';
 import { HistoryView } from '../components/HistoryView';
 import { ChatInput } from '../components/ChatInput';
 import { NodeAction } from '../core/types';
+import { SessionGroup, ExecutionNode } from '@itookit/llm-engine';
 
 export class NodeActionHandler {
     constructor(
-        private sessionManager: SessionManager,
+        private contentService: ContentService,
         private historyView: HistoryView,
         private chatInput: ChatInput
     ) { }
@@ -42,7 +43,7 @@ export class NodeActionHandler {
     }
 
     private async handleRetry(nodeId: string): Promise<void> {
-        const sessions = this.sessionManager.getSessions();
+        const sessions = this.contentService.getSessions();
         let session = sessions.find(s => s.id === nodeId);
 
         if (!session) {
@@ -58,7 +59,7 @@ export class NodeActionHandler {
             return;
         }
 
-        const canRetry = this.sessionManager.canRetry(session.id);
+        const canRetry = this.contentService.canRetry(session.id);
         if (!canRetry.allowed) {
             console.warn(`[NodeActionHandler] Cannot retry: ${canRetry.reason}`);
             return;
@@ -70,11 +71,11 @@ export class NodeActionHandler {
 
         try {
             if (session.role === 'user') {
-                await this.sessionManager.resendUserMessage(session.id, {
+                await this.contentService.resendUserMessage(session.id, {
                     fallbackAgentId
                 });
             } else {
-                await this.sessionManager.retryGeneration(session.id, {
+                await this.contentService.retryGeneration(session.id, {
                     preserveCurrent: true,
                     navigateToNew: true,
                     fallbackAgentId
@@ -91,7 +92,7 @@ export class NodeActionHandler {
         console.log(`[NodeActionHandler] Deleting: ${nodeId}`);
 
         try {
-            const sessions = this.sessionManager.getSessions();
+            const sessions = this.contentService.getSessions();
             const idsToDelete = this.collectDeletionIds(nodeId, sessions);
 
             console.log(`[NodeActionHandler] IDs to delete:`, idsToDelete);
@@ -99,7 +100,7 @@ export class NodeActionHandler {
             // 乐观更新
             this.historyView.removeMessages(idsToDelete, true);
 
-            await this.sessionManager.deleteMessage(nodeId, {
+            await this.contentService.deleteMessage(nodeId, {
                 mode: 'soft',
                 cascade: false,
                 deleteAssociatedResponses: true
@@ -109,19 +110,19 @@ export class NodeActionHandler {
             console.error('[NodeActionHandler] Delete failed:', e);
 
             // 回滚
-            const sessions = this.sessionManager.getSessions();
+            const sessions = this.contentService.getSessions();
             this.historyView.renderFull(sessions);
             this.historyView.renderError(e);
         }
     }
 
     private async handleEditAndRetry(nodeId: string): Promise<void> {
-        const session = this.sessionManager.getSessions().find(s => s.id === nodeId);
+        const session = this.contentService.getSessions().find(s => s.id === nodeId);
         if (!session || session.role !== 'user') return;
 
         this.chatInput.setLoading(true);
         try {
-            await this.sessionManager.editMessage(nodeId, session.content || '', true);
+            await this.contentService.editAndRetry(nodeId, session.content || '');
         } catch (e: any) {
             console.error('[NodeActionHandler] Edit and retry failed:', e);
             this.historyView.renderError(e);
@@ -135,7 +136,7 @@ export class NodeActionHandler {
         const fallbackAgentId = this.chatInput.getSelectedExecutor() || 'default';
 
         try {
-            await this.sessionManager.resendUserMessage(nodeId, {
+            await this.contentService.resendUserMessage(nodeId, {
                 fallbackAgentId
             });
         } catch (e: any) {
@@ -146,7 +147,7 @@ export class NodeActionHandler {
     }
 
     private async handleSiblingSwitch(nodeId: string, direction: 'prev' | 'next'): Promise<void> {
-        const sessions = this.sessionManager.getSessions();
+        const sessions = this.contentService.getSessions();
         const session = sessions.find(s => s.id === nodeId);
         if (!session) return;
 
@@ -162,7 +163,7 @@ export class NodeActionHandler {
 
         if (newIndex !== currentIndex) {
             try {
-                await this.sessionManager.switchToSibling(nodeId, newIndex);
+                await this.contentService.switchToSibling(nodeId, newIndex);
             } catch (e: any) {
                 console.error('[NodeActionHandler] Sibling switch failed:', e);
                 this.historyView.renderError(e);

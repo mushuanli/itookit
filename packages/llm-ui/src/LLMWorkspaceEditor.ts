@@ -20,6 +20,15 @@ import {
 } from '@itookit/llm-engine';
 import { NodeAction } from './core/types';
 
+// Services
+import {
+    SessionService,
+    ContentService,
+    StateService,
+    AssetService,
+    BranchService,
+} from './services';
+
 // Helpers
 import { AgentLoader } from './helpers/AgentLoader';
 import { StateManager } from './helpers/StateManager';
@@ -46,9 +55,9 @@ export interface LLMEditorOptions extends EditorOptions {
 
 /**
  * LLM 工作区编辑器
- * 
+ *
  * 职责：
- * 1. 协调各个 Helper 和组件
+ * 1. 协调各个 Service、Helper 和组件
  * 2. 实现 IEditor 接口
  * 3. 管理生命周期
  */
@@ -63,6 +72,13 @@ export class LLMWorkspaceEditor implements IEditor {
 
     // 全局注册表引用
     private registry: SessionRegistry;
+
+    // Services
+    private sessionService!: SessionService;
+    private contentService!: ContentService;
+    private stateService!: StateService;
+    private assetService!: AssetService;
+    private branchService!: BranchService;
 
     // Helpers
     private agentLoader!: AgentLoader;
@@ -136,16 +152,19 @@ export class LLMWorkspaceEditor implements IEditor {
             // 1. 渲染布局
             this.renderLayout();
 
-            // 2. 初始化 Helpers
+            // 2. 初始化 Services
+            this.initializeServices();
+
+            // 3. 初始化 Helpers
             this.initializeHelpers();
 
-            // 3. 初始化组件
+            // 4. 初始化组件
             await this.initComponents();
 
-            // 4. 绑定事件
+            // 5. 绑定事件
             this.bindEvents();
 
-            // 5. 加载会话
+            // 6. 加载会话
             await this.loadSession(initialContent);
 
             this.emit('ready');
@@ -163,10 +182,27 @@ export class LLMWorkspaceEditor implements IEditor {
         this.titleInput = this.container.querySelector('#llm-title-input') as HTMLInputElement;
     }
 
+    /**
+     * 初始化 Services
+     */
+    private initializeServices(): void {
+        this.sessionService = new SessionService(this.engine, this.sessionManager);
+        this.contentService = new ContentService(this.sessionManager);
+        this.stateService = new StateService(this.engine);
+        this.assetService = new AssetService(this.engine);
+        this.branchService = new BranchService(this.sessionManager);
+    }
+
+    /**
+     * 初始化 Helpers
+     */
     private initializeHelpers(): void {
         this.agentLoader = new AgentLoader(this.options.agentService, this.sessionManager);
-        this.stateManager = new StateManager(this.engine, this.sessionManager, this.options.nodeId!);
-        //this.sessionLoader = new SessionLoader(this.engine, this.sessionManager, this.historyView);
+        this.stateManager = new StateManager(
+            this.stateService,
+            this.contentService,
+            this.options.nodeId!
+        );
     }
 
     private async initComponents(): Promise<void> {
@@ -191,14 +227,15 @@ export class LLMWorkspaceEditor implements IEditor {
                 initialCollapseStates: this.stateManager.getCollapseStates(),
             }
         );
-    // ✅ 在 historyView 创建后再创建 SessionLoader
-    this.sessionLoader = new SessionLoader(this.engine, this.sessionManager, this.historyView);
+
+        // ✅ 在 historyView 创建后再创建 SessionLoader
+        this.sessionLoader = new SessionLoader(this.sessionService, this.historyView);
 
         // 加载会话设置
         let initialSettings;
         if (this.currentSessionId && !this.options.isNewSession) {
             try {
-                initialSettings = await this.sessionManager.getSessionSettings();
+                initialSettings = await this.sessionService.getSessionSettings();
             } catch (e) {
                 console.warn('[LLMWorkspaceEditor] Failed to load session settings:', e);
             }
@@ -221,7 +258,7 @@ export class LLMWorkspaceEditor implements IEditor {
         this.chatInput = new ChatInput(inputEl, {
             onSend: (text, files, agentId, overrides) =>
                 this.handleUserSend(text, files, agentId, overrides),
-            onStop: () => this.sessionManager.abort(),
+            onStop: () => this.contentService.abort(),
             initialAgents,
             initialConfig,
             onConfigChange: (config) => this.handleConfigChange(config),
@@ -233,9 +270,14 @@ export class LLMWorkspaceEditor implements IEditor {
 
         // 初始化其他 Helpers（依赖组件）
         this.navigationHelper = new NavigationHelper(this.container, this.sessionManager);
-        this.nodeActionHandler = new NodeActionHandler(this.sessionManager, this.historyView, this.chatInput);
+        this.nodeActionHandler = new NodeActionHandler(
+            this.contentService,
+            this.historyView,
+            this.chatInput
+        );
         this.branchManager = new BranchManager(
-            this.sessionManager,
+            this.branchService,
+            this.contentService,
             this.historyView,
             (sessionId) => this.navigationHelper.scrollToSession(sessionId)
         );
@@ -290,7 +332,7 @@ export class LLMWorkspaceEditor implements IEditor {
             this.sessionEventUnsubscribe = null;
         }
 
-        // 加载会话
+        // 加载会话（使用 SessionLoader）
         const { sessionId, snapshot, title } = await this.sessionLoader.loadSession(
             this.options.nodeId,
             this.currentTitle
@@ -305,7 +347,7 @@ export class LLMWorkspaceEditor implements IEditor {
         let sessionSettings;
         if (!this.options.isNewSession) {
             try {
-                sessionSettings = await this.sessionManager.getSessionSettings();
+                sessionSettings = await this.sessionService.getSessionSettings();
             } catch (e) {
                 console.warn('[LLMWorkspaceEditor] Failed to load session settings:', e);
             }
@@ -354,7 +396,7 @@ export class LLMWorkspaceEditor implements IEditor {
             case 'pool_status_changed':
                 this.uiUpdater.updateBackgroundIndicator(
                     event.payload,
-                    this.sessionManager.isGenerating()
+                    this.contentService.isGenerating()
                 );
                 break;
 
@@ -375,7 +417,7 @@ export class LLMWorkspaceEditor implements IEditor {
 
     private async handleContentChange(id: string, content: string, type: 'user' | 'node'): Promise<void> {
         try {
-            await this.sessionManager.updateContent(id, content, type);
+            await this.contentService.updateContent(id, content, type);
             this.emit('change');
         } catch (e) {
             console.error('[LLMWorkspaceEditor] updateContent failed:', e);
@@ -385,7 +427,7 @@ export class LLMWorkspaceEditor implements IEditor {
     private async handleConfigChange(config: ChatInputConfig): Promise<void> {
         if (this.currentSessionId && config.settings) {
             try {
-                await this.sessionManager.saveSessionSettings(config.settings);
+                await this.sessionService.saveSessionSettings(config.settings);
             } catch (e) {
                 console.warn('[LLMWorkspaceEditor] Failed to save session settings:', e);
             }
@@ -400,7 +442,7 @@ export class LLMWorkspaceEditor implements IEditor {
 
         if (this.options.nodeId) {
             try {
-                await this.engine.rename(this.options.nodeId, title);
+                await this.sessionService.renameSession(this.options.nodeId, title);
             } catch (e) {
                 console.error('[LLMWorkspaceEditor] Failed to rename:', e);
             }
@@ -416,7 +458,7 @@ export class LLMWorkspaceEditor implements IEditor {
         }
 
         try {
-            const assetDirId = await this.engine.getAssetDirectoryId(ownerNodeId);
+            const assetDirId = await this.assetService.getAssetDirectoryId(ownerNodeId);
 
             if (!assetDirId) {
                 Toast.info('No attachments found in this chat');
@@ -474,10 +516,9 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     private handleCollapseAll(): void {
-        //const btn = this.container.querySelector('#llm-btn-collapse') as Element;
         this.isAllExpanded = this.uiUpdater.toggleAllBubbles(this.isAllExpanded);
 
-        const sessions = this.sessionManager.getSessions();
+        const sessions = this.contentService.getSessions();
         const collapseStates = this.stateManager.getCollapseStates();
 
         sessions.forEach(s => {
@@ -489,7 +530,7 @@ export class LLMWorkspaceEditor implements IEditor {
 
     private async handleCopy(): Promise<void> {
         const btn = this.container.querySelector('#llm-btn-copy') as HTMLElement;
-        const md = this.sessionManager.exportToMarkdown();
+        const md = this.contentService.exportToMarkdown();
         try {
             await navigator.clipboard.writeText(md);
             this.uiUpdater.showButtonFeedback(btn, '✓');
@@ -500,7 +541,7 @@ export class LLMWorkspaceEditor implements IEditor {
 
     private async handlePrint(): Promise<void> {
         try {
-            const md = this.sessionManager.exportToMarkdown();
+            const md = this.contentService.exportToMarkdown();
 
             await this.getPrintService().print(md, {
                 title: this.currentTitle || 'Chat Conversation',
@@ -532,27 +573,17 @@ export class LLMWorkspaceEditor implements IEditor {
         try {
             let finalText = text || '';
 
-            // 上传附件
+            // 上传附件（使用 AssetService）
             if (files.length > 0) {
-                await Promise.all(files.map(async (file) => {
-                    try {
-                        const arrayBuffer = await file.arrayBuffer();
-                        await this.engine.createAsset(ownerNodeId, file.name, arrayBuffer);
-
-                        console.log(`[LLMWorkspaceEditor] Asset saved: ${file.name}`);
-
-                        const isImage = file.type.startsWith('image/');
-                        const ref = isImage
-                            ? `\n\n![${file.name}](@asset/${file.name})`
-                            : `\n\n[📄 ${file.name}](@asset/${file.name})`;
-
-                        finalText += ref;
-
-                    } catch (uploadErr) {
-                        console.error(`[LLMWorkspaceEditor] Failed to save asset ${file.name}:`, uploadErr);
-                        Toast.error(`Failed to upload ${file.name}`);
-                    }
-                }));
+                try {
+                    const refs = await this.assetService.uploadFiles(ownerNodeId, files);
+                    finalText += '\n\n' + refs.join('\n\n');
+                } catch (uploadErr: any) {
+                    console.error('[LLMWorkspaceEditor] Failed to upload files:', uploadErr);
+                    Toast.error(uploadErr.message || 'Failed to upload files');
+                    this.chatInput.setLoading(false);
+                    return;
+                }
             }
 
             if (!finalText.trim()) {
@@ -560,7 +591,7 @@ export class LLMWorkspaceEditor implements IEditor {
                 return;
             }
 
-            await this.sessionManager.runUserQuery(
+            await this.contentService.runUserQuery(
                 finalText.trim(),
                 files,
                 agentId || 'default',
@@ -588,10 +619,13 @@ export class LLMWorkspaceEditor implements IEditor {
                 onUnfoldAll: () => this.unfoldAllSessions(),
                 onBatchDelete: (ids) => this.handleBatchDelete(ids),
                 onBatchCopy: (ids) => this.handleBatchCopy(ids),
+                onShowBranchTree: () => this.showBranchTree(),
+                onCreateBranch: (sourceId) => this.createBranch(sourceId),
+                onSwitchBranch: (branchId) => this.switchBranch(branchId),
             });
         }
 
-        const sessions = this.sessionManager.getSessions();
+        const sessions = this.contentService.getSessions();
         const collapseStates = this.stateManager.getCollapseStates();
         this.floatingNav.updateItems(sessions, collapseStates);
 
@@ -619,7 +653,7 @@ export class LLMWorkspaceEditor implements IEditor {
      * 复制会话内容
      */
     private async copySessionContent(sessionId: string): Promise<void> {
-        const sessions = this.sessionManager.getSessions();
+        const sessions = this.contentService.getSessions();
         const session = sessions.find(s => s.id === sessionId);
 
         if (session) {
@@ -661,7 +695,7 @@ export class LLMWorkspaceEditor implements IEditor {
         if (this.isAllExpanded) {
             this.isAllExpanded = this.uiUpdater.toggleAllBubbles(this.isAllExpanded);
 
-            const sessions = this.sessionManager.getSessions();
+            const sessions = this.contentService.getSessions();
             const collapseStates = this.stateManager.getCollapseStates();
             sessions.forEach(s => { collapseStates[s.id] = true; });
             this.stateManager.scheduleUIStateSave(collapseStates);
@@ -675,11 +709,38 @@ export class LLMWorkspaceEditor implements IEditor {
         if (!this.isAllExpanded) {
             this.isAllExpanded = this.uiUpdater.toggleAllBubbles(this.isAllExpanded);
 
-            const sessions = this.sessionManager.getSessions();
+            const sessions = this.contentService.getSessions();
             const collapseStates = this.stateManager.getCollapseStates();
             sessions.forEach(s => { collapseStates[s.id] = false; });
             this.stateManager.scheduleUIStateSave(collapseStates);
         }
+    }
+
+    /**
+     * 显示分支树
+     */
+    private async showBranchTree(): Promise<void> {
+        try {
+            const tree = await this.branchService.getBranchTree();
+            this.historyView.showBranchTree(tree);
+        } catch (e: any) {
+            console.error('[LLMWorkspaceEditor] Failed to show branch tree:', e);
+            Toast.error('Failed to load branch tree');
+        }
+    }
+
+    /**
+     * 创建分支
+     */
+    private async createBranch(sourceId: string): Promise<void> {
+        await this.branchManager.handleBranchAction('create', sourceId);
+    }
+
+    /**
+     * 切换分支
+     */
+    private async switchBranch(branchId: string): Promise<void> {
+        await this.branchManager.handleBranchAction('select', branchId);
     }
 
     /**
@@ -696,7 +757,7 @@ export class LLMWorkspaceEditor implements IEditor {
             // ✅ 用户取消，通知导航面板更新（清空选择）
             if (this.floatingNav) {
                 this.floatingNav.updateItems(
-                    this.sessionManager.getSessions(),
+                    this.contentService.getSessions(),
                     this.historyView.getCollapseStates()
                 );
             }
@@ -704,7 +765,7 @@ export class LLMWorkspaceEditor implements IEditor {
         }
 
         // ✅ 保存原始状态用于回滚
-        const originalSessions = this.sessionManager.getSessions();
+        const originalSessions = this.contentService.getSessions();
         const successIds: string[] = [];
         const failedIds: string[] = [];
 
@@ -713,7 +774,7 @@ export class LLMWorkspaceEditor implements IEditor {
 
             for (const id of ids) {
                 try {
-                    await this.sessionManager.deleteMessage(id, {
+                    await this.contentService.deleteMessage(id, {
                         mode: 'soft',
                         cascade: false,
                         deleteAssociatedResponses: true
@@ -740,14 +801,14 @@ export class LLMWorkspaceEditor implements IEditor {
 
             } else {
                 Toast.warning(`Deleted ${successIds.length} messages, ${failedIds.length} failed`);
-                const currentSessions = this.sessionManager.getSessions();
+                const currentSessions = this.contentService.getSessions();
                 this.historyView.renderFull(currentSessions);
                 this.emit('change');
             }
 
             // ✅ 更新导航面板（清空选择，刷新列表）
             if (this.floatingNav) {
-                const sessions = this.sessionManager.getSessions();
+                const sessions = this.contentService.getSessions();
                 const collapseStates = this.historyView.getCollapseStates();
                 this.floatingNav.updateItems(sessions, collapseStates);
             }
@@ -773,7 +834,7 @@ export class LLMWorkspaceEditor implements IEditor {
     private async handleBatchCopy(ids: string[]): Promise<void> {
         if (ids.length === 0) return;
 
-        const sessions = this.sessionManager.getSessions();
+        const sessions = this.contentService.getSessions();
         const contentArr: string[] = [];
 
         const sortedIds = ids.sort((a, b) => {
@@ -842,8 +903,8 @@ export class LLMWorkspaceEditor implements IEditor {
         return JSON.stringify({
             sessionId: this.currentSessionId,
             title: this.currentTitle,
-            messageCount: this.sessionManager.getSessions().length,
-            status: this.sessionManager.getStatus()
+            messageCount: this.contentService.getSessions().length,
+            status: this.contentService.getStatus()
         }, null, 2);
     }
 
@@ -878,7 +939,7 @@ export class LLMWorkspaceEditor implements IEditor {
         this.stateManager?.cleanup();
 
         // 只在非删除、非流式模式下保存状态
-        if (!this.isBeingDeleted && !this.sessionManager.isGenerating()) {
+        if (!this.isBeingDeleted && !this.contentService.isGenerating()) {
             this.stateManager?.saveUIState(this.chatInput, this.isBeingDeleted).catch(() => { });
         }
 
@@ -941,7 +1002,7 @@ export class LLMWorkspaceEditor implements IEditor {
     setReadOnly() { }
     get commands() { return {}; }
     async getHeadings() { return []; }
-    async getSearchableText() { return this.sessionManager.exportToMarkdown(); }
+    async getSearchableText() { return this.contentService.exportToMarkdown(); }
     async getSummary() { return null; }
     async navigateTo() { }
     async search() { return []; }
