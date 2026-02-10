@@ -398,9 +398,12 @@ export class CoreEditorPlugin implements MDxPlugin {
     const lastTriggerIndex = lineText.lastIndexOf(triggerChar);
     if (lastTriggerIndex === -1) return null;
 
-    // 检查触发字符前是否为空白或行首
+  // ✅ 修复：先检查索引，再访问字符
+  if (lastTriggerIndex > 0) {
     const charBefore = lineText[lastTriggerIndex - 1];
-    if (charBefore && !/\s/.test(charBefore) && lastTriggerIndex > 0) return null;
+    // 检查触发字符前是否为空白
+    if (charBefore && !/\s/.test(charBefore)) return null;
+  }
 
     const query = lineText.slice(lastTriggerIndex + triggerChar.length);
     

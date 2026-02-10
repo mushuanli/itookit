@@ -541,32 +541,17 @@ export class MDxEditor extends IEditor {
       return positions;
     }
 
-    const lines = text.split('\n');
-    let currentPos = 0;
-    let inCodeBlock = false;
-
-    // 用于处理重复标题
-    const slugCounts = new Map<string, number>();
-
-    for (const line of lines) {
-      const lineStart = currentPos;
-      const lineEnd = currentPos + line.length;
-
-      const trimmedLine = line.trim();
-
-      // 检测代码块边界
-      if (trimmedLine.startsWith('```') || trimmedLine.startsWith('~~~')) {
-        inCodeBlock = !inCodeBlock;
-        currentPos = lineEnd + 1;
-        continue;
-      }
-
-      // 只在代码块外处理标题
-      if (!inCodeBlock) {
-        const headingMatch = line.match(/^(#{1,6})\s+(.+)$/);
-        if (headingMatch) {
-          const level = headingMatch[1].length;
-          const headingText = headingMatch[2].trim();
+  // ✅ 优化：预处理 - 移除代码块内容
+  const textWithoutCodeBlocks = text.replace(/```[\s\S]*?```|~~~[\s\S]*?~~~/g, '');
+  
+  // ✅ 优化：一次性匹配所有标题
+  const headingRegex = /^(#{1,6})\s+(.+)$/gm;
+  const slugCounts = new Map<string, number>();
+  
+  let match: RegExpExecArray | null;
+  while ((match = headingRegex.exec(textWithoutCodeBlocks)) !== null) {
+    const level = match[1].length;
+    const headingText = match[2].trim();
           const baseSlug = slugify(headingText);
 
           // 处理重复标题：添加数字后缀
@@ -577,16 +562,12 @@ export class MDxEditor extends IEditor {
           const elementId = `heading-${finalSlug}`;
 
           positions.set(elementId, {
-            from: lineStart,
-            to: lineEnd,
+      from: match.index,
+      to: match.index + match[0].length,
             level,
             text: headingText
           });
         }
-      }
-
-      currentPos = lineEnd + 1; // +1 for newline character
-    }
 
     this.headingPositionsCache = { version: this.docVersion, positions };
     return positions;
