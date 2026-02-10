@@ -21,7 +21,7 @@ import { ENGINE_DEFAULTS } from '../core/constants';
 import { SessionState } from './session-state';
 import { KernelAdapter, getKernelAdapter } from '../adapters/kernel-adapter';
 import { PersistenceAdapter } from '../adapters/persistence-adapter';
-import { ILLMSessionEngine,BranchTreeNode } from '../persistence/types';
+import { ILLMSessionEngine, BranchTreeNode } from '../persistence/types';
 import { IAgentService } from '../services/agent-service';
 import { ExecutorConfig } from '@itookit/llm-kernel';
 import { Converters } from '../utils/converters';
@@ -1559,7 +1559,7 @@ export class SessionRegistry {
             );
         }
 
-        return this.persistence.getBranchTree(sessionId);
+        return this.persistence.getBranchTree(sessionId, runtime.nodeId);
     }
 
     /**
