@@ -21,7 +21,7 @@ import { ENGINE_DEFAULTS } from '../core/constants';
 import { SessionState } from './session-state';
 import { KernelAdapter, getKernelAdapter } from '../adapters/kernel-adapter';
 import { PersistenceAdapter } from '../adapters/persistence-adapter';
-import { ILLMSessionEngine } from '../persistence/types';
+import { ILLMSessionEngine,BranchTreeNode } from '../persistence/types';
 import { IAgentService } from '../services/agent-service';
 import { ExecutorConfig } from '@itookit/llm-kernel';
 import { Converters } from '../utils/converters';
@@ -1493,6 +1493,132 @@ export class SessionRegistry {
             console.error('[SessionRegistry] switchToSibling failed:', e);
             throw EngineError.from(e);
         }
+    }
+
+    /**
+     * ✅ 新增：创建分支
+     */
+    async createBranch(
+        sessionId: string,
+        sourceMessageId: string,
+        options?: {
+            name?: string;
+            copyContent?: boolean;
+            createdFrom?: 'retry' | 'edit' | 'manual';
+        }
+    ): Promise<string> {
+        this.ensureInitialized();
+
+        const runtime = this.sessions.get(sessionId);
+        if (!runtime) {
+            throw new EngineError(
+                EngineErrorCode.SESSION_NOT_FOUND,
+                'Session not registered'
+            );
+        }
+
+        // 调用持久化层
+        const newNodeId = await this.persistence.createBranch(
+            runtime.nodeId,
+            sessionId,
+            sourceMessageId,
+            options
+        );
+
+        // 重新加载会话数据
+        const state = this.sessionStates.get(sessionId);
+        if (state) {
+            state.clear();
+            await this.loadSessionData(state, runtime.nodeId, sessionId);
+        }
+
+        // 发送事件
+        this.emitSessionEvent(sessionId, {
+            type: 'branch_created',
+            payload: {
+                sourceId: sourceMessageId,
+                newId: newNodeId,
+                branchName: options?.name
+            }
+        } as any); // 需要扩展 OrchestratorEvent 类型
+
+        return newNodeId;
+    }
+
+    /**
+     * ✅ 新增：获取分支树
+     */
+    async getBranchTree(sessionId: string): Promise<BranchTreeNode> {
+        this.ensureInitialized();
+
+        const runtime = this.sessions.get(sessionId);
+        if (!runtime) {
+            throw new EngineError(
+                EngineErrorCode.SESSION_NOT_FOUND,
+                'Session not registered'
+            );
+        }
+
+        return this.persistence.getBranchTree(sessionId);
+    }
+
+    /**
+     * ✅ 新增：重命名分支
+     */
+    async renameBranch(
+        sessionId: string,
+        nodeId: string,
+        newName: string
+    ): Promise<void> {
+        this.ensureInitialized();
+
+        await this.persistence.renameBranch(sessionId, nodeId, newName);
+
+        // 更新内存状态
+        const state = this.sessionStates.get(sessionId);
+        if (state) {
+            const session = state.findSessionById(nodeId);
+            if (session && session.branchInfo) {
+                session.branchInfo.name = newName;
+            }
+        }
+
+        // 发送事件
+        this.emitSessionEvent(sessionId, {
+            type: 'branch_renamed',
+            payload: { nodeId, newName }
+        } as any);
+    }
+
+    /**
+     * ✅ 新增：删除分支
+     */
+    async deleteBranch(
+        sessionId: string,
+        nodeId: string,
+        options?: { cascade?: boolean }
+    ): Promise<void> {
+        this.ensureInitialized();
+
+        const deletedIds = await this.persistence.deleteBranch(
+            sessionId,
+            nodeId,
+            options
+        );
+
+        // 从内存中移除
+        const state = this.sessionStates.get(sessionId);
+        if (state) {
+            for (const id of deletedIds) {
+                state.removeMessage(id);
+            }
+        }
+
+        // 发送事件
+        this.emitSessionEvent(sessionId, {
+            type: 'messages_deleted',
+            payload: { deletedIds }
+        });
     }
 
     // ================================================================

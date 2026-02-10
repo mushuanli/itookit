@@ -4,7 +4,8 @@ import {
     ILLMSessionEngine,
     ChatNode,
     ChatContextItem,
-    ChatManifest
+    ChatManifest,
+    BranchTreeNode
 } from '../persistence/types';
 import { ChatSessionSettings } from '../core/types';
 
@@ -116,6 +117,51 @@ export class PersistenceAdapter {
 
         // 写回 manifest
         await this.engine.writeContent(nodeId, JSON.stringify(manifest, null, 2));
+    }
+
+    /**
+     * ✅ 新增：创建分支
+     */
+    async createBranch(
+        nodeId: string,
+        sessionId: string,
+        sourceMessageId: string,
+        options?: {
+            name?: string;
+            copyContent?: boolean;
+            createdFrom?: 'retry' | 'edit' | 'manual';
+        }
+    ): Promise<string> {
+        return this.engine.createBranch(nodeId, sessionId, sourceMessageId, options);
+    }
+
+    /**
+     * ✅ 新增：获取分支树
+     */
+    async getBranchTree(sessionId: string): Promise<BranchTreeNode> {
+        return this.engine.getBranchTree(sessionId);
+    }
+
+    /**
+     * ✅ 新增：重命名分支
+     */
+    async renameBranch(
+        sessionId: string,
+        nodeId: string,
+        newName: string
+    ): Promise<void> {
+        return this.engine.renameBranch(sessionId, nodeId, newName);
+    }
+
+    /**
+     * ✅ 新增：删除分支
+     */
+    async deleteBranch(
+        sessionId: string,
+        nodeId: string,
+        options?: { cascade?: boolean }
+    ): Promise<string[]> {
+        return this.engine.deleteBranch(sessionId, nodeId, options);
     }
 
     // ============== 队列操作 ==============

@@ -7,7 +7,7 @@ import {
 } from '@itookit/common';
 import { LLMPrintService, type PrintService, AssetManagerUI } from '@itookit/mdxeditor';
 import { FloatingNavPanel } from './components/FloatingNavPanel';
-import { HistoryView, CollapseStateMap } from './components/HistoryView';
+import { HistoryView, CollapseStateMap,BranchAction } from './components/HistoryView';
 import { ChatInput, ChatInputConfig, ExecutorOption, ModelOption } from './components/ChatInput';
 import { LayoutTemplates } from './components/templates/LayoutTemplates'; // 确保导入
 import {
@@ -234,6 +234,11 @@ export class LLMWorkspaceEditor implements IEditor {
         });
 
         this.bindNavigationEvents();
+
+        // ✅ 新增：设置分支操作回调
+        this.historyView.setBranchActionCallback(
+            (action, nodeId, options) => this.handleBranchAction(action, nodeId, options)
+        );
     }
 
     // ================================================================
@@ -1239,6 +1244,233 @@ export class LLMWorkspaceEditor implements IEditor {
             console.error('[LLMWorkspaceEditor] Send failed:', error);
             this.historyView.renderError(error);
             this.chatInput.setLoading(false);
+        }
+    }
+
+    /**
+     * ✅ 新增：处理分支操作
+     */
+    private async handleBranchAction(
+        action: BranchAction,
+        nodeId: string,
+        options?: { newName?: string; compareWith?: string }
+    ): Promise<void> {
+        try {
+            switch (action) {
+                case 'show-tree':
+                    await this.showBranchTree();
+                    break;
+
+                case 'create':
+                    await this.createBranch(nodeId);
+                    break;
+
+                case 'navigate':
+                    await this.navigateToBranch(nodeId);
+                    break;
+
+                case 'rename':
+                    if (options?.newName) {
+                        await this.renameBranch(nodeId, options.newName);
+                    }
+                    break;
+
+                case 'delete':
+                    await this.deleteBranch(nodeId);
+                    break;
+
+                case 'compare':
+                    if (options?.compareWith) {
+                        await this.compareBranches(nodeId, options.compareWith);
+                    }
+                    break;
+
+                case 'select':
+                    await this.selectBranch(nodeId);
+                    break;
+            }
+        } catch (e: any) {
+            console.error('[LLMWorkspaceEditor] Branch action failed:', e);
+            Toast.error(e.message || 'Branch operation failed');
+        }
+    }
+
+    /**
+     * ✅ 新增：显示分支树
+     */
+    private async showBranchTree(): Promise<void> {
+        const tree = await this.sessionManager.getBranchTree();
+        this.historyView.showBranchTree(tree);
+    }
+
+    /**
+     * ✅ 新增：创建分支
+     */
+    private async createBranch(sourceNodeId: string): Promise<void> {
+        // 显示命名对话框
+        const branchName = await this.promptBranchName();
+        
+        if (branchName === null) {
+            return; // 用户取消
+        }
+
+        await this.sessionManager.createBranch(sourceNodeId, {
+            name: branchName || undefined,
+            copyContent: true
+        });
+
+        Toast.success(`Branch "${branchName || 'Untitled'}" created`);
+        
+        // 刷新视图
+        const sessions = this.sessionManager.getSessions();
+        this.historyView.renderFull(sessions);
+        
+        this.emit('change');
+    }
+
+    /**
+     * ✅ 新增：提示输入分支名称
+     */
+    private async promptBranchName(): Promise<string | null> {
+        return new Promise((resolve) => {
+            const dialog = document.createElement('div');
+            dialog.className = 'llm-branch-name-dialog';
+            dialog.innerHTML = `
+                <div class="llm-branch-name-dialog__overlay"></div>
+                <div class="llm-branch-name-dialog__content">
+                    <h4>Create New Branch</h4>
+                    <p>Enter a name for this branch (optional):</p>
+                    <input type="text" class="llm-input" placeholder="Branch name">
+                    <div class="llm-branch-name-dialog__actions">
+                        <button class="llm-btn" data-action="cancel">Cancel</button>
+                        <button class="llm-btn llm-btn--primary" data-action="create">Create</button>
+                    </div>
+                </div>
+            `;
+
+            this.container.appendChild(dialog);
+
+            const input = dialog.querySelector('input') as HTMLInputElement;
+            input.focus();
+
+            const cleanup = () => {
+                dialog.remove();
+            };
+
+            dialog.querySelector('[data-action="create"]')?.addEventListener('click', () => {
+                cleanup();
+                resolve(input.value.trim());
+            });
+
+            dialog.querySelector('[data-action="cancel"]')?.addEventListener('click', () => {
+                cleanup();
+                resolve(null);
+            });
+
+            dialog.querySelector('.llm-branch-name-dialog__overlay')?.addEventListener('click', () => {
+                cleanup();
+                resolve(null);
+            });
+
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    cleanup();
+                    resolve(input.value.trim());
+                } else if (e.key === 'Escape') {
+                    cleanup();
+                    resolve(null);
+                }
+            });
+        });
+    }
+
+    /**
+     * ✅ 新增：导航到分支
+     */
+    private async navigateToBranch(nodeId: string): Promise<void> {
+        // 找到对应的 session
+        const sessions = this.sessionManager.getSessions();
+        const targetSession = sessions.find(s => 
+            s.id === nodeId || 
+            s.persistedNodeId === nodeId ||
+            s.executionRoot?.id === nodeId
+        );
+
+        if (targetSession) {
+            this.scrollToSession(targetSession.id);
+        }
+    }
+
+    /**
+     * ✅ 新增：重命名分支
+     */
+    private async renameBranch(nodeId: string, newName: string): Promise<void> {
+        await this.sessionManager.renameBranch(nodeId, newName);
+        Toast.success('Branch renamed');
+        this.emit('change');
+    }
+
+    /**
+     * ✅ 新增：删除分支
+     */
+    private async deleteBranch(nodeId: string): Promise<void> {
+        const confirmed = await showConfirmDialog(
+            'Delete this branch and all its children?'
+        );
+
+        if (!confirmed) return;
+
+        await this.sessionManager.deleteBranch(nodeId, true);
+        
+        // 刷新视图
+        const sessions = this.sessionManager.getSessions();
+        this.historyView.renderFull(sessions);
+        
+        Toast.success('Branch deleted');
+        this.emit('change');
+    }
+
+    /**
+     * ✅ 新增：对比分支
+     */
+    private async compareBranches(nodeId1: string, nodeId2: string): Promise<void> {
+        const sessions = this.sessionManager.getSessions();
+        
+        const branch1 = sessions.find(s => 
+            s.id === nodeId1 || s.persistedNodeId === nodeId1
+        );
+        const branch2 = sessions.find(s => 
+            s.id === nodeId2 || s.persistedNodeId === nodeId2
+        );
+
+        if (branch1 && branch2) {
+            this.historyView.showBranchCompare(branch1, branch2);
+        } else {
+            Toast.error('Could not find branches to compare');
+        }
+    }
+
+    /**
+     * ✅ 新增：选择分支（切换到该分支）
+     */
+    private async selectBranch(branchId: string): Promise<void> {
+        // 找到分支的 sibling index
+        const sessions = this.sessionManager.getSessions();
+        const targetSession = sessions.find(s => 
+            s.id === branchId || s.persistedNodeId === branchId
+        );
+
+        if (targetSession && targetSession.siblingIndex !== undefined) {
+            await this.sessionManager.switchToSibling(
+                targetSession.id,
+                targetSession.siblingIndex
+            );
+            
+            // 刷新视图
+            const updatedSessions = this.sessionManager.getSessions();
+            this.historyView.renderFull(updatedSessions);
+            
+            this.emit('change');
         }
     }
 
