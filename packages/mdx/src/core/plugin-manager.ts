@@ -25,6 +25,7 @@ class EngineMetadataStore implements ScopedPersistenceStore {
   private pendingUpdates = new Map<string, unknown>();
   private flushTimer: number | null = null;
   private flushPromise: Promise<void> | null = null;
+  private isDestroyed = false; // ✅ 添加销毁标志
 
   constructor(
     private engine: ISessionEngine,
@@ -37,6 +38,8 @@ class EngineMetadataStore implements ScopedPersistenceStore {
   }
 
   async get(key: string): Promise<unknown> {
+    if (this.isDestroyed) return undefined; // ✅ 检查销毁状态
+    
     // 优先从待更新队列获取
     if (this.pendingUpdates.has(key)) {
       return this.pendingUpdates.get(key);
@@ -56,16 +59,22 @@ class EngineMetadataStore implements ScopedPersistenceStore {
   }
 
   async set(key: string, value: unknown): Promise<void> {
+    if (this.isDestroyed) return; // ✅ 检查销毁状态
+    
     this.pendingUpdates.set(key, value);
     this.scheduleFlush();
   }
 
   async remove(key: string): Promise<void> {
+    if (this.isDestroyed) return; // ✅ 检查销毁状态
+    
     this.pendingUpdates.set(key, undefined); // 标记为删除
     this.scheduleFlush();
   }
 
   private scheduleFlush(): void {
+    if (this.isDestroyed) return; // ✅ 检查销毁状态
+    
     if (this.flushTimer) {
       clearTimeout(this.flushTimer);
     }
@@ -73,7 +82,7 @@ class EngineMetadataStore implements ScopedPersistenceStore {
   }
 
   private async flush(): Promise<void> {
-    if (this.pendingUpdates.size === 0) return;
+    if (this.isDestroyed || this.pendingUpdates.size === 0) return; // ✅ 检查销毁状态
     
     // 防止并发 flush
     if (this.flushPromise) {
@@ -115,6 +124,17 @@ class EngineMetadataStore implements ScopedPersistenceStore {
     })();
 
     await this.flushPromise;
+  }
+
+  // ✅ 添加销毁方法
+  destroy(): void {
+    this.isDestroyed = true;
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = null;
+    }
+    this.pendingUpdates.clear();
+    this.flushPromise = null;
   }
 }
 
@@ -529,6 +549,12 @@ export class PluginManager {
     this.eventBus.clear();
     this.serviceContainer.clear();
     this.instanceStores.clear();
+  // ✅ 销毁所有缓存的 store
+  this.storeCache.forEach(store => {
+    if ('destroy' in store && typeof store.destroy === 'function') {
+      store.destroy();
+    }
+  });
     this.storeCache.clear();
     this.codemirrorExtensions = [];
     this.commands.clear();
