@@ -14,7 +14,7 @@ import {
     DEFAULT_SESSION_SETTINGS,
 } from '../core/types';
 import { EngineError, EngineErrorCode } from '../core/errors';
-
+import {BranchTreeNode} from '../persistence/types';
 /**
  * 会话快照
  */
@@ -433,6 +433,71 @@ export class SessionManager {
             sessionGroupId,
             siblingIndex
         );
+    }
+
+    /**
+     * ✅ 新增：创建分支
+     */
+    async createBranch(
+        sourceMessageId: string,
+        options?: {
+            name?: string;
+            copyContent?: boolean;
+        }
+    ): Promise<string> {
+        if (!this.sessionId) {
+            throw new EngineError(
+                EngineErrorCode.SESSION_INVALID,
+                'No session bound'
+            );
+        }
+
+        return this.registry.createBranch(this.sessionId, sourceMessageId, {
+            ...options,
+            createdFrom: 'manual'
+        });
+    }
+
+    /**
+     * ✅ 新增：获取分支树
+     */
+    async getBranchTree(): Promise<BranchTreeNode> {
+        if (!this.sessionId) {
+            throw new EngineError(
+                EngineErrorCode.SESSION_INVALID,
+                'No session bound'
+            );
+        }
+
+        return this.registry.getBranchTree(this.sessionId);
+    }
+
+    /**
+     * ✅ 新增：重命名分支
+     */
+    async renameBranch(nodeId: string, newName: string): Promise<void> {
+        if (!this.sessionId) {
+            throw new EngineError(
+                EngineErrorCode.SESSION_INVALID,
+                'No session bound'
+            );
+        }
+
+        await this.registry.renameBranch(this.sessionId, nodeId, newName);
+    }
+
+    /**
+     * ✅ 新增：删除分支
+     */
+    async deleteBranch(nodeId: string, cascade: boolean = false): Promise<void> {
+        if (!this.sessionId) {
+            throw new EngineError(
+                EngineErrorCode.SESSION_INVALID,
+                'No session bound'
+            );
+        }
+
+        await this.registry.deleteBranch(this.sessionId, nodeId, { cascade });
     }
 
     /**

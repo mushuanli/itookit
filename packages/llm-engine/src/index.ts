@@ -53,7 +53,8 @@ export type {
     ILLMSessionEngine,
     ChatManifest,
     ChatNode,
-    ChatContextItem
+    ChatContextItem,
+    BranchTreeNode
 } from './persistence/types';
 
 // ============================================
