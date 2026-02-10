@@ -2,7 +2,7 @@
 
 import { RestorableItem } from '@itookit/common';
 import { LLMConnection, AgentDefinition } from '@itookit/llm-driver';
-
+import { ChatManifest } from '../persistence/types';
 /**
  * MCP 服务器
  */
@@ -58,6 +58,9 @@ export interface IAgentService {
 
     getRestorableItems(): Promise<RestorableItem[]>;
     restoreItem(type: 'connection' | 'agent', id: string): Promise<void>;
+
+    updateManifest(nodeId: string, manifest: ChatManifest): Promise<void>;
+    resolvePath(path: string): Promise<string | null>;
 
     // Events
     onChange(callback: () => void): () => void;

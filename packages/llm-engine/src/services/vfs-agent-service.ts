@@ -1,6 +1,6 @@
 // @file: llm-engine/src/services/vfs-agent-service.ts
 
-import { 
+import {
     VFS,
     BaseModuleService,
     VFSEventType
@@ -13,19 +13,20 @@ import type {
 import {
     FS_MODULE_AGENTS
 } from '@itookit/common';
-import {    VFSEvent } from '@itookit/vfs';
-import { 
+import { VFSEvent } from '@itookit/vfs';
+import {
     LLMConnection,
-    AgentDefinition,  
+    AgentDefinition,
     CONST_CONFIG_VERSION,
     LLM_PROVIDER_DEFAULTS,
-    DEFAULT_AGENTS, 
-    AGENT_DEFAULT_DIR 
+    DEFAULT_AGENTS,
+    AGENT_DEFAULT_DIR
 } from '@itookit/llm-driver';
-import { 
-    IAgentService, 
-    MCPServer 
+import {
+    IAgentService,
+    MCPServer
 } from './agent-service';
+import { ChatManifest } from '../persistence/types';
 
 // ============================================
 // 常量
@@ -48,7 +49,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
     private _mcpServers: MCPServer[] = [];
     private _syncTimer: ReturnType<typeof setTimeout> | null = null;
     private _eventUnsubscribers: Array<() => void> = [];
-    
+
     constructor(vfs: VFS) {
         super(FS_MODULE_AGENTS, { description: 'AI Agents Configuration' }, vfs);
     }
@@ -74,7 +75,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
 
         const handler = (event: VFSEvent) => {
             const path = event.path || '';
-            
+
             // 检查是否属于当前模块
             const modulePrefix = `/${this.moduleName}`;
             if (!path.startsWith(modulePrefix)) {
@@ -83,7 +84,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
 
             // 获取模块内的相对路径
             const relativePath = path.slice(modulePrefix.length);
-            
+
             const isConnection = relativePath.startsWith(CONNECTIONS_DIR);
             const isMcp = relativePath.startsWith(MCP_DIR);
             const isAgent = relativePath.endsWith('.agent');
@@ -91,7 +92,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
             if (isConnection || isMcp || isAgent) {
                 // 防抖刷新
                 if (this._syncTimer) clearTimeout(this._syncTimer);
-                
+
                 this._syncTimer = setTimeout(async () => {
                     await this.refreshData();
                 }, 300);
@@ -129,7 +130,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
     private async ensureDefaults(): Promise<void> {
         try {
             const versionData = await this.readJson<{ version: number }>(VERSION_FILE);
-            
+
             // 如果版本相同，跳过同步（假设配置变化时会递增版本号）
             if (versionData && versionData.version >= CONST_CONFIG_VERSION) {
                 console.log('[VFSAgentService] Defaults are up to date, skipping sync.');
@@ -141,16 +142,16 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
             // 执行增量同步
             await this.syncDefaultConnections();
             await this.syncDefaultAgents();
-            
+
             // 更新版本号
-            await this.writeJson(VERSION_FILE, { 
-                version: CONST_CONFIG_VERSION, 
-                updatedAt: Date.now() 
+            await this.writeJson(VERSION_FILE, {
+                version: CONST_CONFIG_VERSION,
+                updatedAt: Date.now()
             });
-            
+
             // 刷新内存缓存
             await this.refreshData();
-            
+
             console.log('[VFSAgentService] Defaults sync completed.');
         } catch (e) {
             console.error('[VFSAgentService] ensureDefaults error:', e);
@@ -168,10 +169,10 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
     private async syncDefaultConnections(): Promise<void> {
         // 确保目录存在
         await this.ensureDirectory(CONNECTIONS_DIR);
-        
+
         // 从磁盘重新加载最新的 connections 数据
         const currentConnections = await this.loadJsonFiles<LLMConnection>(CONNECTIONS_DIR);
-        
+
         // 构建 provider -> connection 的映射，便于快速查找
         const connectionsByProvider = new Map<string, LLMConnection>();
         for (const conn of currentConnections) {
@@ -198,23 +199,23 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
                     availableModels: [...providerDef.models],
                     metadata: { isSystemDefault: true }
                 };
-                
+
                 await this.saveConnection(newConn);
                 console.log(`[VFSAgentService] Created new connection: ${newConn.id} (${providerKey})`);
             } else {
                 // === 场景 2: Connection 已存在，检查是否需要合并新模型 ===
-                
+
                 // 使用深拷贝，避免直接修改缓存对象
                 const updatedConn: LLMConnection = JSON.parse(JSON.stringify(existing));
-                
+
                 // 确保 availableModels 数组存在
                 if (!updatedConn.availableModels) {
                     updatedConn.availableModels = [];
                 }
-                
+
                 // 获取已存在的模型 ID 集合
                 const existingModelIds = new Set(updatedConn.availableModels.map(m => m.id));
-                
+
                 // 检查并添加新模型
                 let hasNewModels = false;
                 for (const model of providerDef.models) {
@@ -224,7 +225,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
                         console.log(`[VFSAgentService] Added new model "${model.id}" to connection "${existing.id}"`);
                     }
                 }
-                
+
                 // 只有在有变化时才保存
                 if (hasNewModels) {
                     await this.saveConnection(updatedConn);
@@ -243,7 +244,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
     private async syncDefaultAgents(): Promise<void> {
         // 获取默认连接 ID
         const defaultConnId = this.getDefaultConnectionId();
-        
+
         // 加载当前所有 agents
         const currentAgents = await this.getAgents();
         const currentAgentIds = new Set(currentAgents.map(a => a.id));
@@ -272,11 +273,11 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
             if (!content.config.connectionId) {
                 content.config.connectionId = defaultConnId;
             }
-            
+
             try {
                 // 确保目录存在
                 await this.ensureDirectory(parentDir);
-                
+
                 const node = await this.engine.createFile(
                     filename,
                     parentDir,
@@ -292,7 +293,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
                 if (initialTags && initialTags.length > 0 && node?.id) {
                     await this.engine.setTags(node.id, initialTags);
                 }
-                
+
                 console.log(`[VFSAgentService] Created default agent: ${agentDef.id} at ${fullPath}`);
             } catch (e) {
                 console.error(`[VFSAgentService] Failed to create agent ${agentDef.id}:`, e);
@@ -325,7 +326,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
     private async resolveModelName(connectionId: string, currentModelName: string | undefined): Promise<string> {
         // 获取连接信息
         const connection = await this.getConnection(connectionId);
-        
+
         // 如果连接不存在或没有可用模型，直接返回当前值（无法校验）
         if (!connection || !connection.availableModels || connection.availableModels.length === 0) {
             return currentModelName || '';
@@ -351,27 +352,27 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
 
     async getAgents(): Promise<AgentDefinition[]> {
         const agents: AgentDefinition[] = [];
-        
+
         try {
             // 使用正确的搜索查询类型
-            const query: EngineSearchQuery = { 
-                text: '.agent', 
-                type: 'file' 
+            const query: EngineSearchQuery = {
+                text: '.agent',
+                type: 'file'
             };
             const nodes = await this.engine.search(query);
-            
+
             const promises = nodes.map(async (node: EngineNode) => {
                 if (!node.name.endsWith('.agent')) return null;
-                
+
                 try {
                     const content = await this.engine.readContent(node.id);
                     if (!content) return null;
-                    
-                    const jsonStr = typeof content === 'string' 
-                        ? content 
+
+                    const jsonStr = typeof content === 'string'
+                        ? content
                         : new TextDecoder().decode(content as ArrayBuffer);
                     const data = JSON.parse(jsonStr) as AgentDefinition;
-                    
+
                     // 兼容旧数据
                     if ((data.config as any).modelId && !data.config.modelName) {
                         data.config.modelName = (data.config as any).modelId;
@@ -391,14 +392,14 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
         } catch (e) {
             console.error('[VFSAgentService] Failed to scan agents:', e);
         }
-        
+
         return agents;
     }
 
     async getAgentConfig(agentId: string): Promise<AgentDefinition | null> {
         const agents = await this.getAgents();
         let found = agents.find(a => a.id === agentId);
-        
+
         // 返回默认配置模板
         if (!found && agentId === 'default') {
             found = this.createDefaultAgentDefinition();
@@ -406,7 +407,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
 
         if (found) {
             // === 运行时数据修正 ===
-            
+
             // 1. 确保 connectionId 存在
             if (!found.config.connectionId) {
                 found.config.connectionId = this.getDefaultConnectionId();
@@ -414,18 +415,18 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
 
             // 2. 修正 ModelName (读取时校验，防止 Connection 变更导致模型无效)
             const resolvedModel = await this.resolveModelName(
-                found.config.connectionId, 
+                found.config.connectionId,
                 found.config.modelName
             );
-            
+
             // 如果解析出的模型与当前不同，更新内存中的对象（UI显示正确），但不强制写回文件
             if (resolvedModel !== found.config.modelName) {
                 found.config.modelName = resolvedModel;
             }
-            
+
             return found;
         }
-        
+
         return null;
     }
 
@@ -443,7 +444,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
 
         const filename = `${agent.id}.agent`;
         const contentStr = JSON.stringify(agent, null, 2);
-        
+
         const metadata = {
             icon: agent.icon || '🤖',
             title: agent.name,
@@ -460,7 +461,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
         } else {
             await this.engine.createFile(filename, null, contentStr, metadata);
         }
-        
+
         this.notify();
     }
 
@@ -469,7 +470,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
         const query: EngineSearchQuery = { text: filename, type: 'file' };
         const results = await this.engine.search(query);
         const node = results.find((n: EngineNode) => n.name === filename);
-        
+
         if (node) {
             await this.engine.delete([node.id]);
             this.notify();
@@ -499,9 +500,9 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
         if (this._connections.length === 0) {
             return null; // 没有任何连接
         }
-        
+
         const defaultConn = this._connections.find(c => c.id === 'default');
-        
+
         // 返回找到的 'default' 连接，或者回退到列表中的第一个
         return defaultConn || this._connections[0];
     }
@@ -518,20 +519,20 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
 
         if (nodeId) {
             await this.engine.writeContent(nodeId, content);
-            await this.engine.updateMetadata(nodeId, { 
-                icon: '🔌', 
-                title: conn.name, 
-                type: 'connection' 
+            await this.engine.updateMetadata(nodeId, {
+                icon: '🔌',
+                title: conn.name,
+                type: 'connection'
             });
         } else {
             await this.engine.createFile(
-                filename, 
-                CONNECTIONS_DIR, 
-                content, 
+                filename,
+                CONNECTIONS_DIR,
+                content,
                 { icon: '🔌', title: conn.name, type: 'connection' }
             );
         }
-        
+
         // 更新内存缓存
         const index = this._connections.findIndex(c => c.id === conn.id);
         if (index >= 0) {
@@ -539,7 +540,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
         } else {
             this._connections.push(conn);
         }
-        
+
         this.notify();
     }
 
@@ -547,14 +548,14 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
         if (id === 'default') {
             throw new Error("Cannot delete default connection");
         }
-        
+
         const fullPath = `${CONNECTIONS_DIR}/${id}.json`;
         const nodeId = await this.engine.resolvePath(fullPath);
-        
+
         if (nodeId) {
             await this.engine.delete([nodeId]);
         }
-        
+
         this._connections = this._connections.filter(c => c.id !== id);
         this.notify();
     }
@@ -578,20 +579,20 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
 
         if (nodeId) {
             await this.engine.writeContent(nodeId, content);
-            await this.engine.updateMetadata(nodeId, { 
-                icon: '🔌', 
-                title: server.name, 
-                type: 'mcp' 
+            await this.engine.updateMetadata(nodeId, {
+                icon: '🔌',
+                title: server.name,
+                type: 'mcp'
             });
         } else {
             await this.engine.createFile(
-                filename, 
-                MCP_DIR, 
-                content, 
+                filename,
+                MCP_DIR,
+                content,
                 { icon: '🔌', title: server.name, type: 'mcp' }
             );
         }
-        
+
         // 更新缓存
         const index = this._mcpServers.findIndex(s => s.id === server.id);
         if (index >= 0) {
@@ -599,18 +600,18 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
         } else {
             this._mcpServers.push(server);
         }
-        
+
         this.notify();
     }
 
     async deleteMCPServer(id: string): Promise<void> {
         const fullPath = `${MCP_DIR}/${id}.json`;
         const nodeId = await this.engine.resolvePath(fullPath);
-        
+
         if (nodeId) {
             await this.engine.delete([nodeId]);
         }
-        
+
         this._mcpServers = this._mcpServers.filter(s => s.id !== id);
         this.notify();
     }
@@ -626,13 +627,13 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
         // 取消事件订阅
         this._eventUnsubscribers.forEach(fn => fn());
         this._eventUnsubscribers = [];
-        
+
         // 清理定时器
         if (this._syncTimer) {
             clearTimeout(this._syncTimer);
             this._syncTimer = null;
         }
-        
+
         // 调用基类的 dispose
         await super.dispose();
     }
@@ -646,21 +647,21 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
      */
     async getRestorableItems(): Promise<RestorableItem[]> {
         const items: RestorableItem[] = [];
-        
+
         // 1. 检查 Connections
         const currentConns = await this.getConnections();
         const connMap = new Map(currentConns.map(c => [c.id, c]));
-        
+
         // 遍历所有默认 Provider 定义
         for (const [providerKey, providerDef] of Object.entries(LLM_PROVIDER_DEFAULTS)) {
             // 默认连接 ID 规则：第一个是 'default'，其他是 'conn-{provider}'
             // 这里我们需要一种方式确定这个 provider 对应的 connection ID 是什么。
             // 简单起见，我们假设默认连接 ID 规则是固定的。
             const targetId = providerKey === Object.keys(LLM_PROVIDER_DEFAULTS)[0] ? 'default' : `conn-${providerKey}`;
-            
+
             const existing = connMap.get(targetId);
             let status: 'missing' | 'modified' | 'ok' = 'missing';
-            
+
             if (existing) {
                 // 简单判断：如果 provider 变了，或者 models 列表为空，视为 modified
                 // 这里可以根据需求加严判断
@@ -727,7 +728,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
         // 1. 反向查找该 ID 对应的默认 Provider
         let targetProviderDef: any = null;
         let targetProviderKey = '';
-        
+
         const keys = Object.keys(LLM_PROVIDER_DEFAULTS);
         if (targetId === 'default') {
             targetProviderKey = keys[0];
@@ -769,11 +770,11 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
 
         // 移除初始化专用字段，构建标准 AgentDefinition
         const { initPath, initialTags, ...agentData } = def;
-        
+
         // 确保 connectionId 指向正确（处理 default 引用）
         if (!agentData.config.connectionId) {
-             // 这里简化处理，实际可以使用 getDefaultConnectionId 逻辑
-             agentData.config.connectionId = 'default'; 
+            // 这里简化处理，实际可以使用 getDefaultConnectionId 逻辑
+            agentData.config.connectionId = 'default';
         }
 
         await this.saveAgent(agentData as any);
@@ -789,19 +790,19 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
      */
     private async loadJsonFiles<T>(dirPath: string): Promise<T[]> {
         const items: T[] = [];
-        
+
         try {
             const dirId = await this.engine.resolvePath(dirPath);
             if (!dirId) return [];
 
             const children = await this.engine.getChildren(dirId);
-            
+
             for (const child of children) {
                 if (child.type === 'file' && child.name.endsWith('.json')) {
                     try {
                         const content = await this.engine.readContent(child.id);
-                        const jsonStr = typeof content === 'string' 
-                            ? content 
+                        const jsonStr = typeof content === 'string'
+                            ? content
                             : new TextDecoder().decode(content as ArrayBuffer);
                         items.push(JSON.parse(jsonStr));
                     } catch (e) {
@@ -812,7 +813,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
         } catch (e) {
             // 目录不存在时忽略
         }
-        
+
         return items;
     }
 
@@ -832,5 +833,19 @@ export class VFSAgentService extends BaseModuleService implements IAgentService 
                 systemPrompt: 'You are a helpful assistant.'
             }
         };
+    }
+
+    /**
+     * ✅ 新增：更新 manifest
+     */
+    async updateManifest(nodeId: string, manifest: ChatManifest): Promise<void> {
+        await this.engine.writeContent(nodeId, JSON.stringify(manifest, null, 2));
+    }
+
+    /**
+     * ✅ 新增：解析路径
+     */
+    async resolvePath(path: string): Promise<string | null> {
+        return this.engine.resolvePath(path);
     }
 }
