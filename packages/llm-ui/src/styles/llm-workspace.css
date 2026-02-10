@@ -36,23 +36,23 @@
 
 /* --- 历史记录滚动区域 --- */
 .llm-ui-workspace__history {
-    flex: 1;
-    overflow-y: auto;
-    overflow-x: hidden;
-    padding: 20px;
-    scrollbar-width: thin;
-    
-    /* ✅ 滚动锚定 */
-    overflow-anchor: auto;
-    
-    /* ✅ 默认不使用 smooth，由 JS 控制 */
-    scroll-behavior: auto;
-    
-    /* ✅ 优化触摸滚动 */
-    -webkit-overflow-scrolling: touch;
-    
-    /* ✅ 限制滚动越界行为 */
-    overscroll-behavior: contain;
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 20px;
+  scrollbar-width: thin;
+
+  /* ✅ 滚动锚定 */
+  overflow-anchor: auto;
+
+  /* ✅ 默认不使用 smooth，由 JS 控制 */
+  scroll-behavior: auto;
+
+  /* ✅ 优化触摸滚动 */
+  -webkit-overflow-scrolling: touch;
+
+  /* ✅ 限制滚动越界行为 */
+  overscroll-behavior: contain;
 }
 
 /* --- 输入区域容器 --- */
@@ -68,68 +68,83 @@
    3. 标题栏 (Titlebar)
    ========================================= */
 .llm-workspace-titlebar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0.5rem 1rem;
-    background-color: #f6f8fa;
-    border-bottom: 1px solid #d0d7de;
-    min-height: 48px;
-    z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 1rem;
+  background-color: #f6f8fa;
+  border-bottom: 1px solid #d0d7de;
+  min-height: 48px;
+  z-index: 10;
 }
 
 .llm-workspace-titlebar__left,
 .llm-workspace-titlebar__right {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .llm-workspace-titlebar__btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 32px;
-    height: 32px;
-    padding: 0;
-    border: 1px solid transparent;
-    border-radius: 6px;
-    background: transparent;
-    color: #57606a;
-    cursor: pointer;
-    transition: all 0.2s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: #57606a;
+  cursor: pointer;
+  transition: all 0.2s;
 }
 
-.llm-workspace-titlebar__btn:hover { background-color: #eaeef2; color: #24292f; }
-.llm-workspace-titlebar__btn:active { background-color: #dbe0e6; }
-.llm-workspace-titlebar__btn svg { width: 16px; height: 16px; pointer-events: none; }
+.llm-workspace-titlebar__btn:hover {
+  background-color: #eaeef2;
+  color: #24292f;
+}
+
+.llm-workspace-titlebar__btn:active {
+  background-color: #dbe0e6;
+}
+
+.llm-workspace-titlebar__btn svg {
+  width: 16px;
+  height: 16px;
+  pointer-events: none;
+}
 
 .llm-workspace-titlebar__sep {
-    width: 1px;
-    height: 20px;
-    background-color: #d0d7de;
-    margin: 0 4px;
+  width: 1px;
+  height: 20px;
+  background-color: #d0d7de;
+  margin: 0 4px;
 }
 
 .llm-workspace-titlebar__input {
-    border: 1px solid transparent;
-    background: transparent;
-    font-size: 14px;
-    font-weight: 600;
-    color: #24292f;
-    padding: 4px 8px;
-    border-radius: 4px;
-    min-width: 150px;
-    max-width: min(400px, 50vw);
-    flex: 1;
+  border: 1px solid transparent;
+  background: transparent;
+  font-size: 14px;
+  font-weight: 600;
+  color: #24292f;
+  padding: 4px 8px;
+  border-radius: 4px;
+  min-width: 150px;
+  max-width: min(400px, 50vw);
+  flex: 1;
 }
 
-.llm-workspace-titlebar__input:hover { background-color: #fff; border-color: #d0d7de; }
+.llm-workspace-titlebar__input:hover {
+  background-color: #fff;
+  border-color: #d0d7de;
+}
+
 .llm-workspace-titlebar__input:focus {
-    outline: none;
-    background-color: #fff;
-    border-color: #0969da;
-    box-shadow: 0 0 0 2px rgba(9, 105, 218, 0.3);
+  outline: none;
+  background-color: #fff;
+  border-color: #0969da;
+  box-shadow: 0 0 0 2px rgba(9, 105, 218, 0.3);
 }
 
 /* =========================================
@@ -143,34 +158,39 @@
   position: relative;
 }
 
-.llm-ui-session--user { flex-direction: row-reverse; }
+.llm-ui-session--user {
+  flex-direction: row-reverse;
+}
+
 /* 当前活跃/聚焦的会话 */
 .llm-ui-session.is-active {
-    position: relative;
-    background-color: rgba(var(--llm-primary-rgb), 0.03); /* 极淡的背景色 */
+  position: relative;
+  background-color: rgba(var(--llm-primary-rgb), 0.03);
+  /* 极淡的背景色 */
 }
 
 /* 左侧指示条 */
 .llm-ui-session.is-active::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    top: 0;
-    bottom: 0;
-    width: 3px;
-    background-color: var(--llm-primary-color);
-    border-radius: 0 2px 2px 0;
-    opacity: 0.6;
-    pointer-events: none;
-    z-index: 10;
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background-color: var(--llm-primary-color);
+  border-radius: 0 2px 2px 0;
+  opacity: 0.6;
+  pointer-events: none;
+  z-index: 10;
 }
 
 /* 可选：加个过渡动画让切换更平滑 */
 .llm-ui-session {
-    transition: background-color 0.2s ease;
+  transition: background-color 0.2s ease;
 }
+
 .llm-ui-session::before {
-    transition: opacity 0.2s ease;
+  transition: opacity 0.2s ease;
 }
 
 .llm-ui-avatar {
@@ -193,16 +213,18 @@
   border-radius: 12px;
   border-top-right-radius: 2px;
   max-width: 80%;
-  min-width: 300px; /* 增加最小宽度以容纳工具栏 */
+  min-width: 300px;
+  /* 增加最小宽度以容纳工具栏 */
   position: relative;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
   overflow: hidden;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* User Bubble 折叠状态 */
 .llm-ui-bubble--user.is-collapsed {
-  padding: 0; /* Header自带padding */
+  padding: 0;
+  /* Header自带padding */
   min-height: auto;
 }
 
@@ -222,10 +244,17 @@
 }
 
 /* MDxEditor 适配 */
-.llm-ui-bubble--user .mdx-editor { color: white; --base: white; }
+.llm-ui-bubble--user .mdx-editor {
+  color: white;
+  --base: white;
+}
 
 /* AI Root Container */
-.llm-ui-execution-root { flex: 1; max-width: 90%; min-width: 0; }
+.llm-ui-execution-root {
+  flex: 1;
+  max-width: 90%;
+  min-width: 0;
+}
 
 /* =========================================
    5. 头部通用样式 (Headers & Actions)
@@ -251,7 +280,9 @@
   border-bottom: 1px solid var(--llm-ui-border-color);
 }
 
-.llm-ui-node.is-collapsed .llm-ui-node__header { border-bottom: none; }
+.llm-ui-node.is-collapsed .llm-ui-node__header {
+  border-bottom: none;
+}
 
 /* 标题 */
 .llm-ui-bubble__title,
@@ -262,7 +293,10 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.llm-ui-node__title { color: var(--llm-ui-text-primary); }
+
+.llm-ui-node__title {
+  color: var(--llm-ui-text-primary);
+}
 
 /* 图标 */
 .llm-ui-bubble__icon,
@@ -273,92 +307,104 @@
 }
 
 .llm-ui-node__icon--clickable {
-    cursor: pointer;
-    transition: transform 0.2s, background-color 0.2s;
-    position: relative;
+  cursor: pointer;
+  transition: transform 0.2s, background-color 0.2s;
+  position: relative;
 }
 
 .llm-ui-node__icon--clickable:hover {
-    transform: scale(1.1);
-    background-color: rgba(0, 0, 0, 0.05); /* 轻微背景高亮 */
-    border-radius: 4px;
+  transform: scale(1.1);
+  background-color: rgba(0, 0, 0, 0.05);
+  /* 轻微背景高亮 */
+  border-radius: 4px;
 }
 
 /* 加上一个小角标提示 */
 .llm-ui-node__icon--clickable::after {
-    content: "⚙️";
-    position: absolute;
-    bottom: -4px;
-    right: -4px;
-    font-size: 8px;
-    opacity: 0;
-    transition: opacity 0.2s;
+  content: "⚙️";
+  position: absolute;
+  bottom: -4px;
+  right: -4px;
+  font-size: 8px;
+  opacity: 0;
+  transition: opacity 0.2s;
 }
 
 .llm-ui-node__icon--clickable:hover::after {
-    opacity: 1;
+  opacity: 1;
 }
 
 /* --- 预览文本 (Content Preview) --- */
 .llm-ui-header-preview {
-    display: none; /* 默认隐藏 (展开状态) */
-    font-weight: 400;
-    font-size: 0.85em;
-    margin-left: 8px;
-    margin-right: auto; /* 推开右侧元素 */
-    padding-right: 12px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    flex: 1;
-    min-width: 0;
-    max-width: 300px; /* 限制最大宽度 */
+  display: none;
+  /* 默认隐藏 (展开状态) */
+  font-weight: 400;
+  font-size: 0.85em;
+  margin-left: 8px;
+  margin-right: auto;
+  /* 推开右侧元素 */
+  padding-right: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+  max-width: 300px;
+  /* 限制最大宽度 */
 }
 
-.llm-ui-node .llm-ui-header-preview { 
-    color: var(--llm-ui-text-secondary); 
-    opacity: 0.8;
+.llm-ui-node .llm-ui-header-preview {
+  color: var(--llm-ui-text-secondary);
+  opacity: 0.8;
 }
 
-.llm-ui-bubble--user .llm-ui-header-preview { 
-    color: rgba(255, 255, 255, 0.85); 
+.llm-ui-bubble--user .llm-ui-header-preview {
+  color: rgba(255, 255, 255, 0.85);
 }
 
 /* 仅在折叠时显示预览 */
 .llm-ui-bubble--user.is-collapsed .llm-ui-header-preview,
 .llm-ui-node.is-collapsed .llm-ui-header-preview {
-    display: block;
+  display: block;
 }
+
 /* ✅ 展开时隐藏预览（可选，作为双重保险） */
 .llm-ui-bubble--user:not(.is-collapsed) .llm-ui-header-preview,
 .llm-ui-node:not(.is-collapsed) .llm-ui-header-preview {
-    display: none;
+  display: none;
 }
 
 
 
 /* 折叠时隐藏不重要的元数据以节省空间 */
-.llm-ui-node.is-collapsed .llm-ui-node__status { display: none; }
+.llm-ui-node.is-collapsed .llm-ui-node__status {
+  display: none;
+}
 
 /* --- 时间显示 (Time) --- */
 .llm-ui-time {
-    font-size: 0.75rem;
-    color: var(--llm-ui-text-secondary);
-    opacity: 0.7;
-    white-space: nowrap;
-    margin-right: 8px;
-    font-variant-numeric: tabular-nums;
+  font-size: 0.75rem;
+  color: var(--llm-ui-text-secondary);
+  opacity: 0.7;
+  white-space: nowrap;
+  margin-right: 8px;
+  font-variant-numeric: tabular-nums;
 }
-.llm-ui-bubble--user .llm-ui-time { color: rgba(255, 255, 255, 0.7); }
+
+.llm-ui-bubble--user .llm-ui-time {
+  color: rgba(255, 255, 255, 0.7);
+}
 
 /* --- 操作按钮组 (Actions) --- */
 .llm-ui-actions {
   display: flex;
   align-items: center;
   gap: 2px;
-  margin-left: auto; /* ✨ 核心：强制右对齐 */
+  margin-left: auto;
+  /* ✨ 核心：强制右对齐 */
   flex-shrink: 0;
-  opacity: 0; /* 默认隐藏，hover显示 */
+  opacity: 0;
+  /* 默认隐藏，hover显示 */
   transition: opacity 0.2s;
 }
 
@@ -376,7 +422,8 @@
   border: none;
   cursor: pointer;
   padding: 4px;
-  color: inherit; /* 跟随父级字体颜色 */
+  color: inherit;
+  /* 跟随父级字体颜色 */
   border-radius: 4px;
   display: flex;
   align-items: center;
@@ -387,20 +434,48 @@
   transition: all 0.2s;
 }
 
-.llm-icon-btn:hover { opacity: 1; background-color: rgba(0,0,0,0.08); }
-.llm-icon-btn svg { width: 14px; height: 14px; pointer-events: none; }
+.llm-icon-btn:hover {
+  opacity: 1;
+  background-color: rgba(0, 0, 0, 0.08);
+}
+
+.llm-icon-btn svg {
+  width: 14px;
+  height: 14px;
+  pointer-events: none;
+}
 
 /* User Bubble 按钮特化 (白色) */
-.llm-ui-bubble--user .llm-icon-btn { color: white; opacity: 0.7; }
-.llm-ui-bubble--user .llm-icon-btn:hover { background-color: rgba(255,255,255,0.2); opacity: 1; }
+.llm-ui-bubble--user .llm-icon-btn {
+  color: white;
+  opacity: 0.7;
+}
+
+.llm-ui-bubble--user .llm-icon-btn:hover {
+  background-color: rgba(255, 255, 255, 0.2);
+  opacity: 1;
+}
 
 /* Agent Node 按钮特化 (灰色) */
-.llm-ui-node .llm-icon-btn { color: #64748b; }
-.llm-ui-node .llm-icon-btn:hover { color: var(--llm-ui-text-primary); }
+.llm-ui-node .llm-icon-btn {
+  color: #64748b;
+}
+
+.llm-ui-node .llm-icon-btn:hover {
+  color: var(--llm-ui-text-primary);
+}
 
 /* 特殊按钮样式 */
-.llm-icon-btn[data-action="delete"]:hover { color: var(--llm-ui-color-error) !important; background-color: #fee2e2 !important; }
-.llm-icon-btn[data-action="edit"] { font-size: 14px; } /* 调整铅笔图标大小 */
+.llm-icon-btn[data-action="delete"]:hover {
+  color: var(--llm-ui-color-error) !important;
+  background-color: #fee2e2 !important;
+}
+
+.llm-icon-btn[data-action="edit"] {
+  font-size: 14px;
+}
+
+/* 调整铅笔图标大小 */
 
 /* =========================================
    6. 执行节点 (Agent/Tool Nodes)
@@ -420,12 +495,22 @@
 }
 
 /* 折叠状态：隐藏 body */
-.llm-ui-node.is-collapsed .llm-ui-node__body { display: none; }
+.llm-ui-node.is-collapsed .llm-ui-node__body {
+  display: none;
+}
 
 /* 状态边框指示器 */
-.llm-ui-node--success { border-left: 3px solid var(--llm-ui-color-success); }
-.llm-ui-node--failed { border-left: 3px solid var(--llm-ui-color-error); }
-.llm-ui-node--running { border-left: 3px solid var(--llm-ui-color-primary); }
+.llm-ui-node--success {
+  border-left: 3px solid var(--llm-ui-color-success);
+}
+
+.llm-ui-node--failed {
+  border-left: 3px solid var(--llm-ui-color-error);
+}
+
+.llm-ui-node--running {
+  border-left: 3px solid var(--llm-ui-color-primary);
+}
 
 /* 状态标签 */
 .llm-ui-node__status {
@@ -437,9 +522,21 @@
   letter-spacing: 0.02em;
   margin-right: 8px;
 }
-.llm-ui-node__status--success { color: var(--llm-ui-color-success); background: #d1fae5; }
-.llm-ui-node__status--running { color: var(--llm-ui-color-primary); background: #dbeafe; }
-.llm-ui-node__status--failed { color: var(--llm-ui-color-error); background: #fee2e2; }
+
+.llm-ui-node__status--success {
+  color: var(--llm-ui-color-success);
+  background: #d1fae5;
+}
+
+.llm-ui-node__status--running {
+  color: var(--llm-ui-color-primary);
+  background: #dbeafe;
+}
+
+.llm-ui-node__status--failed {
+  color: var(--llm-ui-color-error);
+  background: #fee2e2;
+}
 
 /* 思考过程 */
 .llm-ui-thought {
@@ -448,6 +545,7 @@
   font-size: 0.9em;
   color: var(--llm-ui-text-secondary);
 }
+
 .llm-ui-thought__content {
   padding: 12px;
   max-height: 300px;
@@ -476,6 +574,7 @@
   overflow-x: auto;
   border-bottom: 1px dashed var(--llm-ui-border-color);
 }
+
 .llm-ui-node--tool .llm-ui-node__result {
   padding: 8px 12px;
   font-size: 0.85em;
@@ -494,7 +593,8 @@
   background-color: rgba(0, 0, 0, 0.02);
   border-top: 1px solid var(--llm-ui-border-color);
 }
-.llm-ui-node__children--parallel > .llm-ui-node {
+
+.llm-ui-node__children--parallel>.llm-ui-node {
   margin-bottom: 0;
   height: 100%;
   display: flex;
@@ -505,44 +605,68 @@
    7. 状态指示器与 Badge (Status & Badges)
    ========================================= */
 .llm-workspace-status {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-left: 12px;
-    padding: 4px 8px;
-    border-radius: 4px;
-    background: #f5f5f5;
-    font-size: 12px;
-    color: #666;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 12px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: #f5f5f5;
+  font-size: 12px;
+  color: #666;
 }
 
 .llm-workspace-status__dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: #999;
-    transition: background-color 0.2s ease;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #999;
+  transition: background-color 0.2s ease;
 }
-.llm-workspace-status__dot.--running { background: var(--llm-ui-color-primary); animation: pulse 1.5s ease-in-out infinite; }
-.llm-workspace-status__dot.--completed { background: var(--llm-ui-color-success); }
-.llm-workspace-status__dot.--failed { background: var(--llm-ui-color-error); }
 
-.llm-workspace-titlebar__bg-indicator { display: flex; align-items: center; margin-right: 8px; }
+.llm-workspace-status__dot.--running {
+  background: var(--llm-ui-color-primary);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.llm-workspace-status__dot.--completed {
+  background: var(--llm-ui-color-success);
+}
+
+.llm-workspace-status__dot.--failed {
+  background: var(--llm-ui-color-error);
+}
+
+.llm-workspace-titlebar__bg-indicator {
+  display: flex;
+  align-items: center;
+  margin-right: 8px;
+}
+
 .llm-bg-badge {
-    display: inline-flex;
-    align-items: center;
-    padding: 2px 8px;
-    border-radius: 10px;
-    background: var(--llm-ui-color-primary);
-    color: white;
-    font-size: 11px;
-    font-weight: 500;
-    animation: pulse 2s ease-in-out infinite;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--llm-ui-color-primary);
+  color: white;
+  font-size: 11px;
+  font-weight: 500;
+  animation: pulse 2s ease-in-out infinite;
 }
 
 @keyframes pulse {
-    0%, 100% { opacity: 1; transform: scale(1); }
-    50% { opacity: 0.6; transform: scale(1.1); }
+
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 0.6;
+    transform: scale(1.1);
+  }
 }
 
 /* =========================================
@@ -550,13 +674,13 @@
    ========================================= */
 
 .llm-ui-file-badge {
-    display: inline-block;
-    font-size: 11px;
-    background: rgba(255,255,255,0.2);
-    padding: 2px 6px;
-    border-radius: 4px;
-    margin-right: 6px;
-    margin-bottom: 4px;
+  display: inline-block;
+  font-size: 11px;
+  background: rgba(255, 255, 255, 0.2);
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-right: 6px;
+  margin-bottom: 4px;
 }
 
 .llm-ui-welcome {
@@ -569,7 +693,12 @@
   text-align: center;
   user-select: none;
 }
-.llm-ui-welcome__icon { font-size: 48px; margin-bottom: 16px; opacity: 0.8; }
+
+.llm-ui-welcome__icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+  opacity: 0.8;
+}
 
 .llm-ui-banner--error {
   margin: 20px;
@@ -583,140 +712,217 @@
 
 /* 打印与深色模式支持 */
 @media print {
-    .llm-workspace-titlebar, .llm-ui-workspace__input { display: none !important; }
-    .llm-ui-workspace__history { overflow: visible !important; height: auto !important; }
-    .is-collapsed .llm-ui-node__body, .is-collapsed .llm-ui-bubble__body { display: block !important; }
+
+  .llm-workspace-titlebar,
+  .llm-ui-workspace__input {
+    display: none !important;
+  }
+
+  .llm-ui-workspace__history {
+    overflow: visible !important;
+    height: auto !important;
+  }
+
+  .is-collapsed .llm-ui-node__body,
+  .is-collapsed .llm-ui-bubble__body {
+    display: block !important;
+  }
 }
 
 @media (prefers-color-scheme: dark) {
-    .llm-ui-workspace { background-color: #0d1117; color: #c9d1d9; }
-    .llm-workspace-titlebar { background-color: #161b22; border-bottom-color: #30363d; }
-    .llm-workspace-titlebar__btn { color: #8b949e; }
-    .llm-ui-node { background-color: #161b22; border-color: #30363d; }
-    .llm-ui-node__header { background-color: #0d1117; border-bottom-color: #30363d; }
-    .llm-ui-node__output { background-color: #161b22; }
-    .llm-ui-node:hover { border-color: #58a6ff; }
+  .llm-ui-workspace {
+    background-color: #0d1117;
+    color: #c9d1d9;
+  }
+
+  .llm-workspace-titlebar {
+    background-color: #161b22;
+    border-bottom-color: #30363d;
+  }
+
+  .llm-workspace-titlebar__btn {
+    color: #8b949e;
+  }
+
+  .llm-ui-node {
+    background-color: #161b22;
+    border-color: #30363d;
+  }
+
+  .llm-ui-node__header {
+    background-color: #0d1117;
+    border-bottom-color: #30363d;
+  }
+
+  .llm-ui-node__output {
+    background-color: #161b22;
+  }
+
+  .llm-ui-node:hover {
+    border-color: #58a6ff;
+  }
 }
+
 /* =========================================
    9. 系统消息与错误气泡 (System & Error)
    ========================================= */
 
 /* 系统消息容器 */
 .llm-ui-session--system {
-    justify-content: center;
-    padding: 0 20px;
-    margin-bottom: 16px;
+  justify-content: center;
+  padding: 0 20px;
+  margin-bottom: 16px;
 }
 
 /* 错误气泡 */
 .llm-ui-bubble--error {
-    background: #fef2f2;
-    border: 1px solid #fecaca;
-    border-radius: 8px;
-    color: #991b1b;
-    padding: 12px 16px;
-    max-width: 80%;
-    font-size: 0.9rem;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-    animation: slideIn 0.3s ease;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  color: #991b1b;
+  padding: 12px 16px;
+  max-width: 80%;
+  font-size: 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  animation: slideIn 0.3s ease;
 }
 
 .llm-ui-bubble--error strong {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
 }
 
 .llm-ui-bubble--error__content {
-    line-height: 1.5;
+  line-height: 1.5;
 }
 
 .llm-ui-bubble--error__actions {
-    display: flex;
-    gap: 8px;
-    margin-top: 4px;
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
 }
 
 .llm-ui-error-btn {
-    background: white;
-    border: 1px solid #f87171;
-    color: #dc2626;
-    padding: 4px 12px;
-    border-radius: 4px;
-    font-size: 0.8rem;
-    cursor: pointer;
-    transition: all 0.2s;
-    font-weight: 500;
+  background: white;
+  border: 1px solid #f87171;
+  color: #dc2626;
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-weight: 500;
 }
 
 .llm-ui-error-btn:hover {
-    background: #fee2e2;
+  background: #fee2e2;
 }
 
 .llm-ui-node__error-embed {
-    background: #fff5f5;
-    color: #c53030;
-    padding: 8px 12px;
-    font-size: 0.85rem;
-    border-bottom: 1px solid #fed7d7;
-    font-family: monospace;
-    white-space: pre-wrap;
+  background: #fff5f5;
+  color: #c53030;
+  padding: 8px 12px;
+  font-size: 0.85rem;
+  border-bottom: 1px solid #fed7d7;
+  font-family: monospace;
+  white-space: pre-wrap;
 }
 
 /* 暗色模式适配 */
 @media (prefers-color-scheme: dark) {
-    .llm-ui-bubble--error {
-        background: #450a0a;
-        border-color: #7f1d1d;
-        color: #fca5a5;
-    }
-    .llm-ui-error-btn {
-        background: #2a0a0a;
-        border-color: #991b1b;
-        color: #fca5a5;
-    }
-    .llm-ui-error-btn:hover {
-        background: #450a0a;
-    }
+  .llm-ui-bubble--error {
+    background: #450a0a;
+    border-color: #7f1d1d;
+    color: #fca5a5;
+  }
+
+  .llm-ui-error-btn {
+    background: #2a0a0a;
+    border-color: #991b1b;
+    color: #fca5a5;
+  }
+
+  .llm-ui-error-btn:hover {
+    background: #450a0a;
+  }
 }
 
 @keyframes slideIn {
-    from { opacity: 0; transform: translateY(10px); }
-    to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* 新内容提示器样式 */
 .llm-ui-new-content-indicator {
-    position: sticky;
-    bottom: 16px;
-    display: flex;
-    justify-content: center;
-    pointer-events: none;
-    z-index: 100;
+  position: sticky;
+  bottom: 16px;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 100;
 }
 
 .llm-ui-new-content-btn {
-    pointer-events: auto;
-    background: var(--llm-accent-color, #3b82f6);
-    color: white;
-    border: none;
-    border-radius: 20px;
-    padding: 8px 16px;
-    font-size: 14px;
-    cursor: pointer;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-    animation: llm-bounce 0.5s ease-in-out;
+  pointer-events: auto;
+  background: var(--llm-accent-color, #3b82f6);
+  color: white;
+  border: none;
+  border-radius: 20px;
+  padding: 8px 16px;
+  font-size: 14px;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  animation: llm-bounce 0.5s ease-in-out;
 }
 
 .llm-ui-new-content-btn:hover {
-    background: var(--llm-accent-hover, #2563eb);
+  background: var(--llm-accent-hover, #2563eb);
 }
 
 @keyframes llm-bounce {
-    0%, 100% { transform: translateY(0); }
-    50% { transform: translateY(-4px); }
+
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+/* @file: llm-ui/styles/llm-workspace.css */
+
+.llm-workspace-branch-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--primary-color);
+  font-weight: 500;
+}
+
+.llm-workspace-branch-badge svg {
+  flex-shrink: 0;
+}
+
+.llm-workspace-branch-badge .count {
+  opacity: 0.7;
+  margin-left: 2px;
 }

@@ -5,17 +5,34 @@ export const LayoutTemplates = {
     /**
      * 渲染主工作区结构
      */
-    renderWorkspace: (currentTitle: string) => `
-        <div class="llm-workspace-titlebar">
-            <div class="llm-workspace-titlebar__left">
-                <button class="llm-workspace-titlebar__btn" id="llm-btn-sidebar" title="Toggle Sidebar">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg>
-                </button>
-                
-                <div class="llm-workspace-titlebar__sep"></div>
-                
-                <input type="text" class="llm-workspace-titlebar__input" id="llm-title-input" value="${escapeHTML(currentTitle)}" placeholder="Untitled Chat" />
-                
+renderWorkspace: (currentTitle: string, branchInfo?: { name?: string; count?: number }) => `
+    <div class="llm-workspace-titlebar">
+        <div class="llm-workspace-titlebar__left">
+            <button class="llm-workspace-titlebar__btn" id="llm-btn-sidebar" title="Toggle Sidebar">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                    <line x1="9" y1="3" x2="9" y2="21"></line>
+                </svg>
+            </button>
+            
+            <div class="llm-workspace-titlebar__sep"></div>
+            
+            <input type="text" class="llm-workspace-titlebar__input" id="llm-title-input" 
+                   value="${escapeHTML(currentTitle)}" placeholder="Untitled Chat" />
+            
+            <!-- ✅ 新增：分支指示器 -->
+            ${branchInfo?.name ? `
+                <div class="llm-workspace-branch-badge">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="6" y1="3" x2="6" y2="15"></line>
+                        <circle cx="18" cy="6" r="3"></circle>
+                        <circle cx="6" cy="18" r="3"></circle>
+                        <path d="M18 9a9 9 0 0 1-9 9"></path>
+                    </svg>
+                    <span>${escapeHTML(branchInfo.name)}</span>
+                    ${branchInfo.count ? `<span class="count">(${branchInfo.count})</span>` : ''}
+                </div>
+            ` : ''}
                 <!-- 状态指示器 -->
                 <div class="llm-workspace-status" id="llm-status-indicator">
                     <span class="llm-workspace-status__dot"></span>
