@@ -23,10 +23,43 @@ export class NodeTemplates {
         const siblingCount = group.siblingCount ?? 1;
         const hasSiblings = siblingCount > 1;
         
+        // ✅ 新增：分支名称显示
+        const branchName = group.branchInfo?.name 
+            ? `<span class="llm-ui-branch-name">${escapeHTML(group.branchInfo.name)}</span>`
+            : '';
+        
         const branchNavHtml = hasSiblings ? `
-            <button class="llm-icon-btn" data-action="prev-sibling" title="Previous" ${siblingIndex === 0 ? 'disabled' : ''}>←</button>
-            <span class="llm-ui-branch-indicator">${siblingIndex + 1}/${siblingCount}</span>
-            <button class="llm-icon-btn" data-action="next-sibling" title="Next" ${siblingIndex === siblingCount - 1 ? 'disabled' : ''}>→</button>
+            <button class="llm-icon-btn" data-action="prev-sibling" title="Previous Branch" ${siblingIndex === 0 ? 'disabled' : ''}>
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="15 18 9 12 15 6"></polyline>
+                </svg>
+            </button>
+            <span class="llm-ui-branch-indicator">
+                ${branchName}
+                <span class="llm-ui-branch-count">${siblingIndex + 1}/${siblingCount}</span>
+            </span>
+            <button class="llm-icon-btn" data-action="next-sibling" title="Next Branch" ${siblingIndex === siblingCount - 1 ? 'disabled' : ''}>
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="9 18 15 12 9 6"></polyline>
+                </svg>
+            </button>
+            
+            <!-- ✅ 新增：分支管理按钮 -->
+            <button class="llm-icon-btn" data-action="show-branch-tree" title="Branch Tree">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="12" y1="5" x2="12" y2="19"></line>
+                    <polyline points="19 12 12 19 5 12"></polyline>
+                </svg>
+            </button>
+            <button class="llm-icon-btn" data-action="create-branch" title="Create Branch">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="6" y1="3" x2="6" y2="15"></line>
+                    <circle cx="18" cy="6" r="3"></circle>
+                    <circle cx="6" cy="18" r="3"></circle>
+                    <path d="M18 9a9 9 0 0 1-9 9"></path>
+                </svg>
+            </button>
+            
             <div class="llm-ui-sep" style="width:1px;background:rgba(255,255,255,0.2);margin:0 4px;"></div>
         ` : '';
 
@@ -78,11 +111,35 @@ export class NodeTemplates {
         const siblingCount = node.data.metaInfo?.siblingCount ?? 1;
         const hasSiblings = siblingCount > 1;
         
-        // ✅ 新增：分支导航 HTML
+        // ✅ 新增：分支名称
+        const branchName = node.data.metaInfo?.branchName
+            ? `<span class="llm-ui-branch-name">${escapeHTML(node.data.metaInfo.branchName)}</span>`
+            : '';
+        
         const branchNavHtml = hasSiblings ? `
             <button class="llm-icon-btn" data-action="prev-sibling" title="Previous" ${siblingIndex === 0 ? 'disabled' : ''}>←</button>
-            <span class="llm-ui-branch-indicator">${siblingIndex + 1}/${siblingCount}</span>
+            <span class="llm-ui-branch-indicator">
+                ${branchName}
+                <span class="llm-ui-branch-count">${siblingIndex + 1}/${siblingCount}</span>
+            </span>
             <button class="llm-icon-btn" data-action="next-sibling" title="Next" ${siblingIndex === siblingCount - 1 ? 'disabled' : ''}>→</button>
+            
+            <!-- ✅ 新增：分支管理按钮 -->
+            <button class="llm-icon-btn" data-action="show-branch-tree" title="Branch Tree">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="12" y1="5" x2="12" y2="19"></line>
+                    <polyline points="19 12 12 19 5 12"></polyline>
+                </svg>
+            </button>
+            <button class="llm-icon-btn" data-action="create-branch" title="Create Branch">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="6" y1="3" x2="6" y2="15"></line>
+                    <circle cx="18" cy="6" r="3"></circle>
+                    <circle cx="6" cy="18" r="3"></circle>
+                    <path d="M18 9a9 9 0 0 1-9 9"></path>
+                </svg>
+            </button>
+            
             <div class="llm-ui-sep"></div>
         ` : '';
 

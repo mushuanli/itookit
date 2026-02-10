@@ -165,6 +165,16 @@ export interface SessionGroup {
     siblingIndex?: number;
     siblingCount?: number;
 
+    // ✅ 新增：扩展分支信息
+    branchInfo?: {
+        /** 分支名称 */
+        name?: string;
+        /** 是否为当前激活分支 */
+        isActive?: boolean;
+        /** 创建方式 */
+        createdFrom?: 'retry' | 'edit' | 'manual';
+    };
+
     /** 关联的用户消息 ID */
     parentUserSessionId?: string;
 }
@@ -201,7 +211,12 @@ export type OrchestratorEvent =
             siblingCount?: number;
         }
     }
-    | { type: 'sibling_switch'; payload: { sessionId: string; newIndex: number; total: number } };
+    | { type: 'sibling_switch'; payload: { sessionId: string; newIndex: number; total: number } }
+    // ✅ 新增：分支事件
+    | { type: 'branch_created'; payload: { sourceId: string; newId: string; branchName?: string } }
+    | { type: 'branch_renamed'; payload: { nodeId: string; newName: string } }
+    | { type: 'branch_deleted'; payload: { nodeId: string; deletedIds: string[] } }
+    | { type: 'branch_switched'; payload: { fromId: string; toId: string } };
 
 /**
  * 会话运行状态

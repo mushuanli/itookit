@@ -66,6 +66,17 @@ export interface ChatNode {
         files?: ChatFile[];
 
         status?: string;
+        
+        // ✅ 新增：分支元数据
+        branchMetadata?: {
+            /** 分支名称（可选） */
+            branchName?: string;
+            /** 创建方式 */
+            createdFrom?: 'retry' | 'edit' | 'manual';
+            /** 创建时间 */
+            createdAt?: string;
+        };
+        
         [key: string]: any;
     };
 
@@ -78,6 +89,21 @@ export interface ChatNode {
 export interface ChatContextItem {
     node: ChatNode;
     depth?: number;
+}
+
+
+/**
+ * ✅ 新增：分支树节点类型
+ */
+export interface BranchTreeNode {
+    id: string;
+    role: 'system' | 'user' | 'assistant' | 'tool';
+    content: string;
+    timestamp: number;
+    isActive: boolean;
+    branchName?: string;
+    createdFrom?: 'retry' | 'edit' | 'manual';
+    children: BranchTreeNode[];
 }
 
 /**
@@ -127,6 +153,45 @@ export interface ILLMSessionEngine extends IBaseSessionEngine {
 
     /** 切换分支 */
     switchBranch(nodeId: string, sessionId: string, branchName: string): Promise<void>;
+    /**
+     * ✅ 新增：创建分支
+     */
+    createBranch(
+        nodeId: string,
+        sessionId: string,
+        sourceMessageId: string,
+        options?: {
+            name?: string;
+            copyContent?: boolean;
+            createdFrom?: 'retry' | 'edit' | 'manual';
+        }
+    ): Promise<string>;
+
+    /**
+     * ✅ 新增：获取分支树
+     */
+    getBranchTree(
+        sessionId: string,
+        rootNodeId?: string
+    ): Promise<BranchTreeNode>;
+
+    /**
+     * ✅ 新增：重命名分支
+     */
+    renameBranch(
+        sessionId: string,
+        nodeId: string,
+        newName: string
+    ): Promise<void>;
+
+    /**
+     * ✅ 新增：删除分支
+     */
+    deleteBranch(
+        sessionId: string,
+        nodeId: string,
+        options?: { cascade?: boolean }
+    ): Promise<string[]>;
 
     /** 获取节点的兄弟节点 */
     getNodeSiblings(sessionId: string, messageId: string): Promise<ChatNode[]>;

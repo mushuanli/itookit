@@ -1,0 +1,669 @@
+/* @file: llm-ui/styles/branch.css */
+
+/* ============================================
+   分支导航器增强
+   ============================================ */
+
+.llm-ui-branch-indicator {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.llm-ui-branch-name {
+    max-width: 100px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 500;
+    color: var(--primary-color);
+}
+
+.llm-ui-branch-count {
+    opacity: 0.7;
+}
+
+.llm-branch-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 6px;
+    font-size: 10px;
+    font-weight: 500;
+    border-radius: 4px;
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+}
+
+.llm-branch-badge--retry {
+    background: rgba(59, 130, 246, 0.1);
+    color: #3b82f6;
+}
+
+.llm-branch-badge--edit {
+    background: rgba(245, 158, 11, 0.1);
+    color: #f59e0b;
+}
+
+.llm-branch-badge--manual {
+    background: rgba(16, 185, 129, 0.1);
+    color: #10b981;
+}
+
+/* ============================================
+   分支树面板
+   ============================================ */
+
+.llm-branch-tree-panel {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1000;
+    display: flex;
+    justify-content: flex-end;
+}
+
+.llm-branch-tree-panel__overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.3);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.llm-branch-tree-panel.is-open .llm-branch-tree-panel__overlay {
+    opacity: 1;
+}
+
+.llm-branch-tree-panel__content {
+    position: relative;
+    width: 400px;
+    max-width: 90vw;
+    height: 100%;
+    background: var(--bg-primary);
+    box-shadow: -4px 0 20px rgba(0, 0, 0, 0.15);
+    transform: translateX(100%);
+    transition: transform 0.3s ease;
+    display: flex;
+    flex-direction: column;
+}
+
+.llm-branch-tree-panel.is-open .llm-branch-tree-panel__content {
+    transform: translateX(0);
+}
+
+.llm-branch-tree-panel__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.llm-branch-tree-panel__header h3 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.llm-branch-tree-panel__actions {
+    display: flex;
+    gap: 8px;
+}
+
+.llm-branch-tree-panel__body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 0;
+}
+
+/* 分支节点 */
+.llm-branch-node {
+    display: flex;
+    align-items: stretch;
+    padding: 8px 16px;
+    border-left: 3px solid transparent;
+    cursor: pointer;
+    transition: background 0.2s, border-color 0.2s;
+}
+
+.llm-branch-node:hover {
+    background: var(--bg-hover);
+}
+
+.llm-branch-node.is-active {
+    border-left-color: var(--primary-color);
+    background: rgba(59, 130, 246, 0.05);
+}
+
+.llm-branch-node.is-selected {
+    background: rgba(59, 130, 246, 0.1);
+}
+
+.llm-branch-node.is-deleting {
+    opacity: 0;
+    transform: translateX(20px);
+    transition: opacity 0.3s, transform 0.3s;
+}
+
+.llm-branch-node__content {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 1;
+    min-width: 0;
+}
+
+.llm-branch-node__icon {
+    font-size: 16px;
+    flex-shrink: 0;
+}
+
+.llm-branch-node__info {
+    flex: 1;
+    min-width: 0;
+}
+
+.llm-branch-node__preview {
+    font-size: 13px;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.llm-branch-node__meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 4px;font-size: 11px;
+    color: var(--text-tertiary);
+}
+
+.llm-branch-node__actions {
+    display: flex;
+    gap: 4px;opacity: 0;
+    transition: opacity 0.2s;
+}
+
+.llm-branch-node:hover .llm-branch-node__actions {
+    opacity: 1;
+}
+
+/* ============================================
+   分支对比视图
+   ============================================ */
+
+.llm-branch-compare {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1001;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.llm-branch-compare__overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.llm-branch-compare.is-open .llm-branch-compare__overlay {
+    opacity: 1;
+}
+
+.llm-branch-compare__content {
+    position: relative;
+    width: 90vw;
+    max-width: 1200px;
+    height: 80vh;
+    background: var(--bg-primary);
+    border-radius: 8px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+    display: flex;
+    flex-direction: column;
+    transform: scale(0.9);
+    opacity: 0;
+    transition: transform 0.3s ease, opacity 0.3s ease;
+}
+
+.llm-branch-compare.is-open .llm-branch-compare__content {
+    transform: scale(1);
+    opacity: 1;
+}
+
+.llm-branch-compare__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.llm-branch-compare__header h3 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.llm-branch-compare__body {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1fr 1px 1fr;
+    gap: 0;
+    overflow: hidden;
+}
+
+.llm-branch-compare__column {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.llm-branch-compare__column-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.llm-branch-compare__label {
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.llm-branch-compare__meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.llm-branch-compare__time {
+    opacity: 0.7;
+}
+
+.llm-branch-compare__column-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+    font-size: 13px;
+    line-height: 1.6;
+}
+
+.llm-branch-compare__divider {
+    background: var(--border-color);
+}
+
+.llm-branch-compare__line {
+    display: flex;
+    align-items: flex-start;
+    padding: 2px 0;
+    transition: background 0.2s;
+}
+
+.llm-branch-compare__line:hover {
+    background: var(--bg-hover);
+}
+
+.llm-branch-compare__line-number {
+    display: inline-block;
+    width: 40px;
+    text-align: right;
+    padding-right: 12px;
+    color: var(--text-tertiary);
+    user-select: none;
+    flex-shrink: 0;
+}
+
+.llm-branch-compare__line-content {
+    flex: 1;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.llm-branch-compare__line--added {
+    background: rgba(16, 185, 129, 0.1);
+}
+
+.llm-branch-compare__line--added .llm-branch-compare__line-content::before {
+    content: '+ ';
+    color: #10b981;
+    font-weight: bold;
+}
+
+.llm-branch-compare__line--removed {
+    background: rgba(239, 68, 68, 0.1);
+}
+
+.llm-branch-compare__line--removed .llm-branch-compare__line-content::before {
+    content: '- ';
+    color: #ef4444;
+    font-weight: bold;
+}
+
+.llm-branch-compare__footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 20px;
+    border-top: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+}
+
+.llm-branch-compare__stats {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.llm-branch-compare__stat {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.llm-branch-compare__stat--added {
+    color: #10b981;
+}
+
+.llm-branch-compare__stat--removed {
+    color: #ef4444;
+}
+
+/* ============================================
+   分支命名对话框
+   ============================================ */
+
+.llm-branch-name-dialog {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1002;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.llm-branch-name-dialog__overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.4);
+}
+
+.llm-branch-name-dialog__content {
+    position: relative;
+    width: 400px;
+    max-width: 90vw;
+    padding: 24px;
+    background: var(--bg-primary);
+    border-radius: 8px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+.llm-branch-name-dialog__content h4 {
+    margin: 0 0 8px 0;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.llm-branch-name-dialog__content p {
+    margin: 0 0 16px 0;
+    font-size: 14px;
+    color: var(--text-secondary);
+}
+
+.llm-branch-name-dialog__content .llm-input {
+    width: 100%;
+    padding: 10px 12px;
+    font-size: 14px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.llm-branch-name-dialog__content .llm-input:focus {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.llm-branch-name-dialog__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    margin-top: 20px;
+}
+
+/* ============================================
+   重命名对话框
+   ============================================ */
+
+.llm-branch-rename-dialog {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.llm-branch-rename-dialog__overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.3);
+}
+
+.llm-branch-rename-dialog__content {
+    position: relative;
+    width: 300px;
+    padding: 20px;
+    background: var(--bg-primary);
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+}
+
+.llm-branch-rename-dialog__content h4 {
+    margin: 0 0 12px 0;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.llm-branch-rename-dialog__content .llm-input {
+    width: 100%;
+    padding: 8px 10px;
+    font-size: 13px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    outline: none;
+}
+
+.llm-branch-rename-dialog__content .llm-input:focus {
+    border-color: var(--primary-color);
+}
+
+.llm-branch-rename-dialog__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 16px;
+}
+
+/* ============================================
+   通用按钮样式
+   ============================================ */
+
+.llm-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 16px;
+    font-size: 13px;
+    font-weight: 500;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.2s, transform 0.1s;
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+.llm-btn:hover {
+    background: var(--bg-hover);
+}
+
+.llm-btn:active {
+    transform: scale(0.98);
+}
+
+.llm-btn--primary {
+    background: var(--primary-color);
+    color: white;
+}
+
+.llm-btn--primary:hover {
+    background: var(--primary-color-hover);
+}
+
+.llm-btn--sm {
+    padding: 6px 12px;
+    font-size: 12px;
+}
+
+.llm-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* ============================================
+   响应式适配
+   ============================================ */
+
+@media (max-width: 768px) {
+    .llm-branch-tree-panel__content {
+        width: 100%;
+        max-width: none;
+    }
+
+    .llm-branch-compare__content {
+        width: 100%;
+        height: 100%;
+        max-width: none;
+        border-radius: 0;
+    }
+
+    .llm-branch-compare__body {
+        grid-template-columns: 1fr;
+        grid-template-rows: 1fr 1px 1fr;
+    }
+
+    .llm-branch-compare__divider {
+        height: 1px;
+        width: 100%;
+    }
+}
+
+/* ============================================
+   暗色主题适配
+   ============================================ */
+
+[data-theme="dark"] {
+    --bg-primary: #1a1a1a;
+    --bg-secondary: #242424;
+    --bg-tertiary: #2d2d2d;
+    --bg-hover: rgba(255, 255, 255, 0.05);
+    --text-primary: #e5e5e5;
+    --text-secondary: #a3a3a3;
+    --text-tertiary: #737373;
+    --border-color: #333;
+    --primary-color: #3b82f6;
+    --primary-color-hover: #2563eb;
+}
+
+[data-theme="dark"] .llm-branch-compare__line--added {
+    background: rgba(16, 185, 129, 0.15);
+}
+
+[data-theme="dark"] .llm-branch-compare__line--removed {
+    background: rgba(239, 68, 68, 0.15);
+}
+/* ============================================
+   分支通知
+   ============================================ */
+
+.llm-ui-branch-notification {
+    position: fixed;
+    bottom: 80px;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    padding: 12px 20px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    font-size: 14px;
+    color: var(--text-primary);
+    opacity: 0;
+    transition: opacity 0.3s, transform 0.3s;
+    z-index: 1000;
+}
+
+.llm-ui-branch-notification.is-visible {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+}
+
+/* ============================================
+   激活分支高亮
+   ============================================ */
+
+.llm-ui-session.is-active-branch,
+.llm-ui-node.is-active-branch {
+    position: relative;
+}
+
+.llm-ui-session.is-active-branch::before,
+.llm-ui-node.is-active-branch::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: var(--primary-color);
+    border-radius: 0 2px 2px 0;
+}

@@ -12,6 +12,11 @@ export interface FloatingNavPanelOptions {
     // ✨ 新增：批量操作回调
     onBatchDelete?: (sessionIds: string[]) => Promise<void>;
     onBatchCopy?: (sessionIds: string[]) => Promise<void>;
+    
+    // ✅ 新增：分支操作
+    onShowBranchTree?: () => void;
+    onCreateBranch?: (sourceId: string) => void;
+    onSwitchBranch?: (branchId: string) => void;
 }
 
 export interface ChatNavItem {
@@ -22,6 +27,12 @@ export interface ChatNavItem {
     index: number;
     timestamp: number;
     agentName?: string;
+    
+    // ✅ 新增：分支信息
+    branchName?: string;
+    siblingIndex?: number;
+    siblingCount?: number;
+    hasChildren?: boolean;
 }
 
 export class FloatingNavPanel {
@@ -35,7 +46,9 @@ export class FloatingNavPanel {
     
     // ✅ 移除 isSelectionMode，checkbox 始终可见
     private selectedIds: Set<string> = new Set();
-    
+    // ✅ 新增：视图模式
+    private viewMode: 'list' | 'tree' = 'list';
+
     private keydownHandler: ((e: KeyboardEvent) => void) | null = null;
 
     constructor(container: HTMLElement, options: FloatingNavPanelOptions) {
@@ -106,6 +119,16 @@ export class FloatingNavPanel {
                 this.panel?.remove();
                 this.panel = null;
             }, 200);
+        }
+    }
+
+    /**
+     * ✅ 新增：切换视图模式
+     */
+    public setViewMode(mode: 'list' | 'tree'): void {
+        this.viewMode = mode;
+        if (this.isVisible) {
+            this.render();
         }
     }
 
@@ -204,7 +227,7 @@ export class FloatingNavPanel {
             </div>
             
             <div class="llm-nav-panel__list">
-                ${this.renderList()}
+                ${this.viewMode === 'list' ? this.renderList() : this.renderTreeView()}
             </div>
             
             <!-- ✅ 底部状态栏（可选，显示快捷键提示） -->
@@ -212,6 +235,7 @@ export class FloatingNavPanel {
                 <span class="llm-nav-panel__hint">
                     <kbd>↑↓</kbd> Navigate &nbsp;
                     <kbd>Shift+Click</kbd> Range Select &nbsp;
+                    ${this.viewMode === 'tree' ? '<kbd>→</kbd> Create Branch &nbsp;' : ''}
                     <kbd>Esc</kbd> Close
                 </span>
             </div>
@@ -224,6 +248,93 @@ export class FloatingNavPanel {
         requestAnimationFrame(() => {
             this.panel?.classList.add('llm-nav-panel--visible');
         });
+    }
+    
+    /**
+     * ✅ 新增：渲染树形视图
+     */
+    private renderTreeView(): string {
+        if (this.items.length === 0) {
+            return '<div class="llm-nav-panel__empty">No messages yet</div>';
+        }
+
+        return this.items.map((item, idx) => {
+            const icon = item.role === 'user' ? '👤' : '🤖';
+            const activeClass = idx === this.currentIndex ? 'llm-nav-item--active' : '';
+            const isSelected = this.selectedIds.has(item.id);
+            const timeStr = this.formatTime(item.timestamp);
+            const title = item.role === 'user' ? 'You' : (item.agentName || 'Assistant');
+            
+            // ✅ 分支信息
+            const hasBranches = (item.siblingCount || 0) > 1;
+            const branchInfo = hasBranches 
+                ? `<span class="llm-nav-item__branch-badge">${item.siblingIndex! + 1}/${item.siblingCount}</span>`
+                : '';
+            
+            const branchName = item.branchName 
+                ? `<span class="llm-nav-item__branch-name">${escapeHTML(item.branchName)}</span>`
+                : '';
+
+            return `
+                <div class="llm-nav-item llm-nav-item--tree ${activeClass} ${isSelected ? 'selected' : ''}"
+                     data-id="${item.id}"
+                     data-index="${idx}">
+                    <div class="llm-nav-item__checkbox ${isSelected ? 'checked' : ''}" data-checkbox="true"></div>
+                    <span class="llm-nav-item__icon">${icon}</span>
+                    <div class="llm-nav-item__content">
+                        <div class="llm-nav-item__header">
+                            <span class="llm-nav-item__title">${escapeHTML(title)}</span>
+                            ${branchName}
+                            ${branchInfo}
+                            <span class="llm-nav-item__time">${timeStr}</span>
+                        </div>
+                        <div class="llm-nav-item__preview">${escapeHTML(item.preview)}</div>
+                        
+                        <!-- ✅ 分支操作按钮 -->
+                        ${hasBranches || item.hasChildren ? `
+                            <div class="llm-nav-item__branch-actions">
+                                ${hasBranches ? `
+                                    <button class="llm-nav-item__branch-btn" 
+                                            data-action="prev-branch" 
+                                            title="Previous Branch"
+                                            ${(item.siblingIndex || 0) === 0 ? 'disabled' : ''}>
+                                        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
+                                            <polyline points="15 18 9 12 15 6"></polyline>
+                                        </svg>
+                                    </button>
+                                    <button class="llm-nav-item__branch-btn" 
+                                            data-action="next-branch" 
+                                            title="Next Branch"
+                                            ${(item.siblingIndex || 0) >= (item.siblingCount || 1) - 1 ? 'disabled' : ''}>
+                                        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
+                                            <polyline points="9 18 15 12 9 6"></polyline>
+                                        </svg>
+                                    </button>
+                                ` : ''}
+                                <button class="llm-nav-item__branch-btn" 
+                                        data-action="create-branch" 
+                                        title="Create Branch (→)">
+                                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
+                                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                                    </svg>
+                                </button>
+                                ${item.hasChildren ? `
+                                    <button class="llm-nav-item__branch-btn" 
+                                            data-action="show-children" 
+                                            title="Show Child Branches">
+                                        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
+                                            <polyline points="6 9 12 15 18 9"></polyline>
+                                        </svg>
+                                    </button>
+                                ` : ''}
+                            </div>
+                        ` : ''}
+                    </div>
+                    <span class="llm-nav-item__index">#${idx + 1}</span>
+                </div>
+            `;
+        }).join('');
     }
 
     private renderList(): string {
@@ -282,6 +393,14 @@ export class FloatingNavPanel {
 
         this.panel.querySelector('.llm-nav-panel__close')?.addEventListener('click', () => this.hide());
 
+        // ✅ 视图切换
+        this.panel.querySelectorAll<HTMLElement>('.llm-nav-panel__view-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const view = btn.dataset.view as 'list' | 'tree';
+                this.setViewMode(view);
+            });
+        });
+
         // 工具栏按钮
         this.panel.querySelectorAll<HTMLElement>('.llm-nav-panel__btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
@@ -298,6 +417,14 @@ export class FloatingNavPanel {
                 const target = e.target as HTMLElement;
                 const id = item.dataset.id!;
                 const idx = parseInt(item.dataset.index!);
+
+                // ✅ 分支操作按钮
+                const branchBtn = target.closest('[data-action]') as HTMLElement;
+                if (branchBtn && item.contains(branchBtn)) {
+                    const action = branchBtn.dataset.action;
+                    this.handleBranchAction(action!, id, idx);
+                    return;
+                }
 
                 // 点击 checkbox
                 if (target.closest('[data-checkbox]')) {
@@ -388,6 +515,35 @@ export class FloatingNavPanel {
                 break;
         }
     }
+    
+    /**
+     * ✅ 新增：处理分支操作
+     */
+    private handleBranchAction(action: string, sessionId: string, index: number): void {
+        const item = this.items[index];
+        
+        switch (action) {
+            case 'prev-branch':
+                if (item.siblingIndex! > 0) {
+                    this.options.onSwitchBranch?.(sessionId);
+                }
+                break;
+                
+            case 'next-branch':
+                if (item.siblingIndex! < (item.siblingCount || 1) - 1) {
+                    this.options.onSwitchBranch?.(sessionId);
+                }
+                break;
+                
+            case 'create-branch':
+                this.options.onCreateBranch?.(sessionId);
+                break;
+                
+            case 'show-children':
+                this.options.onShowBranchTree?.();
+                break;
+        }
+    }
 
     private toggleSelection(id: string): void {
         if (this.selectedIds.has(id)) {
@@ -475,12 +631,54 @@ export class FloatingNavPanel {
                     e.preventDefault();
                     this.navigateNext();
                     break;
+                // ✅ 新增：分支导航快捷键
+                case 'ArrowLeft':
+                    if (this.viewMode === 'tree' && this.currentIndex >= 0) {
+                        e.preventDefault();
+                        const item = this.items[this.currentIndex];
+                        if (item.siblingIndex! > 0) {
+                            this.options.onSwitchBranch?.(item.id);
+                        }
+                    }
+                    break;
+                    
+                case 'ArrowRight':
+                    if (this.viewMode === 'tree' && this.currentIndex >= 0) {
+                        e.preventDefault();
+                        const item = this.items[this.currentIndex];
+                        if (e.shiftKey) {
+                            // Shift + → 创建分支
+                            this.options.onCreateBranch?.(item.id);
+                        } else if (item.siblingIndex! < (item.siblingCount || 1) - 1) {
+                            // → 切换到下一个分支
+                            this.options.onSwitchBranch?.(item.id);
+                        }
+                    }
+                    break;
+
                 case 'Enter':
                     e.preventDefault();
                     if (this.currentIndex >= 0) {
                         this.options.onNavigate(this.items[this.currentIndex].id);
                     }
                     break;
+                    
+                case 'b':
+                    // B 键：显示分支树
+                    if (e.ctrlKey || e.metaKey) {
+                        e.preventDefault();
+                        this.options.onShowBranchTree?.();
+                    }
+                    break;
+                    
+                case 't':
+                    // T 键：切换视图模式
+                    if (e.ctrlKey || e.metaKey) {
+                        e.preventDefault();
+                        this.setViewMode(this.viewMode === 'list' ? 'tree' : 'list');
+                    }
+                    break;
+                    
                 case 'a':
                     if (e.ctrlKey || e.metaKey) {
                         e.preventDefault();

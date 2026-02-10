@@ -1,12 +1,14 @@
 // @file: llm-ui/components/HistoryView.ts
 
 import { NodeActionCallback } from '../core/types';
-import { OrchestratorEvent, SessionGroup, ExecutionNode } from '@itookit/llm-engine';
+import { OrchestratorEvent, SessionGroup, ExecutionNode,BranchTreeNode } from '@itookit/llm-engine';
 import { NodeRenderer } from './NodeRenderer';
 import { MDxController } from './mdx/MDxController';
 import { NodeTemplates } from './templates/NodeTemplates';
 import { LayoutTemplates } from './templates/LayoutTemplates';
 import { escapeHTML, showConfirmDialog, ISessionEngine } from '@itookit/common';
+import { BranchTreePanel } from './BranchTreePanel';
+import { BranchCompareView } from './BranchCompareView';
 
 // ✅ 新增：折叠状态类型
 export type CollapseStateMap = Record<string, boolean>;
@@ -75,6 +77,13 @@ export class HistoryView {
     // ✅ 新增：新内容提示器
     private newContentIndicator: HTMLElement | null = null;
 
+    // ✅ 新增：分支管理组件
+    private branchTreePanel: BranchTreePanel | null = null;
+    private branchCompareView: BranchCompareView | null = null;
+    
+    // ✅ 新增：分支操作回调
+    private onBranchAction?: BranchActionCallback;
+
     constructor(
         container: HTMLElement,
         onContentChange?: (id: string, content: string, type: 'user' | 'node') => void,
@@ -105,6 +114,9 @@ export class HistoryView {
             });
         });
         this.resizeObserver.observe(this.container);
+
+        // ✅ 初始化分支组件
+        this.initBranchComponents();
     }
 
     // ✅ 新增：获取当前折叠状态
@@ -393,6 +405,74 @@ export class HistoryView {
         }
     }
 
+    /**
+     * ✅ 新增：初始化分支组件
+     */
+    private initBranchComponents(): void {
+        this.branchTreePanel = new BranchTreePanel(this.container, {
+            onNavigate: (nodeId) => this.handleBranchNavigate(nodeId),
+            onRename: (nodeId, newName) => this.handleBranchRename(nodeId, newName),
+            onDelete: (nodeId) => this.handleBranchDelete(nodeId),
+            onCompare: (nodeId1, nodeId2) => this.handleBranchCompare(nodeId1, nodeId2),
+            onClose: () => {}
+        });
+
+        this.branchCompareView = new BranchCompareView(this.container, {
+            onClose: () => {},
+            onSelectBranch: (branchId) => this.handleBranchSelect(branchId)
+        });
+    }
+
+    /**
+     * ✅ 新增：设置分支操作回调
+     */
+    public setBranchActionCallback(callback: BranchActionCallback): void {
+        this.onBranchAction = callback;
+    }
+
+    /**
+     * ✅ 新增：显示分支树
+     */
+    public showBranchTree(tree: BranchTreeNode): void {
+        this.branchTreePanel?.show(tree);
+    }
+
+    /**
+     * ✅ 新增：隐藏分支树
+     */
+    public hideBranchTree(): void {
+        this.branchTreePanel?.hide();
+    }
+
+    /**
+     * ✅ 新增：显示分支对比
+     */
+    public showBranchCompare(branch1: SessionGroup, branch2: SessionGroup): void {
+        this.branchCompareView?.show(branch1, branch2);
+    }
+
+    // ✅ 新增：分支操作处理方法
+    
+    private handleBranchNavigate(nodeId: string): void {
+        this.onBranchAction?.('navigate', nodeId);
+    }
+
+    private handleBranchRename(nodeId: string, newName: string): void {
+        this.onBranchAction?.('rename', nodeId, { newName });
+    }
+
+    private handleBranchDelete(nodeId: string): void {
+        this.onBranchAction?.('delete', nodeId);
+    }
+
+    private handleBranchCompare(nodeId1: string, nodeId2: string): void {
+        this.onBranchAction?.('compare', nodeId1, { compareWith: nodeId2 });
+    }
+
+    private handleBranchSelect(branchId: string): void {
+        this.onBranchAction?.('select', branchId);
+    }
+
     private initUserBubble(wrapper: HTMLElement, group: SessionGroup) {
         const mountPoint = wrapper.querySelector(`#user-mount-${group.id}`) as HTMLElement;
         const controller = new MDxController(mountPoint, group.content || '', {
@@ -450,6 +530,17 @@ export class HistoryView {
         wrapper.querySelector('[data-action="prev-sibling"]')?.addEventListener('click', (e) => {
             e.stopPropagation();
             this.onNodeAction?.('prev-sibling', group.id);
+        });
+        // ✅ 新增：分支树按钮
+        wrapper.querySelector('[data-action="show-branch-tree"]')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.onBranchAction?.('show-tree', group.id);
+        });
+
+        // ✅ 新增：创建分支按钮
+        wrapper.querySelector('[data-action="create-branch"]')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.onBranchAction?.('create', group.id);
         });
 
         wrapper.querySelector('[data-action="next-sibling"]')?.addEventListener('click', (e) => {
@@ -916,6 +1007,20 @@ export class HistoryView {
             this.onNodeAction?.('next-sibling', sessionId);
         });
 
+        // ✅ 新增：分支树按钮
+        element.querySelector('[data-action="show-branch-tree"]')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const sessionId = this.getSessionIdFromElement(element);
+            this.onBranchAction?.('show-tree', sessionId);
+        });
+
+        // ✅ 新增：创建分支按钮
+        element.querySelector('[data-action="create-branch"]')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const sessionId = this.getSessionIdFromElement(element);
+            this.onBranchAction?.('create', sessionId);
+        });
+
         if (mountPoints.output) {
             const isStreamingNode = node.status === 'running' || node.status === 'queued';
 
@@ -1231,10 +1336,32 @@ export class HistoryView {
      */
     processEvent(event: OrchestratorEvent) {
         // 非流式更新事件直接处理
-        if (event.type !== 'node_update') {
-            this.processEventImmediate(event);
-            return;
+        // ✅ 新增：分支事件处理
+        switch (event.type) {
+            case 'branch_created':
+                this.handleBranchCreated(event.payload);
+                break;
+
+            case 'branch_renamed':
+                this.handleBranchRenamed(event.payload);
+                break;
+
+            case 'branch_deleted':
+                this.handleBranchDeleted(event.payload);
+                break;
+
+            case 'branch_switched':
+                this.handleBranchSwitched(event.payload);
+                break;
+
+            default:
+                if (event.type !== 'node_update') {
+                    this.processEventImmediate(event);
+                    return;
+                }
+                break;
         }
+
 
         // 流式更新事件批量处理
         this.eventQueue.push(event);
@@ -1386,6 +1513,103 @@ export class HistoryView {
         }
     }
 
+    /**
+     * ✅ 新增：从元素获取 sessionId
+     */
+    private getSessionIdFromElement(element: HTMLElement): string {
+        const sessionEl = element.closest('[data-session-id]');
+        return (sessionEl as HTMLElement)?.dataset.sessionId || '';
+    }
+
+    /**
+     * ✅ 新增：处理分支创建事件
+     */
+    private handleBranchCreated(payload: { sourceId: string; newId: string; branchName?: string }): void {
+        console.log(`[HistoryView] Branch created: ${payload.newId} from ${payload.sourceId}`);
+        
+        // 更新源节点的分支计数
+        const sourceEl = this.findElementBySessionId(payload.sourceId);
+        if (sourceEl) {
+            const indicator = sourceEl.querySelector('.llm-ui-branch-indicator');
+            if (indicator) {
+                const countEl = indicator.querySelector('.llm-ui-branch-count');
+                if (countEl) {
+                    const [current, total] = countEl.textContent?.split('/').map(Number) || [1, 1];
+                    countEl.textContent = `${current}/${total + 1}`;
+                }
+            }
+        }
+
+        // 显示成功提示
+        this.showBranchNotification(`Branch "${payload.branchName || 'Untitled'}" created`);
+    }
+
+    /**
+     * ✅ 新增：处理分支重命名事件
+     */
+    private handleBranchRenamed(payload: { nodeId: string; newName: string }): void {
+        const el = this.findElementBySessionId(payload.nodeId);
+        if (el) {
+            const nameEl = el.querySelector('.llm-ui-branch-name');
+            if (nameEl) {
+                nameEl.textContent = payload.newName;
+            }
+        }
+    }
+
+    /**
+     * ✅ 新增：处理分支删除事件
+     */
+    private handleBranchDeleted(payload: { nodeId: string; deletedIds: string[] }): void {
+        // 移除已删除的消息
+        this.removeMessages(payload.deletedIds, true);
+    }
+
+    /**
+     * ✅ 新增：处理分支切换事件
+     */
+    private handleBranchSwitched(payload: { fromId: string; toId: string }): void {
+        // 更新激活状态
+        const fromEl = this.findElementBySessionId(payload.fromId);
+        const toEl = this.findElementBySessionId(payload.toId);
+
+        if (fromEl) {
+            fromEl.classList.remove('is-active-branch');
+        }
+        if (toEl) {
+            toEl.classList.add('is-active-branch');
+            toEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+    }
+
+    /**
+     * ✅ 新增：根据 sessionId 查找元素
+     */
+    private findElementBySessionId(sessionId: string): HTMLElement | null {
+        return this.container.querySelector(`[data-session-id="${sessionId}"]`) as HTMLElement ||
+               this.nodeMap.get(sessionId) || null;
+    }
+
+    /**
+     * ✅ 新增：显示分支通知
+     */
+    private showBranchNotification(message: string): void {
+        const notification = document.createElement('div');
+        notification.className = 'llm-ui-branch-notification';
+        notification.textContent = message;
+        
+        this.container.appendChild(notification);
+        
+        requestAnimationFrame(() => {
+            notification.classList.add('is-visible');
+        });
+
+        setTimeout(() => {
+            notification.classList.remove('is-visible');
+            setTimeout(() => notification.remove(), 300);
+        }, 2000);
+    }
+
     clear() {
         if (this.scrollFrameId !== null) {
             cancelAnimationFrame(this.scrollFrameId);
@@ -1430,6 +1654,13 @@ export class HistoryView {
             this.scrollFrameId = null;
         }
 
+        // ✅ 清理分支组件
+        this.branchTreePanel?.destroy();
+        this.branchTreePanel = null;
+        
+        this.branchCompareView?.destroy();
+        this.branchCompareView = null;
+
         this.resizeObserver.disconnect();
 
         this.previewUpdateTimers.forEach(timer => clearTimeout(timer));
@@ -1455,4 +1686,20 @@ export class HistoryView {
 
         this.container.innerHTML = '';
     }
+}
+
+/**
+ * ✅ 新增：分支操作回调类型
+ */
+export type BranchAction = 
+    | 'show-tree' 
+    | 'create' 
+    | 'navigate' 
+    | 'rename' 
+    | 'delete' 
+    | 'compare' 
+    | 'select';
+
+export interface BranchActionCallback {
+    (action: BranchAction, nodeId: string, options?: { newName?: string; compareWith?: string }): void;
 }
