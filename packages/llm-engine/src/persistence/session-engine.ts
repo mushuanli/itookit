@@ -50,7 +50,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
    * 初始化钩子
    */
   protected async onLoad(): Promise<void> {
-    log.info('Initialized');
+    //log.info('Initialized');
   }
 
   // ============================================================
@@ -425,13 +425,6 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
     meta?: AppendMessageMeta
   ): Promise<string> {
     return this.lockManager.acquire(`session:${sessionId}`, async () => {
-      log.debug('Appending message', {
-        sessionId,
-        role,
-        contentLength: content.length,
-        hasFiles: !!meta?.files?.length,
-        fileCount: meta?.files?.length || 0
-      });
       const manifest = await this.getManifest(nodeId);
 
       const parentId = manifest.current_head;
@@ -472,7 +465,6 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
         // 处理 Summary
         if (!manifest.summary || manifest.summary === "New conversation") {
           manifest.summary = content.substring(0, 100).replace(/[\r\n]+/g, ' ').trim();
-          log.debug('Updated session summary', { sessionId });
         }
 
         // 处理 Title
@@ -511,12 +503,6 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
       manifest.updated_at = now;
 
       await this.engine.writeContent(nodeId, JSON.stringify(manifest, null, 2));
-
-      log.debug('Message appended successfully', {
-        sessionId,
-        nodeId: newNodeId,
-        role
-      });
 
       return newNodeId;
     });
@@ -566,11 +552,6 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
 
       if (hasChanges) {
         await this.writeJson(path, node);
-        log.debug('Node updated', {
-          sessionId,
-          nodeId,
-          changes: changes.join(', ')
-        });
       }
     });
   }
@@ -590,11 +571,6 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
     messageNodeId: string
   ): Promise<void> {
     return this.lockManager.acquire(`session:${sessionId}`, async () => {
-      log.info('Deleting message', {
-        sessionId,
-        nodeId,
-        messageNodeId
-      });
       const messagePath = this.getNodePath(sessionId, messageNodeId);
       const messageNode = await this.readJson<ChatNode>(messagePath);
 
@@ -607,7 +583,6 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
       }
 
       if (messageNode.status === 'deleted') {
-        log.debug('Message already deleted', { sessionId, messageNodeId });
         return;
       }
 
@@ -617,16 +592,10 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
       }
 
       // 2. 软删除当前节点及其所有后代
-      const deletedCount = await this.softDeleteRecursive(sessionId, messageNodeId);
+      await this.softDeleteRecursive(sessionId, messageNodeId);
 
       // 3. 更新 manifest
       await this.repairManifestAfterDelete(nodeId, sessionId, messageNodeId, messageNode);
-
-      log.info('Message deleted successfully', {
-        sessionId,
-        messageNodeId,
-        deletedCount
-      });
     });
   }
 
@@ -729,10 +698,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
       manifest.updated_at = new Date().toISOString();
       await this.engine.writeContent(nodeId, JSON.stringify(manifest, null, 2));
 
-      log.info('Manifest repaired after deletion', {
-        sessionId,
-        repairs
-      });
+      //log.info('Manifest repaired after deletion', { sessionId, repairs });
     }
   }
 
@@ -1180,8 +1146,6 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
   ): Promise<EngineNode> {
     const baseName = (name || "New Chat").replace(/\.chat$/i, '');
 
-    log.debug(`createFile: name="${name}", baseName="${baseName}"`);
-
     // 1. 查找可用的文件名
     const availableName = await this.findAvailableFileName(baseName, parentId);
 
@@ -1593,11 +1557,6 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
 
       const parsed = YAML.parse(yamlStr) as Partial<ChatSessionSettings>;
 
-      log.debug('Session settings loaded', {
-        sessionId,
-        settings: parsed
-      });
-
       return {
         ...DEFAULT_SESSION_SETTINGS,
         ...parsed,
@@ -1617,10 +1576,6 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
     settings: Partial<ChatSessionSettings>
   ): Promise<void> {
     return this.lockManager.acquire(`settings:${sessionId}`, async () => {
-      log.info('Saving session settings', {
-        sessionId,
-        settings
-      });
 
       const path = this.getSettingsPath(sessionId);
 
@@ -1650,7 +1605,6 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
       const nodeId = await this.engine.resolvePath(path);
       if (nodeId) {
         await this.engine.writeContent(nodeId, yamlContent);
-        log.debug('Session settings updated', { sessionId });
       } else {
         // 确保隐藏目录存在
         const hiddenDir = this.getHiddenDir(sessionId);
@@ -1666,8 +1620,6 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
           { type: 'settings' }
         );
       }
-
-      log.debug(`Session settings saved for ${sessionId}`);
     });
   }
 
@@ -1705,8 +1657,6 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
    */
   async validateManifest(nodeId: string, sessionId: string): Promise<boolean> {
     try {
-      log.debug('Validating manifest', { sessionId, nodeId });
-
       const manifest = await this.getManifest(nodeId);
       let needsUpdate = false;
       const issues: string[] = [];
