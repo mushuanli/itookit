@@ -1,4 +1,4 @@
-// @file: llm-engine/adapters/kernel-adapter.ts
+// @file: llm-engine/adapters/llmkernel-adapter.ts
 import { ChatMessage, Attachment } from '@itookit/llm-driver';
 import {
     ExecutionRuntime,
@@ -9,7 +9,7 @@ import {
 import { OrchestratorEvent } from '../core/types';
 import { UIEventAdapter } from './ui-event-adapter';
 
-export interface KernelAdapterOptions {
+export interface LLMKernelAdapterOptions {
     sessionId: string;
     history: ChatMessage[];  // ✅ 明确类型是 ChatMessage[]
     attachments: Attachment[];
@@ -23,7 +23,7 @@ export interface KernelAdapterOptions {
  * Kernel 适配器
  * 将 Kernel 的执行能力适配到 UI 层
  */
-export class KernelAdapter {
+export class LLMKernelAdapter {
     private runtime: ExecutionRuntime;
     private uiAdapter: UIEventAdapter;
 
@@ -38,7 +38,7 @@ export class KernelAdapter {
     async executeQuery(
         input: string,
         executorConfig: ExecutorConfig,
-        options: KernelAdapterOptions
+        options: LLMKernelAdapterOptions
     ): Promise<ExecutionResult> {
         const {
             sessionId,
@@ -115,14 +115,14 @@ export class KernelAdapter {
 // 单例管理
 // ============================================
 
-let kernelAdapter: KernelAdapter | null = null;
+let kernelAdapter: LLMKernelAdapter | null = null;
 
 /**
- * 获取 KernelAdapter 单例
+ * 获取 LLMKernelAdapter 单例
  */
-export function getKernelAdapter(): KernelAdapter {
+export function getLLMKernelAdapter(): LLMKernelAdapter {
     if (!kernelAdapter) {
-        kernelAdapter = new KernelAdapter();
+        kernelAdapter = new LLMKernelAdapter();
     }
     return kernelAdapter;
 }
@@ -130,6 +130,6 @@ export function getKernelAdapter(): KernelAdapter {
 /**
  * 重置 KernelAdapter（用于测试）
  */
-export function resetKernelAdapter(): void {
+export function resetLLMKernelAdapter(): void {
     kernelAdapter = null;
 }

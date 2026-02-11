@@ -40,7 +40,6 @@ export { SessionRecovery } from './session/session-recovery';
 // 适配器
 // ============================================
 
-export { KernelAdapter, getKernelAdapter } from './adapters/kernel-adapter';
 export { PersistenceAdapter } from './adapters/persistence-adapter';
 export { UIEventAdapter } from './adapters/ui-event-adapter';
 

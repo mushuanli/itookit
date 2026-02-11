@@ -7,7 +7,7 @@ import {
 } from '../core/types';
 import { EngineError, EngineErrorCode } from '../core/errors';
 import { ENGINE_DEFAULTS } from '../core/constants';
-import { KernelAdapter, getKernelAdapter } from '../adapters/kernel-adapter';
+import { LLMKernelAdapter, getLLMKernelAdapter } from '../adapters/llmkernel-adapter';
 import { PersistenceAdapter } from '../adapters/persistence-adapter';
 import { ILLMSessionEngine, BranchTreeNode } from '../persistence/types';
 import { IAgentService } from '../services/agent-service';
@@ -44,7 +44,7 @@ export class SessionRegistry {
     private static instance: SessionRegistry | null = null;
 
     // 核心依赖
-    private kernelAdapter!: KernelAdapter;
+    private kernelAdapter!: LLMKernelAdapter;
     private persistence!: PersistenceAdapter;
     private agentService!: IAgentService;
     private initialized = false;
@@ -80,7 +80,7 @@ export class SessionRegistry {
         if (this.initialized) return;
 
         // 初始化核心依赖
-        this.kernelAdapter = getKernelAdapter();
+        this.kernelAdapter = getLLMKernelAdapter();
         this.persistence = new PersistenceAdapter(sessionEngine);
         this.agentService = agentService;
 

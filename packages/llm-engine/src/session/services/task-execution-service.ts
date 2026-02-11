@@ -10,7 +10,7 @@ import {
 } from '../../core/types';
 import { ENGINE_DEFAULTS } from '../../core/constants';
 import { SessionState, HistoryMessage } from '../session-state';
-import { KernelAdapter } from '../../adapters/kernel-adapter';
+import { LLMKernelAdapter } from '../../adapters/llmkernel-adapter';
 import { PersistenceAdapter } from '../../adapters/persistence-adapter';
 import { SessionEventEmitter } from '../events/session-event-emitter';
 import { ExecutorResolverService } from './executor-resolver-service';
@@ -23,7 +23,7 @@ import { MessageOperationService } from './message-operation-service';
  */
 export class TaskExecutionService {
     constructor(
-        private kernelAdapter: KernelAdapter,
+        private kernelAdapter: LLMKernelAdapter,
         private persistence: PersistenceAdapter,
         private eventEmitter: SessionEventEmitter,
         private executorResolver: ExecutorResolverService,
