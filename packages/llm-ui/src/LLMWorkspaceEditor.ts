@@ -13,8 +13,7 @@ import {
     ILLMSessionEngine,
     IAgentService,
     SessionManager,
-    getSessionRegistry,
-    SessionRegistry,
+    getSessionManager,
     OrchestratorEvent,
     RegistryEvent,
 } from '@itookit/llm-engine';
@@ -70,9 +69,6 @@ export class LLMWorkspaceEditor implements IEditor {
     // 会话管理器（代理层）
     private sessionManager: SessionManager;
 
-    // 全局注册表引用
-    private registry: SessionRegistry;
-
     // Services
     private sessionService!: SessionService;
     private contentService!: ContentService;
@@ -127,8 +123,8 @@ export class LLMWorkspaceEditor implements IEditor {
 
     constructor(_container: HTMLElement, options: LLMEditorOptions) {
         this.options = options;
-        this.registry = getSessionRegistry();
-        this.sessionManager = new SessionManager();
+        // 使用全局单例，不再自己 new
+        this.sessionManager = getSessionManager();
 
         if (options.title) {
             this.currentTitle = options.title;
@@ -316,7 +312,7 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     private bindGlobalEvents(): void {
-        this.globalEventUnsubscribe = this.registry.onGlobalEvent((event) => {
+        this.globalEventUnsubscribe = this.sessionManager.onGlobalEvent((event: RegistryEvent) => {
             this.handleGlobalEvent(event);
         });
     }
@@ -775,8 +771,6 @@ export class LLMWorkspaceEditor implements IEditor {
             for (const id of ids) {
                 try {
                     await this.contentService.deleteMessage(id, {
-                        mode: 'soft',
-                        cascade: false,
                         deleteAssociatedResponses: true
                     });
 

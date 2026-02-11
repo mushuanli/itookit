@@ -102,7 +102,7 @@ export interface ChatNodeMeta extends AppendMessageMeta {
     tokens?: number;
     /** 完成原因 */
     finish_reason?: string;
-    
+
     /** 其他扩展字段 */
     [key: string]: any;
 }
@@ -176,18 +176,25 @@ export interface ILLMSessionEngine extends IBaseSessionEngine {
         sessionId: string,
         role: ChatNode['role'],
         content: string,
-        meta?: any
+        meta?: AppendMessageMeta
     ): Promise<string>;
 
     /** 更新节点 */
     updateNode(
         sessionId: string,
         messageId: string,
-        updates: Partial<Pick<ChatNode, 'content' | 'meta' | 'status'>>
+        updates: {
+            content?: string;
+            meta?: UpdateMessageMeta;
+            status?: ChatNode['status'];
+        }
     ): Promise<void>;
 
-    /** 删除消息（软删除） */
-    deleteMessage(sessionId: string, messageId: string): Promise<void>;
+    deleteMessage(
+        nodeId: string,
+        sessionId: string,
+        messageNodeId: string
+    ): Promise<void>;
 
     /** 编辑消息（创建分支） */
     editMessage(
@@ -197,11 +204,14 @@ export interface ILLMSessionEngine extends IBaseSessionEngine {
         newContent: string
     ): Promise<string>;
 
-    /** 切换分支 */
-    switchBranch(nodeId: string, sessionId: string, branchName: string): Promise<void>;
-    /**
-     * ✅ 新增：创建分支
-     */
+    // === 分支操作 ===
+
+    switchBranch(
+        nodeId: string,
+        sessionId: string,
+        branchName: string
+    ): Promise<void>;
+
     createBranch(
         nodeId: string,
         sessionId: string,
@@ -218,7 +228,7 @@ export interface ILLMSessionEngine extends IBaseSessionEngine {
      */
     getBranchTree(
         sessionId: string,
-        nodeId: string,  // 新增参数
+        nodeId: string,
         rootNodeId?: string
     ): Promise<BranchTreeNode>;
 
@@ -235,8 +245,9 @@ export interface ILLMSessionEngine extends IBaseSessionEngine {
      * ✅ 新增：删除分支
      */
     deleteBranch(
-        sessionId: string,
         nodeId: string,
+        sessionId: string,
+        messageNodeId: string,
         options?: { cascade?: boolean }
     ): Promise<string[]>;
 
@@ -261,22 +272,28 @@ export interface ILLMSessionEngine extends IBaseSessionEngine {
      * @returns 会话设置，如果不存在返回默认值
      */
     getSessionSettings(sessionId: string): Promise<ChatSessionSettings>;
-    
+
     /**
      * 保存会话设置
      * @param sessionId 会话 ID
      * @param settings 要保存的设置（增量合并）
      */
     saveSessionSettings(sessionId: string, settings: Partial<ChatSessionSettings>): Promise<void>;
-    
+
+    // === Manifest 维护 ===
+
     /**
-     * ✅ 新增：获取 Agent 对应的 Connection 的可用模型
-     * @param agentId Agent ID
-     * @returns 可用模型列表
+     * 验证并修复 manifest 一致性
      */
-    getAvailableModelsForAgent(agentId: string): Promise<Array<{
-        id: string;
-        name: string;
-        provider?: string;
-    }>>;
+    validateManifest(nodeId: string, sessionId: string): Promise<boolean>;
+
+    /**
+     * 原子性更新 manifest 的 current_head（带锁）
+     */
+    updateManifestHead(
+        nodeId: string,
+        sessionId: string,
+        targetNodeId: string
+    ): Promise<void>;
 }
+

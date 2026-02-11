@@ -1,8 +1,8 @@
-// @file: llm-engine/src/services/agent-service.ts
+// @file: llm-engine/services/agent-service.ts
 
 import { RestorableItem } from '@itookit/common';
 import { LLMConnection, AgentDefinition } from '@itookit/llm-driver';
-import { ChatManifest } from '../persistence/types';
+
 /**
  * MCP 服务器
  */
@@ -13,7 +13,6 @@ export interface MCPServer {
     command?: string;
     endpoint?: string;
     status?: 'idle' | 'connected' | 'error';
-    // API:
     args?: string;
     cwd?: string;
     apiKey?: string;
@@ -22,46 +21,47 @@ export interface MCPServer {
     timeout?: number;
     tools?: any[];
     resources?: any[];
-
-    // UI:
     icon?: string;
     description?: string;
 }
 
 /**
- * Agent 服务接口
+ * Agent 服务 — 核心读取接口
+ * SessionManager / AgentResolver 只依赖此接口
  */
 export interface IAgentService {
     init(): Promise<void>;
 
-    // Agents
-    getAgents(): Promise<AgentDefinition[]>;
+    // 读取
     getAgentConfig(agentId: string): Promise<AgentDefinition | null>;
+    getAgents(): Promise<AgentDefinition[]>;
+    getConnection(connectionId: string): Promise<LLMConnection | undefined>;
+    getDefaultConnection(): Promise<LLMConnection | null>;
+
+    // 事件
+    onChange(callback: () => void): () => void;
+}
+
+/**
+ * Agent 管理服务 — 完整 CRUD 接口
+ * 设置页面、管理 UI 依赖此接口
+ */
+export interface IAgentManagementService extends IAgentService {
+    // Agent CRUD
     saveAgent(agent: AgentDefinition): Promise<void>;
     deleteAgent(agentId: string): Promise<void>;
 
-    // Connections
+    // Connection CRUD
     getConnections(): Promise<LLMConnection[]>;
-    getConnection(connectionId: string): Promise<LLMConnection | undefined>;
-    /**
-     * ✅ 新增：获取默认或回退的 Connection
-     * 保证总能返回一个可用的 Connection，除非一个都没有。
-     */
-    getDefaultConnection(): Promise<LLMConnection | null>;
     saveConnection(conn: LLMConnection): Promise<void>;
     deleteConnection(id: string): Promise<void>;
 
-    // MCP Servers
+    // MCP CRUD
     getMCPServers(): Promise<MCPServer[]>;
     saveMCPServer(server: MCPServer): Promise<void>;
     deleteMCPServer(id: string): Promise<void>;
 
+    // 恢复/诊断
     getRestorableItems(): Promise<RestorableItem[]>;
     restoreItem(type: 'connection' | 'agent', id: string): Promise<void>;
-
-    updateManifest(nodeId: string, manifest: ChatManifest): Promise<void>;
-    resolvePath(path: string): Promise<string | null>;
-
-    // Events
-    onChange(callback: () => void): () => void;
 }

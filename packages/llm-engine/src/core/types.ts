@@ -71,15 +71,6 @@ export interface ExecutionOverrides {
 }
 
 /**
- * ✅ 新增：分支信息
- */
-export interface BranchInfo {
-    siblingIndex: number;
-    siblingCount: number;
-    parentAssistantId?: string;
-}
-
-/**
  * 执行节点（UI 层表示）
  */
 export interface ExecutionNode {
@@ -180,43 +171,15 @@ export interface SessionGroup {
 }
 
 /**
- * UI 事件类型
+ * 会话快照
  */
-export type OrchestratorEvent =
-    // 会话事件
-    | { type: 'session_start'; payload: SessionGroup }
-    | { type: 'session_cleared'; payload: Record<string, never> }
-
-    // 节点事件
-    | { type: 'node_start'; payload: { parentId?: string; node: ExecutionNode } }
-    | { type: 'node_update'; payload: { nodeId: string; chunk?: string; field?: 'thought' | 'output'; metaInfo?: any } }
-    | { type: 'node_status'; payload: { nodeId: string; status: NodeStatus; result?: any } }
-
-    // 交互事件
-    | { type: 'request_input'; payload: { nodeId: string; schema: any } }
-    | { type: 'finished'; payload: { sessionId: string, metadata?: object } }
-    // ✅ 修复：扩展 error payload 以支持 code
-    | { type: 'error'; payload: { message: string; error?: Error; code?: string | number } }
-
-    // 编辑/删除事件
-    | { type: 'messages_deleted'; payload: { deletedIds: string[] } }
-    | { type: 'message_edited'; payload: { sessionId: string; newContent: string } }
-    // ✅ 修复：扩展 payload
-    | {
-        type: 'retry_started';
-        payload: {
-            originalId: string;
-            newId: string;
-            siblingIndex?: number;
-            siblingCount?: number;
-        }
-    }
-    | { type: 'sibling_switch'; payload: { sessionId: string; newIndex: number; total: number } }
-    // ✅ 新增：分支事件
-    | { type: 'branch_created'; payload: { sourceId: string; newId: string; branchName?: string } }
-    | { type: 'branch_renamed'; payload: { nodeId: string; newName: string } }
-    | { type: 'branch_deleted'; payload: { nodeId: string; deletedIds: string[] } }
-    | { type: 'branch_switched'; payload: { fromId: string; toId: string } };
+export interface SessionSnapshot {
+    sessionId: string;
+    nodeId: string;
+    sessions: SessionGroup[];
+    status: SessionStatus;
+    isRunning: boolean;
+}
 
 /**
  * 会话运行状态
@@ -256,29 +219,81 @@ export interface SessionRuntime {
 }
 
 /**
- * 执行任务
+ * 任务输入
+ */
+export interface TaskInput {
+    sessionId: string;
+    nodeId: string;
+    text: string;
+    files: ChatFile[];
+    agentId: string;
+    overrides?: ExecutionOverrides;
+    skipUserMessage?: boolean;
+    parentUserNodeId?: string;
+    branchInfo?: BranchInfo;
+}
+
+/**
+ * 分支信息
+ */
+export interface BranchInfo {
+    siblingIndex: number;
+    siblingCount: number;
+    parentAssistantId?: string;
+}
+
+/**
+ * 执行任务（内部）
  */
 export interface ExecutionTask {
     id: string;
     sessionId: string;
     nodeId: string;
-    input: {
-        text: string;
-        /** ✅ [修改] 传递 ChatFile 数组 */
-        files: ChatFile[];
-        executorId: string;
-        overrides?: ExecutionOverrides;
-    };
-    // ✅ 修复：添加 branchInfo
-    options: {
-        skipUserMessage?: boolean;
-        parentUserNodeId?: string;
-        branchInfo?: BranchInfo;
-    };
+    input: TaskInput;
     priority: number;
     createdAt: number;
     abortController: AbortController;
 }
+
+/**
+ * 池状态
+ */
+export interface PoolStatus {
+    running: number;
+    queued: number;
+    maxConcurrent: number;
+    available: number;
+}
+
+/**
+ * 删除选项
+ */
+export interface DeleteOptions {
+    /** 是否删除关联的响应消息，默认 true */
+    deleteAssociatedResponses?: boolean;
+}
+
+
+/**
+ * UI 事件类型
+ */
+export type OrchestratorEvent =
+    | { type: 'session_start'; payload: SessionGroup }
+    | { type: 'session_cleared'; payload: Record<string, never> }
+    | { type: 'node_start'; payload: { parentId?: string; node: ExecutionNode } }
+    | { type: 'node_update'; payload: { nodeId: string; chunk?: string; field?: 'thought' | 'output'; metaInfo?: any } }
+    | { type: 'node_status'; payload: { nodeId: string; status: NodeStatus; result?: any } }
+    | { type: 'request_input'; payload: { nodeId: string; schema: any } }
+    | { type: 'finished'; payload: { sessionId: string; metadata?: object } }
+    | { type: 'error'; payload: { message: string; error?: Error; code?: string | number } }
+    | { type: 'messages_deleted'; payload: { deletedIds: string[] } }
+    | { type: 'message_edited'; payload: { sessionId: string; newContent: string } }
+    | { type: 'retry_started'; payload: { originalId: string; newId: string; siblingIndex?: number; siblingCount?: number } }
+    | { type: 'sibling_switch'; payload: { sessionId: string; newIndex: number; total: number } }
+    | { type: 'branch_created'; payload: { sourceId: string; newId: string; branchName?: string } }
+    | { type: 'branch_renamed'; payload: { nodeId: string; newName: string } }
+    | { type: 'branch_deleted'; payload: { nodeId: string; deletedIds: string[] } }
+    | { type: 'branch_switched'; payload: { fromId: string; toId: string } };
 
 /**
  * 注册表事件

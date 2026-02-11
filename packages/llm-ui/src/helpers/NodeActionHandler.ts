@@ -71,13 +71,12 @@ export class NodeActionHandler {
 
         try {
             if (session.role === 'user') {
-                await this.contentService.resendUserMessage(session.id, {
-                    fallbackAgentId
-                });
+                await this.contentService.resendUserMessage(
+                    session.id, fallbackAgentId
+                );
             } else {
                 await this.contentService.retryGeneration(session.id, {
                     preserveCurrent: true,
-                    navigateToNew: true,
                     fallbackAgentId
                 });
             }
@@ -101,8 +100,6 @@ export class NodeActionHandler {
             this.historyView.removeMessages(idsToDelete, true);
 
             await this.contentService.deleteMessage(nodeId, {
-                mode: 'soft',
-                cascade: false,
                 deleteAssociatedResponses: true
             });
 
@@ -136,9 +133,9 @@ export class NodeActionHandler {
         const fallbackAgentId = this.chatInput.getSelectedExecutor() || 'default';
 
         try {
-            await this.contentService.resendUserMessage(nodeId, {
-                fallbackAgentId
-            });
+            await this.contentService.resendUserMessage(
+                nodeId, fallbackAgentId
+            );
         } catch (e: any) {
             console.error('[NodeActionHandler] Resend failed:', e);
             this.historyView.renderError(e);

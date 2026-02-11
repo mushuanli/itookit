@@ -1,14 +1,14 @@
 // @file llm-ui/editors/MCPSettingsEditor.ts
 import { BaseSettingsEditor, Toast, Modal, generateShortUUID } from '@itookit/common';
-import { MCPServer,IAgentService } from '@itookit/llm-engine';
+import { MCPServer, IAgentManagementService } from '@itookit/llm-engine';
 
-export class MCPSettingsEditor extends BaseSettingsEditor<IAgentService> {
+export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementService> {
     // [修复] 添加缺失的属性
     private selectedId: string | null = null;
 
     async render() {
         const servers = await this.service.getMCPServers();
-        
+
         // 修正选中状态
         if (this.selectedId && !servers.find(s => s.id === this.selectedId)) {
             this.selectedId = null;
@@ -55,10 +55,10 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentService> {
 
     private renderListItem(server: MCPServer) {
         const isSelected = server.id === this.selectedId;
-        const statusClass = server.status === 'connected' ? 'settings-badge--success' : 
-                           server.status === 'error' ? 'settings-badge--danger' : '';
-        const statusIcon = server.status === 'connected' ? 'check-circle' : 
-                          server.status === 'error' ? 'exclamation-circle' : 'circle';
+        const statusClass = server.status === 'connected' ? 'settings-badge--success' :
+            server.status === 'error' ? 'settings-badge--danger' : '';
+        const statusIcon = server.status === 'connected' ? 'check-circle' :
+            server.status === 'error' ? 'exclamation-circle' : 'circle';
 
         return `
             <div class="settings-list-item ${isSelected ? 'selected' : ''}" data-id="${server.id}">
@@ -120,22 +120,22 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentService> {
                 <h3 class="settings-section__title">
                     工具列表 (Tools) <span class="settings-badge">${tools.length}</span>
                 </h3>
-                ${tools.length === 0 
-                    ? `<div class="settings-empty settings-empty--mini"><p>暂无工具</p><button class="settings-btn settings-btn--sm" id="btn-add-tool">手动添加</button></div>`
-                    : `<div class="settings-list-card-container">${tools.map((t, i) => this.renderToolItem(t, i)).join('')}</div>
+                ${tools.length === 0
+                ? `<div class="settings-empty settings-empty--mini"><p>暂无工具</p><button class="settings-btn settings-btn--sm" id="btn-add-tool">手动添加</button></div>`
+                : `<div class="settings-list-card-container">${tools.map((t, i) => this.renderToolItem(t, i)).join('')}</div>
                        <button class="settings-btn settings-btn--sm" id="btn-add-tool" style="margin-top:10px">添加工具</button>`
-                }
+            }
             </div>
 
             <div class="settings-section">
                 <h3 class="settings-section__title">
                     资源列表 (Resources) <span class="settings-badge">${resources.length}</span>
                 </h3>
-                ${resources.length === 0 
-                    ? `<div class="settings-empty settings-empty--mini"><p>暂无资源</p><button class="settings-btn settings-btn--sm" id="btn-add-resource">手动添加</button></div>`
-                    : `<div class="settings-list-card-container">${resources.map((r, i) => this.renderResourceItem(r, i)).join('')}</div>
+                ${resources.length === 0
+                ? `<div class="settings-empty settings-empty--mini"><p>暂无资源</p><button class="settings-btn settings-btn--sm" id="btn-add-resource">手动添加</button></div>`
+                : `<div class="settings-list-card-container">${resources.map((r, i) => this.renderResourceItem(r, i)).join('')}</div>
                        <button class="settings-btn settings-btn--sm" id="btn-add-resource" style="margin-top:10px">添加资源</button>`
-                }
+            }
             </div>
 
             <div class="settings-section">
@@ -314,7 +314,7 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentService> {
             // 模拟测试：更新状态并生成假数据
             // 在真实场景中，这里会调用后端 API
             await new Promise(r => setTimeout(r, 1000));
-            
+
             const server = (await this.service.getMCPServers()).find(s => s.id === this.selectedId);
             if (server) {
                 server.status = 'connected';

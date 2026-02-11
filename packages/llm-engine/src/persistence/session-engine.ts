@@ -500,11 +500,11 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
   async updateNode(
     sessionId: string,
     nodeId: string,
-        updates: {
-            content?: string;
-            meta?: UpdateMessageMeta;  // ✅ 明确类型
-            status?: ChatNode['status'];
-        }
+    updates: {
+      content?: string;
+      meta?: UpdateMessageMeta;  // ✅ 明确类型
+      status?: ChatNode['status'];
+    }
   ): Promise<void> {
     return this.lockManager.acquire(`node:${sessionId}:${nodeId}`, async () => {
       const path = this.getNodePath(sessionId, nodeId);
@@ -539,15 +539,174 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
   }
 
   /**
-   * 删除消息（软删除）
+   * 删除消息
+   * 
+   * 操作步骤：
+   * 1. 软删除节点（标记 status: 'deleted'）
+   * 2. 从父节点的 children_ids 中移除引用
+   * 3. 如果删除的是 current_head 或其祖先链上的节点，回退 manifest
+   * 4. 递归软删除所有子节点（孤儿清理）
    */
-  async deleteMessage(sessionId: string, nodeId: string): Promise<void> {
+  async deleteMessage(
+    nodeId: string,
+    sessionId: string,
+    messageNodeId: string
+  ): Promise<void> {
+    return this.lockManager.acquire(`session:${sessionId}`, async () => {
+      const messagePath = this.getNodePath(sessionId, messageNodeId);
+      const messageNode = await this.readJson<ChatNode>(messagePath);
+
+      if (!messageNode) {
+        console.warn(`[LLMSessionEngine] Node ${messageNodeId} not found, skipping delete`);
+        return;
+      }
+
+      // 已经删除过，幂等返回
+      if (messageNode.status === 'deleted') {
+        return;
+      }
+
+      // 1. 从父节点的 children_ids 中移除
+      if (messageNode.parent_id) {
+        await this.removeFromParentChildren(sessionId, messageNode.parent_id, messageNodeId);
+      }
+
+      // 2. 软删除当前节点及其所有后代
+      await this.softDeleteRecursive(sessionId, messageNodeId);
+
+      // 3. 更新 manifest：如果 current_head 被删除或位于被删除的子树中
+      await this.repairManifestAfterDelete(nodeId, sessionId, messageNodeId, messageNode);
+
+      log(`Deleted message ${messageNodeId} and updated manifest for session ${sessionId}`);
+    });
+  }
+
+  /**
+   * 从父节点的 children_ids 中移除指定子节点
+   */
+  private async removeFromParentChildren(
+    sessionId: string,
+    parentId: string,
+    childId: string
+  ): Promise<void> {
+    const parentPath = this.getNodePath(sessionId, parentId);
+    const parentNode = await this.readJson<ChatNode>(parentPath);
+
+    if (!parentNode) return;
+
+    const index = parentNode.children_ids.indexOf(childId);
+    if (index !== -1) {
+      parentNode.children_ids.splice(index, 1);
+      await this.writeJson(parentPath, parentNode);
+    }
+  }
+
+  /**
+   * 递归软删除节点及其所有后代
+   */
+  private async softDeleteRecursive(sessionId: string, nodeId: string): Promise<void> {
     const path = this.getNodePath(sessionId, nodeId);
     const node = await this.readJson<ChatNode>(path);
-    if (node) {
-      node.status = 'deleted';
-      await this.writeJson(path, node);
+
+    if (!node || node.status === 'deleted') return;
+
+    // 先递归删除子节点
+    for (const childId of node.children_ids) {
+      await this.softDeleteRecursive(sessionId, childId);
     }
+
+    // 标记当前节点为删除
+    node.status = 'deleted';
+    await this.writeJson(path, node);
+  }
+
+  /**
+   * 删除后修复 manifest
+   * 
+   * 策略：
+   * - 如果 current_head 是被删除的节点或其后代，回退到被删除节点的父节点
+   * - 如果父节点也无效，逐级回退直到 root_id
+   * - 同步更新 branches 中当前分支的指针
+   */
+  private async repairManifestAfterDelete(
+    nodeId: string,
+    sessionId: string,
+    deletedNodeId: string,
+    deletedNode: ChatNode
+  ): Promise<void> {
+    const manifest = await this.getManifest(nodeId);
+    let needsUpdate = false;
+
+    // 检查 current_head 是否在被删除的子树中
+    if (await this.isNodeInDeletedSubtree(manifest.current_head, deletedNodeId, sessionId)) {
+      // 回退到被删除节点的父节点
+      let newHead = deletedNode.parent_id || manifest.root_id;
+
+      // 验证新的 head 是否有效
+      const newHeadNode = await this.readJson<ChatNode>(
+        this.getNodePath(sessionId, newHead)
+      );
+      if (!newHeadNode || newHeadNode.status === 'deleted') {
+        // 如果父节点也无效，回退到 root
+        newHead = manifest.root_id;
+      }
+
+      manifest.current_head = newHead;
+      manifest.branches[manifest.current_branch] = newHead;
+      needsUpdate = true;
+
+      log(`current_head rolled back from ${deletedNodeId} to ${newHead}`);
+    }
+
+    // 检查其他分支是否引用了被删除的节点
+    for (const [branchName, branchHead] of Object.entries(manifest.branches)) {
+      if (branchName === manifest.current_branch) continue;
+
+      if (await this.isNodeInDeletedSubtree(branchHead, deletedNodeId, sessionId)) {
+        const fallback = deletedNode.parent_id || manifest.root_id;
+        manifest.branches[branchName] = fallback;
+        needsUpdate = true;
+        log(`Branch "${branchName}" head rolled back to ${fallback}`);
+      }
+    }
+
+    if (needsUpdate) {
+      manifest.updated_at = new Date().toISOString();
+      await this.engine.writeContent(nodeId, JSON.stringify(manifest, null, 2));
+    }
+  }
+
+  /**
+   * 检查 targetId 是否等于 deletedId 或是 deletedId 的后代
+   * 
+   * 简化实现：如果 targetId === deletedId 直接返回 true，
+   * 否则从 targetId 沿 parent_id 向上查找，看是否经过 deletedId。
+   */
+  private async isNodeInDeletedSubtree(
+    targetId: string,
+    deletedId: string,
+    sessionId: string
+  ): Promise<boolean> {
+    if (targetId === deletedId) return true;
+
+    // 从 targetId 向上遍历，检查是否经过 deletedId
+    let currentId: string | null = targetId;
+    const visited = new Set<string>();
+
+    while (currentId) {
+      if (currentId === deletedId) return true;
+      if (visited.has(currentId)) break; // 防止环
+      visited.add(currentId);
+
+      const node: ChatNode | null = await this.readJson<ChatNode>(
+        this.getNodePath(sessionId, currentId)
+      );
+      if (!node) break;
+
+      currentId = node.parent_id;
+    }
+
+    return false;
   }
 
   /**
@@ -771,39 +930,63 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
   }
 
   /**
-   * ✅ 新增：删除分支（级联删除子节点）
+   * 删除分支（级联删除子节点）
+   * 更新 manifest 以确保不引用已删除节点
    */
   async deleteBranch(
-    sessionId: string,
     nodeId: string,
+    sessionId: string,
+    messageNodeId: string,
     options?: { cascade?: boolean }
   ): Promise<string[]> {
-    const deletedIds: string[] = [];
-
-    const deleteRecursive = async (id: string) => {
-      const node = await this.readJson<ChatNode>(
-        this.getNodePath(sessionId, id)
+    return this.lockManager.acquire(`session:${sessionId}`, async () => {
+      const deletedIds: string[] = [];
+      const targetNode = await this.readJson<ChatNode>(
+        this.getNodePath(sessionId, messageNodeId)
       );
+      if (!targetNode) return deletedIds;
 
-      if (!node) return;
-
-      // 如果启用级联删除，递归删除子节点
-      if (options?.cascade && node.children_ids.length > 0) {
-        for (const childId of node.children_ids) {
-          await deleteRecursive(childId);
-        }
+      // 从父节点的 children_ids 中移除
+      if (targetNode.parent_id) {
+        await this.removeFromParentChildren(
+          sessionId,
+          targetNode.parent_id,
+          messageNodeId
+        );
       }
 
-      // 软删除节点
-      node.status = 'deleted';
-      await this.writeJson(this.getNodePath(sessionId, id), node);
-      deletedIds.push(id);
-    };
+      // 递归软删除
+      const deleteRecursive = async (id: string): Promise<void> => {
+        const node: ChatNode | null = await this.readJson<ChatNode>(
+          this.getNodePath(sessionId, id)
+        );
+        if (!node || node.status === 'deleted') return;
 
-    await deleteRecursive(nodeId);
+        if (options?.cascade) {
+          for (const childId of node.children_ids) {
+            await deleteRecursive(childId);
+          }
+        }
 
-    return deletedIds;
+        node.status = 'deleted';
+        await this.writeJson(this.getNodePath(sessionId, id), node);
+        deletedIds.push(id);
+      };
+
+      await deleteRecursive(messageNodeId);
+
+      // 修复 manifest
+      await this.repairManifestAfterDelete(
+        nodeId,
+        sessionId,
+        messageNodeId,
+        targetNode
+      );
+
+      return deletedIds;
+    });
   }
+
 
   /**
    * 切换分支
@@ -1362,18 +1545,92 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
   }
 
   /**
-   * ✅ 新增：获取 Agent 对应的可用模型
+ * 原子性更新 manifest head（带锁）
+ */
+  async updateManifestHead(
+    nodeId: string,
+    sessionId: string,
+    targetNodeId: string
+  ): Promise<void> {
+    return this.lockManager.acquire(`session:${sessionId}`, async () => {
+      const manifest = await this.getManifest(nodeId);
+
+      manifest.current_head = targetNodeId;
+      manifest.branches[manifest.current_branch] = targetNodeId;
+      manifest.updated_at = new Date().toISOString();
+
+      await this.engine.writeContent(nodeId, JSON.stringify(manifest, null, 2));
+
+      log(`Manifest head updated to ${targetNodeId} for session ${sessionId}`);
+    });
+  }
+
+  /**
+   * 验证并修复 manifest 一致性
    */
-  async getAvailableModelsForAgent(_agentId: string): Promise<Array<{
-    id: string;
-    name: string;
-    provider?: string;
-  }>> {
-    // 注意：这个方法需要访问 AgentService，
-    // 但 SessionEngine 不应该直接依赖 AgentService
-    // 因此这个方法应该在 SessionRegistry 或更上层实现
-    // 这里返回空数组，实际实现在 SessionRegistry
-    console.warn('[LLMSessionEngine] getAvailableModelsForAgent should be called via SessionRegistry');
-    return [];
+  async validateManifest(nodeId: string, sessionId: string): Promise<boolean> {
+    try {
+      const manifest = await this.getManifest(nodeId);
+      let needsUpdate = false;
+
+      // 1. 验证 current_head 是否存在
+      const currentHeadPath = this.getNodePath(sessionId, manifest.current_head);
+      const currentHeadNode = await this.readJson<ChatNode>(currentHeadPath);
+
+      if (!currentHeadNode) {
+        console.warn(
+          `[LLMSessionEngine] current_head ${manifest.current_head} not found, resetting`
+        );
+        manifest.current_head = manifest.root_id;
+        manifest.branches[manifest.current_branch] = manifest.root_id;
+        needsUpdate = true;
+      }
+
+      // 2. 验证所有分支的头节点
+      const validBranches: Record<string, string> = {};
+
+      for (const [branchName, branchHead] of Object.entries(manifest.branches)) {
+        const branchPath = this.getNodePath(sessionId, branchHead);
+        const branchNode = await this.readJson<ChatNode>(branchPath);
+
+        if (branchNode) {
+          validBranches[branchName] = branchHead;
+        } else {
+          console.warn(
+            `[LLMSessionEngine] Branch "${branchName}" head ${branchHead} not found`
+          );
+          needsUpdate = true;
+
+          // 如果是当前分支，回退到 root
+          if (branchName === manifest.current_branch) {
+            validBranches[branchName] = manifest.root_id;
+            manifest.current_head = manifest.root_id;
+          }
+          // 非当前分支的无效分支直接丢弃
+        }
+      }
+
+      // 3. 确保至少有一个分支
+      if (Object.keys(validBranches).length === 0) {
+        validBranches['main'] = manifest.root_id;
+        manifest.current_branch = 'main';
+        manifest.current_head = manifest.root_id;
+        needsUpdate = true;
+      }
+
+      manifest.branches = validBranches;
+
+      // 4. 写回
+      if (needsUpdate) {
+        manifest.updated_at = new Date().toISOString();
+        await this.engine.writeContent(nodeId, JSON.stringify(manifest, null, 2));
+        log(`Manifest validated and repaired for session ${sessionId}`);
+      }
+
+      return needsUpdate;
+    } catch (e) {
+      console.error(`[LLMSessionEngine] validateManifest failed for ${sessionId}:`, e);
+      return false;
+    }
   }
 }
