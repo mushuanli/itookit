@@ -303,4 +303,5 @@ export type RegistryEvent =
     | { type: 'session_unregistered'; payload: { sessionId: string } }
     | { type: 'session_status_changed'; payload: { sessionId: string; status: SessionStatus; prevStatus?: SessionStatus } }
     | { type: 'session_unread_updated'; payload: { sessionId: string; count: number } }
-    | { type: 'pool_status_changed'; payload: { running: number; queued: number; maxConcurrent: number } };
+    | { type: 'pool_status_changed'; payload: { running: number; queued: number; maxConcurrent: number } }
+    | { type: 'background_task_completed'; payload: { sessionId: string } };  // ✅ 新增

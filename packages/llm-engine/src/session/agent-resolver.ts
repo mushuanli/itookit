@@ -3,6 +3,7 @@
 import { ExecutorConfig } from '@itookit/llm-kernel';
 import { IAgentService } from '../services/agent-service';
 import { EngineError, EngineErrorCode } from '../core/errors';
+import { log } from '../utils/logger';
 
 /**
  * Agent 信息（列表展示用）
@@ -35,6 +36,8 @@ export class AgentResolver {
      * 解析 agentId 为执行器配置
      */
     async resolve(agentId: string): Promise<ExecutorConfig> {
+        log.debug('Resolving agent', { agentId });
+
         try {
             const agentDef = await this.agentService.getAgentConfig(agentId);
 
@@ -44,6 +47,11 @@ export class AgentResolver {
                 );
 
                 if (!connection) {
+                    log.error('Connection not found for agent', { 
+                        agentId,
+                        agentName: agentDef.name,
+                        connectionId: agentDef.config.connectionId 
+                    });
                     throw new EngineError(
                         EngineErrorCode.EXECUTOR_NOT_FOUND,
                         `Connection '${agentDef.config.connectionId}' for agent '${agentDef.name}' not found.`
@@ -51,6 +59,17 @@ export class AgentResolver {
                 }
 
                 const realModelId = this.resolveModelId(connection, agentDef.config.modelName);
+
+                log.info('Agent resolved successfully', { 
+                    agentId: agentDef.id,
+                    agentName: agentDef.name,
+                    agentType: agentDef.type,
+                    connectionId: connection.id,
+                    connectionName: connection.name,
+                    provider: connection.provider,
+                    modelName: agentDef.config.modelName,
+                    resolvedModelId: realModelId 
+                });
 
                 return {
                     id: agentDef.id,
@@ -63,9 +82,10 @@ export class AgentResolver {
             }
         } catch (e) {
             if (e instanceof EngineError) throw e;
-            console.warn(`[AgentResolver] Failed to resolve ${agentId}:`, e);
+            log.error('Failed to resolve agent', { agentId, error: e });
         }
 
+        log.warn('Agent not found, using fallback', { agentId });
         return this.getFallbackConfig();
     }
 
@@ -96,9 +116,11 @@ export class AgentResolver {
                 });
             }
 
+            log.debug('Available agents retrieved', { count: list.length });
+
             return list;
         } catch (e) {
-            console.error('[AgentResolver] getAvailableAgents failed:', e);
+            log.error('Failed to get available agents', { error: e });
             return [{ id: 'default', name: 'Default Assistant', icon: '🤖', category: 'System' }];
         }
     }
@@ -134,6 +156,10 @@ export class AgentResolver {
     private resolveModelId(connection: any, modelName: string): string {
         if (!modelName) return '';
         if (!connection.availableModels || !Array.isArray(connection.availableModels)) {
+            log.warn('No available models in connection', { 
+                connectionId: connection.id,
+                modelName 
+            });
             return modelName;
         }
 
@@ -155,7 +181,7 @@ export class AgentResolver {
         const fallbackConnection = await this.agentService.getDefaultConnection();
 
         if (!fallbackConnection) {
-            console.error('[AgentResolver] CRITICAL: No connections available.');
+            log.error('CRITICAL: No connections available');
             return {
                 id: 'default',
                 name: 'Error: No Connection',
@@ -166,6 +192,12 @@ export class AgentResolver {
 
         const modelId =
             fallbackConnection.model || fallbackConnection.availableModels?.[0]?.id || '';
+
+        log.info('Using fallback configuration', { 
+            connectionId: fallbackConnection.id,
+            connectionName: fallbackConnection.name,
+            modelId 
+        });
 
         return {
             id: 'default',
