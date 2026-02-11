@@ -2,11 +2,11 @@
 
 import { Modal, Toast, BaseSettingsEditor, generateShortUUID } from '@itookit/common';
 import { testLLMConnection, LLMConnection, LLM_PROVIDER_DEFAULTS, LLMModel } from '@itookit/llm-driver';
-import { IAgentService } from '@itookit/llm-engine';
+import { IAgentManagementService } from '@itookit/llm-engine';
 
-export class ConnectionSettingsEditor extends BaseSettingsEditor<IAgentService> {
+export class ConnectionSettingsEditor extends BaseSettingsEditor<IAgentManagementService> {
     private testingConnections = new Set<string>();
-    
+
     // 编辑弹窗中的临时状态
     private currentEditModels: LLMModel[] = [];
 
@@ -59,23 +59,23 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IAgentService> 
                 ` : ''}
             </div>
         `;
-        
+
         this.bindEvents();
     }
 
     private renderConnectionCard(conn: LLMConnection) {
         const isDefault = conn.id === 'default';
         const hasKey = !!(conn.apiKey && conn.apiKey.trim().length > 0);
-        
+
         const provider = LLM_PROVIDER_DEFAULTS[conn.provider];
         // 优先使用连接内保存的模型列表，如果没有则回退到默认
-        const modelList = (conn.availableModels && conn.availableModels.length > 0) 
-            ? conn.availableModels 
+        const modelList = (conn.availableModels && conn.availableModels.length > 0)
+            ? conn.availableModels
             : (provider?.models || []);
-            
+
         const modelObj = modelList.find(m => m.id === conn.model);
         const modelName = modelObj ? modelObj.name : (conn.model || '未设置');
-        
+
         // ✅ [新增] 状态类名，用于 CSS 样式区分 (例如让未配置的稍微变灰)
         const statusClass = !hasKey ? 'settings-connection-card--incomplete' : '';
 
@@ -130,7 +130,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IAgentService> 
 
     private bindEvents() {
         this.clearListeners();
-        
+
         this.bindButton('#btn-add-connection', () => this.showEditModal(null));
 
         const list = this.container.querySelector('#connections-list');
@@ -181,7 +181,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IAgentService> 
         const isNew = !connection;
         const providers = Object.keys(LLM_PROVIDER_DEFAULTS);
         const initialProvider = connection?.provider || providers[0];
-        
+
         // ✅ [新增] 初始化模型列表状态
         // 如果是新连接，用默认配置；如果是旧连接，优先用保存的，否则用默认配置
         if (connection && connection.availableModels) {
@@ -189,7 +189,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IAgentService> 
         } else {
             this.currentEditModels = JSON.parse(JSON.stringify(LLM_PROVIDER_DEFAULTS[initialProvider]?.models || []));
         }
-        
+
         const modalContent = `
             <form id="connection-form" class="settings-form settings-form--wide">
                 <div class="settings-row">
@@ -260,11 +260,11 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IAgentService> 
                     form.reportValidity();
                     return false;
                 }
-                
+
                 // ✅ [新增] 在保存前，先同步 Input 中的值到 currentEditModels
                 // 因为用户可能修改了 input 但没触发 change 事件就点了保存
                 this.syncInputsToModelData();
-                
+
                 if (this.currentEditModels.length === 0) {
                     Toast.warning('请至少保留一个可用模型');
                     return false;
@@ -272,7 +272,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IAgentService> 
 
                 const formData = new FormData(form);
                 const data = Object.fromEntries(formData) as any;
-                
+
                 // 保留原有的 availableModels，或从 provider 默认值获取
                 const providerDef = LLM_PROVIDER_DEFAULTS[data.provider];
                 const newConn: LLMConnection = {
@@ -283,16 +283,16 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IAgentService> 
                     model: data.model,
                     baseURL: data.baseURL || providerDef?.baseURL || '',
                     // 确保 availableModels 不丢失
-                    availableModels: [...this.currentEditModels], 
+                    availableModels: [...this.currentEditModels],
                     metadata: connection?.metadata
                 };
-                
+
                 await this.service.saveConnection(newConn);
                 Toast.success('连接配置已保存');
                 this.render();
             }
         }).show();
-        
+
         // Dynamic Provider Switch
         setTimeout(() => {
             this.bindModalEvents(connection);
@@ -311,7 +311,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IAgentService> 
         const refreshModelSelect = () => {
             // 记录当前选中的值，刷新后尝试恢复
             const currentVal = modelSelect.value || originalConn?.model;
-            
+
             modelSelect.innerHTML = this.currentEditModels.length > 0
                 ? this.currentEditModels.map(m => `
                     <option value="${m.id}" ${currentVal === m.id ? 'selected' : ''}>
@@ -319,7 +319,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IAgentService> 
                     </option>
                 `).join('')
                 : '<option value="">-- 请先添加模型 --</option>';
-            
+
             // 如果原来的值还在列表中，保持选中；否则选中第一个
             if (this.currentEditModels.some(m => m.id === currentVal)) {
                 modelSelect.value = currentVal!;
@@ -338,7 +338,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IAgentService> 
             providerSelect.addEventListener('change', (e) => {
                 const pKey = (e.target as HTMLSelectElement).value;
                 const defs = LLM_PROVIDER_DEFAULTS[pKey];
-                
+
                 // 切换 Provider 时，询问是否加载该 Provider 的默认模型
                 if (confirm('切换提供商将重置模型列表和 BaseURL 为默认值，是否继续？')) {
                     this.currentEditModels = JSON.parse(JSON.stringify(defs?.models || []));
@@ -358,11 +358,11 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IAgentService> 
 
                 const pKey = providerSelect.value;
                 const defs = LLM_PROVIDER_DEFAULTS[pKey];
-                
+
                 // 重置数据
                 this.currentEditModels = JSON.parse(JSON.stringify(defs?.models || []));
                 baseUrlInput.value = defs?.baseURL || '';
-                
+
                 renderList();
                 Toast.success('已恢复默认配置');
             });
@@ -394,26 +394,26 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IAgentService> 
                     this.currentEditModels.splice(idx, 1);
                 } else if (btn.classList.contains('btn-up')) {
                     if (idx > 0) {
-                        [this.currentEditModels[idx], this.currentEditModels[idx - 1]] = 
-                        [this.currentEditModels[idx - 1], this.currentEditModels[idx]];
+                        [this.currentEditModels[idx], this.currentEditModels[idx - 1]] =
+                            [this.currentEditModels[idx - 1], this.currentEditModels[idx]];
                     }
                 } else if (btn.classList.contains('btn-down')) {
                     if (idx < this.currentEditModels.length - 1) {
-                        [this.currentEditModels[idx], this.currentEditModels[idx + 1]] = 
-                        [this.currentEditModels[idx + 1], this.currentEditModels[idx]];
+                        [this.currentEditModels[idx], this.currentEditModels[idx + 1]] =
+                            [this.currentEditModels[idx + 1], this.currentEditModels[idx]];
                     }
                 }
                 renderList();
             });
-            
+
             // 监听输入框变化，实时更新 select
             listContainer.addEventListener('input', (e) => {
                 const target = e.target as HTMLInputElement;
                 if (target.classList.contains('model-name-input') || target.classList.contains('model-id-input')) {
-                     // 防抖或者是失焦更新太慢，这里简单做：
-                     // 仅仅当修改 Name 时更新 Select 的文本显示比较复杂
-                     // 我们选择在 blur 或 save 时统一同步，但为了体验，可以在这里不做重绘，
-                     // 仅在 syncInputsToModelData 里处理
+                    // 防抖或者是失焦更新太慢，这里简单做：
+                    // 仅仅当修改 Name 时更新 Select 的文本显示比较复杂
+                    // 我们选择在 blur 或 save 时统一同步，但为了体验，可以在这里不做重绘，
+                    // 仅在 syncInputsToModelData 里处理
                 }
             });
         }
@@ -426,14 +426,14 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IAgentService> 
     private syncInputsToModelData() {
         const container = document.getElementById('model-list-container');
         if (!container) return;
-        
+
         const rows = container.querySelectorAll('.settings-model-item');
         rows.forEach((row, index) => {
             if (index >= this.currentEditModels.length) return;
-            
+
             const idInput = row.querySelector('.model-id-input') as HTMLInputElement;
             const nameInput = row.querySelector('.model-name-input') as HTMLInputElement;
-            
+
             if (idInput) this.currentEditModels[index].id = idInput.value;
             if (nameInput) this.currentEditModels[index].name = nameInput.value;
         });
@@ -441,13 +441,13 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IAgentService> 
 
     private async testConnection(card: HTMLElement, connection: LLMConnection) {
         if (this.testingConnections.has(connection.id)) return;
-        
+
         // 检查 API Key 是否存在
         if (!connection.apiKey) {
             Toast.warning('请先配置 API Key');
             return;
         }
-        
+
         this.testingConnections.add(connection.id);
         const testBtn = card.querySelector('.settings-btn-test') as HTMLButtonElement;
         const originalText = testBtn.innerHTML;

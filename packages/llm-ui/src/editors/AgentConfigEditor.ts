@@ -8,36 +8,29 @@ import {
     CollapseExpandResult
 } from '@itookit/common';
 import { LLMModel, type AgentType, AgentDefinition, } from '@itookit/llm-driver';
-import { IAgentService } from '@itookit/llm-engine';
+import { IAgentManagementService } from '@itookit/llm-engine';
 
 /**
  * Agent 配置编辑器
- * 它实现了 IEditor 接口，而不是继承 BaseSettingsEditor，
- * 因为它需要处理 setText/getText (文件内容读写)。
+ * 需要完整的 CRUD 能力，因此依赖 IAgentManagementService
  */
 export class AgentConfigEditor implements IEditor {
     private container!: HTMLElement;
     private content: AgentDefinition | null = null;
     private _isDirty = false;
     private listeners = new Map<string, Set<EditorEventCallback>>();
-
-    // [修复] 添加缺失的属性
     private originalContent: string = '';
 
     constructor(
         _container: HTMLElement,
         _options: EditorOptions,
-        // 依赖 IAgentService 来获取 Connection 列表和 Model 列表
-        private service: IAgentService
+        private service: IAgentManagementService
     ) { }
 
     async init(container: HTMLElement, initialContent?: string) {
         this.container = container;
         this.container.classList.add('agent-config-editor');
-
-        // 保存原始内容用于错误显示
         this.originalContent = initialContent || '{}';
-
         this.setText(this.originalContent);
         this.emit('ready');
     }
@@ -568,16 +561,8 @@ export class AgentConfigEditor implements IEditor {
             });
         });
 
-        // 取消
-        overlay.querySelector('.icon-picker-cancel')?.addEventListener('click', () => {
-            overlay.remove();
-        });
-
-        // 点击背景关闭
-        overlay.addEventListener('click', (e) => {
-            if (e.target === overlay) overlay.remove();
-        });
-
+        overlay.querySelector('.icon-picker-cancel')?.addEventListener('click', () => overlay.remove());
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
         document.body.appendChild(overlay);
     }
 
