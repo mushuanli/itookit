@@ -24,6 +24,7 @@ import { AgentResolver } from './agent-resolver';
 import { AttachmentProcessor } from './attachment-processor';
 import { createThrottledWriter } from '../utils/throttled-writer';
 import { formatErrorMessage } from '../utils/error-formatter';
+import { log } from '../utils/logger';
 
 export interface TaskRunnerOptions {
     maxConcurrent?: number;
@@ -36,6 +37,8 @@ export interface TaskRunnerOptions {
 export interface TaskRunnerCallbacks {
     onStatusChange: (sessionId: string, status: SessionStatus) => void;
     onUnread: (sessionId: string) => void;
+    // ✅ 新增：获取当前绑定的 session ID
+    getBoundSessionId?: () => string | null;
     // ✅ 新增：让 TaskRunner 能从 SessionManager 获取 state/runtime
     getSessionContext: (sessionId: string) => {
         state: SessionState;
@@ -76,10 +79,19 @@ export class TaskRunner {
      */
     async submit(input: TaskInput, runtime: SessionRuntime): Promise<string> {
         if (runtime.status === 'running' || runtime.status === 'queued') {
+            log.warn('Task submission rejected (session busy)', {
+                sessionId: input.sessionId,
+                currentStatus: runtime.status
+            });
             throw new EngineError(EngineErrorCode.SESSION_BUSY, 'Session already has active task');
         }
 
         if (this.queue.length >= this.maxQueueSize) {
+            log.error('Task submission rejected (queue full)', {
+                sessionId: input.sessionId,
+                queueSize: this.queue.length,
+                maxQueueSize: this.maxQueueSize
+            });
             throw new EngineError(EngineErrorCode.QUOTA_EXCEEDED, 'Task queue is full');
         }
 
@@ -92,6 +104,15 @@ export class TaskRunner {
             createdAt: Date.now(),
             abortController: new AbortController(),
         };
+
+        log.info('Task submitted', {
+            taskId: task.id,
+            sessionId: input.sessionId,
+            agentId: input.agentId,
+            hasFiles: input.files.length > 0,
+            fileCount: input.files.length,
+            queuePosition: this.queue.length
+        });
 
         runtime.currentTaskId = task.id;
         this.callbacks.onStatusChange(input.sessionId, 'queued');
@@ -114,9 +135,15 @@ export class TaskRunner {
      * 中止会话的任务
      */
     abort(sessionId: string): void {
-        // 从队列中移除
+        log.info('Aborting session tasks', { sessionId });
+
         const queueIndex = this.queue.findIndex((t) => t.sessionId === sessionId);
         if (queueIndex !== -1) {
+            const task = this.queue[queueIndex];
+            log.debug('Removing task from queue', {
+                taskId: task.id,
+                sessionId
+            });
             this.queue.splice(queueIndex, 1);
             this.callbacks.onStatusChange(sessionId, 'aborted');
             this.emitPoolStatus();
@@ -126,14 +153,17 @@ export class TaskRunner {
         }
 
         // 中止运行中的任务 —— 只触发 abort 信号，让 executeTask 的 finally 处理清理
-        for (const [_taskId, task] of this.running) {
+        for (const [taskId, task] of this.running) {
             if (task.sessionId === sessionId) {
+                log.info('Aborting running task', { taskId, sessionId });
                 task.abortController.abort();
                 // 不在这里 delete running、不调用 processQueue
                 // executeTask 的 catch/finally 会处理状态更新和清理
                 return;
             }
         }
+
+        log.warn('No task found to abort', { sessionId });
     }
 
     /**
@@ -166,6 +196,12 @@ export class TaskRunner {
      */
     setMaxConcurrent(value: number): void {
         if (value < 1) throw new Error('maxConcurrent must be at least 1');
+
+        log.info('Max concurrent tasks updated', {
+            oldValue: this.maxConcurrent,
+            newValue: value
+        });
+
         this.maxConcurrent = value;
         this.emitPoolStatus();
         this.processQueue();
@@ -176,15 +212,34 @@ export class TaskRunner {
     // ============================================
 
     private processQueue(): void {
+        const availableSlots = this.maxConcurrent - this.running.size;
+
+        if (availableSlots > 0 && this.queue.length > 0) {
+            log.debug('Processing task queue', {
+                availableSlots,
+                queueLength: this.queue.length,
+                runningCount: this.running.size
+            });
+        }
+
         while (this.running.size < this.maxConcurrent && this.queue.length > 0) {
             const task = this.queue.shift()!;
 
             // ✅ 修复：从回调中获取对应会话的 state/runtime
             const ctx = this.callbacks.getSessionContext(task.sessionId);
             if (!ctx) {
-                console.error(`[TaskRunner] Session ${task.sessionId} not found, dropping task`);
+                log.error('Session context not found, dropping task', {
+                    taskId: task.id,
+                    sessionId: task.sessionId
+                });
                 continue;
             }
+
+            log.debug('Starting task from queue', {
+                taskId: task.id,
+                sessionId: task.sessionId,
+                queueWaitTime: Date.now() - task.createdAt
+            });
 
             this.executeTask(task, ctx.state, ctx.runtime);
         }
@@ -200,10 +255,19 @@ export class TaskRunner {
         runtime: SessionRuntime
     ): Promise<void> {
         const { sessionId, input } = task;
+        // ✅ 检查是否为后台任务
+        const isBound = this.callbacks.getBoundSessionId?.() === sessionId;
+
 
         this.running.set(task.id, task);
         this.callbacks.onStatusChange(sessionId, 'running');
         this.emitPoolStatus();
+
+        log.info('Task execution started', {
+            taskId: task.id,
+            sessionId,
+            agentId: input.agentId
+        });
 
         let errorAlreadyEmitted = false;
 
@@ -215,20 +279,56 @@ export class TaskRunner {
                 input.files
             );
 
-            // 2. 创建用户消息（如果需要）
+            log.debug('Attachments resolved', {
+                taskId: task.id,
+                fileCount: contextFiles.length
+            });
+
+            // 2. 创建用户消息
             let userNodeId = input.parentUserNodeId;
             if (!input.skipUserMessage) {
                 userNodeId = await this.createUserMessage(task, state, contextFiles);
+                log.debug('User message created', {
+                    taskId: task.id,
+                    userNodeId
+                });
             }
 
             // 3. 解析执行器配置
             let executorConfig = await this.agentResolver.resolve(input.agentId);
+
+            log.info('Agent resolved', {
+                taskId: task.id,
+                agentId: executorConfig.id,
+                agentName: executorConfig.name,
+                agentType: executorConfig.type,
+                model: executorConfig.model,
+                connectionId: executorConfig.connection?.id,
+                connectionName: executorConfig.connection?.name,
+                provider: executorConfig.connection?.provider
+            });
+
             if (input.overrides) {
+                const originalModel = executorConfig.model;
                 executorConfig = this.applyOverrides(executorConfig, input.overrides);
+
+                if (input.overrides.modelId && input.overrides.modelId !== originalModel) {
+                    log.info('Model overridden', {
+                        taskId: task.id,
+                        originalModel,
+                        overriddenModel: executorConfig.model
+                    });
+                }
             }
 
             // 4. 获取历史消息
             const history = this.getHistory(state, input.overrides?.historyLength);
+
+            log.debug('History prepared', {
+                taskId: task.id,
+                historyLength: history.length,
+                limitApplied: input.overrides?.historyLength
+            });
 
             // 5. 创建 assistant 节点
             const { assistantNodeId, rootNode } = await this.createAssistantNode(
@@ -239,6 +339,12 @@ export class TaskRunner {
                 input.branchInfo,
                 userNodeId
             );
+
+            log.debug('Assistant node created', {
+                taskId: task.id,
+                assistantNodeId,
+                rootNodeId: rootNode.id
+            });
 
             // 6. 设置节流持久化
             const { accumulator, persist, finalize } = createThrottledWriter(
@@ -255,7 +361,8 @@ export class TaskRunner {
                 state,
                 accumulator,
                 persist,
-                () => { errorAlreadyEmitted = true; }
+                () => { errorAlreadyEmitted = true; },
+                isBound  // ✅ 传递绑定状态
             );
 
             // 8. 准备附件
@@ -263,6 +370,17 @@ export class TaskRunner {
 
             // 9. 加载历史附件
             const historyWithFiles = await this.buildHistoryMessages(sessionId, history);
+
+            log.info('Executing LLM query', {
+                taskId: task.id,
+                sessionId,
+                agentName: executorConfig.name,
+                model: executorConfig.model,
+                provider: executorConfig.connection?.provider,
+                historyCount: historyWithFiles.length,
+                attachmentCount: attachments.length,
+                streamMode: input.overrides?.streamMode ?? true
+            });
 
             // 10. 执行 LLM 查询
             const result = await this.kernelAdapter.executeQuery(
@@ -282,6 +400,16 @@ export class TaskRunner {
             // 11. 检查结果
             if (result.status === 'failed') {
                 const firstError = result.errors?.[0];
+                log.error('LLM execution failed', {
+                    taskId: task.id,
+                    sessionId,
+                    agentName: executorConfig.name,
+                    model: executorConfig.model,
+                    errorCode: firstError?.code,
+                    errorMessage: firstError?.message,
+                    allErrors: result.errors
+                });
+
                 const error = new Error(firstError?.message || 'Execution failed');
                 (error as any).status = firstError?.code;
                 throw error;
@@ -298,6 +426,15 @@ export class TaskRunner {
                 },
             });
 
+            log.info('Task execution completed successfully', {
+                taskId: task.id,
+                sessionId,
+                agentName: executorConfig.name,
+                outputLength: accumulator.output.length,
+                thinkingLength: accumulator.thinking.length,
+                duration: Date.now() - task.createdAt
+            });
+
             // 13. 更新状态并通知
             state.updateNodeStatus(rootNode.id, 'success');
 
@@ -312,6 +449,7 @@ export class TaskRunner {
             });
 
             this.callbacks.onStatusChange(sessionId, 'completed');
+
             this.callbacks.onUnread(sessionId);
 
         } catch (error: any) {
@@ -319,8 +457,15 @@ export class TaskRunner {
         } finally {
             this.running.delete(task.id);
             runtime.currentTaskId = undefined;
+
+            log.debug('Task cleanup completed', {
+                taskId: task.id,
+                sessionId,
+                runningCount: this.running.size,
+                queuedCount: this.queue.length
+            });
+
             this.emitPoolStatus();
-            // 继续处理队列中的下一个任务
             this.processQueue();
         }
     }
@@ -408,7 +553,8 @@ export class TaskRunner {
         state: SessionState,
         accumulator: { output: string; thinking: string },
         persist: () => void,
-        markErrorEmitted: () => void
+        markErrorEmitted: () => void,
+        isBound: boolean  // ✅ 新增参数
     ): (event: OrchestratorEvent) => void {
         return (event: OrchestratorEvent) => {
             // 过滤重复的根 node_start
@@ -443,8 +589,10 @@ export class TaskRunner {
                 }
             }
 
-            // 转发给 UI
-            this.eventBus.emitSession(sessionId, event);
+            // ✅ 只在绑定时转发给 UI
+            if (isBound) {
+                this.eventBus.emitSession(sessionId, event);
+            }
         };
     }
 
@@ -520,10 +668,20 @@ export class TaskRunner {
         sessionId: string,
         errorAlreadyEmitted: boolean
     ): Promise<void> {
-        console.error('[TaskRunner] Task execution failed:', error);
-
         const isAborted = error.name === 'AbortError' || task.abortController.signal.aborted;
         const status: SessionStatus = isAborted ? 'aborted' : 'failed';
+
+        log.error('Task execution failed', {
+            taskId: task.id,
+            sessionId,
+            status,
+            errorName: error.name,
+            errorMessage: error.message,
+            errorCode: error.code || error.status,
+            isAborted,
+            duration: Date.now() - task.createdAt,
+            stack: error.stack
+        });
 
         runtime.error = error;
         this.callbacks.onStatusChange(sessionId, status);
@@ -549,7 +707,13 @@ export class TaskRunner {
                     .updateNode(sessionId, lastSession.persistedNodeId, {
                         meta: { status, error: errorMessage, endTime: Date.now() },
                     })
-                    .catch(console.warn);
+                    .catch((e) => {
+                        log.error('Failed to persist error state', {
+                            sessionId,
+                            nodeId: lastSession.persistedNodeId,
+                            error: e
+                        });
+                    });
             }
         }
 

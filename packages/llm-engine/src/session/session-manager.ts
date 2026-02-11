@@ -24,6 +24,7 @@ import { TaskRunner } from './task-runner';
 import { AgentResolver, AgentInfo, ModelInfo } from './agent-resolver';
 import { AttachmentProcessor } from './attachment-processor';
 import { Converters } from '../utils/converters';
+import { log } from '../utils/logger';
 
 /**
  * 会话管理器
@@ -77,6 +78,8 @@ export class SessionManager {
             {
                 onStatusChange: (sid, status) => this.updateStatus(sid, status),
                 onUnread: (sid) => this.incrementUnread(sid),
+                // ✅ 新增：提供获取当前绑定 session ID 的方法
+                getBoundSessionId: () => this.boundSessionId,
                 getSessionContext: (sid) => {
                     const state = this.states.get(sid);
                     const runtime = this.sessions.get(sid);
@@ -98,6 +101,18 @@ export class SessionManager {
     async bindSession(nodeId: string, sessionId: string): Promise<SessionSnapshot> {
         const currentVersion = ++this.bindingVersion;
 
+    log.info('Binding to session', { 
+        nodeId, 
+        sessionId,
+        version: currentVersion,
+        previousBound: this.boundSessionId,
+        previousStatus: this.boundSessionId 
+            ? this.sessions.get(this.boundSessionId)?.status 
+            : null,
+        totalSessionsInMemory: this.sessions.size,
+        allSessionIds: Array.from(this.sessions.keys())
+    });
+
         this.unbindSession();
         this.bindingVersion = currentVersion;
 
@@ -107,7 +122,11 @@ export class SessionManager {
 
             // 检查绑定是否已过期（被后续的 bindSession 覆盖）
             if (this.bindingVersion !== currentVersion) {
-                console.log('[SessionManager] Bind cancelled (stale version)');
+                log.warn('Bind cancelled (stale version)', {
+                    sessionId,
+                    currentVersion,
+                    actualVersion: this.bindingVersion
+                });
                 throw new EngineError(EngineErrorCode.ABORTED, 'Bind cancelled');
             }
 
@@ -118,6 +137,10 @@ export class SessionManager {
             // 清除未读
             const runtime = this.sessions.get(sessionId);
             if (runtime && runtime.unreadCount > 0) {
+                log.debug('Clearing unread count', {
+                    sessionId,
+                    unreadCount: runtime.unreadCount
+                });
                 runtime.unreadCount = 0;
                 this.eventBus.emitGlobal({
                     type: 'session_unread_updated',
@@ -125,16 +148,23 @@ export class SessionManager {
                 });
             }
 
-            console.log(`[SessionManager] Bound to session: ${sessionId}`);
+            log.info('Session bound successfully', { sessionId, nodeId });
             return this.getSnapshot();
         } catch (e) {
-            console.error('[SessionManager] Bind failed:', e);
+            log.error('Failed to bind session', { sessionId, nodeId, error: e });
             throw EngineError.from(e);
         }
     }
 
     unbindSession(): void {
         this.bindingVersion++;
+
+        if (this.boundSessionId) {
+            log.info('Unbinding session', {
+                sessionId: this.boundSessionId,
+                status: this.sessions.get(this.boundSessionId)?.status
+            });
+        }
 
         if (this.eventUnsubscribe) {
             this.eventUnsubscribe();
@@ -145,7 +175,10 @@ export class SessionManager {
         if (this.boundSessionId) {
             const runtime = this.sessions.get(this.boundSessionId);
             if (runtime && (runtime.status === 'running' || runtime.status === 'queued')) {
-                // 清除 UI 事件监听，但保留 session 注册（后台运行）
+                log.info('Session running in background', {
+                    sessionId: this.boundSessionId,
+                    status: runtime.status
+                });
                 this.eventBus.clearSessionListeners(this.boundSessionId);
             }
         }
@@ -723,26 +756,36 @@ export class SessionManager {
             if (runtime.unreadCount > 0) continue;
 
             if (now - runtime.lastActiveTime > maxIdleTime) {
+                log.info('Cleaning up idle session', {
+                    sessionId,
+                    idleTime: now - runtime.lastActiveTime,
+                    status: runtime.status
+                });
                 this.unregisterSession(sessionId);
                 cleaned++;
             }
         }
 
         if (cleaned > 0) {
-            console.log(`[SessionManager] Cleaned ${cleaned} idle sessions`);
+            log.info('Idle sessions cleaned', { count: cleaned });
         }
 
         return cleaned;
     }
 
     destroy(): void {
+    log.warn('SessionManager destroying', { 
+        sessionCount: this.sessions.size,
+        sessions: Array.from(this.sessions.keys()),
+        boundSession: this.boundSessionId 
+    });
         this.unbindSession();
         this.taskRunner.abortAll();
         this.sessions.clear();
         this.states.clear();
         this.eventBus.clear();
         this.activeSessionId = null;
-        console.log('[SessionManager] Destroyed');
+    log.info('SessionManager destroyed');
     }
 
     debug(): void {
@@ -774,12 +817,37 @@ export class SessionManager {
      * 确保会话已注册
      */
     private async ensureRegistered(nodeId: string, sessionId: string): Promise<void> {
+    // ✅ 添加诊断日志：打印当前 Map 中所有 session
+    log.debug('ensureRegistered check', { 
+        sessionId,
+        sessionsInMap: Array.from(this.sessions.keys()),
+        sessionExists: this.sessions.has(sessionId),
+        totalSessions: this.sessions.size 
+    });
         if (this.sessions.has(sessionId)) {
             const existing = this.sessions.get(sessionId)!;
             existing.lastActiveTime = Date.now();
             this.eventBus.ensureSession(sessionId);
+
+            log.debug('Session already registered', {
+                sessionId,
+                status: existing.status
+            });
+
+            // ✅ 新增：如果 session 在后台完成了任务，重新加载数据
+            const state = this.states.get(sessionId);
+            if (state && (existing.status === 'completed' || existing.status === 'failed')) {
+                log.info('Reloading background-completed session', {
+                    sessionId,
+                    status: existing.status
+                });
+                await this.reloadSessionData(nodeId, sessionId, state);
+            }
+
             return;
         }
+
+        log.info('Registering new session', { sessionId, nodeId });
 
         // 验证 manifest
         await this.engine.validateManifest(nodeId, sessionId);
@@ -802,6 +870,11 @@ export class SessionManager {
         this.eventBus.emitGlobal({
             type: 'session_registered',
             payload: { sessionId },
+        });
+
+        log.info('Session registered successfully', {
+            sessionId,
+            messageCount: state.getSessions().length
         });
     }
 
@@ -837,16 +910,26 @@ export class SessionManager {
         sessionId: string
     ): Promise<void> {
         try {
+            log.debug('Loading session data', { sessionId, nodeId });
+
             const context = await this.engine.getSessionContext(nodeId, sessionId);
 
+            let loadedCount = 0;
             for (const item of context) {
                 const node = item.node;
                 if (node.role === 'system') continue;
                 if (node.role === 'assistant' && !node.content?.trim()) continue;
                 state.loadFromChatNode(node);
+                loadedCount++;
             }
+
+            log.info('Session data loaded', {
+                sessionId,
+                totalMessages: context.length,
+                loadedMessages: loadedCount
+            });
         } catch (e) {
-            console.error(`[SessionManager] Failed to load session ${sessionId}:`, e);
+            log.error('Failed to load session data', { sessionId, error: e });
         }
     }
 
@@ -866,6 +949,12 @@ export class SessionManager {
             runtime.error = undefined;
         }
 
+        log.info('Session status changed', {
+            sessionId,
+            prevStatus,
+            newStatus: status
+        });
+
         this.eventBus.emitGlobal({
             type: 'session_status_changed',
             payload: { sessionId, status, prevStatus },
@@ -873,11 +962,18 @@ export class SessionManager {
     }
 
     private incrementUnread(sessionId: string): void {
-        if (sessionId === this.activeSessionId) return;
+        if (sessionId === this.boundSessionId) {
+            log.debug('Skipping unread increment (session is bound)', { sessionId });
+            return;
+        }
 
         const runtime = this.sessions.get(sessionId);
         if (runtime) {
             runtime.unreadCount++;
+            log.debug('Unread count incremented', {
+                sessionId,
+                unreadCount: runtime.unreadCount
+            });
             this.eventBus.emitGlobal({
                 type: 'session_unread_updated',
                 payload: { sessionId, count: runtime.unreadCount },
@@ -1079,7 +1175,14 @@ export function createSessionManager(
     agentService: IAgentService,
     options?: { maxConcurrent?: number }
 ): SessionManager {
+    // ✅ 防止重复创建
+    if (sessionManagerInstance) {
+        log.warn('SessionManager already exists, returning existing instance');
+        return sessionManagerInstance;
+    }
+    
     sessionManagerInstance = new SessionManager(engine, agentService, options);
+    log.info('SessionManager created');
     return sessionManagerInstance;
 }
 
@@ -1094,6 +1197,10 @@ export function getSessionManager(): SessionManager {
 }
 
 export function resetSessionManager(): void {
+    log.warn('resetSessionManager called', { 
+        hasInstance: !!sessionManagerInstance 
+    });
+    
     if (sessionManagerInstance) {
         sessionManagerInstance.destroy();
     }
