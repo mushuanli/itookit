@@ -14,8 +14,8 @@ export const chatFileParser = (content: string): any => {
                 ...data.settings,
                 type: 'chat',
                 updatedAt: data.updated_at,
-                messageCount: Object.keys(data.branches || {}).length
-            }
+                messageCount: Object.keys(data.branches || {}).length,
+            },
         };
     } catch (e) {
         console.warn('[chatFileParser] Parse failed:', e);

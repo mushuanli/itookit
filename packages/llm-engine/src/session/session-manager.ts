@@ -1,91 +1,91 @@
 // @file: llm-engine/session/session-manager.ts
 
 import {
-    SessionRegistry,
-    getSessionRegistry
-} from './session-registry';
-import {
     SessionGroup,
     SessionStatus,
+    SessionRuntime,
+    SessionSnapshot,
     OrchestratorEvent,
     ChatFile,
     ExecutionOverrides,
     ChatSessionSettings,
     DEFAULT_SESSION_SETTINGS,
+    PoolStatus,
+    DeleteOptions,
+    RegistryEvent,
 } from '../core/types';
 import { EngineError, EngineErrorCode } from '../core/errors';
-import {BranchTreeNode} from '../persistence/types';
-/**
- * 会话快照
- */
-export interface SessionSnapshot {
-    sessionId: string;
-    nodeId: string;
-    sessions: SessionGroup[];
-    status: SessionStatus;
-    isRunning: boolean;
-}
-
-/**
- * 删除选项
- */
-export interface DeleteOptions {
-    /** 删除模式：soft=软删除, hard=物理删除 */
-    mode?: 'soft' | 'hard';
-    /** 是否级联删除子节点 */
-    cascade?: boolean;
-    /** 是否删除关联的响应消息 */
-    deleteAssociatedResponses?: boolean;
-}
-
-/**
- * 重试选项
- */
-export interface RetryOptions {
-    /** 使用的 Agent ID（最高优先级） */
-    agentId?: string;
-    /** 当前 ChatInput 选择的 Agent ID（作为 fallback） */
-    fallbackAgentId?: string;  // ✅ 新增
-    /** 是否保留当前回复（创建分支） */
-    preserveCurrent?: boolean;
-    /** 是否导航到新分支 */
-    navigateToNew?: boolean;
-}
-
-/**
- * ✅ 新增：重发选项
- */
-export interface ResendOptions {
-    /** 显式指定的 Agent ID（最高优先级） */
-    agentId?: string;
-    /** 当前 ChatInput 选择的 Agent ID（作为 fallback） */
-    fallbackAgentId?: string;
-}
-
-/**
- * SessionManager 配置选项
- */
-export interface SessionManagerOptions {
-    /** 当绑定到会话时的回调，用于 UI 初始化 */
-    onSessionBound?: (snapshot: SessionSnapshot) => void;
-
-    /** 当会话解绑时的回调 */
-    onSessionUnbound?: () => void;
-}
+import { ENGINE_DEFAULTS } from '../core/constants';
+import { ILLMSessionEngine, BranchTreeNode } from '../persistence/types';
+import { IAgentService } from '../services/agent-service';
+import { SessionState } from './session-state';
+import { SessionEventBus } from './session-event-bus';
+import { TaskRunner } from './task-runner';
+import { AgentResolver, AgentInfo, ModelInfo } from './agent-resolver';
+import { AttachmentProcessor } from './attachment-processor';
+import { Converters } from '../utils/converters';
 
 /**
  * 会话管理器
- * 单会话视图代理，封装对 SessionRegistry 的调用
+ *
+ * 整个 llm-engine 对外的唯一入口。
+ * 合并了原 SessionManager（视图绑定）、SessionRegistry（全局状态）、
+ * 以及各个 Manager/Service 的协调逻辑。
+ *
+ * 后台运行：切换会话（unbindSession）不会停止运行中的任务，
+ * session 仍保留在内存中直到完成或被显式清理。
  */
 export class SessionManager {
-    private registry: SessionRegistry;
-    private sessionId: string | null = null;
-    private nodeId: string | null = null;
-    private eventUnsubscribe: (() => void) | null = null;
-    private bindingVersion = 0;
+    // === 全局会话存储 ===
+    private sessions = new Map<string, SessionRuntime>();
+    private states = new Map<string, SessionState>();
+    private activeSessionId: string | null = null;
 
-    constructor(_options: SessionManagerOptions = {}) {
-        this.registry = getSessionRegistry();
+    // === 当前视图绑定 ===
+    private boundSessionId: string | null = null;
+    private boundNodeId: string | null = null;
+    private bindingVersion = 0;
+    private eventUnsubscribe: (() => void) | null = null;
+
+    // === 内部组件 ===
+    private taskRunner: TaskRunner;
+    private agentResolver: AgentResolver;
+    private attachments: AttachmentProcessor;
+    private eventBus: SessionEventBus;
+
+    // === 直接依赖 ===
+    private engine: ILLMSessionEngine;
+    //private agentService: IAgentService;
+
+    constructor(
+        engine: ILLMSessionEngine,
+        agentService: IAgentService,
+        options?: { maxConcurrent?: number }
+    ) {
+        this.engine = engine;
+        //this.agentService = agentService;
+
+        this.eventBus = new SessionEventBus();
+        this.agentResolver = new AgentResolver(agentService);
+        this.attachments = new AttachmentProcessor(engine);
+
+        this.taskRunner = new TaskRunner(
+            engine,
+            this.eventBus,
+            this.agentResolver,
+            this.attachments,
+            {
+                onStatusChange: (sid, status) => this.updateStatus(sid, status),
+                onUnread: (sid) => this.incrementUnread(sid),
+                getSessionContext: (sid) => {
+                    const state = this.states.get(sid);
+                    const runtime = this.sessions.get(sid);
+                    if (!state || !runtime) return null;
+                    return { state, runtime };
+                },
+            },
+            options
+        );
     }
 
     // ================================================================
@@ -93,70 +93,46 @@ export class SessionManager {
     // ================================================================
 
     /**
-     * 绑定到会话
-     * 返回会话快照，供 UI 层直接使用
+     * 绑定到会话，返回快照供 UI 初始化
      */
     async bindSession(nodeId: string, sessionId: string): Promise<SessionSnapshot> {
         const currentVersion = ++this.bindingVersion;
 
-        // 解绑之前的会话
         this.unbindSession();
         this.bindingVersion = currentVersion;
 
         try {
-            await this.registry.registerSession(nodeId, sessionId);
+            // 注册（若尚未注册）—— 直接使用参数，不调用 ensureBound
+            await this.ensureRegistered(nodeId, sessionId);
 
-            // 检查绑定是否过期
+            // 检查绑定是否已过期（被后续的 bindSession 覆盖）
             if (this.bindingVersion !== currentVersion) {
-                console.log(`[SessionManager] Bind cancelled (stale version)`);
-                this.registry.unregisterSession(sessionId, { keepInBackground: true }).catch(() => { });
+                console.log('[SessionManager] Bind cancelled (stale version)');
                 throw new EngineError(EngineErrorCode.ABORTED, 'Bind cancelled');
             }
 
-            this.nodeId = nodeId;
-            this.sessionId = sessionId;
-            this.registry.setActiveSession(sessionId);
+            this.boundNodeId = nodeId;
+            this.boundSessionId = sessionId;
+            this.activeSessionId = sessionId;
+
+            // 清除未读
+            const runtime = this.sessions.get(sessionId);
+            if (runtime && runtime.unreadCount > 0) {
+                runtime.unreadCount = 0;
+                this.eventBus.emitGlobal({
+                    type: 'session_unread_updated',
+                    payload: { sessionId, count: 0 },
+                });
+            }
 
             console.log(`[SessionManager] Bound to session: ${sessionId}`);
-
-            // ✅ 返回完整快照
             return this.getSnapshot();
-
         } catch (e) {
             console.error('[SessionManager] Bind failed:', e);
             throw EngineError.from(e);
         }
     }
 
-    /**
-     * ✅ 新增：获取当前会话快照
-     */
-    getSnapshot(): SessionSnapshot {
-        if (!this.sessionId || !this.nodeId) {
-            return {
-                sessionId: '',
-                nodeId: '',
-                sessions: [],
-                status: 'idle',
-                isRunning: false
-            };
-        }
-
-        const runtime = this.registry.getSessionRuntime(this.sessionId);
-        const status = runtime?.status || 'idle';
-
-        return {
-            sessionId: this.sessionId,
-            nodeId: this.nodeId,
-            sessions: this.registry.getSessionMessages(this.sessionId),
-            status,
-            isRunning: status === 'running' || status === 'queued'
-        };
-    }
-
-    /**
-     * 解绑会话
-     */
     unbindSession(): void {
         this.bindingVersion++;
 
@@ -165,220 +141,132 @@ export class SessionManager {
             this.eventUnsubscribe = null;
         }
 
-        this.sessionId = null;
-        this.nodeId = null;
-    }
-
-    /**
-     * 加载会话（兼容旧接口）
-     */
-    async loadSession(nodeId: string, sessionId: string): Promise<void> {
-        await this.bindSession(nodeId, sessionId);
-    }
-
-    // ================================================================
-    // 事件订阅
-    // ================================================================
-
-    /**
-     * 订阅会话事件
-     * ✅ 修复：保存外部处理器引用，支持状态恢复
-     */
-    onEvent(handler: (event: OrchestratorEvent) => void): () => void {
-        if (!this.sessionId) {
-            return () => { };
+        // 如果之前绑定的会话正在运行，只清除事件监听，保留 session
+        if (this.boundSessionId) {
+            const runtime = this.sessions.get(this.boundSessionId);
+            if (runtime && (runtime.status === 'running' || runtime.status === 'queued')) {
+                // 清除 UI 事件监听，但保留 session 注册（后台运行）
+                this.eventBus.clearSessionListeners(this.boundSessionId);
+            }
         }
 
-        // 取消之前的订阅
-        if (this.eventUnsubscribe) {
-            this.eventUnsubscribe();
-        }
-
-        this.eventUnsubscribe = this.registry.onSessionEvent(this.sessionId, handler);
-        return this.eventUnsubscribe;
+        this.boundSessionId = null;
+        this.boundNodeId = null;
     }
 
     // ================================================================
     // 状态查询
     // ================================================================
 
+    getSnapshot(): SessionSnapshot {
+        if (!this.boundSessionId || !this.boundNodeId) {
+            return { sessionId: '', nodeId: '', sessions: [], status: 'idle', isRunning: false };
+        }
+        const state = this.states.get(this.boundSessionId);
+        const runtime = this.sessions.get(this.boundSessionId);
+        const status = runtime?.status || 'idle';
+        return {
+            sessionId: this.boundSessionId,
+            nodeId: this.boundNodeId,
+            sessions: state?.getSessions() || [],
+            status,
+            isRunning: status === 'running' || status === 'queued',
+        };
+    }
+
     getSessions(): SessionGroup[] {
-        if (!this.sessionId) return [];
-        return this.registry.getSessionMessages(this.sessionId);
+        if (!this.boundSessionId) return [];
+        return this.states.get(this.boundSessionId)?.getSessions() || [];
     }
 
-    /**
-     * 获取当前会话 ID
-     */
     getCurrentSessionId(): string | null {
-        return this.sessionId;
+        return this.boundSessionId;
     }
 
-    /**
-     * 获取当前节点 ID
-     */
     getCurrentNodeId(): string | null {
-        return this.nodeId;
+        return this.boundNodeId;
     }
 
-    /**
-     * 获取状态
-     */
     getStatus(): SessionStatus | 'unbound' {
-        if (!this.sessionId) return 'unbound';
-        return this.registry.getSessionRuntime(this.sessionId)?.status || 'idle';
+        if (!this.boundSessionId) return 'unbound';
+        return this.sessions.get(this.boundSessionId)?.status || 'idle';
     }
 
-    /**
-     * 是否正在生成
-     */
     isGenerating(): boolean {
-        if (!this.sessionId) return false;
-        const runtime = this.registry.getSessionRuntime(this.sessionId);
+        if (!this.boundSessionId) return false;
+        const runtime = this.sessions.get(this.boundSessionId);
         return runtime?.status === 'running' || runtime?.status === 'queued';
     }
 
     /**
-     * 是否有未保存的更改
+     * 保留原始接口兼容性
      */
     hasUnsavedChanges(): boolean {
         return false;
     }
 
+    getPoolStatus(): PoolStatus {
+        return this.taskRunner.getPoolStatus();
+    }
+
+    getAllSessions(): SessionRuntime[] {
+        return Array.from(this.sessions.values());
+    }
+
+    getSessionRuntime(sessionId: string): SessionRuntime | undefined {
+        return this.sessions.get(sessionId);
+    }
+
     // ================================================================
-    // 执行 API
+    // 事件
     // ================================================================
 
-    /**
-     * 运行用户查询
-     * @param text 用户输入文本
-     * @param files 附件文件
-     * @param executorId 执行器 ID
-     * @param overrides 可选的覆盖参数
-     */
+    onEvent(handler: (event: OrchestratorEvent) => void): () => void {
+        if (!this.boundSessionId) return () => { };
+        if (this.eventUnsubscribe) {
+            this.eventUnsubscribe();
+        }
+        this.eventUnsubscribe = this.eventBus.onSession(this.boundSessionId, handler);
+        return this.eventUnsubscribe;
+    }
+
+    onGlobalEvent(handler: (event: RegistryEvent) => void): () => void {
+        return this.eventBus.onGlobal(handler);
+    }
+
+    // ================================================================
+    // 兼容旧接口
+    // ================================================================
+
+    async loadSession(nodeId: string, sessionId: string): Promise<void> {
+        await this.bindSession(nodeId, sessionId);
+    }
+
     async runUserQuery(
         text: string,
         files: ChatFile[],
         executorId: string,
         overrides?: ExecutionOverrides
     ): Promise<void> {
-        if (!this.sessionId) {
-            throw new EngineError(EngineErrorCode.SESSION_INVALID, 'No session bound');
-        }
-
-        await this.registry.submitTask(this.sessionId, {
-            text,
-            files,
-            executorId,
-            overrides
-        });
+        return this.sendMessage(text, files, executorId, overrides);
     }
 
-    /**
-     * 中止执行
-     */
-    abort(): void {
-        if (this.sessionId) {
-            this.registry.abortSession(this.sessionId).catch(console.error);
-        }
-    }
-
-    // ================================================================
-    // 消息操作 API
-    // ================================================================
-
-    /**
-     * 删除消息
-     * @param id 消息 ID
-     * @param options 删除选项
-     */
-    async deleteMessage(id: string, options?: DeleteOptions): Promise<void> {
-        if (!this.sessionId) {
-            throw new EngineError(EngineErrorCode.SESSION_INVALID, 'No session bound');
-        }
-
-        // 合并默认选项
-        const opts: DeleteOptions = {
-            mode: 'soft',
-            cascade: false,
-            deleteAssociatedResponses: true,
-            ...options
-        };
-
-        await this.registry.deleteMessage(this.sessionId, id, opts);
-    }
-
-    /**
-     * 更新消息内容（不触发重新执行）
-     * @param id 消息 ID  
-     * @param content 新内容
-     * @param type 消息类型
-     */
     async updateContent(id: string, content: string, _type: 'user' | 'node'): Promise<void> {
-        if (!this.sessionId) {
-            throw new EngineError(EngineErrorCode.SESSION_INVALID, 'No session bound');
-        }
-
-        // updateContent 是编辑的简化版，不触发重新执行
-        await this.registry.editMessage(this.sessionId, id, content, false);
+        await this.editMessage(id, content, false);
     }
 
-    /**
-     * 编辑消息
-     * @param id 消息 ID
-     * @param content 新内容
-     * @param autoRerun 是否自动重新执行
-     */
-    async editMessage(id: string, content: string, autoRerun: boolean = false): Promise<void> {
-        if (!this.sessionId) {
-            throw new EngineError(EngineErrorCode.SESSION_INVALID, 'No session bound');
-        }
-        await this.registry.editMessage(this.sessionId, id, content, autoRerun);
+    async getAvailableExecutors(): Promise<AgentInfo[]> {
+        return this.getAvailableAgents();
     }
 
-    /**
-     * 重试生成
-     * @param assistantId 助手消息 ID
-     * @param options 重试选项
-     */
-    async retryGeneration(assistantId: string, options?: RetryOptions): Promise<void> {
-        if (!this.sessionId) {
-            throw new EngineError(EngineErrorCode.SESSION_INVALID, 'No session bound');
-        }
-
-        await this.registry.retryGeneration(this.sessionId, assistantId, {
-            agentId: options?.agentId,
-            fallbackAgentId: options?.fallbackAgentId,  // ✅ 新增：传递 fallbackAgentId
-            preserveCurrent: options?.preserveCurrent ?? true
-        });
-
-        // 如果需要导航到新分支，这里可以添加逻辑
-        // 但通常 UI 会通过事件自动处理
-    }
-
-    /**
-     * ✅ 修改：重发用户消息
-     * @param userSessionId 用户消息 ID
-     * @param options 重发选项（包含 fallbackAgentId）
-     */
-    async resendUserMessage(userSessionId: string, options?: ResendOptions): Promise<void> {
-        if (!this.sessionId) {
-            throw new EngineError(EngineErrorCode.SESSION_INVALID, 'No session bound');
-        }
-
-        await this.registry.resendUserMessage(this.sessionId, userSessionId, {
-            agentId: options?.agentId,
-            fallbackAgentId: options?.fallbackAgentId
-        });
+    async getAvailableModelsForAgent(agentId: string): Promise<ModelInfo[]> {
+        return this.getModelsForAgent(agentId);
     }
 
     // ================================================================
     // 检查 API
     // ================================================================
 
-    /**
-     * 检查是否可以删除
-     */
     canDeleteMessage(_id: string): { allowed: boolean; reason?: string } {
         if (this.isGenerating()) {
             return { allowed: false, reason: 'Cannot delete while generating' };
@@ -386,20 +274,14 @@ export class SessionManager {
         return { allowed: true };
     }
 
-    /**
-     * 检查是否可以重试
-     */
-    canRetry(_sessionGroupId: string): { allowed: boolean; reason?: string } {
+    canRetry(_id: string): { allowed: boolean; reason?: string } {
         if (this.isGenerating()) {
             return { allowed: false, reason: 'Already generating' };
         }
         return { allowed: true };
     }
 
-    /**
-     * 检查是否可以编辑
-     */
-    canEdit(_sessionGroupId: string): { allowed: boolean; reason?: string } {
+    canEdit(_id: string): { allowed: boolean; reason?: string } {
         if (this.isGenerating()) {
             return { allowed: false, reason: 'Cannot edit while generating' };
         }
@@ -407,167 +289,813 @@ export class SessionManager {
     }
 
     // ================================================================
-    // 分支导航 API
+    // 执行 API
     // ================================================================
 
-    /**
-     * 获取兄弟分支
-     * @param sessionGroupId 消息 ID
-     */
-    async getSiblings(sessionGroupId: string): Promise<SessionGroup[]> {
-        if (!this.sessionId) return [];
-        return await this.registry.getNodeSiblings(this.sessionId, sessionGroupId);
+    async sendMessage(
+        text: string,
+        files: ChatFile[],
+        agentId: string,
+        overrides?: ExecutionOverrides
+    ): Promise<void> {
+        const { sessionId, nodeId, runtime } = this.ensureBound();
+        await this.taskRunner.submit(
+            { sessionId, nodeId, text, files, agentId, overrides },
+            runtime
+        );
+    }
+
+    abort(): void {
+        if (this.boundSessionId) {
+            this.taskRunner.abort(this.boundSessionId);
+        }
+    }
+
+    // ================================================================
+    // 消息操作
+    // ================================================================
+
+    async deleteMessage(messageId: string, options?: DeleteOptions): Promise<void> {
+        const { sessionId, nodeId, state } = this.ensureBound();
+        const session = state.findSessionById(messageId);
+        if (!session) return;
+
+        const deleteResponses = options?.deleteAssociatedResponses ?? true;
+        const idsToDelete = this.collectDeletableIds(state, messageId, deleteResponses);
+
+        const toDelete = idsToDelete.map((id) => ({
+            id,
+            persistedNodeId: state.findSessionById(id)?.persistedNodeId,
+        }));
+
+        // 批量删除
+        for (const { id, persistedNodeId } of toDelete) {
+            state.removeMessage(id);
+            if (persistedNodeId) {
+                await this.engine.deleteMessage(nodeId, sessionId, persistedNodeId).catch(console.warn);
+            }
+        }
+
+        this.eventBus.emitSession(sessionId, {
+            type: 'messages_deleted',
+            payload: { deletedIds: idsToDelete },
+        });
+    }
+
+    async editMessage(
+        messageId: string,
+        newContent: string,
+        autoRerun: boolean = false
+    ): Promise<void> {
+        const { sessionId, state, runtime, nodeId } = this.ensureBound();
+
+        state.updateMessageContent(messageId, newContent);
+        const session = state.findSessionById(messageId);
+        if (session?.persistedNodeId) {
+            await this.engine.updateNode(sessionId, session.persistedNodeId, {
+                content: newContent,
+            });
+        }
+
+        this.eventBus.emitSession(sessionId, {
+            type: 'message_edited',
+            payload: { sessionId: messageId, newContent },
+        });
+
+        if (autoRerun && session?.role === 'user') {
+            await this.deleteAssociatedResponses(sessionId, messageId, state);
+            await this.taskRunner.submit(
+                {
+                    sessionId,
+                    nodeId,
+                    text: newContent,
+                    files: session.files || [],
+                    agentId: 'default',
+                    skipUserMessage: true,
+                    parentUserNodeId: session.persistedNodeId,
+                },
+                runtime
+            );
+        }
     }
 
     /**
-     * 切换到兄弟分支
-     * @param sessionGroupId 消息 ID
-     * @param siblingIndex 目标分支索引
+     * 重试生成
+     * @param assistantId 助手消息 ID
+     * @param agentId 显式指定的 Agent ID（最高优先级）
+     * @param fallbackAgentId ChatInput 当前选择的 Agent（作为兜底）
+     * @param preserveCurrent 是否保留当前回复（创建分支），默认 true
      */
-    async switchToSibling(sessionGroupId: string, siblingIndex: number): Promise<void> {
-        if (!this.sessionId || !this.nodeId) return;
+    async retryGeneration(
+        assistantId: string,
+        agentId?: string,
+        fallbackAgentId?: string,
+        preserveCurrent: boolean = true
+    ): Promise<void> {
+        const { sessionId, nodeId, state, runtime } = this.ensureBound();
 
-        await this.registry.switchToSibling(
-            this.nodeId,
-            this.sessionId,
-            sessionGroupId,
-            siblingIndex
+        const userMessage = state.findUserMessageBefore(assistantId);
+        if (!userMessage) {
+            throw new EngineError(EngineErrorCode.SESSION_INVALID, 'No user message found');
+        }
+
+        const currentAssistant = state.findSessionById(assistantId);
+
+        // 解析 agentId：显式 > 当前 assistant > fallback > default
+        const resolvedAgentId =
+            agentId ||
+            currentAssistant?.executionRoot?.executorId ||
+            fallbackAgentId ||
+            'default';
+
+        let siblingCount = 1;
+        let siblingIndex = 0;
+
+        if (currentAssistant) {
+            siblingCount = (currentAssistant.siblingCount || 1) + 1;
+            siblingIndex = siblingCount - 1;
+
+            if (preserveCurrent) {
+                currentAssistant.siblingCount = siblingCount;
+                if (currentAssistant.executionRoot) {
+                    currentAssistant.executionRoot.data.metaInfo = {
+                        ...currentAssistant.executionRoot.data.metaInfo,
+                        siblingIndex: currentAssistant.siblingIndex || 0,
+                        siblingCount,
+                    };
+                }
+                if (currentAssistant.persistedNodeId) {
+                    await this.engine.updateNode(
+                        sessionId,
+                        currentAssistant.persistedNodeId,
+                        {
+                            meta: {
+                                siblingIndex: currentAssistant.siblingIndex || 0,
+                                siblingCount,
+                            },
+                        }
+                    );
+                }
+                this.eventBus.emitSession(sessionId, {
+                    type: 'sibling_switch',
+                    payload: {
+                        sessionId: assistantId,
+                        newIndex: currentAssistant.siblingIndex || 0,
+                        total: siblingCount,
+                    },
+                });
+            }
+        }
+
+        if (!preserveCurrent) {
+            await this.deleteMessage(assistantId);
+            siblingCount = 1;
+            siblingIndex = 0;
+        }
+
+        this.eventBus.emitSession(sessionId, {
+            type: 'retry_started',
+            payload: { originalId: assistantId, newId: '', siblingIndex, siblingCount },
+        });
+
+        await this.taskRunner.submit(
+            {
+                sessionId,
+                nodeId,
+                text: userMessage.content || '',
+                files: userMessage.files || [],
+                agentId: resolvedAgentId,
+                skipUserMessage: true,
+                parentUserNodeId: userMessage.persistedNodeId,
+                branchInfo: {
+                    siblingIndex,
+                    siblingCount,
+                    parentAssistantId: preserveCurrent ? assistantId : undefined,
+                },
+            },
+            runtime
         );
     }
 
     /**
-     * ✅ 新增：创建分支
+     * 重发用户消息
+     * @param userMessageId 用户消息 ID
+     * @param agentId 显式指定的 Agent ID
+     * @param fallbackAgentId ChatInput 当前选择的 Agent（作为兜底）
      */
-    async createBranch(
-        sourceMessageId: string,
-        options?: {
-            name?: string;
-            copyContent?: boolean;
-        }
-    ): Promise<string> {
-        if (!this.sessionId) {
-            throw new EngineError(
-                EngineErrorCode.SESSION_INVALID,
-                'No session bound'
-            );
+    async resendUserMessage(
+        userMessageId: string,
+        agentId?: string,
+        fallbackAgentId?: string
+    ): Promise<void> {
+        const { sessionId, nodeId, state, runtime } = this.ensureBound();
+
+        const session = state.findSessionById(userMessageId);
+        if (!session || session.role !== 'user') {
+            throw new EngineError(EngineErrorCode.SESSION_INVALID, 'Invalid user session');
         }
 
-        return this.registry.createBranch(this.sessionId, sourceMessageId, {
-            ...options,
-            createdFrom: 'manual'
+        // 解析 agentId：显式 > 后续 assistant > fallback > default
+        const resolvedAgentId =
+            agentId ||
+            this.resolveAgentFromResponses(state, userMessageId) ||
+            fallbackAgentId ||
+            'default';
+
+        await this.deleteAssociatedResponses(sessionId, userMessageId, state);
+
+        this.eventBus.emitSession(sessionId, {
+            type: 'retry_started',
+            payload: { originalId: userMessageId, newId: '' },
+        });
+
+        await this.taskRunner.submit(
+            {
+                sessionId,
+                nodeId,
+                text: session.content || '',
+                files: session.files || [],
+                agentId: resolvedAgentId,
+                skipUserMessage: true,
+                parentUserNodeId: session.persistedNodeId,
+            },
+            runtime
+        );
+    }
+
+    async getSiblings(messageId: string): Promise<SessionGroup[]> {
+        const { sessionId, state } = this.ensureBound();
+        const session = state.findSessionById(messageId);
+        if (!session?.persistedNodeId) {
+            return session ? [session] : [];
+        }
+
+        try {
+            const siblings = await this.engine.getNodeSiblings(
+                sessionId,
+                session.persistedNodeId
+            );
+            return siblings
+                .map((chatNode, index) => {
+                    const converted = Converters.chatNodeToSessionGroup(chatNode);
+                    if (converted) {
+                        converted.siblingIndex = index;
+                        converted.siblingCount = siblings.length;
+                    }
+                    return converted;
+                })
+                .filter(Boolean) as SessionGroup[];
+        } catch (e) {
+            console.error('[SessionManager] getSiblings failed:', e);
+            return session ? [session] : [];
+        }
+    }
+
+    async switchToSibling(messageId: string, siblingIndex: number): Promise<void> {
+        const { sessionId, nodeId, state } = this.ensureBound();
+        const session = state.findSessionById(messageId);
+        if (!session?.persistedNodeId) {
+            throw new EngineError(EngineErrorCode.SESSION_INVALID, 'Message not found');
+        }
+
+        const siblings = await this.engine.getNodeSiblings(sessionId, session.persistedNodeId);
+        if (siblingIndex < 0 || siblingIndex >= siblings.length) {
+            throw new EngineError(EngineErrorCode.SESSION_INVALID, 'Invalid sibling index');
+        }
+
+        const target = siblings[siblingIndex];
+
+        // 通过 engine 的带锁方法切换，避免竞态
+        await this.updateManifestHead(nodeId, sessionId, target.id);
+
+        // 重新加载并通知 UI
+        await this.reloadSessionData(nodeId, sessionId, state);
+
+        this.eventBus.emitSession(sessionId, {
+            type: 'sibling_switch',
+            payload: {
+                sessionId: messageId,
+                newIndex: siblingIndex,
+                total: siblings.length,
+            },
         });
     }
 
-    /**
-     * ✅ 新增：获取分支树
-     */
+    async createBranch(
+        sourceMessageId: string,
+        options?: { name?: string; copyContent?: boolean }
+    ): Promise<string> {
+        const { sessionId, nodeId, state } = this.ensureBound();
+
+        const newNodeId = await this.engine.createBranch(nodeId, sessionId, sourceMessageId, {
+            ...options,
+            createdFrom: 'manual',
+        });
+
+        await this.reloadSessionData(nodeId, sessionId, state);
+
+        this.eventBus.emitSession(sessionId, {
+            type: 'branch_created',
+            payload: {
+                sourceId: sourceMessageId,
+                newId: newNodeId,
+                branchName: options?.name,
+            },
+        });
+
+        return newNodeId;
+    }
+
     async getBranchTree(): Promise<BranchTreeNode> {
-        if (!this.sessionId) {
-            throw new EngineError(
-                EngineErrorCode.SESSION_INVALID,
-                'No session bound'
-            );
-        }
-
-        return this.registry.getBranchTree(this.sessionId);
+        const { sessionId, nodeId } = this.ensureBound();
+        return this.engine.getBranchTree(sessionId, nodeId);
     }
 
-    /**
-     * ✅ 新增：重命名分支
-     */
-    async renameBranch(nodeId: string, newName: string): Promise<void> {
-        if (!this.sessionId) {
-            throw new EngineError(
-                EngineErrorCode.SESSION_INVALID,
-                'No session bound'
-            );
+    async renameBranch(branchNodeId: string, newName: string): Promise<void> {
+        const { sessionId } = this.ensureBound();
+
+        await this.engine.renameBranch(sessionId, branchNodeId, newName);
+
+        const state = this.states.get(sessionId);
+        const session = state?.findSessionById(branchNodeId);
+        if (session?.branchInfo) {
+            session.branchInfo.name = newName;
         }
 
-        await this.registry.renameBranch(this.sessionId, nodeId, newName);
+        this.eventBus.emitSession(sessionId, {
+            type: 'branch_renamed',
+            payload: { nodeId: branchNodeId, newName },
+        });
     }
 
-    /**
-     * ✅ 新增：删除分支
-     */
-    async deleteBranch(nodeId: string, cascade: boolean = false): Promise<void> {
-        if (!this.sessionId) {
-            throw new EngineError(
-                EngineErrorCode.SESSION_INVALID,
-                'No session bound'
-            );
+    async deleteBranch(branchNodeId: string, cascade: boolean = false): Promise<void> {
+        const { sessionId, nodeId } = this.ensureBound();
+
+        // ✅ 传入 nodeId
+        const deletedIds = await this.engine.deleteBranch(
+            nodeId,
+            sessionId,
+            branchNodeId,
+            { cascade }
+        );
+
+        const state = this.states.get(sessionId);
+        if (state) {
+            for (const id of deletedIds) {
+                state.removeMessage(id);
+            }
         }
 
-        await this.registry.deleteBranch(this.sessionId, nodeId, { cascade });
+        this.eventBus.emitSession(sessionId, {
+            type: 'messages_deleted',
+            payload: { deletedIds },
+        });
     }
 
-    /**
-     * 获取会话设置
-     */
+    // ================================================================
+    // 会话设置
+    // ================================================================
+
     async getSessionSettings(): Promise<ChatSessionSettings> {
-        if (!this.sessionId) {
+        if (!this.boundSessionId) {
             return { ...DEFAULT_SESSION_SETTINGS };
         }
-        return this.registry.getSessionSettings(this.sessionId);
+        return this.engine.getSessionSettings(this.boundSessionId);
     }
 
-    /**
-     * 保存会话设置
-     */
     async saveSessionSettings(settings: Partial<ChatSessionSettings>): Promise<void> {
-        if (!this.sessionId) {
-            throw new EngineError(EngineErrorCode.SESSION_INVALID, 'No session bound');
-        }
-        await this.registry.saveSessionSettings(this.sessionId, settings);
-    }
-
-    /**
-     * ✅ 新增：获取当前 Agent 可用的模型列表
-     */
-    async getAvailableModelsForAgent(agentId: string): Promise<Array<{
-        id: string;
-        name: string;
-        provider?: string;
-    }>> {
-        return this.registry.getAvailableModelsForAgent(agentId);
+        const { sessionId } = this.ensureBound();
+        await this.engine.saveSessionSettings(sessionId, settings);
     }
 
     // ================================================================
-    // 执行器 API
+    // Agent / 执行器查询
     // ================================================================
 
-    /**
-     * 获取可用的执行器列表
-     */
-    async getAvailableExecutors(): Promise<Array<{
-        id: string;
-        name: string;
-        icon?: string;
-        category?: string;
-        description?: string;
-    }>> {
-        return this.registry.getAvailableExecutors();
+    async getAvailableAgents(): Promise<AgentInfo[]> {
+        return this.agentResolver.getAvailableAgents();
+    }
+
+    async getModelsForAgent(agentId: string): Promise<ModelInfo[]> {
+        return this.agentResolver.getModelsForAgent(agentId);
     }
 
     // ================================================================
     // 导出
     // ================================================================
 
-    /**
-     * 导出为 Markdown
-     */
     exportToMarkdown(): string {
-        if (!this.sessionId) return '';
-        return this.registry.exportToMarkdown(this.sessionId);
+        if (!this.boundSessionId) return '';
+
+        const state = this.states.get(this.boundSessionId);
+        if (!state) return '';
+
+        return state.exportToMarkdown();
     }
 
     // ================================================================
-    // 生命周期
+    // 配置
     // ================================================================
 
-    /**
-     * 销毁
-     */
+    setMaxConcurrent(value: number): void {
+        this.taskRunner.setMaxConcurrent(value);
+    }
+
+    // ================================================================
+    // 清理 / 生命周期
+    // ================================================================
+
+    startAutoCleanup(intervalMs: number = ENGINE_DEFAULTS.CLEANUP_INTERVAL): () => void {
+        const timer = setInterval(() => {
+            this.cleanupIdleSessions();
+        }, intervalMs);
+        return () => clearInterval(timer);
+    }
+
+    cleanupIdleSessions(maxIdleTime: number = ENGINE_DEFAULTS.SESSION_IDLE_TIMEOUT): number {
+        const now = Date.now();
+        let cleaned = 0;
+
+        for (const [sessionId, runtime] of this.sessions) {
+            if (sessionId === this.activeSessionId) continue;
+            if (sessionId === this.boundSessionId) continue;
+            if (runtime.status === 'running' || runtime.status === 'queued') continue;
+            if (runtime.unreadCount > 0) continue;
+
+            if (now - runtime.lastActiveTime > maxIdleTime) {
+                this.unregisterSession(sessionId);
+                cleaned++;
+            }
+        }
+
+        if (cleaned > 0) {
+            console.log(`[SessionManager] Cleaned ${cleaned} idle sessions`);
+        }
+
+        return cleaned;
+    }
+
     destroy(): void {
         this.unbindSession();
+        this.taskRunner.abortAll();
+        this.sessions.clear();
+        this.states.clear();
+        this.eventBus.clear();
+        this.activeSessionId = null;
+        console.log('[SessionManager] Destroyed');
     }
+
+    debug(): void {
+        console.group('[SessionManager] Debug Info');
+        console.log('Bound:', this.boundSessionId);
+        console.log('Active:', this.activeSessionId);
+        console.log('Pool:', this.getPoolStatus());
+        console.log('Total sessions:', this.sessions.size);
+
+        for (const [sid, runtime] of this.sessions) {
+            const state = this.states.get(sid);
+            const isBound = sid === this.boundSessionId ? ' [BOUND]' : '';
+            const isActive = sid === this.activeSessionId ? ' [ACTIVE]' : '';
+            console.log(
+                `  ${sid}${isBound}${isActive}: status=${runtime.status}, ` +
+                `messages=${state?.getSessions().length || 0}, ` +
+                `unread=${runtime.unreadCount}`
+            );
+        }
+
+        console.groupEnd();
+    }
+
+    // ================================================================
+    // 内部：会话注册
+    // ================================================================
+
+    /**
+     * 确保会话已注册
+     */
+    private async ensureRegistered(nodeId: string, sessionId: string): Promise<void> {
+        if (this.sessions.has(sessionId)) {
+            const existing = this.sessions.get(sessionId)!;
+            existing.lastActiveTime = Date.now();
+            this.eventBus.ensureSession(sessionId);
+            return;
+        }
+
+        // 验证 manifest
+        await this.engine.validateManifest(nodeId, sessionId);
+
+        const runtime: SessionRuntime = {
+            sessionId,
+            nodeId,
+            status: 'idle',
+            lastActiveTime: Date.now(),
+            unreadCount: 0,
+        };
+
+        const state = new SessionState(nodeId, sessionId);
+        await this.loadSessionData(state, nodeId, sessionId);
+
+        this.sessions.set(sessionId, runtime);
+        this.states.set(sessionId, state);
+        this.eventBus.ensureSession(sessionId);
+
+        this.eventBus.emitGlobal({
+            type: 'session_registered',
+            payload: { sessionId },
+        });
+    }
+
+    /**
+     * 注销会话。
+     * 如果会话正在运行，先中止任务再注销。
+     */
+    private unregisterSession(sessionId: string): void {
+        const runtime = this.sessions.get(sessionId);
+
+        // 如果还在运行，先中止
+        if (runtime && (runtime.status === 'running' || runtime.status === 'queued')) {
+            this.taskRunner.abort(sessionId);
+        }
+
+        this.sessions.delete(sessionId);
+        this.states.delete(sessionId);
+        this.eventBus.removeSession(sessionId);
+
+        if (this.activeSessionId === sessionId) {
+            this.activeSessionId = null;
+        }
+
+        this.eventBus.emitGlobal({
+            type: 'session_unregistered',
+            payload: { sessionId },
+        });
+    }
+
+    private async loadSessionData(
+        state: SessionState,
+        nodeId: string,
+        sessionId: string
+    ): Promise<void> {
+        try {
+            const context = await this.engine.getSessionContext(nodeId, sessionId);
+
+            for (const item of context) {
+                const node = item.node;
+                if (node.role === 'system') continue;
+                if (node.role === 'assistant' && !node.content?.trim()) continue;
+                state.loadFromChatNode(node);
+            }
+        } catch (e) {
+            console.error(`[SessionManager] Failed to load session ${sessionId}:`, e);
+        }
+    }
+
+    // ================================================================
+    // 内部：状态更新
+    // ================================================================
+
+    private updateStatus(sessionId: string, status: SessionStatus): void {
+        const runtime = this.sessions.get(sessionId);
+        if (!runtime) return;
+
+        const prevStatus = runtime.status;
+        runtime.status = status;
+        runtime.lastActiveTime = Date.now();
+
+        if (status !== 'failed') {
+            runtime.error = undefined;
+        }
+
+        this.eventBus.emitGlobal({
+            type: 'session_status_changed',
+            payload: { sessionId, status, prevStatus },
+        });
+    }
+
+    private incrementUnread(sessionId: string): void {
+        if (sessionId === this.activeSessionId) return;
+
+        const runtime = this.sessions.get(sessionId);
+        if (runtime) {
+            runtime.unreadCount++;
+            this.eventBus.emitGlobal({
+                type: 'session_unread_updated',
+                payload: { sessionId, count: runtime.unreadCount },
+            });
+        }
+    }
+
+    // ================================================================
+    // 内部：消息操作辅助
+    // ================================================================
+
+    private collectDeletableIds(
+        state: SessionState,
+        messageId: string,
+        includeResponses: boolean = true
+    ): string[] {
+        const ids: string[] = [messageId];
+        const session = state.findSessionById(messageId);
+        if (!session) return ids;
+
+        if (includeResponses && session.role === 'user') {
+            const sessions = state.getSessions();
+            const index = sessions.findIndex((s) => s.id === messageId);
+
+            if (index !== -1) {
+                for (let i = index + 1; i < sessions.length; i++) {
+                    if (sessions[i].role === 'assistant') {
+                        ids.push(sessions[i].id);
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+
+        return ids;
+    }
+
+    private async deleteAssociatedResponses(
+        sessionId: string,
+        userMessageId: string,
+        state: SessionState
+    ): Promise<void> {
+        const nodeId = this.boundNodeId;
+        if (!nodeId) return;
+
+        const sessions = state.getSessions();
+        const index = sessions.findIndex((s) => s.id === userMessageId);
+        if (index === -1) return;
+
+        const toDelete: Array<{ id: string; persistedNodeId?: string }> = [];
+
+        for (let i = index + 1; i < sessions.length; i++) {
+            if (sessions[i].role === 'assistant') {
+                toDelete.push({
+                    id: sessions[i].id,
+                    persistedNodeId: sessions[i].persistedNodeId,
+                });
+            } else {
+                break;
+            }
+        }
+
+        for (const { id, persistedNodeId } of toDelete) {
+            state.removeMessage(id);
+            if (persistedNodeId) {
+                await this.engine
+                    .deleteMessage(nodeId, sessionId, persistedNodeId)
+                    .catch((e) =>
+                        console.warn(`[SessionManager] Failed to delete response ${id}:`, e)
+                    );
+            }
+        }
+
+        if (toDelete.length > 0) {
+            this.eventBus.emitSession(sessionId, {
+                type: 'messages_deleted',
+                payload: { deletedIds: toDelete.map((d) => d.id) },
+            });
+        }
+    }
+
+    /**
+     * 从后续 assistant 消息中解析 agentId
+     * 返回 null 表示未找到（由调用方决定 fallback）
+     */
+    private resolveAgentFromResponses(
+        state: SessionState,
+        userMessageId: string
+    ): string | null {
+        const sessions = state.getSessions();
+        const userIndex = sessions.findIndex(
+            (s) => s.id === userMessageId || s.persistedNodeId === userMessageId
+        );
+
+        if (userIndex === -1) return null;
+
+        // 向后搜索紧跟的 assistant 消息
+        for (let i = userIndex + 1; i < sessions.length; i++) {
+            const s = sessions[i];
+
+            // 遇到下一条用户消息就停止搜索
+            if (s.role === 'user') break;
+
+            // 从 assistant 的 executionRoot 中提取 executorId
+            if (s.role === 'assistant' && s.executionRoot?.executorId) {
+                return s.executionRoot.executorId;
+            }
+        }
+
+        return null;
+    }
+
+    // ================================================================
+    // 内部：分支辅助
+    // ================================================================
+
+    /**
+     * 通过 engine 更新 manifest 的 current_head（带锁安全）
+     */
+    private async updateManifestHead(
+        nodeId: string,
+        sessionId: string,
+        targetNodeId: string
+    ): Promise<void> {
+        await this.engine.updateManifestHead(nodeId, sessionId, targetNodeId);
+    }
+
+    /**
+     * 重新加载会话数据并通知 UI 完全重新渲染
+     */
+    private async reloadSessionData(
+        nodeId: string,
+        sessionId: string,
+        state: SessionState
+    ): Promise<void> {
+        state.clear();
+
+        const context = await this.engine.getSessionContext(nodeId, sessionId);
+        for (const item of context) {
+            const node = item.node;
+            if (node.role === 'system') continue;
+            if (node.role === 'assistant' && !node.content?.trim()) continue;
+            state.loadFromChatNode(node);
+        }
+
+        // 通知 UI 重新渲染
+        this.eventBus.emitSession(sessionId, {
+            type: 'session_cleared',
+            payload: {},
+        });
+
+        for (const sess of state.getSessions()) {
+            this.eventBus.emitSession(sessionId, {
+                type: 'session_start',
+                payload: sess,
+            });
+        }
+    }
+
+    // ================================================================
+    // 内部：断言
+    // ================================================================
+
+    private ensureBound(): {
+        sessionId: string;
+        nodeId: string;
+        state: SessionState;
+        runtime: SessionRuntime;
+    } {
+        if (!this.boundSessionId || !this.boundNodeId) {
+            throw new EngineError(EngineErrorCode.SESSION_INVALID, 'No session bound');
+        }
+
+        const state = this.states.get(this.boundSessionId);
+        const runtime = this.sessions.get(this.boundSessionId);
+
+        if (!state || !runtime) {
+            throw new EngineError(EngineErrorCode.SESSION_NOT_FOUND, 'Session state not found');
+        }
+
+        return {
+            sessionId: this.boundSessionId,
+            nodeId: this.boundNodeId,
+            state,
+            runtime,
+        };
+    }
+}
+
+// ============================================
+// 工厂函数
+// ============================================
+
+let sessionManagerInstance: SessionManager | null = null;
+
+export function createSessionManager(
+    engine: ILLMSessionEngine,
+    agentService: IAgentService,
+    options?: { maxConcurrent?: number }
+): SessionManager {
+    sessionManagerInstance = new SessionManager(engine, agentService, options);
+    return sessionManagerInstance;
+}
+
+export function getSessionManager(): SessionManager {
+    if (!sessionManagerInstance) {
+        throw new EngineError(
+            EngineErrorCode.SESSION_INVALID,
+            'SessionManager not created. Call createSessionManager() first.'
+        );
+    }
+    return sessionManagerInstance;
+}
+
+export function resetSessionManager(): void {
+    if (sessionManagerInstance) {
+        sessionManagerInstance.destroy();
+    }
+    sessionManagerInstance = null;
 }

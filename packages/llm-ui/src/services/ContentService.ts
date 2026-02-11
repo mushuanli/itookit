@@ -1,12 +1,11 @@
 // @file: llm-ui/services/ContentService.ts
 
-import { SessionManager, SessionGroup } from '@itookit/llm-engine';
+import {
+    SessionManager,
+    SessionGroup,
+    DeleteOptions,
+} from '@itookit/llm-engine';
 
-export interface DeleteOptions {
-    mode: 'soft' | 'hard';
-    cascade: boolean;
-    deleteAssociatedResponses: boolean;
-}
 
 export interface RetryOptions {
     preserveCurrent?: boolean;
@@ -31,36 +30,56 @@ export class ContentService {
     /**
      * 删除消息
      */
-    async deleteMessage(nodeId: string, options: DeleteOptions): Promise<void> {
-        await this.sessionManager.deleteMessage(nodeId, options);
+    async deleteMessage(messageId: string, options?: DeleteOptions): Promise<void> {
+        await this.sessionManager.deleteMessage(messageId, options);
     }
 
     /**
      * 编辑并重新生成
      */
-    async editAndRetry(nodeId: string, newContent: string): Promise<void> {
-        await this.sessionManager.editMessage(nodeId, newContent, true);
+    async editAndRetry(messageId: string, newContent: string): Promise<void> {
+        await this.sessionManager.editMessage(messageId, newContent, true);
     }
 
     /**
      * 重新发送用户消息
+     * @param userMessageId 用户消息 ID
+     * @param fallbackAgentId 当前 ChatInput 选择的 Agent（兜底）
      */
-    async resendUserMessage(nodeId: string, options: { fallbackAgentId: string }): Promise<void> {
-        await this.sessionManager.resendUserMessage(nodeId, options);
+    async resendUserMessage(userMessageId: string, fallbackAgentId?: string): Promise<void> {
+        await this.sessionManager.resendUserMessage(
+            userMessageId,
+            undefined,        // agentId — 无显式指定
+            fallbackAgentId   // fallbackAgentId
+        );
     }
 
     /**
      * 重试生成
+     * @param assistantId 助手消息 ID
+     * @param options 重试选项
      */
-    async retryGeneration(nodeId: string, options: RetryOptions): Promise<void> {
-        await this.sessionManager.retryGeneration(nodeId, options);
+    async retryGeneration(
+        assistantId: string,
+        options?: {
+            agentId?: string;
+            fallbackAgentId?: string;
+            preserveCurrent?: boolean;
+        }
+    ): Promise<void> {
+        await this.sessionManager.retryGeneration(
+            assistantId,
+            options?.agentId,
+            options?.fallbackAgentId,
+            options?.preserveCurrent ?? true
+        );
     }
 
     /**
      * 切换分支
      */
-    async switchToSibling(nodeId: string, newIndex: number): Promise<void> {
-        await this.sessionManager.switchToSibling(nodeId, newIndex);
+    async switchToSibling(messageId: string, newIndex: number): Promise<void> {
+        await this.sessionManager.switchToSibling(messageId, newIndex);
     }
 
     /**
@@ -80,7 +99,7 @@ export class ContentService {
     /**
      * 检查是否可以重试
      */
-    canRetry(sessionId: string) {
+    canRetry(sessionId: string): { allowed: boolean; reason?: string } {
         return this.sessionManager.canRetry(sessionId);
     }
 
