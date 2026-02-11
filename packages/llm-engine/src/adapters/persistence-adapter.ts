@@ -5,7 +5,9 @@ import {
     ChatNode,
     ChatContextItem,
     ChatManifest,
-    BranchTreeNode
+    BranchTreeNode,
+    AppendMessageMeta,  // ✅ 导入新类型
+    UpdateMessageMeta   // ✅ 导入新类型
 } from '../persistence/types';
 import { ChatSessionSettings } from '../core/types';
 
@@ -54,7 +56,7 @@ export class PersistenceAdapter {
         sessionId: string,
         role: ChatNode['role'],
         content: string,
-        meta?: any
+        meta?: AppendMessageMeta  // ✅ 明确类型
     ): Promise<string> {
         return this.engine.appendMessage(nodeId, sessionId, role, content, meta);
     }
@@ -62,7 +64,11 @@ export class PersistenceAdapter {
     async updateMessage(
         sessionId: string,
         messageId: string,
-        updates: Partial<Pick<ChatNode, 'content' | 'meta' | 'status'>>
+        updates: {
+            content?: string;
+            meta?: UpdateMessageMeta;  // ✅ 明确类型
+            status?: ChatNode['status'];
+        }
     ): Promise<void> {
         return this.engine.updateNode(sessionId, messageId, updates);
     }

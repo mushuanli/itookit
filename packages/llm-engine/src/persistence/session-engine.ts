@@ -23,6 +23,8 @@ import {
   ChatContextItem,
   ILLMSessionEngine,
   BranchTreeNode,
+  AppendMessageMeta,
+  UpdateMessageMeta
 } from './types';
 import { LockManager } from '../utils/LockManager';
 import { ChatSessionSettings, DEFAULT_SESSION_SETTINGS } from '../core/types';
@@ -416,7 +418,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
     sessionId: string,
     role: ChatNode['role'],
     content: string,
-    meta: any = {}
+    meta?: AppendMessageMeta
   ): Promise<string> {
     return this.lockManager.acquire(`session:${sessionId}`, async () => {
       const manifest = await this.getManifest(nodeId);
@@ -498,7 +500,11 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
   async updateNode(
     sessionId: string,
     nodeId: string,
-    updates: Partial<Pick<ChatNode, 'content' | 'meta' | 'status'>>
+        updates: {
+            content?: string;
+            meta?: UpdateMessageMeta;  // ✅ 明确类型
+            status?: ChatNode['status'];
+        }
   ): Promise<void> {
     return this.lockManager.acquire(`node:${sessionId}:${nodeId}`, async () => {
       const path = this.getNodePath(sessionId, nodeId);
