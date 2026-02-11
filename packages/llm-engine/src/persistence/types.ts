@@ -3,6 +3,7 @@
 import { ISessionEngine as IBaseSessionEngine } from '@itookit/common';
 import { ChatFile, ChatSessionSettings } from '../core/types';
 
+
 /**
  * 聊天清单（.chat 文件）
  */
@@ -36,6 +37,78 @@ export interface ChatManifest {
 }
 
 /**
+ * ✅ 新增：消息追加元数据类型
+ */
+export interface AppendMessageMeta {
+    // === 用户消息字段 ===
+    /** 附件文件列表 */
+    files?: ChatFile[];
+    /** 使用的执行器 ID */
+    executorId?: string;
+
+    // === 助手消息字段 ===
+    /** Agent ID */
+    agentId?: string;
+    /** Agent 名称 */
+    agentName?: string;
+    /** Agent 图标 */
+    agentIcon?: string;
+    /** 执行状态 */
+    status?: 'running' | 'success' | 'failed' | 'aborted';
+    /** 思考过程 */
+    thinking?: string;
+    /** 错误信息 */
+    error?: string;
+    /** 结束时间 */
+    endTime?: number;
+
+    // === 分支相关字段 ===
+    /** 兄弟节点索引 */
+    siblingIndex?: number;
+    /** 兄弟节点总数 */
+    siblingCount?: number;
+    /** 父助手消息 ID（用于分支追溯） */
+    parentAssistantId?: string;
+    /** ✅ 关键：父用户消息 ID（建立用户-助手关联） */
+    parentUserNodeId?: string;
+
+    // === 分支元数据 ===
+    branchMetadata?: {
+        branchName?: string;
+        createdFrom?: 'retry' | 'edit' | 'manual';
+        createdAt?: string;
+    };
+}
+
+/**
+ * ✅ 新增：消息更新元数据类型
+ */
+export interface UpdateMessageMeta {
+    thinking?: string;
+    status?: 'running' | 'success' | 'failed' | 'aborted';
+    error?: string;
+    endTime?: number;
+    siblingIndex?: number;
+    siblingCount?: number;
+}
+
+/**
+ * ✅ 更新：ChatNode.meta 类型
+ */
+export interface ChatNodeMeta extends AppendMessageMeta {
+    /** 使用的模型 */
+    model?: string;
+    /** Token 使用量 */
+    tokens?: number;
+    /** 完成原因 */
+    finish_reason?: string;
+    
+    /** 其他扩展字段 */
+    [key: string]: any;
+}
+
+
+/**
  * 聊天节点
  */
 export interface ChatNode {
@@ -49,36 +122,8 @@ export interface ChatNode {
 
     content: string;
 
-    meta?: {
-        model?: string;
-        tokens?: number;
-        finish_reason?: string;
-        thinking?: string;
-
-        /** ✅ 新增：持久化的错误信息 */
-        error?: string;
-
-        agentId?: string;
-        agentName?: string;
-        agentIcon?: string;
-
-        /** ✅ [修改] 使用 ChatFile[]，支持 path 字段 */
-        files?: ChatFile[];
-
-        status?: string;
-        
-        // ✅ 新增：分支元数据
-        branchMetadata?: {
-            /** 分支名称（可选） */
-            branchName?: string;
-            /** 创建方式 */
-            createdFrom?: 'retry' | 'edit' | 'manual';
-            /** 创建时间 */
-            createdAt?: string;
-        };
-        
-        [key: string]: any;
-    };
+    /** ✅ 使用明确的类型 */
+    meta?: ChatNodeMeta;
 
     status: 'active' | 'deleted';
 }
@@ -105,6 +150,7 @@ export interface BranchTreeNode {
     createdFrom?: 'retry' | 'edit' | 'manual';
     children: BranchTreeNode[];
 }
+
 
 /**
  * LLM 会话引擎扩展接口
