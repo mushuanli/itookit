@@ -24,35 +24,12 @@ export function createThrottledWriter(
     let pendingPromise: Promise<void> = Promise.resolve();
     let persistCount = 0;
 
-    log.debug('ThrottledWriter created', {
-        sessionId,
-        messageId,
-        intervalMs
-    });
 
     const persist = () => {
-        if (!accumulator.output && !accumulator.thinking) {
-            log.debug('Persist skipped (no content)', {
-                sessionId,
-                messageId
-            });
-            return;
-        }
+        if (!accumulator.output && !accumulator.thinking) return;
 
         const now = Date.now();
-        const timeSinceLastPersist = now - lastPersistTime;
-
-        if (timeSinceLastPersist < intervalMs) {
-            log.debug('Persist throttled', {
-                sessionId,
-                messageId,
-                timeSinceLastPersist,
-                intervalMs,
-                outputLength: accumulator.output.length,
-                thinkingLength: accumulator.thinking.length
-            });
-            return;
-        }
+        if (now - lastPersistTime < intervalMs) return;
 
         lastPersistTime = now;
         persistCount++;
@@ -60,14 +37,6 @@ export function createThrottledWriter(
         const outputSnapshot = accumulator.output;
         const thinkingSnapshot = accumulator.thinking;
 
-        log.info('Persisting content', {
-            sessionId,
-            messageId,
-            persistCount,
-            outputLength: outputSnapshot.length,
-            thinkingLength: thinkingSnapshot.length,
-            timeSinceLastPersist
-        });
 
         pendingPromise = pendingPromise
             .then(async () => {
@@ -76,47 +45,25 @@ export function createThrottledWriter(
                         content: outputSnapshot,
                         meta: { thinking: thinkingSnapshot, status: 'running' },
                     });
-
-                    log.debug('Persist successful', {
-                        sessionId,
-                        messageId,
-                        persistCount
-                    });
                 } catch (e) {
-                    log.error('Persist failed', {
+                    // 只有失败时记录，保留关键上下文
+                    log.error('Throttled persist failed', {
                         sessionId,
                         messageId,
                         persistCount,
-                        error: e
+                        error: e instanceof Error ? e.message : e
                     });
                     throw e;
                 }
             })
-            .catch((e) => {
-                log.warn('Persist error caught', {
-                    sessionId,
-                    messageId,
-                    error: e
-                });
+            .catch(() => {
+                /* 错误已在上面 log.error 记录，此处防止 promise chain 中断 */
             });
     };
 
     const finalize = async () => {
-        log.info('Finalizing throttled writer', {
-            sessionId,
-            messageId,
-            totalPersists: persistCount,
-            finalOutputLength: accumulator.output.length,
-            finalThinkingLength: accumulator.thinking.length
-        });
-
         try {
             await pendingPromise;
-
-            log.info('Finalize completed', {
-                sessionId,
-                messageId
-            });
         } catch (e) {
             log.error('Finalize failed', {
                 sessionId,

@@ -37,9 +37,7 @@ export interface TaskRunnerOptions {
 export interface TaskRunnerCallbacks {
     onStatusChange: (sessionId: string, status: SessionStatus) => void;
     onUnread: (sessionId: string) => void;
-    // ✅ 新增：获取当前绑定的 session ID
     getBoundSessionId?: () => string | null;
-    // ✅ 新增：让 TaskRunner 能从 SessionManager 获取 state/runtime
     getSessionContext: (sessionId: string) => {
         state: SessionState;
         runtime: SessionRuntime;
@@ -104,15 +102,6 @@ export class TaskRunner {
             createdAt: Date.now(),
             abortController: new AbortController(),
         };
-
-        log.info('Task submitted', {
-            taskId: task.id,
-            sessionId: input.sessionId,
-            agentId: input.agentId,
-            hasFiles: input.files.length > 0,
-            fileCount: input.files.length,
-            queuePosition: this.queue.length
-        });
 
         runtime.currentTaskId = task.id;
         this.callbacks.onStatusChange(input.sessionId, 'queued');
@@ -255,19 +244,10 @@ export class TaskRunner {
         runtime: SessionRuntime
     ): Promise<void> {
         const { sessionId, input } = task;
-        // ✅ 检查是否为后台任务
-        const isBound = this.callbacks.getBoundSessionId?.() === sessionId;
-
 
         this.running.set(task.id, task);
         this.callbacks.onStatusChange(sessionId, 'running');
         this.emitPoolStatus();
-
-        log.info('Task execution started', {
-            taskId: task.id,
-            sessionId,
-            agentId: input.agentId
-        });
 
         let errorAlreadyEmitted = false;
 
@@ -296,17 +276,6 @@ export class TaskRunner {
 
             // 3. 解析执行器配置
             let executorConfig = await this.agentResolver.resolve(input.agentId);
-
-            log.info('Agent resolved', {
-                taskId: task.id,
-                agentId: executorConfig.id,
-                agentName: executorConfig.name,
-                agentType: executorConfig.type,
-                model: executorConfig.model,
-                connectionId: executorConfig.connection?.id,
-                connectionName: executorConfig.connection?.name,
-                provider: executorConfig.connection?.provider
-            });
 
             if (input.overrides) {
                 const originalModel = executorConfig.model;
@@ -353,6 +322,16 @@ export class TaskRunner {
                 assistantNodeId,
                 ENGINE_DEFAULTS.PERSIST_THROTTLE
             );
+
+            // ✅ 新增：检查是否为绑定会话
+            const isBound = this.callbacks.getBoundSessionId?.() === sessionId;
+
+            log.debug('Task execution context', {
+                taskId: task.id,
+                sessionId,
+                isBound,
+                streamMode: input.overrides?.streamMode ?? true
+            });
 
             // 7. 创建事件处理器
             const onEvent = this.createEventHandler(
@@ -426,27 +405,21 @@ export class TaskRunner {
                 },
             });
 
-            log.info('Task execution completed successfully', {
-                taskId: task.id,
-                sessionId,
-                agentName: executorConfig.name,
-                outputLength: accumulator.output.length,
-                thinkingLength: accumulator.thinking.length,
-                duration: Date.now() - task.createdAt
-            });
-
             // 13. 更新状态并通知
             state.updateNodeStatus(rootNode.id, 'success');
 
-            this.eventBus.emitSession(sessionId, {
-                type: 'node_status',
-                payload: { nodeId: rootNode.id, status: 'success' },
-            });
+            // ✅ 只在绑定时发送 UI 事件
+            if (isBound) {
+                this.eventBus.emitSession(sessionId, {
+                    type: 'node_status',
+                    payload: { nodeId: rootNode.id, status: 'success' },
+                });
 
-            this.eventBus.emitSession(sessionId, {
-                type: 'finished',
-                payload: { sessionId },
-            });
+                this.eventBus.emitSession(sessionId, {
+                    type: 'finished',
+                    payload: { sessionId },
+                });
+            }
 
             this.callbacks.onStatusChange(sessionId, 'completed');
 
@@ -492,10 +465,14 @@ export class TaskRunner {
 
         const userSession = state.addUserMessage(input.text, contextFiles, userNodeId);
 
-        this.eventBus.emitSession(sessionId, {
-            type: 'session_start',
-            payload: userSession,
-        });
+        // ✅ 检查是否绑定
+        const isBound = this.callbacks.getBoundSessionId?.() === sessionId;
+        if (isBound) {
+            this.eventBus.emitSession(sessionId, {
+                type: 'session_start',
+                payload: userSession,
+            });
+        }
 
         return userNodeId;
     }
@@ -530,15 +507,19 @@ export class TaskRunner {
             branchInfo
         );
 
-        this.eventBus.emitSession(sessionId, {
-            type: 'session_start',
-            payload: state.getLastSession()!,
-        });
+        // ✅ 检查是否绑定
+        const isBound = this.callbacks.getBoundSessionId?.() === sessionId;
+        if (isBound) {
+            this.eventBus.emitSession(sessionId, {
+                type: 'session_start',
+                payload: state.getLastSession()!,
+            });
 
-        this.eventBus.emitSession(sessionId, {
-            type: 'node_start',
-            payload: { node: rootNode },
-        });
+            this.eventBus.emitSession(sessionId, {
+                type: 'node_start',
+                payload: { node: rootNode },
+            });
+        }
 
         return { assistantNodeId, rootNode };
     }
@@ -557,43 +538,60 @@ export class TaskRunner {
         isBound: boolean  // ✅ 新增参数
     ): (event: OrchestratorEvent) => void {
         return (event: OrchestratorEvent) => {
-            // 过滤重复的根 node_start
-            if (event.type === 'node_start') {
-                const p = event.payload as { parentId?: string; node?: ExecutionNode };
-                if (!p.parentId && !p.node?.parentId) return;
-            }
-
-            // 修正空 nodeId
-            if (
-                (event.type === 'node_update' || event.type === 'node_status') &&
-                !event.payload.nodeId
-            ) {
-                event.payload.nodeId = rootNode.id;
-            }
-
-            if (event.type === 'error') {
-                markErrorEmitted();
-            }
-
-            // 累积流式内容
+            // ✅ 关键修复：先处理持久化（不依赖绑定状态）
             if (event.type === 'node_update' && event.payload.chunk) {
-                if (event.payload.nodeId === rootNode.id) {
+                if (event.payload.nodeId === rootNode.id || !event.payload.nodeId) {
+                    const targetNodeId = event.payload.nodeId || rootNode.id;
+
                     if (event.payload.field === 'thought') {
                         accumulator.thinking += event.payload.chunk;
-                        state.appendToNode(rootNode.id, event.payload.chunk, 'thought');
+                        state.appendToNode(targetNodeId, event.payload.chunk, 'thought');
                     } else if (event.payload.field === 'output') {
                         accumulator.output += event.payload.chunk;
-                        state.appendToNode(rootNode.id, event.payload.chunk, 'output');
+                        state.appendToNode(targetNodeId, event.payload.chunk, 'output');
                     }
+
+                    // ✅ 无论是否绑定都持久化
                     persist();
                 }
             }
 
-            // ✅ 只在绑定时转发给 UI
+            // ✅ 然后处理其他事件（只在绑定时转发给 UI）
             if (isBound) {
-                this.eventBus.emitSession(sessionId, event);
+                this.handleUIEvents(event, sessionId, rootNode, markErrorEmitted);
             }
         };
+    }
+
+    /**
+     * ✅ 新增：处理 UI 事件
+     */
+    private handleUIEvents(
+        event: OrchestratorEvent,
+        sessionId: string,
+        rootNode: ExecutionNode,
+        markErrorEmitted: () => void
+    ): void {
+        // 过滤重复的根 node_start
+        if (event.type === 'node_start') {
+            const p = event.payload as { parentId?: string; node?: ExecutionNode };
+            if (!p.parentId && !p.node?.parentId) return;
+        }
+
+        // 修正空 nodeId
+        if (
+            (event.type === 'node_update' || event.type === 'node_status') &&
+            !event.payload.nodeId
+        ) {
+            event.payload.nodeId = rootNode.id;
+        }
+
+        if (event.type === 'error') {
+            markErrorEmitted();
+        }
+
+        // 转发给 UI
+        this.eventBus.emitSession(sessionId, event);
     }
 
     // ============================================
@@ -686,6 +684,7 @@ export class TaskRunner {
         runtime.error = error;
         this.callbacks.onStatusChange(sessionId, status);
 
+        const isBound = this.callbacks.getBoundSessionId?.() === sessionId;
         const errorMessage = formatErrorMessage(error);
 
         const lastSession = state.getLastSession();
@@ -695,7 +694,9 @@ export class TaskRunner {
             state.updateNodeStatus(rootId, status);
             state.updateNodeError(rootId, errorMessage);
 
-            if (!errorAlreadyEmitted) {
+            // ✅ 检查是否绑定
+
+            if (!errorAlreadyEmitted && isBound) {
                 this.eventBus.emitSession(sessionId, {
                     type: 'node_status',
                     payload: { nodeId: rootId, status, result: errorMessage },
@@ -717,7 +718,7 @@ export class TaskRunner {
             }
         }
 
-        if (!errorAlreadyEmitted) {
+        if (!errorAlreadyEmitted && isBound) {
             this.eventBus.emitSession(sessionId, {
                 type: 'error',
                 payload: {
