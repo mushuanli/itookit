@@ -26,6 +26,7 @@ import {
     IAgentManagementService,
     MCPServer,
 } from './agent-service';
+import { log } from '../utils/logger';
 
 // ============================================
 // 常量
@@ -57,9 +58,14 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
      * 初始化钩子 (BaseModuleService 调用)
      */
     protected async onLoad(): Promise<void> {
+        log.info('VFSAgentService initializing');
         await this.refreshData();
         this.bindVFSEvents();
         await this.ensureDefaults();
+        log.info('VFSAgentService initialized', { 
+            connectionCount: this._connections.length,
+            mcpServerCount: this._mcpServers.length 
+        });
     }
 
     /**
@@ -106,11 +112,24 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
      */
     private async refreshData(): Promise<void> {
         try {
+            log.debug('Refreshing agent service data');
+            
             this._connections = await this.loadJsonFiles<LLMConnection>(CONNECTIONS_DIR);
             this._mcpServers = await this.loadJsonFiles<MCPServer>(MCP_DIR);
+            
+            log.info('Agent service data refreshed', { 
+                connectionCount: this._connections.length,
+                mcpServerCount: this._mcpServers.length,
+                connections: this._connections.map(c => ({ 
+                    id: c.id, 
+                    name: c.name, 
+                    provider: c.provider 
+                }))
+            });
+            
             this.notify();
         } catch (e) {
-            console.error('[VFSAgentService] Failed to refresh data', e);
+            log.error('Failed to refresh agent service data', { error: e });
         }
     }
 
@@ -128,11 +147,17 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
 
             // 如果版本相同，跳过同步（假设配置变化时会递增版本号）
             if (versionData && versionData.version >= CONST_CONFIG_VERSION) {
-                console.log('[VFSAgentService] Defaults are up to date, skipping sync.');
+                log.info('Defaults are up to date', { 
+                    currentVersion: versionData.version,
+                    requiredVersion: CONST_CONFIG_VERSION 
+                });
                 return;
             }
 
-            console.log(`[VFSAgentService] Syncing defaults from version ${versionData?.version || 0} to ${CONST_CONFIG_VERSION}...`);
+            log.info('Syncing defaults', { 
+                fromVersion: versionData?.version || 0,
+                toVersion: CONST_CONFIG_VERSION 
+            });
 
             // 执行增量同步
             await this.syncDefaultConnections();
@@ -147,9 +172,9 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
             // 刷新内存缓存
             await this.refreshData();
 
-            console.log('[VFSAgentService] Defaults sync completed.');
+            log.info('Defaults sync completed successfully');
         } catch (e) {
-            console.error('[VFSAgentService] ensureDefaults error:', e);
+            log.error('Failed to ensure defaults', { error: e });
         }
     }
 
@@ -162,7 +187,8 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
      * 3. 正确处理新增 connection 和新增 model 两种情况
      */
     private async syncDefaultConnections(): Promise<void> {
-        // 确保目录存在
+        log.debug('Syncing default connections');
+        
         await this.ensureDirectory(CONNECTIONS_DIR);
 
         // 从磁盘重新加载最新的 connections 数据
@@ -173,6 +199,9 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
         // 获取第一个 provider key，用于确定 default connection
         const providerKeys = Object.keys(LLM_PROVIDER_DEFAULTS);
         const defaultProviderKey = providerKeys[0];
+
+        let createdCount = 0;
+        let updatedCount = 0;
 
         for (const [providerKey, providerDef] of Object.entries(LLM_PROVIDER_DEFAULTS)) {
             const existing = connectionsByProvider.get(providerKey);
@@ -192,7 +221,13 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
                 };
 
                 await this.saveConnection(newConn);
-                console.log(`[VFSAgentService] Created new connection: ${newConn.id} (${providerKey})`);
+                createdCount++;
+                
+                log.info('Created new connection', { 
+                    connectionId: newConn.id,
+                    provider: providerKey,
+                    modelCount: newConn.availableModels.length 
+                });
             } else {
                 // === 场景 2: Connection 已存在，检查是否需要合并新模型 ===
 
@@ -213,16 +248,27 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
                     if (!existingModelIds.has(model.id)) {
                         updatedConn.availableModels.push({ ...model });
                         hasNewModels = true;
-                        console.log(`[VFSAgentService] Added new model "${model.id}" to connection "${existing.id}"`);
+                        
+                        log.debug('Added new model to connection', { 
+                            connectionId: existing.id,
+                            modelId: model.id,
+                            modelName: model.name 
+                        });
                     }
                 }
 
                 // 只有在有变化时才保存
                 if (hasNewModels) {
                     await this.saveConnection(updatedConn);
+                    updatedCount++;
                 }
             }
         }
+
+        log.info('Default connections synced', { 
+            created: createdCount,
+            updated: updatedCount 
+        });
     }
 
     /**
@@ -233,12 +279,15 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
      * 2. 支持用户删除后不再重建的场景（可选，通过 metadata 标记）
      */
     private async syncDefaultAgents(): Promise<void> {
-        // 获取默认连接 ID
+        log.debug('Syncing default agents');
+        
         const defaultConnId = this.getDefaultConnectionId();
 
         // 加载当前所有 agents
         const currentAgents = await this.getAgents();
         const currentAgentIds = new Set(currentAgents.map(a => a.id));
+
+        let createdCount = 0;
 
         for (const agentDef of DEFAULT_AGENTS) {
             // 检查 agent 是否已存在（基于 ID）
@@ -281,11 +330,23 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
                     await this.engine.setTags(node.id, initialTags);
                 }
 
-                console.log(`[VFSAgentService] Created default agent: ${agentDef.id} at ${fullPath}`);
+                createdCount++;
+                
+                log.info('Created default agent', { 
+                    agentId: agentDef.id,
+                    agentName: agentDef.name,
+                    path: fullPath 
+                });
             } catch (e) {
-                console.error(`[VFSAgentService] Failed to create agent ${agentDef.id}:`, e);
+                log.error('Failed to create default agent', { 
+                    agentId: agentDef.id,
+                    path: fullPath,
+                    error: e 
+                });
             }
         }
+
+        log.info('Default agents synced', { created: createdCount });
     }
 
     // ================================================================
@@ -451,9 +512,20 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
     // ============================================
 
     async saveAgent(agent: AgentDefinition): Promise<void> {
-        // 1. 确保 ConnectionId
+        log.info('Saving agent', { 
+            agentId: agent.id,
+            agentName: agent.name,
+            agentType: agent.type,
+            connectionId: agent.config.connectionId,
+            modelName: agent.config.modelName 
+        });
+
         if (!agent.config.connectionId) {
             agent.config.connectionId = this.getDefaultConnectionId();
+            log.debug('Using default connection for agent', { 
+                agentId: agent.id,
+                connectionId: agent.config.connectionId 
+            });
         }
 
         // 2. 修正 ModelName 并固化
@@ -478,14 +550,18 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
         if (existingNode) {
             await this.engine.writeContent(existingNode.id, contentStr);
             await this.engine.updateMetadata(existingNode.id, metadata);
+            log.debug('Agent updated', { agentId: agent.id });
         } else {
             await this.engine.createFile(filename, null, contentStr, metadata);
+            log.debug('Agent created', { agentId: agent.id });
         }
 
         this.notify();
     }
 
     async deleteAgent(agentId: string): Promise<void> {
+        log.info('Deleting agent', { agentId });
+
         const filename = `${agentId}.agent`;
         const query: EngineSearchQuery = { text: filename, type: 'file' };
         const results = await this.engine.search(query);
@@ -493,7 +569,10 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
 
         if (node) {
             await this.engine.delete([node.id]);
+            log.debug('Agent file deleted', { agentId });
             this.notify();
+        } else {
+            log.warn('Agent file not found for deletion', { agentId });
         }
     }
 
@@ -502,6 +581,13 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
     }
 
     async saveConnection(conn: LLMConnection): Promise<void> {
+        log.info('Saving connection', { 
+            connectionId: conn.id,
+            name: conn.name,
+            provider: conn.provider,
+            modelCount: conn.availableModels?.length || 0 
+        });
+
         const filename = `${conn.id}.json`;
         const content = JSON.stringify(conn, null, 2);
         const fullPath = `${CONNECTIONS_DIR}/${filename}`;
@@ -518,6 +604,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
                 title: conn.name,
                 type: 'connection'
             });
+            log.debug('Connection updated', { connectionId: conn.id });
         } else {
             await this.engine.createFile(
                 filename,
@@ -525,6 +612,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
                 content,
                 { icon: '🔌', title: conn.name, type: 'connection' }
             );
+            log.debug('Connection created', { connectionId: conn.id });
         }
 
         // 更新内存缓存
@@ -540,14 +628,18 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
 
     async deleteConnection(id: string): Promise<void> {
         if (id === 'default') {
+            log.warn('Attempted to delete default connection', { connectionId: id });
             throw new Error("Cannot delete default connection");
         }
+
+        log.info('Deleting connection', { connectionId: id });
 
         const fullPath = `${CONNECTIONS_DIR}/${id}.json`;
         const nodeId = await this.engine.resolvePath(fullPath);
 
         if (nodeId) {
             await this.engine.delete([nodeId]);
+            log.debug('Connection file deleted', { connectionId: id });
         }
 
         this._connections = this._connections.filter((c) => c.id !== id);

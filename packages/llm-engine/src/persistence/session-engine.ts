@@ -28,10 +28,7 @@ import {
 } from './types';
 import { LockManager } from '../utils/LockManager';
 import { ChatSessionSettings, DEFAULT_SESSION_SETTINGS } from '../core/types';
-
-// 调试日志
-const DEBUG = typeof process !== 'undefined' && process.env?.NODE_ENV === 'development';
-const log = (...args: any[]) => DEBUG && console.log('[LLMSessionEngine]', ...args);
+import { log } from '../utils/logger';
 
 // ============================================
 // LLMSessionEngine
@@ -53,7 +50,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
    * 初始化钩子
    */
   protected async onLoad(): Promise<void> {
-    log('Initialized');
+    log.info('Initialized');
   }
 
   // ============================================================
@@ -79,7 +76,11 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
     const sessionId = generateUUID();
     const now = new Date().toISOString();
 
-    log(`createSession: title="${title}", sessionId=${sessionId}`);
+    log.info('Creating new session', {
+      sessionId,
+      title,
+      systemPromptLength: systemPrompt.length
+    });
 
     // 1. 创建隐藏目录
     await this.engine.createDirectory(this.getHiddenDir(sessionId), null);
@@ -122,6 +123,9 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
     );
 
     this.notify();
+
+    log.info('Session created successfully', { sessionId, title });
+
     return sessionId;
   }
 
@@ -144,13 +148,13 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
         try {
           manifest = JSON.parse(str) as ChatManifest;
         } catch (parseError) {
-          log(`Manifest JSON parse failed, will reinitialize:`, parseError);
+          log.debug(`Manifest JSON parse failed, will reinitialize:`, parseError);
           return await this.createNewSessionStructure(nodeId, title, systemPrompt);
         }
 
         // 验证 manifest 结构完整性
         if (!this.isValidManifest(manifest)) {
-          log(`Invalid manifest structure, will reinitialize`);
+          log.debug(`Invalid manifest structure, will reinitialize`);
           return await this.createNewSessionStructure(nodeId, title, systemPrompt);
         }
 
@@ -159,7 +163,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
         const hiddenDirId = await this.engine.resolvePath(hiddenDirPath);
 
         if (!hiddenDirId) {
-          log(`Hidden directory missing for session ${manifest.id}, rebuilding...`);
+          log.debug(`Hidden directory missing for session ${manifest.id}, rebuilding...`);
           return await this.rebuildSessionStructure(nodeId, manifest, systemPrompt);
         }
 
@@ -168,15 +172,15 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
         const rootNode = await this.readJson<ChatNode>(rootNodePath);
 
         if (!rootNode) {
-          log(`Root node missing, rebuilding session structure`);
+          log.debug(`Root node missing, rebuilding session structure`);
           return await this.rebuildSessionStructure(nodeId, manifest, systemPrompt);
         }
 
-        log(`Existing valid session found: ${manifest.id}`);
+        log.debug(`Existing valid session found: ${manifest.id}`);
         return manifest.id;
       }
     } catch (e) {
-      log(`Failed to read/validate existing content, will create new:`, e);
+      log.warn(`Failed to read/validate existing content, will create new:`, e);
     }
 
     // 文件为空或完全损坏，创建新结构
@@ -209,7 +213,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
     const sessionId = generateUUID();
     const now = new Date().toISOString();
 
-    log(`Creating new session structure: nodeId=${nodeId}, sessionId=${sessionId}`);
+    log.debug(`Creating new session structure: nodeId=${nodeId}, sessionId=${sessionId}`);
 
     // 创建隐藏目录
     await this.engine.createDirectory(this.getHiddenDir(sessionId), null);
@@ -266,7 +270,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
     const sessionId = oldManifest.id;
     const now = new Date().toISOString();
 
-    log(`Rebuilding session structure: sessionId=${sessionId}`);
+    log.debug(`Rebuilding session structure: sessionId=${sessionId}`);
 
     // 清理可能存在的残留目录
     const hiddenDirPath = this.getHiddenDir(sessionId);
@@ -421,6 +425,13 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
     meta?: AppendMessageMeta
   ): Promise<string> {
     return this.lockManager.acquire(`session:${sessionId}`, async () => {
+      log.debug('Appending message', {
+        sessionId,
+        role,
+        contentLength: content.length,
+        hasFiles: !!meta?.files?.length,
+        fileCount: meta?.files?.length || 0
+      });
       const manifest = await this.getManifest(nodeId);
 
       const parentId = manifest.current_head;
@@ -461,6 +472,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
         // 处理 Summary
         if (!manifest.summary || manifest.summary === "New conversation") {
           manifest.summary = content.substring(0, 100).replace(/[\r\n]+/g, ' ').trim();
+          log.debug('Updated session summary', { sessionId });
         }
 
         // 处理 Title
@@ -472,13 +484,23 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
           manifest.title = newTitle;
           metaUpdates.title = newTitle;
           needMetaUpdate = true;
+
+          log.info('Updated session title', {
+            sessionId,
+            oldTitle: manifest.title,
+            newTitle
+          });
         }
 
         if (needMetaUpdate) {
           try {
             await this.engine.updateMetadata(nodeId, metaUpdates);
           } catch (e) {
-            console.warn(`[LLMSessionEngine] Failed to update metadata for ${nodeId}`, e);
+            log.warn('Failed to update session metadata', {
+              sessionId,
+              nodeId,
+              error: e
+            });
           }
         }
       }
@@ -489,6 +511,12 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
       manifest.updated_at = now;
 
       await this.engine.writeContent(nodeId, JSON.stringify(manifest, null, 2));
+
+      log.debug('Message appended successfully', {
+        sessionId,
+        nodeId: newNodeId,
+        role
+      });
 
       return newNodeId;
     });
@@ -502,7 +530,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
     nodeId: string,
     updates: {
       content?: string;
-      meta?: UpdateMessageMeta;  // ✅ 明确类型
+      meta?: UpdateMessageMeta;
       status?: ChatNode['status'];
     }
   ): Promise<void> {
@@ -511,29 +539,38 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
       const node = await this.readJson<ChatNode>(path);
 
       if (!node) {
-        console.warn(`[LLMSessionEngine] Node ${nodeId} not found, skipping update`);
+        log.warn('Node not found for update', { sessionId, nodeId });
         return;
       }
 
       let hasChanges = false;
+      const changes: string[] = [];
 
       if (updates.content !== undefined && updates.content !== node.content) {
         node.content = updates.content;
         hasChanges = true;
+        changes.push('content');
       }
 
       if (updates.status !== undefined && updates.status !== node.status) {
         node.status = updates.status;
         hasChanges = true;
+        changes.push('status');
       }
 
       if (updates.meta) {
         node.meta = { ...node.meta, ...updates.meta };
         hasChanges = true;
+        changes.push('meta');
       }
 
       if (hasChanges) {
         await this.writeJson(path, node);
+        log.debug('Node updated', {
+          sessionId,
+          nodeId,
+          changes: changes.join(', ')
+        });
       }
     });
   }
@@ -553,16 +590,24 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
     messageNodeId: string
   ): Promise<void> {
     return this.lockManager.acquire(`session:${sessionId}`, async () => {
+      log.info('Deleting message', {
+        sessionId,
+        nodeId,
+        messageNodeId
+      });
       const messagePath = this.getNodePath(sessionId, messageNodeId);
       const messageNode = await this.readJson<ChatNode>(messagePath);
 
       if (!messageNode) {
-        console.warn(`[LLMSessionEngine] Node ${messageNodeId} not found, skipping delete`);
+        log.warn('Message node not found for deletion', {
+          sessionId,
+          messageNodeId
+        });
         return;
       }
 
-      // 已经删除过，幂等返回
       if (messageNode.status === 'deleted') {
+        log.debug('Message already deleted', { sessionId, messageNodeId });
         return;
       }
 
@@ -572,12 +617,16 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
       }
 
       // 2. 软删除当前节点及其所有后代
-      await this.softDeleteRecursive(sessionId, messageNodeId);
+      const deletedCount = await this.softDeleteRecursive(sessionId, messageNodeId);
 
-      // 3. 更新 manifest：如果 current_head 被删除或位于被删除的子树中
+      // 3. 更新 manifest
       await this.repairManifestAfterDelete(nodeId, sessionId, messageNodeId, messageNode);
 
-      log(`Deleted message ${messageNodeId} and updated manifest for session ${sessionId}`);
+      log.info('Message deleted successfully', {
+        sessionId,
+        messageNodeId,
+        deletedCount
+      });
     });
   }
 
@@ -604,20 +653,25 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
   /**
    * 递归软删除节点及其所有后代
    */
-  private async softDeleteRecursive(sessionId: string, nodeId: string): Promise<void> {
+  private async softDeleteRecursive(sessionId: string, nodeId: string): Promise<number> {
     const path = this.getNodePath(sessionId, nodeId);
     const node = await this.readJson<ChatNode>(path);
 
-    if (!node || node.status === 'deleted') return;
+    if (!node || node.status === 'deleted') return 0;
+
+    let count = 0;
 
     // 先递归删除子节点
     for (const childId of node.children_ids) {
-      await this.softDeleteRecursive(sessionId, childId);
+      count += await this.softDeleteRecursive(sessionId, childId);
     }
 
     // 标记当前节点为删除
     node.status = 'deleted';
     await this.writeJson(path, node);
+    count++;
+
+    return count;
   }
 
   /**
@@ -636,6 +690,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
   ): Promise<void> {
     const manifest = await this.getManifest(nodeId);
     let needsUpdate = false;
+    const repairs: string[] = [];
 
     // 检查 current_head 是否在被删除的子树中
     if (await this.isNodeInDeletedSubtree(manifest.current_head, deletedNodeId, sessionId)) {
@@ -655,7 +710,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
       manifest.branches[manifest.current_branch] = newHead;
       needsUpdate = true;
 
-      log(`current_head rolled back from ${deletedNodeId} to ${newHead}`);
+      repairs.push(`current_head: ${deletedNodeId} -> ${newHead}`);
     }
 
     // 检查其他分支是否引用了被删除的节点
@@ -666,13 +721,18 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
         const fallback = deletedNode.parent_id || manifest.root_id;
         manifest.branches[branchName] = fallback;
         needsUpdate = true;
-        log(`Branch "${branchName}" head rolled back to ${fallback}`);
+        repairs.push(`branch "${branchName}": ${branchHead} -> ${fallback}`);
       }
     }
 
     if (needsUpdate) {
       manifest.updated_at = new Date().toISOString();
       await this.engine.writeContent(nodeId, JSON.stringify(manifest, null, 2));
+
+      log.info('Manifest repaired after deletion', {
+        sessionId,
+        repairs
+      });
     }
   }
 
@@ -780,12 +840,22 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
     }
   ): Promise<string> {
     return this.lockManager.acquire(`session:${sessionId}`, async () => {
+      log.info('Creating branch', {
+        sessionId,
+        sourceMessageId,
+        branchName: options?.name,
+        createdFrom: options?.createdFrom
+      });
       const manifest = await this.getManifest(nodeId);
       const sourceNode = await this.readJson<ChatNode>(
         this.getNodePath(sessionId, sourceMessageId)
       );
 
       if (!sourceNode) {
+        log.error('Source node not found for branch creation', {
+          sessionId,
+          sourceMessageId
+        });
         throw new Error('Source node not found');
       }
 
@@ -839,6 +909,12 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
       manifest.updated_at = now;
 
       await this.engine.writeContent(nodeId, JSON.stringify(manifest, null, 2));
+
+      log.info('Branch created successfully', {
+        sessionId,
+        newNodeId,
+        branchName: options?.name
+      });
 
       return newNodeId;
     });
@@ -940,11 +1016,23 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
     options?: { cascade?: boolean }
   ): Promise<string[]> {
     return this.lockManager.acquire(`session:${sessionId}`, async () => {
+      log.info('Deleting branch', {
+        sessionId,
+        messageNodeId,
+        cascade: options?.cascade
+      });
+
       const deletedIds: string[] = [];
       const targetNode = await this.readJson<ChatNode>(
         this.getNodePath(sessionId, messageNodeId)
       );
-      if (!targetNode) return deletedIds;
+      if (!targetNode) {
+        log.warn('Target node not found for branch deletion', {
+          sessionId,
+          messageNodeId
+        });
+        return deletedIds;
+      }
 
       // 从父节点的 children_ids 中移除
       if (targetNode.parent_id) {
@@ -982,6 +1070,12 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
         messageNodeId,
         targetNode
       );
+
+      log.info('Branch deleted successfully', {
+        sessionId,
+        deletedCount: deletedIds.length,
+        deletedIds
+      });
 
       return deletedIds;
     });
@@ -1086,7 +1180,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
   ): Promise<EngineNode> {
     const baseName = (name || "New Chat").replace(/\.chat$/i, '');
 
-    log(`createFile: name="${name}", baseName="${baseName}"`);
+    log.debug(`createFile: name="${name}", baseName="${baseName}"`);
 
     // 1. 查找可用的文件名
     const availableName = await this.findAvailableFileName(baseName, parentId);
@@ -1101,7 +1195,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
     } catch (e: any) {
       // 如果目录已存在（极端情况：UUID 碰撞），重试
       if (e.message?.includes('exists')) {
-        log(`Hidden directory already exists for ${sessionId}, this is unexpected`);
+        log.debug(`Hidden directory already exists for ${sessionId}, this is unexpected`);
         // 可以选择清理或重新生成 UUID
       } else {
         throw e;
@@ -1180,7 +1274,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
         }
       });
     } catch (e) {
-      log(`Failed to list existing files:`, e);
+      log.debug(`Failed to list existing files:`, e);
       // 继续执行，假设没有冲突
     }
 
@@ -1193,14 +1287,14 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
     for (let i = 1; i <= maxAttempts; i++) {
       const numberedName = `${baseName} (${i})`;
       if (!existingNames.has(numberedName.toLowerCase())) {
-        log(`File name conflict resolved: "${baseName}" -> "${numberedName}"`);
+        log.debug(`File name conflict resolved: "${baseName}" -> "${numberedName}"`);
         return numberedName;
       }
     }
 
     // 超过最大尝试次数，使用 UUID 后缀
     const fallbackName = `${baseName}_${generateUUID().substring(0, 8)}`;
-    log(`File name conflict: max attempts exceeded, using fallback: "${fallbackName}"`);
+    log.debug(`File name conflict: max attempts exceeded, using fallback: "${fallbackName}"`);
     return fallbackName;
   }
 
@@ -1231,7 +1325,10 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
    * 删除
    */
   async delete(ids: string[]): Promise<void> {
-    // 定义递归清理函数
+    log.info('Deleting nodes', {
+      count: ids.length,
+      nodeIds: ids
+    });
     const cleanupRecursively = async (nodeId: string) => {
       const node = await this.vfs.getNodeById(nodeId);
       if (!node) return;
@@ -1256,19 +1353,29 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
             const manifest = JSON.parse(str) as ChatManifest;
 
             if (manifest.id) {
-              // ✅ 新增：清理 manifest 中的节点引用
+              log.info('Cleaning up session data', {
+                sessionId: manifest.id,
+                title: manifest.title
+              });
+
               await this.cleanupManifestReferences(nodeId, manifest);
-              // 删除对应的隐藏数据目录
+
               const hiddenDirPath = this.getHiddenDir(manifest.id);
               const hiddenDirId = await this.engine.resolvePath(hiddenDirPath);
               if (hiddenDirId) {
                 await this.engine.delete([hiddenDirId]);
-                log(`Cleaned up hidden data for session ${manifest.id}`);
+                log.debug('Hidden directory deleted', {
+                  sessionId: manifest.id
+                });
               }
             }
           }
         } catch (e) {
-          console.warn(`[LLMSessionEngine] Failed to cleanup data for ${node.name}`, e);
+          log.error('Failed to cleanup session data', {
+            nodeId: node.nodeId,
+            nodeName: node.name,
+            error: e
+          });
         }
       }
     };
@@ -1278,10 +1385,12 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
       await cleanupRecursively(id);
     }
 
-    // 2. 再执行物理删除 (删除 VFS 节点)
+    // 2. 再执行物理删除
     await this.engine.delete(ids);
 
     this.notify();
+
+    log.info('Nodes deleted successfully', { count: ids.length });
   }
 
   /**
@@ -1292,6 +1401,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
     manifest: ChatManifest
   ): Promise<void> {
     let needsUpdate = false;
+    const fixes: string[] = [];
 
     // 1. 检查 current_head 是否存在
     const currentHeadPath = this.getNodePath(manifest.id, manifest.current_head);
@@ -1302,7 +1412,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
       manifest.current_head = manifest.root_id;
       manifest.branches[manifest.current_branch] = manifest.root_id;
       needsUpdate = true;
-      log(`Reset current_head to root for session ${manifest.id}`);
+      fixes.push('current_head reset to root');
     }
 
     // 2. 清理 branches 中的无效引用
@@ -1316,20 +1426,26 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
           // 如果是当前分支，回退到 root
           manifest.branches[branchName] = manifest.root_id;
           manifest.current_head = manifest.root_id;
+          fixes.push(`current branch "${branchName}" reset to root`);
         } else {
           // 如果是其他分支，删除该分支
           delete manifest.branches[branchName];
+          fixes.push(`branch "${branchName}" removed`);
         }
         needsUpdate = true;
-        log(`Cleaned up invalid branch "${branchName}" for session ${manifest.id}`);
+        log.debug(`Cleaned up invalid branch "${branchName}" for session ${manifest.id}`);
       }
     }
 
-    // 3. 如果有变更，更新 manifest
+    // 3. 更新 manifest
     if (needsUpdate) {
       manifest.updated_at = new Date().toISOString();
       await this.engine.writeContent(nodeId, JSON.stringify(manifest, null, 2));
-      log(`Updated manifest for session ${manifest.id}`);
+
+      log.info('Manifest references cleaned', {
+        sessionId: manifest.id,
+        fixes
+      });
     }
   }
 
@@ -1462,6 +1578,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
     try {
       const nodeId = await this.engine.resolvePath(path);
       if (!nodeId) {
+        log.debug('Session settings not found, using defaults', { sessionId });
         return { ...DEFAULT_SESSION_SETTINGS };
       }
 
@@ -1476,26 +1593,35 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
 
       const parsed = YAML.parse(yamlStr) as Partial<ChatSessionSettings>;
 
-      // 合并默认值
+      log.debug('Session settings loaded', {
+        sessionId,
+        settings: parsed
+      });
+
       return {
         ...DEFAULT_SESSION_SETTINGS,
         ...parsed,
       };
 
     } catch (e) {
-      console.warn('[LLMSessionEngine] Failed to load session settings:', e);
+      log.warn('Failed to load session settings', {
+        sessionId,
+        error: e
+      });
       return { ...DEFAULT_SESSION_SETTINGS };
     }
   }
 
-  /**
-   * 保存会话设置
-   */
   async saveSessionSettings(
     sessionId: string,
     settings: Partial<ChatSessionSettings>
   ): Promise<void> {
     return this.lockManager.acquire(`settings:${sessionId}`, async () => {
+      log.info('Saving session settings', {
+        sessionId,
+        settings
+      });
+
       const path = this.getSettingsPath(sessionId);
 
       // 加载现有设置
@@ -1524,6 +1650,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
       const nodeId = await this.engine.resolvePath(path);
       if (nodeId) {
         await this.engine.writeContent(nodeId, yamlContent);
+        log.debug('Session settings updated', { sessionId });
       } else {
         // 确保隐藏目录存在
         const hiddenDir = this.getHiddenDir(sessionId);
@@ -1540,7 +1667,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
         );
       }
 
-      log(`Session settings saved for ${sessionId}`);
+      log.debug(`Session settings saved for ${sessionId}`);
     });
   }
 
@@ -1553,6 +1680,10 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
     targetNodeId: string
   ): Promise<void> {
     return this.lockManager.acquire(`session:${sessionId}`, async () => {
+      log.info('Updating manifest head', {
+        sessionId,
+        targetNodeId
+      });
       const manifest = await this.getManifest(nodeId);
 
       manifest.current_head = targetNodeId;
@@ -1561,7 +1692,11 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
 
       await this.engine.writeContent(nodeId, JSON.stringify(manifest, null, 2));
 
-      log(`Manifest head updated to ${targetNodeId} for session ${sessionId}`);
+      log.info('Manifest head updated successfully', {
+        sessionId,
+        branch: manifest.current_branch,
+        newHead: targetNodeId
+      });
     });
   }
 
@@ -1570,23 +1705,24 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
    */
   async validateManifest(nodeId: string, sessionId: string): Promise<boolean> {
     try {
+      log.debug('Validating manifest', { sessionId, nodeId });
+
       const manifest = await this.getManifest(nodeId);
       let needsUpdate = false;
+      const issues: string[] = [];
 
-      // 1. 验证 current_head 是否存在
+      // 1. 验证 current_head
       const currentHeadPath = this.getNodePath(sessionId, manifest.current_head);
       const currentHeadNode = await this.readJson<ChatNode>(currentHeadPath);
 
       if (!currentHeadNode) {
-        console.warn(
-          `[LLMSessionEngine] current_head ${manifest.current_head} not found, resetting`
-        );
         manifest.current_head = manifest.root_id;
         manifest.branches[manifest.current_branch] = manifest.root_id;
         needsUpdate = true;
+        issues.push('current_head not found');
       }
 
-      // 2. 验证所有分支的头节点
+      // 2. 验证分支
       const validBranches: Record<string, string> = {};
 
       for (const [branchName, branchHead] of Object.entries(manifest.branches)) {
@@ -1596,17 +1732,13 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
         if (branchNode) {
           validBranches[branchName] = branchHead;
         } else {
-          console.warn(
-            `[LLMSessionEngine] Branch "${branchName}" head ${branchHead} not found`
-          );
           needsUpdate = true;
+          issues.push(`branch "${branchName}" head not found`);
 
-          // 如果是当前分支，回退到 root
           if (branchName === manifest.current_branch) {
             validBranches[branchName] = manifest.root_id;
             manifest.current_head = manifest.root_id;
           }
-          // 非当前分支的无效分支直接丢弃
         }
       }
 
@@ -1616,6 +1748,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
         manifest.current_branch = 'main';
         manifest.current_head = manifest.root_id;
         needsUpdate = true;
+        issues.push('no valid branches, created main');
       }
 
       manifest.branches = validBranches;
@@ -1624,12 +1757,22 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
       if (needsUpdate) {
         manifest.updated_at = new Date().toISOString();
         await this.engine.writeContent(nodeId, JSON.stringify(manifest, null, 2));
-        log(`Manifest validated and repaired for session ${sessionId}`);
+
+        log.warn('Manifest validated and repaired', {
+          sessionId,
+          issues
+        });
+      } else {
+        log.debug('Manifest validation passed', { sessionId });
       }
 
       return needsUpdate;
     } catch (e) {
-      console.error(`[LLMSessionEngine] validateManifest failed for ${sessionId}:`, e);
+      log.error('Manifest validation failed', {
+        sessionId,
+        nodeId,
+        error: e
+      });
       return false;
     }
   }
