@@ -182,13 +182,15 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    margin-top: 4px;font-size: 11px;
+    margin-top: 4px;
+    font-size: 11px;
     color: var(--text-tertiary);
 }
 
 .llm-branch-node__actions {
     display: flex;
-    gap: 4px;opacity: 0;
+    gap: 4px;
+    opacity: 0;
     transition: opacity 0.2s;
 }
 
@@ -621,6 +623,7 @@
 [data-theme="dark"] .llm-branch-compare__line--removed {
     background: rgba(239, 68, 68, 0.15);
 }
+
 /* ============================================
    分支通知
    ============================================ */
@@ -666,4 +669,160 @@
     width: 3px;
     background: var(--primary-color);
     border-radius: 0 2px 2px 0;
+}
+
+/* 树形连接线容器 */
+.llm-branch-node__tree-lines {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    display: flex;
+    pointer-events: none;
+}
+
+/* 单条连接线 */
+.llm-branch-node__tree-line {
+    width: 16px;
+    position: relative;
+}
+
+/* 竖线 */
+.llm-branch-node__tree-line--vertical::before {
+    content: '';
+    position: absolute;
+    left: 8px;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: var(--border-color, #e0e0e0);
+}
+
+/* L 形或 T 形分支线 */
+.llm-branch-node__tree-line--branch::before {
+    content: '';
+    position: absolute;
+    left: 8px;
+    top: 0;
+    bottom: 50%;
+    width: 1px;
+    background: var(--border-color, #e0e0e0);
+}
+
+.llm-branch-node__tree-line--branch::after {
+    content: '';
+    position: absolute;
+    left: 8px;
+    top: 50%;
+    width: 8px;
+    height: 1px;
+    background: var(--border-color, #e0e0e0);
+}
+
+/* 折叠按钮 */
+.llm-branch-node__collapse {
+    width: 16px;
+    height: 16px;
+    padding: 0;
+    margin-right: 4px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 2px;
+    flex-shrink: 0;
+}
+
+.llm-branch-node__collapse:hover {
+    background: var(--hover-bg, #f0f0f0);
+}
+
+.llm-branch-node__collapse-placeholder {
+    width: 16px;
+    height: 16px;
+    margin-right: 4px;
+    flex-shrink: 0;
+}
+
+/* 深度指示器 */
+.llm-branch-node__depth-badge {
+    display: inline-block;
+    padding: 1px 4px;
+    margin-right: 6px;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-muted, #666);
+    background: var(--bg-secondary, #f5f5f5);
+    border-radius: 3px;
+    vertical-align: middle;
+}
+
+/* 折叠状态 */
+.llm-branch-node.is-collapsed {
+    margin-bottom: 0;
+}
+
+/* 节点内容布局调整 */
+.llm-branch-node__content {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-radius: 6px;
+    transition: background-color 0.2s;
+}
+
+.llm-branch-node__content:hover {
+    background: var(--hover-bg, #f8f8f8);
+}
+
+/* 确保节点相对定位以支持绝对定位的连接线 */
+.llm-branch-node {
+    position: relative;
+    margin-bottom: 2px;
+}
+
+/* 活动节点高亮 */
+.llm-branch-node.is-active .llm-branch-node__content {
+    background: var(--active-bg, #e3f2fd);
+    border-left: 3px solid var(--primary-color, #2196f3);
+    padding-left: 9px;
+}
+
+/* 选中状态 */
+.llm-branch-node.is-selected .llm-branch-node__content {
+    background: var(--selected-bg, #fff3e0);
+    border-left: 3px solid var(--accent-color, #ff9800);
+    padding-left: 9px;
+}
+
+/* 删除动画 */
+.llm-branch-node.is-deleting {
+    opacity: 0;
+    transform: translateX(-10px);
+    transition: opacity 0.3s, transform 0.3s;
+}
+
+/* 响应式调整 - 小屏幕上进一步限制缩进 */
+@media (max-width: 768px) {
+    .llm-branch-node {
+        font-size: 14px;
+    }
+
+    .llm-branch-node__tree-line {
+        width: 12px;
+    }
+
+    .llm-branch-node__tree-line--vertical::before,
+    .llm-branch-node__tree-line--branch::before {
+        left: 6px;
+    }
+
+    .llm-branch-node__tree-line--branch::after {
+        left: 6px;
+        width: 6px;
+    }
 }

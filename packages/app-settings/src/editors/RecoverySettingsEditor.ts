@@ -1,19 +1,19 @@
 // @file: app-settings/editors/RecoverySettingsEditor.ts
 
 import { BaseSettingsEditor, Toast, Modal, type RestorableItem } from '@itookit/common'; // 假设 Modal/Toast 存在
-import { IAgentService } from '@itookit/llm-engine';
+import { IAgentManagementService } from '@itookit/llm-engine';
 
-export class RecoverySettingsEditor extends BaseSettingsEditor<IAgentService> {
+export class RecoverySettingsEditor extends BaseSettingsEditor<IAgentManagementService> {
     private selectedItems = new Set<string>(); // 存储格式: "type:id"
     private allItems: RestorableItem[] = [];
 
     async render() {
         // 1. 获取数据
         this.allItems = await this.service.getRestorableItems();
-        
+
         const connections = this.allItems.filter(i => i.type === 'connection');
         const agents = this.allItems.filter(i => i.type === 'agent');
-        
+
         const selectedCount = this.selectedItems.size;
         const hasSelection = selectedCount > 0;
 
@@ -68,11 +68,11 @@ export class RecoverySettingsEditor extends BaseSettingsEditor<IAgentService> {
     private renderRow(item: RestorableItem): string {
         const key = `${item.type}:${item.id}`;
         const isSelected = this.selectedItems.has(key);
-        
+
         let statusBadge = '';
         let statusClass = '';
         let statusText = '';
-        
+
         switch (item.status) {
             case 'missing':
                 statusBadge = '<span class="settings-badge settings-badge--danger">已丢失</span>';
@@ -122,7 +122,7 @@ export class RecoverySettingsEditor extends BaseSettingsEditor<IAgentService> {
 
                 const checkbox = item.querySelector('.chk-item') as HTMLInputElement;
                 checkbox.checked = !checkbox.checked;
-                
+
                 // 手动触发 change 事件逻辑
                 this.handleItemSelection(checkbox);
             });
@@ -143,7 +143,7 @@ export class RecoverySettingsEditor extends BaseSettingsEditor<IAgentService> {
                 const target = e.target as HTMLInputElement;
                 const groupType = target.dataset.group;
                 const items = this.allItems.filter(i => i.type === groupType);
-                
+
                 items.forEach(item => {
                     const key = `${item.type}:${item.id}`;
                     if (target.checked) {
@@ -152,7 +152,7 @@ export class RecoverySettingsEditor extends BaseSettingsEditor<IAgentService> {
                         this.selectedItems.delete(key);
                     }
                 });
-                this.render(); 
+                this.render();
             });
         });
 
@@ -178,7 +178,7 @@ export class RecoverySettingsEditor extends BaseSettingsEditor<IAgentService> {
             const count = this.selectedItems.size;
             btn.disabled = count === 0;
             btn.innerHTML = `🔄 重置选中项 (${count})`;
-            
+
             // 动态改变按钮颜色：如果选中了包含“正常”的项目，显示为警告色，提示用户这是一个覆盖操作
             const hasNormalItems = this.getSelectedObjects().some(i => i.status === 'ok');
             if (hasNormalItems) {
@@ -189,12 +189,12 @@ export class RecoverySettingsEditor extends BaseSettingsEditor<IAgentService> {
                 btn.classList.add('settings-btn--primary');
             }
         }
-        
+
         ['connection', 'agent'].forEach(type => {
             const items = this.allItems.filter(i => i.type === type);
             this.updateSelectAllCheckboxState(type, items);
         });
-        
+
         // 更新行的高亮状态
         const rows = this.container.querySelectorAll('.settings-list-item');
         rows.forEach(row => {
@@ -220,7 +220,7 @@ export class RecoverySettingsEditor extends BaseSettingsEditor<IAgentService> {
 
     // 辅助方法：获取选中的实际对象
     private getSelectedObjects(): RestorableItem[] {
-        return this.allItems.filter(item => 
+        return this.allItems.filter(item =>
             this.selectedItems.has(`${item.type}:${item.id}`)
         );
     }
@@ -235,17 +235,17 @@ export class RecoverySettingsEditor extends BaseSettingsEditor<IAgentService> {
 
         // 构建智能提示信息
         let msg = `确定要重置这 ${selectedObjs.length} 个项目吗？\n`;
-        
+
         if (normalItems.length > 0) {
             msg += `\n⚠️ 注意：包含 ${normalItems.length} 个状态正常的项目。强制重置将覆盖当前的配置。`;
         }
         if (modifiedItems.length > 0) {
-             msg += `\n⚠️ 警告：${modifiedItems.length} 个项目的自定义修改将丢失。`;
+            msg += `\n⚠️ 警告：${modifiedItems.length} 个项目的自定义修改将丢失。`;
         }
         if (missingItems.length > 0) {
             msg += `\n✅ ${missingItems.length} 个丢失的项目将被恢复。`;
         }
-        
+
         // 针对 Connection，额外提示 API Key
         const hasConnections = selectedObjs.some(i => i.type === 'connection');
         if (hasConnections) {
@@ -253,11 +253,11 @@ export class RecoverySettingsEditor extends BaseSettingsEditor<IAgentService> {
         }
 
         Modal.confirm(
-            normalItems.length > 0 ? '强制重置确认' : '恢复确认', 
-            msg, 
+            normalItems.length > 0 ? '强制重置确认' : '恢复确认',
+            msg,
             async () => {
                 const btn = this.container.querySelector('#btn-batch-restore') as HTMLButtonElement;
-                if(btn) {
+                if (btn) {
                     btn.disabled = true;
                     btn.innerHTML = '⏳ 处理中...';
                 }
