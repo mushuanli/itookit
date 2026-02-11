@@ -150,7 +150,7 @@ export async function initializeLLMEngine(options: EngineInitOptions): Promise<{
         { maxConcurrent: options.maxConcurrent }
     );
 
-    console.log('[LLM Engine] Initialized');
+    //console.log('[LLM Engine] Initialized');
     return { sessionManager };
 }
 

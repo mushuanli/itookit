@@ -36,8 +36,6 @@ export class AgentResolver {
      * 解析 agentId 为执行器配置
      */
     async resolve(agentId: string): Promise<ExecutorConfig> {
-        log.debug('Resolving agent', { agentId });
-
         try {
             const agentDef = await this.agentService.getAgentConfig(agentId);
 
@@ -47,10 +45,10 @@ export class AgentResolver {
                 );
 
                 if (!connection) {
-                    log.error('Connection not found for agent', { 
+                    log.error('Connection not found for agent', {
                         agentId,
                         agentName: agentDef.name,
-                        connectionId: agentDef.config.connectionId 
+                        connectionId: agentDef.config.connectionId
                     });
                     throw new EngineError(
                         EngineErrorCode.EXECUTOR_NOT_FOUND,
@@ -59,17 +57,6 @@ export class AgentResolver {
                 }
 
                 const realModelId = this.resolveModelId(connection, agentDef.config.modelName);
-
-                log.info('Agent resolved successfully', { 
-                    agentId: agentDef.id,
-                    agentName: agentDef.name,
-                    agentType: agentDef.type,
-                    connectionId: connection.id,
-                    connectionName: connection.name,
-                    provider: connection.provider,
-                    modelName: agentDef.config.modelName,
-                    resolvedModelId: realModelId 
-                });
 
                 return {
                     id: agentDef.id,
@@ -116,8 +103,6 @@ export class AgentResolver {
                 });
             }
 
-            log.debug('Available agents retrieved', { count: list.length });
-
             return list;
         } catch (e) {
             log.error('Failed to get available agents', { error: e });
@@ -156,9 +141,9 @@ export class AgentResolver {
     private resolveModelId(connection: any, modelName: string): string {
         if (!modelName) return '';
         if (!connection.availableModels || !Array.isArray(connection.availableModels)) {
-            log.warn('No available models in connection', { 
+            log.warn('No available models in connection', {
                 connectionId: connection.id,
-                modelName 
+                modelName
             });
             return modelName;
         }
@@ -193,10 +178,10 @@ export class AgentResolver {
         const modelId =
             fallbackConnection.model || fallbackConnection.availableModels?.[0]?.id || '';
 
-        log.info('Using fallback configuration', { 
+        log.info('Using fallback configuration', {
             connectionId: fallbackConnection.id,
             connectionName: fallbackConnection.name,
-            modelId 
+            modelId
         });
 
         return {

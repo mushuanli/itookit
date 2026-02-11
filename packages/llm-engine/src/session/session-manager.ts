@@ -100,19 +100,6 @@ export class SessionManager {
      */
     async bindSession(nodeId: string, sessionId: string): Promise<SessionSnapshot> {
         const currentVersion = ++this.bindingVersion;
-
-    log.info('Binding to session', { 
-        nodeId, 
-        sessionId,
-        version: currentVersion,
-        previousBound: this.boundSessionId,
-        previousStatus: this.boundSessionId 
-            ? this.sessions.get(this.boundSessionId)?.status 
-            : null,
-        totalSessionsInMemory: this.sessions.size,
-        allSessionIds: Array.from(this.sessions.keys())
-    });
-
         this.unbindSession();
         this.bindingVersion = currentVersion;
 
@@ -148,7 +135,6 @@ export class SessionManager {
                 });
             }
 
-            log.info('Session bound successfully', { sessionId, nodeId });
             return this.getSnapshot();
         } catch (e) {
             log.error('Failed to bind session', { sessionId, nodeId, error: e });
@@ -158,13 +144,6 @@ export class SessionManager {
 
     unbindSession(): void {
         this.bindingVersion++;
-
-        if (this.boundSessionId) {
-            log.info('Unbinding session', {
-                sessionId: this.boundSessionId,
-                status: this.sessions.get(this.boundSessionId)?.status
-            });
-        }
 
         if (this.eventUnsubscribe) {
             this.eventUnsubscribe();
@@ -774,18 +753,25 @@ export class SessionManager {
     }
 
     destroy(): void {
-    log.warn('SessionManager destroying', { 
-        sessionCount: this.sessions.size,
-        sessions: Array.from(this.sessions.keys()),
-        boundSession: this.boundSessionId 
-    });
         this.unbindSession();
+
+        // 2. 检查是否有运行中的任务
+        const runningTasks = Array.from(this.sessions.values())
+            .filter(r => r.status === 'running' || r.status === 'queued');
+
+        if (runningTasks.length > 0) {
+            // ✅ 不中止任务，不清空状态
+            // 只清理全局事件监听器（避免内存泄漏）
+            this.eventBus.clearGlobalListeners();
+            return;
+        }
+
+        // 3. 没有运行中任务时才完全清理
         this.taskRunner.abortAll();
         this.sessions.clear();
         this.states.clear();
         this.eventBus.clear();
         this.activeSessionId = null;
-    log.info('SessionManager destroyed');
     }
 
     debug(): void {
@@ -817,13 +803,13 @@ export class SessionManager {
      * 确保会话已注册
      */
     private async ensureRegistered(nodeId: string, sessionId: string): Promise<void> {
-    // ✅ 添加诊断日志：打印当前 Map 中所有 session
-    log.debug('ensureRegistered check', { 
-        sessionId,
-        sessionsInMap: Array.from(this.sessions.keys()),
-        sessionExists: this.sessions.has(sessionId),
-        totalSessions: this.sessions.size 
-    });
+        // ✅ 添加诊断日志：打印当前 Map 中所有 session
+        log.debug('ensureRegistered check', {
+            sessionId,
+            sessionsInMap: Array.from(this.sessions.keys()),
+            sessionExists: this.sessions.has(sessionId),
+            totalSessions: this.sessions.size
+        });
         if (this.sessions.has(sessionId)) {
             const existing = this.sessions.get(sessionId)!;
             existing.lastActiveTime = Date.now();
@@ -839,15 +825,23 @@ export class SessionManager {
             if (state && (existing.status === 'completed' || existing.status === 'failed')) {
                 log.info('Reloading background-completed session', {
                     sessionId,
-                    status: existing.status
+                    status: existing.status,
+                    currentMessageCount: state.getSessions().length
                 });
+
+                // 重新加载最新数据
                 await this.reloadSessionData(nodeId, sessionId, state);
+
+                log.info('Background session data reloaded', {
+                    sessionId,
+                    newMessageCount: state.getSessions().length
+                });
             }
 
             return;
         }
 
-        log.info('Registering new session', { sessionId, nodeId });
+        //log.info('Registering new session', { sessionId, nodeId });
 
         // 验证 manifest
         await this.engine.validateManifest(nodeId, sessionId);
@@ -870,11 +864,6 @@ export class SessionManager {
         this.eventBus.emitGlobal({
             type: 'session_registered',
             payload: { sessionId },
-        });
-
-        log.info('Session registered successfully', {
-            sessionId,
-            messageCount: state.getSessions().length
         });
     }
 
@@ -923,11 +912,6 @@ export class SessionManager {
                 loadedCount++;
             }
 
-            log.info('Session data loaded', {
-                sessionId,
-                totalMessages: context.length,
-                loadedMessages: loadedCount
-            });
         } catch (e) {
             log.error('Failed to load session data', { sessionId, error: e });
         }
@@ -948,12 +932,6 @@ export class SessionManager {
         if (status !== 'failed') {
             runtime.error = undefined;
         }
-
-        log.info('Session status changed', {
-            sessionId,
-            prevStatus,
-            newStatus: status
-        });
 
         this.eventBus.emitGlobal({
             type: 'session_status_changed',
@@ -1180,9 +1158,8 @@ export function createSessionManager(
         log.warn('SessionManager already exists, returning existing instance');
         return sessionManagerInstance;
     }
-    
+
     sessionManagerInstance = new SessionManager(engine, agentService, options);
-    log.info('SessionManager created');
     return sessionManagerInstance;
 }
 
@@ -1197,10 +1174,10 @@ export function getSessionManager(): SessionManager {
 }
 
 export function resetSessionManager(): void {
-    log.warn('resetSessionManager called', { 
-        hasInstance: !!sessionManagerInstance 
+    log.warn('resetSessionManager called', {
+        hasInstance: !!sessionManagerInstance
     });
-    
+
     if (sessionManagerInstance) {
         sessionManagerInstance.destroy();
     }
