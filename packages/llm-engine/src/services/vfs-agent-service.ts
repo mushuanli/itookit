@@ -26,6 +26,7 @@ import {
     IAgentManagementService,
     MCPServer,
 } from './agent-service';
+import { VFSEntityStore, EntityStoreConfig } from '../utils/vfs-entity-store';
 import { log } from '../utils/logger';
 
 // ============================================
@@ -35,6 +36,18 @@ import { log } from '../utils/logger';
 const VERSION_FILE = '/.defaults_version.json';
 const CONNECTIONS_DIR = '/.connections';
 const MCP_DIR = '/.mcp';
+
+const CONNECTION_STORE_CONFIG: EntityStoreConfig = {
+    dir: CONNECTIONS_DIR,
+    icon: '🔌',
+    typeName: 'connection'
+};
+
+const MCP_STORE_CONFIG: EntityStoreConfig = {
+    dir: MCP_DIR,
+    icon: '🔌',
+    typeName: 'mcp'
+};
 
 // ============================================
 // VFSAgentService
@@ -50,6 +63,9 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
     private _syncTimer: ReturnType<typeof setTimeout> | null = null;
     private _eventUnsubscribers: Array<() => void> = [];
 
+    private connectionStore!: VFSEntityStore<LLMConnection>;
+    private mcpStore!: VFSEntityStore<MCPServer>;
+
     constructor(vfs: VFS) {
         super(FS_MODULE_AGENTS, { description: 'AI Agents Configuration' }, vfs);
     }
@@ -58,6 +74,10 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
      * 初始化钩子 (BaseModuleService 调用)
      */
     protected async onLoad(): Promise<void> {
+        // 初始化实体存储器
+        this.connectionStore = new VFSEntityStore(this, this.engine, CONNECTION_STORE_CONFIG);
+        this.mcpStore = new VFSEntityStore(this, this.engine, MCP_STORE_CONFIG);
+
         await this.refreshData();
         this.bindVFSEvents();
         await this.ensureDefaults();
@@ -102,9 +122,10 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
         });
     }
 
-    /**
-     * 刷新数据
-     */
+    // ================================================================
+    // 数据刷新
+    // ================================================================
+
     private async refreshData(): Promise<void> {
         try {
 
@@ -114,11 +135,6 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
             log.info('Agent service data refreshed', {
                 connectionCount: this._connections.length,
                 mcpServerCount: this._mcpServers.length,
-                connections: this._connections.map(c => ({
-                    id: c.id,
-                    name: c.name,
-                    provider: c.provider
-                }))
             });
 
             this.notify();
@@ -544,42 +560,9 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
             connectionId: conn.id,
             name: conn.name,
             provider: conn.provider,
-            modelCount: conn.availableModels?.length || 0
         });
 
-        const filename = `${conn.id}.json`;
-        const content = JSON.stringify(conn, null, 2);
-        const fullPath = `${CONNECTIONS_DIR}/${filename}`;
-
-        // 确保目录存在
-        await this.ensureDirectory(CONNECTIONS_DIR);
-
-        const nodeId = await this.engine.resolvePath(fullPath);
-
-        if (nodeId) {
-            await this.engine.writeContent(nodeId, content);
-            await this.engine.updateMetadata(nodeId, {
-                icon: '🔌',
-                title: conn.name,
-                type: 'connection'
-            });
-        } else {
-            await this.engine.createFile(
-                filename,
-                CONNECTIONS_DIR,
-                content,
-                { icon: '🔌', title: conn.name, type: 'connection' }
-            );
-        }
-
-        // 更新内存缓存
-        const index = this._connections.findIndex(c => c.id === conn.id);
-        if (index >= 0) {
-            this._connections[index] = conn;
-        } else {
-            this._connections.push(conn);
-        }
-
+        this._connections = await this.connectionStore.save(conn, this._connections);
         this.notify();
     }
 
@@ -589,16 +572,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
             throw new Error("Cannot delete default connection");
         }
 
-
-        const fullPath = `${CONNECTIONS_DIR}/${id}.json`;
-        const nodeId = await this.engine.resolvePath(fullPath);
-
-        if (nodeId) {
-            await this.engine.delete([nodeId]);
-            log.debug('Connection file deleted', { connectionId: id });
-        }
-
-        this._connections = this._connections.filter((c) => c.id !== id);
+        this._connections = await this.connectionStore.delete(id, this._connections);
         this.notify();
     }
 
@@ -611,49 +585,12 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
     }
 
     async saveMCPServer(server: MCPServer): Promise<void> {
-        const filename = `${server.id}.json`;
-        const content = JSON.stringify(server, null, 2);
-        const fullPath = `${MCP_DIR}/${filename}`;
-
-        await this.ensureDirectory(MCP_DIR);
-
-        const nodeId = await this.engine.resolvePath(fullPath);
-
-        if (nodeId) {
-            await this.engine.writeContent(nodeId, content);
-            await this.engine.updateMetadata(nodeId, {
-                icon: '🔌',
-                title: server.name,
-                type: 'mcp'
-            });
-        } else {
-            await this.engine.createFile(
-                filename,
-                MCP_DIR,
-                content,
-                { icon: '🔌', title: server.name, type: 'mcp' }
-            );
-        }
-
-        const index = this._mcpServers.findIndex((s) => s.id === server.id);
-        if (index >= 0) {
-            this._mcpServers[index] = server;
-        } else {
-            this._mcpServers.push(server);
-        }
-
+        this._mcpServers = await this.mcpStore.save(server, this._mcpServers);
         this.notify();
     }
 
     async deleteMCPServer(id: string): Promise<void> {
-        const fullPath = `${MCP_DIR}/${id}.json`;
-        const nodeId = await this.engine.resolvePath(fullPath);
-
-        if (nodeId) {
-            await this.engine.delete([nodeId]);
-        }
-
-        this._mcpServers = this._mcpServers.filter((s) => s.id !== id);
+        this._mcpServers = await this.mcpStore.delete(id, this._mcpServers);
         this.notify();
     }
 
@@ -727,32 +664,27 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
 
     private async restoreConnection(targetId: string): Promise<void> {
         const keys = Object.keys(LLM_PROVIDER_DEFAULTS);
-        let targetProviderKey = '';
-
-        if (targetId === 'default') {
-            targetProviderKey = keys[0];
-        } else if (targetId.startsWith('conn-')) {
-            targetProviderKey = targetId.replace('conn-', '');
-        }
+        const targetProviderKey = targetId === 'default'
+            ? keys[0]
+            : targetId.startsWith('conn-') ? targetId.replace('conn-', '') : '';
 
         const targetProviderDef = LLM_PROVIDER_DEFAULTS[targetProviderKey];
         if (!targetProviderDef) {
             throw new Error(`无法找到 ID 为 ${targetId} 的默认连接定义`);
         }
+
         const oldConn = await this.getConnection(targetId);
 
-        const newConn: LLMConnection = {
+        await this.saveConnection({
             id: targetId,
             name: targetProviderDef.name,
             provider: targetProviderKey,
-            apiKey: oldConn?.apiKey || '', // 保留旧 API Key
+            apiKey: oldConn?.apiKey || '',
             baseURL: targetProviderDef.baseURL,
             model: targetProviderDef.models[0]?.id || '',
             availableModels: [...targetProviderDef.models],
             metadata: { isSystemDefault: true },
-        };
-
-        await this.saveConnection(newConn);
+        });
     }
 
     private async restoreAgent(agentId: string): Promise<void> {
@@ -762,7 +694,6 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
         }
 
         const { initPath, initialTags, ...agentData } = def;
-
         if (!agentData.config.connectionId) {
             agentData.config.connectionId = 'default';
         }
