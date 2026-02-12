@@ -5,34 +5,60 @@ export const LayoutTemplates = {
     /**
      * 渲染主工作区结构
      */
-renderWorkspace: (currentTitle: string, branchInfo?: { name?: string; count?: number }) => `
-    <div class="llm-workspace-titlebar">
-        <div class="llm-workspace-titlebar__left">
-            <button class="llm-workspace-titlebar__btn" id="llm-btn-sidebar" title="Toggle Sidebar">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                    <line x1="9" y1="3" x2="9" y2="21"></line>
-                </svg>
-            </button>
-            
-            <div class="llm-workspace-titlebar__sep"></div>
-            
-            <input type="text" class="llm-workspace-titlebar__input" id="llm-title-input" 
-                   value="${escapeHTML(currentTitle)}" placeholder="Untitled Chat" />
-            
-            <!-- ✅ 新增：分支指示器 -->
-            ${branchInfo?.name ? `
-                <div class="llm-workspace-branch-badge">
-                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-                        <line x1="6" y1="3" x2="6" y2="15"></line>
-                        <circle cx="18" cy="6" r="3"></circle>
-                        <circle cx="6" cy="18" r="3"></circle>
-                        <path d="M18 9a9 9 0 0 1-9 9"></path>
+    renderWorkspace: (currentTitle: string, branchInfo?: { name?: string; count?: number }) => `
+        <div class="llm-workspace-titlebar">
+            <div class="llm-workspace-titlebar__left">
+                <button class="llm-workspace-titlebar__btn" id="llm-btn-sidebar" title="Toggle Sidebar">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                        <line x1="9" y1="3" x2="9" y2="21"></line>
                     </svg>
-                    <span>${escapeHTML(branchInfo.name)}</span>
-                    ${branchInfo.count ? `<span class="count">(${branchInfo.count})</span>` : ''}
+                </button>
+                
+                <div class="llm-workspace-titlebar__sep"></div>
+                
+                <input type="text" class="llm-workspace-titlebar__input" id="llm-title-input" 
+                       value="${escapeHTML(currentTitle)}" placeholder="Untitled Chat" />
+                
+                <!-- ✅ 分支指示器区域：始终渲染容器，内容由 BranchIndicator 组件动态填充 -->
+                <div class="llm-branch-indicator-bar" id="llm-branch-indicator">
+                    ${branchInfo?.name ? `
+                        <button class="llm-branch-indicator-btn"
+                                data-action="toggle-branch-dropdown"
+                                title="Branch: ${escapeHTML(branchInfo.name)}${branchInfo.count ? ` (${branchInfo.count} branches)` : ''}">
+                            <svg class="llm-branch-indicator-icon" viewBox="0 0 24 24" 
+                                 width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="6" y1="3" x2="6" y2="15"></line>
+                                <circle cx="18" cy="6" r="3"></circle>
+                                <circle cx="6" cy="18" r="3"></circle>
+                                <path d="M18 9a9 9 0 0 1-9 9"></path>
+                            </svg>
+                            <span class="llm-branch-indicator-name">${escapeHTML(branchInfo.name)}</span>
+                            ${branchInfo.count && branchInfo.count > 1
+                ? `<span class="llm-branch-indicator-count">${branchInfo.count}</span>`
+                : ''}
+                            <svg class="llm-branch-indicator-chevron" viewBox="0 0 24 24"
+                                 width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="6 9 12 15 18 9"></polyline>
+                            </svg>
+                        </button>
+                        <div class="llm-branch-dropdown" style="display:none"></div>
+                    ` : `
+                        <button class="llm-branch-indicator-btn llm-branch-indicator-btn--minimal"
+                                data-action="show-branch-tree"
+                                title="Branch: main">
+                            <svg class="llm-branch-indicator-icon" viewBox="0 0 24 24" 
+                                 width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="6" y1="3" x2="6" y2="15"></line>
+                                <circle cx="18" cy="6" r="3"></circle>
+                                <circle cx="6" cy="18" r="3"></circle>
+                                <path d="M18 9a9 9 0 0 1-9 9"></path>
+                            </svg>
+                            <span class="llm-branch-indicator-name">main</span>
+                        </button>
+                    `}
                 </div>
-            ` : ''}
+
                 <!-- 状态指示器 -->
                 <div class="llm-workspace-status" id="llm-status-indicator">
                     <span class="llm-workspace-status__dot"></span>
@@ -46,7 +72,7 @@ renderWorkspace: (currentTitle: string, branchInfo?: { name?: string; count?: nu
                     <span class="llm-bg-badge">2 running</span>
                 </div>
 
-                <!-- ✨ [新增] 4个新按钮组 -->
+                <!-- 导航按钮组 -->
                 <button class="llm-workspace-titlebar__btn" id="llm-btn-prev-agent" title="Prev Agent Chat">
                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"></polyline></svg>
                 </button>
