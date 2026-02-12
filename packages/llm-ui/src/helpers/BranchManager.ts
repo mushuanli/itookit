@@ -70,10 +70,7 @@ export class BranchManager {
         });
 
         Toast.success(`Branch "${branchName || 'Untitled'}" created`);
-
-        // 刷新视图（事件驱动已处理部分，但全量刷新保证一致性）
-        const sessions = this.sessionManager.getSessions();
-        this.historyView.renderFull(sessions);
+        // ✅ 删除：renderFull() —— 事件驱动已处理
     }
 
     private navigateToBranch(nodeId: string): void {
@@ -101,9 +98,6 @@ export class BranchManager {
         //   3. 内存清理
         //   4. 发送 messages_deleted 事件
         await this.sessionManager.deleteBranch(nodeId, true);
-
-        const sessions = this.sessionManager.getSessions();
-        this.historyView.renderFull(sessions);
         Toast.success('Branch deleted');
     }
 
@@ -135,10 +129,6 @@ export class BranchManager {
         //   3. 发送 session_cleared + session_start 事件序列
         //   4. 发送 branch_switched 事件
         await this.sessionManager.navigateToBranch(branchId);
-
-        // 重新渲染（事件驱动覆盖大部分场景，全量刷新作为兜底）
-        const updated = this.sessionManager.getSessions();
-        this.historyView.renderFull(updated);
     }
 
     private promptBranchName(): Promise<string | null> {
