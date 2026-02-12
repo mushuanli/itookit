@@ -188,7 +188,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
   }
 
   /**
-   * ✅ 新增：验证 manifest 结构
+   * 验证 manifest 结构
    */
   private isValidManifest(manifest: any): manifest is ChatManifest {
     return (
@@ -203,7 +203,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
   }
 
   /**
-   * ✅ 新增：创建新的会话结构
+   * 创建新的会话结构
    */
   private async createNewSessionStructure(
     nodeId: string,
@@ -260,7 +260,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
   }
 
   /**
-   * ✅ 新增：重建会话结构（保留 manifest ID，重建隐藏目录）
+   * 重建会话结构（保留 manifest ID，重建隐藏目录）
    */
   private async rebuildSessionStructure(
     nodeId: string,
@@ -360,7 +360,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
   }
 
   /**
-   * ✅ 新增：读取 UI 状态
+   * 读取 UI 状态
    */
   async getUIState(nodeId: string): Promise<ChatManifest['ui_state'] | null> {
     try {
@@ -373,7 +373,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
   }
 
   /**
-   * ✅ 新增：更新 UI 状态（增量合并）
+   * 更新 UI 状态（增量合并）
    */
   async updateUIState(
     nodeId: string,
@@ -383,11 +383,9 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
       try {
         const manifest = await this.getManifest(nodeId);
 
-        // 增量合并
         manifest.ui_state = {
           ...manifest.ui_state,
           ...updates,
-          // 对于 collapse_states，需要深度合并
           collapse_states: {
             ...manifest.ui_state?.collapse_states,
             ...updates.collapse_states
@@ -398,7 +396,6 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
 
         await this.engine.writeContent(nodeId, JSON.stringify(manifest, null, 2));
       } catch (e: any) {
-        // ✨ 优雅处理节点不存在
         if (e.message?.includes('not found') ||
           e.message?.includes('Node not found') ||
           e.message?.includes('Manifest missing')) {
@@ -557,13 +554,13 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
   }
 
   /**
-   * 删除消息
-   * 
-   * 操作步骤：
-   * 1. 软删除节点（标记 status: 'deleted'）
-   * 2. 从父节点的 children_ids 中移除引用
-   * 3. 如果删除的是 current_head 或其祖先链上的节点，回退 manifest
-   * 4. 递归软删除所有子节点（孤儿清理）
+   * 删除单条消息
+   *
+   * 操作步骤（已修正时序）：
+   * 1. 读取目标节点
+   * 2. 软删除当前节点及其所有后代（标记 status: 'deleted'）
+   * 3. 从父节点的 children_ids 中移除引用
+   * 4. 修复 manifest（current_head / branch heads 回退）
    */
   async deleteMessage(
     nodeId: string,
@@ -571,31 +568,141 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
     messageNodeId: string
   ): Promise<void> {
     return this.lockManager.acquire(`session:${sessionId}`, async () => {
-      const messagePath = this.getNodePath(sessionId, messageNodeId);
-      const messageNode = await this.readJson<ChatNode>(messagePath);
+      await this.deleteMessageInternal(nodeId, sessionId, messageNodeId);
+    });
+  }
 
-      if (!messageNode) {
-        log.warn('Message node not found for deletion', {
-          sessionId,
-          messageNodeId
-        });
+  /**
+   * ✅ 新增：批量删除消息
+   *
+   * 优化点：
+   * - 单次锁获取
+   * - 批量处理所有节点的软删除和父引用清理
+   * - 只读写一次 manifest
+   */
+  async deleteMessages(
+    nodeId: string,
+    sessionId: string,
+    messageNodeIds: string[]
+  ): Promise<void> {
+    if (messageNodeIds.length === 0) return;
+
+    if (messageNodeIds.length === 1) {
+      return this.deleteMessage(nodeId, sessionId, messageNodeIds[0]);
+    }
+
+    return this.lockManager.acquire(`session:${sessionId}`, async () => {
+      const deletedNodeIds = new Set<string>();
+      // parentId -> Set<childIdsToRemove>
+      const parentUpdates = new Map<string, Set<string>>();
+
+      // 阶段 1：收集所有需要删除的节点信息
+      for (const messageNodeId of messageNodeIds) {
+        const messagePath = this.getNodePath(sessionId, messageNodeId);
+        const messageNode = await this.readJson<ChatNode>(messagePath);
+
+        if (!messageNode || messageNode.status === 'deleted') {
+          continue;
+        }
+
+        // 记录需要从父节点移除的引用
+        if (messageNode.parent_id) {
+          if (!parentUpdates.has(messageNode.parent_id)) {
+            parentUpdates.set(messageNode.parent_id, new Set());
+          }
+          parentUpdates.get(messageNode.parent_id)!.add(messageNodeId);
+        }
+
+        // 收集当前节点及其所有后代
+        await this.collectDescendantIds(sessionId, messageNodeId, deletedNodeIds);
+      }
+
+      if (deletedNodeIds.size === 0) {
+        log.debug('No nodes to delete in batch', { sessionId });
         return;
       }
 
-      if (messageNode.status === 'deleted') {
-        return;
+      // 阶段 2：批量软删除所有节点
+      for (const deletedId of deletedNodeIds) {
+        const path = this.getNodePath(sessionId, deletedId);
+        const node = await this.readJson<ChatNode>(path);
+        if (node && node.status !== 'deleted') {
+          node.status = 'deleted';
+          await this.writeJson(path, node);
+        }
       }
 
-      // 1. 从父节点的 children_ids 中移除
-      if (messageNode.parent_id) {
-        await this.removeFromParentChildren(sessionId, messageNode.parent_id, messageNodeId);
+      // 阶段 3：批量更新父节点的 children_ids
+      for (const [parentId, childIdsToRemove] of parentUpdates) {
+        // 如果父节点本身也在删除列表中，跳过
+        if (deletedNodeIds.has(parentId)) continue;
+
+        const parentPath = this.getNodePath(sessionId, parentId);
+        const parentNode = await this.readJson<ChatNode>(parentPath);
+        if (parentNode) {
+          const originalLength = parentNode.children_ids.length;
+          parentNode.children_ids = parentNode.children_ids.filter(
+            id => !childIdsToRemove.has(id)
+          );
+          if (parentNode.children_ids.length !== originalLength) {
+            await this.writeJson(parentPath, parentNode);
+          }
+        }
       }
 
-      // 2. 软删除当前节点及其所有后代
-      await this.softDeleteRecursive(sessionId, messageNodeId);
+      // 阶段 4：一次性修复 manifest
+      await this.repairManifestAfterBatchDelete(nodeId, sessionId, deletedNodeIds);
 
-      // 3. 更新 manifest
-      await this.repairManifestAfterDelete(nodeId, sessionId, messageNodeId, messageNode);
+      log.info('Batch delete completed', {
+        sessionId,
+        requestedCount: messageNodeIds.length,
+        actualDeletedCount: deletedNodeIds.size
+      });
+    });
+  }
+
+  // ============================================================
+  // 删除 - 内部辅助方法
+  // ============================================================
+
+  /**
+   * 内部删除逻辑（不获取锁，由调用方负责加锁）
+   */
+  private async deleteMessageInternal(
+    nodeId: string,
+    sessionId: string,
+    messageNodeId: string
+  ): Promise<void> {
+    const messagePath = this.getNodePath(sessionId, messageNodeId);
+    const messageNode = await this.readJson<ChatNode>(messagePath);
+
+    if (!messageNode) {
+      log.warn('Message node not found for deletion', {
+        sessionId,
+        messageNodeId
+      });
+      return;
+    }
+
+    if (messageNode.status === 'deleted') {
+      return;
+    }
+
+    // ✅ 步骤 1：先软删除当前节点及其所有后代
+    const deletedCount = await this.softDeleteRecursive(sessionId, messageNodeId);
+
+    // ✅ 步骤 2：从父节点的 children_ids 中移除引用
+    if (messageNode.parent_id) {
+      await this.removeFromParentChildren(sessionId, messageNode.parent_id, messageNodeId);
+    }
+
+    // ✅ 步骤 3：最后更新 manifest
+    await this.repairManifestAfterDelete(nodeId, sessionId, messageNodeId, messageNode);
+
+    log.debug('Message deleted', {
+      sessionId,
+      messageNodeId,
+      deletedCount
     });
   }
 
@@ -644,12 +751,28 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
   }
 
   /**
-   * 删除后修复 manifest
-   * 
-   * 策略：
-   * - 如果 current_head 是被删除的节点或其后代，回退到被删除节点的父节点
-   * - 如果父节点也无效，逐级回退直到 root_id
-   * - 同步更新 branches 中当前分支的指针
+   * 递归收集节点及其所有后代 ID（不修改任何数据）
+   */
+  private async collectDescendantIds(
+    sessionId: string,
+    nodeId: string,
+    collected: Set<string>
+  ): Promise<void> {
+    if (collected.has(nodeId)) return; // 防止循环
+
+    const path = this.getNodePath(sessionId, nodeId);
+    const node = await this.readJson<ChatNode>(path);
+    if (!node || node.status === 'deleted') return;
+
+    collected.add(nodeId);
+
+    for (const childId of node.children_ids) {
+      await this.collectDescendantIds(sessionId, childId, collected);
+    }
+  }
+
+  /**
+   * 单条删除后修复 manifest
    */
   private async repairManifestAfterDelete(
     nodeId: string,
@@ -697,16 +820,99 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
     if (needsUpdate) {
       manifest.updated_at = new Date().toISOString();
       await this.engine.writeContent(nodeId, JSON.stringify(manifest, null, 2));
-
-      //log.info('Manifest repaired after deletion', { sessionId, repairs });
+      log.info('Manifest repaired after deletion', { sessionId, repairs });
     }
   }
 
   /**
+   * ✅ 新增：批量删除后一次性修复 manifest
+   */
+  private async repairManifestAfterBatchDelete(
+    nodeId: string,
+    sessionId: string,
+    deletedNodeIds: Set<string>
+  ): Promise<void> {
+    const manifest = await this.getManifest(nodeId);
+    let needsUpdate = false;
+    const repairs: string[] = [];
+
+    // 修复 current_head
+    if (deletedNodeIds.has(manifest.current_head)) {
+      const newHead = await this.findNearestActiveAncestor(
+        sessionId,
+        manifest.current_head,
+        deletedNodeIds,
+        manifest.root_id
+      );
+      manifest.current_head = newHead;
+      manifest.branches[manifest.current_branch] = newHead;
+      needsUpdate = true;
+      repairs.push(`current_head -> ${newHead}`);
+    }
+
+    // 修复所有分支 heads
+    for (const [branchName, branchHead] of Object.entries(manifest.branches)) {
+      if (branchName === manifest.current_branch) continue;
+
+      if (deletedNodeIds.has(branchHead)) {
+        const newHead = await this.findNearestActiveAncestor(
+          sessionId,
+          branchHead,
+          deletedNodeIds,
+          manifest.root_id
+        );
+        manifest.branches[branchName] = newHead;
+        needsUpdate = true;
+        repairs.push(`branch "${branchName}" -> ${newHead}`);
+      }
+    }
+
+    if (needsUpdate) {
+      manifest.updated_at = new Date().toISOString();
+      await this.engine.writeContent(nodeId, JSON.stringify(manifest, null, 2));
+      log.info('Manifest repaired after batch delete', { sessionId, repairs });
+    }
+  }
+
+  /**
+   * ✅ 新增：从目标节点向上查找最近的未被删除的祖先
+   */
+  private async findNearestActiveAncestor(
+    sessionId: string,
+    startNodeId: string,
+    deletedNodeIds: Set<string>,
+    fallbackId: string
+  ): Promise<string> {
+    let currentId: string | null = startNodeId;
+    const visited = new Set<string>();
+
+    while (currentId) {
+      if (visited.has(currentId)) break;
+      visited.add(currentId);
+
+      const node = await this.readJson<ChatNode>(
+        this.getNodePath(sessionId, currentId)
+      );
+      if (!node) break;
+
+      // 检查父节点是否未被删除且有效
+      if (node.parent_id && !deletedNodeIds.has(node.parent_id)) {
+        const parentNode = await this.readJson<ChatNode>(
+          this.getNodePath(sessionId, node.parent_id)
+        );
+        if (parentNode && parentNode.status === 'active') {
+          return node.parent_id;
+        }
+      }
+
+      currentId = node.parent_id;
+    }
+
+    return fallbackId;
+  }
+
+  /**
    * 检查 targetId 是否等于 deletedId 或是 deletedId 的后代
-   * 
-   * 简化实现：如果 targetId === deletedId 直接返回 true，
-   * 否则从 targetId 沿 parent_id 向上查找，看是否经过 deletedId。
    */
   private async isNodeInDeletedSubtree(
     targetId: string,
@@ -721,7 +927,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
 
     while (currentId) {
       if (currentId === deletedId) return true;
-      if (visited.has(currentId)) break; // 防止环
+      if (visited.has(currentId)) break;
       visited.add(currentId);
 
       const node: ChatNode | null = await this.readJson<ChatNode>(
@@ -789,12 +995,10 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
   // ============================================================
   // 分支操作
   // ============================================================
-  /* ✅ 新增：创建新分支
-  * @param nodeId VFS 节点 ID
-  * @param sessionId 会话 ID
-  * @param sourceMessageId 源消息 ID
-  * @param options 分支选项
-  */
+
+  /**
+   * 创建新分支
+   */
   async createBranch(
     nodeId: string,
     sessionId: string,
@@ -887,10 +1091,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
   }
 
   /**
-   * ✅ 新增：获取分支树
-   * @param sessionId 会话 ID
-* @param nodeId VFS 节点 ID（.chat 文件的 ID）
-   * @param rootNodeId 根节点 ID（可选，默认从 manifest 获取）
+   * 获取分支树
    */
   async getBranchTree(
     sessionId: string,
@@ -898,13 +1099,12 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
     rootNodeId?: string
   ): Promise<BranchTreeNode> {
     const manifest = await this.getManifest(nodeId);
-
     const root = rootNodeId || manifest.root_id;
     return this.buildBranchTreeRecursive(sessionId, root, manifest.current_head);
   }
 
   /**
-   * 递归构建分支树
+   * ✅ 修复：递归构建分支树，过滤已删除节点
    */
   private async buildBranchTreeRecursive(
     sessionId: string,
@@ -921,12 +1121,29 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
 
     const children: BranchTreeNode[] = [];
     for (const childId of node.children_ids) {
-      const childNode = await this.buildBranchTreeRecursive(
-        sessionId,
-        childId,
-        activeNodeId
+      // ✅ 修复：先检查子节点状态，跳过已删除的节点
+      const childNode = await this.readJson<ChatNode>(
+        this.getNodePath(sessionId, childId)
       );
-      children.push(childNode);
+      if (!childNode || childNode.status === 'deleted') {
+        continue;
+      }
+
+      try {
+        const childTree = await this.buildBranchTreeRecursive(
+          sessionId,
+          childId,
+          activeNodeId
+        );
+        children.push(childTree);
+      } catch (e) {
+        // 子节点构建失败时跳过，避免整棵树构建失败
+        log.warn('Failed to build branch tree child', {
+          sessionId,
+          childId,
+          error: e
+        });
+      }
     }
 
     return {
@@ -942,7 +1159,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
   }
 
   /**
-   * ✅ 新增：重命名分支
+   * 重命名分支
    */
   async renameBranch(
     sessionId: string,
@@ -973,7 +1190,6 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
 
   /**
    * 删除分支（级联删除子节点）
-   * 更新 manifest 以确保不引用已删除节点
    */
   async deleteBranch(
     nodeId: string,
@@ -1000,14 +1216,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
         return deletedIds;
       }
 
-      // 从父节点的 children_ids 中移除
-      if (targetNode.parent_id) {
-        await this.removeFromParentChildren(
-          sessionId,
-          targetNode.parent_id,
-          messageNodeId
-        );
-      }
+      // ✅ 修正时序：先收集并软删除，再移除父引用
 
       // 递归软删除
       const deleteRecursive = async (id: string): Promise<void> => {
@@ -1029,6 +1238,15 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
 
       await deleteRecursive(messageNodeId);
 
+      // 从父节点的 children_ids 中移除
+      if (targetNode.parent_id) {
+        await this.removeFromParentChildren(
+          sessionId,
+          targetNode.parent_id,
+          messageNodeId
+        );
+      }
+
       // 修复 manifest
       await this.repairManifestAfterDelete(
         nodeId,
@@ -1046,7 +1264,6 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
       return deletedIds;
     });
   }
-
 
   /**
    * 切换分支
@@ -1088,9 +1305,6 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
   // ID 转换
   // ============================================================
 
-  /**
-   * 从 VFS nodeId 获取 sessionId
-   */
   async getSessionIdFromNodeId(nodeId: string): Promise<string | null> {
     try {
       const manifest = await this.getManifest(nodeId);
@@ -1105,22 +1319,16 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
   // ISessionEngine 文件操作
   // ============================================================
 
-  /**
-   * 加载文件树
-   */
   async loadTree(): Promise<EngineNode[]> {
     const allNodes = await this.engine.loadTree();
 
     return allNodes.filter((node: EngineNode) => {
-      // 1. 总是排除以 . 开头的隐藏文件/文件夹 (系统数据)
       if (node.name.startsWith('.')) return false;
 
-      // 2. 如果是文件，只保留 .chat
       if (node.type === 'file') {
         return node.name.endsWith('.chat');
       }
 
-      // 3. 如果是目录，保留（用于分类）
       if (node.type === 'directory') {
         return true;
       }
@@ -1129,38 +1337,26 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
     });
   }
 
-  /**
-   * 创建目录
-   */
   async createDirectory(name: string, parentId: string | null): Promise<EngineNode> {
     return this.engine.createDirectory(name, parentId);
   }
 
-  /**
-   * 创建文件 - 供 VFS UI 创建新文件时调用
-   */
   async createFile(
     name: string,
     parentId: string | null,
     _content?: string | ArrayBuffer
   ): Promise<EngineNode> {
     const baseName = (name || "New Chat").replace(/\.chat$/i, '');
-
-    // 1. 查找可用的文件名
     const availableName = await this.findAvailableFileName(baseName, parentId);
 
-    // 2. 生成 sessionId
     const sessionId = generateUUID();
     const now = new Date().toISOString();
 
-    // 3. 创建隐藏数据目录（带冲突处理）
     try {
       await this.engine.createDirectory(this.getHiddenDir(sessionId), null);
     } catch (e: any) {
-      // 如果目录已存在（极端情况：UUID 碰撞），重试
       if (e.message?.includes('exists')) {
         log.debug(`Hidden directory already exists for ${sessionId}, this is unexpected`);
-        // 可以选择清理或重新生成 UUID
       } else {
         throw e;
       }
@@ -1293,6 +1489,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
       count: ids.length,
       nodeIds: ids
     });
+
     const cleanupRecursively = async (nodeId: string) => {
       const node = await this.vfs.getNodeById(nodeId);
       if (!node) return;
@@ -1526,7 +1723,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
   }
 
   // ============================================================
-  // ✅ 新增：会话设置管理 (YAML)
+  // 会话设置管理 (YAML)
   // ============================================================
 
   private getSettingsPath(sessionId: string): string {
