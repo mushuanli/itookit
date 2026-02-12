@@ -327,6 +327,14 @@ export class SessionManager {
     // 消息操作
     // ================================================================
 
+    /**
+     * 删除单条消息（及关联的 assistant 消息）
+     *
+     * ✅ 修复：
+     * - 先持久化删除，再内存删除
+     * - 正确关联删除 user+assistant 消息
+     * - 使用批量持久化删除减少 IO
+     */
     async deleteMessage(messageId: string, options?: DeleteOptions): Promise<void> {
         const { sessionId, nodeId, state } = this.ensureBound();
         const session = state.findSessionById(messageId);
@@ -335,22 +343,98 @@ export class SessionManager {
         const deleteResponses = options?.deleteAssociatedResponses ?? true;
         const idsToDelete = this.collectDeletableIds(state, messageId, deleteResponses);
 
-        const toDelete = idsToDelete.map((id) => ({
-            id,
-            persistedNodeId: state.findSessionById(id)?.persistedNodeId,
-        }));
-
-        // 批量删除
-        for (const { id, persistedNodeId } of toDelete) {
-            state.removeMessage(id);
-            if (persistedNodeId) {
-                await this.engine.deleteMessage(nodeId, sessionId, persistedNodeId).catch(console.warn);
+        // 收集持久化节点 ID
+        const persistedNodeIds: string[] = [];
+        for (const id of idsToDelete) {
+            const s = state.findSessionById(id);
+            if (s?.persistedNodeId) {
+                persistedNodeIds.push(s.persistedNodeId);
             }
+        }
+
+        // ✅ 先持久化删除（先更新 manifest，再删除节点文件）
+        if (persistedNodeIds.length > 0) {
+            try {
+                if (persistedNodeIds.length === 1) {
+                    await this.engine.deleteMessage(nodeId, sessionId, persistedNodeIds[0]);
+                } else {
+                    await this.engine.deleteMessages(nodeId, sessionId, persistedNodeIds);
+                }
+            } catch (e) {
+                log.warn('Failed to delete persisted messages', {
+                    sessionId,
+                    persistedNodeIds,
+                    error: e
+                });
+            }
+        }
+
+        // ✅ 然后从内存删除
+        for (const id of idsToDelete) {
+            state.removeMessage(id);
         }
 
         this.eventBus.emitSession(sessionId, {
             type: 'messages_deleted',
             payload: { deletedIds: idsToDelete },
+        });
+    }
+
+    /**
+     * ✅ 新增：批量删除消息
+     *
+     * @param messageIds 要删除的消息 ID 列表
+     * @param options 删除选项
+     */
+    async deleteMessages(messageIds: string[], options?: DeleteOptions): Promise<void> {
+        if (messageIds.length === 0) return;
+
+        if (messageIds.length === 1) {
+            return this.deleteMessage(messageIds[0], options);
+        }
+
+        const { sessionId, nodeId, state } = this.ensureBound();
+        const deleteResponses = options?.deleteAssociatedResponses ?? true;
+
+        // 收集所有需要删除的 ID（含关联的 assistant 消息），去重
+        const allIdsToDelete = new Set<string>();
+        const persistedNodeIds: string[] = [];
+
+        for (const messageId of messageIds) {
+            const ids = this.collectDeletableIds(state, messageId, deleteResponses);
+            for (const id of ids) {
+                if (!allIdsToDelete.has(id)) {
+                    allIdsToDelete.add(id);
+
+                    const session = state.findSessionById(id);
+                    if (session?.persistedNodeId) {
+                        persistedNodeIds.push(session.persistedNodeId);
+                    }
+                }
+            }
+        }
+
+        // ✅ 批量持久化删除（单次锁获取，单次 manifest 修复）
+        if (persistedNodeIds.length > 0) {
+            try {
+                await this.engine.deleteMessages(nodeId, sessionId, persistedNodeIds);
+            } catch (e) {
+                log.error('Batch delete persisted messages failed', {
+                    sessionId,
+                    count: persistedNodeIds.length,
+                    error: e
+                });
+            }
+        }
+
+        // ✅ 批量内存删除
+        for (const id of allIdsToDelete) {
+            state.removeMessage(id);
+        }
+
+        this.eventBus.emitSession(sessionId, {
+            type: 'messages_deleted',
+            payload: { deletedIds: Array.from(allIdsToDelete) },
         });
     }
 
@@ -963,33 +1047,58 @@ export class SessionManager {
     // 内部：消息操作辅助
     // ================================================================
 
+    /**
+     * ✅ 修复：收集需要删除的消息 ID
+     *
+     * - 删除 assistant 消息：只删除自身
+     * - 删除 user 消息：删除自身 + 紧跟的所有 assistant 消息
+     */
     private collectDeletableIds(
         state: SessionState,
         messageId: string,
         includeResponses: boolean = true
     ): string[] {
-        const ids: string[] = [messageId];
+        const ids: string[] = [];
         const session = state.findSessionById(messageId);
-        if (!session) return ids;
+        if (!session) return [messageId];
 
-        if (includeResponses && session.role === 'user') {
-            const sessions = state.getSessions();
-            const index = sessions.findIndex((s) => s.id === messageId);
+        if (session.role === 'assistant') {
+            // 删除 assistant 消息：只删除自身
+            ids.push(messageId);
+        } else if (session.role === 'user') {
+            // 删除 user 消息
+            ids.push(messageId);
 
-            if (index !== -1) {
-                for (let i = index + 1; i < sessions.length; i++) {
-                    if (sessions[i].role === 'assistant') {
-                        ids.push(sessions[i].id);
-                    } else {
-                        break;
+            if (includeResponses) {
+                const sessions = state.getSessions();
+                const index = sessions.findIndex(
+                    (s) => s.id === messageId || s.persistedNodeId === messageId
+                );
+
+                if (index !== -1) {
+                    // 向后查找所有紧跟的 assistant 消息
+                    for (let i = index + 1; i < sessions.length; i++) {
+                        if (sessions[i].role === 'assistant') {
+                            ids.push(sessions[i].id);
+                        } else {
+                            break;
+                        }
                     }
                 }
             }
+        } else {
+            // 其他角色：只删除自身
+            ids.push(messageId);
         }
 
         return ids;
     }
 
+    /**
+     * ✅ 修复：删除关联的 assistant 响应
+     *
+     * 复用 collectDeletableIds 和批量删除逻辑，避免重复代码
+     */
     private async deleteAssociatedResponses(
         sessionId: string,
         userMessageId: string,
@@ -1002,34 +1111,49 @@ export class SessionManager {
         const index = sessions.findIndex((s) => s.id === userMessageId);
         if (index === -1) return;
 
-        const toDelete: Array<{ id: string; persistedNodeId?: string }> = [];
+        // 只收集需要删除的 assistant IDs
+        const assistantIds: string[] = [];
+        const persistedNodeIds: string[] = [];
 
         for (let i = index + 1; i < sessions.length; i++) {
             if (sessions[i].role === 'assistant') {
-                toDelete.push({
-                    id: sessions[i].id,
-                    persistedNodeId: sessions[i].persistedNodeId,
-                });
+                assistantIds.push(sessions[i].id);
+                if (sessions[i].persistedNodeId) {
+                    persistedNodeIds.push(sessions[i].persistedNodeId!);
+                }
             } else {
                 break;
             }
         }
 
-        for (const { id, persistedNodeId } of toDelete) {
-            state.removeMessage(id);
-            if (persistedNodeId) {
-                await this.engine
-                    .deleteMessage(nodeId, sessionId, persistedNodeId)
-                    .catch((e) =>
-                        console.warn(`[SessionManager] Failed to delete response ${id}:`, e)
-                    );
+        if (assistantIds.length === 0) return;
+
+        // ✅ 先持久化删除
+        if (persistedNodeIds.length > 0) {
+            try {
+                if (persistedNodeIds.length === 1) {
+                    await this.engine.deleteMessage(nodeId, sessionId, persistedNodeIds[0]);
+                } else {
+                    await this.engine.deleteMessages(nodeId, sessionId, persistedNodeIds);
+                }
+            } catch (e) {
+                log.warn('Failed to delete associated responses', {
+                    sessionId,
+                    persistedNodeIds,
+                    error: e
+                });
             }
         }
 
-        if (toDelete.length > 0) {
+        // ✅ 然后内存删除
+        for (const id of assistantIds) {
+            state.removeMessage(id);
+        }
+
+        if (assistantIds.length > 0) {
             this.eventBus.emitSession(sessionId, {
                 type: 'messages_deleted',
-                payload: { deletedIds: toDelete.map((d) => d.id) },
+                payload: { deletedIds: assistantIds },
             });
         }
     }
