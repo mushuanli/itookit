@@ -195,6 +195,11 @@ export interface ILLMSessionEngine extends IBaseSessionEngine {
         sessionId: string,
         messageNodeId: string
     ): Promise<void>;
+    deleteMessages(
+        nodeId: string,
+        sessionId: string,
+        messageNodeIds: string[]
+    ): Promise<void>;
 
     /** 编辑消息（创建分支） */
     editMessage(
