@@ -2,7 +2,8 @@
 
 import { SessionSnapshot } from '@itookit/llm-engine';
 import { ChatInput } from '../components/ChatInput';
-import { BranchIndicator, BranchItem } from '../components/BranchIndicator';
+import { BranchIndicator } from '../components/BranchIndicator';
+import { BranchItem } from '../components/templates/BranchIndicatorTemplates';
 
 export class UIUpdater {
     private branchIndicator: BranchIndicator | null = null;

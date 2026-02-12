@@ -1,7 +1,7 @@
 // @file: llm-ui/components/BranchCompareView.ts
 
-import { escapeHTML } from '@itookit/common';
 import { SessionGroup } from '@itookit/llm-engine';
+import { BranchTemplates } from './templates/BranchTemplates';
 
 export interface BranchCompareViewOptions {
     onClose?: () => void;
@@ -35,63 +35,37 @@ export class BranchCompareView {
 
         this.panel = document.createElement('div');
         this.panel.className = 'llm-branch-compare';
-        this.panel.innerHTML = `
-            <div class="llm-branch-compare__overlay"></div>
-            <div class="llm-branch-compare__content">
-                <div class="llm-branch-compare__header">
-                    <h3>Compare Branches</h3>
-                    <button class="llm-icon-btn" data-action="close" title="Close">
-                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-                            <line x1="18" y1="6" x2="6" y2="18"></line>
-                            <line x1="6" y1="6" x2="18" y2="18"></line>
-                        </svg>
-                    </button>
-                </div>
-                
-                <div class="llm-branch-compare__body">
-                    <div class="llm-branch-compare__column">
-                        <div class="llm-branch-compare__column-header">
-                            <span class="llm-branch-compare__label">Branch A</span>
-                            ${this.renderBranchMeta(branch1)}
-                            <button class="llm-btn llm-btn--sm" data-action="select" data-branch-id="${branch1.id}">
-                                Use This
-                            </button>
-                        </div>
-                        <div class="llm-branch-compare__column-content">
-                            ${this.renderDiffContent(content1, diff, 'left')}
-                        </div>
-                    </div>
-                    
-                    <div class="llm-branch-compare__divider"></div>
-                    
-                    <div class="llm-branch-compare__column">
-                        <div class="llm-branch-compare__column-header">
-                            <span class="llm-branch-compare__label">Branch B</span>
-                            ${this.renderBranchMeta(branch2)}
-                            <button class="llm-btn llm-btn--sm" data-action="select" data-branch-id="${branch2.id}">
-                                Use This
-                            </button>
-                        </div>
-                        <div class="llm-branch-compare__column-content">
-                            ${this.renderDiffContent(content2, diff, 'right')}
-                        </div>
-                    </div>
-                
-                <div class="llm-branch-compare__footer">
-                    <div class="llm-branch-compare__stats">
-                        <span class="llm-branch-compare__stat llm-branch-compare__stat--added">
-                            +${diff.addedLines} lines
-                        </span>
-                        <span class="llm-branch-compare__stat llm-branch-compare__stat--removed">
-                            -${diff.removedLines} lines
-                        </span>
-                        <span class="llm-branch-compare__stat">
-                            ${diff.similarity}% similar
-                        </span>
-                    </div>
-                </div>
-            </div>
-        `;
+        this.panel.innerHTML = BranchTemplates.renderCompareViewStructure();
+
+        const bodyEl = this.panel.querySelector('.llm-branch-compare__body');
+        if (bodyEl) {
+            const timestamp1 = new Date(branch1.timestamp).toLocaleString();
+            const timestamp2 = new Date(branch2.timestamp).toLocaleString();
+
+            const meta1 = BranchTemplates.renderBranchMeta(timestamp1, branch1.branchInfo?.name);
+            const meta2 = BranchTemplates.renderBranchMeta(timestamp2, branch2.branchInfo?.name);
+
+            const diffContent1 = this.renderDiffContent(content1, diff, 'left');
+            const diffContent2 = this.renderDiffContent(content2, diff, 'right');
+
+            const column1 = BranchTemplates.renderCompareColumn('Branch A', branch1.id, meta1, diffContent1);
+            const column2 = BranchTemplates.renderCompareColumn('Branch B', branch2.id, meta2, diffContent2);
+
+            bodyEl.innerHTML = `
+                ${column1}
+                <div class="llm-branch-compare__divider"></div>
+                ${column2}
+            `;
+        }
+
+        const footerEl = this.panel.querySelector('.llm-branch-compare__footer');
+        if (footerEl) {
+            footerEl.innerHTML = BranchTemplates.renderCompareStats(
+                diff.addedLines,
+                diff.removedLines,
+                diff.similarity
+            );
+        }
 
         this.container.appendChild(this.panel);
         this.bindEvents();
@@ -126,34 +100,17 @@ export class BranchCompareView {
         return session.executionRoot?.data.output || '';
     }
 
-    /**
-     * 渲染分支元数据
-     */
-    private renderBranchMeta(session: SessionGroup): string {
-        const timestamp = new Date(session.timestamp).toLocaleString();
-        const branchName = session.branchInfo?.name || '';
-        return `
-            <div class="llm-branch-compare__meta">
-                <span class="llm-branch-compare__time">${timestamp}</span>
-                ${branchName ? `<span class="llm-branch-badge">${escapeHTML(branchName)}</span>` : ''}
-            </div>
-        `;
-    }
-
-    /**
-     * 计算差异
-     */
     private computeDiff(content1: string, content2: string): DiffResult {
         const lines1 = content1.split('\n');
         const lines2 = content2.split('\n');
-        
+
         // 简单的行级差异计算
         const set1 = new Set(lines1);
         const set2 = new Set(lines2);
-        
+
         let addedLines = 0;
         let removedLines = 0;
-        
+
         const diffLines1: DiffLine[] = lines1.map(line => {
             if (!set2.has(line)) {
                 removedLines++;
@@ -161,7 +118,7 @@ export class BranchCompareView {
             }
             return { text: line, type: 'unchanged' };
         });
-        
+
         const diffLines2: DiffLine[] = lines2.map(line => {
             if (!set1.has(line)) {
                 addedLines++;
@@ -169,14 +126,14 @@ export class BranchCompareView {
             }
             return { text: line, type: 'unchanged' };
         });
-        
+
         // 计算相似度
         const totalLines = Math.max(lines1.length, lines2.length);
         const unchangedLines = totalLines - Math.max(addedLines, removedLines);
-        const similarity = totalLines > 0 
-            ? Math.round((unchangedLines / totalLines) * 100) 
+        const similarity = totalLines > 0
+            ? Math.round((unchangedLines / totalLines) * 100)
             : 100;
-        
+
         return {
             left: diffLines1,
             right: diffLines2,
@@ -191,19 +148,10 @@ export class BranchCompareView {
      */
     private renderDiffContent(_content: string, diff: DiffResult, side: 'left' | 'right'): string {
         const lines = side === 'left' ? diff.left : diff.right;
-        
-        return lines.map((line, index) => {
-            const lineClass = line.type === 'unchanged' 
-                ? '' 
-                : `llm-branch-compare__line--${line.type}`;
-            
-            return `
-                <div class="llm-branch-compare__line ${lineClass}">
-                    <span class="llm-branch-compare__line-number">${index + 1}</span>
-                    <span class="llm-branch-compare__line-content">${escapeHTML(line.text) || '&nbsp;'}</span>
-                </div>
-            `;
-        }).join('');
+
+        return lines.map((line, index) =>
+            BranchTemplates.renderDiffLine(line, index)
+        ).join('');
     }
 
     /**
@@ -231,9 +179,6 @@ export class BranchCompareView {
         });
     }
 
-    /**
-     * 销毁
-     */
     destroy(): void {
         this.panel?.remove();
         this.panel = null;
@@ -252,3 +197,4 @@ interface DiffResult {
     removedLines: number;
     similarity: number;
 }
+
