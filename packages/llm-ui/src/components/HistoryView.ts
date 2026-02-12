@@ -9,7 +9,6 @@ import { LayoutTemplates } from './templates/LayoutTemplates';
 import { ErrorTemplates } from './templates/ErrorTemplates';
 import { showConfirmDialog, ISessionEngine } from '@itookit/common';
 import { BranchTreePanel } from './BranchTreePanel';
-import { BranchCompareView } from './BranchCompareView';
 import { CollapseStateMap } from '../core/types';
 
 export interface HistoryViewOptions {
@@ -77,7 +76,6 @@ export class HistoryView {
 
     // ✅ 新增：分支管理组件
     private branchTreePanel: BranchTreePanel | null = null;
-    private branchCompareView: BranchCompareView | null = null;
 
     // ✅ 新增：分支操作回调
     private onBranchAction?: BranchActionCallback;
@@ -400,13 +398,7 @@ export class HistoryView {
             onNavigate: (id) => this.onBranchAction?.('navigate', id),
             onRename: (id, name) => this.onBranchAction?.('rename', id, { newName: name }),
             onDelete: (id) => this.onBranchAction?.('delete', id),
-            onCompare: (id1, id2) => this.onBranchAction?.('compare', id1, { compareWith: id2 }),
             onClose: () => { }
-        });
-
-        this.branchCompareView = new BranchCompareView(this.container, {
-            onClose: () => { },
-            onSelectBranch: (branchId) => this.onBranchAction?.('select', branchId)
         });
     }
 
@@ -429,13 +421,6 @@ export class HistoryView {
      */
     public hideBranchTree(): void {
         this.branchTreePanel?.hide();
-    }
-
-    /**
-     * ✅ 新增：显示分支对比
-     */
-    public showBranchCompare(branch1: SessionGroup, branch2: SessionGroup): void {
-        this.branchCompareView?.show(branch1, branch2);
     }
 
     private initUserBubble(wrapper: HTMLElement, group: SessionGroup) {
@@ -1476,7 +1461,7 @@ export class HistoryView {
      */
     private handleBranchSwitched(payload: { fromId: string; toId: string }): void {
         // 更新激活状态
-    this.collapseStates = {};
+        this.collapseStates = {};
         const fromEl = this.findElementBySessionId(payload.fromId);
         const toEl = this.findElementBySessionId(payload.toId);
 
@@ -1564,9 +1549,6 @@ export class HistoryView {
         // ✅ 清理分支组件
         this.branchTreePanel?.destroy();
         this.branchTreePanel = null;
-
-        this.branchCompareView?.destroy();
-        this.branchCompareView = null;
 
         this.resizeObserver.disconnect();
 
