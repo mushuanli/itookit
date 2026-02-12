@@ -1,7 +1,7 @@
 // @file: llm-ui/components/FloatingNavPanel.ts
 
-import { escapeHTML } from '@itookit/common';
 import { SessionGroup } from '@itookit/llm-engine';
+import { FloatingNavPanelTemplates } from './templates/FloatingNavPanelTemplates';
 
 export interface FloatingNavPanelOptions {
     onNavigate: (sessionId: string) => void;
@@ -12,7 +12,7 @@ export interface FloatingNavPanelOptions {
     // ✨ 新增：批量操作回调
     onBatchDelete?: (sessionIds: string[]) => Promise<void>;
     onBatchCopy?: (sessionIds: string[]) => Promise<void>;
-    
+
     // ✅ 新增：分支操作
     onShowBranchTree?: () => void;
     onCreateBranch?: (sourceId: string) => void;
@@ -27,7 +27,7 @@ export interface ChatNavItem {
     index: number;
     timestamp: number;
     agentName?: string;
-    
+
     // ✅ 新增：分支信息
     branchName?: string;
     siblingIndex?: number;
@@ -43,10 +43,8 @@ export class FloatingNavPanel {
     private currentIndex: number = -1;
     private options: FloatingNavPanelOptions;
     private lastSelectedIndex: number = -1;
-    
-    // ✅ 移除 isSelectionMode，checkbox 始终可见
+
     private selectedIds: Set<string> = new Set();
-    // ✅ 新增：视图模式
     private viewMode: 'list' | 'tree' = 'list';
 
     private keydownHandler: ((e: KeyboardEvent) => void) | null = null;
@@ -66,12 +64,14 @@ export class FloatingNavPanel {
             preview: this.getPreview(session.content || session.executionRoot?.data.output || '', 30),
             isCollapsed: collapseStates[session.id] ?? false,
             index,
-            // ✅ 新增
             timestamp: session.timestamp,
-            agentName: session.executionRoot?.name
+            agentName: session.executionRoot?.name,
+            branchName: session.branchInfo?.name,
+            siblingIndex: session.siblingIndex,
+            siblingCount: session.siblingCount,
+            hasChildren: session.branchInfo?.hasChildren
         }));
-        
-        // 清理不再存在的选中 ID
+
         const currentIds = new Set(this.items.map(i => i.id));
         this.selectedIds = new Set([...this.selectedIds].filter(id => currentIds.has(id)));
 
@@ -80,9 +80,6 @@ export class FloatingNavPanel {
         }
     }
 
-    /**
-     * 设置当前聚焦的 chat（用于高亮显示）
-     */
     public setCurrentChat(sessionId: string): void {
         const idx = this.items.findIndex(item => item.id === sessionId);
         if (idx !== -1) {
@@ -93,9 +90,6 @@ export class FloatingNavPanel {
         }
     }
 
-    /**
-     * 显示/隐藏面板
-     */
     public toggle(): void {
         this.isVisible ? this.hide() : this.show();
     }
@@ -112,7 +106,7 @@ export class FloatingNavPanel {
         this.isVisible = false;
         this.selectedIds.clear();
         this.unbindKeyboard();
-        
+
         if (this.panel) {
             this.panel.classList.add('llm-nav-panel--hiding');
             setTimeout(() => {
@@ -122,9 +116,6 @@ export class FloatingNavPanel {
         }
     }
 
-    /**
-     * ✅ 新增：切换视图模式
-     */
     public setViewMode(mode: 'list' | 'tree'): void {
         this.viewMode = mode;
         if (this.isVisible) {
@@ -133,241 +124,66 @@ export class FloatingNavPanel {
     }
 
     private render(): void {
-        // 移除旧面板
         this.panel?.remove();
-        
+
         this.panel = document.createElement('div');
         this.panel.className = 'llm-nav-panel';
-        
+
         const userItems = this.items.filter(i => i.role === 'user');
         const totalUsers = userItems.length;
-        const currentUserIdx = this.currentIndex >= 0 
-            ? userItems.findIndex(u => u.index <= this.currentIndex) 
+        const currentUserIdx = this.currentIndex >= 0
+            ? userItems.findIndex(u => u.index <= this.currentIndex)
             : -1;
 
         const hasSelection = this.selectedIds.size > 0;
         const isAllSelected = this.selectedIds.size === this.items.length && this.items.length > 0;
 
-        this.panel.innerHTML = `
-            <div class="llm-nav-panel__header">
-                <span class="llm-nav-panel__title">Chat Navigator</span>
-                <span class="llm-nav-panel__counter">${currentUserIdx + 1} / ${totalUsers}</span>
-                <button class="llm-nav-panel__close" title="Close (Esc)">×</button>
-            </div>
-            
-            <!-- ✅ 统一工具栏 -->
-            <div class="llm-nav-panel__toolbar">
-                <!-- 左侧：选择相关 -->
-                <div class="llm-nav-panel__toolbar-group">
-                    <button class="llm-nav-panel__btn llm-nav-panel__btn--checkbox ${isAllSelected ? 'checked' : ''}" 
-                            data-action="toggle-select-all" 
-                            title="${isAllSelected ? 'Deselect All' : 'Select All'}">
-                        <span class="llm-nav-panel__checkbox-icon"></span>
-                    </button>
-                    ${hasSelection ? `
-                        <span class="llm-nav-panel__selection-count">${this.selectedIds.size} selected</span>
-                    ` : ''}
-                </div>
+        const listContent = this.items.length === 0
+            ? FloatingNavPanelTemplates.renderEmpty()
+            : (this.viewMode === 'list' ? this.renderList() : this.renderTreeView());
 
-                <div class="llm-nav-panel__toolbar-sep"></div>
-
-                <!-- 中间：批量操作（有选择时显示） -->
-                <div class="llm-nav-panel__toolbar-group llm-nav-panel__toolbar-group--actions ${hasSelection ? 'visible' : ''}">
-                    <button class="llm-nav-panel__btn" data-action="batch-toggle" title="Toggle Fold Selected">
-                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M9 18l6-6-6-6"/>
-                        </svg>
-                    </button>
-                    <button class="llm-nav-panel__btn" data-action="batch-copy" title="Copy Selected">
-                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                        </svg>
-                    </button>
-                    <button class="llm-nav-panel__btn llm-nav-panel__btn--danger" data-action="batch-delete" title="Delete Selected">
-                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-                            <polyline points="3 6 5 6 21 6"></polyline>
-                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                        </svg>
-                    </button>
-                    <button class="llm-nav-panel__btn" data-action="clear-selection" title="Clear Selection">
-                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-                            <line x1="18" y1="6" x2="6" y2="18"></line>
-                            <line x1="6" y1="6" x2="18" y2="18"></line>
-                        </svg>
-                    </button>
-                </div>
-
-                <!-- 右侧：视图控制 -->
-                <div class="llm-nav-panel__toolbar-group llm-nav-panel__toolbar-group--view ${hasSelection ? 'hidden' : ''}">
-                    <button class="llm-nav-panel__btn" data-action="fold-all" title="Fold All">
-                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-                            <polyline points="4 14 10 14 10 20"></polyline>
-                            <polyline points="20 10 14 10 14 4"></polyline>
-                        </svg>
-                    </button>
-                    <button class="llm-nav-panel__btn" data-action="unfold-all" title="Unfold All">
-                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-                            <polyline points="15 3 21 3 21 9"></polyline>
-                            <polyline points="9 21 3 21 3 15"></polyline>
-                        </svg>
-                    </button>
-                    <div class="llm-nav-panel__toolbar-sep"></div>
-                    <button class="llm-nav-panel__btn" data-action="prev" title="Previous (↑)">
-                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-                            <polyline points="18 15 12 9 6 15"></polyline>
-                        </svg>
-                    </button>
-                    <button class="llm-nav-panel__btn" data-action="next" title="Next (↓)">
-                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-                            <polyline points="6 9 12 15 18 9"></polyline>
-                        </svg>
-                    </button>
-                </div>
-            </div>
-            
-            <div class="llm-nav-panel__list">
-                ${this.viewMode === 'list' ? this.renderList() : this.renderTreeView()}
-            </div>
-            
-            <!-- ✅ 底部状态栏（可选，显示快捷键提示） -->
-            <div class="llm-nav-panel__footer">
-                <span class="llm-nav-panel__hint">
-                    <kbd>↑↓</kbd> Navigate &nbsp;
-                    <kbd>Shift+Click</kbd> Range Select &nbsp;
-                    ${this.viewMode === 'tree' ? '<kbd>→</kbd> Create Branch &nbsp;' : ''}
-                    <kbd>Esc</kbd> Close
-                </span>
-            </div>
-        `;
+        this.panel.innerHTML = FloatingNavPanelTemplates.renderPanel(
+            currentUserIdx,
+            totalUsers,
+            hasSelection,
+            isAllSelected,
+            this.selectedIds.size,
+            this.viewMode,
+            listContent
+        );
 
         this.container.appendChild(this.panel);
         this.bindEvents();
         this.updateHighlight();
-        
+
         requestAnimationFrame(() => {
             this.panel?.classList.add('llm-nav-panel--visible');
         });
     }
-    
-    /**
-     * ✅ 新增：渲染树形视图
-     */
-    private renderTreeView(): string {
-        if (this.items.length === 0) {
-            return '<div class="llm-nav-panel__empty">No messages yet</div>';
-        }
 
+    private renderTreeView(): string {
         return this.items.map((item, idx) => {
-            const icon = item.role === 'user' ? '👤' : '🤖';
-            const activeClass = idx === this.currentIndex ? 'llm-nav-item--active' : '';
+            const isActive = idx === this.currentIndex;
             const isSelected = this.selectedIds.has(item.id);
             const timeStr = this.formatTime(item.timestamp);
             const title = item.role === 'user' ? 'You' : (item.agentName || 'Assistant');
-            
-            // ✅ 分支信息
-            const hasBranches = (item.siblingCount || 0) > 1;
-            const branchInfo = hasBranches 
-                ? `<span class="llm-nav-item__branch-badge">${item.siblingIndex! + 1}/${item.siblingCount}</span>`
-                : '';
-            
-            const branchName = item.branchName 
-                ? `<span class="llm-nav-item__branch-name">${escapeHTML(item.branchName)}</span>`
-                : '';
 
-            return `
-                <div class="llm-nav-item llm-nav-item--tree ${activeClass} ${isSelected ? 'selected' : ''}"
-                     data-id="${item.id}"
-                     data-index="${idx}">
-                    <div class="llm-nav-item__checkbox ${isSelected ? 'checked' : ''}" data-checkbox="true"></div>
-                    <span class="llm-nav-item__icon">${icon}</span>
-                    <div class="llm-nav-item__content">
-                        <div class="llm-nav-item__header">
-                            <span class="llm-nav-item__title">${escapeHTML(title)}</span>
-                            ${branchName}
-                            ${branchInfo}
-                            <span class="llm-nav-item__time">${timeStr}</span>
-                        </div>
-                        <div class="llm-nav-item__preview">${escapeHTML(item.preview)}</div>
-                        
-                        <!-- ✅ 分支操作按钮 -->
-                        ${hasBranches || item.hasChildren ? `
-                            <div class="llm-nav-item__branch-actions">
-                                ${hasBranches ? `
-                                    <button class="llm-nav-item__branch-btn" 
-                                            data-action="prev-branch" 
-                                            title="Previous Branch"
-                                            ${(item.siblingIndex || 0) === 0 ? 'disabled' : ''}>
-                                        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
-                                            <polyline points="15 18 9 12 15 6"></polyline>
-                                        </svg>
-                                    </button>
-                                    <button class="llm-nav-item__branch-btn" 
-                                            data-action="next-branch" 
-                                            title="Next Branch"
-                                            ${(item.siblingIndex || 0) >= (item.siblingCount || 1) - 1 ? 'disabled' : ''}>
-                                        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
-                                            <polyline points="9 18 15 12 9 6"></polyline>
-                                        </svg>
-                                    </button>
-                                ` : ''}
-                                <button class="llm-nav-item__branch-btn" 
-                                        data-action="create-branch" 
-                                        title="Create Branch (→)">
-                                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
-                                        <line x1="12" y1="5" x2="12" y2="19"></line>
-                                        <line x1="5" y1="12" x2="19" y2="12"></line>
-                                    </svg>
-                                </button>
-                                ${item.hasChildren ? `
-                                    <button class="llm-nav-item__branch-btn" 
-                                            data-action="show-children" 
-                                            title="Show Child Branches">
-                                        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
-                                            <polyline points="6 9 12 15 18 9"></polyline>
-                                        </svg>
-                                    </button>
-                                ` : ''}
-                            </div>
-                        ` : ''}
-                    </div>
-                    <span class="llm-nav-item__index">#${idx + 1}</span>
-                </div>
-            `;
+            return FloatingNavPanelTemplates.renderTreeItem(
+                item, idx, isActive, isSelected, timeStr, title
+            );
         }).join('');
     }
 
     private renderList(): string {
-        if (this.items.length === 0) {
-            return '<div class="llm-nav-panel__empty">No messages yet</div>';
-        }
-
         return this.items.map((item, idx) => {
-            const icon = item.role === 'user' ? '👤' : '🤖';
-            const foldIcon = item.isCollapsed ? '▶' : '▼';
-            const activeClass = idx === this.currentIndex ? 'llm-nav-item--active' : '';
-            const collapsedClass = item.isCollapsed ? 'llm-nav-item--collapsed' : '';
+            const isActive = idx === this.currentIndex;
             const isSelected = this.selectedIds.has(item.id);
             const timeStr = this.formatTime(item.timestamp);
             const title = item.role === 'user' ? 'You' : (item.agentName || 'Assistant');
 
-            return `
-                <div class="llm-nav-item ${activeClass} ${collapsedClass} ${isSelected ? 'selected' : ''}" 
-                     data-id="${item.id}" 
-                     data-index="${idx}">
-                    <div class="llm-nav-item__checkbox ${isSelected ? 'checked' : ''}" data-checkbox="true"></div>
-                    <span class="llm-nav-item__fold" data-fold="true">${foldIcon}</span>
-                    <span class="llm-nav-item__icon">${icon}</span>
-                    <div class="llm-nav-item__content">
-                        <div class="llm-nav-item__header">
-                            <span class="llm-nav-item__title">${escapeHTML(title)}</span>
-                            <span class="llm-nav-item__time">${timeStr}</span>
-                        </div>
-                        <div class="llm-nav-item__preview">${escapeHTML(item.preview)}</div>
-                    </div>
-                    <span class="llm-nav-item__index">#${idx + 1}</span>
-                </div>
-            `;
+            return FloatingNavPanelTemplates.renderListItem(
+                item, idx, isActive, isSelected, timeStr, title
+            );
         }).join('');
     }
 
@@ -375,12 +191,12 @@ export class FloatingNavPanel {
         const date = new Date(timestamp);
         const now = new Date();
         const isToday = date.toDateString() === now.toDateString();
-        
+
         if (isToday) {
             return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         } else {
-            return date.toLocaleDateString([], { 
-                month: 'short', 
+            return date.toLocaleDateString([], {
+                month: 'short',
                 day: 'numeric',
                 hour: '2-digit',
                 minute: '2-digit'
@@ -393,7 +209,6 @@ export class FloatingNavPanel {
 
         this.panel.querySelector('.llm-nav-panel__close')?.addEventListener('click', () => this.hide());
 
-        // ✅ 视图切换
         this.panel.querySelectorAll<HTMLElement>('.llm-nav-panel__view-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 const view = btn.dataset.view as 'list' | 'tree';
@@ -401,7 +216,6 @@ export class FloatingNavPanel {
             });
         });
 
-        // 工具栏按钮
         this.panel.querySelectorAll<HTMLElement>('.llm-nav-panel__btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -410,7 +224,6 @@ export class FloatingNavPanel {
             });
         });
 
-        // 列表项点击
         const items = this.panel.querySelectorAll<HTMLElement>('.llm-nav-item');
         items.forEach(item => {
             item.addEventListener('click', (e: MouseEvent) => {
@@ -418,7 +231,6 @@ export class FloatingNavPanel {
                 const id = item.dataset.id!;
                 const idx = parseInt(item.dataset.index!);
 
-                // ✅ 分支操作按钮
                 const branchBtn = target.closest('[data-action]') as HTMLElement;
                 if (branchBtn && item.contains(branchBtn)) {
                     const action = branchBtn.dataset.action;
@@ -426,7 +238,6 @@ export class FloatingNavPanel {
                     return;
                 }
 
-                // 点击 checkbox
                 if (target.closest('[data-checkbox]')) {
                     if (e.shiftKey && this.lastSelectedIndex !== -1) {
                         this.selectRange(this.lastSelectedIndex, idx);
@@ -437,7 +248,6 @@ export class FloatingNavPanel {
                     return;
                 }
 
-                // 点击折叠图标
                 if (target.closest('[data-fold]')) {
                     this.options.onToggleFold(id);
                     const itemData = this.items[idx];
@@ -446,7 +256,6 @@ export class FloatingNavPanel {
                     return;
                 }
 
-                // 点击其他区域：导航
                 this.currentIndex = idx;
                 this.updateHighlight();
                 this.options.onNavigate(id);
@@ -494,51 +303,41 @@ export class FloatingNavPanel {
                 break;
             case 'batch-delete':
                 if (this.selectedIds.size > 0) {
-                    // ✅ 等待删除完成
                     await this.options.onBatchDelete?.(Array.from(this.selectedIds));
-                    
-                    // ✅ 删除成功后才清空选择
                     this.selectedIds.clear();
-                    
-                    // ✅ 重新渲染面板
                     this.render();
                 }
                 break;
             case 'batch-copy':
                 if (this.selectedIds.size > 0) {
                     await this.options.onBatchCopy?.(Array.from(this.selectedIds));
-                    
-                    // ✅ 复制后清空选择
                     this.selectedIds.clear();
                     this.render();
                 }
                 break;
         }
     }
-    
-    /**
-     * ✅ 新增：处理分支操作
-     */
+
     private handleBranchAction(action: string, sessionId: string, index: number): void {
         const item = this.items[index];
-        
+
         switch (action) {
             case 'prev-branch':
                 if (item.siblingIndex! > 0) {
                     this.options.onSwitchBranch?.(sessionId);
                 }
                 break;
-                
+
             case 'next-branch':
                 if (item.siblingIndex! < (item.siblingCount || 1) - 1) {
                     this.options.onSwitchBranch?.(sessionId);
                 }
                 break;
-                
+
             case 'create-branch':
                 this.options.onCreateBranch?.(sessionId);
                 break;
-                
+
             case 'show-children':
                 this.options.onShowBranchTree?.();
                 break;
@@ -558,7 +357,7 @@ export class FloatingNavPanel {
     private selectRange(start: number, end: number): void {
         const min = Math.min(start, end);
         const max = Math.max(start, end);
-        
+
         for (let i = min; i <= max; i++) {
             this.selectedIds.add(this.items[i].id);
         }
@@ -578,24 +377,24 @@ export class FloatingNavPanel {
 
     private updateToolbarState(): void {
         if (!this.panel) return;
-        
+
         const hasSelection = this.selectedIds.size > 0;
         const isAllSelected = this.selectedIds.size === this.items.length && this.items.length > 0;
-        
+
         // 更新全选按钮状态
         const selectAllBtn = this.panel.querySelector('[data-action="toggle-select-all"]');
         selectAllBtn?.classList.toggle('checked', isAllSelected);
-        
+
         // 更新选择计数
         const countEl = this.panel.querySelector('.llm-nav-panel__selection-count');
         if (countEl) {
             countEl.textContent = `${this.selectedIds.size} selected`;
         }
-        
+
         // 显示/隐藏操作按钮组
         const actionsGroup = this.panel.querySelector('.llm-nav-panel__toolbar-group--actions');
         const viewGroup = this.panel.querySelector('.llm-nav-panel__toolbar-group--view');
-        
+
         actionsGroup?.classList.toggle('visible', hasSelection);
         viewGroup?.classList.toggle('hidden', hasSelection);
     }
@@ -610,7 +409,7 @@ export class FloatingNavPanel {
 
     private bindKeyboard(): void {
         this.keydownHandler = (e: KeyboardEvent) => {
-            if ((e.target as HTMLElement).tagName === 'INPUT' || 
+            if ((e.target as HTMLElement).tagName === 'INPUT' ||
                 (e.target as HTMLElement).tagName === 'TEXTAREA') return;
 
             switch (e.key) {
@@ -641,7 +440,7 @@ export class FloatingNavPanel {
                         }
                     }
                     break;
-                    
+
                 case 'ArrowRight':
                     if (this.viewMode === 'tree' && this.currentIndex >= 0) {
                         e.preventDefault();
@@ -662,7 +461,7 @@ export class FloatingNavPanel {
                         this.options.onNavigate(this.items[this.currentIndex].id);
                     }
                     break;
-                    
+
                 case 'b':
                     // B 键：显示分支树
                     if (e.ctrlKey || e.metaKey) {
@@ -670,7 +469,7 @@ export class FloatingNavPanel {
                         this.options.onShowBranchTree?.();
                     }
                     break;
-                    
+
                 case 't':
                     // T 键：切换视图模式
                     if (e.ctrlKey || e.metaKey) {
@@ -678,7 +477,7 @@ export class FloatingNavPanel {
                         this.setViewMode(this.viewMode === 'list' ? 'tree' : 'list');
                     }
                     break;
-                    
+
                 case 'a':
                     if (e.ctrlKey || e.metaKey) {
                         e.preventDefault();
@@ -725,13 +524,13 @@ export class FloatingNavPanel {
 
     private updateHighlight(): void {
         if (!this.panel) return;
-        
+
         this.panel.querySelectorAll('.llm-nav-item').forEach((item, idx) => {
             item.classList.toggle('llm-nav-item--active', idx === this.currentIndex);
         });
 
         const userItems = this.items.filter(i => i.role === 'user');
-        const currentUserIdx = this.currentIndex >= 0 
+        const currentUserIdx = this.currentIndex >= 0
             ? userItems.findIndex(u => u.index <= this.currentIndex)
             : -1;
         const counter = this.panel.querySelector('.llm-nav-panel__counter');
