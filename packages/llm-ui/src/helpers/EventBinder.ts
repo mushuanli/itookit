@@ -18,8 +18,10 @@ export interface GlobalShortcutCallbacks {
     onToggleNavigator: () => void;
     onNavigatePrev: () => void;
     onNavigateNext: () => void;
-    onShowBranchTree?: () => void;
-    onCreateBranch?: () => void;
+    onShowBranchTree: () => void;     // ✅ 改为必选
+    onCreateBranch: () => void;        // ✅ 改为必选
+    onSwitchBranchPrev?: () => void;   // ✅ 新增：快捷键切换上一个分支
+    onSwitchBranchNext?: () => void;   // ✅ 新增：快捷键切换下一个分支
 }
 
 export class EventBinder {
@@ -75,10 +77,22 @@ export class EventBinder {
             const isMod = e.metaKey || e.ctrlKey;
             if (!isMod) return;
 
-            // Cmd/Ctrl + Shift + B: 创建分支（先检查 Shift 组合）
-            if (e.shiftKey && e.key === 'B' && shortcuts.onCreateBranch) {
+            // Cmd/Ctrl + Shift + B: 创建分支
+            if (e.shiftKey && e.key === 'B') {
                 e.preventDefault();
                 shortcuts.onCreateBranch();
+                return;
+            }
+
+            // ✅ 新增: Cmd/Ctrl + Shift + [ / ] : 切换分支
+            if (e.shiftKey && e.key === '[' && shortcuts.onSwitchBranchPrev) {
+                e.preventDefault();
+                shortcuts.onSwitchBranchPrev();
+                return;
+            }
+            if (e.shiftKey && e.key === ']' && shortcuts.onSwitchBranchNext) {
+                e.preventDefault();
+                shortcuts.onSwitchBranchNext();
                 return;
             }
 

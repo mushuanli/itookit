@@ -1,6 +1,6 @@
 // @file: llm-ui/components/HistoryView.ts
 
-import { NodeActionCallback } from '../core/types';
+import { NodeActionCallback, BranchActionCallback } from '../core/types';
 import { OrchestratorEvent, SessionGroup, ExecutionNode, BranchTreeNode } from '@itookit/llm-engine';
 import { NodeRenderer } from './NodeRenderer';
 import { MDxController } from './mdx/MDxController';
@@ -1662,20 +1662,4 @@ export class HistoryView {
 
         this.container.innerHTML = '';
     }
-}
-
-/**
- * ✅ 新增：分支操作回调类型
- */
-export type BranchAction =
-    | 'show-tree'
-    | 'create'
-    | 'navigate'
-    | 'rename'
-    | 'delete'
-    | 'compare'
-    | 'select';
-
-export interface BranchActionCallback {
-    (action: BranchAction, nodeId: string, options?: { newName?: string; compareWith?: string }): void;
 }
