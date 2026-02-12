@@ -42,10 +42,13 @@ export class BranchManager {
 
                 case 'select':
                     return await this.selectBranch(nodeId);
+                default:
+                    console.warn(`[BranchManager] Unknown action: ${action}`);
             }
         } catch (e: any) {
             console.error('[BranchManager] Branch action failed:', e);
             Toast.error(e.message || 'Branch operation failed');
+            throw e; // ✅ 重新抛出错误,让调用者处理
         }
     }
 

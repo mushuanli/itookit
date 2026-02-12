@@ -24,16 +24,24 @@ export class UIUpdater {
     /**
      * ✅ 新增：更新分支指示器数据
      */
-    updateBranchIndicator(branches: BranchItem[]): void {
-        this.branchIndicator?.update(branches);
+    public updateBranchIndicator(branches: BranchItem[]): void {
+        if (!this.branchIndicator) {
+            console.warn('[UIUpdater] Branch indicator not initialized');
+            return;
+        }
+
+        this.branchIndicator.update(branches);
     }
+
 
     /**
      * ✅ 新增：分支切换成功后的视觉反馈
      */
-    flashBranchIndicator(): void {
-        this.branchIndicator?.highlightTransition();
+    public flashBranchIndicator(): void {
+        if (!this.branchIndicator) return;
+        this.branchIndicator.highlightTransition();
     }
+
 
     /**
      * 更新状态指示器

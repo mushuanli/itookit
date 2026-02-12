@@ -1,5 +1,5 @@
 // @file: llm-ui/components/BranchIndicator.ts
-
+import { BranchIndicatorTemplates } from "./templates/BranchIndicatorTemplates";
 export interface BranchItem {
     name: string;
     headNodeId: string;
@@ -31,7 +31,14 @@ export class BranchIndicator {
      * 更新分支列表和当前分支
      */
     update(branches: BranchItem[]): void {
-        this.branches = branches;
+        // ✅ 新增:防御性检查
+        if (!branches || branches.length === 0) {
+            console.warn('[BranchIndicator] Empty branches list, using default');
+            this.branches = [{ name: 'main', headNodeId: '', isCurrent: true }];
+        } else {
+            this.branches = branches;
+        }
+
         this.render();
     }
 
@@ -40,28 +47,17 @@ export class BranchIndicator {
      */
     private render(): void {
         const indicatorEl = this.container.querySelector('.llm-branch-indicator-bar') as HTMLElement;
-        if (!indicatorEl) return;
+        if (!indicatorEl) {
+            console.warn('[BranchIndicator] Container element not found');
+            return;
+        }
 
         const currentBranch = this.branches.find(b => b.isCurrent);
         const name = currentBranch?.name || 'main';
         const count = this.branches.length;
 
-        // 简化模板：仅显示名称和数量，点击打开 Navigator
-        indicatorEl.innerHTML = `
-            <button class="llm-branch-indicator-btn" 
-                    data-action="open-navigator"
-                    title="Branch: ${name}${count > 1 ? ` (${count} total)` : ''} - Click to manage branches">
-                <svg class="llm-branch-indicator-icon" viewBox="0 0 24 24" 
-                     width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="6" y1="3" x2="6" y2="15"></line>
-                    <circle cx="18" cy="6" r="3"></circle>
-                    <circle cx="6" cy="18" r="3"></circle>
-                    <path d="M18 9a9 9 0 0 1-9 9"></path>
-                </svg>
-                <span class="llm-branch-indicator-name">${name}</span>
-                ${count > 1 ? `<span class="llm-branch-indicator-count">${count}</span>` : ''}
-            </button>
-        `;
+        // ✅ 使用模板
+        indicatorEl.innerHTML = BranchIndicatorTemplates.renderIndicator(name, count);
     }
 
     /**
@@ -71,7 +67,7 @@ export class BranchIndicator {
         this.container.addEventListener('click', (e) => {
             const target = e.target as HTMLElement;
             const btn = target.closest('[data-action="open-navigator"]');
-            
+
             if (btn) {
                 e.stopPropagation();
                 this.callbacks.onOpenNavigator();
