@@ -20,7 +20,7 @@ export class BranchTreePanel {
     private options: BranchTreePanelOptions;
     private selectedNodes: Set<string> = new Set();
     private collapsedNodes: Set<string> = new Set();
-    
+
     // 配置常量
     private readonly MAX_INDENT_LEVEL = 5; // 最大缩进层级
     private readonly INDENT_SIZE = 16; // 每层缩进像素
@@ -110,26 +110,26 @@ export class BranchTreePanel {
         // 限制最大缩进
         const visualDepth = Math.min(depth, this.MAX_INDENT_LEVEL);
         const indent = visualDepth * this.INDENT_SIZE;
-        
+
         const isActive = node.isActive;
         const hasChildren = node.children.length > 0;
         const isCollapsed = this.collapsedNodes.has(node.id);
-        
+
         const roleIcon = node.role === 'user' ? '👤' : '🤖';
         const preview = this.getPreview(node.content);
         const timestamp = new Date(node.timestamp).toLocaleString();
-        
-        const branchBadge = node.branchName 
+
+        const branchBadge = node.branchName
             ? `<span class="llm-branch-badge">${escapeHTML(node.branchName)}</span>`
             : '';
-        
+
         const createdFromBadge = node.createdFrom
             ? `<span class="llm-branch-badge llm-branch-badge--${node.createdFrom}">${node.createdFrom}</span>`
             : '';
 
         // 渲染连接线
         const treeLines = this.renderTreeLines(ancestorLines, hasChildren);
-        
+
         // 折叠按钮
         const collapseBtn = hasChildren ? `
             <button class="llm-branch-node__collapse" data-action="toggle-collapse" title="${isCollapsed ? 'Expand' : 'Collapse'}">
@@ -141,7 +141,7 @@ export class BranchTreePanel {
         ` : '<span class="llm-branch-node__collapse-placeholder"></span>';
 
         // 深度指示器 (当超过最大缩进时显示)
-        const depthIndicator = depth > this.MAX_INDENT_LEVEL 
+        const depthIndicator = depth > this.MAX_INDENT_LEVEL
             ? `<span class="llm-branch-node__depth-badge">+${depth - this.MAX_INDENT_LEVEL}</span>`
             : '';
 
@@ -214,15 +214,15 @@ export class BranchTreePanel {
     /**
      * 渲染树形连接线
      */
-    private renderTreeLines(ancestorLines: boolean[], hasChildren: boolean): string {
+    private renderTreeLines(ancestorLines: boolean[], _hasChildren: boolean): string {
         if (ancestorLines.length === 0) return '';
 
         let html = '<div class="llm-branch-node__tree-lines">';
-        
+
         for (let i = 0; i < ancestorLines.length; i++) {
             const needsLine = ancestorLines[i];
             const isLast = i === ancestorLines.length - 1;
-            
+
             if (isLast) {
                 // 最后一层: L 形或 T 形连接
                 html += `<div class="llm-branch-node__tree-line llm-branch-node__tree-line--branch"></div>`;
@@ -234,7 +234,7 @@ export class BranchTreePanel {
                 html += `<div class="llm-branch-node__tree-line"></div>`;
             }
         }
-        
+
         html += '</div>';
         return html;
     }
@@ -242,8 +242,8 @@ export class BranchTreePanel {
     private getPreview(content: string, maxLength: number = 60): string {
         if (!content) return '(Empty)';
         const cleaned = content.replace(/\s+/g, ' ').trim();
-        return cleaned.length > maxLength 
-            ? cleaned.substring(0, maxLength) + '...' 
+        return cleaned.length > maxLength
+            ? cleaned.substring(0, maxLength) + '...'
             : cleaned;
     }
 
@@ -292,7 +292,7 @@ export class BranchTreePanel {
                 case 'delete':
                     this.confirmDelete(nodeId);
                     break;
-                    
+
                 case 'toggle-collapse':
                     this.toggleCollapse(nodeId, nodeEl);
                     break;
@@ -313,43 +313,32 @@ export class BranchTreePanel {
      * 切换折叠状态
      */
     private toggleCollapse(nodeId: string, nodeEl: HTMLElement): void {
-        if (this.collapsedNodes.has(nodeId)) {
+        const shouldShow = this.collapsedNodes.has(nodeId);
+
+        if (shouldShow) {
             this.collapsedNodes.delete(nodeId);
-            nodeEl.classList.remove('is-collapsed');
-            
-            // 显示子节点
-            let nextEl = nodeEl.nextElementSibling as HTMLElement;
-            const currentDepth = parseInt(nodeEl.dataset.depth || '0');
-            
-            while (nextEl && nextEl.classList.contains('llm-branch-node')) {
-                const nextDepth = parseInt(nextEl.dataset.depth || '0');
-                if (nextDepth <= currentDepth) break;
-                
-                nextEl.style.display = '';
-                nextEl = nextEl.nextElementSibling as HTMLElement;
-            }
         } else {
             this.collapsedNodes.add(nodeId);
-            nodeEl.classList.add('is-collapsed');
-            
-            // 隐藏子节点
-            let nextEl = nodeEl.nextElementSibling as HTMLElement;
-            const currentDepth = parseInt(nodeEl.dataset.depth || '0');
-            
-            while (nextEl && nextEl.classList.contains('llm-branch-node')) {
-                const nextDepth = parseInt(nextEl.dataset.depth || '0');
-                if (nextDepth <= currentDepth) break;
-                
-                nextEl.style.display = 'none';
-                nextEl = nextEl.nextElementSibling as HTMLElement;
-            }
         }
-        
-        // 更新折叠按钮图标
-        const collapseBtn = nodeEl.querySelector('[data-action="toggle-collapse"] svg') as SVGElement;
-        if (collapseBtn) {
-            const isCollapsed = this.collapsedNodes.has(nodeId);
-            collapseBtn.style.transform = `rotate(${isCollapsed ? 0 : 90}deg)`;
+
+        nodeEl.classList.toggle('is-collapsed', !shouldShow);
+
+        // 批量更新子节点可见性
+        const currentDepth = parseInt(nodeEl.dataset.depth || '0');
+        let nextEl = nodeEl.nextElementSibling as HTMLElement;
+
+        while (nextEl?.classList.contains('llm-branch-node')) {
+            const nextDepth = parseInt(nextEl.dataset.depth || '0');
+            if (nextDepth <= currentDepth) break;
+
+            nextEl.style.display = shouldShow ? '' : 'none';
+            nextEl = nextEl.nextElementSibling as HTMLElement;
+        }
+
+        // 更新图标
+        const svg = nodeEl.querySelector('[data-action="toggle-collapse"] svg') as SVGElement;
+        if (svg) {
+            svg.style.transform = `rotate(${shouldShow ? 90 : 0}deg)`;
         }
     }
 
@@ -381,7 +370,7 @@ export class BranchTreePanel {
      */
     private showRenameDialog(nodeId: string, nodeEl: HTMLElement): void {
         const currentName = nodeEl.querySelector('.llm-branch-badge')?.textContent || '';
-        
+
         const dialog = document.createElement('div');
         dialog.className = 'llm-branch-rename-dialog';
         dialog.innerHTML = `
@@ -406,7 +395,7 @@ export class BranchTreePanel {
             const newName = input.value.trim();
             if (newName) {
                 this.options.onRename?.(nodeId, newName);
-                
+
                 // 更新 UI
                 const badge = nodeEl.querySelector('.llm-branch-badge');
                 if (badge) {
@@ -445,7 +434,7 @@ export class BranchTreePanel {
         const confirmed = confirm('Delete this branch and all its children?');
         if (confirmed) {
             this.options.onDelete?.(nodeId);
-            
+
             // 从 UI 中移除
             const nodeEl = this.panel?.querySelector(`[data-node-id="${nodeId}"]`);
             if (nodeEl) {
