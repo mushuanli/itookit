@@ -431,6 +431,8 @@ export class LLMWorkspaceEditor implements IEditor {
      * ✅ 新增：通过偏移量切换分支（用于快捷键 ⌘⇧[ / ⌘⇧]）
      */
     private async switchBranchByOffset(offset: number): Promise<void> {
+        // 先刷新缓存，确保数据最新
+        await this.refreshBranchIndicator();
         if (this.cachedBranches.length <= 1) {
             Toast.info('No other branches to switch to');
             return;
@@ -468,13 +470,6 @@ export class LLMWorkspaceEditor implements IEditor {
             this.uiUpdater.updateStatusIndicator('failed');
         }
 
-        // ✅ 新增：分支相关事件后刷新指示器
-        const branchEvents = new Set([
-            'branch_created', 'branch_deleted', 'branch_switched', 'branch_renamed'
-        ]);
-        if (branchEvents.has(event.type)) {
-            this.refreshBranchIndicator();
-        }
     }
 
     private handleGlobalEvent(event: RegistryEvent): void {

@@ -303,7 +303,7 @@ export type OrchestratorEvent =
     | { type: 'sibling_switch'; payload: { sessionId: string; newIndex: number; total: number } }
     | { type: 'branch_created'; payload: { sourceId: string; newId: string; branchName?: string } }
     | { type: 'branch_renamed'; payload: { nodeId: string; newName: string } }
-    | { type: 'branch_deleted'; payload: { nodeId: string; deletedIds: string[] } }
+    | { type: 'branch_deleted'; payload: { deletedIds: string[] } }
     | { type: 'branch_switched'; payload: { fromId: string; toId: string } };
 
 /**

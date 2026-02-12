@@ -605,6 +605,13 @@ export class SessionManager {
 
     async switchToSibling(messageId: string, siblingIndex: number): Promise<void> {
         const { sessionId, nodeId, state } = this.ensureBound();
+    // ✅ 新增：生成中禁止操作
+    if (this.isGenerating()) {
+        throw new EngineError(
+            EngineErrorCode.SESSION_INVALID,
+            'Cannot switch sibling while generating'
+        );
+    }
         const session = state.findSessionById(messageId);
         if (!session?.persistedNodeId) {
             throw new EngineError(EngineErrorCode.SESSION_INVALID, 'Message not found');
@@ -630,13 +637,21 @@ export class SessionManager {
     ): Promise<string> {
         const { sessionId, nodeId, state } = this.ensureBound();
 
-        const session = state.findSessionById(branchNodeId);
-        if (!session?.persistedNodeId) {
-            throw new EngineError(
-                EngineErrorCode.SESSION_INVALID,
-                `Message not found or not persisted: ${branchNodeId}`
-            );
-        }
+    // ✅ 新增：生成中禁止操作
+    if (this.isGenerating()) {
+        throw new EngineError(
+            EngineErrorCode.SESSION_INVALID,
+            'Cannot create branch while generating'
+        );
+    }
+
+    const session = state.findSessionById(branchNodeId);
+    if (!session?.persistedNodeId) {
+        throw new EngineError(
+            EngineErrorCode.SESSION_INVALID,
+            `Message not found or not persisted: ${branchNodeId}`
+        );
+    }
 
         const newNodeId = await this.engine.createBranch(
             nodeId, sessionId, session.persistedNodeId,
@@ -677,6 +692,13 @@ export class SessionManager {
     async deleteBranch(branchNodeId: string, cascade: boolean = false): Promise<void> {
         const { sessionId, nodeId, state } = this.ensureBound();
 
+    // ✅ 新增：生成中禁止操作
+    if (this.isGenerating()) {
+        throw new EngineError(
+            EngineErrorCode.SESSION_INVALID,
+            'Cannot delete branch while generating'
+        );
+    }
         const manifest = await this.engine.getManifest(nodeId);
         if (branchNodeId === manifest.current_head) {
             throw new EngineError(
@@ -696,7 +718,7 @@ export class SessionManager {
         }
 
         this.eventBus.emitSession(sessionId, {
-            type: 'messages_deleted',
+            type: 'branch_deleted',
             payload: { deletedIds },
         });
     }
@@ -704,12 +726,24 @@ export class SessionManager {
     async navigateToBranch(targetNodeId: string): Promise<void> {
         const { sessionId, nodeId, state } = this.ensureBound();
 
-        await this.engine.updateManifestHead(nodeId, sessionId, targetNodeId);
-        await this.reloadSessionData(nodeId, sessionId, state);
+    // ✅ 新增：生成中禁止操作
+    if (this.isGenerating()) {
+        throw new EngineError(
+            EngineErrorCode.SESSION_INVALID,
+            'Cannot switch branch while generating'
+        );
+    }
+
+    // ✅ 修复：记录当前 head 作为 fromId
+    const manifest = await this.engine.getManifest(nodeId);
+    const fromId = manifest.current_head || '';
+
+    await this.engine.updateManifestHead(nodeId, sessionId, targetNodeId);
+    await this.reloadSessionData(nodeId, sessionId, state);
 
         this.eventBus.emitSession(sessionId, {
             type: 'branch_switched',
-            payload: { fromId: '', toId: targetNodeId },
+            payload: { fromId, toId: targetNodeId },
         });
     }
 

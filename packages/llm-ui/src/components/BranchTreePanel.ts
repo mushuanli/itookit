@@ -263,18 +263,8 @@ export class BranchTreePanel {
     /**
      * 确认删除
      */
-    private async confirmDelete(nodeId: string): Promise<void> {
-        const confirmed = confirm('Delete this branch and all its children?');
-        if (confirmed) {
-            this.options.onDelete?.(nodeId);
-
-            // 从 UI 中移除
-            const nodeEl = this.panel?.querySelector(`[data-node-id="${nodeId}"]`);
-            if (nodeEl) {
-                nodeEl.classList.add('is-deleting');
-                setTimeout(() => nodeEl.remove(), 300);
-            }
-        }
+    private confirmDelete(nodeId: string): void {
+        this.options.onDelete?.(nodeId);
     }
 
     /**

@@ -1246,19 +1246,19 @@ export class HistoryView {
         switch (event.type) {
             case 'branch_created':
                 this.handleBranchCreated(event.payload);
-                break;
+                return;
 
             case 'branch_renamed':
                 this.handleBranchRenamed(event.payload);
-                break;
+                return;
 
             case 'branch_deleted':
                 this.handleBranchDeleted(event.payload);
-                break;
+                return;
 
             case 'branch_switched':
                 this.handleBranchSwitched(event.payload);
-                break;
+                return;
 
             default:
                 if (event.type !== 'node_update') {
@@ -1466,7 +1466,7 @@ export class HistoryView {
     /**
      * ✅ 新增：处理分支删除事件
      */
-    private handleBranchDeleted(payload: { nodeId: string; deletedIds: string[] }): void {
+    private handleBranchDeleted(payload: { deletedIds: string[] }): void {
         // 移除已删除的消息
         this.removeMessages(payload.deletedIds, true);
     }
@@ -1476,6 +1476,7 @@ export class HistoryView {
      */
     private handleBranchSwitched(payload: { fromId: string; toId: string }): void {
         // 更新激活状态
+    this.collapseStates = {};
         const fromEl = this.findElementBySessionId(payload.fromId);
         const toEl = this.findElementBySessionId(payload.toId);
 
