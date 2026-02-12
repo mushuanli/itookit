@@ -52,7 +52,7 @@ class MathJaxManager {
   private renderQueue: Set<HTMLElement> = new Set();
   private renderTimer: number | null = null;
 
-  private constructor() {}
+  private constructor() { }
 
   static getInstance(): MathJaxManager {
     if (!MathJaxManager.instance) {
@@ -66,7 +66,7 @@ class MathJaxManager {
    */
   registerInstance(config: any, cdnUrl: string): void {
     this.instanceCount++;
-    
+
     if (this.instanceCount === 1) {
       this.config = config;
       this.cdnUrl = cdnUrl;
@@ -80,7 +80,7 @@ class MathJaxManager {
    */
   unregisterInstance(): void {
     this.instanceCount--;
-    
+
     if (this.instanceCount === 0) {
       this.cleanup();
     }
@@ -106,12 +106,12 @@ class MathJaxManager {
       script.src = this.cdnUrl;
       script.async = true;
       script.id = 'mathjax-script';
-      
+
       script.onload = () => {
         this.isLoaded = true;
         resolve();
       };
-      
+
       script.onerror = () => {
         this.loadPromise = null;
         reject(new Error('Failed to load MathJax'));
@@ -206,7 +206,7 @@ export class MathJaxPlugin implements MDxPlugin {
 
   constructor(options: MathJaxPluginOptions = {}) {
     this.options = {
-      cdnUrl: options.cdnUrl || 'https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js',
+      cdnUrl: options.cdnUrl || 'https://fastly.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js',
       config: {
         tex: {
           inlineMath: [['$', '$'], ['\\(', '\\)']],

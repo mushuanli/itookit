@@ -18,7 +18,7 @@ declare global {
 export interface MermaidPluginOptions {
   /**
    * Mermaid CDN URL
-   * @default 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs'
+   * @default 'https://fastly.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs'
    */
   cdnUrl?: string;
 
@@ -53,7 +53,7 @@ class MermaidManager {
   private renderQueues: Map<string, Set<Element>> = new Map();
   private renderTimers: Map<string, number> = new Map();
 
-  private constructor() {}
+  private constructor() { }
 
   static getInstance(): MermaidManager {
     if (!MermaidManager.instance) {
@@ -67,7 +67,7 @@ class MermaidManager {
    */
   registerInstance(config: any, cdnUrl: string): void {
     this.instanceCount++;
-    
+
     if (this.instanceCount === 1) {
       this.config = config;
       this.cdnUrl = cdnUrl;
@@ -82,16 +82,16 @@ class MermaidManager {
   unregisterInstance(instanceId: string): void {
     // 清理该实例的渲染队列
     this.renderQueues.delete(instanceId);
-    
+
     // 清理该实例的定时器
     const timer = this.renderTimers.get(instanceId);
     if (timer) {
       clearTimeout(timer);
       this.renderTimers.delete(instanceId);
     }
-    
+
     this.instanceCount--;
-    
+
     if (this.instanceCount === 0) {
       this.cleanup();
     }
@@ -152,7 +152,7 @@ class MermaidManager {
     const timer = window.setTimeout(() => {
       this.flushRenderQueue(instanceId);
     }, 100);
-    
+
     this.renderTimers.set(instanceId, timer);
   }
 
@@ -168,14 +168,14 @@ class MermaidManager {
 
       if (window.mermaid?.run) {
         const elementsArray = Array.from(queue);
-        
+
         // [优化] 检查元素是否仍在 DOM 中
         const validElements = elementsArray.filter(el => document.contains(el));
         if (validElements.length === 0) {
           queue.clear();
           return;
         }
-        
+
         const uniqueAttr = `data-mermaid-instance-${instanceId}`;
         validElements.forEach((el, i) => {
           (el as HTMLElement).setAttribute(uniqueAttr, String(i));
@@ -184,9 +184,9 @@ class MermaidManager {
         const selector = validElements
           .map((_, i) => `[${uniqueAttr}="${i}"]`)
           .join(',');
-        
+
         const nodeList = document.querySelectorAll(selector);
-        
+
         await window.mermaid.run({ nodes: nodeList });
 
         validElements.forEach(el => {
@@ -232,7 +232,7 @@ export class MermaidPlugin implements MDxPlugin {
 
   constructor(options: MermaidPluginOptions = {}) {
     this.options = {
-      cdnUrl: options.cdnUrl || 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs',
+      cdnUrl: options.cdnUrl || 'https://fastly.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs',
       theme: options.theme || 'default',
       mermaidConfig: {
         startOnLoad: false,
@@ -243,7 +243,7 @@ export class MermaidPlugin implements MDxPlugin {
     };
 
     this.instanceId = `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
-    
+
     this.manager = MermaidManager.getInstance();
     this.manager.registerInstance(this.options.mermaidConfig, this.options.cdnUrl);
   }

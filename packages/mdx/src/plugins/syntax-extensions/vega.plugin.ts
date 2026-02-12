@@ -35,9 +35,9 @@ export class VegaPlugin implements MDxPlugin {
 
     constructor(options: VegaPluginOptions = {}) {
         this.options = {
-            embedCdnUrl: options.embedCdnUrl || 'https://cdn.jsdelivr.net/npm/vega-embed@6',
-            vegaCdnUrl: options.vegaCdnUrl || 'https://cdn.jsdelivr.net/npm/vega@5',
-            vegaLiteCdnUrl: options.vegaLiteCdnUrl || 'https://cdn.jsdelivr.net/npm/vega-lite@5',
+            embedCdnUrl: options.embedCdnUrl || 'https://fastly.jsdelivr.net/npm/vega-embed@6',
+            vegaCdnUrl: options.vegaCdnUrl || 'https://fastly.jsdelivr.net/npm/vega@5',
+            vegaLiteCdnUrl: options.vegaLiteCdnUrl || 'https://fastly.jsdelivr.net/npm/vega-lite@5',
             theme: options.theme || 'quartz', // quartz 主题比较通用且好看
             actions: options.actions ?? false, // 默认关闭右下角的三点菜单
         };
@@ -105,15 +105,15 @@ export class VegaPlugin implements MDxPlugin {
                 // 替换 DOM
                 pre.replaceWith(container);
 
-        // 渲染图表
-        if (window.vegaEmbed) {
-           await window.vegaEmbed(container, spec, {
-            mode: isLite ? 'vega-lite' : 'vega',
-            theme: this.options.theme,
-            actions: this.options.actions,
-            renderer: 'svg',
-          });
-        }
+                // 渲染图表
+                if (window.vegaEmbed) {
+                    await window.vegaEmbed(container, spec, {
+                        mode: isLite ? 'vega-lite' : 'vega',
+                        theme: this.options.theme,
+                        actions: this.options.actions,
+                        renderer: 'svg',
+                    });
+                }
 
             } catch (error: any) {
                 console.warn('[VegaPlugin] Render error:', error);
@@ -126,6 +126,6 @@ export class VegaPlugin implements MDxPlugin {
                 container.appendChild(pre.cloneNode(true));
                 pre.replaceWith(container);
             }
-    }));
+        }));
     }
 }
