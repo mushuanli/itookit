@@ -30,7 +30,7 @@ import { NodeActionHandler } from './helpers/NodeActionHandler';
 import { BranchManager } from './helpers/BranchManager';
 import { EventBinder } from './helpers/EventBinder';
 import { UIUpdater } from './helpers/UIUpdater';
-import { BranchItem } from './components/BranchIndicator'; // ✅ 新增
+import { BranchItem } from './components/templates/BranchIndicatorTemplates';
 
 export interface LLMEditorOptions extends EditorOptions {
     sessionEngine: ILLMSessionEngine;
@@ -258,7 +258,7 @@ export class LLMWorkspaceEditor implements IEditor {
             onPrevAgent: () => this.handlePrevAgent(),
             onNextAgent: () => this.handleNextAgent(),
             onFoldOne: () => this.historyView.foldFirstUnfolded(),
-            onCopyAgent: () => this.handleCopyAgent(),
+            //onCopyAgent: () => this.handleCopyAgent(),
             onCollapseAll: () => this.setAllSessionsFold(!this.isAllExpanded),
             onCopy: () => this.handleCopy(),
             onPrint: () => this.handlePrint(),
@@ -275,7 +275,6 @@ export class LLMWorkspaceEditor implements IEditor {
                 const currentId = this.navigationHelper.findCurrentVisibleSession();
                 if (currentId) this.branchManager.handleBranchAction('create', currentId);
             },
-            // ✅ 新增：分支快捷键切换
             onSwitchBranchPrev: () => this.switchBranchByOffset(-1),
             onSwitchBranchNext: () => this.switchBranchByOffset(1),
         });
@@ -577,23 +576,6 @@ export class LLMWorkspaceEditor implements IEditor {
             this.navigationHelper.scrollToSession(nextId);
         } else {
             Toast.info('No next agent chat');
-        }
-    }
-
-    private async handleCopyAgent(): Promise<void> {
-        const content = this.historyView.getFirstUnfoldedAgentContent();
-        if (content) {
-            try {
-                await navigator.clipboard.writeText(content);
-                const btn = this.container.querySelector('#llm-btn-copy-agent') as HTMLElement;
-                this.uiUpdater.showButtonFeedback(btn, '✓');
-                Toast.success('Agent chat copied');
-            } catch (err) {
-                console.error('Copy failed', err);
-                Toast.error('Failed to copy');
-            }
-        } else {
-            Toast.info('No unfolded agent chat found');
         }
     }
 

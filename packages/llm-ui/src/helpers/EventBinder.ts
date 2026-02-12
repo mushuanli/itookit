@@ -8,7 +8,6 @@ export interface EventBinderCallbacks {
     onPrevAgent: () => void;
     onNextAgent: () => void;
     onFoldOne: () => void;
-    onCopyAgent: () => void;
     onCollapseAll: () => void;
     onCopy: () => void;
     onPrint: () => void;
@@ -58,7 +57,6 @@ export class EventBinder {
             '#llm-btn-prev-agent': this.callbacks.onPrevAgent,
             '#llm-btn-next-agent': this.callbacks.onNextAgent,
             '#llm-btn-fold-one': this.callbacks.onFoldOne,
-            '#llm-btn-copy-agent': this.callbacks.onCopyAgent,
             '#llm-btn-collapse': this.callbacks.onCollapseAll,
             '#llm-btn-copy': this.callbacks.onCopy,
             '#llm-btn-print': this.callbacks.onPrint,
