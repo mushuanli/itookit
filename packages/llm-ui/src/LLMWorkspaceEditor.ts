@@ -231,7 +231,7 @@ export class LLMWorkspaceEditor implements IEditor {
 
         this.branchManager = new BranchManager(
             this.sessionManager,
-            this.historyView,
+            () => this.openNavigatorWithBranchView(),
             (sessionId) => this.navigationHelper.scrollToSession(sessionId)
         );
 
@@ -239,9 +239,7 @@ export class LLMWorkspaceEditor implements IEditor {
 
         // ✅ 新增：初始化分支指示器
         this.uiUpdater.initBranchIndicator({
-            onSwitchBranch: (branchId) => this.handleSwitchBranch(branchId),
-            onCreateBranch: () => this.handleCreateBranchFromIndicator(),
-            onShowBranchTree: () => this.branchManager.handleBranchAction('show-tree', ''),
+            onOpenNavigator: () => this.openNavigatorWithBranchView(),
         });
 
         this.historyView.setBranchActionCallback(
@@ -270,7 +268,6 @@ export class LLMWorkspaceEditor implements IEditor {
             onToggleNavigator: () => this.toggleNavigator(),
             onNavigatePrev: () => this.navigationHelper.navigateToUserChat('prev'),
             onNavigateNext: () => this.navigationHelper.navigateToUserChat('next'),
-            onShowBranchTree: () => this.branchManager.handleBranchAction('show-tree', ''),
             onCreateBranch: () => {
                 const currentId = this.navigationHelper.findCurrentVisibleSession();
                 if (currentId) this.branchManager.handleBranchAction('create', currentId);
@@ -356,6 +353,16 @@ export class LLMWorkspaceEditor implements IEditor {
      * 刷新分支指示器：从 SessionManager 获取最新分支列表并更新 UI
      */
     private async refreshBranchIndicator(): Promise<void> {
+        return;
+        // ✅ 添加会话绑定检查
+        if (!this.currentSessionId) {
+            console.warn('[LLMWorkspaceEditor] Cannot refresh branch indicator: no session loaded');
+            // 降级：显示默认 main 分支
+            this.cachedBranches = [{ name: 'main', headNodeId: '', isCurrent: true }];
+            this.uiUpdater.updateBranchIndicator(this.cachedBranches);
+            return;
+        }
+
         try {
             const branches = await this.sessionManager.listBranches();
 
@@ -375,36 +382,55 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     /**
-     * 从 title bar 指示器触发的分支切换
+     * ✅ 新增：刷新 FloatingNav 的分支列表
+     */
+    private async refreshFloatingNavBranches(): Promise<void> {
+        if (!this.floatingNav) return;
+
+        // ✅ 添加会话绑定检查
+        if (!this.currentSessionId) {
+            console.warn('[LLMWorkspaceEditor] Cannot refresh navigator branches: no session loaded');
+            return;
+        }
+
+        try {
+            const branches = await this.sessionManager.listBranches();
+            const branchItems = branches.map(b => ({
+                name: b.name,
+                headNodeId: b.headNodeId,
+                isCurrent: b.isCurrent,
+            }));
+
+            this.floatingNav.updateBranches(branchItems);
+        } catch (e) {
+            console.warn('[LLMWorkspaceEditor] Failed to refresh branches in navigator:', e);
+        }
+    }
+
+    /**
+     * 从 title bar 指示器或 Navigator 触发的分支切换
      */
     private async handleSwitchBranch(branchHeadNodeId: string): Promise<void> {
+        // ✅ 添加会话绑定检查
+        if (!this.currentSessionId) {
+            Toast.error('No session loaded');
+            return;
+        }
+
         try {
             await this.branchManager.handleBranchAction('select', branchHeadNodeId);
             await this.refreshBranchIndicator();
+
+            // ✅ 只在 Navigator 打开时刷新
+            if (this.floatingNav) {
+                await this.refreshFloatingNavBranches();
+            }
+
             this.uiUpdater.flashBranchIndicator();
             Toast.success('Branch switched');
         } catch (e: any) {
             console.error('[LLMWorkspaceEditor] Switch branch failed:', e);
             Toast.error(e.message || 'Failed to switch branch');
-        }
-    }
-
-    /**
-     * 从 title bar 指示器触发的分支创建
-     */
-    private async handleCreateBranchFromIndicator(): Promise<void> {
-        const currentId = this.navigationHelper.findCurrentVisibleSession();
-        if (currentId) {
-            await this.handleBranchActionWithRefresh('create', currentId);
-        } else {
-            // 没有可见会话时，使用最后一条消息
-            const sessions = this.sessionManager.getSessions();
-            if (sessions.length > 0) {
-                const lastSession = sessions[sessions.length - 1];
-                await this.handleBranchActionWithRefresh('create', lastSession.id);
-            } else {
-                Toast.info('No messages to branch from');
-            }
         }
     }
 
@@ -418,12 +444,23 @@ export class LLMWorkspaceEditor implements IEditor {
         nodeId: string,
         options?: { newName?: string; compareWith?: string }
     ): Promise<void> {
+        // ✅ 添加会话绑定检查
+        if (!this.currentSessionId && action !== 'show-tree') {
+            Toast.error('No session loaded');
+            return;
+        }
+
         await this.branchManager.handleBranchAction(action as any, nodeId, options);
 
         // 影响分支状态的操作需要刷新指示器
         const branchMutatingActions = new Set(['create', 'delete', 'select', 'rename', 'navigate']);
         if (branchMutatingActions.has(action)) {
             await this.refreshBranchIndicator();
+
+            // ✅ 只在 Navigator 打开时刷新
+            if (this.floatingNav) {
+                await this.refreshFloatingNavBranches();
+            }
         }
     }
 
@@ -431,6 +468,12 @@ export class LLMWorkspaceEditor implements IEditor {
      * ✅ 新增：通过偏移量切换分支（用于快捷键 ⌘⇧[ / ⌘⇧]）
      */
     private async switchBranchByOffset(offset: number): Promise<void> {
+        // ✅ 添加会话绑定检查
+        if (!this.currentSessionId) {
+            Toast.info('No session loaded');
+            return;
+        }
+
         // 先刷新缓存，确保数据最新
         await this.refreshBranchIndicator();
         if (this.cachedBranches.length <= 1) {
@@ -659,8 +702,33 @@ export class LLMWorkspaceEditor implements IEditor {
     // ================================================================
     // 导航面板
     // ================================================================
+    // ✅ 新增：打开 Navigator 并切换到分支管理视图
+    private openNavigatorWithBranchView(): void {
+        // ✅ 添加会话绑定检查
+        if (!this.currentSessionId) {
+            Toast.info('No session loaded');
+            return;
+        }
+
+        if (!this.floatingNav) {
+            this.toggleNavigator();
+        } else {
+            // 如果已经打开，刷新数据
+            this.refreshFloatingNav();
+        }
+
+        // 可选：自动切换到 tree 视图和 all 过滤器
+        // this.floatingNav?.setViewMode('tree');
+        // this.floatingNav?.setFilter('all');
+    }
 
     private toggleNavigator(): void {
+        // ✅ 添加会话绑定检查
+        if (!this.currentSessionId) {
+            Toast.info('No session loaded');
+            return;
+        }
+
         if (!this.floatingNav) {
             this.floatingNav = new FloatingNavPanel(this.container, {
                 onNavigate: (id) => this.navigationHelper.scrollToSession(id),
@@ -670,9 +738,7 @@ export class LLMWorkspaceEditor implements IEditor {
                 onUnfoldAll: () => this.setAllSessionsFold(false),
                 onBatchDelete: (ids) => this.handleBatchDelete(ids),
                 onBatchCopy: (ids) => this.handleBatchCopy(ids),
-                onShowBranchTree: () => this.branchManager.handleBranchAction('show-tree', ''),
                 onCreateBranch: (sourceId) => this.handleBranchActionWithRefresh('create', sourceId),
-                // ✅ 修改：切换分支后也刷新指示器
                 onSwitchBranch: (branchId) => this.handleSwitchBranch(branchId),
             });
         }
@@ -680,6 +746,9 @@ export class LLMWorkspaceEditor implements IEditor {
         const sessions = this.sessionManager.getSessions();
         const collapseStates = this.stateManager.getCollapseStates();
         this.floatingNav.updateItems(sessions, collapseStates);
+
+        // ✅ 更新分支列表
+        this.refreshFloatingNavBranches();
 
         const visibleId = this.navigationHelper.findCurrentVisibleSession();
         if (visibleId) this.floatingNav.setCurrentChat(visibleId);
@@ -798,15 +867,19 @@ export class LLMWorkspaceEditor implements IEditor {
         }
     }
 
+
     /**
      * 刷新浮动导航面板数据
      */
     private refreshFloatingNav(): void {
         if (!this.floatingNav) return;
+
         this.floatingNav.updateItems(
             this.sessionManager.getSessions(),
             this.historyView.getCollapseStates()
         );
+
+        this.refreshFloatingNavBranches();
     }
 
 

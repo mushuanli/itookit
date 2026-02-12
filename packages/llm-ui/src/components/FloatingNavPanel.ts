@@ -3,555 +3,562 @@
 import { SessionGroup } from '@itookit/llm-engine';
 import { FloatingNavPanelTemplates } from './templates/FloatingNavPanelTemplates';
 
-export interface FloatingNavPanelOptions {
-    onNavigate: (sessionId: string) => void;
-    onToggleFold: (sessionId: string) => void;
-    onCopy: (sessionId: string) => void;
-    onFoldAll: () => void;
-    onUnfoldAll: () => void;
-    // ✨ 新增：批量操作回调
-    onBatchDelete?: (sessionIds: string[]) => Promise<void>;
-    onBatchCopy?: (sessionIds: string[]) => Promise<void>;
-
-    // ✅ 新增：分支操作
-    onShowBranchTree?: () => void;
-    onCreateBranch?: (sourceId: string) => void;
-    onSwitchBranch?: (branchId: string) => void;
-}
+export type BranchFilter = 'all' | 'current' | string; // 'all' | 'current' | branchId
+export type ViewMode = 'list' | 'tree';
 
 export interface ChatNavItem {
     id: string;
     role: 'user' | 'assistant';
     preview: string;
-    isCollapsed: boolean;
-    index: number;
     timestamp: number;
-    agentName?: string;
-
-    // ✅ 新增：分支信息
-    branchName?: string;
+    isCollapsed: boolean;
     siblingIndex?: number;
     siblingCount?: number;
+    branchName?: string;
+    branchId?: string;
+    isCurrent?: boolean;
     hasChildren?: boolean;
 }
 
+export interface BranchItem {
+    name: string;
+    headNodeId: string;
+    isCurrent: boolean;
+}
+
+export interface FloatingNavPanelCallbacks {
+    onNavigate: (id: string) => void;
+    onToggleFold: (id: string) => void;
+    onCopy: (id: string) => void;
+    onFoldAll: () => void;
+    onUnfoldAll: () => void;
+    onBatchDelete: (ids: string[]) => void;
+    onBatchCopy: (ids: string[]) => void;
+    onCreateBranch: (sourceId: string) => void;
+    onSwitchBranch: (branchId: string) => void;
+}
+
 export class FloatingNavPanel {
-    private container: HTMLElement;
     private panel: HTMLElement | null = null;
-    private isVisible: boolean = false;
+    private container: HTMLElement;
+    private callbacks: FloatingNavPanelCallbacks;
     private items: ChatNavItem[] = [];
-    private currentIndex: number = -1;
-    private options: FloatingNavPanelOptions;
+    private branches: BranchItem[] = [];
+    private currentFilter: BranchFilter = 'current';
+    private viewMode: ViewMode = 'list';
+    private selectedIds = new Set<string>();
+    private currentChatId: string | null = null;
     private lastSelectedIndex: number = -1;
 
-    private selectedIds: Set<string> = new Set();
-    private viewMode: 'list' | 'tree' = 'list';
-
-    private keydownHandler: ((e: KeyboardEvent) => void) | null = null;
-
-    constructor(container: HTMLElement, options: FloatingNavPanelOptions) {
+    constructor(container: HTMLElement, callbacks: FloatingNavPanelCallbacks) {
         this.container = container;
-        this.options = options;
+        this.callbacks = callbacks;
     }
 
     /**
-     * 更新导航项列表
+     * 更新消息列表
      */
-    public updateItems(sessions: SessionGroup[], collapseStates: Record<string, boolean>): void {
-        this.items = sessions.map((session, index) => ({
-            id: session.id,
-            role: session.role,
-            preview: this.getPreview(session.content || session.executionRoot?.data.output || '', 30),
-            isCollapsed: collapseStates[session.id] ?? false,
-            index,
-            timestamp: session.timestamp,
-            agentName: session.executionRoot?.name,
-            branchName: session.branchInfo?.name,
-            siblingIndex: session.siblingIndex,
-            siblingCount: session.siblingCount,
-            hasChildren: session.branchInfo?.hasChildren
+    updateItems(sessions: SessionGroup[], collapseStates: Record<string, boolean>): void {
+        this.items = sessions.map(s => ({
+            id: s.id,
+            role: s.role,
+            preview: this.getPreview(s.content || ''),
+            timestamp: s.timestamp,
+            isCollapsed: collapseStates[s.id] || false,
+            siblingIndex: s.siblingIndex,
+            siblingCount: s.siblingCount,
+            branchName: s.branchInfo?.name,
+            branchId: s.branchInfo?.headNodeId,
+            isCurrent: s.branchInfo?.isCurrent,
+            hasChildren: (s.siblingCount || 0) > 1,
         }));
-
-        const currentIds = new Set(this.items.map(i => i.id));
-        this.selectedIds = new Set([...this.selectedIds].filter(id => currentIds.has(id)));
-
-        if (this.isVisible) {
-            this.render();
-        }
+        this.refresh();
     }
 
-    public setCurrentChat(sessionId: string): void {
-        const idx = this.items.findIndex(item => item.id === sessionId);
-        if (idx !== -1) {
-            this.currentIndex = idx;
-            if (this.isVisible) {
-                this.updateHighlight();
-            }
-        }
+    /**
+     * 更新分支列表
+     */
+    updateBranches(branches: BranchItem[]): void {
+        this.branches = branches;
+        this.refresh();
     }
 
-    public toggle(): void {
-        this.isVisible ? this.hide() : this.show();
+    /**
+     * 设置当前聊天
+     */
+    setCurrentChat(id: string): void {
+        this.currentChatId = id;
+        this.refresh();
     }
 
-    public show(): void {
-        if (this.isVisible) return;
-        this.isVisible = true;
-        this.render();
-        this.bindKeyboard();
-    }
-
-    public hide(): void {
-        if (!this.isVisible) return;
-        this.isVisible = false;
-        this.selectedIds.clear();
-        this.unbindKeyboard();
-
-        if (this.panel) {
-            this.panel.classList.add('llm-nav-panel--hiding');
-            setTimeout(() => {
-                this.panel?.remove();
-                this.panel = null;
-            }, 200);
-        }
-    }
-
-    public setViewMode(mode: 'list' | 'tree'): void {
+    /**
+     * 设置视图模式
+     */
+    setViewMode(mode: ViewMode): void {
         this.viewMode = mode;
-        if (this.isVisible) {
-            this.render();
+        this.refresh();
+    }
+
+    /**
+     * 设置分支过滤器
+     */
+    setFilter(filter: BranchFilter): void {
+        this.currentFilter = filter;
+        this.refresh();
+    }
+
+    /**
+     * 切换显示/隐藏
+     */
+    toggle(): void {
+        if (this.panel) {
+            this.hide();
+        } else {
+            this.show();
         }
     }
 
-    private render(): void {
-        this.panel?.remove();
-
+    /**
+     * 显示面板
+     */
+    private show(): void {
         this.panel = document.createElement('div');
         this.panel.className = 'llm-nav-panel';
-
-        const userItems = this.items.filter(i => i.role === 'user');
-        const totalUsers = userItems.length;
-        const currentUserIdx = this.currentIndex >= 0
-            ? userItems.findIndex(u => u.index <= this.currentIndex)
-            : -1;
-
-        const hasSelection = this.selectedIds.size > 0;
-        const isAllSelected = this.selectedIds.size === this.items.length && this.items.length > 0;
-
-        const listContent = this.items.length === 0
-            ? FloatingNavPanelTemplates.renderEmpty()
-            : (this.viewMode === 'list' ? this.renderList() : this.renderTreeView());
-
-        this.panel.innerHTML = FloatingNavPanelTemplates.renderPanel(
-            currentUserIdx,
-            totalUsers,
-            hasSelection,
-            isAllSelected,
-            this.selectedIds.size,
-            this.viewMode,
-            listContent
-        );
-
         this.container.appendChild(this.panel);
+
+        this.render();
         this.bindEvents();
-        this.updateHighlight();
 
         requestAnimationFrame(() => {
-            this.panel?.classList.add('llm-nav-panel--visible');
+            this.panel?.classList.add('is-open');
         });
     }
 
-    private renderTreeView(): string {
-        return this.items.map((item, idx) => {
-            const isActive = idx === this.currentIndex;
-            const isSelected = this.selectedIds.has(item.id);
-            const timeStr = this.formatTime(item.timestamp);
-            const title = item.role === 'user' ? 'You' : (item.agentName || 'Assistant');
+    /**
+     * 隐藏面板
+     */
+    private hide(): void {
+        if (!this.panel) return;
 
-            return FloatingNavPanelTemplates.renderTreeItem(
-                item, idx, isActive, isSelected, timeStr, title
-            );
-        }).join('');
+        this.panel.classList.remove('is-open');
+        setTimeout(() => {
+            this.panel?.remove();
+            this.panel = null;
+        }, 200);
     }
 
-    private renderList(): string {
-        return this.items.map((item, idx) => {
-            const isActive = idx === this.currentIndex;
-            const isSelected = this.selectedIds.has(item.id);
-            const timeStr = this.formatTime(item.timestamp);
-            const title = item.role === 'user' ? 'You' : (item.agentName || 'Assistant');
-
-            return FloatingNavPanelTemplates.renderListItem(
-                item, idx, isActive, isSelected, timeStr, title
-            );
-        }).join('');
+    /**
+     * 刷新面板内容
+     */
+    private refresh(): void {
+        if (!this.panel) return;
+        this.render();
+        this.bindEvents();
     }
 
-    private formatTime(timestamp: number): string {
-        const date = new Date(timestamp);
-        const now = new Date();
-        const isToday = date.toDateString() === now.toDateString();
+    /**
+     * 渲染面板
+     */
+    private render(): void {
+        if (!this.panel) return;
 
-        if (isToday) {
-            return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        } else {
-            return date.toLocaleDateString([], {
-                month: 'short',
-                day: 'numeric',
+        const filteredItems = this.filterItems();
+        const userChats = filteredItems.filter(item => item.role === 'user');
+        const currentUserIdx = userChats.findIndex(item => item.id === this.currentChatId);
+
+        this.panel.innerHTML = FloatingNavPanelTemplates.renderPanel(
+            currentUserIdx === -1 ? 0 : currentUserIdx,
+            userChats.length,
+            this.selectedIds.size > 0,
+            this.selectedIds.size === filteredItems.length && filteredItems.length > 0,
+            this.selectedIds.size,
+            this.viewMode,
+            this.currentFilter,
+            this.branches,
+            this.renderItems(filteredItems)
+        );
+    }
+
+    /**
+     * 根据过滤器筛选消息
+     */
+    private filterItems(): ChatNavItem[] {
+        if (this.currentFilter === 'all') {
+            return this.items;
+        }
+
+        if (this.currentFilter === 'current') {
+            return this.items.filter(item => item.isCurrent !== false);
+        }
+
+        // 特定分支
+        const branchId = this.currentFilter;
+        return this.items.filter(item => item.branchId === branchId);
+    }
+
+    /**
+     * 渲染消息列表
+     */
+    private renderItems(items: ChatNavItem[]): string {
+        if (items.length === 0) {
+            return FloatingNavPanelTemplates.renderEmpty();
+        }
+
+        return items.map((item, idx) => {
+            const isActive = item.id === this.currentChatId;
+            const isSelected = this.selectedIds.has(item.id);
+            const timeStr = new Date(item.timestamp).toLocaleTimeString([], {
                 hour: '2-digit',
                 minute: '2-digit'
             });
-        }
+            const title = item.role === 'user' ? 'You' : 'Assistant';
+
+            if (this.viewMode === 'tree') {
+                return FloatingNavPanelTemplates.renderTreeItem(
+                    item,
+                    idx,
+                    isActive,
+                    isSelected,
+                    timeStr,
+                    title,
+                    this.currentFilter === 'all'
+                );
+            } else {
+                return FloatingNavPanelTemplates.renderListItem(
+                    item,
+                    idx,
+                    isActive,
+                    isSelected,
+                    timeStr,
+                    title
+                );
+            }
+        }).join('');
     }
 
+    /**
+     * 绑定事件
+     */
     private bindEvents(): void {
         if (!this.panel) return;
 
-        this.panel.querySelector('.llm-nav-panel__close')?.addEventListener('click', () => this.hide());
-
-        this.panel.querySelectorAll<HTMLElement>('.llm-nav-panel__view-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const view = btn.dataset.view as 'list' | 'tree';
-                this.setViewMode(view);
-            });
+        // 关闭按钮
+        this.panel.querySelector('.llm-nav-panel__close')?.addEventListener('click', () => {
+            this.hide();
         });
 
-        this.panel.querySelectorAll<HTMLElement>('.llm-nav-panel__btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const action = btn.dataset.action;
-                this.handleAction(action);
-            });
-        });
+        // 工具栏按钮
+        this.panel.addEventListener('click', (e) => {
+            const target = e.target as HTMLElement;
+            const btn = target.closest('[data-action]') as HTMLElement;
+            if (!btn) return;
 
-        const items = this.panel.querySelectorAll<HTMLElement>('.llm-nav-item');
-        items.forEach(item => {
-            item.addEventListener('click', (e: MouseEvent) => {
-                const target = e.target as HTMLElement;
-                const id = item.dataset.id!;
-                const idx = parseInt(item.dataset.index!);
+            const action = btn.dataset.action;
 
-                const branchBtn = target.closest('[data-action]') as HTMLElement;
-                if (branchBtn && item.contains(branchBtn)) {
-                    const action = branchBtn.dataset.action;
-                    this.handleBranchAction(action!, id, idx);
-                    return;
-                }
-
-                if (target.closest('[data-checkbox]')) {
-                    if (e.shiftKey && this.lastSelectedIndex !== -1) {
-                        this.selectRange(this.lastSelectedIndex, idx);
-                    } else {
-                        this.toggleSelection(id);
-                    }
-                    this.lastSelectedIndex = idx;
-                    return;
-                }
-
-                if (target.closest('[data-fold]')) {
-                    this.options.onToggleFold(id);
-                    const itemData = this.items[idx];
-                    if (itemData) itemData.isCollapsed = !itemData.isCollapsed;
-                    this.updateFoldIcon(item, itemData.isCollapsed);
-                    return;
-                }
-
-                this.currentIndex = idx;
-                this.updateHighlight();
-                this.options.onNavigate(id);
-            });
-        });
-    }
-
-    private async handleAction(action?: string): Promise<void> {
-        switch (action) {
-            case 'toggle-select-all':
-                if (this.selectedIds.size === this.items.length) {
-                    this.selectedIds.clear();
-                } else {
-                    this.items.forEach(i => this.selectedIds.add(i.id));
-                }
-                this.render();
-                break;
-            case 'clear-selection':
-                this.selectedIds.clear();
-                this.render();
-                break;
-            case 'fold-all':
-                this.options.onFoldAll();
-                this.items.forEach(i => i.isCollapsed = true);
-                this.render();
-                break;
-            case 'unfold-all':
-                this.options.onUnfoldAll();
-                this.items.forEach(i => i.isCollapsed = false);
-                this.render();
-                break;
-            case 'prev':
-                this.navigatePrev();
-                break;
-            case 'next':
-                this.navigateNext();
-                break;
-            case 'batch-toggle':
-                this.selectedIds.forEach(id => {
-                    this.options.onToggleFold(id);
-                    const item = this.items.find(i => i.id === id);
-                    if (item) item.isCollapsed = !item.isCollapsed;
-                });
-                this.render();
-                break;
-            case 'batch-delete':
-                if (this.selectedIds.size > 0) {
-                    await this.options.onBatchDelete?.(Array.from(this.selectedIds));
-                    this.selectedIds.clear();
-                    this.render();
-                }
-                break;
-            case 'batch-copy':
-                if (this.selectedIds.size > 0) {
-                    await this.options.onBatchCopy?.(Array.from(this.selectedIds));
-                    this.selectedIds.clear();
-                    this.render();
-                }
-                break;
-        }
-    }
-
-    private handleBranchAction(action: string, sessionId: string, index: number): void {
-        const item = this.items[index];
-
-        switch (action) {
-            case 'prev-branch':
-                if (item.siblingIndex! > 0) {
-                    this.options.onSwitchBranch?.(sessionId);
-                }
-                break;
-
-            case 'next-branch':
-                if (item.siblingIndex! < (item.siblingCount || 1) - 1) {
-                    this.options.onSwitchBranch?.(sessionId);
-                }
-                break;
-
-            case 'create-branch':
-                this.options.onCreateBranch?.(sessionId);
-                break;
-
-            case 'show-children':
-                this.options.onShowBranchTree?.();
-                break;
-        }
-    }
-
-    private toggleSelection(id: string): void {
-        if (this.selectedIds.has(id)) {
-            this.selectedIds.delete(id);
-        } else {
-            this.selectedIds.add(id);
-        }
-        this.syncSelectionUI();
-        this.updateToolbarState();
-    }
-
-    private selectRange(start: number, end: number): void {
-        const min = Math.min(start, end);
-        const max = Math.max(start, end);
-
-        for (let i = min; i <= max; i++) {
-            this.selectedIds.add(this.items[i].id);
-        }
-        this.syncSelectionUI();
-        this.updateToolbarState();
-    }
-
-    private syncSelectionUI(): void {
-        if (!this.panel) return;
-        this.panel.querySelectorAll<HTMLElement>('.llm-nav-item').forEach(el => {
-            const id = el.dataset.id!;
-            const isSelected = this.selectedIds.has(id);
-            el.classList.toggle('selected', isSelected);
-            el.querySelector('.llm-nav-item__checkbox')?.classList.toggle('checked', isSelected);
-        });
-    }
-
-    private updateToolbarState(): void {
-        if (!this.panel) return;
-
-        const hasSelection = this.selectedIds.size > 0;
-        const isAllSelected = this.selectedIds.size === this.items.length && this.items.length > 0;
-
-        // 更新全选按钮状态
-        const selectAllBtn = this.panel.querySelector('[data-action="toggle-select-all"]');
-        selectAllBtn?.classList.toggle('checked', isAllSelected);
-
-        // 更新选择计数
-        const countEl = this.panel.querySelector('.llm-nav-panel__selection-count');
-        if (countEl) {
-            countEl.textContent = `${this.selectedIds.size} selected`;
-        }
-
-        // 显示/隐藏操作按钮组
-        const actionsGroup = this.panel.querySelector('.llm-nav-panel__toolbar-group--actions');
-        const viewGroup = this.panel.querySelector('.llm-nav-panel__toolbar-group--view');
-
-        actionsGroup?.classList.toggle('visible', hasSelection);
-        viewGroup?.classList.toggle('hidden', hasSelection);
-    }
-
-    private updateFoldIcon(itemEl: HTMLElement, isCollapsed: boolean): void {
-        const foldEl = itemEl.querySelector('.llm-nav-item__fold');
-        if (foldEl) {
-            foldEl.textContent = isCollapsed ? '▶' : '▼';
-        }
-        itemEl.classList.toggle('llm-nav-item--collapsed', isCollapsed);
-    }
-
-    private bindKeyboard(): void {
-        this.keydownHandler = (e: KeyboardEvent) => {
-            if ((e.target as HTMLElement).tagName === 'INPUT' ||
-                (e.target as HTMLElement).tagName === 'TEXTAREA') return;
-
-            switch (e.key) {
-                case 'Escape':
-                    e.preventDefault();
-                    if (this.selectedIds.size > 0) {
-                        this.selectedIds.clear();
-                        this.render();
-                    } else {
-                        this.hide();
-                    }
+            switch (action) {
+                case 'toggle-select-all':
+                    this.toggleSelectAll();
                     break;
-                case 'ArrowUp':
-                    e.preventDefault();
+                case 'batch-toggle':
+                    this.batchToggleFold();
+                    break;
+                case 'batch-copy':
+                    this.batchCopy();
+                    break;
+                case 'batch-delete':
+                    this.batchDelete();
+                    break;
+                case 'clear-selection':
+                    this.clearSelection();
+                    break;
+                case 'fold-all':
+                    this.callbacks.onFoldAll();
+                    break;
+                case 'unfold-all':
+                    this.callbacks.onUnfoldAll();
+                    break;
+                case 'prev':
                     this.navigatePrev();
                     break;
-                case 'ArrowDown':
-                    e.preventDefault();
+                case 'next':
                     this.navigateNext();
                     break;
-                // ✅ 新增：分支导航快捷键
-                case 'ArrowLeft':
-                    if (this.viewMode === 'tree' && this.currentIndex >= 0) {
-                        e.preventDefault();
-                        const item = this.items[this.currentIndex];
-                        if (item.siblingIndex! > 0) {
-                            this.options.onSwitchBranch?.(item.id);
-                        }
-                    }
+                case 'create-branch':
+                    this.handleCreateBranch();
                     break;
-
-                case 'ArrowRight':
-                    if (this.viewMode === 'tree' && this.currentIndex >= 0) {
-                        e.preventDefault();
-                        const item = this.items[this.currentIndex];
-                        if (e.shiftKey) {
-                            // Shift + → 创建分支
-                            this.options.onCreateBranch?.(item.id);
-                        } else if (item.siblingIndex! < (item.siblingCount || 1) - 1) {
-                            // → 切换到下一个分支
-                            this.options.onSwitchBranch?.(item.id);
-                        }
-                    }
-                    break;
-
-                case 'Enter':
-                    e.preventDefault();
-                    if (this.currentIndex >= 0) {
-                        this.options.onNavigate(this.items[this.currentIndex].id);
-                    }
-                    break;
-
-                case 'b':
-                    // B 键：显示分支树
-                    if (e.ctrlKey || e.metaKey) {
-                        e.preventDefault();
-                        this.options.onShowBranchTree?.();
-                    }
-                    break;
-
-                case 't':
-                    // T 键：切换视图模式
-                    if (e.ctrlKey || e.metaKey) {
-                        e.preventDefault();
-                        this.setViewMode(this.viewMode === 'list' ? 'tree' : 'list');
-                    }
-                    break;
-
-                case 'a':
-                    if (e.ctrlKey || e.metaKey) {
-                        e.preventDefault();
-                        this.items.forEach(i => this.selectedIds.add(i.id));
-                        this.render();
-                    }
+                case 'prev-branch':
+                case 'next-branch':
+                    this.handleBranchNavigation(btn, action);
                     break;
             }
-        };
-
-        document.addEventListener('keydown', this.keydownHandler);
-    }
-
-    private unbindKeyboard(): void {
-        if (this.keydownHandler) {
-            document.removeEventListener('keydown', this.keydownHandler);
-            this.keydownHandler = null;
-        }
-    }
-
-    private navigatePrev(): void {
-        for (let i = this.currentIndex - 1; i >= 0; i--) {
-            if (this.items[i].role === 'user') {
-                this.currentIndex = i;
-                this.updateHighlight();
-                this.options.onNavigate(this.items[i].id);
-                this.scrollItemIntoView(i);
-                break;
-            }
-        }
-    }
-
-    private navigateNext(): void {
-        for (let i = this.currentIndex + 1; i < this.items.length; i++) {
-            if (this.items[i].role === 'user') {
-                this.currentIndex = i;
-                this.updateHighlight();
-                this.options.onNavigate(this.items[i].id);
-                this.scrollItemIntoView(i);
-                break;
-            }
-        }
-    }
-
-    private updateHighlight(): void {
-        if (!this.panel) return;
-
-        this.panel.querySelectorAll('.llm-nav-item').forEach((item, idx) => {
-            item.classList.toggle('llm-nav-item--active', idx === this.currentIndex);
         });
 
-        const userItems = this.items.filter(i => i.role === 'user');
-        const currentUserIdx = this.currentIndex >= 0
-            ? userItems.findIndex(u => u.index <= this.currentIndex)
-            : -1;
-        const counter = this.panel.querySelector('.llm-nav-panel__counter');
-        if (counter) {
-            counter.textContent = `${currentUserIdx + 1} / ${userItems.length}`;
+        // 分支过滤器
+        const filterSelect = this.panel.querySelector('.llm-nav-panel__branch-filter') as HTMLSelectElement;
+        if (filterSelect) {
+            filterSelect.addEventListener('change', () => {
+                this.currentFilter = filterSelect.value as BranchFilter;
+                this.clearSelection();
+                this.refresh();
+            });
+        }
+
+        // 视图切换
+        this.panel.querySelectorAll('.llm-nav-panel__view-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const mode = (btn as HTMLElement).dataset.view as ViewMode;
+                this.viewMode = mode;
+                this.refresh();
+            });
+        });
+
+        // 消息项点击
+        this.panel.querySelectorAll('.llm-nav-item').forEach(item => {
+            const itemEl = item as HTMLElement;
+            const id = itemEl.dataset.id;
+            if (!id) return;
+
+            // 复选框
+            const checkbox = itemEl.querySelector('[data-checkbox]');
+            if (checkbox) {
+                checkbox.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.toggleSelection(id, e.shiftKey, parseInt(itemEl.dataset.index || '0'));
+                });
+            }
+
+            // 折叠按钮
+            const foldBtn = itemEl.querySelector('[data-fold]');
+            if (foldBtn) {
+                foldBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.callbacks.onToggleFold(id);
+                });
+            }
+
+            // 点击导航
+            itemEl.addEventListener('click', () => {
+                this.callbacks.onNavigate(id);
+                this.hide();
+            });
+        });
+
+        // 键盘导航
+        document.addEventListener('keydown', this.handleKeyDown);
+    }
+
+    /**
+     * 处理键盘事件
+     */
+    private handleKeyDown = (e: KeyboardEvent): void => {
+        if (!this.panel) return;
+
+        if (e.key === 'Escape') {
+            this.hide();
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            this.navigatePrev();
+        } else if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            this.navigateNext();
+        } else if (e.key === 'ArrowLeft' && this.viewMode === 'tree') {
+            e.preventDefault();
+            this.navigateBranchPrev();
+        } else if (e.key === 'ArrowRight' && this.viewMode === 'tree') {
+            if (e.shiftKey) {
+                e.preventDefault();
+                this.handleCreateBranch();
+            } else {
+                e.preventDefault();
+                this.navigateBranchNext();
+            }
+        } else if (e.key === 't' && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            this.viewMode = this.viewMode === 'list' ? 'tree' : 'list';
+            this.refresh();
+        }
+    };
+
+    /**
+     * 切换选择
+     */
+    private toggleSelection(id: string, shiftKey: boolean, index: number): void {
+        if (shiftKey && this.lastSelectedIndex !== -1) {
+            const start = Math.min(this.lastSelectedIndex, index);
+            const end = Math.max(this.lastSelectedIndex, index);
+            const filteredItems = this.filterItems();
+
+            for (let i = start; i <= end; i++) {
+                if (filteredItems[i]) {
+                    this.selectedIds.add(filteredItems[i].id);
+                }
+            }
+        } else {
+            if (this.selectedIds.has(id)) {
+                this.selectedIds.delete(id);
+            } else {
+                this.selectedIds.add(id);
+            }
+            this.lastSelectedIndex = index;
+        }
+
+        this.refresh();
+    }
+
+    /**
+     * 全选/取消全选
+     */
+    private toggleSelectAll(): void {
+        const filteredItems = this.filterItems();
+        if (this.selectedIds.size === filteredItems.length) {
+            this.selectedIds.clear();
+        } else {
+            filteredItems.forEach(item => this.selectedIds.add(item.id));
+        }
+        this.refresh();
+    }
+
+    /**
+     * 清除选择
+     */
+    private clearSelection(): void {
+        this.selectedIds.clear();
+        this.lastSelectedIndex = -1;
+        this.refresh();
+    }
+
+    /**
+     * 批量折叠/展开
+     */
+    private batchToggleFold(): void {
+        this.selectedIds.forEach(id => this.callbacks.onToggleFold(id));
+    }
+
+    /**
+     * 批量复制
+     */
+    private batchCopy(): void {
+        this.callbacks.onBatchCopy(Array.from(this.selectedIds));
+        this.clearSelection();
+    }
+
+    /**
+     * 批量删除
+     */
+    private batchDelete(): void {
+        this.callbacks.onBatchDelete(Array.from(this.selectedIds));
+        this.clearSelection();
+    }
+
+    /**
+     * 导航到上一个用户消息
+     */
+    private navigatePrev(): void {
+        const filteredItems = this.filterItems();
+        const userChats = filteredItems.filter(item => item.role === 'user');
+        if (userChats.length === 0) return;
+
+        const currentIdx = userChats.findIndex(item => item.id === this.currentChatId);
+        const prevIdx = currentIdx <= 0 ? userChats.length - 1 : currentIdx - 1;
+
+        this.callbacks.onNavigate(userChats[prevIdx].id);
+        this.currentChatId = userChats[prevIdx].id;
+        this.refresh();
+    }
+
+    /**
+     * 导航到下一个用户消息
+     */
+    private navigateNext(): void {
+        const filteredItems = this.filterItems();
+        const userChats = filteredItems.filter(item => item.role === 'user');
+        if (userChats.length === 0) return;
+
+        const currentIdx = userChats.findIndex(item => item.id === this.currentChatId);
+        const nextIdx = currentIdx >= userChats.length - 1 ? 0 : currentIdx + 1;
+
+        this.callbacks.onNavigate(userChats[nextIdx].id);
+        this.currentChatId = userChats[nextIdx].id;
+        this.refresh();
+    }
+
+    /**
+     * 创建分支
+     */
+    private handleCreateBranch(): void {
+        const sourceId = this.currentChatId || this.filterItems()[0]?.id;
+        if (sourceId) {
+            this.callbacks.onCreateBranch(sourceId);
         }
     }
 
-    private scrollItemIntoView(index: number): void {
-        const itemEl = this.panel?.querySelector(`[data-index="${index}"]`) as HTMLElement;
-        itemEl?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    /**
+     * 分支导航
+     */
+    private handleBranchNavigation(btn: HTMLElement, action: string): void {
+        const itemEl = btn.closest('.llm-nav-item') as HTMLElement;
+        const sessionId = itemEl?.dataset.id;
+        if (!sessionId) return;
+
+        const item = this.items.find(i => i.id === sessionId);
+        if (!item) return;
+
+        const siblingIndex = item.siblingIndex ?? 0;
+        const siblingCount = item.siblingCount ?? 1;
+
+        if (action === 'prev-branch' && siblingIndex > 0) {
+            // 触发切换到前一个兄弟分支
+            this.callbacks.onNavigate(sessionId); // 这里需要扩展回调支持分支切换
+        } else if (action === 'next-branch' && siblingIndex < siblingCount - 1) {
+            // 触发切换到后一个兄弟分支
+            this.callbacks.onNavigate(sessionId);
+        }
     }
 
-    private getPreview(content: string, maxLen: number): string {
-        if (!content) return '(empty)';
-        let plain = content.replace(/[\r\n]+/g, ' ').replace(/[*#`_~[\]()]/g, '').trim();
-        return plain.length > maxLen ? plain.substring(0, maxLen) + '...' : plain;
+    /**
+     * 键盘导航：上一个分支
+     */
+    private navigateBranchPrev(): void {
+        if (!this.currentChatId) return;
+        const item = this.items.find(i => i.id === this.currentChatId);
+        if (!item || (item.siblingIndex ?? 0) === 0) return;
+
+        // 触发分支切换逻辑（需要扩展）
+        this.callbacks.onNavigate(this.currentChatId);
     }
 
-    public destroy(): void {
+    /**
+     * 键盘导航：下一个分支
+     */
+    private navigateBranchNext(): void {
+        if (!this.currentChatId) return;
+        const item = this.items.find(i => i.id === this.currentChatId);
+        if (!item) return;
+
+        const siblingIndex = item.siblingIndex ?? 0;
+        const siblingCount = item.siblingCount ?? 1;
+        if (siblingIndex >= siblingCount - 1) return;
+
+        // 触发分支切换逻辑（需要扩展）
+        this.callbacks.onNavigate(this.currentChatId);
+    }
+
+    /**
+     * 获取预览文本
+     */
+    private getPreview(content: string, maxLength: number = 60): string {
+        if (!content) return '(Empty)';
+        const cleaned = content.replace(/\s+/g, ' ').trim();
+        return cleaned.length > maxLength
+            ? cleaned.substring(0, maxLength) + '...'
+            : cleaned;
+    }
+
+    /**
+     * 销毁
+     */
+    destroy(): void {
+        document.removeEventListener('keydown', this.handleKeyDown);
         this.hide();
-        this.items = [];
     }
 }

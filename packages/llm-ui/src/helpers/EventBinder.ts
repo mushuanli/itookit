@@ -17,104 +17,125 @@ export interface GlobalShortcutCallbacks {
     onToggleNavigator: () => void;
     onNavigatePrev: () => void;
     onNavigateNext: () => void;
-    onShowBranchTree: () => void;     // ✅ 改为必选
-    onCreateBranch: () => void;        // ✅ 改为必选
-    onSwitchBranchPrev?: () => void;   // ✅ 新增：快捷键切换上一个分支
-    onSwitchBranchNext?: () => void;   // ✅ 新增：快捷键切换下一个分支
+    onCreateBranch: () => void;
+    onSwitchBranchPrev: () => void;
+    onSwitchBranchNext: () => void;
 }
 
 export class EventBinder {
-    private keydownHandler: ((e: KeyboardEvent) => void) | null = null;
+    private container: HTMLElement;
+    private callbacks: EventBinderCallbacks;
+    
+    // ✅ 添加缺失的属性
+    private globalKeyHandler: ((e: KeyboardEvent) => void) | null = null;
 
-    constructor(
-        private container: HTMLElement,
-        private callbacks: EventBinderCallbacks
-    ) { }
+    constructor(container: HTMLElement, callbacks: EventBinderCallbacks) {
+        this.container = container;
+        this.callbacks = callbacks;
+    }
 
     bindTitleBarEvents(): void {
-        this.container.querySelector('#llm-btn-sidebar')?.addEventListener('click', () => {
-            this.callbacks.onToggleSidebar();
-        });
-
         const titleInput = this.container.querySelector('#llm-title-input') as HTMLInputElement;
         if (titleInput) {
             titleInput.addEventListener('blur', () => {
                 this.callbacks.onTitleChange(titleInput.value);
             });
             titleInput.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') titleInput.blur();
+                if (e.key === 'Enter') {
+                    titleInput.blur();
+                }
             });
         }
+
+        this.container.querySelector('#llm-btn-sidebar')?.addEventListener('click', () => {
+            this.callbacks.onToggleSidebar();
+        });
 
         this.container.querySelector('#llm-btn-assets')?.addEventListener('click', () => {
             this.callbacks.onOpenAssetManager();
         });
+
+        this.container.querySelector('#llm-btn-collapse')?.addEventListener('click', () => {
+            this.callbacks.onCollapseAll();
+        });
+
+        this.container.querySelector('#llm-btn-copy')?.addEventListener('click', () => {
+            this.callbacks.onCopy();
+        });
+
+        this.container.querySelector('#llm-btn-print')?.addEventListener('click', () => {
+            this.callbacks.onPrint();
+        });
+
+        this.container.querySelector('#llm-btn-navigator')?.addEventListener('click', () => {
+            this.callbacks.onToggleNavigator();
+        });
     }
 
     bindNavigationEvents(): void {
-        const bindings: Record<string, () => void> = {
-            '#llm-btn-navigator': this.callbacks.onToggleNavigator,
-            '#llm-btn-prev-agent': this.callbacks.onPrevAgent,
-            '#llm-btn-next-agent': this.callbacks.onNextAgent,
-            '#llm-btn-fold-one': this.callbacks.onFoldOne,
-            '#llm-btn-collapse': this.callbacks.onCollapseAll,
-            '#llm-btn-copy': this.callbacks.onCopy,
-            '#llm-btn-print': this.callbacks.onPrint,
-        };
+        this.container.querySelector('#llm-btn-prev-agent')?.addEventListener('click', () => {
+            this.callbacks.onPrevAgent();
+        });
 
-        for (const [selector, handler] of Object.entries(bindings)) {
-            this.container.querySelector(selector)?.addEventListener('click', handler);
-        }
+        this.container.querySelector('#llm-btn-next-agent')?.addEventListener('click', () => {
+            this.callbacks.onNextAgent();
+        });
+
+        this.container.querySelector('#llm-btn-fold-one')?.addEventListener('click', () => {
+            this.callbacks.onFoldOne();
+        });
     }
 
-    bindGlobalShortcuts(shortcuts: GlobalShortcutCallbacks): void {
-        this.keydownHandler = (e: KeyboardEvent) => {
-            const target = e.target as HTMLElement;
-            if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
+    bindGlobalShortcuts(callbacks: GlobalShortcutCallbacks): void {
+        this.globalKeyHandler = (e: KeyboardEvent) => {
+            const isCtrlOrMeta = e.ctrlKey || e.metaKey;
 
-            const isMod = e.metaKey || e.ctrlKey;
-            if (!isMod) return;
-
-            // Cmd/Ctrl + Shift + B: 创建分支
-            if (e.shiftKey && e.key === 'B') {
+            // Ctrl+G: 打开 Navigator（统一入口）
+            if (isCtrlOrMeta && e.key === 'g') {
                 e.preventDefault();
-                shortcuts.onCreateBranch();
+                callbacks.onToggleNavigator();
                 return;
             }
 
-            // ✅ 新增: Cmd/Ctrl + Shift + [ / ] : 切换分支
-            if (e.shiftKey && e.key === '[' && shortcuts.onSwitchBranchPrev) {
+            // Ctrl+↑/↓: 导航
+            if (isCtrlOrMeta && e.key === 'ArrowUp') {
                 e.preventDefault();
-                shortcuts.onSwitchBranchPrev();
+                callbacks.onNavigatePrev();
                 return;
             }
-            if (e.shiftKey && e.key === ']' && shortcuts.onSwitchBranchNext) {
+            if (isCtrlOrMeta && e.key === 'ArrowDown') {
                 e.preventDefault();
-                shortcuts.onSwitchBranchNext();
+                callbacks.onNavigateNext();
                 return;
             }
 
-            const keyMap: Record<string, (() => void) | undefined> = {
-                'k': shortcuts.onToggleNavigator,
-                'ArrowUp': shortcuts.onNavigatePrev,
-                'ArrowDown': shortcuts.onNavigateNext,
-                'b': shortcuts.onShowBranchTree,
-            };
-
-            const handler = keyMap[e.key];
-            if (handler) {
+            // ⌘⇧B: 创建分支
+            if (isCtrlOrMeta && e.shiftKey && e.key === 'B') {
                 e.preventDefault();
-                handler();
+                callbacks.onCreateBranch();
+                return;
+            }
+
+            // ⌘⇧[ / ⌘⇧]: 切换分支
+            if (isCtrlOrMeta && e.shiftKey && e.key === '[') {
+                e.preventDefault();
+                callbacks.onSwitchBranchPrev();
+                return;
+            }
+            if (isCtrlOrMeta && e.shiftKey && e.key === ']') {
+                e.preventDefault();
+                callbacks.onSwitchBranchNext();
+                return;
             }
         };
 
-        document.addEventListener('keydown', this.keydownHandler);
+        document.addEventListener('keydown', this.globalKeyHandler);
     }
 
     cleanup(): void {
-        if (this.keydownHandler) {
-            document.removeEventListener('keydown', this.keydownHandler);
-            this.keydownHandler = null;
+        if (this.globalKeyHandler) {
+            document.removeEventListener('keydown', this.globalKeyHandler);
+            this.globalKeyHandler = null;
         }
     }
 }

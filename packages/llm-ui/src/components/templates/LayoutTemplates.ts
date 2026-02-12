@@ -2,7 +2,7 @@
 import { escapeHTML } from '@itookit/common';
 
 export const LayoutTemplates = {
-    renderWorkspace: (currentTitle: string, branchInfo?: { name?: string; count?: number }) => `
+    renderWorkspace: (currentTitle: string) => `
         <div class="llm-workspace-titlebar">
             <div class="llm-workspace-titlebar__left">
                 <button class="llm-workspace-titlebar__btn" id="llm-btn-sidebar" title="Toggle Sidebar">
@@ -17,43 +17,8 @@ export const LayoutTemplates = {
                 <input type="text" class="llm-workspace-titlebar__input" id="llm-title-input" 
                        value="${escapeHTML(currentTitle)}" placeholder="Untitled Chat" />
                 
-                <div class="llm-branch-indicator-bar" id="llm-branch-indicator">
-                    ${branchInfo?.name ? `
-                        <button class="llm-branch-indicator-btn"
-                                data-action="toggle-branch-dropdown"
-                                title="Branch: ${escapeHTML(branchInfo.name)}${branchInfo.count ? ` (${branchInfo.count} branches)` : ''}">
-                            <svg class="llm-branch-indicator-icon" viewBox="0 0 24 24" 
-                                 width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-                                <line x1="6" y1="3" x2="6" y2="15"></line>
-                                <circle cx="18" cy="6" r="3"></circle>
-                                <circle cx="6" cy="18" r="3"></circle>
-                                <path d="M18 9a9 9 0 0 1-9 9"></path>
-                            </svg>
-                            <span class="llm-branch-indicator-name">${escapeHTML(branchInfo.name)}</span>
-                            ${branchInfo.count && branchInfo.count > 1
-                ? `<span class="llm-branch-indicator-count">${branchInfo.count}</span>`
-                : ''}
-                            <svg class="llm-branch-indicator-chevron" viewBox="0 0 24 24"
-                                 width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
-                                <polyline points="6 9 12 15 18 9"></polyline>
-                            </svg>
-                        </button>
-                        <div class="llm-branch-dropdown" style="display:none"></div>
-                    ` : `
-                        <button class="llm-branch-indicator-btn llm-branch-indicator-btn--minimal"
-                                data-action="show-branch-tree"
-                                title="Branch: main">
-                            <svg class="llm-branch-indicator-icon" viewBox="0 0 24 24" 
-                                 width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-                                <line x1="6" y1="3" x2="6" y2="15"></line>
-                                <circle cx="18" cy="6" r="3"></circle>
-                                <circle cx="6" cy="18" r="3"></circle>
-                                <path d="M18 9a9 9 0 0 1-9 9"></path>
-                            </svg>
-                            <span class="llm-branch-indicator-name">main</span>
-                        </button>
-                    `}
-                </div>
+                <!-- ✅ 简化：仅保留占位容器，由 BranchIndicator 组件动态填充 -->
+                <div class="llm-branch-indicator-bar" id="llm-branch-indicator"></div>
 
                 <div class="llm-workspace-status" id="llm-status-indicator">
                     <span class="llm-workspace-status__dot"></span>

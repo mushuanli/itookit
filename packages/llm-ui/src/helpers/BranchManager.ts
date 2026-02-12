@@ -2,14 +2,13 @@
 // @file: llm-ui/helpers/BranchManager.ts
 
 import { SessionManager } from '@itookit/llm-engine';
-import { HistoryView } from '../components/HistoryView';
 import { Toast, showConfirmDialog } from '@itookit/common';
 import { BranchAction } from '../core/types';
 
 export class BranchManager {
     constructor(
         private sessionManager: SessionManager,
-        private historyView: HistoryView,
+        private openNavigator: () => void,
         private scrollToSession: (sessionId: string) => void
     ) { }
 
@@ -24,7 +23,10 @@ export class BranchManager {
         try {
             switch (action) {
                 case 'show-tree':
-                    return await this.showBranchTree();
+                    // ✅ 改为打开 Navigator
+                    this.openNavigator();
+                    return;
+
                 case 'create':
                     return await this.createBranch(nodeId);
                 case 'navigate':
@@ -47,26 +49,16 @@ export class BranchManager {
         }
     }
 
-    async showBranchTree(): Promise<void> {
-        const tree = await this.sessionManager.getBranchTree();
-        this.historyView.showBranchTree(tree);
-    }
-
     private async createBranch(sourceNodeId: string): Promise<void> {
         const branchName = await this.promptBranchName();
         if (branchName === null) return;
 
-        // ✅ SessionManager.createBranch 内部自动：
-        //   1. 持久化创建分支
-        //   2. reloadSessionData
-        //   3. 发送 branch_created 事件
         await this.sessionManager.createBranch(sourceNodeId, {
             name: branchName || undefined,
             copyContent: true
         });
 
         Toast.success(`Branch "${branchName || 'Untitled'}" created`);
-        // ✅ 删除：renderFull() —— 事件驱动已处理
     }
 
     private navigateToBranch(nodeId: string): void {
@@ -88,24 +80,11 @@ export class BranchManager {
         );
         if (!confirmed) return;
 
-        // ✅ SessionManager.deleteBranch 内部自动：
-        //   1. 校验不能删除当前 head
-        //   2. 持久化删除
-        //   3. 内存清理
-        //   4. 发送 messages_deleted 事件
         await this.sessionManager.deleteBranch(nodeId, true);
         Toast.success('Branch deleted');
     }
 
-    /**
-     * ✅ 使用 navigateToBranch 替代 switchToSibling
-     */
     private async selectBranch(branchId: string): Promise<void> {
-        // ✅ navigateToBranch 内部自动：
-        //   1. updateManifestHead 切换当前活跃头节点
-        //   2. reloadSessionData 重新加载消息
-        //   3. 发送 session_cleared + session_start 事件序列
-        //   4. 发送 branch_switched 事件
         await this.sessionManager.navigateToBranch(branchId);
     }
 

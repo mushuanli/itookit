@@ -1,26 +1,25 @@
 // @file: llm-ui/components/BranchIndicator.ts
 
-import { BranchIndicatorTemplates, BranchItem } from './templates/BranchIndicatorTemplates';
+export interface BranchItem {
+    name: string;
+    headNodeId: string;
+    isCurrent: boolean;
+}
 
 export interface BranchIndicatorCallbacks {
-    onSwitchBranch: (branchId: string) => void;
-    onCreateBranch: () => void;
-    onShowBranchTree: () => void;
+    onOpenNavigator: () => void;
 }
 
 /**
- * 分支指示器组件
- * 职责：在 title bar 中显示当前分支状态，提供切换和创建操作
+ * 分支指示器组件（简化版）
+ * 职责：在 title bar 中显示当前分支状态，点击打开 Navigator
  * 
- * 遵循 SRP：仅负责分支指示 UI 的渲染和交互
+ * 遵循 KISS 原则：仅显示信息，不提供下拉菜单
  */
 export class BranchIndicator {
     private container: HTMLElement;
     private callbacks: BranchIndicatorCallbacks;
-    private dropdownEl: HTMLElement | null = null;
-    private isDropdownOpen = false;
     private branches: BranchItem[] = [];
-    private outsideClickHandler: ((e: MouseEvent) => void) | null = null;
 
     constructor(container: HTMLElement, callbacks: BranchIndicatorCallbacks) {
         this.container = container;
@@ -33,145 +32,49 @@ export class BranchIndicator {
      */
     update(branches: BranchItem[]): void {
         this.branches = branches;
-        this.renderIndicator();
+        this.render();
     }
 
     /**
-     * 渲染指示器主体
+     * 渲染指示器
      */
-    private renderIndicator(): void {
-        const currentBranch = this.branches.find(b => b.isCurrent);
-        const branchCount = this.branches.length;
-
+    private render(): void {
         const indicatorEl = this.container.querySelector('.llm-branch-indicator-bar') as HTMLElement;
         if (!indicatorEl) return;
 
-        // 无分支或仅 main 分支：简化显示
-        if (branchCount <= 1) {
-            const name = currentBranch?.name || 'main';
-            indicatorEl.innerHTML = BranchIndicatorTemplates.renderMinimalIndicator(name);
-            indicatorEl.classList.remove('has-branches');
-        } else {
-            const name = currentBranch?.name || 'main';
-            indicatorEl.innerHTML = BranchIndicatorTemplates.renderFullIndicator(name, branchCount);
-            indicatorEl.classList.add('has-branches');
-        }
-    }
+        const currentBranch = this.branches.find(b => b.isCurrent);
+        const name = currentBranch?.name || 'main';
+        const count = this.branches.length;
 
-    private toggleDropdown(): void {
-        if (this.isDropdownOpen) {
-            this.closeDropdown();
-        } else {
-            this.openDropdown();
-        }
-    }
-
-    /**
-     * 打开下拉菜单
-     */
-    private openDropdown(): void {
-        const dropdownEl = this.container.querySelector('.llm-branch-dropdown') as HTMLElement;
-        if (!dropdownEl) return;
-
-        this.dropdownEl = dropdownEl;
-        this.isDropdownOpen = true;
-
-        dropdownEl.innerHTML = BranchIndicatorTemplates.renderDropdownContent(this.branches);
-        dropdownEl.style.display = 'block';
-
-        this.bindDropdownEvents(dropdownEl);
-
-        requestAnimationFrame(() => {
-            dropdownEl.classList.add('is-open');
-        });
-
-        this.outsideClickHandler = (e: MouseEvent) => {
-            const target = e.target as HTMLElement;
-            if (!this.container.querySelector('.llm-branch-indicator-bar')?.contains(target)) {
-                this.closeDropdown();
-            }
-        };
-        setTimeout(() => {
-            document.addEventListener('click', this.outsideClickHandler!);
-        }, 0);
+        // 简化模板：仅显示名称和数量，点击打开 Navigator
+        indicatorEl.innerHTML = `
+            <button class="llm-branch-indicator-btn" 
+                    data-action="open-navigator"
+                    title="Branch: ${name}${count > 1 ? ` (${count} total)` : ''} - Click to manage branches">
+                <svg class="llm-branch-indicator-icon" viewBox="0 0 24 24" 
+                     width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="6" y1="3" x2="6" y2="15"></line>
+                    <circle cx="18" cy="6" r="3"></circle>
+                    <circle cx="6" cy="18" r="3"></circle>
+                    <path d="M18 9a9 9 0 0 1-9 9"></path>
+                </svg>
+                <span class="llm-branch-indicator-name">${name}</span>
+                ${count > 1 ? `<span class="llm-branch-indicator-count">${count}</span>` : ''}
+            </button>
+        `;
     }
 
     /**
-     * 关闭下拉菜单
+     * 绑定事件
      */
-    private closeDropdown(): void {
-        if (!this.dropdownEl) return;
-
-        this.isDropdownOpen = false;
-        this.dropdownEl.classList.remove('is-open');
-
-        setTimeout(() => {
-            if (this.dropdownEl) {
-                this.dropdownEl.style.display = 'none';
-                this.dropdownEl.innerHTML = '';
-            }
-        }, 200);
-
-        if (this.outsideClickHandler) {
-            document.removeEventListener('click', this.outsideClickHandler);
-            this.outsideClickHandler = null;
-        }
-    }
-
     private bindEvents(): void {
         this.container.addEventListener('click', (e) => {
             const target = e.target as HTMLElement;
-            const btn = target.closest('[data-action]') as HTMLElement;
-            if (!btn) return;
-
-            // 确保事件来自 branch indicator 区域
-            if (!btn.closest('.llm-branch-indicator-bar')) return;
-
-            const action = btn.dataset.action;
-
-            switch (action) {
-                case 'toggle-branch-dropdown':
-                    e.stopPropagation();
-                    this.toggleDropdown();
-                    break;
-                case 'show-branch-tree':
-                    e.stopPropagation();
-                    this.closeDropdown();
-                    this.callbacks.onShowBranchTree();
-                    break;
-            }
-        });
-    }
-
-    /**
-     * 绑定下拉菜单事件
-     */
-    private bindDropdownEvents(dropdownEl: HTMLElement): void {
-        dropdownEl.addEventListener('click', (e) => {
-            const target = e.target as HTMLElement;
-            const btn = target.closest('[data-action]') as HTMLElement;
-            if (!btn) return;
-
-            e.stopPropagation();
-            const action = btn.dataset.action;
-
-            switch (action) {
-                case 'switch-branch': {
-                    const branchId = btn.dataset.branchId;
-                    if (branchId) {
-                        this.closeDropdown();
-                        this.callbacks.onSwitchBranch(branchId);
-                    }
-                    break;
-                }
-                case 'create-branch':
-                    this.closeDropdown();
-                    this.callbacks.onCreateBranch();
-                    break;
-                case 'show-branch-tree':
-                    this.closeDropdown();
-                    this.callbacks.onShowBranchTree();
-                    break;
+            const btn = target.closest('[data-action="open-navigator"]');
+            
+            if (btn) {
+                e.stopPropagation();
+                this.callbacks.onOpenNavigator();
             }
         });
     }
@@ -193,7 +96,6 @@ export class BranchIndicator {
      * 销毁
      */
     destroy(): void {
-        this.closeDropdown();
         const indicatorEl = this.container.querySelector('.llm-branch-indicator-bar');
         if (indicatorEl) {
             indicatorEl.innerHTML = '';

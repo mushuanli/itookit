@@ -3,6 +3,12 @@
 import { escapeHTML } from '@itookit/common';
 import { ChatNavItem } from '../FloatingNavPanel';
 
+export interface BranchItem {
+    name: string;
+    headNodeId: string;
+    isCurrent: boolean;
+}
+
 export const FloatingNavPanelTemplates = {
     /**
      * 渲染面板主结构
@@ -14,6 +20,8 @@ export const FloatingNavPanelTemplates = {
         isAllSelected: boolean,
         selectedCount: number,
         viewMode: 'list' | 'tree',
+        currentFilter: string,
+        branches: BranchItem[],
         listContent: string
     ): string => `
         <div class="llm-nav-panel__header">
@@ -23,7 +31,27 @@ export const FloatingNavPanelTemplates = {
         </div>
         
         <div class="llm-nav-panel__toolbar">
-            <!-- 左侧：选择相关 -->
+            <!-- 左侧：分支过滤器 -->
+            <div class="llm-nav-panel__toolbar-group">
+                <select class="llm-nav-panel__branch-filter" data-action="change-filter">
+                    <option value="current" ${currentFilter === 'current' ? 'selected' : ''}>
+                        📍 Current Branch
+                    </option>
+                    <option value="all" ${currentFilter === 'all' ? 'selected' : ''}>
+                        🌐 All Branches
+                    </option>
+                    ${branches.length > 1 ? '<option disabled>──────────</option>' : ''}
+                    ${branches.map(b => `
+                        <option value="${escapeHTML(b.headNodeId)}" ${currentFilter === b.headNodeId ? 'selected' : ''}>
+                            ${b.isCurrent ? '✓ ' : ''}🌿 ${escapeHTML(b.name)}
+                        </option>
+                    `).join('')}
+                </select>
+            </div>
+
+            <div class="llm-nav-panel__toolbar-sep"></div>
+
+            <!-- 中间：选择相关 -->
             <div class="llm-nav-panel__toolbar-group">
                 <button class="llm-nav-panel__btn llm-nav-panel__btn--checkbox ${isAllSelected ? 'checked' : ''}" 
                         data-action="toggle-select-all" 
@@ -37,7 +65,7 @@ export const FloatingNavPanelTemplates = {
 
             <div class="llm-nav-panel__toolbar-sep"></div>
 
-            <!-- 中间：批量操作 -->
+            <!-- 批量操作（选择时显示）-->
             <div class="llm-nav-panel__toolbar-group llm-nav-panel__toolbar-group--actions ${hasSelection ? 'visible' : ''}">
                 <button class="llm-nav-panel__btn" data-action="batch-toggle" title="Toggle Fold Selected">
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
@@ -64,7 +92,7 @@ export const FloatingNavPanelTemplates = {
                 </button>
             </div>
 
-            <!-- 右侧：视图控制 -->
+            <!-- 右侧：视图控制 + 分支管理（无选择时显示）-->
             <div class="llm-nav-panel__toolbar-group llm-nav-panel__toolbar-group--view ${hasSelection ? 'hidden' : ''}">
                 <!-- 视图切换按钮 -->
                 <button class="llm-nav-panel__btn llm-nav-panel__view-btn ${viewMode === 'list' ? 'active' : ''}" 
@@ -87,6 +115,16 @@ export const FloatingNavPanelTemplates = {
                         <circle cx="18" cy="6" r="3"></circle>
                         <circle cx="6" cy="18" r="3"></circle>
                         <path d="M18 9a9 9 0 0 1-9 9"></path>
+                    </svg>
+                </button>
+                
+                <div class="llm-nav-panel__toolbar-sep"></div>
+                
+                <!-- 分支管理按钮 -->
+                <button class="llm-nav-panel__btn" data-action="create-branch" title="Create Branch from Current (Shift+→)">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
                     </svg>
                 </button>
                 
@@ -184,7 +222,8 @@ export const FloatingNavPanelTemplates = {
         isActive: boolean,
         isSelected: boolean,
         timeStr: string,
-        title: string
+        title: string,
+        showBranchBadge: boolean
     ): string => {
         const icon = item.role === 'user' ? '👤' : '🤖';
         const activeClass = isActive ? 'llm-nav-item--active' : '';
@@ -194,8 +233,9 @@ export const FloatingNavPanelTemplates = {
             ? `<span class="llm-nav-item__branch-badge">${item.siblingIndex! + 1}/${item.siblingCount}</span>`
             : '';
 
-        const branchName = item.branchName
-            ? `<span class="llm-nav-item__branch-name">${escapeHTML(item.branchName)}</span>`
+        // 仅在 "All Branches" 模式下显示分支名称
+        const branchName = showBranchBadge && item.branchName
+            ? `<span class="llm-nav-item__branch-name">🌿 ${escapeHTML(item.branchName)}</span>`
             : '';
 
         return `
@@ -269,15 +309,6 @@ export const FloatingNavPanelTemplates = {
                         <line x1="5" y1="12" x2="19" y2="12"></line>
                     </svg>
                 </button>
-                ${item.hasChildren ? `
-                    <button class="llm-nav-item__branch-btn" 
-                            data-action="show-children" 
-                            title="Show Child Branches">
-                        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
-                            <polyline points="6 9 12 15 18 9"></polyline>
-                        </svg>
-                    </button>
-                ` : ''}
             </div>
         `;
     }

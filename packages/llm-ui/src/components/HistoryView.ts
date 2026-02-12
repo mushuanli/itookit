@@ -1,14 +1,13 @@
 // @file: llm-ui/components/HistoryView.ts
 
 import { NodeActionCallback, BranchActionCallback } from '../core/types';
-import { OrchestratorEvent, SessionGroup, ExecutionNode, BranchTreeNode } from '@itookit/llm-engine';
+import { OrchestratorEvent, SessionGroup, ExecutionNode } from '@itookit/llm-engine';
 import { NodeRenderer } from './NodeRenderer';
 import { MDxController } from './mdx/MDxController';
 import { NodeTemplates } from './templates/NodeTemplates';
 import { LayoutTemplates } from './templates/LayoutTemplates';
 import { ErrorTemplates } from './templates/ErrorTemplates';
 import { showConfirmDialog, ISessionEngine } from '@itookit/common';
-import { BranchTreePanel } from './BranchTreePanel';
 import { CollapseStateMap } from '../core/types';
 
 export interface HistoryViewOptions {
@@ -74,9 +73,6 @@ export class HistoryView {
     // ✅ 新增：新内容提示器
     private newContentIndicator: HTMLElement | null = null;
 
-    // ✅ 新增：分支管理组件
-    private branchTreePanel: BranchTreePanel | null = null;
-
     // ✅ 新增：分支操作回调
     private onBranchAction?: BranchActionCallback;
 
@@ -110,9 +106,6 @@ export class HistoryView {
             });
         });
         this.resizeObserver.observe(this.container);
-
-        // ✅ 初始化分支组件
-        this.initBranchComponents();
     }
 
     // ✅ 新增：获取当前折叠状态
@@ -391,36 +384,10 @@ export class HistoryView {
     }
 
     /**
-     * ✅ 新增：初始化分支组件
-     */
-    private initBranchComponents(): void {
-        this.branchTreePanel = new BranchTreePanel(this.container, {
-            onNavigate: (id) => this.onBranchAction?.('navigate', id),
-            onRename: (id, name) => this.onBranchAction?.('rename', id, { newName: name }),
-            onDelete: (id) => this.onBranchAction?.('delete', id),
-            onClose: () => { }
-        });
-    }
-
-    /**
      * ✅ 新增：设置分支操作回调
      */
     public setBranchActionCallback(callback: BranchActionCallback): void {
         this.onBranchAction = callback;
-    }
-
-    /**
-     * ✅ 新增：显示分支树
-     */
-    public showBranchTree(tree: BranchTreeNode): void {
-        this.branchTreePanel?.show(tree);
-    }
-
-    /**
-     * ✅ 新增：隐藏分支树
-     */
-    public hideBranchTree(): void {
-        this.branchTreePanel?.hide();
     }
 
     private initUserBubble(wrapper: HTMLElement, group: SessionGroup) {
@@ -1545,10 +1512,6 @@ export class HistoryView {
             cancelAnimationFrame(this.scrollFrameId);
             this.scrollFrameId = null;
         }
-
-        // ✅ 清理分支组件
-        this.branchTreePanel?.destroy();
-        this.branchTreePanel = null;
 
         this.resizeObserver.disconnect();
 
