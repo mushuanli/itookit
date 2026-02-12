@@ -66,8 +66,8 @@ export abstract class BaseModuleService {
   protected async readJson<T>(path: string): Promise<T | null> {
     try {
       const content = await this.vfs.read(this.moduleName, path);
-      const str = typeof content === 'string' 
-        ? content 
+      const str = typeof content === 'string'
+        ? content
         : new TextDecoder().decode(content as ArrayBuffer);
       return JSON.parse(str);
     } catch (e: any) {
@@ -92,12 +92,12 @@ export abstract class BaseModuleService {
       const lastSlash = path.lastIndexOf('/');
       const parentPath = lastSlash > 0 ? path.slice(0, lastSlash) : null;
       const fileName = path.slice(lastSlash + 1);
-      
+
       // 确保父目录存在
       if (parentPath && parentPath !== '/') {
         await this.ensureDirectory(parentPath);
       }
-      
+
       await this.engine.createFile(fileName, parentPath, content);
     }
   }
@@ -105,7 +105,7 @@ export abstract class BaseModuleService {
   /**
    * 确保目录存在
    */
-  protected async ensureDirectory(path: string): Promise<void> {
+  async ensureDirectory(path: string): Promise<void> {
     // 委托给内核方法
     const systemPath = `/${this.moduleName}${path.startsWith('/') ? path : '/' + path}`;
     await this.vfs.kernel.ensureDirectory(systemPath);
