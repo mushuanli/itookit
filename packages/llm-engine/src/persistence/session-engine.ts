@@ -890,7 +890,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
       if (visited.has(currentId)) break;
       visited.add(currentId);
 
-      const node = await this.readJson<ChatNode>(
+      const node: ChatNode | null = await this.readJson<ChatNode>(
         this.getNodePath(sessionId, currentId)
       );
       if (!node) break;
