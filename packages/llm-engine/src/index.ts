@@ -99,13 +99,6 @@ export { createThrottledWriter } from './utils/throttled-writer';
 export type { ThrottledWriter } from './utils/throttled-writer';
 
 // ============================================
-// 核心类型
-// ============================================
-
-export * from './core/types';
-export * from './core/errors';
-
-// ============================================
 // 初始化
 // ============================================
 
