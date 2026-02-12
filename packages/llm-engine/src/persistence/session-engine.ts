@@ -1016,6 +1016,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
         branchName: options?.name,
         createdFrom: options?.createdFrom
       });
+
       const manifest = await this.getManifest(nodeId);
       const sourceNode = await this.readJson<ChatNode>(
         this.getNodePath(sessionId, sourceMessageId)
@@ -1024,46 +1025,107 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
       if (!sourceNode) {
         log.error('Source node not found for branch creation', {
           sessionId,
-          sourceMessageId
+          sourceMessageId,
+          path: this.getNodePath(sessionId, sourceMessageId)
         });
-        throw new Error('Source node not found');
+        throw new Error(`Source node not found: ${sourceMessageId}`);
       }
 
-      // 生成新节点 ID
       const newNodeId = generateUUID();
       const now = new Date().toISOString();
 
-      // 创建新节点（复制源节点）
-      const newNode: ChatNode = {
-        ...sourceNode,
-        id: newNodeId,
-        created_at: now,
-        children_ids: [],
-        meta: {
-          ...sourceNode.meta,
-          branchMetadata: {
-            branchName: options?.name,
-            createdFrom: options?.createdFrom || 'manual',
-            createdAt: now
-          }
+      const branchMeta = {
+        branchMetadata: {
+          branchName: options?.name,
+          createdFrom: options?.createdFrom || 'manual',
+          createdAt: now,
         }
       };
 
-      // 如果不复制内容，清空
-      if (!options?.copyContent) {
-        newNode.content = '';
-      }
+      if (sourceNode.role === 'user') {
+        // ✅ User Node：创建并列的兄弟 user 节点
+        //   parent
+        //     ├── sourceNode (user)
+        //     └── newNode (user)     ← 新增
+        const newNode: ChatNode = {
+          id: newNodeId,
+          type: 'message',
+          role: 'user',
+          content: options?.copyContent ? sourceNode.content : '',
+          created_at: now,
+          parent_id: sourceNode.parent_id,
+          children_ids: [],
+          status: 'active',
+          meta: {
+            ...branchMeta,
+            ...(options?.copyContent ? { files: sourceNode.meta?.files } : {}),
+          }
+        };
 
-      // 写入新节点
-      await this.writeJson(this.getNodePath(sessionId, newNodeId), newNode);
+        await this.writeJson(this.getNodePath(sessionId, newNodeId), newNode);
 
-      // 更新父节点的 children_ids
-      if (sourceNode.parent_id) {
-        const parent = await this.readJson<ChatNode>(
-          this.getNodePath(sessionId, sourceNode.parent_id)
-        );
-        if (parent) {
-          if (!parent.children_ids.includes(newNodeId)) {
+        if (sourceNode.parent_id) {
+          const parent = await this.readJson<ChatNode>(
+            this.getNodePath(sessionId, sourceNode.parent_id)
+          );
+          if (parent && !parent.children_ids.includes(newNodeId)) {
+            parent.children_ids.push(newNodeId);
+            await this.writeJson(
+              this.getNodePath(sessionId, sourceNode.parent_id),
+              parent
+            );
+          }
+        }
+
+      } else if (sourceNode.role === 'assistant') {
+        // ✅ Assistant Node：创建下一轮对话的分支入口
+        //   sourceNode (assistant)
+        //     ├── existingChild
+        //     └── newNode (user)     ← 新增，等待用户输入
+        const newNode: ChatNode = {
+          id: newNodeId,
+          type: 'message',
+          role: 'user',
+          content: '',
+          created_at: now,
+          parent_id: sourceMessageId,
+          children_ids: [],
+          status: 'active',
+          meta: branchMeta,
+        };
+
+        await this.writeJson(this.getNodePath(sessionId, newNodeId), newNode);
+
+        if (!sourceNode.children_ids.includes(newNodeId)) {
+          sourceNode.children_ids.push(newNodeId);
+          await this.writeJson(
+            this.getNodePath(sessionId, sourceMessageId),
+            sourceNode
+          );
+        }
+
+      } else {
+        // system 或其他：默认作为兄弟节点
+        const newNode: ChatNode = {
+          ...sourceNode,
+          id: newNodeId,
+          created_at: now,
+          children_ids: [],
+          status: 'active',
+          meta: { ...sourceNode.meta, ...branchMeta },
+        };
+
+        if (!options?.copyContent) {
+          newNode.content = '';
+        }
+
+        await this.writeJson(this.getNodePath(sessionId, newNodeId), newNode);
+
+        if (sourceNode.parent_id) {
+          const parent = await this.readJson<ChatNode>(
+            this.getNodePath(sessionId, sourceNode.parent_id)
+          );
+          if (parent && !parent.children_ids.includes(newNodeId)) {
             parent.children_ids.push(newNodeId);
             await this.writeJson(
               this.getNodePath(sessionId, sourceNode.parent_id),
@@ -1073,7 +1135,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
         }
       }
 
-      // 更新 Manifest（切换到新分支）
+      // 更新 Manifest
       manifest.current_head = newNodeId;
       manifest.branches[manifest.current_branch] = newNodeId;
       manifest.updated_at = now;
@@ -1083,11 +1145,52 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
       log.info('Branch created successfully', {
         sessionId,
         newNodeId,
+        sourceRole: sourceNode.role,
         branchName: options?.name
       });
 
       return newNodeId;
     });
+  }
+
+  /**
+ * 根据指定 head 节点获取上下文（用于查看非当前分支）
+ */
+  async getSessionContextFromHead(
+    _nodeId: string,
+    sessionId: string,
+    headNodeId: string
+  ): Promise<ChatContextItem[]> {
+    const nodes: ChatNode[] = [];
+    let currentNodeId: string | null = headNodeId;
+    const visited = new Set<string>();
+
+    while (currentNodeId) {
+      if (visited.has(currentNodeId)) {
+        log.warn('Circular reference detected in branch traversal', {
+          sessionId,
+          nodeId: currentNodeId
+        });
+        break;
+      }
+      visited.add(currentNodeId);
+
+      const chatNode: ChatNode | null = await this.readJson<ChatNode>(
+        this.getNodePath(sessionId, currentNodeId)
+      );
+      if (!chatNode) break;
+
+      if (chatNode.status === 'active') {
+        nodes.push(chatNode);
+      }
+
+      currentNodeId = chatNode.parent_id;
+    }
+
+    return nodes
+      .reverse()
+      .filter(node => node.status === 'active')
+      .map((node, index) => ({ node, depth: index }));
   }
 
   /**

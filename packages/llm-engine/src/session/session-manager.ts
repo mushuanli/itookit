@@ -16,7 +16,7 @@ import {
 } from '../core/types';
 import { EngineError, EngineErrorCode } from '../core/errors';
 import { ENGINE_DEFAULTS } from '../core/constants';
-import { ILLMSessionEngine, BranchTreeNode } from '../persistence/types';
+import { ILLMSessionEngine, BranchTreeNode, ChatContextItem } from '../persistence/types';
 import { IAgentService } from '../services/agent-service';
 import { SessionState } from './session-state';
 import { SessionEventBus } from './session-event-bus';
@@ -310,7 +310,17 @@ export class SessionManager {
         agentId: string,
         overrides?: ExecutionOverrides
     ): Promise<void> {
-        const { sessionId, nodeId, runtime } = this.ensureBound();
+        const { sessionId, nodeId, runtime, state } = this.ensureBound();
+
+        // ✅ 新增：校验不允许连续两条 user message
+        const lastSession = state.getLastSession();
+        if (lastSession && lastSession.role === 'user') {
+            throw new EngineError(
+                EngineErrorCode.SESSION_INVALID,
+                'Cannot send consecutive user messages. Wait for assistant response or delete the pending user message first.'
+            );
+        }
+
         await this.taskRunner.submit(
             { sessionId, nodeId, text, files, agentId, overrides },
             runtime
@@ -497,13 +507,37 @@ export class SessionManager {
 
         const currentAssistant = state.findSessionById(assistantId);
 
-        // 解析 agentId：显式 > 当前 assistant > fallback > default
         const resolvedAgentId =
             agentId ||
             currentAssistant?.executionRoot?.executorId ||
             fallbackAgentId ||
             'default';
 
+        if (!preserveCurrent) {
+            // ✅ 修复：不保留时，删除旧 assistant 后重新生成（覆盖语义）
+            await this.deleteMessage(assistantId);
+
+            this.eventBus.emitSession(sessionId, {
+                type: 'retry_started',
+                payload: { originalId: assistantId, newId: '', siblingIndex: 0, siblingCount: 1 },
+            });
+
+            await this.taskRunner.submit(
+                {
+                    sessionId,
+                    nodeId,
+                    text: userMessage.content || '',
+                    files: userMessage.files || [],
+                    agentId: resolvedAgentId,
+                    skipUserMessage: true,
+                    parentUserNodeId: userMessage.persistedNodeId,
+                },
+                runtime
+            );
+            return;
+        }
+
+        // preserveCurrent === true：创建分支
         let siblingCount = 1;
         let siblingIndex = 0;
 
@@ -511,42 +545,34 @@ export class SessionManager {
             siblingCount = (currentAssistant.siblingCount || 1) + 1;
             siblingIndex = siblingCount - 1;
 
-            if (preserveCurrent) {
-                currentAssistant.siblingCount = siblingCount;
-                if (currentAssistant.executionRoot) {
-                    currentAssistant.executionRoot.data.metaInfo = {
-                        ...currentAssistant.executionRoot.data.metaInfo,
-                        siblingIndex: currentAssistant.siblingIndex || 0,
-                        siblingCount,
-                    };
-                }
-                if (currentAssistant.persistedNodeId) {
-                    await this.engine.updateNode(
-                        sessionId,
-                        currentAssistant.persistedNodeId,
-                        {
-                            meta: {
-                                siblingIndex: currentAssistant.siblingIndex || 0,
-                                siblingCount,
-                            },
-                        }
-                    );
-                }
-                this.eventBus.emitSession(sessionId, {
-                    type: 'sibling_switch',
-                    payload: {
-                        sessionId: assistantId,
-                        newIndex: currentAssistant.siblingIndex || 0,
-                        total: siblingCount,
-                    },
-                });
+            currentAssistant.siblingCount = siblingCount;
+            if (currentAssistant.executionRoot) {
+                currentAssistant.executionRoot.data.metaInfo = {
+                    ...currentAssistant.executionRoot.data.metaInfo,
+                    siblingIndex: currentAssistant.siblingIndex || 0,
+                    siblingCount,
+                };
             }
-        }
-
-        if (!preserveCurrent) {
-            await this.deleteMessage(assistantId);
-            siblingCount = 1;
-            siblingIndex = 0;
+            if (currentAssistant.persistedNodeId) {
+                await this.engine.updateNode(
+                    sessionId,
+                    currentAssistant.persistedNodeId,
+                    {
+                        meta: {
+                            siblingIndex: currentAssistant.siblingIndex || 0,
+                            siblingCount,
+                        },
+                    }
+                );
+            }
+            this.eventBus.emitSession(sessionId, {
+                type: 'sibling_switch',
+                payload: {
+                    sessionId: assistantId,
+                    newIndex: currentAssistant.siblingIndex || 0,
+                    total: siblingCount,
+                },
+            });
         }
 
         this.eventBus.emitSession(sessionId, {
@@ -566,7 +592,7 @@ export class SessionManager {
                 branchInfo: {
                     siblingIndex,
                     siblingCount,
-                    parentAssistantId: preserveCurrent ? assistantId : undefined,
+                    parentAssistantId: assistantId,
                 },
             },
             runtime
@@ -591,13 +617,13 @@ export class SessionManager {
             throw new EngineError(EngineErrorCode.SESSION_INVALID, 'Invalid user session');
         }
 
-        // 解析 agentId：显式 > 后续 assistant > fallback > default
         const resolvedAgentId =
             agentId ||
             this.resolveAgentFromResponses(state, userMessageId) ||
             fallbackAgentId ||
             'default';
 
+        // ✅ 修复：删除关联的 assistant 响应（覆盖语义）
         await this.deleteAssociatedResponses(sessionId, userMessageId, state);
 
         this.eventBus.emitSession(sessionId, {
@@ -678,22 +704,36 @@ export class SessionManager {
     }
 
     async createBranch(
-        sourceMessageId: string,
+        branchNodeId: string,
         options?: { name?: string; copyContent?: boolean }
     ): Promise<string> {
         const { sessionId, nodeId, state } = this.ensureBound();
 
-        const newNodeId = await this.engine.createBranch(nodeId, sessionId, sourceMessageId, {
-            ...options,
-            createdFrom: 'manual',
-        });
+        // ✅ 验证 branchNodeId 在当前会话中存在
+        const session = state.findSessionById(branchNodeId);
+        if (!session?.persistedNodeId) {
+            throw new EngineError(
+                EngineErrorCode.SESSION_INVALID,
+                `Message not found or not persisted: ${branchNodeId}`
+            );
+        }
+
+        const newNodeId = await this.engine.createBranch(
+            nodeId,
+            sessionId,
+            session.persistedNodeId,
+            {
+                ...options,
+                createdFrom: 'manual',
+            }
+        );
 
         await this.reloadSessionData(nodeId, sessionId, state);
 
         this.eventBus.emitSession(sessionId, {
             type: 'branch_created',
             payload: {
-                sourceId: sourceMessageId,
+                sourceId: branchNodeId,
                 newId: newNodeId,
                 branchName: options?.name,
             },
@@ -725,9 +765,17 @@ export class SessionManager {
     }
 
     async deleteBranch(branchNodeId: string, cascade: boolean = false): Promise<void> {
-        const { sessionId, nodeId } = this.ensureBound();
+        const { sessionId, nodeId, state } = this.ensureBound();
 
-        // ✅ 传入 nodeId
+        // ✅ 新增：防止删除当前 head
+        const manifest = await this.engine.getManifest(nodeId);
+        if (branchNodeId === manifest.current_head) {
+            throw new EngineError(
+                EngineErrorCode.SESSION_INVALID,
+                'Cannot delete the current active head node. Switch to another branch first.'
+            );
+        }
+
         const deletedIds = await this.engine.deleteBranch(
             nodeId,
             sessionId,
@@ -735,7 +783,6 @@ export class SessionManager {
             { cascade }
         );
 
-        const state = this.states.get(sessionId);
         if (state) {
             for (const id of deletedIds) {
                 state.removeMessage(id);
@@ -746,6 +793,103 @@ export class SessionManager {
             type: 'messages_deleted',
             payload: { deletedIds },
         });
+    }
+    async navigateToBranch(targetNodeId: string): Promise<void> {
+        const { sessionId, nodeId, state } = this.ensureBound();
+
+        await this.updateManifestHead(nodeId, sessionId, targetNodeId);
+        await this.reloadSessionData(nodeId, sessionId, state);
+
+        this.eventBus.emitSession(sessionId, {
+            type: 'branch_switched',
+            payload: { fromId: '', toId: targetNodeId },
+        });
+    }
+
+    // ============== 新增：selectBranch ==============
+
+    async selectBranch(targetNodeId: string): Promise<void> {
+        return this.navigateToBranch(targetNodeId);
+    }
+
+    // ============== 新增：listBranches ==============
+
+    async listBranches(): Promise<Array<{
+        name: string;
+        headNodeId: string;
+        isCurrent: boolean;
+    }>> {
+        const { nodeId } = this.ensureBound();
+        const manifest = await this.engine.getManifest(nodeId);
+
+        return Object.entries(manifest.branches).map(([name, headNodeId]) => ({
+            name,
+            headNodeId,
+            isCurrent: name === manifest.current_branch,
+        }));
+    }
+
+    // ============== 新增：getBranchMessages ==============
+
+    async getBranchMessages(branchHeadNodeId: string): Promise<SessionGroup[]> {
+        const { sessionId, nodeId } = this.ensureBound();
+
+        const contextItems = await this.engine.getSessionContextFromHead(
+            nodeId,
+            sessionId,
+            branchHeadNodeId
+        );
+
+        const sessions: SessionGroup[] = [];
+        for (const item of contextItems) {
+            const node = item.node;
+            if (node.role === 'system') continue;
+            if (node.role === 'assistant' && !node.content?.trim()) continue;
+
+            const converted = Converters.chatNodeToSessionGroup(node);
+            if (converted) sessions.push(converted);
+        }
+
+        return sessions;
+    }
+
+    // ============== 新增：compareBranches ==============
+
+    async compareBranches(
+        nodeIdA: string,
+        nodeIdB: string
+    ): Promise<{
+        branchA: SessionGroup[];
+        branchB: SessionGroup[];
+        commonAncestorId: string | null;
+    }> {
+        const { sessionId, nodeId } = this.ensureBound();
+
+        const [contextA, contextB] = await Promise.all([
+            this.engine.getSessionContextFromHead(nodeId, sessionId, nodeIdA),
+            this.engine.getSessionContextFromHead(nodeId, sessionId, nodeIdB),
+        ]);
+
+        const idsA = new Set(contextA.map(item => item.node.id));
+        let commonAncestorId: string | null = null;
+
+        for (const item of contextB) {
+            if (idsA.has(item.node.id)) {
+                commonAncestorId = item.node.id;
+            }
+        }
+
+        const toSessionGroups = (items: ChatContextItem[]): SessionGroup[] =>
+            items
+                .filter(item => item.node.role !== 'system')
+                .map(item => Converters.chatNodeToSessionGroup(item.node))
+                .filter(Boolean) as SessionGroup[];
+
+        return {
+            branchA: toSessionGroups(contextA),
+            branchB: toSessionGroups(contextB),
+            commonAncestorId,
+        };
     }
 
     // ================================================================

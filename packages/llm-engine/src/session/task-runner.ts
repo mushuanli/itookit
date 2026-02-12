@@ -608,7 +608,26 @@ export class TaskRunner {
             history = history.slice(-historyLength);
         }
 
+        this.validateHistory(history);
         return history;
+    }
+    /**
+     * ✅ 新增：校验历史消息序列合法性
+     * LLM 要求 user/assistant 交替出现，不允许连续两条相同角色
+     */
+    private validateHistory(history: HistoryMessage[]): void {
+        for (let i = 1; i < history.length; i++) {
+            if (history[i].role === 'user' && history[i - 1].role === 'user') {
+                log.error('Invalid history: consecutive user messages', {
+                    index: i,
+                    historyLength: history.length
+                });
+                throw new EngineError(
+                    EngineErrorCode.SESSION_INVALID,
+                    `Invalid message sequence: consecutive user messages at index ${i - 1} and ${i}`
+                );
+            }
+        }
     }
 
     private async buildHistoryMessages(
