@@ -128,6 +128,24 @@ export interface ExecutionNode {
 }
 
 /**
+ * ✅ 新增：分支元信息
+ */
+export interface BranchMetadata {
+    /** 分支名称 */
+    name?: string;
+    /** 是否为当前激活分支 */
+    isActive?: boolean;
+    /** 创建方式 */
+    createdFrom?: 'retry' | 'edit' | 'manual';
+    /** 是否有子分支 */
+    hasChildren?: boolean;
+    /** 父分支 ID */
+    parentBranchId?: string;
+    /** 创建时间 */
+    createdAt?: number;
+}
+
+/**
  * 会话组（一轮对话）
  */
 export interface SessionGroup {
@@ -156,15 +174,8 @@ export interface SessionGroup {
     siblingIndex?: number;
     siblingCount?: number;
 
-    // ✅ 新增：扩展分支信息
-    branchInfo?: {
-        /** 分支名称 */
-        name?: string;
-        /** 是否为当前激活分支 */
-        isActive?: boolean;
-        /** 创建方式 */
-        createdFrom?: 'retry' | 'edit' | 'manual';
-    };
+    /** ✅ 修改：使用新的 BranchMetadata 类型 */
+    branchInfo?: BranchMetadata;
 
     /** 关联的用户消息 ID */
     parentUserSessionId?: string;
