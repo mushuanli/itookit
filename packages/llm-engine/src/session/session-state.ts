@@ -6,7 +6,7 @@ import { ChatNode } from '../persistence/types';
 import { ExecutorConfig } from '@itookit/llm-kernel';
 
 /**
- * 历史消息类型（增强版）
+ * 历史消息类型
  */
 export interface HistoryMessage {
     role: string;
@@ -41,39 +41,17 @@ export class SessionState {
                 s.role === 'user' ||
                 (s.role === 'assistant' && s.executionRoot?.data.output)
             )
-            .map(s => {
-                const msg: HistoryMessage = {
-                    role: s.role,
-                    content: s.role === 'user'
-                        ? s.content || ''
-                        : s.executionRoot?.data.output || ''
-                };
-
-                // ✅ 新增：保留用户消息的附件
-                if (s.role === 'user' && s.files && s.files.length > 0) {
-                    msg.files = s.files;
-                }
-
-                return msg;
-            });
-    }
-
-    /**
-     * ✅ 新增：获取历史消息（简化版，仅文本）
-     * 用于不需要附件的场景
-     */
-    getHistoryText(): Array<{ role: string; content: string }> {
-        return this.sessions
-            .filter(s =>
-                s.role === 'user' ||
-                (s.role === 'assistant' && s.executionRoot?.data.output)
-            )
             .map(s => ({
                 role: s.role,
                 content: s.role === 'user'
                     ? s.content || ''
-                    : s.executionRoot?.data.output || ''
+                    : s.executionRoot?.data.output || '',
+                ...(s.role === 'user' && s.files?.length ? { files: s.files } : {})
             }));
+    }
+
+    getHistoryText(): Array<{ role: string; content: string }> {
+        return this.getHistory().map(({ role, content }) => ({ role, content }));
     }
 
     findSessionById(id: string): SessionGroup | undefined {
@@ -116,6 +94,37 @@ export class SessionState {
         this.sessions.push(session);
     }
 
+    // ============== 执行节点操作（统一入口） ==============
+
+    /**
+     * 在执行树中查找目标节点并执行更新
+     */
+    private withNode(nodeId: string, updater: (node: ExecutionNode) => void): void {
+        for (const session of this.sessions) {
+            const node = this.findNodeInTree(session.executionRoot, nodeId);
+            if (node) {
+                updater(node);
+                return;
+            }
+        }
+    }
+
+    private findNodeInTree(
+        node: ExecutionNode | undefined,
+        targetId: string
+    ): ExecutionNode | null {
+        if (!node) return null;
+        if (node.id === targetId) return node;
+
+        if (node.children) {
+            for (const child of node.children) {
+                const found = this.findNodeInTree(child, targetId);
+                if (found) return found;
+            }
+        }
+        return null;
+    }
+
     // ============== 添加消息 ==============
 
     addUserMessage(
@@ -145,7 +154,7 @@ export class SessionState {
     createAssistantMessage(
         config: ExecutorConfig,
         persistedNodeId: string,
-        branchInfo?: { siblingIndex: number; siblingCount: number }  // ✅ 新增
+        branchInfo?: { siblingIndex: number; siblingCount: number }
     ): ExecutionNode {
         const rootNode: ExecutionNode = {
             id: generateUUID(),
@@ -160,8 +169,8 @@ export class SessionState {
                 metaInfo: {
                     agentId: config.id,
                     agentName: config.name,
-                    siblingIndex: branchInfo?.siblingIndex ?? 0,      // ✅ 新增
-                    siblingCount: branchInfo?.siblingCount ?? 1       // ✅ 新增
+                    siblingIndex: branchInfo?.siblingIndex ?? 0,
+                    siblingCount: branchInfo?.siblingCount ?? 1
                 }
             },
             children: []
@@ -173,100 +182,50 @@ export class SessionState {
             role: 'assistant',
             executionRoot: rootNode,
             persistedNodeId,
-            siblingIndex: branchInfo?.siblingIndex,    // ✅ 新增
-            siblingCount: branchInfo?.siblingCount     // ✅ 新增
+            siblingIndex: branchInfo?.siblingIndex,
+            siblingCount: branchInfo?.siblingCount
         };
 
         this.sessions.push(session);
         return rootNode;
     }
 
-    // ============== 更新 ==============
+    // ============== 节点更新 ==============
 
     updateNodeOutput(nodeId: string, output: string): void {
-        for (const session of this.sessions) {
-            if (session.executionRoot?.id === nodeId) {
-                session.executionRoot.data.output = output;
-                session.executionRoot.status = 'success';
-                session.executionRoot.endTime = Date.now();
-                return;
-            }
-
-            // 递归搜索子节点
-            if (session.executionRoot) {
-                const found = this.findAndUpdateNode(session.executionRoot, nodeId, output);
-                if (found) return;
-            }
-        }
-    }
-
-    private findAndUpdateNode(node: ExecutionNode, targetId: string, output: string): boolean {
-        if (node.id === targetId) {
+        this.withNode(nodeId, node => {
             node.data.output = output;
             node.status = 'success';
             node.endTime = Date.now();
-            return true;
-        }
-
-        if (node.children) {
-            for (const child of node.children) {
-                if (this.findAndUpdateNode(child, targetId, output)) {
-                    return true;
-                }
-            }
-        }
-
-        return false;
+        });
     }
 
     updateNodeThinking(nodeId: string, thinking: string): void {
-        for (const session of this.sessions) {
-            if (session.executionRoot?.id === nodeId) {
-                session.executionRoot.data.thought = thinking;
-                return;
-            }
-        }
+        this.withNode(nodeId, node => {
+            node.data.thought = thinking;
+        });
     }
 
     appendToNode(nodeId: string, delta: string, field: 'output' | 'thought'): void {
-        for (const session of this.sessions) {
-            const node = this.findNodeInTree(session.executionRoot, nodeId);
-            if (node) {
-                if (field === 'output') {
-                    node.data.output = (node.data.output || '') + delta;
-                } else {
-                    node.data.thought = (node.data.thought || '') + delta;
-                }
-                return;
-            }
-        }
-    }
-
-    private findNodeInTree(node: ExecutionNode | undefined, targetId: string): ExecutionNode | null {
-        if (!node) return null;
-        if (node.id === targetId) return node;
-
-        if (node.children) {
-            for (const child of node.children) {
-                const found = this.findNodeInTree(child, targetId);
-                if (found) return found;
-            }
-        }
-
-        return null;
+        this.withNode(nodeId, node => {
+            const key = field === 'output' ? 'output' : 'thought';
+            node.data[key] = (node.data[key] || '') + delta;
+        });
     }
 
     updateNodeStatus(nodeId: string, status: ExecutionNode['status']): void {
-        for (const session of this.sessions) {
-            const node = this.findNodeInTree(session.executionRoot, nodeId);
-            if (node) {
-                node.status = status;
-                if (status === 'success' || status === 'failed') {
-                    node.endTime = Date.now();
-                }
-                return;
+        this.withNode(nodeId, node => {
+            node.status = status;
+            if (status === 'success' || status === 'failed') {
+                node.endTime = Date.now();
             }
-        }
+        });
+    }
+
+    updateNodeError(nodeId: string, error: string): void {
+        this.withNode(nodeId, node => {
+            node.data.error = error;
+        });
     }
 
     updateMessageContent(messageId: string, content: string): void {
@@ -277,19 +236,6 @@ export class SessionState {
             session.content = content;
         } else if (session.executionRoot) {
             session.executionRoot.data.output = content;
-        }
-    }
-
-    /**
-     * ✅ 新增：更新节点错误信息
-     */
-    updateNodeError(nodeId: string, error: string): void {
-        for (const session of this.sessions) {
-            const node = this.findNodeInTree(session.executionRoot, nodeId);
-            if (node) {
-                node.data.error = error;
-                return;
-            }
         }
     }
 
