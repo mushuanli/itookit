@@ -1,21 +1,20 @@
 
 // @file: llm-ui/helpers/BranchManager.ts
 
-import { BranchService } from '../services';
-import { HistoryView, BranchAction } from '../components/HistoryView';
+import { SessionManager } from '@itookit/llm-engine';
+import { HistoryView } from '../components/HistoryView';
 import { Toast, showConfirmDialog } from '@itookit/common';
-import { ContentService } from '../services';
+import { BranchAction } from '../core/types';
 
 export class BranchManager {
     constructor(
-        private branchService: BranchService,
-        private contentService: ContentService,
+        private sessionManager: SessionManager,
         private historyView: HistoryView,
         private scrollToSession: (sessionId: string) => void
-    ) {}
+    ) { }
 
     /**
-     * 处理分支操作
+     * 分支操作统一入口
      */
     async handleBranchAction(
         action: BranchAction,
@@ -25,36 +24,26 @@ export class BranchManager {
         try {
             switch (action) {
                 case 'show-tree':
-                    await this.showBranchTree();
-                    break;
-
+                    return await this.showBranchTree();
                 case 'create':
-                    await this.createBranch(nodeId);
-                    break;
-
+                    return await this.createBranch(nodeId);
                 case 'navigate':
-                    await this.navigateToBranch(nodeId);
-                    break;
-
+                    return this.navigateToBranch(nodeId);
                 case 'rename':
                     if (options?.newName) {
-                        await this.renameBranch(nodeId, options.newName);
+                        await this.sessionManager.renameBranch(nodeId, options.newName);
+                        Toast.success('Branch renamed');
                     }
-                    break;
-
+                    return;
                 case 'delete':
-                    await this.deleteBranch(nodeId);
-                    break;
-
+                    return await this.deleteBranch(nodeId);
                 case 'compare':
                     if (options?.compareWith) {
-                        await this.compareBranches(nodeId, options.compareWith);
+                        return await this.compareBranches(nodeId, options.compareWith);
                     }
-                    break;
-
+                    return;
                 case 'select':
-                    await this.selectBranch(nodeId);
-                    break;
+                    return await this.selectBranch(nodeId);
             }
         } catch (e: any) {
             console.error('[BranchManager] Branch action failed:', e);
@@ -62,30 +51,97 @@ export class BranchManager {
         }
     }
 
-    private async showBranchTree(): Promise<void> {
-        const tree = await this.branchService.getBranchTree();
+    async showBranchTree(): Promise<void> {
+        const tree = await this.sessionManager.getBranchTree();
         this.historyView.showBranchTree(tree);
     }
 
     private async createBranch(sourceNodeId: string): Promise<void> {
         const branchName = await this.promptBranchName();
+        if (branchName === null) return;
 
-        if (branchName === null) {
-            return;
-        }
-
-        await this.branchService.createBranch(sourceNodeId, {
+        // ✅ SessionManager.createBranch 内部自动：
+        //   1. 持久化创建分支
+        //   2. reloadSessionData
+        //   3. 发送 branch_created 事件
+        await this.sessionManager.createBranch(sourceNodeId, {
             name: branchName || undefined,
             copyContent: true
         });
 
         Toast.success(`Branch "${branchName || 'Untitled'}" created`);
 
-        const sessions = this.contentService.getSessions();
+        // 刷新视图（事件驱动已处理部分，但全量刷新保证一致性）
+        const sessions = this.sessionManager.getSessions();
         this.historyView.renderFull(sessions);
     }
 
-    private async promptBranchName(): Promise<string | null> {
+    private navigateToBranch(nodeId: string): void {
+        const sessions = this.sessionManager.getSessions();
+        const target = sessions.find(s =>
+            s.id === nodeId ||
+            s.persistedNodeId === nodeId ||
+            s.executionRoot?.id === nodeId
+        );
+
+        if (target) {
+            this.scrollToSession(target.id);
+        }
+    }
+
+    private async deleteBranch(nodeId: string): Promise<void> {
+        const confirmed = await showConfirmDialog(
+            'Delete this branch and all its children?'
+        );
+        if (!confirmed) return;
+
+        // ✅ SessionManager.deleteBranch 内部自动：
+        //   1. 校验不能删除当前 head
+        //   2. 持久化删除
+        //   3. 内存清理
+        //   4. 发送 messages_deleted 事件
+        await this.sessionManager.deleteBranch(nodeId, true);
+
+        const sessions = this.sessionManager.getSessions();
+        this.historyView.renderFull(sessions);
+        Toast.success('Branch deleted');
+    }
+
+    /**
+     * ✅ 使用 SessionManager.compareBranches 替代手动查找
+     */
+    private async compareBranches(nodeId1: string, nodeId2: string): Promise<void> {
+        // ✅ compareBranches 返回两个分支的完整消息链 + 共同祖先
+        const result = await this.sessionManager.compareBranches(nodeId1, nodeId2);
+
+        if (result.branchA.length === 0 || result.branchB.length === 0) {
+            Toast.error('Could not find branches to compare');
+            return;
+        }
+
+        // 取每个分支的最后一条消息作为对比入口
+        const lastA = result.branchA[result.branchA.length - 1];
+        const lastB = result.branchB[result.branchB.length - 1];
+        this.historyView.showBranchCompare(lastA, lastB);
+    }
+
+    /**
+     * ✅ 使用 navigateToBranch 替代 switchToSibling
+     */
+    private async selectBranch(branchId: string): Promise<void> {
+        // ✅ navigateToBranch 内部自动：
+        //   1. updateManifestHead 切换当前活跃头节点
+        //   2. reloadSessionData 重新加载消息
+        //   3. 发送 session_cleared + session_start 事件序列
+        //   4. 发送 branch_switched 事件
+        await this.sessionManager.navigateToBranch(branchId);
+
+        // 重新渲染（事件驱动覆盖大部分场景，全量刷新作为兜底）
+        const updated = this.sessionManager.getSessions();
+        this.historyView.renderFull(updated);
+    }
+
+    private promptBranchName(): Promise<string | null> {
         return new Promise((resolve) => {
             const dialog = document.createElement('div');
             dialog.className = 'llm-branch-name-dialog';
@@ -103,105 +159,21 @@ export class BranchManager {
             `;
 
             document.body.appendChild(dialog);
-
             const input = dialog.querySelector('input') as HTMLInputElement;
             input.focus();
 
-            const cleanup = () => {
-                dialog.remove();
-            };
+            const cleanup = () => dialog.remove();
+            const submit = () => { cleanup(); resolve(input.value.trim()); };
+            const cancel = () => { cleanup(); resolve(null); };
 
-            dialog.querySelector('[data-action="create"]')?.addEventListener('click', () => {
-                cleanup();
-                resolve(input.value.trim());
-            });
-
-            dialog.querySelector('[data-action="cancel"]')?.addEventListener('click', () => {
-                cleanup();
-                resolve(null);
-            });
-
-            dialog.querySelector('.llm-branch-name-dialog__overlay')?.addEventListener('click', () => {
-                cleanup();
-                resolve(null);
-            });
+            dialog.querySelector('[data-action="create"]')?.addEventListener('click', submit);
+            dialog.querySelector('[data-action="cancel"]')?.addEventListener('click', cancel);
+            dialog.querySelector('.llm-branch-name-dialog__overlay')?.addEventListener('click', cancel);
 
             input.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') {
-                    cleanup();
-                    resolve(input.value.trim());
-                } else if (e.key === 'Escape') {
-                    cleanup();
-                    resolve(null);
-                }
+                if (e.key === 'Enter') submit();
+                else if (e.key === 'Escape') cancel();
             });
         });
-    }
-
-    private async navigateToBranch(nodeId: string): Promise<void> {
-        const sessions = this.contentService.getSessions();
-        const targetSession = sessions.find(s =>
-            s.id === nodeId ||
-            s.persistedNodeId === nodeId ||
-            s.executionRoot?.id === nodeId
-        );
-
-        if (targetSession) {
-            this.scrollToSession(targetSession.id);
-        }
-    }
-
-    private async renameBranch(nodeId: string, newName: string): Promise<void> {
-        await this.branchService.renameBranch(nodeId, newName);
-        Toast.success('Branch renamed');
-    }
-
-    private async deleteBranch(nodeId: string): Promise<void> {
-        const confirmed = await showConfirmDialog(
-            'Delete this branch and all its children?'
-        );
-
-        if (!confirmed) return;
-
-        await this.branchService.deleteBranch(nodeId, true);
-
-        const sessions = this.contentService.getSessions();
-        this.historyView.renderFull(sessions);
-
-        Toast.success('Branch deleted');
-    }
-
-    private async compareBranches(nodeId1: string, nodeId2: string): Promise<void> {
-        const sessions = this.contentService.getSessions();
-
-        const branch1 = sessions.find(s =>
-            s.id === nodeId1 || s.persistedNodeId === nodeId1
-        );
-        const branch2 = sessions.find(s =>
-            s.id === nodeId2 || s.persistedNodeId === nodeId2
-        );
-
-        if (branch1 && branch2) {
-            this.historyView.showBranchCompare(branch1, branch2);
-        } else {
-            Toast.error('Could not find branches to compare');
-        }
-    }
-
-    private async selectBranch(branchId: string): Promise<void> {
-        const sessions = this.contentService.getSessions();
-        const targetSession = sessions.find(s =>
-            s.id === branchId || s.persistedNodeId === branchId
-        );
-
-        if (targetSession && targetSession.siblingIndex !== undefined) {
-            await this.branchService.switchBranch(
-                targetSession.id,
-                targetSession.siblingIndex
-            );
-
-            const updatedSessions = this.contentService.getSessions();
-            this.historyView.renderFull(updatedSessions);
-        }
     }
 }

@@ -60,7 +60,7 @@ export class AgentLoader {
      */
     async loadModelsForAgent(agentId: string): Promise<ModelOption[]> {
         try {
-            const models = await this.sessionManager.getAvailableModelsForAgent(agentId);
+            const models = await this.sessionManager.getModelsForAgent(agentId);
             return models.map(m => ({
                 id: m.id,
                 name: m.name,
