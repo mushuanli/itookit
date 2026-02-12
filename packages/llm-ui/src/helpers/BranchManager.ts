@@ -37,11 +37,7 @@ export class BranchManager {
                     return;
                 case 'delete':
                     return await this.deleteBranch(nodeId);
-                case 'compare':
-                    if (options?.compareWith) {
-                        return await this.compareBranches(nodeId, options.compareWith);
-                    }
-                    return;
+
                 case 'select':
                     return await this.selectBranch(nodeId);
             }
@@ -99,24 +95,6 @@ export class BranchManager {
         //   4. 发送 messages_deleted 事件
         await this.sessionManager.deleteBranch(nodeId, true);
         Toast.success('Branch deleted');
-    }
-
-    /**
-     * ✅ 使用 SessionManager.compareBranches 替代手动查找
-     */
-    private async compareBranches(nodeId1: string, nodeId2: string): Promise<void> {
-        // ✅ compareBranches 返回两个分支的完整消息链 + 共同祖先
-        const result = await this.sessionManager.compareBranches(nodeId1, nodeId2);
-
-        if (result.branchA.length === 0 || result.branchB.length === 0) {
-            Toast.error('Could not find branches to compare');
-            return;
-        }
-
-        // 取每个分支的最后一条消息作为对比入口
-        const lastA = result.branchA[result.branchA.length - 1];
-        const lastB = result.branchB[result.branchB.length - 1];
-        this.historyView.showBranchCompare(lastA, lastB);
     }
 
     /**

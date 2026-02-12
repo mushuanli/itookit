@@ -30,7 +30,6 @@ export type BranchAction =
     | 'navigate'
     | 'rename'
     | 'delete'
-    | 'compare'
     | 'select';
 
 export interface BranchActionCallback {
