@@ -1,12 +1,6 @@
 // @file: llm-ui/components/BranchIndicator.ts
 
-import { escapeHTML } from '@itookit/common';
-
-export interface BranchItem {
-    name: string;
-    headNodeId: string;
-    isCurrent: boolean;
-}
+import { BranchIndicatorTemplates, BranchItem } from './templates/BranchIndicatorTemplates';
 
 export interface BranchIndicatorCallbacks {
     onSwitchBranch: (branchId: string) => void;
@@ -54,65 +48,16 @@ export class BranchIndicator {
 
         // 无分支或仅 main 分支：简化显示
         if (branchCount <= 1) {
-            indicatorEl.innerHTML = this.renderMinimalIndicator(currentBranch);
+            const name = currentBranch?.name || 'main';
+            indicatorEl.innerHTML = BranchIndicatorTemplates.renderMinimalIndicator(name);
             indicatorEl.classList.remove('has-branches');
         } else {
-            indicatorEl.innerHTML = this.renderFullIndicator(currentBranch, branchCount);
+            const name = currentBranch?.name || 'main';
+            indicatorEl.innerHTML = BranchIndicatorTemplates.renderFullIndicator(name, branchCount);
             indicatorEl.classList.add('has-branches');
         }
     }
 
-    /**
-     * 最小化指示器（无分支或仅 main）
-     */
-    private renderMinimalIndicator(current?: BranchItem): string {
-        const name = current?.name || 'main';
-        return `
-            <button class="llm-branch-indicator-btn llm-branch-indicator-btn--minimal"
-                    data-action="show-branch-tree"
-                    title="Branch: ${escapeHTML(name)}">
-                <svg class="llm-branch-indicator-icon" viewBox="0 0 24 24" 
-                     width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="6" y1="3" x2="6" y2="15"></line>
-                    <circle cx="18" cy="6" r="3"></circle>
-                    <circle cx="6" cy="18" r="3"></circle>
-                    <path d="M18 9a9 9 0 0 1-9 9"></path>
-                </svg>
-                <span class="llm-branch-indicator-name">${escapeHTML(name)}</span>
-            </button>
-        `;
-    }
-
-    /**
-     * 完整指示器（多分支）
-     */
-    private renderFullIndicator(current: BranchItem | undefined, count: number): string {
-        const name = current?.name || 'main';
-        return `
-            <button class="llm-branch-indicator-btn"
-                    data-action="toggle-branch-dropdown"
-                    title="Current branch: ${escapeHTML(name)} (${count} branches)">
-                <svg class="llm-branch-indicator-icon" viewBox="0 0 24 24" 
-                     width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="6" y1="3" x2="6" y2="15"></line>
-                    <circle cx="18" cy="6" r="3"></circle>
-                    <circle cx="6" cy="18" r="3"></circle>
-                    <path d="M18 9a9 9 0 0 1-9 9"></path>
-                </svg>
-                <span class="llm-branch-indicator-name">${escapeHTML(name)}</span>
-                <span class="llm-branch-indicator-count">${count}</span>
-                <svg class="llm-branch-indicator-chevron" viewBox="0 0 24 24"
-                     width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
-                    <polyline points="6 9 12 15 18 9"></polyline>
-                </svg>
-            </button>
-            <div class="llm-branch-dropdown" style="display:none"></div>
-        `;
-    }
-
-    /**
-     * 切换下拉菜单
-     */
     private toggleDropdown(): void {
         if (this.isDropdownOpen) {
             this.closeDropdown();
@@ -131,25 +76,21 @@ export class BranchIndicator {
         this.dropdownEl = dropdownEl;
         this.isDropdownOpen = true;
 
-        dropdownEl.innerHTML = this.renderDropdownContent();
+        dropdownEl.innerHTML = BranchIndicatorTemplates.renderDropdownContent(this.branches);
         dropdownEl.style.display = 'block';
 
-        // 绑定下拉菜单内的事件
         this.bindDropdownEvents(dropdownEl);
 
-        // 添加展开动画
         requestAnimationFrame(() => {
             dropdownEl.classList.add('is-open');
         });
 
-        // 点击外部关闭
         this.outsideClickHandler = (e: MouseEvent) => {
             const target = e.target as HTMLElement;
             if (!this.container.querySelector('.llm-branch-indicator-bar')?.contains(target)) {
                 this.closeDropdown();
             }
         };
-        // 延迟绑定避免当前点击触发
         setTimeout(() => {
             document.addEventListener('click', this.outsideClickHandler!);
         }, 0);
@@ -177,63 +118,6 @@ export class BranchIndicator {
         }
     }
 
-    /**
-     * 渲染下拉菜单内容
-     */
-    private renderDropdownContent(): string {
-        const branchItems = this.branches.map(branch => {
-            const isActive = branch.isCurrent ? 'is-active' : '';
-            const checkmark = branch.isCurrent
-                ? `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" 
-                       stroke="currentColor" stroke-width="2">
-                       <polyline points="20 6 9 17 4 12"></polyline>
-                   </svg>`
-                : '<span style="width:14px;display:inline-block"></span>';
-
-            return `
-                <button class="llm-branch-dropdown-item ${isActive}"
-                        data-action="switch-branch"
-                        data-branch-id="${escapeHTML(branch.headNodeId)}"
-                        ${branch.isCurrent ? 'disabled' : ''}>
-                    ${checkmark}
-                    <span class="llm-branch-dropdown-item-name">${escapeHTML(branch.name)}</span>
-                </button>
-            `;
-        }).join('');
-
-        return `
-            <div class="llm-branch-dropdown-header">
-                <span class="llm-branch-dropdown-title">Branches</span>
-            </div>
-            <div class="llm-branch-dropdown-list">
-                ${branchItems}
-            </div>
-            <div class="llm-branch-dropdown-footer">
-                <button class="llm-branch-dropdown-action" data-action="create-branch">
-                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" 
-                         stroke="currentColor" stroke-width="2">
-                        <line x1="12" y1="5" x2="12" y2="19"></line>
-                        <line x1="5" y1="12" x2="19" y2="12"></line>
-                    </svg>
-                    <span>New Branch</span>
-                </button>
-                <button class="llm-branch-dropdown-action" data-action="show-branch-tree">
-                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" 
-                         stroke="currentColor" stroke-width="2">
-                        <circle cx="12" cy="12" r="10"></circle>
-                        <line x1="2" y1="12" x2="22" y2="12"></line>
-                        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 
-                                 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
-                    </svg>
-                    <span>View Tree</span>
-                </button>
-            </div>
-        `;
-    }
-
-    /**
-     * 绑定指示器主体事件
-     */
     private bindEvents(): void {
         this.container.addEventListener('click', (e) => {
             const target = e.target as HTMLElement;

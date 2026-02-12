@@ -18,16 +18,16 @@ export class NodeTemplates {
         const collapsedClass = isCollapsed ? 'is-collapsed' : '';
         const timeStr = this.formatTime(group.timestamp);
 
-    // ✅ 分支导航（只在多分支时显示）
-    const siblingIndex = group.siblingIndex ?? 0;
-    const siblingCount = group.siblingCount ?? 1;
-    const hasSiblings = siblingCount > 1;
-    
-    const branchName = group.branchInfo?.name 
-        ? `<span class="llm-ui-branch-name">${escapeHTML(group.branchInfo.name)}</span>`
-        : '';
-    
-    const branchNavHtml = hasSiblings ? `
+        // ✅ 分支导航（只在多分支时显示）
+        const siblingIndex = group.siblingIndex ?? 0;
+        const siblingCount = group.siblingCount ?? 1;
+        const hasSiblings = siblingCount > 1;
+
+        const branchName = group.branchInfo?.name
+            ? `<span class="llm-ui-branch-name">${escapeHTML(group.branchInfo.name)}</span>`
+            : '';
+
+        const branchNavHtml = hasSiblings ? `
         <button class="llm-icon-btn" data-action="prev-sibling" title="Previous Branch" ${siblingIndex === 0 ? 'disabled' : ''}>
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
                 <polyline points="15 18 9 12 15 6"></polyline>
@@ -45,14 +45,8 @@ export class NodeTemplates {
         <div class="llm-ui-sep" style="width:1px;background:rgba(255,255,255,0.2);margin:0 4px;"></div>
     ` : '';
 
-    // ✅ 分支管理按钮（始终显示）
-    const branchManageHtml = `
-        <button class="llm-icon-btn" data-action="show-branch-tree" title="Branch Tree">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-                <line x1="12" y1="5" x2="12" y2="19"></line>
-                <polyline points="19 12 12 19 5 12"></polyline>
-            </svg>
-        </button>
+        // ✅ 分支管理按钮（始终显示）
+        const branchManageHtml = `
         <button class="llm-icon-btn" data-action="create-branch" title="Create Branch">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
                 <line x1="6" y1="3" x2="6" y2="15"></line>
@@ -64,7 +58,7 @@ export class NodeTemplates {
         <div class="llm-ui-sep" style="width:1px;background:rgba(255,255,255,0.2);margin:0 4px;"></div>
     `;
 
-    return `
+        return `
         <div class="llm-ui-bubble llm-ui-bubble--user ${collapsedClass}">
             <div class="llm-ui-bubble__header">
                 <div class="llm-ui-avatar">👤</div>
@@ -82,9 +76,9 @@ export class NodeTemplates {
                      <button class="llm-icon-btn" data-action="copy" title="Copy">📋</button>
                      <button class="llm-icon-btn" data-action="collapse" title="Toggle">
                         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-                            ${isCollapsed 
-                                ? '<polyline points="6 9 12 15 18 9"></polyline>' 
-                                : '<polyline points="18 15 12 9 6 15"></polyline>'}
+                            ${isCollapsed
+                ? '<polyline points="6 9 12 15 18 9"></polyline>'
+                : '<polyline points="18 15 12 9 6 15"></polyline>'}
                         </svg>
                      </button>
                 </div>
@@ -109,12 +103,12 @@ export class NodeTemplates {
         const siblingIndex = node.data.metaInfo?.siblingIndex ?? 0;
         const siblingCount = node.data.metaInfo?.siblingCount ?? 1;
         const hasSiblings = siblingCount > 1;
-        
+
         // ✅ 新增：分支名称
         const branchName = node.data.metaInfo?.branchName
             ? `<span class="llm-ui-branch-name">${escapeHTML(node.data.metaInfo.branchName)}</span>`
             : '';
-        
+
         const branchNavHtml = hasSiblings ? `
             <button class="llm-icon-btn" data-action="prev-sibling" title="Previous" ${siblingIndex === 0 ? 'disabled' : ''}>←</button>
             <span class="llm-ui-branch-indicator">
@@ -125,14 +119,9 @@ export class NodeTemplates {
         <div class="llm-ui-sep"></div>
     ` : '';
 
-    // ✅ 分支管理按钮（始终显示）
-    const branchManageHtml = `
-            <button class="llm-icon-btn" data-action="show-branch-tree" title="Branch Tree">
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="12" y1="5" x2="12" y2="19"></line>
-                    <polyline points="19 12 12 19 5 12"></polyline>
-                </svg>
-            </button>
+        // ✅ 分支管理按钮（始终显示）
+        const branchManageHtml = `
+
             <button class="llm-icon-btn" data-action="create-branch" title="Create Branch">
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
                     <line x1="6" y1="3" x2="6" y2="15"></line>
@@ -150,7 +139,7 @@ export class NodeTemplates {
         // 只有类型为 agent 且有 ID 的（非 Tool）才可点击
         // 如果是 'default' 也可以点击，前提是我们在 Agent Workspace 有对应的逻辑处理
         const isClickable = node.executorType === 'agent' && agentId;
-        
+
         const iconHtml = isClickable
             ? `<div class="llm-ui-node__icon llm-ui-node__icon--clickable" title="Edit Agent" data-agent-id="${escapeHTML(agentId)}">${icon}</div>`
             : `<div class="llm-ui-node__icon">${icon}</div>`;
@@ -182,9 +171,9 @@ export class NodeTemplates {
                     <button class="llm-icon-btn" data-action="copy" title="Copy">📋</button>
                     <button class="llm-icon-btn" data-action="collapse" title="Toggle">
                         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-                            ${isCollapsed 
-                                ? '<polyline points="6 9 12 15 18 9"></polyline>' 
-                                : '<polyline points="18 15 12 9 6 15"></polyline>'}
+                            ${isCollapsed
+                ? '<polyline points="6 9 12 15 18 9"></polyline>'
+                : '<polyline points="18 15 12 9 6 15"></polyline>'}
                         </svg>
                     </button>
                 </div>

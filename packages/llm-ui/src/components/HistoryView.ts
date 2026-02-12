@@ -6,7 +6,8 @@ import { NodeRenderer } from './NodeRenderer';
 import { MDxController } from './mdx/MDxController';
 import { NodeTemplates } from './templates/NodeTemplates';
 import { LayoutTemplates } from './templates/LayoutTemplates';
-import { escapeHTML, showConfirmDialog, ISessionEngine } from '@itookit/common';
+import { ErrorTemplates } from './templates/ErrorTemplates';
+import { showConfirmDialog, ISessionEngine } from '@itookit/common';
 import { BranchTreePanel } from './BranchTreePanel';
 import { BranchCompareView } from './BranchCompareView';
 import { CollapseStateMap } from '../core/types';
@@ -15,7 +16,6 @@ export interface HistoryViewOptions {
     nodeId?: string;
     ownerNodeId?: string;
     sessionEngine?: ISessionEngine;
-    // ✅ 新增：状态持久化回调
     onCollapseStateChange?: (states: CollapseStateMap) => void;
     initialCollapseStates?: CollapseStateMap;
 }
@@ -191,13 +191,7 @@ export class HistoryView {
 
         const banner = document.createElement('div');
         banner.className = 'llm-ui-error-banner';
-        banner.innerHTML = `
-            <div class="llm-ui-error-banner__content">
-                <span class="llm-ui-error-banner__icon">⚠️</span>
-                <span class="llm-ui-error-banner__message">${escapeHTML(error.message)}</span>
-                <button class="llm-ui-error-banner__close" title="Dismiss">×</button>
-            </div>
-        `;
+        banner.innerHTML = ErrorTemplates.renderErrorBanner(error.message);
 
         banner.querySelector('.llm-ui-error-banner__close')?.addEventListener('click', () => {
             banner.remove();
@@ -347,11 +341,7 @@ export class HistoryView {
 
         this.newContentIndicator = document.createElement('div');
         this.newContentIndicator.className = 'llm-ui-new-content-indicator';
-        this.newContentIndicator.innerHTML = `
-            <button class="llm-ui-new-content-btn">
-                <span>⬇️ New response available</span>
-            </button>
-        `;
+        this.newContentIndicator.innerHTML = ErrorTemplates.renderNewContentIndicator();
 
         this.newContentIndicator.querySelector('button')?.addEventListener('click', () => {
             this.scrollToBottom(true);
@@ -370,7 +360,6 @@ export class HistoryView {
             this.newContentIndicator = null;
         }
     }
-
 
     private appendSessionGroup(group: SessionGroup, isCollapsed: boolean) {
         // ✅ 关键修复：检查是否已渲染
@@ -502,18 +491,16 @@ export class HistoryView {
             });
         }
 
-        // Branch Nav
         wrapper.querySelector('[data-action="prev-sibling"]')?.addEventListener('click', (e) => {
             e.stopPropagation();
             this.onNodeAction?.('prev-sibling', group.id);
         });
-        // ✅ 新增：分支树按钮
+
         wrapper.querySelector('[data-action="show-branch-tree"]')?.addEventListener('click', (e) => {
             e.stopPropagation();
             this.onBranchAction?.('show-tree', group.id);
         });
 
-        // ✅ 新增：创建分支按钮
         wrapper.querySelector('[data-action="create-branch"]')?.addEventListener('click', (e) => {
             e.stopPropagation();
             this.onBranchAction?.('create', group.id);
@@ -524,7 +511,6 @@ export class HistoryView {
             this.onNodeAction?.('next-sibling', group.id);
         });
 
-        // Edit Confirm/Cancel
         wrapper.querySelector('[data-action="confirm-edit"]')?.addEventListener('click', (e) => {
             e.stopPropagation();
             this.confirmEdit(group.id, controller, editActionsEl, wrapper, true);
@@ -543,22 +529,18 @@ export class HistoryView {
 
     private toggleEditMode(nodeId: string, controller: MDxController, actionsEl: HTMLElement, wrapper: HTMLElement) {
         if (!this.editingNodes.has(nodeId)) {
-            // Enter Edit
             this.originalContentMap.set(nodeId, controller.content);
             this.editingNodes.add(nodeId);
             controller.toggleEdit();
             actionsEl.style.display = 'flex';
             wrapper.querySelector('[data-action="edit"]')?.classList.add('active');
 
-            // 如果是折叠状态，先展开以便编辑
             const bubble = wrapper.querySelector('.llm-ui-bubble--user');
             if (bubble && bubble.classList.contains('is-collapsed')) {
-                // 模拟点击折叠按钮
                 const collapseBtn = wrapper.querySelector('[data-action="collapse"]');
                 if (collapseBtn) (collapseBtn as HTMLElement).click();
             }
         } else {
-            // (Save-only)
             this.confirmEdit(nodeId, controller, actionsEl, wrapper, false);
         }
     }
@@ -570,18 +552,14 @@ export class HistoryView {
         wrapper: HTMLElement,
         regenerate: boolean
     ) {
-        // 获取编辑后的内容
         const newContent = controller.content;
-        // 退出编辑模式
         this.editingNodes.delete(nodeId);
         this.originalContentMap.delete(nodeId);
         controller.toggleEdit();
         editActionsEl.style.display = 'none';
         wrapper.querySelector('[data-action="edit"]')?.classList.remove('active');
 
-        // ✅ 关键修复：无论是否重新生成，都先保存内容
         this.onContentChange?.(nodeId, newContent, 'user');
-        // 通知外部
         if (regenerate) {
             this.onNodeAction?.('edit-and-retry', nodeId);
         }
@@ -667,14 +645,12 @@ export class HistoryView {
                 : '<polyline points="18 15 12 9 6 15"></polyline>';
         }
 
-        // ✨ [新增] 当从折叠变为展开时，自动折叠该 chat 内的所有代码块
         if (wasCollapsed && !isCollapsed && sessionId) {
             this.collapseCodeBlocksInSession(sessionId);
         }
 
         if (sessionId) {
             this.collapseStates[sessionId] = isCollapsed;
-            // 流式模式下不触发回调，等结束后统一保存
             if (!this.isStreamingMode) {
                 this.onCollapseStateChange?.(this.collapseStates);
             }
@@ -687,19 +663,15 @@ export class HistoryView {
      * @param sessionId - session 的 ID
      */
     private async collapseCodeBlocksInSession(sessionId: string): Promise<void> {
-        // 1. 查找该 session 关联的所有编辑器 ID
         const editorIds = this.getEditorIdsForSession(sessionId);
 
         if (editorIds.length === 0) return;
 
-        // 2. 对每个编辑器执行代码块折叠
         const collapsePromises = editorIds.map(async (editorId) => {
             const controller = this.editorMap.get(editorId);
             if (controller) {
                 try {
-                    // 等待编辑器初始化完成
                     await controller.waitUntilReady();
-                    // 折叠代码块
                     const result = await controller.collapseBlocks();
                     if (result.affectedCount > 0) {
                         console.log(`[HistoryView] Collapsed ${result.affectedCount} code blocks in editor ${editorId}`);
@@ -721,15 +693,12 @@ export class HistoryView {
     private getEditorIdsForSession(sessionId: string): string[] {
         const ids: string[] = [];
 
-        // 1. 检查是否是 user session（直接使用 sessionId）
         if (this.editorMap.has(sessionId)) {
             ids.push(sessionId);
         }
 
-        // 2. 查找该 session 下的所有 node（assistant 消息）
         const sessionEl = this.container.querySelector(`[data-session-id="${sessionId}"]`);
         if (sessionEl) {
-            // 查找该 session 内的所有节点
             const nodes = sessionEl.querySelectorAll('.llm-ui-node[data-id]');
             nodes.forEach(node => {
                 const nodeId = (node as HTMLElement).dataset.id;
@@ -793,9 +762,6 @@ export class HistoryView {
         await Promise.all(promises);
     }
 
-    /**
-     * ✨ [新增] 公开方法：展开所有 session 的代码块
-     */
     public async expandAllCodeBlocks(): Promise<void> {
         const promises: Promise<void>[] = [];
 
@@ -819,19 +785,14 @@ export class HistoryView {
      * ✅ New: Get content of the first unfolded Agent chat
      */
     public getFirstUnfoldedAgentContent(): string | null {
-        // 1. 查找所有 Assistant 类型的 Session
         const sessions = Array.from(this.container.querySelectorAll('.llm-ui-session--assistant'));
 
         for (const session of sessions) {
-            // 2. 找到该 Session 下的主节点（通常是第一个 ExecutionRoot 下的第一个 Node）
-            // 或者简单点，找里面的 .llm-ui-node
             const nodes = session.querySelectorAll('.llm-ui-node');
 
             for (const node of nodes) {
-                // 3. 检查是否折叠
                 if (!node.classList.contains('is-collapsed')) {
                     const nodeId = (node as HTMLElement).dataset.id;
-                    // 4. 从 EditorMap 获取纯文本内容（最准确）
                     if (nodeId && this.editorMap.has(nodeId)) {
                         return this.editorMap.get(nodeId)!.content;
                     }
@@ -1242,39 +1203,14 @@ export class HistoryView {
         wrapper.className = 'llm-ui-session llm-ui-session--system';
 
         const isAuthError = error.message.includes('apiKey') || error.message.includes('401');
-
-        let actionButtons = '';
-
-        if (isAuthError) {
-            actionButtons = `
-                <button class="llm-ui-error-btn" data-action="open-settings">⚙️ 配置连接</button>
-            `;
-        }
-
-        actionButtons += `
-            <button class="llm-ui-error-btn" data-action="retry-last">↻ 重试</button>
-        `;
-
-        wrapper.innerHTML = `
-            <div class="llm-ui-bubble llm-ui-bubble--error">
-                <strong>⚠️ 执行失败</strong>
-                <div class="llm-ui-bubble--error__content">
-                    ${escapeHTML(error.message)}
-                </div>
-                <div class="llm-ui-bubble--error__actions">
-                    ${actionButtons}
-                </div>
-            </div>
-        `;
+        wrapper.innerHTML = ErrorTemplates.renderErrorBubble(error.message, isAuthError);
 
         this.container.appendChild(wrapper);
         this.scrollToBottom(true);
 
-        // 绑定按钮事件
         const settingsBtn = wrapper.querySelector('[data-action="open-settings"]');
         if (settingsBtn) {
             settingsBtn.addEventListener('click', () => {
-                // ✅ 这里触发的事件会被 LLMWorkspaceEditor 捕获
                 this.container.dispatchEvent(new CustomEvent('open-connection-settings', { bubbles: true }));
             });
         }
@@ -1282,9 +1218,7 @@ export class HistoryView {
         const retryBtn = wrapper.querySelector('[data-action="retry-last"]');
         if (retryBtn) {
             retryBtn.addEventListener('click', () => {
-                // 简单的重试逻辑：移除错误气泡，触发重试
                 wrapper.remove();
-                // 找到最后一个可重试的节点
                 const lastNode = this.findLastRetryableId();
                 if (lastNode) {
                     this.onNodeAction?.('retry', lastNode);
@@ -1294,8 +1228,6 @@ export class HistoryView {
     }
 
     private findLastRetryableId(): string | null {
-        // 简单的查找逻辑：找最后一个 user session 或 assistant node
-        // 实际逻辑可能需要根据你的 SessionManager 结构调整
         const allSessions = Array.from(this.container.querySelectorAll('[data-session-id]'));
         if (allSessions.length > 0) {
             return (allSessions[allSessions.length - 1] as HTMLElement).dataset.sessionId || null;
@@ -1311,8 +1243,6 @@ export class HistoryView {
      * ✅ 优化：批量处理事件
      */
     processEvent(event: OrchestratorEvent) {
-        // 非流式更新事件直接处理
-        // ✅ 新增：分支事件处理
         switch (event.type) {
             case 'branch_created':
                 this.handleBranchCreated(event.payload);
@@ -1526,7 +1456,7 @@ export class HistoryView {
     private handleBranchRenamed(payload: { nodeId: string; newName: string }): void {
         const el = this.findElementBySessionId(payload.nodeId);
         if (el) {
-            const nameEl = el.querySelector('.llm-ui-branch-name');
+            const nameEl = el.querySelector('.llm-branch-name');
             if (nameEl) {
                 nameEl.textContent = payload.newName;
             }
@@ -1571,8 +1501,8 @@ export class HistoryView {
      */
     private showBranchNotification(message: string): void {
         const notification = document.createElement('div');
-        notification.className = 'llm-ui-branch-notification';
-        notification.textContent = message;
+        notification.className = 'llm-branch-notification';
+        notification.textContent = ErrorTemplates.renderBranchNotification(message);
 
         this.container.appendChild(notification);
 
