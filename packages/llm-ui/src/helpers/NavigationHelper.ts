@@ -38,9 +38,7 @@ export class NavigationHelper {
         }
 
         const currentEl = this.container.querySelector(`[data-session-id="${currentId}"]`);
-        if (currentEl) {
-            currentEl.classList.add('is-active');
-        }
+        currentEl?.classList.add('is-active');
     }
 
     /**
@@ -95,46 +93,24 @@ export class NavigationHelper {
     }
 
     /**
-     * 导航到上一个用户消息
+     * 导航到上/下一个用户消息（合并 prev/next）
      */
-    navigateToPrevUserChat(): void {
+    navigateToUserChat(direction: 'prev' | 'next'): void {
         const sessions = this.sessionManager.getSessions();
         const currentId = this.findCurrentVisibleSession();
-
         if (!currentId) return;
 
         const currentIdx = sessions.findIndex(s => s.id === currentId);
+        const step = direction === 'prev' ? -1 : 1;
 
-        for (let i = currentIdx - 1; i >= 0; i--) {
+        for (let i = currentIdx + step; i >= 0 && i < sessions.length; i += step) {
             if (sessions[i].role === 'user') {
                 this.scrollToSession(sessions[i].id);
-                break;
+                return;
             }
         }
     }
 
-    /**
-     * 导航到下一个用户消息
-     */
-    navigateToNextUserChat(): void {
-        const sessions = this.sessionManager.getSessions();
-        const currentId = this.findCurrentVisibleSession();
-
-        if (!currentId) return;
-
-        const currentIdx = sessions.findIndex(s => s.id === currentId);
-
-        for (let i = currentIdx + 1; i < sessions.length; i++) {
-            if (sessions[i].role === 'user') {
-                this.scrollToSession(sessions[i].id);
-                break;
-            }
-        }
-    }
-
-    /**
-     * 清理
-     */
     cleanup(): void {
         if (this.activeSessionUpdateTimer) {
             cancelAnimationFrame(this.activeSessionUpdateTimer);

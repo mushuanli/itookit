@@ -19,14 +19,8 @@ import {
 } from '@itookit/llm-engine';
 import { NodeAction } from './core/types';
 
-// Services
-import {
-    SessionService,
-    ContentService,
-    StateService,
-    AssetService,
-    BranchService,
-} from './services';
+// Services（删除了 ContentService、BranchService）
+import { SessionService, StateService, AssetService } from './services';
 
 // Helpers
 import { AgentLoader } from './helpers/AgentLoader';
@@ -36,7 +30,6 @@ import { NodeActionHandler } from './helpers/NodeActionHandler';
 import { BranchManager } from './helpers/BranchManager';
 import { EventBinder } from './helpers/EventBinder';
 import { UIUpdater } from './helpers/UIUpdater';
-import { SessionLoader } from './helpers/SessionLoader';
 
 export interface LLMEditorOptions extends EditorOptions {
     sessionEngine: ILLMSessionEngine;
@@ -71,10 +64,8 @@ export class LLMWorkspaceEditor implements IEditor {
 
     // Services
     private sessionService!: SessionService;
-    private contentService!: ContentService;
     private stateService!: StateService;
     private assetService!: AssetService;
-    private branchService!: BranchService;
 
     // Helpers
     private agentLoader!: AgentLoader;
@@ -84,7 +75,6 @@ export class LLMWorkspaceEditor implements IEditor {
     private branchManager!: BranchManager;
     private eventBinder!: EventBinder;
     private uiUpdater!: UIUpdater;
-    private sessionLoader!: SessionLoader;
 
     // 事件监听器
     private listeners = new Map<string, Set<EditorEventCallback>>();
@@ -94,24 +84,17 @@ export class LLMWorkspaceEditor implements IEditor {
     // UI Elements
     private titleInput!: HTMLInputElement;
     private assetManagerUI: AssetManagerUI | null = null;
+    private floatingNav: FloatingNavPanel | null = null;
 
     private currentTitle: string = 'New Chat';
     private isAllExpanded: boolean = true;
     private currentSessionId: string | null = null;
 
-    // 配置
     private options: LLMEditorOptions;
-
-    // 初始化状态
     private initPromise: Promise<void> | null = null;
     private initResolve: (() => void) | null = null;
     private initReject: ((e: Error) => void) | null = null;
-
-    // 标记是否因为删除而销毁
     private isBeingDeleted: boolean = false;
-
-    // 浮动导航面板
-    private floatingNav: FloatingNavPanel | null = null;
 
     private get hostContext(): EditorHostContext | undefined {
         return this.options.hostContext;
@@ -123,9 +106,7 @@ export class LLMWorkspaceEditor implements IEditor {
 
     constructor(_container: HTMLElement, options: LLMEditorOptions) {
         this.options = options;
-        // 使用全局单例，不再自己 new
         this.sessionManager = getSessionManager();
-
         if (options.title) {
             this.currentTitle = options.title;
         }
@@ -145,27 +126,14 @@ export class LLMWorkspaceEditor implements IEditor {
         });
 
         try {
-            // 1. 渲染布局
             this.renderLayout();
-
-            // 2. 初始化 Services
             this.initializeServices();
-
-            // 3. 初始化 Helpers
             this.initializeHelpers();
-
-            // 4. 初始化组件
             await this.initComponents();
-
-            // 5. 绑定事件
             this.bindEvents();
-
-            // 6. 加载会话
             await this.loadSession(initialContent);
-
             this.emit('ready');
             this.initResolve?.();
-
         } catch (e: any) {
             console.error('[LLMWorkspaceEditor] init failed:', e);
             this.initReject?.(e);
@@ -178,25 +146,17 @@ export class LLMWorkspaceEditor implements IEditor {
         this.titleInput = this.container.querySelector('#llm-title-input') as HTMLInputElement;
     }
 
-    /**
-     * 初始化 Services
-     */
     private initializeServices(): void {
         this.sessionService = new SessionService(this.engine, this.sessionManager);
-        this.contentService = new ContentService(this.sessionManager);
         this.stateService = new StateService(this.engine);
         this.assetService = new AssetService(this.engine);
-        this.branchService = new BranchService(this.sessionManager);
     }
 
-    /**
-     * 初始化 Helpers
-     */
     private initializeHelpers(): void {
         this.agentLoader = new AgentLoader(this.options.agentService, this.sessionManager);
         this.stateManager = new StateManager(
             this.stateService,
-            this.contentService,
+            this.sessionManager,
             this.options.nodeId!
         );
     }
@@ -205,12 +165,11 @@ export class LLMWorkspaceEditor implements IEditor {
         const historyEl = this.container.querySelector('#llm-ui-history') as HTMLElement;
         const inputEl = this.container.querySelector('#llm-ui-input') as HTMLElement;
 
-        // 监听滚动
         historyEl.addEventListener('scroll', () => {
             this.navigationHelper?.scheduleActiveSessionUpdate();
         }, { passive: true });
 
-        // 初始化历史视图
+        // HistoryView
         this.historyView = new HistoryView(
             historyEl,
             (id, content, type) => this.handleContentChange(id, content, type),
@@ -224,10 +183,7 @@ export class LLMWorkspaceEditor implements IEditor {
             }
         );
 
-        // ✅ 在 historyView 创建后再创建 SessionLoader
-        this.sessionLoader = new SessionLoader(this.sessionService, this.historyView);
-
-        // 加载会话设置
+        // 加载设置和状态
         let initialSettings;
         if (this.currentSessionId && !this.options.isNewSession) {
             try {
@@ -237,56 +193,49 @@ export class LLMWorkspaceEditor implements IEditor {
             }
         }
 
-        // 加载 UI 状态
         const savedUIState = await this.stateManager.loadUIState();
-
-        // 获取初始 Agents 列表
         const initialAgents = await this.agentLoader.loadInitialAgents();
 
-        // 构建初始配置
-        const initialConfig: Partial<ChatInputConfig> = {
-            text: savedUIState?.input_text || '',
-            agentId: savedUIState?.input_agent_id || 'default',
-            settings: initialSettings,
-        };
-
-        // 初始化输入组件
+        // ChatInput
         this.chatInput = new ChatInput(inputEl, {
             onSend: (text, files, agentId, overrides) =>
                 this.handleUserSend(text, files, agentId, overrides),
-            onStop: () => this.contentService.abort(),
+            onStop: () => this.sessionManager.abort(),
             initialAgents,
-            initialConfig,
-            onConfigChange: (config) => this.handleConfigChange(config),
-            onExecutorChange: (_executorId) => {
-                this.stateManager.scheduleInputStateSave();
+            initialConfig: {
+                text: savedUIState?.input_text || '',
+                agentId: savedUIState?.input_agent_id || 'default',
+                settings: initialSettings,
             },
+            onConfigChange: (config) => this.handleConfigChange(config),
+            onExecutorChange: () => this.stateManager.scheduleInputStateSave(),
             onRequestModels: (agentId) => this.agentLoader.loadModelsForAgent(agentId),
         });
 
-        // 初始化其他 Helpers（依赖组件）
+        // Helpers（依赖组件）
         this.navigationHelper = new NavigationHelper(this.container, this.sessionManager);
+
         this.nodeActionHandler = new NodeActionHandler(
-            this.contentService,
+            this.sessionManager,
             this.historyView,
             this.chatInput
         );
+
         this.branchManager = new BranchManager(
-            this.branchService,
-            this.contentService,
+            this.sessionManager,
             this.historyView,
             (sessionId) => this.navigationHelper.scrollToSession(sessionId)
         );
+
         this.uiUpdater = new UIUpdater(this.container, this.chatInput);
 
-        // 设置分支操作回调
         this.historyView.setBranchActionCallback(
             (action, nodeId, options) => this.branchManager.handleBranchAction(action, nodeId, options)
         );
     }
 
     private bindEvents(): void {
-        this.eventBinder = new EventBinder(this.container, this.hostContext, {
+        this.eventBinder = new EventBinder(this.container, {
             onToggleSidebar: () => this.hostContext?.toggleSidebar(),
             onTitleChange: (title) => this.handleTitleChange(title),
             onOpenAssetManager: () => this.handleOpenAssetManager(),
@@ -295,7 +244,7 @@ export class LLMWorkspaceEditor implements IEditor {
             onNextAgent: () => this.handleNextAgent(),
             onFoldOne: () => this.historyView.foldFirstUnfolded(),
             onCopyAgent: () => this.handleCopyAgent(),
-            onCollapseAll: () => this.handleCollapseAll(),
+            onCollapseAll: () => this.setAllSessionsFold(!this.isAllExpanded),
             onCopy: () => this.handleCopy(),
             onPrint: () => this.handlePrint(),
         });
@@ -304,8 +253,13 @@ export class LLMWorkspaceEditor implements IEditor {
         this.eventBinder.bindNavigationEvents();
         this.eventBinder.bindGlobalShortcuts({
             onToggleNavigator: () => this.toggleNavigator(),
-            onNavigatePrev: () => this.navigationHelper.navigateToPrevUserChat(),
-            onNavigateNext: () => this.navigationHelper.navigateToNextUserChat(),
+            onNavigatePrev: () => this.navigationHelper.navigateToUserChat('prev'),
+            onNavigateNext: () => this.navigationHelper.navigateToUserChat('next'),
+            onShowBranchTree: () => this.branchManager.handleBranchAction('show-tree', ''),
+            onCreateBranch: () => {
+                const currentId = this.navigationHelper.findCurrentVisibleSession();
+                if (currentId) this.branchManager.handleBranchAction('create', currentId);
+            },
         });
 
         this.bindGlobalEvents();
@@ -328,10 +282,22 @@ export class LLMWorkspaceEditor implements IEditor {
             this.sessionEventUnsubscribe = null;
         }
 
-        // 加载会话（使用 SessionLoader）
-        const { sessionId, snapshot, title } = await this.sessionLoader.loadSession(
+        // 直接调用 SessionService（原 SessionLoader 逻辑内联）
+        const { sessionId, snapshot, title } = await this.sessionService.loadSession(
             this.options.nodeId,
             this.currentTitle
+        );
+
+        // 渲染历史消息
+        if (snapshot.sessions.length > 0) {
+            this.historyView.renderFull(snapshot.sessions);
+        } else {
+            this.historyView.renderWelcome();
+        }
+
+        console.log(
+            `[LLMWorkspaceEditor] Session loaded: ${sessionId}, ` +
+            `messages: ${snapshot.sessions.length}, status: ${snapshot.status}`
         );
 
         this.currentSessionId = sessionId;
@@ -372,10 +338,6 @@ export class LLMWorkspaceEditor implements IEditor {
     private handleSessionEvent(event: OrchestratorEvent): void {
         this.historyView.processEvent(event);
 
-        if (event.type === 'finished' || event.type === 'session_start' || event.type === 'error') {
-            console.log(`[LLMWorkspaceEditor] Session Event: ${event.type}`, event.payload);
-        }
-
         if (event.type === 'finished' || event.type === 'session_start') {
             this.emit('change');
         }
@@ -392,13 +354,11 @@ export class LLMWorkspaceEditor implements IEditor {
             case 'pool_status_changed':
                 this.uiUpdater.updateBackgroundIndicator(
                     event.payload,
-                    this.contentService.isGenerating()
+                    this.sessionManager.isGenerating()
                 );
                 break;
 
             case 'session_status_changed':
-                console.log(`[LLMWorkspaceEditor] Status Changed: ${event.payload.sessionId} -> ${event.payload.status}`);
-
                 if (event.payload.sessionId === this.currentSessionId) {
                     this.uiUpdater.updateStatusIndicator(event.payload.status);
                 } else if (event.payload.status === 'completed') {
@@ -411,9 +371,9 @@ export class LLMWorkspaceEditor implements IEditor {
         }
     }
 
-    private async handleContentChange(id: string, content: string, type: 'user' | 'node'): Promise<void> {
+    private async handleContentChange(id: string, content: string, _type: 'user' | 'node'): Promise<void> {
         try {
-            await this.contentService.updateContent(id, content, type);
+            await this.sessionManager.editMessage(id, content, false);
             this.emit('change');
         } catch (e) {
             console.error('[LLMWorkspaceEditor] updateContent failed:', e);
@@ -461,10 +421,7 @@ export class LLMWorkspaceEditor implements IEditor {
                 return;
             }
 
-            if (this.assetManagerUI) {
-                this.assetManagerUI.close();
-            }
-
+            this.assetManagerUI?.close();
             this.assetManagerUI = new AssetManagerUI(this.engine, null as any, {});
             await this.assetManagerUI.show(assetDirId);
 
@@ -511,22 +468,23 @@ export class LLMWorkspaceEditor implements IEditor {
         }
     }
 
-    private handleCollapseAll(): void {
+    /**
+     * ✅ 合并原 foldAllSessions / unfoldAllSessions / handleCollapseAll
+     */
+    private setAllSessionsFold(fold: boolean): void {
+        if (this.isAllExpanded === !fold) return;
+
         this.isAllExpanded = this.uiUpdater.toggleAllBubbles(this.isAllExpanded);
 
-        const sessions = this.contentService.getSessions();
+        const sessions = this.sessionManager.getSessions();
         const collapseStates = this.stateManager.getCollapseStates();
-
-        sessions.forEach(s => {
-            collapseStates[s.id] = !this.isAllExpanded;
-        });
-
+        sessions.forEach(s => { collapseStates[s.id] = fold; });
         this.stateManager.scheduleUIStateSave(collapseStates);
     }
 
     private async handleCopy(): Promise<void> {
         const btn = this.container.querySelector('#llm-btn-copy') as HTMLElement;
-        const md = this.contentService.exportToMarkdown();
+        const md = this.sessionManager.exportToMarkdown();
         try {
             await navigator.clipboard.writeText(md);
             this.uiUpdater.showButtonFeedback(btn, '✓');
@@ -537,14 +495,11 @@ export class LLMWorkspaceEditor implements IEditor {
 
     private async handlePrint(): Promise<void> {
         try {
-            const md = this.contentService.exportToMarkdown();
-
+            const md = this.sessionManager.exportToMarkdown();
             await this.getPrintService().print(md, {
                 title: this.currentTitle || 'Chat Conversation',
                 showHeader: true,
-                headerMeta: {
-                    date: new Date().toLocaleString(),
-                },
+                headerMeta: { date: new Date().toLocaleString() },
             });
         } catch (err) {
             console.error('[LLMWorkspaceEditor] Print failed:', err);
@@ -563,19 +518,16 @@ export class LLMWorkspaceEditor implements IEditor {
             return;
         }
 
-        console.log('[LLMWorkspaceEditor] User sending message...', { agentId, overrides });
         this.chatInput.setLoading(true);
 
         try {
             let finalText = text || '';
 
-            // 上传附件（使用 AssetService）
             if (files.length > 0) {
                 try {
                     const refs = await this.assetService.uploadFiles(ownerNodeId, files);
                     finalText += '\n\n' + refs.join('\n\n');
                 } catch (uploadErr: any) {
-                    console.error('[LLMWorkspaceEditor] Failed to upload files:', uploadErr);
                     Toast.error(uploadErr.message || 'Failed to upload files');
                     this.chatInput.setLoading(false);
                     return;
@@ -587,11 +539,8 @@ export class LLMWorkspaceEditor implements IEditor {
                 return;
             }
 
-            await this.contentService.runUserQuery(
-                finalText.trim(),
-                files,
-                agentId || 'default',
-                overrides
+            await this.sessionManager.sendMessage(
+                finalText.trim(), files, agentId || 'default', overrides
             );
 
         } catch (error: any) {
@@ -608,140 +557,69 @@ export class LLMWorkspaceEditor implements IEditor {
     private toggleNavigator(): void {
         if (!this.floatingNav) {
             this.floatingNav = new FloatingNavPanel(this.container, {
-                onNavigate: (sessionId) => this.navigationHelper.scrollToSession(sessionId),
-                onToggleFold: (sessionId) => this.toggleSessionFold(sessionId),
-                onCopy: (sessionId) => this.copySessionContent(sessionId),
-                onFoldAll: () => this.foldAllSessions(),
-                onUnfoldAll: () => this.unfoldAllSessions(),
+                onNavigate: (id) => this.navigationHelper.scrollToSession(id),
+                onToggleFold: (id) => this.toggleSessionFold(id),
+                onCopy: (id) => this.copySessionContent(id),
+                onFoldAll: () => this.setAllSessionsFold(true),
+                onUnfoldAll: () => this.setAllSessionsFold(false),
                 onBatchDelete: (ids) => this.handleBatchDelete(ids),
                 onBatchCopy: (ids) => this.handleBatchCopy(ids),
-                onShowBranchTree: () => this.showBranchTree(),
-                onCreateBranch: (sourceId) => this.createBranch(sourceId),
-                onSwitchBranch: (branchId) => this.switchBranch(branchId),
+                onShowBranchTree: () => this.branchManager.handleBranchAction('show-tree', ''),
+                onCreateBranch: (sourceId) => this.branchManager.handleBranchAction('create', sourceId),
+                onSwitchBranch: (branchId) => this.branchManager.handleBranchAction('select', branchId),
             });
         }
 
-        const sessions = this.contentService.getSessions();
+        const sessions = this.sessionManager.getSessions();
         const collapseStates = this.stateManager.getCollapseStates();
         this.floatingNav.updateItems(sessions, collapseStates);
 
-        const visibleSessionId = this.navigationHelper.findCurrentVisibleSession();
-        if (visibleSessionId) {
-            this.floatingNav.setCurrentChat(visibleSessionId);
-        }
+        const visibleId = this.navigationHelper.findCurrentVisibleSession();
+        if (visibleId) this.floatingNav.setCurrentChat(visibleId);
 
         this.floatingNav.toggle();
     }
 
     private toggleSessionFold(sessionId: string): void {
         const historyEl = this.container.querySelector('#llm-ui-history');
-        const sessionEl = historyEl?.querySelector(`[data-session-id="${sessionId}"]`);
-
-        if (sessionEl) {
-            const collapseBtn = sessionEl.querySelector('[data-action="collapse"]') as HTMLElement;
-            if (collapseBtn) {
-                collapseBtn.click();
-            }
-        }
+        const collapseBtn = historyEl
+            ?.querySelector(`[data-session-id="${sessionId}"]`)
+            ?.querySelector('[data-action="collapse"]') as HTMLElement;
+        collapseBtn?.click();
     }
 
     /**
      * 复制会话内容
      */
     private async copySessionContent(sessionId: string): Promise<void> {
-        const sessions = this.contentService.getSessions();
+        const sessions = this.sessionManager.getSessions();
         const session = sessions.find(s => s.id === sessionId);
+        if (!session) return;
 
-        if (session) {
-            let content = session.content || '';
+        let content = session.content || '';
+        if (session.role === 'assistant' && session.executionRoot) {
+            content = this.extractExecutionOutput(session.executionRoot);
+        }
 
-            if (session.role === 'assistant' && session.executionRoot) {
-                content = this.extractExecutionOutput(session.executionRoot);
-            }
-
-            try {
-                await navigator.clipboard.writeText(content);
-                Toast.success('Copied to clipboard');
-            } catch (e) {
-                console.error('Copy failed:', e);
-                Toast.error('Failed to copy');
-            }
+        try {
+            await navigator.clipboard.writeText(content);
+            Toast.success('Copied to clipboard');
+        } catch (e) {
+            Toast.error('Failed to copy');
         }
     }
 
     private extractExecutionOutput(node: any): string {
         let output = node.data?.output || '';
-
-        if (node.children && node.children.length > 0) {
+        if (node.children?.length > 0) {
             for (const child of node.children) {
                 const childOutput = this.extractExecutionOutput(child);
-                if (childOutput) {
-                    output += '\n\n' + childOutput;
-                }
+                if (childOutput) output += '\n\n' + childOutput;
             }
         }
-
         return output.trim();
     }
 
-    /**
-     * 折叠所有会话
-     */
-    private foldAllSessions(): void {
-        if (this.isAllExpanded) {
-            this.isAllExpanded = this.uiUpdater.toggleAllBubbles(this.isAllExpanded);
-
-            const sessions = this.contentService.getSessions();
-            const collapseStates = this.stateManager.getCollapseStates();
-            sessions.forEach(s => { collapseStates[s.id] = true; });
-            this.stateManager.scheduleUIStateSave(collapseStates);
-        }
-    }
-
-    /**
-     * 展开所有会话
-     */
-    private unfoldAllSessions(): void {
-        if (!this.isAllExpanded) {
-            this.isAllExpanded = this.uiUpdater.toggleAllBubbles(this.isAllExpanded);
-
-            const sessions = this.contentService.getSessions();
-            const collapseStates = this.stateManager.getCollapseStates();
-            sessions.forEach(s => { collapseStates[s.id] = false; });
-            this.stateManager.scheduleUIStateSave(collapseStates);
-        }
-    }
-
-    /**
-     * 显示分支树
-     */
-    private async showBranchTree(): Promise<void> {
-        try {
-            const tree = await this.branchService.getBranchTree();
-            this.historyView.showBranchTree(tree);
-        } catch (e: any) {
-            console.error('[LLMWorkspaceEditor] Failed to show branch tree:', e);
-            Toast.error('Failed to load branch tree');
-        }
-    }
-
-    /**
-     * 创建分支
-     */
-    private async createBranch(sourceId: string): Promise<void> {
-        await this.branchManager.handleBranchAction('create', sourceId);
-    }
-
-    /**
-     * 切换分支
-     */
-    private async switchBranch(branchId: string): Promise<void> {
-        await this.branchManager.handleBranchAction('select', branchId);
-    }
-
-    /**
-     * 处理批量删除
-     */
     private async handleBatchDelete(ids: string[]): Promise<void> {
         if (ids.length === 0) return;
 
@@ -750,86 +628,38 @@ export class LLMWorkspaceEditor implements IEditor {
         );
 
         if (!confirmed) {
-            // ✅ 用户取消，通知导航面板更新（清空选择）
-            if (this.floatingNav) {
-                this.floatingNav.updateItems(
-                    this.contentService.getSessions(),
-                    this.historyView.getCollapseStates()
-                );
-            }
+            this.refreshFloatingNav();
             return;
         }
 
-        // ✅ 保存原始状态用于回滚
-        const originalSessions = this.contentService.getSessions();
-        const successIds: string[] = [];
-        const failedIds: string[] = [];
+        const originalSessions = this.sessionManager.getSessions();
 
         try {
+            // ✅ 乐观更新 UI
             this.historyView.removeMessages(ids, true);
 
-            for (const id of ids) {
-                try {
-                    await this.contentService.deleteMessage(id, {
-                        deleteAssociatedResponses: true
-                    });
+            // ✅ 使用批量删除接口（一次持久化、一次事件）
+            await this.sessionManager.deleteMessages(ids, {
+                deleteAssociatedResponses: true
+            });
 
-                    successIds.push(id);
-
-                } catch (e: any) {
-                    console.error(`[LLMWorkspaceEditor] Failed to delete ${id}:`, e);
-                    failedIds.push(id);
-                }
-            }
-
-            // ✅ 处理结果
-            if (failedIds.length === 0) {
-                // 全部成功
-                Toast.success(`Deleted ${successIds.length} message${successIds.length > 1 ? 's' : ''}`);
-                this.emit('change');
-
-            } else if (successIds.length === 0) {
-                // 全部失败
-                Toast.error('Failed to delete messages');
-                this.historyView.renderFull(originalSessions);
-
-            } else {
-                Toast.warning(`Deleted ${successIds.length} messages, ${failedIds.length} failed`);
-                const currentSessions = this.contentService.getSessions();
-                this.historyView.renderFull(currentSessions);
-                this.emit('change');
-            }
-
-            // ✅ 更新导航面板（清空选择，刷新列表）
-            if (this.floatingNav) {
-                const sessions = this.contentService.getSessions();
-                const collapseStates = this.historyView.getCollapseStates();
-                this.floatingNav.updateItems(sessions, collapseStates);
-            }
+            Toast.success(`Deleted ${ids.length} message${ids.length > 1 ? 's' : ''}`);
+            this.emit('change');
 
         } catch (e: any) {
-            // ✅ 意外错误：完全回滚
-            console.error('[LLMWorkspaceEditor] Batch delete critical error:', e);
+            console.error('[LLMWorkspaceEditor] Batch delete failed:', e);
             Toast.error('Delete operation failed');
+            // 回滚
             this.historyView.renderFull(originalSessions);
-
-            if (this.floatingNav) {
-                this.floatingNav.updateItems(
-                    originalSessions,
-                    this.historyView.getCollapseStates()
-                );
-            }
         }
+
+        this.refreshFloatingNav();
     }
 
-    /**
-     * 处理批量复制
-     */
     private async handleBatchCopy(ids: string[]): Promise<void> {
         if (ids.length === 0) return;
 
-        const sessions = this.contentService.getSessions();
-        const contentArr: string[] = [];
+        const sessions = this.sessionManager.getSessions();
 
         const sortedIds = ids.sort((a, b) => {
             const sA = sessions.find(s => s.id === a);
@@ -837,27 +667,39 @@ export class LLMWorkspaceEditor implements IEditor {
             return (sA?.timestamp || 0) - (sB?.timestamp || 0);
         });
 
-        for (const id of sortedIds) {
-            const session = sessions.find(s => s.id === id);
-            if (session) {
+        const contentArr = sortedIds
+            .map(id => {
+                const session = sessions.find(s => s.id === id);
+                if (!session) return null;
+
                 let text = session.content || '';
                 if (session.role === 'assistant' && session.executionRoot) {
                     text = this.extractExecutionOutput(session.executionRoot);
                 }
+
                 const roleName = session.role === 'user' ? 'User' : 'Assistant';
                 const timestamp = new Date(session.timestamp).toLocaleString();
-
-                contentArr.push(`### ${roleName} (${timestamp}):\n${text}`);
-            }
-        }
+                return `### ${roleName} (${timestamp}):\n${text}`;
+            })
+            .filter(Boolean);
 
         try {
             await navigator.clipboard.writeText(contentArr.join('\n\n---\n\n'));
             Toast.success(`Copied ${ids.length} messages`);
         } catch (e) {
-            console.error('[LLMWorkspaceEditor] Copy failed:', e);
             Toast.error('Failed to copy to clipboard');
         }
+    }
+
+    /**
+     * 刷新浮动导航面板数据
+     */
+    private refreshFloatingNav(): void {
+        if (!this.floatingNav) return;
+        this.floatingNav.updateItems(
+            this.sessionManager.getSessions(),
+            this.historyView.getCollapseStates()
+        );
     }
 
     // ================================================================
@@ -883,10 +725,7 @@ export class LLMWorkspaceEditor implements IEditor {
     // ================================================================
 
     async waitUntilReady(): Promise<void> {
-        if (this.initPromise) {
-            return this.initPromise;
-        }
-        return Promise.resolve();
+        return this.initPromise ?? Promise.resolve();
     }
 
     getText(): string {
@@ -897,8 +736,8 @@ export class LLMWorkspaceEditor implements IEditor {
         return JSON.stringify({
             sessionId: this.currentSessionId,
             title: this.currentTitle,
-            messageCount: this.contentService.getSessions().length,
-            status: this.contentService.getStatus()
+            messageCount: this.sessionManager.getSessions().length,
+            status: this.sessionManager.getStatus()
         }, null, 2);
     }
 
@@ -916,65 +755,40 @@ export class LLMWorkspaceEditor implements IEditor {
         await this.loadSession(text);
     }
 
-    isDirty(): boolean {
-        return false;
-    }
-
-    setDirty(_dirty: boolean): void {
-        // no-op
-    }
+    isDirty(): boolean { return false; }
+    setDirty(_dirty: boolean): void { }
 
     focus(): void {
         this.chatInput?.focus();
     }
 
     async destroy(): Promise<void> {
-        // 清理 StateManager 定时器
         this.stateManager?.cleanup();
 
-        // 只在非删除、非流式模式下保存状态
-        if (!this.isBeingDeleted && !this.contentService.isGenerating()) {
+        if (!this.isBeingDeleted && !this.sessionManager.isGenerating()) {
             this.stateManager?.saveUIState(this.chatInput, this.isBeingDeleted).catch(() => { });
         }
 
-        // Asset Manager 清理
-        if (this.assetManagerUI) {
-            this.assetManagerUI.close();
-            this.assetManagerUI = null;
-        }
+        this.assetManagerUI?.close();
+        this.assetManagerUI = null;
 
-        // 解绑会话事件
-        if (this.sessionEventUnsubscribe) {
-            this.sessionEventUnsubscribe();
-            this.sessionEventUnsubscribe = null;
-        }
+        this.sessionEventUnsubscribe?.();
+        this.sessionEventUnsubscribe = null;
 
-        // 解绑全局事件
-        if (this.globalEventUnsubscribe) {
-            this.globalEventUnsubscribe();
-            this.globalEventUnsubscribe = null;
-        }
+        this.globalEventUnsubscribe?.();
+        this.globalEventUnsubscribe = null;
 
-        // 清理打印服务
-        if (this.printService) {
-            this.printService.destroy?.();
-            this.printService = null;
-        }
+        this.printService?.destroy?.();
+        this.printService = null;
 
-        // 清理浮动导航
-        if (this.floatingNav) {
-            this.floatingNav.destroy();
-            this.floatingNav = null;
-        }
+        this.floatingNav?.destroy();
+        this.floatingNav = null;
 
-        // 清理 Helpers
         this.eventBinder?.cleanup();
         this.navigationHelper?.cleanup();
 
-        // 解绑会话
         this.sessionManager.destroy();
 
-        // 清理 UI
         this.historyView?.destroy();
         this.chatInput?.destroy();
         this.container.innerHTML = '';
@@ -988,24 +802,19 @@ export class LLMWorkspaceEditor implements IEditor {
 
     setTitle(title: string): void {
         this.currentTitle = title;
-        if (this.titleInput) {
-            this.titleInput.value = title;
-        }
+        if (this.titleInput) this.titleInput.value = title;
     }
 
     setReadOnly() { }
     get commands() { return {}; }
     async getHeadings() { return []; }
-    async getSearchableText() { return this.contentService.exportToMarkdown(); }
+    async getSearchableText() { return this.sessionManager.exportToMarkdown(); }
     async getSummary() { return null; }
     async navigateTo() { }
     async search() { return []; }
     gotoMatch() { }
     clearSearch() { }
-
-    async pruneAssets(): Promise<number | null> {
-        return null;
-    }
+    async pruneAssets(): Promise<number | null> { return null; }
 
     async collapseBlocks(): Promise<CollapseExpandResult> {
         return { affectedCount: 0, allCollapsed: true };

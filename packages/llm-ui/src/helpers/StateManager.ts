@@ -2,8 +2,9 @@
 
 import { StateService, UIState } from '../services';
 import { ChatInput } from '../components/ChatInput';
-
-export type CollapseStateMap = Record<string, boolean>;
+import { CollapseStateMap } from '../core/types';
+import { createDebouncedSave, DebouncedFn } from '../utils/debounce';
+import { SessionManager } from '@itookit/llm-engine';
 
 /**
  * 状态管理器
@@ -11,21 +12,29 @@ export type CollapseStateMap = Record<string, boolean>;
  */
 export class StateManager {
     private collapseStatesCache: CollapseStateMap = {};
-    private uiStateSaveTimer: ReturnType<typeof setTimeout> | null = null;
-    private inputStateSaveTimer: ReturnType<typeof setTimeout> | null = null;
-
-    private readonly UI_STATE_SAVE_DEBOUNCE = 2000;
-    private readonly INPUT_STATE_SAVE_DEBOUNCE = 1000;
+    private debouncedUIStateSave: DebouncedFn;
+    private debouncedInputStateSave: DebouncedFn;
 
     constructor(
         private stateService: StateService,
-        private contentService: any, // 用于检查 isGenerating
+        private sessionManager: SessionManager,
         private nodeId: string
-    ) { }
+    ) {
+        const notGenerating = () => !this.sessionManager.isGenerating();
 
-    /**
-     * 获取折叠状态缓存
-     */
+        this.debouncedUIStateSave = createDebouncedSave(
+            () => this.saveUIState(),
+            2000,
+            notGenerating
+        );
+
+        this.debouncedInputStateSave = createDebouncedSave(
+            () => this.saveUIState(),
+            1000,
+            notGenerating
+        );
+    }
+
     getCollapseStates(): CollapseStateMap {
         return this.collapseStatesCache;
     }
@@ -38,43 +47,18 @@ export class StateManager {
     }
 
     /**
-     * 防抖保存 UI 状态
+     * 防抖保存 UI 状态（折叠变化时调用）
      */
     scheduleUIStateSave(states: CollapseStateMap): void {
         this.collapseStatesCache = states;
-
-        if (this.contentService.isGenerating()) {
-            return;
-        }
-
-        if (this.uiStateSaveTimer) {
-            clearTimeout(this.uiStateSaveTimer);
-        }
-
-        this.uiStateSaveTimer = setTimeout(async () => {
-            if (!this.contentService.isGenerating()) {
-                await this.saveUIState();
-            }
-        }, this.UI_STATE_SAVE_DEBOUNCE);
+        this.debouncedUIStateSave();
     }
 
     /**
      * 防抖保存输入状态
      */
     scheduleInputStateSave(): void {
-        if (this.contentService.isGenerating()) {
-            return;
-        }
-
-        if (this.inputStateSaveTimer) {
-            clearTimeout(this.inputStateSaveTimer);
-        }
-
-        this.inputStateSaveTimer = setTimeout(async () => {
-            if (!this.contentService.isGenerating()) {
-                await this.saveUIState();
-            }
-        }, this.INPUT_STATE_SAVE_DEBOUNCE);
+        this.debouncedInputStateSave();
     }
 
     /**
@@ -168,15 +152,10 @@ export class StateManager {
             sessionStorage.removeItem(key);
 
             if (isValid && isTargetMatch) {
-                return {
-                    agentId: params.agentId,
-                    text: params.text
-                };
+                return { agentId: params.agentId, text: params.text };
             }
-
             return null;
-
-        } catch (e) {
+        } catch {
             sessionStorage.removeItem(key);
             return null;
         }
@@ -186,14 +165,7 @@ export class StateManager {
      * 清理定时器
      */
     cleanup(): void {
-        if (this.uiStateSaveTimer) {
-            clearTimeout(this.uiStateSaveTimer);
-            this.uiStateSaveTimer = null;
-        }
-
-        if (this.inputStateSaveTimer) {
-            clearTimeout(this.inputStateSaveTimer);
-            this.inputStateSaveTimer = null;
-        }
+        this.debouncedUIStateSave.cancel();
+        this.debouncedInputStateSave.cancel();
     }
 }

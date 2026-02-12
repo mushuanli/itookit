@@ -218,42 +218,6 @@ export class SessionManager {
     }
 
     // ================================================================
-    // 兼容旧接口（@deprecated）
-    // ================================================================
-
-    /** @deprecated Use bindSession */
-    async loadSession(nodeId: string, sessionId: string): Promise<void> {
-        await this.bindSession(nodeId, sessionId);
-    }
-
-    /** @deprecated Use sendMessage */
-    async runUserQuery(
-        text: string, files: ChatFile[], executorId: string, overrides?: ExecutionOverrides
-    ): Promise<void> {
-        return this.sendMessage(text, files, executorId, overrides);
-    }
-
-    /** @deprecated Use editMessage */
-    async updateContent(id: string, content: string, _type: 'user' | 'node'): Promise<void> {
-        await this.editMessage(id, content, false);
-    }
-
-    /** @deprecated Use getAvailableAgents */
-    async getAvailableExecutors(): Promise<AgentInfo[]> {
-        return this.getAvailableAgents();
-    }
-
-    /** @deprecated Use getModelsForAgent */
-    async getAvailableModelsForAgent(agentId: string): Promise<ModelInfo[]> {
-        return this.getModelsForAgent(agentId);
-    }
-
-    /** @deprecated Use navigateToBranch */
-    async selectBranch(targetNodeId: string): Promise<void> {
-        return this.navigateToBranch(targetNodeId);
-    }
-
-    // ================================================================
     // 执行 API
     // ================================================================
 
