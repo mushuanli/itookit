@@ -277,7 +277,15 @@ export interface ILLMSessionEngine extends IBaseSessionEngine {
      * @returns 会话设置，如果不存在返回默认值
      */
     getSessionSettings(sessionId: string): Promise<ChatSessionSettings>;
-
+    /**
+     * ✅ 新增：根据指定 head 节点获取上下文
+     */
+    getSessionContextFromHead(
+        nodeId: string,
+        sessionId: string,
+        headNodeId: string
+    ): Promise<ChatContextItem[]>;
+    
     /**
      * 保存会话设置
      * @param sessionId 会话 ID
