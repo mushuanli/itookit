@@ -72,6 +72,38 @@ export class BranchManager {
     }
 
     /**
+     * ✅ 新增：按名称重命名分支（从 FloatingNavPanel dropdown 触发）
+     */
+    async renameBranchByName(oldName: string, newName: string): Promise<void> {
+        if (!newName.trim()) return;
+        try {
+            await this.sessionManager.renameBranch(oldName, newName);
+            Toast.success('Branch renamed');
+        } catch (e: any) {
+            console.error('[BranchManager] Rename branch failed:', e);
+            Toast.error(e.message || 'Failed to rename branch');
+        }
+    }
+
+    /**
+     * ✅ 新增：按名称删除分支（从 FloatingNavPanel dropdown 触发）
+     */
+    async deleteBranchByName(branchName: string): Promise<void> {
+        const confirmed = await showConfirmDialog(
+            `Delete branch "${branchName}" and all its unique children?`
+        );
+        if (!confirmed) return;
+
+        try {
+            await this.sessionManager.deleteBranch(branchName, true);
+            Toast.success('Branch deleted');
+        } catch (e: any) {
+            console.error('[BranchManager] Delete branch failed:', e);
+            Toast.error(e.message || 'Failed to delete branch');
+        }
+    }
+
+    /**
      * 确定分叉点
      */
     private findBranchPoint(sourceNodeId: string): string {

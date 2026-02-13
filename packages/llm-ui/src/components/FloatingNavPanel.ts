@@ -2,6 +2,7 @@
 
 import { SessionGroup } from '@itookit/llm-engine';
 import { FloatingNavPanelTemplates } from './templates/FloatingNavPanelTemplates';
+import { BranchItem } from '../core/types';
 
 export interface FloatingNavPanelOptions {
     onNavigate: (sessionId: string) => void;
@@ -17,6 +18,11 @@ export interface FloatingNavPanelOptions {
     onShowBranchTree?: () => void;
     onCreateBranch?: (sourceId: string) => void;
     onSwitchBranch?: (branchId: string) => void;
+
+    // ✅ 新增：分支 CRUD
+    onSwitchBranchByName?: (branchName: string) => void;
+    onRenameBranch?: (oldName: string, newName: string) => void;
+    onDeleteBranch?: (branchName: string) => void;
 }
 
 export interface ChatNavItem {
@@ -33,6 +39,11 @@ export interface ChatNavItem {
     siblingIndex?: number;
     siblingCount?: number;
     hasChildren?: boolean;
+
+    // ✅ 新增：此 node 所属的 branch 名称列表
+    belongsToBranches?: string[];
+    // ✅ 新增：此 node 创建的 branch（分叉点标识）
+    createdBranch?: string;
 }
 
 export class FloatingNavPanel {
@@ -40,6 +51,7 @@ export class FloatingNavPanel {
     private panel: HTMLElement | null = null;
     private isVisible: boolean = false;
     private items: ChatNavItem[] = [];
+    private branches: BranchItem[] = [];  // ✅ 新增
     private currentIndex: number = -1;
     private options: FloatingNavPanelOptions;
     private lastSelectedIndex: number = -1;
@@ -75,6 +87,16 @@ export class FloatingNavPanel {
         const currentIds = new Set(this.items.map(i => i.id));
         this.selectedIds = new Set([...this.selectedIds].filter(id => currentIds.has(id)));
 
+        if (this.isVisible) {
+            this.render();
+        }
+    }
+
+    /**
+ * ✅ 新增：更新分支数据
+ */
+    public updateBranches(branches: BranchItem[]): void {
+        this.branches = branches;
         if (this.isVisible) {
             this.render();
         }
@@ -142,6 +164,9 @@ export class FloatingNavPanel {
             ? FloatingNavPanelTemplates.renderEmpty()
             : (this.viewMode === 'list' ? this.renderList() : this.renderTreeView());
 
+        // ✅ 新增：生成 branch bar HTML
+        const branchBarHtml = FloatingNavPanelTemplates.renderBranchBar(this.branches);
+
         this.panel.innerHTML = FloatingNavPanelTemplates.renderPanel(
             currentUserIdx,
             totalUsers,
@@ -149,7 +174,8 @@ export class FloatingNavPanel {
             isAllSelected,
             this.selectedIds.size,
             this.viewMode,
-            listContent
+            listContent,
+            branchBarHtml   // ✅ 新增参数
         );
 
         this.container.appendChild(this.panel);
@@ -224,12 +250,25 @@ export class FloatingNavPanel {
             });
         });
 
+        // ✅ 新增：绑定 branch bar 事件
+        this.bindBranchBarEvents();
+
         const items = this.panel.querySelectorAll<HTMLElement>('.llm-nav-item');
         items.forEach(item => {
             item.addEventListener('click', (e: MouseEvent) => {
                 const target = e.target as HTMLElement;
                 const id = item.dataset.id!;
                 const idx = parseInt(item.dataset.index!);
+
+                // ✅ 新增：点击 node 上的 branch 标签 → 切换到该 branch
+                const branchTag = target.closest('[data-branch-tag]') as HTMLElement;
+                if (branchTag) {
+                    const branchName = branchTag.dataset.branchTag;
+                    if (branchName) {
+                        this.options.onSwitchBranchByName?.(branchName);
+                    }
+                    return;
+                }
 
                 const branchBtn = target.closest('[data-action]') as HTMLElement;
                 if (branchBtn && item.contains(branchBtn)) {
@@ -260,6 +299,175 @@ export class FloatingNavPanel {
                 this.updateHighlight();
                 this.options.onNavigate(id);
             });
+        });
+    }
+
+    /**
+     * ✅ 新增：绑定 Branch Bar 所有事件
+     */
+    private bindBranchBarEvents(): void {
+        if (!this.panel) return;
+
+        const branchBar = this.panel.querySelector('.llm-nav-panel__branch-bar');
+        if (!branchBar) return;
+
+        // 1. Dropdown 展开/收起
+        const selector = branchBar.querySelector('[data-branch-toggle]');
+        const dropdown = branchBar.querySelector('.llm-nav-panel__branch-dropdown') as HTMLElement;
+
+        if (selector && dropdown) {
+            selector.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const isOpen = dropdown.style.display !== 'none';
+                if (isOpen) {
+                    this.closeBranchDropdown(dropdown);
+                } else {
+                    this.openBranchDropdown(dropdown);
+                }
+            });
+        }
+
+        // 2. 创建分支按钮
+        branchBar.querySelector('[data-branch-action="create"]')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            // 从当前选中的 node 创建分支
+            const sourceId = this.currentIndex >= 0
+                ? this.items[this.currentIndex].id
+                : this.items[this.items.length - 1]?.id;
+            if (sourceId) {
+                this.options.onCreateBranch?.(sourceId);
+            }
+        });
+    }
+
+    /**
+     * ✅ 新增：打开 Branch Dropdown 并绑定项事件
+     */
+    private openBranchDropdown(dropdown: HTMLElement): void {
+        dropdown.innerHTML = FloatingNavPanelTemplates.renderBranchDropdownItems(this.branches);
+        dropdown.style.display = 'block';
+
+        // 更新 chevron 方向
+        const chevron = this.panel?.querySelector('.llm-nav-panel__branch-chevron');
+        if (chevron) {
+            chevron.innerHTML = '<polyline points="18 15 12 9 6 15"></polyline>';
+        }
+
+        // 绑定每项点击 → 切换分支
+        dropdown.querySelectorAll('.llm-nav-panel__branch-item').forEach(item => {
+            item.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const el = e.currentTarget as HTMLElement;
+                if (el.classList.contains('llm-nav-panel__branch-item--current')) return;
+
+                const branchName = el.dataset.branchName;
+                if (branchName) {
+                    this.closeBranchDropdown(dropdown);
+                    this.options.onSwitchBranchByName?.(branchName);
+                }
+            });
+
+            // Rename 按钮
+            item.querySelector('[data-branch-item-action="rename"]')?.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const branchItem = (e.currentTarget as HTMLElement).closest('.llm-nav-panel__branch-item') as HTMLElement;
+                const oldName = branchItem?.dataset.branchName;
+                if (oldName) {
+                    this.startBranchRename(branchItem, oldName);
+                }
+            });
+
+            // Delete 按钮
+            item.querySelector('[data-branch-item-action="delete"]')?.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const branchItem = (e.currentTarget as HTMLElement).closest('.llm-nav-panel__branch-item') as HTMLElement;
+                const branchName = branchItem?.dataset.branchName;
+                if (branchName) {
+                    this.closeBranchDropdown(dropdown);
+                    this.options.onDeleteBranch?.(branchName);
+                }
+            });
+        });
+
+        // 点击面板其他区域关闭 dropdown
+        const closeOnOutsideClick = (e: MouseEvent) => {
+            const wrapper = this.panel?.querySelector('.llm-nav-panel__branch-selector-wrapper');
+            if (wrapper && !wrapper.contains(e.target as Node)) {
+                this.closeBranchDropdown(dropdown);
+                this.panel?.removeEventListener('click', closeOnOutsideClick);
+            }
+        };
+        // 延迟绑定，避免当前 click 事件冒泡立即触发
+        setTimeout(() => {
+            this.panel?.addEventListener('click', closeOnOutsideClick);
+        }, 0);
+    }
+
+    /**
+     * ✅ 新增：关闭 Branch Dropdown
+     */
+    private closeBranchDropdown(dropdown: HTMLElement): void {
+        dropdown.style.display = 'none';
+        dropdown.innerHTML = '';
+
+        const chevron = this.panel?.querySelector('.llm-nav-panel__branch-chevron');
+        if (chevron) {
+            chevron.innerHTML = '<polyline points="6 9 12 15 18 9"></polyline>';
+        }
+    }
+
+    /**
+     * ✅ 新增：内联重命名分支
+     */
+    private startBranchRename(branchItemEl: HTMLElement, oldName: string): void {
+        const nameEl = branchItemEl.querySelector('.llm-nav-panel__branch-item-name') as HTMLElement;
+        const actionsEl = branchItemEl.querySelector('.llm-nav-panel__branch-item-actions') as HTMLElement;
+        if (!nameEl) return;
+
+        // 隐藏原有内容，插入输入框
+        const originalDisplay = actionsEl?.style.display;
+        if (actionsEl) actionsEl.style.display = 'none';
+
+        const renameHtml = FloatingNavPanelTemplates.renderBranchRenameInput(oldName);
+        nameEl.outerHTML = renameHtml;
+
+        const renameContainer = branchItemEl.querySelector('.llm-nav-panel__branch-rename') as HTMLElement;
+        const input = renameContainer?.querySelector('.llm-nav-panel__branch-rename-input') as HTMLInputElement;
+        if (!input) return;
+
+        input.focus();
+        input.select();
+
+        const confirm = () => {
+            const newName = input.value.trim();
+            if (newName && newName !== oldName) {
+                this.options.onRenameBranch?.(oldName, newName);
+            }
+            // dropdown 会因为 branch 数据更新而重新渲染，不需要手动恢复 DOM
+        };
+
+        const cancel = () => {
+            // 恢复原始 DOM：直接重新渲染 dropdown
+            const dropdown = this.panel?.querySelector('.llm-nav-panel__branch-dropdown') as HTMLElement;
+            if (dropdown && dropdown.style.display !== 'none') {
+                dropdown.innerHTML = FloatingNavPanelTemplates.renderBranchDropdownItems(this.branches);
+                this.openBranchDropdown(dropdown);
+            }
+        };
+
+        renameContainer.querySelector('[data-rename-action="confirm"]')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            confirm();
+        });
+
+        renameContainer.querySelector('[data-rename-action="cancel"]')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            cancel();
+        });
+
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.stopPropagation(); confirm(); }
+            else if (e.key === 'Escape') { e.stopPropagation(); cancel(); }
         });
     }
 
@@ -553,5 +761,6 @@ export class FloatingNavPanel {
     public destroy(): void {
         this.hide();
         this.items = [];
+        this.branches = [];  // ✅ 新增
     }
 }
