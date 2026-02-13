@@ -188,19 +188,27 @@ export class SessionManager {
     }
 
     // ================================================================
-    // 操作前检查（统一）
+    // 操作前检查
     // ================================================================
 
-    private checkNotGenerating(action: string): { allowed: boolean; reason?: string } {
+    private ensureNotGenerating(action: string): void {
         if (this.isGenerating()) {
-            return { allowed: false, reason: `Cannot ${action} while generating` };
+            throw new EngineError(
+                EngineErrorCode.SESSION_BUSY,
+                `Cannot ${action} while generating`
+            );
         }
-        return { allowed: true };
     }
 
-    canDeleteMessage(_id: string) { return this.checkNotGenerating('delete'); }
-    canRetry(_id: string) { return this.checkNotGenerating('retry'); }
-    canEdit(_id: string) { return this.checkNotGenerating('edit'); }
+    canDeleteMessage(_id: string) {
+        return { allowed: !this.isGenerating(), reason: this.isGenerating() ? 'Generating' : undefined };
+    }
+    canRetry(_id: string) {
+        return { allowed: !this.isGenerating(), reason: this.isGenerating() ? 'Generating' : undefined };
+    }
+    canEdit(_id: string) {
+        return { allowed: !this.isGenerating(), reason: this.isGenerating() ? 'Generating' : undefined };
+    }
 
     // ================================================================
     // 事件
@@ -390,9 +398,10 @@ export class SessionManager {
         state.updateMessageContent(messageId, newContent);
         const session = state.findSessionById(messageId);
         if (session?.persistedNodeId) {
-            await this.engine.updateNode(sessionId, session.persistedNodeId, {
-                content: newContent,
-            });
+            // 委托给 engine 层的 editMessage（会自动保留旧路径）
+            await this.engine.editMessage(
+                nodeId, sessionId, session.persistedNodeId, newContent
+            );
         }
 
         this.eventBus.emitSession(sessionId, {
@@ -401,8 +410,8 @@ export class SessionManager {
         });
 
         if (autoRerun && session?.role === 'user') {
-            const assistantIds = this.collectAssistantIdsAfterUser(state, messageId);
-            await this.executeDelete(nodeId, sessionId, state, assistantIds);
+            // 重新加载数据（editMessage 可能创建了新 branch）
+            await this.reloadSessionData(nodeId, sessionId, state);
 
             await this.resubmitFromUser(session, 'default', runtime);
         }
@@ -487,7 +496,7 @@ export class SessionManager {
         fallbackAgentId?: string,
         preserveCurrent: boolean = true
     ): Promise<void> {
-        const { sessionId, state, runtime } = this.ensureBound();
+        const { sessionId, state, runtime, nodeId } = this.ensureBound();
 
         const userMessage = state.findUserMessageBefore(assistantId);
         if (!userMessage) {
@@ -507,46 +516,66 @@ export class SessionManager {
             return;
         }
 
-        // preserveCurrent === true：创建分支
+        // preserveCurrent === true：创建持久化 branch
+        if (!userMessage.persistedNodeId) {
+            throw new EngineError(
+                EngineErrorCode.SESSION_INVALID,
+                'User message not persisted, cannot create branch'
+            );
+        }
+
+        // 在 engine 层创建真正的 branch（与原 assistant 并列的新路径）
+        const newBranchNodeId = await this.engine.createBranch(
+            nodeId,
+            sessionId,
+            userMessage.persistedNodeId,
+            { createdFrom: 'retry', copyContent: true }
+        );
+
+        // 重新加载会话数据（branch 结构已变）
+        await this.reloadSessionData(nodeId, sessionId, state);
+
+        // 计算兄弟信息（从持久化获取真实数据）
         let siblingCount = 1;
         let siblingIndex = 0;
 
-        if (currentAssistant) {
-            siblingCount = (currentAssistant.siblingCount || 1) + 1;
-            siblingIndex = siblingCount - 1;
-
-            currentAssistant.siblingCount = siblingCount;
-            if (currentAssistant.executionRoot) {
-                currentAssistant.executionRoot.data.metaInfo = {
-                    ...currentAssistant.executionRoot.data.metaInfo,
-                    siblingIndex: currentAssistant.siblingIndex || 0,
-                    siblingCount,
-                };
-            }
-            if (currentAssistant.persistedNodeId) {
-                await this.engine.updateNode(sessionId, currentAssistant.persistedNodeId, {
-                    meta: {
-                        siblingIndex: currentAssistant.siblingIndex || 0,
-                        siblingCount,
-                    },
-                });
-            }
-
-            this.eventBus.emitSession(sessionId, {
-                type: 'sibling_switch',
-                payload: {
-                    sessionId: assistantId,
-                    newIndex: currentAssistant.siblingIndex || 0,
-                    total: siblingCount,
-                },
-            });
+        try {
+            const siblings = await this.engine.getNodeSiblings(
+                sessionId, newBranchNodeId
+            );
+            siblingCount = siblings.length;
+            siblingIndex = siblings.findIndex(s => s.id === newBranchNodeId);
+            if (siblingIndex === -1) siblingIndex = siblingCount - 1;
+        } catch (e) {
+            log.warn('Failed to get sibling info for retry', { error: e });
         }
 
-        await this.resubmitFromUser(userMessage, resolvedAgentId, runtime, {
-            siblingIndex,
-            siblingCount,
-            parentAssistantId: assistantId,
+        this.eventBus.emitSession(sessionId, {
+            type: 'branch_created',
+            payload: {
+                sourceId: assistantId,
+                newId: newBranchNodeId,
+            },
         });
+
+        // 在新 branch 上提交执行（skipUserMessage 因为 createBranch 已复制了用户消息）
+        await this.taskRunner.submit(
+            {
+                sessionId,
+                nodeId,
+                text: userMessage.content || '',
+                files: userMessage.files || [],
+                agentId: resolvedAgentId,
+                skipUserMessage: true,
+                parentUserNodeId: newBranchNodeId,
+                branchInfo: {
+                    siblingIndex,
+                    siblingCount,
+                    parentAssistantId: assistantId,
+                },
+            },
+            runtime
+        );
     }
 
     async resendUserMessage(
@@ -578,40 +607,10 @@ export class SessionManager {
     // 兄弟节点 / 分支操作
     // ================================================================
 
-    async getSiblings(messageId: string): Promise<SessionGroup[]> {
-        const { sessionId, state } = this.ensureBound();
-        const session = state.findSessionById(messageId);
-        if (!session?.persistedNodeId) return session ? [session] : [];
-
-        try {
-            const siblings = await this.engine.getNodeSiblings(
-                sessionId, session.persistedNodeId
-            );
-            return siblings
-                .map((chatNode, index) => {
-                    const converted = Converters.chatNodeToSessionGroup(chatNode);
-                    if (converted) {
-                        converted.siblingIndex = index;
-                        converted.siblingCount = siblings.length;
-                    }
-                    return converted;
-                })
-                .filter(Boolean) as SessionGroup[];
-        } catch (e) {
-            log.error('getSiblings failed', { error: e });
-            return session ? [session] : [];
-        }
-    }
-
     async switchToSibling(messageId: string, siblingIndex: number): Promise<void> {
         const { sessionId, nodeId, state } = this.ensureBound();
-        // ✅ 新增：生成中禁止操作
-        if (this.isGenerating()) {
-            throw new EngineError(
-                EngineErrorCode.SESSION_INVALID,
-                'Cannot switch sibling while generating'
-            );
-        }
+        this.ensureNotGenerating('switch sibling');
+
         const session = state.findSessionById(messageId);
         if (!session?.persistedNodeId) {
             throw new EngineError(EngineErrorCode.SESSION_INVALID, 'Message not found');
@@ -622,7 +621,21 @@ export class SessionManager {
             throw new EngineError(EngineErrorCode.SESSION_INVALID, 'Invalid sibling index');
         }
 
-        await this.engine.updateManifestHead(nodeId, sessionId, siblings[siblingIndex].id);
+        const targetNodeId = siblings[siblingIndex].id;
+
+        // 查找目标节点所属的 branch
+        const targetBranch = await this.engine.findBranchForNode(
+            nodeId, sessionId, targetNodeId
+        );
+
+        if (targetBranch) {
+            // 目标节点已属于某个 branch → 切换到该 branch
+            await this.engine.switchBranch(nodeId, sessionId, targetBranch);
+        } else {
+            // 目标节点不属于任何 branch → 注册为新 branch
+            await this.engine.registerPathAsBranch(nodeId, sessionId, targetNodeId);
+        }
+
         await this.reloadSessionData(nodeId, sessionId, state);
 
         this.eventBus.emitSession(sessionId, {
@@ -631,19 +644,17 @@ export class SessionManager {
         });
     }
 
+
+    // ================================================================
+    // 分支操作
+    // ================================================================
+
     async createBranch(
         branchNodeId: string,
         options?: { name?: string; copyContent?: boolean }
     ): Promise<string> {
         const { sessionId, nodeId, state } = this.ensureBound();
-
-        // ✅ 新增：生成中禁止操作
-        if (this.isGenerating()) {
-            throw new EngineError(
-                EngineErrorCode.SESSION_INVALID,
-                'Cannot create branch while generating'
-            );
-        }
+        this.ensureNotGenerating('create branch');
 
         const session = state.findSessionById(branchNodeId);
         if (!session?.persistedNodeId) {
@@ -668,6 +679,38 @@ export class SessionManager {
         return newNodeId;
     }
 
+    /**
+     * 按分支名切换当前 branch
+     * 更新 manifest 的 current_branch 和 current_head，重新加载消息
+     */
+    async switchBranch(branchName: string): Promise<void> {
+        const { sessionId, nodeId, state } = this.ensureBound();
+        this.ensureNotGenerating('switch branch');
+
+        const manifest = await this.engine.getManifest(nodeId);
+        if (!manifest.branches[branchName]) {
+            throw new EngineError(
+                EngineErrorCode.SESSION_INVALID,
+                `Branch not found: ${branchName}`
+            );
+        }
+
+        if (manifest.current_branch === branchName) {
+            return; // 已经在该 branch 上，无需操作
+        }
+
+        await this.engine.switchBranch(nodeId, sessionId, branchName);
+        await this.reloadSessionData(nodeId, sessionId, state);
+
+        this.eventBus.emitSession(sessionId, {
+            type: 'branch_switched',
+            payload: {
+                fromId: manifest.current_branch,
+                toId: branchName,
+            },
+        });
+    }
+
     async getBranchTree(): Promise<BranchTreeNode> {
         const { sessionId, nodeId } = this.ensureBound();
         return this.engine.getBranchTree(sessionId, nodeId);
@@ -686,23 +729,15 @@ export class SessionManager {
 
         await this.engine.renameBranch(nodeId, sessionId, oldName, newName);
 
-        const chatNodeId = manifest.branches[oldName];
-
         this.eventBus.emitSession(sessionId, {
             type: 'branch_renamed',
-            payload: { nodeId: chatNodeId, newName },
+            payload: { nodeId: manifest.branches[oldName], newName },
         });
     }
 
     async deleteBranch(branchName: string, cascade: boolean = true): Promise<void> {
         const { sessionId, nodeId, state } = this.ensureBound();
-
-        if (this.isGenerating()) {
-            throw new EngineError(
-                EngineErrorCode.SESSION_INVALID,
-                'Cannot delete branch while generating'
-            );
-        }
+        this.ensureNotGenerating('delete branch');
 
         const manifest = await this.engine.getManifest(nodeId);
         if (Object.keys(manifest.branches).length <= 1) {
@@ -757,6 +792,30 @@ export class SessionManager {
             .filter(Boolean) as SessionGroup[];
     }
 
+    async getSiblings(messageId: string): Promise<SessionGroup[]> {
+        const { sessionId, state } = this.ensureBound();
+        const session = state.findSessionById(messageId);
+        if (!session?.persistedNodeId) return session ? [session] : [];
+
+        try {
+            const siblings = await this.engine.getNodeSiblings(
+                sessionId, session.persistedNodeId
+            );
+            return siblings
+                .map((chatNode, index) => {
+                    const converted = Converters.chatNodeToSessionGroup(chatNode);
+                    if (converted) {
+                        converted.siblingIndex = index;
+                        converted.siblingCount = siblings.length;
+                    }
+                    return converted;
+                })
+                .filter(Boolean) as SessionGroup[];
+        } catch (e) {
+            log.error('getSiblings failed', { error: e });
+            return session ? [session] : [];
+        }
+    }
 
     // ================================================================
     // 会话设置
