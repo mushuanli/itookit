@@ -21,6 +21,7 @@ export class BranchManager {
         nodeId: string,
         options?: { newName?: string; compareWith?: string }
     ): Promise<void> {
+        console.log('[BranchManager] Branch action:', action, nodeId, options);
         try {
             switch (action) {
                 case 'create':
@@ -47,19 +48,57 @@ export class BranchManager {
 
     private async createBranch(sourceNodeId: string): Promise<void> {
         const branchName = await this.promptBranchName();
-        if (branchName === null) return;
+        if (branchName === null) return; // 用户取消
 
-        // ✅ SessionManager.createBranch 内部自动：
-        //   1. 持久化创建分支
-        //   2. reloadSessionData
-        //   3. 发送 branch_created 事件
-        await this.sessionManager.createBranch(sourceNodeId, {
+        // ✅ 找到分叉点：如果 sourceNodeId 是 user message，
+        //    则从它之前的最后一条消息分叉（这样新分支不包含这条 user message）
+        const branchPointId = this.findBranchPoint(sourceNodeId);
+
+        const newNodeId = await this.sessionManager.createBranch(branchPointId, {
             name: branchName || undefined,
-            copyContent: true
+            copyContent: true,
         });
 
+        // ✅ 创建后自动切换到新分支
+        await this.sessionManager.navigateToBranch(newNodeId);
+
         Toast.success(`Branch "${branchName || 'Untitled'}" created`);
-        // ✅ 删除：renderFull() —— 事件驱动已处理
+    }
+
+    /**
+     * ✅ 新增：确定分叉点
+     * 
+     * 如果用户在 user message 上点击 "Create Branch"：
+     *   → 分叉点 = 该 user message 之前的最后一条 assistant message
+     *   → 这样新分支停在上一轮对话结束处，等待用户输入新问题
+     * 
+     * 如果用户在 assistant message 上点击 "Create Branch"：
+     *   → 分叉点 = 该 assistant message 本身
+     *   → 新分支包含这条 assistant 回复
+     * 
+     * 如果是第一条 user message（没有前驱）：
+     *   → 使用该 user message 自身作为分叉点（回退到 root）
+     */
+    private findBranchPoint(sourceNodeId: string): string {
+        const sessions = this.sessionManager.getSessions();
+        const sourceIndex = sessions.findIndex(s => s.id === sourceNodeId);
+
+        if (sourceIndex === -1) return sourceNodeId;
+
+        const sourceSession = sessions[sourceIndex];
+
+        // assistant message → 直接用它自己
+        if (sourceSession.role !== 'user') {
+            return sourceNodeId;
+        }
+
+        // user message → 找前一条消息
+        if (sourceIndex > 0) {
+            return sessions[sourceIndex - 1].id;
+        }
+
+        // 第一条 user message，没有前驱 → 用自身
+        return sourceNodeId;
     }
 
     private navigateToBranch(nodeId: string): void {
