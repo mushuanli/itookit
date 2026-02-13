@@ -140,6 +140,13 @@ export class LLMWorkspaceEditor implements IEditor {
             this.emit('ready');
             this.initResolve?.();
         } catch (e: any) {
+            // ✅ 修复：Bind cancelled 是正常的竞争结果，不应视为致命错误
+            if (e.code === 'ABORTED' || e.message?.includes('Bind cancelled')) {
+                console.warn('[LLMWorkspaceEditor] Init aborted (superseded by another session)');
+                this.initResolve?.(); // 静默完成，不抛错
+                return;
+            }
+
             console.error('[LLMWorkspaceEditor] init failed:', e);
             this.initReject?.(e);
             throw e;
@@ -363,7 +370,7 @@ export class LLMWorkspaceEditor implements IEditor {
 
             this.uiUpdater.updateBranchIndicator(
                 this.cachedBranches,
-                (headNodeId) => this.handleBranchAction('select', headNodeId)
+                (branchName) => this.handleSwitchBranchByName(branchName)
             );
         } catch (e) {
             console.warn('[LLMWorkspaceEditor] Failed to refresh branch indicator:', e);
@@ -386,6 +393,19 @@ export class LLMWorkspaceEditor implements IEditor {
     ): Promise<void> {
         console.log('[LLMWorkspaceEditor] handleBranchActionWithRefresh action:', action, nodeId, options);
         await this.branchManager.handleBranchAction(action as any, nodeId, options);
+    }
+
+    /**
+     * ✅ 新增：直接通过 branchName 切换（从下拉菜单触发）
+     */
+    private async handleSwitchBranchByName(branchName: string): Promise<void> {
+        try {
+            await this.sessionManager.switchBranch(branchName);
+            // 事件驱动：switchBranch 内部发 branch_switched → handleSessionEvent 处理 UI
+        } catch (e: any) {
+            console.error('[LLMWorkspaceEditor] Switch branch failed:', e);
+            Toast.error(e.message || 'Failed to switch branch');
+        }
     }
 
     /**
@@ -413,8 +433,8 @@ export class LLMWorkspaceEditor implements IEditor {
 
         if (wrappedIndex === currentIndex) return;
 
-        const targetBranch = this.cachedBranches[wrappedIndex];
-        await this.handleBranchAction('select', targetBranch.headNodeId);
+        // ✅ 直接用 name
+        await this.handleSwitchBranchByName(this.cachedBranches[wrappedIndex].name);
     }
 
     // ================================================================
@@ -796,7 +816,6 @@ export class LLMWorkspaceEditor implements IEditor {
         );
     }
 
-
     // ================================================================
     // 工具方法
     // ================================================================
@@ -885,7 +904,8 @@ export class LLMWorkspaceEditor implements IEditor {
         // ✅ 新增：清理 UIUpdater（含 BranchIndicator）
         this.uiUpdater?.destroy();
 
-        this.sessionManager.destroy();
+        // ✅ 修复：只解绑，不销毁全局单例
+        this.sessionManager.unbindSession();
 
         this.historyView?.destroy();
         this.chatInput?.destroy();
