@@ -1415,19 +1415,9 @@ export class HistoryView {
     /**
      * ✅ 新增：处理分支切换事件
      */
-    private handleBranchSwitched(payload: { fromId: string; toId: string }): void {
-        // 更新激活状态
+    private handleBranchSwitched(_payload: { fromId: string; toId: string }): void {
+        // 切换分支后清空折叠状态，让 renderFull 使用默认折叠策略
         this.collapseStates = {};
-        const fromEl = this.findElementBySessionId(payload.fromId);
-        const toEl = this.findElementBySessionId(payload.toId);
-
-        if (fromEl) {
-            fromEl.classList.remove('is-active-branch');
-        }
-        if (toEl) {
-            toEl.classList.add('is-active-branch');
-            toEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
     }
 
     /**

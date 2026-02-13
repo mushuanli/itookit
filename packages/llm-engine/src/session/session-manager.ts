@@ -17,7 +17,7 @@ import {
 } from '../core/types';
 import { EngineError, EngineErrorCode } from '../core/errors';
 import { ENGINE_DEFAULTS } from '../core/constants';
-import { ILLMSessionEngine, BranchTreeNode, ChatContextItem } from '../persistence/types';
+import { ILLMSessionEngine, BranchTreeNode } from '../persistence/types';
 import { IAgentService } from '../services/agent-service';
 import { SessionState } from './session-state';
 import { SessionEventBus } from './session-event-bus';
@@ -673,78 +673,55 @@ export class SessionManager {
         return this.engine.getBranchTree(sessionId, nodeId);
     }
 
-    async renameBranch(branchNodeId: string, newName: string): Promise<void> {
-        const { sessionId } = this.ensureBound();
-        await this.engine.renameBranch(sessionId, branchNodeId, newName);
+    async renameBranch(oldName: string, newName: string): Promise<void> {
+        const { sessionId, nodeId } = this.ensureBound();
 
-        const state = this.states.get(sessionId);
-        const session = state?.findSessionById(branchNodeId);
-        if (session?.branchInfo) {
-            session.branchInfo.name = newName;
+        const manifest = await this.engine.getManifest(nodeId);
+        if (!manifest.branches[oldName]) {
+            throw new EngineError(
+                EngineErrorCode.SESSION_INVALID,
+                `Branch not found: ${oldName}`
+            );
         }
+
+        await this.engine.renameBranch(nodeId, sessionId, oldName, newName);
+
+        const chatNodeId = manifest.branches[oldName];
 
         this.eventBus.emitSession(sessionId, {
             type: 'branch_renamed',
-            payload: { nodeId: branchNodeId, newName },
+            payload: { nodeId: chatNodeId, newName },
         });
     }
 
-    async deleteBranch(branchNodeId: string, cascade: boolean = false): Promise<void> {
+    async deleteBranch(branchName: string, cascade: boolean = true): Promise<void> {
         const { sessionId, nodeId, state } = this.ensureBound();
 
-        // ✅ 新增：生成中禁止操作
         if (this.isGenerating()) {
             throw new EngineError(
                 EngineErrorCode.SESSION_INVALID,
                 'Cannot delete branch while generating'
             );
         }
+
         const manifest = await this.engine.getManifest(nodeId);
-        if (branchNodeId === manifest.current_head) {
+        if (Object.keys(manifest.branches).length <= 1) {
             throw new EngineError(
                 EngineErrorCode.SESSION_INVALID,
-                'Cannot delete the current active head node.'
+                'Cannot delete the last branch'
             );
         }
 
         const deletedIds = await this.engine.deleteBranch(
-            nodeId, sessionId, branchNodeId, { cascade }
+            nodeId, sessionId, branchName, { cascade }
         );
 
-        if (state) {
-            for (const id of deletedIds) {
-                state.removeMessage(id);
-            }
-        }
+        // 重新加载会话数据（分支结构已变）
+        await this.reloadSessionData(nodeId, sessionId, state);
 
         this.eventBus.emitSession(sessionId, {
             type: 'branch_deleted',
             payload: { deletedIds },
-        });
-    }
-
-    async navigateToBranch(targetNodeId: string): Promise<void> {
-        const { sessionId, nodeId, state } = this.ensureBound();
-
-        // ✅ 新增：生成中禁止操作
-        if (this.isGenerating()) {
-            throw new EngineError(
-                EngineErrorCode.SESSION_INVALID,
-                'Cannot switch branch while generating'
-            );
-        }
-
-        // ✅ 修复：记录当前 head 作为 fromId
-        const manifest = await this.engine.getManifest(nodeId);
-        const fromId = manifest.current_head || '';
-
-        await this.engine.updateManifestHead(nodeId, sessionId, targetNodeId);
-        await this.reloadSessionData(nodeId, sessionId, state);
-
-        console.log(`[navigateToBranch] fromId: ${fromId} toId: ${targetNodeId}`);
-        this.eventBus.emitSession(sessionId, {
-            type: 'branch_switched',
-            payload: { fromId, toId: targetNodeId },
         });
     }
 
