@@ -353,7 +353,7 @@ export class LLMWorkspaceEditor implements IEditor {
     private async refreshBranchIndicator(): Promise<void> {
         try {
             const branches = await this.sessionManager.listBranches();
-
+            console.log('[LLMWorkspaceEditor] refreshBranchIndicator branches:', branches);
             this.cachedBranches = branches.map(b => ({
                 name: b.name,
                 headNodeId: b.headNodeId,
@@ -403,17 +403,13 @@ export class LLMWorkspaceEditor implements IEditor {
         nodeId: string,
         options?: { newName?: string; compareWith?: string }
     ): Promise<void> {
+        console.log('[LLMWorkspaceEditor] handleBranchActionWithRefresh action:', action, nodeId, options);
         await this.branchManager.handleBranchAction(action as any, nodeId, options);
 
         // 影响分支列表的操作 → 刷新指示器
         const branchMutatingActions = new Set(['create', 'delete', 'select', 'rename']);
         if (branchMutatingActions.has(action)) {
             await this.refreshBranchIndicator();
-
-            // create 后给视觉反馈
-            if (action === 'create') {
-                this.uiUpdater.flashBranchIndicator();
-            }
         }
     }
 
@@ -449,6 +445,18 @@ export class LLMWorkspaceEditor implements IEditor {
     // ================================================================
 
     private handleSessionEvent(event: OrchestratorEvent): void {
+        // ✅ 分支切换事件：需要在 historyView.processEvent 之前拦截处理
+        //    因为 navigateToBranch 内部的 reloadSessionData 已经发了
+        //    session_cleared + session_start 序列给 historyView，
+        //    但 branch_switched 事件需要额外处理 indicator 和完整重渲染
+        const branchEvents = new Set([
+            'branch_created',
+            'branch_switched',
+            'branch_deleted',
+            'branch_renamed',
+        ]);
+
+        // 先让 HistoryView 处理所有事件（包括分支事件中的 UI 提示）
         this.historyView.processEvent(event);
 
         if (event.type === 'finished' || event.type === 'session_start') {
@@ -461,21 +469,21 @@ export class LLMWorkspaceEditor implements IEditor {
             this.uiUpdater.updateStatusIndicator('failed');
         }
 
-        // ✅ 分支相关事件 → 刷新指示器
-        const branchEvents = new Set([
-            'branch_created',
-            'branch_switched',
-            'branch_deleted',
-            'branch_renamed',
-        ]);
-
+        // ✅ 分支事件：刷新 indicator + 必要时重渲染 history
         if (branchEvents.has(event.type)) {
-            this.refreshBranchIndicator();
-
-            // 切换事件后重新渲染 history
-            if (event.type === 'branch_switched') {
+            // branch_switched 和 branch_created（因为现在 create 后自动 switch）
+            // 都需要重渲染 history，因为 reloadSessionData 发的
+            // session_cleared + session_start 序列可能不够完整
+            if (event.type === 'branch_switched' || event.type === 'branch_created') {
                 const sessions = this.sessionManager.getSessions();
                 this.historyView.renderFull(sessions);
+                this.historyView.scrollToBottom(true);
+            }
+
+            this.refreshBranchIndicator();
+
+            if (event.type === 'branch_created' || event.type === 'branch_switched') {
+                this.uiUpdater.flashBranchIndicator();
             }
         }
     }
