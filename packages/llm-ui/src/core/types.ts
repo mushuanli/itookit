@@ -33,7 +33,6 @@ export interface BranchItem {
 /** 分支操作类型 */
 export type BranchAction =
     | 'create'
-    | 'navigate'
     | 'rename'
     | 'delete'
     | 'select';
