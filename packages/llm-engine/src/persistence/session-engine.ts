@@ -437,6 +437,185 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
   }
 
   // ============================================================
+  // Branch 路径辅助
+  // ============================================================
+
+  /**
+   * 收集从 nodeId 到 root 的所有祖先 ID（含自身）
+   */
+  private async collectAncestorIds(
+    sessionId: string,
+    nodeId: string,
+    collected: Set<string>
+  ): Promise<void> {
+    let currentId: string | null = nodeId;
+    const visited = new Set<string>();
+
+    while (currentId) {
+      if (visited.has(currentId)) break;
+      visited.add(currentId);
+      collected.add(currentId);
+
+      const node: ChatNode | null = await this.readJson<ChatNode>(
+        this.getNodePath(sessionId, currentId)
+      );
+      if (!node) break;
+      currentId = node.parent_id;
+    }
+  }
+
+  /**
+   * 收集从 headNodeId 向上直到遇到受保护节点的独占链
+   */
+  private async collectExclusiveChain(
+    sessionId: string,
+    headNodeId: string,
+    protectedNodeIds: Set<string>
+  ): Promise<string[]> {
+    const chain: string[] = [];
+    let currentId: string | null = headNodeId;
+    const visited = new Set<string>();
+
+    while (currentId) {
+      if (visited.has(currentId)) break;
+      visited.add(currentId);
+      if (protectedNodeIds.has(currentId)) break;
+
+      chain.push(currentId);
+
+      const node: ChatNode | null = await this.readJson<ChatNode>(
+        this.getNodePath(sessionId, currentId)
+      );
+      if (!node) break;
+      currentId = node.parent_id;
+    }
+    return chain;
+  }
+
+  /**
+   * 递归软删除，跳过受保护节点
+   */
+  private async softDeleteExclusive(
+    sessionId: string,
+    nodeId: string,
+    protectedNodeIds: Set<string>,
+    deletedIds: string[]
+  ): Promise<void> {
+    if (protectedNodeIds.has(nodeId)) return;
+
+    const path = this.getNodePath(sessionId, nodeId);
+    const node = await this.readJson<ChatNode>(path);
+    if (!node || node.status === 'deleted') return;
+
+    for (const childId of node.children_ids) {
+      await this.softDeleteExclusive(sessionId, childId, protectedNodeIds, deletedIds);
+    }
+
+    node.status = 'deleted';
+    await this.writeJson(path, node);
+    deletedIds.push(nodeId);
+  }
+
+  /**
+   * 构建 branch head-to-root 路径的 nodeId 集合映射
+   * 返回 Map<nodeId, Set<branchName>>
+   */
+  private async buildBranchMembership(
+    sessionId: string,
+    manifest: ChatManifest
+  ): Promise<Map<string, Set<string>>> {
+    const membership = new Map<string, Set<string>>();
+
+    for (const [branchName, headId] of Object.entries(manifest.branches)) {
+      let currentId: string | null = headId;
+      const visited = new Set<string>();
+
+      while (currentId) {
+        if (visited.has(currentId)) break;
+        visited.add(currentId);
+
+        if (!membership.has(currentId)) {
+          membership.set(currentId, new Set());
+        }
+        membership.get(currentId)!.add(branchName);
+
+        const node: ChatNode | null = await this.readJson<ChatNode>(
+          this.getNodePath(sessionId, currentId)
+        );
+        if (!node) break;
+        currentId = node.parent_id;
+      }
+    }
+
+    return membership;
+  }
+
+  /**
+   * 收集从 current_head 到 root 的活跃路径 ID 集合
+   */
+  private async collectActivePathIds(
+    sessionId: string,
+    headNodeId: string
+  ): Promise<Set<string>> {
+    const pathIds = new Set<string>();
+    let currentId: string | null = headNodeId;
+    const visited = new Set<string>();
+
+    while (currentId) {
+      if (visited.has(currentId)) break;
+      visited.add(currentId);
+      pathIds.add(currentId);
+
+      const node: ChatNode | null = await this.readJson<ChatNode>(
+        this.getNodePath(sessionId, currentId)
+      );
+      if (!node) break;
+      currentId = node.parent_id;
+    }
+    return pathIds;
+  }
+
+  /**
+   * 检查 targetNodeId 是否在某个 branch 的 head-to-root 路径上
+   */
+  private async isNodeOnBranchPath(
+    sessionId: string,
+    branchHeadId: string,
+    targetNodeId: string
+  ): Promise<boolean> {
+    let currentId: string | null = branchHeadId;
+    const visited = new Set<string>();
+
+    while (currentId) {
+      if (currentId === targetNodeId) return true;
+      if (visited.has(currentId)) break;
+      visited.add(currentId);
+
+      const node: ChatNode | null = await this.readJson<ChatNode>(
+        this.getNodePath(sessionId, currentId)
+      );
+      if (!node) break;
+      currentId = node.parent_id;
+    }
+    return false;
+  }
+
+  // ============================================================
+  // 自动分支名生成
+  // ============================================================
+
+  private generateBranchName(manifest: ChatManifest): string {
+    const existingNames = new Set(Object.keys(manifest.branches));
+    let index = 1;
+    let name: string;
+    do {
+      name = `branch-${index}`;
+      index++;
+    } while (existingNames.has(name));
+    return name;
+  }
+
+  // ============================================================
   // ILLMSessionEngine 核心实现
   // ============================================================
 
@@ -769,6 +948,26 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
       );
       if (!originalNode) throw new Error("Original node not found");
 
+      // 1. 旧路径有子节点且未被其他 branch 保护 → 自动保留
+      const hasChildren = originalNode.children_ids.length > 0;
+
+      if (hasChildren) {
+        let isProtectedByOtherBranch = false;
+        for (const [name, headId] of Object.entries(manifest.branches)) {
+          if (name === manifest.current_branch) continue;
+          if (await this.isNodeOnBranchPath(sessionId, headId, originalNodeId)) {
+            isProtectedByOtherBranch = true;
+            break;
+          }
+        }
+
+        if (!isProtectedByOtherBranch) {
+          const preservedBranchName = this.generateBranchName(manifest);
+          manifest.branches[preservedBranchName] = manifest.current_head;
+        }
+      }
+
+      // 2. 创建并列新节点
       const newNodeId = generateUUID();
       const now = new Date().toISOString();
 
@@ -777,12 +976,18 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
         id: newNodeId,
         content: newContent,
         created_at: now,
-        children_ids: []
+        children_ids: [],
+        meta: {
+          ...originalNode.meta,
+          branchCreatedFrom: 'edit',
+          branchCreatedAt: now,
+        }
       };
 
       await this.writeJson(this.getNodePath(sessionId, newNodeId), newNode);
       await this.appendToParentChildren(sessionId, newNode.parent_id, newNodeId);
 
+      // 3. 当前 branch 指向新节点
       manifest.current_head = newNodeId;
       manifest.branches[manifest.current_branch] = newNodeId;
       manifest.updated_at = now;
@@ -819,42 +1024,37 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
       // 生成分支名称
       const branchName = options?.name || this.generateBranchName(manifest);
 
-      const branchMeta = {
-        branchMetadata: {
-          branchName: branchName,  // ← 使用确定的分支名
-          createdFrom: options?.createdFrom || 'manual',
-          createdAt: now,
-        }
+      // 统一策略：新节点与 sourceNode 并列（共享 parent）
+      // 无论 sourceNode 是什么角色，分支的含义都是"从同一个分叉点出发的另一条路径"
+      const newNode: ChatNode = {
+        id: newNodeId,
+        type: 'message',
+        role: sourceNode.role,
+        content: options?.copyContent ? sourceNode.content : '',
+        created_at: now,
+        parent_id: sourceNode.parent_id,
+        children_ids: [],
+        status: 'active',
+        meta: {
+          ...(options?.copyContent && sourceNode.meta?.files
+            ? { files: sourceNode.meta.files }
+            : {}),
+          branchCreatedFrom: options?.createdFrom || 'manual',
+          branchCreatedAt: now,
+        },
       };
-
-      const newNode = this.buildBranchNode(
-        sourceNode, newNodeId, now, branchMeta, options
-      );
 
       await this.writeJson(this.getNodePath(sessionId, newNodeId), newNode);
 
-      // 更新父节点的 children_ids
-      const parentId = newNode.parent_id;
-      if (parentId) {
-        if (parentId === sourceMessageId) {
-          // assistant 场景：新节点挂在 sourceNode 下
-          if (!sourceNode.children_ids.includes(newNodeId)) {
-            sourceNode.children_ids.push(newNodeId);
-            await this.writeJson(
-              this.getNodePath(sessionId, sourceMessageId),
-              sourceNode
-            );
-          }
-        } else {
-          // user/system 场景：新节点与 sourceNode 并列
-          await this.appendToParentChildren(sessionId, parentId, newNodeId);
-        }
+      // 挂到父节点的 children_ids
+      if (newNode.parent_id) {
+        await this.appendToParentChildren(sessionId, newNode.parent_id, newNodeId);
       }
 
-      // ✅ 修复：创建新的分支条目，而不是覆盖当前分支
-      manifest.branches[branchName] = newNodeId;       // 新分支指向新节点
-      manifest.current_branch = branchName;             // 切换到新分支
-      manifest.current_head = newNodeId;                // 更新 head
+      // 注册新 branch，切换过去
+      manifest.branches[branchName] = newNodeId;
+      manifest.current_branch = branchName;
+      manifest.current_head = newNodeId;
       manifest.updated_at = now;
       await this.engine.writeContent(nodeId, JSON.stringify(manifest, null, 2));
 
@@ -862,63 +1062,109 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
     });
   }
 
+  async switchBranch(nodeId: string, sessionId: string, branchName: string): Promise<void> {
+    return this.lockManager.acquire(`session:${sessionId}`, async () => {
+      const manifest = await this.getManifest(nodeId);
+      if (!manifest.branches[branchName]) throw new Error("Branch not found");
+
+      manifest.current_branch = branchName;
+      manifest.current_head = manifest.branches[branchName];
+      manifest.updated_at = new Date().toISOString();
+
+      await this.engine.writeContent(nodeId, JSON.stringify(manifest, null, 2));
+    });
+  }
+
+  // ============================================================
+  // 🔴 修复：findBranchForNode — 查找节点所属 branch
+  // ============================================================
   /**
- * 生成唯一的分支名称
- */
-  private generateBranchName(manifest: ChatManifest): string {
-    const existingNames = new Set(Object.keys(manifest.branches));
-    let index = 1;
-    let name: string;
-    do {
-      name = `branch-${index}`;
-      index++;
-    } while (existingNames.has(name));
-    return name;
+   * 将已存在的节点路径注册为新 branch（不创建新节点）
+   * 从 targetNodeId 向下找到最深叶子作为 branch head
+   */
+  async registerPathAsBranch(
+    nodeId: string,
+    sessionId: string,
+    targetNodeId: string,
+    branchName?: string
+  ): Promise<string> {
+    return this.lockManager.acquire(`session:${sessionId}`, async () => {
+      const manifest = await this.getManifest(nodeId);
+      const name = branchName || this.generateBranchName(manifest);
+
+      // 从 targetNodeId 向下找最深的 active 叶子
+      const leafId = await this.findDeepestActiveLeaf(sessionId, targetNodeId);
+
+      manifest.branches[name] = leafId;
+      manifest.current_branch = name;
+      manifest.current_head = leafId;
+      manifest.updated_at = new Date().toISOString();
+
+      await this.engine.writeContent(nodeId, JSON.stringify(manifest, null, 2));
+      return name;
+    });
   }
 
   /**
-   * 根据源节点角色构建分支节点
+   * 从指定节点向下找最深的 active 叶子节点
    */
-  private buildBranchNode(
-    sourceNode: ChatNode,
-    newNodeId: string,
-    now: string,
-    branchMeta: Record<string, any>,
-    options?: { copyContent?: boolean }
-  ): ChatNode {
-    if (sourceNode.role === 'assistant') {
-      // Assistant：创建子用户节点（下一轮分支入口）
-      return {
-        id: newNodeId,
-        type: 'message',
-        role: 'user',
-        content: '',
-        created_at: now,
-        parent_id: sourceNode.id, // 挂在 assistant 下
-        children_ids: [],
-        status: 'active',
-        meta: branchMeta,
-      };
+  private async findDeepestActiveLeaf(
+    sessionId: string,
+    nodeId: string
+  ): Promise<string> {
+    let currentId = nodeId;
+    const visited = new Set<string>();
+
+    while (true) {
+      if (visited.has(currentId)) break;
+      visited.add(currentId);
+
+      const node = await this.readJson<ChatNode>(
+        this.getNodePath(sessionId, currentId)
+      );
+      if (!node) break;
+
+      // 找第一个 active 子节点
+      let foundChild = false;
+      for (const childId of node.children_ids) {
+        const child = await this.readJson<ChatNode>(
+          this.getNodePath(sessionId, childId)
+        );
+        if (child && child.status === 'active') {
+          currentId = childId;
+          foundChild = true;
+          break;
+        }
+      }
+
+      if (!foundChild) break;
     }
 
-    // User / System：创建并列兄弟节点
-    return {
-      id: newNodeId,
-      type: 'message',
-      role: sourceNode.role === 'user' ? 'user' : sourceNode.role,
-      content: options?.copyContent ? sourceNode.content : '',
-      created_at: now,
-      parent_id: sourceNode.parent_id, // 与源节点并列
-      children_ids: [],
-      status: 'active',
-      meta: {
-        ...branchMeta,
-        ...(options?.copyContent && sourceNode.role === 'user'
-          ? { files: sourceNode.meta?.files }
-          : {}
-        ),
-      },
-    };
+    return currentId;
+  }
+
+  async findBranchForNode(
+    nodeId: string,
+    sessionId: string,
+    targetNodeId: string
+  ): Promise<string | null> {
+    const manifest = await this.getManifest(nodeId);
+    const matchingBranches: string[] = [];
+
+    for (const [branchName, headId] of Object.entries(manifest.branches)) {
+      if (await this.isNodeOnBranchPath(sessionId, headId, targetNodeId)) {
+        matchingBranches.push(branchName);
+      }
+    }
+
+    if (matchingBranches.length === 0) return null;
+
+    // 优先返回 current_branch
+    if (matchingBranches.includes(manifest.current_branch)) {
+      return manifest.current_branch;
+    }
+
+    return matchingBranches[0];
   }
 
   async getBranchTree(
@@ -928,13 +1174,28 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
   ): Promise<BranchTreeNode> {
     const manifest = await this.getManifest(nodeId);
     const root = rootNodeId || manifest.root_id;
-    return this.buildBranchTreeRecursive(sessionId, root, manifest.current_head);
+
+    // 预计算：活跃路径 + branch 归属
+    const activePathIds = await this.collectActivePathIds(sessionId, manifest.current_head);
+    const branchMembership = await this.buildBranchMembership(sessionId, manifest);
+
+    // 构建 head 反查表
+    const headToBranch = new Map<string, string>();
+    for (const [name, headId] of Object.entries(manifest.branches)) {
+      headToBranch.set(headId, name);
+    }
+
+    return this.buildBranchTreeRecursive(
+      sessionId, root, activePathIds, branchMembership, headToBranch
+    );
   }
 
   private async buildBranchTreeRecursive(
     sessionId: string,
     nodeId: string,
-    activeNodeId: string
+    activePathIds: Set<string>,
+    branchMembership: Map<string, Set<string>>,
+    headToBranch: Map<string, string>
   ): Promise<BranchTreeNode> {
     const node = await this.readJson<ChatNode>(this.getNodePath(sessionId, nodeId));
     if (!node) throw new Error(`Node ${nodeId} not found`);
@@ -948,27 +1209,32 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
 
       try {
         children.push(
-          await this.buildBranchTreeRecursive(sessionId, childId, activeNodeId)
+          await this.buildBranchTreeRecursive(
+            sessionId, childId, activePathIds, branchMembership, headToBranch
+          )
         );
       } catch (e) {
         log.warn('Failed to build branch tree child', { childId, error: e });
       }
     }
 
+    const memberBranches = branchMembership.get(nodeId);
+
     return {
       id: nodeId,
       role: node.role,
       content: node.content,
       timestamp: new Date(node.created_at).getTime(),
-      isActive: nodeId === activeNodeId,
-      branchName: node.meta?.branchMetadata?.branchName,
-      createdFrom: node.meta?.branchMetadata?.createdFrom,
+      isOnActivePath: activePathIds.has(nodeId),
+      memberOfBranches: memberBranches ? Array.from(memberBranches) : [],
+      branchHead: headToBranch.get(nodeId),
+      createdFrom: node.meta?.branchCreatedFrom,
       children
     };
   }
 
   async renameBranch(
-    nodeId: string,       // manifest 文件的 VFS nodeId
+    nodeId: string,
     sessionId: string,
     oldName: string,
     newName: string
@@ -983,18 +1249,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
         throw new Error(`Branch name already exists: ${newName}`);
       }
 
-      // 1. 更新节点 meta 中的 branchName
-      const chatNodeId = manifest.branches[oldName];
-      const path = this.getNodePath(sessionId, chatNodeId);
-      const node = await this.readJson<ChatNode>(path);
-      if (node) {
-        if (!node.meta) node.meta = {};
-        if (!node.meta.branchMetadata) node.meta.branchMetadata = {};
-        node.meta.branchMetadata.branchName = newName;
-        await this.writeJson(path, node);
-      }
-
-      // 2. 更新 manifest 中的 branch key
+      // branch 名只存在于 manifest 中，不需要修改任何节点
       const headNodeId = manifest.branches[oldName];
       delete manifest.branches[oldName];
       manifest.branches[newName] = headNodeId;
@@ -1012,7 +1267,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
   async deleteBranch(
     nodeId: string,
     sessionId: string,
-    branchName: string,     // ← 改为按分支名删除，而非 messageNodeId
+    branchName: string,
     options?: { cascade?: boolean }
   ): Promise<string[]> {
     return this.lockManager.acquire(`session:${sessionId}`, async () => {
@@ -1095,101 +1350,9 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
     });
   }
 
-  /**
-   * 从指定节点向上收集所有祖先节点 ID（含自身）
-   */
-  private async collectAncestorIds(
-    sessionId: string,
-    nodeId: string,
-    collected: Set<string>
-  ): Promise<void> {
-    let currentId: string | null = nodeId;
-    const visited = new Set<string>();
-
-    while (currentId) {
-      if (visited.has(currentId)) break;
-      visited.add(currentId);
-      collected.add(currentId);
-
-      const node: ChatNode | null = await this.readJson<ChatNode>(
-        this.getNodePath(sessionId, currentId)
-      );
-      if (!node) break;
-      currentId = node.parent_id;
-    }
-  }
-
-  /**
-   * 从 headNodeId 向上收集直到遇到受保护节点为止的独占链
-   * 返回的是从分叉点的直接子节点开始，到 head 的链
-   */
-  private async collectExclusiveChain(
-    sessionId: string,
-    headNodeId: string,
-    protectedNodeIds: Set<string>
-  ): Promise<string[]> {
-    const chain: string[] = [];
-    let currentId: string | null = headNodeId;
-    const visited = new Set<string>();
-
-    while (currentId) {
-      if (visited.has(currentId)) break;
-      visited.add(currentId);
-
-      // 遇到受保护节点，停止（这个节点是共享的分叉点）
-      if (protectedNodeIds.has(currentId)) break;
-
-      chain.push(currentId);
-
-      const node: ChatNode | null = await this.readJson<ChatNode>(
-        this.getNodePath(sessionId, currentId)
-      );
-      if (!node) break;
-      currentId = node.parent_id;
-    }
-
-    return chain;
-  }
-
-  /**
-   * 递归软删除节点及其子树，跳过受保护节点
-   */
-  private async softDeleteExclusive(
-    sessionId: string,
-    nodeId: string,
-    protectedNodeIds: Set<string>,
-    deletedIds: string[]
-  ): Promise<void> {
-    if (protectedNodeIds.has(nodeId)) return;
-
-    const path = this.getNodePath(sessionId, nodeId);
-    const node = await this.readJson<ChatNode>(path);
-    if (!node || node.status === 'deleted') return;
-
-    // 先递归删除子节点
-    for (const childId of node.children_ids) {
-      await this.softDeleteExclusive(
-        sessionId, childId, protectedNodeIds, deletedIds
-      );
-    }
-
-    node.status = 'deleted';
-    await this.writeJson(path, node);
-    deletedIds.push(nodeId);
-  }
-
-  async switchBranch(nodeId: string, sessionId: string, branchName: string): Promise<void> {
-    return this.lockManager.acquire(`session:${sessionId}`, async () => {
-      const manifest = await this.getManifest(nodeId);
-      if (!manifest.branches[branchName]) throw new Error("Branch not found");
-
-      manifest.current_branch = branchName;
-      manifest.current_head = manifest.branches[branchName];
-      manifest.updated_at = new Date().toISOString();
-
-      await this.engine.writeContent(nodeId, JSON.stringify(manifest, null, 2));
-    });
-  }
+  // ============================================================
+  // getNodeSiblings
+  // ============================================================
 
   async getNodeSiblings(sessionId: string, nodeId: string): Promise<ChatNode[]> {
     const node = await this.readJson<ChatNode>(this.getNodePath(sessionId, nodeId));
@@ -1388,9 +1551,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
       const content = await this.engine.readContent(nodeId);
       if (!content) return;
 
-      const str = typeof content === 'string'
-        ? content
-        : new TextDecoder().decode(content);
+      const str = typeof content === 'string' ? content : new TextDecoder().decode(content);
       const manifest = JSON.parse(str) as ChatManifest;
 
       if (!manifest.id) return;
