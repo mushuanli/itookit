@@ -414,7 +414,6 @@ export class LLMWorkspaceEditor implements IEditor {
         if (wrappedIndex === currentIndex) return;
 
         const targetBranch = this.cachedBranches[wrappedIndex];
-        // 直接调用 BranchManager.select → SessionManager.navigateToBranch → 事件驱动刷新
         await this.handleBranchAction('select', targetBranch.headNodeId);
     }
 
@@ -429,14 +428,13 @@ export class LLMWorkspaceEditor implements IEditor {
      * 仅在此处根据事件类型触发一次。
      */
     private handleSessionEvent(event: OrchestratorEvent): void {
-        const branchEvents = new Set([
-            'branch_created',
-            'branch_switched',
-            'branch_deleted',
-            'branch_renamed',
+        const branchRenderEvents = new Set(['branch_switched', 'branch_created']);
+        const allBranchEvents = new Set([
+            'branch_created', 'branch_switched', 'branch_deleted', 'branch_renamed',
         ]);
 
-        // 先让 HistoryView 处理所有事件
+        // 让 HistoryView 处理非全量刷新的事件
+        // branch_switched / branch_created 在 HistoryView 中只做状态清理，不做 DOM 操作
         this.historyView.processEvent(event);
 
         if (event.type === 'finished' || event.type === 'session_start') {
@@ -449,10 +447,9 @@ export class LLMWorkspaceEditor implements IEditor {
             this.uiUpdater.updateStatusIndicator('failed');
         }
 
-        // ✅ 分支事件：统一处理，每个事件只触发一次刷新
-        if (branchEvents.has(event.type)) {
-            // 需要重渲染 history 的事件
-            if (event.type === 'branch_switched' || event.type === 'branch_created') {
+        // 分支事件统一处理
+        if (allBranchEvents.has(event.type)) {
+            if (branchRenderEvents.has(event.type)) {
                 const sessions = this.sessionManager.getSessions();
                 this.historyView.renderFull(sessions);
                 this.historyView.scrollToBottom(true);

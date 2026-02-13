@@ -1185,8 +1185,14 @@ export class HistoryView {
      */
     processEvent(event: OrchestratorEvent) {
         switch (event.type) {
+            // ✅ 修复：branch_switched / branch_created 不做局部 DOM 更新
+            // 由 LLMWorkspaceEditor.handleSessionEvent 调用 renderFull 统一处理
+            case 'branch_switched':
+                this.collapseStates = {};
+                return;
+
             case 'branch_created':
-                this.handleBranchCreated(event.payload);
+                // 不做局部 DOM 更新，等待 renderFull
                 return;
 
             case 'branch_renamed':
@@ -1197,10 +1203,6 @@ export class HistoryView {
                 this.handleBranchDeleted(event.payload);
                 return;
 
-            case 'branch_switched':
-                this.handleBranchSwitched(event.payload);
-                return;
-
             default:
                 if (event.type !== 'node_update') {
                     this.processEventImmediate(event);
@@ -1208,7 +1210,6 @@ export class HistoryView {
                 }
                 break;
         }
-
 
         // 流式更新事件批量处理
         this.eventQueue.push(event);
@@ -1368,28 +1369,6 @@ export class HistoryView {
         return (sessionEl as HTMLElement)?.dataset.sessionId || '';
     }
 
-    /**
-     * ✅ 新增：处理分支创建事件
-     */
-    private handleBranchCreated(payload: { sourceId: string; newId: string; branchName?: string }): void {
-        console.log(`[HistoryView] Branch created: ${payload.newId} from ${payload.sourceId}`);
-
-        // 更新源节点的分支计数
-        const sourceEl = this.findElementBySessionId(payload.sourceId);
-        if (sourceEl) {
-            const indicator = sourceEl.querySelector('.llm-ui-branch-indicator');
-            if (indicator) {
-                const countEl = indicator.querySelector('.llm-ui-branch-count');
-                if (countEl) {
-                    const [current, total] = countEl.textContent?.split('/').map(Number) || [1, 1];
-                    countEl.textContent = `${current}/${total + 1}`;
-                }
-            }
-        }
-
-        // 显示成功提示
-        this.showBranchNotification(`Branch "${payload.branchName || 'Untitled'}" created`);
-    }
 
     /**
      * ✅ 新增：处理分支重命名事件
@@ -1413,39 +1392,11 @@ export class HistoryView {
     }
 
     /**
-     * ✅ 新增：处理分支切换事件
-     */
-    private handleBranchSwitched(_payload: { fromId: string; toId: string }): void {
-        // 切换分支后清空折叠状态，让 renderFull 使用默认折叠策略
-        this.collapseStates = {};
-    }
-
-    /**
      * ✅ 新增：根据 sessionId 查找元素
      */
     private findElementBySessionId(sessionId: string): HTMLElement | null {
         return this.container.querySelector(`[data-session-id="${sessionId}"]`) as HTMLElement ||
             this.nodeMap.get(sessionId) || null;
-    }
-
-    /**
-     * ✅ 新增：显示分支通知
-     */
-    private showBranchNotification(message: string): void {
-        const notification = document.createElement('div');
-        notification.className = 'llm-branch-notification';
-        notification.textContent = ErrorTemplates.renderBranchNotification(message);
-
-        this.container.appendChild(notification);
-
-        requestAnimationFrame(() => {
-            notification.classList.add('is-visible');
-        });
-
-        setTimeout(() => {
-            notification.classList.remove('is-visible');
-            setTimeout(() => notification.remove(), 300);
-        }, 2000);
     }
 
     clear() {
