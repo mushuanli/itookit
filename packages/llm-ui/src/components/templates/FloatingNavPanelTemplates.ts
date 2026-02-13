@@ -172,21 +172,10 @@ export const FloatingNavPanelTemplates = {
                         <div class="llm-nav-panel__branch-dropdown" style="display:none;"></div>
                     ` : ''}
                 </div>
-                <button class="llm-nav-panel__branch-action-btn" 
-                        data-branch-action="create" 
-                        title="Create Branch from selected node">
-                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-                        <line x1="12" y1="5" x2="12" y2="19"></line>
-                        <line x1="5" y1="12" x2="19" y2="12"></line>
-                    </svg>
-                </button>
             </div>
         `;
     },
 
-    /**
-     * 渲染 Branch Dropdown 项列表
-     */
     renderBranchDropdownItems: (branches: BranchItem[]): string => {
         return branches.map(branch => {
             const currentClass = branch.isCurrent ? 'llm-nav-panel__branch-item--current' : '';
@@ -219,9 +208,6 @@ export const FloatingNavPanelTemplates = {
         }).join('');
     },
 
-    /**
-     * 渲染 Branch 内联重命名输入框
-     */
     renderBranchRenameInput: (currentName: string): string => `
         <div class="llm-nav-panel__branch-rename">
             <input type="text" class="llm-nav-panel__branch-rename-input" 
@@ -231,13 +217,6 @@ export const FloatingNavPanelTemplates = {
         </div>
     `,
 
-    // ================================================================
-    // List / Tree Items
-    // ================================================================
-
-    /**
-     * 渲染列表视图项
-     */
     renderListItem: (
         item: ChatNavItem,
         idx: number,
@@ -293,16 +272,26 @@ export const FloatingNavPanelTemplates = {
             ? `<span class="llm-nav-item__branch-name">${escapeHTML(item.branchName)}</span>`
             : '';
 
-        // ✅ 新增：渲染 node 所属的 branch 标签（可点击切换）
-        const branchTags = (item.belongsToBranches && item.belongsToBranches.length > 0)
-            ? item.belongsToBranches.map(name =>
-                `<span class="llm-nav-item__branch-tag" data-branch-tag="${escapeHTML(name)}" title="Switch to branch: ${escapeHTML(name)}">${escapeHTML(name)}</span>`
-            ).join('')
-            : '';
-
-        // ✅ 新增：渲染分叉点创建标识
-        const createdBranchTag = item.createdBranch
-            ? `<span class="llm-nav-item__branch-tag llm-nav-item__branch-tag--created" data-branch-tag="${escapeHTML(item.createdBranch)}" title="Branch created here: ${escapeHTML(item.createdBranch)}">⑂ ${escapeHTML(item.createdBranch)}</span>`
+        // ✅ 只在真正的分叉点显示子分支列表
+        const childBranchesHtml = item.childBranches && item.childBranches.length > 0
+            ? `<div class="llm-nav-item__child-branches">
+                <span class="llm-nav-item__fork-icon" title="Branch point - ${item.childBranches.length} branches">⑂</span>
+                ${item.childBranches.map(child => `
+                    <span class="llm-nav-item__branch-tag ${child.isCurrent ? 'is-current' : ''}" 
+                          data-branch-tag="${escapeHTML(child.name)}" 
+                          title="Switch to branch: ${escapeHTML(child.name)}">
+                        ${escapeHTML(child.name)}
+                    </span>
+                `).join('')}
+                <button class="llm-nav-item__branch-btn llm-nav-item__branch-btn--create" 
+                        data-action="create-branch" 
+                        title="Create new branch from this point">
+                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                </button>
+            </div>`
             : '';
 
         return `
@@ -316,13 +305,11 @@ export const FloatingNavPanelTemplates = {
                         <span class="llm-nav-item__title">${escapeHTML(title)}</span>
                         ${branchName}
                         ${branchInfo}
-                        ${createdBranchTag}
                         <span class="llm-nav-item__time">${timeStr}</span>
                     </div>
-                    <div class="llm-nav-item__preview">
-                        ${branchTags ? `<span class="llm-nav-item__branch-tags">${branchTags}</span>` : ''}
-                        ${escapeHTML(item.preview)}
-                    </div>
+                    <div class="llm-nav-item__preview">${escapeHTML(item.preview)}</div>
+                    
+                    ${childBranchesHtml}
                     
                     ${FloatingNavPanelTemplates.renderBranchActions(item)}
                 </div>
@@ -331,9 +318,6 @@ export const FloatingNavPanelTemplates = {
         `;
     },
 
-    /**
-     * 渲染分支操作按钮
-     */
     renderBranchActions: (item: ChatNavItem): string => {
         const hasBranches = (item.siblingCount || 0) > 1;
 

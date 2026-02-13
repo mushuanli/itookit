@@ -82,6 +82,207 @@
     color: var(--vscode-foreground, var(--llm-text-primary));
 }
 
+/* --- Branch Bar --- */
+.llm-nav-panel__branch-bar {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--vscode-panel-border, var(--llm-border-color));
+    background: var(--vscode-sideBar-background, rgba(0, 0, 0, 0.05));
+}
+
+.llm-nav-panel__branch-selector-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.llm-nav-panel__branch-selector {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    background: var(--vscode-input-background, rgba(255, 255, 255, 0.05));
+    border: 1px solid var(--vscode-input-border, var(--llm-border-color));
+    border-radius: var(--llm-radius-md);
+    flex: 1;
+    min-width: 0;
+}
+
+.llm-nav-panel__branch-selector--interactive {
+    cursor: pointer;
+    transition: all var(--llm-transition-fast);
+}
+
+.llm-nav-panel__branch-selector--interactive:hover {
+    border-color: var(--llm-color-primary);
+    background: var(--vscode-list-hoverBackground, rgba(var(--llm-color-primary-rgb), 0.1));
+}
+
+.llm-nav-panel__branch-icon {
+    flex-shrink: 0;
+    color: var(--llm-color-primary);
+}
+
+.llm-nav-panel__branch-label {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--vscode-foreground, var(--llm-text-primary));
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.llm-nav-panel__branch-count {
+    font-size: 10px;
+    padding: 2px 6px;
+    background: var(--vscode-badge-background, var(--llm-bg-tertiary));
+    color: var(--vscode-badge-foreground, var(--llm-text-primary));
+    border-radius: 10px;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.llm-nav-panel__branch-chevron {
+    flex-shrink: 0;
+    color: var(--vscode-descriptionForeground, var(--llm-text-muted));
+    transition: transform var(--llm-transition-fast);
+}
+
+/* Branch Dropdown */
+.llm-nav-panel__branch-dropdown {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    background: var(--vscode-dropdown-background, var(--llm-bg-primary));
+    border: 1px solid var(--vscode-dropdown-border, var(--llm-border-color));
+    border-radius: var(--llm-radius-md);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    max-height: 250px;
+    overflow-y: auto;
+    z-index: 1000;
+    padding: 4px 0;
+}
+
+.llm-nav-panel__branch-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    cursor: pointer;
+    transition: background var(--llm-transition-fast);
+}
+
+.llm-nav-panel__branch-item:hover {
+    background: var(--vscode-list-hoverBackground, var(--llm-bg-hover));
+}
+
+.llm-nav-panel__branch-item--current {
+    background: var(--vscode-list-activeSelectionBackground, rgba(var(--llm-color-primary-rgb), 0.15));
+    cursor: default;
+}
+
+.llm-nav-panel__branch-item-dot {
+    font-size: 10px;
+    color: var(--llm-color-primary);
+    flex-shrink: 0;
+}
+
+.llm-nav-panel__branch-item-name {
+    flex: 1;
+    font-size: 12px;
+    color: var(--vscode-foreground, var(--llm-text-primary));
+    font-weight: 500;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.llm-nav-panel__branch-item-actions {
+    display: none;
+    gap: 4px;
+}
+
+.llm-nav-panel__branch-item:hover .llm-nav-panel__branch-item-actions {
+    display: flex;
+}
+
+.llm-nav-panel__branch-item-btn {
+    padding: 4px;
+    background: transparent;
+    border: none;
+    border-radius: var(--llm-radius-sm);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all var(--llm-transition-fast);
+    color: var(--vscode-foreground, var(--llm-text-muted));
+}
+
+.llm-nav-panel__branch-item-btn:hover {
+    background: var(--vscode-toolbar-hoverBackground, var(--llm-bg-hover));
+}
+
+.llm-nav-panel__branch-item-btn--danger:hover {
+    background: rgba(255, 107, 107, 0.15);
+    color: var(--llm-color-error);
+}
+
+/* Branch Rename */
+.llm-nav-panel__branch-rename {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex: 1;
+}
+
+.llm-nav-panel__branch-rename-input {
+    flex: 1;
+    padding: 4px 8px;
+    font-size: 12px;
+    border: 1px solid var(--llm-color-primary);
+    border-radius: var(--llm-radius-sm);
+    background: var(--vscode-input-background, var(--llm-bg-primary));
+    color: var(--vscode-input-foreground, var(--llm-text-primary));
+    outline: none;
+}
+
+.llm-nav-panel__branch-rename-btn {
+    padding: 4px 8px;
+    background: transparent;
+    border: 1px solid var(--vscode-input-border, var(--llm-border-color));
+    border-radius: var(--llm-radius-sm);
+    cursor: pointer;
+    font-size: 12px;
+    transition: all var(--llm-transition-fast);
+}
+
+.llm-nav-panel__branch-rename-btn:hover {
+    background: var(--vscode-button-secondaryHoverBackground, var(--llm-bg-hover));
+}
+
+.llm-nav-panel__branch-rename-btn[data-rename-action="confirm"] {
+    color: #059669;
+    border-color: #059669;
+}
+
+.llm-nav-panel__branch-rename-btn[data-rename-action="confirm"]:hover {
+    background: rgba(5, 150, 105, 0.1);
+}
+
+.llm-nav-panel__branch-rename-btn[data-rename-action="cancel"] {
+    color: var(--llm-color-error);
+    border-color: var(--llm-color-error);
+}
+
+.llm-nav-panel__branch-rename-btn[data-rename-action="cancel"]:hover {
+    background: rgba(255, 107, 107, 0.1);
+}
+
 /* --- Toolbar --- */
 .llm-nav-panel__toolbar {
     display: flex;
@@ -337,7 +538,6 @@
     border: solid white;
     border-width: 0 2px 2px 0;
     transform: rotate(45deg);
-    animation: llm-ui-checkmark 0.15s ease-out;
 }
 
 /* Item 内容 */
@@ -438,6 +638,60 @@
     font-weight: 500;
 }
 
+/* Child Branches (Fork Points) */
+.llm-nav-item__child-branches {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+    padding: 8px 10px;
+    background: rgba(var(--llm-color-primary-rgb), 0.05);
+    border-radius: var(--llm-radius-md);
+    border-left: 3px solid var(--llm-color-primary);
+}
+
+.llm-nav-item__fork-icon {
+    font-size: 16px;
+    color: var(--llm-color-primary);
+    margin-right: 4px;
+    font-weight: bold;
+}
+
+.llm-nav-item__branch-tag {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 10px;
+    font-size: 11px;
+    font-weight: 500;
+    background: var(--vscode-input-background, white);
+    border: 1px solid var(--vscode-input-border, var(--llm-border-color));
+    border-radius: var(--llm-radius-sm);
+    cursor: pointer;
+    transition: all var(--llm-transition-fast);
+    white-space: nowrap;
+}
+
+.llm-nav-item__branch-tag:hover {
+    background: var(--llm-color-primary);
+    color: white;
+    border-color: var(--llm-color-primary);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(var(--llm-color-primary-rgb), 0.2);
+}
+
+.llm-nav-item__branch-tag.is-current {
+    background: var(--llm-color-primary);
+    color: white;
+    border-color: var(--llm-color-primary);
+    font-weight: 600;
+    cursor: default;
+}
+
+.llm-nav-item__branch-tag.is-current:hover {
+    transform: none;
+    box-shadow: none;
+}
+
 .llm-nav-item__branch-actions {
     display: flex;
     gap: 4px;
@@ -450,7 +704,7 @@
     color: var(--vscode-button-secondaryForeground, var(--llm-text-primary));
     cursor: pointer;
     padding: 4px 6px;
-    border-radius: 3px;
+    border-radius: var(--llm-radius-sm);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -464,6 +718,28 @@
 .llm-nav-item__branch-btn:disabled {
     opacity: 0.4;
     cursor: not-allowed;
+}
+
+.llm-nav-item__branch-btn--create {
+    margin-left: auto;
+    padding: 4px 6px;
+    background: transparent;
+    border: 1px dashed var(--vscode-input-border, var(--llm-border-color));
+    border-radius: var(--llm-radius-sm);
+    cursor: pointer;
+    opacity: 0.5;
+    transition: all var(--llm-transition-fast);
+}
+
+.llm-nav-item__branch-btn--create:hover {
+    opacity: 1;
+    background: var(--llm-color-primary);
+    border-color: var(--llm-color-primary);
+    border-style: solid;
+}
+
+.llm-nav-item__branch-btn--create:hover svg {
+    stroke: white;
 }
 
 /* --- Footer --- */
@@ -517,354 +793,5 @@
 
     .llm-nav-panel__selection-count {
         display: none;
-    }
-}
-
-/* @file: llm-ui/styles/floating-nav-branch.css */
-
-/* ================================================================
-   Branch Bar（header 与 toolbar 之间的分支选择栏）
-   ================================================================ */
-
-.llm-nav-panel__branch-bar {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 12px;
-    border-bottom: 1px solid var(--border-color, #e0e0e0);
-    background: var(--bg-secondary, #f8f9fa);
-    min-height: 32px;
-}
-
-.llm-nav-panel__branch-selector-wrapper {
-    position: relative;
-    flex: 1;
-    min-width: 0;
-}
-
-.llm-nav-panel__branch-selector {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 3px 8px;
-    border-radius: 4px;
-    font-size: 12px;
-    color: var(--text-secondary, #666);
-    overflow: hidden;
-    white-space: nowrap;
-}
-
-.llm-nav-panel__branch-selector--interactive {
-    cursor: pointer;
-    transition: background 0.15s;
-}
-
-.llm-nav-panel__branch-selector--interactive:hover {
-    background: var(--bg-hover, #e8e8e8);
-}
-
-.llm-nav-panel__branch-icon {
-    flex-shrink: 0;
-    width: 14px;
-    height: 14px;
-    opacity: 0.7;
-}
-
-.llm-nav-panel__branch-label {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    font-weight: 500;
-    color: var(--text-primary, #333);
-}
-
-.llm-nav-panel__branch-count {
-    flex-shrink: 0;
-    background: var(--accent-bg, #e3f2fd);
-    color: var(--accent-color, #1976d2);
-    font-size: 10px;
-    font-weight: 600;
-    padding: 0 5px;
-    border-radius: 8px;
-    line-height: 16px;
-}
-
-.llm-nav-panel__branch-chevron {
-    flex-shrink: 0;
-    width: 12px;
-    height: 12px;
-    opacity: 0.5;
-    transition: transform 0.15s;
-}
-
-.llm-nav-panel__branch-action-btn {
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 24px;
-    height: 24px;
-    border: none;
-    background: none;
-    border-radius: 4px;
-    cursor: pointer;
-    color: var(--text-secondary, #666);
-    transition: background 0.15s, color 0.15s;
-}
-
-.llm-nav-panel__branch-action-btn:hover {
-    background: var(--bg-hover, #e8e8e8);
-    color: var(--accent-color, #1976d2);
-}
-
-/* ================================================================
-   Branch Dropdown
-   ================================================================ */
-
-.llm-nav-panel__branch-dropdown {
-    position: absolute;
-    top: 100%;
-    left: 0;
-    right: 0;
-    z-index: 10;
-    margin-top: 2px;
-    background: var(--bg-primary, #fff);
-    border: 1px solid var(--border-color, #e0e0e0);
-    border-radius: 6px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
-    max-height: 200px;
-    overflow-y: auto;
-    padding: 4px 0;
-}
-
-.llm-nav-panel__branch-item {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 12px;
-    cursor: pointer;
-    font-size: 12px;
-    transition: background 0.1s;
-}
-
-.llm-nav-panel__branch-item:hover {
-    background: var(--bg-hover, #f0f0f0);
-}
-
-.llm-nav-panel__branch-item--current {
-    background: var(--accent-bg, #e3f2fd);
-    cursor: default;
-}
-
-.llm-nav-panel__branch-item--current:hover {
-    background: var(--accent-bg, #e3f2fd);
-}
-
-.llm-nav-panel__branch-item-dot {
-    flex-shrink: 0;
-    font-size: 8px;
-    color: var(--accent-color, #1976d2);
-}
-
-.llm-nav-panel__branch-item-name {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.llm-nav-panel__branch-item-actions {
-    display: none;
-    gap: 2px;
-    flex-shrink: 0;
-}
-
-.llm-nav-panel__branch-item:hover .llm-nav-panel__branch-item-actions {
-    display: flex;
-}
-
-.llm-nav-panel__branch-item-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 20px;
-    height: 20px;
-    border: none;
-    background: none;
-    border-radius: 3px;
-    cursor: pointer;
-    color: var(--text-tertiary, #999);
-    transition: background 0.1s, color 0.1s;
-}
-
-.llm-nav-panel__branch-item-btn:hover {
-    background: var(--bg-hover, #e0e0e0);
-    color: var(--text-primary, #333);
-}
-
-.llm-nav-panel__branch-item-btn--danger:hover {
-    background: #fee;
-    color: #d32f2f;
-}
-
-/* ================================================================
-   Branch Rename Inline
-   ================================================================ */
-
-.llm-nav-panel__branch-rename {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    flex: 1;
-    min-width: 0;
-}
-
-.llm-nav-panel__branch-rename-input {
-    flex: 1;
-    min-width: 0;
-    padding: 2px 6px;
-    border: 1px solid var(--accent-color, #1976d2);
-    border-radius: 3px;
-    font-size: 12px;
-    outline: none;
-    background: var(--bg-primary, #fff);
-    color: var(--text-primary, #333);
-}
-
-.llm-nav-panel__branch-rename-input:focus {
-    box-shadow: 0 0 0 2px rgba(25, 118, 210, 0.2);
-}
-
-.llm-nav-panel__branch-rename-btn {
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 20px;
-    height: 20px;
-    border: none;
-    background: none;
-    border-radius: 3px;
-    cursor: pointer;
-    font-size: 12px;
-    color: var(--text-secondary, #666);
-    transition: background 0.1s, color 0.1s;
-}
-
-.llm-nav-panel__branch-rename-btn:hover {
-    background: var(--bg-hover, #e0e0e0);
-}
-
-.llm-nav-panel__branch-rename-btn[data-rename-action="confirm"]:hover {
-    color: #2da44e;
-}
-
-.llm-nav-panel__branch-rename-btn[data-rename-action="cancel"]:hover {
-    color: #d32f2f;
-}
-
-/* ================================================================
-   Node Branch Tags（tree view 中 node 上的 branch 标签）
-   ================================================================ */
-
-.llm-nav-item__branch-tags {
-    display: inline-flex;
-    gap: 3px;
-    margin-right: 4px;
-    flex-shrink: 0;
-}
-
-.llm-nav-item__branch-tag {
-    display: inline-block;
-    padding: 0 5px;
-    border-radius: 3px;
-    font-size: 10px;
-    line-height: 16px;
-    background: var(--accent-bg, #e3f2fd);
-    color: var(--accent-color, #1976d2);
-    cursor: pointer;
-    white-space: nowrap;
-    transition: background 0.1s, color 0.1s;
-    max-width: 80px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.llm-nav-item__branch-tag:hover {
-    background: var(--accent-color, #1976d2);
-    color: #fff;
-}
-
-.llm-nav-item__branch-tag--created {
-    background: var(--success-bg, #e8f5e9);
-    color: var(--success-color, #2e7d32);
-    font-weight: 500;
-}
-
-.llm-nav-item__branch-tag--created:hover {
-    background: var(--success-color, #2e7d32);
-    color: #fff;
-}
-
-/* ================================================================
-   Dark Mode
-   ================================================================ */
-
-@media (prefers-color-scheme: dark) {
-    .llm-nav-panel__branch-bar {
-        background: var(--bg-secondary, #1e1e1e);
-        border-bottom-color: var(--border-color, #333);
-    }
-
-    .llm-nav-panel__branch-selector--interactive:hover {
-        background: var(--bg-hover, #2a2a2a);
-    }
-
-    .llm-nav-panel__branch-label {
-        color: var(--text-primary, #e0e0e0);
-    }
-
-    .llm-nav-panel__branch-count {
-        background: rgba(25, 118, 210, 0.2);
-    }
-
-    .llm-nav-panel__branch-dropdown {
-        background: var(--bg-primary, #252525);
-        border-color: var(--border-color, #444);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-    }
-
-    .llm-nav-panel__branch-item:hover {
-        background: var(--bg-hover, #2a2a2a);
-    }
-
-    .llm-nav-panel__branch-item--current {
-        background: rgba(25, 118, 210, 0.15);
-    }
-
-    .llm-nav-panel__branch-item--current:hover {
-        background: rgba(25, 118, 210, 0.15);
-    }
-
-    .llm-nav-panel__branch-item-btn:hover {
-        background: var(--bg-hover, #333);
-    }
-
-    .llm-nav-panel__branch-item-btn--danger:hover {
-        background: rgba(211, 47, 47, 0.15);
-    }
-
-    .llm-nav-panel__branch-rename-input {
-        background: var(--bg-primary, #1e1e1e);
-        color: var(--text-primary, #e0e0e0);
-        border-color: var(--accent-color, #1976d2);
-    }
-
-    .llm-nav-item__branch-tag {
-        background: rgba(25, 118, 210, 0.15);
-    }
-
-    .llm-nav-item__branch-tag--created {
-        background: rgba(46, 125, 50, 0.15);
     }
 }
