@@ -604,7 +604,7 @@ export class LLMWorkspaceEditor implements IEditor {
      * ✅ 合并原 foldAllSessions / unfoldAllSessions / handleCollapseAll
      */
     private setAllSessionsFold(fold: boolean): void {
-        if (this.isAllExpanded === !fold) return;
+        if (this.isAllExpanded === fold) return;
 
         this.isAllExpanded = this.uiUpdater.toggleAllBubbles(this.isAllExpanded);
 
