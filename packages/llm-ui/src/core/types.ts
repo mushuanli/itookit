@@ -40,3 +40,11 @@ export type BranchAction =
 export interface BranchActionCallback {
     (action: BranchAction, nodeId: string, options?: { newName?: string; compareWith?: string }): void;
 }
+
+/** ✅ 新增：ChatNavItem 的 branch 扩展信息 */
+export interface ChatNavBranchInfo {
+    /** 此 node 所属的 branch 名称列表 */
+    belongsToBranches: string[];
+    /** 此 node 创建的 branch 名称（分叉点标识） */
+    createdBranch?: string;
+}

@@ -409,6 +409,20 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     /**
+ * ✅ 新增：通过 branchName 重命名（从 FloatingNavPanel dropdown 触发）
+ */
+    private async handleBranchRename(oldName: string, newName: string): Promise<void> {
+        await this.branchManager.renameBranchByName(oldName, newName);
+    }
+
+    /**
+     * ✅ 新增：通过 branchName 删除（从 FloatingNavPanel dropdown 触发）
+     */
+    private async handleBranchDeleteByName(branchName: string): Promise<void> {
+        await this.branchManager.deleteBranchByName(branchName);
+    }
+
+    /**
      * 通过偏移量切换分支（快捷键 ⌘⇧[ / ⌘⇧]）
      */
     private async switchBranchByOffset(offset: number): Promise<void> {
@@ -477,7 +491,10 @@ export class LLMWorkspaceEditor implements IEditor {
             }
 
             // 所有分支事件都刷新 indicator
-            this.refreshBranchIndicator();
+            this.refreshBranchIndicator().then(() => {
+                // ✅ 新增：如果 FloatingNavPanel 打开，同步刷新
+                this.refreshFloatingNav();
+            });
         }
     }
 
@@ -681,12 +698,20 @@ export class LLMWorkspaceEditor implements IEditor {
                 onBatchCopy: (ids) => this.handleBatchCopy(ids),
                 onCreateBranch: (sourceId) => this.handleBranchAction('create', sourceId),
                 onSwitchBranch: (branchId) => this.handleBranchAction('select', branchId),
+
+                // ✅ 新增：分支 CRUD 回调
+                onSwitchBranchByName: (branchName) => this.handleSwitchBranchByName(branchName),
+                onRenameBranch: (oldName, newName) => this.handleBranchRename(oldName, newName),
+                onDeleteBranch: (branchName) => this.handleBranchDeleteByName(branchName),
             });
         }
 
         const sessions = this.sessionManager.getSessions();
         const collapseStates = this.stateManager.getCollapseStates();
         this.floatingNav.updateItems(sessions, collapseStates);
+
+        // ✅ 新增：传入分支数据
+        this.floatingNav.updateBranches(this.cachedBranches);
 
         const visibleId = this.navigationHelper.findCurrentVisibleSession();
         if (visibleId) this.floatingNav.setCurrentChat(visibleId);
@@ -814,6 +839,8 @@ export class LLMWorkspaceEditor implements IEditor {
             this.sessionManager.getSessions(),
             this.historyView.getCollapseStates()
         );
+        // ✅ 新增：同步分支数据
+        this.floatingNav.updateBranches(this.cachedBranches);
     }
 
     // ================================================================
