@@ -136,8 +136,8 @@ export class LLMWorkspaceEditor implements IEditor {
             this.bindEvents();
             await this.loadSession(initialContent);
 
-            // ✅ 新增：会话加载后刷新分支指示器
-            //await this.refreshBranchIndicator();
+            // ✅ 会话加载后刷新分支指示器
+            await this.refreshBranchIndicator();
 
             this.emit('ready');
             this.initResolve?.();
@@ -264,7 +264,7 @@ export class LLMWorkspaceEditor implements IEditor {
             onNavigateNext: () => this.navigationHelper.navigateToUserChat('next'),
             onCreateBranch: () => {
                 const currentId = this.navigationHelper.findCurrentVisibleSession();
-                if (currentId) this.branchManager.handleBranchAction('create', currentId);
+                if (currentId) this.handleBranchActionWithRefresh('create', currentId);
             },
             onSwitchBranchPrev: () => this.switchBranchByOffset(-1),
             onSwitchBranchNext: () => this.switchBranchByOffset(1),
@@ -340,16 +340,54 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     // ================================================================
-    // ✅ 新增：分支指示器相关方法
+    // Branch Indicator
     // ================================================================
+
     /**
-     * 从 title bar 指示器触发的分支切换
+     * 从 SessionManager 获取分支列表并更新 titlebar 指示器
+     * 
+     * 调用时机：
+     *   - init 完成后
+     *   - branch_created / branch_switched / branch_deleted / branch_renamed 事件后
+     */
+    private async refreshBranchIndicator(): Promise<void> {
+        try {
+            const branches = await this.sessionManager.listBranches();
+
+            this.cachedBranches = branches.map(b => ({
+                name: b.name,
+                headNodeId: b.headNodeId,
+                isCurrent: b.isCurrent,
+            }));
+
+            this.uiUpdater.updateBranchIndicator(
+                this.cachedBranches,
+                (headNodeId) => this.handleSwitchBranch(headNodeId)
+            );
+        } catch (e) {
+            console.warn('[LLMWorkspaceEditor] Failed to refresh branch indicator:', e);
+            // 降级：显示默认单分支
+            this.cachedBranches = [{ name: 'main', headNodeId: '', isCurrent: true }];
+            this.uiUpdater.updateBranchIndicator(
+                this.cachedBranches,
+                () => { }
+            );
+        }
+    }
+
+    /**
+     * 从 titlebar 下拉菜单或快捷键触发的分支切换
      */
     private async handleSwitchBranch(branchHeadNodeId: string): Promise<void> {
         try {
             await this.branchManager.handleBranchAction('select', branchHeadNodeId);
-            //await this.refreshBranchIndicator();
-            //this.uiUpdater.flashBranchIndicator();
+
+            // 切换后重新加载 history view
+            const sessions = this.sessionManager.getSessions();
+            this.historyView.renderFull(sessions);
+
+            await this.refreshBranchIndicator();
+            this.uiUpdater.flashBranchIndicator();
             Toast.success('Branch switched');
         } catch (e: any) {
             console.error('[LLMWorkspaceEditor] Switch branch failed:', e);
@@ -358,9 +396,7 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     /**
-     * ✅ 新增：统一的分支操作入口，操作完成后刷新指示器
-     * 
-     * 遵循 DRY 原则：所有分支操作后统一刷新指示器
+     * 统一的分支操作入口，操作完成后刷新指示器
      */
     private async handleBranchActionWithRefresh(
         action: string,
@@ -369,19 +405,25 @@ export class LLMWorkspaceEditor implements IEditor {
     ): Promise<void> {
         await this.branchManager.handleBranchAction(action as any, nodeId, options);
 
-        // 影响分支状态的操作需要刷新指示器
-        const branchMutatingActions = new Set(['create', 'delete', 'select', 'rename', 'navigate']);
+        // 影响分支列表的操作 → 刷新指示器
+        const branchMutatingActions = new Set(['create', 'delete', 'select', 'rename']);
         if (branchMutatingActions.has(action)) {
-            //await this.refreshBranchIndicator();
+            await this.refreshBranchIndicator();
+
+            // create 后给视觉反馈
+            if (action === 'create') {
+                this.uiUpdater.flashBranchIndicator();
+            }
         }
     }
 
     /**
-     * ✅ 新增：通过偏移量切换分支（用于快捷键 ⌘⇧[ / ⌘⇧]）
+     * 通过偏移量切换分支（快捷键 ⌘⇧[ / ⌘⇧]）
      */
     private async switchBranchByOffset(offset: number): Promise<void> {
-        // 先刷新缓存，确保数据最新
-        //await this.refreshBranchIndicator();
+        // 确保缓存是最新的
+        await this.refreshBranchIndicator();
+
         if (this.cachedBranches.length <= 1) {
             Toast.info('No other branches to switch to');
             return;
@@ -403,7 +445,7 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     // ================================================================
-    // 事件处理（修改部分）
+    // 事件处理
     // ================================================================
 
     private handleSessionEvent(event: OrchestratorEvent): void {
@@ -419,6 +461,23 @@ export class LLMWorkspaceEditor implements IEditor {
             this.uiUpdater.updateStatusIndicator('failed');
         }
 
+        // ✅ 分支相关事件 → 刷新指示器
+        const branchEvents = new Set([
+            'branch_created',
+            'branch_switched',
+            'branch_deleted',
+            'branch_renamed',
+        ]);
+
+        if (branchEvents.has(event.type)) {
+            this.refreshBranchIndicator();
+
+            // 切换事件后重新渲染 history
+            if (event.type === 'branch_switched') {
+                const sessions = this.sessionManager.getSessions();
+                this.historyView.renderFull(sessions);
+            }
+        }
     }
 
     private handleGlobalEvent(event: RegistryEvent): void {

@@ -2,28 +2,29 @@
 
 import { SessionSnapshot } from '@itookit/llm-engine';
 import { ChatInput } from '../components/ChatInput';
+import { BranchItem } from '../core/types';
+import { BranchIndicatorTemplates } from '../components/templates/BranchIndicatorTemplates';
 
 export class UIUpdater {
+    private branchDropdownCleanup: (() => void) | null = null;
+    private outsideClickHandler: ((e: MouseEvent) => void) | null = null;
 
     constructor(
         private container: HTMLElement,
         private chatInput: ChatInput
     ) { }
 
-    /**
-     * 根据快照更新状态
-     */
+    // ================================================================
+    // 快照 & 状态指示器
+    // ================================================================
+
     updateFromSnapshot(snapshot: SessionSnapshot): void {
         this.updateStatusIndicator(snapshot.status);
-
         if (snapshot.isRunning) {
             this.chatInput.setLoading(true);
         }
     }
 
-    /**
-     * 更新状态指示器
-     */
     updateStatusIndicator(status: string): void {
         const indicator = this.container.querySelector('#llm-status-indicator') as HTMLElement;
         if (!indicator) return;
@@ -61,10 +62,10 @@ export class UIUpdater {
         }
     }
 
-    /**
-     * 更新后台运行指示器
-     */
-    updateBackgroundIndicator(payload: { running: number; queued: number }, isCurrentGenerating: boolean): void {
+    updateBackgroundIndicator(
+        payload: { running: number; queued: number },
+        isCurrentGenerating: boolean
+    ): void {
         const indicator = this.container.querySelector('#llm-bg-indicator') as HTMLElement;
         if (!indicator) return;
 
@@ -84,27 +85,20 @@ export class UIUpdater {
         }
     }
 
-    /**
-     * 显示按钮反馈
-     */
     showButtonFeedback(btn: HTMLElement, text: string): void {
         const originalHtml = btn.innerHTML;
         btn.innerHTML = `<span style="color:#2da44e">${text}</span>`;
-        setTimeout(() => btn.innerHTML = originalHtml, 2000);
+        setTimeout(() => (btn.innerHTML = originalHtml), 2000);
     }
 
-    /**
-     * 切换所有气泡的折叠状态
-     */
     toggleAllBubbles(isExpanded: boolean): boolean {
         const newState = !isExpanded;
-
         const historyContainer = this.container.querySelector('#llm-ui-history');
         if (!historyContainer) return newState;
 
         const bubbles = historyContainer.querySelectorAll('.llm-ui-bubble--user, .llm-ui-node');
 
-        bubbles.forEach(bubble => {
+        bubbles.forEach((bubble) => {
             if (newState) {
                 bubble.classList.remove('is-collapsed');
             } else {
@@ -139,10 +133,147 @@ export class UIUpdater {
         return newState;
     }
 
-    /**
-     * ✅ 新增：清理
-     */
-    destroy(): void {
+    // ================================================================
+    // Branch Indicator
+    // ================================================================
 
+    /**
+     * 更新 titlebar 中的分支指示器
+     */
+    updateBranchIndicator(
+        branches: BranchItem[],
+        onSwitch: (headNodeId: string) => void
+    ): void {
+        const indicatorBar = this.container.querySelector('#llm-branch-indicator') as HTMLElement;
+        if (!indicatorBar) return;
+
+        const currentBranch = branches.find((b) => b.isCurrent);
+        const currentName = currentBranch?.name || 'main';
+        const branchCount = branches.length;
+
+        // 清理旧事件
+        this.cleanupBranchDropdown();
+
+        // 渲染内容
+        indicatorBar.innerHTML = BranchIndicatorTemplates.renderIndicator(
+            currentName,
+            branchCount
+        );
+
+        // 只有多分支时才需要下拉交互
+        if (branchCount <= 1) return;
+
+        const btn = indicatorBar.querySelector('.llm-branch-indicator-btn') as HTMLElement;
+        const dropdown = indicatorBar.querySelector('.llm-branch-dropdown') as HTMLElement;
+        if (!btn || !dropdown) return;
+
+        // 点击按钮 → 切换下拉
+        const toggleDropdown = (e: MouseEvent) => {
+            e.stopPropagation();
+            const isOpen = dropdown.style.display !== 'none';
+            if (isOpen) {
+                this.closeBranchDropdown(dropdown);
+            } else {
+                this.openBranchDropdown(dropdown, branches, onSwitch);
+            }
+        };
+
+        btn.addEventListener('click', toggleDropdown);
+
+        // 点击外部关闭
+        this.outsideClickHandler = (e: MouseEvent) => {
+            if (!indicatorBar.contains(e.target as Node)) {
+                this.closeBranchDropdown(dropdown);
+            }
+        };
+        document.addEventListener('click', this.outsideClickHandler);
+
+        // 保存清理函数
+        this.branchDropdownCleanup = () => {
+            btn.removeEventListener('click', toggleDropdown);
+            if (this.outsideClickHandler) {
+                document.removeEventListener('click', this.outsideClickHandler);
+                this.outsideClickHandler = null;
+            }
+        };
+    }
+
+    /**
+     * 短暂高亮 branch indicator，给用户视觉反馈
+     */
+    flashBranchIndicator(): void {
+        const btn = this.container.querySelector(
+            '#llm-branch-indicator .llm-branch-indicator-btn'
+        ) as HTMLElement;
+        if (!btn) return;
+
+        btn.classList.add('llm-branch-indicator-btn--flash');
+        setTimeout(() => {
+            btn.classList.remove('llm-branch-indicator-btn--flash');
+        }, 600);
+    }
+
+    // ================================================================
+    // Branch Dropdown 内部
+    // ================================================================
+
+    private openBranchDropdown(
+        dropdown: HTMLElement,
+        branches: BranchItem[],
+        onSwitch: (headNodeId: string) => void
+    ): void {
+        dropdown.innerHTML = BranchIndicatorTemplates.renderDropdownItems(branches);
+        dropdown.style.display = 'block';
+
+        // 绑定每项点击
+        dropdown.querySelectorAll('.llm-branch-dropdown__item').forEach((item) => {
+            item.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const el = e.currentTarget as HTMLElement;
+                if (el.classList.contains('is-current')) return;
+
+                const headNodeId = el.dataset.branchHead;
+                if (headNodeId) {
+                    this.closeBranchDropdown(dropdown);
+                    onSwitch(headNodeId);
+                }
+            });
+        });
+
+        // chevron 朝上
+        const chevron = this.container.querySelector(
+            '#llm-branch-indicator .llm-branch-indicator-chevron'
+        );
+        if (chevron) {
+            chevron.innerHTML = BranchIndicatorTemplates.chevronUp;
+        }
+    }
+
+    private closeBranchDropdown(dropdown: HTMLElement): void {
+        dropdown.style.display = 'none';
+        dropdown.innerHTML = '';
+
+        // chevron 朝下
+        const chevron = this.container.querySelector(
+            '#llm-branch-indicator .llm-branch-indicator-chevron'
+        );
+        if (chevron) {
+            chevron.innerHTML = BranchIndicatorTemplates.chevronDown;
+        }
+    }
+
+    private cleanupBranchDropdown(): void {
+        if (this.branchDropdownCleanup) {
+            this.branchDropdownCleanup();
+            this.branchDropdownCleanup = null;
+        }
+    }
+
+    // ================================================================
+    // 清理
+    // ================================================================
+
+    destroy(): void {
+        this.cleanupBranchDropdown();
     }
 }

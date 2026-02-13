@@ -1,7 +1,7 @@
-/* @file llmui/styles/index.css */
+/* @file: llm-ui/styles/index.css */
+@import 'variables.css';
+@import 'base.css';
 @import 'llm-input.css';
-@import 'chat-styles.css';
 @import 'llm-workspace.css';
-@import 'history.css';
-@import 'recovery.css';
 @import 'floating-nav.css';
+@import 'dialogs.css';
