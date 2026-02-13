@@ -17,7 +17,7 @@ import {
     OrchestratorEvent,
     RegistryEvent,
 } from '@itookit/llm-engine';
-import { NodeAction } from './core/types';
+import { NodeAction, BranchItem } from './core/types';
 
 // Services（删除了 ContentService、BranchService）
 import { SessionService, StateService, AssetService } from './services';
@@ -30,7 +30,6 @@ import { NodeActionHandler } from './helpers/NodeActionHandler';
 import { BranchManager } from './helpers/BranchManager';
 import { EventBinder } from './helpers/EventBinder';
 import { UIUpdater } from './helpers/UIUpdater';
-import { BranchItem } from './components/templates/BranchIndicatorTemplates';
 
 export interface LLMEditorOptions extends EditorOptions {
     sessionEngine: ILLMSessionEngine;
@@ -138,7 +137,7 @@ export class LLMWorkspaceEditor implements IEditor {
             await this.loadSession(initialContent);
 
             // ✅ 新增：会话加载后刷新分支指示器
-            await this.refreshBranchIndicator();
+            //await this.refreshBranchIndicator();
 
             this.emit('ready');
             this.initResolve?.();
@@ -237,13 +236,6 @@ export class LLMWorkspaceEditor implements IEditor {
 
         this.uiUpdater = new UIUpdater(this.container, this.chatInput);
 
-        // ✅ 新增：初始化分支指示器
-        this.uiUpdater.initBranchIndicator({
-            onSwitchBranch: (branchId) => this.handleSwitchBranch(branchId),
-            onCreateBranch: () => this.handleCreateBranchFromIndicator(),
-            onShowBranchTree: () => this.branchManager.handleBranchAction('show-tree', ''),
-        });
-
         this.historyView.setBranchActionCallback(
             (action, nodeId, options) => this.handleBranchActionWithRefresh(action, nodeId, options)
         );
@@ -270,7 +262,6 @@ export class LLMWorkspaceEditor implements IEditor {
             onToggleNavigator: () => this.toggleNavigator(),
             onNavigatePrev: () => this.navigationHelper.navigateToUserChat('prev'),
             onNavigateNext: () => this.navigationHelper.navigateToUserChat('next'),
-            onShowBranchTree: () => this.branchManager.handleBranchAction('show-tree', ''),
             onCreateBranch: () => {
                 const currentId = this.navigationHelper.findCurrentVisibleSession();
                 if (currentId) this.branchManager.handleBranchAction('create', currentId);
@@ -351,60 +342,18 @@ export class LLMWorkspaceEditor implements IEditor {
     // ================================================================
     // ✅ 新增：分支指示器相关方法
     // ================================================================
-
-    /**
-     * 刷新分支指示器：从 SessionManager 获取最新分支列表并更新 UI
-     */
-    private async refreshBranchIndicator(): Promise<void> {
-        try {
-            const branches = await this.sessionManager.listBranches();
-
-            this.cachedBranches = branches.map(b => ({
-                name: b.name,
-                headNodeId: b.headNodeId,
-                isCurrent: b.isCurrent,
-            }));
-
-            this.uiUpdater.updateBranchIndicator(this.cachedBranches);
-        } catch (e) {
-            console.warn('[LLMWorkspaceEditor] Failed to refresh branch indicator:', e);
-            // 降级：显示默认 main 分支
-            this.cachedBranches = [{ name: 'main', headNodeId: '', isCurrent: true }];
-            this.uiUpdater.updateBranchIndicator(this.cachedBranches);
-        }
-    }
-
     /**
      * 从 title bar 指示器触发的分支切换
      */
     private async handleSwitchBranch(branchHeadNodeId: string): Promise<void> {
         try {
             await this.branchManager.handleBranchAction('select', branchHeadNodeId);
-            await this.refreshBranchIndicator();
-            this.uiUpdater.flashBranchIndicator();
+            //await this.refreshBranchIndicator();
+            //this.uiUpdater.flashBranchIndicator();
             Toast.success('Branch switched');
         } catch (e: any) {
             console.error('[LLMWorkspaceEditor] Switch branch failed:', e);
             Toast.error(e.message || 'Failed to switch branch');
-        }
-    }
-
-    /**
-     * 从 title bar 指示器触发的分支创建
-     */
-    private async handleCreateBranchFromIndicator(): Promise<void> {
-        const currentId = this.navigationHelper.findCurrentVisibleSession();
-        if (currentId) {
-            await this.handleBranchActionWithRefresh('create', currentId);
-        } else {
-            // 没有可见会话时，使用最后一条消息
-            const sessions = this.sessionManager.getSessions();
-            if (sessions.length > 0) {
-                const lastSession = sessions[sessions.length - 1];
-                await this.handleBranchActionWithRefresh('create', lastSession.id);
-            } else {
-                Toast.info('No messages to branch from');
-            }
         }
     }
 
@@ -423,7 +372,7 @@ export class LLMWorkspaceEditor implements IEditor {
         // 影响分支状态的操作需要刷新指示器
         const branchMutatingActions = new Set(['create', 'delete', 'select', 'rename', 'navigate']);
         if (branchMutatingActions.has(action)) {
-            await this.refreshBranchIndicator();
+            //await this.refreshBranchIndicator();
         }
     }
 
@@ -432,7 +381,7 @@ export class LLMWorkspaceEditor implements IEditor {
      */
     private async switchBranchByOffset(offset: number): Promise<void> {
         // 先刷新缓存，确保数据最新
-        await this.refreshBranchIndicator();
+        //await this.refreshBranchIndicator();
         if (this.cachedBranches.length <= 1) {
             Toast.info('No other branches to switch to');
             return;
@@ -670,7 +619,6 @@ export class LLMWorkspaceEditor implements IEditor {
                 onUnfoldAll: () => this.setAllSessionsFold(false),
                 onBatchDelete: (ids) => this.handleBatchDelete(ids),
                 onBatchCopy: (ids) => this.handleBatchCopy(ids),
-                onShowBranchTree: () => this.branchManager.handleBranchAction('show-tree', ''),
                 onCreateBranch: (sourceId) => this.handleBranchActionWithRefresh('create', sourceId),
                 // ✅ 修改：切换分支后也刷新指示器
                 onSwitchBranch: (branchId) => this.handleSwitchBranch(branchId),
