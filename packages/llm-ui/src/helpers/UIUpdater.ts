@@ -142,7 +142,7 @@ export class UIUpdater {
      */
     updateBranchIndicator(
         branches: BranchItem[],
-        onSwitch: (headNodeId: string) => void
+        onSwitch: (branchName: string) => void
     ): void {
         const indicatorBar = this.container.querySelector('#llm-branch-indicator') as HTMLElement;
         if (!indicatorBar) return;
@@ -220,7 +220,7 @@ export class UIUpdater {
     private openBranchDropdown(
         dropdown: HTMLElement,
         branches: BranchItem[],
-        onSwitch: (headNodeId: string) => void
+        onSwitch: (branchName: string) => void
     ): void {
         dropdown.innerHTML = BranchIndicatorTemplates.renderDropdownItems(branches);
         dropdown.style.display = 'block';
@@ -232,10 +232,10 @@ export class UIUpdater {
                 const el = e.currentTarget as HTMLElement;
                 if (el.classList.contains('is-current')) return;
 
-                const headNodeId = el.dataset.branchHead;
-                if (headNodeId) {
+                const name = el.dataset.branchName;
+                if (name) {
                     this.closeBranchDropdown(dropdown);
-                    onSwitch(headNodeId);
+                    onSwitch(name);
                 }
             });
         });

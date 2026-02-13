@@ -5,9 +5,6 @@ import { BranchItem } from '../../core/types';
 
 export const BranchIndicatorTemplates = {
 
-    /**
-     * 渲染 titlebar 中的 branch indicator 按钮 + 下拉容器
-     */
     renderIndicator(currentName: string, branchCount: number): string {
         const countBadge = branchCount > 1
             ? `<span class="llm-branch-indicator-count">${branchCount}</span>`
@@ -38,9 +35,6 @@ export const BranchIndicatorTemplates = {
         `;
     },
 
-    /**
-     * 渲染下拉菜单中的分支列表
-     */
     renderDropdownItems(branches: BranchItem[]): string {
         if (branches.length === 0) {
             return `<div class="llm-branch-dropdown__empty">No branches</div>`;
@@ -48,7 +42,7 @@ export const BranchIndicatorTemplates = {
 
         return branches.map(b => `
             <div class="llm-branch-dropdown__item ${b.isCurrent ? 'is-current' : ''}"
-                 data-branch-head="${escapeHTML(b.headNodeId)}"
+                 data-branch-name="${escapeHTML(b.name)}"
                  title="${escapeHTML(b.name)}">
                 <span class="llm-branch-dropdown__icon">${b.isCurrent ? '●' : '○'}</span>
                 <span class="llm-branch-dropdown__name">${escapeHTML(b.name)}</span>
@@ -57,9 +51,6 @@ export const BranchIndicatorTemplates = {
         `).join('');
     },
 
-    /**
-     * 渲染 chevron 的展开/折叠方向
-     */
     chevronUp: '<polyline points="18 15 12 9 6 15"></polyline>',
     chevronDown: '<polyline points="6 9 12 15 18 9"></polyline>',
 };
