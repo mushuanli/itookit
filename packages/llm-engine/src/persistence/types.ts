@@ -241,8 +241,9 @@ export interface ILLMSessionEngine extends IBaseSessionEngine {
      * ✅ 新增：重命名分支
      */
     renameBranch(
-        sessionId: string,
         nodeId: string,
+        sessionId: string,
+        oldName: string,
         newName: string
     ): Promise<void>;
 
@@ -252,7 +253,7 @@ export interface ILLMSessionEngine extends IBaseSessionEngine {
     deleteBranch(
         nodeId: string,
         sessionId: string,
-        messageNodeId: string,
+        branchName: string,          // ← 从 messageNodeId 改为 branchName
         options?: { cascade?: boolean }
     ): Promise<string[]>;
 
@@ -285,7 +286,7 @@ export interface ILLMSessionEngine extends IBaseSessionEngine {
         sessionId: string,
         headNodeId: string
     ): Promise<ChatContextItem[]>;
-    
+
     /**
      * 保存会话设置
      * @param sessionId 会话 ID

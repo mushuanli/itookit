@@ -1,4 +1,3 @@
-
 // @file: llm-ui/helpers/BranchManager.ts
 
 import { SessionManager } from '@itookit/llm-engine';
@@ -15,6 +14,9 @@ export class BranchManager {
 
     /**
      * 分支操作统一入口
+     * 
+     * 注意：所有操作完成后由 SessionManager 发送事件，
+     * UI 刷新统一在 LLMWorkspaceEditor.handleSessionEvent 中处理。
      */
     async handleBranchAction(
         action: BranchAction,
@@ -26,8 +28,6 @@ export class BranchManager {
             switch (action) {
                 case 'create':
                     return await this.createBranch(nodeId);
-                case 'navigate':
-                    return this.navigateToBranch(nodeId);
                 case 'rename':
                     if (options?.newName) {
                         await this.sessionManager.renameBranch(nodeId, options.newName);
@@ -48,10 +48,8 @@ export class BranchManager {
 
     private async createBranch(sourceNodeId: string): Promise<void> {
         const branchName = await this.promptBranchName();
-        if (branchName === null) return; // 用户取消
+        if (branchName === null) return;
 
-        // ✅ 找到分叉点：如果 sourceNodeId 是 user message，
-        //    则从它之前的最后一条消息分叉（这样新分支不包含这条 user message）
         const branchPointId = this.findBranchPoint(sourceNodeId);
 
         const newNodeId = await this.sessionManager.createBranch(branchPointId, {
@@ -59,7 +57,8 @@ export class BranchManager {
             copyContent: true,
         });
 
-        // ✅ 创建后自动切换到新分支
+        // 创建后自动切换到新分支
+        // → 触发 branch_switched 事件，UI 刷新由事件处理统一完成
         await this.sessionManager.navigateToBranch(newNodeId);
 
         Toast.success(`Branch "${branchName || 'Untitled'}" created`);
@@ -101,43 +100,22 @@ export class BranchManager {
         return sourceNodeId;
     }
 
-    private navigateToBranch(nodeId: string): void {
-        const sessions = this.sessionManager.getSessions();
-        const target = sessions.find(s =>
-            s.id === nodeId ||
-            s.persistedNodeId === nodeId ||
-            s.executionRoot?.id === nodeId
-        );
-
-        if (target) {
-            this.scrollToSession(target.id);
-        }
-    }
-
     private async deleteBranch(nodeId: string): Promise<void> {
         const confirmed = await showConfirmDialog(
             'Delete this branch and all its children?'
         );
         if (!confirmed) return;
 
-        // ✅ SessionManager.deleteBranch 内部自动：
-        //   1. 校验不能删除当前 head
-        //   2. 持久化删除
-        //   3. 内存清理
-        //   4. 发送 messages_deleted 事件
         await this.sessionManager.deleteBranch(nodeId, true);
         Toast.success('Branch deleted');
     }
 
     /**
-     * ✅ 使用 navigateToBranch 替代 switchToSibling
+     * 切换到指定分支
+     * → SessionManager.navigateToBranch 内部发送 branch_switched 事件
+     * → UI 刷新由事件处理统一完成
      */
     private async selectBranch(branchId: string): Promise<void> {
-        // ✅ navigateToBranch 内部自动：
-        //   1. updateManifestHead 切换当前活跃头节点
-        //   2. reloadSessionData 重新加载消息
-        //   3. 发送 session_cleared + session_start 事件序列
-        //   4. 发送 branch_switched 事件
         await this.sessionManager.navigateToBranch(branchId);
     }
 

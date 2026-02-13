@@ -15,6 +15,9 @@ export class StateManager {
     private debouncedUIStateSave: DebouncedFn;
     private debouncedInputStateSave: DebouncedFn;
 
+    // ✅ 修复：持有 chatInput 引用的 getter，延迟绑定
+    private chatInputGetter: (() => ChatInput | undefined) | null = null;
+
     constructor(
         private stateService: StateService,
         private sessionManager: SessionManager,
@@ -29,10 +32,17 @@ export class StateManager {
         );
 
         this.debouncedInputStateSave = createDebouncedSave(
-            () => this.saveUIState(),
+            () => this.saveUIState(this.chatInputGetter?.()),
             1000,
             notGenerating
         );
+    }
+
+    /**
+     * ✅ 新增：绑定 chatInput（组件初始化后调用）
+     */
+    setChatInputGetter(getter: () => ChatInput | undefined): void {
+        this.chatInputGetter = getter;
     }
 
     getCollapseStates(): CollapseStateMap {

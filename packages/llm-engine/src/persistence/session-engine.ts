@@ -967,61 +967,215 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
     };
   }
 
-  async renameBranch(sessionId: string, nodeId: string, newName: string): Promise<void> {
-    return this.lockManager.acquire(`node:${sessionId}:${nodeId}`, async () => {
-      const path = this.getNodePath(sessionId, nodeId);
+  async renameBranch(
+    nodeId: string,       // manifest 文件的 VFS nodeId
+    sessionId: string,
+    oldName: string,
+    newName: string
+  ): Promise<void> {
+    return this.lockManager.acquire(`session:${sessionId}`, async () => {
+      const manifest = await this.getManifest(nodeId);
+
+      if (!manifest.branches[oldName]) {
+        throw new Error(`Branch not found: ${oldName}`);
+      }
+      if (oldName !== newName && manifest.branches[newName]) {
+        throw new Error(`Branch name already exists: ${newName}`);
+      }
+
+      // 1. 更新节点 meta 中的 branchName
+      const chatNodeId = manifest.branches[oldName];
+      const path = this.getNodePath(sessionId, chatNodeId);
       const node = await this.readJson<ChatNode>(path);
-      if (!node) throw new Error('Node not found');
+      if (node) {
+        if (!node.meta) node.meta = {};
+        if (!node.meta.branchMetadata) node.meta.branchMetadata = {};
+        node.meta.branchMetadata.branchName = newName;
+        await this.writeJson(path, node);
+      }
 
-      if (!node.meta) node.meta = {};
-      if (!node.meta.branchMetadata) node.meta.branchMetadata = {};
-      node.meta.branchMetadata.branchName = newName;
+      // 2. 更新 manifest 中的 branch key
+      const headNodeId = manifest.branches[oldName];
+      delete manifest.branches[oldName];
+      manifest.branches[newName] = headNodeId;
 
-      await this.writeJson(path, node);
+      // 3. 同步 current_branch
+      if (manifest.current_branch === oldName) {
+        manifest.current_branch = newName;
+      }
+
+      manifest.updated_at = new Date().toISOString();
+      await this.engine.writeContent(nodeId, JSON.stringify(manifest, null, 2));
     });
   }
 
   async deleteBranch(
     nodeId: string,
     sessionId: string,
-    messageNodeId: string,
+    branchName: string,     // ← 改为按分支名删除，而非 messageNodeId
     options?: { cascade?: boolean }
   ): Promise<string[]> {
     return this.lockManager.acquire(`session:${sessionId}`, async () => {
-      const targetNode = await this.readJson<ChatNode>(
-        this.getNodePath(sessionId, messageNodeId)
-      );
-      if (!targetNode) return [];
+      const manifest = await this.getManifest(nodeId);
 
-      const deletedIds: string[] = [];
-
-      const deleteRecursive = async (id: string): Promise<void> => {
-        const node = await this.readJson<ChatNode>(this.getNodePath(sessionId, id));
-        if (!node || node.status === 'deleted') return;
-
-        if (options?.cascade) {
-          for (const childId of node.children_ids) {
-            await deleteRecursive(childId);
-          }
-        }
-
-        node.status = 'deleted';
-        await this.writeJson(this.getNodePath(sessionId, id), node);
-        deletedIds.push(id);
-      };
-
-      await deleteRecursive(messageNodeId);
-
-      if (targetNode.parent_id) {
-        await this.removeFromParentChildren(
-          sessionId, targetNode.parent_id, messageNodeId
-        );
+      // 1. 验证
+      if (!manifest.branches[branchName]) {
+        throw new Error(`Branch not found: ${branchName}`);
+      }
+      if (Object.keys(manifest.branches).length <= 1) {
+        throw new Error('Cannot delete the last branch');
       }
 
-      await this.repairManifestAfterDelete(nodeId, sessionId, messageNodeId, targetNode);
+      const branchHeadId = manifest.branches[branchName];
+
+      // 2. 收集"其他分支"需要的所有节点（受保护节点集合）
+      const protectedNodeIds = new Set<string>();
+      for (const [name, headId] of Object.entries(manifest.branches)) {
+        if (name === branchName) continue;
+        // 该分支 head 到 root 的整条祖先链都需要保护
+        await this.collectAncestorIds(sessionId, headId, protectedNodeIds);
+      }
+
+      // 3. 找到该分支的独占节点
+      //    从 branchHead 向上走，直到遇到受保护节点（分叉点）
+      const branchExclusiveChain = await this.collectExclusiveChain(
+        sessionId, branchHeadId, protectedNodeIds
+      );
+
+      // 4. 对独占节点执行软删除（含子树）
+      const deletedIds: string[] = [];
+
+      for (const exclusiveNodeId of branchExclusiveChain) {
+        if (options?.cascade !== false) {
+          // 递归删除该节点的所有后代（跳过受保护的）
+          await this.softDeleteExclusive(
+            sessionId, exclusiveNodeId, protectedNodeIds, deletedIds
+          );
+        } else {
+          // 只删除节点本身
+          const node = await this.readJson<ChatNode>(
+            this.getNodePath(sessionId, exclusiveNodeId)
+          );
+          if (node && node.status !== 'deleted') {
+            node.status = 'deleted';
+            await this.writeJson(
+              this.getNodePath(sessionId, exclusiveNodeId), node
+            );
+            deletedIds.push(exclusiveNodeId);
+          }
+        }
+      }
+
+      // 5. 更新受保护的分叉父节点的 children_ids
+      //    移除已删除的直接子节点
+      for (const deletedId of deletedIds) {
+        const deletedNode = await this.readJson<ChatNode>(
+          this.getNodePath(sessionId, deletedId)
+        );
+        if (deletedNode?.parent_id && protectedNodeIds.has(deletedNode.parent_id)) {
+          await this.removeFromParentChildren(
+            sessionId, deletedNode.parent_id, deletedId
+          );
+        }
+      }
+
+      // 6. 从 manifest 中移除分支
+      delete manifest.branches[branchName];
+
+      if (manifest.current_branch === branchName) {
+        const remaining = Object.keys(manifest.branches);
+        manifest.current_branch = remaining[0];
+        manifest.current_head = manifest.branches[remaining[0]];
+      }
+
+      manifest.updated_at = new Date().toISOString();
+      await this.engine.writeContent(nodeId, JSON.stringify(manifest, null, 2));
 
       return deletedIds;
     });
+  }
+
+  /**
+   * 从指定节点向上收集所有祖先节点 ID（含自身）
+   */
+  private async collectAncestorIds(
+    sessionId: string,
+    nodeId: string,
+    collected: Set<string>
+  ): Promise<void> {
+    let currentId: string | null = nodeId;
+    const visited = new Set<string>();
+
+    while (currentId) {
+      if (visited.has(currentId)) break;
+      visited.add(currentId);
+      collected.add(currentId);
+
+      const node: ChatNode | null = await this.readJson<ChatNode>(
+        this.getNodePath(sessionId, currentId)
+      );
+      if (!node) break;
+      currentId = node.parent_id;
+    }
+  }
+
+  /**
+   * 从 headNodeId 向上收集直到遇到受保护节点为止的独占链
+   * 返回的是从分叉点的直接子节点开始，到 head 的链
+   */
+  private async collectExclusiveChain(
+    sessionId: string,
+    headNodeId: string,
+    protectedNodeIds: Set<string>
+  ): Promise<string[]> {
+    const chain: string[] = [];
+    let currentId: string | null = headNodeId;
+    const visited = new Set<string>();
+
+    while (currentId) {
+      if (visited.has(currentId)) break;
+      visited.add(currentId);
+
+      // 遇到受保护节点，停止（这个节点是共享的分叉点）
+      if (protectedNodeIds.has(currentId)) break;
+
+      chain.push(currentId);
+
+      const node: ChatNode | null = await this.readJson<ChatNode>(
+        this.getNodePath(sessionId, currentId)
+      );
+      if (!node) break;
+      currentId = node.parent_id;
+    }
+
+    return chain;
+  }
+
+  /**
+   * 递归软删除节点及其子树，跳过受保护节点
+   */
+  private async softDeleteExclusive(
+    sessionId: string,
+    nodeId: string,
+    protectedNodeIds: Set<string>,
+    deletedIds: string[]
+  ): Promise<void> {
+    if (protectedNodeIds.has(nodeId)) return;
+
+    const path = this.getNodePath(sessionId, nodeId);
+    const node = await this.readJson<ChatNode>(path);
+    if (!node || node.status === 'deleted') return;
+
+    // 先递归删除子节点
+    for (const childId of node.children_ids) {
+      await this.softDeleteExclusive(
+        sessionId, childId, protectedNodeIds, deletedIds
+      );
+    }
+
+    node.status = 'deleted';
+    await this.writeJson(path, node);
+    deletedIds.push(nodeId);
   }
 
   async switchBranch(nodeId: string, sessionId: string, branchName: string): Promise<void> {

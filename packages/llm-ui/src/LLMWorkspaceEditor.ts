@@ -19,10 +19,8 @@ import {
 } from '@itookit/llm-engine';
 import { NodeAction, BranchItem } from './core/types';
 
-// Services（删除了 ContentService、BranchService）
 import { SessionService, StateService, AssetService } from './services';
 
-// Helpers
 import { AgentLoader } from './helpers/AgentLoader';
 import { StateManager } from './helpers/StateManager';
 import { NavigationHelper } from './helpers/NavigationHelper';
@@ -219,6 +217,9 @@ export class LLMWorkspaceEditor implements IEditor {
             onRequestModels: (agentId) => this.agentLoader.loadModelsForAgent(agentId),
         });
 
+        // ✅ 修复：绑定 chatInput getter 以支持 input 状态持久化
+        this.stateManager.setChatInputGetter(() => this.chatInput);
+
         // Helpers（依赖组件）
         this.navigationHelper = new NavigationHelper(this.container, this.sessionManager);
 
@@ -237,7 +238,7 @@ export class LLMWorkspaceEditor implements IEditor {
         this.uiUpdater = new UIUpdater(this.container, this.chatInput);
 
         this.historyView.setBranchActionCallback(
-            (action, nodeId, options) => this.handleBranchActionWithRefresh(action, nodeId, options)
+            (action, nodeId, options) => this.handleBranchAction(action, nodeId, options)
         );
     }
 
@@ -250,7 +251,6 @@ export class LLMWorkspaceEditor implements IEditor {
             onPrevAgent: () => this.handlePrevAgent(),
             onNextAgent: () => this.handleNextAgent(),
             onFoldOne: () => this.historyView.foldFirstUnfolded(),
-            //onCopyAgent: () => this.handleCopyAgent(),
             onCollapseAll: () => this.setAllSessionsFold(!this.isAllExpanded),
             onCopy: () => this.handleCopy(),
             onPrint: () => this.handlePrint(),
@@ -264,7 +264,7 @@ export class LLMWorkspaceEditor implements IEditor {
             onNavigateNext: () => this.navigationHelper.navigateToUserChat('next'),
             onCreateBranch: () => {
                 const currentId = this.navigationHelper.findCurrentVisibleSession();
-                if (currentId) this.handleBranchActionWithRefresh('create', currentId);
+                if (currentId) this.handleBranchAction('create', currentId);
             },
             onSwitchBranchPrev: () => this.switchBranchByOffset(-1),
             onSwitchBranchNext: () => this.switchBranchByOffset(1),
@@ -347,8 +347,9 @@ export class LLMWorkspaceEditor implements IEditor {
      * 从 SessionManager 获取分支列表并更新 titlebar 指示器
      * 
      * 调用时机：
-     *   - init 完成后
-     *   - branch_created / branch_switched / branch_deleted / branch_renamed 事件后
+     *   - init 完成后（唯一的主动调用）
+     *   - 事件驱动：branch_created / branch_switched / branch_deleted / branch_renamed
+     *   - 快捷键切换前确保缓存最新
      */
     private async refreshBranchIndicator(): Promise<void> {
         try {
@@ -362,63 +363,39 @@ export class LLMWorkspaceEditor implements IEditor {
 
             this.uiUpdater.updateBranchIndicator(
                 this.cachedBranches,
-                (headNodeId) => this.handleSwitchBranch(headNodeId)
+                (headNodeId) => this.handleBranchAction('select', headNodeId)
             );
         } catch (e) {
             console.warn('[LLMWorkspaceEditor] Failed to refresh branch indicator:', e);
             // 降级：显示默认单分支
             this.cachedBranches = [{ name: 'main', headNodeId: '', isCurrent: true }];
-            this.uiUpdater.updateBranchIndicator(
-                this.cachedBranches,
-                () => { }
-            );
+            this.uiUpdater.updateBranchIndicator(this.cachedBranches, () => { });
         }
     }
 
     /**
-     * 从 titlebar 下拉菜单或快捷键触发的分支切换
+     * ✅ 修复：统一的分支操作入口
+     * 
+     * 不再手动调用 renderFull/refreshBranchIndicator/flashBranchIndicator，
+     * 全部由 handleSessionEvent 中的事件驱动统一处理。
      */
-    private async handleSwitchBranch(branchHeadNodeId: string): Promise<void> {
-        try {
-            await this.branchManager.handleBranchAction('select', branchHeadNodeId);
-
-            // 切换后重新加载 history view
-            const sessions = this.sessionManager.getSessions();
-            this.historyView.renderFull(sessions);
-
-            await this.refreshBranchIndicator();
-            this.uiUpdater.flashBranchIndicator();
-            Toast.success('Branch switched');
-        } catch (e: any) {
-            console.error('[LLMWorkspaceEditor] Switch branch failed:', e);
-            Toast.error(e.message || 'Failed to switch branch');
-        }
-    }
-
-    /**
-     * 统一的分支操作入口，操作完成后刷新指示器
-     */
-    private async handleBranchActionWithRefresh(
+    private async handleBranchAction(
         action: string,
         nodeId: string,
         options?: { newName?: string; compareWith?: string }
     ): Promise<void> {
         console.log('[LLMWorkspaceEditor] handleBranchActionWithRefresh action:', action, nodeId, options);
         await this.branchManager.handleBranchAction(action as any, nodeId, options);
-
-        // 影响分支列表的操作 → 刷新指示器
-        const branchMutatingActions = new Set(['create', 'delete', 'select', 'rename']);
-        if (branchMutatingActions.has(action)) {
-            await this.refreshBranchIndicator();
-        }
     }
 
     /**
      * 通过偏移量切换分支（快捷键 ⌘⇧[ / ⌘⇧]）
      */
     private async switchBranchByOffset(offset: number): Promise<void> {
-        // 确保缓存是最新的
-        await this.refreshBranchIndicator();
+        // 缓存为空时才刷新
+        if (this.cachedBranches.length === 0) {
+            await this.refreshBranchIndicator();
+        }
 
         if (this.cachedBranches.length <= 1) {
             Toast.info('No other branches to switch to');
@@ -437,18 +414,21 @@ export class LLMWorkspaceEditor implements IEditor {
         if (wrappedIndex === currentIndex) return;
 
         const targetBranch = this.cachedBranches[wrappedIndex];
-        await this.handleSwitchBranch(targetBranch.headNodeId);
+        // 直接调用 BranchManager.select → SessionManager.navigateToBranch → 事件驱动刷新
+        await this.handleBranchAction('select', targetBranch.headNodeId);
     }
 
     // ================================================================
     // 事件处理
     // ================================================================
 
+    /**
+     * ✅ 修复：统一事件驱动，消除重复调用
+     * 
+     * 所有分支 UI 刷新（renderFull / refreshBranchIndicator / flash）
+     * 仅在此处根据事件类型触发一次。
+     */
     private handleSessionEvent(event: OrchestratorEvent): void {
-        // ✅ 分支切换事件：需要在 historyView.processEvent 之前拦截处理
-        //    因为 navigateToBranch 内部的 reloadSessionData 已经发了
-        //    session_cleared + session_start 序列给 historyView，
-        //    但 branch_switched 事件需要额外处理 indicator 和完整重渲染
         const branchEvents = new Set([
             'branch_created',
             'branch_switched',
@@ -456,7 +436,7 @@ export class LLMWorkspaceEditor implements IEditor {
             'branch_renamed',
         ]);
 
-        // 先让 HistoryView 处理所有事件（包括分支事件中的 UI 提示）
+        // 先让 HistoryView 处理所有事件
         this.historyView.processEvent(event);
 
         if (event.type === 'finished' || event.type === 'session_start') {
@@ -469,22 +449,18 @@ export class LLMWorkspaceEditor implements IEditor {
             this.uiUpdater.updateStatusIndicator('failed');
         }
 
-        // ✅ 分支事件：刷新 indicator + 必要时重渲染 history
+        // ✅ 分支事件：统一处理，每个事件只触发一次刷新
         if (branchEvents.has(event.type)) {
-            // branch_switched 和 branch_created（因为现在 create 后自动 switch）
-            // 都需要重渲染 history，因为 reloadSessionData 发的
-            // session_cleared + session_start 序列可能不够完整
+            // 需要重渲染 history 的事件
             if (event.type === 'branch_switched' || event.type === 'branch_created') {
                 const sessions = this.sessionManager.getSessions();
                 this.historyView.renderFull(sessions);
                 this.historyView.scrollToBottom(true);
-            }
-
-            this.refreshBranchIndicator();
-
-            if (event.type === 'branch_created' || event.type === 'branch_switched') {
                 this.uiUpdater.flashBranchIndicator();
             }
+
+            // 所有分支事件都刷新 indicator
+            this.refreshBranchIndicator();
         }
     }
 
@@ -686,9 +662,8 @@ export class LLMWorkspaceEditor implements IEditor {
                 onUnfoldAll: () => this.setAllSessionsFold(false),
                 onBatchDelete: (ids) => this.handleBatchDelete(ids),
                 onBatchCopy: (ids) => this.handleBatchCopy(ids),
-                onCreateBranch: (sourceId) => this.handleBranchActionWithRefresh('create', sourceId),
-                // ✅ 修改：切换分支后也刷新指示器
-                onSwitchBranch: (branchId) => this.handleSwitchBranch(branchId),
+                onCreateBranch: (sourceId) => this.handleBranchAction('create', sourceId),
+                onSwitchBranch: (branchId) => this.handleBranchAction('select', branchId),
             });
         }
 
