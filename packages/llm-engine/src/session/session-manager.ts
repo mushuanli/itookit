@@ -605,13 +605,13 @@ export class SessionManager {
 
     async switchToSibling(messageId: string, siblingIndex: number): Promise<void> {
         const { sessionId, nodeId, state } = this.ensureBound();
-    // ✅ 新增：生成中禁止操作
-    if (this.isGenerating()) {
-        throw new EngineError(
-            EngineErrorCode.SESSION_INVALID,
-            'Cannot switch sibling while generating'
-        );
-    }
+        // ✅ 新增：生成中禁止操作
+        if (this.isGenerating()) {
+            throw new EngineError(
+                EngineErrorCode.SESSION_INVALID,
+                'Cannot switch sibling while generating'
+            );
+        }
         const session = state.findSessionById(messageId);
         if (!session?.persistedNodeId) {
             throw new EngineError(EngineErrorCode.SESSION_INVALID, 'Message not found');
@@ -637,21 +637,21 @@ export class SessionManager {
     ): Promise<string> {
         const { sessionId, nodeId, state } = this.ensureBound();
 
-    // ✅ 新增：生成中禁止操作
-    if (this.isGenerating()) {
-        throw new EngineError(
-            EngineErrorCode.SESSION_INVALID,
-            'Cannot create branch while generating'
-        );
-    }
+        // ✅ 新增：生成中禁止操作
+        if (this.isGenerating()) {
+            throw new EngineError(
+                EngineErrorCode.SESSION_INVALID,
+                'Cannot create branch while generating'
+            );
+        }
 
-    const session = state.findSessionById(branchNodeId);
-    if (!session?.persistedNodeId) {
-        throw new EngineError(
-            EngineErrorCode.SESSION_INVALID,
-            `Message not found or not persisted: ${branchNodeId}`
-        );
-    }
+        const session = state.findSessionById(branchNodeId);
+        if (!session?.persistedNodeId) {
+            throw new EngineError(
+                EngineErrorCode.SESSION_INVALID,
+                `Message not found or not persisted: ${branchNodeId}`
+            );
+        }
 
         const newNodeId = await this.engine.createBranch(
             nodeId, sessionId, session.persistedNodeId,
@@ -692,13 +692,13 @@ export class SessionManager {
     async deleteBranch(branchNodeId: string, cascade: boolean = false): Promise<void> {
         const { sessionId, nodeId, state } = this.ensureBound();
 
-    // ✅ 新增：生成中禁止操作
-    if (this.isGenerating()) {
-        throw new EngineError(
-            EngineErrorCode.SESSION_INVALID,
-            'Cannot delete branch while generating'
-        );
-    }
+        // ✅ 新增：生成中禁止操作
+        if (this.isGenerating()) {
+            throw new EngineError(
+                EngineErrorCode.SESSION_INVALID,
+                'Cannot delete branch while generating'
+            );
+        }
         const manifest = await this.engine.getManifest(nodeId);
         if (branchNodeId === manifest.current_head) {
             throw new EngineError(
@@ -726,21 +726,22 @@ export class SessionManager {
     async navigateToBranch(targetNodeId: string): Promise<void> {
         const { sessionId, nodeId, state } = this.ensureBound();
 
-    // ✅ 新增：生成中禁止操作
-    if (this.isGenerating()) {
-        throw new EngineError(
-            EngineErrorCode.SESSION_INVALID,
-            'Cannot switch branch while generating'
-        );
-    }
+        // ✅ 新增：生成中禁止操作
+        if (this.isGenerating()) {
+            throw new EngineError(
+                EngineErrorCode.SESSION_INVALID,
+                'Cannot switch branch while generating'
+            );
+        }
 
-    // ✅ 修复：记录当前 head 作为 fromId
-    const manifest = await this.engine.getManifest(nodeId);
-    const fromId = manifest.current_head || '';
+        // ✅ 修复：记录当前 head 作为 fromId
+        const manifest = await this.engine.getManifest(nodeId);
+        const fromId = manifest.current_head || '';
 
-    await this.engine.updateManifestHead(nodeId, sessionId, targetNodeId);
-    await this.reloadSessionData(nodeId, sessionId, state);
+        await this.engine.updateManifestHead(nodeId, sessionId, targetNodeId);
+        await this.reloadSessionData(nodeId, sessionId, state);
 
+        console.log(`[navigateToBranch] fromId: ${fromId} toId: ${targetNodeId}`);
         this.eventBus.emitSession(sessionId, {
             type: 'branch_switched',
             payload: { fromId, toId: targetNodeId },
@@ -754,6 +755,9 @@ export class SessionManager {
     }>> {
         const { nodeId } = this.ensureBound();
         const manifest = await this.engine.getManifest(nodeId);
+
+        console.log('[listBranches] manifest.branches:', JSON.stringify(manifest.branches));
+        console.log('[listBranches] current_branch:', manifest.current_branch);
 
         return Object.entries(manifest.branches).map(([name, headNodeId]) => ({
             name,
@@ -776,42 +780,6 @@ export class SessionManager {
             .filter(Boolean) as SessionGroup[];
     }
 
-    async compareBranches(
-        nodeIdA: string,
-        nodeIdB: string
-    ): Promise<{
-        branchA: SessionGroup[];
-        branchB: SessionGroup[];
-        commonAncestorId: string | null;
-    }> {
-        const { sessionId, nodeId } = this.ensureBound();
-
-        const [contextA, contextB] = await Promise.all([
-            this.engine.getSessionContextFromHead(nodeId, sessionId, nodeIdA),
-            this.engine.getSessionContextFromHead(nodeId, sessionId, nodeIdB),
-        ]);
-
-        const idsA = new Set(contextA.map(item => item.node.id));
-        let commonAncestorId: string | null = null;
-
-        for (const item of contextB) {
-            if (idsA.has(item.node.id)) {
-                commonAncestorId = item.node.id;
-            }
-        }
-
-        const toSessionGroups = (items: ChatContextItem[]): SessionGroup[] =>
-            items
-                .filter(item => item.node.role !== 'system')
-                .map(item => Converters.chatNodeToSessionGroup(item.node))
-                .filter(Boolean) as SessionGroup[];
-
-        return {
-            branchA: toSessionGroups(contextA),
-            branchB: toSessionGroups(contextB),
-            commonAncestorId,
-        };
-    }
 
     // ================================================================
     // 会话设置

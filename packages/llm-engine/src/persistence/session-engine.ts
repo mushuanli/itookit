@@ -816,9 +816,12 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
       const newNodeId = generateUUID();
       const now = new Date().toISOString();
 
+      // 生成分支名称
+      const branchName = options?.name || this.generateBranchName(manifest);
+
       const branchMeta = {
         branchMetadata: {
-          branchName: options?.name,
+          branchName: branchName,  // ← 使用确定的分支名
           createdFrom: options?.createdFrom || 'manual',
           createdAt: now,
         }
@@ -848,14 +851,29 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
         }
       }
 
-      // 更新 manifest
-      manifest.current_head = newNodeId;
-      manifest.branches[manifest.current_branch] = newNodeId;
+      // ✅ 修复：创建新的分支条目，而不是覆盖当前分支
+      manifest.branches[branchName] = newNodeId;       // 新分支指向新节点
+      manifest.current_branch = branchName;             // 切换到新分支
+      manifest.current_head = newNodeId;                // 更新 head
       manifest.updated_at = now;
       await this.engine.writeContent(nodeId, JSON.stringify(manifest, null, 2));
 
       return newNodeId;
     });
+  }
+
+  /**
+ * 生成唯一的分支名称
+ */
+  private generateBranchName(manifest: ChatManifest): string {
+    const existingNames = new Set(Object.keys(manifest.branches));
+    let index = 1;
+    let name: string;
+    do {
+      name = `branch-${index}`;
+      index++;
+    } while (existingNames.has(name));
+    return name;
   }
 
   /**
