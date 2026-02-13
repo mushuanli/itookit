@@ -1,6 +1,6 @@
 // @file: llm-ui/components/FloatingNavPanel.ts
 
-import { SessionGroup } from '@itookit/llm-engine';
+import { SessionGroup, SessionManager } from '@itookit/llm-engine';
 import { FloatingNavPanelTemplates } from './templates/FloatingNavPanelTemplates';
 import { BranchItem } from '../core/types';
 
@@ -33,17 +33,17 @@ export interface ChatNavItem {
     index: number;
     timestamp: number;
     agentName?: string;
-
-    // ✅ 新增：分支信息
     branchName?: string;
     siblingIndex?: number;
     siblingCount?: number;
     hasChildren?: boolean;
 
-    // ✅ 新增：此 node 所属的 branch 名称列表
-    belongsToBranches?: string[];
-    // ✅ 新增：此 node 创建的 branch（分叉点标识）
-    createdBranch?: string;
+    // ✅ 只在分叉点显示子分支列表
+    childBranches?: Array<{
+        name: string;
+        headNodeId: string;
+        isCurrent: boolean;
+    }>;
 }
 
 export class FloatingNavPanel {
@@ -51,50 +51,123 @@ export class FloatingNavPanel {
     private panel: HTMLElement | null = null;
     private isVisible: boolean = false;
     private items: ChatNavItem[] = [];
-    private branches: BranchItem[] = [];  // ✅ 新增
+    private branches: BranchItem[] = [];
     private currentIndex: number = -1;
     private options: FloatingNavPanelOptions;
     private lastSelectedIndex: number = -1;
-
     private selectedIds: Set<string> = new Set();
     private viewMode: 'list' | 'tree' = 'list';
-
     private keydownHandler: ((e: KeyboardEvent) => void) | null = null;
+    private sessionManager: SessionManager;
 
-    constructor(container: HTMLElement, options: FloatingNavPanelOptions) {
+    constructor(
+        container: HTMLElement,
+        options: FloatingNavPanelOptions,
+        sessionManager: SessionManager
+    ) {
         this.container = container;
         this.options = options;
+        this.sessionManager = sessionManager;
     }
 
     /**
-     * 更新导航项列表
+     * ✅ 修复：只在分叉点显示子分支列表
      */
-    public updateItems(sessions: SessionGroup[], collapseStates: Record<string, boolean>): void {
-        this.items = sessions.map((session, index) => ({
-            id: session.id,
-            role: session.role,
-            preview: this.getPreview(session.content || session.executionRoot?.data.output || '', 30),
-            isCollapsed: collapseStates[session.id] ?? false,
-            index,
-            timestamp: session.timestamp,
-            agentName: session.executionRoot?.name,
-            branchName: session.branchInfo?.name,
-            siblingIndex: session.siblingIndex,
-            siblingCount: session.siblingCount,
-            hasChildren: session.branchInfo?.hasChildren
-        }));
+    public async updateItems(
+        sessions: SessionGroup[],
+        collapseStates: Record<string, boolean>
+    ): Promise<void> {
+        try {
+            const branchTree = await this.sessionManager.getBranchTree();
 
-        const currentIds = new Set(this.items.map(i => i.id));
-        this.selectedIds = new Set([...this.selectedIds].filter(id => currentIds.has(id)));
+            const nodeMap = new Map<string, any>();
+            const buildMap = (node: any) => {
+                nodeMap.set(node.id, node);
+                node.children?.forEach(buildMap);
+            };
+            buildMap(branchTree);
 
-        if (this.isVisible) {
-            this.render();
+            this.items = sessions.map((session, index) => {
+                const persistedId = session.persistedNodeId || session.id;
+                const treeNode = nodeMap.get(persistedId);
+
+                // ✅ 只在分叉点显示子分支
+                let childBranches: Array<{ name: string; headNodeId: string; isCurrent: boolean }> | undefined;
+
+                if (treeNode?.children && treeNode.children.length > 1) {
+                    // 收集所有子节点的第一个 branch（代表该子树的主分支）
+                    const branchMap = new Map<string, any>();
+
+                    treeNode.children.forEach((child: any) => {
+                        // 取子节点所属的第一个 branch（通常是最相关的）
+                        const branchName = child.memberOfBranches?.[0];
+                        if (branchName && !branchMap.has(branchName)) {
+                            branchMap.set(branchName, {
+                                name: branchName,
+                                headNodeId: child.id,
+                                isCurrent: child.isOnActivePath || false,
+                            });
+                        }
+                    });
+
+                    // 只有多个不同分支时才是真正的分叉点
+                    if (branchMap.size > 1) {
+                        childBranches = Array.from(branchMap.values());
+                    }
+                }
+
+                return {
+                    id: session.id,
+                    role: session.role,
+                    preview: this.getPreview(
+                        session.content || session.executionRoot?.data.output || '',
+                        30
+                    ),
+                    isCollapsed: collapseStates[session.id] ?? false,
+                    index,
+                    timestamp: session.timestamp,
+                    agentName: session.executionRoot?.name,
+                    branchName: session.branchInfo?.name,
+                    siblingIndex: session.siblingIndex,
+                    siblingCount: session.siblingCount,
+                    hasChildren: (treeNode?.children?.length || 0) > 0,
+                    childBranches,
+                };
+            });
+
+            const currentIds = new Set(this.items.map(i => i.id));
+            this.selectedIds = new Set([...this.selectedIds].filter(id => currentIds.has(id)));
+
+            if (this.isVisible) {
+                this.render();
+            }
+        } catch (e) {
+            console.warn('[FloatingNavPanel] Failed to load branch tree:', e);
+
+            // 降级：使用基础信息
+            this.items = sessions.map((session, index) => ({
+                id: session.id,
+                role: session.role,
+                preview: this.getPreview(
+                    session.content || session.executionRoot?.data.output || '',
+                    30
+                ),
+                isCollapsed: collapseStates[session.id] ?? false,
+                index,
+                timestamp: session.timestamp,
+                agentName: session.executionRoot?.name,
+                branchName: session.branchInfo?.name,
+                siblingIndex: session.siblingIndex,
+                siblingCount: session.siblingCount,
+                hasChildren: session.branchInfo?.hasChildren
+            }));
+
+            if (this.isVisible) {
+                this.render();
+            }
         }
     }
 
-    /**
- * ✅ 新增：更新分支数据
- */
     public updateBranches(branches: BranchItem[]): void {
         this.branches = branches;
         if (this.isVisible) {
@@ -175,7 +248,7 @@ export class FloatingNavPanel {
             this.selectedIds.size,
             this.viewMode,
             listContent,
-            branchBarHtml   // ✅ 新增参数
+            branchBarHtml
         );
 
         this.container.appendChild(this.panel);
@@ -250,7 +323,6 @@ export class FloatingNavPanel {
             });
         });
 
-        // ✅ 新增：绑定 branch bar 事件
         this.bindBranchBarEvents();
 
         const items = this.panel.querySelectorAll<HTMLElement>('.llm-nav-item');
@@ -260,7 +332,7 @@ export class FloatingNavPanel {
                 const id = item.dataset.id!;
                 const idx = parseInt(item.dataset.index!);
 
-                // ✅ 新增：点击 node 上的 branch 标签 → 切换到该 branch
+                // ✅ 点击子分支标签 → 切换到该 branch
                 const branchTag = target.closest('[data-branch-tag]') as HTMLElement;
                 if (branchTag) {
                     const branchName = branchTag.dataset.branchTag;
@@ -311,7 +383,6 @@ export class FloatingNavPanel {
         const branchBar = this.panel.querySelector('.llm-nav-panel__branch-bar');
         if (!branchBar) return;
 
-        // 1. Dropdown 展开/收起
         const selector = branchBar.querySelector('[data-branch-toggle]');
         const dropdown = branchBar.querySelector('.llm-nav-panel__branch-dropdown') as HTMLElement;
 
@@ -326,34 +397,17 @@ export class FloatingNavPanel {
                 }
             });
         }
-
-        // 2. 创建分支按钮
-        branchBar.querySelector('[data-branch-action="create"]')?.addEventListener('click', (e) => {
-            e.stopPropagation();
-            // 从当前选中的 node 创建分支
-            const sourceId = this.currentIndex >= 0
-                ? this.items[this.currentIndex].id
-                : this.items[this.items.length - 1]?.id;
-            if (sourceId) {
-                this.options.onCreateBranch?.(sourceId);
-            }
-        });
     }
 
-    /**
-     * ✅ 新增：打开 Branch Dropdown 并绑定项事件
-     */
     private openBranchDropdown(dropdown: HTMLElement): void {
         dropdown.innerHTML = FloatingNavPanelTemplates.renderBranchDropdownItems(this.branches);
         dropdown.style.display = 'block';
 
-        // 更新 chevron 方向
         const chevron = this.panel?.querySelector('.llm-nav-panel__branch-chevron');
         if (chevron) {
             chevron.innerHTML = '<polyline points="18 15 12 9 6 15"></polyline>';
         }
 
-        // 绑定每项点击 → 切换分支
         dropdown.querySelectorAll('.llm-nav-panel__branch-item').forEach(item => {
             item.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -367,7 +421,6 @@ export class FloatingNavPanel {
                 }
             });
 
-            // Rename 按钮
             item.querySelector('[data-branch-item-action="rename"]')?.addEventListener('click', (e) => {
                 e.stopPropagation();
                 const branchItem = (e.currentTarget as HTMLElement).closest('.llm-nav-panel__branch-item') as HTMLElement;
@@ -389,7 +442,6 @@ export class FloatingNavPanel {
             });
         });
 
-        // 点击面板其他区域关闭 dropdown
         const closeOnOutsideClick = (e: MouseEvent) => {
             const wrapper = this.panel?.querySelector('.llm-nav-panel__branch-selector-wrapper');
             if (wrapper && !wrapper.contains(e.target as Node)) {
@@ -397,15 +449,11 @@ export class FloatingNavPanel {
                 this.panel?.removeEventListener('click', closeOnOutsideClick);
             }
         };
-        // 延迟绑定，避免当前 click 事件冒泡立即触发
         setTimeout(() => {
             this.panel?.addEventListener('click', closeOnOutsideClick);
         }, 0);
     }
 
-    /**
-     * ✅ 新增：关闭 Branch Dropdown
-     */
     private closeBranchDropdown(dropdown: HTMLElement): void {
         dropdown.style.display = 'none';
         dropdown.innerHTML = '';
@@ -424,8 +472,6 @@ export class FloatingNavPanel {
         const actionsEl = branchItemEl.querySelector('.llm-nav-panel__branch-item-actions') as HTMLElement;
         if (!nameEl) return;
 
-        // 隐藏原有内容，插入输入框
-        const originalDisplay = actionsEl?.style.display;
         if (actionsEl) actionsEl.style.display = 'none';
 
         const renameHtml = FloatingNavPanelTemplates.renderBranchRenameInput(oldName);
@@ -589,17 +635,14 @@ export class FloatingNavPanel {
         const hasSelection = this.selectedIds.size > 0;
         const isAllSelected = this.selectedIds.size === this.items.length && this.items.length > 0;
 
-        // 更新全选按钮状态
         const selectAllBtn = this.panel.querySelector('[data-action="toggle-select-all"]');
         selectAllBtn?.classList.toggle('checked', isAllSelected);
 
-        // 更新选择计数
         const countEl = this.panel.querySelector('.llm-nav-panel__selection-count');
         if (countEl) {
             countEl.textContent = `${this.selectedIds.size} selected`;
         }
 
-        // 显示/隐藏操作按钮组
         const actionsGroup = this.panel.querySelector('.llm-nav-panel__toolbar-group--actions');
         const viewGroup = this.panel.querySelector('.llm-nav-panel__toolbar-group--view');
 
@@ -761,6 +804,6 @@ export class FloatingNavPanel {
     public destroy(): void {
         this.hide();
         this.items = [];
-        this.branches = [];  // ✅ 新增
+        this.branches = [];
     }
 }

@@ -698,25 +698,26 @@ export class LLMWorkspaceEditor implements IEditor {
                 onBatchCopy: (ids) => this.handleBatchCopy(ids),
                 onCreateBranch: (sourceId) => this.handleBranchAction('create', sourceId),
                 onSwitchBranch: (branchId) => this.handleBranchAction('select', branchId),
-
-                // ✅ 新增：分支 CRUD 回调
                 onSwitchBranchByName: (branchName) => this.handleSwitchBranchByName(branchName),
                 onRenameBranch: (oldName, newName) => this.handleBranchRename(oldName, newName),
                 onDeleteBranch: (branchName) => this.handleBranchDeleteByName(branchName),
-            });
+            },
+                this.sessionManager  // ✅ 传入 sessionManager
+            );
         }
 
-        const sessions = this.sessionManager.getSessions();
-        const collapseStates = this.stateManager.getCollapseStates();
-        this.floatingNav.updateItems(sessions, collapseStates);
+        // ✅ 改为异步
+        this.floatingNav.updateItems(
+            this.sessionManager.getSessions(),
+            this.stateManager.getCollapseStates()
+        ).then(() => {
+            this.floatingNav!.updateBranches(this.cachedBranches);
 
-        // ✅ 新增：传入分支数据
-        this.floatingNav.updateBranches(this.cachedBranches);
+            const visibleId = this.navigationHelper.findCurrentVisibleSession();
+            if (visibleId) this.floatingNav!.setCurrentChat(visibleId);
 
-        const visibleId = this.navigationHelper.findCurrentVisibleSession();
-        if (visibleId) this.floatingNav.setCurrentChat(visibleId);
-
-        this.floatingNav.toggle();
+            this.floatingNav!.toggle();
+        });
     }
 
     private toggleSessionFold(sessionId: string): void {
@@ -833,13 +834,13 @@ export class LLMWorkspaceEditor implements IEditor {
     /**
      * 刷新浮动导航面板数据
      */
-    private refreshFloatingNav(): void {
+    private async refreshFloatingNav(): Promise<void> {
         if (!this.floatingNav) return;
-        this.floatingNav.updateItems(
+        await this.floatingNav.updateItems(
             this.sessionManager.getSessions(),
             this.historyView.getCollapseStates()
         );
-        // ✅ 新增：同步分支数据
+        // ✅ 同步分支数据
         this.floatingNav.updateBranches(this.cachedBranches);
     }
 
