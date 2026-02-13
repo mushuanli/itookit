@@ -9,7 +9,7 @@ import { BranchAction } from '../core/types';
 export class BranchManager {
     constructor(
         private sessionManager: SessionManager,
-        private historyView: HistoryView,
+        _historyView: HistoryView,
         private scrollToSession: (sessionId: string) => void
     ) { }
 
@@ -23,8 +23,6 @@ export class BranchManager {
     ): Promise<void> {
         try {
             switch (action) {
-                case 'show-tree':
-                    return await this.showBranchTree();
                 case 'create':
                     return await this.createBranch(nodeId);
                 case 'navigate':
@@ -45,11 +43,6 @@ export class BranchManager {
             console.error('[BranchManager] Branch action failed:', e);
             Toast.error(e.message || 'Branch operation failed');
         }
-    }
-
-    async showBranchTree(): Promise<void> {
-        const tree = await this.sessionManager.getBranchTree();
-        this.historyView.showBranchTree(tree);
     }
 
     private async createBranch(sourceNodeId: string): Promise<void> {

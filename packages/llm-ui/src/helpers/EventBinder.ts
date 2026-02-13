@@ -17,7 +17,6 @@ export interface GlobalShortcutCallbacks {
     onToggleNavigator: () => void;
     onNavigatePrev: () => void;
     onNavigateNext: () => void;
-    onShowBranchTree: () => void;     // ✅ 改为必选
     onCreateBranch: () => void;        // ✅ 改为必选
     onSwitchBranchPrev?: () => void;   // ✅ 新增：快捷键切换上一个分支
     onSwitchBranchNext?: () => void;   // ✅ 新增：快捷键切换下一个分支
@@ -98,7 +97,6 @@ export class EventBinder {
                 'k': shortcuts.onToggleNavigator,
                 'ArrowUp': shortcuts.onNavigatePrev,
                 'ArrowDown': shortcuts.onNavigateNext,
-                'b': shortcuts.onShowBranchTree,
             };
 
             const handler = keyMap[e.key];

@@ -23,9 +23,15 @@ export interface DeleteResult {
 /** 折叠状态映射（统一定义，消除重复） */
 export type CollapseStateMap = Record<string, boolean>;
 
+
+export interface BranchItem {
+    name: string;
+    headNodeId: string;
+    isCurrent: boolean;
+}
+
 /** 分支操作类型 */
 export type BranchAction =
-    | 'show-tree'
     | 'create'
     | 'navigate'
     | 'rename'

@@ -2,47 +2,13 @@
 
 import { SessionSnapshot } from '@itookit/llm-engine';
 import { ChatInput } from '../components/ChatInput';
-import { BranchIndicator } from '../components/BranchIndicator';
-import { BranchItem } from '../components/templates/BranchIndicatorTemplates';
 
 export class UIUpdater {
-    private branchIndicator: BranchIndicator | null = null;
 
     constructor(
         private container: HTMLElement,
         private chatInput: ChatInput
     ) { }
-
-    /**
-     * ✅ 新增：初始化分支指示器
-     */
-    initBranchIndicator(callbacks: {
-        onSwitchBranch: (branchId: string) => void;
-        onCreateBranch: () => void;
-        onShowBranchTree: () => void;
-    }): BranchIndicator {
-        const indicatorContainer = this.container.querySelector('#llm-branch-indicator') as HTMLElement;
-        if (!indicatorContainer) {
-            throw new Error('[UIUpdater] Branch indicator container not found');
-        }
-
-        this.branchIndicator = new BranchIndicator(indicatorContainer, callbacks);
-        return this.branchIndicator;
-    }
-
-    /**
-     * ✅ 新增：更新分支指示器数据
-     */
-    updateBranchIndicator(branches: BranchItem[]): void {
-        this.branchIndicator?.update(branches);
-    }
-
-    /**
-     * ✅ 新增：分支切换成功后的视觉反馈
-     */
-    flashBranchIndicator(): void {
-        this.branchIndicator?.highlightTransition();
-    }
 
     /**
      * 根据快照更新状态
@@ -177,7 +143,6 @@ export class UIUpdater {
      * ✅ 新增：清理
      */
     destroy(): void {
-        this.branchIndicator?.destroy();
-        this.branchIndicator = null;
+
     }
 }
