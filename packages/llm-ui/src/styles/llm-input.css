@@ -1,540 +1,471 @@
-/* @file llm-ui/styles/llm-input.css */
+/* @file: llm-ui/styles/llm-input.css */
+/* =========================================
+   输入组件 (Input Component)
+   ========================================= */
 
-:root {
-  --llm-input-bg: #ffffff;
-  --llm-input-border: #e5e7eb;
-  --llm-input-focus-ring: #3b82f6;
-  --llm-input-text: #374151;
-  --llm-input-placeholder: #9ca3af;
-  --llm-input-radius: 12px;
-  --llm-input-padding: 12px;
-  --llm-settings-bg: #f8fafc;
-}
-
-/* --- Block: 主容器 --- */
+/* --- 主容器 --- */
 .llm-input {
-  display: flex;
-  flex-direction: column;
-  background: var(--llm-input-bg);
-  border: 1px solid var(--llm-input-border);
-  border-radius: var(--llm-input-radius);
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
-  transition: box-shadow 0.2s, border-color 0.2s;
-  position: relative;
-  overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    background: var(--llm-bg-primary);
+    border: 1px solid var(--llm-border-color);
+    border-radius: var(--llm-input-radius);
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+    transition: box-shadow var(--llm-transition-normal), border-color var(--llm-transition-normal);
+    position: relative;
+    overflow: hidden;
 }
 
 .llm-input:focus-within {
-  border-color: var(--llm-input-focus-ring);
-  box-shadow: 0 4px 12px -2px rgba(59, 130, 246, 0.15);
+    border-color: var(--llm-color-primary);
+    box-shadow: 0 4px 12px -2px rgba(59, 130, 246, 0.15);
 }
 
-/* ✨ 新增：设置面板 */
+/* --- 设置面板 --- */
 .llm-input__settings-panel {
-  background: var(--llm-settings-bg);
-  border-bottom: 1px solid var(--llm-input-border);
-  padding: 12px 16px;
-  animation: slideDown 0.2s ease-out;
-}
-
-.llm-input__settings-panel--entering {
-  animation: slideDown 0.2s ease-out;
-}
-
-@keyframes slideDown {
-  from {
-    opacity: 0;
-    transform: translateY(-10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+    background: var(--llm-settings-bg);
+    border-bottom: 1px solid var(--llm-border-color);
+    padding: 12px 16px;
+    animation: llm-ui-slideDown 0.2s ease-out;
 }
 
 .llm-input__settings-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
 }
 
 .llm-input__settings-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: #64748b;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--llm-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
 }
 
 .llm-input__settings-close {
-  background: none;
-  border: none;
-  padding: 4px;
-  cursor: pointer;
-  color: #94a3b8;
-  border-radius: 4px;
-  transition: all 0.15s;
+    background: none;
+    border: none;
+    padding: 4px;
+    cursor: pointer;
+    color: var(--llm-text-muted);
+    border-radius: var(--llm-radius-sm);
+    transition: all var(--llm-transition-fast);
 }
 
 .llm-input__settings-close:hover {
-  background: #e2e8f0;
-  color: #475569;
+    background: var(--llm-bg-hover);
+    color: var(--llm-text-primary);
 }
 
 .llm-input__settings-body {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
 }
 
 .llm-input__setting-row {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
 }
 
 .llm-input__setting-label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.85rem;
-  font-weight: 500;
-  color: var(--llm-input-text);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--llm-text-primary);
 }
 
 .llm-input__setting-icon {
-  font-size: 1rem;
+    font-size: 1rem;
 }
 
 .llm-input__setting-hint {
-  font-size: 0.75rem;
-  color: #94a3b8;
-  margin-top: 2px;
+    font-size: 0.75rem;
+    color: var(--llm-text-muted);
+    margin-top: 2px;
 }
 
 /* Model Select */
 .llm-input__model-select {
-  width: 100%;
-  padding: 8px 12px;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  font-size: 0.9rem;
-  background: white;
-  color: var(--llm-input-text);
-  cursor: pointer;
-  transition: border-color 0.15s;
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid var(--llm-border-color);
+    border-radius: var(--llm-radius-lg);
+    font-size: 0.9rem;
+    background: var(--llm-bg-primary);
+    color: var(--llm-text-primary);
+    cursor: pointer;
+    transition: border-color var(--llm-transition-fast);
 }
 
 .llm-input__model-select:hover {
-  border-color: #cbd5e1;
+    border-color: var(--llm-bg-hover);
 }
 
 .llm-input__model-select:focus {
-  outline: none;
-  border-color: var(--llm-input-focus-ring);
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+    outline: none;
+    border-color: var(--llm-color-primary);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
 /* History Slider */
 .llm-input__history-value {
-  margin-left: auto;
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: var(--llm-input-focus-ring);
-  background: #eff6ff;
-  padding: 2px 8px;
-  border-radius: 4px;
+    margin-left: auto;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--llm-color-primary);
+    background: var(--llm-color-primary-bg);
+    padding: 2px 8px;
+    border-radius: var(--llm-radius-sm);
 }
 
 .llm-input__slider-wrapper {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
 }
 
 .llm-input__history-slider {
-  width: 100%;
-  height: 6px;
-  -webkit-appearance: none;
-  appearance: none;
-  background: #e2e8f0;
-  border-radius: 3px;
-  outline: none;
-  cursor: pointer;
+    width: 100%;
+    height: 6px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: var(--llm-bg-hover);
+    border-radius: 3px;
+    outline: none;
+    cursor: pointer;
 }
 
 .llm-input__history-slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: var(--llm-input-focus-ring);
-  cursor: pointer;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  transition: transform 0.15s, box-shadow 0.15s;
+    -webkit-appearance: none;
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--llm-color-primary);
+    cursor: pointer;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    transition: transform var(--llm-transition-fast), box-shadow var(--llm-transition-fast);
 }
 
 .llm-input__history-slider::-webkit-slider-thumb:hover {
-  transform: scale(1.1);
-  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+    transform: scale(1.1);
+    box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
 }
 
 .llm-input__history-slider::-moz-range-thumb {
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: var(--llm-input-focus-ring);
-  cursor: pointer;
-  border: none;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--llm-color-primary);
+    cursor: pointer;
+    border: none;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .llm-input__slider-labels {
-  display: flex;
-  justify-content: space-between;
-  font-size: 0.7rem;
-  color: #94a3b8;
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.7rem;
+    color: var(--llm-text-muted);
 }
 
 /* Preset Buttons */
 .llm-input__presets {
-  flex-direction: row !important;
-  align-items: center;
-  flex-wrap: wrap;
+    flex-direction: row !important;
+    align-items: center;
+    flex-wrap: wrap;
 }
 
 .llm-input__presets .llm-input__setting-label {
-  font-size: 0.8rem;
-  color: #64748b;
-  margin-right: 8px;
+    font-size: 0.8rem;
+    color: var(--llm-text-secondary);
+    margin-right: 8px;
 }
 
 .llm-input__preset-buttons {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
 }
 
 .llm-input__preset-btn {
-  padding: 4px 10px;
-  font-size: 0.75rem;
-  border: 1px solid #e2e8f0;
-  border-radius: 16px;
-  background: white;
-  color: #64748b;
-  cursor: pointer;
-  transition: all 0.15s;
+    padding: 4px 10px;
+    font-size: 0.75rem;
+    border: 1px solid var(--llm-border-color);
+    border-radius: 16px;
+    background: var(--llm-bg-primary);
+    color: var(--llm-text-secondary);
+    cursor: pointer;
+    transition: all var(--llm-transition-fast);
 }
 
 .llm-input__preset-btn:hover {
-  border-color: var(--llm-input-focus-ring);
-  color: var(--llm-input-focus-ring);
+    border-color: var(--llm-color-primary);
+    color: var(--llm-color-primary);
 }
 
 .llm-input__preset-btn.active {
-  background: var(--llm-input-focus-ring);
-  border-color: var(--llm-input-focus-ring);
-  color: white;
+    background: var(--llm-color-primary);
+    border-color: var(--llm-color-primary);
+    color: white;
 }
 
-/* ✨ 主输入区域容器 */
+/* --- 主输入区域 --- */
 .llm-input__main {
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
-  padding: 8px;
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    padding: 8px;
 }
 
-/* --- Element: 左侧执行器选择器 --- */
+/* 执行器选择器 */
 .llm-input__executor-wrapper {
-  flex-shrink: 0;
-  position: relative;
-  margin-bottom: 4px; /* 视觉微调 */
+    flex-shrink: 0;
+    position: relative;
+    margin-bottom: 4px;
 }
 
 .llm-input__executor-select {
-  appearance: none;
-  background-color: #f3f4f6;
-  border: 1px solid transparent;
-  padding: 6px 24px 6px 10px;
-  border-radius: 6px;
-  font-size: 0.85rem;
-  font-weight: 500;
-  color: var(--llm-input-text);
-  cursor: pointer;
-  max-width: 120px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  overflow: hidden;
-  transition: all 0.2s;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23666' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 6px center;
+    appearance: none;
+    background-color: var(--llm-bg-tertiary);
+    border: 1px solid transparent;
+    padding: 6px 24px 6px 10px;
+    border-radius: var(--llm-radius-md);
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--llm-text-primary);
+    cursor: pointer;
+    max-width: 120px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    overflow: hidden;
+    transition: all var(--llm-transition-normal);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23666' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 6px center;
 }
 
 .llm-input__executor-select:hover {
-  background-color: #e5e7eb;
+    background-color: var(--llm-bg-hover);
 }
 
 .llm-input__executor-select:focus {
-  outline: none;
-  border-color: var(--llm-input-focus-ring);
+    outline: none;
+    border-color: var(--llm-color-primary);
 }
 
-/* --- Element: 输入框区域 --- */
+/* 输入框区域 */
 .llm-input__field-wrapper {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
 }
 
-/* ✨ 活动设置指示器 */
-.llm-input__active-settings {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 6px;
-}
-
-.llm-input__active-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  font-size: 0.75rem;
-  background: #eff6ff;
-  color: #1d4ed8;
-  border-radius: 12px;
-  border: 1px solid #bfdbfe;
-}
-
-.llm-input__active-badge[data-type="history"] {
-  background: #fef3c7;
-  color: #92400e;
-  border-color: #fcd34d;
-}
-
-.llm-input__badge-clear {
-  background: none;
-  border: none;
-  padding: 0 2px;
-  font-size: 0.9rem;
-  cursor: pointer;
-  opacity: 0.6;
-  transition: opacity 0.15s;
-  line-height: 1;
-}
-
-.llm-input__badge-clear:hover {
-  opacity: 1;
-}
-
-.llm-input__textarea {
-  width: 100%;
-  border: none;
-  background: transparent;
-  resize: none;
-  padding: 8px 0;
-  font-family: inherit;
-  font-size: 0.95rem;
-  line-height: 1.5;
-  color: var(--llm-input-text);
-  outline: none;
-  max-height: 200px; /* 限制最大高度 */
-  overflow-y: auto;
-}
-
-.llm-input__textarea::placeholder {
-  color: var(--llm-input-placeholder);
-}
-
-/* --- Element: 附件预览区域 (新增) --- */
-.llm-input__attachments {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 4px;
-}
-
-.llm-input__attachment-tag {
-  font-size: 0.75rem;
-  background: #eff6ff;
-  color: #1d4ed8;
-  padding: 2px 8px;
-  border-radius: 4px;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.llm-input__remove-btn {
-  cursor: pointer;
-  opacity: 0.6;
-  transition: opacity 0.15s;
-}
-
-.llm-input__remove-btn:hover {
-  opacity: 1;
-}
-
-/* --- Element: 右侧操作区 --- */
-.llm-input__actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-shrink: 0;
-  margin-bottom: 4px;
-}
-
-/* 通用图标按钮样式 */
-.llm-input__btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: #6b7280;
-  cursor: pointer;
-  transition: all 0.2s;
-  position: relative;
-}
-
-.llm-input__btn:hover {
-  background-color: #f3f4f6;
-  color: #111827;
-}
-
-.llm-input__btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-/* ✨ 设置按钮 */
-.llm-input__btn--settings.active {
-  background-color: #eff6ff;
-  color: var(--llm-input-focus-ring);
-}
-
-/* 设置按钮有覆盖值时的指示器 */
-.llm-input__btn--settings.has-overrides::after {
-  content: '';
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  width: 6px;
-  height: 6px;
-  background: #f59e0b;
-  border-radius: 50%;
-  border: 1px solid white;
-}
-
-/* 发送按钮 */
-.llm-input__btn--send {
-  background-color: var(--llm-input-focus-ring);
-  color: white;
-  margin-left: 4px;
-}
-
-.llm-input__btn--send:hover {
-  background-color: #2563eb;
-}
-
-.llm-input__btn--send:disabled {
-  background-color: #93c5fd;
-  cursor: not-allowed;
-}
-
-/* 停止按钮 */
-.llm-input__btn--stop {
-  background-color: #ef4444;
-  color: white;
-}
-
-.llm-input__btn--stop:hover {
-  background-color: #dc2626;
-}
-
-/* 拖拽状态 */
 .llm-input__field-wrapper--drag-active {
-  background: #eff6ff;
-  border-radius: 8px;
+    background: var(--llm-color-primary-bg);
+    border-radius: var(--llm-radius-lg);
 }
 
 .llm-input__field-wrapper--disabled {
-  opacity: 0.6;
-  pointer-events: none;
+    opacity: 0.6;
+    pointer-events: none;
 }
 
-/* 响应式调整 */
-@media (max-width: 600px) {
-  .llm-input__settings-body {
-    gap: 12px;
-  }
-  
-  .llm-input__presets {
-    flex-direction: column !important;
-    align-items: flex-start;
-  }
-  
-  .llm-input__preset-buttons {
+/* 活动设置指示器 */
+.llm-input__active-settings {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+.llm-input__active-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    font-size: 0.75rem;
+    background: var(--llm-color-primary-bg);
+    color: var(--llm-color-primary-hover);
+    border-radius: var(--llm-radius-xl);
+    border: 1px solid var(--llm-color-primary-light);
+}
+
+.llm-input__active-badge[data-type="history"] {
+    background: var(--llm-color-warning-bg);
+    color: #92400e;
+    border-color: #fcd34d;
+}
+
+.llm-input__badge-clear {
+    background: none;
+    border: none;
+    padding: 0 2px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    opacity: 0.6;
+    transition: opacity var(--llm-transition-fast);
+    line-height: 1;
+}
+
+.llm-input__badge-clear:hover {
+    opacity: 1;
+}
+
+.llm-input__textarea {
     width: 100%;
-  }
-  
-  .llm-input__preset-btn {
-    flex: 1;
-    text-align: center;
-  }
-  
-  .llm-input__executor-select {
-    max-width: 90px;
-  }
+    border: none;
+    background: transparent;
+    resize: none;
+    padding: 8px 0;
+    font-family: inherit;
+    font-size: 0.95rem;
+    line-height: 1.5;
+    color: var(--llm-text-primary);
+    outline: none;
+    max-height: 200px;
+    overflow-y: auto;
 }
 
-/* 暗色模式支持 */
-@media (prefers-color-scheme: dark) {
-  :root {
-    --llm-input-bg: #1e1e1e;
-    --llm-input-border: #3d3d3d;
-    --llm-input-text: #e5e5e5;
-    --llm-input-placeholder: #6b6b6b;
-    --llm-settings-bg: #252525;
-  }
-  
-  .llm-input__executor-select {
-    background-color: #2d2d2d;
-    color: #e5e5e5;
-  }
-  
-  .llm-input__model-select {
-    background: #2d2d2d;
-    border-color: #3d3d3d;
-    color: #e5e5e5;
-  }
-  
-  .llm-input__history-slider {
-    background: #3d3d3d;
-  }
-  
-  .llm-input__preset-btn {
-    background: #2d2d2d;
-    border-color: #3d3d3d;
-    color: #a1a1a1;
-  }
-  
-  .llm-input__preset-btn:hover {
-    border-color: var(--llm-input-focus-ring);
-  }
-  
-  .llm-input__settings-close:hover {
-    background: #3d3d3d;
-  }
+.llm-input__textarea::placeholder {
+    color: var(--llm-text-placeholder);
+}
+
+/* 附件预览 */
+.llm-input__attachments {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+.llm-input__attachment-tag {
+    font-size: 0.75rem;
+    background: var(--llm-color-primary-bg);
+    color: var(--llm-color-primary-hover);
+    padding: 2px 8px;
+    border-radius: var(--llm-radius-sm);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.llm-input__remove-btn {
+    cursor: pointer;
+    opacity: 0.6;
+    transition: opacity var(--llm-transition-fast);
+}
+
+.llm-input__remove-btn:hover {
+    opacity: 1;
+}
+
+/* 操作区 */
+.llm-input__actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+    margin-bottom: 4px;
+}
+
+.llm-input__btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border: none;
+    border-radius: var(--llm-radius-md);
+    background: transparent;
+    color: var(--llm-text-secondary);
+    cursor: pointer;
+    transition: all var(--llm-transition-normal);
+    position: relative;
+}
+
+.llm-input__btn:hover {
+    background-color: var(--llm-bg-tertiary);
+    color: var(--llm-text-primary);
+}
+
+.llm-input__btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.llm-input__btn--settings.active {
+    background-color: var(--llm-color-primary-bg);
+    color: var(--llm-color-primary);
+}
+
+.llm-input__btn--settings.has-overrides::after {
+    content: '';
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 6px;
+    height: 6px;
+    background: var(--llm-color-warning);
+    border-radius: 50%;
+    border: 1px solid white;
+}
+
+.llm-input__btn--send {
+    background-color: var(--llm-color-primary);
+    color: white;
+    margin-left: 4px;
+}
+
+.llm-input__btn--send:hover {
+    background-color: var(--llm-color-primary-hover);
+}
+
+.llm-input__btn--send:disabled {
+    background-color: #93c5fd;
+    cursor: not-allowed;
+}
+
+.llm-input__btn--stop {
+    background-color: var(--llm-color-error);
+    color: white;
+}
+
+.llm-input__btn--stop:hover {
+    background-color: var(--llm-color-error-hover);
+}
+
+/* --- 响应式 --- */
+@media (max-width: 600px) {
+    .llm-input__settings-body {
+        gap: 12px;
+    }
+
+    .llm-input__presets {
+        flex-direction: column !important;
+        align-items: flex-start;
+    }
+
+    .llm-input__preset-buttons {
+        width: 100%;
+    }
+
+    .llm-input__preset-btn {
+        flex: 1;
+        text-align: center;
+    }
+
+    .llm-input__executor-select {
+        max-width: 90px;
+    }
 }
