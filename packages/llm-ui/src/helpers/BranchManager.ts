@@ -9,12 +9,12 @@ export class BranchManager {
     constructor(
         private sessionManager: SessionManager,
         _historyView: HistoryView,
-        private scrollToSession: (sessionId: string) => void
+        _scrollToSession: (sessionId: string) => void
     ) { }
 
     /**
      * 分支操作统一入口
-     * 
+     *
      * 注意：所有操作完成后由 SessionManager 发送事件，
      * UI 刷新统一在 LLMWorkspaceEditor.handleSessionEvent 中处理。
      */
@@ -29,14 +29,9 @@ export class BranchManager {
                 case 'create':
                     return await this.createBranch(nodeId);
                 case 'rename':
-                    if (options?.newName) {
-                        await this.sessionManager.renameBranch(nodeId, options.newName);
-                        Toast.success('Branch renamed');
-                    }
-                    return;
+                    return await this.renameBranch(nodeId, options?.newName);
                 case 'delete':
                     return await this.deleteBranch(nodeId);
-
                 case 'select':
                     return await this.selectBranch(nodeId);
             }
@@ -44,6 +39,18 @@ export class BranchManager {
             console.error('[BranchManager] Branch action failed:', e);
             Toast.error(e.message || 'Branch operation failed');
         }
+    }
+
+    /**
+     * headNodeId → branchName 查找
+     */
+    private async resolveBranchName(headNodeId: string): Promise<string> {
+        const branches = await this.sessionManager.listBranches();
+        const branch = branches.find(b => b.headNodeId === headNodeId);
+        if (!branch) {
+            throw new Error(`No branch found for head node: ${headNodeId}`);
+        }
+        return branch.name;
     }
 
     private async createBranch(sourceNodeId: string): Promise<void> {
@@ -58,25 +65,14 @@ export class BranchManager {
         });
 
         // 创建后自动切换到新分支
-        // → 触发 branch_switched 事件，UI 刷新由事件处理统一完成
-        await this.sessionManager.navigateToBranch(newNodeId);
+        const newBranchName = await this.resolveBranchName(newNodeId);
+        await this.sessionManager.switchBranch(newBranchName);
 
         Toast.success(`Branch "${branchName || 'Untitled'}" created`);
     }
 
     /**
-     * ✅ 新增：确定分叉点
-     * 
-     * 如果用户在 user message 上点击 "Create Branch"：
-     *   → 分叉点 = 该 user message 之前的最后一条 assistant message
-     *   → 这样新分支停在上一轮对话结束处，等待用户输入新问题
-     * 
-     * 如果用户在 assistant message 上点击 "Create Branch"：
-     *   → 分叉点 = 该 assistant message 本身
-     *   → 新分支包含这条 assistant 回复
-     * 
-     * 如果是第一条 user message（没有前驱）：
-     *   → 使用该 user message 自身作为分叉点（回退到 root）
+     * 确定分叉点
      */
     private findBranchPoint(sourceNodeId: string): string {
         const sessions = this.sessionManager.getSessions();
@@ -100,23 +96,36 @@ export class BranchManager {
         return sourceNodeId;
     }
 
-    private async deleteBranch(nodeId: string): Promise<void> {
+    /**
+     * 切换到指定分支（传入 headNodeId，内部转为 branchName）
+     */
+    private async selectBranch(headNodeId: string): Promise<void> {
+        const branchName = await this.resolveBranchName(headNodeId);
+        await this.sessionManager.switchBranch(branchName);
+    }
+
+    /**
+     * 重命名分支（传入 headNodeId，内部转为 branchName）
+     */
+    private async renameBranch(headNodeId: string, newName?: string): Promise<void> {
+        if (!newName) return;
+        const oldName = await this.resolveBranchName(headNodeId);
+        await this.sessionManager.renameBranch(oldName, newName);
+        Toast.success('Branch renamed');
+    }
+
+    /**
+     * 删除分支（传入 headNodeId，内部转为 branchName）
+     */
+    private async deleteBranch(headNodeId: string): Promise<void> {
         const confirmed = await showConfirmDialog(
             'Delete this branch and all its children?'
         );
         if (!confirmed) return;
 
-        await this.sessionManager.deleteBranch(nodeId, true);
+        const branchName = await this.resolveBranchName(headNodeId);
+        await this.sessionManager.deleteBranch(branchName, true);
         Toast.success('Branch deleted');
-    }
-
-    /**
-     * 切换到指定分支
-     * → SessionManager.navigateToBranch 内部发送 branch_switched 事件
-     * → UI 刷新由事件处理统一完成
-     */
-    private async selectBranch(branchId: string): Promise<void> {
-        await this.sessionManager.navigateToBranch(branchId);
     }
 
     private promptBranchName(): Promise<string | null> {
