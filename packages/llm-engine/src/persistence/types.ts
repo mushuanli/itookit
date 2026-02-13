@@ -72,12 +72,9 @@ export interface AppendMessageMeta {
     /** ✅ 关键：父用户消息 ID（建立用户-助手关联） */
     parentUserNodeId?: string;
 
-    // === 分支元数据 ===
-    branchMetadata?: {
-        branchName?: string;
-        createdFrom?: 'retry' | 'edit' | 'manual';
-        createdAt?: string;
-    };
+    // === 分支创建信息（不可变，仅记录创建方式） ===
+    branchCreatedFrom?: 'retry' | 'edit' | 'manual';
+    branchCreatedAt?: string;
 }
 
 /**
@@ -145,8 +142,12 @@ export interface BranchTreeNode {
     role: 'system' | 'user' | 'assistant' | 'tool';
     content: string;
     timestamp: number;
-    isActive: boolean;
-    branchName?: string;
+    /** 该节点是否在当前活跃路径上（root → current_head 的完整链） */
+    isOnActivePath: boolean;
+    /** 该节点属于哪些 branch（从 manifest 推导） */
+    memberOfBranches: string[];
+    /** 如果是某个 branch 的 head 节点，记录 branch 名 */
+    branchHead?: string;
     createdFrom?: 'retry' | 'edit' | 'manual';
     children: BranchTreeNode[];
 }
@@ -161,153 +162,58 @@ export interface ILLMSessionEngine extends IBaseSessionEngine {
 
     /** 创建新会话 */
     createSession(title: string, systemPrompt?: string): Promise<string>;
-
-    /** 初始化已存在的空文件 */
     initializeExistingFile(nodeId: string, title: string, systemPrompt?: string): Promise<string>;
 
-    // 上下文
     getSessionContext(nodeId: string, sessionId: string): Promise<ChatContextItem[]>;
-
-    /** 获取 Manifest */
+    getSessionContextFromHead(nodeId: string, sessionId: string, headNodeId: string): Promise<ChatContextItem[]>;
     getManifest(nodeId: string): Promise<ChatManifest>;
 
-    appendMessage(
-        nodeId: string,
-        sessionId: string,
-        role: ChatNode['role'],
-        content: string,
-        meta?: AppendMessageMeta
-    ): Promise<string>;
+    appendMessage(nodeId: string, sessionId: string, role: ChatNode['role'], content: string, meta?: AppendMessageMeta): Promise<string>;
+    updateNode(sessionId: string, messageId: string, updates: { content?: string; meta?: UpdateMessageMeta; status?: ChatNode['status'] }): Promise<void>;
+    deleteMessage(nodeId: string, sessionId: string, messageNodeId: string): Promise<void>;
+    deleteMessages(nodeId: string, sessionId: string, messageNodeIds: string[]): Promise<void>;
 
-    /** 更新节点 */
-    updateNode(
-        sessionId: string,
-        messageId: string,
-        updates: {
-            content?: string;
-            meta?: UpdateMessageMeta;
-            status?: ChatNode['status'];
-        }
-    ): Promise<void>;
-
-    deleteMessage(
-        nodeId: string,
-        sessionId: string,
-        messageNodeId: string
-    ): Promise<void>;
-    deleteMessages(
-        nodeId: string,
-        sessionId: string,
-        messageNodeIds: string[]
-    ): Promise<void>;
-
-    /** 编辑消息（创建分支） */
-    editMessage(
-        nodeId: string,
-        sessionId: string,
-        originalMessageId: string,
-        newContent: string
-    ): Promise<string>;
+    /** 编辑消息：自动为旧路径保留 branch，创建并列新节点 */
+    editMessage(nodeId: string, sessionId: string, originalMessageId: string, newContent: string): Promise<string>;
 
     // === 分支操作 ===
 
-    switchBranch(
-        nodeId: string,
-        sessionId: string,
-        branchName: string
-    ): Promise<void>;
+    switchBranch(nodeId: string, sessionId: string, branchName: string): Promise<void>;
 
-    createBranch(
-        nodeId: string,
-        sessionId: string,
-        sourceMessageId: string,
-        options?: {
-            name?: string;
-            copyContent?: boolean;
-            createdFrom?: 'retry' | 'edit' | 'manual';
-        }
-    ): Promise<string>;
+    /** 创建分支：在 sourceNode 的 parent 下创建并列节点 */
+    createBranch(nodeId: string, sessionId: string, sourceMessageId: string, options?: {
+        name?: string;
+        copyContent?: boolean;
+        createdFrom?: 'retry' | 'edit' | 'manual';
+    }): Promise<string>;
 
-    /**
-     * ✅ 新增：获取分支树
-     */
-    getBranchTree(
-        sessionId: string,
-        nodeId: string,
-        rootNodeId?: string
-    ): Promise<BranchTreeNode>;
+    /** 查找包含目标节点的 branch，优先返回 current_branch */
+    findBranchForNode(nodeId: string, sessionId: string, targetNodeId: string): Promise<string | null>;
 
-    /**
-     * ✅ 新增：重命名分支
-     */
-    renameBranch(
-        nodeId: string,
-        sessionId: string,
-        oldName: string,
-        newName: string
-    ): Promise<void>;
+    /** 将已存在的路径注册为新 branch，自动找最深叶子作为 head */
+    registerPathAsBranch(nodeId: string, sessionId: string, targetNodeId: string, branchName?: string): Promise<string>;
 
-    /**
-     * ✅ 新增：删除分支
-     */
-    deleteBranch(
-        nodeId: string,
-        sessionId: string,
-        branchName: string,          // ← 从 messageNodeId 改为 branchName
-        options?: { cascade?: boolean }
-    ): Promise<string[]>;
+    /** 获取分支树（标记完整活跃路径 + 多 branch 归属） */
+    getBranchTree(sessionId: string, nodeId: string, rootNodeId?: string): Promise<BranchTreeNode>;
 
-    /** 获取节点的兄弟节点 */
+    /** 重命名分支（仅修改 manifest，不修改节点） */
+    renameBranch(nodeId: string, sessionId: string, oldName: string, newName: string): Promise<void>;
+
+    /** 删除分支（只删除独占节点，保护共享节点） */
+    deleteBranch(nodeId: string, sessionId: string, branchName: string, options?: { cascade?: boolean }): Promise<string[]>;
+
     getNodeSiblings(sessionId: string, messageId: string): Promise<ChatNode[]>;
-
-    /** 从 VFS nodeId 获取 sessionId */
     getSessionIdFromNodeId(nodeId: string): Promise<string | null>;
-    /** 
-     * ✅ 新增：根据相对路径读取会话内的资产内容 
-     * 用于 Engine 在运行时解析 Markdown 引用
-     */
     readSessionAsset(sessionId: string, assetPath: string): Promise<Blob | null>;
 
-    // ✅ 新增：UI 状态管理
     getUIState(nodeId: string): Promise<ChatManifest['ui_state'] | null>;
     updateUIState(nodeId: string, updates: Partial<NonNullable<ChatManifest['ui_state']>>): Promise<void>;
 
-    /**
-     * 获取会话设置
-     * @param sessionId 会话 ID
-     * @returns 会话设置，如果不存在返回默认值
-     */
     getSessionSettings(sessionId: string): Promise<ChatSessionSettings>;
-    /**
-     * ✅ 新增：根据指定 head 节点获取上下文
-     */
-    getSessionContextFromHead(
-        nodeId: string,
-        sessionId: string,
-        headNodeId: string
-    ): Promise<ChatContextItem[]>;
-
-    /**
-     * 保存会话设置
-     * @param sessionId 会话 ID
-     * @param settings 要保存的设置（增量合并）
-     */
     saveSessionSettings(sessionId: string, settings: Partial<ChatSessionSettings>): Promise<void>;
 
     // === Manifest 维护 ===
-
-    /**
-     * 验证并修复 manifest 一致性
-     */
     validateManifest(nodeId: string, sessionId: string): Promise<boolean>;
-
-    /**
-     * 原子性更新 manifest 的 current_head（带锁）
-     */
-    updateManifestHead(
-        nodeId: string,
-        sessionId: string,
-        targetNodeId: string
-    ): Promise<void>;
+    updateManifestHead(nodeId: string, sessionId: string, targetNodeId: string): Promise<void>;
 }
 
