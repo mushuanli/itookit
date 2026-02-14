@@ -134,16 +134,6 @@
     white-space: nowrap;
 }
 
-.llm-nav-panel__branch-count {
-    font-size: 10px;
-    padding: 2px 6px;
-    background: var(--vscode-badge-background, var(--llm-bg-tertiary));
-    color: var(--vscode-badge-foreground, var(--llm-text-primary));
-    border-radius: 10px;
-    font-weight: 600;
-    flex-shrink: 0;
-}
-
 .llm-nav-panel__branch-chevron {
     flex-shrink: 0;
     color: var(--vscode-descriptionForeground, var(--llm-text-muted));
@@ -166,6 +156,12 @@
     padding: 4px 0;
 }
 
+.llm-nav-panel__branch-separator {
+    height: 1px;
+    background: var(--vscode-panel-border, var(--llm-border-color));
+    margin: 4px 0;
+}
+
 .llm-nav-panel__branch-item {
     display: flex;
     align-items: center;
@@ -181,7 +177,10 @@
 
 .llm-nav-panel__branch-item--current {
     background: var(--vscode-list-activeSelectionBackground, rgba(var(--llm-color-primary-rgb), 0.15));
-    cursor: default;
+}
+
+.llm-nav-panel__branch-item[data-branch-name="__all__"] {
+    font-weight: 500;
 }
 
 .llm-nav-panel__branch-item-dot {
@@ -369,17 +368,6 @@
     color: var(--llm-color-error);
 }
 
-/* 视图切换按钮 */
-.llm-nav-panel__view-btn {
-    opacity: 0.6;
-}
-
-.llm-nav-panel__view-btn.active {
-    opacity: 1;
-    background: var(--vscode-toolbar-hoverBackground, var(--llm-bg-hover));
-}
-
-/* 全选 Checkbox */
 .llm-nav-panel__btn--checkbox {
     position: relative;
 }
@@ -490,20 +478,6 @@
     border-color: var(--vscode-focusBorder, rgba(var(--llm-color-primary-rgb), 0.3));
 }
 
-/* 树形视图 */
-.llm-nav-item--tree {
-    border-left: 3px solid transparent;
-}
-
-.llm-nav-item--tree:hover {
-    border-left-color: var(--llm-color-primary);
-}
-
-.llm-nav-item--tree.llm-nav-item--active {
-    border-left-color: var(--llm-color-primary);
-}
-
-/* Checkbox */
 .llm-nav-item__checkbox {
     width: 18px;
     height: 18px;
@@ -622,19 +596,24 @@
 
 /* 分支相关 */
 .llm-nav-item__branch-name {
-    font-size: 11px;
-    color: var(--vscode-descriptionForeground, var(--llm-text-muted));
-    background: var(--vscode-badge-background, var(--llm-bg-tertiary));
+    display: inline-flex;
+    align-items: center;
     padding: 2px 6px;
-    border-radius: 3px;
+    font-size: 10px;
+    background: rgba(var(--llm-color-primary-rgb), 0.1);
+    color: var(--llm-color-primary);
+    border-radius: 4px;
+    font-weight: 500;
 }
 
 .llm-nav-item__branch-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 6px;
     font-size: 10px;
-    color: var(--vscode-badge-foreground, white);
     background: var(--vscode-badge-background, var(--llm-bg-tertiary));
-    padding: 2px 5px;
-    border-radius: 3px;
+    color: var(--vscode-badge-foreground, var(--llm-text-primary));
+    border-radius: 4px;
     font-weight: 500;
 }
 
@@ -648,6 +627,7 @@
     background: rgba(var(--llm-color-primary-rgb), 0.05);
     border-radius: var(--llm-radius-md);
     border-left: 3px solid var(--llm-color-primary);
+    flex-wrap: wrap;
 }
 
 .llm-nav-item__fork-icon {
@@ -692,10 +672,17 @@
     box-shadow: none;
 }
 
+/* Branch 操作按钮 */
 .llm-nav-item__branch-actions {
     display: flex;
     gap: 4px;
     margin-top: 6px;
+    opacity: 0;
+    transition: opacity var(--llm-transition-fast);
+}
+
+.llm-nav-item:hover .llm-nav-item__branch-actions {
+    opacity: 1;
 }
 
 .llm-nav-item__branch-btn {
@@ -708,7 +695,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: background var(--llm-transition-fast);
+    transition: all var(--llm-transition-fast);
 }
 
 .llm-nav-item__branch-btn:hover:not(:disabled) {
@@ -727,12 +714,10 @@
     border: 1px dashed var(--vscode-input-border, var(--llm-border-color));
     border-radius: var(--llm-radius-sm);
     cursor: pointer;
-    opacity: 0.5;
     transition: all var(--llm-transition-fast);
 }
 
 .llm-nav-item__branch-btn--create:hover {
-    opacity: 1;
     background: var(--llm-color-primary);
     border-color: var(--llm-color-primary);
     border-style: solid;
@@ -784,6 +769,10 @@
     .llm-nav-panel__toolbar {
         flex-wrap: wrap;
     }
+
+    .llm-nav-item__branch-actions {
+        opacity: 1;
+    }
 }
 
 @media (max-width: 480px) {
@@ -793,5 +782,10 @@
 
     .llm-nav-panel__selection-count {
         display: none;
+    }
+
+    .llm-nav-item__branch-tag {
+        font-size: 10px;
+        padding: 2px 6px;
     }
 }

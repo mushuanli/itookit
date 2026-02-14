@@ -3,6 +3,7 @@
 import { SessionGroup, SessionManager } from '@itookit/llm-engine';
 import { FloatingNavPanelTemplates } from './templates/FloatingNavPanelTemplates';
 import { BranchItem } from '../core/types';
+import { showConfirmDialog, Toast } from '@itookit/common';
 
 export interface FloatingNavPanelOptions {
     onNavigate: (sessionId: string) => void;
@@ -37,13 +38,15 @@ export interface ChatNavItem {
     siblingIndex?: number;
     siblingCount?: number;
     hasChildren?: boolean;
-
-    // ✅ 只在分叉点显示子分支列表
+    // 该节点所属的所有 branch 名称（用于筛选和删除判断）
+    memberOfBranches?: string[];
     childBranches?: Array<{
         name: string;
         headNodeId: string;
         isCurrent: boolean;
     }>;
+    // 从该节点及其后续节点分离出的所有 branch（用于删除提示）
+    descendantBranches?: string[];
 }
 
 export class FloatingNavPanel {
@@ -51,14 +54,16 @@ export class FloatingNavPanel {
     private panel: HTMLElement | null = null;
     private isVisible: boolean = false;
     private items: ChatNavItem[] = [];
+    private allItems: ChatNavItem[] = []; // 所有节点（跨 branch）
     private branches: BranchItem[] = [];
     private currentIndex: number = -1;
     private options: FloatingNavPanelOptions;
     private lastSelectedIndex: number = -1;
     private selectedIds: Set<string> = new Set();
-    private viewMode: 'list' | 'tree' = 'list';
     private keydownHandler: ((e: KeyboardEvent) => void) | null = null;
     private sessionManager: SessionManager;
+    // 当前 dropdown 筛选：null 表示 "all"，string 表示具体 branch
+    private filterBranch: string | null = null;
 
     constructor(
         container: HTMLElement,
@@ -87,13 +92,11 @@ export class FloatingNavPanel {
             };
             buildMap(branchTree);
 
-            this.items = sessions.map((session, index) => {
+            this.allItems = sessions.map((session, index) => {
                 const persistedId = session.persistedNodeId || session.id;
                 const treeNode = nodeMap.get(persistedId);
 
-                // ✅ 只在分叉点显示子分支
-                let childBranches: Array<{ name: string; headNodeId: string; isCurrent: boolean }> | undefined;
-
+                let childBranches: ChatNavItem['childBranches'];
                 if (treeNode?.children && treeNode.children.length > 1) {
                     // 收集所有子节点的第一个 branch（代表该子树的主分支）
                     const branchMap = new Map<string, any>();
@@ -116,6 +119,9 @@ export class FloatingNavPanel {
                     }
                 }
 
+                // 收集从该节点及后代分离出的所有 branch
+                const descendantBranches = this.collectDescendantBranches(treeNode);
+
                 return {
                     id: session.id,
                     role: session.role,
@@ -131,9 +137,13 @@ export class FloatingNavPanel {
                     siblingIndex: session.siblingIndex,
                     siblingCount: session.siblingCount,
                     hasChildren: (treeNode?.children?.length || 0) > 0,
+                    memberOfBranches: treeNode?.memberOfBranches || [],
                     childBranches,
+                    descendantBranches,
                 };
             });
+
+            this.applyFilter();
 
             const currentIds = new Set(this.items.map(i => i.id));
             this.selectedIds = new Set([...this.selectedIds].filter(id => currentIds.has(id)));
@@ -144,8 +154,7 @@ export class FloatingNavPanel {
         } catch (e) {
             console.warn('[FloatingNavPanel] Failed to load branch tree:', e);
 
-            // 降级：使用基础信息
-            this.items = sessions.map((session, index) => ({
+            this.allItems = sessions.map((session, index) => ({
                 id: session.id,
                 role: session.role,
                 preview: this.getPreview(
@@ -159,8 +168,12 @@ export class FloatingNavPanel {
                 branchName: session.branchInfo?.name,
                 siblingIndex: session.siblingIndex,
                 siblingCount: session.siblingCount,
-                hasChildren: session.branchInfo?.hasChildren
+                hasChildren: session.branchInfo?.hasChildren,
+                memberOfBranches: session.branchInfo?.name ? [session.branchInfo.name] : [],
+                descendantBranches: [],
             }));
+
+            this.applyFilter();
 
             if (this.isVisible) {
                 this.render();
@@ -168,8 +181,48 @@ export class FloatingNavPanel {
         }
     }
 
+    /**
+     * 递归收集节点及其所有后代所属的 branch 名称（去重）
+     */
+    private collectDescendantBranches(treeNode: any): string[] {
+        if (!treeNode) return [];
+        const branches = new Set<string>();
+        const collect = (node: any) => {
+            node.memberOfBranches?.forEach((b: string) => branches.add(b));
+            node.children?.forEach(collect);
+        };
+        // 只收集子节点的，不包含当前节点自身所在的主路径 branch
+        treeNode.children?.forEach(collect);
+        return Array.from(branches);
+    }
+
+    /**
+     * 根据 filterBranch 筛选 items
+     */
+    private applyFilter(): void {
+        if (this.filterBranch === null) {
+            // "All" 模式：显示所有节点
+            this.items = this.allItems.map((item, idx) => ({ ...item, index: idx }));
+        } else {
+            // 筛选属于指定 branch 的节点
+            this.items = this.allItems
+                .filter(item => item.memberOfBranches?.includes(this.filterBranch!))
+                .map((item, idx) => ({ ...item, index: idx }));
+        }
+    }
+
     public updateBranches(branches: BranchItem[]): void {
         this.branches = branches;
+
+        // ✅ 自动同步 filterBranch 到当前活跃的 branch
+        // 除非用户明确选择了 "All" 模式
+        const currentBranch = branches.find(b => b.isCurrent);
+        if (currentBranch && this.filterBranch !== null) {
+            // 只在非 "All" 模式下同步
+            this.filterBranch = currentBranch.name;
+            this.applyFilter();
+        }
+
         if (this.isVisible) {
             this.render();
         }
@@ -211,8 +264,8 @@ export class FloatingNavPanel {
         }
     }
 
-    public setViewMode(mode: 'list' | 'tree'): void {
-        this.viewMode = mode;
+    // 保留接口兼容，但内部不再区分 list/tree — 统一视图
+    public setViewMode(_mode: 'list' | 'tree'): void {
         if (this.isVisible) {
             this.render();
         }
@@ -235,10 +288,12 @@ export class FloatingNavPanel {
 
         const listContent = this.items.length === 0
             ? FloatingNavPanelTemplates.renderEmpty()
-            : (this.viewMode === 'list' ? this.renderList() : this.renderTreeView());
+            : this.renderUnifiedList();
 
-        // ✅ 新增：生成 branch bar HTML
-        const branchBarHtml = FloatingNavPanelTemplates.renderBranchBar(this.branches);
+        const branchBarHtml = FloatingNavPanelTemplates.renderBranchBar(
+            this.branches,
+            this.filterBranch
+        );
 
         this.panel.innerHTML = FloatingNavPanelTemplates.renderPanel(
             currentUserIdx,
@@ -246,7 +301,7 @@ export class FloatingNavPanel {
             hasSelection,
             isAllSelected,
             this.selectedIds.size,
-            this.viewMode,
+            'list', // 统一视图，参数保留兼容
             listContent,
             branchBarHtml
         );
@@ -260,27 +315,17 @@ export class FloatingNavPanel {
         });
     }
 
-    private renderTreeView(): string {
+    /**
+     * 统一列表渲染：在每个 item 中同时显示 fold、branch 信息
+     */
+    private renderUnifiedList(): string {
         return this.items.map((item, idx) => {
             const isActive = idx === this.currentIndex;
             const isSelected = this.selectedIds.has(item.id);
             const timeStr = this.formatTime(item.timestamp);
             const title = item.role === 'user' ? 'You' : (item.agentName || 'Assistant');
 
-            return FloatingNavPanelTemplates.renderTreeItem(
-                item, idx, isActive, isSelected, timeStr, title
-            );
-        }).join('');
-    }
-
-    private renderList(): string {
-        return this.items.map((item, idx) => {
-            const isActive = idx === this.currentIndex;
-            const isSelected = this.selectedIds.has(item.id);
-            const timeStr = this.formatTime(item.timestamp);
-            const title = item.role === 'user' ? 'You' : (item.agentName || 'Assistant');
-
-            return FloatingNavPanelTemplates.renderListItem(
+            return FloatingNavPanelTemplates.renderUnifiedItem(
                 item, idx, isActive, isSelected, timeStr, title
             );
         }).join('');
@@ -400,7 +445,10 @@ export class FloatingNavPanel {
     }
 
     private openBranchDropdown(dropdown: HTMLElement): void {
-        dropdown.innerHTML = FloatingNavPanelTemplates.renderBranchDropdownItems(this.branches);
+        dropdown.innerHTML = FloatingNavPanelTemplates.renderBranchDropdownItems(
+            this.branches,
+            this.filterBranch
+        );
         dropdown.style.display = 'block';
 
         const chevron = this.panel?.querySelector('.llm-nav-panel__branch-chevron');
@@ -408,16 +456,33 @@ export class FloatingNavPanel {
             chevron.innerHTML = '<polyline points="18 15 12 9 6 15"></polyline>';
         }
 
-        dropdown.querySelectorAll('.llm-nav-panel__branch-item').forEach(item => {
+        // "All" 选项
+        dropdown.querySelector('[data-branch-name="__all__"]')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.filterBranch = null;
+            this.applyFilter();
+            this.closeBranchDropdown(dropdown);
+            this.render();
+        });
+
+        dropdown.querySelectorAll('.llm-nav-panel__branch-item:not([data-branch-name="__all__"])').forEach(item => {
             item.addEventListener('click', (e) => {
                 e.stopPropagation();
                 const el = e.currentTarget as HTMLElement;
-                if (el.classList.contains('llm-nav-panel__branch-item--current')) return;
-
                 const branchName = el.dataset.branchName;
                 if (branchName) {
+                    // ✅ 检查是否已在该 branch
+                    const isAlreadySelected = this.filterBranch === branchName;
+
                     this.closeBranchDropdown(dropdown);
-                    this.options.onSwitchBranchByName?.(branchName);
+
+                    // 只有在切换到不同 branch 时才调用回调
+                    if (!isAlreadySelected) {
+                        this.filterBranch = branchName;
+                        this.applyFilter();
+                        this.options.onSwitchBranchByName?.(branchName);
+                        this.render();
+                    }
                 }
             });
 
@@ -430,7 +495,6 @@ export class FloatingNavPanel {
                 }
             });
 
-            // Delete 按钮
             item.querySelector('[data-branch-item-action="delete"]')?.addEventListener('click', (e) => {
                 e.stopPropagation();
                 const branchItem = (e.currentTarget as HTMLElement).closest('.llm-nav-panel__branch-item') as HTMLElement;
@@ -464,9 +528,6 @@ export class FloatingNavPanel {
         }
     }
 
-    /**
-     * ✅ 新增：内联重命名分支
-     */
     private startBranchRename(branchItemEl: HTMLElement, oldName: string): void {
         const nameEl = branchItemEl.querySelector('.llm-nav-panel__branch-item-name') as HTMLElement;
         const actionsEl = branchItemEl.querySelector('.llm-nav-panel__branch-item-actions') as HTMLElement;
@@ -489,14 +550,15 @@ export class FloatingNavPanel {
             if (newName && newName !== oldName) {
                 this.options.onRenameBranch?.(oldName, newName);
             }
-            // dropdown 会因为 branch 数据更新而重新渲染，不需要手动恢复 DOM
         };
 
         const cancel = () => {
-            // 恢复原始 DOM：直接重新渲染 dropdown
             const dropdown = this.panel?.querySelector('.llm-nav-panel__branch-dropdown') as HTMLElement;
             if (dropdown && dropdown.style.display !== 'none') {
-                dropdown.innerHTML = FloatingNavPanelTemplates.renderBranchDropdownItems(this.branches);
+                dropdown.innerHTML = FloatingNavPanelTemplates.renderBranchDropdownItems(
+                    this.branches,
+                    this.filterBranch
+                );
                 this.openBranchDropdown(dropdown);
             }
         };
@@ -515,6 +577,63 @@ export class FloatingNavPanel {
             if (e.key === 'Enter') { e.stopPropagation(); confirm(); }
             else if (e.key === 'Escape') { e.stopPropagation(); cancel(); }
         });
+    }
+
+    /**
+     * 收集待删除节点影响的所有 branch（从该节点或其后续节点分离的）
+     */
+    private collectAffectedBranches(sessionIds: string[]): string[] {
+        const affected = new Set<string>();
+        //const deleteSet = new Set(sessionIds);
+
+        for (const id of sessionIds) {
+            const item = this.allItems.find(i => i.id === id);
+            if (!item) continue;
+
+            // 该节点的 childBranches（从此节点分叉出的）
+            item.childBranches?.forEach(cb => affected.add(cb.name));
+
+            // 该节点后代分离出的所有 branch
+            item.descendantBranches?.forEach(b => affected.add(b));
+        }
+
+        // 过滤掉当前 branch（不应该删除自己正在用的）
+        const currentBranch = this.branches.find(b => b.isCurrent);
+        if (currentBranch) {
+            affected.delete(currentBranch.name);
+        }
+
+        return Array.from(affected);
+    }
+
+    /**
+     * 判断哪些 branch 会因为节点删除而失效
+     * （branch 的所有独占节点都被删除了）
+     */
+    private findInvalidatedBranches(sessionIds: string[]): string[] {
+        const deleteSet = new Set(sessionIds);
+        const invalidated: string[] = [];
+
+        for (const branch of this.branches) {
+            if (branch.isCurrent) continue;
+
+            // 找到该 branch 独占的节点（不属于其他 branch 的）
+            const branchNodes = this.allItems.filter(
+                item => item.memberOfBranches?.includes(branch.name)
+            );
+
+            // 如果该 branch 的 head 节点被删除，或所有独占节点都被删除，则失效
+            const headDeleted = deleteSet.has(branch.headNodeId);
+            const allExclusiveDeleted = branchNodes
+                .filter(n => n.memberOfBranches?.length === 1)
+                .every(n => deleteSet.has(n.id));
+
+            if (headDeleted || (branchNodes.length > 0 && allExclusiveDeleted)) {
+                invalidated.push(branch.name);
+            }
+        }
+
+        return invalidated;
     }
 
     private async handleAction(action?: string): Promise<void> {
@@ -556,11 +675,7 @@ export class FloatingNavPanel {
                 this.render();
                 break;
             case 'batch-delete':
-                if (this.selectedIds.size > 0) {
-                    await this.options.onBatchDelete?.(Array.from(this.selectedIds));
-                    this.selectedIds.clear();
-                    this.render();
-                }
+                await this.handleBatchDeleteWithBranchCheck();
                 break;
             case 'batch-copy':
                 if (this.selectedIds.size > 0) {
@@ -572,6 +687,50 @@ export class FloatingNavPanel {
         }
     }
 
+    /**
+     * 删除节点时检查受影响的 branch，提示用户，并清理失效 branch
+     */
+    private async handleBatchDeleteWithBranchCheck(): Promise<void> {
+        if (this.selectedIds.size === 0) return;
+
+        const ids = Array.from(this.selectedIds);
+        const affectedBranches = this.collectAffectedBranches(ids);
+        const invalidatedBranches = this.findInvalidatedBranches(ids);
+
+        // 构建确认消息
+        let message = `Delete ${ids.length} message(s)?`;
+
+        if (affectedBranches.length > 0) {
+            message += `\n\nThe following branches fork from the selected nodes or their descendants:\n• ${affectedBranches.join('\n• ')}`;
+        }
+
+        if (invalidatedBranches.length > 0) {
+            message += `\n\nThe following branches will become invalid and be deleted:\n• ${invalidatedBranches.join('\n• ')}`;
+        }
+
+        const confirmed = await showConfirmDialog(message);
+        if (!confirmed) return;
+
+        // 先删除失效的 branch
+        for (const branchName of invalidatedBranches) {
+            try {
+                await this.options.onDeleteBranch?.(branchName);
+            } catch (e) {
+                console.warn(`[FloatingNavPanel] Failed to delete invalidated branch: ${branchName}`, e);
+            }
+        }
+
+        // 再删除节点
+        await this.options.onBatchDelete?.(ids);
+        this.selectedIds.clear();
+
+        if (invalidatedBranches.length > 0) {
+            Toast.info(`Deleted ${ids.length} message(s) and ${invalidatedBranches.length} invalidated branch(es)`);
+        }
+
+        this.render();
+    }
+
     private handleBranchAction(action: string, sessionId: string, index: number): void {
         const item = this.items[index];
 
@@ -581,17 +740,14 @@ export class FloatingNavPanel {
                     this.options.onSwitchBranch?.(sessionId);
                 }
                 break;
-
             case 'next-branch':
                 if (item.siblingIndex! < (item.siblingCount || 1) - 1) {
                     this.options.onSwitchBranch?.(sessionId);
                 }
                 break;
-
             case 'create-branch':
                 this.options.onCreateBranch?.(sessionId);
                 break;
-
             case 'show-children':
                 this.options.onShowBranchTree?.();
                 break;
@@ -611,7 +767,6 @@ export class FloatingNavPanel {
     private selectRange(start: number, end: number): void {
         const min = Math.min(start, end);
         const max = Math.max(start, end);
-
         for (let i = min; i <= max; i++) {
             this.selectedIds.add(this.items[i].id);
         }
@@ -681,9 +836,8 @@ export class FloatingNavPanel {
                     e.preventDefault();
                     this.navigateNext();
                     break;
-                // ✅ 新增：分支导航快捷键
                 case 'ArrowLeft':
-                    if (this.viewMode === 'tree' && this.currentIndex >= 0) {
+                    if (this.currentIndex >= 0) {
                         e.preventDefault();
                         const item = this.items[this.currentIndex];
                         if (item.siblingIndex! > 0) {
@@ -691,44 +845,29 @@ export class FloatingNavPanel {
                         }
                     }
                     break;
-
                 case 'ArrowRight':
-                    if (this.viewMode === 'tree' && this.currentIndex >= 0) {
+                    if (this.currentIndex >= 0) {
                         e.preventDefault();
                         const item = this.items[this.currentIndex];
                         if (e.shiftKey) {
-                            // Shift + → 创建分支
                             this.options.onCreateBranch?.(item.id);
                         } else if (item.siblingIndex! < (item.siblingCount || 1) - 1) {
-                            // → 切换到下一个分支
                             this.options.onSwitchBranch?.(item.id);
                         }
                     }
                     break;
-
                 case 'Enter':
                     e.preventDefault();
                     if (this.currentIndex >= 0) {
                         this.options.onNavigate(this.items[this.currentIndex].id);
                     }
                     break;
-
                 case 'b':
-                    // B 键：显示分支树
                     if (e.ctrlKey || e.metaKey) {
                         e.preventDefault();
                         this.options.onShowBranchTree?.();
                     }
                     break;
-
-                case 't':
-                    // T 键：切换视图模式
-                    if (e.ctrlKey || e.metaKey) {
-                        e.preventDefault();
-                        this.setViewMode(this.viewMode === 'list' ? 'tree' : 'list');
-                    }
-                    break;
-
                 case 'a':
                     if (e.ctrlKey || e.metaKey) {
                         e.preventDefault();
@@ -804,6 +943,7 @@ export class FloatingNavPanel {
     public destroy(): void {
         this.hide();
         this.items = [];
+        this.allItems = [];
         this.branches = [];
     }
 }
