@@ -14,7 +14,7 @@ export const FloatingNavPanelTemplates = {
         hasSelection: boolean,
         isAllSelected: boolean,
         selectedCount: number,
-        viewMode: 'list' | 'tree',
+        _viewMode: 'list' | 'tree', // 保留参数兼容，但不再使用
         listContent: string,
         branchDropdownHtml: string
     ): string => `
@@ -70,29 +70,6 @@ export const FloatingNavPanelTemplates = {
 
             <!-- 右侧：视图控制 -->
             <div class="llm-nav-panel__toolbar-group llm-nav-panel__toolbar-group--view ${hasSelection ? 'hidden' : ''}">
-                <button class="llm-nav-panel__btn llm-nav-panel__view-btn ${viewMode === 'list' ? 'active' : ''}" 
-                        data-view="list" title="List View">
-                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-                        <line x1="8" y1="6" x2="21" y2="6"></line>
-                        <line x1="8" y1="12" x2="21" y2="12"></line>
-                        <line x1="8" y1="18" x2="21" y2="18"></line>
-                        <line x1="3" y1="6" x2="3.01" y2="6"></line>
-                        <line x1="3" y1="12" x2="3.01" y2="12"></line>
-                        <line x1="3" y1="18" x2="3.01" y2="18"></line>
-                    </svg>
-                </button>
-                <button class="llm-nav-panel__btn llm-nav-panel__view-btn ${viewMode === 'tree' ? 'active' : ''}" 
-                        data-view="tree" title="Tree View (Branches)">
-                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-                        <line x1="6" y1="3" x2="6" y2="15"></line>
-                        <circle cx="18" cy="6" r="3"></circle>
-                        <circle cx="6" cy="18" r="3"></circle>
-                        <path d="M18 9a9 9 0 0 1-9 9"></path>
-                    </svg>
-                </button>
-                
-                <div class="llm-nav-panel__toolbar-sep"></div>
-                
                 <button class="llm-nav-panel__btn" data-action="fold-all" title="Fold All">
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
                         <polyline points="4 14 10 14 10 20"></polyline>
@@ -126,9 +103,9 @@ export const FloatingNavPanelTemplates = {
         <div class="llm-nav-panel__footer">
             <span class="llm-nav-panel__hint">
                 <kbd>↑↓</kbd> Navigate &nbsp;
+                <kbd>←→</kbd> Switch Branch &nbsp;
+                <kbd>Shift+→</kbd> Create Branch &nbsp;
                 <kbd>Shift+Click</kbd> Range Select &nbsp;
-                ${viewMode === 'tree' ? '<kbd>←→</kbd> Switch Branch &nbsp; <kbd>Shift+→</kbd> Create Branch &nbsp;' : ''}
-                <kbd>Ctrl+T</kbd> Toggle View &nbsp;
                 <kbd>Esc</kbd> Close
             </span>
         </div>
@@ -142,11 +119,13 @@ export const FloatingNavPanelTemplates = {
     `,
 
     /**
-     * 渲染 Branch 选择栏（插入 header 与 toolbar 之间）
+     * 渲染 Branch 选择栏，支持 "All" 选项
      */
-    renderBranchBar: (branches: BranchItem[]): string => {
-        const currentBranch = branches.find(b => b.isCurrent);
-        const currentName = currentBranch?.name || 'main';
+    renderBranchBar: (branches: BranchItem[], filterBranch: string | null): string => {
+        //const currentBranch = branches.find(b => b.isCurrent);
+        const displayName = filterBranch === null
+            ? `All (${branches.length} branches)`
+            : (filterBranch || 'main');
         const hasManyBranches = branches.length > 1;
 
         return `
@@ -160,9 +139,8 @@ export const FloatingNavPanelTemplates = {
                             <circle cx="6" cy="18" r="3"></circle>
                             <path d="M18 9a9 9 0 0 1-9 9"></path>
                         </svg>
-                        <span class="llm-nav-panel__branch-label">${escapeHTML(currentName)}</span>
+                        <span class="llm-nav-panel__branch-label">${escapeHTML(displayName)}</span>
                         ${hasManyBranches ? `
-                            <span class="llm-nav-panel__branch-count">${branches.length}</span>
                             <svg class="llm-nav-panel__branch-chevron" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
                                 <polyline points="6 9 12 15 18 9"></polyline>
                             </svg>
@@ -176,14 +154,30 @@ export const FloatingNavPanelTemplates = {
         `;
     },
 
-    renderBranchDropdownItems: (branches: BranchItem[]): string => {
-        return branches.map(branch => {
-            const currentClass = branch.isCurrent ? 'llm-nav-panel__branch-item--current' : '';
+    /**
+     * 渲染 Branch Dropdown，包含 "All" 选项
+     */
+    renderBranchDropdownItems: (branches: BranchItem[], filterBranch: string | null): string => {
+        const isAllSelected = filterBranch === null;
+
+        const allItem = `
+            <div class="llm-nav-panel__branch-item ${isAllSelected ? 'llm-nav-panel__branch-item--current' : ''}" 
+                 data-branch-name="__all__">
+                <span class="llm-nav-panel__branch-item-dot">${isAllSelected ? '●' : '○'}</span>
+                <span class="llm-nav-panel__branch-item-name">All (${branches.length} branches)</span>
+            </div>
+            <div class="llm-nav-panel__branch-separator"></div>
+        `;
+
+        const branchItems = branches.map(branch => {
+            const currentClass = !isAllSelected && filterBranch === branch.name
+                ? 'llm-nav-panel__branch-item--current'
+                : '';
             return `
                 <div class="llm-nav-panel__branch-item ${currentClass}" 
                      data-branch-name="${escapeHTML(branch.name)}"
                      data-branch-head="${escapeHTML(branch.headNodeId)}">
-                    <span class="llm-nav-panel__branch-item-dot">${branch.isCurrent ? '●' : '○'}</span>
+                    <span class="llm-nav-panel__branch-item-dot">${currentClass ? '●' : '○'}</span>
                     <span class="llm-nav-panel__branch-item-name">${escapeHTML(branch.name)}</span>
                     <div class="llm-nav-panel__branch-item-actions">
                         <button class="llm-nav-panel__branch-item-btn" 
@@ -206,6 +200,8 @@ export const FloatingNavPanelTemplates = {
                 </div>
             `;
         }).join('');
+
+        return allItem + branchItems;
     },
 
     renderBranchRenameInput: (currentName: string): string => `
@@ -217,7 +213,10 @@ export const FloatingNavPanelTemplates = {
         </div>
     `,
 
-    renderListItem: (
+    /**
+     * 统一列表项渲染：同时显示 fold、branch 信息、子分支
+     */
+    renderUnifiedItem: (
         item: ChatNavItem,
         idx: number,
         isActive: boolean,
@@ -230,49 +229,17 @@ export const FloatingNavPanelTemplates = {
         const activeClass = isActive ? 'llm-nav-item--active' : '';
         const collapsedClass = item.isCollapsed ? 'llm-nav-item--collapsed' : '';
 
-        return `
-            <div class="llm-nav-item ${activeClass} ${collapsedClass} ${isSelected ? 'selected' : ''}" 
-                 data-id="${item.id}" 
-                 data-index="${idx}">
-                <div class="llm-nav-item__checkbox ${isSelected ? 'checked' : ''}" data-checkbox="true"></div>
-                <span class="llm-nav-item__fold" data-fold="true">${foldIcon}</span>
-                <span class="llm-nav-item__icon">${icon}</span>
-                <div class="llm-nav-item__content">
-                    <div class="llm-nav-item__header">
-                        <span class="llm-nav-item__title">${escapeHTML(title)}</span>
-                        <span class="llm-nav-item__time">${timeStr}</span>
-                    </div>
-                    <div class="llm-nav-item__preview">${escapeHTML(item.preview)}</div>
-                </div>
-                <span class="llm-nav-item__index">#${idx + 1}</span>
-            </div>
-        `;
-    },
-
-    /**
-     * 渲染树形视图项
-     */
-    renderTreeItem: (
-        item: ChatNavItem,
-        idx: number,
-        isActive: boolean,
-        isSelected: boolean,
-        timeStr: string,
-        title: string
-    ): string => {
-        const icon = item.role === 'user' ? '👤' : '🤖';
-        const activeClass = isActive ? 'llm-nav-item--active' : '';
-
+        // Branch 信息
         const hasBranches = (item.siblingCount || 0) > 1;
-        const branchInfo = hasBranches
-            ? `<span class="llm-nav-item__branch-badge">${item.siblingIndex! + 1}/${item.siblingCount}</span>`
+        const branchBadge = hasBranches
+            ? `<span class="llm-nav-item__branch-badge" title="Branch ${item.siblingIndex! + 1} of ${item.siblingCount}">${item.siblingIndex! + 1}/${item.siblingCount}</span>`
             : '';
 
         const branchName = item.branchName
-            ? `<span class="llm-nav-item__branch-name">${escapeHTML(item.branchName)}</span>`
+            ? `<span class="llm-nav-item__branch-name" title="Branch: ${escapeHTML(item.branchName)}">${escapeHTML(item.branchName)}</span>`
             : '';
 
-        // ✅ 只在真正的分叉点显示子分支列表
+        // 子分支列表（分叉点）
         const childBranchesHtml = item.childBranches && item.childBranches.length > 0
             ? `<div class="llm-nav-item__child-branches">
                 <span class="llm-nav-item__fork-icon" title="Branch point - ${item.childBranches.length} branches">⑂</span>
@@ -294,33 +261,41 @@ export const FloatingNavPanelTemplates = {
             </div>`
             : '';
 
+        // Branch 操作按钮
+        const branchActionsHtml = FloatingNavPanelTemplates.renderBranchActions(item);
+
         return `
-            <div class="llm-nav-item llm-nav-item--tree ${activeClass} ${isSelected ? 'selected' : ''}"
-                 data-id="${item.id}"
+            <div class="llm-nav-item ${activeClass} ${collapsedClass} ${isSelected ? 'selected' : ''}" 
+                 data-id="${item.id}" 
                  data-index="${idx}">
                 <div class="llm-nav-item__checkbox ${isSelected ? 'checked' : ''}" data-checkbox="true"></div>
+                <span class="llm-nav-item__fold" data-fold="true">${foldIcon}</span>
                 <span class="llm-nav-item__icon">${icon}</span>
                 <div class="llm-nav-item__content">
                     <div class="llm-nav-item__header">
                         <span class="llm-nav-item__title">${escapeHTML(title)}</span>
                         ${branchName}
-                        ${branchInfo}
+                        ${branchBadge}
                         <span class="llm-nav-item__time">${timeStr}</span>
                     </div>
                     <div class="llm-nav-item__preview">${escapeHTML(item.preview)}</div>
                     
                     ${childBranchesHtml}
                     
-                    ${FloatingNavPanelTemplates.renderBranchActions(item)}
+                    ${branchActionsHtml}
                 </div>
                 <span class="llm-nav-item__index">#${idx + 1}</span>
             </div>
         `;
     },
 
+    /**
+     * 渲染 Branch 操作按钮（统一视图中使用）
+     */
     renderBranchActions: (item: ChatNavItem): string => {
         const hasBranches = (item.siblingCount || 0) > 1;
 
+        // 如果没有分支且没有子节点，只显示创建分支按钮
         if (!hasBranches && !item.hasChildren) {
             return `
                 <div class="llm-nav-item__branch-actions">
@@ -375,5 +350,30 @@ export const FloatingNavPanelTemplates = {
                 ` : ''}
             </div>
         `;
+    },
+
+    // 保留旧方法以防其他地方调用，但标记为废弃
+    /** @deprecated 使用 renderUnifiedItem 替代 */
+    renderListItem: (
+        item: ChatNavItem,
+        idx: number,
+        isActive: boolean,
+        isSelected: boolean,
+        timeStr: string,
+        title: string
+    ): string => {
+        return FloatingNavPanelTemplates.renderUnifiedItem(item, idx, isActive, isSelected, timeStr, title);
+    },
+
+    /** @deprecated 使用 renderUnifiedItem 替代 */
+    renderTreeItem: (
+        item: ChatNavItem,
+        idx: number,
+        isActive: boolean,
+        isSelected: boolean,
+        timeStr: string,
+        title: string
+    ): string => {
+        return FloatingNavPanelTemplates.renderUnifiedItem(item, idx, isActive, isSelected, timeStr, title);
     }
 };
