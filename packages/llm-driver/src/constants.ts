@@ -39,6 +39,7 @@ export const LLM_PROVIDER_DEFAULTS: Record<string, LLMProviderDefinition> = {
         models: [
             { id: 'claude-4.6-opus', name: 'Claude 4.6 Opus', icon: '👑' },
             { id: 'gemini-3-pro', name: 'Gemini 3 Pro', icon: '💫' },
+            { id: 'gemini-3.1-pro', name: 'Gemini 3.1 Pro Preview', icon: '💫' },
             { id: 'gpt-5.2', name: 'GPT-5.2', icon: '✨' },
             { id: 'claude-4.5-sonnet', name: 'Claude 4.5 Sonnet', icon: '🎭' },
             { id: 'gemini-3-flash', name: 'Gemini 3 Flash', icon: '⚡' },
@@ -157,6 +158,7 @@ export const LLM_PROVIDER_DEFAULTS: Record<string, LLMProviderDefinition> = {
         models: [
             { id: 'claude-opus-4-6-thinking', name: 'Claude 4.6 Opus thinking', icon: '👑' },
             { id: 'claude-opus-4-6', name: 'Claude 4.6 Opus', icon: '👑' },
+            { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro Preview', icon: '💫' },
             { id: 'gemini-3-pro-thinking', name: 'Gemini 3 Pro', icon: '💫' },
             { id: 'gpt-5.2', name: 'GPT-5.2', icon: '✨' },
             { id: 'claude-sonnet-4-5-20250929-thinking', name: 'Claude 4.5 Sonnet', icon: '🎭' },
