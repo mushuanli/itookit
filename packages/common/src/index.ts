@@ -20,17 +20,18 @@ export {
 // ── IModuleFS: 模块文件系统接口及相关类型 ──
 
 export type {
-    // 基础数据类型
+    // 数据类型
     FSNodeType,
     FSNode,
     FSSearchQuery,
+    SRSItemData,
 
     // 事件类型
     FSEventType,
     FSEvent,
     FSEventPayloadMap,
 
-    // 单节点事件载荷
+    // 事件载荷 — 单节点
     FSNodeCreatedPayload,
     FSNodeUpdatedPayload,
     FSNodeDeletedPayload,
@@ -38,18 +39,15 @@ export type {
     FSNodeCopiedPayload,
     FSNodeRenamedPayload,
 
-    // 批量事件载荷
+    // 事件载荷 — 批量
     FSBatchCreatedPayload,
     FSBatchUpdatedPayload,
     FSBatchMovedPayload,
     FSBatchDeletedPayload,
     FSBatchCopiedPayload,
 
-    // 错误事件载荷
+    // 事件载荷 — 错误
     FSErrorPayload,
-
-    // SRS
-    //SRSItemData,
 
     // 核心接口
     IModuleFS,
@@ -58,24 +56,23 @@ export type {
 // ── IVFSManager: 系统级 VFS 管理接口及相关类型 ──
 
 export type {
-    // 模块管理
     ModuleInfo,
     ModuleMountOptions,
-
-    // VFS 事件
-    VFSEventType,
-    VFSEvent,
-
-    // 全局标签
+    VFSManagerEventType,
+    VFSManagerEvent,
     GlobalTagInfo,
-
-    // 辅助类型
-    VFSNodeInfo,
     SyncableFileInfo,
-
-    // 核心接口
+    VFSNodeInfo,
     IVFSManager,
 } from './interfaces/IVFSManager';
+
+// ── 工厂类型（仅初始化层使用） ──
+export type {
+    VFSFactoryOptions,
+    BrowserVFSOptions,
+    ElectronVFSOptions,
+    VFSFactory,
+} from './interfaces/IVFSFactory';
 
 export {
     IEditor,
@@ -109,7 +106,7 @@ export {
     type EngineEvent,
     type ISessionEngine,
     type NodeType,
-    type SRSItemData
+    //type SRSItemData
 } from './interfaces/ISessionEngine';
 
 export { ISettingsWidget } from './interfaces/ISettingsWidget';

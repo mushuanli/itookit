@@ -1,8 +1,21 @@
 /**
  * @file common/interfaces/IModuleFS.ts
  * @desc 定义了模块文件系统的标准契约。
- * 这使得 UI 和插件（如自动完成）可以透明地与不同的后端工作
- * （例如 vfs, REST API, Electron FS, 纯内存实现等）。
+ *
+ * 设计目标：
+ * 使 UI 和插件（如自动完成、BackgroundBrain）可以透明地与不同后端工作
+ * （例如 VFS/IndexedDB, REST API, Electron FS, 纯内存实现等）。
+ *
+ * 职责边界：
+ * - IModuleFS: 模块内的文件操作（"我是笔记模块，我操作我的文件"）
+ * - IVFSManager: 跨模块的系统管理（"我是管理员，我管理所有模块"）
+ *
+ * 使用者: MemoryManager, VFSUIManager, BackgroundBrain, 各 WorkspaceStrategy
+ *
+ * idOrPath 约定:
+ * - 以 '/' 开头的字符串视为模块内路径（如 '/notes/hello.md'）
+ * - 其他字符串视为节点 ID
+ * - 实现约束: 节点 ID 不应以 '/' 开头
  */
 
 // ═══════════════════════════════════════════════════════════════
@@ -12,49 +25,62 @@
 export type FSNodeType = 'file' | 'directory';
 
 /**
- * 通用的节点数据结构
+ * 通用的节点元数据结构
+ *
+ * 设计说明:
+ * - 这是一个纯元数据结构，不包含文件内容
+ * - 文件内容通过 readContent() 单独获取
+ * - 子节点通过 getChildren() 单独获取
+ * - loadTree() 返回的是扁平/层级的元数据节点列表
  */
 export interface FSNode {
+  /** 节点唯一标识符（全局唯一） */
   id: string;
-  parentId: string | null; // 根节点为 null
+
+  /** 父节点 ID，根节点为 null */
+  parentId: string | null;
+
+  /** 节点名称（含扩展名） */
   name: string;
 
-  /**
-   * 节点类型
-   * 使用字符串字面量
-   */
+  /** 节点类型 */
   type: FSNodeType;
 
-  /** 文件内容 (仅当 type === 'file' 时存在) */
-  content?: string | ArrayBuffer;
-  /** 子节点列表 (仅当 type === 'directory' 时存在) */
-  children?: FSNode[];
+  /** 创建时间戳 (ms) */
   createdAt: number;
+
+  /** 最后修改时间戳 (ms) */
   modifiedAt: number;
-  /** 节点的完整路径 (逻辑路径) */
+
+  /** 节点的完整逻辑路径（模块内路径，如 '/notes/hello.md'） */
   path: string;
+
   /**
    * 文件大小 (字节数)
-   * - 文件节点：文件内容大小
-   * - 目录节点：0 或子文件总大小（取决于实现）
-   * - 可选，默认为 0
+   * - 文件节点: 文件内容大小
+   * - 目录节点: 0 或子文件总大小（取决于实现）
+   * - 默认为 0
    */
   size?: number;
 
+  /** 节点关联的标签列表 */
   tags?: string[];
+
+  /** 节点的自由格式元数据 */
   metadata?: Record<string, unknown>;
-  /** 所属模块ID (用于多模块/命名空间系统) */
+
+  /** 所属模块 ID（用于跨模块搜索结果中区分来源） */
   moduleId?: string;
 
   /**
    * 节点的自定义图标 (Emoji 或 URL)
-   * 如果存在，UI 应该优先显示此图标，而不是默认的文件/文件夹图标。
+   * 如果存在，UI 应优先显示此图标，而不是默认的文件/文件夹图标
    */
   icon?: string;
 
   /**
    * 关联的资产目录 ID
-   * 用于 O(1) 查找节点的伴生资产目录。
+   * 用于 O(1) 查找节点的伴生资产目录:
    * - 对于文件: 指向 `.filename/` 目录
    * - 对于目录: 指向 `.assets/` 子目录
    * 如果节点没有资产目录，则为 undefined
@@ -66,19 +92,23 @@ export interface FSNode {
  * 搜索查询参数
  */
 export interface FSSearchQuery {
+  /** 全文搜索关键词 */
+  text?: string;
+
   /** 节点类型过滤 */
   type?: FSNodeType;
 
-  /** 标签过滤 */
+  /** 标签过滤（AND 语义: 节点需包含所有列出的标签） */
   tags?: string[];
-  text?: string;
+
+  /** 最大返回数量 */
   limit?: number;
 
   /**
    * 搜索作用域
-   * - undefined / 空数组: 默认为当前绑定的上下文 (当前模块)
-   * - ['*']: 全局搜索 (所有模块)
-   * - ['modA', 'modB']: 特定模块范围
+   * - undefined / 空数组: 仅搜索当前绑定模块
+   * - ['*']: 全局搜索（所有模块），需要底层支持，否则降级为当前模块
+   * - ['modA', 'modB']: 特定模块范围，需要底层支持，否则忽略不支持的模块
    */
   scope?: string[];
 }
@@ -282,6 +312,7 @@ export interface FSErrorPayload {
 
 /**
  * 事件类型 → 载荷类型的完整映射
+ * 用于 on() 方法的类型安全推导
  */
 export interface FSEventPayloadMap {
   'node:created': FSNodeCreatedPayload;
@@ -314,12 +345,12 @@ export interface FSEvent<T extends FSEventType = FSEventType> {
 // ═══════════════════════════════════════════════════════════════
 
 /**
- * SRS 状态数据结构
+ * SRS（间隔重复）卡片状态数据
  */
 export interface SRSItemData {
-  /** 下次复习时间 (Unix 时间戳) */
+  /** 下次复习时间 (Unix 时间戳 ms) */
   dueAt: number;
-  /** 上次复习时间 (Unix 时间戳) */
+  /** 上次复习时间 (Unix 时间戳 ms) */
   lastReviewedAt: number;
   /** 复习次数 */
   reviewCount: number;
@@ -327,7 +358,7 @@ export interface SRSItemData {
   interval: number;
   /** 难度系数 */
   ease: number;
-  /** 内容片段 (可选) */
+  /** 内容摘要片段 */
   snippet?: string;
 }
 
@@ -338,45 +369,80 @@ export interface SRSItemData {
 /**
  * 模块文件系统接口
  *
+ * 这是应用中最核心的文件操作抽象。每个 IModuleFS 实例绑定到一个模块，
+ * 所有路径操作都相对于该模块的根目录。
+ *
  * 设计约定:
  * - idOrPath 参数: 以 '/' 开头视为模块内路径，否则视为节点 ID
+ *   实现约束: 节点 ID 不应以 '/' 开头
  * - 必选方法(无 ?) 是所有后端必须实现的最小集
  * - 可选方法(带 ?) 允许后端增量实现，消费层对缺失方法提供 fallback
+ *
+ * 实现方:
+ * - VFSModuleEngine: 基于 @itookit/vfs 的浏览器实现
+ * - RestModuleFS: 基于 REST API 的远程实现
+ * - MemoryModuleFS: 纯内存实现（用于测试）
+ * - ElectronModuleFS: 基于 Node.js fs 的桌面实现
+ *
+ * 消费方:
+ * - MemoryManager, VFSUIManager, BackgroundBrain
+ * - 各 WorkspaceStrategy
+ * - Domain Service 层（VFSAgentService, LLMSessionEngine 内部）
  */
 export interface IModuleFS {
-  /** 当前绑定的模块 ID */
+  /** 当前绑定的模块 ID（只读） */
   readonly moduleId: string;
 
   // ==================== 生命周期 ====================
 
-  /** 初始化引擎（连接存储、加载模块等） */
+  /**
+   * 初始化引擎（连接存储、加载模块等）
+   *
+   * 幂等: 多次调用安全，后续调用直接返回
+   */
   init(): Promise<void>;
 
   /**
    * 销毁引擎，释放资源
    * - 取消所有事件订阅
-   * - 清理内部状态
-   * 实现应确保多次调用安全（幂等）
+   * - 清理内部缓存和状态
+   * - 断开存储连接
+   *
+   * 幂等: 多次调用安全
    */
   dispose?(): Promise<void>;
 
   // ==================== 读取操作 ====================
 
-  /** 加载当前模块的根节点树结构（含文件内容） */
+  /**
+   * 加载当前模块的完整节点树
+   *
+   * 返回的 FSNode 列表仅包含元数据，不包含文件内容。
+   * 文件内容需通过 readContent() 单独获取。
+   *
+   * 返回格式由实现决定（扁平列表或嵌套结构），
+   * 但每个节点的 parentId 字段保证树结构可重建。
+   */
   loadTree(): Promise<FSNode[]>;
-
-  /** 获取指定目录下的直接子节点列表 */
+  /**
+   * 获取指定目录下的直接子节点列表
+   * @param parentId - 父目录的节点 ID
+   * @returns 直接子节点的元数据列表（不含文件内容）
+   */
   getChildren(parentId: string): Promise<FSNode[]>;
 
   /**
    * 读取文件内容
    * @param idOrPath - 节点 ID 或模块内路径
+   * @returns 文件内容（文本返回 string，二进制返回 ArrayBuffer）
+   * @throws 节点不存在或不是文件时抛出错误
    */
   readContent(idOrPath: string): Promise<string | ArrayBuffer>;
 
   /**
    * 获取节点详情
    * @param idOrPath - 节点 ID 或模块内路径
+   * @returns 节点元数据，不存在返回 null
    */
   getNode(idOrPath: string): Promise<FSNode | null>;
 
@@ -390,18 +456,28 @@ export interface IModuleFS {
 
   /**
    * 检查路径是否存在
-   * 路径为模块内的相对路径
+   *
+   * 默认 fallback: 消费方可通过 resolvePath(path) !== null 替代
+   *
+   * @param path - 模块内路径
    */
   pathExists?(path: string): Promise<boolean>;
 
   /**
    * 搜索节点
-   * 支持通过 scope 参数进行全局或跨模块搜索
+   *
+   * scope 行为:
+   * - undefined / 空数组: 仅搜索当前模块
+   * - ['*']: 全局搜索，需底层支持，否则降级为当前模块
+   * - ['modA', 'modB']: 指定模块范围，需底层支持
    */
   search(query: FSSearchQuery): Promise<FSNode[]>;
 
   /**
-   * 获取系统中所有可用的标签定义
+   * 获取当前模块中所有可用的标签定义
+   *
+   * 默认 fallback: 返回空数组
+   *
    * @returns 标签名称及可选的颜色信息
    */
   getAllTags?(): Promise<Array<{ name: string; color?: string }>>;
@@ -410,10 +486,12 @@ export interface IModuleFS {
 
   /**
    * 创建文件
-   * @param name - 文件名（含扩展名）
+   * @param name - 文件名（含扩展名，如 'hello.md'）
    * @param parentId - 父目录 ID，null 表示模块根目录
-   * @param content - 初始内容
-   * @param metadata - 初始元数据（icon, title, description 等）
+   * @param content - 初始内容（可选）
+   * @param metadata - 初始元数据，如 { icon, title, description }（可选）
+   * @returns 创建的节点元数据
+   *
    * @emits node:created → FSNodeCreatedPayload
    */
   createFile(
@@ -425,14 +503,16 @@ export interface IModuleFS {
 
   /**
    * 批量创建文件
+   *
    * 允许后端优化为单次事务/请求。
-   * 如果未实现，Service 层应回退到 Promise.all 并发调用 createFile。
+   *
+   * 默认 fallback: 消费方应回退到 Promise.all(files.map(f => createFile(...)))
    *
    * @emits node:batch_created → FSBatchCreatedPayload
    */
   createFiles?(
     files: Array<{
-      title: string;
+      name: string;
       content: string | ArrayBuffer;
       metadata?: Record<string, unknown>;
     }>,
@@ -441,6 +521,9 @@ export interface IModuleFS {
 
   /**
    * 创建目录
+   * @param name - 目录名称
+   * @param parentId - 父目录 ID，null 表示模块根目录
+   * @returns 创建的目录节点元数据
    *
    * @emits node:created → FSNodeCreatedPayload
    */
@@ -450,11 +533,16 @@ export interface IModuleFS {
 
   /**
    * 为指定节点创建关联资产（如图片、附件）
-   * 会自动计算存储位置 (例如 .filename/asset.png) 并处理目录的惰性创建
-   * @param ownerNodeId - 归属的主节点 ID (如 Markdown 文件的 ID)
-   * @param filename - 资产文件名 (如 image.png)
-   * @param content - 二进制内容
-   * @returns 创建的资产节点
+   *
+   * 实现细节:
+   * - 自动计算存储位置（例如 .filename/asset.png）
+   * - 如果资产目录不存在，自动惰性创建
+   * - 资产目录对用户不可见（隐藏目录）
+   *
+   * @param ownerNodeId - 归属的主节点 ID（如 Markdown 文件的 ID）
+   * @param filename - 资产文件名（如 'image.png'）
+   * @param content - 资产内容（通常是二进制）
+   * @returns 创建的资产节点元数据
    *
    * @emits node:created → FSNodeCreatedPayload
    */
@@ -466,13 +554,18 @@ export interface IModuleFS {
 
   /**
    * 获取指定节点的资产目录 ID
-   * 如果不存在则返回 null
+   * @param ownerNodeId - 主节点 ID
+   * @returns 资产目录 ID，不存在返回 null
    */
   getAssetDirectoryId(ownerNodeId: string): Promise<string | null>;
 
   /**
    * 获取指定节点的所有资产文件
-   * 返回资产目录中的所有文件节点
+   *
+   * 默认 fallback: 通过 getAssetDirectoryId() + getChildren() 组合实现
+   *
+   * @param ownerNodeId - 主节点 ID
+   * @returns 资产目录中的所有文件节点
    */
   getAssets?(ownerNodeId: string): Promise<FSNode[]>;
 
@@ -480,6 +573,8 @@ export interface IModuleFS {
 
   /**
    * 写入/覆盖文件内容
+   * @param idOrPath - 节点 ID 或模块内路径
+   * @param content - 新内容
    *
    * @emits node:updated → FSNodeUpdatedPayload { changedFields: ['content'] }
    */
@@ -487,37 +582,55 @@ export interface IModuleFS {
 
   /**
    * 重命名节点
-   * 内部实现通常是修改路径的最后一段（move 的特殊形式）
+   *
+   * 语义上等同于 move 到同一父目录下但使用新名称。
+   * 实现方可能同时发出 node:renamed 和 node:moved 事件。
+   *
+   * @param id - 节点 ID
+   * @param newName - 新名称（含扩展名）
    *
    * @emits node:renamed → FSNodeRenamedPayload
-   * @emits node:moved  → FSNodeMovedPayload  (底层 VFS 仍发出 moved)
    */
   rename(id: string, newName: string): Promise<void>;
 
   /**
-   * 移动节点到新父节点下
-   * 支持批量 ID
-   * - 单个节点: 发出 node:moved
-   * - 多个节点: 发出 node:batch_moved
+   * 移动节点到新父目录
    *
-   * @emits node:moved       → FSNodeMovedPayload       (单节点)
-   * @emits node:batch_moved → FSBatchMovedPayload      (多节点)
+   * 事件行为:
+   * - 单个 ID: 发出 node:moved
+   * - 多个 ID: 发出 node:batch_moved
+   *
+   * @param ids - 要移动的节点 ID 列表
+   * @param targetParentId - 目标父目录 ID，null 表示模块根目录
+   *
+   * @emits node:moved       → FSNodeMovedPayload       (ids.length === 1)
+   * @emits node:batch_moved → FSBatchMovedPayload      (ids.length > 1)
    */
   move(ids: string[], targetParentId: string | null): Promise<void>;
 
   /**
    * 删除节点
-   * 支持批量 ID，级联删除子节点和关联资产目录
-   * - 单个节点: 发出 node:deleted
-   * - 多个节点: 发出 node:batch_deleted
    *
-   * @emits node:deleted       → FSNodeDeletedPayload       (单节点)
-   * @emits node:batch_deleted → FSBatchDeletedPayload      (多节点)
+   * 级联行为: 自动删除子节点和关联资产目录
+   *
+   * 事件行为:
+   * - 单个 ID: 发出 node:deleted
+   * - 多个 ID: 发出 node:batch_deleted
+   *
+   * @param ids - 要删除的节点 ID 列表
+   *
+   * @emits node:deleted       → FSNodeDeletedPayload       (ids.length === 1)
+   * @emits node:batch_deleted → FSBatchDeletedPayload      (ids.length > 1)
    */
   delete(ids: string[]): Promise<void>;
 
   /**
-   * 更新元数据 (合并模式，不会覆盖未提及的字段)
+   * 更新节点元数据（合并模式）
+   *
+   * 只修改传入的字段，不会覆盖未提及的字段。
+   *
+   * @param id - 节点 ID
+   * @param metadata - 要合并的元数据
    *
    * @emits node:updated → FSNodeUpdatedPayload { changedFields: ['metadata'] }
    */
@@ -527,7 +640,11 @@ export interface IModuleFS {
 
   /**
    * 复制单个节点到目标父目录
-   * 深度复制：包含子节点和关联资产目录
+   *
+   * 深度复制: 包含子节点和关联资产目录
+   *
+   * 默认 fallback: 消费方可通过 getNode + readContent + createFile 组合实现
+   *
    * @param sourceId - 源节点 ID
    * @param targetParentId - 目标父目录 ID，null 表示模块根目录
    * @param newName - 可选的新名称，默认与源节点同名
@@ -542,9 +659,10 @@ export interface IModuleFS {
   ): Promise<FSNode>;
 
   /**
-   * 批量复制节点到目标父目录
-   * 允许后端优化为单次事务。
-   * 如果未实现，Service 层应回退到逐个调用 copy。
+   * 批量复制节点
+   *
+   * 默认 fallback: 消费方逐个调用 copy()
+   *
    * @param sourceIds - 源节点 ID 列表
    * @param targetParentId - 目标父目录 ID，null 表示模块根目录
    * @returns 新创建的节点列表（顺序与 sourceIds 对应）
@@ -559,7 +677,12 @@ export interface IModuleFS {
   // ── 标签操作 ──
 
   /**
-   * 设置节点的标签 (全量替换模式)
+   * 设置节点的标签（全量替换模式）
+   *
+   * 传入空数组清除所有标签。
+   *
+   * @param id - 节点 ID
+   * @param tags - 新的标签列表
    *
    * @emits node:updated → FSNodeUpdatedPayload { changedFields: ['tags'] }
    */
@@ -567,8 +690,8 @@ export interface IModuleFS {
 
   /**
    * 批量设置标签
-   * 定义为可选，以便兼容旧的实现。
-   * 如果未实现，Service 层应回退到逐个调用 setTags。
+   *
+   * 默认 fallback: 消费方逐个调用 setTags()
    *
    * @emits node:batch_updated → FSBatchUpdatedPayload { reason: 'tags' }
    */
@@ -576,7 +699,10 @@ export interface IModuleFS {
 
   /**
    * 更新标签定义（如修改颜色）
-   * 不影响节点关联，仅修改标签自身属性
+   *
+   * 不影响节点与标签的关联关系，仅修改标签自身属性。
+   * 对于单模块后端，标签定义是模块级的。
+   * 对于多模块系统，此方法影响当前模块的标签视图。
    */
   updateTagDefinition?(
     tagName: string,
@@ -586,9 +712,9 @@ export interface IModuleFS {
   // ── 批量元数据更新 ──
 
   /**
-   * 批量更新元数据
-   * 每个条目都是合并模式（与 updateMetadata 一致）
-   * 如果未实现，Service 层应回退到逐个调用 updateMetadata。
+   * 批量更新元数据（合并模式）
+   *
+   * 默认 fallback: 消费方逐个调用 updateMetadata()
    *
    * @emits node:batch_updated → FSBatchUpdatedPayload { reason: 'metadata' }
    */
@@ -618,7 +744,7 @@ export interface IModuleFS {
   ): Promise<void>;
 
   /**
-   * 获取全局或当前模块的到期卡片
+   * 获取到期的 SRS 卡片
    * @param limit - 最大返回数量
    */
   getDueCards?(limit?: number): Promise<Array<{
@@ -632,11 +758,11 @@ export interface IModuleFS {
   /**
    * 订阅本模块内的文件变更事件
    *
-   * 实现保证：
+   * 实现保证:
    * - 只触发属于当前 moduleId 的节点事件
-   * - 不需要消费方手动过滤
+   * - 消费方不需要手动过滤模块
    *
-   * 类型安全：回调中的 event.payload 类型由 FSEventPayloadMap[E] 自动推导。
+   * 类型安全: 回调中的 event.payload 类型由 FSEventPayloadMap[E] 自动推导
    *
    * @example
    * ```ts
@@ -644,9 +770,7 @@ export interface IModuleFS {
    *   // event.payload 自动推导为 FSNodeCreatedPayload
    *   console.log(event.payload.nodeId, event.payload.path);
    * });
-   *
-   * // 取消订阅
-   * unsub();
+   * unsub(); // 取消订阅
    * ```
    *
    * @param event - 要订阅的事件类型
