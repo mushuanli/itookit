@@ -1,14 +1,29 @@
-// common/interfaces/fs/constants.ts
 /**
  * @file common/interfaces/fs/constants.ts
- * @desc 文件系统常量定义
  */
 
-/** 配置文件系统的保留模块名 */
-export const CONFIG_MODULE = '__config' as const;
+/** 配置模块名 */
+export const CONFIG_MODULE = '__config';
 
-/** 系统元数据模块名 */
-export const META_MODULE = '__vfs_meta__' as const;
+/** 设备模块名 */
+export const DEV_MODULE = '__dev';
 
-/** 系统保留模块名列表（不可被用户创建或删除） */
-export const SYSTEM_MODULES = [CONFIG_MODULE, META_MODULE] as const;
+/**
+ * 系统目录前缀
+ *
+ * 系统级目录结构：
+ *   /__config/          → 全局配置
+ *   /dev/               → 设备文件
+ *   /module/<name>/     → 业务模块
+ */
+export const SYSTEM_DIRS = {
+    CONFIG: '/__config',
+    DEV: '/dev',
+    MODULE: '/module',
+} as const;
+
+/** 保留模块名（不可被用户使用） */
+export const RESERVED_MODULE_NAMES = new Set([
+    CONFIG_MODULE,
+    DEV_MODULE,
+]);

@@ -24,7 +24,6 @@ export type {
     FSNodeType,
     FSNode,
     FSSearchQuery,
-    SRSItemData,
 
     // 事件类型
     FSEventType,
@@ -39,40 +38,28 @@ export type {
     FSNodeCopiedPayload,
     FSNodeRenamedPayload,
 
-    // 事件载荷 — 批量
-    FSBatchCreatedPayload,
-    FSBatchUpdatedPayload,
-    FSBatchMovedPayload,
-    FSBatchDeletedPayload,
-    FSBatchCopiedPayload,
-
     // 事件载荷 — 错误
     FSErrorPayload,
 
     // 核心接口
     IModuleFS,
-} from './interfaces/IModuleFS';
 
-// ── IVFSManager: 系统级 VFS 管理接口及相关类型 ──
+    // ── IVFSManager: 系统级 VFS 管理接口及相关类型 ──
 
-export type {
     ModuleInfo,
     ModuleMountOptions,
     VFSManagerEventType,
     VFSManagerEvent,
     GlobalTagInfo,
     SyncableFileInfo,
-    VFSNodeInfo,
     IVFSManager,
-} from './interfaces/IVFSManager';
 
-// ── 工厂类型（仅初始化层使用） ──
-export type {
+    // ── 工厂类型（仅初始化层使用） ──
     VFSFactoryOptions,
     BrowserVFSOptions,
     ElectronVFSOptions,
     VFSFactory,
-} from './interfaces/IVFSFactory';
+} from './interfaces/fs';
 
 export {
     IEditor,
