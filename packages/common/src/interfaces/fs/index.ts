@@ -1,7 +1,5 @@
-// common/interfaces/fs/index.ts
 /**
  * @file common/interfaces/fs/index.ts
- * @desc 文件系统接口模块的统一导出
  */
 
 // ── 基础类型 ──
@@ -10,12 +8,18 @@ export type {
     FSNodeBaseType,
     FSNodeExtendedType,
     FSNode,
+    FSFileNode,
+    FSDirectoryNode,
+    FSSeqFileNode,
+    FSDeviceNode,
+    FSSymlinkNode,
+    FSNodeMetadata,
     FSSearchQuery,
     FSCapabilities,
     FSModuleStats,
 } from './types';
 
-// ── 选项类型 ──
+// ── 选项 ──
 export type {
     ReadOptions,
     WriteOptions,
@@ -25,7 +29,7 @@ export type {
     TreeWalkCallback,
 } from './options';
 
-// ── 事件类型 ──
+// ── 事件 ──
 export type {
     FSEventType,
     FSNodeCreatedPayload,
@@ -39,7 +43,7 @@ export type {
     FSEvent,
 } from './events';
 
-// ── 错误类型 ──
+// ── 错误 ──
 export {
     FSError,
     FSNotFoundError,
@@ -48,28 +52,19 @@ export {
     FSAlreadyExistsError,
     FSInvalidPathError,
     FSModuleNotFoundError,
+    FSConflictError,
 } from './errors';
 export type { FSErrorCode } from './errors';
 
-// ── SeqFile 接口 ──
-export type {
-    SeqFileEntry,
-    ISeqFileOperations,
-} from './ISeqFile';
-
-// ── 设备文件接口 ──
-export type { IDeviceHandler } from './IDeviceFile';
-
-// ── SRS 服务接口 ──
-export type {
-    SRSItemData,
-    SRSCardRef,
-    SRSStats,
-    ISRSService,
-} from './ISRSService.ts';
+// ── 子接口 ──
+export type { SeqFileEntry, ISeqFileOperations } from './ISeqFile';
+export type { IAssetOperations } from './IAssetOperations';
+export type { ITagOperations } from './ITagOperations';
+export type { DeviceContext, IDeviceHandler } from './IDeviceFile';
 
 // ── 核心接口 ──
-export type { IModuleFS } from './IModuleFS';
+export type { IFSTransaction, IModuleFS } from './IModuleFS';
+export type { IConfigService, ConfigFileDescriptor, ConfigChangeEvent } from './IConfigService';
 
 export type {
     ModuleInfo,
@@ -79,8 +74,8 @@ export type {
     VFSManagerEventPayloadMap,
     GlobalTagInfo,
     SyncableFileInfo,
-    VFSNodeInfo,
-    ConfigFileDescriptor,
+    ModuleExportData,
+    VFSSearchQuery,
     VFSSystemStats,
     IVFSManager,
 } from './IVFSManager';
@@ -89,8 +84,8 @@ export type {
     VFSFactoryOptions,
     BrowserVFSOptions,
     ElectronVFSOptions,
+    VFSInstance,
     VFSFactory,
 } from './IVFSFactory';
 
-// ── 常量 ──
 export { CONFIG_MODULE } from './constants';

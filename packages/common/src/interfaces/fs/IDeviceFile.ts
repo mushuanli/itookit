@@ -1,69 +1,126 @@
-// common/interfaces/fs/IDeviceFile.ts
 /**
  * @file common/interfaces/fs/IDeviceFile.ts
- * @desc 设备文件处理器接口
+ * @desc 设备文件处理器
  *
- * 设备文件的读写行为由注册的 handler 定义，
- * 而不是直接存储在文件系统中。
+ * 设计：
+ * - 一个 handler 对应一种设备类型（如 'llm-openai'）
+ * - 一个 handler 可服务多个设备文件节点
+ * - 每次 read/write/readStream 通过 DeviceContext.sessionId 区分并发连接
+ * - handler 内部管理会话生命周期
  *
- * 典型用途:
- * - /dev/status: 返回系统状态信息
- * - /dev/llm: 代理 LLM 调用
- * - /dev/clipboard: 剪贴板访问
- * - /dev/random: 返回随机数据
+ * 多 LLM 示例：
+ *   /dev/llm/openai  → handlerId: 'llm-openai'
+ *   /dev/llm/claude  → handlerId: 'llm-claude'
+ *   /dev/llm/local   → handlerId: 'llm-local'
  *
- * 使用流程:
- * 1. 实现 IDeviceHandler 接口
- * 2. 调用 IModuleFS.registerDeviceHandler(handler)
- * 3. 调用 IModuleFS.createDeviceFile(name, parent, handlerId) 创建设备节点
- * 4. 对设备节点调用 readContent / writeContent 时，
- *    实现层委托给对应的 IDeviceHandler
+ * 多连接示例：
+ *   const s1 = await handler.open(ctx);           // 会话 1
+ *   const s2 = await handler.open(ctx);           // 会话 2
+ *   handler.write({ ...ctx, sessionId: s1 }, prompt1);
+ *   handler.write({ ...ctx, sessionId: s2 }, prompt2);
+ *   for await (const chunk of handler.readStream({ ...ctx, sessionId: s1 })) { ... }
  */
-
-import type { FSNode } from './types';
 
 /**
- * 设备文件处理器接口
+ * 设备文件上下文
  */
-export interface IDeviceHandler {
-    /** 处理器唯一标识符（对应 FSNode.deviceHandlerId） */
-    readonly handlerId: string;
+export interface DeviceContext {
+    /** 设备节点 ID */
+    nodeId: string;
+    /** 设备节点名称 */
+    name: string;
+    /** 节点元数据 */
+    metadata?: Record<string, unknown>;
+    /**
+     * 会话 ID（可选）
+     *
+     * 用于区分同一设备上的多个并发连接。
+     * - 无状态设备（如 /dev/random）：忽略此字段
+     * - 有状态设备（如 /dev/llm/*）：通过 open() 获取 sessionId
+     *
+     * 不传时，handler 可以选择：
+     * - 使用默认/匿名会话
+     * - 抛出错误要求必须先 open()
+     */
+    sessionId?: string;
+}
 
-    /** 设备是否支持写入 */
+export interface IDeviceHandler {
+    /** 处理器唯一标识符 */
+    readonly handlerId: string;
+    /** 是否支持写入 */
     readonly writable: boolean;
+    /** 是否支持流式读取 */
+    readonly streamable?: boolean;
+    /**
+     * 是否支持多会话
+     *
+     * true: 需要先 open() 获取 sessionId，再 read/write
+     * false: 无状态设备，直接 read/write
+     */
+    readonly sessionable?: boolean;
+
+    /**
+     * 打开会话（可选）
+     *
+     * 对有状态设备（如 LLM），返回会话 ID。
+     * 后续 read/write/readStream 需携带此 sessionId。
+     *
+     * @param ctx - 不含 sessionId 的设备上下文
+     * @param options - 会话初始化选项（由设备定义语义）
+     * @returns 会话 ID
+     *
+     * @example
+     * ```ts
+     * const sessionId = await handler.open(ctx, {
+     *     model: 'gpt-4',
+     *     systemPrompt: 'You are a helpful assistant.',
+     * });
+     * ```
+     */
+    open?(
+        ctx: DeviceContext,
+        options?: Record<string, unknown>
+    ): Promise<string>;
+
+    /**
+     * 关闭会话（可选）
+     *
+     * 释放会话资源（如中断流式响应、清理上下文窗口）。
+     * 不调用时，handler 可在超时后自动清理。
+     */
+    close?(ctx: DeviceContext): Promise<void>;
 
     /**
      * 读取设备内容
      *
-     * 每次调用可能返回不同结果（与普通文件不同）。
-     * 例如 /dev/status 每次返回当前系统状态。
-     *
-     * @param node - 设备文件节点元数据
-     * @returns 设备输出内容
+     * - 无状态设备：每次调用独立，忽略 sessionId
+     * - 有状态设备：返回当前会话的响应
      */
-    read(node: FSNode): Promise<string | ArrayBuffer>;
+    read(ctx: DeviceContext): Promise<string | ArrayBuffer>;
 
     /**
      * 写入设备
      *
-     * 写入的"内容"由设备定义其语义。
-     * 例如 /dev/llm 可将写入内容作为 prompt 发送。
-     *
-     * @param node - 设备文件节点元数据
-     * @param content - 写入内容
-     * @throws FSReadOnlyError 当 writable === false 时
+     * - 无状态设备：如 /dev/null，丢弃内容
+     * - 有状态设备：如 /dev/llm/*，写入作为用户消息
      */
-    write(node: FSNode, content: string | ArrayBuffer): Promise<void>;
+    write(ctx: DeviceContext, content: string | ArrayBuffer): Promise<void>;
 
     /**
-     * 设备初始化（可选）
-     * 在设备文件首次被访问时调用
+     * 流式读取
+     *
+     * 需要 streamable === true。
+     * 对 LLM 设备，write prompt 后调用此方法获取流式响应。
      */
+    readStream?(ctx: DeviceContext): AsyncIterable<string | ArrayBuffer>;
+
+    /** 设备初始化 */
     init?(): Promise<void>;
 
     /**
-     * 设备销毁（可选）
-     * 在模块 dispose 时调用，用于清理设备资源
+     * 设备销毁
+     * 实现应关闭所有活跃会话。
      */
     dispose?(): Promise<void>;
 }

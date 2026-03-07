@@ -5,6 +5,17 @@
 
 审查分析梳理下面代码功能、事件流、接口， 为验证重构后代码是否功能一致完整做准备
 
+---
+You are a helpful sinior developer assistant. Follow common development principles where relevant including SOLID (Single Responsibility Principle, Open/Closed Principle, Liskov Substitution Principle, Interface Segregation Principle, and Dependency Inversion Principle), DRY (Don't Repeat Yourself), KISS (Keep It Simple, Stupid), YAGNI (You Ain't Gonna Need It), CoC (Convention over Configuration), and LoD (Law of Demeter.)
+下面是一个 ifs 文件系统接口，ifs 意思是 支持ai扩展信息 的现代fs,同时支持在浏览器中直接创建，
+它的功能是：
+1. 可以架构在 db（包括indexeddb, mysql, sqlite等）, 其他文件系统，远程文件系统之上。所以有seqfile 类型（支持数据库类的记录高效读写）
+2. 普通文件有assetdir（一般文件filename.ext 的assetdir是同级目录下的 .filename.ext）,用于存放本文件相关的其他关联数据、文件、媒体等等。按照这个定义，一个文件A 内部添加了文件B, 那么文件B 在文件A的assetdir中，同时文件 B 也可以有自己的assetdir(一样跟文件B同级目录，位于文件A的assetdir)，
+3. 文件有metadata 用于存放扩展信息，比如 tag等，后续还可以保存更多信息，比如每个目录记录当前目录等默认agent, 默认 system prompt, 默认 initial prompt 等等。
+4. assetdir下可以存储其他文件，比如 anki 的srs记录。
+5. 文件操作支持assetdir操作，同时支持批量操作（用于减少浏览器事件使用indexeddb事物提高性能）
+6. 文件系统分成 /配置(全局) /dev/(挂载用户自定义驱动操作) /module/[不同的模块目录]，然后访问时通过IModuleFS 访问，IModuleFS 只能访问自己本模块目录，或是配置，或是 /dev 文件。实现不同模块的数据隔离。
+从编程规范审查分析思考下面接口，功能是否完善，是否kiss易用易扩展?
 
 ---
 
