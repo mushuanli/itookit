@@ -1,19 +1,10 @@
-// common/interfaces/fs/errors.ts
 /**
  * @file common/interfaces/fs/errors.ts
- * @desc 文件系统结构化错误类型
+ * @desc 错误类型
  *
- * 设计原则:
- * - 错误码枚举覆盖所有已知失败场景
- * - 错误类继承层次简洁，消费方可通过 instanceof 或 code 区分
- * - 每个常见场景提供专用子类，减少重复的错误构造代码
+ * 重构要点：增加 FSConflictError（乐观锁冲突）
  */
 
-import type { FSCapabilities } from './types';
-
-/**
- * 文件系统错误码
- */
 export type FSErrorCode =
     | 'NOT_FOUND'
     | 'ALREADY_EXISTS'
@@ -26,11 +17,9 @@ export type FSErrorCode =
     | 'MODULE_NOT_FOUND'
     | 'CAPABILITY_MISSING'
     | 'STORAGE_ERROR'
-    | 'QUOTA_EXCEEDED';
+    | 'QUOTA_EXCEEDED'
+    | 'VERSION_CONFLICT';
 
-/**
- * 文件系统错误基类
- */
 export class FSError extends Error {
     constructor(
         public readonly code: FSErrorCode,
@@ -43,57 +32,42 @@ export class FSError extends Error {
     }
 }
 
-/**
- * 节点不存在
- */
 export class FSNotFoundError extends FSError {
     constructor(idOrPath: string, operation?: string) {
-        super('NOT_FOUND', `Node not found: ${idOrPath}`, operation, idOrPath);
+        super('NOT_FOUND', `Node not found: ${idOrPath} `, operation, idOrPath);
         this.name = 'FSNotFoundError';
     }
 }
 
-/**
- * 节点已存在
- */
 export class FSAlreadyExistsError extends FSError {
     constructor(path: string, operation?: string) {
-        super('ALREADY_EXISTS', `Node already exists: ${path}`, operation, path);
+        super('ALREADY_EXISTS', `Already exists: ${path} `, operation, path);
         this.name = 'FSAlreadyExistsError';
     }
 }
 
-/**
- * 只读文件系统上执行写入
- */
 export class FSReadOnlyError extends FSError {
     constructor(moduleId: string, operation?: string) {
-        super('READ_ONLY', `Module '${moduleId}' is read-only`, operation);
+        super('READ_ONLY', `Module '${moduleId}' is read - only`, operation);
         this.name = 'FSReadOnlyError';
     }
 }
 
-/**
- * 请求的能力不支持
- */
 export class FSCapabilityError extends FSError {
-    constructor(capability: keyof FSCapabilities, moduleId: string) {
+    constructor(capability: string, moduleId: string) {
         super(
             'CAPABILITY_MISSING',
-            `Module '${moduleId}' does not support capability '${capability}'`
+            `Module '${moduleId}' does not support '${capability}'`
         );
         this.name = 'FSCapabilityError';
     }
 }
 
-/**
- * 无效路径
- */
 export class FSInvalidPathError extends FSError {
     constructor(path: string, reason?: string) {
         super(
             'INVALID_PATH',
-            `Invalid path '${path}'${reason ? ': ' + reason : ''}`,
+            `Invalid path '${path}'${reason ? ': ' + reason : ''} `,
             undefined,
             path
         );
@@ -101,12 +75,28 @@ export class FSInvalidPathError extends FSError {
     }
 }
 
-/**
- * 模块未挂载
- */
 export class FSModuleNotFoundError extends FSError {
     constructor(moduleName: string) {
         super('MODULE_NOT_FOUND', `Module '${moduleName}' is not mounted`);
         this.name = 'FSModuleNotFoundError';
+    }
+}
+
+/**
+ * 乐观锁版本冲突
+ */
+export class FSConflictError extends FSError {
+    constructor(
+        idOrPath: string,
+        public readonly expectedVersion: number,
+        public readonly actualVersion: number
+    ) {
+        super(
+            'VERSION_CONFLICT',
+            `Version conflict on '${idOrPath}': expected ${expectedVersion}, actual ${actualVersion} `,
+            undefined,
+            idOrPath
+        );
+        this.name = 'FSConflictError';
     }
 }
