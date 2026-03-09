@@ -409,14 +409,14 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     /**
- * ✅ 新增：通过 branchName 重命名（从 FloatingNavPanel dropdown 触发）
- */
+     * 通过 branchName 重命名（从 FloatingNavPanel dropdown 触发）
+     */
     private async handleBranchRename(oldName: string, newName: string): Promise<void> {
         await this.branchManager.renameBranchByName(oldName, newName);
     }
 
     /**
-     * ✅ 新增：通过 branchName 删除（从 FloatingNavPanel dropdown 触发）
+     * 通过 branchName 删除（从 FloatingNavPanel dropdown 触发）
      */
     private async handleBranchDeleteByName(branchName: string): Promise<void> {
         await this.branchManager.deleteBranchByName(branchName);
@@ -426,7 +426,6 @@ export class LLMWorkspaceEditor implements IEditor {
      * 通过偏移量切换分支（快捷键 ⌘⇧[ / ⌘⇧]）
      */
     private async switchBranchByOffset(offset: number): Promise<void> {
-        // 缓存为空时才刷新
         if (this.cachedBranches.length === 0) {
             await this.refreshBranchIndicator();
         }
@@ -440,14 +439,11 @@ export class LLMWorkspaceEditor implements IEditor {
         if (currentIndex === -1) return;
 
         const newIndex = currentIndex + offset;
-
-        // 循环切换
         const wrappedIndex = ((newIndex % this.cachedBranches.length) + this.cachedBranches.length)
             % this.cachedBranches.length;
 
         if (wrappedIndex === currentIndex) return;
 
-        // ✅ 直接用 name
         await this.handleSwitchBranchByName(this.cachedBranches[wrappedIndex].name);
     }
 
@@ -456,10 +452,11 @@ export class LLMWorkspaceEditor implements IEditor {
     // ================================================================
 
     /**
-     * ✅ 修复：统一事件驱动，消除重复调用
+     * ✅ 修复：统一事件驱动
      * 
-     * 所有分支 UI 刷新（renderFull / refreshBranchIndicator / flash）
-     * 仅在此处根据事件类型触发一次。
+     * 新增：
+     * - session_start 时清理旧的错误提示（问题2）
+     * - finished 时清理错误提示（问题2）
      */
     private handleSessionEvent(event: OrchestratorEvent): void {
         const branchRenderEvents = new Set(['branch_switched', 'branch_created']);
@@ -467,16 +464,21 @@ export class LLMWorkspaceEditor implements IEditor {
             'branch_created', 'branch_switched', 'branch_deleted', 'branch_renamed',
         ]);
 
-        // 让 HistoryView 处理非全量刷新的事件
-        // branch_switched / branch_created 在 HistoryView 中只做状态清理，不做 DOM 操作
         this.historyView.processEvent(event);
 
         if (event.type === 'finished' || event.type === 'session_start') {
             this.emit('change');
         }
 
+        // ✅ 修复问题2：新一轮对话开始时，清理之前的错误提示
+        if (event.type === 'session_start') {
+            this.historyView.clearErrors();
+        }
+
         if (event.type === 'finished') {
             this.uiUpdater.updateStatusIndicator('completed');
+            // ✅ 修复问题2：完成时也清理错误提示（正常完成说明问题已解决）
+            this.historyView.clearErrors();
         } else if (event.type === 'error') {
             this.uiUpdater.updateStatusIndicator('failed');
         }
@@ -580,21 +582,44 @@ export class LLMWorkspaceEditor implements IEditor {
         }
     }
 
+    /**
+     * ✅ 修复问题3：Prev Agent Chat 导航
+     * 
+     * 逻辑：
+     * 1. 找到当前视口中可见的 session
+     * 2. 找到该 session 所属的 agent chat（assistant session）的 title
+     * 3. 如果当前 agent chat 的 title 不在视口中，先导航到它的 title
+     * 4. 否则导航到上一个未折叠的 agent chat 的 title
+     */
     private handlePrevAgent(): void {
         const currentId = this.navigationHelper.findCurrentVisibleSession();
-        const prevId = this.historyView.getNeighborAgentSessionId(currentId, 'prev');
-        if (prevId) {
-            this.navigationHelper.scrollToSession(prevId);
+        const result = this.historyView.getNeighborAgentChatTarget(currentId, 'prev');
+
+        if (result) {
+            this.navigationHelper.scrollToSession(result);
         } else {
             Toast.info('No previous agent chat');
         }
     }
 
+    /**
+     * ✅ 修复问题3：Next Agent Chat 导航
+     * 
+     * 逻辑：
+     * 1. 找到当前视口中可见的 session
+     * 2. 如果当前在一个 agent chat 中且其 title 不可见，先跳到 title
+     * 3. 否则跳到下一个未折叠的 agent chat 的 title
+     * 4. 如果已经是最后一个，则跳到 chat 末尾
+     */
     private handleNextAgent(): void {
         const currentId = this.navigationHelper.findCurrentVisibleSession();
-        const nextId = this.historyView.getNeighborAgentSessionId(currentId, 'next');
-        if (nextId) {
-            this.navigationHelper.scrollToSession(nextId);
+        const result = this.historyView.getNeighborAgentChatTarget(currentId, 'next');
+
+        if (result === '__end__') {
+            // 已经是最后一个，滚动到底部
+            this.historyView.scrollToBottom(true);
+        } else if (result) {
+            this.navigationHelper.scrollToSession(result);
         } else {
             Toast.info('No next agent chat');
         }
@@ -638,6 +663,14 @@ export class LLMWorkspaceEditor implements IEditor {
         }
     }
 
+    /**
+     * ✅ 修复问题1：发送失败时保留输入内容
+     * 
+     * 改动：
+     * - 在发送前保存输入文本和文件
+     * - 发送失败时恢复输入内容到 ChatInput
+     * - 只有发送成功后才清空输入
+     */
     private async handleUserSend(
         text: string,
         files: File[],
@@ -650,6 +683,13 @@ export class LLMWorkspaceEditor implements IEditor {
             return;
         }
 
+        // ✅ 修复问题1：保存发送前的输入内容，用于失败时恢复
+        const savedText = text;
+        const savedAgentId = agentId;
+
+        // ✅ 记录发送前的 session 快照，用于失败时回滚 DOM
+        const sessionsBeforeSend = this.sessionManager.getSessions().map(s => s.id);
+
         this.chatInput.setLoading(true);
 
         try {
@@ -661,6 +701,8 @@ export class LLMWorkspaceEditor implements IEditor {
                     finalText += '\n\n' + refs.join('\n\n');
                 } catch (uploadErr: any) {
                     Toast.error(uploadErr.message || 'Failed to upload files');
+                    // ✅ 修复问题1：上传失败时恢复输入
+                    this.chatInput.restoreInput(savedText, savedAgentId);
                     this.chatInput.setLoading(false);
                     return;
                 }
@@ -675,10 +717,82 @@ export class LLMWorkspaceEditor implements IEditor {
                 finalText.trim(), files, agentId || 'default', overrides
             );
 
+            // ✅ 发送成功：不需要恢复，ChatInput 已经在 onSend 回调中清空了
+
         } catch (error: any) {
             console.error('[LLMWorkspaceEditor] Send failed:', error);
-            this.historyView.renderError(error);
+
+            // ✅ 修复：回滚发送过程中创建的空白 session DOM
+            this.rollbackFailedSend(sessionsBeforeSend);
+
+            // ✅ 修复：恢复用户输入内容
+            this.chatInput.restoreInput(savedText, savedAgentId);
+
+            // ✅ 显示用户友好的错误提示
+            this.showSendError(error);
+
             this.chatInput.setLoading(false);
+        }
+    }
+
+    /**
+     * ✅ 新增：回滚发送失败时创建的空白 session
+     * 
+     * sendMessage 内部可能先 emit session_start 创建了 user/assistant session DOM，
+     * 然后验证失败抛出异常。需要将这些「幽灵」session 从 DOM 中移除。
+     */
+    private rollbackFailedSend(sessionsBeforeSend: string[]): void {
+        const sessionsAfterFail = this.sessionManager.getSessions().map(s => s.id);
+
+        // 找出发送过程中新增的 session ID
+        const newSessionIds = sessionsAfterFail.filter(
+            id => !sessionsBeforeSend.includes(id)
+        );
+
+        if (newSessionIds.length > 0) {
+            console.log('[LLMWorkspaceEditor] Rolling back ghost sessions:', newSessionIds);
+
+            // 从 DOM 中移除（无动画，立即清理）
+            this.historyView.removeMessages(newSessionIds, false);
+
+            // 如果 sessionManager 也保留了这些 session，尝试静默删除
+            for (const id of newSessionIds) {
+                try {
+                    this.sessionManager.deleteMessage(id, {
+                        deleteAssociatedResponses: true,
+                        silent: true  // 不触发事件
+                    });
+                } catch (e) {
+                    // 静默失败（session 可能已被引擎回滚）
+                    console.warn('[LLMWorkspaceEditor] Silent cleanup failed for:', id, e);
+                }
+            }
+        }
+
+        // ✅ 确保流式模式被正确退出
+        this.historyView.exitStreamingMode();
+
+        // ✅ 清理可能残留的错误提示
+        this.historyView.clearErrors();
+    }
+
+    /**
+     * ✅ 新增：显示发送错误的用户友好提示
+     */
+    private showSendError(error: Error): void {
+        const message = error.message || 'Unknown error';
+
+        // 针对常见错误提供友好提示
+        if (message.includes('Cannot send consecutive user messages')) {
+            Toast.error('Please wait for the previous response to complete before sending another message.');
+        } else if (message.includes('rate limit') || message.includes('429')) {
+            Toast.error('Rate limit exceeded. Please wait a moment and try again.');
+        } else if (message.includes('API key') || message.includes('401')) {
+            Toast.error('Authentication failed. Please check your API key settings.');
+            // 对于严重错误，额外显示错误气泡
+            this.historyView.renderError(error);
+        } else {
+            Toast.error(`Send failed: ${message}`);
         }
     }
 
@@ -702,7 +816,7 @@ export class LLMWorkspaceEditor implements IEditor {
                 onRenameBranch: (oldName, newName) => this.handleBranchRename(oldName, newName),
                 onDeleteBranch: (branchName) => this.handleBranchDeleteByName(branchName),
             },
-                this.sessionManager  // ✅ 传入 sessionManager
+                this.sessionManager
             );
         }
 

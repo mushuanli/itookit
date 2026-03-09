@@ -119,6 +119,210 @@ export class HistoryView {
         this.collapseStates = { ...states };
     }
 
+    /**
+     * ✅ 修复问题2：清理所有错误提示
+     * 
+     * 清理 error banner 和 error bubble（system session），
+     * 在新一轮对话开始或成功完成时调用。
+     */
+    public clearErrors(): void {
+        // 清理 error banner（由 renderError 创建）
+        const banners = this.container.querySelectorAll('.llm-ui-error-banner');
+        banners.forEach(banner => banner.remove());
+
+        // 清理 error bubble（由 appendErrorBubble 创建的 system session）
+        const errorSessions = this.container.querySelectorAll('.llm-ui-session--system');
+        errorSessions.forEach(session => session.remove());
+    }
+
+    // @file: llm-ui/components/HistoryView.ts
+    // 确认 removeMessages 中已有以下清理逻辑（上一轮已修复，此处确认完整性）
+
+    public removeMessages(ids: string[], animated: boolean = true): string[] {
+        const actuallyRemoved: string[] = [];
+
+        for (const id of ids) {
+            const sessionEl = this.container.querySelector(`[data-session-id="${id}"]`);
+            const nodeEl = this.nodeMap.get(id);
+
+            if (!sessionEl && !nodeEl) {
+                console.warn(`[HistoryView] Cannot remove ${id}: not found in DOM`);
+                continue;
+            }
+
+            // ✅ 清理渲染记录
+            this.renderedSessionIds.delete(id);
+
+            if (sessionEl) {
+                this.removeElement(sessionEl as HTMLElement, animated);
+            }
+            if (nodeEl) {
+                this.removeElement(nodeEl, animated);
+                this.nodeMap.delete(id);
+            }
+
+            const editor = this.editorMap.get(id);
+            if (editor) {
+                editor.destroy();
+                this.editorMap.delete(id);
+            }
+
+            const timer = this.previewUpdateTimers.get(id);
+            if (timer) {
+                clearTimeout(timer);
+                this.previewUpdateTimers.delete(id);
+            }
+
+            this.originalContentMap.delete(id);
+            this.editingNodes.delete(id);
+            delete this.collapseStates[id];
+
+            actuallyRemoved.push(id);
+        }
+
+        const delay = animated ? 350 : 0;
+        setTimeout(() => this.checkEmpty(), delay);
+
+        return actuallyRemoved;
+    }
+
+    /**
+     * ✅ 修复问题3：获取 prev/next agent chat 的导航目标
+     * 
+     * 导航逻辑：
+     * - prev: 
+     *   1. 找到当前可见 session 所属的 agent chat (assistant session)
+     *   2. 如果该 agent chat 的 title 不在当前视口可见区域，则导航到该 title
+     *   3. 否则导航到上一个未折叠的 agent chat 的 title
+     * 
+     * - next:
+     *   1. 找到当前可见 session 所属的 agent chat
+     *   2. 如果该 agent chat 的 title 不在视口中，先导航到该 title
+     *   3. 否则导航到下一个未折叠的 agent chat 的 title
+     *   4. 如果已经是最后一个，返回 '__end__' 表示应滚动到底部
+     * 
+     * @param currentVisibleId 当前视口中可见的 session ID
+     * @param direction 'prev' | 'next'
+     * @returns 目标 session ID，'__end__' 表示滚到底部，null 表示无目标
+     */
+    public getNeighborAgentChatTarget(
+        currentVisibleId: string | null,
+        direction: 'prev' | 'next'
+    ): string | null | '__end__' {
+        const sessions = Array.from(this.container.querySelectorAll('.llm-ui-session'));
+        if (sessions.length === 0) return null;
+
+        // 收集所有未折叠的 assistant session（agent chat）
+        const agentSessions = sessions.filter(el => {
+            if (!el.classList.contains('llm-ui-session--assistant')) return false;
+
+            const sessionId = (el as HTMLElement).dataset.sessionId;
+            if (!sessionId) return false;
+
+            // 检查是否折叠：通过 collapseStates 或 DOM class
+            const isCollapsed = this.collapseStates[sessionId] === true;
+            return !isCollapsed;
+        });
+
+        if (agentSessions.length === 0) return null;
+
+        // 找到当前可见 session 在全部 sessions 中的位置
+        let currentIndex = -1;
+        if (currentVisibleId) {
+            currentIndex = sessions.findIndex(
+                el => (el as HTMLElement).dataset.sessionId === currentVisibleId
+            );
+        }
+
+        // 找到当前可见 session 所属的 agent chat（即距离当前位置最近的前方 assistant session）
+        let currentAgentSession: Element | null = null;
+        let currentAgentIndex = -1;
+
+        if (currentIndex >= 0) {
+            // 检查当前 session 本身是否是 assistant
+            if (sessions[currentIndex].classList.contains('llm-ui-session--assistant')) {
+                currentAgentSession = sessions[currentIndex];
+                currentAgentIndex = agentSessions.indexOf(currentAgentSession);
+            } else {
+                // 向前查找最近的 assistant session
+                for (let i = currentIndex - 1; i >= 0; i--) {
+                    if (sessions[i].classList.contains('llm-ui-session--assistant')) {
+                        currentAgentSession = sessions[i];
+                        currentAgentIndex = agentSessions.indexOf(currentAgentSession);
+                        break;
+                    }
+                }
+                // 如果前面没有 assistant，也检查后面（用户可能在第一条 user 消息处）
+                if (!currentAgentSession) {
+                    for (let i = currentIndex + 1; i < sessions.length; i++) {
+                        if (sessions[i].classList.contains('llm-ui-session--assistant')) {
+                            currentAgentSession = sessions[i];
+                            currentAgentIndex = agentSessions.indexOf(currentAgentSession);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        // 检查某个 session 的 title（header）是否在视口中可见
+        const isTitleVisible = (sessionEl: Element): boolean => {
+            const header = sessionEl.querySelector('.llm-ui-node__header, .llm-ui-bubble__header');
+            if (!header) return false;
+
+            const containerRect = this.container.getBoundingClientRect();
+            const headerRect = header.getBoundingClientRect();
+
+            // title 可见 = header 的顶部在容器可视区域内
+            return headerRect.top >= containerRect.top &&
+                headerRect.top <= containerRect.bottom;
+        };
+
+        if (direction === 'prev') {
+            // 如果当前有关联的 agent chat 且其 title 不可见，先跳到它的 title
+            if (currentAgentSession && !isTitleVisible(currentAgentSession)) {
+                const sessionId = (currentAgentSession as HTMLElement).dataset.sessionId;
+                return sessionId || null;
+            }
+
+            // 否则找上一个未折叠的 agent chat
+            if (currentAgentIndex > 0) {
+                const prevAgent = agentSessions[currentAgentIndex - 1];
+                return (prevAgent as HTMLElement).dataset.sessionId || null;
+            } else if (currentAgentIndex === -1 && agentSessions.length > 0) {
+                // 当前不在任何 agent chat 中，导航到最后一个
+                const lastAgent = agentSessions[agentSessions.length - 1];
+                return (lastAgent as HTMLElement).dataset.sessionId || null;
+            }
+
+            return null;
+        } else {
+            // direction === 'next'
+
+            // 如果当前有关联的 agent chat 且其 title 不可见（用户在该 chat 的中间位置向下看）
+            // 这种情况下 next 应该跳到下一个，因为用户已经看过当前的内容了
+            // 但如果 title 在视口上方（已经滚过去了），next 应该跳到下一个
+
+            if (currentAgentIndex >= 0) {
+                // 找下一个未折叠的 agent chat
+                if (currentAgentIndex < agentSessions.length - 1) {
+                    const nextAgent = agentSessions[currentAgentIndex + 1];
+                    return (nextAgent as HTMLElement).dataset.sessionId || null;
+                } else {
+                    // 已经是最后一个 agent chat，跳到 chat 末尾
+                    return '__end__';
+                }
+            } else if (agentSessions.length > 0) {
+                // 当前不在任何 agent chat 中（比如在第一条 user 消息之前）
+                // 导航到第一个 agent chat
+                const firstAgent = agentSessions[0];
+                return (firstAgent as HTMLElement).dataset.sessionId || null;
+            }
+
+            return null;
+        }
+    }
+
     renderFull(sessions: SessionGroup[]) {
         this.clear();
         if (sessions.length === 0) {
@@ -191,7 +395,9 @@ export class HistoryView {
 
         const isSerious = error.message.includes('401') || error.message.includes('API key');
         if (!isSerious) {
-            setTimeout(() => banner.remove(), 5000);
+            setTimeout(() => {
+                if (banner.parentNode) banner.remove();
+            }, 5000);
         }
 
         this.container.insertBefore(banner, this.container.firstChild);
@@ -770,33 +976,9 @@ export class HistoryView {
     // ✨ [新增] 获取相邻的 Agent Chat Session ID
     // direction: 'next' | 'prev'
     public getNeighborAgentSessionId(currentVisibleId: string | null, direction: 'next' | 'prev'): string | null {
-        const sessions = Array.from(this.container.querySelectorAll('.llm-ui-session'));
-        if (sessions.length === 0) return null;
-
-        let currentIndex = -1;
-        if (currentVisibleId) {
-            currentIndex = sessions.findIndex(el => (el as HTMLElement).dataset.sessionId === currentVisibleId);
-        }
-
-        if (direction === 'next') {
-            // 如果没找到当前，默认从头开始找
-            const start = currentIndex === -1 ? -1 : currentIndex;
-            for (let i = start + 1; i < sessions.length; i++) {
-                if (sessions[i].classList.contains('llm-ui-session--assistant')) {
-                    return (sessions[i] as HTMLElement).dataset.sessionId || null;
-                }
-            }
-        } else {
-            // prev
-            // 如果没找到当前，默认从尾部开始找
-            const start = currentIndex === -1 ? sessions.length : currentIndex;
-            for (let i = start - 1; i >= 0; i--) {
-                if (sessions[i].classList.contains('llm-ui-session--assistant')) {
-                    return (sessions[i] as HTMLElement).dataset.sessionId || null;
-                }
-            }
-        }
-        return null;
+        const result = this.getNeighborAgentChatTarget(currentVisibleId, direction);
+        if (result === '__end__') return null;
+        return result;
     }
 
     private renderExecutionTree(node: ExecutionNode, isCollapsed: boolean = false) {
@@ -1275,6 +1457,9 @@ export class HistoryView {
     private processEventImmediate(event: OrchestratorEvent) {
         switch (event.type) {
             case 'session_start':
+                // ✅ 修复问题2：新对话开始时清理错误提示
+                this.clearErrors();
+
                 this.enterStreamingMode();
                 // [修改]：新消息产生时，如果是用户消息，强制折叠
                 // 如果希望用户刚发完能看到，这里传 false；如果要求“绝对保持fold”，传 true
@@ -1311,7 +1496,9 @@ export class HistoryView {
                 this.exitStreamingMode();
                 this.editorMap.forEach(editor => editor.finishStream());
 
-                // 流式结束后，保存折叠状态
+                // ✅ 修复问题2：成功完成时清理错误提示
+                this.clearErrors();
+
                 this.onCollapseStateChange?.(this.collapseStates);
                 break;
 
@@ -1356,6 +1543,8 @@ export class HistoryView {
                 break;
 
             case 'retry_started':
+                // ✅ 修复问题2：重试时也清理旧的错误提示
+                this.clearErrors();
                 this.enterStreamingMode();
                 break;
         }
