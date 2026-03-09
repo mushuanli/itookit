@@ -3,7 +3,7 @@
  */
 import { VFSModuleEngine } from '@itookit/vfs';
 import { createVFSUI, connectEditorLifecycle, VFSUIManager } from '@itookit/vfs-ui';
-import { createMDxEditor } from '@itookit/mdxeditor'; 
+import { createMDxEditor } from '@itookit/mdxeditor';
 import { MemoryManagerConfig } from '../types';
 import { BackgroundBrain } from './BackgroundBrain';
 import { Layout } from './Layout';
@@ -67,8 +67,8 @@ export class MemoryManager {
         // ✅ [Fix] 5. Create Host Context Explicitly
         // 创建通用的宿主上下文，供所有编辑器使用
         const sharedHostContext: EditorHostContext = {
-            toggleSidebar: (collapsed?: boolean) => {
-                this.vfsUI.toggleSidebar(); 
+            toggleSidebar: (_collapsed?: boolean) => {
+                this.vfsUI.toggleSidebar();
             },
             saveContent: async (nodeId: string, content: string) => {
                 await this.engine.writeContent(nodeId, content);
@@ -93,7 +93,7 @@ export class MemoryManager {
             {
                 // ✅ 传递 HostContext
                 hostContext: sharedHostContext,
-                
+
                 // 传递其他编辑器配置
                 ...config.editorConfig
             }
@@ -109,7 +109,7 @@ export class MemoryManager {
      * 此时 this.vfsUI 可能还在初始化中，但当此函数被实际调用时(打开文件时)，它一定已经可用。
      */
     private enhancedEditorFactory = async (
-        container: HTMLElement, 
+        container: HTMLElement,
         runtimeOptions: EditorOptions
     ): Promise<IEditor> => {
         const { editorConfig } = this.config;
@@ -117,9 +117,9 @@ export class MemoryManager {
         const mergedOptions: EditorOptions = {
             ...editorConfig,
             ...runtimeOptions,
-            plugins: [ 
-                ...(editorConfig?.plugins || []), 
-                ...(runtimeOptions?.plugins || []) 
+            plugins: [
+                ...(editorConfig?.plugins || []),
+                ...(runtimeOptions?.plugins || [])
             ],
             defaultPluginOptions: {
                 ...(editorConfig?.defaultPluginOptions || {}),
@@ -160,8 +160,8 @@ export class MemoryManager {
 
     public async start() {
         await this.engine.init();
-        await this.vfsUI.start(); 
-        
+        await this.vfsUI.start();
+
         // Settings 模块的特殊逻辑：监听来自 Main 的 Tab 切换请求
         if (this.config.moduleName === 'settings_root') {
             // 注意：这里需要配合 Main.ts 中的逻辑，如果是通过 openFile 方法调用则不需要这个监听器
@@ -170,8 +170,8 @@ export class MemoryManager {
     }
 
     public async openFile(nodeId: string) {
-        await this.vfsUI.store.dispatch({ 
-            type: 'SESSION_SELECT', 
+        await this.vfsUI.store.dispatch({
+            type: 'SESSION_SELECT',
             payload: { sessionId: nodeId }
         });
     }
