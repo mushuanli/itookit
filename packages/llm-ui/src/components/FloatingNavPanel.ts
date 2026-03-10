@@ -4,27 +4,10 @@ import { SessionGroup, SessionManager } from '@itookit/llm-engine';
 import { FloatingNavPanelTemplates } from './templates/FloatingNavPanelTemplates';
 import { BranchItem } from '../core/types';
 import { showConfirmDialog, Toast } from '@itookit/common';
+import { EditorEventBus } from '../core/EditorEventBus';
+import { EventCleanup } from '../utils/EventCleanup';
+import { TimerManager } from '../utils/TimerManager';
 
-export interface FloatingNavPanelOptions {
-    onNavigate: (sessionId: string) => void;
-    onToggleFold: (sessionId: string) => void;
-    onCopy: (sessionId: string) => void;
-    onFoldAll: () => void;
-    onUnfoldAll: () => void;
-    // ✨ 新增：批量操作回调
-    onBatchDelete?: (sessionIds: string[]) => Promise<void>;
-    onBatchCopy?: (sessionIds: string[]) => Promise<void>;
-
-    // ✅ 新增：分支操作
-    onShowBranchTree?: () => void;
-    onCreateBranch?: (sourceId: string) => void;
-    onSwitchBranch?: (branchId: string) => void;
-
-    // ✅ 新增：分支 CRUD
-    onSwitchBranchByName?: (branchName: string) => void;
-    onRenameBranch?: (oldName: string, newName: string) => void;
-    onDeleteBranch?: (branchName: string) => void;
-}
 
 export interface ChatNavItem {
     id: string;
@@ -57,27 +40,33 @@ export class FloatingNavPanel {
     private allItems: ChatNavItem[] = []; // 所有节点（跨 branch）
     private branches: BranchItem[] = [];
     private currentIndex: number = -1;
-    private options: FloatingNavPanelOptions;
     private lastSelectedIndex: number = -1;
     private selectedIds: Set<string> = new Set();
-    private keydownHandler: ((e: KeyboardEvent) => void) | null = null;
-    private sessionManager: SessionManager;
-    // 当前 dropdown 筛选：null 表示 "all"，string 表示具体 branch
     private filterBranch: string | null = null;
+
+    // ✅ 新增：统一管理
+    private bus: EditorEventBus;
+    private sessionManager: SessionManager;
+    private events = new EventCleanup();
+    private timers = new TimerManager();
+
+    // ✅ 新增：面板内部事件清理（每次 render 时重建）
+    private panelEvents = new EventCleanup();
 
     constructor(
         container: HTMLElement,
-        options: FloatingNavPanelOptions,
+        bus: EditorEventBus,
         sessionManager: SessionManager
     ) {
         this.container = container;
-        this.options = options;
+        this.bus = bus;
         this.sessionManager = sessionManager;
     }
 
-    /**
-     * ✅ 修复：只在分叉点显示子分支列表
-     */
+    // ================================================================
+    // 数据更新
+    // ================================================================
+
     public async updateItems(
         sessions: SessionGroup[],
         collapseStates: Record<string, boolean>
@@ -257,7 +246,8 @@ export class FloatingNavPanel {
 
         if (this.panel) {
             this.panel.classList.add('llm-nav-panel--hiding');
-            setTimeout(() => {
+            // ✅ 改动：使用 TimerManager
+            this.timers.setTimeout(() => {
                 this.panel?.remove();
                 this.panel = null;
             }, 200);
@@ -272,6 +262,9 @@ export class FloatingNavPanel {
     }
 
     private render(): void {
+        // ✅ 清理上次 render 绑定的面板事件
+        this.panelEvents.cleanup();
+
         this.panel?.remove();
 
         this.panel = document.createElement('div');
@@ -307,7 +300,7 @@ export class FloatingNavPanel {
         );
 
         this.container.appendChild(this.panel);
-        this.bindEvents();
+        this.bindPanelEvents();
         this.updateHighlight();
 
         requestAnimationFrame(() => {
@@ -348,80 +341,101 @@ export class FloatingNavPanel {
         }
     }
 
-    private bindEvents(): void {
+    // ================================================================
+    // 事件绑定（使用 panelEvents，每次 render 重建）
+    // ================================================================
+
+    private bindPanelEvents(): void {
         if (!this.panel) return;
 
-        this.panel.querySelector('.llm-nav-panel__close')?.addEventListener('click', () => this.hide());
+        const closeBtn = this.panel.querySelector('.llm-nav-panel__close');
+        if (closeBtn) {
+            this.panelEvents.add(closeBtn, 'click', () => this.hide());
+        }
 
         this.panel.querySelectorAll<HTMLElement>('.llm-nav-panel__view-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
+            this.panelEvents.add(btn, 'click', () => {
                 const view = btn.dataset.view as 'list' | 'tree';
                 this.setViewMode(view);
             });
         });
 
         this.panel.querySelectorAll<HTMLElement>('.llm-nav-panel__btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
+            this.panelEvents.add(btn, 'click', ((e: MouseEvent) => {
                 e.stopPropagation();
                 const action = btn.dataset.action;
                 this.handleAction(action);
-            });
+            }) as EventListener);
         });
 
         this.bindBranchBarEvents();
 
-        const items = this.panel.querySelectorAll<HTMLElement>('.llm-nav-item');
-        items.forEach(item => {
-            item.addEventListener('click', (e: MouseEvent) => {
-                const target = e.target as HTMLElement;
-                const id = item.dataset.id!;
-                const idx = parseInt(item.dataset.index!);
-
-                // ✅ 点击子分支标签 → 切换到该 branch
-                const branchTag = target.closest('[data-branch-tag]') as HTMLElement;
-                if (branchTag) {
-                    const branchName = branchTag.dataset.branchTag;
-                    if (branchName) {
-                        this.options.onSwitchBranchByName?.(branchName);
-                    }
-                    return;
-                }
-
-                const branchBtn = target.closest('[data-action]') as HTMLElement;
-                if (branchBtn && item.contains(branchBtn)) {
-                    const action = branchBtn.dataset.action;
-                    this.handleBranchAction(action!, id, idx);
-                    return;
-                }
-
-                if (target.closest('[data-checkbox]')) {
-                    if (e.shiftKey && this.lastSelectedIndex !== -1) {
-                        this.selectRange(this.lastSelectedIndex, idx);
-                    } else {
-                        this.toggleSelection(id);
-                    }
-                    this.lastSelectedIndex = idx;
-                    return;
-                }
-
-                if (target.closest('[data-fold]')) {
-                    this.options.onToggleFold(id);
-                    const itemData = this.items[idx];
-                    if (itemData) itemData.isCollapsed = !itemData.isCollapsed;
-                    this.updateFoldIcon(item, itemData.isCollapsed);
-                    return;
-                }
-
-                this.currentIndex = idx;
-                this.updateHighlight();
-                this.options.onNavigate(id);
-            });
-        });
+        // ✅ 改动：使用事件委托处理所有 nav-item 点击
+        const listContainer = this.panel.querySelector('.llm-nav-panel__list');
+        if (listContainer) {
+            this.panelEvents.add(listContainer, 'click', ((e: MouseEvent) => {
+                this.handleItemClick(e);
+            }) as EventListener);
+        }
     }
 
-    /**
-     * ✅ 新增：绑定 Branch Bar 所有事件
-     */
+    // ✅ 新增：统一的 item 点击处理（事件委托）
+    private handleItemClick(e: MouseEvent): void {
+        const target = e.target as HTMLElement;
+        const itemEl = target.closest('.llm-nav-item') as HTMLElement;
+        if (!itemEl) return;
+
+        const id = itemEl.dataset.id!;
+        const idx = parseInt(itemEl.dataset.index!);
+
+        // 点击子分支标签 → 切换到该 branch
+        const branchTag = target.closest('[data-branch-tag]') as HTMLElement;
+        if (branchTag) {
+            const branchName = branchTag.dataset.branchTag;
+            if (branchName) {
+                this.bus.emit('branch:switch', { branchName });
+            }
+            return;
+        }
+
+        // 点击 action 按钮
+        const branchBtn = target.closest('[data-action]') as HTMLElement;
+        if (branchBtn && itemEl.contains(branchBtn)) {
+            const action = branchBtn.dataset.action;
+            this.handleBranchAction(action!, id, idx);
+            return;
+        }
+
+        // 点击 checkbox
+        if (target.closest('[data-checkbox]')) {
+            if (e.shiftKey && this.lastSelectedIndex !== -1) {
+                this.selectRange(this.lastSelectedIndex, idx);
+            } else {
+                this.toggleSelection(id);
+            }
+            this.lastSelectedIndex = idx;
+            return;
+        }
+
+        // 点击 fold
+        if (target.closest('[data-fold]')) {
+            this.bus.emit('nav:toggleFold', { sessionId: id });
+            const itemData = this.items[idx];
+            if (itemData) itemData.isCollapsed = !itemData.isCollapsed;
+            this.updateFoldIcon(itemEl, itemData.isCollapsed);
+            return;
+        }
+
+        // 默认：导航
+        this.currentIndex = idx;
+        this.updateHighlight();
+        this.bus.emit('nav:scrollTo', { sessionId: id });
+    }
+
+    // ================================================================
+    // Branch Bar 事件
+    // ================================================================
+
     private bindBranchBarEvents(): void {
         if (!this.panel) return;
 
@@ -432,7 +446,7 @@ export class FloatingNavPanel {
         const dropdown = branchBar.querySelector('.llm-nav-panel__branch-dropdown') as HTMLElement;
 
         if (selector && dropdown) {
-            selector.addEventListener('click', (e) => {
+            this.panelEvents.add(selector, 'click', ((e: MouseEvent) => {
                 e.stopPropagation();
                 const isOpen = dropdown.style.display !== 'none';
                 if (isOpen) {
@@ -440,7 +454,7 @@ export class FloatingNavPanel {
                 } else {
                     this.openBranchDropdown(dropdown);
                 }
-            });
+            }) as EventListener);
         }
     }
 
@@ -457,16 +471,22 @@ export class FloatingNavPanel {
         }
 
         // "All" 选项
-        dropdown.querySelector('[data-branch-name="__all__"]')?.addEventListener('click', (e) => {
-            e.stopPropagation();
-            this.filterBranch = null;
-            this.applyFilter();
-            this.closeBranchDropdown(dropdown);
-            this.render();
-        });
+        const allItem = dropdown.querySelector('[data-branch-name="__all__"]');
+        if (allItem) {
+            this.panelEvents.add(allItem, 'click', ((e: MouseEvent) => {
+                e.stopPropagation();
+                this.filterBranch = null;
+                this.applyFilter();
+                this.closeBranchDropdown(dropdown);
+                this.render();
+            }) as EventListener);
+        }
 
-        dropdown.querySelectorAll('.llm-nav-panel__branch-item:not([data-branch-name="__all__"])').forEach(item => {
-            item.addEventListener('click', (e) => {
+        // 各分支选项
+        dropdown.querySelectorAll(
+            '.llm-nav-panel__branch-item:not([data-branch-name="__all__"])'
+        ).forEach(item => {
+            this.panelEvents.add(item, 'click', ((e: MouseEvent) => {
                 e.stopPropagation();
                 const el = e.currentTarget as HTMLElement;
                 const branchName = el.dataset.branchName;
@@ -480,41 +500,57 @@ export class FloatingNavPanel {
                     if (!isAlreadySelected) {
                         this.filterBranch = branchName;
                         this.applyFilter();
-                        this.options.onSwitchBranchByName?.(branchName);
+                        // ✅ 改动：通过 bus 发送
+                        this.bus.emit('branch:switch', { branchName });
                         this.render();
                     }
                 }
-            });
+            }) as EventListener);
 
-            item.querySelector('[data-branch-item-action="rename"]')?.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const branchItem = (e.currentTarget as HTMLElement).closest('.llm-nav-panel__branch-item') as HTMLElement;
-                const oldName = branchItem?.dataset.branchName;
-                if (oldName) {
-                    this.startBranchRename(branchItem, oldName);
-                }
-            });
+            // 重命名按钮
+            const renameBtn = item.querySelector('[data-branch-item-action="rename"]');
+            if (renameBtn) {
+                this.panelEvents.add(renameBtn, 'click', ((e: MouseEvent) => {
+                    e.stopPropagation();
+                    const branchItem = (e.currentTarget as HTMLElement)
+                        .closest('.llm-nav-panel__branch-item') as HTMLElement;
+                    const oldName = branchItem?.dataset.branchName;
+                    if (oldName) {
+                        this.startBranchRename(branchItem, oldName, dropdown);
+                    }
+                }) as EventListener);
+            }
 
-            item.querySelector('[data-branch-item-action="delete"]')?.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const branchItem = (e.currentTarget as HTMLElement).closest('.llm-nav-panel__branch-item') as HTMLElement;
-                const branchName = branchItem?.dataset.branchName;
-                if (branchName) {
-                    this.closeBranchDropdown(dropdown);
-                    this.options.onDeleteBranch?.(branchName);
-                }
-            });
+            // 删除按钮
+            const deleteBtn = item.querySelector('[data-branch-item-action="delete"]');
+            if (deleteBtn) {
+                this.panelEvents.add(deleteBtn, 'click', ((e: MouseEvent) => {
+                    e.stopPropagation();
+                    const branchItem = (e.currentTarget as HTMLElement)
+                        .closest('.llm-nav-panel__branch-item') as HTMLElement;
+                    const branchName = branchItem?.dataset.branchName;
+                    if (branchName) {
+                        this.closeBranchDropdown(dropdown);
+                        // ✅ 改动：通过 bus 发送
+                        this.bus.emit('branch:delete', { branchName });
+                    }
+                }) as EventListener);
+            }
         });
 
-        const closeOnOutsideClick = (e: MouseEvent) => {
-            const wrapper = this.panel?.querySelector('.llm-nav-panel__branch-selector-wrapper');
-            if (wrapper && !wrapper.contains(e.target as Node)) {
-                this.closeBranchDropdown(dropdown);
-                this.panel?.removeEventListener('click', closeOnOutsideClick);
+        // 点击外部关闭
+        this.timers.setTimeout(() => {
+            const closeOnOutsideClick = (e: MouseEvent) => {
+                const wrapper = this.panel?.querySelector('.llm-nav-panel__branch-selector-wrapper');
+                if (wrapper && !wrapper.contains(e.target as Node)) {
+                    this.closeBranchDropdown(dropdown);
+                    this.panel?.removeEventListener('click', closeOnOutsideClick);
+                }
+            };
+
+            if (this.panel) {
+                this.panelEvents.add(this.panel, 'click', closeOnOutsideClick as EventListener);
             }
-        };
-        setTimeout(() => {
-            this.panel?.addEventListener('click', closeOnOutsideClick);
         }, 0);
     }
 
@@ -528,7 +564,11 @@ export class FloatingNavPanel {
         }
     }
 
-    private startBranchRename(branchItemEl: HTMLElement, oldName: string): void {
+    private startBranchRename(
+        branchItemEl: HTMLElement,
+        oldName: string,
+        dropdown: HTMLElement
+    ): void {
         const nameEl = branchItemEl.querySelector('.llm-nav-panel__branch-item-name') as HTMLElement;
         const actionsEl = branchItemEl.querySelector('.llm-nav-panel__branch-item-actions') as HTMLElement;
         if (!nameEl) return;
@@ -548,12 +588,12 @@ export class FloatingNavPanel {
         const confirm = () => {
             const newName = input.value.trim();
             if (newName && newName !== oldName) {
-                this.options.onRenameBranch?.(oldName, newName);
+                // ✅ 改动：通过 bus 发送
+                this.bus.emit('branch:rename', { oldName, newName });
             }
         };
 
         const cancel = () => {
-            const dropdown = this.panel?.querySelector('.llm-nav-panel__branch-dropdown') as HTMLElement;
             if (dropdown && dropdown.style.display !== 'none') {
                 dropdown.innerHTML = FloatingNavPanelTemplates.renderBranchDropdownItems(
                     this.branches,
@@ -563,25 +603,131 @@ export class FloatingNavPanel {
             }
         };
 
-        renameContainer.querySelector('[data-rename-action="confirm"]')?.addEventListener('click', (e) => {
-            e.stopPropagation();
-            confirm();
-        });
+        const confirmBtn = renameContainer.querySelector('[data-rename-action="confirm"]');
+        if (confirmBtn) {
+            this.panelEvents.add(confirmBtn, 'click', ((e: MouseEvent) => {
+                e.stopPropagation();
+                confirm();
+            }) as EventListener);
+        }
 
-        renameContainer.querySelector('[data-rename-action="cancel"]')?.addEventListener('click', (e) => {
-            e.stopPropagation();
-            cancel();
-        });
+        const cancelBtn = renameContainer.querySelector('[data-rename-action="cancel"]');
+        if (cancelBtn) {
+            this.panelEvents.add(cancelBtn, 'click', ((e: MouseEvent) => {
+                e.stopPropagation();
+                cancel();
+            }) as EventListener);
+        }
 
-        input.addEventListener('keydown', (e) => {
+        this.panelEvents.add(input, 'keydown', ((e: KeyboardEvent) => {
             if (e.key === 'Enter') { e.stopPropagation(); confirm(); }
             else if (e.key === 'Escape') { e.stopPropagation(); cancel(); }
-        });
+        }) as EventListener);
     }
 
-    /**
-     * 收集待删除节点影响的所有 branch（从该节点或其后续节点分离的）
-     */
+    // ================================================================
+    // 工具栏操作
+    // ================================================================
+
+    private async handleAction(action?: string): Promise<void> {
+        switch (action) {
+            case 'toggle-select-all':
+                if (this.selectedIds.size === this.items.length) {
+                    this.selectedIds.clear();
+                } else {
+                    this.items.forEach(i => this.selectedIds.add(i.id));
+                }
+                this.render();
+                break;
+
+            case 'clear-selection':
+                this.selectedIds.clear();
+                this.render();
+                break;
+
+            case 'fold-all':
+                // ✅ 改动：通过 bus 发送
+                this.bus.emit('nav:foldAll', {});
+                this.items.forEach(i => i.isCollapsed = true);
+                this.render();
+                break;
+
+            case 'unfold-all':
+                // ✅ 改动：通过 bus 发送
+                this.bus.emit('nav:unfoldAll', {});
+                this.items.forEach(i => i.isCollapsed = false);
+                this.render();
+                break;
+
+            case 'prev':
+                this.navigatePrev();
+                break;
+
+            case 'next':
+                this.navigateNext();
+                break;
+
+            case 'batch-toggle':
+                this.selectedIds.forEach(id => {
+                    // ✅ 改动：通过 bus 发送
+                    this.bus.emit('nav:toggleFold', { sessionId: id });
+                    const item = this.items.find(i => i.id === id);
+                    if (item) item.isCollapsed = !item.isCollapsed;
+                });
+                this.render();
+                break;
+
+            case 'batch-delete':
+                await this.handleBatchDeleteWithBranchCheck();
+                break;
+
+            case 'batch-copy':
+                if (this.selectedIds.size > 0) {
+                    // ✅ 改动：通过 bus 发送
+                    this.bus.emit('batch:copy', { ids: Array.from(this.selectedIds) });
+                    this.selectedIds.clear();
+                    this.render();
+                }
+                break;
+        }
+    }
+
+    // ================================================================
+    // 分支操作
+    // ================================================================
+
+    private handleBranchAction(action: string, sessionId: string, index: number): void {
+        const item = this.items[index];
+
+        switch (action) {
+            case 'prev-branch':
+                if (item.siblingIndex! > 0) {
+                    // ✅ 改动：通过 bus 发送
+                    this.bus.emit('branch:switchById', { headNodeId: sessionId });
+                }
+                break;
+
+            case 'next-branch':
+                if (item.siblingIndex! < (item.siblingCount || 1) - 1) {
+                    this.bus.emit('branch:switchById', { headNodeId: sessionId });
+                }
+                break;
+
+            case 'create-branch':
+                // ✅ 改动：通过 bus 发送
+                this.bus.emit('branch:create', { sourceNodeId: sessionId });
+                break;
+
+            case 'show-children':
+                // 暂无操作
+                break;
+        }
+    }
+
+    // ================================================================
+    // 批量删除（含分支检查）
+    // ================================================================
+
     private collectAffectedBranches(sessionIds: string[]): string[] {
         const affected = new Set<string>();
         //const deleteSet = new Set(sessionIds);
@@ -636,60 +782,6 @@ export class FloatingNavPanel {
         return invalidated;
     }
 
-    private async handleAction(action?: string): Promise<void> {
-        switch (action) {
-            case 'toggle-select-all':
-                if (this.selectedIds.size === this.items.length) {
-                    this.selectedIds.clear();
-                } else {
-                    this.items.forEach(i => this.selectedIds.add(i.id));
-                }
-                this.render();
-                break;
-            case 'clear-selection':
-                this.selectedIds.clear();
-                this.render();
-                break;
-            case 'fold-all':
-                this.options.onFoldAll();
-                this.items.forEach(i => i.isCollapsed = true);
-                this.render();
-                break;
-            case 'unfold-all':
-                this.options.onUnfoldAll();
-                this.items.forEach(i => i.isCollapsed = false);
-                this.render();
-                break;
-            case 'prev':
-                this.navigatePrev();
-                break;
-            case 'next':
-                this.navigateNext();
-                break;
-            case 'batch-toggle':
-                this.selectedIds.forEach(id => {
-                    this.options.onToggleFold(id);
-                    const item = this.items.find(i => i.id === id);
-                    if (item) item.isCollapsed = !item.isCollapsed;
-                });
-                this.render();
-                break;
-            case 'batch-delete':
-                await this.handleBatchDeleteWithBranchCheck();
-                break;
-            case 'batch-copy':
-                if (this.selectedIds.size > 0) {
-                    await this.options.onBatchCopy?.(Array.from(this.selectedIds));
-                    this.selectedIds.clear();
-                    this.render();
-                }
-                break;
-        }
-    }
-
-    /**
-     * 删除节点时检查受影响的 branch，提示用户，并清理失效 branch
-     */
     private async handleBatchDeleteWithBranchCheck(): Promise<void> {
         if (this.selectedIds.size === 0) return;
 
@@ -714,14 +806,16 @@ export class FloatingNavPanel {
         // 先删除失效的 branch
         for (const branchName of invalidatedBranches) {
             try {
-                await this.options.onDeleteBranch?.(branchName);
+                // ✅ 改动：通过 bus 发送
+                this.bus.emit('branch:delete', { branchName });
             } catch (e) {
                 console.warn(`[FloatingNavPanel] Failed to delete invalidated branch: ${branchName}`, e);
             }
         }
 
         // 再删除节点
-        await this.options.onBatchDelete?.(ids);
+        // ✅ 改动：通过 bus 发送
+        this.bus.emit('batch:delete', { ids });
         this.selectedIds.clear();
 
         if (invalidatedBranches.length > 0) {
@@ -731,28 +825,9 @@ export class FloatingNavPanel {
         this.render();
     }
 
-    private handleBranchAction(action: string, sessionId: string, index: number): void {
-        const item = this.items[index];
-
-        switch (action) {
-            case 'prev-branch':
-                if (item.siblingIndex! > 0) {
-                    this.options.onSwitchBranch?.(sessionId);
-                }
-                break;
-            case 'next-branch':
-                if (item.siblingIndex! < (item.siblingCount || 1) - 1) {
-                    this.options.onSwitchBranch?.(sessionId);
-                }
-                break;
-            case 'create-branch':
-                this.options.onCreateBranch?.(sessionId);
-                break;
-            case 'show-children':
-                this.options.onShowBranchTree?.();
-                break;
-        }
-    }
+    // ================================================================
+    // 选择逻辑
+    // ================================================================
 
     private toggleSelection(id: string): void {
         if (this.selectedIds.has(id)) {
@@ -813,8 +888,12 @@ export class FloatingNavPanel {
         itemEl.classList.toggle('llm-nav-item--collapsed', isCollapsed);
     }
 
+    // ================================================================
+    // 键盘导航
+    // ================================================================
+
     private bindKeyboard(): void {
-        this.keydownHandler = (e: KeyboardEvent) => {
+        const handler = (e: KeyboardEvent) => {
             if ((e.target as HTMLElement).tagName === 'INPUT' ||
                 (e.target as HTMLElement).tagName === 'TEXTAREA') return;
 
@@ -841,7 +920,8 @@ export class FloatingNavPanel {
                         e.preventDefault();
                         const item = this.items[this.currentIndex];
                         if (item.siblingIndex! > 0) {
-                            this.options.onSwitchBranch?.(item.id);
+                            // ✅ 改动：通过 bus 发送
+                            this.bus.emit('branch:switchById', { headNodeId: item.id });
                         }
                     }
                     break;
@@ -850,24 +930,21 @@ export class FloatingNavPanel {
                         e.preventDefault();
                         const item = this.items[this.currentIndex];
                         if (e.shiftKey) {
-                            this.options.onCreateBranch?.(item.id);
+                            // ✅ 改动：通过 bus 发送
+                            this.bus.emit('branch:create', { sourceNodeId: item.id });
                         } else if (item.siblingIndex! < (item.siblingCount || 1) - 1) {
-                            this.options.onSwitchBranch?.(item.id);
+                            this.bus.emit('branch:switchById', { headNodeId: item.id });
                         }
                     }
                     break;
                 case 'Enter':
                     e.preventDefault();
                     if (this.currentIndex >= 0) {
-                        this.options.onNavigate(this.items[this.currentIndex].id);
+                        // ✅ 改动：通过 bus 发送
+                        this.bus.emit('nav:scrollTo', { sessionId: this.items[this.currentIndex].id });
                     }
                     break;
-                case 'b':
-                    if (e.ctrlKey || e.metaKey) {
-                        e.preventDefault();
-                        this.options.onShowBranchTree?.();
-                    }
-                    break;
+
                 case 'a':
                     if (e.ctrlKey || e.metaKey) {
                         e.preventDefault();
@@ -878,22 +955,26 @@ export class FloatingNavPanel {
             }
         };
 
-        document.addEventListener('keydown', this.keydownHandler);
+        // ✅ 改动：通过 EventCleanup 管理
+        this.events.add(document, 'keydown', handler as EventListener);
     }
 
     private unbindKeyboard(): void {
-        if (this.keydownHandler) {
-            document.removeEventListener('keydown', this.keydownHandler);
-            this.keydownHandler = null;
-        }
+        // ✅ 改动：EventCleanup 统一清理
+        this.events.cleanup();
     }
+
+    // ================================================================
+    // 导航
+    // ================================================================
 
     private navigatePrev(): void {
         for (let i = this.currentIndex - 1; i >= 0; i--) {
             if (this.items[i].role === 'user') {
                 this.currentIndex = i;
                 this.updateHighlight();
-                this.options.onNavigate(this.items[i].id);
+                // ✅ 改动：通过 bus 发送
+                this.bus.emit('nav:scrollTo', { sessionId: this.items[i].id });
                 this.scrollItemIntoView(i);
                 break;
             }
@@ -905,7 +986,8 @@ export class FloatingNavPanel {
             if (this.items[i].role === 'user') {
                 this.currentIndex = i;
                 this.updateHighlight();
-                this.options.onNavigate(this.items[i].id);
+                // ✅ 改动：通过 bus 发送
+                this.bus.emit('nav:scrollTo', { sessionId: this.items[i].id });
                 this.scrollItemIntoView(i);
                 break;
             }
@@ -934,14 +1016,25 @@ export class FloatingNavPanel {
         itemEl?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     }
 
+    // ================================================================
+    // 工具方法
+    // ================================================================
+
     private getPreview(content: string, maxLen: number): string {
         if (!content) return '(empty)';
         let plain = content.replace(/[\r\n]+/g, ' ').replace(/[*#`_~[\]()]/g, '').trim();
         return plain.length > maxLen ? plain.substring(0, maxLen) + '...' : plain;
     }
 
+    // ================================================================
+    // 清理
+    // ================================================================
+
     public destroy(): void {
         this.hide();
+        this.panelEvents.cleanup();
+        this.events.cleanup();
+        this.timers.destroy();
         this.items = [];
         this.allItems = [];
         this.branches = [];

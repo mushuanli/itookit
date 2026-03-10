@@ -1,6 +1,7 @@
 // @file llm-ui/components/mdx/MDxController.ts
 import { createMDxEditor, MDxEditor } from '@itookit/mdxeditor';
 import type { ISessionEngine, CollapseExpandResult } from '@itookit/common';
+import { TimerManager } from '../../utils/TimerManager';
 
 export interface MDxControllerOptions {
     readOnly?: boolean;
@@ -44,6 +45,9 @@ export class MDxController {
     // ✅ 新增：批量缓冲
     private contentSnapshot: string = '';
     private pendingContentLength: number = 0;
+
+    // ✅ 改动：使用 TimerManager 管理所有定时器
+    private timers = new TimerManager();
 
     constructor(
         container: HTMLElement,
@@ -229,21 +233,15 @@ export class MDxController {
 
         // 取消之前的 RAF
         if (this.rafId !== null) {
-            cancelAnimationFrame(this.rafId);
+            this.timers.cancelAnimationFrame(this.rafId);
+            this.rafId = null;
         }
 
-        // 使用 requestIdleCallback 如果可用
-        if ('requestIdleCallback' in window) {
-            (window as any).requestIdleCallback(
-                () => this.doRender(),
-                { timeout: this.RENDER_INTERVAL }
-            );
-        } else {
-            this.rafId = requestAnimationFrame(() => {
-                this.rafId = null;
-                this.doRender();
-            });
-        }
+        // ✅ 改动：统一通过 TimerManager.requestIdleCallback
+        this.timers.requestIdleCallback(
+            () => this.doRender(),
+            { timeout: this.RENDER_INTERVAL }
+        );
     }
 
     /**
@@ -277,7 +275,7 @@ export class MDxController {
 
         // 取消所有挂起的渲染
         if (this.rafId !== null) {
-            cancelAnimationFrame(this.rafId);
+            this.timers.cancelAnimationFrame(this.rafId);
             this.rafId = null;
         }
         this.renderScheduled = false;
@@ -346,12 +344,7 @@ export class MDxController {
     }
 
     destroy() {
-        // 清理定时器
-        if (this.rafId !== null) {
-            cancelAnimationFrame(this.rafId);
-            this.rafId = null;
-        }
-
+        this.timers.destroy();
         this.editor?.destroy();
         this.editor = null;
         this.isInitialized = false;

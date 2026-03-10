@@ -1,24 +1,32 @@
 // @file: llm-ui/helpers/NavigationHelper.ts
 
 import { SessionManager } from '@itookit/llm-engine';
+import { TimerManager } from '../utils/TimerManager';
 
 export class NavigationHelper {
+    private timers = new TimerManager();
     private activeSessionUpdateTimer: number | null = null;
+
+    // ✅ 改动：缓存 historyEl 引用，避免每次 querySelector
+    private historyEl: HTMLElement | null = null;
 
     constructor(
         private container: HTMLElement,
         private sessionManager: SessionManager
-    ) { }
+    ) {
+        this.historyEl = this.container.querySelector('#llm-ui-history');
+    }
 
     /**
      * 调度活跃会话更新
      */
     scheduleActiveSessionUpdate(): void {
-        if (this.activeSessionUpdateTimer) {
-            cancelAnimationFrame(this.activeSessionUpdateTimer);
+        if (this.activeSessionUpdateTimer !== null) {
+            this.timers.cancelAnimationFrame(this.activeSessionUpdateTimer);
         }
 
-        this.activeSessionUpdateTimer = requestAnimationFrame(() => {
+        // ✅ 改动：通过 TimerManager 注册 RAF
+        this.activeSessionUpdateTimer = this.timers.requestAnimationFrame(() => {
             this.updateActiveSessionHighlight();
             this.activeSessionUpdateTimer = null;
         });
@@ -45,13 +53,13 @@ export class NavigationHelper {
      * 查找当前可见的会话
      */
     findCurrentVisibleSession(): string | null {
-        const historyEl = this.container.querySelector('#llm-ui-history');
-        if (!historyEl) return null;
+        // ✅ 改动：使用缓存
+        if (!this.historyEl) return null;
 
-        const historyRect = historyEl.getBoundingClientRect();
+        const historyRect = this.historyEl.getBoundingClientRect();
         const viewLine = historyRect.top + (historyRect.height * 0.4);
 
-        const sessions = historyEl.querySelectorAll('.llm-ui-session');
+        const sessions = this.historyEl.querySelectorAll('.llm-ui-session');
 
         let closestSession: Element | null = null;
         let minDistance = Infinity;
@@ -78,22 +86,25 @@ export class NavigationHelper {
      * 滚动到指定会话
      */
     scrollToSession(sessionId: string): void {
-        const historyEl = this.container.querySelector('#llm-ui-history');
-        const sessionEl = historyEl?.querySelector(`[data-session-id="${sessionId}"]`) as HTMLElement;
+        // ✅ 改动：使用缓存的 historyEl
+        const sessionEl = this.historyEl?.querySelector(
+            `[data-session-id="${sessionId}"]`
+        ) as HTMLElement;
 
         if (sessionEl) {
             sessionEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
             this.updateActiveSessionHighlight();
 
             sessionEl.classList.add('llm-ui-session--highlight');
-            setTimeout(() => {
+            // ✅ 改动：通过 TimerManager 管理
+            this.timers.setTimeout(() => {
                 sessionEl.classList.remove('llm-ui-session--highlight');
             }, 1500);
         }
     }
 
     /**
-     * 导航到上/下一个用户消息（合并 prev/next）
+     * 导航到上/下一个用户消息
      */
     navigateToUserChat(direction: 'prev' | 'next'): void {
         const sessions = this.sessionManager.getSessions();
@@ -111,10 +122,8 @@ export class NavigationHelper {
         }
     }
 
+    // ✅ 改动：统一通过 TimerManager 清理
     cleanup(): void {
-        if (this.activeSessionUpdateTimer) {
-            cancelAnimationFrame(this.activeSessionUpdateTimer);
-            this.activeSessionUpdateTimer = null;
-        }
+        this.timers.destroy();
     }
 }

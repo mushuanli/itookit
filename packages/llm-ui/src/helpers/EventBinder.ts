@@ -1,5 +1,7 @@
 // @file: llm-ui/helpers/EventBinder.ts
 
+import { EventCleanup } from '../utils/EventCleanup';
+
 export interface EventBinderCallbacks {
     onToggleSidebar: () => void;
     onTitleChange: (title: string) => void;
@@ -17,13 +19,14 @@ export interface GlobalShortcutCallbacks {
     onToggleNavigator: () => void;
     onNavigatePrev: () => void;
     onNavigateNext: () => void;
-    onCreateBranch: () => void;        // ✅ 改为必选
-    onSwitchBranchPrev?: () => void;   // ✅ 新增：快捷键切换上一个分支
-    onSwitchBranchNext?: () => void;   // ✅ 新增：快捷键切换下一个分支
+    onCreateBranch: () => void;
+    onSwitchBranchPrev?: () => void;
+    onSwitchBranchNext?: () => void;
 }
 
 export class EventBinder {
-    private keydownHandler: ((e: KeyboardEvent) => void) | null = null;
+    // ✅ 改动：用 EventCleanup 替代手动管理 keydownHandler
+    private events = new EventCleanup();
 
     constructor(
         private container: HTMLElement,
@@ -31,23 +34,29 @@ export class EventBinder {
     ) { }
 
     bindTitleBarEvents(): void {
-        this.container.querySelector('#llm-btn-sidebar')?.addEventListener('click', () => {
-            this.callbacks.onToggleSidebar();
-        });
-
-        const titleInput = this.container.querySelector('#llm-title-input') as HTMLInputElement;
-        if (titleInput) {
-            titleInput.addEventListener('blur', () => {
-                this.callbacks.onTitleChange(titleInput.value);
-            });
-            titleInput.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') titleInput.blur();
+        const sidebarBtn = this.container.querySelector('#llm-btn-sidebar');
+        if (sidebarBtn) {
+            this.events.add(sidebarBtn, 'click', () => {
+                this.callbacks.onToggleSidebar();
             });
         }
 
-        this.container.querySelector('#llm-btn-assets')?.addEventListener('click', () => {
-            this.callbacks.onOpenAssetManager();
-        });
+        const titleInput = this.container.querySelector('#llm-title-input') as HTMLInputElement;
+        if (titleInput) {
+            this.events.add(titleInput, 'blur', () => {
+                this.callbacks.onTitleChange(titleInput.value);
+            });
+            this.events.add(titleInput, 'keydown', ((e: KeyboardEvent) => {
+                if (e.key === 'Enter') titleInput.blur();
+            }) as EventListener);
+        }
+
+        const assetsBtn = this.container.querySelector('#llm-btn-assets');
+        if (assetsBtn) {
+            this.events.add(assetsBtn, 'click', () => {
+                this.callbacks.onOpenAssetManager();
+            });
+        }
     }
 
     bindNavigationEvents(): void {
@@ -62,12 +71,16 @@ export class EventBinder {
         };
 
         for (const [selector, handler] of Object.entries(bindings)) {
-            this.container.querySelector(selector)?.addEventListener('click', handler);
+            const el = this.container.querySelector(selector);
+            if (el) {
+                // ✅ 改动：通过 EventCleanup 注册
+                this.events.add(el, 'click', handler);
+            }
         }
     }
 
     bindGlobalShortcuts(shortcuts: GlobalShortcutCallbacks): void {
-        this.keydownHandler = (e: KeyboardEvent) => {
+        const keydownHandler = (e: KeyboardEvent) => {
             const target = e.target as HTMLElement;
             if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
 
@@ -106,13 +119,12 @@ export class EventBinder {
             }
         };
 
-        document.addEventListener('keydown', this.keydownHandler);
+        // ✅ 改动：通过 EventCleanup 注册 document 级事件
+        this.events.add(document, 'keydown', keydownHandler as EventListener);
     }
 
+    // ✅ 改动：统一清理替代手动移除
     cleanup(): void {
-        if (this.keydownHandler) {
-            document.removeEventListener('keydown', this.keydownHandler);
-            this.keydownHandler = null;
-        }
+        this.events.cleanup();
     }
 }

@@ -60,7 +60,7 @@ export type {
     ElectronVFSOptions,
     VFSFactory,
 } from './interfaces/fs';
-
+export type { SRSItemData, SRSCardRef, SRSStats, ISRSService } from './interfaces/srs';
 export {
     IEditor,
     type EditorOptions,
