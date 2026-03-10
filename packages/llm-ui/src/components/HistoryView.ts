@@ -121,6 +121,19 @@ export class HistoryView {
     }
 
     // ================================================================
+    // ✅ 新增：Command 所需的公开方法
+    // ================================================================
+
+    /**
+     * 获取 session DOM 元素（供 ScrollToSessionCommand 使用）
+     */
+    public getSessionElement(sessionId: string): HTMLElement | null {
+        return this.container.querySelector(
+            `[data-session-id="${sessionId}"]`
+        ) as HTMLElement | null;
+    }
+
+    // ================================================================
     // 事件委托
     // ================================================================
 
@@ -302,17 +315,77 @@ export class HistoryView {
         errorSessions.forEach(session => session.remove());
     }
 
-    // ✅ 新增：公开的折叠切换方法（替代外部直接操作 DOM）
-    public toggleSessionCollapse(sessionId: string): void {
+    /**
+     * 批量设置所有可折叠元素的折叠状态
+     * （供 FoldAllCommand / UnfoldAllCommand 使用）
+     */
+    public setAllCollapsed(collapsed: boolean): void {
+        const items = this.container.querySelectorAll('.llm-ui-bubble--user, .llm-ui-node');
+
+        items.forEach((el) => {
+            el.classList.toggle('is-collapsed', collapsed);
+
+            const svg = el.querySelector('[data-action="collapse"] svg');
+            if (svg) {
+                svg.innerHTML = collapsed
+                    ? '<polyline points="6 9 12 15 18 9"></polyline>'
+                    : '<polyline points="18 15 12 9 6 15"></polyline>';
+            }
+        });
+
+        // 更新内部状态
+        const sessions = this.container.querySelectorAll('[data-session-id]');
+        sessions.forEach(sessionEl => {
+            const id = (sessionEl as HTMLElement).dataset.sessionId;
+            if (id) {
+                this.collapseStates[id] = collapsed;
+            }
+        });
+    }
+
+    /**
+     * 切换指定 session 的折叠状态
+     * 
+     * @param sessionId - session ID
+     * @param forceState - 可选，强制设为指定状态（true=折叠, false=展开）
+     */
+    public toggleSessionCollapse(sessionId: string, forceState?: boolean): void {
         const sessionEl = this.container.querySelector(
             `[data-session-id="${sessionId}"]`
         ) as HTMLElement;
         if (!sessionEl) return;
 
-        const collapseBtn = sessionEl.querySelector(
-            '[data-action="collapse"]'
+        // 找到可折叠容器（user bubble 或 node）
+        const collapsible = sessionEl.querySelector(
+            '.llm-ui-bubble--user, .llm-ui-node'
         ) as HTMLElement;
-        collapseBtn?.click();
+        if (!collapsible) return;
+
+        const currentCollapsed = collapsible.classList.contains('is-collapsed');
+        const targetCollapsed = forceState !== undefined ? forceState : !currentCollapsed;
+
+        if (targetCollapsed === currentCollapsed) return;
+
+        collapsible.classList.toggle('is-collapsed', targetCollapsed);
+
+        const svg = collapsible.querySelector('[data-action="collapse"] svg');
+        if (svg) {
+            svg.innerHTML = targetCollapsed
+                ? '<polyline points="6 9 12 15 18 9"></polyline>'
+                : '<polyline points="18 15 12 9 6 15"></polyline>';
+        }
+
+        // 展开时折叠内部代码块
+        if (!targetCollapsed) {
+            this.collapseCodeBlocksInSession(sessionId);
+        }
+
+        // 更新状态
+        this.collapseStates[sessionId] = targetCollapsed;
+
+        if (!this.isStreamingMode) {
+            this.bus?.emit('state:collapseChanged', { states: { ...this.collapseStates } });
+        }
     }
 
     public removeMessages(ids: string[], animated: boolean = true): string[] {
