@@ -28,6 +28,8 @@ import { NodeActionHandler } from './helpers/NodeActionHandler';
 import { BranchManager } from './helpers/BranchManager';
 import { EventBinder } from './helpers/EventBinder';
 import { UIUpdater } from './helpers/UIUpdater';
+import { EditorEventBus } from './core/EditorEventBus';
+import { ErrorHandler } from './utils/errorHandler';
 
 export interface LLMEditorOptions extends EditorOptions {
     sessionEngine: ILLMSessionEngine;
@@ -73,6 +75,13 @@ export class LLMWorkspaceEditor implements IEditor {
     private branchManager!: BranchManager;
     private eventBinder!: EventBinder;
     private uiUpdater!: UIUpdater;
+
+    // ✅ 新增：事件总线
+    private bus!: EditorEventBus;
+    private busUnsubscribers: (() => void)[] = [];
+
+    // ✅ 新增：统一错误处理器
+    private errorHandler!: ErrorHandler;
 
     // 事件监听器
     private listeners = new Map<string, Set<EditorEventCallback>>();
@@ -134,7 +143,9 @@ export class LLMWorkspaceEditor implements IEditor {
             this.bindEvents();
             await this.loadSession(initialContent);
 
-            // ✅ 会话加载后刷新分支指示器
+            // ✅ 新增：缓存 UIUpdater 的 DOM 元素引用
+            this.uiUpdater.cacheElements();
+
             await this.refreshBranchIndicator();
 
             this.emit('ready');
@@ -165,44 +176,116 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     private initializeHelpers(): void {
+        // ✅ 新增：初始化事件总线
+        this.bus = new EditorEventBus();
+
         this.agentLoader = new AgentLoader(this.options.agentService, this.sessionManager);
         this.stateManager = new StateManager(
             this.stateService,
             this.sessionManager,
             this.options.nodeId!
         );
+
+        // ✅ 新增：统一错误处理器
+        this.errorHandler = new ErrorHandler({
+            module: 'LLMWorkspaceEditor',
+            defaultSeverity: 'toast',
+            onRenderError: (err) => this.historyView?.renderError(err),
+            onResetLoading: () => this.chatInput?.setLoading(false),
+        });
+
+        // ✅ 新增：注册事件总线处理器
+        this.registerBusHandlers();
+    }
+
+    // ✅ 新增：集中注册事件总线处理器
+    private registerBusHandlers(): void {
+        const unsubs = this.busUnsubscribers;
+
+        // 分支操作
+        unsubs.push(this.bus.on('branch:create', ({ sourceNodeId }) =>
+            this.handleBranchAction('create', sourceNodeId)
+        ));
+        unsubs.push(this.bus.on('branch:switch', ({ branchName }) =>
+            this.handleSwitchBranchByName(branchName)
+        ));
+        unsubs.push(this.bus.on('branch:switchById', ({ headNodeId }) =>
+            this.handleBranchAction('select', headNodeId)
+        ));
+        unsubs.push(this.bus.on('branch:rename', ({ oldName, newName }) =>
+            this.handleBranchRename(oldName, newName)
+        ));
+        unsubs.push(this.bus.on('branch:delete', ({ branchName }) =>
+            this.handleBranchDeleteByName(branchName)
+        ));
+
+        // 导航操作
+        unsubs.push(this.bus.on('nav:scrollTo', ({ sessionId }) =>
+            this.navigationHelper.scrollToSession(sessionId)
+        ));
+        unsubs.push(this.bus.on('nav:toggleFold', ({ sessionId }) =>
+            this.toggleSessionFold(sessionId)
+        ));
+        unsubs.push(this.bus.on('nav:foldAll', () =>
+            this.setAllSessionsFold(true)
+        ));
+        unsubs.push(this.bus.on('nav:unfoldAll', () =>
+            this.setAllSessionsFold(false)
+        ));
+
+        // 批量操作
+        unsubs.push(this.bus.on('batch:delete', ({ ids }) =>
+            this.handleBatchDelete(ids)
+        ));
+        unsubs.push(this.bus.on('batch:copy', ({ ids }) =>
+            this.handleBatchCopy(ids)
+        ));
+
+        // 内容操作
+        unsubs.push(this.bus.on('content:copy', ({ sessionId }) =>
+            this.copySessionContent(sessionId)
+        ));
+
+        // 状态变化
+        unsubs.push(this.bus.on('state:collapseChanged', ({ states }) =>
+            this.stateManager.scheduleUIStateSave(states)
+        ));
+        unsubs.push(this.bus.on('state:inputChanged', () =>
+            this.stateManager.scheduleInputStateSave()
+        ));
     }
 
     private async initComponents(): Promise<void> {
         const historyEl = this.container.querySelector('#llm-ui-history') as HTMLElement;
         const inputEl = this.container.querySelector('#llm-ui-input') as HTMLElement;
 
-        historyEl.addEventListener('scroll', () => {
-            this.navigationHelper?.scheduleActiveSessionUpdate();
-        }, { passive: true });
+        // ✅ 改动：移除重复的 scroll 监听，由 HistoryView 内部 ScrollController 管理
+        // ❌ 删除：historyEl.addEventListener('scroll', () => { ... }, { passive: true });
 
-        // HistoryView
-        this.historyView = new HistoryView(
-            historyEl,
-            (id, content, type) => this.handleContentChange(id, content, type),
-            (action: NodeAction, nodeId: string) => this.nodeActionHandler.handleAction(action, nodeId),
-            {
-                nodeId: this.options.nodeId,
-                ownerNodeId: this.options.ownerNodeId || this.options.nodeId,
-                sessionEngine: this.options.sessionEngine,
-                onCollapseStateChange: (states) => this.stateManager.scheduleUIStateSave(states),
-                initialCollapseStates: this.stateManager.getCollapseStates(),
-            }
-        );
+        // ✅ 改动：使用新的 HistoryViewOptions 接口
+        this.historyView = new HistoryView(historyEl, {
+            onContentChange: (id, content, type) => this.handleContentChange(id, content, type),
+            onNodeAction: (action: NodeAction, nodeId: string) =>
+                this.nodeActionHandler.handleAction(action, nodeId),
+            bus: this.bus,
+            nodeId: this.options.nodeId,
+            ownerNodeId: this.options.ownerNodeId || this.options.nodeId,
+            sessionEngine: this.options.sessionEngine,
+            initialCollapseStates: this.stateManager.getCollapseStates(),
+            onScroll: () => this.navigationHelper?.scheduleActiveSessionUpdate(),
+        });
+
+        // ❌ 删除：this.historyView.setBranchActionCallback(...)
+        // 已通过 bus 处理
 
         // 加载设置和状态
         let initialSettings;
         if (this.currentSessionId && !this.options.isNewSession) {
-            try {
-                initialSettings = await this.sessionService.getSessionSettings();
-            } catch (e) {
-                console.warn('[LLMWorkspaceEditor] Failed to load session settings:', e);
-            }
+            initialSettings = await this.errorHandler.wrap(
+                () => this.sessionService.getSessionSettings(),
+                'Load session settings',
+                'warn'
+            );
         }
 
         const savedUIState = await this.stateManager.loadUIState();
@@ -220,7 +303,7 @@ export class LLMWorkspaceEditor implements IEditor {
                 settings: initialSettings,
             },
             onConfigChange: (config) => this.handleConfigChange(config),
-            onExecutorChange: () => this.stateManager.scheduleInputStateSave(),
+            onExecutorChange: () => this.bus.emit('state:inputChanged', {}),
             onRequestModels: (agentId) => this.agentLoader.loadModelsForAgent(agentId),
         });
 
@@ -243,10 +326,6 @@ export class LLMWorkspaceEditor implements IEditor {
         );
 
         this.uiUpdater = new UIUpdater(this.container, this.chatInput);
-
-        this.historyView.setBranchActionCallback(
-            (action, nodeId, options) => this.handleBranchAction(action, nodeId, options)
-        );
     }
 
     private bindEvents(): void {
@@ -321,13 +400,15 @@ export class LLMWorkspaceEditor implements IEditor {
 
         // 恢复 UI 状态
         const savedUIState = await this.stateManager.loadUIState();
+
+        // ✅ 改动：使用 errorHandler.wrap
         let sessionSettings;
         if (!this.options.isNewSession) {
-            try {
-                sessionSettings = await this.sessionService.getSessionSettings();
-            } catch (e) {
-                console.warn('[LLMWorkspaceEditor] Failed to load session settings:', e);
-            }
+            sessionSettings = await this.errorHandler.wrap(
+                () => this.sessionService.getSessionSettings(),
+                'Load session settings',
+                'warn'
+            );
         }
 
         this.stateManager.restoreInputState(this.chatInput, {
@@ -350,34 +431,29 @@ export class LLMWorkspaceEditor implements IEditor {
     // Branch Indicator
     // ================================================================
 
-    /**
-     * 从 SessionManager 获取分支列表并更新 titlebar 指示器
-     * 
-     * 调用时机：
-     *   - init 完成后（唯一的主动调用）
-     *   - 事件驱动：branch_created / branch_switched / branch_deleted / branch_renamed
-     *   - 快捷键切换前确保缓存最新
-     */
+    // ✅ 改动：使用 errorHandler.wrapWithFallback
     private async refreshBranchIndicator(): Promise<void> {
-        try {
-            const branches = await this.sessionManager.listBranches();
-            console.log('[LLMWorkspaceEditor] refreshBranchIndicator branches:', branches);
+        const branches = await this.errorHandler.wrapWithFallback(
+            () => this.sessionManager.listBranches(),
+            [],
+            'Refresh branch indicator',
+            'warn'
+        );
+
+        if (branches.length === 0) {
+            this.cachedBranches = [{ name: 'main', headNodeId: '', isCurrent: true }];
+        } else {
             this.cachedBranches = branches.map(b => ({
                 name: b.name,
                 headNodeId: b.headNodeId,
                 isCurrent: b.isCurrent,
             }));
-
-            this.uiUpdater.updateBranchIndicator(
-                this.cachedBranches,
-                (branchName) => this.handleSwitchBranchByName(branchName)
-            );
-        } catch (e) {
-            console.warn('[LLMWorkspaceEditor] Failed to refresh branch indicator:', e);
-            // 降级：显示默认单分支
-            this.cachedBranches = [{ name: 'main', headNodeId: '', isCurrent: true }];
-            this.uiUpdater.updateBranchIndicator(this.cachedBranches, () => { });
         }
+
+        this.uiUpdater.updateBranchIndicator(
+            this.cachedBranches,
+            (branchName) => this.handleSwitchBranchByName(branchName)
+        );
     }
 
     /**
@@ -395,17 +471,12 @@ export class LLMWorkspaceEditor implements IEditor {
         await this.branchManager.handleBranchAction(action as any, nodeId, options);
     }
 
-    /**
-     * ✅ 新增：直接通过 branchName 切换（从下拉菜单触发）
-     */
+    // ✅ 改动：使用 errorHandler.wrap
     private async handleSwitchBranchByName(branchName: string): Promise<void> {
-        try {
-            await this.sessionManager.switchBranch(branchName);
-            // 事件驱动：switchBranch 内部发 branch_switched → handleSessionEvent 处理 UI
-        } catch (e: any) {
-            console.error('[LLMWorkspaceEditor] Switch branch failed:', e);
-            Toast.error(e.message || 'Failed to switch branch');
-        }
+        await this.errorHandler.wrap(
+            () => this.sessionManager.switchBranch(branchName),
+            'Switch branch'
+        );
     }
 
     /**
@@ -523,24 +594,26 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     private async handleContentChange(id: string, content: string, _type: 'user' | 'node'): Promise<void> {
-        try {
-            await this.sessionManager.editMessage(id, content, false);
-            this.emit('change');
-        } catch (e) {
-            console.error('[LLMWorkspaceEditor] updateContent failed:', e);
-        }
+        await this.errorHandler.wrap(
+            async () => {
+                await this.sessionManager.editMessage(id, content, false);
+                this.emit('change');
+            },
+            'Update content',
+            'warn'
+        );
     }
 
     private async handleConfigChange(config: ChatInputConfig): Promise<void> {
         if (this.currentSessionId && config.settings) {
-            try {
-                await this.sessionService.saveSessionSettings(config.settings);
-            } catch (e) {
-                console.warn('[LLMWorkspaceEditor] Failed to save session settings:', e);
-            }
+            await this.errorHandler.wrap(
+                () => this.sessionService.saveSessionSettings(config.settings),
+                'Save session settings',
+                'warn'
+            );
         }
 
-        this.stateManager.scheduleInputStateSave();
+        this.bus.emit('state:inputChanged', {});
     }
 
     private async handleTitleChange(title: string): Promise<void> {
@@ -548,38 +621,34 @@ export class LLMWorkspaceEditor implements IEditor {
         this.emit('change');
 
         if (this.options.nodeId) {
-            try {
-                await this.sessionService.renameSession(this.options.nodeId, title);
-            } catch (e) {
-                console.error('[LLMWorkspaceEditor] Failed to rename:', e);
-            }
+            await this.errorHandler.wrap(
+                () => this.sessionService.renameSession(this.options.nodeId!, title),
+                'Rename session',
+                'warn'
+            );
         }
     }
 
     private async handleOpenAssetManager(): Promise<void> {
-        const ownerNodeId = this.options.ownerNodeId || this.options.nodeId;
+        await this.errorHandler.wrap(
+            async () => {
+                const ownerNodeId = this.options.ownerNodeId || this.options.nodeId;
+                if (!this.engine || !ownerNodeId) {
+                    throw new Error('Engine not connected or no session');
+                }
 
-        if (!this.engine || !ownerNodeId) {
-            Toast.error('Engine not connected or no session');
-            return;
-        }
+                const assetDirId = await this.assetService.getAssetDirectoryId(ownerNodeId);
+                if (!assetDirId) {
+                    Toast.info('No attachments found in this chat');
+                    return;
+                }
 
-        try {
-            const assetDirId = await this.assetService.getAssetDirectoryId(ownerNodeId);
-
-            if (!assetDirId) {
-                Toast.info('No attachments found in this chat');
-                return;
-            }
-
-            this.assetManagerUI?.close();
-            this.assetManagerUI = new AssetManagerUI(this.engine, null as any, {});
-            await this.assetManagerUI.show(assetDirId);
-
-        } catch (e: any) {
-            console.error('[LLMWorkspaceEditor] Failed to open Asset Manager:', e);
-            Toast.error('Failed to open Asset Manager');
-        }
+                this.assetManagerUI?.close();
+                this.assetManagerUI = new AssetManagerUI(this.engine, null as any, {});
+                await this.assetManagerUI.show(assetDirId);
+            },
+            'Open Asset Manager'
+        );
     }
 
     /**
@@ -651,16 +720,18 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     private async handlePrint(): Promise<void> {
-        try {
-            const md = this.sessionManager.exportToMarkdown();
-            await this.getPrintService().print(md, {
-                title: this.currentTitle || 'Chat Conversation',
-                showHeader: true,
-                headerMeta: { date: new Date().toLocaleString() },
-            });
-        } catch (err) {
-            console.error('[LLMWorkspaceEditor] Print failed:', err);
-        }
+        await this.errorHandler.wrap(
+            async () => {
+                const md = this.sessionManager.exportToMarkdown();
+                await this.getPrintService().print(md, {
+                    title: this.currentTitle || 'Chat Conversation',
+                    showHeader: true,
+                    headerMeta: { date: new Date().toLocaleString() },
+                });
+            },
+            'Print',
+            'warn'
+        );
     }
 
     /**
@@ -691,6 +762,9 @@ export class LLMWorkspaceEditor implements IEditor {
         const sessionsBeforeSend = this.sessionManager.getSessions().map(s => s.id);
 
         this.chatInput.setLoading(true);
+
+        // ✅ 新增：发送消息时强制滚动到底部（用户明确操作）
+        this.historyView.scrollToBottom(true);
 
         try {
             let finalText = text || '';
@@ -728,8 +802,12 @@ export class LLMWorkspaceEditor implements IEditor {
             // ✅ 修复：恢复用户输入内容
             this.chatInput.restoreInput(savedText, savedAgentId);
 
-            // ✅ 显示用户友好的错误提示
-            this.showSendError(error);
+            // ✅ 改动：使用统一错误分类
+            const classified = ErrorHandler.classifyError(error);
+            Toast.error(classified.userMessage);
+            if (classified.isAuthError) {
+                this.historyView.renderError(error);
+            }
 
             this.chatInput.setLoading(false);
         }
@@ -760,7 +838,7 @@ export class LLMWorkspaceEditor implements IEditor {
                 try {
                     this.sessionManager.deleteMessage(id, {
                         deleteAssociatedResponses: true,
-                        silent: true  // 不触发事件
+                        //silent: true  // 不触发事件
                     });
                 } catch (e) {
                     // 静默失败（session 可能已被引擎回滚）
@@ -776,46 +854,16 @@ export class LLMWorkspaceEditor implements IEditor {
         this.historyView.clearErrors();
     }
 
-    /**
-     * ✅ 新增：显示发送错误的用户友好提示
-     */
-    private showSendError(error: Error): void {
-        const message = error.message || 'Unknown error';
-
-        // 针对常见错误提供友好提示
-        if (message.includes('Cannot send consecutive user messages')) {
-            Toast.error('Please wait for the previous response to complete before sending another message.');
-        } else if (message.includes('rate limit') || message.includes('429')) {
-            Toast.error('Rate limit exceeded. Please wait a moment and try again.');
-        } else if (message.includes('API key') || message.includes('401')) {
-            Toast.error('Authentication failed. Please check your API key settings.');
-            // 对于严重错误，额外显示错误气泡
-            this.historyView.renderError(error);
-        } else {
-            Toast.error(`Send failed: ${message}`);
-        }
-    }
-
     // ================================================================
     // 导航面板
     // ================================================================
 
     private toggleNavigator(): void {
         if (!this.floatingNav) {
-            this.floatingNav = new FloatingNavPanel(this.container, {
-                onNavigate: (id) => this.navigationHelper.scrollToSession(id),
-                onToggleFold: (id) => this.toggleSessionFold(id),
-                onCopy: (id) => this.copySessionContent(id),
-                onFoldAll: () => this.setAllSessionsFold(true),
-                onUnfoldAll: () => this.setAllSessionsFold(false),
-                onBatchDelete: (ids) => this.handleBatchDelete(ids),
-                onBatchCopy: (ids) => this.handleBatchCopy(ids),
-                onCreateBranch: (sourceId) => this.handleBranchAction('create', sourceId),
-                onSwitchBranch: (branchId) => this.handleBranchAction('select', branchId),
-                onSwitchBranchByName: (branchName) => this.handleSwitchBranchByName(branchName),
-                onRenameBranch: (oldName, newName) => this.handleBranchRename(oldName, newName),
-                onDeleteBranch: (branchName) => this.handleBranchDeleteByName(branchName),
-            },
+            // ✅ 改动：传入 bus 替代大量回调
+            this.floatingNav = new FloatingNavPanel(
+                this.container,
+                this.bus,
                 this.sessionManager
             );
         }
@@ -835,11 +883,7 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     private toggleSessionFold(sessionId: string): void {
-        const historyEl = this.container.querySelector('#llm-ui-history');
-        const collapseBtn = historyEl
-            ?.querySelector(`[data-session-id="${sessionId}"]`)
-            ?.querySelector('[data-action="collapse"]') as HTMLElement;
-        collapseBtn?.click();
+        this.historyView.toggleSessionCollapse(sessionId);
     }
 
     /**
@@ -1046,7 +1090,11 @@ export class LLMWorkspaceEditor implements IEditor {
         // ✅ 新增：清理 UIUpdater（含 BranchIndicator）
         this.uiUpdater?.destroy();
 
-        // ✅ 修复：只解绑，不销毁全局单例
+        // ✅ 新增：清理事件总线
+        this.busUnsubscribers.forEach(unsub => unsub());
+        this.busUnsubscribers = [];
+        this.bus?.destroy();
+
         this.sessionManager.unbindSession();
 
         this.historyView?.destroy();

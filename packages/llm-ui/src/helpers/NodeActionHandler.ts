@@ -4,35 +4,49 @@ import { SessionManager, ExecutionNode } from '@itookit/llm-engine';
 import { HistoryView } from '../components/HistoryView';
 import { ChatInput } from '../components/ChatInput';
 import { NodeAction } from '../core/types';
+import { ErrorHandler } from '../utils/errorHandler';
 
 export class NodeActionHandler {
+    // ✅ 改动：统一错误处理器
+    private errorHandler: ErrorHandler;
+
     constructor(
         private sessionManager: SessionManager,
         private historyView: HistoryView,
         private chatInput: ChatInput
-    ) { }
+    ) {
+        this.errorHandler = new ErrorHandler({
+            module: 'NodeActionHandler',
+            defaultSeverity: 'render',
+            onRenderError: (err) => this.historyView.renderError(err),
+            onResetLoading: () => this.chatInput.setLoading(false),
+        });
+    }
 
+    // ✅ 改动：统一 wrap，移除每个方法中的 try-catch
     async handleAction(action: NodeAction, nodeId: string): Promise<void> {
-        try {
-            switch (action) {
-                case 'retry':
-                    return await this.handleRetry(nodeId);
-                case 'delete':
-                    return await this.handleDelete(nodeId);
-                case 'edit-and-retry':
-                    return await this.handleEditAndRetry(nodeId);
-                case 'resend':
-                    return await this.handleResend(nodeId);
-                case 'prev-sibling':
-                case 'next-sibling':
-                    return await this.handleSiblingSwitch(
-                        nodeId,
-                        action === 'prev-sibling' ? 'prev' : 'next'
-                    );
-            }
-        } catch (e: any) {
-            console.error('[NodeActionHandler] Action failed:', e);
-            this.historyView.renderError(e);
+        await this.errorHandler.wrap(
+            () => this.executeAction(action, nodeId),
+            `Action "${action}" on ${nodeId}`
+        );
+    }
+
+    private async executeAction(action: NodeAction, nodeId: string): Promise<void> {
+        switch (action) {
+            case 'retry':
+                return this.handleRetry(nodeId);
+            case 'delete':
+                return this.handleDelete(nodeId);
+            case 'edit-and-retry':
+                return this.handleEditAndRetry(nodeId);
+            case 'resend':
+                return this.handleResend(nodeId);
+            case 'prev-sibling':
+            case 'next-sibling':
+                return this.handleSiblingSwitch(
+                    nodeId,
+                    action === 'prev-sibling' ? 'prev' : 'next'
+                );
         }
     }
 
@@ -40,6 +54,7 @@ export class NodeActionHandler {
         return this.chatInput.getSelectedExecutor() || 'default';
     }
 
+    // ✅ 改动：移除内部 try-catch，错误自动冒泡到 handleAction
     private async handleRetry(nodeId: string): Promise<void> {
         const sessions = this.sessionManager.getSessions();
         let session = sessions.find(s => s.id === nodeId);
@@ -52,91 +67,62 @@ export class NodeActionHandler {
         }
 
         if (!session) {
-            this.historyView.renderError(new Error('Message not found'));
-            return;
+            throw new Error('Message not found');
         }
 
         const canRetry = this.sessionManager.canRetry(session.id);
         if (!canRetry.allowed) {
-            console.warn(`[NodeActionHandler] Cannot retry: ${canRetry.reason}`);
-            return;
+            throw new Error(canRetry.reason || 'Cannot retry');
         }
 
         this.chatInput.setLoading(true);
 
-        try {
-            if (session.role === 'user') {
-                await this.sessionManager.resendUserMessage(
-                    session.id, undefined, this.fallbackAgentId
-                );
-            } else {
-                await this.sessionManager.retryGeneration(
-                    session.id,
-                    undefined,
-                    this.fallbackAgentId,
-                    true // preserveCurrent
-                );
-            }
-        } catch (e: any) {
-            console.error('[NodeActionHandler] Retry failed:', e);
-            this.historyView.renderError(e);
-            this.chatInput.setLoading(false);
+        if (session.role === 'user') {
+            await this.sessionManager.resendUserMessage(
+                session.id, undefined, this.fallbackAgentId
+            );
+        } else {
+            await this.sessionManager.retryGeneration(
+                session.id, undefined, this.fallbackAgentId, true
+            );
         }
     }
 
+    // ✅ 改动：移除内部 try-catch
     private async handleDelete(nodeId: string): Promise<void> {
-        try {
-            // 预估 ID 用于乐观 UI 更新
-            const previewIds = this.previewDeletionIds(nodeId);
-            this.historyView.removeMessages(previewIds, true);
+        const previewIds = this.previewDeletionIds(nodeId);
+        this.historyView.removeMessages(previewIds, true);
 
+        try {
             await this.sessionManager.deleteMessage(nodeId, {
                 deleteAssociatedResponses: true
             });
-
         } catch (e: any) {
-            console.error('[NodeActionHandler] Delete failed:', e);
-            // 回滚
+            // 删除失败需要特殊处理：回滚 UI
             const sessions = this.sessionManager.getSessions();
             this.historyView.renderFull(sessions);
-            this.historyView.renderError(e);
+            throw e; // 重新抛出让 errorHandler 处理
         }
     }
 
+    // ✅ 改动：移除内部 try-catch
     private async handleEditAndRetry(nodeId: string): Promise<void> {
         const session = this.sessionManager.getSessions().find(s => s.id === nodeId);
         if (!session || session.role !== 'user') return;
 
         this.chatInput.setLoading(true);
-        try {
-            // ✅ editMessage(id, content, autoRerun=true) 内部自动：
-            //   1. 更新消息内容
-            //   2. 持久化
-            //   3. 删除关联 assistant 响应
-            //   4. 重新提交
-            await this.sessionManager.editMessage(nodeId, session.content || '', true);
-        } catch (e: any) {
-            console.error('[NodeActionHandler] Edit and retry failed:', e);
-            this.historyView.renderError(e);
-            this.chatInput.setLoading(false);
-        }
+        await this.sessionManager.editMessage(nodeId, session.content || '', true);
     }
 
+    // ✅ 改动：移除内部 try-catch
     private async handleResend(nodeId: string): Promise<void> {
         this.chatInput.setLoading(true);
-        try {
-            await this.sessionManager.resendUserMessage(
-                nodeId,
-                undefined,
-                this.fallbackAgentId
-            );
-        } catch (e: any) {
-            console.error('[NodeActionHandler] Resend failed:', e);
-            this.historyView.renderError(e);
-            this.chatInput.setLoading(false);
-        }
+        await this.sessionManager.resendUserMessage(
+            nodeId, undefined, this.fallbackAgentId
+        );
     }
 
+    // ✅ 改动：移除内部 try-catch
     private async handleSiblingSwitch(nodeId: string, direction: 'prev' | 'next'): Promise<void> {
         const sessions = this.sessionManager.getSessions();
         const session = sessions.find(s => s.id === nodeId);
@@ -150,17 +136,7 @@ export class NodeActionHandler {
             : Math.min(total - 1, currentIndex + 1);
 
         if (newIndex !== currentIndex) {
-            try {
-                // ✅ switchToSibling 内部自动：
-                //   1. 获取兄弟节点列表
-                //   2. updateManifestHead
-                //   3. reloadSessionData
-                //   4. 发送 sibling_switch 事件
-                await this.sessionManager.switchToSibling(nodeId, newIndex);
-            } catch (e: any) {
-                console.error('[NodeActionHandler] Sibling switch failed:', e);
-                this.historyView.renderError(e);
-            }
+            await this.sessionManager.switchToSibling(nodeId, newIndex);
         }
     }
 
