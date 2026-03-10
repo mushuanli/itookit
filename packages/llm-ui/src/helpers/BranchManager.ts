@@ -4,40 +4,50 @@ import { SessionManager } from '@itookit/llm-engine';
 import { HistoryView } from '../components/HistoryView';
 import { Toast, showConfirmDialog } from '@itookit/common';
 import { BranchAction } from '../core/types';
+import { ErrorHandler } from '../utils/errorHandler';
 
 export class BranchManager {
+    // ✅ 改动：统一错误处理器
+    private errorHandler: ErrorHandler;
+
     constructor(
         private sessionManager: SessionManager,
         _historyView: HistoryView,
         _scrollToSession: (sessionId: string) => void
-    ) { }
+    ) {
+        this.errorHandler = new ErrorHandler({
+            module: 'BranchManager',
+            defaultSeverity: 'toast',
+        });
+    }
 
-    /**
-     * 分支操作统一入口
-     *
-     * 注意：所有操作完成后由 SessionManager 发送事件，
-     * UI 刷新统一在 LLMWorkspaceEditor.handleSessionEvent 中处理。
-     */
+    // ✅ 改动：使用 errorHandler.wrap
     async handleBranchAction(
         action: BranchAction,
         nodeId: string,
         options?: { newName?: string; compareWith?: string }
     ): Promise<void> {
         console.log('[BranchManager] Branch action:', action, nodeId, options);
-        try {
-            switch (action) {
-                case 'create':
-                    return await this.createBranch(nodeId);
-                case 'rename':
-                    return await this.renameBranch(nodeId, options?.newName);
-                case 'delete':
-                    return await this.deleteBranch(nodeId);
-                case 'select':
-                    return await this.selectBranch(nodeId);
-            }
-        } catch (e: any) {
-            console.error('[BranchManager] Branch action failed:', e);
-            Toast.error(e.message || 'Branch operation failed');
+        await this.errorHandler.wrap(
+            () => this.executeBranchAction(action, nodeId, options),
+            `Branch ${action}`
+        );
+    }
+
+    private async executeBranchAction(
+        action: BranchAction,
+        nodeId: string,
+        options?: { newName?: string; compareWith?: string }
+    ): Promise<void> {
+        switch (action) {
+            case 'create':
+                return this.createBranch(nodeId);
+            case 'rename':
+                return this.renameBranch(nodeId, options?.newName);
+            case 'delete':
+                return this.deleteBranch(nodeId);
+            case 'select':
+                return this.selectBranch(nodeId);
         }
     }
 
@@ -71,36 +81,31 @@ export class BranchManager {
         Toast.success(`Branch "${branchName || 'Untitled'}" created`);
     }
 
-    /**
-     * ✅ 新增：按名称重命名分支（从 FloatingNavPanel dropdown 触发）
-     */
+    // ✅ 改动：使用 errorHandler.wrap
     async renameBranchByName(oldName: string, newName: string): Promise<void> {
         if (!newName.trim()) return;
-        try {
-            await this.sessionManager.renameBranch(oldName, newName);
-            Toast.success('Branch renamed');
-        } catch (e: any) {
-            console.error('[BranchManager] Rename branch failed:', e);
-            Toast.error(e.message || 'Failed to rename branch');
-        }
+        await this.errorHandler.wrap(
+            async () => {
+                await this.sessionManager.renameBranch(oldName, newName);
+                Toast.success('Branch renamed');
+            },
+            'Rename branch'
+        );
     }
 
-    /**
-     * ✅ 新增：按名称删除分支（从 FloatingNavPanel dropdown 触发）
-     */
+    // ✅ 改动：使用 errorHandler.wrap
     async deleteBranchByName(branchName: string): Promise<void> {
         const confirmed = await showConfirmDialog(
             `Delete branch "${branchName}" and all its unique children?`
         );
         if (!confirmed) return;
-
-        try {
-            await this.sessionManager.deleteBranch(branchName, true);
-            Toast.success('Branch deleted');
-        } catch (e: any) {
-            console.error('[BranchManager] Delete branch failed:', e);
-            Toast.error(e.message || 'Failed to delete branch');
-        }
+        await this.errorHandler.wrap(
+            async () => {
+                await this.sessionManager.deleteBranch(branchName, true);
+                Toast.success('Branch deleted');
+            },
+            'Delete branch'
+        );
     }
 
     /**

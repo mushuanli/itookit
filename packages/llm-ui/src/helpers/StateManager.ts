@@ -5,6 +5,7 @@ import { ChatInput } from '../components/ChatInput';
 import { CollapseStateMap } from '../core/types';
 import { createDebouncedSave, DebouncedFn } from '../utils/debounce';
 import { SessionManager } from '@itookit/llm-engine';
+import { ErrorHandler } from '../utils/errorHandler';
 
 /**
  * 状态管理器
@@ -18,11 +19,19 @@ export class StateManager {
     // ✅ 修复：持有 chatInput 引用的 getter，延迟绑定
     private chatInputGetter: (() => ChatInput | undefined) | null = null;
 
+    // ✅ 新增：统一错误处理
+    private errorHandler: ErrorHandler;
+
     constructor(
         private stateService: StateService,
         private sessionManager: SessionManager,
         private nodeId: string
     ) {
+        this.errorHandler = new ErrorHandler({
+            module: 'StateManager',
+            defaultSeverity: 'silent', // 状态保存失败不需要打扰用户
+        });
+
         const notGenerating = () => !this.sessionManager.isGenerating();
 
         this.debouncedUIStateSave = createDebouncedSave(
@@ -85,20 +94,29 @@ export class StateManager {
             input_agent_id: inputConfig?.agentId,
         };
 
-        await this.stateService.saveUIState(this.nodeId, payload);
+        await this.errorHandler.wrap(
+            () => this.stateService.saveUIState(this.nodeId, payload),
+            'Save UI state',
+            'silent'
+        );
     }
 
     /**
      * 加载 UI 状态
      */
     async loadUIState(): Promise<UIState | null> {
-        const savedState = await this.stateService.loadUIState(this.nodeId);
+        const result = await this.errorHandler.wrapWithFallback(
+            () => this.stateService.loadUIState(this.nodeId),
+            null,
+            'Load UI state',
+            'silent'
+        );
 
-        if (savedState?.collapse_states) {
-            this.collapseStatesCache = savedState.collapse_states;
+        if (result?.collapse_states) {
+            this.collapseStatesCache = result.collapse_states;
         }
 
-        return savedState;
+        return result;
     }
 
     /**

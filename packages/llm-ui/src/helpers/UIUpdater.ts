@@ -4,15 +4,43 @@ import { SessionSnapshot } from '@itookit/llm-engine';
 import { ChatInput } from '../components/ChatInput';
 import { BranchItem } from '../core/types';
 import { BranchIndicatorTemplates } from '../components/templates/BranchIndicatorTemplates';
+import { DOMCache } from '../utils/DOMCache';
+import { TimerManager } from '../utils/TimerManager';
+import { EventCleanup } from '../utils/EventCleanup';
 
 export class UIUpdater {
+    private domCache: DOMCache;
+    private timers = new TimerManager();
+    private events = new EventCleanup();
+
+    // ✅ 改动：缓存固定元素引用
+    private statusDot: HTMLElement | null = null;
+    private statusText: HTMLElement | null = null;
+    private bgIndicator: HTMLElement | null = null;
+    private bgBadge: HTMLElement | null = null;
+
     private branchDropdownCleanup: (() => void) | null = null;
-    private outsideClickHandler: ((e: MouseEvent) => void) | null = null;
 
     constructor(
         private container: HTMLElement,
         private chatInput: ChatInput
-    ) { }
+    ) {
+        this.domCache = new DOMCache(container);
+    }
+
+    // ✅ 新增：初始化后缓存固定元素引用（在 renderLayout 之后调用一次）
+    cacheElements(): void {
+        const indicator = this.domCache.byId('llm-status-indicator');
+        if (indicator) {
+            this.statusDot = indicator.querySelector('.llm-workspace-status__dot');
+            this.statusText = indicator.querySelector('.llm-workspace-status__text');
+        }
+
+        this.bgIndicator = this.domCache.byId('llm-bg-indicator');
+        if (this.bgIndicator) {
+            this.bgBadge = this.bgIndicator.querySelector('.llm-bg-badge');
+        }
+    }
 
     // ================================================================
     // 快照 & 状态指示器
@@ -25,70 +53,69 @@ export class UIUpdater {
         }
     }
 
+    // ✅ 改动：使用缓存引用，消除重复 querySelector
     updateStatusIndicator(status: string): void {
-        const indicator = this.container.querySelector('#llm-status-indicator') as HTMLElement;
-        if (!indicator) return;
+        if (!this.statusDot || !this.statusText) return;
 
-        const dot = indicator.querySelector('.llm-workspace-status__dot') as HTMLElement;
-        const text = indicator.querySelector('.llm-workspace-status__text') as HTMLElement;
-
-        dot?.classList.remove('--running', '--queued', '--completed', '--failed', '--idle');
+        this.statusDot.classList.remove('--running', '--queued', '--completed', '--failed', '--idle');
 
         switch (status) {
             case 'running':
-                dot?.classList.add('--running');
-                text.textContent = 'Generating...';
+                this.statusDot.classList.add('--running');
+                this.statusText.textContent = 'Generating...';
                 this.chatInput.setLoading(true);
                 break;
             case 'queued':
-                dot?.classList.add('--queued');
-                text.textContent = 'Queued';
+                this.statusDot.classList.add('--queued');
+                this.statusText.textContent = 'Queued';
                 this.chatInput.setLoading(true);
                 break;
             case 'completed':
-                dot?.classList.add('--completed');
-                text.textContent = 'Ready';
+                this.statusDot.classList.add('--completed');
+                this.statusText.textContent = 'Ready';
                 this.chatInput.setLoading(false);
                 break;
             case 'failed':
-                dot?.classList.add('--failed');
-                text.textContent = 'Error';
+                this.statusDot.classList.add('--failed');
+                this.statusText.textContent = 'Error';
                 this.chatInput.setLoading(false);
                 break;
             default:
-                dot?.classList.add('--idle');
-                text.textContent = 'Ready';
+                this.statusDot.classList.add('--idle');
+                this.statusText.textContent = 'Ready';
                 this.chatInput.setLoading(false);
         }
     }
 
+    // ✅ 改动：使用缓存引用
     updateBackgroundIndicator(
         payload: { running: number; queued: number },
         isCurrentGenerating: boolean
     ): void {
-        const indicator = this.container.querySelector('#llm-bg-indicator') as HTMLElement;
-        if (!indicator) return;
+        if (!this.bgIndicator) return;
 
         const otherRunning = isCurrentGenerating
             ? Math.max(0, payload.running - 1)
             : payload.running;
 
         if (otherRunning > 0 || payload.queued > 0) {
-            indicator.style.display = 'flex';
-            const badge = indicator.querySelector('.llm-bg-badge');
-            if (badge) {
+            this.bgIndicator.style.display = 'flex';
+            if (this.bgBadge) {
                 const total = otherRunning + payload.queued;
-                badge.textContent = `${total} background task${total > 1 ? 's' : ''} `;
+                this.bgBadge.textContent = `${total} background task${total > 1 ? 's' : ''}`;
             }
         } else {
-            indicator.style.display = 'none';
+            this.bgIndicator.style.display = 'none';
         }
     }
 
+    // ✅ 改动：使用 TimerManager
     showButtonFeedback(btn: HTMLElement, text: string): void {
         const originalHtml = btn.innerHTML;
         btn.innerHTML = `<span style="color:#2da44e">${text}</span>`;
-        setTimeout(() => (btn.innerHTML = originalHtml), 2000);
+        this.timers.setTimeout(() => {
+            btn.innerHTML = originalHtml;
+        }, 2000);
     }
 
     toggleAllBubbles(isExpanded: boolean): boolean {
@@ -144,7 +171,7 @@ export class UIUpdater {
         branches: BranchItem[],
         onSwitch: (branchName: string) => void
     ): void {
-        const indicatorBar = this.container.querySelector('#llm-branch-indicator') as HTMLElement;
+        const indicatorBar = this.domCache.byId('llm-branch-indicator');
         if (!indicatorBar) return;
 
         const currentBranch = branches.find((b) => b.isCurrent);
@@ -178,29 +205,25 @@ export class UIUpdater {
             }
         };
 
-        btn.addEventListener('click', toggleDropdown);
+        // ✅ 改动：通过 EventCleanup 注册
+        this.events.add(btn, 'click', toggleDropdown as EventListener);
 
-        // 点击外部关闭
-        this.outsideClickHandler = (e: MouseEvent) => {
+        const outsideClickHandler = (e: MouseEvent) => {
             if (!indicatorBar.contains(e.target as Node)) {
                 this.closeBranchDropdown(dropdown);
             }
         };
-        document.addEventListener('click', this.outsideClickHandler);
 
-        // 保存清理函数
+        // ✅ 改动：通过 EventCleanup 注册 document 级事件
+        this.events.add(document, 'click', outsideClickHandler as EventListener);
+
+        // 保存清理函数（用于下次 updateBranchIndicator 前清理）
         this.branchDropdownCleanup = () => {
-            btn.removeEventListener('click', toggleDropdown);
-            if (this.outsideClickHandler) {
-                document.removeEventListener('click', this.outsideClickHandler);
-                this.outsideClickHandler = null;
-            }
+            this.events.cleanup();
         };
     }
 
-    /**
-     * 短暂高亮 branch indicator，给用户视觉反馈
-     */
+    // ✅ 改动：使用 TimerManager
     flashBranchIndicator(): void {
         const btn = this.container.querySelector(
             '#llm-branch-indicator .llm-branch-indicator-btn'
@@ -208,7 +231,7 @@ export class UIUpdater {
         if (!btn) return;
 
         btn.classList.add('llm-branch-indicator-btn--flash');
-        setTimeout(() => {
+        this.timers.setTimeout(() => {
             btn.classList.remove('llm-branch-indicator-btn--flash');
         }, 600);
     }
@@ -275,5 +298,12 @@ export class UIUpdater {
 
     destroy(): void {
         this.cleanupBranchDropdown();
+        this.events.cleanup();
+        this.timers.destroy();
+        this.domCache.destroy();
+        this.statusDot = null;
+        this.statusText = null;
+        this.bgIndicator = null;
+        this.bgBadge = null;
     }
 }

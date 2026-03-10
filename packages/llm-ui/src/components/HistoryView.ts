@@ -1,6 +1,6 @@
 // @file: llm-ui/components/HistoryView.ts
 
-import { NodeActionCallback, BranchActionCallback } from '../core/types';
+import { NodeActionCallback } from '../core/types';
 import { OrchestratorEvent, SessionGroup, ExecutionNode } from '@itookit/llm-engine';
 import { NodeRenderer } from './NodeRenderer';
 import { MDxController } from './mdx/MDxController';
@@ -9,13 +9,22 @@ import { LayoutTemplates } from './templates/LayoutTemplates';
 import { ErrorTemplates } from './templates/ErrorTemplates';
 import { showConfirmDialog, ISessionEngine } from '@itookit/common';
 import { CollapseStateMap } from '../core/types';
+import { EditorEventBus } from '../core/EditorEventBus';
+import { ScrollController } from '../utils/ScrollController';
+import { ContentResizeTracker } from '../utils/ContentResizeTracker';
+import { EventBatchProcessor, BatchedEvents } from '../utils/EventBatchProcessor';
+import { EventCleanup } from '../utils/EventCleanup';
+import { TimerManager } from '../utils/TimerManager';
 
 export interface HistoryViewOptions {
+    onContentChange?: (id: string, content: string, type: 'user' | 'node') => void;
+    onNodeAction?: NodeActionCallback;
+    bus?: EditorEventBus;
     nodeId?: string;
     ownerNodeId?: string;
     sessionEngine?: ISessionEngine;
-    onCollapseStateChange?: (states: CollapseStateMap) => void;
     initialCollapseStates?: CollapseStateMap;
+    onScroll?: () => void;
 }
 
 export class HistoryView {
@@ -23,21 +32,29 @@ export class HistoryView {
     private editorMap = new Map<string, MDxController>();
     private container: HTMLElement;
 
-    private shouldAutoScroll = true;
-    private scrollThreshold = 150;
-    private scrollFrameId: number | null = null;
-    private resizeObserver: ResizeObserver;
+    // ✅ 改动：统一滚动控制器（替代分散的滚动逻辑）
+    private scrollController: ScrollController;
 
-    // ✅ 新增：流式模式控制
+    // ✅ 改动：统一内容高度追踪（替代直接 ResizeObserver）
+    private resizeTracker: ContentResizeTracker;
+
+    // ✅ 改动：统一事件批处理器（替代手动 eventQueue + timer）
+    private eventProcessor: EventBatchProcessor;
+
+    // ✅ 改动：统一事件清理
+    private events = new EventCleanup();
+
+    // ✅ 改动：统一定时器管理
+    private timers = new TimerManager();
+
+    // ✅ 改动：流式模式标记（由 ScrollController 管理滚动，此处只控制 UI 状态）
     private isStreamingMode = false;
-    private lastScrollHeight = 0;
-    private scrollLockUntil = 0;
 
-    // ✅ 新增：用户是否正在查看历史内容
-    private userIsScrolledUp = false;
+    // 思考区域滚动节流
+    private thoughtScrollThrottled = false;
 
     // 预览更新节流
-    private previewUpdateTimers = new Map<string, number>();
+    private previewUpdateTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
     private onContentChange?: (id: string, content: string, type: 'user' | 'node') => void;
     private onNodeAction?: NodeActionCallback;
@@ -54,62 +71,212 @@ export class HistoryView {
     // 保存上下文
     private contextOptions: HistoryViewOptions;
 
-    // ✅ 新增：折叠状态存储
+    // 折叠状态
     private collapseStates: CollapseStateMap = {};
-    private onCollapseStateChange?: (states: CollapseStateMap) => void;
 
-    // ✅ 新增：事件批量处理
-    private eventQueue: OrchestratorEvent[] = [];
-    private eventProcessTimer: number | null = null;
-    private readonly EVENT_BATCH_INTERVAL = 50;
-
-    // ✅ 新增：滚动节流
-    private scrollThrottleTimer: number | null = null;
-    private readonly SCROLL_THROTTLE = 100;
-
-    // ✅ 新增：思考区域滚动节流
-    private thoughtScrollThrottled = false;
-
-    // ✅ 新增：新内容提示器
+    // 新内容提示器
     private newContentIndicator: HTMLElement | null = null;
 
+    // 事件总线
+    private bus?: EditorEventBus;
 
-    // ✅ 新增：分支操作回调
-    private onBranchAction?: BranchActionCallback;
-
-    constructor(
-        container: HTMLElement,
-        onContentChange?: (id: string, content: string, type: 'user' | 'node') => void,
-        onNodeAction?: NodeActionCallback,
-        options?: HistoryViewOptions
-    ) {
+    constructor(container: HTMLElement, options: HistoryViewOptions) {
         this.container = container;
-        this.onContentChange = onContentChange;
-        this.onNodeAction = onNodeAction;
-        this.contextOptions = options || {};
+        this.onContentChange = options.onContentChange;
+        this.onNodeAction = options.onNodeAction;
+        this.contextOptions = options;
+        this.bus = options.bus;
 
-        // ✅ 恢复初始状态
-        if (options?.initialCollapseStates) {
+        // 恢复初始状态
+        if (options.initialCollapseStates) {
             this.collapseStates = { ...options.initialCollapseStates };
         }
-        this.onCollapseStateChange = options?.onCollapseStateChange;
 
-        // 使用 passive 监听器
-        this.container.addEventListener('scroll', this.handleScroll.bind(this), { passive: true });
-
-        // 监听内容高度变化
-        this.resizeObserver = new ResizeObserver(() => {
-            if (this.scrollFrameId !== null) return;
-
-            this.scrollFrameId = requestAnimationFrame(() => {
-                this.scrollFrameId = null;
-                this.handleResize();
-            });
+        // ✅ 改动：统一滚动控制器
+        this.scrollController = new ScrollController(container, {
+            onUserScrolledUp: () => this.showNewContentIndicator(),
+            onUserScrolledDown: () => this.hideNewContentIndicator(),
+            onScroll: () => options.onScroll?.(),
         });
-        this.resizeObserver.observe(this.container);
+
+        // ✅ 改动：统一内容高度追踪
+        this.resizeTracker = new ContentResizeTracker(
+            container,
+            (newHeight, oldHeight) => {
+                if (newHeight > oldHeight) {
+                    this.scrollController.handleContentResize();
+                }
+            }
+        );
+
+        // ✅ 改动：统一事件批处理
+        this.eventProcessor = new EventBatchProcessor(
+            (batched) => this.handleBatchedEvents(batched),
+            (event) => this.processEventImmediate(event),
+            50
+        );
+
+        // ✅ 改动：使用事件委托替代逐个绑定
+        this.initEventDelegation();
     }
 
-    // ✅ 新增：获取当前折叠状态
+    // ================================================================
+    // 事件委托
+    // ================================================================
+
+    // ✅ 新增：单一事件委托处理所有 data-action 点击
+    private initEventDelegation(): void {
+        this.events.add(this.container, 'click', ((e: MouseEvent) => {
+            const target = e.target as HTMLElement;
+            const actionEl = target.closest('[data-action]') as HTMLElement;
+            if (!actionEl) return;
+
+            const action = actionEl.dataset.action;
+            if (!action) return;
+
+            e.stopPropagation();
+            this.handleDelegatedAction(action, actionEl, e);
+        }) as EventListener);
+    }
+
+    // ✅ 新增：统一的委托动作处理器
+    private handleDelegatedAction(
+        action: string,
+        actionEl: HTMLElement,
+        _event: MouseEvent
+    ): void {
+        const sessionEl = actionEl.closest('[data-session-id]') as HTMLElement;
+        const sessionId = sessionEl?.dataset.sessionId || '';
+
+        const nodeEl = actionEl.closest('.llm-ui-node') as HTMLElement;
+        const nodeId = nodeEl?.dataset.id || sessionId;
+
+        switch (action) {
+            case 'collapse': {
+                const collapsible = actionEl.closest(
+                    '.llm-ui-bubble--user, .llm-ui-node'
+                ) as HTMLElement;
+                if (collapsible) {
+                    this.toggleCollapse(collapsible, actionEl, sessionId || nodeId);
+                }
+                break;
+            }
+
+            case 'copy': {
+                const editor = this.editorMap.get(nodeId) || this.editorMap.get(sessionId);
+                if (editor) {
+                    this.handleCopy(editor.content, actionEl);
+                }
+                break;
+            }
+
+            case 'delete':
+                this.handleDeleteConfirm(
+                    sessionId,
+                    sessionEl?.classList.contains('llm-ui-session--user') ? 'user' : 'assistant'
+                );
+                break;
+
+            case 'retry':
+                this.onNodeAction?.('retry', sessionId);
+                break;
+
+            case 'resend':
+                this.onNodeAction?.('resend', sessionId);
+                break;
+
+            case 'edit': {
+                const editor = this.editorMap.get(sessionId);
+                if (editor && sessionEl) {
+                    const editActionsEl = sessionEl.querySelector('.llm-ui-edit-actions') as HTMLElement;
+                    if (editActionsEl) {
+                        this.toggleEditMode(sessionId, editor, editActionsEl, sessionEl);
+                    }
+                } else {
+                    // Node 编辑模式
+                    const nodeEditor = this.editorMap.get(nodeId);
+                    if (nodeEditor) {
+                        this.handleNodeEdit(nodeId, sessionId, nodeEditor, actionEl);
+                    }
+                }
+                break;
+            }
+
+            case 'confirm-edit': {
+                const editor = this.editorMap.get(sessionId);
+                if (editor && sessionEl) {
+                    const editActionsEl = sessionEl.querySelector('.llm-ui-edit-actions') as HTMLElement;
+                    this.confirmEdit(sessionId, editor, editActionsEl, sessionEl, true);
+                }
+                break;
+            }
+
+            case 'save-only': {
+                const editor = this.editorMap.get(sessionId);
+                if (editor && sessionEl) {
+                    const editActionsEl = sessionEl.querySelector('.llm-ui-edit-actions') as HTMLElement;
+                    this.confirmEdit(sessionId, editor, editActionsEl, sessionEl, false);
+                }
+                break;
+            }
+
+            case 'cancel-edit': {
+                const editor = this.editorMap.get(sessionId);
+                if (editor && sessionEl) {
+                    const editActionsEl = sessionEl.querySelector('.llm-ui-edit-actions') as HTMLElement;
+                    this.cancelEdit(sessionId, editor, editActionsEl, sessionEl);
+                }
+                break;
+            }
+
+            case 'prev-sibling':
+                this.onNodeAction?.('prev-sibling', sessionId);
+                break;
+
+            case 'next-sibling':
+                this.onNodeAction?.('next-sibling', sessionId);
+                break;
+
+            case 'create-branch':
+                this.bus?.emit('branch:create', { sourceNodeId: sessionId || nodeId });
+                break;
+
+            case 'open-settings':
+                this.container.dispatchEvent(
+                    new CustomEvent('open-connection-settings', { bubbles: true })
+                );
+                break;
+
+            case 'retry-last': {
+                const errorBubble = actionEl.closest('.llm-ui-session--system');
+                errorBubble?.remove();
+                const lastNode = this.findLastRetryableId();
+                if (lastNode) this.onNodeAction?.('retry', lastNode);
+                break;
+            }
+        }
+    }
+
+    // ✅ 新增：Node 编辑模式处理
+    private async handleNodeEdit(
+        _nodeId: string,
+        sessionId: string,
+        editor: MDxController,
+        actionEl: Element
+    ): Promise<void> {
+        const wasEditing = editor.isEditing();
+        await editor.toggleEdit();
+        actionEl.classList.toggle('active');
+
+        if (wasEditing) {
+            this.onContentChange?.(sessionId, editor.content, 'node');
+        }
+    }
+
+    // ================================================================
+    // 公开 API
+    // ================================================================
+
     public getCollapseStates(): CollapseStateMap {
         return { ...this.collapseStates };
     }
@@ -135,8 +302,18 @@ export class HistoryView {
         errorSessions.forEach(session => session.remove());
     }
 
-    // @file: llm-ui/components/HistoryView.ts
-    // 确认 removeMessages 中已有以下清理逻辑（上一轮已修复，此处确认完整性）
+    // ✅ 新增：公开的折叠切换方法（替代外部直接操作 DOM）
+    public toggleSessionCollapse(sessionId: string): void {
+        const sessionEl = this.container.querySelector(
+            `[data-session-id="${sessionId}"]`
+        ) as HTMLElement;
+        if (!sessionEl) return;
+
+        const collapseBtn = sessionEl.querySelector(
+            '[data-action="collapse"]'
+        ) as HTMLElement;
+        collapseBtn?.click();
+    }
 
     public removeMessages(ids: string[], animated: boolean = true): string[] {
         const actuallyRemoved: string[] = [];
@@ -181,7 +358,8 @@ export class HistoryView {
         }
 
         const delay = animated ? 350 : 0;
-        setTimeout(() => this.checkEmpty(), delay);
+        // ✅ 改动：使用 TimerManager
+        this.timers.setTimeout(() => this.checkEmpty(), delay);
 
         return actuallyRemoved;
     }
@@ -323,6 +501,10 @@ export class HistoryView {
         }
     }
 
+    // ================================================================
+    // 渲染
+    // ================================================================
+
     renderFull(sessions: SessionGroup[]) {
         this.clear();
         if (sessions.length === 0) {
@@ -395,90 +577,32 @@ export class HistoryView {
 
         const isSerious = error.message.includes('401') || error.message.includes('API key');
         if (!isSerious) {
-            setTimeout(() => {
+            this.timers.setTimeout(() => {
                 if (banner.parentNode) banner.remove();
             }, 5000);
         }
 
         this.container.insertBefore(banner, this.container.firstChild);
-        this.scrollToBottom(true);
+        this.scrollController.scrollToBottom(true);
     }
 
     // ================================================================
-    // 滚动控制
+    // 滚动（委托给 ScrollController）
     // ================================================================
-
-    /**
-     * 处理用户滚动 - 增强版
-     */
-    private handleScroll(): void {
-        const { scrollTop, scrollHeight, clientHeight } = this.container;
-        const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
-
-        // 判断用户是否正在查看历史内容
-        this.userIsScrolledUp = distanceFromBottom > this.scrollThreshold;
-
-        // 如果用户滚动到底部，隐藏新内容提示
-        if (!this.userIsScrolledUp) {
-            this.hideNewContentIndicator();
-        }
-
-        // 非流式模式下才更新自动滚动状态
-        if (!this.isStreamingMode) {
-            if (Date.now() < this.scrollLockUntil) return;
-            this.shouldAutoScroll = distanceFromBottom < this.scrollThreshold;
-        }
-    }
-
-    /**
-     * ✅ 优化：处理内容高度变化
-     */
-    private handleResize(): void {
-        if (!this.shouldAutoScroll && !this.isStreamingMode) return;
-
-        // 节流滚动
-        if (this.scrollThrottleTimer !== null) return;
-
-        this.scrollThrottleTimer = window.setTimeout(() => {
-            this.scrollThrottleTimer = null;
-
-            const currentScrollHeight = this.container.scrollHeight;
-
-            if (currentScrollHeight > this.lastScrollHeight) {
-                this.lastScrollHeight = currentScrollHeight;
-                this.instantScrollToBottom();
-            }
-        }, this.SCROLL_THROTTLE);
-    }
-
-    /**
-     * ✅ 优化：瞬时滚动到底部
-     */
-    private instantScrollToBottom(): void {
-        if (this.scrollFrameId !== null) return;
-
-        this.scrollFrameId = requestAnimationFrame(() => {
-            this.scrollFrameId = null;
-            this.container.scrollTop = this.container.scrollHeight;
-        });
-    }
 
     /**
      * 滚动到底部
+     * 
+     * @param force - 
+     *   true:  用户主动触发（如点击按钮、发送消息）→ 使用 forceScrollToBottom
+     *   false: 程序触发（如新内容到达）→ 尊重用户滚动状态
      */
     scrollToBottom(force: boolean = false): void {
-        if (!force && !this.shouldAutoScroll) return;
-
-        if (this.scrollFrameId !== null) {
-            cancelAnimationFrame(this.scrollFrameId);
+        if (force) {
+            this.scrollController.forceScrollToBottom();
+        } else {
+            this.scrollController.scrollToBottom(false);
         }
-
-        this.scrollFrameId = requestAnimationFrame(() => {
-            this.scrollFrameId = null;
-            this.container.scrollTop = this.container.scrollHeight;
-            this.lastScrollHeight = this.container.scrollHeight;
-            this.scrollLockUntil = Date.now() + 100;
-        });
     }
 
     /**
@@ -488,9 +612,8 @@ export class HistoryView {
         if (this.isStreamingMode) return;
 
         this.isStreamingMode = true;
-        this.shouldAutoScroll = true;
-        this.lastScrollHeight = this.container.scrollHeight;
-
+        this.scrollController.enterStreamingMode();
+        this.resizeTracker.enterStreamingMode();
         this.container.classList.add('llm-ui-history--streaming');
     }
 
@@ -501,11 +624,12 @@ export class HistoryView {
         if (!this.isStreamingMode) return;
 
         this.isStreamingMode = false;
+        this.scrollController.exitStreamingMode();
+        this.resizeTracker.exitStreamingMode();
         this.container.classList.remove('llm-ui-history--streaming');
 
-        // 只有当用户没有主动滚动上去时，才滚动到底部
-        if (!this.userIsScrolledUp) {
-            this.scrollToBottom(true);
+        if (!this.scrollController.isUserScrolledUp) {
+            this.scrollController.scrollToBottom(true);
         } else {
             this.showNewContentIndicator();
         }
@@ -530,9 +654,10 @@ export class HistoryView {
         });
     }
 
-    /**
-     * ✅ 新增：显示新内容提示器
-     */
+    // ================================================================
+    // 新内容提示器
+    // ================================================================
+
     private showNewContentIndicator(): void {
         // 避免重复创建
         if (this.newContentIndicator) return;
@@ -542,7 +667,8 @@ export class HistoryView {
         this.newContentIndicator.innerHTML = ErrorTemplates.renderNewContentIndicator();
 
         this.newContentIndicator.querySelector('button')?.addEventListener('click', () => {
-            this.scrollToBottom(true);
+            // ✅ 修复：使用 forceScrollToBottom，明确的用户操作
+            this.scrollController.forceScrollToBottom();
             this.hideNewContentIndicator();
         });
 
@@ -558,6 +684,10 @@ export class HistoryView {
             this.newContentIndicator = null;
         }
     }
+
+    // ================================================================
+    // Session / Node 渲染
+    // ================================================================
 
     private appendSessionGroup(group: SessionGroup, isCollapsed: boolean) {
         // ✅ 关键修复：检查是否已渲染
@@ -590,13 +720,6 @@ export class HistoryView {
         }
     }
 
-    /**
-     * ✅ 新增：设置分支操作回调
-     */
-    public setBranchActionCallback(callback: BranchActionCallback): void {
-        this.onBranchAction = callback;
-    }
-
     private initUserBubble(wrapper: HTMLElement, group: SessionGroup) {
         const mountPoint = wrapper.querySelector(`#user-mount-${group.id}`) as HTMLElement;
         const controller = new MDxController(mountPoint, group.content || '', {
@@ -612,76 +735,96 @@ export class HistoryView {
             sessionEngine: this.contextOptions.sessionEngine,
         });
         this.editorMap.set(group.id, controller);
-        this.bindUserBubbleEvents(wrapper, group, controller);
+        // ✅ 改动：事件绑定已由事件委托处理，不再需要 bindUserBubbleEvents
     }
 
-    private bindUserBubbleEvents(wrapper: HTMLElement, group: SessionGroup, controller: MDxController) {
-        const bubbleEl = wrapper.querySelector('.llm-ui-bubble--user') as HTMLElement;
-        const editActionsEl = wrapper.querySelector('.llm-ui-edit-actions') as HTMLElement;
+    private renderExecutionTree(node: ExecutionNode, isCollapsed: boolean = false) {
+        this.appendNode(node.parentId, node, isCollapsed);
+        node.children?.forEach(c => this.renderExecutionTree(c, isCollapsed));
+    }
 
-        if (!bubbleEl) return;
-
-        // Action Bindings
-        wrapper.querySelector('[data-action="resend"]')?.addEventListener('click', (e) => {
-            e.stopPropagation();
-            this.onNodeAction?.('resend', group.id);
-        });
-
-        wrapper.querySelector('[data-action="edit"]')?.addEventListener('click', (e) => {
-            e.stopPropagation();
-            this.toggleEditMode(group.id, controller, editActionsEl, wrapper);
-        });
-
-        wrapper.querySelector('[data-action="copy"]')?.addEventListener('click', async (e) => {
-            e.stopPropagation();
-            await this.handleCopy(controller.content, e.currentTarget as HTMLElement);
-        });
-
-        wrapper.querySelector('[data-action="delete"]')?.addEventListener('click', async (e) => {
-            e.stopPropagation();
-            await this.handleDeleteConfirm(group.id, 'user');
-        });
-
-        const collapseBtn = wrapper.querySelector('[data-action="collapse"]');
-        if (collapseBtn) {
-            collapseBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                this.toggleCollapse(bubbleEl, e.currentTarget as HTMLElement, group.id);
-            });
+    private appendNode(parentId: string | undefined, node: ExecutionNode, isCollapsed: boolean) {
+        if (this.nodeMap.has(node.id)) {
+            console.warn(`[HistoryView] Duplicate node skipped: ${node.id}`);
+            return;
         }
 
-        wrapper.querySelector('[data-action="prev-sibling"]')?.addEventListener('click', (e) => {
-            e.stopPropagation();
-            this.onNodeAction?.('prev-sibling', group.id);
-        });
+        let parentEl: HTMLElement | null = null;
 
-        wrapper.querySelector('[data-action="create-branch"]')?.addEventListener('click', (e) => {
-            e.stopPropagation();
-            this.onBranchAction?.('create', group.id);
-        });
+        if (parentId) {
+            parentEl = this.nodeMap.get(parentId)?.querySelector('.llm-ui-node__children') || null;
+        }
 
-        wrapper.querySelector('[data-action="next-sibling"]')?.addEventListener('click', (e) => {
-            e.stopPropagation();
-            this.onNodeAction?.('next-sibling', group.id);
-        });
+        if (!parentEl) {
+            const roots = this.container.querySelectorAll('.llm-ui-execution-root');
+            if (roots.length > 0) parentEl = roots[roots.length - 1] as HTMLElement;
+        }
 
-        wrapper.querySelector('[data-action="confirm-edit"]')?.addEventListener('click', (e) => {
-            e.stopPropagation();
-            this.confirmEdit(group.id, controller, editActionsEl, wrapper, true);
-        });
+        if (parentEl) {
+            const { element } = NodeRenderer.create(node);
 
-        wrapper.querySelector('[data-action="save-only"]')?.addEventListener('click', (e) => {
-            e.stopPropagation();
-            this.confirmEdit(group.id, controller, editActionsEl, wrapper, false);
-        });
+            if (isCollapsed) {
+                element.classList.add('is-collapsed');
+                const svg = element.querySelector('[data-action="collapse"] svg');
+                if (svg) svg.innerHTML = '<polyline points="6 9 12 15 18 9"></polyline>';
+            }
 
-        wrapper.querySelector('[data-action="cancel-edit"]')?.addEventListener('click', (e) => {
-            e.stopPropagation();
-            this.cancelEdit(group.id, controller, editActionsEl, wrapper);
-        });
+            this.nodeMap.set(node.id, element);
+            parentEl.appendChild(element);
+
+            // ✅ 改动：简化为仅编辑器挂载（事件由委托处理）
+            this.mountNodeEditor(element, node);
+        }
     }
 
-    private toggleEditMode(nodeId: string, controller: MDxController, actionsEl: HTMLElement, wrapper: HTMLElement) {
+    // ✅ 新增：仅负责编辑器挂载（替代原来的 bindNodeEvents）
+    private mountNodeEditor(element: HTMLElement, node: ExecutionNode): void {
+        const getSessionId = (): string => {
+            const sessionEl = element.closest('[data-session-id]');
+            return (sessionEl as HTMLElement)?.dataset.sessionId || node.id;
+        };
+        const effectiveId = getSessionId();
+
+        const mountPoint = element.querySelector(`#mount-${node.id}`) as HTMLElement;
+        if (!mountPoint) return;
+
+        const isStreamingNode = node.status === 'running' || node.status === 'queued';
+
+        const controller = new MDxController(mountPoint, node.data.output || '', {
+            readOnly: true,
+            streaming: isStreamingNode,
+            onChange: (text) => {
+                if (controller.isEditing()) {
+                    this.onContentChange?.(effectiveId, text, 'node');
+                }
+                if (!this.isStreamingMode) {
+                    const previewEl = element.querySelector('.llm-ui-header-preview');
+                    if (previewEl) previewEl.textContent = this.getPreviewText(text);
+                }
+            },
+            nodeId: this.contextOptions.nodeId,
+            ownerNodeId: this.contextOptions.ownerNodeId,
+            sessionEngine: this.contextOptions.sessionEngine,
+        });
+        this.editorMap.set(node.id, controller);
+
+        // 设置 agentId 用于事件委托中的 icon 点击
+        const iconEl = element.querySelector('.llm-ui-node__icon--clickable');
+        if (iconEl && node.data.metaInfo?.agentId) {
+            (iconEl as HTMLElement).dataset.agentId = node.data.metaInfo.agentId;
+        }
+    }
+
+    // ================================================================
+    // 编辑操作
+    // ================================================================
+
+    private toggleEditMode(
+        nodeId: string,
+        controller: MDxController,
+        actionsEl: HTMLElement,
+        wrapper: HTMLElement
+    ) {
         if (!this.editingNodes.has(nodeId)) {
             this.originalContentMap.set(nodeId, controller.content);
             this.editingNodes.add(nodeId);
@@ -742,7 +885,9 @@ export class HistoryView {
             await navigator.clipboard.writeText(content);
             const originalHtml = btnElement.innerHTML;
             btnElement.innerHTML = '✓';
-            setTimeout(() => btnElement.innerHTML = originalHtml, 1500);
+            this.timers.setTimeout(() => {
+                btnElement.innerHTML = originalHtml;
+            }, 1500);
         } catch (err) {
             console.error('Copy failed', err);
         }
@@ -784,9 +929,10 @@ export class HistoryView {
         return count;
     }
 
-    /**
-     * ✅ 优化：流式模式下不保存状态
-     */
+    // ================================================================
+    // 折叠控制
+    // ================================================================
+
     private toggleCollapse(element: HTMLElement, btn: HTMLElement, sessionId?: string) {
         const wasCollapsed = element.classList.contains('is-collapsed');
         element.classList.toggle('is-collapsed');
@@ -806,7 +952,8 @@ export class HistoryView {
         if (sessionId) {
             this.collapseStates[sessionId] = isCollapsed;
             if (!this.isStreamingMode) {
-                this.onCollapseStateChange?.(this.collapseStates);
+                // ✅ 改动：通过 bus 通知，替代直接回调
+                this.bus?.emit('state:collapseChanged', { states: { ...this.collapseStates } });
             }
         }
     }
@@ -826,10 +973,7 @@ export class HistoryView {
             if (controller) {
                 try {
                     await controller.waitUntilReady();
-                    const result = await controller.collapseBlocks();
-                    if (result.affectedCount > 0) {
-                        console.log(`[HistoryView] Collapsed ${result.affectedCount} code blocks in editor ${editorId}`);
-                    }
+                    await controller.collapseBlocks();
                 } catch (e) {
                     console.warn(`[HistoryView] Failed to collapse code blocks in editor ${editorId}:`, e);
                 }
@@ -865,10 +1009,10 @@ export class HistoryView {
         return ids;
     }
 
-    /**
-     * ✨ [新增] 公开方法：折叠指定 session 的所有代码块
-     * 可供外部调用
-     */
+    // ================================================================
+    // 公开的代码块折叠方法
+    // ================================================================
+
     public async collapseCodeBlocksForSession(sessionId: string): Promise<void> {
         await this.collapseCodeBlocksInSession(sessionId);
     }
@@ -973,158 +1117,19 @@ export class HistoryView {
         }
     }
 
-    // ✨ [新增] 获取相邻的 Agent Chat Session ID
-    // direction: 'next' | 'prev'
-    public getNeighborAgentSessionId(currentVisibleId: string | null, direction: 'next' | 'prev'): string | null {
+    public getNeighborAgentSessionId(
+        currentVisibleId: string | null,
+        direction: 'next' | 'prev'
+    ): string | null {
         const result = this.getNeighborAgentChatTarget(currentVisibleId, direction);
         if (result === '__end__') return null;
         return result;
     }
 
-    private renderExecutionTree(node: ExecutionNode, isCollapsed: boolean = false) {
-        this.appendNode(node.parentId, node, isCollapsed);
-        node.children?.forEach(c => this.renderExecutionTree(c, isCollapsed));
-    }
+    // ================================================================
+    // 节点内容更新
+    // ================================================================
 
-    private appendNode(parentId: string | undefined, node: ExecutionNode, isCollapsed: boolean) {
-        // ✅ 关键修复：检查是否已渲染
-        if (this.nodeMap.has(node.id)) {
-            console.warn(`[HistoryView] Duplicate node skipped: ${node.id}`);
-            return;
-        }
-
-        let parentEl: HTMLElement | null = null;
-
-        if (parentId) {
-            parentEl = this.nodeMap.get(parentId)?.querySelector('.llm-ui-node__children') || null;
-        }
-
-        if (!parentEl) {
-            const roots = this.container.querySelectorAll('.llm-ui-execution-root');
-            if (roots.length > 0) parentEl = roots[roots.length - 1] as HTMLElement;
-        }
-
-        if (parentEl) {
-            const { element, mountPoints } = NodeRenderer.create(node);
-
-            if (isCollapsed) {
-                element.classList.add('is-collapsed');
-                const svg = element.querySelector('[data-action="collapse"] svg');
-                if (svg) svg.innerHTML = '<polyline points="6 9 12 15 18 9"></polyline>';
-            }
-
-            this.nodeMap.set(node.id, element);
-            parentEl.appendChild(element);
-
-            this.bindNodeEvents(element, node, mountPoints);
-        }
-    }
-
-    private bindNodeEvents(element: HTMLElement, node: ExecutionNode, mountPoints: any) {
-        const editBtn = element.querySelector('[data-action="edit"]');
-        const copyBtn = element.querySelector('[data-action="copy"]');
-        const collapseBtn = element.querySelector('[data-action="collapse"]');
-        const retryBtn = element.querySelector('[data-action="retry"]');
-        const deleteBtn = element.querySelector('[data-action="delete"]');
-
-        const getSessionId = (): string => {
-            const sessionEl = element.closest('[data-session-id]');
-            return (sessionEl as HTMLElement)?.dataset.sessionId || node.id;
-        };
-        const effectiveId = getSessionId();
-
-        const iconEl = element.querySelector('.llm-ui-node__icon--clickable');
-        if (iconEl) {
-            iconEl.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const agentId = (e.currentTarget as HTMLElement).dataset.agentId;
-                if (agentId) {
-                    this.container.dispatchEvent(new CustomEvent('open-agent-config', {
-                        bubbles: true,
-                        detail: { agentId }
-                    }));
-                }
-            });
-        }
-
-        retryBtn?.addEventListener('click', (e) => {
-            e.stopPropagation();
-            this.onNodeAction?.('retry', effectiveId);
-        });
-
-        deleteBtn?.addEventListener('click', async (e) => {
-            e.stopPropagation();
-            await this.handleDeleteConfirm(effectiveId, 'assistant');
-        });
-
-        collapseBtn?.addEventListener('click', (e) => {
-            e.stopPropagation();
-            this.toggleCollapse(element, e.target as HTMLElement, effectiveId);
-        });
-
-        element.querySelector('[data-action="prev-sibling"]')?.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const sessionId = getSessionId();
-            this.onNodeAction?.('prev-sibling', sessionId);
-        });
-
-        element.querySelector('[data-action="next-sibling"]')?.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const sessionId = getSessionId();
-            this.onNodeAction?.('next-sibling', sessionId);
-        });
-
-        // ✅ 新增：创建分支按钮
-        element.querySelector('[data-action="create-branch"]')?.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const sessionId = this.getSessionIdFromElement(element);
-            this.onBranchAction?.('create', sessionId);
-        });
-
-        if (mountPoints.output) {
-            const isStreamingNode = node.status === 'running' || node.status === 'queued';
-
-            const controller = new MDxController(mountPoints.output, node.data.output || '', {
-                readOnly: true,
-                streaming: isStreamingNode,
-                onChange: (text) => {
-                    if (controller.isEditing()) {
-                        this.onContentChange?.(effectiveId, text, 'node');
-                    }
-                    // 流式模式下不更新预览
-                    if (!this.isStreamingMode) {
-                        const previewEl = element.querySelector('.llm-ui-header-preview');
-                        if (previewEl) previewEl.textContent = this.getPreviewText(text);
-                    }
-                },
-                nodeId: this.contextOptions.nodeId,
-                ownerNodeId: this.contextOptions.ownerNodeId,
-                sessionEngine: this.contextOptions.sessionEngine,
-            });
-            this.editorMap.set(node.id, controller);
-
-            editBtn?.addEventListener('click', async () => {
-                const wasEditing = controller.isEditing();
-                await controller.toggleEdit();
-                editBtn.classList.toggle('active');
-
-                if (wasEditing) {
-                    this.onContentChange?.(effectiveId, controller.content, 'node');
-                }
-            });
-
-            copyBtn?.addEventListener('click', async () => {
-                await this.handleCopy(controller.content, copyBtn as HTMLElement);
-            });
-        } else {
-            if (editBtn) (editBtn as HTMLButtonElement).style.display = 'none';
-            if (copyBtn) (copyBtn as HTMLButtonElement).style.display = 'none';
-        }
-    }
-
-    /**
-     * ✅ 优化：更新节点内容（减少 DOM 操作）
-     */
     private updateNodeContent(nodeId: string, chunk: string, field: 'thought' | 'output') {
         const el = this.nodeMap.get(nodeId);
         if (!el) return;
@@ -1146,7 +1151,7 @@ export class HistoryView {
                 // 节流滚动思考区域
                 if (!this.thoughtScrollThrottled) {
                     this.thoughtScrollThrottled = true;
-                    requestAnimationFrame(() => {
+                    this.timers.requestAnimationFrame(() => {
                         this.thoughtScrollThrottled = false;
                         if (container) container.scrollTop = container.scrollHeight;
                     });
@@ -1205,80 +1210,130 @@ export class HistoryView {
         }
     }
 
-    public removeMessages(ids: string[], animated: boolean = true): string[] {
-        const actuallyRemoved: string[] = [];
+    // ================================================================
+    // 事件处理（使用 EventBatchProcessor）
+    // ================================================================
 
-        for (const id of ids) {
-            // ✅ 检查是否存在
-            const sessionEl = this.container.querySelector(`[data-session-id="${id}"]`);
-            const nodeEl = this.nodeMap.get(id);
-
-            if (!sessionEl && !nodeEl) {
-                console.warn(`[HistoryView] Cannot remove ${id}: not found in DOM`);
-                continue;
-            }
-
-            // ✅ 清理渲染记录
-            this.renderedSessionIds.delete(id);
-
-            // ✅ 移除 DOM
-            if (sessionEl) {
-                this.removeElement(sessionEl as HTMLElement, animated);
-            }
-            if (nodeEl) {
-                this.removeElement(nodeEl, animated);
-                this.nodeMap.delete(id);
-            }
-
-            // ✅ 清理编辑器
-            const editor = this.editorMap.get(id);
-            if (editor) {
-                editor.destroy();
-                this.editorMap.delete(id);
-            }
-
-            // ✅ 清理定时器
-            const timer = this.previewUpdateTimers.get(id);
-            if (timer) {
-                clearTimeout(timer);
-                this.previewUpdateTimers.delete(id);
-            }
-
-            // ✅ 清理状态
-            this.originalContentMap.delete(id);
-            this.editingNodes.delete(id);
-            delete this.collapseStates[id];
-
-            actuallyRemoved.push(id);
-        }
-
-        // ✅ 检查是否为空
-        const delay = animated ? 350 : 0;
-        setTimeout(() => this.checkEmpty(), delay);
-
-        return actuallyRemoved;
+    // ✅ 改动：统一入口委托给 EventBatchProcessor
+    processEvent(event: OrchestratorEvent) {
+        this.eventProcessor.push(event);
     }
 
-    private removeElement(el: HTMLElement, animated: boolean): void {
-        if (animated) {
-            el.classList.add('llm-ui-session--deleting');
-            el.addEventListener('animationend', () => el.remove(), { once: true });
-            setTimeout(() => {
-                if (el.parentNode) el.remove();
-            }, 350);
-        } else {
-            el.remove();
+    // ✅ 新增：处理合并后的批量事件
+    private handleBatchedEvents(batched: BatchedEvents): void {
+        // 1. 先应用合并的 chunk
+        for (const [nodeId, chunks] of batched.chunks) {
+            if (chunks.thought) {
+                this.updateNodeContent(nodeId, chunks.thought, 'thought');
+            }
+            if (chunks.output) {
+                this.updateNodeContent(nodeId, chunks.output, 'output');
+            }
+        }
+
+        // 2. 再处理状态变更
+        for (const [nodeId, { status, result }] of batched.statusChanges) {
+            this.updateNodeStatus(nodeId, status, result);
+        }
+
+        // 3. 最后处理不可合并的事件
+        for (const event of batched.immediate) {
+            this.processEventImmediate(event);
+        }
+
+    }
+
+    private processEventImmediate(event: OrchestratorEvent) {
+        switch (event.type) {
+            case 'branch_switched':
+                this.collapseStates = {};
+                return;
+
+            case 'branch_created':
+                return;
+
+            case 'branch_renamed':
+                this.handleBranchRenamed(event.payload);
+                return;
+
+            case 'branch_deleted':
+                this.handleBranchDeleted(event.payload);
+                return;
+
+            case 'session_start':
+                this.clearErrors();
+                this.enterStreamingMode();
+                const isUser = event.payload.role === 'user';
+                const defaultFold = isUser ? true : false;
+                this.appendSessionGroup(event.payload, defaultFold);
+                this.collapseStates[event.payload.id] = defaultFold;
+
+                // ✅ 修复：只在用户当前在底部时滚动
+                // force=false 让 ScrollController 内部判断
+                this.scrollController.scrollToBottom(false);
+                break;
+
+            case 'node_start':
+                this.appendNode(event.payload.parentId, event.payload.node, false);
+                break;
+
+            case 'node_status':
+                this.updateNodeStatus(
+                    event.payload.nodeId,
+                    event.payload.status,
+                    event.payload.result
+                );
+                break;
+
+            case 'finished':
+                this.exitStreamingMode();
+                this.editorMap.forEach(editor => editor.finishStream());
+                this.clearErrors();
+                this.bus?.emit('state:collapseChanged', { states: { ...this.collapseStates } });
+                break;
+
+            case 'error': {
+                this.exitStreamingMode();
+                const errorMessage = event.payload.message || 'Unknown error';
+                const errorCode = (event.payload as any).code;
+
+                if (errorCode === 401) {
+                    this.appendErrorBubble(new Error(`🔐 ${errorMessage}`));
+                } else if (errorCode === 429) {
+                    this.appendErrorBubble(new Error(`⏳ ${errorMessage}`));
+                } else {
+                    this.appendErrorBubble(new Error(errorMessage));
+                }
+                this.editorMap.forEach(editor => editor.finishStream(false));
+                break;
+            }
+
+            case 'messages_deleted':
+                this.handleMessagesDeleted(event.payload.deletedIds);
+                break;
+
+            case 'message_edited':
+                this.handleMessageEdited(event.payload.sessionId, event.payload.newContent);
+                break;
+
+            case 'session_cleared':
+                this.renderWelcome();
+                break;
+
+            case 'sibling_switch':
+                this.handleSiblingSwitch(event.payload);
+                break;
+
+            case 'retry_started':
+                this.clearErrors();
+                this.enterStreamingMode();
+                break;
         }
     }
 
-    private checkEmpty(): void {
-        const remaining = this.container.querySelectorAll(
-            '.llm-ui-session:not(.llm-ui-session--deleting)'
-        );
-        if (remaining.length === 0) {
-            this.renderWelcome();
-        }
-    }
+    // ================================================================
+    // 事件子处理器
+    // ================================================================
 
     private handleMessagesDeleted(deletedIds: string[]) {
         this.removeMessages(deletedIds, true);
@@ -1310,14 +1365,24 @@ export class HistoryView {
         if (nextBtn) nextBtn.disabled = payload.newIndex === payload.total - 1;
     }
 
-    private getPreviewText(content: string): string {
-        if (!content) return '';
-        let plain = content.replace(/[\r\n]+/g, ' ');
-        plain = plain.replace(/[*#`_~[\]()]/g, '');
-        plain = plain.trim();
-        if (!plain) return '';
-        return plain.length > 60 ? plain.substring(0, 60) + '...' : plain;
+    private handleBranchRenamed(payload: { nodeId: string; newName: string }): void {
+        const el = this.container.querySelector(`[data-session-id="${payload.nodeId}"]`) as HTMLElement ||
+            this.nodeMap.get(payload.nodeId) || null;
+        if (el) {
+            const nameEl = el.querySelector('.llm-branch-name');
+            if (nameEl) {
+                nameEl.textContent = payload.newName;
+            }
+        }
     }
+
+    private handleBranchDeleted(payload: { deletedIds: string[] }): void {
+        this.removeMessages(payload.deletedIds, true);
+    }
+
+    // ================================================================
+    // Error Bubble
+    // ================================================================
 
     public appendErrorBubble(error: Error) {
         this.exitStreamingMode();
@@ -1329,25 +1394,10 @@ export class HistoryView {
         wrapper.innerHTML = ErrorTemplates.renderErrorBubble(error.message, isAuthError);
 
         this.container.appendChild(wrapper);
-        this.scrollToBottom(true);
+        this.scrollController.scrollToBottom(true);
 
-        const settingsBtn = wrapper.querySelector('[data-action="open-settings"]');
-        if (settingsBtn) {
-            settingsBtn.addEventListener('click', () => {
-                this.container.dispatchEvent(new CustomEvent('open-connection-settings', { bubbles: true }));
-            });
-        }
-
-        const retryBtn = wrapper.querySelector('[data-action="retry-last"]');
-        if (retryBtn) {
-            retryBtn.addEventListener('click', () => {
-                wrapper.remove();
-                const lastNode = this.findLastRetryableId();
-                if (lastNode) {
-                    this.onNodeAction?.('retry', lastNode);
-                }
-            });
-        }
+        // ✅ 改动：事件委托已处理 data-action="open-settings" 和 data-action="retry-last"
+        // 不需要在此处绑定事件
     }
 
     private findLastRetryableId(): string | null {
@@ -1359,241 +1409,45 @@ export class HistoryView {
     }
 
     // ================================================================
-    // ✅ 优化：事件批量处理
+    // 工具方法
     // ================================================================
 
-    /**
-     * ✅ 优化：批量处理事件
-     */
-    processEvent(event: OrchestratorEvent) {
-        switch (event.type) {
-            // ✅ 修复：branch_switched / branch_created 不做局部 DOM 更新
-            // 由 LLMWorkspaceEditor.handleSessionEvent 调用 renderFull 统一处理
-            case 'branch_switched':
-                this.collapseStates = {};
-                return;
+    private getPreviewText(content: string): string {
+        if (!content) return '';
+        let plain = content.replace(/[\r\n]+/g, ' ');
+        plain = plain.replace(/[*#`_~[\]()]/g, '');
+        plain = plain.trim();
+        if (!plain) return '';
+        return plain.length > 60 ? plain.substring(0, 60) + '...' : plain;
+    }
 
-            case 'branch_created':
-                // 不做局部 DOM 更新，等待 renderFull
-                return;
-
-            case 'branch_renamed':
-                this.handleBranchRenamed(event.payload);
-                return;
-
-            case 'branch_deleted':
-                this.handleBranchDeleted(event.payload);
-                return;
-
-            default:
-                if (event.type !== 'node_update') {
-                    this.processEventImmediate(event);
-                    return;
-                }
-                break;
-        }
-
-        // 流式更新事件批量处理
-        this.eventQueue.push(event);
-
-        if (this.eventProcessTimer === null) {
-            this.eventProcessTimer = window.setTimeout(() => {
-                this.flushEventQueue();
-            }, this.EVENT_BATCH_INTERVAL);
+    // ✅ 改动：使用 TimerManager 管理动画定时器
+    private removeElement(el: HTMLElement, animated: boolean): void {
+        if (animated) {
+            el.classList.add('llm-ui-session--deleting');
+            el.addEventListener('animationend', () => el.remove(), { once: true });
+            this.timers.setTimeout(() => {
+                if (el.parentNode) el.remove();
+            }, 350);
+        } else {
+            el.remove();
         }
     }
 
-    /**
-     * ✅ 新增：批量处理队列中的事件
-     */
-    private flushEventQueue(): void {
-        this.eventProcessTimer = null;
-
-        if (this.eventQueue.length === 0) return;
-
-        // 按 nodeId 合并 chunk
-        const mergedChunks = new Map<string, { thought: string; output: string }>();
-
-        for (const event of this.eventQueue) {
-            if (event.type !== 'node_update') continue;
-
-            const { nodeId, chunk, field } = event.payload;
-            if (!chunk || !field) continue;
-
-            if (!mergedChunks.has(nodeId)) {
-                mergedChunks.set(nodeId, { thought: '', output: '' });
-            }
-
-            const merged = mergedChunks.get(nodeId)!;
-            if (field === 'thought') {
-                merged.thought += chunk;
-            } else if (field === 'output') {
-                merged.output += chunk;
-            }
-        }
-
-        // 清空队列
-        this.eventQueue = [];
-
-        // 批量更新
-        for (const [nodeId, chunks] of mergedChunks) {
-            if (chunks.thought) {
-                this.updateNodeContent(nodeId, chunks.thought, 'thought');
-            }
-            if (chunks.output) {
-                this.updateNodeContent(nodeId, chunks.output, 'output');
-            }
-        }
-
-        // 只滚动一次
-        if (!this.userIsScrolledUp) {
-            this.scrollToBottom(false);
+    private checkEmpty(): void {
+        const remaining = this.container.querySelectorAll(
+            '.llm-ui-session:not(.llm-ui-session--deleting)'
+        );
+        if (remaining.length === 0) {
+            this.renderWelcome();
         }
     }
 
-    /**
-     * ✅ 原有的处理逻辑
-     */
-    private processEventImmediate(event: OrchestratorEvent) {
-        switch (event.type) {
-            case 'session_start':
-                // ✅ 修复问题2：新对话开始时清理错误提示
-                this.clearErrors();
-
-                this.enterStreamingMode();
-                // [修改]：新消息产生时，如果是用户消息，强制折叠
-                // 如果希望用户刚发完能看到，这里传 false；如果要求“绝对保持fold”，传 true
-                const isUser = event.payload.role === 'user';
-                const defaultFold = isUser ? true : false;
-
-                this.appendSessionGroup(event.payload, defaultFold);
-
-                // 记录状态
-                this.collapseStates[event.payload.id] = defaultFold;
-
-                this.scrollToBottom(true);
-                break;
-
-            case 'node_start':
-                this.appendNode(event.payload.parentId, event.payload.node, false);
-                break;
-
-            case 'node_status':
-                this.updateNodeStatus(
-                    event.payload.nodeId,
-                    event.payload.status,
-                    event.payload.result
-                );
-                break;
-
-            case 'finished':
-                // 先处理队列中剩余的事件
-                if (this.eventProcessTimer !== null) {
-                    clearTimeout(this.eventProcessTimer);
-                    this.flushEventQueue();
-                }
-
-                this.exitStreamingMode();
-                this.editorMap.forEach(editor => editor.finishStream());
-
-                // ✅ 修复问题2：成功完成时清理错误提示
-                this.clearErrors();
-
-                this.onCollapseStateChange?.(this.collapseStates);
-                break;
-
-            case 'error':
-                if (this.eventProcessTimer !== null) {
-                    clearTimeout(this.eventProcessTimer);
-                    this.flushEventQueue();
-                }
-
-                this.exitStreamingMode();
-                // ✅ 修复：显示更详细的错误信息
-                const errorMessage = event.payload.message || 'Unknown error';
-                const errorCode = (event.payload as any).code;
-
-                // 根据错误类型显示不同的提示
-                if (errorCode === 401) {
-                    this.appendErrorBubble(new Error(`🔐 ${errorMessage}`));
-                } else if (errorCode === 429) {
-                    this.appendErrorBubble(new Error(`⏳ ${errorMessage}`));
-                } else {
-                    this.appendErrorBubble(new Error(errorMessage));
-                }
-
-                // 同时结束所有流式编辑器
-                this.editorMap.forEach(editor => editor.finishStream(false));
-                break;
-
-            case 'messages_deleted':
-                this.handleMessagesDeleted(event.payload.deletedIds);
-                break;
-
-            case 'message_edited':
-                this.handleMessageEdited(event.payload.sessionId, event.payload.newContent);
-                break;
-
-            case 'session_cleared':
-                this.renderWelcome();
-                break;
-
-            case 'sibling_switch':
-                this.handleSiblingSwitch(event.payload);
-                break;
-
-            case 'retry_started':
-                // ✅ 修复问题2：重试时也清理旧的错误提示
-                this.clearErrors();
-                this.enterStreamingMode();
-                break;
-        }
-    }
-
-    /**
-     * ✅ 新增：从元素获取 sessionId
-     */
-    private getSessionIdFromElement(element: HTMLElement): string {
-        const sessionEl = element.closest('[data-session-id]');
-        return (sessionEl as HTMLElement)?.dataset.sessionId || '';
-    }
-
-
-    /**
-     * ✅ 新增：处理分支重命名事件
-     */
-    private handleBranchRenamed(payload: { nodeId: string; newName: string }): void {
-        const el = this.findElementBySessionId(payload.nodeId);
-        if (el) {
-            const nameEl = el.querySelector('.llm-branch-name');
-            if (nameEl) {
-                nameEl.textContent = payload.newName;
-            }
-        }
-    }
-
-    /**
-     * ✅ 新增：处理分支删除事件
-     */
-    private handleBranchDeleted(payload: { deletedIds: string[] }): void {
-        // 移除已删除的消息
-        this.removeMessages(payload.deletedIds, true);
-    }
-
-    /**
-     * ✅ 新增：根据 sessionId 查找元素
-     */
-    private findElementBySessionId(sessionId: string): HTMLElement | null {
-        return this.container.querySelector(`[data-session-id="${sessionId}"]`) as HTMLElement ||
-            this.nodeMap.get(sessionId) || null;
-    }
+    // ================================================================
+    // 清理
+    // ================================================================
 
     clear() {
-        if (this.scrollFrameId !== null) {
-            cancelAnimationFrame(this.scrollFrameId);
-            this.scrollFrameId = null;
-        }
-
         this.previewUpdateTimers.forEach(timer => clearTimeout(timer));
         this.previewUpdateTimers.clear();
 
@@ -1606,33 +1460,18 @@ export class HistoryView {
         this.renderedSessionIds.clear();
 
         this.isStreamingMode = false;
-        this.shouldAutoScroll = true;
-        this.userIsScrolledUp = false;
-        this.lastScrollHeight = 0;
         this.container.classList.remove('llm-ui-history--streaming');
 
         this.container.innerHTML = '';
     }
 
     destroy() {
-        // 清理事件处理定时器
-        if (this.eventProcessTimer !== null) {
-            clearTimeout(this.eventProcessTimer);
-            this.eventProcessTimer = null;
-        }
-
-        // 清理滚动节流定时器
-        if (this.scrollThrottleTimer !== null) {
-            clearTimeout(this.scrollThrottleTimer);
-            this.scrollThrottleTimer = null;
-        }
-
-        if (this.scrollFrameId !== null) {
-            cancelAnimationFrame(this.scrollFrameId);
-            this.scrollFrameId = null;
-        }
-
-        this.resizeObserver.disconnect();
+        // ✅ 改动：统一清理所有子系统
+        this.timers.destroy();
+        this.events.cleanup();
+        this.eventProcessor.destroy();
+        this.scrollController.destroy();
+        this.resizeTracker.destroy();
 
         this.previewUpdateTimers.forEach(timer => clearTimeout(timer));
         this.previewUpdateTimers.clear();
@@ -1643,14 +1482,10 @@ export class HistoryView {
         this.nodeMap.clear();
         this.originalContentMap.clear();
         this.editingNodes.clear();
-        this.eventQueue = [];
         this.collapseStates = {};
         this.renderedSessionIds.clear();
 
         this.isStreamingMode = false;
-        this.shouldAutoScroll = true;
-        this.userIsScrolledUp = false;
-        this.lastScrollHeight = 0;
         this.container.classList.remove('llm-ui-history--streaming');
 
         this.hideNewContentIndicator();
