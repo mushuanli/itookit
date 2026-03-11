@@ -13,3 +13,4 @@ export { BatchDeleteCommand, BatchCopyCommand } from './BatchCommands';
 export { CopySessionContentCommand } from './ContentCommands';
 export { FoldAllCommand, UnfoldAllCommand, ToggleSessionFoldCommand } from './FoldCommands';
 export { ScrollToSessionCommand } from './NavigationCommands';
+export { CopyAllCommand, PrintCommand, ToggleAllFoldCommand } from './WorkspaceCommands';

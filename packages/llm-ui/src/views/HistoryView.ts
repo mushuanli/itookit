@@ -9,6 +9,7 @@ import { ContentResizeTracker } from '../base/infrastructure/ContentResizeTracke
 import { EventBatchProcessor, BatchedEvents } from '../base/infrastructure/EventBatchProcessor';
 import { ErrorTemplates } from './templates/ErrorTemplates';
 import { TimerManager } from '../base/infrastructure/TimerManager';
+import { getPreviewText } from '../utils/textUtils';
 
 import { SessionRenderer, RendererContext } from './history/SessionRenderer';
 import { StreamController } from './history/StreamController';
@@ -501,7 +502,7 @@ export class HistoryView {
                 if (el) {
                     const preview = el.querySelector('.llm-ui-header-preview');
                     if (preview) {
-                        preview.textContent = this.renderer.getPreviewText(
+                        preview.textContent = getPreviewText(
                             event.payload.newContent
                         );
                     }

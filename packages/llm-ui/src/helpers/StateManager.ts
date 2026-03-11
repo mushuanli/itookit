@@ -129,13 +129,16 @@ export class StateManager {
             isNewSession?: boolean;
             savedState?: UIState | null;
             sessionSettings?: any;
+            agentValidator?: (id: string) => string;  // ✅ 新增
         }
     ): void {
+        const validate = options.agentValidator || ((id: string) => id);
+
         // 优先级 1：外部指定的初始状态
         if (options.initialInputState) {
             chatInput.setConfig({
                 text: options.initialInputState.text || '',
-                agentId: options.initialInputState.agentId || 'default',
+                agentId: validate(options.initialInputState.agentId || 'default'),
             });
             return;
         }
@@ -145,7 +148,7 @@ export class StateManager {
         if (createParams) {
             chatInput.setConfig({
                 text: createParams.text || '',
-                agentId: createParams.agentId || 'default',
+                agentId: validate(createParams.agentId || 'default'),
             });
             return;
         }
@@ -154,7 +157,7 @@ export class StateManager {
         if (!options.isNewSession && options.savedState) {
             chatInput.setConfig({
                 text: options.savedState.input_text || '',
-                agentId: options.savedState.input_agent_id || 'default',
+                agentId: validate(options.savedState.input_agent_id || 'default'),
                 settings: options.sessionSettings,
             });
         }
