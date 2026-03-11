@@ -1,8 +1,8 @@
-// @file: llm-ui/components/templates/FloatingNavPanelTemplates.ts
+// @file: llm-ui/views/templates/FloatingNavPanelTemplates.ts
 
 import { escapeHTML } from '@itookit/common';
 import { ChatNavItem } from '../FloatingNavPanel';
-import { BranchItem } from '../../core/types';
+import { BranchItem } from '../../base/core/types';
 
 export const FloatingNavPanelTemplates = {
     /**

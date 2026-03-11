@@ -1,12 +1,12 @@
-// @file: llm-ui/components/FloatingNavPanel.ts
+// @file: llm-ui/views/FloatingNavPanel.ts
 
 import { SessionGroup, SessionManager } from '@itookit/llm-engine';
 import { FloatingNavPanelTemplates } from './templates/FloatingNavPanelTemplates';
-import { BranchItem } from '../core/types';
+import { BranchItem } from '../base/core/types';
 import { showConfirmDialog, Toast } from '@itookit/common';
-import { EditorEventBus } from '../core/EditorEventBus';
-import { EventCleanup } from '../utils/EventCleanup';
-import { TimerManager } from '../utils/TimerManager';
+import { EditorEventBus } from '../base/core/EditorEventBus';
+import { EventCleanup } from '../base/infrastructure/EventCleanup';
+import { TimerManager } from '../base/infrastructure/TimerManager';
 
 
 export interface ChatNavItem {

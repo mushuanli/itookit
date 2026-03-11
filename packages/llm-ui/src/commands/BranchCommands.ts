@@ -1,8 +1,8 @@
 // @file: llm-ui/commands/BranchCommands.ts
 
-import { Command } from '../core/Command';
+import { Command } from '../base/core/Command';
 import { Toast, showConfirmDialog } from '@itookit/common';
-import type { BranchItem } from '../core/types';
+import type { BranchItem } from '../base/core/types';
 
 export class CreateBranchCommand extends Command<{ sourceNodeId: string }> {
     protected readonly name = 'Create Branch';

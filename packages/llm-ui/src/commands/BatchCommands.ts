@@ -1,7 +1,8 @@
 // @file: llm-ui/commands/BatchCommands.ts
 
-import { Command } from '../core/Command';
+import { Command } from '../base/core/Command';
 import { Toast, showConfirmDialog } from '@itookit/common';
+import { extractExecutionOutput } from '../utils/textUtils';
 
 export class BatchDeleteCommand extends Command<{ ids: string[] }> {
     protected name = 'Batch Delete';
@@ -48,7 +49,7 @@ export class BatchCopyCommand extends Command<{ ids: string[] }> {
                 if (!s) return null;
                 let text = s.content || '';
                 if (s.role === 'assistant' && s.executionRoot) {
-                    text = this.extractOutput(s.executionRoot);
+                    text = extractExecutionOutput(s.executionRoot);
                 }
                 const role = s.role === 'user' ? 'User' : 'Assistant';
                 const time = new Date(s.timestamp).toLocaleString();
@@ -58,16 +59,5 @@ export class BatchCopyCommand extends Command<{ ids: string[] }> {
 
         await navigator.clipboard.writeText(content.join('\n\n---\n\n'));
         Toast.success(`Copied ${ids.length} messages`);
-    }
-
-    private extractOutput(node: any): string {
-        let output = node.data?.output || '';
-        if (node.children?.length > 0) {
-            for (const child of node.children) {
-                const childOutput = this.extractOutput(child);
-                if (childOutput) output += '\n\n' + childOutput;
-            }
-        }
-        return output.trim();
     }
 }

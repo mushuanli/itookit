@@ -1,6 +1,6 @@
 // @file: llm-ui/helpers/EventBinder.ts
 
-import { EventCleanup } from '../utils/EventCleanup';
+import { EventCleanup } from '../base/infrastructure/EventCleanup';
 
 export interface EventBinderCallbacks {
     onToggleSidebar: () => void;

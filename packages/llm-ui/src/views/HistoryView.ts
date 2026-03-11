@@ -1,14 +1,14 @@
-// @file: llm-ui/components/HistoryView.ts
+// @file: llm-ui/views/HistoryView.ts
 
 import { SessionGroup, OrchestratorEvent } from '@itookit/llm-engine';
 import { ISessionEngine } from '@itookit/common';
-import { CollapseStateMap, NodeActionCallback } from '../core/types';
-import { EditorEventBus } from '../core/EditorEventBus';
-import { ScrollController } from '../utils/ScrollController';
-import { ContentResizeTracker } from '../utils/ContentResizeTracker';
-import { EventBatchProcessor, BatchedEvents } from '../utils/EventBatchProcessor';
+import { CollapseStateMap, NodeActionCallback } from '../base/core/types';
+import { EditorEventBus } from '../base/core/EditorEventBus';
+import { ScrollController } from '../base/infrastructure/ScrollController';
+import { ContentResizeTracker } from '../base/infrastructure/ContentResizeTracker';
+import { EventBatchProcessor, BatchedEvents } from '../base/infrastructure/EventBatchProcessor';
 import { ErrorTemplates } from './templates/ErrorTemplates';
-import { TimerManager } from '../utils/TimerManager';
+import { TimerManager } from '../base/infrastructure/TimerManager';
 
 import { SessionRenderer, RendererContext } from './history/SessionRenderer';
 import { StreamController } from './history/StreamController';

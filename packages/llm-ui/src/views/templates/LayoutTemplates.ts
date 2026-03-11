@@ -1,7 +1,8 @@
-// @file: llm-ui/components/templates/LayoutTemplates.ts
+// @file: llm-ui/views/templates/LayoutTemplates.ts
 import { escapeHTML } from '@itookit/common';
 
 export const LayoutTemplates = {
+
     renderWorkspace: (currentTitle: string) => `
         <div class="llm-workspace-titlebar">
             <div class="llm-workspace-titlebar__left">
@@ -104,5 +105,29 @@ export const LayoutTemplates = {
         <div class="llm-ui-banner llm-ui-banner--error">
             Error: ${escapeHTML(message)}
         </div>
-    `
+    `,
+
+    collapseIcon: () => {
+        return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="4 14 10 14 10 20"></polyline>
+            <polyline points="20 10 14 10 14 4"></polyline>
+        </svg>`;
+    },
+
+    expandIcon: () => {
+        return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="15 3 21 3 21 9"></polyline>
+            <polyline points="9 21 3 21 3 15"></polyline>
+            <line x1="21" y1="3" x2="14" y2="10"></line>
+            <line x1="3" y1="21" x2="10" y2="14"></line>
+        </svg>`;
+    },
+
+    chevronDown: () => {
+        return '<polyline points="6 9 12 15 18 9"></polyline>';
+    },
+
+    chevronUp: () => {
+        return '<polyline points="18 15 12 9 6 15"></polyline>';
+    }
 };

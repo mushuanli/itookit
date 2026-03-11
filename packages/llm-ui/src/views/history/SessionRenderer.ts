@@ -1,4 +1,4 @@
-// @file: llm-ui/components/history/SessionRenderer.ts
+// @file: llm-ui/views/history/SessionRenderer.ts
 
 import { SessionGroup, ExecutionNode } from '@itookit/llm-engine';
 import { MDxController } from '../mdx/MDxController';
@@ -6,7 +6,8 @@ import { NodeRenderer } from '../NodeRenderer';
 import { NodeTemplates } from '../templates/NodeTemplates';
 import { LayoutTemplates } from '../templates/LayoutTemplates';
 import type { ISessionEngine } from '@itookit/common';
-import { TimerManager } from '../../utils/TimerManager';
+import { TimerManager } from '../../base/infrastructure/TimerManager';
+import { getPreviewText } from '../../utils/textUtils';
 
 export interface RendererContext {
     nodeId?: string;
@@ -247,9 +248,7 @@ export class SessionRenderer {
     // ================================================================
 
     getPreviewText(content: string): string {
-        if (!content) return '';
-        let plain = content.replace(/[\r\n]+/g, ' ').replace(/[*#`_~[\]()]/g, '').trim();
-        return plain.length > 60 ? plain.substring(0, 60) + '...' : plain;
+        return getPreviewText(content, 60);
     }
 
     /**
