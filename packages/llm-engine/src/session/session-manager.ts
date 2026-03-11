@@ -410,10 +410,13 @@ export class SessionManager {
         });
 
         if (autoRerun && session?.role === 'user') {
-            // 重新加载数据（editMessage 可能创建了新 branch）
             await this.reloadSessionData(nodeId, sessionId, state);
 
-            await this.resubmitFromUser(session, 'default', runtime);
+            // ✅ 修复：自动解析原消息关联的 agentId
+            const originalAgentId = this.resolveAgentFromResponses(state, messageId);
+            const agentId = this.resolveAgentId(undefined, originalAgentId, 'default');
+
+            await this.resubmitFromUser(session, agentId, runtime);
         }
     }
 

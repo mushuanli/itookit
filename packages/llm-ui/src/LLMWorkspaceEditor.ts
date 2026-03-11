@@ -21,13 +21,12 @@ import { EventBinder } from './helpers/EventBinder';
 import { EditorEventBus } from './base/core/EditorEventBus';
 import { Command, CommandContext } from './base/core/Command';
 import { CommandRegistry } from './base/core/CommandRegistry';
-import { SendMessageCommand } from './commands/SendMessageCommand';
-import { SwitchBranchByOffsetCommand } from './commands/BranchCommands';
 import {
+    SendMessageCommand, SwitchBranchByOffsetCommand,
     RetryCommand, DeleteMessageCommand, EditAndRetryCommand,
     ResendCommand, SiblingSwitchCommand,
-} from './commands/NodeCommands';
-import { CopyAllCommand, PrintCommand, ToggleAllFoldCommand } from './commands/WorkspaceCommands';
+    CopyAllCommand, PrintCommand, ToggleAllFoldCommand
+} from './commands/';
 import { ErrorHandler } from './utils/errorHandler';
 import { EventCleanup } from './base/infrastructure/EventCleanup';
 import { TimerManager } from './base/infrastructure/TimerManager';
@@ -204,7 +203,13 @@ export class LLMWorkspaceEditor implements IEditor {
 
         // ChatInput
         const savedUIState = await this.stateManager.loadUIState();
-        const initialAgents = await this.agentLoader.loadInitialAgents();
+        const initialAgents = await this.agentLoader.loadAgents();  // ✅ 统一方法名
+
+        // ✅ 校验保存的 agentId
+        const savedAgentId = savedUIState?.input_agent_id || 'default';
+        const validAgentId = this.agentLoader.validateAgentId(
+            savedAgentId, initialAgents
+        );
 
         let initialSettings;
         if (this.currentSessionId && !this.options.isNewSession) {
@@ -221,7 +226,7 @@ export class LLMWorkspaceEditor implements IEditor {
             initialAgents,
             initialConfig: {
                 text: savedUIState?.input_text || '',
-                agentId: savedUIState?.input_agent_id || 'default',
+                agentId: validAgentId,  // ✅ 使用校验后的 ID
                 settings: initialSettings,
             },
             onConfigChange: (config) => this.handleConfigChange(config),
@@ -362,6 +367,9 @@ export class LLMWorkspaceEditor implements IEditor {
         this.sessionEventUnsub?.();
         this.sessionEventUnsub = null;
 
+        // ✅ 新增：每次加载会话时刷新 Agent 列表
+        await this.refreshAgents();
+
         const { sessionId, snapshot, title } = await this.sessionService.loadSession(
             this.options.nodeId, this.currentTitle
         );
@@ -399,6 +407,24 @@ export class LLMWorkspaceEditor implements IEditor {
         );
 
         this.statusIndicator.updateFromSnapshot(snapshot);
+    }
+
+    /**
+     * ✅ 新增：刷新 Agent 列表并校验当前选中
+     */
+    private async refreshAgents(): Promise<void> {
+        // 如果 chatInput 尚未初始化（首次 init 时），跳过
+        if (!this.chatInput) return;
+
+        const agents = await this.agentLoader.loadAgents();
+        const changed = this.chatInput.refreshAgents(
+            agents,
+            (id, list) => this.agentLoader.validateAgentId(id, list)
+        );
+
+        if (changed) {
+            this.bus.emit('state:inputChanged', {});
+        }
     }
 
     // ================================================================

@@ -2,12 +2,13 @@
 
 import { SessionGroup, ExecutionNode } from '@itookit/llm-engine';
 import { MDxController } from '../mdx/MDxController';
-import { NodeRenderer } from '../NodeRenderer';
+import { NodeRenderer } from './NodeRenderer';
 import { NodeTemplates } from '../templates/NodeTemplates';
 import { LayoutTemplates } from '../templates/LayoutTemplates';
 import type { ISessionEngine } from '@itookit/common';
 import { TimerManager } from '../../base/infrastructure/TimerManager';
 import { getPreviewText } from '../../utils/textUtils';
+import { IconResolver } from '../../utils/iconResolver';
 
 export interface RendererContext {
     nodeId?: string;
@@ -78,13 +79,18 @@ export class SessionRenderer {
         wrapper.dataset.sessionId = group.id;
 
         if (group.role === 'user') {
-            const preview = this.getPreviewText(group.content || '');
+            const preview = getPreviewText(group.content || '');
             wrapper.innerHTML = NodeTemplates.renderUserBubble(group, preview, isCollapsed);
             this.container.appendChild(wrapper);
             this.mountUserEditor(wrapper, group);
         } else {
+            // ✅ 修复：动态提取图标
+            const icon = group.executionRoot
+                ? IconResolver.getIcon(group.executionRoot)
+                : '🤖';
+
             wrapper.innerHTML = `
-                <div class="llm-ui-avatar">🤖</div>
+                <div class="llm-ui-avatar">${icon}</div>
                 <div class="llm-ui-execution-root" id="container-${group.id}"></div>
             `;
             this.container.appendChild(wrapper);
@@ -142,7 +148,7 @@ export class SessionRenderer {
             onChange: (text) => {
                 this.onContentChange?.(group.id, text, 'user');
                 const previewEl = wrapper.querySelector('.llm-ui-header-preview');
-                if (previewEl) previewEl.textContent = this.getPreviewText(text);
+                if (previewEl) previewEl.textContent = getPreviewText(text);
             },
             nodeId: this.context.nodeId,
             ownerNodeId: this.context.ownerNodeId,
@@ -246,10 +252,6 @@ export class SessionRenderer {
     // ================================================================
     // 工具方法
     // ================================================================
-
-    getPreviewText(content: string): string {
-        return getPreviewText(content, 60);
-    }
 
     /**
      * 获取指定 session 关联的所有编辑器 ID
