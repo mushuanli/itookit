@@ -1,6 +1,5 @@
-// @file llm-ui/components/ChatInput.ts
+// @file llm-ui/views/ChatInputView.ts
 
-// @file: llm-ui/components/ChatInput.ts
 
 import { ChatInputTemplates } from './templates/ChatInputTemplates';
 

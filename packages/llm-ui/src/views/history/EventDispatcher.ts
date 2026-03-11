@@ -1,14 +1,14 @@
-// @file: llm-ui/components/history/EventDispatcher.ts
+// @file: llm-ui/views/history/EventDispatcher.ts
 
-import { EventCleanup } from '../../utils/EventCleanup';
-import { TimerManager } from '../../utils/TimerManager';
+import { EventCleanup } from '../../base/infrastructure/EventCleanup';
+import { TimerManager } from '../../base/infrastructure/TimerManager';
 import { showConfirmDialog } from '@itookit/common';
 import type { SessionRenderer } from './SessionRenderer';
 import type { StreamController } from './StreamController';
 import type { CollapseController } from './CollapseController';
 import type { EditController } from './EditController';
-import type { EditorEventBus } from '../../core/EditorEventBus';
-import type { NodeActionCallback, NodeAction } from '../../core/types';
+import type { EditorEventBus } from '../../base/core/EditorEventBus';
+import type { NodeActionCallback, NodeAction } from '../../base/core/types';
 
 /**
  * 事件委托分发器

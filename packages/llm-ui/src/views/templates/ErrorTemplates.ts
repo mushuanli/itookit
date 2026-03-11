@@ -1,4 +1,4 @@
-// @file: llm-ui/components/templates/ErrorTemplates.ts
+// @file: llm-ui/views/templates/ErrorTemplates.ts
 
 import { escapeHTML } from '@itookit/common';
 

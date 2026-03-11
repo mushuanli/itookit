@@ -1,9 +1,9 @@
 // @file: llm-ui/commands/SendMessageCommand.ts
 
-import { Command } from '../core/Command';
+import { Command } from '../base/core/Command';
 import { Toast } from '@itookit/common';
 import { ErrorHandler } from '../utils/errorHandler';
-import type { ChatOverrides } from '../components/ChatInput';
+import type { ChatOverrides } from '../views/ChatInputView';
 
 export interface SendMessageParams {
     text: string;

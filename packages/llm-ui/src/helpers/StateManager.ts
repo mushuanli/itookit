@@ -1,8 +1,8 @@
 // @file: llm-ui/helpers/StateManager.ts
 
-import { StateService, UIState } from '../services';
-import { ChatInput } from '../components/ChatInput';
-import { CollapseStateMap } from '../core/types';
+import { StateService, UIState } from '../base/services';
+import { ChatInput } from '../views/ChatInputView';
+import { CollapseStateMap } from '../base/core/types';
 import { createDebouncedSave, DebouncedFn } from '../utils/debounce';
 import { SessionManager } from '@itookit/llm-engine';
 import { ErrorHandler } from '../utils/errorHandler';

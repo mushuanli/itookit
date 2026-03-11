@@ -1,6 +1,6 @@
-// @file: llm-ui/components/NodeRenderer.ts
+// @file: llm-ui/views/NodeRenderer.ts
 
-import {escapeHTML} from '@itookit/common';
+import { escapeHTML } from '@itookit/common';
 import { ExecutionNode } from '@itookit/llm-engine';
 import { NodeTemplates } from './templates/NodeTemplates';
 
@@ -23,9 +23,9 @@ class IconResolver {
 
         // 2. 其次检查 agentId
         if (node.data.metaInfo?.agentId === 'default') return '🤖';
-        
+
         switch (node.executorType) {
-            case 'agent': return '🤖'; 
+            case 'agent': return '🤖';
             case 'tool': return '🔧';
             case 'composite': return '🔀';  // 原 router
             case 'http': return '🌐';
@@ -45,11 +45,11 @@ class IconResolver {
 export class NodeRenderer {
     static create(node: ExecutionNode): RenderResult {
         const el = document.createElement('div');
-        
+
         // 解析 UI 属性
         const icon = IconResolver.getIcon(node);
         const layoutClass = IconResolver.getLayoutClass(node);
-        
+
         // BEM: llm-ui-node llm-ui-node--[type] [layout]
         el.className = `llm-ui-node llm-ui-node--${node.executorType} ${layoutClass}`;
         el.dataset.id = node.id;
@@ -74,7 +74,7 @@ export class NodeRenderer {
         const hasThought = !!(node.data.thought && node.data.thought.length > 0);
         const previewText = node.data.output ? node.data.output.substring(0, 50).replace(/\n/g, ' ') : '';
         // ✅ 检查是否有错误信息需要渲染
-        const errorHtml = node.status === 'failed' && node.data.error 
+        const errorHtml = node.status === 'failed' && node.data.error
             ? `<div class="llm-ui-node__error-embed">
                  ⚠️ ${escapeHTML(node.data.error)}
                </div>`

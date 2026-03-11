@@ -1,6 +1,6 @@
 // @file: llm-ui/commands/FoldCommands.ts
 
-import { Command } from '../core/Command';
+import { Command } from '../base/core/Command';
 import type { ErrorSeverity } from '../utils/errorHandler';
 
 export class FoldAllCommand extends Command {

@@ -1,7 +1,7 @@
-// @file: llm-ui/components/templates/ChatInputTemplates.ts
+// @file: llm-ui/views/templates/ChatInputTemplates.ts
 
 import { escapeHTML } from '@itookit/common';
-import { ExecutorOption, ModelOption } from '../ChatInput';
+import { ExecutorOption, ModelOption } from '../ChatInputView';
 
 export const ChatInputTemplates = {
 
