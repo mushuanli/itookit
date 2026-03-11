@@ -2,6 +2,7 @@
 
 import { ExecutionNode, SessionGroup } from '@itookit/llm-engine';
 import { escapeHTML } from '@itookit/common';
+import { LayoutTemplates } from './LayoutTemplates';
 
 export class NodeTemplates {
     /**
@@ -90,14 +91,16 @@ export class NodeTemplates {
     ): string {
         const collapsedClass = isCollapsed ? 'is-collapsed' : '';
         const timeStr = this.formatTime(group.timestamp);
-
-        const siblingIndex = group.siblingIndex ?? 0;
-        const siblingCount = group.siblingCount ?? 1;
         const branchHtml = this.renderBranchNav(
-            siblingIndex,
-            siblingCount,
+            group.siblingIndex ?? 0,
+            group.siblingCount ?? 1,
             group.branchInfo?.name,
         );
+
+        // ✅ 使用共享 chevron
+        const chevron = isCollapsed
+            ? LayoutTemplates.chevronDown()
+            : LayoutTemplates.chevronUp();
 
         return `
         <div class="llm-ui-bubble llm-ui-bubble--user ${collapsedClass}">
@@ -116,9 +119,7 @@ export class NodeTemplates {
                      <button class="llm-icon-btn" data-action="copy" title="Copy">📋</button>
                      <button class="llm-icon-btn" data-action="collapse" title="Toggle">
                         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-                            ${isCollapsed
-                ? '<polyline points="6 9 12 15 18 9"></polyline>'
-                : '<polyline points="18 15 12 9 6 15"></polyline>'}
+                            ${chevron}
                         </svg>
                      </button>
                 </div>
@@ -132,8 +133,7 @@ export class NodeTemplates {
                     <button class="llm-btn" data-action="cancel-edit">Cancel</button>
                 </div>
             </div>
-        </div>
-    `;
+        </div>`;
     }
 
     static renderAgentHeader(
@@ -143,12 +143,9 @@ export class NodeTemplates {
         isCollapsed: boolean = false,
     ): string {
         const timeStr = this.formatTime(node.startTime);
-
-        const siblingIndex = node.data.metaInfo?.siblingIndex ?? 0;
-        const siblingCount = node.data.metaInfo?.siblingCount ?? 1;
         const branchHtml = this.renderBranchNav(
-            siblingIndex,
-            siblingCount,
+            node.data.metaInfo?.siblingIndex ?? 0,
+            node.data.metaInfo?.siblingCount ?? 1,
             node.data.metaInfo?.branchName,
         );
 
@@ -161,6 +158,11 @@ export class NodeTemplates {
         const iconHtml = isClickable
             ? `<div class="llm-ui-node__icon llm-ui-node__icon--clickable" title="Edit Agent" data-agent-id="${escapeHTML(agentId)}">${icon}</div>`
             : `<div class="llm-ui-node__icon">${icon}</div>`;
+
+        // ✅ 使用共享 chevron
+        const chevron = isCollapsed
+            ? LayoutTemplates.chevronDown()
+            : LayoutTemplates.chevronUp();
 
         return `
             <div class="llm-ui-node__header">
@@ -188,9 +190,7 @@ export class NodeTemplates {
                     <button class="llm-icon-btn" data-action="copy" title="Copy">📋</button>
                     <button class="llm-icon-btn" data-action="collapse" title="Toggle">
                         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-                            ${isCollapsed
-                ? '<polyline points="6 9 12 15 18 9"></polyline>'
-                : '<polyline points="18 15 12 9 6 15"></polyline>'}
+                            ${chevron}
                         </svg>
                     </button>
                 </div>
@@ -213,6 +213,8 @@ export class NodeTemplates {
         const inputStr = JSON.stringify(node.data.input || {}, null, 2);
         const resultStr = JSON.stringify(node.data.toolCall?.result || {}, null, 2);
 
+        const chevron = LayoutTemplates.chevronUp();
+
         return `
             <div class="llm-ui-node__header">
                 <div class="llm-ui-node__icon">${icon}</div>
@@ -221,7 +223,7 @@ export class NodeTemplates {
                 <div class="llm-ui-actions">
                     <button class="llm-icon-btn" data-action="collapse">
                         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-                            <polyline points="18 15 12 9 6 15"></polyline>
+                            ${chevron}
                         </svg>
                     </button>
                 </div>

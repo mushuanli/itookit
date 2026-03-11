@@ -342,6 +342,43 @@ export class ChatInput {
         }
     }
 
+    /**
+     * ✅ 新增：刷新 Agent 列表并校验当前选中
+     *
+     * @param agents 最新的 Agent 列表
+     * @param validateAgentId 校验函数，无效时返回 fallback ID
+     * @returns 如果当前 agentId 发生了变化则返回 true
+     */
+    public refreshAgents(
+        agents: ExecutorOption[],
+        validateAgentId: (id: string, agents: ExecutorOption[]) => string
+    ): boolean {
+        const currentAgentId = this.config.agentId;
+
+        // 更新列表
+        this.updateExecutors(agents);
+
+        // 校验当前选中的 Agent 是否仍然有效
+        const validatedId = validateAgentId(currentAgentId, agents);
+        const changed = validatedId !== currentAgentId;
+
+        if (changed) {
+            this.config.agentId = validatedId;
+            this.currentAgentId = validatedId;
+            this.setExecutorValue(validatedId);
+
+            // 清除无效的 model 选择
+            this.config.settings.modelId = undefined;
+            this.modelSelect.value = '';
+            this.updateActiveBadges();
+        }
+
+        // 重新加载当前 Agent 的模型列表
+        this.loadModelsForAgent(this.currentAgentId);
+
+        return changed;
+    }
+
     // ================================================================
     // UI 同步
     // ================================================================

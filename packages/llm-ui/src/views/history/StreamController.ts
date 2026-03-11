@@ -2,7 +2,7 @@
 
 import { TimerManager } from '../../base/infrastructure/TimerManager';
 import type { SessionRenderer } from './SessionRenderer';
-
+import { getPreviewText } from '../../utils/textUtils';
 /**
  * 流式输出控制器
  *
@@ -58,7 +58,7 @@ export class StreamController {
             if (el) {
                 const previewEl = el.querySelector('.llm-ui-header-preview');
                 if (previewEl) {
-                    previewEl.textContent = this.renderer.getPreviewText(editor.content);
+                    previewEl.textContent = getPreviewText(editor.content);
                 }
             }
         });
@@ -123,7 +123,7 @@ export class StreamController {
             const editor = this.renderer.getEditor(nodeId);
             const previewEl = el.querySelector('.llm-ui-header-preview');
             if (editor && previewEl) {
-                previewEl.textContent = this.renderer.getPreviewText(editor.content);
+                previewEl.textContent = getPreviewText(editor.content);
             }
         }
 

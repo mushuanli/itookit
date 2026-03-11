@@ -19,12 +19,14 @@ export class RetryCommand extends Command<{ nodeId: string }> {
         if (!canRetry.allowed) throw new Error(canRetry.reason || 'Cannot retry');
 
         this.ctx.chatInput.setLoading(true);
-        const agentId = this.ctx.chatInput.getSelectedExecutor() || 'default';
 
+        // ✅ 修复：不传 agentId，让 engine 的 resolveAgentId 链自动处理
+        // resendUserMessage(id, undefined, undefined) 会触发：
+        //   resolveAgentId(undefined, resolveAgentFromResponses(...), 'default')
         if (session.role === 'user') {
-            await this.ctx.sessionManager.resendUserMessage(session.id, undefined, agentId);
+            await this.ctx.sessionManager.resendUserMessage(session.id);
         } else {
-            await this.ctx.sessionManager.retryGeneration(session.id, undefined, agentId, true);
+            await this.ctx.sessionManager.retryGeneration(session.id);
         }
     }
 
@@ -78,6 +80,8 @@ export class EditAndRetryCommand extends Command<{ nodeId: string }> {
         if (!session || session.role !== 'user') return;
 
         this.ctx.chatInput.setLoading(true);
+
+        // ✅ 修复：不传 agentId，让 engine 自动解析
         await this.ctx.sessionManager.editMessage(nodeId, session.content || '', true);
     }
 }
@@ -87,8 +91,9 @@ export class ResendCommand extends Command<{ nodeId: string }> {
 
     protected async execute({ nodeId }: { nodeId: string }): Promise<void> {
         this.ctx.chatInput.setLoading(true);
-        const agentId = this.ctx.chatInput.getSelectedExecutor() || 'default';
-        await this.ctx.sessionManager.resendUserMessage(nodeId, undefined, agentId);
+
+        // ✅ 修复：不传 agentId，让 engine 自动解析
+        await this.ctx.sessionManager.resendUserMessage(nodeId);
     }
 }
 
