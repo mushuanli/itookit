@@ -1,6 +1,6 @@
 // @file: llm-ui/commands/NodeCommands.ts
 
-import { Command } from '../core/Command';
+import { Command } from '../base/core/Command';
 import type { ErrorSeverity } from '../utils/errorHandler';
 
 export class RetryCommand extends Command<{ nodeId: string }> {

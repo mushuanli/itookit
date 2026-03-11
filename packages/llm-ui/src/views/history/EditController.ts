@@ -1,7 +1,7 @@
-// @file: llm-ui/components/history/EditController.ts
+// @file: llm-ui/views/history/EditController.ts
 
 import { MDxController } from '../mdx/MDxController';
-import type { NodeActionCallback } from '../../core/types';
+import type { NodeActionCallback } from '../../base/core/types';
 
 /**
  * 编辑模式控制器

@@ -5,12 +5,10 @@ import { EditorEventBus, EditorBusEvents } from './EditorEventBus';
 
 import {
     CreateBranchCommand, SwitchBranchCommand, SwitchBranchByIdCommand,
-    RenameBranchCommand, DeleteBranchCommand
-} from '../commands/BranchCommands';
-import { BatchDeleteCommand, BatchCopyCommand } from '../commands/BatchCommands';
-import { CopySessionContentCommand } from '../commands/ContentCommands';
-import { FoldAllCommand, UnfoldAllCommand, ToggleSessionFoldCommand } from '../commands/FoldCommands';
-import { ScrollToSessionCommand } from '../commands/NavigationCommands';
+    RenameBranchCommand, DeleteBranchCommand, BatchDeleteCommand, BatchCopyCommand,
+    CopySessionContentCommand, FoldAllCommand, UnfoldAllCommand, ToggleSessionFoldCommand,
+    ScrollToSessionCommand
+} from '../../commands/';
 
 type CommandFactory = (ctx: CommandContext) => Command<any, any>;
 

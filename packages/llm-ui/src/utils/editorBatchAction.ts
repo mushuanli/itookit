@@ -1,6 +1,6 @@
 // @file: llm-ui/utils/editorBatchAction.ts
 
-import { MDxController } from '../components/mdx/MDxController';
+import { MDxController } from '../views/mdx/MDxController';
 
 /**
  * 对一组编辑器执行批量操作

@@ -1,12 +1,12 @@
 // @file: llm-ui/core/Command.ts
 
-import { ErrorHandler, ErrorSeverity } from '../utils/errorHandler';
+import { ErrorHandler, ErrorSeverity } from '../../utils/errorHandler';
 import type { SessionManager } from '@itookit/llm-engine';
 import type { SessionService } from '../services/SessionService';
 import type { StateService } from '../services/StateService';
 import type { AssetService } from '../services/AssetService';
-import type { HistoryView } from '../components/HistoryView';
-import type { ChatInput } from '../components/ChatInput';
+import type { HistoryView } from '../../views/HistoryView';
+import type { ChatInput } from '../../views/ChatInputView';
 import type { EditorEventBus } from './EditorEventBus';
 
 /**

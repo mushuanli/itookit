@@ -1,8 +1,9 @@
-// @file: llm-ui/components/history/CollapseController.ts
+// @file: llm-ui/views/history/CollapseController.ts
 
-import { CollapseStateMap } from '../../core/types';
+import { CollapseStateMap } from '../../base/core/types';
 import type { SessionRenderer } from './SessionRenderer';
-import type { EditorEventBus } from '../../core/EditorEventBus';
+import type { EditorEventBus } from '../../base/core/EditorEventBus';
+import { LayoutTemplates } from '../templates/LayoutTemplates';
 
 /**
  * 折叠状态控制器
@@ -195,8 +196,8 @@ export class CollapseController {
         const svg = btn.querySelector('svg');
         if (svg) {
             svg.innerHTML = isCollapsed
-                ? '<polyline points="6 9 12 15 18 9"></polyline>'
-                : '<polyline points="18 15 12 9 6 15"></polyline>';
+                ? LayoutTemplates.chevronDown()
+                : LayoutTemplates.chevronUp();
         }
     }
 

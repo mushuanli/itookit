@@ -1,7 +1,7 @@
-// @file: llm-ui/components/templates/BranchIndicatorTemplates.ts
+// @file: llm-ui/views/templates/BranchIndicatorTemplates.ts
 
 import { escapeHTML } from '@itookit/common';
-import { BranchItem } from '../../core/types';
+import { BranchItem } from '../../base/core/types';
 
 export const BranchIndicatorTemplates = {
 

@@ -1,6 +1,6 @@
-// @file: llm-ui/components/history/StreamController.ts
+// @file: llm-ui/views/history/StreamController.ts
 
-import { TimerManager } from '../../utils/TimerManager';
+import { TimerManager } from '../../base/infrastructure/TimerManager';
 import type { SessionRenderer } from './SessionRenderer';
 
 /**

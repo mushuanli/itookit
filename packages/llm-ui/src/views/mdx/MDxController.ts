@@ -1,7 +1,7 @@
-// @file llm-ui/components/mdx/MDxController.ts
+// @file llm-ui/views/mdx/MDxController.ts
 import { createMDxEditor, MDxEditor } from '@itookit/mdxeditor';
 import type { ISessionEngine, CollapseExpandResult } from '@itookit/common';
-import { TimerManager } from '../../utils/TimerManager';
+import { TimerManager } from '../../base/infrastructure/TimerManager';
 
 export interface MDxControllerOptions {
     readOnly?: boolean;

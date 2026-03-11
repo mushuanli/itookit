@@ -1,7 +1,7 @@
 // @file: llm-ui/helpers/AgentLoader.ts
 
 import { IAgentService, SessionManager } from '@itookit/llm-engine';
-import { ExecutorOption, ModelOption } from '../components/ChatInput';
+import { ExecutorOption, ModelOption } from '../views/ChatInputView';
 
 export class AgentLoader {
     constructor(

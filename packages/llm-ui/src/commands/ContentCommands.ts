@@ -1,7 +1,8 @@
 // @file: llm-ui/commands/ContentCommands.ts
 
-import { Command } from '../core/Command';
+import { Command } from '../base/core/Command';
 import { Toast } from '@itookit/common';
+import { extractExecutionOutput } from '../utils/textUtils';
 
 export class CopySessionContentCommand extends Command<{ sessionId: string }> {
     protected name = 'Copy Session Content';
@@ -13,19 +14,10 @@ export class CopySessionContentCommand extends Command<{ sessionId: string }> {
 
         let content = session.content || '';
         if (session.role === 'assistant' && session.executionRoot) {
-            content = this.extractOutput(session.executionRoot);
+            content = extractExecutionOutput(session.executionRoot);
         }
 
         await navigator.clipboard.writeText(content);
         Toast.success('Copied to clipboard');
-    }
-
-    private extractOutput(node: any): string {
-        let output = node.data?.output || '';
-        for (const child of node.children || []) {
-            const childOutput = this.extractOutput(child);
-            if (childOutput) output += '\n\n' + childOutput;
-        }
-        return output.trim();
     }
 }
