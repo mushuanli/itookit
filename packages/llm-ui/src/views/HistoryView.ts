@@ -56,9 +56,10 @@ export class HistoryView {
 
     // UI 状态
     private newContentIndicator: HTMLElement | null = null;
-
-    // 事件总线
     private bus?: EditorEventBus;
+
+    // ✅ 新增：追踪流式期间是否需要抑制 onScroll
+    private suppressScrollHighlight = false;
 
     constructor(container: HTMLElement, options: HistoryViewOptions) {
         this.container = container;
@@ -75,8 +76,22 @@ export class HistoryView {
             container, ctx, options.onContentChange
         );
 
-        // 2. 创建子控制器
-        this.stream = new StreamController(container, this.renderer);
+        // 2. 滚动控制器
+        this.scrollController = new ScrollController(container, {
+            onUserScrolledUp: () => this.showNewContentIndicator(),
+            onUserScrolledDown: () => this.hideNewContentIndicator(),
+            onScroll: () => {
+                // ✅ 流式期间抑制高亮更新，避免无意义的 DOM 查询
+                if (!this.suppressScrollHighlight) {
+                    options.onScroll?.();
+                }
+            },
+        });
+
+        // 3. 创建子控制器（StreamController 接收 scrollController）
+        this.stream = new StreamController(
+            container, this.renderer, this.scrollController
+        );
 
         this.collapse = new CollapseController(
             container, this.renderer, options.bus, options.initialCollapseStates
@@ -87,31 +102,22 @@ export class HistoryView {
         );
 
         this.dispatcher = new EventDispatcher(
-            container,
-            this.renderer,
-            this.stream,
-            this.collapse,
-            this.edit,
-            options.bus,
-            options.onNodeAction,
+            container, this.renderer, this.stream,
+            this.collapse, this.edit, options.bus, options.onNodeAction,
         );
 
-        // 3. 滚动 & 内容高度追踪
-        this.scrollController = new ScrollController(container, {
-            onUserScrolledUp: () => this.showNewContentIndicator(),
-            onUserScrolledDown: () => this.hideNewContentIndicator(),
-            onScroll: () => options.onScroll?.(),
-        });
-
-        // ✅ 改动：统一内容高度追踪
+        // 4. ContentResizeTracker — 仅非流式期间使用
+        // ✅ 流式期间由 StreamRenderPipeline 接管高度检查
         this.resizeTracker = new ContentResizeTracker(
             container,
             (newH, oldH) => {
-                if (newH > oldH) this.scrollController.handleContentResize();
+                if (newH > oldH && !this.stream.isStreamingMode) {
+                    this.scrollController.handleContentResize();
+                }
             }
         );
 
-        // ✅ 改动：统一事件批处理
+        // 5. 事件批处理
         this.eventProcessor = new EventBatchProcessor(
             (batched) => this.handleBatchedEvents(batched),
             (event) => this.processEventImmediate(event),
@@ -271,18 +277,40 @@ export class HistoryView {
 
     enterStreamingMode(): void {
         this.stream.enter();
-        this.resizeTracker.enterStreamingMode();
+        this.suppressScrollHighlight = true;
+
+        // ✅ 不再需要通知 resizeTracker 进入流式模式
+        // Pipeline 已接管高度检查
     }
 
     exitStreamingMode(): void {
         this.stream.exit();
-        this.resizeTracker.exitStreamingMode();
+        this.suppressScrollHighlight = false;
 
         if (!this.scrollController.isUserScrolledUp) {
             this.scrollController.scrollToBottom(true);
         } else {
             this.showNewContentIndicator();
         }
+    }
+
+    // ================================================================
+    // 公开 API — 智能折叠
+    // ================================================================
+
+    /**
+     * ✅ 智能切换全部折叠/展开
+     * @returns true 如果操作后处于折叠状态
+     */
+    toggleAllFold(): boolean {
+        return this.collapse.toggleAll();
+    }
+
+    /**
+     * ✅ 查询当前是否有展开的 assistant 会话
+     */
+    shouldShowCollapseIcon(): boolean {
+        return this.collapse.shouldCollapse();
     }
 
     // ================================================================
@@ -413,10 +441,14 @@ export class HistoryView {
     }
 
     private handleBatchedEvents(batched: BatchedEvents): void {
-        // 1. 合并的 chunk
+        // 1. 合并的 chunk — 通过 StreamController 积累
         for (const [nodeId, chunks] of batched.chunks) {
-            if (chunks.thought) this.stream.updateContent(nodeId, chunks.thought, 'thought');
-            if (chunks.output) this.stream.updateContent(nodeId, chunks.output, 'output');
+            if (chunks.thought) {
+                this.stream.updateContent(nodeId, chunks.thought, 'thought');
+            }
+            if (chunks.output) {
+                this.stream.updateContent(nodeId, chunks.output, 'output');
+            }
         }
 
         // 2. 状态变更
@@ -571,8 +603,10 @@ export class HistoryView {
         this.edit.destroy();
         this.renderer.clear();
 
-        // 重建 StreamController（因为 renderer 被清空了）
-        this.stream = new StreamController(this.container, this.renderer);
+        // 重建 StreamController
+        this.stream = new StreamController(
+            this.container, this.renderer, this.scrollController
+        );
     }
 
     destroy(): void {
