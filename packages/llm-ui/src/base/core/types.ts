@@ -1,11 +1,10 @@
-// @file: llm-ui/core/types.ts
+// @file: llm-ui/base/core/types.ts
 
 export type NodeAction =
-    | 'retry'
+    | 'regenerate'        // ✅ 统一：替代 retry + resend
     | 'delete'
     | 'edit'
-    | 'edit-and-retry'
-    | 'resend'
+    | 'edit-and-retry'    // 编辑后自动重跑（保留，内部调用 editMessage(autoRerun=true)）
     | 'prev-sibling'
     | 'next-sibling';
 

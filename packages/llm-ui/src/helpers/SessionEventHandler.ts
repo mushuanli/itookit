@@ -27,6 +27,7 @@ export interface SessionEventHandlerDeps {
 export class SessionEventHandler {
     private static readonly BRANCH_EVENTS = new Set([
         'branch_created', 'branch_switched', 'branch_deleted', 'branch_renamed',
+        'regenerate_started', 'regenerate_completed',
     ]);
     private static readonly BRANCH_RENDER_EVENTS = new Set([
         'branch_switched', 'branch_created',
@@ -56,16 +57,35 @@ export class SessionEventHandler {
             this.deps.statusIndicator.update('failed');
         }
 
-        // 3. 分支事件统一处理
+        // 3. 重新生成事件处理
+        if (event.type === 'regenerate_started') {
+            historyView.clearErrors();
+            historyView.enterStreamingMode();
+            // 分支指示器闪烁提示
+            this.deps.branchIndicator.flash();
+        }
+
+        if (event.type === 'regenerate_completed') {
+            // 刷新分支指示器（新分支已创建）
+            this.deps.branchIndicator.refresh().then(() => {
+                this.deps.floatingNav?.refresh();
+            });
+        }
+
+        // 4. 分支事件统一处理
         if (SessionEventHandler.BRANCH_EVENTS.has(event.type)) {
             if (SessionEventHandler.BRANCH_RENDER_EVENTS.has(event.type)) {
                 historyView.renderFull(sessionManager.getSessions());
                 historyView.scrollToBottom(true);
                 this.deps.branchIndicator.flash();
             }
-            this.deps.branchIndicator.refresh().then(() => {
-                this.deps.floatingNav?.refresh();
-            });
+
+            // regenerate 事件的分支刷新在上面单独处理，避免重复
+            if (event.type !== 'regenerate_started' && event.type !== 'regenerate_completed') {
+                this.deps.branchIndicator.refresh().then(() => {
+                    this.deps.floatingNav?.refresh();
+                });
+            }
         }
     }
 

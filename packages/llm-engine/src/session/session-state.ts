@@ -52,7 +52,7 @@ export class SessionState {
     }
 
     /**
-     * 查找指定 assistant 消息之前的 user 消息
+     * 查找指定 assistant 消息之前最近的 user 消息
      */
     findUserMessageBefore(assistantId: string): SessionGroup | undefined {
         const index = this.sessions.findIndex(s => s.id === assistantId);
@@ -64,6 +64,40 @@ export class SessionState {
             }
         }
         return undefined;
+    }
+
+    /**
+     * 查找指定 user 消息之后的 assistant 消息列表
+     * 遇到下一个 user 消息时停止
+     */
+    findAssistantMessagesAfter(userMessageId: string): SessionGroup[] {
+        const index = this.sessions.findIndex(s => s.id === userMessageId);
+        if (index === -1) return [];
+
+        const assistants: SessionGroup[] = [];
+        for (let i = index + 1; i < this.sessions.length; i++) {
+            if (this.sessions[i].role === 'user') break;
+            if (this.sessions[i].role === 'assistant') {
+                assistants.push(this.sessions[i]);
+            }
+        }
+        return assistants;
+    }
+
+    /**
+     * 获取指定 user 消息关联的第一个 assistant 的 agent ID
+     */
+    getOriginalAgentId(userMessageId: string): string | null {
+        const assistants = this.findAssistantMessagesAfter(userMessageId);
+        if (assistants.length === 0) return null;
+        return assistants[0].executionRoot?.executorId || null;
+    }
+
+    /**
+     * 收集 user 消息之后紧跟的 assistant ID 列表
+     */
+    collectAssistantIdsAfter(userMessageId: string): string[] {
+        return this.findAssistantMessagesAfter(userMessageId).map(s => s.id);
     }
 
     // ================================================================
@@ -78,10 +112,8 @@ export class SessionState {
         const converted = Converters.chatNodeToSessionGroup(node);
         if (!converted) return;
 
-        // 使用 persistedNodeId 作为主 ID
         converted.id = node.id;
         converted.persistedNodeId = node.id;
-
         this.sessions.push(converted);
     }
 
@@ -209,6 +241,11 @@ export class SessionState {
         if (index !== -1) {
             this.sessions.splice(index, 1);
         }
+    }
+
+    removeMessages(messageIds: string[]): void {
+        const idSet = new Set(messageIds);
+        this.sessions = this.sessions.filter(s => !idSet.has(s.id));
     }
 
     // ================================================================

@@ -20,6 +20,7 @@ import { EventDispatcher } from './history/EventDispatcher';
 export interface HistoryViewOptions {
     onContentChange?: (id: string, content: string, type: 'user' | 'node') => void;
     onNodeAction?: NodeActionCallback;
+    onCommitEdit?: (id: string, content: string) => void;
     bus?: EditorEventBus;
     nodeId?: string;
     ownerNodeId?: string;
@@ -98,7 +99,9 @@ export class HistoryView {
         );
 
         this.edit = new EditController(
-            options.onContentChange, options.onNodeAction
+            options.onContentChange,
+            options.onNodeAction,
+            options.onCommitEdit,
         );
 
         this.dispatcher = new EventDispatcher(
@@ -530,7 +533,8 @@ export class HistoryView {
                 break;
 
             case 'message_edited': {
-                const el = this.renderer.getSessionElement(event.payload.sessionId);
+                // ✅ 更新：字段名从 sessionId 改为 messageId
+                const el = this.renderer.getSessionElement(event.payload.messageId);
                 if (el) {
                     const preview = el.querySelector('.llm-ui-header-preview');
                     if (preview) {
@@ -547,8 +551,9 @@ export class HistoryView {
                 break;
 
             case 'sibling_switch': {
-                const { sessionId, newIndex, total } = event.payload;
-                const el = this.renderer.getSessionElement(sessionId);
+                // ✅ 更新：字段名从 sessionId 改为 messageId
+                const { messageId, newIndex, total } = event.payload;
+                const el = this.renderer.getSessionElement(messageId);
                 if (!el) break;
 
                 const indicator = el.querySelector('.llm-ui-branch-indicator');
@@ -561,9 +566,15 @@ export class HistoryView {
                 break;
             }
 
-            case 'retry_started':
+            // ✅ 新增：regenerate 事件处理
+            case 'regenerate_started':
                 this.clearErrors();
                 this.enterStreamingMode();
+                break;
+
+            case 'regenerate_completed':
+                // 完成事件在 SessionEventHandler 中处理分支刷新
+                // HistoryView 不需要额外处理
                 break;
         }
     }

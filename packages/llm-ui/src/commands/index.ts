@@ -6,8 +6,8 @@ export {
     RenameBranchCommand, DeleteBranchCommand, SwitchBranchByOffsetCommand
 } from './BranchCommands';
 export {
-    RetryCommand, DeleteMessageCommand, EditAndRetryCommand,
-    ResendCommand, SiblingSwitchCommand
+    RegenerateCommand, DeleteMessageCommand, EditAndRetryCommand,
+    SiblingSwitchCommand
 } from './NodeCommands';
 export { BatchDeleteCommand, BatchCopyCommand } from './BatchCommands';
 export { CopySessionContentCommand } from './ContentCommands';

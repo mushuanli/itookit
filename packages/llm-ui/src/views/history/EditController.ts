@@ -11,7 +11,10 @@ import type { NodeActionCallback } from '../../base/core/types';
  * 2. 保存原始内容用于取消
  * 3. 进入/确认/取消编辑模式
  *
- * 不负责：DOM 渲染、折叠、流式
+ * 设计要点：
+ * - 编辑期间：onChange → onContentChange → updateDraft（仅内存）
+ * - 确认编辑：onCommitEdit 或 onNodeAction('edit-and-retry')
+ * - 取消编辑：恢复原始内容
  */
 export class EditController {
     private editingNodes = new Set<string>();
@@ -20,6 +23,7 @@ export class EditController {
     constructor(
         private onContentChange?: (id: string, content: string, type: 'user' | 'node') => void,
         private onNodeAction?: NodeActionCallback,
+        private onCommitEdit?: (id: string, content: string) => void,
     ) { }
 
     isEditing(nodeId: string): boolean {
@@ -63,6 +67,12 @@ export class EditController {
         }
     }
 
+    /**
+     * 确认编辑
+     * 
+     * @param regenerate true = "Save & Run"（提交 + 重新生成），
+     *                   false = "Save Only"（仅提交）
+     */
     confirmEdit(
         nodeId: string,
         controller: MDxController,
@@ -71,16 +81,33 @@ export class EditController {
         regenerate: boolean
     ): void {
         const newContent = controller.content;
+        const originalContent = this.originalContent.get(nodeId);
+        const contentChanged = newContent !== originalContent;
 
+        // 退出编辑模式
         this.editingNodes.delete(nodeId);
         this.originalContent.delete(nodeId);
         controller.toggleEdit();
         actionsEl.style.display = 'none';
         wrapper.querySelector('[data-action="edit"]')?.classList.remove('active');
 
-        this.onContentChange?.(nodeId, newContent, 'user');
+        // 内容没有变化 → 不做任何操作
+        if (!contentChanged && !regenerate) {
+            return;
+        }
+
         if (regenerate) {
+            // "Save & Run"：
+            // 1. 先更新内存中的草稿（确保 commitEdit 拿到最新内容）
+            this.onContentChange?.(nodeId, newContent, 'user');
+            // 2. 触发 edit-and-retry 命令（内部调用 commitEdit(autoRerun=true)）
             this.onNodeAction?.('edit-and-retry', nodeId);
+        } else {
+            // "Save Only"：
+            // 仅在内容实际变化时才提交
+            if (contentChanged) {
+                this.onCommitEdit?.(nodeId, newContent);
+            }
         }
     }
 
