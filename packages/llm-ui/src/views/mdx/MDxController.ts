@@ -35,19 +35,13 @@ export class MDxController {
     // ✨ [修复 6.1] 添加 reject 函数
     private readyReject!: (reason: any) => void;
 
-    // ✅ 优化：增加节流间隔和批量阈值
-    private readonly RENDER_INTERVAL = 300;
-    private readonly BATCH_SIZE_THRESHOLD = 800;
-    private lastRenderTime: number = 0;
-    private rafId: number | null = null;
-    private renderScheduled: boolean = false;
-
     // ✅ 新增：批量缓冲
     private contentSnapshot: string = '';
-    private pendingContentLength: number = 0;
 
     // ✅ 改动：使用 TimerManager 管理所有定时器
     private timers = new TimerManager();
+
+    private pendingRender = false;
 
     constructor(
         container: HTMLElement,
@@ -198,91 +192,50 @@ export class MDxController {
     appendStream(delta: string): void {
         this.isStreaming = true;
         this.currentContent += delta;
-        this.pendingContentLength += delta.length;
 
         if (!this.isInitialized || !this.editor) {
             this.pendingChunks.push(delta);
             return;
         }
 
-        // 更智能的渲染触发条件
-        const now = Date.now();
-        const timeSinceLastRender = now - this.lastRenderTime;
-
-        // 条件1：累积足够多的内容
-        const shouldRenderBySize = this.pendingContentLength >= this.BATCH_SIZE_THRESHOLD;
-
-        // 条件2：距离上次渲染超过间隔
-        const shouldRenderByTime = timeSinceLastRender >= this.RENDER_INTERVAL;
-
-        // 条件3：内容以完整句子结束
-        const endsWithSentence = /[.!?。！？\n]$/.test(delta);
-        const shouldRenderBySentence = endsWithSentence && timeSinceLastRender >= 100;
-
-        if (shouldRenderBySize || shouldRenderByTime || shouldRenderBySentence) {
-            this.scheduleRender();
-        }
+        this.pendingRender = true;
     }
 
     /**
-     * ✅ 优化：智能渲染调度
+     * ✅ 新增：由 Pipeline 调用，执行实际渲染
+     * 将积累的内容一次性推送给编辑器
      */
-    private scheduleRender(): void {
-        if (this.renderScheduled) return;
-        this.renderScheduled = true;
-
-        // 取消之前的 RAF
-        if (this.rafId !== null) {
-            this.timers.cancelAnimationFrame(this.rafId);
-            this.rafId = null;
-        }
-
-        // ✅ 改动：统一通过 TimerManager.requestIdleCallback
-        this.timers.requestIdleCallback(
-            () => this.doRender(),
-            { timeout: this.RENDER_INTERVAL }
-        );
-    }
-
-    /**
-     * ✅ 优化：执行渲染
-     */
-    private async doRender(): Promise<void> {
-        this.renderScheduled = false;
-
-        if (!this.editor || !this.isInitialized) return;
-
-        // 检查内容是否有变化（避免无谓渲染）
+    async flushStream(): Promise<void> {
+        if (!this.pendingRender || !this.editor || !this.isInitialized) return;
         if (this.currentContent === this.contentSnapshot) return;
+
+        this.pendingRender = false;
 
         try {
             await this.editor.setStreamingText(this.currentContent);
-
             this.contentSnapshot = this.currentContent;
-            this.lastRenderTime = Date.now();
-            this.pendingContentLength = 0;
-
         } catch (e) {
             console.error('[MDxController] Render failed:', e);
         }
     }
 
     /**
-     * ✅ 优化：结束流式输出
+     * ✅ 查询是否有待渲染内容
+     */
+    hasPendingRender(): boolean {
+        return this.pendingRender;
+    }
+
+    /**
+     * ✅ 简化：结束流式
      */
     finishStream(emitChange: boolean = false): void {
         this.isStreaming = false;
-
-        // 取消所有挂起的渲染
-        if (this.rafId !== null) {
-            this.timers.cancelAnimationFrame(this.rafId);
-            this.rafId = null;
-        }
-        this.renderScheduled = false;
-        this.pendingContentLength = 0;
+        this.pendingRender = false;
 
         // 最终渲染
-        if (this.editor && this.isInitialized && this.currentContent !== this.contentSnapshot) {
+        if (this.editor && this.isInitialized
+            && this.currentContent !== this.contentSnapshot) {
             queueMicrotask(async () => {
                 try {
                     await this.editor!.setStreamingText(this.currentContent);
@@ -349,7 +302,5 @@ export class MDxController {
         this.editor = null;
         this.isInitialized = false;
         this.pendingChunks = [];
-        this.renderScheduled = false;
-        this.pendingContentLength = 0;
     }
 }

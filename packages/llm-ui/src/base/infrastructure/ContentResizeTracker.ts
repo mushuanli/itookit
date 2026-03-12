@@ -1,14 +1,13 @@
-// @file: llm-ui/utils/ContentResizeTracker.ts
+// @file: llm-ui/base/infrastructure/ContentResizeTracker.ts
 
 import { TimerManager } from './TimerManager';
 
 /**
  * 内容高度变化追踪器
  *
- * 替代直接使用 ResizeObserver，提供：
- * 1. 内置节流（避免 layout thrashing）
- * 2. 流式/非流式模式自适应
- * 3. 避免 ResizeObserver 的 "loop limit exceeded" 警告
+ * ✅ 简化：移除流式 polling 逻辑
+ * 流式期间由 StreamRenderPipeline 接管高度检查，
+ * 此类仅负责非流式期间的 ResizeObserver 监听。
  */
 export class ContentResizeTracker {
     private resizeObserver: ResizeObserver;
@@ -16,10 +15,6 @@ export class ContentResizeTracker {
     private lastNotifiedHeight = 0;
     private timers = new TimerManager();
     private rafId: number | null = null;
-
-    private isStreamingMode = false;
-    private streamingPollTimer: ReturnType<typeof setInterval> | null = null;
-    private readonly STREAMING_POLL_INTERVAL = 80;
 
     constructor(
         private container: HTMLElement,
@@ -32,8 +27,6 @@ export class ContentResizeTracker {
     }
 
     private handleObserverEntry = (): void => {
-        // 流式模式由 polling 驱动，忽略 ResizeObserver
-        if (this.isStreamingMode) return;
         if (this.pendingCallback) return;
 
         this.pendingCallback = true;
@@ -59,27 +52,8 @@ export class ContentResizeTracker {
         }
     }
 
-    enterStreamingMode(): void {
-        if (this.isStreamingMode) return;
-        this.isStreamingMode = true;
-
-        this.streamingPollTimer = this.timers.setInterval(() => {
-            this.checkHeight();
-        }, this.STREAMING_POLL_INTERVAL);
-    }
-
-    exitStreamingMode(): void {
-        if (!this.isStreamingMode) return;
-        this.isStreamingMode = false;
-
-        if (this.streamingPollTimer !== null) {
-            this.timers.clearInterval(this.streamingPollTimer);
-            this.streamingPollTimer = null;
-        }
-
-        // 最终检查一次
-        this.checkHeight();
-    }
+    // ✅ 删除：enterStreamingMode(), exitStreamingMode()
+    // 不再需要，流式期间由 Pipeline 接管
 
     destroy(): void {
         this.resizeObserver.disconnect();

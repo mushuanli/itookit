@@ -29,6 +29,8 @@ export interface ExecutorConfig {
     id: string;
     name: string;
     type: ExecutorType;
+    icon?: string;  // ✅ 新增
+
     description?: string;
     model?: string;
     temperature?: number;

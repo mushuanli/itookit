@@ -1,18 +1,19 @@
 // @file: llm-ui/views/history/StreamController.ts
 
-import { TimerManager } from '../../base/infrastructure/TimerManager';
+import { TimerManager, StreamRenderPipeline, ScrollController } from '../../base/infrastructure/';
 import type { SessionRenderer } from './SessionRenderer';
 import { getPreviewText } from '../../utils/textUtils';
+
 /**
  * 流式输出控制器
  *
  * 职责：
  * 1. 管理流式/非流式模式切换
- * 2. 处理 chunk 追加和 thought 更新
- * 3. 管理 node 状态变更
- * 4. 流式结束时的清理和预览更新
+ * 2. 收集 chunk 并标记脏区
+ * 3. 通过 Pipeline 统一调度渲染和滚动
+ * 4. 管理 node 状态变更
  *
- * 不负责：DOM 创建、事件绑定、折叠
+ * ✅ 优化：不再独立调度渲染，由 StreamRenderPipeline 协调
  */
 export class StreamController {
     private isStreaming = false;
@@ -20,10 +21,22 @@ export class StreamController {
     private previewTimers = new Map<string, ReturnType<typeof setTimeout>>();
     private timers = new TimerManager();
 
+    // ✅ 新增：统一渲染管线
+    private pipeline: StreamRenderPipeline;
+
+    // ✅ 新增：追踪哪些节点有 pending 内容
+    private dirtyNodes = new Set<string>();
+
     constructor(
         private container: HTMLElement,
-        private renderer: SessionRenderer
-    ) { }
+        private renderer: SessionRenderer,
+        private scrollController: ScrollController
+    ) {
+        this.pipeline = new StreamRenderPipeline({
+            flushContent: () => this.flushAllContent(),
+            checkAndScroll: () => this.checkAndScroll(),
+        });
+    }
 
     get isStreamingMode(): boolean {
         return this.isStreaming;
@@ -37,6 +50,7 @@ export class StreamController {
         if (this.isStreaming) return;
         this.isStreaming = true;
         this.container.classList.add('llm-ui-history--streaming');
+        this.pipeline.start();
     }
 
     exit(): void {
@@ -44,23 +58,21 @@ export class StreamController {
         this.isStreaming = false;
         this.container.classList.remove('llm-ui-history--streaming');
 
-        // 清理流式状态
+        // 停止管线（内部会执行最终 flush）
+        this.pipeline.stop();
+
+        // 清理流式 CSS 状态
         this.container.querySelectorAll('.llm-ui-node--streaming').forEach(el => {
             el.classList.remove('llm-ui-node--streaming');
         });
 
         this.previewTimers.forEach(timer => clearTimeout(timer));
         this.previewTimers.clear();
+        this.dirtyNodes.clear();
 
-        // 更新所有预览
+        // 更新所有预览文本
         this.renderer.editors.forEach((editor, nodeId) => {
-            const el = this.renderer.getNode(nodeId);
-            if (el) {
-                const previewEl = el.querySelector('.llm-ui-header-preview');
-                if (previewEl) {
-                    previewEl.textContent = getPreviewText(editor.content);
-                }
-            }
+            this.updatePreview(nodeId, editor.content);
         });
 
         // 结束所有编辑器的流式模式
@@ -68,7 +80,7 @@ export class StreamController {
     }
 
     // ================================================================
-    // 内容更新
+    // 内容更新 — 只积累，不渲染
     // ================================================================
 
     updateContent(nodeId: string, chunk: string, field: 'thought' | 'output'): void {
@@ -80,9 +92,16 @@ export class StreamController {
         }
 
         if (field === 'thought') {
+            // thought 是纯文本追加，成本低，直接更新
             this.updateThought(el, chunk);
         } else {
-            this.updateOutput(nodeId, chunk);
+            // output 通过 MDxController 积累，由 Pipeline 统一渲染
+            const editor = this.renderer.getEditor(nodeId);
+            if (editor) {
+                editor.appendStream(chunk);
+                this.dirtyNodes.add(nodeId);
+                this.pipeline.markContentDirty();
+            }
         }
     }
 
@@ -112,19 +131,16 @@ export class StreamController {
                 }
             }
 
-            // 清理预览定时器
-            const timer = this.previewTimers.get(nodeId);
-            if (timer) {
-                clearTimeout(timer);
-                this.previewTimers.delete(nodeId);
-            }
-
             // 更新最终预览
             const editor = this.renderer.getEditor(nodeId);
-            const previewEl = el.querySelector('.llm-ui-header-preview');
-            if (editor && previewEl) {
-                previewEl.textContent = getPreviewText(editor.content);
+            if (editor) {
+                this.updatePreview(nodeId, editor.content);
             }
+
+            // 清理
+            this.previewTimers.get(nodeId) && clearTimeout(this.previewTimers.get(nodeId)!);
+            this.previewTimers.delete(nodeId);
+            this.dirtyNodes.delete(nodeId);
         }
 
         // 结束编辑器流式
@@ -132,6 +148,35 @@ export class StreamController {
         if (editor && (status === 'success' || status === 'failed')) {
             editor.finishStream(false);
         }
+    }
+
+    // ================================================================
+    // Pipeline 回调
+    // ================================================================
+
+    /**
+     * ✅ 由 Pipeline 调用：批量 flush 所有 dirty 节点的内容
+     * 
+     * 一帧内只执行一次，将所有积累的 chunk 推送给编辑器
+     */
+    private flushAllContent(): void {
+        for (const nodeId of this.dirtyNodes) {
+            const editor = this.renderer.getEditor(nodeId);
+            if (editor?.hasPendingRender()) {
+                editor.flushStream();
+            }
+        }
+        // 不清除 dirtyNodes：下次有新 chunk 时会继续标记
+    }
+
+    /**
+     * ✅ 由 Pipeline 调用：检查高度变化并决定是否滚动
+     * 
+     * 合并了 ContentResizeTracker 和 ScrollController 的功能
+     * 每帧最多：一次 scrollHeight 读取 + 一次 scrollTop 写入
+     */
+    private checkAndScroll(): void {
+        this.scrollController.handleContentResize();
     }
 
     // ================================================================
@@ -161,10 +206,12 @@ export class StreamController {
         }
     }
 
-    private updateOutput(nodeId: string, chunk: string): void {
-        const editor = this.renderer.getEditor(nodeId);
-        if (editor) {
-            editor.appendStream(chunk);
+    private updatePreview(nodeId: string, content: string): void {
+        const el = this.renderer.getNode(nodeId);
+        if (!el) return;
+        const previewEl = el.querySelector('.llm-ui-header-preview');
+        if (previewEl) {
+            previewEl.textContent = getPreviewText(content);
         }
     }
 
@@ -178,11 +225,14 @@ export class StreamController {
             clearTimeout(timer);
             this.previewTimers.delete(nodeId);
         }
+        this.dirtyNodes.delete(nodeId);
     }
 
     destroy(): void {
+        this.pipeline.destroy();
         this.previewTimers.forEach(timer => clearTimeout(timer));
         this.previewTimers.clear();
+        this.dirtyNodes.clear();
         this.timers.destroy();
         this.isStreaming = false;
     }

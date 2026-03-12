@@ -1,336 +1,291 @@
 // @file: llm-engine/session/session-state.ts
+import { NodeStatus } from '@itookit/llm-kernel';
 
-import { generateUUID } from '@itookit/common';
-import { SessionGroup, ExecutionNode, ChatFile } from '../core/types';
+import {
+    SessionGroup,
+    ExecutionNode,
+    ChatFile,
+    BranchInfo,
+} from '../core/types';
 import { ChatNode } from '../persistence/types';
-import { ExecutorConfig } from '@itookit/llm-kernel';
+import { Converters } from '../utils/converters';
 
-/**
- * 历史消息类型
- */
 export interface HistoryMessage {
-    role: string;
+    role: 'user' | 'assistant';
     content: string;
     files?: ChatFile[];
 }
 
 /**
  * 会话状态管理
- * 管理单个会话的内存状态
+ *
+ * ID 策略：
+ *   SessionGroup.id = persistedNodeId（如果有），否则生成临时 ID
+ *   这保证了 reloadSessionData 后 ID 保持稳定，
+ *   消除了双重查找和 fallback 链。
  */
 export class SessionState {
     private sessions: SessionGroup[] = [];
 
     constructor(
-        public readonly nodeId: string,
-        public readonly sessionId: string
+        private readonly _nodeId: string,
+        private readonly _sessionId: string
     ) { }
 
-    // ============== 查询 ==============
+    // ================================================================
+    // 访问器
+    // ================================================================
+
+    get nodeId(): string { return this._nodeId; }
+    get sessionId(): string { return this._sessionId; }
 
     getSessions(): SessionGroup[] {
-        return [...this.sessions];
-    }
-
-    /**
-     * ✅ 修复：获取历史消息（包含附件信息）
-     */
-    getHistory(): HistoryMessage[] {
-        return this.sessions
-            .filter(s =>
-                s.role === 'user' ||
-                (s.role === 'assistant' && s.executionRoot?.data.output)
-            )
-            .map(s => ({
-                role: s.role,
-                content: s.role === 'user'
-                    ? s.content || ''
-                    : s.executionRoot?.data.output || '',
-                ...(s.role === 'user' && s.files?.length ? { files: s.files } : {})
-            }));
-    }
-
-    getHistoryText(): Array<{ role: string; content: string }> {
-        return this.getHistory().map(({ role, content }) => ({ role, content }));
-    }
-
-    findSessionById(id: string): SessionGroup | undefined {
-        return this.sessions.find(s =>
-            s.id === id ||
-            s.persistedNodeId === id ||
-            s.executionRoot?.id === id
-        );
-    }
-
-    findSessionIndex(id: string): number {
-        return this.sessions.findIndex(s =>
-            s.id === id ||
-            s.persistedNodeId === id ||
-            s.executionRoot?.id === id
-        );
-    }
-
-    findUserMessageBefore(messageId: string): SessionGroup | undefined {
-        const index = this.findSessionIndex(messageId);
-        if (index <= 0) return undefined;
-
-        for (let i = index - 1; i >= 0; i--) {
-            if (this.sessions[i].role === 'user') {
-                return this.sessions[i];
-            }
-        }
-
-        return undefined;
+        return this.sessions;
     }
 
     getLastSession(): SessionGroup | undefined {
         return this.sessions[this.sessions.length - 1];
     }
 
-    /**
-     * 添加会话（用于加载历史数据）
-     */
-    addSession(session: SessionGroup): void {
-        this.sessions.push(session);
+    findSessionById(id: string): SessionGroup | undefined {
+        return this.sessions.find(s => s.id === id);
     }
-
-    // ============== 执行节点操作（统一入口） ==============
 
     /**
-     * 在执行树中查找目标节点并执行更新
+     * 查找指定 assistant 消息之前的 user 消息
      */
-    private withNode(nodeId: string, updater: (node: ExecutionNode) => void): void {
-        for (const session of this.sessions) {
-            const node = this.findNodeInTree(session.executionRoot, nodeId);
-            if (node) {
-                updater(node);
-                return;
+    findUserMessageBefore(assistantId: string): SessionGroup | undefined {
+        const index = this.sessions.findIndex(s => s.id === assistantId);
+        if (index === -1) return undefined;
+
+        for (let i = index - 1; i >= 0; i--) {
+            if (this.sessions[i].role === 'user') {
+                return this.sessions[i];
             }
         }
+        return undefined;
     }
 
-    private findNodeInTree(
-        node: ExecutionNode | undefined,
-        targetId: string
-    ): ExecutionNode | null {
-        if (!node) return null;
-        if (node.id === targetId) return node;
+    // ================================================================
+    // 从持久化加载
+    // ================================================================
 
-        if (node.children) {
-            for (const child of node.children) {
-                const found = this.findNodeInTree(child, targetId);
-                if (found) return found;
-            }
-        }
-        return null;
+    /**
+     * 从 ChatNode 加载 session
+     * 使用 persistedNodeId 作为 session.id
+     */
+    loadFromChatNode(node: ChatNode): void {
+        const converted = Converters.chatNodeToSessionGroup(node);
+        if (!converted) return;
+
+        // 使用 persistedNodeId 作为主 ID
+        converted.id = node.id;
+        converted.persistedNodeId = node.id;
+
+        this.sessions.push(converted);
     }
 
-    // ============== 添加消息 ==============
+    // ================================================================
+    // 创建消息
+    // ================================================================
 
-    addUserMessage(
-        content: string,
-        files: ChatFile[],
-        persistedNodeId: string
-    ): SessionGroup {
+    /**
+     * 创建用户消息
+     * 使用 persistedNodeId 作为 id
+     */
+    addUserMessage(text: string, files: ChatFile[], persistedNodeId: string): SessionGroup {
         const session: SessionGroup = {
-            id: generateUUID(),
-            timestamp: Date.now(),
+            id: persistedNodeId,
+            persistedNodeId,
             role: 'user',
-            content,
-            // 剥离 fileRef，只存储可序列化数据到内存状态中
-            files: files.map(f => ({
-                name: f.name,
-                type: f.type,
-                path: f.path,
-                size: f.size
-            })),
-            persistedNodeId
+            content: text,
+            files,
+            timestamp: Date.now(),
         };
 
         this.sessions.push(session);
         return session;
     }
 
+    /**
+     * 创建 assistant 消息并返回执行根节点
+     */
     createAssistantMessage(
-        config: ExecutorConfig,
+        config: any, // ExecutorConfig
         persistedNodeId: string,
-        branchInfo?: { siblingIndex: number; siblingCount: number }
+        branchInfo?: BranchInfo
     ): ExecutionNode {
         const rootNode: ExecutionNode = {
-            id: generateUUID(),
-            executorId: config.id,
-            executorType: config.type as any || 'agent',
+            id: persistedNodeId,
             name: config.name || config.id,
+            executorType: config.type || 'agent',
+            executorId: config.id,
             status: 'running',
             startTime: Date.now(),
+            parentId: undefined,
             data: {
                 output: '',
                 thought: '',
                 metaInfo: {
                     agentId: config.id,
-                    agentName: config.name,
-                    siblingIndex: branchInfo?.siblingIndex ?? 0,
-                    siblingCount: branchInfo?.siblingCount ?? 1
-                }
+                    agentIcon: config.icon,
+                },
             },
-            children: []
+            children: [],
         };
 
         const session: SessionGroup = {
-            id: generateUUID(),
-            timestamp: Date.now(),
-            role: 'assistant',
-            executionRoot: rootNode,
+            id: persistedNodeId,
             persistedNodeId,
+            role: 'assistant',
+            content: '',
+            timestamp: Date.now(),
+            executionRoot: rootNode,
             siblingIndex: branchInfo?.siblingIndex,
-            siblingCount: branchInfo?.siblingCount
+            siblingCount: branchInfo?.siblingCount,
         };
 
         this.sessions.push(session);
         return rootNode;
     }
 
-    // ============== 节点更新 ==============
+    // ================================================================
+    // 更新
+    // ================================================================
 
-    updateNodeOutput(nodeId: string, output: string): void {
-        this.withNode(nodeId, node => {
-            node.data.output = output;
-            node.status = 'success';
-            node.endTime = Date.now();
-        });
-    }
-
-    updateNodeThinking(nodeId: string, thinking: string): void {
-        this.withNode(nodeId, node => {
-            node.data.thought = thinking;
-        });
-    }
-
-    appendToNode(nodeId: string, delta: string, field: 'output' | 'thought'): void {
-        this.withNode(nodeId, node => {
-            const key = field === 'output' ? 'output' : 'thought';
-            node.data[key] = (node.data[key] || '') + delta;
-        });
-    }
-
-    updateNodeStatus(nodeId: string, status: ExecutionNode['status']): void {
-        this.withNode(nodeId, node => {
-            node.status = status;
-            if (status === 'success' || status === 'failed') {
-                node.endTime = Date.now();
-            }
-        });
-    }
-
-    updateNodeError(nodeId: string, error: string): void {
-        this.withNode(nodeId, node => {
-            node.data.error = error;
-        });
-    }
-
-    updateMessageContent(messageId: string, content: string): void {
+    updateMessageContent(messageId: string, newContent: string): void {
         const session = this.findSessionById(messageId);
-        if (!session) return;
-
-        if (session.role === 'user') {
-            session.content = content;
-        } else if (session.executionRoot) {
-            session.executionRoot.data.output = content;
+        if (session) {
+            session.content = newContent;
         }
     }
 
-    // ============== 删除 ==============
+    appendToNode(nodeId: string, chunk: string, field: 'thought' | 'output'): void {
+        for (const session of this.sessions) {
+            if (session.executionRoot) {
+                const node = this.findNodeInTree(session.executionRoot, nodeId);
+                if (node) {
+                    if (field === 'thought') {
+                        node.data.thought = (node.data.thought || '') + chunk;
+                    } else {
+                        node.data.output = (node.data.output || '') + chunk;
+                    }
+                    return;
+                }
+            }
+        }
+    }
+
+    updateNodeStatus(nodeId: string, status: NodeStatus): void {
+        for (const session of this.sessions) {
+            if (session.executionRoot) {
+                const node = this.findNodeInTree(session.executionRoot, nodeId);
+                if (node) {
+                    node.status = status;
+                    return;
+                }
+            }
+        }
+    }
+
+    updateNodeError(nodeId: string, error: string): void {
+        for (const session of this.sessions) {
+            if (session.executionRoot) {
+                const node = this.findNodeInTree(session.executionRoot, nodeId);
+                if (node) {
+                    node.data.error = error;
+                    return;
+                }
+            }
+        }
+    }
+
+    // ================================================================
+    // 删除
+    // ================================================================
 
     removeMessage(messageId: string): void {
-        const index = this.findSessionIndex(messageId);
+        const index = this.sessions.findIndex(s => s.id === messageId);
         if (index !== -1) {
             this.sessions.splice(index, 1);
         }
     }
 
-    removeMessagesAfter(messageId: string): void {
-        const index = this.findSessionIndex(messageId);
-        if (index !== -1) {
-            this.sessions = this.sessions.slice(0, index + 1);
-        }
-    }
+    // ================================================================
+    // 历史
+    // ================================================================
 
-    // ============== 从持久化加载 ==============
-
-    loadFromChatNode(node: ChatNode): void {
-        if (node.role === 'user') {
-            this.sessions.push({
-                id: generateUUID(),
-                timestamp: new Date(node.created_at).getTime(),
-                role: 'user',
-                content: node.content,
-                files: node.meta?.files || [],
-                persistedNodeId: node.id
-            });
-        } else if (node.role === 'assistant') {
-            this.sessions.push({
-                id: generateUUID(),
-                timestamp: new Date(node.created_at).getTime(),
-                role: 'assistant',
-                executionRoot: {
-                    id: generateUUID(),
-                    executorId: node.meta?.agentId || 'unknown',
-                    executorType: 'agent',
-                    name: node.meta?.agentName || 'Assistant',
-                    status: 'success',
-                    startTime: new Date(node.created_at).getTime(),
-                    endTime: new Date(node.created_at).getTime(),
-                    data: {
-                        output: node.content,
-                        thought: node.meta?.thinking || '',
-                        metaInfo: node.meta || {}
-                    },
-                    children: []
-                },
-                persistedNodeId: node.id
-            });
-        }
-    }
-
-    // ============== 导出 ==============
-
-    exportToMarkdown(): string {
-        let md = `# Chat Export\n\n`;
-        md += `> Exported at: ${new Date().toLocaleString()}\n\n---\n\n`;
+    getHistory(): HistoryMessage[] {
+        const history: HistoryMessage[] = [];
 
         for (const session of this.sessions) {
-            const role = session.role === 'user' ? '👤 User' : '🤖 Assistant';
-            const ts = new Date(session.timestamp).toLocaleTimeString();
-
-            md += `### ${role} (${ts})\n\n`;
-
             if (session.role === 'user') {
-                if (session.files && session.files.length > 0) {
-                    const files = session.files.map(f => `\`${f.name}\``).join(', ');
-                    md += `> Attachments: ${files}\n\n`;
+                history.push({
+                    role: 'user',
+                    content: session.content || '',
+                    files: session.files,
+                });
+            } else if (session.role === 'assistant' && session.executionRoot) {
+                const output = this.extractOutput(session.executionRoot);
+                if (output.trim()) {
+                    history.push({
+                        role: 'assistant',
+                        content: output,
+                    });
                 }
-                md += `${session.content || '(Empty)'}\n\n`;
-            } else if (session.executionRoot) {
-                if (session.executionRoot.data.thought) {
-                    md += `> **Thinking:**\n`;
-                    md += session.executionRoot.data.thought
-                        .split('\n')
-                        .map(line => `> ${line}`)
-                        .join('\n');
-                    md += `\n\n`;
-                }
-                md += `${session.executionRoot.data.output || '(No output)'}\n\n`;
             }
-
-            md += `---\n\n`;
         }
 
-        return md;
+        return history;
     }
 
-    // ============== 清理 ==============
+    // ================================================================
+    // 导出
+    // ================================================================
+
+    exportToMarkdown(): string {
+        const lines: string[] = [];
+
+        for (const session of this.sessions) {
+            if (session.role === 'user') {
+                lines.push(`## User\n\n${session.content || ''}\n`);
+            } else if (session.role === 'assistant' && session.executionRoot) {
+                const output = this.extractOutput(session.executionRoot);
+                const name = session.executionRoot.name || 'Assistant';
+                lines.push(`## ${name}\n\n${output}\n`);
+            }
+        }
+
+        return lines.join('\n---\n\n');
+    }
+
+    // ================================================================
+    // 清理
+    // ================================================================
 
     clear(): void {
         this.sessions = [];
+    }
+
+    // ================================================================
+    // 内部工具
+    // ================================================================
+
+    private findNodeInTree(node: ExecutionNode, targetId: string): ExecutionNode | null {
+        if (node.id === targetId) return node;
+        for (const child of node.children || []) {
+            const found = this.findNodeInTree(child, targetId);
+            if (found) return found;
+        }
+        return null;
+    }
+
+    private extractOutput(node: ExecutionNode): string {
+        let output = node.data?.output || '';
+        for (const child of node.children || []) {
+            const childOutput = this.extractOutput(child);
+            if (childOutput) output += '\n\n' + childOutput;
+        }
+        return output.trim();
     }
 }

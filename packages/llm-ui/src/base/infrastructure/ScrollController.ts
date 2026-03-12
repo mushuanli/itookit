@@ -28,6 +28,10 @@ export class ScrollController {
     private timers = new TimerManager();
     private scrollThrottleTimer: ReturnType<typeof setTimeout> | null = null;
 
+    // ✅ 新增：流式期间的滚动节流
+    private streamingScrollThrottle = false;
+    private readonly STREAMING_SCROLL_INTERVAL = 120; // ms
+
     private readonly SCROLL_THRESHOLD = 150;
     private readonly SCROLL_THROTTLE = 100;
 
@@ -101,19 +105,30 @@ export class ScrollController {
     // ================================================================
 
     /**
-     * 内容高度变化时调用（由 ResizeObserver / ContentResizeTracker 触发）
+     * ✅ 优化：流式期间使用更积极的节流
+     * 由 StreamRenderPipeline 每帧调用，但实际滚动有最小间隔
      */
     handleContentResize(): void {
-        // ✅ 关键修复：用户上滚时不自动滚动，无论是否是流式模式
         if (!this.shouldAutoScroll) return;
 
-        // 节流
+        // 流式期间：使用独立节流，避免与非流式逻辑冲突
+        if (this._isStreamingMode) {
+            if (this.streamingScrollThrottle) return;
+            this.streamingScrollThrottle = true;
+
+            this.timers.setTimeout(() => {
+                this.streamingScrollThrottle = false;
+            }, this.STREAMING_SCROLL_INTERVAL);
+
+            this.scrollToBottomImmediate();
+            return;
+        }
+
+        // 非流式期间：保持原有逻辑
         if (this.scrollThrottleTimer !== null) return;
 
         this.scrollThrottleTimer = this.timers.setTimeout(() => {
             this.scrollThrottleTimer = null;
-
-            // ✅ 二次检查：防止定时器期间用户已经上滚
             if (!this.shouldAutoScroll) return;
 
             const currentScrollHeight = this.container.scrollHeight;

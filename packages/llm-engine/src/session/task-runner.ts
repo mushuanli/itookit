@@ -12,7 +12,7 @@ import {
     PoolStatus,
     BranchInfo,
     ExecutionOverrides,
-    ChatFile
+    ChatFile,
 } from '../core/types';
 import { ENGINE_DEFAULTS } from '../core/constants';
 import { EngineError, EngineErrorCode } from '../core/errors';
@@ -46,7 +46,7 @@ export interface TaskRunnerCallbacks {
 
 /**
  * 任务执行器
- * 合并任务队列管理和执行逻辑
+ * 职责：任务队列管理 + LLM 执行
  */
 export class TaskRunner {
     private queue: ExecutionTask[] = [];
@@ -72,24 +72,12 @@ export class TaskRunner {
     // 公共 API
     // ============================================
 
-    /**
-     * 提交任务
-     */
     async submit(input: TaskInput, runtime: SessionRuntime): Promise<string> {
         if (runtime.status === 'running' || runtime.status === 'queued') {
-            log.warn('Task submission rejected (session busy)', {
-                sessionId: input.sessionId,
-                currentStatus: runtime.status
-            });
             throw new EngineError(EngineErrorCode.SESSION_BUSY, 'Session already has active task');
         }
 
         if (this.queue.length >= this.maxQueueSize) {
-            log.error('Task submission rejected (queue full)', {
-                sessionId: input.sessionId,
-                queueSize: this.queue.length,
-                maxQueueSize: this.maxQueueSize
-            });
             throw new EngineError(EngineErrorCode.QUOTA_EXCEEDED, 'Task queue is full');
         }
 
@@ -106,7 +94,6 @@ export class TaskRunner {
         runtime.currentTaskId = task.id;
         this.callbacks.onStatusChange(input.sessionId, 'queued');
 
-        // 按优先级插入队列
         const insertIndex = this.queue.findIndex((t) => t.priority < task.priority);
         if (insertIndex === -1) {
             this.queue.push(task);
@@ -124,45 +111,27 @@ export class TaskRunner {
      * 中止会话的任务
      */
     abort(sessionId: string): void {
-        log.info('Aborting session tasks', { sessionId });
-
         const queueIndex = this.queue.findIndex((t) => t.sessionId === sessionId);
         if (queueIndex !== -1) {
-            const task = this.queue[queueIndex];
-            log.debug('Removing task from queue', {
-                taskId: task.id,
-                sessionId
-            });
             this.queue.splice(queueIndex, 1);
             this.callbacks.onStatusChange(sessionId, 'aborted');
             this.emitPoolStatus();
-            // ✅ 修复：中止后继续处理队列
             this.processQueue();
             return;
         }
 
-        // 中止运行中的任务 —— 只触发 abort 信号，让 executeTask 的 finally 处理清理
-        for (const [taskId, task] of this.running) {
+        for (const [_taskId, task] of this.running) {
             if (task.sessionId === sessionId) {
-                log.info('Aborting running task', { taskId, sessionId });
                 task.abortController.abort();
-                // 不在这里 delete running、不调用 processQueue
-                // executeTask 的 catch/finally 会处理状态更新和清理
                 return;
             }
         }
-
-        log.warn('No task found to abort', { sessionId });
     }
 
-    /**
-     * 中止所有任务
-     */
     abortAll(): void {
         for (const task of this.running.values()) {
             task.abortController.abort();
         }
-        // abortAll 用于 destroy，直接清空
         this.running.clear();
         this.queue = [];
         this.emitPoolStatus();
@@ -185,12 +154,6 @@ export class TaskRunner {
      */
     setMaxConcurrent(value: number): void {
         if (value < 1) throw new Error('maxConcurrent must be at least 1');
-
-        log.info('Max concurrent tasks updated', {
-            oldValue: this.maxConcurrent,
-            newValue: value
-        });
-
         this.maxConcurrent = value;
         this.emitPoolStatus();
         this.processQueue();
@@ -201,34 +164,17 @@ export class TaskRunner {
     // ============================================
 
     private processQueue(): void {
-        const availableSlots = this.maxConcurrent - this.running.size;
-
-        if (availableSlots > 0 && this.queue.length > 0) {
-            log.debug('Processing task queue', {
-                availableSlots,
-                queueLength: this.queue.length,
-                runningCount: this.running.size
-            });
-        }
-
         while (this.running.size < this.maxConcurrent && this.queue.length > 0) {
             const task = this.queue.shift()!;
 
-            // ✅ 修复：从回调中获取对应会话的 state/runtime
             const ctx = this.callbacks.getSessionContext(task.sessionId);
             if (!ctx) {
                 log.error('Session context not found, dropping task', {
                     taskId: task.id,
-                    sessionId: task.sessionId
+                    sessionId: task.sessionId,
                 });
                 continue;
             }
-
-            log.debug('Starting task from queue', {
-                taskId: task.id,
-                sessionId: task.sessionId,
-                queueWaitTime: Date.now() - task.createdAt
-            });
 
             this.executeTask(task, ctx.state, ctx.runtime);
         }
@@ -250,121 +196,65 @@ export class TaskRunner {
         this.emitPoolStatus();
 
         let errorAlreadyEmitted = false;
+        const isBound = this.callbacks.getBoundSessionId?.() === sessionId;
 
         try {
             // 1. 解析附件
             const contextFiles = await this.attachments.resolveAttachments(
-                sessionId,
-                input.text,
-                input.files
+                sessionId, input.text, input.files
             );
 
-            log.debug('Attachments resolved', {
-                taskId: task.id,
-                fileCount: contextFiles.length
-            });
-
-            // 2. 创建用户消息
+            // 2. 创建用户消息（非 skip 模式）
             let userNodeId = input.parentUserNodeId;
             if (!input.skipUserMessage) {
                 userNodeId = await this.createUserMessage(task, state, contextFiles);
-                log.debug('User message created', {
-                    taskId: task.id,
-                    userNodeId
-                });
             }
 
             // 3. 解析执行器配置
             let executorConfig = await this.agentResolver.resolve(input.agentId);
-
             if (input.overrides) {
-                const originalModel = executorConfig.model;
                 executorConfig = this.applyOverrides(executorConfig, input.overrides);
-
-                if (input.overrides.modelId && input.overrides.modelId !== originalModel) {
-                    log.info('Model overridden', {
-                        taskId: task.id,
-                        originalModel,
-                        overriddenModel: executorConfig.model
-                    });
-                }
             }
 
-            // 4. 获取历史消息
-            const history = this.getHistory(state, input.overrides?.historyLength);
-
-            log.debug('History prepared', {
-                taskId: task.id,
-                historyLength: history.length,
-                limitApplied: input.overrides?.historyLength
-            });
+            // 4. 构建历史
+            const history = this.buildHistoryForTask(
+                state, input.text, input.overrides?.historyLength
+            );
 
             // 5. 创建 assistant 节点
             const { assistantNodeId, rootNode } = await this.createAssistantNode(
-                sessionId,
-                task.nodeId,
-                state,
-                executorConfig,
-                input.branchInfo,
-                userNodeId
+                sessionId, task.nodeId, state, executorConfig,
+                input.branchInfo, userNodeId
             );
 
-            log.debug('Assistant node created', {
-                taskId: task.id,
-                assistantNodeId,
-                rootNodeId: rootNode.id
-            });
-
-            // 6. 设置节流持久化
+            // 6. 节流持久化
             const { accumulator, persist, finalize } = createThrottledWriter(
-                this.engine,
-                sessionId,
-                assistantNodeId,
+                this.engine, sessionId, assistantNodeId,
                 ENGINE_DEFAULTS.PERSIST_THROTTLE
             );
 
-            // ✅ 新增：检查是否为绑定会话
-            const isBound = this.callbacks.getBoundSessionId?.() === sessionId;
-
-            log.debug('Task execution context', {
-                taskId: task.id,
-                sessionId,
-                isBound,
-                streamMode: input.overrides?.streamMode ?? true
-            });
-
-            // 7. 创建事件处理器
+            // 7. 事件处理器
             const onEvent = this.createEventHandler(
-                sessionId,
-                rootNode,
-                state,
-                accumulator,
-                persist,
+                sessionId, rootNode, state, accumulator, persist,
                 () => { errorAlreadyEmitted = true; },
-                isBound  // ✅ 传递绑定状态
+                isBound
             );
 
-            // 8. 准备附件
+            // 8. 准备附件和历史
             const attachments = await this.attachments.convertToAttachments(sessionId, contextFiles);
-
-            // 9. 加载历史附件
             const historyWithFiles = await this.buildHistoryMessages(sessionId, history);
 
             log.info('Executing LLM query', {
                 taskId: task.id,
                 sessionId,
-                agentName: executorConfig.name,
+                agent: executorConfig.name,
                 model: executorConfig.model,
-                provider: executorConfig.connection?.provider,
                 historyCount: historyWithFiles.length,
-                attachmentCount: attachments.length,
-                streamMode: input.overrides?.streamMode ?? true
             });
 
-            // 10. 执行 LLM 查询
+            // 9. 执行
             const result = await this.kernelAdapter.executeQuery(
-                input.text,
-                executorConfig,
+                input.text, executorConfig,
                 {
                     sessionId,
                     history: historyWithFiles,
@@ -376,25 +266,15 @@ export class TaskRunner {
                 }
             );
 
-            // 11. 检查结果
+            // 10. 检查结果
             if (result.status === 'failed') {
                 const firstError = result.errors?.[0];
-                log.error('LLM execution failed', {
-                    taskId: task.id,
-                    sessionId,
-                    agentName: executorConfig.name,
-                    model: executorConfig.model,
-                    errorCode: firstError?.code,
-                    errorMessage: firstError?.message,
-                    allErrors: result.errors
-                });
-
                 const error = new Error(firstError?.message || 'Execution failed');
                 (error as any).status = firstError?.code;
                 throw error;
             }
 
-            // 12. 最终持久化
+            // 11. 最终持久化
             await finalize();
             await this.engine.updateNode(sessionId, assistantNodeId, {
                 content: accumulator.output,
@@ -405,16 +285,14 @@ export class TaskRunner {
                 },
             });
 
-            // 13. 更新状态并通知
+            // 12. 完成
             state.updateNodeStatus(rootNode.id, 'success');
 
-            // ✅ 只在绑定时发送 UI 事件
             if (isBound) {
                 this.eventBus.emitSession(sessionId, {
                     type: 'node_status',
                     payload: { nodeId: rootNode.id, status: 'success' },
                 });
-
                 this.eventBus.emitSession(sessionId, {
                     type: 'finished',
                     payload: { sessionId },
@@ -422,7 +300,6 @@ export class TaskRunner {
             }
 
             this.callbacks.onStatusChange(sessionId, 'completed');
-
             this.callbacks.onUnread(sessionId);
 
         } catch (error: any) {
@@ -430,14 +307,6 @@ export class TaskRunner {
         } finally {
             this.running.delete(task.id);
             runtime.currentTaskId = undefined;
-
-            log.debug('Task cleanup completed', {
-                taskId: task.id,
-                sessionId,
-                runningCount: this.running.size,
-                queuedCount: this.queue.length
-            });
-
             this.emitPoolStatus();
             this.processQueue();
         }
@@ -456,16 +325,12 @@ export class TaskRunner {
         const persistedFiles = this.attachments.stripFileRefs(contextFiles);
 
         const userNodeId = await this.engine.appendMessage(
-            nodeId,
-            sessionId,
-            'user',
-            input.text,
+            nodeId, sessionId, 'user', input.text,
             { files: persistedFiles, executorId: input.agentId }
         );
 
         const userSession = state.addUserMessage(input.text, contextFiles, userNodeId);
 
-        // ✅ 检查是否绑定
         const isBound = this.callbacks.getBoundSessionId?.() === sessionId;
         if (isBound) {
             this.eventBus.emitSession(sessionId, {
@@ -486,13 +351,11 @@ export class TaskRunner {
         parentUserNodeId?: string
     ): Promise<{ assistantNodeId: string; rootNode: ExecutionNode }> {
         const assistantNodeId = await this.engine.appendMessage(
-            nodeId,
-            sessionId,
-            'assistant',
-            '',
+            nodeId, sessionId, 'assistant', '',
             {
                 agentId: executorConfig.id,
                 agentName: executorConfig.name,
+                agentIcon: (executorConfig as any).icon,
                 status: 'running',
                 siblingIndex: branchInfo?.siblingIndex ?? 0,
                 siblingCount: branchInfo?.siblingCount ?? 1,
@@ -502,12 +365,9 @@ export class TaskRunner {
         );
 
         const rootNode = state.createAssistantMessage(
-            executorConfig,
-            assistantNodeId,
-            branchInfo
+            executorConfig, assistantNodeId, branchInfo
         );
 
-        // ✅ 检查是否绑定
         const isBound = this.callbacks.getBoundSessionId?.() === sessionId;
         if (isBound) {
             this.eventBus.emitSession(sessionId, {
@@ -535,10 +395,10 @@ export class TaskRunner {
         accumulator: { output: string; thinking: string },
         persist: () => void,
         markErrorEmitted: () => void,
-        isBound: boolean  // ✅ 新增参数
+        isBound: boolean
     ): (event: OrchestratorEvent) => void {
         return (event: OrchestratorEvent) => {
-            // ✅ 关键修复：先处理持久化（不依赖绑定状态）
+            // 持久化处理（不依赖绑定状态）
             if (event.type === 'node_update' && event.payload.chunk) {
                 if (event.payload.nodeId === rootNode.id || !event.payload.nodeId) {
                     const targetNodeId = event.payload.nodeId || rootNode.id;
@@ -551,21 +411,17 @@ export class TaskRunner {
                         state.appendToNode(targetNodeId, event.payload.chunk, 'output');
                     }
 
-                    // ✅ 无论是否绑定都持久化
                     persist();
                 }
             }
 
-            // ✅ 然后处理其他事件（只在绑定时转发给 UI）
+            // UI 事件（只在绑定时转发）
             if (isBound) {
                 this.handleUIEvents(event, sessionId, rootNode, markErrorEmitted);
             }
         };
     }
 
-    /**
-     * ✅ 新增：处理 UI 事件
-     */
     private handleUIEvents(
         event: OrchestratorEvent,
         sessionId: string,
@@ -590,7 +446,6 @@ export class TaskRunner {
             markErrorEmitted();
         }
 
-        // 转发给 UI
         this.eventBus.emitSession(sessionId, event);
     }
 
@@ -598,36 +453,58 @@ export class TaskRunner {
     // 内部：历史消息
     // ============================================
 
+    /**
+     * 为任务构建历史消息
+     *
+     * 规则：
+     * 1. history 只包含已完成的对话轮次
+     * 2. 当前用户输入不在 history 中
+     * 3. 确保末尾不是 user message
+     */
+    private buildHistoryForTask(
+        state: SessionState,
+        currentInputText: string,
+        historyLength?: number
+    ): HistoryMessage[] {
+        let history = this.getHistory(state, historyLength);
+
+        // 移除末尾与当前输入重复的 user message
+        if (
+            history.length > 0 &&
+            history[history.length - 1].role === 'user' &&
+            history[history.length - 1].content.trim() === currentInputText.trim()
+        ) {
+            history = history.slice(0, -1);
+        }
+
+        // 确保末尾不是 user message
+        while (history.length > 0 && history[history.length - 1].role === 'user') {
+            history.pop();
+        }
+
+        return history;
+    }
+
+    /**
+     * 获取历史（含防御性清理）
+     */
     private getHistory(state: SessionState, historyLength?: number): HistoryMessage[] {
         let history = state.getHistory();
 
         if (historyLength !== undefined && historyLength !== -1) {
-            if (historyLength === 0) {
-                return [];
-            }
+            if (historyLength === 0) return [];
             history = history.slice(-historyLength);
         }
 
-        this.validateHistory(history);
-        return history;
-    }
-    /**
-     * ✅ 新增：校验历史消息序列合法性
-     * LLM 要求 user/assistant 交替出现，不允许连续两条相同角色
-     */
-    private validateHistory(history: HistoryMessage[]): void {
-        for (let i = 1; i < history.length; i++) {
-            if (history[i].role === 'user' && history[i - 1].role === 'user') {
-                log.error('Invalid history: consecutive user messages', {
-                    index: i,
-                    historyLength: history.length
-                });
-                throw new EngineError(
-                    EngineErrorCode.SESSION_INVALID,
-                    `Invalid message sequence: consecutive user messages at index ${i - 1} and ${i}`
-                );
+        // 防御性清理：移除连续的 user message
+        return history.filter((msg, i, arr) => {
+            if (i === 0) return true;
+            if (msg.role === 'user' && arr[i - 1].role === 'user') {
+                log.warn('Removed consecutive user message from history');
+                return false;
             }
-        }
+            return true;
+        });
     }
 
     private async buildHistoryMessages(
@@ -646,8 +523,7 @@ export class TaskRunner {
                 chatMessage.attachments = [];
                 for (const file of msg.files) {
                     const attachment = await this.attachments.resolveHistoryAttachment(
-                        sessionId,
-                        file
+                        sessionId, file
                     );
                     if (attachment) {
                         chatMessage.attachments.push(attachment);
@@ -692,12 +568,8 @@ export class TaskRunner {
             taskId: task.id,
             sessionId,
             status,
-            errorName: error.name,
             errorMessage: error.message,
-            errorCode: error.code || error.status,
             isAborted,
-            duration: Date.now() - task.createdAt,
-            stack: error.stack
         });
 
         runtime.error = error;
@@ -712,8 +584,6 @@ export class TaskRunner {
 
             state.updateNodeStatus(rootId, status);
             state.updateNodeError(rootId, errorMessage);
-
-            // ✅ 检查是否绑定
 
             if (!errorAlreadyEmitted && isBound) {
                 this.eventBus.emitSession(sessionId, {
@@ -731,7 +601,7 @@ export class TaskRunner {
                         log.error('Failed to persist error state', {
                             sessionId,
                             nodeId: lastSession.persistedNodeId,
-                            error: e
+                            error: e,
                         });
                     });
             }

@@ -155,6 +155,40 @@ export class CollapseController {
     }
 
     // ================================================================
+    // 智能折叠
+    // ================================================================
+
+    /**
+     * 智能判断当前应该折叠还是展开
+     * 
+     * 规则：只要有任何 assistant 会话处于展开状态，就优先折叠
+     */
+    shouldCollapse(): boolean {
+        const assistantNodes = this.container.querySelectorAll(
+            '.llm-ui-session--assistant .llm-ui-node'
+        );
+
+        for (const node of assistantNodes) {
+            if (!node.classList.contains('is-collapsed')) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * 智能切换：根据当前状态自动决定折叠或展开
+     * 
+     * @returns 操作后是否处于折叠状态
+     */
+    toggleAll(): boolean {
+        const shouldCollapse = this.shouldCollapse();
+        this.setAllCollapsed(shouldCollapse);
+        return shouldCollapse;
+    }
+
+    // ================================================================
     // 代码块折叠
     // ================================================================
 

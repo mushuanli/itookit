@@ -8,3 +8,4 @@ export type { ScrollControllerCallbacks } from './ScrollController';
 export { ContentResizeTracker } from './ContentResizeTracker';
 export { EventBatchProcessor } from './EventBatchProcessor';
 export type { BatchedEvents } from './EventBatchProcessor';
+export { StreamRenderPipeline } from './StreamRenderPipeline';
