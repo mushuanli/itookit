@@ -1,7 +1,7 @@
 // @file: llm-ui/commands/BatchCommands.ts
 
 import { Command } from '../base/core/Command';
-import { Toast, showConfirmDialog } from '@itookit/common';
+import { Toast } from '@itookit/common';
 import { extractExecutionOutput } from '../utils/textUtils';
 
 export class BatchDeleteCommand extends Command<{ ids: string[] }> {
@@ -10,20 +10,27 @@ export class BatchDeleteCommand extends Command<{ ids: string[] }> {
     protected async execute({ ids }: { ids: string[] }): Promise<void> {
         if (ids.length === 0) return;
 
-        const confirmed = await showConfirmDialog(
-            `Are you sure you want to delete ${ids.length} messages?`
-        );
-        if (!confirmed) return;
-
         const originalSessions = this.ctx.sessionManager.getSessions();
 
         try {
+            // 乐观更新 UI
             this.ctx.historyView.removeMessages(ids, true);
-            await this.ctx.sessionManager.deleteMessages(ids, {
+
+            // 数据层负责：删除节点 + 清理孤立 branch + 回传结果
+            const result = await this.ctx.sessionManager.deleteMessages(ids, {
                 deleteAssociatedResponses: true,
+                cleanupOrphanedBranches: true,  // ✅ 让数据层处理
             });
-            Toast.success(`Deleted ${ids.length} message${ids.length > 1 ? 's' : ''}`);
+
+            // 结果通知
+            const branchCount = result?.deletedBranches?.length ?? 0;
+            const msg = branchCount > 0
+                ? `Deleted ${ids.length} message(s) and ${branchCount} branch(es)`
+                : `Deleted ${ids.length} message(s)`;
+            Toast.success(msg);
+
         } catch (e) {
+            // 回滚
             this.ctx.historyView.renderFull(originalSessions);
             throw e;
         }

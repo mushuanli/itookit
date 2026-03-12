@@ -12,6 +12,7 @@ import {
     DEFAULT_SESSION_SETTINGS,
     PoolStatus,
     DeleteOptions,
+    DeleteResult,
     RegistryEvent,
     BranchInfo,
     RegenerateOptions,
@@ -493,16 +494,16 @@ export class SessionManager {
     // 消息操作：删除
     // ================================================================
 
-    async deleteMessage(messageId: string, options?: DeleteOptions): Promise<void> {
+    async deleteMessage(messageId: string, options?: DeleteOptions): Promise<DeleteResult> {
         const { sessionId, nodeId, state } = this.ensureBound();
         const idsToDelete = this.collectDeletableIds(
             state, messageId, options?.deleteAssociatedResponses ?? true
         );
-        await this.executeDelete(nodeId, sessionId, state, idsToDelete);
+        return this.executeDelete(nodeId, sessionId, state, idsToDelete, options);
     }
 
-    async deleteMessages(messageIds: string[], options?: DeleteOptions): Promise<void> {
-        if (messageIds.length === 0) return;
+    async deleteMessages(messageIds: string[], options?: DeleteOptions): Promise<DeleteResult> {
+        if (messageIds.length === 0) return { deletedIds: [], deletedBranches: [] };
         if (messageIds.length === 1) return this.deleteMessage(messageIds[0], options);
 
         const { sessionId, nodeId, state } = this.ensureBound();
@@ -514,21 +515,29 @@ export class SessionManager {
             ).forEach(x => allIds.add(x));
         }
 
-        await this.executeDelete(nodeId, sessionId, state, Array.from(allIds));
+        return this.executeDelete(nodeId, sessionId, state, Array.from(allIds), options);
     }
 
     /**
      * 统一删除执行
+     * 
+     * 流程：
+ * 1. 持久化删除消息节点
+ * 2. 内存删除
+ * 3. 如果 cleanupOrphanedBranches，检查并清理孤立分支
+     * 4. 发射事件
      */
     private async executeDelete(
         nodeId: string,
         sessionId: string,
         state: SessionState,
-        idsToDelete: string[]
-    ): Promise<void> {
-        if (idsToDelete.length === 0) return;
+        idsToDelete: string[],
+        options?: DeleteOptions
+    ): Promise<DeleteResult> {
+        const result: DeleteResult = { deletedIds: [], deletedBranches: [] };
+        if (idsToDelete.length === 0) return result;
 
-        // 持久化删除
+        // 1. 持久化删除
         const persistedIds = idsToDelete
             .map(id => state.findSessionById(id)?.persistedNodeId)
             .filter((id): id is string => !!id);
@@ -545,14 +554,91 @@ export class SessionManager {
             }
         }
 
-        // 内存删除
+        // 2. 内存删除
         state.removeMessages(idsToDelete);
+        result.deletedIds = [...idsToDelete];
 
-        // 事件通知
+        // 3. 清理孤立分支
+        const shouldCleanup = options?.cleanupOrphanedBranches ?? true;
+        if (shouldCleanup) {
+            const orphaned = await this.findOrphanedBranches(nodeId, sessionId);
+            for (const branchName of orphaned) {
+                try {
+                    const deletedBranchIds = await this.engine.deleteBranch(
+                        nodeId, sessionId, branchName, { cascade: true }
+                    );
+                    result.deletedBranches.push(branchName);
+                    result.deletedIds.push(...deletedBranchIds);
+
+                    this.eventBus.emitSession(sessionId, {
+                        type: 'branch_deleted',
+                        payload: { deletedIds: deletedBranchIds },
+                    });
+
+                    log.info('Orphaned branch cleaned up', { branchName });
+                } catch (e) {
+                    log.warn('Failed to cleanup orphaned branch', { branchName, error: e });
+                }
+            }
+        }
+
+        // 4. 消息删除事件
         this.eventBus.emitSession(sessionId, {
             type: 'messages_deleted',
             payload: { deletedIds: idsToDelete },
         });
+
+        return result;
+    }
+
+    /**
+     * 查找孤立分支
+     *
+     * 利用已有的 engine.getManifest 读取 manifest，
+     * 然后对每个非当前 branch 的 head 节点，
+     * 通过 engine 的 getSessionContextFromHead 检查其是否仍可达。
+     *
+     * 如果 head 节点已被软删除或不存在，则该 branch 孤立。
+     * 不需要新增 engine API。
+     */
+    private async findOrphanedBranches(
+        nodeId: string,
+        sessionId: string
+    ): Promise<string[]> {
+        const orphaned: string[] = [];
+
+        try {
+            const manifest = await this.engine.getManifest(nodeId);
+            const currentBranch = manifest.current_branch;
+
+            for (const [branchName, headNodeId] of Object.entries(manifest.branches)) {
+                if (branchName === currentBranch) continue;
+
+                try {
+                    // 尝试从 head 构建上下文链
+                    // 如果 head 节点已被软删除，buildContextChain 会返回空或不含该节点
+                    const context = await this.engine.getSessionContextFromHead(
+                        nodeId, sessionId, headNodeId
+                    );
+
+                    // 空上下文或只有 system 节点 = head 不可达
+                    const hasActiveMessages = context.some(
+                        item => item.node.role !== 'system'
+                    );
+
+                    if (!hasActiveMessages) {
+                        orphaned.push(branchName);
+                    }
+                } catch {
+                    // head 节点读取失败 = 节点不存在
+                    orphaned.push(branchName);
+                }
+            }
+        } catch (e) {
+            log.warn('Failed to check orphaned branches', { nodeId, error: e });
+        }
+
+        return orphaned;
     }
 
     /**
