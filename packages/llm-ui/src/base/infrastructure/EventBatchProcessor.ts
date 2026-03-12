@@ -1,4 +1,4 @@
-// @file: llm-ui/utils/EventBatchProcessor.ts
+// @file: llm-ui/base/infrastructure/EventBatchProcessor.ts
 
 import { OrchestratorEvent } from '@itookit/llm-engine';
 
@@ -33,7 +33,9 @@ export class EventBatchProcessor {
     /** 立即处理的事件类型 */
     private static readonly IMMEDIATE_TYPES = new Set([
         'session_start', 'finished', 'error', 'session_cleared',
-        'messages_deleted', 'message_edited', 'retry_started',
+        'messages_deleted', 'message_edited',
+        // ✅ 替换 retry_started → regenerate_started/completed
+        'regenerate_started', 'regenerate_completed',
         'branch_switched', 'branch_created', 'branch_renamed', 'branch_deleted',
         'sibling_switch',
     ]);

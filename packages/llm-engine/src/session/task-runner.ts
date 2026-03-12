@@ -46,7 +46,12 @@ export interface TaskRunnerCallbacks {
 
 /**
  * 任务执行器
- * 职责：任务队列管理 + LLM 执行
+ * 
+ * 职责：
+ * - 任务队列管理（优先级排序）
+ * - 并发控制
+ * - LLM 执行编排
+ * - 事件分发（区分绑定/后台）
  */
 export class TaskRunner {
     private queue: ExecutionTask[] = [];
@@ -293,6 +298,18 @@ export class TaskRunner {
                     type: 'node_status',
                     payload: { nodeId: rootNode.id, status: 'success' },
                 });
+
+                // 如果是 regenerate 任务，发送完成事件
+                if (input.regenerateContext) {
+                    this.eventBus.emitSession(sessionId, {
+                        type: 'regenerate_completed',
+                        payload: {
+                            branchName: input.regenerateContext.branchName,
+                            assistantNodeId,
+                        },
+                    });
+                }
+
                 this.eventBus.emitSession(sessionId, {
                     type: 'finished',
                     payload: { sessionId },

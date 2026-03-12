@@ -136,7 +136,7 @@ export interface BranchMetadata {
     /** 是否为当前激活分支 */
     isActive?: boolean;
     /** 创建方式 */
-    createdFrom?: 'retry' | 'edit' | 'manual';
+    createdFrom?: 'regenerate' | 'edit' | 'manual';
     /** 是否有子分支 */
     hasChildren?: boolean;
     /** 父分支 ID */
@@ -182,8 +182,36 @@ export interface SessionGroup {
 }
 
 /**
- * 会话快照
+ * 重新生成选项
  */
+export interface RegenerateOptions {
+    /** 显式指定 agent ID（最高优先级） */
+    agentId?: string;
+    /** 执行参数覆盖 */
+    overrides?: ExecutionOverrides;
+}
+
+/**
+ * 重新生成结果
+ */
+export interface RegenerateResult {
+    /** 新分支名称 */
+    branchName: string;
+    /** 新分支中的 user node ID */
+    userNodeId: string;
+    /** 实际使用的 agent ID */
+    agentId: string;
+}
+
+/**
+ * 重新生成触发方式
+ */
+export type RegenerateTrigger = 'from_assistant' | 'from_user' | 'from_edit';
+
+// ============================================
+// 会话快照
+// ============================================
+
 export interface SessionSnapshot {
     sessionId: string;
     nodeId: string;
@@ -242,6 +270,12 @@ export interface TaskInput {
     skipUserMessage?: boolean;
     parentUserNodeId?: string;
     branchInfo?: BranchInfo;
+    /** 标记是否为 regenerate 任务 */
+    regenerateContext?: {
+        sourceId: string;
+        trigger: RegenerateTrigger;
+        branchName: string;
+    };
 }
 
 /**
@@ -298,13 +332,25 @@ export type OrchestratorEvent =
     | { type: 'finished'; payload: { sessionId: string; metadata?: object } }
     | { type: 'error'; payload: { message: string; error?: Error; code?: string | number } }
     | { type: 'messages_deleted'; payload: { deletedIds: string[] } }
-    | { type: 'message_edited'; payload: { sessionId: string; newContent: string } }
-    | { type: 'retry_started'; payload: { originalId: string; newId: string; siblingIndex?: number; siblingCount?: number } }
-    | { type: 'sibling_switch'; payload: { sessionId: string; newIndex: number; total: number } }
+    | { type: 'message_edited'; payload: { messageId: string; newContent: string; newPersistedNodeId?: string } }
+    // 重新生成事件
+    | { type: 'regenerate_started'; payload: {
+        sourceId: string;
+        newUserNodeId: string;
+        branchName: string;
+        agentId: string;
+        trigger: RegenerateTrigger;
+    }}
+    | { type: 'regenerate_completed'; payload: {
+        branchName: string;
+        assistantNodeId: string;
+    }}
+    // 分支事件
+    | { type: 'sibling_switch'; payload: { messageId: string; newIndex: number; total: number } }
     | { type: 'branch_created'; payload: { sourceId: string; newId: string; branchName?: string } }
     | { type: 'branch_renamed'; payload: { nodeId: string; newName: string } }
     | { type: 'branch_deleted'; payload: { deletedIds: string[] } }
-    | { type: 'branch_switched'; payload: { fromId: string; toId: string } };
+    | { type: 'branch_switched'; payload: { fromBranch: string; toBranch: string } };
 
 /**
  * 注册表事件
@@ -315,4 +361,4 @@ export type RegistryEvent =
     | { type: 'session_status_changed'; payload: { sessionId: string; status: SessionStatus; prevStatus?: SessionStatus } }
     | { type: 'session_unread_updated'; payload: { sessionId: string; count: number } }
     | { type: 'pool_status_changed'; payload: { running: number; queued: number; maxConcurrent: number } }
-    | { type: 'background_task_completed'; payload: { sessionId: string } };  // ✅ 新增
+    | { type: 'background_task_completed'; payload: { sessionId: string } };

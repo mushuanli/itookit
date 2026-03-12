@@ -72,8 +72,8 @@ export interface AppendMessageMeta {
     /** ✅ 关键：父用户消息 ID（建立用户-助手关联） */
     parentUserNodeId?: string;
 
-    // === 分支创建信息（不可变，仅记录创建方式） ===
-    branchCreatedFrom?: 'retry' | 'edit' | 'manual';
+    // === 分支创建信息 ===
+    branchCreatedFrom?: 'regenerate' | 'edit' | 'manual';
     branchCreatedAt?: string;
 }
 
@@ -148,7 +148,7 @@ export interface BranchTreeNode {
     memberOfBranches: string[];
     /** 如果是某个 branch 的 head 节点，记录 branch 名 */
     branchHead?: string;
-    createdFrom?: 'retry' | 'edit' | 'manual';
+    createdFrom?: 'regenerate' | 'edit' | 'manual';
     children: BranchTreeNode[];
 }
 
@@ -184,7 +184,7 @@ export interface ILLMSessionEngine extends IBaseSessionEngine {
     createBranch(nodeId: string, sessionId: string, sourceMessageId: string, options?: {
         name?: string;
         copyContent?: boolean;
-        createdFrom?: 'retry' | 'edit' | 'manual';
+        createdFrom?: 'regenerate' | 'edit' | 'manual';
     }): Promise<string>;
 
     /** 查找包含目标节点的 branch，优先返回 current_branch */

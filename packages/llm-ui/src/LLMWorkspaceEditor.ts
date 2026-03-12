@@ -23,8 +23,8 @@ import { Command, CommandContext } from './base/core/Command';
 import { CommandRegistry } from './base/core/CommandRegistry';
 import {
     SendMessageCommand, SwitchBranchByOffsetCommand,
-    RetryCommand, DeleteMessageCommand, EditAndRetryCommand,
-    ResendCommand, SiblingSwitchCommand,
+    RegenerateCommand, DeleteMessageCommand, EditAndRetryCommand,
+    SiblingSwitchCommand,
     CopyAllCommand, PrintCommand, ToggleAllFoldCommand
 } from './commands/';
 import { ErrorHandler } from './utils/errorHandler';
@@ -182,6 +182,8 @@ export class LLMWorkspaceEditor implements IEditor {
         this.historyView = new HistoryView(historyEl, {
             onContentChange: (id, content, type) => this.handleContentChange(id, content, type),
             onNodeAction: (action, nodeId) => this.handleNodeAction(action, nodeId),
+            // ✅ 新增：编辑确认回调（Save Only）
+            onCommitEdit: (id, content) => this.handleCommitEdit(id, content),
             bus: this.bus,
             nodeId: this.options.nodeId,
             ownerNodeId: this.options.ownerNodeId || this.options.nodeId,
@@ -249,10 +251,9 @@ export class LLMWorkspaceEditor implements IEditor {
         this.switchBranchByOffsetCommand = new SwitchBranchByOffsetCommand(ctx);
 
         this.nodeCommands = new Map<string, Command<any, any>>([
-            ['retry', new RetryCommand(ctx)],
+            ['regenerate', new RegenerateCommand(ctx)],
             ['delete', new DeleteMessageCommand(ctx)],
             ['edit-and-retry', new EditAndRetryCommand(ctx)],
-            ['resend', new ResendCommand(ctx)],
         ]);
 
         // 状态持久化绑定
@@ -430,14 +431,26 @@ export class LLMWorkspaceEditor implements IEditor {
     // ================================================================
     // 操作处理 — 轻薄委托
     // ================================================================
-
-    private async handleContentChange(
+    /**
+     * ✅ 修改：编辑中仅更新草稿，不触发持久化
+     */
+    private handleContentChange(
         id: string, content: string, _type: 'user' | 'node'
-    ): Promise<void> {
+    ): void {
+        // 仅更新内存，不创建分支，不重新加载
+        this.sessionManager.updateDraft(id, content);
+        this.emit('change');
+    }
+
+    /**
+     * ✅ 新增：编辑确认回调（Save Only，不重新生成）
+     * 用户点击 "Save" 时触发，创建分支并持久化
+     */
+    private async handleCommitEdit(id: string, content: string): Promise<void> {
         await this.errorHandler.wrap(async () => {
-            await this.sessionManager.editMessage(id, content, false);
+            await this.sessionManager.commitEdit(id, content, false);
             this.emit('change');
-        }, 'Update content', 'warn');
+        }, 'Commit edit', 'warn');
     }
 
     private async handleConfigChange(config: ChatInputConfig): Promise<void> {

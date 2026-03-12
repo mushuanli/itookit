@@ -948,8 +948,8 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
       );
       if (!originalNode) throw new Error("Original node not found");
 
-      // 1. 旧路径有子节点且未被其他 branch 保护 → 自动保留
-      const hasChildren = originalNode.children_ids.length > 0;
+            // 1. 旧路径有子节点且未被其他 branch 保护 → 自动保留为分支
+            const hasChildren = originalNode.children_ids.length > 0;
 
       if (hasChildren) {
         let isProtectedByOtherBranch = false;
@@ -979,7 +979,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
         children_ids: [],
         meta: {
           ...originalNode.meta,
-          branchCreatedFrom: 'edit',
+                    branchCreatedFrom: 'edit',  // ✅ 保持 'edit'
           branchCreatedAt: now,
         }
       };
@@ -1008,7 +1008,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
     options?: {
       name?: string;
       copyContent?: boolean;
-      createdFrom?: 'retry' | 'edit' | 'manual';
+      createdFrom?: 'regenerate' | 'edit' | 'manual';
     }
   ): Promise<string> {
     return this.lockManager.acquire(`session:${sessionId}`, async () => {
