@@ -18,6 +18,8 @@ import { AgentLoader } from './helpers/AgentLoader';
 import { StateManager } from './helpers/StateManager';
 import { SessionEventHandler } from './helpers/SessionEventHandler';
 import { EventBinder } from './helpers/EventBinder';
+import { BranchStore } from './helpers/BranchStore';
+import { NavDataBuilder } from './helpers/NavDataBuilder';
 import { EditorEventBus } from './base/core/EditorEventBus';
 import { Command, CommandContext } from './base/core/Command';
 import { CommandRegistry } from './base/core/CommandRegistry';
@@ -70,6 +72,9 @@ export class LLMWorkspaceEditor implements IEditor {
     private stateManager!: StateManager;
     private agentLoader!: AgentLoader;
     private errorHandler!: ErrorHandler;
+
+    private branchStore!: BranchStore;
+    private navDataBuilder!: NavDataBuilder;
 
     // 事件系统
     private bus!: EditorEventBus;
@@ -129,8 +134,9 @@ export class LLMWorkspaceEditor implements IEditor {
             this.renderLayout();
             this.domCache = new DOMCache(this.container);
             this.bus = new EditorEventBus();
-            this.initServices();
+            // ✅ 修复：errorHandler 必须在 initServices 之前初始化
             this.initErrorHandler();
+            this.initServices();
             await this.initViews();
             this.initCommands();
             this.initEventHandler();
@@ -160,9 +166,11 @@ export class LLMWorkspaceEditor implements IEditor {
         this.stateService = new StateService(this.engine);
         this.assetService = new AssetService(this.engine);
         this.agentLoader = new AgentLoader(this.options.agentService, this.sessionManager);
-        this.stateManager = new StateManager(
-            this.stateService, this.sessionManager, this.options.nodeId!
-        );
+        this.stateManager = new StateManager(this.stateService, this.sessionManager, this.options.nodeId!);
+
+        // ✅ BranchStore 需要 errorHandler，所以 initErrorHandler 必须先调用
+        this.branchStore = new BranchStore(this.sessionManager, this.errorHandler);
+        this.navDataBuilder = new NavDataBuilder(this.sessionManager);
     }
 
     private initErrorHandler(): void {
@@ -194,7 +202,7 @@ export class LLMWorkspaceEditor implements IEditor {
 
         // BranchIndicator
         this.branchIndicator = new BranchIndicatorView(
-            this.domCache, this.bus, this.sessionManager, this.errorHandler
+            this.domCache, this.bus, this.branchStore
         );
 
         // StatusIndicator
@@ -205,13 +213,10 @@ export class LLMWorkspaceEditor implements IEditor {
 
         // ChatInput
         const savedUIState = await this.stateManager.loadUIState();
-        const initialAgents = await this.agentLoader.loadAgents();  // ✅ 统一方法名
+        const initialAgents = await this.agentLoader.loadAgents();
 
-        // ✅ 校验保存的 agentId
         const savedAgentId = savedUIState?.input_agent_id || 'default';
-        const validAgentId = this.agentLoader.validateAgentId(
-            savedAgentId, initialAgents
-        );
+        const validAgentId = this.agentLoader.validateAgentId(savedAgentId, initialAgents);
 
         let initialSettings;
         if (this.currentSessionId && !this.options.isNewSession) {
@@ -228,7 +233,7 @@ export class LLMWorkspaceEditor implements IEditor {
             initialAgents,
             initialConfig: {
                 text: savedUIState?.input_text || '',
-                agentId: validAgentId,  // ✅ 使用校验后的 ID
+                agentId: validAgentId,
                 settings: initialSettings,
             },
             onConfigChange: (config) => this.handleConfigChange(config),
@@ -272,11 +277,11 @@ export class LLMWorkspaceEditor implements IEditor {
             bus: this.bus,
             branchIndicator: this.branchIndicator,
             statusIndicator: this.statusIndicator,
+            // ✅ 修复：使用 branchStore 替代 floatingNav
+            branchStore: this.branchStore,
             getCurrentSessionId: () => this.currentSessionId,
             onContentChanged: () => this.emit('change'),
-            floatingNav: this.floatingNav
-                ? { refresh: () => this.refreshFloatingNav() }
-                : null,
+            onFloatingNavRefresh: () => this.pushNavData(),
         });
     }
 
@@ -325,11 +330,11 @@ export class LLMWorkspaceEditor implements IEditor {
             },
             onSwitchBranchPrev: () => this.switchBranchByOffsetCommand.run({
                 offset: -1,
-                cachedBranches: this.branchIndicator.getCachedBranches(),
+                cachedBranches: this.branchStore.current,
             }),
             onSwitchBranchNext: () => this.switchBranchByOffsetCommand.run({
                 offset: 1,
-                cachedBranches: this.branchIndicator.getCachedBranches(),
+                cachedBranches: this.branchStore.current,
             }),
         });
 
@@ -414,7 +419,6 @@ export class LLMWorkspaceEditor implements IEditor {
      * ✅ 新增：刷新 Agent 列表并校验当前选中
      */
     private async refreshAgents(): Promise<void> {
-        // 如果 chatInput 尚未初始化（首次 init 时），跳过
         if (!this.chatInput) return;
 
         const agents = await this.agentLoader.loadAgents();
@@ -599,35 +603,30 @@ export class LLMWorkspaceEditor implements IEditor {
     // 浮动导航面板
     // ================================================================
 
-    private toggleNavigator(): void {
+    private async toggleNavigator(): Promise<void> {
         if (!this.floatingNav) {
-            this.floatingNav = new FloatingNavPanel(
-                this.container, this.bus, this.sessionManager
-            );
+            this.floatingNav = new FloatingNavPanel(this.container, this.bus);
         }
 
-        this.floatingNav.updateItems(
-            this.sessionManager.getSessions(),
-            this.stateManager.getCollapseStates()
-        ).then(() => {
-            this.floatingNav!.updateBranches(
-                this.branchIndicator.getCachedBranches()
-            );
-            const visibleId = this.findCurrentVisibleSession();
-            if (visibleId) this.floatingNav!.setCurrentChat(visibleId);
-            this.floatingNav!.toggle();
-        });
+        await this.pushNavData();
+        this.floatingNav.toggle();
     }
 
-    private async refreshFloatingNav(): Promise<void> {
+    /**
+     * ✅ 新增：统一的数据推送方法
+     * 无论是 toggle 还是 refresh，都走同一条路径
+     */
+    private async pushNavData(): Promise<void> {
         if (!this.floatingNav) return;
-        await this.floatingNav.updateItems(
+
+        const data = await this.navDataBuilder.build(
             this.sessionManager.getSessions(),
-            this.historyView.getCollapseStates()
+            this.historyView.getCollapseStates(),
+            this.branchStore.current,
+            this.findCurrentVisibleSession() ?? undefined
         );
-        this.floatingNav.updateBranches(
-            this.branchIndicator.getCachedBranches()
-        );
+
+        this.floatingNav.update(data);
     }
 
     // ================================================================
@@ -738,6 +737,7 @@ export class LLMWorkspaceEditor implements IEditor {
         this.bus?.destroy();
 
         this.branchIndicator?.destroy();
+        this.branchStore?.destroy();
         this.statusIndicator?.destroy();
         this.domCache?.destroy();
 
