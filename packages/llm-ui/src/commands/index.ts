@@ -10,4 +10,4 @@ export {
     SiblingSwitchCommand
 } from './NodeCommands';
 export { BatchDeleteCommand, BatchCopyCommand } from './BatchCommands';
-export { CopyAllCommand, PrintCommand, ToggleAllFoldCommand } from './WorkspaceCommands';
+export { CopyAllCommand, PrintCommand } from './WorkspaceCommands';
