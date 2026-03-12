@@ -2,17 +2,29 @@
 
 import { Command } from '../base/core/Command';
 import type { ErrorSeverity } from '../utils/errorHandler';
+import type { SessionGroup } from '@itookit/llm-engine';
+
+/**
+ * 在 sessions 列表和执行树中查找 session
+ */
+function findSession(sessions: SessionGroup[], nodeId: string): SessionGroup | undefined {
+    return sessions.find(s => s.id === nodeId)
+        || sessions.find(s =>
+            s.executionRoot?.id === nodeId || findInTree(s.executionRoot, nodeId)
+        );
+}
+
+function findInTree(node: any, targetId: string): boolean {
+    if (!node) return false;
+    if (node.id === targetId) return true;
+    return node.children?.some((c: any) => findInTree(c, targetId)) ?? false;
+}
 
 export class RetryCommand extends Command<{ nodeId: string }> {
     protected readonly name = 'Retry';
 
     protected async execute({ nodeId }: { nodeId: string }): Promise<void> {
-        const sessions = this.ctx.sessionManager.getSessions();
-        const session = sessions.find(s => s.id === nodeId)
-            || sessions.find(s =>
-                s.executionRoot?.id === nodeId || this.findInTree(s.executionRoot, nodeId)
-            );
-
+        const session = findSession(this.ctx.sessionManager.getSessions(), nodeId);
         if (!session) throw new Error('Message not found');
 
         const canRetry = this.ctx.sessionManager.canRetry(session.id);
@@ -20,20 +32,12 @@ export class RetryCommand extends Command<{ nodeId: string }> {
 
         this.ctx.chatInput.setLoading(true);
 
-        // ✅ 修复：不传 agentId，让 engine 的 resolveAgentId 链自动处理
-        // resendUserMessage(id, undefined, undefined) 会触发：
-        //   resolveAgentId(undefined, resolveAgentFromResponses(...), 'default')
+        // 不传 agentId — 引擎自动从上下文解析
         if (session.role === 'user') {
             await this.ctx.sessionManager.resendUserMessage(session.id);
         } else {
             await this.ctx.sessionManager.retryGeneration(session.id);
         }
-    }
-
-    private findInTree(node: any, targetId: string): boolean {
-        if (!node) return false;
-        if (node.id === targetId) return true;
-        return node.children?.some((c: any) => this.findInTree(c, targetId)) ?? false;
     }
 }
 
@@ -50,8 +54,7 @@ export class DeleteMessageCommand extends Command<{ nodeId: string }> {
             });
         } catch (e) {
             // 删除失败：回滚 UI
-            const sessions = this.ctx.sessionManager.getSessions();
-            this.ctx.historyView.renderFull(sessions);
+            this.ctx.historyView.renderFull(this.ctx.sessionManager.getSessions());
             throw e;
         }
     }
@@ -80,8 +83,6 @@ export class EditAndRetryCommand extends Command<{ nodeId: string }> {
         if (!session || session.role !== 'user') return;
 
         this.ctx.chatInput.setLoading(true);
-
-        // ✅ 修复：不传 agentId，让 engine 自动解析
         await this.ctx.sessionManager.editMessage(nodeId, session.content || '', true);
     }
 }
@@ -91,8 +92,6 @@ export class ResendCommand extends Command<{ nodeId: string }> {
 
     protected async execute({ nodeId }: { nodeId: string }): Promise<void> {
         this.ctx.chatInput.setLoading(true);
-
-        // ✅ 修复：不传 agentId，让 engine 自动解析
         await this.ctx.sessionManager.resendUserMessage(nodeId);
     }
 }
@@ -101,7 +100,9 @@ export class SiblingSwitchCommand extends Command<{ nodeId: string; direction: '
     protected readonly name = 'Switch Sibling';
     protected severity: ErrorSeverity = 'warn';
 
-    protected async execute({ nodeId, direction }: { nodeId: string; direction: 'prev' | 'next' }): Promise<void> {
+    protected async execute({ nodeId, direction }: {
+        nodeId: string; direction: 'prev' | 'next';
+    }): Promise<void> {
         const session = this.ctx.sessionManager.getSessions().find(s => s.id === nodeId);
         if (!session) return;
 

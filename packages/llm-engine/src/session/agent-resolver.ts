@@ -65,6 +65,7 @@ export class AgentResolver {
                     connection,
                     model: realModelId,
                     systemPrompt: agentDef.config.systemPrompt,
+                    icon: agentDef.icon,  // ✅ 修复：传递 icon
                 } as ExecutorConfig;
             }
         } catch (e) {

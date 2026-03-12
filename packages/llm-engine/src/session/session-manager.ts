@@ -258,38 +258,78 @@ export class SessionManager {
     }
 
     // ================================================================
-    // 消息操作：统一删除执行
+    // Agent 解析
     // ================================================================
 
     /**
-     * 统一的删除执行：持久化 + 内存 + 事件通知
+     * Agent 解析优先级链
+     *
+     * 调用场景：
+     *   sendMessage:       由用户在 ChatInput 中选择，直接传入
+     *   retryGeneration:   resolveAgentId(explicit?, originalAgent, fallback)
+     *   resendUserMessage: resolveAgentId(explicit?, fromResponses, fallback)
+     *   editMessage:       resolveAgentId(undefined, fromResponses, 'default')
+     *
+     * 重试/重发时 UI 层不传 agentId，引擎自动从上下文解析
+     */
+    private resolveAgentId(
+        explicit?: string,
+        fromContext?: string | null,
+        fallback?: string
+    ): string {
+        return explicit || fromContext || fallback || 'default';
+    }
+
+    /**
+     * 从 user 消息后续的 assistant 中提取 agentId
+     */
+    private resolveAgentFromResponses(
+        state: SessionState,
+        userMessageId: string
+    ): string | null {
+        const sessions = state.getSessions();
+        const userIndex = sessions.findIndex(s => s.id === userMessageId);
+        if (userIndex === -1) return null;
+
+        for (let i = userIndex + 1; i < sessions.length; i++) {
+            if (sessions[i].role === 'user') break;
+            const executorId = sessions[i].executionRoot?.executorId;
+            if (sessions[i].role === 'assistant' && executorId) {
+                return executorId;
+            }
+        }
+        return null;
+    }
+
+    // ================================================================
+    // 消息操作：删除
+    // ================================================================
+
+    /**
+     * 统一删除执行：持久化 + 内存 + 事件通知
      */
     private async executeDelete(
         nodeId: string,
         sessionId: string,
         state: SessionState,
-        idsToDelete: string[],
-        emitEvent: boolean = true
+        idsToDelete: string[]
     ): Promise<void> {
         if (idsToDelete.length === 0) return;
 
-        // 收集持久化节点 ID
-        const persistedNodeIds = idsToDelete
+        // 持久化删除
+        const persistedIds = idsToDelete
             .map(id => state.findSessionById(id)?.persistedNodeId)
             .filter((id): id is string => !!id);
 
-        // 持久化删除
-        if (persistedNodeIds.length > 0) {
+        if (persistedIds.length > 0) {
             try {
-                if (persistedNodeIds.length === 1) {
-                    await this.engine.deleteMessage(nodeId, sessionId, persistedNodeIds[0]);
+                if (persistedIds.length === 1) {
+                    await this.engine.deleteMessage(nodeId, sessionId, persistedIds[0]);
                 } else {
-                    await this.engine.deleteMessages(nodeId, sessionId, persistedNodeIds);
+                    await this.engine.deleteMessages(nodeId, sessionId, persistedIds);
                 }
             } catch (e) {
-                log.warn('Failed to delete persisted messages', {
-                    sessionId, persistedNodeIds, error: e
-                });
+                log.warn('Failed to delete persisted messages', { sessionId, error: e });
             }
         }
 
@@ -299,41 +339,36 @@ export class SessionManager {
         }
 
         // 事件通知
-        if (emitEvent) {
-            this.eventBus.emitSession(sessionId, {
-                type: 'messages_deleted',
-                payload: { deletedIds: idsToDelete },
-            });
-        }
+        this.eventBus.emitSession(sessionId, {
+            type: 'messages_deleted',
+            payload: { deletedIds: idsToDelete },
+        });
     }
 
     /**
-     * 收集需要删除的消息 ID
+     * 收集需要删除的消息 ID（含关联 assistant）
      */
     private collectDeletableIds(
         state: SessionState,
         messageId: string,
         includeResponses: boolean = true
     ): string[] {
-        const session = state.findSessionById(messageId);
-        if (!session) return [messageId];
-
         const ids: string[] = [messageId];
 
-        if (session.role === 'user' && includeResponses) {
-            const sessions = state.getSessions();
-            const index = sessions.findIndex(
-                s => s.id === messageId || s.persistedNodeId === messageId
-            );
+        if (!includeResponses) return ids;
 
-            if (index !== -1) {
-                for (let i = index + 1; i < sessions.length; i++) {
-                    if (sessions[i].role === 'assistant') {
-                        ids.push(sessions[i].id);
-                    } else {
-                        break;
-                    }
-                }
+        const session = state.findSessionById(messageId);
+        if (!session || session.role !== 'user') return ids;
+
+        const sessions = state.getSessions();
+        const index = sessions.findIndex(s => s.id === messageId);
+        if (index === -1) return ids;
+
+        for (let i = index + 1; i < sessions.length; i++) {
+            if (sessions[i].role === 'assistant') {
+                ids.push(sessions[i].id);
+            } else {
+                break;
             }
         }
 
@@ -341,7 +376,7 @@ export class SessionManager {
     }
 
     /**
-     * 收集 user 消息之后紧跟的 assistant 消息 ID
+     * 收集 user 消息之后紧跟的 assistant ID
      */
     private collectAssistantIdsAfterUser(
         state: SessionState,
@@ -368,8 +403,9 @@ export class SessionManager {
 
     async deleteMessage(messageId: string, options?: DeleteOptions): Promise<void> {
         const { sessionId, nodeId, state } = this.ensureBound();
-        const deleteResponses = options?.deleteAssociatedResponses ?? true;
-        const idsToDelete = this.collectDeletableIds(state, messageId, deleteResponses);
+        const idsToDelete = this.collectDeletableIds(
+            state, messageId, options?.deleteAssociatedResponses ?? true
+        );
         await this.executeDelete(nodeId, sessionId, state, idsToDelete);
     }
 
@@ -378,15 +414,20 @@ export class SessionManager {
         if (messageIds.length === 1) return this.deleteMessage(messageIds[0], options);
 
         const { sessionId, nodeId, state } = this.ensureBound();
-        const deleteResponses = options?.deleteAssociatedResponses ?? true;
-
         const allIds = new Set<string>();
+
         for (const id of messageIds) {
-            this.collectDeletableIds(state, id, deleteResponses).forEach(x => allIds.add(x));
+            this.collectDeletableIds(
+                state, id, options?.deleteAssociatedResponses ?? true
+            ).forEach(x => allIds.add(x));
         }
 
         await this.executeDelete(nodeId, sessionId, state, Array.from(allIds));
     }
+
+    // ================================================================
+    // 消息操作：编辑
+    // ================================================================
 
     async editMessage(
         messageId: string,
@@ -395,33 +436,194 @@ export class SessionManager {
     ): Promise<void> {
         const { sessionId, state, runtime, nodeId } = this.ensureBound();
 
+        // 在 reload 前解析 agent
+        const resolvedAgentId = autoRerun
+            ? this.resolveAgentId(
+                undefined,
+                this.resolveAgentFromResponses(state, messageId),
+                'default'
+            )
+            : 'default';
+
+        // 更新内存
         state.updateMessageContent(messageId, newContent);
         const session = state.findSessionById(messageId);
-        if (session?.persistedNodeId) {
-            // 委托给 engine 层的 editMessage（会自动保留旧路径）
-            await this.engine.editMessage(
+        if (!session) return;
+
+        // 持久化编辑
+        let newPersistedNodeId: string | undefined;
+        if (session.persistedNodeId) {
+            newPersistedNodeId = await this.engine.editMessage(
                 nodeId, sessionId, session.persistedNodeId, newContent
             );
         }
 
+        // 通知 UI
         this.eventBus.emitSession(sessionId, {
             type: 'message_edited',
             payload: { sessionId: messageId, newContent },
         });
 
-        if (autoRerun && session?.role === 'user') {
+        // 自动重新生成
+        if (autoRerun && session.role === 'user') {
             await this.reloadSessionData(nodeId, sessionId, state);
 
-            // ✅ 修复：自动解析原消息关联的 agentId
-            const originalAgentId = this.resolveAgentFromResponses(state, messageId);
-            const agentId = this.resolveAgentId(undefined, originalAgentId, 'default');
+            const searchId = newPersistedNodeId || messageId;
+            const reloadedSession = state.findSessionById(searchId);
 
-            await this.resubmitFromUser(session, agentId, runtime);
+            if (!reloadedSession) {
+                throw new EngineError(
+                    EngineErrorCode.SESSION_INVALID,
+                    `User message not found after reload: ${searchId}`
+                );
+            }
+
+            await this.resubmitFromUser(reloadedSession, resolvedAgentId, runtime);
         }
     }
 
     // ================================================================
-    // 重试：统一核心逻辑
+    // 重试
+    // ================================================================
+
+    async retryGeneration(
+        assistantId: string,
+        agentId?: string,
+        fallbackAgentId?: string,
+        preserveCurrent: boolean = true
+    ): Promise<void> {
+        const { state, runtime } = this.ensureBound();
+
+        const userMessage = state.findUserMessageBefore(assistantId);
+        if (!userMessage) {
+            throw new EngineError(EngineErrorCode.SESSION_INVALID, 'No user message found');
+        }
+
+        const currentAssistant = state.findSessionById(assistantId);
+        const resolvedAgentId = this.resolveAgentId(
+            agentId,
+            currentAssistant?.executionRoot?.executorId,
+            fallbackAgentId
+        );
+
+        if (preserveCurrent) {
+            await this.retryWithBranch(userMessage, assistantId, resolvedAgentId, runtime);
+        } else {
+            await this.retryInPlace(userMessage, assistantId, resolvedAgentId, runtime);
+        }
+    }
+
+    /**
+     * 就地重试：删除旧 assistant，在原位重新生成
+     */
+    private async retryInPlace(
+        userMessage: SessionGroup,
+        assistantId: string,
+        agentId: string,
+        runtime: SessionRuntime
+    ): Promise<void> {
+        const { state } = this.ensureBound();
+
+        await this.deleteMessage(assistantId);
+
+        const userAfterDelete = state.findSessionById(userMessage.id);
+        if (!userAfterDelete) {
+            throw new EngineError(
+                EngineErrorCode.SESSION_INVALID,
+                'User message lost after deleting assistant'
+            );
+        }
+
+        await this.resubmitFromUser(userAfterDelete, agentId, runtime);
+    }
+
+    /**
+     * 分支重试：保留当前回复，创建新分支重新生成
+     */
+    private async retryWithBranch(
+        userMessage: SessionGroup,
+        originalAssistantId: string,
+        agentId: string,
+        runtime: SessionRuntime
+    ): Promise<void> {
+        const { sessionId, nodeId, state } = this.ensureBound();
+
+        if (!userMessage.persistedNodeId) {
+            throw new EngineError(
+                EngineErrorCode.SESSION_INVALID,
+                'User message not persisted, cannot create branch'
+            );
+        }
+
+        const newBranchNodeId = await this.engine.createBranch(
+            nodeId, sessionId, userMessage.persistedNodeId,
+            { createdFrom: 'retry', copyContent: true }
+        );
+
+        await this.reloadSessionData(nodeId, sessionId, state);
+
+        const reloadedUser = state.findSessionById(newBranchNodeId);
+        if (!reloadedUser) {
+            throw new EngineError(
+                EngineErrorCode.SESSION_INVALID,
+                `Branch user message not found: ${newBranchNodeId}`
+            );
+        }
+
+        const branchInfo = await this.getSiblingInfo(sessionId, newBranchNodeId);
+
+        this.eventBus.emitSession(sessionId, {
+            type: 'branch_created',
+            payload: { sourceId: originalAssistantId, newId: newBranchNodeId },
+        });
+
+        await this.resubmitFromUser(reloadedUser, agentId, runtime, branchInfo);
+    }
+
+    // ================================================================
+    // 重发
+    // ================================================================
+
+    async resendUserMessage(
+        userMessageId: string,
+        agentId?: string,
+        fallbackAgentId?: string
+    ): Promise<void> {
+        const { sessionId, nodeId, state, runtime } = this.ensureBound();
+
+        const session = state.findSessionById(userMessageId);
+        if (!session || session.role !== 'user') {
+            throw new EngineError(
+                EngineErrorCode.SESSION_INVALID,
+                `Invalid user session: ${userMessageId}`
+            );
+        }
+
+        // 先解析 agent（在删除 assistant 之前）
+        const resolvedAgentId = this.resolveAgentId(
+            agentId,
+            this.resolveAgentFromResponses(state, userMessageId),
+            fallbackAgentId
+        );
+
+        // 删除后续 assistant
+        const assistantIds = this.collectAssistantIdsAfterUser(state, userMessageId);
+        await this.executeDelete(nodeId, sessionId, state, assistantIds);
+
+        // 重新提交
+        const sessionAfterDelete = state.findSessionById(userMessageId);
+        if (!sessionAfterDelete) {
+            throw new EngineError(
+                EngineErrorCode.SESSION_INVALID,
+                'User session lost after deleting assistant messages'
+            );
+        }
+
+        await this.resubmitFromUser(sessionAfterDelete, resolvedAgentId, runtime);
+    }
+
+    // ================================================================
+    // 共享：重新提交
     // ================================================================
 
     /**
@@ -441,7 +643,7 @@ export class SessionManager {
                 originalId: userMessage.id,
                 newId: '',
                 siblingIndex: branchInfo?.siblingIndex,
-                siblingCount: branchInfo?.siblingCount
+                siblingCount: branchInfo?.siblingCount,
             },
         });
 
@@ -461,149 +663,22 @@ export class SessionManager {
     }
 
     /**
-     * 从后续 assistant 消息中解析 agentId
+     * 获取兄弟节点信息
      */
-    private resolveAgentFromResponses(
-        state: SessionState,
-        userMessageId: string
-    ): string | null {
-        const sessions = state.getSessions();
-        const userIndex = sessions.findIndex(
-            s => s.id === userMessageId || s.persistedNodeId === userMessageId
-        );
-        if (userIndex === -1) return null;
-
-        for (let i = userIndex + 1; i < sessions.length; i++) {
-            if (sessions[i].role === 'user') break;
-            if (sessions[i].role === 'assistant' && sessions[i].executionRoot?.executorId) {
-                return sessions[i].executionRoot!.executorId;
-            }
-        }
-        return null;
-    }
-
-    /**
-     * 解析最终使用的 agentId（优先级链）
-     */
-    private resolveAgentId(
-        explicit?: string,
-        fromAssistant?: string | null,
-        fallback?: string
-    ): string {
-        return explicit || fromAssistant || fallback || 'default';
-    }
-
-    async retryGeneration(
-        assistantId: string,
-        agentId?: string,
-        fallbackAgentId?: string,
-        preserveCurrent: boolean = true
-    ): Promise<void> {
-        const { sessionId, state, runtime, nodeId } = this.ensureBound();
-
-        const userMessage = state.findUserMessageBefore(assistantId);
-        if (!userMessage) {
-            throw new EngineError(EngineErrorCode.SESSION_INVALID, 'No user message found');
-        }
-
-        const currentAssistant = state.findSessionById(assistantId);
-        const resolvedAgentId = this.resolveAgentId(
-            agentId,
-            currentAssistant?.executionRoot?.executorId,
-            fallbackAgentId
-        );
-
-        if (!preserveCurrent) {
-            await this.deleteMessage(assistantId);
-            await this.resubmitFromUser(userMessage, resolvedAgentId, runtime);
-            return;
-        }
-
-        // preserveCurrent === true：创建持久化 branch
-        if (!userMessage.persistedNodeId) {
-            throw new EngineError(
-                EngineErrorCode.SESSION_INVALID,
-                'User message not persisted, cannot create branch'
-            );
-        }
-
-        // 在 engine 层创建真正的 branch（与原 assistant 并列的新路径）
-        const newBranchNodeId = await this.engine.createBranch(
-            nodeId,
-            sessionId,
-            userMessage.persistedNodeId,
-            { createdFrom: 'retry', copyContent: true }
-        );
-
-        // 重新加载会话数据（branch 结构已变）
-        await this.reloadSessionData(nodeId, sessionId, state);
-
-        // 计算兄弟信息（从持久化获取真实数据）
-        let siblingCount = 1;
-        let siblingIndex = 0;
-
+    private async getSiblingInfo(
+        sessionId: string,
+        nodeId: string
+    ): Promise<BranchInfo> {
         try {
-            const siblings = await this.engine.getNodeSiblings(
-                sessionId, newBranchNodeId
-            );
-            siblingCount = siblings.length;
-            siblingIndex = siblings.findIndex(s => s.id === newBranchNodeId);
-            if (siblingIndex === -1) siblingIndex = siblingCount - 1;
-        } catch (e) {
-            log.warn('Failed to get sibling info for retry', { error: e });
+            const siblings = await this.engine.getNodeSiblings(sessionId, nodeId);
+            const idx = siblings.findIndex(s => s.id === nodeId);
+            return {
+                siblingIndex: idx === -1 ? siblings.length - 1 : idx,
+                siblingCount: siblings.length,
+            };
+        } catch {
+            return { siblingIndex: 0, siblingCount: 1 };
         }
-
-        this.eventBus.emitSession(sessionId, {
-            type: 'branch_created',
-            payload: {
-                sourceId: assistantId,
-                newId: newBranchNodeId,
-            },
-        });
-
-        // 在新 branch 上提交执行（skipUserMessage 因为 createBranch 已复制了用户消息）
-        await this.taskRunner.submit(
-            {
-                sessionId,
-                nodeId,
-                text: userMessage.content || '',
-                files: userMessage.files || [],
-                agentId: resolvedAgentId,
-                skipUserMessage: true,
-                parentUserNodeId: newBranchNodeId,
-                branchInfo: {
-                    siblingIndex,
-                    siblingCount,
-                    parentAssistantId: assistantId,
-                },
-            },
-            runtime
-        );
-    }
-
-    async resendUserMessage(
-        userMessageId: string,
-        agentId?: string,
-        fallbackAgentId?: string
-    ): Promise<void> {
-        const { sessionId, nodeId, state, runtime } = this.ensureBound();
-
-        const session = state.findSessionById(userMessageId);
-        if (!session || session.role !== 'user') {
-            throw new EngineError(EngineErrorCode.SESSION_INVALID, 'Invalid user session');
-        }
-
-        const resolvedAgentId = this.resolveAgentId(
-            agentId,
-            this.resolveAgentFromResponses(state, userMessageId),
-            fallbackAgentId
-        );
-
-        // 删除关联的 assistant 响应
-        const assistantIds = this.collectAssistantIdsAfterUser(state, userMessageId);
-        await this.executeDelete(nodeId, sessionId, state, assistantIds);
-
-        await this.resubmitFromUser(session, resolvedAgentId, runtime);
     }
 
     // ================================================================
@@ -682,10 +757,6 @@ export class SessionManager {
         return newNodeId;
     }
 
-    /**
-     * 按分支名切换当前 branch
-     * 更新 manifest 的 current_branch 和 current_head，重新加载消息
-     */
     async switchBranch(branchName: string): Promise<void> {
         const { sessionId, nodeId, state } = this.ensureBound();
         this.ensureNotGenerating('switch branch');
@@ -698,9 +769,7 @@ export class SessionManager {
             );
         }
 
-        if (manifest.current_branch === branchName) {
-            return; // 已经在该 branch 上，无需操作
-        }
+        if (manifest.current_branch === branchName) return;
 
         await this.engine.switchBranch(nodeId, sessionId, branchName);
         await this.reloadSessionData(nodeId, sessionId, state);
@@ -754,7 +823,6 @@ export class SessionManager {
             nodeId, sessionId, branchName, { cascade }
         );
 
-        // 重新加载会话数据（分支结构已变）
         await this.reloadSessionData(nodeId, sessionId, state);
 
         this.eventBus.emitSession(sessionId, {
@@ -939,7 +1007,7 @@ export class SessionManager {
     // ================================================================
 
     /**
-     * 从持久化加载消息到 state（不含事件通知）
+     * 从持久化加载消息到 state
      */
     private async populateState(
         state: SessionState,
