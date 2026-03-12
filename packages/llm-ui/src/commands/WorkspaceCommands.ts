@@ -40,21 +40,3 @@ export class PrintCommand extends Command<{ title: string; engine: any; nodeId?:
         });
     }
 }
-
-/**
- * 全部折叠/展开切换
- */
-export class ToggleAllFoldCommand extends Command<{ isAllExpanded: boolean }> {
-    protected readonly name = 'Toggle All Fold';
-    protected severity: ErrorSeverity = 'silent';
-
-    protected async execute({ isAllExpanded }: { isAllExpanded: boolean }): Promise<void> {
-        const shouldCollapse = isAllExpanded;
-        this.ctx.historyView.setAllCollapsed(shouldCollapse);
-
-        const sessions = this.ctx.sessionManager.getSessions();
-        const states: Record<string, boolean> = {};
-        sessions.forEach(s => { states[s.id] = shouldCollapse; });
-        this.ctx.bus.emit('state:collapseChanged', { states });
-    }
-}

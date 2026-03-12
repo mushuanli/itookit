@@ -27,7 +27,7 @@ import {
     SendMessageCommand, SwitchBranchByOffsetCommand,
     RegenerateCommand, DeleteMessageCommand, EditAndRetryCommand,
     SiblingSwitchCommand,
-    CopyAllCommand, PrintCommand, ToggleAllFoldCommand
+    CopyAllCommand, PrintCommand
 } from './commands/';
 import { ErrorHandler } from './utils/errorHandler';
 import { EventCleanup } from './base/infrastructure/EventCleanup';
@@ -98,7 +98,6 @@ export class LLMWorkspaceEditor implements IEditor {
     private sessionEventUnsub: (() => void) | null = null;
     private titleInput!: HTMLInputElement;
     private currentTitle: string = 'New Chat';
-    private isAllExpanded: boolean = true;
     private currentSessionId: string | null = null;
     private isBeingDeleted = false;
     private initPromise: Promise<void> | null = null;
@@ -262,8 +261,10 @@ export class LLMWorkspaceEditor implements IEditor {
         ]);
 
         // 状态持久化绑定
-        this.bus.on('state:collapseChanged', ({ states }) =>
-            this.stateManager.scheduleUIStateSave(states)
+        this.bus.on('state:collapseChanged', ({ states }) => {
+            this.stateManager.scheduleUIStateSave(states);
+            this.updateCollapseButtonIcon();
+        }
         );
         this.bus.on('state:inputChanged', () =>
             this.stateManager.scheduleInputStateSave()
@@ -478,22 +479,23 @@ export class LLMWorkspaceEditor implements IEditor {
         }
     }
 
-    private handleToggleAllFold(): void {
-        this.isAllExpanded = !this.isAllExpanded;
-        new ToggleAllFoldCommand(this.buildCommandContext())
-            .run({ isAllExpanded: !this.isAllExpanded });
-
-        // 更新折叠按钮图标
+    private updateCollapseButtonIcon(isAllCollapsed?: boolean): void {
         const collapseBtn = this.domCache.byId('llm-btn-collapse');
-        if (collapseBtn) {
-            collapseBtn.innerHTML = this.isAllExpanded
-                ? LayoutTemplates.collapseIcon()
-                : LayoutTemplates.expandIcon();
-            collapseBtn.setAttribute(
-                'title',
-                this.isAllExpanded ? 'Collapse All' : 'Expand All'
-            );
-        }
+        if (!collapseBtn) return;
+
+        const showExpand = isAllCollapsed ?? !this.historyView.shouldShowCollapseIcon();
+        collapseBtn.innerHTML = showExpand
+            ? LayoutTemplates.expandIcon()
+            : LayoutTemplates.collapseIcon();
+        collapseBtn.setAttribute('title', showExpand ? 'Expand All' : 'Collapse All');
+    }
+
+    private handleToggleAllFold(): void {
+        const isNowCollapsed = this.historyView.toggleAllFold();
+        this.bus.emit('state:collapseChanged', {
+            states: this.historyView.getCollapseStates(),
+        });
+        this.updateCollapseButtonIcon(isNowCollapsed);
     }
 
     private async handleCopy(): Promise<void> {
