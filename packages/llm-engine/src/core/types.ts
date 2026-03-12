@@ -316,6 +316,18 @@ export interface PoolStatus {
 export interface DeleteOptions {
     /** 是否删除关联的响应消息，默认 true */
     deleteAssociatedResponses?: boolean;
+    /** 是否自动清理孤立的分支，默认 true */
+    cleanupOrphanedBranches?: boolean;
+}
+
+/**
+ * 删除结果
+ */
+export interface DeleteResult {
+    /** 被删除的消息 ID 列表 */
+    deletedIds: string[];
+    /** 被级联清理的分支名称列表 */
+    deletedBranches: string[];
 }
 
 
