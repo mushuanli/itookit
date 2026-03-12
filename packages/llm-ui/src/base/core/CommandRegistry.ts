@@ -1,4 +1,4 @@
-// @file: llm-ui/core/CommandRegistry.ts
+// @file: llm-ui/base/core/CommandRegistry.ts
 
 import { Command, CommandContext } from './Command';
 import { EditorEventBus, EditorBusEvents } from './EditorEventBus';
@@ -6,11 +6,8 @@ import { EditorEventBus, EditorBusEvents } from './EditorEventBus';
 import {
     CreateBranchCommand, SwitchBranchCommand, SwitchBranchByIdCommand,
     RenameBranchCommand, DeleteBranchCommand, BatchDeleteCommand, BatchCopyCommand,
-    CopySessionContentCommand, FoldAllCommand, UnfoldAllCommand, ToggleSessionFoldCommand,
-    ScrollToSessionCommand
 } from '../../commands/';
-
-type CommandFactory = (ctx: CommandContext) => Command<any, any>;
+import { Toast } from '@itookit/common';
 
 /**
  * 命令注册中心
@@ -20,72 +17,88 @@ type CommandFactory = (ctx: CommandContext) => Command<any, any>;
  * 在 LLMWorkspaceEditor.initCommands() 中手动实例化。
  */
 export class CommandRegistry {
-    private commands = new Map<string, Command<any, any>>();
     private unsubscribers: (() => void)[] = [];
 
     constructor(
         private ctx: CommandContext,
         private bus: EditorEventBus
-    ) { }
+    ) {}
 
     /**
      * 注册所有命令并绑定到事件总线
      */
     initialize(): void {
-        // 分支命令
-        this.bind('branch:create', (ctx) => new CreateBranchCommand(ctx));
-        this.bind('branch:switch', (ctx) => new SwitchBranchCommand(ctx));
-        this.bind('branch:switchById', (ctx) => new SwitchBranchByIdCommand(ctx));
-        this.bind('branch:rename', (ctx) => new RenameBranchCommand(ctx));
-        this.bind('branch:delete', (ctx) => new DeleteBranchCommand(ctx));
+        // 复杂命令保留独立类
+        this.bindCommand('branch:create', new CreateBranchCommand(this.ctx));
+        this.bindCommand('branch:switch', new SwitchBranchCommand(this.ctx));
+        this.bindCommand('branch:switchById', new SwitchBranchByIdCommand(this.ctx));
+        this.bindCommand('branch:rename', new RenameBranchCommand(this.ctx));
+        this.bindCommand('branch:delete', new DeleteBranchCommand(this.ctx));
+        this.bindCommand('batch:delete', new BatchDeleteCommand(this.ctx));
+        this.bindCommand('batch:copy', new BatchCopyCommand(this.ctx));
 
-        // 导航命令
-        this.bind('nav:scrollTo', (ctx) => new ScrollToSessionCommand(ctx));
-        this.bind('nav:toggleFold', (ctx) => new ToggleSessionFoldCommand(ctx));
-        this.bind('nav:foldAll', (ctx) => new FoldAllCommand(ctx));
-        this.bind('nav:unfoldAll', (ctx) => new UnfoldAllCommand(ctx));
+        // ✅ 简单操作直接内联，消除 6 个单独的文件/类
+        this.bindInline('nav:scrollTo', async ({ sessionId }) => {
+            const el = this.ctx.historyView.getSessionElement(sessionId);
+            if (!el) return;
+            el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            el.classList.add('llm-ui-session--highlight');
+            setTimeout(() => el.classList.remove('llm-ui-session--highlight'), 1500);
+        });
 
-        // 批量操作
-        this.bind('batch:delete', (ctx) => new BatchDeleteCommand(ctx));
-        this.bind('batch:copy', (ctx) => new BatchCopyCommand(ctx));
+        this.bindInline('nav:toggleFold', async ({ sessionId }) => {
+            this.ctx.historyView.toggleSessionCollapse(sessionId);
+        });
 
-        // 内容操作
-        this.bind('content:copy', (ctx) => new CopySessionContentCommand(ctx));
+        this.bindInline('nav:foldAll', async () => {
+            this.ctx.historyView.setAllCollapsed(true);
+            this.emitCollapseStates(true);
+        });
 
-        // 状态持久化 — 直接绑定到 StateManager（不需要 Command 类）
+        this.bindInline('nav:unfoldAll', async () => {
+            this.ctx.historyView.setAllCollapsed(false);
+            this.emitCollapseStates(false);
+        });
+
+        this.bindInline('content:copy', async ({ sessionId }) => {
+            const sessions = this.ctx.sessionManager.getSessions();
+            const session = sessions.find(s => s.id === sessionId);
+            if (!session) return;
+            const content = session.content || '';
+            await navigator.clipboard.writeText(content);
+            Toast.success('Copied to clipboard');
+        });
+    }
+
+    private emitCollapseStates(collapsed: boolean): void {
+        const sessions = this.ctx.sessionManager.getSessions();
+        const states: Record<string, boolean> = {};
+        sessions.forEach(s => { states[s.id] = collapsed; });
+        this.ctx.bus.emit('state:collapseChanged', { states });
+    }
+
+    private bindCommand<K extends keyof EditorBusEvents>(
+        event: K, cmd: Command<any, any>
+    ): void {
         this.unsubscribers.push(
-            this.bus.on('state:collapseChanged', ({ }) => {
-                this.ctx.stateService; // 通过 UIController 处理
-            })
+            this.bus.on(event, (payload) => cmd.run(payload))
         );
     }
 
-    /**
-     * 按名字执行命令
-     */
-    async execute<K extends string>(name: K, params: any): Promise<any> {
-        const cmd = this.commands.get(name);
-        if (!cmd) {
-            console.warn(`[CommandRegistry] Unknown command: ${name}`);
-            return;
-        }
-        return cmd.run(params);
-    }
-
-    private bind<K extends keyof EditorBusEvents>(
+    private bindInline<K extends keyof EditorBusEvents>(
         event: K,
-        factory: CommandFactory
+        handler: (payload: EditorBusEvents[K]) => Promise<void>
     ): void {
-        const cmd = factory(this.ctx);
-        this.commands.set(event, cmd);
         this.unsubscribers.push(
-            this.bus.on(event, (payload) => cmd.run(payload))
+            this.bus.on(event, (payload) => {
+                // ✅ 修复：从 ctx 中获取 errorHandler
+                this.ctx.errorHandler.wrap(() => handler(payload), event, 'silent');
+            })
         );
     }
 
     destroy(): void {
         this.unsubscribers.forEach(unsub => unsub());
         this.unsubscribers = [];
-        this.commands.clear();
     }
 }

@@ -6,6 +6,7 @@ import { HistoryView } from '../views/HistoryView';
 import { EditorEventBus } from '../base/core/EditorEventBus';
 import { BranchIndicatorView } from '../views/BranchIndicatorView';
 import { StatusIndicatorView } from '../views/StatusIndicatorView';
+import { BranchStore } from './BranchStore';
 
 export interface SessionEventHandlerDeps {
     sessionManager: SessionManager;
@@ -13,80 +14,84 @@ export interface SessionEventHandlerDeps {
     bus: EditorEventBus;
     branchIndicator: BranchIndicatorView;
     statusIndicator: StatusIndicatorView;
+    branchStore: BranchStore;
     getCurrentSessionId: () => string | null;
     onContentChanged: () => void;
-    floatingNav: { refresh: () => Promise<void> } | null;
+    onFloatingNavRefresh: (() => Promise<void>) | null;
 }
 
 /**
  * 会话事件处理器
  * 
  * 职责：将引擎事件路由到对应的 View/Controller
- * 从 LLMWorkspaceEditor 中提取，消除 ~100 行代码
  */
 export class SessionEventHandler {
     private static readonly BRANCH_EVENTS = new Set([
         'branch_created', 'branch_switched', 'branch_deleted', 'branch_renamed',
         'regenerate_started', 'regenerate_completed',
     ]);
-    private static readonly BRANCH_RENDER_EVENTS = new Set([
+
+    private static readonly NEEDS_FULL_RENDER = new Set([
         'branch_switched', 'branch_created',
     ]);
 
     constructor(private deps: SessionEventHandlerDeps) { }
 
     handleSessionEvent(event: OrchestratorEvent): void {
-        const { historyView, sessionManager } = this.deps;
+        // ✅ 修复：只解构实际使用的变量
+        const { historyView } = this.deps;
 
         // 1. 转发给 HistoryView 处理 DOM 更新
         historyView.processEvent(event);
 
         // 2. 状态更新
+        this.updateStatus(event);
+
+        // 3. 分支事件统一处理
+        if (SessionEventHandler.BRANCH_EVENTS.has(event.type)) {
+            this.handleBranchEvent(event);
+        }
+    }
+
+    private updateStatus(event: OrchestratorEvent): void {
         if (event.type === 'finished' || event.type === 'session_start') {
             this.deps.onContentChanged();
         }
 
         if (event.type === 'session_start') {
-            historyView.clearErrors();
+            this.deps.historyView.clearErrors();
         }
 
         if (event.type === 'finished') {
             this.deps.statusIndicator.update('completed');
-            historyView.clearErrors();
+            this.deps.historyView.clearErrors();
         } else if (event.type === 'error') {
             this.deps.statusIndicator.update('failed');
         }
+    }
 
-        // 3. 重新生成事件处理
+    private handleBranchEvent(event: OrchestratorEvent): void {
+        const { historyView, sessionManager, branchIndicator, branchStore } = this.deps;
+
         if (event.type === 'regenerate_started') {
             historyView.clearErrors();
             historyView.enterStreamingMode();
-            // 分支指示器闪烁提示
-            this.deps.branchIndicator.flash();
+            branchIndicator.flash();
+            return;
         }
 
-        if (event.type === 'regenerate_completed') {
-            // 刷新分支指示器（新分支已创建）
-            this.deps.branchIndicator.refresh().then(() => {
-                this.deps.floatingNav?.refresh();
-            });
+        // 需要完整重渲染的事件
+        if (SessionEventHandler.NEEDS_FULL_RENDER.has(event.type)) {
+            historyView.renderFull(sessionManager.getSessions());
+            historyView.scrollToBottom(true);
+            branchIndicator.flash();
         }
 
-        // 4. 分支事件统一处理
-        if (SessionEventHandler.BRANCH_EVENTS.has(event.type)) {
-            if (SessionEventHandler.BRANCH_RENDER_EVENTS.has(event.type)) {
-                historyView.renderFull(sessionManager.getSessions());
-                historyView.scrollToBottom(true);
-                this.deps.branchIndicator.flash();
-            }
-
-            // regenerate 事件的分支刷新在上面单独处理，避免重复
-            if (event.type !== 'regenerate_started' && event.type !== 'regenerate_completed') {
-                this.deps.branchIndicator.refresh().then(() => {
-                    this.deps.floatingNav?.refresh();
-                });
-            }
-        }
+        // 所有 branch 变化都刷新 store
+        branchStore.refresh().then(() => {
+            // ✅ 修复：安全调用可能为 null 的回调
+            this.deps.onFloatingNavRefresh?.();
+        });
     }
 
     handleGlobalEvent(event: RegistryEvent): void {

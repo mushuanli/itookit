@@ -1,51 +1,35 @@
 // @file: llm-ui/views/BranchIndicatorView.ts
 
-import { BranchItem } from '../base/core/types';
 import { BranchIndicatorTemplates } from './templates/BranchIndicatorTemplates';
 import { EditorEventBus } from '../base/core/EditorEventBus';
 import { EventCleanup } from '../base/infrastructure/EventCleanup';
 import { TimerManager } from '../base/infrastructure/TimerManager';
 import { DOMCache } from '../base/infrastructure/DOMCache';
-import { ErrorHandler } from '../utils/errorHandler';
-import { SessionManager } from '@itookit/llm-engine';
+import { BranchStore } from '../helpers/BranchStore';
 
 /**
  * 分支指示器视图
  *
- * 从 LLMWorkspaceEditor 中提取 ~120 行代码
  * 职责：分支指示器的渲染、下拉菜单、闪烁动画
+ * 数据来源：BranchStore（单一真实来源）
  */
 export class BranchIndicatorView {
-    private cachedBranches: BranchItem[] = [];
     private events = new EventCleanup();
     private timers = new TimerManager();
+    private unsub: (() => void) | null = null;
 
     constructor(
         private domCache: DOMCache,
         private bus: EditorEventBus,
-        private sessionManager: SessionManager,
-        private errorHandler: ErrorHandler
-    ) { }
-
-    getCachedBranches(): BranchItem[] {
-        return this.cachedBranches;
+        private branchStore: BranchStore
+    ) {
+        // 监听 store 变化自动更新 UI
+        this.unsub = this.branchStore.onChange(() => this.render());
     }
 
     async refresh(): Promise<void> {
-        const branches = await this.errorHandler.wrapWithFallback(
-            () => this.sessionManager.listBranches(), [],
-            'Refresh branch indicator', 'warn'
-        );
-
-        this.cachedBranches = branches.length === 0
-            ? [{ name: 'main', headNodeId: '', isCurrent: true }]
-            : branches.map(b => ({
-                name: b.name,
-                headNodeId: b.headNodeId,
-                isCurrent: b.isCurrent,
-            }));
-
-        this.render();
+        await this.branchStore.refresh();
+        // render 由 onChange 自动触发
     }
 
     flash(): void {
@@ -66,18 +50,18 @@ export class BranchIndicatorView {
 
         this.domCache.invalidate('llm-branch-indicator');
 
-        const current = this.cachedBranches.find(b => b.isCurrent);
+        const branches = this.branchStore.current;
+        const current = this.branchStore.currentBranch;
         const name = current?.name || 'main';
-        const count = this.cachedBranches.length;
 
-        el.innerHTML = BranchIndicatorTemplates.renderIndicator(name, count);
-        if (count <= 1) return;
+        el.innerHTML = BranchIndicatorTemplates.renderIndicator(name, branches.length);
+        if (branches.length <= 1) return;
 
         const btn = el.querySelector('.llm-branch-indicator-btn') as HTMLElement;
         const dropdown = el.querySelector('.llm-branch-dropdown') as HTMLElement;
         if (!btn || !dropdown) return;
 
-        this.events.cleanup(); // 清理上次绑定
+        this.events.cleanup();
 
         this.events.add(btn, 'click', ((e: MouseEvent) => {
             e.stopPropagation();
@@ -102,7 +86,7 @@ export class BranchIndicatorView {
 
     private openDropdown(dropdown: HTMLElement): void {
         dropdown.innerHTML = BranchIndicatorTemplates.renderDropdownItems(
-            this.cachedBranches
+            this.branchStore.current
         );
         dropdown.style.display = 'block';
 
@@ -128,8 +112,8 @@ export class BranchIndicatorView {
     }
 
     destroy(): void {
+        this.unsub?.();
         this.events.cleanup();
         this.timers.destroy();
-        this.cachedBranches = [];
     }
 }
