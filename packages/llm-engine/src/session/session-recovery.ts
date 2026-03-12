@@ -21,7 +21,7 @@ interface RecoveryState {
     sessions: PersistedSessionState[];
 }
 
-const RECOVERY_VERSION = 1;
+const RECOVERY_VERSION = 2; // ✅ 版本升级，旧格式自动失效
 
 /**
  * 会话恢复管理器
@@ -72,12 +72,8 @@ export class SessionRecovery {
     }
 
     private scheduleSave(): void {
-        if (this.saveTimer) {
-            clearTimeout(this.saveTimer);
-        }
-        this.saveTimer = setTimeout(() => {
-            this.saveImmediately();
-        }, this.SAVE_DEBOUNCE);
+        if (this.saveTimer) clearTimeout(this.saveTimer);
+        this.saveTimer = setTimeout(() => this.saveImmediately(), this.SAVE_DEBOUNCE);
     }
 
     saveImmediately(): void {
@@ -92,16 +88,14 @@ export class SessionRecovery {
     }
 
     private buildRecoveryState(): RecoveryState {
-        const sessions: PersistedSessionState[] = [];
-
-        for (const runtime of this.manager.getAllSessions()) {
-            sessions.push({
+        const sessions: PersistedSessionState[] = this.manager
+            .getAllSessions()
+            .map((runtime) => ({
                 sessionId: runtime.sessionId,
                 nodeId: runtime.nodeId,
                 status: runtime.status,
                 lastActiveTime: runtime.lastActiveTime,
-            });
-        }
+            }));
 
         return {
             version: RECOVERY_VERSION,
@@ -141,6 +135,8 @@ export class SessionRecovery {
             if (!stored) return [];
 
             const state: RecoveryState = JSON.parse(stored);
+            if (state.version !== RECOVERY_VERSION) return [];
+
             return state.sessions.filter(
                 (s) => s.status === 'running' || s.status === 'queued'
             );
@@ -171,6 +167,10 @@ export class SessionRecovery {
             if (!stored) return { recovered, failed };
 
             const state: RecoveryState = JSON.parse(stored);
+            if (state.version !== RECOVERY_VERSION) {
+                this.clearRecoveryState();
+                return { recovered, failed };
+            }
 
             // 先注册所有会话（不绑定 UI）
             for (const sessionState of state.sessions) {
@@ -219,128 +219,6 @@ export class SessionRecovery {
         localStorage.removeItem(STORAGE_KEYS.SESSION_RECOVERY);
     }
 
-    /**
-     * 显示恢复对话框
-     */
-    async showRecoveryDialog(): Promise<boolean> {
-        if (typeof document === 'undefined') return false;
-
-        const sessions = this.getRecoverableSessions();
-        if (sessions.length === 0) return false;
-
-        return new Promise((resolve) => {
-            const dialog = document.createElement('div');
-            dialog.className = 'llm-recovery-dialog';
-            dialog.innerHTML = `
-                <div class="llm-recovery-dialog__overlay"></div>
-                <div class="llm-recovery-dialog__content">
-                    <h3>Recover Previous Sessions?</h3>
-                    <p>${sessions.length} AI task(s) were interrupted. Would you like to recover them?</p>
-                    <ul class="llm-recovery-dialog__list">
-                        ${sessions.map(s => `
-                            <li>
-                                <span class="session-id">${s.sessionId.substring(0, 8)}...</span>
-                                <span class="session-status">${s.status}</span>
-                            </li>
-                        `).join('')}
-                    </ul>
-                    <div class="llm-recovery-dialog__actions">
-                        <button class="btn btn--secondary" data-action="dismiss">Dismiss</button>
-                        <button class="btn btn--primary" data-action="recover">Recover</button>
-                    </div>
-                </div>
-            `;
-
-            // 添加基础样式
-            const style = document.createElement('style');
-            style.textContent = `
-                .llm-recovery-dialog {
-                    position: fixed;
-                    top: 0;
-                    left: 0;
-                    right: 0;
-                    bottom: 0;
-                    z-index: 10000;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                }
-                .llm-recovery-dialog__overlay {
-                    position: absolute;
-                    top: 0;
-                    left: 0;
-                    right: 0;
-                    bottom: 0;
-                    background: rgba(0, 0, 0, 0.5);
-                }
-                .llm-recovery-dialog__content {
-                    position: relative;
-                    background: white;
-                    padding: 24px;
-                    border-radius: 8px;
-                    max-width: 400px;
-                    width: 90%;
-                    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
-                }
-                .llm-recovery-dialog__content h3 {
-                    margin: 0 0 12px 0;
-                }
-                .llm-recovery-dialog__list {
-                    list-style: none;
-                    padding: 0;
-                    margin: 16px 0;
-                }
-                .llm-recovery-dialog__list li {
-                    display: flex;
-                    justify-content: space-between;
-                    padding: 8px;
-                    background: #f5f5f5;
-                    border-radius: 4px;
-                    margin-bottom: 4px;
-                }
-                .llm-recovery-dialog__actions {
-                    display: flex;
-                    gap: 12px;
-                    justify-content: flex-end;
-                }
-                .llm-recovery-dialog__actions button {
-                    padding: 8px 16px;
-                    border-radius: 4px;
-                    border: none;
-                    cursor: pointer;
-                }
-                .btn--primary {
-                    background: #2563eb;
-                    color: white;
-                }
-                .btn--secondary {
-                    background: #e5e7eb;
-                    color: #374151;
-                }
-            `;
-
-            document.head.appendChild(style);
-            document.body.appendChild(dialog);
-
-            dialog.querySelector('[data-action="dismiss"]')?.addEventListener('click', () => {
-                this.clearRecoveryState();
-                dialog.remove();
-                style.remove();
-                resolve(false);
-            });
-
-            dialog.querySelector('[data-action="recover"]')?.addEventListener('click', async () => {
-                dialog.remove();
-                style.remove();
-                await this.recoverSessions();
-                resolve(true);
-            });
-        });
-    }
-
-    /**
-     * 销毁
-     */
     dispose(): void {
         if (this.unsubscribeGlobal) {
             this.unsubscribeGlobal();

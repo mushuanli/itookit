@@ -80,8 +80,9 @@ export class EventDispatcher {
         });
 
 
-        m.set('retry', (ctx) => this.fireNodeAction('retry', ctx.sessionId));
-        m.set('resend', (ctx) => this.fireNodeAction('resend', ctx.sessionId));
+        m.set('resend', (ctx) => this.fireNodeAction('regenerate', ctx.sessionId));
+        m.set('regenerate', (ctx) => this.fireNodeAction('regenerate', ctx.sessionId));
+
         m.set('prev-sibling', (ctx) => this.fireNodeAction('prev-sibling', ctx.sessionId));
         m.set('next-sibling', (ctx) => this.fireNodeAction('next-sibling', ctx.sessionId));
 
@@ -107,7 +108,7 @@ export class EventDispatcher {
         m.set('retry-last', (ctx) => {
             ctx.actionEl.closest('.llm-ui-session--system')?.remove();
             const lastId = this.findLastRetryableId();
-            if (lastId) this.fireNodeAction('retry', lastId);
+            if (lastId) this.fireNodeAction('regenerate', lastId);
         });
     }
 

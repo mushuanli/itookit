@@ -20,23 +20,32 @@ function findInTree(node: any, targetId: string): boolean {
     return node.children?.some((c: any) => findInTree(c, targetId)) ?? false;
 }
 
-export class RetryCommand extends Command<{ nodeId: string }> {
-    protected readonly name = 'Retry';
+/**
+ * 重新生成命令（统一 retry + resend）
+ *
+ * 行为：
+ * - 如果目标是 assistant 消息 → regenerate(assistantId)
+ * - 如果目标是 user 消息 → regenerateFromUser(userId)
+ * - 两者都会创建分支，不破坏现有对话路径
+ */
+export class RegenerateCommand extends Command<{ nodeId: string }> {
+    protected readonly name = 'Regenerate';
 
     protected async execute({ nodeId }: { nodeId: string }): Promise<void> {
-        const session = findSession(this.ctx.sessionManager.getSessions(), nodeId);
+        const sessions = this.ctx.sessionManager.getSessions();
+        const session = findSession(sessions, nodeId);
         if (!session) throw new Error('Message not found');
 
-        const canRetry = this.ctx.sessionManager.canRetry(session.id);
-        if (!canRetry.allowed) throw new Error(canRetry.reason || 'Cannot retry');
+        const check = this.ctx.sessionManager.canRegenerate(session.id);
+        if (!check.allowed) throw new Error(check.reason || 'Cannot regenerate');
 
         this.ctx.chatInput.setLoading(true);
 
-        // 不传 agentId — 引擎自动从上下文解析
+        // 根据角色自动路由
         if (session.role === 'user') {
-            await this.ctx.sessionManager.resendUserMessage(session.id);
+            await this.ctx.sessionManager.regenerateFromUser(session.id);
         } else {
-            await this.ctx.sessionManager.retryGeneration(session.id);
+            await this.ctx.sessionManager.regenerate(session.id);
         }
     }
 }
@@ -83,16 +92,8 @@ export class EditAndRetryCommand extends Command<{ nodeId: string }> {
         if (!session || session.role !== 'user') return;
 
         this.ctx.chatInput.setLoading(true);
-        await this.ctx.sessionManager.editMessage(nodeId, session.content || '', true);
-    }
-}
-
-export class ResendCommand extends Command<{ nodeId: string }> {
-    protected readonly name = 'Resend';
-
-    protected async execute({ nodeId }: { nodeId: string }): Promise<void> {
-        this.ctx.chatInput.setLoading(true);
-        await this.ctx.sessionManager.resendUserMessage(nodeId);
+        // ✅ 使用 commitEdit 替代 editMessage
+        await this.ctx.sessionManager.commitEdit(nodeId, session.content || '', true);
     }
 }
 
