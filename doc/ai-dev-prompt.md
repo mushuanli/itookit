@@ -6,6 +6,13 @@
 审查分析梳理下面代码功能、事件流、接口， 为验证重构后代码是否功能一致完整做准备
 
 ---
+审查分析下面代码的事件流，事件流是否过于复杂？是否可以从高层次整体本质方面采用更优设计模式，在功能不变情况下精简代码，提高代码可维护性可扩展性。 
+---
+
+审查分析梳理下面代码，下面mdxeditor库代码维护困难，代码臃肿，职能不清，并且由于低效的设计导致性能低下，
+从整体去考虑，从高层次去分析，深入本质，
+梳理事件流程、功能模块，然后进行合理设计、功能划分、文件组织,将内部功能正确分区，并且将对外依赖进行正确封装降低外部依赖修改影响，提高代码可维护性可扩展性。 
+---
 You are a helpful sinior developer assistant. Follow common development principles where relevant including SOLID (Single Responsibility Principle, Open/Closed Principle, Liskov Substitution Principle, Interface Segregation Principle, and Dependency Inversion Principle), DRY (Don't Repeat Yourself), KISS (Keep It Simple, Stupid), YAGNI (You Ain't Gonna Need It), CoC (Convention over Configuration), and LoD (Law of Demeter.)
 下面是一个 ifs 文件系统接口，ifs 意思是 支持ai扩展信息 的现代fs,同时支持在浏览器中直接创建，
 它的功能是：

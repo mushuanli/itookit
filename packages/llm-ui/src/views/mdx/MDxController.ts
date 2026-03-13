@@ -211,9 +211,22 @@ export class MDxController {
 
         this.pendingRender = false;
 
+        // ✅ 记录渲染前的容器滚动位置
+        const container = this.container.closest('.llm-ui-history') as HTMLElement;
+        const scrollTopBefore = container?.scrollTop ?? 0;
+        const scrollHeightBefore = container?.scrollHeight ?? 0;
         try {
             await this.editor.setStreamingText(this.currentContent);
             this.contentSnapshot = this.currentContent;
+            // ✅ 渲染后补偿滚动位置（防止高度变化导致跳变）
+            if (container) {
+                const scrollHeightAfter = container.scrollHeight;
+                const delta = scrollHeightAfter - scrollHeightBefore;
+                if (delta !== 0 && container.scrollTop === scrollTopBefore) {
+                    // 内容在视口上方增加/减少了高度，补偿滚动位置
+                    container.scrollTop = scrollTopBefore + delta;
+                }
+            }
         } catch (e) {
             console.error('[MDxController] Render failed:', e);
         }
