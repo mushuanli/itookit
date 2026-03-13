@@ -2,7 +2,7 @@
  * @file mdx/plugins/core/core-editor.plugin.ts
  * @desc 核心编辑器插件，为 MDxEditor 提供 CodeMirror 6 的基础编辑体验。
  */
-import type { MDxPlugin, PluginContext } from '../../core/plugin';
+import type { MDxPlugin, PluginContext } from '../../core/types';
 import { EditorState, type Extension } from '@codemirror/state';
 import {
   lineNumbers,
@@ -324,7 +324,7 @@ export class CoreEditorPlugin implements MDxPlugin {
       existing.push(source);
       sourcesByTrigger.set(source.triggerChar, existing);
     }
-    
+
     // 获取所有触发字符用于快速检查
     const triggerChars = new Set(sourcesByTrigger.keys());
 
@@ -390,23 +390,23 @@ export class CoreEditorPlugin implements MDxPlugin {
   }
 
 
-    /**
-   * [优化] 在行内文本中匹配触发字符
-   * 避免搜索整个文档
-     */
+  /**
+ * [优化] 在行内文本中匹配触发字符
+ * 避免搜索整个文档
+   */
   private matchTriggerInLine(lineText: string, triggerChar: string): { localStart: number; query: string } | null {
     const lastTriggerIndex = lineText.lastIndexOf(triggerChar);
     if (lastTriggerIndex === -1) return null;
 
-  // ✅ 修复：先检查索引，再访问字符
-  if (lastTriggerIndex > 0) {
-    const charBefore = lineText[lastTriggerIndex - 1];
-    // 检查触发字符前是否为空白
-    if (charBefore && !/\s/.test(charBefore)) return null;
-  }
+    // ✅ 修复：先检查索引，再访问字符
+    if (lastTriggerIndex > 0) {
+      const charBefore = lineText[lastTriggerIndex - 1];
+      // 检查触发字符前是否为空白
+      if (charBefore && !/\s/.test(charBefore)) return null;
+    }
 
     const query = lineText.slice(lastTriggerIndex + triggerChar.length);
-    
+
     // 查询中不能有空白
     if (/\s/.test(query)) return null;
 

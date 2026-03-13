@@ -1,5 +1,5 @@
 // mdx/plugins/cloze/memory.plugin.ts
-import type { MDxPlugin, PluginContext, ScopedPersistenceStore } from '../../core/plugin';
+import type { MDxPlugin, PluginContext, ScopedPersistenceStore } from '../../core/types';
 import type { SRSItemData } from '@itookit/common';  // ✅ 导入类型
 
 export interface MemoryPluginOptions {
@@ -49,7 +49,7 @@ export class MemoryPlugin implements MDxPlugin {
   private cleanupFns: Array<() => void> = [];
   private clozeStatesCache = new WeakMap<PluginContext, Map<string, SRSCardState>>();
   private storeRef: ScopedPersistenceStore | null = null;
-  
+
   // [新增] 同步状态追踪
   private syncedContexts = new WeakSet<PluginContext>();
   private syncPromise: Promise<void> | null = null;
@@ -85,19 +85,19 @@ export class MemoryPlugin implements MDxPlugin {
     // 这个事件只有在 Cloze 从 [隐藏] -> [显示] 状态切换时才会触发 (由 ClozePlugin 发出)
     const removeClozeRevealed = context.listen('clozeRevealed', (data: any) => {
       const stateClass = data.element.dataset.stateClass as ClozeStateClass;
-      
+
       // 1. 冷却中的卡片 (Again 之后) 打开时不显示菜单，避免干扰
       if (stateClass === 'is-cooling') {
         this.log('Card is cooling, skip grading panel', data.clozeId);
         return;
       }
-      
+
       // 2. is-cleared (Easy) 的卡片，如果是用户手动点击打开的，应该显示菜单
       // 这样用户可以修改之前的评分，或者重新复习
-      
+
       const isLocked = data.element.closest('.is-global-override');
       const timeout = isLocked ? 0 : this.options.gradingTimeout;
-      
+
       this.showGradingPanel(data.element, context, timeout);
     });
     if (removeClozeRevealed) this.cleanupFns.push(removeClozeRevealed);
@@ -111,7 +111,7 @@ export class MemoryPlugin implements MDxPlugin {
     // [优化] DOM 更新时的同步逻辑
     const removeDomUpdated = context.on('domUpdated', async ({ element }: { element: HTMLElement }) => {
       this.log('DOM updated, checking sync status...');
-      
+
       // 只在首次加载时同步
       if (!this.syncedContexts.has(context)) {
         // 防止并发同步
@@ -123,7 +123,7 @@ export class MemoryPlugin implements MDxPlugin {
         await this.syncPromise;
         this.syncedContexts.add(context);
       }
-      
+
       this.applyVisualsAndState(element, context);
     });
     if (removeDomUpdated) this.cleanupFns.push(removeDomUpdated);
@@ -182,7 +182,7 @@ export class MemoryPlugin implements MDxPlugin {
         const srsData = (await this.storeRef.get('_mdx_srs')) as Record<string, SRSCardState> | undefined;
         const count = srsData ? Object.keys(srsData).length : 0;
         this.log(`Loaded ${count} items from Metadata Store (Fallback).`);
-        
+
         if (srsData) {
           for (const [key, value] of Object.entries(srsData)) {
             cache.set(key, value);
@@ -199,8 +199,8 @@ export class MemoryPlugin implements MDxPlugin {
    * 单个卡片评分后触发
    */
   private async saveCardState(
-    context: PluginContext, 
-    clozeId: string, 
+    context: PluginContext,
+    clozeId: string,
     newState: SRSCardState
   ): Promise<void> {
     const engine = context.getSessionEngine?.();
@@ -219,7 +219,7 @@ export class MemoryPlugin implements MDxPlugin {
           ease: newState.easeFactor,
           reviewCount: newState.reviewCount
         };
-        
+
         await engine.updateSRSStatus(fileId, clozeId, srsData);
         this.log(`Saved successfully to Engine VFS.`);
         return;
@@ -260,12 +260,12 @@ export class MemoryPlugin implements MDxPlugin {
     // 2. 冷却逻辑
     // 如果是刚刚复习过的短间隔卡片，且在冷却期内，保持 is-cooling (显示)
     if (state.interval * 24 * 60 * 60 * 1000 < this.options.coolingPeriod * 2) {
-         if (lastReviewedAt && dueAt > now) {
-            const timeSinceReview = now.getTime() - lastReviewedAt.getTime();
-            if (timeSinceReview < this.options.coolingPeriod) {
-              return 'is-cooling';
-            }
-         }
+      if (lastReviewedAt && dueAt > now) {
+        const timeSinceReview = now.getTime() - lastReviewedAt.getTime();
+        if (timeSinceReview < this.options.coolingPeriod) {
+          return 'is-cooling';
+        }
+      }
     }
 
     // 3. 计算“提前隐藏”逻辑
@@ -278,7 +278,7 @@ export class MemoryPlugin implements MDxPlugin {
     }
 
     // 5. 否则，进入隐藏状态 (包含 Learning, Due, Danger)
-    
+
     // 学习中 (间隔小于1天)
     if (state.interval < 1) {
       return 'is-learning';
@@ -311,7 +311,7 @@ export class MemoryPlugin implements MDxPlugin {
       if (!locator) return;
 
       const state = cache.get(locator);
-      
+
       if (state) matchedCount++;
 
       const stateClass = this.determineStateClass(state);
@@ -319,7 +319,7 @@ export class MemoryPlugin implements MDxPlugin {
       // 1. 更新 CSS 类
       cloze.classList.remove('is-new', 'is-cooling', 'is-learning', 'is-due', 'is-danger', 'is-cleared');
       cloze.classList.add(stateClass);
-      
+
       // 2. 存储状态到 dataset，供点击事件使用
       (cloze as HTMLElement).dataset.stateClass = stateClass;
 
@@ -368,10 +368,10 @@ export class MemoryPlugin implements MDxPlugin {
       if (timeout) clearTimeout(timeout);
 
       const grade = parseInt(btn.getAttribute('data-grade') || '3', 10);
-      
+
       // 评分后移除面板
       panel.remove();
-      
+
       // 执行评分逻辑
       await this.gradeCard(clozeElement, grade, context);
     });
@@ -456,7 +456,7 @@ export class MemoryPlugin implements MDxPlugin {
 
       // 1. 更新内存缓存
       cache.set(locator, newState);
-      
+
       // 2. ✨ [重构] 调用新的保存逻辑
       await this.saveCardState(context, locator, newState);
 
@@ -472,7 +472,7 @@ export class MemoryPlugin implements MDxPlugin {
       // 此时因为不是通过 ClozePlugin 的 click 触发的，所以不会发 clozeRevealed 事件，也就不会再次显示 Panel
       if (stateClass === 'is-cleared' || stateClass === 'is-cooling') {
         clozeElement.classList.remove('hidden');
-      } 
+      }
       // 注意：如果评分结果导致它应该隐藏 (比如某种 logic)，这里可以 add('hidden')
       // 但对于 SRS，通常评分后我们希望看到结果（或者自动跳到下一个），这里保持显示是合理的。
 

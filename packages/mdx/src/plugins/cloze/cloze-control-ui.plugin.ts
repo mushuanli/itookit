@@ -1,7 +1,7 @@
 // mdx/plugins/cloze/cloze-control-ui.plugin.ts
-import type { MDxPlugin, PluginContext } from '../../core/plugin';
+import type { MDxPlugin, PluginContext } from '../../core/types';
 import { ClozeAPIKey } from './cloze.plugin';
-import {escapeHTML} from '@itookit/common';
+import { escapeHTML } from '@itookit/common';
 
 export interface ClozeControlsPluginOptions {
   className?: string;
@@ -12,15 +12,15 @@ export class ClozeControlsPlugin implements MDxPlugin {
 
   private options: Required<ClozeControlsPluginOptions>;
   private cleanupFns: Array<() => void> = [];
-  
+
   private panel: HTMLElement | null = null;
   private container: HTMLElement | null = null;
-  
+
   // State that persists across DOM updates
   private currentIndex = 0;
-  private isAllOpen = false; 
+  private isAllOpen = false;
   private isExpanded = true;
-  
+
   // Track which clozes were manually opened (by locator)
   private manuallyOpenedClozes: Set<string> = new Set();
   private static readonly MAX_TRACKED_CLOZES = 1000;
@@ -50,13 +50,13 @@ export class ClozeControlsPlugin implements MDxPlugin {
     // Listen for DOM updates
     const removeDomUpdated = context.on('domUpdated', ({ element }: { element: HTMLElement }) => {
       this.container = element;
-      
+
       // 1. Rebuild UI panel
       this.createPanel(context, clozeApi);
-      
+
       // 2. Restore content display mode
       this.updateAllClozeContent();
-      
+
       // 3. Restore open states
       this.restoreOpenStates(clozeApi, context);
     });
@@ -70,11 +70,11 @@ export class ClozeControlsPlugin implements MDxPlugin {
     // 如果已存在，先删除再添加（移到末尾）
     this.manuallyOpenedClozes.delete(locator);
     this.manuallyOpenedClozes.add(locator);
-    
+
     // 超出限制时删除最早的
     if (this.manuallyOpenedClozes.size > ClozeControlsPlugin.MAX_TRACKED_CLOZES) {
       const firstKey = this.manuallyOpenedClozes.values().next().value;
-      if( firstKey )
+      if (firstKey)
         this.manuallyOpenedClozes.delete(firstKey);
     }
   }
@@ -89,7 +89,7 @@ export class ClozeControlsPlugin implements MDxPlugin {
       // Global "Open All" mode
       this.container.classList.add('is-global-override');
       clozeApi().toggleAll(true, this.container);
-      
+
       // Re-trigger grading panels after a short delay
       setTimeout(() => {
         context.emit('clozeBatchGradeToggle', { container: this.container });
@@ -116,7 +116,7 @@ export class ClozeControlsPlugin implements MDxPlugin {
 
     this.panel = document.createElement('div');
     this.panel.className = this.options.className;
-    
+
     const eyeIcon = this.isAllOpen ? 'fa-eye-slash' : 'fa-eye';
     const expandIcon = this.isExpanded ? 'fa-compress-alt' : 'fa-expand-alt';
 
@@ -138,22 +138,22 @@ export class ClozeControlsPlugin implements MDxPlugin {
       const icon = btn.querySelector('i');
 
       switch (action) {
-        case 'prev': 
-          this.navigate(-1); 
+        case 'prev':
+          this.navigate(-1);
           break;
-        case 'next': 
-          this.navigate(1); 
+        case 'next':
+          this.navigate(1);
           break;
-        
+
         case 'toggle-expand':
           this.isExpanded = !this.isExpanded;
           if (icon) icon.className = this.isExpanded ? 'fas fa-compress-alt' : 'fas fa-expand-alt';
           this.updateAllClozeContent();
           break;
-        
+
         case 'toggle-visible':
           this.isAllOpen = !this.isAllOpen;
-          
+
           if (this.isAllOpen) {
             this.container.classList.add('is-global-override');
             clozeApi().toggleAll(true, this.container);
@@ -164,7 +164,7 @@ export class ClozeControlsPlugin implements MDxPlugin {
             // Clear manually opened tracking when closing all
             this.manuallyOpenedClozes.clear();
           }
-          
+
           if (icon) icon.className = this.isAllOpen ? 'fas fa-eye-slash' : 'fas fa-eye';
           break;
 
@@ -175,7 +175,7 @@ export class ClozeControlsPlugin implements MDxPlugin {
           clozes.forEach(el => {
             const wasHidden = el.classList.contains('hidden');
             el.classList.toggle('hidden');
-            
+
             // Track newly opened clozes
             const locator = el.getAttribute('data-cloze-locator');
             if (locator) {
@@ -190,10 +190,10 @@ export class ClozeControlsPlugin implements MDxPlugin {
           break;
       }
     });
-    
+
     this.container?.appendChild(this.panel);
   }
-  
+
   private updateAllClozeContent(): void {
     if (!this.container) return;
     const contentSpans = this.container.querySelectorAll('.mdx-cloze__content');
@@ -201,14 +201,14 @@ export class ClozeControlsPlugin implements MDxPlugin {
 
     // [优化] 收集所有更新，批量应用
     const updates: Array<{ span: HTMLElement; html: string }> = [];
-    
+
     contentSpans.forEach(span => {
       const parent = span.parentElement;
       if (!parent) return;
-      
+
       const rawContent = parent.getAttribute('data-cloze-content') || '';
       let newContent: string;
-      
+
       if (this.isExpanded) {
         newContent = rawContent.replace(/¶/g, '<br/>');
       } else {
@@ -216,7 +216,7 @@ export class ClozeControlsPlugin implements MDxPlugin {
         if (text.length > 100) text = text.substring(0, 100) + '...';
         newContent = escapeHTML(text);
       }
-      
+
       updates.push({ span: span as HTMLElement, html: newContent });
     });
 
@@ -237,7 +237,7 @@ export class ClozeControlsPlugin implements MDxPlugin {
 
     this.currentIndex = (this.currentIndex + direction + hidden.length) % hidden.length;
     const target = hidden[this.currentIndex] as HTMLElement;
-    
+
     target.scrollIntoView({ behavior: 'smooth', block: 'center' });
     target.classList.add('mdx-cloze--highlight');
     setTimeout(() => target.classList.remove('mdx-cloze--highlight'), 1000);

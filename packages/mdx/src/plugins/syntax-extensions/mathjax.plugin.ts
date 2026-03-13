@@ -1,5 +1,5 @@
 // mdx/plugins/syntax-extensions/mathjax.plugin.ts
-import type { MDxPlugin, PluginContext } from '../../core/plugin';
+import type { MDxPlugin, PluginContext } from '../../core/types';
 import type { MarkedExtension, Tokens } from 'marked';
 
 declare global {

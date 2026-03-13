@@ -1,5 +1,5 @@
 // mdx/plugins/cloze/cloze.plugin.ts
-import type { MDxPlugin, PluginContext } from '../../core/plugin';
+import type { MDxPlugin, PluginContext } from '../../core/types';
 import type { MarkedExtension, Tokens } from 'marked';
 import * as commands from '../../editor/commands';
 
@@ -19,7 +19,7 @@ export class ClozePlugin implements MDxPlugin {
   private options: Required<ClozePluginOptions>;
   private cleanupFns: Array<() => void> = [];
   private contextStates = new WeakMap<PluginContext, ClozeState>();
-  
+
   // [新增] 事件委托处理器
   private delegationHandlers = new WeakMap<HTMLElement, (e: Event) => void>();
 
@@ -72,7 +72,7 @@ export class ClozePlugin implements MDxPlugin {
 
             // [修复] 对 content 属性进行转义，防止 content 包含双引号破坏 HTML 结构
             const safeContentAttr = this.escapeHtml(token.content);
-            
+
             // [新增] 默认渲染时，将 ¶ 替换为 <br/>
             const displayContent = token.content.replace(/¶/g, '<br/>');
 
@@ -90,13 +90,13 @@ export class ClozePlugin implements MDxPlugin {
    * [新增] 简单的 HTML 转义工具，用于属性值安全
    */
   private escapeHtml(str: string): string {
-      if (!str) return '';
-      return str
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;")
-          .replace(/"/g, "&quot;")
-          .replace(/'/g, "&#039;");
+    if (!str) return '';
+    return str
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
   }
 
   install(context: PluginContext): void {
@@ -121,8 +121,8 @@ export class ClozePlugin implements MDxPlugin {
       const { registerCommand, registerToolbarButton } = context;
 
       registerToolbarButton({
-          id: `sep-cloze-${Date.now()}`,
-          type: 'separator'
+        id: `sep-cloze-${Date.now()}`,
+        type: 'separator'
       });
 
       registerCommand('applyCloze', (view: any) => {
@@ -146,9 +146,9 @@ export class ClozePlugin implements MDxPlugin {
         icon: '<i class="fas fa-volume-up"></i>',
         command: 'applyAudioCloze'
       });
-      
+
       registerCommand('insertLinebreak', (view: any) => {
-            if (commands && commands.insertLinebreak) return commands.insertLinebreak(view);
+        if (commands && commands.insertLinebreak) return commands.insertLinebreak(view);
         return false;
       });
       registerToolbarButton({
@@ -177,7 +177,7 @@ export class ClozePlugin implements MDxPlugin {
 
     const handler = (e: Event) => {
       const target = e.target as HTMLElement;
-      
+
       // 检查是否点击了音频按钮
       const audioSpan = target.closest(`.${this.options.className}__audio`);
       if (audioSpan) {

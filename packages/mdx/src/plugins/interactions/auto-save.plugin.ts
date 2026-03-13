@@ -2,8 +2,8 @@
  * @file mdx/plugins/interactions/auto-save.plugin.ts
  * @desc 自动保存插件 - 融合防抖、失焦、可见性变化等多种保存策略
  */
-import type { MDxPlugin, PluginContext } from '../../core/plugin';
-import type { MDxEditor } from '../../editor/editor';
+import type { MDxPlugin, PluginContext } from '../../core/types';
+import type { MDxEditor } from '../../editor/mdx-editor';
 
 export interface AutoSavePluginOptions {
   /** 
@@ -12,25 +12,25 @@ export interface AutoSavePluginOptions {
    * @default 2000 
    */
   debounceDelay?: number;
-  
+
   /** 
    * 失去焦点时是否立即保存 
    * @default true 
    */
   saveOnBlur?: boolean;
-  
+
   /** 
    * 页面隐藏时是否立即保存（用户切换 Tab）
    * @default true 
    */
   saveOnVisibilityHidden?: boolean;
-  
+
   /** 
    * 窗口关闭前是否尝试保存
    * @default true 
    */
   saveOnBeforeUnload?: boolean;
-  
+
   /** 
    * 是否启用自动保存
    * @default true 
@@ -40,11 +40,11 @@ export interface AutoSavePluginOptions {
 
 export class AutoSavePlugin implements MDxPlugin {
   name = 'interaction:auto-save';
-  
+
   private options: Required<AutoSavePluginOptions>;
   private cleanupFns: Array<() => void> = [];
   private timer: number | null = null;
-  
+
   // 销毁保护标志
   private isDestroyed = false;
 
@@ -140,7 +140,7 @@ export class AutoSavePlugin implements MDxPlugin {
    */
   private triggerDebouncedSave(editor: MDxEditor): void {
     if (this.isDestroyed) return;
-    
+
     this.clearTimer();
     this.timer = window.setTimeout(() => {
       // 只检查插件自身的销毁状态
@@ -156,9 +156,9 @@ export class AutoSavePlugin implements MDxPlugin {
    */
   private triggerImmediateSave(editor: MDxEditor): void {
     if (this.isDestroyed) return;
-    
+
     this.clearTimer();
-    
+
     // 只检查 isDirty，不需要检查 isDestroying
     // 因为 beforeDestroy 事件会在编辑器销毁前触发 stop()
     if (editor.isDirty()) {

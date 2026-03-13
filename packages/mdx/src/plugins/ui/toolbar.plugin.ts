@@ -1,7 +1,7 @@
 // mdx/plugins/ui/toolbar.plugin.ts
 
-import type { MDxPlugin, PluginContext, ToolbarButtonConfig } from '../../core/plugin';
-import type { MDxEditor } from '../../editor/editor';
+import type { MDxPlugin, PluginContext, ToolbarButtonConfig } from '../../core/types';
+import type { MDxEditor } from '../../editor/mdx-editor';
 import type { PluginManager } from '../../core/plugin-manager';
 
 /**
@@ -43,13 +43,13 @@ export class ToolbarPlugin implements MDxPlugin {
   /**
    * [优化] 构建工具栏 - 使用 DocumentFragment 和事件委托
    */
-  private buildToolbar(context: PluginContext, payload: { 
-    editor: MDxEditor, 
-    pluginManager: PluginManager 
+  private buildToolbar(_context: PluginContext, payload: {
+    editor: MDxEditor,
+    pluginManager: PluginManager
   }): void {
     const { editor, pluginManager } = payload;
 
-    const editorRootContainer = editor.container; 
+    const editorRootContainer = editor.container;
     if (!editorRootContainer) {
       console.warn('ToolbarPlugin: Container not found.');
       return;
@@ -58,35 +58,35 @@ export class ToolbarPlugin implements MDxPlugin {
     let toolbarContainer = editorRootContainer.querySelector(
       `.${this.options.className}`
     ) as HTMLElement;
-    
+
     if (!toolbarContainer) {
       toolbarContainer = document.createElement('div');
       toolbarContainer.className = this.options.className;
-      
+
       editorRootContainer.insertBefore(toolbarContainer, editorRootContainer.firstChild);
     }
-    
+
     this.toolbarElement = toolbarContainer;
-    
+
     const buttons = pluginManager.getToolbarButtons();
 
     toolbarContainer.innerHTML = '';
 
-    const mainButtons = buttons.filter((b: ToolbarButtonConfig) => 
+    const mainButtons = buttons.filter((b: ToolbarButtonConfig) =>
       !b.location || b.location === 'main'
     );
-    const modeSwitcherButtons = buttons.filter((b: ToolbarButtonConfig) => 
+    const modeSwitcherButtons = buttons.filter((b: ToolbarButtonConfig) =>
       b.location === 'mode-switcher'
     );
 
     const mainGroup = document.createElement('div');
     mainGroup.className = `${this.options.className}__main`;
-    
+
     // [优化] 使用事件委托处理按钮点击
     mainGroup.addEventListener('click', (e) => {
       const target = (e.target as HTMLElement).closest('button');
       if (!target) return;
-      
+
       const commandName = target.getAttribute('data-command');
       if (commandName) {
         const command = pluginManager.getCommand(commandName);
@@ -96,7 +96,7 @@ export class ToolbarPlugin implements MDxPlugin {
         }
       }
     });
-    
+
     toolbarContainer.appendChild(mainGroup);
 
     // 使用 DocumentFragment 批量添加按钮
@@ -111,12 +111,12 @@ export class ToolbarPlugin implements MDxPlugin {
     if (modeSwitcherButtons.length > 0) {
       const modeSwitcherGroup = document.createElement('div');
       modeSwitcherGroup.className = `${this.options.className}__mode-switcher`;
-      
+
       // 事件委托
       modeSwitcherGroup.addEventListener('click', (e) => {
         const target = (e.target as HTMLElement).closest('button');
         if (!target) return;
-        
+
         const commandName = target.getAttribute('data-command');
         if (commandName) {
           const command = pluginManager.getCommand(commandName);
@@ -126,7 +126,7 @@ export class ToolbarPlugin implements MDxPlugin {
           }
         }
       });
-      
+
       toolbarContainer.appendChild(modeSwitcherGroup);
 
       const modeFragment = document.createDocumentFragment();
@@ -167,7 +167,7 @@ export class ToolbarPlugin implements MDxPlugin {
       this.toolbarElement.remove();
     }
     this.toolbarElement = null;
-    
+
     this.cleanupFns.forEach(fn => fn());
     this.cleanupFns = [];
   }

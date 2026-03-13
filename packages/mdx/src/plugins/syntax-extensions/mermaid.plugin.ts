@@ -1,6 +1,6 @@
 // mdx/plugins/syntax-extensions/mermaid.plugin.ts
 
-import type { MDxPlugin, PluginContext } from '../../core/plugin';
+import type { MDxPlugin, PluginContext } from '../../core/types';
 
 declare global {
   interface Window {
