@@ -6,7 +6,7 @@
  * > 内容...
  */
 
-import type { MDxPlugin, PluginContext } from '../../core/plugin';
+import type { MDxPlugin, PluginContext } from '../../core/types';
 import type { MarkedExtension } from 'marked';
 
 export interface CalloutPluginOptions {

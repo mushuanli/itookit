@@ -2,11 +2,11 @@
  * @file mdx/plugins/core/asset-resolver.plugin.ts
  * @desc 负责将 @asset/ 路径解析为 Blob URL
  */
-import type { MDxPlugin, PluginContext } from '../../core/plugin';
+import type { MDxPlugin, PluginContext } from '../../core/types';
 import { type ISessionEngine, type EngineNode, guessMimeType } from '@itookit/common';
-import { extractFilenameFromPath, AssetConfigOptions } from '../../core/asset-helper';
+import { extractFilenameFromPath, AssetConfigOptions } from '../../services/asset-helper';
 
-export interface AssetResolverPluginOptions extends AssetConfigOptions {}
+export interface AssetResolverPluginOptions extends AssetConfigOptions { }
 
 interface AssetCache {
     dirId: string;
@@ -16,8 +16,8 @@ interface AssetCache {
 
 export class AssetResolverPlugin implements MDxPlugin {
     name = 'core:asset-resolver';
-    priority = 95; 
-    
+    priority = 95;
+
     private createdUrls: Set<string> = new Set();
     private assetCache: AssetCache | null = null;
     private readonly CACHE_TTL = 5000;
@@ -50,7 +50,7 @@ export class AssetResolverPlugin implements MDxPlugin {
             console.debug('[AssetResolver] Failed to get asset dir ID:', e);
             return;
         }
-        
+
         // 如果目录不存在 (Engine 返回 null)，说明没有资产，直接返回
         if (!assetDirId) return;
 
@@ -61,7 +61,7 @@ export class AssetResolverPlugin implements MDxPlugin {
         // 3. 扫描 DOM 节点并替换
         const elements = root.querySelectorAll<HTMLElement>('[src], [href]');
         const resolvePromises: Promise<void>[] = [];
-        
+
         for (const el of elements) {
             const srcAttr = el.hasAttribute('src') ? 'src' : 'href';
             const rawUrl = el.getAttribute(srcAttr);
@@ -73,7 +73,7 @@ export class AssetResolverPlugin implements MDxPlugin {
 
             const filename = extractFilenameFromPath(rawUrl);
             const targetNode = assetsMap.get(filename);
-            
+
             if (!targetNode) continue;
 
             resolvePromises.push(
@@ -98,13 +98,13 @@ export class AssetResolverPlugin implements MDxPlugin {
             const mimeType = guessMimeType(node.name);
             const blob = new Blob([content], { type: mimeType });
             const blobUrl = URL.createObjectURL(blob);
-            
+
             this.createdUrls.add(blobUrl);
-            
+
             el.setAttribute(srcAttr, blobUrl);
             el.setAttribute('data-original-src', rawUrl);
             el.setAttribute('data-asset-id', node.id);
-            
+
             // 移除 srcset 以防止浏览器加载错误图片
             if (el.tagName === 'IMG') {
                 el.removeAttribute('srcset');
@@ -115,7 +115,7 @@ export class AssetResolverPlugin implements MDxPlugin {
     }
 
     private async getAssetsMap(
-        engine: ISessionEngine, 
+        engine: ISessionEngine,
         dirId: string
     ): Promise<Map<string, EngineNode>> {
         const now = Date.now();
@@ -154,7 +154,7 @@ export class AssetResolverPlugin implements MDxPlugin {
         if (!editor) return 0;
 
         const content = editor.getText();
-        
+
         // 提取引用：只关心 @asset/ 语法
         const usedFilenames = new Set<string>();
         const regex = /@asset\/([^\s)"']+)/g;

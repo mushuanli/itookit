@@ -3,7 +3,7 @@
  * @desc 处理 PlantUML 代码块，将其转换为图片标签
  */
 
-import type { MDxPlugin, PluginContext } from '../../core/plugin';
+import type { MDxPlugin, PluginContext } from '../../core/types';
 
 export interface PlantUMLPluginOptions {
     /**

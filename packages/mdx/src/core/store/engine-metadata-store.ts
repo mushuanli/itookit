@@ -1,0 +1,110 @@
+// @mdx/core/store/engine-metadata-store.ts
+import type { ISessionEngine } from '@itookit/common';
+import type { ScopedPersistenceStore } from './types';
+
+type PluginDataRecord = Record<string, unknown>;
+
+/**
+ * 基于 Engine 元数据的持久化存储
+ * 特性：防抖批量写入、并发安全、销毁保护
+ */
+export class EngineMetadataStore implements ScopedPersistenceStore {
+    private pendingUpdates = new Map<string, unknown>();
+    private flushTimer: number | null = null;
+    private flushPromise: Promise<void> | null = null;
+    private isDestroyed = false;
+
+    constructor(
+        private engine: ISessionEngine,
+        private nodeId: string,
+        private pluginNamespace: string
+    ) { }
+
+    private getMetaKey(): string {
+        return `_mdx_plugin_${this.pluginNamespace}`;
+    }
+
+    async get(key: string): Promise<unknown> {
+        if (this.isDestroyed) return undefined;
+
+        // 优先从待写入队列读取
+        if (this.pendingUpdates.has(key)) {
+            return this.pendingUpdates.get(key);
+        }
+
+        try {
+            const node = await this.engine.getNode(this.nodeId);
+            if (!node) return undefined;
+            const pluginData = node.metadata?.[this.getMetaKey()] as PluginDataRecord | undefined;
+            return pluginData?.[key];
+        } catch (error) {
+            console.warn(`[EngineMetadataStore] Get "${key}" failed:`, error);
+            return undefined;
+        }
+    }
+
+    async set(key: string, value: unknown): Promise<void> {
+        if (this.isDestroyed) return;
+        this.pendingUpdates.set(key, value);
+        this.scheduleFlush();
+    }
+
+    async remove(key: string): Promise<void> {
+        if (this.isDestroyed) return;
+        this.pendingUpdates.set(key, undefined);
+        this.scheduleFlush();
+    }
+
+    private scheduleFlush(): void {
+        if (this.isDestroyed || this.flushTimer) return;
+        this.flushTimer = window.setTimeout(() => {
+            this.flushTimer = null;
+            this.flush();
+        }, 100);
+    }
+
+    private async flush(): Promise<void> {
+        if (this.isDestroyed || this.pendingUpdates.size === 0) return;
+        if (this.flushPromise) {
+            await this.flushPromise;
+            return;
+        }
+
+        this.flushPromise = (async () => {
+            try {
+                const node = await this.engine.getNode(this.nodeId);
+                if (!node) throw new Error(`Node ${this.nodeId} not found`);
+
+                const metaKey = this.getMetaKey();
+                const pluginData = { ...(node.metadata?.[metaKey] as PluginDataRecord) || {} };
+
+                for (const [k, v] of this.pendingUpdates) {
+                    if (v === undefined) delete pluginData[k];
+                    else pluginData[k] = v;
+                }
+
+                await this.engine.updateMetadata(this.nodeId, {
+                    ...node.metadata,
+                    [metaKey]: pluginData,
+                });
+                this.pendingUpdates.clear();
+            } catch (error) {
+                console.error('[EngineMetadataStore] Flush failed:', error);
+            } finally {
+                this.flushPromise = null;
+            }
+        })();
+
+        await this.flushPromise;
+    }
+
+    destroy(): void {
+        this.isDestroyed = true;
+        if (this.flushTimer) {
+            clearTimeout(this.flushTimer);
+            this.flushTimer = null;
+        }
+        this.pendingUpdates.clear();
+        this.flushPromise = null;
+    }
+}

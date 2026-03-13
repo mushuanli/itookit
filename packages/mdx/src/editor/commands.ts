@@ -2,7 +2,7 @@
 
 import { EditorView } from '@codemirror/view';
 import { EditorSelection, ChangeSpec } from '@codemirror/state';
-import type { MDxEditor } from './editor';
+import type { MDxEditor } from './mdx-editor';
 
 /**
  * 命令函数类型定义
@@ -66,7 +66,7 @@ export function applyCloze(view: EditorView): boolean {
   // 一次性收集所有 Cloze 匹配
   const clozeRegex = /--.*?--/gd;
   const allMatches: ClozeMatch[] = [];
-  
+
   for (const match of docString.matchAll(clozeRegex)) {
     const indices = match.indices?.[0];
     if (indices) {
@@ -114,12 +114,12 @@ export function applyCloze(view: EditorView): boolean {
 
   // 移除已存在的 Cloze 标记
   const contentToWrap = doc.sliceString(modificationStart, modificationEnd).replace(/--/g, '');
-  
+
   if (!contentToWrap.trim()) {
     view.focus();
     return true;
   }
-  
+
   const locator = `c${Date.now()}`;
   const newText = `--[${locator}] ${contentToWrap.trim()}--`;
 
@@ -141,13 +141,13 @@ export function applyAudioCloze(view: EditorView): boolean {
     alert("请先选择要制作成 Cloze 的文本。");
     return false;
   }
-  
+
   const selectedText = state.doc.sliceString(from, to);
   const audioText = prompt("请输入音频提示文本:", selectedText);
   if (audioText === null) return false;
 
   const newText = `--${selectedText}--^^audio:${audioText.trim()}^^`;
-  
+
   view.dispatch({
     changes: { from, to, insert: newText }
   });
@@ -175,13 +175,13 @@ function toggleLinePrefix(view: EditorView, prefix: string): boolean {
 
   const fromLine = state.doc.lineAt(from);
   const toLine = state.doc.lineAt(to);
-  
+
   const changes: ChangeSpec[] = [];
-  
+
   // 预分配数组，一次遍历完成检测和收集
   const lineInfos: Array<{ line: typeof fromLine; hasPrefix: boolean }> = [];
   let allLinesHavePrefix = true;
-  
+
   for (let i = fromLine.number; i <= toLine.number; i++) {
     const line = state.doc.line(i);
     const hasPrefix = line.length > 0 && line.text.trimStart().startsWith(prefix);
@@ -197,10 +197,10 @@ function toggleLinePrefix(view: EditorView, prefix: string): boolean {
       // 移除前缀
       if (line.text.includes(prefix)) {
         const prefixIndex = line.text.indexOf(prefix);
-        changes.push({ 
-          from: line.from + prefixIndex, 
-          to: line.from + prefixIndex + prefix.length, 
-          insert: '' 
+        changes.push({
+          from: line.from + prefixIndex,
+          to: line.from + prefixIndex + prefix.length,
+          insert: ''
         });
       }
     } else if (line.length > 0 && !hasPrefix) {
@@ -237,7 +237,7 @@ export const toggleHeading: CommandFunction = (view) => {
   } else {
     change = { from: line.from, insert: '## ' };
   }
-  
+
   view.dispatch({ changes: [change] });
   view.focus();
   return true;
@@ -251,7 +251,7 @@ export function insertHorizontalRule(view: EditorView): boolean {
   const line = view.state.doc.lineAt(from);
   const insertPos = line.to;
   const insertText = (line.length > 0 ? '\n\n---\n' : '\n---\n');
-  
+
   view.dispatch({
     changes: { from: insertPos, insert: insertText },
     selection: EditorSelection.cursor(insertPos + insertText.length)
@@ -281,7 +281,7 @@ export function insertTable(view: EditorView): boolean {
   const headerCells = Array(colCount).fill('标题').join(' | ');
   const separatorCells = Array(colCount).fill('---').join(' | ');
   const bodyCells = Array(colCount).fill('单元格').join(' | ');
-  
+
   const lines = [
     '',
     `| ${headerCells} |`,
@@ -289,7 +289,7 @@ export function insertTable(view: EditorView): boolean {
     ...Array(rowCount - 1).fill(`| ${bodyCells} |`),
     ''
   ];
-  
+
   const table = lines.join('\n');
 
   view.dispatch({
@@ -328,7 +328,7 @@ export function applyLink(view: EditorView): boolean {
   const { state } = view;
   const { from, to } = state.selection.main;
   const selectedText = state.sliceDoc(from, to);
-  
+
   const linkText = selectedText || '链接文本';
   const newText = `[${linkText}](${url})`;
 
@@ -351,7 +351,7 @@ export function insertImage(view: EditorView): boolean {
   const { from, to } = state.selection.main;
   const altText = state.sliceDoc(from, to) || '图片描述';
   const newText = `![${altText}](${url})`;
-  
+
   view.dispatch({
     changes: { from, to, insert: newText }
   });
@@ -369,9 +369,9 @@ export function handleAIAction(view: EditorView, callback: (content: string) => 
   }
   const { from, to } = view.state.selection.main;
   const selectedText = view.state.doc.sliceString(from, to);
-  
+
   const textToProcess = selectedText.length > 0 ? selectedText : view.state.doc.toString();
-  
+
   callback(textToProcess);
   view.focus();
   return true;
@@ -402,7 +402,7 @@ export async function handlePrintAction(editor: MDxEditor): Promise<boolean> {
     printContainer.className = 'rich-content-area';
     document.body.appendChild(printContainer);
   }
-  
+
   try {
     if (editor.getMode() === 'render') {
       const renderEl = editor.getRenderContainer();
@@ -412,10 +412,10 @@ export async function handlePrintAction(editor: MDxEditor): Promise<boolean> {
     } else {
       const latestMarkdown = editor.getText();
       await editor.getRenderer().render(printContainer, latestMarkdown, {
-        areAllClozesVisible: true 
+        areAllClozesVisible: true
       });
     }
-    
+
     document.body.classList.add('mdx-printing');
     window.print();
   } catch (error) {

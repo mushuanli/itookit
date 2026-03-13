@@ -3,7 +3,7 @@
  * @desc 支持 Vega 和 Vega-Lite 数据可视化图表
  */
 
-import type { MDxPlugin, PluginContext } from '../../core/plugin';
+import type { MDxPlugin, PluginContext } from '../../core/types';
 
 declare global {
     interface Window {

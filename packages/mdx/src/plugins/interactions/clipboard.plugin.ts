@@ -4,7 +4,7 @@
  */
 
 import { EditorView } from 'codemirror';
-import type { MDxPlugin, PluginContext } from '../../core/plugin';
+import type { MDxPlugin, PluginContext } from '../../core/types';
 
 // 需要安装: npm install turndown turndown-plugin-gfm
 import TurndownService from 'turndown';
@@ -52,7 +52,7 @@ export class ClipboardPlugin implements MDxPlugin {
                 const alt = img.alt || '';
                 const src = img.src || '';
                 const title = img.title ? ` "${img.title}"` : '';
-                
+
                 // 标记外部图片，后续可以选择下载或保留原链接
                 if (src.startsWith('data:')) {
                     // Base64 图片，标记为需要上传
@@ -85,10 +85,10 @@ export class ClipboardPlugin implements MDxPlugin {
         // 优先级 1: 处理文件（图片等）
         if (this.options.enableImagePaste && clipboardData.files.length > 0) {
             // 检查是否有图片文件
-            const imageFiles = Array.from(clipboardData.files).filter(f => 
+            const imageFiles = Array.from(clipboardData.files).filter(f =>
                 f.type.startsWith('image/')
             );
-            
+
             if (imageFiles.length > 0) {
                 // 让 UploadPlugin 处理
                 return false;
@@ -98,13 +98,13 @@ export class ClipboardPlugin implements MDxPlugin {
         // 优先级 2: 处理 HTML 内容
         if (this.options.enableHtmlToMarkdown) {
             const htmlContent = clipboardData.getData('text/html');
-            
+
             if (htmlContent && this.isRichContent(htmlContent)) {
                 event.preventDefault();
-                
+
                 const markdown = this.convertHtmlToMarkdown(htmlContent);
                 this.insertText(view, markdown);
-                
+
                 return true;
             }
         }
@@ -143,8 +143,8 @@ export class ClipboardPlugin implements MDxPlugin {
 
         // 检查是否有多个段落（换行）
         const textContent = body.textContent || '';
-        const hasMultipleLines = textContent.includes('\n') || 
-                                 body.querySelectorAll('div, span').length > 1;
+        const hasMultipleLines = textContent.includes('\n') ||
+            body.querySelectorAll('div, span').length > 1;
 
         return hasMultipleLines;
     }
@@ -156,13 +156,13 @@ export class ClipboardPlugin implements MDxPlugin {
         try {
             // 预处理：清理 HTML
             const cleanedHtml = this.preprocessHtml(html);
-            
+
             // 使用 Turndown 转换
             let markdown = this.turndownService.turndown(cleanedHtml);
-            
+
             // 后处理：清理 Markdown
             markdown = this.postprocessMarkdown(markdown);
-            
+
             return markdown;
         } catch (error) {
             console.error('[ClipboardPlugin] HTML to Markdown conversion failed:', error);
@@ -212,7 +212,7 @@ export class ClipboardPlugin implements MDxPlugin {
      */
     private insertText(view: EditorView, text: string): void {
         const { from, to } = view.state.selection.main;
-        
+
         view.dispatch({
             changes: { from, to, insert: text },
             selection: { anchor: from + text.length },
