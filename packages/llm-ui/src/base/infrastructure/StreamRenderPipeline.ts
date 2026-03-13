@@ -25,6 +25,7 @@ export class StreamRenderPipeline {
     private rafId: number | null = null;
     private timers = new TimerManager();
     private dirty = false;
+    private scrollPending = false; // ✅ 添加属性声明
 
     // 内容渲染节流
     private contentDirty = false;
@@ -56,6 +57,7 @@ export class StreamRenderPipeline {
         }
 
         this.callbacks.checkAndScroll();
+        this.scrollPending = false; // ✅ 停止时清理
 
         if (this.rafId !== null) {
             cancelAnimationFrame(this.rafId);
@@ -98,12 +100,15 @@ export class StreamRenderPipeline {
                 this.callbacks.flushContent();
                 this.contentDirty = false;
                 this.lastContentFlush = now;
-                this.dirty = true; // 内容变化后需要检查滚动
+                // ✅ 渲染后不立即滚动，标记下一帧滚动
+                this.scrollPending = true;
+                return;
             }
         }
 
-        // Phase 2: 高度检查 + 滚动（每帧都检查，成本低）
-        if (this.dirty) {
+        // 滚动在渲染的下一帧执行
+        if (this.scrollPending || this.dirty) {
+            this.scrollPending = false;
             this.dirty = false;
             this.callbacks.checkAndScroll();
         }
@@ -115,6 +120,7 @@ export class StreamRenderPipeline {
             cancelAnimationFrame(this.rafId);
             this.rafId = null;
         }
+        this.scrollPending = false; // ✅ 销毁时清理
         this.timers.destroy();
     }
 }
