@@ -3,7 +3,7 @@
  * @desc 处理 SVG 代码块的插件，支持将 ```svg 代码块渲染为内联 SVG。
  */
 
-import type { MDxPlugin, PluginContext } from '../../core/plugin';
+import type { MDxPlugin, PluginContext } from '../../core/types';
 
 export interface SvgPluginOptions {
     /**

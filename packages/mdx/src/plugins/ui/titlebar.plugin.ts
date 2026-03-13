@@ -2,8 +2,8 @@
  * @file mdx/plugins/ui/titlebar.plugin.ts
  */
 
-import type { MDxPlugin, PluginContext } from '../../core/plugin';
-import type { MDxEditor } from '../../editor/editor';
+import type { MDxPlugin, PluginContext } from '../../core/types';
+import type { MDxEditor } from '../../editor/mdx-editor';
 import type { PluginManager } from '../../core/plugin-manager';
 
 /**
@@ -53,7 +53,7 @@ export class CoreTitleBarPlugin implements MDxPlugin {
   private cleanupFns: Array<() => void> = [];
   private toggleModeBtn: HTMLButtonElement | null = null;
   // [新增] 属性，用于存储标题元素的引用
-  private titleEl: HTMLElement | null = null; 
+  private titleEl: HTMLElement | null = null;
 
   constructor(options: CoreTitleBarPluginOptions = {}) {
     this.options = options;
@@ -70,9 +70,9 @@ export class CoreTitleBarPlugin implements MDxPlugin {
       this.cleanupFns.push(removeSetTitleListener);
     }
 
-    const removeRegister = context.on('editorPostInit', (payload: { 
-      editor: MDxEditor, 
-      pluginManager: PluginManager 
+    const removeRegister = context.on('editorPostInit', (payload: {
+      editor: MDxEditor,
+      pluginManager: PluginManager
     }) => {
       this.registerButtons(context, payload);
     });
@@ -81,9 +81,9 @@ export class CoreTitleBarPlugin implements MDxPlugin {
       this.cleanupFns.push(removeRegister);
     }
 
-    const removeRender = context.on('editorPostInit', (payload: { 
-      editor: MDxEditor, 
-      pluginManager: PluginManager 
+    const removeRender = context.on('editorPostInit', (payload: {
+      editor: MDxEditor,
+      pluginManager: PluginManager
     }) => {
       this.renderTitleBar(context, payload);
     });
@@ -104,9 +104,9 @@ export class CoreTitleBarPlugin implements MDxPlugin {
   /**
    * 注册按钮
    */
-  private registerButtons(context: PluginContext, payload: { 
-    editor: MDxEditor, 
-    pluginManager: PluginManager 
+  private registerButtons(context: PluginContext, payload: {
+    editor: MDxEditor,
+    pluginManager: PluginManager
   }): void {
     const { editor } = payload;
 
@@ -179,9 +179,9 @@ export class CoreTitleBarPlugin implements MDxPlugin {
   /**
    * 渲染标题栏
    */
-  private renderTitleBar(context: PluginContext, payload: { 
-    editor: MDxEditor, 
-    pluginManager: PluginManager 
+  private renderTitleBar(context: PluginContext, payload: {
+    editor: MDxEditor,
+    pluginManager: PluginManager
   }): void {
     const { editor, pluginManager } = payload;
     const container = editor.container;
@@ -196,7 +196,7 @@ export class CoreTitleBarPlugin implements MDxPlugin {
 
     const leftGroup = document.createElement('div');
     leftGroup.className = 'mdx-editor-titlebar__left';
-    
+
     // [新增] 创建标题容器和标题元素
     const titleContainer = document.createElement('div');
     titleContainer.className = 'mdx-editor-titlebar__center';

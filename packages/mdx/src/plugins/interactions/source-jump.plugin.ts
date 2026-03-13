@@ -2,7 +2,7 @@
  * @file mdx/plugins/interactions/source-jump.plugin.ts
  * @description 源码同步插件 - 优化版
  */
-import type { MDxPlugin, PluginContext } from '../../core/plugin';
+import type { MDxPlugin, PluginContext } from '../../core/types';
 
 // [优化] 静态常量提取
 const BLOCK_TAGS = new Set(['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'LI', 'BLOCKQUOTE', 'PRE', 'DIV']);
@@ -10,9 +10,9 @@ const BLOCK_TAGS = new Set(['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'LI', 'BLOC
 export class SourceSyncPlugin implements MDxPlugin {
   name = 'interaction:source-sync';
   private cleanupFns: Array<() => void> = [];
-  
+
   // [优化] 缓存平台检测结果
-  private readonly isMac = typeof navigator !== 'undefined' && 
+  private readonly isMac = typeof navigator !== 'undefined' &&
     navigator.platform.toUpperCase().indexOf('MAC') >= 0;
 
   install(context: PluginContext): void {
@@ -50,7 +50,7 @@ export class SourceSyncPlugin implements MDxPlugin {
     };
 
     element.addEventListener('dblclick', handler);
-    
+
     this.cleanupFns.push(() => {
       element.removeEventListener('dblclick', handler);
       delete element.dataset.sourceSyncBound;

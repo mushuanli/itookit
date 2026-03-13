@@ -3,23 +3,23 @@
  * @desc 处理文件粘贴/拖拽上传，以及 Titlebar 主动上传。支持文件过滤、大小限制和自定义路径策略。
  */
 import { EditorView } from 'codemirror';
-import type { MDxPlugin, PluginContext } from '../../core/plugin';
-import type { MDxEditor } from '../../editor/editor';
+import type { MDxPlugin, PluginContext } from '../../core/types';
+import type { MDxEditor } from '../../editor/mdx-editor';
 import { Toast } from '@itookit/common';
-import { 
-    getUploadLimits, 
+import {
+    getUploadLimits,
     validateFile,
     generateAssetPath,
-    AssetConfigOptions 
-} from '../../core/asset-helper';
+    AssetConfigOptions
+} from '../../services/asset-helper';
 
-export interface UploadPluginOptions extends AssetConfigOptions {}
+export interface UploadPluginOptions extends AssetConfigOptions { }
 
 export class UploadPlugin implements MDxPlugin {
     name = 'interaction:upload';
     private context!: PluginContext;
     private uploadLimits: { maxSize: number; accept: string[] };
-    
+
     // 新增：用于主动触发上传的隐藏 Input 和当前编辑器引用
     private fileInput: HTMLInputElement | null = null;
     private currentEditor: MDxEditor | null = null;
@@ -30,7 +30,7 @@ export class UploadPlugin implements MDxPlugin {
 
     install(context: PluginContext): void {
         this.context = context;
-        
+
         // 1. 初始化隐藏的 Input 元素 (用于点击按钮上传)
         this.initHiddenInput();
 
@@ -69,7 +69,7 @@ export class UploadPlugin implements MDxPlugin {
                 return false;
             },
         });
-        
+
         context.registerCodeMirrorExtension?.(extension);
     }
 
@@ -81,7 +81,7 @@ export class UploadPlugin implements MDxPlugin {
         this.fileInput.type = 'file';
         this.fileInput.multiple = true; // ✅ 允许一次选择多个文件
         this.fileInput.style.display = 'none';
-        
+
         // 设置接受的文件类型 (为了 UI 体验，安全性在 processFiles 再次校验)
         if (this.uploadLimits.accept.length > 0) {
             this.fileInput.accept = this.uploadLimits.accept.join(',');
@@ -96,10 +96,10 @@ export class UploadPlugin implements MDxPlugin {
 
             // 获取编辑器视图
             const view = this.currentEditor?.getEditorView();
-            
+
             if (view) {
                 // 聚焦编辑器，确保插入位置正确
-                view.focus(); 
+                view.focus();
                 await this.processFiles(files, view);
             } else {
                 Toast.error('无法获取编辑器实例');
@@ -117,7 +117,7 @@ export class UploadPlugin implements MDxPlugin {
         const engine = this.context.getSessionEngine?.();
         // ✅ 获取 ownerNodeId (由 EditorOptions 传入，或默认为 nodeId)
         const ownerNodeId = this.context.getOwnerNodeId?.();
-        
+
         if (!engine) {
             console.warn('[UploadPlugin] No engine available.');
             Toast.error('上传服务不可用');
@@ -132,7 +132,7 @@ export class UploadPlugin implements MDxPlugin {
 
         const placeholderId = `upload-${Date.now().toString(36)}`;
         const placeholderText = `![Uploading ${fileList.length} files... #${placeholderId}]()`;
-        
+
         // 1. 插入上传占位符 (在光标位置)
         const { from } = view.state.selection.main;
         view.dispatch({
@@ -164,7 +164,7 @@ export class UploadPlugin implements MDxPlugin {
                 // 注意：VFSCore 会根据 arrayBuffer 自动标记 isBinary: true
                 // MiddlewareRegistry 会根据此标记跳过 PlainTextMiddleware
                 const assetNode = await engine.createAsset(ownerNodeId, safeName, arrayBuffer);
-                
+
                 // 2.4 生成 @asset/ 路径 Markdown
                 const path = generateAssetPath(assetNode.name);
                 replacements.push(this.generateMarkdown(file, path));
@@ -178,12 +178,12 @@ export class UploadPlugin implements MDxPlugin {
             // 4. 替换占位符
             const currentDoc = view.state.doc.toString();
             const startIdx = currentDoc.indexOf(placeholderText);
-            
+
             if (startIdx >= 0) {
                 // 如果所有文件都失败了，replacements 为空，直接删除占位符
                 // 如果有成功的，插入 Markdown，并在末尾加个换行符保持格式整洁
-                const finalText = replacements.length > 0 
-                    ? '\n' + replacements.join('\n') + '\n' 
+                const finalText = replacements.length > 0
+                    ? '\n' + replacements.join('\n') + '\n'
                     : '';
 
                 view.dispatch({
@@ -195,7 +195,7 @@ export class UploadPlugin implements MDxPlugin {
                     // 更新光标位置到插入内容之后
                     selection: { anchor: startIdx + finalText.length }
                 });
-                
+
                 if (replacements.length > 0) {
                     Toast.success(`成功上传 ${replacements.length} 个文件`);
                 }
@@ -204,13 +204,13 @@ export class UploadPlugin implements MDxPlugin {
         } catch (error) {
             console.error('[UploadPlugin] Upload failed:', error);
             Toast.error('上传过程中发生错误');
-            
+
             // 发生严重错误时清理占位符
             const currentDoc = view.state.doc.toString();
             const startIdx = currentDoc.indexOf(placeholderText);
             if (startIdx >= 0) {
                 view.dispatch({
-                   changes: { from: startIdx, to: startIdx + placeholderText.length, insert: '' }
+                    changes: { from: startIdx, to: startIdx + placeholderText.length, insert: '' }
                 });
             }
         }

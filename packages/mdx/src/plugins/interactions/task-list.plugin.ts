@@ -4,7 +4,7 @@
  */
 
 import { type MarkedExtension, lexer as markedLexer } from 'marked';
-import type { MDxPlugin, PluginContext, ScopedPersistenceStore } from '../../core/plugin';
+import type { MDxPlugin, PluginContext, ScopedPersistenceStore } from '../../core/types';
 
 // ... Options 接口保持不变 ...
 export interface TaskListPluginOptions {

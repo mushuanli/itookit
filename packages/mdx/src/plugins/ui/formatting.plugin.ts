@@ -1,6 +1,6 @@
 // mdx/plugins/ui/formatting.plugin.ts
 
-import type { MDxPlugin, PluginContext } from '../../core/plugin';
+import type { MDxPlugin, PluginContext } from '../../core/types';
 import * as commands from '../../editor/commands';
 
 /**
@@ -110,7 +110,7 @@ export class FormattingPlugin implements MDxPlugin {
     // [优化] 使用 for 循环替代 forEach，避免闭包开销
     for (let i = 0; i < formats.length; i++) {
       const format = formats[i];
-      
+
       if (format === 'separator') {
         registerToolbarButton({
           id: `sep-${i}`,

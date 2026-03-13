@@ -1,6 +1,6 @@
 // @file: mdx/core/print.service.ts
 
-import { MDxRenderer } from '../renderer/renderer';
+import { MDxRenderer } from '../../renderer/mdx-renderer';
 import type { ISessionEngine } from '@itookit/common';
 
 // ✅ 从常量文件导入样式
@@ -12,13 +12,13 @@ import { PRINT_STYLES } from './print.styles';
 export interface PrintOptions {
     /** 文档标题 */
     title?: string;
-    
+
     /** 自定义样式（CSS 字符串或数组） */
     styles?: string | string[];
-    
+
     /** 是否显示页眉 */
     showHeader?: boolean;
-    
+
     /** 页眉元数据 */
     headerMeta?: {
         author?: string;
@@ -26,16 +26,16 @@ export interface PrintOptions {
         version?: string;
         [key: string]: string | undefined;
     };
-    
+
     /** 打印前的 HTML 处理钩子 */
     beforePrint?: (html: string) => string;
-    
+
     /** 打印后是否自动关闭预览窗口 */
     autoClose?: boolean;
-    
+
     /** 布局变体 */
     variant?: 'default' | 'compact';
-    
+
     /** 纸张大小 */
     pageSize?: 'A4' | 'Letter' | 'Legal';
 }
@@ -48,17 +48,17 @@ export interface PrintService {
      * 将 Markdown 渲染为可打印的 HTML
      */
     renderForPrint(markdown: string, options?: PrintOptions): Promise<string>;
-    
+
     /**
      * 打开打印预览窗口并触发打印（从 Markdown 渲染）
      */
     print(markdown: string, options?: PrintOptions): Promise<void>;
-    
+
     /**
      * ✅ [新增] 直接使用 HTML 内容打印（跳过渲染步骤）
      */
     printFromHtml(html: string, options?: PrintOptions): Promise<void>;
-    
+
     /**
      * 销毁服务，释放资源
      */
@@ -127,19 +127,19 @@ export class DefaultPrintService implements PrintService {
 
         const title = options.title || 'Untitled Document';
         const meta = options.headerMeta || {};
-        
+
         let metaItems = '';
-        
+
         if (meta.author) {
             metaItems += `<span class="mdx-print-header__meta-item">${this.escapeHtml(meta.author)}</span>`;
         }
-        
+
         if (meta.date) {
             metaItems += `<span class="mdx-print-header__meta-item">${this.escapeHtml(meta.date)}</span>`;
         } else {
             metaItems += `<span class="mdx-print-header__meta-item">${new Date().toLocaleDateString()}</span>`;
         }
-        
+
         if (meta.version) {
             metaItems += `<span class="mdx-print-header__meta-item">v${this.escapeHtml(meta.version)}</span>`;
         }
@@ -194,7 +194,7 @@ export class DefaultPrintService implements PrintService {
         const title = options.title || 'Print';
         const styles = this.getStyles(options);
         const header = this.buildHeader(options);
-        
+
         // 确定变体类名
         const variantClass = options.variant === 'compact' ? 'mdx-print--compact' : '';
         const headerClass = options.showHeader === false ? 'mdx-print--no-header' : '';
@@ -290,7 +290,7 @@ export class LLMPrintService extends DefaultPrintService {
     async renderForPrint(markdown: string, options: PrintOptions = {}): Promise<string> {
         // 预处理：将对话 Markdown 转换为带有 BEM 类名的结构
         const processedMarkdown = this.preprocessConversation(markdown);
-        
+
         // 调用父类渲染
         return super.renderForPrint(processedMarkdown, {
             ...options,
@@ -317,7 +317,7 @@ export class LLMPrintService extends DefaultPrintService {
                 if (content) {
                     const avatarIcon = this.getRoleIcon(currentRole);
                     const roleLabel = this.getRoleLabel(currentRole);
-                    
+
                     result.push(`<div class="mdx-print-message mdx-print-message--${currentRole}">`);
                     result.push(`  <div class="mdx-print-message__header">`);
                     result.push(`    <span class="mdx-print-message__avatar">${avatarIcon}</span>`);

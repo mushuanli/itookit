@@ -1,6 +1,6 @@
 // mdx/plugins/autocomplete/autocomplete.plugin.ts
-import {type HoverPreviewData} from '@itookit/common';
-import type { MDxPlugin, PluginContext } from '../../core/plugin';
+import { type HoverPreviewData } from '@itookit/common';
+import type { MDxPlugin, PluginContext } from '../../core/types';
 import {
   Completion,
 } from '@codemirror/autocomplete';
@@ -78,10 +78,10 @@ export class AutocompletePlugin implements MDxPlugin {
       console.warn('AutocompletePlugin: PluginManager not available');
       return;
     }
-    
+
     if (!(pluginManager as any)._autocompleteSources) {
       (pluginManager as any)._autocompleteSources = [];
-    //console.log('🔧 [AutocompletePlugin] Created _autocompleteSources array');
+      //console.log('🔧 [AutocompletePlugin] Created _autocompleteSources array');
     }
 
     // [优化] 直接推入，避免展开操作

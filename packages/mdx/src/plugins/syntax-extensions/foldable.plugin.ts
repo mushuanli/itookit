@@ -1,8 +1,8 @@
 // src/plugins/syntax-extensions/foldable.plugin.ts
 
-import type { MDxPlugin, PluginContext } from '../../core/plugin';
+import type { MDxPlugin, PluginContext } from '../../core/types';
 import { Marked } from 'marked';
-import {escapeHTML} from '@itookit/common';
+import { escapeHTML } from '@itookit/common';
 /**
  * 可折叠块插件配置选项
  */
@@ -12,13 +12,13 @@ export interface FoldablePluginOptions {
    * @default true
    */
   defaultOpen?: boolean;
-  
+
   /**
    * 自定义 CSS 类名。建议遵循 BEM 命名法并使用命名空间。
    * @default 'mdx-editor-foldable'
    */
   className?: string;
-  
+
   /**
    * 是否支持任务复选框
    * @default true
@@ -65,7 +65,7 @@ export class FoldablePlugin implements MDxPlugin {
   name = 'feature:foldable';
   private options: Required<FoldablePluginOptions>;
   private cleanupFns: Array<() => void> = [];
-  
+
   /**
    * 使用 WeakMap 存储每个上下文的独立状态
    * 键：PluginContext（每个 renderer 实例唯一）
@@ -119,7 +119,7 @@ export class FoldablePlugin implements MDxPlugin {
   private createBeforeParseHook(context: PluginContext) {
     return ({ markdown, options }: { markdown: string; options: any }) => {
       const state = this.getContextState(context);
-      
+
       state.storedBlocks.clear();
       state.placeholderId = 0;
       state.originalMarkdown = markdown; // 保存原始内容
@@ -135,12 +135,12 @@ export class FoldablePlugin implements MDxPlugin {
         foldableRegex,
         (match, checkmark, label, _rawContent, offset) => {
           const placeholder = this.generatePlaceholder(state);
-          
+
           // [优化] 只存储位置信息
           const labelEndPos = match.indexOf('\n');
           const contentStart = offset + (labelEndPos >= 0 ? labelEndPos + 1 : match.length);
           const contentEnd = offset + match.length;
-          
+
           state.storedBlocks.set(placeholder, {
             checkmark: checkmark || undefined,
             label: label.trim(),
@@ -165,7 +165,7 @@ export class FoldablePlugin implements MDxPlugin {
   private createAfterRenderHook(context: PluginContext) {
     return ({ html, options }: { html: string; options: any }) => {
       const state = this.getContextState(context);
-      
+
       if (state.storedBlocks.size === 0) {
         return { html, options };
       }
@@ -180,7 +180,7 @@ export class FoldablePlugin implements MDxPlugin {
         const innerHtml = innerMarked.parse(dedentedContent) as string;
 
         let summaryContent = escapeHTML(blockRef.label);
-        
+
         if (this.options.enableTaskCheckbox && blockRef.checkmark) {
           const isChecked = blockRef.checkmark.toLowerCase() === 'x';
           const checkboxHtml = `<input type="checkbox" class="${this.options.className}__task-checkbox" ${isChecked ? 'checked' : ''}>`;
@@ -199,7 +199,7 @@ export class FoldablePlugin implements MDxPlugin {
           `<p>${escapedPlaceholder}</p>|${escapedPlaceholder}`,
           'g'
         );
-        
+
         processedHtml = processedHtml.replace(placeholderRegex, detailsHtml);
       }
 

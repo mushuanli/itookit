@@ -2,12 +2,12 @@
  * @file mdx/plugins/ui/asset-manager.plugin.ts
  * @desc 集成 AssetManagerUI 并处理配置
  */
-import type { MDxPlugin, PluginContext } from '../../core/plugin';
+import type { MDxPlugin, PluginContext } from '../../core/types';
 import { AssetManagerUI } from './asset-manager.ui';
-import { AssetConfigOptions } from '../../core/asset-helper';
+import { AssetConfigOptions } from '../../services/asset-helper';
 import { Toast } from '@itookit/common';
 
-export interface AssetManagerPluginOptions extends AssetConfigOptions {}
+export interface AssetManagerPluginOptions extends AssetConfigOptions { }
 
 export class AssetManagerPlugin implements MDxPlugin {
     name = 'ui:asset-manager';
@@ -44,7 +44,7 @@ export class AssetManagerPlugin implements MDxPlugin {
     private async openAssetManager(context: PluginContext, editor: any): Promise<void> {
         const engine = context.getSessionEngine?.();
         const ownerNodeId = context.getOwnerNodeId?.();
-        
+
         if (!engine) {
             Toast.error('未连接到引擎');
             return;

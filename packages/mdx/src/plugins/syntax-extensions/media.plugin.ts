@@ -3,7 +3,7 @@
  * @desc 综合媒体插件，支持视频、文件下载及第三方内容嵌入 (PDF, Office, YouTube等)
  */
 
-import type { MDxPlugin, PluginContext } from '../../core/plugin';
+import type { MDxPlugin, PluginContext } from '../../core/types';
 
 export interface MediaPluginOptions {
   /** 视频容器 CSS 类名 @default 'mdx-editor-video' */
@@ -57,32 +57,32 @@ export class MediaPlugin implements MDxPlugin {
   }
 
   private handleAfterRender({ html, options }: { html: string; options: any }) {
-  // 合并正则：匹配 video[...], file[...], embed
-  const mediaRegex = /<img\s+[^>]*src="([^"]+)"[^>]*alt="((?:video|file)\[[^\]]*\]|embed)"[^>]*\/?>/gi;
-  
-  const processedHtml = html.replace(mediaRegex, (match, src, altText) => {
-    // 处理 embed
-    if (altText === 'embed') {
-      return this.renderEmbed(src);
-    }
-    
-    // 处理 video[...] 或 file[...]
-    const typeMatch = altText.match(/^(video|file)\[(.*?)\]$/);
-    if (typeMatch) {
-      const type = typeMatch[1];
-      const title = this.decodeHTML(typeMatch[2]);
-      
-      if (type === 'video') {
-        return this.renderVideo(src, title);
-      } else if (type === 'file') {
-        return this.renderFile(src, title);
-      }
-    }
-    
-    return match;
-  });
+    // 合并正则：匹配 video[...], file[...], embed
+    const mediaRegex = /<img\s+[^>]*src="([^"]+)"[^>]*alt="((?:video|file)\[[^\]]*\]|embed)"[^>]*\/?>/gi;
 
-  return { html: processedHtml, options };
+    const processedHtml = html.replace(mediaRegex, (match, src, altText) => {
+      // 处理 embed
+      if (altText === 'embed') {
+        return this.renderEmbed(src);
+      }
+
+      // 处理 video[...] 或 file[...]
+      const typeMatch = altText.match(/^(video|file)\[(.*?)\]$/);
+      if (typeMatch) {
+        const type = typeMatch[1];
+        const title = this.decodeHTML(typeMatch[2]);
+
+        if (type === 'video') {
+          return this.renderVideo(src, title);
+        } else if (type === 'file') {
+          return this.renderFile(src, title);
+        }
+      }
+
+      return match;
+    });
+
+    return { html: processedHtml, options };
   }
 
   private renderVideo(src: string, title: string): string {
@@ -129,9 +129,9 @@ export class MediaPlugin implements MDxPlugin {
     // 2. Office 文档 -> 强制转换为文件卡片样式
     // 因为本地 Blob URL 无法被微软在线预览服务访问
     if (/\.(doc|docx|xls|xlsx|ppt|pptx)$/.test(lowerUrl)) {
-       // 提取文件名
-       const filename = decodeURIComponent(url.split('/').pop() || 'Document');
-       return this.renderFile(url, filename);
+      // 提取文件名
+      const filename = decodeURIComponent(url.split('/').pop() || 'Document');
+      return this.renderFile(url, filename);
     }
     // 3. YouTube
     else if (url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]+)/)) {

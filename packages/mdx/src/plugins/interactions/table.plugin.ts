@@ -3,7 +3,7 @@
  * @desc 增强标准 GFM 表格，提供排序和筛选功能
  */
 
-import type { MDxPlugin, PluginContext } from '../../core/plugin';
+import type { MDxPlugin, PluginContext } from '../../core/types';
 
 export interface TablePluginOptions {
     /**

@@ -2,14 +2,14 @@
  * @file mdx/plugins/ui/asset-manager.ui.ts
  * @desc 独立的资源管理器 UI 类，不绑定 MDxPlugin 上下文
  */
-import { Toast,guessMimeType, type ISessionEngine, type EngineNode } from '@itookit/common';
-import type { MDxEditor } from '../../editor/editor';
-import { 
-    isAssetVisible, 
-    generateAssetPath, 
+import { Toast, guessMimeType, type ISessionEngine, type EngineNode } from '@itookit/common';
+import type { MDxEditor } from '../../editor/mdx-editor';
+import {
+    isAssetVisible,
+    generateAssetPath,
     extractFilenameFromPath,
-    AssetConfigOptions 
-} from '../../core/asset-helper';
+    AssetConfigOptions
+} from '../../services/asset-helper';
 
 interface AssetDisplayItem {
     node: EngineNode;
@@ -29,12 +29,12 @@ export class AssetManagerUI {
         private engine: ISessionEngine,
         private editor: MDxEditor,
         private options: AssetConfigOptions = {}
-    ) {}
+    ) { }
 
     public async show(assetDirId: string): Promise<void> {
         this.currentAssetDirId = assetDirId;
         this.createModalStructure();
-        
+
         if (this.overlay) {
             document.body.appendChild(this.overlay);
         }
@@ -59,7 +59,7 @@ export class AssetManagerUI {
 
     private async refreshAssetList(): Promise<void> {
         if (!this.listContainer) return;
-        
+
         this.listContainer.innerHTML = '<div class="mdx-empty-state">加载中...</div>';
 
         let files: EngineNode[] = [];
@@ -70,7 +70,7 @@ export class AssetManagerUI {
             this.listContainer.innerHTML = '<div class="mdx-empty-state">读取目录失败</div>';
             return;
         }
-        
+
         const assetFiles = files.filter(f => {
             if (f.type !== 'file') return false;
             return isAssetVisible(f.name, this.options.viewFilter);
@@ -78,7 +78,7 @@ export class AssetManagerUI {
 
         if (assetFiles.length === 0) {
             this.listContainer.innerHTML = '<div class="mdx-empty-state">暂无附件</div>';
-            this.updateToolbar(0, 0, () => {});
+            this.updateToolbar(0, 0, () => { });
             return;
         }
 
@@ -93,9 +93,9 @@ export class AssetManagerUI {
 
         // 生成预览
         await this.loadPreviews(displayItems);
-        
+
         this.renderList(displayItems);
-        
+
         const unusedCount = displayItems.filter(i => !i.isUsed).length;
         this.updateToolbar(displayItems.length, unusedCount, () => {
             this.handleBatchDelete(displayItems.filter(i => !i.isUsed));
@@ -122,10 +122,10 @@ export class AssetManagerUI {
         const linkRegex = /\]\(\s*([^)\s]+)\s*(?:"[^"]*")?\s*\)/g;
         while ((match = linkRegex.exec(content)) !== null) {
             const path = match[1];
-            
+
             // 排除不需要处理的路径
             if (this.shouldSkipPath(path)) continue;
-            
+
             // 提取文件名
             const filename = extractFilenameFromPath(path);
             if (filename && !filename.startsWith('#')) {
@@ -138,7 +138,7 @@ export class AssetManagerUI {
         while ((match = htmlAttrRegex.exec(content)) !== null) {
             const path = match[1];
             if (this.shouldSkipPath(path)) continue;
-            
+
             const filename = extractFilenameFromPath(path);
             if (filename) filenames.add(filename);
         }
@@ -164,11 +164,11 @@ export class AssetManagerUI {
     private async loadPreviews(items: AssetDisplayItem[]): Promise<void> {
         const previewPromises = items.map(async (item) => {
             if (!this.isPreviewableImage(item.node.name)) return;
-            
+
             try {
                 const buffer = await this.engine.readContent(item.node.id);
                 if (!buffer) return;
-                
+
                 const mimeType = guessMimeType(item.node.name);
                 const blob = new Blob([buffer], { type: mimeType });
                 const url = URL.createObjectURL(blob);
@@ -184,9 +184,9 @@ export class AssetManagerUI {
 
     private updateToolbar(total: number, unused: number, onClean: () => void): void {
         if (!this.statsEl || !this.cleanBtn) return;
-        
+
         this.statsEl.textContent = `共 ${total} 个附件，${unused} 个未引用`;
-        
+
         if (unused > 0) {
             this.cleanBtn.style.display = 'inline-block';
             this.cleanBtn.textContent = `清理 ${unused} 个未引用`;
@@ -199,7 +199,7 @@ export class AssetManagerUI {
     private renderList(items: AssetDisplayItem[]): void {
         if (!this.listContainer) return;
         this.listContainer.innerHTML = '';
-        
+
         // 排序: 未引用优先，然后按时间倒序
         items.sort((a, b) => {
             if (a.isUsed !== b.isUsed) return a.isUsed ? 1 : -1;
@@ -229,10 +229,10 @@ export class AssetManagerUI {
         // 信息区
         const info = document.createElement('div');
         info.className = 'mdx-asset-info';
-        
+
         const dateStr = new Date(item.node.createdAt).toLocaleDateString();
         const sizeStr = this.formatFileSize(item.node.size || 0);
-        
+
         info.innerHTML = `
             <div class="mdx-asset-name" title="${item.node.name}">${item.node.name}</div>
             <div class="mdx-asset-meta">
@@ -258,7 +258,7 @@ export class AssetManagerUI {
         // 插入按钮
         const insertBtn = this.createButton('插入', 'primary', () => {
             const path = generateAssetPath(item.node.name);
-            const text = this.isPreviewableImage(item.node.name) 
+            const text = this.isPreviewableImage(item.node.name)
                 ? `![${item.node.name}](${path})`
                 : `[${item.node.name}](${path})`;
             this.insertText(text);
@@ -278,7 +278,7 @@ export class AssetManagerUI {
                 );
                 if (!confirmed) return;
             }
-            
+
             try {
                 await this.engine.delete([item.node.id]);
                 Toast.success('删除成功');
@@ -294,7 +294,7 @@ export class AssetManagerUI {
     }
 
     private createButton(
-        text: string, 
+        text: string,
         type: 'primary' | 'default' | 'danger',
         onClick: () => void
     ): HTMLButtonElement {
@@ -322,10 +322,10 @@ export class AssetManagerUI {
             a.download = node.name;
             document.body.appendChild(a);
             a.click();
-            
+
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
-            
+
             Toast.success('下载已开始');
         } catch (e) {
             console.error('[AssetManager] Download failed:', e);
@@ -335,10 +335,10 @@ export class AssetManagerUI {
 
     private async handleBatchDelete(items: AssetDisplayItem[]): Promise<void> {
         if (items.length === 0) return;
-        
+
         const confirmed = confirm(`确定要永久删除这 ${items.length} 个未引用的文件吗？`);
         if (!confirmed) return;
-        
+
         try {
             await this.engine.delete(items.map(i => i.node.id));
             Toast.success(`已清理 ${items.length} 个文件`);
@@ -352,10 +352,10 @@ export class AssetManagerUI {
     private insertText(text: string): void {
         const view = this.editor.getEditorView();
         if (!view) return;
-        
+
         const range = view.state.selection.main;
-        view.dispatch({ 
-            changes: { from: range.from, to: range.to, insert: text } 
+        view.dispatch({
+            changes: { from: range.from, to: range.to, insert: text }
         });
         this.editor.focus();
         Toast.success('已插入链接');
@@ -364,10 +364,10 @@ export class AssetManagerUI {
     private createModalStructure(): void {
         const overlay = document.createElement('div');
         overlay.className = 'mdx-asset-modal-overlay';
-        
+
         const modal = document.createElement('div');
         modal.className = 'mdx-asset-modal';
-        
+
         modal.innerHTML = `
             <div class="mdx-asset-header">
                 <h3>附件管理</h3>
@@ -379,19 +379,19 @@ export class AssetManagerUI {
             </div>
             <ul class="mdx-asset-list"></ul>
         `;
-        
+
         overlay.appendChild(modal);
-        
+
         this.overlay = overlay;
         this.listContainer = modal.querySelector('.mdx-asset-list')!;
         this.statsEl = modal.querySelector('.mdx-stats')!;
         this.cleanBtn = modal.querySelector('.mdx-clean-btn')!;
-        
+
         const closeBtn = modal.querySelector('.mdx-asset-close')!;
         closeBtn.addEventListener('click', () => this.close());
-        
-        overlay.addEventListener('click', (e) => { 
-            if (e.target === overlay) this.close(); 
+
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) this.close();
         });
 
         // ESC 关闭
@@ -410,7 +410,7 @@ export class AssetManagerUI {
 
     private getFileIcon(filename: string): string {
         const ext = filename.split('.').pop()?.toLowerCase() || '';
-        
+
         // 根据文件类型返回不同的图标
         const iconMap: Record<string, string> = {
             'pdf': this.createSvgIcon('📄', '#e74c3c'),
@@ -444,12 +444,12 @@ export class AssetManagerUI {
 
     private formatFileSize(bytes: number): string {
         if (bytes === 0) return '0 B';
-        
+
         const units = ['B', 'KB', 'MB', 'GB'];
         const k = 1024;
         const i = Math.floor(Math.log(bytes) / Math.log(k));
         const size = bytes / Math.pow(k, i);
-        
+
         return `${size.toFixed(i > 0 ? 1 : 0)} ${units[i]}`;
     }
 }

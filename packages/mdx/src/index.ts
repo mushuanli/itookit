@@ -1,52 +1,44 @@
-/// <reference path="./types/shims-turndown.d.ts" />
 
-// mdx/index.ts
-export { createMDxEditor,defaultEditorFactory, registerPlugin } from './factory';
+// @mdx/index.ts
+export { createMDxEditor, defaultEditorFactory, registerPlugin } from './factory';
 export type { MDxEditorFactoryConfig, PluginConfig } from './factory';
 
+// === 编辑器 ===
+export { MDxEditor } from './editor/mdx-editor';
+export type { MDxEditorConfig } from './editor/mdx-editor';
+
+// === 渲染器 ===
+export { MDxRenderer } from './renderer/mdx-renderer';
+export type { MDxRendererConfig, RenderOptions } from './renderer/mdx-renderer';
+
+// === 核心框架 ===
 export { PluginManager } from './core/plugin-manager';
+export { EventBus } from './core/event-bus';
 export { ServiceContainer } from './core/service-container';
 export type {
   MDxPlugin,
   PluginContext,
   ScopedPersistenceStore,
-  TitleBarButtonConfig,
   ToolbarButtonConfig,
-} from './core/plugin';
+  TitleBarButtonConfig,
+} from './core/types';
 
-export { MDxRenderer } from './renderer/renderer';
-export type { MDxRendererConfig, RenderOptions } from './renderer/renderer';
+// === 服务 ===
+export { MDxProcessor } from './services/processor';
+export type { ProcessOptions, ProcessResult, MentionMatch } from './services/processor';
 
-export { MDxEditor } from './editor/editor';
-export type { MDxEditorConfig } from './editor/editor';
-
-// [新增] 导出 MDxProcessor 及其相关类型
-export { MDxProcessor } from './core/processor';
-export type {
-  IMentionProviderForProcessor,
-  MentionRule,
-  ProcessOptions,
-  MentionMatch,
-  ProcessResult
-} from './core/processor';
+export { DefaultPrintService, LLMPrintService } from './services/print/print.service';
+export type { PrintService, PrintOptions } from './services/print/print.service';
 
 export {
-    type AssetConfigOptions,
-    generateAssetPath,
-    extractFilenameFromPath,
-    isAssetVisible,
-    getUploadLimits,
-    DEFAULT_UPLOAD_LIMITS,
-} from './core/asset-helper';
+  generateAssetPath,
+  extractFilenameFromPath,
+  isAssetVisible,
+  getUploadLimits,
+  DEFAULT_UPLOAD_LIMITS,
+} from './services/asset-helper';
 
-export {
-    DefaultPrintService,
-    LLMPrintService,
-    type PrintService,
-    type PrintOptions,
-} from './core/print.service';
-
-
+// === 插件（保持原有导出） ===
 export { CoreEditorPlugin } from './plugins/core/core-editor.plugin';
 export type { CoreEditorPluginOptions } from './plugins/core/core-editor.plugin';
 
@@ -89,7 +81,7 @@ export type { ToolbarPluginOptions } from './plugins/ui/toolbar.plugin';
 export { FormattingPlugin } from './plugins/ui/formatting.plugin';
 export type { FormattingPluginOptions } from './plugins/ui/formatting.plugin';
 
-export {AssetManagerUI} from './plugins/ui/asset-manager.ui';
+export { AssetManagerUI } from './plugins/ui/asset-manager.ui';
 
 export { AutocompletePlugin } from './plugins/autocomplete/autocomplete.plugin';
 export type { AutocompletePluginOptions, AutocompleteProvider, AutocompleteSourceConfig } from './plugins/autocomplete/autocomplete.plugin';

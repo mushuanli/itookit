@@ -6,7 +6,7 @@
  * - 流式模式：始终显示折叠按钮（零计算开销）
  * - 普通模式：基于行数判断（无 reflow，一次性计算）
  */
-import type { MDxPlugin, PluginContext } from '../../core/plugin';
+import type { MDxPlugin, PluginContext } from '../../core/types';
 
 export interface CodeBlockControlsPluginOptions {
   /** 折叠高度阈值（普通模式下用于计算行数阈值的参考） */
@@ -78,7 +78,7 @@ export interface CodeBlockCollapseResult {
  */
 export class CodeBlockControlsPlugin implements MDxPlugin {
   name = 'interaction:codeblock-controls';
-  
+
   private options: ResolvedOptions;
   private cleanupFns: Array<() => void> = [];
   private buttonHandlers = new WeakMap<HTMLElement, () => void>();
@@ -123,20 +123,20 @@ export class CodeBlockControlsPlugin implements MDxPlugin {
     button.title = title;
     button.innerHTML = icon;
     button.type = 'button';
-    
+
     const clickHandler = (e: MouseEvent) => {
       e.preventDefault();
       e.stopPropagation();
       onClick(button, pre);
     };
-    
+
     button.addEventListener('click', clickHandler);
-    
+
     // 存储处理器引用以便清理
     this.buttonHandlers.set(button, () => {
       button.removeEventListener('click', clickHandler);
     });
-    
+
     this.cleanupFns.push(() => {
       const cleanup = this.buttonHandlers.get(button);
       if (cleanup) {
@@ -144,7 +144,7 @@ export class CodeBlockControlsPlugin implements MDxPlugin {
         this.buttonHandlers.delete(button);
       }
     });
-    
+
     return button;
   }
 
@@ -181,11 +181,11 @@ export class CodeBlockControlsPlugin implements MDxPlugin {
     const originalHTML = btn.innerHTML;
     const originalTitle = btn.title;
     const className = `${this.options.classPrefix}-controls__button--${type}`;
-    
+
     btn.innerHTML = icon;
     btn.title = title;
     btn.classList.add(className);
-    
+
     setTimeout(() => {
       btn.innerHTML = originalHTML;
       btn.title = originalTitle;
@@ -222,17 +222,17 @@ export class CodeBlockControlsPlugin implements MDxPlugin {
         const code = pre.textContent || '';
         const extension = this._getCodeLanguage(pre);
         const filename = `code.${extension}`;
-        
+
         const blob = new Blob([code], { type: 'text/plain;charset=utf-8' });
         const url = URL.createObjectURL(blob);
-        
+
         const a = document.createElement('a');
         a.href = url;
         a.download = filename;
         a.style.display = 'none';
         document.body.appendChild(a);
         a.click();
-        
+
         requestAnimationFrame(() => {
           document.body.removeChild(a);
           URL.revokeObjectURL(url);
@@ -248,10 +248,10 @@ export class CodeBlockControlsPlugin implements MDxPlugin {
   private _getCodeLanguage(pre: HTMLPreElement): string {
     const codeElement = pre.querySelector('code');
     if (!codeElement) return 'txt';
-    
+
     const languageClass = Array.from(codeElement.classList)
       .find(cls => cls.startsWith('language-'));
-    
+
     return languageClass ? languageClass.replace('language-', '') : 'txt';
   }
 
@@ -269,7 +269,7 @@ export class CodeBlockControlsPlugin implements MDxPlugin {
     if (this.options.streamingMode) {
       return true;
     }
-    
+
     // 普通模式：基于行数判断
     const code = pre.textContent || '';
     const lineCount = code.split('\n').length;
@@ -293,7 +293,7 @@ export class CodeBlockControlsPlugin implements MDxPlugin {
     const trigger = document.createElement('div');
     trigger.className = `${this.options.classPrefix}-expand-trigger`;
     trigger.innerHTML = `<span>${this.options.icons.expand} ${this.options.expandText}</span>`;
-    
+
     const triggerHandler = () => {
       this._toggleCollapse(wrapper, button, pre);
     };
@@ -322,7 +322,7 @@ export class CodeBlockControlsPlugin implements MDxPlugin {
     button.innerHTML = isExpanded ? this.options.icons.collapse : this.options.icons.expand;
     button.title = isExpanded ? 'Collapse code' : 'Expand code';
     button.setAttribute('aria-expanded', String(isExpanded));
-    
+
     if (isExpanded) {
       pre.style.maxHeight = 'none';
       wrapper.classList.remove(`${this.options.classPrefix}-wrapper--height-limited`);
@@ -353,17 +353,17 @@ export class CodeBlockControlsPlugin implements MDxPlugin {
    */
   private _enhanceCodeBlocks(element: HTMLElement): void {
     this.currentRenderContainer = element;
-    
+
     // 只处理未增强的代码块
     const pres = element.querySelectorAll<HTMLPreElement>('pre:not([data-enhanced])');
     if (pres.length === 0) return;
-    
+
     // 少量代码块：同步处理
     if (pres.length <= 5) {
       pres.forEach(pre => this._enhanceCodeBlock(pre));
       return;
     }
-    
+
     // 大量代码块：分批异步处理
     this._batchEnhance(Array.from(pres));
   }
@@ -374,7 +374,7 @@ export class CodeBlockControlsPlugin implements MDxPlugin {
   private _batchEnhance(blocks: HTMLPreElement[]): void {
     let index = 0;
     const batchSize = 5;
-    
+
     const processBatch = () => {
       const end = Math.min(index + batchSize, blocks.length);
       for (; index < end; index++) {
@@ -384,7 +384,7 @@ export class CodeBlockControlsPlugin implements MDxPlugin {
         requestAnimationFrame(processBatch);
       }
     };
-    
+
     requestAnimationFrame(processBatch);
   }
 
@@ -404,7 +404,7 @@ export class CodeBlockControlsPlugin implements MDxPlugin {
     // 创建控制栏
     const controls = document.createElement('div');
     controls.className = `${this.options.classPrefix}-controls`;
-    
+
     const rightButtons = document.createElement('div');
     rightButtons.className = `${this.options.classPrefix}-controls__right`;
 
@@ -412,7 +412,7 @@ export class CodeBlockControlsPlugin implements MDxPlugin {
     if (this.options.enableDownload) {
       rightButtons.appendChild(this._createDownloadButton(pre));
     }
-    
+
     if (this.options.enableCopy) {
       rightButtons.appendChild(this._createCopyButton(pre));
     }
@@ -446,7 +446,7 @@ export class CodeBlockControlsPlugin implements MDxPlugin {
     const wrappers = root.querySelectorAll<HTMLElement>(
       `.${this.options.classPrefix}-wrapper[data-has-collapse="true"]:not(.${this.options.classPrefix}-wrapper--collapsed)`
     );
-    
+
     let affectedCount = 0;
 
     wrappers.forEach(wrapper => {
@@ -454,7 +454,7 @@ export class CodeBlockControlsPlugin implements MDxPlugin {
         `.${this.options.classPrefix}-controls__button--collapse`
       );
       const pre = wrapper.querySelector<HTMLPreElement>('pre');
-      
+
       if (button && pre) {
         wrapper.classList.add(`${this.options.classPrefix}-wrapper--collapsed`);
         this._updateCollapseState(wrapper, button, pre, false);
@@ -477,7 +477,7 @@ export class CodeBlockControlsPlugin implements MDxPlugin {
     const wrappers = root.querySelectorAll<HTMLElement>(
       `.${this.options.classPrefix}-wrapper[data-has-collapse="true"].${this.options.classPrefix}-wrapper--collapsed`
     );
-    
+
     let affectedCount = 0;
 
     wrappers.forEach(wrapper => {
@@ -485,7 +485,7 @@ export class CodeBlockControlsPlugin implements MDxPlugin {
         `.${this.options.classPrefix}-controls__button--collapse`
       );
       const pre = wrapper.querySelector<HTMLPreElement>('pre');
-      
+
       if (button && pre) {
         wrapper.classList.remove(`${this.options.classPrefix}-wrapper--collapsed`);
         this._updateCollapseState(wrapper, button, pre, true);
@@ -522,7 +522,7 @@ export class CodeBlockControlsPlugin implements MDxPlugin {
     const expandedWrapper = root.querySelector(
       `.${this.options.classPrefix}-wrapper[data-has-collapse="true"]:not(.${this.options.classPrefix}-wrapper--collapsed)`
     );
-    
+
     return !expandedWrapper;
   }
 

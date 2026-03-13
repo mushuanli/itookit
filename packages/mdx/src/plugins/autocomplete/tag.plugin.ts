@@ -1,6 +1,6 @@
 
 // mdx/plugins/autocomplete/tag.plugin.ts
-import type { MDxPlugin, PluginContext } from '../../core/plugin';
+import type { MDxPlugin, PluginContext } from '../../core/types';
 import { AutocompletePlugin, AutocompleteProvider } from './autocomplete.plugin';
 import type { Completion } from '@codemirror/autocomplete';
 
@@ -9,7 +9,7 @@ import type { Completion } from '@codemirror/autocomplete';
  */
 export class TagAutocompleteSource implements AutocompleteProvider {
   private getTags: () => string[] | Promise<string[]>;
-  
+
   // [优化] 缓存上次结果
   private cache: { query: string; results: Completion[] } | null = null;
 
@@ -22,10 +22,10 @@ export class TagAutocompleteSource implements AutocompleteProvider {
     if (this.cache && this.cache.query === query) {
       return this.cache.results;
     }
-    
+
     const tags = await this.getTags();
     const lowerQuery = query.toLowerCase();
-    
+
     const results = tags
       .filter((tag) => tag.toLowerCase().includes(lowerQuery))
       .map((tag) => ({
@@ -36,10 +36,10 @@ export class TagAutocompleteSource implements AutocompleteProvider {
 
     // 更新缓存
     this.cache = { query, results };
-    
+
     return results;
   }
-  
+
   // 清除缓存（当标签列表变化时调用）
   clearCache(): void {
     this.cache = null;
