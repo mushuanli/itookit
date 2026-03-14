@@ -4,11 +4,11 @@ import { SessionGroup, OrchestratorEvent } from '@itookit/llm-engine';
 import { ISessionEngine } from '@itookit/common';
 import { CollapseStateMap, NodeActionCallback } from '../base/core/types';
 import { EditorEventBus } from '../base/core/EditorEventBus';
-import { ScrollController } from '../base/infrastructure/ScrollController';
-import { ContentResizeTracker } from '../base/infrastructure/ContentResizeTracker';
-import { EventBatchProcessor, BatchedEvents } from '../base/infrastructure/EventBatchProcessor';
+import { ScrollController } from './common/ScrollController';
+import { ContentResizeTracker } from './common/ContentResizeTracker';
+import { EventBatchProcessor, BatchedEvents } from './common/EventBatchProcessor';
 import { ErrorTemplates } from './templates/ErrorTemplates';
-import { TimerManager } from '../base/infrastructure/TimerManager';
+import { TimerManager } from './common/TimerManager';
 import { getPreviewText } from '../utils/textUtils';
 
 import { SessionRenderer, RendererContext } from './history/SessionRenderer';

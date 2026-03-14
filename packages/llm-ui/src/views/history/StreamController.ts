@@ -1,6 +1,6 @@
 // @file: llm-ui/views/history/StreamController.ts
 
-import { TimerManager, StreamRenderPipeline, ScrollController } from '../../base/infrastructure/';
+import { TimerManager, StreamRenderPipeline, ScrollController } from '../common';
 import type { SessionRenderer } from './SessionRenderer';
 import { getPreviewText } from '../../utils/textUtils';
 

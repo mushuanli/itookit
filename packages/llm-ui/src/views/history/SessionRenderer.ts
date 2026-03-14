@@ -6,7 +6,7 @@ import { NodeRenderer } from './NodeRenderer';
 import { NodeTemplates } from '../templates/NodeTemplates';
 import { LayoutTemplates } from '../templates/LayoutTemplates';
 import type { ISessionEngine } from '@itookit/common';
-import { TimerManager } from '../../base/infrastructure/TimerManager';
+import { TimerManager } from '../common/TimerManager';
 import { getPreviewText } from '../../utils/textUtils';
 import { IconResolver } from '../../utils/iconResolver';
 

@@ -2,9 +2,9 @@
 
 import { BranchIndicatorTemplates } from './templates/BranchIndicatorTemplates';
 import { EditorEventBus } from '../base/core/EditorEventBus';
-import { EventCleanup } from '../base/infrastructure/EventCleanup';
-import { TimerManager } from '../base/infrastructure/TimerManager';
-import { DOMCache } from '../base/infrastructure/DOMCache';
+import { EventCleanup } from './common/EventCleanup';
+import { TimerManager } from './common/TimerManager';
+import { DOMCache } from './common/DOMCache';
 import { BranchStore } from '../helpers/BranchStore';
 
 /**
