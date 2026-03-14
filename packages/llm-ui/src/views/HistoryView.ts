@@ -357,83 +357,134 @@ export class HistoryView {
     }
 
     /**
-     * 获取相邻 agent chat 导航目标
-     */
-    getNeighborAgentChatTarget(
-        currentVisibleId: string | null,
+ * 获取 agent chat 导航目标
+ * 
+ * 设计：跳转到视口外的 unfold agent chat 的 title 位置
+ * - prev: 如果当前 agent chat 的 title 不在视口中，先跳到当前的 title；
+ *         否则跳到上一个 unfold agent chat 的 title
+ * - next: 跳到下一个 unfold agent chat 的 title；
+ *         最后一个之后返回 '__end__'
+ */
+    getAgentNavigationTarget(
         direction: 'prev' | 'next'
-    ): string | null | '__end__' {
-        const sessions = Array.from(this.container.querySelectorAll('.llm-ui-session'));
-        if (sessions.length === 0) return null;
+    ): string | null | '__end__' | '__start__' {
+        const containerRect = this.container.getBoundingClientRect();
+        const viewportTop = containerRect.top;
+        const viewportBottom = containerRect.bottom;
 
+        // 收集所有 unfold 的 assistant session 元素
         const collapseStates = this.collapse.getStates();
+        const agentElements: HTMLElement[] = [];
 
-        // 收集未折叠的 assistant session
-        const agentSessions = sessions.filter(el => {
-            if (!el.classList.contains('llm-ui-session--assistant')) return false;
+        const allSessions = this.container.querySelectorAll('.llm-ui-session--assistant');
+        for (const el of allSessions) {
             const id = (el as HTMLElement).dataset.sessionId;
-            return id ? !collapseStates[id] : false;
-        });
-
-        if (agentSessions.length === 0) return null;
-
-        // 找到当前位置
-        let currentIndex = -1;
-        if (currentVisibleId) {
-            currentIndex = sessions.findIndex(
-                el => (el as HTMLElement).dataset.sessionId === currentVisibleId
-            );
+            if (id && !collapseStates[id]) {
+                agentElements.push(el as HTMLElement);
+            }
         }
 
-        // 找到当前所属的 agent chat
-        let currentAgentIndex = -1;
-        if (currentIndex >= 0) {
-            if (sessions[currentIndex].classList.contains('llm-ui-session--assistant')) {
-                currentAgentIndex = agentSessions.indexOf(sessions[currentIndex]);
+        if (agentElements.length === 0) return null;
+
+        // 判断每个 agent session 的 title 是否在视口中
+        // title 就是 session 元素的顶部区域（包含 avatar 和 agent header）
+        const TITLE_HEIGHT = 48; // agent chat title 大约的高度（像素）
+
+        // 分类：title 在视口上方、视口中、视口下方的 agent chats
+        const aboveViewport: HTMLElement[] = [];   // title 完全在视口上方
+        const inViewport: HTMLElement[] = [];      // title 在视口中可见
+        const belowViewport: HTMLElement[] = [];   // title 完全在视口下方
+
+        for (const el of agentElements) {
+            const rect = el.getBoundingClientRect();
+            const titleBottom = rect.top + TITLE_HEIGHT;
+
+            if (titleBottom < viewportTop) {
+                // title 已经滚出视口上方
+                aboveViewport.push(el);
+            } else if (rect.top > viewportBottom) {
+                // title 在视口下方
+                belowViewport.push(el);
             } else {
-                for (let i = currentIndex - 1; i >= 0; i--) {
-                    if (sessions[i].classList.contains('llm-ui-session--assistant')) {
-                        currentAgentIndex = agentSessions.indexOf(sessions[i]);
-                        break;
-                    }
-                }
-                if (currentAgentIndex === -1) {
-                    for (let i = currentIndex + 1; i < sessions.length; i++) {
-                        if (sessions[i].classList.contains('llm-ui-session--assistant')) {
-                            currentAgentIndex = agentSessions.indexOf(sessions[i]);
-                            break;
-                        }
-                    }
-                }
+                // title 至少部分可见
+                inViewport.push(el);
             }
         }
 
         if (direction === 'prev') {
-            if (currentAgentIndex > 0) {
-                return (agentSessions[currentAgentIndex - 1] as HTMLElement).dataset.sessionId || null;
-            } else if (currentAgentIndex === -1 && agentSessions.length > 0) {
-                return (agentSessions[agentSessions.length - 1] as HTMLElement).dataset.sessionId || null;
+            // Case 1: 有 agent chat 的内容在视口中，但 title 不可见
+            // 这种情况：session 的 body 在视口中，但 rect.top < viewportTop
+            // 即 session 还在视口，但 title 已经滚出
+            const currentlyViewingButTitleHidden = this.findAgentWithContentVisibleButTitleHidden(
+                agentElements, viewportTop, viewportBottom, TITLE_HEIGHT
+            );
+
+            if (currentlyViewingButTitleHidden) {
+                return currentlyViewingButTitleHidden.dataset.sessionId || null;
             }
-            return null;
+
+            // Case 2: 当前视口中有 title 可见的 agent chat
+            // 跳到 aboveViewport 中最后一个（最近的上方 agent）
+            if (aboveViewport.length > 0) {
+                return aboveViewport[aboveViewport.length - 1].dataset.sessionId || null;
+            }
+
+            // Case 3: 没有更上面的 agent 了
+            // 检查是否已经在顶部
+            if (this.container.scrollTop > 0) {
+                return '__start__';  // ← 对称处理：跳到顶部
+            }
+
+            return null;  // 已经在顶部，Toast 提示
         } else {
-            if (currentAgentIndex >= 0 && currentAgentIndex < agentSessions.length - 1) {
-                return (agentSessions[currentAgentIndex + 1] as HTMLElement).dataset.sessionId || null;
-            } else if (currentAgentIndex === agentSessions.length - 1) {
-                return '__end__';
-            } else if (agentSessions.length > 0) {
-                return (agentSessions[0] as HTMLElement).dataset.sessionId || null;
+            // next direction
+
+            // Case 1: 视口下方有 agent chat → 跳到第一个
+            if (belowViewport.length > 0) {
+                return belowViewport[0].dataset.sessionId || null;
             }
+
+            // Case 2: 视口中有多个 agent chat → 
+            // 找到最后一个 title 可见的，如果它是整个列表的最后一个 → __end__
+            // 这里需要考虑：视口中可能有一个 agent chat 的 title 可见
+            // 但下方没有更多了
+
+            // 检查当前视口中最后一个可见的 agent 是否是列表最后一个
+            const lastInView = inViewport.length > 0
+                ? inViewport[inViewport.length - 1]
+                : null;
+            const lastOverall = agentElements[agentElements.length - 1];
+
+            if (lastInView === lastOverall ||
+                (aboveViewport.length + inViewport.length === agentElements.length)) {
+                return '__end__';
+            }
+
             return null;
         }
     }
 
-    getNeighborAgentSessionId(
-        currentVisibleId: string | null,
-        direction: 'next' | 'prev'
-    ): string | null {
-        const result = this.getNeighborAgentChatTarget(currentVisibleId, direction);
-        return result === '__end__' ? null : result;
+    /**
+     * 查找"内容在视口中可见但 title 已滚出视口上方"的 agent chat
+     */
+    private findAgentWithContentVisibleButTitleHidden(
+        agentElements: HTMLElement[],
+        viewportTop: number,
+        viewportBottom: number,
+        titleHeight: number
+    ): HTMLElement | null {
+        for (const el of agentElements) {
+            const rect = el.getBoundingClientRect();
+            const titleBottom = rect.top + titleHeight;
+
+            // title 在视口上方，但 session 的 body 还在视口中可见
+            if (titleBottom < viewportTop && rect.bottom > viewportTop && rect.top < viewportBottom) {
+                return el;
+            }
+        }
+        return null;
     }
+
 
     // ================================================================
     // 事件处理（引擎事件入口）
