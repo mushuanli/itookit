@@ -4,8 +4,8 @@ import { FloatingNavPanelTemplates } from './templates/FloatingNavPanelTemplates
 import { BranchItem } from '../base/core/types';
 import { showConfirmDialog } from '@itookit/common';
 import { EditorEventBus } from '../base/core/EditorEventBus';
-import { EventCleanup } from '../base/infrastructure/EventCleanup';
-import { TimerManager } from '../base/infrastructure/TimerManager';
+import { EventCleanup } from './common/EventCleanup';
+import { TimerManager } from './common/TimerManager';
 
 
 export interface ChatNavItem {

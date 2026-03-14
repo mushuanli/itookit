@@ -1,4 +1,4 @@
-// @file: llm-ui/base/infrastructure/EventBatchProcessor.ts
+// @file: llm-ui/views/common/EventBatchProcessor.ts
 
 import { OrchestratorEvent } from '@itookit/llm-engine';
 

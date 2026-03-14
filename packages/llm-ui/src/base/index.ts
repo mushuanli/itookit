@@ -1,12 +1,12 @@
 // @file: llm-ui/base/index.ts
 
 // Infrastructure
-export { TimerManager } from './infrastructure/TimerManager';
-export { EventCleanup } from './infrastructure/EventCleanup';
-export { DOMCache } from './infrastructure/DOMCache';
-export { ScrollController } from './infrastructure/ScrollController';
-export { ContentResizeTracker } from './infrastructure/ContentResizeTracker';
-export { EventBatchProcessor } from './infrastructure/EventBatchProcessor';
+export { TimerManager } from '../views/common/TimerManager';
+export { EventCleanup } from '../views/common/EventCleanup';
+export { DOMCache } from '../views/common/DOMCache';
+export { ScrollController } from '../views/common/ScrollController';
+export { ContentResizeTracker } from '../views/common/ContentResizeTracker';
+export { EventBatchProcessor } from '../views/common/EventBatchProcessor';
 
 // Core
 export { Command } from './core/Command';

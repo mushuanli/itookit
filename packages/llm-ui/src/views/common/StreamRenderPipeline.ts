@@ -1,4 +1,4 @@
-// @file: llm-ui/infrastructure/StreamRenderPipeline.ts
+// @file: llm-ui/views/common/StreamRenderPipeline.ts
 
 import { TimerManager } from './TimerManager';
 

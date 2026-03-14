@@ -17,7 +17,7 @@ import { SessionService, StateService, AssetService } from './base/services';
 import { AgentLoader } from './helpers/AgentLoader';
 import { StateManager } from './helpers/StateManager';
 import { SessionEventHandler } from './helpers/SessionEventHandler';
-import { EventBinder } from './helpers/EventBinder';
+import { EventBinder } from './views/common/EventBinder';
 import { BranchStore } from './helpers/BranchStore';
 import { NavDataBuilder } from './helpers/NavDataBuilder';
 import { EditorEventBus } from './base/core/EditorEventBus';
@@ -30,9 +30,9 @@ import {
     CopyAllCommand, PrintCommand
 } from './commands/';
 import { ErrorHandler } from './utils/errorHandler';
-import { EventCleanup } from './base/infrastructure/EventCleanup';
-import { TimerManager } from './base/infrastructure/TimerManager';
-import { DOMCache } from './base/infrastructure/DOMCache';
+import { EventCleanup } from './views/common/EventCleanup';
+import { TimerManager } from './views/common/TimerManager';
+import { DOMCache } from './views/common/DOMCache';
 import { FloatingNavPanel } from './views/FloatingNavPanel';
 
 export interface LLMEditorOptions extends EditorOptions {
