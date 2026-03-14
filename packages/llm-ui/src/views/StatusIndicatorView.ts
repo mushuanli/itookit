@@ -1,6 +1,6 @@
 // @file: llm-ui/views/StatusIndicatorView.ts
 
-import { DOMCache } from '../base/infrastructure/DOMCache';
+import { DOMCache } from './common/DOMCache';
 import { SessionManager } from '@itookit/llm-engine';
 
 interface StatusInfo {
