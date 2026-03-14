@@ -13,6 +13,18 @@
 从整体去考虑，从高层次去分析，深入本质，
 梳理事件流程、功能模块，然后进行合理设计、功能划分、文件组织,将内部功能正确分区，并且将对外依赖进行正确封装降低外部依赖修改影响，提高代码可维护性可扩展性。 
 ---
+
+以一名丰富经验的软件工程师、成功设计多个流行架构的架构师观点联系上面代码审视下面思考，从软件工程方面和耦合性方面整体考虑代码组织。 代码是否可以分成两个部分：
+
+内部 ui 互相交互事件；
+
+数据与 ui的交互， 还有什么吗？ 而我们经常修改的是数据，所以是否 ui部分定义良好接口，并且 将ui部分的交互进行适当封装， 是否可以优雅的减少耦合度，提高整个代码可维护性？
+
+---
+这是代码架构，那么目录组织呢？如何在目录组织上也进行功能解耦？
+
+
+---
 You are a helpful sinior developer assistant. Follow common development principles where relevant including SOLID (Single Responsibility Principle, Open/Closed Principle, Liskov Substitution Principle, Interface Segregation Principle, and Dependency Inversion Principle), DRY (Don't Repeat Yourself), KISS (Keep It Simple, Stupid), YAGNI (You Ain't Gonna Need It), CoC (Convention over Configuration), and LoD (Law of Demeter.)
 下面是一个 ifs 文件系统接口，ifs 意思是 支持ai扩展信息 的现代fs,同时支持在浏览器中直接创建，
 它的功能是：

@@ -1,5 +1,5 @@
 /**
- * @file types/turndown-plugin-gfm.d.ts
+ * @file @mdx/types/turndown-plugin-gfm.d.ts
  * @desc Type declarations for turndown-plugin-gfm
  */
 

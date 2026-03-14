@@ -102,6 +102,7 @@ export class LLMWorkspaceEditor implements IEditor {
     private isBeingDeleted = false;
     private initPromise: Promise<void> | null = null;
     private initResolve: (() => void) | null = null;
+    private navRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
     private options: LLMEditorOptions;
 
@@ -278,11 +279,11 @@ export class LLMWorkspaceEditor implements IEditor {
             bus: this.bus,
             branchIndicator: this.branchIndicator,
             statusIndicator: this.statusIndicator,
-            // ✅ 修复：使用 branchStore 替代 floatingNav
             branchStore: this.branchStore,
             getCurrentSessionId: () => this.currentSessionId,
             onContentChanged: () => this.emit('change'),
-            onFloatingNavRefresh: () => this.pushNavData(),
+            // ✅ 重命名：语义更清晰
+            onNavRefresh: () => this.pushNavData(),
         });
     }
 
@@ -589,15 +590,26 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     private navigateAgent(direction: 'prev' | 'next'): void {
-        const currentId = this.findCurrentVisibleSession();
-        const result = this.historyView.getNeighborAgentChatTarget(currentId, direction);
+        const result = this.historyView.getAgentNavigationTarget(direction);
 
         if (result === '__end__') {
             this.historyView.scrollToBottom(true);
+        } else if (result === '__start__') {
+            this.scrollToTop();
         } else if (result) {
             this.bus.emit('nav:scrollTo', { sessionId: result });
         } else {
-            Toast.info(`No ${direction} agent chat`);
+            Toast.info(
+                direction === 'prev'
+                    ? 'No previous agent chat'
+                    : 'Already at the last agent chat'
+            );
+        }
+    }
+    private scrollToTop(): void {
+        const historyEl = this.domCache.byId('llm-ui-history');
+        if (historyEl) {
+            historyEl.scrollTo({ top: 0, behavior: 'smooth' });
         }
     }
 
@@ -605,21 +617,60 @@ export class LLMWorkspaceEditor implements IEditor {
     // 浮动导航面板
     // ================================================================
 
+    /**
+     * ✅ 新增：统一的数据推送方法
+     * 无论是 toggle 还是 refresh，都走同一条路径
+     */
+    private pushNavData(): void {
+        if (!this.floatingNav) return;
+
+        if (this.navRefreshTimer !== null) {
+            this.timers.clearTimeout(this.navRefreshTimer);
+        }
+
+        this.navRefreshTimer = this.timers.setTimeout(async () => {
+            this.navRefreshTimer = null;
+            if (!this.floatingNav) return;
+
+            const data = await this.navDataBuilder.build(
+                this.sessionManager.getSessions(),
+                this.historyView.getCollapseStates(),
+                this.branchStore.current,
+                this.findCurrentVisibleSession() ?? undefined
+            );
+
+            this.floatingNav.update(data);
+        }, 50);
+    }
+
+    // ================================================================
+    // toggleNavigator — 简化
+    // ================================================================
+
     private async toggleNavigator(): Promise<void> {
         if (!this.floatingNav) {
             this.floatingNav = new FloatingNavPanel(this.container, this.bus);
         }
 
-        await this.pushNavData();
+        if (!this.floatingNav.isVisible) {
+            // 打开前先推送最新数据
+            await this.pushNavDataImmediate();
+        }
+
         this.floatingNav.toggle();
     }
 
     /**
-     * ✅ 新增：统一的数据推送方法
-     * 无论是 toggle 还是 refresh，都走同一条路径
+     * 立即推送（不防抖），用于面板首次打开
      */
-    private async pushNavData(): Promise<void> {
+    private async pushNavDataImmediate(): Promise<void> {
         if (!this.floatingNav) return;
+
+        // 取消 pending 的防抖
+        if (this.navRefreshTimer !== null) {
+            this.timers.clearTimeout(this.navRefreshTimer);
+            this.navRefreshTimer = null;
+        }
 
         const data = await this.navDataBuilder.build(
             this.sessionManager.getSessions(),
