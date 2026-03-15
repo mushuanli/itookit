@@ -2,10 +2,10 @@
 
 import './styles/index.css';
 
-import { LLMWorkspaceEditor, LLMEditorOptions } from './LLMWorkspaceEditor';
-import { 
-    VFSAgentService, 
-    ILLMSessionEngine, 
+import { LLMWorkspaceEditor, LLMEditorOptions } from './shell/LLMWorkspaceEditor';
+import {
+    VFSAgentService,
+    ILLMSessionEngine,
 } from '@itookit/llm-engine';
 import { EditorFactory, EditorOptions } from '@itookit/common';
 import { AgentConfigEditor } from './editors/AgentConfigEditor';
@@ -34,10 +34,10 @@ export { MCPSettingsEditor } from './editors/MCPSettingsEditor';
 export const createLLMFactory = (
     agentService: VFSAgentService
 ): EditorFactory => {
-    
+
     return async (container: HTMLElement, options: EditorOptions) => {
         let effectiveNodeId = options.nodeId;
-        
+
         // 类型转换，此时 sessionEngine 应该已经在 MemoryManager 中通过 Dependency Injection 注入
         const llmOptions = options as LLMEditorOptions;
         const engine = llmOptions.sessionEngine as ILLMSessionEngine;

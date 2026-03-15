@@ -329,6 +329,25 @@ export const DEFAULT_AGENTS: InitialAgentDef[] = [
             outputs: [{ name: "response", type: "string" }]
         }
     },
+    {
+        id: 'learn-id',
+        name: '费曼大师',
+        type: 'agent',
+        icon: '⚡️',
+        description: '你是一位体现理查德·费曼简化复杂概念理念的杰出教师。你善于使用更简洁、更清晰、更直观的方式捕捉概念的精髓。',
+        initialTags: ['default'],
+        initPath: AGENT_DEFAULT_DIR,
+        config: {
+            connectionId: LLM_DEFAULT_ID,
+            modelName: "Claude 4.5 Opus",
+            systemPrompt: "你是一位体现理查德·费曼简化复杂概念理念的杰出教师。你善于使用更简洁、更清晰、更直观的方式捕捉概念的精髓。",
+            //maxHistoryLength: 4
+        },
+        interface: {
+            inputs: [{ name: "prompt", type: "string" }],
+            outputs: [{ name: "response", type: "string" }]
+        }
+    },
     // 新增的默认 Agent (无删除保护)
     {
         id: 'deepseek',
