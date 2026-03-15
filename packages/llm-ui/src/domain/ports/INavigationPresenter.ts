@@ -1,0 +1,37 @@
+// @file: llm-ui/domain/ports/INavigationPresenter.ts
+
+
+export interface ChatNavItem {
+    id: string;
+    role: 'user' | 'assistant';
+    preview: string;
+    isCollapsed: boolean;
+    index: number;
+    timestamp: number;
+    agentName?: string;
+    branchName?: string;
+    siblingIndex?: number;
+    siblingCount?: number;
+    hasChildren?: boolean;
+    // 该节点所属的所有 branch 名称（用于筛选和删除判断）
+    memberOfBranches?: string[];
+    childBranches?: Array<{
+        name: string;
+        headNodeId: string;
+        isCurrent: boolean;
+    }>;
+}
+
+export interface NavPanelData {
+    items: any[];
+    branches: any[];
+    currentSessionId?: string;
+}
+
+export interface INavigationPresenter {
+    readonly isVisible: boolean;
+    toggle(): void;
+    update(data: NavPanelData): void;
+    destroy(): void;
+}
+

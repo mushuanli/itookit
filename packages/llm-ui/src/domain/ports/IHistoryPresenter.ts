@@ -1,0 +1,46 @@
+// @file: llm-ui/domain/ports/IHistoryPresenter.ts
+
+import type { CollapseStateMap } from '../types';
+import type { SessionGroup, OrchestratorEvent } from '@itookit/llm-engine';
+
+/**
+ * History 视图的能力接口
+ * 
+ * Shell 和 Command 只通过此接口与 HistoryView 交互。
+ * 任何 UI 实现的替换（如 React 版本）只需实现此接口。
+ */
+export interface IHistoryPresenter {
+    // === 渲染 ===
+    renderFull(sessions: SessionGroup[]): void;
+    renderWelcome(): void;
+    renderError(error: Error): void;
+    clearErrors(): void;
+
+    // === 消息操作 ===
+    removeMessages(ids: string[], animated: boolean): string[];
+
+    // === 折叠 ===
+    getCollapseStates(): CollapseStateMap;
+    toggleSessionCollapse(sessionId: string, forceState?: boolean): void;
+    setAllCollapsed(collapsed: boolean): void;
+    toggleAllFold(): boolean;
+    shouldShowCollapseIcon(): boolean;
+    foldFirstUnfolded(): void;
+
+    // === 滚动 ===
+    scrollToBottom(force: boolean): void;
+
+    // === 流式 ===
+    enterStreamingMode(): void;
+    exitStreamingMode(): void;
+
+    // === 查询 ===
+    getSessionElement(sessionId: string): HTMLElement | null;
+    getAgentNavigationTarget(direction: 'prev' | 'next'): string | null | '__end__' | '__start__';
+
+    // === 事件处理 ===
+    processEvent(event: OrchestratorEvent): void;
+
+    // === 生命周期 ===
+    destroy(): void;
+}

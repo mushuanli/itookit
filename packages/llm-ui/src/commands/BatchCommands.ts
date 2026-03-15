@@ -1,6 +1,6 @@
 // @file: llm-ui/commands/BatchCommands.ts
 
-import { Command } from '../base/core/Command';
+import { Command } from './Command';
 import { Toast } from '@itookit/common';
 import { extractExecutionOutput } from '../utils/textUtils';
 

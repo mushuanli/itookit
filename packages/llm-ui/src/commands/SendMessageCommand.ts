@@ -1,9 +1,9 @@
 // @file: llm-ui/commands/SendMessageCommand.ts
 
-import { Command } from '../base/core/Command';
+import { Command } from './Command';
 import { Toast } from '@itookit/common';
 import { ErrorHandler } from '../utils/errorHandler';
-import type { ChatOverrides } from '../views/ChatInputView';
+import type { ChatOverrides } from '../domain/types';
 
 export interface SendMessageParams {
     text: string;
@@ -76,7 +76,5 @@ export class SendMessageCommand extends Command<SendMessageParams> {
             }
         }
 
-        this.ctx.historyView.exitStreamingMode();
-        this.ctx.historyView.clearErrors();
     }
 }
