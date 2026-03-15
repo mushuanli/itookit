@@ -1,6 +1,6 @@
 // @file: llm-ui/commands/NodeCommands.ts
 
-import { Command } from '../base/core/Command';
+import { Command } from './Command';
 import type { ErrorSeverity } from '../utils/errorHandler';
 import type { SessionGroup } from '@itookit/llm-engine';
 

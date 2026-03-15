@@ -1,6 +1,6 @@
 // @file: llm-ui/commands/WorkspaceCommands.ts
 
-import { Command } from '../base/core/Command';
+import { Command } from './Command';
 import { LLMPrintService, type PrintService } from '@itookit/mdxeditor';
 import type { ErrorSeverity } from '../utils/errorHandler';
 
