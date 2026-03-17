@@ -4,13 +4,14 @@
  */
 import './styles/index.css';
 
-import { VFSUIShell } from './shell/VFSUIShell';
+import { VFSUIManager } from './shell/VFSUIShell';
 
-import type { SessionUIOptions, ISessionUI, ISessionEngine, EditorFactory } from '@itookit/common';
+import type { SessionUIOptions, ISessionUI, ISessionEngine,EditorFactory } from '@itookit/common';
 import type { VFSNodeUI, VFSUIState, UISettings } from './contracts/types';
-import { VFSService } from './services/VFSService';
+import { VFSService } from './services/VFSService.js';
 
-import type { FileTypeDefinition, CustomEditorResolver } from './services/FileTypeRegistry';
+// [新增] 导入类型
+import type { FileTypeDefinition, CustomEditorResolver } from './services/IFileTypeRegistry';
 
 export { FileMentionSource } from './mention/FileMentionSource';
 export { DirectoryMentionSource } from './mention/DirectoryMentionSource';
@@ -27,12 +28,12 @@ export type VFSUIOptions = SessionUIOptions & {
     fileTypes?: FileTypeDefinition[];
     defaultEditorFactory: EditorFactory;
     customEditorResolver?: CustomEditorResolver;
-
+    
     /** 
      * [新增] 必须在此处定义，以便 createVFSUI 能够识别
      * 用于多实例隔离标识
      */
-    scopeId?: string;
+    scopeId?: string; 
 };
 
 
@@ -40,11 +41,12 @@ export type VFSUIOptions = SessionUIOptions & {
  * 创建 VFSUI 实例 (通用引擎模式)
  */
 export const createVFSUI = (options: VFSUIOptions, engine: ISessionEngine): ISessionUI<VFSNodeUI, VFSService> =>
-    new VFSUIShell(options, engine);
+    new VFSUIManager(options, engine);
 
-export { VFSService, VFSUIShell };
+export { VFSService, VFSUIManager };
 export * from './contracts/types';
 
-export type { FileTypeDefinition, CustomEditorResolver } from './services/FileTypeRegistry';
+// [新增] 导出文件注册相关接口
+export type { FileTypeDefinition, CustomEditorResolver, IFileTypeRegistry } from './services/IFileTypeRegistry';
 
-export { connectEditorLifecycle } from './integrations/editor-connector';
+export { connectEditorLifecycle } from './integrations/editor-connector.js';
