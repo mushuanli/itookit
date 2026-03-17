@@ -1,23 +1,25 @@
 /**
  * @file vfs-ui/integrations/editor-connector.ts
- * @desc Provides a high-level function to connect a VFS-UI manager with any IEditor-compatible editor.
- *       Optimized with debounce saving and async initialization, guarded against race conditions.
+ * @desc Connects VFS-UI with IEditor instances. Updated to work with new shell.
  */
 import type {
-    IEditor, EditorFactory, EditorOptions, ISessionUI, ISessionEngine,
-    EditorHostContext, NavigationRequest
+  IEditor,
+  EditorFactory,
+  EditorOptions,
+  ISessionUI,
+  ISessionEngine,
+  EditorHostContext,
+  NavigationRequest,
 } from '@itookit/common';
-import type { VFSNodeUI, VFSUIState } from '../types/types';
+
+import type { VFSNodeUI, VFSUIState } from '../contracts/types';
 import type { VFSService } from '../services/VFSService';
 import { parseFileInfo, extractTaskCounts } from '../utils/parser';
 
 export interface ConnectOptions {
-    /** Callback fired when an editor instance is fully created and mounted */
-    onEditorCreated?: (editor: IEditor | null) => void;
-    /** Time in ms to wait before auto-saving after the last keystroke. Default: 500ms */
-    saveDebounceMs?: number;
-    /** Any extra options to pass to the editor factory (including hostContext from upstream) */
-    [key: string]: any;
+  onEditorCreated?: (editor: IEditor | null) => void;
+  saveDebounceMs?: number;
+  [key: string]: any;
 }
 
 type VFSManager = ISessionUI<VFSNodeUI, VFSService> & {
@@ -48,27 +50,37 @@ export function connectEditorLifecycle(
   let hasUnsavedChanges = false;
 
   const dispatch = (itemId: string, metadata: any) => {
-    vfsManager.store?.dispatch({ type: 'ITEM_METADATA_UPDATE', payload: { itemId, metadata } });
+    vfsManager.store?.dispatch({
+      type: 'ITEM_METADATA_UPDATE',
+      payload: { itemId, metadata },
+    });
   };
 
   const optimisticUpdate = () => {
     if (!activeEditor || !activeNode) return;
     const stats = extractTaskCounts(activeEditor.getText());
-    const current = lastTaskStats || activeNode.metadata.custom.taskCount || { total: 0, completed: 0 };
+    const current =
+      lastTaskStats ||
+      activeNode.metadata.custom.taskCount || { total: 0, completed: 0 };
 
-    if (stats.total !== current.total || stats.completed !== current.completed) {
+    if (
+      stats.total !== current.total ||
+      stats.completed !== current.completed
+    ) {
       lastTaskStats = stats;
       hasUnsavedChanges = true;
-      dispatch(activeNode.id, { custom: { ...activeNode.metadata.custom, taskCount: stats } });
+      dispatch(activeNode.id, {
+        custom: { ...activeNode.metadata.custom, taskCount: stats },
+      });
     }
   };
 
-    /**
-     * 执行保存 (DB Write)
-     */
   const save = async () => {
     if (!activeEditor || !activeNode) return;
-    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+    if (saveTimer) {
+      clearTimeout(saveTimer);
+      saveTimer = null;
+    }
     if (!activeEditor.isDirty?.() && !hasUnsavedChanges) return;
 
     try {
@@ -86,7 +98,7 @@ export function connectEditorLifecycle(
           taskCount: metadata.taskCount,
           clozeCount: metadata.clozeCount,
           mermaidCount: metadata.mermaidCount,
-          _summary: summary
+          _summary: summary,
         });
 
         activeEditor.setDirty?.(false);
@@ -97,17 +109,11 @@ export function connectEditorLifecycle(
     }
   };
 
-    /**
-     * Schedules a save operation with debounce.
-     */
   const scheduleSave = () => {
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(save, saveDebounceMs);
   };
-    /**
-     * Tears down the current editor instance.
-     * Performs: Token increment, Forced Save, Event Unbinding, Destruction.
-     */
+
   const teardown = async () => {
     sessionToken++;
     if (activeEditor) {
@@ -124,24 +130,31 @@ export function connectEditorLifecycle(
   };
 
   const createHostContext = (): EditorHostContext => {
-    const external = factoryExtraOptions.hostContext as EditorHostContext | undefined;
+    const external = factoryExtraOptions.hostContext as
+      | EditorHostContext
+      | undefined;
     return {
       toggleSidebar: () => vfsManager.toggleSidebar(),
       saveContent: (nodeId, content) => engine.writeContent(nodeId, content),
       navigate: async (request: NavigationRequest) => {
         if (external?.navigate) await external.navigate(request);
         else console.warn('[EditorConnector] No navigation handler.', request);
-      }
+      },
     };
   };
 
-  const handleSessionChange = async ({ item }: { item?: VFSNodeUI }) => {
+  const handleSessionChange = async ({
+    item,
+  }: {
+    item?: VFSNodeUI;
+  }) => {
     await teardown();
     const myToken = sessionToken;
     editorContainer.innerHTML = '';
 
     if (!item || item.type !== 'file') {
-      editorContainer.innerHTML = '<div class="editor-placeholder">Select a file...</div>';
+      editorContainer.innerHTML =
+        '<div class="editor-placeholder">Select a file...</div>';
       return;
     }
 
@@ -149,8 +162,9 @@ export function connectEditorLifecycle(
       if (myToken !== sessionToken) return;
 
       try {
-        const factory = vfsManager.resolveEditorFactory?.(item) || defaultEditorFactory;
-        if (!factory) throw new Error("No suitable editor factory found.");
+        const factory =
+          vfsManager.resolveEditorFactory?.(item) || defaultEditorFactory;
+        if (!factory) throw new Error('No suitable editor factory found.');
 
         const editorOptions: EditorOptions = {
           ...factoryExtraOptions,
@@ -159,11 +173,14 @@ export function connectEditorLifecycle(
           nodeId: item.id,
           language: item.metadata.custom?._extension || '',
           sessionEngine: engine,
-          hostContext: createHostContext()
+          hostContext: createHostContext(),
         };
 
         const editor = await factory(editorContainer, editorOptions);
-        if (myToken !== sessionToken) { editor?.destroy(); return; }
+        if (myToken !== sessionToken) {
+          editor?.destroy();
+          return;
+        }
 
         activeEditor = editor;
         activeNode = item;
@@ -171,21 +188,31 @@ export function connectEditorLifecycle(
         hasUnsavedChanges = false;
 
         if (activeEditor) {
-          const bindEditorEvent = (eventName: string, handler: (...args: any[]) => void) => {
+          const bindEditorEvent = (
+            eventName: string,
+            handler: (...args: any[]) => void
+          ) => {
             try {
-              // 使用 any 类型绕过严格的类型检查，因为不同编辑器可能有不同的事件签名
               const unsub = (activeEditor as any).on(eventName, handler);
               if (typeof unsub === 'function') {
                 unsubscribers.push(unsub);
               }
             } catch (e) {
-              console.warn(`[EditorConnector] Failed to bind event '${eventName}':`, e);
+              console.warn(
+                `[EditorConnector] Failed to bind event '${eventName}':`,
+                e
+              );
             }
           };
 
           bindEditorEvent('blur', scheduleSave);
-          bindEditorEvent('modeChanged', (p: any) => p?.mode === 'render' && save());
-          bindEditorEvent('interactiveChange', () => { optimisticUpdate(); scheduleSave(); });
+          bindEditorEvent('modeChanged', (p: any) =>
+            p?.mode === 'render' && save()
+          );
+          bindEditorEvent('interactiveChange', () => {
+            optimisticUpdate();
+            scheduleSave();
+          });
           bindEditorEvent('optimisticUpdate', optimisticUpdate);
         }
 
@@ -199,9 +226,12 @@ export function connectEditorLifecycle(
     }, 0);
   };
 
-  const unsubNav = vfsManager.on('navigateToHeading', async ({ elementId }: { elementId: string }) => {
-    activeEditor?.navigateTo({ elementId });
-  });
+  const unsubNav = vfsManager.on(
+    'navigateToHeading',
+    async ({ elementId }: { elementId: string }) => {
+      activeEditor?.navigateTo({ elementId });
+    }
+  );
 
   const unsubSession = vfsManager.on('sessionSelected', handleSessionChange);
   handleSessionChange({ item: vfsManager.getActiveSession() });

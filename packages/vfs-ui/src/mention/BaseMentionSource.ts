@@ -1,13 +1,13 @@
 /**
  * @file vfs-ui/mention/BaseMentionSource.ts
- * @desc Base class for mention sources to reduce duplication
+ * @desc Base class for mention sources.
  */
 import {
-    IMentionSource,
-    type Suggestion,
-    type HoverPreviewData,
-    type ISessionEngine,
-    type EngineNode
+  IMentionSource,
+  type Suggestion,
+  type HoverPreviewData,
+  type ISessionEngine,
+  type EngineNode,
 } from '@itookit/common';
 import { shouldFilterNode } from '../utils/helpers';
 
@@ -22,7 +22,10 @@ export abstract class BaseMentionSource extends IMentionSource {
 
   constructor({ engine, scope = true }: MentionSourceDependencies) {
     super();
-    if (!engine) throw new Error(`${this.constructor.name} requires an ISessionEngine instance.`);
+    if (!engine)
+      throw new Error(
+        `${this.constructor.name} requires an ISessionEngine instance.`
+      );
     this.engine = engine;
     this.searchScope = Array.isArray(scope) ? scope : scope ? ['*'] : undefined;
   }
@@ -32,8 +35,11 @@ export abstract class BaseMentionSource extends IMentionSource {
 
   protected parseUri(uri: string): string | null {
     if (!uri) return null;
-    try { return new URL(uri).pathname?.substring(1) || null; } 
-    catch { return null; }
+    try {
+      return new URL(uri).pathname?.substring(1) || null;
+    } catch {
+      return null;
+    }
   }
 
   abstract getSuggestions(query: string): Promise<Suggestion[]>;

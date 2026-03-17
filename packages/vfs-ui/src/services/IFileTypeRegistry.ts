@@ -3,8 +3,8 @@
  * @description Defines interfaces for registering file types, icons, and editors.
  */
 
-import { EditorFactory,Heading } from '@itookit/common';
-import { VFSNodeUI, FileMetadata } from '../types/types';
+import { EditorFactory, Heading } from '@itookit/common';
+import { VFSNodeUI, FileMetadata } from '../contracts/types';
 
 /**
  * 解析结果结构
@@ -36,7 +36,7 @@ export interface FileTypeDefinition {
     /** 该类型对应的编辑器工厂函数 */
     editorFactory?: EditorFactory;
     /** [新增] 自定义内容解析逻辑，用于生成摘要、大纲等 */
-    contentParser?: ContentParser; 
+    contentParser?: ContentParser;
 }
 
 /**
