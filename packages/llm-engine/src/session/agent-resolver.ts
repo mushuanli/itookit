@@ -27,13 +27,22 @@ export interface ModelInfo {
 
 /**
  * Agent 解析器
- * 将 agentId 解析为 Kernel 可用的 ExecutorConfig
+ * 
+ * ✅ 改进要点：
+ * - 不维护自己的缓存（缓存由 VFSAgentService 统一管理）
+ * - 每次 resolve 都调用 agentService（agentService 内部走缓存，很快）
+ * - resolveModelId 不再做缓存（VFSAgentService.getAgentConfig 已做运行时适配）
  */
 export class AgentResolver {
     constructor(private agentService: IAgentService) { }
 
     /**
      * 解析 agentId 为执行器配置
+     * 
+     * ✅ 流程：
+     * 1. agentService.getAgentConfig() 返回已适配的配置（深拷贝 + 运行时 modelName 解析）
+     * 2. agentService.getConnection() 返回缓存的 connection
+     * 3. 组装 ExecutorConfig
      */
     async resolve(agentId: string): Promise<ExecutorConfig> {
         try {
@@ -56,16 +65,20 @@ export class AgentResolver {
                     );
                 }
 
-                const realModelId = this.resolveModelId(connection, agentDef.config.modelName);
+                // ✅ modelName 已由 getAgentConfig() 解析为有效的 model ID
+                // 这里只需要做一次最终确认
+                const modelId = agentDef.config.modelName ||
+                    connection.model ||
+                    connection.availableModels?.[0]?.id || '';
 
                 return {
                     id: agentDef.id,
                     name: agentDef.name,
                     type: agentDef.type === 'agent' ? 'agent' : 'composite',
                     connection,
-                    model: realModelId,
+                    model: modelId,
                     systemPrompt: agentDef.config.systemPrompt,
-                    icon: agentDef.icon,  // ✅ 修复：传递 icon
+                    icon: agentDef.icon,
                 } as ExecutorConfig;
             }
         } catch (e) {
@@ -134,30 +147,6 @@ export class AgentResolver {
             console.error('[AgentResolver] getModelsForAgent failed:', e);
             return [];
         }
-    }
-
-    /**
-     * 解析模型 ID：modelName -> 真实 model ID
-     */
-    private resolveModelId(connection: any, modelName: string): string {
-        if (!modelName) return '';
-        if (!connection.availableModels || !Array.isArray(connection.availableModels)) {
-            log.warn('No available models in connection', {
-                connectionId: connection.id,
-                modelName
-            });
-            return modelName;
-        }
-
-        // 优先匹配 name
-        const byName = connection.availableModels.find((m: any) => m.name === modelName);
-        if (byName) return byName.id;
-
-        // 再匹配 id
-        const byId = connection.availableModels.find((m: any) => m.id === modelName);
-        if (byId) return byId.id;
-
-        return modelName;
     }
 
     /**

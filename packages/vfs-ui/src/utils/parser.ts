@@ -1,33 +1,24 @@
 /**
  * @file vfs-ui/utils/parser.ts
- * @desc Self-contained parsing utility for extracting metadata from file content.
- *       Now completely generic and agnostic of business logic (like Chat Manifests).
+ * @desc Content parsing utility. No internal dependencies except contracts.
  */
 
 import {
   tryParseJson,
   formatJsonSummary,
   parseMarkdown,
-  type Heading,
 } from '@itookit/common';
 
-import type { FileMetadata } from '../types/types';
+import type { FileMetadata, ParseResult } from '../contracts/types';
 
-export interface ParseResult {
-  summary: string;
-  searchableText: string;
-  headings: Heading[];
-  metadata: FileMetadata;
-}
-
-// --- 主解析逻辑 ---
-
-export function parseFileInfo(contentString: string | null | undefined): ParseResult {
+export function parseFileInfo(
+  contentString: string | null | undefined
+): ParseResult {
   const defaultResult: ParseResult = {
     summary: '',
     searchableText: '',
     headings: [],
-    metadata: {}
+    metadata: {},
   };
 
   if (typeof contentString !== 'string' || !contentString) {
@@ -62,7 +53,7 @@ export function parseFileInfo(contentString: string | null | undefined): ParseRe
   return {
     summary: parsed.summary || '',
     searchableText: parsed.searchableText,
-    headings: parsed.headings, 
+    headings: parsed.headings,
     metadata,
   };
 }
