@@ -68,6 +68,8 @@ export interface ExecutionOverrides {
     temperature?: number;
     /** ✅ 新增：流式输出开关 */
     streamMode?: boolean;
+    /** ✅ 新增：覆盖自动续写 */
+    autoContinue?: boolean;
 }
 
 /**

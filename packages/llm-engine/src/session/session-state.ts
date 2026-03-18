@@ -208,6 +208,18 @@ export class SessionState {
         }
     }
 
+    updateNodeOutput(nodeId: string, content: string): void {
+        for (const session of this.sessions) {
+            if (session.executionRoot) {
+                const node = this.findNodeInTree(session.executionRoot, nodeId);
+                if (node) {
+                    node.data.output = content;
+                    return;
+                }
+            }
+        }
+    }
+
     updateNodeStatus(nodeId: string, status: NodeStatus): void {
         for (const session of this.sessions) {
             if (session.executionRoot) {
