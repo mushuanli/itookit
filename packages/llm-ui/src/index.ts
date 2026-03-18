@@ -13,6 +13,13 @@ import { AgentConfigEditor } from './editors/AgentConfigEditor';
 export { ConnectionSettingsEditor } from './editors/ConnectionSettingsEditor';
 export { MCPSettingsEditor } from './editors/MCPSettingsEditor';
 
+import type { PromptHistoryService } from '@itookit/llm-engine';
+
+export interface LLMFactoryOptions {
+    agentService: VFSAgentService;
+    promptHistory?: PromptHistoryService;
+}
+
 /**
  * 创建 LLM 编辑器工厂
  * @param agentService 已初始化的 AgentService
@@ -32,7 +39,7 @@ export { MCPSettingsEditor } from './editors/MCPSettingsEditor';
  * ```
  */
 export const createLLMFactory = (
-    agentService: VFSAgentService
+    agentService: VFSAgentService,
 ): EditorFactory => {
 
     return async (container: HTMLElement, options: EditorOptions) => {
@@ -64,7 +71,7 @@ export const createLLMFactory = (
             agentService,
             nodeId: effectiveNodeId,
             sessionEngine: engine,
-            isNewSession,  // ✨ 传递新会话标记
+            isNewSession,
         };
 
         const editor = new LLMWorkspaceEditor(container, editorOptions);
