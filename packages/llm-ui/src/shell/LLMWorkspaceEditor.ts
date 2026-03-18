@@ -41,7 +41,7 @@ import { ErrorHandler } from '../utils/errorHandler';
 
 // Components — 仅在 init 中用于构造，之后通过接口引用
 import { HistoryView } from '../components/HistoryView';
-import { ChatInput } from '../components/ChatInputView';
+import { ChatInput } from '../components/input/ChatInputView';
 import { BranchIndicatorView } from '../components/indicators/BranchIndicatorView';
 import { StatusIndicatorView } from '../components/indicators/StatusIndicatorView';
 import { FloatingNavPanel } from '../components/FloatingNavPanel';

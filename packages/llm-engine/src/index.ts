@@ -77,6 +77,17 @@ export type {
 } from './persistence/types';
 
 // ============================================
+// Prompt History
+// ============================================
+export { PromptHistoryService } from './services/prompt-history-service';
+export type {
+    PromptHistoryEntry,
+    HistoryQueryOptions,
+} from './services/prompt-history-service';
+
+//export { VFSHistoryStorage } from './services/prompt-history-storage';
+
+// ============================================
 // 服务
 // ============================================
 
@@ -108,6 +119,7 @@ import { initializeKernel, KernelInitOptions } from '@itookit/llm-kernel';
 import { LLMSessionEngine } from './persistence/session-engine';
 import { VFSAgentService } from './services/vfs-agent-service';
 import { SessionManager, createSessionManager } from './session/session-manager';
+import { PromptHistoryService } from './services/prompt-history-service';
 
 /**
  * Engine 初始化选项
@@ -121,6 +133,8 @@ export interface EngineInitOptions extends KernelInitOptions {
 
     /** 最大并发数 */
     maxConcurrent?: number;
+    /** ✅ 新增：可选，不传则自动创建 */
+    promptHistory?: PromptHistoryService;
 }
 
 /**
@@ -128,6 +142,7 @@ export interface EngineInitOptions extends KernelInitOptions {
  */
 export async function initializeLLMEngine(options: EngineInitOptions): Promise<{
     sessionManager: SessionManager;
+    promptHistory: PromptHistoryService | undefined;
 }> {
     await initializeKernel({
         plugins: options.plugins,
@@ -140,11 +155,13 @@ export async function initializeLLMEngine(options: EngineInitOptions): Promise<{
     const sessionManager = createSessionManager(
         options.sessionEngine,
         options.agentService,
-        { maxConcurrent: options.maxConcurrent }
+        {
+            maxConcurrent: options.maxConcurrent,
+            promptHistory: options.promptHistory,
+        }
     );
 
-    //console.log('[LLM Engine] Initialized');
-    return { sessionManager };
+    return { sessionManager, promptHistory: options.promptHistory };
 }
 
 /**
@@ -158,16 +175,22 @@ export async function quickInitialize(options: {
     sessionManager: SessionManager;
     agentService: IAgentService;
     sessionEngine: ILLMSessionEngine;
+    promptHistory: PromptHistoryService;
 }> {
     const agentService = new VFSAgentService(options.vfs);
     const sessionEngine = new LLMSessionEngine(options.vfs);
+
+    // ✅ 新增：创建并初始化 PromptHistoryService
+    const promptHistory = new PromptHistoryService(options.vfs);
+    await promptHistory.init();
 
     const { sessionManager } = await initializeLLMEngine({
         agentService,
         sessionEngine,
         maxConcurrent: options.maxConcurrent,
         plugins: options.plugins,
+        promptHistory,
     });
 
-    return { sessionManager, agentService, sessionEngine };
+    return { sessionManager, agentService, sessionEngine, promptHistory };
 }
