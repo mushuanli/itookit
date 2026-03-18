@@ -34,7 +34,9 @@ import {
     HistoryQueryOptions,
     getPromptHistory,
 } from '../services/prompt-history-service';
-
+import type {
+    AutoContinueConfig,
+} from './auto-continue';
 import { log } from '../utils/logger';
 
 /**
@@ -71,6 +73,7 @@ export class SessionManager {
         agentService: IAgentService,
         options?: {
             maxConcurrent?: number;
+            autoContinue?: Partial<AutoContinueConfig>;  // ✅ 新增
         }
     ) {
         this.engine = engine;
@@ -94,7 +97,10 @@ export class SessionManager {
                     return { state, runtime };
                 },
             },
-            { maxConcurrent: options?.maxConcurrent }
+            {
+                maxConcurrent: options?.maxConcurrent,
+                autoContinue: options?.autoContinue,  // ✅ 透传
+            }
         );
     }
 

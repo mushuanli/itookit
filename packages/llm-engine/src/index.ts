@@ -109,6 +109,15 @@ export { formatErrorMessage } from './utils/error-formatter';
 export { createThrottledWriter } from './utils/throttled-writer';
 export type { ThrottledWriter } from './utils/throttled-writer';
 
+export { TruncationDetector } from './session/truncation-detector';
+export type { TruncationResult } from './session/truncation-detector';
+
+export { AutoContinueHandler } from './session/auto-continue';
+export type {
+    AutoContinueConfig,
+    ContinueDecision,
+} from './session/auto-continue';
+
 // ============================================
 // 初始化
 // ============================================
