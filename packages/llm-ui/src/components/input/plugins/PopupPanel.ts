@@ -98,23 +98,11 @@ export class PopupPanel {
 
         this.positionPanel();
 
-        // ✅ 诊断
-        console.log('[PopupPanel] show:', {
-            itemCount: items.length,
-            visible: this.visible,
-            panelParent: this.panel.parentElement?.className,
-            panelRect: this.panel.getBoundingClientRect(),
-            anchorRect: this.anchor.getBoundingClientRect(),
-            computedDisplay: getComputedStyle(this.panel).display,
-            computedOpacity: getComputedStyle(this.panel).opacity,
-        });
-
         if (this.searchInput) {
             this.searchInput.value = '';
             this.searchInput.focus();
         }
 
-        // 延迟绑定外部点击（避免触发自身的 show 事件）
         requestAnimationFrame(() => {
             this.outsideClickHandler = (e: MouseEvent) => {
                 if (!this.panel.contains(e.target as Node)) {
