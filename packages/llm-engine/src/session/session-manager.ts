@@ -29,6 +29,12 @@ import { TaskRunner } from './task-runner';
 import { AgentResolver, AgentInfo, ModelInfo } from './agent-resolver';
 import { AttachmentProcessor } from './attachment-processor';
 import { Converters } from '../utils/converters';
+import {
+    PromptHistoryService,
+    PromptHistoryEntry,
+    HistoryQueryOptions,
+} from '../services/prompt-history-service';
+
 import { log } from '../utils/logger';
 
 /**
@@ -58,19 +64,25 @@ export class SessionManager {
     private agentResolver: AgentResolver;
     private attachments: AttachmentProcessor;
     private eventBus: SessionEventBus;
-
-    // === 依赖 ===
     private engine: ILLMSessionEngine;
+
+    private promptHistory: PromptHistoryService | undefined;
 
     constructor(
         engine: ILLMSessionEngine,
         agentService: IAgentService,
-        options?: { maxConcurrent?: number }
+        options?: {
+            maxConcurrent?: number;
+            promptHistory?: PromptHistoryService;  // ✅ 可选注入
+        }
     ) {
         this.engine = engine;
         this.eventBus = new SessionEventBus();
         this.agentResolver = new AgentResolver(agentService);
         this.attachments = new AttachmentProcessor(engine);
+
+        // ✅ 通过构造函数注入（DIP）
+        this.promptHistory = options?.promptHistory;
 
         this.taskRunner = new TaskRunner(
             engine,
@@ -88,9 +100,10 @@ export class SessionManager {
                     return { state, runtime };
                 },
             },
-            options
+            { maxConcurrent: options?.maxConcurrent }
         );
     }
+
 
     // ================================================================
     // 会话绑定
@@ -285,6 +298,11 @@ export class SessionManager {
                 'Cannot send consecutive user messages.'
             );
         }
+
+        // ✅ 新增：记录到 prompt history（fire-and-forget，不阻塞发送）
+        this.promptHistory?.add(text, { agentId, sessionId }).catch((e) => {
+            log.warn('Failed to record prompt history', { error: e });
+        });
 
         await this.taskRunner.submit(
             { sessionId, nodeId, text, files, agentId, overrides },
@@ -1032,6 +1050,67 @@ export class SessionManager {
     }
 
     // ================================================================
+    // Prompt History API（新增）
+    // ================================================================
+
+    /**
+     * 搜索 prompt 历史
+     * 
+     * 用例：
+     * - 输入框展示最近历史
+     * - 模糊搜索历史 prompt
+     * - 按 agent 过滤
+     * 
+     * @example
+     * // 获取最近 10 条
+     * const recent = await manager.searchHistory({ limit: 10 });
+     * 
+     * // 搜索包含 "React" 的 prompt
+     * const results = await manager.searchHistory({ query: "React", limit: 20 });
+     * 
+     * // 获取特定 agent 的历史
+     * const agentHistory = await manager.searchHistory({ agentId: "code-assistant" });
+     */
+    async searchHistory(options?: HistoryQueryOptions): Promise<PromptHistoryEntry[]> {
+        if (!this.promptHistory) return [];
+        return this.promptHistory.search(options);
+    }
+
+    /**
+     * 获取最近的 prompt 历史
+     * 
+     * 快捷方法，等价于 searchHistory({ limit: count })
+     */
+    async getRecentPrompts(count: number = 20): Promise<PromptHistoryEntry[]> {
+        if (!this.promptHistory) return [];
+        return this.promptHistory.getRecent(count);
+    }
+
+    /**
+     * 从历史中删除一条记录
+     */
+    async removeFromHistory(text: string): Promise<boolean> {
+        if (!this.promptHistory) return false;
+        return this.promptHistory.remove(text);
+    }
+
+    /**
+     * 清空全部 prompt 历史
+     */
+    async clearHistory(): Promise<void> {
+        if (!this.promptHistory) return;
+        await this.promptHistory.clear();
+    }
+
+    /**
+     * 获取历史记录总数
+     */
+    async getHistoryCount(): Promise<number> {
+        if (!this.promptHistory) return 0;
+        return this.promptHistory.getCount();
+    }
+
+    // ================================================================
     // 清理 / 生命周期
     // ================================================================
 
@@ -1062,6 +1141,13 @@ export class SessionManager {
 
     destroy(): void {
         this.unbindSession();
+
+        // ✅ 新增：持久化并释放 history
+        if (this.promptHistory) {
+            this.promptHistory.persistNow().catch(() => { });
+            this.promptHistory.dispose().catch(() => { });
+            this.promptHistory = undefined;
+        }
 
         const runningTasks = Array.from(this.sessions.values())
             .filter(r => r.status === 'running' || r.status === 'queued');
@@ -1297,7 +1383,10 @@ let sessionManagerInstance: SessionManager | null = null;
 export function createSessionManager(
     engine: ILLMSessionEngine,
     agentService: IAgentService,
-    options?: { maxConcurrent?: number }
+    options?: {
+        maxConcurrent?: number;
+        promptHistory?: PromptHistoryService;
+    }
 ): SessionManager {
     if (sessionManagerInstance) {
         log.warn('SessionManager already exists, returning existing instance');
