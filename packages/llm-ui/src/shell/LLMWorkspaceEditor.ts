@@ -757,19 +757,12 @@ export class LLMWorkspaceEditor implements IEditor {
         // ✅ 直接获取全局实例，零传递
         const promptHistory = getPromptHistory();
         if (promptHistory) {
-            console.log('[Shell] Creating HistoryPlugin');
             this.historyPlugin = new HistoryPlugin(promptHistory);
             chatInput.registerPlugin(this.historyPlugin);
-        } else {
-            console.warn('[Shell] No promptHistory provided, HistoryPlugin skipped');
         }
 
-        // 2. Slash Command Plugin
-        console.log('[Shell] Creating SlashCommandPlugin');
         this.slashPlugin = new SlashCommandPlugin(this.buildSlashCallbacks());
         chatInput.registerPlugin(this.slashPlugin);
-
-        console.log(`[Shell] Input plugins registered: history=${!!this.historyPlugin}, slash=${!!this.slashPlugin}`);
     }
 
     /**

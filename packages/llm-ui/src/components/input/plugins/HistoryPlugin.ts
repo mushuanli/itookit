@@ -27,7 +27,6 @@ export class HistoryPlugin implements InputPlugin {
     constructor(private historyService: PromptHistoryService) {}
 
     activate(ctx: InputPluginContext): void {
-        console.log('[HistoryPlugin] activate called');
         this.ctx = ctx;
 
         this.panel = new PopupPanel(ctx.textarea, {
@@ -40,8 +39,6 @@ export class HistoryPlugin implements InputPlugin {
             animated: true,
             onDelete: (item) => this.handleDelete(item),
         });
-
-        console.log('[HistoryPlugin] Panel created, ready');
     }
 
     // ================================================================
@@ -60,23 +57,15 @@ export class HistoryPlugin implements InputPlugin {
 
         // Ctrl+R / Cmd+R：搜索历史
         if ((e.ctrlKey || e.metaKey) && e.key === 'r') {
-            console.log('[HistoryPlugin] Ctrl+R triggered');
             e.preventDefault();
             this.openHistory();
             return true;
         }
 
-        // ↑ 键
-        if (e.key === 'ArrowUp') {
-            const empty = this.isInputEmpty();
-            const atStart = this.isCursorAtStart();
-            console.log(`[HistoryPlugin] ArrowUp: empty=${empty}, atStart=${atStart}`);
-
-            if (empty && atStart) {
-                e.preventDefault();
-                this.openHistory();
-                return true;
-            }
+        if (e.key === 'ArrowUp' && this.isInputEmpty() && this.isCursorAtStart()) {
+            e.preventDefault();
+            this.openHistory();
+            return true;
         }
 
         return false;
@@ -95,25 +84,15 @@ export class HistoryPlugin implements InputPlugin {
     // ================================================================
 
     private async openHistory(): Promise<void> {
-        if (!this.ctx || !this.panel) {
-            console.warn('[HistoryPlugin] openHistory: ctx or panel is null');
-            return;
-        }
-
-        console.log('[HistoryPlugin] Opening history panel...');
+        if (!this.ctx || !this.panel) return;
 
         try {
             this.cachedEntries = await this.historyService.getRecent(50);
-            console.log(`[HistoryPlugin] Loaded ${this.cachedEntries.length} entries`);
-        } catch (e) {
-            console.error('[HistoryPlugin] Failed to load history:', e);
+        } catch {
             this.cachedEntries = [];
         }
 
-        if (this.cachedEntries.length === 0) {
-            console.log('[HistoryPlugin] No history entries, skipping panel');
-            return;
-        }
+        if (this.cachedEntries.length === 0) return;
 
         const items = this.entriesToItems(this.cachedEntries);
 
@@ -121,8 +100,6 @@ export class HistoryPlugin implements InputPlugin {
             onSelect: (item) => this.handleSelect(item),
             onClose: () => this.ctx?.focus(),
         });
-
-        console.log('[HistoryPlugin] Panel shown');
     }
 
     private handleSelect(item: PopupItem): void {
