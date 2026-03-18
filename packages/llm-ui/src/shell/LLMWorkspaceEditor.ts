@@ -47,6 +47,11 @@ import { StatusIndicatorView } from '../components/indicators/StatusIndicatorVie
 import { FloatingNavPanel } from '../components/FloatingNavPanel';
 import { LayoutTemplates } from '../components/templates/LayoutTemplates';
 
+import { HistoryPlugin } from '../components/input/plugins/HistoryPlugin';
+import { SlashCommandPlugin } from '../components/input/plugins/SlashCommandPlugin';
+import type { SlashCommandCallbacks } from '../components/input/plugins/SlashCommandPlugin';
+import { getPromptHistory } from '@itookit/llm-engine';
+
 export interface LLMEditorOptions extends EditorOptions {
     sessionEngine: ILLMSessionEngine;
     agentService: IAgentService;
@@ -100,6 +105,10 @@ export class LLMWorkspaceEditor implements IEditor {
     private sendCommand!: SendMessageCommand;
     private switchBranchByOffsetCommand!: SwitchBranchByOffsetCommand;
     private nodeCommands = new Map<string, Command<any, any>>();
+
+    // === 新增 ===
+    private historyPlugin: HistoryPlugin | null = null;
+    private slashPlugin: SlashCommandPlugin | null = null;
 
     // === 基础设施 ===
     private timers = new TimerManager();
@@ -252,6 +261,9 @@ export class LLMWorkspaceEditor implements IEditor {
             onExecutorChange: () => this.bus.emit('state:inputChanged', {}),
             onRequestModels: (agentId) => this.agentLoader.loadModelsForAgent(agentId),
         });
+
+        // ✅ 新增：注册插件
+        this.registerInputPlugins();
 
         this.stateManager.setChatInputGetter(() => this.chatInput);
     }
@@ -729,6 +741,97 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     // ================================================================
+    // 插件注册（新增方法）
+    // ================================================================
+
+    /**
+     * 注册输入插件
+     * 
+     * 在 ChatInput 初始化完成后调用。
+     * 插件通过 ChatInput.registerPlugin() 注入，
+     * 不修改 ChatInput 的构造函数或核心逻辑。
+     */
+    private registerInputPlugins(): void {
+        const chatInput = this.chatInput as ChatInput;
+
+        // ✅ 直接获取全局实例，零传递
+        const promptHistory = getPromptHistory();
+        if (promptHistory) {
+            console.log('[Shell] Creating HistoryPlugin');
+            this.historyPlugin = new HistoryPlugin(promptHistory);
+            chatInput.registerPlugin(this.historyPlugin);
+        } else {
+            console.warn('[Shell] No promptHistory provided, HistoryPlugin skipped');
+        }
+
+        // 2. Slash Command Plugin
+        console.log('[Shell] Creating SlashCommandPlugin');
+        this.slashPlugin = new SlashCommandPlugin(this.buildSlashCallbacks());
+        chatInput.registerPlugin(this.slashPlugin);
+
+        console.log(`[Shell] Input plugins registered: history=${!!this.historyPlugin}, slash=${!!this.slashPlugin}`);
+    }
+
+    /**
+     * 构建 Slash 命令回调
+     * 
+     * 将 slash 命令的执行逻辑桥接到现有的 Command 体系。
+     * SlashCommandPlugin 不直接依赖 SessionManager。
+     */
+    private buildSlashCallbacks(): SlashCommandCallbacks {
+        return {
+            onRetry: () => {
+                const sessions = this.sessionManager.getSessions();
+                const lastAssistant = [...sessions].reverse()
+                    .find(s => s.role === 'assistant');
+                if (lastAssistant) {
+                    const cmd = this.nodeCommands.get('regenerate');
+                    cmd?.run({ nodeId: lastAssistant.id });
+                }
+            },
+
+            onClear: async () => {
+                const sessions = this.sessionManager.getSessions();
+                if (sessions.length === 0) return;
+
+                const { showConfirmDialog } = await import('@itookit/common');
+                const confirmed = await showConfirmDialog(
+                    'Clear all messages in this conversation?'
+                );
+                if (!confirmed) return;
+
+                const ids = sessions.map(s => s.id);
+                this.bus.emit('batch:delete', { ids });
+            },
+
+            onExport: async () => {
+                await this.handleCopy();
+                Toast.success('Conversation copied as Markdown');
+            },
+
+            onCopyAll: () => this.handleCopy(),
+
+            onPrint: () => this.handlePrint(),
+
+            onCreateBranch: () => {
+                const id = this.findCurrentVisibleSession();
+                if (id) this.bus.emit('branch:create', { sourceNodeId: id });
+            },
+
+            onSwitchAgent: (agentId: string) => {
+                this.chatInput.setConfig({ agentId });
+                this.bus.emit('state:inputChanged', {});
+            },
+
+            onHelp: () => {
+                Toast.info(
+                    'Available commands: /retry, /clear, /export, /copy, /print, /branch, /agent <id>, /help'
+                );
+            },
+        };
+    }
+
+    // ================================================================
     // 销毁 — 逆序清理
     // ================================================================
 
@@ -760,21 +863,27 @@ export class LLMWorkspaceEditor implements IEditor {
         // 5. 基础设施
         this.timers.destroy();
 
-        // 6. UI 组件（实现了 destroy 的接口）
+        // ✅ 6. 插件清理（在 UI 组件之前）
+        this.historyPlugin?.deactivate();
+        this.slashPlugin?.deactivate();
+        this.historyPlugin = null;
+        this.slashPlugin = null;
+
+        // 7. UI 组件
         this.branchIndicator?.destroy();
         this.statusIndicator?.destroy();
         this.historyView?.destroy();
         this.chatInput?.destroy();
 
-        // 7. 服务
+        // 8. 服务
         this.branchStore?.destroy();
         this.domCache?.destroy();
         this.bus?.destroy();
 
-        // 8. 引擎解绑
+        // 9. 引擎解绑
         this.sessionManager.unbindSession();
 
-        // 9. DOM 清理
+        // 10. DOM 清理
         this.container.innerHTML = '';
         this.listeners.clear();
         this.nodeCommands.clear();
