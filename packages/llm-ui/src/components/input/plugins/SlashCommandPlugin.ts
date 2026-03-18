@@ -71,7 +71,6 @@ export class SlashCommandPlugin implements InputPlugin {
     }
 
     activate(ctx: InputPluginContext): void {
-        console.log('[SlashPlugin] activate called');
         this.ctx = ctx;
 
         this.panel = new PopupPanel(ctx.textarea, {
@@ -82,8 +81,6 @@ export class SlashCommandPlugin implements InputPlugin {
             variant: 'slash',
             animated: true,
         });
-
-        console.log(`[SlashPlugin] Panel created, ${this.commands.length} commands registered`);
     }
 
     // ================================================================
@@ -111,48 +108,29 @@ export class SlashCommandPlugin implements InputPlugin {
     // ================================================================
 
     onKeyDown(e: KeyboardEvent): boolean {
-        // 面板已打开时：由面板处理导航
         if (this.panel?.isVisible) {
-            console.debug(`[SlashPlugin] Panel visible, handling key: ${e.key}`);
             if (this.panel.handleKeyDown(e)) {
                 return true;
             }
-
-            // Esc 关闭
             if (e.key === 'Escape') {
                 this.closePanel();
                 return true;
             }
-
-            // 其他键：继续输入（会触发 onInput 更新过滤）
             return false;
         }
-
         return false;
     }
 
-    // ================================================================
-    // 输入钩子
-    // ================================================================
-
     onInput(text: string, _cursorPos: number): void {
-        // 检测是否以 / 开头
         if (text.startsWith('/')) {
             const query = text.slice(1).split(/\s/)[0];
-            console.log(`[SlashPlugin] Slash detected, query: "${query}"`);
             this.showCommands(query);
         } else if (this.panel?.isVisible) {
-            console.log('[SlashPlugin] No slash prefix, closing panel');
             this.closePanel();
         }
     }
 
-    // ================================================================
-    // 发送前钩子
-    // ================================================================
-
     onBeforeSend(text: string): boolean | void {
-        // 拦截 slash 命令（不作为普通消息发送）
         if (!text.startsWith('/')) return;
 
         const match = text.match(/^\/(\S+)\s*(.*)/);
@@ -163,11 +141,8 @@ export class SlashCommandPlugin implements InputPlugin {
 
         if (command) {
             this.executeCommand(command, args.trim());
-            return false; // 阻止发送
+            return false;
         }
-
-        // 未匹配到命令：允许正常发送（用户可能就是要发 / 开头的文本）
-        return;
     }
 
     // ================================================================
@@ -202,10 +177,7 @@ export class SlashCommandPlugin implements InputPlugin {
             const placeholder = command.argsPlaceholder || '';
             this.ctx.setText(`/${command.name} ${placeholder}`);
             this.ctx.focus();
-
-            // 选中占位符部分
-            const start = command.name.length + 2;
-            this.ctx.setCursorPosition(start);
+            this.ctx.setCursorPosition(command.name.length + 2);
         } else {
             // 无参数：直接执行
             this.ctx.setText('');
@@ -238,74 +210,14 @@ export class SlashCommandPlugin implements InputPlugin {
 
     private buildDefaultCommands(cb: SlashCommandCallbacks): SlashCommandDef[] {
         return [
-            {
-                name: 'retry',
-                label: '/retry',
-                description: 'Regenerate last response',
-                icon: '🔄',
-                group: 'Common',
-                execute: () => cb.onRetry(),
-            },
-            {
-                name: 'clear',
-                label: '/clear',
-                description: 'Clear conversation history',
-                icon: '🗑️',
-                group: 'Common',
-                execute: () => cb.onClear(),
-            },
-            {
-                name: 'export',
-                label: '/export',
-                description: 'Export as Markdown',
-                icon: '📤',
-                group: 'Tools',
-                execute: () => cb.onExport(),
-            },
-            {
-                name: 'copy',
-                label: '/copy',
-                description: 'Copy all messages',
-                icon: '📋',
-                group: 'Tools',
-                execute: () => cb.onCopyAll(),
-            },
-            {
-                name: 'print',
-                label: '/print',
-                description: 'Print conversation',
-                icon: '🖨️',
-                group: 'Tools',
-                execute: () => cb.onPrint(),
-            },
-            {
-                name: 'branch',
-                label: '/branch',
-                description: 'Create new branch',
-                icon: '🌿',
-                group: 'Branch',
-                execute: () => cb.onCreateBranch(),
-            },
-            {
-                name: 'agent',
-                label: '/agent',
-                description: 'Switch to agent',
-                icon: '🤖',
-                group: 'Settings',
-                hasArgs: true,
-                argsPlaceholder: '<agent-id>',
-                execute: (args) => {
-                    if (args) cb.onSwitchAgent(args);
-                },
-            },
-            {
-                name: 'help',
-                label: '/help',
-                description: 'Show available commands',
-                icon: '❓',
-                group: 'Help',
-                execute: () => cb.onHelp(),
-            },
+            { name: 'retry', label: '/retry', description: 'Regenerate last response', icon: '🔄', group: 'Common', execute: () => cb.onRetry() },
+            { name: 'clear', label: '/clear', description: 'Clear conversation history', icon: '🗑️', group: 'Common', execute: () => cb.onClear() },
+            { name: 'export', label: '/export', description: 'Export as Markdown', icon: '📤', group: 'Tools', execute: () => cb.onExport() },
+            { name: 'copy', label: '/copy', description: 'Copy all messages', icon: '📋', group: 'Tools', execute: () => cb.onCopyAll() },
+            { name: 'print', label: '/print', description: 'Print conversation', icon: '🖨️', group: 'Tools', execute: () => cb.onPrint() },
+            { name: 'branch', label: '/branch', description: 'Create new branch', icon: '🌿', group: 'Branch', execute: () => cb.onCreateBranch() },
+            { name: 'agent', label: '/agent', description: 'Switch to agent', icon: '🤖', group: 'Settings', hasArgs: true, argsPlaceholder: '<agent-id>', execute: (args) => { if (args) cb.onSwitchAgent(args); } },
+            { name: 'help', label: '/help', description: 'Show available commands', icon: '❓', group: 'Help', execute: () => cb.onHelp() },
         ];
     }
 
@@ -321,6 +233,7 @@ export class SlashCommandPlugin implements InputPlugin {
             icon: cmd.icon,
             group: cmd.group,
             searchText: `${cmd.name} ${cmd.description}`,
+            hasArgs: cmd.hasArgs,
         }));
     }
 

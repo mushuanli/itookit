@@ -81,19 +81,11 @@ export class ChatInput implements IChatInputPresenter {
         this.plugins.sort((a, b) => (a.priority ?? 100) - (b.priority ?? 100));
 
         if (this.pluginCtx) {
-            console.log(`[ChatInput] Activating plugin: ${plugin.id}`);
             plugin.activate(this.pluginCtx);
-        } else {
-            console.warn(`[ChatInput] Plugin "${plugin.id}" registered but pluginCtx not ready yet`);
         }
     }
 
-    /**
-     * 在 bindEvents 中调用，构建 Plugin 上下文
-     */
     private initPluginSystem(): void {
-        console.log('[ChatInput] initPluginSystem called');
-
         this.pluginCtx = {
             textarea: this.textarea,
             container: this.container,
@@ -124,11 +116,7 @@ export class ChatInput implements IChatInputPresenter {
             getAgentId: () => this.config.agentId,
         };
 
-        console.log(`[ChatInput] pluginCtx ready, activating ${this.plugins.length} pending plugin(s)`);
-
-        // 激活已注册但未激活的插件
         for (const plugin of this.plugins) {
-            console.log(`[ChatInput] Late-activating plugin: ${plugin.id}`);
             plugin.activate(this.pluginCtx);
         }
     }
@@ -268,27 +256,19 @@ export class ChatInput implements IChatInputPresenter {
             this.config.text = this.textarea.value;
             this.notifyConfigChange();
 
-            // ✨ 通知所有插件
             const cursorPos = this.textarea.selectionStart;
-            console.debug(`[ChatInput] input event, plugins: ${this.plugins.length}, text: "${this.textarea.value.slice(0, 20)}..."`);
-
             for (const plugin of this.plugins) {
                 plugin.onInput?.(this.textarea.value, cursorPos);
             }
         });
 
         this.textarea.addEventListener('keydown', (e) => {
-            // ✨ Plugin 链式处理
-            console.debug(`[ChatInput] keydown: ${e.key}, plugins: ${this.plugins.length}`);
-
             for (const plugin of this.plugins) {
                 if (plugin.onKeyDown?.(e)) {
-                    console.debug(`[ChatInput] Key "${e.key}" consumed by plugin: ${plugin.id}`);
                     return;
                 }
             }
 
-            // 默认行为
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 this.triggerSend();
