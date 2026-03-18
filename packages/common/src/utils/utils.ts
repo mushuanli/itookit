@@ -21,6 +21,12 @@ export function escapeHTML(str: string | null | undefined): string {
     return str.replace(/[&<>"']/g, tag => map[tag] || tag);
 }
 
+export function escapeAttr(str: string): string {
+    return str.replace(/[&"']/g, (m) =>
+        ({ '&': '&amp;', '"': '&quot;', "'": '&#39;' }[m] || m)
+    );
+}
+
 export function generateUUID(): string {
     return 'node-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
 }
@@ -40,10 +46,10 @@ export function generateId(prefix: string = 'item'): string {
 export function debounce<T extends (...args: any[]) => any>(func: T, delay: number): ((...args: Parameters<T>) => void) & { cancel: () => void } {
     let timeout: ReturnType<typeof setTimeout>;
     // 必须使用 function 关键字才能动态绑定 this
-    const debounced = function(this: any, ...args: Parameters<T>) {
+    const debounced = function (this: any, ...args: Parameters<T>) {
         clearTimeout(timeout);
         // 捕获外部的 this
-        const context = this; 
+        const context = this;
         timeout = setTimeout(() => func.apply(context, args), delay);
     };
     debounced.cancel = () => clearTimeout(timeout);
@@ -55,14 +61,14 @@ export function isClass(v: any): boolean {
 }
 
 export function guessMimeType(filename: string): string {
-        const ext = filename.split('.').pop()?.toLowerCase();
-        const map: Record<string, string> = {
+    const ext = filename.split('.').pop()?.toLowerCase();
+    const map: Record<string, string> = {
         // 图片
-        'png': 'image/png', 
-        'jpg': 'image/jpeg', 
+        'png': 'image/png',
+        'jpg': 'image/jpeg',
         'jpeg': 'image/jpeg',
-        'gif': 'image/gif', 
-        'svg': 'image/svg+xml', 
+        'gif': 'image/gif',
+        'svg': 'image/svg+xml',
         'webp': 'image/webp',
         'bmp': 'image/bmp',
         'ico': 'image/x-icon',
@@ -78,7 +84,7 @@ export function guessMimeType(filename: string): string {
 
         'txt': 'text/plain',
         'md': 'text/markdown',
-        
+
         // 代码
         'json': 'application/json',
         'js': 'text/javascript',
@@ -94,20 +100,20 @@ export function guessMimeType(filename: string): string {
         'mp3': 'audio/mpeg',
         'wav': 'audio/wav',
         'ogg': 'audio/ogg',
-        
+
         // 视频
         'mp4': 'video/mp4',
         'webm': 'video/webm',
-        
+
         // 压缩
         'zip': 'application/zip',
         'gz': 'application/gzip',
         'tar': 'application/x-tar',
         'rar': 'application/x-rar-compressed',
         '7z': 'application/x-7z-compressed',
-        };
-        return map[ext || ''] || 'application/octet-stream';
-    }
+    };
+    return map[ext || ''] || 'application/octet-stream';
+}
 
 
 
@@ -133,7 +139,7 @@ export function throttle<T extends (...args: any[]) => any>(
     limit: number
 ): (...args: Parameters<T>) => void {
     let inThrottle = false;
-    
+
     return (...args: Parameters<T>) => {
         if (!inThrottle) {
             fn(...args);
@@ -163,24 +169,24 @@ export async function retry<T>(
         backoff = true,
         shouldRetry = () => true
     } = options;
-    
+
     let lastError: any;
-    
+
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
             return await fn();
         } catch (error) {
             lastError = error;
-            
+
             if (attempt === maxAttempts || !shouldRetry(error)) {
                 throw error;
             }
-            
+
             const waitTime = backoff ? delay * Math.pow(2, attempt - 1) : delay;
             await sleep(waitTime);
         }
     }
-    
+
     throw lastError;
 }
 
@@ -196,7 +202,7 @@ export function withTimeout<T>(
         const timeoutId = setTimeout(() => {
             reject(new Error(message));
         }, timeoutMs);
-        
+
         promise
             .then(result => {
                 clearTimeout(timeoutId);
@@ -227,22 +233,22 @@ export function deepClone<T>(obj: T): T {
     if (obj === null || typeof obj !== 'object') {
         return obj;
     }
-    
+
     if (obj instanceof Date) {
         return new Date(obj.getTime()) as any;
     }
-    
+
     if (Array.isArray(obj)) {
         return obj.map(item => deepClone(item)) as any;
     }
-    
+
     const cloned: any = {};
     for (const key in obj) {
         if (Object.prototype.hasOwnProperty.call(obj, key)) {
             cloned[key] = deepClone((obj as any)[key]);
         }
     }
-    
+
     return cloned;
 }
 
@@ -261,12 +267,12 @@ export function formatFileSize(bytes: number): string {
     const units = ['B', 'KB', 'MB', 'GB', 'TB'];
     let unitIndex = 0;
     let size = bytes;
-    
+
     while (size >= 1024 && unitIndex < units.length - 1) {
         size /= 1024;
         unitIndex++;
     }
-    
+
     return `${size.toFixed(1)} ${units[unitIndex]}`;
 }
 
@@ -285,22 +291,22 @@ export function formatDuration(ms: number): string {
  */
 export function timeAgo(date: Date | number): string {
     const seconds = Math.floor((Date.now() - (typeof date === 'number' ? date : date.getTime())) / 1000);
-    
+
     if (seconds < 60) return 'just now';
     if (seconds < 3600) return `${Math.floor(seconds / 60)} min ago`;
     if (seconds < 86400) return `${Math.floor(seconds / 3600)} hours ago`;
     if (seconds < 604800) return `${Math.floor(seconds / 86400)} days ago`;
-    
+
     const d = typeof date === 'number' ? new Date(date) : date;
     return d.toLocaleDateString();
 }
 
 
 export async function calculateHash(buffer: ArrayBuffer): Promise<string> {
-  const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
-  return Array.from(new Uint8Array(hashBuffer))
-    .map(b => b.toString(16).padStart(2, '0'))
-    .join('');
+    const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+    return Array.from(new Uint8Array(hashBuffer))
+        .map(b => b.toString(16).padStart(2, '0'))
+        .join('');
 }
 
 /**

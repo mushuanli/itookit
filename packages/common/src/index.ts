@@ -102,6 +102,7 @@ export { ISettingsWidget } from './interfaces/ISettingsWidget';
 export {
     simpleHash,
     escapeHTML,
+    escapeAttr,
     generateUUID,
     generateShortUUID,
     generateId,

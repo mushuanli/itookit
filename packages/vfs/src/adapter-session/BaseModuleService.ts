@@ -28,7 +28,7 @@ export abstract class BaseModuleService {
   constructor(
     protected moduleName: string,
     protected options: ModuleServiceOptions = {},
-    protected vfs: VFS
+    public readonly vfs: VFS
   ) {
     this.engine = new VFSModuleEngine(moduleName, vfs);
   }
