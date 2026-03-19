@@ -21,7 +21,7 @@
     overflow-x: hidden;
     padding: 20px;
     scrollbar-width: thin;
-    overflow-anchor: auto;
+    overflow-anchor: none;
     scroll-behavior: auto;
     -webkit-overflow-scrolling: touch;
     overscroll-behavior: contain;
@@ -306,6 +306,11 @@
     animation: llm-ui-fadeIn 0.3s ease;
     position: relative;
     transition: background-color var(--llm-transition-normal);
+}
+
+/* 流式期间禁用新 session 的入场动画 */
+.llm-ui-history--streaming .llm-ui-session {
+    animation: none;
 }
 
 .llm-ui-session--user {
@@ -650,7 +655,17 @@
     border-radius: var(--llm-radius-lg);
     background: var(--llm-bg-primary);
     overflow: hidden;
-    transition: box-shadow var(--llm-transition-normal), border-color var(--llm-transition-normal);
+    /* ✅ 始终预留 border 空间，用颜色切换代替 border 出现/消失 */
+    border-left: 3px solid transparent;
+
+    /* ✅ 流式期间禁用 transition */
+    transition: box-shadow var(--llm-transition-normal),
+        border-color var(--llm-transition-normal);
+}
+
+/* 流式期间禁用所有 transition */
+.llm-ui-history--streaming .llm-ui-node {
+    transition: none;
 }
 
 .llm-ui-node:hover {
@@ -683,15 +698,15 @@
 
 /* 状态边框 */
 .llm-ui-node--success {
-    border-left: 3px solid var(--llm-color-success);
+    border-left-color: var(--llm-color-success);
 }
 
 .llm-ui-node--failed {
-    border-left: 3px solid var(--llm-color-error);
+    border-left-color: var(--llm-color-error);
 }
 
 .llm-ui-node--running {
-    border-left: 3px solid var(--llm-color-primary);
+    border-left-color: var(--llm-color-primary);
 }
 
 /* 状态标签 */
@@ -751,8 +766,14 @@
 /* 内容输出区域 */
 .llm-ui-node__output {
     padding: 0;
-    min-height: 40px;
+    min-height: 0px;
     background: var(--llm-bg-primary);
+}
+
+/* 流式中的节点：给一个合理的占位高度，避免从 0 跳变 */
+.llm-ui-node--streaming .llm-ui-node__output {
+    min-height: 1.5em;
+    /* ✅ 约一行文本的高度 */
 }
 
 /* 代码块 */
