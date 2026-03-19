@@ -5,7 +5,7 @@
  */
 export const ENGINE_DEFAULTS = {
     /** 最大并发任务数 */
-    MAX_CONCURRENT: 3,
+    MAX_CONCURRENT: 8,
 
     /** 任务队列最大长度 */
     MAX_QUEUE_SIZE: 10,
@@ -22,7 +22,7 @@ export const ENGINE_DEFAULTS = {
     /** 自动清理间隔（5分钟） */
     CLEANUP_INTERVAL: 5 * 60 * 1000,
 
-    /** 自动续写最大次数 */
+    /** 自动续写最大次数（与 AutoContinueConfig.maxContinuations 对齐） */
     AUTO_CONTINUE_MAX: 10,
 };
 

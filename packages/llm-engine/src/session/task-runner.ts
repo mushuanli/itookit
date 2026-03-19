@@ -55,6 +55,12 @@ export interface TaskRunnerCallbacks {
  * - 并发控制
  * - LLM 执行编排（含自动续写）
  * - 事件分发（区分绑定/后台）
+ *
+ * 自动续写设计要点：
+ * - 续写对 UI 完全透明（chunk 持续追加到同一个节点）
+ * - 终结事件（finished / node_status:success）由 TaskRunner 统一发送
+ *   而非透传 kernel 的事件，避免中间轮次误触发 UI 完成逻辑
+ * - 续写历史只保留一条合并的 assistant 记录，不产生多余的 role 对
  */
 export class TaskRunner {
     private queue: ExecutionTask[] = [];
@@ -63,7 +69,7 @@ export class TaskRunner {
     private maxQueueSize: number;
     private kernelAdapter: LLMKernelAdapter;
 
-    /** ✅ 新增：自动续写配置模板 */
+    /** 自动续写配置模板 */
     private autoContinueConfig: Partial<AutoContinueConfig>;
 
     constructor(
@@ -255,28 +261,61 @@ export class TaskRunner {
                 ENGINE_DEFAULTS.PERSIST_THROTTLE
             );
 
-            // 7. 事件处理器
+            // 7. 终结事件抑制标志
+            //
+            // 为什么始终抑制（而非仅续写时抑制）：
+            //   kernel 的终结事件（execution:complete → finished）在 executeQuery
+            //   返回之前就已经通过 onEvent 回调发出。我们在 executeQuery 返回后
+            //   才能调用 evaluate() 判断是否续写——此时事件已经到达 UI。
+            //
+            //   因此无法做到"先判断要不要续写，再决定是否抑制"。
+            //
+            //   安全策略：始终抑制 kernel 的终结事件，由 TaskRunner 在循环
+            //   真正结束后统一发送。无论是否发生续写，行为都是一致的。
+            //
+            //   error 事件不抑制——错误应该立即展示。
+            let suppressTerminalEvents = true;
+
+            // 8. 事件处理器
             const onEvent = this.createEventHandler(
                 sessionId, rootNode, state, accumulator, persist,
                 () => { errorAlreadyEmitted = true; },
-                isBound
+                isBound,
+                () => suppressTerminalEvents
             );
 
-            // 8. 准备附件和历史
-            const attachments = await this.attachments.convertToAttachments(sessionId, contextFiles);
+            // 9. 准备附件和历史
+            const attachmentList = await this.attachments.convertToAttachments(sessionId, contextFiles);
             const historyWithFiles = await this.buildHistoryMessages(sessionId, history);
 
             // =====================================================
-            // 9. 执行循环（支持 auto-continue）
+            // 10. 执行循环（支持 auto-continue）
             //
-            // 续写对 UI 完全透明：
-            // - 流式 chunk 持续追加到同一个 assistant 节点
-            // - 用户看到的就是"AI 在持续输出"
-            // - Stop 按钮通过 AbortController 自然中断循环
+            // 历史构建策略：
+            //
+            //   首次请求：
+            //     history = originalHistory（不含当前轮 user/assistant）
+            //     input = 用户原文
+            //     → kernel 拼接为: [...history, user(input)]
+            //
+            //   续写请求：
+            //     history = [...originalHistoryForContinue, assistant(累积输出)]
+            //     input = continue prompt
+            //     → kernel 拼接为: [..., user, assistant(累积), user(continue)]
+            //
+            //   originalHistoryForContinue = originalHistory 去掉末尾 assistant
+            //   这样追加当前轮 assistant 不会产生连续 assistant 违反 role 交替。
+            //
+            // token 增长分析：
+            //   每次续写只是 assistant 那一条记录变长，不产生多余的 role 对。
+            //   总 token = 原始历史 + 累积输出 + continue prompt（线性增长）。
             // =====================================================
 
             let currentInput = input.text;
             let currentHistory = historyWithFiles;
+
+            // 预处理：移除末尾 assistant，为续写准备干净的历史前缀
+            const originalHistoryForContinue = this.trimTrailingAssistant(historyWithFiles);
 
             while (true) {
                 log.info('Executing LLM query', {
@@ -295,7 +334,7 @@ export class TaskRunner {
                         history: currentHistory,
                         // 续写时不重复发送附件（上下文已在历史中）
                         attachments: autoContinue.getStatus().count === 0
-                            ? attachments
+                            ? attachmentList
                             : [],
                         onEvent,
                         signal: task.abortController.signal,
@@ -304,7 +343,7 @@ export class TaskRunner {
                     }
                 );
 
-                // 10. 检查结果
+                // 11. 检查结果
                 if (result.status === 'failed') {
                     const firstError = result.errors?.[0];
                     const error = new Error(firstError?.message || 'Execution failed');
@@ -312,11 +351,11 @@ export class TaskRunner {
                     throw error;
                 }
 
-                // 11. 提取 finish_reason
+                // 12. 提取 finish_reason
                 const finishReason = result.metadata?.finishReason
                     ?? result.metadata?.finish_reason;
 
-                // 12. 判断是否需要续写
+                // 13. 判断是否需要续写
                 const decision = autoContinue.evaluate(
                     accumulator.output,
                     finishReason
@@ -332,15 +371,17 @@ export class TaskRunner {
                     break;
                 }
 
-                // 13. 准备续写
+                // 14. 准备续写
                 autoContinue.incrementCount();
 
-                // 追加当前 assistant 输出 + continue 指令到历史
-                // 不创建新节点 — 续写内容拼接到同一个 assistant 节点
+                // 基于裁剪后的历史重建：
+                //   [...user1, assistant1, user2, assistant(累积输出)]
+                // kernel 会把 currentInput 作为最终 user message 追加：
+                //   [...user1, assistant1, user2, assistant(累积), user(continue)]
+                // role 交替正确 ✓
                 currentHistory = [
-                    ...currentHistory,
+                    ...originalHistoryForContinue,
                     { role: 'assistant' as const, content: accumulator.output },
-                    { role: 'user' as const, content: autoContinue.getContinuePrompt() },
                 ];
 
                 currentInput = autoContinue.getContinuePrompt();
@@ -349,35 +390,20 @@ export class TaskRunner {
                     count: autoContinue.getStatus().count,
                     reason: decision.reason,
                     outputLength: accumulator.output.length,
+                    historyMessages: currentHistory.length,
                 });
-
-                // ✅ 不发送 metaInfo 事件给 UI
-                // 续写对用户完全透明：流式 chunk 持续追加到同一个节点
-                // 用户看到的就是"AI 在持续输出"，与正常长回复无区别
             }
 
             // =====================================================
             // 循环结束：收尾
             // =====================================================
 
+            // 关闭终结事件抑制（此后如有事件可正常通过）
+            suppressTerminalEvents = false;
+
             const continuationCount = autoContinue.getStatus().count;
 
-            // ✅ 新增：剥离完成标记（如果 LLM 输出了的话）
-            if (continuationCount > 0) {
-                const cleaned = AutoContinueHandler.stripCompletionMarker(accumulator.output);
-                if (cleaned !== accumulator.output) {
-                    log.debug('Stripped completion marker from output', {
-                        originalLength: accumulator.output.length,
-                        cleanedLength: cleaned.length,
-                    });
-                    accumulator.output = cleaned;
-
-                    // 同步更新 SessionState 中的节点内容
-                    state.updateNodeOutput(rootNode.id, cleaned);
-                }
-            }
-
-            // 14. 最终持久化
+            // 最终持久化
             await finalize();
             await this.engine.updateNode(sessionId, assistantNodeId, {
                 content: accumulator.output,
@@ -385,14 +411,13 @@ export class TaskRunner {
                     thinking: accumulator.thinking,
                     status: 'success',
                     endTime: Date.now(),
-                    // 仅在发生续写时记录（供调试/统计）
                     ...(continuationCount > 0 && {
                         continuations: continuationCount,
                     }),
                 },
             });
 
-            // 15. 完成
+            // 完成
             state.updateNodeStatus(rootNode.id, 'success');
 
             if (isBound) {
@@ -401,7 +426,6 @@ export class TaskRunner {
                     payload: { nodeId: rootNode.id, status: 'success' },
                 });
 
-                // 如果是 regenerate 任务，发送完成事件
                 if (input.regenerateContext) {
                     this.eventBus.emitSession(sessionId, {
                         type: 'regenerate_completed',
@@ -507,6 +531,23 @@ export class TaskRunner {
     // 内部：事件处理
     // ============================================
 
+    /**
+     * 创建事件处理器
+     *
+     * 终结事件抑制策略：
+     *   kernel 每次 executeQuery 结束都会发 execution:complete → finished，
+     *   但在续写循环中，只有最后一轮才是真正的完成。
+     *
+     *   由于 kernel 事件在 executeQuery 返回之前就通过回调发出，
+     *   我们无法在 evaluate() 之后再决定是否抑制——时序上来不及。
+     *
+     *   因此采用"始终抑制、统一发送"策略：
+     *   - onEvent 中始终过滤 finished 和 node_status(success/completed)
+     *   - 流式 chunk（node_update）和错误（error）正常通过
+     *   - 循环结束后由 TaskRunner 自己发送 node_status + finished
+     *
+     *   无论是否发生续写，行为一致。
+     */
     private createEventHandler(
         sessionId: string,
         rootNode: ExecutionNode,
@@ -514,9 +555,25 @@ export class TaskRunner {
         accumulator: { output: string; thinking: string },
         persist: () => void,
         markErrorEmitted: () => void,
-        isBound: boolean
+        isBound: boolean,
+        shouldSuppressTerminal: () => boolean
     ): (event: OrchestratorEvent) => void {
         return (event: OrchestratorEvent) => {
+            // 终结事件抑制
+            if (shouldSuppressTerminal()) {
+                if (event.type === 'finished') {
+                    log.debug('Suppressed finished event (terminal events managed by TaskRunner)');
+                    return;
+                }
+                if (event.type === 'node_status') {
+                    const status = (event.payload as any).status;
+                    if (status === 'success' || status === 'completed') {
+                        log.debug('Suppressed node_status event during execution', { status });
+                        return;
+                    }
+                }
+            }
+
             // 持久化处理（不依赖绑定状态）
             if (event.type === 'node_update' && event.payload.chunk) {
                 if (event.payload.nodeId === rootNode.id || !event.payload.nodeId) {
@@ -626,6 +683,30 @@ export class TaskRunner {
         });
     }
 
+    /**
+     * 移除历史末尾的 assistant 消息
+     *
+     * 用途：为续写准备"干净"的历史前缀。
+     *
+     * 续写时会追加当前轮的 assistant(累积输出)，如果 originalHistory
+     * 末尾已有上一轮的 assistant，就会产生连续 assistant 违反 role 交替。
+     *
+     * 移除末尾 assistant 后，续写历史变为：
+     *   [..., user(上一轮), assistant(当前轮累积)]
+     * role 交替正确。
+     *
+     * 注意：只移除末尾的一条，不影响中间的 assistant。
+     */
+    private trimTrailingAssistant(history: ChatMessage[]): ChatMessage[] {
+        if (history.length === 0) return history;
+
+        if (history[history.length - 1].role === 'assistant') {
+            return history.slice(0, -1);
+        }
+
+        return history;
+    }
+
     private async buildHistoryMessages(
         sessionId: string,
         history: HistoryMessage[]
@@ -731,7 +812,8 @@ export class TaskRunner {
                 type: 'error',
                 payload: {
                     message: errorMessage,
-                    error: error instanceof Error ? error : new Error(String(error)),
+                    error: error instanceof Error ? error
+                        : new Error(String(error)),
                 },
             });
         }

@@ -11,11 +11,10 @@ export interface ScrollControllerCallbacks {
 /**
  * 统一滚动控制器
  *
- * 合并原来分散在 HistoryView、NavigationHelper 中的滚动逻辑：
- * - 自动滚动判断
- * - 流式模式管理
- * - 用户滚动状态跟踪
- * - 内容高度变化响应
+ * ✅ 优化：
+ * - 流式滚动使用 CSS scroll-behavior 消除抖动
+ * - 程序滚动标记避免误判用户意图
+ * - handleContentResize 是唯一的滚动触发入口（由 Pipeline 分帧调用）
  */
 export class ScrollController {
     private shouldAutoScroll = true;
@@ -28,14 +27,10 @@ export class ScrollController {
     private timers = new TimerManager();
     private scrollThrottleTimer: ReturnType<typeof setTimeout> | null = null;
 
-    // ✅ 新增：流式期间的滚动节流
-    private streamingScrollThrottle = false;
-    private readonly STREAMING_SCROLL_INTERVAL = 120; // ms
-
     private readonly SCROLL_THRESHOLD = 150;
     private readonly SCROLL_THROTTLE = 100;
 
-    // ✅ 新增：追踪是否是程序触发的滚动（而非用户手动）
+    // 程序滚动标记
     private isProgrammaticScroll = false;
     private programmaticScrollTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -62,27 +57,21 @@ export class ScrollController {
     // ================================================================
 
     private handleScroll = (): void => {
+        // 程序触发的滚动：不更新用户状态
+        if (this.isProgrammaticScroll) return;
+
         const { scrollTop, scrollHeight, clientHeight } = this.container;
         const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
 
         const wasScrolledUp = this._isUserScrolledUp;
         const isNearBottom = distanceFromBottom < this.SCROLL_THRESHOLD;
 
-        // ✅ 关键修复：区分用户滚动和程序滚动
-        if (this.isProgrammaticScroll) {
-            // 程序触发的滚动：不更新用户状态
-            return;
-        }
-
         this._isUserScrolledUp = !isNearBottom;
 
-        // ✅ 关键修复：流式模式下也要响应用户滚动
         if (this._isStreamingMode) {
             if (this._isUserScrolledUp) {
-                // 用户主动上滚 → 停止自动滚动
                 this.shouldAutoScroll = false;
             } else {
-                // 用户滚回底部 → 恢复自动滚动
                 this.shouldAutoScroll = true;
             }
         } else {
@@ -90,7 +79,6 @@ export class ScrollController {
             this.shouldAutoScroll = isNearBottom;
         }
 
-        // 状态变化回调
         if (!wasScrolledUp && this._isUserScrolledUp) {
             this.callbacks.onUserScrolledUp?.();
         } else if (wasScrolledUp && !this._isUserScrolledUp) {
@@ -101,42 +89,49 @@ export class ScrollController {
     };
 
     // ================================================================
-    // 内容高度变化
+    // 内容高度变化 — Pipeline 唯一调用入口
     // ================================================================
 
     /**
-     * ✅ 优化：流式期间使用更积极的节流
-     * 由 StreamRenderPipeline 每帧调用，但实际滚动有最小间隔
+     * ✅ 简化：由 Pipeline 在渲染后的下一帧调用
+     * 
+     * Pipeline 保证此方法在 flushContent 的下一帧执行，
+     * 此时浏览器已完成 layout 计算，读取 scrollHeight 不会触发强制布局。
+     * 
+     * 流式和非流式统一逻辑：
+     * 1. 读取 scrollHeight（layout read）
+     * 2. 比较高度变化
+     * 3. 如果需要滚动，设置 scrollTop（layout write）
+     * 
+     * 每次调用最多 1 read + 1 write，零 layout thrashing。
      */
     handleContentResize(): void {
         if (!this.shouldAutoScroll) return;
 
-        // 流式期间：使用独立节流，避免与非流式逻辑冲突
-        if (this._isStreamingMode) {
-            if (this.streamingScrollThrottle) return;
-            this.streamingScrollThrottle = true;
+        const currentScrollHeight = this.container.scrollHeight;
 
-            this.timers.setTimeout(() => {
-                this.streamingScrollThrottle = false;
-            }, this.STREAMING_SCROLL_INTERVAL);
+        // 非流式期间保持节流
+        if (!this._isStreamingMode) {
+            if (this.scrollThrottleTimer !== null) return;
 
-            this.scrollToBottomImmediate();
+            this.scrollThrottleTimer = this.timers.setTimeout(() => {
+                this.scrollThrottleTimer = null;
+                if (!this.shouldAutoScroll) return;
+
+                const h = this.container.scrollHeight;
+                if (h > this.lastScrollHeight) {
+                    this.lastScrollHeight = h;
+                    this.scrollToBottomImmediate();
+                }
+            }, this.SCROLL_THROTTLE);
             return;
         }
 
-        // 非流式期间：保持原有逻辑
-        if (this.scrollThrottleTimer !== null) return;
+        // 流式期间：直接执行（Pipeline 已保证分帧和节流）
+        if (currentScrollHeight <= this.lastScrollHeight) return;
 
-        this.scrollThrottleTimer = this.timers.setTimeout(() => {
-            this.scrollThrottleTimer = null;
-            if (!this.shouldAutoScroll) return;
-
-            const currentScrollHeight = this.container.scrollHeight;
-            if (currentScrollHeight > this.lastScrollHeight) {
-                this.lastScrollHeight = currentScrollHeight;
-                this.scrollToBottomImmediate();
-            }
-        }, this.SCROLL_THROTTLE);
+        this.lastScrollHeight = currentScrollHeight;
+        this.scrollToBottomImmediate();
     }
 
     // ================================================================
@@ -144,13 +139,9 @@ export class ScrollController {
     // ================================================================
 
     scrollToBottom(force: boolean = false): void {
-        // ✅ 关键修复：非 force 模式下，尊重用户的滚动意图
         if (!force && !this.shouldAutoScroll) return;
 
-        // ✅ force 模式在流式期间也要检查用户状态
         if (force && this._isStreamingMode && this._isUserScrolledUp) {
-            // 流式模式下，即使 force 也不应该覆盖用户的上滚
-            // 只有非流式场景下的 force（如 session_start 初始定位）才强制滚动
             return;
         }
 
@@ -158,7 +149,6 @@ export class ScrollController {
             cancelAnimationFrame(this.scrollFrameId);
         }
 
-        // ✅ 标记为程序滚动
         this.markProgrammaticScroll();
 
         this.scrollFrameId = this.timers.requestAnimationFrame(() => {
@@ -169,10 +159,6 @@ export class ScrollController {
         });
     }
 
-    /**
-     * ✅ 新增：强制滚动到底部（不受用户状态限制）
-     * 仅在明确的用户操作触发时使用（如点击 "scroll to bottom" 按钮）
-     */
     forceScrollToBottom(): void {
         this.shouldAutoScroll = true;
         this._isUserScrolledUp = false;
@@ -191,26 +177,19 @@ export class ScrollController {
         });
     }
 
+    /**
+     * ✅ 流式期间的滚动：直接设置，不经过 RAF 排队
+     * 
+     * 因为 Pipeline 已经在 RAF 循环内调用 handleContentResize，
+     * 此处直接写入 scrollTop 即可，无需再排一个 RAF。
+     */
     private scrollToBottomImmediate(): void {
-        if (this.scrollFrameId !== null) return;
-
-        // ✅ 再次检查
         if (!this.shouldAutoScroll) return;
 
         this.markProgrammaticScroll();
-
-        this.scrollFrameId = this.timers.requestAnimationFrame(() => {
-            this.scrollFrameId = null;
-            this.container.scrollTop = this.container.scrollHeight;
-        });
+        this.container.scrollTop = this.container.scrollHeight;
     }
 
-    /**
-     * ✅ 新增：标记接下来的滚动为程序触发
-     * 
-     * 使用短暂的标记窗口（150ms），在此期间的 scroll 事件
-     * 被视为程序触发，不会更新用户滚动状态。
-     */
     private markProgrammaticScroll(): void {
         this.isProgrammaticScroll = true;
 
@@ -232,8 +211,6 @@ export class ScrollController {
         if (this._isStreamingMode) return;
         this._isStreamingMode = true;
 
-        // ✅ 关键修复：只有当用户当前在底部时才启用自动滚动
-        // 如果用户进入流式前就在查看历史，不应该强制拉到底部
         const { scrollTop, scrollHeight, clientHeight } = this.container;
         const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
         const isNearBottom = distanceFromBottom < this.SCROLL_THRESHOLD;

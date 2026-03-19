@@ -98,7 +98,9 @@ export class HistoryView implements IHistoryPresenter {
         this.resizeTracker = new ContentResizeTracker(
             container,
             (newH, oldH) => {
-                if (newH > oldH && !this.stream.isStreamingMode) {
+                if (newH > oldH
+                    && !this.stream.isStreamingMode
+                    && !this.stream.recentlyExited) {
                     this.scrollController.handleContentResize();
                 }
             }
@@ -241,67 +243,111 @@ export class HistoryView implements IHistoryPresenter {
     getAgentNavigationTarget(
         direction: 'prev' | 'next'
     ): string | null | '__end__' | '__start__' {
+        const collapseStates = this.collapse.getStates();
+
+        // 一次性读取容器位置
         const containerRect = this.container.getBoundingClientRect();
         const viewportTop = containerRect.top;
         const viewportBottom = containerRect.bottom;
-
-        const collapseStates = this.collapse.getStates();
-        const agentElements: HTMLElement[] = [];
+        const TITLE_HEIGHT = 48;
 
         const allSessions = this.container.querySelectorAll('.llm-ui-session--assistant');
-        for (const el of allSessions) {
-            const id = (el as HTMLElement).dataset.sessionId;
-            if (id && !collapseStates[id]) {
-                agentElements.push(el as HTMLElement);
-            }
-        }
+        if (allSessions.length === 0) return null;
 
-        if (agentElements.length === 0) return null;
-
-        const TITLE_HEIGHT = 48;
-        const aboveViewport: HTMLElement[] = [];
-        const inViewport: HTMLElement[] = [];
-        const belowViewport: HTMLElement[] = [];
-
-        for (const el of agentElements) {
-            const rect = el.getBoundingClientRect();
-            const titleBottom = rect.top + TITLE_HEIGHT;
-
-            if (titleBottom < viewportTop) {
-                aboveViewport.push(el);
-            } else if (rect.top > viewportBottom) {
-                belowViewport.push(el);
-            } else {
-                inViewport.push(el);
-            }
-        }
+        // 转为数组以支持反向遍历
+        const sessionArray = Array.from(allSessions) as HTMLElement[];
 
         if (direction === 'prev') {
-            const titleHidden = this.findAgentWithTitleHidden(
-                agentElements, viewportTop, viewportBottom, TITLE_HEIGHT
-            );
-            if (titleHidden) return titleHidden.dataset.sessionId || null;
-
-            if (aboveViewport.length > 0) {
-                return aboveViewport[aboveViewport.length - 1].dataset.sessionId || null;
-            }
-
-            return this.container.scrollTop > 0 ? '__start__' : null;
+            return this.findPrevAgent(sessionArray, collapseStates, viewportTop, viewportBottom, TITLE_HEIGHT);
         } else {
-            if (belowViewport.length > 0) {
-                return belowViewport[0].dataset.sessionId || null;
-            }
-
-            const lastInView = inViewport[inViewport.length - 1] ?? null;
-            const lastOverall = agentElements[agentElements.length - 1];
-
-            if (lastInView === lastOverall ||
-                (aboveViewport.length + inViewport.length === agentElements.length)) {
-                return '__end__';
-            }
-
-            return null;
+            return this.findNextAgent(sessionArray, collapseStates, viewportTop, viewportBottom, TITLE_HEIGHT);
         }
+    }
+
+    /**
+     * 向前导航：找到视口上方最近的 agent，或当前 agent 本身（如果标题被遮挡）
+     */
+    private findPrevAgent(
+        sessions: HTMLElement[],
+        collapseStates: Record<string, boolean>,
+        viewportTop: number,
+        _viewportBottom: number,
+        titleHeight: number
+    ): string | null | '__start__' {
+        let lastAboveId: string | null = null;
+
+        for (const el of sessions) {
+            const id = el.dataset.sessionId;
+            if (!id || collapseStates[id]) continue;
+
+            const rect = el.getBoundingClientRect();
+            const titleBottom = rect.top + titleHeight;
+
+            // 情况 1：标题完全在视口上方 → 记录为候选
+            if (titleBottom < viewportTop) {
+                lastAboveId = id;
+                continue;
+            }
+
+            // 情况 2：元素跨越视口顶部（标题被遮挡）→ 直接返回它
+            if (rect.top < viewportTop && rect.bottom > viewportTop) {
+                return id;
+            }
+
+            // 情况 3：元素在视口内或下方 → 停止搜索
+            // 因为我们是正向遍历，后面的元素只会更靠下
+            break;
+        }
+
+        // 如果找到了上方的 agent，返回它
+        if (lastAboveId) return lastAboveId;
+
+        // 没有上方 agent，检查是否可以滚动到顶部
+        return this.container.scrollTop > 0 ? '__start__' : null;
+    }
+
+    /**
+     * 向后导航：找到视口下方最近的 agent，或最后一个视口内 agent 之后的
+     */
+    private findNextAgent(
+        sessions: HTMLElement[],
+        collapseStates: Record<string, boolean>,
+        viewportTop: number,
+        viewportBottom: number,
+        titleHeight: number
+    ): string | null | '__end__' {
+        //let lastInViewportId: string | null = null;
+        let foundInViewport = false;
+
+        for (const el of sessions) {
+            const id = el.dataset.sessionId;
+            if (!id || collapseStates[id]) continue;
+
+            const rect = el.getBoundingClientRect();
+            const titleBottom = rect.top + titleHeight;
+
+            // 元素完全在视口上方 → 跳过
+            if (rect.bottom < viewportTop) continue;
+
+            // 元素在视口下方 → 这就是目标
+            if (rect.top > viewportBottom) {
+                return id;
+            }
+
+            // 元素在视口内（部分或全部）
+            if (titleBottom >= viewportTop && rect.top <= viewportBottom) {
+                foundInViewport = true;
+                //lastInViewportId = id;
+            }
+        }
+
+        // 遍历完了，没有找到视口下方的 agent
+        // 如果有视口内的 agent，说明已经是最后一个了
+        if (foundInViewport) {
+            return '__end__';
+        }
+
+        return null;
     }
 
     processEvent(event: OrchestratorEvent): void {
@@ -469,22 +515,6 @@ export class HistoryView implements IHistoryPresenter {
             this.newContentIndicator.remove();
             this.newContentIndicator = null;
         }
-    }
-
-    private findAgentWithTitleHidden(
-        agentElements: HTMLElement[],
-        viewportTop: number,
-        viewportBottom: number,
-        titleHeight: number
-    ): HTMLElement | null {
-        for (const el of agentElements) {
-            const rect = el.getBoundingClientRect();
-            const titleBottom = rect.top + titleHeight;
-            if (titleBottom < viewportTop && rect.bottom > viewportTop && rect.top < viewportBottom) {
-                return el;
-            }
-        }
-        return null;
     }
 
     // ================================================================
