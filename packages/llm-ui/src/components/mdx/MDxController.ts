@@ -46,7 +46,7 @@ export class MDxController {
     constructor(
         container: HTMLElement,
         initialContent: string,
-        options?: MDxControllerOptions  // ✅ 使用新的选项接口
+        options?: MDxControllerOptions
     ) {
         this.container = container;
         this.currentContent = initialContent;
@@ -202,8 +202,15 @@ export class MDxController {
     }
 
     /**
-     * ✅ 新增：由 Pipeline 调用，执行实际渲染
-     * 将积累的内容一次性推送给编辑器
+     * ✅ 修改：移除滚动补偿逻辑
+     * 
+     * MDxController 是渲染组件，职责是将内容推送给编辑器。
+     * 滚动由 ScrollController 通过 StreamRenderPipeline 统一管理。
+     * 
+     * 原来在此处做滚动补偿会导致：
+     * 1. 多个 dirty 节点时产生多次 layout thrashing
+     * 2. 与 Pipeline 的 checkAndScroll 竞争 scrollTop 写入
+     * 3. 违反 SRP（渲染组件不应知道滚动容器）和 LoD
      */
     async flushStream(): Promise<void> {
         if (!this.pendingRender || !this.editor || !this.isInitialized) return;
@@ -211,22 +218,9 @@ export class MDxController {
 
         this.pendingRender = false;
 
-        // ✅ 记录渲染前的容器滚动位置
-        const container = this.container.closest('.llm-ui-history') as HTMLElement;
-        const scrollTopBefore = container?.scrollTop ?? 0;
-        const scrollHeightBefore = container?.scrollHeight ?? 0;
         try {
             await this.editor.setStreamingText(this.currentContent);
             this.contentSnapshot = this.currentContent;
-            // ✅ 渲染后补偿滚动位置（防止高度变化导致跳变）
-            if (container) {
-                const scrollHeightAfter = container.scrollHeight;
-                const delta = scrollHeightAfter - scrollHeightBefore;
-                if (delta !== 0 && container.scrollTop === scrollTopBefore) {
-                    // 内容在视口上方增加/减少了高度，补偿滚动位置
-                    container.scrollTop = scrollTopBefore + delta;
-                }
-            }
         } catch (e) {
             console.error('[MDxController] Render failed:', e);
         }
