@@ -25,6 +25,10 @@
     scroll-behavior: auto;
     -webkit-overflow-scrolling: touch;
     overscroll-behavior: contain;
+
+    /* ✅ 新增：布局隔离 + 滚动性能优化 */
+    contain: layout style;
+    will-change: scroll-position;
 }
 
 .llm-ui-workspace__input {
@@ -306,11 +310,16 @@
     animation: llm-ui-fadeIn 0.3s ease;
     position: relative;
     transition: background-color var(--llm-transition-normal);
+
+    /* ✅ 新增：每个会话独立布局，一个会话的高度变化不触发其他会话的重排 */
+    contain: layout style;
 }
 
 /* 流式期间禁用新 session 的入场动画 */
 .llm-ui-history--streaming .llm-ui-session {
     animation: none;
+    /* ✅ 新增：流式期间禁用过渡 */
+    transition: none !important;
 }
 
 .llm-ui-session--user {
@@ -661,6 +670,14 @@
     /* ✅ 流式期间禁用 transition */
     transition: box-shadow var(--llm-transition-normal),
         border-color var(--llm-transition-normal);
+
+    /* ✅ 新增：非流式节点完全隔离 */
+    contain: layout style;
+}
+
+/* ✅ 新增：流式期间的节点 — 允许高度变化，只隔离样式 */
+.llm-ui-node--streaming {
+    contain: style;
 }
 
 /* 流式期间禁用所有 transition */
@@ -768,12 +785,21 @@
     padding: 0;
     min-height: 0px;
     background: var(--llm-bg-primary);
+
+    /* ✅ 新增：非流式节点的输出区域完全隔离 */
+    contain: layout style;
 }
 
 /* 流式中的节点：给一个合理的占位高度，避免从 0 跳变 */
 .llm-ui-node--streaming .llm-ui-node__output {
     min-height: 1.5em;
-    /* ✅ 约一行文本的高度 */
+    /* ✅ 修改：流式期间只隔离样式，不隔离 layout（高度在变） */
+    contain: style;
+}
+
+/* ✅ 新增：流式期间禁用输出区域的过渡动画 */
+.llm-ui-history--streaming .llm-ui-node__output {
+    transition: none !important;
 }
 
 /* 代码块 */

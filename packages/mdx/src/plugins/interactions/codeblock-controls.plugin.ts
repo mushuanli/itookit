@@ -392,6 +392,10 @@ export class CodeBlockControlsPlugin implements MDxPlugin {
    * 增强单个代码块
    */
   private _enhanceCodeBlock(pre: HTMLPreElement): void {
+    // ✅ 关键：检查是否已处理过
+    if (pre.hasAttribute('data-enhanced')) {
+      return; // 已增强的代码块不再处理
+    }
     // 标记已处理
     pre.setAttribute('data-enhanced', 'true');
 
@@ -532,9 +536,23 @@ export class CodeBlockControlsPlugin implements MDxPlugin {
    * 安装插件
    */
   install(context: PluginContext): void {
-    // 监听 DOM 更新事件
-    const removeDomUpdated = context.on('domUpdated', ({ element }: { element: HTMLElement }) => {
+    const removeDomUpdated = context.on('domUpdated', ({
+      element,
+      options
+    }: {
+      element: HTMLElement;
+      options?: { partialUpdate?: boolean; isLastBlock?: boolean }
+    }) => {
+      // 增量渲染时，只处理新增的 DOM
+      // 已有的代码块因为有 data-enhanced 属性会被跳过
       this._enhanceCodeBlocks(element);
+
+      // 如果是流式模式的最后一个块，标记为"活跃"
+      // 可以添加特殊样式（如淡入动画）
+      if (options?.partialUpdate && options?.isLastBlock) {
+        const lastPre = element.querySelector('pre[data-enhanced]:last-of-type');
+        lastPre?.classList.add('mdx-code-block--streaming');
+      }
     });
 
     if (removeDomUpdated) {

@@ -122,6 +122,54 @@
 }
 
 /* ===========================
+   Streaming Mode Compatibility
+   =========================== */
+
+/* 流式期间：Mermaid 代码块在活跃块中显示为 loading 状态
+ * 因为 Mermaid 渲染是异步的，活跃块的内容还在变化，
+ * 不应该触发 Mermaid 渲染（由 JS 层的 isLastBlock 控制）
+ */
+.mdx-streaming-block--active pre code.language-mermaid {
+  position: relative;
+  min-height: 60px;
+  color: #999;
+  font-size: 0.85em;
+}
+
+/* 活跃块中的 Mermaid：显示"等待完成"提示 */
+.mdx-streaming-block--active pre code.language-mermaid::after {
+  content: '⏳ Waiting for completion...';
+  display: block;
+  margin-top: 0.5em;
+  color: #999;
+  font-size: 0.85em;
+  font-style: italic;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* 非活跃的已完成块：Mermaid 正常渲染，无特殊样式 */
+.mdx-streaming-block:not(.mdx-streaming-block--active) pre code.language-mermaid::after {
+  display: none;
+}
+
+/* 已渲染的 Mermaid 在流式块中保持稳定 */
+.mdx-streaming-block .mermaid {
+  /* 确保已渲染的图表不受块更新影响 */
+  contain: layout;
+}
+
+/* 深色主题 */
+@media (prefers-color-scheme: dark) {
+  .mdx-streaming-block--active pre code.language-mermaid {
+    color: #666;
+  }
+  
+  .mdx-streaming-block--active pre code.language-mermaid::after {
+    color: #666;
+  }
+}
+
+/* ===========================
    Responsive Design
    =========================== */
 

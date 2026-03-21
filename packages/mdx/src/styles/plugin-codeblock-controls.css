@@ -221,3 +221,42 @@
     background: #30363d;
   }
 }
+
+/* ===========================
+   流式渲染兼容
+   =========================== */
+
+/* 流式期间的活跃代码块：禁用折叠交互 */
+.mdx-streaming-block--active .mdx-code-block-controls__button--collapse {
+  opacity: 0.4;
+  pointer-events: none;
+  cursor: default;
+}
+
+/* 流式期间的活跃代码块：隐藏底部展开触发器 */
+.mdx-streaming-block--active .mdx-code-block-expand-trigger {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* 流式期间活跃块内的代码块：强制展开，不折叠 */
+.mdx-streaming-block--active .mdx-code-block-wrapper--collapsed pre {
+  max-height: none !important;
+  overflow-y: visible !important;
+}
+
+/* 非活跃的已完成块：恢复正常交互 */
+.mdx-streaming-block:not(.mdx-streaming-block--active) .mdx-code-block-controls__button--collapse {
+  opacity: 1;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+/* 已增强标记的代码块不重复添加控件（JS 层保证，CSS 层无需额外规则） */
+
+/* 深色模式下的流式代码块 */
+@media (prefers-color-scheme: dark) {
+  .mdx-streaming-block--active .mdx-code-block-controls__button--collapse {
+    opacity: 0.3;
+  }
+}

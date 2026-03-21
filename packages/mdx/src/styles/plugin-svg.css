@@ -9,8 +9,27 @@
     background: transparent;
 }
 
-/* 暗黑模式适配示例 */
-.dark-mode .mdx-svg-container svg {
-    /* 如果 SVG 线条是纯黑色的，可能需要反转或调整 */
-    /* filter: invert(1); */
+/* ✅新增：流式块中的 SVG 保持稳定 */
+.mdx-streaming-block .mdx-svg-container {
+    contain: layout;
+}
+
+/* 活跃块中的 SVG 代码：显示等待提示（与 Mermaid 一致） */
+.mdx-streaming-block--active pre code.language-svg::after {
+    content: '⏳ Waiting for completion...';
+    display: block;
+    margin-top: 0.5em;
+    color: #999;
+    font-size: 0.85em;
+    font-style: italic;
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.mdx-streaming-block:not(.mdx-streaming-block--active) pre code.language-svg::after {
+    display: none;
+}
+
+.mdx-svg-container svg {
+    max-width: 100%;
+    height: auto;
 }

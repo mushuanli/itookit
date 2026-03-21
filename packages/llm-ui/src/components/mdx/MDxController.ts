@@ -7,14 +7,24 @@ export interface MDxControllerOptions {
     readOnly?: boolean;
     onChange?: (text: string) => void;
     streaming?: boolean;
-    // ✅ 新增：编辑器上下文
     nodeId?: string;
     ownerNodeId?: string;
     sessionEngine?: ISessionEngine;
 }
 
+/**
+ * MDx 编辑器控制器
+ *
+ * 关键改动（抖动修复）：
+ * - flushStream() 不再做滚动补偿
+ * - 渲染职责纯粹：只负责将内容推送给编辑器
+ * - 滚动由 StreamRenderPipeline → ScrollController 在下一帧统一处理
+ *
+ * 违反 SRP 的旧代码已移除：
+ * - 不再 querySelector('.llm-ui-history') 获取滚动容器
+ * - 不再读写 scrollTop/scrollHeight
+ */
 export class MDxController {
-    // ✨ [修改] 类型定义放宽为 IEditor，以便使用通用接口
     private editor: MDxEditor | null = null;
     private container: HTMLElement;
     private currentContent: string = '';
@@ -22,25 +32,19 @@ export class MDxController {
     private isReadOnly: boolean = true;
     private onChangeCallback?: (text: string) => void;
 
-    // ✅ 新增：记录初始化时是否为流式模式
     private isStreamingInit: boolean = false;
-
-    // ✅ 新增：保存上下文
     private options: MDxControllerOptions;
 
     private isInitialized: boolean = false;
     private pendingChunks: string[] = [];
     private readyPromise: Promise<void>;
     private readyResolve!: () => void;
-    // ✨ [修复 6.1] 添加 reject 函数
     private readyReject!: (reason: any) => void;
 
-    // ✅ 新增：批量缓冲
+    // 批量缓冲
     private contentSnapshot: string = '';
 
-    // ✅ 改动：使用 TimerManager 管理所有定时器
     private timers = new TimerManager();
-
     private pendingRender = false;
 
     constructor(
@@ -53,8 +57,6 @@ export class MDxController {
         this.options = options || {};
         this.isReadOnly = options?.readOnly ?? true;
         this.onChangeCallback = options?.onChange;
-
-        // ✅ 获取流式状态，默认为 false
         this.isStreamingInit = options?.streaming ?? false;
 
         this.readyPromise = new Promise((resolve, reject) => {
@@ -65,25 +67,18 @@ export class MDxController {
         this.init();
     }
 
-    /**
-     * ✨ [新增] 等待初始化完成
-     */
     async waitUntilReady(): Promise<void> {
         return this.readyPromise;
     }
 
     private async init() {
-
         try {
             this.editor = await createMDxEditor(this.container, {
                 initialContent: this.currentContent,
                 initialMode: this.isReadOnly ? 'render' : 'edit',
-
-                // ✅ 关键修复：传递上下文
                 nodeId: this.options.nodeId,
                 ownerNodeId: this.options.ownerNodeId,
                 sessionEngine: this.options.sessionEngine,
-
                 plugins: [
                     'editor:core',
                     'ui:formatting',
@@ -96,9 +91,6 @@ export class MDxController {
                     'ui:toolbar'
                 ],
                 defaultPluginOptions: {
-                    // ✅ 动态控制 defaultCollapsed
-                    // 如果是正在输出的流(isStreamingInit=true)，则折叠(true)
-                    // 否则(历史记录/编辑)，则展开(false)
                     'codeblock-controls': {
                         defaultCollapsed: !this.isStreamingInit,
                         streamingMode: this.isStreamingInit
@@ -124,70 +116,50 @@ export class MDxController {
                 await this.editor.setStreamingText(this.currentContent);
             }
 
-            // ✨ [优化] 解析 ready Promise
             this.readyResolve();
 
         } catch (e) {
             console.error('[MDxController] init() failed:', e);
-            // ✨ [修复 6.1] 使用 reject 通知失败
             this.readyReject(e);
-            // 不再 throw，让外部通过 promise 处理
         }
     }
 
-    // ✨ ==================== 新增：代码块折叠/展开接口 ====================
+    // ==================== 代码块折叠/展开接口 ====================
 
-    /**
-     * 折叠编辑器内所有代码块
-     * @returns 操作结果
-     */
     async collapseBlocks(): Promise<CollapseExpandResult> {
         if (!this.editor || !this.isInitialized) {
             return { affectedCount: 0, allCollapsed: true };
         }
-
-        // 确保在 render 模式下才能操作代码块
         if (this.editor.getMode() !== 'render') {
             return { affectedCount: 0, allCollapsed: true };
         }
-
         return await this.editor.collapseBlocks();
     }
 
-    /**
-     * 展开编辑器内所有代码块
-     * @returns 操作结果
-     */
     async expandBlocks(): Promise<CollapseExpandResult> {
         if (!this.editor || !this.isInitialized) {
             return { affectedCount: 0, allCollapsed: false };
         }
-
         if (this.editor.getMode() !== 'render') {
             return { affectedCount: 0, allCollapsed: false };
         }
-
         return await this.editor.expandBlocks();
     }
 
-    /**
-     * 切换所有代码块的折叠状态
-     * @returns 操作结果
-     */
     async toggleBlocks(): Promise<CollapseExpandResult> {
         if (!this.editor || !this.isInitialized) {
             return { affectedCount: 0, allCollapsed: false };
         }
-
         if (this.editor.getMode() !== 'render') {
             return { affectedCount: 0, allCollapsed: false };
         }
-
         return await this.editor.toggleBlocks();
     }
 
+    // ==================== 流式内容管理 ====================
+
     /**
-     * ✅ 优化：追加流式内容
+     * 追加流式内容 — 只积累，不渲染
      */
     appendStream(delta: string): void {
         this.isStreaming = true;
@@ -202,15 +174,14 @@ export class MDxController {
     }
 
     /**
-     * ✅ 修改：移除滚动补偿逻辑
-     * 
-     * MDxController 是渲染组件，职责是将内容推送给编辑器。
-     * 滚动由 ScrollController 通过 StreamRenderPipeline 统一管理。
-     * 
-     * 原来在此处做滚动补偿会导致：
-     * 1. 多个 dirty 节点时产生多次 layout thrashing
-     * 2. 与 Pipeline 的 checkAndScroll 竞争 scrollTop 写入
-     * 3. 违反 SRP（渲染组件不应知道滚动容器）和 LoD
+     * 由 Pipeline 调用，执行增量渲染
+     *
+     * 委托给 MDxEditor.setStreamingText()，
+     * 内部通过 MDxRenderer.renderStreaming() 实现增量更新：
+     * - 只重新渲染变化的尾部块
+     * - 已渲染的 DOM 节点保持稳定（代码块 fold、copy 按钮不受影响）
+     *
+     * 不做任何滚动操作 — 滚动由 ScrollController 在下一帧处理。
      */
     async flushStream(): Promise<void> {
         if (!this.pendingRender || !this.editor || !this.isInitialized) return;
@@ -227,14 +198,17 @@ export class MDxController {
     }
 
     /**
-     * ✅ 查询是否有待渲染内容
+     * 查询是否有待渲染内容
      */
     hasPendingRender(): boolean {
         return this.pendingRender;
     }
 
     /**
-     * ✅ 简化：结束流式
+     * 结束流式模式
+     *
+     * 调用 MDxEditor.finishStreamingText() 执行最终完整渲染，
+     * 确保所有插件效果（语法高亮、Mermaid、MathJax 等）正确应用。
      */
     finishStream(emitChange: boolean = false): void {
         this.isStreaming = false;
@@ -258,6 +232,8 @@ export class MDxController {
         }
     }
 
+    // ==================== 编辑模式 ====================
+
     async toggleEdit() {
         if (!this.editor) return;
 
@@ -272,9 +248,6 @@ export class MDxController {
 
     get content() { return this.currentContent; }
 
-    /**
-     * ✨ [新增] 设置内容（用于编辑取消时恢复）
-     */
     setContent(content: string) {
         this.currentContent = content;
         this.contentSnapshot = content;
@@ -283,16 +256,10 @@ export class MDxController {
         }
     }
 
-    /**
-     * ✨ [新增] 获取当前是否处于编辑模式
-     */
     isEditing(): boolean {
         return !this.isReadOnly;
     }
 
-    /**
-     * ✨ [新增] 强制进入指定模式
-     */
     async setMode(mode: 'edit' | 'render') {
         if (!this.editor) return;
 
