@@ -318,6 +318,16 @@ export class TaskRunner {
             const originalHistoryForContinue = this.trimTrailingAssistant(historyWithFiles);
 
             while (true) {
+                // 每次执行前检查中止信号
+                if (task.abortController.signal.aborted) {
+                    log.info('Task aborted', {
+                        taskId: task.id,
+                        phase: 'before_execute',
+                        continuation: autoContinue.getStatus().count,
+                    });
+                    throw new DOMException('Aborted', 'AbortError');
+                }
+
                 log.info('Executing LLM query', {
                     taskId: task.id,
                     sessionId,
@@ -343,7 +353,16 @@ export class TaskRunner {
                     }
                 );
 
-                // 11. 检查结果
+                // 执行后检查中止信号
+                if (task.abortController.signal.aborted) {
+                    log.info('Task aborted', {
+                        taskId: task.id,
+                        phase: 'after_execute',
+                        continuation: autoContinue.getStatus().count,
+                    });
+                    throw new DOMException('Aborted', 'AbortError');
+                }
+
                 if (result.status === 'failed') {
                     const firstError = result.errors?.[0];
                     const error = new Error(firstError?.message || 'Execution failed');
@@ -371,7 +390,16 @@ export class TaskRunner {
                     break;
                 }
 
-                // 14. 准备续写
+                // 准备续写前再次检查中止信号
+                if (task.abortController.signal.aborted) {
+                    log.info('Task aborted', {
+                        taskId: task.id,
+                        phase: 'before_continuation',
+                        continuation: autoContinue.getStatus().count,
+                    });
+                    throw new DOMException('Aborted', 'AbortError');
+                }
+
                 autoContinue.incrementCount();
 
                 // 基于裁剪后的历史重建：
