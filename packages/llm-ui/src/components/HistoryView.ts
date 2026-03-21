@@ -222,11 +222,13 @@ export class HistoryView implements IHistoryPresenter {
     enterStreamingMode(): void {
         this.stream.enter();
         this.suppressScrollHighlight = true;
+        this.resizeTracker.suspend();
     }
 
     exitStreamingMode(): void {
         this.stream.exit();
         this.suppressScrollHighlight = false;
+        this.resizeTracker.resume();
 
         if (!this.scrollController.isUserScrolledUp) {
             this.scrollController.scrollToBottom(true);
