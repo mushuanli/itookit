@@ -12,6 +12,12 @@
   color: #333;
   max-width: 100%;
   word-wrap: break-word;
+
+  /* ✅ 新增：布局隔离，限制重排范围
+   * layout: 内部布局变化不触发外部重排
+   * style: 内部样式计算不影响外部
+   * 不使用 size：容器高度需要随内容变化 */
+  contain: layout style;
 }
 
 .mdx-editor-renderer > :first-child {

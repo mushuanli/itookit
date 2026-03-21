@@ -12,23 +12,23 @@ export interface RenderPipelineCallbacks {
 /**
  * 流式渲染管线
  *
- * 将 "内容更新 → 高度检查 → 滚动" 合并为单一 RAF 循环。
- * 流式期间替代 ContentResizeTracker 的 polling 和 ScrollController 的独立 RAF。
+ * 将 "内容更新 → 高度检查 → 滚动" 合并为单一 RAF 循环，
+ * 使用两阶段状态机确保渲染和滚动**永远不在同一帧**。
  *
- * ✅ 优化：两阶段状态机
- * 
- * 抖动的核心原因是渲染（DOM mutation）和滚动（scrollTop 读写）
- * 在同一帧内交替执行，导致 layout thrashing。
- * 
- * 状态机保证：
- * - 'idle' → 执行渲染 → 进入 'rendered'
- * - 'rendered' → 下一帧执行滚动 → 回到 'idle'
- * - 渲染和滚动永远不在同一帧
- * 
- * 参考：VS Code Terminal 的渲染管线设计
- *   - 内容变更批量收集
- *   - 渲染帧和滚动帧严格分离
- *   - 每帧最多一次 layout read + 一次 layout write
+ * 帧调度模型：
+ *
+ *   Frame N:   [读旧高度] → [flush DOM] → 标记 phase='rendered'
+ *   Frame N+1: [浏览器完成 layout] → [checkAndScroll] → 标记 phase='idle'
+ *
+ * 这样保证：
+ * - 每帧最多一次 layout read + 一次 layout write
+ * - 滚动在 DOM 变更的下一帧执行，浏览器已完成 layout 计算
+ * - 不需要滚动补偿（消除抖动根源）
+ *
+ * 设计原则：
+ * - Pipeline 只负责时序调度，不知道 DOM 和滚动的具体实现（SRP）
+ * - 回调接口最小化：flushContent + checkAndScroll（ISP）
+ * - 非流式期间完全静默，零开销
  */
 export class StreamRenderPipeline {
     private isActive = false;
@@ -41,16 +41,7 @@ export class StreamRenderPipeline {
     // 内容渲染节流
     private contentDirty = false;
     private lastContentFlush = 0;
-
-    /**
-     * 内容渲染最小间隔（ms）
-     * 
-     * 80ms ≈ 12.5 fps 的内容更新频率：
-     * - 比 250ms 流畅得多（用户感知到连续输出而非跳跃）
-     * - 比 16ms (60fps) 更节省资源（markdown 渲染成本较高）
-     * - 与人眼对文本变化的感知阈值匹配（~100ms）
-     */
-    private readonly CONTENT_INTERVAL = 80;
+    private readonly CONTENT_INTERVAL = 80; // ms — 降低到 80ms 提升流畅度
 
     constructor(private callbacks: RenderPipelineCallbacks) { }
 
@@ -61,6 +52,7 @@ export class StreamRenderPipeline {
         if (this.isActive) return;
         this.isActive = true;
         this.phase = 'idle';
+        this.contentDirty = false;
         this.scheduleFrame();
     }
 
@@ -94,17 +86,6 @@ export class StreamRenderPipeline {
         this.contentDirty = true;
     }
 
-    /**
-     * 标记需要滚动检查（由外部高度变化触发）
-     */
-    markScrollDirty(): void {
-        // 如果当前在 idle 且没有 content dirty，
-        // 直接标记为 rendered 状态让下一帧执行滚动
-        if (this.phase === 'idle' && !this.contentDirty) {
-            this.phase = 'rendered';
-        }
-    }
-
     private scheduleFrame(): void {
         if (this.rafId !== null || !this.isActive) return;
 
@@ -118,18 +99,10 @@ export class StreamRenderPipeline {
     }
 
     /**
-     * 两阶段帧执行：
+     * 两阶段帧执行
      *
-     * Frame N (idle → rendered):
-     *   1. 检查内容节流时间
-     *   2. 执行 flushContent()（DOM mutation）
-     *   3. 切换到 rendered 状态
-     *
-     * Frame N+1 (rendered → idle):
-     *   1. 执行 checkAndScroll()（layout read + scroll write）
-     *   2. 切换回 idle 状态
-     *
-     * 关键：渲染和滚动永远不在同一帧，避免 layout thrashing
+     * idle → 检查是否需要渲染 → flush → rendered
+     * rendered → 执行滚动（浏览器已完成上一帧的 layout） → idle
      */
     private executeFrame(): void {
         switch (this.phase) {
@@ -139,7 +112,7 @@ export class StreamRenderPipeline {
                 const now = Date.now();
                 if (now - this.lastContentFlush < this.CONTENT_INTERVAL) return;
 
-                // Phase 1: 执行渲染（layout write via DOM mutation）
+                // Phase 1: 执行渲染（DOM mutation）
                 this.callbacks.flushContent();
                 this.contentDirty = false;
                 this.lastContentFlush = now;
@@ -150,7 +123,7 @@ export class StreamRenderPipeline {
             }
 
             case 'rendered': {
-                // Phase 2: 下一帧执行滚动（layout read + write）
+                // Phase 2: 下一帧执行滚动
                 // 此时浏览器已完成上一帧的 layout 计算
                 this.callbacks.checkAndScroll();
                 this.phase = 'idle';
@@ -165,6 +138,8 @@ export class StreamRenderPipeline {
             cancelAnimationFrame(this.rafId);
             this.rafId = null;
         }
+        this.phase = 'idle';
+        this.contentDirty = false;
         this.timers.destroy();
     }
 }

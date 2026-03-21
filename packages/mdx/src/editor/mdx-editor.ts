@@ -127,11 +127,65 @@ export class MDxEditor extends IEditor {
         }
     }
 
+    /**
+     * 流式更新内容（增量渲染）
+     *
+     * 与 setStreamingText 的区别：
+     * - setStreamingText: 使用 debouncedRender，内部调用 renderStreaming
+     * - 本方法直接暴露，供需要精确控制的场景使用
+     *
+     * @param markdown 当前完整的 markdown 文本
+     */
+    async renderStreaming(markdown: string): Promise<void> {
+        this.cmAdapter.setText(markdown);
+        this.saveManager.setDirty(false);
+
+        const renderContainer = this.modeManager.getRenderContainer();
+        if (renderContainer && this.modeManager.getMode() === 'render') {
+            await this.renderer.renderStreaming(renderContainer, markdown);
+        }
+    }
+
+    /**
+     * 结束流式渲染
+     *
+     * 执行最终完整渲染，确保所有插件效果生效。
+     * 应在流式输出完成后调用。
+     *
+     * @param finalMarkdown 最终完整的 markdown 文本
+     */
+    async finishStreamingText(finalMarkdown: string): Promise<void> {
+        this.cmAdapter.setText(finalMarkdown);
+        this.saveManager.setDirty(false);
+
+        const renderContainer = this.modeManager.getRenderContainer();
+        if (renderContainer && this.modeManager.getMode() === 'render') {
+            await this.renderer.finishStreaming(renderContainer, finalMarkdown);
+        }
+    }
+
+    /**
+     * 设置流式文本（带防抖）
+     *
+     * 这是外部调用的主入口，内部使用 debouncedRender 控制渲染频率。
+     * 
+     * @param markdown 当前完整的 markdown 文本
+     */
     async setStreamingText(markdown: string): Promise<void> {
         this.cmAdapter.setText(markdown);
         this.saveManager.setDirty(false);
         if (this.modeManager.getMode() === 'render') {
-            await this.modeManager.debouncedRender(() => this.renderContent());
+            await this.modeManager.debouncedRender(() => this.renderStreamingContent(markdown));
+        }
+    }
+
+    /**
+     * 内部方法：执行流式渲染
+     */
+    private async renderStreamingContent(markdown: string): Promise<void> {
+        const renderContainer = this.modeManager.getRenderContainer();
+        if (renderContainer) {
+            await this.renderer.renderStreaming(renderContainer, markdown);
         }
     }
 
