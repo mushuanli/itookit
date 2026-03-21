@@ -1,86 +1,69 @@
 // @file: llm-ui/components/history/StreamController.ts
 
-import { TimerManager, StreamRenderPipeline, ScrollController } from '../common';
 import type { SessionRenderer } from './SessionRenderer';
+import type { ScrollController } from '../common/ScrollController';
 import { getPreviewText } from '../../utils/textUtils';
 
 /**
  * 流式输出控制器
  *
- * 职责：
- * 1. 管理流式/非流式模式切换
- * 2. 收集 chunk 并标记脏区
- * 3. 通过 Pipeline 统一调度渲染和滚动
- * 4. 管理 node 状态变更
+ * ✅ 核心职责：
+ * 1. 收集 chunk，按节奏触发渲染
+ * 2. 协调渲染和滚动的时序（两阶段状态机）
+ * 3. 管理流式生命周期
  *
- * 设计要点：
- * - updateContent() 只积累内容，不触发渲染
- * - 实际渲染由 Pipeline 在 RAF 循环中调用 flushAllContent()
- * - 滚动由 Pipeline 在渲染帧的下一帧调用 checkAndScroll()
- * - 渲染和滚动严格分帧，消除 layout thrashing
- * - recentlyExited 防止 finishStream DOM 重建引起的高度变化
- *   被 ContentResizeTracker 误判为"新内容"
+ * ✅ 架构改进：
+ * - 合并了 StreamRenderPipeline 的职责
+ * - 单一滚动决策点
+ * - 渲染和滚动严格分帧
  */
 export class StreamController {
     private isStreaming = false;
-    private thoughtScrollThrottled = false;
-    private previewTimers = new Map<string, ReturnType<typeof setTimeout>>();
-    private timers = new TimerManager();
-
-    // 统一渲染管线
-    private pipeline: StreamRenderPipeline;
-
-    // 追踪哪些节点有 pending 内容
     private dirtyNodes = new Set<string>();
+    private rafId: number | null = null;
+    private lastFlushTime = 0;
+    private thoughtScrollThrottled = false;
 
-    // 退出流式后的短暂保护窗口
-    // finishStream 会触发 DOM 重建（流式容器 → MDx 编辑器），
-    // 导致 ContentResizeTracker 检测到高度变化。
-    // 在此窗口内，外部不应将高度变化当作"新内容到达"而触发自动滚动。
+    // 两阶段状态机
+    private phase: 'idle' | 'waitScroll' = 'idle';
+    private readonly FLUSH_INTERVAL = 80;
+
+    // ✅ 新增：追踪是否刚退出流式模式
+    // 用于 HistoryView 在流式结束后短暂保持某些行为
     private _recentlyExited = false;
     private recentlyExitedTimer: ReturnType<typeof setTimeout> | null = null;
-    private readonly EXIT_GUARD_WINDOW = 500; // ms
 
     constructor(
         private container: HTMLElement,
         private renderer: SessionRenderer,
         private scrollController: ScrollController
-    ) {
-        // ✅ Pipeline 只知道两个回调，不持有任何外部状态引用
-        this.pipeline = new StreamRenderPipeline({
-            flushContent: () => this.flushAllContent(),
-            checkAndScroll: () => this.scrollController.handleContentResize(),
-        });
-    }
+    ) {}
 
     get isStreamingMode(): boolean {
         return this.isStreaming;
     }
 
-    /**
-     * 流式刚退出后的保护窗口
-     *
-     * 在此期间，finishStream 引发的 DOM 重建（流式容器切换为 MDx 编辑器）
-     * 会导致容器高度变化。ContentResizeTracker 会检测到这些变化，
-     * 但它们不是"新内容"，不应触发自动滚动。
-     *
-     * 由 HistoryView 的 resizeTracker 回调中检查。
-     */
+    // ✅ 新增 getter
     get recentlyExited(): boolean {
         return this._recentlyExited;
     }
 
     // ================================================================
-    // 模式切换
+    // 生命周期
     // ================================================================
 
     enter(): void {
         if (this.isStreaming) return;
         this.isStreaming = true;
         this._recentlyExited = false;
-        this.clearExitGuard();
+        if (this.recentlyExitedTimer !== null) {
+            clearTimeout(this.recentlyExitedTimer);
+            this.recentlyExitedTimer = null;
+        }
+        this.phase = 'idle';
         this.container.classList.add('llm-ui-history--streaming');
-        this.pipeline.start();
+        this.scrollController.enterStreamingMode();
+        this.scheduleFrame();
     }
 
     exit(): void {
@@ -88,53 +71,32 @@ export class StreamController {
         this.isStreaming = false;
         this.container.classList.remove('llm-ui-history--streaming');
 
-        // 停止管线（内部会执行最终 flush + scroll）
-        this.pipeline.stop();
-
-        // 清理流式 CSS 状态
-        this.container.querySelectorAll('.llm-ui-node--streaming').forEach(el => {
-            el.classList.remove('llm-ui-node--streaming');
-        });
-
-        this.previewTimers.forEach(timer => clearTimeout(timer));
-        this.previewTimers.clear();
-        this.dirtyNodes.clear();
-
-        // 更新所有预览文本
-        this.renderer.editors.forEach((editor, nodeId) => {
-            this.updatePreview(nodeId, editor.content);
-        });
-
-        // 结束所有编辑器的流式模式
-        // 这会触发 DOM 重建（流式容器 → MDx 编辑器完整渲染）
-        this.renderer.editors.forEach(editor => editor.finishStream());
-
-        // 启动退出保护窗口
-        this.startExitGuard();
-    }
-
-    // ================================================================
-    // 退出保护窗口
-    // ================================================================
-
-    private startExitGuard(): void {
+        // ✅ 标记为刚退出，一段时间后清除
         this._recentlyExited = true;
-        this.clearExitGuard();
-        this.recentlyExitedTimer = this.timers.setTimeout(() => {
+        this.recentlyExitedTimer = setTimeout(() => {
             this._recentlyExited = false;
             this.recentlyExitedTimer = null;
-        }, this.EXIT_GUARD_WINDOW);
-    }
+        }, 500);
 
-    private clearExitGuard(): void {
-        if (this.recentlyExitedTimer !== null) {
-            this.timers.clearTimeout(this.recentlyExitedTimer);
-            this.recentlyExitedTimer = null;
-        }
+        // 最终 flush
+        this.flushAll();
+
+        // 下一微任务做最终滚动
+        queueMicrotask(() => {
+            this.scrollController.handleContentResize();
+        });
+
+        this.cancelFrame();
+        this.finalizeAll();
+        this.updateAllPreviews();
+        this.dirtyNodes.clear();
+        this.phase = 'idle';
+
+        this.scrollController.exitStreamingMode();
     }
 
     // ================================================================
-    // 内容更新 — 只积累，不渲染
+    // 内容更新
     // ================================================================
 
     updateContent(nodeId: string, chunk: string, field: 'thought' | 'output'): void {
@@ -146,15 +108,12 @@ export class StreamController {
         }
 
         if (field === 'thought') {
-            // thought 是纯文本追加，成本低，直接更新
             this.updateThought(el, chunk);
         } else {
-            // output 通过 MDxController 积累，由 Pipeline 统一渲染
             const editor = this.renderer.getEditor(nodeId);
             if (editor) {
-                editor.appendStream(chunk);
+                editor.appendDelta(chunk);
                 this.dirtyNodes.add(nodeId);
-                this.pipeline.markContentDirty();
             }
         }
     }
@@ -165,7 +124,9 @@ export class StreamController {
             el.classList.remove('llm-ui-node--streaming');
             el.dataset.status = status;
             el.classList.remove(
-                'llm-ui-node--running', 'llm-ui-node--success', 'llm-ui-node--failed'
+                'llm-ui-node--running',
+                'llm-ui-node--success',
+                'llm-ui-node--failed'
             );
             el.classList.add(`llm-ui-node--${status}`);
 
@@ -185,48 +146,99 @@ export class StreamController {
                 }
             }
 
-            // 更新最终预览
+            // 更新预览
             const editor = this.renderer.getEditor(nodeId);
             if (editor) {
                 this.updatePreview(nodeId, editor.content);
             }
 
-            // 清理
-            const previewTimer = this.previewTimers.get(nodeId);
-            if (previewTimer) {
-                clearTimeout(previewTimer);
-                this.previewTimers.delete(nodeId);
-            }
             this.dirtyNodes.delete(nodeId);
         }
 
         // 结束编辑器流式
         const editor = this.renderer.getEditor(nodeId);
         if (editor && (status === 'success' || status === 'failed')) {
-            editor.finishStream(false);
+            editor.finalize();
         }
     }
 
     // ================================================================
-    // Pipeline 回调
+    // 帧调度
     // ================================================================
 
-    /**
-     * 由 Pipeline 调用：批量 flush 所有 dirty 节点的内容
-     * 一帧内只执行一次，将所有积累的 chunk 推送给编辑器
-     */
-    private flushAllContent(): void {
-        for (const nodeId of this.dirtyNodes) {
-            const editor = this.renderer.getEditor(nodeId);
-            if (editor?.hasPendingRender()) {
-                editor.flushStream();
+    private scheduleFrame(): void {
+        if (this.rafId !== null || !this.isStreaming) return;
+
+        this.rafId = requestAnimationFrame(() => {
+            this.rafId = null;
+            if (!this.isStreaming) return;
+            this.executeFrame();
+            this.scheduleFrame();
+        });
+    }
+
+    private cancelFrame(): void {
+        if (this.rafId !== null) {
+            cancelAnimationFrame(this.rafId);
+            this.rafId = null;
+        }
+    }
+
+    private executeFrame(): void {
+        switch (this.phase) {
+            case 'idle': {
+                if (this.dirtyNodes.size === 0) return;
+
+                const now = performance.now();
+                if (now - this.lastFlushTime < this.FLUSH_INTERVAL) return;
+
+                // 帧内：执行渲染（DOM write）
+                this.flushAll();
+                this.lastFlushTime = now;
+
+                // 下一帧：执行滚动
+                this.phase = 'waitScroll';
+                break;
+            }
+
+            case 'waitScroll': {
+                // 帧内：执行滚动（DOM read + write）
+                this.scrollController.handleContentResize();
+                this.phase = 'idle';
+                break;
             }
         }
-        // 不清除 dirtyNodes：下次有新 chunk 时会继续标记
     }
 
     // ================================================================
-    // 内部方法
+    // 渲染操作
+    // ================================================================
+
+    private flushAll(): void {
+        for (const nodeId of this.dirtyNodes) {
+            const editor = this.renderer.getEditor(nodeId);
+            if (editor?.hasPending) {
+                editor.flush().catch(e => {
+                    console.error(`[StreamController] flush failed: ${nodeId}`, e);
+                });
+            }
+        }
+    }
+
+    private finalizeAll(): void {
+        this.renderer.editors.forEach(editor => {
+            editor.finalize().catch(() => {});
+        });
+    }
+
+    private updateAllPreviews(): void {
+        this.renderer.editors.forEach((editor, nodeId) => {
+            this.updatePreview(nodeId, editor.content);
+        });
+    }
+
+    // ================================================================
+    // 辅助方法
     // ================================================================
 
     private updateThought(el: HTMLElement, chunk: string): void {
@@ -242,7 +254,7 @@ export class StreamController {
 
             if (!this.thoughtScrollThrottled) {
                 this.thoughtScrollThrottled = true;
-                this.timers.requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
                     this.thoughtScrollThrottled = false;
                     if (thoughtContainer) {
                         thoughtContainer.scrollTop = thoughtContainer.scrollHeight;
@@ -261,27 +273,19 @@ export class StreamController {
         }
     }
 
-    // ================================================================
-    // 清理
-    // ================================================================
-
     cleanupNode(nodeId: string): void {
-        const timer = this.previewTimers.get(nodeId);
-        if (timer) {
-            clearTimeout(timer);
-            this.previewTimers.delete(nodeId);
-        }
         this.dirtyNodes.delete(nodeId);
     }
 
     destroy(): void {
-        this.pipeline.destroy();
-        this.clearExitGuard();
-        this._recentlyExited = false;
-        this.previewTimers.forEach(timer => clearTimeout(timer));
-        this.previewTimers.clear();
+        this.cancelFrame();
         this.dirtyNodes.clear();
-        this.timers.destroy();
         this.isStreaming = false;
+        this._recentlyExited = false;
+        if (this.recentlyExitedTimer !== null) {
+            clearTimeout(this.recentlyExitedTimer);
+            this.recentlyExitedTimer = null;
+        }
+        this.phase = 'idle';
     }
 }
