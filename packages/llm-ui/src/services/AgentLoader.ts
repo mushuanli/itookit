@@ -1,9 +1,11 @@
-// @file: llm-ui/helpers/AgentLoader.ts
+// @file: llm-ui/services/AgentLoader.ts
 
 import { IAgentService, SessionManager } from '@itookit/llm-engine';
 import { ExecutorOption, ModelOption } from '../domain/types';
 
 export class AgentLoader {
+    private cachedAgents: ExecutorOption[] = [];
+
     constructor(
         private agentService: IAgentService,
         private sessionManager: SessionManager
@@ -37,28 +39,37 @@ export class AgentLoader {
 
             // 去重
             const seen = new Set<string>();
-            return agentOptions.filter(agent => {
+            agentOptions = agentOptions.filter(agent => {
                 if (seen.has(agent.id)) return false;
                 seen.add(agent.id);
                 return true;
             });
+
+            this.cachedAgents = agentOptions;
+            return agentOptions;
         } catch (e) {
             console.warn('[AgentLoader] Failed to load agents:', e);
-            return AgentLoader.FALLBACK_AGENTS;
+            this.cachedAgents = AgentLoader.FALLBACK_AGENTS;
+            return this.cachedAgents;
         }
     }
 
     /**
-     * ✅ 新增：校验 agentId 是否仍然有效
-     * 如果无效，返回 'default'
+     * 验证 agentId — 使用内部缓存，调用者无需传入列表
      */
-    validateAgentId(agentId: string, agents: ExecutorOption[]): string {
-        if (agents.some(a => a.id === agentId)) return agentId;
-
+    validateAgentId(agentId: string): string {
+        if (this.cachedAgents.some(a => a.id === agentId)) return agentId;
         console.warn(
-            `[AgentLoader] Agent "${agentId}" no longer exists, falling back to default`
+            `[AgentLoader] Agent "${agentId}" not found in ${this.cachedAgents.length} cached agents, falling back to default`
         );
         return 'default';
+    }
+
+    /**
+     * 获取缓存的 agents（只读）
+     */
+    get agents(): ReadonlyArray<ExecutorOption> {
+        return this.cachedAgents;
     }
 
     /**

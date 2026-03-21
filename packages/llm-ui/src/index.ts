@@ -30,7 +30,6 @@ export interface LLMFactoryOptions {
  * const editor = await factory(container, {
  *     title: 'New Chat',
  *     sessionEngine: engine,
- *     // ✨ 支持外部指定初始输入状态
  *     initialInputState: {
  *         text: '请帮我分析这个问题...',
  *         agentId: 'my-custom-agent'
@@ -41,6 +40,10 @@ export interface LLMFactoryOptions {
 export const createLLMFactory = (
     agentService: VFSAgentService,
 ): EditorFactory => {
+
+    // ✅ 跟踪进行中的创建，按 nodeId 去重
+    // 防止外部框架在短时间内对同一 nodeId 重复调用 factory
+    const pendingCreations = new Map<string, Promise<any>>();
 
     return async (container: HTMLElement, options: EditorOptions) => {
         let effectiveNodeId = options.nodeId;
@@ -59,12 +62,20 @@ export const createLLMFactory = (
             // 如果没有 nodeId，创建新文件
             const newNode = await engine.createFile(options.title || 'New Chat', null);
             effectiveNodeId = newNode.id;
-            isNewSession = true;  // ✨ 标记为新会话
+            isNewSession = true;
             console.log(`[LLMFactory] New file created: ${effectiveNodeId}`);
         }
 
-        // 此时 sessionEngine 应该已经在 main.ts 中通过 initializeLLMEngine 准备好了
-        // 我们不需要在这里再次调用初始化逻辑，直接使用
+        // ✅ 去重：如果同一个 nodeId 正在创建中，等待并复用
+        if (effectiveNodeId && pendingCreations.has(effectiveNodeId)) {
+            console.warn(`[LLMFactory] Duplicate creation for ${effectiveNodeId}, reusing pending instance`);
+            try {
+                return await pendingCreations.get(effectiveNodeId)!;
+            } catch {
+                // 前一次创建失败了，继续创建新的
+                pendingCreations.delete(effectiveNodeId);
+            }
+        }
 
         const editorOptions: LLMEditorOptions = {
             ...llmOptions,
@@ -74,11 +85,30 @@ export const createLLMFactory = (
             isNewSession,
         };
 
-        const editor = new LLMWorkspaceEditor(container, editorOptions);
-        await editor.init(container, options.initialContent);
+        // ✅ 将创建过程包装为 Promise，注册到 pendingCreations
+        const createPromise = (async () => {
+            try {
+                const editor = new LLMWorkspaceEditor(container, editorOptions);
+                await editor.init(container, options.initialContent);
 
-        console.log(`[LLMFactory] Editor created successfully, isNew: ${isNewSession}`);
-        return editor;
+                console.log(`[LLMFactory] Editor created successfully, isNew: ${isNewSession}`);
+                return editor;
+            } catch (e) {
+                console.error(`[LLMFactory] Editor creation failed for ${effectiveNodeId}:`, e);
+                throw e;
+            } finally {
+                // ✅ 无论成功失败，都清理 pending 记录
+                if (effectiveNodeId) {
+                    pendingCreations.delete(effectiveNodeId);
+                }
+            }
+        })();
+
+        if (effectiveNodeId) {
+            pendingCreations.set(effectiveNodeId, createPromise);
+        }
+
+        return createPromise;
     };
 };
 

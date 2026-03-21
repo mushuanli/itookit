@@ -181,23 +181,23 @@ export class ChatInput implements IChatInputPresenter {
 
     refreshAgents(
         agents: ExecutorOption[],
-        validateAgentId: (id: string, agents: ExecutorOption[]) => string
+        validateAgentId: (id: string) => string  // ✅ 签名简化，不再需要 agents 参数
     ): boolean {
         const currentAgentId = this.config.agentId;
         this.updateExecutors(agents);
 
-        const validatedId = validateAgentId(currentAgentId, agents);
+        const validatedId = validateAgentId(currentAgentId);
         const changed = validatedId !== currentAgentId;
 
         if (changed) {
             this.config.agentId = validatedId;
             this.currentAgentId = validatedId;
-            this.setExecutorValue(validatedId);
             this.config.settings.modelId = undefined;
             this.modelSelect.value = '';
             this.updateActiveBadges();
         }
 
+        this.setExecutorValue(this.config.agentId);
         this.loadModelsForAgent(this.currentAgentId);
         return changed;
     }
