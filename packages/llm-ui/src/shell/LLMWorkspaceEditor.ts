@@ -126,6 +126,8 @@ export class LLMWorkspaceEditor implements IEditor {
     private initResolve: (() => void) | null = null;
     private navRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
+    private initComplete = false;  // 新增标记
+
     private options: LLMEditorOptions;
 
     private get engine(): ILLMSessionEngine {
@@ -149,8 +151,8 @@ export class LLMWorkspaceEditor implements IEditor {
     async init(container: HTMLElement, _initialContent?: string): Promise<void> {
         this.container = container;
         this.container.classList.add('llm-ui-workspace');
+        this.initComplete = false;  // 重置
         this.initPromise = new Promise(resolve => { this.initResolve = resolve; });
-
         try {
             this.initLayout();
             this.initInfrastructure();
@@ -164,6 +166,7 @@ export class LLMWorkspaceEditor implements IEditor {
             this.statusIndicator.cacheElements();
             await this.branchIndicator.refresh();
 
+            this.initComplete = true;  // ✅ 完全初始化后才标记
             this.emit('ready');
             this.initResolve?.();
         } catch (e: any) {
@@ -196,7 +199,10 @@ export class LLMWorkspaceEditor implements IEditor {
         this.stateService = new StateService(this.engine);
         this.assetService = new AssetService(this.engine);
         this.agentLoader = new AgentLoader(this.options.agentService, this.sessionManager);
-        this.stateManager = new StateManager(this.stateService, this.sessionManager, this.options.nodeId!);
+        this.stateManager = new StateManager(
+            this.stateService, this.sessionManager, this.options.nodeId!,
+            this.agentLoader  // ✅ 注入
+        );
         this.branchStore = new BranchStore(this.sessionManager, this.errorHandler);
         this.navDataBuilder = new NavDataBuilder(this.sessionManager);
     }
@@ -233,11 +239,11 @@ export class LLMWorkspaceEditor implements IEditor {
             (loading) => this.chatInput?.setLoading(loading)
         );
 
-        // ChatInput → IChatInputPresenter
-        const savedUIState = await this.stateManager.loadUIState();
+        // ✅ 只加载 agents 列表（缓存在 agentLoader 中），不恢复状态
         const initialAgents = await this.agentLoader.loadAgents();
+        const savedUIState = await this.stateManager.loadUIState();
         const savedAgentId = savedUIState?.input_agent_id || 'default';
-        const validAgentId = this.agentLoader.validateAgentId(savedAgentId, initialAgents);
+        const validAgentId = this.agentLoader.validateAgentId(savedAgentId);
 
         let initialSettings;
         if (this.currentSessionId && !this.options.isNewSession) {
@@ -247,6 +253,7 @@ export class LLMWorkspaceEditor implements IEditor {
             );
         }
 
+        // ✅ ChatInput 用 default 初始化，loadSession 统一恢复
         this.chatInput = new ChatInput(inputEl, {
             onSend: (text, files, agentId, overrides) =>
                 this.sendCommand.run({ text, files, agentId, overrides }),
@@ -511,7 +518,7 @@ export class LLMWorkspaceEditor implements IEditor {
         const agents = await this.agentLoader.loadAgents();
         const changed = this.chatInput.refreshAgents(
             agents,
-            (id, list) => this.agentLoader.validateAgentId(id, list)
+            (id) => this.agentLoader.validateAgentId(id)
         );
 
         if (changed) {
@@ -829,11 +836,12 @@ export class LLMWorkspaceEditor implements IEditor {
     // ================================================================
 
     async destroy(): Promise<void> {
+
         // 1. 状态持久化（先于组件销毁）
         this.stateManager?.cleanup();
 
-        if (!this.isBeingDeleted && !this.sessionManager.isGenerating()) {
-            this.stateManager?.saveUIState(
+        if (this.initComplete && !this.isBeingDeleted && !this.sessionManager.isGenerating()) {
+            await this.stateManager?.saveUIState(
                 this.chatInput?.getConfig(),
                 this.isBeingDeleted
             ).catch(() => { });

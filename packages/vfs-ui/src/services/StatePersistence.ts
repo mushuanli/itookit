@@ -1,7 +1,7 @@
 /**
  * @file vfs-ui/services/StatePersistence.ts
  * @desc Handles persisting and restoring UI state to/from localStorage.
- *       Extracted from VFSUIManager to follow SRP.
+ *       Extracted from VFSUIShell to follow SRP.
  */
 import type { IStatePort } from '../contracts/ports';
 import type { VFSUIState } from '../contracts/types';

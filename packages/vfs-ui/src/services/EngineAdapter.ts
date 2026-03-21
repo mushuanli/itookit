@@ -1,7 +1,7 @@
 /**
  * @file vfs-ui/services/EngineAdapter.ts
  * @desc Bridges ISessionEngine events → VFSStore dispatches.
- *       Extracted from VFSUIManager to isolate engine coupling.
+ *       Extracted from VFSUIShell to isolate engine coupling.
  */
 import type { ISessionEngine, EngineEvent, EngineEventType } from '@itookit/common';
 import type { IStatePort, IFileTypePort } from '../contracts/ports';

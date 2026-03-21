@@ -2,7 +2,7 @@
  * @file memory-manager/types.ts
  */
 import type { VFS } from '@itookit/vfs';
-import { EditorFactory, ISessionEngine, SessionUIOptions,NavigationRequest } from '@itookit/common';
+import { EditorFactory, ISessionEngine, SessionUIOptions, NavigationRequest } from '@itookit/common';
 import type { FileTypeDefinition, CustomEditorResolver } from '@itookit/vfs-ui';
 
 export interface MemoryManagerConfig {
@@ -61,7 +61,7 @@ export interface MemoryManagerConfig {
 
     // --- VFS UI 配置 ---
     /** 
-     * 透传给 VFSUIManager 的 UI 选项 
+     * 透传给 VFSUIShell 的 UI 选项 
      */
     uiOptions?: Partial<SessionUIOptions>;
 
