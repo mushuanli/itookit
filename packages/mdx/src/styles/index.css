@@ -5,6 +5,7 @@
 @import './mdx-dark-theme.css';
 @import './mdx-codemirror.css';
 @import './mdx-print.css';
+@import './mdx-streaming.css';           /* ✅ 新增 */
 
 @import './plugin-foldable.css';
 @import './plugin-media.css';

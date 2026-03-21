@@ -1,0 +1,166 @@
+/* @file: mdx/styles/mdx-streaming.css
+ * 流式增量渲染样式
+ *
+ * 配合 MDxRenderer.renderStreaming() 使用。
+ * 每个顶层 Markdown 块被包裹在 .mdx-streaming-block 中，
+ * 增量渲染时只替换变化的块，保留已完成块的 DOM 和交互状态。
+ */
+
+/* ===========================
+   流式块容器
+   =========================== */
+
+.mdx-streaming-block {
+  contain: layout style;
+}
+
+.mdx-streaming-block > :first-child {
+  margin-top: 0;
+}
+
+.mdx-streaming-block > :last-child {
+  margin-bottom: 0;
+}
+
+/* ===========================
+   活跃块（正在输出的最后一个块）
+   =========================== */
+
+.mdx-streaming-block--active {
+  contain: style;
+}
+
+/* ===========================
+   流式光标效果
+   =========================== */
+
+/* 段落末尾光标 — 仅 opt-in */
+.mdx-streaming--show-cursor .mdx-streaming-block--active > :last-child::after {
+  content: '';
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  background: var(--mdx-accent-color, #0969da);
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  animation: mdx-streaming-cursor-blink 1s step-end infinite;
+}
+
+/* 代码块内不显示段落级光标 */
+.mdx-streaming--show-cursor .mdx-streaming-block--active > pre:last-child::after,
+.mdx-streaming--show-cursor .mdx-streaming-block--active > .mdx-code-block-wrapper:last-child::after {
+  display: none;
+}
+
+@keyframes mdx-streaming-cursor-blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+/* ===========================
+   流式期间的代码块
+   =========================== */
+
+/* 代码块内光标 — 同样仅 opt-in */
+.mdx-streaming--show-cursor .mdx-code-block--streaming::after {
+  content: '';
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  width: 2px;
+  height: 1.2em;
+  background: var(--mdx-accent-color, #0969da);
+  animation: mdx-streaming-cursor-blink 1s step-end infinite;
+  pointer-events: none;
+}
+
+/* 非活跃块不显示 */
+.mdx-streaming--show-cursor .mdx-streaming-block:not(.mdx-streaming-block--active) .mdx-code-block--streaming::after {
+  display: none;
+}
+
+/* ===========================
+   LLM Chat 场景：显式禁用光标
+   即使误加了 show-cursor 类也不生效
+   =========================== */
+
+.llm-ui-node__output .mdx-streaming-block--active > :last-child::after {
+  display: none !important;
+}
+
+.llm-ui-node__output .mdx-code-block--streaming::after {
+  display: none !important;
+}
+
+/* ===========================
+   流式期间代码块交互控制（不受光标影响）
+   =========================== */
+
+/* 流式期间代码块不显示折叠遮罩 */
+.mdx-streaming-block--active .mdx-code-block-expand-trigger {
+  display: none;
+}
+
+/* 流式期间代码块不折叠 */
+.mdx-streaming-block--active .mdx-code-block-wrapper--collapsed pre {
+  max-height: none !important;
+  overflow-y: visible;
+}
+
+/* ===========================
+   块过渡动画
+   =========================== */
+
+@keyframes mdx-streaming-block-enter {
+  from { opacity: 0.6; }
+  to { opacity: 1; }
+}
+
+.mdx-streaming-block:not(.mdx-streaming-block--settled) {
+  animation: mdx-streaming-block-enter 0.15s ease-out;
+}
+
+.mdx-streaming-block--settled {
+  animation: none;
+}
+
+/* ===========================
+   深色主题
+   =========================== */
+
+@media (prefers-color-scheme: dark) {
+  .mdx-streaming--show-cursor .mdx-streaming-block--active > :last-child::after {
+    background: var(--mdx-accent-color, #58a6ff);
+  }
+
+  .mdx-streaming--show-cursor .mdx-code-block--streaming::after {
+    background: var(--mdx-accent-color, #58a6ff);
+  }
+}
+
+/* ===========================
+   打印时隐藏流式效果
+   =========================== */
+
+@media print {
+  .mdx-streaming--show-cursor .mdx-streaming-block--active > :last-child::after,
+  .mdx-streaming--show-cursor .mdx-code-block--streaming::after {
+    display: none !important;
+  }
+}
+
+/* ===========================
+   减少动画
+   =========================== */
+
+@media (prefers-reduced-motion: reduce) {
+  .mdx-streaming--show-cursor .mdx-streaming-block--active > :last-child::after,
+  .mdx-streaming--show-cursor .mdx-code-block--streaming::after {
+    animation: none;
+    opacity: 1;
+  }
+
+  .mdx-streaming-block:not(.mdx-streaming-block--settled) {
+    animation: none;
+  }
+}
