@@ -1095,3 +1095,15 @@
         border-bottom-color: #7f1d1d;
     }
 }
+
+/* 流式期间：禁用所有过渡动画 */
+.llm-ui-history--streaming .llm-ui-session,
+.llm-ui-history--streaming .llm-ui-node,
+.llm-ui-history--streaming .llm-ui-node__output {
+    transition: none !important;
+}
+
+/* 流式期间：禁用入场动画 */
+.llm-ui-history--streaming .llm-ui-session {
+    animation: none !important;
+}

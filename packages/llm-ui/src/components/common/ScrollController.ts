@@ -31,15 +31,13 @@ export class ScrollController {
 
     private scrollFrameId: number | null = null;
     private timers = new TimerManager();
-    private scrollThrottleTimer: ReturnType<typeof setTimeout> | null = null;
 
     private readonly SCROLL_THRESHOLD = 150;
-    private readonly SCROLL_THROTTLE = 100;
 
     // 程序滚动标记
     private isProgrammaticScroll = false;
     private programmaticScrollTimer: ReturnType<typeof setTimeout> | null = null;
-    private readonly PROGRAMMATIC_SCROLL_WINDOW = 200; // ✅ 缩短到 200ms
+    private readonly PROGRAMMATIC_SCROLL_WINDOW = 300; // ✅ 缩短到 200ms
 
     private callbacks: ScrollControllerCallbacks;
 
@@ -104,57 +102,26 @@ export class ScrollController {
     handleContentResize(): void {
         if (!this.shouldAutoScroll) return;
 
-        if (this._isStreamingMode) {
-            // ✅ 流式期间：直接滚动，不再排 RAF（Pipeline 已在 RAF 内）
-            this.scrollToBottomDirect();
-            return;
-        }
+        // 单次 read
+        const scrollHeight = this.container.scrollHeight;
+        const clientHeight = this.container.clientHeight;
+        const targetTop = scrollHeight - clientHeight;
 
-        // 非流式期间：节流
-        if (this.scrollThrottleTimer !== null) return;
+        // 没有变化 → 跳过
+        if (scrollHeight === this.lastScrollHeight) return;
+        this.lastScrollHeight = scrollHeight;
 
-        this.scrollThrottleTimer = this.timers.setTimeout(() => {
-            this.scrollThrottleTimer = null;
-            if (!this.shouldAutoScroll) return;
+        // 已经在底部 → 跳过
+        if (Math.abs(this.container.scrollTop - targetTop) < 2) return;
 
-            const currentScrollHeight = this.container.scrollHeight;
-            if (currentScrollHeight > this.lastScrollHeight) {
-                this.lastScrollHeight = currentScrollHeight;
-                this.scrollToBottomViaRAF();
-            }
-        }, this.SCROLL_THROTTLE);
+        // 单次 write
+        this.markProgrammaticScroll();
+        this.container.scrollTop = targetTop;
     }
 
     // ================================================================
     // 滚动操作
     // ================================================================
-
-    /**
-     * 直接滚动到底部（不排 RAF）
-     * 仅在 Pipeline 的 RAF 循环内调用时使用
-     */
-    private scrollToBottomDirect(): void {
-        if (!this.shouldAutoScroll) return;
-
-        this.markProgrammaticScroll();
-        this.container.scrollTop = this.container.scrollHeight;
-        this.lastScrollHeight = this.container.scrollHeight;
-    }
-
-    /**
-     * 通过 RAF 滚动到底部（非流式期间使用）
-     */
-    private scrollToBottomViaRAF(): void {
-        if (this.scrollFrameId !== null) return;
-        if (!this.shouldAutoScroll) return;
-
-        this.markProgrammaticScroll();
-
-        this.scrollFrameId = this.timers.requestAnimationFrame(() => {
-            this.scrollFrameId = null;
-            this.container.scrollTop = this.container.scrollHeight;
-        });
-    }
 
     scrollToBottom(force: boolean = false): void {
         if (!force && !this.shouldAutoScroll) return;
