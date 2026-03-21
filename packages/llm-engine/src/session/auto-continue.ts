@@ -30,11 +30,18 @@ export interface AutoContinueConfig {
 /**
  * 续写提示词
  *
- * 简洁明确，不引入任何特殊标记。
- * LLM 写完后会自然返回 finish_reason='stop'，这是最可靠的完成信号。
+ * 设计要点：
+ * - 强调从精确断点继续，包括词/句中间
+ * - 明确禁止重复代码块围栏、标题等结构标记
+ * - 不引入任何特殊标记（避免污染输出流）
+ * - LLM 写完后自然返回 finish_reason='stop'
  */
-const DEFAULT_CONTINUE_PROMPT =
-    'Continue from where you left off. Do not repeat any content already written.';
+const DEFAULT_CONTINUE_PROMPT = [
+    'Continue from the exact point where the text was cut off.',
+    'Do not repeat any content. Do not add opening code fences, markdown headers,',
+    'or any structural markers that already exist in the prior output.',
+    'If the cutoff was mid-word or mid-sentence, resume from that exact character.',
+].join(' ');
 
 export const DEFAULT_AUTO_CONTINUE: AutoContinueConfig = {
     enabled: true,
