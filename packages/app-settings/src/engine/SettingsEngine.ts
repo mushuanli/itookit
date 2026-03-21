@@ -16,7 +16,7 @@ export const SETTINGS_PAGES: Record<string, { name: string, icon: string }> = {
 };
 
 export class SettingsEngine implements ISessionEngine {
-    // [修复] MemoryManager/VFSUIManager 需要 moduleName 来生成 localStorage key
+    // [修复] MemoryManager/VFSUIShell 需要 moduleName 来生成 localStorage key
     public readonly moduleName = 'settings_root';
 
     private listeners: Map<string, Set<(event: EngineEvent) => void>> = new Map();

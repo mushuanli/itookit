@@ -15,24 +15,24 @@ import { createLLMFactory, createAgentEditorFactory, VFSAgentService } from '@it
 import { initializeLLMEngine, LLMSessionEngine, chatFileParser } from '@itookit/llm-engine';
 
 // 策略引入
-import { 
-    StandardWorkspaceStrategy, 
-    SettingsWorkspaceStrategy, 
+import {
+    StandardWorkspaceStrategy,
+    SettingsWorkspaceStrategy,
     ChatWorkspaceStrategy,
-    AgentWorkspaceStrategy 
+    AgentWorkspaceStrategy
 } from './strategies';
 // ✨ [修复 1] 引入接口用于显式类型声明
-import { WorkspaceStrategy } from './strategies/types'; 
+import { WorkspaceStrategy } from './strategies/types';
 
 // ✨ 引入新文件
 import { FILE_REGISTRY, EditorTypeKey } from './config/file-registry';
 
 import '@itookit/vfs-ui/style.css';
 import '@itookit/mdxeditor/style.css';
-import '@itookit/memory-manager/style.css'; 
-import '@itookit/llm-ui/style.css'; 
-import '@itookit/app-settings/style.css'; 
-import './styles/index.css'; 
+import '@itookit/memory-manager/style.css';
+import '@itookit/llm-ui/style.css';
+import '@itookit/app-settings/style.css';
+import './styles/index.css';
 
 // --- Router Definition ---
 
@@ -42,14 +42,14 @@ const ROUTE_MAP: Record<string, string> = {
     'chat': 'llm-workspace',
     'agents': 'agent-workspace',
     'settings': 'settings-workspace',
-    
+
     // 标准内容工作区
     'anki': 'anki-workspace',
     'prompts': 'prompt-workspace',
     'projects': 'project-workspace',
     'emails': 'email-workspace',
     'private': 'private-workspace',
-    
+
     // 别名支持
     'home': 'llm-workspace',  // 默认首页
 };
@@ -74,18 +74,18 @@ function resolveTarget(target: string): string {
     if (ROUTE_MAP[target]) {
         return ROUTE_MAP[target];
     }
-    
+
     // 2. 检查是否直接是 elementId
     if (document.getElementById(target)) {
         return target;
     }
-    
+
     // 3. 检查 moduleName 映射
     const wsConfig = WORKSPACES.find(w => w.moduleName === target);
     if (wsConfig) {
         return wsConfig.elementId;
     }
-    
+
     // 4. 回退到默认
     console.warn(`[Router] Unknown target: ${target}, falling back to chat`);
     return 'llm-workspace';
@@ -98,7 +98,7 @@ function parseHash(): { workspace: string; resource?: string; isCreate?: boolean
     const parts = location.hash.slice(2).split('/'); // 去掉 #/
     const slug = parts[0] || 'chat';
     const resource = parts[1] ? decodeURIComponent(parts[1]) : undefined;
-    
+
     return {
         workspace: resolveTarget(slug),
         resource: resource === 'new' ? undefined : resource,
@@ -110,13 +110,13 @@ function parseHash(): { workspace: string; resource?: string; isCreate?: boolean
  * 更新浏览器历史
  */
 function updateBrowserHistory(
-    workspaceId: string, 
-    resourceId: string | null, 
+    workspaceId: string,
+    resourceId: string | null,
     mode: 'push' | 'replace' = 'push'
 ): void {
     const slug = REVERSE_ROUTE_MAP[workspaceId] || 'home';
     const hash = resourceId ? `#/${slug}/${encodeURIComponent(resourceId)}` : `#/${slug}`;
-    
+
     if (location.hash !== hash) {
         const state = { workspaceId, resourceId };
         if (mode === 'push') {
@@ -134,10 +134,10 @@ async function bootstrap() {
         const vfsCore = await initVFS();
 
         // --- 2. 核心服务层初始化 (重构关键点) ---
-        
+
         // 2.1 初始化 Agent Service (管理 Prompt, Connection, Tools)
         const agentService = new VFSAgentService(vfsCore);
-        
+
         // 2.2 初始化 Session Engine (管理 .chat 文件持久化)
         const sessionEngine = new LLMSessionEngine(vfsCore);
 
@@ -157,7 +157,7 @@ async function bootstrap() {
         // ✅ 优化：Factory 只需关注 AgentService
         const llmFactory = createLLMFactory(agentService);
         const agentFactory = createAgentEditorFactory(agentService);
-        
+
         // ✨ [修复 1] 显式声明类型 Record<string, WorkspaceStrategy>
         // 这告诉 TS：这里面的所有值都遵循 WorkspaceStrategy 接口
         // 即使 Standard 策略没写 getEngine，访问它也是安全的（返回 undefined）
@@ -197,7 +197,7 @@ async function bootstrap() {
             if (def.editorType !== 'standard') {
                 factory = editorFactoryMap[def.editorType];
             }
-            
+
             // 特殊处理：Chat 文件需要 parser
             // (如果逻辑更复杂，可以在 Registry 中增加 parserType 字段，此处为简化直接判断 ID)
             const parser = (def.id === 'chat') ? chatFileParser : undefined;
@@ -213,15 +213,18 @@ async function bootstrap() {
         // --- 4. 路由状态管理 ---
 
         // --- 5. 通用加载逻辑 (The Loader) ---
-        
-        const loadWorkspace = async (targetId: string): Promise<MemoryManager | undefined> => {
+
+        const loadWorkspace = async (
+            targetId: string,
+            initialResourceId?: string  // ✅ 传入初始资源
+        ): Promise<MemoryManager | undefined> => {
             if (managerCache.has(targetId)) {
                 return managerCache.get(targetId);
             }
 
             const container = document.getElementById(targetId);
             const wsConfig = WORKSPACES.find(w => w.elementId === targetId);
-            
+
             if (!container || !wsConfig) return undefined;
 
             const strategyType = wsConfig.type || 'standard';
@@ -243,20 +246,20 @@ async function bootstrap() {
             // 构造 UI Options
             const uiOptions = {
                 ...uiPassThrough, // title, readOnly 等
-                
+
                 // 如果 Registry 有定义，优先使用 Registry 的 label/filename/content
-                createFileLabel: primaryFileDef?.label || 'File', 
+                createFileLabel: primaryFileDef?.label || 'File',
                 defaultFileName: primaryFileDef?.defaultFileName,
                 defaultExtension: primaryFileDef?.extension,
                 defaultFileContent: primaryFileDef?.defaultContent,
-                contextMenu: { 
-                    items: (_item: any, defaults: any[]) => uiPassThrough.readOnly ? [] : defaults 
+                contextMenu: {
+                    items: (_item: any, defaults: any[]) => uiPassThrough.readOnly ? [] : defaults
                 }
             };
 
             const manager = new MemoryManager({
                 container,
-                
+
                 // 1. Engine 注入: 策略提供(如Settings) 或 自动创建(如Standard)
                 customEngine: strategy.getEngine?.(moduleName),
                 moduleName: moduleName, // 作为 fallback 或 key
@@ -274,13 +277,13 @@ async function bootstrap() {
                     // ✅ [新增] 将 mentionScope 放入 config，供支持它的编辑器读取
                     mentionScope: mentionScope
                 },
-                
+
                 aiConfig: { enabled: aiEnabled ?? true },
 
                 // ✅ [核心] 统一导航处理器
                 onNavigate: async (req: NavigationRequest) => {
                     const targetWsId = resolveTarget(req.target);
-                    
+
                     // 处理创建动作
                     if (req.params?.action === 'create') {
                         // 存储创建参数供目标编辑器读取
@@ -296,7 +299,7 @@ async function bootstrap() {
                     } else {
                         updateBrowserHistory(targetWsId, req.resourceId || null, 'push');
                     }
-                    
+
                     await performNavigation(targetWsId, req.resourceId, req.params);
                 },
 
@@ -305,8 +308,8 @@ async function bootstrap() {
                 }
             });
 
-            await manager.start();
-            
+            await manager.start(initialResourceId);
+
             // ✨ [修复 2] 存入缓存
             managerCache.set(targetId, manager);
             return manager;
@@ -314,7 +317,7 @@ async function bootstrap() {
 
         // --- 6. 导航执行器 ---
         const performNavigation = async (
-            workspaceId: string, 
+            workspaceId: string,
             resourceId?: string,
             params?: NavigationRequest['params']
         ): Promise<void> => {
@@ -329,19 +332,20 @@ async function bootstrap() {
                 btn.classList.toggle('active', btnTarget === workspaceId);
             });
 
-            // 加载模块
-            const manager = await loadWorkspace(workspaceId);
-            if (!manager) {
-                console.error(`[Router] Failed to load workspace: ${workspaceId}`);
-                return;
+            // 2. 加载模块
+            const isFirstLoad = !managerCache.has(workspaceId);
+
+            if (isFirstLoad) {
+                // ✅ 首次加载：start() 内部处理初始文件打开
+                await loadWorkspace(workspaceId, resourceId);
+            } else {
+                // 已加载：运行时导航
+                const manager = managerCache.get(workspaceId)!;
+                if (resourceId) {
+                    await manager.openFile(resourceId);
+                }
             }
 
-            // 打开资源
-            if (resourceId) {
-                setTimeout(() => {
-                    manager.openFile(resourceId);
-                }, 10);
-            }
         };
 
         // --- 7. 全局事件绑定 ---
@@ -366,7 +370,7 @@ async function bootstrap() {
                     // 获取该模块上次的状态（如果已加载）
                     const manager = managerCache.get(targetId);
                     const lastActiveId = manager?.getActiveSessionId() || null;
-                    
+
                     updateBrowserHistory(targetId, lastActiveId, 'push');
                     performNavigation(targetId, lastActiveId || undefined);
                 }
@@ -386,7 +390,7 @@ async function bootstrap() {
         // --- 8. 启动 ---
         const initialRoute = parseHash();
         await performNavigation(initialRoute.workspace, initialRoute.resource);
-        
+
         // 替换当前的空白历史记录，确保后续 Back 操作正常
         updateBrowserHistory(initialRoute.workspace, initialRoute.resource || null, 'replace');
 

@@ -152,10 +152,10 @@ interface ContentMetadata {
 
 ## 三、核心类实现
 
-### 1. VFSUIManager
+### 1. VFSUIShell
 
 ```typescript
-class VFSUIManager implements IVFSUIManager {
+class VFSUIShell implements IVFSUIManager {
   private vfs: VFSCore;
   private module: string;
   private treeView: VFSTreeView;
@@ -478,7 +478,7 @@ class VFSTreeView extends BaseComponent {
 
 ```typescript
 import { getVFSManager } from '@itookit/vfs';
-import { VFSUIManager } from '@itookit/vfs-ui';
+import { VFSUIShell } from '@itookit/vfs-ui';
 import { MarkdownEditor } from './editors/MarkdownEditor';
 
 // 初始化 vfs
@@ -487,7 +487,7 @@ await vfs.init();
 await vfs.mount('notes');
 
 // 创建 vfs-ui
-const ui = new VFSUIManager({
+const ui = new VFSUIShell({
   container: document.querySelector('#sidebar'),
   editorContainer: document.querySelector('#editor'),
   vfsCore: vfs,
@@ -627,7 +627,7 @@ editorRegistry.register('text/plain', (container, node, options) => {
 const sessionUI = createSessionUI(options, configManager, namespace);
 
 // 新代码
-const vfsUI = new VFSUIManager({
+const vfsUI = new VFSUIShell({
   container: options.sessionListContainer,
   editorContainer: options.editorContainer,
   vfsCore: vfs, // 替代 configManager
@@ -659,7 +659,7 @@ sessionUI.on('sessionSelected', callback)
 ```
 vfs-ui/
 ├── core/
-│   ├── VFSUIManager.ts      # 主管理器
+│   ├── VFSUIShell.ts      # 主管理器
 │   ├── EditorRegistry.ts    # 编辑器注册表
 │   └── EventBus.ts           # 事件总线
 ├── components/

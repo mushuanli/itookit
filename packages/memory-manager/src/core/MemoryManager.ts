@@ -2,7 +2,7 @@
  * @file memory-manager/core/MemoryManager.ts
  */
 import { VFSModuleEngine } from '@itookit/vfs';
-import { createVFSUI, connectEditorLifecycle, VFSUIManager } from '@itookit/vfs-ui';
+import { createVFSUI, connectEditorLifecycle, VFSUIShell } from '@itookit/vfs-ui';
 import { createMDxEditor } from '@itookit/mdxeditor';
 import { MemoryManagerConfig } from '../types';
 import { BackgroundBrain } from './BackgroundBrain';
@@ -10,12 +10,13 @@ import { Layout } from './Layout';
 import { EditorOptions, IEditor, ISessionEngine, EditorHostContext, NavigationRequest } from '@itookit/common';
 
 export class MemoryManager {
-    private vfsUI: VFSUIManager;
+    private vfsUI: VFSUIShell;
     private engine: ISessionEngine;
     private brain?: BackgroundBrain;
     private layout: Layout;
     private lifecycleUnsubscribe: () => void;
     private baseEditorFactory: (container: HTMLElement, options: EditorOptions) => Promise<IEditor>;
+    private hasStarted = false;
 
     constructor(private config: MemoryManagerConfig) {
         this.layout = new Layout(config.container);
@@ -24,7 +25,6 @@ export class MemoryManager {
         if (config.customEngine) {
             this.engine = config.customEngine;
         } else if (config.vfs && config.moduleName) {
-            // ✅ 使用 VFS + moduleName 创建 VFSModuleEngine
             this.engine = new VFSModuleEngine(config.moduleName, config.vfs);
         } else {
             throw new Error(
@@ -35,15 +35,13 @@ export class MemoryManager {
         // 2. Factory 解析
         this.baseEditorFactory = config.editorFactory || createMDxEditor;
 
-        // 3. 计算 Scope ID (用于多实例隔离)
-        // 优先使用传入的 scopeId，否则回退到 moduleName，最后 default
+        // 3. 计算 Scope ID
         const scopeId = config.scopeId || config.moduleName || 'default';
 
         // 4. 初始化 UI
         this.vfsUI = createVFSUI(
             {
                 ...config.uiOptions,
-                // ✅ [关键] 传递 scopeId 确保 UI 状态 (LocalStorage) 隔离
                 scopeId: scopeId,
                 sessionListContainer: this.layout.sidebarContainer,
                 defaultFileName: config.defaultContentConfig?.fileName,
@@ -53,7 +51,7 @@ export class MemoryManager {
                 customEditorResolver: config.customEditorResolver,
             },
             this.engine
-        ) as VFSUIManager;
+        ) as VFSUIShell;
 
         // 5. 初始化 AI Brain (可选)
         if (config.aiConfig?.enabled) {
@@ -64,8 +62,7 @@ export class MemoryManager {
             this.brain.start();
         }
 
-        // ✅ [Fix] 5. Create Host Context Explicitly
-        // 创建通用的宿主上下文，供所有编辑器使用
+        // 6. Create Host Context
         const sharedHostContext: EditorHostContext = {
             toggleSidebar: (_collapsed?: boolean) => {
                 this.vfsUI.toggleSidebar();
@@ -83,18 +80,14 @@ export class MemoryManager {
             }
         };
 
-        // 6. Connect Editor Lifecycle
-        // 关键：将 hostContext 作为 options 传入，确保 EditorConnector 能接收到它
+        // 7. Connect Editor Lifecycle
         this.lifecycleUnsubscribe = connectEditorLifecycle(
             this.vfsUI,
             this.engine,
             this.layout.editorContainer,
             this.enhancedEditorFactory,
             {
-                // ✅ 传递 HostContext
                 hostContext: sharedHostContext,
-
-                // 传递其他编辑器配置
                 ...config.editorConfig
             }
         );
@@ -104,9 +97,7 @@ export class MemoryManager {
     }
 
     /**
-     * [核心架构] 增强型编辑器工厂
-     * 作用：拦截创建过程，注入 MemoryManager 的上下文能力和配置。
-     * 此时 this.vfsUI 可能还在初始化中，但当此函数被实际调用时(打开文件时)，它一定已经可用。
+     * 增强型编辑器工厂
      */
     private enhancedEditorFactory = async (
         container: HTMLElement,
@@ -128,17 +119,14 @@ export class MemoryManager {
             sessionEngine: this.engine
         };
 
-        // 3. 直接调用原始工厂
         return this.baseEditorFactory(container, mergedOptions);
     }
 
     private bindLayoutEvents() {
-        // 响应 UI 侧边栏折叠事件 -> 更新 Layout 样式
         const unsubscribe = this.vfsUI.on('sidebarStateChanged', ({ isCollapsed }) => {
             this.layout.toggleSidebar(isCollapsed);
         });
 
-        // 劫持 destroy 确保清理
         const originalDestroy = this.destroy.bind(this);
         this.destroy = () => {
             unsubscribe();
@@ -146,9 +134,6 @@ export class MemoryManager {
         };
     }
 
-    /**
-     * ✅ [新增] 监听内部事件，通知上层 (Main) 更新 URL
-     */
     private bindInternalEvents() {
         this.vfsUI.on('sessionSelected', (payload: { item?: { id: string } }) => {
             const sessionId = payload.item?.id ?? null;
@@ -158,18 +143,58 @@ export class MemoryManager {
         });
     }
 
-    public async start() {
+    /**
+     * 启动并可选地导航到指定资源
+     * 
+     * 这是统一的启动入口。将"初始化"和"打开初始文件"合为一个原子操作，
+     * 避免 start() + openFile() 分开调用时产生的竞态条件。
+     * 
+     * @param initialResourceId 启动后要打开的资源 ID
+     *   - 提供时：start 完成后，如果当前活跃文件不是目标，则切换到目标
+     *   - 不提供时：恢复上次离开时的会话状态（VFSUIShell 默认行为）
+     */
+    public async start(initialResourceId?: string): Promise<void> {
         await this.engine.init();
         await this.vfsUI.start();
 
-        // Settings 模块的特殊逻辑：监听来自 Main 的 Tab 切换请求
-        if (this.config.moduleName === 'settings_root') {
-            // 注意：这里需要配合 Main.ts 中的逻辑，如果是通过 openFile 方法调用则不需要这个监听器
-            // 但为了兼容旧的 window dispatch 方式，保留也无妨
+        // start() 完成后，检查是否需要导航到指定文件
+        // VFSUIShell.start() 内部已经恢复了上次的 activeId，
+        // 只有当目标与当前不同时才需要额外的 SESSION_SELECT
+        if (initialResourceId) {
+            const currentId = this.getActiveSessionId();
+            if (currentId !== initialResourceId) {
+                await this.openFileInternal(initialResourceId);
+            }
         }
+
+        this.hasStarted = true;
     }
 
-    public async openFile(nodeId: string) {
+    /**
+     * 运行时打开文件（幂等）
+     * 
+     * 仅用于已启动后的导航操作（用户点击侧边栏、路由变化等）。
+     * 启动时的初始导航应使用 start(resourceId)。
+     */
+    public async openFile(nodeId: string): Promise<void> {
+        if (!this.hasStarted) {
+            console.warn('[MemoryManager] openFile called before start, ignoring');
+            return;
+        }
+
+        // 幂等：已经是当前文件则不重复打开
+        const currentId = this.getActiveSessionId();
+        if (currentId === nodeId) {
+            return;
+        }
+
+        await this.openFileInternal(nodeId);
+    }
+
+    /**
+     * 内部文件打开（绕过 hasStarted 和幂等检查）
+     */
+    private async openFileInternal(nodeId: string): Promise<void> {
         await this.vfsUI.store.dispatch({
             type: 'SESSION_SELECT',
             payload: { sessionId: nodeId }
@@ -177,7 +202,7 @@ export class MemoryManager {
     }
 
     /**
-     * ✅ [新增] 获取当前激活的节点 ID (用于同步 URL)
+     * 获取当前激活的节点 ID
      */
     public getActiveSessionId(): string | null {
         const session = this.vfsUI.getActiveSession();

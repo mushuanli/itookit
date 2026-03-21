@@ -12,13 +12,13 @@ This document outlines the architectural design to extend VFS-UI from a minimal 
 
 ```
 CURRENT (VFS-UI):
-VFSUIManager
+VFSUIShell
 ├── VFSTreeView (basic tree)
 ├── EditorRegistry
 └── EventBus
 
 TARGET (Enhanced VFS-UI):
-VFSUIManager
+VFSUIShell
 ├── State Management Layer
 │   ├── UIStore (Zustand/Immer)
 │   ├── SelectionManager
@@ -939,10 +939,10 @@ const throttledDragOver = useThrottledCallback(
 
 ```typescript
 // Old API still works
-const manager = new VFSUIManager(vfsCore);
+const manager = new VFSUIShell(vfsCore);
 
 // New API adds capabilities
-const enhancedManager = new VFSUIManager(vfsCore, {
+const enhancedManager = new VFSUIShell(vfsCore, {
   enableMultiSelect: true,
   enableDragDrop: true,
   enableSearch: true,

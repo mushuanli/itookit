@@ -19,7 +19,7 @@ export interface IChatInputPresenter {
     focus(): void;
     refreshAgents(
         agents: Array<{ id: string; name: string; icon?: string; category?: string }>,
-        validateAgentId: (id: string, agents: any[]) => string
+        validateAgentId: (id: string) => string
     ): boolean;
     destroy(): void;
 }

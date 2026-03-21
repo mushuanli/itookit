@@ -6,6 +6,7 @@ import type { StateService } from '../services/StateService';
 import type { SessionManager } from '@itookit/llm-engine';
 import { createDebouncedSave, DebouncedFn } from '../utils/debounce';
 import { ErrorHandler } from '../utils/errorHandler';
+import { AgentLoader } from '../services';
 
 /**
  * 状态管理器
@@ -22,7 +23,8 @@ export class StateManager {
     constructor(
         private stateService: StateService,
         private sessionManager: SessionManager,
-        private nodeId: string
+        private nodeId: string,
+        private agentLoader: AgentLoader  // 注入 AgentLoader
     ) {
         this.errorHandler = new ErrorHandler({
             module: 'StateManager',
@@ -106,10 +108,9 @@ export class StateManager {
             isNewSession?: boolean;
             savedState?: UIState | null;
             sessionSettings?: any;
-            agentValidator?: (id: string) => string;
         }
     ): void {
-        const validate = options.agentValidator || ((id: string) => id);
+        const validate = (id: string) => this.agentLoader.validateAgentId(id);
 
         // 优先级 1：外部指定的初始状态
         if (options.initialInputState) {
@@ -135,6 +136,17 @@ export class StateManager {
             chatInput.setConfig({
                 text: options.savedState.input_text || '',
                 agentId: validate(options.savedState.input_agent_id || 'default'),
+                settings: options.sessionSettings,
+            });
+            return;
+        }
+
+        // 兜底：保持现有 agentId，仅应用 settings
+        if (!options.isNewSession && options.sessionSettings) {
+            const current = chatInput.getConfig();
+            chatInput.setConfig({
+                text: current.text,
+                agentId: current.agentId,
                 settings: options.sessionSettings,
             });
         }
