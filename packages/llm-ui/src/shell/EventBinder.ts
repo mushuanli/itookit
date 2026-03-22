@@ -1,4 +1,4 @@
-// @file: llm-ui/views/common/EventBinder.ts
+// @file: llm-ui/shell/EventBinder.ts
 
 import { EventCleanup } from '../components/common/EventCleanup';
 
@@ -7,9 +7,9 @@ export interface EventBinderCallbacks {
     onTitleChange: (title: string) => void;
     onOpenAssetManager: () => void;
     onToggleNavigator: () => void;
-    onPrevAgent: () => void;
-    onNextAgent: () => void;
-    onFoldOne: () => void;
+    onPrevUnfolded: () => void;
+    onNextUnfolded: () => void;
+    onFoldCurrent: () => void;
     onCollapseAll: () => void;
     onCopy: () => void;
     onPrint: () => void;
@@ -25,7 +25,6 @@ export interface GlobalShortcutCallbacks {
 }
 
 export class EventBinder {
-    // ✅ 改动：用 EventCleanup 替代手动管理 keydownHandler
     private events = new EventCleanup();
 
     constructor(
@@ -62,9 +61,9 @@ export class EventBinder {
     bindNavigationEvents(): void {
         const bindings: Record<string, () => void> = {
             '#llm-btn-navigator': this.callbacks.onToggleNavigator,
-            '#llm-btn-prev-agent': this.callbacks.onPrevAgent,
-            '#llm-btn-next-agent': this.callbacks.onNextAgent,
-            '#llm-btn-fold-one': this.callbacks.onFoldOne,
+            '#llm-btn-prev-unfolded': this.callbacks.onPrevUnfolded,
+            '#llm-btn-next-unfolded': this.callbacks.onNextUnfolded,
+            '#llm-btn-fold-current': this.callbacks.onFoldCurrent,
             '#llm-btn-collapse': this.callbacks.onCollapseAll,
             '#llm-btn-copy': this.callbacks.onCopy,
             '#llm-btn-print': this.callbacks.onPrint,
@@ -73,7 +72,6 @@ export class EventBinder {
         for (const [selector, handler] of Object.entries(bindings)) {
             const el = this.container.querySelector(selector);
             if (el) {
-                // ✅ 改动：通过 EventCleanup 注册
                 this.events.add(el, 'click', handler);
             }
         }
@@ -94,7 +92,7 @@ export class EventBinder {
                 return;
             }
 
-            // ✅ 新增: Cmd/Ctrl + Shift + [ / ] : 切换分支
+            // Cmd/Ctrl + Shift + [ / ] : 切换分支
             if (e.shiftKey && e.key === '[' && shortcuts.onSwitchBranchPrev) {
                 e.preventDefault();
                 shortcuts.onSwitchBranchPrev();
@@ -119,11 +117,9 @@ export class EventBinder {
             }
         };
 
-        // ✅ 改动：通过 EventCleanup 注册 document 级事件
         this.events.add(document, 'keydown', keydownHandler as EventListener);
     }
 
-    // ✅ 改动：统一清理替代手动移除
     cleanup(): void {
         this.events.cleanup();
     }

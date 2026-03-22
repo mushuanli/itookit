@@ -25,7 +25,11 @@ export interface IHistoryPresenter {
     setAllCollapsed(collapsed: boolean): void;
     toggleAllFold(): boolean;
     shouldShowCollapseIcon(): boolean;
-    foldFirstUnfolded(): void;
+    /**
+     * 折叠当前视口中可见的 unfold chat
+     * 替代原来的 foldFirstUnfolded
+     */
+    foldCurrentUnfolded(): void;
 
     // === 滚动 ===
     scrollToBottom(force: boolean): void;
@@ -36,7 +40,7 @@ export interface IHistoryPresenter {
 
     // === 查询 ===
     getSessionElement(sessionId: string): HTMLElement | null;
-    getAgentNavigationTarget(direction: 'prev' | 'next'): string | null | '__end__' | '__start__';
+    getUnfoldedNavigationTarget(direction: 'prev' | 'next'): string | null | '__end__' | '__start__';
 
     // === 事件处理 ===
     processEvent(event: OrchestratorEvent): void;
