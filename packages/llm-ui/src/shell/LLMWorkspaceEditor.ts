@@ -930,6 +930,10 @@ export class LLMWorkspaceEditor implements IEditor {
                 this.historyView.scrollToBottom(true);
             },
 
+            onNav: () => {
+                this.toggleNavigator();
+            },
+
             // ── Tools ───────────────────────────────────────────
 
             onExport: async () => {
@@ -945,6 +949,96 @@ export class LLMWorkspaceEditor implements IEditor {
             onCreateBranch: () => {
                 const id = this.findCurrentVisibleSession();
                 if (id) this.bus.emit('branch:create', { sourceNodeId: id });
+            },
+
+            onSwitchBranch: (name: string) => {
+                const branches = this.branchStore.current;
+                const target = branches.find(
+                    b => b.name.toLowerCase() === name.toLowerCase()
+                );
+
+                if (!target) {
+                    const available = branches.map(b => b.name).join(', ');
+                    Toast.error(`Branch "${name}" not found. Available: ${available}`);
+                    return;
+                }
+
+                if (target.isCurrent) {
+                    Toast.info(`Already on branch "${target.name}"`);
+                    return;
+                }
+
+                this.bus.emit('branch:switch', { branchName: target.name });
+            },
+
+            onBranchPrev: () => {
+                this.switchBranchByOffsetCommand.run({
+                    offset: -1,
+                    cachedBranches: this.branchStore.current,
+                });
+            },
+
+            onBranchNext: () => {
+                this.switchBranchByOffsetCommand.run({
+                    offset: 1,
+                    cachedBranches: this.branchStore.current,
+                });
+            },
+
+            onListBranches: () => {
+                const branches = this.branchStore.current;
+
+                if (branches.length <= 1) {
+                    Toast.info('Only one branch: main');
+                    return;
+                }
+
+                const list = branches.map((b, i) => {
+                    const marker = b.isCurrent ? '→ ' : '  ';
+                    return `${marker}${i + 1}. ${b.name}`;
+                }).join('\n');
+
+                Toast.info(`Branches (${branches.length}):\n${list}`);
+            },
+
+            onRenameBranch: (args: string) => {
+                const parts = args.trim().split(/\s+/);
+                if (parts.length < 2) {
+                    Toast.error('Usage: /renamebranch <old-name> <new-name>');
+                    return;
+                }
+
+                const [oldName, newName] = parts;
+
+                const branches = this.branchStore.current;
+                const exists = branches.find(
+                    b => b.name.toLowerCase() === oldName.toLowerCase()
+                );
+                if (!exists) {
+                    Toast.error(`Branch "${oldName}" not found`);
+                    return;
+                }
+
+                this.bus.emit('branch:rename', { oldName: exists.name, newName });
+            },
+
+            onDeleteBranch: (name: string) => {
+                const branches = this.branchStore.current;
+                const target = branches.find(
+                    b => b.name.toLowerCase() === name.toLowerCase()
+                );
+
+                if (!target) {
+                    Toast.error(`Branch "${name}" not found`);
+                    return;
+                }
+
+                if (target.isCurrent) {
+                    Toast.error('Cannot delete the current branch. Switch to another branch first.');
+                    return;
+                }
+
+                this.bus.emit('branch:delete', { branchName: target.name });
             },
 
             // ── Settings ────────────────────────────────────────
@@ -966,9 +1060,15 @@ export class LLMWorkspaceEditor implements IEditor {
 
             onHelp: () => {
                 Toast.info(
-                    'Commands: /retry /continue /reedit /delete /clear · /shorter /longer /simplify /summarize · ' +
-                    '/fold /foldall /unfoldall /top /bottom · /copy /export /print · ' +
-                    '/branch /agent <id> /model <id> · /history <n> /fresh · /help'
+                    'Commands:\n' +
+                    '  /retry /continue /reedit /delete /clear\n' +
+                    '  /shorter /longer /simplify /summarize\n' +
+                    '  /fold /foldall /unfoldall /top /bottom\n' +
+                    '  /copy /export /print\n' +
+                    '  /branch /switch <name> /branchprev /branchnext\n' +
+                    '  /branches /renamebranch <old> <new> /deletebranch <name>\n' +
+                    '  /agent <id> /model <id> /history <n> /fresh\n' +
+                    '  /help'
                 );
             },
         };
