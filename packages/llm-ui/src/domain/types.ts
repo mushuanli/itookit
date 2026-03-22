@@ -9,6 +9,7 @@ export type NodeAction =
     | 'delete'
     | 'edit'
     | 'edit-and-retry'
+    | 'edit-agent'
     | 'prev-sibling'
     | 'next-sibling';
 

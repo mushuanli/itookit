@@ -192,6 +192,52 @@ export class MemoryManager {
     }
 
     /**
+     * 创建新文件并打开
+     * 
+     * 公共 API — 供路由层调用，封装内部创建逻辑。
+     * 复用 VFSUIShell 的 sessionService（即 VFSService），
+     * 走与侧边栏 "+" 按钮相同的路径。
+     * 
+     * @param title    文件标题
+     * @param parentId 父目录 ID（可选）
+     * @param content  初始内容（可选）
+     * @returns 新创建的文件 ID
+     */
+    public async createAndOpenFile(options: {
+        title?: string;
+        parentId?: string | null;
+        content?: string;
+    } = {}): Promise<string> {
+        if (!this.hasStarted) {
+            console.warn('[MemoryManager] createAndOpenFile called before start');
+            throw new Error('MemoryManager not started');
+        }
+
+        const title = options.title || 'Untitled';
+        const newNode = await this.vfsUI.sessionService.createFile({
+            title,
+            parentId: options.parentId ?? null,
+            content: options.content,
+        });
+
+        console.log(`[MemoryManager] Created new file: ${newNode.id}, title: ${title}`);
+
+        // VFSService.createFile 内部已触发 engine 事件 → EngineAdapter 自动更新侧边栏
+        // SESSION_CREATE_SUCCESS 会自动选中新文件
+        // 但为确保 editor-connector 正确响应，等一帧
+        await new Promise(resolve => setTimeout(resolve, 50));
+
+        // 如果自动选中未生效，手动选中
+        const currentId = this.getActiveSessionId();
+        if (currentId !== newNode.id) {
+            await this.openFileInternal(newNode.id);
+        }
+
+        return newNode.id;
+    }
+
+
+    /**
      * 内部文件打开（绕过 hasStarted 和幂等检查）
      */
     private async openFileInternal(nodeId: string): Promise<void> {

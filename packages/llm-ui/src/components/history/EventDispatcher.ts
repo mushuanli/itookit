@@ -59,7 +59,6 @@ export class EventDispatcher {
                 this.stream.isStreamingMode
             );
 
-            // 展开时折叠内部代码块
             if (expanded && ctx.sessionId) {
                 this.collapse.collapseCodeBlocksInSession(ctx.sessionId);
             }
@@ -82,6 +81,7 @@ export class EventDispatcher {
 
         m.set('resend', (ctx) => this.fireNodeAction('regenerate', ctx.sessionId));
         m.set('regenerate', (ctx) => this.fireNodeAction('regenerate', ctx.sessionId));
+        m.set('retry', (ctx) => this.fireNodeAction('regenerate', ctx.sessionId));
 
         m.set('prev-sibling', (ctx) => this.fireNodeAction('prev-sibling', ctx.sessionId));
         m.set('next-sibling', (ctx) => this.fireNodeAction('next-sibling', ctx.sessionId));
@@ -90,6 +90,14 @@ export class EventDispatcher {
             this.bus?.emit('branch:create', {
                 sourceNodeId: ctx.sessionId || ctx.nodeId,
             });
+        });
+
+        // ✅ 新增：点击 agent 图标 → 导航到 agent 编辑器
+        m.set('edit-agent', (ctx) => {
+            const agentId = ctx.actionEl.dataset.agentId;
+            if (agentId) {
+                this.fireNodeAction('edit-agent', agentId);
+            }
         });
 
         // 编辑相关
@@ -119,6 +127,19 @@ export class EventDispatcher {
     private bindDelegation(): void {
         this.events.add(this.container, 'click', ((e: MouseEvent) => {
             const target = e.target as HTMLElement;
+
+            // ✅ 优先处理 agent 图标点击（导航到 Agent 编辑器）
+            const agentIcon = target.closest('.llm-ui-node__icon--clickable') as HTMLElement;
+            if (agentIcon) {
+                const agentId = agentIcon.dataset.agentId;
+                if (agentId) {
+                    e.stopPropagation();
+                    this.handleAgentIconClick(agentId);
+                    return;
+                }
+            }
+
+            // data-action 委托
             const actionEl = target.closest('[data-action]') as HTMLElement;
             if (!actionEl) return;
 
@@ -144,6 +165,32 @@ export class EventDispatcher {
                 console.warn(`[EventDispatcher] Unknown action: ${action}`);
             }
         }) as EventListener);
+    }
+
+    // ================================================================
+    // Agent 图标点击 — 导航到 Agent 编辑器
+    // ================================================================
+
+    /**
+     * 处理 agent 图标点击，通过全局导航事件跳转到 Agent 工作区
+     * 
+     * 使用 NavigationRequest 协议，不直接依赖 hostContext。
+     * 通过 DOM CustomEvent 冒泡到顶层，由 main.ts 的全局监听器处理。
+     */
+    private handleAgentIconClick(agentId: string): void {
+        // 'default' agent 没有独立配置文件，跳过
+        if (agentId === 'default') return;
+
+        const event = new CustomEvent('app:navigate', {
+            bubbles: true,
+            detail: {
+                target: 'agents',
+                action: 'open',
+                resourceId: agentId,
+            },
+        });
+
+        this.container.dispatchEvent(event);
     }
 
     // ================================================================

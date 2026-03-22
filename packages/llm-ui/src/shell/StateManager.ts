@@ -12,6 +12,7 @@ import { AgentLoader } from '../services';
  * 状态管理器
  * 
  * ✅ 面向 IChatInputPresenter 接口，不依赖 ChatInput 实现
+ * ✅ 支持新版 NavigationRequest.state 协议读取创建参数
  */
 export class StateManager {
     private collapseStatesCache: CollapseStateMap = {};
@@ -24,7 +25,7 @@ export class StateManager {
         private stateService: StateService,
         private sessionManager: SessionManager,
         private nodeId: string,
-        private agentLoader: AgentLoader  // 注入 AgentLoader
+        private agentLoader: AgentLoader
     ) {
         this.errorHandler = new ErrorHandler({
             module: 'StateManager',
@@ -100,6 +101,8 @@ export class StateManager {
 
     /**
      * 恢复输入状态 — 面向 IChatInputPresenter 接口
+     * 
+     * ✅ 新增 onTitleRestore 回调，支持从创建参数恢复标题
      */
     restoreInputState(
         chatInput: IChatInputPresenter,
@@ -108,6 +111,7 @@ export class StateManager {
             isNewSession?: boolean;
             savedState?: UIState | null;
             sessionSettings?: any;
+            onTitleRestore?: (title: string) => void;
         }
     ): void {
         const validate = (id: string) => this.agentLoader.validateAgentId(id);
@@ -121,13 +125,18 @@ export class StateManager {
             return;
         }
 
-        // 优先级 2：sessionStorage 中的创建参数
+        // 优先级 2：NavigationRequest 创建参数（新版 + 旧版兼容）
         const createParams = this.getAndClearCreateParams();
         if (createParams) {
             chatInput.setConfig({
                 text: createParams.text || '',
                 agentId: validate(createParams.agentId || 'default'),
             });
+
+            // 如果创建参数包含标题，通知 Shell 更新
+            if (createParams.title && options.onTitleRestore) {
+                options.onTitleRestore(createParams.title);
+            }
             return;
         }
 
@@ -152,7 +161,16 @@ export class StateManager {
         }
     }
 
-    private getAndClearCreateParams(): { agentId?: string; text?: string } | null {
+    /**
+     * 读取并清除 sessionStorage 中的创建参数
+     * 
+     * ✅ 支持新版 NavigationRequest 协议的 title 字段
+     */
+    private getAndClearCreateParams(): { 
+        agentId?: string; 
+        text?: string;
+        title?: string;
+    } | null {
         const key = 'app_create_params';
         const paramsJson = sessionStorage.getItem(key);
         if (!paramsJson) return null;
@@ -165,7 +183,14 @@ export class StateManager {
                 params.target === 'llm-workspace';
 
             sessionStorage.removeItem(key);
-            return (isValid && isTargetMatch) ? { agentId: params.agentId, text: params.text } : null;
+
+            if (!isValid || !isTargetMatch) return null;
+
+            return { 
+                agentId: params.agentId || params.state?.agentId,
+                text: params.text || params.state?.inputText,
+                title: params.title || params.create?.title,
+            };
         } catch {
             sessionStorage.removeItem(key);
             return null;
