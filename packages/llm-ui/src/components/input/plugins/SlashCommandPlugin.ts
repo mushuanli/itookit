@@ -23,6 +23,8 @@ export interface SlashCommandDef {
     hasArgs?: boolean;
     /** 参数占位符 */
     argsPlaceholder?: string;
+    /** 执行后是否保留输入框内容（默认 false = 清空） */
+    preserveInput?: boolean;
 }
 
 /**
@@ -32,13 +34,43 @@ export interface SlashCommandDef {
  * 插件本身不依赖 SessionManager 等业务对象。
  */
 export interface SlashCommandCallbacks {
+    // Common
     onRetry: () => void;
     onClear: () => void;
+    onDeleteLast: () => void;
+    onReedit: () => void;
+
+    // Refine
+    onShorter: () => void;
+    onLonger: () => void;
+    onSimplify: () => void;
+    onSummarize: () => void;
+    onContinue: () => void;
+
+    // Context
+    onHistory: (length: string) => void;
+    onFresh: () => void;
+
+    // View
+    onFoldCurrent: () => void;
+    onFoldAll: () => void;
+    onUnfoldAll: () => void;
+    onTop: () => void;
+    onBottom: () => void;
+
+    // Tools
     onExport: () => void;
     onCopyAll: () => void;
     onPrint: () => void;
+
+    // Branch
     onCreateBranch: () => void;
+
+    // Settings
     onSwitchAgent: (agentId: string) => void;
+    onModel: (modelId: string) => void;
+
+    // Help
     onHelp: () => void;
 }
 
@@ -59,12 +91,11 @@ export interface SlashCommandCallbacks {
  */
 export class SlashCommandPlugin implements InputPlugin {
     readonly id = 'slash-commands';
-    readonly priority = 40; // 优先于 HistoryPlugin
+    readonly priority = 40;
 
     private ctx: InputPluginContext | null = null;
     private panel: PopupPanel | null = null;
     private commands: SlashCommandDef[] = [];
-    //private isActive = false;
 
     constructor(callbacks: SlashCommandCallbacks) {
         this.commands = this.buildDefaultCommands(callbacks);
@@ -75,7 +106,7 @@ export class SlashCommandPlugin implements InputPlugin {
 
         this.panel = new PopupPanel(ctx.textarea, {
             maxVisible: 12,
-            showSearch: false, // 搜索由输入框本身驱动
+            showSearch: false,
             emptyText: 'No matching commands',
             footerHint: '↑↓ Navigate · Enter Execute · Esc Close',
             variant: 'slash',
@@ -91,7 +122,6 @@ export class SlashCommandPlugin implements InputPlugin {
      * 注册额外命令（供外部扩展）
      */
     registerCommand(command: SlashCommandDef): void {
-        // 去重
         this.commands = this.commands.filter(c => c.name !== command.name);
         this.commands.push(command);
     }
@@ -159,10 +189,8 @@ export class SlashCommandPlugin implements InputPlugin {
                 onSelect: (item) => this.handleSelect(item),
                 onClose: () => { },
             });
-            //this.isActive = true;
         }
 
-        // 实时过滤
         this.panel.filter(query);
     }
 
@@ -173,20 +201,31 @@ export class SlashCommandPlugin implements InputPlugin {
         if (!command) return;
 
         if (command.hasArgs) {
-            // 有参数的命令：填入命令+占位符，等用户补充
             const placeholder = command.argsPlaceholder || '';
             this.ctx.setText(`/${command.name} ${placeholder}`);
             this.ctx.focus();
             this.ctx.setCursorPosition(command.name.length + 2);
         } else {
-            // 无参数：直接执行
-            this.ctx.setText('');
             this.executeCommand(command, '');
         }
     }
 
+    /**
+     * 执行命令
+     * 
+     * ✅ 关键修改：先清空输入，再执行命令。
+     * 命令（如 /reedit）可能在执行过程中通过 restoreInput 写入新内容，
+     * 如果在执行后清空会覆盖掉命令写入的内容。
+     * 
+     * 对于声明了 preserveInput 的命令，不做预清空。
+     */
     private async executeCommand(command: SlashCommandDef, args: string): Promise<void> {
         if (!this.ctx) return;
+
+        // 执行前清空（除非命令声明保留输入）
+        if (!command.preserveInput) {
+            this.ctx.setText('');
+        }
 
         try {
             await command.execute(args, this.ctx);
@@ -194,14 +233,11 @@ export class SlashCommandPlugin implements InputPlugin {
             console.error(`[SlashCommand] Failed to execute /${command.name}:`, e);
         }
 
-        // 执行后清空输入
-        this.ctx.setText('');
         this.ctx.focus();
     }
 
     private closePanel(): void {
         this.panel?.hide();
-        //this.isActive = false;
     }
 
     // ================================================================
@@ -210,14 +246,212 @@ export class SlashCommandPlugin implements InputPlugin {
 
     private buildDefaultCommands(cb: SlashCommandCallbacks): SlashCommandDef[] {
         return [
-            { name: 'retry', label: '/retry', description: 'Regenerate last response', icon: '🔄', group: 'Common', execute: () => cb.onRetry() },
-            { name: 'clear', label: '/clear', description: 'Clear conversation history', icon: '🗑️', group: 'Common', execute: () => cb.onClear() },
-            { name: 'export', label: '/export', description: 'Export as Markdown', icon: '📤', group: 'Tools', execute: () => cb.onExport() },
-            { name: 'copy', label: '/copy', description: 'Copy all messages', icon: '📋', group: 'Tools', execute: () => cb.onCopyAll() },
-            { name: 'print', label: '/print', description: 'Print conversation', icon: '🖨️', group: 'Tools', execute: () => cb.onPrint() },
-            { name: 'branch', label: '/branch', description: 'Create new branch', icon: '🌿', group: 'Branch', execute: () => cb.onCreateBranch() },
-            { name: 'agent', label: '/agent', description: 'Switch to agent', icon: '🤖', group: 'Settings', hasArgs: true, argsPlaceholder: '<agent-id>', execute: (args) => { if (args) cb.onSwitchAgent(args); } },
-            { name: 'help', label: '/help', description: 'Show available commands', icon: '❓', group: 'Help', execute: () => cb.onHelp() },
+            // ── Common ──────────────────────────────────────────
+            {
+                name: 'retry',
+                label: '/retry',
+                description: 'Regenerate last response',
+                icon: '🔄',
+                group: 'Common',
+                execute: () => cb.onRetry(),
+            },
+            {
+                name: 'continue',
+                label: '/continue',
+                description: 'Continue generating from where it stopped',
+                icon: '▶️',
+                group: 'Common',
+                execute: () => cb.onContinue(),
+            },
+            {
+                name: 'reedit',
+                label: '/reedit',
+                description: 'Undo last send — restore prompt to input and delete the message',
+                icon: '↩️',
+                group: 'Common',
+                preserveInput: true,
+                execute: () => cb.onReedit(),
+            },
+            {
+                name: 'delete',
+                label: '/delete',
+                description: 'Delete last user message and its responses',
+                icon: '✂️',
+                group: 'Common',
+                execute: () => cb.onDeleteLast(),
+            },
+            {
+                name: 'clear',
+                label: '/clear',
+                description: 'Clear all messages',
+                icon: '🗑️',
+                group: 'Common',
+                execute: () => cb.onClear(),
+            },
+
+            // ── Refine ──────────────────────────────────────────
+            {
+                name: 'shorter',
+                label: '/shorter',
+                description: 'Ask to make the last response more concise',
+                icon: '📏',
+                group: 'Refine',
+                execute: () => cb.onShorter(),
+            },
+            {
+                name: 'longer',
+                label: '/longer',
+                description: 'Ask to elaborate on the last response',
+                icon: '📐',
+                group: 'Refine',
+                execute: () => cb.onLonger(),
+            },
+            {
+                name: 'simplify',
+                label: '/simplify',
+                description: 'Explain the last response in simpler terms',
+                icon: '💡',
+                group: 'Refine',
+                execute: () => cb.onSimplify(),
+            },
+            {
+                name: 'summarize',
+                label: '/summarize',
+                description: 'Summarize the entire conversation so far',
+                icon: '📝',
+                group: 'Refine',
+                execute: () => cb.onSummarize(),
+            },
+
+            // ── Context ─────────────────────────────────────────
+            {
+                name: 'history',
+                label: '/history',
+                description: 'Set context history length (0 = none, -1 = all)',
+                icon: '📚',
+                group: 'Context',
+                hasArgs: true,
+                argsPlaceholder: '<number>',
+                execute: (args) => cb.onHistory(args),
+            },
+            {
+                name: 'fresh',
+                label: '/fresh',
+                description: 'Next message sends without any history context',
+                icon: '✨',
+                group: 'Context',
+                execute: () => cb.onFresh(),
+            },
+
+            // ── View ────────────────────────────────────────────
+            {
+                name: 'fold',
+                label: '/fold',
+                description: 'Fold current visible chat',
+                icon: '📁',
+                group: 'View',
+                execute: () => cb.onFoldCurrent(),
+            },
+            {
+                name: 'foldall',
+                label: '/foldall',
+                description: 'Fold all chats',
+                icon: '📂',
+                group: 'View',
+                execute: () => cb.onFoldAll(),
+            },
+            {
+                name: 'unfoldall',
+                label: '/unfoldall',
+                description: 'Unfold all chats',
+                icon: '📖',
+                group: 'View',
+                execute: () => cb.onUnfoldAll(),
+            },
+            {
+                name: 'top',
+                label: '/top',
+                description: 'Scroll to the beginning of conversation',
+                icon: '⬆️',
+                group: 'View',
+                execute: () => cb.onTop(),
+            },
+            {
+                name: 'bottom',
+                label: '/bottom',
+                description: 'Scroll to the latest message',
+                icon: '⬇️',
+                group: 'View',
+                execute: () => cb.onBottom(),
+            },
+
+            // ── Tools ───────────────────────────────────────────
+            {
+                name: 'copy',
+                label: '/copy',
+                description: 'Copy all messages as Markdown',
+                icon: '📋',
+                group: 'Tools',
+                execute: () => cb.onCopyAll(),
+            },
+            {
+                name: 'export',
+                label: '/export',
+                description: 'Export conversation as Markdown',
+                icon: '📤',
+                group: 'Tools',
+                execute: () => cb.onExport(),
+            },
+            {
+                name: 'print',
+                label: '/print',
+                description: 'Print conversation',
+                icon: '🖨️',
+                group: 'Tools',
+                execute: () => cb.onPrint(),
+            },
+
+            // ── Branch ──────────────────────────────────────────
+            {
+                name: 'branch',
+                label: '/branch',
+                description: 'Create new branch from current point',
+                icon: '🌿',
+                group: 'Branch',
+                execute: () => cb.onCreateBranch(),
+            },
+
+            // ── Settings ────────────────────────────────────────
+            {
+                name: 'agent',
+                label: '/agent',
+                description: 'Switch to a different agent',
+                icon: '🤖',
+                group: 'Settings',
+                hasArgs: true,
+                argsPlaceholder: '<agent-id>',
+                execute: (args) => { if (args) cb.onSwitchAgent(args); },
+            },
+            {
+                name: 'model',
+                label: '/model',
+                description: 'Switch to a different model',
+                icon: '🧠',
+                group: 'Settings',
+                hasArgs: true,
+                argsPlaceholder: '<model-id>',
+                execute: (args) => { if (args) cb.onModel(args); },
+            },
+
+            // ── Help ────────────────────────────────────────────
+            {
+                name: 'help',
+                label: '/help',
+                description: 'Show all available commands',
+                icon: '❓',
+                group: 'Help',
+                execute: () => cb.onHelp(),
+            },
         ];
     }
 

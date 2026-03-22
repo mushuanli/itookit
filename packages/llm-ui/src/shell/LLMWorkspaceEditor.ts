@@ -767,6 +767,8 @@ export class LLMWorkspaceEditor implements IEditor {
 
     private buildSlashCallbacks(): SlashCommandCallbacks {
         return {
+            // ── Common ──────────────────────────────────────────
+
             onRetry: () => {
                 const sessions = this.sessionManager.getSessions();
                 const lastAssistant = [...sessions].reverse()
@@ -775,6 +777,59 @@ export class LLMWorkspaceEditor implements IEditor {
                     const cmd = this.nodeCommands.get('regenerate');
                     cmd?.run({ nodeId: lastAssistant.id });
                 }
+            },
+
+            onContinue: () => {
+                this.sendFollowUp('Please continue from where you left off.');
+            },
+
+            onReedit: async () => {
+                const sessions = this.sessionManager.getSessions();
+                if (sessions.length === 0) {
+                    Toast.info('No messages to reedit');
+                    return;
+                }
+
+                const lastUser = [...sessions].reverse().find(s => s.role === 'user');
+                if (!lastUser) {
+                    Toast.info('No user message found');
+                    return;
+                }
+
+                // 1. 提取原始 prompt 内容
+                const originalText = lastUser.content || '';
+
+                // 2. 删除该消息及其关联的 assistant 响应（静默，不弹确认框）
+                const cmd = this.nodeCommands.get('delete');
+                if (cmd) {
+                    await cmd.run({ nodeId: lastUser.id });
+                }
+
+                // 3. 恢复到输入框
+                this.chatInput.restoreInput(originalText);
+            },
+
+            onDeleteLast: async () => {
+                const sessions = this.sessionManager.getSessions();
+                if (sessions.length === 0) {
+                    Toast.info('No messages to delete');
+                    return;
+                }
+
+                const lastUser = [...sessions].reverse().find(s => s.role === 'user');
+                if (!lastUser) {
+                    Toast.info('No user message found');
+                    return;
+                }
+
+                const { showConfirmDialog } = await import('@itookit/common');
+                const confirmed = await showConfirmDialog(
+                    'Delete last user message and its responses?'
+                );
+                if (!confirmed) return;
+
+                const cmd = this.nodeCommands.get('delete');
+                cmd?.run({ nodeId: lastUser.id });
             },
 
             onClear: async () => {
@@ -791,33 +846,148 @@ export class LLMWorkspaceEditor implements IEditor {
                 this.bus.emit('batch:delete', { ids });
             },
 
+            // ── Refine ──────────────────────────────────────────
+
+            onShorter: () => {
+                this.sendFollowUp(
+                    'Please make your last response more concise and to the point. Keep only the essential information.'
+                );
+            },
+
+            onLonger: () => {
+                this.sendFollowUp(
+                    'Please elaborate on your last response with more details, examples, and explanations.'
+                );
+            },
+
+            onSimplify: () => {
+                this.sendFollowUp(
+                    'Please explain your last response in simpler terms, as if explaining to someone unfamiliar with the topic.'
+                );
+            },
+
+            onSummarize: () => {
+                this.sendFollowUp(
+                    'Please provide a concise summary of our entire conversation so far, highlighting the key points and conclusions.'
+                );
+            },
+
+            // ── Context ─────────────────────────────────────────
+
+            onHistory: (length: string) => {
+                const value = parseInt(length, 10);
+                if (isNaN(value)) {
+                    Toast.error('Usage: /history <number>  (-1 = unlimited, 0 = none)');
+                    return;
+                }
+                this.chatInput.setConfig({
+                    settings: { historyLength: value },
+                });
+                this.bus.emit('state:inputChanged', {});
+
+                const label = value === -1 ? 'unlimited'
+                    : value === 0 ? 'none'
+                    : `${value} messages`;
+                Toast.info(`History context set to ${label}`);
+            },
+
+            onFresh: () => {
+                this.chatInput.setConfig({
+                    settings: { historyLength: 0 },
+                });
+                this.bus.emit('state:inputChanged', {});
+                Toast.info('Next message will be sent without history context');
+            },
+
+            // ── View ────────────────────────────────────────────
+
+            onFoldCurrent: () => {
+                this.historyView.foldCurrentUnfolded();
+            },
+
+            onFoldAll: () => {
+                this.historyView.setAllCollapsed(true);
+                this.bus.emit('state:collapseChanged', {
+                    states: (this.historyView as HistoryView).getCollapseStates(),
+                });
+                this.updateCollapseButtonIcon(true);
+            },
+
+            onUnfoldAll: () => {
+                this.historyView.setAllCollapsed(false);
+                this.bus.emit('state:collapseChanged', {
+                    states: (this.historyView as HistoryView).getCollapseStates(),
+                });
+                this.updateCollapseButtonIcon(false);
+            },
+
+            onTop: () => {
+                const historyEl = this.domCache.byId('llm-ui-history');
+                historyEl?.scrollTo({ top: 0, behavior: 'smooth' });
+            },
+
+            onBottom: () => {
+                this.historyView.scrollToBottom(true);
+            },
+
+            // ── Tools ───────────────────────────────────────────
+
             onExport: async () => {
                 await this.handleCopy();
                 Toast.success('Conversation copied as Markdown');
             },
 
             onCopyAll: () => this.handleCopy(),
-
             onPrint: () => this.handlePrint(),
+
+            // ── Branch ──────────────────────────────────────────
 
             onCreateBranch: () => {
                 const id = this.findCurrentVisibleSession();
                 if (id) this.bus.emit('branch:create', { sourceNodeId: id });
             },
 
+            // ── Settings ────────────────────────────────────────
+
             onSwitchAgent: (agentId: string) => {
                 this.chatInput.setConfig({ agentId });
                 this.bus.emit('state:inputChanged', {});
             },
 
+            onModel: (modelId: string) => {
+                this.chatInput.setConfig({
+                    settings: { modelId },
+                });
+                this.bus.emit('state:inputChanged', {});
+                Toast.info(`Model switched to ${modelId}`);
+            },
+
+            // ── Help ────────────────────────────────────────────
+
             onHelp: () => {
                 Toast.info(
-                    'Available commands: /retry, /clear, /export, /copy, /print, /branch, /agent <id>, /help'
+                    'Commands: /retry /continue /reedit /delete /clear · /shorter /longer /simplify /summarize · ' +
+                    '/fold /foldall /unfoldall /top /bottom · /copy /export /print · ' +
+                    '/branch /agent <id> /model <id> · /history <n> /fresh · /help'
                 );
             },
         };
     }
 
+    /**
+     * 发送跟进消息（用于 /shorter /longer /simplify /summarize /continue）
+     * 
+     * 复用 SendMessageCommand，保持与正常发送完全一致的流程。
+     */
+    private sendFollowUp(text: string): void {
+        const agentId = this.chatInput.getConfig().agentId;
+        this.sendCommand.run({
+            text,
+            files: [],
+            agentId,
+        });
+    }
+ 
     // ================================================================
     // 销毁 — 逆序清理
     // ================================================================
