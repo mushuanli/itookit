@@ -1,29 +1,25 @@
 /**
  * @file common/interfaces/fs/constants.ts
+ * @desc 全局常量
  */
 
-/** 配置模块名 */
+/** __config 模块名（始终自动挂载） */
 export const CONFIG_MODULE = '__config';
 
-/** 设备模块名 */
-export const DEV_MODULE = '__dev';
+/** 系统保留目录 */
+export const SYSTEM_DIRS = ['etc', 'dev', 'module'] as const;
 
-/**
- * 系统目录前缀
- *
- * 系统级目录结构：
- *   /__config/          → 全局配置
- *   /dev/               → 设备文件
- *   /module/<name>/     → 业务模块
- */
-export const SYSTEM_DIRS = {
-    CONFIG: '/__config',
-    DEV: '/dev',
-    MODULE: '/module',
-} as const;
+/** AssetDir 名称前缀 */
+export const ASSET_DIR_PREFIX = '_';
 
-/** 保留模块名（不可被用户使用） */
-export const RESERVED_MODULE_NAMES = new Set([
-    CONFIG_MODULE,
-    DEV_MODULE,
-]);
+/** 隐藏文件前缀 */
+export const HIDDEN_FILE_PREFIX = '.';
+
+/** Symlink 解析最大深度 */
+export const DEFAULT_MAX_SYMLINK_DEPTH = 40;
+
+/** 默认文件名校验正则（禁止 . 和 _ 开头） */
+export const DEFAULT_FILENAME_PATTERN = /^[^._/\\][^/\\]*$/;
+
+/** 默认搜索返回数量 */
+export const DEFAULT_SEARCH_LIMIT = 50;
