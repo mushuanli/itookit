@@ -12,18 +12,21 @@ import { LayoutTemplates } from '../templates/LayoutTemplates';
  * 1. 管理 session/node 折叠状态
  * 2. 计算初始折叠状态
  * 3. 操作 DOM 折叠/展开
- * 4. 触发代码块折叠
- * 5. 通知状态持久化
+ * 4. 视口感知的 unfold chat 查找（统一 fold/navigate 逻辑）
+ * 5. 触发代码块折叠
+ * 6. 通知状态持久化
  *
  * 不负责：编辑模式、流式更新
  */
 export class CollapseController {
     private states: CollapseStateMap = {};
 
+    private static readonly TITLE_HEIGHT = 48;
+
     constructor(
         private container: HTMLElement,
         private renderer: SessionRenderer,
-        private bus?: IEditorEventBus,        // ✅ 改为接口
+        private bus?: IEditorEventBus,
         initialStates?: CollapseStateMap
     ) {
         if (initialStates) {
@@ -144,13 +147,78 @@ export class CollapseController {
         this.notifyChange();
     }
 
-    foldFirstUnfolded(): void {
-        const items = this.container.querySelectorAll('.llm-ui-bubble--user, .llm-ui-node');
-        for (const item of items) {
-            if (!item.classList.contains('is-collapsed')) {
-                const btn = item.querySelector('[data-action="collapse"]') as HTMLElement;
-                if (btn) { btn.click(); return; }
+    // ================================================================
+    // 视口感知的 Unfold Chat 查找
+    // ================================================================
+
+    /**
+     * 基于视口位置查找 unfold chat
+     *
+     * 统一逻辑，同时服务于：
+     * - foldCurrentUnfolded():          direction='current'
+     * - navigateUnfolded('prev'):       direction='prev'
+     * - navigateUnfolded('next'):       direction='next'
+     *
+     * @param direction  查找方向
+     * @param roleFilter 可选角色过滤（'assistant' | 'user'），null 表示不限
+     * @returns sessionId | '__start__' | '__end__' | null
+     */
+    findUnfoldedByViewport(
+        direction: 'current' | 'prev' | 'next',
+        roleFilter: string | null = null
+    ): string | null | '__end__' | '__start__' {
+        const containerRect = this.container.getBoundingClientRect();
+        const viewportTop = containerRect.top;
+        const viewportBottom = containerRect.bottom;
+        const TITLE_HEIGHT = CollapseController.TITLE_HEIGHT;
+
+        // 收集所有未折叠的 session
+        const unfoldedElements = this.collectUnfoldedElements(roleFilter);
+        if (unfoldedElements.length === 0) return null;
+
+        // 分类：在视口上方、视口中、视口下方
+        const aboveViewport: HTMLElement[] = [];
+        const inViewport: HTMLElement[] = [];
+        const belowViewport: HTMLElement[] = [];
+
+        for (const el of unfoldedElements) {
+            const rect = el.getBoundingClientRect();
+            const titleBottom = rect.top + TITLE_HEIGHT;
+
+            if (titleBottom < viewportTop) {
+                aboveViewport.push(el);
+            } else if (rect.top > viewportBottom) {
+                belowViewport.push(el);
+            } else {
+                inViewport.push(el);
             }
+        }
+
+        switch (direction) {
+            case 'current':
+                return this.findCurrent(
+                    inViewport, aboveViewport, viewportTop
+                );
+
+            case 'prev':
+                return this.findPrev(
+                    unfoldedElements, aboveViewport, viewportTop, TITLE_HEIGHT
+                );
+
+            case 'next':
+                return this.findNext(
+                    unfoldedElements, aboveViewport, inViewport, belowViewport
+                );
+        }
+    }
+
+    /**
+     * 折叠当前视口中可见的 unfold chat（最靠上的那个）
+     */
+    foldCurrentUnfolded(): void {
+        const sessionId = this.findUnfoldedByViewport('current');
+        if (sessionId && sessionId !== '__start__' && sessionId !== '__end__') {
+            this.toggleSession(sessionId, true);
         }
     }
 
@@ -160,7 +228,7 @@ export class CollapseController {
 
     /**
      * 智能判断当前应该折叠还是展开
-     * 
+     *
      * 规则：只要有任何 assistant 会话处于展开状态，就优先折叠
      */
     shouldCollapse(): boolean {
@@ -179,7 +247,7 @@ export class CollapseController {
 
     /**
      * 智能切换：根据当前状态自动决定折叠或展开
-     * 
+     *
      * @returns 操作后是否处于折叠状态
      */
     toggleAll(): boolean {
@@ -220,6 +288,127 @@ export class CollapseController {
             })());
         });
         await Promise.all(promises);
+    }
+
+    // ================================================================
+    // 内部 — 视口查找辅助
+    // ================================================================
+
+    /**
+     * 收集所有未折叠的 session 元素
+     */
+    private collectUnfoldedElements(roleFilter: string | null): HTMLElement[] {
+        const unfoldedElements: HTMLElement[] = [];
+        const allSessions = this.container.querySelectorAll('.llm-ui-session');
+
+        for (const el of allSessions) {
+            const sessionEl = el as HTMLElement;
+            const id = sessionEl.dataset.sessionId;
+            if (!id) continue;
+            if (this.states[id]) continue; // 已折叠，跳过
+
+            if (roleFilter &&
+                !sessionEl.classList.contains(`llm-ui-session--${roleFilter}`)) {
+                continue;
+            }
+
+            unfoldedElements.push(sessionEl);
+        }
+
+        return unfoldedElements;
+    }
+
+    /**
+     * direction='current': 视口中最靠上的 unfold chat
+     */
+    private findCurrent(
+        inViewport: HTMLElement[],
+        aboveViewport: HTMLElement[],
+        viewportTop: number
+    ): string | null {
+        // 视口中有 unfold chat → 返回最靠上的
+        if (inViewport.length > 0) {
+            return inViewport[0].dataset.sessionId || null;
+        }
+
+        // 视口中没有，检查视口上方最后一个是否 body 仍然可见
+        if (aboveViewport.length > 0) {
+            const last = aboveViewport[aboveViewport.length - 1];
+            const rect = last.getBoundingClientRect();
+            if (rect.bottom > viewportTop) {
+                return last.dataset.sessionId || null;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * direction='prev': 上一个 unfold chat
+     */
+    private findPrev(
+        allUnfolded: HTMLElement[],
+        aboveViewport: HTMLElement[],
+        viewportTop: number,
+        titleHeight: number
+    ): string | null | '__start__' {
+        // 先检查 title 被滚出视口但 body 仍可见的
+        const titleHidden = this.findTitleHiddenElement(
+            allUnfolded, viewportTop, titleHeight
+        );
+        if (titleHidden) return titleHidden.dataset.sessionId || null;
+
+        // 视口上方最后一个
+        if (aboveViewport.length > 0) {
+            return aboveViewport[aboveViewport.length - 1].dataset.sessionId || null;
+        }
+
+        // 已在最顶部
+        return this.container.scrollTop > 0 ? '__start__' : null;
+    }
+
+    /**
+     * direction='next': 下一个 unfold chat
+     */
+    private findNext(
+        allUnfolded: HTMLElement[],
+        aboveViewport: HTMLElement[],
+        inViewport: HTMLElement[],
+        belowViewport: HTMLElement[]
+    ): string | null | '__end__' {
+        // 视口下方的第一个
+        if (belowViewport.length > 0) {
+            return belowViewport[0].dataset.sessionId || null;
+        }
+
+        // 所有 unfold chat 都在视口中或上方 → 到底了
+        const lastInView = inViewport[inViewport.length - 1] ?? null;
+        const lastOverall = allUnfolded[allUnfolded.length - 1];
+
+        if (lastInView === lastOverall ||
+            (aboveViewport.length + inViewport.length === allUnfolded.length)) {
+            return '__end__';
+        }
+
+        return null;
+    }
+
+    /**
+     * 查找 title 被滚出视口但 body 仍可见的元素
+     */
+    private findTitleHiddenElement(
+        elements: HTMLElement[],
+        viewportTop: number,
+        titleHeight: number
+    ): HTMLElement | null {
+        for (const el of elements) {
+            const rect = el.getBoundingClientRect();
+            const titleBottom = rect.top + titleHeight;
+            if (titleBottom < viewportTop && rect.bottom > viewportTop) {
+                return el;
+            }
+        }
+        return null;
     }
 
     // ================================================================

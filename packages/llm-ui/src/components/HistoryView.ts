@@ -207,8 +207,8 @@ export class HistoryView implements IHistoryPresenter {
         return this.collapse.shouldCollapse();
     }
 
-    foldFirstUnfolded(): void {
-        this.collapse.foldFirstUnfolded();
+    foldCurrentUnfolded(): void {
+        this.collapse.foldCurrentUnfolded();
     }
 
     scrollToBottom(force: boolean = false): void {
@@ -241,70 +241,10 @@ export class HistoryView implements IHistoryPresenter {
         return this.renderer.getSessionElement(sessionId);
     }
 
-    getAgentNavigationTarget(
+    getUnfoldedNavigationTarget(
         direction: 'prev' | 'next'
     ): string | null | '__end__' | '__start__' {
-        const containerRect = this.container.getBoundingClientRect();
-        const viewportTop = containerRect.top;
-        const viewportBottom = containerRect.bottom;
-
-        const collapseStates = this.collapse.getStates();
-        const agentElements: HTMLElement[] = [];
-
-        const allSessions = this.container.querySelectorAll('.llm-ui-session--assistant');
-        for (const el of allSessions) {
-            const id = (el as HTMLElement).dataset.sessionId;
-            if (id && !collapseStates[id]) {
-                agentElements.push(el as HTMLElement);
-            }
-        }
-
-        if (agentElements.length === 0) return null;
-
-        const TITLE_HEIGHT = 48;
-        const aboveViewport: HTMLElement[] = [];
-        const inViewport: HTMLElement[] = [];
-        const belowViewport: HTMLElement[] = [];
-
-        for (const el of agentElements) {
-            const rect = el.getBoundingClientRect();
-            const titleBottom = rect.top + TITLE_HEIGHT;
-
-            if (titleBottom < viewportTop) {
-                aboveViewport.push(el);
-            } else if (rect.top > viewportBottom) {
-                belowViewport.push(el);
-            } else {
-                inViewport.push(el);
-            }
-        }
-
-        if (direction === 'prev') {
-            const titleHidden = this.findAgentWithTitleHidden(
-                agentElements, viewportTop, viewportBottom, TITLE_HEIGHT
-            );
-            if (titleHidden) return titleHidden.dataset.sessionId || null;
-
-            if (aboveViewport.length > 0) {
-                return aboveViewport[aboveViewport.length - 1].dataset.sessionId || null;
-            }
-
-            return this.container.scrollTop > 0 ? '__start__' : null;
-        } else {
-            if (belowViewport.length > 0) {
-                return belowViewport[0].dataset.sessionId || null;
-            }
-
-            const lastInView = inViewport[inViewport.length - 1] ?? null;
-            const lastOverall = agentElements[agentElements.length - 1];
-
-            if (lastInView === lastOverall ||
-                (aboveViewport.length + inViewport.length === agentElements.length)) {
-                return '__end__';
-            }
-
-            return null;
-        }
+        return this.collapse.findUnfoldedByViewport(direction);
     }
 
     processEvent(event: OrchestratorEvent): void {
@@ -472,22 +412,6 @@ export class HistoryView implements IHistoryPresenter {
             this.newContentIndicator.remove();
             this.newContentIndicator = null;
         }
-    }
-
-    private findAgentWithTitleHidden(
-        agentElements: HTMLElement[],
-        viewportTop: number,
-        viewportBottom: number,
-        titleHeight: number
-    ): HTMLElement | null {
-        for (const el of agentElements) {
-            const rect = el.getBoundingClientRect();
-            const titleBottom = rect.top + titleHeight;
-            if (titleBottom < viewportTop && rect.bottom > viewportTop && rect.top < viewportBottom) {
-                return el;
-            }
-        }
-        return null;
     }
 
     // ================================================================
