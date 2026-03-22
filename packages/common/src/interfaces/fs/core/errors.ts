@@ -1,0 +1,176 @@
+/**
+ * @file common/interfaces/fs/core/errors.ts
+ * @desc VFS 错误体系
+ *
+ * 设计：
+ * - POSIX 风格错误码
+ * - 类型化子类（消费方可 catch 特定类型）
+ * - 每个错误携带操作上下文
+ */
+
+export type FSErrorCode =
+    | 'ENOENT'
+    | 'EEXIST'
+    | 'EISDIR'
+    | 'ENOTDIR'
+    | 'ENOTEMPTY'
+    | 'EACCES'
+    | 'EROFS'
+    | 'ENOSPC'
+    | 'ENOTTY'
+    | 'EINVAL'
+    | 'ELOOP'
+    | 'EIO'
+    | 'EPLUGIN'
+    | 'ENOTRECORD'
+    | 'ENOMODULE'
+    | 'ECAPABILITY'
+    | 'ECONFLICT'
+    | 'EBUSY'
+    | 'EXMOUNT'
+    | 'ERESERVED'
+    | 'ETYPEMISMATCH'
+    | 'EDEVNOTFOUND'
+    | 'EINTERNAL';
+
+export class FSError extends Error {
+    constructor(
+        public readonly code: FSErrorCode,
+        message: string,
+        public readonly operation?: string,
+        public readonly path?: string,
+        public readonly cause?: Error,
+    ) {
+        super(
+            path
+                ? `[${code}] ${operation ?? 'fs'} "${path}": ${message}`
+                : `[${code}] ${operation ?? 'fs'}: ${message}`,
+        );
+        this.name = 'FSError';
+    }
+}
+
+export class FSNotFoundError extends FSError {
+    constructor(idOrPath: string, operation?: string) {
+        super('ENOENT', `not found: ${idOrPath}`, operation, idOrPath);
+        this.name = 'FSNotFoundError';
+    }
+}
+
+export class FSAlreadyExistsError extends FSError {
+    constructor(path: string, operation?: string) {
+        super('EEXIST', `already exists: ${path}`, operation, path);
+        this.name = 'FSAlreadyExistsError';
+    }
+}
+
+export class FSAccessDeniedError extends FSError {
+    constructor(path: string, operation?: string, detail?: string) {
+        super('EACCES', detail ?? 'permission denied', operation, path);
+        this.name = 'FSAccessDeniedError';
+    }
+}
+
+export class FSReadOnlyError extends FSError {
+    constructor(path?: string, operation?: string) {
+        super('EROFS', 'read-only filesystem', operation, path);
+        this.name = 'FSReadOnlyError';
+    }
+}
+
+export class FSReservedNameError extends FSError {
+    constructor(name: string) {
+        super('ERESERVED', 'filename must not start with . or _', 'create', name);
+        this.name = 'FSReservedNameError';
+    }
+}
+
+export class FSCapabilityError extends FSError {
+    constructor(capability: string, moduleId?: string) {
+        super(
+            'ECAPABILITY',
+            `capability '${capability}' not supported${moduleId ? ` by module '${moduleId}'` : ''}`,
+        );
+        this.name = 'FSCapabilityError';
+    }
+}
+
+export class FSModuleNotFoundError extends FSError {
+    constructor(moduleName: string) {
+        super('ENOMODULE', `module '${moduleName}' is not mounted`);
+        this.name = 'FSModuleNotFoundError';
+    }
+}
+
+export class FSConflictError extends FSError {
+    constructor(
+        idOrPath: string,
+        public readonly expectedVersion: number,
+        public readonly actualVersion: number,
+    ) {
+        super(
+            'ECONFLICT',
+            `version conflict: expected ${expectedVersion}, actual ${actualVersion}`,
+            'write',
+            idOrPath,
+        );
+        this.name = 'FSConflictError';
+    }
+}
+
+export class FSInvalidPathError extends FSError {
+    constructor(path: string, reason?: string) {
+        super(
+            'EINVAL',
+            `invalid path '${path}'${reason ? ': ' + reason : ''}`,
+            undefined,
+            path,
+        );
+        this.name = 'FSInvalidPathError';
+    }
+}
+
+export class FSSymlinkLoopError extends FSError {
+    constructor(path: string) {
+        super('ELOOP', 'too many levels of symbolic links', 'resolve', path);
+        this.name = 'FSSymlinkLoopError';
+    }
+}
+
+export class FSCrossMountError extends FSError {
+    constructor(srcPath: string, destPath: string) {
+        super(
+            'EXMOUNT',
+            `cross - mount operation denied: ${srcPath} → ${destPath} `,
+            'move',
+            srcPath,
+        );
+        this.name = 'FSCrossMountError';
+    }
+}
+
+export class FSBusyError extends FSError {
+    constructor(path: string, detail?: string) {
+        super('EBUSY', detail ?? 'resource busy', undefined, path);
+        this.name = 'FSBusyError';
+    }
+}
+
+export class FSTypeMismatchError extends FSError {
+    constructor(idOrPath: string, expectedType: string, actualType: string) {
+        super(
+            'ETYPEMISMATCH',
+            `expected type '${expectedType}', got '${actualType}'`,
+            undefined,
+            idOrPath,
+        );
+        this.name = 'FSTypeMismatchError';
+    }
+}
+
+export class FSDeviceNotFoundError extends FSError {
+    constructor(handlerId: string) {
+        super('EDEVNOTFOUND', `device driver '${handlerId}' not found`);
+        this.name = 'FSDeviceNotFoundError';
+    }
+}

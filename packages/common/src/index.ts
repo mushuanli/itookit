@@ -18,48 +18,7 @@ export {
 } from './utils/MemoryLogger';
 
 // ── IModuleFS: 模块文件系统接口及相关类型 ──
-
-export type {
-    // 数据类型
-    FSNodeType,
-    FSNode,
-    FSSearchQuery,
-
-    // 事件类型
-    FSEventType,
-    FSEvent,
-    FSEventPayloadMap,
-
-    // 事件载荷 — 单节点
-    FSNodeCreatedPayload,
-    FSNodeUpdatedPayload,
-    FSNodeDeletedPayload,
-    FSNodeMovedPayload,
-    FSNodeCopiedPayload,
-    FSNodeRenamedPayload,
-
-    // 事件载荷 — 错误
-    FSErrorPayload,
-
-    // 核心接口
-    IModuleFS,
-
-    // ── IVFSManager: 系统级 VFS 管理接口及相关类型 ──
-
-    ModuleInfo,
-    ModuleMountOptions,
-    VFSManagerEventType,
-    VFSManagerEvent,
-    GlobalTagInfo,
-    SyncableFileInfo,
-    IVFSManager,
-
-    // ── 工厂类型（仅初始化层使用） ──
-    VFSFactoryOptions,
-    BrowserVFSOptions,
-    ElectronVFSOptions,
-    VFSFactory,
-} from './interfaces/fs';
+export * from './interfaces/fs';
 export type { SRSItemData, SRSCardRef, SRSStats, ISRSService } from './interfaces/srs';
 export {
     IEditor,
