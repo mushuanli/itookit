@@ -57,6 +57,7 @@ export interface SlashCommandCallbacks {
     onUnfoldAll: () => void;
     onTop: () => void;
     onBottom: () => void;
+    onNav: () => void;
 
     // Tools
     onExport: () => void;
@@ -65,6 +66,12 @@ export interface SlashCommandCallbacks {
 
     // Branch
     onCreateBranch: () => void;
+    onSwitchBranch: (name: string) => void;
+    onBranchPrev: () => void;
+    onBranchNext: () => void;
+    onListBranches: () => void;
+    onRenameBranch: (args: string) => void;
+    onDeleteBranch: (name: string) => void;
 
     // Settings
     onSwitchAgent: (agentId: string) => void;
@@ -384,6 +391,14 @@ export class SlashCommandPlugin implements InputPlugin {
                 group: 'View',
                 execute: () => cb.onBottom(),
             },
+            {
+                name: 'nav',
+                label: '/nav',
+                description: 'Toggle chat navigator panel',
+                icon: '🧭',
+                group: 'View',
+                execute: () => cb.onNav(),
+            },
 
             // ── Tools ───────────────────────────────────────────
             {
@@ -419,6 +434,60 @@ export class SlashCommandPlugin implements InputPlugin {
                 icon: '🌿',
                 group: 'Branch',
                 execute: () => cb.onCreateBranch(),
+            },
+            {
+                name: 'switch',
+                label: '/switch',
+                description: 'Switch to a branch by name',
+                icon: '🔀',
+                group: 'Branch',
+                hasArgs: true,
+                argsPlaceholder: '<branch-name>',
+                execute: (args) => { if (args) cb.onSwitchBranch(args); },
+            },
+            {
+                name: 'branchprev',
+                label: '/branchprev',
+                description: 'Switch to previous branch',
+                icon: '⏮️',
+                group: 'Branch',
+                execute: () => cb.onBranchPrev(),
+            },
+            {
+                name: 'branchnext',
+                label: '/branchnext',
+                description: 'Switch to next branch',
+                icon: '⏭️',
+                group: 'Branch',
+                execute: () => cb.onBranchNext(),
+            },
+            {
+                name: 'branches',
+                label: '/branches',
+                description: 'List all branches with current indicator',
+                icon: '📋',
+                group: 'Branch',
+                execute: () => cb.onListBranches(),
+            },
+            {
+                name: 'renamebranch',
+                label: '/renamebranch',
+                description: 'Rename a branch',
+                icon: '✏️',
+                group: 'Branch',
+                hasArgs: true,
+                argsPlaceholder: '<old-name> <new-name>',
+                execute: (args) => cb.onRenameBranch(args),
+            },
+            {
+                name: 'deletebranch',
+                label: '/deletebranch',
+                description: 'Delete a branch and its unique messages',
+                icon: '🗑️',
+                group: 'Branch',
+                hasArgs: true,
+                argsPlaceholder: '<branch-name>',
+                execute: (args) => { if (args) cb.onDeleteBranch(args); },
             },
 
             // ── Settings ────────────────────────────────────────
