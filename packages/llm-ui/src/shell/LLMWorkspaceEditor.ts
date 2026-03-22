@@ -106,7 +106,7 @@ export class LLMWorkspaceEditor implements IEditor {
     private switchBranchByOffsetCommand!: SwitchBranchByOffsetCommand;
     private nodeCommands = new Map<string, Command<any, any>>();
 
-    // === 新增 ===
+    // === 插件 ===
     private historyPlugin: HistoryPlugin | null = null;
     private slashPlugin: SlashCommandPlugin | null = null;
 
@@ -498,6 +498,11 @@ export class LLMWorkspaceEditor implements IEditor {
             isNewSession: this.options.isNewSession,
             savedState: savedUIState,
             sessionSettings,
+            onTitleRestore: (restoredTitle: string) => {
+                this.currentTitle = restoredTitle;
+                this.titleInput.value = restoredTitle;
+                this.handleTitleChange(restoredTitle);
+            },
         });
 
         this.sessionEventUnsub = this.sessionManager.onEvent(
@@ -603,7 +608,7 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     // ================================================================
-    // 浮动导航面板 — 延迟创建
+    // 浮动导航面板
     // ================================================================
 
     private pushNavData(): void {
@@ -769,6 +774,34 @@ export class LLMWorkspaceEditor implements IEditor {
         return {
             // ── Common ──────────────────────────────────────────
 
+            onNew: (args: string) => {
+                const agentId = this.chatInput.getConfig().agentId;
+                const title = args.trim() || this.formatDefaultTitle(agentId);
+
+                if (!this.hostContext?.navigate) {
+                    Toast.info('Navigation not available in this context');
+                    return;
+                }
+
+                sessionStorage.setItem('app_create_params', JSON.stringify({
+                    target: 'chat',
+                    state: { agentId: agentId !== 'default' ? agentId : undefined },
+                    create: { title },
+                    agentId: agentId !== 'default' ? agentId : undefined,
+                    title,
+                    timestamp: Date.now(),
+                }));
+
+                this.hostContext.navigate({
+                    target: 'chat',
+                    action: 'create',
+                    create: { title },
+                    state: {
+                        agentId: agentId !== 'default' ? agentId : undefined,
+                    },
+                });
+            },
+
             onRetry: () => {
                 const sessions = this.sessionManager.getSessions();
                 const lastAssistant = [...sessions].reverse()
@@ -796,16 +829,11 @@ export class LLMWorkspaceEditor implements IEditor {
                     return;
                 }
 
-                // 1. 提取原始 prompt 内容
                 const originalText = lastUser.content || '';
-
-                // 2. 删除该消息及其关联的 assistant 响应（静默，不弹确认框）
                 const cmd = this.nodeCommands.get('delete');
                 if (cmd) {
                     await cmd.run({ nodeId: lastUser.id });
                 }
-
-                // 3. 恢复到输入框
                 this.chatInput.restoreInput(originalText);
             },
 
@@ -1061,9 +1089,9 @@ export class LLMWorkspaceEditor implements IEditor {
             onHelp: () => {
                 Toast.info(
                     'Commands:\n' +
-                    '  /retry /continue /reedit /delete /clear\n' +
+                    '  /new [title] /retry /continue /reedit /delete /clear\n' +
                     '  /shorter /longer /simplify /summarize\n' +
-                    '  /fold /foldall /unfoldall /top /bottom\n' +
+                    '  /fold /foldall /unfoldall /top /bottom /nav\n' +
                     '  /copy /export /print\n' +
                     '  /branch /switch <name> /branchprev /branchnext\n' +
                     '  /branches /renamebranch <old> <new> /deletebranch <name>\n' +
@@ -1087,7 +1115,38 @@ export class LLMWorkspaceEditor implements IEditor {
             agentId,
         });
     }
- 
+
+    /**
+     * 生成默认会话标题：YYYY-MM-DD HH:mm agentName
+     */
+    private formatDefaultTitle(agentId: string): string {
+        const now = new Date();
+        const date = now.toISOString().slice(0, 10);
+        const time = now.toTimeString().slice(0, 5).replace(':', '');  // HHmm
+        const agentName = this.sanitizeFileName(this.getAgentDisplayName(agentId));
+        return `${date}_${time}_${agentName}`;
+    }
+
+    /**
+     * 获取 agent 的可读显示名称
+     */
+    private getAgentDisplayName(agentId: string): string {
+        const agents = this.agentLoader.agents;
+        const agent = agents.find(a => a.id === agentId);
+        return agent?.name || agentId;
+    }
+
+    /**
+     * 清理文件名中的非法字符
+     */
+    private sanitizeFileName(name: string): string {
+        return name
+            .replace(/[\/\\:*?"<>|]/g, '')  // 移除路径非法字符
+            .replace(/\s+/g, '-')            // 空格 → 连字符
+            .replace(/-+/g, '-')             // 合并连续连字符
+            .replace(/^-|-$/g, '');          // 去除首尾连字符
+    }
+
     // ================================================================
     // 销毁 — 逆序清理
     // ================================================================

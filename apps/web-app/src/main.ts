@@ -70,23 +70,10 @@ const managerCache = new Map<string, MemoryManager>();
  * 支持多种输入格式：slug、elementId、moduleName
  */
 function resolveTarget(target: string): string {
-    // 1. 优先检查 slug 映射
-    if (ROUTE_MAP[target]) {
-        return ROUTE_MAP[target];
-    }
-
-    // 2. 检查是否直接是 elementId
-    if (document.getElementById(target)) {
-        return target;
-    }
-
-    // 3. 检查 moduleName 映射
+    if (ROUTE_MAP[target]) return ROUTE_MAP[target];
+    if (document.getElementById(target)) return target;
     const wsConfig = WORKSPACES.find(w => w.moduleName === target);
-    if (wsConfig) {
-        return wsConfig.elementId;
-    }
-
-    // 4. 回退到默认
+    if (wsConfig) return wsConfig.elementId;
     console.warn(`[Router] Unknown target: ${target}, falling back to chat`);
     return 'llm-workspace';
 }
@@ -146,7 +133,7 @@ async function bootstrap() {
         await initializeLLMEngine({
             agentService,
             sessionEngine,
-            maxConcurrent: 4, // 配置最大并发任务数
+            maxConcurrent: 20, // 配置最大并发任务数
             // plugins: [...] // 如果有 Kernel 插件在此传入
         });
 
@@ -216,8 +203,7 @@ async function bootstrap() {
 
         const loadWorkspace = async (
             targetId: string,
-            initialResourceId?: string  // ✅ 传入初始资源
-        ): Promise<MemoryManager | undefined> => {
+            initialResourceId?: string): Promise<MemoryManager | undefined> => {
             if (managerCache.has(targetId)) {
                 return managerCache.get(targetId);
             }
@@ -280,27 +266,9 @@ async function bootstrap() {
 
                 aiConfig: { enabled: aiEnabled ?? true },
 
-                // ✅ [核心] 统一导航处理器
+                // ✅ 统一导航处理器 — 使用新版 NavigationRequest 协议
                 onNavigate: async (req: NavigationRequest) => {
-                    const targetWsId = resolveTarget(req.target);
-
-                    // 处理创建动作
-                    if (req.params?.action === 'create') {
-                        // 存储创建参数供目标编辑器读取
-                        if (req.params.agentId || req.params.text) {
-                            sessionStorage.setItem('app_create_params', JSON.stringify({
-                                target: req.target,
-                                agentId: req.params.agentId,
-                                text: req.params.text,
-                                timestamp: Date.now()
-                            }));
-                        }
-                        updateBrowserHistory(targetWsId, null, 'push');
-                    } else {
-                        updateBrowserHistory(targetWsId, req.resourceId || null, 'push');
-                    }
-
-                    await performNavigation(targetWsId, req.resourceId, req.params);
+                    await handleNavigationRequest(req);
                 },
 
                 onSessionChange: (sessionId) => {
@@ -316,12 +284,12 @@ async function bootstrap() {
         };
 
         // --- 6. 导航执行器 ---
+
         const performNavigation = async (
             workspaceId: string,
             resourceId?: string,
-            params?: NavigationRequest['params']
         ): Promise<void> => {
-            console.log(`[Router] Navigating to: ${workspaceId}`, { resourceId, params });
+            console.log(`[Router] Navigating to: ${workspaceId}`, { resourceId });
 
             // 1. UI Tab 切换
             document.querySelectorAll('.workspace-view').forEach(ws => {
@@ -336,21 +304,86 @@ async function bootstrap() {
             const isFirstLoad = !managerCache.has(workspaceId);
 
             if (isFirstLoad) {
-                // ✅ 首次加载：start() 内部处理初始文件打开
                 await loadWorkspace(workspaceId, resourceId);
             } else {
-                // 已加载：运行时导航
                 const manager = managerCache.get(workspaceId)!;
                 if (resourceId) {
                     await manager.openFile(resourceId);
                 }
             }
+        };
 
+        // --- 6.1 统一导航请求处理器 ---
+        /**
+         * 处理所有 NavigationRequest（新版协议）
+         * 
+         * 职责：
+         * 1. 解析目标 workspace
+         * 2. 根据 action 类型分发（open/create/reveal/focus）
+         * 3. 创建时委托给 MemoryManager.createAndOpenFile（不自己做业务逻辑）
+         * 4. 通过 sessionStorage 传递初始状态（跨实例中转）
+         */
+        const handleNavigationRequest = async (req: NavigationRequest): Promise<void> => {
+            const targetWsId = resolveTarget(req.target);
+            const action = req.action || 'open';
+
+            switch (action) {
+                case 'create': {
+                    // 写入创建参数供目标编辑器读取（跨实例中转）
+                    if (req.state || req.create) {
+                        sessionStorage.setItem('app_create_params', JSON.stringify({
+                            target: req.target,
+                            state: req.state,
+                            create: req.create,
+                            // 旧版兼容字段
+                            agentId: req.state?.agentId,
+                            text: req.state?.inputText,
+                            title: req.create?.title,
+                            timestamp: Date.now(),
+                        }));
+                    }
+
+                    updateBrowserHistory(targetWsId, null, 'push');
+
+                    // 确保 workspace 已加载
+                    await performNavigation(targetWsId);
+
+                    // ✅ 关键：委托 MemoryManager 创建文件
+                    const manager = managerCache.get(targetWsId);
+                    if (manager) {
+                        const newId = await manager.createAndOpenFile({
+                            title: req.create?.title,
+                            content: req.create?.content,
+                            parentId: req.create?.parentId,
+                        });
+                        updateBrowserHistory(targetWsId, newId, 'replace');
+                    }
+                    break;
+                }
+
+                case 'reveal': {
+                    updateBrowserHistory(targetWsId, req.resourceId || null, 'replace');
+                    await performNavigation(targetWsId);
+                    break;
+                }
+
+                case 'focus': {
+                    updateBrowserHistory(targetWsId, null, 'replace');
+                    await performNavigation(targetWsId);
+                    break;
+                }
+
+                case 'open':
+                default: {
+                    updateBrowserHistory(targetWsId, req.resourceId || null, 'push');
+                    await performNavigation(targetWsId, req.resourceId);
+                    break;
+                }
+            }
         };
 
         // --- 7. 全局事件绑定 ---
 
-        // 浏览器历史
         window.addEventListener('popstate', (event) => {
             const state = event.state as { workspaceId: string, resourceId?: string } | null;
             if (state) {
@@ -361,13 +394,11 @@ async function bootstrap() {
             }
         });
 
-        // 侧边栏导航按钮
         document.querySelectorAll('.app-nav-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 e.preventDefault();
                 const targetId = (e.currentTarget as HTMLElement).dataset.target;
                 if (targetId) {
-                    // 获取该模块上次的状态（如果已加载）
                     const manager = managerCache.get(targetId);
                     const lastActiveId = manager?.getActiveSessionId() || null;
 
@@ -377,21 +408,17 @@ async function bootstrap() {
             });
         });
 
-        // ✅ [新增] 全局导航事件监听器
+        // ✅ 全局导航事件监听器 — 统一走 handleNavigationRequest
         document.addEventListener(NAVIGATION_EVENTS.NAVIGATE, ((e: CustomEvent) => {
-            const { target, resourceId, params } = e.detail || {};
-            if (target) {
-                const targetWsId = resolveTarget(target);
-                updateBrowserHistory(targetWsId, resourceId || null, 'push');
-                performNavigation(targetWsId, resourceId, params);
+            const req = e.detail as NavigationRequest;
+            if (req?.target) {
+                handleNavigationRequest(req);
             }
         }) as EventListener);
 
         // --- 8. 启动 ---
         const initialRoute = parseHash();
         await performNavigation(initialRoute.workspace, initialRoute.resource);
-
-        // 替换当前的空白历史记录，确保后续 Back 操作正常
         updateBrowserHistory(initialRoute.workspace, initialRoute.resource || null, 'replace');
 
     } catch (error) {
