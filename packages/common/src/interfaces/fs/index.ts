@@ -1,8 +1,24 @@
 /**
  * @file common/interfaces/fs/index.ts
+ * @desc VFS 接口统一导出
+ *
+ * 使用方式：
+ *   import type { IModuleFS, FSNode, FSFileNode } from '@common/interfaces/fs';
+ *   import { FSError, FSNotFoundError } from '@common/interfaces/fs';
  */
 
-// ── 基础类型 ──
+// ── 常量 ──
+export {
+    CONFIG_MODULE,
+    SYSTEM_DIRS,
+    ASSET_DIR_PREFIX,
+    HIDDEN_FILE_PREFIX,
+    DEFAULT_MAX_SYMLINK_DEPTH,
+    DEFAULT_FILENAME_PATTERN,
+    DEFAULT_SEARCH_LIMIT,
+} from './constants';
+
+// ── 核心类型 ──
 export type {
     FSNodeType,
     FSNodeBaseType,
@@ -14,10 +30,38 @@ export type {
     FSDeviceNode,
     FSSymlinkNode,
     FSNodeMetadata,
+    DirEntry,
+    RefType,
+    Reference,
+    FileContent,
     FSSearchQuery,
+    FSSearchResult,
     FSCapabilities,
     FSModuleStats,
-} from './types';
+} from './core/types';
+
+// re-export SeqFileEntry from canonical location
+export type { SeqFileEntry } from './capabilities/seq-file';
+
+// ── 错误 ──
+export {
+    FSError,
+    FSNotFoundError,
+    FSAlreadyExistsError,
+    FSAccessDeniedError,
+    FSReadOnlyError,
+    FSReservedNameError,
+    FSCapabilityError,
+    FSModuleNotFoundError,
+    FSConflictError,
+    FSInvalidPathError,
+    FSSymlinkLoopError,
+    FSCrossMountError,
+    FSBusyError,
+    FSTypeMismatchError,
+    FSDeviceNotFoundError,
+} from './core/errors';
+export type { FSErrorCode } from './core/errors';
 
 // ── 选项 ──
 export type {
@@ -25,47 +69,109 @@ export type {
     WriteOptions,
     CreateFileOptions,
     CreateDirectoryOptions,
+    DeleteOptions,
+    RenameOptions,
+    MoveOptions,
+    CopyOptions,
+    ListOptions,
     TreeWalkOptions,
     TreeWalkCallback,
-} from './options';
+} from './core/options';
 
 // ── 事件 ──
 export type {
     FSEventType,
+    FSEvent,
     FSNodeCreatedPayload,
     FSNodeUpdatedPayload,
     FSNodeDeletedPayload,
     FSNodeMovedPayload,
     FSNodeCopiedPayload,
     FSNodeRenamedPayload,
+    FSMountPayload,
     FSErrorPayload,
     FSEventPayloadMap,
-    FSEvent,
-} from './events';
+    FSEventEmitter,
+} from './core/events';
 
-// ── 错误 ──
+// ── 存储后端 ──
+export type {
+    InodeRecord,
+    IInodeStore,
+    MetaRecord,
+    IMetaStore,
+    IContentStore,
+    ITransactionScope,
+    RecordValue,
+    QueryOperator,
+    RecordQuery,
+    RecordQueryOptions,
+    RecordQueryResult,
+    IRecordStore,
+    IHighLevelStore,
+    ISyncableStore,
+    IStorageBackend,
+} from './storage';
 export {
-    FSError,
-    FSNotFoundError,
-    FSReadOnlyError,
-    FSCapabilityError,
-    FSAlreadyExistsError,
-    FSInvalidPathError,
-    FSModuleNotFoundError,
-    FSConflictError,
-} from './errors';
-export type { FSErrorCode } from './errors';
+    hasRecordStore,
+    hasHighLevelStore,
+    hasSyncableStore,
+} from './storage';
 
-// ── 子接口 ──
-export type { SeqFileEntry, ISeqFileOperations } from './ISeqFile';
-export type { IAssetOperations } from './IAssetOperations';
-export type { ITagOperations } from './ITagOperations';
-export type { DeviceContext, IDeviceHandler } from './IDeviceFile';
+// ── 能力子接口 ──
+export type { ISeqFileOperations } from './capabilities/seq-file';
+export type { IAssetOperations } from './capabilities/asset-ops';
+export type { TagDefinition, ITagOperations } from './capabilities/tag-ops';
+export type { RefQueryOptions, IRefOperations } from './capabilities/ref-ops';
+export type {
+    FileChangeEvent,
+    WatchOptions,
+    Watcher,
+    IWatchOperations,
+} from './capabilities/watch';
 
-// ── 核心接口 ──
-export type { IFSTransaction, IModuleFS } from './IModuleFS';
-export type { IConfigService, ConfigFileDescriptor, ConfigChangeEvent } from './IConfigService';
+// ── 设备 ──
+export type {
+    DeviceContext,
+    IDeviceDriver,
+    IDeviceManager,
+} from './device/device';
 
+// ── 插件 ──
+export type {
+    FSOperationType,
+    OperationContext,
+    MiddlewareNext,
+    MiddlewareHandler,
+    PluginInfo,
+    IPlugin,
+    IPluginManager,
+} from './plugin/plugin';
+
+// ── 挂载 ──
+export type {
+    MountPoint,
+    MountOptions,
+    ResolvedMount,
+    IMountRouter,
+} from './mount/mount';
+
+// ── 同步 ──
+export type {
+    ChangeLogEntry,
+    SyncState,
+    SyncConflict,
+    ConflictResolution,
+    ConflictResolver,
+    SyncTarget,
+    SyncResult,
+    ISyncService,
+} from './sync/sync';
+
+// ── 模块文件系统 ──
+export type { IFSTransaction, IModuleFS } from './services/module-fs';
+
+// ── VFS 管理器 ──
 export type {
     ModuleInfo,
     ModuleMountOptions,
@@ -77,15 +183,24 @@ export type {
     ModuleExportData,
     VFSSearchQuery,
     VFSSystemStats,
+    IMountService,
+    IMaintenanceService,
     IVFSManager,
-} from './IVFSManager';
+} from './services/vfs-manager';
 
+// ── 配置服务 ──
+export type {
+    ConfigFileDescriptor,
+    ConfigChangeEvent,
+    IConfigService,
+} from './services/config-service';
+
+// ── 工厂 ──
 export type {
     VFSFactoryOptions,
     BrowserVFSOptions,
     ElectronVFSOptions,
+    ServerVFSOptions,
     VFSInstance,
     VFSFactory,
-} from './IVFSFactory';
-
-export { CONFIG_MODULE } from './constants';
+} from './services/factory';

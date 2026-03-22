@@ -6,8 +6,8 @@
  * 消费方直接 import 使用，无需后端额外实现。
  */
 
-import type { IModuleFS, FSNode, IFSTransaction } from '../interfaces/fs';
-import { CONFIG_MODULE, DEV_MODULE, SYSTEM_DIRS } from '../interfaces/fs/constants';
+import type { IModuleFS, FSNode, IFSTransaction } from '../interfaces/fs0';
+import { CONFIG_MODULE, DEV_MODULE, SYSTEM_DIRS } from '../interfaces/fs0/constants';
 
 /**
  * 检查路径是否存在
