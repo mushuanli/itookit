@@ -97,7 +97,6 @@ export class NodeTemplates {
             group.branchInfo?.name,
         );
 
-        // ✅ 使用共享 chevron
         const chevron = isCollapsed
             ? LayoutTemplates.chevronDown()
             : LayoutTemplates.chevronUp();
@@ -149,91 +148,72 @@ export class NodeTemplates {
             node.data.metaInfo?.branchName,
         );
 
-        // ✨ [修改] 识别 Agent 并添加可点击属性
         const agentId = node.data.metaInfo?.agentId;
-        // 只有类型为 agent 且有 ID 的（非 Tool）才可点击
-        // 如果是 'default' 也可以点击，前提是我们在 Agent Workspace 有对应的逻辑处理
         const isClickable = node.executorType === 'agent' && agentId;
 
+        // ✅ 修复：添加 data-action="edit-agent" 使事件委托能捕获点击
         const iconHtml = isClickable
-            ? `<div class="llm-ui-node__icon llm-ui-node__icon--clickable" title="Edit Agent" data-agent-id="${escapeHTML(agentId)}">${icon}</div>`
+            ? `<div class="llm-ui-node__icon llm-ui-node__icon--clickable" 
+                    data-action="edit-agent" 
+                    data-agent-id="${escapeHTML(agentId)}" 
+                    title="Edit Agent: ${escapeHTML(agentId)}">${icon}</div>`
             : `<div class="llm-ui-node__icon">${icon}</div>`;
 
-        // ✅ 使用共享 chevron
         const chevron = isCollapsed
             ? LayoutTemplates.chevronDown()
             : LayoutTemplates.chevronUp();
 
         return `
-            <div class="llm-ui-node__header">
-                <div class="llm-ui-node__status-icon">
-                    <div class="llm-ui-spinner"></div>
-                    <div class="llm-ui-status-dot"></div>
-                </div>
-                ${iconHtml}
-                <div class="llm-ui-node__title">${escapeHTML(node.name)}</div>
-                
-                <div class="llm-ui-header-preview">${escapeHTML(preview)}</div>
-                
-                <div class="llm-ui-node__meta">
-                    <span class="llm-ui-time">${timeStr}</span>
-                    <span class="llm-ui-node__status">${node.status}</span>
-                </div>
+        <div class="llm-ui-node__header">
+            ${iconHtml}
+            <span class="llm-ui-node__name">${escapeHTML(node.name)}</span>
+            <span class="llm-ui-header-preview">${escapeHTML(preview)}</span>
+            <span class="llm-ui-node__status llm-ui-node__status--${node.status}">${node.status}</span>
+            <div class="llm-ui-time">${timeStr}</div>
 
-                <!-- 使用 margin-left: auto 将 actions 推到右边 -->
-                <div class="llm-ui-actions" style="margin-left: auto; display: flex; gap: 4px;">
-                    ${branchHtml}
-                    <button class="llm-icon-btn" data-action="delete" title="Delete">🗑️</button>
-                    <!-- 新增 Edit 按钮 (用于修改输出结果) -->
-                    <button class="llm-icon-btn" data-action="retry" title="Retry">↻</button>
-                    <button class="llm-icon-btn" data-action="edit" title="Edit Result">✎</button>
-                    <button class="llm-icon-btn" data-action="copy" title="Copy">📋</button>
-                    <button class="llm-icon-btn" data-action="collapse" title="Toggle">
-                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-                            ${chevron}
-                        </svg>
-                    </button>
-                </div>
+            <div class="llm-ui-actions" style="margin-left: auto; display: flex; gap: 4px;">
+                ${branchHtml}
+
+                <button class="llm-icon-btn" data-action="delete" title="Delete">🗑️</button>
+                <button class="llm-icon-btn" data-action="regenerate" title="Regenerate">↻</button>
+                <button class="llm-icon-btn" data-action="edit" title="Edit">✎</button>
+                <button class="llm-icon-btn" data-action="copy" title="Copy">📋</button>
+                <button class="llm-icon-btn" data-action="collapse" title="Toggle">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                        ${chevron}
+                    </svg>
+                </button>
             </div>
-        `;
+        </div>`;
     }
 
-    static renderThinking(thought: string, visible: boolean): string {
-        const displayStyle = visible ? 'block' : 'none';
-        return `
-            <div class="llm-ui-thought" style="display: ${displayStyle}">
-                <div class="llm-ui-thought__label">Thinking Process</div>
-                <div class="llm-ui-thought__content">${escapeHTML(thought).replace(/\n/g, '<br>')}</div>
-            </div>
-        `;
-    }
-
-    // [修改] 增加 icon 参数
     static renderTool(node: ExecutionNode, icon: string): string {
-        const inputStr = JSON.stringify(node.data.input || {}, null, 2);
-        const resultStr = JSON.stringify(node.data.toolCall?.result || {}, null, 2);
-
-        const chevron = LayoutTemplates.chevronUp();
+        const hasResult = node.data.output || node.status === 'success';
+        const resultDisplay = hasResult ? 'block' : 'none';
+        const resultText = node.data.output
+            ? (typeof node.data.output === 'string' ? node.data.output : JSON.stringify(node.data.output))
+            : '';
 
         return `
-            <div class="llm-ui-node__header">
-                <div class="llm-ui-node__icon">${icon}</div>
-                <div class="llm-ui-node__title">${escapeHTML(node.name)}</div>
-                <div class="llm-ui-node__status">${node.status}</div>
-                <div class="llm-ui-actions">
-                    <button class="llm-icon-btn" data-action="collapse">
-                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-                            ${chevron}
-                        </svg>
-                    </button>
-                </div>
-            </div>
-            <div class="llm-ui-node__body">
-                <div class="llm-ui-code-block">Input: ${escapeHTML(inputStr)}</div>
-                <div class="llm-ui-code-block llm-ui-node__result" style="display:${node.status === 'success' ? 'block' : 'none'}">
-                    Result: ${escapeHTML(resultStr)}
-                </div>
-            </div>
-        `;
+        <div class="llm-ui-node__header">
+            <div class="llm-ui-node__icon">${icon}</div>
+            <span class="llm-ui-node__name">${escapeHTML(node.name)}</span>
+            <span class="llm-ui-node__status llm-ui-node__status--${node.status}">${node.status}</span>
+        </div>
+        <div class="llm-ui-node__body">
+            ${node.data.input ? `<div class="llm-ui-node__input"><pre>${escapeHTML(
+                typeof node.data.input === 'string' ? node.data.input : JSON.stringify(node.data.input, null, 2)
+            )}</pre></div>` : ''}
+            <div class="llm-ui-node__result" style="display:${resultDisplay}">${escapeHTML(resultText)}</div>
+            <div class="llm-ui-node__children"></div>
+        </div>`;
+    }
+
+    static renderThinking(thought: string, hasThought: boolean): string {
+        return `
+        <div class="llm-ui-thought" style="display: ${hasThought ? 'block' : 'none'}">
+            <div class="llm-ui-thought__label">💭 Thinking</div>
+            <div class="llm-ui-thought__content">${escapeHTML(thought)}</div>
+        </div>`;
     }
 }
