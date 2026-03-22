@@ -126,7 +126,7 @@ export class LLMWorkspaceEditor implements IEditor {
     private initResolve: (() => void) | null = null;
     private navRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
-    private initComplete = false;  // 新增标记
+    private initComplete = false;
 
     private options: LLMEditorOptions;
 
@@ -151,7 +151,7 @@ export class LLMWorkspaceEditor implements IEditor {
     async init(container: HTMLElement, _initialContent?: string): Promise<void> {
         this.container = container;
         this.container.classList.add('llm-ui-workspace');
-        this.initComplete = false;  // 重置
+        this.initComplete = false;
         this.initPromise = new Promise(resolve => { this.initResolve = resolve; });
         try {
             this.initLayout();
@@ -166,7 +166,7 @@ export class LLMWorkspaceEditor implements IEditor {
             this.statusIndicator.cacheElements();
             await this.branchIndicator.refresh();
 
-            this.initComplete = true;  // ✅ 完全初始化后才标记
+            this.initComplete = true;
             this.emit('ready');
             this.initResolve?.();
         } catch (e: any) {
@@ -201,7 +201,7 @@ export class LLMWorkspaceEditor implements IEditor {
         this.agentLoader = new AgentLoader(this.options.agentService, this.sessionManager);
         this.stateManager = new StateManager(
             this.stateService, this.sessionManager, this.options.nodeId!,
-            this.agentLoader  // ✅ 注入
+            this.agentLoader
         );
         this.branchStore = new BranchStore(this.sessionManager, this.errorHandler);
         this.navDataBuilder = new NavDataBuilder(this.sessionManager);
@@ -214,7 +214,6 @@ export class LLMWorkspaceEditor implements IEditor {
         const historyView = new HistoryView(historyEl, {
             onContentChange: (id: string, content: string, type: 'user' | 'node') =>
                 this.handleContentChange(id, content, type),
-            // ✅ 修复 1&2：显式类型标注
             onNodeAction: (action: string, nodeId: string) =>
                 this.handleNodeAction(action, nodeId),
             onCommitEdit: (id: string, content: string) =>
@@ -239,7 +238,6 @@ export class LLMWorkspaceEditor implements IEditor {
             (loading) => this.chatInput?.setLoading(loading)
         );
 
-        // ✅ 只加载 agents 列表（缓存在 agentLoader 中），不恢复状态
         const initialAgents = await this.agentLoader.loadAgents();
         const savedUIState = await this.stateManager.loadUIState();
         const savedAgentId = savedUIState?.input_agent_id || 'default';
@@ -253,7 +251,6 @@ export class LLMWorkspaceEditor implements IEditor {
             );
         }
 
-        // ✅ ChatInput 用 default 初始化，loadSession 统一恢复
         this.chatInput = new ChatInput(inputEl, {
             onSend: (text, files, agentId, overrides) =>
                 this.sendCommand.run({ text, files, agentId, overrides }),
@@ -269,7 +266,6 @@ export class LLMWorkspaceEditor implements IEditor {
             onRequestModels: (agentId) => this.agentLoader.loadModelsForAgent(agentId),
         });
 
-        // ✅ 新增：注册插件
         this.registerInputPlugins();
 
         this.stateManager.setChatInputGetter(() => this.chatInput);
@@ -284,7 +280,6 @@ export class LLMWorkspaceEditor implements IEditor {
         this.sendCommand = new SendMessageCommand(ctx);
         this.switchBranchByOffsetCommand = new SwitchBranchByOffsetCommand(ctx);
 
-        // ✅ 修复 3：显式泛型消除类型推断冲突
         this.nodeCommands = new Map<string, Command<any, any>>([
             ['regenerate', new RegenerateCommand(ctx)],
             ['delete', new DeleteMessageCommand(ctx)],
@@ -339,9 +334,9 @@ export class LLMWorkspaceEditor implements IEditor {
             onTitleChange: (title) => this.handleTitleChange(title),
             onOpenAssetManager: () => this.handleOpenAssetManager(),
             onToggleNavigator: () => this.toggleNavigator(),
-            onPrevAgent: () => this.navigateAgent('prev'),
-            onNextAgent: () => this.navigateAgent('next'),
-            onFoldOne: () => this.historyView.foldFirstUnfolded(),
+            onPrevUnfolded: () => this.navigateUnfolded('prev'),
+            onNextUnfolded: () => this.navigateUnfolded('next'),
+            onFoldCurrent: () => this.historyView.foldCurrentUnfolded(),
             onCollapseAll: () => this.handleToggleAllFold(),
             onCopy: () => this.handleCopy(),
             onPrint: () => this.handlePrint(),
@@ -527,7 +522,7 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     // ================================================================
-    // 导航 — 委托给 ViewportQuery 提取后更精简
+    // 导航
     // ================================================================
 
     private findCurrentVisibleSession(): string | null {
@@ -584,8 +579,14 @@ export class LLMWorkspaceEditor implements IEditor {
         }
     }
 
-    private navigateAgent(direction: 'prev' | 'next'): void {
-        const result = this.historyView.getAgentNavigationTarget(direction);
+    /**
+     * 导航到上/下一个 unfold chat
+     * 
+     * 统一使用 IHistoryPresenter.getUnfoldedNavigationTarget()，
+     * 与 foldCurrentUnfolded() 共享 CollapseController 的视口感知逻辑。
+     */
+    private navigateUnfolded(direction: 'prev' | 'next'): void {
+        const result = this.historyView.getUnfoldedNavigationTarget(direction);
 
         if (result === '__end__') {
             this.historyView.scrollToBottom(true);
@@ -596,8 +597,8 @@ export class LLMWorkspaceEditor implements IEditor {
             this.bus.emit('nav:scrollTo', { sessionId: result });
         } else {
             Toast.info(direction === 'prev'
-                ? 'No previous agent chat'
-                : 'Already at the last agent chat');
+                ? 'No previous unfolded chat'
+                : 'Already at the last unfolded chat');
         }
     }
 
@@ -748,20 +749,12 @@ export class LLMWorkspaceEditor implements IEditor {
     }
 
     // ================================================================
-    // 插件注册（新增方法）
+    // 插件注册
     // ================================================================
 
-    /**
-     * 注册输入插件
-     * 
-     * 在 ChatInput 初始化完成后调用。
-     * 插件通过 ChatInput.registerPlugin() 注入，
-     * 不修改 ChatInput 的构造函数或核心逻辑。
-     */
     private registerInputPlugins(): void {
         const chatInput = this.chatInput as ChatInput;
 
-        // ✅ 直接获取全局实例，零传递
         const promptHistory = getPromptHistory();
         if (promptHistory) {
             this.historyPlugin = new HistoryPlugin(promptHistory);
@@ -772,12 +765,6 @@ export class LLMWorkspaceEditor implements IEditor {
         chatInput.registerPlugin(this.slashPlugin);
     }
 
-    /**
-     * 构建 Slash 命令回调
-     * 
-     * 将 slash 命令的执行逻辑桥接到现有的 Command 体系。
-     * SlashCommandPlugin 不直接依赖 SessionManager。
-     */
     private buildSlashCallbacks(): SlashCommandCallbacks {
         return {
             onRetry: () => {
@@ -864,7 +851,7 @@ export class LLMWorkspaceEditor implements IEditor {
         // 5. 基础设施
         this.timers.destroy();
 
-        // ✅ 6. 插件清理（在 UI 组件之前）
+        // 6. 插件清理（在 UI 组件之前）
         this.historyPlugin?.deactivate();
         this.slashPlugin?.deactivate();
         this.historyPlugin = null;

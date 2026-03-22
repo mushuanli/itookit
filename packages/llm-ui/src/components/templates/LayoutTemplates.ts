@@ -32,13 +32,13 @@ export const LayoutTemplates = {
                     <span class="llm-bg-badge">2 running</span>
                 </div>
 
-                <button class="llm-workspace-titlebar__btn" id="llm-btn-prev-agent" title="Prev Agent Chat">
+                <button class="llm-workspace-titlebar__btn" id="llm-btn-prev-unfolded" title="Prev Unfolded Chat">
                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
                        <polyline points="18 15 12 9 6 15"></polyline>
                    </svg>
                 </button>
                 
-                <button class="llm-workspace-titlebar__btn" id="llm-btn-next-agent" title="Next Agent Chat">
+                <button class="llm-workspace-titlebar__btn" id="llm-btn-next-unfolded" title="Next Unfolded Chat">
                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
                        <polyline points="6 9 12 15 18 9"></polyline>
                    </svg>
@@ -46,7 +46,7 @@ export const LayoutTemplates = {
 
                 <div class="llm-workspace-titlebar__sep"></div>
 
-                <button class="llm-workspace-titlebar__btn" id="llm-btn-fold-one" title="Fold First Unfolded">
+                <button class="llm-workspace-titlebar__btn" id="llm-btn-fold-current" title="Fold Current">
                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
                        <path d="M4 14h6m-6 4h6m8-10h-6m6-4h-6M4 6h6m-3-3v18"/>
                    </svg>
