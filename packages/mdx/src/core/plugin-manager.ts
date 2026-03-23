@@ -11,7 +11,7 @@ import type {
   MDxPlugin, PluginContext,
   ToolbarButtonConfig, TitleBarButtonConfig,
 } from './types';
-import type { IPersistenceAdapter, ISessionEngine } from '@itookit/common';
+import type { ISessionEngine } from '@itookit/common';
 
 /**
  * 插件管理器（精简版）
@@ -40,7 +40,6 @@ export class PluginManager {
   private currentNodeId: string | null = null;
 
   private ownerNodeId: string | null = null;
-  private dataAdapter: IPersistenceAdapter | null = null;
 
   // 收集器
   public codemirrorExtensions: Extension[] = [];
@@ -65,11 +64,6 @@ export class PluginManager {
     if (nodeId) this.currentNodeId = nodeId;
     if (engine) this.sessionEngine = engine;
     this.ownerNodeId = ownerNodeId || nodeId || null;
-    this.storeCache.clear();
-  }
-
-  setDataAdapter(adapter: IPersistenceAdapter): void {
-    this.dataAdapter = adapter;
     this.storeCache.clear();
   }
 
@@ -214,7 +208,6 @@ export class PluginManager {
       instanceId: this.instanceId,
       sessionEngine: this.sessionEngine,
       nodeId: this.currentNodeId,
-      dataAdapter: this.dataAdapter,
     });
 
     this.storeCache.set(pluginName, store);
