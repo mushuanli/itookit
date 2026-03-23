@@ -1,7 +1,6 @@
 // @mdx/core/store/types.ts
-import type { IPersistenceAdapter, ISessionEngine } from '@itookit/common';
+import type { ISessionEngine } from '@itookit/common';
 import { EngineMetadataStore } from './engine-metadata-store';
-import { AdapterStore } from './adapter-store';
 import { MemoryStore } from './memory-store';
 
 export interface ScopedPersistenceStore {
@@ -16,26 +15,20 @@ export interface StoreFactoryConfig {
     instanceId: string;
     sessionEngine: ISessionEngine | null;
     nodeId: string | null;
-    dataAdapter: IPersistenceAdapter | null;
 }
 
 /**
- * 三级回退存储工厂
- * Engine Metadata → Persistence Adapter → Memory
+ * 二级回退存储工厂
+ * Engine Metadata → Memory
  */
 export function createStore(config: StoreFactoryConfig): ScopedPersistenceStore {
-    const { pluginName, instanceId, sessionEngine, nodeId, dataAdapter } = config;
+    const { pluginName, sessionEngine, nodeId } = config;
 
     // 1. 优先：Engine 元数据存储
     if (sessionEngine && nodeId) {
         return new EngineMetadataStore(sessionEngine, nodeId, pluginName);
     }
 
-    // 2. 其次：持久化适配器
-    if (dataAdapter) {
-        return new AdapterStore(dataAdapter, `${instanceId}:${pluginName}`);
-    }
-
-    // 3. 兜底：内存存储
+    // 2. 兜底：内存存储
     return new MemoryStore();
 }
