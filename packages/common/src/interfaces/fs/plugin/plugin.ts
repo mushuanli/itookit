@@ -23,7 +23,7 @@
  * - 抛出错误（中止操作）
  */
 
-import type { FSNode, FSNodeType, FileContent, FSNodeMetadata } from '../core/types';
+import type { FSNode, FileContent, FSNodeMetadata } from '../core/types';
 
 // ═══════════════════════════════════════════════════════════════
 // 操作类型
