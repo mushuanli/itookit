@@ -832,7 +832,12 @@ export class ModuleFS implements IModuleFS {
         this.assertWritable(dir);
         this.access.checkCreate(this.caller, name, realDir);
 
-        const resolved = await this.engine.createSymlink(realDir, name, targetPath);
+        // Translate absolute virtual paths to real paths so the engine can resolve them.
+        // Relative paths are left unchanged (resolved relative to the symlink's directory).
+        const realTarget = targetPath.startsWith('/')
+            ? this.scope.toRealPath(targetPath)
+            : targetPath;
+        const resolved = await this.engine.createSymlink(realDir, name, realTarget);
         const nodeRealPath = P.join(realDir, name);
         const node = this._node(resolved.inode, resolved.meta, nodeRealPath);
 
@@ -849,7 +854,9 @@ export class ModuleFS implements IModuleFS {
     }
 
     async readlink(idOrPath: string): Promise<string> {
-        const r = await this._resolve(idOrPath, 'readlink');
+        // Resolve without following the final symlink so we can inspect its target
+        const realPath = await this._toReal(idOrPath);
+        const r = await this.engine.resolve(realPath, false);
         if (r.inode.type !== 'symlink') {
             throw new FSError('EINVAL', 'not a symlink', 'readlink', r.fullPath);
         }
