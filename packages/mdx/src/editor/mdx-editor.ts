@@ -55,7 +55,6 @@ export class MDxEditor extends IEditor {
             nodeId: config.nodeId,
             ownerNodeId: this.config.ownerNodeId,
             sessionEngine: config.sessionEngine,
-            persistenceAdapter: config.persistenceAdapter,
         });
         this.renderer.setEditorInstance(this);
 

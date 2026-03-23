@@ -38,7 +38,6 @@ export type { DocumentInfo, ReferenceExtractionResult, IDocumentAnalyzer, GCResu
 export { IAutocompleteSource, type Suggestion } from './interfaces/IAutocompleteSource';
 
 export { IMentionSource, type HoverPreviewData } from './interfaces/IMentionSource';
-export { IPersistenceAdapter } from './interfaces/IPersistenceAdapter';
 export {
     ISessionUI,
     type MenuItem, type ContextMenuBuilder, type ContextMenuConfig, type SessionUIOptions,
