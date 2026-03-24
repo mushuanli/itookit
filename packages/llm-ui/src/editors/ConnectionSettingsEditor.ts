@@ -5,8 +5,6 @@ import { testLLMConnection, LLMConnection, LLM_PROVIDER_DEFAULTS, LLMModel } fro
 import { IAgentManagementService } from '@itookit/llm-engine';
 
 export class ConnectionSettingsEditor extends BaseSettingsEditor<IAgentManagementService> {
-    private testingConnections = new Set<string>();
-
     // 编辑弹窗中的临时状态
     private currentEditModels: LLMModel[] = [];
 
@@ -121,7 +119,6 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IAgentManagemen
                 
                 <div class="settings-page__actions" style="margin-top:auto; width:100%">
                     <button class="settings-btn ${editBtnClass} settings-btn--sm settings-btn-edit" style="flex:1">${editBtnText}</button>
-                    <button class="settings-btn settings-btn--secondary settings-btn--sm settings-btn-test" style="flex:1" ${!hasKey ? 'disabled' : ''}>🔍 测试</button>
                     ${!isDefault ? '<button class="settings-btn settings-btn--danger settings-btn--sm settings-btn-delete" style="flex:1">🗑️ 删除</button>' : ''}
                 </div>
             </div>
@@ -146,8 +143,6 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IAgentManagemen
 
                 if (target.closest('.settings-btn-edit')) {
                     this.showEditModal(connection);
-                } else if (target.closest('.settings-btn-test')) {
-                    await this.testConnection(card, connection);
                 } else if (target.closest('.settings-btn-delete')) {
                     this.deleteConnection(id, connection.name);
                 }
@@ -221,7 +216,12 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IAgentManagemen
                             <label class="settings-form__label">API Key *</label>
                             <input type="password" class="settings-form__input" name="apiKey" value="${connection?.apiKey || ''}" required placeholder="sk-...">
                         </div>
-                        
+
+                        <div class="settings-form__group">
+                            <button type="button" id="btn-test-connection" class="settings-btn settings-btn--secondary settings-btn--sm" style="width:100%">🔍 测试连接</button>
+                            <div id="test-result" style="display:none; margin-top:8px; padding:8px 10px; border-radius:4px; font-size:12px; line-height:1.5;"></div>
+                        </div>
+
                         <div class="settings-form__group">
                             <label class="settings-form__label">Base URL</label>
                             <input type="text" class="settings-form__input" id="conn-baseurl" name="baseURL" value="${connection?.baseURL || ''}" placeholder="默认地址...">
@@ -418,6 +418,49 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IAgentManagemen
             });
         }
 
+        // 4. 弹窗内测试连接
+        const testConnectionBtn = document.getElementById('btn-test-connection') as HTMLButtonElement;
+        const testResultEl = document.getElementById('test-result') as HTMLElement;
+
+        if (testConnectionBtn && testResultEl) {
+            testConnectionBtn.addEventListener('click', async () => {
+                if (testConnectionBtn.disabled) return;
+
+                const form = document.getElementById('connection-form') as HTMLFormElement;
+                const apiKey = (form.querySelector('[name="apiKey"]') as HTMLInputElement)?.value?.trim();
+                const provider = providerSelect?.value;
+                const baseURL = baseUrlInput?.value?.trim();
+                const model = modelSelect?.value;
+
+                if (!apiKey) {
+                    testResultEl.style.cssText = 'display:block; margin-top:8px; padding:8px 10px; border-radius:4px; font-size:12px; background:var(--st-warning-bg,#fff3cd); color:var(--st-warning,#856404);';
+                    testResultEl.textContent = '⚠️ 请先填写 API Key';
+                    return;
+                }
+
+                testConnectionBtn.disabled = true;
+                testConnectionBtn.textContent = '⏳ 测试中...';
+                testResultEl.style.display = 'none';
+
+                try {
+                    const result = await testLLMConnection({ provider, apiKey, baseURL, model });
+                    if (result.success) {
+                        testResultEl.style.cssText = 'display:block; margin-top:8px; padding:8px 10px; border-radius:4px; font-size:12px; background:var(--st-success-bg,#d4edda); color:var(--st-success,#155724);';
+                        testResultEl.textContent = `✅ ${result.message || '连接测试成功！'}`;
+                    } else {
+                        testResultEl.style.cssText = 'display:block; margin-top:8px; padding:8px 10px; border-radius:4px; font-size:12px; background:var(--st-danger-bg,#f8d7da); color:var(--st-danger,#721c24);';
+                        testResultEl.textContent = `❌ ${result.message || '连接测试失败'}`;
+                    }
+                } catch (error: any) {
+                    testResultEl.style.cssText = 'display:block; margin-top:8px; padding:8px 10px; border-radius:4px; font-size:12px; background:var(--st-danger-bg,#f8d7da); color:var(--st-danger,#721c24);';
+                    testResultEl.textContent = `❌ 测试出错: ${error.message}`;
+                } finally {
+                    testConnectionBtn.disabled = false;
+                    testConnectionBtn.textContent = '🔍 测试连接';
+                }
+            });
+        }
+
         // 初始化
         refreshModelSelect();
     }
@@ -437,55 +480,6 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IAgentManagemen
             if (idInput) this.currentEditModels[index].id = idInput.value;
             if (nameInput) this.currentEditModels[index].name = nameInput.value;
         });
-    }
-
-    private async testConnection(card: HTMLElement, connection: LLMConnection) {
-        if (this.testingConnections.has(connection.id)) return;
-
-        // 检查 API Key 是否存在
-        if (!connection.apiKey) {
-            Toast.warning('请先配置 API Key');
-            return;
-        }
-
-        this.testingConnections.add(connection.id);
-        const testBtn = card.querySelector('.settings-btn-test') as HTMLButtonElement;
-        const originalText = testBtn.innerHTML;
-        testBtn.innerHTML = '⏳ 测试中...';
-        testBtn.disabled = true;
-
-        try {
-            const result = await testLLMConnection({
-                provider: connection.provider,
-                apiKey: connection.apiKey,
-                baseURL: connection.baseURL,
-                model: connection.model
-            });
-
-            if (result.success) {
-                Toast.success(result.message || '连接测试成功！');
-                testBtn.innerHTML = '✅ 成功';
-                testBtn.classList.remove('settings-btn--secondary');
-                testBtn.classList.add('settings-btn--success');
-            } else {
-                Toast.error(`测试失败: ${result.message}`);
-                testBtn.innerHTML = '❌ 失败';
-                testBtn.classList.remove('settings-btn--secondary');
-                testBtn.classList.add('settings-btn--danger');
-            }
-        } catch (error: any) {
-            console.error(error);
-            Toast.error(`测试出错: ${error.message}`);
-            testBtn.innerHTML = '❌ 出错';
-        } finally {
-            setTimeout(() => {
-                testBtn.innerHTML = originalText;
-                testBtn.disabled = false;
-                testBtn.classList.remove('settings-btn--success', 'settings-btn--danger');
-                testBtn.classList.add('settings-btn--secondary');
-                this.testingConnections.delete(connection.id);
-            }, 3000);
-        }
     }
 
     private deleteConnection(id: string, name: string) {
