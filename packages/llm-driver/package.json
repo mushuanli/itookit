@@ -57,10 +57,8 @@
     "url": "https://github.com/mushuanli/itookit/issues"
   },
   "homepage": "https://github.com/mushuanli/itookit/tree/main/packages/llm-driver#readme",
-
   "dependencies": {
     "@itookit/common": "workspace:*",
-    "@itookit/vfs": "workspace:*",
     "js-yaml": "^4.1.1"
   },
   "devDependencies": {

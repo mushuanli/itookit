@@ -1,10 +1,7 @@
 // @file: llm-engine/src/services/vfs-agent-service.ts
 
-import {
-    VFS,
-    BaseModuleService,
-    VFSEventType
-} from '@itookit/vfs';
+import { BaseModuleService } from '@itookit/vfslib';
+import type { IVFSManager, VFSManagerEvent } from '@itookit/common';
 import type {
     EngineNode,
     EngineSearchQuery,
@@ -13,7 +10,7 @@ import type {
 import {
     FS_MODULE_AGENTS
 } from '@itookit/common';
-import { VFSEvent } from '@itookit/vfs';
+
 import {
     LLMConnection,
     AgentDefinition,
@@ -68,8 +65,8 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
     private connectionStore!: VFSEntityStore<LLMConnection>;
     private mcpStore!: VFSEntityStore<MCPServer>;
 
-    constructor(vfs: VFS) {
-        super(FS_MODULE_AGENTS, { description: 'AI Agents Configuration' }, vfs);
+    constructor(vfs: IVFSManager) {
+        super(FS_MODULE_AGENTS, { description: 'AI Agents Configuration', isSystem: true }, vfs);
     }
 
     /**
@@ -90,39 +87,32 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
      * 监听 VFS 事件
      */
     private bindVFSEvents(): void {
-        const eventsToWatch: VFSEventType[] = [
-            VFSEventType.NODE_CREATED,
-            VFSEventType.NODE_UPDATED,
-            VFSEventType.NODE_DELETED
-        ];
-
-        const handler = (event: VFSEvent) => {
-            const path = (event.path || '').replace(/\/+/g, '/');  // ✅ 规范化路径
-
-            // 检查是否属于当前模块
-            const modulePrefix = `/${this.moduleName}`;
-            if (!path.startsWith(modulePrefix)) {
-                return;
-            }
-
-            // 获取模块内的相对路径
-            const relativePath = path.slice(modulePrefix.length);
-            const isRelevant = relativePath.startsWith(CONNECTIONS_DIR) ||
-                relativePath.startsWith(MCP_DIR) ||
-                relativePath.endsWith('.agent');
-
-            if (isRelevant) {
-                // 防抖刷新
-                if (this._syncTimer) clearTimeout(this._syncTimer);
-                this._syncTimer = setTimeout(() => this.refreshData(), 300);
-            }
+        const debounce = () => {
+            if (this._syncTimer) clearTimeout(this._syncTimer);
+            this._syncTimer = setTimeout(() => this.refreshData(), 300);
         };
 
-        // 使用 VFS 的事件总线
-        eventsToWatch.forEach(evt => {
-            const unsubscribe = this.vfs.on(evt, handler);
-            this._eventUnsubscribers.push(unsubscribe);
-        });
+        const checkPath = (path: string, moduleId: string): boolean => {
+            if (moduleId !== this.moduleName) return false;
+            const p = path.replace(/\/+/g, '/');
+            return (
+                p.startsWith(CONNECTIONS_DIR) ||
+                p.startsWith(MCP_DIR) ||
+                p.endsWith('.agent')
+            );
+        };
+
+        this._eventUnsubscribers.push(
+            this.vfs.on('node:created', (e: VFSManagerEvent<'node:created'>) => {
+                if (checkPath(e.payload.path, e.payload.moduleId)) debounce();
+            }),
+            this.vfs.on('node:updated', (e: VFSManagerEvent<'node:updated'>) => {
+                if (checkPath(e.payload.path, e.payload.moduleId)) debounce();
+            }),
+            this.vfs.on('node:deleted', (e: VFSManagerEvent<'node:deleted'>) => {
+                if (e.payload.moduleId === this.moduleName) debounce();
+            }),
+        );
     }
 
     // ============================================

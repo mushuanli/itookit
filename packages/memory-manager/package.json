@@ -1,7 +1,7 @@
 {
-    "name": "@itookit/memory-manager",
-    "version": "0.4.1",
-    "description": "An intelligent glue layer connecting VFS-UI and MDxEditor with headless AI capabilities for advanced memory management.",
+  "name": "@itookit/memory-manager",
+  "version": "0.4.1",
+  "description": "An intelligent glue layer connecting VFS-UI and MDxEditor with headless AI capabilities for advanced memory management.",
   "type": "module",
   "main": "./src/index.ts",
   "module": "./src/index.ts",
@@ -15,7 +15,7 @@
     "./style.css": "./src/styles/memory-manager.css"
   },
   "publishConfig": {
-        "access": "public",
+    "access": "public",
     "main": "./dist/memory-manager.umd.cjs",
     "module": "./dist/memory-manager.js",
     "types": "./dist/index.d.ts",
@@ -28,52 +28,52 @@
       "./style.css": "./dist/style.css"
     }
   },
-    "files": [
-        "dist",
-        "README.md",
-        "LICENSE"
-    ],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "vite build",
     "dev": "vite build --watch",
-        "preview": "vite preview",
+    "preview": "vite preview",
     "prepublishOnly": "pnpm build"
   },
-    "keywords": [
-        "memory-manager",
-        "pkm",
-        "vfs-ui",
-        "mdxeditor",
-        "headless-ai",
-        "typescript"
-    ],
-    "author": "lizlok@gmail.com",
-    "license": "MIT",
-    "repository": {
-        "type": "git",
-        "url": "https://github.com/mushuanli/itookit.git",
-        "directory": "packages/memory-manager"
-    },
-    "engines": {
-        "node": ">=16.0.0"
-    },
+  "keywords": [
+    "memory-manager",
+    "pkm",
+    "vfs-ui",
+    "mdxeditor",
+    "headless-ai",
+    "typescript"
+  ],
+  "author": "lizlok@gmail.com",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mushuanli/itookit.git",
+    "directory": "packages/memory-manager"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
   "dependencies": {
     "immer": "^10.2.0"
   },
   "peerDependencies": {
     "@itookit/common": "workspace:*",
     "@itookit/mdxeditor": "workspace:*",
-    "@itookit/vfs": "workspace:*",
-    "@itookit/vfs-ui": "workspace:*"
+    "@itookit/vfs-ui": "workspace:*",
+    "@itookit/vfslib": "workspace:*"
   },
   "devDependencies": {
     "@itookit/common": "workspace:*",
     "@itookit/mdxeditor": "workspace:*",
-    "@itookit/vfs": "workspace:*",
     "@itookit/vfs-ui": "workspace:*",
     "@types/node": "^20.19.25",
     "typescript": "^5.9.3",
     "vite": "^5.4.21",
-    "vite-plugin-dts": "^3.9.1"
+    "vite-plugin-dts": "^3.9.1",
+    "@itookit/vfslib": "workspace:*"
   }
 }

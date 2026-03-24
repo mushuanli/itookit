@@ -66,14 +66,14 @@
     "@itookit/common": "workspace:*",
     "@itookit/llm-driver": "workspace:*",
     "@itookit/llm-kernel": "workspace:*",
-    "@itookit/vfs": "workspace:*"
+    "@itookit/vfslib": "workspace:*"
   },
   "dependencies": {
     "@itookit/common": "workspace:*",
     "@itookit/llm-driver": "workspace:*",
     "@itookit/llm-kernel": "workspace:*",
-    "@itookit/vfs": "workspace:*",
-    "yaml": "^2.8.2"
+    "yaml": "^2.8.2",
+    "@itookit/vfslib": "workspace:*"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",

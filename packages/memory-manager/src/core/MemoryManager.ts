@@ -1,7 +1,7 @@
 /**
  * @file memory-manager/core/MemoryManager.ts
  */
-import { VFSModuleEngine } from '@itookit/vfs';
+import { VFSModuleEngine } from '@itookit/vfslib';
 import { createVFSUI, connectEditorLifecycle, VFSUIShell } from '@itookit/vfs-ui';
 import { createMDxEditor } from '@itookit/mdxeditor';
 import { MemoryManagerConfig } from '../types';
@@ -25,7 +25,7 @@ export class MemoryManager {
         if (config.customEngine) {
             this.engine = config.customEngine;
         } else if (config.vfs && config.moduleName) {
-            this.engine = new VFSModuleEngine(config.moduleName, config.vfs);
+            this.engine = new VFSModuleEngine(config.moduleName, config.vfs) as unknown as ISessionEngine;
         } else {
             throw new Error(
                 "MemoryManager requires either 'customEngine' or both 'vfs' and 'moduleName' in config"

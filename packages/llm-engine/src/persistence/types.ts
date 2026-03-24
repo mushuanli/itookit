@@ -27,6 +27,16 @@ export interface ChatManifest {
     current_head: string;
     root_id: string;
 
+    // Asset-dir storage metadata
+    /** VFS node ID of the .chat file itself */
+    chat_node_id: string;
+    /** Next global sequence number (starts at 1) */
+    next_sn: number;
+    /** Next branch number to assign (starts at 1) */
+    next_branch_num: number;
+    /** branchName → branchNum (main=0) */
+    branch_nums: Record<string, number>;
+
     // ✅ 新增：UI 状态持久化
     ui_state?: {
         /** 折叠状态：messageId -> isCollapsed */

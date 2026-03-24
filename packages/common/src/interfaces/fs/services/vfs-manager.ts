@@ -40,12 +40,16 @@ export interface ModuleInfo {
     rootNodeId?: string;
     isProtected?: boolean;
     syncEnabled?: boolean;
+    /** System modules bypass all access control checks (hidden files, cross-module) */
+    isSystem?: boolean;
 }
 
 export interface ModuleMountOptions {
     description?: string;
     isProtected?: boolean;
     syncEnabled?: boolean;
+    /** System modules bypass all access control checks (hidden files, cross-module) */
+    isSystem?: boolean;
 }
 
 // ═══════════════════════════════════════════════════════════════

@@ -13,6 +13,7 @@ export const SETTINGS_PAGES: Record<string, { name: string, icon: string }> = {
     'recovery': { name: '系统恢复', icon: '🚑' },
     'log': { name: '系统日志', icon: '📋' },
     'about': { name: 'About', icon: 'ℹ️' },
+    'fs-explorer': { name: 'FS Explorer', icon: '🗂️' },
 };
 
 export class SettingsEngine implements ISessionEngine {
