@@ -1,7 +1,8 @@
 // @file: llm-engine/services/prompt-history-service.ts
 
 import YAML from 'yaml';
-import { VFS, BaseModuleService } from '@itookit/vfs';
+import { BaseModuleService } from '@itookit/vfslib';
+import type { IVFSManager } from '@itookit/common';
 import { log } from '../utils/logger';
 
 // ============================================
@@ -83,7 +84,7 @@ export class PromptHistoryService extends BaseModuleService {
     private dirty = false;
     private writeTimer: ReturnType<typeof setTimeout> | null = null;
 
-    constructor(vfs: VFS) {
+    constructor(vfs: IVFSManager) {
         super(MODULE_NAME, { description: 'Global Configuration' }, vfs);
     }
 
@@ -373,7 +374,7 @@ export function getPromptHistory(): PromptHistoryService | undefined {
  * 初始化 PromptHistoryService
  * 由 quickInitialize / initializeLLMEngine 调用
  */
-export async function initializePromptHistory(vfs: any): Promise<PromptHistoryService> {
+export async function initializePromptHistory(vfs: IVFSManager): Promise<PromptHistoryService> {
     if (historyInstance) return historyInstance;
 
     historyInstance = new PromptHistoryService(vfs);

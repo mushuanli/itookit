@@ -1,6 +1,36 @@
 // @file: app-settings/types/sync.ts
 
-import { SyncProgress } from '@itookit/vfs';
+// ==================== 本地定义的同步相关类型 ====================
+
+export interface SyncProgress {
+    phase: string;
+    current: number;
+    total: number;
+    bytesTransferred: number;
+    bytesTotal: number;
+    currentFile?: string;
+    speed?: number;
+}
+
+export interface SyncChange {
+    type: 'created' | 'modified' | 'deleted';
+    content?: string;
+    hash?: string;
+    size?: number;
+    timestamp: number;
+}
+
+export interface SyncConflict {
+    conflictId: string;
+    nodeId: string;
+    path: string;
+    type: string;
+    localChange: SyncChange;
+    remoteChange: SyncChange;
+    resolved: boolean;
+    resolution?: 'local' | 'remote';
+    timestamp: number;
+}
 
 // ==================== 核心配置 ====================
 

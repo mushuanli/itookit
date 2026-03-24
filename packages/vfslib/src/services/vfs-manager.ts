@@ -105,6 +105,7 @@ export class VFSManager implements IVFSManager {
             rootNodeId: encodeId('mount_0', rootIno),
             isProtected: options?.isProtected,
             syncEnabled: options?.syncEnabled,
+            isSystem: options?.isSystem,
         });
 
         this.emitManager('module:mounted', { moduleName });
@@ -157,6 +158,7 @@ export class VFSManager implements IVFSManager {
             throw new FSModuleNotFoundError(moduleName);
         }
 
+        const moduleInfo = this.modules.get(moduleName)!;
         const deps: ModuleFSDeps = {
             moduleId: moduleName,
             engine: this.engine,
@@ -165,6 +167,7 @@ export class VFSManager implements IVFSManager {
             access: this.engine.access,
             devices: this.engine.devices,
             mountId: 'mount_0',
+            isSystem: moduleInfo.isSystem,
         };
         const fs = new ModuleFS(deps);
         fs.init().catch(() => {}); // lazy init

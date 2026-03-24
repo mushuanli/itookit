@@ -115,7 +115,7 @@ export async function getAssets(
 ): Promise<FSNode[]> {
     // 优先用资产子接口的专用方法
     if (fs.assets) {
-        const dirId = await fs.assets.getAssetDirectoryId(ownerIdOrPath);
+        const dirId = await fs.assets.getAssetDirId(ownerIdOrPath);
         if (!dirId) return [];
         return fs.getChildren(dirId);
     }

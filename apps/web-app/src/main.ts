@@ -19,7 +19,6 @@ import {
     StandardWorkspaceStrategy,
     SettingsWorkspaceStrategy,
     ChatWorkspaceStrategy,
-    AgentWorkspaceStrategy
 } from './strategies';
 // ✨ [修复 1] 引入接口用于显式类型声明
 import { WorkspaceStrategy } from './strategies/types';
@@ -150,7 +149,7 @@ async function bootstrap() {
         // 即使 Standard 策略没写 getEngine，访问它也是安全的（返回 undefined）
         const strategies: Record<string, WorkspaceStrategy> = {
             'standard': new StandardWorkspaceStrategy(vfsCore),
-            'agent': new AgentWorkspaceStrategy(vfsCore),
+            'agent': new StandardWorkspaceStrategy(vfsCore),
             'settings': new SettingsWorkspaceStrategy(settingsModule.factory, settingsModule.engine),
             'chat': new ChatWorkspaceStrategy(llmFactory, sessionEngine)
         };

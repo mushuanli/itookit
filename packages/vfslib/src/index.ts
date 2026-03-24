@@ -33,6 +33,14 @@ export { nullDevice, zeroDevice, randomDevice } from './devices';
 // ── 后端 ──
 export { MemoryBackend } from './backend';
 
+// ── セッションアダプター ──
+export { VFSModuleEngine } from './adapter-session/VFSModuleEngine';
+export {
+    BaseModuleService,
+    type ChangeListener,
+    type ModuleServiceOptions,
+} from './adapter-session/BaseModuleService';
+
 // ── 常量 ──
 export { ROOT_INO } from './engine/vfs-engine';
 

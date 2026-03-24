@@ -3,18 +3,23 @@
  * @desc Shared utility functions. No internal dependencies.
  */
 
-/** 判断是否为隐藏文件 */
+/** 判断是否为隐藏文件 (. 或 __ 前缀) */
 export const isHiddenFile = (name: string): boolean =>
   name.startsWith('.') || name.startsWith('__');
+
+/** 判断路径段是否为 asset 目录（单下划线前缀，如 _filename.md） */
+const isAssetDirSegment = (segment: string): boolean =>
+  segment.startsWith('_') && !segment.startsWith('__');
 
 export const shouldFilterNode = (node: {
   name: string;
   moduleId?: string;
   path?: string;
 }): boolean =>
-  (node.moduleId && isHiddenFile(node.moduleId)) ||
-  node.path?.split('/').some(isHiddenFile) ||
-  isHiddenFile(node.name);
+  (!!node.moduleId && isHiddenFile(node.moduleId)) ||
+  node.path?.split('/').some(s => isHiddenFile(s) || isAssetDirSegment(s)) ||
+  isHiddenFile(node.name) ||
+  isAssetDirSegment(node.name);
 
 export const stripExtension = (name: string): string => {
   const i = name.lastIndexOf('.');

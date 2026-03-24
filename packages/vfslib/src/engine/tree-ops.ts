@@ -5,10 +5,13 @@
 
 import type {
     IStorageBackend,
+    IRecordStore,
     InodeRecord,
 } from '@itookit/common';
 
-type StoreAccessor = Pick<IStorageBackend, 'inodes' | 'meta' | 'content'>;
+type StoreAccessor = Pick<IStorageBackend, 'inodes' | 'meta' | 'content'> & {
+    readonly records?: IRecordStore;
+};
 
 export async function deleteRecursive(
     store: StoreAccessor,
@@ -37,6 +40,11 @@ async function deleteWalk(
     const meta = await store.meta.getMeta(ino);
     if (meta?.contentRef) {
         await store.content.deleteData(meta.contentRef);
+    }
+
+    // Seqfile stores key-value data in the records table; clean it up to avoid orphans.
+    if (inode.type === 'seqfile' && store.records) {
+        await store.records.clearRecordFields(ino);
     }
 
     await store.meta.deleteMeta(ino);
@@ -100,6 +108,14 @@ async function copyWalk(
             modifiedAt: now,
             version: 0,
         });
+    }
+
+    // Copy seqfile records to the new inode.
+    if (sourceInode.type === 'seqfile' && store.records) {
+        const entries = await store.records.getAllRecordFields(sourceIno);
+        for (const [field, value] of Object.entries(entries)) {
+            await store.records.setRecordField(newIno, field, value);
+        }
     }
 
     if (sourceInode.type === 'directory') {

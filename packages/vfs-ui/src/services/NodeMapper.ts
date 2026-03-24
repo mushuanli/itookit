@@ -6,7 +6,7 @@ import type { EngineNode } from '@itookit/common';
 import type { VFSNodeUI, ParseResult } from '../contracts/types';
 import type { IconResolver, ContentParserResolver } from './FileTypeRegistry';
 import { parseFileInfo } from '../utils/parser';
-import { isHiddenFile, stripExtension, getExtension } from '../utils/helpers';
+import { shouldFilterNode, stripExtension, getExtension } from '../utils/helpers';
 
 export const mapEngineNodeToUIItem = (
   node: EngineNode,
@@ -74,5 +74,5 @@ export const mapEngineTreeToUIItems = (
   parserResolver?: ContentParserResolver
 ): VFSNodeUI[] =>
   nodes
-    ?.filter(n => !isHiddenFile(n.name))
+    ?.filter(n => !shouldFilterNode(n))
     .map(n => mapEngineNodeToUIItem(n, iconResolver, parserResolver)) || [];

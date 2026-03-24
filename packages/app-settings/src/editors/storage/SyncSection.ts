@@ -10,7 +10,7 @@ import {
   SyncUIEvent,
   UISyncState
 } from '../../types/sync';
-import { SyncConflict } from '@itookit/vfs';
+import type { SyncConflict } from '../../types/sync';
 import { StorageUtils } from './StorageUtils';
 
 /**
