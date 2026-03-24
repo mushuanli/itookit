@@ -14,11 +14,13 @@ export interface moduleConfig{
 export interface SystemConfig {
     elementId: string;
     moduleName: string;
-    type?: WorkspaceType; 
+    type?: WorkspaceType;
     isProtected?: boolean;
-    plugins?: string[]; 
+    /** System modules bypass VFS access control (hidden files, cross-module access) */
+    isSystem?: boolean;
+    plugins?: string[];
     mentionScope?: string[];
-    aiEnabled?: boolean; 
+    aiEnabled?: boolean;
 }
 
 // 3. 混合类型：配置现在只需引用文件类型的 Key
@@ -55,6 +57,7 @@ export const WORKSPACES: WorkspaceConfig[] = [
         elementId: 'agent-workspace',
         moduleName: FS_MODULE_AGENTS,
         syncEnabled: true,
+        isSystem: true, // needs to write hidden files (.connections, .agents, etc.)
 
         type: 'agent',
         title: 'Agents',
@@ -75,11 +78,12 @@ export const WORKSPACES: WorkspaceConfig[] = [
         // 既支持 Anki 卡片，也支持普通 Markdown
         supportedFileTypes: ['anki', 'markdown'], 
         plugins: [
-            'cloze:cloze', 
-            'cloze:cloze-controls', 
-            'autocomplete:mention', 
+            'cloze:cloze',
+            'cloze:cloze-controls',
+            'cloze:memory',
+            'autocomplete:mention',
             'autocomplete:tag'
-        ], 
+        ],
         mentionScope: ['*'], 
         aiEnabled: true
     },

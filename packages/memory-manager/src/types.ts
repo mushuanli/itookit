@@ -1,7 +1,7 @@
 /**
  * @file memory-manager/types.ts
  */
-import type { VFS } from '@itookit/vfs';
+import type { IVFSManager } from '@itookit/common';
 import { EditorFactory, ISessionEngine, SessionUIOptions, NavigationRequest } from '@itookit/common';
 import type { FileTypeDefinition, CustomEditorResolver } from '@itookit/vfs-ui';
 
@@ -19,7 +19,7 @@ export interface MemoryManagerConfig {
      * VFS 实例 (与 moduleName 配合使用)
      * 如果提供了 customEngine，则此项可选
      */
-    vfs?: VFS;
+    vfs?: IVFSManager;
 
     /** 
      * 自定义引擎实例 (推荐)。

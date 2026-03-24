@@ -4,6 +4,7 @@
  */
 
 import type { FSEventType, FSEvent, FSEventPayloadMap } from '@itookit/common';
+import { busDEBUG } from '../utils/debug';
 
 type Handler<E extends FSEventType = FSEventType> = (event: FSEvent<E>) => void;
 
@@ -18,6 +19,7 @@ export class EventBus {
             this.handlers.set(event, set);
         }
         set.add(callback);
+        busDEBUG.on(event, set.size);
         return () => { set!.delete(callback); };
     }
 
@@ -41,6 +43,10 @@ export class EventBus {
         };
 
         const set = this.handlers.get(type);
+        busDEBUG.emit(type, (set?.size ?? 0) + this.anyHandlers.size, {
+            moduleId: extra?.moduleId,
+            fromTransaction: extra?.fromTransaction,
+        });
         if (set) {
             for (const h of set) {
                 try { h(event); } catch { /* swallow */ }

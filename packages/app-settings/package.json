@@ -33,17 +33,17 @@
   },
   "peerDependencies": {
     "@itookit/common": "workspace:*",
-    "@itookit/vfs": "workspace:*",
-    "@itookit/llm-driver": "workspace:*",
-    "@itookit/llm-engine": "workspace:*",
-    "@itookit/llm-ui": "workspace:*"
-  },
-  "devDependencies": {
-    "@itookit/common": "workspace:*",
-    "@itookit/vfs": "workspace:*",
     "@itookit/llm-driver": "workspace:*",
     "@itookit/llm-engine": "workspace:*",
     "@itookit/llm-ui": "workspace:*",
+    "@itookit/memory-manager": "workspace:*"
+  },
+  "devDependencies": {
+    "@itookit/common": "workspace:*",
+    "@itookit/llm-driver": "workspace:*",
+    "@itookit/llm-engine": "workspace:*",
+    "@itookit/llm-ui": "workspace:*",
+    "@itookit/memory-manager": "workspace:*",
     "@types/node": "^20.19.25",
     "typescript": "^5.9.3",
     "vite": "^5.4.21",

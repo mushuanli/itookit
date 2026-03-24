@@ -1,23 +1,16 @@
 /**
  * @file: app-settings/services/SettingsService.ts
  */
-import { FS_MODULE_AGENTS } from '@itookit/common';
-import {    VFSEvent } from '@itookit/vfs';
-import { 
-    VFS, 
-    ErrorCode, 
-    VFSEventType, 
-    VNodeType,
-    VFSError
-} from '@itookit/vfs';
+import { FS_MODULE_AGENTS, CONFIG_MODULE } from '@itookit/common';
+import type { IVFSManager, VFSManagerEvent, FSNode } from '@itookit/common';
+import { FSAlreadyExistsError, FSNotFoundError } from '@itookit/common';
+import type { SyncMode } from '../types/sync';
 import { SettingsState, Contact, Tag } from '../types/types';
-
-const CONFIG_MODULE = '__config';
+import { SnapshotService } from './SnapshotService';
 
 // 定义不向用户展示的系统内部模块
 // agents 模块现在由 VFSAgentService 管理，视为系统模块
 const SYSTEM_MODULES = ['__config', '__vfs_meta__', 'settings_ui', FS_MODULE_AGENTS];
-const SNAPSHOT_PREFIX = 'snapshot_';
 
 const FILES = {
     tags: '/tags.json',
@@ -28,8 +21,6 @@ const FILES = {
 // ============================================
 // 类型定义
 // ============================================
-
-export type SyncMode = 'standard' | 'force_push' | 'force_pull';
 
 // [新增] 同步配置接口 (Fix Error 1)
 export interface SyncConfig {
@@ -47,14 +38,8 @@ export interface SyncStatus {
     errorMessage?: string;
 }
 
-// [修改] 快照接口 (Fix Error 5, 6)
-export interface LocalSnapshot {
-    name: string;
-    displayName: string;
-    createdAt: number;
-    size: number;
-    description: string;
-}
+// Re-export so existing callers don't need to change imports
+export type { LocalSnapshot } from './SnapshotService';
 
 // Helper types for Sync Protocol
 interface FileMeta {
@@ -78,7 +63,7 @@ type ChangeListener = () => void;
  * 3. 协调 VFS 配置模块的挂载
  */
 export class SettingsService {
-    private vfs: VFS;
+    public readonly vfs: IVFSManager;
     private dbName: string;
 
     private state: Pick<SettingsState, 'tags' | 'contacts'> = {
@@ -99,9 +84,12 @@ export class SettingsService {
     private syncTimer: ReturnType<typeof setTimeout> | null = null;
     private eventUnsubscribers: Array<() => void> = [];
 
-    constructor(vfs: VFS, dbName: string = 'MindOS') {
+    public readonly snapshot: SnapshotService;
+
+    constructor(vfs: IVFSManager, dbName: string = 'MindOS-v2') {
         this.vfs = vfs;
         this.dbName = dbName;
+        this.snapshot = new SnapshotService(vfs, dbName);
     }
 
     // =========================================================
@@ -114,8 +102,9 @@ export class SettingsService {
         // 1. 挂载配置存储模块
         if (!this.vfs.getModule(CONFIG_MODULE)) {
             try {
-                await this.vfs.mount(CONFIG_MODULE, { 
-                    description: 'Settings Persistence' 
+                await this.vfs.mount(CONFIG_MODULE, {
+                    description: 'Settings Persistence',
+                    isSystem: true,
                 });
             } catch (e: any) {
                 if (!this.isAlreadyExistsError(e)) throw e;
@@ -140,48 +129,37 @@ export class SettingsService {
      * 检查是否为"已存在"错误
      */
     private isAlreadyExistsError(e: any): boolean {
-        if (e instanceof VFSError) {
-            return e.code === ErrorCode.ALREADY_EXISTS;
-        }
-        return e.code === ErrorCode.ALREADY_EXISTS || 
-               e.message?.includes('exists');
+        return (
+            e instanceof FSAlreadyExistsError ||
+            e?.code === 'EEXIST' ||
+            e?.code === 'ALREADY_EXISTS' ||
+            String(e?.message).toLowerCase().includes('exist')
+        );
     }
 
     /**
      * 检查是否为"未找到"错误
      */
     private isNotFoundError(e: any): boolean {
-        if (e instanceof VFSError) {
-            return e.code === ErrorCode.NOT_FOUND;
-        }
-        return e.code === ErrorCode.NOT_FOUND || 
-               e.message?.toLowerCase().includes('not found');
+        return (
+            e instanceof FSNotFoundError ||
+            e?.code === 'ENOENT' ||
+            e?.code === 'NOT_FOUND' ||
+            String(e?.message).toLowerCase().includes('not found')
+        );
     }
 
     /**
      * 监听 VFS 事件以保持 Tag 计数同步
      */
     private bindVFSEvents(): void {
-        const eventsToWatch: VFSEventType[] = [
-            VFSEventType.NODE_CREATED,
-            VFSEventType.NODE_UPDATED,
-            VFSEventType.NODE_DELETED
-        ];
-
-        const handler = (event: VFSEvent) => {
-            // 过滤掉配置模块自身的变更
-            if (event.path && event.path.startsWith(`/${CONFIG_MODULE}`)) {
-                return;
-            }
-
-            // 防抖
+        const debounce = () => {
             if (this.syncTimer) clearTimeout(this.syncTimer);
             this.syncTimer = setTimeout(() => {
                 this.syncTags().then(() => this.notify());
 
-                // Auto-Sync
-                if (this.syncConfig.autoSync && 
-                    this.syncStatus.state !== 'syncing' && 
+                if (this.syncConfig.autoSync &&
+                    this.syncStatus.state !== 'syncing' &&
                     this.syncConfig.serverUrl) {
                     console.log('[AutoSync] Triggered');
                     this.triggerSync().catch(e => console.error('AutoSync failed', e));
@@ -189,10 +167,19 @@ export class SettingsService {
             }, 2000);
         };
 
-        eventsToWatch.forEach(evt => {
-            const unsubscribe = this.vfs.on(evt, handler);
-            this.eventUnsubscribers.push(unsubscribe);
-        });
+        const isConfigEvent = (moduleId: string) => moduleId === CONFIG_MODULE;
+
+        this.eventUnsubscribers.push(
+            this.vfs.on('node:created', (e: VFSManagerEvent<'node:created'>) => {
+                if (!isConfigEvent(e.payload.moduleId)) debounce();
+            }),
+            this.vfs.on('node:updated', (e: VFSManagerEvent<'node:updated'>) => {
+                if (!isConfigEvent(e.payload.moduleId)) debounce();
+            }),
+            this.vfs.on('node:deleted', (e: VFSManagerEvent<'node:deleted'>) => {
+                if (!isConfigEvent(e.payload.moduleId)) debounce();
+            }),
+        );
     }
 
     // =========================================================
@@ -219,15 +206,7 @@ export class SettingsService {
     private async saveEntity<K extends keyof Pick<SettingsState, 'tags' | 'contacts'>>(key: K): Promise<void> {
         const path = FILES[key];
         const content = JSON.stringify(this.state[key], null, 2);
-        try {
-            await this.vfs.write(CONFIG_MODULE, path, content);
-        } catch (e: any) {
-            if (this.isNotFoundError(e)) {
-                await this.vfs.createFile(CONFIG_MODULE, path, content);
-            } else {
-                throw e;
-            }
-        }
+        await this.vfs.write(CONFIG_MODULE, path, content);
         if (key !== 'tags') this.notify();
     }
 
@@ -288,12 +267,11 @@ export class SettingsService {
             this.state.tags = mergedTags;
             const newStateStr = JSON.stringify(this.state.tags);
 
-            this.saveEntity('tags').catch((err) => 
-                console.error('Failed to save merged tags', err)
-            );
-
-            if (oldStateStr !== newStateStr && this.initialized) {
-                this.notify();
+            if (oldStateStr !== newStateStr) {
+                this.saveEntity('tags').catch((err) =>
+                    console.error('Failed to save merged tags', err)
+                );
+                if (this.initialized) this.notify();
             }
         } catch (e) {
             console.error('[SettingsService] Failed to sync tags:', e);
@@ -314,11 +292,14 @@ export class SettingsService {
         // 注意：VFS 可能没有直接的 deleteTagDefinition
         // 需要通过 TagManager 或者从所有节点移除该标签
         try {
-            // 尝试调用删除标签定义（如果 VFS 支持）
             const tagNodes = await this.vfs.findByTag(tag.name);
-            for (const nodeId of tagNodes) {
-                await this.vfs.removeTag(nodeId, tag.name);
-            }
+            await Promise.all(tagNodes.map(async nodeId => {
+                const nodeWithModule = await this.vfs.getNodeById(nodeId);
+                if (nodeWithModule) {
+                    const engine = this.vfs.getEngine(nodeWithModule.moduleName);
+                    await engine.tags?.removeTag(nodeId, tag.name);
+                }
+            }));
         } catch (e) {
             console.warn('Failed to cleanup tag from nodes', e);
         }
@@ -355,14 +336,7 @@ export class SettingsService {
 
     async saveSyncConfig(config: SyncConfig): Promise<void> {
         this.syncConfig = config;
-        const content = JSON.stringify(config, null, 2);
-        try {
-            await this.vfs.write(CONFIG_MODULE, FILES.sync, content);
-        } catch (e: any) {
-            if (this.isNotFoundError(e)) {
-                await this.vfs.createFile(CONFIG_MODULE, FILES.sync, content);
-            }
-        }
+        await this.vfs.write(CONFIG_MODULE, FILES.sync, JSON.stringify(config, null, 2));
     }
 
     async testConnection(url: string, _user: string, token: string): Promise<boolean> {
@@ -475,69 +449,59 @@ export class SettingsService {
         const modules = this.vfs.getAllModules().filter(m => !SYSTEM_MODULES.includes(m.name));
 
         for (const mod of modules) {
-            const modInfo = this.vfs.getModule(mod.name);
-            if (modInfo && modInfo.rootNodeId) {
-                // 使用 kernel 获取根节点
-                const rootNode = await this.vfs.kernel.getNode(modInfo.rootNodeId);
-                if (rootNode) {
-                    await this._traverseAndIndex(mod.name, rootNode, files);
-                }
+            try {
+                await this.traverseModuleFiles(mod.name, files);
+            } catch (e) {
+                console.warn(`[SettingsService] Failed to index module ${mod.name}`, e);
             }
         }
         return files;
     }
 
-    private async _traverseAndIndex(
-        _moduleName: string, 
-        node: { nodeId: string; type: any; path: string; modifiedAt: number }, 
-        list: FileMeta[]
-    ): Promise<void> {
-        if (node.type === VNodeType.FILE) {
-            // 使用 kernel 读取内容
-            const content = await this.vfs.kernel.read(node.nodeId);
+    private async traverseModuleFiles(moduleName: string, list: FileMeta[]): Promise<void> {
+        const engine = this.vfs.getEngine(moduleName);
 
-            let buffer: ArrayBuffer;
-            if (typeof content === 'string') {
-                buffer = new TextEncoder().encode(content).buffer;
-            } else {
-                buffer = content as ArrayBuffer;
-            }
-
-            const hash = await this.computeSHA256(buffer);
-
-            list.push({
-                path: node.path,
-                hash: hash,
-                mtime: node.modifiedAt,
-                is_deleted: false
-            });
-        } else if (node.type === VNodeType.DIRECTORY) {
-            // 使用 kernel 读取子节点
-            const children = await this.vfs.kernel.readdir(node.nodeId);
+        const walk = async (parentIdOrPath: string): Promise<void> => {
+            const children = await engine.getChildren(parentIdOrPath) as FSNode[];
             for (const child of children) {
-                await this._traverseAndIndex(_moduleName, child, list);
+                if (child.type === 'file') {
+                    try {
+                        const raw = await engine.readContent(child.id);
+                        const buffer = this.toArrayBuffer(raw);
+                        const hash = await this.computeSHA256(buffer);
+                        list.push({
+                            path: `/${moduleName}${child.path}`,
+                            hash,
+                            mtime: child.modifiedAt,
+                            is_deleted: false,
+                        });
+                    } catch { /* skip */ }
+                } else if (child.type === 'directory') {
+                    await walk(child.id);
+                }
             }
-        }
+        };
+
+        await walk('/');
     }
 
     private async uploadFile(systemPath: string, token: string): Promise<void> {
         try {
-            // 使用 kernel 解析路径并读取
-            const nodeId = await this.vfs.kernel.resolvePathToId(systemPath);
+            const parts = systemPath.split('/').filter(Boolean);
+            const moduleName = parts[0];
+            const innerPath = '/' + parts.slice(1).join('/');
 
-            if (nodeId) {
-                const content = await this.vfs.kernel.read(nodeId);
-                const blob = new Blob([content]);
+            const content = await this.vfs.read(moduleName, innerPath);
+            const blob = new Blob([this.toArrayBuffer(content)]);
 
-                const formData = new FormData();
-                formData.append(systemPath, blob);
+            const formData = new FormData();
+            formData.append(systemPath, blob);
 
-                await fetch(`${this.syncConfig.serverUrl}/api/sync/upload`, {
-                    method: 'POST',
-                    headers: { 'Authorization': `Bearer ${token}` },
-                    body: formData
-                });
-            }
+            await fetch(`${this.syncConfig.serverUrl}/api/sync/upload`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` },
+                body: formData
+            });
         } catch (e) {
             console.warn(`Failed to upload ${systemPath}`, e);
         }
@@ -557,29 +521,18 @@ export class SettingsService {
             if (!res.ok) throw new Error('Download failed');
             const arrayBuffer = await res.arrayBuffer();
 
-            // 解析系统路径: /moduleName/relative/path
             const parts = meta.path.split('/').filter(Boolean);
             const moduleName = parts[0];
             const userPath = '/' + parts.slice(1).join('/');
 
             if (this.vfs.getModule(moduleName)) {
-                // 尝试写入，如果文件不存在则创建
-                try {
-                    await this.vfs.write(moduleName, userPath, arrayBuffer);
-                } catch (e: any) {
-                    if (this.isNotFoundError(e)) {
-                        // 确保父目录存在并创建文件
-                        await this.ensureParentDirectories(moduleName, userPath);
-                        await this.vfs.createFile(moduleName, userPath, arrayBuffer);
-                    } else {
-                        throw e;
-                    }
-                }
+                // vfs.write has upsert semantics (creates intermediate directories)
+                await this.vfs.write(moduleName, userPath, arrayBuffer);
 
-                // 更新元数据
-                const node = await this.vfs.getNode(moduleName, userPath);
+                const engine = this.vfs.getEngine(moduleName);
+                const node = await engine.getNode(userPath);
                 if (node) {
-                    await this.vfs.updateMetadata(node.nodeId, { syncedAt: meta.mtime });
+                    await engine.updateMetadata(node.id, { syncedAt: meta.mtime });
                 }
             }
         } catch (e) {
@@ -587,27 +540,13 @@ export class SettingsService {
         }
     }
 
-    /**
-     * 确保父目录存在
-     */
-    private async ensureParentDirectories(moduleName: string, userPath: string): Promise<void> {
-        const parts = userPath.split('/').filter(Boolean);
-        parts.pop(); // 移除文件名
-
-        let currentPath = '';
-        for (const part of parts) {
-            currentPath += '/' + part;
-            const existing = await this.vfs.getNode(moduleName, currentPath);
-            if (!existing) {
-                try {
-                    await this.vfs.createDirectory(moduleName, currentPath);
-                } catch (e: any) {
-                    if (!this.isAlreadyExistsError(e)) {
-                        throw e;
-                    }
-                }
-            }
+    // Note: same logic as toBuffer() in @itookit/vfslib — duplicated here due to package boundary
+    private toArrayBuffer(data: string | ArrayBuffer | Uint8Array): ArrayBuffer {
+        if (typeof data === 'string') return new TextEncoder().encode(data).buffer as ArrayBuffer;
+        if (data instanceof Uint8Array) {
+            return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
         }
+        return data;
     }
 
     private async computeSHA256(buffer: ArrayBuffer): Promise<string> {
@@ -641,7 +580,7 @@ export class SettingsService {
 
         for (const name of moduleNames) {
             try {
-                const moduleDump = await this.vfs.exportModule(name);
+                const moduleDump = await this.vfs.maintenance.exportModule(name);
                 exportData.modules.push(moduleDump);
             } catch (e) {
                 console.warn(`Failed to export module ${name}`, e);
@@ -679,7 +618,7 @@ export class SettingsService {
 
             for (const modData of selectedModulesData) {
                 try {
-                    await this.vfs.importModule(modData);
+                    await this.vfs.maintenance.importModule(modData);
                 } catch (e) {
                     console.error(`Failed to import module ${modData?.module?.name}`, e);
                 }
@@ -695,162 +634,16 @@ export class SettingsService {
     }
 
     // =========================================================
-    // 本地快照管理 (IndexedDB Level)
+    // 本地快照管理 — 委托给 SnapshotService
     // =========================================================
 
-    async listLocalSnapshots(): Promise<LocalSnapshot[]> {
-        if (!window.indexedDB.databases) {
-            return [];
-        }
-        const dbs = await window.indexedDB.databases();
-        const snapshots: LocalSnapshot[] = [];
-        
-        for (const db of dbs) {
-            if (db.name && db.name.startsWith(SNAPSHOT_PREFIX)) {
-                const parts = db.name.split('_');
-                const timestamp = parseInt(parts[1]);
-                if (!isNaN(timestamp)) {
-                    snapshots.push({
-                        name: db.name,
-                        displayName: new Date(timestamp).toLocaleString(),
-                        createdAt: timestamp,
-                        size: 0,
-                        description: ''
-                    });
-                }
-            }
-        }
-        return snapshots.sort((a, b) => b.createdAt - a.createdAt);
-    }
-
-    async createSnapshot(): Promise<void> {
-        const targetDbName = `${SNAPSHOT_PREFIX}${Date.now()}`;
-        await this.copyDatabase(this.dbName, targetDbName);
-    }
+    listLocalSnapshots() { return this.snapshot.listLocalSnapshots(); }
+    createSnapshot()     { return this.snapshot.createSnapshot(); }
+    deleteSnapshot(name: string) { return this.snapshot.deleteSnapshot(name); }
 
     async restoreSnapshot(snapshotName: string): Promise<void> {
-        await this.vfs.shutdown();
-        await this.copyDatabase(snapshotName, this.dbName);
-        // 注意：恢复后需要重新初始化 VFS
-    }
-
-    async deleteSnapshot(snapshotName: string): Promise<void> {
-        return new Promise((resolve, reject) => {
-            const req = window.indexedDB.deleteDatabase(snapshotName);
-            req.onsuccess = () => resolve();
-            req.onerror = () => reject(req.error);
-            req.onblocked = () => console.warn(`Delete ${snapshotName} blocked`);
-        });
-    }
-
-    /**
-     * 复制 IndexedDB 数据库
-     */
-    private async copyDatabase(sourceName: string, targetName: string): Promise<void> {
-        return new Promise((resolve, reject) => {
-            const openReq = indexedDB.open(sourceName);
-
-            openReq.onerror = () => reject(openReq.error);
-
-            openReq.onsuccess = () => {
-                const sourceDb = openReq.result;
-                const storeNames = Array.from(sourceDb.objectStoreNames);
-
-                // 删除目标数据库（如果存在）
-                const deleteReq = indexedDB.deleteDatabase(targetName);
-                deleteReq.onsuccess = deleteReq.onerror = () => {
-                    // 创建目标数据库
-                    const createReq = indexedDB.open(targetName, sourceDb.version);
-
-                    createReq.onupgradeneeded = (event) => {
-                        const targetDb = (event.target as IDBOpenDBRequest).result;
-
-                        // 复制所有 object stores 的结构
-                        for (const storeName of storeNames) {
-                            const sourceStore = sourceDb
-                                .transaction(storeName, 'readonly')
-                                .objectStore(storeName);
-
-                            const targetStore = targetDb.createObjectStore(storeName, {
-                                keyPath: sourceStore.keyPath as string | string[],
-                                autoIncrement: sourceStore.autoIncrement
-                            });
-
-                            // 复制索引
-                            for (const indexName of Array.from(sourceStore.indexNames)) {
-                                const index = sourceStore.index(indexName);
-                                targetStore.createIndex(indexName, index.keyPath as string | string[], {
-                                    unique: index.unique,
-                                    multiEntry: index.multiEntry
-                                });
-                            }
-                        }
-                    };
-
-                    createReq.onsuccess = async () => {
-                        const targetDb = createReq.result;
-
-                        try {
-                            // 复制数据
-                            for (const storeName of storeNames) {
-                                await this.copyStoreData(sourceDb, targetDb, storeName);
-                            }
-                            sourceDb.close();
-                            targetDb.close();
-                            resolve();
-                        } catch (e) {
-                            sourceDb.close();
-                            targetDb.close();
-                            reject(e);
-                        }
-                    };
-
-                    createReq.onerror = () => {
-                        sourceDb.close();
-                        reject(createReq.error);
-                    };
-                };
-            };
-        });
-    }
-
-    private copyStoreData(
-        sourceDb: IDBDatabase, 
-        targetDb: IDBDatabase, 
-        storeName: string
-    ): Promise<void> {
-        return new Promise((resolve, reject) => {
-            const sourceTx = sourceDb.transaction(storeName, 'readonly');
-            const sourceStore = sourceTx.objectStore(storeName);
-            const getAllReq = sourceStore.getAll();
-
-            getAllReq.onsuccess = () => {
-                const data = getAllReq.result;
-                const targetTx = targetDb.transaction(storeName, 'readwrite');
-                const targetStore = targetTx.objectStore(storeName);
-
-                let completed = 0;
-                const total = data.length;
-
-                if (total === 0) {
-                    resolve();
-                    return;
-                }
-
-                for (const item of data) {
-                    const putReq = targetStore.put(item);
-                    putReq.onsuccess = () => {
-                        completed++;
-                        if (completed === total) {
-                            resolve();
-                        }
-                    };
-                    putReq.onerror = () => reject(putReq.error);
-                }
-            };
-
-            getAllReq.onerror = () => reject(getAllReq.error);
-        });
+        await this.snapshot.restoreSnapshot(snapshotName);
+        // 恢复后需要重新初始化 VFS
     }
 
     // =========================================================
@@ -858,18 +651,18 @@ export class SettingsService {
     // =========================================================
 
     async createFullBackup(): Promise<string> {
-        return this.vfs.createBackup();
+        return this.vfs.maintenance.createBackup();
     }
 
     async restoreFullBackup(jsonContent: string): Promise<void> {
-        await this.vfs.restoreBackup(jsonContent);
+        await this.vfs.maintenance.restoreBackup(jsonContent);
         this.initialized = false;
         await this.init();
     }
 
     async factoryReset(): Promise<void> {
         // 关闭 VFS
-        await this.vfs.shutdown();
+        await this.vfs.dispose();
         
         // 删除主数据库
         await new Promise<void>((resolve, reject) => {

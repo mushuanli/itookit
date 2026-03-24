@@ -80,6 +80,7 @@ import {
 } from '../utils/validation';
 import * as P from '../utils/path';
 import { encodeId, decodeId } from './id-mapper';
+import { moduleDEBUG } from '../utils/debug';
 
 export interface ModuleFSDeps {
     moduleId: string;
@@ -89,6 +90,8 @@ export interface ModuleFSDeps {
     access: AccessController;
     devices: DeviceRegistry;
     mountId?: string;
+    /** If true, the module bypasses all access control checks */
+    isSystem?: boolean;
 }
 
 export class ModuleFS implements IModuleFS {
@@ -120,7 +123,7 @@ export class ModuleFS implements IModuleFS {
         this.devices = deps.devices;
         this.scope = new ScopedView(deps.moduleId);
         this.mountId = deps.mountId ?? 'mount_0';
-        this.caller = { moduleId: deps.moduleId, isSystem: false };
+        this.caller = { moduleId: deps.moduleId, isSystem: deps.isSystem ?? false };
 
         const backend = this.engine.getBackend();
         this.capabilities = Object.freeze({
@@ -172,7 +175,9 @@ export class ModuleFS implements IModuleFS {
 
     on<E extends FSEventType>(event: E, callback: (event: FSEvent<E>) => void): () => void {
         return this.bus.on(event, (evt) => {
-            if (evt.moduleId === this.moduleId || !evt.moduleId) callback(evt);
+            const pass = evt.moduleId === this.moduleId || !evt.moduleId;
+            moduleDEBUG.filter(this.moduleId, event, pass, evt.moduleId);
+            if (pass) callback(evt);
         });
     }
 

@@ -1,7 +1,8 @@
 // @file: app-settings/services/SyncService.ts
 
-import { VFS, VFSEventType } from '@itookit/vfs';
-import { SyncPlugin, SyncConfig as PluginSyncConfig, SyncState as PluginSyncState, SyncConflict } from '@itookit/vfs';
+import { CONFIG_MODULE } from '@itookit/common';
+import type { IVFSManager } from '@itookit/common';
+import type { SyncConflict } from '../types/sync';
 import {
   AppSyncSettings,
   SyncMode,
@@ -12,15 +13,24 @@ import {
   SyncUIEvent
 } from '../types/sync';
 
-const CONFIG_MODULE = '__config';
+// Sync plugin is not yet available in vfslib — local stub interface
+interface ISyncPlugin {
+    reconfigure(config: any): Promise<void>;
+    triggerManualSync(mode: string): Promise<void>;
+    testConnection(url: string): Promise<boolean>;
+    reconnect(): Promise<void>;
+    resolveConflict(id: string, resolution: 'local' | 'remote'): Promise<void>;
+    getConflicts(): Promise<SyncConflict[]>;
+}
+
 const SYNC_CONFIG_PATH = '/sync_config.json';
 
 /**
  * 同步服务 - UI 层与 SyncPlugin 的桥接层
  */
 export class SyncService {
-  private vfs: VFS | null = null;
-  private plugin: SyncPlugin | null = null;
+  private vfs: IVFSManager | null = null;
+  private plugin: ISyncPlugin | null = null;
 
   // 使用应用层配置类型
   private settings: AppSyncSettings | null = null;
@@ -46,17 +56,19 @@ export class SyncService {
   /**
    * 初始化服务
    */
-  async init(vfs: VFS): Promise<void> {
+  async init(vfs: IVFSManager): Promise<void> {
     this.vfs = vfs;
-    this.plugin = vfs.getPlugin<SyncPlugin>('vfs-sync') ?? null;  // 修复类型问题
+    // SyncPlugin not yet available in vfslib — always null until implemented
+    this.plugin = null;
+
+    // Always load persisted settings regardless of plugin availability
+    await this.loadSettingsFromVFS();
 
     if (!this.plugin) {
-      console.warn('[SyncService] SyncPlugin not found');
-      this.updateStatus({ state: 'error', errorMessage: 'Sync Plugin Missing' });
+      console.warn('[SyncService] SyncPlugin not found — sync features unavailable');
       return;
     }
 
-    await this.loadSettingsFromVFS();
     this.bindPluginEvents();
 
     if (this.settings?.autoSync) {
@@ -69,9 +81,9 @@ export class SyncService {
   // ==================== 适配器逻辑 (Adapter Logic) ====================
 
   /**
-   * 核心：将 PluginSyncState (VFS) 映射回 AppSyncStatus (UI)
+   * 核心：将 any (sync plugin state) 映射回 AppSyncStatus (UI)
    */
-  private syncFromPluginState(pluginState: PluginSyncState): void {
+  private syncFromPluginState(pluginState: any): void {
     // 状态字符串映射
     const stateMap: Record<string, UISyncState> = {
       'idle': 'idle',
@@ -103,18 +115,14 @@ export class SyncService {
     if (!this.vfs) return;
 
     try {
-      const exists = await this.vfs.getNode(CONFIG_MODULE, SYNC_CONFIG_PATH);
-      if (exists) {
-        const content = await this.vfs.read(CONFIG_MODULE, SYNC_CONFIG_PATH);
-        const json = typeof content === 'string' ? content : new TextDecoder().decode(content as ArrayBuffer);
-        this.settings = JSON.parse(json);
-
-        // 加载后立即应用到底层插件
-        if (this.plugin && this.settings) {
-          await this.plugin.reconfigure(this.mapToPluginConfig(this.settings));
-        }
+      const content = await this.vfs.read(CONFIG_MODULE, SYNC_CONFIG_PATH);
+      const json = typeof content === 'string' ? content : new TextDecoder().decode(content as ArrayBuffer);
+      this.settings = JSON.parse(json);
+      if (this.plugin && this.settings) {
+        await this.plugin.reconfigure(this.mapToPluginConfig(this.settings));
       }
-    } catch (e) {
+    } catch {
+      // File not found or parse error — start with defaults
       this.settings = this.getDefaultSettings();
     }
   }
@@ -145,28 +153,8 @@ export class SyncService {
     this.settings = settings;
 
     // 1. 持久化到 VFS
-    const content = JSON.stringify(settings, null, 2);
-    try {
-      const exists = await this.vfs.getNode(CONFIG_MODULE, SYNC_CONFIG_PATH);
-      if (exists) {
-        await this.vfs.write(CONFIG_MODULE, SYNC_CONFIG_PATH, content);
-      } else {
-        await this.vfs.createFile(CONFIG_MODULE, SYNC_CONFIG_PATH, content);
-      }
-    } catch (e: any) {
-      // 如果模块不存在，尝试创建
-      if (e.message?.includes('not found')) {
-        try {
-          await this.vfs.mount(CONFIG_MODULE, { description: 'Configuration Storage' });
-          await this.vfs.createFile(CONFIG_MODULE, SYNC_CONFIG_PATH, content);
-        } catch (mountError) {
-          console.error('[SyncService] Failed to create config module', mountError);
-          throw mountError;
-        }
-      } else {
-        throw e;
-      }
-    }
+    // vfs.write has upsert semantics (creates file and intermediate dirs if needed)
+    await this.vfs.write(CONFIG_MODULE, SYNC_CONFIG_PATH, JSON.stringify(settings, null, 2));
 
     // 2. ✅ 使用 applyConfigToPlugin 代替直接调用
     await this.applyConfigToPlugin(settings);
@@ -306,7 +294,7 @@ export class SyncService {
     if (!this.vfs) return;
 
     // 监听 VFS 事件总线中的同步相关事件
-    const unsub = this.vfs.onAny((type: VFSEventType | string, event: any) => {
+    const unsub = this.vfs.onAny((type: string, event: any) => {
       // 处理自定义同步事件（Plugin 通过 EventBus 发送）
       const typeStr = String(type);
 
@@ -450,7 +438,7 @@ export class SyncService {
   private handlePluginEvent(type: string, event: any): void {
     switch (type) {
       case 'sync:state_changed':
-        const pluginState = event.data as PluginSyncState;
+        const pluginState = event.data as any;
         this.syncFromPluginState(pluginState);
         break;
 
@@ -524,7 +512,7 @@ export class SyncService {
   /**
    * 将 UI 配置映射到 Plugin 配置
    */
-  private mapToPluginConfig(uiConfig: AppSyncSettings): PluginSyncConfig {
+  private mapToPluginConfig(uiConfig: AppSyncSettings): any {
     return {
       moduleId: 'root',
       peerId: this.getOrCreatePeerId(),
