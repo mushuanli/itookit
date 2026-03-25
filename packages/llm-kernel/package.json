@@ -63,7 +63,7 @@
 
   "dependencies": {
     "@itookit/common": "workspace:*",
-    "@itookit/llm-driver": "workspace:*"
+    "@itookit/device-llm": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
@@ -74,6 +74,6 @@
     "vitest": "^1.6.0"
   },
   "peerDependencies": {
-    "@itookit/llm-driver": "workspace:*"
+    "@itookit/device-llm": "workspace:*"
   }
 }

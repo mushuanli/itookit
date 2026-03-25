@@ -28,7 +28,7 @@ import type { IStorageBackend } from '../storage/backend';
 import type { IMountRouter, MountPoint, MountOptions } from '../mount/mount';
 import type { ISyncService } from '../sync/sync';
 import type { IPluginManager } from '../plugin/plugin';
-import type { IDeviceManager } from '../device/device';
+import type { IDeviceManager, IDeviceDriver } from '../device/device';
 
 // ═══════════════════════════════════════════════════════════════
 // 模块管理类型
@@ -269,6 +269,16 @@ export interface IVFSManager {
 
     /** 设备管理 */
     readonly devices: IDeviceManager;
+
+    /**
+     * 注册设备驱动并在 /dev/<handlerId> 创建对应的设备文件节点。
+     *
+     * 相比 `devices.register()`，此方法额外将驱动"挂载"到 VFS 文件树，
+     * 使其可通过路径访问：`engine.openDevice('/dev/llm', opts)`。
+     *
+     * @param driver 已初始化的设备驱动
+     */
+    registerDevice(driver: IDeviceDriver): Promise<void>;
 
     /** 插件管理 */
     readonly plugins: IPluginManager;

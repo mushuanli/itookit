@@ -1,0 +1,163 @@
+// @file: common/interfaces/llm/message.ts
+// LLM 消息、工具调用、附件相关类型（提供商无关）。
+
+export type Role = 'system' | 'user' | 'assistant' | 'tool' | 'developer';
+
+// ─── Message Content Parts ────────────────────────────────────────────────────
+
+export interface MessageContentText {
+    type: 'text';
+    text: string;
+    cache_control?: { type: 'ephemeral' };
+}
+
+export interface MessageContentImage {
+    type: 'image_url' | 'image';
+    // OpenAI format
+    image_url?: { url: string; detail?: string; [key: string]: unknown };
+    // Anthropic format (source can be an object or url string)
+    source?: string | { type: string; media_type?: string; data?: string; url?: string; [key: string]: unknown };
+}
+
+export interface MessageContentAudio {
+    type: 'input_audio' | 'audio';
+    input_audio?: { data: string; format: string };
+    transcript?: string;
+}
+
+export interface MessageContentVideo {
+    type: 'video';
+    video: {
+        source?: string | { type: string; media_type?: string; data?: string; [key: string]: unknown };
+        url?: string;
+        file_id?: string;
+        data?: string;
+        mime_type?: string;
+        duration?: number;
+        [key: string]: unknown;
+    };
+}
+
+export interface FileData {
+    source?: string | { type: string; media_type?: string; data?: string; [key: string]: unknown };
+    url?: string;
+    file_id?: string;
+    data?: string;
+    filename?: string;
+    mime_type?: string;
+    [key: string]: unknown;
+}
+
+export interface MessageContentFile {
+    type: 'file' | 'document';
+    file?: FileData;
+    document?: FileData;
+}
+
+export interface MessageContentToolResult {
+    type: 'tool_result';
+    tool_use_id: string;
+    content: string | MessageContentPart[];
+    is_error?: boolean;
+}
+
+export interface MessageContentCodeExecution {
+    type: 'code_execution_result';
+    id?: string;
+    output?: string;
+    error?: string;
+}
+
+export interface MessageContentCitation {
+    type: 'citation';
+    text: string;
+    source?: string;
+    page?: number;
+}
+
+export type MessageContentPart =
+    | MessageContentText
+    | MessageContentImage
+    | MessageContentAudio
+    | MessageContentVideo
+    | MessageContentFile
+    | MessageContentToolResult
+    | MessageContentCodeExecution
+    | MessageContentCitation;
+
+export type MessageContent = string | MessageContentPart[];
+
+// ─── Tool Calls ───────────────────────────────────────────────────────────────
+
+export interface ToolDefinition {
+    type?: 'function' | 'computer_20241022' | 'bash_20241022' | 'text_editor_20241022' | 'mcp';
+    function?: {
+        name: string;
+        description?: string;
+        parameters?: Record<string, any>;
+        strict?: boolean;
+    };
+    // Anthropic built-in tools
+    name?: string;
+    display_width_px?: number;
+    display_height_px?: number;
+    display_number?: number;
+    computer_use?: Record<string, unknown>;
+    [key: string]: unknown;
+}
+
+export interface ToolCall {
+    id: string;
+    index?: number;
+    type: 'function' | 'computer_20241022' | 'bash_20241022' | 'text_editor_20241022' | 'mcp';
+    function?: { name?: string; arguments: string };
+    // Anthropic computer use
+    name?: string;
+    input?: Record<string, unknown>;
+    // MCP tool call
+    mcp?: { server_name: string; tool_name: string; arguments?: Record<string, unknown> };
+    // Computer use action
+    computer_use?: Record<string, unknown>;
+}
+
+export interface MCPToolCall {
+    server: string;
+    tool: string;
+    arguments?: Record<string, unknown>;
+}
+
+export interface ComputerUseAction {
+    type: 'screenshot' | 'mouse_move' | 'left_click' | 'right_click' | 'double_click'
+        | 'left_click_drag' | 'type' | 'key' | 'scroll' | 'cursor_position';
+    coordinate?: [number, number];
+    text?: string;
+    start_coordinate?: [number, number];
+    direction?: 'up' | 'down';
+    amount?: number;
+}
+
+// ─── Attachment ───────────────────────────────────────────────────────────────
+
+export interface Attachment {
+    name?: string;
+    type: string;       // 类型分类 ('image' | 'audio' | 'video' | 'file') 或 MIME type
+    source: string | File | Blob | ArrayBuffer;
+    size?: number;
+    filename?: string;
+    mimeType?: string;
+    options?: Record<string, any>;
+}
+
+// ─── Chat Message ─────────────────────────────────────────────────────────────
+
+export interface ChatMessage {
+    role: Role;
+    content: MessageContent;
+    name?: string;
+    tool_call_id?: string;
+    tool_calls?: ToolCall[];
+    audio?: { id?: string; data?: string; transcript?: string };
+    attachments?: Attachment[];
+    cache_control?: { type: 'ephemeral' };
+    tags?: string[];
+}

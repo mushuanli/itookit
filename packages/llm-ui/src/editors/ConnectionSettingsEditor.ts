@@ -1,10 +1,10 @@
 // @file: llm-ui/editors/ConnectionSettingsEditor.ts
 
 import { Modal, Toast, BaseSettingsEditor, generateShortUUID } from '@itookit/common';
-import { testLLMConnection, LLMConnection, LLM_PROVIDER_DEFAULTS, LLMModel } from '@itookit/llm-driver';
-import { IAgentManagementService } from '@itookit/llm-engine';
+import type { IConnectionService, ConnectionMeta, LLMConnection, LLMModel } from '@itookit/common';
+import { LLM_PROVIDER_DEFAULTS, testLLMConnection } from '@itookit/device-llm';
 
-export class ConnectionSettingsEditor extends BaseSettingsEditor<IAgentManagementService> {
+export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionService> {
     // 编辑弹窗中的临时状态
     private currentEditModels: LLMModel[] = [];
 
@@ -22,8 +22,8 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IAgentManagemen
             if (b.id === 'default') return 1;
 
             // Rule 2: Has API Key ?
-            const aHasKey = !!(a.apiKey && a.apiKey.trim().length > 0);
-            const bHasKey = !!(b.apiKey && b.apiKey.trim().length > 0);
+            const aHasKey = a.hasApiKey;
+            const bHasKey = b.hasApiKey;
 
             if (aHasKey && !bHasKey) return -1;
             if (!aHasKey && bHasKey) return 1;
@@ -61,9 +61,9 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IAgentManagemen
         this.bindEvents();
     }
 
-    private renderConnectionCard(conn: LLMConnection) {
+    private renderConnectionCard(conn: ConnectionMeta) {
         const isDefault = conn.id === 'default';
-        const hasKey = !!(conn.apiKey && conn.apiKey.trim().length > 0);
+        const hasKey = conn.hasApiKey;
 
         const provider = LLM_PROVIDER_DEFAULTS[conn.provider];
         // 优先使用连接内保存的模型列表，如果没有则回退到默认
@@ -90,7 +90,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IAgentManagemen
         const editBtnClass = hasKey ? 'settings-btn--secondary' : 'settings-btn--primary';
 
         return `
-            <div class="settings-connection-card ${isDefault ? 'settings-connection-card--default' : ''} ${statusClass}" data-id="${conn.id}">
+            <div class="settings-connection-card ${isDefault ? 'settings-connection-card--default' : ''} ${statusClass}" data-id="${conn.id}" data-name="${conn.name}">
                 <div class="settings-connection-card__header">
                     <h3 class="settings-connection-card__title">${conn.name}</h3>
                     ${badgeHtml}
@@ -138,13 +138,13 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IAgentManagemen
                 if (!card) return;
 
                 const id = card.dataset.id!;
-                const connection = (await this.service.getConnections()).find(c => c.id === id);
-                if (!connection) return;
 
                 if (target.closest('.settings-btn-edit')) {
-                    this.showEditModal(connection);
+                    // 编辑时加载完整连接（含 apiKey）供表单预填
+                    const connection = await this.service.getFullConnection(id);
+                    this.showEditModal(connection ?? null);
                 } else if (target.closest('.settings-btn-delete')) {
-                    this.deleteConnection(id, connection.name);
+                    this.deleteConnection(id, card.dataset.name ?? id);
                 }
             });
         }

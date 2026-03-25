@@ -7,8 +7,7 @@ import {
     UnifiedSearchResult,
     CollapseExpandResult
 } from '@itookit/common';
-import { LLMModel, type AgentType, AgentDefinition, } from '@itookit/llm-driver';
-import { IAgentManagementService } from '@itookit/llm-engine';
+import type { LLMModel, AgentType, AgentDefinition, IAgentManagementService } from '@itookit/common';
 
 /**
  * Agent 配置编辑器
@@ -126,8 +125,8 @@ export class AgentConfigEditor implements IEditor {
             if (a.id === 'default') return -1;
             if (b.id === 'default') return 1;
 
-            const aHasKey = !!(a.apiKey && a.apiKey.trim().length > 0);
-            const bHasKey = !!(b.apiKey && b.apiKey.trim().length > 0);
+            const aHasKey = a.hasApiKey;
+            const bHasKey = b.hasApiKey;
 
             if (aHasKey && !bHasKey) return -1;
             if (!aHasKey && bHasKey) return 1;
@@ -238,7 +237,7 @@ export class AgentConfigEditor implements IEditor {
                             <select class="agent-form-select" name="connectionId" id="connection-select">
                                 <option value="">-- 选择连接 --</option>
                                 ${connections.map(c => {
-            const hasKey = !!(c.apiKey && c.apiKey.trim().length > 0);
+            const hasKey = c.hasApiKey;
             const isDefault = c.id === 'default';
             // User Friendly Display
             let displayName = this.escapeHtml(c.name);

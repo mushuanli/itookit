@@ -19,28 +19,28 @@ export async function createVFS(options: VFSFactoryOptions): Promise<VFSInstance
         maxSymlinkDepth: options.maxSymlinkDepth,
     });
 
-    // Register built-in devices
-    engine.devices.register(nullDevice);
-    engine.devices.register(zeroDevice);
-    engine.devices.register(randomDevice);
-
-    // Register user plugins
+    // Register user plugins (before init)
     if (options.plugins) {
         for (const plugin of options.plugins) {
             engine.plugins.register(plugin);
         }
     }
 
-    // Register user devices
-    if (options.devices) {
-        for (const device of options.devices) {
-            engine.devices.register(device);
-        }
-    }
-
-    // Create manager and initialize
+    // Create manager and initialize (bootstraps /dev/ directory)
     const manager = new VFSManager(engine);
     await manager.initialize();
+
+    // Register built-in devices → creates /dev/null, /dev/zero, /dev/random
+    await manager.registerDevice(nullDevice);
+    await manager.registerDevice(zeroDevice);
+    await manager.registerDevice(randomDevice);
+
+    // Register user devices → creates /dev/<handlerId> for each
+    if (options.devices) {
+        for (const device of options.devices) {
+            await manager.registerDevice(device);
+        }
+    }
 
     // Mount additional backends
     if (options.additionalMounts) {

@@ -1,15 +1,10 @@
 // @file app-settings/types.ts
 
-// 从 common 导入类型
-import type { 
-    LLMConnection as CommonLLMConnection,
-} from '@itookit/llm-driver';
+// LLM 相关类型直接从 common 导入，避免对 device-llm / llm-engine 的间接依赖
+import type { LLMConnection, MCPServer } from '@itookit/common';
 
-import { MCPServer} from '@itookit/llm-engine';
-
-// 重新导出 LLMConnection，保持向后兼容
-export type LLMConnection = CommonLLMConnection;
-
+// 向后兼容重新导出
+export type { LLMConnection };
 
 export interface Tag {
     id: string;

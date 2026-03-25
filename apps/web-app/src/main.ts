@@ -9,10 +9,13 @@ import { FileTypeDefinition } from '@itookit/vfs-ui';
 import { NavigationRequest, NAVIGATION_EVENTS } from '@itookit/common';
 
 // 模块引入
-import { createSettingsModule } from '@itookit/app-settings';
+import { createSettingsModule, createSettingsFactory } from '@itookit/app-settings';
 import { createLLMFactory, createAgentEditorFactory, VFSAgentService } from '@itookit/llm-ui';
 // 引入 Engine 核心初始化方法和 SessionEngine
 import { initializeLLMEngine, LLMSessionEngine, chatFileParser } from '@itookit/llm-engine';
+// LLM 设备插件（连接配置的唯一守护者）
+import { LLMDeviceDriver } from '@itookit/device-llm';
+import { setKernelDeviceManager } from '@itookit/llm-kernel';
 
 // 策略引入
 import {
@@ -119,28 +122,36 @@ async function bootstrap() {
         // --- 1. 基础设施初始化 ---
         const vfsCore = await initVFS();
 
-        // --- 2. 核心服务层初始化 (重构关键点) ---
+        // --- 1.1 初始化 LLM 设备驱动（连接配置的唯一守护者） ---
+        // LLMDeviceDriver 管理连接存储（__llm VFS 模块），同时提供 LLM 通信接口。
+        // AgentExecutor 通过 IDeviceDriver ioctl 与其通信，apiKey 不离开 device 边界。
+        const llmDriver = new LLMDeviceDriver(vfsCore);
+        await llmDriver.init();              // 挂载 __llm 模块，加载默认连接
+        await vfsCore.registerDevice(llmDriver); // 注册驱动 + 创建 /dev/llm 设备文件
+        setKernelDeviceManager(vfsCore.devices);
 
-        // 2.1 初始化 Agent Service (管理 Prompt, Connection, Tools)
-        const agentService = new VFSAgentService(vfsCore);
+        // --- 2. 核心服务层初始化 ---
 
-        // 2.2 初始化 Session Engine (管理 .chat 文件持久化)
+        // 2.1 Settings 模块
+        const settingsModule = await createSettingsModule(vfsCore);
+
+        // 2.2 Agent Service（仅管理 Agent / MCP，连接操作委托给 IConnectionService）
+        const agentService = new VFSAgentService(vfsCore, llmDriver);
+
+        // 2.3 Session Engine (管理 .chat 文件持久化)
         const sessionEngine = new LLMSessionEngine(vfsCore);
 
-        // 2.3 !!! 初始化 LLM Kernel & Registry !!!
-        // 这一步至关重要，它会启动全局 SessionRegistry 和 Kernel
-        await initializeLLMEngine({
+        // 2.4 初始化 LLM Kernel & Registry
+        await initializeLLMEngine({ agentService, sessionEngine, maxConcurrent: 20 });
+
+        // 2.5 Settings 编辑器工厂（ConnectionSettingsEditor 通过 IDeviceManager 访问连接）
+        const settingsFactory = createSettingsFactory(
+            settingsModule.service,
             agentService,
-            sessionEngine,
-            maxConcurrent: 20, // 配置最大并发任务数
-            // plugins: [...] // 如果有 Kernel 插件在此传入
-        });
+            llmDriver,  // IConnectionService → ConnectionSettingsEditor 直接调用
+        );
 
-        // 2.4 Settings 模块
-        const settingsModule = await createSettingsModule(vfsCore, agentService);
-
-        // 2. 创建 UI Factories
-        // ✅ 优化：Factory 只需关注 AgentService
+        // 创建 UI Factories
         const llmFactory = createLLMFactory(agentService);
         const agentFactory = createAgentEditorFactory(agentService);
 
@@ -150,7 +161,7 @@ async function bootstrap() {
         const strategies: Record<string, WorkspaceStrategy> = {
             'standard': new StandardWorkspaceStrategy(vfsCore),
             'agent': new StandardWorkspaceStrategy(vfsCore),
-            'settings': new SettingsWorkspaceStrategy(settingsModule.factory, settingsModule.engine),
+            'settings': new SettingsWorkspaceStrategy(settingsFactory, settingsModule.engine),
             'chat': new ChatWorkspaceStrategy(llmFactory, sessionEngine)
         };
 

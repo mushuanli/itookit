@@ -3,16 +3,9 @@
 import { IExecutor, ExecutorConfig } from '../core/interfaces';
 import { IExecutionContext } from '../core/execution-context';
 import { ExecutionResult, ExecutorType, TokenUsage } from '../core/types';
-import {
-    LLMDriver,
-    ChatMessage,
-    LLMConnection,
-    ChatCompletionChunk,
-    ChatCompletionResponse,
-    ChatCompletionParams,
-    Attachment,
-    ToolCall  // 添加 ToolCall 类型导入
-} from '@itookit/llm-driver';
+import { getKernelDeviceManager } from '../core/device-registry';
+import type { IDeviceHandle, DeviceContext, ChatMessage, ChatCompletionChunk, ChatCompletionResponse, ChatCompletionParams, Attachment, ToolCall } from '@itookit/common';
+import { createDeviceHandle } from '@itookit/common';
 
 /**
  * Agent 输入类型
@@ -41,7 +34,8 @@ export function isAgentInput(input: unknown): input is AgentInput {
  */
 export interface AgentExecutorConfig extends ExecutorConfig {
     type: 'agent';
-    connection: LLMConnection;
+    /** 引用连接 ID，由 LLMDeviceDriver 在 open() 时解析为完整连接 */
+    connectionId?: string;
     model?: string;
     systemPrompt?: string;
     temperature?: number;
@@ -100,17 +94,38 @@ interface ToolCallAccumulator {
 export class AgentExecutor implements IExecutor {
     readonly type: ExecutorType = 'agent';
 
-    private driver: LLMDriver;
+    /** 当前会话的设备句柄，懒初始化（首次执行时打开会话） */
+    private _deviceHandle: IDeviceHandle | null = null;
 
     constructor(
         public readonly id: string,
         public readonly name: string,
         private config: AgentExecutorConfig
-    ) {
-        this.driver = new LLMDriver({
-            connection: config.connection,
-            model: config.model
-        });
+    ) {}
+
+    /**
+     * 确保设备会话已打开，返回 IDeviceHandle。
+     * 连接由 LLMDeviceDriver 内部通过 connectionId 解析，
+     * AgentExecutor 不感知 apiKey 等细节。
+     */
+    private async ensureDeviceHandle(): Promise<IDeviceHandle> {
+        const dm = getKernelDeviceManager();
+        if (!dm?.has('llm')) {
+            throw new Error('AgentExecutor: LLM device driver not registered. Call setKernelDeviceManager() first.');
+        }
+
+        if (!this._deviceHandle) {
+            const driver = dm.get('llm');
+            const baseCtx: DeviceContext = { nodeId: this.id, name: this.name };
+            // 传入纯 options 对象，不依赖 device-llm 的具体类型
+            const sessionId = await driver.open!(baseCtx, {
+                connectionId: this.config.connectionId ?? 'default',
+                systemPrompt: this.config.systemPrompt,
+            });
+            this._deviceHandle = createDeviceHandle(driver, { ...baseCtx, sessionId });
+        }
+
+        return this._deviceHandle;
     }
 
     async execute(input: unknown, context: IExecutionContext): Promise<ExecutionResult> {
@@ -157,12 +172,10 @@ export class AgentExecutor implements IExecutor {
         // 构建请求参数
         const requestParams = this.buildRequestParams(messages);
 
-        // 流式调用 LLM
-        const stream = await this.driver.chat.create({
-            ...requestParams,
-            stream: true,
-            signal: context.signal
-        }) as AsyncGenerator<ChatCompletionChunk>;
+        const handle = await this.ensureDeviceHandle();
+        const chatParams: ChatCompletionParams = { ...requestParams, stream: true, signal: context.signal };
+        // 通过 IDeviceHandle.ioctl 发起流式请求，命令名 'chat' 是设备约定而非导入常量
+        const stream = await handle.ioctl('chat', chatParams) as AsyncGenerator<ChatCompletionChunk>;
 
         // 处理流
         for await (const chunk of stream) {
@@ -240,12 +253,9 @@ export class AgentExecutor implements IExecutor {
         // 构建请求参数
         const requestParams = this.buildRequestParams(messages);
 
-        // 非流式调用 LLM
-        const response = await this.driver.chat.create({
-            ...requestParams,
-            stream: false,
-            signal: context.signal
-        }) as ChatCompletionResponse;
+        const handle = await this.ensureDeviceHandle();
+        const syncParams: ChatCompletionParams = { ...requestParams, stream: false, signal: context.signal };
+        const response = await handle.ioctl('chat-sync', syncParams) as ChatCompletionResponse;
 
         // 检查取消
         context.checkCancelled();
@@ -475,17 +485,13 @@ export class AgentExecutor implements IExecutor {
     /**
      * 解析 token 使用信息
      */
-    private parseTokenUsage(usage: {
-        prompt_tokens: number;
-        completion_tokens: number;
-        total_tokens: number;
-        thinking_tokens?: number;
-    }): TokenUsage {
+    private parseTokenUsage(usage: Record<string, unknown> | undefined): TokenUsage {
+        if (!usage) return { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
         return {
-            promptTokens: usage.prompt_tokens,
-            completionTokens: usage.completion_tokens,
-            totalTokens: usage.total_tokens,
-            thinkingTokens: usage.thinking_tokens
+            promptTokens: (usage.prompt_tokens as number) ?? 0,
+            completionTokens: (usage.completion_tokens as number) ?? 0,
+            totalTokens: (usage.total_tokens as number) ?? 0,
+            thinkingTokens: usage.thinking_tokens as number | undefined,
         };
     }
 
@@ -635,7 +641,7 @@ export class AgentExecutor implements IExecutor {
             if (toolCall.type === 'function' && toolCall.function) {
                 await this.executeSingleToolCall(
                     toolCall.id,
-                    toolCall.function.name,
+                    toolCall.function.name!,
                     toolCall.function.arguments,
                     context
                 );
