@@ -1,8 +1,8 @@
 // @file: llm-engine/src/services/vfs-agent-service.ts
 //
-// Agent 和 MCP Server 的 VFS 持久化服务。
-// 连接管理委托给注入的 IConnectionService（由 LLMDeviceDriver 实现），
-// 本服务不直接依赖 device-llm 的 ioctl 细节。
+// Agent VFS 持久化服务。
+// 连接管理委托给注入的 IConnectionService（由 LLMDeviceDriver 实现）。
+// MCP 服务器管理委托给注入的 IMCPManagementService（由 LLMDeviceDriver 实现）。
 
 import { BaseModuleService } from '@itookit/vfslib';
 import type { IVFSManager, VFSManagerEvent } from '@itookit/common';
@@ -15,35 +15,26 @@ import {
     LLM_PROVIDER_DEFAULTS,
     DEFAULT_AGENTS,
     AGENT_DEFAULT_DIR,
+    type IMCPManagementService,
 } from '@itookit/device-llm';
 import { IAgentManagementService, MCPServer } from './agent-service';
-import { VFSEntityStore, EntityStoreConfig } from '../utils/vfs-entity-store';
 import { log } from '../utils/logger';
 
 // ─── 常量 ──────────────────────────────────────────────────────────────────────
 
 const VERSION_FILE = '/.defaults_version.json';
-const MCP_DIR = '/.mcp';
-
-const MCP_STORE_CONFIG: EntityStoreConfig = {
-    dir: MCP_DIR,
-    icon: '🔌',
-    typeName: 'mcp',
-};
 
 // ─── VFSAgentService ──────────────────────────────────────────────────────────
 
 export class VFSAgentService extends BaseModuleService implements IAgentManagementService {
     private _agents: AgentDefinition[] = [];
-    private _mcpServers: MCPServer[] = [];
     private _syncTimer: ReturnType<typeof setTimeout> | null = null;
     private _eventUnsubscribers: Array<() => void> = [];
-
-    private mcpStore!: VFSEntityStore<MCPServer>;
 
     constructor(
         vfs: IVFSManager,
         private readonly connectionService: IConnectionService,
+        private readonly mcpService: IMCPManagementService,
     ) {
         super(FS_MODULE_AGENTS, { description: 'AI Agents Configuration', isSystem: true }, vfs);
     }
@@ -51,7 +42,6 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
     // ─── BaseModuleService lifecycle ─────────────────────────────────────────
 
     protected async onLoad(): Promise<void> {
-        this.mcpStore = new VFSEntityStore(this, this.engine, MCP_STORE_CONFIG);
         await this.ensureDefaults();
         await this.refreshData();
         this.bindVFSEvents();
@@ -69,8 +59,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
 
         const relevant = (path: string, moduleId: string): boolean => {
             if (moduleId !== this.moduleName) return false;
-            const p = path.replace(/\/+/g, '/');
-            return p.startsWith(MCP_DIR) || p.endsWith('.agent');
+            return path.endsWith('.agent');
         };
 
         this._eventUnsubscribers.push(
@@ -90,12 +79,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
 
     private async refreshData(): Promise<void> {
         try {
-            const [agents, mcpServers] = await Promise.all([
-                this.scanAgentFiles(),
-                this.loadJsonFiles<MCPServer>(MCP_DIR),
-            ]);
-            this._agents = agents;
-            this._mcpServers = mcpServers;
+            this._agents = await this.scanAgentFiles();
             log.info('Agent service data refreshed', { agentCount: this._agents.length });
             this.notify();
         } catch (e) {
@@ -225,18 +209,18 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
         return this.connectionService.deleteConnection(id);
     }
 
-    // ─── IAgentManagementService — MCP ────────────────────────────────────────
+    // ─── IAgentManagementService — MCP (delegated to IMCPManagementService) ──
 
-    async getMCPServers(): Promise<MCPServer[]> { return [...this._mcpServers]; }
+    async getMCPServers(): Promise<MCPServer[]> {
+        return this.mcpService.getMCPServers();
+    }
 
     async saveMCPServer(server: MCPServer): Promise<void> {
-        this._mcpServers = await this.mcpStore.save(server, this._mcpServers);
-        await this.refreshData();
+        return this.mcpService.saveMCPServer(server);
     }
 
     async deleteMCPServer(id: string): Promise<void> {
-        this._mcpServers = await this.mcpStore.delete(id, this._mcpServers);
-        await this.refreshData();
+        return this.mcpService.deleteMCPServer(id);
     }
 
     // ─── Restore / Diagnose ───────────────────────────────────────────────────
@@ -323,25 +307,6 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
         if (byName) return byName.id;
         const byId = connMeta.availableModels.find(m => m.id === currentModelName);
         return byId ? byId.id : connMeta.availableModels[0].id;
-    }
-
-    private async loadJsonFiles<T>(dirPath: string): Promise<T[]> {
-        const items: T[] = [];
-        try {
-            const dirId = await this.engine.resolvePath(dirPath);
-            if (!dirId) return [];
-            const children = await this.engine.getChildren(dirId);
-            for (const child of children) {
-                if (child.type === 'file' && child.name.endsWith('.json')) {
-                    try {
-                        const content = await this.engine.readContent(child.id);
-                        const jsonStr = typeof content === 'string' ? content : new TextDecoder().decode(content as ArrayBuffer);
-                        items.push(JSON.parse(jsonStr));
-                    } catch { /* skip */ }
-                }
-            }
-        } catch { /* directory doesn't exist */ }
-        return items;
     }
 
     private async scanAgentFiles(): Promise<AgentDefinition[]> {

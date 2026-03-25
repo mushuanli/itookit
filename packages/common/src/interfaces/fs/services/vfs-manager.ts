@@ -280,6 +280,30 @@ export interface IVFSManager {
      */
     registerDevice(driver: IDeviceDriver): Promise<void>;
 
+    /**
+     * 在 /dev/ 下创建嵌套设备节点（支持子路径，如 /dev/llm/connection/<id>）。
+     *
+     * 驱动必须已通过 registerDevice 注册。
+     * 节点通过 devPath 中的路径创建，中间目录自动创建（recursive）。
+     * 幂等：节点已存在时忽略。
+     *
+     * @param handlerId 已注册的设备驱动 ID
+     * @param devPath   设备节点路径，如 /dev/llm/connection/default
+     * @param nodeMetadata 附加到节点的元数据（通过 DeviceContext.metadata 传递给驱动）
+     */
+    createDeviceNode(
+        handlerId: string,
+        devPath: string,
+        nodeMetadata?: Record<string, unknown>,
+    ): Promise<void>;
+
+    /**
+     * 删除 /dev/ 下的设备节点（如节点不存在则静默忽略）。
+     *
+     * @param devPath 设备节点路径，如 /dev/llm/connection/default
+     */
+    removeDeviceNode(devPath: string): Promise<void>;
+
     /** 插件管理 */
     readonly plugins: IPluginManager;
 
