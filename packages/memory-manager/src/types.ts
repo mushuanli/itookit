@@ -60,8 +60,8 @@ export interface MemoryManagerConfig {
     onSessionChange?: (sessionId: string | null) => void;
 
     // --- VFS UI 配置 ---
-    /** 
-     * 透传给 VFSUIShell 的 UI 选项 
+    /**
+     * 透传给 VFSUIShell 的 UI 选项
      */
     uiOptions?: Partial<SessionUIOptions>;
 
