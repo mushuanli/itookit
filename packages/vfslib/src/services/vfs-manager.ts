@@ -117,6 +117,37 @@ export class VFSManager implements IVFSManager {
         }
     }
 
+    async createDeviceNode(
+        handlerId: string,
+        devPath: string,
+        nodeMetadata?: Record<string, unknown>,
+    ): Promise<void> {
+        const lastSlash = devPath.lastIndexOf('/');
+        const parentPath = devPath.slice(0, lastSlash) || '/';
+        const name = devPath.slice(lastSlash + 1);
+        try {
+            await this.engine.createFile(
+                parentPath,
+                name,
+                'device',
+                undefined,
+                { deviceHandlerId: handlerId, metadata: nodeMetadata },
+                { recursive: true },
+            );
+        } catch (e) {
+            // 幂等：文件已存在时忽略
+            if (!(e instanceof FSAlreadyExistsError)) throw e;
+        }
+    }
+
+    async removeDeviceNode(devPath: string): Promise<void> {
+        try {
+            await this.engine.delete(devPath);
+        } catch {
+            // Node doesn't exist — ignore silently
+        }
+    }
+
     // ══════════════════════════════════════════════════════════
     // Module Management
     // ══════════════════════════════════════════════════════════

@@ -109,11 +109,16 @@ export {
 } from './providers/registry';
 
 // ============================================
-// 技能/MCP 系统 (新增)
+// 技能/MCP 系统
 // ============================================
 
 export { SkillRegistry, globalSkillRegistry } from './skills/registry';
-export { MCPClient } from './skills/mcp-client';
+export { MCPClient, MCPServerConnection } from './skills/mcp-client';
+export type {
+    MCPSkill,
+    MCPSkillContext,
+    MCPSkillResult,
+} from './skills/mcp-client';
 export type {
     Skill,
     SkillDefinition,
@@ -177,6 +182,7 @@ export { LLMDeviceDriver, LLM_IOCTL } from './device/llm-device-driver';
 export type {
     LLMIoctlCommand,
     LLMDeviceOpenOptions,
+    IMCPManagementService,
 } from './device/llm-device-driver';
 
 // ============================================
