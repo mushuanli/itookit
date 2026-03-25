@@ -4,7 +4,7 @@
  */
 import { MemoryManager } from '@itookit/memory-manager';
 import { initVFS } from './services/vfs';
-import { WORKSPACES } from './config/modules';
+import { WORKSPACES, MENTIONABLE_MODULES } from './config/modules';
 import { FileTypeDefinition } from '@itookit/vfs-ui';
 import { NavigationRequest, NAVIGATION_EVENTS } from '@itookit/common';
 
@@ -270,8 +270,12 @@ async function bootstrap() {
                 editorConfig: {
                     plugins: plugins || [],
                     readOnly: false,
-                    // ✅ [新增] 将 mentionScope 放入 config，供支持它的编辑器读取
-                    mentionScope: mentionScope
+                    // Resolve ['*'] to the concrete list of mentionable modules so that
+                    // system/internal modules (settings, agents) don't fill the search
+                    // limit window and push user-content modules (chats, private) out.
+                    mentionScope: mentionScope?.[0] === '*'
+                        ? MENTIONABLE_MODULES
+                        : mentionScope
                 },
 
                 aiConfig: { enabled: aiEnabled ?? true },

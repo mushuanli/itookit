@@ -14,6 +14,7 @@ import type { FileTypeDefinition, CustomEditorResolver } from './services/FileTy
 
 export { FileMentionSource } from './mention/FileMentionSource';
 export { DirectoryMentionSource } from './mention/DirectoryMentionSource';
+export { createVFSMentionProviders } from './mention/createVFSMentionProviders';
 
 // 修改 Options 类型定义以包含新的配置项
 export type VFSUIOptions = SessionUIOptions & {
