@@ -10,6 +10,7 @@ export const SETTINGS_PAGES: Record<string, { name: string, icon: string }> = {
     'connections': { name: 'LLM 连接', icon: '🔗' },
     // 'executables': { name: 'Agents',      icon: '🤖' }, // Removed
     'mcp-servers': { name: 'MCP Servers', icon: '🔌' },
+    'skills':      { name: 'Skills',      icon: '⚡' },
     'recovery': { name: '系统恢复', icon: '🚑' },
     'log': { name: '系统日志', icon: '📋' },
     'about': { name: 'About', icon: 'ℹ️' },
