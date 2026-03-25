@@ -27,6 +27,11 @@
       "@itookit/app-settings": ["../../packages/app-settings/src/index.ts"]
     }
   },
-  "include": ["src"],
+  "include": [
+    "src",
+    // Ambient module declarations from workspace packages that have no @types coverage.
+    // Needed because web-app compiles package sources directly via `paths` aliases.
+    "../../packages/mdx/src/types"
+  ],
   "exclude": ["node_modules", "dist"]
 }
