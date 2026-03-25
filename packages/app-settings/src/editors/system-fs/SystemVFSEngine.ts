@@ -72,7 +72,9 @@ function fsNodeToEngine(node: FSNode, id: string, parentId: string | null, modul
         createdAt: node.createdAt,
         modifiedAt: node.modifiedAt,
         tags: [...(node.tags ?? [])] as string[],
-        metadata: node.metadata as Record<string, unknown> | undefined,
+        // _showAll bypasses shouldFilterNode so hidden/asset nodes are visible
+        // in this debug view without modifying any shared UI layer code.
+        metadata: { ...(node.metadata as Record<string, unknown>), _showAll: true },
         moduleId,
     };
 
@@ -89,7 +91,8 @@ async function collectTree(
     parentId: string,
     moduleName: string,
 ): Promise<EngineNode[]> {
-    const children = await fs.getChildren(idOrPath) as FSNode[];
+    // Debug view: include hidden (. prefix) and asset dirs (_ prefix).
+    const children = await fs.getChildren(idOrPath, { includeHidden: true, includeAssetDirs: true }) as FSNode[];
     const result: EngineNode[] = [];
 
     for (const child of children) {
@@ -98,6 +101,13 @@ async function collectTree(
 
         if (child.type === 'directory') {
             engineNode.children = await collectTree(fs, child.id, cId, moduleName);
+        } else {
+            // Eagerly load content so the editor receives it via item.content.data
+            // without needing a custom factory or event-driven reload.
+            try {
+                const raw = await fs.readContent(child.id);
+                engineNode.content = typeof raw === 'string' ? raw : undefined;
+            } catch { /* unreadable files show as empty */ }
         }
         result.push(engineNode);
     }
@@ -142,7 +152,7 @@ export class SystemVFSEngine implements ISessionEngine {
                 createdAt: 0,
                 modifiedAt: 0,
                 tags: [],
-                metadata: { title: mod.name, description: mod.description ?? '' },
+                metadata: { title: mod.name, description: mod.description ?? '', _showAll: true },
                 moduleId: 'system',
                 children,
             };
@@ -173,7 +183,7 @@ export class SystemVFSEngine implements ISessionEngine {
 
         try {
             const fs = this.vfs.getEngine(parsed.moduleName);
-            const children = await fs.getChildren(parsed.realId) as FSNode[];
+            const children = await fs.getChildren(parsed.realId, { includeHidden: true, includeAssetDirs: true }) as FSNode[];
             return children.map(c => {
                 const cId = compositeId(parsed.moduleName, c.id);
                 return fsNodeToEngine(c, cId, parentId, parsed.moduleName);

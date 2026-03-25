@@ -11,7 +11,7 @@ import { shouldFilterNode, stripExtension, getExtension } from '../utils/helpers
 export const mapEngineNodeToUIItem = (
   node: EngineNode,
   iconResolver?: IconResolver,
-  parserResolver?: ContentParserResolver
+  parserResolver?: ContentParserResolver,
 ): VFSNodeUI => {
   const isDir = node.type === 'directory';
 
