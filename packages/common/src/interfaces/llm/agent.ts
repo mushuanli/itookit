@@ -118,6 +118,26 @@ export interface IConnectionService {
     onChange(listener: () => void): () => void;
 }
 
+// ─── ILLMManagementService ───────────────────────────────────────────────────
+
+/**
+ * LLM 设备全量管理接口 — 由 LLMDeviceDriver 实现。
+ *
+ * 聚合连接、MCP Server、Skill 三类资源的 CRUD，
+ * 是 VFSAgentService 和 Settings UI 注入的唯一管理服务契约。
+ */
+export interface ILLMManagementService extends IConnectionService {
+    // ── MCP Server ────────────────────────────────────────────────
+    getMCPServers(): Promise<MCPServer[]>;
+    saveMCPServer(server: MCPServer): Promise<void>;
+    deleteMCPServer(id: string): Promise<void>;
+
+    // ── Skills ────────────────────────────────────────────────────
+    getSkills(): Promise<LLMSkill[]>;
+    saveSkill(skill: LLMSkill): Promise<void>;
+    deleteSkill(id: string): Promise<void>;
+}
+
 // ─── IAgentService ────────────────────────────────────────────────────────────
 
 /**
@@ -138,25 +158,15 @@ export interface IAgentService {
 
 // ─── IAgentManagementService ──────────────────────────────────────────────────
 
-export interface IAgentManagementService extends IAgentService {
+/**
+ * 完整 Agent 管理接口（Settings UI 消费）。
+ * 继承 IAgentService（读） + ILLMManagementService（连接/MCP/Skill 管理），
+ * 并增加 Agent CRUD 和恢复/诊断能力。
+ */
+export interface IAgentManagementService extends IAgentService, ILLMManagementService {
     // Agent CRUD
     saveAgent(agent: AgentDefinition): Promise<void>;
     deleteAgent(agentId: string): Promise<void>;
-
-    // Connection — 读取返回安全元数据；写入接受完整连接（含 apiKey）
-    getConnections(): Promise<ConnectionMeta[]>;
-    saveConnection(conn: LLMConnection): Promise<void>;
-    deleteConnection(id: string): Promise<void>;
-
-    // MCP
-    getMCPServers(): Promise<MCPServer[]>;
-    saveMCPServer(server: MCPServer): Promise<void>;
-    deleteMCPServer(id: string): Promise<void>;
-
-    // Skills
-    getSkills(): Promise<LLMSkill[]>;
-    saveSkill(skill: LLMSkill): Promise<void>;
-    deleteSkill(id: string): Promise<void>;
 
     // 恢复/诊断
     getRestorableItems(): Promise<RestorableItem[]>;

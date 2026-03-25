@@ -1,24 +1,24 @@
 // @file: llm-engine/src/services/vfs-agent-service.ts
 //
 // Agent VFS 持久化服务。
-// 连接管理委托给注入的 IConnectionService（由 LLMDeviceDriver 实现）。
-// MCP 服务器管理委托给注入的 IMCPManagementService（由 LLMDeviceDriver 实现）。
+// 连接 / MCP / Skill 管理全部委托给注入的 ILLMManagementService（由 LLMDeviceDriver 实现）。
 
 import { BaseModuleService } from '@itookit/vfslib';
 import type { IVFSManager, VFSManagerEvent } from '@itookit/common';
 import type { EngineNode, EngineSearchQuery, RestorableItem } from '@itookit/common';
 import { FS_MODULE_AGENTS } from '@itookit/common';
-import type { IConnectionService, ConnectionMeta, LLMConnection, AgentDefinition, LLMSkill } from '@itookit/common';
+import type {
+    ILLMManagementService, ConnectionMeta, LLMConnection,
+    AgentDefinition, MCPServer, LLMSkill,
+} from '@itookit/common';
 
 import {
     CONST_CONFIG_VERSION,
     LLM_PROVIDER_DEFAULTS,
     DEFAULT_AGENTS,
     AGENT_DEFAULT_DIR,
-    type IMCPManagementService,
-    type ISkillManagementService,
 } from '@itookit/device-llm';
-import { IAgentManagementService, MCPServer } from './agent-service';
+import { IAgentManagementService } from './agent-service';
 import { log } from '../utils/logger';
 
 // ─── 常量 ──────────────────────────────────────────────────────────────────────
@@ -34,9 +34,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
 
     constructor(
         vfs: IVFSManager,
-        private readonly connectionService: IConnectionService,
-        private readonly mcpService: IMCPManagementService,
-        private readonly skillService: ISkillManagementService,
+        private readonly llmService: ILLMManagementService,
     ) {
         super(FS_MODULE_AGENTS, { description: 'AI Agents Configuration', isSystem: true }, vfs);
     }
@@ -49,7 +47,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
         this.bindVFSEvents();
         // 连接变更时同步通知，保持 IAgentService.onChange 语义不变
         this._eventUnsubscribers.push(
-            this.connectionService.onChange(() => this.notify()),
+            this.llmService.onChange(() => this.notify()),
         );
     }
 
@@ -160,11 +158,11 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
     }
 
     async getConnection(id: string): Promise<ConnectionMeta | undefined> {
-        return this.connectionService.getConnection(id);
+        return this.llmService.getConnection(id);
     }
 
     async getDefaultConnection(): Promise<ConnectionMeta | null> {
-        return this.connectionService.getDefaultConnection();
+        return this.llmService.getDefaultConnection();
     }
 
     // ─── IAgentManagementService — Agent CRUD ─────────────────────────────────
@@ -197,47 +195,20 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
         if (node) { await this.engine.delete([node.id]); await this.refreshData(); }
     }
 
-    // ─── IAgentManagementService — Connection (delegate to IConnectionService) ─
+    // ─── ILLMManagementService — 全部委托给 llmService（LLMDeviceDriver）─────
 
-    async getConnections(): Promise<ConnectionMeta[]> {
-        return this.connectionService.getConnections();
-    }
+    async getConnections(): Promise<ConnectionMeta[]> { return this.llmService.getConnections(); }
+    async getFullConnection(id: string): Promise<LLMConnection | null> { return this.llmService.getFullConnection(id); }
+    async saveConnection(conn: LLMConnection): Promise<void> { return this.llmService.saveConnection(conn); }
+    async deleteConnection(id: string): Promise<void> { return this.llmService.deleteConnection(id); }
 
-    async saveConnection(conn: LLMConnection): Promise<void> {
-        return this.connectionService.saveConnection(conn);
-    }
+    async getMCPServers(): Promise<MCPServer[]> { return this.llmService.getMCPServers(); }
+    async saveMCPServer(server: MCPServer): Promise<void> { return this.llmService.saveMCPServer(server); }
+    async deleteMCPServer(id: string): Promise<void> { return this.llmService.deleteMCPServer(id); }
 
-    async deleteConnection(id: string): Promise<void> {
-        return this.connectionService.deleteConnection(id);
-    }
-
-    // ─── IAgentManagementService — MCP (delegated to IMCPManagementService) ──
-
-    async getMCPServers(): Promise<MCPServer[]> {
-        return this.mcpService.getMCPServers();
-    }
-
-    async saveMCPServer(server: MCPServer): Promise<void> {
-        return this.mcpService.saveMCPServer(server);
-    }
-
-    async deleteMCPServer(id: string): Promise<void> {
-        return this.mcpService.deleteMCPServer(id);
-    }
-
-    // ─── IAgentManagementService — Skills (delegated to ISkillManagementService) ─
-
-    async getSkills(): Promise<LLMSkill[]> {
-        return this.skillService.getSkills();
-    }
-
-    async saveSkill(skill: LLMSkill): Promise<void> {
-        return this.skillService.saveSkill(skill);
-    }
-
-    async deleteSkill(id: string): Promise<void> {
-        return this.skillService.deleteSkill(id);
-    }
+    async getSkills(): Promise<LLMSkill[]> { return this.llmService.getSkills(); }
+    async saveSkill(skill: LLMSkill): Promise<void> { return this.llmService.saveSkill(skill); }
+    async deleteSkill(id: string): Promise<void> { return this.llmService.deleteSkill(id); }
 
     // ─── Restore / Diagnose ───────────────────────────────────────────────────
 
@@ -285,7 +256,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
         if (!providerDef) throw new Error(`No default definition for connection id: ${targetId}`);
 
         // 保留用户已配置的 apiKey，仅重置其他字段
-        const existing = await this.connectionService.getFullConnection(targetId);
+        const existing = await this.llmService.getFullConnection(targetId);
         const existingApiKey = existing?.apiKey ?? '';
 
         await this.saveConnection({
