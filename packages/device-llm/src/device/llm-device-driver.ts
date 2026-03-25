@@ -24,7 +24,7 @@ import { LLMDriver } from '../core/driver';
 import { testLLMConnection } from '../core/api';
 import type { ConnectionTestResult } from '../core/api';
 import { LLM_PROVIDER_DEFAULTS, CONST_CONFIG_VERSION } from '../constants';
-import { MCPServerConnection } from '../skills/mcp-client';
+import { MCPServerConnection, type MCPToolInfo } from '../skills/mcp-client';
 import type { MCPServerConfig } from '../types/provider';
 
 // ─── 存储路径 ────────────────────────────────────────────────────────────────
@@ -429,7 +429,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
             switch (command) {
                 case LLM_IOCTL.MCP_LIST_TOOLS: {
                     const tools = await session.connection.listTools();
-                    return tools.map((t): ToolDefinition => ({
+                    return tools.map((t: MCPToolInfo): ToolDefinition => ({
                         type: 'function',
                         function: {
                             name: t.name,
