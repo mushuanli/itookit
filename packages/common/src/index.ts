@@ -19,6 +19,9 @@ export {
 
 // ── IModuleFS: 模块文件系统接口及相关类型 ──
 export * from './interfaces/fs';
+
+// ── LLM: 连接、消息、补全、Agent、Executor 接口 ──
+export * from './interfaces/llm';
 export type { SRSItemData, SRSCardRef, SRSStats, ISRSService } from './interfaces/srs';
 export {
     IEditor,

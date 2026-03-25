@@ -1,113 +1,84 @@
 // @file: llm-engine/src/services/vfs-agent-service.ts
+//
+// Agent 和 MCP Server 的 VFS 持久化服务。
+// 连接管理委托给注入的 IConnectionService（由 LLMDeviceDriver 实现），
+// 本服务不直接依赖 device-llm 的 ioctl 细节。
 
 import { BaseModuleService } from '@itookit/vfslib';
 import type { IVFSManager, VFSManagerEvent } from '@itookit/common';
-import type {
-    EngineNode,
-    EngineSearchQuery,
-    RestorableItem,
-} from '@itookit/common';
-import {
-    FS_MODULE_AGENTS
-} from '@itookit/common';
+import type { EngineNode, EngineSearchQuery, RestorableItem } from '@itookit/common';
+import { FS_MODULE_AGENTS } from '@itookit/common';
+import type { IConnectionService, ConnectionMeta, LLMConnection, AgentDefinition } from '@itookit/common';
 
 import {
-    LLMConnection,
-    AgentDefinition,
     CONST_CONFIG_VERSION,
     LLM_PROVIDER_DEFAULTS,
     DEFAULT_AGENTS,
-    AGENT_DEFAULT_DIR
-} from '@itookit/llm-driver';
-import {
-    IAgentManagementService,
-    MCPServer,
-} from './agent-service';
+    AGENT_DEFAULT_DIR,
+} from '@itookit/device-llm';
+import { IAgentManagementService, MCPServer } from './agent-service';
 import { VFSEntityStore, EntityStoreConfig } from '../utils/vfs-entity-store';
 import { log } from '../utils/logger';
 
-// ============================================
-// 常量
-// ============================================
+// ─── 常量 ──────────────────────────────────────────────────────────────────────
 
 const VERSION_FILE = '/.defaults_version.json';
-const CONNECTIONS_DIR = '/.connections';
 const MCP_DIR = '/.mcp';
-
-const CONNECTION_STORE_CONFIG: EntityStoreConfig = {
-    dir: CONNECTIONS_DIR,
-    icon: '🔌',
-    typeName: 'connection'
-};
 
 const MCP_STORE_CONFIG: EntityStoreConfig = {
     dir: MCP_DIR,
     icon: '🔌',
-    typeName: 'mcp'
+    typeName: 'mcp',
 };
 
-// ============================================
-// VFSAgentService
-// ============================================
+// ─── VFSAgentService ──────────────────────────────────────────────────────────
 
-/**
- * VFS Agent 服务
- * 继承 BaseModuleService，通过 engine 访问文件系统
- */
 export class VFSAgentService extends BaseModuleService implements IAgentManagementService {
-    private _connections: LLMConnection[] = [];
-    private _agents: AgentDefinition[] = [];          // ✅ 新增：agent 缓存
+    private _agents: AgentDefinition[] = [];
     private _mcpServers: MCPServer[] = [];
     private _syncTimer: ReturnType<typeof setTimeout> | null = null;
     private _eventUnsubscribers: Array<() => void> = [];
-    //private _dataReady = false;                        // ✅ 新增：标记数据是否就绪
 
-    private connectionStore!: VFSEntityStore<LLMConnection>;
     private mcpStore!: VFSEntityStore<MCPServer>;
 
-    constructor(vfs: IVFSManager) {
+    constructor(
+        vfs: IVFSManager,
+        private readonly connectionService: IConnectionService,
+    ) {
         super(FS_MODULE_AGENTS, { description: 'AI Agents Configuration', isSystem: true }, vfs);
     }
 
-    /**
-     * 初始化钩子 (BaseModuleService 调用)
-     */
-    protected async onLoad(): Promise<void> {
-        // 初始化实体存储器
-        this.connectionStore = new VFSEntityStore(this, this.engine, CONNECTION_STORE_CONFIG);
-        this.mcpStore = new VFSEntityStore(this, this.engine, MCP_STORE_CONFIG);
+    // ─── BaseModuleService lifecycle ─────────────────────────────────────────
 
+    protected async onLoad(): Promise<void> {
+        this.mcpStore = new VFSEntityStore(this, this.engine, MCP_STORE_CONFIG);
         await this.ensureDefaults();
-        await this.refreshData();       // ✅ 启动时读一次
-        //this._dataReady = true;
-        this.bindVFSEvents();           // ✅ 监听外部变更（其他窗口/标签页）
+        await this.refreshData();
+        this.bindVFSEvents();
+        // 连接变更时同步通知，保持 IAgentService.onChange 语义不变
+        this._eventUnsubscribers.push(
+            this.connectionService.onChange(() => this.notify()),
+        );
     }
 
-    /**
-     * 监听 VFS 事件
-     */
     private bindVFSEvents(): void {
         const debounce = () => {
             if (this._syncTimer) clearTimeout(this._syncTimer);
             this._syncTimer = setTimeout(() => this.refreshData(), 300);
         };
 
-        const checkPath = (path: string, moduleId: string): boolean => {
+        const relevant = (path: string, moduleId: string): boolean => {
             if (moduleId !== this.moduleName) return false;
             const p = path.replace(/\/+/g, '/');
-            return (
-                p.startsWith(CONNECTIONS_DIR) ||
-                p.startsWith(MCP_DIR) ||
-                p.endsWith('.agent')
-            );
+            return p.startsWith(MCP_DIR) || p.endsWith('.agent');
         };
 
         this._eventUnsubscribers.push(
             this.vfs.on('node:created', (e: VFSManagerEvent<'node:created'>) => {
-                if (checkPath(e.payload.path, e.payload.moduleId)) debounce();
+                if (relevant(e.payload.path, e.payload.moduleId)) debounce();
             }),
             this.vfs.on('node:updated', (e: VFSManagerEvent<'node:updated'>) => {
-                if (checkPath(e.payload.path, e.payload.moduleId)) debounce();
+                if (relevant(e.payload.path, e.payload.moduleId)) debounce();
             }),
             this.vfs.on('node:deleted', (e: VFSManagerEvent<'node:deleted'>) => {
                 if (e.payload.moduleId === this.moduleName) debounce();
@@ -115,498 +86,148 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
         );
     }
 
-    // ============================================
-    // 数据刷新（统一入口）
-    // ============================================
+    // ─── Data refresh ─────────────────────────────────────────────────────────
 
     private async refreshData(): Promise<void> {
         try {
-            const [connections, agents, mcpServers] = await Promise.all([
-                this.loadJsonFiles<LLMConnection>(CONNECTIONS_DIR),
-                this.scanAgentFiles(),                                  // ✅ 新增
+            const [agents, mcpServers] = await Promise.all([
+                this.scanAgentFiles(),
                 this.loadJsonFiles<MCPServer>(MCP_DIR),
             ]);
-
-            this._connections = connections;
             this._agents = agents;
             this._mcpServers = mcpServers;
-
-            log.info('Agent service data refreshed', {
-                connectionCount: this._connections.length,
-                agentCount: this._agents.length,
-                mcpServerCount: this._mcpServers.length,
-            });
-
-            this.notify();  // ✅ 通知所有监听者（包括 AgentResolver）
+            log.info('Agent service data refreshed', { agentCount: this._agents.length });
+            this.notify();
         } catch (e) {
             log.error('Failed to refresh agent service data', { error: e });
         }
     }
 
-    /**
-     * 确保默认配置存在
-     * 
-     * 策略说明:
-     * - 版本号用于触发完整同步检查
-     * - 每次同步都是增量的：只添加缺失的 connection/model/agent
-     * - 不会覆盖用户已修改的数据
-     */
+    // ─── Defaults ─────────────────────────────────────────────────────────────
+
     private async ensureDefaults(): Promise<void> {
         try {
             const versionData = await this.readJson<{ version: number }>(VERSION_FILE);
-
-            // 如果版本相同，跳过同步（假设配置变化时会递增版本号）
-            if (versionData && versionData.version >= CONST_CONFIG_VERSION) {
-                return;
-            }
-
-            log.info('Syncing defaults', {
-                fromVersion: versionData?.version || 0,
-                toVersion: CONST_CONFIG_VERSION
-            });
-
-            // 执行增量同步
-            await this.syncDefaultConnections();
+            if (versionData && versionData.version >= CONST_CONFIG_VERSION) return;
+            log.info('Syncing default agents');
             await this.syncDefaultAgents();
-
-            // 更新版本号
-            await this.writeJson(VERSION_FILE, {
-                version: CONST_CONFIG_VERSION,
-                updatedAt: Date.now()
-            });
-
-            log.info('Defaults sync completed successfully');
+            await this.writeJson(VERSION_FILE, { version: CONST_CONFIG_VERSION, updatedAt: Date.now() });
         } catch (e) {
             log.error('Failed to ensure defaults', { error: e });
         }
     }
 
-    /**
-     * 同步默认连接
-     * 
-     * 修正点:
-     * 1. 在每次处理前重新从磁盘加载最新数据
-     * 2. 使用深拷贝避免污染缓存
-     * 3. 正确处理新增 connection 和新增 model 两种情况
-     */
-    private async syncDefaultConnections(): Promise<void> {
-
-        await this.ensureDirectory(CONNECTIONS_DIR);
-
-        // 从磁盘重新加载最新的 connections 数据
-        const currentConnections = await this.loadJsonFiles<LLMConnection>(CONNECTIONS_DIR);
-
-        // 构建 provider -> connection 的映射，便于快速查找
-        const connectionsByProvider = new Map(currentConnections.map((c) => [c.provider, c]));
-        // 获取第一个 provider key，用于确定 default connection
-        const providerKeys = Object.keys(LLM_PROVIDER_DEFAULTS);
-        const defaultProviderKey = providerKeys[0];
-
-        for (const [providerKey, providerDef] of Object.entries(LLM_PROVIDER_DEFAULTS)) {
-            const existing = connectionsByProvider.get(providerKey);
-
-            if (!existing) {
-                // === 场景 1: 新增 Connection ===
-                const newConn: LLMConnection = {
-                    // 如果是列表中的第一个，则 ID 为 'default'，否则为 'conn-{provider}'
-                    id: providerKey === defaultProviderKey ? 'default' : `conn-${providerKey}`,
-                    name: providerDef.name,
-                    provider: providerKey,
-                    apiKey: '',
-                    baseURL: providerDef.baseURL,
-                    model: providerDef.models[0]?.id || '',
-                    availableModels: [...providerDef.models],
-                    metadata: { isSystemDefault: true }
-                };
-
-                await this.saveConnectionInternal(newConn);
-            } else {
-                // === 场景 2: Connection 已存在，检查是否需要合并新模型 ===
-
-                // 使用深拷贝，避免直接修改缓存对象
-                const updatedConn: LLMConnection = JSON.parse(JSON.stringify(existing));
-
-                // 确保 availableModels 数组存在
-                if (!updatedConn.availableModels) {
-                    updatedConn.availableModels = [];
-                }
-
-                // 获取已存在的模型 ID 集合
-                const existingModelIds = new Set(updatedConn.availableModels.map(m => m.id));
-
-                // 检查并添加新模型
-                let hasNewModels = false;
-                for (const model of providerDef.models) {
-                    if (!existingModelIds.has(model.id)) {
-                        updatedConn.availableModels.push({ ...model });
-                        hasNewModels = true;
-
-                        log.debug('Added new model to connection', {
-                            connectionId: existing.id,
-                            modelId: model.id,
-                            modelName: model.name
-                        });
-                    }
-                }
-
-                // 只有在有变化时才保存
-                if (hasNewModels) {
-                    await this.saveConnectionInternal(updatedConn);
-                }
-            }
-        }
-    }
-
-    /**
-     * 同步默认 Agents
-     * 
-     * 修正点:
-     * 1. 检查 agent 是否存在时使用 ID 匹配，而非路径
-     * 2. 支持用户删除后不再重建的场景（可选，通过 metadata 标记）
-     */
     private async syncDefaultAgents(): Promise<void> {
+        const defaultConnId = await this.getDefaultConnectionId();
+        const currentAgents = await this.scanAgentFiles();
+        const currentIds = new Set(currentAgents.map(a => a.id));
+        let created = 0;
 
-        const defaultConnId = this.getDefaultConnectionId();
-        const currentAgents = await this.scanAgentFiles();  // ✅ 直接读文件
-        const currentAgentIds = new Set(currentAgents.map(a => a.id));
-
-        let createdCount = 0;
-
-        for (const agentDef of DEFAULT_AGENTS) {
-            // 检查 agent 是否已存在（基于 ID）
-            if (currentAgentIds.has(agentDef.id)) {
-                // Agent 已存在，跳过（不覆盖用户可能的修改）
-                continue;
-            }
-
-            // 构建文件路径
-            const filename = `${agentDef.id}.agent`;
-            const parentDir = agentDef.initPath || AGENT_DEFAULT_DIR;
+        for (const def of DEFAULT_AGENTS) {
+            if (currentIds.has(def.id)) continue;
+            const filename = `${def.id}.agent`;
+            const parentDir = def.initPath || AGENT_DEFAULT_DIR;
             const fullPath = `${parentDir}/${filename}`.replace(/\/+/g, '/');
-
             if (await this.engine.pathExists(fullPath)) continue;
 
-            // 准备 agent 内容
-            const { initPath, initialTags, ...content } = agentDef;
-
-            // 确保默认 agent 指向正确的 connection
-            if (!content.config.connectionId) {
-                content.config.connectionId = defaultConnId;
-            }
+            const { initPath, initialTags, ...content } = def;
+            if (!content.config.connectionId) content.config.connectionId = defaultConnId;
 
             try {
-                // 确保目录存在
                 await this.ensureDirectory(parentDir);
-
                 const node = await this.engine.createFile(
-                    filename,
-                    parentDir,
+                    filename, parentDir,
                     JSON.stringify(content, null, 2),
-                    {
-                        icon: agentDef.icon || '🤖',
-                        title: agentDef.name,
-                        description: agentDef.description
-                    }
+                    { icon: def.icon || '🤖', title: def.name, description: def.description },
                 );
-
-                if (initialTags?.length && node?.id) {
-                    await this.engine.setTags(node.id, initialTags);
-                }
-
-                createdCount++;
-            } catch (e) {
-            }
+                if (initialTags?.length && node?.id) await this.engine.setTags(node.id, initialTags);
+                created++;
+            } catch { /* ignore per-agent errors */ }
         }
 
-        log.info('Default agents synced', { created: createdCount });
+        log.info('Default agents synced', { created });
     }
 
-    // ================================================================
-    // 逻辑辅助
-    // ================================================================
+    // ─── IAgentService — reads ────────────────────────────────────────────────
 
-    private getDefaultConnectionId(): string {
-        if (DEFAULT_AGENTS?.length > 0) {
-            return DEFAULT_AGENTS[0].config.connectionId || 'default';
-        }
-        return 'default';
-    }
-
-    /**
-     * ✅ 改进：resolveModelName 只做验证，不修改原始数据
-     *    用于读取时的运行时适配
-     */
-    private resolveModelNameForRuntime(
-        connection: LLMConnection | undefined,
-        currentModelName: string | undefined
-    ): string {
-        if (!connection?.availableModels?.length) {
-            return currentModelName || '';
-        }
-
-        // 如果没有指定 model，使用 connection 的第一个
-        if (!currentModelName) {
-            return connection.availableModels[0].id;
-        }
-
-        // 验证 modelName 是否有效（匹配 name 或 id）
-        const byName = connection.availableModels.find(m => m.name === currentModelName);
-        if (byName) return byName.id;
-
-        const byId = connection.availableModels.find(m => m.id === currentModelName);
-        if (byId) return byId.id;
-
-        // 不匹配则回退到第一个
-        log.warn('Model not found in connection, using fallback', {
-            connectionId: connection.id,
-            requestedModel: currentModelName,
-            fallbackModel: connection.availableModels[0].id
-        });
-        return connection.availableModels[0].id;
-    }
-
-    private async loadJsonFiles<T>(dirPath: string): Promise<T[]> {
-        const items: T[] = [];
-        try {
-            const dirId = await this.engine.resolvePath(dirPath);
-            if (!dirId) return [];
-
-            const children = await this.engine.getChildren(dirId);
-            for (const child of children) {
-                if (child.type === 'file' && child.name.endsWith('.json')) {
-                    try {
-                        const content = await this.engine.readContent(child.id);
-                        const jsonStr =
-                            typeof content === 'string'
-                                ? content
-                                : new TextDecoder().decode(content as ArrayBuffer);
-                        items.push(JSON.parse(jsonStr));
-                    } catch {
-                        // ignore parse errors
-                    }
-                }
-            }
-        } catch {
-            // directory doesn't exist
-        }
-        return items;
-    }
-
-    private createDefaultAgentDefinition(): AgentDefinition {
-        return {
-            id: 'default',
-            name: 'Default Assistant',
-            type: 'agent',
-            icon: '🤖',
-            description: 'Built-in default assistant',
-            config: {
-                connectionId: this.getDefaultConnectionId(),
-                modelName: '',
-                systemPrompt: 'You are a helpful assistant.',
-            },
-        };
-    }
-
-    // ============================================
-    // IAgentService 实现（核心读取 — 全部走缓存）
-    // ============================================
-    /**
-     * ✅ 改进：直接返回缓存，不再每次扫描文件系统
-     */
     async getAgents(): Promise<AgentDefinition[]> {
         return [...this._agents];
     }
 
-    private async scanAgentFiles(): Promise<AgentDefinition[]> {
-        const agents: AgentDefinition[] = [];
-
-        try {
-            const query: EngineSearchQuery = { text: '.agent', type: 'file' };
-            const nodes = await this.engine.search(query);
-
-            const promises = nodes.map(async (node: EngineNode) => {
-                if (!node.name.endsWith('.agent')) return null;
-
-                try {
-                    const content = await this.engine.readContent(node.id);
-                    if (!content) return null;
-
-                    const jsonStr = typeof content === 'string'
-                        ? content
-                        : new TextDecoder().decode(content as ArrayBuffer);
-                    const data = JSON.parse(jsonStr) as AgentDefinition;
-
-                    // 兼容旧数据
-                    if ((data.config as any).modelId && !data.config.modelName) {
-                        data.config.modelName = (data.config as any).modelId;
-                    }
-
-                    if (data.id) {
-                        return { ...data, tags: node.tags };
-                    }
-                } catch {
-                    // 忽略解析错误
-                }
-                return null;
-            });
-
-            const results = await Promise.all(promises);
-            results.forEach(r => r && agents.push(r));
-        } catch (e) {
-            console.error('[VFSAgentService] Failed to scan agents:', e);
-        }
-
-        return agents;
-    }
-
     async getAgentConfig(agentId: string): Promise<AgentDefinition | null> {
         let found = this._agents.find(a => a.id === agentId);
-
-        // 返回默认配置模板
         if (!found && agentId === 'default') {
-            found = this.createDefaultAgentDefinition();
+            found = {
+                id: 'default', name: 'Default Assistant', type: 'agent',
+                icon: '🤖', description: 'Built-in default assistant',
+                config: { connectionId: 'default', modelName: '' },
+            };
         }
-
         if (!found) return null;
 
-        // ✅ 深拷贝，避免污染缓存
         const result: AgentDefinition = JSON.parse(JSON.stringify(found));
+        if (!result.config.connectionId) result.config.connectionId = 'default';
 
-        // === 运行时适配（只在返回值上修正，不写回文件/缓存） ===
-
-        if (!result.config.connectionId) {
-            result.config.connectionId = this.getDefaultConnectionId();
-        }
-
-        const connection = this._connections.find(
-            c => c.id === result.config.connectionId
-        );
-
-        result.config.modelName = this.resolveModelNameForRuntime(
-            connection,
-            result.config.modelName
-        );
-
+        const connMeta = await this.getConnection(result.config.connectionId);
+        result.config.modelName = this.resolveModelName(connMeta, result.config.modelName);
         return result;
     }
 
-    async getConnection(connectionId: string): Promise<LLMConnection | undefined> {
-        return this._connections.find((c) => c.id === connectionId);
+    async getConnection(id: string): Promise<ConnectionMeta | undefined> {
+        return this.connectionService.getConnection(id);
     }
 
-    async getDefaultConnection(): Promise<LLMConnection | null> {
-        if (this._connections.length === 0) return null;
-        return this._connections.find((c) => c.id === 'default') || this._connections[0];
+    async getDefaultConnection(): Promise<ConnectionMeta | null> {
+        return this.connectionService.getDefaultConnection();
     }
 
-    // ============================================
-    // IAgentManagementService 实现（CRUD — 写后刷新）
-    // ============================================
+    // ─── IAgentManagementService — Agent CRUD ─────────────────────────────────
 
-    /**
-     * ✅ 改进：保存时不做 modelName 修正，保持用户原始配置
-     */
     async saveAgent(agent: AgentDefinition): Promise<void> {
-        // 只确保 connectionId 存在（这是结构完整性保障）
-        if (!agent.config.connectionId) {
-            agent.config.connectionId = this.getDefaultConnectionId();
-            log.debug('Using default connection for agent', {
-                agentId: agent.id,
-                connectionId: agent.config.connectionId
-            });
-        }
-
-        // ✅ 不再修正 modelName — 保存用户的原始意图
-        // 运行时解析在 getAgentConfig() 中完成
-
+        if (!agent.config.connectionId) agent.config.connectionId = 'default';
         const filename = `${agent.id}.agent`;
         const contentStr = JSON.stringify(agent, null, 2);
-
-        const metadata = {
-            icon: agent.icon || '🤖',
-            title: agent.name,
-            description: agent.description
-        };
+        const metadata = { icon: agent.icon || '🤖', title: agent.name, description: agent.description };
 
         const query: EngineSearchQuery = { text: filename, type: 'file' };
         const results = await this.engine.search(query);
-        const existingNode = results.find((n: EngineNode) => n.name === filename);
+        const existing = results.find((n: EngineNode) => n.name === filename);
 
-        if (existingNode) {
-            await this.engine.writeContent(existingNode.id, contentStr);
-            await this.engine.updateMetadata(existingNode.id, metadata);
-            log.debug('Agent updated', { agentId: agent.id });
+        if (existing) {
+            await this.engine.writeContent(existing.id, contentStr);
+            await this.engine.updateMetadata(existing.id, metadata);
         } else {
             await this.engine.createFile(filename, null, contentStr, metadata);
-            log.debug('Agent created', { agentId: agent.id });
         }
 
-        // ✅ 写后刷新缓存
         await this.refreshData();
     }
 
     async deleteAgent(agentId: string): Promise<void> {
-        log.info('Deleting agent', { agentId });
-
         const filename = `${agentId}.agent`;
         const query: EngineSearchQuery = { text: filename, type: 'file' };
         const results = await this.engine.search(query);
         const node = results.find((n: EngineNode) => n.name === filename);
-
-        if (node) {
-            await this.engine.delete([node.id]);
-            log.debug('Agent file deleted', { agentId });
-
-            // ✅ 写后刷新缓存
-            await this.refreshData();
-        } else {
-            log.warn('Agent file not found for deletion', { agentId });
-        }
+        if (node) { await this.engine.delete([node.id]); await this.refreshData(); }
     }
 
-    async getConnections(): Promise<LLMConnection[]> {
-        return [...this._connections];
+    // ─── IAgentManagementService — Connection (delegate to IConnectionService) ─
+
+    async getConnections(): Promise<ConnectionMeta[]> {
+        return this.connectionService.getConnections();
     }
 
     async saveConnection(conn: LLMConnection): Promise<void> {
-        await this.saveConnectionInternal(conn);
-
-        // ✅ 写后刷新缓存（确保内存与磁盘一致）
-        await this.refreshData();
-    }
-
-    /**
-     * 内部保存（不触发 refreshData，供 ensureDefaults 批量调用）
-     */
-    private async saveConnectionInternal(conn: LLMConnection): Promise<void> {
-        log.info('Saving connection', {
-            connectionId: conn.id,
-            name: conn.name,
-            provider: conn.provider,
-        });
-
-        this._connections = await this.connectionStore.save(conn, this._connections);
+        return this.connectionService.saveConnection(conn);
     }
 
     async deleteConnection(id: string): Promise<void> {
-        if (id === 'default') {
-            log.warn('Attempted to delete default connection', { connectionId: id });
-            throw new Error("Cannot delete default connection");
-        }
-
-        this._connections = await this.connectionStore.delete(id, this._connections);
-
-        // ✅ 写后刷新缓存
-        await this.refreshData();
+        return this.connectionService.deleteConnection(id);
     }
 
-    // ============================================
-    // MCP Servers
-    // ============================================
+    // ─── IAgentManagementService — MCP ────────────────────────────────────────
 
-    async getMCPServers(): Promise<MCPServer[]> {
-        return [...this._mcpServers];
-    }
+    async getMCPServers(): Promise<MCPServer[]> { return [...this._mcpServers]; }
 
     async saveMCPServer(server: MCPServer): Promise<void> {
         this._mcpServers = await this.mcpStore.save(server, this._mcpServers);
@@ -618,122 +239,143 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
         await this.refreshData();
     }
 
-    // ============================================
-    // 恢复/诊断
-    // ============================================
+    // ─── Restore / Diagnose ───────────────────────────────────────────────────
 
     async getRestorableItems(): Promise<RestorableItem[]> {
+        const connections = await this.getConnections();
+        const connMap = new Map(connections.map(c => [c.id, c]));
+        const providerKeys = Object.keys(LLM_PROVIDER_DEFAULTS);
         const items: RestorableItem[] = [];
 
-        const connMap = new Map(this._connections.map((c) => [c.id, c]));
-        const providerKeys = Object.keys(LLM_PROVIDER_DEFAULTS);
-
-        for (const [providerKey, providerDef] of Object.entries(LLM_PROVIDER_DEFAULTS)) {
-            const targetId = providerKey === providerKeys[0] ? 'default' : `conn-${providerKey}`;
+        for (const [key, def] of Object.entries(LLM_PROVIDER_DEFAULTS)) {
+            const targetId = key === providerKeys[0] ? 'default' : `conn-${key}`;
             const existing = connMap.get(targetId);
-
-            let status: 'missing' | 'modified' | 'ok' = 'missing';
-            if (existing) {
-                status = existing.provider !== providerKey ? 'modified' : 'ok';
-            }
-
+            const status = !existing ? 'missing' : existing.provider !== key ? 'modified' : 'ok';
             items.push({
-                id: targetId,
-                type: 'connection',
-                name: providerDef.name,
-                description: `预设的 ${providerDef.name} 连接配置`,
-                icon: providerDef.icon || '🔌',
-                status
+                id: targetId, type: 'connection', name: def.name,
+                description: `预设的 ${def.name} 连接配置`,
+                icon: (def as any).icon || '🔌', status,
             });
         }
 
-        const agentMap = new Map(this._agents.map((a) => [a.id, a]));
-
+        const agentMap = new Map(this._agents.map(a => [a.id, a]));
         for (const def of DEFAULT_AGENTS) {
             const existing = agentMap.get(def.id);
-            let status: 'missing' | 'modified' | 'ok' = 'missing';
-
-            if (existing) {
-                status = existing.name !== def.name ? 'modified' : 'ok';
-            }
-
+            const status = !existing ? 'missing' : existing.name !== def.name ? 'modified' : 'ok';
             items.push({
-                id: def.id,
-                type: 'agent',
-                name: def.name,
-                description: def.description,
-                icon: def.icon || '🤖',
-                status,
+                id: def.id, type: 'agent', name: def.name,
+                description: def.description, icon: def.icon || '🤖', status,
             });
         }
 
         return items;
     }
 
-    /**
-     * 恢复单个项目
-     */
     async restoreItem(type: 'connection' | 'agent', id: string): Promise<void> {
-        if (type === 'connection') {
-            await this.restoreConnection(id);
-        } else {
-            await this.restoreAgent(id);
-        }
+        if (type === 'connection') await this.restoreConnection(id);
+        else await this.restoreAgent(id);
     }
 
     private async restoreConnection(targetId: string): Promise<void> {
         const keys = Object.keys(LLM_PROVIDER_DEFAULTS);
-        const targetProviderKey = targetId === 'default'
+        const providerKey = targetId === 'default'
             ? keys[0]
             : targetId.startsWith('conn-') ? targetId.replace('conn-', '') : '';
+        const providerDef = LLM_PROVIDER_DEFAULTS[providerKey];
+        if (!providerDef) throw new Error(`No default definition for connection id: ${targetId}`);
 
-        const targetProviderDef = LLM_PROVIDER_DEFAULTS[targetProviderKey];
-        if (!targetProviderDef) {
-            throw new Error(`无法找到 ID 为 ${targetId} 的默认连接定义`);
-        }
-
-        const oldConn = await this.getConnection(targetId);
+        // 保留用户已配置的 apiKey，仅重置其他字段
+        const existing = await this.connectionService.getFullConnection(targetId);
+        const existingApiKey = existing?.apiKey ?? '';
 
         await this.saveConnection({
-            id: targetId,
-            name: targetProviderDef.name,
-            provider: targetProviderKey,
-            apiKey: oldConn?.apiKey || '',
-            baseURL: targetProviderDef.baseURL,
-            model: targetProviderDef.models[0]?.id || '',
-            availableModels: [...targetProviderDef.models],
+            id: targetId, name: providerDef.name, provider: providerKey,
+            apiKey: existingApiKey, baseURL: providerDef.baseURL,
+            model: providerDef.models[0]?.id ?? '',
+            availableModels: [...providerDef.models],
             metadata: { isSystemDefault: true },
         });
     }
 
     private async restoreAgent(agentId: string): Promise<void> {
-        const def = DEFAULT_AGENTS.find((a) => a.id === agentId);
-        if (!def) {
-            throw new Error(`无法找到 ID 为 ${agentId} 的默认智能体定义`);
-        }
-
+        const def = DEFAULT_AGENTS.find(a => a.id === agentId);
+        if (!def) throw new Error(`No default definition for agent id: ${agentId}`);
         const { initPath, initialTags, ...agentData } = def;
-        if (!agentData.config.connectionId) {
-            agentData.config.connectionId = 'default';
-        }
-
+        if (!agentData.config.connectionId) agentData.config.connectionId = 'default';
         await this.saveAgent(agentData as AgentDefinition);
     }
 
-    // ============================================
-    // 清理
-    // ============================================
+    // ─── Helpers ─────────────────────────────────────────────────────────────
+
+    private async getDefaultConnectionId(): Promise<string> {
+        const meta = await this.getDefaultConnection();
+        return meta?.id ?? 'default';
+    }
+
+    private resolveModelName(
+        connMeta: ConnectionMeta | undefined,
+        currentModelName: string | undefined,
+    ): string {
+        if (!connMeta?.availableModels?.length) return currentModelName ?? '';
+        if (!currentModelName) return connMeta.availableModels[0].id;
+
+        const byName = connMeta.availableModels.find(m => m.name === currentModelName);
+        if (byName) return byName.id;
+        const byId = connMeta.availableModels.find(m => m.id === currentModelName);
+        return byId ? byId.id : connMeta.availableModels[0].id;
+    }
+
+    private async loadJsonFiles<T>(dirPath: string): Promise<T[]> {
+        const items: T[] = [];
+        try {
+            const dirId = await this.engine.resolvePath(dirPath);
+            if (!dirId) return [];
+            const children = await this.engine.getChildren(dirId);
+            for (const child of children) {
+                if (child.type === 'file' && child.name.endsWith('.json')) {
+                    try {
+                        const content = await this.engine.readContent(child.id);
+                        const jsonStr = typeof content === 'string' ? content : new TextDecoder().decode(content as ArrayBuffer);
+                        items.push(JSON.parse(jsonStr));
+                    } catch { /* skip */ }
+                }
+            }
+        } catch { /* directory doesn't exist */ }
+        return items;
+    }
+
+    private async scanAgentFiles(): Promise<AgentDefinition[]> {
+        const agents: AgentDefinition[] = [];
+        try {
+            const query: EngineSearchQuery = { text: '.agent', type: 'file' };
+            const nodes = await this.engine.search(query);
+
+            const results = await Promise.all(nodes.map(async (node: EngineNode) => {
+                if (!node.name.endsWith('.agent')) return null;
+                try {
+                    const content = await this.engine.readContent(node.id);
+                    if (!content) return null;
+                    const jsonStr = typeof content === 'string' ? content : new TextDecoder().decode(content as ArrayBuffer);
+                    const data = JSON.parse(jsonStr) as AgentDefinition;
+                    // Compat: rename legacy modelId → modelName
+                    if ((data.config as any).modelId && !data.config.modelName) {
+                        data.config.modelName = (data.config as any).modelId;
+                    }
+                    return data.id ? { ...data, tags: node.tags } as AgentDefinition : null;
+                } catch { return null; }
+            }));
+
+            results.forEach(r => r && agents.push(r));
+        } catch (e) {
+            console.error('[VFSAgentService] Failed to scan agents:', e);
+        }
+        return agents;
+    }
 
     async dispose(): Promise<void> {
-        this._eventUnsubscribers.forEach((fn) => fn());
+        this._eventUnsubscribers.forEach(fn => fn());
         this._eventUnsubscribers = [];
-
-        if (this._syncTimer) {
-            clearTimeout(this._syncTimer);
-            this._syncTimer = null;
-        }
-
-        //this._dataReady = false;
+        if (this._syncTimer) { clearTimeout(this._syncTimer); this._syncTimer = null; }
         await super.dispose();
     }
 }

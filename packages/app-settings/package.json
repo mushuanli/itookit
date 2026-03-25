@@ -33,14 +33,14 @@
   },
   "peerDependencies": {
     "@itookit/common": "workspace:*",
-    "@itookit/llm-driver": "workspace:*",
+    "@itookit/device-llm": "workspace:*",
     "@itookit/llm-engine": "workspace:*",
     "@itookit/llm-ui": "workspace:*",
     "@itookit/memory-manager": "workspace:*"
   },
   "devDependencies": {
     "@itookit/common": "workspace:*",
-    "@itookit/llm-driver": "workspace:*",
+    "@itookit/device-llm": "workspace:*",
     "@itookit/llm-engine": "workspace:*",
     "@itookit/llm-ui": "workspace:*",
     "@itookit/memory-manager": "workspace:*",

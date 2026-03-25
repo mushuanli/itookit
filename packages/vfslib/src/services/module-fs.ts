@@ -52,6 +52,8 @@ import type {
     RecordQueryOptions,
     RecordQueryResult,
     FSNodeMovedPayload,
+    IDeviceHandle,
+    DeviceContext,
 } from '@itookit/common';
 
 import {
@@ -93,6 +95,44 @@ export interface ModuleFSDeps {
     /** If true, the module bypasses all access control checks */
     isSystem?: boolean;
 }
+
+// ─── DeviceHandle ─────────────────────────────────────────────────────────────
+
+/**
+ * 打开设备文件后返回的句柄，将 driver + ctx 封装为统一接口。
+ * 通过 ModuleFS.openDevice() 创建，不直接实例化。
+ */
+class DeviceHandle implements IDeviceHandle {
+    constructor(
+        private readonly _driver: import('@itookit/common').IDeviceDriver,
+        public readonly ctx: DeviceContext,
+    ) {}
+
+    read(): Promise<FileContent> {
+        return this._driver.read(this.ctx);
+    }
+
+    write(content: FileContent): Promise<void> {
+        if (!this._driver.writable) throw new Error(`Device '${this._driver.handlerId}' is read-only`);
+        return this._driver.write(this.ctx, content);
+    }
+
+    async *readStream(): AsyncIterable<string | ArrayBuffer> {
+        if (!this._driver.readStream) throw new Error(`Device '${this._driver.handlerId}' is not streamable`);
+        yield* this._driver.readStream(this.ctx);
+    }
+
+    ioctl(command: string | number, arg?: unknown): Promise<unknown> {
+        if (!this._driver.ioctl) throw new Error(`Device '${this._driver.handlerId}' does not support ioctl`);
+        return this._driver.ioctl(this.ctx, command, arg);
+    }
+
+    async close(): Promise<void> {
+        await this._driver.close?.(this.ctx);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 export class ModuleFS implements IModuleFS {
     readonly moduleId: string;
@@ -892,6 +932,78 @@ export class ModuleFS implements IModuleFS {
             command,
             arg,
         );
+    }
+
+    /**
+     * 在 parentIdOrPath 下创建 type=device 的文件节点。
+     * handlerId 必须已注册到 DeviceRegistry。
+     */
+    async createDeviceFile(
+        name: string,
+        parentIdOrPath: string | null,
+        handlerId: string,
+    ): Promise<FSNode> {
+        if (!this.devices.has(handlerId)) {
+            throw new FSError('ENOTTY', `device handler '${handlerId}' not registered`, 'createDeviceFile', name);
+        }
+
+        const parentRealPath = parentIdOrPath
+            ? await this._toReal(parentIdOrPath)
+            : `/module/${this.moduleId}`;
+
+        this.assertWritable(this._toVirtual(parentRealPath));
+        this.access.checkCreate(this.caller, name, parentRealPath);
+
+        const c = this.ctx('create', parentRealPath);
+        c.args = { name, handlerId };
+        let resultNode!: FSNode;
+
+        await this.plugins.execute('create', c, async () => {
+            const resolved = await this.engine.createFile(
+                parentRealPath, name, 'device',
+                undefined,
+                { deviceHandlerId: handlerId },
+            );
+            const nodeRealPath = P.join(parentRealPath, name);
+            resultNode = this._node(resolved.inode, resolved.meta, nodeRealPath);
+            c.result = resultNode;
+        });
+
+        resultNode = (c.result as FSNode) ?? resultNode;
+        this._emit('node:created', {
+            nodes: [{ nodeId: resultNode.id, parentId: resultNode.parentId, path: resultNode.path, type: resultNode.type }],
+        });
+        return resultNode;
+    }
+
+    /**
+     * 打开设备文件，返回绑定上下文的 DeviceHandle。
+     *
+     * 对 sessionable 设备自动调用 driver.open() 建立会话；
+     * 无状态设备直接绑定 nodeId 返回句柄。
+     */
+    async openDevice(idOrPath: string, options?: Record<string, unknown>): Promise<IDeviceHandle> {
+        const r = await this._resolve(idOrPath, 'openDevice');
+        if (r.inode.type !== 'device') {
+            throw new FSError('ENOTTY', 'not a device file', 'openDevice', r.fullPath);
+        }
+
+        const handlerId = r.meta?.deviceHandlerId as string | undefined;
+        if (!handlerId) throw new FSError('ENOTTY', 'no device handler', 'openDevice', r.fullPath);
+
+        const driver = this.devices.get(handlerId);
+        const baseCtx: DeviceContext = {
+            nodeId: this._id(r.ino),
+            name: r.name,
+            metadata: r.meta?.metadata as Record<string, unknown> | undefined,
+        };
+
+        let sessionId: string | undefined;
+        if (driver.sessionable && driver.open) {
+            sessionId = await driver.open(baseCtx, options);
+        }
+
+        return new DeviceHandle(driver, { ...baseCtx, sessionId });
     }
 
     // ══════════════════════════════════════════════════════════

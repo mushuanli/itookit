@@ -35,8 +35,10 @@ import type {
 
 import {
     FSModuleNotFoundError,
+    FSAlreadyExistsError,
     FSError,
     CONFIG_MODULE,
+    type IDeviceDriver,
 } from '@itookit/common';
 
 import { VFSEngine } from '../engine/vfs-engine';
@@ -74,7 +76,8 @@ export class VFSManager implements IVFSManager {
     async initialize(): Promise<void> {
         if (this.initialized) return;
         await this.engine.initialize();
-        await this.mount(CONFIG_MODULE);
+        // __config 是系统级配置模块，isSystem: true 使其 engine 可写 dot-prefix 路径
+        await this.mount(CONFIG_MODULE, { isSystem: true, description: 'System configuration' });
         this.initialized = true;
     }
 
@@ -89,6 +92,29 @@ export class VFSManager implements IVFSManager {
         this.managerBus.removeAllListeners();
         await this.engine.dispose();
         this.initialized = false;
+    }
+
+    /**
+     * 注册设备驱动并在 /dev/<handlerId> 创建对应的设备文件节点（幂等）。
+     *
+     * 等同于 `devices.register(driver)` + 在 VFS 文件树中创建 FSDeviceNode，
+     * 之后可通过路径访问：`engine.openDevice('/dev/llm', opts)`。
+     */
+    async registerDevice(driver: IDeviceDriver): Promise<void> {
+        this.devices.register(driver);
+
+        try {
+            await this.engine.createFile(
+                '/dev',
+                driver.handlerId,
+                'device',
+                undefined,
+                { deviceHandlerId: driver.handlerId },
+            );
+        } catch (e) {
+            // 幂等：文件已存在时忽略
+            if (!(e instanceof FSAlreadyExistsError)) throw e;
+        }
     }
 
     // ══════════════════════════════════════════════════════════

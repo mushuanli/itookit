@@ -47,7 +47,7 @@ import type { IAssetOperations } from '../capabilities/asset-ops';
 import type { ITagOperations } from '../capabilities/tag-ops';
 import type { IRefOperations } from '../capabilities/ref-ops';
 import type { IWatchOperations } from '../capabilities/watch';
-import type { IDeviceDriver } from '../device/device';
+import type { IDeviceDriver, IDeviceHandle } from '../device/device';
 
 // ═══════════════════════════════════════════════════════════════
 // 事务
@@ -296,6 +296,23 @@ export interface IModuleFS extends FSEventEmitter {
         command: string | number,
         arg?: unknown,
     ): Promise<unknown>;
+
+    /**
+     * 打开设备文件，返回绑定了上下文的设备句柄。
+     *
+     * 对 sessionable 设备（如 LLM）自动调用 driver.open() 建立会话；
+     * 无状态设备（如 /dev/null）直接返回绑定 nodeId 的句柄。
+     *
+     * @example
+     *   const dev = await engine.openDevice('/dev/llm', { connectionId: 'default' });
+     *   await dev.write(prompt);
+     *   for await (const chunk of dev.readStream()) { ... }
+     *   await dev.close();
+     */
+    openDevice?(
+        idOrPath: string,
+        options?: Record<string, unknown>,
+    ): Promise<IDeviceHandle>;
 
     // ==================== 事务 ====================
 

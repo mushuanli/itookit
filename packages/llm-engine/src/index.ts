@@ -12,7 +12,7 @@
  * 
  * 依赖：
  * - @itookit/llm-kernel (执行引擎)
- * - @itookit/llm-driver (LLM 通信)
+ * - @itookit/device-llm (LLM 通信)
  * - @itookit/vfslib (文件系统)
  * - @itookit/common (公共接口和工具)
  */
@@ -94,6 +94,7 @@ export type {
 export type {
     IAgentService,
     IAgentManagementService,
+    IConnectionService,
     MCPServer,
 } from './services/agent-service';
 

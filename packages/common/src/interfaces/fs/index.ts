@@ -135,7 +135,9 @@ export type {
     DeviceContext,
     IDeviceDriver,
     IDeviceManager,
+    IDeviceHandle,
 } from './device/device';
+export { createDeviceHandle } from './device/device';
 
 // ── 插件 ──
 export type {

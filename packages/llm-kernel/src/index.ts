@@ -25,6 +25,7 @@ export * from './core/types';
 export * from './core/interfaces';
 export * from './core/event-bus';
 export * from './core/execution-context';
+export { setKernelDeviceManager, getKernelDeviceManager } from './core/device-registry';
 
 // ============================================
 // 执行器

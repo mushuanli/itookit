@@ -1,5 +1,5 @@
 // @file: llm-engine/adapters/llmkernel-adapter.ts
-import { ChatMessage, Attachment } from '@itookit/llm-driver';
+import type { ChatMessage, Attachment } from '@itookit/common';
 import {
     ExecutionRuntime,
     getRuntime,

@@ -9,7 +9,7 @@ export default defineConfig(
     external: [
       '@itookit/common',
       '@itookit/vfs',
-      '@itookit/llm-driver',
+      '@itookit/device-llm',
       '@itookit/llm-engine',
       '@itookit/mdxeditor',
       'marked',
@@ -18,7 +18,7 @@ export default defineConfig(
     globals: {
       '@itookit/common': 'ItookitCommon',
       '@itookit/vfs': 'VFSCore',
-      '@itookit/llm-driver': 'LLMDriver',
+      '@itookit/device-llm': 'LLMDriver',
       '@itookit/llm-engine': 'LLMEngine',
       '@itookit/mdxeditor': 'MDxEditor',
       'marked': 'marked',
