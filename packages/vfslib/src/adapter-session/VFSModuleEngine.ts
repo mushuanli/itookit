@@ -88,8 +88,33 @@ export class VFSModuleEngine implements ISessionEngine {
     }
 
     async search(query: EngineSearchQuery): Promise<EngineNode[]> {
+        // Name-contains is the primary filter for mention autocomplete (user types a filename prefix).
+        const nameQuery = query.text ? { contains: query.text } : undefined;
+        const tagsQuery = query.tags ? { any: query.tags } : undefined;
+
+        // Cross-module search: delegate to IVFSManager when scope is specified.
+        const hasScope = Array.isArray(query.scope) && query.scope.length > 0;
+        if (hasScope) {
+            const modules = query.scope![0] === '*' ? undefined : query.scope;
+            const result = await this.vfs.search({
+                modules,
+                name: nameQuery,
+                type: query.type as any,
+                tags: tagsQuery,
+                limit: query.limit,
+            });
+            return Array.from(result.nodes).map(n => ({
+                ...this.toEngineNode(n),
+                // Use the node's own moduleId from cross-module results.
+                moduleId: n.moduleId ?? this.moduleName,
+            }));
+        }
+
+        // Module-local search.
         const result = await this.getModuleFS().search({
-            tags: query.tags ? { any: query.tags } : undefined,
+            name: nameQuery,
+            type: query.type as any,
+            tags: tagsQuery,
             limit: query.limit,
         });
         return Array.from(result.nodes).map(n => this.toEngineNode(n));
