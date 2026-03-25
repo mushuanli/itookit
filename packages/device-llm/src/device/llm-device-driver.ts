@@ -218,12 +218,28 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
     // ─── createDeviceNodes ────────────────────────────────────────────────────
 
     /**
-     * 在 VFS 中创建 /dev/llm/connection/<id> 和 /dev/llm/mcp/<id> 设备节点。
-     * 对 autoConnect: true 的 MCP 服务器自动连接。
-     * 必须在 registerDevice(this) 之后调用。
+     * 在 VFS 中建立 /dev/llm/ 目录树并创建设备文件。
+     *
+     * /dev/llm/                  ← 普通目录
+     *   connection/<id>          ← device 文件
+     *   mcp/<id>                 ← device 文件
+     *   skills/<id>              ← device 文件
+     *
+     * 调用方须先通过 vfsCore.devices.register(this) 注册驱动，
+     * 不应调用 vfsCore.registerDevice(this)（会把 /dev/llm 创建为 device 文件）。
      */
     async createDeviceNodes(): Promise<void> {
-        // Connection device nodes
+        // 迁移：旧版本把 /dev/llm 创建为 device 文件，导致无法建子路径。
+        // removeDeviceNode 内部 try-catch，若节点不存在或已是目录则静默忽略。
+        await this.vfs.removeDeviceNode('/dev/llm');
+
+        // 建父目录（普通目录，不是 device 文件）
+        await this.vfs.ensureSystemDirectory('/dev/llm');
+        await this.vfs.ensureSystemDirectory('/dev/llm/connection');
+        await this.vfs.ensureSystemDirectory('/dev/llm/mcp');
+        await this.vfs.ensureSystemDirectory('/dev/llm/skills');
+
+        // Connection device files
         for (const conn of this._connections) {
             await this.vfs.createDeviceNode('llm', `/dev/llm/connection/${conn.id}`, {
                 resourceType: 'connection',
@@ -231,7 +247,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
             });
         }
 
-        // MCP device nodes + auto-connect
+        // MCP device files + auto-connect
         for (const server of this._mcpServers) {
             await this.vfs.createDeviceNode('llm', `/dev/llm/mcp/${server.id}`, {
                 resourceType: 'mcp',
@@ -246,7 +262,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
             }
         }
 
-        // Skill device nodes
+        // Skill device files
         for (const skill of this._skills) {
             await this.vfs.createDeviceNode('llm', `/dev/llm/skills/${skill.id}`, {
                 resourceType: 'skill',
@@ -258,19 +274,24 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
     // ─── IDeviceDriver: open / close ─────────────────────────────────────────
 
     async open(ctx: DeviceContext, options?: Record<string, unknown>): Promise<string> {
-        const resourceType = ctx.metadata?.resourceType as string | undefined;
+        // 优先使用设备节点元数据（来自 /dev/llm/connection/<id> 等设备文件），
+        // 其次回落到 options（直接传参，如 openDevice('/dev/llm', { resourceType: 'mcp' })）
+        const resourceType = (ctx.metadata?.resourceType ?? options?.resourceType) as string | undefined;
+        const resourceId   = (ctx.metadata?.resourceId   ?? options?.resourceId)   as string | undefined;
 
         if (resourceType === 'connection') {
-            return this.openConnectionSession(ctx.metadata!.resourceId as string, options);
+            return this.openConnectionSession(resourceId ?? 'default', options);
         }
         if (resourceType === 'mcp') {
-            return this.openMCPSession(ctx.metadata!.resourceId as string, options);
+            if (!resourceId) throw new Error('LLMDeviceDriver: resourceId required for MCP session');
+            return this.openMCPSession(resourceId, options);
         }
         if (resourceType === 'skill') {
-            return this.openSkillSession(ctx.metadata!.resourceId as string);
+            if (!resourceId) throw new Error('LLMDeviceDriver: resourceId required for Skill session');
+            return this.openSkillSession(resourceId);
         }
 
-        // Fallback: legacy /dev/llm usage (options.connectionId)
+        // Legacy: openDevice('/dev/llm', { connectionId: 'xxx' })
         const opts = options as LLMDeviceOpenOptions | undefined;
         return this.openConnectionSession(opts?.connectionId ?? 'default', options);
     }

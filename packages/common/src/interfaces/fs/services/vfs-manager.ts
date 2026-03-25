@@ -281,6 +281,14 @@ export interface IVFSManager {
     registerDevice(driver: IDeviceDriver): Promise<void>;
 
     /**
+     * 确保系统级绝对路径存在（以普通目录形式）。
+     * 用于在 /dev/ 下建子目录，供设备驱动在调用 createDeviceNode 之前预建父目录。
+     *
+     * @param path 系统级绝对路径，如 /dev/llm/connection
+     */
+    ensureSystemDirectory(path: string): Promise<void>;
+
+    /**
      * 在 /dev/ 下创建嵌套设备节点（支持子路径，如 /dev/llm/connection/<id>）。
      *
      * 驱动必须已通过 registerDevice 注册。
