@@ -12,7 +12,8 @@
 //  7. 创建 /dev/llm/connection/<id>、/dev/llm/mcp/<id>、/dev/llm/skills/<id> 设备节点
 
 import type {
-    IDeviceDriver, IConnectionService, DeviceContext, IVFSManager, FileContent,
+    IDeviceDriver, ILLMManagementService,
+    DeviceContext, IVFSManager, FileContent,
     LLMConnection, ConnectionMeta, ChatMessage, ChatCompletionChunk,
     ChatCompletionParams, ChatCompletionResponse, TokenUsage,
     MCPServer, LLMSkill, CreateFileOptions, ToolDefinition,
@@ -109,19 +110,7 @@ export interface LLMDeviceOpenOptions {
     completionDefaults?: Record<string, unknown>;
 }
 
-/** MCP 服务器管理服务接口（由 LLMDeviceDriver 实现，注入到 VFSAgentService） */
-export interface IMCPManagementService {
-    getMCPServers(): Promise<MCPServer[]>;
-    saveMCPServer(server: MCPServer): Promise<void>;
-    deleteMCPServer(id: string): Promise<void>;
-}
-
-/** Skill 管理服务接口（由 LLMDeviceDriver 实现，注入到 VFSAgentService） */
-export interface ISkillManagementService {
-    getSkills(): Promise<LLMSkill[]>;
-    saveSkill(skill: LLMSkill): Promise<void>;
-    deleteSkill(id: string): Promise<void>;
-}
+// ILLMManagementService 统一管理接口已定义在 @itookit/common
 
 // ─── 内部会话状态 ─────────────────────────────────────────────────────────────
 
@@ -152,7 +141,7 @@ type SessionState = LLMSessionState | MCPSessionState | SkillSessionState;
 
 // ─── LLMDeviceDriver ─────────────────────────────────────────────────────────
 
-export class LLMDeviceDriver implements IDeviceDriver, IConnectionService, IMCPManagementService, ISkillManagementService {
+export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
     readonly handlerId = 'llm';
     readonly description = 'LLM streaming chat, connection management, MCP, and skills device';
     readonly writable = true;
@@ -550,7 +539,7 @@ export class LLMDeviceDriver implements IDeviceDriver, IConnectionService, IMCPM
         return () => this._listeners.delete(listener);
     }
 
-    // ─── IMCPManagementService ────────────────────────────────────────────────
+    // ─── ILLMManagementService — MCP ─────────────────────────────────────────
 
     async getMCPServers(): Promise<MCPServer[]> {
         return [...this._mcpServers];
@@ -643,7 +632,7 @@ export class LLMDeviceDriver implements IDeviceDriver, IConnectionService, IMCPM
         if (nodeId) await this.engine.delete([nodeId]);
     }
 
-    // ─── ISkillManagementService ──────────────────────────────────────────────
+    // ─── ILLMManagementService — Skills ──────────────────────────────────────
 
     async getSkills(): Promise<LLMSkill[]> {
         return [...this._skills];
