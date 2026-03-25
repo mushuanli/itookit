@@ -41,6 +41,37 @@ export type InitialAgentDef = AgentDefinition & {
     initialTags?: string[];
 };
 
+// ─── LLMSkill ─────────────────────────────────────────────────────────────────
+
+/** 技能类型：builtin = 代码内置 / http = 远程 HTTP 端点 / custom = 自定义扩展 */
+export type LLMSkillType = 'builtin' | 'http' | 'custom';
+
+/**
+ * 持久化 Skill 配置（存储在 __config:/llm/.skills/<id>.json）。
+ * 运行时通过 /dev/llm/skills/<id> 访问。
+ */
+export interface LLMSkill {
+    id: string;
+    name: string;
+    description?: string;
+    type: LLMSkillType;
+    enabled: boolean;
+    icon?: string;
+
+    // ── HTTP 端点配置（type = 'http'）────────────────────────────
+    endpoint?: string;
+    method?: 'GET' | 'POST' | 'PUT';
+    headers?: Record<string, string>;
+
+    // ── LLM function-calling 参数 Schema ─────────────────────────
+    /** JSON Schema（object 类型），描述 LLM 调用此 skill 时的参数格式 */
+    parameters?: Record<string, unknown>;
+
+    metadata?: Record<string, unknown>;
+    createdAt?: number;
+    modifiedAt?: number;
+}
+
 // ─── MCP ──────────────────────────────────────────────────────────────────────
 
 export interface MCPServer {
@@ -121,6 +152,11 @@ export interface IAgentManagementService extends IAgentService {
     getMCPServers(): Promise<MCPServer[]>;
     saveMCPServer(server: MCPServer): Promise<void>;
     deleteMCPServer(id: string): Promise<void>;
+
+    // Skills
+    getSkills(): Promise<LLMSkill[]>;
+    saveSkill(skill: LLMSkill): Promise<void>;
+    deleteSkill(id: string): Promise<void>;
 
     // 恢复/诊断
     getRestorableItems(): Promise<RestorableItem[]>;
