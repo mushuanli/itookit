@@ -10,7 +10,7 @@ import { NavigationRequest, NAVIGATION_EVENTS } from '@itookit/common';
 
 // 模块引入
 import { createSettingsModule, createSettingsFactory } from '@itookit/app-settings';
-import { createLLMFactory, createAgentEditorFactory, VFSAgentService } from '@itookit/llm-ui';
+import { createLLMFactory, createAgentEditorFactory, VFSAgentService, createAIContextMenuConfig } from '@itookit/llm-ui';
 // 引入 Engine 核心初始化方法和 SessionEngine
 import { initializeLLMEngine, LLMSessionEngine, chatFileParser } from '@itookit/llm-engine';
 // LLM 设备插件（连接配置的唯一守护者）
@@ -239,6 +239,11 @@ async function bootstrap() {
             const primaryFileKey = supportedFileTypes?.[0];
             const primaryFileDef = primaryFileKey ? FILE_REGISTRY[primaryFileKey] : undefined;
 
+            // AI 右键菜单：仅在 chat 工作区且非只读时启用
+            const aiContextMenu = (strategyType === 'chat' && !uiPassThrough.readOnly)
+                ? createAIContextMenuConfig({ agentService, engine: sessionEngine })
+                : null;
+
             // 构造 UI Options
             const uiOptions = {
                 ...uiPassThrough, // title, readOnly 等
@@ -249,7 +254,11 @@ async function bootstrap() {
                 defaultExtension: primaryFileDef?.extension,
                 defaultFileContent: primaryFileDef?.defaultContent,
                 contextMenu: {
-                    items: (_item: any, defaults: any[]) => uiPassThrough.readOnly ? [] : defaults
+                    items: (item: any, defaults: any[]) => {
+                        if (uiPassThrough.readOnly) return [];
+                        if (aiContextMenu?.items) return aiContextMenu.items(item, defaults);
+                        return defaults;
+                    }
                 }
             };
 
