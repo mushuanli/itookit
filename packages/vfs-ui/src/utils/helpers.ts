@@ -15,11 +15,16 @@ export const shouldFilterNode = (node: {
   name: string;
   moduleId?: string;
   path?: string;
-}): boolean =>
-  (!!node.moduleId && isHiddenFile(node.moduleId)) ||
-  node.path?.split('/').some(s => isHiddenFile(s) || isAssetDirSegment(s)) ||
-  isHiddenFile(node.name) ||
-  isAssetDirSegment(node.name);
+  metadata?: Record<string, unknown>;
+}): boolean => {
+  if (node.metadata?.['_showAll']) return false;
+  return (
+    (!!node.moduleId && isHiddenFile(node.moduleId)) ||
+    node.path?.split('/').some(s => isHiddenFile(s) || isAssetDirSegment(s)) ||
+    isHiddenFile(node.name) ||
+    isAssetDirSegment(node.name)
+  );
+};
 
 export const stripExtension = (name: string): string => {
   const i = name.lastIndexOf('.');
