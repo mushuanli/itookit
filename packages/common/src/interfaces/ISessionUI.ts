@@ -9,6 +9,8 @@ interface IRegularMenuItem {
     iconHTML?: string;
     type?: 'item'; // 'type' 是可辨识的属性
     hidden?: (item: Record<string, any>) => boolean;
+    /** Custom click handler. When provided, bypasses the command-bus dispatch. */
+    onClick?: (item: object) => void;
 }
 
 // 定义一个分割线

@@ -126,3 +126,7 @@ export const createAgentEditorFactory = (agentService: VFSAgentService): EditorF
 // 导出类型和类
 export { VFSAgentService };
 export type { LLMEditorOptions };
+
+// AI 右键菜单扩展
+export { createAIContextMenuConfig } from './context-menu/AIContextMenu';
+export type { AIContextMenuOptions } from './context-menu/AIContextMenu';

@@ -244,6 +244,13 @@ export class TaskRunner {
                 executorConfig = this.applyOverrides(executorConfig, input.overrides);
             }
 
+            // 文件级 system prompt 覆盖：ai_systemPrompt 设置时优先于 agent 配置
+            const fileNode = await this.engine.getNode(task.nodeId);
+            const fileSystemPrompt = fileNode?.metadata?.ai_systemPrompt as string | undefined;
+            if (fileSystemPrompt) {
+                executorConfig = { ...executorConfig, systemPrompt: fileSystemPrompt };
+            }
+
             // 4. 构建历史
             const history = this.buildHistoryForTask(
                 state, input.text, input.overrides?.historyLength

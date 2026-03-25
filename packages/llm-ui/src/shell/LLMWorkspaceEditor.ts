@@ -461,6 +461,27 @@ export class LLMWorkspaceEditor implements IEditor {
     // 会话加载
     // ================================================================
 
+    /**
+     * Reads ai_defaultAgent and ai_initialPrompt from the parent directory of the
+     * current node. Used to pre-configure new, empty chat sessions.
+     */
+    private async readParentDirAIDefaults(): Promise<{ agentId?: string; text?: string } | undefined> {
+        const nodeId = this.options.nodeId;
+        if (!nodeId) return undefined;
+        try {
+            const node = await this.engine.getNode(nodeId);
+            if (!node?.parentId) return undefined;
+            const parent = await this.engine.getNode(node.parentId);
+            if (!parent?.metadata) return undefined;
+            const agentId = parent.metadata.ai_defaultAgent as string | undefined;
+            const text    = parent.metadata.ai_initialPrompt as string | undefined;
+            if (!agentId && !text) return undefined;
+            return { agentId, text };
+        } catch {
+            return undefined;
+        }
+    }
+
     private async loadSession(_initialContent?: string): Promise<void> {
         if (!this.options.nodeId) throw new Error('nodeId is required');
 
@@ -485,6 +506,13 @@ export class LLMWorkspaceEditor implements IEditor {
 
         const savedUIState = await this.stateManager.loadUIState();
 
+        // When the session is brand-new (no messages) and no explicit initialInputState was
+        // injected by the caller, inherit ai_defaultAgent / ai_initialPrompt from the
+        // containing directory so new chats start with the right agent and prompt preset.
+        const emptySession = snapshot.sessions.length === 0;
+        const effectiveInitialInputState = this.options.initialInputState
+            ?? (emptySession ? await this.readParentDirAIDefaults() : undefined);
+
         let sessionSettings;
         if (!this.options.isNewSession) {
             sessionSettings = await this.errorHandler.wrap(
@@ -494,7 +522,7 @@ export class LLMWorkspaceEditor implements IEditor {
         }
 
         this.stateManager.restoreInputState(this.chatInput, {
-            initialInputState: this.options.initialInputState,
+            initialInputState: effectiveInitialInputState,
             isNewSession: this.options.isNewSession,
             savedState: savedUIState,
             sessionSettings,
