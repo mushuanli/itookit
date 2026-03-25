@@ -122,14 +122,17 @@ async function bootstrap() {
         // --- 1. 基础设施初始化 ---
         const vfsCore = await initVFS();
 
-        // --- 1.1 初始化 LLM 设备驱动（连接配置 + MCP 管理的唯一守护者） ---
-        // LLMDeviceDriver 管理连接存储和 MCP 服务器配置（__config VFS 模块），
-        // 同时提供 LLM 通信接口。AgentExecutor 通过 IDeviceDriver ioctl 与其通信，
-        // apiKey 不离开 device 边界。
+        // --- 1.1 初始化 LLM 设备驱动（连接配置 + MCP + Skill 管理的唯一守护者） ---
+        // 注意：调用 devices.register 而非 registerDevice，避免把 /dev/llm 创建为
+        // device 文件（device 文件不支持子路径）。createDeviceNodes 自行建目录树：
+        //   /dev/llm/                  ← 普通目录
+        //     connection/<id>          ← device 文件
+        //     mcp/<id>                 ← device 文件
+        //     skills/<id>              ← device 文件
         const llmDriver = new LLMDeviceDriver(vfsCore);
-        await llmDriver.init();                  // 挂载 __config 模块，加载连接和 MCP 配置
-        await vfsCore.registerDevice(llmDriver); // 注册驱动 + 创建 /dev/llm 设备文件
-        await llmDriver.createDeviceNodes();     // 创建 /dev/llm/connection/* 和 /dev/llm/mcp/*
+        await llmDriver.init();
+        vfsCore.devices.register(llmDriver);     // 仅注册驱动，不创建 VFS device 文件
+        await llmDriver.createDeviceNodes();     // 建目录 + 子 device 文件
         setKernelDeviceManager(vfsCore.devices);
 
         // --- 2. 核心服务层初始化 ---

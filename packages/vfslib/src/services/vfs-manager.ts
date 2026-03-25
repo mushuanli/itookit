@@ -117,6 +117,17 @@ export class VFSManager implements IVFSManager {
         }
     }
 
+    async ensureSystemDirectory(path: string): Promise<void> {
+        const lastSlash = path.lastIndexOf('/');
+        const parentPath = path.slice(0, lastSlash) || '/';
+        const name = path.slice(lastSlash + 1);
+        try {
+            await this.engine.createFile(parentPath, name, 'directory', undefined, undefined, { recursive: true });
+        } catch (e) {
+            if (!(e instanceof FSAlreadyExistsError)) throw e;
+        }
+    }
+
     async createDeviceNode(
         handlerId: string,
         devPath: string,
