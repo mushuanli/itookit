@@ -70,6 +70,7 @@ export class SystemFSExploreEditor extends BaseSettingsEditor<SettingsService> {
             // readOnly is enforced at the engine level — writes throw.
             editorConfig: {
                 readOnly: true,
+                initialMode: 'render',
             },
         });
 
