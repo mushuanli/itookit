@@ -18,15 +18,18 @@ export async function initVFS(): Promise<IVFSManager> {
 
     const { manager } = await createVFS({
         rootBackend: new IndexedDBBackend({ dbName: 'MindOS-v3' }),
-        modules: WORKSPACES.map(ws => ({
-            name: ws.moduleName,
-            options: {
-                description: ws.title,
-                isProtected: ws.isProtected,
-                syncEnabled: ws.syncEnabled,
-                isSystem: ws.isSystem,
-            },
-        })),
+        modules: WORKSPACES
+            // 'settings' type uses a virtual engine with no VFS storage
+            .filter(ws => ws.type !== 'settings')
+            .map(ws => ({
+                name: ws.moduleName,
+                options: {
+                    description: ws.title,
+                    isProtected: ws.isProtected,
+                    syncEnabled: ws.syncEnabled,
+                    isSystem: ws.isSystem,
+                },
+            })),
     });
 
     vfsInstance = manager;

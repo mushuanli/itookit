@@ -3,6 +3,7 @@
 import YAML from 'yaml';
 import { BaseModuleService } from '@itookit/vfslib';
 import type { IVFSManager } from '@itookit/common';
+import { FS_MODULE_CHAT } from '@itookit/common';
 import { log } from '../utils/logger';
 
 // ============================================
@@ -50,11 +51,11 @@ interface PromptHistoryFile {
 // 常量
 // ============================================
 
-/** 全局模块名称 */
-const MODULE_NAME = 'fs-global';
+/** prompt 历史属于 chat 功能，存放在 chat 模块内 */
+const MODULE_NAME = FS_MODULE_CHAT;
 
-/** 历史文件路径（模块内相对路径） */
-const HISTORY_FILE = '/history.yaml';
+/** _ 前缀：模块内部数据，对用户不可见，无需 isSystem */
+const HISTORY_FILE = '/_history.yaml';
 
 const DEFAULT_MAX_ENTRIES = 500;
 const WRITE_DEBOUNCE_MS = 1500;
@@ -63,13 +64,13 @@ const MIN_PROMPT_LENGTH = 2;
 /**
  * Prompt History 服务
  *
- * 继承 BaseModuleService，拥有独立的 VFS 模块命名空间 (fs-global)
- * 
+ * 继承 BaseModuleService，数据存储在 chats:/_history.yaml
+ *
  * 职责：
  * - 记录用户输入的 prompt（全局，跨会话）
  * - 去重（相同文本只保留最新记录）
  * - 模糊搜索和过滤
- * - 持久化到 /.global/history.yaml
+ * - 持久化到 chats:/_history.yaml
  *
  * 设计要点：
  * - 懒加载：首次访问时才读取文件
@@ -85,7 +86,7 @@ export class PromptHistoryService extends BaseModuleService {
     private writeTimer: ReturnType<typeof setTimeout> | null = null;
 
     constructor(vfs: IVFSManager) {
-        super(MODULE_NAME, { description: 'Global Configuration' }, vfs);
+        super(MODULE_NAME, {}, vfs);
     }
 
     protected async onLoad(): Promise<void> {
