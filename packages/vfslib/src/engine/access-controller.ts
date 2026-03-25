@@ -28,14 +28,18 @@ export class AccessController {
         if (caller.isSystem) return;
 
         const normalPath = pathUtils.normalize(absolutePath);
-        const name = pathUtils.basename(normalPath);
 
-        if (name && isHiddenName(name)) {
-            throw new FSAccessDeniedError(
-                normalPath,
-                operation,
-                'hidden files require system access',
-            );
+        // 检查路径所有分段：若任一段以 "." 开头（隐藏文件/目录，
+        // 或位于隐藏目录内的文件），均需要 system access。
+        const segments = normalPath.split('/').filter(Boolean);
+        for (const seg of segments) {
+            if (isHiddenName(seg)) {
+                throw new FSAccessDeniedError(
+                    normalPath,
+                    operation,
+                    'hidden files require system access',
+                );
+            }
         }
 
         const moduleMatch = normalPath.match(/^\/module\/([^/]+)/);

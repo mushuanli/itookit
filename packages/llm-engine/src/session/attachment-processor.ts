@@ -1,7 +1,7 @@
 // @file: llm-engine/session/attachment-processor.ts
 
 import { guessMimeType, MarkdownAnalyzer } from '@itookit/common';
-import { type Attachment } from '@itookit/llm-driver';
+import type { Attachment } from '@itookit/common';
 import { ChatFile } from '../core/types';
 import { ILLMSessionEngine } from '../persistence/types';
 

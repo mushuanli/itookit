@@ -1,27 +1,26 @@
 // @file: app-settings/index.ts
 import './styles/styles.css';
 import type { IVFSManager } from '@itookit/common';
-import { VFSAgentService } from '@itookit/llm-ui';
 import { SettingsService } from './services/SettingsService';
-import { SettingsEngine } from './engine/SettingsEngine'; 
-import { createSettingsFactory } from './factories/settingsFactory';
+import { SettingsEngine } from './engine/SettingsEngine';
 
-// 导出类型定义
 export * from './types/types';
+export { createSettingsFactory } from './factories/settingsFactory';
 
 /**
- * [Facade] Settings 模块聚合初始化函数
+ * Settings 模块初始化。
+ *
+ * 使用方式：
+ *   const settingsModule = await createSettingsModule(vfs);
+ *   const settingsFactory = createSettingsFactory(
+ *       settingsModule.service,
+ *       agentService,
+ *       vfsCore.devices,  // IDeviceManager，供 ConnectionSettingsEditor 使用
+ *   );
  */
-export async function createSettingsModule(vfs: IVFSManager, agentService: VFSAgentService) {
+export async function createSettingsModule(vfs: IVFSManager) {
     const service = new SettingsService(vfs);
     await service.init();
-
     const engine = new SettingsEngine(service);
-    const factory = createSettingsFactory(service, agentService);
-
-    return {
-        service,
-        engine, 
-        factory
-    };
+    return { service, engine };
 }

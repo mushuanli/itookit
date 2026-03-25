@@ -1,6 +1,6 @@
 // @file: llm-engine/session/task-runner.ts
 
-import { ChatMessage } from '@itookit/llm-driver';
+import type { ChatMessage } from '@itookit/common';
 import { ExecutorConfig } from '@itookit/llm-kernel';
 import {
     ExecutionTask,

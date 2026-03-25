@@ -3,16 +3,21 @@
  * @desc Read-only cross-module ISessionEngine for the System FS Explorer debug view.
  *
  * Tree layout:
- *   <moduleName>/          ← synthetic directory node per VFS module
- *     actual/files.md      ← remapped from the real module's file tree
- *     .hidden-file         ← visible in tree but content is BLOCKED
+ *   dev/                     ← synthetic /dev directory: registered device drivers
+ *     llm                    ← FSDeviceNode info (content = JSON metadata)
+ *     null / zero / random   ← built-in devices
+ *   <moduleName>/            ← synthetic directory node per VFS module
+ *     ordinary-file.md       ← content shown
+ *     .hidden-file           ← content BLOCKED (dot prefix = system/hidden)
+ *     _asset-dir/            ← content BLOCKED (underscore prefix = asset/special)
  *
  * Node ID encoding:
- *   Module dir : "__mod__<moduleName>"
- *   Real node  : "<moduleName>|<realNodeId>"
+ *   /dev dir    : "__dev__"
+ *   /dev device : "__dev__|<handlerId>"
+ *   Module dir  : "__mod__<moduleName>"
+ *   Real node   : "<moduleName>|<realNodeId>"
  *
- * All write operations (createFile, delete, rename, …) throw a read-only error.
- * Content of files whose name starts with "." is replaced with a placeholder.
+ * All write operations throw a read-only error.
  */
 import type {
     ISessionEngine,
@@ -27,24 +32,31 @@ import type {
 
 // ── ID helpers ────────────────────────────────────────────────────────────────
 
-const MOD_PREFIX = '__mod__';
+const DEV_DIR_ID  = '__dev__';
+const DEV_PREFIX  = '__dev__|';
+const MOD_PREFIX  = '__mod__';
 
 const moduleNodeId = (moduleName: string): string => `${MOD_PREFIX}${moduleName}`;
+const devNodeId    = (handlerId: string): string   => `${DEV_PREFIX}${handlerId}`;
 
 const compositeId = (moduleName: string, realId: string): string =>
     `${moduleName}|${realId}`;
 
 function parseComposite(id: string): { moduleName: string; realId: string } | null {
-    if (id.startsWith(MOD_PREFIX)) return null;
+    if (id.startsWith(MOD_PREFIX) || id.startsWith(DEV_PREFIX) || id === DEV_DIR_ID) return null;
     const sep = id.indexOf('|');
     if (sep < 0) return null;
     return { moduleName: id.slice(0, sep), realId: id.slice(sep + 1) };
 }
 
-const isHiddenName = (name: string): boolean => name.startsWith('.');
+/**
+ * 判断文件是否应屏蔽内容：仅 "." 前缀（系统/隐藏文件）。
+ * "_" 前缀（资产目录等）正常显示。
+ */
+const isSensitiveName = (name: string): boolean => name.startsWith('.');
 
 const BLOCKED_CONTENT = (name: string, path: string, mod: string): string =>
-    `⛔ System / hidden file — content not shown\n\n` +
+    `⛔ System / hidden / asset file — content not shown\n\n` +
     `Name  : ${name}\n` +
     `Path  : ${path}\n` +
     `Module: ${mod}\n`;
@@ -102,10 +114,14 @@ export class SystemVFSEngine implements ISessionEngine {
     // ── Tree ─────────────────────────────────────────────────────────────────
 
     async loadTree(): Promise<EngineNode[]> {
-        const modules = this.vfs.getAllModules();
+        const nodes: EngineNode[] = [];
 
-        // Load all modules in parallel — avoids serial await chain for large workspaces.
-        return Promise.all(modules.map(async mod => {
+        // 1. /dev/ — 虚拟设备目录
+        nodes.push(this.buildDevDirNode());
+
+        // 2. VFS 模块目录
+        const modules = this.vfs.getAllModules();
+        const moduleTrees = await Promise.all(modules.map(async mod => {
             const dirId = moduleNodeId(mod.name);
             let children: EngineNode[] = [];
 
@@ -131,9 +147,17 @@ export class SystemVFSEngine implements ISessionEngine {
                 children,
             };
         }));
+
+        nodes.push(...moduleTrees);
+        return nodes;
     }
 
     async getChildren(parentId: string): Promise<EngineNode[]> {
+        // /dev/ 目录
+        if (parentId === DEV_DIR_ID) {
+            return this.buildDevChildNodes();
+        }
+
         if (parentId.startsWith(MOD_PREFIX)) {
             const moduleName = parentId.slice(MOD_PREFIX.length);
             try {
@@ -160,6 +184,13 @@ export class SystemVFSEngine implements ISessionEngine {
     }
 
     async getNode(id: string): Promise<EngineNode | null> {
+        if (id === DEV_DIR_ID) return this.buildDevDirNode();
+
+        if (id.startsWith(DEV_PREFIX)) {
+            const handlerId = id.slice(DEV_PREFIX.length);
+            return this.buildDevFileNode(handlerId, DEV_DIR_ID);
+        }
+
         if (id.startsWith(MOD_PREFIX)) {
             const moduleName = id.slice(MOD_PREFIX.length);
             const info = this.vfs.getModule(moduleName);
@@ -194,6 +225,15 @@ export class SystemVFSEngine implements ISessionEngine {
     // ── Content ───────────────────────────────────────────────────────────────
 
     async readContent(id: string): Promise<string | ArrayBuffer> {
+        // /dev/ 目录本身
+        if (id === DEV_DIR_ID) return '';
+
+        // /dev/<handlerId> 设备节点 → 显示驱动元数据
+        if (id.startsWith(DEV_PREFIX)) {
+            const handlerId = id.slice(DEV_PREFIX.length);
+            return this.buildDevContent(handlerId);
+        }
+
         if (id.startsWith(MOD_PREFIX)) return '';
 
         const parsed = parseComposite(id);
@@ -201,17 +241,15 @@ export class SystemVFSEngine implements ISessionEngine {
 
         const node = await this.getNode(id);
 
-        // Block hidden/system config file content
-        if (node && isHiddenName(node.name)) {
+        // 屏蔽 . 或 _ 前缀的文件（系统/隐藏/资产文件）
+        if (node && isSensitiveName(node.name)) {
             return BLOCKED_CONTENT(node.name, node.path, parsed.moduleName);
         }
 
         try {
             const raw = await this.vfs.getEngine(parsed.moduleName).readContent(parsed.realId);
-            // FileContent can be string | ArrayBuffer | Uint8Array — normalise to string | ArrayBuffer
             if (typeof raw === 'string') return raw;
             if (raw instanceof ArrayBuffer) return raw;
-            // Uint8Array → ArrayBuffer
             return (raw as Uint8Array).buffer.slice(
                 (raw as Uint8Array).byteOffset,
                 (raw as Uint8Array).byteOffset + (raw as Uint8Array).byteLength,
@@ -219,6 +257,61 @@ export class SystemVFSEngine implements ISessionEngine {
         } catch (e) {
             return `⚠️ Could not read content\n\n${e}`;
         }
+    }
+
+    // ── /dev/ helpers ─────────────────────────────────────────────────────────
+
+    private buildDevDirNode(): EngineNode {
+        return {
+            id: DEV_DIR_ID,
+            parentId: null,
+            name: 'dev',
+            type: 'directory' as const,
+            path: '/dev',
+            createdAt: 0,
+            modifiedAt: 0,
+            tags: [],
+            metadata: { title: '/dev', description: 'Registered virtual device drivers' },
+            moduleId: 'system',
+            children: this.buildDevChildNodes(),
+        };
+    }
+
+    private buildDevChildNodes(): EngineNode[] {
+        return this.vfs.devices.list().map(handlerId =>
+            this.buildDevFileNode(handlerId, DEV_DIR_ID),
+        );
+    }
+
+    private buildDevFileNode(handlerId: string, parentId: string): EngineNode {
+        const driver = this.vfs.devices.has(handlerId)
+            ? this.vfs.devices.get(handlerId)
+            : null;
+        return {
+            id: devNodeId(handlerId),
+            parentId,
+            name: handlerId,
+            type: 'file' as const,
+            path: `/dev/${handlerId}`,
+            createdAt: 0,
+            modifiedAt: 0,
+            size: 0,
+            tags: [],
+            metadata: { title: handlerId, description: driver?.description ?? '' },
+            moduleId: 'system',
+        };
+    }
+
+    private buildDevContent(handlerId: string): string {
+        if (!this.vfs.devices.has(handlerId)) return `⚠️ Device '${handlerId}' not found`;
+        const driver = this.vfs.devices.get(handlerId);
+        return JSON.stringify({
+            handlerId: driver.handlerId,
+            description: driver.description ?? null,
+            writable: driver.writable,
+            streamable: driver.streamable ?? false,
+            sessionable: driver.sessionable ?? false,
+        }, null, 2);
     }
 
     // ── Search ────────────────────────────────────────────────────────────────
@@ -229,27 +322,15 @@ export class SystemVFSEngine implements ISessionEngine {
 
     // ── Tags (no-op) ──────────────────────────────────────────────────────────
 
-    async getAllTags(): Promise<Array<{ name: string; color?: string }>> {
-        return [];
-    }
-
+    async getAllTags(): Promise<Array<{ name: string; color?: string }>> { return []; }
     async setTags(_id: string, _tags: string[]): Promise<void> {}
-
     async setTagsBatch(_updates: Array<{ id: string; tags: string[] }>): Promise<void> {}
 
     // ── Assets (no-op) ────────────────────────────────────────────────────────
 
-    async createAsset(_ownerNodeId: string, _filename: string, _content: string | ArrayBuffer): Promise<EngineNode> {
-        return this.throwReadOnly('createAsset');
-    }
-
-    async getAssetDirectoryId(_ownerNodeId: string): Promise<string | null> {
-        return null;
-    }
-
-    async getAssets(_ownerNodeId: string): Promise<EngineNode[]> {
-        return [];
-    }
+    async createAsset(): Promise<EngineNode> { return this.throwReadOnly('createAsset'); }
+    async getAssetDirectoryId(): Promise<string | null> { return null; }
+    async getAssets(): Promise<EngineNode[]> { return []; }
 
     // ── Mutations (read-only — all throw) ────────────────────────────────────
 
@@ -257,31 +338,13 @@ export class SystemVFSEngine implements ISessionEngine {
         throw new Error(`[SystemVFSEngine] Read-only: ${op} is not allowed`);
     }
 
-    async writeContent(_id: string, _content: string | ArrayBuffer): Promise<void> {
-        this.throwReadOnly('writeContent');
-    }
-
-    async createFile(_name: string, _parentId: string | null, _content?: string | ArrayBuffer): Promise<EngineNode> {
-        return this.throwReadOnly('createFile');
-    }
-
-    async createDirectory(_name: string, _parentId: string | null): Promise<EngineNode> {
-        return this.throwReadOnly('createDirectory');
-    }
-
-    async rename(_id: string, _newName: string): Promise<void> {
-        this.throwReadOnly('rename');
-    }
-
-    async delete(_ids: string[]): Promise<void> {
-        this.throwReadOnly('delete');
-    }
-
-    async move(_ids: string[], _targetParentId: string | null): Promise<void> {
-        this.throwReadOnly('move');
-    }
-
-    async updateMetadata(_id: string, _metadata: Record<string, unknown>): Promise<void> {}
+    async writeContent(): Promise<void>  { this.throwReadOnly('writeContent'); }
+    async createFile(): Promise<EngineNode> { return this.throwReadOnly('createFile'); }
+    async createDirectory(): Promise<EngineNode> { return this.throwReadOnly('createDirectory'); }
+    async rename(): Promise<void>  { this.throwReadOnly('rename'); }
+    async delete(): Promise<void>  { this.throwReadOnly('delete'); }
+    async move(): Promise<void>    { this.throwReadOnly('move'); }
+    async updateMetadata(): Promise<void> {}
 
     // ── Events (static snapshot — no events) ─────────────────────────────────
 

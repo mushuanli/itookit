@@ -6,5 +6,5 @@ export default defineConfig({
   dts: true,
   clean: true,
   sourcemap: true,
-  external: ['@itookit/common', '@itookit/llm-driver', /^node:/]
+  external: ['@itookit/common', '@itookit/device-llm', /^node:/]
 });

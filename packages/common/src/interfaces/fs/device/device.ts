@@ -66,3 +66,56 @@ export interface IDeviceManager {
     get(handlerId: string): IDeviceDriver;
     list(): string[];
 }
+
+/**
+ * 从已有的驱动实例和上下文创建 IDeviceHandle。
+ *
+ * 供无法访问 IModuleFS（VFS 路径）的调用方使用（如 llm-kernel）：
+ *   const sessionId = await driver.open!(baseCtx, options);
+ *   const handle = createDeviceHandle(driver, { ...baseCtx, sessionId });
+ *   await handle.write(data);
+ *   await handle.close();
+ */
+export function createDeviceHandle(
+    driver: IDeviceDriver,
+    ctx: DeviceContext,
+): IDeviceHandle {
+    return {
+        ctx,
+        read: () => driver.read(ctx),
+        write: (content) => driver.write(ctx, content),
+        async *readStream() {
+            if (!driver.readStream) throw new Error(`Device '${driver.handlerId}' is not streamable`);
+            yield* driver.readStream(ctx);
+        },
+        ioctl: (command, arg) => {
+            if (!driver.ioctl) throw new Error(`Device '${driver.handlerId}' does not support ioctl`);
+            return driver.ioctl(ctx, command, arg);
+        },
+        close: () => driver.close?.(ctx) ?? Promise.resolve(),
+    };
+}
+
+/**
+ * 打开设备文件后返回的句柄。
+ *
+ * 通过 `IModuleFS.openDevice(path, opts)` 获取：
+ *   const dev = await engine.openDevice('/dev/llm', { connectionId: 'default' });
+ *   await dev.write(prompt);
+ *   for await (const chunk of dev.readStream()) { ... }
+ *   await dev.close();
+ */
+export interface IDeviceHandle {
+    /** 绑定的设备节点上下文（含 sessionId） */
+    readonly ctx: DeviceContext;
+    /** 读取设备输出 */
+    read(): Promise<FileContent>;
+    /** 写入数据到设备 */
+    write(content: FileContent): Promise<void>;
+    /** 流式读取（streamable 设备） */
+    readStream(): AsyncIterable<string | ArrayBuffer>;
+    /** 设备控制命令 */
+    ioctl(command: string | number, arg?: unknown): Promise<unknown>;
+    /** 关闭会话 */
+    close(): Promise<void>;
+}

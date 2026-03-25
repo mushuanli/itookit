@@ -27,7 +27,7 @@ export default defineConfig({
     },
     rollupOptions: {
       external: [
-        '@itookit/llm-driver',
+        '@itookit/device-llm',
         '@itookit/common',
         /^node:/
       ],

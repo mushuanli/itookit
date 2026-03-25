@@ -20,7 +20,7 @@
       "@itookit/vfs-ui": ["../../packages/vfs-ui/src/index.ts"],
       "@itookit/mdxeditor": ["../../packages/mdx/src/index.ts"],
       "@itookit/memory-manager": ["../../packages/memory-manager/src/index.ts"],
-      "@itookit/llm-driver": ["../../packages/llm-driver/src/index.ts"],
+      "@itookit/device-llm": ["../../packages/device-llm/src/index.ts"],
       "@itookit/llm-kernel": ["../../packages/llm-kernel/src/index.ts"],
       "@itookit/llm-engine": ["../../packages/llm-engine/src/index.ts"],
       "@itookit/llm-ui": ["../../packages/llm-ui/src/index.ts"],

@@ -25,7 +25,7 @@ cd packages/vfslib && npx vitest run src/__tests__/04-tag-ops.test.ts  # Single 
 ```
 
 Build tools by package type:
-- Logic-only packages (`common`, `vfslib`, `llm-driver`, `llm-kernel`, `llm-engine`, vfsdrivers): **tsup** → CJS+ESM + `.d.ts`
+- Logic-only packages (`common`, `vfslib`, `device-llm`, `llm-kernel`, `llm-engine`, vfsdrivers): **tsup** → CJS+ESM + `.d.ts`
 - UI packages (`memory-manager`, `vfs-ui`, `llm-ui`, `mdx`, `app-settings`): **vite build**
 
 ## Workspace Structure
@@ -38,7 +38,7 @@ pnpm monorepo. All packages under `packages/`, main app under `apps/web-app/` (p
 | `@itookit/vfslib` | VFS engine core — POSIX-style virtual filesystem abstraction,support assetdir/ 模块目录级别隔离 / mount不同driver到/不同目录下 |
 | `@itookit/vfsdriver-indexeddb` | IndexedDB storage backend (browser) |
 | `@itookit/vfsdriver-fs` | SQLite + local FS backend (Node/Electron) |
-| `@itookit/llm-driver` | LLM API communication — OpenAI/Anthropic/Gemini, SSE streaming, MCP protocol |
+| `@itookit/device-llm` | LLM API communication — OpenAI/Anthropic/Gemini, SSE streaming, MCP protocol |
 | `@itookit/llm-kernel` | Execution engine core, no UI deps — Executor and Orchestrator types |
 | `@itookit/llm-engine` | UI adapter layer — session management, state, VFS persistence (`.chat` files) |
 | `@itookit/mdxeditor` | CodeMirror 6 Markdown editor with frontmatter/GFM/Mermaid |
@@ -98,7 +98,7 @@ Four strategies: `StandardWorkspaceStrategy` (MDxEditor + `VFSModuleEngine`), `C
 ### LLM Engine Stack
 
 ```
-llm-driver  →  LLMConnection / streaming / MCP / multi-provider
+device-llm →  LLMConnection / streaming / MCP / multi-provider
 llm-kernel  →  Executor (Agent/HTTP/Tool/Script) + Orchestrator (Serial/Parallel/Router/Loop/DAG)
 llm-engine  →  SessionManager, LLMSessionEngine (→ vfslib), VFSAgentService (→ vfslib)
 llm-ui      →  UI components for Chat and Agent editing
