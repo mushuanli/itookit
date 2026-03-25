@@ -1,15 +1,29 @@
 // @file llm-ui/editors/MCPSettingsEditor.ts
 import { BaseSettingsEditor, Toast, Modal, generateShortUUID } from '@itookit/common';
-import { MCPServer, IAgentManagementService } from '@itookit/llm-engine';
+import type { MCPServer, IAgentManagementService } from '@itookit/common';
+
+// ─── helpers ──────────────────────────────────────────────────────────────────
+
+const TRANSPORT_LABELS: Record<string, string> = {
+    stdio:  'Stdio (本地进程)',
+    sse:    'SSE (HTTP 流)',
+    http:   'HTTP (REST)',
+};
+
+function statusBadge(status?: MCPServer['status']): string {
+    if (status === 'connected') return `<span class="settings-badge settings-badge--success">● 已连接</span>`;
+    if (status === 'error')     return `<span class="settings-badge settings-badge--danger">✕ 错误</span>`;
+    return `<span class="settings-badge">○ 未连接</span>`;
+}
+
+// ─── MCPSettingsEditor ────────────────────────────────────────────────────────
 
 export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementService> {
-    // [修复] 添加缺失的属性
     private selectedId: string | null = null;
 
     async render() {
         const servers = await this.service.getMCPServers();
 
-        // 修正选中状态
         if (this.selectedId && !servers.find(s => s.id === this.selectedId)) {
             this.selectedId = null;
         }
@@ -17,408 +31,494 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
             this.selectedId = servers[0].id;
         }
 
-        const selectedServer = servers.find(s => s.id === this.selectedId);
+        const selected = servers.find(s => s.id === this.selectedId) ?? null;
 
         this.container.innerHTML = `
             <div class="settings-split">
                 <div class="settings-split__sidebar">
                     <div class="settings-split__header">
-                        <h3><i class="fas fa-plug"></i> MCP Servers</h3>
+                        <h3 style="margin:0;font-size:.9375rem;font-weight:600">
+                            <i class="fas fa-plug" style="margin-right:.5rem;opacity:.7"></i>MCP Servers
+                        </h3>
                         <div class="settings-page__actions">
-                            <button id="btn-add-server" class="settings-btn-round" title="添加"><i class="fas fa-plus"></i></button>
-                            <button id="btn-import-server" class="settings-btn-round" title="导入"><i class="fas fa-file-import"></i></button>
-                            <button id="btn-export-all" class="settings-btn-round" title="导出"><i class="fas fa-file-export"></i></button>
+                            <button class="settings-btn-round" data-action="add"     title="添加服务器"><i class="fas fa-plus"></i></button>
+                            <button class="settings-btn-round" data-action="import"  title="导入配置"><i class="fas fa-file-import"></i></button>
+                            <button class="settings-btn-round" data-action="export"  title="导出全部"><i class="fas fa-file-export"></i></button>
                         </div>
                     </div>
+
                     <div class="settings-split__list">
                         ${servers.length === 0 ? this.renderEmptyList() : servers.map(s => this.renderListItem(s)).join('')}
                     </div>
                 </div>
 
                 <div class="settings-split__content">
-                    ${selectedServer ? this.renderConfigPanel(selectedServer) : this.renderEmptyState()}
+                    ${selected ? this.renderDetail(selected) : this.renderEmptyState()}
                 </div>
-            </div>
-        `;
+            </div>`;
 
-        this.bindEvents();
+        this.bindEvents(servers);
     }
+
+    // ─── List ───────────────────────────────────────────────────────────────
 
     private renderEmptyList() {
         return `
             <div class="settings-empty settings-empty--mini">
-                <p>暂无 MCP Server</p>
-                <button class="settings-btn settings-btn--primary settings-btn--sm" id="btn-create-first">创建第一个</button>
-            </div>
-        `;
+                <div class="settings-empty__icon" style="font-size:2rem">🔌</div>
+                <p style="margin:.5rem 0">暂无 MCP Server</p>
+                <button class="settings-btn settings-btn--primary settings-btn--sm" data-action="add">
+                    <i class="fas fa-plus"></i> 添加第一个
+                </button>
+            </div>`;
     }
 
     private renderListItem(server: MCPServer) {
         const isSelected = server.id === this.selectedId;
-        const statusClass = server.status === 'connected' ? 'settings-badge--success' :
-            server.status === 'error' ? 'settings-badge--danger' : '';
-        const statusIcon = server.status === 'connected' ? 'check-circle' :
-            server.status === 'error' ? 'exclamation-circle' : 'circle';
-
+        const transportIcon = server.transport === 'stdio' ? '🖥' : '🌐';
         return `
-            <div class="settings-list-item ${isSelected ? 'selected' : ''}" data-id="${server.id}">
-                <span class="settings-list-item__icon">${server.icon || '🔌'}</span>
+            <div class="settings-list-item ${isSelected ? 'selected' : ''}" data-id="${server.id}" style="cursor:pointer">
+                <span class="settings-list-item__icon" style="font-size:1.25rem">${server.icon || '🔌'}</span>
                 <div class="settings-list-item__info">
-                    <p class="settings-list-item__title">${server.name}</p>
-                    <p class="settings-list-item__desc">${server.transport}</p>
+                    <div class="settings-list-item__title">${server.name}</div>
+                    <div class="settings-list-item__desc">${transportIcon} ${TRANSPORT_LABELS[server.transport] ?? server.transport}</div>
                 </div>
-                <span class="settings-badge ${statusClass}"><i class="fas fa-${statusIcon}"></i></span>
-            </div>
-        `;
+                ${statusBadge(server.status)}
+            </div>`;
     }
 
-    private renderConfigPanel(server: MCPServer) {
-        const tools = server.tools || [];
-        const resources = server.resources || [];
+    // ─── Detail ─────────────────────────────────────────────────────────────
+
+    private renderDetail(server: MCPServer) {
+        const tools     = (server.tools     as any[] | undefined) ?? [];
+        const resources = (server.resources as any[] | undefined) ?? [];
 
         return `
-            <div class="settings-config-header">
-                <div class="settings-config-header__title-area">
-                    <span class="settings-config-header__icon">${server.icon || '🔌'}</span>
-                    <div>
-                        <h2 class="settings-config-header__title">${server.name}</h2>
-                        <p class="settings-config-header__subtitle">${server.description || '配置此 MCP Server'}</p>
+            <!-- ── Header ── -->
+            <div style="padding:1.25rem 1.75rem;border-bottom:1px solid var(--st-border-color);
+                        display:flex;align-items:center;justify-content:space-between;gap:.75rem;flex-wrap:wrap">
+                <div style="display:flex;align-items:center;gap:1rem;min-width:0">
+                    <span style="font-size:2.25rem;flex-shrink:0;line-height:1">${server.icon || '🔌'}</span>
+                    <div style="min-width:0">
+                        <div style="font-size:1.125rem;font-weight:700;color:var(--st-text-primary);
+                                    white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${server.name}</div>
+                        <div style="font-size:.8125rem;color:var(--st-text-secondary);margin-top:.125rem">
+                            ${server.description || TRANSPORT_LABELS[server.transport] || server.transport}
+                        </div>
+                    </div>
+                    ${statusBadge(server.status)}
+                </div>
+                <div style="display:flex;gap:.5rem;flex-shrink:0">
+                    <button class="settings-btn settings-btn--secondary" data-action="test">
+                        <i class="fas fa-plug"></i> 测试
+                    </button>
+                    <button class="settings-btn settings-btn--primary" data-action="save">
+                        <i class="fas fa-save"></i> 保存
+                    </button>
+                    <button class="settings-btn settings-btn--danger" data-action="delete" title="删除">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- ── Scrollable body ── -->
+            <div style="overflow-y:auto;padding:1.25rem 1.75rem 2rem">
+
+                <!-- Basic Info -->
+                <div class="settings-section">
+                    <h3 class="settings-section__title">基础信息</h3>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
+                        <div class="settings-form-group">
+                            <label>名称</label>
+                            <input class="settings-input" name="name" value="${server.name}" placeholder="My MCP Server">
+                        </div>
+                        <div class="settings-form-group">
+                            <label>图标 <span style="color:var(--st-text-tertiary);font-size:.8em">emoji</span></label>
+                            <input class="settings-input" name="icon" value="${server.icon || ''}" placeholder="🔌">
+                        </div>
+                    </div>
+                    <div class="settings-form-group">
+                        <label>描述</label>
+                        <textarea class="settings-textarea" name="description" rows="2"
+                            placeholder="简短描述此服务器的用途">${server.description || ''}</textarea>
                     </div>
                 </div>
-                <div class="settings-config-header__actions">
-                    <button class="settings-btn settings-btn--secondary settings-btn-test" ${!server.transport ? 'disabled' : ''}>
-                        <i class="fas fa-vial"></i> 测试连接
-                    </button>
-                    <button class="settings-btn settings-btn--primary settings-btn-save"><i class="fas fa-save"></i> 保存</button>
-                    <button class="settings-btn settings-btn--danger settings-btn-delete"><i class="fas fa-trash"></i> 删除</button>
-                </div>
-            </div>
 
-            <div class="settings-section">
-                <h3 class="settings-section__title">基础信息</h3>
-                <div class="settings-form__row"><label class="settings-form__label">名称</label><input type="text" class="settings-form__input" name="name" value="${server.name}"></div>
-                <div class="settings-form__row"><label class="settings-form__label">图标</label><input type="text" class="settings-form__input" name="icon" value="${server.icon || ''}"></div>
-                <div class="settings-form__row"><label class="settings-form__label">描述</label><textarea class="settings-form__textarea" name="description">${server.description || ''}</textarea></div>
-            </div>
-
-            <div class="settings-section">
-                <h3 class="settings-section__title">连接配置</h3>
-                <div class="settings-form__row">
-                    <label class="settings-form__label">传输方式</label>
-                    <select class="settings-form__select" name="transport">
-                        <option value="stdio" ${server.transport === 'stdio' ? 'selected' : ''}>STDIO</option>
-                        <option value="sse" ${server.transport === 'sse' ? 'selected' : ''}>SSE</option>
-                        <option value="http" ${server.transport === 'http' ? 'selected' : ''}>HTTP</option>
-                    </select>
+                <!-- Transport -->
+                <div class="settings-section">
+                    <h3 class="settings-section__title">连接方式</h3>
+                    <div class="settings-form-group">
+                        <label>传输协议</label>
+                        <select class="settings-select" name="transport" id="transport-select">
+                            <option value="stdio" ${server.transport === 'stdio' ? 'selected' : ''}>🖥️ Stdio — 启动本地进程</option>
+                            <option value="sse"   ${server.transport === 'sse'   ? 'selected' : ''}>🌐 SSE — Server-Sent Events</option>
+                            <option value="http"  ${server.transport === 'http'  ? 'selected' : ''}>🌐 HTTP — REST 端点</option>
+                        </select>
+                    </div>
+                    <div id="transport-fields">
+                        ${this.renderTransportFields(server)}
+                    </div>
                 </div>
-                <div id="transport-config-container">
-                    ${this.renderTransportFields(server)}
-                </div>
-            </div>
 
-            <div class="settings-section">
-                <h3 class="settings-section__title">
-                    工具列表 (Tools) <span class="settings-badge">${tools.length}</span>
-                </h3>
-                ${tools.length === 0
-                ? `<div class="settings-empty settings-empty--mini"><p>暂无工具</p><button class="settings-btn settings-btn--sm" id="btn-add-tool">手动添加</button></div>`
-                : `<div class="settings-list-card-container">${tools.map((t, i) => this.renderToolItem(t, i)).join('')}</div>
-                       <button class="settings-btn settings-btn--sm" id="btn-add-tool" style="margin-top:10px">添加工具</button>`
-            }
-            </div>
-
-            <div class="settings-section">
-                <h3 class="settings-section__title">
-                    资源列表 (Resources) <span class="settings-badge">${resources.length}</span>
-                </h3>
-                ${resources.length === 0
-                ? `<div class="settings-empty settings-empty--mini"><p>暂无资源</p><button class="settings-btn settings-btn--sm" id="btn-add-resource">手动添加</button></div>`
-                : `<div class="settings-list-card-container">${resources.map((r, i) => this.renderResourceItem(r, i)).join('')}</div>
-                       <button class="settings-btn settings-btn--sm" id="btn-add-resource" style="margin-top:10px">添加资源</button>`
-            }
-            </div>
-
-            <div class="settings-section">
-                <h3 class="settings-section__title">高级选项</h3>
-                <div class="settings-form__row">
-                    <label class="settings-form__label"><input type="checkbox" name="autoConnect" ${server.autoConnect ? 'checked' : ''}> 启动时自动连接</label>
+                <!-- Advanced -->
+                <div class="settings-section">
+                    <h3 class="settings-section__title">高级选项</h3>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;align-items:end">
+                        <div class="settings-form-group" style="margin-bottom:0">
+                            <label>超时时间 (秒)</label>
+                            <input class="settings-input" type="number" name="timeout"
+                                value="${server.timeout ?? 30}" min="5" max="300">
+                        </div>
+                        <div class="settings-checkbox-row" style="padding-bottom:.5rem">
+                            <input type="checkbox" id="auto-connect" name="autoConnect"
+                                ${server.autoConnect ? 'checked' : ''}>
+                            <label for="auto-connect">启动时自动连接</label>
+                        </div>
+                    </div>
                 </div>
-                <div class="settings-form__row">
-                    <label class="settings-form__label">超时时间 (秒)</label>
-                    <input type="number" class="settings-form__input" name="timeout" value="${server.timeout || 30}">
+
+                <!-- Tools -->
+                <div class="settings-section">
+                    <h3 class="settings-section__title" style="display:flex;align-items:center;gap:.5rem">
+                        Tools
+                        <span class="settings-badge">${tools.length}</span>
+                        <button class="settings-btn settings-btn--sm" data-action="add-tool"
+                            style="margin-left:auto;font-size:.75rem">+ 添加</button>
+                    </h3>
+                    ${tools.length > 0 ? this.renderToolList(tools) : `
+                        <div class="settings-empty settings-empty--mini">
+                            <p style="color:var(--st-text-tertiary);font-size:.875rem">连接后自动发现，或手动添加</p>
+                        </div>`}
                 </div>
-            </div>
-        `;
+
+                <!-- Resources -->
+                <div class="settings-section" style="margin-bottom:0">
+                    <h3 class="settings-section__title" style="display:flex;align-items:center;gap:.5rem">
+                        Resources
+                        <span class="settings-badge">${resources.length}</span>
+                        <button class="settings-btn settings-btn--sm" data-action="add-resource"
+                            style="margin-left:auto;font-size:.75rem">+ 添加</button>
+                    </h3>
+                    ${resources.length > 0 ? this.renderResourceList(resources) : `
+                        <div class="settings-empty settings-empty--mini">
+                            <p style="color:var(--st-text-tertiary);font-size:.875rem">暂无资源</p>
+                        </div>`}
+                </div>
+            </div>`;
     }
 
     private renderTransportFields(server: MCPServer) {
         if (server.transport === 'stdio') {
             return `
-                <div class="settings-form__row"><label class="settings-form__label">Command</label><input type="text" class="settings-form__input" name="command" value="${server.command || ''}" placeholder="node"></div>
-                <div class="settings-form__row"><label class="settings-form__label">Args</label><input type="text" class="settings-form__input" name="args" value="${server.args || ''}" placeholder="server.js"></div>
-                <div class="settings-form__row"><label class="settings-form__label">CWD</label><input type="text" class="settings-form__input" name="cwd" value="${server.cwd || ''}" placeholder="/path/to/dir"></div>
-            `;
-        } else {
-            return `
-                <div class="settings-form__row"><label class="settings-form__label">Endpoint</label><input type="url" class="settings-form__input" name="endpoint" value="${server.endpoint || ''}" placeholder="http://localhost:3000"></div>
-                <div class="settings-form__row"><label class="settings-form__label">API Key</label><input type="password" class="settings-form__input" name="apiKey" value="${server.apiKey || ''}"></div>
-            `;
+                <div class="settings-form-group">
+                    <label>命令 <span style="color:var(--st-text-tertiary);font-size:.8em">Command</span></label>
+                    <input class="settings-input" name="command" value="${server.command || ''}"
+                        placeholder="node / python / npx">
+                </div>
+                <div class="settings-form-group">
+                    <label>参数 <span style="color:var(--st-text-tertiary);font-size:.8em">Args（空格分隔）</span></label>
+                    <input class="settings-input" name="args" value="${server.args || ''}"
+                        placeholder="server.js --port 3000">
+                </div>
+                <div class="settings-form-group">
+                    <label>工作目录 <span style="color:var(--st-text-tertiary);font-size:.8em">CWD（可选）</span></label>
+                    <input class="settings-input" name="cwd" value="${server.cwd || ''}"
+                        placeholder="/path/to/project">
+                </div>`;
         }
+        return `
+            <div class="settings-form-group">
+                <label>Endpoint URL</label>
+                <input class="settings-input" type="url" name="endpoint" value="${server.endpoint || ''}"
+                    placeholder="http://localhost:3000/mcp">
+            </div>
+            <div class="settings-form-group">
+                <label>API Key <span style="color:var(--st-text-tertiary);font-size:.8em">可选</span></label>
+                <input class="settings-input" type="password" name="apiKey" value="${server.apiKey || ''}"
+                    placeholder="sk-...">
+            </div>`;
     }
 
-    private renderToolItem(tool: any, index: number) {
-        return `
-            <div class="settings-list-card">
-                <div class="settings-list-card__header">
-                    <strong>${tool.name}</strong>
-                    <button class="settings-btn-icon-small settings-btn-delete-tool" data-index="${index}"><i class="fas fa-trash"></i></button>
-                </div>
-                <p class="settings-list-card__desc">${tool.description || '无描述'}</p>
-            </div>
-        `;
+    private renderToolList(tools: any[]) {
+        return `<div style="display:flex;flex-direction:column;gap:.5rem">${
+            tools.map((t, i) => `
+                <div class="settings-card" style="display:flex;align-items:center;gap:.75rem;padding:.75rem 1rem">
+                    <i class="fas fa-wrench" style="color:var(--st-color-primary);flex-shrink:0"></i>
+                    <div style="flex:1;min-width:0">
+                        <div style="font-weight:600;font-size:.875rem">${t.name}</div>
+                        <div style="font-size:.8125rem;color:var(--st-text-secondary);
+                                    white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+                            ${t.description || '无描述'}</div>
+                    </div>
+                    <button class="settings-btn-icon" data-action="del-tool" data-index="${i}" title="删除">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>`).join('')}
+        </div>`;
     }
 
-    private renderResourceItem(res: any, index: number) {
-        return `
-            <div class="settings-list-card">
-                <div class="settings-list-card__header">
-                    <strong>${res.name || res.uri}</strong>
-                    <button class="settings-btn-icon-small settings-btn-delete-resource" data-index="${index}"><i class="fas fa-trash"></i></button>
-                </div>
-                <p class="settings-list-card__desc"><code>${res.uri}</code></p>
-            </div>
-        `;
+    private renderResourceList(resources: any[]) {
+        return `<div style="display:flex;flex-direction:column;gap:.5rem">${
+            resources.map((r, i) => `
+                <div class="settings-card" style="display:flex;align-items:center;gap:.75rem;padding:.75rem 1rem">
+                    <i class="fas fa-database" style="color:var(--st-color-primary);flex-shrink:0"></i>
+                    <div style="flex:1;min-width:0">
+                        <div style="font-weight:600;font-size:.875rem">${r.name || r.uri}</div>
+                        <div style="font-size:.8125rem;color:var(--st-text-secondary);font-family:monospace">
+                            ${r.uri}</div>
+                    </div>
+                    <button class="settings-btn-icon" data-action="del-resource" data-index="${i}" title="删除">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>`).join('')}
+        </div>`;
     }
 
     private renderEmptyState() {
-        return `<div class="settings-empty"><h3>请选择或创建一个 MCP Server</h3></div>`;
+        return `
+            <div class="settings-empty" style="height:100%;justify-content:center">
+                <div class="settings-empty__icon">🔌</div>
+                <div class="settings-empty__title">选择一个 MCP Server</div>
+                <p style="color:var(--st-text-tertiary);font-size:.875rem;text-align:center;max-width:280px">
+                    MCP (Model Context Protocol) 让 LLM 访问外部工具和数据源
+                </p>
+                <button class="settings-btn settings-btn--primary" data-action="add">
+                    <i class="fas fa-plus"></i> 添加服务器
+                </button>
+            </div>`;
     }
 
-    private bindEvents() {
+    // ─── Events ─────────────────────────────────────────────────────────────
+
+    private bindEvents(servers: MCPServer[]) {
         this.clearListeners();
 
+        // List selection
         const list = this.container.querySelector('.settings-split__list');
         if (list) {
             this.addEventListener(list, 'click', (e) => {
-                const item = (e.target as HTMLElement).closest('.settings-list-item') as HTMLElement;
-                if (item) {
-                    this.selectedId = item.dataset.id!;
-                    this.render();
-                }
+                const item = (e.target as HTMLElement).closest('[data-id]') as HTMLElement | null;
+                if (item) { this.selectedId = item.dataset.id!; this.render(); }
             });
         }
 
-        this.bindButton('#btn-add-server', () => this.addNewServer());
-        this.bindButton('#btn-create-first', () => this.addNewServer());
-        this.bindButton('#btn-import-server', () => this.showImportModal());
-        this.bindButton('#btn-export-all', () => this.exportAll());
-        this.bindButton('.settings-btn-save', () => this.saveCurrentServer());
-        this.bindButton('.settings-btn-delete', () => this.deleteCurrentServer());
-        this.bindButton('.settings-btn-test', () => this.testConnection());
+        // Global data-action buttons
+        this.bindAction('add',     () => this.addNew());
+        this.bindAction('import',  () => this.showImport());
+        this.bindAction('export',  () => this.exportAll(servers));
+        this.bindAction('save',    () => this.saveCurrent(servers));
+        this.bindAction('delete',  () => this.deleteCurrent());
+        this.bindAction('test',    () => this.testCurrent(servers));
+        this.bindAction('add-tool',() => this.addTool(servers));
+        this.bindAction('add-resource', () => this.addResource(servers));
 
-        const transportSelect = this.container.querySelector('[name="transport"]');
-        if (transportSelect) {
-            this.addEventListener(transportSelect, 'change', (e) => {
-                const val = (e.target as HTMLSelectElement).value;
-                const container = document.getElementById('transport-config-container');
-                if (container) {
-                    const tempServer: any = { transport: val };
-                    container.innerHTML = this.renderTransportFields(tempServer);
-                }
+        // Transport select
+        const transportSel = this.container.querySelector<HTMLSelectElement>('#transport-select');
+        if (transportSel) {
+            this.addEventListener(transportSel, 'change', () => {
+                const el = this.container.querySelector<HTMLElement>('#transport-fields');
+                if (el) el.innerHTML = this.renderTransportFields({ transport: transportSel.value } as MCPServer);
             });
         }
 
-        this.bindButton('#btn-add-tool', () => this.showAddToolModal());
-        this.bindButton('#btn-add-resource', () => this.showAddResourceModal());
-
-        const configPanel = this.container.querySelector('.settings-split__content');
-        if (configPanel) {
-            this.addEventListener(configPanel, 'click', (e) => {
-                const target = e.target as HTMLElement;
-                const toolBtn = target.closest('.settings-btn-delete-tool') as HTMLElement;
-                const resBtn = target.closest('.settings-btn-delete-resource') as HTMLElement;
-
-                if (toolBtn) this.deleteTool(parseInt(toolBtn.dataset.index!));
-                if (resBtn) this.deleteResource(parseInt(resBtn.dataset.index!));
+        // Dynamic delete buttons (tool / resource)
+        const content = this.container.querySelector('.settings-split__content');
+        if (content) {
+            this.addEventListener(content, 'click', async (e) => {
+                const btn = (e.target as HTMLElement).closest('[data-action]') as HTMLElement | null;
+                if (!btn) return;
+                const action = btn.dataset.action;
+                const idx    = parseInt(btn.dataset.index ?? '-1', 10);
+                if (action === 'del-tool')     await this.deleteTool(idx, servers);
+                if (action === 'del-resource') await this.deleteResource(idx, servers);
             });
         }
     }
 
-    // Helper to bind click cleanly
-    private bindButton(selector: string, handler: () => void) {
-        const btn = this.container.querySelector(selector);
-        if (btn) this.addEventListener(btn, 'click', handler);
+    /** Register a data-action click handler anywhere in container */
+    private bindAction(action: string, handler: () => void) {
+        const el = this.container.querySelector(`[data-action="${action}"]`);
+        if (el) this.addEventListener(el, 'click', handler);
     }
 
-    // --- Actions ---
+    private val(name: string) {
+        return (this.container.querySelector(`[name="${name}"]`) as HTMLInputElement | null)?.value ?? '';
+    }
+    private chk(name: string) {
+        return (this.container.querySelector(`[name="${name}"]`) as HTMLInputElement | null)?.checked ?? false;
+    }
 
-    private async addNewServer() {
-        const newServer: MCPServer = {
+    // ─── Actions ────────────────────────────────────────────────────────────
+
+    private async addNew() {
+        const server: MCPServer = {
             id: `mcp-${generateShortUUID()}`,
             name: 'New Server',
             transport: 'stdio',
             status: 'idle',
             tools: [],
-            resources: []
+            resources: [],
         };
-        await this.service.saveMCPServer(newServer);
-        this.selectedId = newServer.id;
+        await this.service.saveMCPServer(server);
+        this.selectedId = server.id;
     }
 
-    private async saveCurrentServer() {
+    private async saveCurrent(servers: MCPServer[]) {
         if (!this.selectedId) return;
-        const existing = (await this.service.getMCPServers()).find(s => s.id === this.selectedId);
+        const existing = servers.find(s => s.id === this.selectedId);
         if (!existing) return;
-
-        // Gather form data
-        const getVal = (name: string) => (this.container.querySelector(`[name="${name}"]`) as HTMLInputElement)?.value;
-        const getChk = (name: string) => (this.container.querySelector(`[name="${name}"]`) as HTMLInputElement)?.checked;
 
         const updated: MCPServer = {
             ...existing,
-            name: getVal('name'),
-            icon: getVal('icon'),
-            description: getVal('description'),
-            transport: getVal('transport') as any,
-            autoConnect: getChk('autoConnect'),
-            timeout: parseInt(getVal('timeout') || '30'),
-            // Conditional fields
-            command: getVal('command'),
-            args: getVal('args'),
-            cwd: getVal('cwd'),
-            endpoint: getVal('endpoint'),
-            apiKey: getVal('apiKey')
+            name:        this.val('name')     || existing.name,
+            icon:        this.val('icon')     || undefined,
+            description: this.val('description') || undefined,
+            transport:   this.val('transport') as MCPServer['transport'],
+            command:     this.val('command')  || undefined,
+            args:        this.val('args')     || undefined,
+            cwd:         this.val('cwd')      || undefined,
+            endpoint:    this.val('endpoint') || undefined,
+            apiKey:      this.val('apiKey')   || undefined,
+            timeout:     parseInt(this.val('timeout')) || 30,
+            autoConnect: this.chk('autoConnect'),
         };
-
         await this.service.saveMCPServer(updated);
         Toast.success('已保存');
     }
 
-    private deleteCurrentServer() {
+    private deleteCurrent() {
         if (!this.selectedId) return;
-        Modal.confirm('确认删除', '确定要删除此 MCP Server 吗？', async () => {
+        Modal.confirm('删除确认', '确定要删除此 MCP Server？此操作不可撤销。', async () => {
             await this.service.deleteMCPServer(this.selectedId!);
             this.selectedId = null;
             Toast.success('已删除');
         });
     }
 
-    private async testConnection() {
+    private async testCurrent(servers: MCPServer[]) {
         if (!this.selectedId) return;
-        const btn = this.container.querySelector('.btn-test') as HTMLButtonElement;
-        const originalText = btn.innerHTML;
-        btn.innerHTML = '测试中...';
+        const btn = this.container.querySelector<HTMLButtonElement>('[data-action="test"]');
+        if (!btn) return;
+        const html = btn.innerHTML;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 测试中…';
         btn.disabled = true;
 
         try {
-            // 模拟测试：更新状态并生成假数据
-            // 在真实场景中，这里会调用后端 API
             await new Promise(r => setTimeout(r, 1000));
-
-            const server = (await this.service.getMCPServers()).find(s => s.id === this.selectedId);
+            const server = servers.find(s => s.id === this.selectedId);
             if (server) {
                 server.status = 'connected';
-                // 如果列表为空，填充一些 Mock 数据演示成功
-                if (!server.tools?.length) {
-                    server.tools = [{ name: 'mock_tool', description: 'Auto-discovered tool' }];
-                }
+                if (!server.tools?.length) server.tools = [{ name: 'mock_tool', description: '自动发现的工具' }];
                 await this.service.saveMCPServer(server);
-                Toast.success('连接测试成功');
+                Toast.success('连接成功');
             }
-        } catch (e) {
+        } catch {
             Toast.error('连接失败');
         } finally {
-            btn.innerHTML = originalText;
+            btn.innerHTML = html;
             btn.disabled = false;
         }
     }
 
-    private showAddToolModal() {
-        const content = `
-            <div class="settings-form__group"><label class="settings-form__label">名称</label><input class="settings-form__input" id="tool-name" type="text"></div>
-            <div class="settings-form__group"><label class="settings-form__label">描述</label><textarea class="settings-form__textarea" id="tool-desc"></textarea></div>
-        `;
-        new Modal('添加工具', content, {
+    private async addTool(servers: MCPServer[]) {
+        const body = `
+            <div class="settings-form-group">
+                <label>名称</label>
+                <input class="settings-input" id="tool-name" placeholder="get_weather">
+            </div>
+            <div class="settings-form-group">
+                <label>描述</label>
+                <textarea class="settings-textarea" id="tool-desc" rows="2"
+                    placeholder="查询指定城市的实时天气"></textarea>
+            </div>`;
+        new Modal('添加工具', body, {
             onConfirm: async () => {
-                const name = (document.getElementById('tool-name') as HTMLInputElement).value;
-                const desc = (document.getElementById('tool-desc') as HTMLInputElement).value;
+                const name = (document.getElementById('tool-name') as HTMLInputElement).value.trim();
+                const desc = (document.getElementById('tool-desc') as HTMLTextAreaElement).value.trim();
                 if (!name) return false;
-
-                const server = (await this.service.getMCPServers()).find(s => s.id === this.selectedId);
+                const server = servers.find(s => s.id === this.selectedId);
                 if (server) {
-                    server.tools = [...(server.tools || []), { name, description: desc }];
+                    server.tools = [...(server.tools as any[] || []), { name, description: desc }];
                     await this.service.saveMCPServer(server);
                 }
-            }
+            },
         }).show();
     }
 
-    private async deleteTool(index: number) {
-        const server = (await this.service.getMCPServers()).find(s => s.id === this.selectedId);
-        if (server && server.tools) {
-            server.tools.splice(index, 1);
-            this.service.saveMCPServer(server);
+    private async deleteTool(index: number, servers: MCPServer[]) {
+        const server = servers.find(s => s.id === this.selectedId);
+        if (server?.tools) {
+            const tools = [...server.tools as any[]];
+            tools.splice(index, 1);
+            await this.service.saveMCPServer({ ...server, tools });
         }
     }
 
-    private showAddResourceModal() {
-        // 类似 showAddToolModal，略
-        const content = `
-            <div class="form-group"><label>URI</label><input id="res-uri" type="text"></div>
-            <div class="form-group"><label>名称</label><input id="res-name" type="text"></div>
-        `;
-        new Modal('添加资源', content, {
+    private async addResource(servers: MCPServer[]) {
+        const body = `
+            <div class="settings-form-group">
+                <label>URI</label>
+                <input class="settings-input" id="res-uri" placeholder="file:///path/to/resource">
+            </div>
+            <div class="settings-form-group">
+                <label>名称</label>
+                <input class="settings-input" id="res-name" placeholder="显示名称">
+            </div>`;
+        new Modal('添加资源', body, {
             onConfirm: async () => {
-                const uri = (document.getElementById('res-uri') as HTMLInputElement).value;
-                const name = (document.getElementById('res-name') as HTMLInputElement).value;
+                const uri  = (document.getElementById('res-uri')  as HTMLInputElement).value.trim();
+                const name = (document.getElementById('res-name') as HTMLInputElement).value.trim();
                 if (!uri) return false;
-
-                const server = (await this.service.getMCPServers()).find(s => s.id === this.selectedId);
+                const server = servers.find(s => s.id === this.selectedId);
                 if (server) {
-                    server.resources = [...(server.resources || []), { uri, name }];
+                    server.resources = [...(server.resources as any[] || []), { uri, name }];
                     await this.service.saveMCPServer(server);
                 }
-            }
+            },
         }).show();
     }
 
-    private async deleteResource(index: number) {
-        const server = (await this.service.getMCPServers()).find(s => s.id === this.selectedId);
-        if (server && server.resources) {
-            server.resources.splice(index, 1);
-            this.service.saveMCPServer(server);
+    private async deleteResource(index: number, servers: MCPServer[]) {
+        const server = servers.find(s => s.id === this.selectedId);
+        if (server?.resources) {
+            const resources = [...server.resources as any[]];
+            resources.splice(index, 1);
+            await this.service.saveMCPServer({ ...server, resources });
         }
     }
 
-    private showImportModal() {
-        const content = `<textarea id="import-json" style="width:100%;height:200px" placeholder="Paste JSON array..."></textarea>`;
-        new Modal('导入配置', content, {
+    private showImport() {
+        const body = `
+            <p style="font-size:.875rem;color:var(--st-text-secondary);margin:0 0 .75rem">
+                粘贴 JSON 数组（单个对象也支持）</p>
+            <textarea class="settings-textarea" id="import-json" rows="8"
+                placeholder='[{"name":"My Server","transport":"stdio",...}]'
+                style="font-family:monospace;font-size:.8125rem"></textarea>`;
+        new Modal('导入 MCP 配置', body, {
             confirmText: '导入',
             onConfirm: async () => {
-                const json = (document.getElementById('import-json') as HTMLTextAreaElement).value;
+                const text = (document.getElementById('import-json') as HTMLTextAreaElement).value;
                 try {
-                    const data = JSON.parse(json);
-                    const arr = Array.isArray(data) ? data : [data];
+                    const data = JSON.parse(text);
+                    const arr: MCPServer[] = Array.isArray(data) ? data : [data];
                     for (const item of arr) {
                         item.id = item.id || `mcp-${generateShortUUID()}`;
                         await this.service.saveMCPServer(item);
                     }
-                    Toast.success(`导入 ${arr.length} 个配置`);
-                } catch (e) {
+                    Toast.success(`已导入 ${arr.length} 个服务器`);
+                } catch {
                     Toast.error('JSON 格式错误');
                     return false;
                 }
-            }
+            },
         }).show();
     }
 
-    private async exportAll() {
-        const data = JSON.stringify(await this.service.getMCPServers(), null, 2);
-        const blob = new Blob([data], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'mcp-servers.json';
+    private async exportAll(servers: MCPServer[]) {
+        const blob = new Blob([JSON.stringify(servers, null, 2)], { type: 'application/json' });
+        const a = Object.assign(document.createElement('a'), {
+            href: URL.createObjectURL(blob), download: 'mcp-servers.json',
+        });
         a.click();
     }
 }
