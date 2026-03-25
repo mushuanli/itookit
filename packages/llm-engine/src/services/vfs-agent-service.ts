@@ -8,7 +8,7 @@ import { BaseModuleService } from '@itookit/vfslib';
 import type { IVFSManager, VFSManagerEvent } from '@itookit/common';
 import type { EngineNode, EngineSearchQuery, RestorableItem } from '@itookit/common';
 import { FS_MODULE_AGENTS } from '@itookit/common';
-import type { IConnectionService, ConnectionMeta, LLMConnection, AgentDefinition } from '@itookit/common';
+import type { IConnectionService, ConnectionMeta, LLMConnection, AgentDefinition, LLMSkill } from '@itookit/common';
 
 import {
     CONST_CONFIG_VERSION,
@@ -16,6 +16,7 @@ import {
     DEFAULT_AGENTS,
     AGENT_DEFAULT_DIR,
     type IMCPManagementService,
+    type ISkillManagementService,
 } from '@itookit/device-llm';
 import { IAgentManagementService, MCPServer } from './agent-service';
 import { log } from '../utils/logger';
@@ -35,6 +36,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
         vfs: IVFSManager,
         private readonly connectionService: IConnectionService,
         private readonly mcpService: IMCPManagementService,
+        private readonly skillService: ISkillManagementService,
     ) {
         super(FS_MODULE_AGENTS, { description: 'AI Agents Configuration', isSystem: true }, vfs);
     }
@@ -221,6 +223,20 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
 
     async deleteMCPServer(id: string): Promise<void> {
         return this.mcpService.deleteMCPServer(id);
+    }
+
+    // ─── IAgentManagementService — Skills (delegated to ISkillManagementService) ─
+
+    async getSkills(): Promise<LLMSkill[]> {
+        return this.skillService.getSkills();
+    }
+
+    async saveSkill(skill: LLMSkill): Promise<void> {
+        return this.skillService.saveSkill(skill);
+    }
+
+    async deleteSkill(id: string): Promise<void> {
+        return this.skillService.deleteSkill(id);
     }
 
     // ─── Restore / Diagnose ───────────────────────────────────────────────────

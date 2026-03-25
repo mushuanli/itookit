@@ -1,20 +1,21 @@
 // @file: device-llm/device/llm-device-driver.ts
 //
-// LLMDeviceDriver — LLM 连接配置守护者 + LLM/MCP 通信设备。
+// LLMDeviceDriver — LLM 连接配置守护者 + LLM/MCP/Skill 通信设备。
 //
 // 职责：
 //  1. 管理 LLMConnection 存储（VFS __config 模块 /llm/.connections/）
 //  2. 管理 MCPServer 存储（VFS __config 模块 /llm/.mcp/）
-//  3. 对外暴露 ConnectionMeta（无 apiKey）供 AgentExecutor 等使用
-//  4. 通过 ioctl 为 Settings UI 提供 CRUD
-//  5. 维护 Chat Session 和 MCP Session 生命周期
-//  6. 创建 /dev/llm/connection/<id> 和 /dev/llm/mcp/<id> 设备节点
+//  3. 管理 LLMSkill 存储（VFS __config 模块 /llm/.skills/）
+//  4. 对外暴露 ConnectionMeta（无 apiKey）供 AgentExecutor 等使用
+//  5. 通过 ioctl 为 Settings UI 提供 CRUD
+//  6. 维护 Chat / MCP / Skill Session 生命周期
+//  7. 创建 /dev/llm/connection/<id>、/dev/llm/mcp/<id>、/dev/llm/skills/<id> 设备节点
 
 import type {
     IDeviceDriver, IConnectionService, DeviceContext, IVFSManager, FileContent,
     LLMConnection, ConnectionMeta, ChatMessage, ChatCompletionChunk,
     ChatCompletionParams, ChatCompletionResponse, TokenUsage,
-    MCPServer, CreateFileOptions, ToolDefinition,
+    MCPServer, LLMSkill, CreateFileOptions, ToolDefinition,
 } from '@itookit/common';
 import { toConnectionMeta, CONFIG_MODULE } from '@itookit/common';
 
@@ -30,6 +31,7 @@ const STORAGE_MODULE   = CONFIG_MODULE;             // '__config'
 const CONNECTIONS_DIR  = '/llm/.connections';       // LLM 连接（新路径）
 const DEFAULTS_VERSION = '/llm/.connections_version.json';
 const MCP_DIR          = '/llm/.mcp';               // MCP 服务器配置（新路径）
+const SKILLS_DIR       = '/llm/.skills';            // Skill 配置
 
 // 旧路径（数据迁移用）
 const OLD_CONNECTIONS_DIR = '/_llm/.connections';
@@ -80,6 +82,20 @@ export const LLM_IOCTL = {
     MCP_LIST_TOOLS:   'list-tools',
     /** arg: { tool: string; args: Record<string,any>; timeout?: number } → any */
     MCP_CALL_TOOL:    'call-tool',
+
+    // ── Skill 管理（无需 sessionId）──────────────────────────────────────────
+    /** → LLMSkill[] */
+    LIST_SKILLS:      'list-skills',
+    /** arg: LLMSkill → void */
+    SAVE_SKILL:       'save-skill',
+    /** arg: id → void */
+    DELETE_SKILL:     'delete-skill',
+
+    // ── Skill 会话（需要 sessionId，由 /dev/llm/skills/<id> 打开）────────────
+    /** arg: { args: Record<string,unknown> } → unknown — 调用 HTTP 端点 */
+    SKILL_INVOKE:     'invoke',
+    /** → LLMSkill — 读取当前 skill 配置 */
+    SKILL_GET_DEF:    'get-definition',
 } as const;
 
 export type LLMIoctlCommand = typeof LLM_IOCTL[keyof typeof LLM_IOCTL];
@@ -98,6 +114,13 @@ export interface IMCPManagementService {
     getMCPServers(): Promise<MCPServer[]>;
     saveMCPServer(server: MCPServer): Promise<void>;
     deleteMCPServer(id: string): Promise<void>;
+}
+
+/** Skill 管理服务接口（由 LLMDeviceDriver 实现，注入到 VFSAgentService） */
+export interface ISkillManagementService {
+    getSkills(): Promise<LLMSkill[]>;
+    saveSkill(skill: LLMSkill): Promise<void>;
+    deleteSkill(id: string): Promise<void>;
 }
 
 // ─── 内部会话状态 ─────────────────────────────────────────────────────────────
@@ -120,13 +143,18 @@ interface MCPSessionState {
     readonly server: MCPServer;
 }
 
-type SessionState = LLMSessionState | MCPSessionState;
+interface SkillSessionState {
+    readonly kind: 'skill';
+    readonly skill: LLMSkill;
+}
+
+type SessionState = LLMSessionState | MCPSessionState | SkillSessionState;
 
 // ─── LLMDeviceDriver ─────────────────────────────────────────────────────────
 
-export class LLMDeviceDriver implements IDeviceDriver, IConnectionService, IMCPManagementService {
+export class LLMDeviceDriver implements IDeviceDriver, IConnectionService, IMCPManagementService, ISkillManagementService {
     readonly handlerId = 'llm';
-    readonly description = 'LLM streaming chat, connection management, and MCP device';
+    readonly description = 'LLM streaming chat, connection management, MCP, and skills device';
     readonly writable = true;
     readonly streamable = true;
     readonly sessionable = true;
@@ -140,6 +168,9 @@ export class LLMDeviceDriver implements IDeviceDriver, IConnectionService, IMCPM
     // ── MCP store ──
     private _mcpServers: MCPServer[] = [];
     private _activeMCPConns = new Map<string, MCPServerConnection>();
+
+    // ── Skill store ──
+    private _skills: LLMSkill[] = [];
 
     // ── Sessions ──
     private readonly sessions = new Map<string, SessionState>();
@@ -170,6 +201,7 @@ export class LLMDeviceDriver implements IDeviceDriver, IConnectionService, IMCPM
         // Load caches
         await this.reload();
         await this.reloadMCP();
+        await this.reloadSkills();
 
         // Cross-tab sync
         this.bindVFSEvents();
@@ -224,6 +256,14 @@ export class LLMDeviceDriver implements IDeviceDriver, IConnectionService, IMCPM
                 }
             }
         }
+
+        // Skill device nodes
+        for (const skill of this._skills) {
+            await this.vfs.createDeviceNode('llm', `/dev/llm/skills/${skill.id}`, {
+                resourceType: 'skill',
+                resourceId: skill.id,
+            });
+        }
     }
 
     // ─── IDeviceDriver: open / close ─────────────────────────────────────────
@@ -236,6 +276,9 @@ export class LLMDeviceDriver implements IDeviceDriver, IConnectionService, IMCPM
         }
         if (resourceType === 'mcp') {
             return this.openMCPSession(ctx.metadata!.resourceId as string, options);
+        }
+        if (resourceType === 'skill') {
+            return this.openSkillSession(ctx.metadata!.resourceId as string);
         }
 
         // Fallback: legacy /dev/llm usage (options.connectionId)
@@ -356,9 +399,21 @@ export class LLMDeviceDriver implements IDeviceDriver, IConnectionService, IMCPM
                 }
                 return;
             }
+
+            // ── Skill 管理命令（无需 sessionId）────────────────────────────────
+            case LLM_IOCTL.LIST_SKILLS:
+                return this._skills.slice();
+
+            case LLM_IOCTL.SAVE_SKILL:
+                await this.saveSkill(arg as LLMSkill);
+                return;
+
+            case LLM_IOCTL.DELETE_SKILL:
+                await this.deleteSkill(arg as string);
+                return;
         }
 
-        // ── MCP 会话命令 ────────────────────────────────────────────────────────
+        // ── MCP / Skill 会话命令 ────────────────────────────────────────────────
         const session = this.sessions.get(ctx.sessionId!);
         if (session?.kind === 'mcp') {
             switch (command) {
@@ -381,6 +436,21 @@ export class LLMDeviceDriver implements IDeviceDriver, IConnectionService, IMCPM
 
                 default:
                     throw new Error(`LLMDeviceDriver: unknown MCP ioctl '${String(command)}'`);
+            }
+        }
+
+        if (session?.kind === 'skill') {
+            switch (command) {
+                case LLM_IOCTL.SKILL_GET_DEF:
+                    return session.skill;
+
+                case LLM_IOCTL.SKILL_INVOKE: {
+                    const { args } = arg as { args: Record<string, unknown> };
+                    return this.invokeSkill(session.skill, args);
+                }
+
+                default:
+                    throw new Error(`LLMDeviceDriver: unknown Skill ioctl '${String(command)}'`);
             }
         }
 
@@ -573,6 +643,30 @@ export class LLMDeviceDriver implements IDeviceDriver, IConnectionService, IMCPM
         if (nodeId) await this.engine.delete([nodeId]);
     }
 
+    // ─── ISkillManagementService ──────────────────────────────────────────────
+
+    async getSkills(): Promise<LLMSkill[]> {
+        return [...this._skills];
+    }
+
+    async saveSkill(skill: LLMSkill): Promise<void> {
+        skill = { ...skill, modifiedAt: Date.now() };
+        await this.writeSkillToDisk(skill);
+        await this.reloadSkills();
+        await this.vfs.createDeviceNode('llm', `/dev/llm/skills/${skill.id}`, {
+            resourceType: 'skill',
+            resourceId: skill.id,
+        });
+        this.notify();
+    }
+
+    async deleteSkill(id: string): Promise<void> {
+        await this.deleteSkillFromDisk(id);
+        await this.reloadSkills();
+        await this.vfs.removeDeviceNode(`/dev/llm/skills/${id}`);
+        this.notify();
+    }
+
     // ─── MCP storage ──────────────────────────────────────────────────────────
 
     private async reloadMCP(): Promise<void> {
@@ -616,6 +710,28 @@ export class LLMDeviceDriver implements IDeviceDriver, IConnectionService, IMCPM
             args: server.args ? server.args.trim().split(/\s+/).filter(Boolean) : undefined,
             url: server.endpoint,
         };
+    }
+
+    // ─── Skill storage ────────────────────────────────────────────────────────
+
+    private async reloadSkills(): Promise<void> {
+        this._skills = await this.loadAllSkills();
+    }
+
+    private loadAllSkills(): Promise<LLMSkill[]> {
+        return this.loadJsonFilesFromDir<LLMSkill>(SKILLS_DIR);
+    }
+
+    private async writeSkillToDisk(skill: LLMSkill): Promise<void> {
+        await this.engineUpsert(
+            `${SKILLS_DIR}/${skill.id}.json`,
+            JSON.stringify(skill, null, 2),
+        );
+    }
+
+    private async deleteSkillFromDisk(id: string): Promise<void> {
+        const nodeId = await this.engine.resolvePath(`${SKILLS_DIR}/${id}.json`);
+        if (nodeId) await this.engine.delete([nodeId]);
     }
 
     // ─── Session management ───────────────────────────────────────────────────
@@ -678,6 +794,27 @@ export class LLMDeviceDriver implements IDeviceDriver, IConnectionService, IMCPM
             server,
         });
         return sessionId;
+    }
+
+    private openSkillSession(skillId: string): string {
+        const skill = this._skills.find(s => s.id === skillId);
+        if (!skill) throw new Error(`LLMDeviceDriver: skill '${skillId}' not found`);
+        const sessionId = `skill-${++this.sessionSeq}`;
+        this.sessions.set(sessionId, { kind: 'skill', skill });
+        return sessionId;
+    }
+
+    private async invokeSkill(skill: LLMSkill, args: Record<string, unknown>): Promise<unknown> {
+        if (skill.type !== 'http' || !skill.endpoint) {
+            throw new Error(`Skill '${skill.id}' is not an HTTP skill or has no endpoint configured`);
+        }
+        const response = await fetch(skill.endpoint, {
+            method: skill.method ?? 'POST',
+            headers: { 'Content-Type': 'application/json', ...skill.headers },
+            body: JSON.stringify(args),
+        });
+        if (!response.ok) throw new Error(`Skill '${skill.name}' invocation failed: HTTP ${response.status}`);
+        return response.json();
     }
 
     // ─── Data migration ───────────────────────────────────────────────────────
@@ -759,6 +896,7 @@ export class LLMDeviceDriver implements IDeviceDriver, IConnectionService, IMCPM
             this._syncTimer = setTimeout(async () => {
                 await this.reload();
                 await this.reloadMCP();
+                await this.reloadSkills();
                 this.notify();
             }, 300);
         };

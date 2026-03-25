@@ -183,6 +183,7 @@ export type {
     LLMIoctlCommand,
     LLMDeviceOpenOptions,
     IMCPManagementService,
+    ISkillManagementService,
 } from './device/llm-device-driver';
 
 // ============================================
