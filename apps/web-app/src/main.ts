@@ -137,8 +137,8 @@ async function bootstrap() {
         // 2.1 Settings 模块
         const settingsModule = await createSettingsModule(vfsCore);
 
-        // 2.2 Agent Service（管理 Agent，连接/MCP/Skill 操作委托给 LLMDeviceDriver）
-        const agentService = new VFSAgentService(vfsCore, llmDriver, llmDriver, llmDriver);
+        // 2.2 Agent Service（管理 Agent；连接/MCP/Skill 全部委托给 LLMDeviceDriver）
+        const agentService = new VFSAgentService(vfsCore, llmDriver);
 
         // 2.3 Session Engine (管理 .chat 文件持久化)
         const sessionEngine = new LLMSessionEngine(vfsCore);
