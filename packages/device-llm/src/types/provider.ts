@@ -3,6 +3,32 @@
 import { LLMConnection } from './connection';
 import { ChatCompletionParams, ChatCompletionResponse } from './response';
 
+// ─── MCP Types (local definition, no device-mcp dependency) ──────────────────
+
+/** MCP 服务器连接配置 */
+export interface MCPServerConfig {
+    /** 服务器名称（唯一） */
+    name: string;
+    /** 传输类型 */
+    transport: 'stdio' | 'sse' | 'websocket';
+    /** 启动命令（stdio 模式） */
+    command?: string;
+    /** 命令参数（stdio 模式） */
+    args?: string[];
+    /** 服务端点 URL（sse / websocket 模式） */
+    url?: string;
+    /** 额外环境变量（stdio 模式） */
+    env?: Record<string, string>;
+}
+
+/** MCP 客户端配置 */
+export interface MCPConfig {
+    /** MCP 服务器列表 */
+    servers: MCPServerConfig[];
+    /** 工具调用默认超时 ms */
+    timeout?: number;
+}
+
 /**
  * Provider 配置（传给 BaseProvider）
  */
@@ -85,33 +111,7 @@ export interface ProviderCapabilities {
     streaming?: boolean;
 }
 
-/**
- * MCP 配置
- */
-export interface MCPConfig {
-    /** MCP 服务器列表 */
-    servers: MCPServerConfig[];
-    /** 默认超时 (ms) */
-    timeout?: number;
-}
-
-/**
- * MCP 服务器配置
- */
-export interface MCPServerConfig {
-    /** 服务器名称 */
-    name: string;
-    /** 传输类型 */
-    transport: 'stdio' | 'sse' | 'websocket';
-    /** 命令 (stdio) */
-    command?: string;
-    /** 参数 (stdio) */
-    args?: string[];
-    /** URL (sse/websocket) */
-    url?: string;
-    /** 环境变量 */
-    env?: Record<string, string>;
-}
+// MCPConfig / MCPServerConfig 已在本文件顶部定义（本地实现，无 device-mcp 依赖）。
 
 /**
  * 生命周期钩子 - 增强版

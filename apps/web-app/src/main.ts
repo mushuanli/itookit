@@ -13,7 +13,7 @@ import { createSettingsModule, createSettingsFactory } from '@itookit/app-settin
 import { createLLMFactory, createAgentEditorFactory, VFSAgentService, createAIContextMenuConfig } from '@itookit/llm-ui';
 // 引入 Engine 核心初始化方法和 SessionEngine
 import { initializeLLMEngine, LLMSessionEngine, chatFileParser } from '@itookit/llm-engine';
-// LLM 设备插件（连接配置的唯一守护者）
+// LLM 设备插件（连接配置 + MCP 管理的唯一守护者）
 import { LLMDeviceDriver } from '@itookit/device-llm';
 import { setKernelDeviceManager } from '@itookit/llm-kernel';
 
@@ -122,12 +122,14 @@ async function bootstrap() {
         // --- 1. 基础设施初始化 ---
         const vfsCore = await initVFS();
 
-        // --- 1.1 初始化 LLM 设备驱动（连接配置的唯一守护者） ---
-        // LLMDeviceDriver 管理连接存储（__llm VFS 模块），同时提供 LLM 通信接口。
-        // AgentExecutor 通过 IDeviceDriver ioctl 与其通信，apiKey 不离开 device 边界。
+        // --- 1.1 初始化 LLM 设备驱动（连接配置 + MCP 管理的唯一守护者） ---
+        // LLMDeviceDriver 管理连接存储和 MCP 服务器配置（__config VFS 模块），
+        // 同时提供 LLM 通信接口。AgentExecutor 通过 IDeviceDriver ioctl 与其通信，
+        // apiKey 不离开 device 边界。
         const llmDriver = new LLMDeviceDriver(vfsCore);
-        await llmDriver.init();              // 挂载 __llm 模块，加载默认连接
+        await llmDriver.init();                  // 挂载 __config 模块，加载连接和 MCP 配置
         await vfsCore.registerDevice(llmDriver); // 注册驱动 + 创建 /dev/llm 设备文件
+        await llmDriver.createDeviceNodes();     // 创建 /dev/llm/connection/* 和 /dev/llm/mcp/*
         setKernelDeviceManager(vfsCore.devices);
 
         // --- 2. 核心服务层初始化 ---
@@ -135,8 +137,8 @@ async function bootstrap() {
         // 2.1 Settings 模块
         const settingsModule = await createSettingsModule(vfsCore);
 
-        // 2.2 Agent Service（仅管理 Agent / MCP，连接操作委托给 IConnectionService）
-        const agentService = new VFSAgentService(vfsCore, llmDriver);
+        // 2.2 Agent Service（管理 Agent，连接和 MCP 操作委托给 LLMDeviceDriver）
+        const agentService = new VFSAgentService(vfsCore, llmDriver, llmDriver);
 
         // 2.3 Session Engine (管理 .chat 文件持久化)
         const sessionEngine = new LLMSessionEngine(vfsCore);

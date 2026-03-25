@@ -1,18 +1,20 @@
 // @file: device-llm/device/llm-device-driver.ts
 //
-// LLMDeviceDriver — 连接配置的唯一守护者 + LLM 通信设备。
+// LLMDeviceDriver — LLM 连接配置守护者 + LLM/MCP 通信设备。
 //
 // 职责：
-//  1. 管理 LLMConnection 存储（VFS __llm 模块，仅该类可访问完整连接含 apiKey）
-//  2. 对外暴露 ConnectionMeta（无 apiKey）供 AgentExecutor、AgentResolver 等使用
-//  3. 通过 ioctl 为 Settings UI 提供连接 CRUD（含 GET_FULL_CONNECTION 供编辑）
-//  4. 维护 Chat Session 生命周期（write / readStream / ioctl CHAT）
+//  1. 管理 LLMConnection 存储（VFS __config 模块 /llm/.connections/）
+//  2. 管理 MCPServer 存储（VFS __config 模块 /llm/.mcp/）
+//  3. 对外暴露 ConnectionMeta（无 apiKey）供 AgentExecutor 等使用
+//  4. 通过 ioctl 为 Settings UI 提供 CRUD
+//  5. 维护 Chat Session 和 MCP Session 生命周期
+//  6. 创建 /dev/llm/connection/<id> 和 /dev/llm/mcp/<id> 设备节点
 
 import type {
     IDeviceDriver, IConnectionService, DeviceContext, IVFSManager, FileContent,
     LLMConnection, ConnectionMeta, ChatMessage, ChatCompletionChunk,
     ChatCompletionParams, ChatCompletionResponse, TokenUsage,
-    CreateFileOptions,
+    MCPServer, CreateFileOptions, ToolDefinition,
 } from '@itookit/common';
 import { toConnectionMeta, CONFIG_MODULE } from '@itookit/common';
 
@@ -20,15 +22,18 @@ import { LLMDriver } from '../core/driver';
 import { testLLMConnection } from '../core/api';
 import type { ConnectionTestResult } from '../core/api';
 import { LLM_PROVIDER_DEFAULTS, CONST_CONFIG_VERSION } from '../constants';
+import { MCPServerConnection } from '../skills/mcp-client';
+import type { MCPServerConfig } from '../types/provider';
 
 // ─── 存储路径 ────────────────────────────────────────────────────────────────
-// 存储在 __config 模块（isSystem: true），路径结构：
-//   _llm/              → 下划线前缀，FS Explorer 可见
-//   _llm/.connections/ → 点前缀，受 AccessController 保护（需 isSystem）
-//   _llm/.connections/{id}.json
-const STORAGE_MODULE    = CONFIG_MODULE;           // '__config'
-const CONNECTIONS_DIR   = '/_llm/.connections';    // 点前缀目录，系统保护
-const DEFAULTS_VERSION  = '/_llm/.connections_version.json';
+const STORAGE_MODULE   = CONFIG_MODULE;             // '__config'
+const CONNECTIONS_DIR  = '/llm/.connections';       // LLM 连接（新路径）
+const DEFAULTS_VERSION = '/llm/.connections_version.json';
+const MCP_DIR          = '/llm/.mcp';               // MCP 服务器配置（新路径）
+
+// 旧路径（数据迁移用）
+const OLD_CONNECTIONS_DIR = '/_llm/.connections';
+const OLD_DEFAULTS_VERSION = '/_llm/.connections_version.json';
 
 // ─── ioctl 命令 ───────────────────────────────────────────────────────────────
 
@@ -49,43 +54,56 @@ export const LLM_IOCTL = {
     /** arg: { provider, apiKey, baseURL?, model? } → ConnectionTestResult */
     TEST_CONNECTION_PARAMS:   'test-connection-params',
 
+    // ── MCP 服务器管理（无需 sessionId）─────────────────────────────────────
+    /** → MCPServer[] */
+    LIST_MCP_SERVERS:         'list-mcp-servers',
+    /** arg: MCPServer → void */
+    SAVE_MCP_SERVER:          'save-mcp-server',
+    /** arg: id → void */
+    DELETE_MCP_SERVER:        'delete-mcp-server',
+    /** arg: id → void — 连接指定 MCP 服务器 */
+    CONNECT_MCP_SERVER:       'connect-mcp-server',
+    /** arg: id → void — 断开指定 MCP 服务器 */
+    DISCONNECT_MCP_SERVER:    'disconnect-mcp-server',
+
     // ── Chat 会话（需要 sessionId）───────────────────────────────────────────
-    /**
-     * 无状态流式调用，不修改 session history。
-     * arg: ChatCompletionParams（含 messages + signal）
-     * 返回: AsyncGenerator<ChatCompletionChunk>
-     */
     CHAT:             'chat',
-    /** 无状态非流式调用，arg: ChatCompletionParams，返回: ChatCompletionResponse */
     CHAT_SYNC:        'chat-sync',
-    /** → ChatMessage[]（当前会话历史） */
     GET_HISTORY:      'get-history',
-    /** 清空历史（保留 system prompt），中止进行中的流 */
     CLEAR_HISTORY:    'clear-history',
-    /** → LLMModel[] */
     GET_MODELS:       'get-models',
-    /** 中止当前流式请求 */
     ABORT:            'abort',
-    /** arg: string | undefined — 替换 system prompt */
     SET_SYSTEM_PROMPT:'set-system-prompt',
+
+    // ── MCP 会话（需要 sessionId，由 /dev/llm/mcp/<id> 打开）────────────────
+    /** → ToolDefinition[] */
+    MCP_LIST_TOOLS:   'list-tools',
+    /** arg: { tool: string; args: Record<string,any>; timeout?: number } → any */
+    MCP_CALL_TOOL:    'call-tool',
 } as const;
 
 export type LLMIoctlCommand = typeof LLM_IOCTL[keyof typeof LLM_IOCTL];
 
-// ─── 公共类型 ─────────────────────────────────────────────────────────────────
+// ─── 公共接口 ─────────────────────────────────────────────────────────────────
 
-/** open() options */
+/** open() options（LLM session） */
 export interface LLMDeviceOpenOptions {
-    /** 引用的连接 ID，由 driver 内部解析为完整 LLMConnection */
     connectionId: string;
     systemPrompt?: string;
     completionDefaults?: Record<string, unknown>;
 }
 
+/** MCP 服务器管理服务接口（由 LLMDeviceDriver 实现，注入到 VFSAgentService） */
+export interface IMCPManagementService {
+    getMCPServers(): Promise<MCPServer[]>;
+    saveMCPServer(server: MCPServer): Promise<void>;
+    deleteMCPServer(id: string): Promise<void>;
+}
 
 // ─── 内部会话状态 ─────────────────────────────────────────────────────────────
 
-interface SessionState {
+interface LLMSessionState {
+    readonly kind: 'llm';
     readonly driver: LLMDriver;
     readonly connection: LLMConnection;
     readonly completionDefaults: Record<string, unknown>;
@@ -96,23 +114,19 @@ interface SessionState {
     abortController: AbortController | null;
 }
 
+interface MCPSessionState {
+    readonly kind: 'mcp';
+    readonly connection: MCPServerConnection;
+    readonly server: MCPServer;
+}
+
+type SessionState = LLMSessionState | MCPSessionState;
+
 // ─── LLMDeviceDriver ─────────────────────────────────────────────────────────
 
-/**
- * LLM 虚拟设备驱动。
- *
- * 是连接数据（apiKey 等）的唯一运行时持有者。
- * 所有外部访问连接信息均通过 ioctl 且返回安全的 ConnectionMeta。
- *
- * main.ts 初始化：
- *   const driver = new LLMDeviceDriver(vfsCore);
- *   await driver.init();
- *   vfsCore.devices.register(driver);
- *   setKernelDeviceManager(vfsCore.devices);
- */
-export class LLMDeviceDriver implements IDeviceDriver, IConnectionService {
+export class LLMDeviceDriver implements IDeviceDriver, IConnectionService, IMCPManagementService {
     readonly handlerId = 'llm';
-    readonly description = 'LLM streaming chat & connection management device';
+    readonly description = 'LLM streaming chat, connection management, and MCP device';
     readonly writable = true;
     readonly streamable = true;
     readonly sessionable = true;
@@ -123,11 +137,14 @@ export class LLMDeviceDriver implements IDeviceDriver, IConnectionService {
     private _syncTimer: ReturnType<typeof setTimeout> | null = null;
     private _eventUnsubs: Array<() => void> = [];
 
-    // ── Chat sessions ──
+    // ── MCP store ──
+    private _mcpServers: MCPServer[] = [];
+    private _activeMCPConns = new Map<string, MCPServerConnection>();
+
+    // ── Sessions ──
     private readonly sessions = new Map<string, SessionState>();
     private sessionSeq = 0;
 
-    /** engine: 由 init() 后通过 vfs.getEngine() 设置，使用前必须先调用 init() */
     private engine!: ReturnType<IVFSManager['getEngine']>;
 
     constructor(private readonly vfs: IVFSManager) {}
@@ -135,23 +152,26 @@ export class LLMDeviceDriver implements IDeviceDriver, IConnectionService {
     // ─── Lifecycle ────────────────────────────────────────────────────────────
 
     async init(): Promise<void> {
-        // 1. 确保 __config 模块已挂载（SettingsService 之前或之后调用均可）
         if (!this.vfs.getModule(STORAGE_MODULE)) {
             await this.vfs.mount(STORAGE_MODULE, {
                 description: 'Settings Persistence',
                 isSystem: true,
             });
         }
-        // 使用 isSystem: true 的 __config engine，可写 .connections 点前缀目录
         this.engine = this.vfs.getEngine(STORAGE_MODULE);
 
-        // 2. 写入默认连接（增量）
+        // Migrate data from old paths if needed
+        await this.migrateConnectionsIfNeeded();
+        await this.migrateMCPIfNeeded();
+
+        // Write default connections (incremental)
         await this.ensureDefaults();
 
-        // 3. 加载连接缓存
+        // Load caches
         await this.reload();
+        await this.reloadMCP();
 
-        // 4. 跨标签页同步（监听 __config 模块事件）
+        // Cross-tab sync
         this.bindVFSEvents();
     }
 
@@ -160,56 +180,83 @@ export class LLMDeviceDriver implements IDeviceDriver, IConnectionService {
         this._eventUnsubs = [];
         if (this._syncTimer) { clearTimeout(this._syncTimer); this._syncTimer = null; }
         this._listeners.clear();
-        for (const s of this.sessions.values()) s.abortController?.abort();
+
+        // Abort all LLM sessions
+        for (const s of this.sessions.values()) {
+            if (s.kind === 'llm') s.abortController?.abort();
+        }
+
+        // Disconnect all active MCP connections
+        for (const conn of this._activeMCPConns.values()) {
+            try { await conn.disconnect(); } catch { /* ignore */ }
+        }
+        this._activeMCPConns.clear();
         this.sessions.clear();
+    }
+
+    // ─── createDeviceNodes ────────────────────────────────────────────────────
+
+    /**
+     * 在 VFS 中创建 /dev/llm/connection/<id> 和 /dev/llm/mcp/<id> 设备节点。
+     * 对 autoConnect: true 的 MCP 服务器自动连接。
+     * 必须在 registerDevice(this) 之后调用。
+     */
+    async createDeviceNodes(): Promise<void> {
+        // Connection device nodes
+        for (const conn of this._connections) {
+            await this.vfs.createDeviceNode('llm', `/dev/llm/connection/${conn.id}`, {
+                resourceType: 'connection',
+                resourceId: conn.id,
+            });
+        }
+
+        // MCP device nodes + auto-connect
+        for (const server of this._mcpServers) {
+            await this.vfs.createDeviceNode('llm', `/dev/llm/mcp/${server.id}`, {
+                resourceType: 'mcp',
+                resourceId: server.id,
+            });
+            if (server.autoConnect) {
+                try {
+                    await this.connectMCPServer(server);
+                } catch (e) {
+                    console.error(`[LLMDeviceDriver] Auto-connect MCP server '${server.id}' failed:`, e);
+                }
+            }
+        }
     }
 
     // ─── IDeviceDriver: open / close ─────────────────────────────────────────
 
     async open(ctx: DeviceContext, options?: Record<string, unknown>): Promise<string> {
+        const resourceType = ctx.metadata?.resourceType as string | undefined;
+
+        if (resourceType === 'connection') {
+            return this.openConnectionSession(ctx.metadata!.resourceId as string, options);
+        }
+        if (resourceType === 'mcp') {
+            return this.openMCPSession(ctx.metadata!.resourceId as string, options);
+        }
+
+        // Fallback: legacy /dev/llm usage (options.connectionId)
         const opts = options as LLMDeviceOpenOptions | undefined;
-        const connectionId = opts?.connectionId ?? 'default';
-
-        const conn = this.findConn(connectionId)
-            ?? this.findConn('default')
-            ?? this._connections[0];
-
-        if (!conn) {
-            throw new Error(`LLMDeviceDriver: no connection available for id '${connectionId}'`);
-        }
-        if (!conn.apiKey?.trim()) {
-            throw new Error(`LLMDeviceDriver: connection '${conn.id}' has no API key configured`);
-        }
-
-        const driver = new LLMDriver({ connection: conn });
-        const history: ChatMessage[] = opts?.systemPrompt
-            ? [{ role: 'system', content: opts.systemPrompt }]
-            : [];
-
-        const sessionId = `llm-${ctx.nodeId}-${++this.sessionSeq}`;
-        this.sessions.set(sessionId, {
-            driver,
-            connection: conn,
-            completionDefaults: (opts?.completionDefaults ?? {}) as Record<string, unknown>,
-            history,
-            pendingStream: null,
-            lastResponse: null,
-            lastUsage: null,
-            abortController: null,
-        });
-        return sessionId;
+        return this.openConnectionSession(opts?.connectionId ?? 'default', options);
     }
 
     async close(ctx: DeviceContext): Promise<void> {
-        const session = this.requireSession(ctx);
-        session.abortController?.abort();
+        const session = this.sessions.get(ctx.sessionId!);
+        if (!session) return;
+
+        if (session.kind === 'llm') {
+            session.abortController?.abort();
+        }
         this.sessions.delete(ctx.sessionId!);
     }
 
     // ─── IDeviceDriver: I/O ──────────────────────────────────────────────────
 
     async write(ctx: DeviceContext, content: FileContent): Promise<void> {
-        const session = this.requireSession(ctx);
+        const session = this.requireLLMSession(ctx);
         session.abortController?.abort();
         session.pendingStream = null;
 
@@ -227,7 +274,7 @@ export class LLMDeviceDriver implements IDeviceDriver, IConnectionService {
     }
 
     async *readStream(ctx: DeviceContext): AsyncIterable<string | ArrayBuffer> {
-        const session = this.requireSession(ctx);
+        const session = this.requireLLMSession(ctx);
         if (!session.pendingStream) return;
         const gen = session.pendingStream;
         session.pendingStream = null;
@@ -238,7 +285,7 @@ export class LLMDeviceDriver implements IDeviceDriver, IConnectionService {
     }
 
     async read(ctx: DeviceContext): Promise<FileContent> {
-        const session = this.requireSession(ctx);
+        const session = this.requireLLMSession(ctx);
         if (session.pendingStream) {
             const gen = session.pendingStream;
             session.pendingStream = null;
@@ -269,70 +316,119 @@ export class LLMDeviceDriver implements IDeviceDriver, IConnectionService {
                 return this.findConn(arg as string) ?? null;
 
             case LLM_IOCTL.SAVE_CONNECTION: {
-                const conn = arg as LLMConnection;
-                await this.writeToDisk(conn);
-                await this.reload();
-                this.notify();
+                await this.saveConnection(arg as LLMConnection);
                 return;
             }
 
             case LLM_IOCTL.DELETE_CONNECTION: {
-                if (arg === 'default') throw new Error('Cannot delete the default connection');
-                await this.deleteFromDisk(arg as string);
-                await this.reload();
-                this.notify();
+                await this.deleteConnection(arg as string);
                 return;
             }
 
             case LLM_IOCTL.TEST_CONNECTION_PARAMS:
                 return testLLMConnection(arg as Parameters<typeof testLLMConnection>[0]) as Promise<ConnectionTestResult>;
+
+            // ── MCP 管理命令（无需 sessionId）──────────────────────────────────
+            case LLM_IOCTL.LIST_MCP_SERVERS:
+                return this._mcpServers.slice();
+
+            case LLM_IOCTL.SAVE_MCP_SERVER: {
+                await this.saveMCPServer(arg as MCPServer);
+                return;
+            }
+
+            case LLM_IOCTL.DELETE_MCP_SERVER: {
+                await this.deleteMCPServer(arg as string);
+                return;
+            }
+
+            case LLM_IOCTL.CONNECT_MCP_SERVER: {
+                const server = this._mcpServers.find(s => s.id === (arg as string));
+                if (server) await this.connectMCPServer(server);
+                return;
+            }
+
+            case LLM_IOCTL.DISCONNECT_MCP_SERVER: {
+                const conn = this._activeMCPConns.get(arg as string);
+                if (conn) {
+                    await conn.disconnect();
+                    this._activeMCPConns.delete(arg as string);
+                }
+                return;
+            }
         }
 
-        // ── Chat 会话命令（需要 sessionId）─────────────────────────────────────
-        const session = this.requireSession(ctx);
+        // ── MCP 会话命令 ────────────────────────────────────────────────────────
+        const session = this.sessions.get(ctx.sessionId!);
+        if (session?.kind === 'mcp') {
+            switch (command) {
+                case LLM_IOCTL.MCP_LIST_TOOLS: {
+                    const tools = await session.connection.listTools();
+                    return tools.map((t): ToolDefinition => ({
+                        type: 'function',
+                        function: {
+                            name: t.name,
+                            description: t.description,
+                            parameters: t.inputSchema,
+                        },
+                    }));
+                }
+
+                case LLM_IOCTL.MCP_CALL_TOOL: {
+                    const { tool, args, timeout } = arg as { tool: string; args: Record<string, any>; timeout?: number };
+                    return session.connection.callTool(tool, args, { timeout });
+                }
+
+                default:
+                    throw new Error(`LLMDeviceDriver: unknown MCP ioctl '${String(command)}'`);
+            }
+        }
+
+        // ── LLM Chat 会话命令（需要 sessionId）─────────────────────────────────
+        const llmSession = this.requireLLMSession(ctx);
 
         switch (command) {
             case LLM_IOCTL.CHAT: {
                 const params = arg as ChatCompletionParams;
-                session.abortController?.abort();
-                session.pendingStream = null;
+                llmSession.abortController?.abort();
+                llmSession.pendingStream = null;
                 const abort = new AbortController();
                 params.signal?.addEventListener('abort', () => abort.abort(), { once: true });
-                session.abortController = abort;
-                const rawStream = await session.driver.chat.create({
+                llmSession.abortController = abort;
+                const rawStream = await llmSession.driver.chat.create({
                     ...params, stream: true, signal: abort.signal,
                 });
-                return this.wrapStreamOnly(rawStream, session);
+                return this.wrapStreamOnly(rawStream, llmSession);
             }
 
             case LLM_IOCTL.CHAT_SYNC: {
                 const params = arg as ChatCompletionParams;
-                return session.driver.chat.create({ ...params, stream: false }) as Promise<ChatCompletionResponse>;
+                return llmSession.driver.chat.create({ ...params, stream: false }) as Promise<ChatCompletionResponse>;
             }
 
             case LLM_IOCTL.GET_HISTORY:
-                return session.history.slice();
+                return llmSession.history.slice();
 
             case LLM_IOCTL.CLEAR_HISTORY:
-                session.abortController?.abort();
-                session.pendingStream = null;
-                session.lastResponse = null;
-                session.lastUsage = null;
-                session.history = session.history.filter(m => m.role === 'system');
+                llmSession.abortController?.abort();
+                llmSession.pendingStream = null;
+                llmSession.lastResponse = null;
+                llmSession.lastUsage = null;
+                llmSession.history = llmSession.history.filter(m => m.role === 'system');
                 return;
 
             case LLM_IOCTL.GET_MODELS:
-                return session.connection.availableModels ?? [];
+                return llmSession.connection.availableModels ?? [];
 
             case LLM_IOCTL.ABORT:
-                session.abortController?.abort();
-                session.pendingStream = null;
+                llmSession.abortController?.abort();
+                llmSession.pendingStream = null;
                 return;
 
             case LLM_IOCTL.SET_SYSTEM_PROMPT: {
                 const prompt = arg as string | undefined;
-                session.history = session.history.filter(m => m.role !== 'system');
-                if (prompt) session.history.unshift({ role: 'system', content: prompt });
+                llmSession.history = llmSession.history.filter(m => m.role !== 'system');
+                if (prompt) llmSession.history.unshift({ role: 'system', content: prompt });
                 return;
             }
 
@@ -341,10 +437,7 @@ export class LLMDeviceDriver implements IDeviceDriver, IConnectionService {
         }
     }
 
-    // ─── IConnectionService (direct API, no ioctl overhead) ──────────────────
-    //
-    // 调用方（VFSAgentService、ConnectionSettingsEditor 等）直接注入 LLMDeviceDriver
-    // 作为 IConnectionService 使用，无需经过 ioctl 字符串路由。
+    // ─── IConnectionService ───────────────────────────────────────────────────
 
     async getConnections(): Promise<ConnectionMeta[]> {
         return this._connections.map(toConnectionMeta);
@@ -360,7 +453,6 @@ export class LLMDeviceDriver implements IDeviceDriver, IConnectionService {
         return c ? toConnectionMeta(c) : null;
     }
 
-    /** 返回完整连接（含 apiKey），仅供 Settings UI 编辑表单使用 */
     async getFullConnection(id: string): Promise<LLMConnection | null> {
         return this.findConn(id) ?? null;
     }
@@ -368,6 +460,10 @@ export class LLMDeviceDriver implements IDeviceDriver, IConnectionService {
     async saveConnection(conn: LLMConnection): Promise<void> {
         await this.writeToDisk(conn);
         await this.reload();
+        await this.vfs.createDeviceNode('llm', `/dev/llm/connection/${conn.id}`, {
+            resourceType: 'connection',
+            resourceId: conn.id,
+        });
         this.notify();
     }
 
@@ -375,12 +471,41 @@ export class LLMDeviceDriver implements IDeviceDriver, IConnectionService {
         if (id === 'default') throw new Error('Cannot delete the default connection');
         await this.deleteFromDisk(id);
         await this.reload();
+        await this.vfs.removeDeviceNode(`/dev/llm/connection/${id}`);
         this.notify();
     }
 
     onChange(listener: () => void): () => void {
         this._listeners.add(listener);
         return () => this._listeners.delete(listener);
+    }
+
+    // ─── IMCPManagementService ────────────────────────────────────────────────
+
+    async getMCPServers(): Promise<MCPServer[]> {
+        return [...this._mcpServers];
+    }
+
+    async saveMCPServer(server: MCPServer): Promise<void> {
+        await this.writeMCPToDisk(server);
+        await this.reloadMCP();
+        await this.vfs.createDeviceNode('llm', `/dev/llm/mcp/${server.id}`, {
+            resourceType: 'mcp',
+            resourceId: server.id,
+        });
+        this.notify();
+    }
+
+    async deleteMCPServer(id: string): Promise<void> {
+        await this.deleteMCPFromDisk(id);
+        await this.reloadMCP();
+        const conn = this._activeMCPConns.get(id);
+        if (conn) {
+            try { await conn.disconnect(); } catch { /* ignore */ }
+            this._activeMCPConns.delete(id);
+        }
+        await this.vfs.removeDeviceNode(`/dev/llm/mcp/${id}`);
+        this.notify();
     }
 
     // ─── Connection storage ───────────────────────────────────────────────────
@@ -416,7 +541,6 @@ export class LLMDeviceDriver implements IDeviceDriver, IConnectionService {
                     metadata: { isSystemDefault: true },
                 });
             } else {
-                // 仅追加新模型，不覆盖用户数据
                 const updated: LLMConnection = JSON.parse(JSON.stringify(existing));
                 if (!updated.availableModels) updated.availableModels = [];
                 const known = new Set(updated.availableModels.map(m => m.id));
@@ -434,28 +558,9 @@ export class LLMDeviceDriver implements IDeviceDriver, IConnectionService {
     }
 
     private async loadAll(): Promise<LLMConnection[]> {
-        const items: LLMConnection[] = [];
-        try {
-            const dirId = await this.engine.resolvePath(CONNECTIONS_DIR);
-            if (!dirId) return [];
-            const children = await this.engine.getChildren(dirId);
-            for (const child of children) {
-                if (child.type !== 'file' || !child.name.endsWith('.json')) continue;
-                try {
-                    const raw = await this.engine.readContent(child.id);
-                    const text = typeof raw === 'string' ? raw : new TextDecoder().decode(raw as ArrayBuffer);
-                    items.push(JSON.parse(text) as LLMConnection);
-                } catch { /* skip malformed */ }
-            }
-        } catch { /* directory not yet created */ }
-        return items;
+        return this.loadJsonFilesFromDir<LLMConnection>(CONNECTIONS_DIR);
     }
 
-    /**
-     * 通过 engine（isSystem: true 的 __config）直接写入连接文件。
-     * 不经过 vfs.write()，确保 AccessController 使用系统级 caller 上下文，
-     * 可写入 .connections/ 点前缀目录。
-     */
     private async writeToDisk(conn: LLMConnection): Promise<void> {
         await this.engineUpsert(
             `${CONNECTIONS_DIR}/${conn.id}.json`,
@@ -468,42 +573,192 @@ export class LLMDeviceDriver implements IDeviceDriver, IConnectionService {
         if (nodeId) await this.engine.delete([nodeId]);
     }
 
-    private async readJson<T>(path: string): Promise<T | null> {
+    // ─── MCP storage ──────────────────────────────────────────────────────────
+
+    private async reloadMCP(): Promise<void> {
+        this._mcpServers = await this.loadAllMCP();
+    }
+
+    private async loadAllMCP(): Promise<MCPServer[]> {
+        return this.loadJsonFilesFromDir<MCPServer>(MCP_DIR);
+    }
+
+    private async writeMCPToDisk(server: MCPServer): Promise<void> {
+        await this.engineUpsert(
+            `${MCP_DIR}/${server.id}.json`,
+            JSON.stringify(server, null, 2),
+        );
+    }
+
+    private async deleteMCPFromDisk(id: string): Promise<void> {
+        const nodeId = await this.engine.resolvePath(`${MCP_DIR}/${id}.json`);
+        if (nodeId) await this.engine.delete([nodeId]);
+    }
+
+    // ─── MCP connection management ────────────────────────────────────────────
+
+    private async connectMCPServer(server: MCPServer): Promise<void> {
+        if (this._activeMCPConns.has(server.id)) return; // already connected
+
+        const config = this.mcpServerToConfig(server);
+        const conn = new MCPServerConnection(config);
+        await conn.connect();
+        this._activeMCPConns.set(server.id, conn);
+    }
+
+    /** Convert MCPServer (common) → MCPServerConfig (local transport layer) */
+    private mcpServerToConfig(server: MCPServer): MCPServerConfig {
+        const transport = server.transport === 'http' ? 'sse' : server.transport as 'stdio' | 'sse';
+        return {
+            name: server.name,
+            transport,
+            command: server.command,
+            args: server.args ? server.args.trim().split(/\s+/).filter(Boolean) : undefined,
+            url: server.endpoint,
+        };
+    }
+
+    // ─── Session management ───────────────────────────────────────────────────
+
+    private async openConnectionSession(
+        connectionId: string,
+        options?: Record<string, unknown>,
+    ): Promise<string> {
+        const opts = options as LLMDeviceOpenOptions | undefined;
+        const conn = this.findConn(connectionId)
+            ?? this.findConn('default')
+            ?? this._connections[0];
+
+        if (!conn) {
+            throw new Error(`LLMDeviceDriver: no connection available for id '${connectionId}'`);
+        }
+        if (!conn.apiKey?.trim()) {
+            throw new Error(`LLMDeviceDriver: connection '${conn.id}' has no API key configured`);
+        }
+
+        const driver = new LLMDriver({ connection: conn });
+        const history: ChatMessage[] = opts?.systemPrompt
+            ? [{ role: 'system', content: opts.systemPrompt }]
+            : [];
+
+        const sessionId = `llm-${++this.sessionSeq}`;
+        this.sessions.set(sessionId, {
+            kind: 'llm',
+            driver,
+            connection: conn,
+            completionDefaults: (opts?.completionDefaults ?? {}) as Record<string, unknown>,
+            history,
+            pendingStream: null,
+            lastResponse: null,
+            lastUsage: null,
+            abortController: null,
+        });
+        return sessionId;
+    }
+
+    private async openMCPSession(
+        serverId: string,
+        _options?: Record<string, unknown>,
+    ): Promise<string> {
+        const server = this._mcpServers.find(s => s.id === serverId);
+        if (!server) {
+            throw new Error(`LLMDeviceDriver: MCP server '${serverId}' not found`);
+        }
+
+        // Connect if not already connected
+        if (!this._activeMCPConns.has(serverId)) {
+            await this.connectMCPServer(server);
+        }
+
+        const conn = this._activeMCPConns.get(serverId)!;
+        const sessionId = `mcp-${++this.sessionSeq}`;
+        this.sessions.set(sessionId, {
+            kind: 'mcp',
+            connection: conn,
+            server,
+        });
+        return sessionId;
+    }
+
+    // ─── Data migration ───────────────────────────────────────────────────────
+
+    /** Migrate connections from old /_llm/.connections to /llm/.connections */
+    private async migrateConnectionsIfNeeded(): Promise<void> {
         try {
-            const nodeId = await this.engine.resolvePath(path);
-            if (!nodeId) return null;
-            const raw = await this.engine.readContent(nodeId);
-            const text = typeof raw === 'string' ? raw : new TextDecoder().decode(raw as ArrayBuffer);
-            return JSON.parse(text) as T;
-        } catch { return null; }
-    }
+            // Skip if new path already has data
+            const newDirId = await this.engine.resolvePath(CONNECTIONS_DIR);
+            if (newDirId) {
+                const children = await this.engine.getChildren(newDirId);
+                if (children.some(c => c.type === 'file' && c.name.endsWith('.json'))) return;
+            }
 
-    private writeJson(path: string, data: unknown): Promise<void> {
-        return this.engineUpsert(path, JSON.stringify(data, null, 2));
-    }
+            // Check old path
+            const oldDirId = await this.engine.resolvePath(OLD_CONNECTIONS_DIR);
+            if (!oldDirId) return;
 
-    /** engine-level upsert：resolvePath 存在则 writeContent，否则 createFile(recursive) */
-    private async engineUpsert(path: string, content: string): Promise<void> {
-        const nodeId = await this.engine.resolvePath(path);
-        if (nodeId) {
-            await this.engine.writeContent(nodeId, content);
-        } else {
-            const name = path.substring(path.lastIndexOf('/') + 1);
-            const parent = path.substring(0, path.lastIndexOf('/')) || '/';
-            await this.engine.createFile({
-                name,
-                parentIdOrPath: parent,
-                content,
-                recursive: true,
-            } as CreateFileOptions);
+            console.info('[LLMDeviceDriver] Migrating connections from old path...');
+            const children = await this.engine.getChildren(oldDirId);
+            for (const child of children) {
+                if (child.type !== 'file' || !child.name.endsWith('.json')) continue;
+                try {
+                    const raw = await this.engine.readContent(child.id);
+                    const text = typeof raw === 'string' ? raw : new TextDecoder().decode(raw as ArrayBuffer);
+                    await this.engineUpsert(`${CONNECTIONS_DIR}/${child.name}`, text);
+                } catch { /* skip */ }
+            }
+
+            // Migrate version file
+            const oldVer = await this.readJson<object>(OLD_DEFAULTS_VERSION);
+            if (oldVer) await this.writeJson(DEFAULTS_VERSION, oldVer);
+
+            console.info('[LLMDeviceDriver] Connection migration complete.');
+        } catch (e) {
+            console.error('[LLMDeviceDriver] Migration failed:', e);
         }
     }
+
+    /** Migrate MCP servers from agents:/.mcp to /llm/.mcp */
+    private async migrateMCPIfNeeded(): Promise<void> {
+        try {
+            // Skip if new path already has data
+            const newDirId = await this.engine.resolvePath(MCP_DIR);
+            if (newDirId) {
+                const children = await this.engine.getChildren(newDirId);
+                if (children.some(c => c.type === 'file' && c.name.endsWith('.json'))) return;
+            }
+
+            // Try to read from agents module
+            const agentsModule = 'agents';
+            if (!this.vfs.getModule(agentsModule)) return;
+
+            const agentsEngine = this.vfs.getEngine(agentsModule);
+            const oldMcpDirId = await agentsEngine.resolvePath('/.mcp');
+            if (!oldMcpDirId) return;
+
+            console.info('[LLMDeviceDriver] Migrating MCP servers from agents module...');
+            const children = await agentsEngine.getChildren(oldMcpDirId);
+            for (const child of children) {
+                if (child.type !== 'file' || !child.name.endsWith('.json')) continue;
+                try {
+                    const raw = await agentsEngine.readContent(child.id);
+                    const text = typeof raw === 'string' ? raw : new TextDecoder().decode(raw as ArrayBuffer);
+                    await this.engineUpsert(`${MCP_DIR}/${child.name}`, text);
+                } catch { /* skip */ }
+            }
+            console.info('[LLMDeviceDriver] MCP migration complete.');
+        } catch (e) {
+            console.error('[LLMDeviceDriver] MCP migration failed:', e);
+        }
+    }
+
+    // ─── VFS event binding ────────────────────────────────────────────────────
 
     private bindVFSEvents(): void {
         const debounce = () => {
             if (this._syncTimer) clearTimeout(this._syncTimer);
             this._syncTimer = setTimeout(async () => {
                 await this.reload();
+                await this.reloadMCP();
                 this.notify();
             }, 300);
         };
@@ -528,9 +783,11 @@ export class LLMDeviceDriver implements IDeviceDriver, IConnectionService {
         return this.findConn('default') ?? this._connections[0];
     }
 
-    private requireSession(ctx: DeviceContext): SessionState {
+    private requireLLMSession(ctx: DeviceContext): LLMSessionState {
         const s = this.sessions.get(ctx.sessionId!);
-        if (!s) throw new Error(`LLMDeviceDriver: session '${ctx.sessionId}' not found`);
+        if (!s || s.kind !== 'llm') {
+            throw new Error(`LLMDeviceDriver: LLM session '${ctx.sessionId}' not found`);
+        }
         return s;
     }
 
@@ -547,8 +804,56 @@ export class LLMDeviceDriver implements IDeviceDriver, IConnectionService {
         return { role: 'user', content: text };
     }
 
+    private async readJson<T>(path: string): Promise<T | null> {
+        try {
+            const nodeId = await this.engine.resolvePath(path);
+            if (!nodeId) return null;
+            const raw = await this.engine.readContent(nodeId);
+            const text = typeof raw === 'string' ? raw : new TextDecoder().decode(raw as ArrayBuffer);
+            return JSON.parse(text) as T;
+        } catch { return null; }
+    }
+
+    private writeJson(path: string, data: unknown): Promise<void> {
+        return this.engineUpsert(path, JSON.stringify(data, null, 2));
+    }
+
+    private async engineUpsert(path: string, content: string): Promise<void> {
+        const nodeId = await this.engine.resolvePath(path);
+        if (nodeId) {
+            await this.engine.writeContent(nodeId, content);
+        } else {
+            const name = path.substring(path.lastIndexOf('/') + 1);
+            const parent = path.substring(0, path.lastIndexOf('/')) || '/';
+            await this.engine.createFile({
+                name,
+                parentIdOrPath: parent,
+                content,
+                recursive: true,
+            } as CreateFileOptions);
+        }
+    }
+
+    private async loadJsonFilesFromDir<T>(dirPath: string): Promise<T[]> {
+        const items: T[] = [];
+        try {
+            const dirId = await this.engine.resolvePath(dirPath);
+            if (!dirId) return [];
+            const children = await this.engine.getChildren(dirId);
+            for (const child of children) {
+                if (child.type !== 'file' || !child.name.endsWith('.json')) continue;
+                try {
+                    const raw = await this.engine.readContent(child.id);
+                    const text = typeof raw === 'string' ? raw : new TextDecoder().decode(raw as ArrayBuffer);
+                    items.push(JSON.parse(text) as T);
+                } catch { /* skip malformed */ }
+            }
+        } catch { /* directory not yet created */ }
+        return items;
+    }
+
     /** 有状态包装：耗尽时将 assistant 响应写入 history */
-    private async *wrapAccumulate(session: SessionState, gen: AsyncGenerator<ChatCompletionChunk>): AsyncGenerator<ChatCompletionChunk> {
+    private async *wrapAccumulate(session: LLMSessionState, gen: AsyncGenerator<ChatCompletionChunk>): AsyncGenerator<ChatCompletionChunk> {
         const parts: string[] = [];
         let usage: TokenUsage | null = null;
         try {
@@ -570,7 +875,7 @@ export class LLMDeviceDriver implements IDeviceDriver, IConnectionService {
     }
 
     /** 无状态包装：不写 history（CHAT ioctl 使用） */
-    private async *wrapStreamOnly(gen: AsyncGenerator<ChatCompletionChunk>, session: SessionState): AsyncGenerator<ChatCompletionChunk> {
+    private async *wrapStreamOnly(gen: AsyncGenerator<ChatCompletionChunk>, session: LLMSessionState): AsyncGenerator<ChatCompletionChunk> {
         try {
             for await (const chunk of gen) {
                 if (chunk.usage) session.lastUsage = chunk.usage;
