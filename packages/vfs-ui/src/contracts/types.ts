@@ -101,6 +101,8 @@ interface RegularMenuItem {
   iconHTML?: string;
   type?: 'item';
   hidden?: (item: VFSNodeUI) => boolean;
+  /** Custom click handler. When provided, bypasses the command-bus dispatch. */
+  onClick?: (item: VFSNodeUI) => void;
 }
 
 interface SeparatorMenuItem {

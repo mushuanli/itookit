@@ -19,6 +19,7 @@ export interface ContextMenuCallbacks {
 
 export class ContextMenuHandler {
   private menuEl: HTMLElement | null = null;
+  private activeOnClickMap = new Map<string, (item: VFSNodeUI) => void>();
 
   constructor(
     private readonly store: IStatePort,
@@ -63,6 +64,7 @@ export class ContextMenuHandler {
     if (this.menuEl) {
       this.menuEl.remove();
       this.menuEl = null;
+      this.activeOnClickMap.clear();
     }
   }
 
@@ -72,6 +74,13 @@ export class ContextMenuHandler {
     y: number,
     contextItem: VFSNodeUI | null
   ): void {
+    this.activeOnClickMap.clear();
+    for (const item of items) {
+      if (item.type !== 'separator' && item.onClick) {
+        this.activeOnClickMap.set(item.id, item.onClick);
+      }
+    }
+
     const container = document.createElement('div');
     container.innerHTML = createContextMenuHTML(items);
     this.menuEl = container.firstElementChild as HTMLElement;
@@ -95,6 +104,13 @@ export class ContextMenuHandler {
     contextItem: VFSNodeUI | null,
     position: { x: number; y: number }
   ): void {
+    // Custom onClick handler takes priority
+    const onClickHandler = this.activeOnClickMap.get(action);
+    if (onClickHandler && contextItem) {
+      onClickHandler(contextItem);
+      return;
+    }
+
     const state = this.store.getState();
 
     // Bulk actions
