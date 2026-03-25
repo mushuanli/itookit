@@ -12,6 +12,7 @@ import { AgentConfigEditor } from './editors/AgentConfigEditor';
 
 export { ConnectionSettingsEditor } from './editors/ConnectionSettingsEditor';
 export { MCPSettingsEditor } from './editors/MCPSettingsEditor';
+export { SkillSettingsEditor } from './editors/SkillSettingsEditor';
 
 import type { PromptHistoryService } from '@itookit/llm-engine';
 
