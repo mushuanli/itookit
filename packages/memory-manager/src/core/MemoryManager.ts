@@ -2,8 +2,8 @@
  * @file memory-manager/core/MemoryManager.ts
  */
 import { VFSModuleEngine } from '@itookit/vfslib';
-import { createVFSUI, connectEditorLifecycle, VFSUIShell } from '@itookit/vfs-ui';
-import { createMDxEditor } from '@itookit/mdxeditor';
+import { createVFSUI, connectEditorLifecycle, VFSUIShell, createVFSMentionProviders } from '@itookit/vfs-ui';
+import { createMDxEditor, MentionPlugin } from '@itookit/mdxeditor';
 import { MemoryManagerConfig } from '../types';
 import { BackgroundBrain } from './BackgroundBrain';
 import { Layout } from './Layout';
@@ -105,13 +105,32 @@ export class MemoryManager {
     ): Promise<IEditor> => {
         const { editorConfig } = this.config;
 
+        // Wire VFS mention providers when mentionScope is configured.
+        // Replaces the 'autocomplete:mention' string entry with a fully configured
+        // MentionPlugin instance so the factory uses VFS providers instead of the
+        // zero-provider default from the registry.
+        const mentionScope = editorConfig?.mentionScope as string[] | undefined;
+        const mentionPlugin = mentionScope !== undefined
+            ? new MentionPlugin({
+                providers: createVFSMentionProviders(this.engine, mentionScope) as any,
+                onMentionClick: (_providerKey: string, nodeId: string) => {
+                    this.config.onNavigate?.({ target: 'self', action: 'open', resourceId: nodeId });
+                },
+            })
+            : undefined;
+
+        const basePlugins = [
+            ...(editorConfig?.plugins || []),
+            ...(runtimeOptions?.plugins || []),
+        ];
+        const plugins = mentionPlugin
+            ? [...basePlugins.filter((p: any) => p !== 'autocomplete:mention'), mentionPlugin]
+            : basePlugins;
+
         const mergedOptions: EditorOptions = {
             ...editorConfig,
             ...runtimeOptions,
-            plugins: [
-                ...(editorConfig?.plugins || []),
-                ...(runtimeOptions?.plugins || [])
-            ],
+            plugins,
             defaultPluginOptions: {
                 ...(editorConfig?.defaultPluginOptions || {}),
                 ...(runtimeOptions?.defaultPluginOptions || {}),
