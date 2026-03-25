@@ -2,7 +2,7 @@
 import type { EditorFactory, IEditor, EditorOptions, IConnectionService } from '@itookit/common';
 import type { IAgentManagementService } from '@itookit/common';
 import { SettingsService } from '../services/SettingsService';
-import { MCPSettingsEditor, ConnectionSettingsEditor } from '@itookit/llm-ui';
+import { MCPSettingsEditor, ConnectionSettingsEditor, SkillSettingsEditor } from '@itookit/llm-ui';
 
 import { TagSettingsEditor } from '../editors/TagSettingsEditor';
 import { ContactSettingsEditor } from '../editors/ContactSettingsEditor';
@@ -31,6 +31,7 @@ export const createSettingsFactory = (
             case 'contacts':    editor = new ContactSettingsEditor(container, settingsService, options); break;
             case 'connections': editor = new ConnectionSettingsEditor(container, connectionService, options); break;
             case 'mcp-servers': editor = new MCPSettingsEditor(container, agentService, options); break;
+            case 'skills':      editor = new SkillSettingsEditor(container, agentService, options); break;
             case 'recovery':    editor = new RecoverySettingsEditor(container, agentService, options); break;
             case 'log':         editor = new LogSettingsEditor(container, settingsService, options); break;
             case 'about':       editor = new AboutSettingsEditor(container, settingsService, options); break;
