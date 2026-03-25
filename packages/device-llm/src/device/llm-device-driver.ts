@@ -231,7 +231,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
     async createDeviceNodes(): Promise<void> {
         // 迁移：旧版本把 /dev/llm 创建为 device 文件，导致无法建子路径。
         // removeDeviceNode 内部 try-catch，若节点不存在或已是目录则静默忽略。
-        await this.vfs.removeDeviceNode('/dev/llm');
+        //await this.vfs.removeDeviceNode('/dev/llm');
 
         // 建父目录（普通目录，不是 device 文件）
         await this.vfs.ensureSystemDirectory('/dev/llm');
