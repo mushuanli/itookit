@@ -78,7 +78,7 @@ sync.post('/download', async (c) => {
 
   const buf = readBlob(meta.hash);
 
-  return new Response(buf, {
+  return new Response(new Uint8Array(buf), {
     headers: {
       'Content-Type': 'application/octet-stream',
       'X-File-Hash': meta.hash,
