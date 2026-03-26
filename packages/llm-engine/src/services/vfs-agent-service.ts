@@ -10,15 +10,13 @@ import { FS_MODULE_AGENTS } from '@itookit/common';
 import type {
     ILLMManagementService, ConnectionMeta, LLMConnection,
     AgentDefinition, MCPServer, LLMSkill,
+    InitialAgentDef, LLMProviderDefinition, ConnectionTestResult,
 } from '@itookit/common';
 
-import {
-    CONST_CONFIG_VERSION,
-    LLM_PROVIDER_DEFAULTS,
-    DEFAULT_AGENTS,
-    AGENT_DEFAULT_DIR,
-} from '@itookit/device-llm';
 import { IAgentManagementService } from './agent-service';
+
+// Agent 默认存储目录（VFS module-relative path）
+const AGENT_DEFAULT_DIR = '/default';
 import { log } from '../utils/logger';
 
 // ─── 常量 ──────────────────────────────────────────────────────────────────────
@@ -91,11 +89,12 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
 
     private async ensureDefaults(): Promise<void> {
         try {
+            const configVersion = this.llmService.getConfigVersion();
             const versionData = await this.readJson<{ version: number }>(VERSION_FILE);
-            if (versionData && versionData.version >= CONST_CONFIG_VERSION) return;
+            if (versionData && versionData.version >= configVersion) return;
             log.info('Syncing default agents');
             await this.syncDefaultAgents();
-            await this.writeJson(VERSION_FILE, { version: CONST_CONFIG_VERSION, updatedAt: Date.now() });
+            await this.writeJson(VERSION_FILE, { version: configVersion, updatedAt: Date.now() });
         } catch (e) {
             log.error('Failed to ensure defaults', { error: e });
         }
@@ -107,7 +106,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
         const currentIds = new Set(currentAgents.map(a => a.id));
         let created = 0;
 
-        for (const def of DEFAULT_AGENTS) {
+        for (const def of this.llmService.getDefaultAgents()) {
             if (currentIds.has(def.id)) continue;
             const filename = `${def.id}.agent`;
             const parentDir = def.initPath || AGENT_DEFAULT_DIR;
@@ -197,6 +196,11 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
 
     // ─── ILLMManagementService — 全部委托给 llmService（LLMDeviceDriver）─────
 
+    getConfigVersion(): number { return this.llmService.getConfigVersion(); }
+    getDefaultAgents(): InitialAgentDef[] { return this.llmService.getDefaultAgents(); }
+    getProviderDefaults(): Record<string, LLMProviderDefinition> { return this.llmService.getProviderDefaults(); }
+    async testConnection(params: { provider: string; apiKey: string; baseURL?: string; model?: string }): Promise<ConnectionTestResult> { return this.llmService.testConnection(params); }
+
     async getConnections(): Promise<ConnectionMeta[]> { return this.llmService.getConnections(); }
     async getFullConnection(id: string): Promise<LLMConnection | null> { return this.llmService.getFullConnection(id); }
     async saveConnection(conn: LLMConnection): Promise<void> { return this.llmService.saveConnection(conn); }
@@ -215,10 +219,11 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
     async getRestorableItems(): Promise<RestorableItem[]> {
         const connections = await this.getConnections();
         const connMap = new Map(connections.map(c => [c.id, c]));
-        const providerKeys = Object.keys(LLM_PROVIDER_DEFAULTS);
+        const providerDefaults = this.llmService.getProviderDefaults();
+        const providerKeys = Object.keys(providerDefaults);
         const items: RestorableItem[] = [];
 
-        for (const [key, def] of Object.entries(LLM_PROVIDER_DEFAULTS)) {
+        for (const [key, def] of Object.entries(providerDefaults)) {
             const targetId = key === providerKeys[0] ? 'default' : `conn-${key}`;
             const existing = connMap.get(targetId);
             const status = !existing ? 'missing' : existing.provider !== key ? 'modified' : 'ok';
@@ -230,7 +235,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
         }
 
         const agentMap = new Map(this._agents.map(a => [a.id, a]));
-        for (const def of DEFAULT_AGENTS) {
+        for (const def of this.llmService.getDefaultAgents()) {
             const existing = agentMap.get(def.id);
             const status = !existing ? 'missing' : existing.name !== def.name ? 'modified' : 'ok';
             items.push({
@@ -248,11 +253,12 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
     }
 
     private async restoreConnection(targetId: string): Promise<void> {
-        const keys = Object.keys(LLM_PROVIDER_DEFAULTS);
+        const providerDefaults = this.llmService.getProviderDefaults();
+        const keys = Object.keys(providerDefaults);
         const providerKey = targetId === 'default'
             ? keys[0]
             : targetId.startsWith('conn-') ? targetId.replace('conn-', '') : '';
-        const providerDef = LLM_PROVIDER_DEFAULTS[providerKey];
+        const providerDef = providerDefaults[providerKey];
         if (!providerDef) throw new Error(`No default definition for connection id: ${targetId}`);
 
         // 保留用户已配置的 apiKey，仅重置其他字段
@@ -269,7 +275,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
     }
 
     private async restoreAgent(agentId: string): Promise<void> {
-        const def = DEFAULT_AGENTS.find(a => a.id === agentId);
+        const def = this.llmService.getDefaultAgents().find(a => a.id === agentId);
         if (!def) throw new Error(`No default definition for agent id: ${agentId}`);
         const { initPath, initialTags, ...agentData } = def;
         if (!agentData.config.connectionId) agentData.config.connectionId = 'default';

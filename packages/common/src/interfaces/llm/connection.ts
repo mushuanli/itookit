@@ -94,6 +94,16 @@ export interface ConnectionMeta {
     status?: 'active' | 'error' | 'untested';
 }
 
+// ─── ConnectionTestResult ─────────────────────────────────────────────────────
+
+/** 连接测试结果 */
+export interface ConnectionTestResult {
+    success: boolean;
+    message: string;
+    latency?: number;
+    model?: string;
+}
+
 /** 将完整连接转换为安全元数据 */
 export function toConnectionMeta(conn: LLMConnection): ConnectionMeta {
     return {

@@ -740,18 +740,21 @@ class MaintenanceService implements IMaintenanceService {
         });
 
         for (const node of sorted) {
+            // Use path-derived parent instead of node.parentId (which is an inode-based
+            // ID from the source machine and does not exist on the target machine).
+            const parentPath = P.dirname(node.path);
             try {
                 if (node.type === 'directory') {
                     await eng.createDirectory({
                         name: node.name,
-                        parentIdOrPath: node.parentId,
+                        parentIdOrPath: parentPath,
                         metadata: node.metadata as any,
                         recursive: true,
                     });
                 } else if (node.type === 'file' || node.type === 'seqfile') {
                     await eng.createFile({
                         name: node.name,
-                        parentIdOrPath: node.parentId,
+                        parentIdOrPath: parentPath,
                         content: data.contents[node.id],
                         metadata: node.metadata as any,
                         tags: node.tags ? [...node.tags] : undefined,
@@ -760,8 +763,8 @@ class MaintenanceService implements IMaintenanceService {
                         overwrite: true,
                     });
                 }
-            } catch {
-                // skip on error
+            } catch (e) {
+                console.warn(`[importModule] Failed to create ${node.path}:`, e);
             }
         }
     }

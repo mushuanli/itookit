@@ -1,14 +1,15 @@
 // @file: llm-ui/editors/ConnectionSettingsEditor.ts
 
 import { Modal, Toast, BaseSettingsEditor, generateShortUUID } from '@itookit/common';
-import type { IConnectionService, ConnectionMeta, LLMConnection, LLMModel } from '@itookit/common';
-import { LLM_PROVIDER_DEFAULTS, testLLMConnection } from '@itookit/device-llm';
+import type { IConnectionService, ConnectionMeta, LLMConnection, LLMModel, LLMProviderDefinition } from '@itookit/common';
 
 export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionService> {
     // 编辑弹窗中的临时状态
     private currentEditModels: LLMModel[] = [];
+    private providerDefaults: Record<string, LLMProviderDefinition> = {};
 
     async render() {
+        this.providerDefaults = this.service.getProviderDefaults();
         let connections = await this.service.getConnections();
 
         // ✅ [新增] 排序逻辑
@@ -65,7 +66,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
         const isDefault = conn.id === 'default';
         const hasKey = conn.hasApiKey;
 
-        const provider = LLM_PROVIDER_DEFAULTS[conn.provider];
+        const provider = this.providerDefaults[conn.provider];
         // 优先使用连接内保存的模型列表，如果没有则回退到默认
         const modelList = (conn.availableModels && conn.availableModels.length > 0)
             ? conn.availableModels
@@ -174,7 +175,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
 
     private showEditModal(connection: LLMConnection | null) {
         const isNew = !connection;
-        const providers = Object.keys(LLM_PROVIDER_DEFAULTS);
+        const providers = Object.keys(this.providerDefaults);
         const initialProvider = connection?.provider || providers[0];
 
         // ✅ [新增] 初始化模型列表状态
@@ -182,7 +183,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
         if (connection && connection.availableModels) {
             this.currentEditModels = JSON.parse(JSON.stringify(connection.availableModels));
         } else {
-            this.currentEditModels = JSON.parse(JSON.stringify(LLM_PROVIDER_DEFAULTS[initialProvider]?.models || []));
+            this.currentEditModels = JSON.parse(JSON.stringify(this.providerDefaults[initialProvider]?.models || []));
         }
 
         const modalContent = `
@@ -202,7 +203,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
                                 <select class="settings-form__select" id="conn-provider" name="provider" required style="flex:1">
                                     ${providers.map(p => `
                                         <option value="${p}" ${initialProvider === p ? 'selected' : ''}>
-                                            ${LLM_PROVIDER_DEFAULTS[p].name}
+                                            ${this.providerDefaults[p].name}
                                         </option>
                                     `).join('')}
                                 </select>
@@ -274,7 +275,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
                 const data = Object.fromEntries(formData) as any;
 
                 // 保留原有的 availableModels，或从 provider 默认值获取
-                const providerDef = LLM_PROVIDER_DEFAULTS[data.provider];
+                const providerDef = this.providerDefaults[data.provider];
                 const newConn: LLMConnection = {
                     id: connection?.id || `conn-${generateShortUUID()}`,
                     name: data.name,
@@ -337,7 +338,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
         if (providerSelect) {
             providerSelect.addEventListener('change', (e) => {
                 const pKey = (e.target as HTMLSelectElement).value;
-                const defs = LLM_PROVIDER_DEFAULTS[pKey];
+                const defs = this.providerDefaults[pKey];
 
                 // 切换 Provider 时，询问是否加载该 Provider 的默认模型
                 if (confirm('切换提供商将重置模型列表和 BaseURL 为默认值，是否继续？')) {
@@ -357,7 +358,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
                 if (!confirm('确定要重置 BaseURL 和模型列表到初始默认状态吗？自定义的模型将被清除。')) return;
 
                 const pKey = providerSelect.value;
-                const defs = LLM_PROVIDER_DEFAULTS[pKey];
+                const defs = this.providerDefaults[pKey];
 
                 // 重置数据
                 this.currentEditModels = JSON.parse(JSON.stringify(defs?.models || []));
@@ -443,7 +444,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
                 testResultEl.style.display = 'none';
 
                 try {
-                    const result = await testLLMConnection({ provider, apiKey, baseURL, model });
+                    const result = await this.service.testConnection({ provider, apiKey, baseURL, model });
                     if (result.success) {
                         testResultEl.style.cssText = 'display:block; margin-top:8px; padding:8px 10px; border-radius:4px; font-size:12px; background:var(--st-success-bg,#d4edda); color:var(--st-success,#155724);';
                         testResultEl.textContent = `✅ ${result.message || '连接测试成功！'}`;
