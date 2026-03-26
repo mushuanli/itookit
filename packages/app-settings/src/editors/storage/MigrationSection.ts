@@ -174,7 +174,7 @@ export class MigrationSection {
     if (json.modules && Array.isArray(json.modules)) {
       availableModules = json.modules.filter((mod: any) => {
         const name = mod.module?.name || '';
-        return !['__vfs_meta__', '__config'].includes(name);
+        return !['__vfs_meta__', 'etc'].includes(name);
       });
     }
 

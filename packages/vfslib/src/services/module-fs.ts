@@ -78,6 +78,7 @@ import {
     isPath,
     isHiddenName,
     isAssetDirName,
+    isInternalDirName,
     toAssetDirName,
 } from '../utils/validation';
 import * as P from '../utils/path';
@@ -354,6 +355,7 @@ export class ModuleFS implements IModuleFS {
 
         const filtered = children.filter(c => {
             if (!options?.includeHidden && isHiddenName(c.name)) return false;
+            if (!options?.includeInternalDirs && isInternalDirName(c.name)) return false;
             if (!options?.includeAssetDirs && isAssetDirName(c.name)) return false;
             return true;
         });
@@ -456,6 +458,7 @@ export class ModuleFS implements IModuleFS {
             for (const child of children) {
                 if (count >= limit) return false;
                 if (!options?.includeHidden && isHiddenName(child.name)) continue;
+                if (isInternalDirName(child.name)) continue;
                 if (isAssetDirName(child.name)) continue;
 
                 if (options?.typeFilter) {
