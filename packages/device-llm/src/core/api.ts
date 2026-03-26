@@ -1,19 +1,12 @@
 // @file: device-llm/core/api.ts
 
+import type { ConnectionTestResult } from '@itookit/common';
 import { LLMDriver } from './driver';
 import { LLM_PROVIDER_DEFAULTS } from '../constants';
 import { LLMError } from '../errors';
-import { log } from '../utils/logger';  // ✅ 简洁导入
+import { log } from '../utils/logger';
 
-/**
- * 连接测试结果
- */
-export interface ConnectionTestResult {
-    success: boolean;
-    message: string;
-    latency?: number;
-    model?: string;
-}
+export type { ConnectionTestResult };
 
 /**
  * 测试 LLM 连接

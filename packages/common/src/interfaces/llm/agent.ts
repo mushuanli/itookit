@@ -1,7 +1,7 @@
 // @file: common/interfaces/llm/agent.ts
 // Agent、MCP 及服务接口定义。
 
-import type { LLMConnection, ConnectionMeta } from './connection';
+import type { LLMConnection, ConnectionMeta, LLMProviderDefinition, ConnectionTestResult } from './connection';
 import type { RestorableItem } from '../../types/types';
 
 // ─── Agent ────────────────────────────────────────────────────────────────────
@@ -116,6 +116,10 @@ export interface IConnectionService {
     deleteConnection(id: string): Promise<void>;
     /** 监听连接数据变化 */
     onChange(listener: () => void): () => void;
+    /** 返回所有 Provider 默认配置（含模型列表、baseURL 等） */
+    getProviderDefaults(): Record<string, LLMProviderDefinition>;
+    /** 测试连接参数是否可用（实际发起 HTTP 请求） */
+    testConnection(params: { provider: string; apiKey: string; baseURL?: string; model?: string }): Promise<ConnectionTestResult>;
 }
 
 // ─── ILLMManagementService ───────────────────────────────────────────────────
@@ -136,6 +140,12 @@ export interface ILLMManagementService extends IConnectionService {
     getSkills(): Promise<LLMSkill[]>;
     saveSkill(skill: LLMSkill): Promise<void>;
     deleteSkill(id: string): Promise<void>;
+
+    // ── Defaults metadata ─────────────────────────────────────────
+    /** 返回当前配置数据版本号，用于增量同步默认数据 */
+    getConfigVersion(): number;
+    /** 返回内置的默认 Agent 定义列表 */
+    getDefaultAgents(): InitialAgentDef[];
 }
 
 // ─── IAgentService ────────────────────────────────────────────────────────────

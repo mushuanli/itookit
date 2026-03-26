@@ -62,8 +62,7 @@
   "homepage": "https://github.com/mushuanli/itookit/tree/main/packages/llm-kernel#readme",
 
   "dependencies": {
-    "@itookit/common": "workspace:*",
-    "@itookit/device-llm": "workspace:*"
+    "@itookit/common": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
@@ -73,7 +72,5 @@
     "vite-plugin-dts": "^3.9.0",
     "vitest": "^1.6.0"
   },
-  "peerDependencies": {
-    "@itookit/device-llm": "workspace:*"
-  }
+  "peerDependencies": {}
 }

@@ -17,13 +17,13 @@ import type {
     LLMConnection, ConnectionMeta, ChatMessage, ChatCompletionChunk,
     ChatCompletionParams, ChatCompletionResponse, TokenUsage,
     MCPServer, LLMSkill, CreateFileOptions, ToolDefinition,
+    LLMProviderDefinition, ConnectionTestResult, InitialAgentDef,
 } from '@itookit/common';
 import { toConnectionMeta, CONFIG_MODULE } from '@itookit/common';
 
 import { LLMDriver } from '../core/driver';
 import { testLLMConnection } from '../core/api';
-import type { ConnectionTestResult } from '../core/api';
-import { LLM_PROVIDER_DEFAULTS, CONST_CONFIG_VERSION } from '../constants';
+import { LLM_PROVIDER_DEFAULTS, CONST_CONFIG_VERSION, DEFAULT_AGENTS } from '../constants';
 import { MCPServerConnection, type MCPToolInfo } from '../skills/mcp-client';
 import type { MCPServerConfig } from '../types/provider';
 
@@ -675,6 +675,26 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         await this.reloadSkills();
         await this.vfs.removeDeviceNode(`/dev/llm/skills/${id}`);
         this.notify();
+    }
+
+    // ─── ILLMManagementService — Defaults metadata ────────────────────────────
+
+    getConfigVersion(): number {
+        return CONST_CONFIG_VERSION;
+    }
+
+    getDefaultAgents(): InitialAgentDef[] {
+        return DEFAULT_AGENTS;
+    }
+
+    // ─── IConnectionService — Provider metadata & testing ─────────────────────
+
+    getProviderDefaults(): Record<string, LLMProviderDefinition> {
+        return LLM_PROVIDER_DEFAULTS;
+    }
+
+    async testConnection(params: { provider: string; apiKey: string; baseURL?: string; model?: string }): Promise<ConnectionTestResult> {
+        return testLLMConnection(params);
     }
 
     // ─── MCP storage ──────────────────────────────────────────────────────────

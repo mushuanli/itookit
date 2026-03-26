@@ -65,7 +65,6 @@
   },
   "dependencies": {
     "@itookit/common": "workspace:*",
-    "@itookit/device-llm": "workspace:*",
     "@itookit/llm-engine": "workspace:*",
     "js-yaml": "^4.1.1",
     "marked": "^16.4.2"

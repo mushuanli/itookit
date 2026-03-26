@@ -64,13 +64,11 @@
   },
   "peerDependencies": {
     "@itookit/common": "workspace:*",
-    "@itookit/device-llm": "workspace:*",
     "@itookit/llm-kernel": "workspace:*",
     "@itookit/vfslib": "workspace:*"
   },
   "dependencies": {
     "@itookit/common": "workspace:*",
-    "@itookit/device-llm": "workspace:*",
     "@itookit/llm-kernel": "workspace:*",
     "yaml": "^2.8.2",
     "@itookit/vfslib": "workspace:*"
