@@ -173,8 +173,8 @@ export class MigrationSection {
     let availableModules: any[] = [];
     if (json.modules && Array.isArray(json.modules)) {
       availableModules = json.modules.filter((mod: any) => {
-        const name = mod.module?.name || '';
-        return !['__vfs_meta__', 'etc'].includes(name);
+        const name = mod.moduleName || '';
+        return name && !['__vfs_meta__', 'etc'].includes(name);
       });
     }
 
@@ -184,7 +184,7 @@ export class MigrationSection {
     }
 
     const modulesHtml = availableModules.map(mod => {
-      const name = mod.module?.name || 'Unknown';
+      const name = mod.moduleName || 'Unknown';
       return `
         <label class="settings-checkbox-row">
           <input type="checkbox" name="import-modules" value="${name}">

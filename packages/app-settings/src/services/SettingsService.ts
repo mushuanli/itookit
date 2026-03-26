@@ -596,27 +596,36 @@ export class SettingsService {
         data: any,
         settingsKeys: (keyof SettingsState)[],
         moduleNames: string[],
-        _options: Record<string, unknown> = {}
+        _options: { overwrite?: boolean; mergeTags?: boolean } = {}
     ): Promise<void> {
         const tasks: Promise<void>[] = [];
 
+        // Resolve value from either new format (data.settings[k]) or legacy format (data[k])
+        const resolveField = (key: string): any[] | undefined => {
+            const fromSettings = data.settings?.[key];
+            const fromRoot = data[key];
+            const val = Array.isArray(fromSettings) ? fromSettings : (Array.isArray(fromRoot) ? fromRoot : undefined);
+            return val;
+        };
+
         // 1. 恢复配置
-        if (data.settings) {
-            if (settingsKeys.includes('tags') && data.settings.tags) {
-                this.state.tags = data.settings.tags;
-                tasks.push(this.saveEntity('tags'));
-            }
-            if (settingsKeys.includes('contacts') && data.settings.contacts) {
-                this.state.contacts = data.settings.contacts;
-                tasks.push(this.saveEntity('contacts'));
-            }
+        const tagsData = settingsKeys.includes('tags') ? resolveField('tags') : undefined;
+        if (tagsData) {
+            this.state.tags = tagsData;
+            tasks.push(this.saveEntity('tags'));
+        }
+
+        const contactsData = settingsKeys.includes('contacts') ? resolveField('contacts') : undefined;
+        if (contactsData) {
+            this.state.contacts = contactsData;
+            tasks.push(this.saveEntity('contacts'));
         }
 
         // 2. 恢复模块
         const allModulesList = data.modules || [];
         if (Array.isArray(allModulesList)) {
             const selectedModulesData = allModulesList.filter((m: any) =>
-                m.module && moduleNames.includes(m.module.name)
+                m.moduleName && moduleNames.includes(m.moduleName)
             );
 
             for (const modData of selectedModulesData) {
