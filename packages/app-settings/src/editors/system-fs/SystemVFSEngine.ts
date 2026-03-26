@@ -91,8 +91,8 @@ async function collectTree(
     parentId: string,
     moduleName: string,
 ): Promise<EngineNode[]> {
-    // Debug view: include hidden (. prefix) and asset dirs (_ prefix).
-    const children = await fs.getChildren(idOrPath, { includeHidden: true, includeAssetDirs: true }) as FSNode[];
+    // Debug view: include all reserved entries (hidden, assetdirs, __config internal dirs).
+    const children = await fs.getChildren(idOrPath, { includeHidden: true, includeAssetDirs: true, includeInternalDirs: true }) as FSNode[];
     const result: EngineNode[] = [];
 
     for (const child of children) {
@@ -183,7 +183,7 @@ export class SystemVFSEngine implements ISessionEngine {
 
         try {
             const fs = this.vfs.getEngine(parsed.moduleName);
-            const children = await fs.getChildren(parsed.realId, { includeHidden: true, includeAssetDirs: true }) as FSNode[];
+            const children = await fs.getChildren(parsed.realId, { includeHidden: true, includeAssetDirs: true, includeInternalDirs: true }) as FSNode[];
             return children.map(c => {
                 const cId = compositeId(parsed.moduleName, c.id);
                 return fsNodeToEngine(c, cId, parentId, parsed.moduleName);

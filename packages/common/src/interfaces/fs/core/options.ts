@@ -148,10 +148,15 @@ export interface ListOptions {
      */
     includeHidden?: boolean;
     /**
-     * 包含 assetdir（_ 开头）
+     * 包含 assetdir（单下划线前缀，如 _note.md/）
      * @default false
      */
     includeAssetDirs?: boolean;
+    /**
+     * 包含模块内部配置目录（双下划线前缀，如 __meta/）
+     * @default false
+     */
+    includeInternalDirs?: boolean;
     /**
      * 返回字段控制
      *

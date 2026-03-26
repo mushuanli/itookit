@@ -54,8 +54,8 @@ interface PromptHistoryFile {
 /** prompt 历史属于 chat 功能，存放在 chat 模块内 */
 const MODULE_NAME = FS_MODULE_CHAT;
 
-/** _ 前缀：模块内部数据，对用户不可见，无需 isSystem */
-const HISTORY_FILE = '/_history.yaml';
+/** __config/ 是模块标准内部目录，文件名无需 _ 前缀 */
+const HISTORY_FILE = '/__config/history.yaml';
 
 const DEFAULT_MAX_ENTRIES = 500;
 const WRITE_DEBOUNCE_MS = 1500;
