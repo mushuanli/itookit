@@ -166,9 +166,20 @@ export function connectEditorLifecycle(
           vfsManager.resolveEditorFactory?.(item) || defaultEditorFactory;
         if (!factory) throw new Error('No suitable editor factory found.');
 
+        // item.content.data is only populated when an in-memory update event
+        // has fired (e.g. after a writeContent). On fresh page load, loadTree()
+        // omits file content, so we must read it from the engine directly.
+        const initialContent =
+          item.content?.data !== undefined
+            ? item.content.data
+            : await engine.readContent(item.id);
+
+        // Re-check token after the async readContent — user may have switched files.
+        if (myToken !== sessionToken) return;
+
         const editorOptions: EditorOptions = {
           ...factoryExtraOptions,
-          initialContent: item.content?.data || '',
+          initialContent: initialContent || '',
           title: item.metadata.title,
           nodeId: item.id,
           language: item.metadata.custom?._extension || '',
