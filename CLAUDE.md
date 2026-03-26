@@ -118,13 +118,74 @@ Discriminated union: `FSNode = FSFileNode | FSDirectoryNode | FSSeqFileNode | FS
 
 `IModuleFS` extends `FSEventEmitter` — `on(eventType, callback): () => void` returns an unsubscriber. `IVFSManager` has typed `on<E extends VFSManagerEventType>(...)` for `node:created`, `node:updated`, `node:deleted`, `module:mounted`, `module:unmounted`. Note: `node:deleted` payload has `nodeIds[]` + `moduleId` but **no `path`** field.
 
+## VFS Path Naming Conventions
+
+### Module isolation
+
+Each **module** is a chroot-isolated namespace. A module's `/` maps to `/module/<name>/` in the system tree. Paths passed to `IModuleFS` are always module-relative (start with `/`). Modules never see each other's files directly — cross-module access goes through `IVFSManager`.
+
+### File/directory name prefixes
+
+Four categories, enforced by `validateFilename` + `AccessController`:
+
+| Prefix | Example | Who creates | Default listing | Sync | Notes |
+|---|---|---|---|---|---|
+| `name` | `notes.md`, `folder/` | user | ✅ visible | ✅ | Normal files |
+| `.name` | `.connections/`, `.nodeId.json` | `isSystem` modules only | ❌ hidden | ❌ | Access-controlled by `AccessController`; non-system modules get EACCES |
+| `_name/` | `_note.md/` | vfslib (auto) | ❌ hidden | ✅ | **Assetdir** — companion dir for `note.md`; lifecycle coupled to owner (auto-renamed/moved/deleted) |
+| `__config/` | `__config/history.yaml` | any module code | ❌ hidden | ✅ | **Module-internal config dir** — one per module, no access restriction, files inside use plain names |
+
+**`validateFilename` rules** (`DEFAULT_FILENAME_PATTERN = /^(?!_(?!_))[^/\\][^/\\]*$/`)**:**
+- Single `_` prefix → **blocked** (assetdirs are created by vfslib internals, not user code)
+- Double `__` prefix → **allowed** (`__config/` is the only conventional use)
+- `.` prefix → allowed by `validateFilename`, restricted by `AccessController`
+
+### Assetdir details
+
+`_note.md/` is the assetdir for `note.md` — same parent directory, `_` + owner filename. Managed exclusively by `IAssetOperations` (`putAsset`, `getAsset`, etc.). The engine auto-renames/moves/deletes the assetdir when the owner file changes. Never create or rename assetdirs manually.
+
+### `__config/` — module-internal config
+
+Each module may have one `__config/` subdirectory for private metadata (history, caches, internal state). Files inside use **plain names** — no prefix needed:
+
+```
+chats/__config/history.yaml     ← prompt history
+notes/__config/index.json       ← module-level index
+```
+
+`__config/` is accessible to any code (no `isSystem` requirement), excluded from default `getChildren` listings, and included in sync. It is NOT the same as the global `etc` module.
+
+### Module-level system flag
+
+Modules mounted with `isSystem: true` (e.g., `etc`, device modules):
+- Can write `.` prefix paths (bypasses `AccessController`)
+- Are **excluded from sync** entirely
+
+User workspace modules (no `isSystem`) are synced in full, including their `__config/` dirs and assetdirs.
+
+### `getChildren` options (all default `false`)
+
+```ts
+fs.getChildren(path, {
+  includeHidden: true,       // include '.' prefix entries
+  includeAssetDirs: true,    // include '_' prefix entries (single _ only)
+  includeInternalDirs: true, // include '__config/' and other '__' prefix dirs
+})
+```
+
+Used by: sync walker (all three `true`), `SystemFSExploreEditor` (all three `true`), normal UI (all `false`).
+
+### System root directories
+
+Bootstrap creates `/etc/`, `/dev/`, `/module/` at VFS root. Modules live under `/module/<name>/`. The `etc` module (`CONFIG_MODULE`) stores global config and is auto-mounted at init.
+
 ## Conventions
 
 - **`vfs.write(moduleName, path, content)`** has upsert semantics — creates file and intermediate directories automatically. Prefer over check-then-create.
 - **Avoid `exists` + `read` patterns** (TOCTOU) — just read and catch not-found errors.
-- **Path formats**: module-relative paths start with `/`. Cross-module system paths: `/module/<name>/path`, `/__config/...`, `/dev/...`. Use `toSystemPath` / `parseSystemPath` from `packages/common/src/utils/fsHelpers.ts`.
-- **Asset directories** use `_` prefix (e.g., `_filename.md/` is the asset dir for `filename.md`).
-- **`toBuffer(content)`** from `@itookit/vfslib` converts `string | ArrayBuffer | Uint8Array → ArrayBuffer`. Use it instead of manual `TextEncoder`/`.buffer.slice()` patterns.
-- **`__config` module** is auto-mounted at VFS init; settings are stored there.
-- **DB name** is `'MindOS-v2'` (IndexedDB). The old `'MindOS'` schema (v7) is incompatible with the current vfslib schema (v1).
-- **Sync plugin** (`SyncService`) is a stub — `ISyncPlugin` is a local interface in app-settings; real sync is not yet implemented.
+- **Asset directories**: use `IAssetOperations.putAsset(ownerIdOrPath, filename, content)` — never create `_name/` dirs directly.
+- **Module-internal data**: write to `/__config/<filename>` (plain filename, no `_` prefix). Any module can create `__config/` without `isSystem`.
+- **`toBuffer(content)`** from `@itookit/vfslib` converts `string | ArrayBuffer | Uint8Array → ArrayBuffer`.
+- **`etc` module** (`CONFIG_MODULE = 'etc'`) is auto-mounted at VFS init; stores LLM connections (`/llm/.connections/`), MCP configs (`/llm/.mcp/`), sync config, tags, contacts.
+- **DB name** is `'MindOS-v2'` (IndexedDB). The old `'MindOS'` schema (v7) is incompatible.
+- **Sync** (`apps/sync-server`, SQLite + local files): system modules (`isSystem: true`) excluded; all other modules synced including `__config/` dirs, assetdirs, and hidden files.

@@ -1,0 +1,21 @@
+{
+  "id": "000_00002_a",
+  "type": "message",
+  "role": "assistant",
+  "content": "",
+  "created_at": "2026-03-26T02:02:00.026Z",
+  "parent_id": "000_00001_u",
+  "children_ids": [],
+  "meta": {
+    "agentId": "dev-id",
+    "agentName": "编程大师",
+    "agentIcon": "⚡️",
+    "status": "failed",
+    "siblingIndex": 0,
+    "siblingCount": 1,
+    "parentUserNodeId": "000_00001_u",
+    "error": "LLMDeviceDriver: connection 'default' has no API key configured",
+    "endTime": 1774490520063
+  },
+  "status": "deleted"
+}

@@ -1,7 +1,7 @@
 // @file: app-settings/services/SyncService.ts
 
 import { CONFIG_MODULE } from '@itookit/common';
-import type { IVFSManager } from '@itookit/common';
+import type { IVFSManager, FSNode } from '@itookit/common';
 import type { SyncConflict } from '../types/sync';
 import {
   AppSyncSettings,
@@ -12,6 +12,15 @@ import {
   UISyncState,
   SyncUIEvent
 } from '../types/sync';
+
+interface FileMeta {
+  path: string;
+  hash: string;
+  mtime: number;
+  is_deleted: boolean;
+}
+
+// Sync excludes modules mounted with isSystem: true (infrastructure, not user data).
 
 // Sync plugin is not yet available in vfslib — local stub interface
 interface ISyncPlugin {
@@ -312,19 +321,18 @@ export class SyncService {
    * 触发同步
    */
   async triggerSync(mode: SyncMode = 'standard'): Promise<void> {
-    if (!this.plugin) {
-      throw new Error('Sync plugin not available');
-    }
-
-    if (!this.settings?.serverUrl) {
-      throw new Error('请先配置同步服务器');
-    }
+    if (!this.settings?.serverUrl) throw new Error('请先配置同步服务器');
+    if (!this.settings?.token)     throw new Error('请先配置 Token');
 
     this.updateStatus({ state: 'syncing', progress: undefined });
     this.log('info', `开始${this.getModeLabel(mode)}同步...`);
 
     try {
-      await this.plugin.triggerManualSync(mode);
+      if (this.plugin) {
+        await this.plugin.triggerManualSync(mode);
+      } else {
+        await this.httpSync(mode);
+      }
       this.updateStatus({ state: 'success', lastSyncTime: Date.now() });
       this.log('success', '同步完成');
     } catch (e: any) {
@@ -332,6 +340,147 @@ export class SyncService {
       this.log('error', `同步失败: ${e.message}`);
       throw e;
     }
+  }
+
+  private async httpSync(mode: SyncMode): Promise<void> {
+    const { serverUrl, token } = this.settings!;
+    const authHeaders = { 'Authorization': `Bearer ${token}` };
+
+    const localFiles = await this.indexLocalFiles();
+
+    let uploadPaths: string[];
+    let downloadList: FileMeta[];
+
+    if (mode === 'force_push') {
+      uploadPaths = localFiles.map(f => f.path);
+      downloadList = [];
+    } else if (mode === 'force_pull') {
+      const res = await this.fetchCheck(serverUrl, authHeaders, []);
+      uploadPaths = [];
+      downloadList = res.files_to_download;
+    } else {
+      const res = await this.fetchCheck(serverUrl, authHeaders, localFiles);
+      uploadPaths = this.settings!.strategy !== 'pull' ? res.files_to_upload : [];
+      downloadList = this.settings!.strategy !== 'push' ? res.files_to_download : [];
+    }
+
+    this.log('info', `计划：上传 ${uploadPaths.length} 个，下载 ${downloadList.length} 个`);
+
+    for (const path of uploadPaths) {
+      await this.httpUpload(path, serverUrl, authHeaders);
+    }
+    for (const meta of downloadList) {
+      await this.httpDownload(meta, serverUrl, authHeaders);
+    }
+  }
+
+  private async fetchCheck(
+    serverUrl: string,
+    headers: Record<string, string>,
+    clientFiles: FileMeta[],
+  ): Promise<{ files_to_upload: string[]; files_to_download: FileMeta[] }> {
+    const res = await fetch(`${serverUrl}/api/sync/check`, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify(clientFiles),
+    });
+    if (!res.ok) throw new Error(`Sync check failed: ${res.status}`);
+    return res.json();
+  }
+
+  private async indexLocalFiles(): Promise<FileMeta[]> {
+    if (!this.vfs) return [];
+    const files: FileMeta[] = [];
+    const modules = this.vfs.getAllModules().filter(m => !m.isSystem);
+
+    for (const mod of modules) {
+      const engine = this.vfs.getEngine(mod.name);
+      const walk = async (parentPath: string): Promise<void> => {
+        const children = await engine.getChildren(parentPath, { includeAssetDirs: true, includeInternalDirs: true, includeHidden: true }) as FSNode[];
+        for (const child of children) {
+          if (child.type === 'file') {
+            try {
+              const raw = await engine.readContent(child.id);
+              const buf = this.toArrayBuffer(raw);
+              files.push({
+                path: `/${mod.name}${child.path}`,
+                hash: await this.sha256hex(buf),
+                mtime: child.modifiedAt,
+                is_deleted: false,
+              });
+            } catch { /* skip unreadable */ }
+          } else if (child.type === 'directory') {
+            await walk(child.id);
+          }
+        }
+      };
+      try { await walk('/'); } catch (e) {
+        this.log('warn', `索引模块 ${mod.name} 失败`);
+      }
+    }
+    return files;
+  }
+
+  private async httpUpload(
+    systemPath: string,
+    serverUrl: string,
+    headers: Record<string, string>,
+  ): Promise<void> {
+    if (!this.vfs) return;
+    try {
+      const parts = systemPath.split('/').filter(Boolean);
+      const content = await this.vfs.read(parts[0], '/' + parts.slice(1).join('/'));
+      const formData = new FormData();
+      formData.append(systemPath, new Blob([this.toArrayBuffer(content)]));
+      await fetch(`${serverUrl}/api/sync/upload`, { method: 'POST', headers, body: formData });
+    } catch (e) {
+      this.log('warn', `上传失败: ${systemPath}`);
+    }
+  }
+
+  private async httpDownload(
+    meta: FileMeta,
+    serverUrl: string,
+    headers: Record<string, string>,
+  ): Promise<void> {
+    if (!this.vfs) return;
+    try {
+      const res = await fetch(`${serverUrl}/api/sync/download`, {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: meta.path }),
+      });
+      if (!res.ok) throw new Error(`Download failed: ${res.status}`);
+      const buf = await res.arrayBuffer();
+      const parts = meta.path.split('/').filter(Boolean);
+      const moduleName = parts[0];
+      const innerParts = parts.slice(1);
+      if (!this.vfs.getModule(moduleName)) return;
+
+      // Asset file: second-to-last segment is an assetdir (starts with '_')
+      if (innerParts.length >= 2 && innerParts[innerParts.length - 2].startsWith('_')) {
+        const assetName = innerParts[innerParts.length - 1];
+        const ownerName = innerParts[innerParts.length - 2].slice(1); // strip '_'
+        const ownerPath = '/' + [...innerParts.slice(0, -2), ownerName].join('/');
+        const engine = this.vfs.getEngine(moduleName);
+        await engine.assets?.putAsset(ownerPath, assetName, buf);
+      } else {
+        await this.vfs.write(moduleName, '/' + innerParts.join('/'), buf);
+      }
+    } catch (e) {
+      this.log('warn', `下载失败: ${meta.path}`);
+    }
+  }
+
+  private toArrayBuffer(data: string | ArrayBuffer | Uint8Array): ArrayBuffer {
+    if (typeof data === 'string') return new TextEncoder().encode(data).buffer as ArrayBuffer;
+    if (data instanceof Uint8Array) return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
+    return data;
+  }
+
+  private async sha256hex(buf: ArrayBuffer): Promise<string> {
+    const hash = await crypto.subtle.digest('SHA-256', buf);
+    return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
   }
 
   /**

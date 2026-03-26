@@ -49,6 +49,7 @@ export * as pathUtils from './utils/path';
 export {
     isHiddenName,
     isAssetDirName,
+    isInternalDirName,
     isReservedName,
     toAssetDirName,
     fromAssetDirName,

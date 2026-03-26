@@ -8,9 +8,9 @@ import type { SyncMode } from '../types/sync';
 import { SettingsState, Contact, Tag } from '../types/types';
 import { SnapshotService } from './SnapshotService';
 
-// 定义不向用户展示的系统内部模块
-// agents 模块现在由 VFSAgentService 管理，视为系统模块
-const SYSTEM_MODULES = ['__config', '__vfs_meta__', 'settings_ui', FS_MODULE_AGENTS];
+// UI display: modules not shown to users in workspace picker
+const SYSTEM_MODULES = ['etc', '__vfs_meta__', 'settings_ui', FS_MODULE_AGENTS];
+
 
 const FILES = {
     tags: '/tags.json',
@@ -446,7 +446,7 @@ export class SettingsService {
 
     private async indexAllLocalFiles(): Promise<FileMeta[]> {
         const files: FileMeta[] = [];
-        const modules = this.vfs.getAllModules().filter(m => !SYSTEM_MODULES.includes(m.name));
+        const modules = this.vfs.getAllModules().filter(m => !m.isSystem);
 
         for (const mod of modules) {
             try {
@@ -462,7 +462,7 @@ export class SettingsService {
         const engine = this.vfs.getEngine(moduleName);
 
         const walk = async (parentIdOrPath: string): Promise<void> => {
-            const children = await engine.getChildren(parentIdOrPath) as FSNode[];
+            const children = await engine.getChildren(parentIdOrPath, { includeAssetDirs: true, includeInternalDirs: true, includeHidden: true }) as FSNode[];
             for (const child of children) {
                 if (child.type === 'file') {
                     try {
@@ -523,17 +523,20 @@ export class SettingsService {
 
             const parts = meta.path.split('/').filter(Boolean);
             const moduleName = parts[0];
-            const userPath = '/' + parts.slice(1).join('/');
+            const innerParts = parts.slice(1);
 
-            if (this.vfs.getModule(moduleName)) {
-                // vfs.write has upsert semantics (creates intermediate directories)
-                await this.vfs.write(moduleName, userPath, arrayBuffer);
+            if (!this.vfs.getModule(moduleName)) return;
 
+            // Asset file: second-to-last segment is an assetdir (starts with '_')
+            if (innerParts.length >= 2 && innerParts[innerParts.length - 2].startsWith('_')) {
+                const assetName = innerParts[innerParts.length - 1];
+                const ownerName = innerParts[innerParts.length - 2].slice(1); // strip '_'
+                const ownerPath = '/' + [...innerParts.slice(0, -2), ownerName].join('/');
                 const engine = this.vfs.getEngine(moduleName);
-                const node = await engine.getNode(userPath);
-                if (node) {
-                    await engine.updateMetadata(node.id, { syncedAt: meta.mtime });
-                }
+                await engine.assets?.putAsset(ownerPath, assetName, arrayBuffer);
+            } else {
+                const userPath = '/' + innerParts.join('/');
+                await this.vfs.write(moduleName, userPath, arrayBuffer);
             }
         } catch (e) {
             console.error(`Failed to download ${meta.path}`, e);

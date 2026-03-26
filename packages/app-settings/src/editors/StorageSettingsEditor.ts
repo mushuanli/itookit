@@ -7,6 +7,7 @@ import { SyncSection } from './storage/SyncSection';
 import { SnapshotSection } from './storage/SnapshotSection';
 import { MigrationSection } from './storage/MigrationSection';
 import { DangerZoneSection } from './storage/DangerZoneSection';
+import { syncService } from '../services/SyncService';
 
 export class StorageSettingsEditor extends BaseSettingsEditor<SettingsService> {
   private sections: any[] = [];
@@ -53,8 +54,11 @@ export class StorageSettingsEditor extends BaseSettingsEditor<SettingsService> {
     const migrationEl = this.container.querySelector('#section-migration') as HTMLElement;
     const dangerEl = this.container.querySelector('#section-danger') as HTMLElement;
 
+    // Wire VFS into syncService singleton so httpSync can read/write files
+    await syncService.init(this.service.vfs);
+
     const overviewSection = new StorageOverviewSection(overviewEl);
-    const syncSection = new SyncSection(syncEl); // SyncService 是单例，内部直接引用
+    const syncSection = new SyncSection(syncEl);
     const snapshotSection = new SnapshotSection(snapshotEl, this.service);
     const migrationSection = new MigrationSection(migrationEl, this.service);
     const dangerSection = new DangerZoneSection(dangerEl, this.service);
