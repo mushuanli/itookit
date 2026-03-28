@@ -96,6 +96,8 @@ export function assemble(
             newFileContent: options.newSessionContent,
             defaultFileName: options.defaultFileName,
             defaultFileContent: options.defaultFileContent,
+            readContent: (id) => engine.readContent(id),
+            getDuplicateTransformer: (ext) => registry.getDuplicateTransformer(ext),
         }),
         new NavigationCommandHandler(commandBus, store, eventBus),
         new UICommandHandler(commandBus, store),

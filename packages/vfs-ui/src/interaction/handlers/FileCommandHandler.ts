@@ -10,6 +10,8 @@ export interface FileCommandOptions {
   newFileContent?: string;
   defaultFileName?: string;
   defaultFileContent?: string;
+  readContent?: (id: string) => Promise<string | ArrayBuffer>;
+  getDuplicateTransformer?: (extension: string) => ((content: string) => string | Promise<string>) | undefined;
 }
 
 export class FileCommandHandler {
@@ -70,6 +72,30 @@ export class FileCommandHandler {
 
       this.commandBus.on('file:updateTags', async ({ itemIds, tags }) => {
         await this.service.updateMultipleItemsTags({ itemIds, tags });
+      }),
+
+      this.commandBus.on('file:duplicate', async ({ itemId }) => {
+        try {
+          const item = findNodeById(this.store.getState().items, itemId);
+          if (!item || item.type !== 'file') return;
+
+          const ext = (item.metadata.custom?._extension as string) || '';
+          const raw = await this.options.readContent?.(itemId);
+          if (raw === undefined) return;
+
+          const transformer = typeof raw === 'string'
+            ? this.options.getDuplicateTransformer?.(ext)
+            : undefined;
+          const content = transformer ? await transformer(raw as string) : raw;
+
+          await this.service.createFile({
+            title: `${item.metadata.title} (copy)${ext}`,
+            parentId: item.metadata.parentId ?? null,
+            content,
+          });
+        } catch (e: any) {
+          console.error('[FileCommandHandler] Duplicate failed:', e);
+        }
       })
     );
   }

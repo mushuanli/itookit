@@ -170,6 +170,7 @@ export class ContextMenuHandler {
 
     const builtInActions = new Set([
       'rename',
+      'duplicate',
       'delete',
       'moveTo',
       'create-in-folder-session',
@@ -194,6 +195,8 @@ export class ContextMenuHandler {
             newTitle: newTitle.trim(),
           });
         }
+      } else if (action === 'duplicate') {
+        this.commandBus.execute('file:duplicate', { itemId: contextItem.id });
       } else if (action === 'delete') {
         if (confirm(`确定删除 "${contextItem.metadata.title || 'this item'}"?`)) {
           this.commandBus.execute('file:delete', { itemIds: [contextItem.id] });
@@ -226,6 +229,14 @@ export class ContextMenuHandler {
         },
         { type: 'separator' }
       );
+    }
+
+    if (item.type === 'file') {
+      items.push({
+        id: 'duplicate',
+        label: '复制',
+        iconHTML: '<i class="fas fa-copy"></i>',
+      });
     }
 
     items.push(

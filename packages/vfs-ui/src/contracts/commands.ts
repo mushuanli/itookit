@@ -19,6 +19,7 @@ import type { UISettings } from './types';
 export interface CommandMap {
   // --- File Operations ---
   'file:create': { type: 'file' | 'directory'; title: string; parentId: string | null };
+  'file:duplicate': { itemId: string };
   'file:delete': { itemIds: string[] };
   'file:rename': { itemId: string; newTitle: string };
   'file:move': { itemIds: string[]; targetId: string | null; position?: 'before' | 'after' | 'into' };
