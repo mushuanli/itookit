@@ -5,6 +5,7 @@
 import type { MDxPlugin, PluginContext } from '../../core/types';
 import type { MDxEditor } from '../../editor/mdx-editor';
 import type { PluginManager } from '../../core/plugin-manager';
+import { buildRenamedFilename } from '@itookit/common';
 
 /**
  * 标题栏插件配置选项
@@ -52,18 +53,19 @@ export class CoreTitleBarPlugin implements MDxPlugin {
   private options: CoreTitleBarPluginOptions;
   private cleanupFns: Array<() => void> = [];
   private toggleModeBtn: HTMLButtonElement | null = null;
-  // [新增] 属性，用于存储标题元素的引用
-  private titleEl: HTMLElement | null = null;
+  private titleEl: HTMLInputElement | null = null;
+  private fileExt: string = '';
+  private currentTitle: string = '';
 
   constructor(options: CoreTitleBarPluginOptions = {}) {
     this.options = options;
   }
 
   install(context: PluginContext): void {
-    // [新增] 监听 'setTitle' 事件
     const removeSetTitleListener = context.listen('setTitle', ({ title }: { title: string }) => {
       if (this.titleEl) {
-        this.titleEl.textContent = title;
+        this.titleEl.value = title;
+        this.currentTitle = title;
       }
     });
     if (removeSetTitleListener) {
@@ -197,12 +199,51 @@ export class CoreTitleBarPlugin implements MDxPlugin {
     const leftGroup = document.createElement('div');
     leftGroup.className = 'mdx-editor-titlebar__left';
 
-    // [新增] 创建标题容器和标题元素
     const titleContainer = document.createElement('div');
     titleContainer.className = 'mdx-editor-titlebar__center';
-    this.titleEl = document.createElement('span');
+    this.fileExt = (editor.config.language as string) || '';
+    this.currentTitle = editor.config.title || '';
+    this.titleEl = document.createElement('input');
+    this.titleEl.type = 'text';
     this.titleEl.className = 'mdx-editor-titlebar__title';
-    this.titleEl.textContent = editor.config.title || ''; // 设置初始标题
+    this.titleEl.value = this.currentTitle;
+    this.titleEl.spellcheck = false;
+
+    const doRename = async () => {
+      const newTitle = this.titleEl!.value.trim();
+      if (!newTitle || newTitle === this.currentTitle) {
+        this.titleEl!.value = this.currentTitle;
+        return;
+      }
+      const { filename: finalName } = buildRenamedFilename(
+        newTitle,
+        this.currentTitle + this.fileExt,
+      );
+      const engine = context.getSessionEngine?.();
+      const nodeId = context.getCurrentNodeId();
+      if (!engine || !nodeId) {
+        this.titleEl!.value = this.currentTitle;
+        return;
+      }
+      try {
+        await engine.rename(nodeId, finalName);
+        this.currentTitle = newTitle;
+      } catch {
+        this.titleEl!.value = this.currentTitle;
+      }
+    };
+
+    this.titleEl.addEventListener('blur', doRename);
+    this.titleEl.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        this.titleEl!.blur();
+      } else if (e.key === 'Escape') {
+        this.titleEl!.value = this.currentTitle;
+        this.titleEl!.blur();
+      }
+    });
+
     titleContainer.appendChild(this.titleEl);
 
     const rightGroup = document.createElement('div');
@@ -259,7 +300,7 @@ export class CoreTitleBarPlugin implements MDxPlugin {
     titleBar.appendChild(titleContainer);
     titleBar.appendChild(rightGroup);
 
-    if (buttons.length === 0 && !this.titleEl.textContent) {
+    if (buttons.length === 0 && !this.titleEl.value) {
       titleBar.style.display = 'none';
     } else {
       titleBar.style.display = '';
@@ -301,5 +342,7 @@ export class CoreTitleBarPlugin implements MDxPlugin {
     this.cleanupFns = [];
     this.toggleModeBtn = null;
     this.titleEl = null;
+    this.fileExt = '';
+    this.currentTitle = '';
   }
 }

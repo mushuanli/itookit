@@ -198,19 +198,34 @@ export class EngineAdapter {
                     this.store.dispatch({ type: 'MOVE_OPERATION_END' });
                     break;
                 }
+                case 'node:renamed': {
+                    // FSNodeRenamedPayload: { nodes: [{nodeId, oldName, newName, oldPath, newPath}] }
+                    // Rename changes path/name only — re-fetch the node to get its new display title.
+                    // Unlike node:updated, there is no 'reason' field, so we never skip it.
+                    const data = payload as { nodes?: Array<{ nodeId: string }> };
+                    data.nodes?.forEach(n => {
+                        if (n.nodeId) {
+                            this.queues.update.add(n.nodeId);
+                            adapterDEBUG.queued('update', n.nodeId, this.queues.update.size);
+                        }
+                    });
+                    if (this.queues.update.size) scheduleProcess(this.queues.update, 'update', 50);
+                    break;
+                }
             }
         };
 
-        // Subscribe only to the 4 base FS event types.
+        // Subscribe to the 4 base FS event types plus node:renamed.
         // node:batch_updated / node:batch_moved / node:batch_deleted are NOT subscribed
-        // separately because VFSModuleEngine maps them to the same underlying FS events
-        // (node:updated / node:moved / node:deleted). Subscribing to both would cause
-        // handleEvent to fire TWICE for each write/move/delete operation.
+        // separately because VFSModuleEngine maps them to the same underlying FS events.
+        // node:renamed is kept separate from node:updated: rename changes path/name (structural),
+        // update changes content/metadata. The two have different payloads and skip rules.
         const eventTypes: EngineEventType[] = [
             'node:created',
             'node:updated',  // also covers node:batch_updated (same FS event)
             'node:deleted',  // also covers node:batch_deleted (same FS event)
             'node:moved',    // also covers node:batch_moved (same FS event)
+            'node:renamed',
         ];
 
         const unsubs = eventTypes.map(type => this.engine.on(type, handleEvent));

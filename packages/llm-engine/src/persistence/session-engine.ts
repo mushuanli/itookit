@@ -13,6 +13,7 @@ import {
   FS_MODULE_CHAT,
   generateUUID,
   guessMimeType,
+  buildRenamedFilename,
 } from '@itookit/common';
 import {
   ChatManifest,
@@ -1497,16 +1498,19 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
     const node = await this.vfs.getNodeById(id);
     if (!node) throw new Error('Node not found');
 
+    const { filename, title: cleanName } = buildRenamedFilename(newName, node.name);
+    await this.engine.rename(id, filename);
+
     try {
       const manifest = await this.getManifest(id);
-      manifest.title = newName;
+      manifest.title = cleanName;
       manifest.updated_at = new Date().toISOString();
       await this.engine.writeContent(id, JSON.stringify(manifest, null, 2));
     } catch {
       // ignore
     }
 
-    await this.engine.updateMetadata(id, { ...node.metadata, title: newName });
+    await this.engine.updateMetadata(id, { title: cleanName });
   }
 
   async delete(ids: string[]): Promise<void> {

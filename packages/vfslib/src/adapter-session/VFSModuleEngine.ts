@@ -26,7 +26,7 @@ const ENGINE_TO_FS_EVENT: Partial<Record<EngineEventType, string>> = {
 };
 
 const FS_SUPPORTED_EVENTS = new Set([
-    'node:created', 'node:updated', 'node:deleted', 'node:moved', 'error',
+    'node:created', 'node:updated', 'node:deleted', 'node:moved', 'node:renamed', 'error',
 ]);
 
 /**
