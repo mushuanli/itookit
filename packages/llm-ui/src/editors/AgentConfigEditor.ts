@@ -3,6 +3,7 @@
 import {
     IEditor, EditorOptions, EditorEvent, EditorEventCallback,
     generateUUID,
+    buildRenamedFilename,
     Heading,
     UnifiedSearchResult,
     CollapseExpandResult
@@ -19,10 +20,11 @@ export class AgentConfigEditor implements IEditor {
     private _isDirty = false;
     private listeners = new Map<string, Set<EditorEventCallback>>();
     private originalContent: string = '';
+    private currentTitle: string = '';
 
     constructor(
         _container: HTMLElement,
-        _options: EditorOptions,
+        private readonly options: EditorOptions,
         private service: IAgentManagementService
     ) { }
 
@@ -30,6 +32,7 @@ export class AgentConfigEditor implements IEditor {
         this.container = container;
         this.container.classList.add('agent-config-editor');
         this.originalContent = initialContent || '{}';
+        this.currentTitle = (this.options.title as string) || '';
         this.setText(this.originalContent);
         this.emit('ready');
     }
@@ -415,6 +418,30 @@ export class AgentConfigEditor implements IEditor {
             el.addEventListener('input', handleChange);
             el.addEventListener('change', handleChange);
         });
+
+        // 名称输入框 → 同步重命名 VFS 文件（复用 engine.rename + node:renamed 事件链）
+        const nameInput = this.container.querySelector('.agent-header__name-input') as HTMLInputElement;
+        const engine = this.options.sessionEngine;
+        const nodeId = this.options.nodeId;
+        if (nameInput && engine && nodeId) {
+            const ext = (this.options.language as string) || '';
+            const doRename = async () => {
+                const newName = nameInput.value.trim();
+                if (!newName || newName === this.currentTitle) return;
+                const { filename } = buildRenamedFilename(newName, this.currentTitle + ext);
+                try {
+                    await engine.rename(nodeId, filename);
+                    this.currentTitle = newName;
+                } catch {
+                    nameInput.value = this.currentTitle;
+                }
+            };
+            nameInput.addEventListener('blur', doRename);
+            nameInput.addEventListener('keydown', (e: KeyboardEvent) => {
+                if (e.key === 'Enter') { e.preventDefault(); nameInput.blur(); }
+                if (e.key === 'Escape') { nameInput.value = this.currentTitle; nameInput.blur(); }
+            });
+        }
 
         // Section 折叠/展开
         this.container.querySelectorAll('.agent-section__header').forEach(header => {
