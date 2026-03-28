@@ -63,8 +63,8 @@ describe('Directory operations (IndexedDB backend)', () => {
     });
 
     it('getChildren excludes hidden files by default', async () => {
-        // Hidden names start with '.' — only system callers can create them
-        // Regular files are visible; the test confirms the filter
+        // Hidden names (dot-prefix) are excluded from default listings.
+        // Any module can create them in its own space; they just won't appear here.
         const { fs } = vfs;
         await fs.createDirectory({ name: 'hdir', parentIdOrPath: null });
         await fs.createFile({ name: 'visible.txt', parentIdOrPath: '/hdir', content: '' });

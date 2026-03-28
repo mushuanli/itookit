@@ -76,7 +76,11 @@ export class VFSManager implements IVFSManager {
     async initialize(): Promise<void> {
         if (this.initialized) return;
         await this.engine.initialize();
-        // __config 是系统级配置模块，isSystem: true 使其 engine 可写 dot-prefix 路径
+        // Wire system-module checker so AccessController can distinguish system vs
+        // regular module paths for hidden-file access control (Linux-like semantics).
+        this.engine.access.setSystemModuleChecker(
+            (moduleId) => this.modules.get(moduleId)?.isSystem ?? false,
+        );
         await this.mount(CONFIG_MODULE, { isSystem: true, description: 'System configuration' });
         this.initialized = true;
     }
