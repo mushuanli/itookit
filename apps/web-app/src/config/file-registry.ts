@@ -14,6 +14,7 @@ export interface AppFileTypeConfig {
     defaultFileName: string; // 默认创建的文件名
     defaultContent: string;  // 默认文件内容
     editorType: EditorTypeKey; // 核心：指定使用哪个编辑器打开
+    duplicateTransformer?: (content: string) => string | Promise<string>;
 }
 
 // 文件类型注册表
@@ -41,7 +42,17 @@ export const FILE_REGISTRY: Record<string, AppFileTypeConfig> = {
         icon: '🤖',
         defaultFileName: 'New Assistant.agent',
         defaultContent: TPL.TPL_AGENT,
-        editorType: 'agent' // 使用 Agent 专用编辑器
+        editorType: 'agent', // 使用 Agent 专用编辑器
+        duplicateTransformer: (content) => {
+            try {
+                const def = JSON.parse(content);
+                def.id = '';  // AgentConfigEditor.setText() auto-generates a new UUID when id is empty
+                def.name = `${def.name} (copy)`;
+                return JSON.stringify(def, null, 2);
+            } catch {
+                return content;
+            }
+        },
     },
     chat: {
         id: 'chat',

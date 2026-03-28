@@ -208,7 +208,8 @@ async function bootstrap() {
                 extensions: [def.extension],
                 icon: def.icon,
                 editorFactory: factory, // undefined for 'standard', specific for others
-                contentParser: parser
+                contentParser: parser,
+                duplicateTransformer: def.duplicateTransformer,
             };
         };
 

@@ -13,9 +13,11 @@ export interface FileTypeDefinition {
   icon?: string;
   editorFactory?: EditorFactory;
   contentParser?: ContentParser;
+  duplicateTransformer?: DuplicateTransformer;
 }
 
 export type ContentParser = (content: string, fileExtension: string) => any;
+export type DuplicateTransformer = (content: string) => string | Promise<string>;
 export type CustomEditorResolver = (node: VFSNodeUI) => EditorFactory | null | undefined;
 export type IconResolver = (filename: string, isDirectory: boolean) => string;
 export type ContentParserResolver = (filename: string) => ContentParser | undefined;
@@ -67,5 +69,9 @@ export class FileTypeRegistry implements IFileTypePort {
 
   resolveContentParser(filename: string): ContentParser | undefined {
     return this.extensionMap.get(getExtension(filename))?.contentParser;
+  }
+
+  getDuplicateTransformer(extension: string): DuplicateTransformer | undefined {
+    return this.extensionMap.get(extension.toLowerCase())?.duplicateTransformer;
   }
 }
