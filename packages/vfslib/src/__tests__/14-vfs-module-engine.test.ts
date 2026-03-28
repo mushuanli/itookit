@@ -169,22 +169,36 @@ describe('VFSModuleEngine.on() — event subscription', () => {
     });
 });
 
-// ── isSystem module: access control bypass ───────────────────────────────────
+// ── Hidden file access — Linux-like semantics ────────────────────────────────
 
-describe('isSystem module — access control', () => {
-    it('non-system module cannot write hidden files (EACCES baseline)', async () => {
-        await expect(
-            engine.createFile('.hidden-file', null, 'secret')
-        ).rejects.toThrow(/EACCES|hidden files require system access/);
+describe('hidden file access — Linux-like semantics', () => {
+    it('non-system module CAN create hidden files in its own module', async () => {
+        const node = await engine.createFile('.hidden-file', null, 'secret');
+        expect(node.name).toBe('.hidden-file');
+    });
+
+    it('hidden files are excluded from getChildren by default', async () => {
+        await engine.createFile('.hidden', null, 'data');
+        await engine.createFile('visible.txt', null, 'data');
+        const children = await engine.getChildren('/');
+        const names = children.map((c) => c.name);
+        expect(names).toContain('visible.txt');
+        expect(names).not.toContain('.hidden');
+    });
+
+    it('hidden files are visible with includeHidden: true via IModuleFS', async () => {
+        await engine.createFile('.hidden', null, 'data');
+        // VFSModuleEngine is an ISessionEngine adapter; for ListOptions use the underlying IModuleFS.
+        const children = await vfs.fs.getChildren('/', { includeHidden: true });
+        expect(children.map((c) => c.name)).toContain('.hidden');
     });
 });
 
-describe('isSystem module — system access granted', () => {
+describe('system module — hidden file access control', () => {
     let sysVfs: TestVFS;
     let sysEngine: VFSModuleEngine;
 
     beforeEach(async () => {
-        // Mount with isSystem: true from the start so ModuleInfo has the flag
         sysVfs = await setupVFS(freshMem());
         await sysVfs.manager.mount('sysmod', { isSystem: true });
         sysEngine = new VFSModuleEngine('sysmod', sysVfs.manager);
@@ -204,13 +218,22 @@ describe('isSystem module — system access granted', () => {
         expect(info?.isSystem).toBe(true);
     });
 
-    it('non-system module in same VFS still cannot write hidden files', async () => {
-        // VFS has both 'test' (non-system) and 'sysmod' (system)
+    it('non-system module cannot access hidden files in a system module path', async () => {
+        // 'sysmod' writes a hidden file; 'test' (non-system) must be blocked from it.
+        // Cross-engine access goes through the shared AccessController.
+        // We verify via the raw controller since module engines are chroot-isolated.
+        const access = (sysVfs.manager as any)._engine.access;
+        const regularCaller = { moduleId: 'test', isSystem: false };
+        expect(() =>
+            access.checkAccess(regularCaller, '/module/sysmod/.connections', 'read'),
+        ).toThrow(/EACCES|hidden files require system access/);
+    });
+
+    it('non-system module CAN write hidden files in its own non-system module', async () => {
         const regularEngine = new VFSModuleEngine('test', sysVfs.manager);
         await regularEngine.init();
-        await expect(
-            regularEngine.createFile('.hidden', null, 'data')
-        ).rejects.toThrow(/EACCES|hidden files require system access/);
+        const node = await regularEngine.createFile('.hidden', null, 'data');
+        expect(node.name).toBe('.hidden');
     });
 });
 

@@ -388,6 +388,10 @@ export class ModuleFS implements IModuleFS {
     readContent(idOrPath: string, options?: ReadOptions): Promise<FileContent>;
     async readContent(idOrPath: string, options?: ReadOptions): Promise<FileContent> {
         const r = await this._resolve(idOrPath, 'readContent');
+        // Guard hidden-file content in system modules (and cross-module ID-based access).
+        // Reads of visible files are isolated by ScopedView path translation; hidden files
+        // and ID-based paths need an explicit check here since _toReal bypasses chroot.
+        this.access.checkAccess(this.caller, r.fullPath, 'read');
 
         // Device file delegation
         if (r.inode.type === 'device') {
