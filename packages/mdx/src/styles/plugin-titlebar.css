@@ -147,17 +147,34 @@
 }
 
 /**
- * 标题文本区域（可选）
+ * 标题输入框（input 元素，默认透明，hover/focus 时显示边框）
  */
 .mdx-editor-titlebar__title {
   font-size: 14px;
   font-weight: 600;
   color: #24292f;
   margin: 0 auto 0 0.5rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   max-width: 300px;
+  /* input reset */
+  border: 1px solid transparent;
+  background: transparent;
+  outline: none;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: inherit;
+  min-width: 80px;
+  width: 100%;
+}
+
+.mdx-editor-titlebar__title:hover {
+  background-color: #ffffff;
+  border-color: #d0d7de;
+}
+
+.mdx-editor-titlebar__title:focus {
+  background-color: #ffffff;
+  border-color: #0969da;
+  box-shadow: 0 0 0 2px rgba(9, 105, 218, 0.2);
 }
 
 /**
@@ -204,6 +221,7 @@
   .mdx-editor-titlebar__title {
     font-size: 13px;
     max-width: 200px;
+    padding: 2px 4px;
   }
 
   .mdx-editor-titlebar__separator {
@@ -242,6 +260,7 @@
   .mdx-editor-titlebar__title {
     font-size: 12px;
     max-width: 150px;
+    padding: 1px 4px;
   }
 
   .mdx-editor-titlebar__separator {
@@ -318,6 +337,17 @@
 
   .mdx-editor-titlebar__title {
     color: #e6edf3;
+  }
+
+  .mdx-editor-titlebar__title:hover {
+    background-color: #21262d;
+    border-color: #30363d;
+  }
+
+  .mdx-editor-titlebar__title:focus {
+    background-color: #21262d;
+    border-color: #388bfd;
+    box-shadow: 0 0 0 2px rgba(56, 139, 253, 0.2);
   }
 
   .mdx-editor-titlebar__separator {
