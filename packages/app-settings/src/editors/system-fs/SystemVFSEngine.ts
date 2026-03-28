@@ -50,10 +50,12 @@ function parseComposite(id: string): { moduleName: string; realId: string } | nu
 }
 
 /**
- * 判断文件是否应屏蔽内容：仅 "." 前缀（系统/隐藏文件）。
- * "_" 前缀（资产目录等）正常显示。
+ * 判断文件路径是否应屏蔽内容：路径任意分段以 "." 开头即视为敏感。
+ * 例：/.connections/default 中，default 文件名不含 "."，但父目录 .connections 含，
+ * 同样需要屏蔽内容。
  */
-const isSensitiveName = (name: string): boolean => name.startsWith('.');
+const isSensitivePath = (path: string): boolean =>
+    path.split('/').filter(Boolean).some(seg => seg.startsWith('.'));
 
 const BLOCKED_CONTENT = (name: string, path: string, mod: string): string =>
     `⛔ System / hidden / asset file — content not shown\n\n` +
@@ -101,9 +103,10 @@ async function collectTree(
 
         if (child.type === 'directory') {
             engineNode.children = await collectTree(fs, child.id, cId, moduleName);
-        } else {
+        } else if (!isSensitivePath(child.path)) {
             // Eagerly load content so the editor receives it via item.content.data
             // without needing a custom factory or event-driven reload.
+            // Skip files whose path contains any dot-prefix segment (hidden / system).
             try {
                 const raw = await fs.readContent(child.id);
                 engineNode.content = typeof raw === 'string' ? raw : undefined;
@@ -251,8 +254,9 @@ export class SystemVFSEngine implements ISessionEngine {
 
         const node = await this.getNode(id);
 
-        // 屏蔽 . 或 _ 前缀的文件（系统/隐藏/资产文件）
-        if (node && isSensitiveName(node.name)) {
+        // Block content for files whose path contains any dot-prefix segment,
+        // including files nested under hidden directories (e.g. .connections/default).
+        if (node && isSensitivePath(node.path)) {
             return BLOCKED_CONTENT(node.name, node.path, parsed.moduleName);
         }
 

@@ -283,9 +283,6 @@ importers:
       '@itookit/common':
         specifier: workspace:*
         version: link:../common
-      '@itookit/device-llm':
-        specifier: workspace:*
-        version: link:../device-llm
       '@itookit/llm-kernel':
         specifier: workspace:*
         version: link:../llm-kernel
@@ -326,9 +323,6 @@ importers:
       '@itookit/common':
         specifier: workspace:*
         version: link:../common
-      '@itookit/device-llm':
-        specifier: workspace:*
-        version: link:../device-llm
     devDependencies:
       '@types/node':
         specifier: ^20.10.0
@@ -354,9 +348,6 @@ importers:
       '@itookit/common':
         specifier: workspace:*
         version: link:../common
-      '@itookit/device-llm':
-        specifier: workspace:*
-        version: link:../device-llm
       '@itookit/llm-engine':
         specifier: workspace:*
         version: link:../llm-engine
@@ -581,7 +572,7 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
       vitest:
-        specifier: ^3.2.1
+        specifier: ^3.2.4
         version: 3.2.4(@types/debug@4.1.12)(@types/node@25.2.3)(jsdom@27.2.0)
 
 packages:
@@ -2599,7 +2590,7 @@ packages:
 
   glob@7.2.3:
     resolution: {integrity: sha512-nFR0zLpU2YCaRxwoCJvL6UvCH2JFyFVIvwTLsIf21AuHlMskA1hhTdk+LlYJtOlYt9v6dvszD2BGRqBL+iQK9Q==}
-    deprecated: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+    deprecated: Glob versions prior to v9 are no longer supported
 
   globals@14.0.0:
     resolution: {integrity: sha512-oahGvuMGQlPw/ivIYBjVSrWAfWLBeku5tpPE2fOPLi+WHffIWbuh2tCjhyQhTBPMf5E9jDEH4FOmTYgYwbKwtQ==}
