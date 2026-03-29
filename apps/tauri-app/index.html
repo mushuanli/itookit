@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>X1</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+    <link rel="stylesheet" href="src/styles/index.css" />
+</head>
+<body>
+    <!-- Left sidebar navigation -->
+    <nav class="app-sidebar">
+        <ul class="main-nav-list" id="main-nav-list">
+
+            <!-- Home: current project directory -->
+            <li>
+                <a class="app-nav-btn nav-home active"
+                   data-target="home-workspace"
+                   data-module="home"
+                   id="nav-home-btn"
+                   title="Files">
+                    <i class="fas fa-folder-open"></i>
+                    <span class="nav-home-label" id="nav-home-label">…</span>
+                </a>
+            </li>
+            <li>
+                <a class="app-nav-btn"
+                   data-target="llm-workspace"
+                   data-module="chats"
+                   title="AI Sessions">
+                    <i class="fas fa-robot"></i>
+                </a>
+            </li>
+            <li>
+                <a class="app-nav-btn"
+                   data-target="agent-workspace"
+                   data-module="agents"
+                   title="Agents">
+                    <i class="fas fa-user-secret"></i>
+                </a>
+            </li>
+            <li>
+                <a class="app-nav-btn"
+                   data-target="prompt-workspace"
+                   data-module="prompts"
+                   title="Prompts">
+                    <i class="fas fa-pen-to-square"></i>
+                </a>
+            </li>
+
+            <li><div class="nav-divider"></div></li>
+
+            <!-- Dynamic mount entries injected here by main.ts -->
+            <li id="nav-mounts-anchor" style="display:none"></li>
+
+        </ul>
+
+        <!-- Add mount + Settings at bottom -->
+        <div class="nav-add-mount">
+            <a class="app-nav-btn" id="btn-add-mount" title="Mount directory…">
+                <i class="fas fa-plus"></i>
+            </a>
+        </div>
+        <div style="height:8px"></div>
+        <a class="app-nav-btn"
+           data-target="settings-workspace"
+           data-module="settings_root"
+           title="Settings">
+            <i class="fas fa-cog"></i>
+        </a>
+        <div style="height:4px"></div>
+
+        <!-- Current home directory label -->
+        <div class="home-dir-badge" id="home-dir-label" title=""></div>
+    </nav>
+
+    <!-- Workspace panels -->
+    <main class="main-content-area">
+        <div id="home-workspace"     class="workspace-view active"></div>
+        <div id="llm-workspace"      class="workspace-view"></div>
+        <div id="agent-workspace"    class="workspace-view"></div>
+        <div id="prompt-workspace"   class="workspace-view"></div>
+        <div id="settings-workspace" class="workspace-view">
+            <div id="settings-content"></div>
+        </div>
+        <!-- Dynamic mount workspace panels appended here by main.ts -->
+    </main>
+
+    <script type="module" src="./src/main.ts"></script>
+</body>
+</html>

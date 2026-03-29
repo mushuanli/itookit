@@ -10,6 +10,8 @@
     "build:libs": "pnpm --filter './packages/*' build",
     "test": "echo \"Error: no test specified\" && exit 1",
     "release": "pnpm --filter ./apps/web-app build && node scripts/release.js",
+    "tauri:dev": "pnpm --filter tauri-app tauri:dev",
+    "tauri:build": "pnpm build:libs && pnpm --filter tauri-app tauri:build",
     "clean": "pnpm -r clean && rm -rf node_modules",
     "typecheck": "pnpm -r typecheck"
   },
