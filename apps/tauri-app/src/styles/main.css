@@ -1,0 +1,183 @@
+/* apps/tauri-app/src/styles/main.css */
+:root {
+    --primary-color:    #5B66F5;
+    --primary-dark:     #3B41C5;
+    --bg-primary:       #FFFFFF;
+    --bg-secondary:     #f1f5f9;
+    --bg-tertiary:      #F3F4F6;
+    --text-primary:     #111827;
+    --text-on-primary:  #FFFFFF;
+    --border-color:     #E5E7EB;
+    --border-radius:    8px;
+    --sidebar-width:    56px;
+    --sidebar-bg:       linear-gradient(135deg, #1e3a8a 0%, #312e81 100%);
+    --font-primary:     -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+    font-family: var(--font-primary);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    display: flex;
+}
+
+/* ── Sidebar ─────────────────────────────────────────────────────────────── */
+
+.app-sidebar {
+    width: var(--sidebar-width);
+    background: var(--sidebar-bg);
+    flex-shrink: 0;
+    padding-top: 12px;
+    padding-bottom: 12px;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+    z-index: 10;
+}
+
+.main-nav-list {
+    flex: 1;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 0;
+    width: 100%;
+    overflow-y: auto;
+    scrollbar-width: none;
+}
+.main-nav-list::-webkit-scrollbar { display: none; }
+
+.nav-divider {
+    width: 32px;
+    height: 1px;
+    background: rgba(255,255,255,0.15);
+    margin: 4px auto;
+}
+
+.app-nav-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    text-decoration: none;
+    background: rgba(255,255,255,0.1);
+    color: rgba(255,255,255,0.7);
+    border: 1px solid transparent;
+    width: 40px;
+    height: 40px;
+    border-radius: var(--border-radius);
+    transition: all 0.15s ease;
+    font-size: 16px;
+    position: relative;
+}
+.app-nav-btn:hover  { background: rgba(255,255,255,0.2); color: #fff; }
+.app-nav-btn.active { background: rgba(255,255,255,0.25); color: #fff; border-color: rgba(255,255,255,0.4); }
+
+/* Tooltip */
+.app-nav-btn[title]:hover::after {
+    content: attr(title);
+    position: absolute;
+    left: calc(var(--sidebar-width) - 8px);
+    top: 50%;
+    transform: translateY(-50%);
+    background: #1e293b;
+    color: #f8fafc;
+    font-size: 12px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: 100;
+}
+
+/* Mount-remove button inside nav btn */
+.app-nav-btn .nav-remove {
+    display: none;
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #ef4444;
+    color: #fff;
+    font-size: 9px;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    line-height: 1;
+}
+.app-nav-btn:hover .nav-remove { display: flex; }
+
+/* Add mount button at the bottom of sidebar */
+.nav-add-mount {
+    margin-top: auto;
+    padding-top: 8px;
+}
+#btn-add-mount {
+    background: rgba(255,255,255,0.08);
+    border: 1px dashed rgba(255,255,255,0.3);
+}
+#btn-add-mount:hover { background: rgba(255,255,255,0.18); border-style: solid; }
+
+/* ── Main content ─────────────────────────────────────────────────────────── */
+
+.main-content-area {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+}
+
+.workspace-view {
+    position: absolute;
+    inset: 0;
+    display: none;
+}
+.workspace-view.active { display: block; }
+
+/* ── Settings ─────────────────────────────────────────────────────────────── */
+
+#settings-content { height: 100%; overflow: auto; }
+
+/* ── Home nav button (wider to show directory name) ───────────────────────── */
+
+.nav-home {
+    width: 44px;
+    height: 44px;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 13px;
+}
+
+.nav-home-label {
+    font-size: 9px;
+    max-width: 40px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    line-height: 1;
+    opacity: 0.8;
+}
+
+/* ── Home dir banner ──────────────────────────────────────────────────────── */
+
+.home-dir-badge {
+    font-size: 11px;
+    color: rgba(255,255,255,0.5);
+    padding: 0 4px 8px;
+    text-align: center;
+    max-width: 48px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: default;
+}
