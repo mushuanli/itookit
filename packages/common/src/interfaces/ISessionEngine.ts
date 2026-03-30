@@ -121,10 +121,7 @@ export interface SRSItemData {
 export interface ISessionEngine {
   // --- Read Operations ---
   init(): Promise<void>;
-  /** 加载当前的根节点树结构 */
-  loadTree(): Promise<EngineNode[]>;
-
-  /** 获取指定目录下的子节点列表 */
+  /** 获取指定目录下的子节点列表（传 '/' 获取根节点，首次加载时调用） */
   getChildren(parentId: string): Promise<EngineNode[]>;
 
   /** 读取单个节点的内容 */

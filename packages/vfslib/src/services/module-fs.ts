@@ -54,6 +54,7 @@ import type {
     FSNodeMovedPayload,
     IDeviceHandle,
     DeviceContext,
+    IStorageBackend,
 } from '@itookit/common';
 
 import {
@@ -153,6 +154,10 @@ export class ModuleFS implements IModuleFS {
     private readonly scope: ScopedView;
     private readonly mountId: string;
     private readonly caller: CallerIdentity;
+    /** The backend that actually stores this module's data (may differ from root backend). */
+    private readonly _moduleBackend: IStorageBackend;
+    /** System mount path for this module (e.g. '/module/home'). '/' means root backend. */
+    private readonly _mountPath: string;
     private initialized = false;
 
     constructor(deps: ModuleFSDeps) {
@@ -166,7 +171,13 @@ export class ModuleFS implements IModuleFS {
         this.mountId = deps.mountId ?? 'mount_0';
         this.caller = { moduleId: deps.moduleId, isSystem: deps.isSystem ?? false };
 
-        const backend = this.engine.getBackend();
+        // Resolve the backend and mount path for this module.
+        // Falls back to the root backend when no mount router is configured (e.g. in tests).
+        const moduleSysPath = `/module/${deps.moduleId}`;
+        this._moduleBackend = deps.engine.getBackendForPath(moduleSysPath);
+        this._mountPath     = deps.engine.getMountPathForPath(moduleSysPath);
+
+        const backend = this._moduleBackend;
         this.capabilities = Object.freeze({
             readonly: false,
             search: true,
@@ -257,10 +268,14 @@ export class ModuleFS implements IModuleFS {
         const decoded = decodeId(idOrPath);
         if (!decoded) throw new FSError('EINVAL', `invalid id: ${idOrPath}`, 'resolve');
 
-        const inode = await this.engine.getBackend().inodes.getInode(decoded.ino);
+        const inode = await this._moduleBackend.inodes.getInode(decoded.ino);
         if (!inode) throw new FSNotFoundError(idOrPath, 'resolve');
 
-        return this._buildAbsPath(inode);
+        const localPath = await this._buildAbsPath(inode);
+        // Convert local path (within the mounted backend) to system path.
+        // Root-backend modules: _mountPath='/', localPath is already a full system path.
+        // Non-root-backend modules: prepend the mount path (e.g. '/module/home').
+        return this._mountPath === '/' ? localPath : this._mountPath + localPath;
     }
 
     /** @internal */
@@ -299,7 +314,7 @@ export class ModuleFS implements IModuleFS {
 
     /** @internal */
     get _backend() {
-        return this.engine.getBackend();
+        return this._moduleBackend;
     }
 
     /** @internal */
@@ -317,7 +332,7 @@ export class ModuleFS implements IModuleFS {
         let current: InodeRecord | null = inode;
         while (current && current.ino !== ROOT_INO && current.parentIno !== current.ino) {
             parts.unshift(current.name);
-            current = await this.engine.getBackend().inodes.getInode(current.parentIno);
+            current = await this._moduleBackend.inodes.getInode(current.parentIno);
         }
         return '/' + parts.join('/');
     }
@@ -351,7 +366,8 @@ export class ModuleFS implements IModuleFS {
     getChildren(idOrPath: string, options?: ListOptions): Promise<FSNode[] | DirEntry[]>;
     async getChildren(idOrPath: string, options?: ListOptions): Promise<FSNode[] | DirEntry[]> {
         const r = await this._resolve(idOrPath, 'getChildren');
-        const children = await this.engine.getBackend().inodes.listChildren(r.ino);
+        const backend = this._moduleBackend;
+        const children = await backend.inodes.listChildren(r.ino);
 
         const filtered = children.filter(c => {
             if (!options?.includeHidden && isHiddenName(c.name)) return false;
@@ -363,7 +379,7 @@ export class ModuleFS implements IModuleFS {
         if (options?.fields === 'entry') {
             const entries: DirEntry[] = [];
             for (const c of filtered) {
-                const meta = await this.engine.getBackend().meta.getMeta(c.ino);
+                const meta = await backend.meta.getMeta(c.ino);
                 entries.push({
                     id: this._id(c.ino),
                     name: c.name,
@@ -377,7 +393,7 @@ export class ModuleFS implements IModuleFS {
 
         const nodes: FSNode[] = [];
         for (const c of filtered) {
-            const meta = await this.engine.getBackend().meta.getMeta(c.ino);
+            const meta = await backend.meta.getMeta(c.ino);
             nodes.push(this._node(c, meta, P.join(r.fullPath, c.name)));
         }
         return nodes;
@@ -417,7 +433,7 @@ export class ModuleFS implements IModuleFS {
             return options?.encoding === 'binary' ? new ArrayBuffer(0) : '';
         }
 
-        const data = await this.engine.getBackend().content.getData(r.meta.contentRef);
+        const data = await this._moduleBackend.content.getData(r.meta.contentRef);
         if (!data) {
             return options?.encoding === 'binary' ? new ArrayBuffer(0) : '';
         }
@@ -455,7 +471,8 @@ export class ModuleFS implements IModuleFS {
             if (maxDepth >= 0 && depth > maxDepth) return true;
             if (count >= limit) return false;
 
-            const children = await this.engine.getBackend().inodes.listChildren(
+            const backend = this._moduleBackend;
+            const children = await backend.inodes.listChildren(
                 (await this.engine.resolve(currentPath)).ino,
             );
 
@@ -473,7 +490,7 @@ export class ModuleFS implements IModuleFS {
                 }
 
                 const childRealPath = P.join(currentPath, child.name);
-                const meta = await this.engine.getBackend().meta.getMeta(child.ino);
+                const meta = await backend.meta.getMeta(child.ino);
                 const node = this._node(child, meta, childRealPath);
 
                 count++;

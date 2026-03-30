@@ -28,6 +28,9 @@ export async function createVFS(options: VFSFactoryOptions): Promise<VFSInstance
 
     // Create manager and initialize (bootstraps /dev/ directory)
     const manager = new VFSManager(engine);
+    // Wire the mount router into the engine so all path-based operations
+    // route to the correct backend (e.g. LocalFSBackend for /module/home).
+    engine.setMountRouter(manager.mounts.router);
     await manager.initialize();
 
     // Register built-in devices → creates /dev/null, /dev/zero, /dev/random

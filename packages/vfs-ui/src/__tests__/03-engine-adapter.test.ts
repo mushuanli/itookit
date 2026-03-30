@@ -319,10 +319,11 @@ describe('connectEngineEvents subscription lifecycle', () => {
         expect(store.getState().items).toHaveLength(0);
     });
 
-    it('subscribes to exactly 4 base FS event types (no duplicate batch subscriptions)', () => {
+    it('subscribes to exactly 5 base FS event types (no duplicate batch subscriptions)', () => {
         // batch events (node:batch_updated/moved/deleted) map to the same underlying FS
         // event as their base counterparts. Subscribing to both would fire handleEvent twice
-        // for a single FS event. EngineAdapter now subscribes only to the 4 base types.
+        // for a single FS event. EngineAdapter subscribes to the 4 base types + node:renamed.
+        // node:renamed is kept separate because rename has its own payload shape and skip rules.
         const origOn = engine.on.bind(engine);
         // Rebuild adapter with an instrumented engine
         const spy = new MockSessionEngine();
@@ -337,14 +338,14 @@ describe('connectEngineEvents subscription lifecycle', () => {
         tempAdapter.destroy();
 
         const expected = [
-            'node:created', 'node:updated', 'node:deleted', 'node:moved',
+            'node:created', 'node:updated', 'node:deleted', 'node:moved', 'node:renamed',
         ];
         expected.forEach(t => expect(registeredTypes).toContain(t));
         // Batch variants must NOT be subscribed (they share the same FS event as their base)
         ['node:batch_updated', 'node:batch_moved', 'node:batch_deleted'].forEach(t =>
             expect(registeredTypes).not.toContain(t)
         );
-        expect(registeredTypes).toHaveLength(4);
+        expect(registeredTypes).toHaveLength(5);
     });
 });
 
@@ -356,7 +357,7 @@ describe('loadData', () => {
         node.content = 'hello';
 
         // Override loadTree to return nodes
-        engine.loadTree = async () => [node];
+        engine.getChildren = async () => [node];
 
         await adapter.loadData();
 
@@ -371,7 +372,7 @@ describe('loadData', () => {
         const assetDir = makeDirectoryNode({ id: 'ad1', name: '_session.chat', path: '/_session.chat' });
         const visible = makeEngineNode({ id: 'v1', name: 'visible.chat', path: '/visible.chat' });
 
-        engine.loadTree = async () => [hidden, assetDir, visible];
+        engine.getChildren = async () => [hidden, assetDir, visible];
 
         await adapter.loadData();
 
@@ -382,7 +383,7 @@ describe('loadData', () => {
     });
 
     it('dispatches ITEMS_LOAD_ERROR on loadTree failure', async () => {
-        engine.loadTree = async () => { throw new Error('storage error'); };
+        engine.getChildren = async () => { throw new Error('storage error'); };
 
         await adapter.loadData();
 
