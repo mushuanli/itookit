@@ -60,7 +60,12 @@ export class TauriFsOps implements IFsOps {
                 isDirectory: s.isDirectory,
             };
         } catch (err) {
-            console.error('[TauriFsOps] stat failed:', p, err);
+            const msg = String(err);
+            // ENOENT is expected (e.g. lookup() checking for non-existent companion dirs).
+            // Only log real errors (permission scope violations, etc.).
+            if (!msg.includes('No such file or directory') && !msg.includes('os error 2')) {
+                console.error('[TauriFsOps] stat failed:', p, err);
+            }
             return null;
         }
     }
@@ -83,8 +88,13 @@ export class TauriFsOps implements IFsOps {
     async mkdir(p: string): Promise<void> {
         try {
             await mkdir(p, { recursive: true });
-        } catch {
-            // Ignore EEXIST
+        } catch (err) {
+            const msg = String(err);
+            // Silently ignore only "already exists" — other failures (permission scope,
+            // forbidden path) must propagate so transactions roll back correctly.
+            if (!msg.includes('os error 17') && !msg.includes('already exists') && !msg.includes('File exists')) {
+                throw err;
+            }
         }
     }
 

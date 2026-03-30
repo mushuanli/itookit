@@ -151,7 +151,7 @@ class FilteredEventEngine {
         });
     }
 
-    async loadTree() { return []; }
+    async getChildren(_parentId: string) { return []; }
     async getNode(id: string) { return this.nodes.get(id) ?? null; }
     async readContent(_id: string): Promise<string | ArrayBuffer> { return ''; }
 }

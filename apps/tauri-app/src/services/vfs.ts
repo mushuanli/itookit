@@ -84,10 +84,10 @@ export async function initVFS(options: VFSInitOptions): Promise<VFSContext> {
     try {
         const homeEngine = new VFSModuleEngine('home', manager);
         await homeEngine.init();
-        const tree = await homeEngine.loadTree();
-        console.log(`[VFS] home module tree: ${tree.length} items`, tree.slice(0, 5).map((n: { name: string }) => n.name));
+        const tree = await homeEngine.getChildren('/');
+        console.log(`[VFS] home module root: ${tree.length} items`, tree.slice(0, 5).map((n: { name: string }) => n.name));
     } catch (err) {
-        console.error('[VFS] home module loadTree FAILED:', err);
+        console.error('[VFS] home module getChildren FAILED:', err);
     }
 
     vfsInstance = { manager, homeDir, appDataDir };

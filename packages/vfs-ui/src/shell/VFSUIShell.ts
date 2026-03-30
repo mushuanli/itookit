@@ -155,6 +155,17 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService> {
 
     if (!this.options.readOnly) {
       this.engineAdapter.connectEngineEvents();
+      // One-time scan: reload children of folders that were expanded before this load
+      // (e.g. previous session state or after a full reload triggered by node:moved).
+      // Only first-level folders are reachable here; nested ones are handled recursively
+      // inside EngineAdapter.expandDirectory after each load completes.
+      const { expandedFolderIds, items } = this.statePort.getState();
+      for (const folderId of expandedFolderIds) {
+        const node = findNodeById(items, folderId);
+        if (node?.type === 'directory' && node.children === undefined) {
+          void this.engineAdapter.expandDirectory(folderId);
+        }
+      }
     }
 
     const state = this.statePort.getState();
@@ -249,6 +260,22 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService> {
       if (command === 'nav:selectSession') {
         shell.navigationWasUserAction = true;
       }
+
+      // Lazy-load directory children when the user expands a folder.
+      // Checked BEFORE the dispatch so expandedFolderIds still reflects the old state,
+      // making it easy to detect that the folder is about to be expanded (not collapsed).
+      if (command === 'nav:toggleFolder') {
+        const folderId = (payload as { folderId: string }).folderId;
+        const state = shell.statePort.getState();
+        const willExpand = !state.expandedFolderIds.has(folderId);
+        if (willExpand) {
+          const node = findNodeById(state.items, folderId);
+          if (node?.type === 'directory' && node.children === undefined) {
+            void shell.engineAdapter.expandDirectory(folderId);
+          }
+        }
+      }
+
       originalExecute(command, payload);
     };
   }
@@ -329,4 +356,5 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService> {
       this.eventPort.emit('stateChanged', { state });
     });
   }
+
 }

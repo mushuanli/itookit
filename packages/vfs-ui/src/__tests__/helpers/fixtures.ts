@@ -60,7 +60,7 @@ export const makeVFSNodeUI = (overrides: Partial<VFSNodeUI> = {}): VFSNodeUI => 
  * - Returns '' for readContent()
  */
 export class MockSessionEngine implements Pick<ISessionEngine,
-    'on' | 'loadTree' | 'getNode' | 'readContent' | 'writeContent' |
+    'on' | 'getChildren' | 'getNode' | 'readContent' | 'writeContent' |
     'createFile' | 'createDirectory' | 'delete' | 'rename' | 'move' |
     'setTags' | 'setTagsBatch' | 'getAllTags' | 'search' | 'updateMetadata'
 > {
@@ -83,7 +83,7 @@ export class MockSessionEngine implements Pick<ISessionEngine,
         this.handlers.get(type)?.forEach(cb => cb({ type, payload }));
     }
 
-    async loadTree(): Promise<EngineNode[]> {
+    async getChildren(_parentId: string): Promise<EngineNode[]> {
         return [];
     }
 
