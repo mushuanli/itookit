@@ -126,46 +126,26 @@ export class SystemVFSEngine implements ISessionEngine {
 
     // ── Tree ─────────────────────────────────────────────────────────────────
 
-    async loadTree(): Promise<EngineNode[]> {
-        const nodes: EngineNode[] = [];
-
-        // 1. /dev/ — 虚拟设备目录
-        nodes.push(this.buildDevDirNode());
-
-        // 2. VFS 模块目录
-        const modules = this.vfs.getAllModules();
-        const moduleTrees = await Promise.all(modules.map(async mod => {
-            const dirId = moduleNodeId(mod.name);
-            let children: EngineNode[] = [];
-
-            try {
-                const fs = this.vfs.getEngine(mod.name);
-                await fs.init();
-                children = await collectTree(fs, '/', dirId, mod.name);
-            } catch {
-                // Module inaccessible — show as empty placeholder directory.
-            }
-
-            return {
-                id: dirId,
+    async getChildren(parentId: string): Promise<EngineNode[]> {
+        // Root: return top-level directory stubs (lazy — children not loaded yet)
+        if (parentId === '/') {
+            const nodes: EngineNode[] = [this.buildDevDirNode()];
+            const modules = this.vfs.getAllModules();
+            nodes.push(...modules.map(mod => ({
+                id: moduleNodeId(mod.name),
                 parentId: null,
                 name: mod.name,
                 type: 'directory' as const,
                 path: `/${mod.name}`,
                 createdAt: 0,
                 modifiedAt: 0,
-                tags: [],
+                tags: [] as string[],
                 metadata: { title: mod.name, description: mod.description ?? '', _showAll: true },
                 moduleId: 'system',
-                children,
-            };
-        }));
+            })));
+            return nodes;
+        }
 
-        nodes.push(...moduleTrees);
-        return nodes;
-    }
-
-    async getChildren(parentId: string): Promise<EngineNode[]> {
         // /dev/ 目录
         if (parentId === DEV_DIR_ID) {
             return this.buildDevChildNodes();

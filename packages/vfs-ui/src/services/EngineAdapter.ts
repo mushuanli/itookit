@@ -23,6 +23,7 @@ export class EngineAdapter {
     };
 
     private engineUnsubscribe: (() => void) | null = null;
+    private loadingFolderIds = new Set<string>();
 
     constructor(
         private readonly engine: ISessionEngine,
@@ -42,7 +43,7 @@ export class EngineAdapter {
         adapterDEBUG.loadData('explicit call');
         try {
             this.store.dispatch({ type: 'ITEMS_LOAD_START' });
-            const rootChildren = await this.engine.loadTree();
+            const rootChildren = await this.engine.getChildren('/');
             const uiItems = mapEngineTreeToUIItems(
                 rootChildren,
                 this.iconResolver,
@@ -243,6 +244,33 @@ export class EngineAdapter {
             });
         });
         return map;
+    }
+
+    async expandDirectory(folderId: string): Promise<void> {
+        if (this.loadingFolderIds.has(folderId)) return;
+        this.loadingFolderIds.add(folderId);
+        try {
+            const children = await this.engine.getChildren(folderId);
+            const uiChildren = children.map(n =>
+                mapEngineNodeToUIItem(n, this.iconResolver, this.parserResolver)
+            );
+            this.store.dispatch({
+                type: 'FOLDER_CHILDREN_LOADED',
+                payload: { parentId: folderId, children: uiChildren },
+            });
+            // After loading, resume any sub-directories that were expanded in a previous session.
+            // This avoids a store subscription — we only check the newly arrived children.
+            const { expandedFolderIds } = this.store.getState();
+            for (const child of uiChildren) {
+                if (child.type === 'directory' && expandedFolderIds.has(child.id)) {
+                    void this.expandDirectory(child.id);
+                }
+            }
+        } catch (err) {
+            console.error('[EngineAdapter] expandDirectory failed:', folderId, err);
+        } finally {
+            this.loadingFolderIds.delete(folderId);
+        }
     }
 
     destroy(): void {

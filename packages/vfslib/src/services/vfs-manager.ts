@@ -41,7 +41,7 @@ import {
     type IDeviceDriver,
 } from '@itookit/common';
 
-import { VFSEngine } from '../engine/vfs-engine';
+import { VFSEngine, ROOT_INO } from '../engine/vfs-engine';
 import { ModuleFS, type ModuleFSDeps } from './module-fs';
 import { EventBus } from '../event/event-bus';
 import { encodeId } from './id-mapper';
@@ -170,11 +170,23 @@ export class VFSManager implements IVFSManager {
     async mount(moduleName: string, options?: ModuleMountOptions): Promise<void> {
         if (this.modules.has(moduleName)) return;
 
-        const rootIno = await this.engine.ensureModuleDir(moduleName);
+        // ensureModuleDir always operates in the root backend (creates a stub entry).
+        await this.engine.ensureModuleDir(moduleName);
+
+        // Determine which mount actually serves this module's data.
+        const modulePath = `/module/${moduleName}`;
+        const { mount } = this.mounts.router.resolve(modulePath);
+        const effectiveMountId = mount.mountId;
+        // Non-root backends use ROOT_INO=1 as their own root; root backend uses the
+        // ino of the stub directory created by ensureModuleDir.
+        const effectiveRootIno = mount.backend === this.engine.getBackend()
+            ? (await this.engine.ensureModuleDir(moduleName))
+            : ROOT_INO;
+
         this.modules.set(moduleName, {
             name: moduleName,
             description: options?.description,
-            rootNodeId: encodeId('mount_0', rootIno),
+            rootNodeId: encodeId(effectiveMountId, effectiveRootIno),
             isProtected: options?.isProtected,
             syncEnabled: options?.syncEnabled,
             isSystem: options?.isSystem,
@@ -231,6 +243,7 @@ export class VFSManager implements IVFSManager {
         }
 
         const moduleInfo = this.modules.get(moduleName)!;
+        const { mount } = this.mounts.router.resolve(`/module/${moduleName}`);
         const deps: ModuleFSDeps = {
             moduleId: moduleName,
             engine: this.engine,
@@ -238,7 +251,7 @@ export class VFSManager implements IVFSManager {
             plugins: this.engine.plugins,
             access: this.engine.access,
             devices: this.engine.devices,
-            mountId: 'mount_0',
+            mountId: mount.mountId,
             isSystem: moduleInfo.isSystem,
         };
         const fs = new ModuleFS(deps);
@@ -509,6 +522,23 @@ class InlineMountRouter implements IMountRouter {
         }
 
         await backend.init();
+
+        // Bootstrap root inode (ino=1) in the mounted backend if absent.
+        // The root backend is bootstrapped by VFSEngine.bootstrap(); additional
+        // backends must set up their own root inode so PathResolver can start traversal.
+        const existingRoot = await backend.inodes.getInode(1);
+        if (!existingRoot) {
+            await backend.runInTransaction('readwrite', async (scope) => {
+                await scope.inodes.putInode({
+                    ino: 1, parentIno: 1, name: '', type: 'directory',
+                    createdAt: Date.now(), nlink: 1,
+                });
+                await scope.meta.putMeta({
+                    ino: 1, modifiedAt: Date.now(), size: 0, version: 0,
+                });
+            });
+        }
+
         const mp: MountPoint = {
             mountId: `mount_${this.nextId++}`,
             mountPath: norm,

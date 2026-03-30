@@ -112,7 +112,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
     const cached = this.chatFileIds.get(sessionId);
     if (cached) return cached;
 
-    const tree = await this.engine.loadTree();
+    const tree = await this.engine.getChildren('/');
     const allFiles = this.collectAllFileNodes(tree);
 
     for (const node of allFiles) {
@@ -1422,18 +1422,6 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
   // ISessionEngine 文件操作
   // ============================================================
 
-  async loadTree(): Promise<EngineNode[]> {
-    const allNodes = await this.engine.loadTree();
-    return allNodes.filter((node: EngineNode) => {
-      // Filter out hidden names and asset dirs (underscore prefix)
-      if (node.name.startsWith('.')) return false;
-      if (node.name.startsWith('_')) return false;
-      if (node.type === 'file') return node.name.endsWith('.chat');
-      if (node.type === 'directory') return true;
-      return false;
-    });
-  }
-
   async createDirectory(name: string, parentId: string | null): Promise<EngineNode> {
     return this.engine.createDirectory(name, parentId);
   }
@@ -1472,7 +1460,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
     try {
       const children = parentId
         ? await this.engine.getChildren(parentId)
-        : (await this.engine.loadTree()).filter(n => !n.parentId);
+        : (await this.engine.getChildren('/')).filter(n => !n.parentId);
 
       children.forEach(child => {
         if (child.name.endsWith('.chat')) {
@@ -1575,7 +1563,15 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
   // ============================================================
 
   async getChildren(parentId: string): Promise<EngineNode[]> {
-    return this.engine.getChildren(parentId);
+    const nodes = await this.engine.getChildren(parentId);
+    // Filter hidden files, asset dirs, and non-.chat files at every level
+    return nodes.filter((node: EngineNode) => {
+      if (node.name.startsWith('.')) return false;
+      if (node.name.startsWith('_')) return false;
+      if (node.type === 'file') return node.name.endsWith('.chat');
+      if (node.type === 'directory') return true;
+      return false;
+    });
   }
 
   async readContent(id: string): Promise<string | ArrayBuffer> {

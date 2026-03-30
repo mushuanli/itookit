@@ -27,30 +27,23 @@ export class SettingsEngine implements ISessionEngine {
 
     async init() { }
 
-    // 只读 Tree，不需要 VFS，直接返回静态结构
-    async loadTree(): Promise<EngineNode[]> {
-        // 确保 Service 数据已加载
+    // Settings 结构是扁平的：getChildren('/') 返回所有设置页面，子页面返回空数组
+    async getChildren(parentId: string): Promise<EngineNode[]> {
+        if (parentId !== '/') return [];
         await this.service.init();
-
         return Object.entries(SETTINGS_PAGES).map(([id, config]) => ({
             id: id,
             parentId: null,
             name: config.name,
-            type: 'file',
+            type: 'file' as const,
             icon: config.icon,
             content: '',
             size: 0,
             createdAt: Date.now(),
             modifiedAt: Date.now(),
             path: `/${config.name}`,
-            moduleId: 'settings_ui'
+            moduleId: 'settings_ui',
         }));
-    }
-
-    // [新增] 实现接口缺失方法：获取子节点
-    // Settings 结构是扁平的，页面下没有子页面，因此返回空数组
-    async getChildren(_parentId: string): Promise<EngineNode[]> {
-        return [];
     }
 
     // 这是一个空操作，因为真正的读写通过 Service 直接进行，

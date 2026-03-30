@@ -56,10 +56,6 @@ export class VFSModuleEngine implements ISessionEngine {
 
     // ── 读取操作 ──────────────────────────────────────────────
 
-    async loadTree(): Promise<EngineNode[]> {
-        return this.collectChildren('/');
-    }
-
     private async collectChildren(idOrPath: string): Promise<EngineNode[]> {
         const children = await this.getModuleFS().getChildren(idOrPath) as FSNode[];
         return Promise.all(children.map(async child => {
@@ -221,7 +217,7 @@ export class VFSModuleEngine implements ISessionEngine {
         if (!fs.seq) return [];
         const now = Date.now();
         const result: Array<{ fileId: string; clozeId: string; status: SRSItemData }> = [];
-        const files = this.flattenFiles(await this.loadTree());
+        const files = this.flattenFiles(await this.collectChildren('/'));
         for (const node of files) {
             if (limit && result.length >= limit) break;
             const seqPath = await this.getSRSSeqFilePath(node.id);

@@ -125,6 +125,14 @@ export class VFSStore implements IStatePort {
       'MOVE_OPERATION_END': () => {
         draft.moveOperation = null;
       },
+      'FOLDER_CHILDREN_LOADED': () => {
+        const node = findNodeById(draft.items, payload.parentId);
+        if (node?.type === 'directory') {
+          node.children = payload.children;
+          draft.expandedFolderIds.add(payload.parentId);
+        }
+        draft.tags = rebuildTagsMap(draft.items);
+      },
       'FOLDER_TOGGLE': () => this.toggleSet(draft.expandedFolderIds, payload.folderId),
       'OUTLINE_TOGGLE': () => this.toggleSet(draft.expandedOutlineIds, payload.itemId),
       'OUTLINE_H1_TOGGLE': () => this.toggleSet(draft.expandedOutlineH1Ids, payload.elementId),
