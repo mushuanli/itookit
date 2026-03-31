@@ -381,8 +381,10 @@ export class VFSManager implements IVFSManager {
             try {
                 const eng = this.getEngine(modName);
                 if (eng.tags) {
-                    const ids = await eng.tags.findByTag(tagName);
-                    results.push(...ids);
+                    await eng.tags.walkByTag(tagName, (id) => {
+                        results.push(id);
+                        return true;
+                    });
                 }
             } catch {
                 continue;

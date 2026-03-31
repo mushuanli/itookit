@@ -23,12 +23,28 @@ export interface ITagOperations {
     /** 移除标签 */
     removeTag(idOrPath: string, tag: string): Promise<void>;
 
-    /** 按标签查找节点 ID */
-    findByTag(tag: string): Promise<string[]>;
+    /**
+     * 按标签流式遍历节点 ID（替代 findByTag）。
+     * callback 返回 false 时提前终止。
+     */
+    walkByTag(
+        tag: string,
+        callback: (nodeId: string) => boolean | Promise<boolean>,
+        options?: { limit?: number; offset?: number },
+    ): Promise<{ total: number; processed: number }>;
 
     /** 更新标签定义（如颜色），不影响节点关联 */
     updateTagDefinition?(
         tagName: string,
         updates: Partial<Omit<TagDefinition, 'name'>>,
     ): Promise<void>;
+
+    /** 流式遍历所有标签定义（可选） */
+    walkTags?(
+        callback: (tag: TagDefinition) => boolean | Promise<boolean>,
+        options?: { prefix?: string; limit?: number },
+    ): Promise<number>;
+
+    /** 统计标签总数（可选，避免全量加载） */
+    countTags?(): Promise<number>;
 }

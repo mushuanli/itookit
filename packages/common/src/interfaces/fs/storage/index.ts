@@ -4,10 +4,10 @@
  */
 
 // Layer 1
-export type { InodeRecord, IInodeStore } from './inode-store';
+export type { InodeRecord, IInodeStore, InodeWalkOptions } from './inode-store';
 
 // Layer 2
-export type { MetaRecord, IMetaStore } from './meta-store';
+export type { MetaRecord, IMetaStore, MetaWalkOptions } from './meta-store';
 
 // Layer 3
 export type { IContentStore } from './content-store';
@@ -22,8 +22,11 @@ export type {
     RecordQuery,
     RecordQueryOptions,
     RecordQueryResult,
+    RecordWalkOptions,
     IRecordStore,
 } from './record-backend';
+
+export type { ContentStreamOptions, ContentStreamResult } from './content-store';
 
 export type { IHighLevelStore } from './high-level-backend';
 export type { ISyncableStore } from './syncable-backend';
