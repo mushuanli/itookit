@@ -8,7 +8,7 @@
  *     idx_tags — tags (multiEntry, for queryByTag)
  */
 
-import type { IMetaStore, MetaRecord } from '@itookit/common';
+import type { IMetaStore, MetaRecord, MetaWalkOptions } from '@itookit/common';
 import { req, collectCursor, STORE_META } from './utils';
 
 export class IDBMetaStore implements IMetaStore {
@@ -34,31 +34,57 @@ export class IDBMetaStore implements IMetaStore {
         await req(this.meta.put(updated));
     }
 
-    async batchGetMeta(inos: number[]): Promise<MetaRecord[]> {
-        const results: MetaRecord[] = [];
-        for (const ino of inos) {
-            const rec = await req<MetaRecord | undefined>(this.meta.get(ino));
-            if (rec) results.push(rec);
+    async forEachMeta(
+        inos: number[],
+        callback: (meta: MetaRecord, index: number) => boolean | Promise<boolean>,
+    ): Promise<void> {
+        for (let i = 0; i < inos.length; i++) {
+            const rec = await req<MetaRecord | undefined>(this.meta.get(inos[i]));
+            if (rec) {
+                if (!(await callback(rec, i))) break;
+            }
         }
-        return results;
     }
 
-    async queryByTag(tag: string): Promise<number[]> {
+    async walkByTag(
+        tag: string,
+        callback: (ino: number) => boolean | Promise<boolean>,
+        options?: MetaWalkOptions,
+    ): Promise<{ total: number; processed: number }> {
         const idx = this.meta.index('idx_tags');
         const records = await collectCursor<MetaRecord>(
             idx.openCursor(IDBKeyRange.only(tag)) as IDBRequest<IDBCursorWithValue | null>,
         );
-        return records.map((r) => r.ino);
+        const total = records.length;
+        let processed = 0;
+        const offset = options?.offset ?? 0;
+        const limit = options?.limit ?? Infinity;
+        for (let i = offset; i < records.length && processed < limit; i++) {
+            if (!(await callback(records[i].ino))) break;
+            processed++;
+        }
+        return { total, processed };
     }
 
-    async queryByMetadata(field: string, value: unknown): Promise<number[]> {
-        // Cursor scan — no dynamic metadata indexes in IDB
+    async walkByMetadata(
+        field: string,
+        value: unknown,
+        callback: (ino: number) => boolean | Promise<boolean>,
+        options?: MetaWalkOptions,
+    ): Promise<{ total: number; processed: number }> {
         const all = await collectCursor<MetaRecord>(
             this.meta.openCursor() as IDBRequest<IDBCursorWithValue | null>,
         );
-        return all
-            .filter((r) => r.metadata && (r.metadata as Record<string, unknown>)[field] === value)
-            .map((r) => r.ino);
+        const filtered = all.filter(r => r.metadata && (r.metadata as Record<string, unknown>)[field] === value);
+        const total = filtered.length;
+        let processed = 0;
+        const offset = options?.offset ?? 0;
+        const limit = options?.limit ?? Infinity;
+        for (let i = offset; i < filtered.length && processed < limit; i++) {
+            if (!(await callback(filtered[i].ino))) break;
+            processed++;
+        }
+        return { total, processed };
     }
 }
 

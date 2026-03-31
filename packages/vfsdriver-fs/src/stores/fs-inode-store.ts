@@ -7,7 +7,7 @@
  */
 
 import type Database from 'better-sqlite3';
-import type { IInodeStore, InodeRecord } from '@itookit/common';
+import type { IInodeStore, InodeRecord, InodeWalkOptions } from '@itookit/common';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DB row type (what SQLite returns)
@@ -48,8 +48,9 @@ export class FsInodeStore implements IInodeStore {
     private readonly stmtUpdateParent: Database.Statement;
     private readonly stmtUpdateName: Database.Statement;
     private readonly stmtUpdateNlink: Database.Statement;
+    private readonly stmtHasChildren: Database.Statement;
 
-    constructor(private readonly db: Database.Database) {
+    constructor(db: Database.Database) {
         this.stmtAllocate = db.prepare(
             'UPDATE counters SET value = value + 1 WHERE name = ? RETURNING value',
         );
@@ -84,6 +85,9 @@ export class FsInodeStore implements IInodeStore {
         this.stmtUpdateNlink = db.prepare(
             'UPDATE inodes SET nlink = ? WHERE ino = ?',
         );
+        this.stmtHasChildren = db.prepare(
+            'SELECT 1 FROM inodes WHERE parentIno = ? AND ino != ? LIMIT 1',
+        );
     }
 
     async allocateIno(): Promise<number> {
@@ -105,7 +109,7 @@ export class FsInodeStore implements IInodeStore {
         return row ? rowToRecord(row) : null;
     }
 
-    async listChildren(parentIno: number): Promise<InodeRecord[]> {
+    private listChildrenInternal(parentIno: number): InodeRecord[] {
         const rows = this.stmtListChildren.all(parentIno, parentIno) as InodeRow[];
         return rows.map(rowToRecord);
     }
@@ -123,13 +127,70 @@ export class FsInodeStore implements IInodeStore {
         if (updates.nlink !== undefined)     this.stmtUpdateNlink.run(updates.nlink, ino);
     }
 
-    async batchGetInodes(inos: number[]): Promise<InodeRecord[]> {
-        if (inos.length === 0) return [];
-        // SQLite doesn't support array binding; use prepared statement per item
-        const placeholders = inos.map(() => '?').join(',');
-        const rows = this.db
-            .prepare(`SELECT * FROM inodes WHERE ino IN (${placeholders})`)
-            .all(...inos) as InodeRow[];
-        return rows.map(rowToRecord);
+    async forEachInode(
+        inos: number[],
+        callback: (inode: InodeRecord, index: number) => boolean | Promise<boolean>,
+    ): Promise<void> {
+        for (let i = 0; i < inos.length; i++) {
+            const row = this.stmtGet.get(inos[i]) as InodeRow | undefined;
+            if (row) {
+                if (!(await callback(rowToRecord(row), i))) break;
+            }
+        }
+    }
+
+    async walkTree(
+        parentIno: number,
+        callback: (inode: InodeRecord, depth: number) => boolean | 'skip' | Promise<boolean | 'skip'>,
+        options?: InodeWalkOptions,
+    ): Promise<void> {
+        if (options?.order === 'breadth-first') {
+            await this._walkBFS(parentIno, callback, options?.maxDepth ?? -1);
+        } else {
+            await this._walkDFS(parentIno, callback, 0, options?.maxDepth ?? -1);
+        }
+    }
+
+    private async _walkDFS(
+        parentIno: number,
+        callback: (inode: InodeRecord, depth: number) => boolean | 'skip' | Promise<boolean | 'skip'>,
+        depth: number,
+        maxDepth: number,
+    ): Promise<boolean> {
+        const children = this.listChildrenInternal(parentIno);
+        for (const child of children) {
+            const result = await callback(child, depth);
+            if (result === false) return false;
+            if (result !== 'skip' && child.type === 'directory' && (maxDepth < 0 || depth < maxDepth)) {
+                if (!(await this._walkDFS(child.ino, callback, depth + 1, maxDepth))) return false;
+            }
+        }
+        return true;
+    }
+
+    private async _walkBFS(
+        parentIno: number,
+        callback: (inode: InodeRecord, depth: number) => boolean | 'skip' | Promise<boolean | 'skip'>,
+        maxDepth: number,
+    ): Promise<void> {
+        const queue: Array<{ ino: number; depth: number }> = [{ ino: parentIno, depth: -1 }];
+        while (queue.length > 0) {
+            const { ino, depth } = queue.shift()!;
+            const nextDepth = depth + 1;
+            if (maxDepth >= 0 && nextDepth > maxDepth) continue;
+            const children = this.listChildrenInternal(ino);
+            for (const child of children) {
+                const result = await callback(child, nextDepth);
+                if (result === false) return;
+                if (result !== 'skip' && child.type === 'directory') {
+                    queue.push({ ino: child.ino, depth: nextDepth });
+                }
+            }
+        }
+    }
+
+    async hasChildren(parentIno: number): Promise<boolean> {
+        const row = this.stmtHasChildren.get(parentIno, parentIno) as { 1: number } | undefined;
+        return row !== undefined;
     }
 }

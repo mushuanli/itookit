@@ -7,7 +7,7 @@
  */
 
 import type Database from 'better-sqlite3';
-import type { IMetaStore, MetaRecord } from '@itookit/common';
+import type { IMetaStore, MetaRecord, MetaWalkOptions } from '@itookit/common';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Row ↔ MetaRecord conversion
@@ -162,29 +162,59 @@ export class FsMetaStore implements IMetaStore {
         })();
     }
 
-    async batchGetMeta(inos: number[]): Promise<MetaRecord[]> {
-        if (inos.length === 0) return [];
-        const placeholders = inos.map(() => '?').join(',');
-        const rows = this.db
-            .prepare(`SELECT * FROM meta WHERE ino IN (${placeholders})`)
-            .all(...inos) as MetaRow[];
-        return rows.map(rowToMeta);
-    }
-
-    async queryByTag(tag: string): Promise<number[]> {
-        const rows = this.stmtQueryByTag.all(tag) as Array<{ ino: number }>;
-        return rows.map((r) => r.ino);
-    }
-
-    async queryByMetadata(field: string, value: unknown): Promise<number[]> {
-        // json_extract works for primitive values; complex values fall back to scan
-        if (typeof value === 'object' && value !== null) {
-            return this.queryByMetadataScan(field, value);
+    async forEachMeta(
+        inos: number[],
+        callback: (meta: MetaRecord, index: number) => boolean | Promise<boolean>,
+    ): Promise<void> {
+        for (let i = 0; i < inos.length; i++) {
+            const row = this.stmtGet.get(inos[i]) as MetaRow | undefined;
+            if (row) {
+                if (!(await callback(rowToMeta(row), i))) break;
+            }
         }
-        const rows = this.db
-            .prepare("SELECT ino FROM meta WHERE json_extract(metadata, '$.' || ?) IS ?")
-            .all(field, value) as Array<{ ino: number }>;
-        return rows.map((r) => r.ino);
+    }
+
+    async walkByTag(
+        tag: string,
+        callback: (ino: number) => boolean | Promise<boolean>,
+        options?: MetaWalkOptions,
+    ): Promise<{ total: number; processed: number }> {
+        const rows = this.stmtQueryByTag.all(tag) as Array<{ ino: number }>;
+        const total = rows.length;
+        let processed = 0;
+        const offset = options?.offset ?? 0;
+        const limit = options?.limit ?? Infinity;
+        for (let i = offset; i < rows.length && processed < limit; i++) {
+            if (!(await callback(rows[i].ino))) break;
+            processed++;
+        }
+        return { total, processed };
+    }
+
+    async walkByMetadata(
+        field: string,
+        value: unknown,
+        callback: (ino: number) => boolean | Promise<boolean>,
+        options?: MetaWalkOptions,
+    ): Promise<{ total: number; processed: number }> {
+        let inos: number[];
+        if (typeof value === 'object' && value !== null) {
+            inos = this.queryByMetadataScan(field, value);
+        } else {
+            const rows = this.db
+                .prepare("SELECT ino FROM meta WHERE json_extract(metadata, '$.' || ?) IS ?")
+                .all(field, value) as Array<{ ino: number }>;
+            inos = rows.map((r) => r.ino);
+        }
+        const total = inos.length;
+        let processed = 0;
+        const offset = options?.offset ?? 0;
+        const limit = options?.limit ?? Infinity;
+        for (let i = offset; i < inos.length && processed < limit; i++) {
+            if (!(await callback(inos[i]))) break;
+            processed++;
+        }
+        return { total, processed };
     }
 
     // ── Private helpers ──────────────────────────────────────────────────────

@@ -14,6 +14,7 @@ import type {
     RecordQuery,
     RecordQueryOptions,
     RecordQueryResult,
+    RecordWalkOptions,
 } from '@itookit/common';
 
 export class FsRecordStore implements IRecordStore {
@@ -22,7 +23,6 @@ export class FsRecordStore implements IRecordStore {
     private readonly stmtDelete: Database.Statement;
     private readonly stmtGetAll: Database.Statement;
     private readonly stmtClear: Database.Statement;
-    private readonly stmtListFields: Database.Statement;
 
     constructor(private readonly db: Database.Database) {
         this.stmtGet = db.prepare(
@@ -39,9 +39,6 @@ export class FsRecordStore implements IRecordStore {
             'SELECT field, value FROM records WHERE ino = ?',
         );
         this.stmtClear = db.prepare('DELETE FROM records WHERE ino = ?');
-        this.stmtListFields = db.prepare(
-            'SELECT field FROM records WHERE ino = ?',
-        );
     }
 
     async getRecordField(ino: number, field: string): Promise<RecordValue | undefined> {
@@ -57,15 +54,6 @@ export class FsRecordStore implements IRecordStore {
         this.stmtDelete.run(ino, field);
     }
 
-    async getAllRecordFields(ino: number): Promise<Record<string, RecordValue>> {
-        const rows = this.stmtGetAll.all(ino) as Array<{ field: string; value: string }>;
-        const result: Record<string, RecordValue> = {};
-        for (const row of rows) {
-            result[row.field] = JSON.parse(row.value) as RecordValue;
-        }
-        return result;
-    }
-
     async setAllRecordFields(ino: number, fields: Record<string, RecordValue>): Promise<void> {
         this.db.transaction(() => {
             this.stmtClear.run(ino);
@@ -79,9 +67,37 @@ export class FsRecordStore implements IRecordStore {
         this.stmtClear.run(ino);
     }
 
-    async listRecordFields(ino: number): Promise<string[]> {
-        const rows = this.stmtListFields.all(ino) as Array<{ field: string }>;
-        return rows.map((r) => r.field);
+    async walkRecordFields(
+        ino: number,
+        callback: (field: string, value: RecordValue) => boolean | Promise<boolean>,
+        options?: RecordWalkOptions,
+    ): Promise<{ total: number; processed: number }> {
+        const rows = this.stmtGetAll.all(ino) as Array<{ field: string; value: string }>;
+        const filtered = options?.prefix ? rows.filter(r => r.field.startsWith(options.prefix!)) : rows;
+        const total = filtered.length;
+        let processed = 0;
+        const offset = options?.offset ?? 0;
+        const limit = options?.limit ?? Infinity;
+        for (let i = offset; i < filtered.length && processed < limit; i++) {
+            const value = JSON.parse(filtered[i].value) as RecordValue;
+            if (!(await callback(filtered[i].field, value))) break;
+            processed++;
+        }
+        return { total, processed };
+    }
+
+    async walkRecordFieldNames(
+        ino: number,
+        callback: (field: string) => boolean | Promise<boolean>,
+        options?: { prefix?: string; limit?: number },
+    ): Promise<number> {
+        let count = 0;
+        await this.walkRecordFields(ino, async (field) => {
+            if (!(await callback(field))) return false;
+            count++;
+            return true;
+        }, options);
+        return count;
     }
 
     async createRecordIndex(_ino: number, _field: string): Promise<void> {
@@ -99,15 +115,13 @@ export class FsRecordStore implements IRecordStore {
         query: RecordQuery,
         options?: RecordQueryOptions,
     ): Promise<RecordQueryResult[]> {
-        const all = await this.getAllRecordFields(ino);
         const matched: RecordQueryResult[] = [];
-
-        for (const [field, value] of Object.entries(all)) {
+        await this.walkRecordFields(ino, (field, value) => {
             if (field === query.field && matchesOperator(value, query)) {
                 matched.push({ field, value });
             }
-        }
-
+            return true;
+        });
         const offset = options?.offset ?? 0;
         const limit  = options?.limit  ?? matched.length;
         return matched.slice(offset, offset + limit);

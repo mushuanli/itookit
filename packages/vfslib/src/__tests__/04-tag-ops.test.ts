@@ -60,20 +60,22 @@ describe('Tag operations (IndexedDB backend)', () => {
         expect(node?.tags ?? []).toHaveLength(0);
     });
 
-    it('findByTag returns matching node IDs', async () => {
+    it('walkByTag returns matching node IDs', async () => {
         const { fs } = vfs;
         const p1 = await mkFile(fs, 'f1.txt');
         const p2 = await mkFile(fs, 'f2.txt');
         await mkFile(fs, 'f3.txt');
         await fs.tags!.addTag(p1, 'vip');
         await fs.tags!.addTag(p2, 'vip');
-        const ids = await fs.tags!.findByTag('vip');
+        const ids: string[] = [];
+        await fs.tags!.walkByTag('vip', (id) => { ids.push(id); return true; });
         expect(ids).toHaveLength(2);
     });
 
-    it('findByTag returns empty for unknown tag', async () => {
+    it('walkByTag returns empty for unknown tag', async () => {
         const { fs } = vfs;
-        const ids = await fs.tags!.findByTag('nonexistent');
+        const ids: string[] = [];
+        await fs.tags!.walkByTag('nonexistent', (id) => { ids.push(id); return true; });
         expect(ids).toHaveLength(0);
     });
 

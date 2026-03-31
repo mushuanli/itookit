@@ -60,6 +60,12 @@ export interface MetaRecord {
     extra?: Record<string, unknown>;
 }
 
+/** IMetaStore 流式查询选项 */
+export interface MetaWalkOptions {
+    limit?: number;
+    offset?: number;
+}
+
 export interface IMetaStore {
     /** 写入元数据记录 */
     putMeta(meta: MetaRecord): Promise<void>;
@@ -73,12 +79,33 @@ export interface IMetaStore {
     /** 部分更新（合并语义） */
     patchMeta(ino: number, partial: Partial<Omit<MetaRecord, 'ino'>>): Promise<void>;
 
-    /** 批量获取 */
-    batchGetMeta(inos: number[]): Promise<MetaRecord[]>;
+    /**
+     * 流式遍历 inos 列表（替代 batchGetMeta）。
+     * callback 返回 false 时提前终止。
+     */
+    forEachMeta(
+        inos: number[],
+        callback: (meta: MetaRecord, index: number) => boolean | Promise<boolean>,
+    ): Promise<void>;
 
-    /** 按标签查询 */
-    queryByTag(tag: string): Promise<number[]>;
+    /**
+     * 按标签流式遍历（替代 queryByTag）。
+     * callback 返回 false 时提前终止。
+     */
+    walkByTag(
+        tag: string,
+        callback: (ino: number) => boolean | Promise<boolean>,
+        options?: MetaWalkOptions,
+    ): Promise<{ total: number; processed: number }>;
 
-    /** 按元数据字段查询 */
-    queryByMetadata(field: string, value: unknown): Promise<number[]>;
+    /**
+     * 按元数据字段流式遍历（替代 queryByMetadata）。
+     * callback 返回 false 时提前终止。
+     */
+    walkByMetadata(
+        field: string,
+        value: unknown,
+        callback: (ino: number) => boolean | Promise<boolean>,
+        options?: MetaWalkOptions,
+    ): Promise<{ total: number; processed: number }>;
 }

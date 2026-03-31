@@ -199,10 +199,12 @@ export class VFSModuleEngine implements ISessionEngine {
         const fs = this.getModuleFS();
         const seqPath = await this.getSRSSeqFilePath(fileId);
         if (!seqPath || !fs.seq) return {};
-        const entries = await fs.seq.getAllEntries(seqPath);
-        return Object.fromEntries(
-            entries.map(e => [e.key, JSON.parse(e.value) as SRSItemData])
-        );
+        const result: Record<string, SRSItemData> = {};
+        await fs.seq.walkEntries(seqPath, (e) => {
+            result[e.key] = JSON.parse(e.value) as SRSItemData;
+            return true;
+        });
+        return result;
     }
 
     async updateSRSStatus(fileId: string, clozeId: string, status: SRSItemData): Promise<void> {
@@ -222,14 +224,14 @@ export class VFSModuleEngine implements ISessionEngine {
             if (limit && result.length >= limit) break;
             const seqPath = await this.getSRSSeqFilePath(node.id);
             if (!seqPath) continue;
-            const entries = await fs.seq.getAllEntries(seqPath);
-            for (const e of entries) {
-                if (limit && result.length >= limit) break;
+            await fs.seq.walkEntries(seqPath, (e) => {
+                if (limit && result.length >= limit) return false;
                 const s = JSON.parse(e.value) as SRSItemData;
                 if (!s.dueAt || s.dueAt <= now) {
                     result.push({ fileId: node.id, clozeId: e.key, status: s });
                 }
-            }
+                return true;
+            });
         }
         return result;
     }

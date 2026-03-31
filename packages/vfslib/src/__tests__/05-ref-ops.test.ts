@@ -1,8 +1,9 @@
 /**
  * Reference (bidirectional link) operations:
- * addRef, removeRef, getOutgoing, getIncoming, hasRef, syncOutgoing.
+ * addRef, removeRef, walkOutgoing, walkIncoming, hasRef, syncOutgoing.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import type { Reference } from '@itookit/common';
 import { setupVFS, type TestVFS } from './helpers';
 
 describe('Reference operations (IndexedDB backend)', () => {
@@ -15,11 +16,23 @@ describe('Reference operations (IndexedDB backend)', () => {
         return `/${name}`;
     }
 
+    async function collectOutgoing(idOrPath: string, opts?: import('@itookit/common').RefQueryOptions): Promise<Reference[]> {
+        const refs: Reference[] = [];
+        await vfs.fs.refs!.walkOutgoing(idOrPath, (r) => { refs.push(r); return true; }, opts);
+        return refs;
+    }
+
+    async function collectIncoming(idOrPath: string, opts?: import('@itookit/common').RefQueryOptions): Promise<Reference[]> {
+        const refs: Reference[] = [];
+        await vfs.fs.refs!.walkIncoming(idOrPath, (r) => { refs.push(r); return true; }, opts);
+        return refs;
+    }
+
     it('addRef creates outgoing ref on source', async () => {
         const src = await mkFile('src.md');
         const tgt = await mkFile('tgt.md');
         await vfs.fs.refs!.addRef(src, tgt, 'mention');
-        const out = await vfs.fs.refs!.getOutgoing(src);
+        const out = await collectOutgoing(src);
         expect(out).toHaveLength(1);
         expect(out[0].refType).toBe('mention');
     });
@@ -28,7 +41,7 @@ describe('Reference operations (IndexedDB backend)', () => {
         const src = await mkFile('s.md');
         const tgt = await mkFile('t.md');
         await vfs.fs.refs!.addRef(src, tgt, 'depend');
-        const inc = await vfs.fs.refs!.getIncoming(tgt);
+        const inc = await collectIncoming(tgt);
         expect(inc).toHaveLength(1);
         expect(inc[0].refType).toBe('depend');
     });
@@ -38,7 +51,7 @@ describe('Reference operations (IndexedDB backend)', () => {
         const tgt = await mkFile('i2.md');
         await vfs.fs.refs!.addRef(src, tgt, 'related');
         await vfs.fs.refs!.addRef(src, tgt, 'related');
-        const out = await vfs.fs.refs!.getOutgoing(src);
+        const out = await collectOutgoing(src);
         expect(out.filter(r => r.refType === 'related')).toHaveLength(1);
     });
 
@@ -62,16 +75,16 @@ describe('Reference operations (IndexedDB backend)', () => {
         await vfs.fs.refs!.addRef(src, tgt, 'mention');
         await vfs.fs.refs!.removeRef(src, tgt, 'mention');
         expect(await vfs.fs.refs!.hasRef(src, tgt, 'mention')).toBe(false);
-        expect(await vfs.fs.refs!.getIncoming(tgt)).toHaveLength(0);
+        expect(await collectIncoming(tgt)).toHaveLength(0);
     });
 
-    it('getOutgoing filters by refType', async () => {
+    it('walkOutgoing filters by refType', async () => {
         const src = await mkFile('fo1.md');
         const t1 = await mkFile('fo2.md');
         const t2 = await mkFile('fo3.md');
         await vfs.fs.refs!.addRef(src, t1, 'mention');
         await vfs.fs.refs!.addRef(src, t2, 'depend');
-        const mentions = await vfs.fs.refs!.getOutgoing(src, { refTypes: ['mention'] });
+        const mentions = await collectOutgoing(src, { refTypes: ['mention'] });
         expect(mentions).toHaveLength(1);
         expect(mentions[0].refType).toBe('mention');
     });
@@ -86,7 +99,7 @@ describe('Reference operations (IndexedDB backend)', () => {
         await vfs.fs.refs!.syncOutgoing(src, [
             { targetIdOrPath: t3, refType: 'mention' },
         ]);
-        const out = await vfs.fs.refs!.getOutgoing(src);
+        const out = await collectOutgoing(src);
         expect(out).toHaveLength(1);
         expect(await vfs.fs.refs!.hasRef(src, t3, 'mention')).toBe(true);
         expect(await vfs.fs.refs!.hasRef(src, t1, 'mention')).toBe(false);
@@ -96,13 +109,13 @@ describe('Reference operations (IndexedDB backend)', () => {
         const src = await mkFile('ep1.md');
         const tgt = await mkFile('ep2.md');
         await vfs.fs.refs!.addRef(src, tgt, 'related', { anchor: 'section-1' });
-        const out = await vfs.fs.refs!.getOutgoing(src);
+        const out = await collectOutgoing(src);
         expect(out[0].extra?.anchor).toBe('section-1');
     });
 
     it('node with no refs returns empty arrays', async () => {
         const p = await mkFile('solo.md');
-        expect(await vfs.fs.refs!.getOutgoing(p)).toHaveLength(0);
-        expect(await vfs.fs.refs!.getIncoming(p)).toHaveLength(0);
+        expect(await collectOutgoing(p)).toHaveLength(0);
+        expect(await collectIncoming(p)).toHaveLength(0);
     });
 });

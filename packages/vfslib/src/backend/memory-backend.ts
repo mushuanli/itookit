@@ -14,6 +14,10 @@ import type {
     IContentStore,
     InodeRecord,
     MetaRecord,
+    InodeWalkOptions,
+    ContentStreamOptions,
+    ContentStreamResult,
+    MetaWalkOptions,
 } from '@itookit/common';
 
 class MemoryInodeStore implements IInodeStore {
@@ -42,16 +46,6 @@ class MemoryInodeStore implements IInodeStore {
         return null;
     }
 
-    async listChildren(parentIno: number): Promise<InodeRecord[]> {
-        const result: InodeRecord[] = [];
-        for (const rec of this.data.values()) {
-            if (rec.parentIno === parentIno && rec.ino !== parentIno) {
-                result.push({ ...rec });
-            }
-        }
-        return result;
-    }
-
     async deleteInode(ino: number): Promise<void> {
         this.data.delete(ino);
     }
@@ -67,13 +61,73 @@ class MemoryInodeStore implements IInodeStore {
         if (updates.nlink !== undefined) rec.nlink = updates.nlink;
     }
 
-    async batchGetInodes(inos: number[]): Promise<InodeRecord[]> {
-        const result: InodeRecord[] = [];
-        for (const ino of inos) {
-            const rec = this.data.get(ino);
-            if (rec) result.push({ ...rec });
+    async forEachInode(
+        inos: number[],
+        callback: (inode: InodeRecord, index: number) => boolean | Promise<boolean>,
+    ): Promise<void> {
+        for (let i = 0; i < inos.length; i++) {
+            const rec = this.data.get(inos[i]);
+            if (rec) {
+                if (!(await callback({ ...rec }, i))) break;
+            }
         }
-        return result;
+    }
+
+    async walkTree(
+        parentIno: number,
+        callback: (inode: InodeRecord, depth: number) => boolean | 'skip' | Promise<boolean | 'skip'>,
+        options?: InodeWalkOptions,
+    ): Promise<void> {
+        if (options?.order === 'breadth-first') {
+            await this._walkBFS(parentIno, callback, options?.maxDepth ?? -1);
+        } else {
+            await this._walkDFS(parentIno, callback, 0, options?.maxDepth ?? -1);
+        }
+    }
+
+    private async _walkDFS(
+        parentIno: number,
+        callback: (inode: InodeRecord, depth: number) => boolean | 'skip' | Promise<boolean | 'skip'>,
+        depth: number,
+        maxDepth: number,
+    ): Promise<boolean> {
+        for (const rec of this.data.values()) {
+            if (rec.parentIno !== parentIno || rec.ino === parentIno) continue;
+            const result = await callback({ ...rec }, depth);
+            if (result === false) return false;
+            if (result !== 'skip' && rec.type === 'directory' && (maxDepth < 0 || depth < maxDepth)) {
+                if (!(await this._walkDFS(rec.ino, callback, depth + 1, maxDepth))) return false;
+            }
+        }
+        return true;
+    }
+
+    private async _walkBFS(
+        parentIno: number,
+        callback: (inode: InodeRecord, depth: number) => boolean | 'skip' | Promise<boolean | 'skip'>,
+        maxDepth: number,
+    ): Promise<void> {
+        const queue: Array<{ ino: number; depth: number }> = [{ ino: parentIno, depth: -1 }];
+        while (queue.length > 0) {
+            const { ino, depth } = queue.shift()!;
+            const nextDepth = depth + 1;
+            if (maxDepth >= 0 && nextDepth > maxDepth) continue;
+            for (const rec of this.data.values()) {
+                if (rec.parentIno !== ino || rec.ino === ino) continue;
+                const result = await callback({ ...rec }, nextDepth);
+                if (result === false) return;
+                if (result !== 'skip' && rec.type === 'directory') {
+                    queue.push({ ino: rec.ino, depth: nextDepth });
+                }
+            }
+        }
+    }
+
+    async hasChildren(parentIno: number): Promise<boolean> {
+        for (const rec of this.data.values()) {
+            if (rec.parentIno === parentIno && rec.ino !== parentIno) return true;
+        }
+        return false;
     }
 }
 
@@ -99,33 +153,57 @@ class MemoryMetaStore implements IMetaStore {
         Object.assign(rec, partial);
     }
 
-    async batchGetMeta(inos: number[]): Promise<MetaRecord[]> {
-        const result: MetaRecord[] = [];
-        for (const ino of inos) {
-            const rec = this.data.get(ino);
-            if (rec) result.push({ ...rec });
-        }
-        return result;
-    }
-
-    async queryByTag(tag: string): Promise<number[]> {
-        const result: number[] = [];
-        for (const rec of this.data.values()) {
-            if (rec.tags?.includes(tag)) {
-                result.push(rec.ino);
+    async forEachMeta(
+        inos: number[],
+        callback: (meta: MetaRecord, index: number) => boolean | Promise<boolean>,
+    ): Promise<void> {
+        for (let i = 0; i < inos.length; i++) {
+            const rec = this.data.get(inos[i]);
+            if (rec) {
+                if (!(await callback({ ...rec }, i))) break;
             }
         }
-        return result;
     }
 
-    async queryByMetadata(field: string, value: unknown): Promise<number[]> {
-        const result: number[] = [];
+    async walkByTag(
+        tag: string,
+        callback: (ino: number) => boolean | Promise<boolean>,
+        options?: MetaWalkOptions,
+    ): Promise<{ total: number; processed: number }> {
+        const matched: number[] = [];
         for (const rec of this.data.values()) {
-            if (rec.metadata && rec.metadata[field] === value) {
-                result.push(rec.ino);
-            }
+            if (rec.tags?.includes(tag)) matched.push(rec.ino);
         }
-        return result;
+        const total = matched.length;
+        let processed = 0;
+        const offset = options?.offset ?? 0;
+        const limit = options?.limit ?? Infinity;
+        for (let i = offset; i < matched.length && processed < limit; i++) {
+            if (!(await callback(matched[i]))) break;
+            processed++;
+        }
+        return { total, processed };
+    }
+
+    async walkByMetadata(
+        field: string,
+        value: unknown,
+        callback: (ino: number) => boolean | Promise<boolean>,
+        options?: MetaWalkOptions,
+    ): Promise<{ total: number; processed: number }> {
+        const matched: number[] = [];
+        for (const rec of this.data.values()) {
+            if (rec.metadata && rec.metadata[field] === value) matched.push(rec.ino);
+        }
+        const total = matched.length;
+        let processed = 0;
+        const offset = options?.offset ?? 0;
+        const limit = options?.limit ?? Infinity;
+        for (let i = offset; i < matched.length && processed < limit; i++) {
+            if (!(await callback(matched[i]))) break;
+            processed++;
+        }
+        return { total, processed };
     }
 }
 
@@ -163,6 +241,27 @@ class MemoryContentStore implements IContentStore {
         } else {
             this.data.set(ref, data.slice(0));
         }
+    }
+
+    async streamData(
+        ref: string,
+        callback: (chunk: ArrayBuffer, offset: number) => boolean | Promise<boolean>,
+        options?: ContentStreamOptions,
+    ): Promise<ContentStreamResult> {
+        const data = await this.getData(ref);
+        if (!data) return { bytesRead: 0, completed: false };
+        const chunkSize = options?.chunkSize ?? 65536;
+        const start = options?.startOffset ?? 0;
+        const end = options?.maxLength != null ? start + options.maxLength : data.byteLength;
+        let offset = start;
+        let bytesRead = 0;
+        while (offset < end) {
+            const chunk = data.slice(offset, Math.min(offset + chunkSize, end));
+            if (!(await callback(chunk, offset))) return { bytesRead, completed: false };
+            bytesRead += chunk.byteLength;
+            offset += chunk.byteLength;
+        }
+        return { bytesRead, completed: true };
     }
 }
 

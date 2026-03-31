@@ -23,6 +23,8 @@ import type {
     IMetaStore,
     IContentStore,
     IRecordStore,
+    InodeRecord,
+    InodeWalkOptions,
 } from '@itookit/common';
 
 import { IDBInodeStore, createInodeStore, createCounterStore } from './inode-store';
@@ -108,11 +110,6 @@ class StandaloneInodeStore implements IInodeStore {
         return new IDBInodeStore(tx.objectStore(STORE_INODES), tx.objectStore(STORE_COUNTERS)).lookup(parentIno, name);
     }
 
-    async listChildren(parentIno: number): Promise<import('@itookit/common').InodeRecord[]> {
-        const tx = this.tx();
-        return new IDBInodeStore(tx.objectStore(STORE_INODES), tx.objectStore(STORE_COUNTERS)).listChildren(parentIno);
-    }
-
     async deleteInode(ino: number): Promise<void> {
         const tx = this.tx('readwrite');
         await new IDBInodeStore(tx.objectStore(STORE_INODES), tx.objectStore(STORE_COUNTERS)).deleteInode(ino);
@@ -125,9 +122,23 @@ class StandaloneInodeStore implements IInodeStore {
         await txDone(tx);
     }
 
-    async batchGetInodes(inos: number[]): Promise<import('@itookit/common').InodeRecord[]> {
+    async forEachInode(inos: number[], callback: (inode: InodeRecord, index: number) => boolean | Promise<boolean>): Promise<void> {
         const tx = this.tx();
-        return new IDBInodeStore(tx.objectStore(STORE_INODES), tx.objectStore(STORE_COUNTERS)).batchGetInodes(inos);
+        return new IDBInodeStore(tx.objectStore(STORE_INODES), tx.objectStore(STORE_COUNTERS)).forEachInode(inos, callback);
+    }
+
+    async walkTree(
+        parentIno: number,
+        callback: (inode: InodeRecord, depth: number) => boolean | 'skip' | Promise<boolean | 'skip'>,
+        options?: InodeWalkOptions,
+    ): Promise<void> {
+        const tx = this.tx();
+        return new IDBInodeStore(tx.objectStore(STORE_INODES), tx.objectStore(STORE_COUNTERS)).walkTree(parentIno, callback, options);
+    }
+
+    async hasChildren(parentIno: number): Promise<boolean> {
+        const tx = this.tx();
+        return new IDBInodeStore(tx.objectStore(STORE_INODES), tx.objectStore(STORE_COUNTERS)).hasChildren(parentIno);
     }
 }
 
@@ -162,9 +173,9 @@ class StandaloneMetaStore implements IMetaStore {
         await txDone(tx);
     }
 
-    batchGetMeta(inos: number[]) { return this.store().batchGetMeta(inos); }
-    queryByTag(tag: string) { return this.store().queryByTag(tag); }
-    queryByMetadata(field: string, value: unknown) { return this.store().queryByMetadata(field, value); }
+    forEachMeta(inos: number[], callback: (meta: import('@itookit/common').MetaRecord, index: number) => boolean | Promise<boolean>) { return this.store().forEachMeta(inos, callback); }
+    walkByTag(tag: string, callback: (ino: number) => boolean | Promise<boolean>, options?: import('@itookit/common').MetaWalkOptions) { return this.store().walkByTag(tag, callback, options); }
+    walkByMetadata(field: string, value: unknown, callback: (ino: number) => boolean | Promise<boolean>, options?: import('@itookit/common').MetaWalkOptions) { return this.store().walkByMetadata(field, value, callback, options); }
 }
 
 class StandaloneContentStore implements IContentStore {
@@ -208,10 +219,14 @@ class StandaloneRecordStore implements IRecordStore {
     }
 
     getRecordField(ino: number, field: string) { return this.ro().getRecordField(ino, field); }
-    getAllRecordFields(ino: number) { return this.ro().getAllRecordFields(ino); }
-    listRecordFields(ino: number) { return this.ro().listRecordFields(ino); }
     queryRecordFields(ino: number, query: import('@itookit/common').RecordQuery, options?: import('@itookit/common').RecordQueryOptions) {
         return this.ro().queryRecordFields(ino, query, options);
+    }
+    walkRecordFields(ino: number, callback: (field: string, value: import('@itookit/common').RecordValue) => boolean | Promise<boolean>, options?: import('@itookit/common').RecordWalkOptions) {
+        return this.ro().walkRecordFields(ino, callback, options);
+    }
+    walkRecordFieldNames(ino: number, callback: (field: string) => boolean | Promise<boolean>, options?: { prefix?: string; limit?: number }) {
+        return this.ro().walkRecordFieldNames(ino, callback, options);
     }
 
     async setRecordField(ino: number, field: string, value: import('@itookit/common').RecordValue): Promise<void> {
@@ -265,10 +280,10 @@ export class IndexedDBBackend implements IStorageBackend {
         const noDb = (): Promise<never> => Promise.reject(
             new Error('IndexedDBBackend not initialized — call init() first'),
         );
-        this.inodes = { allocateIno: noDb, putInode: noDb, getInode: noDb, lookup: noDb, listChildren: noDb, deleteInode: noDb, updateInode: noDb, batchGetInodes: noDb };
-        this.meta = { putMeta: noDb, getMeta: noDb, deleteMeta: noDb, patchMeta: noDb, batchGetMeta: noDb, queryByTag: noDb, queryByMetadata: noDb };
+        this.inodes = { allocateIno: noDb, putInode: noDb, getInode: noDb, lookup: noDb, forEachInode: noDb, deleteInode: noDb, updateInode: noDb, walkTree: noDb, hasChildren: noDb };
+        this.meta = { putMeta: noDb, getMeta: noDb, deleteMeta: noDb, patchMeta: noDb, forEachMeta: noDb, walkByTag: noDb, walkByMetadata: noDb };
         this.content = { putData: noDb, getData: noDb, deleteData: noDb, existsData: noDb, sizeData: noDb };
-        this.records = { getRecordField: noDb, setRecordField: noDb, deleteRecordField: noDb, getAllRecordFields: noDb, setAllRecordFields: noDb, clearRecordFields: noDb, listRecordFields: noDb, createRecordIndex: noDb, deleteRecordIndex: noDb, queryRecordFields: noDb };
+        this.records = { getRecordField: noDb, setRecordField: noDb, deleteRecordField: noDb, setAllRecordFields: noDb, clearRecordFields: noDb, createRecordIndex: noDb, deleteRecordIndex: noDb, queryRecordFields: noDb, walkRecordFields: noDb, walkRecordFieldNames: noDb };
     }
 
     async init(): Promise<void> {

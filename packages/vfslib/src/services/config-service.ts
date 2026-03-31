@@ -169,8 +169,7 @@ export class ConfigService implements IConfigService {
         if (this.fs.seq) {
             const path = this.seqPath(configName);
             if (await this.fs.exists(path)) {
-                const all = await this.fs.seq.getAllEntries(path);
-                for (const e of all) entries.set(e.key, e.value);
+                await this.fs.seq.walkEntries(path, (e) => { entries.set(e.key, e.value); return true; });
                 this.cache.set(configName, new Map(entries));
                 return entries;
             }

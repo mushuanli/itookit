@@ -97,10 +97,10 @@ export class FsBackend implements IStorageBackend {
         const noInit = (): Promise<never> =>
             Promise.reject(new Error('FsBackend not initialised — call init() first'));
 
-        this.inodes  = { allocateIno: noInit, putInode: noInit, getInode: noInit, lookup: noInit, listChildren: noInit, deleteInode: noInit, updateInode: noInit, batchGetInodes: noInit };
-        this.meta    = { putMeta: noInit, getMeta: noInit, deleteMeta: noInit, patchMeta: noInit, batchGetMeta: noInit, queryByTag: noInit, queryByMetadata: noInit };
+        this.inodes  = { allocateIno: noInit, putInode: noInit, getInode: noInit, lookup: noInit, forEachInode: noInit, deleteInode: noInit, updateInode: noInit, walkTree: noInit, hasChildren: noInit };
+        this.meta    = { putMeta: noInit, getMeta: noInit, deleteMeta: noInit, patchMeta: noInit, forEachMeta: noInit, walkByTag: noInit, walkByMetadata: noInit };
         this.content = { putData: noInit, getData: noInit, deleteData: noInit, existsData: noInit, sizeData: noInit };
-        this.records = { getRecordField: noInit, setRecordField: noInit, deleteRecordField: noInit, getAllRecordFields: noInit, setAllRecordFields: noInit, clearRecordFields: noInit, listRecordFields: noInit, createRecordIndex: noInit, deleteRecordIndex: noInit, queryRecordFields: noInit };
+        this.records = { getRecordField: noInit, setRecordField: noInit, deleteRecordField: noInit, setAllRecordFields: noInit, clearRecordFields: noInit, createRecordIndex: noInit, deleteRecordIndex: noInit, queryRecordFields: noInit, walkRecordFields: noInit, walkRecordFieldNames: noInit };
     }
 
     async init(): Promise<void> {

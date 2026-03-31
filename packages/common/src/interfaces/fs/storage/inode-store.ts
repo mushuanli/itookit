@@ -8,6 +8,14 @@
 
 import type { FSNodeType } from '../core/types';
 
+/** IInodeStore.walkTree 遍历选项 */
+export interface InodeWalkOptions {
+    /** 遍历顺序 @default 'depth-first' */
+    order?: 'breadth-first' | 'depth-first';
+    /** 最大深度，-1 无限制 @default -1 */
+    maxDepth?: number;
+}
+
 /**
  * 存储层 Inode 记录
  *
@@ -44,15 +52,32 @@ export interface IInodeStore {
     /** 在父目录中按名称查找 */
     lookup(parentIno: number, name: string): Promise<InodeRecord | null>;
 
-    /** 列出子节点 */
-    listChildren(parentIno: number): Promise<InodeRecord[]>;
-
     /** 删除 inode */
     deleteInode(ino: number): Promise<void>;
 
     /** 更新 inode（重命名/移动/nlink 变更） */
     updateInode(ino: number, updates: Partial<Pick<InodeRecord, 'parentIno' | 'name' | 'nlink'>>): Promise<void>;
 
-    /** 批量获取 */
-    batchGetInodes(inos: number[]): Promise<InodeRecord[]>;
+    /**
+     * 流式遍历 inos 列表，找到目标即可停止（替代 batchGetInodes）。
+     * callback 返回 false 时提前终止。
+     */
+    forEachInode(
+        inos: number[],
+        callback: (inode: InodeRecord, index: number) => boolean | Promise<boolean>,
+    ): Promise<void>;
+
+    /**
+     * 遍历以 parentIno 为根的子孙节点（不含 parentIno 本身）。
+     * callback 返回 false 时停止全部遍历，返回 'skip' 时跳过当前节点的子树。
+     * depth 从 0 开始（直接子节点为 0）。
+     */
+    walkTree(
+        parentIno: number,
+        callback: (inode: InodeRecord, depth: number) => boolean | 'skip' | Promise<boolean | 'skip'>,
+        options?: InodeWalkOptions,
+    ): Promise<void>;
+
+    /** 检查 parentIno 是否有直接子节点 */
+    hasChildren(parentIno: number): Promise<boolean>;
 }

@@ -13,7 +13,7 @@
  *   record: { name: "ino", value: number }
  */
 
-import type { IInodeStore, InodeRecord } from '@itookit/common';
+import type { IInodeStore, InodeRecord, InodeWalkOptions } from '@itookit/common';
 import {
     req,
     collectCursor,
@@ -54,7 +54,7 @@ export class IDBInodeStore implements IInodeStore {
         return result ?? null;
     }
 
-    async listChildren(parentIno: number): Promise<InodeRecord[]> {
+    private async _listChildrenInternal(parentIno: number): Promise<InodeRecord[]> {
         const idx = this.inodes.index('idx_parentIno');
         return collectCursor<InodeRecord>(
             idx.openCursor(IDBKeyRange.only(parentIno)) as IDBRequest<IDBCursorWithValue | null>,
@@ -75,13 +75,72 @@ export class IDBInodeStore implements IInodeStore {
         await req(this.inodes.put(updated));
     }
 
-    async batchGetInodes(inos: number[]): Promise<InodeRecord[]> {
-        const results: InodeRecord[] = [];
-        for (const ino of inos) {
-            const rec = await req<InodeRecord | undefined>(this.inodes.get(ino));
-            if (rec) results.push(rec);
+    async forEachInode(
+        inos: number[],
+        callback: (inode: InodeRecord, index: number) => boolean | Promise<boolean>,
+    ): Promise<void> {
+        for (let i = 0; i < inos.length; i++) {
+            const rec = await req<InodeRecord | undefined>(this.inodes.get(inos[i]));
+            if (rec) {
+                if (!(await callback(rec, i))) break;
+            }
         }
-        return results;
+    }
+
+    async walkTree(
+        parentIno: number,
+        callback: (inode: InodeRecord, depth: number) => boolean | 'skip' | Promise<boolean | 'skip'>,
+        options?: InodeWalkOptions,
+    ): Promise<void> {
+        if (options?.order === 'breadth-first') {
+            await this._walkBFS(parentIno, callback, options?.maxDepth ?? -1);
+        } else {
+            await this._walkDFS(parentIno, callback, 0, options?.maxDepth ?? -1);
+        }
+    }
+
+    private async _walkDFS(
+        parentIno: number,
+        callback: (inode: InodeRecord, depth: number) => boolean | 'skip' | Promise<boolean | 'skip'>,
+        depth: number,
+        maxDepth: number,
+    ): Promise<boolean> {
+        const children = await this._listChildrenInternal(parentIno);
+        for (const child of children) {
+            const result = await callback(child, depth);
+            if (result === false) return false;
+            if (result !== 'skip' && child.type === 'directory' && (maxDepth < 0 || depth < maxDepth)) {
+                if (!(await this._walkDFS(child.ino, callback, depth + 1, maxDepth))) return false;
+            }
+        }
+        return true;
+    }
+
+    private async _walkBFS(
+        parentIno: number,
+        callback: (inode: InodeRecord, depth: number) => boolean | 'skip' | Promise<boolean | 'skip'>,
+        maxDepth: number,
+    ): Promise<void> {
+        const queue: Array<{ ino: number; depth: number }> = [{ ino: parentIno, depth: -1 }];
+        while (queue.length > 0) {
+            const { ino, depth } = queue.shift()!;
+            const nextDepth = depth + 1;
+            if (maxDepth >= 0 && nextDepth > maxDepth) continue;
+            const children = await this._listChildrenInternal(ino);
+            for (const child of children) {
+                const result = await callback(child, nextDepth);
+                if (result === false) return;
+                if (result !== 'skip' && child.type === 'directory') {
+                    queue.push({ ino: child.ino, depth: nextDepth });
+                }
+            }
+        }
+    }
+
+    async hasChildren(parentIno: number): Promise<boolean> {
+        const idx = this.inodes.index('idx_parentIno');
+        const count = await req(idx.count(IDBKeyRange.only(parentIno)));
+        return count > 0;
     }
 }
 
