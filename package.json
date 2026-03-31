@@ -5,7 +5,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "dev": "vite",
+    "dev": "pnpm --filter mind-os dev",
     "build": "pnpm -r build",
     "build:libs": "pnpm --filter './packages/*' build",
     "test": "echo \"Error: no test specified\" && exit 1",
