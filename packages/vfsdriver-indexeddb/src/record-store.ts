@@ -20,6 +20,7 @@ import type {
     RecordQuery,
     RecordQueryOptions,
     RecordQueryResult,
+    RecordWalkOptions,
 } from '@itookit/common';
 import { req, collectCursor, deleteCursor, STORE_RECORDS } from './utils';
 
@@ -47,18 +48,6 @@ export class IDBRecordStore implements IRecordStore {
         await req(this.records.delete(IDBKeyRange.only([ino, field])));
     }
 
-    async getAllRecordFields(ino: number): Promise<Record<string, RecordValue>> {
-        const idx = this.records.index('idx_ino');
-        const rows = await collectCursor<RecordRow>(
-            idx.openCursor(IDBKeyRange.only(ino)) as IDBRequest<IDBCursorWithValue | null>,
-        );
-        const result: Record<string, RecordValue> = {};
-        for (const row of rows) {
-            result[row.field] = row.value;
-        }
-        return result;
-    }
-
     async setAllRecordFields(ino: number, fields: Record<string, RecordValue>): Promise<void> {
         await this.clearRecordFields(ino);
         for (const [field, value] of Object.entries(fields)) {
@@ -73,12 +62,39 @@ export class IDBRecordStore implements IRecordStore {
         );
     }
 
-    async listRecordFields(ino: number): Promise<string[]> {
+    async walkRecordFields(
+        ino: number,
+        callback: (field: string, value: RecordValue) => boolean | Promise<boolean>,
+        options?: RecordWalkOptions,
+    ): Promise<{ total: number; processed: number }> {
         const idx = this.records.index('idx_ino');
         const rows = await collectCursor<RecordRow>(
             idx.openCursor(IDBKeyRange.only(ino)) as IDBRequest<IDBCursorWithValue | null>,
         );
-        return rows.map((r) => r.field);
+        const filtered = options?.prefix ? rows.filter(r => r.field.startsWith(options.prefix!)) : rows;
+        const total = filtered.length;
+        let processed = 0;
+        const offset = options?.offset ?? 0;
+        const limit = options?.limit ?? Infinity;
+        for (let i = offset; i < filtered.length && processed < limit; i++) {
+            if (!(await callback(filtered[i].field, filtered[i].value))) break;
+            processed++;
+        }
+        return { total, processed };
+    }
+
+    async walkRecordFieldNames(
+        ino: number,
+        callback: (field: string) => boolean | Promise<boolean>,
+        options?: { prefix?: string; limit?: number },
+    ): Promise<number> {
+        let count = 0;
+        await this.walkRecordFields(ino, async (field) => {
+            if (!(await callback(field))) return false;
+            count++;
+            return true;
+        }, options);
+        return count;
     }
 
     async createRecordIndex(_ino: number, _field: string): Promise<void> {
@@ -96,15 +112,13 @@ export class IDBRecordStore implements IRecordStore {
         query: RecordQuery,
         options?: RecordQueryOptions,
     ): Promise<RecordQueryResult[]> {
-        const all = await this.getAllRecordFields(ino);
         const matched: RecordQueryResult[] = [];
-
-        for (const [field, value] of Object.entries(all)) {
+        await this.walkRecordFields(ino, (field, value) => {
             if (matchesQuery(field, value, query)) {
                 matched.push({ field, value });
             }
-        }
-
+            return true;
+        });
         const offset = options?.offset ?? 0;
         const limit = options?.limit ?? matched.length;
         return matched.slice(offset, offset + limit);

@@ -18,11 +18,24 @@ export interface SeqFileEntry {
 export interface ISeqFileOperations {
     getEntry(fileIdOrPath: string, key: string): Promise<string | null>;
     getEntries(fileIdOrPath: string, keys: string[]): Promise<Record<string, string>>;
-    getAllEntries(fileIdOrPath: string): Promise<SeqFileEntry[]>;
     setEntry(fileIdOrPath: string, key: string, value: string): Promise<void>;
     setEntries(fileIdOrPath: string, entries: Record<string, string>): Promise<void>;
     deleteEntry(fileIdOrPath: string, key: string): Promise<void>;
     hasEntry(fileIdOrPath: string, key: string): Promise<boolean>;
+
+    /**
+     * 流式遍历所有条目（替代 getAllEntries）。
+     * callback 返回 false 时提前终止。
+     */
+    walkEntries(
+        fileIdOrPath: string,
+        callback: (entry: SeqFileEntry) => boolean | Promise<boolean>,
+        options?: {
+            keyPrefix?: string;
+            limit?: number;
+            offset?: number;
+        },
+    ): Promise<{ total: number; processed: number }>;
 
     /**
      * 查询字段（需要后端支持 IRecordStore）

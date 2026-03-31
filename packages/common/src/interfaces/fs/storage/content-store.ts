@@ -11,11 +11,29 @@
  * - 内容寻址: ref = SHA256 hash
  */
 
+/** streamData 选项 */
+export interface ContentStreamOptions {
+    /** 分块大小（字节）@default 65536 (64KB) */
+    chunkSize?: number;
+    /** 起始偏移量 @default 0 */
+    startOffset?: number;
+    /** 最大读取字节数，不指定则读取全部 */
+    maxLength?: number;
+}
+
+/** streamData 结果 */
+export interface ContentStreamResult {
+    /** 实际读取的字节数 */
+    bytesRead: number;
+    /** true = 读取到末尾，false = callback 提前终止 */
+    completed: boolean;
+}
+
 export interface IContentStore {
     /** 写入内容 */
     putData(ref: string, data: ArrayBuffer): Promise<void>;
 
-    /** 读取内容 */
+    /** 读取内容（完整读取，适合小文件） */
     getData(ref: string): Promise<ArrayBuffer | null>;
 
     /** 删除内容 */
@@ -35,4 +53,15 @@ export interface IContentStore {
 
     /** 追加写入（可选） */
     appendData?(ref: string, data: ArrayBuffer): Promise<void>;
+
+    /**
+     * 流式读取大文件（可选）。
+     * 按 chunkSize 分块回调，callback 返回 false 时停止。
+     * 后端不支持时退化为全量 getData 后分块。
+     */
+    streamData?(
+        ref: string,
+        callback: (chunk: ArrayBuffer, offset: number) => boolean | Promise<boolean>,
+        options?: ContentStreamOptions,
+    ): Promise<ContentStreamResult>;
 }

@@ -84,13 +84,14 @@ describe('IDBInodeStore', () => {
         expect(await backend.inodes.lookup(1, 'no-such.txt')).toBeNull();
     });
 
-    it('listChildren returns all children of a parent', async () => {
+    it('walkTree(maxDepth:0) returns all direct children of a parent', async () => {
         const parentIno = 42;
         for (let i = 0; i < 3; i++) {
             const ino = await backend.inodes.allocateIno();
             await backend.inodes.putInode({ ino, parentIno, name: `child${i}.txt`, type: 'file', createdAt: Date.now(), nlink: 1 });
         }
-        const children = await backend.inodes.listChildren(parentIno);
+        const children: import('@itookit/common').InodeRecord[] = [];
+        await backend.inodes.walkTree(parentIno, (inode) => { children.push(inode); return true; }, { maxDepth: 0 });
         expect(children).toHaveLength(3);
     });
 
@@ -110,13 +111,14 @@ describe('IDBInodeStore', () => {
         expect(updated?.parentIno).toBe(2);
     });
 
-    it('batchGetInodes returns existing inodes only', async () => {
+    it('forEachInode visits existing inodes and skips missing', async () => {
         const ino1 = await backend.inodes.allocateIno();
         const ino2 = await backend.inodes.allocateIno();
         await backend.inodes.putInode({ ino: ino1, parentIno: 1, name: 'a.txt', type: 'file', createdAt: Date.now(), nlink: 1 });
         await backend.inodes.putInode({ ino: ino2, parentIno: 1, name: 'b.txt', type: 'file', createdAt: Date.now(), nlink: 1 });
-        const batch = await backend.inodes.batchGetInodes([ino1, ino2, 99999]);
-        expect(batch).toHaveLength(2);
+        const visited: number[] = [];
+        await backend.inodes.forEachInode([ino1, ino2, 99999], (inode) => { visited.push(inode.ino); return true; });
+        expect(visited).toHaveLength(2);
     });
 });
 
@@ -155,18 +157,20 @@ describe('IDBMetaStore', () => {
         expect(got?.version).toBe(1);
     });
 
-    it('queryByTag returns matching inos', async () => {
+    it('walkByTag visits matching inos', async () => {
         await backend.meta.putMeta({ ino: 401, modifiedAt: Date.now(), size: 0, version: 0, tags: ['vip'] });
         await backend.meta.putMeta({ ino: 402, modifiedAt: Date.now(), size: 0, version: 0, tags: ['vip', 'other'] });
         await backend.meta.putMeta({ ino: 403, modifiedAt: Date.now(), size: 0, version: 0, tags: ['other'] });
-        const vips = await backend.meta.queryByTag('vip');
+        const vips: number[] = [];
+        await backend.meta.walkByTag('vip', (ino) => { vips.push(ino); return true; });
         expect(vips.sort()).toEqual([401, 402]);
     });
 
-    it('queryByMetadata finds matching records', async () => {
+    it('walkByMetadata finds matching records', async () => {
         await backend.meta.putMeta({ ino: 501, modifiedAt: Date.now(), size: 0, version: 0, metadata: { color: 'red' } as any });
         await backend.meta.putMeta({ ino: 502, modifiedAt: Date.now(), size: 0, version: 0, metadata: { color: 'blue' } as any });
-        const reds = await backend.meta.queryByMetadata('color', 'red');
+        const reds: number[] = [];
+        await backend.meta.walkByMetadata('color', 'red', (ino) => { reds.push(ino); return true; });
         expect(reds).toEqual([501]);
     });
 });
@@ -256,17 +260,19 @@ describe('IDBRecordStore', () => {
         expect(await backend.records!.getRecordField(1, 'age')).toBeUndefined();
     });
 
-    it('getAllRecordFields returns all key-value pairs', async () => {
+    it('walkRecordFields returns all key-value pairs', async () => {
         await backend.records!.setRecordField(2, 'x', 'val-x');
         await backend.records!.setRecordField(2, 'y', 'val-y');
-        const all = await backend.records!.getAllRecordFields(2);
+        const all: Record<string, import('@itookit/common').RecordValue> = {};
+        await backend.records!.walkRecordFields(2, (f, v) => { all[f] = v; return true; });
         expect(all).toMatchObject({ x: 'val-x', y: 'val-y' });
     });
 
     it('setAllRecordFields replaces all fields atomically', async () => {
         await backend.records!.setRecordField(3, 'old', 'v');
         await backend.records!.setAllRecordFields(3, { new1: 'a', new2: 'b' });
-        const all = await backend.records!.getAllRecordFields(3);
+        const all: Record<string, import('@itookit/common').RecordValue> = {};
+        await backend.records!.walkRecordFields(3, (f, v) => { all[f] = v; return true; });
         expect(Object.keys(all)).not.toContain('old');
         expect(all.new1).toBe('a');
     });
@@ -275,14 +281,15 @@ describe('IDBRecordStore', () => {
         await backend.records!.setRecordField(4, 'k1', 'v1');
         await backend.records!.setRecordField(4, 'k2', 'v2');
         await backend.records!.clearRecordFields(4);
-        const all = await backend.records!.getAllRecordFields(4);
-        expect(Object.keys(all)).toHaveLength(0);
+        const count = await backend.records!.walkRecordFieldNames(4, () => true);
+        expect(count).toBe(0);
     });
 
-    it('listRecordFields returns field names', async () => {
+    it('walkRecordFieldNames returns field names', async () => {
         await backend.records!.setRecordField(5, 'a', 1);
         await backend.records!.setRecordField(5, 'b', 2);
-        const fields = await backend.records!.listRecordFields(5);
+        const fields: string[] = [];
+        await backend.records!.walkRecordFieldNames(5, (f) => { fields.push(f); return true; });
         expect(fields.sort()).toEqual(['a', 'b']);
     });
 
@@ -326,7 +333,8 @@ describe('IndexedDBBackend.runInTransaction', () => {
             await scope.meta.putMeta({ ino, modifiedAt: Date.now(), size: 5, version: 0 });
             await scope.content.putData(String(ino), new TextEncoder().encode('hello').buffer as ArrayBuffer);
         });
-        const children = await backend.inodes.listChildren(1);
+        const children: import('@itookit/common').InodeRecord[] = [];
+        await backend.inodes.walkTree(1, (inode) => { children.push(inode); return true; }, { maxDepth: 0 });
         expect(children.some(c => c.name === 'tx.txt')).toBe(true);
     });
 
@@ -340,7 +348,12 @@ describe('IndexedDBBackend.runInTransaction', () => {
     });
 
     it('tx aborts on error, leaving store unchanged', async () => {
-        const before = await backend.inodes.listChildren(1);
+        const collectChildren = async () => {
+            const items: import('@itookit/common').InodeRecord[] = [];
+            await backend.inodes.walkTree(1, (inode) => { items.push(inode); return true; }, { maxDepth: 0 });
+            return items;
+        };
+        const before = await collectChildren();
         try {
             await backend.runInTransaction('readwrite', async (scope) => {
                 const ino = await scope.inodes.allocateIno();
@@ -348,7 +361,7 @@ describe('IndexedDBBackend.runInTransaction', () => {
                 throw new Error('abort!');
             });
         } catch { /* expected */ }
-        const after = await backend.inodes.listChildren(1);
+        const after = await collectChildren();
         // With IDB, the failed transaction is rolled back
         expect(after.length).toBe(before.length);
     });

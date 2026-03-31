@@ -29,11 +29,27 @@ export interface IRefOperations {
         refType: RefType,
     ): Promise<void>;
 
-    /** 查询正向引用 */
-    getOutgoing(idOrPath: string, opts?: RefQueryOptions): Promise<Reference[]>;
+    /**
+     * 流式遍历正向引用（替代 getOutgoing）。
+     * callback 返回 false 时提前终止。
+     * 返回实际处理数量。
+     */
+    walkOutgoing(
+        idOrPath: string,
+        callback: (ref: Reference) => boolean | Promise<boolean>,
+        opts?: RefQueryOptions,
+    ): Promise<number>;
 
-    /** 查询反向引用（backlinks） */
-    getIncoming(idOrPath: string, opts?: RefQueryOptions): Promise<Reference[]>;
+    /**
+     * 流式遍历反向引用（替代 getIncoming）。
+     * callback 返回 false 时提前终止。
+     * 返回实际处理数量。
+     */
+    walkIncoming(
+        idOrPath: string,
+        callback: (ref: Reference) => boolean | Promise<boolean>,
+        opts?: RefQueryOptions,
+    ): Promise<number>;
 
     /** 检查引用是否存在 */
     hasRef(

@@ -367,7 +367,12 @@ export class ModuleFS implements IModuleFS {
     async getChildren(idOrPath: string, options?: ListOptions): Promise<FSNode[] | DirEntry[]> {
         const r = await this._resolve(idOrPath, 'getChildren');
         const backend = this._moduleBackend;
-        const children = await backend.inodes.listChildren(r.ino);
+        const childrenRaw: import('@itookit/common').InodeRecord[] = [];
+        await backend.inodes.walkTree(r.ino, (inode) => {
+            childrenRaw.push(inode);
+            return 'skip';
+        }, { maxDepth: 0 });
+        const children = childrenRaw;
 
         const filtered = children.filter(c => {
             if (!options?.includeHidden && isHiddenName(c.name)) return false;
@@ -424,8 +429,9 @@ export class ModuleFS implements IModuleFS {
 
         // SeqFile: serialize to string
         if (r.inode.type === 'seqfile' && this.seq) {
-            const entries = await this.seq.getAllEntries(idOrPath);
-            const text = entries.map(e => `${e.key}=${e.value}`).join('\n');
+            const lines: string[] = [];
+            await this.seq.walkEntries(idOrPath, (e) => { lines.push(`${e.key}=${e.value}`); return true; });
+            const text = lines.join('\n');
             return options?.encoding === 'binary' ? toBuffer(text) : text;
         }
 
@@ -472,9 +478,13 @@ export class ModuleFS implements IModuleFS {
             if (count >= limit) return false;
 
             const backend = this._moduleBackend;
-            const children = await backend.inodes.listChildren(
-                (await this.engine.resolve(currentPath)).ino,
-            );
+            const parentIno = (await this.engine.resolve(currentPath)).ino;
+            const childrenArr: import('@itookit/common').InodeRecord[] = [];
+            await backend.inodes.walkTree(parentIno, (inode) => {
+                childrenArr.push(inode);
+                return 'skip';
+            }, { maxDepth: 0 });
+            const children = childrenArr;
 
             for (const child of children) {
                 if (count >= limit) return false;
@@ -1174,10 +1184,12 @@ class InlineAssetOps implements IAssetOperations {
         const assetDirIno = await this.getAssetDirIno(ownerIdOrPath);
         if (assetDirIno === null) return [];
 
-        const children = await this.fs._backend.inodes.listChildren(assetDirIno);
-        return children
-            .filter(c => includeHidden || !isHiddenName(c.name))
-            .map(c => c.name);
+        const names: string[] = [];
+        await this.fs._backend.inodes.walkTree(assetDirIno, (inode) => {
+            if (includeHidden || !isHiddenName(inode.name)) names.push(inode.name);
+            return 'skip';
+        }, { maxDepth: 0 });
+        return names;
     }
 
     async deleteAsset(ownerIdOrPath: string, assetName: string): Promise<void> {
@@ -1264,9 +1276,12 @@ class InlineTagOps implements ITagOperations {
         await this.setTags(idOrPath, current.filter(t => t !== tag));
     }
 
-    async findByTag(tag: string): Promise<string[]> {
-        const inos = await this.fs._backend.meta.queryByTag(tag);
-        return inos.map(ino => this.fs._id(ino));
+    async walkByTag(
+        tag: string,
+        callback: (nodeId: string) => boolean | Promise<boolean>,
+        options?: { limit?: number; offset?: number },
+    ): Promise<{ total: number; processed: number }> {
+        return this.fs._backend.meta.walkByTag(tag, (ino) => callback(this.fs._id(ino)), options);
     }
 }
 
@@ -1345,8 +1360,12 @@ class InlineRefOps implements IRefOperations {
         });
     }
 
-    async getOutgoing(idOrPath: string, opts?: RefQueryOptions): Promise<Reference[]> {
-        const r = await this.fs._resolve(idOrPath, 'getOutgoing');
+    async walkOutgoing(
+        idOrPath: string,
+        callback: (ref: Reference) => boolean | Promise<boolean>,
+        opts?: RefQueryOptions,
+    ): Promise<number> {
+        const r = await this.fs._resolve(idOrPath, 'walkOutgoing');
         const meta = await this.fs._backend.meta.getMeta(r.ino);
         const sourceId = this.fs._id(r.ino);
 
@@ -1363,11 +1382,21 @@ class InlineRefOps implements IRefOperations {
         }
         if (opts?.offset) refs = refs.slice(opts.offset);
         if (opts?.limit) refs = refs.slice(0, opts.limit);
-        return refs;
+
+        let count = 0;
+        for (const ref of refs) {
+            if (!(await callback(ref))) break;
+            count++;
+        }
+        return count;
     }
 
-    async getIncoming(idOrPath: string, opts?: RefQueryOptions): Promise<Reference[]> {
-        const r = await this.fs._resolve(idOrPath, 'getIncoming');
+    async walkIncoming(
+        idOrPath: string,
+        callback: (ref: Reference) => boolean | Promise<boolean>,
+        opts?: RefQueryOptions,
+    ): Promise<number> {
+        const r = await this.fs._resolve(idOrPath, 'walkIncoming');
         const meta = await this.fs._backend.meta.getMeta(r.ino);
         const targetId = this.fs._id(r.ino);
 
@@ -1384,7 +1413,13 @@ class InlineRefOps implements IRefOperations {
         }
         if (opts?.offset) refs = refs.slice(opts.offset);
         if (opts?.limit) refs = refs.slice(0, opts.limit);
-        return refs;
+
+        let count = 0;
+        for (const ref of refs) {
+            if (!(await callback(ref))) break;
+            count++;
+        }
+        return count;
     }
 
     async hasRef(
@@ -1394,8 +1429,15 @@ class InlineRefOps implements IRefOperations {
     ): Promise<boolean> {
         const targetR = await this.fs._resolve(targetIdOrPath, 'hasRef');
         const targetId = this.fs._id(targetR.ino);
-        const outgoing = await this.getOutgoing(sourceIdOrPath, { refTypes: [refType] });
-        return outgoing.some(r => r.targetId === targetId);
+        let found = false;
+        await this.walkOutgoing(sourceIdOrPath, (ref) => {
+            if (ref.refType === refType && ref.targetId === targetId) {
+                found = true;
+                return false;
+            }
+            return true;
+        }, { refTypes: [refType] });
+        return found;
     }
 
     async syncOutgoing(
@@ -1406,8 +1448,13 @@ class InlineRefOps implements IRefOperations {
             extra?: Record<string, unknown>;
         }>,
     ): Promise<void> {
+        // Collect existing outgoing refs
+        const existing: Reference[] = [];
+        await this.walkOutgoing(sourceIdOrPath, (ref) => {
+            existing.push(ref);
+            return true;
+        });
         // Remove all existing outgoing
-        const existing = await this.getOutgoing(sourceIdOrPath);
         for (const ref of existing) {
             await this.removeRef(sourceIdOrPath, ref.targetId, ref.refType);
         }
@@ -1462,13 +1509,15 @@ class InlineSeqOps implements ISeqFileOperations {
         return result;
     }
 
-    async getAllEntries(fileIdOrPath: string): Promise<SeqFileEntry[]> {
-        const r = await this.mustBeSeqFile(fileIdOrPath, 'seqGetAll');
-        const fields = await this.records.getAllRecordFields(r.ino);
-        return Object.entries(fields).map(([key, value]) => ({
-            key,
-            value: String(value),
-        }));
+    async walkEntries(
+        fileIdOrPath: string,
+        callback: (entry: SeqFileEntry) => boolean | Promise<boolean>,
+        options?: { keyPrefix?: string; limit?: number; offset?: number },
+    ): Promise<{ total: number; processed: number }> {
+        const r = await this.mustBeSeqFile(fileIdOrPath, 'seqWalkEntries');
+        return this.records.walkRecordFields(r.ino, (key, value) => {
+            return callback({ key, value: String(value) });
+        }, { prefix: options?.keyPrefix, limit: options?.limit, offset: options?.offset });
     }
 
     async setEntry(fileIdOrPath: string, key: string, value: string): Promise<void> {

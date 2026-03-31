@@ -493,8 +493,7 @@ export class VFSEngine {
         const { ino, parentIno, name, inode } = resolved;
 
         if (inode.type === 'directory' && !opts?.recursive) {
-            const children = await backend.inodes.listChildren(ino);
-            if (children.length > 0) {
+            if (await backend.inodes.hasChildren(ino)) {
                 throw new FSError('ENOTEMPTY', 'directory not empty', 'delete', path);
             }
         }
@@ -817,7 +816,12 @@ export class VFSEngine {
         if (resolved.inode.type !== 'directory') {
             throw new FSError('ENOTDIR', 'not a directory', 'list', path);
         }
-        return backend.inodes.listChildren(resolved.ino);
+        const children: InodeRecord[] = [];
+        await backend.inodes.walkTree(resolved.ino, (inode) => {
+            children.push(inode);
+            return 'skip';
+        }, { maxDepth: 0 });
+        return children;
     }
 
     private async ensureDirectoryPath(backend: IStorageBackend, localPath: string): Promise<number> {

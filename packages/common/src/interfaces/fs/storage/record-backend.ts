@@ -32,14 +32,20 @@ export interface RecordQueryResult {
     value: RecordValue;
 }
 
+/** walkRecordFields 选项 */
+export interface RecordWalkOptions {
+    /** 字段名前缀过滤 */
+    prefix?: string;
+    limit?: number;
+    offset?: number;
+}
+
 export interface IRecordStore {
     getRecordField(ino: number, field: string): Promise<RecordValue | undefined>;
     setRecordField(ino: number, field: string, value: RecordValue): Promise<void>;
     deleteRecordField(ino: number, field: string): Promise<void>;
-    getAllRecordFields(ino: number): Promise<Record<string, RecordValue>>;
     setAllRecordFields(ino: number, fields: Record<string, RecordValue>): Promise<void>;
     clearRecordFields(ino: number): Promise<void>;
-    listRecordFields(ino: number): Promise<string[]>;
     createRecordIndex(ino: number, field: string): Promise<void>;
     deleteRecordIndex(ino: number, field: string): Promise<void>;
     queryRecordFields(
@@ -47,4 +53,25 @@ export interface IRecordStore {
         query: RecordQuery,
         options?: RecordQueryOptions,
     ): Promise<RecordQueryResult[]>;
+
+    /**
+     * 流式遍历所有字段（替代 getAllRecordFields + listRecordFields）。
+     * callback 返回 false 时提前终止。
+     * 支持前缀过滤和分页。
+     */
+    walkRecordFields(
+        ino: number,
+        callback: (field: string, value: RecordValue) => boolean | Promise<boolean>,
+        options?: RecordWalkOptions,
+    ): Promise<{ total: number; processed: number }>;
+
+    /**
+     * 流式遍历字段名（只需要字段名时比 walkRecordFields 更高效）。
+     * callback 返回 false 时提前终止。
+     */
+    walkRecordFieldNames(
+        ino: number,
+        callback: (field: string) => boolean | Promise<boolean>,
+        options?: { prefix?: string; limit?: number },
+    ): Promise<number>;
 }
