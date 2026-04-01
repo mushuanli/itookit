@@ -58,6 +58,9 @@ importers:
       '@itookit/app-settings':
         specifier: workspace:*
         version: link:../../packages/app-settings
+      '@itookit/app-shell':
+        specifier: workspace:*
+        version: link:../../packages/app-shell
       '@itookit/common':
         specifier: workspace:*
         version: link:../../packages/common
@@ -155,6 +158,9 @@ importers:
       '@itookit/app-settings':
         specifier: workspace:*
         version: link:../../packages/app-settings
+      '@itookit/app-shell':
+        specifier: workspace:*
+        version: link:../../packages/app-shell
       '@itookit/common':
         specifier: workspace:*
         version: link:../../packages/common
@@ -240,6 +246,45 @@ importers:
       vite-plugin-dts:
         specifier: ^3.9.1
         version: 3.9.1(@types/node@20.19.25)(rollup@4.53.3)(typescript@5.9.3)(vite@5.4.21(@types/node@20.19.25))
+
+  packages/app-shell:
+    devDependencies:
+      '@itookit/app-settings':
+        specifier: workspace:*
+        version: link:../app-settings
+      '@itookit/common':
+        specifier: workspace:*
+        version: link:../common
+      '@itookit/device-llm':
+        specifier: workspace:*
+        version: link:../device-llm
+      '@itookit/llm-engine':
+        specifier: workspace:*
+        version: link:../llm-engine
+      '@itookit/llm-kernel':
+        specifier: workspace:*
+        version: link:../llm-kernel
+      '@itookit/llm-ui':
+        specifier: workspace:*
+        version: link:../llm-ui
+      '@itookit/mdxeditor':
+        specifier: workspace:*
+        version: link:../mdx
+      '@itookit/memory-manager':
+        specifier: workspace:*
+        version: link:../memory-manager
+      '@itookit/vfs-ui':
+        specifier: workspace:*
+        version: link:../vfs-ui
+      '@itookit/vfslib':
+        specifier: workspace:*
+        version: link:../vfslib
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.4(@types/debug@4.1.12)(@types/node@25.2.3)(jsdom@27.2.0)
 
   packages/common:
     devDependencies:
@@ -651,6 +696,9 @@ importers:
       '@itookit/vfsdriver-indexeddb':
         specifier: workspace:*
         version: link:../vfsdriver-indexeddb
+      '@itookit/vfsdriver-localfs':
+        specifier: workspace:*
+        version: link:../vfsdriver-localfs
       fake-indexeddb:
         specifier: ^6.0.0
         version: 6.2.5
