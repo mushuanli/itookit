@@ -1,7 +1,7 @@
 // @file: app-settings/services/SyncService.ts
 
 import { CONFIG_MODULE } from '@itookit/common';
-import type { IVFSManager, FSNode } from '@itookit/common';
+import type { IVFSManager } from '@itookit/common';
 import type { SyncConflict } from '../types/sync';
 import {
   AppSyncSettings,
@@ -395,26 +395,21 @@ export class SyncService {
 
     for (const mod of modules) {
       const engine = this.vfs.getEngine(mod.name);
-      const walk = async (parentPath: string): Promise<void> => {
-        const children = await engine.getChildren(parentPath, { includeAssetDirs: true, includeInternalDirs: true, includeHidden: true }) as FSNode[];
-        for (const child of children) {
-          if (child.type === 'file') {
-            try {
-              const raw = await engine.readContent(child.id);
-              const buf = this.toArrayBuffer(raw);
-              files.push({
-                path: `/${mod.name}${child.path}`,
-                hash: await this.sha256hex(buf),
-                mtime: child.modifiedAt,
-                is_deleted: false,
-              });
-            } catch { /* skip unreadable */ }
-          } else if (child.type === 'directory') {
-            await walk(child.id);
-          }
-        }
-      };
-      try { await walk('/'); } catch (e) {
+      try {
+        await engine.walkTree?.(async (node) => {
+          if (node.type !== 'file') return;
+          try {
+            const raw = await engine.readContent(node.id);
+            const buf = this.toArrayBuffer(raw);
+            files.push({
+              path: `/${mod.name}${node.path}`,
+              hash: await this.sha256hex(buf),
+              mtime: node.modifiedAt,
+              is_deleted: false,
+            });
+          } catch { /* skip unreadable */ }
+        }, { includeHidden: true, includeAssetDirs: true, includeInternalDirs: true });
+      } catch (e) {
         this.log('warn', `索引模块 ${mod.name} 失败`);
       }
     }

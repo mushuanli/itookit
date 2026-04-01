@@ -137,6 +137,97 @@ describe('ITEMS_BATCH_UPDATE_SUCCESS', () => {
 
 // ── Subscriber notification ───────────────────────────────────────────────────
 
+// ── FOLDER_TOGGLE (accordion) ─────────────────────────────────────────────────
+
+describe('FOLDER_TOGGLE — accordion behavior', () => {
+    const loadTree = (...nodes: VFSNodeUI[]) =>
+        store.dispatch({ type: 'STATE_LOAD_SUCCESS', payload: { items: nodes, tags: new Map() } });
+
+    const toggle = (id: string) =>
+        store.dispatch({ type: 'FOLDER_TOGGLE', payload: { folderId: id } });
+
+    const expanded = () => store.getState().expandedFolderIds;
+
+    it('expands a folder', () => {
+        loadTree(dir('a'), dir('b'));
+        toggle('a');
+        expect(expanded().has('a')).toBe(true);
+    });
+
+    it('collapses an already-expanded folder', () => {
+        loadTree(dir('a'), dir('b'));
+        toggle('a');
+        toggle('a');
+        expect(expanded().has('a')).toBe(false);
+    });
+
+    it('collapses sibling when expanding another at same level', () => {
+        loadTree(dir('a'), dir('b'), dir('c'));
+        toggle('a');
+        toggle('b'); // should collapse 'a'
+        expect(expanded().has('a')).toBe(false);
+        expect(expanded().has('b')).toBe(true);
+    });
+
+    it('collapses sibling AND its expanded descendants', () => {
+        const inner = dir('a-child', 'a');  // parentId = 'a'
+        loadTree(dir('a', null, [inner]), dir('b'));
+        toggle('a');
+        // simulate 'a-child' being loaded and expanded
+        store.dispatch({ type: 'FOLDER_CHILDREN_LOADED', payload: { parentId: 'a', children: [inner] } });
+        toggle('a-child');
+        expect(expanded().has('a-child')).toBe(true);
+
+        // now expand 'b' — should collapse 'a' and 'a-child'
+        toggle('b');
+        expect(expanded().has('a')).toBe(false);
+        expect(expanded().has('a-child')).toBe(false);
+        expect(expanded().has('b')).toBe(true);
+    });
+
+    it('collapsing a folder also removes its expanded descendants', () => {
+        const child = dir('a-child', 'a');  // parentId = 'a'
+        loadTree(dir('a', null, [child]));
+        toggle('a');
+        store.dispatch({ type: 'FOLDER_CHILDREN_LOADED', payload: { parentId: 'a', children: [child] } });
+        toggle('a-child');
+        expect(expanded().has('a-child')).toBe(true);
+
+        toggle('a'); // collapse parent → should also remove 'a-child'
+        expect(expanded().has('a')).toBe(false);
+        expect(expanded().has('a-child')).toBe(false);
+    });
+
+    // ── FOLDER_CHILDREN_LOADED also applies accordion (startup restoration path) ──
+
+    it('FOLDER_CHILDREN_LOADED collapses siblings (startup path bypasses FOLDER_TOGGLE)', () => {
+        // Simulate old persisted state: multiple siblings were expanded
+        loadTree(dir('a'), dir('b'), dir('c'));
+        store.dispatch({ type: 'FOLDER_CHILDREN_LOADED', payload: { parentId: 'a', children: [] } });
+        store.dispatch({ type: 'FOLDER_CHILDREN_LOADED', payload: { parentId: 'b', children: [] } });
+        // 'a' should have been collapsed when 'b' loaded
+        expect(expanded().has('a')).toBe(false);
+        expect(expanded().has('b')).toBe(true);
+
+        store.dispatch({ type: 'FOLDER_CHILDREN_LOADED', payload: { parentId: 'c', children: [] } });
+        expect(expanded().has('b')).toBe(false);
+        expect(expanded().has('c')).toBe(true);
+    });
+
+    it('does not affect other levels when expanding a nested folder', () => {
+        const child1 = dir('a-c1', 'a');  // parentId = 'a'
+        const child2 = dir('a-c2', 'a');  // parentId = 'a'
+        loadTree(dir('a', null, [child1, child2]), dir('b'));
+        toggle('a');
+        store.dispatch({ type: 'FOLDER_CHILDREN_LOADED', payload: { parentId: 'a', children: [child1, child2] } });
+        toggle('a-c1');
+        toggle('a-c2'); // collapses sibling 'a-c1', NOT the parent 'a'
+        expect(expanded().has('a')).toBe(true);  // parent still open
+        expect(expanded().has('a-c1')).toBe(false);
+        expect(expanded().has('a-c2')).toBe(true);
+    });
+});
+
 describe('subscriber notifications', () => {
     it('notifies subscribers on state change', () => {
         const snapshots: number[] = [];

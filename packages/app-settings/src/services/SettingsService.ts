@@ -2,7 +2,7 @@
  * @file: app-settings/services/SettingsService.ts
  */
 import { FS_MODULE_AGENTS, CONFIG_MODULE } from '@itookit/common';
-import type { IVFSManager, VFSManagerEvent, FSNode } from '@itookit/common';
+import type { IVFSManager, VFSManagerEvent } from '@itookit/common';
 import { FSAlreadyExistsError, FSNotFoundError } from '@itookit/common';
 import type { SyncMode } from '../types/sync';
 import { SettingsState, Contact, Tag } from '../types/types';
@@ -461,28 +461,20 @@ export class SettingsService {
     private async traverseModuleFiles(moduleName: string, list: FileMeta[]): Promise<void> {
         const engine = this.vfs.getEngine(moduleName);
 
-        const walk = async (parentIdOrPath: string): Promise<void> => {
-            const children = await engine.getChildren(parentIdOrPath, { includeAssetDirs: true, includeInternalDirs: true, includeHidden: true }) as FSNode[];
-            for (const child of children) {
-                if (child.type === 'file') {
-                    try {
-                        const raw = await engine.readContent(child.id);
-                        const buffer = this.toArrayBuffer(raw);
-                        const hash = await this.computeSHA256(buffer);
-                        list.push({
-                            path: `/${moduleName}${child.path}`,
-                            hash,
-                            mtime: child.modifiedAt,
-                            is_deleted: false,
-                        });
-                    } catch { /* skip */ }
-                } else if (child.type === 'directory') {
-                    await walk(child.id);
-                }
-            }
-        };
-
-        await walk('/');
+        await engine.walkTree?.(async (node) => {
+            if (node.type !== 'file') return;
+            try {
+                const raw = await engine.readContent(node.id);
+                const buffer = this.toArrayBuffer(raw);
+                const hash = await this.computeSHA256(buffer);
+                list.push({
+                    path: `/${moduleName}${node.path}`,
+                    hash,
+                    mtime: node.modifiedAt,
+                    is_deleted: false,
+                });
+            } catch { /* skip */ }
+        }, { includeHidden: true, includeAssetDirs: true, includeInternalDirs: true });
     }
 
     private async uploadFile(systemPath: string, token: string): Promise<void> {

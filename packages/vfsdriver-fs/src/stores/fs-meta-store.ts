@@ -85,6 +85,7 @@ export class FsMetaStore implements IMetaStore {
     private readonly stmtDeleteTags: Database.Statement;
     private readonly stmtInsertTag: Database.Statement;
     private readonly stmtQueryByTag: Database.Statement;
+    private readonly stmtAllDistinctTags: Database.Statement;
 
     constructor(private readonly db: Database.Database) {
         this.stmtPut = db.prepare(`
@@ -123,6 +124,7 @@ export class FsMetaStore implements IMetaStore {
         this.stmtQueryByTag = db.prepare(
             'SELECT ino FROM inode_tags WHERE tag = ?',
         );
+        this.stmtAllDistinctTags = db.prepare('SELECT DISTINCT tag FROM inode_tags');
     }
 
     async putMeta(meta: MetaRecord): Promise<void> {
@@ -172,6 +174,10 @@ export class FsMetaStore implements IMetaStore {
                 if (!(await callback(rowToMeta(row), i))) break;
             }
         }
+    }
+
+    async getAllDistinctTags(): Promise<string[]> {
+        return (this.stmtAllDistinctTags.all() as Array<{ tag: string }>).map(r => r.tag);
     }
 
     async walkByTag(

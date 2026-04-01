@@ -182,7 +182,7 @@ export class FsInodeStore implements IInodeStore {
             for (const child of children) {
                 const result = await callback(child, nextDepth);
                 if (result === false) return;
-                if (result !== 'skip' && child.type === 'directory') {
+                if (result !== 'skip' && child.type === 'directory' && (maxDepth < 0 || nextDepth < maxDepth)) {
                     queue.push({ ino: child.ino, depth: nextDepth });
                 }
             }
