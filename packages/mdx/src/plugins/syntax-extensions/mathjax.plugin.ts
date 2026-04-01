@@ -70,8 +70,6 @@ class MathJaxManager {
     if (this.instanceCount === 1) {
       this.config = config;
       this.cdnUrl = cdnUrl;
-    } else if (JSON.stringify(this.config) !== JSON.stringify(config)) {
-      console.warn('MathJax config differs between instances. Using first config.');
     }
   }
 
