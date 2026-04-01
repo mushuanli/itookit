@@ -19,6 +19,7 @@
     "@codemirror/state": "^6.5.2",
     "@codemirror/view": "^6.38.8",
     "@fortawesome/fontawesome-free": "^7.1.0",
+    "@itookit/app-shell": "workspace:*",
     "@itookit/app-settings": "workspace:*",
     "@itookit/common": "workspace:*",
     "@itookit/device-llm": "workspace:*",

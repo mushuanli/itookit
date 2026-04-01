@@ -12,6 +12,7 @@
         "typecheck": "tsc --noEmit"
     },
     "dependencies": {
+        "@itookit/app-shell":         "workspace:*",
         "@itookit/app-settings":      "workspace:*",
         "@itookit/common":            "workspace:*",
         "@itookit/device-llm":        "workspace:*",
