@@ -98,7 +98,7 @@ export class FsBackend implements IStorageBackend {
             Promise.reject(new Error('FsBackend not initialised — call init() first'));
 
         this.inodes  = { allocateIno: noInit, putInode: noInit, getInode: noInit, lookup: noInit, forEachInode: noInit, deleteInode: noInit, updateInode: noInit, walkTree: noInit, hasChildren: noInit };
-        this.meta    = { putMeta: noInit, getMeta: noInit, deleteMeta: noInit, patchMeta: noInit, forEachMeta: noInit, walkByTag: noInit, walkByMetadata: noInit };
+        this.meta    = { putMeta: noInit, getMeta: noInit, deleteMeta: noInit, patchMeta: noInit, forEachMeta: noInit, getAllDistinctTags: noInit, walkByTag: noInit, walkByMetadata: noInit };
         this.content = { putData: noInit, getData: noInit, deleteData: noInit, existsData: noInit, sizeData: noInit };
         this.records = { getRecordField: noInit, setRecordField: noInit, deleteRecordField: noInit, setAllRecordFields: noInit, clearRecordFields: noInit, createRecordIndex: noInit, deleteRecordIndex: noInit, queryRecordFields: noInit, walkRecordFields: noInit, walkRecordFieldNames: noInit };
     }

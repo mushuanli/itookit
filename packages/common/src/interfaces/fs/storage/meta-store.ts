@@ -88,6 +88,9 @@ export interface IMetaStore {
         callback: (meta: MetaRecord, index: number) => boolean | Promise<boolean>,
     ): Promise<void>;
 
+    /** 返回当前模块内所有已使用的 tag 名称（去重）。直接读索引，O(T)。 */
+    getAllDistinctTags(): Promise<string[]>;
+
     /**
      * 按标签流式遍历（替代 queryByTag）。
      * callback 返回 false 时提前终止。

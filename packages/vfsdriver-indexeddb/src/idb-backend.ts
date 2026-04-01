@@ -174,6 +174,7 @@ class StandaloneMetaStore implements IMetaStore {
     }
 
     forEachMeta(inos: number[], callback: (meta: import('@itookit/common').MetaRecord, index: number) => boolean | Promise<boolean>) { return this.store().forEachMeta(inos, callback); }
+    getAllDistinctTags() { return this.store().getAllDistinctTags(); }
     walkByTag(tag: string, callback: (ino: number) => boolean | Promise<boolean>, options?: import('@itookit/common').MetaWalkOptions) { return this.store().walkByTag(tag, callback, options); }
     walkByMetadata(field: string, value: unknown, callback: (ino: number) => boolean | Promise<boolean>, options?: import('@itookit/common').MetaWalkOptions) { return this.store().walkByMetadata(field, value, callback, options); }
 }
@@ -281,7 +282,7 @@ export class IndexedDBBackend implements IStorageBackend {
             new Error('IndexedDBBackend not initialized — call init() first'),
         );
         this.inodes = { allocateIno: noDb, putInode: noDb, getInode: noDb, lookup: noDb, forEachInode: noDb, deleteInode: noDb, updateInode: noDb, walkTree: noDb, hasChildren: noDb };
-        this.meta = { putMeta: noDb, getMeta: noDb, deleteMeta: noDb, patchMeta: noDb, forEachMeta: noDb, walkByTag: noDb, walkByMetadata: noDb };
+        this.meta = { putMeta: noDb, getMeta: noDb, deleteMeta: noDb, patchMeta: noDb, forEachMeta: noDb, getAllDistinctTags: noDb, walkByTag: noDb, walkByMetadata: noDb };
         this.content = { putData: noDb, getData: noDb, deleteData: noDb, existsData: noDb, sizeData: noDb };
         this.records = { getRecordField: noDb, setRecordField: noDb, deleteRecordField: noDb, setAllRecordFields: noDb, clearRecordFields: noDb, createRecordIndex: noDb, deleteRecordIndex: noDb, queryRecordFields: noDb, walkRecordFields: noDb, walkRecordFieldNames: noDb };
     }

@@ -249,21 +249,34 @@ export class EngineAdapter {
     async expandDirectory(folderId: string): Promise<void> {
         if (this.loadingFolderIds.has(folderId)) return;
         this.loadingFolderIds.add(folderId);
+
         try {
             const children = await this.engine.getChildren(folderId);
             const uiChildren = children.map(n =>
                 mapEngineNodeToUIItem(n, this.iconResolver, this.parserResolver)
             );
+
             this.store.dispatch({
                 type: 'FOLDER_CHILDREN_LOADED',
                 payload: { parentId: folderId, children: uiChildren },
             });
-            // After loading, resume any sub-directories that were expanded in a previous session.
-            // This avoids a store subscription — we only check the newly arrived children.
+
+            // 恢复时只展开一个子目录（手风琴）
+            // 关键：不要在这里递归调用 expandDirectory
+            // 让 FOLDER_CHILDREN_LOADED 的 reducer 处理 expandedFolderIds 的清理
+            // 用户后续点击时才会触发进一步展开
+
+            // 如果需要自动恢复到深层目录，只展开第一个匹配的：
             const { expandedFolderIds } = this.store.getState();
             for (const child of uiChildren) {
-                if (child.type === 'directory' && expandedFolderIds.has(child.id)) {
+                if (
+                    child.type === 'directory' &&
+                    expandedFolderIds.has(child.id) &&
+                    child.children === undefined
+                ) {
+                    // 只递归展开一个子目录
                     void this.expandDirectory(child.id);
+                    break;
                 }
             }
         } catch (err) {
@@ -272,6 +285,7 @@ export class EngineAdapter {
             this.loadingFolderIds.delete(folderId);
         }
     }
+
 
     destroy(): void {
         this.engineUnsubscribe?.();

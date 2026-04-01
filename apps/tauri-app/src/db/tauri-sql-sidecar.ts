@@ -164,6 +164,23 @@ export class TauriSqlSidecarDb implements ISidecarDb {
         await this.db.execute('DELETE FROM path_ino WHERE ino = ?', [ino]);
     }
 
+    async listDirectChildren(parentRel: string): Promise<Array<{ ino: number; name: string; type: 'file' | 'directory'; createdAt: number }>> {
+        type Row = { ino: number; rel: string; type: string; created_at: number };
+        const rows: Row[] = parentRel === ''
+            ? await this.db.select<Row[]>("SELECT ino, rel, type, created_at FROM path_ino WHERE rel != '' AND rel NOT GLOB '*/*'")
+            : await this.db.select<Row[]>(
+                'SELECT ino, rel, type, created_at FROM path_ino WHERE rel GLOB ? AND rel NOT GLOB ?',
+                [`${parentRel}/*`, `${parentRel}/*/*`],
+            );
+        const prefixLen = parentRel === '' ? 0 : parentRel.length + 1;
+        return rows.map(r => ({
+            ino: r.ino,
+            name: r.rel.slice(prefixLen),
+            type: r.type as 'file' | 'directory',
+            createdAt: r.created_at,
+        }));
+    }
+
     // ── Staging ────────────────────────────────────────────────────────────────
 
     async getStagePath(ref: string): Promise<string | null> {
@@ -241,6 +258,13 @@ export class TauriSqlSidecarDb implements ISidecarDb {
             [tag],
         );
         return rows.map(r => r.ino);
+    }
+
+    async getAllDistinctTags(): Promise<string[]> {
+        const rows = await this.db.select<Array<{ tag: string }>>(
+            'SELECT DISTINCT tag FROM meta_tags',
+        );
+        return rows.map(r => r.tag);
     }
 
     async queryByMetadata(jsonPath: string, value: string): Promise<number[]> {
