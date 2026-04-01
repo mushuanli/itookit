@@ -190,6 +190,16 @@ export interface TreeWalkOptions {
      * @default false
      */
     includeHidden?: boolean;
+    /**
+     * 包含 asset 目录（单 _ 前缀）
+     * @default false
+     */
+    includeAssetDirs?: boolean;
+    /**
+     * 包含模块内部配置目录（双 __ 前缀）
+     * @default false
+     */
+    includeInternalDirs?: boolean;
 }
 
 /**

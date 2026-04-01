@@ -14,7 +14,7 @@
 
 import { MemoryManager } from '@itookit/memory-manager';
 import { FileTypeDefinition } from '@itookit/vfs-ui';
-import { NavigationRequest, NAVIGATION_EVENTS } from '@itookit/common';
+import { NavigationRequest, NAVIGATION_EVENTS, EditorFactory, MenuItem } from '@itookit/common';
 
 import { createSettingsModule, createSettingsFactory } from '@itookit/app-settings';
 import { createLLMFactory, createAgentEditorFactory, VFSAgentService, createAIContextMenuConfig } from '@itookit/llm-ui';
@@ -201,7 +201,7 @@ function waitForEditorMount(container: HTMLElement): Promise<void> {
             observer.disconnect();
             console.warn('[waitForEditorMount] timeout — proceeding without editor');
             resolve();
-        }, 5000);
+        }, 15000);
 
         const check = () => {
             const area = container.querySelector('.mm-editor-area');
@@ -289,7 +289,7 @@ async function bootstrap() {
         const getFileTypeDefinition = (typeId: string): FileTypeDefinition | null => {
             const def = FILE_REGISTRY[typeId];
             if (!def) { console.warn(`[FileRegistry] Unknown type: ${typeId}`); return null; }
-            const factory = def.editorType !== 'standard' ? editorFactoryMap[def.editorType] : undefined;
+            const factory = def.editorType !== 'standard' ? editorFactoryMap[def.editorType] as EditorFactory : undefined;
             const parser  = def.id === 'chat' ? chatFileParser : undefined;
             return {
                 extensions:           [def.extension],
@@ -333,7 +333,7 @@ async function bootstrap() {
                 defaultExtension:   primaryDef?.extension,
                 defaultFileContent: primaryDef?.defaultContent,
                 contextMenu: {
-                    items: (item: unknown, defaults: unknown[]) => {
+                    items: (item: object, defaults: MenuItem[]) => {
                         if (uiPassThrough.readOnly) return [];
                         if (aiContextMenu?.items) return aiContextMenu.items(item, defaults);
                         return defaults;

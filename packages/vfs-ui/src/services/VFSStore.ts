@@ -92,7 +92,10 @@ export class VFSStore implements IStatePort {
       'CREATE_ITEM_START': () => {
         draft.creatingItem = payload;
         draft.selectedItemIds.clear();
-        if (payload.parentId) draft.expandedFolderIds.add(payload.parentId);
+        if (payload.parentId) {
+          this.collapseExpandedSiblings(draft, payload.parentId);
+          draft.expandedFolderIds.add(payload.parentId);
+        }
       },
       'CREATE_ITEM_END': () => {
         draft.creatingItem = null;
@@ -129,11 +132,25 @@ export class VFSStore implements IStatePort {
         const node = findNodeById(draft.items, payload.parentId);
         if (node?.type === 'directory') {
           node.children = payload.children;
+
+          // 清理 expandedFolderIds 中不存在于新 children 中的子目录 ID
+          // 这样可以防止旧的 expandedFolderIds 污染
+          const children = payload.children as VFSNodeUI[];
+          const childIds = new Set(children.map(c => c.id));
+          for (const id of draft.expandedFolderIds) {
+            // 如果某个 expandedId 的 parentId 是当前 folder，但不在新的 children 中，移除它
+            const expandedNode = findNodeById(draft.items, id);
+            if (expandedNode?.metadata.parentId === payload.parentId && !childIds.has(id)) {
+              draft.expandedFolderIds.delete(id);
+            }
+          }
+
+          this.collapseExpandedSiblings(draft, payload.parentId);
           draft.expandedFolderIds.add(payload.parentId);
         }
         draft.tags = rebuildTagsMap(draft.items);
       },
-      'FOLDER_TOGGLE': () => this.toggleSet(draft.expandedFolderIds, payload.folderId),
+      'FOLDER_TOGGLE': () => this.handleFolderToggle(draft, payload.folderId),
       'OUTLINE_TOGGLE': () => this.toggleSet(draft.expandedOutlineIds, payload.itemId),
       'OUTLINE_H1_TOGGLE': () => this.toggleSet(draft.expandedOutlineH1Ids, payload.elementId),
       'SESSION_SELECT': () => this.handleSessionSelect(draft, payload.sessionId),
@@ -152,6 +169,59 @@ export class VFSStore implements IStatePort {
 
   private toggleSet(set: Set<string>, id: string): void {
     set.has(id) ? set.delete(id) : set.add(id);
+  }
+
+  /**
+   * Accordion-style folder toggle:
+   * - Collapse → removes the folder and ALL its descendants from expandedFolderIds.
+   * - Expand   → collapses all siblings (and their descendants) first, then expands.
+   *
+   * This bounds the size of expandedFolderIds: at most one sibling per level can be
+   * open at any time. On startup the engine only needs to re-expand one path, not
+   * an arbitrarily large subtree.
+   */
+  private handleFolderToggle(draft: VFSUIState, folderId: string): void {
+    if (draft.expandedFolderIds.has(folderId)) {
+      this.collapseSubtree(draft.expandedFolderIds, draft.items, folderId);
+    } else {
+      this.collapseExpandedSiblings(draft, folderId);
+      draft.expandedFolderIds.add(folderId);
+    }
+  }
+
+  /**
+   * Collapses all expanded sibling directories of `folderId` (and their
+   * descendants). Shared by FOLDER_TOGGLE and FOLDER_CHILDREN_LOADED so the
+   * accordion invariant holds for both user interactions and startup restoration.
+   */
+  private collapseExpandedSiblings(draft: VFSUIState, folderId: string): void {
+    const node = findNodeById(draft.items, folderId);
+    if (!node) return;
+    const parentId = node.metadata.parentId;
+    const parent = parentId ? findNodeById(draft.items, parentId) : null;
+    const siblings = (parent?.children ?? draft.items).filter(
+      n => n.id !== folderId && n.type === 'directory'
+    );
+    for (const sibling of siblings) {
+      this.collapseSubtree(draft.expandedFolderIds, draft.items, sibling.id);
+    }
+  }
+
+  /** Removes folderId and all expanded descendants from the expanded set. */
+  private collapseSubtree(
+    expandedIds: Set<string>,
+    items: VFSNodeUI[],
+    folderId: string,
+  ): void {
+    expandedIds.delete(folderId);
+    const node = findNodeById(items, folderId);
+    if (node?.children) {
+      for (const child of node.children) {
+        if (child.type === 'directory') {
+          this.collapseSubtree(expandedIds, items, child.id);
+        }
+      }
+    }
   }
 
   private handleDelete(draft: VFSUIState, ids: Set<string>): void {
@@ -191,6 +261,7 @@ export class VFSStore implements IStatePort {
 
     if (parent?.type === 'directory') {
       (parent.children ??= []).unshift(newItem);
+      this.collapseExpandedSiblings(draft, parentId!);
       draft.expandedFolderIds.add(parentId!);
     } else {
       draft.items.unshift(newItem);

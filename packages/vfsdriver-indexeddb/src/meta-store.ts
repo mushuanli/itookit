@@ -9,7 +9,7 @@
  */
 
 import type { IMetaStore, MetaRecord, MetaWalkOptions } from '@itookit/common';
-import { req, collectCursor, STORE_META } from './utils';
+import { req, collectCursor, collectKeyCursor, STORE_META } from './utils';
 
 export class IDBMetaStore implements IMetaStore {
     constructor(private readonly meta: IDBObjectStore) {}
@@ -44,6 +44,13 @@ export class IDBMetaStore implements IMetaStore {
                 if (!(await callback(rec, i))) break;
             }
         }
+    }
+
+    async getAllDistinctTags(): Promise<string[]> {
+        const idx = this.meta.index('idx_tags');
+        // openKeyCursor with 'nextunique' steps through each distinct index key (tag string) once
+        const keys = await collectKeyCursor(idx.openKeyCursor(null, 'nextunique'));
+        return keys as string[];
     }
 
     async walkByTag(

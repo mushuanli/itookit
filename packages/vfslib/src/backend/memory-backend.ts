@@ -116,7 +116,7 @@ class MemoryInodeStore implements IInodeStore {
                 if (rec.parentIno !== ino || rec.ino === ino) continue;
                 const result = await callback({ ...rec }, nextDepth);
                 if (result === false) return;
-                if (result !== 'skip' && rec.type === 'directory') {
+                if (result !== 'skip' && rec.type === 'directory' && (maxDepth < 0 || nextDepth < maxDepth)) {
                     queue.push({ ino: rec.ino, depth: nextDepth });
                 }
             }
@@ -163,6 +163,14 @@ class MemoryMetaStore implements IMetaStore {
                 if (!(await callback({ ...rec }, i))) break;
             }
         }
+    }
+
+    async getAllDistinctTags(): Promise<string[]> {
+        const seen = new Set<string>();
+        for (const rec of this.data.values()) {
+            for (const tag of rec.tags ?? []) seen.add(tag);
+        }
+        return Array.from(seen);
     }
 
     async walkByTag(

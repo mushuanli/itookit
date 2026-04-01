@@ -155,18 +155,26 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService> {
 
     if (!this.options.readOnly) {
       this.engineAdapter.connectEngineEvents();
-      // One-time scan: reload children of folders that were expanded before this load
-      // (e.g. previous session state or after a full reload triggered by node:moved).
-      // Only first-level folders are reachable here; nested ones are handled recursively
-      // inside EngineAdapter.expandDirectory after each load completes.
+
       const { expandedFolderIds, items } = this.statePort.getState();
+
+      // 只找根级（parentId === null）且在 expandedFolderIds 中的第一个目录
+      // 手风琴约束：根级只展开一个
       for (const folderId of expandedFolderIds) {
         const node = findNodeById(items, folderId);
-        if (node?.type === 'directory' && node.children === undefined) {
+        // 只处理根级目录，且 children 未加载
+        if (
+          node &&
+          node.type === 'directory' &&
+          node.metadata.parentId === null &&
+          node.children === undefined
+        ) {
           void this.engineAdapter.expandDirectory(folderId);
+          break;  // 根级只展开一个v
         }
       }
     }
+
 
     const state = this.statePort.getState();
     if (
@@ -233,7 +241,7 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService> {
     const publicEventName = EVENT_MAP[eventName];
     return publicEventName
       ? this.eventPort.on(publicEventName as any, (e: any) => callback(e))
-      : () => {};
+      : () => { };
   }
 
   destroy(): void {

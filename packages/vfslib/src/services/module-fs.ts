@@ -370,7 +370,7 @@ export class ModuleFS implements IModuleFS {
         const childrenRaw: import('@itookit/common').InodeRecord[] = [];
         await backend.inodes.walkTree(r.ino, (inode) => {
             childrenRaw.push(inode);
-            return 'skip';
+            return true;
         }, { maxDepth: 0 });
         const children = childrenRaw;
 
@@ -489,8 +489,8 @@ export class ModuleFS implements IModuleFS {
             for (const child of children) {
                 if (count >= limit) return false;
                 if (!options?.includeHidden && isHiddenName(child.name)) continue;
-                if (isInternalDirName(child.name)) continue;
-                if (isAssetDirName(child.name)) continue;
+                if (!options?.includeInternalDirs && isInternalDirName(child.name)) continue;
+                if (!options?.includeAssetDirs && isAssetDirName(child.name)) continue;
 
                 if (options?.typeFilter) {
                     const types = Array.isArray(options.typeFilter)
@@ -1240,15 +1240,8 @@ class InlineTagOps implements ITagOperations {
     constructor(private readonly fs: ModuleFS) {}
 
     async getAllTags(): Promise<TagDefinition[]> {
-        const tagMap = new Map<string, TagDefinition>();
-        await this.fs.walkTree((node) => {
-            if (node.tags) {
-                for (const t of node.tags) {
-                    if (!tagMap.has(t)) tagMap.set(t, { name: t });
-                }
-            }
-        }, { includeHidden: true });
-        return Array.from(tagMap.values());
+        const tags = await this.fs._backend.meta.getAllDistinctTags();
+        return tags.map(name => ({ name }));
     }
 
     async setTags(idOrPath: string, tags: string[]): Promise<void> {
