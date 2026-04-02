@@ -1,68 +1,23 @@
-import { FS_MODULE_CHAT, FS_MODULE_AGENTS } from '@itookit/common';
+import { WS_SETTINGS, WS_CHAT, WS_AGENTS, WS_PROMPTS } from '@itookit/app-shell';
 import type { WorkspaceConfig } from '@itookit/app-shell';
 
-export type { WorkspaceConfig };
-
 export const WORKSPACES: WorkspaceConfig[] = [
-    {
-        elementId: 'settings-workspace',
-        moduleName: 'settings_root',
-        slug: 'settings',
-        syncEnabled: false,
-        type: 'settings',
-        title: 'Settings',
-        supportedFileTypes: [],
-        readOnly: true,
-        aiEnabled: false,
-        mentionAble: false,
-    },
+    WS_SETTINGS,
+
+    // Tauri-only: transparent local filesystem workspace
     {
         elementId: 'home-workspace',
         moduleName: 'home',
         slug: 'files',
-        syncEnabled: false,
         type: 'standard',
         title: 'Files',
         supportedFileTypes: ['markdown', 'prompt', 'project', 'email', 'private'],
+        syncEnabled: false,
         mentionAble: true,
         aiEnabled: true,
     },
-    {
-        elementId: 'llm-workspace',
-        moduleName: FS_MODULE_CHAT,
-        slug: 'chat',
-        syncEnabled: true,
-        type: 'chat',
-        title: 'AI Sessions',
-        supportedFileTypes: ['chat'],
-        mentionScope: ['*'],
-        mentionAble: true,
-        plugins: [],
-        aiEnabled: false,
-    },
-    {
-        elementId: 'agent-workspace',
-        moduleName: FS_MODULE_AGENTS,
-        slug: 'agents',
-        syncEnabled: true,
-        isSystem: true,
-        type: 'agent',
-        title: 'Agents',
-        supportedFileTypes: ['agent'],
-        plugins: ['core:titlebar'],
-        mentionScope: ['agents'],
-        mentionAble: false,
-        aiEnabled: false,
-    },
-    {
-        elementId: 'prompt-workspace',
-        moduleName: 'prompts',
-        slug: 'prompts',
-        syncEnabled: true,
-        type: 'standard',
-        title: 'Prompts',
-        supportedFileTypes: ['prompt'],
-        mentionAble: true,
-        aiEnabled: true,
-    },
+
+    WS_CHAT,
+    WS_AGENTS,
+    WS_PROMPTS,
 ];
