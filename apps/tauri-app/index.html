@@ -8,11 +8,10 @@
     <link rel="stylesheet" href="src/styles/index.css" />
 </head>
 <body>
-    <!-- Left sidebar navigation -->
     <nav class="app-sidebar">
         <ul class="main-nav-list" id="main-nav-list">
 
-            <!-- Home: current project directory -->
+            <!-- Home: local filesystem (top, primary) -->
             <li>
                 <a class="app-nav-btn nav-home active"
                    data-target="home-workspace"
@@ -23,28 +22,41 @@
                     <span class="nav-home-label" id="nav-home-label">…</span>
                 </a>
             </li>
+
+            <!-- Shared workspaces (same as web-app, data in appData/IndexedDB) -->
             <li>
-                <a class="app-nav-btn"
-                   data-target="llm-workspace"
-                   data-module="chats"
-                   title="AI Sessions">
+                <a class="app-nav-btn" data-target="llm-workspace" title="AI Sessions">
                     <i class="fas fa-robot"></i>
                 </a>
             </li>
             <li>
-                <a class="app-nav-btn"
-                   data-target="agent-workspace"
-                   data-module="agents"
-                   title="Agents">
+                <a class="app-nav-btn" data-target="agent-workspace" title="Agents">
                     <i class="fas fa-user-secret"></i>
                 </a>
             </li>
             <li>
-                <a class="app-nav-btn"
-                   data-target="prompt-workspace"
-                   data-module="prompts"
-                   title="Prompts">
+                <a class="app-nav-btn" data-target="anki-workspace" title="Anki Memory">
+                    <i class="fas fa-brain"></i>
+                </a>
+            </li>
+            <li>
+                <a class="app-nav-btn" data-target="prompt-workspace" title="Prompts">
                     <i class="fas fa-pen-to-square"></i>
+                </a>
+            </li>
+            <li>
+                <a class="app-nav-btn" data-target="project-workspace" title="Projects">
+                    <i class="fas fa-folder-tree"></i>
+                </a>
+            </li>
+            <li>
+                <a class="app-nav-btn" data-target="email-workspace" title="Emails">
+                    <i class="fas fa-envelope"></i>
+                </a>
+            </li>
+            <li>
+                <a class="app-nav-btn" data-target="private-workspace" title="Private Notes">
+                    <i class="fas fa-lock"></i>
                 </a>
             </li>
 
@@ -62,24 +74,23 @@
             </a>
         </div>
         <div style="height:8px"></div>
-        <a class="app-nav-btn"
-           data-target="settings-workspace"
-           data-module="settings_root"
-           title="Settings">
+        <a class="app-nav-btn" data-target="settings-workspace" title="Settings">
             <i class="fas fa-cog"></i>
         </a>
         <div style="height:4px"></div>
 
-        <!-- Current home directory label -->
         <div class="home-dir-badge" id="home-dir-label" title=""></div>
     </nav>
 
-    <!-- Workspace panels -->
     <main class="main-content-area">
         <div id="home-workspace"     class="workspace-view active"></div>
         <div id="llm-workspace"      class="workspace-view"></div>
         <div id="agent-workspace"    class="workspace-view"></div>
+        <div id="anki-workspace"     class="workspace-view"></div>
         <div id="prompt-workspace"   class="workspace-view"></div>
+        <div id="project-workspace"  class="workspace-view"></div>
+        <div id="email-workspace"    class="workspace-view"></div>
+        <div id="private-workspace"  class="workspace-view"></div>
         <div id="settings-workspace" class="workspace-view">
             <div id="settings-content"></div>
         </div>
