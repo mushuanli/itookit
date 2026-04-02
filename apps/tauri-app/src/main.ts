@@ -2,15 +2,17 @@
  * @file apps/tauri-app/src/main.ts
  *
  * Tauri-specific bootstrap:
- *  1. Resolve homeDir + appDataDir via Tauri commands
- *  2. Build platform backends (IndexedDB root + LocalFS home)
+ *  1. Resolve homeDir via Tauri command; derive mindosDir = homeDir/.mindos
+ *  2. Build backends:
+ *       rootBackend  = LocalFSBackend at ~/.mindos/        (all shared modules)
+ *       homeBackend  = LocalFSBackend at <homeDir>         (local filesystem)
+ *       meta sidecar = ~/.mindos/meta/<path-derived-name>  (home + dynamic mounts)
  *  3. Hand off to app-shell (all common logic lives there)
  *  4. Wire tauri-only features: loading overlay, dynamic local mounts
  */
 
 import { initApp } from '@itookit/app-shell';
 import type { WorkspaceConfig } from '@itookit/app-shell';
-import { IndexedDBBackend } from '@itookit/vfsdriver-indexeddb';
 import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
 import { WORKSPACES } from './config/modules';
 import { LocalMountService, MountEntry, MOUNT_EVENTS } from './services/local-mounts';
@@ -23,6 +25,17 @@ import '@itookit/memory-manager/style.css';
 import '@itookit/llm-ui/style.css';
 import '@itookit/app-settings/style.css';
 import './styles/index.css';
+
+// ── Path helpers ───────────────────────────────────────────────────────────────
+
+/**
+ * Derive a stable sidecar directory path from an absolute filesystem path.
+ * /Users/rain/Projects → <mindosDir>/meta/Users_rain_Projects
+ */
+function pathToMetaDir(mindosDir: string, absPath: string): string {
+    const name = absPath.replace(/^\/+/, '').replace(/\//g, '_');
+    return `${mindosDir}/meta/${name}`;
+}
 
 // ── Loading overlay ────────────────────────────────────────────────────────────
 
@@ -66,17 +79,12 @@ function showError(msg: string): void {
 
 // ── Tauri path resolution ──────────────────────────────────────────────────────
 
-async function getTauriPaths(): Promise<{ homeDir: string; appDataDir: string }> {
+async function getHomeDir(): Promise<string> {
     try {
         const { invoke } = await import('@tauri-apps/api/core');
-        const [homeDir, appDataDir] = await Promise.all([
-            invoke<string>('get_home_dir'),
-            invoke<string>('get_app_data_dir'),
-        ]);
-        return { homeDir, appDataDir };
+        return await invoke<string>('get_home_dir');
     } catch {
-        const cwd = (globalThis as unknown as { __CWD__?: string }).__CWD__ ?? '.';
-        return { homeDir: cwd, appDataDir: cwd + '/.tauri-data' };
+        return (globalThis as unknown as { __CWD__?: string }).__CWD__ ?? '.';
     }
 }
 
@@ -124,9 +132,10 @@ function removeMountWorkspace(id: string): void {
 async function bootstrap(): Promise<void> {
     showLoading('正在初始化…');
 
-    // 1. Resolve platform paths
+    // 1. Resolve paths
     showLoading('获取路径…');
-    const { homeDir, appDataDir } = await getTauriPaths();
+    const homeDir  = await getHomeDir();
+    const mindosDir = `${homeDir}/.mindos`;   // ~/.mindos — all app data lives here
 
     const dirName = homeDir.split('/').filter(Boolean).pop() ?? homeDir;
     const navLabel = document.getElementById('nav-home-label');
@@ -136,15 +145,24 @@ async function bootstrap(): Promise<void> {
     const badge = document.getElementById('home-dir-label');
     if (badge) { badge.textContent = dirName; badge.title = homeDir; }
 
-    // 2. Build backends
+    // 2. Build backends in parallel
+    //    rootBackend : LocalFSBackend at ~/.mindos/  (all shared modules go here)
+    //    homeBackend : LocalFSBackend at <homeDir>   (transparent local FS)
     showLoading('初始化文件系统…');
-    const rootBackend = new IndexedDBBackend({ dbName: 'x1-tauri-v1' });
-    const homeBackend = await openLocalFSBackend({
-        rootDir:    homeDir,
-        sidecarDir: `${appDataDir}/home-sidecar`,
-        createDb:   (dbPath) => TauriSqlSidecarDb.open(dbPath),
-        createFs:   () => new TauriFsOps(),
-    });
+    const [rootBackend, homeBackend] = await Promise.all([
+        openLocalFSBackend({
+            rootDir:    mindosDir,
+            sidecarDir: `${mindosDir}/.meta`,
+            createDb:   (dbPath) => TauriSqlSidecarDb.open(dbPath),
+            createFs:   () => new TauriFsOps(),
+        }),
+        openLocalFSBackend({
+            rootDir:    homeDir,
+            sidecarDir: pathToMetaDir(mindosDir, homeDir),
+            createDb:   (dbPath) => TauriSqlSidecarDb.open(dbPath),
+            createFs:   () => new TauriFsOps(),
+        }),
+    ]);
 
     // 3. Hand off to app-shell
     const app = await initApp({
@@ -157,7 +175,7 @@ async function bootstrap(): Promise<void> {
     });
 
     // 4. Local mount service (tauri-only dynamic mounts)
-    const localMounts = new LocalMountService(app.vfs, appDataDir);
+    const localMounts = new LocalMountService(app.vfs, mindosDir);
 
     // Add mount button
     document.getElementById('btn-add-mount')!.addEventListener('click', async () => {
@@ -165,7 +183,7 @@ async function bootstrap(): Promise<void> {
         if (!localPath) return;
         const label = localPath.split('/').filter(Boolean).pop() ?? 'Mount';
         const entry = await localMounts.mount(localPath, label);
-        await app.navigate(entry.id, undefined);
+        await app.navigate(entry.id);
     });
 
     // React to mount added (restore + user action)
