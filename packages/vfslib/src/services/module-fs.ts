@@ -1065,21 +1065,25 @@ export class ModuleFS implements IModuleFS {
         const realEmit = this.bus.emit;
         (this.bus as any).emit = bufferedEmit;
 
+        // NOTE: do NOT wrap fn(tx) in backend.runInTransaction() here.
+        // Each tx.createFile/createDirectory/etc. internally calls engine methods
+        // that invoke backend.runInTransaction(), which would deadlock the txQueue
+        // (outer waits for inner, inner waits for outer via Promise chain).
+        // Individual operations are already serialized by their own txQueue items.
+        const tx: IFSTransaction = {
+            getNode: (id) => this.getNode(id),
+            readContent: (id, opts) => this.readContent(id, opts),
+            createFile: (opts) => this.createFile(opts),
+            createDirectory: (opts) => this.createDirectory(opts),
+            writeContent: (id, content, opts) => this.writeContent(id, content, opts),
+            rename: (id, newName, opts) => this.rename(id, newName, opts),
+            move: (ids, target, opts) => this.move(ids, target, opts),
+            delete: (ids, opts) => this.delete(ids, opts),
+            updateMetadata: (id, meta) => this.updateMetadata(id, meta),
+        };
+
         try {
-            const result = await this._backend.runInTransaction('readwrite', async (_scope) => {
-                const tx: IFSTransaction = {
-                    getNode: (id) => this.getNode(id),
-                    readContent: (id, opts) => this.readContent(id, opts),
-                    createFile: (opts) => this.createFile(opts),
-                    createDirectory: (opts) => this.createDirectory(opts),
-                    writeContent: (id, content, opts) => this.writeContent(id, content, opts),
-                    rename: (id, newName, opts) => this.rename(id, newName, opts),
-                    move: (ids, target, opts) => this.move(ids, target, opts),
-                    delete: (ids, opts) => this.delete(ids, opts),
-                    updateMetadata: (id, meta) => this.updateMetadata(id, meta),
-                };
-                return fn(tx);
-            });
+            const result = await fn(tx);
 
             // Restore emit and flush buffered events
             (this.bus as any).emit = realEmit;

@@ -276,9 +276,18 @@ importers:
       '@itookit/vfs-ui':
         specifier: workspace:*
         version: link:../vfs-ui
+      '@itookit/vfsdriver-indexeddb':
+        specifier: workspace:*
+        version: link:../vfsdriver-indexeddb
+      '@itookit/vfsdriver-localfs':
+        specifier: workspace:*
+        version: link:../vfsdriver-localfs
       '@itookit/vfslib':
         specifier: workspace:*
         version: link:../vfslib
+      fake-indexeddb:
+        specifier: ^6.0.0
+        version: 6.2.5
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
