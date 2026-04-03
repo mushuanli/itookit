@@ -43,6 +43,18 @@ fn get_home_dir() -> String {
         .unwrap_or_else(|_| ".".to_string())
 }
 
+/// Returns the MindOS data directory: ~/.mindos
+///
+/// Always points to the real user home directory regardless of the
+/// working directory (which `get_home_dir` may return as a project path).
+#[tauri::command]
+fn get_mindos_dir(app: AppHandle) -> String {
+    app.path()
+        .home_dir()
+        .map(|h| format!("{}/.mindos", h.to_string_lossy()))
+        .unwrap_or_else(|_| ".mindos".to_string())
+}
+
 /// Returns the app-local data directory (platform-specific).
 ///
 /// macOS  : ~/Library/Application Support/<bundle_id>/
@@ -94,6 +106,7 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
             get_home_dir,
+            get_mindos_dir,
             get_app_data_dir,
             get_app_config_dir,
         ])
