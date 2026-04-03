@@ -246,7 +246,7 @@ export const DEFAULT_AGENTS: InitialAgentDef[] = [
         initialTags: ['default'],
         initPath: AGENT_DEFAULT_DIR,
         config: {
-            connectionId: LLM_DEFAULT_ID,
+            connectionId: '',  // filled with real default connection at init by syncDefaultAgents
             modelName: "",
             systemPrompt: "You are a helpful assistant. Answer the user's current prompt concisely and accurately, without referring to any past conversation history.",
             maxHistoryLength: 4
@@ -265,8 +265,8 @@ export const DEFAULT_AGENTS: InitialAgentDef[] = [
         initialTags: ['default'],
         initPath: AGENT_DEFAULT_DIR,
         config: {
-            connectionId: LLM_DEFAULT_ID,
-            modelName: "Claude 4.5 Opus",
+            connectionId: '',  // filled with real default connection at init by syncDefaultAgents
+            modelName: '',
             systemPrompt: "You are a helpful sinior developer assistant. Follow common development principles where relevant including SOLID (Single Responsibility Principle, Open/Closed Principle, Liskov Substitution Principle, Interface Segregation Principle, and Dependency Inversion Principle), DRY (Don't Repeat Yourself), KISS (Keep It Simple, Stupid), YAGNI (You Ain't Gonna Need It), CoC (Convention over Configuration), and LoD (Law of Demeter.)",
             //maxHistoryLength: 4
         },
@@ -284,8 +284,8 @@ export const DEFAULT_AGENTS: InitialAgentDef[] = [
         initialTags: ['default'],
         initPath: AGENT_DEFAULT_DIR,
         config: {
-            connectionId: LLM_DEFAULT_ID,
-            modelName: "Claude 4.5 Opus",
+            connectionId: '',  // filled with real default connection at init by syncDefaultAgents
+            modelName: '',
             systemPrompt: "你是一位体现理查德·费曼简化复杂概念理念的杰出教师。你善于使用更简洁、更清晰、更直观的方式捕捉概念的精髓。",
             //maxHistoryLength: 4
         },
