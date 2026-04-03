@@ -159,29 +159,51 @@ async function bootstrap(): Promise<void> {
     const badge = document.getElementById('home-dir-label');
     if (badge) { badge.textContent = dirName; badge.title = homeDir; }
 
-    // 2. Build backends in parallel
-    //    rootBackend : LocalFSBackend at ~/.mindos/  (all shared modules go here)
-    //    homeBackend : LocalFSBackend at <homeDir>   (transparent local FS)
+    // 2. Build backends
+    //
+    //  rootBackend          : ~/.mindos/  — system paths only (/etc/, /dev/)
+    //                         SQLite: ~/.mindos/_meta/
+    //  per-module backends  : ~/.mindos/module/<name>/  — one SQLite each
+    //                         SQLite: ~/.mindos/_db/<name>/
+    //  homeBackend          : <homeDir>  — transparent local FS
+    //                         SQLite: ~/.mindos/meta/<path-derived>/
+    //
+    // Each module gets its own SQLite to eliminate cross-module DB locking.
     showLoading('初始化文件系统…');
-    const [rootBackend, homeBackend] = await Promise.all([
+
+    const openBackend = (rootDir: string, sidecarDir: string) =>
         openLocalFSBackend({
-            rootDir:    mindosDir,
-            sidecarDir: `${mindosDir}/_meta`,
-            createDb:   (dbPath) => TauriSqlSidecarDb.open(dbPath),
-            createFs:   () => new TauriFsOps(),
-        }),
-        openLocalFSBackend({
-            rootDir:    homeDir,
-            sidecarDir: pathToMetaDir(mindosDir, homeDir),
-            createDb:   (dbPath) => TauriSqlSidecarDb.open(dbPath),
-            createFs:   () => new TauriFsOps(),
-        }),
+            rootDir, sidecarDir,
+            createDb: (dbPath) => TauriSqlSidecarDb.open(dbPath),
+            createFs: () => new TauriFsOps(),
+        });
+
+    // Collect module names that need their own backend (skip settings/home)
+    const moduleNames = WORKSPACES
+        .filter(ws => ws.type !== 'settings' && ws.moduleName !== 'home')
+        .map(ws => ws.moduleName);
+
+    // Open all backends in parallel — different SQLite files, no contention
+    const [rootBackend, homeBackend, ...moduleBackends] = await Promise.all([
+        openBackend(mindosDir, `${mindosDir}/_meta`),
+        openBackend(homeDir, pathToMetaDir(mindosDir, homeDir)),
+        ...moduleNames.map(name =>
+            openBackend(`${mindosDir}/module/${name}`, `${mindosDir}/_db/${name}`)
+        ),
     ]);
+
+    const moduleAdditionalMounts = moduleNames.map((name, i) => ({
+        path: `/module/${name}`,
+        backend: moduleBackends[i],
+    }));
 
     // 3. Hand off to app-shell
     const app = await initApp({
         backend: rootBackend,
-        additionalMounts: [{ path: '/module/home', backend: homeBackend }],
+        additionalMounts: [
+            ...moduleAdditionalMounts,
+            { path: '/module/home', backend: homeBackend },
+        ],
         workspaces: WORKSPACES,
         defaultSlug: 'files',
         routeAliases: { home: 'home-workspace' },
