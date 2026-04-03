@@ -92,6 +92,15 @@ pub fn run() {
     tauri::Builder::default()
         // Open DevTools automatically in debug builds (Cmd+Option+I also works)
         .setup(|app| {
+            // Pre-create ~/.mindos scaffold with native std::fs so the frontend
+            // never needs to mkdir the top-level dirs through the Tauri fs scope.
+            if let Ok(home) = app.path().home_dir() {
+                let mindos = home.join(".mindos");
+                for sub in &["", ".meta", "meta", "module"] {
+                    let _ = std::fs::create_dir_all(mindos.join(sub));
+                }
+            }
+
             #[cfg(debug_assertions)]
             {
                 use tauri::Manager;
