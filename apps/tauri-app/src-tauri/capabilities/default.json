@@ -27,6 +27,8 @@
         "fs:scope-temp-recursive",
         { "identifier": "fs:scope", "allow": [
             { "path": "$HOME/.mindos" },
+            { "path": "$HOME/.mindos/_meta" },
+            { "path": "$HOME/.mindos/_meta/**" },
             { "path": "$HOME/.mindos/**" }
         ]},
 

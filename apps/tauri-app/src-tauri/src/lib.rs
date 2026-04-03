@@ -96,7 +96,7 @@ pub fn run() {
             // never needs to mkdir the top-level dirs through the Tauri fs scope.
             if let Ok(home) = app.path().home_dir() {
                 let mindos = home.join(".mindos");
-                for sub in &["", ".meta", "meta", "module"] {
+                for sub in &["", "_meta", "meta", "module"] {
                     let _ = std::fs::create_dir_all(mindos.join(sub));
                 }
             }
