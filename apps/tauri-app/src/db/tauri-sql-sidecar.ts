@@ -34,6 +34,9 @@ export class TauriSqlSidecarDb implements ISidecarDb {
         // PRAGMAs: use select() because rusqlite's execute() rejects statements
         // that return rows (journal_mode returns the new mode as a result row).
         await this.db.select('PRAGMA journal_mode = WAL');
+        // Wait up to 5s on a locked DB instead of immediately returning SQLITE_BUSY.
+        // Needed because multiple backends initialise concurrently during boot.
+        await this.db.select('PRAGMA busy_timeout = 5000');
         await this.db.select('PRAGMA foreign_keys = ON');
 
         // DDL: one statement per execute() call (rusqlite restriction)
