@@ -268,6 +268,12 @@ export class TauriSqlSidecarDb implements ISidecarDb {
     }
 
     async syncTags(ino: number, tags: string[] | undefined): Promise<void> {
+        // No explicit transaction needed: syncTags is always called from within
+        // a LocalFSBackend.runInTransaction callback, which is serialized by
+        // txQueue. No concurrent _execTx can run while this executes.
+        // Using BEGIN IMMEDIATE here would conflict with pre-txQueue DB writes
+        // (e.g. registerPath called from lookup before runInTransaction) that
+        // go to a different connection in the sqlx pool.
         await this.db.execute('DELETE FROM meta_tags WHERE ino = ?', [ino]);
         if (tags) {
             for (const tag of tags) {
@@ -302,17 +308,19 @@ export class TauriSqlSidecarDb implements ISidecarDb {
         return rows.map(r => r.ino);
     }
 
-    // ── Transaction ────────────────────────────────────────────────────────────
-    // Mutex ensures only one transaction is active at a time per SQLite file,
-    // eliminating SQLITE_BUSY races that PRAGMA busy_timeout cannot reliably fix
-    // across sqlx connection-pool entries.
+    // ── Transaction (ISidecarDb) ───────────────────────────────────────────────
+    // LocalFSBackend no longer calls begin/commit/rollback at the _execTx level
+    // (holding BEGIN IMMEDIATE across async boundaries caused SQLITE_BUSY on the
+    // sqlx connection pool). These methods satisfy the ISidecarDb interface but
+    // are not called by LocalFSBackend. Per-method transactions (e.g. syncTags)
+    // use txMutex directly to keep transactions short and pool-safe.
 
     async begin(): Promise<void> {
         await this.txMutex.acquire();
         try {
             await this.db.execute('BEGIN IMMEDIATE');
         } catch (e) {
-            this.txMutex.release();   // don't hold the lock if BEGIN fails
+            this.txMutex.release();
             throw e;
         }
     }
