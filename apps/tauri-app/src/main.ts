@@ -88,6 +88,19 @@ async function getHomeDir(): Promise<string> {
     }
 }
 
+/** Always returns ~/.mindos — the real user home, not the working directory. */
+async function getMindosDir(): Promise<string> {
+    try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        return await invoke<string>('get_mindos_dir');
+    } catch {
+        // Fallback for plain Vite dev (no Tauri context)
+        const home = (globalThis as { process?: { env?: { HOME?: string } } })
+            .process?.env?.HOME ?? '.';
+        return `${home}/.mindos`;
+    }
+}
+
 async function openDirectoryDialog(): Promise<string | null> {
     try {
         const { open } = await import('@tauri-apps/plugin-dialog');
@@ -133,9 +146,10 @@ async function bootstrap(): Promise<void> {
     showLoading('正在初始化…');
 
     // 1. Resolve paths
+    //    homeDir   = working project directory (CWD or --home arg)
+    //    mindosDir = ~/.mindos — always the real user home, never the working dir
     showLoading('获取路径…');
-    const homeDir  = await getHomeDir();
-    const mindosDir = `${homeDir}/.mindos`;   // ~/.mindos — all app data lives here
+    const [homeDir, mindosDir] = await Promise.all([getHomeDir(), getMindosDir()]);
 
     const dirName = homeDir.split('/').filter(Boolean).pop() ?? homeDir;
     const navLabel = document.getElementById('nav-home-label');
