@@ -36,7 +36,7 @@ export class TauriSqlSidecarDb implements ISidecarDb {
         await this.db.select('PRAGMA journal_mode = WAL');
         // Wait up to 5s on a locked DB instead of immediately returning SQLITE_BUSY.
         // Needed because multiple backends initialise concurrently during boot.
-        await this.db.select('PRAGMA busy_timeout = 5000');
+        await this.db.select('PRAGMA busy_timeout = 30000');
         await this.db.select('PRAGMA foreign_keys = ON');
 
         // DDL: one statement per execute() call (rusqlite restriction)
