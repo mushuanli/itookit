@@ -29,7 +29,9 @@
             { "path": "$HOME/.mindos" },
             { "path": "$HOME/.mindos/_meta" },
             { "path": "$HOME/.mindos/_meta/**" },
-            { "path": "$HOME/.mindos/**" }
+            { "path": "$HOME/.mindos/**" },
+            { "path": "$HOME/.mindos/**/.*" },
+            { "path": "$HOME/.mindos/**/.*/.*" }
         ]},
 
         "sql:allow-load",
