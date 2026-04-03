@@ -16,7 +16,31 @@ import Database from '@tauri-apps/plugin-sql';
 import { SCHEMA_VERSION } from '@itookit/vfsdriver-localfs';
 import type { ISidecarDb, PathEntry, MetaExtRow } from '@itookit/vfsdriver-localfs';
 
+// ── Async mutex ───────────────────────────────────────────────────────────────
+// @tauri-apps/plugin-sql uses sqlx connection pools; PRAGMA busy_timeout only
+// applies to whichever connection is checked out, not to future pool entries.
+// We enforce transaction serialization at the JS layer so BEGIN IMMEDIATE never
+// races against another active write on the same file.
+class AsyncMutex {
+    private locked = false;
+    private queue: Array<() => void> = [];
+
+    acquire(): Promise<void> {
+        if (!this.locked) { this.locked = true; return Promise.resolve(); }
+        return new Promise(resolve => this.queue.push(resolve));
+    }
+
+    release(): void {
+        if (this.queue.length > 0) {
+            this.queue.shift()!();   // hand lock to next waiter
+        } else {
+            this.locked = false;
+        }
+    }
+}
+
 export class TauriSqlSidecarDb implements ISidecarDb {
+    private readonly txMutex = new AsyncMutex();
     private constructor(private readonly db: Database) {}
 
     // ── Factory ────────────────────────────────────────────────────────────────
@@ -279,10 +303,29 @@ export class TauriSqlSidecarDb implements ISidecarDb {
     }
 
     // ── Transaction ────────────────────────────────────────────────────────────
+    // Mutex ensures only one transaction is active at a time per SQLite file,
+    // eliminating SQLITE_BUSY races that PRAGMA busy_timeout cannot reliably fix
+    // across sqlx connection-pool entries.
 
-    async begin(): Promise<void>    { await this.db.execute('BEGIN IMMEDIATE'); }
-    async commit(): Promise<void>   { await this.db.execute('COMMIT'); }
-    async rollback(): Promise<void> { await this.db.execute('ROLLBACK'); }
+    async begin(): Promise<void> {
+        await this.txMutex.acquire();
+        try {
+            await this.db.execute('BEGIN IMMEDIATE');
+        } catch (e) {
+            this.txMutex.release();   // don't hold the lock if BEGIN fails
+            throw e;
+        }
+    }
+
+    async commit(): Promise<void> {
+        await this.db.execute('COMMIT');
+        this.txMutex.release();
+    }
+
+    async rollback(): Promise<void> {
+        await this.db.execute('ROLLBACK');
+        this.txMutex.release();
+    }
 
     async close(): Promise<void>    { await this.db.close(); }
 }
