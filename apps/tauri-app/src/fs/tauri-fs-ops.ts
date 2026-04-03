@@ -33,7 +33,14 @@ export class TauriFsOps implements IFsOps {
         // Ensure parent directory exists before writing
         const parent = p.split('/').slice(0, -1).join('/');
         if (parent) await this.mkdir(parent);
-        await writeFile(p, new Uint8Array(data));
+        console.log(`[TauriFsOps] writeFile(${p}) size=${data.byteLength}`);
+        try {
+            await writeFile(p, new Uint8Array(data));
+            console.log(`[TauriFsOps] writeFile ok: ${p}`);
+        } catch (err) {
+            console.error(`[TauriFsOps] writeFile failed: ${p}`, err);
+            throw err;
+        }
     }
 
     async appendFile(p: string, data: ArrayBuffer): Promise<void> {
@@ -93,6 +100,7 @@ export class TauriFsOps implements IFsOps {
             // Silently ignore only "already exists" — other failures (permission scope,
             // forbidden path) must propagate so transactions roll back correctly.
             if (!msg.includes('os error 17') && !msg.includes('already exists') && !msg.includes('File exists')) {
+                console.error(`[TauriFsOps] mkdir failed: ${p}`, err);
                 throw err;
             }
         }

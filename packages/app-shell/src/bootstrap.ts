@@ -154,10 +154,14 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
         initialResourceId?: string,
     ): Promise<MemoryManager | undefined> => {
         const { elementId } = wsConfig;
+        console.log(`[Shell] loadWorkspace: ${elementId} cached=${managerCache.has(elementId)}`);
         if (managerCache.has(elementId)) return managerCache.get(elementId);
 
         const container = document.getElementById(elementId);
-        if (!container) return undefined;
+        if (!container) {
+            console.warn(`[Shell] loadWorkspace: container #${elementId} not found in DOM`);
+            return undefined;
+        }
 
         const strategyType = wsConfig.type ?? 'standard';
         const strategy = strategies[strategyType] ?? strategies.standard;
@@ -244,6 +248,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     };
 
     const performNavigation = async (workspaceId: string, resourceId?: string): Promise<void> => {
+        console.log(`[Shell] performNavigation: ${workspaceId} resourceId=${resourceId ?? '—'} cached=${managerCache.has(workspaceId)}`);
         document.querySelectorAll('.workspace-view').forEach(ws => {
             ws.classList.toggle('active', ws.id === workspaceId);
         });
@@ -262,6 +267,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     const handleNavigationRequest = async (req: NavigationRequest): Promise<void> => {
         const targetWsId = resolveTarget(req.target);
         const action = req.action ?? 'open';
+        console.log(`[Shell] handleNavigationRequest: action=${action} target=${req.target} → wsId=${targetWsId}`);
 
         switch (action) {
             case 'create': {
@@ -279,13 +285,21 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
                 updateHistory(targetWsId, null, 'push');
                 await performNavigation(targetWsId);
                 const mgr = managerCache.get(targetWsId);
+                console.log(`[Shell] create: mgr found=${!!mgr} wsId=${targetWsId}`);
                 if (mgr) {
-                    const newId = await mgr.createAndOpenFile({
-                        title:    req.create?.title,
-                        content:  req.create?.content,
-                        parentId: req.create?.parentId,
-                    });
-                    updateHistory(targetWsId, newId, 'replace');
+                    try {
+                        const newId = await mgr.createAndOpenFile({
+                            title:    req.create?.title,
+                            content:  req.create?.content,
+                            parentId: req.create?.parentId,
+                        });
+                        console.log(`[Shell] createAndOpenFile ok: newId=${newId}`);
+                        updateHistory(targetWsId, newId, 'replace');
+                    } catch (err) {
+                        console.error('[Shell] createAndOpenFile failed:', err);
+                    }
+                } else {
+                    console.warn(`[Shell] create skipped: no manager for wsId=${targetWsId}`);
                 }
                 break;
             }
