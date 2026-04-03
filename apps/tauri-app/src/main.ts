@@ -166,7 +166,7 @@ async function bootstrap(): Promise<void> {
     const [rootBackend, homeBackend] = await Promise.all([
         openLocalFSBackend({
             rootDir:    mindosDir,
-            sidecarDir: `${mindosDir}/.meta`,
+            sidecarDir: `${mindosDir}/_meta`,
             createDb:   (dbPath) => TauriSqlSidecarDb.open(dbPath),
             createFs:   () => new TauriFsOps(),
         }),
