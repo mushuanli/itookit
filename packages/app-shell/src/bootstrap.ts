@@ -148,18 +148,18 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     // ── 6. Manager cache + workspace loader ────────────────────────────────────
 
     const managerCache = new Map<string, MemoryManager>();
+    // Deduplicate concurrent loads: if the same workspace is loading, reuse the promise.
+    const pendingLoads = new Map<string, Promise<MemoryManager | undefined>>();
 
-    const loadWorkspace = async (
+    const doLoadWorkspace = async (
         wsConfig: WorkspaceConfig,
         initialResourceId?: string,
     ): Promise<MemoryManager | undefined> => {
         const { elementId } = wsConfig;
-        console.log(`[Shell] loadWorkspace: ${elementId} cached=${managerCache.has(elementId)}`);
-        if (managerCache.has(elementId)) return managerCache.get(elementId);
 
         const container = document.getElementById(elementId);
         if (!container) {
-            console.warn(`[Shell] loadWorkspace: container #${elementId} not found in DOM`);
+            console.warn(`[Shell] doLoadWorkspace: container #${elementId} not found in DOM`);
             return undefined;
         }
 
@@ -224,6 +224,22 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
         if (onProgress) await waitForEditorMount(container);
 
         return manager;
+    };
+
+    /** Deduplicated workspace loader: concurrent calls for the same elementId share one promise. */
+    const loadWorkspace = (
+        wsConfig: WorkspaceConfig,
+        initialResourceId?: string,
+    ): Promise<MemoryManager | undefined> => {
+        const { elementId } = wsConfig;
+        console.log(`[Shell] loadWorkspace: ${elementId} cached=${managerCache.has(elementId)} pending=${pendingLoads.has(elementId)}`);
+        if (managerCache.has(elementId)) return Promise.resolve(managerCache.get(elementId));
+        if (!pendingLoads.has(elementId)) {
+            const p = doLoadWorkspace(wsConfig, initialResourceId)
+                .finally(() => pendingLoads.delete(elementId));
+            pendingLoads.set(elementId, p);
+        }
+        return pendingLoads.get(elementId)!;
     };
 
     // ── 7. Routing helpers ─────────────────────────────────────────────────────
