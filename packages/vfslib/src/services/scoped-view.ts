@@ -61,4 +61,17 @@ export class ScopedView {
         }
         return false;
     }
+
+    // Check read-only by real path to avoid virtual-path ambiguity (e.g. a
+    // module-owned '/module/<id>/dev' dir has virtual path '/dev' which would
+    // incorrectly match the system '/dev' read-only mapping).
+    isRealPathReadOnly(realPath: string): boolean {
+        const normalized = P.normalize(realPath);
+        for (const m of this.mappings) {
+            if (m.virtualPrefix !== '/' && P.isUnder(normalized, m.realPrefix)) {
+                return m.readOnly;
+            }
+        }
+        return false;
+    }
 }
