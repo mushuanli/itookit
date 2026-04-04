@@ -337,9 +337,12 @@ export class ModuleFS implements IModuleFS {
         return '/' + parts.join('/');
     }
 
-    private assertWritable(idOrPath: string): void {
-        if (isPath(idOrPath) && this.scope.isReadOnly(idOrPath)) {
-            throw new FSReadOnlyError(idOrPath);
+    // Takes a real (internal) path to avoid virtual-path ambiguity: e.g. a
+    // module dir named 'dev' has virtual path '/dev' which would incorrectly
+    // match the system read-only '/dev' mount.
+    private assertWritable(realPath: string): void {
+        if (this.scope.isRealPathReadOnly(realPath)) {
+            throw new FSReadOnlyError(this._toVirtual(realPath));
         }
     }
 
@@ -617,7 +620,7 @@ export class ModuleFS implements IModuleFS {
             ? await this._toReal(options.parentIdOrPath)
             : `/module/${this.moduleId}`;
 
-        this.assertWritable(this._toVirtual(parentRealPath));
+        this.assertWritable(parentRealPath);
         this.access.checkCreate(this.caller, options.name, parentRealPath);
 
         const c = this.ctx('create', parentRealPath);
@@ -655,7 +658,7 @@ export class ModuleFS implements IModuleFS {
             ? await this._toReal(options.parentIdOrPath)
             : `/module/${this.moduleId}`;
 
-        this.assertWritable(this._toVirtual(parentRealPath));
+        this.assertWritable(parentRealPath);
         this.access.checkCreate(this.caller, options.name, parentRealPath);
 
         const c = this.ctx('create', parentRealPath);
@@ -692,7 +695,7 @@ export class ModuleFS implements IModuleFS {
     ): Promise<void> {
         const r = await this._resolve(idOrPath, 'writeContent');
         const virtualPath = this._toVirtual(r.fullPath);
-        this.assertWritable(virtualPath);
+        this.assertWritable(r.fullPath);
 
         // Device delegation
         if (r.inode.type === 'device') {
@@ -734,7 +737,7 @@ export class ModuleFS implements IModuleFS {
     ): Promise<void> {
         const r = await this._resolve(idOrPath, 'rename');
         const virtualPath = this._toVirtual(r.fullPath);
-        this.assertWritable(virtualPath);
+        this.assertWritable(r.fullPath);
 
         const oldName = r.name;
         const c = this.ctx('rename', r.fullPath);
@@ -765,7 +768,7 @@ export class ModuleFS implements IModuleFS {
         const targetRealPath = targetParentIdOrPath
             ? await this._toReal(targetParentIdOrPath)
             : `/module/${this.moduleId}`;
-        this.assertWritable(this._toVirtual(targetRealPath));
+        this.assertWritable(targetRealPath);
 
         const movedNodes: FSNodeMovedPayload['nodes'] = [];
 
@@ -810,7 +813,7 @@ export class ModuleFS implements IModuleFS {
                 throw e;
             }
 
-            this.assertWritable(this._toVirtual(r.fullPath));
+            this.assertWritable(r.fullPath);
             const nodeId = this._id(r.ino);
             requestedIds.push(nodeId);
 
@@ -835,7 +838,7 @@ export class ModuleFS implements IModuleFS {
         metadata: Record<string, unknown>,
     ): Promise<void> {
         const r = await this._resolve(idOrPath, 'updateMetadata');
-        this.assertWritable(this._toVirtual(r.fullPath));
+        this.assertWritable(r.fullPath);
 
         const c = this.ctx('updateMetadata', r.fullPath);
         c.args = { metadata };
@@ -868,7 +871,7 @@ export class ModuleFS implements IModuleFS {
         const targetRealPath = targetParentIdOrPath
             ? await this._toReal(targetParentIdOrPath)
             : `/module/${this.moduleId}`;
-        this.assertWritable(this._toVirtual(targetRealPath));
+        this.assertWritable(targetRealPath);
 
         const c = this.ctx('copy', sourceR.fullPath);
         let resultNode!: FSNode;
@@ -908,7 +911,7 @@ export class ModuleFS implements IModuleFS {
         const dir = P.dirname(linkPath);
         const name = P.basename(linkPath);
         const realDir = this.scope.toRealPath(dir);
-        this.assertWritable(dir);
+        this.assertWritable(realDir);
         this.access.checkCreate(this.caller, name, realDir);
 
         // Translate absolute virtual paths to real paths so the engine can resolve them.
@@ -985,7 +988,7 @@ export class ModuleFS implements IModuleFS {
             ? await this._toReal(parentIdOrPath)
             : `/module/${this.moduleId}`;
 
-        this.assertWritable(this._toVirtual(parentRealPath));
+        this.assertWritable(parentRealPath);
         this.access.checkCreate(this.caller, name, parentRealPath);
 
         const c = this.ctx('create', parentRealPath);
