@@ -225,7 +225,125 @@ describe.skipIf(!apiKey)(
             });
         });
 
-        // ── 3. Text content (inline) ──────────────────────────────────────────
+        // ── 3. Text attachments (type:'text') ────────────────────────────────
+        // Tests the new text attachment path: attachments are auto-expanded by
+        // LLMDriver into MessageContentText parts before sending to the provider.
+
+        describe('text attachment', () => {
+            it('plain text string source — model reads content from attachment', async () => {
+                const messages: ChatMessage[] = [{
+                    role: 'user',
+                    content: 'Read the attached document and answer: what number is mentioned? Reply with the number only.',
+                    attachments: [{
+                        type: 'text',
+                        source: TEXT_CONTENT,
+                        name: 'doc.txt',
+                        mimeType: 'text/plain',
+                    }],
+                }];
+
+                const response = await driver.chat.create({ messages, stream: false, maxTokens: 8 });
+                const text = toText(response);
+                console.log('[text-att-plain]', text);
+
+                expect(text).toContain('42');
+            });
+
+            it('JSON string source — model extracts field from text attachment', async () => {
+                const messages: ChatMessage[] = [{
+                    role: 'user',
+                    content: 'Read the attached JSON and answer: what is the value of the "city" field? Reply with the city name only.',
+                    attachments: [{
+                        type: 'text',
+                        source: JSON_CONTENT,
+                        name: 'data.json',
+                        mimeType: 'application/json',
+                    }],
+                }];
+
+                const response = await driver.chat.create({ messages, stream: false, maxTokens: 8 });
+                const text = toText(response);
+                console.log('[text-att-json]', text);
+
+                expect(text.toLowerCase()).toContain('tokyo');
+            });
+
+            it('markdown string source — model reads structure from text attachment', async () => {
+                const messages: ChatMessage[] = [{
+                    role: 'user',
+                    content: 'Read the attached markdown and answer: what is the project name? One word answer.',
+                    attachments: [{
+                        type: 'text',
+                        source: MD_CONTENT,
+                        name: 'report.md',
+                        mimeType: 'text/markdown',
+                    }],
+                }];
+
+                const response = await driver.chat.create({ messages, stream: false, maxTokens: 8 });
+                const text = toText(response);
+                console.log('[text-att-md]', text);
+
+                expect(text.toLowerCase()).toContain('phoenix');
+            });
+
+            it('file type with text MIME — auto-downgraded to text path', async () => {
+                // type='file' + mimeType='application/json' should resolve to text, not base64 file
+                const messages: ChatMessage[] = [{
+                    role: 'user',
+                    content: 'Read the attached file and answer: what is the value of the "city" field? Reply with the city name only.',
+                    attachments: [{
+                        type: 'file',
+                        source: JSON_CONTENT,
+                        name: 'data.json',
+                        mimeType: 'application/json',
+                    }],
+                }];
+
+                const response = await driver.chat.create({ messages, stream: false, maxTokens: 8 });
+                const text = toText(response);
+                console.log('[text-att-file-downgrade]', text);
+
+                expect(text.toLowerCase()).toContain('tokyo');
+            });
+
+            it('multiple text attachments in one message', async () => {
+                const messages: ChatMessage[] = [{
+                    role: 'user',
+                    content: 'I am sending two documents. The first contains a number, the second contains a city name. Reply with exactly: "<number> <city>"',
+                    attachments: [
+                        { type: 'text', source: TEXT_CONTENT, name: 'numbers.txt', mimeType: 'text/plain' },
+                        { type: 'text', source: JSON_CONTENT, name: 'data.json', mimeType: 'application/json' },
+                    ],
+                }];
+
+                const response = await driver.chat.create({ messages, stream: false, maxTokens: 16 });
+                const text = toText(response);
+                console.log('[text-att-multi]', text);
+
+                expect(text).toContain('42');
+                expect(text.toLowerCase()).toContain('tokyo');
+            });
+
+            it('text attachment mixed with image attachment', async () => {
+                const messages: ChatMessage[] = [{
+                    role: 'user',
+                    content: 'I am sending a text document and an image. What number is in the text? Reply with the number only.',
+                    attachments: [
+                        { type: 'text', source: TEXT_CONTENT, name: 'doc.txt', mimeType: 'text/plain' },
+                        { type: 'image', source: BLUE_PNG_URI, name: 'img.png' },
+                    ],
+                }];
+
+                const response = await driver.chat.create({ messages, stream: false, maxTokens: 8 });
+                const text = toText(response);
+                console.log('[text-att-mixed]', text);
+
+                expect(text).toContain('42');
+            });
+        });
+
+        // ── 4. Text content (inline) ──────────────────────────────────────────
         // NOTE: OpenAI Chat Completions API does NOT support { type:'file' } content parts.
         // That is a Responses API feature. Text documents must be embedded inline as text.
 
@@ -270,7 +388,7 @@ describe.skipIf(!apiKey)(
             });
         });
 
-        // ── 4. Multi-turn with attachments ────────────────────────────────────
+        // ── 5. Multi-turn with attachments ────────────────────────────────────
 
         describe('multi-turn conversation', () => {
             it('image in first turn is referenced in follow-up', async () => {
@@ -324,7 +442,7 @@ describe.skipIf(!apiKey)(
             });
         });
 
-        // ── 5. Token usage reporting ──────────────────────────────────────────
+        // ── 6. Token usage reporting ──────────────────────────────────────────
 
         describe('token usage', () => {
             it('non-streaming response includes usage stats', async () => {
