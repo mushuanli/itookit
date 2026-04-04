@@ -8,6 +8,8 @@ vitest.config.ts
 constants.ts
 test/
 tests/
+__test__/
+__tests__/
 scripts/
 
 # mdx plugins:
