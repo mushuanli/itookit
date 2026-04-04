@@ -11,7 +11,8 @@ import { BaseProvider } from '../providers/base';
 import { createProvider } from '../providers/registry';
 import { LLMError } from '../errors';
 import { DEFAULT_MAX_RETRIES, DEFAULT_RETRY_DELAY, DEFAULT_TIMEOUT } from '../constants';
-import { log } from '../utils/logger';  // ✅ 简洁导入
+import { expandMessagesAttachments } from '../utils/attachment';
+import { log } from '../utils/logger';
 
 /**
  * LLM Driver - 统一的 LLM API 客户端
@@ -21,6 +22,7 @@ import { log } from '../utils/logger';  // ✅ 简洁导入
  * 2. 统一消息格式和响应结构
  * 3. 处理重试和超时
  * 4. 处理流式响应
+ * 5. 自动展开 ChatMessage.attachments 为 multipart content
  */
 export class LLMDriver {
     private provider: BaseProvider;
@@ -94,11 +96,25 @@ export class LLMDriver {
     get currentModel(): string | undefined {
         return this.config.model || this.config.connection?.model;
     }
+
+    /**
+     * 推断当前 provider 的格式标识，用于 attachment 展开
+     */
+    private get providerFormat(): 'openai' | 'anthropic' | 'gemini' | undefined {
+        const name = this.providerName.toLowerCase();
+        if (name.includes('anthropic') || name.includes('claude')) return 'anthropic';
+        if (name.includes('gemini') || name.includes('google')) return 'gemini';
+        // OpenAI 及兼容实现均使用 openai 格式
+        return 'openai';
+    }
     
     // ============== 主入口 ==============
     
     /**
      * 创建聊天完成（支持流式和非流式）
+     * 
+     * 会自动将消息中的 `attachments` 字段展开为对应的 multipart content parts，
+     * 使上层调用方无需手动调用 `processAttachments` 或 `expandMessageAttachments`。
      */
     async createChatCompletion(params: ChatCompletionParams & { stream: true }): Promise<AsyncGenerator<ChatCompletionChunk>>;
     async createChatCompletion(params: ChatCompletionParams & { stream?: false }): Promise<ChatCompletionResponse>;
@@ -114,6 +130,24 @@ export class LLMDriver {
         });
         
         let finalParams = { ...params };
+
+        // ── 自动展开 attachments ──
+        const hasAttachments = finalParams.messages.some(m => m.attachments && m.attachments.length > 0);
+        if (hasAttachments) {
+            try {
+                finalParams.messages = await expandMessagesAttachments(
+                    finalParams.messages,
+                    this.providerFormat,
+                );
+                log.debug('Attachments expanded', { requestId });
+            } catch (err: any) {
+                log.warn('Failed to expand attachments, sending messages as-is', {
+                    requestId,
+                    error: err.message,
+                });
+            }
+        }
+
         if (this.config.hooks?.beforeRequest) {
             finalParams = await this.config.hooks.beforeRequest(finalParams);
         }

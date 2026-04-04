@@ -15,6 +15,7 @@ export type {
     MessageContent,
     ChatMessage,
     Attachment,
+    AttachmentType,
     ToolCall,
     ToolDefinition,
     ComputerUseAction,
