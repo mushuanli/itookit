@@ -138,12 +138,18 @@ export interface ComputerUseAction {
 
 // ─── Attachment ───────────────────────────────────────────────────────────────
 
+/** 附件类型分类 */
+export type AttachmentType = 'image' | 'audio' | 'video' | 'file' | 'text';
+
 export interface Attachment {
     name?: string;
-    type: string;       // 类型分类 ('image' | 'audio' | 'video' | 'file') 或 MIME type
+    /** 附件类型分类 */
+    type: AttachmentType;
+    /** 附件数据源：URL / Data URI / Base64 字符串 / File / Blob / ArrayBuffer */
     source: string | File | Blob | ArrayBuffer;
     size?: number;
     filename?: string;
+    /** MIME type，用于辅助判断处理方式 */
     mimeType?: string;
     options?: Record<string, any>;
 }

@@ -9,7 +9,7 @@
  * - 统一消息格式和响应结构
  * - 处理流式响应
  * - 提供连接测试能力
- * - 支持多模态内容 (图片、音频、视频、文档)
+ * - 支持多模态内容 (图片、音频、视频、文档、文本附件)
  * - 支持 MCP 协议
  * - 支持技能/工具系统
  * 
@@ -54,18 +54,19 @@ export type {
     MessageContentPart,
     MessageContentText,
     MessageContentImage,
-    MessageContentAudio,      // 新增
-    MessageContentVideo,      // 新增
-    MessageContentFile,       // 新增 (替代 MessageContentDocument)
-    MessageContentToolResult, // 新增
-    MessageContentCodeExecution, // 新增
-    MessageContentCitation,   // 新增
+    MessageContentAudio,
+    MessageContentVideo,
+    MessageContentFile,
+    MessageContentToolResult,
+    MessageContentCodeExecution,
+    MessageContentCitation,
     Role,
     ToolCall,
     ToolDefinition,
-    ComputerUseAction,        // 新增
-    MCPToolCall,              // 新增
-    Attachment                // 新增
+    ComputerUseAction,
+    MCPToolCall,
+    Attachment,
+    AttachmentType            // 新增
 } from './types/message';
 
 // Provider 配置
@@ -73,9 +74,9 @@ export type {
     LLMProviderConfig,
     LLMClientConfig,
     LLMHooks,
-    ProviderCapabilities,     // 新增
-    MCPConfig,                // 新增
-    MCPServerConfig           // 新增
+    ProviderCapabilities,
+    MCPConfig,
+    MCPServerConfig
 } from './types/provider';
 
 // 请求/响应
@@ -83,12 +84,12 @@ export type {
     ChatCompletionParams,
     ChatCompletionResponse,
     ChatCompletionChunk,
-    AssistantMessage,         // 新增
-    ToolChoice,               // 新增
-    ResponseFormat,           // 新增
-    TokenUsage,               // 新增
-    Citation,                 // 新增
-    FinishReason              // 新增
+    AssistantMessage,
+    ToolChoice,
+    ResponseFormat,
+    TokenUsage,
+    Citation,
+    FinishReason
 } from './types/response';
 
 // ============================================
@@ -156,17 +157,24 @@ export {
 export {
     processAttachment,
     isSupportedVisionContent,
-    isSupportedAudioContent,   // 新增
-    isSupportedVideoContent,   // 新增
+    isSupportedAudioContent,
+    isSupportedVideoContent,
+    isSupportedTextContent,        // 新增
     buildImageContent,
-    buildAudioContent,         // 新增
-    buildVideoContent,         // 新增
-    buildFileContent,          // 新增
-    attachmentToContentPart,   // 新增
-    processAttachments,        // 新增
-    detectMediaType,           // 新增
-    SUPPORTED_MEDIA_TYPES      // 新增
+    buildAudioContent,
+    buildVideoContent,
+    buildFileContent,
+    buildTextContent,              // 新增
+    readTextSource,                // 新增
+    attachmentToContentPart,
+    processAttachments,
+    expandMessageAttachments,      // 新增
+    expandMessagesAttachments,     // 新增
+    detectMediaType,
+    SUPPORTED_MEDIA_TYPES
 } from './utils/attachment';
+
+export type { ProcessedAttachment } from './utils/attachment';
 
 export {
     parseSSEStream,
