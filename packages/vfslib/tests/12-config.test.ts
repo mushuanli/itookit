@@ -3,7 +3,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { freshIDB } from './helpers';
-import { createVFS } from '../factory';
+import { createVFS } from '../src/factory';
 import type { IVFSManager, IConfigService } from '@itookit/common';
 
 interface ConfigVFS {

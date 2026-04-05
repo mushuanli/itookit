@@ -3,7 +3,7 @@
  * Verifies hidden files and asset-dir paths are correctly identified.
  */
 import { describe, it, expect } from 'vitest';
-import { isHiddenFile, shouldFilterNode } from '../utils/helpers';
+import { isHiddenFile, shouldFilterNode } from '../src/utils/helpers';
 
 // ── isHiddenFile ─────────────────────────────────────────────────────────────
 

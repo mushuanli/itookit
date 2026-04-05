@@ -19,8 +19,8 @@ import { promises as fsp } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
-import { createVFS } from '../factory';
-import { VFSModuleEngine } from '../adapter-session/VFSModuleEngine';
+import { createVFS } from '../src/factory';
+import { VFSModuleEngine } from '../src/adapter-session/VFSModuleEngine';
 import { freshIDB } from './helpers';
 import type { EngineNode } from '@itookit/common';
 
