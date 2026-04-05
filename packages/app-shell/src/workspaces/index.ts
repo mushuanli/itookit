@@ -8,7 +8,7 @@
  *   import { WS_CHAT, WS_AGENTS } from '@itookit/app-shell';
  *   const WORKSPACES = [
  *     WS_CHAT,
- *     { ...WS_AGENTS, mentionScope: ['agents', 'prompts'] },
+ *     { ...WS_AGENTS, mentionScope: ['agents', 'minds'] },
  *   ];
  */
 
@@ -58,13 +58,13 @@ export const WS_AGENTS: WorkspaceConfig = {
     aiEnabled: false,
 };
 
-export const WS_PROMPTS: WorkspaceConfig = {
-    elementId: 'prompt-workspace',
-    moduleName: 'prompts',
-    slug: 'prompts',
+export const WS_MINDS: WorkspaceConfig = {
+    elementId: 'minds-workspace',
+    moduleName: 'minds',
+    slug: 'minds',
     type: 'standard',
-    title: 'Prompts',
-    supportedFileTypes: ['prompt'],
+    title: 'Minds',
+    supportedFileTypes: ['mind'],
     syncEnabled: true,
     mentionAble: true,
     aiEnabled: true,

@@ -1,5 +1,5 @@
 import {
-    WS_SETTINGS, WS_CHAT, WS_AGENTS, WS_PROMPTS,
+    WS_SETTINGS, WS_CHAT, WS_AGENTS, WS_MINDS,
     WS_ANKI, WS_PROJECTS, WS_EMAILS, WS_PRIVATE,
 } from '@itookit/app-shell';
 import type { WorkspaceConfig } from '@itookit/app-shell';
@@ -12,7 +12,7 @@ const WS_HOME: WorkspaceConfig = {
     slug: 'files',
     type: 'standard',
     title: 'Files',
-    supportedFileTypes: ['markdown', 'prompt', 'project', 'email', 'private'],
+    supportedFileTypes: ['markdown', 'mind', 'project', 'email', 'private'],
     syncEnabled: false,
     mentionAble: true,
     aiEnabled: true,
@@ -24,7 +24,7 @@ export const WORKSPACES: WorkspaceConfig[] = [
     WS_CHAT,
     WS_AGENTS,
     WS_ANKI,
-    WS_PROMPTS,
+    WS_MINDS,
     WS_PROJECTS,    // stored in appData/IndexedDB — same as web-app
     WS_EMAILS,
     WS_PRIVATE,
