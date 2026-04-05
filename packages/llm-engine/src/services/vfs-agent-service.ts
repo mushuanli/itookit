@@ -27,6 +27,7 @@ const VERSION_FILE = '/.defaults_version.json';
 
 export class VFSAgentService extends BaseModuleService implements IAgentManagementService {
     private _agents: AgentDefinition[] = [];
+    private _agentNodeIds = new Map<string, string>(); // agentId → VFS node ID
     private _syncTimer: ReturnType<typeof setTimeout> | null = null;
     private _eventUnsubscribers: Array<() => void> = [];
 
@@ -102,12 +103,9 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
 
     private async syncDefaultAgents(): Promise<void> {
         const defaultConnId = await this.getDefaultConnectionId();
-        const currentAgents = await this.scanAgentFiles();
-        const currentIds = new Set(currentAgents.map(a => a.id));
         let created = 0;
 
         for (const def of this.llmService.getDefaultAgents()) {
-            if (currentIds.has(def.id)) continue;
             const filename = `${def.id}.agent`;
             const parentDir = def.initPath || AGENT_DEFAULT_DIR;
             const fullPath = `${parentDir}/${filename}`.replace(/\/+/g, '/');
@@ -172,26 +170,49 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
         const contentStr = JSON.stringify(agent, null, 2);
         const metadata = { icon: agent.icon || '🤖', title: agent.name, description: agent.description };
 
-        const query: EngineSearchQuery = { text: filename, type: 'file' };
-        const results = await this.engine.search(query);
-        const existing = results.find((n: EngineNode) => n.name === filename);
-
-        if (existing) {
-            await this.engine.writeContent(existing.id, contentStr);
-            await this.engine.updateMetadata(existing.id, metadata);
+        const cachedId = this._agentNodeIds.get(agent.id);
+        if (cachedId) {
+            await this.engine.writeContent(cachedId, contentStr);
+            await this.engine.updateMetadata(cachedId, metadata);
         } else {
-            await this.engine.createFile(filename, null, contentStr, metadata);
+            // Cache miss: search for existing file (only before first scan completes)
+            const query: EngineSearchQuery = { text: filename, type: 'file' };
+            const results = await this.engine.search(query);
+            const existing = results.find((n: EngineNode) => n.name === filename);
+            if (existing) {
+                this._agentNodeIds.set(agent.id, existing.id);
+                await this.engine.writeContent(existing.id, contentStr);
+                await this.engine.updateMetadata(existing.id, metadata);
+            } else {
+                const node = await this.engine.createFile(filename, null, contentStr, metadata);
+                if (node?.id) this._agentNodeIds.set(agent.id, node.id);
+            }
         }
 
-        await this.refreshData();
+        // Update in-memory list directly; VFS event debounce will refresh from disk
+        const idx = this._agents.findIndex(a => a.id === agent.id);
+        if (idx >= 0) {
+            this._agents[idx] = { ...agent, tags: this._agents[idx].tags };
+        } else {
+            this._agents.push(agent);
+        }
+        this.notify();
     }
 
     async deleteAgent(agentId: string): Promise<void> {
-        const filename = `${agentId}.agent`;
-        const query: EngineSearchQuery = { text: filename, type: 'file' };
-        const results = await this.engine.search(query);
-        const node = results.find((n: EngineNode) => n.name === filename);
-        if (node) { await this.engine.delete([node.id]); await this.refreshData(); }
+        const cachedId = this._agentNodeIds.get(agentId);
+        if (cachedId) {
+            await this.engine.delete([cachedId]);
+            this._agentNodeIds.delete(agentId);
+        } else {
+            const filename = `${agentId}.agent`;
+            const query: EngineSearchQuery = { text: filename, type: 'file' };
+            const results = await this.engine.search(query);
+            const node = results.find((n: EngineNode) => n.name === filename);
+            if (node) await this.engine.delete([node.id]);
+        }
+        this._agents = this._agents.filter(a => a.id !== agentId);
+        this.notify();
     }
 
     // ─── ILLMManagementService — 全部委托给 llmService（LLMDeviceDriver）─────
@@ -304,6 +325,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
 
     private async scanAgentFiles(): Promise<AgentDefinition[]> {
         const agents: AgentDefinition[] = [];
+        this._agentNodeIds.clear();
         try {
             const query: EngineSearchQuery = { text: '.agent', type: 'file' };
             const nodes = await this.engine.search(query);
@@ -319,7 +341,11 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
                     if ((data.config as any).modelId && !data.config.modelName) {
                         data.config.modelName = (data.config as any).modelId;
                     }
-                    return data.id ? { ...data, tags: node.tags } as AgentDefinition : null;
+                    if (data.id) {
+                        this._agentNodeIds.set(data.id, node.id);
+                        return { ...data, tags: node.tags } as AgentDefinition;
+                    }
+                    return null;
                 } catch { return null; }
             }));
 
@@ -334,6 +360,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
         this._eventUnsubscribers.forEach(fn => fn());
         this._eventUnsubscribers = [];
         if (this._syncTimer) { clearTimeout(this._syncTimer); this._syncTimer = null; }
+        this._agentNodeIds.clear();
         await super.dispose();
     }
 }

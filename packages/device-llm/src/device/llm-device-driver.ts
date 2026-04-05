@@ -539,7 +539,9 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
 
     async saveConnection(conn: LLMConnection): Promise<void> {
         await this.writeToDisk(conn);
-        await this.reload();
+        // Update in-memory cache directly; bindVFSEvents debounce handles cross-tab sync
+        const idx = this._connections.findIndex(c => c.id === conn.id);
+        if (idx >= 0) { this._connections[idx] = conn; } else { this._connections.push(conn); }
         await this.vfs.createDeviceNode('llm', `/dev/llm/connection/${conn.id}`, {
             resourceType: 'connection',
             resourceId: conn.id,
@@ -550,7 +552,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
     async deleteConnection(id: string): Promise<void> {
         if (id === 'default') throw new Error('Cannot delete the default connection');
         await this.deleteFromDisk(id);
-        await this.reload();
+        this._connections = this._connections.filter(c => c.id !== id);
         await this.vfs.removeDeviceNode(`/dev/llm/connection/${id}`);
         this.notify();
     }
@@ -568,7 +570,8 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
 
     async saveMCPServer(server: MCPServer): Promise<void> {
         await this.writeMCPToDisk(server);
-        await this.reloadMCP();
+        const idx = this._mcpServers.findIndex(s => s.id === server.id);
+        if (idx >= 0) { this._mcpServers[idx] = server; } else { this._mcpServers.push(server); }
         await this.vfs.createDeviceNode('llm', `/dev/llm/mcp/${server.id}`, {
             resourceType: 'mcp',
             resourceId: server.id,
@@ -578,7 +581,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
 
     async deleteMCPServer(id: string): Promise<void> {
         await this.deleteMCPFromDisk(id);
-        await this.reloadMCP();
+        this._mcpServers = this._mcpServers.filter(s => s.id !== id);
         const conn = this._activeMCPConns.get(id);
         if (conn) {
             try { await conn.disconnect(); } catch { /* ignore */ }
@@ -662,7 +665,8 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
     async saveSkill(skill: LLMSkill): Promise<void> {
         skill = { ...skill, modifiedAt: Date.now() };
         await this.writeSkillToDisk(skill);
-        await this.reloadSkills();
+        const idx = this._skills.findIndex(s => s.id === skill.id);
+        if (idx >= 0) { this._skills[idx] = skill; } else { this._skills.push(skill); }
         await this.vfs.createDeviceNode('llm', `/dev/llm/skills/${skill.id}`, {
             resourceType: 'skill',
             resourceId: skill.id,
@@ -672,7 +676,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
 
     async deleteSkill(id: string): Promise<void> {
         await this.deleteSkillFromDisk(id);
-        await this.reloadSkills();
+        this._skills = this._skills.filter(s => s.id !== id);
         await this.vfs.removeDeviceNode(`/dev/llm/skills/${id}`);
         this.notify();
     }
