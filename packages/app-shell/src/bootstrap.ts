@@ -339,6 +339,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     document.querySelectorAll('.app-nav-btn[data-target]').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.preventDefault();
+            e.stopPropagation(); // prevent bubbling to delegated handler in app-specific main.ts
             const targetId = (e.currentTarget as HTMLElement).dataset.target;
             if (!targetId) return;
             const lastId = managerCache.get(targetId)?.getActiveSessionId() ?? null;
