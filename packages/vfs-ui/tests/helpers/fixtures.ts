@@ -2,8 +2,8 @@
  * Shared test fixtures and mock factories for vfs-ui tests.
  */
 import type { EngineNode, EngineEventType, EngineEvent, ISessionEngine } from '@itookit/common';
-import type { IFileTypePort } from '../../contracts/ports';
-import type { VFSNodeUI } from '../../contracts/types';
+import type { IFileTypePort } from '../../src/contracts/ports';
+import type { VFSNodeUI } from '../../src/contracts/types';
 
 // ── Wait helpers ────────────────────────────────────────────────────────────
 

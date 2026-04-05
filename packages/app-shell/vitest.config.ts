@@ -7,6 +7,6 @@ export default defineConfig({
         // LLM network calls need longer timeout
         testTimeout: 60_000,
         hookTimeout: 15_000,
-        include: ['src/__tests__/**/*.test.ts'],
+        include: ['tests/**/*.test.ts'],
     },
 });

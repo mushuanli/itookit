@@ -14,11 +14,11 @@
  *    the original `in` vs `.has()` bug on a Set.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { FileCommandHandler } from '../interaction/handlers/FileCommandHandler';
-import { CommandBus } from '../interaction/CommandBus';
-import { VFSStore } from '../services/VFSStore';
-import { VFSService } from '../services/VFSService';
-import { EngineAdapter } from '../services/EngineAdapter';
+import { FileCommandHandler } from '../src/interaction/handlers/FileCommandHandler';
+import { CommandBus } from '../src/interaction/CommandBus';
+import { VFSStore } from '../src/services/VFSStore';
+import { VFSService } from '../src/services/VFSService';
+import { EngineAdapter } from '../src/services/EngineAdapter';
 import {
     MockSessionEngine,
     mockFileTypePort,

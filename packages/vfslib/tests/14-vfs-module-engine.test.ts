@@ -9,7 +9,7 @@
  * AFTER fix:  on() correctly subscribes via Set.has()
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { VFSModuleEngine } from '../adapter-session/VFSModuleEngine';
+import { VFSModuleEngine } from '../src/adapter-session/VFSModuleEngine';
 import { setupVFS, freshMem, type TestVFS } from './helpers';
 import type { EngineEvent } from '@itookit/common';
 
