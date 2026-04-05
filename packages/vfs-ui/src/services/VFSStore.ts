@@ -90,7 +90,10 @@ export class VFSStore implements IStatePort {
         draft.error = payload.error;
       },
       'CREATE_ITEM_START': () => {
-        draft.creatingItem = payload;
+        draft.creatingItem = {
+          ...payload,
+          prevSelectedIds: [...draft.selectedItemIds],
+        };
         draft.selectedItemIds.clear();
         if (payload.parentId) {
           this.collapseExpandedSiblings(draft, payload.parentId);
@@ -98,7 +101,11 @@ export class VFSStore implements IStatePort {
         }
       },
       'CREATE_ITEM_END': () => {
+        const prev = draft.creatingItem?.prevSelectedIds;
         draft.creatingItem = null;
+        if (prev?.length) {
+          draft.selectedItemIds = new Set(prev);
+        }
       },
       'ITEM_DELETE_SUCCESS': () => this.handleDelete(draft, new Set(payload.itemIds)),
       'ITEM_SELECTION_REPLACE': () => {

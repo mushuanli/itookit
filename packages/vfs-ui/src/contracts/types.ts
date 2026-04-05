@@ -70,7 +70,7 @@ export interface VFSUIState {
   expandedOutlineIds: Set<string>;
   expandedOutlineH1Ids: Set<string>;
   selectedItemIds: Set<string>;
-  creatingItem: { type: 'file' | 'directory'; parentId: string | null } | null;
+  creatingItem: { type: 'file' | 'directory'; parentId: string | null; prevSelectedIds?: string[] } | null;
   moveOperation: { isMoving: boolean; itemIds: string[] } | null;
   searchQuery: string;
   uiSettings: UISettings;

@@ -196,7 +196,7 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService> {
     }
 
     let active = this.getActiveSession();
-    if (!active) {
+    if (!active && this.statePort.getState().selectedItemIds.size === 0) {
       const findFirst = (items: VFSNodeUI[]): VFSNodeUI | null => {
         for (const item of items) {
           if (item.type === 'file') return item;
