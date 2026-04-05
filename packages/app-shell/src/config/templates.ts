@@ -14,14 +14,14 @@ export const TPL_ANKI = `### 挖空填词 (Cloze)
 - **带音频**: 法语单词 "你好" 的发音是 --Bonjour--^^audio:Bonjour^^。
 `;
 
-export const TPL_PROMPT = `# Welcome to Your Prompt Library!
+export const TPL_MIND = `# Welcome to Minds!
 
 This is your personal space to create, manage, and reuse powerful prompts for Large Language Models (LLMs).
 
 ## How to Use This Space
 
-*   **Create a New Prompt**: Click the '+' icon in the sidebar to create a new prompt file.
-*   **Organize**: Use folders to group related prompts.
+*   **Create a New Mind**: Click the '+' icon in the sidebar to create a new mind file.
+*   **Organize**: Use folders to group related minds.
 *   **Use Variables**: You can use placeholders like \`{{variable_name}}\` in your prompts.
 `;
 
