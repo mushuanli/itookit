@@ -7,8 +7,8 @@
  */
 
 import { IndexedDBBackend } from '@itookit/vfsdriver-indexeddb';
-import { MemoryBackend } from '../backend/memory-backend';
-import { createVFS } from '../factory';
+import { MemoryBackend } from '../src/backend/memory-backend';
+import { createVFS } from '../src/factory';
 import type { IVFSManager, IModuleFS, IStorageBackend } from '@itookit/common';
 
 // ─────────────────────────────────────────────────────────────────────────────

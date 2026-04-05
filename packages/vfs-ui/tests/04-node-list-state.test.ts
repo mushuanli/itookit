@@ -6,8 +6,8 @@
  * same reference for a changed field, render() will NOT be called.
  */
 import { describe, it, expect } from 'vitest';
-import { NodeListStateTransformer } from '../ui/components/NodeList/NodeListState';
-import type { VFSUIState } from '../contracts/types';
+import { NodeListStateTransformer } from '../src/ui/components/NodeList/NodeListState';
+import type { VFSUIState } from '../src/contracts/types';
 import { makeVFSNodeUI } from './helpers/fixtures';
 
 // ── Minimal VFSUIState factory ────────────────────────────────────────────────

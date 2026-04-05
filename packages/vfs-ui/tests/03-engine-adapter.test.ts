@@ -7,8 +7,8 @@
  * These tests catch payload-shape mismatches and Set.has() vs `in` bugs.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { EngineAdapter } from '../services/EngineAdapter';
-import { VFSStore } from '../services/VFSStore';
+import { EngineAdapter } from '../src/services/EngineAdapter';
+import { VFSStore } from '../src/services/VFSStore';
 import {
     MockSessionEngine,
     mockFileTypePort,

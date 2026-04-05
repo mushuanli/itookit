@@ -3,8 +3,8 @@
  * Covers create/delete/update actions and their effect on items tree.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
-import { VFSStore } from '../services/VFSStore';
-import type { VFSNodeUI } from '../contracts/types';
+import { VFSStore } from '../src/services/VFSStore';
+import type { VFSNodeUI } from '../src/contracts/types';
 import { makeVFSNodeUI } from './helpers/fixtures';
 
 // ── Setup ────────────────────────────────────────────────────────────────────
