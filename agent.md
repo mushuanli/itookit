@@ -239,7 +239,7 @@ UI packages declare internal packages as `peerDependencies` (not `dependencies`)
 
 ## 13. Testing
 
-- Only `vfslib` has a full test suite (`packages/vfslib/src/__tests__/01-*.test.ts` … `16-*.test.ts`)
+- Only `vfslib` has a full test suite (`packages/vfslib/tests/01-*.test.ts` … `16-*.test.ts`)
 - Test runner: **Vitest**
 - `fake-indexeddb` used for browser storage emulation in Node test environment
-- `app-shell` also has tests in `src/__tests__/`
+- `app-shell` also has tests in `tests/`

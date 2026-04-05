@@ -58,12 +58,12 @@ export const FILE_REGISTRY: Record<string, AppFileTypeConfig> = {
         defaultContent: TPL.TPL_CHAT,
         editorType: 'chat',
     },
-    prompt: {
-        id: 'prompt',
-        label: 'Prompt',
-        extension: '.prompt',
-        defaultFileName: 'New Prompt.md',
-        defaultContent: TPL.TPL_PROMPT,
+    mind: {
+        id: 'mind',
+        label: 'Mind',
+        extension: '.mind',
+        defaultFileName: 'New Mind.md',
+        defaultContent: TPL.TPL_MIND,
         editorType: 'standard',
     },
     project: {
