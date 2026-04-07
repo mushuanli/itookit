@@ -257,7 +257,7 @@ class SessionRegistry {
     static getInstance(): SessionRegistry
     
     // 初始化
-    initialize(agentService: IAgentService, sessionEngine: ISessionEngine, options?: { maxConcurrent?: number }): void
+    initialize(agentService: IAgentConfigService, sessionEngine: ISessionEngine, options?: { maxConcurrent?: number }): void
     
     // 会话管理
     registerSession(nodeId: string, sessionId: string): Promise<SessionRuntime>
@@ -401,9 +401,9 @@ stopCleanup();
 ### 自定义 Agent 服务
 
 ```typescript
-import { IAgentService, AgentDefinition } from '@itookit/llm-engine';
+import { IAgentConfigService, AgentDefinition } from '@itookit/llm-engine';
 
-class CustomAgentService implements IAgentService {
+class CustomAgentService implements IAgentConfigService {
     async init() { /* ... */ }
     
     async getAgents(): Promise<AgentDefinition[]> {

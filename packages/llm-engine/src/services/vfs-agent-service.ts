@@ -44,7 +44,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
         await this.ensureDefaults();
         await this.refreshData();
         this.bindVFSEvents();
-        // 连接变更时同步通知，保持 IAgentService.onChange 语义不变
+        // 连接变更时同步通知，保持 IAgentConfigService.onChange 语义不变
         this._eventUnsubscribers.push(
             this.llmService.onChange(() => this.notify()),
         );
@@ -129,7 +129,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
         log.info('Default agents synced', { created });
     }
 
-    // ─── IAgentService — reads ────────────────────────────────────────────────
+    // ─── IAgentConfigService — reads ────────────────────────────────────────────────
 
     async getAgents(): Promise<AgentDefinition[]> {
         return [...this._agents];

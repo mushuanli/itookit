@@ -14,7 +14,7 @@
  * ```
  */
 import type {
-    IAgentService,
+    IAgentConfigService,
     AgentDefinition,
     ContextMenuConfig,
     MenuItem,
@@ -35,7 +35,7 @@ interface NodeItem {
 
 export interface AIContextMenuOptions {
     /** Agent service used to load the list of available agents. */
-    agentService: IAgentService;
+    agentService: IAgentConfigService;
     /** Session engine used to persist metadata changes. */
     engine: ISessionEngine;
     /**
@@ -102,7 +102,7 @@ export function createAIContextMenuConfig(options: AIContextMenuOptions): Contex
 
 async function showAgentDialog(
     node: NodeItem,
-    agentService: IAgentService,
+    agentService: IAgentConfigService,
     engine: ISessionEngine,
     currentAgentId: string | undefined
 ): Promise<void> {

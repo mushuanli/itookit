@@ -5,7 +5,7 @@ import {
     EditorEventCallback, CollapseExpandResult, Toast,
 } from '@itookit/common';
 import {
-    ILLMSessionEngine, IAgentService, SessionManager, getSessionManager,
+    ILLMSessionEngine, IAgentConfigService, SessionManager, getSessionManager,
 } from '@itookit/llm-engine';
 
 // Domain — 只依赖接口和类型
@@ -54,7 +54,7 @@ import { getPromptHistory } from '@itookit/llm-engine';
 
 export interface LLMEditorOptions extends EditorOptions {
     sessionEngine: ILLMSessionEngine;
-    agentService: IAgentService;
+    agentService: IAgentConfigService;
     initialInputState?: { text?: string; agentId?: string };
     isNewSession?: boolean;
 }

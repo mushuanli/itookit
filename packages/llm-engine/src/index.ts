@@ -92,7 +92,7 @@ export type {
 // ============================================
 
 export type {
-    IAgentService,
+    IAgentConfigService,
     IAgentManagementService,
     IConnectionService,
     MCPServer,
@@ -123,7 +123,7 @@ export type {
 // 初始化
 // ============================================
 
-import { IAgentService } from './services/agent-service';
+import { IAgentConfigService } from './services/agent-service';
 import { ILLMSessionEngine } from './persistence/types';
 import { initializeKernel, KernelInitOptions } from '@itookit/llm-kernel';
 import { LLMSessionEngine } from './persistence/session-engine';
@@ -135,7 +135,7 @@ import { initializePromptHistory } from './services/prompt-history-service';
  */
 export interface EngineInitOptions extends KernelInitOptions {
     /** Agent 服务 */
-    agentService: IAgentService;
+    agentService: IAgentConfigService;
 
     /** 会话引擎 */
     sessionEngine: ILLMSessionEngine;

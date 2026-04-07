@@ -22,7 +22,7 @@ import {
 import { EngineError, EngineErrorCode } from '../core/errors';
 import { ENGINE_DEFAULTS } from '../core/constants';
 import { ILLMSessionEngine, BranchTreeNode } from '../persistence/types';
-import { IAgentService } from '../services/agent-service';
+import { IAgentConfigService } from '../services/agent-service';
 import { SessionState } from './session-state';
 import { SessionEventBus } from './session-event-bus';
 import { TaskRunner } from './task-runner';
@@ -70,7 +70,7 @@ export class SessionManager {
 
     constructor(
         engine: ILLMSessionEngine,
-        agentService: IAgentService,
+        agentService: IAgentConfigService,
         options?: {
             maxConcurrent?: number;
             autoContinue?: Partial<AutoContinueConfig>;  // ✅ 新增
@@ -1370,7 +1370,7 @@ let sessionManagerInstance: SessionManager | null = null;
 
 export function createSessionManager(
     engine: ILLMSessionEngine,
-    agentService: IAgentService,
+    agentService: IAgentConfigService,
     options?: {
         maxConcurrent?: number;
     }
