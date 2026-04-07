@@ -4,7 +4,7 @@
 export type {
     MCPServer,
     IConnectionService,
-    IAgentService,
+    IAgentConfigService,
     IAgentManagementService,
     AgentDefinition,
     AgentType,

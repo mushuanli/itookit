@@ -14,7 +14,7 @@
 | 原文件 | 新位置 | 说明 |
 |--------|--------|------|
 | `services/VFSAgentService.ts` | `llm-engine/services/agent-service.ts` | 保持逻辑不变 |
-| `services/IAgentService.ts` | `llm-engine/services/agent-service.ts` | 合并导出 |
+| `services/IAgentConfigService.ts` | `llm-engine/services/agent-service.ts` | 合并导出 |
 | `engine/LLMSessionEngine.ts` | `llm-engine/persistence/session-engine.ts` | 保持逻辑不变 |
 | `base/session/*` | `llm-engine/persistence/types.ts` | 类型迁移 |
 | `base/agent.ts` | `llm-engine/types/agent.ts` | Agent 定义 |

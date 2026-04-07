@@ -1,7 +1,7 @@
 // @file: llm-engine/session/agent-resolver.ts
 
 import { ExecutorConfig } from '@itookit/llm-kernel';
-import { IAgentService } from '../services/agent-service';
+import { IAgentConfigService } from '../services/agent-service';
 import { EngineError, EngineErrorCode } from '../core/errors';
 import { log } from '../utils/logger';
 
@@ -27,7 +27,7 @@ export interface ModelInfo {
  * 完整连接（含 apiKey）由 LLMDeviceDriver 内部通过 connectionId 解析。
  */
 export class AgentResolver {
-    constructor(private agentService: IAgentService) {}
+    constructor(private agentService: IAgentConfigService) {}
 
     async resolve(agentId: string): Promise<ExecutorConfig> {
         try {
