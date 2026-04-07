@@ -22,6 +22,10 @@ export * from './interfaces/fs';
 
 // ── LLM: 连接、消息、补全、Agent、Executor 接口 ──
 export * from './interfaces/llm';
+export * from './interfaces/tools';
+export * from './interfaces/skills';
+export * from './interfaces/agent';
+
 export {
     IEditor,
     type EditorOptions,

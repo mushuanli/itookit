@@ -1,13 +1,13 @@
 // @file: llm-ui/services/AgentLoader.ts
 
-import { IAgentService, SessionManager } from '@itookit/llm-engine';
+import { IAgentConfigService, SessionManager } from '@itookit/llm-engine';
 import { ExecutorOption, ModelOption } from '../domain/types';
 
 export class AgentLoader {
     private cachedAgents: ExecutorOption[] = [];
 
     constructor(
-        private agentService: IAgentService,
+        private agentService: IAgentConfigService,
         private sessionManager: SessionManager
     ) { }
 

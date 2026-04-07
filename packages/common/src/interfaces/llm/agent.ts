@@ -148,14 +148,14 @@ export interface ILLMManagementService extends IConnectionService {
     getDefaultAgents(): InitialAgentDef[];
 }
 
-// ─── IAgentService ────────────────────────────────────────────────────────────
+// ─── IAgentConfigService ────────────────────────────────────────────────────────────
 
 /**
  * Agent 核心读取接口（SessionManager / AgentResolver 依赖）。
  * getConnection / getDefaultConnection 返回 ConnectionMeta（不含 apiKey），
  * 实现内部委托给 LLMDeviceDriver ioctl。
  */
-export interface IAgentService {
+export interface IAgentConfigService {
     init(): Promise<void>;
     getAgentConfig(agentId: string): Promise<AgentDefinition | null>;
     getAgents(): Promise<AgentDefinition[]>;
@@ -173,7 +173,7 @@ export interface IAgentService {
  * 继承 IAgentService（读） + ILLMManagementService（连接/MCP/Skill 管理），
  * 并增加 Agent CRUD 和恢复/诊断能力。
  */
-export interface IAgentManagementService extends IAgentService, ILLMManagementService {
+export interface IAgentManagementService extends IAgentConfigService, ILLMManagementService {
     // Agent CRUD
     saveAgent(agent: AgentDefinition): Promise<void>;
     deleteAgent(agentId: string): Promise<void>;

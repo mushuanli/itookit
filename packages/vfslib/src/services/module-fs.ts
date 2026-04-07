@@ -1132,6 +1132,17 @@ class InlineAssetOps implements IAssetOperations {
                 ino = existing.ino;
             } else {
                 ino = await scope.inodes.allocateIno();
+            }
+
+            // contentRef must be String(ino) so LocalFSContentStore.resolveRef
+            // can parseInt() it to look up the real path. putData must run
+            // before putInode so the staging file exists when putInode migrates
+            // it to the real path (LocalFS staging→rename flow).
+            const contentRef = String(ino);
+            const buf = toBuffer(content);
+            await scope.content.putData(contentRef, buf);
+
+            if (!existing) {
                 await scope.inodes.putInode({
                     ino,
                     parentIno: assetDirIno,
@@ -1141,10 +1152,6 @@ class InlineAssetOps implements IAssetOperations {
                     nlink: 1,
                 });
             }
-
-            const contentRef = `data_${ino}`;
-            const buf = toBuffer(content);
-            await scope.content.putData(contentRef, buf);
 
             const currentMeta = existing ? await scope.meta.getMeta(ino) : null;
             await scope.meta.putMeta({
