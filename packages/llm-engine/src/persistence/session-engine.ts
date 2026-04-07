@@ -319,23 +319,42 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
   private async tryReadValidManifest(nodeId: string): Promise<ChatManifest | null> {
     try {
       const content = await this.engine.readContent(nodeId);
+      const byteLen = content instanceof ArrayBuffer ? content.byteLength : (content as string).length;
+      console.log(`[tryReadValidManifest] nodeId=${nodeId} contentBytes=${byteLen}`);
       if (!content) return null;
 
       const str = typeof content === 'string' ? content : new TextDecoder().decode(content);
+      if (!str) {
+        console.warn(`[tryReadValidManifest] nodeId=${nodeId} → empty string after decode`);
+        return null;
+      }
       const parsed = JSON.parse(str);
-      return this.isValidManifest(parsed) ? parsed : null;
-    } catch {
+      const valid = this.isValidManifest(parsed);
+      if (!valid) console.warn(`[tryReadValidManifest] nodeId=${nodeId} → parsed but failed isValidManifest`, parsed);
+      return valid ? parsed : null;
+    } catch (e) {
+      console.warn(`[tryReadValidManifest] nodeId=${nodeId} → exception`, e);
       return null;
     }
   }
 
   private async isSessionStructureIntact(chatFileId: string, manifest: ChatManifest): Promise<boolean> {
     const assetDirId = await this.engine.getAssetDirectoryId(chatFileId);
+    console.log(`[isSessionStructureIntact] chatFileId=${chatFileId} assetDirId=${assetDirId}`);
     if (!assetDirId) return false;
 
     const assetDir = await this.getAssetDirPath(chatFileId);
-    const rootNode = await this.readJson<ChatNode>(`${assetDir}/${manifest.root_id}.chat`);
-    return !!rootNode;
+    const rootPath = `${assetDir}/${manifest.root_id}.chat`;
+    const rootNode = await this.readJson<ChatNode>(rootPath);
+    console.log(`[isSessionStructureIntact] rootPath=${rootPath} rootNode=${rootNode ? 'OK' : 'NULL'}`);
+    // If the root node file exists (assetDirId found) but can't be parsed,
+    // treat as intact — unreadable != absent. Rebuild would wipe all nodes.
+    if (!rootNode) {
+      const exists = await this.engine.pathExists(rootPath);
+      console.log(`[isSessionStructureIntact] rootNode unreadable, file exists=${exists}`);
+      return exists;
+    }
+    return rootNode.status !== 'deleted';
   }
 
   // ============================================================
@@ -657,19 +676,39 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
     title: string,
     systemPrompt: string = 'You are a helpful assistant.'
   ): Promise<string> {
+    console.log(`[initializeExistingFile] nodeId=${nodeId} title="${title}"`);
     const manifest = await this.tryReadValidManifest(nodeId);
 
     if (!manifest) {
+      // Safety guard: only auto-create a new session if the .chat file is
+      // genuinely empty (new file) or absent. If the file already has content
+      // but the manifest could not be parsed, it is corrupt — never overwrite
+      // user data without explicit confirmation.
+      const existing = await this.engine.readContent(nodeId);
+      const existingSize = existing instanceof ArrayBuffer
+        ? existing.byteLength
+        : (existing as string).length;
+
+      if (existingSize > 0) {
+        console.warn(`[initializeExistingFile] nodeId=${nodeId} → file has ${existingSize} bytes but manifest is invalid — refusing to auto-create (would overwrite user data)`);
+        throw new Error(`Session file is corrupt and cannot be parsed (nodeId=${nodeId}). Manual recovery required.`);
+      }
+
+      console.warn(`[initializeExistingFile] nodeId=${nodeId} → file is empty, creating new session`);
       return this.createNewSessionForNode(nodeId, title, systemPrompt);
     }
 
-    if (!(await this.isSessionStructureIntact(nodeId, manifest))) {
+    console.log(`[initializeExistingFile] manifest OK: id=${manifest.id} head=${manifest.current_head} next_sn=${manifest.next_sn}`);
+
+    const intact = await this.isSessionStructureIntact(nodeId, manifest);
+    if (!intact) {
+      console.warn(`[initializeExistingFile] nodeId=${nodeId} → structure broken, rebuilding (will lose nodes)`);
       return this.rebuildSessionStructure(nodeId, manifest, systemPrompt);
     }
 
     // Populate cache
     this.chatFileIds.set(manifest.id, nodeId);
-    log.debug(`Existing valid session found: ${manifest.id}`);
+    console.log(`[initializeExistingFile] session loaded: ${manifest.id}`);
     return manifest.id;
   }
 
@@ -690,14 +729,22 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
     oldManifest: ChatManifest,
     systemPrompt: string
   ): Promise<string> {
-    // Clean up existing asset dir
-    try {
-      const assetDirId = await this.engine.getAssetDirectoryId(nodeId);
-      if (assetDirId) {
-        await this.engine.delete([assetDirId]);
+    // Safety guard: check whether the asset dir has any nodes before deleting.
+    // An asset dir with nodes means user data exists — do NOT auto-delete.
+    // Only wipe when the asset dir is genuinely empty (no node files at all).
+    const assetDirId = await this.engine.getAssetDirectoryId(nodeId);
+    if (assetDirId) {
+      const assets = await this.engine.getAssets(nodeId);
+      if (assets.length > 0) {
+        console.warn(`[rebuildSessionStructure] nodeId=${nodeId} → asset dir has ${assets.length} nodes, refusing to delete user data`);
+        throw new Error(`Session structure is broken but asset dir contains ${assets.length} node(s) — cannot auto-rebuild without data loss (nodeId=${nodeId}). Manual recovery required.`);
       }
-    } catch {
-      // ignore
+      // Asset dir exists but is empty — safe to remove and recreate
+      try {
+        await this.engine.delete([assetDirId]);
+      } catch {
+        // ignore
+      }
     }
 
     const { sessionId } = await this.createSessionStructure(
@@ -1401,19 +1448,26 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
   async validateManifest(nodeId: string, _sessionId: string): Promise<boolean> {
     try {
       const assetDir = await this.getAssetDirPath(nodeId);
+      console.log(`[validateManifest] nodeId=${nodeId} assetDir=${assetDir}`);
       const io = this.getManifestIO();
       const { repaired } = await repairManifest(
         io,
         nodeId,
         async (id) => {
-          const node: ChatNode | null = await this.readJson<ChatNode>(`${assetDir}/${id}.chat`);
-          return !node || node.status === 'deleted';
+          const nodePath = `${assetDir}/${id}.chat`;
+          const node: ChatNode | null = await this.readJson<ChatNode>(nodePath);
+          console.log(`[validateManifest] isInvalid check: ${nodePath} → node=${node ? `role=${node.role} status=${node.status}` : 'NULL'}`);
+          // Only treat explicitly soft-deleted nodes as invalid.
+          // Unreadable nodes (empty file, parse error) are a storage
+          // corruption issue — do NOT remove their branch pointers.
+          return node !== null && node.status === 'deleted';
         },
         async (_invalidId, manifest) => manifest.root_id
       );
       return repaired;
     } catch (e) {
       log.error('Manifest validation failed', { nodeId, error: e });
+      console.error(`[validateManifest] exception for nodeId=${nodeId}`, e);
       return false;
     }
   }
