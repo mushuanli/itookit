@@ -5,6 +5,7 @@ import { Toast } from '@itookit/common';
 import type { IHistoryPresenter } from '../domain/ports/IHistoryPresenter';
 import type { IStatusPresenter } from '../domain/ports/IStatusPresenter';
 import type { IBranchPresenter } from '../domain/ports/IBranchPresenter';
+import type { IChatInputPresenter } from '../domain/ports/IChatInputPresenter';
 import type { IEditorEventBus } from '../domain/events';
 import type { BranchStore } from '../services/BranchStore';
 
@@ -51,10 +52,12 @@ const EVENT_SIDE_EFFECTS: Partial<Record<string, SideEffect[]>> = {
 
 export interface SessionEventHandlerDeps {
     sessionManager: SessionManager;
-    historyView: IHistoryPresenter;       // ✅ 接口
-    bus: IEditorEventBus;                 // ✅ 接口
-    branchIndicator: IBranchPresenter;    // ✅ 接口
-    statusIndicator: IStatusPresenter;    // ✅ 接口
+    historyView: IHistoryPresenter;
+    bus: IEditorEventBus;
+    branchIndicator: IBranchPresenter;
+    statusIndicator: IStatusPresenter;
+    /** ChatInput presenter — 用于更新 token 用量显示 */
+    chatInput: IChatInputPresenter;
     branchStore: BranchStore;
     getCurrentSessionId: () => string | null;
     onContentChanged: () => void;
@@ -125,7 +128,23 @@ export class SessionEventHandler {
     }
 
     private updateStatusFromEvent(event: OrchestratorEvent): void {
-        if (event.type === 'finished') this.deps.statusIndicator.update('completed');
-        else if (event.type === 'error') this.deps.statusIndicator.update('failed');
+        if (event.type === 'finished') {
+            this.deps.statusIndicator.update('completed');
+
+            // Forward token usage to ChatInput TokenMeterPlugin
+            const tu = event.payload.tokenUsage;
+            if (tu) {
+                this.deps.chatInput.updateTokenStats({
+                    inputTokens:       tu.inputTokens,
+                    outputTokens:      tu.outputTokens,
+                    cacheTokens:       tu.cacheTokens,
+                    costUsd:           tu.costUsd,
+                    contextUsageRatio: tu.contextUsageRatio,
+                    turns:             tu.turns,
+                    durationMs:        tu.durationMs,
+                    isEstimated:       tu.isEstimated,
+                });
+            }
+        } else if (event.type === 'error') this.deps.statusIndicator.update('failed');
     }
 }

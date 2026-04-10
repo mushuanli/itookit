@@ -6,4 +6,5 @@ export * from './connection';
 export * from './message';
 export * from './completion';
 export * from './agent';
+export * from './llm-service';
 

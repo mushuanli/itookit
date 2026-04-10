@@ -2,6 +2,7 @@
 // Agent 调度器核心类型。
 
 import type { TokenUsage } from '../llm/completion';
+import type { Attachment } from '../llm/message';
 
 /**
  * Agent 会话状态。
@@ -69,6 +70,8 @@ export interface AgentTaskRequest {
     budgetOverride?: Partial<AgentBudgetLimits>;
     /** 会话 ID（用于恢复已有会话） */
     sessionId?: string;
+    /** 附件（图片、文件等多模态输入） */
+    attachments?: Attachment[];
 }
 
 /**
@@ -200,10 +203,10 @@ export interface AgentEventPayloads {
     'agent:llm:fallback': { from: string; to: string; reason: string };
     'agent:stream:content': { delta: string };
     'agent:stream:thinking': { delta: string };
-    'agent:tool:start': { toolId: string; args: Record<string, unknown> };
-    'agent:tool:success': { toolId: string; output: string; durationMs: number };
-    'agent:tool:error': { toolId: string; error: string };
-    'agent:tool:timeout': { toolId: string; timeoutMs: number };
+    'agent:tool:start': { toolId: string; callId: string; args: Record<string, unknown> };
+    'agent:tool:success': { toolId: string; callId: string; output: string; durationMs: number };
+    'agent:tool:error': { toolId: string; callId: string; error: string };
+    'agent:tool:timeout': { toolId: string; callId: string; timeoutMs: number };
     'agent:permission:request': { toolId: string; args: Record<string, unknown> };
     'agent:context:compressed': CompressionInfo;
     'agent:skill:loaded': { skillId: string; toolIds: string[] };

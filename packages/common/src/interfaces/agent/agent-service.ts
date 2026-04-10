@@ -7,6 +7,9 @@ import type {
     AgentSessionInfo,
     AgentEventType,
     AgentEventPayloads,
+    AgentModelRoles,
+    AgentBudgetLimits,
+    AgentLoopConfig,
 } from './agent-types';
 
 /**
@@ -67,4 +70,33 @@ export interface IAgentRuntime {
 
     /** 删除会话 */
     deleteSession(sessionId: string): void;
+}
+
+/**
+ * Agent 运行时配置服务接口。
+ *
+ * 管理 AgentLoopExecutor 的运行参数：
+ * 模型角色分配、六维预算限制、循环行为配置。
+ *
+ * 注意：与 llm/agent.ts 中的 IAgentConfigService（LLM 管理服务）不同，
+ * 此接口专属于 AgentLoopExecutor 的运行时配置。
+ */
+export interface IAgentRuntimeConfig {
+    /** 获取模型角色配置 */
+    getModelRoles(): AgentModelRoles;
+    /** 更新模型角色配置 */
+    setModelRoles(roles: Partial<AgentModelRoles>): Promise<void>;
+
+    /** 获取预算限制配置 */
+    getBudgetLimits(): AgentBudgetLimits;
+    /** 更新预算限制配置 */
+    setBudgetLimits(limits: Partial<AgentBudgetLimits>): Promise<void>;
+
+    /** 获取循环行为配置 */
+    getLoopConfig(): AgentLoopConfig;
+    /** 更新循环行为配置 */
+    setLoopConfig(config: Partial<AgentLoopConfig>): Promise<void>;
+
+    /** 监听配置变化 */
+    onChange(listener: () => void): () => void;
 }

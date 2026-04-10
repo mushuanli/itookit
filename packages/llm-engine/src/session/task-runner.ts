@@ -13,11 +13,13 @@ import {
     BranchInfo,
     ExecutionOverrides,
     ChatFile,
+    SessionTokenUsage,
 } from '../core/types';
 import { ENGINE_DEFAULTS } from '../core/constants';
 import { EngineError, EngineErrorCode } from '../core/errors';
 import { SessionState, HistoryMessage } from './session-state';
 import { LLMKernelAdapter, getLLMKernelAdapter } from '../adapters/llmkernel-adapter';
+import { HarnessAdapter } from '../adapters/harness-adapter';
 import { ILLMSessionEngine } from '../persistence/types';
 import { SessionEventBus } from './session-event-bus';
 import { AgentResolver } from './agent-resolver';
@@ -68,6 +70,7 @@ export class TaskRunner {
     private maxConcurrent: number;
     private maxQueueSize: number;
     private kernelAdapter: LLMKernelAdapter;
+    private harnessAdapter: HarnessAdapter | null = null;
 
     /** 自动续写配置模板 */
     private autoContinueConfig: Partial<AutoContinueConfig>;
@@ -89,6 +92,16 @@ export class TaskRunner {
     // ============================================
     // 公共 API
     // ============================================
+
+    /**
+     * 注入 HarnessAdapter（初始化后调用）。
+     *
+     * 注入后，当 input.overrides.useHarness === true 时，
+     * 任务会通过 AgentLoopExecutor 执行而非 llm-kernel。
+     */
+    setHarnessAdapter(adapter: HarnessAdapter): void {
+        this.harnessAdapter = adapter;
+    }
 
     async submit(input: TaskInput, runtime: SessionRuntime): Promise<string> {
         if (runtime.status === 'running' || runtime.status === 'queued') {
@@ -194,12 +207,211 @@ export class TaskRunner {
                 continue;
             }
 
-            this.executeTask(task, ctx.state, ctx.runtime);
+            if (this.harnessAdapter && task.input.overrides?.useHarness) {
+                this.executeHarnessTask(task, ctx.state, ctx.runtime);
+            } else {
+                this.executeTask(task, ctx.state, ctx.runtime);
+            }
         }
     }
 
     // ============================================
-    // 内部：任务执行
+    // 内部：共享 setup（harness + kernel 路径公共部分）
+    // ============================================
+
+    /**
+     * 初始化任务执行的公共前置步骤（steps 1-5）。
+     *
+     * 两条路径（harness / kernel）在步骤 1-5 完全相同，
+     * 只有步骤 6+ 的执行逻辑（LLM 调用方式）有差异，提取为共享方法。
+     */
+    private async setupTaskExecution(
+        task: ExecutionTask,
+        state: SessionState,
+    ): Promise<{
+        userNodeId: string | undefined;
+        executorConfig: import('@itookit/llm-kernel').ExecutorConfig;
+        assistantNodeId: string;
+        rootNode: ExecutionNode;
+        accumulator: { output: string; thinking: string };
+        persist: () => void;
+        finalize: () => Promise<void>;
+        contextFiles: ChatFile[];
+    }> {
+        const { sessionId, input } = task;
+
+        // 1. Resolve attachments
+        const contextFiles = await this.attachments.resolveAttachments(
+            sessionId, input.text, input.files,
+        );
+
+        // 2. Create user message
+        let userNodeId = input.parentUserNodeId;
+        if (!input.skipUserMessage) {
+            userNodeId = await this.createUserMessage(task, state, contextFiles);
+        }
+
+        // 3. Resolve executor config
+        let executorConfig = await this.agentResolver.resolve(input.agentId);
+        if (input.overrides) {
+            executorConfig = this.applyOverrides(executorConfig, input.overrides);
+        }
+
+        // 4. Create assistant node
+        const { assistantNodeId, rootNode } = await this.createAssistantNode(
+            sessionId, task.nodeId, state, executorConfig, input.branchInfo, userNodeId,
+        );
+
+        // 5. Throttled persistence writer
+        const { accumulator, persist, finalize } = createThrottledWriter(
+            this.engine, sessionId, assistantNodeId, ENGINE_DEFAULTS.PERSIST_THROTTLE,
+        );
+
+        return { userNodeId, executorConfig, assistantNodeId, rootNode, accumulator, persist, finalize, contextFiles };
+    }
+
+    // ============================================
+    // 内部：任务执行（harness 路径）
+    // ============================================
+
+    /**
+     * Harness 执行路径。
+     *
+     * 与 kernel 路径的区别：
+     * - 无 auto-continue（由 AgentLoopExecutor 内部处理）
+     * - 无自定义历史截断（AgentLoopExecutor 自行管理上下文）
+     * - 事件通过 HarnessAdapter 桥接到 OrchestratorEvent
+     */
+    private async executeHarnessTask(
+        task: ExecutionTask,
+        state: SessionState,
+        runtime: SessionRuntime,
+    ): Promise<void> {
+        const { sessionId, input } = task;
+        this.running.set(task.id, task);
+        this.callbacks.onStatusChange(sessionId, 'running');
+        this.emitPoolStatus();
+
+        const isBound = this.callbacks.getBoundSessionId?.() === sessionId;
+        let errorAlreadyEmitted = false;
+
+        try {
+            const { assistantNodeId, rootNode, accumulator, persist, finalize } =
+                await this.setupTaskExecution(task, state);
+
+            // 6. Event bridge: harness events → OrchestratorEvent → UI + persistence
+            const onEvent = (event: OrchestratorEvent) => {
+                // Persist streaming content regardless of bound state
+                if (event.type === 'node_update' && event.payload.chunk) {
+                    if (!event.payload.nodeId || event.payload.nodeId === rootNode.id) {
+                        if (event.payload.field === 'output') {
+                            accumulator.output += event.payload.chunk;
+                            state.appendToNode(rootNode.id, event.payload.chunk, 'output');
+                        } else if (event.payload.field === 'thought') {
+                            accumulator.thinking += event.payload.chunk;
+                            state.appendToNode(rootNode.id, event.payload.chunk, 'thought');
+                        }
+                        persist();
+                    }
+                }
+
+                if (isBound) {
+                    if (event.type === 'error') errorAlreadyEmitted = true;
+                    // Fix missing nodeId on root-level events
+                    if (
+                        (event.type === 'node_update' || event.type === 'node_status') &&
+                        !event.payload.nodeId
+                    ) {
+                        (event.payload as { nodeId: string }).nodeId = rootNode.id;
+                    }
+                    this.eventBus.emitSession(sessionId, event);
+                }
+            };
+
+            // 7. Build harness task request
+            const harnessCwd = input.overrides?.workingDirectory ?? process.cwd();
+            const harnessRequest = {
+                prompt: input.text,
+                workingDirectory: harnessCwd,
+                sessionId,
+                context: { agentId: input.agentId },
+            };
+
+            // 8. Execute via harness (multi-turn loop, no auto-continue needed)
+            const { result } = await this.harnessAdapter!.execute(
+                harnessRequest, rootNode, onEvent, task.abortController.signal,
+            );
+
+            // 9. Final persistence — harness has exact token data
+            await finalize();
+            const hEnd = Date.now();
+            const hUsage = result.usage;
+            await this.engine.updateNode(sessionId, assistantNodeId, {
+                content: accumulator.output,
+                meta: {
+                    thinking:     accumulator.thinking,
+                    status: result.status === 'completed' ? 'success'
+                          : result.status === 'partial'   ? 'success'
+                          : result.status === 'cancelled' ? 'aborted'
+                          : 'failed',
+                    endTime:      hEnd,
+                    durationMs:   hUsage.elapsedMs,
+                    inputTokens:  hUsage.inputTokens,
+                    outputTokens: hUsage.outputTokens,
+                    costUsd:      hUsage.costUsd,
+                    isEstimated:  false,
+                },
+            });
+
+            // 10. Complete
+            const harnessMaxCtx = 200_000;
+            const hTokenUsage: SessionTokenUsage = {
+                inputTokens:       hUsage.inputTokens,
+                outputTokens:      hUsage.outputTokens,
+                cacheTokens:       0,
+                costUsd:           hUsage.costUsd,
+                contextUsageRatio: Math.min(1, hUsage.inputTokens / harnessMaxCtx),
+                turns:             hUsage.turns,
+                durationMs:        hUsage.elapsedMs,
+                isEstimated:       false,
+            };
+
+            state.updateNodeStatus(rootNode.id, 'success');
+
+            if (isBound) {
+                this.eventBus.emitSession(sessionId, {
+                    type: 'node_status',
+                    payload: { nodeId: rootNode.id, status: 'success' },
+                });
+
+                if (input.regenerateContext) {
+                    this.eventBus.emitSession(sessionId, {
+                        type: 'regenerate_completed',
+                        payload: { branchName: input.regenerateContext.branchName, assistantNodeId },
+                    });
+                }
+
+                this.eventBus.emitSession(sessionId, {
+                    type: 'finished',
+                    payload: { sessionId, tokenUsage: hTokenUsage },
+                });
+            }
+
+            this.callbacks.onStatusChange(sessionId, 'completed');
+            this.callbacks.onUnread(sessionId);
+
+        } catch (error: any) {
+            await this.handleError(error, task, runtime, state, sessionId, errorAlreadyEmitted);
+        } finally {
+            this.running.delete(task.id);
+            runtime.currentTaskId = undefined;
+            this.emitPoolStatus();
+            this.processQueue();
+        }
+    }
+
+    // ============================================
+    // 内部：任务执行（kernel 路径）
     // ============================================
 
     private async executeTask(
@@ -227,24 +439,12 @@ export class TaskRunner {
         });
 
         try {
-            // 1. 解析附件
-            const contextFiles = await this.attachments.resolveAttachments(
-                sessionId, input.text, input.files
-            );
-
-            // 2. 创建用户消息（非 skip 模式）
-            let userNodeId = input.parentUserNodeId;
-            if (!input.skipUserMessage) {
-                userNodeId = await this.createUserMessage(task, state, contextFiles);
-            }
-
-            // 3. 解析执行器配置
-            let executorConfig = await this.agentResolver.resolve(input.agentId);
-            if (input.overrides) {
-                executorConfig = this.applyOverrides(executorConfig, input.overrides);
-            }
+            // 1-5. 公共 setup（附件解析、消息创建、执行器配置、持久化写入器）
+            const { executorConfig: baseConfig, assistantNodeId, rootNode, accumulator, persist, finalize, contextFiles } =
+                await this.setupTaskExecution(task, state);
 
             // 文件级 system prompt 覆盖：ai_systemPrompt 设置时优先于 agent 配置
+            let executorConfig = baseConfig;
             const fileNode = await this.engine.getNode(task.nodeId);
             const fileSystemPrompt = fileNode?.metadata?.ai_systemPrompt as string | undefined;
             if (fileSystemPrompt) {
@@ -256,19 +456,7 @@ export class TaskRunner {
                 state, input.text, input.overrides?.historyLength
             );
 
-            // 5. 创建 assistant 节点
-            const { assistantNodeId, rootNode } = await this.createAssistantNode(
-                sessionId, task.nodeId, state, executorConfig,
-                input.branchInfo, userNodeId
-            );
-
-            // 6. 节流持久化
-            const { accumulator, persist, finalize } = createThrottledWriter(
-                this.engine, sessionId, assistantNodeId,
-                ENGINE_DEFAULTS.PERSIST_THROTTLE
-            );
-
-            // 7. 终结事件抑制标志
+            // 6. 终结事件抑制标志
             //
             // 为什么始终抑制（而非仅续写时抑制）：
             //   kernel 的终结事件（execution:complete → finished）在 executeQuery
@@ -291,12 +479,12 @@ export class TaskRunner {
                 () => suppressTerminalEvents
             );
 
-            // 9. 准备附件和历史
+            // 7. 准备附件和历史
             const attachmentList = await this.attachments.convertToAttachments(sessionId, contextFiles);
             const historyWithFiles = await this.buildHistoryMessages(sessionId, history);
 
             // =====================================================
-            // 10. 执行循环（支持 auto-continue）
+            // 8. 执行循环（支持 auto-continue）
             //
             // 历史构建策略：
             //
@@ -440,15 +628,46 @@ export class TaskRunner {
 
             // 最终持久化
             await finalize();
+
+            // ── Token 估算 ─────────────────────────────────────────────────────
+            // 普通 kernel 路径没有精确 token 返回，从字符数估算（÷4）。
+            // 历史输入 = 所有发送给 LLM 的消息文本；输出 = 本次生成内容。
+            const startMs = task.createdAt;
+            const endMs = Date.now();
+            const historyChars = historyWithFiles.reduce(
+                (s, m) => s + (typeof m.content === 'string' ? m.content.length : 0), 0
+            );
+            const outputChars = accumulator.output.length + accumulator.thinking.length;
+            const estInputTokens  = Math.ceil((historyChars + input.text.length) / 4);
+            const estOutputTokens = Math.ceil(outputChars / 4);
+            // Conservative cost: $3/M input, $15/M output (Sonnet-class default)
+            const estCost = estInputTokens * 0.000003 + estOutputTokens * 0.000015;
+            // Context ratio: use history chars / 800k chars (≈ 200k tokens × 4)
+            const estContextRatio = Math.min(1, (historyChars + outputChars) / 800_000);
+
+            const tokenUsage: SessionTokenUsage = {
+                inputTokens:       estInputTokens,
+                outputTokens:      estOutputTokens,
+                cacheTokens:       0,
+                costUsd:           estCost,
+                contextUsageRatio: estContextRatio,
+                turns:             continuationCount + 1,
+                durationMs:        endMs - startMs,
+                isEstimated:       true,
+            };
+
             await this.engine.updateNode(sessionId, assistantNodeId, {
                 content: accumulator.output,
                 meta: {
-                    thinking: accumulator.thinking,
-                    status: 'success',
-                    endTime: Date.now(),
-                    ...(continuationCount > 0 && {
-                        continuations: continuationCount,
-                    }),
+                    thinking:     accumulator.thinking,
+                    status:       'success',
+                    endTime:      endMs,
+                    durationMs:   endMs - startMs,
+                    inputTokens:  estInputTokens,
+                    outputTokens: estOutputTokens,
+                    costUsd:      estCost,
+                    isEstimated:  true,
+                    ...(continuationCount > 0 && { continuations: continuationCount }),
                 },
             });
 
@@ -473,7 +692,7 @@ export class TaskRunner {
 
                 this.eventBus.emitSession(sessionId, {
                     type: 'finished',
-                    payload: { sessionId },
+                    payload: { sessionId, tokenUsage },
                 });
             }
 

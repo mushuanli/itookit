@@ -30,6 +30,8 @@ export class AgentResolver {
     constructor(private agentService: IAgentConfigService) {}
 
     async resolve(agentId: string): Promise<ExecutorConfig> {
+        let config: ExecutorConfig | null = null;
+
         try {
             const agentDef = await this.agentService.getAgentConfig(agentId);
 
@@ -51,11 +53,10 @@ export class AgentResolver {
                     || connMeta.availableModels?.[0]?.id
                     || '';
 
-                return {
+                config = {
                     id: agentDef.id,
                     name: agentDef.name,
                     type: agentDef.type === 'agent' ? 'agent' : 'composite',
-                    // connectionId 传给 LLMDeviceDriver，由其内部解析完整连接
                     connectionId: agentDef.config.connectionId,
                     model: modelId,
                     systemPrompt: agentDef.config.systemPrompt,
@@ -67,8 +68,41 @@ export class AgentResolver {
             log.error('Failed to resolve agent', { agentId, error: e });
         }
 
-        log.warn('Agent not found, using fallback', { agentId });
-        return this.getFallbackConfig();
+        if (!config) {
+            log.warn('Agent not found, using fallback', { agentId });
+            config = await this.getFallbackConfig();
+        }
+
+        return this.injectPromptSkills(config);
+    }
+
+    /**
+     * Inject enabled 'prompt' skill instructions into the resolved config's systemPrompt.
+     *
+     * Duck-typed: IAgentConfigService doesn't expose getSkills, but VFSAgentService
+     * (the concrete impl) does via IAgentManagementService — use optional call.
+     */
+    private async injectPromptSkills(config: ExecutorConfig): Promise<ExecutorConfig> {
+        type WithSkills = { getSkills?: () => Promise<Array<{ type: string; enabled: boolean; instructions?: string }>> };
+        const svc = this.agentService as WithSkills;
+        if (typeof svc.getSkills !== 'function') return config;
+
+        try {
+            const skills = await svc.getSkills();
+            const extra = skills
+                .filter(s => s.type === 'prompt' && s.enabled && s.instructions)
+                .map(s => s.instructions as string)
+                .join('\n\n');
+
+            if (!extra) return config;
+            return {
+                ...config,
+                systemPrompt: config.systemPrompt ? `${config.systemPrompt}\n\n${extra}` : extra,
+            };
+        } catch (e) {
+            log.warn('Failed to inject prompt skill instructions', { error: e });
+            return config;
+        }
     }
 
     async getAvailableAgents(): Promise<AgentInfo[]> {

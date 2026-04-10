@@ -3,10 +3,14 @@
 import type { IChatInputPresenter, IChatInputConfig } from '../../domain/ports/IChatInputPresenter';
 import type {
     ExecutorOption, ModelOption,
-    ChatOverrides,
+    ChatOverrides, SkillInfo, FileSuggestion,
 } from '../../domain/types';
+import type { IAgentRuntime } from '@itookit/common';
 import { ChatInputTemplates } from '../templates/ChatInputTemplates';
 import type { InputPlugin, InputPluginContext } from './plugins/InputPlugin';
+import type { HarnessPlugin } from './plugins/HarnessPlugin';
+import { MentionPlugin } from './plugins/MentionPlugin';
+import { TokenMeterPlugin } from './plugins/TokenMeterPlugin';
 
 export interface ChatInputOptions {
     onSend: (text: string, files: File[], executorId: string, overrides?: ChatOverrides) => Promise<void>;
@@ -16,6 +20,44 @@ export interface ChatInputOptions {
     initialAgents?: ExecutorOption[];
     initialConfig?: Partial<IChatInputConfig>;
     onRequestModels?: (agentId: string) => Promise<ModelOption[]>;
+
+    // ── Harness callbacks ────────────────────────────────────────────────────
+
+    /**
+     * 获取可用 Skill 列表（含 loaded 状态）。
+     *
+     * 仅在 harness 模式可用时由 Shell 注入。
+     * ChatInput 在设置面板打开时调用此函数刷新列表。
+     */
+    onRequestSkills?: () => Promise<SkillInfo[]>;
+
+    /**
+     * 加载 Skill 到当前 harness 会话。
+     *
+     * 调用后 harness 的 IToolService 会注册该 Skill 的工具，
+     * system prompt 会追加 Skill 的使用指令。
+     *
+     * @returns 新加载的工具 ID 列表
+     */
+    onLoadSkill?: (skillId: string) => Promise<string[]>;
+
+    /**
+     * 卸载 Skill。
+     */
+    onUnloadSkill?: (skillId: string) => Promise<void>;
+
+    // ── @mention 文件引用 ─────────────────────────────────────────────────────
+
+    /**
+     * 用户键入 `@` 后，根据 query 返回文件建议列表。
+     *
+     * 由 Shell 注入：调用 sessionEngine.searchFiles(query) 或
+     * 遍历当前模块 VFS 节点。未提供时 `@` 不触发文件选择器。
+     *
+     * 返回的 `path` 字段将以 Markdown 链接形式插入输入框，
+     * 发送时由 AttachmentProcessor 自动解析并附加文件内容。
+     */
+    onRequestFiles?: (query: string) => Promise<FileSuggestion[]>;
 }
 
 /**
@@ -48,14 +90,34 @@ export class ChatInput implements IChatInputPresenter {
     private currentAgentId: string = 'default';
     private isLoadingModels: boolean = false;
 
-    // ✨ 新增：插件系统
+    // ── Harness DOM elements ─────────────────────────────────────────────────
+    private harnessToggle!: HTMLInputElement;
+    private harnessToggleLabel!: HTMLSpanElement;
+    private cwdRow!: HTMLElement;
+    private cwdInput!: HTMLInputElement;
+    private skillSection!: HTMLElement;
+    private skillsList!: HTMLElement;
+
+    // ── Help panel ───────────────────────────────────────────────────────────
+    private helpBtn!: HTMLButtonElement;
+    private helpPanel!: HTMLElement;
+    private helpBody!: HTMLElement;
+    private helpVisible = false;
+
+    // ── Harness state ────────────────────────────────────────────────────────
+    private skills: SkillInfo[] = [];
+    private isLoadingSkills = false;
+
+    // ── Plugin system ────────────────────────────────────────────────────────
     private plugins: InputPlugin[] = [];
     private pluginCtx: InputPluginContext | null = null;
+    private harnessPlugin: HarnessPlugin | null = null;
+    private tokenMeterPlugin: TokenMeterPlugin | null = null;
 
     private config: IChatInputConfig = {
         text: '',
         agentId: 'default',
-        settings: { historyLength: -1, streamMode: true },
+        settings: { historyLength: -1, streamMode: true, useHarness: false, workingDirectory: '' },
     };
 
     constructor(private container: HTMLElement, private options: ChatInputOptions) {
@@ -69,6 +131,16 @@ export class ChatInput implements IChatInputPresenter {
         this.initExecutors();
         this.syncUIFromConfig();
         this.loadModelsForAgent(this.currentAgentId);
+
+        // TokenMeterPlugin — always registered, shows token stats after each response
+        const tokenMeter = new TokenMeterPlugin();
+        this.tokenMeterPlugin = tokenMeter;
+        this.registerPlugin(tokenMeter);
+
+        // Register MentionPlugin if file-request callback is available
+        if (options.onRequestFiles) {
+            this.registerPlugin(new MentionPlugin({ onRequestFiles: options.onRequestFiles }));
+        }
     }
 
     /**
@@ -79,6 +151,14 @@ export class ChatInput implements IChatInputPresenter {
 
         this.plugins.push(plugin);
         this.plugins.sort((a, b) => (a.priority ?? 100) - (b.priority ?? 100));
+
+        // Track known plugins for typed access
+        if (plugin.id === 'harness-status') {
+            this.harnessPlugin = plugin as HarnessPlugin;
+        }
+        if (plugin.id === 'token-meter') {
+            this.tokenMeterPlugin = plugin as TokenMeterPlugin;
+        }
 
         if (this.pluginCtx) {
             plugin.activate(this.pluginCtx);
@@ -202,6 +282,16 @@ export class ChatInput implements IChatInputPresenter {
         return changed;
     }
 
+    setHarnessRuntime(runtime: IAgentRuntime | null): void {
+        if (this.harnessPlugin) {
+            this.harnessPlugin.setRuntime(runtime);
+        }
+    }
+
+    updateTokenStats(stats: import('../../domain/types').TokenStats | null): void {
+        this.tokenMeterPlugin?.update(stats);
+    }
+
     destroy(): void {
         if (this.outsideClickHandler) {
             document.removeEventListener('click', this.outsideClickHandler);
@@ -228,6 +318,121 @@ export class ChatInput implements IChatInputPresenter {
         this.bindElements();
         this.updateModelOptions();
         this.updateHistoryDisplay();
+        this.injectHelpStyles();
+    }
+
+    private injectHelpStyles(): void {
+        if (document.getElementById('llm-input-help-styles')) return;
+        const s = document.createElement('style');
+        s.id = 'llm-input-help-styles';
+        s.textContent = `
+.llm-input__btn--help { opacity: 0.6; font-size: 13px; }
+.llm-input__btn--help:hover, .llm-input__btn--help.active { opacity: 1; }
+
+.llm-input__help-panel {
+    border-radius: 8px 8px 0 0;
+    border: 1px solid var(--border-color, #e0e0e0);
+    border-bottom: none;
+    background: var(--bg-primary, #fff);
+    max-height: 420px;
+    overflow-y: auto;
+    box-shadow: 0 -4px 16px rgba(0,0,0,.08);
+}
+.llm-input__help-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px 8px;
+    border-bottom: 1px solid var(--border-color, #e0e0e0);
+    position: sticky;
+    top: 0;
+    background: var(--bg-primary, #fff);
+    z-index: 1;
+}
+.llm-input__help-title { font-weight: 600; font-size: 13px; color: var(--text-primary, #333); }
+.llm-input__help-close {
+    background: none; border: none; cursor: pointer;
+    font-size: 18px; line-height: 1; color: var(--text-secondary, #888);
+    padding: 0 2px;
+}
+.llm-input__help-close:hover { color: var(--text-primary, #333); }
+.llm-input__help-body { padding: 4px 0 8px; }
+
+.llm-input__help-section { padding: 8px 14px 4px; }
+.llm-input__help-section + .llm-input__help-section {
+    border-top: 1px solid var(--border-color-subtle, #f0f0f0);
+}
+.llm-input__help-section-title {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    color: var(--text-tertiary, #aaa);
+    margin: 0 0 6px;
+}
+.llm-input__help-section-desc {
+    font-size: 12px;
+    color: var(--text-secondary, #666);
+    margin: 0 0 6px;
+}
+
+.llm-input__help-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+.llm-input__help-table tr { vertical-align: top; }
+.llm-input__help-table td {
+    padding: 2px 6px 2px 0;
+    color: var(--text-primary, #333);
+    white-space: nowrap;
+}
+.llm-input__help-table td:last-child { white-space: normal; color: var(--text-secondary, #666); }
+.llm-input__help-group {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: var(--text-tertiary, #bbb);
+    padding-top: 8px !important;
+    padding-bottom: 2px !important;
+}
+
+kbd {
+    display: inline-block;
+    padding: 1px 5px;
+    font-size: 11px;
+    font-family: monospace;
+    background: var(--bg-secondary, #f5f5f5);
+    border: 1px solid var(--border-color, #ddd);
+    border-radius: 3px;
+    color: var(--text-primary, #333);
+    white-space: nowrap;
+}
+code {
+    font-size: 11px;
+    font-family: monospace;
+    background: var(--bg-secondary, #f5f5f5);
+    padding: 1px 4px;
+    border-radius: 3px;
+}
+
+.llm-input__help-hint {
+    font-size: 11px;
+    color: var(--text-tertiary, #aaa);
+    margin: 4px 0 0;
+}
+.llm-input__help-hint code { background: none; padding: 0; }
+.llm-input__help-dim { font-size: 10px; color: var(--text-tertiary, #aaa); }
+
+.llm-input__help-footer {
+    font-size: 11px;
+    color: var(--text-tertiary, #aaa);
+    padding: 6px 14px 4px;
+    border-top: 1px solid var(--border-color-subtle, #f0f0f0);
+    margin: 0;
+}
+`;
+        document.head.appendChild(s);
     }
 
     private bindElements(): void {
@@ -248,6 +453,19 @@ export class ChatInput implements IChatInputPresenter {
         this.fileInput = q('.llm-input__file-input');
         this.attachmentContainer = q('.llm-input__attachments');
         this.inputWrapper = q('.llm-input__field-wrapper');
+
+        // Harness controls
+        this.harnessToggle = q('.llm-input__harness-toggle');
+        this.harnessToggleLabel = q('.llm-input__harness-toggle-label');
+        this.cwdRow = q('.llm-input__cwd-row');
+        this.cwdInput = q('.llm-input__cwd-input');
+        this.skillSection = q('.llm-input__skill-section');
+        this.skillsList = q('.llm-input__skills-list');
+
+        // Help panel
+        this.helpBtn = q('.llm-input__btn--help');
+        this.helpPanel = q('.llm-input__help-panel');
+        this.helpBody = q('.llm-input__help-body');
     }
 
     private bindEvents(): void {
@@ -255,6 +473,8 @@ export class ChatInput implements IChatInputPresenter {
             this.adjustTextareaHeight();
             this.config.text = this.textarea.value;
             this.notifyConfigChange();
+            // Close help when user starts typing
+            if (this.helpVisible && this.textarea.value.length > 0) this.hideHelp();
 
             const cursorPos = this.textarea.selectionStart;
             for (const plugin of this.plugins) {
@@ -263,6 +483,13 @@ export class ChatInput implements IChatInputPresenter {
         });
 
         this.textarea.addEventListener('keydown', (e) => {
+            // Esc closes help panel before propagating to plugins
+            if (e.key === 'Escape' && this.helpVisible) {
+                e.preventDefault();
+                this.hideHelp();
+                return;
+            }
+
             for (const plugin of this.plugins) {
                 if (plugin.onKeyDown?.(e)) {
                     return;
@@ -294,6 +521,7 @@ export class ChatInput implements IChatInputPresenter {
 
         this.bindSettingsEvents();
         this.bindDragEvents();
+        this.bindHelpEvents();
         this.bindOutsideClickHandler();
 
         // ✅ 初始化插件系统（放在所有事件绑定之后）
@@ -358,6 +586,43 @@ export class ChatInput implements IChatInputPresenter {
                 const clearType = (e.currentTarget as HTMLElement).dataset.clear;
                 this.clearSetting(clearType as 'model' | 'history' | 'stream');
             });
+        });
+
+        // ── Harness toggle ──────────────────────────────────────────────────
+        this.harnessToggle?.addEventListener('change', () => {
+            const enabled = this.harnessToggle.checked;
+            this.config.settings.useHarness = enabled;
+            this.updateHarnessToggleLabel();
+            this.updateHarnessVisibility();
+            if (enabled && this.options.onRequestSkills) {
+                this.reloadSkills();
+            }
+            this.updateActiveBadges();
+            this.notifyConfigChange();
+        });
+
+        this.cwdInput?.addEventListener('change', () => {
+            this.config.settings.workingDirectory = this.cwdInput.value.trim();
+            this.notifyConfigChange();
+        });
+
+        // Skill list delegation (load / unload buttons + refresh)
+        this.skillSection?.addEventListener('click', (e) => {
+            const target = e.target as HTMLElement;
+
+            if (target.matches('.llm-input__skill-btn--load')) {
+                const skillId = target.dataset.skill;
+                if (skillId) this.loadSkill(skillId);
+                return;
+            }
+            if (target.matches('.llm-input__skill-btn--unload')) {
+                const skillId = target.dataset.skill;
+                if (skillId) this.unloadSkill(skillId);
+                return;
+            }
+            if (target.matches('.llm-input__skills-refresh')) {
+                this.reloadSkills();
+            }
         });
     }
 
@@ -439,6 +704,15 @@ export class ChatInput implements IChatInputPresenter {
         if (this.config.settings.historyLength !== -1) overrides.historyLength = this.config.settings.historyLength;
         if (this.config.settings.temperature !== undefined) overrides.temperature = this.config.settings.temperature;
         if (!this.config.settings.streamMode) overrides.streamMode = false;
+
+        // Harness overrides
+        if (this.config.settings.useHarness) {
+            overrides.useHarness = true;
+            if (this.config.settings.workingDirectory) {
+                overrides.workingDirectory = this.config.settings.workingDirectory;
+            }
+        }
+
         return overrides;
     }
 
@@ -505,6 +779,14 @@ export class ChatInput implements IChatInputPresenter {
             this.streamToggle.checked = this.config.settings.streamMode;
             this.updateStreamToggleLabel();
         }
+        if (this.harnessToggle) {
+            this.harnessToggle.checked = this.config.settings.useHarness ?? false;
+            this.updateHarnessToggleLabel();
+            this.updateHarnessVisibility();
+        }
+        if (this.cwdInput && this.config.settings.workingDirectory) {
+            this.cwdInput.value = this.config.settings.workingDirectory;
+        }
         this.updateActiveBadges();
     }
 
@@ -514,6 +796,8 @@ export class ChatInput implements IChatInputPresenter {
         this.config.settings.modelId = this.modelSelect?.value || undefined;
         this.config.settings.historyLength = parseInt(this.historySlider?.value || '-1');
         this.config.settings.streamMode = this.streamToggle?.checked ?? true;
+        this.config.settings.useHarness = this.harnessToggle?.checked ?? false;
+        this.config.settings.workingDirectory = this.cwdInput?.value.trim() ?? '';
     }
 
     private adjustTextareaHeight(): void {
@@ -579,6 +863,143 @@ export class ChatInput implements IChatInputPresenter {
     private updateStreamToggleLabel(): void {
         const label = this.container.querySelector('.llm-input__toggle-label');
         if (label) label.textContent = this.config.settings.streamMode ? 'Enabled' : 'Disabled';
+    }
+
+    // ── Help panel ────────────────────────────────────────────────────────────
+
+    /**
+     * 显示内嵌帮助面板。
+     *
+     * 帮助内容根据当前配置动态生成：
+     * - 基础分区：键盘快捷键、slash 命令列表
+     * - @mention 分区：当 onRequestFiles 回调已注入时显示
+     * - Agent Mode 分区：当 harness 已配置时显示
+     */
+    showHelp(): void {
+        if (this.helpVisible) return;
+
+        const hasHarness = !!this.options.onLoadSkill;  // harness wired = skill callback injected
+        const hasFiles = !!this.options.onRequestFiles;
+
+        this.helpBody.innerHTML = ChatInputTemplates.renderHelpContent(hasHarness, hasFiles);
+        this.helpPanel.style.display = 'block';
+        this.helpBtn.classList.add('active');
+        this.helpVisible = true;
+
+        // Close settings panel if open
+        this.toggleSettings(false);
+    }
+
+    private hideHelp(): void {
+        if (!this.helpVisible) return;
+        this.helpPanel.style.display = 'none';
+        this.helpBtn.classList.remove('active');
+        this.helpVisible = false;
+    }
+
+    private toggleHelp(): void {
+        if (this.helpVisible) this.hideHelp();
+        else this.showHelp();
+    }
+
+    private bindHelpEvents(): void {
+        this.helpBtn?.addEventListener('click', () => this.toggleHelp());
+
+        // Close button inside panel
+        this.helpPanel?.querySelector('.llm-input__help-close')
+            ?.addEventListener('click', () => this.hideHelp());
+
+        // Click outside help panel closes it
+        document.addEventListener('click', (e: MouseEvent) => {
+            if (
+                this.helpVisible &&
+                !this.helpPanel.contains(e.target as Node) &&
+                !this.helpBtn.contains(e.target as Node)
+            ) {
+                this.hideHelp();
+            }
+        });
+    }
+
+    private updateHarnessToggleLabel(): void {
+        if (this.harnessToggleLabel) {
+            this.harnessToggleLabel.textContent = this.config.settings.useHarness ? 'Enabled' : 'Disabled';
+        }
+    }
+
+    private updateHarnessVisibility(): void {
+        const enabled = this.config.settings.useHarness;
+        if (this.cwdRow) this.cwdRow.style.display = enabled ? '' : 'none';
+        if (this.skillSection) this.skillSection.style.display = enabled ? '' : 'none';
+    }
+
+    // ── Skill management ─────────────────────────────────────────────────────
+
+    /**
+     * 刷新 Skill 列表（由 Shell 注入 skills 数据或内部主动拉取）。
+     *
+     * Shell 在 harness 可用时调用此方法传入最新 skill 列表；
+     * 也可在用户点击 Refresh 按钮时由内部调用 onRequestSkills 回调。
+     */
+    refreshSkills(skills: SkillInfo[]): void {
+        this.skills = skills;
+        this.renderSkillsList();
+    }
+
+    private async reloadSkills(): Promise<void> {
+        if (!this.options.onRequestSkills || this.isLoadingSkills) return;
+        this.isLoadingSkills = true;
+        this.skillsList.innerHTML = '<span class="llm-input__skills-empty">Loading…</span>';
+        try {
+            const skills = await this.options.onRequestSkills();
+            this.refreshSkills(skills);
+        } catch {
+            this.skillsList.innerHTML = '<span class="llm-input__skills-empty">Failed to load skills</span>';
+        } finally {
+            this.isLoadingSkills = false;
+        }
+    }
+
+    private renderSkillsList(): void {
+        if (!this.skillsList) return;
+        if (this.skills.length === 0) {
+            this.skillsList.innerHTML = '<span class="llm-input__skills-empty">No skills available</span>';
+            return;
+        }
+        this.skillsList.innerHTML = this.skills
+            .map((s) => ChatInputTemplates.renderSkillItem(s))
+            .join('');
+    }
+
+    private async loadSkill(skillId: string): Promise<void> {
+        if (!this.options.onLoadSkill) return;
+        const btn = this.skillsList.querySelector(`[data-skill="${skillId}"]`) as HTMLButtonElement | null;
+        if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
+        try {
+            await this.options.onLoadSkill(skillId);
+            // Update local state and re-render
+            const skill = this.skills.find((s) => s.id === skillId);
+            if (skill) skill.loaded = true;
+            this.renderSkillsList();
+        } catch (e) {
+            console.error('[ChatInput] loadSkill failed:', e);
+            if (btn) { btn.disabled = false; btn.textContent = 'Load'; }
+        }
+    }
+
+    private async unloadSkill(skillId: string): Promise<void> {
+        if (!this.options.onUnloadSkill) return;
+        const btn = this.skillsList.querySelector(`[data-skill="${skillId}"]`) as HTMLButtonElement | null;
+        if (btn) { btn.disabled = true; btn.textContent = 'Unloading…'; }
+        try {
+            await this.options.onUnloadSkill(skillId);
+            const skill = this.skills.find((s) => s.id === skillId);
+            if (skill) skill.loaded = false;
+            this.renderSkillsList();
+        } catch (e) {
+            console.error('[ChatInput] unloadSkill failed:', e);
+            if (btn) { btn.disabled = false; btn.textContent = 'Unload'; }
+        }
     }
 
     private updateActiveBadges(): void {
