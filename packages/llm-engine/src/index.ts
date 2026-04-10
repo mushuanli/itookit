@@ -59,6 +59,12 @@ export { AttachmentProcessor } from './session/attachment-processor';
 
 export { UIEventAdapter } from './adapters/ui-event-adapter';
 export { LLMKernelAdapter, getLLMKernelAdapter } from './adapters/llmkernel-adapter';
+export {
+    HarnessAdapter,
+    initHarnessAdapter,
+    getHarnessAdapter,
+    resetHarnessAdapter,
+} from './adapters/harness-adapter';
 
 // ============================================
 // 持久化
@@ -123,12 +129,14 @@ export type {
 // 初始化
 // ============================================
 
+import type { IAgentRuntime, ISkillService } from '@itookit/common';
 import { IAgentConfigService } from './services/agent-service';
 import { ILLMSessionEngine } from './persistence/types';
 import { initializeKernel, KernelInitOptions } from '@itookit/llm-kernel';
 import { LLMSessionEngine } from './persistence/session-engine';
 import { SessionManager, createSessionManager } from './session/session-manager';
 import { initializePromptHistory } from './services/prompt-history-service';
+import { initHarnessAdapter } from './adapters/harness-adapter';
 
 /**
  * Engine 初始化选项
@@ -142,6 +150,24 @@ export interface EngineInitOptions extends KernelInitOptions {
 
     /** 最大并发数 */
     maxConcurrent?: number;
+
+    /**
+     * （可选）AgentLoopExecutor 运行时。
+     *
+     * 提供后，发送消息时可通过 overrides.useHarness=true 切换到
+     * 多轮 Agent 循环（含工具调用、上下文压缩、反压验证）。
+     * 由 @itookit/llm-harness 的 createHarness() 创建。
+     */
+    harnessRuntime?: IAgentRuntime;
+
+    /**
+     * （可选）Skill 服务实例。
+     *
+     * 与 harnessRuntime 配合使用，注入后 ChatInput 的
+     * Skill 选择面板可以列出、加载、卸载 Skill。
+     * 由 @itookit/llm-harness 的 createHarness().skillService 提供。
+     */
+    harnessSkillService?: ISkillService;
 }
 
 /**
@@ -171,6 +197,15 @@ export async function initializeLLMEngine(options: EngineInitOptions): Promise<{
         options.agentService,
         { maxConcurrent: options.maxConcurrent }
     );
+
+    // Wire harness if provided
+    if (options.harnessRuntime) {
+        const harnessAdapter = initHarnessAdapter(options.harnessRuntime);
+        if (options.harnessSkillService) {
+            harnessAdapter.setSkillService(options.harnessSkillService);
+        }
+        sessionManager.setHarnessAdapter(harnessAdapter);
+    }
 
     return { sessionManager };
 }

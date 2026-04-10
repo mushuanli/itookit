@@ -80,6 +80,28 @@ export interface SlashCommandCallbacks {
 
     // Help
     onHelp: () => void;
+
+    // ── Harness: Skills ──────────────────────────────────────────────────────
+
+    /**
+     * 加载指定 Skill（如 `/skill docker`）。
+     *
+     * 向 AgentLoopExecutor 注册该 Skill 的工具，并追加 system prompt 指令。
+     * 仅在 harness 模式可用时有效，否则为 undefined。
+     */
+    onSkill?: (skillId: string) => Promise<void>;
+
+    /**
+     * 列出所有可用 Skill（打开设置面板的 Skill 选项卡）。
+     */
+    onSkills?: () => void;
+
+    // ── Harness: Tools ───────────────────────────────────────────────────────
+
+    /**
+     * 显示当前 harness 会话已注册的工具列表。
+     */
+    onTools?: () => void;
 }
 
 /**
@@ -532,12 +554,122 @@ export class SlashCommandPlugin implements InputPlugin {
                 group: 'Help',
                 execute: () => cb.onHelp(),
             },
+
+            // ── Agent Skills ──────────────────────────────────────────────────
+            //
+            // 这三条命令始终注册进 PopupPanel，保证用户键入 / 时能看到并发现。
+            // 当 Agent Mode 未启用（回调为 undefined）时，执行给出友好提示，
+            // 而不是让命令"凭空消失"引起困惑。
+            {
+                name: 'skill',
+                label: '/skill',
+                description: cb.onSkill
+                    ? 'Load a skill into the agent (e.g., /skill docker)'
+                    : 'Load a skill — enable Agent Mode first',
+                icon: '⚡',
+                group: 'Agent Skills',
+                hasArgs: true,
+                argsPlaceholder: '<skill-id>',
+                execute: async (args?: string) => {
+                    if (!cb.onSkill) {
+                        this.showAgentModeHint('skill');
+                        return;
+                    }
+                    const id = args?.trim();
+                    if (id) await cb.onSkill(id);
+                },
+            },
+            {
+                name: 'skills',
+                label: '/skills',
+                description: cb.onSkills
+                    ? 'Browse and load available skills'
+                    : 'Browse skills — enable Agent Mode first',
+                icon: '⚡',
+                group: 'Agent Skills',
+                execute: () => {
+                    if (!cb.onSkills) { this.showAgentModeHint('skills'); return; }
+                    cb.onSkills();
+                },
+            },
+
+            // ── Agent Tools ───────────────────────────────────────────────────
+            {
+                name: 'tools',
+                label: '/tools',
+                description: cb.onTools
+                    ? 'Show registered agent tools'
+                    : 'Show tools — enable Agent Mode first',
+                icon: '🔧',
+                group: 'Agent Tools',
+                execute: () => {
+                    if (!cb.onTools) { this.showAgentModeHint('tools'); return; }
+                    cb.onTools();
+                },
+            },
         ];
     }
 
     // ================================================================
     // 工具
     // ================================================================
+
+    /**
+     * Agent Mode 未启用时显示引导提示。
+     *
+     * 告诉用户如何开启 harness 模式，而不是静默失败。
+     */
+    private showAgentModeHint(command: string): void {
+        const hint = document.createElement('div');
+        hint.className = 'slash-cmd__agent-hint';
+        hint.innerHTML =
+            `<b>/${command}</b> requires <b>Agent Mode</b>.<br>` +
+            `Enable it: <kbd>Settings ⚙</kbd> → <b>Agent Loop</b> toggle.`;
+
+        // Inject hint above the textarea, auto-remove after 4s.
+        // .llm-input__field-wrapper is inside .llm-input__main (not a direct
+        // child of ctx.container), so we must use wrapper.parentElement.
+        const container = this.ctx?.container;
+        if (!container) return;
+
+        const existing = container.querySelector('.slash-cmd__agent-hint');
+        existing?.remove();
+
+        const wrapper = container.querySelector('.llm-input__field-wrapper');
+        const parent = wrapper?.parentElement ?? container;
+        parent.insertBefore(hint, wrapper ?? parent.firstChild);
+
+        this.injectAgentHintStyles();
+        setTimeout(() => hint.remove(), 4000);
+    }
+
+    private injectAgentHintStyles(): void {
+        if (document.getElementById('slash-cmd-hint-styles')) return;
+        const s = document.createElement('style');
+        s.id = 'slash-cmd-hint-styles';
+        s.textContent = `
+.slash-cmd__agent-hint {
+    padding: 7px 12px;
+    font-size: 12px;
+    color: var(--text-primary, #333);
+    background: var(--warning-bg, #fff8e1);
+    border: 1px solid var(--warning-border, #ffc107);
+    border-radius: 4px 4px 0 0;
+    animation: slash-hint-in .15s ease;
+}
+.slash-cmd__agent-hint kbd {
+    display: inline-block;
+    padding: 1px 5px;
+    background: var(--bg-secondary, #f0f0f0);
+    border: 1px solid var(--border-color, #ccc);
+    border-radius: 3px;
+    font-size: 11px;
+    font-family: inherit;
+}
+@keyframes slash-hint-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+`;
+        document.head.appendChild(s);
+    }
 
     private commandsToPopupItems(commands: SlashCommandDef[]): PopupItem[] {
         return commands.map(cmd => ({

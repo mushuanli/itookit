@@ -5,10 +5,16 @@ import type { MCPServer, IAgentManagementService } from '@itookit/common';
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 const TRANSPORT_LABELS: Record<string, string> = {
-    stdio:  'Stdio (本地进程)',
-    sse:    'SSE (HTTP 流)',
-    http:   'HTTP (REST)',
+    stdio: 'Stdio (本地进程)',
+    sse:   'SSE (HTTP 流)',
+    http:  'HTTP (REST)',
 };
+
+function statusDot(status?: MCPServer['status']): string {
+    if (status === 'connected') return '<span style="color:#10b981;font-size:.75rem">● 已连接</span>';
+    if (status === 'error')     return '<span style="color:#ef4444;font-size:.75rem">● 错误</span>';
+    return '<span style="color:#9ca3af;font-size:.75rem">○ 未连接</span>';
+}
 
 function statusBadge(status?: MCPServer['status']): string {
     if (status === 'connected') return `<span class="settings-badge settings-badge--success">● 已连接</span>`;
@@ -41,17 +47,15 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
                             <i class="fas fa-plug" style="margin-right:.5rem;opacity:.7"></i>MCP Servers
                         </h3>
                         <div class="settings-page__actions">
-                            <button class="settings-btn-round" data-action="add"     title="添加服务器"><i class="fas fa-plus"></i></button>
-                            <button class="settings-btn-round" data-action="import"  title="导入配置"><i class="fas fa-file-import"></i></button>
-                            <button class="settings-btn-round" data-action="export"  title="导出全部"><i class="fas fa-file-export"></i></button>
+                            <button class="settings-btn-round" data-action="add"    title="添加服务器"><i class="fas fa-plus"></i></button>
+                            <button class="settings-btn-round" data-action="import" title="导入配置"><i class="fas fa-file-import"></i></button>
+                            <button class="settings-btn-round" data-action="export" title="导出全部"><i class="fas fa-file-export"></i></button>
                         </div>
                     </div>
-
                     <div class="settings-split__list">
                         ${servers.length === 0 ? this.renderEmptyList() : servers.map(s => this.renderListItem(s)).join('')}
                     </div>
                 </div>
-
                 <div class="settings-split__content">
                     ${selected ? this.renderDetail(selected) : this.renderEmptyState()}
                 </div>
@@ -79,11 +83,14 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
         return `
             <div class="settings-list-item ${isSelected ? 'selected' : ''}" data-id="${server.id}" style="cursor:pointer">
                 <span class="settings-list-item__icon" style="font-size:1.25rem">${server.icon || '🔌'}</span>
-                <div class="settings-list-item__info">
-                    <div class="settings-list-item__title">${server.name}</div>
-                    <div class="settings-list-item__desc">${transportIcon} ${TRANSPORT_LABELS[server.transport] ?? server.transport}</div>
+                <div class="settings-list-item__info" style="min-width:0">
+                    <div class="settings-list-item__title" data-name-for="${server.id}"
+                         title="双击重命名" style="cursor:text">${server.name}</div>
+                    <div class="settings-list-item__desc">
+                        ${transportIcon} ${TRANSPORT_LABELS[server.transport] ?? server.transport}
+                    </div>
                 </div>
-                ${statusBadge(server.status)}
+                ${statusDot(server.status)}
             </div>`;
     }
 
@@ -100,17 +107,25 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
                 <div style="display:flex;align-items:center;gap:1rem;min-width:0">
                     <span style="font-size:2.25rem;flex-shrink:0;line-height:1">${server.icon || '🔌'}</span>
                     <div style="min-width:0">
-                        <div style="font-size:1.125rem;font-weight:700;color:var(--st-text-primary);
-                                    white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${server.name}</div>
+                        <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
+                            <input name="header-name" value="${server.name}"
+                                placeholder="Server 名称"
+                                style="font-size:1.125rem;font-weight:700;color:var(--st-text-primary);
+                                       background:transparent;border:0;border-bottom:2px solid transparent;
+                                       outline:none;padding:0 0 1px;font-family:inherit;
+                                       width:auto;min-width:60px;max-width:280px;cursor:text;
+                                       transition:border-color .15s"
+                                title="点击编辑名称，Enter 或失焦保存">
+                            ${statusBadge(server.status)}
+                        </div>
                         <div style="font-size:.8125rem;color:var(--st-text-secondary);margin-top:.125rem">
                             ${server.description || TRANSPORT_LABELS[server.transport] || server.transport}
                         </div>
                     </div>
-                    ${statusBadge(server.status)}
                 </div>
                 <div style="display:flex;gap:.5rem;flex-shrink:0">
                     <button class="settings-btn settings-btn--secondary" data-action="test">
-                        <i class="fas fa-plug"></i> 测试
+                        <i class="fas fa-plug"></i> 测试连接
                     </button>
                     <button class="settings-btn settings-btn--primary" data-action="save">
                         <i class="fas fa-save"></i> 保存
@@ -151,7 +166,7 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
                         <label>传输协议</label>
                         <select class="settings-select" name="transport" id="transport-select">
                             <option value="stdio" ${server.transport === 'stdio' ? 'selected' : ''}>🖥️ Stdio — 启动本地进程</option>
-                            <option value="sse"   ${server.transport === 'sse'   ? 'selected' : ''}>🌐 SSE — Server-Sent Events</option>
+                            <option value="sse"   ${server.transport === 'sse'   ? 'selected' : ''}>📡 SSE — Server-Sent Events</option>
                             <option value="http"  ${server.transport === 'http'  ? 'selected' : ''}>🌐 HTTP — REST 端点</option>
                         </select>
                     </div>
@@ -183,11 +198,14 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
                         Tools
                         <span class="settings-badge">${tools.length}</span>
                         <button class="settings-btn settings-btn--sm" data-action="add-tool"
-                            style="margin-left:auto;font-size:.75rem">+ 添加</button>
+                            style="margin-left:auto;font-size:.75rem">+ 手动添加</button>
                     </h3>
+                    <p style="font-size:.75rem;color:var(--st-text-tertiary);margin:0 0 .5rem">
+                        连接成功后自动发现。也可手动定义供 MCP Skill 引用。
+                    </p>
                     ${tools.length > 0 ? this.renderToolList(tools) : `
                         <div class="settings-empty settings-empty--mini">
-                            <p style="color:var(--st-text-tertiary);font-size:.875rem">连接后自动发现，或手动添加</p>
+                            <p style="color:var(--st-text-tertiary);font-size:.875rem">暂无工具</p>
                         </div>`}
                 </div>
 
@@ -213,17 +231,17 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
                 <div class="settings-form-group">
                     <label>命令 <span style="color:var(--st-text-tertiary);font-size:.8em">Command</span></label>
                     <input class="settings-input" name="command" value="${server.command || ''}"
-                        placeholder="node / python / npx">
+                        placeholder="node / python / npx" style="font-family:monospace">
                 </div>
                 <div class="settings-form-group">
                     <label>参数 <span style="color:var(--st-text-tertiary);font-size:.8em">Args（空格分隔）</span></label>
                     <input class="settings-input" name="args" value="${server.args || ''}"
-                        placeholder="server.js --port 3000">
+                        placeholder="server.js --port 3000" style="font-family:monospace">
                 </div>
                 <div class="settings-form-group">
                     <label>工作目录 <span style="color:var(--st-text-tertiary);font-size:.8em">CWD（可选）</span></label>
                     <input class="settings-input" name="cwd" value="${server.cwd || ''}"
-                        placeholder="/path/to/project">
+                        placeholder="/path/to/project" style="font-family:monospace">
                 </div>`;
         }
         return `
@@ -240,12 +258,12 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
     }
 
     private renderToolList(tools: any[]) {
-        return `<div style="display:flex;flex-direction:column;gap:.5rem">${
+        return `<div style="display:flex;flex-direction:column;gap:.375rem">${
             tools.map((t, i) => `
-                <div class="settings-card" style="display:flex;align-items:center;gap:.75rem;padding:.75rem 1rem">
-                    <i class="fas fa-wrench" style="color:var(--st-color-primary);flex-shrink:0"></i>
+                <div class="settings-card" style="display:flex;align-items:center;gap:.75rem;padding:.625rem .875rem">
+                    <i class="fas fa-wrench" style="color:var(--st-color-primary);flex-shrink:0;font-size:.875rem"></i>
                     <div style="flex:1;min-width:0">
-                        <div style="font-weight:600;font-size:.875rem">${t.name}</div>
+                        <div style="font-weight:600;font-size:.875rem;font-family:monospace">${t.name}</div>
                         <div style="font-size:.8125rem;color:var(--st-text-secondary);
                                     white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
                             ${t.description || '无描述'}</div>
@@ -258,14 +276,14 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
     }
 
     private renderResourceList(resources: any[]) {
-        return `<div style="display:flex;flex-direction:column;gap:.5rem">${
+        return `<div style="display:flex;flex-direction:column;gap:.375rem">${
             resources.map((r, i) => `
-                <div class="settings-card" style="display:flex;align-items:center;gap:.75rem;padding:.75rem 1rem">
-                    <i class="fas fa-database" style="color:var(--st-color-primary);flex-shrink:0"></i>
+                <div class="settings-card" style="display:flex;align-items:center;gap:.75rem;padding:.625rem .875rem">
+                    <i class="fas fa-database" style="color:var(--st-color-primary);flex-shrink:0;font-size:.875rem"></i>
                     <div style="flex:1;min-width:0">
                         <div style="font-weight:600;font-size:.875rem">${r.name || r.uri}</div>
-                        <div style="font-size:.8125rem;color:var(--st-text-secondary);font-family:monospace">
-                            ${r.uri}</div>
+                        <div style="font-size:.8125rem;color:var(--st-text-secondary);font-family:monospace;
+                                    white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${r.uri}</div>
                     </div>
                     <button class="settings-btn-icon" data-action="del-resource" data-index="${i}" title="删除">
                         <i class="fas fa-times"></i>
@@ -293,35 +311,69 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
     private bindEvents(servers: MCPServer[]) {
         this.clearListeners();
 
-        // List selection
+        // ── Sidebar: single click = select, double click = inline rename ──────
         const list = this.container.querySelector('.settings-split__list');
         if (list) {
             this.addEventListener(list, 'click', (e) => {
+                if ((e.target as HTMLElement).closest('.mcp-inline-rename')) return;
                 const item = (e.target as HTMLElement).closest('[data-id]') as HTMLElement | null;
                 if (item) { this.selectedId = item.dataset.id!; this.render(); }
             });
+            this.addEventListener(list, 'dblclick', (e) => {
+                const titleEl = (e.target as HTMLElement).closest('[data-name-for]') as HTMLElement | null;
+                if (titleEl) this.startInlineRename(titleEl, titleEl.dataset.nameFor!, servers);
+            });
         }
 
-        // Global data-action buttons
-        this.bindAction('add',     () => this.addNew());
-        this.bindAction('import',  () => this.showImport());
-        this.bindAction('export',  () => this.exportAll(servers));
-        this.bindAction('save',    () => this.saveCurrent(servers));
-        this.bindAction('delete',  () => this.deleteCurrent());
-        this.bindAction('test',    () => this.testCurrent(servers));
-        this.bindAction('add-tool',() => this.addTool(servers));
+        // ── Header name input ─────────────────────────────────────────────────
+        const headerInput = this.container.querySelector<HTMLInputElement>('[name="header-name"]');
+        const formInput   = this.container.querySelector<HTMLInputElement>('[name="name"]');
+        if (headerInput) {
+            this.addEventListener(headerInput, 'focus', () => {
+                headerInput.style.borderBottomColor = 'var(--st-primary, #6366f1)';
+            });
+            this.addEventListener(headerInput, 'blur', () => {
+                headerInput.style.borderBottomColor = 'transparent';
+                this.saveNameOnly(headerInput.value.trim(), servers);
+            });
+            this.addEventListener(headerInput, 'keydown', (e) => {
+                if ((e as KeyboardEvent).key === 'Enter') headerInput.blur();
+            });
+            if (formInput) {
+                this.addEventListener(headerInput, 'input', () => {
+                    formInput.value = headerInput.value;
+                    this.resizeHeaderInput(headerInput);
+                });
+                this.addEventListener(formInput, 'input', () => {
+                    headerInput.value = formInput.value;
+                    this.resizeHeaderInput(headerInput);
+                });
+            }
+            this.resizeHeaderInput(headerInput);
+        }
+
+        // ── Action buttons ────────────────────────────────────────────────────
+        this.container.querySelectorAll('[data-action="add"]').forEach(el =>
+            this.addEventListener(el, 'click', () => this.addNew()));
+        this.bindAction('import',       () => this.showImport());
+        this.bindAction('export',       () => this.exportAll(servers));
+        this.bindAction('save',         () => this.saveCurrent(servers));
+        this.bindAction('delete',       () => this.deleteCurrent());
+        this.bindAction('test',         () => this.testCurrent(servers));
+        this.bindAction('add-tool',     () => this.addTool(servers));
         this.bindAction('add-resource', () => this.addResource(servers));
 
-        // Transport select
+        // ── Transport select ──────────────────────────────────────────────────
         const transportSel = this.container.querySelector<HTMLSelectElement>('#transport-select');
         if (transportSel) {
             this.addEventListener(transportSel, 'change', () => {
                 const el = this.container.querySelector<HTMLElement>('#transport-fields');
-                if (el) el.innerHTML = this.renderTransportFields({ transport: transportSel.value } as MCPServer);
+                const dummy = { transport: transportSel.value } as MCPServer;
+                if (el) el.innerHTML = this.renderTransportFields(dummy);
             });
         }
 
-        // Dynamic delete buttons (tool / resource)
+        // ── Dynamic delete buttons (tool / resource) ──────────────────────────
         const content = this.container.querySelector('.settings-split__content');
         if (content) {
             this.addEventListener(content, 'click', async (e) => {
@@ -329,13 +381,12 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
                 if (!btn) return;
                 const action = btn.dataset.action;
                 const idx    = parseInt(btn.dataset.index ?? '-1', 10);
-                if (action === 'del-tool')     await this.deleteTool(idx, servers);
-                if (action === 'del-resource') await this.deleteResource(idx, servers);
+                if (action === 'del-tool')     { await this.deleteTool(idx, servers); await this.render(); }
+                if (action === 'del-resource') { await this.deleteResource(idx, servers); await this.render(); }
             });
         }
     }
 
-    /** Register a data-action click handler anywhere in container */
     private bindAction(action: string, handler: () => void) {
         const el = this.container.querySelector(`[data-action="${action}"]`);
         if (el) this.addEventListener(el, 'click', handler);
@@ -348,19 +399,89 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
         return (this.container.querySelector(`[name="${name}"]`) as HTMLInputElement | null)?.checked ?? false;
     }
 
+    private resizeHeaderInput(input: HTMLInputElement): void {
+        input.style.width = '4px';
+        input.style.width = `${Math.min(input.scrollWidth + 4, 280)}px`;
+    }
+
+    private async saveNameOnly(newName: string, servers: MCPServer[]): Promise<void> {
+        if (!this.selectedId || !newName) return;
+        const server = servers.find(s => s.id === this.selectedId);
+        if (!server || server.name === newName) return;
+
+        await this.service.saveMCPServer({ ...server, name: newName });
+
+        const sidebarTitle = this.container.querySelector<HTMLElement>(`[data-name-for="${this.selectedId}"]`);
+        if (sidebarTitle && !sidebarTitle.querySelector('input')) sidebarTitle.textContent = newName;
+        const formInput = this.container.querySelector<HTMLInputElement>('[name="name"]');
+        if (formInput) formInput.value = newName;
+        // Patch local cache so subsequent saves use the new name
+        server.name = newName;
+    }
+
+    private startInlineRename(titleEl: HTMLElement, serverId: string, servers: MCPServer[]): void {
+        if (titleEl.querySelector('input')) return;
+        const original = titleEl.textContent?.trim() ?? '';
+
+        const input = document.createElement('input');
+        input.value = original;
+        input.className = 'mcp-inline-rename';
+        input.style.cssText = [
+            'width:100%', 'padding:0 2px', 'margin:0',
+            'font-size:inherit', 'font-weight:inherit', 'font-family:inherit',
+            'color:inherit', 'background:var(--st-input-bg,#fff)',
+            'border:1px solid var(--st-primary,#6366f1)', 'border-radius:3px',
+            'outline:none', 'line-height:1.4',
+        ].join(';');
+
+        titleEl.textContent = '';
+        titleEl.appendChild(input);
+        input.select();
+        input.focus();
+
+        let committed = false;
+        const commit = async () => {
+            if (committed) return;
+            committed = true;
+            const newName = input.value.trim() || original;
+            titleEl.textContent = newName;
+            if (newName === original) return;
+
+            const server = servers.find(s => s.id === serverId);
+            if (!server) return;
+            await this.service.saveMCPServer({ ...server, name: newName });
+            server.name = newName;
+
+            if (serverId === this.selectedId) {
+                const hdr = this.container.querySelector<HTMLInputElement>('[name="header-name"]');
+                const frm = this.container.querySelector<HTMLInputElement>('[name="name"]');
+                if (hdr) { hdr.value = newName; this.resizeHeaderInput(hdr); }
+                if (frm) frm.value = newName;
+            }
+        };
+
+        input.addEventListener('blur', commit, { once: true });
+        input.addEventListener('keydown', (e) => {
+            e.stopPropagation();
+            if (e.key === 'Enter')  { input.blur(); }
+            if (e.key === 'Escape') { committed = true; titleEl.textContent = original; }
+        });
+    }
+
     // ─── Actions ────────────────────────────────────────────────────────────
 
     private async addNew() {
         const server: MCPServer = {
-            id: `mcp-${generateShortUUID()}`,
-            name: 'New Server',
+            id:        `mcp-${generateShortUUID()}`,
+            name:      'New Server',
             transport: 'stdio',
-            status: 'idle',
-            tools: [],
+            status:    'idle',
+            tools:     [],
             resources: [],
         };
         await this.service.saveMCPServer(server);
         this.selectedId = server.id;
+        await this.render();
     }
 
     private async saveCurrent(servers: MCPServer[]) {
@@ -368,78 +489,105 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
         const existing = servers.find(s => s.id === this.selectedId);
         if (!existing) return;
 
+        const transport = this.val('transport') as MCPServer['transport'];
         const updated: MCPServer = {
             ...existing,
-            name:        this.val('name')     || existing.name,
-            icon:        this.val('icon')     || undefined,
+            name:        this.val('header-name') || this.val('name') || existing.name,
+            icon:        this.val('icon')        || undefined,
             description: this.val('description') || undefined,
-            transport:   this.val('transport') as MCPServer['transport'],
-            command:     this.val('command')  || undefined,
-            args:        this.val('args')     || undefined,
-            cwd:         this.val('cwd')      || undefined,
-            endpoint:    this.val('endpoint') || undefined,
-            apiKey:      this.val('apiKey')   || undefined,
+            transport,
+            // stdio
+            command:     transport === 'stdio' ? (this.val('command') || undefined) : undefined,
+            args:        transport === 'stdio' ? (this.val('args')    || undefined) : undefined,
+            cwd:         transport === 'stdio' ? (this.val('cwd')     || undefined) : undefined,
+            // http/sse
+            endpoint:    transport !== 'stdio' ? (this.val('endpoint') || undefined) : undefined,
+            apiKey:      transport !== 'stdio' ? (this.val('apiKey')   || undefined) : undefined,
             timeout:     parseInt(this.val('timeout')) || 30,
             autoConnect: this.chk('autoConnect'),
         };
         await this.service.saveMCPServer(updated);
         Toast.success('已保存');
+        await this.render();
     }
 
     private deleteCurrent() {
         if (!this.selectedId) return;
-        Modal.confirm('删除确认', '确定要删除此 MCP Server？此操作不可撤销。', async () => {
+        Modal.confirm('删除确认', '确定要删除此 MCP Server？', async () => {
             await this.service.deleteMCPServer(this.selectedId!);
             this.selectedId = null;
             Toast.success('已删除');
+            await this.render();
         });
     }
 
     private async testCurrent(servers: MCPServer[]) {
         if (!this.selectedId) return;
+        const server = servers.find(s => s.id === this.selectedId);
+        if (!server) return;
+
         const btn = this.container.querySelector<HTMLButtonElement>('[data-action="test"]');
         if (!btn) return;
-        const html = btn.innerHTML;
+        const originalHTML = btn.innerHTML;
         btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 测试中…';
         btn.disabled = true;
 
         try {
-            await new Promise(r => setTimeout(r, 1000));
-            const server = servers.find(s => s.id === this.selectedId);
-            if (server) {
-                server.status = 'connected';
-                if (!server.tools?.length) server.tools = [{ name: 'mock_tool', description: '自动发现的工具' }];
-                await this.service.saveMCPServer(server);
-                Toast.success('连接成功');
+            if (server.transport === 'stdio') {
+                Toast.info('Stdio 服务器由应用程序管理连接，请检查 autoConnect 选项或手动启动进程');
+                return;
             }
-        } catch {
-            Toast.error('连接失败');
+            if (!server.endpoint) {
+                Toast.error('请先配置 Endpoint URL');
+                return;
+            }
+            const res = await fetch(server.endpoint, {
+                method:  'GET',
+                headers: server.apiKey
+                    ? { Authorization: `Bearer ${server.apiKey}` }
+                    : {},
+                signal: AbortSignal.timeout(5000),
+            });
+            if (res.ok) {
+                Toast.success(`连接成功 (HTTP ${res.status})`);
+                // Update status
+                const updated = { ...server, status: 'connected' as const };
+                await this.service.saveMCPServer(updated);
+                await this.render();
+            } else {
+                Toast.error(`HTTP ${res.status} — 请检查 Endpoint 和认证信息`);
+            }
+        } catch (e: unknown) {
+            Toast.error(`连接失败: ${(e as Error).message}`);
         } finally {
-            btn.innerHTML = html;
-            btn.disabled = false;
+            if (btn.isConnected) {
+                btn.innerHTML = originalHTML;
+                btn.disabled = false;
+            }
         }
     }
 
     private async addTool(servers: MCPServer[]) {
         const body = `
             <div class="settings-form-group">
-                <label>名称</label>
-                <input class="settings-input" id="tool-name" placeholder="get_weather">
+                <label>工具名称 <span style="color:var(--st-text-tertiary);font-size:.8em">snake_case</span></label>
+                <input class="settings-input" id="tool-name" placeholder="get_weather" style="font-family:monospace">
             </div>
             <div class="settings-form-group">
                 <label>描述</label>
                 <textarea class="settings-textarea" id="tool-desc" rows="2"
                     placeholder="查询指定城市的实时天气"></textarea>
             </div>`;
-        new Modal('添加工具', body, {
+        new Modal('手动添加工具', body, {
             onConfirm: async () => {
                 const name = (document.getElementById('tool-name') as HTMLInputElement).value.trim();
                 const desc = (document.getElementById('tool-desc') as HTMLTextAreaElement).value.trim();
                 if (!name) return false;
                 const server = servers.find(s => s.id === this.selectedId);
                 if (server) {
-                    server.tools = [...(server.tools as any[] || []), { name, description: desc }];
+                    server.tools = [...((server.tools as any[]) || []), { name, description: desc }];
                     await this.service.saveMCPServer(server);
+                    await this.render();
                 }
             },
         }).show();
@@ -447,18 +595,17 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
 
     private async deleteTool(index: number, servers: MCPServer[]) {
         const server = servers.find(s => s.id === this.selectedId);
-        if (server?.tools) {
-            const tools = [...server.tools as any[]];
-            tools.splice(index, 1);
-            await this.service.saveMCPServer({ ...server, tools });
-        }
+        if (!server?.tools) return;
+        const tools = [...(server.tools as any[])];
+        tools.splice(index, 1);
+        await this.service.saveMCPServer({ ...server, tools });
     }
 
     private async addResource(servers: MCPServer[]) {
         const body = `
             <div class="settings-form-group">
                 <label>URI</label>
-                <input class="settings-input" id="res-uri" placeholder="file:///path/to/resource">
+                <input class="settings-input" id="res-uri" placeholder="file:///path/to/resource" style="font-family:monospace">
             </div>
             <div class="settings-form-group">
                 <label>名称</label>
@@ -471,8 +618,9 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
                 if (!uri) return false;
                 const server = servers.find(s => s.id === this.selectedId);
                 if (server) {
-                    server.resources = [...(server.resources as any[] || []), { uri, name }];
+                    server.resources = [...((server.resources as any[]) || []), { uri, name }];
                     await this.service.saveMCPServer(server);
+                    await this.render();
                 }
             },
         }).show();
@@ -480,11 +628,10 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
 
     private async deleteResource(index: number, servers: MCPServer[]) {
         const server = servers.find(s => s.id === this.selectedId);
-        if (server?.resources) {
-            const resources = [...server.resources as any[]];
-            resources.splice(index, 1);
-            await this.service.saveMCPServer({ ...server, resources });
-        }
+        if (!server?.resources) return;
+        const resources = [...(server.resources as any[])];
+        resources.splice(index, 1);
+        await this.service.saveMCPServer({ ...server, resources });
     }
 
     private showImport() {
@@ -506,6 +653,8 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
                         await this.service.saveMCPServer(item);
                     }
                     Toast.success(`已导入 ${arr.length} 个服务器`);
+                    if (arr.length > 0) this.selectedId = arr[arr.length - 1].id;
+                    await this.render();
                 } catch {
                     Toast.error('JSON 格式错误');
                     return false;
@@ -515,10 +664,13 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
     }
 
     private async exportAll(servers: MCPServer[]) {
-        const blob = new Blob([JSON.stringify(servers, null, 2)], { type: 'application/json' });
+        // Remove apiKey from export for security
+        const safe = servers.map(({ apiKey: _k, ...rest }) => rest);
+        const blob = new Blob([JSON.stringify(safe, null, 2)], { type: 'application/json' });
         const a = Object.assign(document.createElement('a'), {
             href: URL.createObjectURL(blob), download: 'mcp-servers.json',
         });
         a.click();
+        URL.revokeObjectURL(a.href);
     }
 }

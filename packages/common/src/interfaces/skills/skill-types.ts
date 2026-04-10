@@ -7,11 +7,13 @@ import type { ToolDefinition } from '../llm/message';
  * Skill 类型分类。
  *
  * - builtin:  代码内置（如 load_skill 元工具自身）
- * - http:     远程 HTTP 端点
+ * - http:     远程 HTTP 端点，包装为 function-calling 工具
+ * - shell:    本地 Shell 命令，包装为 function-calling 工具
+ * - prompt:   纯 Markdown 指令注入，不产生可调用工具（最常用）
  * - mcp:      通过 MCP 协议提供
  * - custom:   用户自定义脚本
  */
-export type SkillType = 'builtin' | 'http' | 'mcp' | 'custom';
+export type SkillType = 'builtin' | 'http' | 'shell' | 'prompt' | 'mcp' | 'custom';
 
 /**
  * Skill 定义。
@@ -86,11 +88,18 @@ export interface SkillToolBinding {
     definition: ToolDefinition;
     /**
      * 执行方式：
-     * - 'builtin':   由 device-tools 内置工具处理
+     * - 'builtin':   由 llm-harness 内置工具处理（已注册，skill 只是引用）
      * - 'http':      HTTP 调用 skill 的 endpoint
-     * - 'handler':   由 Skill 自身的 handler 函数处理
+     * - 'shell':     本地 Shell 命令，支持 {{argName}} 模板替换
+     * - 'handler':   由 Skill 自身的 handler 函数处理（预留）
      */
-    executionType: 'builtin' | 'http' | 'handler';
+    executionType: 'builtin' | 'http' | 'shell' | 'handler';
+    /**
+     * Shell 命令模板（executionType='shell'）。
+     * 支持 {{argName}} 占位符，由 LLM 传入的参数替换。
+     * 例：`git log --oneline -{{n}} -- {{path}}`
+     */
+    command?: string;
     /** 工具副作用（用于并行策略） */
     sideEffect?: import('../tools/tool-types').ToolSideEffect;
     /** 超时覆盖 */

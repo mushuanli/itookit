@@ -3,6 +3,32 @@
 import { NodeStatus } from '@itookit/llm-kernel';
 
 /**
+ * 单次任务（或整个会话）的 token 用量统计。
+ *
+ * 通过 `finished` 事件 payload 传递给 UI，供 TokenMeterPlugin 展示。
+ * - `isEstimated = true`：普通 kernel 路径，从内容字符数估算（÷4）
+ * - `isEstimated = false`：harness 路径，来自 AgentUsageSnapshot，精确值
+ */
+export interface SessionTokenUsage {
+    /** 输入 token（含历史上下文） */
+    inputTokens: number;
+    /** 输出 token */
+    outputTokens: number;
+    /** 缓存命中 token（Anthropic prompt caching） */
+    cacheTokens: number;
+    /** 估算费用（USD） */
+    costUsd: number;
+    /** 上下文窗口使用率 [0, 1]（inputTokens / modelMaxContextTokens） */
+    contextUsageRatio: number;
+    /** 会话累计轮次 */
+    turns: number;
+    /** 任务耗时（ms） */
+    durationMs: number;
+    /** true = 字符估算；false = API 精确值 */
+    isEstimated: boolean;
+}
+
+/**
  * ✅ 新增：会话级设置（YAML 配置文件格式）
  * 文件位置: /.{sessionId}/settings.yaml
  */
@@ -21,6 +47,20 @@ export interface ChatSessionSettings {
 
     /** 流式输出开关，默认 true */
     streamMode: boolean;
+
+    /**
+     * 是否使用 AgentLoopExecutor（harness 模式）。
+     *
+     * true  → 多轮循环，工具调用由 AgentLoopExecutor 内部管理
+     * false → 单轮 kernel 路径（默认）
+     */
+    useHarness?: boolean;
+
+    /**
+     * 文件工具根目录（harness 模式下有效）。
+     * 空或未设置时使用进程工作目录。
+     */
+    workingDirectory?: string;
 
     /** 最后更新时间 */
     updatedAt?: string;
@@ -66,10 +106,22 @@ export interface ExecutionOverrides {
     historyLength?: number;
     /** 温度参数 */
     temperature?: number;
-    /** ✅ 新增：流式输出开关 */
+    /** 流式输出开关 */
     streamMode?: boolean;
-    /** ✅ 新增：覆盖自动续写 */
+    /** 覆盖自动续写 */
     autoContinue?: boolean;
+    /**
+     * 路由到 AgentLoopExecutor（harness 模式）。
+     *
+     * 开启后跳过 llm-kernel，通过 HarnessAdapter 执行多轮 Agent 循环：
+     * 工具调用、上下文压缩、反压验证均由 AgentLoopExecutor 内部管理。
+     */
+    useHarness?: boolean;
+    /**
+     * 文件工具的工作目录（harness 模式下使用）。
+     * 不设置时默认使用进程工作目录。
+     */
+    workingDirectory?: string;
 }
 
 /**
@@ -343,7 +395,12 @@ export type OrchestratorEvent =
     | { type: 'node_update'; payload: { nodeId: string; chunk?: string; field?: 'thought' | 'output'; metaInfo?: any } }
     | { type: 'node_status'; payload: { nodeId: string; status: NodeStatus; result?: any } }
     | { type: 'request_input'; payload: { nodeId: string; schema: any } }
-    | { type: 'finished'; payload: { sessionId: string; metadata?: object } }
+    | { type: 'finished'; payload: {
+        sessionId: string;
+        metadata?: object;
+        /** 本次任务的 token 使用统计（普通模式为估算，harness 模式为精确值） */
+        tokenUsage?: SessionTokenUsage;
+    } }
     | { type: 'error'; payload: { message: string; error?: Error; code?: string | number } }
     | { type: 'messages_deleted'; payload: { deletedIds: string[] } }
     | { type: 'message_edited'; payload: { messageId: string; newContent: string; newPersistedNodeId?: string } }

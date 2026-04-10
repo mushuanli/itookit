@@ -139,7 +139,28 @@ interface SkillSessionState {
 
 type SessionState = LLMSessionState | MCPSessionState | SkillSessionState;
 
+// ─── Shell Runner interface ──────────────────────────────────────────────────
+//
+// 执行环境隔离层。device-llm 运行在浏览器环境，不能直接访问 child_process。
+// 不同宿主环境注入各自的实现：
+//   - 浏览器:    不注入 → shell skills 返回"不支持"提示
+//   - Tauri:     TauriShellRunner（@tauri-apps/plugin-shell）
+//   - Node.js:   NodeShellRunner（由 llm-harness 提供）
+//
+export interface IShellRunner {
+    /** 执行 shell 命令，返回 stdout+stderr 合并输出 */
+    run(command: string, args: Record<string, unknown>): Promise<string>;
+}
+
 // ─── LLMDeviceDriver ─────────────────────────────────────────────────────────
+
+export interface LLMDeviceDriverOptions {
+    /**
+     * Shell 命令执行器（可选）。
+     * 未注入时 shell 类型 Skill 返回"环境不支持"提示。
+     */
+    shellRunner?: IShellRunner;
+}
 
 export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
     readonly handlerId = 'llm';
@@ -166,8 +187,11 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
     private sessionSeq = 0;
 
     private engine!: ReturnType<IVFSManager['getEngine']>;
+    private readonly shellRunner: IShellRunner | undefined;
 
-    constructor(private readonly vfs: IVFSManager) {}
+    constructor(private readonly vfs: IVFSManager, options?: LLMDeviceDriverOptions) {
+        this.shellRunner = options?.shellRunner;
+    }
 
     // ─── Lifecycle ────────────────────────────────────────────────────────────
 
@@ -839,16 +863,62 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
     }
 
     private async invokeSkill(skill: LLMSkill, args: Record<string, unknown>): Promise<unknown> {
-        if (skill.type !== 'http' || !skill.endpoint) {
-            throw new Error(`Skill '${skill.id}' is not an HTTP skill or has no endpoint configured`);
+        switch (skill.type) {
+            case 'http':
+                return this.invokeHttpSkill(skill, args);
+            case 'shell':
+                return this.invokeShellSkill(skill, args);
+            case 'mcp':
+                return this.invokeMcpSkill(skill, args);
+            case 'prompt':
+                return `[Skill '${skill.name}' provides context instructions — it is not a callable tool.]`;
+            default:
+                throw new Error(`Skill '${skill.id}': type '${skill.type}' is not invocable`);
         }
+    }
+
+    private async invokeHttpSkill(skill: LLMSkill, args: Record<string, unknown>): Promise<unknown> {
+        if (!skill.endpoint) throw new Error(`Skill '${skill.id}' has no endpoint configured`);
         const response = await fetch(skill.endpoint, {
             method: skill.method ?? 'POST',
             headers: { 'Content-Type': 'application/json', ...skill.headers },
             body: JSON.stringify(args),
         });
         if (!response.ok) throw new Error(`Skill '${skill.name}' invocation failed: HTTP ${response.status}`);
-        return response.json();
+        const ct = response.headers.get('content-type') ?? '';
+        return ct.includes('application/json') ? response.json() : response.text();
+    }
+
+    private async invokeShellSkill(skill: LLMSkill, args: Record<string, unknown>): Promise<string> {
+        if (!skill.command) throw new Error(`Skill '${skill.id}' has no command configured`);
+        if (!this.shellRunner) {
+            return (
+                `Shell skills require a native execution environment.\n` +
+                `Inject an IShellRunner when constructing LLMDeviceDriver, or use the harness path.`
+            );
+        }
+        return this.shellRunner.run(skill.command, args);
+    }
+
+    private async invokeMcpSkill(skill: LLMSkill, args: Record<string, unknown>): Promise<unknown> {
+        const { mcpServerId, mcpToolName } = skill;
+        if (!mcpServerId || !mcpToolName) {
+            throw new Error(`MCP skill '${skill.id}' requires mcpServerId and mcpToolName`);
+        }
+
+        // Reuse existing connection, or open a new one for this server.
+        let conn = this._activeMCPConns.get(mcpServerId);
+        if (!conn) {
+            const server = this._mcpServers.find(s => s.id === mcpServerId);
+            if (!server) throw new Error(`MCP server '${mcpServerId}' not configured`);
+            const config = this.mcpServerToConfig(server);
+            conn = new MCPServerConnection(config);
+            await conn.connect();
+            this._activeMCPConns.set(mcpServerId, conn);
+        }
+
+        const result = await conn.callTool(mcpToolName, args);
+        return typeof result === 'string' ? result : JSON.stringify(result, null, 2);
     }
 
     // ─── Data migration ───────────────────────────────────────────────────────
