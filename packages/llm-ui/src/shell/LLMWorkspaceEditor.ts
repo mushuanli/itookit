@@ -2,8 +2,11 @@
 
 import {
     IEditor, EditorOptions, EditorHostContext, EditorEvent,
-    EditorEventCallback, CollapseExpandResult, Toast,
+    EditorEventCallback, CollapseExpandResult, Toast, guessMimeType,
 } from '@itookit/common';
+
+/** Alias: infer MIME from filename (used for @mention file suggestions) */
+const guessMimeTypeFromName = guessMimeType;
 import {
     ILLMSessionEngine, IAgentConfigService, SessionManager, getSessionManager,
 } from '@itookit/llm-engine';
@@ -50,7 +53,8 @@ import { LayoutTemplates } from '../components/templates/LayoutTemplates';
 import { HistoryPlugin } from '../components/input/plugins/HistoryPlugin';
 import { SlashCommandPlugin } from '../components/input/plugins/SlashCommandPlugin';
 import type { SlashCommandCallbacks } from '../components/input/plugins/SlashCommandPlugin';
-import { getPromptHistory } from '@itookit/llm-engine';
+import { HarnessPlugin } from '../components/input/plugins/HarnessPlugin';
+import { getPromptHistory, getHarnessAdapter } from '@itookit/llm-engine';
 
 export interface LLMEditorOptions extends EditorOptions {
     sessionEngine: ILLMSessionEngine;
@@ -109,6 +113,7 @@ export class LLMWorkspaceEditor implements IEditor {
     // === 插件 ===
     private historyPlugin: HistoryPlugin | null = null;
     private slashPlugin: SlashCommandPlugin | null = null;
+    private harnessPlugin: HarnessPlugin | null = null;
 
     // === 基础设施 ===
     private timers = new TimerManager();
@@ -251,6 +256,9 @@ export class LLMWorkspaceEditor implements IEditor {
             );
         }
 
+        const harnessAdapter = getHarnessAdapter();
+        const harnessRuntime = harnessAdapter?.getRuntime();
+
         this.chatInput = new ChatInput(inputEl, {
             onSend: (text, files, agentId, overrides) =>
                 this.sendCommand.run({ text, files, agentId, overrides }),
@@ -264,6 +272,12 @@ export class LLMWorkspaceEditor implements IEditor {
             onConfigChange: (config) => this.handleConfigChange(config),
             onExecutorChange: () => this.bus.emit('state:inputChanged', {}),
             onRequestModels: (agentId) => this.agentLoader.loadModelsForAgent(agentId),
+
+            // ── Harness callbacks (only wired when skill service is available) ──
+            ...this.buildHarnessCallbacks(harnessAdapter, harnessRuntime),
+
+            // ── @mention file reference ───────────────────────────────────────
+            onRequestFiles: async (query) => this.searchSessionFiles(query),
         });
 
         this.registerInputPlugins();
@@ -302,6 +316,7 @@ export class LLMWorkspaceEditor implements IEditor {
             bus: this.bus,
             branchIndicator: this.branchIndicator,
             statusIndicator: this.statusIndicator,
+            chatInput: this.chatInput,
             branchStore: this.branchStore,
             getCurrentSessionId: () => this.currentSessionId,
             onContentChanged: () => this.emit('change'),
@@ -502,6 +517,8 @@ export class LLMWorkspaceEditor implements IEditor {
 
         this.currentSessionId = sessionId;
         this.currentTitle = title;
+        // Reset token meter when switching sessions
+        this.chatInput?.updateTokenStats?.(null);
         this.titleInput.value = title;
 
         const savedUIState = await this.stateManager.loadUIState();
@@ -785,8 +802,54 @@ export class LLMWorkspaceEditor implements IEditor {
     // 插件注册
     // ================================================================
 
+    /**
+     * Skill 回调：仅在 HarnessAdapter 含 SkillService 时注入。
+     *
+     * onRequestSkills  — 返回所有 Skill 含 loaded 状态（供设置面板渲染）
+     * onLoadSkill      — 加载 Skill：向 ToolService 注册工具，注入 system prompt
+     * onUnloadSkill    — 卸载 Skill
+     */
+    private buildHarnessCallbacks(
+        adapter: import('@itookit/llm-engine').HarnessAdapter | null,
+        runtime: import('@itookit/common').IAgentRuntime | undefined,
+    ): Partial<import('../components/input/ChatInputView').ChatInputOptions> {
+        const skillSvc = adapter?.getSkillService();
+        if (!skillSvc || !runtime) return {};
+
+        return {
+            onRequestSkills: async () => {
+                const session = runtime.getCurrentSession();
+                const loadedIds = new Set(session?.loadedSkills ?? []);
+                return skillSvc.listSkills().map((s) => ({
+                    id: s.id,
+                    name: s.name,
+                    description: s.description,
+                    loaded: loadedIds.has(s.id),
+                    toolCount: s.tools?.length ?? 0,
+                    icon: s.icon,
+                }));
+            },
+
+            onLoadSkill: async (skillId) => {
+                const result = await skillSvc.loadSkill(skillId);
+                return result.toolIds;
+            },
+
+            onUnloadSkill: async (skillId) => {
+                await skillSvc.unloadSkill(skillId);
+            },
+        };
+    }
+
     private registerInputPlugins(): void {
         const chatInput = this.chatInput as ChatInput;
+
+        // HarnessPlugin — must be registered first (lowest priority number)
+        // so its status bar appears above other plugin UI.
+        const harnessAdapter = getHarnessAdapter();
+        const harnessRuntime = harnessAdapter?.getRuntime() ?? undefined;
+        this.harnessPlugin = new HarnessPlugin(harnessRuntime);
+        chatInput.registerPlugin(this.harnessPlugin);
 
         const promptHistory = getPromptHistory();
         if (promptHistory) {
@@ -1115,19 +1178,101 @@ export class LLMWorkspaceEditor implements IEditor {
             // ── Help ────────────────────────────────────────────
 
             onHelp: () => {
+                // Open the inline help panel inside ChatInput
+                this.chatInput.showHelp?.();
+            },
+
+            // ── Harness: Skills ──────────────────────────────────────────────
+            ...this.buildHarnessSlashCallbacks(),
+        };
+    }
+
+    /**
+     * Harness slash 命令回调（仅在 harness 可用时注入）。
+     *
+     * onSkill  — `/skill docker` → 加载 Skill（注册工具 + 注入 system prompt）
+     * onSkills — `/skills`       → 打开设置面板的 Skill 选项卡
+     * onTools  — `/tools`        → 展示当前会话已注册的工具列表
+     */
+    private buildHarnessSlashCallbacks(): Partial<SlashCommandCallbacks> {
+        const skillSvc = getHarnessAdapter()?.getSkillService();
+        if (!skillSvc) return {};
+
+        return {
+            onSkill: async (skillId: string) => {
+                const result = await skillSvc.loadSkill(skillId);
+                if (result.success) {
+                    Toast.success(`Skill "${skillId}" loaded (${result.toolIds.length} tools)`);
+                    // Refresh skill panel if settings are open
+                    const skills = skillSvc.listSkills().map((s) => ({
+                        id: s.id,
+                        name: s.name,
+                        description: s.description,
+                        loaded: s.id === skillId ? true : false,
+                        toolCount: s.tools?.length ?? 0,
+                        icon: s.icon,
+                    }));
+                    (this.chatInput as ChatInput & { refreshSkills?: (s: unknown[]) => void }).refreshSkills?.(skills);
+                } else {
+                    Toast.error(`Failed to load skill "${skillId}": ${result.error ?? 'unknown error'}`);
+                }
+            },
+
+            onSkills: () => {
+                // Open settings panel — toggle it via the settings button
+                const settingsBtn = document.querySelector('.llm-input__btn--settings') as HTMLButtonElement | null;
+                settingsBtn?.click();
+            },
+
+            onTools: () => {
+                const tools = getHarnessAdapter()?.getSkillService()
+                    ? skillSvc.listSkills()
+                        .filter((s) => s.enabled)
+                        .flatMap((s) => s.tools.map((t) => `${t.toolId} (${s.name})`))
+                    : [];
+                const toolService = (getHarnessAdapter() as unknown as {
+                    toolService?: { listTools(): Array<{ id: string }> }
+                })?.toolService;
+                const builtinTools = toolService?.listTools().map((t) => t.id) ?? [
+                    'file_read', 'file_write', 'shell_exec', 'glob_search', 'grep_search',
+                ];
                 Toast.info(
-                    'Commands:\n' +
-                    '  /new [title] /retry /continue /reedit /delete /clear\n' +
-                    '  /shorter /longer /simplify /summarize\n' +
-                    '  /fold /foldall /unfoldall /top /bottom /nav\n' +
-                    '  /copy /export /print\n' +
-                    '  /branch /switch <name> /branchprev /branchnext\n' +
-                    '  /branches /renamebranch <old> <new> /deletebranch <name>\n' +
-                    '  /agent <id> /model <id> /history <n> /fresh\n' +
-                    '  /help'
+                    `Available tools:\n${builtinTools.concat(tools).join('\n  ')}`
                 );
             },
         };
+    }
+
+    /**
+     * 搜索当前会话模块的文件，供 `@` mention 使用。
+     *
+     * 通过 ISessionEngine.loadTree() 获取文件节点列表，
+     * 按 query 模糊筛选文件名和路径后返回 FileSuggestion[]。
+     *
+     * 返回的 path 格式为 `./relative/path`，
+     * AttachmentProcessor 发送时会解析并附加文件内容。
+     */
+    private async searchSessionFiles(query: string): Promise<import('../domain/types').FileSuggestion[]> {
+        try {
+            const engine = this.options.sessionEngine;
+            // Use search() to find file nodes matching the query
+            const results = await engine.search({
+                text: query || undefined,
+                type: 'file',
+                limit: 20,
+            });
+
+            return results
+                .filter((n) => n.type === 'file')
+                .map((n) => ({
+                    name: n.name,
+                    path: n.path.startsWith('/') ? `.${n.path}` : `./${n.path}`,
+                    mimeType: guessMimeTypeFromName(n.name),
+                    size: n.size,
+                }));
+        } catch {
+            return [];
+        }
     }
 
     /**

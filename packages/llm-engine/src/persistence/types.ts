@@ -97,6 +97,18 @@ export interface UpdateMessageMeta {
     endTime?: number;
     siblingIndex?: number;
     siblingCount?: number;
+    /** LLM 输入 token 数（含历史） */
+    inputTokens?: number;
+    /** LLM 输出 token 数 */
+    outputTokens?: number;
+    /** 缓存命中的 token 数 */
+    cacheTokens?: number;
+    /** 估算费用（USD） */
+    costUsd?: number;
+    /** 生成耗时（ms） */
+    durationMs?: number;
+    /** 是否为估算值（非精确 API 返回） */
+    isEstimated?: boolean;
 }
 
 /**

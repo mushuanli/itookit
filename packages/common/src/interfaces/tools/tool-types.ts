@@ -42,6 +42,14 @@ export interface ToolMeta {
     icon?: string;
     /** 标签 */
     tags?: string[];
+    /**
+     * Skill 加载器参数键名。
+     *
+     * 若设置，执行器在此工具调用成功后会取 args[skillLoaderArgKey] 作为 skillId，
+     * 调用 contextManager.markSkillLoaded()，触发 agent:skill:loaded 事件。
+     * 这样工具本身无需耦合执行器，执行器无需硬编码工具名。
+     */
+    skillLoaderArgKey?: string;
 }
 
 /**

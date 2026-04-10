@@ -187,7 +187,7 @@ export {
 // ============================================
 
 export { LLMDeviceDriver, LLM_IOCTL } from './device/llm-device-driver';
-export type { LLMIoctlCommand, LLMDeviceOpenOptions } from './device/llm-device-driver';
+export type { LLMIoctlCommand, LLMDeviceOpenOptions, IShellRunner, LLMDeviceDriverOptions } from './device/llm-device-driver';
 // ILLMManagementService 统一从 @itookit/common 导入
 
 // ============================================

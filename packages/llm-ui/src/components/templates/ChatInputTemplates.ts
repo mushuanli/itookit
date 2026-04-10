@@ -11,6 +11,7 @@ export const ChatInputTemplates = {
     renderMain(): string {
         return `
             <div class="llm-input">
+                ${this.renderHelpPanel()}
                 ${this.renderSettingsPanel()}
                 ${this.renderInputArea()}
                 <input type="file" multiple style="display:none;" class="llm-input__file-input">
@@ -33,12 +34,14 @@ export const ChatInputTemplates = {
                         ${this.closeIcon()}
                     </button>
                 </div>
-                
+
                 <div class="llm-input__settings-body">
                     ${this.renderModelSetting()}
                     ${this.renderStreamSetting()}
                     ${this.renderHistorySetting()}
                     ${this.renderPresets()}
+                    ${this.renderHarnessSetting()}
+                    ${this.renderSkillsSetting()}
                 </div>
             </div>
         `;
@@ -133,6 +136,97 @@ export const ChatInputTemplates = {
     },
 
     /**
+     * Agent Mode（Harness）设置行
+     *
+     * 开启后消息通过 AgentLoopExecutor 执行：
+     * 支持多轮工具调用、上下文压缩、反压验证。
+     */
+    renderHarnessSetting(): string {
+        return `
+            <div class="llm-input__setting-row llm-input__harness-section">
+                <div class="llm-input__setting-divider">Agent Mode</div>
+
+                <label class="llm-input__setting-label">
+                    <span class="llm-input__setting-icon">🤖</span>
+                    Agent Loop
+                </label>
+                <div class="llm-input__toggle-wrapper">
+                    <label class="llm-input__toggle">
+                        <input type="checkbox"
+                               class="llm-input__harness-toggle"
+                               title="Enable multi-turn agent loop with tools">
+                        <span class="llm-input__toggle-slider"></span>
+                    </label>
+                    <span class="llm-input__harness-toggle-label">Disabled</span>
+                </div>
+                <span class="llm-input__setting-hint">
+                    Multi-turn loop with file tools, context compression and back-pressure validation
+                </span>
+            </div>
+
+            <div class="llm-input__setting-row llm-input__cwd-row" style="display:none">
+                <label class="llm-input__setting-label">
+                    <span class="llm-input__setting-icon">📁</span>
+                    Working Dir
+                </label>
+                <input type="text"
+                       class="llm-input__cwd-input"
+                       placeholder="Default (process cwd)"
+                       title="Root directory for file tools (file_read, file_write, shell_exec, etc.)">
+                <span class="llm-input__setting-hint">
+                    Directory accessible to file and shell tools
+                </span>
+            </div>
+        `;
+    },
+
+    /**
+     * Skill 选择面板（harness 模式下可见）
+     *
+     * 每个 Skill 是一组工具 + 系统提示词，按需加载到当前会话。
+     */
+    renderSkillsSetting(): string {
+        return `
+            <div class="llm-input__skill-section" style="display:none">
+                <div class="llm-input__setting-divider">
+                    Skills
+                    <button class="llm-input__skills-refresh" title="Refresh skill list">↺</button>
+                </div>
+                <div class="llm-input__skills-list">
+                    <span class="llm-input__skills-empty">No skills available</span>
+                </div>
+            </div>
+        `;
+    },
+
+    /**
+     * 渲染单个 Skill 条目
+     */
+    renderSkillItem(skill: { id: string; name: string; description: string; loaded: boolean; toolCount: number; icon?: string }): string {
+        const icon = skill.icon ? escapeHTML(skill.icon) : '⚡';
+        const loadedBadge = skill.loaded
+            ? `<span class="llm-input__skill-badge llm-input__skill-badge--loaded">Loaded</span>`
+            : '';
+        const btn = skill.loaded
+            ? `<button class="llm-input__skill-btn llm-input__skill-btn--unload" data-skill="${escapeHTML(skill.id)}">Unload</button>`
+            : `<button class="llm-input__skill-btn llm-input__skill-btn--load" data-skill="${escapeHTML(skill.id)}">Load</button>`;
+
+        return `
+            <div class="llm-input__skill-item${skill.loaded ? ' llm-input__skill-item--loaded' : ''}"
+                 data-skill-id="${escapeHTML(skill.id)}">
+                <span class="llm-input__skill-icon">${icon}</span>
+                <div class="llm-input__skill-info">
+                    <span class="llm-input__skill-name">${escapeHTML(skill.name)}</span>
+                    ${loadedBadge}
+                    <span class="llm-input__skill-desc">${escapeHTML(skill.description)}</span>
+                    <span class="llm-input__skill-tools">${skill.toolCount} tool${skill.toolCount !== 1 ? 's' : ''}</span>
+                </div>
+                ${btn}
+            </div>
+        `;
+    },
+
+    /**
      * 渲染主输入区域
      */
     renderInputArea(): string {
@@ -203,6 +297,9 @@ export const ChatInputTemplates = {
     renderActions(): string {
         return `
             <div class="llm-input__actions">
+                <button class="llm-input__btn llm-input__btn--help" title="Show keyboard shortcuts &amp; commands (?)">
+                    ${this.helpIcon()}
+                </button>
                 <button class="llm-input__btn llm-input__btn--settings" title="Chat Settings">
                     ${this.sliderIcon()}
                 </button>
@@ -216,6 +313,122 @@ export const ChatInputTemplates = {
                     ${this.stopIcon()}
                 </button>
             </div>
+        `;
+    },
+
+    /**
+     * 帮助面板骨架（挂载在 .llm-input 根节点内）。
+     *
+     * 内容由 ChatInputView.renderHelpContent() 动态写入 .llm-input__help-body。
+     */
+    renderHelpPanel(): string {
+        return `
+            <div class="llm-input__help-panel" style="display:none;" role="dialog" aria-label="ChatInput help">
+                <div class="llm-input__help-header">
+                    <span class="llm-input__help-title">How to use</span>
+                    <button class="llm-input__help-close" title="Close help (Esc)">×</button>
+                </div>
+                <div class="llm-input__help-body"></div>
+            </div>
+        `;
+    },
+
+    /**
+     * 帮助面板内容（动态注入）。
+     *
+     * @param hasHarness  是否启用了 AgentLoopExecutor（决定是否显示 Agent Mode 分区）
+     * @param hasFiles    是否注入了 onRequestFiles（决定是否显示 @ 分区）
+     */
+    renderHelpContent(hasHarness: boolean, hasFiles: boolean): string {
+        const agentSection = hasHarness ? `
+            <section class="llm-input__help-section">
+                <h3 class="llm-input__help-section-title">🤖 Agent Mode</h3>
+                <p class="llm-input__help-section-desc">
+                    Enable <b>Agent Loop</b> in Settings to use multi-turn AI with tools.
+                </p>
+                <table class="llm-input__help-table">
+                    <tr><td><kbd>/skill &lt;id&gt;</kbd></td><td>Load a skill into the agent</td></tr>
+                    <tr><td><kbd>/skills</kbd></td><td>Browse &amp; manage available skills</td></tr>
+                    <tr><td><kbd>/tools</kbd></td><td>Show registered tools</td></tr>
+                    <tr><td><kbd>Settings → Agent Loop</kbd></td><td>Toggle harness mode</td></tr>
+                    <tr><td><kbd>Settings → Working Dir</kbd></td><td>Set file tool root directory</td></tr>
+                </table>
+                <p class="llm-input__help-hint">
+                    Built-in tools: <code>file_read</code> <code>file_write</code>
+                    <code>shell_exec</code> <code>glob_search</code> <code>grep_search</code>
+                </p>
+            </section>` : '';
+
+        const fileSection = hasFiles ? `
+            <section class="llm-input__help-section">
+                <h3 class="llm-input__help-section-title">@ File References</h3>
+                <table class="llm-input__help-table">
+                    <tr><td><kbd>@filename</kbd></td><td>Type @ to open file picker</td></tr>
+                    <tr><td>Select a file</td><td>Inserts <code>[file.md](./path)</code> → AI reads its content</td></tr>
+                    <tr><td>Images</td><td>Inserts <code>![img.png](./path)</code> → sent as vision attachment</td></tr>
+                </table>
+            </section>` : '';
+
+        return `
+            <section class="llm-input__help-section">
+                <h3 class="llm-input__help-section-title">⌨ Keyboard Shortcuts</h3>
+                <table class="llm-input__help-table">
+                    <tr><td><kbd>Enter</kbd></td><td>Send message</td></tr>
+                    <tr><td><kbd>Shift+Enter</kbd></td><td>New line</td></tr>
+                    <tr><td><kbd>↑</kbd> <span class="llm-input__help-dim">(empty input)</span></td><td>Browse prompt history</td></tr>
+                    <tr><td><kbd>Ctrl+R</kbd></td><td>Search prompt history</td></tr>
+                    <tr><td><kbd>Esc</kbd></td><td>Close active panel</td></tr>
+                    <tr><td><kbd>Cmd+K</kbd></td><td>Toggle navigation panel</td></tr>
+                    <tr><td><kbd>Cmd+↑↓</kbd></td><td>Navigate between messages</td></tr>
+                </table>
+            </section>
+
+            <section class="llm-input__help-section">
+                <h3 class="llm-input__help-section-title">/ Slash Commands</h3>
+                <p class="llm-input__help-section-desc">Type <kbd>/</kbd> to open the command picker.</p>
+                <table class="llm-input__help-table">
+                    <tr><th colspan="2" class="llm-input__help-group">Chat</th></tr>
+                    <tr><td><kbd>/new</kbd> [title]</td><td>Start a new chat</td></tr>
+                    <tr><td><kbd>/retry</kbd></td><td>Regenerate last response</td></tr>
+                    <tr><td><kbd>/continue</kbd></td><td>Continue generation</td></tr>
+                    <tr><td><kbd>/reedit</kbd></td><td>Re-edit last message</td></tr>
+                    <tr><td><kbd>/delete</kbd></td><td>Delete last message pair</td></tr>
+                    <tr><td><kbd>/clear</kbd></td><td>Clear conversation</td></tr>
+
+                    <tr><th colspan="2" class="llm-input__help-group">Refine</th></tr>
+                    <tr><td><kbd>/shorter</kbd> <kbd>/longer</kbd></td><td>Adjust response length</td></tr>
+                    <tr><td><kbd>/simplify</kbd></td><td>Simplify last response</td></tr>
+                    <tr><td><kbd>/summarize</kbd></td><td>Summarize last response</td></tr>
+
+                    <tr><th colspan="2" class="llm-input__help-group">View</th></tr>
+                    <tr><td><kbd>/fold</kbd> <kbd>/foldall</kbd></td><td>Fold current / all messages</td></tr>
+                    <tr><td><kbd>/top</kbd> <kbd>/bottom</kbd></td><td>Scroll to top / bottom</td></tr>
+                    <tr><td><kbd>/nav</kbd></td><td>Toggle navigation panel</td></tr>
+
+                    <tr><th colspan="2" class="llm-input__help-group">Export</th></tr>
+                    <tr><td><kbd>/copy</kbd></td><td>Copy all as Markdown</td></tr>
+                    <tr><td><kbd>/export</kbd></td><td>Export conversation</td></tr>
+
+                    <tr><th colspan="2" class="llm-input__help-group">Branch</th></tr>
+                    <tr><td><kbd>/branch</kbd></td><td>Create branch</td></tr>
+                    <tr><td><kbd>/switch</kbd> &lt;name&gt;</td><td>Switch branch</td></tr>
+                    <tr><td><kbd>/branchprev</kbd> <kbd>/branchnext</kbd></td><td>Cycle branches</td></tr>
+                    <tr><td><kbd>/branches</kbd></td><td>List all branches</td></tr>
+
+                    <tr><th colspan="2" class="llm-input__help-group">Settings</th></tr>
+                    <tr><td><kbd>/agent</kbd> &lt;id&gt;</td><td>Switch agent</td></tr>
+                    <tr><td><kbd>/model</kbd> &lt;id&gt;</td><td>Override model</td></tr>
+                    <tr><td><kbd>/history</kbd> &lt;n&gt;</td><td>Set context length (0 = none, -1 = all)</td></tr>
+                    <tr><td><kbd>/fresh</kbd></td><td>Clear context (fresh start)</td></tr>
+                </table>
+            </section>
+
+            ${fileSection}
+            ${agentSection}
+
+            <p class="llm-input__help-footer">
+                Tip: type <kbd>/</kbd> in the input to browse all commands interactively.
+            </p>
         `;
     },
 
@@ -353,6 +566,14 @@ export const ChatInputTemplates = {
     stopIcon(): string {
         return `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+        </svg>`;
+    },
+
+    helpIcon(): string {
+        return `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+            <line x1="12" y1="17" x2="12.01" y2="17"></line>
         </svg>`;
     },
 };

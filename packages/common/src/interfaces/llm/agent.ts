@@ -43,8 +43,15 @@ export type InitialAgentDef = AgentDefinition & {
 
 // ─── LLMSkill ─────────────────────────────────────────────────────────────────
 
-/** 技能类型：builtin = 代码内置 / http = 远程 HTTP 端点 / custom = 自定义扩展 */
-export type LLMSkillType = 'builtin' | 'http' | 'custom';
+/**
+ * Skill 类型：
+ * - builtin: 代码内置工具（已在 device-tools 注册，skill 只是引用）
+ * - http:    远程 REST 端点，包装为 function-calling 工具
+ * - shell:   本地 Shell 命令，包装为 function-calling 工具
+ * - prompt:  纯 Markdown 指令注入，不产生可调用工具
+ * - custom:  预留扩展
+ */
+export type LLMSkillType = 'builtin' | 'http' | 'shell' | 'prompt' | 'mcp' | 'custom';
 
 /**
  * 持久化 Skill 配置（存储在 __config:/llm/.skills/<id>.json）。
@@ -63,9 +70,32 @@ export interface LLMSkill {
     method?: 'GET' | 'POST' | 'PUT';
     headers?: Record<string, string>;
 
-    // ── LLM function-calling 参数 Schema ─────────────────────────
+    // ── Shell 命令配置（type = 'shell'）──────────────────────────
+    /**
+     * Shell 命令模板。支持 {{argName}} 占位符。
+     * 例：`git log --oneline -{{n}}` → LLM 传 { n: 10 } → `git log --oneline -10`
+     */
+    command?: string;
+
+    // ── Prompt 指令配置（type = 'prompt'）────────────────────────
+    /**
+     * Markdown 格式的指令文本，注入到 LLM 的 system prompt。
+     * 不产生可调用工具，只为 LLM 提供上下文和行为规范。
+     */
+    instructions?: string;
+
+    // ── LLM function-calling 参数 Schema（http / shell 类型）─────
     /** JSON Schema（object 类型），描述 LLM 调用此 skill 时的参数格式 */
     parameters?: Record<string, unknown>;
+
+    // ── MCP 工具引用（type = 'mcp'）──────────────────────────────
+    /**
+     * 引用已配置的 MCP Server ID。
+     * 端点、认证、协议全部继承自 MCPServer 配置，无需重复填写。
+     */
+    mcpServerId?: string;
+    /** 该 MCP Server 上的具体工具名称 */
+    mcpToolName?: string;
 
     metadata?: Record<string, unknown>;
     createdAt?: number;

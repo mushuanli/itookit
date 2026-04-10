@@ -442,6 +442,28 @@ importers:
         specifier: ^1.6.1
         version: 1.6.1(@types/node@20.19.25)(jsdom@27.2.0)
 
+  packages/llm-harness:
+    dependencies:
+      '@itookit/common':
+        specifier: workspace:*
+        version: link:../common
+      '@itookit/device-llm':
+        specifier: workspace:*
+        version: link:../device-llm
+    devDependencies:
+      '@types/node':
+        specifier: ^20.10.0
+        version: 20.19.25
+      rimraf:
+        specifier: ^5.0.5
+        version: 5.0.10
+      typescript:
+        specifier: ^5.3.0
+        version: 5.9.3
+      vitest:
+        specifier: ^1.6.0
+        version: 1.6.1(@types/node@20.19.25)(jsdom@27.2.0)
+
   packages/llm-kernel:
     dependencies:
       '@itookit/common':

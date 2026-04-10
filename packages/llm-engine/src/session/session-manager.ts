@@ -26,6 +26,7 @@ import { IAgentConfigService } from '../services/agent-service';
 import { SessionState } from './session-state';
 import { SessionEventBus } from './session-event-bus';
 import { TaskRunner } from './task-runner';
+import { HarnessAdapter } from '../adapters/harness-adapter';
 import { AgentResolver, AgentInfo, ModelInfo } from './agent-resolver';
 import { AttachmentProcessor } from './attachment-processor';
 import { Converters } from '../utils/converters';
@@ -1132,6 +1133,16 @@ export class SessionManager {
 
         if (cleaned > 0) log.info('Idle sessions cleaned', { count: cleaned });
         return cleaned;
+    }
+
+    /**
+     * 注入 HarnessAdapter，启用 Agent 循环执行路径。
+     *
+     * 须在 initializeLLMEngine 完成后、第一次 sendMessage 之前调用。
+     * 注入后，带有 overrides.useHarness=true 的任务将通过 AgentLoopExecutor 执行。
+     */
+    setHarnessAdapter(adapter: HarnessAdapter): void {
+        this.taskRunner.setHarnessAdapter(adapter);
     }
 
     destroy(): void {
