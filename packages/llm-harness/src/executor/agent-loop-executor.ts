@@ -103,7 +103,7 @@ export class AgentLoopExecutor implements IAgentRuntime {
         const primaryConn = task.modelOverride ?? this.modelRoles.primary;
         const recovery = new ErrorRecoveryService(this.llm, primaryConn);
         const backPressure = new BackPressureValidator(this.loopConfig.backPressureRules);
-        const cwd = task.workingDirectory ?? process.cwd();
+        const cwd = task.workingDirectory ?? (typeof process !== 'undefined' ? process.cwd() : '/');
 
         this.contextManager.initSession(sessionId, cwd, '');
         // Auto-detect and pre-load skills matching the task prompt.
