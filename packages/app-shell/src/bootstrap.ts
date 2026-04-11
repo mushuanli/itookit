@@ -283,6 +283,10 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
                     return defaults;
                 },
             },
+            // Skills workspace: show summary = skill name below the skill ID.
+            ...(strategyType === 'skills' && {
+                defaultUiSettings: { showSummary: true },
+            }),
         };
 
         const manager = new MemoryManager({

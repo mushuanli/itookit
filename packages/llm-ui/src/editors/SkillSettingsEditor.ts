@@ -45,6 +45,9 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
     ): SkillSettingsEditor {
         const editor = new SkillSettingsEditor(container, service, options ?? {});
         editor._formOnly = true;
+        // Prefer options.nodeId (always accurate) over parsing options.initialContent YAML.
+        // In formOnly mode, options.nodeId IS the skill ID from SkillsEngine.
+        if (options?.nodeId) editor.selectedId = options.nodeId;
         return editor;
     }
 
