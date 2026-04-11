@@ -2,7 +2,7 @@
 
 import {
     IEditor, EditorOptions, EditorHostContext, EditorEvent,
-    EditorEventCallback, CollapseExpandResult, Toast, guessMimeType, Modal,
+    EditorEventCallback, CollapseExpandResult, Toast, guessMimeType,
 } from '@itookit/common';
 
 /** Alias: infer MIME from filename (used for @mention file suggestions) */
@@ -1277,45 +1277,27 @@ export class LLMWorkspaceEditor implements IEditor {
             ...(toolSvc ? {
                 onToolInvoke: async (toolId: string, args: Record<string, unknown>) => {
                     const cwd = this.chatInput.getConfig()?.settings?.workingDirectory || undefined;
+                    // Build the human-readable command string for the output header.
+                    const argStr = Object.entries(args)
+                        .filter(([k]) => k !== 'command') // 'command' is the positional for shell_exec
+                        .map(([k, v]) => `--${k} ${String(v)}`)
+                        .join(' ');
+                    const posArg = args['command'] ?? args['path'] ?? args['pattern'] ?? '';
+                    const cmd = [toolId.replace('_', ' '), String(posArg), argStr].filter(Boolean).join(' ');
+
+                    // Show a "running…" state immediately so the user knows execution started.
+                    this.chatInput.showToolOutput?.(cmd, '⏳ Running…', true);
+
                     const result = await toolSvc.invoke({ toolId, args, cwd });
-                    this.showToolResultModal(toolId, args, result.output, result.success);
+
+                    // Replace the placeholder with the real output.
+                    this.chatInput.showToolOutput?.(cmd, result.output, result.success);
                 },
             } : {}),
         };
     }
 
-    /** Show tool output in a scrollable Modal (code block). */
-    private showToolResultModal(
-        toolId: string,
-        args: Record<string, unknown>,
-        output: string,
-        success: boolean,
-    ): void {
-        const argSummary = Object.entries(args)
-            .filter(([, v]) => v !== undefined)
-            .map(([k, v]) => `--${k} ${String(v)}`)
-            .join(' ');
-        const title = `/${toolId}${argSummary ? '  ' + argSummary : ''}`;
-        const lines = output.split('\n').length;
-        const body = `
-            <div style="font-size:.75rem;color:var(--st-text-tertiary);margin-bottom:.5rem">
-                ${success ? '✅ success' : '❌ error'} · ${lines} line${lines !== 1 ? 's' : ''}
-            </div>
-            <pre style="
-                white-space:pre-wrap;word-break:break-all;
-                font-family:monospace;font-size:.8125rem;line-height:1.55;
-                background:var(--st-bg-secondary,#f8f8f8);
-                border:1px solid var(--st-border-color,#e5e5e5);
-                border-radius:6px;padding:.75rem 1rem;
-                max-height:60vh;overflow-y:auto;margin:0">${output.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>`;
-
-        new Modal(title, body, {
-            confirmText: 'Close',
-            onConfirm: () => true,
-            // @ts-ignore Modal supports hideCancel
-            hideCancel: true,
-        }).show();
-    }
+    // showToolResultModal removed — output is now shown inline via chatInput.showToolOutput()
 
     /**
      * Execute a skill invocation with file resolution, glob expansion,
