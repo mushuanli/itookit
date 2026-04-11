@@ -64,8 +64,6 @@ export class MentionPlugin implements InputPlugin {
     }
 
     onKeyDown(e: KeyboardEvent): boolean {
-        console.log('[mention:onKeyDown] key:', e.key, 'mentionStart:', this.mentionStart, 'popup:', !!this.popup, 'visible:', this.popup?.isVisible, 'activeEl:', document.activeElement?.tagName);
-
         if (this.mentionStart < 0 || !this.popup) return false;
 
         // Navigation / selection: delegate to PopupPanel.
@@ -82,14 +80,11 @@ export class MentionPlugin implements InputPlugin {
         // When the popup is still loading (not visible yet), let Enter through
         // so the user can still submit (resolveAtPath will strip the @ prefix).
         if (['Enter', 'Tab'].includes(e.key)) {
-            console.log('[mention:onKeyDown] Enter/Tab — popup.isVisible:', this.popup.isVisible);
             if (this.popup.isVisible) {
                 e.preventDefault();
-                const handled = this.popup.handleKeyDown(e);
-                console.log('[mention:onKeyDown] popup.handleKeyDown returned:', handled);
+                this.popup.handleKeyDown(e);
                 return true;
             }
-            console.log('[mention:onKeyDown] popup not visible, letting Enter through');
             return false; // popup loading — don't block Enter
         }
 
@@ -170,14 +165,12 @@ export class MentionPlugin implements InputPlugin {
             icon: this.fileIcon(f),
         }));
 
-        console.log('[mention:fetchAndShow] showing popup with', items.length, 'items, query:', this.currentQuery);
         // show() automatically calls positionPanel() internally
         this.popup?.show(items, {
-            onSelect: (item) => { console.log('[mention:onSelect] selected:', item.id); this.insertMention(item.id as string); },
+            onSelect: (item) => this.insertMention(item.id as string),
             onClose: () => this.close(),
         });
         this.popup?.filter(this.currentQuery);
-        console.log('[mention:fetchAndShow] after show, popup.isVisible:', this.popup?.isVisible, 'activeEl:', document.activeElement?.tagName);
 
         // PopupPanel.show() may call searchInput.focus(), which steals focus
         // from the textarea. Once focus leaves the textarea, ChatInputView's
@@ -185,15 +178,13 @@ export class MentionPlugin implements InputPlugin {
         // called and Enter can't complete the mention.
         // Refocus the textarea immediately to restore the correct event path.
         this.ctx?.focus();
-        console.log('[mention:fetchAndShow] after focus(), activeEl:', document.activeElement?.tagName);
     }
 
     private insertMention(filePath: string): void {
-        console.log('[mention:insertMention] filePath:', filePath, 'mentionStart:', this.mentionStart, 'cursor:', this.ctx?.getCursorPosition());
-        if (!this.ctx) { console.warn('[mention:insertMention] no ctx!'); return; }
+        if (!this.ctx) return;
 
         const suggestion = this.cachedSuggestions.find((f) => f.path === filePath);
-        if (!suggestion) { console.warn('[mention:insertMention] suggestion not found for path:', filePath); return; }
+        if (!suggestion) return;
 
         const name = suggestion.name;
         const isImage = suggestion.mimeType && IMAGE_MIMES.has(suggestion.mimeType);
