@@ -8,7 +8,6 @@
 // Inject into LLMDeviceDriver at startup:
 //   new LLMDeviceDriver(vfs, { shellRunner: new NodeShellRunner() })
 
-import { spawn } from 'node:child_process';
 import type { IShellRunner } from '@itookit/device-llm';
 
 const MAX_OUTPUT = 50_000;
@@ -26,11 +25,20 @@ export class NodeShellRunner implements IShellRunner {
     async run(template: string, args: Record<string, unknown>): Promise<string> {
         const command = renderTemplate(template, args);
 
+        let spawnFn: typeof import('node:child_process').spawn;
+        try {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const cp = await import('node:child_process' as any);
+            spawnFn = cp.spawn;
+        } catch {
+            return 'Error: NodeShellRunner is not available in browser environments';
+        }
+
         return new Promise((resolve) => {
             const chunks: string[] = [];
             let timedOut = false;
 
-            const proc = spawn('sh', ['-c', command], {
+            const proc = spawnFn('sh', ['-c', command], {
                 env: { ...process.env },
                 stdio: ['ignore', 'pipe', 'pipe'],
             });
