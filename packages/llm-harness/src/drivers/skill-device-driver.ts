@@ -1,7 +1,7 @@
 // @file: llm-harness/src/drivers/skill-device-driver.ts
 // Skill 设备驱动：包装 ISkillService，实现 IDeviceDriver。
 
-import { spawn } from 'node:child_process';
+// node:child_process is loaded dynamically in registerShellTool to stay browser-safe.
 import type {
     IDeviceDriver,
     ISkillService,
@@ -187,18 +187,28 @@ export class SkillDeviceDriver implements IDeviceDriver, ISkillService {
         const template = binding.command ?? '';
         const MAX_OUTPUT = 50_000;
 
-        const handler: ToolHandler = (args, ctx) =>
-            new Promise((resolve) => {
-                // Render {{argName}} placeholders
-                let command = template;
-                for (const [k, v] of Object.entries(args)) {
-                    command = command.replace(new RegExp(`\\{\\{${k}\\}\\}`, 'g'), String(v));
-                }
+        const handler: ToolHandler = async (args, ctx) => {
+            // Dynamic import keeps node:child_process out of browser bundles.
+            let spawnFn: typeof import('node:child_process').spawn;
+            try {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const cp = await import('node:child_process' as any);
+                spawnFn = cp.spawn;
+            } catch {
+                return 'Error: shell skill tools are not available in browser environments';
+            }
 
+            // Render {{argName}} placeholders
+            let command = template;
+            for (const [k, v] of Object.entries(args)) {
+                command = command.replace(new RegExp(`\\{\\{${k}\\}\\}`, 'g'), String(v));
+            }
+
+            return new Promise((resolve) => {
                 const chunks: string[] = [];
                 let timedOut = false;
 
-                const proc = spawn('sh', ['-c', command], {
+                const proc = spawnFn('sh', ['-c', command], {
                     cwd: ctx.cwd,
                     env: { ...process.env },
                     stdio: ['ignore', 'pipe', 'pipe'],
@@ -231,6 +241,7 @@ export class SkillDeviceDriver implements IDeviceDriver, ISkillService {
                     resolve(`Error spawning command: ${err.message}`);
                 });
             });
+        };
 
         this.toolService.registerTool(
             {
