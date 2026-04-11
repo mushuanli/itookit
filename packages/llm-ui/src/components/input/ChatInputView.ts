@@ -82,7 +82,7 @@ export class ChatInput implements IChatInputPresenter {
     private executorSelect!: HTMLSelectElement;
     private modelSelect!: HTMLSelectElement;
     private historySlider!: HTMLInputElement;
-    private historyValue!: HTMLSpanElement;
+    private historyValue: HTMLSpanElement | null = null; // removed from new template
     private streamToggle!: HTMLInputElement;
     private settingsPanel!: HTMLElement;
     private fileInput!: HTMLInputElement;
@@ -97,9 +97,9 @@ export class ChatInput implements IChatInputPresenter {
     private currentAgentId: string = 'default';
     private isLoadingModels: boolean = false;
 
-    // ── Harness DOM elements ─────────────────────────────────────────────────
+    // ── Mode / harness DOM elements ──────────────────────────────────────────
     private harnessToggle!: HTMLInputElement;
-    private harnessToggleLabel!: HTMLSpanElement;
+    private harnessToggleLabel!: HTMLSpanElement; // kept for backward compat; may be absent
     private cwdRow!: HTMLElement;
     private cwdInput!: HTMLInputElement;
     private skillSection!: HTMLElement;
@@ -501,16 +501,16 @@ code {
         this.executorSelect = q('.llm-input__executor-select');
         this.modelSelect = q('.llm-input__model-select');
         this.historySlider = q('.llm-input__history-slider');
-        this.historyValue = q('.llm-input__history-value');
+        this.historyValue = this.container.querySelector('.llm-input__history-value');
         this.streamToggle = q('.llm-input__stream-toggle');
         this.settingsPanel = q('.llm-input__settings-panel');
         this.fileInput = q('.llm-input__file-input');
         this.attachmentContainer = q('.llm-input__attachments');
         this.inputWrapper = q('.llm-input__field-wrapper');
 
-        // Harness controls
+        // Mode / skills controls
         this.harnessToggle = q('.llm-input__harness-toggle');
-        this.harnessToggleLabel = q('.llm-input__harness-toggle-label');
+        this.harnessToggleLabel = this.container.querySelector('.llm-input__harness-toggle-label') as HTMLSpanElement;
         this.cwdRow = q('.llm-input__cwd-row');
         this.cwdInput = q('.llm-input__cwd-input');
         this.skillSection = q('.llm-input__skill-section');
@@ -642,15 +642,12 @@ code {
             });
         });
 
-        // ── Harness toggle ──────────────────────────────────────────────────
+        // ── Mode toggle (Simple / Full) ──────────────────────────────────────
         this.harnessToggle?.addEventListener('change', () => {
             const enabled = this.harnessToggle.checked;
             this.config.settings.useHarness = enabled;
             this.updateHarnessToggleLabel();
             this.updateHarnessVisibility();
-            if (enabled && this.options.onRequestSkills) {
-                this.reloadSkills();
-            }
             this.updateActiveBadges();
             this.notifyConfigChange();
         });
@@ -660,24 +657,22 @@ code {
             this.notifyConfigChange();
         });
 
-        // Skill list delegation (load / unload buttons + refresh)
-        this.skillSection?.addEventListener('click', (e) => {
-            const target = e.target as HTMLElement;
-
-            if (target.matches('.llm-input__skill-btn--load')) {
-                const skillId = target.dataset.skill;
-                if (skillId) this.loadSkill(skillId);
-                return;
-            }
-            if (target.matches('.llm-input__skill-btn--unload')) {
-                const skillId = target.dataset.skill;
-                if (skillId) this.unloadSkill(skillId);
-                return;
-            }
-            if (target.matches('.llm-input__skills-refresh')) {
-                this.reloadSkills();
+        // Skill list delegation — toggle checkbox drives load/unload
+        this.skillSection?.addEventListener('change', (e) => {
+            const target = e.target as HTMLInputElement;
+            if (!target.matches('.llm-input__skill-btn')) return;
+            const skillId = target.dataset.skill;
+            if (!skillId) return;
+            if (target.checked) {
+                this.loadSkill(skillId);
+            } else {
+                this.unloadSkill(skillId);
             }
         });
+
+        // Skills refresh button (click, not change)
+        this.container.querySelector('.llm-input__skills-refresh')
+            ?.addEventListener('click', () => this.reloadSkills());
     }
 
     private bindOutsideClickHandler(): void {
@@ -839,7 +834,6 @@ code {
         }
         if (this.harnessToggle) {
             this.harnessToggle.checked = this.config.settings.useHarness ?? false;
-            this.updateHarnessToggleLabel();
             this.updateHarnessVisibility();
         }
         if (this.cwdInput && this.config.settings.workingDirectory) {
@@ -878,6 +872,10 @@ code {
             requestAnimationFrame(() => {
                 this.settingsPanel.classList.remove('llm-input__settings-panel--entering');
             });
+            // Lazily load skills when panel opens (skills always visible now)
+            if (this.skills.length === 0 && this.options.onRequestSkills) {
+                this.reloadSkills();
+            }
         }
     }
 
@@ -904,6 +902,7 @@ code {
     }
 
     private updateHistoryDisplay(): void {
+        if (!this.historyValue) return; // element removed in new template; presets show state
         const value = this.config.settings.historyLength;
         if (value === -1) this.historyValue.textContent = 'Unlimited';
         else if (value === 0) this.historyValue.textContent = 'None';
@@ -980,15 +979,17 @@ code {
     }
 
     private updateHarnessToggleLabel(): void {
+        // Legacy label element may not exist in new template; tolerate gracefully
         if (this.harnessToggleLabel) {
-            this.harnessToggleLabel.textContent = this.config.settings.useHarness ? 'Enabled' : 'Disabled';
+            this.harnessToggleLabel.textContent = this.config.settings.useHarness ? 'Full' : 'Simple';
         }
     }
 
     private updateHarnessVisibility(): void {
-        const enabled = this.config.settings.useHarness;
-        if (this.cwdRow) this.cwdRow.style.display = enabled ? '' : 'none';
-        if (this.skillSection) this.skillSection.style.display = enabled ? '' : 'none';
+        const fullMode = this.config.settings.useHarness;
+        // Working dir only relevant in Full mode
+        if (this.cwdRow) this.cwdRow.style.display = fullMode ? '' : 'none';
+        // Skills are always visible — they affect system prompt in both modes
     }
 
     // ── Skill management ─────────────────────────────────────────────────────

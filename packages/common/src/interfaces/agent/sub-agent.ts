@@ -54,6 +54,16 @@ export interface SubAgentTask {
     connectionId?: string;
     /** 工作目录（继承自主代理，用于工具执行） */
     cwd?: string;
+    // ── Mission extensions ───────────────────────────────────
+    /** Override default sub-agent system prompt (used by delegate_agent with AgentDefinition) */
+    systemPrompt?: string;
+    /** Override model name (used by delegate_agent with AgentDefinition) */
+    modelName?: string;
+    /**
+     * VFS paths of reference files (journal, summaries) appended to the system prompt.
+     * Sub-agent reads these at its discretion for mission context.
+     */
+    contextFiles?: string[];
 }
 
 /**

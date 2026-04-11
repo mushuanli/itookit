@@ -107,6 +107,21 @@ export type {
 export { VFSAgentService } from './services/vfs-agent-service';
 
 // ============================================
+// Mission Orchestration
+// ============================================
+
+export {
+    TodoStateManager,
+    ResultPersistenceService,
+    MissionScheduler,
+    MissionService,
+} from './mission';
+export type {
+    MissionSchedulerOptions,
+    MissionServiceOptions,
+} from './mission';
+
+// ============================================
 // 工具
 // ============================================
 
