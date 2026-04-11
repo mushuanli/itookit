@@ -83,7 +83,7 @@ export class ToolDeviceDriver implements IDeviceDriver, IToolService {
             };
         }
 
-        const cwd = request.cwd ?? process.cwd();
+        const cwd = request.cwd ?? (typeof process !== 'undefined' ? process.cwd() : '/');
         const timeoutMs = request.timeoutMs ?? entry.meta.timeoutMs;
         const t0 = Date.now();
 
