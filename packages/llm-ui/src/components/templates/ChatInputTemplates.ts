@@ -24,24 +24,23 @@ export const ChatInputTemplates = {
      */
     renderSettingsPanel(): string {
         return `
-            <div class="llm-input__settings-panel" style="display: none;">
+            <div class="llm-input__settings-panel" style="display: none; overflow-y: auto; max-height: 420px;">
                 <div class="llm-input__settings-header">
                     <span class="llm-input__settings-title">
                         ${this.settingsIcon()}
-                        Chat Settings
+                        Settings
                     </span>
-                    <button class="llm-input__settings-close" title="Close settings">
+                    <button class="llm-input__settings-close" title="Close">
                         ${this.closeIcon()}
                     </button>
                 </div>
 
                 <div class="llm-input__settings-body">
                     ${this.renderModelSetting()}
-                    ${this.renderStreamSetting()}
-                    ${this.renderHistorySetting()}
-                    ${this.renderPresets()}
-                    ${this.renderHarnessSetting()}
+                    ${this.renderContextSetting()}
+                    ${this.renderModeSetting()}
                     ${this.renderSkillsSetting()}
+                    ${this.renderAdvancedSection()}
                 </div>
             </div>
         `;
@@ -55,143 +54,78 @@ export const ChatInputTemplates = {
             <div class="llm-input__setting-row">
                 <label class="llm-input__setting-label">
                     <span class="llm-input__setting-icon">🧠</span>
-                    Model Override
+                    Model
                 </label>
-                <select class="llm-input__model-select" title="Override model for this chat">
-                    <option value="">Use Agent Default</option>
+                <select class="llm-input__model-select" title="Override model for this session">
+                    <option value="">Agent Default</option>
                 </select>
-                <span class="llm-input__setting-hint">Temporarily use a different model</span>
             </div>
         `;
     },
 
     /**
-     * 流式模式设置行
+     * Context 长度设置 — radio-pill 预设取代 slider + 独立预设行
      */
-    renderStreamSetting(): string {
-        return `
-            <div class="llm-input__setting-row">
-                <label class="llm-input__setting-label">
-                    <span class="llm-input__setting-icon">⚡</span>
-                    Stream Mode
-                </label>
-                <div class="llm-input__toggle-wrapper">
-                    <label class="llm-input__toggle">
-                        <input type="checkbox" 
-                               class="llm-input__stream-toggle" 
-                               checked
-                               title="Enable streaming output">
-                        <span class="llm-input__toggle-slider"></span>
-                    </label>
-                    <span class="llm-input__toggle-label">Enabled</span>
-                </div>
-                <span class="llm-input__setting-hint">Show response as it generates</span>
-            </div>
-        `;
-    },
-
-    /**
-     * 历史上下文设置行
-     */
-    renderHistorySetting(): string {
+    renderContextSetting(): string {
         return `
             <div class="llm-input__setting-row">
                 <label class="llm-input__setting-label">
                     <span class="llm-input__setting-icon">📜</span>
-                    History Context
-                    <span class="llm-input__history-value">Unlimited</span>
+                    Context
                 </label>
-                <div class="llm-input__slider-wrapper">
-                    <input type="range" 
-                           class="llm-input__history-slider" 
-                           min="-1" 
-                           max="50" 
-                           value="-1"
-                           title="Number of messages to include">
-                    <div class="llm-input__slider-labels">
-                        <span>None</span>
-                        <span>Unlimited</span>
-                    </div>
+                <div class="llm-input__preset-buttons" role="group" aria-label="Context length">
+                    <button class="llm-input__preset-btn" data-history="0"  title="No history — fresh start">Fresh</button>
+                    <button class="llm-input__preset-btn" data-history="5"  title="Last 5 messages">Short</button>
+                    <button class="llm-input__preset-btn" data-history="20" title="Last 20 messages">Long</button>
+                    <button class="llm-input__preset-btn active" data-history="-1" title="Full history">All</button>
                 </div>
-                <span class="llm-input__setting-hint">How many previous messages to send</span>
             </div>
+            <input type="range" class="llm-input__history-slider" min="-1" max="50" value="-1"
+                   style="display:none" aria-hidden="true">
         `;
     },
 
     /**
-     * 快速预设按钮
-     */
-    renderPresets(): string {
-        return `
-            <div class="llm-input__setting-row llm-input__presets">
-                <span class="llm-input__setting-label">Quick presets:</span>
-                <div class="llm-input__preset-buttons">
-                    <button class="llm-input__preset-btn" data-history="0" title="No history context">Fresh Start</button>
-                    <button class="llm-input__preset-btn" data-history="5" title="Last 5 messages">Short (5)</button>
-                    <button class="llm-input__preset-btn" data-history="20" title="Last 20 messages">Medium (20)</button>
-                    <button class="llm-input__preset-btn active" data-history="-1" title="All messages">Full</button>
-                </div>
-            </div>
-        `;
-    },
-
-    /**
-     * Agent Mode（Harness）设置行
+     * Mode 切换（Simple = 单轮 LLM / Full = 多轮 Agent Loop with tools）
      *
-     * 开启后消息通过 AgentLoopExecutor 执行：
-     * 支持多轮工具调用、上下文压缩、反压验证。
+     * 取代旧的 "harness toggle" — 使用用户可理解的语言。
+     * Simple 是默认模式；Full 开启 AgentLoopExecutor。
      */
-    renderHarnessSetting(): string {
+    renderModeSetting(): string {
         return `
             <div class="llm-input__setting-row llm-input__harness-section">
-                <div class="llm-input__setting-divider">Agent Mode</div>
-
-                <label class="llm-input__setting-label">
-                    <span class="llm-input__setting-icon">🤖</span>
-                    Agent Loop
+                <label class="llm-input__toggle" title="Enable multi-turn agent loop with file tools">
+                    <input type="checkbox" class="llm-input__harness-toggle">
+                    <span class="llm-input__toggle-slider"></span>
                 </label>
-                <div class="llm-input__toggle-wrapper">
-                    <label class="llm-input__toggle">
-                        <input type="checkbox"
-                               class="llm-input__harness-toggle"
-                               title="Enable multi-turn agent loop with tools">
-                        <span class="llm-input__toggle-slider"></span>
-                    </label>
-                    <span class="llm-input__harness-toggle-label">Disabled</span>
-                </div>
-                <span class="llm-input__setting-hint">
-                    Multi-turn loop with file tools, context compression and back-pressure validation
-                </span>
+                <span style="margin-left:8px;">Advanced Mode</span>
             </div>
 
             <div class="llm-input__setting-row llm-input__cwd-row" style="display:none">
                 <label class="llm-input__setting-label">
                     <span class="llm-input__setting-icon">📁</span>
-                    Working Dir
+                    Working dir
                 </label>
                 <input type="text"
                        class="llm-input__cwd-input"
-                       placeholder="Default (process cwd)"
-                       title="Root directory for file tools (file_read, file_write, shell_exec, etc.)">
-                <span class="llm-input__setting-hint">
-                    Directory accessible to file and shell tools
-                </span>
+                       placeholder="Default"
+                       title="Root directory for file and shell tools">
             </div>
         `;
     },
 
     /**
-     * Skill 选择面板（harness 模式下可见）
+     * Skills 面板 — 始终可见（影响 system prompt，与 Mode 无关）
      *
-     * 每个 Skill 是一组工具 + 系统提示词，按需加载到当前会话。
+     * 每个 Skill 以 toggle 开关控制当前会话是否启用。
      */
     renderSkillsSetting(): string {
         return `
-            <div class="llm-input__skill-section" style="display:none">
-                <div class="llm-input__setting-divider">
-                    Skills
-                    <button class="llm-input__skills-refresh" title="Refresh skill list">↺</button>
-                </div>
+            <div class="llm-input__setting-divider">
+                Skills
+                <button class="llm-input__skills-refresh" title="Refresh">↺</button>
+            </div>
+            <div class="llm-input__skill-section">
                 <div class="llm-input__skills-list">
                     <span class="llm-input__skills-empty">No skills available</span>
                 </div>
@@ -200,30 +134,43 @@ export const ChatInputTemplates = {
     },
 
     /**
-     * 渲染单个 Skill 条目
+     * 渲染单个 Skill 条目 — toggle switch 样式
      */
     renderSkillItem(skill: { id: string; name: string; description: string; loaded: boolean; toolCount: number; icon?: string }): string {
         const icon = skill.icon ? escapeHTML(skill.icon) : '⚡';
-        // Compact single-row: [icon] name · desc    [On / Off]
-        const btn = skill.loaded
-            ? `<button class="llm-input__skill-btn llm-input__skill-btn--unload" data-skill="${escapeHTML(skill.id)}" title="Unload skill">On</button>`
-            : `<button class="llm-input__skill-btn llm-input__skill-btn--load"   data-skill="${escapeHTML(skill.id)}" title="Load skill">Off</button>`;
-
-        const descPart = skill.description
-            ? `<span class="llm-input__skill-sep" aria-hidden="true">·</span>
-               <span class="llm-input__skill-desc">${escapeHTML(skill.description)}</span>`
-            : '';
+        const checked = skill.loaded ? 'checked' : '';
+        const btnClass = skill.loaded ? 'llm-input__skill-btn--unload' : 'llm-input__skill-btn--load';
+        const desc = skill.description ? `: <span class="llm-input__skill-desc">${escapeHTML(skill.description)}</span>` : '';
 
         return `
             <div class="llm-input__skill-item${skill.loaded ? ' llm-input__skill-item--loaded' : ''}"
                  data-skill-id="${escapeHTML(skill.id)}">
+                <label class="llm-input__toggle llm-input__skill-toggle" title="${skill.loaded ? 'Disable skill' : 'Enable skill'}">
+                    <input type="checkbox" class="llm-input__skill-btn ${btnClass}"
+                           data-skill="${escapeHTML(skill.id)}" ${checked}>
+                    <span class="llm-input__toggle-slider"></span>
+                </label>
                 <span class="llm-input__skill-icon">${icon}</span>
-                <div class="llm-input__skill-info">
-                    <span class="llm-input__skill-name">${escapeHTML(skill.name)}</span>
-                    ${descPart}
-                </div>
-                ${btn}
+                <span class="llm-input__skill-name">${escapeHTML(skill.name)}</span>${desc}
             </div>
+        `;
+    },
+
+    /**
+     * Advanced 折叠区 — 放置用户极少修改的选项（Streaming）
+     */
+    renderAdvancedSection(): string {
+        return `
+            <details class="llm-input__advanced">
+                <summary class="llm-input__setting-divider llm-input__advanced-toggle">Advanced</summary>
+                <div class="llm-input__setting-row">
+                    <label class="llm-input__toggle" title="Stream response as it generates">
+                        <input type="checkbox" class="llm-input__stream-toggle" checked>
+                        <span class="llm-input__toggle-slider"></span>
+                    </label>
+                    <span style="margin-left:8px;">Streaming</span>
+                </div>
+            </details>
         `;
     },
 
