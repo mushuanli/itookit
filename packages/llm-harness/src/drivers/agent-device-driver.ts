@@ -21,15 +21,21 @@ import type {
     AgentBudgetLimits,
     AgentLoopConfig,
     DeviceContext,
+    IAgentLookup,
+    IResultPersistenceService,
 } from '@itookit/common';
 import { AgentLoopExecutor } from '../executor/agent-loop-executor';
 import { SubAgentRouter } from '../executor/sub-agent-router';
 import { loadSkillMeta, loadSkillDefinition, createLoadSkillHandler } from '../tools/load-skill';
 import { delegateTaskMeta, delegateTaskDefinition, createDelegateTaskHandler } from '../tools/delegate-task';
+import { delegateAgentMeta, delegateAgentDefinition, createDelegateAgentHandler } from '../tools/delegate-agent';
+import { writeResultMeta, writeResultDefinition, createWriteResultHandler } from '../tools/write-result';
+import { humanInputMeta, humanInputDefinition, createHumanInputHandler } from '../tools/human-input';
 import { TTYSessionManager } from '../tty/session-manager';
 import { shellSessionMeta, shellSessionDefinition, createShellSessionHandler } from '../tools/shell-session';
 import { ttyWriteMeta, ttyWriteDefinition, createTtyWriteHandler } from '../tools/tty-write';
 import { ttyCloseMeta, ttyCloseDefinition, createTtyCloseHandler } from '../tools/tty-close';
+import type { HITLQueue } from '../services/hitl-queue';
 
 interface CostModel {
     perInputToken: number;
@@ -71,6 +77,11 @@ export class AgentDeviceDriver implements IDeviceDriver, IAgentRuntimeConfig {
     private ttyDriver: ITTYDriver | null = null;
     private ttyManager: TTYSessionManager = new TTYSessionManager();
 
+    // Mission optional services
+    private agentLookup: IAgentLookup | null = null;
+    private resultPersistence: IResultPersistenceService | null = null;
+    private hitlQueue: HITLQueue | null = null;
+
     private modelRoles: AgentModelRoles = { primary: '' };
     private budgetLimits: AgentBudgetLimits = { ...DEFAULT_BUDGET };
     private loopConfig: AgentLoopConfig = { ...DEFAULT_LOOP_CONFIG };
@@ -89,10 +100,23 @@ export class AgentDeviceDriver implements IDeviceDriver, IAgentRuntimeConfig {
         this.ttyDriver = driver;
     }
 
-    setServices(services: { llm: ILLMService; tool: IToolService; skill: ISkillService }): void {
+    setServices(services: {
+        llm: ILLMService;
+        tool: IToolService;
+        skill: ISkillService;
+        /** Optional: enables delegate_agent tool */
+        agentLookup?: IAgentLookup;
+        /** Optional: enables write_result tool */
+        resultPersistence?: IResultPersistenceService;
+        /** Optional: enables human_input tool */
+        hitlQueue?: HITLQueue;
+    }): void {
         this.llm = services.llm;
         this.toolService = services.tool;
         this.skillService = services.skill;
+        this.agentLookup = services.agentLookup ?? null;
+        this.resultPersistence = services.resultPersistence ?? null;
+        this.hitlQueue = services.hitlQueue ?? null;
         // Give SkillDeviceDriver access to ToolService so HTTP skills can register their tools on load.
         if ('setToolService' in services.skill && typeof (services.skill as Record<string, unknown>)['setToolService'] === 'function') {
             (services.skill as { setToolService: (t: IToolService) => void }).setToolService(services.tool);
@@ -216,6 +240,29 @@ export class AgentDeviceDriver implements IDeviceDriver, IAgentRuntimeConfig {
 
         this.toolService.registerTool(loadSkillMeta, loadSkillDefinition, createLoadSkillHandler(this.skillService));
         this.toolService.registerTool(delegateTaskMeta, delegateTaskDefinition, createDelegateTaskHandler(this.router));
+
+        // Mission tools — registered only when optional services are provided
+        if (this.agentLookup) {
+            this.toolService.registerTool(
+                delegateAgentMeta,
+                delegateAgentDefinition,
+                createDelegateAgentHandler(this.router, this.agentLookup),
+            );
+        }
+        if (this.resultPersistence) {
+            this.toolService.registerTool(
+                writeResultMeta,
+                writeResultDefinition,
+                createWriteResultHandler(this.resultPersistence),
+            );
+        }
+        if (this.hitlQueue) {
+            this.toolService.registerTool(
+                humanInputMeta,
+                humanInputDefinition,
+                createHumanInputHandler(this.hitlQueue),
+            );
+        }
 
         // TTY tools — only registered when a driver is provided.
         // The onEvent callback threads agent:tty:* events through to the executor's emit.

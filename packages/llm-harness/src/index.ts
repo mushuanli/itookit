@@ -12,6 +12,12 @@ export { SubAgentRouter } from './executor/sub-agent-router';
 // ── Built-in tools ──
 export { BUILTIN_TOOLS, createLoadSkillHandler, createDelegateTaskHandler } from './tools/index';
 export type { BuiltinToolEntry } from './tools/index';
+export { createDelegateAgentHandler, delegateAgentMeta, delegateAgentDefinition } from './tools/delegate-agent';
+export { createWriteResultHandler, writeResultMeta, writeResultDefinition } from './tools/write-result';
+export { createHumanInputHandler, humanInputMeta, humanInputDefinition } from './tools/human-input';
+
+// ── Mission services ──
+export { HITLQueue } from './services/hitl-queue';
 
 // ── Device drivers ──
 export { ToolDeviceDriver } from './drivers/tool-device-driver';
