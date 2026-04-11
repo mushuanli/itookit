@@ -1,7 +1,8 @@
 import { MemoryManager } from '@itookit/memory-manager';
 import { FileTypeDefinition } from '@itookit/vfs-ui';
 import { NavigationRequest, NAVIGATION_EVENTS, EditorFactory, MenuItem } from '@itookit/common';
-import type { LLMSkill, SkillDefinition, SkillToolBinding, ToolVFSContext, IVFSManager } from '@itookit/common';
+import type { LLMSkill, SkillDefinition, SkillToolBinding, ToolVFSContext } from '@itookit/common';
+import type { IVFSManager } from '@itookit/vfslib';
 import { createVFS } from '@itookit/vfslib';
 import { createSettingsModule, createSettingsFactory } from '@itookit/app-settings';
 import {
@@ -64,27 +65,66 @@ function waitForEditorMount(container: HTMLElement): Promise<void> {
 // for workspace-specific access the tool cwd should be set to the module path.
 
 function createVFSToolContext(vfsManager: IVFSManager): ToolVFSContext {
-    // Use the global VFS manager's search and I/O to fulfil tool requests.
+    /**
+     * Resolve a user-facing path to a VFS node.
+     *
+     * Supported input formats (all used by MentionPlugin / resolveAtPath):
+     *   ./t2.chat          → filename search
+     *   t2.chat            → filename search
+     *   /absolute/path     → filename = last segment, search by name
+     *
+     * The search checks all non-system modules (chats, minds, etc.).
+     * Returns { moduleId, nodePath, nodeId } on success.
+     */
+    async function resolveToNode(path: string) {
+        // Normalise: strip leading ./ and extract the basename for name-based search.
+        const clean    = path.replace(/^\.\//, '');
+        const filename = clean.split('/').pop() ?? clean;
+
+        const result = await vfsManager.search({
+            name:  { exact: filename },
+            type:  'file',
+            limit: 20,
+        });
+
+        // Prefer an exact path match; fall back to the first result.
+        const node = result.nodes.find(
+            (n) => n.path === `/${clean}` || n.path === `/${filename}` || n.name === filename,
+        ) ?? result.nodes[0];
+
+        if (!node || !node.moduleId) {
+            throw new Error(`VFS file not found: ${path}`);
+        }
+        return node;
+    }
+
     return {
         async readFile(path: string): Promise<string> {
-            const nodeId = await vfsManager.resolvePath(path);
-            if (!nodeId) throw new Error(`VFS file not found: ${path}`);
-            const raw = await vfsManager.readContent(nodeId);
+            const node = await resolveToNode(path);
+            // vfs.read(moduleName, moduleRelativePath) → FileContent
+            const raw = await vfsManager.read(node.moduleId!, node.path);
             return typeof raw === 'string' ? raw : new TextDecoder().decode(raw as ArrayBuffer);
         },
 
         async writeFile(path: string, content: string): Promise<void> {
-            await vfsManager.write(path, content);
+            // Find the file to know its module; write via the module engine.
+            const clean = path.replace(/^\.\//, '');
+            const filename = clean.split('/').pop() ?? clean;
+            const result = await vfsManager.search({ name: { exact: filename }, type: 'file', limit: 5 });
+            if (result.nodes.length > 0 && result.nodes[0].moduleId) {
+                const node = result.nodes[0];
+                await vfsManager.write(node.moduleId!, node.path, content);
+            } else {
+                throw new Error(`VFS write failed: cannot locate module for "${path}". File must already exist.`);
+            }
         },
 
         async listFiles(dir?: string): Promise<string[]> {
-            const query = dir ? `type:file` : `type:file`;
-            const results = await vfsManager.search({ text: '', filters: query ? [query] : [] }).catch(() => []);
-            // Return relative paths within the requested dir
-            return results
-                .map((n) => n.path ?? '')
-                .filter((p) => !dir || p.startsWith(dir))
-                .map((p) => dir ? p.slice(dir.length).replace(/^\//, '') : p);
+            const result = await vfsManager.search({ type: 'file', limit: 500 });
+            return result.nodes
+                .filter((n) => n.type === 'file')
+                .map((n) => n.path ?? n.name)
+                .filter((p) => !dir || p.includes(dir));
         },
     };
 }
