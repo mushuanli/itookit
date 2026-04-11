@@ -86,22 +86,29 @@ export class SkillsEngine implements ISessionEngine {
      */
     async writeContent(id: string, content: string | ArrayBuffer): Promise<void> {
         const text = typeof content === 'string' ? content : new TextDecoder().decode(content as ArrayBuffer);
-        if (!text.trim()) return;
+        console.log('[skill:engine] writeContent id:', id, 'text length:', text.length, 'preview:', text.slice(0, 80));
+        if (!text.trim()) { console.warn('[skill:engine] writeContent: empty content, skipping'); return; }
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         let incoming: any;
-        try { incoming = yaml.load(text); } catch { return; }
+        try { incoming = yaml.load(text); } catch (e) { console.error('[skill:engine] writeContent: yaml.load failed', e); return; }
         // Ignore non-object content (e.g. readContent() returning just the skill id as a string).
-        if (!incoming || typeof incoming !== 'object') return;
+        if (!incoming || typeof incoming !== 'object') {
+            console.warn('[skill:engine] writeContent: parsed value is not an object:', typeof incoming, incoming);
+            return;
+        }
+        console.log('[skill:engine] writeContent: parsed skill id:', incoming.id, 'name:', incoming.name);
 
         const skills = await this.service.getSkills();
         const existing = skills.find((s) => s.id === id);
 
         // Prefer the id from YAML (canonical) over the placeholder id derived from filename.
         const targetId = (typeof incoming.id === 'string' && incoming.id.trim()) ? incoming.id.trim() : id;
+        console.log('[skill:engine] writeContent: placeholder id:', id, '→ target id:', targetId);
 
         const updated: LLMSkill = { ...existing, ...incoming, id: targetId, modifiedAt: Date.now() };
         await this.service.saveSkill(updated);
+        console.log('[skill:engine] writeContent: saved ok, targetId:', targetId);
 
         if (targetId !== id) {
             // Remove the filename-derived placeholder node.
@@ -117,6 +124,7 @@ export class SkillsEngine implements ISessionEngine {
         // Strip file extensions so drag-dropped "essay-review.skill.yaml" becomes "essay-review"
         const name = cleanName(rawName);
         const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || `skill-${Date.now()}`;
+        console.log('[skill:engine] createFile raw:', rawName, '→ name:', name, 'id:', id);
         const now = Date.now();
         const skill: LLMSkill = { id, name, type: 'prompt', enabled: false, createdAt: now, modifiedAt: now };
         await this.service.saveSkill(skill);
