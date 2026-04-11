@@ -829,7 +829,8 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
         fileInput.addEventListener('change', async () => {
             const files = Array.from(fileInput.files ?? []);
             document.body.removeChild(fileInput);
-            if (files.length === 0) return;
+            console.log('[skill:import] change fired, files:', files.map(f => f.name));
+            if (files.length === 0) { console.warn('[skill:import] no files selected'); return; }
 
             const results = await Promise.allSettled(
                 files.map(f => f.text()),
@@ -841,16 +842,20 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
             for (let i = 0; i < results.length; i++) {
                 const r = results[i];
                 if (r.status === 'rejected') {
+                    console.error('[skill:import] file read rejected:', files[i].name, r.reason);
                     errors.push(t('skill.import.readError', { filename: files[i].name }));
                     continue;
                 }
+                console.log('[skill:import] file read ok:', files[i].name, 'length:', r.value.length, 'preview:', r.value.slice(0, 120));
                 try {
                     const name = files[i].name;
                     const isYaml = name.endsWith('.yaml') || name.endsWith('.yml');
                     const data = isYaml ? yaml.load(r.value) : JSON.parse(r.value);
+                    console.log('[skill:import] parsed data:', data);
                     const arr: LLMSkill[] = Array.isArray(data) ? data as LLMSkill[] : [data as LLMSkill];
                     skills.push(...arr);
-                } catch {
+                } catch (e) {
+                    console.error('[skill:import] parse error:', files[i].name, e);
                     errors.push(`${files[i].name}: ${t('skill.toast.invalidJson')}`);
                 }
             }
@@ -863,6 +868,7 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
 
             // Suppress onChange-triggered re-renders while batch-saving to avoid
             // showing partial state (e.g. only 1 of 3 skills) between saves.
+            console.log('[skill:import] skills to save:', skills.length, skills.map(s => ({ id: s.id, name: s.name })));
             this._importing = true;
             // Snapshot existing IDs to detect duplicates across the whole import batch.
             const existingIds = new Set((await this.service.getSkills()).map(s => s.id));
@@ -883,10 +889,13 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
                 existingIds.add(baseId); // prevent duplicates within this import batch
                 item.enabled = item.enabled ?? false;
                 try {
+                    console.log('[skill:import] saving skill:', item.id, item.name);
                     await this.service.saveSkill(item);
+                    console.log('[skill:import] saved ok:', item.id);
                     lastId = item.id;
                     savedCount++;
                 } catch (e) {
+                    console.error('[skill:import] saveSkill failed:', item.id, e);
                     errors.push(`${item.name || item.id}: ${e instanceof Error ? e.message : String(e)}`);
                 }
             }
