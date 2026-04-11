@@ -15,6 +15,21 @@ export { MCPSettingsEditor } from './editors/MCPSettingsEditor';
 export { SkillSettingsEditor } from './editors/SkillSettingsEditor';
 
 import type { PromptHistoryService } from '@itookit/llm-engine';
+import type { IAgentManagementService } from '@itookit/common';
+import { SkillSettingsEditor } from './editors/SkillSettingsEditor';
+
+/**
+ * EditorFactory for the Skills workspace.
+ *
+ * VFSUIShell calls factory(container, options) when a skill node is selected.
+ * options.initialContent = skill YAML from SkillsEngine.readContent(skillId).
+ * The factory creates a SkillSettingsEditor in form-only mode.
+ */
+export function createSkillsEditorFactory(agentService: IAgentManagementService): EditorFactory {
+    return async (container: HTMLElement, options: EditorOptions = {}): Promise<import('@itookit/common').IEditor> => {
+        return SkillSettingsEditor.createFormOnly(container, agentService, options);
+    };
+}
 
 export interface LLMFactoryOptions {
     agentService: VFSAgentService;

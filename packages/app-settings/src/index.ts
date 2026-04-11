@@ -6,6 +6,7 @@ import { SettingsEngine } from './engine/SettingsEngine';
 
 export * from './types/types';
 export { createSettingsFactory } from './factories/settingsFactory';
+export { SkillsEngine } from './engine/SkillsEngine';
 
 /**
  * Settings 模块初始化。

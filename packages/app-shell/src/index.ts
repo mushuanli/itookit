@@ -1,5 +1,5 @@
 export { initApp } from './bootstrap';
-export { WS_SETTINGS, WS_CHAT, WS_AGENTS, WS_MINDS, WS_ANKI, WS_PROJECTS, WS_EMAILS, WS_PRIVATE } from './workspaces/index';
+export { WS_SETTINGS, WS_CHAT, WS_AGENTS, WS_MINDS, WS_ANKI, WS_PROJECTS, WS_EMAILS, WS_PRIVATE, WS_SKILLS } from './workspaces/index';
 export type { AppOptions, AppHandle, WorkspaceConfig, WorkspaceType, AdditionalMount } from './types';
 export { FILE_REGISTRY } from './config/file-registry';
 export type { AppFileTypeConfig, EditorTypeKey } from './config/file-registry';

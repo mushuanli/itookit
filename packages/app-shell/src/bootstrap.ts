@@ -14,6 +14,8 @@ import { initializeLLMEngine, LLMSessionEngine, chatFileParser } from '@itookit/
 import { LLMDeviceDriver } from '@itookit/device-llm';
 import { setKernelDeviceManager } from '@itookit/llm-kernel';
 import { createHarness, type HarnessInstance } from '@itookit/llm-harness';
+import { SkillsEngine } from '@itookit/app-settings';
+import { createSkillsEditorFactory } from '@itookit/llm-ui';
 
 import { AppOptions, AppHandle, WorkspaceConfig } from './types';
 import {
@@ -199,6 +201,10 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     const llmFactory      = createLLMFactory(agentService);
     const agentFactory    = createAgentEditorFactory(agentService);
 
+    // Skills workspace: VFSUIShell list (SkillsEngine) + form editor (SkillSettingsEditor)
+    const skillsEngine  = new SkillsEngine(agentService);
+    const skillsFactory = createSkillsEditorFactory(agentService);
+
     // ── 4. Workspace strategies ────────────────────────────────────────────────
 
     const strategies: Record<string, WorkspaceStrategy> = {
@@ -206,6 +212,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
         agent:    new StandardWorkspaceStrategy(vfs),
         settings: new SettingsWorkspaceStrategy(settingsFactory, settingsModule.engine),
         chat:     new ChatWorkspaceStrategy(llmFactory, sessionEngine),
+        skills:   new SettingsWorkspaceStrategy(skillsFactory, skillsEngine),  // reuse the same strategy pattern
     };
 
     const editorFactoryMap: Record<EditorTypeKey, EditorFactory | undefined> = {

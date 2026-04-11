@@ -1,6 +1,6 @@
 import type { IStorageBackend, IVFSManager, MountOptions } from '@itookit/common';
 
-export type WorkspaceType = 'standard' | 'settings' | 'agent' | 'chat';
+export type WorkspaceType = 'standard' | 'settings' | 'agent' | 'chat' | 'skills';
 
 export interface WorkspaceConfig {
     elementId: string;

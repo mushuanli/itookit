@@ -26,11 +26,84 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
     private _importing = false;
     /** IDs checked for multi-select batch actions. */
     private _checkedIds = new Set<string>();
+    /**
+     * Form-only mode: renders just the detail panel (no sidebar).
+     * Used when Skills is a standalone VFSUIShell workspace — the sidebar is
+     * provided by VFSUIShell itself; this editor handles only the right panel.
+     */
+    private _formOnly = false;
+
+    /**
+     * Factory for form-only mode (used by the Skills workspace EditorFactory).
+     * VFSUIShell calls init(container, yamlContent) where yamlContent comes from
+     * SkillsEngine.readContent(skillId).
+     */
+    static createFormOnly(
+        container: HTMLElement,
+        service: IAgentManagementService,
+        options?: import('@itookit/common').EditorOptions,
+    ): SkillSettingsEditor {
+        const editor = new SkillSettingsEditor(container, service, options ?? {});
+        editor._formOnly = true;
+        return editor;
+    }
+
+    // ── IEditor: init override (sets selectedId from YAML content in form-only mode) ──
+
+    async init(container: HTMLElement, content?: string): Promise<void> {
+        if (this._formOnly && content?.trim()) {
+            try {
+                const skill = yaml.load(content) as { id?: string };
+                if (skill?.id) this.selectedId = skill.id;
+            } catch { /* ignore malformed YAML */ }
+        }
+        await super.init(container, content);
+    }
+
+    // ── IEditor: getText() — returns skill YAML for auto-save by editor-connector ──
+
+    getText(): string {
+        if (!this._formOnly || !this.selectedId) return '';
+        const type = this.val('type') as LLMSkillType;
+        let parameters: Record<string, unknown> | undefined;
+        const rawParams = this.val('parameters').trim();
+        if (rawParams) { try { parameters = JSON.parse(rawParams); } catch { /* invalid */ } }
+
+        const authVal = this.val('auth-header').trim();
+        const rawHdrs = this.val('headers').trim();
+        let headers: Record<string, string> | undefined;
+        if (rawHdrs) { try { headers = JSON.parse(rawHdrs); } catch { /* invalid */ } }
+        if (authVal) headers = { ...(headers ?? {}), Authorization: authVal };
+
+        const skill: LLMSkill = {
+            id:           this.selectedId,
+            name:         this.val('header-name') || this.val('name') || this.selectedId,
+            icon:         this.val('icon') || undefined,
+            description:  this.val('description') || undefined,
+            type,
+            enabled:      this.chk('enabled'),
+            instructions: type === 'prompt' ? (this.val('instructions') || undefined) : undefined,
+            command:      type === 'shell'  ? (this.val('command')      || undefined) : undefined,
+            mcpServerId:  type === 'mcp'    ? (this.val('mcpServerId')  || undefined) : undefined,
+            mcpToolName:  type === 'mcp'    ? (this.val('mcpToolName')  || undefined) : undefined,
+            endpoint:     type === 'http'   ? (this.val('endpoint')     || undefined) : undefined,
+            method:       type === 'http'   ? ((this.val('method') || 'POST') as LLMSkill['method']) : undefined,
+            headers:      type === 'http'   ? headers : undefined,
+            parameters:   (type !== 'prompt' && type !== 'mcp') ? parameters : undefined,
+            modifiedAt:   Date.now(),
+        };
+        return yaml.dump(skill, { lineWidth: -1, noRefs: true });
+    }
 
     async render() {
         // During batch import, each saveSkill triggers notify() → render().
         // Suppress those intermediate renders; the import loop calls render() once at the end.
         if (this._importing) return;
+
+        // Form-only mode: no sidebar — render just the detail panel for selectedId.
+        if (this._formOnly) {
+            return this._renderFormOnly();
+        }
 
         const [skills, mcpServers] = await Promise.all([
             this.service.getSkills(),
@@ -879,6 +952,28 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
                 await this.render();
             },
         }).show();
+    }
+
+    // ─── Form-only mode helpers ──────────────────────────────────────────────
+
+    private async _renderFormOnly() {
+        if (!this.selectedId) {
+            this.container.innerHTML = `
+                <div style="display:flex;height:100%;align-items:center;justify-content:center;
+                            flex-direction:column;gap:.75rem;color:var(--st-text-tertiary)">
+                    <span style="font-size:2rem">⚡</span>
+                    <span style="font-size:.9375rem">Select a skill to edit</span>
+                </div>`;
+            return;
+        }
+        const [skills, mcpServers] = await Promise.all([
+            this.service.getSkills(),
+            this.service.getMCPServers?.() ?? Promise.resolve([]),
+        ]);
+        const skill = skills.find((s) => s.id === this.selectedId);
+        if (!skill) { this.container.innerHTML = ''; return; }
+        this.container.innerHTML = this.renderDetail(skill, mcpServers);
+        this.bindEvents(mcpServers); // bindEvents gracefully skips missing sidebar elements
     }
 
     private async exportAll() {
