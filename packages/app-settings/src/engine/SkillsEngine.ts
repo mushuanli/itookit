@@ -59,15 +59,18 @@ export class SkillsEngine implements ISessionEngine {
      * Returns the skill's human-readable NAME (not full YAML).
      *
      * Two consumers:
-     *  1. NodeMapper — uses it as the list-item summary (the "brief" below the ID).
+     *  1. NodeMapper — uses it as the list-item summary (the brief below the name).
+     *     Returns s.id so the brief shows the skill ID (essay-review-cn).
      *  2. editor-connector — passes it as options.initialContent to the factory,
      *     but SkillSettingsEditor formOnly mode uses options.nodeId instead, so
      *     this content is effectively ignored by the form editor.
      */
     async readContent(id: string): Promise<string> {
-        const skills = await this.service.getSkills();
-        const s = skills.find((x) => x.id === id);
-        return s?.name ?? '';
+        // Return the skill ID so NodeMapper uses it as the summary line.
+        // Combined with node.name = s.name as primary, the list shows:
+        //   [⚡] 中学生作文审查   ← name  (primary, from metadata.title)
+        //        essay-review-cn  ← id    (summary, from this content)
+        return id;
     }
 
     /** Called by editor-connector on blur — receives full skill YAML from getText(). */
@@ -155,7 +158,7 @@ export class SkillsEngine implements ISessionEngine {
         const node = {
             id:         s.id,
             parentId:   null,
-            name:       s.id,            // ID as "filename" (no spaces, no extension)
+            name:       s.name,          // human-readable name as primary label
             type:       'file',
             icon:       s.icon ?? '⚡',
             path:       `/${s.id}`,
@@ -164,18 +167,19 @@ export class SkillsEngine implements ISessionEngine {
             modifiedAt: s.modifiedAt ?? Date.now(),
             moduleId:   'skills',
             metadata:   {
-                title:        s.id,   // primary label = ID
+                title:        s.name,  // primary display: 中学生作文审查
                 tags:         s.enabled ? [] : ['disabled'],
                 lastModified: s.modifiedAt ?? Date.now(),
                 custom:       { skillType: s.type, enabled: s.enabled },
             },
         } as EngineNode;
 
-        // Attach skill name as node.content so NodeMapper uses it as the summary line.
-        // NodeMapper: if (!isDir && node.content) { parsed.summary = parseFileInfo(content).summary }
-        // parseFileInfo(s.name) treats the name as plain text → first line = s.name ✓
+        // Attach skill ID as node.content so NodeMapper uses it as the summary line.
+        // With showSummary=true, the list shows:
+        //   [⚡] 中学生作文审查   ← name (primary)
+        //        essay-review-cn  ← id  (summary / brief)
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (node as any).content = s.name;
+        (node as any).content = s.id;
 
         return node;
     }
