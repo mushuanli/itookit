@@ -20,6 +20,7 @@
 import type {
     IAgentRuntime,
     ISkillService,
+    IToolService,
     AgentTaskRequest,
     AgentTaskResult,
     AgentEventPayloads,
@@ -43,6 +44,7 @@ export interface HarnessAccumulator {
  */
 export class HarnessAdapter {
     private skillService: ISkillService | null = null;
+    private toolService: IToolService | null = null;
 
     constructor(private readonly runtime: IAgentRuntime) {}
 
@@ -59,6 +61,14 @@ export class HarnessAdapter {
     /** 获取 SkillService（harness 未配置时为 null） */
     getSkillService(): ISkillService | null {
         return this.skillService;
+    }
+
+    setToolService(service: IToolService): void {
+        this.toolService = service;
+    }
+
+    getToolService(): IToolService | null {
+        return this.toolService;
     }
 
     /**

@@ -129,7 +129,7 @@ export type {
 // 初始化
 // ============================================
 
-import type { IAgentRuntime, ISkillService } from '@itookit/common';
+import type { IAgentRuntime, ISkillService, IToolService } from '@itookit/common';
 import { IAgentConfigService } from './services/agent-service';
 import { ILLMSessionEngine } from './persistence/types';
 import { initializeKernel, KernelInitOptions } from '@itookit/llm-kernel';
@@ -168,6 +168,15 @@ export interface EngineInitOptions extends KernelInitOptions {
      * 由 @itookit/llm-harness 的 createHarness().skillService 提供。
      */
     harnessSkillService?: ISkillService;
+
+    /**
+     * （可选）Tool 服务实例。
+     *
+     * 注入后 ChatInput 的 `/exec` `/read` `/grep` `/glob` slash 命令可以
+     * 直接调用 harness 内置工具，绕过 LLM 直接执行并在 Modal 中展示结果。
+     * 由 @itookit/llm-harness 的 createHarness().toolService 提供。
+     */
+    harnessToolService?: IToolService;
 }
 
 /**
@@ -203,6 +212,9 @@ export async function initializeLLMEngine(options: EngineInitOptions): Promise<{
         const harnessAdapter = initHarnessAdapter(options.harnessRuntime);
         if (options.harnessSkillService) {
             harnessAdapter.setSkillService(options.harnessSkillService);
+        }
+        if (options.harnessToolService) {
+            harnessAdapter.setToolService(options.harnessToolService);
         }
         sessionManager.setHarnessAdapter(harnessAdapter);
     }
