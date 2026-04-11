@@ -167,6 +167,8 @@ export interface SkillInfo {
     description: string;
     /** 当前会话是否已加载 */
     loaded: boolean;
+    /** Skill 是否已启用（enabled=false 时不出现在 slash 命令列表） */
+    enabled: boolean;
     /** 该 Skill 提供的工具数量 */
     toolCount: number;
     icon?: string;
