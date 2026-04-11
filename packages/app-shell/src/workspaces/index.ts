@@ -108,6 +108,20 @@ export const WS_EMAILS: WorkspaceConfig = {
     aiEnabled: true,
 };
 
+/** Skills workspace — VFSUIShell list backed by SkillsEngine + SkillSettingsEditor (form-only). */
+export const WS_SKILLS: WorkspaceConfig = {
+    elementId:        'skills-workspace',
+    moduleName:       'skills',
+    slug:             'skills',
+    type:             'skills',   // handled by SkillsWorkspaceStrategy in bootstrap.ts
+    title:            'Skills',
+    supportedFileTypes: [],
+    syncEnabled:      false,
+    readOnly:         false,
+    mentionAble:      false,
+    aiEnabled:        false,
+};
+
 export const WS_PRIVATE: WorkspaceConfig = {
     elementId: 'private-workspace',
     moduleName: 'private',

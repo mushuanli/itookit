@@ -76,6 +76,11 @@
                 </a>
             </li>
             <li>
+                <a class="app-nav-btn" data-target="skills-workspace" title="Skills">
+                    <i class="fas fa-bolt"></i>
+                </a>
+            </li>
+            <li>
                 <a class="app-nav-btn" data-target="settings-workspace" title="Settings">
                     <i class="fas fa-cog"></i>
                 </a>
@@ -113,6 +118,9 @@
 
         <!-- (A) Agent Workspace (默认激活) -->
         <div id="agent-workspace" class="workspace-view"></div>
+
+        <!-- Skills Workspace -->
+        <div id="skills-workspace" class="workspace-view"></div>
         <!-- 
            Settings Workspace 
            这是一个特殊的视图，不使用 MemoryManager 文件管理，
