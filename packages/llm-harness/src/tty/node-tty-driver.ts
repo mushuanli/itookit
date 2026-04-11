@@ -2,6 +2,10 @@
 //
 // NodeTTYDriver — spawns child processes with pipe-based bidirectional I/O.
 //
+// Browser safety: node:child_process is pre-loaded via a module-level async
+// IIFE so Vite does not statically bundle it. In browser environments the
+// load fails and spawn() throws a clear "not available" error.
+//
 // Limitations (Phase 1):
 //   supportsPty = false → programs that call isatty() may behave differently
 //   (e.g., disable color output, use unbuffered mode, etc.)
@@ -9,15 +13,30 @@
 // Upgrade path: replace NodeTTYSession internals with node-pty for a real PTY.
 // The ITTYDriver/ITTYSession interface remains unchanged.
 
-import { spawn, type ChildProcess } from 'node:child_process';
 import { generateId } from '@itookit/common';
 import type { ITTYDriver, ITTYSession, ITTYSpawnOptions, ITTYSessionEvents } from '@itookit/common';
+
+// Pre-load spawn asynchronously so the synchronous spawn() method can use it.
+// undefined = still loading, null = unavailable (browser), function = ready.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let _spawnFn: ((...a: any[]) => any) | null | undefined = undefined;
+// eslint-disable-next-line @typescript-eslint/no-floating-promises
+(async () => {
+    try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const cp = await import('node:child_process' as any);
+        _spawnFn = cp.spawn;
+    } catch {
+        _spawnFn = null;
+    }
+})();
 
 // ── NodeTTYSession ────────────────────────────────────────────────────────────
 
 export class NodeTTYSession implements ITTYSession {
     readonly id: string;
     readonly command: string;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     readonly pid: number | undefined;
 
     private _exited = false;
@@ -26,30 +45,22 @@ export class NodeTTYSession implements ITTYSession {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     private handlers: Map<string, Set<(...args: any[]) => void>> = new Map();
 
-    constructor(
-        private readonly proc: ChildProcess,
-        command: string,
-        args: string[],
-    ) {
-        this.id   = `tty_${generateId()}`;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    constructor(private readonly proc: any, command: string, args: string[]) {
+        this.id      = `tty_${generateId()}`;
         this.command = [command, ...args].join(' ');
-        this.pid  = proc.pid;
+        this.pid     = proc.pid;
 
-        // Merge stdout + stderr into the 'data' event stream
-        proc.stdout?.on('data', (chunk: Buffer) => {
-            this.emit('data', chunk.toString());
-        });
-        proc.stderr?.on('data', (chunk: Buffer) => {
-            this.emit('data', chunk.toString());
-        });
+        proc.stdout?.on('data', (chunk: Buffer) => this.emit('data', chunk.toString()));
+        proc.stderr?.on('data', (chunk: Buffer) => this.emit('data', chunk.toString()));
 
-        proc.on('close', (code, signal) => {
+        proc.on('close', (code: number | null, signal: string | null) => {
             this._exited   = true;
             this._exitCode = code;
             this.emit('exit', code, signal);
         });
 
-        proc.on('error', (err) => {
+        proc.on('error', (err: Error) => {
             this._exited = true;
             this.emit('error', err);
         });
@@ -69,7 +80,7 @@ export class NodeTTYSession implements ITTYSession {
     }
 
     kill(signal = 'SIGTERM'): void {
-        if (!this._exited) this.proc.kill(signal as NodeJS.Signals);
+        if (!this._exited) this.proc.kill(signal);
     }
 
     on<E extends keyof ITTYSessionEvents>(event: E, handler: ITTYSessionEvents[E]): () => void {
@@ -93,20 +104,24 @@ export class NodeTTYSession implements ITTYSession {
  * Phase 2: replace with node-pty for real PTY emulation.
  */
 export class NodeTTYDriver implements ITTYDriver {
-    /** Phase 1 uses pipes, not a real PTY. */
     readonly supportsPty = false;
 
     spawn(command: string, args: string[] = [], options: ITTYSpawnOptions = {}): ITTYSession {
-        const proc = spawn(command, args, {
+        if (_spawnFn === undefined) {
+            throw new Error('NodeTTYDriver: child_process is still loading — call spawn() after a short delay');
+        }
+        if (_spawnFn === null) {
+            throw new Error('NodeTTYDriver: not available in browser environments');
+        }
+
+        const proc = _spawnFn(command, args, {
             cwd:   options.cwd ?? process.cwd(),
             env:   { ...process.env, ...options.env },
-            // Connect stdin so we can write; merge stdout/stderr for simplicity
             stdio: ['pipe', 'pipe', 'pipe'],
         });
 
         const session = new NodeTTYSession(proc, command, args);
 
-        // Wire abort signal → kill
         if (options.signal) {
             const onAbort = () => session.kill('SIGTERM');
             options.signal.addEventListener('abort', onAbort, { once: true });
