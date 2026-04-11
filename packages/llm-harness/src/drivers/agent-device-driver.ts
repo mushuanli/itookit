@@ -16,6 +16,7 @@ import type {
     ILLMService,
     IToolService,
     ISkillService,
+    ITTYDriver,
     AgentModelRoles,
     AgentBudgetLimits,
     AgentLoopConfig,
@@ -25,6 +26,10 @@ import { AgentLoopExecutor } from '../executor/agent-loop-executor';
 import { SubAgentRouter } from '../executor/sub-agent-router';
 import { loadSkillMeta, loadSkillDefinition, createLoadSkillHandler } from '../tools/load-skill';
 import { delegateTaskMeta, delegateTaskDefinition, createDelegateTaskHandler } from '../tools/delegate-task';
+import { TTYSessionManager } from '../tty/session-manager';
+import { shellSessionMeta, shellSessionDefinition, createShellSessionHandler } from '../tools/shell-session';
+import { ttyWriteMeta, ttyWriteDefinition, createTtyWriteHandler } from '../tools/tty-write';
+import { ttyCloseMeta, ttyCloseDefinition, createTtyCloseHandler } from '../tools/tty-close';
 
 interface CostModel {
     perInputToken: number;
@@ -63,6 +68,8 @@ export class AgentDeviceDriver implements IDeviceDriver, IAgentRuntimeConfig {
     private llm: ILLMService | null = null;
     private toolService: IToolService | null = null;
     private skillService: ISkillService | null = null;
+    private ttyDriver: ITTYDriver | null = null;
+    private ttyManager: TTYSessionManager = new TTYSessionManager();
 
     private modelRoles: AgentModelRoles = { primary: '' };
     private budgetLimits: AgentBudgetLimits = { ...DEFAULT_BUDGET };
@@ -72,6 +79,15 @@ export class AgentDeviceDriver implements IDeviceDriver, IAgentRuntimeConfig {
     private changeListeners: Array<() => void> = [];
 
     // ── Dependency injection ──
+
+    /**
+     * Inject an optional ITTYDriver to enable interactive shell sessions.
+     * Must be called before setServices().
+     * Without a driver, shell_session / tty_write / tty_close are not registered.
+     */
+    setTTYDriver(driver: ITTYDriver): void {
+        this.ttyDriver = driver;
+    }
 
     setServices(services: { llm: ILLMService; tool: IToolService; skill: ISkillService }): void {
         this.llm = services.llm;
@@ -107,8 +123,9 @@ export class AgentDeviceDriver implements IDeviceDriver, IAgentRuntimeConfig {
 
     async dispose(): Promise<void> {
         this.runtime?.abort();
+        this.ttyManager.abortAll();
         this.runtime = null;
-        this.router = null;
+        this.router  = null;
     }
 
     getRuntime(): IAgentRuntime {
@@ -196,8 +213,48 @@ export class AgentDeviceDriver implements IDeviceDriver, IAgentRuntimeConfig {
     /** (Re-)registers dynamic tools that need live service references. Idempotent. */
     private registerDynamicTools(): void {
         if (!this.toolService || !this.skillService || !this.router) return;
+
         this.toolService.registerTool(loadSkillMeta, loadSkillDefinition, createLoadSkillHandler(this.skillService));
         this.toolService.registerTool(delegateTaskMeta, delegateTaskDefinition, createDelegateTaskHandler(this.router));
+
+        // TTY tools — only registered when a driver is provided.
+        // The onEvent callback threads agent:tty:* events through to the executor's emit.
+        if (this.ttyDriver) {
+            const emitter = this.makeEventEmitter();
+            this.ttyManager = new TTYSessionManager(); // fresh manager per re-wire
+            this.toolService.registerTool(
+                shellSessionMeta,
+                shellSessionDefinition,
+                createShellSessionHandler(this.ttyDriver, this.ttyManager, emitter),
+            );
+            this.toolService.registerTool(
+                ttyWriteMeta,
+                ttyWriteDefinition,
+                createTtyWriteHandler(this.ttyManager, emitter),
+            );
+            this.toolService.registerTool(
+                ttyCloseMeta,
+                ttyCloseDefinition,
+                createTtyCloseHandler(this.ttyManager, emitter),
+            );
+        }
+    }
+
+    /**
+     * Returns an event emitter shim that routes agent:tty:* events through
+     * the AgentLoopExecutor's event system once a runtime exists.
+     */
+    private makeEventEmitter(): (type: string, payload: Record<string, unknown>) => void {
+        return (type, payload) => {
+            // The runtime may not exist yet at registration time — access lazily.
+            const rt = this.runtime;
+            if (!rt) return;
+            // AgentLoopExecutor's emit is private; we expose it via a minimal workaround.
+            // The event types are declared in AgentEventPayloads, so the cast is safe.
+            (rt as unknown as {
+                emit: (e: string, p: unknown) => void
+            }).emit?.(type, payload);
+        };
     }
 
     private ensureRuntime(): AgentLoopExecutor {

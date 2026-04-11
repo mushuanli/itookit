@@ -16,6 +16,7 @@ import type {
     IToolService,
     ISkillService,
     IDeviceDriver,
+    ITTYDriver,
 } from '@itookit/common';
 import { LLMServiceAdapter } from './adapters/llm-service-adapter';
 import { ToolDeviceDriver } from './drivers/tool-device-driver';
@@ -28,6 +29,20 @@ export interface HarnessOptions {
      * Obtain via the VFS device manager: `vfsManager.getDevice('llm')`.
      */
     llmDriver: IDeviceDriver;
+
+    /**
+     * Optional TTY driver for interactive shell sessions.
+     *
+     * When provided, the harness registers shell_session, tty_write, and tty_close tools,
+     * enabling persistent shell sessions with bidirectional I/O.
+     *
+     * @example
+     * ```ts
+     * import { NodeTTYDriver } from '@itookit/llm-harness';
+     * const harness = await createHarness({ llmDriver, ttyDriver: new NodeTTYDriver() });
+     * ```
+     */
+    ttyDriver?: ITTYDriver;
 }
 
 export interface HarnessInstance {
@@ -69,9 +84,16 @@ export async function createHarness(options: HarnessOptions): Promise<HarnessIns
     const skillDriver = new SkillDeviceDriver();
     const agentDriver = new AgentDeviceDriver();
 
+    // Inject optional TTY driver before setServices so registerDynamicTools
+    // can conditionally add shell_session / tty_write / tty_close.
+    if (options.ttyDriver) {
+        agentDriver.setTTYDriver(options.ttyDriver);
+    }
+
     // Inject services. AgentDeviceDriver will:
     //   - create the SubAgentRouter
     //   - register load_skill and delegate_task on toolDriver
+    //   - register TTY tools (if ttyDriver was set)
     agentDriver.setServices({
         llm: llmService,
         tool: toolDriver.getService(),

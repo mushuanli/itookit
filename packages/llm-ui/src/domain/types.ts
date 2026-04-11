@@ -151,6 +151,11 @@ export interface FileSuggestion {
     size?: number;
 }
 
+// ── Skill invocation types ──────────────────────────────────────────────────
+
+// Re-export so Shell layer can reference via domain types
+export type { SkillInvocation } from '../components/input/SkillInvocationParser';
+
 // ── Skill picker types ──────────────────────────────────────────────────────
 
 /**

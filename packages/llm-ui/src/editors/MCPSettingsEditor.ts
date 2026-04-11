@@ -1,25 +1,24 @@
 // @file llm-ui/editors/MCPSettingsEditor.ts
-import { BaseSettingsEditor, Toast, Modal, generateShortUUID } from '@itookit/common';
+import {
+    BaseSettingsEditor, Toast, Modal, generateShortUUID,
+    t, MCP_TRANSPORT_ICONS, STATUS_META, ENTITY_ICONS,
+} from '@itookit/common';
 import type { MCPServer, IAgentManagementService } from '@itookit/common';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
-const TRANSPORT_LABELS: Record<string, string> = {
-    stdio: 'Stdio (本地进程)',
-    sse:   'SSE (HTTP 流)',
-    http:  'HTTP (REST)',
-};
-
 function statusDot(status?: MCPServer['status']): string {
-    if (status === 'connected') return '<span style="color:#10b981;font-size:.75rem">● 已连接</span>';
-    if (status === 'error')     return '<span style="color:#ef4444;font-size:.75rem">● 错误</span>';
-    return '<span style="color:#9ca3af;font-size:.75rem">○ 未连接</span>';
+    const s = STATUS_META[status as keyof typeof STATUS_META] ?? STATUS_META.idle;
+    const label = t(`status.${status ?? 'idle'}` as Parameters<typeof t>[0]);
+    return `<span style="color:${s.color};font-size:.75rem">${s.dot} ${label}</span>`;
 }
 
 function statusBadge(status?: MCPServer['status']): string {
-    if (status === 'connected') return `<span class="settings-badge settings-badge--success">● 已连接</span>`;
-    if (status === 'error')     return `<span class="settings-badge settings-badge--danger">✕ 错误</span>`;
-    return `<span class="settings-badge">○ 未连接</span>`;
+    if (status === 'connected')
+        return `<span class="settings-badge settings-badge--success">${STATUS_META.connected.dot} ${t('status.connected')}</span>`;
+    if (status === 'error')
+        return `<span class="settings-badge settings-badge--danger">✕ ${t('status.error')}</span>`;
+    return `<span class="settings-badge">${STATUS_META.idle.dot} ${t('status.idle')}</span>`;
 }
 
 // ─── MCPSettingsEditor ────────────────────────────────────────────────────────
@@ -47,9 +46,9 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
                             <i class="fas fa-plug" style="margin-right:.5rem;opacity:.7"></i>MCP Servers
                         </h3>
                         <div class="settings-page__actions">
-                            <button class="settings-btn-round" data-action="add"    title="添加服务器"><i class="fas fa-plus"></i></button>
-                            <button class="settings-btn-round" data-action="import" title="导入配置"><i class="fas fa-file-import"></i></button>
-                            <button class="settings-btn-round" data-action="export" title="导出全部"><i class="fas fa-file-export"></i></button>
+                            <button class="settings-btn-round" data-action="add"    title="${t('mcp.addNew')}"><i class="fas fa-plus"></i></button>
+                            <button class="settings-btn-round" data-action="import" title="${t('mcp.importConfig')}"><i class="fas fa-file-import"></i></button>
+                            <button class="settings-btn-round" data-action="export" title="${t('mcp.exportAll')}"><i class="fas fa-file-export"></i></button>
                         </div>
                     </div>
                     <div class="settings-split__list">
@@ -70,24 +69,24 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
         return `
             <div class="settings-empty settings-empty--mini">
                 <div class="settings-empty__icon" style="font-size:2rem">🔌</div>
-                <p style="margin:.5rem 0">暂无 MCP Server</p>
+                <p style="margin:.5rem 0">${t('mcp.empty.text')}</p>
                 <button class="settings-btn settings-btn--primary settings-btn--sm" data-action="add">
-                    <i class="fas fa-plus"></i> 添加第一个
+                    <i class="fas fa-plus"></i> ${t('mcp.empty.action')}
                 </button>
             </div>`;
     }
 
     private renderListItem(server: MCPServer) {
         const isSelected = server.id === this.selectedId;
-        const transportIcon = server.transport === 'stdio' ? '🖥' : '🌐';
+        const transportIcon = MCP_TRANSPORT_ICONS[server.transport as keyof typeof MCP_TRANSPORT_ICONS] ?? '🌐';
         return `
             <div class="settings-list-item ${isSelected ? 'selected' : ''}" data-id="${server.id}" style="cursor:pointer">
-                <span class="settings-list-item__icon" style="font-size:1.25rem">${server.icon || '🔌'}</span>
+                <span class="settings-list-item__icon" style="font-size:1.25rem">${server.icon || ENTITY_ICONS.mcp}</span>
                 <div class="settings-list-item__info" style="min-width:0">
                     <div class="settings-list-item__title" data-name-for="${server.id}"
-                         title="双击重命名" style="cursor:text">${server.name}</div>
+                         title="${t('tooltip.dblClickRename')}" style="cursor:text">${server.name}</div>
                     <div class="settings-list-item__desc">
-                        ${transportIcon} ${TRANSPORT_LABELS[server.transport] ?? server.transport}
+                        ${transportIcon} ${t(`mcpTransport.${server.transport}` as Parameters<typeof t>[0]) ?? server.transport}
                     </div>
                 </div>
                 ${statusDot(server.status)}
@@ -105,32 +104,32 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
             <div style="padding:1.25rem 1.75rem;border-bottom:1px solid var(--st-border-color);
                         display:flex;align-items:center;justify-content:space-between;gap:.75rem;flex-wrap:wrap">
                 <div style="display:flex;align-items:center;gap:1rem;min-width:0">
-                    <span style="font-size:2.25rem;flex-shrink:0;line-height:1">${server.icon || '🔌'}</span>
+                    <span style="font-size:2.25rem;flex-shrink:0;line-height:1">${server.icon || ENTITY_ICONS.mcp}</span>
                     <div style="min-width:0">
                         <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
                             <input name="header-name" value="${server.name}"
-                                placeholder="Server 名称"
+                                placeholder="${t('mcp.placeholder.name')}"
                                 style="font-size:1.125rem;font-weight:700;color:var(--st-text-primary);
                                        background:transparent;border:0;border-bottom:2px solid transparent;
                                        outline:none;padding:0 0 1px;font-family:inherit;
                                        width:auto;min-width:60px;max-width:280px;cursor:text;
                                        transition:border-color .15s"
-                                title="点击编辑名称，Enter 或失焦保存">
+                                title="${t('tooltip.clickEditName')}">
                             ${statusBadge(server.status)}
                         </div>
                         <div style="font-size:.8125rem;color:var(--st-text-secondary);margin-top:.125rem">
-                            ${server.description || TRANSPORT_LABELS[server.transport] || server.transport}
+                            ${server.description || t(`mcpTransport.${server.transport}` as Parameters<typeof t>[0]) || server.transport}
                         </div>
                     </div>
                 </div>
                 <div style="display:flex;gap:.5rem;flex-shrink:0">
                     <button class="settings-btn settings-btn--secondary" data-action="test">
-                        <i class="fas fa-plug"></i> 测试连接
+                        <i class="fas fa-plug"></i> ${t('action.test')}
                     </button>
                     <button class="settings-btn settings-btn--primary" data-action="save">
-                        <i class="fas fa-save"></i> 保存
+                        <i class="fas fa-save"></i> ${t('action.save')}
                     </button>
-                    <button class="settings-btn settings-btn--danger" data-action="delete" title="删除">
+                    <button class="settings-btn settings-btn--danger" data-action="delete" title="${t('action.delete')}">
                         <i class="fas fa-trash"></i>
                     </button>
                 </div>
@@ -141,33 +140,33 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
 
                 <!-- Basic Info -->
                 <div class="settings-section">
-                    <h3 class="settings-section__title">基础信息</h3>
+                    <h3 class="settings-section__title">${t('mcp.section.basic')}</h3>
                     <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
                         <div class="settings-form-group">
-                            <label>名称</label>
-                            <input class="settings-input" name="name" value="${server.name}" placeholder="My MCP Server">
+                            <label>${t('form.name')}</label>
+                            <input class="settings-input" name="name" value="${server.name}" placeholder="${t('mcp.placeholder.name')}">
                         </div>
                         <div class="settings-form-group">
-                            <label>图标 <span style="color:var(--st-text-tertiary);font-size:.8em">emoji</span></label>
+                            <label>${t('form.icon')} <span style="color:var(--st-text-tertiary);font-size:.8em">emoji</span></label>
                             <input class="settings-input" name="icon" value="${server.icon || ''}" placeholder="🔌">
                         </div>
                     </div>
                     <div class="settings-form-group">
-                        <label>描述</label>
+                        <label>${t('form.description')}</label>
                         <textarea class="settings-textarea" name="description" rows="2"
-                            placeholder="简短描述此服务器的用途">${server.description || ''}</textarea>
+                            placeholder="${t('mcp.placeholder.desc')}">${server.description || ''}</textarea>
                     </div>
                 </div>
 
                 <!-- Transport -->
                 <div class="settings-section">
-                    <h3 class="settings-section__title">连接方式</h3>
+                    <h3 class="settings-section__title">${t('mcp.section.transport')}</h3>
                     <div class="settings-form-group">
-                        <label>传输协议</label>
+                        <label>${t('mcp.transport.label')}</label>
                         <select class="settings-select" name="transport" id="transport-select">
-                            <option value="stdio" ${server.transport === 'stdio' ? 'selected' : ''}>🖥️ Stdio — 启动本地进程</option>
-                            <option value="sse"   ${server.transport === 'sse'   ? 'selected' : ''}>📡 SSE — Server-Sent Events</option>
-                            <option value="http"  ${server.transport === 'http'  ? 'selected' : ''}>🌐 HTTP — REST 端点</option>
+                            <option value="stdio" ${server.transport === 'stdio' ? 'selected' : ''}>${MCP_TRANSPORT_ICONS.stdio} ${t('mcpTransport.stdio.option')}</option>
+                            <option value="sse"   ${server.transport === 'sse'   ? 'selected' : ''}>${MCP_TRANSPORT_ICONS.sse} ${t('mcpTransport.sse.option')}</option>
+                            <option value="http"  ${server.transport === 'http'  ? 'selected' : ''}>${MCP_TRANSPORT_ICONS.http} ${t('mcpTransport.http.option')}</option>
                         </select>
                     </div>
                     <div id="transport-fields">
@@ -177,17 +176,17 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
 
                 <!-- Advanced -->
                 <div class="settings-section">
-                    <h3 class="settings-section__title">高级选项</h3>
+                    <h3 class="settings-section__title">${t('mcp.section.advanced')}</h3>
                     <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;align-items:end">
                         <div class="settings-form-group" style="margin-bottom:0">
-                            <label>超时时间 (秒)</label>
+                            <label>${t('form.timeout')}</label>
                             <input class="settings-input" type="number" name="timeout"
                                 value="${server.timeout ?? 30}" min="5" max="300">
                         </div>
                         <div class="settings-checkbox-row" style="padding-bottom:.5rem">
                             <input type="checkbox" id="auto-connect" name="autoConnect"
                                 ${server.autoConnect ? 'checked' : ''}>
-                            <label for="auto-connect">启动时自动连接</label>
+                            <label for="auto-connect">${t('form.autoConnect')}</label>
                         </div>
                     </div>
                 </div>
@@ -198,14 +197,14 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
                         Tools
                         <span class="settings-badge">${tools.length}</span>
                         <button class="settings-btn settings-btn--sm" data-action="add-tool"
-                            style="margin-left:auto;font-size:.75rem">+ 手动添加</button>
+                            style="margin-left:auto;font-size:.75rem">${t('mcp.tools.addBtn')}</button>
                     </h3>
                     <p style="font-size:.75rem;color:var(--st-text-tertiary);margin:0 0 .5rem">
-                        连接成功后自动发现。也可手动定义供 MCP Skill 引用。
+                        ${t('mcp.tools.hint')}
                     </p>
                     ${tools.length > 0 ? this.renderToolList(tools) : `
                         <div class="settings-empty settings-empty--mini">
-                            <p style="color:var(--st-text-tertiary);font-size:.875rem">暂无工具</p>
+                            <p style="color:var(--st-text-tertiary);font-size:.875rem">${t('mcp.tools.empty')}</p>
                         </div>`}
                 </div>
 
@@ -215,11 +214,11 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
                         Resources
                         <span class="settings-badge">${resources.length}</span>
                         <button class="settings-btn settings-btn--sm" data-action="add-resource"
-                            style="margin-left:auto;font-size:.75rem">+ 添加</button>
+                            style="margin-left:auto;font-size:.75rem">${t('mcp.resources.addBtn')}</button>
                     </h3>
                     ${resources.length > 0 ? this.renderResourceList(resources) : `
                         <div class="settings-empty settings-empty--mini">
-                            <p style="color:var(--st-text-tertiary);font-size:.875rem">暂无资源</p>
+                            <p style="color:var(--st-text-tertiary);font-size:.875rem">${t('mcp.resources.empty')}</p>
                         </div>`}
                 </div>
             </div>`;
@@ -229,46 +228,46 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
         if (server.transport === 'stdio') {
             return `
                 <div class="settings-form-group">
-                    <label>命令 <span style="color:var(--st-text-tertiary);font-size:.8em">Command</span></label>
+                    <label>${t('mcp.command.label')} <span style="color:var(--st-text-tertiary);font-size:.8em">${t('mcp.command.hint')}</span></label>
                     <input class="settings-input" name="command" value="${server.command || ''}"
-                        placeholder="node / python / npx" style="font-family:monospace">
+                        placeholder="${t('mcp.placeholder.command')}" style="font-family:monospace">
                 </div>
                 <div class="settings-form-group">
-                    <label>参数 <span style="color:var(--st-text-tertiary);font-size:.8em">Args（空格分隔）</span></label>
+                    <label>${t('mcp.args.label')} <span style="color:var(--st-text-tertiary);font-size:.8em">${t('mcp.args.hint')}</span></label>
                     <input class="settings-input" name="args" value="${server.args || ''}"
-                        placeholder="server.js --port 3000" style="font-family:monospace">
+                        placeholder="${t('mcp.placeholder.args')}" style="font-family:monospace">
                 </div>
                 <div class="settings-form-group">
-                    <label>工作目录 <span style="color:var(--st-text-tertiary);font-size:.8em">CWD（可选）</span></label>
+                    <label>${t('mcp.cwd.label')} <span style="color:var(--st-text-tertiary);font-size:.8em">${t('mcp.cwd.hint')}</span></label>
                     <input class="settings-input" name="cwd" value="${server.cwd || ''}"
-                        placeholder="/path/to/project" style="font-family:monospace">
+                        placeholder="${t('mcp.placeholder.cwd')}" style="font-family:monospace">
                 </div>`;
         }
         return `
             <div class="settings-form-group">
                 <label>Endpoint URL</label>
                 <input class="settings-input" type="url" name="endpoint" value="${server.endpoint || ''}"
-                    placeholder="http://localhost:3000/mcp">
+                    placeholder="${t('mcp.placeholder.endpoint')}">
             </div>
             <div class="settings-form-group">
-                <label>API Key <span style="color:var(--st-text-tertiary);font-size:.8em">可选</span></label>
+                <label>${t('mcp.apiKey.label')} <span style="color:var(--st-text-tertiary);font-size:.8em">${t('mcp.apiKey.hint')}</span></label>
                 <input class="settings-input" type="password" name="apiKey" value="${server.apiKey || ''}"
-                    placeholder="sk-...">
+                    placeholder="${t('mcp.placeholder.apiKey')}">
             </div>`;
     }
 
     private renderToolList(tools: any[]) {
         return `<div style="display:flex;flex-direction:column;gap:.375rem">${
-            tools.map((t, i) => `
+            tools.map((tool, i) => `
                 <div class="settings-card" style="display:flex;align-items:center;gap:.75rem;padding:.625rem .875rem">
                     <i class="fas fa-wrench" style="color:var(--st-color-primary);flex-shrink:0;font-size:.875rem"></i>
                     <div style="flex:1;min-width:0">
-                        <div style="font-weight:600;font-size:.875rem;font-family:monospace">${t.name}</div>
+                        <div style="font-weight:600;font-size:.875rem;font-family:monospace">${tool.name}</div>
                         <div style="font-size:.8125rem;color:var(--st-text-secondary);
                                     white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
-                            ${t.description || '无描述'}</div>
+                            ${tool.description || t('mcp.tools.noDesc')}</div>
                     </div>
-                    <button class="settings-btn-icon" data-action="del-tool" data-index="${i}" title="删除">
+                    <button class="settings-btn-icon" data-action="del-tool" data-index="${i}" title="${t('action.delete')}">
                         <i class="fas fa-times"></i>
                     </button>
                 </div>`).join('')}
@@ -285,7 +284,7 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
                         <div style="font-size:.8125rem;color:var(--st-text-secondary);font-family:monospace;
                                     white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${r.uri}</div>
                     </div>
-                    <button class="settings-btn-icon" data-action="del-resource" data-index="${i}" title="删除">
+                    <button class="settings-btn-icon" data-action="del-resource" data-index="${i}" title="${t('action.delete')}">
                         <i class="fas fa-times"></i>
                     </button>
                 </div>`).join('')}
@@ -295,13 +294,13 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
     private renderEmptyState() {
         return `
             <div class="settings-empty" style="height:100%;justify-content:center">
-                <div class="settings-empty__icon">🔌</div>
-                <div class="settings-empty__title">选择一个 MCP Server</div>
+                <div class="settings-empty__icon">${ENTITY_ICONS.mcp}</div>
+                <div class="settings-empty__title">${t('mcp.select.title')}</div>
                 <p style="color:var(--st-text-tertiary);font-size:.875rem;text-align:center;max-width:280px">
-                    MCP (Model Context Protocol) 让 LLM 访问外部工具和数据源
+                    ${t('mcp.select.desc')}
                 </p>
                 <button class="settings-btn settings-btn--primary" data-action="add">
-                    <i class="fas fa-plus"></i> 添加服务器
+                    <i class="fas fa-plus"></i> ${t('mcp.select.action')}
                 </button>
             </div>`;
     }
@@ -507,16 +506,16 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
             autoConnect: this.chk('autoConnect'),
         };
         await this.service.saveMCPServer(updated);
-        Toast.success('已保存');
+        Toast.success(t('mcp.toast.saved'));
         await this.render();
     }
 
     private deleteCurrent() {
         if (!this.selectedId) return;
-        Modal.confirm('删除确认', '确定要删除此 MCP Server？', async () => {
+        Modal.confirm(t('dialog.delete.title'), t('mcp.confirm.delete'), async () => {
             await this.service.deleteMCPServer(this.selectedId!);
             this.selectedId = null;
-            Toast.success('已删除');
+            Toast.success(t('mcp.toast.deleted'));
             await this.render();
         });
     }
@@ -529,16 +528,16 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
         const btn = this.container.querySelector<HTMLButtonElement>('[data-action="test"]');
         if (!btn) return;
         const originalHTML = btn.innerHTML;
-        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 测试中…';
+        btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${t('status.testing')}`;
         btn.disabled = true;
 
         try {
             if (server.transport === 'stdio') {
-                Toast.info('Stdio 服务器由应用程序管理连接，请检查 autoConnect 选项或手动启动进程');
+                Toast.info(t('mcp.toast.testStdio'));
                 return;
             }
             if (!server.endpoint) {
-                Toast.error('请先配置 Endpoint URL');
+                Toast.error(t('mcp.toast.testNoEndpoint'));
                 return;
             }
             const res = await fetch(server.endpoint, {
@@ -549,16 +548,16 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
                 signal: AbortSignal.timeout(5000),
             });
             if (res.ok) {
-                Toast.success(`连接成功 (HTTP ${res.status})`);
+                Toast.success(t('mcp.toast.testSuccess', { status: res.status }));
                 // Update status
                 const updated = { ...server, status: 'connected' as const };
                 await this.service.saveMCPServer(updated);
                 await this.render();
             } else {
-                Toast.error(`HTTP ${res.status} — 请检查 Endpoint 和认证信息`);
+                Toast.error(t('mcp.toast.testFailed', { status: res.status }));
             }
         } catch (e: unknown) {
-            Toast.error(`连接失败: ${(e as Error).message}`);
+            Toast.error(t('mcp.toast.testError', { message: (e as Error).message }));
         } finally {
             if (btn.isConnected) {
                 btn.innerHTML = originalHTML;
@@ -570,15 +569,15 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
     private async addTool(servers: MCPServer[]) {
         const body = `
             <div class="settings-form-group">
-                <label>工具名称 <span style="color:var(--st-text-tertiary);font-size:.8em">snake_case</span></label>
-                <input class="settings-input" id="tool-name" placeholder="get_weather" style="font-family:monospace">
+                <label>${t('mcp.addTool.nameLabel')} <span style="color:var(--st-text-tertiary);font-size:.8em">snake_case</span></label>
+                <input class="settings-input" id="tool-name" placeholder="${t('mcp.addTool.namePlaceholder')}" style="font-family:monospace">
             </div>
             <div class="settings-form-group">
-                <label>描述</label>
+                <label>${t('form.description')}</label>
                 <textarea class="settings-textarea" id="tool-desc" rows="2"
-                    placeholder="查询指定城市的实时天气"></textarea>
+                    placeholder="${t('mcp.addTool.descPlaceholder')}"></textarea>
             </div>`;
-        new Modal('手动添加工具', body, {
+        new Modal(t('mcp.addTool.title'), body, {
             onConfirm: async () => {
                 const name = (document.getElementById('tool-name') as HTMLInputElement).value.trim();
                 const desc = (document.getElementById('tool-desc') as HTMLTextAreaElement).value.trim();
@@ -604,14 +603,14 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
     private async addResource(servers: MCPServer[]) {
         const body = `
             <div class="settings-form-group">
-                <label>URI</label>
-                <input class="settings-input" id="res-uri" placeholder="file:///path/to/resource" style="font-family:monospace">
+                <label>${t('mcp.addResource.uriLabel')}</label>
+                <input class="settings-input" id="res-uri" placeholder="${t('mcp.addResource.uriPlaceholder')}" style="font-family:monospace">
             </div>
             <div class="settings-form-group">
-                <label>名称</label>
-                <input class="settings-input" id="res-name" placeholder="显示名称">
+                <label>${t('form.name')}</label>
+                <input class="settings-input" id="res-name" placeholder="${t('mcp.addResource.namePlaceholder')}">
             </div>`;
-        new Modal('添加资源', body, {
+        new Modal(t('mcp.addResource.title'), body, {
             onConfirm: async () => {
                 const uri  = (document.getElementById('res-uri')  as HTMLInputElement).value.trim();
                 const name = (document.getElementById('res-name') as HTMLInputElement).value.trim();
@@ -637,12 +636,12 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
     private showImport() {
         const body = `
             <p style="font-size:.875rem;color:var(--st-text-secondary);margin:0 0 .75rem">
-                粘贴 JSON 数组（单个对象也支持）</p>
+                ${t('mcp.import.hint')}</p>
             <textarea class="settings-textarea" id="import-json" rows="8"
-                placeholder='[{"name":"My Server","transport":"stdio",...}]'
+                placeholder="${t('mcp.import.placeholder')}"
                 style="font-family:monospace;font-size:.8125rem"></textarea>`;
-        new Modal('导入 MCP 配置', body, {
-            confirmText: '导入',
+        new Modal(t('mcp.import.title'), body, {
+            confirmText: t('dialog.import.action'),
             onConfirm: async () => {
                 const text = (document.getElementById('import-json') as HTMLTextAreaElement).value;
                 try {
@@ -652,11 +651,11 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
                         item.id = item.id || `mcp-${generateShortUUID()}`;
                         await this.service.saveMCPServer(item);
                     }
-                    Toast.success(`已导入 ${arr.length} 个服务器`);
+                    Toast.success(t('mcp.toast.imported', { count: arr.length }));
                     if (arr.length > 0) this.selectedId = arr[arr.length - 1].id;
                     await this.render();
                 } catch {
-                    Toast.error('JSON 格式错误');
+                    Toast.error(t('mcp.toast.invalidJson'));
                     return false;
                 }
             },
