@@ -22,12 +22,16 @@ import { SkillSettingsEditor } from './editors/SkillSettingsEditor';
  * EditorFactory for the Skills workspace.
  *
  * VFSUIShell calls factory(container, options) when a skill node is selected.
- * options.initialContent = skill YAML from SkillsEngine.readContent(skillId).
- * The factory creates a SkillSettingsEditor in form-only mode.
+ * options.nodeId = skill ID; options.initialContent = skill name (for summary display).
+ * The factory must call editor.init() — editor-connector does not do it automatically.
  */
 export function createSkillsEditorFactory(agentService: IAgentManagementService): EditorFactory {
     return async (container: HTMLElement, options: EditorOptions = {}): Promise<import('@itookit/common').IEditor> => {
-        return SkillSettingsEditor.createFormOnly(container, agentService, options);
+        // createFormOnly already sets selectedId = options.nodeId (the skill ID).
+        const editor = SkillSettingsEditor.createFormOnly(container, agentService, options);
+        // The factory is responsible for calling init(). Pass initialContent as fallback.
+        await editor.init(container, options.initialContent ?? '');
+        return editor;
     };
 }
 

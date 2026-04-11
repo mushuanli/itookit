@@ -1,21 +1,29 @@
 // @file app-settings/engine/SkillsEngine.ts
 // ISessionEngine adapter for the Skills workspace.
 //
-// Bridges IAgentManagementService → ISessionEngine so VFSUIShell can render
-// the skill list without any custom sidebar code.
+// Display contract (→ NodeMapper):
+//   node.name      = s.id    ← "filename" = skill ID (no extension)
+//   metadata.title = s.id    ← primary label in VFSUIShell list
+//   node.content   = s.name  ← NodeMapper uses first line as summary (the "brief")
+//   WS_SKILLS sets showSummary=true → human-readable name shows below the ID
 //
-// Event payloads must match what EngineAdapter expects:
-//   node:created  → { nodes: [{nodeId, parentId, path, type}] }
-//   node:updated  → { nodes: [{nodeId}] }
-//   node:deleted  → { requestedIds: string[], allDeletedIds: string[] }
-//   node:renamed  → { nodes: [{nodeId, oldName, newName}] }
-//   node:moved    → any  (triggers full loadData() in EngineAdapter)
+// Event payloads must match EngineAdapter expectations:
+//   node:created → { nodes: [{nodeId, parentId, path, type}] }
+//   node:updated → { nodes: [{nodeId}] }
+//   node:deleted → { requestedIds, allDeletedIds }
+//   node:renamed → { nodes: [{nodeId, oldName, newName}] }
+//   node:moved   → any  (triggers EngineAdapter.loadData() full refresh)
 
 import type {
     ISessionEngine, EngineNode, EngineEvent, EngineEventType, EngineSearchQuery,
     LLMSkill, IAgentManagementService,
 } from '@itookit/common';
 import yaml from 'js-yaml';
+
+/** Strip common skill file extensions from a user-typed or imported filename. */
+function cleanName(raw: string): string {
+    return raw.replace(/\.(skill\.(yaml|yml)|yaml|yml|json)$/i, '').trim() || raw.trim();
+}
 
 export class SkillsEngine implements ISessionEngine {
     public readonly moduleName = 'skills';
@@ -24,9 +32,9 @@ export class SkillsEngine implements ISessionEngine {
     private unsubscribe: (() => void) | null = null;
 
     constructor(private readonly service: IAgentManagementService) {
-        // Forward agentService changes to VFSUIShell.
-        // 'node:moved' is the only EngineAdapter event that triggers a full loadData() — use it
-        // to force a refresh when skills are changed externally (e.g., from the Settings page).
+        // 'node:moved' is the only EngineAdapter event that calls loadData() —
+        // use it to force a full list refresh when skills change externally
+        // (e.g., another tab saves via agentService).
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         this.unsubscribe = (service as any).onChange?.(() => {
             this.fire('node:moved', {});
@@ -47,15 +55,22 @@ export class SkillsEngine implements ISessionEngine {
         return s ? this.toNode(s) : null;
     }
 
-    /** Returns skill YAML — passed to SkillSettingsEditor.init() as content. */
+    /**
+     * Returns the skill's human-readable NAME (not full YAML).
+     *
+     * Two consumers:
+     *  1. NodeMapper — uses it as the list-item summary (the "brief" below the ID).
+     *  2. editor-connector — passes it as options.initialContent to the factory,
+     *     but SkillSettingsEditor formOnly mode uses options.nodeId instead, so
+     *     this content is effectively ignored by the form editor.
+     */
     async readContent(id: string): Promise<string> {
         const skills = await this.service.getSkills();
         const s = skills.find((x) => x.id === id);
-        if (!s) return '';
-        return yaml.dump(s, { lineWidth: -1, noRefs: true });
+        return s?.name ?? '';
     }
 
-    /** Called by editor-connector on blur — merges form YAML back into the skill. */
+    /** Called by editor-connector on blur — receives full skill YAML from getText(). */
     async writeContent(id: string, content: string | ArrayBuffer): Promise<void> {
         const text = typeof content === 'string' ? content : new TextDecoder().decode(content as ArrayBuffer);
         if (!text.trim()) return;
@@ -67,12 +82,12 @@ export class SkillsEngine implements ISessionEngine {
         const existing = skills.find((s) => s.id === id);
         const updated: LLMSkill = { ...existing, ...incoming, id, modifiedAt: Date.now() };
         await this.service.saveSkill(updated);
-        // onChange fires after saveSkill → triggers 'node:moved' → full reload.
-        // Emit an additional 'node:updated' for faster per-item refresh.
         this.fire('node:updated', { nodes: [{ nodeId: id }] });
     }
 
-    async createFile(name: string): Promise<EngineNode> {
+    async createFile(rawName: string): Promise<EngineNode> {
+        // Strip file extensions so drag-dropped "essay-review.skill.yaml" becomes "essay-review"
+        const name = cleanName(rawName);
         const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || `skill-${Date.now()}`;
         const now = Date.now();
         const skill: LLMSkill = { id, name, type: 'prompt', enabled: false, createdAt: now, modifiedAt: now };
@@ -103,7 +118,11 @@ export class SkillsEngine implements ISessionEngine {
         const lower = query.text.toLowerCase();
         const skills = await this.service.getSkills();
         return skills
-            .filter((s) => s.name.toLowerCase().includes(lower) || s.id.includes(lower))
+            .filter((s) =>
+                s.name.toLowerCase().includes(lower) ||
+                s.id.includes(lower) ||
+                (s.description ?? '').toLowerCase().includes(lower),
+            )
             .map((s) => this.toNode(s));
     }
 
@@ -133,10 +152,10 @@ export class SkillsEngine implements ISessionEngine {
     // ── Private ──
 
     private toNode(s: LLMSkill): EngineNode {
-        return {
+        const node = {
             id:         s.id,
             parentId:   null,
-            name:       s.name,
+            name:       s.id,            // ID as "filename" (no spaces, no extension)
             type:       'file',
             icon:       s.icon ?? '⚡',
             path:       `/${s.id}`,
@@ -145,15 +164,22 @@ export class SkillsEngine implements ISessionEngine {
             modifiedAt: s.modifiedAt ?? Date.now(),
             moduleId:   'skills',
             metadata:   {
-                title:        s.name,
+                title:        s.id,   // primary label = ID
                 tags:         s.enabled ? [] : ['disabled'],
                 lastModified: s.modifiedAt ?? Date.now(),
                 custom:       { skillType: s.type, enabled: s.enabled },
             },
         } as EngineNode;
+
+        // Attach skill name as node.content so NodeMapper uses it as the summary line.
+        // NodeMapper: if (!isDir && node.content) { parsed.summary = parseFileInfo(content).summary }
+        // parseFileInfo(s.name) treats the name as plain text → first line = s.name ✓
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (node as any).content = s.name;
+
+        return node;
     }
 
-    /** Emit a properly-structured EngineEvent to all subscribed handlers. */
     private fire(type: EngineEventType, payload: unknown): void {
         const event: EngineEvent = { type, payload };
         for (const h of this.listeners.get(type) ?? []) h(event);
