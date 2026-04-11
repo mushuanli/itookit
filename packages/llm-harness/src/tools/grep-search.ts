@@ -162,6 +162,9 @@ export const grepSearchHandler: ToolHandler = async (args, ctx) => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const nodePath = await import('node:path' as any);
         deps = { readFile: fs.readFile, readdir: fs.readdir, join: nodePath.join, relative: nodePath.relative };
+        if (typeof deps.readFile !== 'function' || typeof deps.join !== 'function') {
+            throw new Error('incomplete Node.js API');
+        }
     } catch {
         return 'Error: grep_search is not available in browser environments';
     }
