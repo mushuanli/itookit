@@ -1,8 +1,9 @@
 // @file: llm-harness/src/tools/file-write.ts
 // 文件写入工具（支持创建/覆盖/字符串替换）。
+//
+// Browser safety: node:fs/promises and node:path are loaded via dynamic
+// import so Vite does not statically bundle them into the browser build.
 
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
-import { resolve, dirname } from 'node:path';
 import type { ToolMeta, ToolDefinition, ToolHandler } from '@itookit/common';
 
 export const fileWriteMeta: ToolMeta = {
@@ -48,10 +49,34 @@ export const fileWriteDefinition: ToolDefinition = {
 };
 
 export const fileWriteHandler: ToolHandler = async (args, ctx) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let readFile: typeof import('node:fs/promises').readFile;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let writeFile: typeof import('node:fs/promises').writeFile;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let mkdir: typeof import('node:fs/promises').mkdir;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let resolvePath: typeof import('node:path').resolve;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let dirname: typeof import('node:path').dirname;
+    try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const fs = await import('node:fs/promises' as any);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const nodePath = await import('node:path' as any);
+        readFile = fs.readFile;
+        writeFile = fs.writeFile;
+        mkdir = fs.mkdir;
+        resolvePath = nodePath.resolve;
+        dirname = nodePath.dirname;
+    } catch {
+        return 'Error: file_write is not available in browser environments';
+    }
+
     const path = args['path'] as string;
     const content = args['content'] as string;
     const mode = (args['mode'] as string) ?? 'overwrite';
-    const absPath = resolve(ctx.cwd, path);
+    const absPath = resolvePath(ctx.cwd, path);
 
     await mkdir(dirname(absPath), { recursive: true });
 
