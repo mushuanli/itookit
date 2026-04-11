@@ -56,6 +56,10 @@ export const fileReadHandler: ToolHandler = async (args, ctx) => {
         const nodePath = await import('node:path' as any);
         readFile = fs.readFile;
         resolvePath = nodePath.resolve;
+        // node:path may be polyfilled in browser but resolve() is often missing
+        if (typeof readFile !== 'function' || typeof resolvePath !== 'function') {
+            throw new Error('incomplete Node.js API');
+        }
     } catch {
         return 'Error: file_read is not available in browser environments';
     }

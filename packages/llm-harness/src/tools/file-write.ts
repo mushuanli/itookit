@@ -69,6 +69,9 @@ export const fileWriteHandler: ToolHandler = async (args, ctx) => {
         mkdir = fs.mkdir;
         resolvePath = nodePath.resolve;
         dirname = nodePath.dirname;
+        if (typeof writeFile !== 'function' || typeof resolvePath !== 'function') {
+            throw new Error('incomplete Node.js API');
+        }
     } catch {
         return 'Error: file_write is not available in browser environments';
     }

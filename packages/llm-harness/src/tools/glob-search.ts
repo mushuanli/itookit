@@ -111,6 +111,9 @@ export const globSearchHandler: ToolHandler = async (args, ctx) => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const nodePath = await import('node:path' as any);
         deps = { readdir: fs.readdir, stat: fs.stat, join: nodePath.join, relative: nodePath.relative };
+        if (typeof deps.readdir !== 'function' || typeof deps.join !== 'function') {
+            throw new Error('incomplete Node.js API');
+        }
     } catch {
         return 'Error: glob_search is not available in browser environments';
     }
