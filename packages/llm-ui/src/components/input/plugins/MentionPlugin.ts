@@ -76,18 +76,16 @@ export class MentionPlugin implements InputPlugin {
             return true;
         }
 
-        // Enter / Tab: ALWAYS intercept when a mention is in progress to prevent
-        // the ChatInputView from triggering a send (and accidentally executing a
-        // slash command with an un-resolved @mention).
-        //
-        // onRequestFiles is async — suggestions may not have loaded yet when
-        // the user presses Enter. If PopupPanel handles it (item selected) great;
-        // otherwise, swallow the key and let the user wait for suggestions or
-        // press Escape to cancel the mention.
+        // Enter / Tab: intercept only when the popup is visible and has items.
+        // When the popup is still loading (not visible yet), let Enter through
+        // so the user can still submit (resolveAtPath will strip the @ prefix).
         if (['Enter', 'Tab'].includes(e.key)) {
-            e.preventDefault();
-            this.popup.handleKeyDown(e); // attempt selection (no-op if no items yet)
-            return true;
+            if (this.popup.isVisible) {
+                e.preventDefault();
+                this.popup.handleKeyDown(e);
+                return true;
+            }
+            return false; // popup loading — don't block Enter
         }
 
         return false;
@@ -173,6 +171,13 @@ export class MentionPlugin implements InputPlugin {
             onClose: () => this.close(),
         });
         this.popup?.filter(this.currentQuery);
+
+        // PopupPanel.show() may call searchInput.focus(), which steals focus
+        // from the textarea. Once focus leaves the textarea, ChatInputView's
+        // keydown listener stops firing, so MentionPlugin.onKeyDown is never
+        // called and Enter can't complete the mention.
+        // Refocus the textarea immediately to restore the correct event path.
+        this.ctx?.focus();
     }
 
     private insertMention(filePath: string): void {
