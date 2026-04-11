@@ -79,7 +79,7 @@ export class ImportCommandHandler {
       reader.onload = () => resolve(reader.result as string | ArrayBuffer);
       reader.onerror = () => reject(new Error(`读取失败: ${file.name}`));
 
-      const textExts = ['.md', '.txt', '.json', '.html', '.css', '.js', '.ts'];
+      const textExts = ['.md', '.txt', '.json', '.html', '.css', '.js', '.ts', '.yaml', '.yml'];
       const isText =
         file.type.startsWith('text/') ||
         textExts.some(ext => file.name.endsWith(ext));
