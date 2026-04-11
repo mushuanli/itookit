@@ -120,11 +120,63 @@ export class SkillsEngine implements ISessionEngine {
         }
     }
 
-    async createFile(rawName: string): Promise<EngineNode> {
-        // Strip file extensions so drag-dropped "essay-review.skill.yaml" becomes "essay-review"
+    /**
+     * ISessionEngine.createFile(name, parentId?, content?) — three parameters.
+     *
+     * ImportCommandHandler reads the file bytes and passes them as `content`.
+     * Previously we only accepted `rawName` and ignored content → YAML was lost.
+     *
+     * Fix: when content is provided, parse it as YAML and use the canonical
+     * id/name from the file instead of deriving them from the filename.
+     */
+    async createFile(
+        rawName: string,
+        _parentId: string | null = null,
+        content?: string | ArrayBuffer,
+    ): Promise<EngineNode> {
+        console.log('[skill:engine] createFile raw:', rawName, 'has content:', !!content,
+            content ? 'len:' + (typeof content === 'string' ? content.length : (content as ArrayBuffer).byteLength) : '');
+
+        // If file content is provided (ImportCommandHandler path), parse the YAML
+        // to get the canonical id and name — don't derive from the filename.
+        if (content) {
+            const text = typeof content === 'string'
+                ? content
+                : new TextDecoder().decode(content as ArrayBuffer);
+            try {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const parsed = yaml.load(text) as any;
+                if (parsed && typeof parsed === 'object') {
+                    const skillId = (typeof parsed.id === 'string' && parsed.id.trim())
+                        ? parsed.id.trim()
+                        : cleanName(rawName).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || `skill-${Date.now()}`;
+                    const skillName = (typeof parsed.name === 'string' && parsed.name.trim())
+                        ? parsed.name.trim()
+                        : cleanName(rawName);
+
+                    const skill: LLMSkill = {
+                        type: 'prompt', enabled: false,
+                        ...parsed,
+                        id: skillId,
+                        name: skillName,
+                        createdAt: parsed.createdAt ?? Date.now(),
+                        modifiedAt: Date.now(),
+                    };
+                    console.log('[skill:engine] createFile from content → id:', skill.id, 'name:', skill.name);
+                    await this.service.saveSkill(skill);
+                    const node = this.toNode(skill);
+                    this.fire('node:created', { nodes: [{ nodeId: skill.id, parentId: null, path: `/${skill.id}`, type: 'file' }] });
+                    return node;
+                }
+            } catch (e) {
+                console.warn('[skill:engine] createFile: YAML parse failed, falling back to filename', e);
+            }
+        }
+
+        // Fallback: no content or invalid YAML → create blank skill from filename.
         const name = cleanName(rawName);
         const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || `skill-${Date.now()}`;
-        console.log('[skill:engine] createFile raw:', rawName, '→ name:', name, 'id:', id);
+        console.log('[skill:engine] createFile (blank) raw:', rawName, '→ name:', name, 'id:', id);
         const now = Date.now();
         const skill: LLMSkill = { id, name, type: 'prompt', enabled: false, createdAt: now, modifiedAt: now };
         await this.service.saveSkill(skill);
