@@ -240,10 +240,23 @@ export class SkillsEngine implements ISessionEngine {
     // ── Private ──
 
     private toNode(s: LLMSkill): EngineNode {
+        // Enabled state display strategy:
+        //   enabled  → green indicator dot (hasUnreadUpdate) after the title
+        //              No tag — "enabled" is the default/normal state, keep it quiet.
+        //   disabled → no dot + "disabled" tag pill in the secondary row.
+        //              Tag draws attention to the exception rather than the norm.
+        //
+        // Result in session list:
+        //   [⚡] 中学生作文审查 •         ← enabled  (dot = active)
+        //        essay-review-cn
+        //
+        //   [⚡] Python REPL 交互调试     ← disabled (no dot, tag below)
+        //        tty-python-repl  [disabled]
+
         const node = {
             id:         s.id,
             parentId:   null,
-            name:       s.name,          // human-readable name as primary label
+            name:       s.name,
             type:       'file',
             icon:       s.icon ?? '⚡',
             path:       `/${s.id}`,
@@ -252,17 +265,18 @@ export class SkillsEngine implements ISessionEngine {
             modifiedAt: s.modifiedAt ?? Date.now(),
             moduleId:   'skills',
             metadata:   {
-                title:        s.name,  // primary display: 中学生作文审查
+                title:        s.name,
                 tags:         s.enabled ? [] : ['disabled'],
                 lastModified: s.modifiedAt ?? Date.now(),
-                custom:       { skillType: s.type, enabled: s.enabled },
+                custom:       {
+                    skillType:       s.type,
+                    enabled:         s.enabled,
+                    hasUnreadUpdate: s.enabled,  // green dot = skill is active/enabled
+                },
             },
         } as EngineNode;
 
-        // Attach skill ID as node.content so NodeMapper uses it as the summary line.
-        // With showSummary=true, the list shows:
-        //   [⚡] 中学生作文审查   ← name (primary)
-        //        essay-review-cn  ← id  (summary / brief)
+        // Summary line = skill ID (with showSummary: true in WS_SKILLS defaults).
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (node as any).content = s.id;
 

@@ -283,9 +283,9 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
                     return defaults;
                 },
             },
-            // Skills workspace: show summary = skill name below the skill ID.
+            // Skills workspace: summary=skill ID, tags="disabled" pill, dot=enabled.
             ...(strategyType === 'skills' && {
-                defaultUiSettings: { showSummary: true },
+                defaultUiSettings: { showSummary: true, showTags: true, showBadges: false },
             }),
         };
 
