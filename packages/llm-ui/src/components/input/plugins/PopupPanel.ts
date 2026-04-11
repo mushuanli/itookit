@@ -362,8 +362,11 @@ export class PopupPanel {
     private selectCurrent(): void {
         const item = this.filteredItems[this.selectedIndex];
         if (item) {
-            this.hide();
+            // onSelect MUST fire before hide() so that callbacks can still read
+            // state that hide() / onClose() would clear (e.g. MentionPlugin uses
+            // mentionStart and cachedSuggestions which are reset by close()).
             this.onSelect?.(item);
+            this.hide();
         }
     }
 
