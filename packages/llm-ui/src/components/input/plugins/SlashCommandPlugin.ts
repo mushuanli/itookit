@@ -265,31 +265,43 @@ export class SlashCommandPlugin implements InputPlugin {
         this.panel.filter(query);
     }
 
-    /** Build slash commands from the current skill list (called on each popup open). */
+    /**
+     * Build slash commands from the enabled skill list (called on each popup open).
+     *
+     * Only enabled skills appear; each gets a `/sk-<id>` command so users can type
+     * `/sk` to filter skill commands distinctly from other slash commands.
+     *
+     * Loaded skills are grouped separately so users can see what's already active.
+     */
     private buildSkillCommands(): SlashCommandDef[] {
         const cb = this.cb;
-        const skills = cb.getSkills?.() ?? [];
-        return skills.map((skill: SkillInfo) => ({
-            name: skill.id,
-            label: `/${skill.id}`,
-            description: skill.description || `Run ${skill.name} skill`,
-            icon: skill.icon ?? '⚡',
-            group: skill.loaded ? 'Skills (loaded)' : 'Skills',
-            hasArgs: true,
-            argsPlaceholder: '@file --param value',
-            preserveInput: false,
-            execute: async (args: string, ctx: InputPluginContext) => {
-                if (!cb.onSkillInvoke) {
-                    await cb.onSkill?.(skill.id);
-                    return;
-                }
-                const selText = (ctx.textarea.selectionStart !== ctx.textarea.selectionEnd)
-                    ? ctx.textarea.value.slice(ctx.textarea.selectionStart, ctx.textarea.selectionEnd)
-                    : undefined;
-                const invocation = parseSkillArgs(skill.id, args, selText);
-                await cb.onSkillInvoke(invocation);
-            },
-        }));
+        const skills = (cb.getSkills?.() ?? []).filter((s: SkillInfo) => s.enabled);
+        return skills.map((skill: SkillInfo) => {
+            const cmdName = `sk-${skill.id}`;
+            return {
+                name: cmdName,
+                label: `/sk-${skill.id}`,
+                description: skill.loaded
+                    ? `${skill.name} (loaded)${skill.description ? ' — ' + skill.description : ''}`
+                    : `${skill.name}${skill.description ? ' — ' + skill.description : ''}`,
+                icon: skill.icon ?? '⚡',
+                group: skill.loaded ? 'Skills — active' : 'Skills',
+                hasArgs: true,
+                argsPlaceholder: '@file --param value text',
+                preserveInput: false,
+                execute: async (args: string, ctx: InputPluginContext) => {
+                    if (!cb.onSkillInvoke) {
+                        await cb.onSkill?.(skill.id);
+                        return;
+                    }
+                    const selText = (ctx.textarea.selectionStart !== ctx.textarea.selectionEnd)
+                        ? ctx.textarea.value.slice(ctx.textarea.selectionStart, ctx.textarea.selectionEnd)
+                        : undefined;
+                    const invocation = parseSkillArgs(skill.id, args, selText);
+                    await cb.onSkillInvoke(invocation);
+                },
+            };
+        });
     }
 
     private handleSelect(item: PopupItem, allCommands?: SlashCommandDef[]): void {

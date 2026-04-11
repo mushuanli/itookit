@@ -829,6 +829,7 @@ export class LLMWorkspaceEditor implements IEditor {
                     name: s.name,
                     description: s.description,
                     loaded: loadedIds.has(s.id),
+                    enabled: s.enabled,
                     toolCount: s.tools?.length ?? 0,
                     icon: s.icon,
                 }));
@@ -1258,6 +1259,7 @@ export class LLMWorkspaceEditor implements IEditor {
                     name: s.name,
                     description: s.description,
                     loaded: loadedIds.has(s.id),
+                    enabled: s.enabled,
                     toolCount: s.tools?.length ?? 0,
                     icon: s.icon,
                 }));
