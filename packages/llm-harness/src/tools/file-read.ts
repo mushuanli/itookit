@@ -1,8 +1,9 @@
 // @file: llm-harness/src/tools/file-read.ts
 // 文件读取工具。
+//
+// Browser safety: node:fs/promises and node:path are loaded via dynamic
+// import so Vite does not statically bundle them into the browser build.
 
-import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
 import type { ToolMeta, ToolDefinition, ToolHandler } from '@itookit/common';
 
 export const fileReadMeta: ToolMeta = {
@@ -44,11 +45,26 @@ export const fileReadDefinition: ToolDefinition = {
 const MAX_OUTPUT_LINES = 2000;
 
 export const fileReadHandler: ToolHandler = async (args, ctx) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let readFile: typeof import('node:fs/promises').readFile;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let resolvePath: typeof import('node:path').resolve;
+    try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const fs = await import('node:fs/promises' as any);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const nodePath = await import('node:path' as any);
+        readFile = fs.readFile;
+        resolvePath = nodePath.resolve;
+    } catch {
+        return 'Error: file_read is not available in browser environments';
+    }
+
     const path = args['path'] as string;
     const offset = (args['offset'] as number | undefined) ?? 1;
     const limit = (args['limit'] as number | undefined) ?? MAX_OUTPUT_LINES;
 
-    const absPath = resolve(ctx.cwd, path);
+    const absPath = resolvePath(ctx.cwd, path);
 
     let content: string;
     try {

@@ -1,8 +1,9 @@
 // @file: llm-harness/src/tools/grep-search.ts
 // 内容搜索工具（正则，path:行号 格式输出）。
+//
+// Browser safety: node:fs/promises and node:path are loaded via dynamic
+// import so Vite does not statically bundle them into the browser build.
 
-import { readFile, readdir } from 'node:fs/promises';
-import { join, relative } from 'node:path';
 import type { ToolMeta, ToolDefinition, ToolHandler } from '@itookit/common';
 
 export const grepSearchMeta: ToolMeta = {
@@ -79,6 +80,14 @@ function isBinary(buf: Buffer): boolean {
 
 interface Match { file: string; line: number; content: string }
 
+// fs/path passed as deps to avoid top-level node: imports (browser safety).
+interface FsDeps {
+    readFile: typeof import('node:fs/promises').readFile;
+    readdir: typeof import('node:fs/promises').readdir;
+    join: typeof import('node:path').join;
+    relative: typeof import('node:path').relative;
+}
+
 async function searchFile(
     filePath: string,
     relPath: string,
@@ -86,13 +95,14 @@ async function searchFile(
     contextLines: number,
     matches: Match[],
     limit: number,
+    deps: FsDeps,
 ): Promise<void> {
     if (matches.length >= limit) return;
 
-    const buf = await readFile(filePath).catch(() => null);
-    if (!buf || isBinary(buf)) return;
+    const buf = await deps.readFile(filePath).catch(() => null);
+    if (!buf || isBinary(buf as Buffer)) return;
 
-    const lines = buf.toString('utf-8').split('\n');
+    const lines = (buf as Buffer).toString('utf-8').split('\n');
     for (let i = 0; i < lines.length && matches.length < limit; i++) {
         if (!regex.test(lines[i])) continue;
 
@@ -116,12 +126,13 @@ async function walkAndSearch(
     contextLines: number,
     matches: Match[],
     limit: number,
+    deps: FsDeps,
 ): Promise<void> {
     if (matches.length >= limit) return;
 
     let entries;
     try {
-        entries = await readdir(dir, { withFileTypes: true });
+        entries = await deps.readdir(dir, { withFileTypes: true });
     } catch {
         return;
     }
@@ -130,20 +141,31 @@ async function walkAndSearch(
         if (matches.length >= limit) break;
         if (IGNORED_DIRS.has(entry.name)) continue;
 
-        const full = join(dir, entry.name);
-        const rel = relative(baseDir, full);
+        const full = deps.join(dir, entry.name);
+        const rel = deps.relative(baseDir, full);
 
         if (entry.isDirectory()) {
-            await walkAndSearch(full, baseDir, fileRegex, contentRegex, contextLines, matches, limit);
+            await walkAndSearch(full, baseDir, fileRegex, contentRegex, contextLines, matches, limit, deps);
         } else if (entry.isFile()) {
             if (!fileRegex || fileRegex.test(rel)) {
-                await searchFile(full, rel, contentRegex, contextLines, matches, limit);
+                await searchFile(full, rel, contentRegex, contextLines, matches, limit, deps);
             }
         }
     }
 }
 
 export const grepSearchHandler: ToolHandler = async (args, ctx) => {
+    let deps: FsDeps;
+    try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const fs = await import('node:fs/promises' as any);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const nodePath = await import('node:path' as any);
+        deps = { readFile: fs.readFile, readdir: fs.readdir, join: nodePath.join, relative: nodePath.relative };
+    } catch {
+        return 'Error: grep_search is not available in browser environments';
+    }
+
     const pattern = args['pattern'] as string;
     const glob = args['glob'] as string | undefined;
     const baseDir = args['base_dir'] as string | undefined ?? ctx.cwd;
@@ -160,7 +182,7 @@ export const grepSearchHandler: ToolHandler = async (args, ctx) => {
 
     const fileRegex = glob ? globToRegex(glob) : null;
     const matches: Match[] = [];
-    await walkAndSearch(baseDir, baseDir, fileRegex, contentRegex, contextLines, matches, limit);
+    await walkAndSearch(baseDir, baseDir, fileRegex, contentRegex, contextLines, matches, limit, deps);
 
     if (matches.length === 0) return `No matches for: ${pattern}`;
 
