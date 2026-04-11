@@ -218,6 +218,13 @@ importers:
         version: 5.4.21(@types/node@20.19.25)
 
   packages/app-settings:
+    dependencies:
+      '@types/js-yaml':
+        specifier: ^4.0.9
+        version: 4.0.9
+      js-yaml:
+        specifier: ^4.1.1
+        version: 4.1.1
     devDependencies:
       '@itookit/common':
         specifier: workspace:*
@@ -261,6 +268,9 @@ importers:
       '@itookit/llm-engine':
         specifier: workspace:*
         version: link:../llm-engine
+      '@itookit/llm-harness':
+        specifier: workspace:*
+        version: link:../llm-harness
       '@itookit/llm-kernel':
         specifier: workspace:*
         version: link:../llm-kernel

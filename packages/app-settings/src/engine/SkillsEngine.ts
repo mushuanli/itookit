@@ -2,10 +2,12 @@
 // ISessionEngine adapter for the Skills workspace.
 //
 // Display contract (→ NodeMapper):
-//   node.name      = s.id    ← "filename" = skill ID (no extension)
-//   metadata.title = s.id    ← primary label in VFSUIShell list
-//   node.content   = s.name  ← NodeMapper uses first line as summary (the "brief")
-//   WS_SKILLS sets showSummary=true → human-readable name shows below the ID
+//   node.name                  = s.name  ← human-readable name as primary label
+//   metadata.title             = s.name  ← confirmed primary display
+//   metadata.hasUnreadUpdate   = s.enabled ← green dot when enabled (top-level!)
+//   metadata.tags              = ['disabled'] when !enabled
+//   node.content               = `${s.id}  ${typeIcon}` ← summary: ID + type icon
+//   WS_SKILLS sets showSummary+showTags → summary and tags both visible
 //
 // Event payloads must match EngineAdapter expectations:
 //   node:created → { nodes: [{nodeId, parentId, path, type}] }
@@ -24,6 +26,16 @@ import yaml from 'js-yaml';
 function cleanName(raw: string): string {
     return raw.replace(/\.(skill\.(yaml|yml)|yaml|yml|json)$/i, '').trim() || raw.trim();
 }
+
+/** Skill type → icon used in the summary line of the VFSUIShell list item. */
+const SKILL_TYPE_ICON: Record<string, string> = {
+    prompt:  '📝',  // Markdown instructions injected into system prompt
+    http:    '🌐',  // Remote HTTP endpoint
+    shell:   '⬛',  // Local shell command
+    mcp:     '🔌',  // MCP protocol
+    builtin: '🔧',  // References already-registered harness tool
+    custom:  '⚙️',  // User-defined
+};
 
 export class SkillsEngine implements ISessionEngine {
     public readonly moduleName = 'skills';
@@ -240,18 +252,23 @@ export class SkillsEngine implements ISessionEngine {
     // ── Private ──
 
     private toNode(s: LLMSkill): EngineNode {
-        // Enabled state display strategy:
-        //   enabled  → green indicator dot (hasUnreadUpdate) after the title
-        //              No tag — "enabled" is the default/normal state, keep it quiet.
-        //   disabled → no dot + "disabled" tag pill in the secondary row.
-        //              Tag draws attention to the exception rather than the norm.
+        // ── Display contract ──────────────────────────────────────────────────
+        //
+        // NodeMapper builds VFSNodeUI.metadata.custom by spreading node.metadata:
+        //   custom: { ...(node.metadata || {}), ...parsed.metadata, _originalName }
+        //
+        // So fields that must be accessible as VFSNodeUI.metadata.custom.XXX
+        // MUST be at the TOP LEVEL of node.metadata, not nested inside .custom.
+        //
+        //   hasUnreadUpdate  → top-level → shows green indicator dot after title
+        //   tags             → used by NodeMapper directly (node.tags)
         //
         // Result in session list:
-        //   [⚡] 中学生作文审查 •         ← enabled  (dot = active)
-        //        essay-review-cn
+        //   [📝] 中学生作文审查 •          ← enabled  (• = active/enabled dot)
+        //        essay-review-cn  📝
         //
-        //   [⚡] Python REPL 交互调试     ← disabled (no dot, tag below)
-        //        tty-python-repl  [disabled]
+        //   [🐍] Python REPL 交互调试      ← disabled (no dot)
+        //        tty-python-repl  📝  [disabled]
 
         const node = {
             id:         s.id,
@@ -265,20 +282,20 @@ export class SkillsEngine implements ISessionEngine {
             modifiedAt: s.modifiedAt ?? Date.now(),
             moduleId:   'skills',
             metadata:   {
-                title:        s.name,
-                tags:         s.enabled ? [] : ['disabled'],
-                lastModified: s.modifiedAt ?? Date.now(),
-                custom:       {
-                    skillType:       s.type,
-                    enabled:         s.enabled,
-                    hasUnreadUpdate: s.enabled,  // green dot = skill is active/enabled
-                },
+                title:           s.name,
+                tags:            s.enabled ? [] : ['disabled'],
+                lastModified:    s.modifiedAt ?? Date.now(),
+                // top-level → spread into VFSNodeUI.metadata.custom
+                hasUnreadUpdate: s.enabled,   // ← green dot when enabled
+                skillType:       s.type,
+                enabled:         s.enabled,
             },
         } as EngineNode;
 
-        // Summary line = skill ID (with showSummary: true in WS_SKILLS defaults).
+        // Summary line: "essay-review-cn  📝" — ID + type icon.
+        // parseFileInfo() uses the first line as the summary text.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (node as any).content = s.id;
+        (node as any).content = `${s.id}  ${SKILL_TYPE_ICON[s.type] ?? '⚡'}`;
 
         return node;
     }
