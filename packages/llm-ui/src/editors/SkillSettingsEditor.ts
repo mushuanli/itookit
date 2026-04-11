@@ -1,30 +1,20 @@
 // @file llm-ui/editors/SkillSettingsEditor.ts
-import { BaseSettingsEditor, Toast, Modal, generateShortUUID } from '@itookit/common';
+import { BaseSettingsEditor, Toast, Modal, generateShortUUID, t, SKILL_TYPE_META, ENTITY_ICONS } from '@itookit/common';
 import type { LLMSkill, LLMSkillType, IAgentManagementService } from '@itookit/common';
 
-// ─── helpers ──────────────────────────────────────────────────────────────────
-
-const TYPE_META: Record<LLMSkillType, { label: string; icon: string; color: string }> = {
-    prompt:  { label: 'Prompt',  icon: '📝',  color: '#10b981' },
-    shell:   { label: 'Shell',   icon: '🖥️',  color: '#8b5cf6' },
-    mcp:     { label: 'MCP',     icon: '🔌',  color: '#f97316' },
-    http:    { label: 'HTTP',    icon: '🌐',  color: '#0ea5e9' },
-    builtin: { label: 'Builtin', icon: '⚙️',  color: '#6366f1' },
-    custom:  { label: 'Custom',  icon: '🔧',  color: '#f59e0b' },
-};
-
 function typeBadge(type: LLMSkillType) {
-    const m = TYPE_META[type] ?? TYPE_META.custom;
+    const m = SKILL_TYPE_META[type] ?? SKILL_TYPE_META.custom;
+    const label = t(`skillType.${type}` as Parameters<typeof t>[0]);
     return `<span class="settings-badge" style="background:${m.color}15;color:${m.color};
                 border:1px solid ${m.color}30;font-size:.75rem">
-                ${m.icon} ${m.label}
+                ${m.icon} ${label}
             </span>`;
 }
 
 function enabledBadge(enabled: boolean) {
     return enabled
-        ? `<span class="settings-badge settings-badge--success">启用</span>`
-        : `<span class="settings-badge" style="color:var(--st-text-tertiary)">停用</span>`;
+        ? `<span class="settings-badge settings-badge--success">${t('status.enabled')}</span>`
+        : `<span class="settings-badge" style="color:var(--st-text-tertiary)">${t('status.disabled')}</span>`;
 }
 
 // ─── SkillSettingsEditor ──────────────────────────────────────────────────────
@@ -55,9 +45,10 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
                             <i class="fas fa-bolt" style="margin-right:.5rem;opacity:.7"></i>Skills
                         </h3>
                         <div class="settings-page__actions">
-                            <button class="settings-btn-round" data-action="add"    title="新建 Skill"><i class="fas fa-plus"></i></button>
-                            <button class="settings-btn-round" data-action="import" title="导入配置"><i class="fas fa-file-import"></i></button>
-                            <button class="settings-btn-round" data-action="export" title="导出全部"><i class="fas fa-file-export"></i></button>
+                            <button class="settings-btn-round" data-action="add"          title="${t('skill.addNew')}"><i class="fas fa-plus"></i></button>
+                            <button class="settings-btn-round" data-action="import"       title="${t('skill.import.fileTooltip')}"><i class="fas fa-folder-open"></i></button>
+                            <button class="settings-btn-round" data-action="import-paste" title="${t('skill.import.pasteTooltip')}"><i class="fas fa-clipboard"></i></button>
+                            <button class="settings-btn-round" data-action="export"       title="${t('skill.exportAll')}"><i class="fas fa-file-export"></i></button>
                         </div>
                     </div>
 
@@ -79,24 +70,30 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
     private renderEmptyList() {
         return `
             <div class="settings-empty settings-empty--mini">
-                <div class="settings-empty__icon" style="font-size:2rem">⚡</div>
-                <p style="margin:.5rem 0">暂无 Skill</p>
-                <button class="settings-btn settings-btn--primary settings-btn--sm" data-action="add">
-                    <i class="fas fa-plus"></i> 新建第一个
-                </button>
+                <div class="settings-empty__icon" style="font-size:2rem">${ENTITY_ICONS.skill}</div>
+                <p style="margin:.5rem 0">${t('skill.empty.text')}</p>
+                <div style="display:flex;gap:.5rem;flex-wrap:wrap;justify-content:center">
+                    <button class="settings-btn settings-btn--primary settings-btn--sm" data-action="add">
+                        <i class="fas fa-plus"></i> ${t('skill.empty.action')}
+                    </button>
+                    <button class="settings-btn settings-btn--secondary settings-btn--sm" data-action="import">
+                        <i class="fas fa-folder-open"></i> ${t('skill.import.fileLabel')}
+                    </button>
+                </div>
             </div>`;
     }
 
     private renderListItem(skill: LLMSkill) {
         const isSelected = skill.id === this.selectedId;
-        const meta = TYPE_META[skill.type] ?? TYPE_META.custom;
+        const meta = SKILL_TYPE_META[skill.type] ?? SKILL_TYPE_META.custom;
+        const typeLabel = t(`skillType.${skill.type}` as Parameters<typeof t>[0]);
         return `
             <div class="settings-list-item ${isSelected ? 'selected' : ''}" data-id="${skill.id}" style="cursor:pointer">
                 <span class="settings-list-item__icon" style="font-size:1.25rem">${skill.icon || meta.icon}</span>
                 <div class="settings-list-item__info" style="min-width:0">
                     <div class="settings-list-item__title" data-name-for="${skill.id}"
-                         title="双击重命名" style="cursor:text">${skill.name}</div>
-                    <div class="settings-list-item__desc">${meta.label}${skill.endpoint ? ' · ' + this.shortUrl(skill.endpoint) : ''}</div>
+                         title="${t('tooltip.dblClickRename')}" style="cursor:text">${skill.name}</div>
+                    <div class="settings-list-item__desc">${typeLabel}${skill.endpoint ? ' · ' + this.shortUrl(skill.endpoint) : ''}</div>
                 </div>
                 ${enabledBadge(skill.enabled)}
             </div>`;
@@ -109,7 +106,7 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
     // ─── Detail ─────────────────────────────────────────────────────────────
 
     private renderDetail(skill: LLMSkill, mcpServers: import('@itookit/common').MCPServer[]) {
-        const meta     = TYPE_META[skill.type] ?? TYPE_META.custom;
+        const meta     = SKILL_TYPE_META[skill.type] ?? SKILL_TYPE_META.custom;
         const isHTTP   = skill.type === 'http';
         const isShell  = skill.type === 'shell';
         const isPrompt = skill.type === 'prompt';
@@ -125,30 +122,30 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
                     <div style="min-width:0">
                         <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
                             <input name="header-name" value="${skill.name}"
-                                placeholder="Skill 名称"
+                                placeholder="${t('skill.placeholder.name')}"
                                 style="font-size:1.125rem;font-weight:700;color:var(--st-text-primary);
                                        background:transparent;border:0;border-bottom:2px solid transparent;
                                        outline:none;padding:0 0 1px;font-family:inherit;
                                        width:auto;min-width:60px;max-width:280px;cursor:text;
                                        transition:border-color .15s"
-                                title="点击编辑名称，Enter 或失焦保存">
+                                title="${t('tooltip.clickEditName')}">
                             ${typeBadge(skill.type)}
                             ${enabledBadge(skill.enabled)}
                         </div>
                         <div style="font-size:.8125rem;color:var(--st-text-secondary);margin-top:.125rem">
-                            ${skill.description || '暂无描述'}
+                            ${skill.description || t('status.noDesc')}
                         </div>
                     </div>
                 </div>
                 <div style="display:flex;gap:.5rem;flex-shrink:0">
                     ${isHTTP ? `
-                    <button class="settings-btn settings-btn--secondary" data-action="test" title="发送空请求测试连通性">
-                        <i class="fas fa-vial"></i> 测试
+                    <button class="settings-btn settings-btn--secondary" data-action="test" title="${t('tooltip.testConnection')}">
+                        <i class="fas fa-vial"></i> ${t('action.test')}
                     </button>` : ''}
                     <button class="settings-btn settings-btn--primary" data-action="save">
-                        <i class="fas fa-save"></i> 保存
+                        <i class="fas fa-save"></i> ${t('action.save')}
                     </button>
-                    <button class="settings-btn settings-btn--danger" data-action="delete" title="删除">
+                    <button class="settings-btn settings-btn--danger" data-action="delete" title="${t('action.delete')}">
                         <i class="fas fa-trash"></i>
                     </button>
                 </div>
@@ -159,63 +156,63 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
 
                 <!-- Basic Info -->
                 <div class="settings-section">
-                    <h3 class="settings-section__title">基础信息</h3>
+                    <h3 class="settings-section__title">${t('skill.section.basic')}</h3>
                     <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
                         <div class="settings-form-group">
-                            <label>名称</label>
-                            <input class="settings-input" name="name" value="${skill.name}" placeholder="My Skill">
+                            <label>${t('form.name')}</label>
+                            <input class="settings-input" name="name" value="${skill.name}" placeholder="${t('skill.placeholder.name')}">
                         </div>
                         <div class="settings-form-group">
-                            <label>图标 <span style="color:var(--st-text-tertiary);font-size:.8em">emoji</span></label>
+                            <label>${t('form.icon')} <span style="color:var(--st-text-tertiary);font-size:.8em">emoji</span></label>
                             <input class="settings-input" name="icon" value="${skill.icon || ''}" placeholder="${meta.icon}">
                         </div>
                     </div>
                     <div class="settings-form-group">
-                        <label>描述</label>
+                        <label>${t('form.description')}</label>
                         <textarea class="settings-textarea" name="description" rows="2"
-                            placeholder="简述此 Skill 的功能">${skill.description || ''}</textarea>
+                            placeholder="${t('skill.placeholder.desc')}">${skill.description || ''}</textarea>
                     </div>
                     <div style="display:grid;grid-template-columns:1fr auto;gap:.75rem;align-items:end">
                         <div class="settings-form-group" style="margin-bottom:0">
-                            <label>类型</label>
+                            <label>${t('form.type')}</label>
                             <select class="settings-select" name="type">
-                                <option value="prompt"  ${skill.type === 'prompt'  ? 'selected' : ''}>📝 Prompt — Markdown 指令注入</option>
-                                <option value="shell"   ${skill.type === 'shell'   ? 'selected' : ''}>🖥️ Shell — 本地命令执行</option>
-                                <option value="mcp"     ${skill.type === 'mcp'     ? 'selected' : ''}>🔌 MCP — 引用 MCP Server 工具</option>
-                                <option value="http"    ${skill.type === 'http'    ? 'selected' : ''}>🌐 HTTP — 远程 REST 端点</option>
-                                <option value="builtin" ${skill.type === 'builtin' ? 'selected' : ''}>⚙️ Builtin — 代码内置函数</option>
-                                <option value="custom"  ${skill.type === 'custom'  ? 'selected' : ''}>🔧 Custom — 自定义扩展</option>
+                                <option value="prompt"  ${skill.type === 'prompt'  ? 'selected' : ''}>${SKILL_TYPE_META.prompt.icon} Prompt — ${t('skillType.prompt.desc')}</option>
+                                <option value="shell"   ${skill.type === 'shell'   ? 'selected' : ''}>${SKILL_TYPE_META.shell.icon} Shell — ${t('skillType.shell.desc')}</option>
+                                <option value="mcp"     ${skill.type === 'mcp'     ? 'selected' : ''}>${SKILL_TYPE_META.mcp.icon} MCP — ${t('skillType.mcp.desc')}</option>
+                                <option value="http"    ${skill.type === 'http'    ? 'selected' : ''}>${SKILL_TYPE_META.http.icon} HTTP — ${t('skillType.http.desc')}</option>
+                                <option value="builtin" ${skill.type === 'builtin' ? 'selected' : ''}>${SKILL_TYPE_META.builtin.icon} Builtin — ${t('skillType.builtin.desc')}</option>
+                                <option value="custom"  ${skill.type === 'custom'  ? 'selected' : ''}>${SKILL_TYPE_META.custom.icon} Custom — ${t('skillType.custom.desc')}</option>
                             </select>
                         </div>
                         <div class="settings-checkbox-row" style="padding-bottom:.5rem;white-space:nowrap">
                             <input type="checkbox" id="skill-enabled" name="enabled" ${skill.enabled ? 'checked' : ''}>
-                            <label for="skill-enabled">启用此 Skill</label>
+                            <label for="skill-enabled">${t('skill.enabled.label')}</label>
                         </div>
                     </div>
                 </div>
 
                 <!-- Prompt Instructions (type=prompt) -->
                 <div class="settings-section" id="prompt-section" style="${isPrompt ? '' : 'display:none'}">
-                    <h3 class="settings-section__title">Markdown 指令</h3>
+                    <h3 class="settings-section__title">${t('skill.section.prompt')}</h3>
                     <p style="font-size:.8125rem;color:var(--st-text-secondary);margin:0 0 .75rem">
-                        此内容将注入到 LLM 的 system prompt。适合编写操作规范、代码风格约定、领域知识等。
+                        ${t('skill.hint.prompt')}
                     </p>
                     <textarea class="settings-textarea" name="instructions" rows="14"
                         style="font-family:monospace;font-size:.8125rem;resize:vertical"
-                        placeholder="# 操作规范&#10;&#10;- 永远使用 TypeScript strict 模式&#10;- 函数不超过 30 行&#10;..."
+                        placeholder="${t('skill.placeholder.instructions').replace(/\\n/g, '&#10;')}"
                         >${skill.instructions || ''}</textarea>
                 </div>
 
                 <!-- MCP Config (type=mcp) -->
                 <div class="settings-section" id="mcp-section" style="${isMCP ? '' : 'display:none'}">
-                    <h3 class="settings-section__title">MCP 工具引用</h3>
+                    <h3 class="settings-section__title">${t('skill.section.mcp')}</h3>
                     <p style="font-size:.8125rem;color:var(--st-text-secondary);margin:0 0 .75rem">
-                        选择已配置的 MCP Server 和具体工具。端点、认证、参数 Schema 自动继承——比 HTTP Skill 更简洁。
+                        ${t('skill.hint.mcpDesc')}
                     </p>
                     <div class="settings-form-group">
-                        <label>MCP Server</label>
+                        <label>${t('skill.mcp.serverLabel')}</label>
                         <select class="settings-select" name="mcpServerId" id="mcp-server-select">
-                            <option value="">— 选择服务器 —</option>
+                            <option value="">${t('skill.mcp.serverEmpty')}</option>
                             ${mcpServers.map(s => `
                                 <option value="${s.id}" ${skill.mcpServerId === s.id ? 'selected' : ''}>
                                     ${s.icon || '🔌'} ${s.name}
@@ -224,14 +221,14 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
                         ${mcpServers.length === 0 ? `
                             <p style="font-size:.75rem;color:var(--st-color-warning,#f59e0b);margin:.375rem 0 0">
                                 <i class="fas fa-exclamation-triangle"></i>
-                                尚无配置的 MCP Server，请先在 MCP Servers 标签页中添加
+                                ${t('skill.hint.noMcpServer')}
                             </p>` : ''}
                     </div>
                     <div class="settings-form-group" id="mcp-tool-group"
                          style="${skill.mcpServerId ? '' : 'display:none'}">
-                        <label>工具</label>
+                        <label>${t('skill.mcp.toolLabel')}</label>
                         <select class="settings-select" name="mcpToolName" id="mcp-tool-select">
-                            <option value="">— 选择工具 —</option>
+                            <option value="">${t('skill.mcp.toolEmpty')}</option>
                             ${this.renderMcpToolOptions(skill.mcpServerId, skill.mcpToolName, mcpServers)}
                         </select>
                     </div>
@@ -239,38 +236,38 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
                         <div style="padding:.625rem .875rem;background:var(--st-surface-secondary,#f9fafb);
                                     border-radius:6px;font-size:.8125rem;color:var(--st-text-secondary)">
                             <i class="fas fa-info-circle"></i>
-                            参数 Schema 由 MCP Server 的工具定义自动提供，无需手动填写。
+                            ${t('skill.hint.mcpAutoParams')}
                         </div>` : ''}
                 </div>
 
                 <!-- Shell Config (type=shell) -->
                 <div class="settings-section" id="shell-section" style="${isShell ? '' : 'display:none'}">
-                    <h3 class="settings-section__title">Shell 命令</h3>
+                    <h3 class="settings-section__title">${t('skill.section.shell')}</h3>
                     <div class="settings-form-group">
                         <label>
-                            命令模板
-                            <span style="color:var(--st-text-tertiary);font-size:.8em">支持 {{argName}} 占位符</span>
+                            ${t('skill.shell.commandLabel')}
+                            <span style="color:var(--st-text-tertiary);font-size:.8em">${t('skill.shell.commandHint')}</span>
                         </label>
                         <input class="settings-input" name="command" style="font-family:monospace"
                             value="${skill.command || ''}"
-                            placeholder="git log --oneline -{{n}} -- {{path}}">
+                            placeholder="${t('skill.shell.placeholder')}">
                     </div>
                     <p style="font-size:.75rem;color:var(--st-text-tertiary);margin:.25rem 0 0">
-                        LLM 传入的参数会替换 <code>{{argName}}</code> 占位符后执行。在 Parameters Schema 中定义参数格式。
+                        ${t('skill.hint.shell')}
                     </p>
                 </div>
 
                 <!-- HTTP Config (type=http) -->
                 <div class="settings-section" id="http-section" style="${isHTTP ? '' : 'display:none'}">
-                    <h3 class="settings-section__title">HTTP 端点配置</h3>
+                    <h3 class="settings-section__title">${t('skill.section.http')}</h3>
                     <div class="settings-form-group">
-                        <label>Endpoint URL</label>
+                        <label>${t('form.endpoint')}</label>
                         <input class="settings-input" type="url" name="endpoint"
                             value="${skill.endpoint || ''}" placeholder="https://api.example.com/skill">
                     </div>
                     <div style="display:grid;grid-template-columns:120px 1fr;gap:.75rem">
                         <div class="settings-form-group" style="margin-bottom:0">
-                            <label>Method</label>
+                            <label>${t('form.method')}</label>
                             <select class="settings-select" name="method">
                                 <option value="POST" ${(skill.method ?? 'POST') === 'POST' ? 'selected' : ''}>POST</option>
                                 <option value="GET"  ${skill.method === 'GET'  ? 'selected' : ''}>GET</option>
@@ -278,15 +275,15 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
                             </select>
                         </div>
                         <div class="settings-form-group" style="margin-bottom:0">
-                            <label>Authorization <span style="color:var(--st-text-tertiary);font-size:.8em">可选</span></label>
+                            <label>${t('form.auth')} <span style="color:var(--st-text-tertiary);font-size:.8em">可选</span></label>
                             <input class="settings-input" type="password" name="auth-header"
                                 value="${skill.headers?.Authorization || ''}" placeholder="Bearer sk-...">
                         </div>
                     </div>
                     <div class="settings-form-group">
                         <label>
-                            额外请求头
-                            <span style="color:var(--st-text-tertiary);font-size:.8em">JSON，不含 Authorization</span>
+                            ${t('form.headers')}
+                            <span style="color:var(--st-text-tertiary);font-size:.8em">${t('form.headersHint')}</span>
                         </label>
                         <textarea class="settings-textarea" name="headers" rows="3"
                             style="font-family:monospace;font-size:.8125rem"
@@ -297,16 +294,16 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
                 <!-- Parameters Schema (http / shell only; prompt + mcp auto-derive) -->
                 <div class="settings-section" id="params-section" style="${isPrompt || isMCP ? 'display:none' : ''};margin-bottom:0">
                     <h3 class="settings-section__title" style="display:flex;align-items:center;gap:.5rem">
-                        Parameters Schema
+                        ${t('skill.section.params')}
                         <span style="font-size:.75rem;font-weight:400;color:var(--st-text-tertiary)">
-                            JSON Schema — LLM 调用此 Skill 的参数格式
+                            JSON Schema
                         </span>
                     </h3>
                     <textarea class="settings-textarea" name="parameters" rows="10"
                         style="font-family:monospace;font-size:.8125rem;resize:vertical"
-                        placeholder='{\n  "type": "object",\n  "properties": {\n    "query": {\n      "type": "string",\n      "description": "搜索关键词"\n    }\n  },\n  "required": ["query"]\n}'>${params}</textarea>
+                        placeholder="${t('skill.param.placeholder')}">${params}</textarea>
                     <p style="font-size:.75rem;color:var(--st-text-tertiary);margin:.375rem 0 0">
-                        留空则 LLM 将以无参数形式调用此 Skill
+                        ${t('skill.hint.params')}
                     </p>
                 </div>
             </div>`;
@@ -321,7 +318,7 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
         const server = mcpServers.find(s => s.id === serverId);
         const tools = (server?.tools as any[] | undefined) ?? [];
         if (tools.length === 0) {
-            return `<option value="" disabled>（该服务器暂无工具，请先连接）</option>`;
+            return `<option value="" disabled>${t('skill.hint.noMcpTools')}</option>`;
         }
         return tools.map((t: any) =>
             `<option value="${t.name}" ${selectedTool === t.name ? 'selected' : ''}>${t.name}${t.description ? ' — ' + t.description : ''}</option>`
@@ -337,14 +334,19 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
     private renderEmptyState() {
         return `
             <div class="settings-empty" style="height:100%;justify-content:center">
-                <div class="settings-empty__icon">⚡</div>
-                <div class="settings-empty__title">选择一个 Skill</div>
+                <div class="settings-empty__icon">${ENTITY_ICONS.skill}</div>
+                <div class="settings-empty__title">${t('skill.select.title')}</div>
                 <p style="color:var(--st-text-tertiary);font-size:.875rem;text-align:center;max-width:280px">
-                    Skills 让 LLM 能够调用 HTTP API、内置函数或自定义代码
+                    ${t('skill.select.desc')}
                 </p>
-                <button class="settings-btn settings-btn--primary" data-action="add">
-                    <i class="fas fa-plus"></i> 新建 Skill
-                </button>
+                <div style="display:flex;gap:.5rem;flex-wrap:wrap;justify-content:center">
+                    <button class="settings-btn settings-btn--primary" data-action="add">
+                        <i class="fas fa-plus"></i> ${t('skill.select.action')}
+                    </button>
+                    <button class="settings-btn settings-btn--secondary" data-action="import">
+                        <i class="fas fa-folder-open"></i> ${t('skill.import.fileLabel')}
+                    </button>
+                </div>
             </div>`;
     }
 
@@ -400,9 +402,10 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
         }
 
         // ── Action buttons ─────────────────────────────────────────────────────
-        this.bindAction('add',    () => this.addNew());
-        this.bindAction('import', () => this.showImport());
-        this.bindAction('export', () => this.exportAll());
+        this.bindAction('add',          () => this.addNew());
+        this.bindAction('import',       () => this.showImport());
+        this.bindAction('import-paste', () => this.showPasteImport());
+        this.bindAction('export',       () => this.exportAll());
         this.bindAction('save',   () => this.saveCurrent());
         this.bindAction('delete', () => this.deleteCurrent());
         this.bindAction('test',   () => this.testCurrent());
@@ -433,7 +436,7 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
                 const serverId = mcpServerSel.value;
                 mcpToolGroup.style.display = serverId ? '' : 'none';
                 mcpToolSel.innerHTML =
-                    '<option value="">— 选择工具 —</option>' +
+                    `<option value="">${t('skill.mcp.toolEmpty')}</option>` +
                     this.renderMcpToolOptions(serverId, undefined, mcpServers);
             });
         }
@@ -571,7 +574,7 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
         const rawParams = this.val('parameters').trim();
         if (rawParams) {
             try { parameters = JSON.parse(rawParams); }
-            catch { Toast.error('Parameters 不是合法 JSON'); return; }
+            catch { Toast.error(t('skill.toast.invalidParams')); return; }
         }
 
         // Build headers (merge Authorization back in)
@@ -580,7 +583,7 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
         const rawHdrs = this.val('headers').trim();
         if (rawHdrs) {
             try { headers = JSON.parse(rawHdrs); }
-            catch { Toast.error('Headers 不是合法 JSON'); return; }
+            catch { Toast.error(t('skill.toast.invalidHeaders')); return; }
         }
         if (authVal) headers = { ...(headers ?? {}), Authorization: authVal };
 
@@ -608,16 +611,16 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
             modifiedAt:   Date.now(),
         };
         await this.service.saveSkill(updated);
-        Toast.success('已保存');
+        Toast.success(t('skill.toast.saved'));
         await this.render(); // ← refresh badges in header and list item
     }
 
     private deleteCurrent() {
         if (!this.selectedId) return;
-        Modal.confirm('删除确认', '确定要删除此 Skill？此操作不可撤销。', async () => {
+        Modal.confirm(t('dialog.delete.title'), t('skill.confirm.delete'), async () => {
             await this.service.deleteSkill(this.selectedId!);
             this.selectedId = null;
-            Toast.success('已删除');
+            Toast.success(t('skill.toast.deleted'));
             await this.render(); // ← refresh list, clear detail panel
         });
     }
@@ -627,15 +630,15 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
         const skills = await this.service.getSkills();
         const skill  = skills.find(s => s.id === this.selectedId);
         if (!skill) return;
-        if (skill.type === 'prompt') { Toast.info('Prompt 类型 Skill 内容直接注入 system prompt，无需测试'); return; }
-        if (skill.type === 'mcp')    { Toast.info('MCP Skill 通过 MCP Server 连接测试，请在 MCP Servers 标签页中测试服务器连通性'); return; }
-        if (skill.type !== 'http')   { Toast.error('测试功能仅支持 HTTP 类型 Skill'); return; }
-        if (!skill.endpoint)         { Toast.error('请先保存 Endpoint URL'); return; }
+        if (skill.type === 'prompt') { Toast.info(t('skill.toast.testPrompt')); return; }
+        if (skill.type === 'mcp')    { Toast.info(t('skill.toast.testMcp')); return; }
+        if (skill.type !== 'http')   { Toast.error(t('skill.toast.testNotHttp')); return; }
+        if (!skill.endpoint)         { Toast.error(t('skill.toast.testNoEndpoint')); return; }
 
         const btn = this.container.querySelector<HTMLButtonElement>('[data-action="test"]');
         if (!btn) return;
         const originalHTML = btn.innerHTML;
-        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 测试中…';
+        btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${t('status.testing')}`;
         btn.disabled  = true;
 
         try {
@@ -644,25 +647,97 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
                 headers: { 'Content-Type': 'application/json', ...skill.headers },
                 body:    JSON.stringify({}),
             });
-            res.ok ? Toast.success(`连接成功 (HTTP ${res.status})`)
-                   : Toast.error(`HTTP ${res.status} — 请检查 Endpoint`);
+            res.ok ? Toast.success(t('skill.toast.testSuccess', { status: res.status }))
+                   : Toast.error(t('skill.toast.testFailed', { status: res.status }));
         } catch (e: unknown) {
-            Toast.error(`连接失败: ${(e as Error).message}`);
+            Toast.error(t('skill.toast.testError', { message: (e as Error).message }));
         } finally {
             btn.innerHTML = originalHTML;
             btn.disabled  = false;
         }
     }
 
+    /**
+     * Import via file picker (primary) or paste JSON (secondary).
+     *
+     * A hidden <input type="file"> is created on demand and immediately clicked.
+     * Each selected file may contain a single LLMSkill object or an array.
+     * All files are read in parallel and their skills are imported in one batch.
+     *
+     * After file import, a "Paste JSON" fallback is still available via a
+     * secondary action shown in the import result area.
+     */
     private showImport() {
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.accept = '.json,application/json';
+        fileInput.multiple = true;
+        fileInput.style.display = 'none';
+        document.body.appendChild(fileInput);
+
+        fileInput.addEventListener('change', async () => {
+            const files = Array.from(fileInput.files ?? []);
+            document.body.removeChild(fileInput);
+            if (files.length === 0) return;
+
+            const results = await Promise.allSettled(
+                files.map(f => f.text()),
+            );
+
+            const skills: LLMSkill[] = [];
+            const errors: string[] = [];
+
+            for (let i = 0; i < results.length; i++) {
+                const r = results[i];
+                if (r.status === 'rejected') {
+                    errors.push(t('skill.import.readError', { filename: files[i].name }));
+                    continue;
+                }
+                try {
+                    const data = JSON.parse(r.value);
+                    const arr: LLMSkill[] = Array.isArray(data) ? data : [data];
+                    skills.push(...arr);
+                } catch {
+                    errors.push(`${files[i].name}: ${t('skill.toast.invalidJson')}`);
+                }
+            }
+
+            if (errors.length > 0) {
+                Toast.error(errors.join('\n'));
+            }
+
+            if (skills.length === 0) return;
+
+            let lastId = '';
+            for (const item of skills) {
+                item.id      = item.id      ?? `skill-${generateShortUUID()}`;
+                item.enabled = item.enabled ?? false;
+                await this.service.saveSkill(item);
+                lastId = item.id;
+            }
+            Toast.success(t('skill.toast.imported', { count: skills.length }));
+            if (lastId) this.selectedId = lastId;
+            await this.render();
+        });
+
+        // Cancel also removes the hidden element
+        fileInput.addEventListener('cancel', () => {
+            document.body.removeChild(fileInput);
+        });
+
+        fileInput.click();
+    }
+
+    /** Paste-JSON fallback — kept for users who copy from clipboard or CI pipelines. */
+    private showPasteImport() {
         const body = `
             <p style="font-size:.875rem;color:var(--st-text-secondary);margin:0 0 .75rem">
-                粘贴 JSON 数组或单个对象</p>
+                ${t('dialog.import.hint')}</p>
             <textarea class="settings-textarea" id="import-json" rows="8"
                 style="font-family:monospace;font-size:.8125rem"
-                placeholder='[{"name":"My Skill","type":"http","endpoint":"..."}]'></textarea>`;
-        new Modal('导入 Skills', body, {
-            confirmText: '导入',
+                placeholder='[{"name":"My Skill","type":"prompt","instructions":"..."}]'></textarea>`;
+        new Modal(t('skill.import.title'), body, {
+            confirmText: t('dialog.import.action'),
             onConfirm: async () => {
                 const text = (document.getElementById('import-json') as HTMLTextAreaElement)?.value ?? '';
                 try {
@@ -673,12 +748,12 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
                         item.enabled = item.enabled ?? false;
                         await this.service.saveSkill(item);
                     }
-                    Toast.success(`已导入 ${arr.length} 个 Skill`);
+                    Toast.success(t('skill.toast.imported', { count: arr.length }));
                     if (arr.length > 0) this.selectedId = arr[arr.length - 1].id;
-                    await this.render(); // ← refresh after import
+                    await this.render();
                 } catch {
-                    Toast.error('JSON 格式错误');
-                    return false; // keep modal open
+                    Toast.error(t('skill.toast.invalidJson'));
+                    return false;
                 }
             },
         }).show();

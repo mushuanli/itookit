@@ -55,6 +55,10 @@ import { SlashCommandPlugin } from '../components/input/plugins/SlashCommandPlug
 import type { SlashCommandCallbacks } from '../components/input/plugins/SlashCommandPlugin';
 import { HarnessPlugin } from '../components/input/plugins/HarnessPlugin';
 import { getPromptHistory, getHarnessAdapter } from '@itookit/llm-engine';
+import {
+    buildSkillPrompt, getShellTemplateParams, getMissingParams, buildWizardRefill,
+} from '../components/input/SkillInvocationParser';
+import type { SkillInvocation } from '../components/input/SkillInvocationParser';
 
 export interface LLMEditorOptions extends EditorOptions {
     sessionEngine: ILLMSessionEngine;
@@ -1198,19 +1202,17 @@ export class LLMWorkspaceEditor implements IEditor {
         const skillSvc = getHarnessAdapter()?.getSkillService();
         if (!skillSvc) return {};
 
+        const runtime = getHarnessAdapter()?.getRuntime();
+
         return {
+            // ── Load-only (existing behavior for /skill <id>) ─────────────────
             onSkill: async (skillId: string) => {
                 const result = await skillSvc.loadSkill(skillId);
                 if (result.success) {
                     Toast.success(`Skill "${skillId}" loaded (${result.toolIds.length} tools)`);
-                    // Refresh skill panel if settings are open
                     const skills = skillSvc.listSkills().map((s) => ({
-                        id: s.id,
-                        name: s.name,
-                        description: s.description,
-                        loaded: s.id === skillId ? true : false,
-                        toolCount: s.tools?.length ?? 0,
-                        icon: s.icon,
+                        id: s.id, name: s.name, description: s.description,
+                        loaded: s.id === skillId, toolCount: s.tools?.length ?? 0, icon: s.icon,
                     }));
                     (this.chatInput as ChatInput & { refreshSkills?: (s: unknown[]) => void }).refreshSkills?.(skills);
                 } else {
@@ -1219,28 +1221,109 @@ export class LLMWorkspaceEditor implements IEditor {
             },
 
             onSkills: () => {
-                // Open settings panel — toggle it via the settings button
                 const settingsBtn = document.querySelector('.llm-input__btn--settings') as HTMLButtonElement | null;
                 settingsBtn?.click();
             },
 
             onTools: () => {
-                const tools = getHarnessAdapter()?.getSkillService()
-                    ? skillSvc.listSkills()
-                        .filter((s) => s.enabled)
-                        .flatMap((s) => s.tools.map((t) => `${t.toolId} (${s.name})`))
-                    : [];
+                const tools = skillSvc.listSkills()
+                    .filter((s) => s.enabled)
+                    .flatMap((s) => s.tools.map((t) => `${t.toolId} (${s.name})`));
                 const toolService = (getHarnessAdapter() as unknown as {
                     toolService?: { listTools(): Array<{ id: string }> }
                 })?.toolService;
-                const builtinTools = toolService?.listTools().map((t) => t.id) ?? [
-                    'file_read', 'file_write', 'shell_exec', 'glob_search', 'grep_search',
-                ];
-                Toast.info(
-                    `Available tools:\n${builtinTools.concat(tools).join('\n  ')}`
-                );
+                const builtinTools = toolService?.listTools().map((t) => t.id) ??
+                    ['file_read', 'file_write', 'shell_exec', 'glob_search', 'grep_search'];
+                Toast.info(`Available tools:\n${builtinTools.concat(tools).join('\n  ')}`);
+            },
+
+            // ── Dynamic skill list for slash popup ─────────────────────────────
+            getSkills: () => {
+                const session = runtime?.getCurrentSession();
+                const loadedIds = new Set(session?.loadedSkills ?? []);
+                return skillSvc.listSkills().map((s) => ({
+                    id: s.id,
+                    name: s.name,
+                    description: s.description,
+                    loaded: loadedIds.has(s.id),
+                    toolCount: s.tools?.length ?? 0,
+                    icon: s.icon,
+                }));
+            },
+
+            // ── Parameterized skill invocation (/skillname @file --arg text) ───
+            onSkillInvoke: async (invocation: SkillInvocation) => {
+                await this.executeSkillInvocation(invocation, skillSvc);
             },
         };
+    }
+
+    /**
+     * Execute a skill invocation with file resolution, glob expansion,
+     * missing-arg wizard, and prompt building.
+     */
+    private async executeSkillInvocation(
+        invocation: SkillInvocation,
+        skillSvc: import('@itookit/common').ISkillService,
+    ): Promise<void> {
+        const skill = skillSvc.getSkill(invocation.skillId);
+
+        // 1. Load the skill if not already loaded
+        if (skill) {
+            const result = await skillSvc.loadSkill(invocation.skillId);
+            if (!result.success) {
+                Toast.error(`Failed to load skill "${invocation.skillId}": ${result.error}`);
+                return;
+            }
+        } else {
+            Toast.error(`Skill "${invocation.skillId}" not found. Use /skills to browse available skills.`);
+            return;
+        }
+
+        // 2. Check for missing required params (shell skills with {{placeholder}} templates)
+        if (skill.type === 'shell') {
+            const shellCmd = skill.tools.find((t) => t.executionType === 'shell' && t.command)?.command;
+            if (shellCmd) {
+                const required = getShellTemplateParams(shellCmd);
+                const missing = getMissingParams(required, invocation.args);
+                if (missing.length > 0) {
+                    const refill = buildWizardRefill(invocation, missing);
+                    this.chatInput.restoreInput(refill);
+                    this.chatInput.focus();
+                    Toast.error(
+                        `Missing: ${missing.map(m => `--${m}`).join(', ')} — fill blanks (___) and press Enter.`,
+                    );
+                    return;
+                }
+            }
+        }
+
+        // 3. Expand glob patterns → resolve to concrete file paths
+        let resolvedFilePaths = [...invocation.filePaths];
+        if (invocation.globPatterns.length > 0) {
+            const engine = this.options.sessionEngine;
+            for (const pattern of invocation.globPatterns) {
+                try {
+                    const results = await engine.search({ text: pattern, type: 'file', limit: 50 });
+                    const paths = results
+                        .filter((n) => n.type === 'file')
+                        .map((n) => n.path.startsWith('/') ? `.${n.path}` : `./${n.path}`);
+                    resolvedFilePaths = [...resolvedFilePaths, ...paths];
+                } catch { /* ignore, best-effort */ }
+            }
+        }
+
+        // 4. Build the prompt for the agent
+        const fullInvocation = { ...invocation, filePaths: resolvedFilePaths };
+        const prompt = buildSkillPrompt(fullInvocation, skill.name, skill.type);
+
+        // 5. Send (AttachmentProcessor resolves [name](path) markdown links)
+        const agentId = this.chatInput.getConfig().agentId;
+        const overrides = this.chatInput.getConfig().settings.useHarness
+            ? { useHarness: true, workingDirectory: this.chatInput.getConfig().settings.workingDirectory }
+            : {};
+
+        await this.sendCommand.run({ text: prompt, files: [], agentId, overrides });
     }
 
     /**

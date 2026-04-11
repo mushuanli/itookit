@@ -1,27 +1,21 @@
 // @file: llm-ui/utils/iconResolver.ts
 
 import { ExecutionNode } from '@itookit/llm-engine';
+import { EXECUTOR_TYPE_ICONS, ENTITY_ICONS } from '@itookit/common';
 
 /**
  * Agent/Node 图标解析器
- * 
- * 统一的图标决策逻辑，消除 NodeRenderer 和 SessionRenderer 中的重复
+ *
+ * 统一的图标决策逻辑，消除 NodeRenderer 和 SessionRenderer 中的重复。
+ * 图标常量统一来自 @itookit/common 的 EXECUTOR_TYPE_ICONS。
  */
 export class IconResolver {
-    private static readonly TYPE_ICONS: Record<string, string> = {
-        agent: '🤖',
-        tool: '🔧',
-        composite: '🔀',
-        http: '🌐',
-        script: '📜',
-    };
-
     /**
      * 从 ExecutionNode 获取显示图标
-     * 
+     *
      * 优先级：
      * 1. metaInfo.agentIcon（配置指定）
-     * 2. executorType 映射
+     * 2. EXECUTOR_TYPE_ICONS 映射（来自 common）
      * 3. 默认 📄
      */
     static getIcon(node: ExecutionNode): string {
@@ -30,17 +24,17 @@ export class IconResolver {
         }
 
         if (node.data.metaInfo?.agentId === 'default') {
-            return '🤖';
+            return ENTITY_ICONS.agent;
         }
 
-        return this.TYPE_ICONS[node.executorType] || '📄';
+        return EXECUTOR_TYPE_ICONS[node.executorType] ?? '📄';
     }
 
     /**
      * 仅根据类型获取图标（无 node 实例时）
      */
     static getIconByType(executorType: string): string {
-        return this.TYPE_ICONS[executorType] || '🤖';
+        return EXECUTOR_TYPE_ICONS[executorType] ?? ENTITY_ICONS.agent;
     }
 
     /**

@@ -114,6 +114,24 @@ export { NAVIGATION_EVENTS } from './events/navigation-events';
 
 export type { RestoreStatus, RestorableItem } from './types/types';
 
+// ── TTY: 终端设备接口 ──
+export * from './interfaces/tty';
+
+// ── i18n: 图标常量、字符串本地化 ──
+export { t, setLocale, getLocale } from './i18n';
+export type { Locale, LocaleKey, LocaleStrings } from './i18n';
+export {
+    SKILL_TYPE_META,
+    MCP_TRANSPORT_ICONS,
+    STATUS_META,
+    EXECUTOR_TYPE_ICONS,
+    ACTION_ICONS,
+    FEEDBACK_ICONS,
+    ENTITY_ICONS,
+    AGENT_ICON_PALETTE,
+    getFileIcon,
+} from './i18n/icons';
+
 // Constants
 export const FS_MODULE_CHAT = 'chats';
 export const FS_MODULE_AGENTS = 'agents';
