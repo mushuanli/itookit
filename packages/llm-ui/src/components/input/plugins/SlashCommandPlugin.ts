@@ -208,7 +208,11 @@ export interface SlashCommandCallbacks {
      * 搜索：   /grep "TODO" --glob *.ts
      * 文件搜：/glob "**\/*.test.ts"
      */
-    onToolInvoke?: (toolId: string, args: Record<string, unknown>) => Promise<void>;
+    /**
+     * 直接调用 harness 工具。
+     * @param displayCmd  用于 UI 显示的原始命令字符串（如 "/read src/index.ts"）
+     */
+    onToolInvoke?: (toolId: string, args: Record<string, unknown>, displayCmd: string) => Promise<void>;
 }
 
 /**
@@ -793,7 +797,7 @@ export class SlashCommandPlugin implements InputPlugin {
                     argsPlaceholder: '<command>',
                     execute: async (args?: string) => {
                         if (!args?.trim()) return;
-                        await cb.onToolInvoke!('shell_exec', { command: args.trim() });
+                        await cb.onToolInvoke!('shell_exec', { command: args.trim() }, `/exec ${args.trim()}`);
                     },
                 },
                 {
@@ -808,7 +812,9 @@ export class SlashCommandPlugin implements InputPlugin {
                         const { positionals, flags } = parseToolArgs(args ?? '');
                         const path = positionals.join(' ');
                         if (!path) return;
-                        await cb.onToolInvoke!('file_read', { path, ...flags });
+                        // Only include non-positional flags in toolArgs to avoid duplication.
+                        const toolArgs: Record<string, unknown> = { path, ...flags };
+                        await cb.onToolInvoke!('file_read', toolArgs, `/read ${args ?? ''}`);
                     },
                 },
                 {
@@ -828,7 +834,7 @@ export class SlashCommandPlugin implements InputPlugin {
                         if (flags['dir'])  toolArgs['base_dir'] = flags['dir'];
                         if (flags['i'])    toolArgs['case_insensitive'] = true;
                         if (flags['n'])    toolArgs['context_lines'] = Number(flags['n']) || 0;
-                        await cb.onToolInvoke!('grep_search', toolArgs);
+                        await cb.onToolInvoke!('grep_search', toolArgs, `/grep ${args ?? ''}`);
                     },
                 },
                 {
@@ -846,7 +852,7 @@ export class SlashCommandPlugin implements InputPlugin {
                         const toolArgs: Record<string, unknown> = { pattern };
                         if (flags['dir'])   toolArgs['base_dir'] = flags['dir'];
                         if (flags['limit']) toolArgs['limit'] = Number(flags['limit']) || 100;
-                        await cb.onToolInvoke!('glob_search', toolArgs);
+                        await cb.onToolInvoke!('glob_search', toolArgs, `/glob ${args ?? ''}`);
                     },
                 },
             ] as SlashCommandDef[] : []),
