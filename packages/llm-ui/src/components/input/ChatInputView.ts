@@ -111,6 +111,9 @@ export class ChatInput implements IChatInputPresenter {
     private helpBody!: HTMLElement;
     private helpVisible = false;
 
+    // ── Tool output panel ─────────────────────────────────────────────────────
+    private toolOutputEl: HTMLElement | null = null;
+
     // ── Harness state ────────────────────────────────────────────────────────
     private skills: SkillInfo[] = [];
     private isLoadingSkills = false;
@@ -297,6 +300,50 @@ export class ChatInput implements IChatInputPresenter {
 
     updateTokenStats(stats: import('../../domain/types').TokenStats | null): void {
         this.tokenMeterPlugin?.update(stats);
+    }
+
+    /**
+     * Inline tool output panel — appears above the textarea, inside the ChatInput.
+     * Replaces any previous output so the panel shows only the latest command.
+     * Dismissed by the × button or when the user sends an agent message.
+     */
+    showToolOutput(cmd: string, output: string, success: boolean): void {
+        if (!this.toolOutputEl) {
+            this.toolOutputEl = document.createElement('div');
+            this.toolOutputEl.className = 'llm-input__tool-output';
+            // Insert above the field wrapper so it sits between executor selector and textarea.
+            const wrapper = this.container.querySelector('.llm-input__field-wrapper');
+            const parent = wrapper?.parentElement ?? this.container;
+            parent.insertBefore(this.toolOutputEl, wrapper ?? parent.firstChild);
+        }
+
+        const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const lines = output.split('\n').length;
+        const icon = success ? '✅' : '❌';
+
+        this.toolOutputEl.innerHTML = `
+            <div class="llm-input__tool-output-header">
+                <code class="llm-input__tool-output-cmd">$ ${esc(cmd)}</code>
+                <span class="llm-input__tool-output-meta">${icon} ${lines} line${lines !== 1 ? 's' : ''}</span>
+                <button class="llm-input__tool-output-close" type="button" title="Close">×</button>
+            </div>
+            <pre class="llm-input__tool-output-body">${esc(output)}</pre>`;
+
+        this.toolOutputEl.style.display = 'block';
+        this.toolOutputEl.querySelector('.llm-input__tool-output-close')?.addEventListener('click', () => {
+            this.clearToolOutput();
+        });
+
+        // Scroll output into view and refocus textarea for next command.
+        this.toolOutputEl.scrollIntoView?.({ block: 'nearest' });
+        this.textarea?.focus();
+    }
+
+    clearToolOutput(): void {
+        if (this.toolOutputEl) {
+            this.toolOutputEl.style.display = 'none';
+            this.toolOutputEl.innerHTML = '';
+        }
     }
 
     destroy(): void {
@@ -696,6 +743,10 @@ code {
         this.config.text = '';
         this.files = [];
         this.renderAttachments();
+
+        // Clear the inline tool output when sending to the agent —
+        // the user is switching from tool mode back to conversation mode.
+        this.clearToolOutput();
 
         await this.options.onSend(text, currentFiles, currentExecutor, overrides);
 
