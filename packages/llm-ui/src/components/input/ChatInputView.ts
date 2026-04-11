@@ -46,6 +46,13 @@ export interface ChatInputOptions {
      */
     onUnloadSkill?: (skillId: string) => Promise<void>;
 
+    /**
+     * 获取当前可用 Skill 列表（含 loaded 状态）。
+     *
+     * 供 SlashCommandPlugin 动态生成 Skill 快捷命令，每次弹出面板时调用。
+     */
+    getSkills?: () => SkillInfo[];
+
     // ── @mention 文件引用 ─────────────────────────────────────────────────────
 
     /**

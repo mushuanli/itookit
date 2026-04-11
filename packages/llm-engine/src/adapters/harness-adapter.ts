@@ -241,6 +241,39 @@ export class HarnessAdapter {
             });
         }));
 
+        // ── TTY session events ────────────────────────────────────────────
+        // Forward real-time TTY output so the UI can render a terminal widget.
+        unsubs.push(this.runtime.on('agent:tty:open', (p) => {
+            onEvent({
+                type: 'node_update',
+                payload: {
+                    nodeId: rootNode.id,
+                    metaInfo: { ttyOpen: { sessionId: p.sessionId, command: p.command, pid: p.pid } },
+                },
+            });
+        }));
+
+        unsubs.push(this.runtime.on('agent:tty:data', (p) => {
+            onEvent({
+                type: 'node_update',
+                payload: {
+                    nodeId:   rootNode.id,
+                    // ttyData carries the raw chunk; the UI TtyPanel dispatches by sessionId
+                    metaInfo: { ttyData: { sessionId: p.sessionId, chunk: p.chunk } },
+                },
+            });
+        }));
+
+        unsubs.push(this.runtime.on('agent:tty:close', (p) => {
+            onEvent({
+                type: 'node_update',
+                payload: {
+                    nodeId: rootNode.id,
+                    metaInfo: { ttyClose: { sessionId: p.sessionId, exitCode: p.exitCode } },
+                },
+            });
+        }));
+
         try {
             const result = await this.runtime.run(request);
             return { accumulator, result };

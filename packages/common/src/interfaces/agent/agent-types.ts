@@ -188,7 +188,12 @@ export type AgentEventType =
     | 'agent:budget:exhausted'
     // 反压
     | 'agent:backpressure:check'
-    | 'agent:backpressure:failed';
+    | 'agent:backpressure:failed'
+    // TTY 会话（shell_session / tty_write / tty_close）
+    | 'agent:tty:open'    // 新会话创建
+    | 'agent:tty:data'    // 进程输出（实时流）
+    | 'agent:tty:close'   // 进程退出
+    | 'agent:tty:error';  // 会话错误
 
 /**
  * Agent 事件载荷映射
@@ -214,4 +219,9 @@ export interface AgentEventPayloads {
     'agent:budget:exhausted': { resource: string; used: number; limit: number };
     'agent:backpressure:check': { ruleName: string; command: string };
     'agent:backpressure:failed': { ruleName: string; errors: string };
+    // TTY sessions
+    'agent:tty:open':  { sessionId: string; command: string; pid: number | undefined };
+    'agent:tty:data':  { sessionId: string; chunk: string };
+    'agent:tty:close': { sessionId: string; exitCode: number | null; signal: string | null };
+    'agent:tty:error': { sessionId: string; error: string };
 }

@@ -2,6 +2,9 @@
 
 import type { InputPlugin, InputPluginContext } from './InputPlugin';
 import { PopupPanel, PopupItem } from './PopupPanel';
+import type { SkillInfo } from '../../../domain/types';
+import { parseSkillArgs } from '../SkillInvocationParser';
+import type { SkillInvocation } from '../SkillInvocationParser';
 
 /**
  * Slash 命令定义
@@ -96,6 +99,22 @@ export interface SlashCommandCallbacks {
      */
     onSkills?: () => void;
 
+    /**
+     * 获取当前可用 Skill 列表（含 loaded 状态）。
+     *
+     * 每次弹出 Slash 面板时调用，动态生成 Skill 快捷命令。
+     * 未注入时不显示 Skill 命令。
+     */
+    getSkills?: () => SkillInfo[];
+
+    /**
+     * 执行 Skill 调用（带参数/文件/文本）。
+     *
+     * 当用户发送 `/skillname [--key val]* [@file]* [text]` 时触发。
+     * 与 onSkill（仅加载）不同，此回调同时加载 Skill 并构建 prompt 发送给 Agent。
+     */
+    onSkillInvoke?: (invocation: SkillInvocation) => Promise<void>;
+
     // ── Harness: Tools ───────────────────────────────────────────────────────
 
     /**
@@ -126,8 +145,10 @@ export class SlashCommandPlugin implements InputPlugin {
     private ctx: InputPluginContext | null = null;
     private panel: PopupPanel | null = null;
     private commands: SlashCommandDef[] = [];
+    private readonly cb: SlashCommandCallbacks;
 
     constructor(callbacks: SlashCommandCallbacks) {
+        this.cb = callbacks;
         this.commands = this.buildDefaultCommands(callbacks);
     }
 
@@ -182,25 +203,42 @@ export class SlashCommandPlugin implements InputPlugin {
     }
 
     onInput(text: string, _cursorPos: number): void {
-        if (text.startsWith('/')) {
-            const query = text.slice(1).split(/\s/)[0];
-            this.showCommands(query);
-        } else if (this.panel?.isVisible) {
-            this.closePanel();
+        if (!text.startsWith('/')) {
+            if (this.panel?.isVisible) this.closePanel();
+            return;
         }
+
+        const afterSlash = text.slice(1);
+        // Close the popup once the user has moved past the command name
+        // (a space means they're now typing args / @files)
+        if (afterSlash.includes(' ')) {
+            if (this.panel?.isVisible) this.closePanel();
+            return;
+        }
+
+        this.showCommands(afterSlash);
     }
 
     onBeforeSend(text: string): boolean | void {
         if (!text.startsWith('/')) return;
 
-        const match = text.match(/^\/(\S+)\s*(.*)/);
+        const match = text.match(/^\/(\S+)\s*(.*)/s);
         if (!match) return;
 
-        const [, cmdName, args] = match;
-        const command = this.commands.find(c => c.name === cmdName);
+        const [, cmdName, argsStr] = match;
 
-        if (command) {
-            this.executeCommand(command, args.trim());
+        // Check static commands first
+        const staticCmd = this.commands.find(c => c.name === cmdName);
+        if (staticCmd) {
+            this.executeCommand(staticCmd, argsStr.trim());
+            return false;
+        }
+
+        // Check dynamic skill commands
+        const skillCmds = this.buildSkillCommands();
+        const skillCmd = skillCmds.find(c => c.name === cmdName);
+        if (skillCmd) {
+            this.executeCommand(skillCmd, argsStr.trim());
             return false;
         }
     }
@@ -212,11 +250,14 @@ export class SlashCommandPlugin implements InputPlugin {
     private showCommands(query: string): void {
         if (!this.panel) return;
 
-        const items = this.commandsToPopupItems(this.commands);
+        // Merge static commands with dynamic skill commands (fresh each time)
+        const skillCommands = this.buildSkillCommands();
+        const allCommands = [...this.commands, ...skillCommands];
+        const items = this.commandsToPopupItems(allCommands);
 
         if (!this.panel.isVisible) {
             this.panel.show(items, {
-                onSelect: (item) => this.handleSelect(item),
+                onSelect: (item) => this.handleSelect(item, allCommands),
                 onClose: () => { },
             });
         }
@@ -224,15 +265,44 @@ export class SlashCommandPlugin implements InputPlugin {
         this.panel.filter(query);
     }
 
-    private handleSelect(item: PopupItem): void {
+    /** Build slash commands from the current skill list (called on each popup open). */
+    private buildSkillCommands(): SlashCommandDef[] {
+        const cb = this.cb;
+        const skills = cb.getSkills?.() ?? [];
+        return skills.map((skill: SkillInfo) => ({
+            name: skill.id,
+            label: `/${skill.id}`,
+            description: skill.description || `Run ${skill.name} skill`,
+            icon: skill.icon ?? '⚡',
+            group: skill.loaded ? 'Skills (loaded)' : 'Skills',
+            hasArgs: true,
+            argsPlaceholder: '@file --param value',
+            preserveInput: false,
+            execute: async (args: string, ctx: InputPluginContext) => {
+                if (!cb.onSkillInvoke) {
+                    await cb.onSkill?.(skill.id);
+                    return;
+                }
+                const selText = (ctx.textarea.selectionStart !== ctx.textarea.selectionEnd)
+                    ? ctx.textarea.value.slice(ctx.textarea.selectionStart, ctx.textarea.selectionEnd)
+                    : undefined;
+                const invocation = parseSkillArgs(skill.id, args, selText);
+                await cb.onSkillInvoke(invocation);
+            },
+        }));
+    }
+
+    private handleSelect(item: PopupItem, allCommands?: SlashCommandDef[]): void {
         if (!this.ctx) return;
 
-        const command = this.commands.find(c => c.name === item.id);
+        const commands = allCommands ?? this.commands;
+        const command = commands.find(c => c.name === item.id);
         if (!command) return;
 
         if (command.hasArgs) {
-            const placeholder = command.argsPlaceholder || '';
-            this.ctx.setText(`/${command.name} ${placeholder}`);
+            // Insert "/skillname " with cursor right after the space
+            // so the user can immediately start typing args / @file refs
+            this.ctx.setText(`/${command.name} `);
             this.ctx.focus();
             this.ctx.setCursorPosition(command.name.length + 2);
         } else {
