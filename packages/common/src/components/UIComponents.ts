@@ -131,6 +131,43 @@ export class Toast {
     static error(msg: string) { this.show(msg, 'error'); }
     static warning(msg: string) { this.show(msg, 'warning'); }
     static info(msg: string) { this.show(msg, 'info'); }
+
+    /**
+     * 带操作按钮的 Toast（持续 8 秒，点击按钮后立即关闭）。
+     *
+     * 用于"后台会话有 TTY 活动"等需要用户响应的通知。
+     */
+    static action(message: string, actionLabel: string, onAction: () => void, duration = 8000): void {
+        const toast = document.createElement('div');
+        toast.className = 'settings-toast settings-toast--info settings-toast--action';
+
+        toast.innerHTML = `
+            <span class="settings-toast__icon"><i class="fas fa-terminal"></i></span>
+            <span class="settings-toast__message">${message}</span>
+            <button class="settings-toast__action" type="button">${actionLabel}</button>
+        `;
+
+        let container = document.querySelector('.settings-toast-container');
+        if (!container) {
+            container = document.createElement('div');
+            container.className = 'settings-toast-container';
+            document.body.appendChild(container);
+        }
+
+        const dismiss = () => {
+            toast.classList.remove('show');
+            setTimeout(() => toast.remove(), 300);
+        };
+
+        toast.querySelector('.settings-toast__action')?.addEventListener('click', () => {
+            onAction();
+            dismiss();
+        });
+
+        container.appendChild(toast);
+        requestAnimationFrame(() => toast.classList.add('show'));
+        setTimeout(dismiss, duration);
+    }
 }
 
 
