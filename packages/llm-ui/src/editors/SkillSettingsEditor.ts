@@ -1,6 +1,7 @@
 // @file llm-ui/editors/SkillSettingsEditor.ts
 import { BaseSettingsEditor, Toast, Modal, generateShortUUID, t, SKILL_TYPE_META, ENTITY_ICONS } from '@itookit/common';
 import type { LLMSkill, LLMSkillType, IAgentManagementService } from '@itookit/common';
+import yaml from 'js-yaml';
 
 function typeBadge(type: LLMSkillType) {
     const m = SKILL_TYPE_META[type] ?? SKILL_TYPE_META.custom;
@@ -676,7 +677,7 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
     private showImport() {
         const fileInput = document.createElement('input');
         fileInput.type = 'file';
-        fileInput.accept = '.json,application/json';
+        fileInput.accept = '.json,.yaml,.yml,application/json';
         fileInput.multiple = true;
         fileInput.style.display = 'none';
         document.body.appendChild(fileInput);
@@ -700,8 +701,10 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
                     continue;
                 }
                 try {
-                    const data = JSON.parse(r.value);
-                    const arr: LLMSkill[] = Array.isArray(data) ? data : [data];
+                    const name = files[i].name;
+                    const isYaml = name.endsWith('.yaml') || name.endsWith('.yml');
+                    const data = isYaml ? yaml.load(r.value) : JSON.parse(r.value);
+                    const arr: LLMSkill[] = Array.isArray(data) ? data as LLMSkill[] : [data as LLMSkill];
                     skills.push(...arr);
                 } catch {
                     errors.push(`${files[i].name}: ${t('skill.toast.invalidJson')}`);
@@ -762,8 +765,11 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
                 const text = (document.getElementById('import-json') as HTMLTextAreaElement)?.value ?? '';
                 let arr: LLMSkill[];
                 try {
-                    const data = JSON.parse(text);
-                    arr = Array.isArray(data) ? data : [data];
+                    // Auto-detect YAML (starts with `---` or a plain key, not `[` or `{`)
+                    const looksLikeYaml = text.trimStart().startsWith('---') ||
+                        /^[a-zA-Z_][\w]*\s*:/m.test(text.trimStart().slice(0, 120));
+                    const data = looksLikeYaml ? yaml.load(text) : JSON.parse(text);
+                    arr = Array.isArray(data) ? data as LLMSkill[] : [data as LLMSkill];
                 } catch {
                     Toast.error(t('skill.toast.invalidJson'));
                     return false;
@@ -796,11 +802,12 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
 
     private async exportAll() {
         const skills = await this.service.getSkills(); // always export fresh data
-        const blob   = new Blob([JSON.stringify(skills, null, 2)], { type: 'application/json' });
+        const content = yaml.dump(skills, { lineWidth: -1, noRefs: true });
+        const blob = new Blob([content], { type: 'text/yaml' });
         const a = Object.assign(document.createElement('a'), {
-            href: URL.createObjectURL(blob), download: 'skills.json',
+            href: URL.createObjectURL(blob), download: 'skills.yaml',
         });
         a.click();
-        URL.revokeObjectURL(a.href); // clean up object URL
+        URL.revokeObjectURL(a.href);
     }
 }

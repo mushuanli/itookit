@@ -1,0 +1,90 @@
+id: tty-python-repl
+name: Python REPL 交互调试
+type: prompt
+description: 通过 shell_session / tty_write / tty_close 启动 Python 交互式解释器，分步执行代码并验证 TTY 工具集成
+enabled: true
+icon: "🐍"
+
+instructions: |
+  ## Python REPL 交互调试模式
+
+  你现在具备三个 TTY 工具：
+  - **shell_session** — 启动一个持久化 shell 进程，返回初始输出
+  - **tty_write** — 向已开启的会话写入一行命令，等待输出稳定
+  - **tty_close** — 关闭会话并释放进程资源
+
+  ---
+
+  ### 标准工作流
+
+  **Step 1 — 启动 Python 解释器**
+  ```
+  shell_session(
+    command="python3",
+    idle_timeout_ms=2000
+  )
+  ```
+  预期输出示例：
+  ```
+  [TTY tty_abc]
+  Python 3.11.x ...
+  >>>
+  [Waiting for input]
+  ```
+  记下 sessionId（如 `tty_abc`），后续步骤均使用它。
+
+  **Step 2 — 逐条执行代码**
+  每条命令末尾必须加 `\n`，等待 `>>>` 出现后再发送下一条：
+  ```
+  tty_write(session_id="tty_abc", data="import math\n")
+  tty_write(session_id="tty_abc", data="print(math.pi)\n")
+  tty_write(session_id="tty_abc", data="x = [i**2 for i in range(10)]\n")
+  tty_write(session_id="tty_abc", data="print(x)\n")
+  ```
+
+  **Step 3 — 验证多行代码块**
+  ```
+  tty_write(session_id="tty_abc", data="def greet(name):\n    return f'Hello, {name}!'\n\n")
+  tty_write(session_id="tty_abc", data="print(greet('TTY'))\n")
+  ```
+  注意：多行 def 需要额外的空行（`\n`）触发执行。
+
+  **Step 4 — 关闭会话**
+  ```
+  tty_close(session_id="tty_abc")
+  ```
+
+  ---
+
+  ### 验证清单（完成后逐项回报）
+
+  | 步骤 | 预期 | 实际 |
+  |------|------|------|
+  | shell_session 启动 | 输出 Python 版本 + `>>>` | |
+  | 首次 tty_write | 输出 `>>>` 确认接收 | |
+  | print(math.pi) | 输出 `3.141592653589793` | |
+  | print(x) | 输出 `[0, 1, 4, 9, 16, 25, 36, 49, 64, 81]` | |
+  | greet('TTY') | 输出 `Hello, TTY!` | |
+  | tty_close | 返回 "Session closed" | |
+
+  ---
+
+  ### 常见问题
+
+  - **没有 `>>>` 出现**：适当增大 `idle_timeout_ms`（默认 1500ms）
+  - **多行代码未执行**：确认末尾有两个 `\n`（空行触发 Python 执行 def）
+  - **进程已退出**：用新的 `shell_session` 重新启动，不要对已关闭的 sessionId 调用 tty_write
+  - **输出被截断**：单条输出超过 50 000 字节时自动截断，属正常保护行为
+
+tools: []
+triggerPatterns:
+  - "python.*repl"
+  - "tty.*test"
+  - "tty.*验证"
+  - "shell.*session.*demo"
+  - "交互.*python"
+  - "python.*交互"
+autoLoad: false
+priority: 50
+createdAt: 1744300800000
+modifiedAt: 1744300800000
