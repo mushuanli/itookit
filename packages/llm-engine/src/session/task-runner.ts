@@ -325,6 +325,20 @@ export class TaskRunner {
                         (event.payload as { nodeId: string }).nodeId = rootNode.id;
                     }
                     this.eventBus.emitSession(sessionId, event);
+                } else if (event.type === 'node_update') {
+                    // Background session: promote TTY open events to the global bus so the
+                    // UI can notify the user that an interactive shell has started and they
+                    // may want to switch to this session.
+                    const ttyOpen = (event.payload.metaInfo as Record<string, unknown> | undefined)?.['ttyOpen'];
+                    if (ttyOpen) {
+                        this.eventBus.emitGlobal({
+                            type: 'session_tty_active',
+                            payload: {
+                                sessionId,
+                                command: (ttyOpen as { command: string }).command,
+                            },
+                        });
+                    }
                 }
             };
 

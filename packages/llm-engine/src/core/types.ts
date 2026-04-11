@@ -432,4 +432,11 @@ export type RegistryEvent =
     | { type: 'session_status_changed'; payload: { sessionId: string; status: SessionStatus; prevStatus?: SessionStatus } }
     | { type: 'session_unread_updated'; payload: { sessionId: string; count: number } }
     | { type: 'pool_status_changed'; payload: { running: number; queued: number; maxConcurrent: number } }
-    | { type: 'background_task_completed'; payload: { sessionId: string } };
+    | { type: 'background_task_completed'; payload: { sessionId: string } }
+    /**
+     * 后台会话打开了 TTY 交互进程。
+     *
+     * 当 harness 路径中非当前绑定会话（后台会话）的 shell_session 工具成功
+     * 启动进程时发出，供 UI 提示用户切换到该会话查看实时输出。
+     */
+    | { type: 'session_tty_active'; payload: { sessionId: string; command: string } };
