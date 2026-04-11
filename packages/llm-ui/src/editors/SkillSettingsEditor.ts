@@ -21,8 +21,14 @@ function enabledBadge(enabled: boolean) {
 
 export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementService> {
     private selectedId: string | null = null;
+    /** True while a batch import is in progress — suppresses onChange-triggered renders. */
+    private _importing = false;
 
     async render() {
+        // During batch import, each saveSkill triggers notify() → render().
+        // Suppress those intermediate renders; the import loop calls render() once at the end.
+        if (this._importing) return;
+
         const [skills, mcpServers] = await Promise.all([
             this.service.getSkills(),
             this.service.getMCPServers?.() ?? Promise.resolve([]),
@@ -708,21 +714,35 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
 
             if (skills.length === 0) return;
 
+            // Suppress onChange-triggered re-renders while batch-saving to avoid
+            // showing partial state (e.g. only 1 of 3 skills) between saves.
+            this._importing = true;
             let lastId = '';
+            let savedCount = 0;
             for (const item of skills) {
                 item.id      = item.id      ?? `skill-${generateShortUUID()}`;
                 item.enabled = item.enabled ?? false;
-                await this.service.saveSkill(item);
-                lastId = item.id;
+                try {
+                    await this.service.saveSkill(item);
+                    lastId = item.id;
+                    savedCount++;
+                } catch (e) {
+                    errors.push(`${item.name || item.id}: ${e instanceof Error ? e.message : String(e)}`);
+                }
             }
-            Toast.success(t('skill.toast.imported', { count: skills.length }));
+            this._importing = false;
+
+            if (errors.length > 0) Toast.error(errors.join('\n'));
+            if (savedCount > 0) {
+                Toast.success(t('skill.toast.imported', { count: savedCount }));
+            }
             if (lastId) this.selectedId = lastId;
             await this.render();
         });
 
-        // Cancel also removes the hidden element
+        // Cancel also removes the hidden element (guard against already-removed)
         fileInput.addEventListener('cancel', () => {
-            document.body.removeChild(fileInput);
+            if (fileInput.parentNode) document.body.removeChild(fileInput);
         });
 
         fileInput.click();
@@ -740,21 +760,36 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
             confirmText: t('dialog.import.action'),
             onConfirm: async () => {
                 const text = (document.getElementById('import-json') as HTMLTextAreaElement)?.value ?? '';
+                let arr: LLMSkill[];
                 try {
                     const data = JSON.parse(text);
-                    const arr: LLMSkill[] = Array.isArray(data) ? data : [data];
-                    for (const item of arr) {
-                        item.id      = item.id      ?? `skill-${generateShortUUID()}`;
-                        item.enabled = item.enabled ?? false;
-                        await this.service.saveSkill(item);
-                    }
-                    Toast.success(t('skill.toast.imported', { count: arr.length }));
-                    if (arr.length > 0) this.selectedId = arr[arr.length - 1].id;
-                    await this.render();
+                    arr = Array.isArray(data) ? data : [data];
                 } catch {
                     Toast.error(t('skill.toast.invalidJson'));
                     return false;
                 }
+
+                this._importing = true;
+                const saveErrors: string[] = [];
+                let savedCount = 0;
+                for (const item of arr) {
+                    item.id      = item.id      ?? `skill-${generateShortUUID()}`;
+                    item.enabled = item.enabled ?? false;
+                    try {
+                        await this.service.saveSkill(item);
+                        savedCount++;
+                    } catch (e) {
+                        saveErrors.push(`${item.name || item.id}: ${e instanceof Error ? e.message : String(e)}`);
+                    }
+                }
+                this._importing = false;
+
+                if (saveErrors.length > 0) Toast.error(saveErrors.join('\n'));
+                if (savedCount > 0) {
+                    Toast.success(t('skill.toast.imported', { count: savedCount }));
+                    this.selectedId = [...arr].reverse().find((s) => s.id)?.id ?? this.selectedId;
+                }
+                await this.render();
             },
         }).show();
     }
