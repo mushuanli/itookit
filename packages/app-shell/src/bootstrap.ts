@@ -12,6 +12,7 @@ import {
 import { initializeLLMEngine, LLMSessionEngine, chatFileParser } from '@itookit/llm-engine';
 import { LLMDeviceDriver } from '@itookit/device-llm';
 import { setKernelDeviceManager } from '@itookit/llm-kernel';
+import { createHarness } from '@itookit/llm-harness';
 
 import { AppOptions, AppHandle, WorkspaceConfig } from './types';
 import {
@@ -108,7 +109,18 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     const settingsModule = await createSettingsModule(vfs);
     const agentService   = new VFSAgentService(vfs, llmDriver);
     const sessionEngine  = new LLMSessionEngine(vfs);
-    await initializeLLMEngine({ agentService, sessionEngine, maxConcurrent: 20 });
+
+    // Harness: AgentLoopExecutor + built-in tools + skill service.
+    // createHarness() reads the default LLM connection from llmDriver automatically.
+    const harness = await createHarness({ llmDriver });
+
+    await initializeLLMEngine({
+        agentService,
+        sessionEngine,
+        maxConcurrent:       20,
+        harnessRuntime:      harness.runtime,
+        harnessSkillService: harness.skillService,
+    });
 
     const settingsFactory = createSettingsFactory(settingsModule.service, agentService, llmDriver);
     const llmFactory      = createLLMFactory(agentService);
