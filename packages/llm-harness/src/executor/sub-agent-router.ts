@@ -31,6 +31,7 @@ export class SubAgentRouter implements ISubAgentRouter {
         const { signal } = this.abortController;
 
         const connectionId = task.connectionId ?? this.modelRoles.subAgent ?? this.modelRoles.primary;
+        // task.modelName is stored for future ILLMService model-override support
         const allowedTools = task.allowedTools ?? READ_ONLY_TOOLS;
         const maxTurns = task.maxTurns ?? DEFAULT_MAX_TURNS;
 
@@ -41,14 +42,19 @@ export class SubAgentRouter implements ISubAgentRouter {
                 return allowedTools.includes(name);
             });
 
+        // Build system prompt: prefer task override, fall back to default
+        let systemContent = task.systemPrompt
+            ?? ('You are a focused sub-agent. Complete the given task using the provided tools. ' +
+                'When done, provide a concise summary of your findings.');
+        if (task.responseFormat) systemContent += ` Response format: ${task.responseFormat}`;
+        if (task.contextFiles && task.contextFiles.length > 0) {
+            systemContent +=
+                '\n\nReference files for context (read these if needed):\n' +
+                task.contextFiles.map(f => `- ${f}`).join('\n');
+        }
+
         const messages: ChatMessage[] = [
-            {
-                role: 'system',
-                content:
-                    'You are a focused sub-agent. Complete the given task using the provided tools. ' +
-                    'When done, provide a concise summary of your findings.' +
-                    (task.responseFormat ? ` Response format: ${task.responseFormat}` : ''),
-            },
+            { role: 'system', content: systemContent },
             { role: 'user', content: task.instruction },
         ];
 
@@ -81,7 +87,7 @@ export class SubAgentRouter implements ISubAgentRouter {
                         messages.push({ role: 'tool', content: 'Error: tool not allowed in sub-agent context', tool_call_id: call.id });
                         continue;
                     }
-                    const result = await this.toolService.invoke({ toolId: name, args: getToolArgs(call), cwd: task.cwd ?? process.cwd(), signal });
+                    const result = await this.toolService.invoke({ toolId: name, args: getToolArgs(call), cwd: task.cwd ?? (typeof process !== 'undefined' ? process.cwd() : '/'), signal });
                     messages.push({ role: 'tool', content: result.output, tool_call_id: call.id });
                 }
             }
