@@ -195,6 +195,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
         maxConcurrent:       20,
         harnessRuntime:      harness.runtime,
         harnessSkillService: harness.skillService,
+        harnessToolService:  harness.toolService,
     });
 
     const settingsFactory = createSettingsFactory(settingsModule.service, agentService, llmDriver);

@@ -6,6 +6,57 @@ import type { SkillInfo } from '../../../domain/types';
 import { parseSkillArgs } from '../SkillInvocationParser';
 import type { SkillInvocation } from '../SkillInvocationParser';
 
+// ── Tool arg parser ──────────────────────────────────────────────────────────
+// Parses slash command args: positionals and --flag value pairs.
+// Handles quoted strings ("foo bar") as single tokens.
+
+interface ToolArgResult {
+    positionals: string[];
+    flags: Record<string, string | number | boolean>;
+}
+
+function parseToolArgs(raw: string): ToolArgResult {
+    const tokens: string[] = [];
+    let current = '';
+    let inQuote = false;
+    let quoteChar = '';
+
+    for (const ch of (raw ?? '').trim()) {
+        if (inQuote) {
+            if (ch === quoteChar) { inQuote = false; if (current) { tokens.push(current); current = ''; } }
+            else current += ch;
+        } else if (ch === '"' || ch === "'") {
+            inQuote = true; quoteChar = ch;
+        } else if (ch === ' ') {
+            if (current) { tokens.push(current); current = ''; }
+        } else {
+            current += ch;
+        }
+    }
+    if (current) tokens.push(current);
+
+    const flags: Record<string, string | number | boolean> = {};
+    const positionals: string[] = [];
+
+    for (let i = 0; i < tokens.length; i++) {
+        if (tokens[i].startsWith('--')) {
+            const key = tokens[i].slice(2);
+            const next = tokens[i + 1];
+            if (next !== undefined && !next.startsWith('--')) {
+                const num = Number(next);
+                flags[key] = isNaN(num) ? next : num;
+                i++;
+            } else {
+                flags[key] = true;
+            }
+        } else {
+            positionals.push(tokens[i]);
+        }
+    }
+
+    return { positionals, flags };
+}
+
 /**
  * Slash 命令定义
  */
@@ -121,6 +172,17 @@ export interface SlashCommandCallbacks {
      * 显示当前 harness 会话已注册的工具列表。
      */
     onTools?: () => void;
+
+    /**
+     * 直接调用 harness 工具（绕过 LLM，立即执行，结果用 Modal 展示）。
+     *
+     * 由 `/exec` `/read` `/grep` `/glob` 等 slash 命令触发。
+     * Shell：  /exec npm run build
+     * 文件：   /read src/index.ts --offset 1 --limit 50
+     * 搜索：   /grep "TODO" --glob *.ts
+     * 文件搜：/glob "**\/*.test.ts"
+     */
+    onToolInvoke?: (toolId: string, args: Record<string, unknown>) => Promise<void>;
 }
 
 /**
@@ -689,6 +751,79 @@ export class SlashCommandPlugin implements InputPlugin {
                     cb.onTools();
                 },
             },
+
+            // ── Direct Tool Invocation (bypasses LLM) ────────────────────────
+            // Available when onToolInvoke is injected (harness with toolService).
+            // Result shown in a Modal — no LLM round-trip.
+
+            ...(cb.onToolInvoke ? [
+                {
+                    name: 'exec',
+                    label: '/exec',
+                    description: 'Execute a shell command directly (no LLM)',
+                    icon: '⬛',
+                    group: 'Direct Tools',
+                    hasArgs: true,
+                    argsPlaceholder: '<command>',
+                    execute: async (args?: string) => {
+                        if (!args?.trim()) return;
+                        await cb.onToolInvoke!('shell_exec', { command: args.trim() });
+                    },
+                },
+                {
+                    name: 'read',
+                    label: '/read',
+                    description: 'Read a file directly — /read path [--offset N] [--limit N]',
+                    icon: '📄',
+                    group: 'Direct Tools',
+                    hasArgs: true,
+                    argsPlaceholder: '<path> [--offset N] [--limit N]',
+                    execute: async (args?: string) => {
+                        const { positionals, flags } = parseToolArgs(args ?? '');
+                        const path = positionals.join(' ');
+                        if (!path) return;
+                        await cb.onToolInvoke!('file_read', { path, ...flags });
+                    },
+                },
+                {
+                    name: 'grep',
+                    label: '/grep',
+                    description: 'Search file contents — /grep <pattern> [--glob *.ts] [--dir path]',
+                    icon: '🔎',
+                    group: 'Direct Tools',
+                    hasArgs: true,
+                    argsPlaceholder: '"<pattern>" [--glob *.ts] [--dir ./src]',
+                    execute: async (args?: string) => {
+                        const { positionals, flags } = parseToolArgs(args ?? '');
+                        const pattern = positionals[0];
+                        if (!pattern) return;
+                        const toolArgs: Record<string, unknown> = { pattern };
+                        if (flags['glob']) toolArgs['glob'] = flags['glob'];
+                        if (flags['dir'])  toolArgs['base_dir'] = flags['dir'];
+                        if (flags['i'])    toolArgs['case_insensitive'] = true;
+                        if (flags['n'])    toolArgs['context_lines'] = Number(flags['n']) || 0;
+                        await cb.onToolInvoke!('grep_search', toolArgs);
+                    },
+                },
+                {
+                    name: 'glob',
+                    label: '/glob',
+                    description: 'Find files by pattern — /glob <pattern> [--dir path] [--limit N]',
+                    icon: '🔍',
+                    group: 'Direct Tools',
+                    hasArgs: true,
+                    argsPlaceholder: '"**/*.ts" [--dir ./src] [--limit 50]',
+                    execute: async (args?: string) => {
+                        const { positionals, flags } = parseToolArgs(args ?? '');
+                        const pattern = positionals[0];
+                        if (!pattern) return;
+                        const toolArgs: Record<string, unknown> = { pattern };
+                        if (flags['dir'])   toolArgs['base_dir'] = flags['dir'];
+                        if (flags['limit']) toolArgs['limit'] = Number(flags['limit']) || 100;
+                        await cb.onToolInvoke!('glob_search', toolArgs);
+                    },
+                },
+            ] as SlashCommandDef[] : []),
         ];
     }
 
