@@ -68,5 +68,18 @@ export interface IChatInputPresenter {
      */
     setHarnessRuntime(runtime: IAgentRuntime | null): void;
 
+    /**
+     * 在输入框上方内联显示工具执行结果（不弹 Modal）。
+     *
+     * 用于 /exec /read /grep /glob 等直接 tool 调用：
+     * - 结果以 monospace 代码块展示在 ChatInput 区域内
+     * - 用户可继续输入下一条工具命令或切换回 agent 模式
+     * - 发送 agent 消息时自动清除（clearToolOutput）
+     */
+    showToolOutput(cmd: string, output: string, success: boolean): void;
+
+    /** 清除 inline 工具输出面板。 */
+    clearToolOutput(): void;
+
     destroy(): void;
 }
