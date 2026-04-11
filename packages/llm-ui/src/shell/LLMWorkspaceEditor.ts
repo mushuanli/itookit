@@ -1275,23 +1275,12 @@ export class LLMWorkspaceEditor implements IEditor {
             // Bypasses the LLM: calls toolService.invoke() directly and shows
             // the result in a Modal — no agent round-trip needed.
             ...(toolSvc ? {
-                onToolInvoke: async (toolId: string, args: Record<string, unknown>) => {
+                // displayCmd = the original "/read src/index.ts" string from the slash command.
+                onToolInvoke: async (toolId: string, args: Record<string, unknown>, displayCmd: string) => {
                     const cwd = this.chatInput.getConfig()?.settings?.workingDirectory || undefined;
-                    // Build the human-readable command string for the output header.
-                    const argStr = Object.entries(args)
-                        .filter(([k]) => k !== 'command') // 'command' is the positional for shell_exec
-                        .map(([k, v]) => `--${k} ${String(v)}`)
-                        .join(' ');
-                    const posArg = args['command'] ?? args['path'] ?? args['pattern'] ?? '';
-                    const cmd = [toolId.replace('_', ' '), String(posArg), argStr].filter(Boolean).join(' ');
-
-                    // Show a "running…" state immediately so the user knows execution started.
-                    this.chatInput.showToolOutput?.(cmd, '⏳ Running…', true);
-
+                    this.chatInput.showToolOutput?.(displayCmd, '⏳ Running…', true);
                     const result = await toolSvc.invoke({ toolId, args, cwd });
-
-                    // Replace the placeholder with the real output.
-                    this.chatInput.showToolOutput?.(cmd, result.output, result.success);
+                    this.chatInput.showToolOutput?.(displayCmd, result.output, result.success);
                 },
             } : {}),
         };
