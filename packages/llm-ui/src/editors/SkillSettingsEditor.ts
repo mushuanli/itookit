@@ -960,23 +960,23 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
     // ─── Form-only mode helpers ──────────────────────────────────────────────
 
     private async _renderFormOnly() {
-        if (!this.selectedId) {
-            this.container.innerHTML = `
-                <div style="display:flex;height:100%;align-items:center;justify-content:center;
-                            flex-direction:column;gap:.75rem;color:var(--st-text-tertiary)">
-                    <span style="font-size:2rem">⚡</span>
-                    <span style="font-size:.9375rem">Select a skill to edit</span>
-                </div>`;
-            return;
-        }
         const [skills, mcpServers] = await Promise.all([
             this.service.getSkills(),
             this.service.getMCPServers?.() ?? Promise.resolve([]),
         ]);
-        const skill = skills.find((s) => s.id === this.selectedId);
-        if (!skill) { this.container.innerHTML = ''; return; }
+
+        const skill = this.selectedId ? skills.find((s) => s.id === this.selectedId) : null;
+
+        if (!skill) {
+            // Show empty state with Add + Import buttons so the user can bring skills in.
+            // bindEvents() wires the buttons (it gracefully skips absent sidebar elements).
+            this.container.innerHTML = this.renderEmptyState();
+            this.bindEvents(mcpServers);
+            return;
+        }
+
         this.container.innerHTML = this.renderDetail(skill, mcpServers);
-        this.bindEvents(mcpServers); // bindEvents gracefully skips missing sidebar elements
+        this.bindEvents(mcpServers);
     }
 
     private async exportAll() {
