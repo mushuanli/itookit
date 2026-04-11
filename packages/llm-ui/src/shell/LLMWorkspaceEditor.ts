@@ -1221,8 +1221,20 @@ export class LLMWorkspaceEditor implements IEditor {
             },
 
             onSkills: () => {
+                const skills = skillSvc.listSkills();
+                if (skills.length === 0) {
+                    Toast.info('没有可用的 Skill。请前往 Settings → Skills 添加。');
+                    return;
+                }
+                // Open the ChatInput settings panel (contains the skill picker).
                 const settingsBtn = document.querySelector('.llm-input__btn--settings') as HTMLButtonElement | null;
-                settingsBtn?.click();
+                if (settingsBtn) {
+                    settingsBtn.click();
+                } else {
+                    // Fallback: show skill list as toast if panel unavailable.
+                    const names = skills.map((s) => `${s.icon ?? '⚡'} ${s.name}`).join('\n');
+                    Toast.info(`可用 Skills (${skills.length}):\n${names}\n\n使用 /skill <id> 加载`);
+                }
             },
 
             onTools: () => {
