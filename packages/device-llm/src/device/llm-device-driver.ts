@@ -20,6 +20,7 @@ import type {
     LLMProviderDefinition, ConnectionTestResult, InitialAgentDef,
 } from '@itookit/common';
 import { toConnectionMeta, CONFIG_MODULE } from '@itookit/common';
+import yaml from 'js-yaml';
 
 import { LLMDriver } from '../core/driver';
 import { testLLMConnection } from '../core/api';
@@ -782,14 +783,19 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
 
     private async writeSkillToDisk(skill: LLMSkill): Promise<void> {
         await this.engineUpsert(
-            `${SKILLS_DIR}/${skill.id}.json`,
-            JSON.stringify(skill, null, 2),
+            `${SKILLS_DIR}/${skill.id}.yaml`,
+            yaml.dump(skill, { lineWidth: -1, noRefs: true }),
         );
+        // Remove legacy .json file if present (one-time migration on first save).
+        const oldId = await this.engine.resolvePath(`${SKILLS_DIR}/${skill.id}.json`);
+        if (oldId) await this.engine.delete([oldId]);
     }
 
     private async deleteSkillFromDisk(id: string): Promise<void> {
-        const nodeId = await this.engine.resolvePath(`${SKILLS_DIR}/${id}.json`);
-        if (nodeId) await this.engine.delete([nodeId]);
+        for (const ext of ['.yaml', '.json']) {
+            const nodeId = await this.engine.resolvePath(`${SKILLS_DIR}/${id}${ext}`);
+            if (nodeId) { await this.engine.delete([nodeId]); break; }
+        }
     }
 
     // ─── Session management ───────────────────────────────────────────────────
@@ -1076,6 +1082,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         }
     }
 
+    /** Load all YAML (preferred) and JSON (legacy) files from a VFS directory. */
     private async loadJsonFilesFromDir<T>(dirPath: string): Promise<T[]> {
         const items: T[] = [];
         try {
@@ -1083,11 +1090,17 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
             if (!dirId) return [];
             const children = await this.engine.getChildren(dirId);
             for (const child of children) {
-                if (child.type !== 'file' || !child.name.endsWith('.json')) continue;
+                if (child.type !== 'file') continue;
+                const isYaml = child.name.endsWith('.yaml') || child.name.endsWith('.yml');
+                const isJson = child.name.endsWith('.json');
+                if (!isYaml && !isJson) continue;
                 try {
                     const raw = await this.engine.readContent(child.id);
                     const text = typeof raw === 'string' ? raw : new TextDecoder().decode(raw as ArrayBuffer);
-                    items.push(JSON.parse(text) as T);
+                    const parsed = isYaml
+                        ? yaml.load(text) as T
+                        : JSON.parse(text) as T;
+                    items.push(parsed);
                 } catch { /* skip malformed */ }
             }
         } catch { /* directory not yet created */ }
