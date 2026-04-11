@@ -24,6 +24,8 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
     private selectedId: string | null = null;
     /** True while a batch import is in progress — suppresses onChange-triggered renders. */
     private _importing = false;
+    /** IDs checked for multi-select batch actions. */
+    private _checkedIds = new Set<string>();
 
     async render() {
         // During batch import, each saveSkill triggers notify() → render().
@@ -59,6 +61,21 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
                         </div>
                     </div>
 
+                    ${this._checkedIds.size > 0 ? `
+                    <div style="display:flex;align-items:center;gap:.5rem;padding:.375rem .75rem;
+                                background:var(--st-color-primary-bg,#eef2ff);border-bottom:1px solid var(--st-border-color)">
+                        <span style="font-size:.8125rem;font-weight:500;flex:1">${this._checkedIds.size} selected</span>
+                        <button class="settings-btn settings-btn--secondary settings-btn--sm" data-action="batch-export">
+                            <i class="fas fa-file-export"></i> Export
+                        </button>
+                        <button class="settings-btn settings-btn--danger settings-btn--sm" data-action="batch-delete">
+                            <i class="fas fa-trash"></i> Delete
+                        </button>
+                        <button class="settings-btn settings-btn--secondary settings-btn--sm" data-action="batch-clear"
+                                title="Clear selection" style="padding:.25rem .5rem">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>` : ''}
                     <div class="settings-split__list">
                         ${skills.length === 0 ? this.renderEmptyList() : skills.map(s => this.renderListItem(s)).join('')}
                     </div>
@@ -92,15 +109,22 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
 
     private renderListItem(skill: LLMSkill) {
         const isSelected = skill.id === this.selectedId;
+        const isChecked  = this._checkedIds.has(skill.id);
         const meta = SKILL_TYPE_META[skill.type] ?? SKILL_TYPE_META.custom;
         const typeLabel = t(`skillType.${skill.type}` as Parameters<typeof t>[0]);
         return `
             <div class="settings-list-item ${isSelected ? 'selected' : ''}" data-id="${skill.id}" style="cursor:pointer">
+                <input type="checkbox" class="settings-list-item__check" data-check-id="${skill.id}"
+                       ${isChecked ? 'checked' : ''}
+                       style="flex-shrink:0;margin:0;cursor:pointer;accent-color:var(--st-color-primary,#6366f1)"
+                       title="Select for batch action"
+                       onclick="event.stopPropagation()">
                 <span class="settings-list-item__icon" style="font-size:1.25rem">${skill.icon || meta.icon}</span>
                 <div class="settings-list-item__info" style="min-width:0">
                     <div class="settings-list-item__title" data-name-for="${skill.id}"
                          title="${t('tooltip.dblClickRename')}" style="cursor:text">${skill.name}</div>
                     <div class="settings-list-item__desc">${typeLabel}${skill.endpoint ? ' · ' + this.shortUrl(skill.endpoint) : ''}</div>
+                    <div style="font-family:monospace;font-size:.7rem;opacity:.5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${skill.id}</div>
                 </div>
                 ${enabledBadge(skill.enabled)}
             </div>`;
@@ -173,6 +197,13 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
                             <label>${t('form.icon')} <span style="color:var(--st-text-tertiary);font-size:.8em">emoji</span></label>
                             <input class="settings-input" name="icon" value="${skill.icon || ''}" placeholder="${meta.icon}">
                         </div>
+                    </div>
+                    <div class="settings-form-group">
+                        <label>ID <span style="color:var(--st-text-tertiary);font-size:.8em">lowercase letters, numbers, hyphens</span></label>
+                        <input class="settings-input" name="id" value="${skill.id}"
+                               placeholder="my-skill-id"
+                               style="font-family:monospace;font-size:.875rem"
+                               pattern="[a-z0-9][a-z0-9_-]*" title="Lowercase letters, numbers, hyphens">
                     </div>
                     <div class="settings-form-group">
                         <label>${t('form.description')}</label>
@@ -362,12 +393,21 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
     private bindEvents(mcpServers: import('@itookit/common').MCPServer[]) {
         this.clearListeners();
 
-        // ── Sidebar: single click = select, double click = inline rename ──────
+        // ── Sidebar: checkbox = multi-select, click = single-select, dblclick = rename ──
         const list = this.container.querySelector('.settings-split__list');
         if (list) {
+            this.addEventListener(list, 'change', (e) => {
+                const cb = (e.target as HTMLElement).closest('[data-check-id]') as HTMLInputElement | null;
+                if (!cb) return;
+                const id = cb.dataset.checkId!;
+                if (cb.checked) this._checkedIds.add(id);
+                else this._checkedIds.delete(id);
+                this.render(); // re-render to show/hide batch bar
+            });
             this.addEventListener(list, 'click', (e) => {
-                // Ignore clicks inside an active rename input
+                // Ignore clicks inside an active rename input or on checkboxes
                 if ((e.target as HTMLElement).closest('.skill-inline-rename')) return;
+                if ((e.target as HTMLElement).closest('[data-check-id]')) return;
                 const item = (e.target as HTMLElement).closest('[data-id]') as HTMLElement | null;
                 if (item) { this.selectedId = item.dataset.id!; this.render(); }
             });
@@ -376,6 +416,11 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
                 if (titleEl) this.startInlineRename(titleEl, titleEl.dataset.nameFor!);
             });
         }
+
+        // ── Batch actions ────────────────────────────────────────────────────
+        this.bindAction('batch-clear',  () => { this._checkedIds.clear(); this.render(); });
+        this.bindAction('batch-delete', () => this.batchDelete());
+        this.bindAction('batch-export', () => this.batchExport());
 
         // ── Header name input: focus style + sync + auto-save ─────────────────
         const headerInput = this.container.querySelector<HTMLInputElement>('[name="header-name"]');
@@ -595,8 +640,23 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
         if (authVal) headers = { ...(headers ?? {}), Authorization: authVal };
 
         const type = this.val('type') as LLMSkillType;
+        // Validate and resolve new ID
+        const rawId  = this.val('id').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+        const newId  = rawId || existing.id;
+        const idChanged = newId !== existing.id;
+
+        if (idChanged) {
+            // Check for conflicts with other skills
+            const conflict = skills.find(s => s.id === newId);
+            if (conflict) {
+                Toast.error(`ID "${newId}" is already used by "${conflict.name}"`);
+                return;
+            }
+        }
+
         const updated: LLMSkill = {
             ...existing,
+            id:           newId,
             name:         this.val('header-name') || this.val('name') || existing.name,
             icon:         this.val('icon')         || undefined,
             description:  this.val('description') || undefined,
@@ -617,7 +677,15 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
             parameters:   (type !== 'prompt' && type !== 'mcp') ? parameters : undefined,
             modifiedAt:   Date.now(),
         };
-        await this.service.saveSkill(updated);
+
+        if (idChanged) {
+            // Rename: save under new ID then delete old
+            await this.service.saveSkill(updated);
+            await this.service.deleteSkill(existing.id);
+            this.selectedId = newId;
+        } else {
+            await this.service.saveSkill(updated);
+        }
         Toast.success(t('skill.toast.saved'));
         await this.render(); // ← refresh badges in header and list item
     }
@@ -720,10 +788,23 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
             // Suppress onChange-triggered re-renders while batch-saving to avoid
             // showing partial state (e.g. only 1 of 3 skills) between saves.
             this._importing = true;
+            // Snapshot existing IDs to detect duplicates across the whole import batch.
+            const existingIds = new Set((await this.service.getSkills()).map(s => s.id));
             let lastId = '';
             let savedCount = 0;
             for (const item of skills) {
-                item.id      = item.id      ?? `skill-${generateShortUUID()}`;
+                // Resolve ID: use the one from the file; generate if absent.
+                let baseId = item.id ?? `skill-${generateShortUUID()}`;
+                // Deduplicate: append -2, -3, ... if the ID already exists.
+                if (existingIds.has(baseId)) {
+                    let counter = 2;
+                    while (existingIds.has(`${baseId}-${counter}`)) counter++;
+                    const suffixed = `${baseId}-${counter}`;
+                    errors.push(`ID "${baseId}" already exists → renamed to "${suffixed}"`);
+                    baseId = suffixed;
+                }
+                item.id      = baseId;
+                existingIds.add(baseId); // prevent duplicates within this import batch
                 item.enabled = item.enabled ?? false;
                 try {
                     await this.service.saveSkill(item);
@@ -802,10 +883,41 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
 
     private async exportAll() {
         const skills = await this.service.getSkills(); // always export fresh data
+        this.downloadYaml(skills, 'skills.yaml');
+    }
+
+    // ─── Batch actions ───────────────────────────────────────────────────────
+
+    private async batchDelete() {
+        const ids = [...this._checkedIds];
+        if (ids.length === 0) return;
+        Modal.confirm(
+            t('dialog.delete.title'),
+            `Delete ${ids.length} selected skill${ids.length > 1 ? 's' : ''}?`,
+            async () => {
+                this._importing = true;
+                for (const id of ids) await this.service.deleteSkill(id).catch(() => {});
+                this._importing = false;
+                this._checkedIds.clear();
+                if (ids.includes(this.selectedId ?? '')) this.selectedId = null;
+                await this.render();
+            },
+        );
+    }
+
+    private async batchExport() {
+        const ids = new Set(this._checkedIds);
+        if (ids.size === 0) return;
+        const all = await this.service.getSkills();
+        const selected = all.filter(s => ids.has(s.id));
+        this.downloadYaml(selected, selected.length === 1 ? `${selected[0].id}.yaml` : 'skills-export.yaml');
+    }
+
+    private downloadYaml(skills: LLMSkill[], filename: string) {
         const content = yaml.dump(skills, { lineWidth: -1, noRefs: true });
         const blob = new Blob([content], { type: 'text/yaml' });
         const a = Object.assign(document.createElement('a'), {
-            href: URL.createObjectURL(blob), download: 'skills.yaml',
+            href: URL.createObjectURL(blob), download: filename,
         });
         a.click();
         URL.revokeObjectURL(a.href);
