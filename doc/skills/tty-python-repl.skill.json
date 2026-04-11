@@ -1,0 +1,22 @@
+{
+  "id": "tty-python-repl",
+  "name": "Python REPL 交互调试",
+  "type": "prompt",
+  "description": "通过 shell_session / tty_write / tty_close 启动 Python 交互式解释器，分步执行代码并验证 TTY 工具集成",
+  "enabled": true,
+  "icon": "🐍",
+  "instructions": "## Python REPL 交互调试模式\n\n你现在具备三个 TTY 工具：\n- **shell_session** — 启动一个持久化 shell 进程，返回初始输出\n- **tty_write** — 向已开启的会话写入一行命令，等待输出稳定\n- **tty_close** — 关闭会话并释放进程资源\n\n---\n\n### 标准工作流\n\n**Step 1 — 启动 Python 解释器**\n```\nshell_session(\n  command=\"python3\",\n  idle_timeout_ms=2000\n)\n```\n预期输出示例：\n```\n[TTY tty_abc]\nPython 3.11.x ...\n>>> \n[Waiting for input]\n```\n记下 sessionId（如 `tty_abc`），后续步骤均使用它。\n\n**Step 2 — 逐条执行代码**\n每条命令末尾必须加 `\\n`，等待 `>>>` 出现后再发送下一条：\n```\ntty_write(session_id=\"tty_abc\", data=\"import math\\n\")\ntty_write(session_id=\"tty_abc\", data=\"print(math.pi)\\n\")\ntty_write(session_id=\"tty_abc\", data=\"x = [i**2 for i in range(10)]\\n\")\ntty_write(session_id=\"tty_abc\", data=\"print(x)\\n\")\n```\n\n**Step 3 — 验证多行代码块**\n```\ntty_write(session_id=\"tty_abc\", data=\"def greet(name):\\n    return f'Hello, {name}!'\\n\\n\")\ntty_write(session_id=\"tty_abc\", data=\"print(greet('TTY'))\\n\")\n```\n注意：多行 def 需要额外的空行（`\\n`）触发执行。\n\n**Step 4 — 关闭会话**\n```\ntty_close(session_id=\"tty_abc\")\n```\n\n---\n\n### 验证清单（完成后逐项回报）\n\n| 步骤 | 预期 | 实际 |\n|------|------|------|\n| shell_session 启动 | 输出 Python 版本 + `>>>` | |\n| 首次 tty_write | 输出 `>>>` 确认接收 | |\n| print(math.pi) | 输出 `3.141592653589793` | |\n| print(x) | 输出 `[0, 1, 4, 9, 16, 25, 36, 49, 64, 81]` | |\n| greet('TTY') | 输出 `Hello, TTY!` | |\n| tty_close | 返回 "Session closed" | |\n\n---\n\n### 常见问题\n\n- **没有 `>>>` 出现**：适当增大 `idle_timeout_ms`（默认 1500ms）\n- **多行代码未执行**：确认末尾有两个 `\\n`（空行触发 Python 执行 def）\n- **进程已退出**：用新的 `shell_session` 重新启动，不要对已关闭的 sessionId 调用 tty_write\n- **输出被截断**：单条输出超过 50 000 字节时自动截断，属正常保护行为",
+  "tools": [],
+  "triggerPatterns": [
+    "python.*repl",
+    "tty.*test",
+    "tty.*验证",
+    "shell.*session.*demo",
+    "交互.*python",
+    "python.*交互"
+  ],
+  "autoLoad": false,
+  "priority": 50,
+  "createdAt": 1744300800000,
+  "modifiedAt": 1744300800000
+}

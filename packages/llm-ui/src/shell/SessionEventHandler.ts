@@ -62,6 +62,13 @@ export interface SessionEventHandlerDeps {
     getCurrentSessionId: () => string | null;
     onContentChanged: () => void;
     onNavRefresh: () => void;
+    /**
+     * 导航到指定会话（可选）。
+     *
+     * 当后台会话发出 session_tty_active 事件时，通知条提示用户点击切换。
+     * 由 Shell 注入，不提供时仅展示无操作的 Toast。
+     */
+    onNavigateToSession?: (sessionId: string) => void;
 }
 
 // ----------------------------------------------------------------
@@ -122,6 +129,22 @@ export class SessionEventHandler {
                     this.deps.statusIndicator.update(event.payload.status);
                 } else if (event.payload.status === 'completed') {
                     Toast.info('Background task completed');
+                }
+                break;
+            case 'session_tty_active':
+                // Only notify when the TTY activity is in a background session.
+                if (event.payload.sessionId !== this.deps.getCurrentSessionId()) {
+                    const navigate = this.deps.onNavigateToSession;
+                    if (navigate) {
+                        // Show a clickable toast that navigates to the background session.
+                        Toast.action(
+                            `后台会话正在运行交互命令: ${event.payload.command}`,
+                            '切换查看',
+                            () => navigate(event.payload.sessionId),
+                        );
+                    } else {
+                        Toast.info(`后台会话正在运行交互命令: ${event.payload.command}，切换到该会话可查看实时输出`);
+                    }
                 }
                 break;
         }
