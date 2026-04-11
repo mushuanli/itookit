@@ -66,13 +66,27 @@ export class MentionPlugin implements InputPlugin {
     onKeyDown(e: KeyboardEvent): boolean {
         if (this.mentionStart < 0 || !this.popup) return false;
 
-        // Delegate navigation/selection to PopupPanel
-        if (['ArrowUp', 'ArrowDown', 'Enter', 'Tab'].includes(e.key)) {
+        // Navigation / selection: delegate to PopupPanel.
+        if (['ArrowUp', 'ArrowDown'].includes(e.key)) {
             return this.popup.handleKeyDown(e);
         }
 
         if (e.key === 'Escape') {
             this.close();
+            return true;
+        }
+
+        // Enter / Tab: ALWAYS intercept when a mention is in progress to prevent
+        // the ChatInputView from triggering a send (and accidentally executing a
+        // slash command with an un-resolved @mention).
+        //
+        // onRequestFiles is async — suggestions may not have loaded yet when
+        // the user presses Enter. If PopupPanel handles it (item selected) great;
+        // otherwise, swallow the key and let the user wait for suggestions or
+        // press Escape to cancel the mention.
+        if (['Enter', 'Tab'].includes(e.key)) {
+            e.preventDefault();
+            this.popup.handleKeyDown(e); // attempt selection (no-op if no items yet)
             return true;
         }
 
