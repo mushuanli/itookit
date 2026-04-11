@@ -1,7 +1,7 @@
 import { MemoryManager } from '@itookit/memory-manager';
 import { FileTypeDefinition } from '@itookit/vfs-ui';
 import { NavigationRequest, NAVIGATION_EVENTS, EditorFactory, MenuItem } from '@itookit/common';
-import type { LLMSkill, SkillDefinition, SkillToolBinding } from '@itookit/common';
+import type { LLMSkill, SkillDefinition, SkillToolBinding, ToolVFSContext, IVFSManager } from '@itookit/common';
 import { createVFS } from '@itookit/vfslib';
 import { createSettingsModule, createSettingsFactory } from '@itookit/app-settings';
 import {
@@ -51,6 +51,42 @@ function waitForEditorMount(container: HTMLElement): Promise<void> {
         observer.observe(container, { childList: true, subtree: true });
         check();
     });
+}
+
+// ── VFS ToolContext adapter ────────────────────────────────────────────────────
+//
+// Provides ToolVFSContext so harness file tools (file_read, file_write,
+// glob_search, grep_search) can access the virtual filesystem (IndexedDB)
+// in browser environments instead of the unavailable node:fs/promises.
+//
+// Path convention: tools use paths relative to the injected cwd.
+// The VFS manager resolves these against the CONFIG_MODULE ('etc') by default;
+// for workspace-specific access the tool cwd should be set to the module path.
+
+function createVFSToolContext(vfsManager: IVFSManager): ToolVFSContext {
+    // Use the global VFS manager's search and I/O to fulfil tool requests.
+    return {
+        async readFile(path: string): Promise<string> {
+            const nodeId = await vfsManager.resolvePath(path);
+            if (!nodeId) throw new Error(`VFS file not found: ${path}`);
+            const raw = await vfsManager.readContent(nodeId);
+            return typeof raw === 'string' ? raw : new TextDecoder().decode(raw as ArrayBuffer);
+        },
+
+        async writeFile(path: string, content: string): Promise<void> {
+            await vfsManager.write(path, content);
+        },
+
+        async listFiles(dir?: string): Promise<string[]> {
+            const query = dir ? `type:file` : `type:file`;
+            const results = await vfsManager.search({ text: '', filters: query ? [query] : [] }).catch(() => []);
+            // Return relative paths within the requested dir
+            return results
+                .map((n) => n.path ?? '')
+                .filter((p) => !dir || p.startsWith(dir))
+                .map((p) => dir ? p.slice(dir.length).replace(/^\//, '') : p);
+        },
+    };
 }
 
 // ── LLMSkill → SkillDefinition bridge ─────────────────────────────────────────
@@ -182,6 +218,10 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     // Harness: AgentLoopExecutor + built-in tools + skill service.
     // createHarness() reads the default LLM connection from llmDriver automatically.
     const harness = await createHarness({ llmDriver });
+
+    // Inject VFS context so file tools work with the virtual filesystem in browser.
+    // When node:fs is unavailable, tools fall back to ctx.vfs (ToolVFSContext).
+    harness.toolDriver.setVFSContext(createVFSToolContext(vfs));
 
     // Bridge: sync VFS LLMSkills → harness SkillDefinition so /skills, /skill <id>,
     // and the skill picker panel all show the user's configured skills.

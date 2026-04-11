@@ -58,11 +58,39 @@ export type ToolHandler = (
  *
  * 工具处理器执行时的环境信息。
  */
+/**
+ * 浏览器环境下的虚拟文件系统访问接口。
+ *
+ * 当 node:fs/promises 不可用时（browser build），工具通过此接口
+ * 访问 vfslib 中的虚拟文件，而非本地真实文件系统。
+ *
+ * 路径格式：VFS 模块相对路径，如 `/notes.md`、`subdir/file.ts`。
+ * `cwd` 是当前模块的 VFS 根路径，由调用方注入。
+ */
+export interface ToolVFSContext {
+    /** 读取 VFS 文件，返回 UTF-8 字符串。 */
+    readFile(path: string): Promise<string>;
+    /** 写入 VFS 文件（upsert 语义）。 */
+    writeFile(path: string, content: string): Promise<void>;
+    /**
+     * 列出路径下所有文件（递归），返回相对路径列表。
+     * 用于 glob_search 在 VFS 中遍历。
+     */
+    listFiles(dir?: string): Promise<string[]>;
+}
+
 export interface ToolExecutionContext {
-    /** 工作目录 */
+    /** 工作目录（Node.js 真实路径 或 VFS 模块相对路径） */
     cwd: string;
     /** 取消信号 */
     signal?: AbortSignal;
     /** 超时（毫秒） */
     timeoutMs: number;
+    /**
+     * 虚拟文件系统访问（仅在浏览器环境且 VFS 可用时注入）。
+     *
+     * 工具应优先检查此字段：有则走 VFS，无则走 node:fs/promises。
+     * 这样同一套工具代码同时支持 Node.js（真实 FS）和浏览器（VFS）。
+     */
+    vfs?: ToolVFSContext;
 }

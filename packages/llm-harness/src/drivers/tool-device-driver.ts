@@ -9,6 +9,7 @@ import type {
     ToolInvokeRequest,
     ToolInvokeResult,
     ToolBatchResult,
+    ToolVFSContext,
     DeviceContext,
 } from '@itookit/common';
 import type { ToolHandler } from '@itookit/common';
@@ -28,6 +29,16 @@ export class ToolDeviceDriver implements IDeviceDriver, IToolService {
     readonly sessionable = false;
 
     private registry = new Map<string, RegisteredTool>();
+    private vfsContext: ToolVFSContext | undefined = undefined;
+
+    /**
+     * Inject a VFS context so file tools (file_read, file_write, glob_search,
+     * grep_search) can access the virtual filesystem in browser environments
+     * instead of the unavailable node:fs/promises.
+     */
+    setVFSContext(ctx: ToolVFSContext): void {
+        this.vfsContext = ctx;
+    }
 
     constructor() {
         // Register all built-in tools at construction time
@@ -95,7 +106,12 @@ export class ToolDeviceDriver implements IDeviceDriver, IToolService {
         }
 
         try {
-            const output = await entry.handler(request.args, { cwd, signal: abortController.signal, timeoutMs });
+            const output = await entry.handler(request.args, {
+                cwd,
+                signal: abortController.signal,
+                timeoutMs,
+                vfs: this.vfsContext,  // undefined in Node.js; set in browser via setVFSContext()
+            });
             return { toolId: request.toolId, success: true, output, durationMs: Date.now() - t0 };
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err);

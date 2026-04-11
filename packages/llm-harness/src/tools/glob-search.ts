@@ -1,8 +1,9 @@
 // @file: llm-harness/src/tools/glob-search.ts
 // Glob 文件搜索工具。
 //
-// Browser safety: node:fs/promises and node:path are loaded via dynamic
-// import so Vite does not statically bundle them into the browser build.
+// 运行环境优先级：
+//   1. ctx.vfs  → 浏览器 VFS（vfslib.listFiles）
+//   2. node:fs  → Node.js 真实文件系统
 
 import type { ToolMeta, ToolDefinition, ToolHandler } from '@itookit/common';
 
@@ -75,39 +76,42 @@ async function walkDir(
     deps: FsDeps,
 ): Promise<void> {
     if (results.length >= limit) return;
-
     let entries;
-    try {
-        entries = await deps.readdir(dir, { withFileTypes: true });
-    } catch {
-        return;
-    }
-
+    try { entries = await deps.readdir(dir, { withFileTypes: true }); }
+    catch { return; }
     for (const entry of entries) {
         if (results.length >= limit) break;
         if (IGNORED_DIRS.has(entry.name)) continue;
-
         const full = deps.join(dir, entry.name);
-        const rel = deps.relative(baseDir, full);
-
+        const rel  = deps.relative(baseDir, full);
         if (entry.isDirectory()) {
             await walkDir(full, baseDir, regex, results, limit, deps);
         } else if (entry.isFile() && regex.test(rel)) {
-            try {
-                const s = await deps.stat(full);
-                results.push({ path: rel, mtime: s.mtimeMs });
-            } catch {
-                results.push({ path: rel, mtime: 0 });
-            }
+            try { results.push({ path: rel, mtime: (await deps.stat(full)).mtimeMs }); }
+            catch { results.push({ path: rel, mtime: 0 }); }
         }
     }
 }
 
 export const globSearchHandler: ToolHandler = async (args, ctx) => {
+    const pattern = args['pattern'] as string;
+    const baseDir = (args['base_dir'] as string | undefined) ?? ctx.cwd;
+    const limit   = (args['limit']   as number | undefined) ?? 100;
+    const regex   = globToRegex(pattern);
+
+    // ── Path A: VFS (browser) ──────────────────────────────────────────────
+    if (ctx.vfs) {
+        const allFiles = await ctx.vfs.listFiles(baseDir).catch(() => [] as string[]);
+        const matched  = allFiles.filter((f) => regex.test(f)).slice(0, limit);
+        if (matched.length === 0) return `No files matching: ${pattern}`;
+        return `${matched.length} file(s) matching "${pattern}":\n${matched.join('\n')}`;
+    }
+
+    // ── Path B: Node.js real filesystem ───────────────────────────────────
     let deps: FsDeps;
     try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const fs = await import('node:fs/promises' as any);
+        const fs       = await import('node:fs/promises' as any);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const nodePath = await import('node:path' as any);
         deps = { readdir: fs.readdir, stat: fs.stat, join: nodePath.join, relative: nodePath.relative };
@@ -115,20 +119,13 @@ export const globSearchHandler: ToolHandler = async (args, ctx) => {
             throw new Error('incomplete Node.js API');
         }
     } catch {
-        return 'Error: glob_search is not available in browser environments';
+        return 'Error: glob_search is not available in this environment (no VFS context injected and no Node.js fs API)';
     }
 
-    const pattern = args['pattern'] as string;
-    const baseDir = args['base_dir'] as string | undefined ?? ctx.cwd;
-    const limit = (args['limit'] as number | undefined) ?? 100;
-
-    const regex = globToRegex(pattern);
     const results: Array<{ path: string; mtime: number }> = [];
     await walkDir(baseDir, baseDir, regex, results, limit, deps);
-
     results.sort((a, b) => b.mtime - a.mtime);
     const paths = results.map((r) => r.path);
-
     if (paths.length === 0) return `No files matching: ${pattern}`;
     return `${paths.length} file(s) matching "${pattern}":\n${paths.join('\n')}`;
 };

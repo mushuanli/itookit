@@ -1,8 +1,9 @@
 // @file: llm-harness/src/tools/grep-search.ts
 // 内容搜索工具（正则，path:行号 格式输出）。
 //
-// Browser safety: node:fs/promises and node:path are loaded via dynamic
-// import so Vite does not statically bundle them into the browser build.
+// 运行环境优先级：
+//   1. ctx.vfs  → 浏览器 VFS（vfslib.listFiles + readFile）
+//   2. node:fs  → Node.js 真实文件系统
 
 import type { ToolMeta, ToolDefinition, ToolHandler } from '@itookit/common';
 
@@ -26,30 +27,12 @@ export const grepSearchDefinition: ToolDefinition = {
     parameters: {
         type: 'object',
         properties: {
-            pattern: {
-                type: 'string',
-                description: 'Regular expression pattern to search for',
-            },
-            glob: {
-                type: 'string',
-                description: 'File glob filter (e.g. "*.ts", "**/*.tsx"). Defaults to all text files.',
-            },
-            base_dir: {
-                type: 'string',
-                description: 'Base directory for the search (default: working directory)',
-            },
-            case_insensitive: {
-                type: 'boolean',
-                description: 'Case-insensitive matching (default: false)',
-            },
-            context_lines: {
-                type: 'number',
-                description: 'Number of context lines before/after each match (default: 0)',
-            },
-            limit: {
-                type: 'number',
-                description: 'Maximum number of matches to return (default: 50)',
-            },
+            pattern:         { type: 'string',  description: 'Regular expression pattern to search for' },
+            glob:            { type: 'string',  description: 'File glob filter (e.g. "*.ts"). Defaults to all text files.' },
+            base_dir:        { type: 'string',  description: 'Base directory for the search (default: working directory)' },
+            case_insensitive:{ type: 'boolean', description: 'Case-insensitive matching (default: false)' },
+            context_lines:   { type: 'number',  description: 'Number of context lines before/after each match (default: 0)' },
+            limit:           { type: 'number',  description: 'Maximum number of matches to return (default: 50)' },
         },
         required: ['pattern'],
     },
@@ -80,37 +63,28 @@ function isBinary(buf: Buffer): boolean {
 
 interface Match { file: string; line: number; content: string }
 
-// fs/path passed as deps to avoid top-level node: imports (browser safety).
 interface FsDeps {
     readFile: typeof import('node:fs/promises').readFile;
-    readdir: typeof import('node:fs/promises').readdir;
-    join: typeof import('node:path').join;
+    readdir:  typeof import('node:fs/promises').readdir;
+    join:     typeof import('node:path').join;
     relative: typeof import('node:path').relative;
 }
 
 async function searchFile(
-    filePath: string,
-    relPath: string,
-    regex: RegExp,
-    contextLines: number,
-    matches: Match[],
-    limit: number,
-    deps: FsDeps,
+    filePath: string, relPath: string, regex: RegExp,
+    contextLines: number, matches: Match[], limit: number, deps: FsDeps,
 ): Promise<void> {
     if (matches.length >= limit) return;
-
     const buf = await deps.readFile(filePath).catch(() => null);
     if (!buf || isBinary(buf as Buffer)) return;
-
     const lines = (buf as Buffer).toString('utf-8').split('\n');
     for (let i = 0; i < lines.length && matches.length < limit; i++) {
         if (!regex.test(lines[i])) continue;
-
         if (contextLines === 0) {
             matches.push({ file: relPath, line: i + 1, content: lines[i] });
         } else {
             const start = Math.max(0, i - contextLines);
-            const end = Math.min(lines.length - 1, i + contextLines);
+            const end   = Math.min(lines.length - 1, i + contextLines);
             for (let j = start; j <= end && matches.length < limit; j++) {
                 matches.push({ file: relPath, line: j + 1, content: lines[j] });
             }
@@ -119,62 +93,33 @@ async function searchFile(
 }
 
 async function walkAndSearch(
-    dir: string,
-    baseDir: string,
-    fileRegex: RegExp | null,
-    contentRegex: RegExp,
-    contextLines: number,
-    matches: Match[],
-    limit: number,
-    deps: FsDeps,
+    dir: string, baseDir: string, fileRegex: RegExp | null, contentRegex: RegExp,
+    contextLines: number, matches: Match[], limit: number, deps: FsDeps,
 ): Promise<void> {
     if (matches.length >= limit) return;
-
     let entries;
-    try {
-        entries = await deps.readdir(dir, { withFileTypes: true });
-    } catch {
-        return;
-    }
-
+    try { entries = await deps.readdir(dir, { withFileTypes: true }); }
+    catch { return; }
     for (const entry of entries) {
         if (matches.length >= limit) break;
         if (IGNORED_DIRS.has(entry.name)) continue;
-
         const full = deps.join(dir, entry.name);
-        const rel = deps.relative(baseDir, full);
-
+        const rel  = deps.relative(baseDir, full);
         if (entry.isDirectory()) {
             await walkAndSearch(full, baseDir, fileRegex, contentRegex, contextLines, matches, limit, deps);
-        } else if (entry.isFile()) {
-            if (!fileRegex || fileRegex.test(rel)) {
-                await searchFile(full, rel, contentRegex, contextLines, matches, limit, deps);
-            }
+        } else if (entry.isFile() && (!fileRegex || fileRegex.test(rel))) {
+            await searchFile(full, rel, contentRegex, contextLines, matches, limit, deps);
         }
     }
 }
 
 export const grepSearchHandler: ToolHandler = async (args, ctx) => {
-    let deps: FsDeps;
-    try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const fs = await import('node:fs/promises' as any);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const nodePath = await import('node:path' as any);
-        deps = { readFile: fs.readFile, readdir: fs.readdir, join: nodePath.join, relative: nodePath.relative };
-        if (typeof deps.readFile !== 'function' || typeof deps.join !== 'function') {
-            throw new Error('incomplete Node.js API');
-        }
-    } catch {
-        return 'Error: grep_search is not available in browser environments';
-    }
-
-    const pattern = args['pattern'] as string;
-    const glob = args['glob'] as string | undefined;
-    const baseDir = args['base_dir'] as string | undefined ?? ctx.cwd;
+    const pattern         = args['pattern']          as string;
+    const glob            = args['glob']              as string | undefined;
+    const baseDir         = (args['base_dir']         as string | undefined) ?? ctx.cwd;
     const caseInsensitive = (args['case_insensitive'] as boolean | undefined) ?? false;
-    const contextLines = (args['context_lines'] as number | undefined) ?? 0;
-    const limit = (args['limit'] as number | undefined) ?? 50;
+    const contextLines    = (args['context_lines']    as number | undefined) ?? 0;
+    const limit           = (args['limit']            as number | undefined) ?? 50;
 
     let contentRegex: RegExp;
     try {
@@ -182,14 +127,52 @@ export const grepSearchHandler: ToolHandler = async (args, ctx) => {
     } catch {
         return `Error: invalid regex pattern: ${pattern}`;
     }
-
     const fileRegex = glob ? globToRegex(glob) : null;
+
+    // ── Path A: VFS (browser) ──────────────────────────────────────────────
+    if (ctx.vfs) {
+        const allFiles = await ctx.vfs.listFiles(baseDir).catch(() => [] as string[]);
+        const matches: Match[] = [];
+        for (const relPath of allFiles) {
+            if (matches.length >= limit) break;
+            if (fileRegex && !fileRegex.test(relPath)) continue;
+            const text = await ctx.vfs.readFile(relPath).catch(() => null);
+            if (!text) continue;
+            const lines = text.split('\n');
+            for (let i = 0; i < lines.length && matches.length < limit; i++) {
+                if (!contentRegex.test(lines[i])) continue;
+                if (contextLines === 0) {
+                    matches.push({ file: relPath, line: i + 1, content: lines[i] });
+                } else {
+                    const start = Math.max(0, i - contextLines);
+                    const end   = Math.min(lines.length - 1, i + contextLines);
+                    for (let j = start; j <= end && matches.length < limit; j++) {
+                        matches.push({ file: relPath, line: j + 1, content: lines[j] });
+                    }
+                }
+            }
+        }
+        if (matches.length === 0) return `No matches for: ${pattern}`;
+        return `${matches.length} match(es) for "${pattern}"${glob ? ` in ${glob}` : ''}:\n${matches.map((m) => `${m.file}:${m.line}: ${m.content}`).join('\n')}`;
+    }
+
+    // ── Path B: Node.js real filesystem ───────────────────────────────────
+    let deps: FsDeps;
+    try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const fs       = await import('node:fs/promises' as any);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const nodePath = await import('node:path' as any);
+        deps = { readFile: fs.readFile, readdir: fs.readdir, join: nodePath.join, relative: nodePath.relative };
+        if (typeof deps.readFile !== 'function' || typeof deps.join !== 'function') {
+            throw new Error('incomplete Node.js API');
+        }
+    } catch {
+        return 'Error: grep_search is not available in this environment (no VFS context injected and no Node.js fs API)';
+    }
+
     const matches: Match[] = [];
     await walkAndSearch(baseDir, baseDir, fileRegex, contentRegex, contextLines, matches, limit, deps);
-
     if (matches.length === 0) return `No matches for: ${pattern}`;
-
-    const lines = matches.map((m) => `${m.file}:${m.line}: ${m.content}`);
-    const header = `${matches.length} match(es) for "${pattern}"${glob ? ` in ${glob}` : ''}:`;
-    return `${header}\n${lines.join('\n')}`;
+    return `${matches.length} match(es) for "${pattern}"${glob ? ` in ${glob}` : ''}:\n${matches.map((m) => `${m.file}:${m.line}: ${m.content}`).join('\n')}`;
 };
