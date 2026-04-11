@@ -204,12 +204,15 @@ export const ChatInputTemplates = {
      */
     renderSkillItem(skill: { id: string; name: string; description: string; loaded: boolean; toolCount: number; icon?: string }): string {
         const icon = skill.icon ? escapeHTML(skill.icon) : '⚡';
-        const loadedBadge = skill.loaded
-            ? `<span class="llm-input__skill-badge llm-input__skill-badge--loaded">Loaded</span>`
-            : '';
+        // Compact single-row: [icon] name · desc    [On / Off]
         const btn = skill.loaded
-            ? `<button class="llm-input__skill-btn llm-input__skill-btn--unload" data-skill="${escapeHTML(skill.id)}">Unload</button>`
-            : `<button class="llm-input__skill-btn llm-input__skill-btn--load" data-skill="${escapeHTML(skill.id)}">Load</button>`;
+            ? `<button class="llm-input__skill-btn llm-input__skill-btn--unload" data-skill="${escapeHTML(skill.id)}" title="Unload skill">On</button>`
+            : `<button class="llm-input__skill-btn llm-input__skill-btn--load"   data-skill="${escapeHTML(skill.id)}" title="Load skill">Off</button>`;
+
+        const descPart = skill.description
+            ? `<span class="llm-input__skill-sep" aria-hidden="true">·</span>
+               <span class="llm-input__skill-desc">${escapeHTML(skill.description)}</span>`
+            : '';
 
         return `
             <div class="llm-input__skill-item${skill.loaded ? ' llm-input__skill-item--loaded' : ''}"
@@ -217,9 +220,7 @@ export const ChatInputTemplates = {
                 <span class="llm-input__skill-icon">${icon}</span>
                 <div class="llm-input__skill-info">
                     <span class="llm-input__skill-name">${escapeHTML(skill.name)}</span>
-                    ${loadedBadge}
-                    <span class="llm-input__skill-desc">${escapeHTML(skill.description)}</span>
-                    <span class="llm-input__skill-tools">${skill.toolCount} tool${skill.toolCount !== 1 ? 's' : ''}</span>
+                    ${descPart}
                 </div>
                 ${btn}
             </div>
