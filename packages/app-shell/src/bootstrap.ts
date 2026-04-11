@@ -1,6 +1,7 @@
 import { MemoryManager } from '@itookit/memory-manager';
 import { FileTypeDefinition } from '@itookit/vfs-ui';
 import { NavigationRequest, NAVIGATION_EVENTS, EditorFactory, MenuItem } from '@itookit/common';
+import type { LLMSkill, SkillDefinition, SkillToolBinding } from '@itookit/common';
 import { createVFS } from '@itookit/vfslib';
 import { createSettingsModule, createSettingsFactory } from '@itookit/app-settings';
 import {
@@ -12,7 +13,7 @@ import {
 import { initializeLLMEngine, LLMSessionEngine, chatFileParser } from '@itookit/llm-engine';
 import { LLMDeviceDriver } from '@itookit/device-llm';
 import { setKernelDeviceManager } from '@itookit/llm-kernel';
-import { createHarness } from '@itookit/llm-harness';
+import { createHarness, type HarnessInstance } from '@itookit/llm-harness';
 
 import { AppOptions, AppHandle, WorkspaceConfig } from './types';
 import {
@@ -48,6 +49,72 @@ function waitForEditorMount(container: HTMLElement): Promise<void> {
         observer.observe(container, { childList: true, subtree: true });
         check();
     });
+}
+
+// ── LLMSkill → SkillDefinition bridge ─────────────────────────────────────────
+//
+// Two independent skill stores exist:
+//   - LLMSkill   (device-llm / VFS)          — user-configured, persisted
+//   - SkillDefinition (harness SkillDeviceDriver) — runtime, in-memory
+//
+// This bridge ensures the harness skill picker always reflects the VFS skills.
+
+function llmSkillToSkillDef(s: LLMSkill): SkillDefinition {
+    // For http / shell type skills, build a SkillToolBinding so the harness
+    // can register and invoke the tool when the skill is loaded.
+    const hasTool = (s.type === 'http' || s.type === 'shell') && s.parameters;
+    const tools: SkillToolBinding[] = hasTool ? [{
+        toolId: `${s.id}__tool`,
+        definition: {
+            name: `${s.id}__tool`,
+            description: s.description ?? s.name,
+            parameters: s.parameters as Record<string, unknown>,
+        },
+        executionType: s.type as 'http' | 'shell',
+        command: s.command,
+        sideEffect: s.type === 'http' ? 'external' : 'local',
+        timeoutMs: 30_000,
+    }] : [];
+
+    return {
+        id:          s.id,
+        name:        s.name,
+        description: s.description ?? '',
+        type:        s.type as SkillDefinition['type'],
+        enabled:     s.enabled,
+        icon:        s.icon,
+        instructions: s.instructions ?? '',
+        tools,
+        triggerPatterns: [],
+        autoLoad:    false,
+        priority:    50,
+        endpoint:    s.endpoint,
+        method:      s.method,
+        headers:     s.headers,
+        parameters:  s.parameters as Record<string, unknown> | undefined,
+        metadata:    s.metadata,
+        createdAt:   s.createdAt,
+        modifiedAt:  s.modifiedAt,
+    };
+}
+
+async function syncSkillsToHarness(
+    llmDriver: LLMDeviceDriver,
+    harness: HarnessInstance,
+): Promise<void> {
+    const llmSkills = await llmDriver.getSkills();
+    // Snapshot current harness skill IDs to detect deletions.
+    const harnessIds = new Set(harness.skillService.getSkillNames());
+
+    for (const s of llmSkills) {
+        await harness.skillService.saveSkill(llmSkillToSkillDef(s));
+        harnessIds.delete(s.id);
+    }
+
+    // Remove skills that were deleted from VFS.
+    for (const id of harnessIds) {
+        await harness.skillService.deleteSkill(id);
+    }
 }
 
 export async function initApp(options: AppOptions): Promise<AppHandle> {
@@ -113,6 +180,12 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     // Harness: AgentLoopExecutor + built-in tools + skill service.
     // createHarness() reads the default LLM connection from llmDriver automatically.
     const harness = await createHarness({ llmDriver });
+
+    // Bridge: sync VFS LLMSkills → harness SkillDefinition so /skills, /skill <id>,
+    // and the skill picker panel all show the user's configured skills.
+    await syncSkillsToHarness(llmDriver, harness);
+    // Keep skills in sync when the user adds / edits / deletes skills in Settings.
+    llmDriver.onChange(() => { syncSkillsToHarness(llmDriver, harness).catch(() => {}); });
 
     await initializeLLMEngine({
         agentService,
