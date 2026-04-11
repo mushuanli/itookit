@@ -73,19 +73,44 @@ export class SkillsEngine implements ISessionEngine {
         return id;
     }
 
-    /** Called by editor-connector on blur — receives full skill YAML from getText(). */
+    /**
+     * Called by editor-connector on blur (form auto-save) OR by VFSUIShell's
+     * ImportCommandHandler after creating a placeholder node for a dragged-in file.
+     *
+     * Key behaviour: if the YAML has an `id` field that differs from the current
+     * node `id` (e.g. file "essay-review.skill.yaml" → placeholder id "essay-review",
+     * but YAML says `id: essay-review-cn`), we:
+     *   1. Save the skill under the YAML's correct id.
+     *   2. Delete the placeholder.
+     *   3. Emit node:deleted + node:created so VFSUIShell refreshes correctly.
+     */
     async writeContent(id: string, content: string | ArrayBuffer): Promise<void> {
         const text = typeof content === 'string' ? content : new TextDecoder().decode(content as ArrayBuffer);
         if (!text.trim()) return;
+
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const incoming = yaml.load(text) as any;
+        let incoming: any;
+        try { incoming = yaml.load(text); } catch { return; }
+        // Ignore non-object content (e.g. readContent() returning just the skill id as a string).
         if (!incoming || typeof incoming !== 'object') return;
 
         const skills = await this.service.getSkills();
         const existing = skills.find((s) => s.id === id);
-        const updated: LLMSkill = { ...existing, ...incoming, id, modifiedAt: Date.now() };
+
+        // Prefer the id from YAML (canonical) over the placeholder id derived from filename.
+        const targetId = (typeof incoming.id === 'string' && incoming.id.trim()) ? incoming.id.trim() : id;
+
+        const updated: LLMSkill = { ...existing, ...incoming, id: targetId, modifiedAt: Date.now() };
         await this.service.saveSkill(updated);
-        this.fire('node:updated', { nodes: [{ nodeId: id }] });
+
+        if (targetId !== id) {
+            // Remove the filename-derived placeholder node.
+            if (existing) await this.service.deleteSkill(id).catch(() => {});
+            this.fire('node:deleted', { requestedIds: [id], allDeletedIds: [id] });
+            this.fire('node:created', { nodes: [{ nodeId: targetId, parentId: null, path: `/${targetId}`, type: 'file' }] });
+        } else {
+            this.fire('node:updated', { nodes: [{ nodeId: targetId }] });
+        }
     }
 
     async createFile(rawName: string): Promise<EngineNode> {
