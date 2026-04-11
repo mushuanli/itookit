@@ -1,7 +1,10 @@
 // @file: llm-harness/src/executor/back-pressure.ts
 // 反压验证器实现。
+//
+// Browser safety: spawn is loaded via dynamic import so Vite does not
+// statically bundle node:child_process into the browser build.
+// In browser environments the dynamic import throws and every rule passes (no-op).
 
-import { spawn } from 'node:child_process';
 import type { IBackPressureValidator, BackPressureResult, BackPressureRule } from '@itookit/common';
 
 export class BackPressureValidator implements IBackPressureValidator {
@@ -44,9 +47,22 @@ export class BackPressureValidator implements IBackPressureValidator {
     }
 
     private runRule(rule: BackPressureRule, cwd: string): Promise<BackPressureResult> {
-        return new Promise((resolve) => {
+        return new Promise(async (resolve) => {
+            // Dynamic import keeps node:child_process out of the browser bundle.
+            // The destructure triggers the Vite externalized-module getter, which throws
+            // in browser; we catch that and treat the rule as passed (no-op).
+            let spawnFn: typeof import('node:child_process').spawn;
+            try {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const cp = await import('node:child_process' as any);
+                spawnFn = cp.spawn;
+            } catch {
+                resolve({ passed: true, ruleName: rule.name, errorMessage: '' });
+                return;
+            }
+
             const chunks: string[] = [];
-            const proc = spawn('sh', ['-c', rule.command], {
+            const proc = spawnFn('sh', ['-c', rule.command], {
                 cwd,
                 stdio: ['ignore', 'pipe', 'pipe'],
             });

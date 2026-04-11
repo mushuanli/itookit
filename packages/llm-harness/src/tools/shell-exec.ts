@@ -1,7 +1,10 @@
 // @file: llm-harness/src/tools/shell-exec.ts
 // Shell 命令执行工具（含危险命令硬拦截）。
+//
+// Browser safety: spawn is loaded via dynamic import so Vite does not
+// statically bundle node:child_process. In browser environments the tool
+// returns an error message instead of attempting process spawn.
 
-import { spawn } from 'node:child_process';
 import type { ToolMeta, ToolDefinition, ToolHandler } from '@itookit/common';
 
 export const shellExecMeta: ToolMeta = {
@@ -66,11 +69,21 @@ export const shellExecHandler: ToolHandler = async (args, ctx) => {
         return `Error: command blocked by safety filter (pattern: ${danger})`;
     }
 
+    // Dynamic import keeps node:child_process out of the browser bundle.
+    let spawnFn: typeof import('node:child_process').spawn;
+    try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const cp = await import('node:child_process' as any);
+        spawnFn = cp.spawn;
+    } catch {
+        return 'Error: shell_exec is not available in browser environments';
+    }
+
     return new Promise((resolve) => {
         const chunks: string[] = [];
         let timedOut = false;
 
-        const proc = spawn('sh', ['-c', command], {
+        const proc = spawnFn('sh', ['-c', command], {
             cwd: ctx.cwd,
             env: { ...process.env },
             stdio: ['ignore', 'pipe', 'pipe'],
