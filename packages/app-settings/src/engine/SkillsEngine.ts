@@ -4,8 +4,12 @@
 // Bridges IAgentManagementService → ISessionEngine so VFSUIShell can render
 // the skill list without any custom sidebar code.
 //
-// Skill storage remains in device-llm (etc module / llm/.skills/*.yaml).
-// This engine reads/writes through the service layer, never the VFS directly.
+// Event payloads must match what EngineAdapter expects:
+//   node:created  → { nodes: [{nodeId, parentId, path, type}] }
+//   node:updated  → { nodes: [{nodeId}] }
+//   node:deleted  → { requestedIds: string[], allDeletedIds: string[] }
+//   node:renamed  → { nodes: [{nodeId, oldName, newName}] }
+//   node:moved    → any  (triggers full loadData() in EngineAdapter)
 
 import type {
     ISessionEngine, EngineNode, EngineEvent, EngineEventType, EngineSearchQuery,
@@ -16,15 +20,17 @@ import yaml from 'js-yaml';
 export class SkillsEngine implements ISessionEngine {
     public readonly moduleName = 'skills';
 
-    private listeners = new Map<string, Set<(e: EngineEvent) => void>>();
+    private readonly listeners = new Map<string, Set<(e: EngineEvent) => void>>();
     private unsubscribe: (() => void) | null = null;
 
     constructor(private readonly service: IAgentManagementService) {
-        // Forward agentService changes to VFSUIShell as batch_updated events.
+        // Forward agentService changes to VFSUIShell.
+        // 'node:moved' is the only EngineAdapter event that triggers a full loadData() — use it
+        // to force a refresh when skills are changed externally (e.g., from the Settings page).
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        this.unsubscribe = (service as any).onChange?.(() =>
-            this.emit('node:batch_updated', {} as EngineEvent),
-        ) ?? null;
+        this.unsubscribe = (service as any).onChange?.(() => {
+            this.fire('node:moved', {});
+        }) ?? null;
     }
 
     async init(): Promise<void> {}
@@ -41,7 +47,7 @@ export class SkillsEngine implements ISessionEngine {
         return s ? this.toNode(s) : null;
     }
 
-    /** Returns the skill as YAML — passed to SkillSettingsEditor.init() as content. */
+    /** Returns skill YAML — passed to SkillSettingsEditor.init() as content. */
     async readContent(id: string): Promise<string> {
         const skills = await this.service.getSkills();
         const s = skills.find((x) => x.id === id);
@@ -61,6 +67,9 @@ export class SkillsEngine implements ISessionEngine {
         const existing = skills.find((s) => s.id === id);
         const updated: LLMSkill = { ...existing, ...incoming, id, modifiedAt: Date.now() };
         await this.service.saveSkill(updated);
+        // onChange fires after saveSkill → triggers 'node:moved' → full reload.
+        // Emit an additional 'node:updated' for faster per-item refresh.
+        this.fire('node:updated', { nodes: [{ nodeId: id }] });
     }
 
     async createFile(name: string): Promise<EngineNode> {
@@ -68,23 +77,25 @@ export class SkillsEngine implements ISessionEngine {
         const now = Date.now();
         const skill: LLMSkill = { id, name, type: 'prompt', enabled: false, createdAt: now, modifiedAt: now };
         await this.service.saveSkill(skill);
-        this.emit('node:created', { nodeId: id, parentId: null } as unknown as EngineEvent);
-        return this.toNode(skill);
+        const node = this.toNode(skill);
+        this.fire('node:created', { nodes: [{ nodeId: id, parentId: null, path: `/${id}`, type: 'file' }] });
+        return node;
     }
 
     async rename(id: string, newName: string): Promise<void> {
         const skills = await this.service.getSkills();
         const s = skills.find((x) => x.id === id);
         if (!s) return;
+        const oldName = s.name;
         await this.service.saveSkill({ ...s, name: newName, modifiedAt: Date.now() });
-        this.emit('node:updated', { nodeId: id } as unknown as EngineEvent);
+        this.fire('node:renamed', { nodes: [{ nodeId: id, oldName, newName }] });
     }
 
     async delete(ids: string[]): Promise<void> {
         for (const id of ids) {
             await this.service.deleteSkill(id);
         }
-        this.emit('node:deleted', { nodeIds: ids } as unknown as EngineEvent);
+        this.fire('node:deleted', { requestedIds: ids, allDeletedIds: ids });
     }
 
     async search(query: EngineSearchQuery): Promise<EngineNode[]> {
@@ -134,15 +145,17 @@ export class SkillsEngine implements ISessionEngine {
             modifiedAt: s.modifiedAt ?? Date.now(),
             moduleId:   'skills',
             metadata:   {
-                title:       s.name,
-                tags:        s.enabled ? [] : ['disabled'],
+                title:        s.name,
+                tags:         s.enabled ? [] : ['disabled'],
                 lastModified: s.modifiedAt ?? Date.now(),
-                custom:      { skillType: s.type, enabled: s.enabled },
+                custom:       { skillType: s.type, enabled: s.enabled },
             },
         } as EngineNode;
     }
 
-    private emit(type: string, event: EngineEvent): void {
+    /** Emit a properly-structured EngineEvent to all subscribed handlers. */
+    private fire(type: EngineEventType, payload: unknown): void {
+        const event: EngineEvent = { type, payload };
         for (const h of this.listeners.get(type) ?? []) h(event);
     }
 }
