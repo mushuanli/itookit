@@ -38,6 +38,15 @@ export interface IAgentRuntime {
     abort(): void;
 
     /**
+     * Q3: 在执行中注入用户指令。
+     *
+     * 调用后，当前 sessionId 的下一轮循环开始时会先把 message 作为 user 消息
+     * 加入上下文，Agent 会在下一轮响应时感知到这条指令。
+     * 适合用于"执行中途发现方向不对"的场景：用户无需 abort 即可实时纠偏。
+     */
+    inject(message: string): void;
+
+    /**
      * 订阅 Agent 事件（通知模式）
      */
     on<E extends AgentEventType>(

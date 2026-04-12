@@ -155,6 +155,12 @@ export interface AgentLoopConfig {
     enableBackPressure: boolean;
     /** 反压规则列表 */
     backPressureRules: BackPressureRule[];
+    /**
+     * Q1: 首轮有工具调用时，在执行前发出 agent:plan:confirm 事件等待用户确认。
+     * onIntercept 返回 false=取消，true=继续，string=修改指令后重新规划。
+     * @default false
+     */
+    enablePlanConfirm: boolean;
 }
 
 /**
@@ -193,7 +199,11 @@ export type AgentEventType =
     | 'agent:tty:open'    // 新会话创建
     | 'agent:tty:data'    // 进程输出（实时流）
     | 'agent:tty:close'   // 进程退出
-    | 'agent:tty:error';  // 会话错误
+    | 'agent:tty:error'   // 会话错误
+    // 计划确认（Q1：用户可在第一次工具调用前审批/修改计划）
+    | 'agent:plan:confirm'
+    // 用户注入（Q3：执行中用户插入指令）
+    | 'agent:user:injected';
 
 /**
  * Agent 事件载荷映射
@@ -224,4 +234,14 @@ export interface AgentEventPayloads {
     'agent:tty:data':  { sessionId: string; chunk: string };
     'agent:tty:close': { sessionId: string; exitCode: number | null; signal: string | null };
     'agent:tty:error': { sessionId: string; error: string };
+    /**
+     * Q1: 第一次工具调用前的计划确认。
+     * onIntercept 返回 false=取消任务, true=批准, string=修改指令后继续。
+     */
+    'agent:plan:confirm': {
+        plannedTools: Array<{ id: string; name: string; args: Record<string, unknown> }>;
+        turn: number;
+    };
+    /** Q3: 用户在执行中注入指令，已加入下一轮上下文。 */
+    'agent:user:injected': { message: string };
 }

@@ -2,7 +2,7 @@
 
 import {
     IEditor, EditorOptions, EditorHostContext, EditorEvent,
-    EditorEventCallback, CollapseExpandResult, Toast, guessMimeType,
+    EditorEventCallback, CollapseExpandResult, Toast, Modal, guessMimeType,
 } from '@itookit/common';
 
 /** Alias: infer MIME from filename (used for @mention file suggestions) */
@@ -178,6 +178,8 @@ export class LLMWorkspaceEditor implements IEditor {
             this.initComplete = true;
             this.emit('ready');
             this.initResolve?.();
+            // Q2: Check for interrupted harness sessions after init.
+            this.checkInterruptedSessions();
         } catch (e: any) {
             if (e.code === 'ABORTED' || e.message?.includes('Bind cancelled')) {
                 this.initResolve?.();
@@ -856,6 +858,11 @@ export class LLMWorkspaceEditor implements IEditor {
         this.harnessPlugin = new HarnessPlugin(harnessRuntime);
         chatInput.registerPlugin(this.harnessPlugin);
 
+        // Q1: Wire plan-confirm intercept when harness runtime is available.
+        if (harnessRuntime) {
+            this.wirePlanConfirmIntercept(harnessRuntime);
+        }
+
         const promptHistory = getPromptHistory();
         if (promptHistory) {
             this.historyPlugin = new HistoryPlugin(promptHistory);
@@ -1288,6 +1295,78 @@ export class LLMWorkspaceEditor implements IEditor {
 
     // showToolResultModal removed — output is now shown inline via chatInput.showToolOutput()
 
+    // ── Q2: Interrupted session recovery ────────────────────────────────────
+
+    private checkInterruptedSessions(): void {
+        // Q2: Dynamically import session-store to check for interrupted sessions.
+        // This avoids a hard dependency on llm-harness in the llm-ui package.
+        try {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const store = (globalThis as any)['localStorage'];
+            if (!store) return;
+            const interrupted: Array<{ sessionId: string; task: { prompt: string } }> = [];
+            for (let i = 0; i < store.length; i++) {
+                const k: string = store.key(i) ?? '';
+                if (!k.startsWith('harness:session:')) continue;
+                try {
+                    const p = JSON.parse(store.getItem(k)) as { status: string; sessionId: string; task: { prompt: string } };
+                    if (p.status === 'running') interrupted.push(p);
+                } catch { /* skip */ }
+            }
+            if (interrupted.length === 0) return;
+            const latest = interrupted[0];
+            const preview = latest.task.prompt.slice(0, 80);
+            Toast.action(
+                `上次有未完成的 Agent 任务: "${preview}"`,
+                '重新执行',
+                () => {
+                    const runtime = getHarnessAdapter()?.getRuntime();
+                    if (!runtime) { Toast.error('需要先开启 Agent Mode'); return; }
+                    runtime.resumeSession(latest.sessionId).catch(() => {
+                        Toast.info('旧任务将重新运行，请确保 Agent Mode 已开启');
+                    });
+                },
+            );
+        } catch { /* localStorage not available */ }
+    }
+
+    // ── Q3: Mid-execution user injection ─────────────────────────────────────
+
+    /**
+     * Called when the user sends a message while harness is running.
+     * Instead of rejecting with SESSION_BUSY, inject the message into the
+     * running harness so the Agent sees it on the next loop iteration.
+     */
+    injectIntoRunningHarness(message: string): boolean {
+        const runtime = getHarnessAdapter()?.getRuntime();
+        const session = runtime?.getCurrentSession();
+        if (!session || session.status !== 'running') return false;
+        runtime!.inject(message);
+        Toast.info('已注入指令 — Agent 将在下一轮感知到');
+        return true;
+    }
+
+    // ── Q1: Plan confirm intercept ───────────────────────────────────────────
+    // Wired in registerInputPlugins() when harness runtime is available.
+
+    private wirePlanConfirmIntercept(runtime: import('@itookit/common').IAgentRuntime): () => void {
+        return runtime.onIntercept('agent:plan:confirm', (payload) => {
+            const toolList = payload.plannedTools
+                .map((t) => `• ${t.name}(${JSON.stringify(t.args).slice(0, 60)})`)
+                .join('\n');
+            return new Promise<boolean | string>((resolve) => {
+                // Modal.confirm(title, body, onConfirm) — simple 3-arg form
+                Modal.confirm(
+                    'Plan 确认',
+                    `Agent 计划执行以下操作:\n${toolList}\n\n点击"确认"批准执行，或关闭取消任务。`,
+                    () => resolve(true),
+                );
+                // No cancel hook in the simple Modal.confirm — resolve false on timeout
+                setTimeout(() => resolve(false), 120_000);
+            });
+        });
+    }
+
     /**
      * Execute a skill invocation with file resolution, glob expansion,
      * missing-arg wizard, and prompt building.
@@ -1394,12 +1473,14 @@ export class LLMWorkspaceEditor implements IEditor {
      * 复用 SendMessageCommand，保持与正常发送完全一致的流程。
      */
     private sendFollowUp(text: string): void {
-        const agentId = this.chatInput.getConfig().agentId;
-        this.sendCommand.run({
-            text,
-            files: [],
-            agentId,
-        });
+        const config  = this.chatInput.getConfig();
+        const agentId = config.agentId;
+        // Preserve harness/workingDirectory overrides so /continue /shorter etc.
+        // honour the current harness toggle instead of silently using the kernel path.
+        const overrides = config.settings?.useHarness
+            ? { useHarness: true as const, workingDirectory: config.settings.workingDirectory }
+            : undefined;
+        this.sendCommand.run({ text, files: [], agentId, overrides });
     }
 
     /**
