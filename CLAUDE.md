@@ -40,12 +40,13 @@ pnpm monorepo. All packages under `packages/`, main app under `apps/web-app/` (p
 | `@itookit/vfsdriver-fs` | SQLite + local FS backend (Node/Electron) |
 | `@itookit/device-llm` | LLM API communication — OpenAI/Anthropic/Gemini, SSE streaming, MCP protocol |
 | `@itookit/llm-kernel` | Execution engine core, no UI deps — Executor and Orchestrator types |
-| `@itookit/llm-engine` | UI adapter layer — session management, state, VFS persistence (`.chat` files) |
+| `@itookit/llm-engine` | UI adapter layer — session management, state, VFS persistence (`.chat` files), Mission + Session-Graph orchestration |
+| `@itookit/llm-harness` | AgentLoopExecutor (multi-turn) + built-in tools + TTY device + Skill/Tool drivers |
 | `@itookit/mdxeditor` | CodeMirror 6 Markdown editor with frontmatter/GFM/Mermaid |
 | `@itookit/llm-ui` | Chat UI components and Agent editor factory |
 | `@itookit/vfs-ui` | File-tree UI shell (`VFSUIShell`) backed by `ISessionEngine` |
 | `@itookit/memory-manager` | Top-level workspace container — combines VFSUIShell + editor + BackgroundBrain |
-| `@itookit/app-settings` | Settings module, sync service skeleton, `SettingsEngine` |
+| `@itookit/app-settings` | Settings module, sync service skeleton, `SettingsEngine`, `SkillsEngine` |
 | `mind-os` (`apps/web-app`) | Main browser SPA — product entry point |
 
 ## Key Architecture
@@ -81,6 +82,7 @@ Each **module** is a named namespace. A module's `IModuleFS` maps its `/` root t
 Two main implementations:
 - **`VFSModuleEngine`** (`packages/vfslib/src/adapter-session/`) — adapts `IVFSManager` → `ISessionEngine` for standard file workspaces
 - **`LLMSessionEngine`** (`packages/llm-engine/src/persistence/`) — Chat-specific; stores sessions as `.chat` files with a branching message graph in hidden VFS directories
+- **`SkillsEngine`** (`packages/app-settings/src/engine/`) — adapts `IAgentManagementService` → `ISessionEngine` for the Skills workspace
 
 Services needing direct VFS access extend **`BaseModuleService`** (`packages/vfslib/src/adapter-session/`) — provides `readJson`/`writeJson` (upsert semantics), `ensureDirectory`, and `engine: VFSModuleEngine`.
 
@@ -93,29 +95,31 @@ interface WorkspaceStrategy {
 }
 ```
 
-Four strategies: `StandardWorkspaceStrategy` (MDxEditor + `VFSModuleEngine`), `ChatWorkspaceStrategy` (`LLMSessionEngine`), `AgentWorkspaceStrategy`, `SettingsWorkspaceStrategy`. Adding a workspace = adding an entry to `WORKSPACES` in `apps/web-app/src/config/modules.ts`.
+Strategies: `StandardWorkspaceStrategy` (MDxEditor + `VFSModuleEngine`), `ChatWorkspaceStrategy` (`LLMSessionEngine`), `AgentWorkspaceStrategy`, `SettingsWorkspaceStrategy`, **`SkillsWorkspaceStrategy`** (⚡ Skills tab — `SkillsEngine` + `SkillSettingsEditor` form-only). Adding a workspace = adding an entry to `WORKSPACES` in `apps/web-app/src/config/modules.ts`.
 
 ### LLM Engine Stack
 
 ```
-device-llm  →  LLMConnection / streaming / MCP / multi-provider / Skill storage
+device-llm  →  LLMConnection / streaming / MCP / multi-provider / Skill storage (LLMSkill YAML)
 llm-kernel  →  Executor (Agent/HTTP/Tool/Script) + Orchestrator (Serial/Parallel/Router/Loop/DAG)
 llm-harness →  AgentLoopExecutor (multi-turn) + built-in tools + TTY device + Skill/Tool drivers
 llm-engine  →  SessionManager, LLMSessionEngine (→ vfslib), VFSAgentService (→ vfslib)
+              + MissionService (plan-execute-verify) + GraphOrchestrator (file-based session graph)
 llm-ui      →  Chat UI, Agent editor, SkillSettingsEditor, MCPSettingsEditor
 ```
 
-`initializeLLMEngine(options)` in `packages/llm-engine/src/index.ts` wires the kernel, `VFSAgentService`, `LLMSessionEngine`, `PromptHistoryService`, and returns a `SessionManager`.
+`initializeLLMEngine(options)` in `packages/llm-engine/src/index.ts` wires the kernel, `VFSAgentService`, `LLMSessionEngine`, `PromptHistoryService`, and returns a `SessionManager`. Also accepts `harnessRuntime`, `harnessSkillService`, `harnessToolService` — all injected from `createHarness()` in `app-shell/bootstrap.ts`.
 
 ### LLM Harness — Agent Loop Executor
 
 `@itookit/llm-harness` implements the multi-turn Agent loop with:
 
-- **AgentLoopExecutor** — `while(true)` loop: budget check → context compress → LLM call → tool execution → back-pressure
+- **AgentLoopExecutor** — `while(true)` loop: flush pending injections → budget check → context compress → LLM call → **plan confirm (Q1)** → tool execution → back-pressure
 - **Four-layer context compression** (HISTORY_SNIP / CACHE_PRUNE / LLM_SUMMARIZE / SLIDING_WINDOW)
 - **Five-category error recovery** (rate-limit / context-too-large / overload / truncation / tool-error)
 - **Built-in tools**: `file_read`, `file_write`, `shell_exec`, `glob_search`, `grep_search`, `load_skill`, `delegate_task`
 - **TTY tools** (when `NodeTTYDriver` is injected): `shell_session`, `tty_write`, `tty_close`
+- **Session persistence**: `session-store.ts` — localStorage-based crash recovery; `loadInterruptedSessions()` for UI recovery banner
 
 **Dual execution path in TaskRunner:**
 
@@ -124,17 +128,38 @@ llm-ui      →  Chat UI, Agent editor, SkillSettingsEditor, MCPSettingsEditor
 | Kernel path | default | single-turn, auto-continue, streaming |
 | Harness path | `overrides.useHarness=true` | multi-turn agent loop, tool calling, context compression |
 
-**Wiring:**
-```ts
-import { createHarness, NodeTTYDriver, NodeShellRunner } from '@itookit/llm-harness';
+**Harness lifecycle (Q1–Q5 features):**
 
-const harness = await createHarness({
-    llmDriver,                          // IDeviceDriver from device-llm
-    ttyDriver: new NodeTTYDriver(),     // optional: enables interactive shells
+| Feature | API | Description |
+|---|---|---|
+| Plan confirm | `agent:plan:confirm` interceptable event | First turn with tool calls pauses for user approval; `enablePlanConfirm` config |
+| Mid-exec injection | `IAgentRuntime.inject(message)` | User injects correction mid-loop; flushed at next iteration start |
+| Crash recovery | `loadInterruptedSessions()` + localStorage | Sessions saved per-turn; offer recovery banner on page load |
+| Slash cmd fix | `sendFollowUp` passes `useHarness` override | `/continue` `/shorter` etc. now honour the harness toggle |
+| Cross-session | `delegate_task` tool + `GraphOrchestrator` | Sub-agent within session; file-based graph for cross-session deps |
+
+**Wiring (bootstrap.ts):**
+```ts
+const harness = await createHarness({ llmDriver });
+harness.toolDriver.setVFSContext(createVFSToolContext(vfs)); // browser VFS fallback
+await initializeLLMEngine({
+    agentService, sessionEngine,
+    harnessRuntime:      harness.runtime,
+    harnessSkillService: harness.skillService,
+    harnessToolService:  harness.toolService,
 });
-// harness.runtime  → IAgentRuntime
-// harness.toolService / skillService / agentDriver / toolDriver / skillDriver
 ```
+
+**Browser-safe built-in tools:** All file tools (`file_read`, `file_write`, `glob_search`, `grep_search`) check `ctx.vfs` first (VFS fallback via `ToolVFSContext`) before attempting `node:fs/promises`. `node:child_process` and `node:path` are loaded via dynamic import to avoid Vite externalization errors.
+
+**Direct tool slash commands (bypass LLM):**
+```
+/exec <command>                      → shell_exec (Node.js only)
+/read <path> [--offset N --limit N]  → file_read  (VFS or real FS)
+/grep "<pattern>" [--glob *.ts]      → grep_search
+/glob "<pattern>" [--dir ./src]      → glob_search
+```
+Results appear in an inline ChatInput panel (not Modal). Agent is NOT involved. Sending a normal message auto-clears the panel.
 
 ### TTY Device — Interactive Shell Sessions
 
@@ -172,14 +197,6 @@ agent:tty:close { sessionId, exitCode, signal }
 ```
 HarnessAdapter bridges these to `OrchestratorEvent(metaInfo.ttyOpen/ttyData/ttyClose)` for UI rendering (Phase 2: xterm.js TtyPanel).
 
-**Multi-turn session example:**
-```
-Turn 1: shell_session("python3")  → "[TTY tty_abc]\nPython 3.11 >>>\n[Waiting]"
-Turn 2: tty_write("import math\n") → ">>>"
-Turn 3: tty_write("print(math.pi)\n") → "3.14159...\n>>>"
-Turn 4: tty_close("tty_abc")      → "Session closed"
-```
-
 **Platform injection pattern:**
 ```ts
 // Node.js / Electron / CLI
@@ -197,8 +214,10 @@ createHarness({ llmDriver })           // TTY tools not registered; graceful deg
 ### Skill System
 
 **Two layers:**
-- `LLMSkill` (stored by `device-llm`, kernel path) — flat JSON config, types: `prompt | http | shell | mcp | custom`
+- `LLMSkill` (stored by `device-llm` as YAML in `etc/llm/.skills/`) — flat config, types: `prompt | http | shell | mcp | custom`
 - `SkillDefinition` (managed by `llm-harness/SkillDeviceDriver`, harness path) — richer: `instructions`, `tools[]`, `triggerPatterns`
+
+**Bridge:** `syncSkillsToHarness()` in `bootstrap.ts` converts `LLMSkill → SkillDefinition` and registers in harness on startup and on `llmDriver.onChange`.
 
 **Skill types:**
 
@@ -210,13 +229,80 @@ createHarness({ llmDriver })           // TTY tools not registered; graceful deg
 | `mcp` | MCP protocol via `_activeMCPConns` in `LLMDeviceDriver` | MCP server tools (auto-inherits endpoint + auth) |
 | `builtin` | References already-registered tools | Wraps existing harness built-ins |
 
-**Chat input invocation syntax:** `/skill-name [--key val]* [[file](path)]* [@glob]* [text]`
-- File paths from `[name](path)` (MentionPlugin) → read by `AttachmentProcessor`
-- Glob patterns `@*.ts` → expanded via `sessionEngine.search()`
-- Shell skills check `{{arg}}` placeholders, show wizard if missing
+**Skill file format:** YAML (`.skill.yaml`) stored in `doc/skills/` as seed files. Import via Settings → Skills → 📂 or the ⚡ Skills workspace.
+
+**Skills workspace (⚡ tab):**
+- Left sidebar: `VFSUIShell` backed by `SkillsEngine` (ISessionEngine adapter over `IAgentManagementService`)
+- Right panel: `SkillSettingsEditor` in `_formOnly` mode (receives skill YAML from `SkillsEngine.readContent()`)
+- `SkillsEngine.toNode()`: `name = skill.name` (primary), `content = skill.id + typeIcon` (summary), `hasUnreadUpdate = skill.enabled` (green dot)
+- Export = YAML; Import supports `@path` and `[name](path)` mention formats
+
+**Chat input invocation syntax:** `/sk-<skillid> [--key val]* [@file]* [text]`
+- Only enabled skills appear; grouped as "Skills — active" (loaded) vs "Skills" (not loaded)
 - `onBeforeSend` in `SlashCommandPlugin` intercepts and routes to `onSkillInvoke`
 
-**Seed skills** in `doc/skills/` — import via Settings → Skills → 📂.
+**Seed skills** in `doc/skills/*.skill.yaml` — import via Settings → Skills → 📂.
+
+### Session Graph — File-Based Cross-Session Dependencies
+
+`packages/llm-engine/src/session-graph/` implements a file-system-native task dependency graph.
+
+**Design:** Each VFS file = one session. File content = task description/prompt. Metadata (type, status, deps, result) lives in the file's assetdir as `_filename/session-meta.json` and `_filename/result.md`.
+
+**Dependency formats** (relative to the declaring session file):
+- `"./other.md"` → single session
+- `"./subdir/"` → all sessions directly inside `subdir/` (non-recursive)
+- `"../shared.md"` → parent-level session
+
+**Execution flow:**
+```
+GraphOrchestrator.executeSession(module, "/project/impl.md", { runtime, llm })
+  → DependencyGraph.topoSort() → [requirements.md, design.md, impl.md]
+  → for each (bottom-up):
+      skip if completed
+      read dep result.md files → inject as context in prompt
+      IAgentRuntime.run(prompt)
+      standard: mark completed
+      advance:  CompletionAnalyzer asks LLM → retry up to maxRetries
+      write result.md → next session reads it
+```
+
+**Session types:**
+
+| Type | Completion check | Use when |
+|---|---|---|
+| `standard` | Agent finishes without error | Mechanical tasks with clear outputs |
+| `advance` | LLM verifies task was truly accomplished | Analysis, research, creative work |
+
+**Key classes:**
+
+| Class | File | Role |
+|---|---|---|
+| `GraphOrchestrator` | `graph-orchestrator.ts` | Top-level coordinator; call `executeSession()` |
+| `DependencyGraph` | `dependency-graph.ts` | Topo-sort + cycle detection (`CycleError`) |
+| `SessionMetaStore` | `session-meta-store.ts` | Read/write `session-meta.json` + `result.md` via `IAssetOperations` |
+| `CompletionAnalyzer` | `completion-analyzer.ts` | LLM-based completion check for advance mode |
+
+**Usage:**
+```ts
+import { GraphOrchestrator } from '@itookit/llm-engine';
+
+const orch = new GraphOrchestrator(vfsManager);
+
+// Declare dependencies
+await orch.store.setDependencies('minds', '/project/design.md',
+  ['./requirements.md'], 'advance');
+
+// Execute (automatically resolves and runs all unmet deps first)
+const result = await orch.executeSession('minds', '/project/design.md', {
+  runtime: harness.runtime,
+  llm:     harness.llmService,   // required for advance mode
+  onProgress: (e) => console.log(e.type, e.path),
+});
+```
+
+**Session status** is tracked in `_file/session-meta.json`:
+`pending → running → completed | failed | skipped`
 
 ### Chat Persistence Format
 
@@ -255,6 +341,8 @@ Four categories, enforced by `validateFilename` + `AccessController`:
 ### Assetdir details
 
 `_note.md/` is the assetdir for `note.md` — same parent directory, `_` + owner filename. Managed exclusively by `IAssetOperations` (`putAsset`, `getAsset`, etc.). The engine auto-renames/moves/deletes the assetdir when the owner file changes. Never create or rename assetdirs manually.
+
+**Session graph uses assetdirs** to store `session-meta.json` and `result.md` per session file — accessed via `IModuleFS.assets` (the optional `IAssetOperations` capability on `IModuleFS`).
 
 ### `__config/` — module-internal config
 
@@ -379,9 +467,12 @@ setLocale(saved ?? (navigator.language.startsWith('zh') ? 'zh-CN' : 'en'));
 
 - **`vfs.write(moduleName, path, content)`** has upsert semantics — creates file and intermediate directories automatically. Prefer over check-then-create.
 - **Avoid `exists` + `read` patterns** (TOCTOU) — just read and catch not-found errors.
-- **Asset directories**: use `IAssetOperations.putAsset(ownerIdOrPath, filename, content)` — never create `_name/` dirs directly.
+- **Asset directories**: use `IAssetOperations.putAsset(ownerIdOrPath, filename, content)` — never create `_name/` dirs directly. Access via `(engine as any).assets` on `IModuleFS`.
 - **Module-internal data**: write to `/__config/<filename>` (plain filename, no `_` prefix). Any module can create `__config/` without `isSystem`.
 - **`toBuffer(content)`** from `@itookit/vfslib` converts `string | ArrayBuffer | Uint8Array → ArrayBuffer`.
-- **`etc` module** (`CONFIG_MODULE = 'etc'`) is auto-mounted at VFS init; stores LLM connections (`/llm/.connections/`), MCP configs (`/llm/.mcp/`), sync config, tags, contacts.
-- **DB name** is `'MindOS-v2'` (IndexedDB). The old `'MindOS'` schema (v7) is incompatible.
+- **`etc` module** (`CONFIG_MODULE = 'etc'`) is auto-mounted at VFS init; stores LLM connections (`/llm/.connections/`), MCP configs (`/llm/.mcp/`), skill YAML (`/llm/.skills/`), sync config, tags, contacts.
+- **DB name** is `'MindOS-v3'` (IndexedDB). Prior schemas are incompatible.
 - **Sync** (`apps/sync-server`, SQLite + local files): system modules (`isSystem: true`) excluded; all other modules synced including `__config/` dirs, assetdirs, and hidden files.
+- **Skill files** use YAML (`.skill.yaml`), not JSON. Import/export via `SkillSettingsEditor` handles both JSON and YAML auto-detection.
+- **Node.js-only APIs** (`node:fs`, `node:path`, `node:child_process`) must use dynamic import with `typeof` guard or function-level async import to avoid Vite externalization errors in browser builds.
+- **`ToolExecutionContext.vfs`** — optional `ToolVFSContext` injected by `ToolDeviceDriver.setVFSContext()` in browser builds. File tools check `ctx.vfs` first, then fall back to `node:fs`. Browser tools fail gracefully with clear error messages.
