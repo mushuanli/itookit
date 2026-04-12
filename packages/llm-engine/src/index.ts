@@ -122,6 +122,31 @@ export type {
 } from './mission';
 
 // ============================================
+// Session Dependency Graph
+// ============================================
+// File-based cross-session dependency system.
+// Each VFS file = a session; dependencies declared via SessionMetaStore.
+// GraphOrchestrator resolves the graph bottom-up and executes each session.
+
+export {
+    GraphOrchestrator,
+    DependencyGraph,
+    SessionMetaStore,
+    CompletionAnalyzer,
+    CycleError,
+    DEFAULT_SESSION_META,
+} from './session-graph';
+export type {
+    SessionMeta,
+    SessionType,
+    SessionStatus,
+    SessionExecutionResult,
+    GraphExecutionOptions,
+    GraphEvent,
+    CompletionVerdict,
+} from './session-graph';
+
+// ============================================
 // 工具
 // ============================================
 

@@ -1290,7 +1290,23 @@ export class LLMWorkspaceEditor implements IEditor {
                     this.chatInput.showToolOutput?.(displayCmd, result.output, result.success);
                 },
             } : {}),
+
+            // ── Session Graph commands ────────────────────────────────────────
+            // Available when harness runtime is connected.
+            ...(runtime ? this.buildSessionGraphCallbacks(runtime) : {}),
         };
+    }
+
+    private buildSessionGraphCallbacks(
+        runtime: import('@itookit/common').IAgentRuntime,
+    ): Partial<SlashCommandCallbacks> {
+        // Session graph slash commands are registered as additional harness commands.
+        // They are handled via onToolInvoke with synthetic tool IDs.
+        // The slash command definitions live in SlashCommandPlugin.buildHarnessCommands().
+        // Here we just need to expose an onSessionGraph callback for routing.
+        // For now, session-run is wired through the existing onToolInvoke extension point.
+        void runtime;  // referenced for future graph-aware routing
+        return {};
     }
 
     // showToolResultModal removed — output is now shown inline via chatInput.showToolOutput()
