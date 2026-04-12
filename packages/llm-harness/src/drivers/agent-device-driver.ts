@@ -59,6 +59,7 @@ const DEFAULT_LOOP_CONFIG: AgentLoopConfig = {
     systemPromptBudgetTokens: 4000,
     enableBackPressure: true,
     backPressureRules: [],
+    enablePlanConfirm: false, // opt-in; UI sets it true when the toggle is on
 };
 
 export class AgentDeviceDriver implements IDeviceDriver, IAgentRuntimeConfig {

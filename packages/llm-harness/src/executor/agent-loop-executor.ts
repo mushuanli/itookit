@@ -38,6 +38,8 @@ import { ErrorRecoveryService } from './error-recovery';
 import { BackPressureValidator } from './back-pressure';
 import { ContextManager } from './context-manager';
 import { getToolName, getToolArgs } from '../utils/tool-call';
+import { saveSession, removeSession } from './session-store';
+export { loadInterruptedSessions } from './session-store';
 
 type NotifyHandler<E extends AgentEventType> = (payload: AgentEventPayloads[E]) => void;
 type InterceptHandler<E extends AgentEventType> = (payload: AgentEventPayloads[E]) => Promise<boolean | string | undefined>;
@@ -65,6 +67,9 @@ export class AgentLoopExecutor implements IAgentRuntime {
 
     private readonly contextManager: ContextManager;
     private readonly subAgentRouter: ISubAgentRouter;
+
+    /** Q3: pending user injections per session (injected at next loop iteration start). */
+    private readonly pendingInjections = new Map<string, string[]>();
 
     constructor(
         private readonly llm: ILLMService,
@@ -118,11 +123,24 @@ export class AgentLoopExecutor implements IAgentRuntime {
 
         let finalResponse = '';
         let incompleteReason: string | undefined;
+        let turnNumber = 0;
 
         try {
             // ── Main Agent Loop ──
             // eslint-disable-next-line no-constant-condition
             while (true) {
+                turnNumber++;
+
+                // Q3: Flush pending user injections before next LLM call.
+                const injections = this.pendingInjections.get(sessionId) ?? [];
+                if (injections.length > 0) {
+                    this.pendingInjections.delete(sessionId);
+                    for (const msg of injections) {
+                        this.contextManager.addMessage(sessionId, { role: 'user', content: msg });
+                        this.emit('agent:user:injected', { message: msg });
+                    }
+                }
+
                 // 1. Budget Check
                 budgetController.checkOrThrow(usage);
                 for (const resource of budgetController.getApproachingLimits(usage)) {
@@ -188,8 +206,50 @@ export class AgentLoopExecutor implements IAgentRuntime {
                 // 5. Update usage — ONCE per loop iteration with total tool count.
                 budgetController.updateUsage(usage, tokenUsage, toolCalls.length);
 
+                // Q2: Persist session state after each turn for crash recovery.
+                saveSession({
+                    sessionId,
+                    task,
+                    messages: this.contextManager.buildMessages(sessionId),
+                    usage,
+                    status: 'running',
+                    savedAt: Date.now(),
+                });
+
                 // 6. Branch
                 if (toolCalls.length > 0) {
+                    // Q1: Plan confirmation on the first turn with tool calls.
+                    // Emit agent:plan:confirm and let the intercept handler decide:
+                    //   true / undefined → proceed
+                    //   false            → abort task
+                    //   string           → inject the string as a correction and re-plan (skip tools this turn)
+                    if (this.loopConfig.enablePlanConfirm && turnNumber === 1) {
+                        const payload = {
+                            plannedTools: toolCalls.map((c) => ({
+                                id: c.id,
+                                name: getToolName(c),
+                                args: getToolArgs(c),
+                            })),
+                            turn: turnNumber,
+                        };
+                        this.emit('agent:plan:confirm', payload);
+                        const decision = await this.callInterceptors('agent:plan:confirm', payload);
+                        if (decision === false) {
+                            state.status = 'cancelled';
+                            incompleteReason = 'Plan cancelled by user';
+                            break;
+                        }
+                        if (typeof decision === 'string' && decision.trim()) {
+                            // User modified the plan — inject as correction and skip tool execution
+                            this.contextManager.addMessage(sessionId, {
+                                role: 'user',
+                                content: `[Plan adjustment] ${decision}`,
+                            });
+                            continue; // Re-run LLM with the new instruction
+                        }
+                        // true or undefined → approved, proceed normally
+                    }
+
                     const toolMessages = await this.executeTools(toolCalls, cwd, sessionId);
                     for (const msg of toolMessages) {
                         this.contextManager.addMessage(sessionId, msg);
@@ -251,6 +311,10 @@ export class AgentLoopExecutor implements IAgentRuntime {
                 state.status = 'failed';
                 incompleteReason = err instanceof Error ? err.message : String(err);
             }
+        } finally {
+            // Q2: Remove persisted session on any completion (success / error / cancel).
+            // Interrupted sessions (browser crash) are detected by the absence of this call.
+            removeSession(sessionId);
         }
 
         const result: AgentTaskResult = {
@@ -269,6 +333,18 @@ export class AgentLoopExecutor implements IAgentRuntime {
     abort(): void {
         this.abortController?.abort();
         this.subAgentRouter.abort();
+    }
+
+    /**
+     * Q3: Inject a user message into the currently running session.
+     * The message is queued and inserted into the context at the start of
+     * the next loop iteration (before the next LLM call).
+     */
+    inject(message: string): void {
+        const sid = this.currentSessionId;
+        if (!sid) return; // no active session
+        if (!this.pendingInjections.has(sid)) this.pendingInjections.set(sid, []);
+        this.pendingInjections.get(sid)!.push(message);
     }
 
     on<E extends AgentEventType>(event: E, handler: NotifyHandler<E>): () => void {

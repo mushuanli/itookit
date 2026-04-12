@@ -284,6 +284,28 @@ export class HarnessAdapter {
             });
         }));
 
+        // Q1: Plan confirm — surface planned tool calls to the UI.
+        unsubs.push(this.runtime.on('agent:plan:confirm', (p) => {
+            onEvent({
+                type: 'node_update',
+                payload: {
+                    nodeId: rootNode.id,
+                    metaInfo: { planConfirm: { tools: p.plannedTools, turn: p.turn } },
+                },
+            });
+        }));
+
+        // Q3: User injection acknowledged — notify UI.
+        unsubs.push(this.runtime.on('agent:user:injected', (p) => {
+            onEvent({
+                type: 'node_update',
+                payload: {
+                    nodeId: rootNode.id,
+                    metaInfo: { userInjected: { message: p.message } },
+                },
+            });
+        }));
+
         try {
             const result = await this.runtime.run(request);
             return { accumulator, result };
