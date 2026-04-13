@@ -116,14 +116,19 @@ export class UIEventAdapter {
                     payload: { sessionId: executionId, metadata: metadata }
                 };
 
-            case 'execution:error':
+            case 'execution:error': {
+                // execution-runtime.ts emits { error, code } while
+                // execution-context.ts emits { message, code, stack }.
+                // Support both field names.
+                const errMsg = payload.error || payload.message || 'Execution failed';
                 return {
                     type: 'error',
                     payload: {
-                        message: payload.message || 'Execution failed',
-                        error: new Error(payload.message)
+                        message: errMsg,
+                        error: new Error(errMsg)
                     }
                 };
+            }
 
             case 'stream:tool_call':
                 // 可以扩展为专门的工具调用事件

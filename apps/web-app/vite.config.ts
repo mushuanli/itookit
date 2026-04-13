@@ -23,9 +23,13 @@ export default defineConfig({
             '@itookit/device-llm': path.resolve(__dirname, '../../packages/device-llm/src/index.ts'),
             '@itookit/llm-kernel': path.resolve(__dirname, '../../packages/llm-kernel/src/index.ts'),
             '@itookit/llm-engine': path.resolve(__dirname, '../../packages/llm-engine/src/index.ts'),
+            '@itookit/llm-harness': path.resolve(__dirname, '../../packages/llm-harness/src/index.ts'),
             '@itookit/llm-ui': path.resolve(__dirname, '../../packages/llm-ui/src/index.ts'),
             '@itookit/app-settings': path.resolve(__dirname, '../../packages/app-settings/src/index.ts'),
             '@itookit/memory-manager': path.resolve(__dirname, '../../packages/memory-manager/src/index.ts'),
+            '@itookit/app-shell': path.resolve(__dirname, '../../packages/app-shell/src/index.ts'),
+            '@itookit/vfslib': path.resolve(__dirname, '../../packages/vfslib/src/index.ts'),
+            '@itookit/vfsdriver-indexeddb': path.resolve(__dirname, '../../packages/vfsdriver-indexeddb/src/index.ts'),
         },
         // ✅ 建议: 防止 React/Vue 等库在 Monorepo 中被打包两次 (双重实例问题)
         dedupe: ['react', 'react-dom', 'dexie', 'mermaid', '@codemirror/state', '@codemirror/view'] 
