@@ -101,6 +101,7 @@ export class StreamController {
 
     updateContent(nodeId: string, chunk: string, field: 'thought' | 'output'): void {
         const el = this.renderer.getNode(nodeId);
+        console.log('[harness][5] updateContent nodeId=', nodeId, 'field=', field, 'el=', !!el, 'chunk.len=', chunk.length);
         if (!el) return;
 
         if (!el.classList.contains('llm-ui-node--streaming')) {

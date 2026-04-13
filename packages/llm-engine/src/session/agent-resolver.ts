@@ -56,7 +56,7 @@ export class AgentResolver {
                 config = {
                     id: agentDef.id,
                     name: agentDef.name,
-                    type: agentDef.type === 'agent' ? 'agent' : 'composite',
+                    type: 'agent', // AgentDefinition.type is a UI category; chat always runs via agent executor
                     connectionId: agentDef.config.connectionId,
                     model: modelId,
                     systemPrompt: agentDef.config.systemPrompt,

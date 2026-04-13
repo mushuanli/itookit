@@ -60,10 +60,10 @@ export class ContextManager implements IContextManager {
             compressionSummary: null,
             loadedSkillIds: [],
             env: {
-                os: process.platform,
+                os: typeof process !== 'undefined' ? process.platform : 'browser',
                 cwd,
                 time: () => new Date().toISOString(),
-                nodeVersion: process.version,
+                nodeVersion: typeof process !== 'undefined' ? process.version : 'N/A',
             },
             memoryContent,
         });
@@ -106,10 +106,12 @@ export class ContextManager implements IContextManager {
         const budget = this.systemPromptBudgetTokens;
         const sections: Array<{ priority: number; content: string }> = [];
 
-        sections.push({
-            priority: 0,
-            content: this.buildCoreIdentity(),
-        });
+        // Agent-provided system prompt takes top priority and replaces the default identity.
+        if (s.memoryContent) {
+            sections.push({ priority: 0, content: s.memoryContent });
+        } else {
+            sections.push({ priority: 0, content: this.buildCoreIdentity() });
+        }
 
         sections.push({
             priority: 1,
@@ -125,9 +127,7 @@ export class ContextManager implements IContextManager {
             if (text) sections.push({ priority: 2, content: text });
         }
 
-        if (s.memoryContent) {
-            sections.push({ priority: 3, content: `## Project Memory\n${s.memoryContent}` });
-        }
+        // memoryContent is already used as the top-level identity (priority 0) above.
 
         const unloaded = allSkills.filter((sk) => !s.loadedSkillIds.includes(sk.id) && sk.enabled);
         if (unloaded.length > 0) {

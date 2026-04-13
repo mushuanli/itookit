@@ -21,25 +21,70 @@ export class LLMServiceAdapter implements ILLMService {
     constructor(private readonly driver: IDeviceDriver) {}
 
     async chat(connectionId: string, request: ChatCompletionParams): Promise<ChatCompletionResponse> {
-        const response = await this.driver.ioctl?.(
-            { ...BASE_CTX, sessionId: connectionId },
-            LLM_IOCTL.CHAT_SYNC,
-            { connectionId, ...request },
-        );
-        return response as ChatCompletionResponse;
+        // Use streaming internally to support APIs that only respond via SSE.
+        // CHAT_SYNC (stream:false) hangs on some proxy endpoints; collecting
+        // streaming chunks is universally compatible.
+        const contentParts: string[] = [];
+        const toolCallMap = new Map<number, { id: string; name: string; args: string }>();
+        let finishReason = 'stop';
+        let usage: ChatCompletionResponse['usage'];
+        let model = '';
+
+        for await (const chunk of this.chatStream(connectionId, request)) {
+            model = model || chunk.model || '';
+            const delta = chunk.choices?.[0]?.delta;
+            if (delta?.content) contentParts.push(delta.content);
+            if (delta?.tool_calls) {
+                for (const tc of delta.tool_calls) {
+                    const idx = tc.index ?? 0;
+                    if (!toolCallMap.has(idx)) {
+                        toolCallMap.set(idx, { id: tc.id ?? '', name: tc.function?.name ?? '', args: '' });
+                    }
+                    if (tc.function?.arguments) {
+                        toolCallMap.get(idx)!.args += tc.function.arguments;
+                    }
+                }
+            }
+            if (chunk.choices?.[0]?.finish_reason) finishReason = chunk.choices[0].finish_reason;
+            if (chunk.usage) usage = chunk.usage;
+        }
+
+        const toolCalls = toolCallMap.size > 0
+            ? [...toolCallMap.entries()].sort(([a], [b]) => a - b).map(([, tc]) => ({
+                id: tc.id, type: 'function' as const,
+                function: { name: tc.name, arguments: tc.args },
+            }))
+            : undefined;
+
+        return {
+            id: '',
+            object: 'chat.completion',
+            created: Date.now(),
+            model,
+            choices: [{
+                index: 0,
+                message: { role: 'assistant', content: contentParts.join(''), tool_calls: toolCalls },
+                finish_reason: finishReason,
+            }],
+            usage,
+        } as unknown as ChatCompletionResponse;
     }
 
     async *chatStream(connectionId: string, request: ChatCompletionParams): AsyncIterable<ChatCompletionChunk> {
         const sessionId = await this.driver.open?.(BASE_CTX, { connectionId }) ?? connectionId;
         const ctx: DeviceContext = { ...BASE_CTX, sessionId };
 
-        // Write the request to start generation
         await this.driver.write(ctx, JSON.stringify(request));
 
         if (!this.driver.readStream) throw new Error('LLM driver does not support streaming');
         for await (const chunk of this.driver.readStream(ctx)) {
             if (typeof chunk === 'string') {
-                yield JSON.parse(chunk) as ChatCompletionChunk;
+                // driver.readStream already parses SSE and yields plain-text delta content.
+                // Wrap it as a ChatCompletionChunk so callers can access delta.content uniformly.
+                yield {
+                    id: '', object: 'chat.completion.chunk', created: 0, model: '',
+                    choices: [{ index: 0, delta: { content: chunk, role: 'assistant' }, finish_reason: null }],
+                } as unknown as ChatCompletionChunk;
             }
         }
         await this.driver.close?.(ctx);
