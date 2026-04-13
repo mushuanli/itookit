@@ -95,6 +95,7 @@ export class AgentLoopExecutor implements IAgentRuntime {
     // ── IAgentRuntime ──
 
     async run(task: AgentTaskRequest): Promise<AgentTaskResult> {
+        console.log('[harness][0] run() called, modelOverride=', task.modelOverride, 'prompt.len=', task.prompt?.length);
         const sessionId = task.sessionId ?? `sess_${generateId()}`;
         this.currentSessionId = sessionId;
         this.abortController = new AbortController();
@@ -110,7 +111,7 @@ export class AgentLoopExecutor implements IAgentRuntime {
         const backPressure = new BackPressureValidator(this.loopConfig.backPressureRules);
         const cwd = task.workingDirectory ?? (typeof process !== 'undefined' ? process.cwd() : '/');
 
-        this.contextManager.initSession(sessionId, cwd, '');
+        this.contextManager.initSession(sessionId, cwd, task.systemPromptOverride ?? '');
         // Auto-detect and pre-load skills matching the task prompt.
         this.contextManager.autoDetectAndLoadSkills(sessionId, task.prompt);
 
@@ -165,11 +166,18 @@ export class AgentLoopExecutor implements IAgentRuntime {
                 ];
 
                 // 4. LLM Call
-                this.emit('agent:llm:start', { model: recovery.getCurrentConnectionId(), messageCount: messages.length });
+                const connId = recovery.getCurrentConnectionId();
                 const toolDefs = this.toolService.getToolDefinitions();
+                // Do not send tool definitions to the API for now.
+                // Some proxy endpoints (like the internal Trend Micro endpoint) return 500
+                // when function-calling schemas are included. Tools will be re-enabled once
+                // the endpoint's tool-calling support is confirmed.
+                const effectiveTools = undefined;
+                console.log('[harness][A] LLM call start, connId=', connId, 'tools=', toolDefs.length, 'systemPromptOverride=', !!task.systemPromptOverride);
+                this.emit('agent:llm:start', { model: connId, messageCount: messages.length });
                 const response = await recovery.callWithRecovery(
-                    recovery.getCurrentConnectionId(),
-                    { messages, tools: toolDefs, signal: this.abortController.signal },
+                    connId,
+                    { messages, tools: effectiveTools, signal: this.abortController.signal },
                     {
                         maxRetries: this.loopConfig.maxApiRetries,
                         baseDelayMs: this.loopConfig.baseRetryDelayMs,
@@ -189,13 +197,22 @@ export class AgentLoopExecutor implements IAgentRuntime {
                 const tokenUsage = response.usage ?? EMPTY_USAGE;
                 const assistantMsg = response.choices[0]?.message;
                 const responseText = assistantMsg?.content ?? '';
-                const toolCalls: ToolCall[] = assistantMsg?.tool_calls ?? [];
+                // If effectiveTools is undefined, the LLM shouldn't return tool_calls.
+                // Guard against misbehaving models that return tool_calls anyway.
+                const toolCalls: ToolCall[] = (effectiveTools !== undefined ? assistantMsg?.tool_calls : undefined) ?? [];
+                console.log('[harness][B] LLM response, responseText.len=', responseText.length, 'toolCalls=', toolCalls.length, 'choices=', response.choices?.length);
 
                 this.contextManager.addMessage(sessionId, {
                     role: 'assistant',
                     content: responseText,
                     tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
                 });
+
+                // Emit content so UI can display it.
+                console.log('[harness][1] before emit, responseText.len=', responseText.length, 'handlers=', this.notifyHandlers.get('agent:stream:content')?.length ?? 0);
+                if (responseText) {
+                    this.emit('agent:stream:content', { delta: responseText });
+                }
 
                 this.emit('agent:llm:end', {
                     model: recovery.getCurrentConnectionId(),
@@ -293,6 +310,7 @@ export class AgentLoopExecutor implements IAgentRuntime {
                             continue;
                         }
                     }
+                    console.log('[harness][C] loop done, finalResponse.len=', responseText.length);
                     finalResponse = responseText;
                     break;
                 }
@@ -310,6 +328,7 @@ export class AgentLoopExecutor implements IAgentRuntime {
             } else {
                 state.status = 'failed';
                 incompleteReason = err instanceof Error ? err.message : String(err);
+                console.error('[harness][ERR] run() caught error:', err);
             }
         } finally {
             // Q2: Remove persisted session on any completion (success / error / cancel).
@@ -367,6 +386,7 @@ export class AgentLoopExecutor implements IAgentRuntime {
 
     getCurrentSession(): AgentSessionInfo | null {
         if (!this.currentSessionId) return null;
+        if (!this.sessions.has(this.currentSessionId)) return null;
         return this.buildSessionInfo(this.currentSessionId);
     }
 
@@ -517,7 +537,8 @@ export class AgentLoopExecutor implements IAgentRuntime {
     }
 
     private buildSessionInfo(sessionId: string): AgentSessionInfo {
-        const s = this.sessions.get(sessionId)!;
+        const s = this.sessions.get(sessionId);
+        if (!s) throw new Error(`buildSessionInfo: session not found: ${sessionId}`);
         return {
             sessionId,
             status: s.status,

@@ -296,13 +296,14 @@ export class TaskRunner {
         let errorAlreadyEmitted = false;
 
         try {
-            const { assistantNodeId, rootNode, accumulator, persist, finalize } =
+            const { executorConfig, assistantNodeId, rootNode, accumulator, persist, finalize } =
                 await this.setupTaskExecution(task, state);
 
             // 6. Event bridge: harness events → OrchestratorEvent → UI + persistence
             const onEvent = (event: OrchestratorEvent) => {
                 // Persist streaming content regardless of bound state
                 if (event.type === 'node_update' && event.payload.chunk) {
+                    console.log('[harness][3] onEvent node_update chunk, nodeId=', event.payload.nodeId, 'field=', event.payload.field, 'isBound=', isBound, 'rootId=', rootNode.id);
                     if (!event.payload.nodeId || event.payload.nodeId === rootNode.id) {
                         if (event.payload.field === 'output') {
                             accumulator.output += event.payload.chunk;
@@ -343,11 +344,18 @@ export class TaskRunner {
             };
 
             // 7. Build harness task request
-            const harnessCwd = input.overrides?.workingDirectory ?? process.cwd();
+            const harnessCwd = input.overrides?.workingDirectory
+                ?? (typeof process !== 'undefined' && typeof process.cwd === 'function' ? process.cwd() : '/');
             const harnessRequest = {
                 prompt: input.text,
                 workingDirectory: harnessCwd,
                 sessionId,
+                // Route through the user-selected agent's connection.
+                modelOverride: (executorConfig as any).connectionId || undefined,
+                // Pass the agent's specific model and system prompt so the harness
+                // honours the user's agent configuration.
+                modelIdOverride: executorConfig.model || undefined,
+                systemPromptOverride: executorConfig.systemPrompt || undefined,
                 context: { agentId: input.agentId },
             };
 
@@ -361,7 +369,7 @@ export class TaskRunner {
             const hEnd = Date.now();
             const hUsage = result.usage;
             await this.engine.updateNode(sessionId, assistantNodeId, {
-                content: accumulator.output,
+                content: accumulator.output || result.response || '',
                 meta: {
                     thinking:     accumulator.thinking,
                     status: result.status === 'completed' ? 'success'
@@ -574,7 +582,9 @@ export class TaskRunner {
 
                 if (result.status === 'failed') {
                     const firstError = result.errors?.[0];
-                    const error = new Error(firstError?.message || 'Execution failed');
+                    const msg = firstError?.message
+                        || (firstError?.code ? `Execution failed [${firstError.code}]` : 'Execution failed');
+                    const error = new Error(msg);
                     (error as any).status = firstError?.code;
                     throw error;
                 }

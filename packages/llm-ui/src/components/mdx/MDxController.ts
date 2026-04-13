@@ -97,6 +97,13 @@ export class MDxController implements IStreamableEditor {
 
             this.isInitialized = true;
             this.readyResolve();
+
+            // Render any content that arrived before the editor was ready.
+            // finishStream() clears pendingDelta before isInitialized is true, so
+            // check currentContent (never cleared until reset) instead of pendingDelta.
+            if (this.currentContent) {
+                void this.finalize();
+            }
         } catch (e) {
             console.error('[MDxController] init() failed:', e);
             this.readyReject(e);

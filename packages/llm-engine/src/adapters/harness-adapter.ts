@@ -88,10 +88,8 @@ export class HarnessAdapter {
     ): Promise<{ accumulator: HarnessAccumulator; result: AgentTaskResult }> {
         const accumulator: HarnessAccumulator = { output: '', thinking: '' };
 
-        // Track child nodes (per-LLM-turn, per-tool)
-        let currentLLMNodeId: string | null = null;
-        // Key: callId (unique per invocation), not toolId (non-unique for parallel same-tool calls)
-        const toolNodeIds = new Map<string, string>(); // callId → node id
+        // Track tool child nodes (callId → node id; callId is unique per invocation)
+        const toolNodeIds = new Map<string, string>();
 
         // Abort on signal
         const onAbort = () => this.runtime.abort();
@@ -99,21 +97,11 @@ export class HarnessAdapter {
 
         const unsubs: Array<() => void> = [];
 
-        // ── LLM turn start ──────────────────────────────────────────────
-        unsubs.push(this.runtime.on('agent:llm:start', (p) => {
-            currentLLMNodeId = `llm-${generateId()}`;
-            const llmNode: ExecutionNode = {
-                id: currentLLMNodeId,
-                parentId: rootNode.id,
-                executorId: p.model,
-                executorType: 'agent',
-                name: `LLM (${p.model})`,
-                status: 'running',
-                startTime: Date.now(),
-                data: {},
-            };
-            onEvent({ type: 'node_start', payload: { parentId: rootNode.id, node: llmNode } });
-        }));
+        // ── LLM turn: no child node — content goes directly to root node ─
+        // LLM child nodes are intentionally not created; they cluttered the UI
+        // with "LLM (default) running" entries. The root assistant node (already
+        // rendered with the correct agent name) is the only visible node for chat.
+        unsubs.push(this.runtime.on('agent:llm:start', () => { /* no-op */ }));
 
         // ── Streaming content ────────────────────────────────────────────
         unsubs.push(this.runtime.on('agent:stream:content', (p) => {
@@ -132,16 +120,7 @@ export class HarnessAdapter {
             });
         }));
 
-        // ── LLM turn end ─────────────────────────────────────────────────
-        unsubs.push(this.runtime.on('agent:llm:end', () => {
-            if (currentLLMNodeId) {
-                onEvent({
-                    type: 'node_status',
-                    payload: { nodeId: currentLLMNodeId, status: 'success' },
-                });
-                currentLLMNodeId = null;
-            }
-        }));
+        unsubs.push(this.runtime.on('agent:llm:end', () => { /* no-op — no child node to close */ }));
 
         // ── Tool execution ───────────────────────────────────────────────
         unsubs.push(this.runtime.on('agent:tool:start', (p) => {

@@ -64,8 +64,12 @@ export interface AgentTaskRequest {
     context?: Record<string, unknown>;
     /** 工作目录 */
     workingDirectory?: string;
-    /** 模型覆盖 */
+    /** 连接 ID 覆盖（对应 LLM connection） */
     modelOverride?: string;
+    /** 模型 ID 覆盖（connection 内的具体 model，如 gpt-4o） */
+    modelIdOverride?: string;
+    /** Agent 自定义 system prompt（优先级高于 harness 默认值） */
+    systemPromptOverride?: string;
     /** 预算覆盖 */
     budgetOverride?: Partial<AgentBudgetLimits>;
     /** 会话 ID（用于恢复已有会话） */

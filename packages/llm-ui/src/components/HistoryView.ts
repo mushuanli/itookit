@@ -112,7 +112,7 @@ export class HistoryView implements IHistoryPresenter {
             {
                 interval: 50,
                 immediateTypes: [
-                    'session_start', 'finished', 'error', 'session_cleared',
+                    'session_start', 'node_start', 'finished', 'error', 'session_cleared',
                     'messages_deleted', 'message_edited',
                     'regenerate_started', 'regenerate_completed',
                     'branch_switched', 'branch_created', 'branch_renamed', 'branch_deleted',
@@ -256,17 +256,20 @@ export class HistoryView implements IHistoryPresenter {
     // ================================================================
 
     private handleBatchedEvents(batched: BatchedEvents<OrchestratorEvent>): void {
+        // Process structural events first (node_start etc.) so nodes exist in the
+        // DOM before we try to write streaming content into them.
+        for (const event of batched.immediate) {
+            this.processEventImmediate(event);
+        }
+
         for (const [nodeId, chunks] of batched.chunks) {
+            console.log('[harness][4] handleBatchedEvents chunk nodeId=', nodeId, 'output.len=', chunks.output.length);
             if (chunks.thought) this.stream.updateContent(nodeId, chunks.thought, 'thought');
             if (chunks.output) this.stream.updateContent(nodeId, chunks.output, 'output');
         }
 
         for (const [nodeId, { status, result }] of batched.statusChanges) {
             this.stream.updateStatus(nodeId, status, result);
-        }
-
-        for (const event of batched.immediate) {
-            this.processEventImmediate(event);
         }
     }
     private processEventImmediate(event: OrchestratorEvent): void {
