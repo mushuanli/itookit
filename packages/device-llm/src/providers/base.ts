@@ -166,18 +166,19 @@ export abstract class BaseProvider {
         const response = await fetch(url, options);
         
         if (!response.ok) {
+            const text = await response.text();
             let body: any;
             try {
-                body = await response.json();
+                body = JSON.parse(text);
             } catch {
-                body = await response.text();
+                body = text;
             }
             throw LLMError.fromResponse(this.name, response.status, body);
         }
-        
+
         return response.json();
     }
-    
+
     /**
      * 发送流式请求
      */
@@ -186,13 +187,14 @@ export abstract class BaseProvider {
         options: RequestInit
     ): Promise<ReadableStream<Uint8Array>> {
         const response = await fetch(url, options);
-        
+
         if (!response.ok) {
+            const text = await response.text();
             let body: any;
             try {
-                body = await response.json();
+                body = JSON.parse(text);
             } catch {
-                body = await response.text();
+                body = text;
             }
             throw LLMError.fromResponse(this.name, response.status, body);
         }

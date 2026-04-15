@@ -166,7 +166,6 @@ export class LLMDriver {
             if (finalParams.stream) {
                 // 流式响应
                 const stream = this.provider.stream(finalParams);
-                clearTimeout(timeoutId);
                 log.debug('Stream started', { requestId });
                 return this.wrapStreamWithTimeout(stream, controller, timeoutId, requestId);
             } else {
