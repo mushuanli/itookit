@@ -9,7 +9,7 @@
  *     → id = 'mnt_1234567890'
  *     → LocalFSBackend mounted at /module/mnt_1234567890
  *     → VFS module 'mnt_1234567890' registered
- *     → sidecar metadata at ~/.mindos/meta/Users_rain_Documents/
+ *     → sidecar metadata at <rootDir>/meta/Users_rain_Documents/
  *
  * Mount registry is persisted to VFS: etc module, /mounts.json.
  */
@@ -39,11 +39,11 @@ export const MOUNT_EVENTS = {
 
 /**
  * Derive a stable sidecar directory from an absolute path.
- * /Users/rain/Projects → <mindosDir>/meta/Users_rain_Projects
+ * /Users/rain/Projects → <rootDir>/meta/Users_rain_Projects
  */
-function pathToMetaDir(mindosDir: string, absPath: string): string {
+function pathToMetaDir(rootDir: string, absPath: string): string {
     const name = absPath.replace(/^\/+/, '').replace(/\//g, '_');
-    return `${mindosDir}/meta/${name}`;
+    return `${rootDir}/meta/${name}`;
 }
 
 // ── Service ────────────────────────────────────────────────────────────────────
@@ -53,8 +53,8 @@ export class LocalMountService {
 
     constructor(
         private readonly manager: IVFSManager,
-        /** ~/.mindos — parent directory for all meta sidecar dirs */
-        private readonly mindosDir: string,
+        /** VFS root dir — parent directory for all meta sidecar dirs */
+        private readonly rootDir: string,
     ) {}
 
     // ── Public API ─────────────────────────────────────────────────────────────
@@ -65,7 +65,7 @@ export class LocalMountService {
 
         const backend = await openLocalFSBackend({
             rootDir:   localPath,
-            sidecarDir: pathToMetaDir(this.mindosDir, localPath),
+            sidecarDir: pathToMetaDir(this.rootDir, localPath),
             createDb:  (dbPath) => TauriSqlSidecarDb.open(dbPath),
             createFs:  () => new TauriFsOps(),
         });
@@ -129,7 +129,7 @@ export class LocalMountService {
             try {
                 const backend = await openLocalFSBackend({
                     rootDir:   entry.localPath,
-                    sidecarDir: pathToMetaDir(this.mindosDir, entry.localPath),
+                    sidecarDir: pathToMetaDir(this.rootDir, entry.localPath),
                     createDb:  (dbPath) => TauriSqlSidecarDb.open(dbPath),
                     createFs:  () => new TauriFsOps(),
                 });

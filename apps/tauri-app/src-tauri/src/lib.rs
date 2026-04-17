@@ -5,19 +5,20 @@ use tauri_plugin_fs::FsExt;
 // ── Settings ──────────────────────────────────────────────────────────────────
 
 struct MindosSettings {
-    data_dir: Option<PathBuf>,
+    /// Raw value from settings.json#rootDir — may be relative or absolute.
+    root_dir: Option<PathBuf>,
     home_dir: Option<PathBuf>,
 }
 
 fn read_settings(base: &PathBuf) -> MindosSettings {
     let Ok(raw) = std::fs::read_to_string(base.join("settings.json")) else {
-        return MindosSettings { data_dir: None, home_dir: None };
+        return MindosSettings { root_dir: None, home_dir: None };
     };
     let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) else {
-        return MindosSettings { data_dir: None, home_dir: None };
+        return MindosSettings { root_dir: None, home_dir: None };
     };
     MindosSettings {
-        data_dir: v["dataDir"].as_str().filter(|s| !s.is_empty()).map(PathBuf::from),
+        root_dir: v["rootDir"].as_str().filter(|s| !s.is_empty()).map(PathBuf::from),
         home_dir: v["homeDir"].as_str().filter(|s| !s.is_empty()).map(PathBuf::from),
     }
 }
@@ -25,9 +26,13 @@ fn read_settings(base: &PathBuf) -> MindosSettings {
 // ── Path resolution ────────────────────────────────────────────────────────────
 
 struct AppPaths {
-    base_dir:   PathBuf,
-    mindos_dir: PathBuf,
-    home_dir:   PathBuf,
+    /// Discovery dir: MINDOS_ROOT env var or ~/.mindos. Where settings.json lives.
+    base_dir: PathBuf,
+    /// Resolved data root. All VFS modules live here (module/, _db/, _meta/).
+    /// Defaults to base_dir. Relative paths in settings.json are resolved
+    /// against base_dir, making the whole directory portable.
+    root_dir: PathBuf,
+    home_dir: PathBuf,
 }
 
 fn resolve_all_paths(system_home: &PathBuf) -> AppPaths {
@@ -38,7 +43,16 @@ fn resolve_all_paths(system_home: &PathBuf) -> AppPaths {
         .unwrap_or_else(|| system_home.join(".mindos"));
 
     let settings = read_settings(&base_dir);
-    let mindos_dir = settings.data_dir.unwrap_or_else(|| base_dir.clone());
+
+    // rootDir may be:
+    //   absent        → root_dir = base_dir (portable default)
+    //   relative ("." / "data") → resolved against base_dir (portable)
+    //   absolute ("/n/xdr/data") → used as-is (explicit, not portable)
+    let root_dir = settings.root_dir
+        .map(|rd| {
+            if rd.is_absolute() { rd } else { normalize_path(&base_dir.join(&rd)) }
+        })
+        .unwrap_or_else(|| base_dir.clone());
 
     let home_dir = resolve_home_from_cli()
         .or(settings.home_dir)
@@ -46,7 +60,7 @@ fn resolve_all_paths(system_home: &PathBuf) -> AppPaths {
             std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
         });
 
-    AppPaths { base_dir, mindos_dir, home_dir }
+    AppPaths { base_dir, root_dir, home_dir }
 }
 
 fn resolve_home_from_cli() -> Option<PathBuf> {
@@ -104,7 +118,7 @@ fn normalize_path(path: &Path) -> PathBuf {
 
 fn is_allowed(path: &Path, paths: &AppPaths) -> bool {
     let norm = normalize_path(path);
-    norm.starts_with(&paths.mindos_dir) || norm.starts_with(&paths.home_dir)
+    norm.starts_with(&paths.root_dir) || norm.starts_with(&paths.home_dir)
 }
 
 #[tauri::command]
@@ -217,9 +231,13 @@ fn get_home_dir(paths: State<AppPaths>) -> String {
     paths.home_dir.to_string_lossy().into_owned()
 }
 
+/// Resolved VFS root directory (base for all module data).
+/// Defaults to base_dir; can be overridden via settings.json#rootDir.
+/// Relative rootDir values are resolved against base_dir, making the
+/// whole directory portable across machines.
 #[tauri::command]
-fn get_mindos_dir(paths: State<AppPaths>) -> String {
-    paths.mindos_dir.to_string_lossy().into_owned()
+fn get_root_dir(paths: State<AppPaths>) -> String {
+    paths.root_dir.to_string_lossy().into_owned()
 }
 
 #[tauri::command]
@@ -255,21 +273,21 @@ pub fn run() {
 
             let _ = std::fs::create_dir_all(&paths.base_dir);
             for sub in &["", "_meta", "_db", "meta", "module"] {
-                let _ = std::fs::create_dir_all(paths.mindos_dir.join(sub));
+                let _ = std::fs::create_dir_all(paths.root_dir.join(sub));
             }
             for module in &[
                 "etc", "chats", "agents", "anki",
                 "prompts", "projects", "emails", "private",
             ] {
-                let _ = std::fs::create_dir_all(paths.mindos_dir.join("module").join(module));
-                let _ = std::fs::create_dir_all(paths.mindos_dir.join("_db").join(module));
+                let _ = std::fs::create_dir_all(paths.root_dir.join("module").join(module));
+                let _ = std::fs::create_dir_all(paths.root_dir.join("_db").join(module));
             }
 
             // Keep plugin-fs scope for any direct plugin-fs usage elsewhere.
             // Our TauriFsOps now uses Rust commands (fs_*) instead, so these
             // scope entries are only a fallback / belt-and-suspenders.
             let _ = app.fs_scope().allow_directory(&paths.home_dir, true);
-            let _ = app.fs_scope().allow_directory(&paths.mindos_dir, true);
+            let _ = app.fs_scope().allow_directory(&paths.root_dir, true);
 
             app.manage(paths);
 
@@ -284,7 +302,7 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
             get_home_dir,
-            get_mindos_dir,
+            get_root_dir,
             get_app_data_dir,
             get_app_config_dir,
             fs_stat,
