@@ -39,7 +39,11 @@ export default defineConfig({
             // NodeFsOps and BetterSqliteSidecarDb are only loaded via dynamic import
             // in defaultCreateFs/defaultCreateDb. Since the Tauri app ALWAYS provides
             // createFs and createDb, those dynamic chunks are never fetched at runtime.
-            external: (id: string) => id.startsWith('node:') || id === 'better-sqlite3',
+            external: (id: string) =>
+                id.startsWith('node:') ||
+                id === 'better-sqlite3' ||
+                id === 'child_process' ||
+                id === 'readline',
             output: {
                 manualChunks: (id: string) => id.includes('node_modules') ? 'vendor' : undefined,
             },
