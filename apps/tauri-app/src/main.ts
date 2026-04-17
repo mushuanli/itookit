@@ -2,7 +2,7 @@
  * @file apps/tauri-app/src/main.ts
  *
  * Tauri-specific bootstrap:
- *  1. Resolve homeDir via Tauri command; derive mindosDir = homeDir/.mindos
+ *  1. Resolve homeDir via Tauri command; derive rootDir = homeDir/.mindos
  *  2. Build backends:
  *       rootBackend  = LocalFSBackend at ~/.mindos/        (all shared modules)
  *       homeBackend  = LocalFSBackend at <homeDir>         (local filesystem)
@@ -30,11 +30,11 @@ import './styles/index.css';
 
 /**
  * Derive a stable sidecar directory path from an absolute filesystem path.
- * /Users/rain/Projects → <mindosDir>/meta/Users_rain_Projects
+ * /Users/rain/Projects → <rootDir>/meta/Users_rain_Projects
  */
-function pathToMetaDir(mindosDir: string, absPath: string): string {
+function pathToMetaDir(rootDir: string, absPath: string): string {
     const name = absPath.replace(/^\/+/, '').replace(/\//g, '_');
-    return `${mindosDir}/meta/${name}`;
+    return `${rootDir}/meta/${name}`;
 }
 
 // ── Loading overlay ────────────────────────────────────────────────────────────
@@ -88,11 +88,16 @@ async function getHomeDir(): Promise<string> {
     }
 }
 
-/** Always returns ~/.mindos — the real user home, not the working directory. */
-async function getMindosDir(): Promise<string> {
+/**
+ * Returns the resolved VFS root directory.
+ * Defaults to ~/.mindos; configurable via MINDOS_ROOT env var or
+ * settings.json#rootDir (relative paths are resolved against base_dir,
+ * making the directory portable across machines).
+ */
+async function getRootDir(): Promise<string> {
     try {
         const { invoke } = await import('@tauri-apps/api/core');
-        return await invoke<string>('get_mindos_dir');
+        return await invoke<string>('get_root_dir');
     } catch {
         // Fallback for plain Vite dev (no Tauri context)
         const home = (globalThis as { process?: { env?: { HOME?: string } } })
@@ -147,9 +152,9 @@ async function bootstrap(): Promise<void> {
 
     // 1. Resolve paths
     //    homeDir   = working project directory (CWD or --home arg)
-    //    mindosDir = ~/.mindos — always the real user home, never the working dir
+    //    rootDir = ~/.mindos — always the real user home, never the working dir
     showLoading('获取路径…');
-    const [homeDir, mindosDir] = await Promise.all([getHomeDir(), getMindosDir()]);
+    const [homeDir, rootDir] = await Promise.all([getHomeDir(), getRootDir()]);
 
     const dirName = homeDir.split('/').filter(Boolean).pop() ?? homeDir;
     const navLabel = document.getElementById('nav-home-label');
@@ -185,10 +190,10 @@ async function bootstrap(): Promise<void> {
 
     // Open all backends in parallel — different SQLite files, no contention
     const [rootBackend, homeBackend, ...moduleBackends] = await Promise.all([
-        openBackend(mindosDir, `${mindosDir}/_meta`),
-        openBackend(homeDir, pathToMetaDir(mindosDir, homeDir)),
+        openBackend(rootDir, `${rootDir}/_meta`),
+        openBackend(homeDir, pathToMetaDir(rootDir, homeDir)),
         ...moduleNames.map(name =>
-            openBackend(`${mindosDir}/module/${name}`, `${mindosDir}/_db/${name}`)
+            openBackend(`${rootDir}/module/${name}`, `${rootDir}/_db/${name}`)
         ),
     ]);
 
@@ -211,7 +216,7 @@ async function bootstrap(): Promise<void> {
     });
 
     // 4. Local mount service (tauri-only dynamic mounts)
-    const localMounts = new LocalMountService(app.vfs, mindosDir);
+    const localMounts = new LocalMountService(app.vfs, rootDir);
 
     // Add mount button
     document.getElementById('btn-add-mount')!.addEventListener('click', async () => {
