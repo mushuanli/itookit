@@ -68,9 +68,18 @@ export class TauriFsOps implements IFsOps {
             };
         } catch (err) {
             const msg = String(err);
-            // ENOENT is expected (e.g. lookup() checking for non-existent companion dirs).
-            // Only log real errors (permission scope violations, etc.).
-            if (!msg.includes('No such file or directory') && !msg.includes('os error 2')) {
+            // Scope violations mean the FS scope config needs fixing — warn once.
+            if (msg.includes('forbidden path') || msg.includes('not allowed on the scope')) {
+                console.warn('[TauriFsOps] stat: path not in FS scope (check MINDOS_ROOT scope):', p);
+            }
+            // ENOENT and similar "file not found" errors are expected — callers handle null.
+            // Anything else (unexpected IO error, bad path, etc.) log as error.
+            else if (
+                !msg.includes('No such file or directory') &&
+                !msg.includes('os error 2') &&
+                !msg.includes('path not found') &&
+                !msg.includes('[object') // Tauri sometimes serializes errors as objects
+            ) {
                 console.error('[TauriFsOps] stat failed:', p, err);
             }
             return null;
