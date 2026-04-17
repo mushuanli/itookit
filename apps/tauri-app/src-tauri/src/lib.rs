@@ -35,40 +35,42 @@ fn resolve_mindos_dir(home: &PathBuf) -> PathBuf {
     base
 }
 
-// ── Commands ──────────────────────────────────────────────────────────────────
+// ── Path resolution ── home dir ───────────────────────────────────────────────
 
-/// Returns the home directory for this session.
+/// Resolve the working home directory (the project/workspace the user opened).
 ///
 /// Resolution order:
-///   1. CLI argument `--home <path>`
-///   2. First positional argument (e.g. `x1 /path/to/project`)
+///   1. `--home <path>` CLI argument
+///   2. First positional argument that is an existing directory
 ///   3. Current working directory
-#[tauri::command]
-fn get_home_dir() -> String {
+fn resolve_home_dir() -> PathBuf {
     let args: Vec<String> = std::env::args().collect();
 
-    // --home <path>
     if let Some(idx) = args.iter().position(|a| a == "--home") {
         if let Some(p) = args.get(idx + 1) {
             if !p.starts_with('-') {
-                return canonicalise(p);
+                return PathBuf::from(canonicalise(p));
             }
         }
     }
 
-    // First positional argument that looks like an existing directory
     for arg in args.iter().skip(1) {
         if !arg.starts_with('-') {
             let p = PathBuf::from(arg);
             if p.is_dir() {
-                return canonicalise(arg);
+                return PathBuf::from(canonicalise(arg));
             }
         }
     }
 
-    std::env::current_dir()
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or_else(|_| ".".to_string())
+    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+}
+
+// ── Commands ──────────────────────────────────────────────────────────────────
+
+#[tauri::command]
+fn get_home_dir() -> String {
+    resolve_home_dir().to_string_lossy().into_owned()
 }
 
 /// Returns the resolved MindOS data directory.
@@ -133,10 +135,12 @@ pub fn run() {
                 // if settings.json#dataDir is set).
                 let mindos = resolve_mindos_dir(&home);
 
-                // Grant the FS plugin runtime access to the resolved mindos dir.
-                // This is needed when mindos lives outside $HOME (e.g. MINDOS_ROOT=/n/xdr/mindos).
-                // The static capability only covers $HOME/** — anything else requires
-                // a runtime allow so the frontend can read/write there.
+                // Grant the FS plugin runtime access to both the working home dir
+                // (whatever directory the user opened, including CWD as fallback)
+                // and the resolved mindos dir. The static capability only covers
+                // $HOME/**, so any path outside it needs a runtime allow.
+                let work_home = resolve_home_dir();
+                let _ = app.fs_scope().allow_directory(&work_home, true);
                 let _ = app.fs_scope().allow_directory(&mindos, true);
                 for sub in &["", "_meta", "_db", "meta", "module"] {
                     let _ = std::fs::create_dir_all(mindos.join(sub));
