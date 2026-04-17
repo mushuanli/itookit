@@ -73,36 +73,7 @@ export class AgentResolver {
             config = await this.getFallbackConfig();
         }
 
-        return this.injectPromptSkills(config);
-    }
-
-    /**
-     * Inject enabled 'prompt' skill instructions into the resolved config's systemPrompt.
-     *
-     * Duck-typed: IAgentConfigService doesn't expose getSkills, but VFSAgentService
-     * (the concrete impl) does via IAgentManagementService — use optional call.
-     */
-    private async injectPromptSkills(config: ExecutorConfig): Promise<ExecutorConfig> {
-        type WithSkills = { getSkills?: () => Promise<Array<{ type: string; enabled: boolean; instructions?: string }>> };
-        const svc = this.agentService as WithSkills;
-        if (typeof svc.getSkills !== 'function') return config;
-
-        try {
-            const skills = await svc.getSkills();
-            const extra = skills
-                .filter(s => s.type === 'prompt' && s.enabled && s.instructions)
-                .map(s => s.instructions as string)
-                .join('\n\n');
-
-            if (!extra) return config;
-            return {
-                ...config,
-                systemPrompt: config.systemPrompt ? `${config.systemPrompt}\n\n${extra}` : extra,
-            };
-        } catch (e) {
-            log.warn('Failed to inject prompt skill instructions', { error: e });
-            return config;
-        }
+        return config;
     }
 
     async getAvailableAgents(): Promise<AgentInfo[]> {
