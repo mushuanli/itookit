@@ -1,6 +1,39 @@
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 
+// ── Path resolution ────────────────────────────────────────────────────────────
+
+/// Resolve the final MindOS data directory.
+///
+/// Resolution order (first match wins):
+///   1. `MINDOS_ROOT` env var — sets the base discovery directory
+///   2. `<base>/settings.json` → `"dataDir"` field — overrides where data lives
+///   3. Default: `~/.mindos`
+///
+/// Examples:
+///   MINDOS_ROOT=/work/my-project      → data at /work/my-project/
+///   ~/.mindos/settings.json           → { "dataDir": "/mnt/data/mindos" }
+///                                        → data at /mnt/data/mindos/
+fn resolve_mindos_dir(home: &PathBuf) -> PathBuf {
+    // Step 1: base dir from env or default
+    let base = std::env::var("MINDOS_ROOT")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join(".mindos"));
+
+    // Step 2: optional dataDir override in settings.json
+    if let Ok(raw) = std::fs::read_to_string(base.join("settings.json")) {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
+            if let Some(data_dir) = v["dataDir"].as_str().filter(|s| !s.is_empty()) {
+                return PathBuf::from(data_dir);
+            }
+        }
+    }
+
+    base
+}
+
 // ── Commands ──────────────────────────────────────────────────────────────────
 
 /// Returns the home directory for this session.
@@ -32,27 +65,21 @@ fn get_home_dir() -> String {
         }
     }
 
-    // Fall back to CWD.
-    // NOTE: in `tauri dev`, cargo runs the binary from src-tauri/, so CWD is
-    // src-tauri rather than the project root.  Pass the desired directory via
-    // CLI arg to override:
-    //   pnpm tauri:dev -- -- /path/to/project
-    //   pnpm tauri:dev -- -- --home /path/to/project
     std::env::current_dir()
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_else(|_| ".".to_string())
 }
 
-/// Returns the MindOS data directory: ~/.mindos
+/// Returns the resolved MindOS data directory.
 ///
-/// Always points to the real user home directory regardless of the
-/// working directory (which `get_home_dir` may return as a project path).
+/// Respects MINDOS_ROOT env var and settings.json#dataDir.
+/// See resolve_mindos_dir() for full resolution order.
 #[tauri::command]
 fn get_mindos_dir(app: AppHandle) -> String {
-    app.path()
-        .home_dir()
-        .map(|h| format!("{}/.mindos", h.to_string_lossy()))
-        .unwrap_or_else(|_| ".mindos".to_string())
+    let home = app.path().home_dir().unwrap_or_else(|_| PathBuf::from("."));
+    resolve_mindos_dir(&home)
+        .to_string_lossy()
+        .into_owned()
 }
 
 /// Returns the app-local data directory (platform-specific).
@@ -90,17 +117,23 @@ fn canonicalise(raw: &str) -> String {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        // Open DevTools automatically in debug builds (Cmd+Option+I also works)
         .setup(|app| {
-            // Pre-create ~/.mindos scaffold with native std::fs so the frontend
-            // never needs to mkdir the top-level dirs through the Tauri fs scope.
             if let Ok(home) = app.path().home_dir() {
-                let mindos = home.join(".mindos");
-                // Top-level dirs
+                // Always create the base discovery dir (MINDOS_ROOT or ~/.mindos).
+                // This is where settings.json lives, even when dataDir points elsewhere.
+                let base = std::env::var("MINDOS_ROOT")
+                    .ok()
+                    .filter(|s| !s.is_empty())
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| home.join(".mindos"));
+                let _ = std::fs::create_dir_all(&base);
+
+                // Create the scaffold in the resolved data dir (may differ from base
+                // if settings.json#dataDir is set).
+                let mindos = resolve_mindos_dir(&home);
                 for sub in &["", "_meta", "_db", "meta", "module"] {
                     let _ = std::fs::create_dir_all(mindos.join(sub));
                 }
-                // Per-module dirs (module data + per-module SQLite sidecar)
                 for module in &[
                     "etc", "chats", "agents", "anki",
                     "prompts", "projects", "emails", "private",
