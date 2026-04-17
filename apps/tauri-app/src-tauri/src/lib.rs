@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
+use tauri_plugin_fs::FsExt;
 
 // ── Path resolution ────────────────────────────────────────────────────────────
 
@@ -131,6 +132,12 @@ pub fn run() {
                 // Create the scaffold in the resolved data dir (may differ from base
                 // if settings.json#dataDir is set).
                 let mindos = resolve_mindos_dir(&home);
+
+                // Grant the FS plugin runtime access to the resolved mindos dir.
+                // This is needed when mindos lives outside $HOME (e.g. MINDOS_ROOT=/n/xdr/mindos).
+                // The static capability only covers $HOME/** — anything else requires
+                // a runtime allow so the frontend can read/write there.
+                let _ = app.fs_scope().allow_directory(&mindos, true);
                 for sub in &["", "_meta", "_db", "meta", "module"] {
                     let _ = std::fs::create_dir_all(mindos.join(sub));
                 }
