@@ -167,9 +167,20 @@ pub fn run() {
 
             // Grant FS plugin runtime access to both directories.
             // The static capability only covers $HOME/**; any path outside it
-            // (custom MINDOS_ROOT, homeDir on another mount, etc.) needs this.
-            let _ = app.fs_scope().allow_directory(&paths.home_dir, true);
-            let _ = app.fs_scope().allow_directory(&paths.mindos_dir, true);
+            // (custom MINDOS_ROOT, homeDir on another mount, NFS, etc.) needs this.
+            //
+            // We add BOTH the original path and its canonical form because Tauri's
+            // scope checker may canonicalize the accessed path before matching.
+            // If /n/xdr/mindos is a symlink or NFS mount, the canonical path
+            // differs, and only the canonical pattern will match at runtime.
+            for dir in [&paths.home_dir, &paths.mindos_dir] {
+                let _ = app.fs_scope().allow_directory(dir, true);
+                if let Ok(canon) = std::fs::canonicalize(dir) {
+                    if canon != *dir {
+                        let _ = app.fs_scope().allow_directory(&canon, true);
+                    }
+                }
+            }
 
             // Store resolved paths as app state — commands read from here.
             app.manage(paths);
