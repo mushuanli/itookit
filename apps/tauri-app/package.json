@@ -30,7 +30,8 @@
         "@tauri-apps/plugin-fs":      "^2.0.0",
         "@tauri-apps/plugin-sql":     "^2.0.0",
         "immer":  "^10.2.0",
-        "marked": "^16.4.2"
+        "marked": "^16.4.2",
+        "yaml":   "^2.8.2"
     },
     "devDependencies": {
         "@tauri-apps/cli": "^2.0.0",
