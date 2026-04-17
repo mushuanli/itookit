@@ -35,6 +35,7 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "test": "vitest",
+    "test:run": "vitest run",
     "prepublishOnly": "pnpm build",
     "lint": "eslint src --ext .ts",
     "clean": "rm -rf dist"
@@ -74,6 +75,8 @@
     "@itookit/vfslib": "workspace:*"
   },
   "devDependencies": {
+    "@itookit/device-llm": "workspace:*",
+    "@itookit/vfsdriver-localfs": "workspace:*",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.19.25",
     "@vitest/coverage-v8": "^1.6.1",
