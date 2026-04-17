@@ -112,6 +112,9 @@ importers:
       marked:
         specifier: ^16.4.2
         version: 16.4.2
+      yaml:
+        specifier: ^2.8.2
+        version: 2.8.2
     devDependencies:
       '@tauri-apps/cli':
         specifier: ^2.0.0
