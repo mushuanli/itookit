@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_fs::FsExt;
 
@@ -9,12 +9,6 @@ struct MindosSettings {
     home_dir: Option<PathBuf>,
 }
 
-/// Read and parse ~/.mindos/settings.json (or $MINDOS_ROOT/settings.json).
-/// Returns defaults (all None) on any read/parse error.
-///
-/// Supported fields:
-///   dataDir  — override where VFS data is stored (default: same dir as settings.json)
-///   homeDir  — fix the working project directory (default: CWD)
 fn read_settings(base: &PathBuf) -> MindosSettings {
     let Ok(raw) = std::fs::read_to_string(base.join("settings.json")) else {
         return MindosSettings { data_dir: None, home_dir: None };
@@ -30,30 +24,13 @@ fn read_settings(base: &PathBuf) -> MindosSettings {
 
 // ── Path resolution ────────────────────────────────────────────────────────────
 
-/// All resolved runtime paths — computed once in setup(), stored as Tauri State.
-/// Commands read from here instead of re-resolving on every call.
 struct AppPaths {
-    /// Base discovery dir: MINDOS_ROOT env var, or ~/.mindos.
-    /// This is always where settings.json lives.
     base_dir:   PathBuf,
-    /// Final VFS data dir: base_dir, or settings.json#dataDir if set.
     mindos_dir: PathBuf,
-    /// Working project dir opened by the user.
     home_dir:   PathBuf,
 }
 
-/// Resolve all runtime paths from env vars, CLI args, and settings.json.
-///
-/// Resolution order:
-///
-///   mindos base  : MINDOS_ROOT env var  →  ~/.mindos
-///   mindos data  : settings.json#dataDir  →  same as base
-///
-///   home dir     : --home <path> / positional arg
-///                  →  settings.json#homeDir
-///                  →  CWD  (unstable — changes with launch directory)
 fn resolve_all_paths(system_home: &PathBuf) -> AppPaths {
-    // Base dir (where settings.json lives)
     let base_dir = std::env::var("MINDOS_ROOT")
         .ok()
         .filter(|s| !s.is_empty())
@@ -61,13 +38,8 @@ fn resolve_all_paths(system_home: &PathBuf) -> AppPaths {
         .unwrap_or_else(|| system_home.join(".mindos"));
 
     let settings = read_settings(&base_dir);
-
-    // Data dir — may differ from base when settings.json#dataDir is set
     let mindos_dir = settings.data_dir.unwrap_or_else(|| base_dir.clone());
 
-    // Home dir: CLI args take priority; settings.json#homeDir is the stable
-    // default; CWD is the last resort (path changes with launch directory,
-    // which breaks sidecar DB mapping — set homeDir in settings.json instead)
     let home_dir = resolve_home_from_cli()
         .or(settings.home_dir)
         .unwrap_or_else(|| {
@@ -77,19 +49,13 @@ fn resolve_all_paths(system_home: &PathBuf) -> AppPaths {
     AppPaths { base_dir, mindos_dir, home_dir }
 }
 
-/// Extract home directory from CLI arguments only (no settings/CWD fallback).
-/// Returns None when no CLI home is specified.
 fn resolve_home_from_cli() -> Option<PathBuf> {
     let args: Vec<String> = std::env::args().collect();
-
-    // --home <path>
     if let Some(idx) = args.iter().position(|a| a == "--home") {
         if let Some(p) = args.get(idx + 1).filter(|p| !p.starts_with('-')) {
             return Some(PathBuf::from(canonicalise(p)));
         }
     }
-
-    // First positional argument that is an existing directory
     for arg in args.iter().skip(1) {
         if !arg.starts_with('-') {
             let p = PathBuf::from(arg);
@@ -98,19 +64,159 @@ fn resolve_home_from_cli() -> Option<PathBuf> {
             }
         }
     }
-
     None
 }
 
-// ── Commands ──────────────────────────────────────────────────────────────────
+// ── FS commands — bypass plugin-fs scope (dotfiles, NFS, symlinks) ────────────
+//
+// Tauri's plugin-fs uses glob crate with require_literal_leading_dot=true,
+// so `path/**` never matches `path/.hidden`. We expose our own FS commands
+// and enforce path security ourselves: every operation must be under
+// mindos_dir or home_dir (resolved without following symlinks via normalize_path).
 
-/// Working project directory opened by this session.
+#[derive(serde::Serialize)]
+struct FsStatResult {
+    size:         u64,
+    mtime_ms:     i64,
+    birthtime_ms: i64,
+    is_directory: bool,
+}
+
+#[derive(serde::Serialize)]
+struct FsDirEntry {
+    name:         String,
+    is_directory: bool,
+}
+
+/// Normalize a path (resolve `..` and `.`) without requiring it to exist.
+/// Prevents directory traversal: `/allowed/dir/../../../etc/passwd` → `/etc/passwd`.
+fn normalize_path(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for comp in path.components() {
+        match comp {
+            Component::ParentDir => { out.pop(); }
+            Component::CurDir    => {}
+            other                => out.push(other),
+        }
+    }
+    out
+}
+
+fn is_allowed(path: &Path, paths: &AppPaths) -> bool {
+    let norm = normalize_path(path);
+    norm.starts_with(&paths.mindos_dir) || norm.starts_with(&paths.home_dir)
+}
+
+#[tauri::command]
+fn fs_stat(path: String, state: State<AppPaths>) -> Option<FsStatResult> {
+    let p = PathBuf::from(&path);
+    if !is_allowed(&p, &state) { return None; }
+    let m = std::fs::metadata(&p).ok()?;
+    let ms = |t: std::time::SystemTime| {
+        t.duration_since(std::time::UNIX_EPOCH).ok()
+            .map(|d| d.as_millis() as i64).unwrap_or(0)
+    };
+    Some(FsStatResult {
+        size:         m.len(),
+        mtime_ms:     m.modified().ok().map(ms).unwrap_or(0),
+        birthtime_ms: m.created().ok().map(ms).unwrap_or(0),
+        is_directory: m.is_dir(),
+    })
+}
+
+#[tauri::command]
+fn fs_mkdir(path: String, state: State<AppPaths>) -> Result<(), String> {
+    let p = PathBuf::from(&path);
+    if !is_allowed(&p, &state) { return Err(format!("path not allowed: {path}")); }
+    std::fs::create_dir_all(&p).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn fs_read_file(path: String, state: State<AppPaths>) -> Result<Vec<u8>, String> {
+    let p = PathBuf::from(&path);
+    if !is_allowed(&p, &state) { return Err(format!("path not allowed: {path}")); }
+    std::fs::read(&p).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn fs_write_file(path: String, data: Vec<u8>, state: State<AppPaths>) -> Result<(), String> {
+    let p = PathBuf::from(&path);
+    if !is_allowed(&p, &state) { return Err(format!("path not allowed: {path}")); }
+    if let Some(parent) = p.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    // Atomic write: write to .tmp then rename (POSIX rename is atomic)
+    let tmp = p.with_extension(format!("tmp.{}", std::process::id()));
+    std::fs::write(&tmp, &data).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &p).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        e.to_string()
+    })
+}
+
+#[tauri::command]
+fn fs_append_file(path: String, data: Vec<u8>, state: State<AppPaths>) -> Result<(), String> {
+    let p = PathBuf::from(&path);
+    if !is_allowed(&p, &state) { return Err(format!("path not allowed: {path}")); }
+    use std::io::Write;
+    let mut f = std::fs::OpenOptions::new().append(true).create(true).open(&p)
+        .map_err(|e| e.to_string())?;
+    f.write_all(&data).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn fs_read_dir(path: String, state: State<AppPaths>) -> Result<Vec<FsDirEntry>, String> {
+    let p = PathBuf::from(&path);
+    if !is_allowed(&p, &state) { return Err(format!("path not allowed: {path}")); }
+    let iter = std::fs::read_dir(&p).map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for entry in iter.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let is_directory = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+        out.push(FsDirEntry { name, is_directory });
+    }
+    Ok(out)
+}
+
+#[tauri::command]
+fn fs_rename(from: String, to: String, state: State<AppPaths>) -> Result<(), String> {
+    let (fp, tp) = (PathBuf::from(&from), PathBuf::from(&to));
+    if !is_allowed(&fp, &state) || !is_allowed(&tp, &state) {
+        return Err("path not allowed".into());
+    }
+    std::fs::rename(&fp, &tp).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn fs_remove(path: String, recursive: bool, state: State<AppPaths>) -> Result<(), String> {
+    let p = PathBuf::from(&path);
+    if !is_allowed(&p, &state) { return Err(format!("path not allowed: {path}")); }
+    let meta = match std::fs::metadata(&p) {
+        Ok(m) => m,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e.to_string()),
+    };
+    if meta.is_dir() {
+        if recursive { std::fs::remove_dir_all(&p) } else { std::fs::remove_dir(&p) }
+    } else {
+        std::fs::remove_file(&p)
+    }
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn fs_exists(path: String, state: State<AppPaths>) -> bool {
+    let p = PathBuf::from(&path);
+    is_allowed(&p, &state) && p.exists()
+}
+
+// ── Other commands ─────────────────────────────────────────────────────────────
+
 #[tauri::command]
 fn get_home_dir(paths: State<AppPaths>) -> String {
     paths.home_dir.to_string_lossy().into_owned()
 }
 
-/// Resolved MindOS VFS data directory.
 #[tauri::command]
 fn get_mindos_dir(paths: State<AppPaths>) -> String {
     paths.mindos_dir.to_string_lossy().into_owned()
@@ -118,16 +224,14 @@ fn get_mindos_dir(paths: State<AppPaths>) -> String {
 
 #[tauri::command]
 fn get_app_data_dir(app: AppHandle) -> String {
-    app.path()
-        .app_local_data_dir()
+    app.path().app_local_data_dir()
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_else(|_| ".tauri-data".to_string())
 }
 
 #[tauri::command]
 fn get_app_config_dir(app: AppHandle) -> String {
-    app.path()
-        .app_config_dir()
+    app.path().app_config_dir()
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_else(|_| ".tauri-config".to_string())
 }
@@ -149,11 +253,7 @@ pub fn run() {
             let system_home = app.path().home_dir().unwrap_or_else(|_| PathBuf::from("."));
             let paths = resolve_all_paths(&system_home);
 
-            // Always create the base discovery dir — settings.json lives here
-            // even when mindos_dir and base_dir differ.
             let _ = std::fs::create_dir_all(&paths.base_dir);
-
-            // Create the VFS data scaffold in the resolved data dir.
             for sub in &["", "_meta", "_db", "meta", "module"] {
                 let _ = std::fs::create_dir_all(paths.mindos_dir.join(sub));
             }
@@ -165,31 +265,18 @@ pub fn run() {
                 let _ = std::fs::create_dir_all(paths.mindos_dir.join("_db").join(module));
             }
 
-            // Grant FS plugin runtime access to both directories.
-            // The static capability only covers $HOME/**; any path outside it
-            // (custom MINDOS_ROOT, homeDir on another mount, NFS, etc.) needs this.
-            //
-            // We add BOTH the original path and its canonical form because Tauri's
-            // scope checker may canonicalize the accessed path before matching.
-            // If /n/xdr/mindos is a symlink or NFS mount, the canonical path
-            // differs, and only the canonical pattern will match at runtime.
-            for dir in [&paths.home_dir, &paths.mindos_dir] {
-                let _ = app.fs_scope().allow_directory(dir, true);
-                if let Ok(canon) = std::fs::canonicalize(dir) {
-                    if canon != *dir {
-                        let _ = app.fs_scope().allow_directory(&canon, true);
-                    }
-                }
-            }
+            // Keep plugin-fs scope for any direct plugin-fs usage elsewhere.
+            // Our TauriFsOps now uses Rust commands (fs_*) instead, so these
+            // scope entries are only a fallback / belt-and-suspenders.
+            let _ = app.fs_scope().allow_directory(&paths.home_dir, true);
+            let _ = app.fs_scope().allow_directory(&paths.mindos_dir, true);
 
-            // Store resolved paths as app state — commands read from here.
             app.manage(paths);
 
             #[cfg(debug_assertions)]
             if let Some(window) = app.get_webview_window("main") {
                 window.open_devtools();
             }
-
             Ok(())
         })
         .plugin(tauri_plugin_sql::Builder::default().build())
@@ -200,6 +287,15 @@ pub fn run() {
             get_mindos_dir,
             get_app_data_dir,
             get_app_config_dir,
+            fs_stat,
+            fs_mkdir,
+            fs_read_file,
+            fs_write_file,
+            fs_append_file,
+            fs_read_dir,
+            fs_rename,
+            fs_remove,
+            fs_exists,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
