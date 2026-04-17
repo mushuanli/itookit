@@ -89,10 +89,19 @@ export class ContextManager implements IContextManager {
     }
 
     /**
-     * Auto-load skills whose triggerPatterns match the given prompt.
+     * Auto-load skills at session init.
+     * Loads skills flagged with autoLoad=true unconditionally, then loads any skills
+     * whose triggerPatterns match the given prompt.
      * Called once at session init so the first LLM turn already has relevant skills.
      */
     autoDetectAndLoadSkills(sessionId: string, prompt: string): void {
+        // Always load skills flagged for auto-load regardless of prompt content.
+        for (const skill of this.skillService.listSkills()) {
+            if (skill.autoLoad && skill.enabled) {
+                this.markSkillLoaded(sessionId, skill.id);
+            }
+        }
+        // Additionally load skills whose triggerPatterns match the current prompt.
         const matched = this.skillService.autoDetectSkills?.(prompt) ?? [];
         for (const skillId of matched) {
             this.markSkillLoaded(sessionId, skillId);
@@ -120,16 +129,32 @@ export class ContextManager implements IContextManager {
 
         // Use session-local loadedSkillIds as source of truth to avoid cross-session pollution.
         // skillService.getLoadedSkills() returns global state — unreliable with concurrent sessions.
+        // Guard with sk.enabled: if a skill was loaded then later disabled, exclude it from injection.
         const allSkills = this.skillService.listSkills();
-        const sessionLoadedSkills = allSkills.filter((sk) => s.loadedSkillIds.includes(sk.id));
+        const sessionLoadedSkills = allSkills.filter(
+            (sk) => s.loadedSkillIds.includes(sk.id) && sk.enabled,
+        );
         if (sessionLoadedSkills.length > 0) {
             const text = sessionLoadedSkills.map((sk: SkillDefinition) => sk.instructions).join('\n\n');
             if (text) sections.push({ priority: 2, content: text });
         }
 
-        // memoryContent is already used as the top-level identity (priority 0) above.
+        // P3: prompt-type skills inject their instructions directly — no load_skill call needed.
+        // Unlike http/shell/mcp skills, prompt skills have no tools to register, so they can be
+        // injected unconditionally. Budget gating still applies (priority 3, drops if too large).
+        const promptSkills = allSkills.filter(
+            (sk) => !s.loadedSkillIds.includes(sk.id) && sk.enabled && sk.type === 'prompt',
+        );
+        if (promptSkills.length > 0) {
+            const text = promptSkills.map((sk: SkillDefinition) => sk.instructions).join('\n\n');
+            if (text) sections.push({ priority: 3, content: text });
+        }
 
-        const unloaded = allSkills.filter((sk) => !s.loadedSkillIds.includes(sk.id) && sk.enabled);
+        // P4: tool-type skills (http/shell/mcp/builtin) use progressive disclosure.
+        // The LLM must call load_skill to activate them, which triggers tool registration.
+        const unloaded = allSkills.filter(
+            (sk) => !s.loadedSkillIds.includes(sk.id) && sk.enabled && sk.type !== 'prompt',
+        );
         if (unloaded.length > 0) {
             const list = unloaded
                 .map((sk: SkillDefinition) => `- **${sk.id}**: ${sk.description}`)
