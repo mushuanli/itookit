@@ -72,7 +72,7 @@ import { AccessController, type CallerIdentity } from '../engine/access-controll
 import { EventBus, TransactionEventBuffer } from '../event/event-bus';
 import { PluginPipeline } from '../engine/plugin-pipeline';
 import { DeviceRegistry } from '../engine/device-registry';
-import { deleteRecursive } from '../engine/tree-ops';
+import { deleteRecursive, copyRecursive } from '../engine/tree-ops';
 import type { ResolvedInode } from '../engine/path-resolver';
 import { toBuffer, toString } from '../utils/encoding';
 import {
@@ -880,8 +880,7 @@ export class ModuleFS implements IModuleFS {
             const backend = this._backend;
             const targetParentR = await this.engine.resolve(targetRealPath);
             const mapping = await backend.runInTransaction('readwrite', async (scope) => {
-                const { copyRecursive: cr } = await import('../engine/tree-ops');
-                return cr(scope, sourceR.ino, targetParentR.ino, newName ?? sourceR.name);
+                return copyRecursive(scope, sourceR.ino, targetParentR.ino, newName ?? sourceR.name);
             });
             const newIno = mapping.get(sourceR.ino)!;
             const inode = (await backend.inodes.getInode(newIno))!;
