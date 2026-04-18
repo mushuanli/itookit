@@ -76,11 +76,6 @@ export interface LLMProvider {
         streaming?: boolean;
     };
     /**
-     * 推荐的默认 tier → model ID 映射。
-     * optimal 未显式设置时等价于 models[0].id。
-     */
-    defaultTiers?: Partial<Record<ModelTier, string>>;
-    /**
      * true = 内置 Provider（由 constants.ts 定义）。
      * false / undefined = 用户新建的自定义 Provider，可以删除。
      */
@@ -179,10 +174,11 @@ export interface ConnectionTestResult {
  * hasApiKey 从 provider.apiKey 解析（再 fallback 到 legacy conn.apiKey）。
  */
 export function toConnectionMeta(conn: LLMConnection, provider?: LLMProvider): ConnectionMeta {
-    const effectiveTiers = conn.tiers ?? provider?.defaultTiers;
+    // Tier config lives exclusively on Connection; Provider has no defaultTiers.
+    const effectiveTiers = conn.tiers;
     const resolvedModel =
         effectiveTiers?.optimal
-        ?? conn.model
+        ?? conn.model             // legacy fallback
         ?? provider?.models[0]?.id
         ?? '';
     const pid = conn.providerId ?? conn.provider ?? '';

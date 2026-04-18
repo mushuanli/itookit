@@ -162,9 +162,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
         const initialPid = connection?.providerId ?? connection?.provider ?? providerKeys[0];
         const initialProvider = this.providers[initialPid] ?? this.providers[providerKeys[0]];
 
-        this.currentEditTiers = connection?.tiers
-            ? { ...connection.tiers }
-            : { ...initialProvider?.defaultTiers };
+        this.currentEditTiers = connection?.tiers ? { ...connection.tiers } : {};
 
         const modalContent = `
             <form id="connection-form" class="settings-form">
@@ -187,35 +185,25 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
                 <div class="settings-form__group">
                     <label class="settings-form__label">连接名称 *</label>
                     <input type="text" class="settings-form__input" name="name"
-                           value="${connection?.name || ''}" required placeholder="例如: 我的 Anthropic">
-                </div>
-
-                <!-- API Key hint -->
-                <div class="settings-form__group">
-                    <small class="settings-form__help" style="padding:8px;background:var(--st-bg-secondary);border-radius:4px;display:block">
-                        🔑 API Key 在 <strong>设置 → LLM Providers</strong> 中配置，与所有绑定此 Provider 的连接共享。
+                           value="${connection?.name || ''}" required
+                           placeholder="例如: RDSec-Claude、RDSec-Gemini">
+                    <small class="settings-form__help">
+                        同一 Provider 可创建多个连接，用于配置不同的模型层级组合。
                     </small>
                 </div>
 
-                <!-- Base URL override -->
-                <div class="settings-form__group">
-                    <label class="settings-form__label">Base URL <small>（可选，覆盖提供商默认地址）</small></label>
-                    <input type="text" class="settings-form__input" id="conn-baseurl" name="baseURL"
-                           value="${connection?.baseURL || ''}" placeholder="留空使用提供商默认地址">
-                </div>
-
-                <!-- Tier configuration -->
+                <!-- Tier configuration (Connection's core responsibility) -->
                 <div class="settings-form__group">
                     <label class="settings-form__label" style="display:flex;align-items:center;gap:6px">
-                        成本层级配置
+                        模型层级配置
                         <span class="settings-help-icon"
-                              title="为同一连接设置不同成本的模型。&#10;• 最优（optimal）= 默认 / 高质量推理&#10;• 标准（standard）= 日常工作&#10;• 快速（fast）= 简单廉价任务&#10;预算超过 80% 时系统自动向下降级。">?</span>
+                              title="为此连接指定各层级使用的模型：&#10;• 最优（optimal）— 复杂推理（必填）&#10;• 标准（standard）— 日常工作&#10;• 快速（fast）— 简单廉价任务&#10;预算超过 80% 时系统自动向下降级。">?</span>
                     </label>
                     <div class="settings-tier-config" id="tier-config-section">
-                        ${this.renderTierForm(initialProvider, this.currentEditTiers)}
+                        ${this.renderTierForm(initialProvider)}
                     </div>
                     <small class="settings-form__help">
-                        选择"— 同最优模型 —"表示不配置该层级（使用 optimal）。
+                        API Key 和模型列表在 <strong>设置 → LLM Providers</strong> 中管理。
                     </small>
                 </div>
             </form>
@@ -232,10 +220,12 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
                 const data = Object.fromEntries(formData) as Record<string, string>;
                 const pid = data.providerId;
 
-                // Read current tier selections
+                // Read all three tier selections
+                const tierOptimal  = (document.getElementById('tier-optimal')  as HTMLSelectElement)?.value || '';
                 const tierStandard = (document.getElementById('tier-standard') as HTMLSelectElement)?.value || '';
                 const tierFast     = (document.getElementById('tier-fast')     as HTMLSelectElement)?.value || '';
                 const tiers: Partial<Record<ModelTier, string>> = {};
+                if (tierOptimal)  tiers.optimal  = tierOptimal;
                 if (tierStandard) tiers.standard = tierStandard;
                 if (tierFast)     tiers.fast     = tierFast;
 
@@ -243,7 +233,6 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
                     id: connection?.id || `conn-${generateShortUUID()}`,
                     name: data.name,
                     providerId: pid,
-                    // apiKey is on Provider, not Connection
                     tiers: Object.keys(tiers).length > 0 ? tiers : undefined,
                     metadata: connection?.metadata,
                 };
@@ -257,37 +246,31 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
         setTimeout(() => this.bindModalEvents(connection, initialPid), 100);
     }
 
-    /** 渲染 tier 配置三行（optimal 只读说明 + standard/fast 下拉） */
-    private renderTierForm(provider: LLMProvider | undefined, tiers: Partial<Record<ModelTier, string>>): string {
+    /** 渲染 tier 配置三行（optimal/standard/fast 全部可选） */
+    private renderTierForm(provider: LLMProvider | undefined): string {
         const models = provider?.models ?? [];
-        const noneOpt = '<option value="">— 同最优模型 —</option>';
+        const noneOpt = '<option value="">— 未指定（使用 Provider 首个模型）—</option>';
         const modelOpts = models.map(m =>
             `<option value="${m.id}">${m.name}</option>`
         ).join('');
 
-        const optimalModel = tiers.optimal
-            ?? provider?.defaultTiers?.optimal
-            ?? models[0]?.id
-            ?? '';
-        const optimalName = models.find(m => m.id === optimalModel)?.name ?? optimalModel ?? '（连接后自动解析）';
+        const sel = (id: string, _tier: ModelTier) => `
+            <select class="settings-form__select settings-form__select--sm" id="${id}" style="flex:1">
+                ${noneOpt}${modelOpts}
+            </select>`;
 
         return `
             <div class="settings-tier-row">
                 <span class="settings-tier-badge settings-tier-badge--optimal">最优</span>
-                <span class="settings-tier-label" style="flex:1">${optimalName}</span>
-                <small style="color:var(--st-text-disabled)">默认</small>
+                ${sel('tier-optimal', 'optimal')}
             </div>
             <div class="settings-tier-row">
                 <span class="settings-tier-badge settings-tier-badge--standard">标准</span>
-                <select class="settings-form__select settings-form__select--sm" id="tier-standard" style="flex:1">
-                    ${noneOpt}${modelOpts}
-                </select>
+                ${sel('tier-standard', 'standard')}
             </div>
             <div class="settings-tier-row">
                 <span class="settings-tier-badge settings-tier-badge--fast">快速</span>
-                <select class="settings-form__select settings-form__select--sm" id="tier-fast" style="flex:1">
-                    ${noneOpt}${modelOpts}
-                </select>
+                ${sel('tier-fast', 'fast')}
             </div>
         `;
     }
@@ -298,21 +281,23 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
 
         const refreshTierSelects = (provider: LLMProvider | undefined, tiers: Partial<Record<ModelTier, string>>) => {
             if (!tierSection) return;
-            tierSection.innerHTML = this.renderTierForm(provider, tiers);
+            tierSection.innerHTML = this.renderTierForm(provider);
+            const optSel  = document.getElementById('tier-optimal')  as HTMLSelectElement | null;
             const stdSel  = document.getElementById('tier-standard') as HTMLSelectElement | null;
             const fastSel = document.getElementById('tier-fast')     as HTMLSelectElement | null;
+            if (optSel  && tiers.optimal)  optSel.value  = tiers.optimal;
             if (stdSel  && tiers.standard) stdSel.value  = tiers.standard;
             if (fastSel && tiers.fast)     fastSel.value = tiers.fast;
         };
 
         // Initialize tier selects with current connection tiers
-        const initTiers = connection?.tiers ?? this.providers[initialPid]?.defaultTiers ?? {};
+        const initTiers = connection?.tiers ?? {};
         refreshTierSelects(this.providers[initialPid], initTiers);
 
         // Provider switch → refresh tier selects
         providerSelect?.addEventListener('change', () => {
             const provider = this.providers[providerSelect.value];
-            this.currentEditTiers = { ...provider?.defaultTiers };
+            this.currentEditTiers = {};
             refreshTierSelects(provider, this.currentEditTiers);
         });
     }

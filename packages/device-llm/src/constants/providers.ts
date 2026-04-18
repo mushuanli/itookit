@@ -80,7 +80,6 @@ export const LLM_PROVIDERS: Record<string, LLMProvider> = {
         baseURL: 'https://api.rdsec.trendmicro.com/prod/aiendpoint/v1/chat/completions',
         icon: '🛡️',
         supportsThinking: true,
-        defaultTiers: { standard: 'claude-4.6-sonnet', fast: 'claude-4.5-haiku' },
         models: [
             { id: 'claude-4.6-opus',     name: MODEL_NAME_CLAUDE_46_OPUS,    icon: '👑' },
             { id: 'gemini-3.1-pro',      name: MODEL_NAME_GEMINI_31_PRO,     icon: '💫' },
@@ -120,11 +119,6 @@ export const LLM_PROVIDERS: Record<string, LLMProvider> = {
         baseURL: 'https://api.anthropic.com/v1/messages',
         icon: '🏺',
         supportsThinking: true,
-        defaultTiers: {
-            optimal:  'claude-opus-4-1-20250805',
-            standard: 'claude-sonnet-4-5-20250929',
-            fast:     'claude-haiku-4-5-20251001',
-        },
         models: [
             { id: 'claude-opus-4-1-20250805',    name: MODEL_NAME_CLAUDE_45_OPUS,          icon: '👑' },
             { id: 'claude-sonnet-4-5-20250929',  name: MODEL_NAME_CLAUDE_45_SONNET,        icon: '🎭' },
@@ -143,7 +137,6 @@ export const LLM_PROVIDERS: Record<string, LLMProvider> = {
         baseURL: 'https://generativelanguage.googleapis.com/v1beta/models',
         icon: '💎',
         supportsThinking: true,
-        defaultTiers: { standard: 'gemini-2.5-flash', fast: 'gemini-2.5-flash' },
         models: [
             { id: 'gemini-2.5-pro',   name: MODEL_NAME_GEMINI_25_PRO,   icon: '🌟' },
             { id: 'gemini-2.5-flash', name: MODEL_NAME_GEMINI_25_FLASH,  icon: '⚡' },
@@ -158,7 +151,6 @@ export const LLM_PROVIDERS: Record<string, LLMProvider> = {
         baseURL: 'https://api.deepseek.com/v1/chat/completions',
         icon: '🐋',
         supportsThinking: true,
-        defaultTiers: { standard: 'deepseek-chat', fast: 'deepseek-chat' },
         models: [
             { id: 'deepseek-reasoner', name: MODEL_NAME_DEEPSEEK_REASONER, icon: '🧠', supportsThinking: true },
             { id: 'deepseek-chat',     name: MODEL_NAME_DEEPSEEK_CHAT,     icon: '💬' },
@@ -197,11 +189,6 @@ export const LLM_PROVIDERS: Record<string, LLMProvider> = {
         baseURL: 'https://chat.cloudapi.vip/v1/chat/completions',
         icon: '☁️',
         supportsThinking: true,
-        defaultTiers: {
-            optimal:  'claude-opus-4-6',
-            standard: 'claude-sonnet-4-6-thinking',
-            fast:     'claude-haiku-4-5-20251001-r',
-        },
         models: [
             { id: 'claude-opus-4-6-thinking',    name: MODEL_NAME_CLAUDE_46_OPUS_THINKING, icon: '👑' },
             { id: 'gemini-3.1-pro-preview',      name: MODEL_NAME_GEMINI_31_PRO,           icon: '💫' },
@@ -224,7 +211,6 @@ export const LLM_PROVIDERS: Record<string, LLMProvider> = {
         baseURL: 'https://api.openai.com/v1/chat/completions',
         icon: '🤖',
         supportsThinking: true,
-        defaultTiers: { standard: 'gpt-5', fast: 'gpt-5-mini' },
         models: [
             { id: 'gpt-5-pro',   name: MODEL_NAME_GPT52,       icon: '👑' },
             { id: 'gpt-5',       name: MODEL_NAME_GPT5,         icon: '🚀' },
