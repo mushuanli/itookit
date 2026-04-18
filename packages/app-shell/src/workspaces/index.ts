@@ -135,3 +135,38 @@ export const WS_PRIVATE: WorkspaceConfig = {
     mentionAble: true,
     aiEnabled: true,
 };
+
+/**
+ * Local filesystem workspace — primary entry point for desktop apps.
+ * Backend wiring (LocalFSBackend, driver) is the app's responsibility.
+ */
+export const WS_HOME: WorkspaceConfig = {
+    elementId: 'home-workspace',
+    moduleName: 'home',
+    slug: 'files',
+    type: 'standard',
+    title: 'Files',
+    supportedFileTypes: ['markdown', 'mind', 'project', 'email', 'private'],
+    syncEnabled: false,
+    mentionAble: true,
+    aiEnabled: true,
+};
+
+/**
+ * Factory for dynamically-mounted local directory workspaces.
+ * Each mount gets a unique id (e.g. 'mnt_1234567890') and its own VFS module.
+ * Backend wiring is the caller's responsibility.
+ */
+export function createWsMount(id: string, label: string): WorkspaceConfig {
+    return {
+        elementId: `${id}-workspace`,
+        moduleName: id,
+        slug: id,
+        type: 'standard',
+        title: label,
+        supportedFileTypes: ['markdown'],
+        syncEnabled: false,
+        mentionAble: false,
+        aiEnabled: true,
+    };
+}
