@@ -8,6 +8,7 @@ import {
     ProviderCapabilities
 } from '../types';
 import { LLMError } from '../errors';
+import { processAttachments } from '../utils/attachment';
 
 /**
  * Provider 基类
@@ -97,7 +98,6 @@ export abstract class BaseProvider {
             params.messages.map(async (msg) => {
                 // 如果有 attachments 字段，转换为 content parts
                 if (msg.attachments && msg.attachments.length > 0) {
-                    const { processAttachments } = await import('../utils/attachment');
                     const attachmentParts = await processAttachments(
                         msg.attachments,
                         this.getProviderFormat()

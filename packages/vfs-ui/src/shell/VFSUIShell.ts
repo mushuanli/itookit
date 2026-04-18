@@ -297,7 +297,8 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService> {
       tagEditorFactory: this.options.components?.tagEditor,
       searchPlaceholder:
         this.options.searchPlaceholder || 'Search (tag:xx type:file|dir)...',
-      createFileLabel: this.options.createFileLabel,
+      createFileLabel:   this.options.createFileLabel,
+      defaultFileTitle:  this.options.defaultFileTitle,
       title: this.options.title,
       searchFilter: this.options.searchFilter,
       instanceId: this.instanceId,

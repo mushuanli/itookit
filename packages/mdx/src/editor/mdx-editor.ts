@@ -1,7 +1,8 @@
 // @mdx/editor/mdx-editor.ts
 import {
     IEditor, EditorOptions, EditorEvent, EditorEventCallback,
-    UnifiedSearchResult, CollapseExpandResult, Heading
+    UnifiedSearchResult, CollapseExpandResult, Heading,
+    extractSearchableText, extractSummary,
 } from '@itookit/common';
 import { EventBus } from '../core/event-bus';
 import { CodeMirrorAdapter } from './codemirror-adapter';
@@ -344,12 +345,10 @@ export class MDxEditor extends IEditor {
     }
 
     async getSearchableText(): Promise<string> {
-        const { extractSearchableText } = await import('@itookit/common');
         return extractSearchableText(this.getText());
     }
 
     async getSummary(): Promise<string | null> {
-        const { extractSummary } = await import('@itookit/common');
         return extractSummary(this.getText());
     }
 
