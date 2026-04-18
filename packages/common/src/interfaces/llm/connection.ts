@@ -158,6 +158,24 @@ export interface ConnectionMeta {
     status?: 'active' | 'error' | 'untested';
 }
 
+// ─── DefaultConnectionDef ────────────────────────────────────────────────────
+
+/**
+ * 内置默认连接定义模板。
+ * `syncDefaultConnections()` 按此列表初始化 VFS；
+ * 同一 Provider 可出现多次，代表不同的模型族策略。
+ */
+export interface DefaultConnectionDef {
+    /** 连接唯一 ID，'default' 表示系统默认连接 */
+    id: string;
+    /** 连接显示名称 */
+    name: string;
+    /** 引用的 Provider ID */
+    providerId: string;
+    /** Tier → model ID 映射 */
+    tiers?: Partial<Record<ModelTier, string>>;
+}
+
 // ─── ConnectionTestResult ─────────────────────────────────────────────────────
 
 export interface ConnectionTestResult {

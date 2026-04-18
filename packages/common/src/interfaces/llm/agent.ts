@@ -1,7 +1,7 @@
 // @file: common/interfaces/llm/agent.ts
 // Agent、MCP 及服务接口定义。
 
-import type { LLMConnection, ConnectionMeta, LLMProvider, ConnectionTestResult, ModelTier } from './connection';
+import type { LLMConnection, ConnectionMeta, LLMProvider, DefaultConnectionDef, ConnectionTestResult, ModelTier } from './connection';
 import type { RestorableItem } from '../../types/types';
 
 // ─── Agent ────────────────────────────────────────────────────────────────────
@@ -196,6 +196,8 @@ export interface ILLMManagementService extends IConnectionService {
     getConfigVersion(): number;
     /** 返回内置的默认 Agent 定义列表 */
     getDefaultAgents(): InitialAgentDef[];
+    /** 返回内置的默认 Connection 定义列表（含多连接/同 Provider 场景） */
+    getDefaultConnections(): DefaultConnectionDef[];
 }
 
 // ─── IAgentConfigService ────────────────────────────────────────────────────────────
