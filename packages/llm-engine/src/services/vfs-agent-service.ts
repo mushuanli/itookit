@@ -219,6 +219,7 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
 
     getConfigVersion(): number { return this.llmService.getConfigVersion(); }
     getDefaultAgents(): InitialAgentDef[] { return this.llmService.getDefaultAgents(); }
+    getDefaultConnections() { return this.llmService.getDefaultConnections(); }
     getProviderDefaults(): Record<string, LLMProvider> { return this.llmService.getProviderDefaults(); }
     getProvider(providerId: string): LLMProvider | undefined { return this.llmService.getProvider(providerId); }
     getProviders(): LLMProvider[] { return this.llmService.getProviders(); }
@@ -246,7 +247,6 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
         const connections = await this.getConnections();
         const connMap = new Map(connections.map(c => [c.id, c]));
         const providerDefaults = this.llmService.getProviderDefaults();
-        const providerKeys = Object.keys(providerDefaults);
         const items: RestorableItem[] = [];
 
         // ── Layer 1: Providers ─────────────────────────────────────────────────
@@ -265,15 +265,15 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
         }
 
         // ── Layer 2: Connections ───────────────────────────────────────────────
-        for (const [key, def] of Object.entries(providerDefaults)) {
-            const targetId = key === providerKeys[0] ? 'default' : `conn-${key}`;
-            const existing = connMap.get(targetId);
+        for (const connDef of this.llmService.getDefaultConnections()) {
+            const existing = connMap.get(connDef.id);
+            const provider = providerDefaults[connDef.providerId];
             const status: RestorableItem['status'] = !existing ? 'missing'
-                : existing.providerId !== key ? 'modified' : 'ok';
+                : existing.providerId !== connDef.providerId ? 'modified' : 'ok';
             items.push({
-                id: targetId, type: 'connection', name: def.name,
-                description: `${def.name} 的默认连接配置`,
-                icon: (def as any).icon || '🔗', status,
+                id: connDef.id, type: 'connection', name: connDef.name,
+                description: `${connDef.name}（${provider?.name ?? connDef.providerId}）`,
+                icon: (provider as any)?.icon || '🔗', status,
             });
         }
 
@@ -300,16 +300,14 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
 
     async resetAllDefaults(): Promise<void> {
         const providerDefaults = this.llmService.getProviderDefaults();
-        const providerKeys = Object.keys(providerDefaults);
 
         // Reset providers (keep existing apiKey)
         for (const id of Object.keys(providerDefaults)) {
             await this.restoreProvider(id);
         }
         // Reset connections
-        for (const key of providerKeys) {
-            const targetId = key === providerKeys[0] ? 'default' : `conn-${key}`;
-            await this.restoreConnection(targetId);
+        for (const connDef of this.llmService.getDefaultConnections()) {
+            await this.restoreConnection(connDef.id);
         }
         // Reset agents
         for (const def of this.llmService.getDefaultAgents()) {
@@ -331,20 +329,13 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
     }
 
     private async restoreConnection(targetId: string): Promise<void> {
-        const providerDefaults = this.llmService.getProviderDefaults();
-        const keys = Object.keys(providerDefaults);
-        const providerKey = targetId === 'default'
-            ? keys[0]
-            : targetId.startsWith('conn-') ? targetId.replace('conn-', '') : '';
-        const providerDef = providerDefaults[providerKey];
-        if (!providerDef) throw new Error(`No default definition for connection id: ${targetId}`);
-
-        // apiKey is now on Provider, not Connection — reset to lean connection
-        // Restore to lean connection — user re-configures tiers via ConnectionSettingsEditor
+        const connDef = this.llmService.getDefaultConnections().find(c => c.id === targetId);
+        if (!connDef) throw new Error(`No default definition for connection id: ${targetId}`);
         await this.saveConnection({
-            id: targetId,
-            name: providerDef.name,
-            providerId: providerKey,
+            id: connDef.id,
+            name: connDef.name,
+            providerId: connDef.providerId,
+            tiers: connDef.tiers,
             metadata: { isSystemDefault: true },
         });
     }
