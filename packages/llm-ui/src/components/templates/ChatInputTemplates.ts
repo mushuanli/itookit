@@ -1,7 +1,7 @@
 // @file: llm-ui/views/templates/ChatInputTemplates.ts
 
 import { escapeHTML } from '@itookit/common';
-import { ExecutorOption, ModelOption } from '../../domain/types';
+import { ExecutorOption, ConnectionOption } from '../../domain/types';
 
 export const ChatInputTemplates = {
 
@@ -36,7 +36,8 @@ export const ChatInputTemplates = {
                 </div>
 
                 <div class="llm-input__settings-body">
-                    ${this.renderModelSetting()}
+                    ${this.renderConnectionSetting()}
+                    ${this.renderTierSetting()}
                     ${this.renderContextSetting()}
                     ${this.renderModeSetting()}
                     ${this.renderSkillsSetting()}
@@ -47,18 +48,38 @@ export const ChatInputTemplates = {
     },
 
     /**
-     * 模型覆盖设置行
+     * 连接覆盖设置行（替代原 Model 下拉）
      */
-    renderModelSetting(): string {
+    renderConnectionSetting(): string {
         return `
             <div class="llm-input__setting-row">
                 <label class="llm-input__setting-label">
-                    <span class="llm-input__setting-icon">🧠</span>
-                    Model
+                    <span class="llm-input__setting-icon">🔌</span>
+                    Connection
                 </label>
-                <select class="llm-input__model-select" title="Override model for this session">
+                <select class="llm-input__connection-select" title="Override LLM connection for this session">
                     <option value="">Agent Default</option>
                 </select>
+            </div>
+        `;
+    },
+
+    /**
+     * 模型层级（Tier）选择行
+     */
+    renderTierSetting(): string {
+        return `
+            <div class="llm-input__setting-row">
+                <label class="llm-input__setting-label">
+                    <span class="llm-input__setting-icon">⚡</span>
+                    Tier
+                </label>
+                <div class="llm-input__tier-pills" role="group" aria-label="Model tier">
+                    <button type="button" class="llm-input__tier-pill active" data-tier="auto"     title="Use agent's configured tier (default optimal)">Auto</button>
+                    <button type="button" class="llm-input__tier-pill"        data-tier="optimal"  title="Best quality — complex reasoning">最优</button>
+                    <button type="button" class="llm-input__tier-pill"        data-tier="standard" title="Balanced — most daily work">标准</button>
+                    <button type="button" class="llm-input__tier-pill"        data-tier="fast"     title="Cheapest — simple tasks">快速</button>
+                </div>
             </div>
         `;
     },
@@ -223,9 +244,13 @@ export const ChatInputTemplates = {
     renderActiveBadges(): string {
         return `
             <div class="llm-input__active-settings" style="display:none">
-                <span class="llm-input__active-badge" data-type="model" style="display:none">
-                    🧠 <span class="llm-input__badge-text"></span>
-                    <button class="llm-input__badge-clear" data-clear="model">×</button>
+                <span class="llm-input__active-badge" data-type="connection" style="display:none">
+                    🔌 <span class="llm-input__badge-text"></span>
+                    <button class="llm-input__badge-clear" data-clear="connection">×</button>
+                </span>
+                <span class="llm-input__active-badge" data-type="tier" style="display:none">
+                    ⚡ <span class="llm-input__badge-text"></span>
+                    <button class="llm-input__badge-clear" data-clear="tier">×</button>
                 </span>
                 <span class="llm-input__active-badge" data-type="stream" style="display:none">
                     ⏸️ <span class="llm-input__badge-text">Non-stream</span>
@@ -399,19 +424,16 @@ export const ChatInputTemplates = {
     },
 
     /**
-     * 渲染模型选项
+     * 渲染连接选项（替代原 renderModelOptions）
      */
-    renderModelOptions(models: ModelOption[], selectedId?: string): string {
-        let html = '<option value="">Use Agent Default</option>';
-
-        models.forEach(model => {
-            const displayName = model.provider
-                ? `${escapeHTML(model.name)} (${escapeHTML(model.provider)})`
-                : escapeHTML(model.name);
-            const selected = model.id === selectedId ? ' selected' : '';
-            html += `<option value="${escapeHTML(model.id)}"${selected}>${displayName}</option>`;
+    renderConnectionOptions(connections: ConnectionOption[], selectedId?: string): string {
+        let html = '<option value="">Agent Default</option>';
+        connections.forEach(c => {
+            const label = c.provider ? `${escapeHTML(c.name)} (${escapeHTML(c.provider)})` : escapeHTML(c.name);
+            const selected = c.id === selectedId ? ' selected' : '';
+            const tierHint = c.hasTiers ? ' ⚡' : '';
+            html += `<option value="${escapeHTML(c.id)}"${selected}>${label}${tierHint}</option>`;
         });
-
         return html;
     },
 

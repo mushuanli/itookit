@@ -12,6 +12,7 @@ import type {
     ToolCall,
     ToolDefinition,
 } from '@itookit/common';
+import { resolveModelForTier } from '@itookit/common';
 import { getToolName, getToolArgs } from '../utils/tool-call';
 
 const DEFAULT_MAX_TURNS = 10;
@@ -31,7 +32,12 @@ export class SubAgentRouter implements ISubAgentRouter {
         const { signal } = this.abortController;
 
         const connectionId = task.connectionId ?? this.modelRoles.subAgent ?? this.modelRoles.primary;
-        // task.modelName is stored for future ILLMService model-override support
+        // Resolve effective model: explicit modelName > tier lookup > connection default.
+        let effectiveModelId: string | undefined = task.modelName;
+        if (!effectiveModelId && task.modelTier) {
+            const connMeta = await this.llm.getConnection(connectionId);
+            if (connMeta) effectiveModelId = resolveModelForTier(connMeta, task.modelTier);
+        }
         const allowedTools = task.allowedTools ?? READ_ONLY_TOOLS;
         const maxTurns = task.maxTurns ?? DEFAULT_MAX_TURNS;
 
@@ -67,7 +73,7 @@ export class SubAgentRouter implements ISubAgentRouter {
                 if (signal.aborted) break;
                 turns++;
 
-                const response = await this.llm.chat(connectionId, { messages, tools: toolDefs, signal });
+                const response = await this.llm.chat(connectionId, { messages, tools: toolDefs, signal, model: effectiveModelId });
                 const choice = response.choices[0];
                 inputTokens += (response.usage as Record<string, unknown>)?.['prompt_tokens'] as number ?? 0;
                 outputTokens += (response.usage as Record<string, unknown>)?.['completion_tokens'] as number ?? 0;

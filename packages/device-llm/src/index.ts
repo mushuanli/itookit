@@ -44,7 +44,8 @@ export type { LLMErrorDetails } from './errors';
 export type {
     LLMConnection,
     LLMModel,
-    LLMProviderDefinition
+    LLMProvider,
+    LLMProviderDefinition,  // @deprecated alias for LLMProvider
 } from './types/connection';
 
 // 消息
@@ -133,7 +134,9 @@ export type {
 
 export {
     CONST_CONFIG_VERSION,
-    LLM_PROVIDER_DEFAULTS,
+    PROVIDERS_DIR,
+    LLM_PROVIDERS,
+    LLM_PROVIDER_DEFAULTS,  // @deprecated
     LLM_DEFAULT_ID,
     LLM_DEFAULT_NAME,
     DEFAULT_TIMEOUT,

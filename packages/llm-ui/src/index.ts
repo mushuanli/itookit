@@ -11,6 +11,7 @@ import { EditorFactory, EditorOptions } from '@itookit/common';
 import { AgentConfigEditor } from './editors/AgentConfigEditor';
 
 export { ConnectionSettingsEditor } from './editors/ConnectionSettingsEditor';
+export { ProviderSettingsEditor } from './editors/ProviderSettingsEditor';
 export { MCPSettingsEditor } from './editors/MCPSettingsEditor';
 export { SkillSettingsEditor } from './editors/SkillSettingsEditor';
 

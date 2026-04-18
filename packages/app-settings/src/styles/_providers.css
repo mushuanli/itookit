@@ -1,0 +1,24 @@
+/* @file: app-settings/styles/_providers.css */
+/* Provider 配置页样式（复用 _connections.css 基础组件，此处扩展差异部分） */
+
+/* Provider 页面无需额外布局样式，共享 settings-connection-grid / card 组件 */
+
+/* info badge */
+.settings-badge--info {
+    background: #dbeafe;
+    color: #1e40af;
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+@media (prefers-color-scheme: dark) {
+    .settings-badge--info {
+        background: #1e3a5f;
+        color: #93c5fd;
+    }
+}

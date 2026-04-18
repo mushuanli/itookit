@@ -1,6 +1,7 @@
 // @file: llm-engine/src/core/types.ts
 
 import { NodeStatus } from '@itookit/llm-kernel';
+import type { ModelTier } from '@itookit/common';
 
 /**
  * 单次任务（或整个会话）的 token 用量统计。
@@ -100,9 +101,19 @@ export interface ChatFile {
  * ✅ 新增：查询覆盖参数
  */
 export interface ExecutionOverrides {
-    /** 覆盖模型 ID */
-    modelId?: string;
-    /** 历史消息数量限制，-1 表示不限制 */
+    /**
+     * 覆盖使用的 LLM 连接 ID（替代 modelId）。
+     * 对应 AgentTaskRequest.modelOverride。
+     */
+    connectionId?: string;
+    /**
+     * 模型层级偏好（与 connectionId 配合使用）。
+     * 对应 AgentTaskRequest.modelTier。
+     */
+    modelTier?: ModelTier;
+    /**
+     * 历史消息数量限制，-1 表示不限制
+     */
     historyLength?: number;
     /** 温度参数 */
     temperature?: number;
@@ -112,14 +123,10 @@ export interface ExecutionOverrides {
     autoContinue?: boolean;
     /**
      * 路由到 AgentLoopExecutor（harness 模式）。
-     *
-     * 开启后跳过 llm-kernel，通过 HarnessAdapter 执行多轮 Agent 循环：
-     * 工具调用、上下文压缩、反压验证均由 AgentLoopExecutor 内部管理。
      */
     useHarness?: boolean;
     /**
      * 文件工具的工作目录（harness 模式下使用）。
-     * 不设置时默认使用进程工作目录。
      */
     workingDirectory?: string;
 }

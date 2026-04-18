@@ -360,3 +360,37 @@
         color: #fff;
     }
 }
+
+/* ── Agent Tier Selector ──────────────────────────────────────── */
+.agent-tier-selector {
+    display: flex;
+    gap: 8px;
+}
+
+.agent-tier-btn {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 10px 8px;
+    border: 2px solid var(--st-border-color);
+    border-radius: var(--st-radius-md);
+    background: var(--st-bg-primary);
+    cursor: pointer;
+    transition: all 0.15s;
+    font-size: 0.8rem;
+}
+
+.agent-tier-btn:hover {
+    border-color: var(--st-color-primary);
+}
+
+.agent-tier-btn.selected {
+    border-color: var(--st-color-primary);
+    background: var(--st-color-primary-light, rgba(99,102,241,.08));
+}
+
+.agent-tier-btn__icon { font-size: 1.2rem; }
+.agent-tier-btn__label { font-weight: 600; }
+.agent-tier-btn__desc { color: var(--st-text-secondary); font-size: 0.72rem; }
