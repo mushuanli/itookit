@@ -24,7 +24,7 @@ import yaml from 'js-yaml';
 
 import { LLMDriver } from '../core/driver';
 import { testLLMConnection } from '../core/api';
-import { LLM_PROVIDERS, CONST_CONFIG_VERSION, DEFAULT_AGENTS } from '../constants';
+import { LLM_PROVIDERS, DEFAULT_CONNECTION_TIERS, CONST_CONFIG_VERSION, DEFAULT_AGENTS } from '../constants';
 import { MCPServerConnection, type MCPToolInfo } from '../skills/mcp-client';
 import type { MCPServerConfig } from '../types/provider';
 
@@ -716,39 +716,36 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
 
     private async syncDefaultConnections(): Promise<void> {
         const current = await this.loadAll();
-        // Match by providerId (new) or legacy provider field
         const byProvider = new Map(current.map(c => [c.providerId ?? c.provider, c]));
         const keys = Object.keys(LLM_PROVIDERS);
         const defaultKey = keys[0];
 
         for (const [key, def] of Object.entries(LLM_PROVIDERS)) {
             const existing = byProvider.get(key);
+            // Tier config is Connection's responsibility; read from DEFAULT_CONNECTION_TIERS
+            const defaultTiers = DEFAULT_CONNECTION_TIERS[key];
             if (!existing) {
-                // Write a lean connection — no model or availableModels (come from Provider catalog)
                 await this.writeToDisk({
                     id: key === defaultKey ? 'default' : `conn-${key}`,
                     name: def.name,
                     providerId: key,
-                    apiKey: '',
-                    tiers: def.defaultTiers,
-                    baseURL: def.baseURL !== def.baseURL ? def.baseURL : undefined,
+                    tiers: defaultTiers,
                     metadata: { isSystemDefault: true },
                 });
             } else {
                 const updated: LLMConnection = JSON.parse(JSON.stringify(existing));
                 let dirty = false;
-
-                // Migrate: ensure providerId is set (old data has only provider)
+                // Migrate: ensure providerId is set
                 if (!updated.providerId && updated.provider) {
                     updated.providerId = updated.provider;
                     dirty = true;
                 }
-                // Back-fill tiers if missing
-                if (!updated.tiers && def.defaultTiers) {
-                    updated.tiers = def.defaultTiers;
+                // Back-fill tiers from DEFAULT_CONNECTION_TIERS if missing
+                if (!updated.tiers && defaultTiers) {
+                    updated.tiers = defaultTiers;
                     dirty = true;
                 }
-                // Drop deprecated availableModels and model fields from stored data
+                // Drop deprecated fields
                 if (updated.availableModels !== undefined) {
                     delete updated.availableModels;
                     dirty = true;
@@ -945,7 +942,8 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         }
 
         // Resolve model from provider catalog + tier mapping
-        const effectiveTiers = conn.tiers ?? provider?.defaultTiers;
+        // Tier config lives on Connection; Provider has no defaultTiers.
+        const effectiveTiers = conn.tiers;
         const resolvedModel =
             effectiveTiers?.optimal
             ?? conn.model                   // legacy fallback

@@ -4,20 +4,21 @@
 //
 // 职责：
 //   - 展示所有 Provider（内置 + 用户自定义）
-//   - 编辑 Provider：name / icon / baseURL / models 列表 / defaultTiers
+//   - 编辑 Provider：name / icon / implementation / baseURL / apiKey / 模型列表
 //   - 新建自定义 Provider（openai-compatible 端点）
 //   - 重置内置 Provider 到默认值
 //   - 删除用户自定义 Provider
+//
+// 注意：tier 配置（optimal/standard/fast 映射）属于 Connection 层，不在此处配置。
 
 import { Modal, Toast, BaseSettingsEditor, generateShortUUID } from '@itookit/common';
 import type {
     IConnectionService, LLMProvider, LLMModel,
-    LLMProviderImplementation, ModelTier,
+    LLMProviderImplementation,
 } from '@itookit/common';
 
 export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionService> {
     private editModels: LLMModel[] = [];
-    private editTiers: Partial<Record<ModelTier, string>> = {};
 
     async render() {
         const providers = this.service.getProviders();
@@ -56,7 +57,6 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
     // ── Card ───────────────────────────────────────────────────────────────────
 
     private renderProviderCard(p: LLMProvider): string {
-        const tierBadges = this.renderTierBadges(p.defaultTiers);
         // getProviders() strips apiKey; check via getFullProvider
         const fullP = this.service.getFullProvider?.(p.id);
         const hasKey = !!(fullP?.apiKey?.trim());
@@ -92,8 +92,13 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
                         <span class="settings-detail-item__value">${p.models.length} 个</span>
                     </div>
                     <div class="settings-detail-item">
-                        <span class="settings-detail-item__label">默认层级</span>
-                        <span class="settings-detail-item__value">${tierBadges}</span>
+                        <span class="settings-detail-item__label">API Key</span>
+                        <span class="settings-detail-item__value">
+                            ${hasKey
+                                ? '<span style="color:var(--st-color-success,#10b981)">✓ 已配置</span>'
+                                : '<span style="color:var(--st-text-disabled)">未配置</span>'
+                            }
+                        </span>
                     </div>
                 </div>
 
@@ -110,15 +115,6 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
         `;
     }
 
-    private renderTierBadges(tiers?: Partial<Record<ModelTier, string>>): string {
-        if (!tiers || (!tiers.standard && !tiers.fast)) {
-            return '<span style="color:var(--st-text-disabled)">未配置</span>';
-        }
-        const out: string[] = ['<span class="settings-tier-badge settings-tier-badge--optimal">最优</span>'];
-        if (tiers.standard) out.push('<span class="settings-tier-badge settings-tier-badge--standard">标准</span>');
-        if (tiers.fast)     out.push('<span class="settings-tier-badge settings-tier-badge--fast">快速</span>');
-        return out.join(' ');
-    }
 
     // ── List events ────────────────────────────────────────────────────────────
 
@@ -159,7 +155,6 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
         const fullProvider = provider ? (this.service.getFullProvider(provider.id) ?? provider) : null;
 
         this.editModels = fullProvider ? JSON.parse(JSON.stringify(fullProvider.models)) : [];
-        this.editTiers  = fullProvider?.defaultTiers ? { ...fullProvider.defaultTiers } : {};
         const existingApiKey = fullProvider?.apiKey ?? '';
 
         const implementations: LLMProviderImplementation[] = [
@@ -220,16 +215,6 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
                                    value="${fullProvider?.baseURL ?? provider?.baseURL ?? ''}" required placeholder="https://api.example.com/v1">
                         </div>
 
-                        <div class="settings-form__group">
-                            <label class="settings-form__label" style="display:flex;align-items:center;gap:6px">
-                                默认层级
-                                <span class="settings-help-icon"
-                                      title="optimal = 默认/最优&#10;standard = 日常工作&#10;fast = 简单/廉价任务">?</span>
-                            </label>
-                            <div class="settings-tier-config" id="provider-tier-config">
-                                ${this.renderTierForm()}
-                            </div>
-                        </div>
                     </div>
 
                     <!-- Right: model list -->
@@ -255,7 +240,6 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
                 if (!form.checkValidity()) { form.reportValidity(); return false; }
 
                 this.syncInputsToModelData();
-                this.syncTierSelects();
 
                 const formData = new FormData(form);
                 const data = Object.fromEntries(formData) as Record<string, string>;
@@ -270,7 +254,6 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
                     // Keep existing apiKey if field was left empty
                     apiKey: newApiKey || existingApiKey || undefined,
                     models: [...this.editModels],
-                    defaultTiers: Object.keys(this.editTiers).length > 0 ? { ...this.editTiers } : undefined,
                     isBuiltin: isBuiltin,
                 };
 
@@ -305,60 +288,16 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
         `).join('');
     }
 
-    private renderTierForm(): string {
-        const NONE = '<option value="">— 不配置 —</option>';
-        const modelOpts = this.editModels.map(m =>
-            `<option value="${m.id}">${m.name} (${m.id})</option>`
-        ).join('');
-        return `
-            <div class="settings-tier-row">
-                <span class="settings-tier-badge settings-tier-badge--optimal">最优</span>
-                <select class="settings-form__select settings-form__select--sm" id="tier-optimal">
-                    ${NONE}${modelOpts}
-                </select>
-            </div>
-            <div class="settings-tier-row">
-                <span class="settings-tier-badge settings-tier-badge--standard">标准</span>
-                <select class="settings-form__select settings-form__select--sm" id="tier-standard">
-                    ${NONE}${modelOpts}
-                </select>
-            </div>
-            <div class="settings-tier-row">
-                <span class="settings-tier-badge settings-tier-badge--fast">快速</span>
-                <select class="settings-form__select settings-form__select--sm" id="tier-fast">
-                    ${NONE}${modelOpts}
-                </select>
-            </div>
-        `;
-    }
-
     // ── Modal events ───────────────────────────────────────────────────────────
 
     private bindModalEvents() {
         const listContainer = document.getElementById('model-list-container') as HTMLElement | null;
         const addModelBtn   = document.getElementById('btn-add-model') as HTMLButtonElement | null;
-        const tierSection   = document.getElementById('provider-tier-config') as HTMLElement | null;
-
-        const refreshTierSelects = () => {
-            if (!tierSection) return;
-            tierSection.innerHTML = this.renderTierForm();
-            const setVal = (id: string, tier: ModelTier) => {
-                const el = document.getElementById(id) as HTMLSelectElement | null;
-                if (el && this.editTiers[tier]) el.value = this.editTiers[tier]!;
-            };
-            setVal('tier-optimal', 'optimal');
-            setVal('tier-standard', 'standard');
-            setVal('tier-fast', 'fast');
-        };
 
         const renderList = () => {
             if (!listContainer) return;
             listContainer.innerHTML = this.renderModelListHTML();
-            refreshTierSelects();
         };
-
-        // Initial tier setup
-        refreshTierSelects();
 
         // Test API Key button
         const testBtn    = document.getElementById('btn-test-provider') as HTMLButtonElement | null;
@@ -433,18 +372,6 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
         });
     }
 
-    private syncTierSelects() {
-        const get = (id: string) =>
-            (document.getElementById(id) as HTMLSelectElement | null)?.value || undefined;
-        const optimal  = get('tier-optimal');
-        const standard = get('tier-standard');
-        const fast     = get('tier-fast');
-        this.editTiers = {};
-        if (optimal)  this.editTiers.optimal  = optimal;
-        if (standard) this.editTiers.standard = standard;
-        if (fast)     this.editTiers.fast     = fast;
-    }
-
     // ── Delete / Reset ─────────────────────────────────────────────────────────
 
     private confirmDelete(provider: LLMProvider) {
@@ -462,7 +389,7 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
     private confirmReset(provider: LLMProvider) {
         Modal.confirm(
             '确认重置',
-            `将「${provider.name}」恢复为内置默认配置（BaseURL / 模型列表 / 层级映射），确定继续？`,
+            `将「${provider.name}」恢复为内置默认配置（BaseURL / 模型列表），确定继续？`,
             async () => {
                 // Re-save from built-in constant (getProviderDefaults returns raw constant values)
                 const defaults = this.service.getProviderDefaults();
