@@ -932,8 +932,14 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         if (!conn) {
             throw new Error(`LLMDeviceDriver: no connection available for id '${connectionId}'`);
         }
+        if (conn.enabled === false) {
+            throw new Error(`LLMDeviceDriver: connection '${conn.id}' is disabled`);
+        }
         // apiKey now lives on Provider; fall back to legacy conn.apiKey for old data
         const provider = this.getProviderForConn(conn);
+        if (provider?.enabled === false) {
+            throw new Error(`LLMDeviceDriver: provider '${conn.providerId ?? conn.provider}' is disabled`);
+        }
         const apiKey = provider?.apiKey?.trim() ?? conn.apiKey?.trim();
         if (!apiKey) {
             throw new Error(

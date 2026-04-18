@@ -497,3 +497,40 @@
         max-width: 90px;
     }
 }
+/* ── Enable / Disable toggle (shared by Provider & Connection cards) ── */
+.llm-enable-toggle {
+    display: inline-flex;
+    align-items: center;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.llm-enable-toggle__track {
+    position: relative;
+    width: 32px;
+    height: 18px;
+    border-radius: 999px;
+    background: var(--st-text-disabled, #ccc);
+    transition: background 0.2s;
+    display: inline-block;
+}
+
+.llm-enable-toggle__track--on {
+    background: var(--st-color-success, #10b981);
+}
+
+.llm-enable-toggle__thumb {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #fff;
+    transition: transform 0.2s;
+    box-shadow: 0 1px 3px rgba(0,0,0,.2);
+}
+
+.llm-enable-toggle__track--on .llm-enable-toggle__thumb {
+    transform: translateX(14px);
+}
