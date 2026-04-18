@@ -340,11 +340,11 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
         if (!providerDef) throw new Error(`No default definition for connection id: ${targetId}`);
 
         // apiKey is now on Provider, not Connection — reset to lean connection
+        // Restore to lean connection — user re-configures tiers via ConnectionSettingsEditor
         await this.saveConnection({
             id: targetId,
             name: providerDef.name,
             providerId: providerKey,
-            tiers: providerDef.defaultTiers,
             metadata: { isSystemDefault: true },
         });
     }
