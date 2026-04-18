@@ -23,10 +23,12 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
     async render() {
         const providers = this.service.getProviders();
 
-        // Built-in first, then custom alphabetically
+        // enabled first, then disabled; within each group alphabetically
         const sorted = [...providers].sort((a, b) => {
-            if (a.isBuiltin && !b.isBuiltin) return -1;
-            if (!a.isBuiltin && b.isBuiltin) return 1;
+            const aOn = a.enabled !== false;
+            const bOn = b.enabled !== false;
+            if (aOn && !bOn) return -1;
+            if (!aOn && bOn) return 1;
             return (a.name || '').localeCompare(b.name || '');
         });
 
