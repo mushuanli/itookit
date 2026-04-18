@@ -55,11 +55,13 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
     // ── Card rendering ─────────────────────────────────────────────────────────
 
     private renderConnectionCard(conn: ConnectionMeta) {
-        const isDefault = conn.id === 'default';
-        const hasKey = conn.hasApiKey;
-        const pid = conn.providerId ?? conn.provider;
-        const provider = this.providers[pid];
-        const statusClass = !hasKey ? 'settings-connection-card--incomplete' : '';
+        const isDefault    = conn.id === 'default';
+        const hasKey       = conn.hasApiKey;
+        const enabled      = conn.enabled !== false;
+        const pid          = conn.providerId ?? conn.provider;
+        const provider     = this.providers[pid];
+        const statusClass  = !hasKey ? 'settings-connection-card--incomplete' : '';
+        const disabledStyle = enabled ? '' : 'opacity:0.55;';
 
         let badgeHtml = '';
         if (isDefault) {
@@ -68,15 +70,21 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
             badgeHtml = '<span class="settings-badge settings-badge--warning">需配置</span>';
         }
 
-        const editBtnText = hasKey ? '✏️ 编辑' : '⚙️ 去配置';
-        const editBtnClass = hasKey ? 'settings-btn--secondary' : 'settings-btn--primary';
-
         return `
             <div class="settings-connection-card ${isDefault ? 'settings-connection-card--default' : ''} ${statusClass}"
-                 data-id="${conn.id}" data-name="${conn.name}">
+                 data-id="${conn.id}" data-name="${conn.name}" style="${disabledStyle}">
                 <div class="settings-connection-card__header">
                     <h3 class="settings-connection-card__title">${conn.name}</h3>
-                    ${badgeHtml}
+                    <div style="display:flex;gap:4px;align-items:center">
+                        ${badgeHtml}
+                        <label class="llm-enable-toggle" title="${enabled ? '点击禁用' : '点击启用'}">
+                            <input type="checkbox" class="chk-conn-enabled" data-id="${conn.id}"
+                                   ${enabled ? 'checked' : ''} style="display:none">
+                            <span class="llm-enable-toggle__track ${enabled ? 'llm-enable-toggle__track--on' : ''}">
+                                <span class="llm-enable-toggle__thumb"></span>
+                            </span>
+                        </label>
+                    </div>
                 </div>
 
                 <div class="settings-connection-card__details">
@@ -104,7 +112,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
                 </div>
 
                 <div class="settings-page__actions" style="margin-top:auto; width:100%">
-                    <button class="settings-btn ${editBtnClass} settings-btn--sm settings-btn-edit" style="flex:1">${editBtnText}</button>
+                    <button class="settings-btn settings-btn--secondary settings-btn--sm settings-btn-edit" style="flex:1">✏️ 编辑</button>
                     ${!isDefault ? '<button class="settings-btn settings-btn--danger settings-btn--sm settings-btn-delete" style="flex:1">🗑️ 删除</button>' : ''}
                 </div>
             </div>
@@ -139,8 +147,20 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
 
         const list = this.container.querySelector('#connections-list');
         if (list) {
+            // Enable/disable toggle
+            this.addEventListener(list, 'change', async (e) => {
+                const target = e.target as HTMLInputElement;
+                if (!target.classList.contains('chk-conn-enabled')) return;
+                const id = target.dataset.id!;
+                const full = await this.service.getFullConnection(id);
+                if (!full) return;
+                await this.service.saveConnection({ ...full, enabled: target.checked });
+                this.render();
+            });
+
             this.addEventListener(list, 'click', async (e) => {
                 const target = e.target as HTMLElement;
+                if (target.closest('.llm-enable-toggle')) return;  // handled by change
                 const card = target.closest('.settings-connection-card') as HTMLElement;
                 if (!card) return;
                 const id = card.dataset.id!;
