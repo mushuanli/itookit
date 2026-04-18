@@ -98,8 +98,17 @@ export class ClipboardPlugin implements MDxPlugin {
         // 优先级 2: 处理 HTML 内容
         if (this.options.enableHtmlToMarkdown) {
             const htmlContent = clipboardData.getData('text/html');
+            const plainText = clipboardData.getData('text/plain');
 
-            if (htmlContent && this.isRichContent(htmlContent)) {
+            // If plain text matches HTML text content, the HTML is just a plain-text
+            // wrapper (e.g. pasting markdown from a text editor). Skip conversion to
+            // avoid Turndown escaping markdown special characters like *, #, _, [, etc.
+            const isPlainWrapper = htmlContent && plainText && (() => {
+                const doc = new DOMParser().parseFromString(htmlContent, 'text/html');
+                return (doc.body.textContent ?? '').trim() === plainText.trim();
+            })();
+
+            if (htmlContent && !isPlainWrapper && this.isRichContent(htmlContent)) {
                 event.preventDefault();
 
                 const markdown = this.convertHtmlToMarkdown(htmlContent);
