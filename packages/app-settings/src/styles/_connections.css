@@ -227,3 +227,78 @@
         padding-top: var(--st-space-lg);
     }
 }
+
+/* ── Model Tier ──────────────────────────────────────────────────── */
+
+.settings-tier-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.settings-tier-badge--optimal {
+    background: #dbeafe;
+    color: #1d4ed8;
+}
+
+.settings-tier-badge--standard {
+    background: #d1fae5;
+    color: #065f46;
+}
+
+.settings-tier-badge--fast {
+    background: #fef9c3;
+    color: #854d0e;
+}
+
+/* Tier config section inside edit modal */
+.settings-tier-config {
+    display: flex;
+    flex-direction: column;
+    gap: var(--st-space-sm);
+    margin-top: var(--st-space-xs);
+}
+
+.settings-tier-row {
+    display: flex;
+    align-items: center;
+    gap: var(--st-space-md);
+}
+
+.settings-tier-label {
+    font-size: 0.8rem;
+    color: var(--st-text-secondary);
+}
+
+.settings-form__select--sm {
+    flex: 1;
+    font-size: 0.8rem;
+    padding: 4px 6px;
+}
+
+/* Help icon tooltip */
+.settings-help-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--st-bg-tertiary);
+    color: var(--st-text-secondary);
+    font-size: 0.7rem;
+    font-weight: 700;
+    cursor: help;
+    border: 1px solid var(--st-border-color);
+}
+
+@media (prefers-color-scheme: dark) {
+    .settings-tier-badge--optimal  { background: #1e3a5f; color: #93c5fd; }
+    .settings-tier-badge--standard { background: #064e3b; color: #6ee7b7; }
+    .settings-tier-badge--fast     { background: #451a03; color: #fde68a; }
+}

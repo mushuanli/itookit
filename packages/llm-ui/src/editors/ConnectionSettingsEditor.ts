@@ -1,35 +1,25 @@
 // @file: llm-ui/editors/ConnectionSettingsEditor.ts
+//
+// 三层架构：Provider → Connection → Agent
+// 此编辑器负责 Connection 层：绑定 Provider + 配置 apiKey + 自定义 tier 映射。
+// 模型目录由 Provider 统一管理，不在 Connection 中存储/编辑。
 
 import { Modal, Toast, BaseSettingsEditor, generateShortUUID } from '@itookit/common';
-import type { IConnectionService, ConnectionMeta, LLMConnection, LLMModel, LLMProviderDefinition } from '@itookit/common';
+import type { IConnectionService, ConnectionMeta, LLMConnection, LLMProvider, ModelTier } from '@itookit/common';
 
 export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionService> {
-    // 编辑弹窗中的临时状态
-    private currentEditModels: LLMModel[] = [];
-    private providerDefaults: Record<string, LLMProviderDefinition> = {};
+    private currentEditTiers: Partial<Record<ModelTier, string>> = {};
+    private providers: Record<string, LLMProvider> = {};
 
     async render() {
-        this.providerDefaults = this.service.getProviderDefaults();
+        this.providers = this.service.getProviderDefaults();
         let connections = await this.service.getConnections();
 
-        // ✅ [新增] 排序逻辑
-        // 1. Default first
-        // 2. Has API Key second
-        // 3. No API Key last
-        // 4. Name alphabetical within groups
         connections.sort((a, b) => {
-            // Rule 1: Default always on top
             if (a.id === 'default') return -1;
             if (b.id === 'default') return 1;
-
-            // Rule 2: Has API Key ?
-            const aHasKey = a.hasApiKey;
-            const bHasKey = b.hasApiKey;
-
-            if (aHasKey && !bHasKey) return -1;
-            if (!aHasKey && bHasKey) return 1;
-
-            // Rule 3: Alphabetical by name (Fallback)
+            if (a.hasApiKey && !b.hasApiKey) return -1;
+            if (!a.hasApiKey && b.hasApiKey) return 1;
             return (a.name || '').localeCompare(b.name || '');
         });
 
@@ -38,22 +28,22 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
                 <div class="settings-page__header">
                     <div>
                         <h2 class="settings-page__title">LLM 连接配置</h2>
-                        <p class="settings-page__description">管理第三方 LLM 服务的连接凭据与模型列表</p>
+                        <p class="settings-page__description">为云提供商配置 API Key，并设置模型层级（optimal / standard / fast）</p>
                     </div>
                     <button id="btn-add-connection" class="settings-btn settings-btn--primary">
                         <span class="settings-btn__icon">+</span> 添加连接
                     </button>
                 </div>
-                
+
                 <div id="connections-list" class="settings-connection-grid">
                     ${connections.map(conn => this.renderConnectionCard(conn)).join('')}
                 </div>
-                
+
                 ${connections.length === 0 ? `
                     <div class="settings-empty">
                         <div class="settings-empty__icon">🔌</div>
                         <h3 class="settings-empty__title">还没有配置连接</h3>
-                        <p class="settings-empty__text">点击"添加连接"按钮来配置您的第一个 LLM 服务连接</p>
+                        <p class="settings-empty__text">点击"添加连接"按钮，选择云提供商并填写 API Key</p>
                     </div>
                 ` : ''}
             </div>
@@ -62,23 +52,15 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
         this.bindEvents();
     }
 
+    // ── Card rendering ─────────────────────────────────────────────────────────
+
     private renderConnectionCard(conn: ConnectionMeta) {
         const isDefault = conn.id === 'default';
         const hasKey = conn.hasApiKey;
-
-        const provider = this.providerDefaults[conn.provider];
-        // 优先使用连接内保存的模型列表，如果没有则回退到默认
-        const modelList = (conn.availableModels && conn.availableModels.length > 0)
-            ? conn.availableModels
-            : (provider?.models || []);
-
-        const modelObj = modelList.find(m => m.id === conn.model);
-        const modelName = modelObj ? modelObj.name : (conn.model || '未设置');
-
-        // ✅ [新增] 状态类名，用于 CSS 样式区分 (例如让未配置的稍微变灰)
+        const pid = conn.providerId ?? conn.provider;
+        const provider = this.providers[pid];
         const statusClass = !hasKey ? 'settings-connection-card--incomplete' : '';
 
-        // ✅ [新增] 状态标签
         let badgeHtml = '';
         if (isDefault) {
             badgeHtml = '<span class="settings-badge settings-badge--success">默认</span>';
@@ -86,38 +68,41 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
             badgeHtml = '<span class="settings-badge settings-badge--warning">需配置</span>';
         }
 
-        // ✅ [新增] 按钮文案优化
         const editBtnText = hasKey ? '✏️ 编辑' : '⚙️ 去配置';
         const editBtnClass = hasKey ? 'settings-btn--secondary' : 'settings-btn--primary';
 
         return `
-            <div class="settings-connection-card ${isDefault ? 'settings-connection-card--default' : ''} ${statusClass}" data-id="${conn.id}" data-name="${conn.name}">
+            <div class="settings-connection-card ${isDefault ? 'settings-connection-card--default' : ''} ${statusClass}"
+                 data-id="${conn.id}" data-name="${conn.name}">
                 <div class="settings-connection-card__header">
                     <h3 class="settings-connection-card__title">${conn.name}</h3>
                     ${badgeHtml}
                 </div>
-                
+
                 <div class="settings-connection-card__details">
                     <div class="settings-detail-item">
                         <span class="settings-detail-item__label">提供商</span>
-                        <span class="settings-detail-item__value">${provider?.name || conn.provider}</span>
+                        <span class="settings-detail-item__value">${provider?.icon ?? ''} ${provider?.name ?? pid}</span>
                     </div>
                     <div class="settings-detail-item">
-                        <span class="settings-detail-item__label">当前模型</span>
-                        <span class="settings-detail-item__value">${modelName}</span>
+                        <span class="settings-detail-item__label">最优模型</span>
+                        <span class="settings-detail-item__value">${this.resolvedModelName(conn)}</span>
                     </div>
                     <div class="settings-detail-item">
-                        <span class="settings-detail-item__label">可用模型数</span>
-                        <span class="settings-detail-item__value">${modelList.length} 个</span>
+                        <span class="settings-detail-item__label">成本层级</span>
+                        <span class="settings-detail-item__value">${this.renderTierBadges(conn)}</span>
                     </div>
                     <div class="settings-detail-item">
-                        <span class="settings-detail-item__label">API Key</span>
-                        <span class="settings-detail-item__value masked">
-                            ${hasKey ? '••••••••' : '<span style="color:var(--st-text-disabled)">未设置</span>'}
+                        <span class="settings-detail-item__label">Provider Key</span>
+                        <span class="settings-detail-item__value">
+                            ${hasKey
+                                ? '<span style="color:var(--st-color-success,#10b981)">✓ 已配置</span>'
+                                : '<span style="color:var(--st-text-disabled)">未配置（在 Providers 中设置）</span>'
+                            }
                         </span>
                     </div>
                 </div>
-                
+
                 <div class="settings-page__actions" style="margin-top:auto; width:100%">
                     <button class="settings-btn ${editBtnClass} settings-btn--sm settings-btn-edit" style="flex:1">${editBtnText}</button>
                     ${!isDefault ? '<button class="settings-btn settings-btn--danger settings-btn--sm settings-btn-delete" style="flex:1">🗑️ 删除</button>' : ''}
@@ -126,9 +111,30 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
         `;
     }
 
+    private resolvedModelName(conn: ConnectionMeta): string {
+        const pid = conn.providerId ?? conn.provider;
+        const provider = this.providers[pid];
+        const modelId = conn.model;
+        if (!modelId) return '未设置';
+        const modelDef = provider?.models.find(m => m.id === modelId);
+        return modelDef ? modelDef.name : modelId;
+    }
+
+    private renderTierBadges(conn: ConnectionMeta): string {
+        const tiers = conn.tiers;
+        if (!tiers || (!tiers.standard && !tiers.fast)) {
+            return '<span style="color:var(--st-text-disabled)">未配置</span>';
+        }
+        const badges: string[] = ['<span class="settings-tier-badge settings-tier-badge--optimal">最优</span>'];
+        if (tiers.standard) badges.push('<span class="settings-tier-badge settings-tier-badge--standard">标准</span>');
+        if (tiers.fast)     badges.push('<span class="settings-tier-badge settings-tier-badge--fast">快速</span>');
+        return badges.join(' ');
+    }
+
+    // ── Events ─────────────────────────────────────────────────────────────────
+
     private bindEvents() {
         this.clearListeners();
-
         this.bindButton('#btn-add-connection', () => this.showEditModal(null));
 
         const list = this.container.querySelector('#connections-list');
@@ -137,11 +143,8 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
                 const target = e.target as HTMLElement;
                 const card = target.closest('.settings-connection-card') as HTMLElement;
                 if (!card) return;
-
                 const id = card.dataset.id!;
-
                 if (target.closest('.settings-btn-edit')) {
-                    // 编辑时加载完整连接（含 apiKey）供表单预填
                     const connection = await this.service.getFullConnection(id);
                     this.showEditModal(connection ?? null);
                 } else if (target.closest('.settings-btn-delete')) {
@@ -151,335 +154,166 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
         }
     }
 
-    // ✅ [修改] 渲染模型管理列表
-    private renderModelListHTML(): string {
-        if (this.currentEditModels.length === 0) {
-            return '<div class="settings-empty-small">暂无模型，请添加</div>';
-        }
-
-        return this.currentEditModels.map((m, index) => `
-            <div class="settings-model-item">
-                <div class="settings-model-item__drag">::</div>
-                <div class="settings-model-item__content">
-                    <input type="text" class="settings-input-sm model-id-input" data-idx="${index}" value="${m.id}" placeholder="Model ID" title="Model ID (API用)">
-                    <input type="text" class="settings-input-sm model-name-input" data-idx="${index}" value="${m.name}" placeholder="显示名称" title="显示名称">
-                </div>
-                <div class="settings-model-item__actions">
-                    <button type="button" class="btn-icon btn-up" data-idx="${index}" ${index === 0 ? 'disabled' : ''}>⬆️</button>
-                    <button type="button" class="btn-icon btn-down" data-idx="${index}" ${index === this.currentEditModels.length - 1 ? 'disabled' : ''}>⬇️</button>
-                    <button type="button" class="btn-icon btn-del text-danger" data-idx="${index}">✖️</button>
-                </div>
-            </div>
-        `).join('');
-    }
+    // ── Edit modal ─────────────────────────────────────────────────────────────
 
     private showEditModal(connection: LLMConnection | null) {
         const isNew = !connection;
-        const providers = Object.keys(this.providerDefaults);
-        const initialProvider = connection?.provider || providers[0];
+        const providerKeys = Object.keys(this.providers);
+        const initialPid = connection?.providerId ?? connection?.provider ?? providerKeys[0];
+        const initialProvider = this.providers[initialPid] ?? this.providers[providerKeys[0]];
 
-        // ✅ [新增] 初始化模型列表状态
-        // 如果是新连接，用默认配置；如果是旧连接，优先用保存的，否则用默认配置
-        if (connection && connection.availableModels) {
-            this.currentEditModels = JSON.parse(JSON.stringify(connection.availableModels));
-        } else {
-            this.currentEditModels = JSON.parse(JSON.stringify(this.providerDefaults[initialProvider]?.models || []));
-        }
+        this.currentEditTiers = connection?.tiers
+            ? { ...connection.tiers }
+            : { ...initialProvider?.defaultTiers };
 
         const modalContent = `
-            <form id="connection-form" class="settings-form settings-form--wide">
-                <div class="settings-row">
-                    <!-- 左侧：基础信息 -->
-                    <div class="settings-col">
-                        <h4 class="settings-section-title">基础设置</h4>
-                        <div class="settings-form__group">
-                            <label class="settings-form__label">连接名称 *</label>
-                            <input type="text" class="settings-form__input" name="name" value="${connection?.name || ''}" required placeholder="例如: 我的 OpenAI">
-                        </div>
-                        
-                        <div class="settings-form__group">
-                            <label class="settings-form__label">提供商 *</label>
-                            <div style="display:flex; gap:8px">
-                                <select class="settings-form__select" id="conn-provider" name="provider" required style="flex:1">
-                                    ${providers.map(p => `
-                                        <option value="${p}" ${initialProvider === p ? 'selected' : ''}>
-                                            ${this.providerDefaults[p].name}
-                                        </option>
-                                    `).join('')}
-                                </select>
-                                <button type="button" id="btn-reset-defaults" class="settings-btn settings-btn--sm" title="重置 BaseURL 和模型列表为默认值">
-                                    🔄 重置
-                                </button>
-                            </div>
-                        </div>
-                        
-                        <div class="settings-form__group">
-                            <label class="settings-form__label">API Key *</label>
-                            <input type="password" class="settings-form__input" name="apiKey" value="${connection?.apiKey || ''}" required placeholder="sk-...">
-                        </div>
+            <form id="connection-form" class="settings-form">
+                <!-- Provider selection (configure providers in "LLM Providers" settings) -->
+                <div class="settings-form__group">
+                    <label class="settings-form__label">云提供商 *</label>
+                    <select class="settings-form__select" id="conn-provider" name="providerId" required>
+                        ${providerKeys.map(k => {
+                            const p = this.providers[k];
+                            return `<option value="${k}" ${initialPid === k ? 'selected' : ''}>${p.icon ?? ''} ${p.name}</option>`;
+                        }).join('')}
+                    </select>
+                    <small class="settings-form__help">
+                        Provider 的模型列表和地址在
+                        <strong>设置 → LLM Providers</strong> 中管理。
+                    </small>
+                </div>
 
-                        <div class="settings-form__group">
-                            <button type="button" id="btn-test-connection" class="settings-btn settings-btn--secondary settings-btn--sm" style="width:100%">🔍 测试连接</button>
-                            <div id="test-result" style="display:none; margin-top:8px; padding:8px 10px; border-radius:4px; font-size:12px; line-height:1.5;"></div>
-                        </div>
+                <!-- Connection name -->
+                <div class="settings-form__group">
+                    <label class="settings-form__label">连接名称 *</label>
+                    <input type="text" class="settings-form__input" name="name"
+                           value="${connection?.name || ''}" required placeholder="例如: 我的 Anthropic">
+                </div>
 
-                        <div class="settings-form__group">
-                            <label class="settings-form__label">Base URL</label>
-                            <input type="text" class="settings-form__input" id="conn-baseurl" name="baseURL" value="${connection?.baseURL || ''}" placeholder="默认地址...">
-                            <small class="settings-form__help">通常留空即可，除非使用代理或自定义端点。</small>
-                        </div>
+                <!-- API Key hint -->
+                <div class="settings-form__group">
+                    <small class="settings-form__help" style="padding:8px;background:var(--st-bg-secondary);border-radius:4px;display:block">
+                        🔑 API Key 在 <strong>设置 → LLM Providers</strong> 中配置，与所有绑定此 Provider 的连接共享。
+                    </small>
+                </div>
 
-                         <div class="settings-form__group">
-                            <label class="settings-form__label">默认选中模型</label>
-                            <select class="settings-form__select" id="conn-model" name="model" required>
-                                <!-- JS populate -->
-                            </select>
-                        </div>
+                <!-- Base URL override -->
+                <div class="settings-form__group">
+                    <label class="settings-form__label">Base URL <small>（可选，覆盖提供商默认地址）</small></label>
+                    <input type="text" class="settings-form__input" id="conn-baseurl" name="baseURL"
+                           value="${connection?.baseURL || ''}" placeholder="留空使用提供商默认地址">
+                </div>
+
+                <!-- Tier configuration -->
+                <div class="settings-form__group">
+                    <label class="settings-form__label" style="display:flex;align-items:center;gap:6px">
+                        成本层级配置
+                        <span class="settings-help-icon"
+                              title="为同一连接设置不同成本的模型。&#10;• 最优（optimal）= 默认 / 高质量推理&#10;• 标准（standard）= 日常工作&#10;• 快速（fast）= 简单廉价任务&#10;预算超过 80% 时系统自动向下降级。">?</span>
+                    </label>
+                    <div class="settings-tier-config" id="tier-config-section">
+                        ${this.renderTierForm(initialProvider, this.currentEditTiers)}
                     </div>
-
-                    <!-- 右侧：模型管理 -->
-                    <div class="settings-col settings-col--border">
-                        <h4 class="settings-section-title" style="display:flex; justify-content:space-between; align-items:center">
-                            模型列表
-                            <button type="button" id="btn-add-model" class="settings-btn settings-btn--xs settings-btn--primary">+ 新增</button>
-                        </h4>
-                        <div class="settings-model-list-container" id="model-list-container">
-                            ${this.renderModelListHTML()}
-                        </div>
-                        <small class="settings-form__help">拖拽或点击箭头排序，API 请求将使用对应的 Model ID。</small>
-                    </div>
+                    <small class="settings-form__help">
+                        选择"— 同最优模型 —"表示不配置该层级（使用 optimal）。
+                    </small>
                 </div>
             </form>
         `;
 
         new Modal(isNew ? '添加连接' : '配置连接', modalContent, {
-            width: '800px', // 变宽以容纳左右两栏
+            width: '560px',
             confirmText: '保存',
             onConfirm: async () => {
                 const form = document.getElementById('connection-form') as HTMLFormElement;
-                if (!form.checkValidity()) {
-                    form.reportValidity();
-                    return false;
-                }
-
-                // ✅ [新增] 在保存前，先同步 Input 中的值到 currentEditModels
-                // 因为用户可能修改了 input 但没触发 change 事件就点了保存
-                this.syncInputsToModelData();
-
-                if (this.currentEditModels.length === 0) {
-                    Toast.warning('请至少保留一个可用模型');
-                    return false;
-                }
+                if (!form.checkValidity()) { form.reportValidity(); return false; }
 
                 const formData = new FormData(form);
-                const data = Object.fromEntries(formData) as any;
+                const data = Object.fromEntries(formData) as Record<string, string>;
+                const pid = data.providerId;
 
-                // 保留原有的 availableModels，或从 provider 默认值获取
-                const providerDef = this.providerDefaults[data.provider];
+                // Read current tier selections
+                const tierStandard = (document.getElementById('tier-standard') as HTMLSelectElement)?.value || '';
+                const tierFast     = (document.getElementById('tier-fast')     as HTMLSelectElement)?.value || '';
+                const tiers: Partial<Record<ModelTier, string>> = {};
+                if (tierStandard) tiers.standard = tierStandard;
+                if (tierFast)     tiers.fast     = tierFast;
+
                 const newConn: LLMConnection = {
                     id: connection?.id || `conn-${generateShortUUID()}`,
                     name: data.name,
-                    provider: data.provider,
-                    apiKey: data.apiKey,
-                    model: data.model,
-                    baseURL: data.baseURL || providerDef?.baseURL || '',
-                    // 确保 availableModels 不丢失
-                    availableModels: [...this.currentEditModels],
-                    metadata: connection?.metadata
+                    providerId: pid,
+                    // apiKey is on Provider, not Connection
+                    tiers: Object.keys(tiers).length > 0 ? tiers : undefined,
+                    metadata: connection?.metadata,
                 };
 
                 await this.service.saveConnection(newConn);
                 Toast.success('连接配置已保存');
                 this.render();
-            }
+            },
         }).show();
 
-        // Dynamic Provider Switch
-        setTimeout(() => {
-            this.bindModalEvents(connection);
-        }, 100);
+        setTimeout(() => this.bindModalEvents(connection, initialPid), 100);
     }
 
-    // ✅ [新增] 弹窗内部事件绑定逻辑
-    private bindModalEvents(originalConn: LLMConnection | null) {
-        const providerSelect = document.getElementById('conn-provider') as HTMLSelectElement;
-        const modelSelect = document.getElementById('conn-model') as HTMLSelectElement;
-        const baseUrlInput = document.getElementById('conn-baseurl') as HTMLInputElement;
-        const resetBtn = document.getElementById('btn-reset-defaults') as HTMLButtonElement;
-        const addModelBtn = document.getElementById('btn-add-model') as HTMLButtonElement;
-        const listContainer = document.getElementById('model-list-container') as HTMLElement;
+    /** 渲染 tier 配置三行（optimal 只读说明 + standard/fast 下拉） */
+    private renderTierForm(provider: LLMProvider | undefined, tiers: Partial<Record<ModelTier, string>>): string {
+        const models = provider?.models ?? [];
+        const noneOpt = '<option value="">— 同最优模型 —</option>';
+        const modelOpts = models.map(m =>
+            `<option value="${m.id}">${m.name}</option>`
+        ).join('');
 
-        const refreshModelSelect = () => {
-            // 记录当前选中的值，刷新后尝试恢复
-            const currentVal = modelSelect.value || originalConn?.model;
+        const optimalModel = tiers.optimal
+            ?? provider?.defaultTiers?.optimal
+            ?? models[0]?.id
+            ?? '';
+        const optimalName = models.find(m => m.id === optimalModel)?.name ?? optimalModel ?? '（连接后自动解析）';
 
-            modelSelect.innerHTML = this.currentEditModels.length > 0
-                ? this.currentEditModels.map(m => `
-                    <option value="${m.id}" ${currentVal === m.id ? 'selected' : ''}>
-                        ${m.name} (${m.id})
-                    </option>
-                `).join('')
-                : '<option value="">-- 请先添加模型 --</option>';
-
-            // 如果原来的值还在列表中，保持选中；否则选中第一个
-            if (this.currentEditModels.some(m => m.id === currentVal)) {
-                modelSelect.value = currentVal!;
-            } else if (this.currentEditModels.length > 0) {
-                modelSelect.value = this.currentEditModels[0].id;
-            }
-        };
-
-        const renderList = () => {
-            listContainer.innerHTML = this.renderModelListHTML();
-            refreshModelSelect();
-        };
-
-        // 1. Provider 切换
-        if (providerSelect) {
-            providerSelect.addEventListener('change', (e) => {
-                const pKey = (e.target as HTMLSelectElement).value;
-                const defs = this.providerDefaults[pKey];
-
-                // 切换 Provider 时，询问是否加载该 Provider 的默认模型
-                if (confirm('切换提供商将重置模型列表和 BaseURL 为默认值，是否继续？')) {
-                    this.currentEditModels = JSON.parse(JSON.stringify(defs?.models || []));
-                    baseUrlInput.value = defs?.baseURL || '';
-                    renderList();
-                } else {
-                    // 用户取消，恢复 select 选项（略复杂，暂略，简单实现为不恢复）
-                }
-            });
-        }
-
-        // 2. 重置按钮 (Requirement 1)
-        if (resetBtn) {
-            resetBtn.addEventListener('click', (e) => {
-                e.preventDefault(); // 防止提交表单
-                if (!confirm('确定要重置 BaseURL 和模型列表到初始默认状态吗？自定义的模型将被清除。')) return;
-
-                const pKey = providerSelect.value;
-                const defs = this.providerDefaults[pKey];
-
-                // 重置数据
-                this.currentEditModels = JSON.parse(JSON.stringify(defs?.models || []));
-                baseUrlInput.value = defs?.baseURL || '';
-
-                renderList();
-                Toast.success('已恢复默认配置');
-            });
-        }
-
-        // 3. 模型列表操作 (Requirement 2)
-        if (addModelBtn) {
-            addModelBtn.addEventListener('click', () => {
-                this.syncInputsToModelData(); // 先保存当前输入
-                this.currentEditModels.push({ id: 'new-model', name: 'New Model', icon: '🤖' });
-                renderList();
-                // 滚动到底部
-                listContainer.scrollTop = listContainer.scrollHeight;
-            });
-        }
-
-        if (listContainer) {
-            listContainer.addEventListener('click', (e) => {
-                const target = e.target as HTMLElement;
-                const btn = target.closest('button');
-                if (!btn) return;
-
-                const idx = parseInt(btn.dataset.idx!);
-                if (isNaN(idx)) return;
-
-                this.syncInputsToModelData(); // 操作前同步数据
-
-                if (btn.classList.contains('btn-del')) {
-                    this.currentEditModels.splice(idx, 1);
-                } else if (btn.classList.contains('btn-up')) {
-                    if (idx > 0) {
-                        [this.currentEditModels[idx], this.currentEditModels[idx - 1]] =
-                            [this.currentEditModels[idx - 1], this.currentEditModels[idx]];
-                    }
-                } else if (btn.classList.contains('btn-down')) {
-                    if (idx < this.currentEditModels.length - 1) {
-                        [this.currentEditModels[idx], this.currentEditModels[idx + 1]] =
-                            [this.currentEditModels[idx + 1], this.currentEditModels[idx]];
-                    }
-                }
-                renderList();
-            });
-
-            // 监听输入框变化，实时更新 select
-            listContainer.addEventListener('input', (e) => {
-                const target = e.target as HTMLInputElement;
-                if (target.classList.contains('model-name-input') || target.classList.contains('model-id-input')) {
-                    // 防抖或者是失焦更新太慢，这里简单做：
-                    // 仅仅当修改 Name 时更新 Select 的文本显示比较复杂
-                    // 我们选择在 blur 或 save 时统一同步，但为了体验，可以在这里不做重绘，
-                    // 仅在 syncInputsToModelData 里处理
-                }
-            });
-        }
-
-        // 4. 弹窗内测试连接
-        const testConnectionBtn = document.getElementById('btn-test-connection') as HTMLButtonElement;
-        const testResultEl = document.getElementById('test-result') as HTMLElement;
-
-        if (testConnectionBtn && testResultEl) {
-            testConnectionBtn.addEventListener('click', async () => {
-                if (testConnectionBtn.disabled) return;
-
-                const form = document.getElementById('connection-form') as HTMLFormElement;
-                const apiKey = (form.querySelector('[name="apiKey"]') as HTMLInputElement)?.value?.trim();
-                const provider = providerSelect?.value;
-                const baseURL = baseUrlInput?.value?.trim();
-                const model = modelSelect?.value;
-
-                if (!apiKey) {
-                    testResultEl.style.cssText = 'display:block; margin-top:8px; padding:8px 10px; border-radius:4px; font-size:12px; background:var(--st-warning-bg,#fff3cd); color:var(--st-warning,#856404);';
-                    testResultEl.textContent = '⚠️ 请先填写 API Key';
-                    return;
-                }
-
-                testConnectionBtn.disabled = true;
-                testConnectionBtn.textContent = '⏳ 测试中...';
-                testResultEl.style.display = 'none';
-
-                try {
-                    const result = await this.service.testConnection({ provider, apiKey, baseURL, model });
-                    if (result.success) {
-                        testResultEl.style.cssText = 'display:block; margin-top:8px; padding:8px 10px; border-radius:4px; font-size:12px; background:var(--st-success-bg,#d4edda); color:var(--st-success,#155724);';
-                        testResultEl.textContent = `✅ ${result.message || '连接测试成功！'}`;
-                    } else {
-                        testResultEl.style.cssText = 'display:block; margin-top:8px; padding:8px 10px; border-radius:4px; font-size:12px; background:var(--st-danger-bg,#f8d7da); color:var(--st-danger,#721c24);';
-                        testResultEl.textContent = `❌ ${result.message || '连接测试失败'}`;
-                    }
-                } catch (error: any) {
-                    testResultEl.style.cssText = 'display:block; margin-top:8px; padding:8px 10px; border-radius:4px; font-size:12px; background:var(--st-danger-bg,#f8d7da); color:var(--st-danger,#721c24);';
-                    testResultEl.textContent = `❌ 测试出错: ${error.message}`;
-                } finally {
-                    testConnectionBtn.disabled = false;
-                    testConnectionBtn.textContent = '🔍 测试连接';
-                }
-            });
-        }
-
-        // 初始化
-        refreshModelSelect();
+        return `
+            <div class="settings-tier-row">
+                <span class="settings-tier-badge settings-tier-badge--optimal">最优</span>
+                <span class="settings-tier-label" style="flex:1">${optimalName}</span>
+                <small style="color:var(--st-text-disabled)">默认</small>
+            </div>
+            <div class="settings-tier-row">
+                <span class="settings-tier-badge settings-tier-badge--standard">标准</span>
+                <select class="settings-form__select settings-form__select--sm" id="tier-standard" style="flex:1">
+                    ${noneOpt}${modelOpts}
+                </select>
+            </div>
+            <div class="settings-tier-row">
+                <span class="settings-tier-badge settings-tier-badge--fast">快速</span>
+                <select class="settings-form__select settings-form__select--sm" id="tier-fast" style="flex:1">
+                    ${noneOpt}${modelOpts}
+                </select>
+            </div>
+        `;
     }
 
-    // 辅助：将 DOM input 的值同步回内存数组
-    private syncInputsToModelData() {
-        const container = document.getElementById('model-list-container');
-        if (!container) return;
+    private bindModalEvents(connection: LLMConnection | null, initialPid: string) {
+        const providerSelect = document.getElementById('conn-provider') as HTMLSelectElement | null;
+        const tierSection    = document.getElementById('tier-config-section') as HTMLElement | null;
 
-        const rows = container.querySelectorAll('.settings-model-item');
-        rows.forEach((row, index) => {
-            if (index >= this.currentEditModels.length) return;
+        const refreshTierSelects = (provider: LLMProvider | undefined, tiers: Partial<Record<ModelTier, string>>) => {
+            if (!tierSection) return;
+            tierSection.innerHTML = this.renderTierForm(provider, tiers);
+            const stdSel  = document.getElementById('tier-standard') as HTMLSelectElement | null;
+            const fastSel = document.getElementById('tier-fast')     as HTMLSelectElement | null;
+            if (stdSel  && tiers.standard) stdSel.value  = tiers.standard;
+            if (fastSel && tiers.fast)     fastSel.value = tiers.fast;
+        };
 
-            const idInput = row.querySelector('.model-id-input') as HTMLInputElement;
-            const nameInput = row.querySelector('.model-name-input') as HTMLInputElement;
+        // Initialize tier selects with current connection tiers
+        const initTiers = connection?.tiers ?? this.providers[initialPid]?.defaultTiers ?? {};
+        refreshTierSelects(this.providers[initialPid], initTiers);
 
-            if (idInput) this.currentEditModels[index].id = idInput.value;
-            if (nameInput) this.currentEditModels[index].name = nameInput.value;
+        // Provider switch → refresh tier selects
+        providerSelect?.addEventListener('change', () => {
+            const provider = this.providers[providerSelect.value];
+            this.currentEditTiers = { ...provider?.defaultTiers };
+            refreshTierSelects(provider, this.currentEditTiers);
         });
     }
 
@@ -487,7 +321,7 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
         Modal.confirm('确认删除', `确定要删除连接"${name}"吗？此操作无法撤销。`, async () => {
             await this.service.deleteConnection(id);
             Toast.success('连接已删除');
-            this.render(); // 重新渲染列表
+            this.render();
         });
     }
 

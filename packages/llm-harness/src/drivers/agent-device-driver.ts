@@ -135,7 +135,8 @@ export class AgentDeviceDriver implements IDeviceDriver, IAgentRuntimeConfig {
                 this.modelRoles.primary = conn.id;
                 // Derive per-token pricing from the connection's model metadata,
                 // falling back to Sonnet-class defaults if unavailable.
-                const modelInfo = conn.availableModels?.find((m) => m.id === conn.model);
+                // Model catalog moved to Provider; cost model uses Sonnet-class defaults.
+                const modelInfo = undefined as { inputPricePerMillion?: number; outputPricePerMillion?: number } | undefined;
                 if (modelInfo?.inputPricePerMillion !== undefined) {
                     this.costModel = {
                         perInputToken: modelInfo.inputPricePerMillion / 1_000_000,

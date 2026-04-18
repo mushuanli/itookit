@@ -219,6 +219,34 @@
     color: white;
 }
 
+/* ── Tier Pills ─────────────────────────────────────────────── */
+.llm-input__tier-pills {
+    display: flex;
+    gap: 4px;
+}
+
+.llm-input__tier-pill {
+    padding: 3px 10px;
+    font-size: 0.75rem;
+    border: 1px solid var(--llm-border-color);
+    border-radius: 16px;
+    background: var(--llm-bg-primary);
+    color: var(--llm-text-secondary);
+    cursor: pointer;
+    transition: all var(--llm-transition-fast);
+}
+
+.llm-input__tier-pill:hover {
+    border-color: var(--llm-color-primary);
+    color: var(--llm-color-primary);
+}
+
+.llm-input__tier-pill.active {
+    background: var(--llm-color-primary);
+    border-color: var(--llm-color-primary);
+    color: white;
+}
+
 /* --- 主输入区域 --- */
 .llm-input__main {
     display: flex;

@@ -2,9 +2,10 @@
 
 import type { IChatInputPresenter, IChatInputConfig } from '../../domain/ports/IChatInputPresenter';
 import type {
-    ExecutorOption, ModelOption,
+    ExecutorOption, ConnectionOption,
     ChatOverrides, SkillInfo, FileSuggestion,
 } from '../../domain/types';
+import type { ModelTier } from '@itookit/common';
 import type { IAgentRuntime } from '@itookit/common';
 import { ChatInputTemplates } from '../templates/ChatInputTemplates';
 import type { InputPlugin, InputPluginContext } from './plugins/InputPlugin';
@@ -19,7 +20,8 @@ export interface ChatInputOptions {
     onConfigChange?: (config: IChatInputConfig) => void;
     initialAgents?: ExecutorOption[];
     initialConfig?: Partial<IChatInputConfig>;
-    onRequestModels?: (agentId: string) => Promise<ModelOption[]>;
+    /** 获取所有可用连接列表，供 Connection 覆盖下拉使用。 */
+    onRequestConnections?: () => Promise<ConnectionOption[]>;
 
     // ── Harness callbacks ────────────────────────────────────────────────────
 
@@ -80,7 +82,8 @@ export class ChatInput implements IChatInputPresenter {
     private attachBtn!: HTMLButtonElement;
     private settingsBtn!: HTMLButtonElement;
     private executorSelect!: HTMLSelectElement;
-    private modelSelect!: HTMLSelectElement;
+    private connectionSelect!: HTMLSelectElement;
+    private tierPillsContainer!: HTMLElement;
     private historySlider!: HTMLInputElement;
     private historyValue: HTMLSpanElement | null = null; // removed from new template
     private streamToggle!: HTMLInputElement;
@@ -93,9 +96,8 @@ export class ChatInput implements IChatInputPresenter {
     private loading = false;
     private files: File[] = [];
     private settingsExpanded = false;
-    private models: ModelOption[] = [];
+    private connections: ConnectionOption[] = [];
     private currentAgentId: string = 'default';
-    private isLoadingModels: boolean = false;
 
     // ── Mode / harness DOM elements ──────────────────────────────────────────
     private harnessToggle!: HTMLInputElement;
@@ -127,7 +129,7 @@ export class ChatInput implements IChatInputPresenter {
     private config: IChatInputConfig = {
         text: '',
         agentId: 'default',
-        settings: { historyLength: -1, streamMode: true, useHarness: false, workingDirectory: '' },
+        settings: { connectionId: undefined, modelTier: 'auto', historyLength: -1, streamMode: true, useHarness: false, workingDirectory: '' },
     };
 
     constructor(private container: HTMLElement, private options: ChatInputOptions) {
@@ -140,7 +142,7 @@ export class ChatInput implements IChatInputPresenter {
         this.bindEvents();
         this.initExecutors();
         this.syncUIFromConfig();
-        this.loadModelsForAgent(this.currentAgentId);
+        this.loadConnections();
 
         // TokenMeterPlugin — always registered, shows token stats after each response
         const tokenMeter = new TokenMeterPlugin();
@@ -221,6 +223,7 @@ export class ChatInput implements IChatInputPresenter {
         this.stopBtn.style.display = loading ? 'flex' : 'none';
         this.textarea.disabled = loading;
         this.executorSelect.disabled = loading;
+        this.connectionSelect.disabled = loading;
         this.attachBtn.disabled = loading;
         this.settingsBtn.disabled = loading;
 
@@ -238,7 +241,6 @@ export class ChatInput implements IChatInputPresenter {
 
         if (config.agentId && config.agentId !== this.currentAgentId) {
             this.currentAgentId = config.agentId;
-            this.loadModelsForAgent(config.agentId);
         }
     }
 
@@ -282,13 +284,12 @@ export class ChatInput implements IChatInputPresenter {
         if (changed) {
             this.config.agentId = validatedId;
             this.currentAgentId = validatedId;
-            this.config.settings.modelId = undefined;
-            this.modelSelect.value = '';
+            this.config.settings.modelTier = 'auto';
+            this.updateTierPills('auto');
             this.updateActiveBadges();
         }
 
         this.setExecutorValue(this.config.agentId);
-        this.loadModelsForAgent(this.currentAgentId);
         return changed;
     }
 
@@ -370,7 +371,7 @@ export class ChatInput implements IChatInputPresenter {
     private render(): void {
         this.container.innerHTML = ChatInputTemplates.renderMain();
         this.bindElements();
-        this.updateModelOptions();
+        this.updateConnectionOptions();
         this.updateHistoryDisplay();
         this.injectHelpStyles();
     }
@@ -499,7 +500,8 @@ code {
         this.attachBtn = q('.llm-input__btn--attach');
         this.settingsBtn = q('.llm-input__btn--settings');
         this.executorSelect = q('.llm-input__executor-select');
-        this.modelSelect = q('.llm-input__model-select');
+        this.connectionSelect = q('.llm-input__connection-select');
+        this.tierPillsContainer = q('.llm-input__tier-pills');
         this.historySlider = q('.llm-input__history-slider');
         this.historyValue = this.container.querySelector('.llm-input__history-value');
         this.streamToggle = q('.llm-input__stream-toggle');
@@ -583,23 +585,29 @@ code {
     }
 
     private bindSettingsEvents(): void {
-        this.executorSelect.addEventListener('change', async () => {
+        this.executorSelect.addEventListener('change', () => {
             const newAgentId = this.executorSelect.value;
             this.config.agentId = newAgentId;
-
             if (newAgentId !== this.currentAgentId) {
                 this.currentAgentId = newAgentId;
-                this.config.settings.modelId = undefined;
-                this.modelSelect.value = '';
-                await this.loadModelsForAgent(newAgentId);
             }
-
             this.options.onExecutorChange?.(newAgentId);
             this.notifyConfigChange();
         });
 
-        this.modelSelect.addEventListener('change', () => {
-            this.config.settings.modelId = this.modelSelect.value || undefined;
+        this.connectionSelect.addEventListener('change', () => {
+            this.config.settings.connectionId = this.connectionSelect.value || undefined;
+            this.updateActiveBadges();
+            this.notifyConfigChange();
+        });
+
+        this.tierPillsContainer?.addEventListener('click', (e) => {
+            const pill = (e.target as HTMLElement).closest('.llm-input__tier-pill') as HTMLElement | null;
+            if (!pill) return;
+            const tier = pill.dataset.tier as 'auto' | ModelTier;
+            if (!tier) return;
+            this.config.settings.modelTier = tier;
+            this.updateTierPills(tier);
             this.updateActiveBadges();
             this.notifyConfigChange();
         });
@@ -638,7 +646,7 @@ code {
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 const clearType = (e.currentTarget as HTMLElement).dataset.clear;
-                this.clearSetting(clearType as 'model' | 'history' | 'stream');
+                this.clearSetting(clearType as 'connection' | 'tier' | 'history' | 'stream');
             });
         });
 
@@ -753,7 +761,10 @@ code {
 
     private buildOverrides(): ChatOverrides {
         const overrides: ChatOverrides = {};
-        if (this.config.settings.modelId) overrides.modelId = this.config.settings.modelId;
+        if (this.config.settings.connectionId) overrides.connectionId = this.config.settings.connectionId;
+        // 'auto' means no override — only pass an explicit tier
+        const tier = this.config.settings.modelTier;
+        if (tier && tier !== 'auto') overrides.modelTier = tier as ModelTier;
         if (this.config.settings.historyLength !== -1) overrides.historyLength = this.config.settings.historyLength;
         if (this.config.settings.temperature !== undefined) overrides.temperature = this.config.settings.temperature;
         if (!this.config.settings.streamMode) overrides.streamMode = false;
@@ -770,43 +781,16 @@ code {
     }
 
     // ================================================================
-    // 模型加载
+    // 连接加载
     // ================================================================
 
-    private async loadModelsForAgent(agentId: string): Promise<void> {
-        if (!this.options.onRequestModels || this.isLoadingModels) return;
-
-        this.isLoadingModels = true;
-        this.setModelSelectLoading(true);
-
+    private async loadConnections(): Promise<void> {
+        if (!this.options.onRequestConnections) return;
         try {
-            const models = await this.options.onRequestModels(agentId);
-            this.models = models;
-            this.updateModelOptions();
-
-            if (this.config.settings.modelId) {
-                const stillExists = models.some(m => m.id === this.config.settings.modelId);
-                if (!stillExists) {
-                    this.config.settings.modelId = undefined;
-                    this.modelSelect.value = '';
-                    this.updateActiveBadges();
-                }
-            }
+            this.connections = await this.options.onRequestConnections();
+            this.updateConnectionOptions();
         } catch (e) {
-            console.error('[ChatInput] Failed to load models:', e);
-            this.models = [];
-            this.updateModelOptions();
-        } finally {
-            this.isLoadingModels = false;
-            this.setModelSelectLoading(false);
-        }
-    }
-
-    private setModelSelectLoading(loading: boolean): void {
-        if (!this.modelSelect) return;
-        this.modelSelect.disabled = loading;
-        if (loading) {
-            this.modelSelect.innerHTML = '<option value="">Loading models...</option>';
+            console.error('[ChatInput] Failed to load connections:', e);
         }
     }
 
@@ -820,9 +804,10 @@ code {
             this.adjustTextareaHeight();
         }
         if (this.executorSelect) this.setExecutorValue(this.config.agentId);
-        if (this.modelSelect && this.config.settings.modelId) {
-            this.modelSelect.value = this.config.settings.modelId;
+        if (this.connectionSelect && this.config.settings.connectionId) {
+            this.connectionSelect.value = this.config.settings.connectionId;
         }
+        this.updateTierPills(this.config.settings.modelTier ?? 'auto');
         if (this.historySlider) {
             this.historySlider.value = this.config.settings.historyLength.toString();
             this.updateHistoryDisplay();
@@ -845,7 +830,8 @@ code {
     private syncConfigFromUI(): void {
         this.config.text = this.textarea?.value || '';
         this.config.agentId = this.executorSelect?.value || 'default';
-        this.config.settings.modelId = this.modelSelect?.value || undefined;
+        this.config.settings.connectionId = this.connectionSelect?.value || undefined;
+        // modelTier is kept in-memory; pills don't have a native value to read
         this.config.settings.historyLength = parseInt(this.historySlider?.value || '-1');
         this.config.settings.streamMode = this.streamToggle?.checked ?? true;
         this.config.settings.useHarness = this.harnessToggle?.checked ?? false;
@@ -879,11 +865,15 @@ code {
         }
     }
 
-    private clearSetting(type: 'model' | 'history' | 'stream'): void {
+    private clearSetting(type: 'connection' | 'tier' | 'history' | 'stream'): void {
         switch (type) {
-            case 'model':
-                this.modelSelect.value = '';
-                this.config.settings.modelId = undefined;
+            case 'connection':
+                this.connectionSelect.value = '';
+                this.config.settings.connectionId = undefined;
+                break;
+            case 'tier':
+                this.config.settings.modelTier = 'auto';
+                this.updateTierPills('auto');
                 break;
             case 'history':
                 this.historySlider.value = '-1';
@@ -1063,20 +1053,30 @@ code {
 
     private updateActiveBadges(): void {
         const activeContainer = this.container.querySelector('.llm-input__active-settings') as HTMLElement;
-        const modelBadge = this.container.querySelector('.llm-input__active-badge[data-type="model"]') as HTMLElement;
-        const streamBadge = this.container.querySelector('.llm-input__active-badge[data-type="stream"]') as HTMLElement;
+        const connBadge    = this.container.querySelector('.llm-input__active-badge[data-type="connection"]') as HTMLElement;
+        const tierBadge    = this.container.querySelector('.llm-input__active-badge[data-type="tier"]') as HTMLElement;
+        const streamBadge  = this.container.querySelector('.llm-input__active-badge[data-type="stream"]') as HTMLElement;
         const historyBadge = this.container.querySelector('.llm-input__active-badge[data-type="history"]') as HTMLElement;
 
         if (!activeContainer) return;
         let hasActive = false;
 
-        if (this.config.settings.modelId) {
-            const model = this.models.find(m => m.id === this.config.settings.modelId);
-            const text = modelBadge?.querySelector('.llm-input__badge-text');
-            if (text) text.textContent = model?.name || this.config.settings.modelId;
-            if (modelBadge) modelBadge.style.display = 'inline-flex';
+        if (this.config.settings.connectionId) {
+            const conn = this.connections.find(c => c.id === this.config.settings.connectionId);
+            const text = connBadge?.querySelector('.llm-input__badge-text');
+            if (text) text.textContent = conn?.name || this.config.settings.connectionId;
+            if (connBadge) connBadge.style.display = 'inline-flex';
             hasActive = true;
-        } else if (modelBadge) { modelBadge.style.display = 'none'; }
+        } else if (connBadge) { connBadge.style.display = 'none'; }
+
+        const tier = this.config.settings.modelTier;
+        if (tier && tier !== 'auto') {
+            const TIER_LABELS: Record<string, string> = { optimal: '最优', standard: '标准', fast: '快速' };
+            const text = tierBadge?.querySelector('.llm-input__badge-text');
+            if (text) text.textContent = TIER_LABELS[tier] ?? tier;
+            if (tierBadge) tierBadge.style.display = 'inline-flex';
+            hasActive = true;
+        } else if (tierBadge) { tierBadge.style.display = 'none'; }
 
         if (!this.config.settings.streamMode) {
             if (streamBadge) streamBadge.style.display = 'inline-flex';
@@ -1095,6 +1095,12 @@ code {
 
         activeContainer.style.display = hasActive ? 'flex' : 'none';
         this.settingsBtn.classList.toggle('has-overrides', hasActive);
+    }
+
+    private updateTierPills(tier: 'auto' | ModelTier): void {
+        this.tierPillsContainer?.querySelectorAll('.llm-input__tier-pill').forEach(pill => {
+            pill.classList.toggle('active', (pill as HTMLElement).dataset.tier === tier);
+        });
     }
 
     private notifyConfigChange(): void {
@@ -1166,9 +1172,10 @@ code {
         this.executorSelect.innerHTML = ChatInputTemplates.renderExecutorOptions(executors);
     }
 
-    private updateModelOptions(): void {
-        this.modelSelect.innerHTML = ChatInputTemplates.renderModelOptions(
-            this.models, this.config.settings.modelId
+    private updateConnectionOptions(): void {
+        if (!this.connectionSelect) return;
+        this.connectionSelect.innerHTML = ChatInputTemplates.renderConnectionOptions(
+            this.connections, this.config.settings.connectionId
         );
     }
 

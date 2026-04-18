@@ -14,23 +14,24 @@
 import type {
     IDeviceDriver, ILLMManagementService,
     DeviceContext, IVFSManager, FileContent,
-    LLMConnection, ConnectionMeta, ChatMessage, ChatCompletionChunk,
+    LLMConnection, LLMProvider, ConnectionMeta, ChatMessage, ChatCompletionChunk,
     ChatCompletionParams, ChatCompletionResponse, TokenUsage,
     MCPServer, LLMSkill, CreateFileOptions, ToolDefinition,
-    LLMProviderDefinition, ConnectionTestResult, InitialAgentDef,
+    ConnectionTestResult, InitialAgentDef,
 } from '@itookit/common';
 import { toConnectionMeta, CONFIG_MODULE } from '@itookit/common';
 import yaml from 'js-yaml';
 
 import { LLMDriver } from '../core/driver';
 import { testLLMConnection } from '../core/api';
-import { LLM_PROVIDER_DEFAULTS, CONST_CONFIG_VERSION, DEFAULT_AGENTS } from '../constants';
+import { LLM_PROVIDERS, CONST_CONFIG_VERSION, DEFAULT_AGENTS } from '../constants';
 import { MCPServerConnection, type MCPToolInfo } from '../skills/mcp-client';
 import type { MCPServerConfig } from '../types/provider';
 
 // ─── 存储路径 ────────────────────────────────────────────────────────────────
 const STORAGE_MODULE   = CONFIG_MODULE;             // '__config'
 const CONNECTIONS_DIR  = '/llm/.connections';       // LLM 连接（新路径）
+const PROVIDERS_DIR    = '/llm/.providers';         // Provider 配置（用户自定义 + 内置覆盖）
 const DEFAULTS_VERSION = '/llm/.connections_version.json';
 const MCP_DIR          = '/llm/.mcp';               // MCP 服务器配置（新路径）
 const SKILLS_DIR       = '/llm/.skills';            // Skill 配置
@@ -84,6 +85,16 @@ export const LLM_IOCTL = {
     MCP_LIST_TOOLS:   'list-tools',
     /** arg: { tool: string; args: Record<string,any>; timeout?: number } → any */
     MCP_CALL_TOOL:    'call-tool',
+
+    // ── Provider 管理（无需 sessionId）──────────────────────────────────────
+    /** → LLMProvider[]（不含 apiKey） */
+    LIST_PROVIDERS:       'list-providers',
+    /** arg: id → LLMProvider | null（含 apiKey，仅供 Settings UI） */
+    GET_FULL_PROVIDER:    'get-full-provider',
+    /** arg: LLMProvider → void（保存，含 apiKey） */
+    SAVE_PROVIDER:        'save-provider',
+    /** arg: id → void */
+    DELETE_PROVIDER:      'delete-provider',
 
     // ── Skill 管理（无需 sessionId）──────────────────────────────────────────
     /** → LLMSkill[] */
@@ -170,6 +181,10 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
     readonly streamable = true;
     readonly sessionable = true;
 
+    // ── Provider catalog (built-in + user custom, loaded from VFS at init) ──
+    private _providers: Map<string, LLMProvider> =
+        new Map(Object.entries(LLM_PROVIDERS).map(([k, v]) => [k, { ...v, id: k }]));
+
     // ── Connection store ──
     private _connections: LLMConnection[] = [];
     private _listeners = new Set<() => void>();
@@ -208,6 +223,10 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         // Migrate data from old paths if needed
         await this.migrateConnectionsIfNeeded();
         await this.migrateMCPIfNeeded();
+
+        // Seed built-in providers to VFS + load user customizations
+        await this.syncDefaultProviders();
+        await this.reloadProviders();
 
         // Write default connections (incremental)
         await this.ensureDefaults();
@@ -378,16 +397,16 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         // ── 连接管理命令（无需 sessionId）──────────────────────────────────────
         switch (command) {
             case LLM_IOCTL.LIST_CONNECTIONS:
-                return this._connections.map(toConnectionMeta);
+                return this._connections.map(c => this.connToMeta(c));
 
             case LLM_IOCTL.GET_CONNECTION_META: {
                 const c = this.findConn(arg as string);
-                return c ? toConnectionMeta(c) : null;
+                return c ? this.connToMeta(c) : null;
             }
 
             case LLM_IOCTL.GET_DEFAULT_CONNECTION: {
                 const c = this.defaultConnection;
-                return c ? toConnectionMeta(c) : null;
+                return c ? this.connToMeta(c) : null;
             }
 
             case LLM_IOCTL.GET_FULL_CONNECTION:
@@ -434,6 +453,21 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
                 }
                 return;
             }
+
+            // ── Provider 管理命令（无需 sessionId）──────────────────────────────
+            case LLM_IOCTL.LIST_PROVIDERS:
+                return this.getProviders();          // strips apiKey
+
+            case LLM_IOCTL.GET_FULL_PROVIDER:
+                return this.getFullProvider(arg as string) ?? null;
+
+            case LLM_IOCTL.SAVE_PROVIDER:
+                await this.saveProvider(arg as LLMProvider);
+                return;
+
+            case LLM_IOCTL.DELETE_PROVIDER:
+                await this.deleteProvider(arg as string);
+                return;
 
             // ── Skill 管理命令（无需 sessionId）────────────────────────────────
             case LLM_IOCTL.LIST_SKILLS:
@@ -545,12 +579,12 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
     // ─── IConnectionService ───────────────────────────────────────────────────
 
     async getConnections(): Promise<ConnectionMeta[]> {
-        return this._connections.map(toConnectionMeta);
+        return this._connections.map(c => this.connToMeta(c));
     }
 
     async getConnection(id: string): Promise<ConnectionMeta | undefined> {
         const c = this.findConn(id);
-        return c ? toConnectionMeta(c) : undefined;
+        return c ? this.connToMeta(c) : undefined;
     }
 
     async getDefaultConnection(): Promise<ConnectionMeta | null> {
@@ -616,6 +650,57 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         this.notify();
     }
 
+    // ─── Provider storage ─────────────────────────────────────────────────────
+
+    /**
+     * 将内置 Provider 写入 VFS（首次）。已存在的条目保持不变（用户修改受保护）。
+     */
+    private async syncDefaultProviders(): Promise<void> {
+        const existing = await this.loadJsonFilesFromDir<LLMProvider>(PROVIDERS_DIR);
+        const existingIds = new Set(existing.map(p => p.id));
+        for (const [key, def] of Object.entries(LLM_PROVIDERS)) {
+            if (!existingIds.has(key)) {
+                await this.writeProviderToDisk({ ...def, id: key, isBuiltin: true });
+            }
+        }
+    }
+
+    private async reloadProviders(): Promise<void> {
+        const fromVFS = await this.loadJsonFilesFromDir<LLMProvider>(PROVIDERS_DIR);
+        // Start with built-in defaults, overlay VFS data (user customizations win)
+        const merged = new Map(Object.entries(LLM_PROVIDERS).map(([k, v]) => [k, { ...v, id: k }]));
+        for (const p of fromVFS) {
+            merged.set(p.id, p);
+        }
+        this._providers = merged;
+    }
+
+    async saveProvider(provider: LLMProvider): Promise<void> {
+        await this.writeProviderToDisk(provider);
+        this._providers.set(provider.id, provider);
+        this.notify();
+    }
+
+    async deleteProvider(id: string): Promise<void> {
+        const provider = this._providers.get(id);
+        if (provider?.isBuiltin) throw new Error(`Cannot delete built-in provider: ${id}`);
+        await this.deleteProviderFromDisk(id);
+        this._providers.delete(id);
+        this.notify();
+    }
+
+    private async writeProviderToDisk(provider: LLMProvider): Promise<void> {
+        await this.engineUpsert(
+            `${PROVIDERS_DIR}/${provider.id}.json`,
+            JSON.stringify(provider, null, 2),
+        );
+    }
+
+    private async deleteProviderFromDisk(id: string): Promise<void> {
+        const nodeId = await this.engine.resolvePath(`${PROVIDERS_DIR}/${id}.json`);
+        if (nodeId) await this.engine.delete([nodeId]);
+    }
+
     // ─── Connection storage ───────────────────────────────────────────────────
 
     private async ensureDefaults(): Promise<void> {
@@ -631,30 +716,42 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
 
     private async syncDefaultConnections(): Promise<void> {
         const current = await this.loadAll();
-        const byProvider = new Map(current.map(c => [c.provider, c]));
-        const keys = Object.keys(LLM_PROVIDER_DEFAULTS);
+        // Match by providerId (new) or legacy provider field
+        const byProvider = new Map(current.map(c => [c.providerId ?? c.provider, c]));
+        const keys = Object.keys(LLM_PROVIDERS);
         const defaultKey = keys[0];
 
-        for (const [key, def] of Object.entries(LLM_PROVIDER_DEFAULTS)) {
+        for (const [key, def] of Object.entries(LLM_PROVIDERS)) {
             const existing = byProvider.get(key);
             if (!existing) {
+                // Write a lean connection — no model or availableModels (come from Provider catalog)
                 await this.writeToDisk({
                     id: key === defaultKey ? 'default' : `conn-${key}`,
                     name: def.name,
-                    provider: key,
+                    providerId: key,
                     apiKey: '',
-                    model: def.models[0]?.id ?? '',
-                    baseURL: def.baseURL,
-                    availableModels: [...def.models],
+                    tiers: def.defaultTiers,
+                    baseURL: def.baseURL !== def.baseURL ? def.baseURL : undefined,
                     metadata: { isSystemDefault: true },
                 });
             } else {
                 const updated: LLMConnection = JSON.parse(JSON.stringify(existing));
-                if (!updated.availableModels) updated.availableModels = [];
-                const known = new Set(updated.availableModels.map(m => m.id));
                 let dirty = false;
-                for (const m of def.models) {
-                    if (!known.has(m.id)) { updated.availableModels.push({ ...m }); dirty = true; }
+
+                // Migrate: ensure providerId is set (old data has only provider)
+                if (!updated.providerId && updated.provider) {
+                    updated.providerId = updated.provider;
+                    dirty = true;
+                }
+                // Back-fill tiers if missing
+                if (!updated.tiers && def.defaultTiers) {
+                    updated.tiers = def.defaultTiers;
+                    dirty = true;
+                }
+                // Drop deprecated availableModels and model fields from stored data
+                if (updated.availableModels !== undefined) {
+                    delete updated.availableModels;
+                    dirty = true;
                 }
                 if (dirty) await this.writeToDisk(updated);
             }
@@ -666,7 +763,8 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
     }
 
     private async loadAll(): Promise<LLMConnection[]> {
-        return this.loadJsonFilesFromDir<LLMConnection>(CONNECTIONS_DIR);
+        const raw = await this.loadJsonFilesFromDir<LLMConnection>(CONNECTIONS_DIR);
+        return raw.map(c => this.normalizeConn(c));
     }
 
     private async writeToDisk(conn: LLMConnection): Promise<void> {
@@ -718,9 +816,34 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
 
     // ─── IConnectionService — Provider metadata & testing ─────────────────────
 
-    getProviderDefaults(): Record<string, LLMProviderDefinition> {
-        return LLM_PROVIDER_DEFAULTS;
+    getProviderDefaults(): Record<string, LLMProvider> {
+        return LLM_PROVIDERS;
     }
+
+    /** 获取单个 Provider 定义 */
+    getProvider(providerId: string): LLMProvider | undefined {
+        const p = this._providers.get(providerId);
+        if (!p) return undefined;
+        return this.stripProviderApiKey(p);
+    }
+
+    /** 列出所有 Provider（不含 apiKey，供 UI 列表使用） */
+    getProviders(): LLMProvider[] {
+        return [...this._providers.values()].map(p => this.stripProviderApiKey(p));
+    }
+
+    /** 返回含 apiKey 的完整 Provider（仅供 Settings UI 编辑表单使用） */
+    getFullProvider(id: string): LLMProvider | undefined {
+        return this._providers.get(id);
+    }
+
+    /** 剥离 apiKey，返回安全的 Provider 视图 */
+    private stripProviderApiKey(provider: LLMProvider): LLMProvider {
+        const { apiKey: _apiKey, ...meta } = provider as LLMProvider & { apiKey?: string };
+        return meta as LLMProvider;
+    }
+
+    // saveProvider / deleteProvider are implemented in the Provider storage section above.
 
     async testConnection(params: { provider: string; apiKey: string; baseURL?: string; model?: string }): Promise<ConnectionTestResult> {
         return testLLMConnection(params);
@@ -812,11 +935,32 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         if (!conn) {
             throw new Error(`LLMDeviceDriver: no connection available for id '${connectionId}'`);
         }
-        if (!conn.apiKey?.trim()) {
-            throw new Error(`LLMDeviceDriver: connection '${conn.id}' has no API key configured`);
+        // apiKey now lives on Provider; fall back to legacy conn.apiKey for old data
+        const provider = this.getProviderForConn(conn);
+        const apiKey = provider?.apiKey?.trim() ?? conn.apiKey?.trim();
+        if (!apiKey) {
+            throw new Error(
+                `LLMDeviceDriver: provider '${conn.providerId ?? conn.provider}' has no API key configured`
+            );
         }
 
-        const driver = new LLMDriver({ connection: conn });
+        // Resolve model from provider catalog + tier mapping
+        const effectiveTiers = conn.tiers ?? provider?.defaultTiers;
+        const resolvedModel =
+            effectiveTiers?.optimal
+            ?? conn.model                   // legacy fallback
+            ?? provider?.models[0]?.id
+            ?? '';
+
+        // Build a connection object for LLMDriver (which reads .provider, .apiKey, .model)
+        const connForDriver: LLMConnection = {
+            ...conn,
+            provider: conn.providerId ?? conn.provider ?? '',  // LLMDriver reads `provider`
+            apiKey,                                            // resolved from provider
+            model: resolvedModel,
+        };
+
+        const driver = new LLMDriver({ connection: connForDriver });
         const history: ChatMessage[] = opts?.systemPrompt
             ? [{ role: 'system', content: opts.systemPrompt }]
             : [];
@@ -1029,6 +1173,31 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
 
     private get defaultConnection(): LLMConnection | undefined {
         return this.findConn('default') ?? this._connections[0];
+    }
+
+    /** 从 connection 的 providerId（或旧 provider 字段）查找对应的 LLMProvider */
+    private getProviderForConn(conn: LLMConnection): LLMProvider | undefined {
+        const pid = conn.providerId ?? conn.provider ?? '';
+        return this._providers.get(pid);
+    }
+
+    /**
+     * LLMConnection → ConnectionMeta（注入 provider 解析 model + tiers）。
+     * 所有对外暴露 ConnectionMeta 的地方都应通过此方法，而非直接调用 toConnectionMeta()。
+     */
+    private connToMeta(conn: LLMConnection): ConnectionMeta {
+        return toConnectionMeta(conn, this.getProviderForConn(conn));
+    }
+
+    /**
+     * 加载后对旧格式 LLMConnection 数据做规范化（向后兼容迁移）：
+     * - provider → providerId
+     */
+    private normalizeConn(raw: LLMConnection): LLMConnection {
+        if (!raw.providerId && raw.provider) {
+            return { ...raw, providerId: raw.provider };
+        }
+        return raw;
     }
 
     private requireLLMSession(ctx: DeviceContext): LLMSessionState {

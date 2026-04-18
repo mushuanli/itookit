@@ -8,7 +8,7 @@ import {
     UnifiedSearchResult,
     CollapseExpandResult
 } from '@itookit/common';
-import type { LLMModel, AgentType, AgentDefinition, IAgentManagementService } from '@itookit/common';
+import type { AgentType, AgentDefinition, IAgentManagementService, ModelTier } from '@itookit/common';
 
 /**
  * Agent 配置编辑器
@@ -67,8 +67,9 @@ export class AgentConfigEditor implements IEditor {
                 icon: parsed.icon || '🤖',
                 config: {
                     connectionId: parsed.config?.connectionId || '',
-                    // ✅ [Fix] modelId -> modelName
-                    modelName: parsed.config?.modelName || '',
+                    modelTier: (parsed.config?.modelTier as ModelTier | undefined) ?? 'optimal',
+                    // Preserve modelName for backward compat with existing data
+                    modelName: parsed.config?.modelName || undefined,
                     systemPrompt: parsed.config?.systemPrompt || 'You are a helpful assistant.',
                     mcpServers: parsed.config?.mcpServers || [],
                     maxHistoryLength: parsed.config?.maxHistoryLength ?? -1,
@@ -148,33 +149,7 @@ export class AgentConfigEditor implements IEditor {
             }
         }
 
-        const models = selectedConn?.availableModels || [];
-
-        // ✅ [Fix] modelId -> modelName
-        let selectedModelIdentifier = config.modelName;
-
-        if (models.length > 0) {
-            // 检查当前 config 中的 modelName 是否存在于当前连接的模型列表中
-            const modelExists = models.some(m => m.id === selectedModelIdentifier);
-
-            if (!modelExists) {
-                // 尝试通过 display name 匹配 (以此处理不同 provider 对同一模型的不同 ID 命名)
-                const currentModelInfo = this.findModelById(selectedModelIdentifier, connections);
-                if (currentModelInfo) {
-                    const matchedModel = models.find(m => m.name === currentModelInfo.name);
-                    selectedModelIdentifier = matchedModel ? matchedModel.id : models[0].id;
-                } else {
-                    selectedModelIdentifier = models[0].id;
-                }
-
-                // 更新内部状态
-                if (this.content && this.content.config) {
-                    // ✅ [Fix] modelId -> modelName
-                    this.content.config.modelName = selectedModelIdentifier;
-                }
-            }
-        }
-
+        const currentTier = config.modelTier ?? 'optimal';
         const allMCPServers = await this.service.getMCPServers();
 
         this.container.innerHTML = `
@@ -260,19 +235,26 @@ export class AgentConfigEditor implements IEditor {
 
                         <div class="agent-form-row">
                             <label class="agent-form-label">
-                                模型 <small>选择具体的模型</small>
+                                模型层级 <small>cost vs quality 偏好</small>
                             </label>
-                            <!-- ✅ [Fix] name="modelName" -->
-                            <select class="agent-form-select" name="modelName" id="model-select">
-                                ${models.length > 0
-                ? models.map(m => `
-                                        <option value="${m.id}" ${selectedModelIdentifier === m.id ? 'selected' : ''}>
-                                            ${m.name}
-                                        </option>
-                                    `).join('')
-                : '<option value="">请先选择连接</option>'
-            }
-                            </select>
+                            <div class="agent-tier-selector" id="tier-selector">
+                                ${(['optimal', 'standard', 'fast'] as ModelTier[]).map(t => {
+                const meta: Record<ModelTier, { label: string; desc: string; icon: string }> = {
+                    optimal:  { label: '最优', desc: '复杂推理',   icon: '💎' },
+                    standard: { label: '标准', desc: '日常工作',   icon: '⚖️' },
+                    fast:     { label: '快速', desc: '简单任务',   icon: '⚡' },
+                };
+                const m = meta[t];
+                return `
+                                    <button type="button" class="agent-tier-btn ${currentTier === t ? 'selected' : ''}" data-tier="${t}" title="${m.desc}">
+                                        <span class="agent-tier-btn__icon">${m.icon}</span>
+                                        <span class="agent-tier-btn__label">${m.label}</span>
+                                        <span class="agent-tier-btn__desc">${m.desc}</span>
+                                    </button>`;
+            }).join('')}
+                            </div>
+                            <input type="hidden" name="modelTier" id="model-tier-input" value="${currentTier}">
+                            <p class="agent-form-help">连接需在 Settings → Connections 中配置对应 tier 模型</p>
                         </div>
 
                         <div class="agent-form-row">
@@ -372,27 +354,6 @@ export class AgentConfigEditor implements IEditor {
         this.bindEvents();
     }
 
-    /**
-     * 辅助方法：根据模型ID在所有连接中查找模型信息
-     */
-    private findModelById(modelIdentifier: string, connections: any[]): LLMModel | null {
-        if (!modelIdentifier) return null;
-        for (const conn of connections) {
-            const models = conn.availableModels || [];
-            const found = models.find((m: LLMModel) => m.id === modelIdentifier);
-            if (found) return found;
-        }
-        return null;
-    }
-
-    /**
-     * 辅助方法：根据模型名称在模型列表中查找
-     */
-    private findModelByName(modelName: string, models: LLMModel[]): LLMModel | null {
-        if (!modelName) return null;
-        return models.find(m => m.name === modelName) || null;
-    }
-
     private renderError(message: string) {
         this.container.innerHTML = `
             <div class="agent-editor-container">
@@ -486,48 +447,28 @@ export class AgentConfigEditor implements IEditor {
             });
         });
 
-        // Connection 与 Model 联动
+        // Connection 变更（只更新 connectionId，tier 独立管理）
         const connSelect = this.container.querySelector('#connection-select') as HTMLSelectElement;
-        const modelSelect = this.container.querySelector('#model-select') as HTMLSelectElement;
+        if (connSelect) {
+            connSelect.addEventListener('change', () => {
+                if (this.content?.config) this.content.config.connectionId = connSelect.value;
+                handleChange();
+            });
+        }
 
-        if (connSelect && modelSelect) {
-            connSelect.addEventListener('change', async () => {
-                const connId = connSelect.value;
-                const connections = await this.service.getConnections();
-                const conn = connections.find(c => c.id === connId);
-                const newModels = conn?.availableModels || [];
-
-                // ✅ [Fix] modelId -> modelName (获取当前存储的 ID)
-                const currentModelIdentifier = this.content?.config.modelName;
-                const currentModel = this.findModelById(currentModelIdentifier || '', connections);
-                const currentModelDisplayName = currentModel?.name;
-
-                // 2. 重新渲染模型选项
-                modelSelect.innerHTML = newModels.length > 0
-                    ? newModels.map(m => `<option value="${m.id}">${m.name}</option>`).join('')
-                    : '<option value="">请先选择连接</option>';
-
-                // 3. 智能选择模型
-                let newModelIdentifier = '';
-
-                if (newModels.length > 0) {
-                    if (currentModelDisplayName) {
-                        const matchedModel = this.findModelByName(currentModelDisplayName, newModels);
-                        newModelIdentifier = matchedModel ? matchedModel.id : newModels[0].id;
-                    } else {
-                        newModelIdentifier = newModels[0].id;
-                    }
-                    modelSelect.value = newModelIdentifier;
-                }
-
-                // 4. 更新内部状态
-                if (this.content && this.content.config) {
-                    this.content.config.connectionId = connId;
-                    // ✅ [Fix] modelId -> modelName
-                    this.content.config.modelName = newModelIdentifier;
-                }
-
-                // 5. 触发变更事件
+        // Tier 选择器
+        const tierSelector = this.container.querySelector('#tier-selector');
+        const tierInput = this.container.querySelector('#model-tier-input') as HTMLInputElement;
+        if (tierSelector && tierInput) {
+            tierSelector.addEventListener('click', (e) => {
+                const btn = (e.target as HTMLElement).closest('.agent-tier-btn') as HTMLElement | null;
+                if (!btn) return;
+                const tier = btn.dataset.tier as ModelTier;
+                if (!tier) return;
+                tierSelector.querySelectorAll('.agent-tier-btn').forEach(b => b.classList.remove('selected'));
+                btn.classList.add('selected');
+                tierInput.value = tier;
+                if (this.content?.config) this.content.config.modelTier = tier;
                 handleChange();
             });
         }
@@ -618,8 +559,7 @@ export class AgentConfigEditor implements IEditor {
         if (type === 'agent') {
             this.content.config = {
                 connectionId: getVal('connectionId'),
-                // ✅ [Fix] modelId -> modelName (HTML name="modelName")
-                modelName: getVal('modelName'),
+                modelTier: (getVal('modelTier') as ModelTier) || 'optimal',
                 systemPrompt: getVal('systemPrompt'),
                 maxHistoryLength: parseInt(getVal('maxHistoryLength')) || -1,
                 mcpServers: getCheckedValues('mcpServers')

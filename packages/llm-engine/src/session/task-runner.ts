@@ -350,11 +350,12 @@ export class TaskRunner {
                 prompt: input.text,
                 workingDirectory: harnessCwd,
                 sessionId,
-                // Route through the user-selected agent's connection.
-                modelOverride: (executorConfig as any).connectionId || undefined,
-                // Pass the agent's specific model and system prompt so the harness
-                // honours the user's agent configuration.
-                modelIdOverride: executorConfig.model || undefined,
+                // Connection: user override takes priority, then agent's configured connection.
+                modelOverride: input.overrides?.connectionId || (executorConfig as any).connectionId || undefined,
+                // Tier: user override > agent's configured tier (already resolved into executorConfig.model).
+                // When a user tier override is present we let tier routing handle it instead of pinning model.
+                modelTier: input.overrides?.modelTier || undefined,
+                modelIdOverride: input.overrides?.connectionId ? undefined : (executorConfig.model || undefined),
                 systemPromptOverride: executorConfig.systemPrompt || undefined,
                 context: { agentId: input.agentId },
             };
@@ -1021,7 +1022,8 @@ export class TaskRunner {
 
     private applyOverrides(config: ExecutorConfig, overrides: ExecutionOverrides): ExecutorConfig {
         const newConfig = { ...config };
-        if (overrides.modelId) newConfig.model = overrides.modelId;
+        // connectionId override replaces the whole connection (model resolved from new connection's tiers).
+        if (overrides.connectionId) (newConfig as any).connectionId = overrides.connectionId;
         if (overrides.temperature !== undefined) newConfig.temperature = overrides.temperature;
         if (overrides.streamMode !== undefined) newConfig.stream = overrides.streamMode;
         return newConfig;
