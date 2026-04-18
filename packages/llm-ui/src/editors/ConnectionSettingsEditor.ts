@@ -15,11 +15,12 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
         this.providers = this.service.getProviderDefaults();
         let connections = await this.service.getConnections();
 
+        // enabled first, then disabled; within each group alphabetically
         connections.sort((a, b) => {
-            if (a.id === 'default') return -1;
-            if (b.id === 'default') return 1;
-            if (a.hasApiKey && !b.hasApiKey) return -1;
-            if (!a.hasApiKey && b.hasApiKey) return 1;
+            const aOn = a.enabled !== false;
+            const bOn = b.enabled !== false;
+            if (aOn && !bOn) return -1;
+            if (!aOn && bOn) return 1;
             return (a.name || '').localeCompare(b.name || '');
         });
 

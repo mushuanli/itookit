@@ -118,25 +118,10 @@ export class AgentConfigEditor implements IEditor {
         const agent = this.content;
         const config = agent.config;
 
-        let connections = await this.service.getConnections();
-
-        // ✅ [新增] 连接排序逻辑 (User Friendly)
-        // 1. Default first
-        // 2. Has API Key second
-        // 3. No API Key last
-        // 4. Alphabetical
-        connections.sort((a, b) => {
-            if (a.id === 'default') return -1;
-            if (b.id === 'default') return 1;
-
-            const aHasKey = a.hasApiKey;
-            const bHasKey = b.hasApiKey;
-
-            if (aHasKey && !bHasKey) return -1;
-            if (!aHasKey && bHasKey) return 1;
-
-            return (a.name || '').localeCompare(b.name || '');
-        });
+        // Only show connections that are enabled AND have an apiKey configured, sorted alphabetically
+        const connections = (await this.service.getConnections())
+            .filter(c => c.enabled !== false && c.hasApiKey)
+            .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
         // 确保有有效的连接选择
         let selectedConn = connections.find(c => c.id === config.connectionId);
