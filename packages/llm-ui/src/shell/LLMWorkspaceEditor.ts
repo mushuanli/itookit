@@ -209,7 +209,7 @@ export class LLMWorkspaceEditor implements IEditor {
         this.sessionService = new SessionService(this.engine, this.sessionManager);
         this.stateService = new StateService(this.engine);
         this.assetService = new AssetService(this.engine);
-        this.agentLoader = new AgentLoader(this.options.agentService, this.sessionManager);
+        this.agentLoader = new AgentLoader(this.options.agentService);
         this.stateManager = new StateManager(
             this.stateService, this.sessionManager, this.options.nodeId!,
             this.agentLoader
@@ -277,7 +277,7 @@ export class LLMWorkspaceEditor implements IEditor {
             },
             onConfigChange: (config) => this.handleConfigChange(config),
             onExecutorChange: () => this.bus.emit('state:inputChanged', {}),
-            onRequestModels: (agentId) => this.agentLoader.loadModelsForAgent(agentId),
+            onRequestConnections: () => this.agentLoader.loadConnections(),
 
             // ── Harness callbacks (only wired when skill service is available) ──
             ...this.buildHarnessCallbacks(harnessAdapter, harnessRuntime),

@@ -3,6 +3,7 @@
 
 import type { TokenUsage } from '../llm/completion';
 import type { Attachment } from '../llm/message';
+import type { ModelTier } from '../llm/connection';
 
 /**
  * Agent 会话状态。
@@ -66,8 +67,16 @@ export interface AgentTaskRequest {
     workingDirectory?: string;
     /** 连接 ID 覆盖（对应 LLM connection） */
     modelOverride?: string;
-    /** 模型 ID 覆盖（connection 内的具体 model，如 gpt-4o） */
+    /** 模型 ID 覆盖（connection 内的具体 model，如 gpt-4o；优先级高于 modelTier） */
     modelIdOverride?: string;
+    /**
+     * 请求使用的模型层级。连接须配置 `tiers` 字段，否则退回默认模型。
+     * - `optimal`  — 最高质量（默认）
+     * - `standard` — 常规，适合大多数工作
+     * - `fast`     — 低成本，适合简单任务
+     * 预算超过 80% 时，executor 会自动向下降级并在 `agent:budget:warning` 中报告。
+     */
+    modelTier?: ModelTier;
     /** Agent 自定义 system prompt（优先级高于 harness 默认值） */
     systemPromptOverride?: string;
     /** 预算覆盖 */
@@ -229,7 +238,12 @@ export interface AgentEventPayloads {
     'agent:permission:request': { toolId: string; args: Record<string, unknown> };
     'agent:context:compressed': CompressionInfo;
     'agent:skill:loaded': { skillId: string; toolIds: string[] };
-    'agent:budget:warning': { resource: string; usedRatio: number };
+    'agent:budget:warning': {
+        resource: string;
+        usedRatio: number;
+        /** 预算压力下建议切换的更低层级（executor 已自动降级时此字段有值） */
+        suggestedTier?: ModelTier;
+    };
     'agent:budget:exhausted': { resource: string; used: number; limit: number };
     'agent:backpressure:check': { ruleName: string; command: string };
     'agent:backpressure:failed': { ruleName: string; errors: string };

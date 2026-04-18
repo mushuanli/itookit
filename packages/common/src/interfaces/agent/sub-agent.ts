@@ -1,6 +1,8 @@
 // @file: common/interfaces/agent/sub-agent.ts
 // 子代理路由器接口定义。
 
+import type { ModelTier } from '../llm/connection';
+
 /**
  * 子代理路由器接口。
  *
@@ -52,6 +54,11 @@ export interface SubAgentTask {
     maxTurns?: number;
     /** 使用的 LLM 连接 ID（默认使用 subAgent 角色对应的连接） */
     connectionId?: string;
+    /**
+     * 请求的模型层级（需连接配置 `tiers`）。
+     * 优先级低于 `modelName`（精确 model ID）。
+     */
+    modelTier?: ModelTier;
     /** 工作目录（继承自主代理，用于工具执行） */
     cwd?: string;
     // ── Mission extensions ───────────────────────────────────

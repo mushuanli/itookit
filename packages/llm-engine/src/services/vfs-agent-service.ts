@@ -9,8 +9,8 @@ import type { EngineNode, EngineSearchQuery, RestorableItem } from '@itookit/com
 import { FS_MODULE_AGENTS } from '@itookit/common';
 import type {
     ILLMManagementService, ConnectionMeta, LLMConnection,
-    AgentDefinition, MCPServer, LLMSkill,
-    InitialAgentDef, LLMProviderDefinition, ConnectionTestResult,
+    AgentDefinition, MCPServer, LLMSkill, LLMProvider,
+    InitialAgentDef, ConnectionTestResult,
 } from '@itookit/common';
 
 import { IAgentManagementService } from './agent-service';
@@ -219,7 +219,12 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
 
     getConfigVersion(): number { return this.llmService.getConfigVersion(); }
     getDefaultAgents(): InitialAgentDef[] { return this.llmService.getDefaultAgents(); }
-    getProviderDefaults(): Record<string, LLMProviderDefinition> { return this.llmService.getProviderDefaults(); }
+    getProviderDefaults(): Record<string, LLMProvider> { return this.llmService.getProviderDefaults(); }
+    getProvider(providerId: string): LLMProvider | undefined { return this.llmService.getProvider(providerId); }
+    getProviders(): LLMProvider[] { return this.llmService.getProviders(); }
+    getFullProvider(id: string): LLMProvider | undefined { return this.llmService.getFullProvider(id); }
+    async saveProvider(provider: LLMProvider): Promise<void> { return this.llmService.saveProvider(provider); }
+    async deleteProvider(id: string): Promise<void> { return this.llmService.deleteProvider(id); }
     async testConnection(params: { provider: string; apiKey: string; baseURL?: string; model?: string }): Promise<ConnectionTestResult> { return this.llmService.testConnection(params); }
 
     async getConnections(): Promise<ConnectionMeta[]> { return this.llmService.getConnections(); }
@@ -244,21 +249,40 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
         const providerKeys = Object.keys(providerDefaults);
         const items: RestorableItem[] = [];
 
+        // ── Layer 1: Providers ─────────────────────────────────────────────────
         for (const [key, def] of Object.entries(providerDefaults)) {
-            const targetId = key === providerKeys[0] ? 'default' : `conn-${key}`;
-            const existing = connMap.get(targetId);
-            const status = !existing ? 'missing' : existing.provider !== key ? 'modified' : 'ok';
+            const vfsProvider = this.llmService.getFullProvider(key);
+            const status: RestorableItem['status'] = !vfsProvider
+                ? 'missing'
+                : vfsProvider.baseURL !== def.baseURL || vfsProvider.models.length !== def.models.length
+                    ? 'modified'
+                    : 'ok';
             items.push({
-                id: targetId, type: 'connection', name: def.name,
-                description: `预设的 ${def.name} 连接配置`,
-                icon: (def as any).icon || '🔌', status,
+                id: key, type: 'provider', name: def.name,
+                description: `${def.implementation} · ${def.baseURL || '自定义端点'}`,
+                icon: (def as any).icon || '🏭', status,
             });
         }
 
+        // ── Layer 2: Connections ───────────────────────────────────────────────
+        for (const [key, def] of Object.entries(providerDefaults)) {
+            const targetId = key === providerKeys[0] ? 'default' : `conn-${key}`;
+            const existing = connMap.get(targetId);
+            const status: RestorableItem['status'] = !existing ? 'missing'
+                : existing.providerId !== key ? 'modified' : 'ok';
+            items.push({
+                id: targetId, type: 'connection', name: def.name,
+                description: `${def.name} 的默认连接配置`,
+                icon: (def as any).icon || '🔗', status,
+            });
+        }
+
+        // ── Layer 3: Agents ────────────────────────────────────────────────────
         const agentMap = new Map(this._agents.map(a => [a.id, a]));
         for (const def of this.llmService.getDefaultAgents()) {
             const existing = agentMap.get(def.id);
-            const status = !existing ? 'missing' : existing.name !== def.name ? 'modified' : 'ok';
+            const status: RestorableItem['status'] = !existing ? 'missing'
+                : existing.name !== def.name ? 'modified' : 'ok';
             items.push({
                 id: def.id, type: 'agent', name: def.name,
                 description: def.description, icon: def.icon || '🤖', status,
@@ -268,9 +292,42 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
         return items;
     }
 
-    async restoreItem(type: 'connection' | 'agent', id: string): Promise<void> {
-        if (type === 'connection') await this.restoreConnection(id);
+    async restoreItem(type: 'provider' | 'connection' | 'agent', id: string): Promise<void> {
+        if (type === 'provider')    await this.restoreProvider(id);
+        else if (type === 'connection') await this.restoreConnection(id);
         else await this.restoreAgent(id);
+    }
+
+    async resetAllDefaults(): Promise<void> {
+        const providerDefaults = this.llmService.getProviderDefaults();
+        const providerKeys = Object.keys(providerDefaults);
+
+        // Reset providers (keep existing apiKey)
+        for (const id of Object.keys(providerDefaults)) {
+            await this.restoreProvider(id);
+        }
+        // Reset connections
+        for (const key of providerKeys) {
+            const targetId = key === providerKeys[0] ? 'default' : `conn-${key}`;
+            await this.restoreConnection(targetId);
+        }
+        // Reset agents
+        for (const def of this.llmService.getDefaultAgents()) {
+            await this.restoreAgent(def.id);
+        }
+    }
+
+    private async restoreProvider(providerId: string): Promise<void> {
+        const builtinDef = this.llmService.getProviderDefaults()[providerId];
+        if (!builtinDef) throw new Error(`No built-in definition for provider: ${providerId}`);
+        // Reset to built-in defaults, preserving user's apiKey
+        const existing = this.llmService.getFullProvider(providerId);
+        await this.saveProvider({
+            ...builtinDef,
+            id: providerId,
+            isBuiltin: true,
+            apiKey: existing?.apiKey,  // preserve user's apiKey
+        });
     }
 
     private async restoreConnection(targetId: string): Promise<void> {
@@ -282,15 +339,12 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
         const providerDef = providerDefaults[providerKey];
         if (!providerDef) throw new Error(`No default definition for connection id: ${targetId}`);
 
-        // 保留用户已配置的 apiKey，仅重置其他字段
-        const existing = await this.llmService.getFullConnection(targetId);
-        const existingApiKey = existing?.apiKey ?? '';
-
+        // apiKey is now on Provider, not Connection — reset to lean connection
         await this.saveConnection({
-            id: targetId, name: providerDef.name, provider: providerKey,
-            apiKey: existingApiKey, baseURL: providerDef.baseURL,
-            model: providerDef.models[0]?.id ?? '',
-            availableModels: [...providerDef.models],
+            id: targetId,
+            name: providerDef.name,
+            providerId: providerKey,
+            tiers: providerDef.defaultTiers,
             metadata: { isSystemDefault: true },
         });
     }
@@ -314,13 +368,10 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
         connMeta: ConnectionMeta | undefined,
         currentModelName: string | undefined,
     ): string {
-        if (!connMeta?.availableModels?.length) return currentModelName ?? '';
-        if (!currentModelName) return connMeta.availableModels[0].id;
-
-        const byName = connMeta.availableModels.find(m => m.name === currentModelName);
-        if (byName) return byName.id;
-        const byId = connMeta.availableModels.find(m => m.id === currentModelName);
-        return byId ? byId.id : connMeta.availableModels[0].id;
+        // Model names are now resolved via provider catalog, not connection.availableModels.
+        // Return the modelTier-resolved model or the current name as-is.
+        if (!currentModelName) return connMeta?.model ?? '';
+        return currentModelName;
     }
 
     private async scanAgentFiles(): Promise<AgentDefinition[]> {

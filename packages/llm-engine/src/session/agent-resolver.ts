@@ -1,6 +1,7 @@
 // @file: llm-engine/session/agent-resolver.ts
 
 import { ExecutorConfig } from '@itookit/llm-kernel';
+import { resolveModelForTier } from '@itookit/common';
 import { IAgentConfigService } from '../services/agent-service';
 import { EngineError, EngineErrorCode } from '../core/errors';
 import { log } from '../utils/logger';
@@ -48,9 +49,9 @@ export class AgentResolver {
                     );
                 }
 
+                // Priority: explicit modelName pin > tier lookup > resolved optimal (conn.model)
                 const modelId = agentDef.config.modelName
-                    || connMeta.model
-                    || connMeta.availableModels?.[0]?.id
+                    || resolveModelForTier(connMeta, agentDef.config.modelTier ?? 'optimal')
                     || '';
 
                 config = {
@@ -106,13 +107,10 @@ export class AgentResolver {
                 ? await this.agentService.getConnection(connectionId)
                 : await this.agentService.getDefaultConnection();
 
-            if (!connMeta?.availableModels) return [];
-
-            return connMeta.availableModels.map(m => ({
-                id: m.id,
-                name: m.name,
-                provider: connMeta.name,
-            }));
+            // Model catalog is now on the Provider, not ConnectionMeta.
+            // Return the resolved optimal model as the only option.
+            if (!connMeta?.model) return [];
+            return [{ id: connMeta.model, name: connMeta.model, provider: connMeta.name }];
         } catch (e) {
             console.error('[AgentResolver] getModelsForAgent failed:', e);
             return [];
@@ -127,7 +125,7 @@ export class AgentResolver {
             return { id: 'default', name: 'Error: No Connection', type: 'agent', model: '' } as ExecutorConfig;
         }
 
-        const modelId = connMeta.model || connMeta.availableModels?.[0]?.id || '';
+        const modelId = resolveModelForTier(connMeta, 'optimal') || '';
 
         log.info('Using fallback configuration', {
             connectionId: connMeta.id, connectionName: connMeta.name, modelId,

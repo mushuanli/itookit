@@ -1,15 +1,12 @@
 // @file: llm-ui/services/AgentLoader.ts
 
-import { IAgentConfigService, SessionManager } from '@itookit/llm-engine';
-import { ExecutorOption, ModelOption } from '../domain/types';
+import { IAgentConfigService } from '@itookit/llm-engine';
+import { ExecutorOption, ConnectionOption } from '../domain/types';
 
 export class AgentLoader {
     private cachedAgents: ExecutorOption[] = [];
 
-    constructor(
-        private agentService: IAgentConfigService,
-        private sessionManager: SessionManager
-    ) { }
+    constructor(private agentService: IAgentConfigService) { }
 
     /**
      * 加载 Agent 列表
@@ -73,18 +70,19 @@ export class AgentLoader {
     }
 
     /**
-     * 加载指定 Agent 的可用模型
+     * 加载所有可用连接（供 ChatInput 连接选择器使用）
      */
-    async loadModelsForAgent(agentId: string): Promise<ModelOption[]> {
+    async loadConnections(): Promise<ConnectionOption[]> {
         try {
-            const models = await this.sessionManager.getModelsForAgent(agentId);
-            return models.map(m => ({
-                id: m.id,
-                name: m.name,
-                provider: m.provider,
+            const connections = await this.agentService.getConnections();
+            return connections.map(c => ({
+                id: c.id,
+                name: c.name,
+                provider: c.provider,
+                hasTiers: !!(c.tiers?.standard || c.tiers?.fast),
             }));
         } catch (e) {
-            console.error('[AgentLoader] loadModelsForAgent failed:', e);
+            console.error('[AgentLoader] loadConnections failed:', e);
             return [];
         }
     }

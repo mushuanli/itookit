@@ -1,5 +1,7 @@
 // @file: llm-ui/domain/types.ts
 
+import type { ModelTier } from '@itookit/common';
+
 // ============================================================
 // 节点操作
 // ============================================================
@@ -65,12 +67,33 @@ export interface ModelOption {
     description?: string;
 }
 
+/** 连接选项（用于 ChatInput 连接选择器，不含 apiKey） */
+export interface ConnectionOption {
+    id: string;
+    name: string;
+    provider?: string;
+    /** 是否配置了 standard 或 fast tier（决定 tier 选择器是否有实际意义） */
+    hasTiers: boolean;
+}
+
 // ============================================================
 // 会话设置
 // ============================================================
 
 export interface ChatSessionSettings {
-    modelId?: string;
+    /**
+     * 覆盖 Agent 使用的 LLM 连接 ID。
+     * 不设置时使用 Agent 自身配置的连接。
+     */
+    connectionId?: string;
+    /**
+     * 模型层级偏好。
+     * - `'auto'`     — 不覆盖，使用 Agent 自身的 modelTier（默认 optimal）
+     * - `'optimal'`  — 强制使用最优模型
+     * - `'standard'` — 强制使用标准模型
+     * - `'fast'`     — 强制使用快速/廉价模型
+     */
+    modelTier?: 'auto' | ModelTier;
     historyLength: number;
     temperature?: number;
     streamMode: boolean;
@@ -89,7 +112,8 @@ export interface ChatSessionSettings {
 }
 
 export const DEFAULT_SESSION_SETTINGS: ChatSessionSettings = {
-    modelId: undefined,
+    connectionId: undefined,
+    modelTier: 'auto',
     historyLength: -1,
     temperature: undefined,
     streamMode: true,
@@ -98,7 +122,10 @@ export const DEFAULT_SESSION_SETTINGS: ChatSessionSettings = {
 };
 
 export interface ChatOverrides {
-    modelId?: string;
+    /** 覆盖 LLM 连接 ID（对应 AgentTaskRequest.modelOverride） */
+    connectionId?: string;
+    /** 模型层级覆盖（'auto' 不传此字段） */
+    modelTier?: ModelTier;
     historyLength?: number;
     temperature?: number;
     streamMode?: boolean;

@@ -1,7 +1,7 @@
 // @file: common/interfaces/llm/agent.ts
 // Agent、MCP 及服务接口定义。
 
-import type { LLMConnection, ConnectionMeta, LLMProviderDefinition, ConnectionTestResult } from './connection';
+import type { LLMConnection, ConnectionMeta, LLMProvider, ConnectionTestResult, ModelTier } from './connection';
 import type { RestorableItem } from '../../types/types';
 
 // ─── Agent ────────────────────────────────────────────────────────────────────
@@ -10,7 +10,17 @@ export type AgentType = 'agent' | 'composite' | 'tool' | 'workflow';
 
 export interface AgentConfig {
     connectionId: string;
-    modelName: string;
+    /**
+     * 模型层级偏好。决定从连接的 `tiers` 中取哪个模型。
+     * 未设置时默认使用 'optimal'（即连接的 `model` 字段）。
+     */
+    modelTier?: ModelTier;
+    /**
+     * 精确固定某一 model ID（高级用途）。
+     * 优先级高于 modelTier；设置后 tier 系统对该 agent 无效。
+     * @deprecated 优先使用 modelTier + connection.tiers 配置。
+     */
+    modelName?: string;
     systemPrompt?: string;
     maxHistoryLength?: number;
     temperature?: number;
@@ -146,8 +156,18 @@ export interface IConnectionService {
     deleteConnection(id: string): Promise<void>;
     /** 监听连接数据变化 */
     onChange(listener: () => void): () => void;
-    /** 返回所有 Provider 默认配置（含模型列表、baseURL 等） */
-    getProviderDefaults(): Record<string, LLMProviderDefinition>;
+    /** 返回所有内置 Provider 目录（含模型列表、baseURL 等） */
+    getProviderDefaults(): Record<string, LLMProvider>;
+    /** 获取单个 Provider 定义 */
+    getProvider(providerId: string): LLMProvider | undefined;
+    /** 列出所有 Provider（不含 apiKey，供 UI 列表使用） */
+    getProviders(): LLMProvider[];
+    /** 返回含 apiKey 的完整 Provider（仅供 Settings UI 编辑表单使用） */
+    getFullProvider(id: string): LLMProvider | undefined;
+    /** 保存 Provider 到 VFS（新建或更新，含 apiKey） */
+    saveProvider(provider: LLMProvider): Promise<void>;
+    /** 删除用户自定义 Provider（内置 Provider 不可删除） */
+    deleteProvider(id: string): Promise<void>;
     /** 测试连接参数是否可用（实际发起 HTTP 请求） */
     testConnection(params: { provider: string; apiKey: string; baseURL?: string; model?: string }): Promise<ConnectionTestResult>;
 }
@@ -189,10 +209,22 @@ export interface IAgentConfigService {
     init(): Promise<void>;
     getAgentConfig(agentId: string): Promise<AgentDefinition | null>;
     getAgents(): Promise<AgentDefinition[]>;
+    /** 返回所有连接的安全元数据列表（不含 apiKey） */
+    getConnections(): Promise<ConnectionMeta[]>;
     /** 返回安全元数据，不含 apiKey */
     getConnection(id: string): Promise<ConnectionMeta | undefined>;
     /** 返回安全元数据，不含 apiKey */
     getDefaultConnection(): Promise<ConnectionMeta | null>;
+    /** 列出所有 Provider（不含 apiKey） */
+    getProviders(): LLMProvider[];
+    /** 返回含 apiKey 的完整 Provider（仅供 Settings UI 使用） */
+    getFullProvider(id: string): LLMProvider | undefined;
+    /** 获取单个 Provider（不含 apiKey） */
+    getProvider(providerId: string): LLMProvider | undefined;
+    /** 保存 Provider（含 apiKey） */
+    saveProvider(provider: LLMProvider): Promise<void>;
+    /** 删除用户自定义 Provider */
+    deleteProvider(id: string): Promise<void>;
     onChange(callback: () => void): () => void;
 }
 
@@ -210,5 +242,7 @@ export interface IAgentManagementService extends IAgentConfigService, ILLMManage
 
     // 恢复/诊断
     getRestorableItems(): Promise<RestorableItem[]>;
-    restoreItem(type: 'connection' | 'agent', id: string): Promise<void>;
+    restoreItem(type: 'provider' | 'connection' | 'agent', id: string): Promise<void>;
+    /** 强制将所有内置 Provider / Connection / Agent 重置为出厂默认值（保留 apiKey） */
+    resetAllDefaults(): Promise<void>;
 }

@@ -31,8 +31,9 @@ import type {
     ChatMessage,
     ToolCall,
     TokenUsage,
+    ModelTier,
 } from '@itookit/common';
-import { BudgetExhaustedError } from '@itookit/common';
+import { BudgetExhaustedError, getNextLowerTier, resolveModelForTier } from '@itookit/common';
 import { BudgetController } from './budget-controller';
 import { ErrorRecoveryService } from './error-recovery';
 import { BackPressureValidator } from './back-pressure';
@@ -108,6 +109,18 @@ export class AgentLoopExecutor implements IAgentRuntime {
         const usage = budgetController.createSnapshot();
         const primaryConn = task.modelOverride ?? this.modelRoles.primary;
         const recovery = new ErrorRecoveryService(this.llm, primaryConn);
+
+        // Resolve tier model IDs from the connection. modelIdOverride takes absolute priority.
+        let effectiveModelId: string | undefined = task.modelIdOverride;
+        let currentTier: ModelTier = task.modelTier ?? 'optimal';
+        let tierModelIds: Partial<Record<ModelTier, string>> = {};
+        if (!task.modelIdOverride) {
+            const connMeta = await this.llm.getConnection(primaryConn);
+            if (connMeta?.tiers) {
+                tierModelIds = connMeta.tiers;
+                effectiveModelId = resolveModelForTier(connMeta, currentTier);
+            }
+        }
         const backPressure = new BackPressureValidator(this.loopConfig.backPressureRules);
         const cwd = task.workingDirectory ?? (typeof process !== 'undefined' ? process.cwd() : '/');
 
@@ -145,9 +158,19 @@ export class AgentLoopExecutor implements IAgentRuntime {
                 // 1. Budget Check
                 budgetController.checkOrThrow(usage);
                 for (const resource of budgetController.getApproachingLimits(usage)) {
+                    // Auto-downgrade model tier when budget is approaching limits.
+                    // modelIdOverride pins the model explicitly — skip auto-downgrade.
+                    const suggestedTier = task.modelIdOverride
+                        ? undefined
+                        : getNextLowerTier(currentTier, tierModelIds);
+                    if (suggestedTier && tierModelIds[suggestedTier]) {
+                        effectiveModelId = tierModelIds[suggestedTier];
+                        currentTier = suggestedTier;
+                    }
                     this.emit('agent:budget:warning', {
                         resource,
                         usedRatio: budgetController.getUsedRatios(usage)[resource] ?? 0,
+                        suggestedTier,
                     });
                 }
 
@@ -173,11 +196,11 @@ export class AgentLoopExecutor implements IAgentRuntime {
                 // when function-calling schemas are included. Tools will be re-enabled once
                 // the endpoint's tool-calling support is confirmed.
                 const effectiveTools = undefined;
-                console.log('[harness][A] LLM call start, connId=', connId, 'tools=', toolDefs.length, 'systemPromptOverride=', !!task.systemPromptOverride);
-                this.emit('agent:llm:start', { model: connId, messageCount: messages.length });
+                console.log('[harness][A] LLM call start, connId=', connId, 'model=', effectiveModelId ?? '(conn default)', 'tools=', toolDefs.length, 'systemPromptOverride=', !!task.systemPromptOverride);
+                this.emit('agent:llm:start', { model: effectiveModelId ?? connId, messageCount: messages.length });
                 const response = await recovery.callWithRecovery(
                     connId,
-                    { messages, tools: effectiveTools, signal: this.abortController.signal },
+                    { messages, tools: effectiveTools, signal: this.abortController.signal, model: effectiveModelId },
                     {
                         maxRetries: this.loopConfig.maxApiRetries,
                         baseDelayMs: this.loopConfig.baseRetryDelayMs,
