@@ -80,6 +80,11 @@ export interface LLMProvider {
      * false / undefined = 用户新建的自定义 Provider，可以删除。
      */
     isBuiltin?: boolean;
+    /**
+     * Provider 是否启用。false = 禁用（所有绑定此 Provider 的 Connection 均不可用）。
+     * 未设置视为 true。
+     */
+    enabled?: boolean;
     [key: string]: unknown;
 }
 
@@ -115,6 +120,11 @@ export interface LLMConnection {
         headers?: Record<string, string>;
         [key: string]: unknown;
     };
+    /**
+     * Connection 是否启用。false = 禁用（不出现在选择器中，不可用于发起请求）。
+     * 未设置视为 true。
+     */
+    enabled?: boolean;
     status?: 'active' | 'error' | 'untested';
     lastTestedAt?: number;
     lastTestResult?: boolean;
@@ -154,6 +164,11 @@ export interface ConnectionMeta {
     tiers?: Partial<Record<ModelTier, string>>;
     /** 关联 Provider 是否已配置 apiKey */
     hasApiKey: boolean;
+    /**
+     * 此连接是否可用（Connection.enabled && Provider.enabled 均为 true）。
+     * false = 连接或其 Provider 被禁用，不可发起请求。
+     */
+    enabled: boolean;
     metadata?: Record<string, unknown>;
     status?: 'active' | 'error' | 'untested';
 }
@@ -208,8 +223,9 @@ export function toConnectionMeta(conn: LLMConnection, provider?: LLMProvider): C
         provider: pid,
         model: resolvedModel,
         tiers: effectiveTiers,
-        // apiKey now lives on Provider; fall back to legacy conn.apiKey for old data
         hasApiKey: !!(provider?.apiKey?.trim() ?? conn.apiKey?.trim()),
+        // enabled = both connection and provider must be enabled (undefined treated as true)
+        enabled: conn.enabled !== false && provider?.enabled !== false,
         metadata: conn.metadata as Record<string, unknown>,
         status: conn.status,
     };

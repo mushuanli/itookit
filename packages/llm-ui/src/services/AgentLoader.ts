@@ -75,12 +75,14 @@ export class AgentLoader {
     async loadConnections(): Promise<ConnectionOption[]> {
         try {
             const connections = await this.agentService.getConnections();
-            return connections.map(c => ({
-                id: c.id,
-                name: c.name,
-                provider: c.provider,
-                hasTiers: !!(c.tiers?.standard || c.tiers?.fast),
-            }));
+            return connections
+                .filter(c => c.enabled !== false)   // hide disabled connections from selector
+                .map(c => ({
+                    id: c.id,
+                    name: c.name,
+                    provider: c.provider,
+                    hasTiers: !!(c.tiers?.standard || c.tiers?.fast),
+                }));
         } catch (e) {
             console.error('[AgentLoader] loadConnections failed:', e);
             return [];

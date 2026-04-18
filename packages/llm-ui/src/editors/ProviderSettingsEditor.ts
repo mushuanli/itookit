@@ -57,23 +57,31 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
     // ── Card ───────────────────────────────────────────────────────────────────
 
     private renderProviderCard(p: LLMProvider): string {
-        // getProviders() strips apiKey; check via getFullProvider
-        const fullP = this.service.getFullProvider?.(p.id);
-        const hasKey = !!(fullP?.apiKey?.trim());
+        const fullP    = this.service.getFullProvider?.(p.id);
+        const hasKey   = !!(fullP?.apiKey?.trim());
+        const enabled  = p.enabled !== false;
         const badge = p.isBuiltin
             ? '<span class="settings-badge settings-badge--info">内置</span>'
             : '<span class="settings-badge settings-badge--warning">自定义</span>';
         const keyBadge = hasKey
             ? ''
             : '<span class="settings-badge settings-badge--warning" style="font-size:0.7rem">需配置 Key</span>';
+        const disabledStyle = enabled ? '' : 'opacity:0.55;';
 
         return `
-            <div class="settings-connection-card" data-id="${p.id}">
+            <div class="settings-connection-card" data-id="${p.id}" style="${disabledStyle}">
                 <div class="settings-connection-card__header">
-                    <h3 class="settings-connection-card__title">
-                        ${p.icon ?? ''} ${p.name}
-                    </h3>
-                    <div style="display:flex;gap:4px;flex-wrap:wrap">${badge}${keyBadge}</div>
+                    <h3 class="settings-connection-card__title">${p.icon ?? ''} ${p.name}</h3>
+                    <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">
+                        ${badge}${keyBadge}
+                        <label class="llm-enable-toggle" title="${enabled ? '点击禁用' : '点击启用'}">
+                            <input type="checkbox" class="chk-provider-enabled" data-id="${p.id}"
+                                   ${enabled ? 'checked' : ''} style="display:none">
+                            <span class="llm-enable-toggle__track ${enabled ? 'llm-enable-toggle__track--on' : ''}">
+                                <span class="llm-enable-toggle__thumb"></span>
+                            </span>
+                        </label>
+                    </div>
                 </div>
 
                 <div class="settings-connection-card__details">
@@ -126,8 +134,21 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
         const list = this.container.querySelector('#providers-list');
         if (!list) return;
 
+        // Enable/disable toggle (checkbox change)
+        this.addEventListener(list, 'change', async (e) => {
+            const target = e.target as HTMLInputElement;
+            if (!target.classList.contains('chk-provider-enabled')) return;
+            const id = target.dataset.id!;
+            const full = this.service.getFullProvider?.(id);
+            if (!full) return;
+            await this.service.saveProvider({ ...full, enabled: target.checked });
+            this.render();
+        });
+
         this.addEventListener(list, 'click', async (e) => {
             const target = e.target as HTMLElement;
+            // Don't intercept toggle clicks
+            if (target.closest('.llm-enable-toggle')) return;
             const card   = target.closest('[data-id]') as HTMLElement | null;
             if (!card) return;
             const id = card.dataset.id!;
