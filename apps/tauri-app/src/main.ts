@@ -11,8 +11,7 @@
  *  4. Wire tauri-only features: loading overlay, dynamic local mounts
  */
 
-import { initApp } from '@itookit/app-shell';
-import type { WorkspaceConfig } from '@itookit/app-shell';
+import { initApp, createWsMount } from '@itookit/app-shell';
 import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
 import { WORKSPACES } from './config/modules';
 import { LocalMountService, MountEntry, MOUNT_EVENTS } from './services/local-mounts';
@@ -231,18 +230,7 @@ async function bootstrap(): Promise<void> {
     document.addEventListener(MOUNT_EVENTS.ADDED, (e) => {
         const entry = (e as CustomEvent<MountEntry>).detail;
         injectMountWorkspace(entry);
-        const dynamicConfig: WorkspaceConfig = {
-            elementId:          entry.id + '-workspace',
-            moduleName:         entry.id,
-            slug:               entry.id,
-            type:               'standard',
-            title:              entry.label,
-            supportedFileTypes: ['markdown'],
-            syncEnabled:        false,
-            aiEnabled:          true,
-            mentionAble:        false,
-        };
-        app.addWorkspace(dynamicConfig);
+        app.addWorkspace(createWsMount(entry.id, entry.label));
     });
 
     // React to mount removed

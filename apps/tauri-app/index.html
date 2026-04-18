@@ -23,30 +23,20 @@
                 </a>
             </li>
 
-            <!-- Shared workspaces (same as web-app, data in appData/IndexedDB) -->
-            <li>
-                <a class="app-nav-btn" data-target="minds-workspace" title="Minds">
-                    <i class="fas fa-pen-to-square"></i>
-                </a>
-            </li>
+            <!-- Shared workspaces — order mirrors WORKSPACES array in config/modules.ts -->
             <li>
                 <a class="app-nav-btn" data-target="llm-workspace" title="AI Sessions">
                     <i class="fas fa-robot"></i>
                 </a>
             </li>
             <li>
-                <a class="app-nav-btn" data-target="agent-workspace" title="Agents">
-                    <i class="fas fa-user-secret"></i>
+                <a class="app-nav-btn" data-target="project-workspace" title="Projects">
+                    <i class="fas fa-folder-tree"></i>
                 </a>
             </li>
             <li>
                 <a class="app-nav-btn" data-target="anki-workspace" title="Anki Memory">
                     <i class="fas fa-brain"></i>
-                </a>
-            </li>
-            <li>
-                <a class="app-nav-btn" data-target="project-workspace" title="Projects">
-                    <i class="fas fa-folder-tree"></i>
                 </a>
             </li>
             <li>
@@ -57,6 +47,21 @@
             <li>
                 <a class="app-nav-btn" data-target="private-workspace" title="Private Notes">
                     <i class="fas fa-lock"></i>
+                </a>
+            </li>
+            <li>
+                <a class="app-nav-btn" data-target="minds-workspace" title="Minds">
+                    <i class="fas fa-pen-to-square"></i>
+                </a>
+            </li>
+            <li>
+                <a class="app-nav-btn" data-target="skills-workspace" title="Skills">
+                    <i class="fas fa-bolt"></i>
+                </a>
+            </li>
+            <li>
+                <a class="app-nav-btn" data-target="agent-workspace" title="Agents">
+                    <i class="fas fa-user-secret"></i>
                 </a>
             </li>
 
@@ -85,12 +90,13 @@
     <main class="main-content-area">
         <div id="home-workspace"     class="workspace-view active"></div>
         <div id="llm-workspace"      class="workspace-view"></div>
-        <div id="agent-workspace"    class="workspace-view"></div>
-        <div id="anki-workspace"     class="workspace-view"></div>
-        <div id="minds-workspace"   class="workspace-view"></div>
         <div id="project-workspace"  class="workspace-view"></div>
+        <div id="anki-workspace"     class="workspace-view"></div>
         <div id="email-workspace"    class="workspace-view"></div>
         <div id="private-workspace"  class="workspace-view"></div>
+        <div id="minds-workspace"    class="workspace-view"></div>
+        <div id="skills-workspace"   class="workspace-view"></div>
+        <div id="agent-workspace"    class="workspace-view"></div>
         <div id="settings-workspace" class="workspace-view">
             <div id="settings-content"></div>
         </div>
