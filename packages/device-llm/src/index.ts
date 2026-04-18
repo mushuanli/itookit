@@ -151,7 +151,7 @@ export {
     type InitialAgentDef,
     AGENT_DEFAULT_DIR,
     DEFAULT_AGENTS,
-} from './constants';
+} from './constants/';
 
 // ============================================
 // 工具函数
