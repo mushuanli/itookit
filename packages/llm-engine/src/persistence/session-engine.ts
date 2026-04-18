@@ -116,13 +116,29 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
     const allFiles = this.collectAllFileNodes(tree);
 
     for (const node of allFiles) {
-      if (!node.name.endsWith('.chat')) continue;
+      if (!this.isChatFile(node.name)) continue;
       try {
         const manifest = await this.getManifest(node.id); // also populates cache
         if (manifest.id === sessionId) return node.id;
       } catch { continue; }
     }
     return null;
+  }
+
+  /**
+   * Returns true if the filename should be treated as a .chat session file.
+   * Accepts:
+   *   - "session.chat"            ← canonical
+   *   - "Claudecode 讲解"         ← missing extension (lost via external rename or LocalFS bug)
+   *
+   * Rejects:
+   *   - "notes.md" / "image.png" ← real other-type files with a different extension
+   */
+  private isChatFile(name: string): boolean {
+    if (name.endsWith('.chat')) return true;
+    // If the name has NO extension at all (no '.'), treat it as a chat file
+    // whose extension was accidentally stripped.
+    return !name.includes('.');
   }
 
   private collectAllFileNodes(nodes: EngineNode[]): EngineNode[] {
@@ -1540,7 +1556,11 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
     const node = await this.vfs.getNodeById(id);
     if (!node) throw new Error('Node not found');
 
-    const { filename, title: cleanName } = buildRenamedFilename(newName, node.name);
+    // Always preserve .chat extension regardless of what node.name currently contains.
+    // If node.name has lost its .chat (e.g., renamed outside app or via LocalFS), fall back
+    // to the canonical .chat extension so the session remains recognisable.
+    const sourceName = node.name.endsWith('.chat') ? node.name : `${node.name}.chat`;
+    const { filename, title: cleanName } = buildRenamedFilename(newName, sourceName);
     await this.engine.rename(id, filename);
 
     try {
@@ -1567,7 +1587,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
   async search(query: EngineSearchQuery): Promise<EngineNode[]> {
     const results = await this.engine.search(query);
     return results.filter(
-      (node: EngineNode) => node.type === 'file' && node.name.endsWith('.chat')
+      (node: EngineNode) => node.type === 'file' && this.isChatFile(node.name)
     );
   }
 
@@ -1622,7 +1642,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
     return nodes.filter((node: EngineNode) => {
       if (node.name.startsWith('.')) return false;
       if (node.name.startsWith('_')) return false;
-      if (node.type === 'file') return node.name.endsWith('.chat');
+      if (node.type === 'file') return this.isChatFile(node.name);
       if (node.type === 'directory') return true;
       return false;
     });
