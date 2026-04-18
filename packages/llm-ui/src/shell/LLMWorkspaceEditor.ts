@@ -3,6 +3,7 @@
 import {
     IEditor, EditorOptions, EditorHostContext, EditorEvent,
     EditorEventCallback, CollapseExpandResult, Toast, Modal, guessMimeType,
+    showConfirmDialog,
 } from '@itookit/common';
 
 /** Alias: infer MIME from filename (used for @mention file suggestions) */
@@ -55,6 +56,7 @@ import { SlashCommandPlugin } from '../components/input/plugins/SlashCommandPlug
 import type { SlashCommandCallbacks } from '../components/input/plugins/SlashCommandPlugin';
 import { HarnessPlugin } from '../components/input/plugins/HarnessPlugin';
 import { getPromptHistory, getHarnessAdapter } from '@itookit/llm-engine';
+import { AssetManagerUI } from '@itookit/mdxeditor';
 import {
     buildSkillPrompt, getShellTemplateParams, getMissingParams, buildWizardRefill,
 } from '../components/input/SkillInvocationParser';
@@ -466,7 +468,6 @@ export class LLMWorkspaceEditor implements IEditor {
 
     private async handleOpenAssetManager(): Promise<void> {
         await this.errorHandler.wrap(async () => {
-            const { AssetManagerUI } = await import('@itookit/mdxeditor');
             const ownerNodeId = this.options.ownerNodeId || this.options.nodeId;
             if (!this.engine || !ownerNodeId) throw new Error('Engine not connected');
 
@@ -953,7 +954,6 @@ export class LLMWorkspaceEditor implements IEditor {
                     return;
                 }
 
-                const { showConfirmDialog } = await import('@itookit/common');
                 const confirmed = await showConfirmDialog(
                     'Delete last user message and its responses?'
                 );
@@ -967,7 +967,6 @@ export class LLMWorkspaceEditor implements IEditor {
                 const sessions = this.sessionManager.getSessions();
                 if (sessions.length === 0) return;
 
-                const { showConfirmDialog } = await import('@itookit/common');
                 const confirmed = await showConfirmDialog(
                     'Clear all messages in this conversation?'
                 );

@@ -357,6 +357,14 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
             defaultFileName:    primaryDef?.defaultFileName,
             defaultExtension:   primaryDef?.extension,
             defaultFileContent: primaryDef?.defaultContent,
+            ...(strategyType === 'chat' && {
+                defaultFileTitle: () => {
+                    const now = new Date();
+                    const pad = (n: number) => String(n).padStart(2, '0');
+                    // e.g. "2024-04-18 14-30" — local time, filesystem-safe (no colons)
+                    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}-${pad(now.getMinutes())}`;
+                },
+            }),
             contextMenu: {
                 items: (_item: object, defaults: MenuItem[]) => {
                     if (uiPassThrough.readOnly) return [];
