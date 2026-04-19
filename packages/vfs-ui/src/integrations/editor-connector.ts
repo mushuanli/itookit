@@ -15,6 +15,8 @@ import type {
 import type { VFSNodeUI, VFSUIState } from '../contracts/types';
 import type { VFSService } from '../services/VFSService';
 import { parseFileInfo, extractTaskCounts } from '../utils/parser';
+import { MediaViewerEditor, isBinaryViewable } from '../editors/MediaViewerEditor';
+import { guessMimeType } from '@itookit/common';
 
 export interface ConnectOptions {
   onEditorCreated?: (editor: IEditor | null) => void;
@@ -162,13 +164,13 @@ export function connectEditorLifecycle(
       if (myToken !== sessionToken) return;
 
       try {
-        const factory =
-          vfsManager.resolveEditorFactory?.(item) || defaultEditorFactory;
-        if (!factory) throw new Error('No suitable editor factory found.');
+        // Resolve MIME type from file extension to decide rendering strategy.
+        const extension = (item.metadata.custom?._extension as string | undefined) || '';
+        const mimeType = guessMimeType('file' + extension);
 
-        // item.content.data is only populated when an in-memory update event
-        // has fired (e.g. after a writeContent). On fresh page load, loadTree()
-        // omits file content, so we must read it from the engine directly.
+        // Read file content (needed by both viewers and text editors).
+        // item.content.data is only populated on in-memory update events;
+        // on fresh page load, loadTree() omits file content → read from engine.
         const initialContent =
           item.content?.data !== undefined
             ? item.content.data
@@ -176,6 +178,23 @@ export function connectEditorLifecycle(
 
         // Re-check token after the async readContent — user may have switched files.
         if (myToken !== sessionToken) return;
+
+        // Binary media files (image/video/audio/PDF): bypass the editor factory entirely.
+        // Show a read-only viewer instead — editing binary content has no meaning.
+        if (isBinaryViewable(mimeType)) {
+            const viewer = new MediaViewerEditor(mimeType);
+            await viewer.init(editorContainer, initialContent as string | ArrayBuffer | undefined);
+            if (myToken !== sessionToken) { await viewer.destroy(); return; }
+            activeEditor = viewer;
+            activeNode = item;
+            hasUnsavedChanges = false;
+            onEditorCreated?.(viewer);
+            return;
+        }
+
+        const factory =
+          vfsManager.resolveEditorFactory?.(item) || defaultEditorFactory;
+        if (!factory) throw new Error('No suitable editor factory found.');
 
         const editorOptions: EditorOptions = {
           ...factoryExtraOptions,
