@@ -34,6 +34,12 @@ export type VFSUIOptions = SessionUIOptions & {
      * 用于多实例隔离标识
      */
     scopeId?: string;
+
+    /**
+     * 在文件树中显示文件扩展名（如 .md / .ts / .pdf）。
+     * 适用于外部文件系统挂载（home / mount）。内部模块保持 false（默认）。
+     */
+    showFileExtensions?: boolean;
 };
 
 

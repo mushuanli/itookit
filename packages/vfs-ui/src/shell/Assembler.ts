@@ -85,7 +85,7 @@ export function assemble(
         newFileContent: options.newSessionContent,
     });
 
-    const engineAdapter = new EngineAdapter(engine, store, registry);
+    const engineAdapter = new EngineAdapter(engine, store, registry, options.showFileExtensions ?? false);
 
     // --- Interaction ---
     const commandBus = new CommandBus();

@@ -339,7 +339,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
         const strategyType = wsConfig.type ?? 'standard';
         const strategy = strategies[strategyType] ?? strategies.standard;
 
-        const { moduleName, plugins, mentionScope, aiEnabled, supportedFileTypes, ...uiPassThrough } = wsConfig;
+        const { moduleName, plugins, mentionScope, aiEnabled, supportedFileTypes, showFileExtensions, ...uiPassThrough } = wsConfig;
 
         const fileTypes: FileTypeDefinition[] = (supportedFileTypes ?? [])
             .map(id => getFileTypeDef(id))
@@ -386,6 +386,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
             scopeId:       elementId,
             fileTypes,
             uiOptions,
+            showFileExtensions,
             editorConfig: {
                 plugins:      plugins ?? [],
                 readOnly:     false,

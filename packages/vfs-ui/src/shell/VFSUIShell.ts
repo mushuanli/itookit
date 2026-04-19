@@ -51,6 +51,13 @@ export interface VFSUIShellOptions extends SessionUIOptions {
   customEditorResolver?: CustomEditorResolver;
   searchFilter?: SearchFilter;
   scopeId?: string;
+  /**
+   * 在文件树中显示文件扩展名。
+   * 适用于外部文件系统挂载（home / mount），让用户直接看到 .md / .ts / .pdf 等扩展名。
+   * 内部模块（chats / minds / agents）保持关闭，只显示无扩展名的标题。
+   * @default false
+   */
+  showFileExtensions?: boolean;
 }
 
 const EVENT_MAP: Record<SessionManagerEvent, string> = {

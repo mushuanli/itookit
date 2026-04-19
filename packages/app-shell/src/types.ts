@@ -20,6 +20,11 @@ export interface WorkspaceConfig {
     readOnly?: boolean;
     initialSidebarCollapsed?: boolean;
     searchPlaceholder?: string;
+    /**
+     * 在文件树中显示文件扩展名（如 .md / .ts / .pdf）。
+     * 外部文件系统挂载（home、mount）设为 true；内部模块保持 false（默认）。
+     */
+    showFileExtensions?: boolean;
 }
 
 export interface AdditionalMount {
