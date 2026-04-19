@@ -150,6 +150,7 @@ export const WS_HOME: WorkspaceConfig = {
     syncEnabled: false,
     mentionAble: true,
     aiEnabled: true,
+    showFileExtensions: true,   // external FS: show full filenames with extensions
 };
 
 /**
@@ -168,5 +169,6 @@ export function createWsMount(id: string, label: string): WorkspaceConfig {
         syncEnabled: false,
         mentionAble: false,
         aiEnabled: true,
+        showFileExtensions: true,   // external FS mount: show full filenames with extensions
     };
 }

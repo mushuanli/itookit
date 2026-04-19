@@ -12,6 +12,7 @@ export const mapEngineNodeToUIItem = (
   node: EngineNode,
   iconResolver?: IconResolver,
   parserResolver?: ContentParserResolver,
+  showFileExtensions = false,
 ): VFSNodeUI => {
   const isDir = node.type === 'directory';
 
@@ -27,8 +28,11 @@ export const mapEngineNodeToUIItem = (
       : parseFileInfo(contentStr);
   }
 
+  // showFileExtensions: use full filename (e.g. "notes.md") for external FS mounts;
+  // default: strip extension for display (e.g. "notes") for internal modules.
   const displayTitle =
-    (node.metadata?.title as string) || (isDir ? node.name : stripExtension(node.name));
+    (node.metadata?.title as string) ||
+    (isDir ? node.name : (showFileExtensions ? node.name : stripExtension(node.name)));
   const displayIcon =
     node.icon || iconResolver?.(node.name, isDir) || (isDir ? '📁' : '📄');
 
@@ -71,8 +75,9 @@ export const mapEngineNodeToUIItem = (
 export const mapEngineTreeToUIItems = (
   nodes: EngineNode[],
   iconResolver?: IconResolver,
-  parserResolver?: ContentParserResolver
+  parserResolver?: ContentParserResolver,
+  showFileExtensions = false,
 ): VFSNodeUI[] =>
   nodes
     ?.filter(n => !shouldFilterNode(n))
-    .map(n => mapEngineNodeToUIItem(n, iconResolver, parserResolver)) || [];
+    .map(n => mapEngineNodeToUIItem(n, iconResolver, parserResolver, showFileExtensions)) || [];
