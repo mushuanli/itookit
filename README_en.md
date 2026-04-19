@@ -60,7 +60,23 @@ A next-generation Markdown editor built on **CodeMirror 6**, balancing writing e
 - **Foldable blocks**: Fold/unfold long document sections to maintain reading focus
 - **Plugin architecture**: Micro-kernel built on `PluginManager` + `EventBus` + `ServiceContainer`—all features are plugins, combinable on demand
 
-#### 3. Three-Tier LLM Configuration (v3.1)
+#### 3. Conversation Branch System — `packages/llm-ui`
+
+The Chat workspace supports a **message tree branching system**, letting you explore multiple distinct conversation paths within the same session:
+
+- **Branch from any node**: Right-click a message bubble and choose "Branch from here" to create an independent conversation path without affecting the original
+- **Named branches**: Each branch has a custom name (e.g. `main` / `approach-A` / `approach-B`) for easy management of parallel explorations
+- **Branch switching**: Switch freely between branches to review different conversation histories; use `/branchprev` / `/branchnext` for quick cycling
+- **Branch listing**: `/branches` command lists all branches in the current session with their origin nodes
+- **Persistent storage**: The branch structure is stored as a message directed graph in the VFS AssetDir (`.chat` format), preserving every path completely
+- **Use cases**: A/B testing different prompt strategies, "rewind and retry" without losing existing context, exploring multiple directions in parallel
+
+```
+main ──→ Q1 ──→ A1 ──→ Q2 ──→ A2 (main branch)
+                  └──→ Q2' ──→ A2' (approach-B branch, different question)
+```
+
+#### 4. Three-Tier LLM Configuration (v3.1)
 
 ```
 Provider   ── Cloud vendor (apiKey + model catalog)
@@ -80,7 +96,7 @@ Agent      ── Functional customization (system prompt + tier preference)
 
 A single Provider can have multiple Connections (e.g., `rdsec-claude` / `rdsec-gemini` / `rdsec-deepseek`), enabling flexible multi-model setups.
 
-#### 4. Multi-turn Agent Loop — `packages/llm-harness`
+#### 5. Multi-turn Agent Loop — `packages/llm-harness`
 
 - Tool calling (file_read / file_write / shell_exec / glob_search / grep_search)
 - Four-layer progressive context compression (history_snip → cache_prune → llm_summarize → sliding_window)
@@ -89,7 +105,7 @@ A single Provider can have multiple Connections (e.g., `rdsec-claude` / `rdsec-g
 - MCP Protocol support (Model Context Protocol)
 - TTY interactive shell sessions (Python REPL / psql / ssh, etc.)
 
-#### 5. Skill System — `packages/device-llm`
+#### 6. Skill System — `packages/device-llm`
 
 Skills give Agents reusable specialized capabilities:
 

@@ -60,7 +60,23 @@ VFS 是 MindOS 的底层基础，提供了独特的文件系统抽象：
 - **可折叠块**：长文档节点折叠/展开，保持阅读焦点
 - **插件架构**：基于 `PluginManager` + `EventBus` + `ServiceContainer` 的微内核，所有功能均为插件，业务代码可按需组合
 
-#### 3. LLM 三层配置架构（v3.1）
+#### 3. 对话分支系统 — `packages/llm-ui`
+
+Chat 工作区支持**消息树状分支**，让你在同一个会话中探索多条不同的对话路径：
+
+- **从任意节点创建分支**：在消息气泡上右键选择「从此处分支」，生成一条独立的对话路径，原有对话不受影响
+- **命名分支**：每条分支可以自定义名称（如 `main` / `approach-A` / `approach-B`），方便管理多轮探索
+- **切换分支**：在分支间自由切换，查看不同路径的对话历史；`/branchprev` / `/branchnext` 快速循环
+- **分支列表**：`/branches` 命令列出当前会话的所有分支及其起始节点
+- **持久化存储**：分支结构以消息有向图的形式存入 VFS AssetDir（`.chat` 格式），完整保留每条路径
+- **适用场景**：A/B 测试不同 prompt 策略、在不破坏现有上下文的前提下"回退重试"、并行探索多个方向
+
+```
+main ──→ Q1 ──→ A1 ──→ Q2 ──→ A2 (main branch)
+                  └──→ Q2' ──→ A2' (approach-B branch, different question)
+```
+
+#### 4. LLM 三层配置架构（v3.1）
 
 ```
 Provider   ──  云提供商（apiKey + 模型目录）
@@ -80,7 +96,7 @@ Agent      ──  个性化定制（system prompt + tier 偏好）
 
 同一 Provider 可创建多个 Connection（如 `rdsec-claude` / `rdsec-gemini` / `rdsec-deepseek`），灵活应对多模型混用场景。
 
-#### 4. 多轮 Agent 循环 — `packages/llm-harness`
+#### 5. 多轮 Agent 循环 — `packages/llm-harness`
 
 - 工具调用（file_read / file_write / shell_exec / glob_search / grep_search）
 - 四层渐进式上下文压缩（history_snip → cache_prune → llm_summarize → sliding_window）
@@ -89,7 +105,7 @@ Agent      ──  个性化定制（system prompt + tier 偏好）
 - MCP 协议支持（Model Context Protocol）
 - TTY 交互式 Shell 会话（Python REPL / psql / ssh 等）
 
-#### 5. 技能系统 — `packages/device-llm`
+#### 6. 技能系统 — `packages/device-llm`
 
 技能（Skill）让 Agent 具备可复用的专项能力：
 
