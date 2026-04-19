@@ -7,7 +7,7 @@
 //   agents.ts     — Layer 3: Agent 默认定义（功能定制）
 
 /** 配置版本号（修改任意层内容必须递增，触发 ensureDefaults 重新同步） */
-export const CONST_CONFIG_VERSION = 11;
+export const CONST_CONFIG_VERSION = 12;
 
 export * from './providers';
 export * from './connections';
