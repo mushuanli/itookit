@@ -28,7 +28,8 @@ export class EngineAdapter {
     constructor(
         private readonly engine: ISessionEngine,
         private readonly store: IStatePort,
-        private readonly fileTypePort: IFileTypePort
+        private readonly fileTypePort: IFileTypePort,
+        private readonly showFileExtensions = false,
     ) { }
 
     private get iconResolver() {
@@ -47,7 +48,8 @@ export class EngineAdapter {
             const uiItems = mapEngineTreeToUIItems(
                 rootChildren,
                 this.iconResolver,
-                this.parserResolver
+                this.parserResolver,
+                this.showFileExtensions
             );
             const tags = this.buildTagsMap(uiItems);
             adapterDEBUG.dispatch('STATE_LOAD_SUCCESS', `${uiItems.length} items`);
@@ -102,7 +104,7 @@ export class EngineAdapter {
                         } else {
                             node.children = [];
                         }
-                        return mapEngineNodeToUIItem(node, this.iconResolver, this.parserResolver);
+                        return mapEngineNodeToUIItem(node, this.iconResolver, this.parserResolver, this.showFileExtensions);
                     } catch {
                         return null;
                     }
@@ -253,7 +255,7 @@ export class EngineAdapter {
         try {
             const children = await this.engine.getChildren(folderId);
             const uiChildren = children.map(n =>
-                mapEngineNodeToUIItem(n, this.iconResolver, this.parserResolver)
+                mapEngineNodeToUIItem(n, this.iconResolver, this.parserResolver, this.showFileExtensions)
             );
 
             this.store.dispatch({

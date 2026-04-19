@@ -49,6 +49,7 @@ export class MemoryManager {
                 defaultEditorFactory: this.enhancedEditorFactory,
                 fileTypes: config.fileTypes,
                 customEditorResolver: config.customEditorResolver,
+                showFileExtensions: config.showFileExtensions,
             },
             this.engine
         ) as VFSUIShell;

@@ -75,6 +75,12 @@ export interface MemoryManagerConfig {
      */
     customEditorResolver?: CustomEditorResolver;
 
+    /**
+     * 在文件树中显示文件扩展名（如 .md / .ts / .pdf）。
+     * 外部文件系统挂载（home、mount）设为 true；内部模块保持默认 false。
+     */
+    showFileExtensions?: boolean;
+
     // --- 业务功能配置 ---
     /**
      * 默认文件内容配置 (当列表为空时自动创建)
