@@ -25,6 +25,22 @@ export interface LLMModel {
     outputPricePerMillion?: number;
 }
 
+// ─── DailyCost ───────────────────────────────────────────────────────────────
+
+/** 单日用量开销记录，按日期 key 索引，用于统计和图表 */
+export interface DailyCost {
+    /** ISO 日期字符串 YYYY-MM-DD */
+    date: string;
+    /** 输入 token 数 */
+    inputTokens: number;
+    /** 输出 token 数 */
+    outputTokens: number;
+    /** 费用（美元） */
+    cost: number;
+    /** 请求次数 */
+    requests: number;
+}
+
 // ─── ModelTier ────────────────────────────────────────────────────────────────
 
 /**
@@ -85,6 +101,16 @@ export interface LLMProvider {
      * 未设置视为 true。
      */
     enabled?: boolean;
+    /**
+     * Provider 默认温度（0-2），所有绑定此 Provider 的 Connection 继承此值。
+     * Connection.temperature 可覆盖此默认值。
+     */
+    defaultTemperature?: number;
+    /**
+     * 整个 Provider 每日开销统计（所有 Connection 汇总）。
+     * key 为 ISO 日期字符串 YYYY-MM-DD。
+     */
+    dailyCosts?: Record<string, DailyCost>;
     [key: string]: unknown;
 }
 
@@ -126,6 +152,16 @@ export interface LLMConnection {
      */
     enabled?: boolean;
     status?: 'active' | 'error' | 'untested';
+    /**
+     * 温度参数（0-2），覆盖 Provider.defaultTemperature。
+     * 未设置则使用 Provider 的默认温度。
+     */
+    temperature?: number;
+    /**
+     * 本连接每日开销统计，key 为 ISO 日期字符串 YYYY-MM-DD。
+     * 与 Provider.dailyCosts 独立——Provider 存储所有 Connection 的汇总。
+     */
+    dailyCosts?: Record<string, DailyCost>;
     lastTestedAt?: number;
     lastTestResult?: boolean;
     createdAt?: number;
@@ -171,6 +207,10 @@ export interface ConnectionMeta {
     enabled: boolean;
     metadata?: Record<string, unknown>;
     status?: 'active' | 'error' | 'untested';
+    /** 已解析的温度值（connection.temperature ?? provider.defaultTemperature） */
+    temperature?: number;
+    /** 本连接每日开销统计 */
+    dailyCosts?: Record<string, DailyCost>;
 }
 
 // ─── DefaultConnectionDef ────────────────────────────────────────────────────
@@ -228,6 +268,8 @@ export function toConnectionMeta(conn: LLMConnection, provider?: LLMProvider): C
         enabled: conn.enabled !== false && provider?.enabled !== false,
         metadata: conn.metadata as Record<string, unknown>,
         status: conn.status,
+        temperature: conn.temperature ?? provider?.defaultTemperature,
+        dailyCosts: conn.dailyCosts,
     };
 }
 
@@ -241,11 +283,63 @@ export function toProviderMeta(provider: LLMProvider): Omit<LLMProvider, 'apiKey
 }
 
 /** 解析指定 tier 对应的模型 ID */
+/** 层级 fallback 顺序：fast → standard → optimal → model */
+const TIER_FALLBACK: Record<ModelTier, ModelTier[]> = {
+    fast:     ['fast', 'standard', 'optimal'],
+    standard: ['standard', 'optimal'],
+    optimal:  ['optimal'],
+};
+
+/**
+ * 解析指定 tier 对应的模型 ID，未配置时自动向上 fallback。
+ *
+ * 例：选择「快速」但连接未配置 fast/standard → fallback 到 optimal → model
+ */
 export function resolveModelForTier(
     conn: Pick<ConnectionMeta, 'model' | 'tiers'>,
     tier: ModelTier,
 ): string {
-    return conn.tiers?.[tier] ?? conn.model;
+    for (const t of TIER_FALLBACK[tier]) {
+        const modelId = conn.tiers?.[t];
+        if (modelId) {
+            console.log(`[resolveModelForTier] requested=${tier} matched=${t} model=${modelId}`);
+            return modelId;
+        }
+    }
+    console.log(`[resolveModelForTier] requested=${tier} fallback=conn.model model=${conn.model}`);
+    return conn.model;
+}
+
+/** 解析最终温度：connection.temperature → provider.defaultTemperature → undefined */
+export function resolveTemperature(
+    conn: Pick<LLMConnection, 'temperature'>,
+    provider?: Pick<LLMProvider, 'defaultTemperature'>,
+): number | undefined {
+    return conn.temperature ?? provider?.defaultTemperature;
+}
+
+/**
+ * 聚合所有 Connection 的每日开销 → Provider 级别汇总。
+ * 按日期合并，同名日期累加所有 Connection 的数据。
+ */
+export function aggregateProviderCosts(
+    connections: Pick<LLMConnection, 'dailyCosts'>[],
+): Record<string, DailyCost> {
+    const result: Record<string, DailyCost> = {};
+    for (const conn of connections) {
+        if (!conn.dailyCosts) continue;
+        for (const [date, c] of Object.entries(conn.dailyCosts)) {
+            if (result[date]) {
+                result[date].inputTokens += c.inputTokens;
+                result[date].outputTokens += c.outputTokens;
+                result[date].cost += c.cost;
+                result[date].requests += c.requests;
+            } else {
+                result[date] = { ...c };
+            }
+        }
+    }
+    return result;
 }
 
 /** 返回下一个更低成本的层级，optimal → standard → fast → undefined */

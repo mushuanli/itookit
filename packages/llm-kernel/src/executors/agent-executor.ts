@@ -552,16 +552,24 @@ export class AgentExecutor implements IExecutor {
             };
         }
 
-        console.error('[AgentExecutor] Error:', error);
+        const modelId = (error as any).model || this.config.model;
+        console.error(
+            `[AgentExecutor] Error${modelId ? ` (model: ${modelId})` : ''}:`,
+            error,
+        );
         context.emitError(error);
+
+        const errorMsg = modelId
+            ? `Model '${modelId}': ${error.message}`
+            : error.message;
 
         return {
             status: 'failed',
             output: null,
-            control: { action: 'end', reason: error.message },
+            control: { action: 'end', reason: errorMsg },
             errors: [{
                 code: error.code || 'LLM_ERROR',
-                message: error.message,
+                message: errorMsg,
                 recoverable: this.isRecoverable(error)
             }],
             metadata: {

@@ -777,6 +777,12 @@ code {
             }
         }
 
+        console.log('[ChatInput] buildOverrides:', {
+            connectionId: overrides.connectionId || '(agent default)',
+            modelTier: overrides.modelTier || '(auto)',
+            useHarness: overrides.useHarness || false,
+        });
+
         return overrides;
     }
 

@@ -191,23 +191,29 @@ export class LLMDriver {
             }
         } catch (error: any) {
             clearTimeout(timeoutId);
-            
+
             // 转换为 LLMError
-            const llmError = error instanceof LLMError 
-                ? error 
+            const llmError = error instanceof LLMError
+                ? error
                 : LLMError.fromException(this.providerName, error);
-            
-            // ✅ 简洁调用
+
+            // 注入模型名，用于友好错误提示
+            if (!llmError.model && this.currentModel) {
+                llmError.model = this.currentModel;
+                llmError.message = `Model '${this.currentModel}': ${llmError.message}`;
+            }
+
             log.error('Chat failed', {
                 requestId,
                 code: llmError.code,
-                message: llmError.message
+                message: llmError.message,
+                model: llmError.model || this.currentModel,
             });
-            
+
             if (this.config.hooks?.onError) {
                 await this.config.hooks.onError(llmError, finalParams);
             }
-            
+
             throw llmError;
         }
     }

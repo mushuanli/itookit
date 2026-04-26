@@ -19,7 +19,7 @@ import type {
     MCPServer, LLMSkill, CreateFileOptions, ToolDefinition,
     ConnectionTestResult, InitialAgentDef,
 } from '@itookit/common';
-import { toConnectionMeta, CONFIG_MODULE } from '@itookit/common';
+import { toConnectionMeta, aggregateProviderCosts, CONFIG_MODULE } from '@itookit/common';
 import yaml from 'js-yaml';
 
 import { LLMDriver } from '../core/driver';
@@ -89,6 +89,8 @@ export const LLM_IOCTL = {
     // ── Provider 管理（无需 sessionId）──────────────────────────────────────
     /** → LLMProvider[]（不含 apiKey） */
     LIST_PROVIDERS:       'list-providers',
+    /** arg: id → LLMProvider | null（不含 apiKey，含模型定价） */
+    GET_PROVIDER:         'get-provider',
     /** arg: id → LLMProvider | null（含 apiKey，仅供 Settings UI） */
     GET_FULL_PROVIDER:    'get-full-provider',
     /** arg: LLMProvider → void（保存，含 apiKey） */
@@ -458,6 +460,9 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
             case LLM_IOCTL.LIST_PROVIDERS:
                 return this.getProviders();          // strips apiKey
 
+            case LLM_IOCTL.GET_PROVIDER:
+                return this.getProvider(arg as string) ?? null;   // safe view, no apiKey
+
             case LLM_IOCTL.GET_FULL_PROVIDER:
                 return this.getFullProvider(arg as string) ?? null;
 
@@ -606,6 +611,23 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
             resourceId: conn.id,
         });
         this.notify();
+
+        // Aggregate connection costs into provider dailyCosts
+        if (conn.dailyCosts && conn.providerId) {
+            this.aggregateAndSaveProviderCosts(conn.providerId).catch(() => {});
+        }
+    }
+
+    /** 聚合指定 Provider 下所有 Connection 的 dailyCosts，写入 Provider */
+    private async aggregateAndSaveProviderCosts(providerId: string): Promise<void> {
+        const provider = this._providers.get(providerId);
+        if (!provider) return;
+        const pid = providerId;
+        const sameProviderConns = this._connections.filter(
+            c => (c.providerId ?? c.provider) === pid
+        );
+        provider.dailyCosts = aggregateProviderCosts(sameProviderConns);
+        await this.saveProvider(provider);
     }
 
     async deleteConnection(id: string): Promise<void> {
