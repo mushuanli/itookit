@@ -254,8 +254,28 @@ export class TaskRunner {
         // 3. Resolve executor config
         let executorConfig = await this.agentResolver.resolve(input.agentId);
         if (input.overrides) {
+            console.log('[TaskRunner] overrides received:', {
+                connectionId: input.overrides.connectionId || '(none)',
+                modelTier: input.overrides.modelTier || '(none)',
+                useHarness: input.overrides.useHarness || false,
+            });
             executorConfig = this.applyOverrides(executorConfig, input.overrides);
+            // Re-resolve model when connection or tier override is present
+            if (input.overrides.connectionId || input.overrides.modelTier) {
+                executorConfig = await this.agentResolver.reResolveModel(executorConfig, {
+                    connectionId: input.overrides.connectionId,
+                    modelTier: input.overrides.modelTier,
+                });
+            }
+        } else {
+            console.log('[TaskRunner] no overrides — using agent default');
         }
+
+        console.log('[TaskRunner] final config:', {
+            agentId: input.agentId,
+            connectionId: executorConfig.connectionId,
+            model: executorConfig.model,
+        });
 
         // 4. Create assistant node
         const { assistantNodeId, rootNode } = await this.createAssistantNode(
@@ -400,6 +420,16 @@ export class TaskRunner {
             };
 
             state.updateNodeStatus(rootNode.id, 'success');
+
+            // Record cost to connection dailyCosts
+            const hConnectionId = executorConfig.connectionId;
+            if (hConnectionId) {
+                this.agentResolver.recordUsageCost(hConnectionId, {
+                    inputTokens: hUsage.inputTokens,
+                    outputTokens: hUsage.outputTokens,
+                    cost: hUsage.costUsd,
+                }).catch(() => {});
+            }
 
             if (isBound) {
                 this.eventBus.emitSession(sessionId, {
@@ -587,6 +617,7 @@ export class TaskRunner {
                         || (firstError?.code ? `Execution failed [${firstError.code}]` : 'Execution failed');
                     const error = new Error(msg);
                     (error as any).status = firstError?.code;
+                    (error as any)._model = (result as any)._model || executorConfig.model;
                     throw error;
                 }
 
@@ -698,6 +729,16 @@ export class TaskRunner {
 
             // 完成
             state.updateNodeStatus(rootNode.id, 'success');
+
+            // Record cost to connection dailyCosts
+            const kConnectionId = executorConfig.connectionId;
+            if (kConnectionId) {
+                this.agentResolver.recordUsageCost(kConnectionId, {
+                    inputTokens: estInputTokens,
+                    outputTokens: estOutputTokens,
+                    cost: estCost,
+                }).catch(() => {});
+            }
 
             if (isBound) {
                 this.eventBus.emitSession(sessionId, {

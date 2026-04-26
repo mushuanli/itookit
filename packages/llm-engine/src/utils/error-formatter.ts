@@ -5,7 +5,12 @@
  */
 export function formatErrorMessage(error: any): string {
     const statusCode = error.status || error.code;
+    const modelId = error.model || error._model;
 
+    if (statusCode === 'MODEL_NOT_FOUND' || statusCode === 404) {
+        const modelInfo = modelId ? ` '${modelId}'` : '';
+        return `Model${modelInfo} not found: The requested model does not exist or is not available on this provider. Please check your connection settings.`;
+    }
     if (statusCode === 401) {
         return 'Authentication failed: Invalid API key or token expired. Please check your connection settings.';
     }

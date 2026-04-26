@@ -2,7 +2,7 @@
 // 简化的 LLM 调用服务接口定义。
 
 import type { ChatCompletionParams, ChatCompletionResponse, ChatCompletionChunk } from './completion';
-import type { ConnectionMeta } from './connection';
+import type { ConnectionMeta, LLMProvider } from './connection';
 
 /**
  * LLM 调用服务接口。
@@ -57,6 +57,11 @@ export interface ILLMService {
     listConnections(): Promise<ConnectionMeta[]>;
 
     // ── 工具函数 ──
+
+    /**
+     * 获取单个 Provider 定义（不含 apiKey，含模型定价）。
+     */
+    getProvider(providerId: string): LLMProvider | undefined;
 
     /**
      * 估算文本的 token 数量（近似值，无需 API 调用）。

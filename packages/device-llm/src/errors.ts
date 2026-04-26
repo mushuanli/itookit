@@ -37,22 +37,25 @@ export enum LLMErrorCode {
 export interface LLMErrorDetails {
     /** 错误码 */
     code: LLMErrorCode;
-    
+
     /** Provider 标识 */
     provider: string;
-    
+
+    /** 目标模型 ID */
+    model?: string;
+
     /** HTTP 状态码 */
     statusCode?: number;
-    
+
     /** 原始错误 */
     cause?: unknown;
-    
+
     /** 请求体 (用于调试) */
     requestBody?: any;
-    
+
     /** 是否可重试 */
     retryable: boolean;
-    
+
     /** 重试延迟建议 (ms) */
     retryAfter?: number;
 }
@@ -63,16 +66,19 @@ export interface LLMErrorDetails {
 export class LLMError extends Error {
     public readonly code: LLMErrorCode;
     public readonly provider: string;
+    /** 目标模型 ID，由调用链上游注入 */
+    public model?: string;
     public readonly statusCode?: number;
     public readonly cause?: unknown;
     public readonly retryable: boolean;
     public readonly retryAfter?: number;
-    
+
     constructor(message: string, details: LLMErrorDetails) {
         super(message);
         this.name = 'LLMError';
         this.code = details.code;
         this.provider = details.provider;
+        this.model = details.model;
         this.statusCode = details.statusCode;
         this.cause = details.cause;
         this.retryable = details.retryable;
@@ -85,17 +91,23 @@ export class LLMError extends Error {
     static fromResponse(
         provider: string,
         statusCode: number,
-        body: any
+        body: any,
+        model?: string,
     ): LLMError {
         const { code, message, retryable, retryAfter } = this.parseErrorResponse(statusCode, body);
-        
-        return new LLMError(message, {
+
+        const errorMsg = model
+            ? `Model '${model}': ${message}`
+            : message;
+
+        return new LLMError(errorMsg, {
             code,
             provider,
+            model,
             statusCode,
             cause: body,
             retryable,
-            retryAfter
+            retryAfter,
         });
     }
     

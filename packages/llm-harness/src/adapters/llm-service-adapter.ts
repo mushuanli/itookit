@@ -10,6 +10,7 @@ import type {
     ChatCompletionResponse,
     ChatCompletionChunk,
     ConnectionMeta,
+    LLMProvider,
     IDeviceDriver,
     DeviceContext,
 } from '@itookit/common';
@@ -110,6 +111,11 @@ export class LLMServiceAdapter implements ILLMService {
     async listConnections(): Promise<ConnectionMeta[]> {
         const result = await this.driver.ioctl?.(BASE_CTX, LLM_IOCTL.LIST_CONNECTIONS);
         return (result as ConnectionMeta[]) ?? [];
+    }
+
+    async getProvider(providerId: string): Promise<LLMProvider | undefined> {
+        const result = await this.driver.ioctl?.(BASE_CTX, LLM_IOCTL.GET_PROVIDER, providerId);
+        return (result as LLMProvider | null) ?? undefined;
     }
 
     estimateTokens(_connectionId: string, text: string): number {

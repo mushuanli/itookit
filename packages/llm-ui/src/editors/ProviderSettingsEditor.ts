@@ -233,6 +233,17 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
                         </div>
 
                         <div class="settings-form__group">
+                            <label class="settings-form__label">默认温度 (0-2)</label>
+                            <input type="number" class="settings-form__input" name="defaultTemperature"
+                                   value="${fullProvider?.defaultTemperature ?? provider?.defaultTemperature ?? ''}"
+                                   min="0" max="2" step="0.1" placeholder="未设置（由 Connection 决定）"
+                                   style="max-width:120px">
+                            <small class="settings-form__help">
+                                所有绑定此 Provider 的连接继承此温度。Connection 可覆盖。
+                            </small>
+                        </div>
+
+                        <div class="settings-form__group">
                             <label class="settings-form__label">Base URL *</label>
                             <input type="text" class="settings-form__input" name="baseURL"
                                    value="${fullProvider?.baseURL ?? provider?.baseURL ?? ''}" required placeholder="https://api.example.com/v1">
@@ -278,6 +289,11 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
                     apiKey: newApiKey || existingApiKey || undefined,
                     models: [...this.editModels],
                     isBuiltin: isBuiltin,
+                    defaultTemperature: (() => {
+                        const v = parseFloat(data.defaultTemperature);
+                        return !isNaN(v) ? v : undefined;
+                    })(),
+                    dailyCosts: provider?.dailyCosts,
                 };
 
                 await this.service.saveProvider(updated);

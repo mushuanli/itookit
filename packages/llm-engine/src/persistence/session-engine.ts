@@ -201,7 +201,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
       title,
       created_at: now,
       updated_at: now,
-      settings: { model: 'gpt-4', temperature: 0.7 },
+      settings: { model: '' },
       branches: { main: rootNodeId },
       current_branch: 'main',
       current_head: rootNodeId,

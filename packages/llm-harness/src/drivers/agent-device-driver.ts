@@ -133,15 +133,20 @@ export class AgentDeviceDriver implements IDeviceDriver, IAgentRuntimeConfig {
             const conn = await this.llm.getDefaultConnection();
             if (conn) {
                 this.modelRoles.primary = conn.id;
-                // Derive per-token pricing from the connection's model metadata,
-                // falling back to Sonnet-class defaults if unavailable.
-                // Model catalog moved to Provider; cost model uses Sonnet-class defaults.
-                const modelInfo = undefined as { inputPricePerMillion?: number; outputPricePerMillion?: number } | undefined;
-                if (modelInfo?.inputPricePerMillion !== undefined) {
-                    this.costModel = {
-                        perInputToken: modelInfo.inputPricePerMillion / 1_000_000,
-                        perOutputToken: (modelInfo.outputPricePerMillion ?? modelInfo.inputPricePerMillion * 5) / 1_000_000,
-                    };
+                // Derive per-token pricing from the provider's model catalog.
+                const pid = conn.providerId ?? conn.provider;
+                if (pid) {
+                    const provider = this.llm.getProvider
+                        ? await this.llm.getProvider(pid)
+                        : undefined;
+                    const modelId = conn.model;
+                    const modelInfo = provider?.models.find(m => m.id === modelId);
+                    if (modelInfo?.inputPricePerMillion !== undefined) {
+                        this.costModel = {
+                            perInputToken: modelInfo.inputPricePerMillion / 1_000_000,
+                            perOutputToken: (modelInfo.outputPricePerMillion ?? modelInfo.inputPricePerMillion * 5) / 1_000_000,
+                        };
+                    }
                 }
             }
         }
