@@ -258,12 +258,28 @@ export class AgentConfigEditor implements IEditor {
                             <label class="agent-form-label">
                                 历史消息数量 <small>-1 表示不限制</small>
                             </label>
-                            <input type="number" 
-                                   class="agent-form-input" 
-                                   name="maxHistoryLength" 
+                            <input type="number"
+                                   class="agent-form-input"
+                                   name="maxHistoryLength"
                                    value="${config.maxHistoryLength ?? -1}"
                                    min="-1"
                                    style="max-width: 150px;">
+                        </div>
+
+                        <div class="agent-form-row">
+                            <label class="agent-form-label">
+                                温度 (0-2) <small>控制输出随机性</small>
+                            </label>
+                            <input type="number"
+                                   class="agent-form-input"
+                                   name="temperature"
+                                   value="${config.temperature ?? ''}"
+                                   min="0" max="2" step="0.1"
+                                   placeholder="未设置（使用 Provider 默认）"
+                                   style="max-width: 120px;">
+                            <p class="agent-form-help">
+                                值越高越随机。留空则使用 Provider 默认温度。
+                            </p>
                         </div>
                     </div>
                 </div>
@@ -542,12 +558,14 @@ export class AgentConfigEditor implements IEditor {
         this.content.type = type;
 
         if (type === 'agent') {
+            const tempVal = parseFloat(getVal('temperature'));
             this.content.config = {
                 connectionId: getVal('connectionId'),
                 modelTier: (getVal('modelTier') as ModelTier) || 'optimal',
                 systemPrompt: getVal('systemPrompt'),
                 maxHistoryLength: parseInt(getVal('maxHistoryLength')) || -1,
-                mcpServers: getCheckedValues('mcpServers')
+                mcpServers: getCheckedValues('mcpServers'),
+                temperature: !isNaN(tempVal) ? tempVal : undefined,
             };
         }
     }

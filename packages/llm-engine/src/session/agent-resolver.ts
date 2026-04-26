@@ -1,7 +1,7 @@
 // @file: llm-engine/session/agent-resolver.ts
 
 import { ExecutorConfig } from '@itookit/llm-kernel';
-import { resolveModelForTier } from '@itookit/common';
+import { resolveModelForTier, ModelTier } from '@itookit/common';
 import { IAgentConfigService } from '../services/agent-service';
 import { EngineError, EngineErrorCode } from '../core/errors';
 import { log } from '../utils/logger';
@@ -62,7 +62,17 @@ export class AgentResolver {
                     model: modelId,
                     systemPrompt: agentDef.config.systemPrompt,
                     icon: agentDef.icon,
+                    temperature: agentDef.config.temperature,
                 } as ExecutorConfig;
+
+                console.log('[AgentResolver] resolved:', {
+                    agentId,
+                    agentName: agentDef.name,
+                    connectionId: config.connectionId,
+                    modelTier: agentDef.config.modelTier ?? 'optimal',
+                    modelNamePin: agentDef.config.modelName || '(none)',
+                    resolvedModel: modelId,
+                });
             }
         } catch (e) {
             if (e instanceof EngineError) throw e;
@@ -115,6 +125,77 @@ export class AgentResolver {
             console.error('[AgentResolver] getModelsForAgent failed:', e);
             return [];
         }
+    }
+
+    /**
+     * 记录一次 LLM 用量到对应连接的 dailyCosts。
+     */
+    async recordUsageCost(connectionId: string, usage: {
+        inputTokens: number; outputTokens: number; cost: number;
+    }): Promise<void> {
+        if (!connectionId) return;
+        try {
+            const conn = await this.agentService.getFullConnection(connectionId);
+            if (!conn) return;
+            const today = new Date().toISOString().slice(0, 10);
+            const dailyCosts = { ...(conn.dailyCosts ?? {}) };
+            const entry = dailyCosts[today];
+            if (entry) {
+                entry.inputTokens  += usage.inputTokens;
+                entry.outputTokens += usage.outputTokens;
+                entry.cost         += usage.cost;
+                entry.requests     += 1;
+            } else {
+                dailyCosts[today] = {
+                    date: today,
+                    inputTokens:  usage.inputTokens,
+                    outputTokens: usage.outputTokens,
+                    cost:         usage.cost,
+                    requests:     1,
+                };
+            }
+            conn.dailyCosts = dailyCosts;
+            await this.agentService.saveConnection(conn);
+        } catch (e) {
+            log.error('Failed to record usage cost', { connectionId, error: e });
+        }
+    }
+
+    /**
+     * 根据 overrides 重解析模型 ID。
+     *
+     * 当用户切换连接或模型层级时，需要重新查新连接的 tiers 映射来解析模型。
+     */
+    async reResolveModel(config: ExecutorConfig, overrides: {
+        connectionId?: string;
+        modelTier?: ModelTier;
+    }): Promise<ExecutorConfig> {
+        const newConfig = { ...config };
+        const connId = overrides.connectionId || config.connectionId;
+        if (!connId) return newConfig;
+
+        try {
+            const connMeta = await this.agentService.getConnection(connId);
+            if (connMeta) {
+                const tier = overrides.modelTier ?? 'optimal';
+                const oldModel = config.model;
+                newConfig.model = resolveModelForTier(connMeta, tier);
+                if (overrides.connectionId) newConfig.connectionId = overrides.connectionId;
+
+                console.log('[AgentResolver] reResolveModel:', {
+                    connectionOverride: overrides.connectionId || '(none)',
+                    tierOverride: overrides.modelTier || '(none)',
+                    connectionId: newConfig.connectionId,
+                    connectionTiers: connMeta.tiers || {},
+                    oldModel,
+                    newModel: newConfig.model,
+                    tier,
+                });
+            }
+        } catch (e) {
+            log.error('Failed to re-resolve model', { connectionId: connId, error: e });
+        }
+        return newConfig;
     }
 
     private async getFallbackConfig(): Promise<ExecutorConfig> {

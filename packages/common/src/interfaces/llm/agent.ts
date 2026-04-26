@@ -227,6 +227,10 @@ export interface IAgentConfigService {
     saveProvider(provider: LLMProvider): Promise<void>;
     /** 删除用户自定义 Provider */
     deleteProvider(id: string): Promise<void>;
+    /** 获取完整连接（含 dailyCosts），用于更新用量统计 */
+    getFullConnection(id: string): Promise<LLMConnection | null>;
+    /** 保存完整连接（含 dailyCosts 更新） */
+    saveConnection(conn: LLMConnection): Promise<void>;
     onChange(callback: () => void): () => void;
 }
 

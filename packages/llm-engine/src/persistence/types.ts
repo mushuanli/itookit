@@ -17,7 +17,7 @@ export interface ChatManifest {
 
     settings: {
         model: string;
-        temperature: number;
+        temperature?: number;
         system_prompt?: string;
         [key: string]: any;
     };

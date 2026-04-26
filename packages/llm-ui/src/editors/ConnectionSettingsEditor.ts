@@ -12,7 +12,9 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
     private providers: Record<string, LLMProvider> = {};
 
     async render() {
-        this.providers = this.service.getProviderDefaults();
+        this.providers = Object.fromEntries(
+            this.service.getProviders().map(p => [p.id, p])
+        );
         let connections = await this.service.getConnections();
 
         // enabled first, then disabled; within each group alphabetically
@@ -213,6 +215,18 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
                     </small>
                 </div>
 
+                <!-- Temperature override -->
+                <div class="settings-form__group">
+                    <label class="settings-form__label">温度 (0-2)</label>
+                    <input type="number" class="settings-form__input" name="temperature"
+                           value="${connection?.temperature ?? ''}"
+                           min="0" max="2" step="0.1" placeholder="未设置（使用 Provider 默认）"
+                           style="max-width:120px">
+                    <small class="settings-form__help">
+                        覆盖 Provider 的默认温度。留空则使用 Provider 设置。
+                    </small>
+                </div>
+
                 <!-- Tier configuration (Connection's core responsibility) -->
                 <div class="settings-form__group">
                     <label class="settings-form__label" style="display:flex;align-items:center;gap:6px">
@@ -250,11 +264,14 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
                 if (tierStandard) tiers.standard = tierStandard;
                 if (tierFast)     tiers.fast     = tierFast;
 
+                const tempVal = parseFloat(data.temperature);
                 const newConn: LLMConnection = {
                     id: connection?.id || `conn-${generateShortUUID()}`,
                     name: data.name,
                     providerId: pid,
                     tiers: Object.keys(tiers).length > 0 ? tiers : undefined,
+                    temperature: !isNaN(tempVal) ? tempVal : undefined,
+                    dailyCosts: connection?.dailyCosts,
                     metadata: connection?.metadata,
                 };
 
