@@ -183,9 +183,19 @@ export class OpenAIProvider extends BaseProvider {
             }
         }
         
-        // 思考模式 (o1/o3)
-        if (params.thinking && params.reasoningEffort) {
-            body.reasoning_effort = params.reasoningEffort;
+        // Thinking mode — only for providers that declare capabilities.thinking.
+        // DeepSeek API defaults thinking=enabled, so we must explicitly disable it
+        // for models that don't have thinking enabled. Other providers just ignore.
+        if (this.capabilities.thinking) {
+            if (params.thinking === false) {
+                body.thinking = { type: 'disabled' };
+            } else if (params.thinking === true) {
+                const thinking: Record<string, unknown> = { type: 'enabled' };
+                body.thinking = thinking;
+                if (params.reasoningEffort) {
+                    body.reasoning_effort = params.reasoningEffort;
+                }
+            }
         }
 
         // 音频配置 (新增)

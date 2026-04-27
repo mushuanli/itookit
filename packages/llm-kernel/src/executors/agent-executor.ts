@@ -43,6 +43,8 @@ export interface AgentExecutorConfig extends ExecutorConfig {
     tools?: ToolDefinition[];
     /** 是否启用思考过程 */
     enableThinking?: boolean;
+    /** 思考强度（low/medium/xhigh），默认 xhigh */
+    reasoningEffort?: 'low' | 'medium' | 'xhigh';
     /** 思考 token 预算 */
     thinkingBudget?: number;
     /** 是否使用流式模式（默认 true） */
@@ -333,6 +335,12 @@ export class AgentExecutor implements IExecutor {
             if (this.config.thinkingBudget) {
                 params.thinkingBudget = this.config.thinkingBudget;
             }
+            if (this.config.reasoningEffort) {
+                params.reasoningEffort = this.config.reasoningEffort;
+            }
+        } else {
+            // Explicitly disable thinking for providers that default to ON (e.g. DeepSeek)
+            params.thinking = false;
         }
 
         // 工具定义
