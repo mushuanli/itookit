@@ -129,6 +129,10 @@ export interface ExecutionOverrides {
      * 文件工具的工作目录（harness 模式下使用）。
      */
     workingDirectory?: string;
+    /** 推理强度（仅支持 thinking 的模型生效） */
+    reasoningEffort?: 'low' | 'medium' | 'xhigh';
+    /** 强制开启/关闭 thinking（覆盖模型默认） */
+    thinkingEnabled?: boolean;
 }
 
 /**

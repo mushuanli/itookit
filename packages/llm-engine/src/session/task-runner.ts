@@ -254,11 +254,6 @@ export class TaskRunner {
         // 3. Resolve executor config
         let executorConfig = await this.agentResolver.resolve(input.agentId);
         if (input.overrides) {
-            console.log('[TaskRunner] overrides received:', {
-                connectionId: input.overrides.connectionId || '(none)',
-                modelTier: input.overrides.modelTier || '(none)',
-                useHarness: input.overrides.useHarness || false,
-            });
             executorConfig = this.applyOverrides(executorConfig, input.overrides);
             // Re-resolve model when connection or tier override is present
             if (input.overrides.connectionId || input.overrides.modelTier) {
@@ -267,15 +262,7 @@ export class TaskRunner {
                     modelTier: input.overrides.modelTier,
                 });
             }
-        } else {
-            console.log('[TaskRunner] no overrides — using agent default');
         }
-
-        console.log('[TaskRunner] final config:', {
-            agentId: input.agentId,
-            connectionId: executorConfig.connectionId,
-            model: executorConfig.model,
-        });
 
         // 4. Create assistant node
         const { assistantNodeId, rootNode } = await this.createAssistantNode(
@@ -1064,9 +1051,11 @@ export class TaskRunner {
     private applyOverrides(config: ExecutorConfig, overrides: ExecutionOverrides): ExecutorConfig {
         const newConfig = { ...config };
         // connectionId override replaces the whole connection (model resolved from new connection's tiers).
-        if (overrides.connectionId) (newConfig as any).connectionId = overrides.connectionId;
+        if (overrides.connectionId) newConfig.connectionId = overrides.connectionId;
         if (overrides.temperature !== undefined) newConfig.temperature = overrides.temperature;
         if (overrides.streamMode !== undefined) newConfig.stream = overrides.streamMode;
+        if (overrides.reasoningEffort) newConfig.reasoningEffort = overrides.reasoningEffort;
+        if (overrides.thinkingEnabled !== undefined) newConfig.enableThinking = overrides.thinkingEnabled;
         return newConfig;
     }
 

@@ -140,7 +140,7 @@ export interface LLMConnection {
     metadata?: {
         isSystemDefault?: boolean;
         thinkingBudget?: number;
-        reasoningEffort?: 'low' | 'medium' | 'high';
+        reasoningEffort?: 'low' | 'medium' | 'xhigh';
         mcpServers?: string[];
         caching?: boolean;
         headers?: Record<string, string>;
@@ -301,12 +301,8 @@ export function resolveModelForTier(
 ): string {
     for (const t of TIER_FALLBACK[tier]) {
         const modelId = conn.tiers?.[t];
-        if (modelId) {
-            console.log(`[resolveModelForTier] requested=${tier} matched=${t} model=${modelId}`);
-            return modelId;
-        }
+        if (modelId) return modelId;
     }
-    console.log(`[resolveModelForTier] requested=${tier} fallback=conn.model model=${conn.model}`);
     return conn.model;
 }
 

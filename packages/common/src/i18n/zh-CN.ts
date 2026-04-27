@@ -225,6 +225,21 @@ export const zhCN = {
     'mcp.import.hint':           '粘贴 JSON 数组（单个对象也支持）',
     'mcp.import.placeholder':    '[{"name":"My Server","transport":"stdio",...}]',
 
+    // ── Chat input — Thinking mode ───────────────────────────────────────────
+    'thinking.label':            '深度思考',
+    'thinking.tooltip':          '启用/关闭深度思考模式',
+    'thinking.effort.label':     '思考强度',
+    'thinking.effort.auto':      '自动',
+    'thinking.effort.low':       '低',
+    'thinking.effort.medium':    '中',
+    'thinking.effort.xhigh':     '极高',
+    'thinking.toggle.on':        '关闭思考',
+    'thinking.toggle.off':       '开启思考',
+
+    // ── Chat input — Mode toggle ─────────────────────────────────────────────
+    'chatInput.agentMode':       'Agent 模式',
+    'chatInput.agentMode.tooltip': '启用多轮 Agent 循环与工具调用',
+
 } as const;
 
 // LocaleStrings maps every key to string (not literal), so other locales can provide different values.

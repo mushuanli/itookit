@@ -29,6 +29,10 @@ export interface ExecutorConfig {
     model?: string;
     temperature?: number;
     stream?: boolean;
+    /** Whether to enable thinking/reasoning mode */
+    enableThinking?: boolean;
+    /** Reasoning effort for thinking-capable models */
+    reasoningEffort?: 'low' | 'medium' | 'xhigh';
     /** 引用连接 ID，由 LLMDeviceDriver 在 open() 时解析为完整连接（含 apiKey） */
     connectionId?: string;
     systemPrompt?: string;

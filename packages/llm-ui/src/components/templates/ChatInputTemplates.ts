@@ -1,6 +1,6 @@
 // @file: llm-ui/views/templates/ChatInputTemplates.ts
 
-import { escapeHTML } from '@itookit/common';
+import { escapeHTML, t, ENTITY_ICONS } from '@itookit/common';
 import { ExecutorOption, ConnectionOption } from '../../domain/types';
 
 export const ChatInputTemplates = {
@@ -36,46 +36,31 @@ export const ChatInputTemplates = {
                 </div>
 
                 <div class="llm-input__settings-body">
-                    ${this.renderConnectionSetting()}
-                    ${this.renderTierSetting()}
+                    ${this.renderConnectionTierRow()}
                     ${this.renderContextSetting()}
+                    ${this.renderThinkingSetting()}
+                    ${this.renderAdvancedSection()}
                     ${this.renderModeSetting()}
                     ${this.renderSkillsSetting()}
-                    ${this.renderAdvancedSection()}
                 </div>
             </div>
         `;
     },
 
     /**
-     * 连接覆盖设置行（替代原 Model 下拉）
+     * 连接 + Tier 合并行：🔌 [select] ⚡ [Auto][最优][标准][快速]
      */
-    renderConnectionSetting(): string {
+    renderConnectionTierRow(): string {
         return `
-            <div class="llm-input__setting-row">
-                <label class="llm-input__setting-label">
-                    <span class="llm-input__setting-icon">🔌</span>
-                    Connection
-                </label>
-                <select class="llm-input__connection-select" title="Override LLM connection for this session">
+            <div class="llm-input__setting-row llm-input__conn-tier-row">
+                <span class="llm-input__setting-icon" style="flex-shrink:0;">🔌</span>
+                <select class="llm-input__connection-select" title="Override LLM connection for this session"
+                        style="flex:1; min-width:0;">
                     <option value="">Agent Default</option>
                 </select>
-            </div>
-        `;
-    },
-
-    /**
-     * 模型层级（Tier）选择行
-     */
-    renderTierSetting(): string {
-        return `
-            <div class="llm-input__setting-row">
-                <label class="llm-input__setting-label">
-                    <span class="llm-input__setting-icon">⚡</span>
-                    Tier
-                </label>
-                <div class="llm-input__tier-pills" role="group" aria-label="Model tier">
-                    <button type="button" class="llm-input__tier-pill active" data-tier="auto"     title="Use agent's configured tier (default optimal)">Auto</button>
+                <span class="llm-input__setting-icon" style="flex-shrink:0; margin-left:6px;">⚡</span>
+                <div class="llm-input__tier-pills" role="group" aria-label="Model tier" style="flex-shrink:0;">
+                    <button type="button" class="llm-input__tier-pill active" data-tier="auto"     title="Use agent's configured tier">Auto</button>
                     <button type="button" class="llm-input__tier-pill"        data-tier="optimal"  title="Best quality — complex reasoning">最优</button>
                     <button type="button" class="llm-input__tier-pill"        data-tier="standard" title="Balanced — most daily work">标准</button>
                     <button type="button" class="llm-input__tier-pill"        data-tier="fast"     title="Cheapest — simple tasks">快速</button>
@@ -107,19 +92,42 @@ export const ChatInputTemplates = {
     },
 
     /**
-     * Mode 切换（Simple = 单轮 LLM / Full = 多轮 Agent Loop with tools）
-     *
-     * 取代旧的 "harness toggle" — 使用用户可理解的语言。
-     * Simple 是默认模式；Full 开启 AgentLoopExecutor。
+     * Thinking 模式 — 手动控制开关 + 推理强度
+     */
+    renderThinkingSetting(): string {
+        return `
+            <div class="llm-input__setting-row">
+                <label class="llm-input__toggle" title="${t('thinking.tooltip')}">
+                    <input type="checkbox" class="llm-input__thinking-toggle" checked>
+                    <span class="llm-input__toggle-slider"></span>
+                </label>
+                <span style="margin-left:8px;">${ENTITY_ICONS.llm} ${t('thinking.label')}</span>
+            </div>
+            <div class="llm-input__setting-row llm-input__reasoning-row">
+                <label class="llm-input__setting-label">
+                    <span style="font-size:0.75rem; margin-left:44px;">${t('thinking.effort.label')}</span>
+                </label>
+                <select class="llm-input__reasoning-select" title="${t('thinking.effort.label')}">
+                    <option value="auto" selected>${t('thinking.effort.auto')}</option>
+                    <option value="low">${t('thinking.effort.low')}</option>
+                    <option value="medium">${t('thinking.effort.medium')}</option>
+                    <option value="xhigh">${t('thinking.effort.xhigh')}</option>
+                </select>
+            </div>
+        `;
+    },
+
+    /**
+     * Agent 模式 — 多轮 Agent Loop + 工具
      */
     renderModeSetting(): string {
         return `
             <div class="llm-input__setting-row llm-input__harness-section">
-                <label class="llm-input__toggle" title="Enable multi-turn agent loop with file tools">
+                <label class="llm-input__toggle" title="${t('chatInput.agentMode.tooltip')}">
                     <input type="checkbox" class="llm-input__harness-toggle">
                     <span class="llm-input__toggle-slider"></span>
                 </label>
-                <span style="margin-left:8px;">Advanced Mode</span>
+                <span style="margin-left:8px;">${t('chatInput.agentMode')}</span>
             </div>
 
             <div class="llm-input__setting-row llm-input__cwd-row" style="display:none">
@@ -178,18 +186,18 @@ export const ChatInputTemplates = {
     },
 
     /**
-     * Advanced 折叠区 — 放置用户极少修改的选项（Streaming）
+     * Advanced 折叠区 — Block Mode（默认 unchecked = streaming）
      */
     renderAdvancedSection(): string {
         return `
             <details class="llm-input__advanced">
                 <summary class="llm-input__setting-divider llm-input__advanced-toggle">Advanced</summary>
                 <div class="llm-input__setting-row">
-                    <label class="llm-input__toggle" title="Stream response as it generates">
-                        <input type="checkbox" class="llm-input__stream-toggle" checked>
+                    <label class="llm-input__toggle" title="Wait for full response before displaying (disables streaming)">
+                        <input type="checkbox" class="llm-input__stream-toggle">
                         <span class="llm-input__toggle-slider"></span>
                     </label>
-                    <span style="margin-left:8px;">Streaming</span>
+                    <span style="margin-left:8px;">Block Mode</span>
                 </div>
             </details>
         `;
@@ -253,7 +261,7 @@ export const ChatInputTemplates = {
                     <button class="llm-input__badge-clear" data-clear="tier">×</button>
                 </span>
                 <span class="llm-input__active-badge" data-type="stream" style="display:none">
-                    ⏸️ <span class="llm-input__badge-text">Non-stream</span>
+                    ⏸️ <span class="llm-input__badge-text">Block Mode</span>
                     <button class="llm-input__badge-clear" data-clear="stream">×</button>
                 </span>
                 <span class="llm-input__active-badge" data-type="history" style="display:none">
