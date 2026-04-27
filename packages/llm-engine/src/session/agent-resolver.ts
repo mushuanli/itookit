@@ -177,7 +177,6 @@ export class AgentResolver {
             const connMeta = await this.agentService.getConnection(connId);
             if (connMeta) {
                 const tier = overrides.modelTier ?? 'optimal';
-                const oldModel = config.model;
                 newConfig.model = resolveModelForTier(connMeta, tier);
                 if (overrides.connectionId) newConfig.connectionId = overrides.connectionId;
 
