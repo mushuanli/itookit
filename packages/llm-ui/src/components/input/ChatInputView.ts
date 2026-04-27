@@ -624,9 +624,31 @@ code {
         });
 
         this.streamToggle.addEventListener('change', () => {
-            this.config.settings.streamMode = this.streamToggle.checked;
+            // Block Mode checked → streaming disabled
+            this.config.settings.streamMode = !this.streamToggle.checked;
             this.updateStreamToggleLabel();
             this.updateActiveBadges();
+            this.notifyConfigChange();
+        });
+
+        const thinkingToggle = this.container.querySelector('.llm-input__thinking-toggle') as HTMLInputElement | null;
+        const reasoningRow = this.container.querySelector('.llm-input__reasoning-row') as HTMLElement | null;
+        const reasoningSelect = this.container.querySelector('.llm-input__reasoning-select') as HTMLSelectElement | null;
+
+        const syncThinkingUI = () => {
+            const on = thinkingToggle?.checked ?? true;
+            if (reasoningRow) reasoningRow.style.display = on ? '' : 'none';
+        };
+
+        thinkingToggle?.addEventListener('change', () => {
+            syncThinkingUI();
+            this.config.settings.thinkingEnabled = thinkingToggle?.checked;
+            this.notifyConfigChange();
+        });
+
+        reasoningSelect?.addEventListener('change', () => {
+            const val = reasoningSelect.value as 'auto' | 'low' | 'medium' | 'xhigh';
+            this.config.settings.reasoningEffort = val;
             this.notifyConfigChange();
         });
 
@@ -777,11 +799,15 @@ code {
             }
         }
 
-        console.log('[ChatInput] buildOverrides:', {
-            connectionId: overrides.connectionId || '(agent default)',
-            modelTier: overrides.modelTier || '(auto)',
-            useHarness: overrides.useHarness || false,
-        });
+        // Reasoning effort override
+        const effort = this.config.settings.reasoningEffort;
+        if (effort && effort !== 'auto') {
+            overrides.reasoningEffort = effort;
+        }
+        // Thinking toggle (undefined=auto, true=force on, false=force off)
+        if (this.config.settings.thinkingEnabled !== undefined) {
+            overrides.thinkingEnabled = this.config.settings.thinkingEnabled;
+        }
 
         return overrides;
     }
@@ -820,7 +846,8 @@ code {
             this.updatePresetButtons();
         }
         if (this.streamToggle) {
-            this.streamToggle.checked = this.config.settings.streamMode;
+            // Block Mode toggle is inverted: checked = block mode = streaming disabled
+            this.streamToggle.checked = !this.config.settings.streamMode;
             this.updateStreamToggleLabel();
         }
         if (this.harnessToggle) {
@@ -829,6 +856,17 @@ code {
         }
         if (this.cwdInput && this.config.settings.workingDirectory) {
             this.cwdInput.value = this.config.settings.workingDirectory;
+        }
+        // Sync thinking toggle and reasoning effort from persisted settings.
+        const thinkingToggle = this.container.querySelector('.llm-input__thinking-toggle') as HTMLInputElement | null;
+        const reasoningRow = this.container.querySelector('.llm-input__reasoning-row') as HTMLElement | null;
+        const reasoningSelect = this.container.querySelector('.llm-input__reasoning-select') as HTMLSelectElement | null;
+        if (thinkingToggle) {
+            thinkingToggle.checked = this.config.settings.thinkingEnabled ?? true;
+            if (reasoningRow) reasoningRow.style.display = thinkingToggle.checked ? '' : 'none';
+        }
+        if (reasoningSelect && this.config.settings.reasoningEffort) {
+            reasoningSelect.value = this.config.settings.reasoningEffort;
         }
         this.updateActiveBadges();
     }
@@ -839,7 +877,7 @@ code {
         this.config.settings.connectionId = this.connectionSelect?.value || undefined;
         // modelTier is kept in-memory; pills don't have a native value to read
         this.config.settings.historyLength = parseInt(this.historySlider?.value || '-1');
-        this.config.settings.streamMode = this.streamToggle?.checked ?? true;
+        this.config.settings.streamMode = !(this.streamToggle?.checked ?? false);
         this.config.settings.useHarness = this.harnessToggle?.checked ?? false;
         this.config.settings.workingDirectory = this.cwdInput?.value.trim() ?? '';
     }
@@ -888,7 +926,7 @@ code {
                 this.updatePresetButtons();
                 break;
             case 'stream':
-                this.streamToggle.checked = true;
+                this.streamToggle.checked = false; // uncheck = streaming (not block mode)
                 this.config.settings.streamMode = true;
                 this.updateStreamToggleLabel();
                 break;

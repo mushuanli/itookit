@@ -214,4 +214,19 @@ export const en: LocaleStrings = {
     'mcp.import.title':          'Import MCP Config',
     'mcp.import.hint':           'Paste a JSON array (single object also supported)',
     'mcp.import.placeholder':    '[{"name":"My Server","transport":"stdio",...}]',
+
+    // ── Chat input — Thinking mode ───────────────────────────────────────────
+    'thinking.label':            'Thinking',
+    'thinking.tooltip':          'Enable/disable thinking mode',
+    'thinking.effort.label':     'Effort',
+    'thinking.effort.auto':      'Auto',
+    'thinking.effort.low':       'Low',
+    'thinking.effort.medium':    'Medium',
+    'thinking.effort.xhigh':     'xHigh',
+    'thinking.toggle.on':        'Disable thinking',
+    'thinking.toggle.off':       'Enable thinking',
+
+    // ── Chat input — Mode toggle ─────────────────────────────────────────────
+    'chatInput.agentMode':       'Agent Mode',
+    'chatInput.agentMode.tooltip': 'Enable multi-turn agent loop with tools',
 };

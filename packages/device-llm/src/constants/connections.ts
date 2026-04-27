@@ -9,15 +9,15 @@
 import type { DefaultConnectionDef } from '@itookit/common';
 
 /** 系统默认连接 ID */
-export const LLM_DEFAULT_ID   = 'default';
+export const LLM_DEFAULT_ID = 'default';
 export const LLM_DEFAULT_NAME = '默认';
 
 /** LLM 请求超时（ms） */
-export const DEFAULT_TIMEOUT      = 60000;
+export const DEFAULT_TIMEOUT = 60000;
 /** 最大重试次数 */
-export const DEFAULT_MAX_RETRIES  = 3;
+export const DEFAULT_MAX_RETRIES = 3;
 /** 重试基础延迟（ms） */
-export const DEFAULT_RETRY_DELAY  = 1000;
+export const DEFAULT_RETRY_DELAY = 1000;
 
 /** Re-export for convenience */
 export type { DefaultConnectionDef };
@@ -34,9 +34,9 @@ export const DEFAULT_CONNECTIONS: DefaultConnectionDef[] = [
         name: 'RDSec',
         providerId: 'rdsec',
         tiers: {
-            optimal:  'claude-4.6-opus',
+            optimal: 'claude-4.6-opus',
             standard: 'claude-4.6-sonnet',
-            fast:     'claude-4.5-haiku',
+            fast: 'claude-4.5-haiku',
         },
     },
     // ── RDSec — Gemini 系列 ───────────────────────────────────────────────
@@ -45,9 +45,9 @@ export const DEFAULT_CONNECTIONS: DefaultConnectionDef[] = [
         name: 'RDSec Gemini',
         providerId: 'rdsec',
         tiers: {
-            optimal:  'gemini-3.1-pro',
+            optimal: 'gemini-3.1-pro',
             standard: 'gemini-3-flash',
-            fast:     'gemini-3-flash',
+            fast: 'gemini-3-flash',
         },
     },
     // ── RDSec — DeepSeek 系列 ────────────────────────────────────────────
@@ -56,9 +56,9 @@ export const DEFAULT_CONNECTIONS: DefaultConnectionDef[] = [
         name: 'RDSec DeepSeek',
         providerId: 'rdsec',
         tiers: {
-            optimal:  'deepseek-r1',
+            optimal: 'deepseek-r1',
             standard: 'deepseek-v3.1',
-            fast:     'deepseek-v3.1',
+            fast: 'deepseek-v3.1',
         },
     },
 
@@ -68,9 +68,9 @@ export const DEFAULT_CONNECTIONS: DefaultConnectionDef[] = [
         name: 'Anthropic',
         providerId: 'anthropic',
         tiers: {
-            optimal:  'claude-opus-4-1-20250805',
+            optimal: 'claude-opus-4-1-20250805',
             standard: 'claude-sonnet-4-5-20250929',
-            fast:     'claude-haiku-4-5-20251001',
+            fast: 'claude-haiku-4-5-20251001',
         },
     },
 
@@ -80,9 +80,9 @@ export const DEFAULT_CONNECTIONS: DefaultConnectionDef[] = [
         name: 'Google Gemini',
         providerId: 'gemini',
         tiers: {
-            optimal:  'gemini-2.5-pro',
+            optimal: 'gemini-2.5-pro',
             standard: 'gemini-2.5-flash',
-            fast:     'gemini-2.5-flash',
+            fast: 'gemini-2.5-flash',
         },
     },
 
@@ -92,9 +92,9 @@ export const DEFAULT_CONNECTIONS: DefaultConnectionDef[] = [
         name: 'DeepSeek',
         providerId: 'deepseek',
         tiers: {
-            optimal:  'deepseek-reasoner',
-            standard: 'deepseek-chat',
-            fast:     'deepseek-chat',
+            optimal: 'deepseek-v4-pro',
+            standard: 'deepseek-v4-flash',
+            fast: 'deepseek-v4-flash',
         },
     },
 
@@ -104,9 +104,9 @@ export const DEFAULT_CONNECTIONS: DefaultConnectionDef[] = [
         name: 'CloudAPI',
         providerId: 'cloudapi',
         tiers: {
-            optimal:  'claude-opus-4-6',
+            optimal: 'claude-opus-4-6',
             standard: 'claude-sonnet-4-6-thinking',
-            fast:     'claude-haiku-4-5-20251001-r',
+            fast: 'claude-haiku-4-5-20251001-r',
         },
     },
 
@@ -124,9 +124,9 @@ export const DEFAULT_CONNECTIONS: DefaultConnectionDef[] = [
         name: 'OpenAI',
         providerId: 'openai',
         tiers: {
-            optimal:  'gpt-5-pro',
+            optimal: 'gpt-5-pro',
             standard: 'gpt-5',
-            fast:     'gpt-5-mini',
+            fast: 'gpt-5-mini',
         },
     },
 ];

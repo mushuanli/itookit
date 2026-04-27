@@ -61,7 +61,7 @@ export interface ILLMService {
     /**
      * 获取单个 Provider 定义（不含 apiKey，含模型定价）。
      */
-    getProvider(providerId: string): LLMProvider | undefined;
+    getProvider(providerId: string): Promise<LLMProvider | undefined>;
 
     /**
      * 估算文本的 token 数量（近似值，无需 API 调用）。

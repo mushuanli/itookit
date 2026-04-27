@@ -2,6 +2,7 @@
 
 import { ExecutorConfig } from '@itookit/llm-kernel';
 import { resolveModelForTier, ModelTier } from '@itookit/common';
+import type { ConnectionMeta } from '@itookit/common';
 import { IAgentConfigService } from '../services/agent-service';
 import { EngineError, EngineErrorCode } from '../core/errors';
 import { log } from '../utils/logger';
@@ -54,25 +55,23 @@ export class AgentResolver {
                     || resolveModelForTier(connMeta, agentDef.config.modelTier ?? 'optimal')
                     || '';
 
+                const currentTier = agentDef.config.modelTier ?? 'optimal';
+                const { enableThinking, reasoningEffort } =
+                    this.resolveThinkingConfig(connMeta, currentTier, modelId);
+
                 config = {
                     id: agentDef.id,
                     name: agentDef.name,
                     type: 'agent', // AgentDefinition.type is a UI category; chat always runs via agent executor
                     connectionId: agentDef.config.connectionId,
                     model: modelId,
+                    enableThinking,
+                    reasoningEffort,
                     systemPrompt: agentDef.config.systemPrompt,
                     icon: agentDef.icon,
                     temperature: agentDef.config.temperature,
-                } as ExecutorConfig;
+                };
 
-                console.log('[AgentResolver] resolved:', {
-                    agentId,
-                    agentName: agentDef.name,
-                    connectionId: config.connectionId,
-                    modelTier: agentDef.config.modelTier ?? 'optimal',
-                    modelNamePin: agentDef.config.modelName || '(none)',
-                    resolvedModel: modelId,
-                });
             }
         } catch (e) {
             if (e instanceof EngineError) throw e;
@@ -182,20 +181,42 @@ export class AgentResolver {
                 newConfig.model = resolveModelForTier(connMeta, tier);
                 if (overrides.connectionId) newConfig.connectionId = overrides.connectionId;
 
-                console.log('[AgentResolver] reResolveModel:', {
-                    connectionOverride: overrides.connectionId || '(none)',
-                    tierOverride: overrides.modelTier || '(none)',
-                    connectionId: newConfig.connectionId,
-                    connectionTiers: connMeta.tiers || {},
-                    oldModel,
-                    newModel: newConfig.model,
-                    tier,
-                });
+                // Sync thinking support from the newly resolved model
+                const { enableThinking, reasoningEffort } =
+                    this.resolveThinkingConfig(connMeta, tier, newConfig.model ?? '');
+                newConfig.enableThinking = enableThinking;
+                newConfig.reasoningEffort = reasoningEffort;
+
             }
         } catch (e) {
             log.error('Failed to re-resolve model', { connectionId: connId, error: e });
         }
         return newConfig;
+    }
+
+    /** Derive enableThinking and reasoningEffort from connection metadata + model supportsThinking flag. */
+    private resolveThinkingConfig(
+        connMeta: ConnectionMeta,
+        tier: ModelTier,
+        modelId: string,
+    ): { enableThinking: boolean; reasoningEffort: 'low' | 'medium' | 'xhigh' | undefined } {
+        const pid = connMeta.providerId ?? connMeta.provider;
+        const cmData = connMeta.metadata as Record<string, unknown> | undefined;
+        const tierThinking = cmData?.tierThinking as Record<string, boolean> | undefined;
+        const tierOverride = tierThinking?.[tier];
+
+        let enableThinking = false;
+        if (pid && modelId) {
+            const provider = this.agentService.getProvider(pid);
+            const modelDef = provider?.models.find(m => m.id === modelId);
+            // Per-tier override takes priority; fall back to model's supportsThinking default.
+            enableThinking = tierOverride !== undefined ? tierOverride : !!modelDef?.supportsThinking;
+        }
+
+        return {
+            enableThinking,
+            reasoningEffort: cmData?.reasoningEffort as 'low' | 'medium' | 'xhigh' | undefined,
+        };
     }
 
     private async getFallbackConfig(): Promise<ExecutorConfig> {

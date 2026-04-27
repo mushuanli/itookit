@@ -109,6 +109,10 @@ export interface ChatSessionSettings {
      * 空字符串表示使用进程默认目录。
      */
     workingDirectory: string;
+    /** 推理强度（仅支持 thinking 的模型生效），'auto' 表示使用连接默认 */
+    reasoningEffort?: 'auto' | 'low' | 'medium' | 'xhigh';
+    /** 强制开启/关闭 thinking，undefined=auto（跟随模型默认） */
+    thinkingEnabled?: boolean;
 }
 
 export const DEFAULT_SESSION_SETTINGS: ChatSessionSettings = {
@@ -119,6 +123,7 @@ export const DEFAULT_SESSION_SETTINGS: ChatSessionSettings = {
     streamMode: true,
     useHarness: false,
     workingDirectory: '',
+    reasoningEffort: 'auto',
 };
 
 export interface ChatOverrides {
@@ -133,6 +138,10 @@ export interface ChatOverrides {
     useHarness?: boolean;
     /** 文件工具工作目录 */
     workingDirectory?: string;
+    /** 推理强度（仅支持 thinking 的模型生效） */
+    reasoningEffort?: 'low' | 'medium' | 'xhigh';
+    /** 强制开启/关闭 thinking（覆盖模型默认） */
+    thinkingEnabled?: boolean;
 }
 
 // ── Token meter types ──────────────────────────────────────────────────────
