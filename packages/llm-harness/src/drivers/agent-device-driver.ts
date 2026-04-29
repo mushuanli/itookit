@@ -23,6 +23,8 @@ import type {
     DeviceContext,
     IAgentLookup,
     IResultPersistenceService,
+    AgentEventType,
+    AgentEventPayloads,
 } from '@itookit/common';
 import { AgentLoopExecutor } from '../executor/agent-loop-executor';
 import { SubAgentRouter } from '../executor/sub-agent-router';
@@ -155,6 +157,7 @@ export class AgentDeviceDriver implements IDeviceDriver, IAgentRuntimeConfig {
     async dispose(): Promise<void> {
         this.runtime?.abort();
         this.ttyManager.abortAll();
+        this.hitlQueue?.abortAll();
         this.runtime = null;
         this.router  = null;
     }
@@ -264,6 +267,19 @@ export class AgentDeviceDriver implements IDeviceDriver, IAgentRuntimeConfig {
             );
         }
         if (this.hitlQueue) {
+            // Wire the onRequest callback so HITL requests emit agent events
+            // before the human_input tool's push() promise blocks.
+            this.hitlQueue.onRequest = (request) => {
+                this.runtime?.emit('agent:human:input', {
+                    requestId: request.id,
+                    missionId: request.missionId,
+                    todoId: request.todoId,
+                    context: request.context,
+                    question: request.question,
+                    options: request.options,
+                    files: request.files,
+                });
+            };
             this.toolService.registerTool(
                 humanInputMeta,
                 humanInputDefinition,
@@ -273,9 +289,9 @@ export class AgentDeviceDriver implements IDeviceDriver, IAgentRuntimeConfig {
 
         // TTY tools — only registered when a driver is provided.
         // The onEvent callback threads agent:tty:* events through to the executor's emit.
+        // ttyManager is NOT recreated here to preserve existing sessions across re-registrations.
         if (this.ttyDriver) {
             const emitter = this.makeEventEmitter();
-            this.ttyManager = new TTYSessionManager(); // fresh manager per re-wire
             this.toolService.registerTool(
                 shellSessionMeta,
                 shellSessionDefinition,
@@ -297,17 +313,11 @@ export class AgentDeviceDriver implements IDeviceDriver, IAgentRuntimeConfig {
     /**
      * Returns an event emitter shim that routes agent:tty:* events through
      * the AgentLoopExecutor's event system once a runtime exists.
+     * Accesses this.runtime lazily so tools registered before the first run() still work.
      */
     private makeEventEmitter(): (type: string, payload: Record<string, unknown>) => void {
         return (type, payload) => {
-            // The runtime may not exist yet at registration time — access lazily.
-            const rt = this.runtime;
-            if (!rt) return;
-            // AgentLoopExecutor's emit is private; we expose it via a minimal workaround.
-            // The event types are declared in AgentEventPayloads, so the cast is safe.
-            (rt as unknown as {
-                emit: (e: string, p: unknown) => void
-            }).emit?.(type, payload);
+            this.runtime?.emit(type as AgentEventType, payload as AgentEventPayloads[AgentEventType]);
         };
     }
 
@@ -326,6 +336,7 @@ export class AgentDeviceDriver implements IDeviceDriver, IAgentRuntimeConfig {
                 this.router,
                 undefined,      // maxContextTokens — use executor default (200 000)
                 this.costModel, // pricing from connection metadata
+                this.hitlQueue ?? undefined, // HITL queue for human_input tool
             );
         }
         return this.runtime;

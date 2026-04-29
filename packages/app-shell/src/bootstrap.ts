@@ -1,4 +1,3 @@
-import { MemoryManager } from '@itookit/memory-manager';
 import { FileTypeDefinition } from '@itookit/vfs-ui';
 import { NavigationRequest, NAVIGATION_EVENTS, EditorFactory, MenuItem } from '@itookit/common';
 import type { LLMSkill, SkillDefinition, SkillToolBinding, ToolVFSContext } from '@itookit/common';
@@ -12,6 +11,8 @@ import {
     createAIContextMenuConfig,
 } from '@itookit/llm-ui';
 import { initializeLLMEngine, LLMSessionEngine, chatFileParser } from '@itookit/llm-engine';
+import type { SessionManager } from '@itookit/llm-engine';
+import { MemoryManager } from '@itookit/memory-manager';
 import { LLMDeviceDriver } from '@itookit/device-llm';
 import { setKernelDeviceManager } from '@itookit/llm-kernel';
 import { createHarness, type HarnessInstance } from '@itookit/llm-harness';
@@ -51,6 +52,46 @@ function waitForEditorMount(container: HTMLElement): Promise<void> {
         const observer = new MutationObserver(check);
         observer.observe(container, { childList: true, subtree: true });
         check();
+    });
+}
+
+// ── HITL → vfs-ui bridge ───────────────────────────────────────────────────────
+//
+// When a background session's agent calls human_input, the SessionManager emits
+// session_hitl_active / session_hitl_resolved RegistryEvents. This bridge
+// translates those into VFSStore state so the session list renders an orange
+// pulsing indicator on the waiting session's .chat file entry.
+
+function setupHitlVfsBridge(sessionManager: SessionManager, manager: MemoryManager): void {
+    // NOTE: This bridge is "eventual" — it only responds to events that fire
+    // AFTER the workspace is loaded. Sessions that started waiting before the
+    // workspace loaded won't be highlighted until the NEXT input request.
+    // In practice this is not an issue because chat workspaces are loaded at
+    // app startup, before any background session can trigger human_input.
+    sessionManager.onGlobalEvent((event) => {
+        if (event.type === 'session_hitl_active') {
+            const runtime = sessionManager.getSessionRuntime(event.payload.sessionId);
+            if (runtime) {
+                manager.setNodeWaitingInput(runtime.nodeId, true);
+            }
+        } else if (event.type === 'session_hitl_resolved') {
+            const runtime = sessionManager.getSessionRuntime(event.payload.sessionId);
+            if (runtime) {
+                manager.setNodeWaitingInput(runtime.nodeId, false);
+            }
+        } else if (event.type === 'session_status_changed') {
+            // Defensive cleanup: if the session is no longer running (aborted /
+            // completed / failed), clear any lingering waiting-input indicator.
+            // This covers abort() during HITL wait, which calls hitlQueue.abortAll()
+            // but does NOT emit agent:human:resolved.
+            const stopped = event.payload.status !== 'running' && event.payload.status !== 'queued';
+            if (stopped) {
+                const runtime = sessionManager.getSessionRuntime(event.payload.sessionId);
+                if (runtime) {
+                    manager.setNodeWaitingInput(runtime.nodeId, false);
+                }
+            }
+        }
     });
 }
 
@@ -269,7 +310,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     // Keep skills in sync when the user adds / edits / deletes skills in Settings.
     llmDriver.onChange(() => { syncSkillsToHarness(llmDriver, harness).catch(() => {}); });
 
-    await initializeLLMEngine({
+    const { sessionManager } = await initializeLLMEngine({
         agentService,
         sessionEngine,
         maxConcurrent:       20,
@@ -400,6 +441,11 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
         // Start without resourceId to avoid double sessionSelected race with LLMFactory.
         await manager.start();
         managerCache.set(elementId, manager);
+
+        // Bridge: session HITL status → vfs-ui session list highlight.
+        // Calls manager.setNodeWaitingInput() which delegates to VFSUIShell internally,
+        // keeping bootstrap decoupled from the concrete VFSUIShell type.
+        setupHitlVfsBridge(sessionManager, manager);
 
         if (initialResourceId && manager.getActiveSessionId() !== initialResourceId) {
             await manager.openFile(initialResourceId);

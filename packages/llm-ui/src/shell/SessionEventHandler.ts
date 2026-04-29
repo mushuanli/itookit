@@ -1,7 +1,7 @@
 // @file: llm-ui/shell/SessionEventHandler.ts
 
 import type { OrchestratorEvent, RegistryEvent, SessionManager } from '@itookit/llm-engine';
-import { Toast } from '@itookit/common';
+import { Toast, t } from '@itookit/common';
 import type { IHistoryPresenter } from '../domain/ports/IHistoryPresenter';
 import type { IStatusPresenter } from '../domain/ports/IStatusPresenter';
 import type { IBranchPresenter } from '../domain/ports/IBranchPresenter';
@@ -135,15 +135,26 @@ export class SessionEventHandler {
                 // Only notify when the TTY activity is in a background session.
                 if (event.payload.sessionId !== this.deps.getCurrentSessionId()) {
                     const navigate = this.deps.onNavigateToSession;
+                    const ttyMsg = t('session.ttyActive', { command: event.payload.command });
                     if (navigate) {
-                        // Show a clickable toast that navigates to the background session.
-                        Toast.action(
-                            `后台会话正在运行交互命令: ${event.payload.command}`,
-                            '切换查看',
-                            () => navigate(event.payload.sessionId),
-                        );
+                        Toast.action(ttyMsg, t('session.ttyActive.switchView'), () => navigate(event.payload.sessionId));
                     } else {
-                        Toast.info(`后台会话正在运行交互命令: ${event.payload.command}，切换到该会话可查看实时输出`);
+                        Toast.info(ttyMsg);
+                    }
+                }
+                break;
+            case 'session_hitl_active':
+                // Background session is waiting for human input — notify the user.
+                if (event.payload.sessionId !== this.deps.getCurrentSessionId()) {
+                    const navigate = this.deps.onNavigateToSession;
+                    const question = event.payload.question.length > 50
+                        ? `${event.payload.question.slice(0, 50)}\u2026`
+                        : event.payload.question;
+                    const hitlMsg = t('session.hitlActive', { question });
+                    if (navigate) {
+                        Toast.action(hitlMsg, t('session.hitlActive.switch'), () => navigate(event.payload.sessionId));
+                    } else {
+                        Toast.info(hitlMsg);
                     }
                 }
                 break;

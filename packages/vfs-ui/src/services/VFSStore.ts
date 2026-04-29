@@ -170,6 +170,20 @@ export class VFSStore implements IStatePort {
       'SEARCH_QUERY_UPDATE': () => {
         draft.searchQuery = payload.query || '';
       },
+      'SET_NODE_WAITING_INPUT': () => {
+        const { nodeId, waiting } = payload;
+        const updateWaiting = (items: VFSNodeUI[]): boolean => {
+          for (const item of items) {
+            if (item.id === nodeId) {
+              item.metadata.custom.hasWaitingInput = waiting;
+              return true;
+            }
+            if (item.children && updateWaiting(item.children)) return true;
+          }
+          return false;
+        };
+        updateWaiting(draft.items);
+      },
     };
     handlers[type]?.();
   });
