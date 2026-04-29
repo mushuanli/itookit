@@ -240,6 +240,23 @@ export const zhCN = {
     'chatInput.agentMode':       'Agent 模式',
     'chatInput.agentMode.tooltip': '启用多轮 Agent 循环与工具调用',
 
+    // ── HITL (human-in-the-loop) input banner ────────────────────────────────
+    'hitl.inputPlaceholder':    '输入你的回答\u2026',
+    'hitl.submit':              '回应',
+
+    // ── Harness status bar ────────────────────────────────────────────────────
+    'harness.statusBar.toolsLabel':  'Tools',
+    'harness.statusBar.done':        '{count} done',
+    'harness.statusBar.budgetWarn':  '{resource} {pct}%',
+    'harness.statusBar.compressed':  '\u2193 compressed ({layerName}, \u2212{savedTokens} tokens)',
+    'harness.statusBar.skillLoaded': '{skillId}',
+
+    // ── Background session notifications ──────────────────────────────────────
+    'session.ttyActive':             '后台会话正在运行交互命令: {command}',
+    'session.ttyActive.switchView':  '切换查看',
+    'session.hitlActive':            '后台会话等待输入: {question}',
+    'session.hitlActive.switch':     '切换',
+
 } as const;
 
 // LocaleStrings maps every key to string (not literal), so other locales can provide different values.

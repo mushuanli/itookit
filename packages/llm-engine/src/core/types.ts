@@ -450,4 +450,11 @@ export type RegistryEvent =
      * 当 harness 路径中非当前绑定会话（后台会话）的 shell_session 工具成功
      * 启动进程时发出，供 UI 提示用户切换到该会话查看实时输出。
      */
-    | { type: 'session_tty_active'; payload: { sessionId: string; command: string } };
+    | { type: 'session_tty_active'; payload: { sessionId: string; command: string } }
+    /**
+     * 后台会话触发了 human_input 请求，Agent 正在等待人工输入。
+     * UI 应高亮该会话以提示用户切换过去。
+     */
+    | { type: 'session_hitl_active'; payload: { sessionId: string; question: string } }
+    /** 人工输入已被响应，Agent 继续执行。 */
+    | { type: 'session_hitl_resolved'; payload: { sessionId: string } };

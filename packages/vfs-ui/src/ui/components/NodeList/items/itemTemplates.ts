@@ -65,7 +65,7 @@ export const createFileItemHTML = (
     searchQueries,
     uiSettings,
   } = props;
-  const { isPinned = false, hasUnreadUpdate = false } = custom;
+  const { isPinned = false, hasUnreadUpdate = false, hasWaitingInput = false } = custom;
   const summary = content?.summary || '';
 
   let deleteBtnHTML = '';
@@ -135,7 +135,8 @@ export const createFileItemHTML = (
           <div class="vfs-node-item__body">
             <div class="vfs-node-item__row-primary">
               <span class="vfs-node-item__title">${highlight(title, searchQueries)}</span>
-              ${hasUnreadUpdate ? '<span class="vfs-node-item__indicator"></span>' : ''}
+              ${hasWaitingInput ? '<span class="vfs-node-item__indicator vfs-node-item__indicator--waiting" title="等待用户输入"></span>' : ''}
+              ${hasUnreadUpdate && !hasWaitingInput ? '<span class="vfs-node-item__indicator"></span>' : ''}
             </div>
             
             <div class="vfs-node-item__row-secondary">

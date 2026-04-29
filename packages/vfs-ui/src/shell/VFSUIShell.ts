@@ -237,6 +237,14 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService> {
     this.commandPort.execute('ui:toggleSidebar', undefined as any);
   }
 
+  /**
+   * 设置节点的等待输入状态（由外部 bootstrap 调用）。
+   * 用于在 session 列表中将等待 human_input 的会话高亮显示。
+   */
+  setNodeWaitingInput(nodeId: string, waiting: boolean): void {
+    this.statePort.dispatch({ type: 'SET_NODE_WAITING_INPUT', payload: { nodeId, waiting } });
+  }
+
   setTitle(title: string): void {
     this.nodeList.setTitle(title);
   }

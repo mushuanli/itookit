@@ -229,4 +229,21 @@ export const en: LocaleStrings = {
     // ── Chat input — Mode toggle ─────────────────────────────────────────────
     'chatInput.agentMode':       'Agent Mode',
     'chatInput.agentMode.tooltip': 'Enable multi-turn agent loop with tools',
+
+    // ── HITL (human-in-the-loop) input banner ────────────────────────────────
+    'hitl.inputPlaceholder':    'Enter your response\u2026',
+    'hitl.submit':              'Respond',
+
+    // ── Harness status bar ────────────────────────────────────────────────────
+    'harness.statusBar.toolsLabel':  'Tools',
+    'harness.statusBar.done':        '{count} done',
+    'harness.statusBar.budgetWarn':  '{resource} {pct}%',
+    'harness.statusBar.compressed':  '\u2193 compressed ({layerName}, \u2212{savedTokens} tokens)',
+    'harness.statusBar.skillLoaded': '{skillId}',
+
+    // ── Background session notifications ──────────────────────────────────────
+    'session.ttyActive':             'Background session running interactive command: {command}',
+    'session.ttyActive.switchView':  'Switch',
+    'session.hitlActive':            'Background session waiting for input: {question}',
+    'session.hitlActive.switch':     'Switch',
 };

@@ -47,6 +47,14 @@ export interface IAgentRuntime {
     inject(message: string): void;
 
     /**
+     * 响应 human_input 请求，解除 Agent 等待阻塞。
+     *
+     * 当 Agent 调用 human_input 工具时，harness 进入等待状态。
+     * UI 收集用户响应后调用此方法恢复执行。
+     */
+    respondToHumanInput(requestId: string, response: string): void;
+
+    /**
      * 订阅 Agent 事件（通知模式）
      */
     on<E extends AgentEventType>(

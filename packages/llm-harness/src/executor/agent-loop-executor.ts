@@ -40,6 +40,7 @@ import { BackPressureValidator } from './back-pressure';
 import { ContextManager } from './context-manager';
 import { getToolName, getToolArgs } from '../utils/tool-call';
 import { saveSession, removeSession } from './session-store';
+import type { HITLQueue } from '../services/hitl-queue';
 export { loadInterruptedSessions } from './session-store';
 
 type NotifyHandler<E extends AgentEventType> = (payload: AgentEventPayloads[E]) => void;
@@ -82,6 +83,7 @@ export class AgentLoopExecutor implements IAgentRuntime {
         subAgentRouter: ISubAgentRouter,
         maxContextTokens = 200_000,
         private readonly costModel?: { perInputToken: number; perOutputToken: number },
+        private readonly hitlQueue?: HITLQueue,
     ) {
         this.contextManager = new ContextManager(
             llm,
@@ -374,6 +376,7 @@ export class AgentLoopExecutor implements IAgentRuntime {
 
     abort(): void {
         this.abortController?.abort();
+        this.hitlQueue?.abortAll();
         this.subAgentRouter.abort();
     }
 
@@ -387,6 +390,14 @@ export class AgentLoopExecutor implements IAgentRuntime {
         if (!sid) return; // no active session
         if (!this.pendingInjections.has(sid)) this.pendingInjections.set(sid, []);
         this.pendingInjections.get(sid)!.push(message);
+    }
+
+    /**
+     * 响应 human_input 请求，解除 Agent 等待阻塞并发出 resolved 事件。
+     */
+    respondToHumanInput(requestId: string, response: string): void {
+        this.hitlQueue?.resolve(requestId, response);
+        this.emit('agent:human:resolved', { requestId, response });
     }
 
     on<E extends AgentEventType>(event: E, handler: NotifyHandler<E>): () => void {
@@ -543,7 +554,7 @@ export class AgentLoopExecutor implements IAgentRuntime {
         return { role: 'tool', content: output, tool_call_id: callId };
     }
 
-    private emit<E extends AgentEventType>(event: E, payload: AgentEventPayloads[E]): void {
+    emit<E extends AgentEventType>(event: E, payload: AgentEventPayloads[E]): void {
         for (const h of this.notifyHandlers.get(event) ?? []) h(payload);
     }
 
