@@ -21,7 +21,16 @@ export class HITLQueue implements IHITLQueue {
     private readonly queue: QueueEntry[] = [];
     private processing = false;
     private readonly listeners = new Set<HITLListener>();
-    private readonly pending = new Map<string, (response: string) => void>();
+    private readonly pending = new Map<string, { resolve: (response: string) => void; reject: (err: Error) => void }>();
+
+    /**
+     * 可选回调，在 HITL 请求被 drain 时（push() Promise 阻塞前）调用。
+     * 由 AgentDeviceDriver 在 setServices() 时设置，用于在 Agent 事件流中
+     * 发出 agent:human:input 通知。
+     */
+    onRequest?: (request: HITLRequest) => void;
+
+    constructor() {}
 
     /**
      * Enqueue a HITL request. Awaits until the human provides a response.
@@ -37,10 +46,10 @@ export class HITLQueue implements IHITLQueue {
      * Called by UI when the human has responded to the current request.
      */
     resolve(requestId: string, response: string): void {
-        const resolver = this.pending.get(requestId);
-        if (resolver) {
+        const entry = this.pending.get(requestId);
+        if (entry) {
             this.pending.delete(requestId);
-            resolver(response);
+            entry.resolve(response);
             this.processing = false;
             this.drain();
         }
@@ -57,7 +66,7 @@ export class HITLQueue implements IHITLQueue {
         const err = new Error(reason);
         for (const entry of this.queue) entry.reject(err);
         this.queue.length = 0;
-        for (const [, resolver] of this.pending) resolver('');
+        for (const [, { reject }] of this.pending) reject(err);
         this.pending.clear();
         this.processing = false;
     }
@@ -68,7 +77,8 @@ export class HITLQueue implements IHITLQueue {
         if (this.processing || this.queue.length === 0) return;
         const entry = this.queue.shift()!;
         this.processing = true;
-        this.pending.set(entry.request.id, entry.resolve);
+        this.pending.set(entry.request.id, { resolve: entry.resolve, reject: entry.reject });
+        this.onRequest?.(entry.request);
         this.emit(entry.request);
     }
 

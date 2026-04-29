@@ -268,6 +268,15 @@ export class MemoryManager {
     }
 
     /**
+     * 设置节点的等待输入状态。
+     * 由 bootstrap 在后台会话触发 human_input 时调用，
+     * 让 session 列表中的对应文件项显示橙色脉冲指示器。
+     */
+    public setNodeWaitingInput(nodeId: string, waiting: boolean): void {
+        this.vfsUI.setNodeWaitingInput(nodeId, waiting);
+    }
+
+    /**
      * 获取当前激活的节点 ID
      */
     public getActiveSessionId(): string | null {

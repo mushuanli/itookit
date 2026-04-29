@@ -19,7 +19,7 @@ import { ENGINE_DEFAULTS } from '../core/constants';
 import { EngineError, EngineErrorCode } from '../core/errors';
 import { SessionState, HistoryMessage } from './session-state';
 import { LLMKernelAdapter, getLLMKernelAdapter } from '../adapters/llmkernel-adapter';
-import { HarnessAdapter } from '../adapters/harness-adapter';
+import { HarnessAdapter, HARNESS_META_KEYS } from '../adapters/harness-adapter';
 import { ILLMSessionEngine } from '../persistence/types';
 import { SessionEventBus } from './session-event-bus';
 import { AgentResolver } from './agent-resolver';
@@ -71,6 +71,12 @@ export class TaskRunner {
     private maxQueueSize: number;
     private kernelAdapter: LLMKernelAdapter;
     private harnessAdapter: HarnessAdapter | null = null;
+    /**
+     * Harness sessions must be serialized: a single AgentLoopExecutor instance
+     * is shared across all sessions and its event handlers are not scoped per session.
+     * Concurrent harness runs would mix each other's events.
+     */
+    private harnessRunning = false;
 
     /** 自动续写配置模板 */
     private autoContinueConfig: Partial<AutoContinueConfig>;
@@ -195,8 +201,19 @@ export class TaskRunner {
     // ============================================
 
     private processQueue(): void {
-        while (this.running.size < this.maxConcurrent && this.queue.length > 0) {
-            const task = this.queue.shift()!;
+        let i = 0;
+        while (this.running.size < this.maxConcurrent && i < this.queue.length) {
+            const task = this.queue[i];
+            const isHarness = !!(this.harnessAdapter && task.input.overrides?.useHarness);
+
+            // Harness tasks must run one at a time: the AgentLoopExecutor singleton
+            // has global event handlers that are not scoped per session.
+            if (isHarness && this.harnessRunning) {
+                i++; // skip for now; try remaining kernel tasks
+                continue;
+            }
+
+            this.queue.splice(i, 1); // remove from queue (don't advance i)
 
             const ctx = this.callbacks.getSessionContext(task.sessionId);
             if (!ctx) {
@@ -207,7 +224,8 @@ export class TaskRunner {
                 continue;
             }
 
-            if (this.harnessAdapter && task.input.overrides?.useHarness) {
+            if (isHarness) {
+                this.harnessRunning = true;
                 this.executeHarnessTask(task, ctx.state, ctx.runtime);
             } else {
                 this.executeTask(task, ctx.state, ctx.runtime);
@@ -334,10 +352,12 @@ export class TaskRunner {
                     }
                     this.eventBus.emitSession(sessionId, event);
                 } else if (event.type === 'node_update') {
-                    // Background session: promote TTY open events to the global bus so the
-                    // UI can notify the user that an interactive shell has started and they
-                    // may want to switch to this session.
-                    const ttyOpen = (event.payload.metaInfo as Record<string, unknown> | undefined)?.['ttyOpen'];
+                    // Background session: promote harness-specific signals to the global bus.
+                    // Keys are defined in HARNESS_META_KEYS (harness-adapter.ts) as single source of truth.
+                    const meta = event.payload.metaInfo as Record<string, unknown> | undefined;
+                    const ttyOpen    = meta?.[HARNESS_META_KEYS.TTY_OPEN];
+                    const hitlRequest  = meta?.[HARNESS_META_KEYS.HITL_REQUEST];
+                    const hitlResolved = meta?.[HARNESS_META_KEYS.HITL_RESOLVED];
                     if (ttyOpen) {
                         this.eventBus.emitGlobal({
                             type: 'session_tty_active',
@@ -345,6 +365,21 @@ export class TaskRunner {
                                 sessionId,
                                 command: (ttyOpen as { command: string }).command,
                             },
+                        });
+                    }
+                    if (hitlRequest) {
+                        this.eventBus.emitGlobal({
+                            type: 'session_hitl_active',
+                            payload: {
+                                sessionId,
+                                question: (hitlRequest as { question: string }).question,
+                            },
+                        });
+                    }
+                    if (hitlResolved) {
+                        this.eventBus.emitGlobal({
+                            type: 'session_hitl_resolved',
+                            payload: { sessionId },
                         });
                     }
                 }
@@ -443,6 +478,7 @@ export class TaskRunner {
         } catch (error: any) {
             await this.handleError(error, task, runtime, state, sessionId, errorAlreadyEmitted);
         } finally {
+            this.harnessRunning = false;
             this.running.delete(task.id);
             runtime.currentTaskId = undefined;
             this.emitPoolStatus();

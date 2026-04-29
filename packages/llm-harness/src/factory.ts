@@ -22,6 +22,7 @@ import { LLMServiceAdapter } from './adapters/llm-service-adapter';
 import { ToolDeviceDriver } from './drivers/tool-device-driver';
 import { SkillDeviceDriver } from './drivers/skill-device-driver';
 import { AgentDeviceDriver } from './drivers/agent-device-driver';
+import { HITLQueue } from './services/hitl-queue';
 
 export interface HarnessOptions {
     /**
@@ -90,14 +91,20 @@ export async function createHarness(options: HarnessOptions): Promise<HarnessIns
         agentDriver.setTTYDriver(options.ttyDriver);
     }
 
+    // Create HITLQueue for human-in-the-loop input requests.
+    // The onRequest callback is wired by AgentDeviceDriver.setServices().
+    const hitlQueue = new HITLQueue();
+
     // Inject services. AgentDeviceDriver will:
     //   - create the SubAgentRouter
     //   - register load_skill and delegate_task on toolDriver
     //   - register TTY tools (if ttyDriver was set)
+    //   - register human_input tool (when hitlQueue is provided)
     agentDriver.setServices({
         llm: llmService,
         tool: toolDriver.getService(),
         skill: skillDriver.getService(),
+        hitlQueue,
     });
 
     // Auto-detect primary connection + derive per-token pricing.

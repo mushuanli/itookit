@@ -28,6 +28,18 @@ import type {
 import { generateId } from '@itookit/common';
 import type { OrchestratorEvent, ExecutionNode } from '../core/types';
 
+/**
+ * String keys used in OrchestratorEvent.payload.metaInfo for harness-specific signals.
+ * Defined here (source) and imported by TaskRunner (consumer) to keep the coupling explicit.
+ */
+export const HARNESS_META_KEYS = {
+    TTY_OPEN:      'ttyOpen',
+    TTY_DATA:      'ttyData',
+    TTY_CLOSE:     'ttyClose',
+    HITL_REQUEST:  'hitlRequest',
+    HITL_RESOLVED: 'hitlResolved',
+} as const;
+
 /** Content accumulator returned by execute(). */
 export interface HarnessAccumulator {
     output: string;
@@ -281,6 +293,27 @@ export class HarnessAdapter {
                 payload: {
                     nodeId: rootNode.id,
                     metaInfo: { userInjected: { message: p.message } },
+                },
+            });
+        }));
+
+        // ── HITL: human input requests ───────────────────────────────────
+        unsubs.push(this.runtime.on('agent:human:input', (p) => {
+            onEvent({
+                type: 'node_update',
+                payload: {
+                    nodeId: rootNode.id,
+                    metaInfo: { hitlRequest: { ...p } },
+                },
+            });
+        }));
+
+        unsubs.push(this.runtime.on('agent:human:resolved', (p) => {
+            onEvent({
+                type: 'node_update',
+                payload: {
+                    nodeId: rootNode.id,
+                    metaInfo: { hitlResolved: { ...p } },
                 },
             });
         }));

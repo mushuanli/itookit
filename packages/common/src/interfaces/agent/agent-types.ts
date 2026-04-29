@@ -216,7 +216,10 @@ export type AgentEventType =
     // 计划确认（Q1：用户可在第一次工具调用前审批/修改计划）
     | 'agent:plan:confirm'
     // 用户注入（Q3：执行中用户插入指令）
-    | 'agent:user:injected';
+    | 'agent:user:injected'
+    // HITL（human_input 工具：Agent 请求人工输入）
+    | 'agent:human:input'
+    | 'agent:human:resolved';
 
 /**
  * Agent 事件载荷映射
@@ -262,4 +265,19 @@ export interface AgentEventPayloads {
     };
     /** Q3: 用户在执行中注入指令，已加入下一轮上下文。 */
     'agent:user:injected': { message: string };
+    /** Agent 调用 human_input 工具，请求人工输入 */
+    'agent:human:input': {
+        requestId: string;
+        missionId: string;
+        todoId: string;
+        context: string;
+        question: string;
+        options?: string[];
+        files?: string[];
+    };
+    /** 人工输入已被响应 */
+    'agent:human:resolved': {
+        requestId: string;
+        response: string;
+    };
 }
