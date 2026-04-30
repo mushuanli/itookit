@@ -864,6 +864,9 @@ export class LLMWorkspaceEditor implements IEditor {
             this.wirePlanConfirmIntercept(harnessRuntime);
         }
 
+        // Wire harness runtime into HistoryView so TtyController can call ttyWrite().
+        (this.historyView as HistoryView).setRuntime(harnessRuntime ?? null);
+
         const promptHistory = getPromptHistory();
         if (promptHistory) {
             this.historyPlugin = new HistoryPlugin(promptHistory);
@@ -1442,10 +1445,12 @@ export class LLMWorkspaceEditor implements IEditor {
         const prompt = buildSkillPrompt(fullInvocation, skill.name, skill.type);
 
         // 5. Send (AttachmentProcessor resolves [name](path) markdown links)
+        // Skill invocations always run via harness — tools, HITL and TTY require the agent loop.
         const agentId = this.chatInput.getConfig().agentId;
-        const overrides = this.chatInput.getConfig().settings.useHarness
-            ? { useHarness: true, workingDirectory: this.chatInput.getConfig().settings.workingDirectory }
-            : {};
+        const overrides = {
+            useHarness: true,
+            workingDirectory: this.chatInput.getConfig().settings.workingDirectory || undefined,
+        };
 
         await this.sendCommand.run({ text: prompt, files: [], agentId, overrides });
     }

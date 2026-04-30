@@ -1,7 +1,7 @@
 // @file: llm-ui/components/history/HistoryView.ts
 
 import type { SessionGroup, OrchestratorEvent } from '@itookit/llm-engine';
-import type { ISessionEngine } from '@itookit/common';
+import type { ISessionEngine, IAgentRuntime } from '@itookit/common';
 import type { IHistoryPresenter } from '../domain/ports/IHistoryPresenter';
 import type { CollapseStateMap, NodeActionCallback } from '../domain/types';
 import type { IEditorEventBus } from '../domain/events';
@@ -17,6 +17,7 @@ import { StreamController } from './history/StreamController';
 import { CollapseController } from './history/CollapseController';
 import { EditController } from './history/EditController';
 import { EventDispatcher } from './history/EventDispatcher';
+import { TtyController } from './history/TtyController';
 
 export interface HistoryViewOptions {
     onContentChange?: (id: string, content: string, type: 'user' | 'node') => void;
@@ -45,6 +46,7 @@ export class HistoryView implements IHistoryPresenter {
     private collapse: CollapseController;
     private edit: EditController;
     private dispatcher: EventDispatcher;
+    private ttyCtrl: TtyController;
 
     // 基础设施
     private scrollController: ScrollController;
@@ -94,6 +96,8 @@ export class HistoryView implements IHistoryPresenter {
             container, this.renderer, this.stream,
             this.collapse, this.edit, options.bus, options.onNodeAction,
         );
+
+        this.ttyCtrl = new TtyController(this.renderer);
 
         this.resizeTracker = new ContentResizeTracker(
             container,
@@ -255,6 +259,14 @@ export class HistoryView implements IHistoryPresenter {
     // 内部事件处理
     // ================================================================
 
+    /**
+     * 注入 harness runtime，供 TtyController 调用 runtime.ttyWrite()。
+     * 由 LLMWorkspaceEditor.registerInputPlugins() 在 HarnessPlugin 注入后同步调用。
+     */
+    setRuntime(runtime: IAgentRuntime | null): void {
+        this.ttyCtrl.setRuntime(runtime);
+    }
+
     private handleBatchedEvents(batched: BatchedEvents<OrchestratorEvent>): void {
         // Process structural events first (node_start etc.) so nodes exist in the
         // DOM before we try to write streaming content into them.
@@ -270,6 +282,10 @@ export class HistoryView implements IHistoryPresenter {
 
         for (const [nodeId, { status, result }] of batched.statusChanges) {
             this.stream.updateStatus(nodeId, status, result);
+        }
+
+        for (const [nodeId, metaInfo] of batched.metaUpdates) {
+            this.ttyCtrl.handleMeta(nodeId, metaInfo);
         }
     }
     private processEventImmediate(event: OrchestratorEvent): void {
@@ -424,6 +440,7 @@ export class HistoryView implements IHistoryPresenter {
     private clear(): void {
         this.stream.destroy();
         this.edit.destroy();
+        this.ttyCtrl.destroyAll();
         this.renderer.clear();
         this.stream = new StreamController(this.container, this.renderer, this.scrollController);
     }
@@ -437,6 +454,7 @@ export class HistoryView implements IHistoryPresenter {
         this.stream.destroy();
         this.collapse.destroy();
         this.edit.destroy();
+        this.ttyCtrl.destroyAll();
         this.renderer.destroy();
         this.hideNewContentIndicator();
         this.container.innerHTML = '';

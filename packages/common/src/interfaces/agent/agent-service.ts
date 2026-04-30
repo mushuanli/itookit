@@ -87,6 +87,21 @@ export interface IAgentRuntime {
 
     /** 删除会话 */
     deleteSession(sessionId: string): void;
+
+    // ── TTY 交互 ──
+
+    /**
+     * 向指定 TTY 会话的 stdin 写入数据。
+     *
+     * 当 agent 通过 shell_session 开启交互式进程后，UI 可调用此方法
+     * 将用户从 TtyPanel 输入框的内容直接送入进程 stdin，绕过 LLM 循环。
+     */
+    ttyWrite(sessionId: string, data: string): void;
+
+    /**
+     * 列出当前所有活跃 TTY 会话。
+     */
+    ttyActiveSessions(): Array<{ id: string; command: string; pid: number | undefined; exited: boolean }>;
 }
 
 /**

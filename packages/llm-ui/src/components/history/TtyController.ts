@@ -1,0 +1,68 @@
+// @file: llm-ui/components/history/TtyController.ts
+//
+// TtyController — manages TtyPanel instances across multiple TTY sessions.
+//
+// Owned by HistoryView. Receives metaInfo dispatches from handleBatchedEvents()
+// and creates / updates / finalizes TtyPanel widgets accordingly.
+//
+// The runtime reference is set via setRuntime() when LLMWorkspaceEditor
+// calls historyView.setRuntime(), mirroring how HarnessPlugin receives it.
+
+import type { IAgentRuntime } from '@itookit/common';
+import type { SessionRenderer } from './SessionRenderer';
+import { TtyPanel } from './TtyPanel';
+
+type TtyOpenMeta  = { sessionId: string; command: string; pid?: number };
+type TtyDataMeta  = { sessionId: string; chunk: string };
+type TtyCloseMeta = { sessionId: string; exitCode: number | null };
+
+export class TtyController {
+    private panels = new Map<string, TtyPanel>();
+    private runtime: IAgentRuntime | null = null;
+
+    constructor(private readonly renderer: SessionRenderer) {}
+
+    setRuntime(runtime: IAgentRuntime | null): void {
+        this.runtime = runtime;
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    handleMeta(nodeId: string, metaInfo: Record<string, any>): void {
+        const open  = metaInfo.ttyOpen  as TtyOpenMeta  | undefined;
+        const data  = metaInfo.ttyData  as TtyDataMeta  | undefined;
+        const close = metaInfo.ttyClose as TtyCloseMeta | undefined;
+
+        if (open)  this.onOpen(nodeId, open.sessionId, open.command, open.pid);
+        if (data)  this.onData(data.sessionId, data.chunk);
+        if (close) this.onClose(close.sessionId, close.exitCode);
+    }
+
+    destroyAll(): void {
+        this.panels.forEach(p => p.destroy());
+        this.panels.clear();
+    }
+
+    // ── Private ──────────────────────────────────────────────────────────────
+
+    private onOpen(nodeId: string, sessionId: string, command: string, pid?: number): void {
+        if (this.panels.has(sessionId)) return; // idempotent
+
+        const nodeEl = this.renderer.getNode(nodeId);
+        const container = nodeEl?.querySelector('.llm-ui-node__tty-panels') as HTMLElement | null;
+        if (!container) return;
+
+        const panel = new TtyPanel(container, sessionId, command, pid, (sid, data) => {
+            this.runtime?.ttyWrite(sid, data);
+        });
+        this.panels.set(sessionId, panel);
+    }
+
+    private onData(sessionId: string, chunk: string): void {
+        this.panels.get(sessionId)?.appendOutput(chunk);
+    }
+
+    private onClose(sessionId: string, exitCode: number | null): void {
+        this.panels.get(sessionId)?.finalize(exitCode);
+        // Panel stays in map (read-only state) until destroyAll on session clear.
+    }
+}

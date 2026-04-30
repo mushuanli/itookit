@@ -28,11 +28,11 @@ export const humanInputDefinition: ToolDefinition = {
             properties: {
                 mission_id: {
                     type: 'string',
-                    description: 'Mission ID (provided in your task context)',
+                    description: 'Mission ID if running inside a mission, otherwise use "default"',
                 },
                 todo_id: {
                     type: 'string',
-                    description: 'Todo ID of the blocked task',
+                    description: 'Todo ID if running inside a mission, otherwise use "task-1"',
                 },
                 context: {
                     type: 'string',
@@ -73,12 +73,14 @@ export function createHumanInputHandler(
             ? (args['files'] as unknown[]).map(String)
             : undefined;
 
-        if (!missionId || !todoId) return 'Error: mission_id and todo_id are required';
+        // Fallback to sensible defaults outside mission context
+        const effectiveMissionId = missionId || 'default';
+        const effectiveTodoId    = todoId    || 'task-1';
 
         const response = await hitlQueue.push({
             id: generateUUID(),
-            missionId,
-            todoId,
+            missionId: effectiveMissionId,
+            todoId:    effectiveTodoId,
             context,
             question,
             options,

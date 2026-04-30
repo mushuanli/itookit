@@ -32,13 +32,14 @@ import type {
     ToolCall,
     TokenUsage,
     ModelTier,
+    ITTYSessionManager,
 } from '@itookit/common';
 import { BudgetExhaustedError, getNextLowerTier, resolveModelForTier } from '@itookit/common';
 import { BudgetController } from './budget-controller';
 import { ErrorRecoveryService } from './error-recovery';
 import { BackPressureValidator } from './back-pressure';
 import { ContextManager } from './context-manager';
-import { getToolName, getToolArgs } from '../utils/tool-call';
+import { getToolName, getToolArgs, extractXmlToolCalls } from '../utils/tool-call';
 import { saveSession, removeSession } from './session-store';
 import type { HITLQueue } from '../services/hitl-queue';
 export { loadInterruptedSessions } from './session-store';
@@ -72,6 +73,9 @@ export class AgentLoopExecutor implements IAgentRuntime {
 
     /** Q3: pending user injections per session (injected at next loop iteration start). */
     private readonly pendingInjections = new Map<string, string[]>();
+
+    /** TTY session manager — injected by AgentDeviceDriver after construction. */
+    private ttyManager: ITTYSessionManager | null = null;
 
     constructor(
         private readonly llm: ILLMService,
@@ -193,11 +197,7 @@ export class AgentLoopExecutor implements IAgentRuntime {
                 // 4. LLM Call
                 const connId = recovery.getCurrentConnectionId();
                 const toolDefs = this.toolService.getToolDefinitions();
-                // Do not send tool definitions to the API for now.
-                // Some proxy endpoints (like the internal Trend Micro endpoint) return 500
-                // when function-calling schemas are included. Tools will be re-enabled once
-                // the endpoint's tool-calling support is confirmed.
-                const effectiveTools = undefined;
+                const effectiveTools = toolDefs.length > 0 ? toolDefs : undefined;
                 console.log('[harness][A] LLM call start, connId=', connId, 'model=', effectiveModelId ?? '(conn default)', 'tools=', toolDefs.length, 'systemPromptOverride=', !!task.systemPromptOverride);
                 this.emit('agent:llm:start', { model: effectiveModelId ?? connId, messageCount: messages.length });
                 const response = await recovery.callWithRecovery(
@@ -221,10 +221,19 @@ export class AgentLoopExecutor implements IAgentRuntime {
 
                 const tokenUsage = response.usage ?? EMPTY_USAGE;
                 const assistantMsg = response.choices[0]?.message;
-                const responseText = assistantMsg?.content ?? '';
-                // If effectiveTools is undefined, the LLM shouldn't return tool_calls.
-                // Guard against misbehaving models that return tool_calls anyway.
-                const toolCalls: ToolCall[] = (effectiveTools !== undefined ? assistantMsg?.tool_calls : undefined) ?? [];
+                let responseText = assistantMsg?.content ?? '';
+
+                // Primary: structured tool_calls from OpenAI-format response.
+                // Fallback: some OpenAI-compatible proxies return Claude-style <tool_call>
+                // XML blocks inside the text content instead of message.tool_calls.
+                let toolCalls: ToolCall[] = (effectiveTools !== undefined ? assistantMsg?.tool_calls : undefined) ?? [];
+                if (toolCalls.length === 0 && effectiveTools !== undefined && responseText.includes('<tool_call>')) {
+                    const extracted = extractXmlToolCalls(responseText);
+                    if (extracted.calls.length > 0) {
+                        toolCalls = extracted.calls;
+                        responseText = extracted.cleanText;
+                    }
+                }
                 console.log('[harness][B] LLM response, responseText.len=', responseText.length, 'toolCalls=', toolCalls.length, 'choices=', response.choices?.length);
 
                 this.contextManager.addMessage(sessionId, {
@@ -378,6 +387,22 @@ export class AgentLoopExecutor implements IAgentRuntime {
         this.abortController?.abort();
         this.hitlQueue?.abortAll();
         this.subAgentRouter.abort();
+    }
+
+    /**
+     * Inject manager reference so ttyWrite / ttyActiveSessions can delegate.
+     * Called by AgentDeviceDriver immediately after constructing this executor.
+     */
+    setTTYManager(manager: ITTYSessionManager): void {
+        this.ttyManager = manager;
+    }
+
+    ttyWrite(sessionId: string, data: string): void {
+        this.ttyManager?.get(sessionId)?.write(data);
+    }
+
+    ttyActiveSessions(): Array<{ id: string; command: string; pid: number | undefined; exited: boolean }> {
+        return this.ttyManager?.list() ?? [];
     }
 
     /**
