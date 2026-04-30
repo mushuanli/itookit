@@ -338,6 +338,8 @@ export class AgentDeviceDriver implements IDeviceDriver, IAgentRuntimeConfig {
                 this.costModel, // pricing from connection metadata
                 this.hitlQueue ?? undefined, // HITL queue for human_input tool
             );
+            // Give the executor access to the TTY session manager so ttyWrite() works.
+            this.runtime.setTTYManager(this.ttyManager);
         }
         return this.runtime;
     }
