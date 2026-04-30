@@ -36,15 +36,15 @@
 - **LLM Chat**: `llm-ui → SessionManager → TaskRunner → AgentLoopExecutor → LLMServiceAdapter → Provider`
 - **App 装配**: `initApp() → createVFS → createHarness → initializeLLMEngine → WorkspaceStrategy`
 
-详情: [集成链](./integration-chains.md)
+详情: [集成链](./doc/integration-chains.md)
 
 ## 渐进式详情
 
 | 文档 | 内容 |
 |---|---|
-| [接口契约](./interface-contracts.md) | 跨包接口表（VFS / LLM / UI 体系） |
-| [集成链](./integration-chains.md) | 3 条核心集成链（VFS / Chat / AppShell） |
-| [事件流](./event-flows.md) | Agent / VFS / HITL / TTY 事件流 |
-| [Skill 同步](./skill-sync.md) | LLMSkill ↔ SkillDefinition 双体系 |
-| [开发模式](./dev-patterns.md) | 新功能流程、模块边界、浏览器差异、测试策略 |
-| [文件索引](./file-index.md) | 场景 → 关键文件映射 |
+| [接口契约](./doc/interface-contracts.md) | 跨包接口表（VFS / LLM / UI 体系） |
+| [集成链](./doc/integration-chains.md) | 3 条核心集成链（VFS / Chat / AppShell） |
+| [事件流](./doc/event-flows.md) | Agent / VFS / HITL / TTY 事件流 |
+| [Skill 同步](./doc/skill-sync.md) | LLMSkill ↔ SkillDefinition 双体系 |
+| [开发模式](./doc/dev-patterns.md) | 新功能流程、模块边界、浏览器差异、测试策略 |
+| [文件索引](./doc/file-index.md) | 场景 → 关键文件映射 |
