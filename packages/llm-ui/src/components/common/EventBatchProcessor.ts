@@ -19,6 +19,8 @@ export interface BatchedEvents<T extends BatchableEvent = BatchableEvent> {
     chunks: Map<string, { thought: string; output: string }>;
     statusChanges: Map<string, { status: string; result?: any }>;
     immediate: T[];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    metaUpdates: Map<string, Record<string, any>>;
 }
 
 export interface EventBatchProcessorOptions {
@@ -91,12 +93,20 @@ export class EventBatchProcessor<T extends BatchableEvent = BatchableEvent> {
             chunks: new Map(),
             statusChanges: new Map(),
             immediate: [],
+            metaUpdates: new Map(),
         };
 
         for (const event of events) {
             if (event.type === this.chunkType) {
                 const { nodeId, chunk, field } = event.payload ?? {};
-                if (!chunk || !field) continue;
+                if (!chunk || !field) {
+                    // metaInfo-only node_update — collect for TtyController / other meta handlers
+                    if (nodeId && event.payload?.metaInfo) {
+                        const prev = result.metaUpdates.get(nodeId) ?? {};
+                        result.metaUpdates.set(nodeId, { ...prev, ...event.payload.metaInfo });
+                    }
+                    continue;
+                }
 
                 if (!result.chunks.has(nodeId)) {
                     result.chunks.set(nodeId, { thought: '', output: '' });

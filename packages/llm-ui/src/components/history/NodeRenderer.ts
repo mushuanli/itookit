@@ -63,6 +63,7 @@ export class NodeRenderer {
                 <div class="llm-ui-node__output">
                     <div class="llm-ui-mount-point" id="mount-${node.id}"></div>
                 </div>
+                <div class="llm-ui-node__tty-panels"></div>
                 <div class="llm-ui-node__children"></div>
             </div>
         `;

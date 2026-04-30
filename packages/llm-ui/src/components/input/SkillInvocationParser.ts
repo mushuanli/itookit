@@ -175,11 +175,30 @@ export function buildSkillPrompt(
 
     if (invocation.text) {
         lines.push('');
-        lines.push(hasContext ? `Task: ${invocation.text}` : invocation.text);
-    } else if (!hasContext && skillType !== 'prompt') {
-        // No context at all — generic invocation
-        lines.push('');
-        lines.push('Please execute this skill on the current context.');
+        if (hasContext) {
+            lines.push(`Task: ${invocation.text}`);
+        } else if (skillType === 'prompt') {
+            // For prompt-type skills, wrap the user text as an explicit task directive so
+            // the LLM executes the skill's instructions (e.g. calls human_input, shell_session)
+            // rather than just acknowledging the skill content.
+            lines.push(`Task: ${invocation.text}`);
+            lines.push('');
+            lines.push('Please follow this skill\'s instructions and invoke the appropriate tools immediately to handle the task above.');
+        } else {
+            lines.push(invocation.text);
+        }
+    } else if (!hasContext) {
+        if (skillType === 'prompt') {
+            // Standalone invocation with no task text — tell LLM to apply the skill right now.
+            // This ensures skills like ask-human immediately invoke their tools (e.g. human_input)
+            // instead of describing their purpose.
+            lines.push('');
+            lines.push('This skill has been activated. Please follow its instructions and invoke the appropriate tools immediately.');
+            lines.push('If the skill requires human input, call the human_input tool now with mission_id="default" and todo_id="task-1".');
+        } else {
+            lines.push('');
+            lines.push('Please execute this skill on the current context.');
+        }
     }
 
     return lines.join('\n').trim();
