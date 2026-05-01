@@ -33,7 +33,7 @@ import { delegateTaskMeta, delegateTaskDefinition, createDelegateTaskHandler } f
 import { delegateAgentMeta, delegateAgentDefinition, createDelegateAgentHandler } from '../tools/delegate-agent';
 import { writeResultMeta, writeResultDefinition, createWriteResultHandler } from '../tools/write-result';
 import { humanInputMeta, humanInputDefinition, createHumanInputHandler } from '../tools/human-input';
-import { TTYSessionManager } from '../tty/session-manager';
+import { TTYSessionManager } from '@itookit/device-tty';
 import { shellSessionMeta, shellSessionDefinition, createShellSessionHandler } from '../tools/shell-session';
 import { ttyWriteMeta, ttyWriteDefinition, createTtyWriteHandler } from '../tools/tty-write';
 import { ttyCloseMeta, ttyCloseDefinition, createTtyCloseHandler } from '../tools/tty-close';

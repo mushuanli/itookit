@@ -39,7 +39,7 @@ export interface HarnessOptions {
      *
      * @example
      * ```ts
-     * import { NodeTTYDriver } from '@itookit/llm-harness';
+     * import { NodeTTYDriver } from '@itookit/device-tty';
      * const harness = await createHarness({ llmDriver, ttyDriver: new NodeTTYDriver() });
      * ```
      */

@@ -34,7 +34,6 @@ export type { HarnessOptions, HarnessInstance } from './factory';
 // ── Shell runner (Node.js only) ──
 export { NodeShellRunner } from './shell/node-shell-runner';
 
-// ── TTY device (Node.js only) ──
-export { NodeTTYDriver }    from './tty/node-tty-driver';
-export { TTYSessionManager } from './tty/session-manager';
-export type { NodeTTYSession } from './tty/node-tty-driver';
+// ── TTY device (Node.js only) — re-exported from @itookit/device-tty ──
+export { NodeTTYDriver, TTYSessionManager } from '@itookit/device-tty';
+export type { NodeTTYSession } from '@itookit/device-tty';

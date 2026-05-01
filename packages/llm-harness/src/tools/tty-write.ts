@@ -2,7 +2,7 @@
 // tty_write — send input to an active TTY session and collect the response.
 
 import type { ToolMeta, ToolDefinition, ToolHandler, ITTYSessionManager } from '@itookit/common';
-import { collectOutput } from '../tty/session-manager';
+import { collectOutput } from '@itookit/device-tty';
 
 export const ttyWriteMeta: ToolMeta = {
     id:          'tty_write',
