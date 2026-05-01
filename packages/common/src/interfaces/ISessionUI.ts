@@ -62,10 +62,10 @@ export interface SessionUIOptions {
     createFileLabel?: string;
 
     /**
-     * Factory that returns the default title pre-filled in the new-file input.
+     * Default title pre-filled in the new-file input.
      * User can edit or accept as-is. If omitted the input starts empty.
      */
-    defaultFileTitle?: () => string;
+    defaultFileTitle?: string;
 }
 
 export type SessionManagerEvent = 

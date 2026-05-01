@@ -25,7 +25,7 @@ interface NodeListOptions extends BaseComponentDeps {
   searchPlaceholder?: string;
   title?: string;
   createFileLabel?: string;
-  defaultFileTitle?: () => string;
+  defaultFileTitle?: string;
   searchFilter?: SearchFilter;
   instanceId: string;
   engine?: any;
@@ -50,8 +50,7 @@ export class NodeList extends BaseComponent<NodeListState> {
   private readonly renderer: NodeListRenderer;
 
   private currentCreateFileLabel: string;
-  private readonly defaultFileTitle?: () => string;
-  private pendingDefaultTitle = '';
+  private readonly defaultFileTitle?: string;
 
   constructor(options: NodeListOptions) {
     super(options);
@@ -191,9 +190,6 @@ export class NodeList extends BaseComponent<NodeListState> {
       this.commandBus.execute('file:import', { parentId });
     } else if (action === 'create-file' || action === 'create-directory') {
       const type = action.split('-')[1] as 'file' | 'directory';
-      if (type === 'file') {
-        this.pendingDefaultTitle = this.defaultFileTitle?.() ?? '';
-      }
       this.commandBus.execute('ui:startCreating', { type, parentId });
     }
   };
@@ -325,10 +321,7 @@ export class NodeList extends BaseComponent<NodeListState> {
     const { type, parentId } = this.state.creatingItem;
 
     this.commandBus.execute('ui:cancelCreating', undefined as any);
-
-    if (title) {
-      this.commandBus.execute('file:create', { type, title, parentId });
-    }
+    this.commandBus.execute('file:create', { type, title, parentId });
   }
 
   private buildInitialHTML(options: NodeListOptions): void {
@@ -390,10 +383,9 @@ export class NodeList extends BaseComponent<NodeListState> {
     );
     if (creatorInput) {
       creatorInput.focus();
-      if (this.pendingDefaultTitle) {
-        creatorInput.value = this.pendingDefaultTitle;
+      if (this.defaultFileTitle && !creatorInput.value) {
+        creatorInput.value = this.defaultFileTitle;
         creatorInput.select();
-        this.pendingDefaultTitle = '';
       }
     }
   }

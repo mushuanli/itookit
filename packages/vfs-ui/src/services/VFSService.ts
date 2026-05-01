@@ -3,6 +3,7 @@
  * @desc Data mutation service implementing IDataOperationPort.
  */
 import type { ISessionEngine, EngineNode } from '@itookit/common';
+import { formatDefaultFileTitle } from '@itookit/common';
 import type { IDataOperationPort } from '../contracts/ports';
 
 export interface VFSServiceDependencies {
@@ -46,11 +47,11 @@ export class VFSService implements IDataOperationPort {
     EXT_REGEX.test(filename) ? filename : `${filename}${this.defaultExtension}`;
 
   createFile = async ({
-    title = 'Untitled',
+    title,
     parentId = null,
     content = this.newFileContent,
   }: CreateFileOptions = {}): Promise<EngineNode> =>
-    this.engine.createFile(this.ensureExtension(title), parentId, content);
+    this.engine.createFile(this.ensureExtension(title || formatDefaultFileTitle()), parentId, content);
 
   createFiles = async ({
     parentId = null,

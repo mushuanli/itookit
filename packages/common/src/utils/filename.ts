@@ -1,4 +1,16 @@
 /**
+ * Generate a default file title using current date and time.
+ * Format: "YYYY-MM-DD HH-mm" — local time, filesystem-safe (no colons).
+ *
+ * @example "2026-05-01 14-30"
+ */
+export function formatDefaultFileTitle(): string {
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}-${pad(now.getMinutes())}`;
+}
+
+/**
  * Build a renamed filename by preserving the original extension.
  *
  * @param newTitle       The user-supplied new title (may or may not include the extension).
@@ -13,6 +25,7 @@
  * buildRenamedFilename('new-notes.md', 'old-notes.md')
  * // → { filename: 'new-notes.md', title: 'new-notes' }  (extension stripped from title)
  */
+
 export function buildRenamedFilename(
     newTitle: string,
     originalFilename: string,
