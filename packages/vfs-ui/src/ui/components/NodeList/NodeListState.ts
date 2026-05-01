@@ -23,7 +23,6 @@ export interface NodeListState {
   readOnly: boolean;
   status: 'idle' | 'loading' | 'success' | 'error';
   uiSettings: UISettings;
-  createFileLabel: string;
 }
 
 export interface ParsedSearchQuery {
@@ -34,8 +33,7 @@ export interface ParsedSearchQuery {
 
 export class NodeListStateTransformer {
   constructor(
-    private readonly searchFilter?: SearchFilter,
-    private readonly createFileLabel: string = 'File'
+    private readonly searchFilter?: SearchFilter
   ) {}
 
   transform(globalState: VFSUIState): NodeListState {
@@ -79,7 +77,6 @@ export class NodeListStateTransformer {
       selectionStatus,
       visibleItemIds,
       readOnly,
-      createFileLabel: this.createFileLabel,
     };
   }
 

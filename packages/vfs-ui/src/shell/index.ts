@@ -25,8 +25,6 @@ import { VFSService } from '../services/VFSService';
 export type VFSUIOptions = SessionUIOptions & {
     initialState?: Partial<VFSUIState>;
     defaultUiSettings?: Partial<UISettings>;
-    defaultFileName?: string;
-    defaultFileContent?: string;
     fileTypes?: FileTypeDefinition[];
     defaultEditorFactory: EditorFactory;
     customEditorResolver?: CustomEditorResolver;

@@ -44,8 +44,11 @@ export class MemoryManager {
                 ...config.uiOptions,
                 scopeId: scopeId,
                 sessionListContainer: this.layout.sidebarContainer,
-                defaultFileName: config.defaultContentConfig?.fileName,
-                defaultFileContent: config.defaultContentConfig?.content,
+                fileCreation: {
+                    ...config.uiOptions?.fileCreation,
+                    startupFileName: config.uiOptions?.fileCreation?.startupFileName ?? config.defaultContentConfig?.fileName,
+                    startupContent:  config.uiOptions?.fileCreation?.startupContent  ?? config.defaultContentConfig?.content,
+                },
                 defaultEditorFactory: this.enhancedEditorFactory,
                 fileTypes: config.fileTypes,
                 customEditorResolver: config.customEditorResolver,
