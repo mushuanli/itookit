@@ -2,15 +2,6 @@
 
 执行引擎核心层 — Executor/Orchestrator 注册表 + 运行时 + 插件系统。**无 UI 依赖**。
 
-## Commands
-
-```bash
-pnpm --filter @itookit/llm-kernel build       # tsup
-pnpm --filter @itookit/llm-kernel dev         # tsup --watch
-pnpm --filter @itookit/llm-kernel test        # vitest
-pnpm --filter @itookit/llm-kernel typecheck   # tsc --noEmit
-```
-
 ## Architecture
 
 ```

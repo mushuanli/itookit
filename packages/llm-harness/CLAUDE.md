@@ -2,15 +2,6 @@
 
 多轮 Agent 循环执行器 + 内置工具 + Skill 系统 + TTY + HITL。由 `createHarness()` 装配，输出 `IAgentRuntime`。
 
-## Commands
-
-```bash
-pnpm --filter @itookit/llm-harness build       # tsup
-pnpm --filter @itookit/llm-harness dev         # tsup --watch
-pnpm --filter @itookit/llm-harness test        # vitest
-pnpm --filter @itookit/llm-harness typecheck   # tsc --noEmit
-```
-
 ## Architecture
 
 ```
