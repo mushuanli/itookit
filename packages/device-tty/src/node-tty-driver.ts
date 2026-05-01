@@ -1,4 +1,4 @@
-// @file: llm-harness/src/tty/node-tty-driver.ts
+// @file: device-tty/src/node-tty-driver.ts
 //
 // NodeTTYDriver — spawns child processes with pipe-based bidirectional I/O.
 //

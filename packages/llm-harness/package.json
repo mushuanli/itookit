@@ -55,7 +55,8 @@
   },
   "dependencies": {
     "@itookit/common": "workspace:*",
-    "@itookit/device-llm": "workspace:*"
+    "@itookit/device-llm": "workspace:*",
+    "@itookit/device-tty": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",

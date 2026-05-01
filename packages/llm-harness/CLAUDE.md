@@ -12,7 +12,7 @@ src/
 ├── tools/                ← 内置工具 (file-*, shell-exec, glob/grep, load-skill, delegate-*, human-input)
 ├── adapters/             ← LLMServiceAdapter (IDeviceDriver → ILLMService)
 ├── services/             ← HITLQueue
-├── tty/                  ← NodeTTYDriver, TTYSessionManager
+├── (tty: @itookit/device-tty) ← NodeTTYDriver, TTYSessionManager
 └── shell/                ← NodeShellRunner
 ```
 
