@@ -3,7 +3,7 @@
 import {
     IEditor, EditorOptions, EditorHostContext, EditorEvent,
     EditorEventCallback, CollapseExpandResult, Toast, Modal, guessMimeType,
-    showConfirmDialog,
+    showConfirmDialog, formatDefaultFileTitle,
 } from '@itookit/common';
 
 /** Alias: infer MIME from filename (used for @mention file suggestions) */
@@ -1507,11 +1507,9 @@ export class LLMWorkspaceEditor implements IEditor {
      * 生成默认会话标题：YYYY-MM-DD HH:mm agentName
      */
     private formatDefaultTitle(agentId: string): string {
-        const now = new Date();
-        const date = now.toISOString().slice(0, 10);
-        const time = now.toTimeString().slice(0, 5).replace(':', '');  // HHmm
+        const base = formatDefaultFileTitle();
         const agentName = this.sanitizeFileName(this.getAgentDisplayName(agentId));
-        return `${date}_${time}_${agentName}`;
+        return `${base}_${agentName}`;
     }
 
     /**
