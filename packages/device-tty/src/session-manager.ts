@@ -1,4 +1,4 @@
-// @file: llm-harness/src/tty/session-manager.ts
+// @file: device-tty/src/session-manager.ts
 // TTY session registry — tracks active sessions across tool calls.
 
 import type { ITTYSession, ITTYSessionManager } from '@itookit/common';

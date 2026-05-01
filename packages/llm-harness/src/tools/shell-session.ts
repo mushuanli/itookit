@@ -11,7 +11,7 @@
 // and tty_close to terminate. The session ID links the calls.
 
 import type { ToolMeta, ToolDefinition, ToolHandler, ITTYDriver, ITTYSessionManager } from '@itookit/common';
-import { collectOutput } from '../tty/session-manager';
+import { collectOutput } from '@itookit/device-tty';
 
 export const shellSessionMeta: ToolMeta = {
     id:          'shell_session',
