@@ -43,8 +43,6 @@ import { findNodeById } from '../utils/helpers';
 export interface VFSUIShellOptions extends SessionUIOptions {
   initialState?: Partial<VFSUIState>;
   defaultUiSettings?: Partial<UISettings>;
-  defaultFileName?: string;
-  defaultFileContent?: string;
   defaultExtension?: string;
   fileTypes?: FileTypeDefinition[];
   defaultEditorFactory: any;
@@ -184,16 +182,17 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService> {
 
 
     const state = this.statePort.getState();
+    const startup = this.options.fileCreation;
     if (
       !state.items.length &&
       !this.options.readOnly &&
-      this.options.defaultFileName
+      startup?.startupFileName
     ) {
       try {
         await this.vfsService.createFile({
-          title: this.options.defaultFileName,
+          title: startup.startupFileName,
           content:
-            this.options.defaultFileContent ||
+            startup.startupContent ||
             '# Welcome\n\nSelect a file to start.',
           parentId: null,
         });
@@ -312,8 +311,7 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService> {
       tagEditorFactory: this.options.components?.tagEditor,
       searchPlaceholder:
         this.options.searchPlaceholder || 'Search (tag:xx type:file|dir)...',
-      createFileLabel:   this.options.createFileLabel,
-      defaultFileTitle:  this.options.defaultFileTitle,
+      fileCreation: this.options.fileCreation,
       title: this.options.title,
       searchFilter: this.options.searchFilter,
       instanceId: this.instanceId,

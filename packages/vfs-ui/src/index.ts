@@ -20,10 +20,6 @@ export { createVFSMentionProviders } from './mention/createVFSMentionProviders';
 export type VFSUIOptions = SessionUIOptions & {
     initialState?: Partial<VFSUIState>;
     defaultUiSettings?: Partial<UISettings>;
-    /** [新增] 当没有文件时，要创建的默认文件的文件名。如果未提供，则不创建。 */
-    defaultFileName?: string;
-    /** [新增] 默认文件的内容，可以是一段帮助文本或模板。 */
-    defaultFileContent?: string;
     // [新增]
     fileTypes?: FileTypeDefinition[];
     defaultEditorFactory: EditorFactory;

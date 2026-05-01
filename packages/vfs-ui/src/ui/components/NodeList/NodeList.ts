@@ -5,6 +5,7 @@
  */
 import { BaseComponent, BaseComponentDeps } from '../../core/BaseComponent';
 import type { VFSNodeUI, VFSUIState, SearchFilter } from '../../../contracts/types';
+import type { FileCreationConfig } from '@itookit/common';
 import { debounce, escapeHTML } from '@itookit/common';
 
 import { NodeListStateTransformer, NodeListState } from './NodeListState';
@@ -24,8 +25,7 @@ interface NodeListOptions extends BaseComponentDeps {
   tagEditorFactory?: any;
   searchPlaceholder?: string;
   title?: string;
-  createFileLabel?: string;
-  defaultFileTitle?: string;
+  fileCreation?: FileCreationConfig;
   searchFilter?: SearchFilter;
   instanceId: string;
   engine?: any;
@@ -49,17 +49,14 @@ export class NodeList extends BaseComponent<NodeListState> {
   private readonly footer: Footer;
   private readonly renderer: NodeListRenderer;
 
-  private currentCreateFileLabel: string;
-  private readonly defaultFileTitle?: string;
+  private readonly fileCreation?: FileCreationConfig;
 
   constructor(options: NodeListOptions) {
     super(options);
-    this.currentCreateFileLabel = options.createFileLabel || 'File';
-    this.defaultFileTitle = options.defaultFileTitle;
+    this.fileCreation = options.fileCreation;
 
     this.stateTransformer = new NodeListStateTransformer(
-      options.searchFilter,
-      this.currentCreateFileLabel
+      options.searchFilter
     );
 
     this.buildInitialHTML(options);
@@ -110,7 +107,7 @@ export class NodeList extends BaseComponent<NodeListState> {
         showTagEditor: opts => this.tagEditorPopover.show(opts),
         findItemById: id => this.findItemById(id),
       },
-      this.currentCreateFileLabel
+      this.fileCreation?.label ?? 'File'
     );
 
     this.settingsPopover = new SettingsPopover(this.commandBus, this.mainContainerEl);
@@ -335,8 +332,8 @@ export class NodeList extends BaseComponent<NodeListState> {
         <div class="vfs-node-list__header">
           <input type="search" class="vfs-node-list__search" placeholder="${escapeHTML(searchPlaceholder)}" />
           <div class="vfs-node-list__new-controls" data-ref="new-controls">
-            <button class="vfs-node-list__new-btn" data-action="create-file" title="新建 ${escapeHTML(this.currentCreateFileLabel)}">
-              <span>+</span><span class="btn-label">${escapeHTML(this.currentCreateFileLabel)}</span>
+            <button class="vfs-node-list__new-btn" data-action="create-file" title="新建 ${escapeHTML(this.fileCreation?.label ?? 'File')}">
+              <span>+</span><span class="btn-label">${escapeHTML(this.fileCreation?.label ?? 'File')}</span>
             </button>
             <button class="vfs-node-list__new-btn vfs-node-list__new-btn--folder" data-action="create-directory" title="新建目录"><span>📁+</span></button>
             <button class="vfs-node-list__new-btn vfs-node-list__new-btn--icon" data-action="import" title="导入文件"><i class="fas fa-upload"></i></button>
@@ -383,8 +380,8 @@ export class NodeList extends BaseComponent<NodeListState> {
     );
     if (creatorInput) {
       creatorInput.focus();
-      if (this.defaultFileTitle && !creatorInput.value) {
-        creatorInput.value = this.defaultFileTitle;
+      if (this.fileCreation?.title && !creatorInput.value) {
+        creatorInput.value = this.fileCreation?.title;
         creatorInput.select();
       }
     }
