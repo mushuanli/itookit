@@ -1,14 +1,6 @@
-# CLAUDE.md — @itookit/device-llm
+# @itookit/device-llm
 
 LLM 通信层 — Provider API、SSE 流式、MCP 协议、Skill 存储。**不包含**执行逻辑或会话管理。
-
-## Commands
-
-```bash
-pnpm --filter @itookit/device-llm build       # tsup
-pnpm --filter @itookit/device-llm dev         # tsup --watch
-pnpm --filter @itookit/device-llm test        # vitest
-```
 
 ## Architecture
 

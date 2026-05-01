@@ -4,13 +4,6 @@ Chat UI — Ports/Adapters 架构。提供 `LLMWorkspaceEditor`（Chat 主编辑
 
 peerDependency: `@itookit/mdxeditor`
 
-## Commands
-
-```bash
-pnpm --filter @itookit/llm-ui build        # vite build
-pnpm --filter @itookit/llm-ui dev          # vite dev
-```
-
 ## Architecture
 
 ```

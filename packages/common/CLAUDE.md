@@ -2,13 +2,6 @@
 
 共享接口、类型、工具函数和 i18n 的基础包。**零运行时依赖**，所有 `@itookit/*` 包的类型源头。
 
-## Commands
-
-```bash
-pnpm --filter @itookit/common build       # tsup → CJS+ESM+.d.ts
-pnpm --filter @itookit/common dev         # tsup --watch
-```
-
 ## Architecture
 
 此包**不包含实现逻辑**，只导出 interfaces / types / utils / components / i18n。

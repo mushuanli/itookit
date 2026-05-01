@@ -1,14 +1,6 @@
-# CLAUDE.md — @itookit/vfsdriver-fs
+# @itookit/vfsdriver-fs
 
 Node/Electron 本地文件系统 + SQLite 存储后端。实现 `IStorageBackend`。使用 `better-sqlite3` 存储 inode/meta，文件系统直接存储 content。
-
-## Commands
-
-```bash
-pnpm --filter @itookit/vfsdriver-fs build       # tsup
-pnpm --filter @itookit/vfsdriver-fs dev         # tsup --watch
-pnpm --filter @itookit/vfsdriver-fs test        # vitest
-```
 
 ## Architecture
 
