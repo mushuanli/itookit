@@ -2,14 +2,6 @@
 
 VFS 引擎核心 — POSIX 风格虚拟文件系统。引擎、服务层、ISessionEngine 适配器、内置设备。
 
-## Commands
-
-```bash
-pnpm --filter @itookit/vfslib build        # tsup → CJS+ESM+.d.ts
-pnpm --filter @itookit/vfslib dev          # tsup --watch
-pnpm --filter @itookit/vfslib test         # vitest
-```
-
 ## Architecture
 
 ```

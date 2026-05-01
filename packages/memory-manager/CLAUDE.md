@@ -4,13 +4,6 @@
 
 peerDependencies: `@itookit/common`, `@itookit/mdxeditor`, `@itookit/vfs-ui`, `@itookit/vfslib`
 
-## Commands
-
-```bash
-pnpm --filter @itookit/memory-manager build   # vite build
-pnpm --filter @itookit/memory-manager dev     # vite dev
-```
-
 ## Architecture
 
 ```

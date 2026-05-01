@@ -4,13 +4,6 @@
 
 peerDependencies: 所有 `@itookit/*` 包
 
-## Commands
-
-```bash
-pnpm --filter @itookit/app-shell test       # vitest
-pnpm --filter @itookit/app-shell test:watch # vitest --watch
-```
-
 ## Architecture
 
 ```

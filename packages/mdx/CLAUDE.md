@@ -2,14 +2,6 @@
 
 CodeMirror 6 驱动的 Markdown/MDX 编辑器。编辑/预览双模式、流式渲染、Mermaid/数学公式/PlantUML。
 
-## Commands
-
-```bash
-pnpm --filter @itookit/mdxeditor build      # vite build
-pnpm --filter @itookit/mdxeditor dev        # vite dev
-pnpm --filter @itookit/mdxeditor type-check # tsc --noEmit
-```
-
 ## Architecture
 
 ```

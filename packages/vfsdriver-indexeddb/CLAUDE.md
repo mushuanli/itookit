@@ -2,15 +2,6 @@
 
 浏览器 IndexedDB 存储后端。实现 `IStorageBackend` 三层存储接口（inode + meta + content），可选扩展 `IRecordStore`。
 
-## Commands
-
-```bash
-pnpm --filter @itookit/vfsdriver-indexeddb build       # tsup
-pnpm --filter @itookit/vfsdriver-indexeddb dev         # tsup --watch
-pnpm --filter @itookit/vfsdriver-indexeddb test        # vitest
-pnpm --filter @itookit/vfsdriver-indexeddb test:watch  # vitest --watch
-```
-
 ## Architecture
 
 ```

@@ -2,14 +2,6 @@
 
 会话引擎 — 多会话管理、VFS 持久化、Mission 编排、Session Graph。消费 `llm-kernel` 和 `llm-harness`。
 
-## Commands
-
-```bash
-pnpm --filter @itookit/llm-engine build       # tsup
-pnpm --filter @itookit/llm-engine dev         # tsup --watch
-pnpm --filter @itookit/llm-engine test        # vitest
-```
-
 ## Architecture
 
 ```
