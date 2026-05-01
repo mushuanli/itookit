@@ -90,7 +90,7 @@ export {
     calculateHash
 } from './utils/utils';
 export { MarkdownAnalyzer } from './utils/MarkdownAnalyzer';
-export { buildRenamedFilename } from './utils/filename';
+export { buildRenamedFilename, formatDefaultFileTitle } from './utils/filename';
 export {
     type TaskCounts,
     type MarkdownMetadata,

@@ -7,7 +7,7 @@ import {
     VFSAgentService,
     ILLMSessionEngine,
 } from '@itookit/llm-engine';
-import { EditorFactory, EditorOptions } from '@itookit/common';
+import { EditorFactory, EditorOptions, formatDefaultFileTitle } from '@itookit/common';
 import { AgentConfigEditor } from './editors/AgentConfigEditor';
 
 export { ConnectionSettingsEditor } from './editors/ConnectionSettingsEditor';
@@ -81,7 +81,7 @@ export const createLLMFactory = (
 
         if (!effectiveNodeId && engine) {
             // 如果没有 nodeId，创建新文件
-            const newNode = await engine.createFile(options.title || 'New Chat', null);
+            const newNode = await engine.createFile(options.title || formatDefaultFileTitle(), null);
             effectiveNodeId = newNode.id;
             isNewSession = true;
             console.log(`[LLMFactory] New file created: ${effectiveNodeId}`);

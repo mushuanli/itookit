@@ -1,5 +1,5 @@
 import { FileTypeDefinition } from '@itookit/vfs-ui';
-import { NavigationRequest, NAVIGATION_EVENTS, EditorFactory, MenuItem } from '@itookit/common';
+import { NavigationRequest, NAVIGATION_EVENTS, EditorFactory, MenuItem, formatDefaultFileTitle } from '@itookit/common';
 import type { LLMSkill, SkillDefinition, SkillToolBinding, ToolVFSContext } from '@itookit/common';
 import type { IVFSManager } from '@itookit/vfslib';
 import { createVFS } from '@itookit/vfslib';
@@ -398,14 +398,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
             defaultFileName:    primaryDef?.defaultFileName,
             defaultExtension:   primaryDef?.extension,
             defaultFileContent: primaryDef?.defaultContent,
-            ...(strategyType === 'chat' && {
-                defaultFileTitle: () => {
-                    const now = new Date();
-                    const pad = (n: number) => String(n).padStart(2, '0');
-                    // e.g. "2024-04-18 14-30" — local time, filesystem-safe (no colons)
-                    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}-${pad(now.getMinutes())}`;
-                },
-            }),
+            defaultFileTitle: uiPassThrough.defaultFileTitle ?? formatDefaultFileTitle(),
             contextMenu: {
                 items: (_item: object, defaults: MenuItem[]) => {
                     if (uiPassThrough.readOnly) return [];
