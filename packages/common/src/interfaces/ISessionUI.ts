@@ -28,6 +28,23 @@ export interface ContextMenuConfig {
     items?: ContextMenuBuilder;
 }
 
+/**
+ * Options controlling new-file creation behaviour.
+ * Grouped to keep SessionUIOptions focused on session-level concerns.
+ */
+export interface FileCreationConfig {
+    /** Label on the "+ New" button (e.g. "Chat", "Agent"). Default: "File". */
+    label?: string;
+    /** Title pre-filled in the new-file inline input. */
+    title?: string;
+    /** Body content template for newly created files. */
+    content?: string;
+    /** Auto-create this file on startup when the module has zero items. */
+    startupFileName?: string;
+    /** Content for the auto-created startup file. */
+    startupContent?: string;
+}
+
 export interface SessionUIOptions {
     sessionListContainer: HTMLElement;
     documentOutlineContainer?: HTMLElement;
@@ -37,9 +54,11 @@ export interface SessionUIOptions {
     initialSidebarCollapsed?: boolean;
     title?: string;
     searchPlaceholder?: string;
-    newSessionContent?: string;
-    
-    /** 
+
+    /** New-file creation defaults. When omitted, the "+" button still works but without pre-fill or startup file. */
+    fileCreation?: FileCreationConfig;
+
+    /**
      * 自定义组件工厂
      * TagEditor 的构造函数引用
      */
@@ -47,25 +66,6 @@ export interface SessionUIOptions {
         /** UPDATE: Changed type to `new (...args: any[]) => any` to correctly type a class constructor. */
         tagEditor?: new (...args: any[]) => any;
     };
-    
-    // [新增] 默认文件配置
-    /** 当模块/列表为空时，自动创建的默认文件名。如果未提供，则不创建。 */
-    defaultFileName?: string;
-    /** 默认文件的初始内容 */
-    defaultFileContent?: string;
-
-    /**
-     * [新增] 创建按钮的标签名词
-     * 例如: "Agent" -> 按钮显示 "+ Agent"
-     * 默认为 "File" -> 按钮显示 "+ File"
-     */
-    createFileLabel?: string;
-
-    /**
-     * Default title pre-filled in the new-file input.
-     * User can edit or accept as-is. If omitted the input starts empty.
-     */
-    defaultFileTitle?: string;
 }
 
 export type SessionManagerEvent = 

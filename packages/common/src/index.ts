@@ -46,7 +46,7 @@ export { IAutocompleteSource, type Suggestion } from './interfaces/IAutocomplete
 export { IMentionSource, type HoverPreviewData } from './interfaces/IMentionSource';
 export {
     ISessionUI,
-    type MenuItem, type ContextMenuBuilder, type ContextMenuConfig, type SessionUIOptions,
+    type MenuItem, type ContextMenuBuilder, type ContextMenuConfig, type SessionUIOptions, type FileCreationConfig,
     type SessionManagerEvent,
     type SessionManagerCallback
 } from './interfaces/ISessionUI';

@@ -82,7 +82,7 @@ export function assemble(
     const service = new VFSService({
         engine,
         defaultExtension: options.defaultExtension,
-        newFileContent: options.newSessionContent,
+        newFileContent: options.fileCreation?.content,
     });
 
     const engineAdapter = new EngineAdapter(engine, store, registry, options.showFileExtensions ?? false);
@@ -93,9 +93,9 @@ export function assemble(
 
     const handlers = [
         new FileCommandHandler(commandBus, store, service, {
-            newFileContent: options.newSessionContent,
-            defaultFileName: options.defaultFileName,
-            defaultFileContent: options.defaultFileContent,
+            newFileContent: options.fileCreation?.content,
+            defaultFileName: options.fileCreation?.startupFileName,
+            defaultFileContent: options.fileCreation?.startupContent,
             readContent: (id) => engine.readContent(id),
             getDuplicateTransformer: (ext) => registry.getDuplicateTransformer(ext),
         }),

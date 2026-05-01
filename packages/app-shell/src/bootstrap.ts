@@ -394,11 +394,15 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
 
         const uiOptions = {
             ...uiPassThrough,
-            createFileLabel:    primaryDef?.label        ?? 'File',
-            defaultFileName:    primaryDef?.defaultFileName,
-            defaultExtension:   primaryDef?.extension,
-            defaultFileContent: primaryDef?.defaultContent,
-            defaultFileTitle: uiPassThrough.defaultFileTitle ?? formatDefaultFileTitle(),
+            defaultExtension: primaryDef?.extension,
+            fileCreation: {
+                ...uiPassThrough.fileCreation,
+                label:           uiPassThrough.fileCreation?.label           ?? primaryDef?.label           ?? 'File',
+                title:           uiPassThrough.fileCreation?.title           ?? formatDefaultFileTitle(),
+                content:         uiPassThrough.fileCreation?.content,
+                startupFileName: uiPassThrough.fileCreation?.startupFileName ?? primaryDef?.defaultFileName,
+                startupContent:  uiPassThrough.fileCreation?.startupContent  ?? primaryDef?.defaultContent,
+            },
             contextMenu: {
                 items: (_item: object, defaults: MenuItem[]) => {
                     if (uiPassThrough.readOnly) return [];
