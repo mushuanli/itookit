@@ -1,4 +1,4 @@
-// @file: llm-ui/components/history/TtyPanel.ts
+// @file: llm-ui/components/tty/TtyPanel.ts
 //
 // TtyPanel — inline terminal widget for a single TTY session.
 //

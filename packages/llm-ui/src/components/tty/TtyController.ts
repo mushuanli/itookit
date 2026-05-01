@@ -1,26 +1,26 @@
-// @file: llm-ui/components/history/TtyController.ts
+// @file: llm-ui/components/tty/TtyController.ts
 //
 // TtyController — manages TtyPanel instances across multiple TTY sessions.
 //
-// Owned by HistoryView. Receives metaInfo dispatches from handleBatchedEvents()
-// and creates / updates / finalizes TtyPanel widgets accordingly.
-//
-// The runtime reference is set via setRuntime() when LLMWorkspaceEditor
-// calls historyView.setRuntime(), mirroring how HarnessPlugin receives it.
+// Owned by HistoryView, which injects a getNode callback to find DOM containers.
+// Receives metaInfo dispatches from handleBatchedEvents() and creates / updates /
+// finalizes TtyPanel widgets accordingly.
 
 import type { IAgentRuntime } from '@itookit/common';
-import type { SessionRenderer } from './SessionRenderer';
 import { TtyPanel } from './TtyPanel';
 
 type TtyOpenMeta  = { sessionId: string; command: string; pid?: number };
 type TtyDataMeta  = { sessionId: string; chunk: string };
 type TtyCloseMeta = { sessionId: string; exitCode: number | null };
 
+/** Callback to resolve a node ID to its DOM element. */
+type GetNodeFn = (nodeId: string) => HTMLElement | undefined;
+
 export class TtyController {
     private panels = new Map<string, TtyPanel>();
     private runtime: IAgentRuntime | null = null;
 
-    constructor(private readonly renderer: SessionRenderer) {}
+    constructor(private readonly getNode: GetNodeFn) {}
 
     setRuntime(runtime: IAgentRuntime | null): void {
         this.runtime = runtime;
@@ -47,7 +47,7 @@ export class TtyController {
     private onOpen(nodeId: string, sessionId: string, command: string, pid?: number): void {
         if (this.panels.has(sessionId)) return; // idempotent
 
-        const nodeEl = this.renderer.getNode(nodeId);
+        const nodeEl = this.getNode(nodeId);
         const container = nodeEl?.querySelector('.llm-ui-node__tty-panels') as HTMLElement | null;
         if (!container) return;
 

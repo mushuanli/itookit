@@ -17,7 +17,7 @@ import { StreamController } from './history/StreamController';
 import { CollapseController } from './history/CollapseController';
 import { EditController } from './history/EditController';
 import { EventDispatcher } from './history/EventDispatcher';
-import { TtyController } from './history/TtyController';
+import { TtyController } from './tty/TtyController';
 
 export interface HistoryViewOptions {
     onContentChange?: (id: string, content: string, type: 'user' | 'node') => void;
@@ -97,7 +97,7 @@ export class HistoryView implements IHistoryPresenter {
             this.collapse, this.edit, options.bus, options.onNodeAction,
         );
 
-        this.ttyCtrl = new TtyController(this.renderer);
+        this.ttyCtrl = new TtyController((id) => this.renderer.getNode(id));
 
         this.resizeTracker = new ContentResizeTracker(
             container,
