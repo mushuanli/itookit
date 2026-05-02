@@ -101,28 +101,14 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
 
         return `
             <!-- ── Header ── -->
-            <div style="padding:1.25rem 1.75rem;border-bottom:1px solid var(--st-border-color);
-                        display:flex;align-items:center;justify-content:space-between;gap:.75rem;flex-wrap:wrap">
-                <div style="display:flex;align-items:center;gap:1rem;min-width:0">
-                    <span style="font-size:2.25rem;flex-shrink:0;line-height:1">${server.icon || ENTITY_ICONS.mcp}</span>
-                    <div style="min-width:0">
-                        <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
-                            <input name="header-name" value="${server.name}"
-                                placeholder="${t('mcp.placeholder.name')}"
-                                style="font-size:1.125rem;font-weight:700;color:var(--st-text-primary);
-                                       background:transparent;border:0;border-bottom:2px solid transparent;
-                                       outline:none;padding:0 0 1px;font-family:inherit;
-                                       width:auto;min-width:60px;max-width:280px;cursor:text;
-                                       transition:border-color .15s"
-                                title="${t('tooltip.clickEditName')}">
-                            ${statusBadge(server.status)}
-                        </div>
-                        <div style="font-size:.8125rem;color:var(--st-text-secondary);margin-top:.125rem">
-                            ${server.description || t(`mcpTransport.${server.transport}` as Parameters<typeof t>[0]) || server.transport}
-                        </div>
-                    </div>
-                </div>
-                <div style="display:flex;gap:.5rem;flex-shrink:0">
+            ${this.renderEntityHeader({
+                icon:            server.icon || '',
+                fallbackIcon:    ENTITY_ICONS.mcp,
+                name:            server.name,
+                namePlaceholder: t('mcp.placeholder.name'),
+                badges:  statusBadge(server.status),
+                subtitle: server.description || t(`mcpTransport.${server.transport}` as Parameters<typeof t>[0]) || server.transport,
+                actions: `
                     <button class="settings-btn settings-btn--secondary" data-action="test">
                         <i class="fas fa-plug"></i> ${t('action.test')}
                     </button>
@@ -131,9 +117,8 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
                     </button>
                     <button class="settings-btn settings-btn--danger" data-action="delete" title="${t('action.delete')}">
                         <i class="fas fa-trash"></i>
-                    </button>
-                </div>
-            </div>
+                    </button>`,
+            })}
 
             <!-- ── Scrollable body ── -->
             <div style="overflow-y:auto;padding:1.25rem 1.75rem 2rem">
@@ -314,42 +299,21 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
         const list = this.container.querySelector('.settings-split__list');
         if (list) {
             this.addEventListener(list, 'click', (e) => {
-                if ((e.target as HTMLElement).closest('.mcp-inline-rename')) return;
+                if ((e.target as HTMLElement).closest('.settings-inline-rename')) return;
                 const item = (e.target as HTMLElement).closest('[data-id]') as HTMLElement | null;
                 if (item) { this.selectedId = item.dataset.id!; this.render(); }
             });
             this.addEventListener(list, 'dblclick', (e) => {
                 const titleEl = (e.target as HTMLElement).closest('[data-name-for]') as HTMLElement | null;
-                if (titleEl) this.startInlineRename(titleEl, titleEl.dataset.nameFor!, servers);
+                if (titleEl) this._startMCPInlineRename(titleEl, titleEl.dataset.nameFor!, servers);
             });
         }
 
-        // ── Header name input ─────────────────────────────────────────────────
-        const headerInput = this.container.querySelector<HTMLInputElement>('[name="header-name"]');
-        const formInput   = this.container.querySelector<HTMLInputElement>('[name="name"]');
-        if (headerInput) {
-            this.addEventListener(headerInput, 'focus', () => {
-                headerInput.style.borderBottomColor = 'var(--st-primary, #6366f1)';
-            });
-            this.addEventListener(headerInput, 'blur', () => {
-                headerInput.style.borderBottomColor = 'transparent';
-                this.saveNameOnly(headerInput.value.trim(), servers);
-            });
-            this.addEventListener(headerInput, 'keydown', (e) => {
-                if ((e as KeyboardEvent).key === 'Enter') headerInput.blur();
-            });
-            if (formInput) {
-                this.addEventListener(headerInput, 'input', () => {
-                    formInput.value = headerInput.value;
-                    this.resizeHeaderInput(headerInput);
-                });
-                this.addEventListener(formInput, 'input', () => {
-                    headerInput.value = formInput.value;
-                    this.resizeHeaderInput(headerInput);
-                });
-            }
-            this.resizeHeaderInput(headerInput);
-        }
+        // ── Header name: auto-save on blur, kept in sync with form input ─────
+        this.bindEntityHeaderEvents({
+            onNameSave:          (name) => this.saveNameOnly(name, servers),
+            mirrorNameSelector:  '[name="name"]',
+        });
 
         // ── Action buttons ────────────────────────────────────────────────────
         this.container.querySelectorAll('[data-action="add"]').forEach(el =>
@@ -398,11 +362,6 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
         return (this.container.querySelector(`[name="${name}"]`) as HTMLInputElement | null)?.checked ?? false;
     }
 
-    private resizeHeaderInput(input: HTMLInputElement): void {
-        input.style.width = '4px';
-        input.style.width = `${Math.min(input.scrollWidth + 4, 280)}px`;
-    }
-
     private async saveNameOnly(newName: string, servers: MCPServer[]): Promise<void> {
         if (!this.selectedId || !newName) return;
         const server = servers.find(s => s.id === this.selectedId);
@@ -418,53 +377,23 @@ export class MCPSettingsEditor extends BaseSettingsEditor<IAgentManagementServic
         server.name = newName;
     }
 
-    private startInlineRename(titleEl: HTMLElement, serverId: string, servers: MCPServer[]): void {
-        if (titleEl.querySelector('input')) return;
-        const original = titleEl.textContent?.trim() ?? '';
-
-        const input = document.createElement('input');
-        input.value = original;
-        input.className = 'mcp-inline-rename';
-        input.style.cssText = [
-            'width:100%', 'padding:0 2px', 'margin:0',
-            'font-size:inherit', 'font-weight:inherit', 'font-family:inherit',
-            'color:inherit', 'background:var(--st-input-bg,#fff)',
-            'border:1px solid var(--st-primary,#6366f1)', 'border-radius:3px',
-            'outline:none', 'line-height:1.4',
-        ].join(';');
-
-        titleEl.textContent = '';
-        titleEl.appendChild(input);
-        input.select();
-        input.focus();
-
-        let committed = false;
-        const commit = async () => {
-            if (committed) return;
-            committed = true;
-            const newName = input.value.trim() || original;
-            titleEl.textContent = newName;
-            if (newName === original) return;
-
-            const server = servers.find(s => s.id === serverId);
-            if (!server) return;
-            await this.service.saveMCPServer({ ...server, name: newName });
-            server.name = newName;
-
-            if (serverId === this.selectedId) {
+    private _startMCPInlineRename(titleEl: HTMLElement, serverId: string, servers: MCPServer[]): void {
+        this.startInlineRename(
+            titleEl,
+            async (newName) => {
+                const server = servers.find(s => s.id === serverId);
+                if (!server) return;
+                await this.service.saveMCPServer({ ...server, name: newName });
+                server.name = newName; // patch local cache
+            },
+            (newName) => {
+                if (serverId !== this.selectedId) return;
                 const hdr = this.container.querySelector<HTMLInputElement>('[name="header-name"]');
                 const frm = this.container.querySelector<HTMLInputElement>('[name="name"]');
                 if (hdr) { hdr.value = newName; this.resizeHeaderInput(hdr); }
                 if (frm) frm.value = newName;
-            }
-        };
-
-        input.addEventListener('blur', commit, { once: true });
-        input.addEventListener('keydown', (e) => {
-            e.stopPropagation();
-            if (e.key === 'Enter')  { input.blur(); }
-            if (e.key === 'Escape') { committed = true; titleEl.textContent = original; }
-        });
+            },
+        );
     }
 
     // ─── Actions ────────────────────────────────────────────────────────────

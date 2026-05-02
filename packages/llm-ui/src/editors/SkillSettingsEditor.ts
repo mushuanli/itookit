@@ -229,35 +229,15 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
 
         return `
             <!-- ── Header ── -->
-            <div style="padding:1.25rem 1.75rem;border-bottom:1px solid var(--st-border-color);
-                        display:flex;align-items:center;justify-content:space-between;gap:.75rem;flex-wrap:wrap">
-                <div style="display:flex;align-items:center;gap:1rem;min-width:0">
-                    <input name="header-icon" value="${skill.icon || ''}" placeholder="${meta.icon}"
-                           title="${t('tooltip.clickEditIcon')}"
-                           style="font-size:2rem;width:2.75rem;height:2.75rem;text-align:center;
-                                  border:2px solid transparent;border-radius:8px;background:transparent;
-                                  cursor:pointer;outline:none;padding:0;font-family:inherit;flex-shrink:0;
-                                  transition:border-color .15s"
-                           maxlength="2">
-                    <div style="min-width:0">
-                        <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
-                            <input name="header-name" value="${skill.name}"
-                                placeholder="${t('skill.placeholder.name')}"
-                                style="font-size:1.125rem;font-weight:700;color:var(--st-text-primary);
-                                       background:transparent;border:0;border-bottom:2px solid transparent;
-                                       outline:none;padding:0 0 1px;font-family:inherit;
-                                       width:auto;min-width:60px;max-width:280px;cursor:text;
-                                       transition:border-color .15s"
-                                title="${t('tooltip.clickEditName')}">
-                            ${typeBadge(skill.type)}
-                            ${enabledBadge(skill.enabled)}
-                        </div>
-                        <div style="font-size:.8125rem;color:var(--st-text-secondary);margin-top:.125rem">
-                            ${skill.description || t('status.noDesc')}
-                        </div>
-                    </div>
-                </div>
-                <div style="display:flex;gap:.5rem;flex-shrink:0">
+            ${this.renderEntityHeader({
+                icon:         skill.icon || '',
+                fallbackIcon: meta.icon,
+                editableIcon: true,
+                name:         skill.name,
+                namePlaceholder: t('skill.placeholder.name'),
+                badges:  `${typeBadge(skill.type)} ${enabledBadge(skill.enabled)}`,
+                subtitle: skill.description || t('status.noDesc'),
+                actions: `
                     ${isHTTP ? `
                     <button class="settings-btn settings-btn--secondary" data-action="test" title="${t('tooltip.testConnection')}">
                         <i class="fas fa-vial"></i> ${t('action.test')}
@@ -267,9 +247,8 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
                     </button>
                     <button class="settings-btn settings-btn--danger" data-action="delete" title="${t('action.delete')}">
                         <i class="fas fa-trash"></i>
-                    </button>
-                </div>
-            </div>
+                    </button>`,
+            })}
 
             <!-- ── Scrollable body ── -->
             <div style="overflow-y:auto;padding:1.25rem 1.75rem 2rem">
@@ -542,14 +521,14 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
             });
             this.addEventListener(list, 'click', (e) => {
                 // Ignore clicks inside an active rename input or on checkboxes
-                if ((e.target as HTMLElement).closest('.skill-inline-rename')) return;
+                if ((e.target as HTMLElement).closest('.settings-inline-rename')) return;
                 if ((e.target as HTMLElement).closest('[data-check-id]')) return;
                 const item = (e.target as HTMLElement).closest('[data-id]') as HTMLElement | null;
                 if (item) { this.selectedId = item.dataset.id!; this.render(); }
             });
             this.addEventListener(list, 'dblclick', (e) => {
                 const titleEl = (e.target as HTMLElement).closest('[data-name-for]') as HTMLElement | null;
-                if (titleEl) this.startInlineRename(titleEl, titleEl.dataset.nameFor!);
+                if (titleEl) this._startSkillInlineRename(titleEl, titleEl.dataset.nameFor!);
             });
         }
 
@@ -558,39 +537,11 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
         this.bindAction('batch-delete', () => this.batchDelete());
         this.bindAction('batch-export', () => this.batchExport());
 
-        // ── Header icon input: focus style + auto-save on blur ────────────────
-        const iconInput = this.container.querySelector<HTMLInputElement>('[name="header-icon"]');
-        if (iconInput) {
-            this.addEventListener(iconInput, 'focus', () => {
-                iconInput.style.borderColor = 'var(--st-primary, #6366f1)';
-                iconInput.select();
-            });
-            this.addEventListener(iconInput, 'blur', () => {
-                iconInput.style.borderColor = 'transparent';
-                this.saveIconOnly(iconInput.value.trim());
-            });
-            this.addEventListener(iconInput, 'keydown', (e) => {
-                if ((e as KeyboardEvent).key === 'Enter') iconInput.blur();
-                if ((e as KeyboardEvent).key === 'Escape') iconInput.blur();
-            });
-        }
-
-        // ── Header name input: focus style + auto-save ─────────────────────
-        const headerInput = this.container.querySelector<HTMLInputElement>('[name="header-name"]');
-        if (headerInput) {
-            this.addEventListener(headerInput, 'focus', () => {
-                headerInput.style.borderBottomColor = 'var(--st-primary, #6366f1)';
-            });
-            this.addEventListener(headerInput, 'blur', () => {
-                headerInput.style.borderBottomColor = 'transparent';
-                this.saveNameOnly(headerInput.value.trim());
-            });
-            this.addEventListener(headerInput, 'keydown', (e) => {
-                if ((e as KeyboardEvent).key === 'Enter') headerInput.blur();
-                if ((e as KeyboardEvent).key === 'Escape') { headerInput.blur(); }
-            });
-            this.resizeHeaderInput(headerInput);
-        }
+        // ── Header icon + name: auto-save on blur ─────────────────────────────
+        this.bindEntityHeaderEvents({
+            onIconSave: (icon) => this.saveIconOnly(icon),
+            onNameSave: (name) => this.saveNameOnly(name),
+        });
 
         // ── triggerStrategy: show/hide disableModelInvocation ─────────────
         const triggerSel = this.container.querySelector<HTMLSelectElement>('#trigger-strategy-select');
@@ -642,13 +593,6 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
         }
     }
 
-    /** Auto-size the header input to its content width. */
-    private resizeHeaderInput(input: HTMLInputElement): void {
-        // Use a temporary canvas measurement or the scrollWidth trick
-        input.style.width = '4px';
-        input.style.width = `${Math.min(input.scrollWidth + 4, 280)}px`;
-    }
-
     /**
      * Save only the name field without a full re-render.
      * Updates the sidebar title and form field in-place.
@@ -659,9 +603,10 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
         const skill  = skills.find(s => s.id === this.selectedId);
         if (!skill || skill.name === newName) return;
 
-        await this.service.saveSkill({ ...skill, name: newName, modifiedAt: Date.now() });
+        // Sync through engine so vfs-ui list refreshes via node:renamed.
+        await this.syncName(newName);
 
-        // Patch sidebar without full re-render
+        // Patch sidebar in-place for non-formOnly mode (same-tab feedback).
         const sidebarTitle = this.container.querySelector<HTMLElement>(`[data-name-for="${this.selectedId}"]`);
         if (sidebarTitle && !sidebarTitle.querySelector('input')) {
             sidebarTitle.textContent = newName;
@@ -683,9 +628,10 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
         const normalised = newIcon || undefined;
         if (skill.icon === normalised) return;
 
-        await this.service.saveSkill({ ...skill, icon: normalised, modifiedAt: Date.now() });
+        // Sync through engine so vfs-ui list refreshes via node:updated.
+        await this.syncMetadata({ icon: normalised });
 
-        // Patch sidebar icon without full re-render
+        // Patch sidebar icon in-place for non-formOnly mode (same-tab feedback).
         const sidebarIcon = this.container.querySelector<HTMLElement>(
             `.settings-list-item[data-id="${this.selectedId}"] .settings-list-item__icon`
         );
@@ -695,64 +641,23 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
         }
     }
 
-    /**
-     * Replace a sidebar title element with an inline input for renaming.
-     * Commits on Enter/blur, cancels on Escape.
-     */
-    private startInlineRename(titleEl: HTMLElement, skillId: string): void {
-        if (titleEl.querySelector('input')) return; // already editing
-        const original = titleEl.textContent?.trim() ?? '';
-
-        const input = document.createElement('input');
-        input.value = original;
-        input.className = 'skill-inline-rename';
-        input.style.cssText = [
-            'width:100%', 'padding:0 2px', 'margin:0',
-            'font-size:inherit', 'font-weight:inherit', 'font-family:inherit',
-            'color:inherit', 'background:var(--st-input-bg,#fff)',
-            'border:1px solid var(--st-primary,#6366f1)', 'border-radius:3px',
-            'outline:none', 'line-height:1.4',
-        ].join(';');
-
-        titleEl.textContent = '';
-        titleEl.appendChild(input);
-        input.select();
-        input.focus();
-
-        let committed = false;
-        const commit = async () => {
-            if (committed) return;
-            committed = true;
-            const newName = input.value.trim() || original;
-            // Restore text
-            titleEl.textContent = newName;
-
-            if (newName === original) return;
-            const skills = await this.service.getSkills();
-            const skill  = skills.find(s => s.id === skillId);
-            if (!skill) return;
-            await this.service.saveSkill({ ...skill, name: newName, modifiedAt: Date.now() });
-
-            // Sync header + form if this is the currently selected skill
-            if (skillId === this.selectedId) {
+    private _startSkillInlineRename(titleEl: HTMLElement, skillId: string): void {
+        this.startInlineRename(
+            titleEl,
+            async (newName) => {
+                const skills = await this.service.getSkills();
+                const skill  = skills.find(s => s.id === skillId);
+                if (!skill) return;
+                await this.service.saveSkill({ ...skill, name: newName, modifiedAt: Date.now() });
+            },
+            (newName) => {
+                if (skillId !== this.selectedId) return;
                 const hdr = this.container.querySelector<HTMLInputElement>('[name="header-name"]');
                 const frm = this.container.querySelector<HTMLInputElement>('[name="name"]');
                 if (hdr) { hdr.value = newName; this.resizeHeaderInput(hdr); }
                 if (frm) frm.value = newName;
-            }
-        };
-
-        const cancel = () => {
-            committed = true;
-            titleEl.textContent = original;
-        };
-
-        input.addEventListener('blur', commit, { once: true });
-        input.addEventListener('keydown', (e) => {
-            e.stopPropagation(); // prevent list selection
-            if (e.key === 'Enter')  { input.blur(); }
-            if (e.key === 'Escape') { input.removeEventListener('blur', commit); cancel(); }
-        });
+            },
+        );
     }
 
     /** Bind ALL elements with `data-action="<action>"` — fixes duplicate-button problem. */
