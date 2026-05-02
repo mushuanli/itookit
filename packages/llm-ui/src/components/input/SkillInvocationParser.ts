@@ -119,6 +119,34 @@ export function buildWizardRefill(invocation: SkillInvocation, missing: string[]
 }
 
 /**
+ * Build the user message for an L1 action skill invocation.
+ *
+ * Action skills (disableModelInvocation=true) are invoked directly — their instructions
+ * are injected into the user message without going through the LLM load_skill mechanism.
+ * This bypasses the model and executes the skill's instructions as a user directive.
+ */
+export function buildActionSkillMessage(
+    invocation: SkillInvocation,
+    skillInstructions: string,
+): string {
+    const parts: string[] = [`[Action: ${invocation.skillId}]`, '', skillInstructions];
+
+    if (invocation.filePaths.length > 0) {
+        parts.push('', invocation.filePaths.length === 1 ? 'File:' : 'Files:');
+        for (const fp of invocation.filePaths) {
+            const name = fp.split('/').pop() ?? fp;
+            parts.push(`[${name}](${fp})`);
+        }
+    }
+
+    if (invocation.text) {
+        parts.push('', `Task: ${invocation.text}`);
+    }
+
+    return parts.join('\n').trim();
+}
+
+/**
  * Build the prompt string sent to the agent for a skill invocation.
  *
  * File paths are kept as Markdown links so AttachmentProcessor can resolve them.
