@@ -1,6 +1,6 @@
 ## packages/ 模块协作指南
 
-`packages/` 下 14 个模块的协作关系。各模块自身的架构和命令详见 `packages/<pkg>/CLAUDE.md`。
+`packages/` 下 15 个模块的协作关系。各模块自身的架构和命令详见 `packages/<pkg>/CLAUDE.md`。
 
 ## 模块分层
 
@@ -15,6 +15,8 @@
 │ llm-engine   │  llm-harness │  app-settings      │  业务层
 ├──────────────┼──────────────┼────────────────────┤
 │ llm-kernel   │  device-llm  │  vfslib            │  引擎层
+├──────────────┼──────────────┼────────────────────┤
+│ tools        │              │                    │  工具层
 ├──────────────┴──────────────┴────────────────────┤
 │  vfsdriver-*                         存储驱动     │
 ├──────────────────────────────────────────────────┤
@@ -46,5 +48,6 @@
 | [集成链](./doc/integration-chains.md) | 3 条核心集成链（VFS / Chat / AppShell） |
 | [事件流](./doc/event-flows.md) | Agent / VFS / HITL / TTY 事件流 |
 | [Skill 同步](./doc/skill-sync.md) | LLMSkill ↔ SkillDefinition 双体系 |
+| [Skill 系统设计](./doc/design/skill-design.md) | Skill 触发策略、作用域、四层路由、类型系统全貌 |
 | [开发模式](./doc/dev-patterns.md) | 新功能流程、模块边界、浏览器差异、测试策略 |
 | [文件索引](./doc/file-index.md) | 场景 → 关键文件映射 |

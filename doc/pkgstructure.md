@@ -11,7 +11,8 @@ pnpm monorepo. All packages under `packages/`, main app under `apps/web-app/` (p
 | `@itookit/vfsdriver-fs` | SQLite + local FS backend (Node/Electron) |
 | `@itookit/device-llm` | LLM API communication — OpenAI/Anthropic/Gemini, SSE streaming, MCP protocol, Skill/Connection VFS storage |
 | `@itookit/llm-kernel` | Execution engine core, no UI deps — Executor (Agent/HTTP/Tool/Script) + Orchestrator (Serial/Parallel/Router/Loop/DAG) |
-| `@itookit/llm-harness` | Multi-turn agent loop — `AgentLoopExecutor`, built-in tools, context compression, HITL queue, SubAgentRouter |
+| `@itookit/tools` | Built-in tool implementations (`buildTool()` factory) — FileRead/Write/Edit, Glob, Grep, Bash, Skill, Agent, Task, PlanMode, AskUserQuestion, WebFetch; adapter `ToolDeviceDriver` |
+| `@itookit/llm-harness` | Multi-turn agent loop — `AgentLoopExecutor`, harness-specific tools (load_skill, delegate_task), context compression, HITL queue, SubAgentRouter |
 | `@itookit/llm-engine` | Session management + VFS persistence (`.chat` files) + Mission orchestration + Session dependency graph |
 | `@itookit/mdxeditor` | CodeMirror 6 Markdown editor with frontmatter/GFM/Mermaid |
 | `@itookit/llm-ui` | Chat UI components and Agent editor factory |

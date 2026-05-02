@@ -76,7 +76,7 @@ llm-ui      →  Chat UI, Agent editor, SkillSettingsEditor, MCPSettingsEditor
 - **AgentLoopExecutor** — `while(true)` loop: budget check → context compress → LLM call → tool execution → back-pressure
 - **Four-layer context compression** (HISTORY_SNIP / CACHE_PRUNE / LLM_SUMMARIZE / SLIDING_WINDOW)
 - **Five-category error recovery** (rate-limit / context-too-large / overload / truncation / tool-error)
-- **Built-in tools**: `file_read`, `file_write`, `shell_exec`, `glob_search`, `grep_search`, `load_skill`, `delegate_task`
+- **Built-in tools**: 通用工具 (`file_read`, `file_write`, `shell_exec`, `glob_search`, `grep_search` 等) 来自 `@itookit/tools`；harness 专属工具 (`load_skill`, `delegate_task`) 仍在 `llm-harness/src/tools/`
 - **TTY tools** (when `NodeTTYDriver` is injected): `shell_session`, `tty_write`, `tty_close`
 
 **Agent loop enhancements (Q1/Q2/Q3):**
@@ -474,12 +474,18 @@ agent:plan:confirm    agent:user:injected
 
 #### 添加新 Built-in Tool
 
-1. 创建 `packages/llm-harness/src/tools/my-tool.ts`：
+通用工具（无运行时服务依赖）→ 加入 `@itookit/tools`（见 `packages/tools/CLAUDE.md`）：
+
+1. 在 `packages/tools/src/tools/MyTool/` 下创建 `prompt.ts` + `MyToolTool.ts`
+2. 使用 `buildTool(def)` 实现，在 `packages/tools/src/index.ts` 的 `BUILTIN_TOOLS` 注册
+
+Harness 专属工具（需 `ISkillService` / `ISubAgentRouter` 等运行时引用）→ 留在 `llm-harness`：
 
 ```typescript
+// packages/llm-harness/src/tools/my-tool.ts
 export const myToolMeta: ToolMeta = {
     id: 'my_tool',
-    sideEffect: 'local',      // 决定并行策略和权限检查
+    sideEffect: 'local',
     timeoutMs: 30_000,
     type: 'builtin',
     enabled: true,
@@ -487,15 +493,12 @@ export const myToolMeta: ToolMeta = {
 export const myToolDefinition: ToolDefinition = { /* LLM function schema */ };
 export const myToolHandler: ToolHandler = async (args, ctx) => {
     try {
-        // 在浏览器中：优先用 ctx.vfs；Node.js 中用 node:fs
         return 'result string';
     } catch (e) {
         return `Error: ${e instanceof Error ? e.message : String(e)}`;
     }
 };
 ```
-
-2. 加入 `packages/llm-harness/src/tools/index.ts` 的 `BUILTIN_TOOLS` 数组。
 
 #### 添加新 Skill 类型（用户侧）
 
