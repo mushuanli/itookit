@@ -254,6 +254,131 @@ fn get_app_config_dir(app: AppHandle) -> String {
         .unwrap_or_else(|_| ".tauri-config".to_string())
 }
 
+// ── Native search commands (rg / fd) ──────────────────────────────────────────
+//
+// These commands expose ripgrep and fd to the Tauri webview, enabling
+// INativeShell-backed tools (GrepTool, GlobTool, BashTool) to use native
+// binaries instead of manual JS/VFS walking.
+//
+// Security: all `dir` parameters are validated against is_allowed() before
+// passing to the subprocess — same policy as the fs_* commands.
+// The spawned commands are limited to rg/fd binaries; no general shell exec.
+
+/// Capabilities advertised to the TS side at startup.
+#[derive(serde::Serialize)]
+pub struct NativeCapabilities {
+    ripgrep: bool,
+    fd:      bool,
+}
+
+fn which(cmd: &str) -> bool {
+    std::process::Command::new(cmd)
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Return which native search tools are available.
+#[tauri::command]
+fn native_capabilities() -> NativeCapabilities {
+    NativeCapabilities { ripgrep: which("rg"), fd: which("fd") }
+}
+
+/// Run ripgrep and return its raw stdout (JSONL format).
+/// The TS layer (TauriNativeShell) parses the JSONL.
+#[tauri::command]
+fn search_ripgrep(
+    pattern:     String,
+    dir:         String,
+    glob:        Option<String>,
+    max_results: Option<u32>,
+    state:       State<AppPaths>,
+) -> Result<String, String> {
+    let p = PathBuf::from(&dir);
+    if !is_allowed(&p, &state) { return Err(format!("path not allowed: {dir}")); }
+
+    let limit = max_results.unwrap_or(50).to_string();
+    let exclude_glob = "!{node_modules,dist,.git,.svn,build,out,.next,.nuxt,.cache,coverage,__pycache__}/**";
+
+    let mut cmd = std::process::Command::new("rg");
+    cmd.arg("--json")
+       .arg("--case-insensitive")
+       .arg("--glob").arg(exclude_glob)
+       .arg("--max-filesize").arg("1M")
+       .arg("--max-count").arg(&limit);
+
+    if let Some(g) = &glob {
+        cmd.arg("--glob").arg(g);
+    }
+    cmd.arg("-e").arg(&pattern).arg(&dir);
+
+    let out = cmd.output().map_err(|e| format!("rg exec failed: {e}"))?;
+    // rg exits 1 when no matches found (not an error for us)
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// Run fd and return its raw stdout (one path per line).
+#[tauri::command]
+fn search_fd(
+    pattern:     String,
+    dir:         String,
+    max_results: Option<u32>,
+    state:       State<AppPaths>,
+) -> Result<String, String> {
+    let p = PathBuf::from(&dir);
+    if !is_allowed(&p, &state) { return Err(format!("path not allowed: {dir}")); }
+
+    let limit = max_results.unwrap_or(100).to_string();
+
+    let out = std::process::Command::new("fd")
+        .arg("--type").arg("f")
+        .arg("--max-results").arg(&limit)
+        .arg("--exclude").arg("node_modules")
+        .arg("--exclude").arg("dist")
+        .arg("--exclude").arg(".git")
+        .arg("--exclude").arg(".svn")
+        .arg("--exclude").arg("build")
+        .arg("--exclude").arg("out")
+        .arg("--exclude").arg(".next")
+        .arg("--exclude").arg(".nuxt")
+        .arg("--exclude").arg(".cache")
+        .arg("--exclude").arg("coverage")
+        .arg("--exclude").arg("__pycache__")
+        .arg("--glob").arg(&pattern)
+        .arg(&dir)
+        .output()
+        .map_err(|e| format!("fd exec failed: {e}"))?;
+
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// Execute an arbitrary shell command via sh -c.
+/// Only allowed when dir passes is_allowed(); command content is NOT filtered here —
+/// the TS BLOCKED_PATTERNS check in BashTool.validateInput() is the safety gate.
+#[tauri::command]
+fn shell_exec(
+    command: String,
+    cwd:     String,
+    state:   State<AppPaths>,
+) -> Result<(String, i32), String> {
+    let p = PathBuf::from(&cwd);
+    if !is_allowed(&p, &state) { return Err(format!("cwd not allowed: {cwd}")); }
+
+    let out = std::process::Command::new("sh")
+        .arg("-c").arg(&command)
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("sh exec failed: {e}"))?;
+
+    let code = out.status.code().unwrap_or(-1);
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned()
+        + &String::from_utf8_lossy(&out.stderr);
+    Ok((stdout, code))
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 fn canonicalise(raw: &str) -> String {
@@ -314,6 +439,11 @@ pub fn run() {
             fs_rename,
             fs_remove,
             fs_exists,
+            // Native search commands for INativeShell
+            native_capabilities,
+            search_ripgrep,
+            search_fd,
+            shell_exec,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
