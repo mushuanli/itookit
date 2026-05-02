@@ -24,6 +24,7 @@ import {
     buildScopeEntries,
     scanScopeEntry,
     fsSkillToSkillDef,
+    loadAgentMd,
 } from '../skills/fs-skill-loader';
 
 export class SkillDeviceDriver implements IDeviceDriver, ISkillService {
@@ -45,6 +46,8 @@ export class SkillDeviceDriver implements IDeviceDriver, ISkillService {
     private scopeEntries: ScopeEntry[] = [];
     /** 文件系统扫描注册的 skill id 集合（不受 VFS 同步删除） */
     private fsSkillIds = new Set<string>();
+    /** _agent/AGENT.md 内容（项目级永久指令，始终注入系统 Prompt） */
+    private agentMdContent: string = '';
 
     /** Inject ToolService so loadSkill can register HTTP-backed tools. */
     setToolService(toolService: IToolService): void {
@@ -290,14 +293,22 @@ export class SkillDeviceDriver implements IDeviceDriver, ISkillService {
 
     // ── ISkillService — 作用域管理 ──
 
+    getAgentMdContent(): string {
+        return this.agentMdContent;
+    }
+
     async setCwd(cwd: string): Promise<void> {
         this.cwd = cwd;
         const root = await findProjectRoot(cwd);
 
         if (!root) {
             this.scopeEntries = [];
+            this.agentMdContent = '';
             return;
         }
+
+        // Load project-level AGENT.md (always-on instructions, injected at P0.5)
+        this.agentMdContent = await loadAgentMd(root);
 
         // Dynamic import path module (browser safe)
         let pathModule: typeof import('node:path') | null = null;

@@ -9,6 +9,7 @@ import { extractCompactInstructions } from './compact-extractor';
 const AGENT_DIR = '_agent';
 const SKILLS_SUBDIR = 'skills';
 const SKILL_MD = 'SKILL.md';
+const AGENT_MD = 'AGENT.md';
 
 // ── Node.js 模块动态加载（浏览器安全）──────────────────────────────────────
 
@@ -25,6 +26,26 @@ async function getPath(): Promise<typeof import('node:path') | null> {
         return await import('node:path');
     } catch {
         return null;
+    }
+}
+
+// ── AGENT.md 加载 ──────────────────────────────────────────────────────────
+
+/**
+ * 读取项目根的 `_agent/AGENT.md` 文件内容。
+ * 该文件的内容注入到系统 Prompt 最高优先级层（预算豁免），
+ * 用于存放项目级别的永久指令，类似 Claude Code 的 CLAUDE.md。
+ *
+ * 浏览器环境或文件不存在时返回空字符串。
+ */
+export async function loadAgentMd(projectRoot: string): Promise<string> {
+    const fs = await getFs();
+    const path = await getPath();
+    if (!fs || !path) return '';
+    try {
+        return await fs.readFile(path.join(projectRoot, AGENT_DIR, AGENT_MD), 'utf-8');
+    } catch {
+        return '';
     }
 }
 

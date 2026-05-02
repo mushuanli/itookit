@@ -129,6 +129,13 @@ export class ContextManager implements IContextManager {
             content: s.memoryContent || this.buildCoreIdentity(),
         });
 
+        // P0 (exempt): project-level AGENT.md — always included, budget-exempt
+        // Loaded from _agent/AGENT.md in project root; injected right after core identity.
+        const agentMd = this.skillService.getAgentMdContent?.() ?? '';
+        if (agentMd) {
+            sections.push({ priority: 0, content: agentMd });
+        }
+
         // P1: environment
         sections.push({ priority: 1, content: this.buildEnvironment(s.env) });
 

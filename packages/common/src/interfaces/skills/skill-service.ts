@@ -128,4 +128,11 @@ export interface ISkillService {
      * 重新扫描当前作用域条目，卸载失效 skill，加载新 skill。
      */
     refreshScopedSkills(): Promise<SkillLoadResult[]>;
+
+    /**
+     * 返回当前项目的 _agent/AGENT.md 内容。
+     * 注入到系统 Prompt P0.5 层（预算豁免，始终包含）。
+     * 无 AGENT.md 或浏览器环境时返回空字符串。
+     */
+    getAgentMdContent(): string;
 }
