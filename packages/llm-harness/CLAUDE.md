@@ -9,7 +9,7 @@ src/
 ├── factory.ts            ← createHarness() — 一站式装配
 ├── executor/             ← AgentLoopExecutor (核心循环) + Budget + Context + ErrorRecovery + BackPressure + SubAgentRouter
 ├── drivers/              ← AgentDeviceDriver, ToolDeviceDriver, SkillDeviceDriver
-├── tools/                ← 内置工具 (file-*, shell-exec, glob/grep, load-skill, delegate-*, human-input)
+├── tools/                ← Harness 专属工具 (load-skill, delegate-task); 通用工具已迁至 @itookit/tools
 ├── adapters/             ← LLMServiceAdapter (IDeviceDriver → ILLMService)
 ├── services/             ← HITLQueue
 ├── (tty: @itookit/device-tty) ← NodeTTYDriver, TTYSessionManager
@@ -33,5 +33,5 @@ AgentLoopExecutor:
 ## Conventions
 
 - Handler 必须返回 string，异常内部 try/catch
-- 添加内置工具加入 `BUILTIN_TOOLS` 数组
+- 添加通用工具到 `@itookit/tools`（见 packages/tools/CLAUDE.md）；harness 专属工具（需 ISkillService 等运行时依赖）才放此包
 - 添加事件类型在 `agent-types.ts` 的 `AgentEventType` + `AgentEventPayloads`
