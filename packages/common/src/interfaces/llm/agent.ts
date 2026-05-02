@@ -110,6 +110,20 @@ export interface LLMSkill {
     metadata?: Record<string, unknown>;
     createdAt?: number;
     modifiedAt?: number;
+
+    // ── 触发行为配置（v3.2 新增）──────────────────────────────────
+    /** 触发策略：reference（自动按需）| action（仅手动 slash 命令） */
+    triggerStrategy?: 'reference' | 'action';
+    /** 是否随会话自动加载（triggerStrategy=reference 时通常设为 true） */
+    autoLoad?: boolean;
+    /** 加载优先级（越小越优先），默认 50 */
+    priority?: number;
+    /** Glob 模式列表，匹配文件打开时自动挂载（L4 空间联动） */
+    globs?: string[];
+    /** 修正日志文件路径（相对项目根，如 docs/agent-corrections.md） */
+    correctionLog?: string;
+    /** 禁止模型通过 load_skill 加载（action skill 专用） */
+    disableModelInvocation?: boolean;
 }
 
 // ─── MCP ──────────────────────────────────────────────────────────────────────

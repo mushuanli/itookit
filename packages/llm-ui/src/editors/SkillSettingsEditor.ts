@@ -78,10 +78,11 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
         if (rawHdrs) { try { headers = JSON.parse(rawHdrs); } catch { /* invalid */ } }
         if (authVal) headers = { ...(headers ?? {}), Authorization: authVal };
 
+        const globs = this.val('globs').split('\n').map(s => s.trim()).filter(Boolean);
         const skill: LLMSkill = {
             id:           this.selectedId,
-            name:         this.val('header-name') || this.val('name') || this.selectedId,
-            icon:         this.val('icon') || undefined,
+            name:         this.val('header-name') || this.selectedId,
+            icon:         this.val('header-icon') || undefined,
             description:  this.val('description') || undefined,
             type,
             enabled:      this.chk('enabled'),
@@ -93,6 +94,12 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
             method:       type === 'http'   ? ((this.val('method') || 'POST') as LLMSkill['method']) : undefined,
             headers:      type === 'http'   ? headers : undefined,
             parameters:   (type !== 'prompt' && type !== 'mcp') ? parameters : undefined,
+            triggerStrategy: (this.val('triggerStrategy') || 'reference') as LLMSkill['triggerStrategy'],
+            autoLoad:     this.chk('autoLoad'),
+            priority:     parseInt(this.val('priority') || '50', 10),
+            globs:        globs.length > 0 ? globs : undefined,
+            correctionLog: this.val('correctionLog').trim() || undefined,
+            disableModelInvocation: this.chk('disableModelInvocation') || undefined,
             modifiedAt:   Date.now(),
         };
         return yaml.dump(skill, { lineWidth: -1, noRefs: true });
@@ -225,7 +232,13 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
             <div style="padding:1.25rem 1.75rem;border-bottom:1px solid var(--st-border-color);
                         display:flex;align-items:center;justify-content:space-between;gap:.75rem;flex-wrap:wrap">
                 <div style="display:flex;align-items:center;gap:1rem;min-width:0">
-                    <span style="font-size:2.25rem;flex-shrink:0;line-height:1">${skill.icon || meta.icon}</span>
+                    <input name="header-icon" value="${skill.icon || ''}" placeholder="${meta.icon}"
+                           title="${t('tooltip.clickEditIcon')}"
+                           style="font-size:2rem;width:2.75rem;height:2.75rem;text-align:center;
+                                  border:2px solid transparent;border-radius:8px;background:transparent;
+                                  cursor:pointer;outline:none;padding:0;font-family:inherit;flex-shrink:0;
+                                  transition:border-color .15s"
+                           maxlength="2">
                     <div style="min-width:0">
                         <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
                             <input name="header-name" value="${skill.name}"
@@ -264,16 +277,6 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
                 <!-- Basic Info -->
                 <div class="settings-section">
                     <h3 class="settings-section__title">${t('skill.section.basic')}</h3>
-                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
-                        <div class="settings-form-group">
-                            <label>${t('form.name')}</label>
-                            <input class="settings-input" name="name" value="${skill.name}" placeholder="${t('skill.placeholder.name')}">
-                        </div>
-                        <div class="settings-form-group">
-                            <label>${t('form.icon')} <span style="color:var(--st-text-tertiary);font-size:.8em">emoji</span></label>
-                            <input class="settings-input" name="icon" value="${skill.icon || ''}" placeholder="${meta.icon}">
-                        </div>
-                    </div>
                     <div class="settings-form-group">
                         <label>ID <span style="color:var(--st-text-tertiary);font-size:.8em">lowercase letters, numbers, hyphens</span></label>
                         <input class="settings-input" name="id" value="${skill.id}"
@@ -302,6 +305,63 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
                             <input type="checkbox" id="skill-enabled" name="enabled" ${skill.enabled ? 'checked' : ''}>
                             <label for="skill-enabled">${t('skill.enabled.label')}</label>
                         </div>
+                    </div>
+                </div>
+
+                <!-- Trigger & Auto-load -->
+                <div class="settings-section">
+                    <h3 class="settings-section__title">${t('skill.section.trigger')}</h3>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
+                        <div class="settings-form-group" style="margin-bottom:0">
+                            <label>${t('skill.trigger.strategyLabel')}</label>
+                            <select class="settings-select" name="triggerStrategy" id="trigger-strategy-select">
+                                <option value="reference" ${(skill.triggerStrategy ?? 'reference') === 'reference' ? 'selected' : ''}>
+                                    📖 Reference — ${t('skill.trigger.reference.desc')}
+                                </option>
+                                <option value="action" ${skill.triggerStrategy === 'action' ? 'selected' : ''}>
+                                    ⚡ Action — ${t('skill.trigger.action.desc')}
+                                </option>
+                            </select>
+                        </div>
+                        <div class="settings-form-group" style="margin-bottom:0">
+                            <label>${t('skill.trigger.priorityLabel')}
+                                <span style="color:var(--st-text-tertiary);font-size:.8em">${t('skill.trigger.priorityHint')}</span>
+                            </label>
+                            <input class="settings-input" type="number" name="priority"
+                                   value="${skill.priority ?? 50}" min="0" max="100" step="5"
+                                   style="font-variant-numeric:tabular-nums">
+                        </div>
+                    </div>
+                    <div style="display:flex;gap:1.5rem;margin-top:.75rem;flex-wrap:wrap">
+                        <div class="settings-checkbox-row">
+                            <input type="checkbox" id="skill-autoload" name="autoLoad"
+                                   ${skill.autoLoad ? 'checked' : ''}>
+                            <label for="skill-autoload">${t('skill.trigger.autoLoadLabel')}</label>
+                        </div>
+                        <div class="settings-checkbox-row" id="disable-invocation-row"
+                             style="${skill.triggerStrategy === 'action' ? '' : 'display:none'}">
+                            <input type="checkbox" id="skill-disable-model" name="disableModelInvocation"
+                                   ${skill.disableModelInvocation ? 'checked' : ''}>
+                            <label for="skill-disable-model">${t('skill.trigger.disableModelLabel')}</label>
+                        </div>
+                    </div>
+                    <div class="settings-form-group" style="margin-top:.75rem">
+                        <label>${t('skill.trigger.globsLabel')}
+                            <span style="color:var(--st-text-tertiary);font-size:.8em">${t('skill.trigger.globsHint')}</span>
+                        </label>
+                        <textarea class="settings-textarea" name="globs" rows="2"
+                            style="font-family:monospace;font-size:.8125rem"
+                            placeholder="src/controllers/*.ts&#10;src/**/*.handler.ts"
+                            >${(skill.globs ?? []).join('\n')}</textarea>
+                    </div>
+                    <div class="settings-form-group">
+                        <label>${t('skill.trigger.correctionLogLabel')}
+                            <span style="color:var(--st-text-tertiary);font-size:.8em">${t('skill.trigger.correctionLogHint')}</span>
+                        </label>
+                        <input class="settings-input" name="correctionLog"
+                               value="${skill.correctionLog || ''}"
+                               placeholder="docs/agent-corrections.md"
+                               style="font-family:monospace;font-size:.875rem">
                     </div>
                 </div>
 
@@ -498,9 +558,20 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
         this.bindAction('batch-delete', () => this.batchDelete());
         this.bindAction('batch-export', () => this.batchExport());
 
-        // ── Header name input: focus style + sync + auto-save ─────────────────
+        // ── Header icon input: focus style ────────────────────────────────────
+        const iconInput = this.container.querySelector<HTMLInputElement>('[name="header-icon"]');
+        if (iconInput) {
+            this.addEventListener(iconInput, 'focus', () => {
+                iconInput.style.borderColor = 'var(--st-primary, #6366f1)';
+                iconInput.select();
+            });
+            this.addEventListener(iconInput, 'blur', () => {
+                iconInput.style.borderColor = 'transparent';
+            });
+        }
+
+        // ── Header name input: focus style + auto-save ─────────────────────
         const headerInput = this.container.querySelector<HTMLInputElement>('[name="header-name"]');
-        const formInput   = this.container.querySelector<HTMLInputElement>('[name="name"]');
         if (headerInput) {
             this.addEventListener(headerInput, 'focus', () => {
                 headerInput.style.borderBottomColor = 'var(--st-primary, #6366f1)';
@@ -511,22 +582,18 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
             });
             this.addEventListener(headerInput, 'keydown', (e) => {
                 if ((e as KeyboardEvent).key === 'Enter') headerInput.blur();
-                if ((e as KeyboardEvent).key === 'Escape') {
-                    headerInput.blur();
-                }
+                if ((e as KeyboardEvent).key === 'Escape') { headerInput.blur(); }
             });
-            // Keep form field in sync while typing
-            if (formInput) {
-                this.addEventListener(headerInput, 'input', () => {
-                    formInput.value = headerInput.value;
-                });
-                this.addEventListener(formInput, 'input', () => {
-                    headerInput.value = formInput.value;
-                    // Resize header input to fit content
-                    this.resizeHeaderInput(headerInput);
-                });
-            }
             this.resizeHeaderInput(headerInput);
+        }
+
+        // ── triggerStrategy: show/hide disableModelInvocation ─────────────
+        const triggerSel = this.container.querySelector<HTMLSelectElement>('#trigger-strategy-select');
+        const disableRow = this.container.querySelector<HTMLElement>('#disable-invocation-row');
+        if (triggerSel && disableRow) {
+            this.addEventListener(triggerSel, 'change', () => {
+                disableRow.style.display = triggerSel.value === 'action' ? '' : 'none';
+            });
         }
 
         // ── Action buttons ─────────────────────────────────────────────────────
@@ -730,11 +797,12 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
             }
         }
 
+        const globs = this.val('globs').split('\n').map((s: string) => s.trim()).filter(Boolean);
         const updated: LLMSkill = {
             ...existing,
             id:           newId,
-            name:         this.val('header-name') || this.val('name') || existing.name,
-            icon:         this.val('icon')         || undefined,
+            name:         this.val('header-name') || existing.name,
+            icon:         this.val('header-icon') || undefined,
             description:  this.val('description') || undefined,
             type,
             enabled:      this.chk('enabled'),
@@ -751,6 +819,13 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
             headers:      type === 'http'   ? headers : undefined,
             // http / shell share parameters schema; mcp + prompt auto-derive
             parameters:   (type !== 'prompt' && type !== 'mcp') ? parameters : undefined,
+            // trigger behavior
+            triggerStrategy: (this.val('triggerStrategy') || 'reference') as LLMSkill['triggerStrategy'],
+            autoLoad:     this.chk('autoLoad'),
+            priority:     parseInt(this.val('priority') || '50', 10),
+            globs:        globs.length > 0 ? globs : undefined,
+            correctionLog: this.val('correctionLog').trim() || undefined,
+            disableModelInvocation: this.chk('disableModelInvocation') || undefined,
             modifiedAt:   Date.now(),
         };
 
