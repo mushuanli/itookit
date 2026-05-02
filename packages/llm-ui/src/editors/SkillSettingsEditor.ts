@@ -558,7 +558,7 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
         this.bindAction('batch-delete', () => this.batchDelete());
         this.bindAction('batch-export', () => this.batchExport());
 
-        // ── Header icon input: focus style ────────────────────────────────────
+        // ── Header icon input: focus style + auto-save on blur ────────────────
         const iconInput = this.container.querySelector<HTMLInputElement>('[name="header-icon"]');
         if (iconInput) {
             this.addEventListener(iconInput, 'focus', () => {
@@ -567,6 +567,11 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
             });
             this.addEventListener(iconInput, 'blur', () => {
                 iconInput.style.borderColor = 'transparent';
+                this.saveIconOnly(iconInput.value.trim());
+            });
+            this.addEventListener(iconInput, 'keydown', (e) => {
+                if ((e as KeyboardEvent).key === 'Enter') iconInput.blur();
+                if ((e as KeyboardEvent).key === 'Escape') iconInput.blur();
             });
         }
 
@@ -664,6 +669,30 @@ export class SkillSettingsEditor extends BaseSettingsEditor<IAgentManagementServ
         // Sync form field
         const formInput = this.container.querySelector<HTMLInputElement>('[name="name"]');
         if (formInput) formInput.value = newName;
+    }
+
+    /**
+     * Save only the icon field without a full re-render.
+     * Updates the sidebar icon in-place.
+     */
+    private async saveIconOnly(newIcon: string): Promise<void> {
+        if (!this.selectedId) return;
+        const skills = await this.service.getSkills();
+        const skill  = skills.find(s => s.id === this.selectedId);
+        if (!skill) return;
+        const normalised = newIcon || undefined;
+        if (skill.icon === normalised) return;
+
+        await this.service.saveSkill({ ...skill, icon: normalised, modifiedAt: Date.now() });
+
+        // Patch sidebar icon without full re-render
+        const sidebarIcon = this.container.querySelector<HTMLElement>(
+            `.settings-list-item[data-id="${this.selectedId}"] .settings-list-item__icon`
+        );
+        if (sidebarIcon) {
+            const meta = SKILL_TYPE_META[skill.type] ?? SKILL_TYPE_META.custom;
+            sidebarIcon.textContent = newIcon || meta.icon;
+        }
     }
 
     /**
