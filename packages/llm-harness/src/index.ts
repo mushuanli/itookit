@@ -9,8 +9,11 @@ export { BackPressureValidator } from './executor/back-pressure';
 export { ContextManager } from './executor/context-manager';
 export { SubAgentRouter } from './executor/sub-agent-router';
 
-// ── Built-in tools ──
-export { BUILTIN_TOOLS, createLoadSkillHandler, createDelegateTaskHandler } from './tools/index';
+// ── Built-in tools (from @itookit/tools) ──
+export { BUILTIN_TOOLS } from '@itookit/tools';
+
+// ── Harness-specific dynamic tools ──
+export { createLoadSkillHandler, createDelegateTaskHandler } from './tools/index';
 export type { BuiltinToolEntry } from './tools/index';
 export { createDelegateAgentHandler, delegateAgentMeta, delegateAgentDefinition } from './tools/delegate-agent';
 export { createWriteResultHandler, writeResultMeta, writeResultDefinition } from './tools/write-result';
@@ -20,7 +23,7 @@ export { createHumanInputHandler, humanInputMeta, humanInputDefinition } from '.
 export { HITLQueue } from './services/hitl-queue';
 
 // ── Device drivers ──
-export { ToolDeviceDriver } from './drivers/tool-device-driver';
+export { ToolDeviceDriver } from '@itookit/tools';
 export { SkillDeviceDriver } from './drivers/skill-device-driver';
 export { AgentDeviceDriver } from './drivers/agent-device-driver';
 

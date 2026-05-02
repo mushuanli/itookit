@@ -91,6 +91,8 @@ export class AgentDeviceDriver implements IDeviceDriver, IAgentRuntimeConfig {
     private costModel: CostModel | undefined = undefined;
 
     private changeListeners: Array<() => void> = [];
+    /** Guards TTY tool registration — TTY sessions must survive router rebuilds. */
+    private ttyToolsRegistered = false;
 
     // ── Dependency injection ──
 
@@ -287,10 +289,12 @@ export class AgentDeviceDriver implements IDeviceDriver, IAgentRuntimeConfig {
             );
         }
 
-        // TTY tools — only registered when a driver is provided.
-        // The onEvent callback threads agent:tty:* events through to the executor's emit.
-        // ttyManager is NOT recreated here to preserve existing sessions across re-registrations.
-        if (this.ttyDriver) {
+        // TTY tools — registered once per driver lifetime.
+        // The emitter accesses this.runtime lazily, so TTY events work even after router rebuilds.
+        // Re-registration is skipped to avoid creating duplicate event-handler closures
+        // and to preserve in-flight TTY sessions across setModelRoles() calls.
+        if (this.ttyDriver && !this.ttyToolsRegistered) {
+            this.ttyToolsRegistered = true;
             const emitter = this.makeEventEmitter();
             this.toolService.registerTool(
                 shellSessionMeta,

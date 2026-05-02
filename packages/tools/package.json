@@ -1,7 +1,7 @@
 {
-  "name": "@itookit/llm-harness",
+  "name": "@itookit/tools",
   "version": "0.1.0",
-  "description": "LLM Agent harness - AgentLoopExecutor, built-in tools, and device drivers",
+  "description": "Built-in LLM tools — File, Search, Shell, Task, Agent with buildTool() factory pattern",
   "type": "module",
   "main": "./src/index.ts",
   "module": "./src/index.ts",
@@ -27,8 +27,7 @@
     }
   },
   "files": [
-    "dist",
-    "README.md"
+    "dist"
   ],
   "scripts": {
     "build": "tsup",
@@ -40,29 +39,26 @@
   },
   "keywords": [
     "itookit",
+    "tools",
     "llm",
-    "agent",
-    "harness",
-    "executor",
-    "tools"
+    "agent"
   ],
   "author": "lizlok@gmail.com",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/mushuanli/itookit.git",
-    "directory": "packages/llm-harness"
+    "directory": "packages/tools"
   },
   "dependencies": {
     "@itookit/common": "workspace:*",
-    "@itookit/device-llm": "workspace:*",
-    "@itookit/device-tty": "workspace:*",
-    "@itookit/tools": "workspace:*"
+    "zod": "^4.1.0"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
     "rimraf": "^5.0.5",
-    "typescript": "^5.3.0",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
     "vitest": "^1.6.0"
   }
 }
