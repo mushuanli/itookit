@@ -43,6 +43,13 @@ export function createLoadSkillHandler(skillService: ISkillService): ToolHandler
     return async (args) => {
         const skillId = args['skill_id'] as string | undefined;
         if (!skillId) return 'Error: skill_id argument is required';
+
+        // L1: action skills with disableModelInvocation must not be loaded by the model.
+        const skill = skillService.getSkill(skillId);
+        if (skill?.disableModelInvocation) {
+            return `Error: Skill "${skillId}" is an action skill and cannot be loaded by the model. Use the /${skillId} slash command to invoke it directly.`;
+        }
+
         const result = await skillService.loadSkill(skillId);
         if (!result.success) return `Error loading skill "${skillId}": ${result.error}`;
         return `Skill "${skillId}" loaded. New tools available: ${result.toolIds.join(', ')}`;

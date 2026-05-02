@@ -15,6 +15,91 @@ import type { ToolDefinition } from '../llm/message';
  */
 export type SkillType = 'builtin' | 'http' | 'shell' | 'prompt' | 'mcp' | 'custom';
 
+/** 触发策略：reference（自动按需）| action（纯手动 slash 命令） */
+export type SkillTriggerStrategy = 'reference' | 'action';
+
+/** 作用域层级（文件系统 Skill 专用） */
+export type SkillScopeLevel = 'vfs' | 'global-fs' | 'parent-fs' | 'local-fs';
+
+/**
+ * Compact Instructions 区块：历史压缩时必须保留的关键规则。
+ *
+ * 从 SKILL.md 中 `## Compact Instructions` 区块提取。
+ */
+export interface CompactSection {
+    /** 区块标题（通常为 "Compact Instructions"） */
+    marker: string;
+    /** `[红线]` 前缀的关键规则列表 */
+    redLines: string[];
+    /** 原始 Markdown 内容（完整区块文本） */
+    rawContent: string;
+}
+
+/**
+ * 修正日志配置。
+ *
+ * AI 犯错时写入日志，加载 Skill 时注入历史修正记录。
+ */
+export interface SkillCorrectionLog {
+    /** 日志文件路径（相对项目根，例: "docs/agent-corrections.md"） */
+    path: string;
+    /** 是否启用 */
+    enabled: boolean;
+}
+
+/**
+ * Glob 空间联动模式配置。
+ *
+ * 匹配文件打开时自动挂载 Skill（L4 层）。
+ */
+export interface SkillGlobPattern {
+    /** Glob 模式，支持 * ** ? {a,b} */
+    pattern: string;
+    /** 文件打开时自动挂载，默认 true */
+    autoMount: boolean;
+    /** 文件关闭后若无更多匹配则自动卸载，默认 true */
+    autoUnmount: boolean;
+}
+
+/**
+ * 四层路由分类结果。
+ *
+ * 由 SkillDeviceDriver.getRouteLayers() 返回，
+ * ContextManager 据此构建 P2/P3/P4 系统 Prompt 区段。
+ */
+export interface SkillRouteLayer {
+    /** L1：静默层——disableModelInvocation=true，完全不进入 Prompt */
+    silent: SkillDefinition[];
+    /** L2：索引层——未加载的 reference skill，仅 id+description 进入 P4 */
+    index: SkillDefinition[];
+    /** L3：动态挂载层——已加载的 reference skill，完整 instructions 进入 P2 */
+    dynamicMount: SkillDefinition[];
+    /** L4：空间联动层——glob 匹配挂载的 skill，完整 instructions 进入 P3 */
+    spatial: SkillDefinition[];
+}
+
+/**
+ * 语义匹配上下文（可选）。
+ */
+export interface SkillMatchContext {
+    /** 当前打开的文件路径列表 */
+    openFiles?: string[];
+    /** 当前工作目录 */
+    cwd?: string;
+    /** 最近用户消息（用于语义增强） */
+    recentUserMessages?: string[];
+}
+
+/**
+ * 解析后的 Compact Instructions。
+ */
+export interface ParsedCompactInstructions {
+    /** [红线] 规则列表 */
+    redLines: string[];
+    /** 完整格式化文本（用于注入压缩提示词） */
+    fullText: string;
+}
+
 /**
  * Skill 定义。
  *
@@ -74,6 +159,47 @@ export interface SkillDefinition {
     metadata?: Record<string, unknown>;
     createdAt?: number;
     modifiedAt?: number;
+
+    // ── 新增字段（全部可选，向后兼容）──
+
+    /** 触发策略（undefined 视为 reference，向后兼容） */
+    triggerStrategy?: SkillTriggerStrategy;
+
+    /** 存储来源：vfs（VFS 持久化）| filesystem（文件系统扫描） */
+    source?: 'vfs' | 'filesystem';
+
+    /** 作用域层级（文件系统 Skill 专用） */
+    scopeLevel?: SkillScopeLevel;
+
+    /** 作用域根目录绝对路径（CWD 变更时判断可见性） */
+    scopeRoot?: string;
+
+    /** 禁止模型通过 load_skill 调用（L1 静默层，action skill 设为 true） */
+    disableModelInvocation?: boolean;
+
+    /** Glob 模式列表，文件打开时自动挂载（L4 空间联动） */
+    globs?: string[];
+
+    /** Compact Instructions 压缩保护区块 */
+    compact?: CompactSection | null;
+
+    /** 修正日志配置 */
+    correctionLog?: SkillCorrectionLog;
+
+    /** 参考文档路径列表（按需加载的背景知识） */
+    referencePaths?: string[];
+
+    /** 输出模板路径 */
+    templatePath?: string;
+
+    /** 文件系统根目录（source='filesystem' 时填入） */
+    fsRoot?: string;
+
+    /** 是否支持 Subagent 委托执行 */
+    supportsSubagent?: boolean;
+
+    /** Subagent 角色标识（与 buildSubagentSystemPrompt 配合使用） */
+    subagentRole?: string;
 }
 
 /**

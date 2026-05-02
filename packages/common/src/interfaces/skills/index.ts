@@ -4,3 +4,4 @@
 
 export * from './skill-types';
 export * from './skill-service';
+export * from './fs-skill-types';
