@@ -42,13 +42,18 @@ export class SkillsEngine implements ISessionEngine {
 
     private readonly listeners = new Map<string, Set<(e: EngineEvent) => void>>();
     private unsubscribe: (() => void) | null = null;
+    /** Suppress node:moved while a SkillsEngine method (rename/updateMetadata) is saving. */
+    private _suppressOnChange = false;
 
     constructor(private readonly service: IAgentManagementService) {
         // 'node:moved' is the only EngineAdapter event that calls loadData() —
         // use it to force a full list refresh when skills change externally
         // (e.g., another tab saves via agentService).
+        // When changes originate from SkillsEngine methods (rename, updateMetadata),
+        // we suppress node:moved and fire targeted events instead.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         this.unsubscribe = (service as any).onChange?.(() => {
+            if (this._suppressOnChange) return;
             this.fire('node:moved', {});
         }) ?? null;
     }
@@ -200,9 +205,14 @@ export class SkillsEngine implements ISessionEngine {
     async rename(id: string, newName: string): Promise<void> {
         const skills = await this.service.getSkills();
         const s = skills.find((x) => x.id === id);
-        if (!s) return;
+        if (!s || s.name === newName) return;
         const oldName = s.name;
-        await this.service.saveSkill({ ...s, name: newName, modifiedAt: Date.now() });
+        this._suppressOnChange = true;
+        try {
+            await this.service.saveSkill({ ...s, name: newName, modifiedAt: Date.now() });
+        } finally {
+            this._suppressOnChange = false;
+        }
         this.fire('node:renamed', { nodes: [{ nodeId: id, oldName, newName }] });
     }
 
@@ -226,7 +236,27 @@ export class SkillsEngine implements ISessionEngine {
             .map((s) => this.toNode(s));
     }
 
-    async updateMetadata(_id: string, _meta: Record<string, unknown>): Promise<void> {}
+    async updateMetadata(id: string, metadata: Record<string, unknown>): Promise<void> {
+        const skills = await this.service.getSkills();
+        const s = skills.find((x) => x.id === id);
+        if (!s) return;
+
+        // Pick known fields from metadata to merge into the skill.
+        const updates: Partial<LLMSkill> = {};
+        if ('icon' in metadata) updates.icon = (metadata.icon as string) || undefined;
+        if ('description' in metadata) updates.description = (metadata.description as string) || undefined;
+
+        if (Object.keys(updates).length === 0) return;
+
+        this._suppressOnChange = true;
+        try {
+            await this.service.saveSkill({ ...s, ...updates, modifiedAt: Date.now() });
+        } finally {
+            this._suppressOnChange = false;
+        }
+        // No reason:'metadata' — that would be skipped by EngineAdapter.
+        this.fire('node:updated', { nodes: [{ nodeId: id }] });
+    }
     async setTags(id: string, tags: string[]): Promise<void> {
         const skills = await this.service.getSkills();
         const s = skills.find((x) => x.id === id);
