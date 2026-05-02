@@ -10,8 +10,21 @@ import type {
     SkillDefinition,
     SkillToolBinding,
     SkillLoadResult,
+    SkillRouteLayer,
+    SkillMatchContext,
+    SkillScopeLevel,
+    ParsedCompactInstructions,
     DeviceContext,
+    ScopeEntry,
 } from '@itookit/common';
+import { aggregateCompactInstructions } from '../skills/compact-extractor';
+import { matchGlob } from '../skills/glob-matcher';
+import {
+    findProjectRoot,
+    buildScopeEntries,
+    scanScopeEntry,
+    fsSkillToSkillDef,
+} from '../skills/fs-skill-loader';
 
 export class SkillDeviceDriver implements IDeviceDriver, ISkillService {
     readonly handlerId = 'skills';
@@ -24,6 +37,14 @@ export class SkillDeviceDriver implements IDeviceDriver, ISkillService {
     private loaded = new Set<string>();
     private changeListeners: Array<() => void> = [];
     private toolService: IToolService | null = null;
+
+    // ── 新增：作用域 & Glob 状态 ──
+    /** skillId → 当前挂载该 skill 的文件路径集合（L4 glob 联动） */
+    private globMounted = new Map<string, Set<string>>();
+    private cwd: string = '';
+    private scopeEntries: ScopeEntry[] = [];
+    /** 文件系统扫描注册的 skill id 集合（不受 VFS 同步删除） */
+    private fsSkillIds = new Set<string>();
 
     /** Inject ToolService so loadSkill can register HTTP-backed tools. */
     setToolService(toolService: IToolService): void {
@@ -47,7 +68,7 @@ export class SkillDeviceDriver implements IDeviceDriver, ISkillService {
         throw new Error(`Unknown ioctl command: ${command}`);
     }
 
-    // ── ISkillService ──
+    // ── ISkillService — 基础 CRUD ──
 
     listSkills(): SkillDefinition[] {
         return [...this.registry.values()];
@@ -90,6 +111,7 @@ export class SkillDeviceDriver implements IDeviceDriver, ISkillService {
 
     async unloadSkill(id: string): Promise<void> {
         this.loaded.delete(id);
+        this.globMounted.delete(id);
     }
 
     getLoadedSkills(): SkillDefinition[] {
@@ -103,17 +125,7 @@ export class SkillDeviceDriver implements IDeviceDriver, ISkillService {
     }
 
     autoDetectSkills(prompt: string): string[] {
-        const matches: string[] = [];
-        for (const skill of this.registry.values()) {
-            if (!skill.enabled) continue;
-            for (const pattern of skill.triggerPatterns) {
-                if (new RegExp(pattern, 'i').test(prompt)) {
-                    matches.push(skill.id);
-                    break;
-                }
-            }
-        }
-        return matches;
+        return this.semanticMatchSkills(prompt);
     }
 
     async saveSkill(skill: SkillDefinition): Promise<void> {
@@ -121,9 +133,17 @@ export class SkillDeviceDriver implements IDeviceDriver, ISkillService {
         this.notifyChange();
     }
 
+    /**
+     * 删除 skill。
+     * 保护：source='filesystem' 的 skill 不受 VFS 同步删除影响。
+     * VFS 同步调用时应先检查来源。
+     */
     async deleteSkill(id: string): Promise<void> {
+        const skill = this.registry.get(id);
+        if (skill?.source === 'filesystem') return; // 文件系统 skill 不被 VFS 同步删除
         this.registry.delete(id);
         this.loaded.delete(id);
+        this.globMounted.delete(id);
         this.notifyChange();
     }
 
@@ -137,6 +157,211 @@ export class SkillDeviceDriver implements IDeviceDriver, ISkillService {
 
     getService(): ISkillService {
         return this;
+    }
+
+    // ── ISkillService — 四层路由 ──
+
+    getRouteLayers(): SkillRouteLayer {
+        const layers: SkillRouteLayer = {
+            silent: [],
+            index: [],
+            dynamicMount: [],
+            spatial: [],
+        };
+
+        for (const skill of this.getScopedSkills()) {
+            if (!skill.enabled) continue;
+
+            // L1: action skill with disableModelInvocation → silent
+            if (skill.disableModelInvocation) {
+                layers.silent.push(skill);
+                continue;
+            }
+
+            const isLoaded = this.loaded.has(skill.id);
+            const isGlobMounted = (this.globMounted.get(skill.id)?.size ?? 0) > 0;
+
+            if (isLoaded && isGlobMounted) {
+                layers.spatial.push(skill); // L4
+            } else if (isLoaded) {
+                layers.dynamicMount.push(skill); // L3
+            } else {
+                layers.index.push(skill); // L2
+            }
+        }
+
+        return layers;
+    }
+
+    /**
+     * 语义匹配，返回应加载的 skill id 列表。
+     * 跳过 L1 action skill（disableModelInvocation=true）。
+     * 优先级：triggerPatterns → 关键词重叠(≥2) → globs
+     */
+    semanticMatchSkills(userMessage: string, context?: SkillMatchContext): string[] {
+        const matched = new Set<string>();
+        const lowerMsg = userMessage.toLowerCase();
+        const msgWords = lowerMsg.split(/\W+/).filter((w) => w.length > 2);
+
+        for (const skill of this.getScopedSkills()) {
+            if (!skill.enabled || skill.disableModelInvocation) continue;
+            if (this.loaded.has(skill.id)) continue;
+
+            // 1. triggerPatterns (regex, backward compat)
+            if (skill.triggerPatterns.some((p) => new RegExp(p, 'i').test(userMessage))) {
+                matched.add(skill.id);
+                continue;
+            }
+
+            // 2. Keyword overlap: ≥2 words from description appear in message
+            const descWords = skill.description.toLowerCase().split(/\W+/).filter((w) => w.length > 2);
+            const overlap = descWords.filter((w) => msgWords.includes(w));
+            if (overlap.length >= 2) {
+                matched.add(skill.id);
+                continue;
+            }
+
+            // 3. Glob match against openFiles context
+            if (context?.openFiles?.length && skill.globs?.length) {
+                if (context.openFiles.some((f) => matchGlob(f, skill.globs!))) {
+                    matched.add(skill.id);
+                }
+            }
+        }
+
+        return [...matched];
+    }
+
+    mountByGlob(filePath: string): void {
+        for (const skill of this.getScopedSkills()) {
+            if (!skill.enabled || !skill.globs?.length) continue;
+            if (matchGlob(filePath, skill.globs)) {
+                if (!this.globMounted.has(skill.id)) {
+                    this.globMounted.set(skill.id, new Set());
+                }
+                this.globMounted.get(skill.id)!.add(filePath);
+                this.loaded.add(skill.id);
+            }
+        }
+    }
+
+    unmountByGlob(filePath: string): void {
+        for (const [skillId, files] of this.globMounted) {
+            files.delete(filePath);
+            if (files.size === 0) {
+                this.globMounted.delete(skillId);
+                this.loaded.delete(skillId);
+            }
+        }
+    }
+
+    async registerFromDirectory(
+        dirPath: string,
+        scopeLevel: SkillScopeLevel,
+        scopeRoot: string
+    ): Promise<SkillLoadResult[]> {
+        const entry: ScopeEntry = { dirPath, scopeLevel: scopeLevel as ScopeEntry['scopeLevel'], scopeRoot };
+        const dirs = await scanScopeEntry(entry);
+        const results: SkillLoadResult[] = [];
+
+        for (const dir of dirs) {
+            const skillDef = fsSkillToSkillDef(dir, entry);
+            this.registry.set(skillDef.id, skillDef);
+            this.fsSkillIds.add(skillDef.id);
+            results.push({ skillId: skillDef.id, success: true, toolIds: [] });
+        }
+
+        if (dirs.length > 0) this.notifyChange();
+        return results;
+    }
+
+    // ── ISkillService — Compact Instructions ──
+
+    parseCompactInstructions(skillId: string): ParsedCompactInstructions {
+        const skill = this.registry.get(skillId);
+        if (!skill?.compact) return { redLines: [], fullText: '' };
+        const { redLines, rawContent } = skill.compact;
+        return { redLines, fullText: rawContent };
+    }
+
+    getCompactInstructions(): string {
+        return aggregateCompactInstructions(this.listSkills());
+    }
+
+    // ── ISkillService — 作用域管理 ──
+
+    async setCwd(cwd: string): Promise<void> {
+        this.cwd = cwd;
+        const root = await findProjectRoot(cwd);
+
+        if (!root) {
+            this.scopeEntries = [];
+            return;
+        }
+
+        // Dynamic import path module (browser safe)
+        let pathModule: typeof import('node:path') | null = null;
+        try {
+            pathModule = await import('node:path');
+        } catch {
+            return;
+        }
+
+        this.scopeEntries = buildScopeEntries(root, cwd, pathModule);
+        await this.refreshScopedSkills();
+    }
+
+    getScopedSkills(): SkillDefinition[] {
+        return this.listSkills().filter((s) => this.isSkillInScope(s));
+    }
+
+    async refreshScopedSkills(): Promise<SkillLoadResult[]> {
+        // Collect current scope roots
+        const activeScopeRoots = new Set(this.scopeEntries.map((e) => e.scopeRoot));
+
+        // Unload skills from no-longer-active scope roots
+        for (const skill of this.listSkills()) {
+            if (skill.source !== 'filesystem') continue;
+            if (skill.scopeRoot && !activeScopeRoots.has(skill.scopeRoot)) {
+                this.registry.delete(skill.id);
+                this.loaded.delete(skill.id);
+                this.globMounted.delete(skill.id);
+                this.fsSkillIds.delete(skill.id);
+            }
+        }
+
+        // Scan new scope entries
+        const allResults: SkillLoadResult[] = [];
+        for (const entry of this.scopeEntries) {
+            const results = await this.registerFromDirectory(
+                entry.dirPath,
+                entry.scopeLevel,
+                entry.scopeRoot
+            );
+            allResults.push(...results);
+        }
+
+        this.notifyChange();
+        return allResults;
+    }
+
+    // ── 私有工具 ──
+
+    /**
+     * 判断 skill 是否在当前作用域内可见（设计文档 6.3 节）。
+     */
+    private isSkillInScope(skill: SkillDefinition): boolean {
+        const level = skill.scopeLevel;
+        // VFS skills and skills without scope are always visible
+        if (!level || level === 'vfs' || level === 'global-fs') return true;
+
+        const scopeRoot = skill.scopeRoot ?? '';
+        if (level === 'local-fs') {
+            return this.cwd === scopeRoot;
+        }
+
+        // parent-fs: scopeRoot must be an ancestor of cwd
+        return this.cwd === scopeRoot || this.cwd.startsWith(scopeRoot + '/');
     }
 
     private registerHttpTool(skill: SkillDefinition, binding: SkillToolBinding): void {

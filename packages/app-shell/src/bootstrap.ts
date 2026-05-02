@@ -310,6 +310,15 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     // Keep skills in sync when the user adds / edits / deletes skills in Settings.
     llmDriver.onChange(() => { syncSkillsToHarness(llmDriver, harness).catch(() => {}); });
 
+    // Initialize file-system skill scope (Node.js / Tauri only; browser gracefully no-ops).
+    // Scans _agent/skills/ directories from project root to CWD and registers FS skills.
+    const cwd = typeof process !== 'undefined' && typeof process.cwd === 'function'
+        ? process.cwd()
+        : null;
+    if (cwd) {
+        await harness.skillService.setCwd(cwd).catch(() => {});
+    }
+
     const { sessionManager } = await initializeLLMEngine({
         agentService,
         sessionEngine,

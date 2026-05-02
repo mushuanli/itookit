@@ -90,19 +90,27 @@ export class ContextManager implements IContextManager {
 
     /**
      * Auto-load skills at session init.
-     * Loads skills flagged with autoLoad=true unconditionally, then loads any skills
-     * whose triggerPatterns match the given prompt.
-     * Called once at session init so the first LLM turn already has relevant skills.
+     * Loads skills flagged with autoLoad=true (reference skills) unconditionally.
+     * Additionally loads skills matched by semanticMatchSkills() for the given prompt.
+     * Skips L1 action skills (disableModelInvocation=true).
      */
     autoDetectAndLoadSkills(sessionId: string, prompt: string): void {
-        // Always load skills flagged for auto-load regardless of prompt content.
-        for (const skill of this.skillService.listSkills()) {
-            if (skill.autoLoad && skill.enabled) {
+        const scopedSkills = this.skillService.getScopedSkills?.() ?? this.skillService.listSkills();
+
+        for (const skill of scopedSkills) {
+            if (!skill.enabled) continue;
+            if (skill.disableModelInvocation) continue; // L1: never auto-load
+
+            // autoLoad=true (reference strategy) or legacy prompt-type VFS skills (backward compat)
+            const isLegacyPrompt = skill.type === 'prompt' && !skill.triggerStrategy;
+            if (skill.autoLoad || isLegacyPrompt) {
                 this.markSkillLoaded(sessionId, skill.id);
             }
         }
-        // Additionally load skills whose triggerPatterns match the current prompt.
-        const matched = this.skillService.autoDetectSkills?.(prompt) ?? [];
+
+        // Semantic match (new) with fallback to old autoDetectSkills
+        const matched = this.skillService.semanticMatchSkills?.(prompt) ??
+            this.skillService.autoDetectSkills?.(prompt) ?? [];
         for (const skillId of matched) {
             this.markSkillLoaded(sessionId, skillId);
         }
@@ -115,48 +123,57 @@ export class ContextManager implements IContextManager {
         const budget = this.systemPromptBudgetTokens;
         const sections: Array<{ priority: number; content: string }> = [];
 
-        // Agent-provided system prompt takes top priority and replaces the default identity.
-        if (s.memoryContent) {
-            sections.push({ priority: 0, content: s.memoryContent });
-        } else {
-            sections.push({ priority: 0, content: this.buildCoreIdentity() });
-        }
-
+        // P0: core identity — always included
         sections.push({
-            priority: 1,
-            content: this.buildEnvironment(s.env),
+            priority: 0,
+            content: s.memoryContent || this.buildCoreIdentity(),
         });
 
-        // Use session-local loadedSkillIds as source of truth to avoid cross-session pollution.
-        // skillService.getLoadedSkills() returns global state — unreliable with concurrent sessions.
-        // Guard with sk.enabled: if a skill was loaded then later disabled, exclude it from injection.
-        const allSkills = this.skillService.listSkills();
-        const sessionLoadedSkills = allSkills.filter(
-            (sk) => s.loadedSkillIds.includes(sk.id) && sk.enabled,
+        // P1: environment
+        sections.push({ priority: 1, content: this.buildEnvironment(s.env) });
+
+        // Scoped skills (respects CWD scope + VFS visibility)
+        const scopedSkills = this.skillService.getScopedSkills?.() ?? this.skillService.listSkills();
+
+        // L4 spatial skill ids (glob-mounted, session-agnostic)
+        const routeLayers = this.skillService.getRouteLayers?.();
+        const spatialIds = new Set(routeLayers?.spatial.map((sk: SkillDefinition) => sk.id) ?? []);
+
+        // P2: L3 dynamicMount — session-loaded, enabled, not glob-mounted (session-local state)
+        const dynamicMountSkills = scopedSkills.filter(
+            (sk) =>
+                sk.enabled &&
+                !sk.disableModelInvocation &&
+                s.loadedSkillIds.includes(sk.id) &&
+                !spatialIds.has(sk.id),
         );
-        if (sessionLoadedSkills.length > 0) {
-            const text = sessionLoadedSkills.map((sk: SkillDefinition) => sk.instructions).join('\n\n');
+        if (dynamicMountSkills.length > 0) {
+            const text = dynamicMountSkills.map((sk: SkillDefinition) => sk.instructions).join('\n\n');
             if (text) sections.push({ priority: 2, content: text });
         }
 
-        // P3: prompt-type skills inject their instructions directly — no load_skill call needed.
-        // Unlike http/shell/mcp skills, prompt skills have no tools to register, so they can be
-        // injected unconditionally. Budget gating still applies (priority 3, drops if too large).
-        const promptSkills = allSkills.filter(
-            (sk) => !s.loadedSkillIds.includes(sk.id) && sk.enabled && sk.type === 'prompt',
-        );
-        if (promptSkills.length > 0) {
-            const text = promptSkills.map((sk: SkillDefinition) => sk.instructions).join('\n\n');
+        // P3: L4 spatial — glob-mounted skills (service-global, not session-specific)
+        const spatialSkills = routeLayers?.spatial.filter((sk: SkillDefinition) => sk.enabled) ?? [];
+        if (spatialSkills.length > 0) {
+            const text = spatialSkills
+                .map((sk: SkillDefinition) => {
+                    const label = sk.globs?.length ? `[SPATIAL: ${sk.globs.join(', ')}]\n` : '';
+                    return label + sk.instructions;
+                })
+                .join('\n\n');
             if (text) sections.push({ priority: 3, content: text });
         }
 
-        // P4: tool-type skills (http/shell/mcp/builtin) use progressive disclosure.
-        // The LLM must call load_skill to activate them, which triggers tool registration.
-        const unloaded = allSkills.filter(
-            (sk) => !s.loadedSkillIds.includes(sk.id) && sk.enabled && sk.type !== 'prompt',
+        // P4: L2 index — scoped, enabled, not loaded, not L1, not L4
+        const indexSkills = scopedSkills.filter(
+            (sk) =>
+                sk.enabled &&
+                !sk.disableModelInvocation &&
+                !s.loadedSkillIds.includes(sk.id) &&
+                !spatialIds.has(sk.id),
         );
-        if (unloaded.length > 0) {
-            const list = unloaded
+        if (indexSkills.length > 0) {
+            const list = indexSkills
                 .map((sk: SkillDefinition) => `- **${sk.id}**: ${sk.description}`)
                 .join('\n');
             sections.push({
@@ -289,12 +306,13 @@ export class ContextManager implements IContextManager {
         if (connId) {
             try {
                 const convText = toSummarize.map((m) => `[${m.role}]: ${this.messageToText(m)}`).join('\n');
+                const compactRules = this.skillService.getCompactInstructions?.() ?? '';
+                const systemContent =
+                    'Summarize this conversation. Preserve: file paths, decisions, unresolved errors, user constraints. Be concise.' +
+                    (compactRules ? `\n\nCritical rules that MUST be preserved:\n${compactRules}` : '');
                 const response = await this.llm.chat(connId, {
                     messages: [
-                        {
-                            role: 'system',
-                            content: 'Summarize this conversation. Preserve: file paths, decisions, unresolved errors, user constraints. Be concise.',
-                        },
+                        { role: 'system', content: systemContent },
                         { role: 'user', content: convText },
                     ],
                     maxTokens: 1024,
