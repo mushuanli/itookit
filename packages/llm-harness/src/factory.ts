@@ -19,7 +19,7 @@ import type {
     ITTYDriver,
 } from '@itookit/common';
 import { LLMServiceAdapter } from './adapters/llm-service-adapter';
-import { ToolDeviceDriver } from './drivers/tool-device-driver';
+import { ToolDeviceDriver, BUILTIN_TOOLS } from '@itookit/tools';
 import { SkillDeviceDriver } from './drivers/skill-device-driver';
 import { AgentDeviceDriver } from './drivers/agent-device-driver';
 import { HITLQueue } from './services/hitl-queue';
@@ -81,7 +81,7 @@ export interface HarnessInstance {
  */
 export async function createHarness(options: HarnessOptions): Promise<HarnessInstance> {
     const llmService = new LLMServiceAdapter(options.llmDriver);
-    const toolDriver = new ToolDeviceDriver();
+    const toolDriver = new ToolDeviceDriver(BUILTIN_TOOLS);
     const skillDriver = new SkillDeviceDriver();
     const agentDriver = new AgentDeviceDriver();
 
