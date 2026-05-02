@@ -54,6 +54,7 @@ export const en: LocaleStrings = {
 
     'tooltip.dblClickRename':   'Double-click to rename',
     'tooltip.clickEditName':    'Click to edit name, Enter or blur to save',
+    'tooltip.clickEditIcon':    'Click to change icon (enter an emoji)',
     'tooltip.testConnection':   'Send an empty request to test connectivity',
 
     'form.name':         'Name',
@@ -95,11 +96,24 @@ export const en: LocaleStrings = {
     'skill.placeholder.endpoint':'https://api.example.com/skill',
 
     'skill.section.basic':       'Basic Info',
+    'skill.section.trigger':     'Trigger Behavior',
     'skill.section.prompt':      'Markdown Instructions',
     'skill.section.shell':       'Shell Command',
     'skill.section.mcp':         'MCP Tool Reference',
     'skill.section.http':        'HTTP Endpoint',
     'skill.section.params':      'Parameters Schema',
+
+    'skill.trigger.strategyLabel':       'Trigger Strategy',
+    'skill.trigger.reference.desc':      'Auto-trigger via semantic match / glob',
+    'skill.trigger.action.desc':         'Manual slash command only',
+    'skill.trigger.priorityLabel':       'Priority',
+    'skill.trigger.priorityHint':        '0-100, lower = higher priority',
+    'skill.trigger.autoLoadLabel':       'Auto-load at session start',
+    'skill.trigger.disableModelLabel':   'Block model from loading via load_skill (action only)',
+    'skill.trigger.globsLabel':          'Glob Auto-mount',
+    'skill.trigger.globsHint':           'One per line — skill loads when matching file opens',
+    'skill.trigger.correctionLogLabel':  'Correction Log Path',
+    'skill.trigger.correctionLogHint':   'Relative to project root, e.g. docs/corrections.md',
 
     'skill.hint.prompt':         'This content is injected into the LLM system prompt. Good for coding conventions, domain knowledge, etc.',
     'skill.hint.shell':          'LLM-provided arguments replace {{argName}} placeholders before execution. Define argument format in Parameters Schema.',

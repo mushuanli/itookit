@@ -60,6 +60,7 @@ export const zhCN = {
     // ── Common tooltips ─────────────────────────────────────────────────────
     'tooltip.dblClickRename':   '双击重命名',
     'tooltip.clickEditName':    '点击编辑名称，Enter 或失焦保存',
+    'tooltip.clickEditIcon':    '点击更换图标（输入 emoji）',
     'tooltip.testConnection':   '发送空请求测试连通性',
 
     // ── Common form labels ──────────────────────────────────────────────────
@@ -104,11 +105,24 @@ export const zhCN = {
     'skill.placeholder.endpoint':'https://api.example.com/skill',
 
     'skill.section.basic':       '基础信息',
+    'skill.section.trigger':     '触发行为',
     'skill.section.prompt':      'Markdown 指令',
     'skill.section.shell':       'Shell 命令',
     'skill.section.mcp':         'MCP 工具引用',
     'skill.section.http':        'HTTP 端点配置',
     'skill.section.params':      'Parameters Schema',
+
+    'skill.trigger.strategyLabel':       '触发策略',
+    'skill.trigger.reference.desc':      '语义/Glob 自动触发',
+    'skill.trigger.action.desc':         '仅手动 slash 命令触发',
+    'skill.trigger.priorityLabel':       '优先级',
+    'skill.trigger.priorityHint':        '0-100，越小越优先',
+    'skill.trigger.autoLoadLabel':       '会话启动时自动加载',
+    'skill.trigger.disableModelLabel':   '禁止模型通过 load_skill 加载（action 专用）',
+    'skill.trigger.globsLabel':          'Glob 自动挂载',
+    'skill.trigger.globsHint':           '每行一个，文件打开时自动加载此 skill',
+    'skill.trigger.correctionLogLabel':  '修正日志路径',
+    'skill.trigger.correctionLogHint':   '相对项目根，如 docs/corrections.md',
 
     'skill.hint.prompt':         '此内容将注入到 LLM 的 system prompt。适合编写操作规范、代码风格约定、领域知识等。',
     'skill.hint.shell':          'LLM 传入的参数会替换 {{argName}} 占位符后执行。在 Parameters Schema 中定义参数格式。',
