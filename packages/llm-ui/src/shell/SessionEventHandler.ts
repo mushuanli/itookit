@@ -16,7 +16,7 @@ import type { BranchStore } from '../services/BranchStore';
 type SideEffect =
     | 'renderFull' | 'refreshBranch' | 'refreshNav'
     | 'flashIndicator' | 'scrollToBottom' | 'clearErrors'
-    | 'updateStatus' | 'notifyChange';
+    | 'updateStatus' | 'notifyChange' | 'resetCollapse';
 
 /**
  * 集中声明式：事件 → 副作用映射
@@ -32,7 +32,7 @@ const EVENT_SIDE_EFFECTS: Partial<Record<string, SideEffect[]>> = {
 
     // 分支结构变更
     branch_created: ['renderFull', 'scrollToBottom', 'refreshBranch', 'flashIndicator'],
-    branch_switched: ['renderFull', 'scrollToBottom', 'refreshBranch', 'flashIndicator'],
+    branch_switched: ['resetCollapse', 'renderFull', 'scrollToBottom', 'refreshBranch', 'flashIndicator'],
     branch_deleted: ['refreshBranch', 'refreshNav'],
     branch_renamed: ['refreshBranch'],
 
@@ -92,6 +92,7 @@ export class SessionEventHandler {
             clearErrors:    () => this.deps.historyView.clearErrors(),
             updateStatus:   () => {},  // 由 updateStatusFromEvent 处理
             notifyChange:   () => this.deps.onContentChanged(),
+            resetCollapse:  () => this.deps.historyView.resetCollapseStates(),
         };
     }
 
@@ -100,13 +101,16 @@ export class SessionEventHandler {
     // ================================================================
 
     handleSessionEvent(event: OrchestratorEvent): void {
-        // 1. 始终转发给 HistoryView 处理 DOM 级更新
+        // 1. 始终转发给 HistoryView 处理 DOM 级更新（流式内容、节点追加等）
         this.deps.historyView.processEvent(event);
 
         // 2. 状态指示器（需要 payload，单独处理）
         this.updateStatusFromEvent(event);
 
-        // 3. 查表执行副作用
+        // 3. 分支事件携带 payload 的特定处理（从 HistoryView.processEventImmediate 迁移至此）
+        this.handleBranchEvent(event);
+
+        // 4. 查表执行副作用
         const effects = EVENT_SIDE_EFFECTS[event.type];
         if (effects) {
             const seen = new Set<SideEffect>();
@@ -115,6 +119,29 @@ export class SessionEventHandler {
                     seen.add(effect);
                     this.executors[effect]();
                 }
+            }
+        }
+    }
+
+    /**
+     * 分支事件处理 — 需要事件 payload 的操作集中于此
+     *
+     * 从 HistoryView.processEventImmediate 迁移，消除双重消费。
+     * payload 无关的副作用（renderFull、refreshBranch 等）仍在 EVENT_SIDE_EFFECTS 表中声明。
+     */
+    private handleBranchEvent(event: OrchestratorEvent): void {
+        switch (event.type) {
+            case 'branch_deleted':
+                this.deps.historyView.removeMessages(event.payload.deletedIds, true);
+                break;
+
+            case 'branch_renamed': {
+                const el = this.deps.historyView.getElement(event.payload.nodeId);
+                if (el) {
+                    const nameEl = el.querySelector('.llm-branch-name');
+                    if (nameEl) nameEl.textContent = event.payload.newName;
+                }
+                break;
             }
         }
     }

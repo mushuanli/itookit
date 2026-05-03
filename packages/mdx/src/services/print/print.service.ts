@@ -38,6 +38,9 @@ export interface PrintOptions {
 
     /** 纸张大小 */
     pageSize?: 'A4' | 'Letter' | 'Legal';
+
+    /** 正文字体大小 */
+    fontSize?: 'small' | 'normal' | 'large';
 }
 
 /**
@@ -106,6 +109,17 @@ export class DefaultPrintService implements PrintService {
             styles += `\n@page { size: ${options.pageSize}; }`;
         }
 
+        // 添加字体大小覆盖
+        if (options.fontSize) {
+            const sizeMap: Record<string, string> = {
+                small: '12px',
+                normal: '14px',
+                large: '16px',
+            };
+            const baseSize = sizeMap[options.fontSize] || '14px';
+            styles += `\n.mdx-print { font-size: ${baseSize}; }`;
+        }
+
         // 添加自定义样式
         if (options.styles) {
             const customStyles = Array.isArray(options.styles)
@@ -115,6 +129,71 @@ export class DefaultPrintService implements PrintService {
         }
 
         return styles;
+    }
+
+    /**
+     * 解析打印选项：fontSize 未显式设置时弹出选择对话框
+     */
+    private async resolvePrintOptions(options: PrintOptions): Promise<PrintOptions> {
+        if (options.fontSize) {
+            return options;
+        }
+        const fontSize = await this.showPrintOptionsDialog();
+        return { ...options, fontSize };
+    }
+
+    /**
+     * 弹出打印选项对话框，返回用户选择的字体大小
+     */
+    private showPrintOptionsDialog(): Promise<'small' | 'normal' | 'large'> {
+        return new Promise((resolve) => {
+            const overlay = document.createElement('div');
+            overlay.style.cssText =
+                'position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.4);';
+
+            const options: Array<{ value: 'small' | 'normal' | 'large'; label: string; desc: string }> = [
+                { value: 'small', label: '小', desc: '12px' },
+                { value: 'normal', label: '中', desc: '14px' },
+                { value: 'large', label: '大', desc: '16px' },
+            ];
+
+            const buttons = options.map(o =>
+                `<button data-size="${o.value}"
+                    style="flex:1;padding:12px 20px;border:2px solid #d0d5dd;border-radius:8px;background:#fff;cursor:pointer;font-size:14px;transition:border-color .2s;">
+                    <div style="font-weight:600;margin-bottom:4px;">${o.label}</div>
+                    <div style="color:#656d76;font-size:12px;">${o.desc}</div>
+                </button>`
+            ).join('');
+
+            overlay.innerHTML = `
+                <div style="background:#fff;border-radius:12px;padding:24px;min-width:320px;box-shadow:0 8px 32px rgba(0,0,0,0.2);">
+                    <div style="font-size:16px;font-weight:600;margin-bottom:16px;">打印字体大小</div>
+                    <div style="display:flex;gap:12px;margin-bottom:16px;">${buttons}</div>
+                    <div style="display:flex;justify-content:flex-end;gap:8px;">
+                        <button id="mdx-print-cancel"
+                            style="padding:8px 16px;border:1px solid #d0d5dd;border-radius:6px;background:#fff;cursor:pointer;font-size:13px;">取消</button>
+                    </div>
+                </div>`;
+
+            document.body.appendChild(overlay);
+
+            const cleanup = (value?: 'small' | 'normal' | 'large') => {
+                document.body.removeChild(overlay);
+                resolve(value || 'normal');
+            };
+
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) cleanup('normal');
+            });
+
+            overlay.querySelector('#mdx-print-cancel')!.addEventListener('click', () => cleanup('normal'));
+
+            overlay.querySelectorAll<HTMLButtonElement>('[data-size]').forEach(btn => {
+                btn.addEventListener('click', () => cleanup(btn.dataset.size as 'small' | 'normal' | 'large'));
+                btn.addEventListener('mouseenter', () => { btn.style.borderColor = '#4f46e5'; });
+                btn.addEventListener('mouseleave', () => { btn.style.borderColor = '#d0d5dd'; });
+            });
+        });
     }
 
     /**
@@ -183,71 +262,104 @@ export class DefaultPrintService implements PrintService {
      * 打开打印预览窗口
      */
     async print(markdown: string, options: PrintOptions = {}): Promise<void> {
-        const contentHtml = await this.renderForPrint(markdown, options);
-        await this.printFromHtml(contentHtml, options);
+        const resolved = await this.resolvePrintOptions(options);
+        const contentHtml = await this.renderForPrint(markdown, resolved);
+        await this.printFromHtml(contentHtml, resolved);
     }
 
     /**
      * ✅ [新增] 直接使用 HTML 内容打印
      */
     async printFromHtml(contentHtml: string, options: PrintOptions = {}): Promise<void> {
-        const title = options.title || 'Print';
-        const styles = this.getStyles(options);
-        const header = this.buildHeader(options);
+        const resolved = await this.resolvePrintOptions(options);
+        const title = resolved.title || 'Print';
+        const styles = this.getStyles(resolved);
+        const header = this.buildHeader(resolved);
 
         // 确定变体类名
-        const variantClass = options.variant === 'compact' ? 'mdx-print--compact' : '';
-        const headerClass = options.showHeader === false ? 'mdx-print--no-header' : '';
+        const variantClass = resolved.variant === 'compact' ? 'mdx-print--compact' : '';
+        const headerClass = resolved.showHeader === false ? 'mdx-print--no-header' : '';
 
-        const printWindow = window.open('', '_blank');
-        if (!printWindow) {
-            throw new Error('Failed to open print window. Please check popup blocker settings.');
+        // 在主文档中创建打印容器，通过 @media print 隔离
+        const containerId = 'mdx-print-overlay';
+        let container = document.getElementById(containerId);
+        if (!container) {
+            container = document.createElement('div');
+            container.id = containerId;
+            document.body.appendChild(container);
         }
 
-        const fullHtml = `<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>${this.escapeHtml(title)}</title>
-    <style>${styles}</style>
-</head>
-<body>
-    <article class="mdx-print ${variantClass} ${headerClass}">
-        ${header}
-        <main class="mdx-print-content">
-            ${contentHtml}
-        </main>
-    </article>
-</body>
-</html>`;
-
-        printWindow.document.write(fullHtml);
-        printWindow.document.close();
-
-        // 等待资源加载
-        await this.waitForResources(printWindow);
-
-        printWindow.focus();
-        printWindow.print();
-
-        if (options.autoClose) {
-            // 延迟关闭，确保打印对话框有时间显示
-            setTimeout(() => printWindow.close(), 1000);
+        // 注入打印专用样式：打印时仅显示此容器，并附加打印内容样式
+        const styleId = 'mdx-print-overlay-style';
+        let styleEl = document.getElementById(styleId) as HTMLStyleElement | null;
+        if (!styleEl) {
+            styleEl = document.createElement('style');
+            styleEl.id = styleId;
+            document.head.appendChild(styleEl);
         }
+        styleEl.textContent = `
+            #${containerId} { display: none; }
+            @media print {
+                html, body {
+                    overflow: visible !important;
+                    height: auto !important;
+                    position: static !important;
+                }
+                body > *:not(#${containerId}) { display: none !important; }
+                #${containerId} {
+                    display: block !important;
+                    position: static !important;
+                    width: auto !important;
+                    overflow: visible !important;
+                    height: auto !important;
+                }
+            }
+            ${styles}
+        `;
+
+        // 只填充 body 内容（不包含完整的 HTML 文档结构，避免 innerHTML 剥离标签）
+        container.innerHTML = `
+            <article class="mdx-print ${variantClass} ${headerClass}">
+                ${header}
+                <main class="mdx-print-content">
+                    ${contentHtml}
+                </main>
+            </article>
+        `;
+
+        // 等待渲染完成（图片等资源）
+        await new Promise(resolve => setTimeout(resolve, 300));
+
+        window.print();
+
+        // 打印后清理
+        this.cleanupAfterPrint(container, styleEl);
     }
 
     /**
-     * 等待窗口资源加载完成
+     * 打印后清理容器和样式
      */
-    private waitForResources(win: Window): Promise<void> {
-        return new Promise((resolve) => {
-            if (win.document.readyState === 'complete') {
-                setTimeout(resolve, 500);
-            } else {
-                win.addEventListener('load', () => setTimeout(resolve, 500));
+    private cleanupAfterPrint(container: HTMLElement, styleEl: HTMLStyleElement): void {
+        let cleaned = false;
+
+        const cleanup = () => {
+            if (cleaned) return;
+            cleaned = true;
+            window.removeEventListener('afterprint', cleanup);
+            window.removeEventListener('focus', cleanup);
+            if (container.parentNode) {
+                container.innerHTML = '';
             }
-        });
+            if (styleEl.parentNode) {
+                document.head.removeChild(styleEl);
+            }
+        };
+
+        window.addEventListener('afterprint', cleanup, { once: true });
+        // 兜底：打印对话框关闭后主窗口重新获得焦点
+        window.addEventListener('focus', cleanup, { once: true });
+        // 最终兜底：60 秒后强制清理
+        setTimeout(cleanup, 60000);
     }
 
     /**

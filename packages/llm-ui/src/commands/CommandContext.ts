@@ -9,14 +9,16 @@ import type { StateService } from '../services/StateService';
 import type { AssetService } from '../services/AssetService';
 import type { ErrorHandler } from '../utils/errorHandler';
 
+import type { BranchService } from '../services/BranchService';
+
 /**
  * 命令上下文 — 全部面向接口
- * 
+ *
  * 变更点：
  * - historyView: HistoryView → IHistoryPresenter
  * - chatInput: ChatInput → IChatInputPresenter
  * - bus: EditorEventBus → IEditorEventBus
- * 
+ *
  * Command 完全不知道 UI 实现细节。
  */
 export interface CommandContext {
@@ -25,6 +27,7 @@ export interface CommandContext {
     sessionService: SessionService;
     stateService: StateService;
     assetService: AssetService;
+    branchService: BranchService;
 
     // UI 接口（不是实现）
     historyView: IHistoryPresenter;
