@@ -60,8 +60,14 @@ export const zhCN = {
     // ── Common tooltips ─────────────────────────────────────────────────────
     'tooltip.dblClickRename':   '双击重命名',
     'tooltip.clickEditName':    '点击编辑名称，Enter 或失焦保存',
-    'tooltip.clickEditIcon':    '点击更换图标（输入 emoji）',
+    'tooltip.clickEditIcon':    '点击选择图标',
     'tooltip.testConnection':   '发送空请求测试连通性',
+
+    // ── Icon picker ──────────────────────────────────────────────────────────
+    'iconPicker.pasteLabel':       '粘贴图标',
+    'iconPicker.pastePlaceholder': '输入 emoji',
+    'iconPicker.systemLabel':      '系统图标',
+    'iconPicker.useDefault':       '使用默认图标',
 
     // ── Common form labels ──────────────────────────────────────────────────
     'form.name':         '名称',
