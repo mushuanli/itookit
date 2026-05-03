@@ -2,7 +2,10 @@
 
 import { Command } from './Command';
 import { Toast, showConfirmDialog } from '@itookit/common';
+import { BranchError } from '../services/BranchService';
 import type { BranchItem } from '../domain/types';
+
+// ── Create ────────────────────────────────────────────
 
 export class CreateBranchCommand extends Command<{ sourceNodeId: string }> {
     protected readonly name = 'Create Branch';
@@ -10,30 +13,8 @@ export class CreateBranchCommand extends Command<{ sourceNodeId: string }> {
     protected async execute({ sourceNodeId }: { sourceNodeId: string }): Promise<void> {
         const branchName = await this.promptBranchName();
         if (branchName === null) return;
-
-        const branchPointId = this.findBranchPoint(sourceNodeId);
-        const newNodeId = await this.ctx.sessionManager.createBranch(branchPointId, {
-            name: branchName || undefined,
-            copyContent: true,
-        });
-
-        const branches = await this.ctx.sessionManager.listBranches();
-        const branch = branches.find(b => b.headNodeId === newNodeId);
-        if (branch) {
-            await this.ctx.sessionManager.switchBranch(branch.name);
-        }
-
+        await this.ctx.branchService.create(sourceNodeId, branchName);
         Toast.success(`Branch "${branchName || 'Untitled'}" created`);
-    }
-
-    private findBranchPoint(sourceNodeId: string): string {
-        const sessions = this.ctx.sessionManager.getSessions();
-        const idx = sessions.findIndex(s => s.id === sourceNodeId);
-        if (idx === -1) return sourceNodeId;
-
-        const session = sessions[idx];
-        if (session.role !== 'user') return sourceNodeId;
-        return idx > 0 ? sessions[idx - 1].id : sourceNodeId;
     }
 
     private promptBranchName(): Promise<string | null> {
@@ -72,11 +53,21 @@ export class CreateBranchCommand extends Command<{ sourceNodeId: string }> {
     }
 }
 
+// ── Switch ────────────────────────────────────────────
+
 export class SwitchBranchCommand extends Command<{ branchName: string }> {
     protected readonly name = 'Switch Branch';
 
     protected async execute({ branchName }: { branchName: string }): Promise<void> {
-        await this.ctx.sessionManager.switchBranch(branchName);
+        try {
+            await this.ctx.branchService.switch(branchName);
+        } catch (e) {
+            if (e instanceof BranchError && e.code === 'ALREADY_CURRENT') {
+                Toast.info(e.message);
+                return;
+            }
+            throw e;
+        }
     }
 }
 
@@ -84,22 +75,38 @@ export class SwitchBranchByIdCommand extends Command<{ headNodeId: string }> {
     protected readonly name = 'Switch Branch By ID';
 
     protected async execute({ headNodeId }: { headNodeId: string }): Promise<void> {
-        const branches = await this.ctx.sessionManager.listBranches();
-        const branch = branches.find(b => b.headNodeId === headNodeId);
-        if (!branch) throw new Error(`No branch found for head node: ${headNodeId}`);
-        await this.ctx.sessionManager.switchBranch(branch.name);
+        await this.ctx.branchService.switchById(headNodeId);
     }
 }
+
+export class SwitchBranchByOffsetCommand extends Command<{ offset: number; cachedBranches: BranchItem[] }> {
+    protected readonly name = 'Switch Branch By Offset';
+
+    protected async execute({ offset, cachedBranches }: { offset: number; cachedBranches: BranchItem[] }): Promise<void> {
+        try {
+            await this.ctx.branchService.switchByOffset(offset, cachedBranches);
+        } catch (e) {
+            if (e instanceof BranchError && e.code === 'NO_OTHER') {
+                Toast.info('No other branches to switch to');
+                return;
+            }
+            throw e;
+        }
+    }
+}
+
+// ── Rename ────────────────────────────────────────────
 
 export class RenameBranchCommand extends Command<{ oldName: string; newName: string }> {
     protected readonly name = 'Rename Branch';
 
     protected async execute({ oldName, newName }: { oldName: string; newName: string }): Promise<void> {
-        if (!newName.trim()) return;
-        await this.ctx.sessionManager.renameBranch(oldName, newName);
+        await this.ctx.branchService.rename(oldName, newName);
         Toast.success('Branch renamed');
     }
 }
+
+// ── Delete ────────────────────────────────────────────
 
 export class DeleteBranchCommand extends Command<{ branchName: string }> {
     protected readonly name = 'Delete Branch';
@@ -109,27 +116,7 @@ export class DeleteBranchCommand extends Command<{ branchName: string }> {
             `Delete branch "${branchName}" and all its unique children?`
         );
         if (!confirmed) return;
-        await this.ctx.sessionManager.deleteBranch(branchName, true);
+        await this.ctx.branchService.delete(branchName);
         Toast.success('Branch deleted');
-    }
-}
-
-export class SwitchBranchByOffsetCommand extends Command<{ offset: number; cachedBranches: BranchItem[] }> {
-    protected readonly name = 'Switch Branch By Offset';
-
-    protected async execute({ offset, cachedBranches }: { offset: number; cachedBranches: BranchItem[] }): Promise<void> {
-        if (cachedBranches.length <= 1) {
-            Toast.info('No other branches to switch to');
-            return;
-        }
-
-        const currentIndex = cachedBranches.findIndex(b => b.isCurrent);
-        if (currentIndex === -1) return;
-
-        const len = cachedBranches.length;
-        const newIndex = ((currentIndex + offset) % len + len) % len;
-        if (newIndex === currentIndex) return;
-
-        await this.ctx.sessionManager.switchBranch(cachedBranches[newIndex].name);
     }
 }

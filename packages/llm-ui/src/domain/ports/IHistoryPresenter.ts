@@ -21,6 +21,7 @@ export interface IHistoryPresenter {
 
     // === 折叠 ===
     getCollapseStates(): CollapseStateMap;
+    resetCollapseStates(): void;
     toggleSessionCollapse(sessionId: string, forceState?: boolean): void;
     setAllCollapsed(collapsed: boolean): void;
     toggleAllFold(): boolean;
@@ -40,6 +41,8 @@ export interface IHistoryPresenter {
 
     // === 查询 ===
     getSessionElement(sessionId: string): HTMLElement | null;
+    /** session element 或普通节点的组合查找（用于 branch_renamed DOM 更新） */
+    getElement(id: string): HTMLElement | null;
     getUnfoldedNavigationTarget(direction: 'prev' | 'next'): string | null | '__end__' | '__start__';
 
     // === 事件处理 ===

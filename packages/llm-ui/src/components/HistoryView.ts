@@ -119,7 +119,6 @@ export class HistoryView implements IHistoryPresenter {
                     'session_start', 'node_start', 'finished', 'error', 'session_cleared',
                     'messages_deleted', 'message_edited',
                     'regenerate_started', 'regenerate_completed',
-                    'branch_switched', 'branch_created', 'branch_renamed', 'branch_deleted',
                     'sibling_switch',
                 ],
             }
@@ -192,6 +191,10 @@ export class HistoryView implements IHistoryPresenter {
         return this.collapse.getStates();
     }
 
+    resetCollapseStates(): void {
+        this.collapse.resetStates();
+    }
+
     toggleSessionCollapse(sessionId: string, forceState?: boolean): void {
         const expanded = this.collapse.toggleSession(sessionId, forceState);
         if (expanded) {
@@ -245,6 +248,10 @@ export class HistoryView implements IHistoryPresenter {
         return this.renderer.getSessionElement(sessionId);
     }
 
+    getElement(id: string): HTMLElement | null {
+        return this.renderer.getSessionElement(id) || this.renderer.getNode(id);
+    }
+
     getUnfoldedNavigationTarget(
         direction: 'prev' | 'next'
     ): string | null | '__end__' | '__start__' {
@@ -290,27 +297,6 @@ export class HistoryView implements IHistoryPresenter {
     }
     private processEventImmediate(event: OrchestratorEvent): void {
         switch (event.type) {
-            case 'branch_switched':
-                this.collapse.resetStates();
-                return;
-
-            case 'branch_created':
-                return;
-
-            case 'branch_renamed': {
-                const el = this.renderer.getSessionElement(event.payload.nodeId)
-                    || this.renderer.getNode(event.payload.nodeId);
-                if (el) {
-                    const nameEl = el.querySelector('.llm-branch-name');
-                    if (nameEl) nameEl.textContent = event.payload.newName;
-                }
-                return;
-            }
-
-            case 'branch_deleted':
-                this.removeMessages(event.payload.deletedIds, true);
-                return;
-
             case 'session_start': {
                 this.clearErrors();
                 this.enterStreamingMode();

@@ -1,5 +1,6 @@
 // @file: llm-ui/domain/ports/INavigationPresenter.ts
 
+import type { BranchItem } from '../types';
 
 export interface ChatNavItem {
     id: string;
@@ -23,8 +24,8 @@ export interface ChatNavItem {
 }
 
 export interface NavPanelData {
-    items: any[];
-    branches: any[];
+    items: ChatNavItem[];
+    branches: BranchItem[];
     currentSessionId?: string;
 }
 

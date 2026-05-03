@@ -47,7 +47,7 @@ export class FloatingNavPanel implements INavigationPresenter {
     }
 
     update(data: NavPanelData): void {
-        this.allItems = data.items as ChatNavItem[];
+        this.allItems = data.items;
         this.branches = data.branches;
 
         this.syncFilterBranch();

@@ -21,7 +21,7 @@ import type { INavigationPresenter, NavPanelData } from '../domain/ports/INaviga
 import type { IEditorEventBus } from '../domain/events';
 
 // Services
-import { SessionService, StateService, AssetService, AgentLoader, BranchStore, NavDataBuilder } from '../services';
+import { SessionService, StateService, AssetService, AgentLoader, BranchStore, BranchService, NavDataBuilder } from '../services';
 
 // Commands
 import type { CommandContext } from '../commands/CommandContext';
@@ -103,6 +103,7 @@ export class LLMWorkspaceEditor implements IEditor {
     private stateManager!: StateManager;
     private errorHandler!: ErrorHandler;
     private branchStore!: BranchStore;
+    private branchService!: BranchService;
     private navDataBuilder!: NavDataBuilder;
 
     // === 事件系统 ===
@@ -217,6 +218,7 @@ export class LLMWorkspaceEditor implements IEditor {
             this.agentLoader
         );
         this.branchStore = new BranchStore(this.sessionManager, this.errorHandler);
+        this.branchService = new BranchService(this.sessionManager, this.branchStore);
         this.navDataBuilder = new NavDataBuilder(this.sessionManager);
     }
 
@@ -338,6 +340,7 @@ export class LLMWorkspaceEditor implements IEditor {
             sessionService: this.sessionService,
             stateService: this.stateService,
             assetService: this.assetService,
+            branchService: this.branchService,
             historyView: this.historyView,
             chatInput: this.chatInput,
             bus: this.bus,
@@ -1085,22 +1088,16 @@ export class LLMWorkspaceEditor implements IEditor {
             },
 
             onSwitchBranch: (name: string) => {
+                // Fuzzy match for good UX (shows available branches on miss)
                 const branches = this.branchStore.current;
                 const target = branches.find(
                     b => b.name.toLowerCase() === name.toLowerCase()
                 );
-
                 if (!target) {
                     const available = branches.map(b => b.name).join(', ');
                     Toast.error(`Branch "${name}" not found. Available: ${available}`);
                     return;
                 }
-
-                if (target.isCurrent) {
-                    Toast.info(`Already on branch "${target.name}"`);
-                    return;
-                }
-
                 this.bus.emit('branch:switch', { branchName: target.name });
             },
 
@@ -1119,18 +1116,15 @@ export class LLMWorkspaceEditor implements IEditor {
             },
 
             onListBranches: () => {
-                const branches = this.branchStore.current;
-
+                const branches = this.branchService.list;
                 if (branches.length <= 1) {
                     Toast.info('Only one branch: main');
                     return;
                 }
-
                 const list = branches.map((b, i) => {
                     const marker = b.isCurrent ? '→ ' : '  ';
                     return `${marker}${i + 1}. ${b.name}`;
                 }).join('\n');
-
                 Toast.info(`Branches (${branches.length}):\n${list}`);
             },
 
@@ -1140,38 +1134,13 @@ export class LLMWorkspaceEditor implements IEditor {
                     Toast.error('Usage: /renamebranch <old-name> <new-name>');
                     return;
                 }
-
-                const [oldName, newName] = parts;
-
-                const branches = this.branchStore.current;
-                const exists = branches.find(
-                    b => b.name.toLowerCase() === oldName.toLowerCase()
-                );
-                if (!exists) {
-                    Toast.error(`Branch "${oldName}" not found`);
-                    return;
-                }
-
-                this.bus.emit('branch:rename', { oldName: exists.name, newName });
+                // Validation (branch exists, name non-empty) now in BranchService
+                this.bus.emit('branch:rename', { oldName: parts[0], newName: parts[1] });
             },
 
             onDeleteBranch: (name: string) => {
-                const branches = this.branchStore.current;
-                const target = branches.find(
-                    b => b.name.toLowerCase() === name.toLowerCase()
-                );
-
-                if (!target) {
-                    Toast.error(`Branch "${name}" not found`);
-                    return;
-                }
-
-                if (target.isCurrent) {
-                    Toast.error('Cannot delete the current branch. Switch to another branch first.');
-                    return;
-                }
-
-                this.bus.emit('branch:delete', { branchName: target.name });
+                // Validation (branch exists, not current) now in BranchService → Command
+                this.bus.emit('branch:delete', { branchName: name });
             },
 
             // ── Settings ────────────────────────────────────────
