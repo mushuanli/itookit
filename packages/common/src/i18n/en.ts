@@ -54,8 +54,14 @@ export const en: LocaleStrings = {
 
     'tooltip.dblClickRename':   'Double-click to rename',
     'tooltip.clickEditName':    'Click to edit name, Enter or blur to save',
-    'tooltip.clickEditIcon':    'Click to change icon (enter an emoji)',
+    'tooltip.clickEditIcon':    'Click to change icon',
     'tooltip.testConnection':   'Send an empty request to test connectivity',
+
+    // ── Icon picker ──────────────────────────────────────────────────────────
+    'iconPicker.pasteLabel':       'Paste Icon',
+    'iconPicker.pastePlaceholder': 'Type emoji',
+    'iconPicker.systemLabel':      'System Icons',
+    'iconPicker.useDefault':       'Use Default',
 
     'form.name':         'Name',
     'form.icon':         'Icon',

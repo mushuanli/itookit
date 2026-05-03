@@ -11,6 +11,15 @@ export interface IEditorHostContext {
     saveContent: (nodeId: string, content: string) => Promise<void>;
 }
 
+/** System emoji icons shown in the entity header icon picker. */
+const SYSTEM_ICONS = [
+    '📝', '📄', '📋', '✅', '❌', '⚡', '🔥', '⭐', '💡', '🔧',
+    '⚙️', '🔌', '🌐', '🖥️', '📱', '🤖', '🎯', '🚀', '💎', '🔑',
+    '🏷️', '📌', '📊', '📈', '🛠️', '🧩', '🔍', '🎨', '🧪', '🔬',
+    '⚗️', '📡', '🗂️', '🔔', '🎵', '🏗️', '📦', '🧲', '🎪', '🧠',
+    '💬', '📢', '🔗', '🛡️', '🎮', '📐', '🧮', '🔋', '💊', '🐍',
+];
+
 /**
  * 设置类编辑器的基类
  * @template TService 服务层的类型
@@ -161,21 +170,57 @@ export abstract class BaseSettingsEditor<TService> implements IEditor {
         subtitle?: string;
         actions?: string;
     }): string {
+        const displayIcon = opts.icon || opts.fallbackIcon;
         const iconEl = opts.editableIcon
-            ? `<input name="header-icon" value="${opts.icon}" placeholder="${opts.fallbackIcon}"
+            ? `<button type="button" data-action="icon-picker-toggle"
                    title="${t('tooltip.clickEditIcon')}"
                    style="font-size:2rem;width:2.75rem;height:2.75rem;text-align:center;
                           border:2px solid transparent;border-radius:8px;background:transparent;
                           cursor:pointer;outline:none;padding:0;font-family:inherit;flex-shrink:0;
-                          transition:border-color .15s"
-                   maxlength="2">`
-            : `<span style="font-size:2.25rem;flex-shrink:0;line-height:1">${opts.icon || opts.fallbackIcon}</span>`;
+                          transition:border-color .15s;line-height:1">${displayIcon}</button>
+               <div data-role="icon-picker-popover" style="display:none;position:absolute;top:100%;left:0;
+                    margin-top:4px;z-index:100;background:var(--st-surface,#fff);
+                    border:1px solid var(--st-border-color);border-radius:10px;
+                    box-shadow:0 8px 24px rgba(0,0,0,.12);padding:1rem;min-width:340px">
+                   <!-- paste area -->
+                   <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.75rem">
+                       <span style="font-size:.8125rem;white-space:nowrap;color:var(--st-text-secondary)">${t('iconPicker.pasteLabel')}</span>
+                       <input data-role="icon-picker-input" placeholder="${t('iconPicker.pastePlaceholder')}"
+                           style="flex:1;padding:.25rem .5rem;font-size:.875rem;border:1px solid var(--st-border-color);
+                                  border-radius:6px;outline:none;font-family:inherit"
+                           maxlength="4">
+                       <button type="button" data-action="icon-picker-confirm"
+                           style="padding:.25rem .625rem;font-size:.75rem;font-weight:600;border:1px solid var(--st-primary,#6366f1);
+                                  border-radius:6px;background:var(--st-primary,#6366f1);color:#fff;cursor:pointer">
+                           ${t('action.confirm')}
+                       </button>
+                   </div>
+                   <div style="border-top:1px solid var(--st-border-color);margin-bottom:.75rem"></div>
+                   <!-- emoji grid -->
+                   <div style="font-size:.8125rem;color:var(--st-text-secondary);margin-bottom:.375rem">${t('iconPicker.systemLabel')}</div>
+                   <div data-role="icon-picker-grid" style="display:grid;grid-template-columns:repeat(10,1fr);gap:4px;margin-bottom:.75rem">
+                       ${SYSTEM_ICONS.map(e => `<button type="button" data-action="icon-pick" data-emoji="${e}"
+                           style="font-size:1.125rem;padding:4px;text-align:center;border:1px solid transparent;
+                                  border-radius:6px;background:transparent;cursor:pointer;line-height:1.4;
+                                  transition:background .12s"
+                           title="${e}">${e}</button>`).join('')}
+                   </div>
+                   <div style="border-top:1px solid var(--st-border-color);margin-bottom:.75rem"></div>
+                   <!-- clear -->
+                   <button type="button" data-action="icon-picker-clear"
+                       style="padding:.375rem .75rem;font-size:.8125rem;border:1px solid var(--st-border-color);
+                              border-radius:6px;background:transparent;cursor:pointer;color:var(--st-text-secondary);
+                              width:100%;text-align:center">
+                       🗑️ ${t('iconPicker.useDefault')}
+                   </button>
+               </div>`
+            : `<span style="font-size:2.25rem;flex-shrink:0;line-height:1">${displayIcon}</span>`;
 
         return `
             <div style="padding:1.25rem 1.75rem;border-bottom:1px solid var(--st-border-color);
                         display:flex;align-items:center;justify-content:space-between;gap:.75rem;flex-wrap:wrap">
                 <div style="display:flex;align-items:center;gap:1rem;min-width:0">
-                    ${iconEl}
+                    <span style="position:relative;display:inline-flex;flex-shrink:0">${iconEl}</span>
                     <div style="min-width:0">
                         <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
                             <input name="header-name" value="${opts.name}"
@@ -240,21 +285,70 @@ export abstract class BaseSettingsEditor<TService> implements IEditor {
             this.resizeHeaderInput(nameInput);
         }
 
-        const iconInput = this.container.querySelector<HTMLInputElement>('[name="header-icon"]');
-        if (iconInput && opts.onIconSave) {
-            this.addEventListener(iconInput, 'focus', () => {
-                iconInput.style.borderColor = 'var(--st-primary, #6366f1)';
-                iconInput.select();
+        // ── Icon picker ─────────────────────────────────────────────────────
+        const toggleBtn = this.container.querySelector<HTMLButtonElement>('[data-action="icon-picker-toggle"]');
+        const popover    = this.container.querySelector<HTMLElement>('[data-role="icon-picker-popover"]');
+        if (!toggleBtn || !popover || !opts.onIconSave) return;
+
+        const pickerInput = popover.querySelector<HTMLInputElement>('[data-role="icon-picker-input"]');
+
+        const close = () => { popover.style.display = 'none'; };
+        const open  = () => { popover.style.display = 'block'; if (pickerInput) pickerInput.value = ''; };
+        const isOpen = () => popover.style.display !== 'none';
+
+        const selectIcon = async (emoji: string) => {
+            const trimmed = emoji.trim();
+            close();
+            await opts.onIconSave!(trimmed);
+        };
+
+        // Toggle on button click
+        this.addEventListener(toggleBtn, 'click', (e) => {
+            e.stopPropagation();
+            isOpen() ? close() : open();
+        });
+
+        // Pick from grid
+        popover.querySelectorAll<HTMLButtonElement>('[data-action="icon-pick"]').forEach(btn => {
+            this.addEventListener(btn, 'click', (e) => {
+                e.stopPropagation();
+                selectIcon(btn.dataset.emoji ?? '');
             });
-            this.addEventListener(iconInput, 'blur', async () => {
-                iconInput.style.borderColor = 'transparent';
-                await opts.onIconSave!(iconInput.value.trim());
+        });
+
+        // Confirm paste input
+        const confirmBtn = popover.querySelector<HTMLButtonElement>('[data-action="icon-picker-confirm"]');
+        if (confirmBtn && pickerInput) {
+            this.addEventListener(confirmBtn, 'click', (e) => {
+                e.stopPropagation();
+                if (pickerInput.value.trim()) selectIcon(pickerInput.value);
             });
-            this.addEventListener(iconInput, 'keydown', (e) => {
-                if ((e as KeyboardEvent).key === 'Enter')  iconInput.blur();
-                if ((e as KeyboardEvent).key === 'Escape') iconInput.blur();
+            this.addEventListener(pickerInput, 'keydown', (e) => {
+                if ((e as KeyboardEvent).key === 'Enter' && pickerInput.value.trim()) {
+                    e.stopPropagation();
+                    selectIcon(pickerInput.value);
+                }
             });
         }
+
+        // Clear → use default
+        const clearBtn = popover.querySelector<HTMLButtonElement>('[data-action="icon-picker-clear"]');
+        if (clearBtn) {
+            this.addEventListener(clearBtn, 'click', (e) => {
+                e.stopPropagation();
+                selectIcon('');
+            });
+        }
+
+        // Close on outside click
+        const onClickOutside = (e: MouseEvent) => {
+            if (!isOpen()) return;
+            if (!popover.contains(e.target as Node) && e.target !== toggleBtn) {
+                close();
+            }
+        };
+        document.addEventListener('click', onClickOutside);
+        this.listeners.push({ el: document as unknown as Element, type: 'click', handler: onClickOutside as unknown as EventListener });
     }
 
     /** Auto-sizes an input to its content width (max 280px). */
