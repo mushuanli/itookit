@@ -33,7 +33,7 @@ export class MarkedAdapter {
             }
         };
 
-        marked.use({ renderer });
+        marked.use({ renderer, breaks: true });
 
         if (extensions.length > 0) {
             marked.use(...extensions);
