@@ -97,7 +97,7 @@ export class HistoryView implements IHistoryPresenter {
             this.collapse, this.edit, options.bus, options.onNodeAction,
         );
 
-        this.ttyCtrl = new TtyController((id) => this.renderer.getNode(id));
+        this.ttyCtrl = new TtyController((id) => this.renderer.getNode(id) ?? undefined);
 
         this.resizeTracker = new ContentResizeTracker(
             container,

@@ -1,4 +1,5 @@
 // @file common/components/BaseSettingsEditor.ts
+/// <reference lib="dom" />
 
 import { IEditor, CollapseExpandResult, EditorOptions, UnifiedSearchResult, Heading, EditorEvent, EditorEventCallback } from '../interfaces/IEditor';
 import { t } from '../i18n';
