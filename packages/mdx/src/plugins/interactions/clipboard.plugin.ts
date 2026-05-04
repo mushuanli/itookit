@@ -7,6 +7,7 @@ import { EditorView } from 'codemirror';
 import type { MDxPlugin, PluginContext } from '../../core/types';
 
 // 需要安装: npm install turndown turndown-plugin-gfm
+/// <reference path="../../types/turndown-plugin-gfm.d.ts" />
 import TurndownService from 'turndown';
 import { gfm } from 'turndown-plugin-gfm';
 

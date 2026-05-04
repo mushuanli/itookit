@@ -272,7 +272,7 @@ export class DefaultPrintService implements PrintService {
      */
     async printFromHtml(contentHtml: string, options: PrintOptions = {}): Promise<void> {
         const resolved = await this.resolvePrintOptions(options);
-        const title = resolved.title || 'Print';
+        //const title = resolved.title || 'Print';
         const styles = this.getStyles(resolved);
         const header = this.buildHeader(resolved);
 
