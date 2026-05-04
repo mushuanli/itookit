@@ -57,6 +57,10 @@ export const FileReadTool = buildTool({
   isConcurrencySafe() { return true; },
   isReadOnly() { return true; },
 
+  isSearchOrReadCommand() {
+    return 'read' as const;
+  },
+
   async prompt() { return DESCRIPTION; },
 
   async call(input, context) {
