@@ -29,6 +29,58 @@ const BLOCKED_PATTERNS: RegExp[] = [
   /chmod\s+-R\s+777\s+\//,
 ];
 
+// Search commands for collapsible display (grep, find, etc.)
+const BASH_SEARCH_COMMANDS = new Set([
+  'find', 'grep', 'rg', 'ag', 'ack', 'locate', 'which', 'whereis',
+]);
+
+// Read/view commands for collapsible display (cat, head, etc.)
+// Data-processing commands (jq, awk, sort, etc.) are intentionally excluded —
+// they transform data rather than passively reading, so pipelines containing
+// them should not be collapsed as "read" operations.
+const BASH_READ_COMMANDS = new Set([
+  'cat', 'head', 'tail', 'less', 'more',
+  'wc', 'stat', 'file', 'strings',
+]);
+
+// Directory-listing commands for collapsible display (ls, tree, du)
+const BASH_LIST_COMMANDS = new Set(['ls', 'tree', 'du']);
+
+// Commands that are semantic-neutral in any position
+const BASH_SEMANTIC_NEUTRAL_COMMANDS = new Set([
+  'echo', 'printf', 'true', 'false', ':',
+]);
+
+/** Extract the base command name from a pipeline segment. */
+function getBaseCommand(segment: string): string {
+  const match = segment.trim().match(/^(\S+)/);
+  return match ? match[1] : '';
+}
+
+/** Check if a bash command is a search or read operation for UI collapsing. */
+function isSearchOrReadBashCommand(command: string): 'search' | 'read' | 'list' | 'none' {
+  // split() with a capturing group includes the separators as array elements
+  const parts = command.split(/\s*(&&|\|\||[|;])\s*/);
+  let hasSearch = false;
+  let hasRead = false;
+  let hasList = false;
+
+  for (const part of parts) {
+    if (part === '&&' || part === '||' || part === '|' || part === ';') continue;
+    const cmd = getBaseCommand(part);
+    if (!cmd || BASH_SEMANTIC_NEUTRAL_COMMANDS.has(cmd)) continue;
+    if (BASH_SEARCH_COMMANDS.has(cmd)) { hasSearch = true; continue; }
+    if (BASH_READ_COMMANDS.has(cmd)) { hasRead = true; continue; }
+    if (BASH_LIST_COMMANDS.has(cmd)) { hasList = true; continue; }
+    return 'none'; // non-collapsible command found
+  }
+
+  if (hasSearch) return 'search';
+  if (hasList) return 'list';
+  if (hasRead) return 'read';
+  return 'none';
+}
+
 const inputSchema = lazySchema(() =>
   z.strictObject({
     command: z.string().describe('The shell command to execute'),
@@ -150,6 +202,10 @@ export function createBashTool(shell?: INativeShell) {
 
     isConcurrencySafe() { return false; },
     isReadOnly() { return false; },
+
+    isSearchOrReadCommand(input) {
+      return isSearchOrReadBashCommand(input.command);
+    },
 
     isEnabled() {
       // Enabled when: an explicit shell is provided (Tauri), OR Node.js is available.

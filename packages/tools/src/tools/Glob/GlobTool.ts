@@ -141,6 +141,10 @@ export const GlobTool = buildTool({
   isConcurrencySafe() { return true; },
   isReadOnly() { return true; },
 
+  isSearchOrReadCommand() {
+    return 'search' as const;
+  },
+
   async prompt() { return DESCRIPTION; },
 
   async call(input, context) {
