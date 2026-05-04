@@ -1,3 +1,4 @@
+/// <reference path="./types/turndown-plugin-gfm.d.ts" />
 
 // @mdx/index.ts
 export { createMDxEditor, defaultEditorFactory, registerPlugin } from './factory';
