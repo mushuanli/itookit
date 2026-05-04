@@ -58,8 +58,15 @@ export { createAgentTool } from './tools/Agent/AgentTool';
 export type { Output as AgentOutput } from './tools/Agent/AgentTool';
 
 // ── Task tools ──
-export { TaskCreateTool, TaskGetTool, TaskListTool, TaskUpdateTool };
-export type { TaskItem } from './tools/Task/TaskTools';
+export {
+  TaskCreateTool,
+  TaskGetTool,
+  TaskListTool,
+  TaskUpdateTool,
+  createTaskOutputTool,
+  createTaskStopTool,
+} from './tools/Task/TaskTools';
+export type { TaskItem, TaskInfo, ITaskStore } from './tools/Task/TaskTools';
 
 // ── Plan mode tools ──
 export { EnterPlanModeTool, ExitPlanModeTool, isPlanModeActive, getPlanContent };
@@ -76,6 +83,41 @@ export type {
 export { WebFetchTool };
 export type { Output as WebFetchOutput } from './tools/WebFetch/WebFetchTool';
 
+// ── WebSearch tool (P0) ──
+import { WebSearchTool, createWebSearchTool, setWebSearchProvider } from './tools/WebSearch/WebSearchTool';
+export { WebSearchTool, createWebSearchTool, setWebSearchProvider };
+export type {
+  Output as WebSearchOutput,
+  IWebSearchProvider,
+  WebSearchResult,
+} from './tools/WebSearch/WebSearchTool';
+
+// ── MCP tools (P0) ──
+export {
+  createMCPTools,
+  createSingleMCPTool,
+} from './tools/MCP/MCPTool';
+export type {
+  MCPToolDef,
+  MCPCallResult,
+  IMCPClient,
+} from './tools/MCP/MCPTool';
+export { buildMcpToolName } from './tools/MCP/prompt';
+
+// ── SendMessage tool (P1) ──
+export { createSendMessageTool } from './tools/SendMessage/SendMessageTool';
+export type {
+  Output as SendMessageOutput,
+  IMessageRouter,
+  SendMessageResult,
+} from './tools/SendMessage/SendMessageTool';
+
+// ── ToolSearch tool (P1) ──
+// Factory tool — no deferred tools exist without MCP, so ToolSearch must be
+// created and registered dynamically via ToolDeviceDriver.registerToolInstance().
+export { createToolSearchTool } from './tools/ToolSearch/ToolSearchTool';
+export type { Output as ToolSearchOutput } from './tools/ToolSearch/ToolSearchTool';
+
 // ── Adapter ──
 export { ToolDeviceDriver } from './adapters/tool-device-driver';
 
@@ -83,7 +125,10 @@ export { ToolDeviceDriver } from './adapters/tool-device-driver';
 
 /**
  * All static built-in tools (no runtime service dependencies).
- * Use createSkillTool(skillService) and createAgentTool(router) for dynamic tools.
+ * Factory tools (createSkillTool, createAgentTool, createWebSearchTool,
+ * createMCPTools, createTaskOutputTool, createTaskStopTool, createSendMessageTool,
+ * createToolSearchTool) must be created and registered dynamically via
+ * ToolDeviceDriver.registerToolInstance().
  */
 export const BUILTIN_TOOLS: Tool[] = [
   // File
@@ -107,4 +152,5 @@ export const BUILTIN_TOOLS: Tool[] = [
   AskUserQuestionTool,
   // Web
   WebFetchTool,
+  WebSearchTool,
 ];

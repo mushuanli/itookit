@@ -187,6 +187,7 @@ export class ToolDeviceDriver implements IDeviceDriver, IToolService {
       request.signal.addEventListener('abort', () => abortController.abort(), { once: true });
     }
 
+    const canCancel = entry.tool.interruptBehavior?.() === 'cancel';
     try {
       const appState = this.sessionAppState;
       const result = await entry.tool.call(request.args, {
@@ -212,6 +213,21 @@ export class ToolDeviceDriver implements IDeviceDriver, IToolService {
         durationMs: Date.now() - t0,
       };
     } catch (err: unknown) {
+      if (canCancel && abortController.signal.aborted) {
+        // Only suppress the error if it was directly caused by the abort signal.
+        // If it's an unrelated error that raced with the abort, preserve the message.
+        const isAbortError = err instanceof Error && err.name === 'AbortError';
+        const errMsg = isAbortError ? undefined : (err instanceof Error ? err.message : String(err));
+        return {
+          toolId: request.toolId,
+          success: false,
+          output: isAbortError
+            ? 'Tool execution was cancelled.'
+            : `Tool cancelled. ${errMsg}`,
+          durationMs: Date.now() - t0,
+          error: 'cancelled',
+        };
+      }
       const msg = err instanceof Error ? err.message : String(err);
       return {
         toolId: request.toolId,

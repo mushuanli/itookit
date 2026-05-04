@@ -70,6 +70,36 @@ export interface Tool<
   /** Is this tool currently enabled? */
   isEnabled(): boolean;
 
+  /** When true, this tool is deferred (sent with defer_loading: true) and requires
+   *  ToolSearch to be used before it can be called. */
+  readonly shouldDefer?: boolean;
+
+  // ── Interruption ──
+
+  /**
+   * What should happen when the user submits a new message while this tool
+   * is running.
+   *
+   * - `'cancel'` — stop the tool and discard its result
+   * - `'block'`  — keep running; the new message waits
+   *
+   * Defaults to `'block'` when not implemented.
+   */
+  interruptBehavior?(): 'cancel' | 'block';
+
+  // ── UI semantics ──
+
+  /**
+   * Returns the UI display category of this tool invocation for collapsing.
+   * - `'search'` — grep, find, glob patterns
+   * - `'read'`   — cat, head, tail, file read
+   * - `'list'`   — ls, tree, du
+   * - `'none'`   — not collapsible (side-effecting or unknown)
+   *
+   * Defaults to `'none'` when not implemented.
+   */
+  isSearchOrReadCommand?(input: z.infer<Input>): 'search' | 'read' | 'list' | 'none';
+
   // ── Validation & Permissions ──
 
   /** Validate input before permission checks. Runs first (cheap checks). */
@@ -101,6 +131,7 @@ type DefaultableToolKeys =
   | 'isEnabled'
   | 'isConcurrencySafe'
   | 'isReadOnly'
+  | 'interruptBehavior'
   | 'checkPermissions'
   | 'userFacingName';
 
@@ -116,6 +147,7 @@ const TOOL_DEFAULTS = {
   isEnabled: () => true,
   isConcurrencySafe: () => false,
   isReadOnly: () => false,
+  interruptBehavior: () => 'block' as const,
   checkPermissions: (): Promise<PermissionResult> =>
     Promise.resolve({ behavior: 'allow' }),
   userFacingName: function (this: { name: string }) {
