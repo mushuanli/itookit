@@ -44,6 +44,9 @@ export {
 // ── 常量 ──
 export { ROOT_INO } from './engine/vfs-engine';
 
+// ── FileIO ──
+export { FileIO, createFileIO, MDXFileIO, createMDXFileIO, ChatFileIO, createChatFileIO } from './file-io';
+
 // ── 工具 ──
 export * as pathUtils from './utils/path';
 export {

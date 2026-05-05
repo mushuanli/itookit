@@ -147,6 +147,13 @@ export type {
 } from './session-graph';
 
 // ============================================
+// FileIO (implementations live in @itookit/vfslib)
+// ============================================
+
+export type { IChatFileIO } from '@itookit/common';
+export { ChatFileIO, createChatFileIO } from '@itookit/vfslib';
+
+// ============================================
 // 工具
 // ============================================
 
