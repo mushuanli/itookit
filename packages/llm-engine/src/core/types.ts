@@ -1,7 +1,11 @@
 // @file: llm-engine/src/core/types.ts
 
 import { NodeStatus } from '@itookit/llm-kernel';
-import type { ModelTier } from '@itookit/common';
+import type { ModelTier, ChatFile } from '@itookit/common';
+
+// Re-export chat types that moved to @itookit/common for backward compatibility
+export type { ChatFile, ChatSessionSettings } from '@itookit/common';
+export { DEFAULT_SESSION_SETTINGS } from '@itookit/common';
 
 /**
  * 单次任务（或整个会话）的 token 用量统计。
@@ -28,74 +32,6 @@ export interface SessionTokenUsage {
     /** true = 字符估算；false = API 精确值 */
     isEstimated: boolean;
 }
-
-/**
- * ✅ 新增：会话级设置（YAML 配置文件格式）
- * 文件位置: /.{sessionId}/settings.yaml
- */
-export interface ChatSessionSettings {
-    /** 配置版本 */
-    version: '1.0';
-
-    /** 覆盖模型 ID（空表示使用 Agent 默认） */
-    modelId?: string;
-
-    /** 历史消息数量限制，-1 表示不限制, 0 表示不发送 */
-    historyLength: number;
-
-    /** 温度参数 */
-    temperature?: number;
-
-    /** 流式输出开关，默认 true */
-    streamMode: boolean;
-
-    /**
-     * 是否使用 AgentLoopExecutor（harness 模式）。
-     *
-     * true  → 多轮循环，工具调用由 AgentLoopExecutor 内部管理
-     * false → 单轮 kernel 路径（默认）
-     */
-    useHarness?: boolean;
-
-    /**
-     * 文件工具根目录（harness 模式下有效）。
-     * 空或未设置时使用进程工作目录。
-     */
-    workingDirectory?: string;
-
-    /** 最后更新时间 */
-    updatedAt?: string;
-}
-
-/**
- * 默认会话设置
- */
-export const DEFAULT_SESSION_SETTINGS: ChatSessionSettings = {
-    version: '1.0',
-    modelId: undefined,
-    historyLength: -1,
-    temperature: undefined,
-    streamMode: true,
-};
-
-/**
- * 聊天附件定义
- */
-export interface ChatFile {
-    name: string;
-    type: string;
-    /** 
-     * 存储路径 (相对路径 ./xxx 或 协议路径 @asset/xxx) 
-     */
-    path?: string;
-    size?: number;
-    /** 
-     * 运行时使用的原始文件对象 (不持久化)
-     * 用于 Kernel 执行时读取内容
-     */
-    fileRef?: File | Blob;
-}
-
 
 /**
  * ✅ 新增：查询覆盖参数

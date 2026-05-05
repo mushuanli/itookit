@@ -60,6 +60,22 @@ export {
     type SRSItemData,
 } from './interfaces/ISessionEngine';
 
+export type { IFileIO } from './interfaces/IFileIO';
+export type { IMDXFileIO } from './interfaces/IMDXFileIO';
+export type { IChatFileIO } from './interfaces/IChatFileIO';
+export type {
+    ChatFile,
+    AppendMessageMeta,
+    UpdateMessageMeta,
+    ChatNodeMeta,
+    ChatNode,
+    ChatContextItem,
+    ChatManifest,
+    BranchTreeNode,
+    ChatSessionSettings,
+} from './interfaces/chat';
+export { DEFAULT_SESSION_SETTINGS } from './interfaces/chat';
+
 export { ISettingsWidget } from './interfaces/ISettingsWidget';
 
 // Export all utils

@@ -78,6 +78,7 @@
     "@codemirror/state": "^6.5.2",
     "@codemirror/view": "^6.38.8",
     "@itookit/common": "workspace:*",
+    "@itookit/vfslib": "workspace:*",
     "codemirror": "^6.0.2",
     "front-matter": "^4.0.2",
     "gray-matter": "^4.0.3",
