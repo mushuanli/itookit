@@ -7,7 +7,7 @@ import type {
   EditorFactory,
   EditorOptions,
   ISessionUI,
-  ISessionEngine,
+  IFSEngine,
   EditorHostContext,
   NavigationRequest,
 } from '@itookit/common';
@@ -36,7 +36,7 @@ type VFSManager = ISessionUI<VFSNodeUI, VFSService> & {
  */
 export function connectEditorLifecycle(
   vfsManager: VFSManager,
-  engine: ISessionEngine,
+  engine: IFSEngine,
   editorContainer: HTMLElement,
   defaultEditorFactory?: EditorFactory,
   options: ConnectOptions = {}

@@ -1,3 +1,3 @@
-export { FileIO, createFileIO } from './FileIO';
-export { MDXFileIO, createMDXFileIO } from './MDXFileIO';
-export { ChatFileIO, createChatFileIO } from './ChatFileIO';
+export { FileHandle, createFile } from './File';
+export { MDXFileHandle, createMDXFile } from './MDXFile';
+export { ChatFileHandle, createChatFile } from './ChatFile';

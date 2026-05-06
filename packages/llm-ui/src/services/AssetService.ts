@@ -1,13 +1,13 @@
 // @file: llm-ui/services/AssetService.ts
 
-import { ILLMSessionEngine } from '@itookit/llm-engine';
+import { IChatEngine } from '@itookit/llm-engine';
 
 /**
  * 资源管理服务
  * 职责：附件的上传、获取、管理
  */
 export class AssetService {
-    constructor(private engine: ILLMSessionEngine) { }
+    constructor(private engine: IChatEngine) { }
 
     /**
      * 创建资源

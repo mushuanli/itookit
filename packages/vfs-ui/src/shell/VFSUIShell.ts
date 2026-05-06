@@ -9,7 +9,7 @@ import {
   type SessionUIOptions,
   type SessionManagerEvent,
   type SessionManagerCallback,
-  type ISessionEngine,
+  type IFSEngine,
   generateShortUUID,
 } from '@itookit/common';
 
@@ -96,7 +96,7 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService> {
 
   constructor(
     private readonly options: VFSUIShellOptions,
-    private readonly engine: ISessionEngine
+    private readonly engine: IFSEngine
   ) {
     super();
 

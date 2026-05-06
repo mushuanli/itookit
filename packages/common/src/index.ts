@@ -55,16 +55,16 @@ export {
     type EngineSearchQuery,
     type EngineEventType,
     type EngineEvent,
-    type ISessionEngine,
+    type IFSEngine,
     type NodeType,
     type SRSItemData,
-} from './interfaces/ISessionEngine';
+} from './interfaces/IFSEngine';
 
-export type { IFileIO } from './interfaces/IFileIO';
-export type { IMDXFileIO } from './interfaces/IMDXFileIO';
-export type { IChatFileIO } from './interfaces/IChatFileIO';
+export type { IFile } from './interfaces/IFile';
+export type { IMDXFile } from './interfaces/IMDXFile';
+export type { IChatFile } from './interfaces/IChatFile';
 export type {
-    ChatFile,
+    ChatAttachment,
     AppendMessageMeta,
     UpdateMessageMeta,
     ChatNodeMeta,

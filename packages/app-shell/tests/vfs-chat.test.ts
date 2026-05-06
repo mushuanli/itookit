@@ -1,5 +1,5 @@
 /**
- * @file VFS + LLMSessionEngine integration test (pure Node.js, no Tauri)
+ * @file VFS + ChatEngine integration test (pure Node.js, no Tauri)
  *
  * Verifies that chat file creation works end-to-end through the real
  * LocalFSBackend stack (NodeFsOps + BetterSqliteSidecarDb), isolating
@@ -19,7 +19,7 @@ import { join } from 'node:path';
 import { createVFS, VFSModuleEngine } from '@itookit/vfslib';
 import { IndexedDBBackend } from '@itookit/vfsdriver-indexeddb';
 import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
-import { LLMSessionEngine } from '@itookit/llm-engine';
+import { ChatEngine } from '@itookit/llm-engine';
 import { FS_MODULE_CHAT } from '@itookit/common';
 
 // ── Temp dir helpers ──────────────────────────────────────────────────────────
@@ -36,7 +36,7 @@ interface Fixture {
     chatsDir: string;
     sidecarDir: string;
     tempBase: string;
-    engine: LLMSessionEngine;
+    engine: ChatEngine;
     /** File tree view — use this for loadTree / getChildren */
     treeEngine: VFSModuleEngine;
     dispose(): Promise<void>;
@@ -59,7 +59,7 @@ async function createFixture(): Promise<Fixture> {
         modules: [{ name: FS_MODULE_CHAT }],
     });
 
-    const engine = new LLMSessionEngine(vfs);
+    const engine = new ChatEngine(vfs);
     await engine.init();
 
     // VFSModuleEngine for file-tree operations (loadTree, getChildren)
@@ -81,7 +81,7 @@ async function createFixture(): Promise<Fixture> {
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-describe('LLMSessionEngine + LocalFSBackend', () => {
+describe('ChatEngine + LocalFSBackend', () => {
     let fix: Fixture;
 
     beforeEach(async () => { fix = await createFixture(); });

@@ -1,11 +1,11 @@
 import { WorkspaceStrategy } from './types';
 import { defaultEditorFactory } from '@itookit/mdxeditor';
 import { VFSModuleEngine } from '@itookit/vfslib';
-import type { IVFSManager, ISessionEngine, EditorFactory } from '@itookit/common';
-import { ILLMSessionEngine } from '@itookit/llm-engine';
+import type { IVFSManager, IFSEngine, EditorFactory } from '@itookit/common';
+import { IChatEngine } from '@itookit/llm-engine';
 
 export class StandardWorkspaceStrategy implements WorkspaceStrategy {
-    private engineCache = new Map<string, ISessionEngine>();
+    private engineCache = new Map<string, IFSEngine>();
 
     constructor(private vfs: IVFSManager) {}
 
@@ -13,7 +13,7 @@ export class StandardWorkspaceStrategy implements WorkspaceStrategy {
         return defaultEditorFactory;
     }
 
-    getEngine(moduleName: string): ISessionEngine {
+    getEngine(moduleName: string): IFSEngine {
         if (!this.engineCache.has(moduleName)) {
             this.engineCache.set(moduleName, new VFSModuleEngine(moduleName, this.vfs));
         }
@@ -24,19 +24,19 @@ export class StandardWorkspaceStrategy implements WorkspaceStrategy {
 export class SettingsWorkspaceStrategy implements WorkspaceStrategy {
     constructor(
         private factory: EditorFactory,
-        private engine: ISessionEngine,
+        private engine: IFSEngine,
     ) {}
 
     getFactory(): EditorFactory { return this.factory; }
-    getEngine(_moduleName: string): ISessionEngine { return this.engine; }
+    getEngine(_moduleName: string): IFSEngine { return this.engine; }
 }
 
 export class ChatWorkspaceStrategy implements WorkspaceStrategy {
     constructor(
         private factory: EditorFactory,
-        private engine: ILLMSessionEngine,
+        private engine: IChatEngine,
     ) {}
 
     getFactory(): EditorFactory { return this.factory; }
-    getEngine(_moduleName: string): ISessionEngine { return this.engine; }
+    getEngine(_moduleName: string): IFSEngine { return this.engine; }
 }

@@ -1,11 +1,18 @@
 /**
- * @file common/interfaces/IChatFileIO.ts
- * @desc Chat (.chat) file I/O interface.
+ * @file common/interfaces/IChatFile.ts
+ * @desc Chat (.chat) file handle.
  *
- * Placed in common so that vfslib, llm-engine, and tools can all
- * reference it without creating circular dependencies.
+ * Extends IFile with chat-specific storage operations.
+ * Placed in common so that vfslib, llm-engine, and tools can reference it
+ * without creating circular dependencies.
+ *
+ * read() override: assembles all active messages into a markdown document,
+ * hiding the manifest + per-message node storage from callers.
+ * Use readRaw() to access the underlying manifest JSON directly.
+ *
+ * Create via factory: createChatFile(engine: IFSEngine, nodeId: string): IChatFile
  */
-import type { IFileIO } from './IFileIO';
+import type { IFile } from './IFile';
 import type {
     ChatManifest,
     ChatNode,
@@ -13,7 +20,7 @@ import type {
     ChatSessionSettings,
 } from './chat';
 
-export interface IChatFileIO extends IFileIO {
+export interface IChatFile extends IFile {
     // ========== Manifest ==========
 
     getManifest(): Promise<ChatManifest>;

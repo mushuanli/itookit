@@ -1,15 +1,19 @@
 /**
- * @file common/interfaces/IMDXFileIO.ts
- * @desc MDX / Markdown file I/O interface.
+ * @file common/interfaces/IMDXFile.ts
+ * @desc MDX / Markdown file handle.
  *
- * Extends IFileIO with Markdown-specific capabilities:
+ * Extends IFile with Markdown-specific capabilities:
  *  - Resolving @asset/ references to Blob URLs for rendering
  *  - Extracting the list of referenced assets from document content
  *  - Pruning unreferenced assets automatically
+ *
+ * read() returns MDX text directly (no transformation over readRaw).
+ *
+ * Create via factory: createMDXFile(engine: IFSEngine, nodeId: string): IMDXFile
  */
-import type { IFileIO } from './IFileIO';
+import type { IFile } from './IFile';
 
-export interface IMDXFileIO extends IFileIO {
+export interface IMDXFile extends IFile {
     /**
      * Replace every @asset/<name> reference in the given Markdown content with
      * a Blob URL so that the rendered document can display embedded resources.

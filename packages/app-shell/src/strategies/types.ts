@@ -1,6 +1,6 @@
-import { EditorFactory, ISessionEngine } from '@itookit/common';
+import { EditorFactory, IFSEngine } from '@itookit/common';
 
 export interface WorkspaceStrategy {
     getFactory(): EditorFactory;
-    getEngine?(moduleName: string): ISessionEngine;
+    getEngine?(moduleName: string): IFSEngine;
 }

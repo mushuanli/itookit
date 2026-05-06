@@ -4,7 +4,7 @@ import { NodeStatus } from '@itookit/llm-kernel';
 import {
     SessionGroup,
     ExecutionNode,
-    ChatFile,
+    ChatAttachment,
     BranchInfo,
 } from '../core/types';
 import { ChatNode } from '../persistence/types';
@@ -13,7 +13,7 @@ import { Converters } from '../utils/converters';
 export interface HistoryMessage {
     role: 'user' | 'assistant';
     content: string;
-    files?: ChatFile[];
+    files?: ChatAttachment[];
 }
 
 /**
@@ -125,7 +125,7 @@ export class SessionState {
      * 创建用户消息
      * 使用 persistedNodeId 作为 id
      */
-    addUserMessage(text: string, files: ChatFile[], persistedNodeId: string): SessionGroup {
+    addUserMessage(text: string, files: ChatAttachment[], persistedNodeId: string): SessionGroup {
         const session: SessionGroup = {
             id: persistedNodeId,
             persistedNodeId,

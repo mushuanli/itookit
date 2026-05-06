@@ -70,9 +70,9 @@ export {
 // 持久化
 // ============================================
 
-export { LLMSessionEngine } from './persistence/session-engine';
+export { ChatEngine } from './persistence/chat-engine';
 export type {
-    ILLMSessionEngine,
+    IChatEngine,
     ChatManifest,
     ChatNode,
     ChatContextItem,
@@ -147,11 +147,11 @@ export type {
 } from './session-graph';
 
 // ============================================
-// FileIO (implementations live in @itookit/vfslib)
+// File handles (implementations live in @itookit/vfslib)
 // ============================================
 
-export type { IChatFileIO } from '@itookit/common';
-export { ChatFileIO, createChatFileIO } from '@itookit/vfslib';
+export type { IChatFile } from '@itookit/common';
+export { ChatFileHandle, createChatFile } from '@itookit/vfslib';
 
 // ============================================
 // 工具
@@ -178,9 +178,9 @@ export type {
 
 import type { IAgentRuntime, ISkillService, IToolService } from '@itookit/common';
 import { IAgentConfigService } from './services/agent-service';
-import { ILLMSessionEngine } from './persistence/types';
+import { IChatEngine } from './persistence/types';
 import { initializeKernel, KernelInitOptions } from '@itookit/llm-kernel';
-import { LLMSessionEngine } from './persistence/session-engine';
+import { ChatEngine } from './persistence/chat-engine';
 import { SessionManager, createSessionManager } from './session/session-manager';
 import { initializePromptHistory } from './services/prompt-history-service';
 import { initHarnessAdapter } from './adapters/harness-adapter';
@@ -193,7 +193,7 @@ export interface EngineInitOptions extends KernelInitOptions {
     agentService: IAgentConfigService;
 
     /** 会话引擎 */
-    sessionEngine: ILLMSessionEngine;
+    sessionEngine: IChatEngine;
 
     /** 最大并发数 */
     maxConcurrent?: number;
@@ -241,7 +241,7 @@ export async function initializeLLMEngine(options: EngineInitOptions): Promise<{
     await options.sessionEngine.init();
 
     // ✅ 直接访问 public readonly vfs
-    const sessionEngine = options.sessionEngine as LLMSessionEngine;
+    const sessionEngine = options.sessionEngine as ChatEngine;
     if (sessionEngine.vfs) {
         await initializePromptHistory(sessionEngine.vfs).catch((e: any) => {
             console.warn('[LLM Engine] PromptHistory init failed (non-critical):', e);

@@ -12,7 +12,7 @@ import {
     PoolStatus,
     BranchInfo,
     ExecutionOverrides,
-    ChatFile,
+    ChatAttachment,
     SessionTokenUsage,
 } from '../core/types';
 import { ENGINE_DEFAULTS } from '../core/constants';
@@ -20,7 +20,7 @@ import { EngineError, EngineErrorCode } from '../core/errors';
 import { SessionState, HistoryMessage } from './session-state';
 import { LLMKernelAdapter, getLLMKernelAdapter } from '../adapters/llmkernel-adapter';
 import { HarnessAdapter, HARNESS_META_KEYS } from '../adapters/harness-adapter';
-import { ILLMSessionEngine } from '../persistence/types';
+import { IChatEngine } from '../persistence/types';
 import { SessionEventBus } from './session-event-bus';
 import { AgentResolver } from './agent-resolver';
 import { AttachmentProcessor } from './attachment-processor';
@@ -82,7 +82,7 @@ export class TaskRunner {
     private autoContinueConfig: Partial<AutoContinueConfig>;
 
     constructor(
-        private engine: ILLMSessionEngine,
+        private engine: IChatEngine,
         private eventBus: SessionEventBus,
         private agentResolver: AgentResolver,
         private attachments: AttachmentProcessor,
@@ -254,7 +254,7 @@ export class TaskRunner {
         accumulator: { output: string; thinking: string };
         persist: () => void;
         finalize: () => Promise<void>;
-        contextFiles: ChatFile[];
+        contextFiles: ChatAttachment[];
     }> {
         const { sessionId, input } = task;
 
@@ -805,7 +805,7 @@ export class TaskRunner {
     private async createUserMessage(
         task: ExecutionTask,
         state: SessionState,
-        contextFiles: ChatFile[]
+        contextFiles: ChatAttachment[]
     ): Promise<string> {
         const { sessionId, nodeId, input } = task;
         const persistedFiles = this.attachments.stripFileRefs(contextFiles);

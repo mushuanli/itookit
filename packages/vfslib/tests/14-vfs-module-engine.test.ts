@@ -188,7 +188,7 @@ describe('hidden file access — Linux-like semantics', () => {
 
     it('hidden files are visible with includeHidden: true via IModuleFS', async () => {
         await engine.createFile('.hidden', null, 'data');
-        // VFSModuleEngine is an ISessionEngine adapter; for ListOptions use the underlying IModuleFS.
+        // VFSModuleEngine is an IFSEngine adapter; for ListOptions use the underlying IModuleFS.
         const children = await vfs.fs.getChildren('/', { includeHidden: true });
         expect(children.map((c) => c.name)).toContain('.hidden');
     });

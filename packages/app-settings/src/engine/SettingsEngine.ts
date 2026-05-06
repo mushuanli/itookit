@@ -1,5 +1,5 @@
 // @file app-settings/engines/SettingsEngine.ts
-import { ISessionEngine, EngineNode, EngineSearchQuery, EngineEvent, EngineEventType } from '@itookit/common';
+import { IFSEngine, EngineNode, EngineSearchQuery, EngineEvent, EngineEventType } from '@itookit/common';
 import { SettingsService } from '../services/SettingsService';
 
 // UI 定义：ID -> 元数据
@@ -16,7 +16,7 @@ export const SETTINGS_PAGES: Record<string, { name: string, icon: string }> = {
     'fs-explorer': { name: 'FS Explorer', icon: '🗂️' },
 };
 
-export class SettingsEngine implements ISessionEngine {
+export class SettingsEngine implements IFSEngine {
     // [修复] MemoryManager/VFSUIShell 需要 moduleName 来生成 localStorage key
     public readonly moduleName = 'settings_root';
 

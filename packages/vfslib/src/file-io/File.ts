@@ -1,23 +1,26 @@
 /**
- * @file vfslib/src/file-io/FileIO.ts
- * @desc Base implementation of IFileIO wrapping an ISessionEngine.
+ * @file vfslib/src/file-io/File.ts
+ * @desc Base implementation of IFile wrapping an IFSEngine.
  *
- * Performance model (per FileIO instance lifetime):
+ * Performance model (per FileHandle instance lifetime):
  *  - getAssetDirectoryId: at most 1 engine call (cached in _assetDirId)
  *  - getChildren (assetdir listing): at most 1 engine call (cached in _assetIndex)
- *  - putAsset / deleteAsset maintain the index incrementally
+ *  - putAsset / deleteAsset / writeInternal maintain the index incrementally
  *  - pruneAssets issues a single engine.delete() batch call
+ *
+ * read() / write() delegate to readRaw() / writeRaw() by default.
+ * Subclasses may override read() / write() to assemble / decompose format-specific content.
  */
 import type {
-    ISessionEngine,
+    IFSEngine,
     EngineNode,
     EngineEventType,
     EngineEvent,
-    IFileIO,
+    IFile,
 } from '@itookit/common';
 import { toBuffer } from '../utils/encoding';
 
-export class FileIO implements IFileIO {
+export class FileHandle implements IFile {
     readonly nodeId: string;
 
     /**
@@ -30,11 +33,13 @@ export class FileIO implements IFileIO {
     private _assetIndex: Map<string, string> | null = null;
 
     constructor(
-        protected readonly engine: ISessionEngine,
+        protected readonly engine: IFSEngine,
         nodeId: string,
     ) {
         this.nodeId = nodeId;
     }
+
+    // ========== Identity ==========
 
     async getName(): Promise<string> {
         return (await this._requireNode()).name;
@@ -48,20 +53,97 @@ export class FileIO implements IFileIO {
         return this._requireNode();
     }
 
-    // ========== Primary content ==========
+    // ========== Metadata ==========
+
+    async getIcon(): Promise<string> {
+        return (await this._requireNode()).icon ?? '';
+    }
+
+    async getTags(): Promise<string[]> {
+        return (await this._requireNode()).tags ?? [];
+    }
+
+    async setTags(tags: string[]): Promise<void> {
+        await this.engine.setTags(this.nodeId, tags);
+    }
+
+    // ========== High-level content ==========
 
     async read(): Promise<string | ArrayBuffer> {
-        return this.engine.readContent(this.nodeId);
+        return this.readRaw();
     }
 
     async write(content: string | ArrayBuffer): Promise<void> {
+        await this.writeRaw(content);
+    }
+
+    // ========== High-level lifecycle ==========
+
+    async rename(newName: string): Promise<void> {
+        await this.engine.rename(this.nodeId, newName);
+    }
+
+    async copy(destDirNodeId: string, newName?: string): Promise<IFile> {
+        const name = newName ?? await this.getName();
+        const content = await this.readRaw();
+        const newNode = await this.engine.createFile(name, destDirNodeId, content);
+        const newFile = new FileHandle(this.engine, newNode.id);
+        const assetNames = await this.listAssets();
+        for (const assetName of assetNames) {
+            const data = await this.getAsset(assetName);
+            if (data) await newFile.putAsset(assetName, data);
+        }
+        return newFile;
+    }
+
+    async move(destDirNodeId: string): Promise<void> {
+        const assetDirId = await this._resolveAssetDirId();
+        const ids = [this.nodeId];
+        if (assetDirId) ids.push(assetDirId);
+        await this.engine.move(ids, destDirNodeId);
+    }
+
+    async delete(): Promise<void> {
+        const assetDirId = await this._resolveAssetDirId();
+        const ids = [this.nodeId];
+        if (assetDirId) ids.push(assetDirId);
+        await this.engine.delete(ids);
+    }
+
+    // ========== Low-level: raw main-file access ==========
+
+    async readRaw(): Promise<string | ArrayBuffer> {
+        return this.engine.readContent(this.nodeId);
+    }
+
+    async writeRaw(content: string | ArrayBuffer): Promise<void> {
         await this.engine.writeContent(this.nodeId, content);
+    }
+
+    // ========== Low-level: assetdir internal files ==========
+
+    async readInternal(name: string): Promise<string | ArrayBuffer | null> {
+        const index = await this._getAssetIndex();
+        if (!index) return null;
+        const id = index.get(name);
+        if (!id) return null;
+        return this.engine.readContent(id);
+    }
+
+    async writeInternal(name: string, content: string | ArrayBuffer): Promise<void> {
+        const node = await this.engine.createAsset(this.nodeId, name, content);
+        if (this._assetDirId === null) this._assetDirId = undefined;
+        if (this._assetIndex) this._assetIndex.set(name, node.id);
+    }
+
+    async deleteInternal(name: string): Promise<void> {
+        await this.deleteAsset(name);
     }
 
     // ========== Asset operations ==========
 
     async putAsset(name: string, content: string | ArrayBuffer): Promise<string> {
-        await this._writeRawAsset(name, content);
+        await this.writeInternal(name, content);
         return `@asset/${name}`;
     }
 
@@ -96,12 +178,6 @@ export class FileIO implements IFileIO {
         return (await this._resolveAssetDirId()) !== null;
     }
 
-    // ========== Lifecycle ==========
-
-    async rename(newName: string): Promise<void> {
-        await this.engine.rename(this.nodeId, newName);
-    }
-
     /**
      * Batch-delete assets not in referencedNames.
      * Issues exactly 1 engine.delete() call regardless of how many assets are pruned.
@@ -129,19 +205,6 @@ export class FileIO implements IFileIO {
         return this.engine.on(event, callback);
     }
 
-    // ========== Protected helpers ==========
-
-    /**
-     * Write a raw file into the assetdir without returning an @asset/ reference.
-     * Subclasses use this for internal storage files (e.g. message nodes, settings)
-     * that are not user-facing embedded assets.
-     */
-    protected async _writeRawAsset(name: string, content: string | ArrayBuffer): Promise<void> {
-        const node = await this.engine.createAsset(this.nodeId, name, content);
-        if (this._assetDirId === null) this._assetDirId = undefined;
-        if (this._assetIndex) this._assetIndex.set(name, node.id);
-    }
-
     // ========== Private ==========
 
     private async _resolveAssetDirId(): Promise<string | null> {
@@ -166,11 +229,11 @@ export class FileIO implements IFileIO {
 
     private async _requireNode(): Promise<EngineNode> {
         const node = await this.engine.getNode(this.nodeId);
-        if (!node) throw new Error(`FileIO: node not found: ${this.nodeId}`);
+        if (!node) throw new Error(`FileHandle: node not found: ${this.nodeId}`);
         return node;
     }
 }
 
-export function createFileIO(engine: ISessionEngine, nodeId: string): IFileIO {
-    return new FileIO(engine, nodeId);
+export function createFile(engine: IFSEngine, nodeId: string): IFile {
+    return new FileHandle(engine, nodeId);
 }

@@ -21,7 +21,7 @@ import { join } from 'node:path';
 
 import { createVFS } from '@itookit/vfslib';
 import { openLocalFSBackend } from '@itookit/vfsdriver-localfs';
-import { LLMSessionEngine, VFSAgentService, initializeLLMEngine } from '@itookit/llm-engine';
+import { ChatEngine, VFSAgentService, initializeLLMEngine } from '@itookit/llm-engine';
 import { LLMDeviceDriver } from '@itookit/device-llm';
 import { setKernelDeviceManager } from '@itookit/llm-kernel';
 import { FS_MODULE_CHAT, FS_MODULE_AGENTS, IVFSManager } from '@itookit/common';
@@ -49,7 +49,7 @@ interface BootstrapFixture {
     vfs:       IVFSManager;
     llmDriver: LLMDeviceDriver;
     agentService:  VFSAgentService;
-    sessionEngine: LLMSessionEngine;
+    sessionEngine: ChatEngine;
     dispose(): Promise<void>;
 }
 
@@ -116,7 +116,7 @@ beforeAll(async () => {
 
     // ── 5. Core services ───────────────────────────────────────────────────────
     const agentService   = new VFSAgentService(vfs, llmDriver);
-    const sessionEngine  = new LLMSessionEngine(vfs);
+    const sessionEngine  = new ChatEngine(vfs);
     await initializeLLMEngine({ agentService, sessionEngine, maxConcurrent: 4 });
 
     fix = {
@@ -156,7 +156,7 @@ describe('tauri-app bootstrap simulation', () => {
         expect(agents.length).toBeGreaterThan(0);
     });
 
-    it('LLMSessionEngine: createSession writes .chat file to disk', async () => {
+    it('ChatEngine: createSession writes .chat file to disk', async () => {
         const sessionId = await fix.sessionEngine.createSession('Bootstrap Test Chat');
         expect(sessionId).toBeTruthy();
 
@@ -168,7 +168,7 @@ describe('tauri-app bootstrap simulation', () => {
         expect(chatFile).toBeDefined();
     });
 
-    it('LLMSessionEngine: multiple concurrent createSession calls succeed', async () => {
+    it('ChatEngine: multiple concurrent createSession calls succeed', async () => {
         const results = await Promise.all([
             fix.sessionEngine.createSession('Concurrent A'),
             fix.sessionEngine.createSession('Concurrent B'),

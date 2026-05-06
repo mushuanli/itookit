@@ -6,7 +6,7 @@ import './styles/index.css';
 
 import { VFSUIShell } from './shell/VFSUIShell';
 
-import type { SessionUIOptions, ISessionUI, ISessionEngine, EditorFactory } from '@itookit/common';
+import type { SessionUIOptions, ISessionUI, IFSEngine, EditorFactory } from '@itookit/common';
 import type { VFSNodeUI, VFSUIState, UISettings } from './contracts/types';
 import { VFSService } from './services/VFSService';
 
@@ -42,7 +42,7 @@ export type VFSUIOptions = SessionUIOptions & {
 /**
  * 创建 VFSUI 实例 (通用引擎模式)
  */
-export const createVFSUI = (options: VFSUIOptions, engine: ISessionEngine): ISessionUI<VFSNodeUI, VFSService> =>
+export const createVFSUI = (options: VFSUIOptions, engine: IFSEngine): ISessionUI<VFSNodeUI, VFSService> =>
     new VFSUIShell(options, engine);
 
 export { VFSService, VFSUIShell };

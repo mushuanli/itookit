@@ -11,7 +11,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 /** A file attachment associated with a chat message. */
-export interface ChatFile {
+export interface ChatAttachment {
     name: string;
     type: string;
     /** Storage path (relative `./xxx` or protocol `@asset/xxx`) */
@@ -28,7 +28,7 @@ export interface ChatFile {
 /** Metadata appended when creating a new message node. */
 export interface AppendMessageMeta {
     // -- User message fields --
-    files?: ChatFile[];
+    files?: ChatAttachment[];
     executorId?: string;
 
     // -- Assistant message fields --
