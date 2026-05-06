@@ -1,5 +1,5 @@
 // @mdx/core/store/types.ts
-import type { ISessionEngine } from '@itookit/common';
+import type { IFSEngine } from '@itookit/common';
 import { EngineMetadataStore } from './engine-metadata-store';
 import { MemoryStore } from './memory-store';
 
@@ -13,7 +13,7 @@ export interface ScopedPersistenceStore {
 export interface StoreFactoryConfig {
     pluginName: string;
     instanceId: string;
-    sessionEngine: ISessionEngine | null;
+    sessionEngine: IFSEngine | null;
     nodeId: string | null;
 }
 

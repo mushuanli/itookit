@@ -5,7 +5,7 @@
  *       职责：创建实例、注入依赖、连接生命周期。
  *       不承担任何业务逻辑或公共 API。
  */
-import type { ISessionEngine } from '@itookit/common';
+import type { IFSEngine } from '@itookit/common';
 import type { IStatePort, ICommandPort, IEventPort, IFileTypePort } from '../contracts/ports';
 
 import { VFSStore } from '../services/VFSStore';
@@ -53,7 +53,7 @@ const DEFAULT_SETTINGS = {
 
 export function assemble(
     options: VFSUIShellOptions,
-    engine: ISessionEngine
+    engine: IFSEngine
 ): AssembledParts {
     // --- Services ---
     const scopeId = options.scopeId || (engine as any).moduleName || 'default';

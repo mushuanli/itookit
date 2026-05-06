@@ -7,11 +7,11 @@ import { createMDxEditor, MentionPlugin } from '@itookit/mdxeditor';
 import { MemoryManagerConfig } from '../types';
 import { BackgroundBrain } from './BackgroundBrain';
 import { Layout } from './Layout';
-import { EditorOptions, IEditor, ISessionEngine, EditorHostContext, NavigationRequest } from '@itookit/common';
+import { EditorOptions, IEditor, IFSEngine, EditorHostContext, NavigationRequest } from '@itookit/common';
 
 export class MemoryManager {
     private vfsUI: VFSUIShell;
-    private engine: ISessionEngine;
+    private engine: IFSEngine;
     private brain?: BackgroundBrain;
     private layout: Layout;
     private lifecycleUnsubscribe: () => void;
@@ -25,7 +25,7 @@ export class MemoryManager {
         if (config.customEngine) {
             this.engine = config.customEngine;
         } else if (config.vfs && config.moduleName) {
-            this.engine = new VFSModuleEngine(config.moduleName, config.vfs) as unknown as ISessionEngine;
+            this.engine = new VFSModuleEngine(config.moduleName, config.vfs) as unknown as IFSEngine;
         } else {
             throw new Error(
                 "MemoryManager requires either 'customEngine' or both 'vfs' and 'moduleName' in config"

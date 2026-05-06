@@ -3,7 +3,7 @@
  */
 import { FileMentionSource } from '@itookit/vfs-ui';
 import { MDxProcessor, ProcessResult } from '@itookit/mdxeditor';
-import type { ISessionEngine, EngineEvent } from '@itookit/common';
+import type { IFSEngine, EngineEvent } from '@itookit/common';
 
 /**
  * 节点更新事件的 payload 类型
@@ -24,8 +24,8 @@ export class BackgroundBrain {
     private debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
     private unsubscribe: (() => void) | null = null;
 
-    // [修改] 接收 ISessionEngine 接口
-    constructor(private engine: ISessionEngine, _activeRules: string[] = ['*']) {
+    // [修改] 接收 IFSEngine 接口
+    constructor(private engine: IFSEngine, _activeRules: string[] = ['*']) {
         // [修改] 适配新的 MentionSource 签名
         const fileProvider = new FileMentionSource({ engine: this.engine });
         

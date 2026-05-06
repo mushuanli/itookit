@@ -5,7 +5,7 @@ import './styles/index.css';
 import { LLMWorkspaceEditor, LLMEditorOptions } from './shell/LLMWorkspaceEditor';
 import {
     VFSAgentService,
-    ILLMSessionEngine,
+    IChatEngine,
 } from '@itookit/llm-engine';
 import { EditorFactory, EditorOptions, formatDefaultFileTitle } from '@itookit/common';
 import { AgentConfigEditor } from './editors/AgentConfigEditor';
@@ -71,7 +71,7 @@ export const createLLMFactory = (
 
         // 类型转换，此时 sessionEngine 应该已经在 MemoryManager 中通过 Dependency Injection 注入
         const llmOptions = options as LLMEditorOptions;
-        const engine = llmOptions.sessionEngine as ILLMSessionEngine;
+        const engine = llmOptions.sessionEngine as IChatEngine;
 
         if (!engine) {
             console.error('[LLMFactory] Critical: sessionEngine missing in options. Make sure MemoryManager is injecting it correctly.');

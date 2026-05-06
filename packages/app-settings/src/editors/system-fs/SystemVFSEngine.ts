@@ -1,6 +1,6 @@
 /**
  * @file SystemVFSEngine.ts
- * @desc Read-only cross-module ISessionEngine for the System FS Explorer debug view.
+ * @desc Read-only cross-module IFSEngine for the System FS Explorer debug view.
  *
  * Tree layout:
  *   dev/                     ← synthetic /dev directory: registered device drivers
@@ -20,7 +20,7 @@
  * All write operations throw a read-only error.
  */
 import type {
-    ISessionEngine,
+    IFSEngine,
     IVFSManager,
     IModuleFS,
     FSNode,
@@ -119,7 +119,7 @@ async function collectTree(
 
 // ── Engine ────────────────────────────────────────────────────────────────────
 
-export class SystemVFSEngine implements ISessionEngine {
+export class SystemVFSEngine implements IFSEngine {
     constructor(private readonly vfs: IVFSManager) {}
 
     async init(): Promise<void> {}

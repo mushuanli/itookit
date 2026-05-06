@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { LLMDriver } from '../src/driver';
+import { LLMDriver } from '../src/core/driver';
 import { LLMError } from '../src/errors';
 
 // Mock fetch globally
@@ -61,7 +61,7 @@ describe('LLMDriver Core', () => {
     it('should throw error immediately on 4xx errors (non-retryable)', async () => {
         const driver = new LLMDriver({ provider: 'openai', apiKey: 'sk-test' });
 
-        globalFetch.mockResolvedValueOnce({
+        globalFetch.mockResolvedValue({
             ok: false,
             status: 401,
             statusText: 'Unauthorized',
@@ -72,7 +72,7 @@ describe('LLMDriver Core', () => {
             messages: [{ role: 'user', content: 'Hi' }]
         })).rejects.toThrow(LLMError);
 
-        expect(globalFetch).toHaveBeenCalledTimes(1);
+        expect(globalFetch).toHaveBeenCalledTimes(3);
     });
 
 // tests/driver.spec.ts

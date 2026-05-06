@@ -2,8 +2,8 @@
 
 import { guessMimeType, MarkdownAnalyzer } from '@itookit/common';
 import type { Attachment } from '@itookit/common';
-import { ChatFile } from '../core/types';
-import { ILLMSessionEngine } from '../persistence/types';
+import { ChatAttachment } from '../core/types';
+import { IChatEngine } from '../persistence/types';
 
 /**
  * 附件处理器
@@ -12,7 +12,7 @@ import { ILLMSessionEngine } from '../persistence/types';
 export class AttachmentProcessor {
     private markdownAnalyzer = new MarkdownAnalyzer();
 
-    constructor(private engine: ILLMSessionEngine) { }
+    constructor(private engine: IChatEngine) { }
 
     /**
      * 从消息文本和输入文件中解析所有附件
@@ -20,9 +20,9 @@ export class AttachmentProcessor {
     async resolveAttachments(
         sessionId: string,
         text: string,
-        inputFiles: ChatFile[]
-    ): Promise<ChatFile[]> {
-        const result: ChatFile[] = [];
+        inputFiles: ChatAttachment[]
+    ): Promise<ChatAttachment[]> {
+        const result: ChatAttachment[] = [];
         const seen = new Set<string>();
 
         // 从 Markdown 中提取引用的文件名
@@ -59,9 +59,9 @@ export class AttachmentProcessor {
     }
 
     /**
-     * 将 ChatFile 数组转换为 Kernel 可用的 Attachment 数组
+     * 将 ChatAttachment 数组转换为 Kernel 可用的 Attachment 数组
      */
-    async convertToAttachments(sessionId: string, files: ChatFile[]): Promise<Attachment[]> {
+    async convertToAttachments(sessionId: string, files: ChatAttachment[]): Promise<Attachment[]> {
         const attachments: Attachment[] = [];
 
         for (const file of files) {
@@ -88,7 +88,7 @@ export class AttachmentProcessor {
      */
     async resolveHistoryAttachment(
         sessionId: string,
-        file: ChatFile
+        file: ChatAttachment
     ): Promise<Attachment | null> {
         try {
             const blob = file.fileRef || (await this.engine.readSessionAsset(sessionId, file.name));
@@ -110,7 +110,7 @@ export class AttachmentProcessor {
     /**
      * 剥离 fileRef 用于持久化（不序列化运行时对象）
      */
-    stripFileRefs(files: ChatFile[]): Omit<ChatFile, 'fileRef'>[] {
+    stripFileRefs(files: ChatAttachment[]): Omit<ChatAttachment, 'fileRef'>[] {
         return files.map((f) => ({
             name: f.name,
             type: f.type,
@@ -134,7 +134,7 @@ export class AttachmentProcessor {
     // 内部方法
     // ============================================
 
-    private async loadFromStorage(sessionId: string, filename: string): Promise<ChatFile | null> {
+    private async loadFromStorage(sessionId: string, filename: string): Promise<ChatAttachment | null> {
         try {
             const blob = await this.engine.readSessionAsset(sessionId, filename);
             if (!blob) return null;
@@ -152,7 +152,7 @@ export class AttachmentProcessor {
         }
     }
 
-    private async resolveFileSource(sessionId: string, file: ChatFile): Promise<File | Blob | null> {
+    private async resolveFileSource(sessionId: string, file: ChatAttachment): Promise<File | Blob | null> {
         if (file instanceof File) return file;
         if (file.fileRef instanceof File) return file.fileRef;
         if (file.fileRef instanceof Blob) return file.fileRef;

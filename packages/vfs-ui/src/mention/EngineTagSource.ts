@@ -1,8 +1,8 @@
 /**
  * @file vfs-ui/mention/EngineTagSource.ts
- * @desc A generic tag autocomplete source that works with any ISessionEngine.
+ * @desc A generic tag autocomplete source that works with any IFSEngine.
  */
-import { IAutocompleteSource, type Suggestion, type ISessionEngine } from '@itookit/common';
+import { IAutocompleteSource, type Suggestion, type IFSEngine } from '@itookit/common';
 
 interface TagData {
     name: string;
@@ -11,7 +11,7 @@ interface TagData {
 }
 
 export class EngineTagSource extends IAutocompleteSource {
-    constructor(private engine: ISessionEngine) {
+    constructor(private engine: IFSEngine) {
         super();
     }
 

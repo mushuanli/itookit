@@ -1,7 +1,7 @@
 // @file: llm-engine/src/utils/converters.ts
 
 import { generateUUID } from '@itookit/common';
-import { SessionGroup, ExecutionNode, ChatFile } from '../core/types';
+import { SessionGroup, ExecutionNode, ChatAttachment } from '../core/types';
 import { ChatNode } from '../persistence/types';
 
 /**
@@ -14,7 +14,7 @@ export class Converters {
     static chatNodeToSessionGroup(node: ChatNode): SessionGroup | null {
         if (node.role === 'user') {
             // ✅ [修复] 确保类型安全转换
-            const files: ChatFile[] = (node.meta?.files || []).map((f: any) => ({
+            const files: ChatAttachment[] = (node.meta?.files || []).map((f: any) => ({
                 name: f.name,
                 type: f.type,
                 path: f.path,

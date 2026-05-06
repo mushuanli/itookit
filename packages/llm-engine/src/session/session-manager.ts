@@ -6,7 +6,7 @@ import {
     SessionRuntime,
     SessionSnapshot,
     OrchestratorEvent,
-    ChatFile,
+    ChatAttachment,
     ExecutionOverrides,
     ChatSessionSettings,
     DEFAULT_SESSION_SETTINGS,
@@ -21,7 +21,7 @@ import {
 } from '../core/types';
 import { EngineError, EngineErrorCode } from '../core/errors';
 import { ENGINE_DEFAULTS } from '../core/constants';
-import { ILLMSessionEngine, BranchTreeNode } from '../persistence/types';
+import { IChatEngine, BranchTreeNode } from '../persistence/types';
 import { IAgentConfigService } from '../services/agent-service';
 import { SessionState } from './session-state';
 import { SessionEventBus } from './session-event-bus';
@@ -67,10 +67,10 @@ export class SessionManager {
     private agentResolver: AgentResolver;
     private attachments: AttachmentProcessor;
     private eventBus: SessionEventBus;
-    private engine: ILLMSessionEngine;
+    private engine: IChatEngine;
 
     constructor(
-        engine: ILLMSessionEngine,
+        engine: IChatEngine,
         agentService: IAgentConfigService,
         options?: {
             maxConcurrent?: number;
@@ -286,7 +286,7 @@ export class SessionManager {
 
     async sendMessage(
         text: string,
-        files: ChatFile[],
+        files: ChatAttachment[],
         agentId: string,
         overrides?: ExecutionOverrides
     ): Promise<void> {
@@ -1380,7 +1380,7 @@ export class SessionManager {
 let sessionManagerInstance: SessionManager | null = null;
 
 export function createSessionManager(
-    engine: ILLMSessionEngine,
+    engine: IChatEngine,
     agentService: IAgentConfigService,
     options?: {
         maxConcurrent?: number;

@@ -5,7 +5,7 @@
 import type { MDxPlugin, PluginContext } from '../../core/types';
 import type { AssetConfigOptions } from '../../services/asset-helper';
 import { guessMimeType } from '@itookit/common';
-import { createMDXFileIO } from '@itookit/vfslib';
+import { createMDXFile } from '@itookit/vfslib';
 
 export interface AssetResolverPluginOptions extends AssetConfigOptions { }
 
@@ -34,7 +34,7 @@ export class AssetResolverPlugin implements MDxPlugin {
         const ownerNodeId = context.getOwnerNodeId?.();
         if (!engine || !ownerNodeId) return;
 
-        const fileIO = createMDXFileIO(engine, ownerNodeId);
+        const fileIO = createMDXFile(engine, ownerNodeId);
 
         const elements = root.querySelectorAll<HTMLElement>('[src], [href]');
         const resolvePromises: Promise<void>[] = [];
@@ -78,7 +78,7 @@ export class AssetResolverPlugin implements MDxPlugin {
         const ownerNodeId = context.getOwnerNodeId?.();
         if (!engine || !ownerNodeId) return 0;
 
-        const fileIO = createMDXFileIO(engine, ownerNodeId);
+        const fileIO = createMDXFile(engine, ownerNodeId);
         return fileIO.pruneUnusedAssets();
     }
 

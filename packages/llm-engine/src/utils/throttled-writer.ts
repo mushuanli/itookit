@@ -1,6 +1,6 @@
 // @file: llm-engine/utils/throttled-writer.ts
 
-import { ILLMSessionEngine } from '../persistence/types';
+import { IChatEngine } from '../persistence/types';
 import { log } from './logger';
 
 export interface ThrottledWriter {
@@ -14,7 +14,7 @@ export interface ThrottledWriter {
  * 将流式输出按时间间隔批量写入持久化层
  */
 export function createThrottledWriter(
-    engine: ILLMSessionEngine,
+    engine: IChatEngine,
     sessionId: string,
     messageId: string,
     intervalMs: number = 1000

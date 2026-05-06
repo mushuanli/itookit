@@ -1,5 +1,5 @@
 // @mdx/core/store/engine-metadata-store.ts
-import type { ISessionEngine } from '@itookit/common';
+import type { IFSEngine } from '@itookit/common';
 import type { ScopedPersistenceStore } from './types';
 
 type PluginDataRecord = Record<string, unknown>;
@@ -15,7 +15,7 @@ export class EngineMetadataStore implements ScopedPersistenceStore {
     private isDestroyed = false;
 
     constructor(
-        private engine: ISessionEngine,
+        private engine: IFSEngine,
         private nodeId: string,
         private pluginNamespace: string
     ) { }

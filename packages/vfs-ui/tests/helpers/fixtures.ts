@@ -1,7 +1,7 @@
 /**
  * Shared test fixtures and mock factories for vfs-ui tests.
  */
-import type { EngineNode, EngineEventType, EngineEvent, ISessionEngine } from '@itookit/common';
+import type { EngineNode, EngineEventType, EngineEvent, IFSEngine } from '@itookit/common';
 import type { IFileTypePort } from '../../src/contracts/ports';
 import type { VFSNodeUI } from '../../src/contracts/types';
 
@@ -54,12 +54,12 @@ export const makeVFSNodeUI = (overrides: Partial<VFSNodeUI> = {}): VFSNodeUI => 
 // ── MockSessionEngine ────────────────────────────────────────────────────────
 
 /**
- * Minimal ISessionEngine mock that:
+ * Minimal IFSEngine mock that:
  * - Stores event handlers via on() so tests can call emit()
  * - Returns nodes from an internal map via getNode()
  * - Returns '' for readContent()
  */
-export class MockSessionEngine implements Pick<ISessionEngine,
+export class MockSessionEngine implements Pick<IFSEngine,
     'on' | 'getChildren' | 'getNode' | 'readContent' | 'writeContent' |
     'createFile' | 'createDirectory' | 'delete' | 'rename' | 'move' |
     'setTags' | 'setTagsBatch' | 'getAllTags' | 'search' | 'updateMetadata'

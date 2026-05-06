@@ -2,10 +2,10 @@
 // Core chat types have been moved to @itookit/common.
 // Re-exported here for backward compatibility.
 
-import type { ISessionEngine as IBaseSessionEngine } from '@itookit/common';
+import type { IFSEngine } from '@itookit/common';
 
 export type {
-    ChatFile,
+    ChatAttachment,
     AppendMessageMeta,
     UpdateMessageMeta,
     ChatNodeMeta,
@@ -17,7 +17,7 @@ export type {
 } from '@itookit/common';
 export { DEFAULT_SESSION_SETTINGS } from '@itookit/common';
 
-// Local re-import for use in ILLMSessionEngine signatures
+// Local re-import for use in IChatEngine signatures
 import type {
     ChatManifest,
     ChatNode,
@@ -29,10 +29,10 @@ import type {
 } from '@itookit/common';
 
 /**
- * LLM session engine — extends the base ISessionEngine with
+ * Chat engine — extends the base IFSEngine with
  * chat-specific operations (session creation, message management, branches).
  */
-export interface ILLMSessionEngine extends IBaseSessionEngine {
+export interface IChatEngine extends IFSEngine {
     createSession(title: string, systemPrompt?: string): Promise<string>;
     initializeExistingFile(nodeId: string, title: string, systemPrompt?: string): Promise<string>;
 

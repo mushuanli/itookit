@@ -1,6 +1,6 @@
 // @file: llm-ui/services/StateService.ts
 
-import { ILLMSessionEngine } from '@itookit/llm-engine';
+import { IChatEngine } from '@itookit/llm-engine';
 
 export interface UIState {
     collapse_states: Record<string, boolean>;
@@ -13,7 +13,7 @@ export interface UIState {
  * 职责：UI 状态的保存和加载
  */
 export class StateService {
-    constructor(private engine: ILLMSessionEngine) { }
+    constructor(private engine: IChatEngine) { }
 
     /**
      * 保存 UI 状态

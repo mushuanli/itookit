@@ -9,7 +9,7 @@ import {
 /** Alias: infer MIME from filename (used for @mention file suggestions) */
 const guessMimeTypeFromName = guessMimeType;
 import {
-    ILLMSessionEngine, IAgentConfigService, SessionManager, getSessionManager,
+    IChatEngine, IAgentConfigService, SessionManager, getSessionManager,
 } from '@itookit/llm-engine';
 
 // Domain — 只依赖接口和类型
@@ -63,7 +63,7 @@ import {
 import type { SkillInvocation } from '../components/input/SkillInvocationParser';
 
 export interface LLMEditorOptions extends EditorOptions {
-    sessionEngine: ILLMSessionEngine;
+    sessionEngine: IChatEngine;
     agentService: IAgentConfigService;
     initialInputState?: { text?: string; agentId?: string };
     isNewSession?: boolean;
@@ -142,8 +142,8 @@ export class LLMWorkspaceEditor implements IEditor {
 
     private options: LLMEditorOptions;
 
-    private get engine(): ILLMSessionEngine {
-        return this.options.sessionEngine as ILLMSessionEngine;
+    private get engine(): IChatEngine {
+        return this.options.sessionEngine as IChatEngine;
     }
 
     private get hostContext(): EditorHostContext | undefined {
@@ -1427,7 +1427,7 @@ export class LLMWorkspaceEditor implements IEditor {
     /**
      * 搜索当前会话模块的文件，供 `@` mention 使用。
      *
-     * 通过 ISessionEngine.loadTree() 获取文件节点列表，
+     * 通过 IFSEngine.loadTree() 获取文件节点列表，
      * 按 query 模糊筛选文件名和路径后返回 FileSuggestion[]。
      *
      * 返回的 path 格式为 `./relative/path`，

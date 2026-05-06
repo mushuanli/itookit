@@ -2,7 +2,7 @@
  * @file mdx/plugins/ui/asset-manager.ui.ts
  * @desc 独立的资源管理器 UI 类，不绑定 MDxPlugin 上下文
  */
-import { Toast, guessMimeType, type ISessionEngine, type EngineNode } from '@itookit/common';
+import { Toast, guessMimeType, type IFSEngine, type EngineNode } from '@itookit/common';
 import type { MDxEditor } from '../../editor/mdx-editor';
 import {
     isAssetVisible,
@@ -26,7 +26,7 @@ export class AssetManagerUI {
     private currentAssetDirId: string = '';
 
     constructor(
-        private engine: ISessionEngine,
+        private engine: IFSEngine,
         private editor: MDxEditor,
         private options: AssetConfigOptions = {}
     ) { }

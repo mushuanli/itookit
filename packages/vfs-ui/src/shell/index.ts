@@ -9,7 +9,7 @@ import { VFSUIShell } from './VFSUIShell';
 import type {
     SessionUIOptions,
     ISessionUI,
-    ISessionEngine,
+    IFSEngine,
     EditorFactory,
 } from '@itookit/common';
 
@@ -39,7 +39,7 @@ export type VFSUIOptions = SessionUIOptions & {
  */
 export const createVFSUI = (
     options: VFSUIOptions,
-    engine: ISessionEngine
+    engine: IFSEngine
 ): ISessionUI<VFSNodeUI, VFSService> => new VFSUIShell(options, engine);
 
 export { VFSUIShell, VFSService };
