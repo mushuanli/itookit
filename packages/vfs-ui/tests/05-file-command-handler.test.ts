@@ -228,7 +228,7 @@ describe('Event filter: only matching moduleId reaches EngineAdapter', () => {
 
 describe('concurrent create + update events for same node', () => {
     it('node appears in store even when create and update fire together', async () => {
-        // This simulates LLMSessionEngine.createFile() which fires:
+        // This simulates ChatEngine.createFile() which fires:
         // 1. node:created (from engine.createFile)
         // 2. node:updated (from writeContent + updateMetadata)
         const engine = new MockSessionEngine();
@@ -239,7 +239,7 @@ describe('concurrent create + update events for same node', () => {
         const node = makeEngineNode({ id: 'chat-1', path: '/chat.chat' });
         engine.nodes.set('chat-1', node);
 
-        // Fire both in rapid succession (as LLMSessionEngine.createFile does)
+        // Fire both in rapid succession (as ChatEngine.createFile does)
         engine.emit('node:created', createdPayload([{ nodeId: 'chat-1', path: '/chat.chat' }]));
         engine.emit('node:updated', { nodes: [{ nodeId: 'chat-1', path: '/chat.chat' }] });
 
@@ -272,7 +272,7 @@ describe('concurrent create + update events for same node', () => {
         });
         engine.nodes.set('root-node', rootNode);
 
-        // Fire all three node:created events (as LLMSessionEngine.createSessionStructure does)
+        // Fire all three node:created events (as ChatEngine.createSessionStructure does)
         engine.emit('node:created', createdPayload([{ nodeId: 'chat-1', path: '/session.chat' }]));
         engine.emit('node:created', createdPayload([{ nodeId: 'asset-dir', path: '/_session.chat', type: 'directory' }]));
         engine.emit('node:created', createdPayload([{ nodeId: 'root-node', path: '/_session.chat/000_00000_s.chat' }]));

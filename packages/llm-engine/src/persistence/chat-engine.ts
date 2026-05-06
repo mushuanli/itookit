@@ -1,4 +1,4 @@
-// @file: llm-engine/src/persistence/session-engine.ts
+// @file: llm-engine/src/persistence/chat-engine.ts
 
 import YAML from 'yaml'; // 需要添加依赖: npm install yaml
 import { BaseModuleService } from '@itookit/vfslib';
@@ -19,7 +19,7 @@ import {
   ChatManifest,
   ChatNode,
   ChatContextItem,
-  ILLMSessionEngine,
+  IChatEngine,
   BranchTreeNode,
   AppendMessageMeta,
   UpdateMessageMeta
@@ -30,13 +30,13 @@ import { repairManifest, ManifestIO } from '../utils/manifest-repair';
 import { log } from '../utils/logger';
 
 // ============================================
-// LLMSessionEngine
+// ChatEngine
 // ============================================
 
 /**
  * LLM 会话引擎
  * 继承 BaseModuleService，通过 engine 访问文件系统
- * 实现 ILLMSessionEngine 接口
+ * 实现 IChatEngine 接口
  *
  * 存储布局（asset dir 模式）：
  *   my-session.chat            ← ChatManifest JSON
@@ -46,7 +46,7 @@ import { log } from '../utils/logger';
  *     000_00002_a.chat         ← assistant message
  *     settings.yaml            ← session settings
  */
-export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEngine {
+export class ChatEngine extends BaseModuleService implements IChatEngine {
   private lockManager = new LockManager();
   /** sessionId → chatFileId (VFS node ID of the .chat file) */
   private chatFileIds = new Map<string, string>();
@@ -669,7 +669,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
   }
 
   // ============================================================
-  // ILLMSessionEngine 核心实现
+  // IChatEngine 核心实现
   // ============================================================
 
   async createSession(
@@ -1489,7 +1489,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
   }
 
   // ============================================================
-  // ISessionEngine 文件操作
+  // IFSEngine file operations
   // ============================================================
 
   async createDirectory(name: string, parentId: string | null): Promise<EngineNode> {
@@ -1633,7 +1633,7 @@ export class LLMSessionEngine extends BaseModuleService implements ILLMSessionEn
   }
 
   // ============================================================
-  // 代理方法（ISessionEngine 接口）
+  // proxy methods (IFSEngine interface)
   // ============================================================
 
   async getChildren(parentId: string): Promise<EngineNode[]> {

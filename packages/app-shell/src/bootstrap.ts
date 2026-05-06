@@ -10,7 +10,7 @@ import {
     VFSAgentService,
     createAIContextMenuConfig,
 } from '@itookit/llm-ui';
-import { initializeLLMEngine, LLMSessionEngine, chatFileParser } from '@itookit/llm-engine';
+import { initializeLLMEngine, ChatEngine, chatFileParser } from '@itookit/llm-engine';
 import type { SessionManager } from '@itookit/llm-engine';
 import { MemoryManager } from '@itookit/memory-manager';
 import { LLMDeviceDriver } from '@itookit/device-llm';
@@ -299,7 +299,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     onProgress?.('初始化核心服务…');
     const settingsModule = await createSettingsModule(vfs);
     const agentService   = new VFSAgentService(vfs, llmDriver);
-    const sessionEngine  = new LLMSessionEngine(vfs);
+    const sessionEngine  = new ChatEngine(vfs);
 
     // Harness: AgentLoopExecutor + built-in tools + skill service.
     // createHarness() reads the default LLM connection from llmDriver automatically.

@@ -2,7 +2,7 @@
  * @file memory-manager/types.ts
  */
 import type { IVFSManager } from '@itookit/common';
-import { EditorFactory, ISessionEngine, SessionUIOptions, NavigationRequest } from '@itookit/common';
+import { EditorFactory, IFSEngine, SessionUIOptions, NavigationRequest } from '@itookit/common';
 import type { FileTypeDefinition, CustomEditorResolver } from '@itookit/vfs-ui';
 
 export interface MemoryManagerConfig {
@@ -25,7 +25,7 @@ export interface MemoryManagerConfig {
      * 自定义引擎实例 (推荐)。
      * 如果提供，将忽略 moduleName。
      */
-    customEngine?: ISessionEngine;
+    customEngine?: IFSEngine;
 
     /* 创建默认engine */
     moduleName?: string;

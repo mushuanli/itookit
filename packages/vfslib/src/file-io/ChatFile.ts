@@ -1,14 +1,15 @@
 /**
- * @file vfslib/src/file-io/ChatFileIO.ts
- * @desc Concrete implementation of IChatFileIO.
+ * @file vfslib/src/file-io/ChatFile.ts
+ * @desc Chat (.chat) file handle implementing IChatFile.
  *
- * Extends FileIO with chat-file–specific operations.
- * Message nodes are stored as "<nodeId>.chat" files in the companion assetdir.
- * The manifest lives in the main .chat file (this.nodeId).
+ * Extends FileHandle with chat-file–specific operations.
+ * Message nodes are stored as "<nodeId>.chat" internal files in the companion assetdir.
+ * The manifest lives in the main .chat file (this.nodeId) — access via readRaw() / writeRaw().
+ * Settings are stored as "settings.yaml" internal file (not a user asset).
  */
 import YAML from 'yaml';
-import { FileIO } from './FileIO';
-import type { ISessionEngine, IChatFileIO } from '@itookit/common';
+import { FileHandle } from './File';
+import type { IFSEngine, IChatFile } from '@itookit/common';
 import type {
     ChatManifest,
     ChatNode,
@@ -20,15 +21,15 @@ import { toString } from '../utils/encoding';
 
 const SETTINGS_FILENAME = 'settings.yaml';
 
-export class ChatFileIO extends FileIO implements IChatFileIO {
-    constructor(engine: ISessionEngine, nodeId: string) {
+export class ChatFileHandle extends FileHandle implements IChatFile {
+    constructor(engine: IFSEngine, nodeId: string) {
         super(engine, nodeId);
     }
 
     // ========== Manifest ==========
 
     async getManifest(): Promise<ChatManifest> {
-        const content = await this.engine.readContent(this.nodeId);
+        const content = await this.readRaw();
         const str = typeof content === 'string' ? content : toString(content as ArrayBuffer);
         return JSON.parse(str) as ChatManifest;
     }
@@ -36,21 +37,21 @@ export class ChatFileIO extends FileIO implements IChatFileIO {
     async updateManifest(patch: Partial<ChatManifest>, existing?: ChatManifest): Promise<void> {
         const base = existing ?? await this.getManifest();
         const updated: ChatManifest = { ...base, ...patch, updated_at: new Date().toISOString() };
-        await this.engine.writeContent(this.nodeId, JSON.stringify(updated, null, 2));
+        await this.writeRaw(JSON.stringify(updated, null, 2));
     }
 
     // ========== Messages ==========
 
     async writeMessage(nodeId: string, node: ChatNode): Promise<void> {
-        // _writeRawAsset: internal storage, not a user-facing embedded asset.
-        await this._writeRawAsset(`${nodeId}.chat`, JSON.stringify(node));
+        await this.writeInternal(`${nodeId}.chat`, JSON.stringify(node));
     }
 
     async readMessage(nodeId: string): Promise<ChatNode | null> {
-        const data = await this.getAsset(`${nodeId}.chat`);
+        const data = await this.readInternal(`${nodeId}.chat`);
         if (!data) return null;
         try {
-            return JSON.parse(toString(data)) as ChatNode;
+            const str = typeof data === 'string' ? data : toString(data as ArrayBuffer);
+            return JSON.parse(str) as ChatNode;
         } catch {
             return null;
         }
@@ -148,9 +149,10 @@ export class ChatFileIO extends FileIO implements IChatFileIO {
 
     async getSettings(): Promise<ChatSessionSettings> {
         try {
-            const data = await this.getAsset(SETTINGS_FILENAME);
+            const data = await this.readInternal(SETTINGS_FILENAME);
             if (!data) return { ...DEFAULT_SESSION_SETTINGS };
-            return { ...DEFAULT_SESSION_SETTINGS, ...YAML.parse(toString(data)) };
+            const str = typeof data === 'string' ? data : toString(data as ArrayBuffer);
+            return { ...DEFAULT_SESSION_SETTINGS, ...YAML.parse(str) };
         } catch {
             return { ...DEFAULT_SESSION_SETTINGS };
         }
@@ -164,7 +166,7 @@ export class ChatFileIO extends FileIO implements IChatFileIO {
             version: '1.0',
             updatedAt: new Date().toISOString(),
         };
-        await this.putAsset(SETTINGS_FILENAME, YAML.stringify(merged, { indent: 2, lineWidth: 0 }));
+        await this.writeInternal(SETTINGS_FILENAME, YAML.stringify(merged, { indent: 2, lineWidth: 0 }));
     }
 
     // ========== Private helpers ==========
@@ -242,6 +244,6 @@ export class ChatFileIO extends FileIO implements IChatFileIO {
     }
 }
 
-export function createChatFileIO(engine: ISessionEngine, nodeId: string): IChatFileIO {
-    return new ChatFileIO(engine, nodeId);
+export function createChatFile(engine: IFSEngine, nodeId: string): IChatFile {
+    return new ChatFileHandle(engine, nodeId);
 }

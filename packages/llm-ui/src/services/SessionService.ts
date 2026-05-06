@@ -1,6 +1,6 @@
 // @file: llm-ui/services/SessionService.ts
 
-import { ILLMSessionEngine, SessionManager, SessionSnapshot } from '@itookit/llm-engine';
+import { IChatEngine, SessionManager, SessionSnapshot } from '@itookit/llm-engine';
 
 export interface SessionLoadResult {
     sessionId: string;
@@ -14,7 +14,7 @@ export interface SessionLoadResult {
  */
 export class SessionService {
     constructor(
-        private engine: ILLMSessionEngine,
+        private engine: IChatEngine,
         private sessionManager: SessionManager
     ) { }
 

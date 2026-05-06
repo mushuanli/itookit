@@ -1,10 +1,10 @@
 // @file: llm-engine/src/core/types.ts
 
 import { NodeStatus } from '@itookit/llm-kernel';
-import type { ModelTier, ChatFile } from '@itookit/common';
+import type { ModelTier, ChatAttachment } from '@itookit/common';
 
 // Re-export chat types that moved to @itookit/common for backward compatibility
-export type { ChatFile, ChatSessionSettings } from '@itookit/common';
+export type { ChatAttachment, ChatSessionSettings } from '@itookit/common';
 export { DEFAULT_SESSION_SETTINGS } from '@itookit/common';
 
 /**
@@ -162,8 +162,8 @@ export interface SessionGroup {
     /** 用户输入内容 */
     content?: string;
 
-    /** ✅ [修改] 使用 ChatFile 类型 */
-    files?: ChatFile[];
+    /** ✅ [修改] 使用 ChatAttachment 类型 */
+    files?: ChatAttachment[];
 
     /** 执行树根节点（assistant 角色） */
     executionRoot?: ExecutionNode;
@@ -265,7 +265,7 @@ export interface TaskInput {
     sessionId: string;
     nodeId: string;
     text: string;
-    files: ChatFile[];
+    files: ChatAttachment[];
     agentId: string;
     overrides?: ExecutionOverrides;
     skipUserMessage?: boolean;

@@ -1,28 +1,30 @@
 /**
- * @file vfslib/src/file-io/MDXFileIO.ts
- * @desc MDX/Markdown file handle implementing IMDXFileIO.
+ * @file vfslib/src/file-io/MDXFile.ts
+ * @desc MDX/Markdown file handle implementing IMDXFile.
  *
- * Extends FileIO to reuse all base asset operations.
+ * Extends FileHandle to reuse all base asset operations.
  * Adds MDX-specific capabilities:
  *  - @asset/ reference resolution to Blob URLs (cached per instance, parallel fetch)
  *  - Referenced-asset extraction from Markdown content
  *  - Automatic pruning of unreferenced assets
+ *
+ * read() returns MDX text directly (no transformation over readRaw).
  */
-import type { ISessionEngine, IMDXFileIO } from '@itookit/common';
+import type { IFSEngine, IMDXFile } from '@itookit/common';
 import { guessMimeType } from '@itookit/common';
-import { FileIO } from './FileIO';
+import { FileHandle } from './File';
 
 const ASSET_REF_REGEX = /@asset\/([^\s)"']+)/g;
 
-export class MDXFileIO extends FileIO implements IMDXFileIO {
+export class MDXFileHandle extends FileHandle implements IMDXFile {
     /** Blob URLs keyed by asset name — reused across renders, revoked on destroy(). */
     private readonly _blobUrls = new Map<string, string>();
 
-    constructor(engine: ISessionEngine, nodeId: string) {
+    constructor(engine: IFSEngine, nodeId: string) {
         super(engine, nodeId);
     }
 
-    // ========== IMDXFileIO ==========
+    // ========== IMDXFile ==========
 
     extractReferencedAssets(content: string): string[] {
         const names: string[] = [];
@@ -78,6 +80,6 @@ export class MDXFileIO extends FileIO implements IMDXFileIO {
     }
 }
 
-export function createMDXFileIO(engine: ISessionEngine, nodeId: string): IMDXFileIO {
-    return new MDXFileIO(engine, nodeId);
+export function createMDXFile(engine: IFSEngine, nodeId: string): IMDXFile {
+    return new MDXFileHandle(engine, nodeId);
 }

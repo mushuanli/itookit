@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { LLMDriver } from '../src/driver';
+import { LLMDriver } from '../src/core/driver';
 
 const globalFetch = vi.fn();
 global.fetch = globalFetch;

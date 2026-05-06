@@ -1,9 +1,9 @@
 /**
  * @file vfs-ui/services/EngineAdapter.ts
- * @desc Bridges ISessionEngine events → VFSStore dispatches.
+ * @desc Bridges IFSEngine events → VFSStore dispatches.
  *       Extracted from VFSUIShell to isolate engine coupling.
  */
-import type { ISessionEngine, EngineEvent, EngineEventType } from '@itookit/common';
+import type { IFSEngine, EngineEvent, EngineEventType } from '@itookit/common';
 import type { IStatePort, IFileTypePort } from '../contracts/ports';
 import type { VFSNodeUI, TagInfo } from '../contracts/types';
 import { mapEngineNodeToUIItem, mapEngineTreeToUIItems } from './NodeMapper';
@@ -26,7 +26,7 @@ export class EngineAdapter {
     private loadingFolderIds = new Set<string>();
 
     constructor(
-        private readonly engine: ISessionEngine,
+        private readonly engine: IFSEngine,
         private readonly store: IStatePort,
         private readonly fileTypePort: IFileTypePort,
         private readonly showFileExtensions = false,

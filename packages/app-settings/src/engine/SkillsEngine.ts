@@ -1,5 +1,5 @@
 // @file app-settings/engine/SkillsEngine.ts
-// ISessionEngine adapter for the Skills workspace.
+// IFSEngine adapter for the Skills workspace.
 //
 // Display contract (→ NodeMapper):
 //   node.name                  = s.name  ← human-readable name as primary label
@@ -17,7 +17,7 @@
 //   node:moved   → any  (triggers EngineAdapter.loadData() full refresh)
 
 import type {
-    ISessionEngine, EngineNode, EngineEvent, EngineEventType, EngineSearchQuery,
+    IFSEngine, EngineNode, EngineEvent, EngineEventType, EngineSearchQuery,
     LLMSkill, IAgentManagementService,
 } from '@itookit/common';
 import yaml from 'js-yaml';
@@ -37,7 +37,7 @@ const SKILL_TYPE_ICON: Record<string, string> = {
     custom:  '⚙️',  // User-defined
 };
 
-export class SkillsEngine implements ISessionEngine {
+export class SkillsEngine implements IFSEngine {
     public readonly moduleName = 'skills';
 
     private readonly listeners = new Map<string, Set<(e: EngineEvent) => void>>();
@@ -138,7 +138,7 @@ export class SkillsEngine implements ISessionEngine {
     }
 
     /**
-     * ISessionEngine.createFile(name, parentId?, content?) — three parameters.
+     * IFSEngine.createFile(name, parentId?, content?) — three parameters.
      *
      * ImportCommandHandler reads the file bytes and passes them as `content`.
      * Previously we only accepted `rawName` and ignored content → YAML was lost.

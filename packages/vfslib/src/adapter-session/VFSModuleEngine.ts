@@ -6,7 +6,7 @@ import type {
     IVFSManager,
     IModuleFS,
     FSNode,
-    ISessionEngine,
+    IFSEngine,
 } from '@itookit/common';
 import { engineDEBUG } from '../utils/debug';
 import type {
@@ -30,12 +30,12 @@ const FS_SUPPORTED_EVENTS = new Set([
 ]);
 
 /**
- * VFSModuleEngine — 将 IVFSManager 适配为 ISessionEngine
+ * VFSModuleEngine — 将 IVFSManager 适配为 IFSEngine
  *
  * 与旧版 @itookit/vfs 的 VFSModuleEngine 保持相同的公共 API，
  * 内部改为通过 IModuleFS 操作，彻底脱离旧 VFS 实现。
  */
-export class VFSModuleEngine implements ISessionEngine {
+export class VFSModuleEngine implements IFSEngine {
     constructor(
         public readonly moduleName: string,
         private readonly vfs: IVFSManager,
