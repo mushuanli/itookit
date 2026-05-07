@@ -1,12 +1,12 @@
 /**
  * @file vfs-ui/services/EngineAdapter.ts
- * @desc Bridges IFSEngine events → VFSStore dispatches.
+ * @desc Bridges IModuleFS events → VFSStore dispatches.
  *       Extracted from VFSUIShell to isolate engine coupling.
  */
-import type { IFSEngine, EngineEvent, EngineEventType } from '@itookit/common';
+import type { IModuleFS, FSNode, FSEventType, FSEvent } from '@itookit/common';
 import type { IStatePort, IFileTypePort } from '../contracts/ports';
 import type { VFSNodeUI, TagInfo } from '../contracts/types';
-import { mapEngineNodeToUIItem, mapEngineTreeToUIItems } from './NodeMapper';
+import { mapFSNodeToUIItem, mapFSNodesToUIItems } from './NodeMapper';
 import { shouldFilterNode, traverseNodes } from '../utils/helpers';
 import { adapterDEBUG } from '../utils/adapter-debug';
 
@@ -26,7 +26,7 @@ export class EngineAdapter {
     private loadingFolderIds = new Set<string>();
 
     constructor(
-        private readonly engine: IFSEngine,
+        private readonly engine: IModuleFS,
         private readonly store: IStatePort,
         private readonly fileTypePort: IFileTypePort,
         private readonly showFileExtensions = false,
@@ -36,19 +36,15 @@ export class EngineAdapter {
         return (name: string, isDir: boolean) => this.fileTypePort.getIcon(name, isDir);
     }
 
-    private get parserResolver() {
-        return (name: string) => this.fileTypePort.resolveContentParser(name);
-    }
-
     async loadData(): Promise<void> {
         adapterDEBUG.loadData('explicit call');
         try {
             this.store.dispatch({ type: 'ITEMS_LOAD_START' });
-            const rootChildren = await this.engine.getChildren('/');
-            const uiItems = mapEngineTreeToUIItems(
+            const rootChildren = await this.engine.driver.getChildren('/') as FSNode[];
+            const uiItems = mapFSNodesToUIItems(
                 rootChildren,
                 this.iconResolver,
-                this.parserResolver,
+                undefined,
                 this.showFileExtensions
             );
             const tags = this.buildTagsMap(uiItems);
@@ -87,7 +83,7 @@ export class EngineAdapter {
             const items = await Promise.all(
                 ids.map(async id => {
                     try {
-                        const node = await this.engine.getNode(id);
+                        const node = await this.engine.driver.getNode(id) as FSNode | null;
                         adapterDEBUG.nodeResult(id, node);
                         if (!node || shouldFilterNode(node)) {
                             if (action === 'update') {
@@ -99,12 +95,7 @@ export class EngineAdapter {
                             }
                             return null;
                         }
-                        if (node.type === 'file') {
-                            node.content = await this.engine.readContent(id);
-                        } else {
-                            node.children = [];
-                        }
-                        return mapEngineNodeToUIItem(node, this.iconResolver, this.parserResolver, this.showFileExtensions);
+                        return mapFSNodeToUIItem(node, this.iconResolver, undefined, this.showFileExtensions);
                     } catch {
                         return null;
                     }
@@ -145,13 +136,12 @@ export class EngineAdapter {
             }
         };
 
-        const handleEvent = (event: EngineEvent) => {
+        const handleEvent = (event: FSEvent) => {
             const { type, payload } = event;
             adapterDEBUG.received(type, payload);
 
             switch (type) {
                 case 'node:created': {
-                    // FSNodeCreatedPayload: { nodes: [{nodeId, parentId, path, type}] }
                     const data = payload as { nodes?: Array<{ nodeId: string }> };
                     data.nodes?.forEach(n => {
                         if (n.nodeId) {
@@ -163,8 +153,6 @@ export class EngineAdapter {
                     break;
                 }
                 case 'node:deleted': {
-                    // FSNodeDeletedPayload: { requestedIds, allDeletedIds }
-                    // node:batch_deleted maps to the same FS event — no separate subscription needed
                     const data = payload as { allDeletedIds?: string[]; requestedIds?: string[] };
                     (data.allDeletedIds || data.requestedIds || [])
                         .filter(Boolean)
@@ -176,9 +164,6 @@ export class EngineAdapter {
                     break;
                 }
                 case 'node:updated': {
-                    // FSNodeUpdatedPayload: { nodes: [{nodeId, path, changedFields?}], reason }
-                    // node:batch_updated maps to the same FS event — no separate subscription needed
-                    // Skip metadata-only updates — they don't change displayed content or title
                     const data = payload as { nodes?: Array<{ nodeId: string }>; reason?: string };
                     if (data.reason === 'metadata') {
                         adapterDEBUG.received('node:updated[metadata-skip]', payload);
@@ -194,7 +179,6 @@ export class EngineAdapter {
                     break;
                 }
                 case 'node:moved': {
-                    // node:batch_moved maps to the same FS event — no separate subscription needed
                     adapterDEBUG.loadData('node:moved event');
                     this.loadData();
                     adapterDEBUG.dispatch('MOVE_OPERATION_END', '');
@@ -202,9 +186,6 @@ export class EngineAdapter {
                     break;
                 }
                 case 'node:renamed': {
-                    // FSNodeRenamedPayload: { nodes: [{nodeId, oldName, newName, oldPath, newPath}] }
-                    // Rename changes path/name only — re-fetch the node to get its new display title.
-                    // Unlike node:updated, there is no 'reason' field, so we never skip it.
                     const data = payload as { nodes?: Array<{ nodeId: string }> };
                     data.nodes?.forEach(n => {
                         if (n.nodeId) {
@@ -218,20 +199,17 @@ export class EngineAdapter {
             }
         };
 
-        // Subscribe to the 4 base FS event types plus node:renamed.
-        // node:batch_updated / node:batch_moved / node:batch_deleted are NOT subscribed
-        // separately because VFSModuleEngine maps them to the same underlying FS events.
-        // node:renamed is kept separate from node:updated: rename changes path/name (structural),
-        // update changes content/metadata. The two have different payloads and skip rules.
-        const eventTypes: EngineEventType[] = [
+        const eventTypes: FSEventType[] = [
             'node:created',
-            'node:updated',  // also covers node:batch_updated (same FS event)
-            'node:deleted',  // also covers node:batch_deleted (same FS event)
-            'node:moved',    // also covers node:batch_moved (same FS event)
+            'node:updated',
+            'node:deleted',
+            'node:moved',
             'node:renamed',
         ];
 
-        const unsubs = eventTypes.map(type => this.engine.on(type, handleEvent));
+        const unsubs = eventTypes.map(type =>
+            this.engine.driver.on(type, handleEvent as (e: FSEvent<typeof type>) => void)
+        );
         this.engineUnsubscribe = () => unsubs.forEach(u => u());
         return this.engineUnsubscribe;
     }
@@ -253,9 +231,9 @@ export class EngineAdapter {
         this.loadingFolderIds.add(folderId);
 
         try {
-            const children = await this.engine.getChildren(folderId);
+            const children = await this.engine.driver.getChildren(folderId) as FSNode[];
             const uiChildren = children.map(n =>
-                mapEngineNodeToUIItem(n, this.iconResolver, this.parserResolver, this.showFileExtensions)
+                mapFSNodeToUIItem(n, this.iconResolver, undefined, this.showFileExtensions)
             );
 
             this.store.dispatch({
@@ -263,12 +241,6 @@ export class EngineAdapter {
                 payload: { parentId: folderId, children: uiChildren },
             });
 
-            // 恢复时只展开一个子目录（手风琴）
-            // 关键：不要在这里递归调用 expandDirectory
-            // 让 FOLDER_CHILDREN_LOADED 的 reducer 处理 expandedFolderIds 的清理
-            // 用户后续点击时才会触发进一步展开
-
-            // 如果需要自动恢复到深层目录，只展开第一个匹配的：
             const { expandedFolderIds } = this.store.getState();
             for (const child of uiChildren) {
                 if (
@@ -276,7 +248,6 @@ export class EngineAdapter {
                     expandedFolderIds.has(child.id) &&
                     child.children === undefined
                 ) {
-                    // 只递归展开一个子目录
                     void this.expandDirectory(child.id);
                     break;
                 }
@@ -287,7 +258,6 @@ export class EngineAdapter {
             this.loadingFolderIds.delete(folderId);
         }
     }
-
 
     destroy(): void {
         this.engineUnsubscribe?.();

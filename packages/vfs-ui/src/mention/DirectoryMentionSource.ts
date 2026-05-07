@@ -12,13 +12,12 @@ export class DirectoryMentionSource extends BaseMentionSource {
 
   async getSuggestions(query: string): Promise<Suggestion[]> {
     try {
-      const results = await this.engine.search({
+      const result = await this.engine.driver.search({
         type: 'directory',
-        text: query,
+        name: query ? { contains: query } : undefined,
         limit: 20,
-        scope: this.searchScope,
       });
-      return this.filterResults(results).map(node => ({
+      return this.filterResults(Array.from(result.nodes)).map(node => ({
         id: node.id,
         label: `${node.icon || '📁'} ${node.name} (${node.moduleId ? `[${node.moduleId}] ` : ''}${node.path})`,
         title: node.name,
@@ -37,11 +36,11 @@ export class DirectoryMentionSource extends BaseMentionSource {
     if (!dirId) return null;
 
     try {
-      const node = await this.engine.getNode(dirId);
+      const node = await this.engine.driver.getNode(dirId);
       if (!node) return null;
 
-      const childText = node.children
-        ? `Contains ${node.children.length} items`
+      const childText = node.type === 'directory' && (node as any).childCount != null
+        ? `Contains ${(node as any).childCount} items`
         : 'Contents info not available';
       return {
         title: node.name,

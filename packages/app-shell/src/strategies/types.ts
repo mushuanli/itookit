@@ -1,6 +1,6 @@
-import { EditorFactory, IFSEngine } from '@itookit/common';
+import { EditorFactory, IModuleFS } from '@itookit/common';
 
 export interface WorkspaceStrategy {
     getFactory(): EditorFactory;
-    getEngine?(moduleName: string): IFSEngine;
+    getEngine?(moduleName: string): IModuleFS;
 }

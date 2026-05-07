@@ -5,7 +5,7 @@
  *       职责：创建实例、注入依赖、连接生命周期。
  *       不承担任何业务逻辑或公共 API。
  */
-import type { IFSEngine } from '@itookit/common';
+import type { IModuleFS } from '@itookit/common';
 import type { IStatePort, ICommandPort, IEventPort, IFileTypePort } from '../contracts/ports';
 
 import { VFSStore } from '../services/VFSStore';
@@ -53,10 +53,10 @@ const DEFAULT_SETTINGS = {
 
 export function assemble(
     options: VFSUIShellOptions,
-    engine: IFSEngine
+    engine: IModuleFS
 ): AssembledParts {
     // --- Services ---
-    const scopeId = options.scopeId || (engine as any).moduleName || 'default';
+    const scopeId = options.scopeId || engine.moduleId || 'default';
     const persistence = new StatePersistence(scopeId);
     const persisted = persistence.load();
 
@@ -96,7 +96,10 @@ export function assemble(
             newFileContent: options.fileCreation?.content,
             defaultFileName: options.fileCreation?.startupFileName,
             defaultFileContent: options.fileCreation?.startupContent,
-            readContent: (id) => engine.readContent(id),
+            readContent: async (id) => {
+                const c = await engine.driver.readContent(id);
+                return typeof c === 'string' ? c : c instanceof ArrayBuffer ? c : c.buffer.slice(c.byteOffset, c.byteOffset + c.byteLength) as ArrayBuffer;
+            },
             getDuplicateTransformer: (ext) => registry.getDuplicateTransformer(ext),
         }),
         new NavigationCommandHandler(commandBus, store, eventBus),

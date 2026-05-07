@@ -1,3 +1,9 @@
+/**
+ * @file packages/vfslib/src/adapter-session/VFSModuleEngine.ts
+ * @deprecated VFSModuleEngine adapts IVFSManager → IFSEngine (deprecated interface).
+ * Use IVFSManager.getEngine(moduleName) directly to get IModuleFS instead.
+ * This file will be removed in a future version.
+ */
 // @file packages/vfslib/src/adapter-session/VFSModuleEngine.ts
 
 import { toBuffer } from '../utils/encoding';

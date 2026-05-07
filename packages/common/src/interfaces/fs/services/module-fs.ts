@@ -48,6 +48,9 @@ import type { ITagOperations } from '../capabilities/tag-ops';
 import type { IRefOperations } from '../capabilities/ref-ops';
 import type { IWatchOperations } from '../capabilities/watch';
 import type { IDeviceDriver, IDeviceHandle } from '../device/device';
+import type { IFSDriver } from './fs-driver';
+import type { IFSMetaDriver } from './fs-meta-driver';
+import type { IFile } from '../../IFile';
 
 // ═══════════════════════════════════════════════════════════════
 // 事务
@@ -97,7 +100,21 @@ export interface IModuleFS extends FSEventEmitter {
     /** 能力声明 */
     readonly capabilities: FSCapabilities;
 
-    // ── 可选能力子接口 ──
+    // ── 驱动层（新接口，IFile 直接依赖） ──
+
+    /**
+     * 模块作用域文件驱动（CRUD + 链接 + 事务 + 搜索）
+     * IFile 直接持有此引用进行文件内容读写。
+     */
+    readonly driver: IFSDriver;
+
+    /**
+     * 扩展元信息驱动（assetdir / tags / seqfile / refs）
+     * IFile 直接持有此引用进行 assetdir 和元数据操作。
+     */
+    readonly meta: IFSMetaDriver;
+
+    // ── 可选能力子接口（兼容旧消费方，建议改用 meta.*） ──
 
     /** 资产操作（capabilities.assets === true） */
     readonly assets?: IAssetOperations;
@@ -113,6 +130,15 @@ export interface IModuleFS extends FSEventEmitter {
 
     /** 文件监听（capabilities.watch === true） */
     readonly watcher?: IWatchOperations;
+
+    // ── IFile 工厂 ──
+
+    /**
+     * 以 nodeId 打开文件，返回轻量句柄。
+     * 每次调用返回新的 IFile 对象（无状态句柄），内部缓存由实现管理。
+     * @param nodeId 文件节点 ID（不接受路径）
+     */
+    openFile(nodeId: string): IFile;
 
     // ==================== 生命周期 ====================
 

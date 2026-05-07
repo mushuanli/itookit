@@ -11,11 +11,19 @@ VFSEngine  —  PathResolver, AccessController, EventBus, PluginPipeline
 VFSManager (implements IVFSManager)  —  module lifecycle coordinator
     ↕
 ModuleFS (implements IModuleFS)  —  chroot-isolated view per module
-    ↕ optional capability sub-interfaces
-ITagOperations, IAssetOperations, ISeqFileOperations, IRefOperations, IWatchOperations
+    ├── driver: IFSDriver           — POSIX CRUD + search + transaction
+    ├── meta: IFSMetaDriver         — assets / tags / seq / refs / watcher
+    ├── .assets? / .tags? / .seq? / .refs? / .watcher?  ← compatibility aliases
+    └── openFile(nodeId) → IFile    — FileHandle / MDXFileHandle / ChatFileHandle
 ```
 
-All interfaces live in `packages/common/src/interfaces/fs/`. **Callers always type their VFS dependency as `IVFSManager` or `IModuleFS`** — never the concrete classes. Concrete wiring (`createVFS()`) happens only in `packages/app-shell/src/bootstrap.ts` (called by each app entry point).
+**IFSDriver/IFSMetaDriver** (added v3.3) split the old flat `IModuleFS` into two focused interfaces:
+- `IFSDriver` — all POSIX-style file operations (getNode, getChildren, readContent, createFile, createDirectory, writeContent, rename, move, delete, copy, symlink, readlink, hardlink, search, walkTree, stats, transaction)
+- `IFSMetaDriver` — capability-aggregated metadata operations: `assets` (IAssetOperations), `tags` (ITagOperations), `seq` (ISeqFileOperations), `refs` (IRefOperations), `watcher` (IWatchOperations)
+
+Concrete adapters in `vfslib/src/services/fs-driver-adapter.ts`: `FSDriverAdapter` (pass-through to ModuleFS/VFSEngine) and `FSMetaDriverAdapter` (composes InlineAssetOps, InlineTagOps, InlineRefOps, InlineSeqOps).
+
+All interfaces live in `packages/common/src/interfaces/fs/`. **Callers always type their VFS dependency as `IVFSManager`, `IModuleFS`, or `IFSDriver`** — never the concrete classes. Concrete wiring (`createVFS()`) happens only in `packages/app-shell/src/bootstrap.ts` (called by each app entry point).
 
 Each **module** is a named namespace. A module's `IModuleFS` maps its `/` root to the system path `/module/<moduleName>/`. Modules correspond 1:1 with workspace tabs — defined in `apps/web-app/src/config/modules.ts` (`WORKSPACES` array) and auto-mounted at startup.
 
@@ -23,26 +31,34 @@ Each **module** is a named namespace. A module's `IModuleFS` maps its `/` root t
 
 **Backup/restore/export/import** live on `vfs.maintenance.*` (a sub-service), not directly on `vfs`.
 
-### ISessionEngine — the UI/backend contract
+### IModuleFS — the UI/backend contract (v3.3)
 
-`ISessionEngine` (`packages/common/src/interfaces/ISessionEngine.ts`) is the single interface used by all UI packages to talk to any backend. Key methods: `init()`, `loadTree()`, `getChildren()`, `readContent()`, `createFile()`, `createDirectory()`, `rename()`, `move()`, `delete()`, `setTags()`, `on()`.
+~~`ISessionEngine`~~ (deprecated v3.3) has been superseded by `IModuleFS`. UI packages now depend directly on `IModuleFS` (which exposes `driver: IFSDriver` and `meta: IFSMetaDriver`) rather than going through an adapter layer.
 
-Two main implementations:
-- **`VFSModuleEngine`** (`packages/vfslib/src/adapter-session/`) — adapts `IVFSManager` → `ISessionEngine` for standard file workspaces
-- **`LLMSessionEngine`** (`packages/llm-engine/src/persistence/`) — Chat-specific; stores sessions as `.chat` files with a branching message graph in hidden VFS directories
+Key interfaces consumed by UI:
+- **`IModuleFS`** — full module filesystem (driver + meta + openFile)
+- **`IFSDriver`** — CRUD + search + events（文件树、编辑器直接用）
+- **`IFile`** — per-file handle（IModuleFS.openFile() 工厂创建）
 
-Services needing direct VFS access extend **`BaseModuleService`** (`packages/vfslib/src/adapter-session/`) — provides `readJson`/`writeJson` (upsert semantics), `ensureDirectory`, and `engine: VFSModuleEngine`.
+Three file handle implementations:
+- **`FileHandle`** — base `IFile`, wraps `IModuleFS`（v3.3: constructor 参数改为 `IModuleFS`）
+- **`MDXFileHandle`** — `IMDXFile` extends `IFile`, asset resolution
+- **`ChatFileHandle`** — `IChatFile` extends `IFile`, message tree + branches
+
+~~`VFSModuleEngine`~~ is deprecated. `IVFSManager.getEngine(moduleName)` returns `IModuleFS` directly.
+
+Services needing direct VFS access extend **`BaseModuleService`** (`packages/vfslib/src/adapter-session/`) — provides `readJson`/`writeJson` (upsert semantics), `ensureDirectory`.
 
 ### Workspace Strategy Pattern (web-app)
 
 ```ts
 interface WorkspaceStrategy {
     getFactory(): EditorFactory;
-    getEngine(moduleName: string): ISessionEngine;
+    getEngine(moduleName: string): IModuleFS;
 }
 ```
 
-Five strategies: `StandardWorkspaceStrategy` (MDxEditor + `VFSModuleEngine`), `ChatWorkspaceStrategy` (`LLMSessionEngine`), `AgentWorkspaceStrategy`, `SettingsWorkspaceStrategy`, `SkillsWorkspaceStrategy`. Adding a workspace = adding an entry to `WORKSPACES` in `apps/web-app/src/config/modules.ts`.
+Five strategies: `StandardWorkspaceStrategy` (MDxEditor + `IModuleFS`), `ChatWorkspaceStrategy` (`IChatEngine`), `AgentWorkspaceStrategy`, `SettingsWorkspaceStrategy` (custom `IModuleFS`), `SkillsWorkspaceStrategy` (custom `IModuleFS`). Adding a workspace = adding an entry to `WORKSPACES` in `apps/web-app/src/config/modules.ts`.
 
 ### LLM Engine Stack
 

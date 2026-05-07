@@ -30,11 +30,11 @@ export class AssetResolverPlugin implements MDxPlugin {
     }
 
     private async resolveAssets(root: HTMLElement, context: PluginContext): Promise<void> {
-        const engine = context.getSessionEngine?.();
+        const moduleFS = context.getSessionEngine?.();
         const ownerNodeId = context.getOwnerNodeId?.();
-        if (!engine || !ownerNodeId) return;
+        if (!moduleFS || !ownerNodeId) return;
 
-        const fileIO = createMDXFile(engine, ownerNodeId);
+        const fileIO = createMDXFile(moduleFS, ownerNodeId);
 
         const elements = root.querySelectorAll<HTMLElement>('[src], [href]');
         const resolvePromises: Promise<void>[] = [];
@@ -74,11 +74,11 @@ export class AssetResolverPlugin implements MDxPlugin {
      * 清理当前文档中未引用的资产
      */
     private async pruneUnusedAssets(context: PluginContext): Promise<number> {
-        const engine = context.getSessionEngine?.();
+        const moduleFS = context.getSessionEngine?.();
         const ownerNodeId = context.getOwnerNodeId?.();
-        if (!engine || !ownerNodeId) return 0;
+        if (!moduleFS || !ownerNodeId) return 0;
 
-        const fileIO = createMDXFile(engine, ownerNodeId);
+        const fileIO = createMDXFile(moduleFS, ownerNodeId);
         return fileIO.pruneUnusedAssets();
     }
 
