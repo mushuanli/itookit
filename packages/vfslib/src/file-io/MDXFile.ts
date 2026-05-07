@@ -10,7 +10,7 @@
  *
  * read() returns MDX text directly (no transformation over readRaw).
  */
-import type { IFSEngine, IMDXFile } from '@itookit/common';
+import type { IModuleFS, IMDXFile } from '@itookit/common';
 import { guessMimeType } from '@itookit/common';
 import { FileHandle } from './File';
 
@@ -20,8 +20,8 @@ export class MDXFileHandle extends FileHandle implements IMDXFile {
     /** Blob URLs keyed by asset name — reused across renders, revoked on destroy(). */
     private readonly _blobUrls = new Map<string, string>();
 
-    constructor(engine: IFSEngine, nodeId: string) {
-        super(engine, nodeId);
+    constructor(fs: IModuleFS, nodeId: string) {
+        super(fs, nodeId);
     }
 
     // ========== IMDXFile ==========
@@ -80,6 +80,6 @@ export class MDXFileHandle extends FileHandle implements IMDXFile {
     }
 }
 
-export function createMDXFile(engine: IFSEngine, nodeId: string): IMDXFile {
-    return new MDXFileHandle(engine, nodeId);
+export function createMDXFile(fs: IModuleFS, nodeId: string): IMDXFile {
+    return new MDXFileHandle(fs, nodeId);
 }

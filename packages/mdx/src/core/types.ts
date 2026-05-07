@@ -10,7 +10,7 @@
 
 // === Re-export 外部依赖类型（隔离层） ===
 import type {
-    IFSEngine,
+    IModuleFS,
 } from '@itookit/common';
 
 
@@ -86,7 +86,7 @@ export interface PluginContext {
     getScopedStore(): ScopedPersistenceStore;
 
     // 引擎访问
-    getSessionEngine?(): IFSEngine | null;
+    getSessionEngine?(): IModuleFS | null;
     getCurrentNodeId(): string | null;
     getOwnerNodeId?(): string | null;
 

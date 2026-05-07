@@ -34,7 +34,8 @@
 
 ## 核心集成链
 
-- **VFS 全栈**: `vfs-ui → ISessionEngine → VFSModuleEngine → ModuleFS → VFSEngine → IStorageBackend`
+- **VFS 全栈 (v3.3)**: `vfs-ui → IModuleFS → ModuleFS.driver (IFSDriver) → ModuleFS → VFSEngine → IStorageBackend`
+- **VFS File (v3.3)**: `IFile → fs.driver (IFSDriver) + fs.meta (IFSMetaDriver)`
 - **LLM Chat**: `llm-ui → SessionManager → TaskRunner → AgentLoopExecutor → LLMServiceAdapter → Provider`
 - **App 装配**: `initApp() → createVFS → createHarness → initializeLLMEngine → WorkspaceStrategy`
 

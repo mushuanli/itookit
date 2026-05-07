@@ -5,7 +5,7 @@ import {
   escapeHTML,
   type Suggestion,
   type HoverPreviewData,
-  type EngineNode,
+  type FSNode,
 } from '@itookit/common';
 import { BaseMentionSource } from './BaseMentionSource';
 
@@ -15,13 +15,12 @@ export class FileMentionSource extends BaseMentionSource {
 
   async getSuggestions(query: string): Promise<Suggestion[]> {
     try {
-      const results = await this.engine.search({
+      const result = await this.engine.driver.search({
         type: 'file',
-        text: query,
+        name: query ? { contains: query } : undefined,
         limit: 20,
-        scope: this.searchScope,
       });
-      return this.filterResults(results).map(node => ({
+      return this.filterResults(Array.from(result.nodes)).map(node => ({
         id: node.id,
         label: this.formatLabel(node),
         title: node.name,
@@ -35,7 +34,7 @@ export class FileMentionSource extends BaseMentionSource {
     }
   }
 
-  private formatLabel(node: EngineNode): string {
+  private formatLabel(node: FSNode): string {
     const parent =
       node.path.substring(0, node.path.lastIndexOf('/')) || '/';
     const ctx = parent === '/' ? '' : ` ${parent}`;
@@ -49,8 +48,8 @@ export class FileMentionSource extends BaseMentionSource {
 
     try {
       const [node, content] = await Promise.all([
-        this.engine.getNode(fileId),
-        this.engine.readContent(fileId),
+        this.engine.driver.getNode(fileId),
+        this.engine.driver.readContent(fileId),
       ]);
       if (!node) return null;
 
@@ -91,9 +90,9 @@ export class FileMentionSource extends BaseMentionSource {
     if (!fileId) return null;
 
     try {
-      const node = await this.engine.getNode(fileId);
+      const node = await this.engine.driver.getNode(fileId);
       if (!node) return null;
-      const content = await this.engine.readContent(fileId);
+      const content = await this.engine.driver.readContent(fileId);
       return {
         id: node.id,
         title: node.name,

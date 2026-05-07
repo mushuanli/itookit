@@ -1,3 +1,12 @@
+> **⚠️ 部分过期 — 接口类型名已变更**
+> 本文引用的 `VFSCore` / `VNode` / `IContentViewAdapter` 等类型名与当前代码不一致。
+> 当前实现使用：
+> - `ISessionEngine`（替代 `VFSCore`）作为 UI 与后端的合约
+> - `FSNode` 判别联合类型（替代 `VNode`）
+> - `VFSUIShell` 类名保留但内部接口已更新
+> 高层概念（VFSUIShell、TreeView、EditorRegistry）仍然适用。
+> 权威文档参见 [architecture.md](./architecture.md) 和 [pkgstructure.md](./pkgstructure.md)
+
 # VFS-UI 重构设计方案
 
 ## 一、架构概览

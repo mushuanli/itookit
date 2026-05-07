@@ -22,8 +22,10 @@ VFS（Virtual File System）为 itookit 提供 POSIX 风格的虚拟文件系统
 │  IModuleFS / IVFSManager / IStorageBackend / 事件/错误/选项   │
 ├──────────────────────────────────────────────────────────────┤
 │  服务层 (vfslib/services)                                     │
-│  VFSManager ── 模块生命周期 + 跨模块协调                      │
-│  ModuleFS   ── chroot 隔离 + 能力子接口 (assets/tags/seq...)  │
+│  VFSManager     ── 模块生命周期 + 跨模块协调                  │
+│  ModuleFS       ── chroot 隔离 + 能力子接口 (assets/tags...)   │
+│  FSDriverAdapter    ── IFSDriver 实现 (直通 ModuleFS) (v3.3)  │
+│  FSMetaDriverAdapter ── IFSMetaDriver 实现 (组合模式) (v3.3)  │
 │  ConfigService ── 配置读写（seqfile/JSON 双模）               │
 │  ScopedView    ── 虚拟路径 ↔ 真实路径映射                     │
 ├──────────────────────────────────────────────────────────────┤
@@ -39,8 +41,10 @@ VFS（Virtual File System）为 itookit 提供 POSIX 风格的虚拟文件系统
 │  事件层 (vfslib/event)                                        │
 │  EventBus / TransactionEventBuffer                            │
 ├──────────────────────────────────────────────────────────────┤
-│  适配层 (vfslib/adapter-session)                              │
-│  VFSModuleEngine ── IVFSManager → ISessionEngine 适配         │
+│  文件对象层 (vfslib/file-io)                                  │
+│  FileHandle       ── IFile（IFSDriver + IFSMetaDriver）       │
+│  MDXFileHandle    ── IMDXFile extends IFile                   │
+│  ChatFileHandle   ── IChatFile extends IFile                  │
 ├──────────────────────────────────────────────────────────────┤
 │  存储后端层 (common/interfaces/fs/storage)                    │
 │  IStorageBackend ── IInodeStore / IMetaStore / IContentStore   │
@@ -75,6 +79,8 @@ interfaces/fs/
 │   └── syncable-backend.ts   ← 可选: ISyncableStore (同步变更日志)
 ├── services/
 │   ├── module-fs.ts      ← IModuleFS + IFSTransaction
+│   ├── fs-driver.ts      ← IFSDriver + IFSDriverTransaction (v3.3 新增)
+│   ├── fs-meta-driver.ts ← IFSMetaDriver (v3.3 新增，聚合 assets/tags/seq/refs/watcher)
 │   ├── vfs-manager.ts    ← IVFSManager + 子服务接口
 │   ├── config-service.ts ← IConfigService
 │   └── factory.ts        ← VFSFactoryOptions + 各平台选项
@@ -322,6 +328,116 @@ open() → 建立会话 → write(提示词) → readStream() → close()
 
 通过 `isRealPathReadOnly()` 检查避免歧义：模块内的 `/module/<id>/dev` 目录不应被误判为只读 `/dev` 映射。
 
+### IFSDriver / IFSMetaDriver — 驱动层 (v3.3)
+
+v3.3 重构将原有两套并存的接口体系（`IModuleFS` + `IFSEngine`）统一为 `IFSDriver` + `IFSMetaDriver` 双驱动架构：
+
+```
+重构前:                             重构后:
+IFile → IFSEngine（适配 VFS）       IFile → IFSDriver + IFSMetaDriver（直接操作）
+IModuleFS（扁平 20+ 方法）           IModuleFS.driver → IFSDriver
+                                      IModuleFS.meta   → IFSMetaDriver
+                                      IModuleFS.openFile() → IFile（轻量句柄工厂）
+```
+
+**设计动机**：
+1. 普通文件系统和 VFS 扩展（assetdir/标签/引用）职责分离
+2. `IFile` 直接持有驱动引用，去除 `IFSEngine` 适配层
+3. 搜索语义统一：assetdir 内部命中 → 映射为宿主 `IFile`
+4. 事务/符号链接/硬链接：从可选提升为必选能力
+
+#### IModuleFS 新接口
+
+```ts
+interface IModuleFS {
+    driver: IFSDriver;       // POSIX CRUD + 搜索 + 事务 + 事件
+    meta: IFSMetaDriver;     // assetdir / tags / seq / refs / watcher
+    openFile(nodeId): IFile; // 轻量句柄工厂
+
+    // 兼容性别名（逐步迁移到 meta.*）
+    assets?: IAssetOperations;
+    tags?: ITagOperations;
+    seq?: ISeqFileOperations;
+    refs?: IRefOperations;
+    watcher?: IWatchOperations;
+}
+```
+
+#### IFSDriver — 文件操作驱动
+
+模块作用域级（已完成 chroot 隔离、路径解析、权限控制），替代 `IFSEngine` 的 CRUD 部分：
+
+```ts
+interface IFSDriver {
+    // 必选能力（后端不支持时抛 FSCapabilityError）
+    transaction<T>(fn): Promise<T>;   // 闭包式事务
+    symlink(link, target): FSNode;    // 符号链接
+    readlink(path): string;           // 读取链接目标
+    hardlink(link, target): FSNode;   // 硬链接
+
+    // CRUD（与原有 IModuleFS 方法签名一致）
+    getNode / getChildren / readContent / resolvePath / exists
+    createFile / createDirectory / writeContent / appendContent
+    rename / move / delete / updateMetadata / copy?
+
+    // 搜索 + 事件
+    search(query): FSSearchResult;    // assetdir 内部节点不出现在结果中
+    on<E>(event, callback): () => void;
+}
+```
+
+**搜索语义**：`IFSDriver.search()` 保证 assetdir 内部节点不出现在搜索结果中。当 `_note.md/` 内文件名的内容匹配搜索条件时，结果中返回的是宿主文件 `note.md`，且去重（同一宿主文件不重复出现）。
+
+#### IFSMetaDriver — 元数据操作驱动
+
+聚合能力子接口，"有则构建、无则默认"：
+
+```ts
+interface IFSMetaDriver {
+    assets: IAssetOperations;  // 无 assetdir 时返回空数组/null，不抛异常
+    tags: ITagOperations;      // 无标签时返回空数组
+    seq?: ISeqFileOperations;  // 取决于 FSCapabilities.seqFiles
+    refs?: IRefOperations;     // 取决于 FSCapabilities.references
+    watcher?: IWatchOperations;
+}
+```
+
+**默认值语义**是用户方案的核心思想：文件无 assetdir 时 `listAssets()` 返回 `[]`（不抛错），文件无标签时 `getTags()` 返回 `[]`。`seq` 和 `refs` 属于后端能力差异，不存在时调用方需自行处理。
+
+#### IFile 轻量句柄
+
+```ts
+interface IFile {
+    readonly nodeId: string;
+    getNode(): Promise<FSNode>;          // 返回 FSNode（不再使用 EngineNode）
+    on(event, callback): () => void;     // FSEventType → FSEvent<E>（类型化事件）
+
+    // 高级内容（子类可 override，如 ChatFileHandle 拼装消息）
+    read(): Promise<string | ArrayBuffer>;
+    write(content): Promise<void>;
+
+    // 原始主文件
+    readRaw(): Promise<string | ArrayBuffer>;
+    writeRaw(content): Promise<void>;
+
+    // AssetDir 操作（委托给 IFSMetaDriver）
+    putAsset(name, content): Promise<string>;   // 返回 @asset/<name>
+    getAsset / listAssets / deleteAsset / pruneAssets
+    hasAssetDir(): Promise<boolean>;
+
+    // 内部文件（__ 前缀，委托给 meta.assets）
+    readInternal / writeInternal / deleteInternal
+
+    // 生命周期
+    rename / copy / move / delete
+}
+```
+
+- **轻量句柄**：每次 `openFile()` 返回新对象，无状态，调用方无需显式 dispose
+- **缓存由 IFSMetaDriver 管理**：`_assetDirId`、`_assetIndex` 存在驱动层内，跨句柄复用
+
+
+
 ### ConfigService — 配置管理
 
 配置文件存储在 `__config` (etc) 系统模块中，每个配置文件是一个 SeqFile 或 JSON 文件。双模策略：
@@ -338,6 +454,75 @@ open() → 建立会话 → write(提示词) → readStream() → close()
 全局 ID 格式：`${mountId}:${ino}` — 简单可逆。
 - `encodeId(mountId, ino)` → `"mount_0:42"`
 - `decodeId("mount_0:42")` → `{ mountId: "mount_0", ino: 42 }`
+
+### VFSModuleEngine — 适配层 (v3.3: 已废弃)
+
+> **@deprecated** v3.3 起废弃。使用 `IVFSManager.getEngine(moduleName)` 直接获取 `IModuleFS`。
+
+`VFSModuleEngine` 曾将 `IVFSManager` 适配为 `IFSEngine`（201行简化接口）。v3.3 重构后：
+- `IFSEngine` 的 CRUD 部分 → `IFSDriver`
+- `IFSEngine` 的事件 → `FSEventEmitter`
+- `IFSEngine` 的 SRS → 独立 `ISRSService`（领域服务，非 VFS 基础设施）
+- UI 层消费方（文件树、编辑器）直接使用 `IModuleFS`
+
+**保留文件但标注 @deprecated**，现有 3 个实现了 `IFSEngine` 的类（`SettingsEngine` / `SkillsEngine` / `ChatEngine`）需独立迁移至实现 `IModuleFS`。
+
+---
+
+## 消费方迁移指南 (v3.3)
+
+### 类型映射
+
+| 旧接口 | 新接口 | 说明 |
+|---|---|---|
+| `IFSEngine` | `IModuleFS` 或 `IFSDriver` | CRUD 用 `IFSDriver`，文件操作 + 元数据用 `IModuleFS` |
+| `EngineNode` | `FSNode`（判别联合） | `type: 'file' \| 'directory' \| 'seqfile' \| 'device' \| 'symlink'` |
+| `EngineEventType` / `EngineEvent` | `FSEventType` / `FSEvent<E>` | 类型化泛型事件，payload 类型随 event 变化 |
+| `createFile(engine, id)` | `createFile(fs, id)` 或 `fs.openFile(id)` | `IModuleFS.openFile()` 是新的标准工厂方法 |
+| `engine.createFile(name, parent, content)` | `driver.createFile({ name, parentIdOrPath, content })` | 改为选项对象参数 |
+| `engine.search({ text, scope })` | `driver.search({ name: { contains: text }, limit })` | 搜索参数格式变更 |
+
+### 调用映射示例
+
+```ts
+// 旧: 通过 IFSEngine
+const node = await engine.getNode(fileId);
+const content = await engine.readContent(fileId);
+await engine.writeContent(fileId, content);
+
+// 新: 通过 IFSDriver
+const node = await fs.driver.getNode(fileId);
+const content = await fs.driver.readContent(fileId);
+await fs.driver.writeContent(fileId, content);
+
+// 旧: 直接创建 FileHandle
+const file = createFile(engine, nodeId);
+
+// 新: 通过工厂
+const file = fs.openFile(nodeId);
+// 或: const file = createFile(fs, nodeId);
+```
+
+### 已迁移的包
+
+| 包 | 迁移状态 |
+|---|---|
+| `vfs-ui` | 全面迁移：`IFSEngine → IModuleFS`，`EngineAdapter/VFSService/MentionSource` 改用 `driver.*` |
+| `mdx` | `PluginContext.getSessionEngine()` → `IModuleFS`，`AssetResolverPlugin` 更新 |
+| `memory-manager` | 去除 `VFSModuleEngine`，改用 `vfs.getEngine(moduleName)` |
+| `app-shell/strategies` | `StandardWorkspaceStrategy` 直接返回 `IModuleFS` |
+| `llm-ui` | 类型注解迁移 `IFSEngine → IModuleFS` |
+| `common` | 新增 `IFSDriver` / `IFSMetaDriver` / `IFSDriverTransaction`，`IFSEngine` 标注 `@deprecated` |
+| `vfslib` | 新增 `FSDriverAdapter` / `FSMetaDriverAdapter`，`ModuleFS.driver/meta/openFile` |
+
+### 待迁移（用 @deprecated 保持功能）
+
+| 包 | 原因 | 优先级 |
+|---|---|---|
+| `app-settings/SettingsEngine` | 旧设置面板 mock `IFSEngine` 实现 | 中 |
+| `app-settings/SkillsEngine` | 旧技能面板 mock `IFSEngine` 实现 | 中 |
+| `llm-engine/ChatEngine` | `IChatEngine extends IFSEngine`，需专项设计 | 高 |
+| `vfs-ui/tests` | 测试 fixtures 引用 `EngineNode` | 低 |
 
 ---
 

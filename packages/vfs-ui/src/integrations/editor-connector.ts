@@ -7,7 +7,7 @@ import type {
   EditorFactory,
   EditorOptions,
   ISessionUI,
-  IFSEngine,
+  IModuleFS,
   EditorHostContext,
   NavigationRequest,
 } from '@itookit/common';
@@ -36,7 +36,7 @@ type VFSManager = ISessionUI<VFSNodeUI, VFSService> & {
  */
 export function connectEditorLifecycle(
   vfsManager: VFSManager,
-  engine: IFSEngine,
+  engine: IModuleFS,
   editorContainer: HTMLElement,
   defaultEditorFactory?: EditorFactory,
   options: ConnectOptions = {}
@@ -93,10 +93,10 @@ export function connectEditorLifecycle(
 
       if (exists) {
         const content = activeEditor.getText();
-        await engine.writeContent(activeNode.id, content);
+        await engine.driver.writeContent(activeNode.id, content);
 
         const { metadata, summary } = parseFileInfo(content);
-        await engine.updateMetadata(activeNode.id, {
+        await engine.driver.updateMetadata(activeNode.id, {
           taskCount: metadata.taskCount,
           clozeCount: metadata.clozeCount,
           mermaidCount: metadata.mermaidCount,
@@ -137,7 +137,7 @@ export function connectEditorLifecycle(
       | undefined;
     return {
       toggleSidebar: () => vfsManager.toggleSidebar(),
-      saveContent: (nodeId, content) => engine.writeContent(nodeId, content),
+      saveContent: (nodeId, content) => engine.driver.writeContent(nodeId, content),
       navigate: async (request: NavigationRequest) => {
         if (external?.navigate) await external.navigate(request);
         else console.warn('[EditorConnector] No navigation handler.', request);
@@ -174,7 +174,7 @@ export function connectEditorLifecycle(
         const initialContent =
           item.content?.data !== undefined
             ? item.content.data
-            : await engine.readContent(item.id);
+            : await engine.driver.readContent(item.id);
 
         // Re-check token after the async readContent — user may have switched files.
         if (myToken !== sessionToken) return;
