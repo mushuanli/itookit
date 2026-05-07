@@ -4,7 +4,7 @@
  * @interface
  */
 
-import { IFSEngine } from './IFSEngine';
+import type { IModuleFS } from './fs/services/module-fs';
 import { NavigationRequest } from './INavigation';
 
 export type SearchResultSource = 'editor' | 'renderer';
@@ -88,7 +88,7 @@ export interface EditorOptions {
      * 提供文件系统操作、元数据读写、资源搜索等核心能力。
      * 这是编辑器与数据层交互的统一接口。
      */
-    sessionEngine?: IFSEngine;
+    sessionEngine?: IModuleFS;
 
     /** 是否只读 */
     readOnly?: boolean;

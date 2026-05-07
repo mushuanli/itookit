@@ -1,23 +1,24 @@
 /**
  * @file vfslib/src/file-io/File.ts
- * @desc Base implementation of IFile wrapping an IFSEngine.
+ * @desc Base implementation of IFile backed by IModuleFS.
  *
  * Performance model (per FileHandle instance lifetime):
- *  - getAssetDirectoryId: at most 1 engine call (cached in _assetDirId)
- *  - getChildren (assetdir listing): at most 1 engine call (cached in _assetIndex)
+ *  - getAssetDirId: at most 1 driver call (cached in _assetDirId)
+ *  - getChildren (assetdir listing): at most 1 driver call (cached in _assetIndex)
  *  - putAsset / deleteAsset / writeInternal maintain the index incrementally
- *  - pruneAssets issues a single engine.delete() batch call
+ *  - pruneAssets issues a single driver.delete() batch call
  *
  * read() / write() delegate to readRaw() / writeRaw() by default.
  * Subclasses may override read() / write() to assemble / decompose format-specific content.
  */
 import type {
-    IFSEngine,
-    EngineNode,
-    EngineEventType,
-    EngineEvent,
+    IModuleFS,
     IFile,
+    FSNode,
+    FSEventType,
+    FSEvent,
 } from '@itookit/common';
+import { FSNotFoundError } from '@itookit/common';
 import { toBuffer } from '../utils/encoding';
 
 export class FileHandle implements IFile {
@@ -33,7 +34,7 @@ export class FileHandle implements IFile {
     private _assetIndex: Map<string, string> | null = null;
 
     constructor(
-        protected readonly engine: IFSEngine,
+        protected readonly fs: IModuleFS,
         nodeId: string,
     ) {
         this.nodeId = nodeId;
@@ -49,7 +50,7 @@ export class FileHandle implements IFile {
         return (await this._requireNode()).path;
     }
 
-    async getNode(): Promise<EngineNode> {
+    async getNode(): Promise<FSNode> {
         return this._requireNode();
     }
 
@@ -60,11 +61,11 @@ export class FileHandle implements IFile {
     }
 
     async getTags(): Promise<string[]> {
-        return (await this._requireNode()).tags ?? [];
+        return [...((await this._requireNode()).tags ?? [])];
     }
 
     async setTags(tags: string[]): Promise<void> {
-        await this.engine.setTags(this.nodeId, tags);
+        await this.fs.meta.tags.setTags(this.nodeId, tags);
     }
 
     // ========== High-level content ==========
@@ -80,14 +81,18 @@ export class FileHandle implements IFile {
     // ========== High-level lifecycle ==========
 
     async rename(newName: string): Promise<void> {
-        await this.engine.rename(this.nodeId, newName);
+        await this.fs.driver.rename(this.nodeId, newName);
     }
 
     async copy(destDirNodeId: string, newName?: string): Promise<IFile> {
         const name = newName ?? await this.getName();
         const content = await this.readRaw();
-        const newNode = await this.engine.createFile(name, destDirNodeId, content);
-        const newFile = new FileHandle(this.engine, newNode.id);
+        const newNode = await this.fs.driver.createFile({
+            name,
+            parentIdOrPath: destDirNodeId,
+            content,
+        });
+        const newFile = new FileHandle(this.fs, newNode.id);
         const assetNames = await this.listAssets();
         for (const assetName of assetNames) {
             const data = await this.getAsset(assetName);
@@ -100,24 +105,25 @@ export class FileHandle implements IFile {
         const assetDirId = await this._resolveAssetDirId();
         const ids = [this.nodeId];
         if (assetDirId) ids.push(assetDirId);
-        await this.engine.move(ids, destDirNodeId);
+        await this.fs.driver.move(ids, destDirNodeId);
     }
 
     async delete(): Promise<void> {
         const assetDirId = await this._resolveAssetDirId();
         const ids = [this.nodeId];
         if (assetDirId) ids.push(assetDirId);
-        await this.engine.delete(ids);
+        await this.fs.driver.delete(ids);
     }
 
     // ========== Low-level: raw main-file access ==========
 
     async readRaw(): Promise<string | ArrayBuffer> {
-        return this.engine.readContent(this.nodeId);
+        const content = await this.fs.driver.readContent(this.nodeId);
+        return typeof content === 'string' ? content : toBuffer(content);
     }
 
     async writeRaw(content: string | ArrayBuffer): Promise<void> {
-        await this.engine.writeContent(this.nodeId, content);
+        await this.fs.driver.writeContent(this.nodeId, content);
     }
 
     // ========== Low-level: assetdir internal files ==========
@@ -127,11 +133,12 @@ export class FileHandle implements IFile {
         if (!index) return null;
         const id = index.get(name);
         if (!id) return null;
-        return this.engine.readContent(id);
+        const content = await this.fs.driver.readContent(id);
+        return typeof content === 'string' ? content : toBuffer(content);
     }
 
     async writeInternal(name: string, content: string | ArrayBuffer): Promise<void> {
-        const node = await this.engine.createAsset(this.nodeId, name, content);
+        const node = await this.fs.meta.assets.putAsset(this.nodeId, name, content);
         if (this._assetDirId === null) this._assetDirId = undefined;
         if (this._assetIndex) this._assetIndex.set(name, node.id);
     }
@@ -154,7 +161,7 @@ export class FileHandle implements IFile {
         const id = index.get(name);
         if (!id) return null;
 
-        const content = await this.engine.readContent(id);
+        const content = await this.fs.driver.readContent(id);
         return toBuffer(content as string | ArrayBuffer);
     }
 
@@ -170,7 +177,7 @@ export class FileHandle implements IFile {
         const id = index.get(name);
         if (!id) return;
 
-        await this.engine.delete([id]);
+        await this.fs.driver.delete([id]);
         index.delete(name);
     }
 
@@ -180,7 +187,7 @@ export class FileHandle implements IFile {
 
     /**
      * Batch-delete assets not in referencedNames.
-     * Issues exactly 1 engine.delete() call regardless of how many assets are pruned.
+     * Issues exactly 1 driver.delete() call regardless of how many assets are pruned.
      */
     async pruneAssets(referencedNames: string[]): Promise<number | null> {
         const index = await this._getAssetIndex();
@@ -193,7 +200,7 @@ export class FileHandle implements IFile {
         }
 
         if (toDelete.length > 0) {
-            await this.engine.delete(toDelete.map(([, id]) => id));
+            await this.fs.driver.delete(toDelete.map(([, id]) => id));
             for (const [name] of toDelete) index.delete(name);
         }
         return toDelete.length;
@@ -201,15 +208,15 @@ export class FileHandle implements IFile {
 
     // ========== Events ==========
 
-    on(event: EngineEventType, callback: (event: EngineEvent) => void): () => void {
-        return this.engine.on(event, callback);
+    on<E extends FSEventType>(event: E, callback: (event: FSEvent<E>) => void): () => void {
+        return this.fs.driver.on(event, callback);
     }
 
     // ========== Private ==========
 
     private async _resolveAssetDirId(): Promise<string | null> {
         if (this._assetDirId === undefined) {
-            this._assetDirId = await this.engine.getAssetDirectoryId(this.nodeId);
+            this._assetDirId = await this.fs.meta.assets.getAssetDirId(this.nodeId);
         }
         return this._assetDirId;
     }
@@ -219,7 +226,7 @@ export class FileHandle implements IFile {
         if (!dirId) return null;
 
         if (!this._assetIndex) {
-            const children = await this.engine.getChildren(dirId);
+            const children = await this.fs.driver.getChildren(dirId) as FSNode[];
             this._assetIndex = new Map(
                 children.filter((c) => c.type === 'file').map((c) => [c.name, c.id])
             );
@@ -227,13 +234,13 @@ export class FileHandle implements IFile {
         return this._assetIndex;
     }
 
-    private async _requireNode(): Promise<EngineNode> {
-        const node = await this.engine.getNode(this.nodeId);
-        if (!node) throw new Error(`FileHandle: node not found: ${this.nodeId}`);
+    private async _requireNode(): Promise<FSNode> {
+        const node = await this.fs.driver.getNode(this.nodeId);
+        if (!node) throw new FSNotFoundError(this.nodeId, 'FileHandle.getNode');
         return node;
     }
 }
 
-export function createFile(engine: IFSEngine, nodeId: string): IFile {
-    return new FileHandle(engine, nodeId);
+export function createFile(fs: IModuleFS, nodeId: string): IFile {
+    return new FileHandle(fs, nodeId);
 }

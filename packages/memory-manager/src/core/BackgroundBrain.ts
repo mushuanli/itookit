@@ -3,7 +3,7 @@
  */
 import { FileMentionSource } from '@itookit/vfs-ui';
 import { MDxProcessor, ProcessResult } from '@itookit/mdxeditor';
-import type { IFSEngine, EngineEvent } from '@itookit/common';
+import type { IModuleFS, FSEvent } from "@itookit/common";;
 
 /**
  * 节点更新事件的 payload 类型
@@ -24,9 +24,7 @@ export class BackgroundBrain {
     private debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
     private unsubscribe: (() => void) | null = null;
 
-    // [修改] 接收 IFSEngine 接口
-    constructor(private engine: IFSEngine, _activeRules: string[] = ['*']) {
-        // [修改] 适配新的 MentionSource 签名
+    constructor(private engine: IModuleFS, _activeRules: string[] = ['*']) {
         const fileProvider = new FileMentionSource({ engine: this.engine });
         
         // @ts-ignore MDxProcessor 类型可能需要更新以匹配新的 Source 接口，此处暂忽略
@@ -35,8 +33,7 @@ export class BackgroundBrain {
 
     public start() {
         console.log(`🧠 [BackgroundBrain] Started.`);
-        // [修改] 使用 engine.on 监听 'node:updated'
-        this.unsubscribe = this.engine.on('node:updated', this.handleNodeUpdate);
+        this.unsubscribe = this.engine.driver.on('node:updated', this.handleNodeUpdate);
     }
 
     public stop() {
@@ -46,9 +43,8 @@ export class BackgroundBrain {
         console.log(`🧠 [BackgroundBrain] Stopped.`);
     }
 
-    private handleNodeUpdate = (event: EngineEvent) => {
-        // ✅ 类型断言：将 unknown 转为具体类型
-        const payload = event.payload as NodeUpdatePayload | null;
+    private handleNodeUpdate = (event: FSEvent<'node:updated'>) => {
+        const payload = event.payload as unknown as NodeUpdatePayload | null;
         
         if (!payload || !payload.nodeId) {
             return;
@@ -76,8 +72,7 @@ export class BackgroundBrain {
         if (this.isProcessing) return;
 
         try {
-            // [修改] 使用 engine API
-            const node = await this.engine.getNode(nodeId);
+            const node = await this.engine.driver.getNode(nodeId);
             if (!node || node.type !== 'file') return;
 
             // 3. 检查是否需要处理 (防止死循环)
@@ -93,7 +88,7 @@ export class BackgroundBrain {
 
             this.isProcessing = true;
             
-            const content = await this.engine.readContent(nodeId);
+            const content = await this.engine.driver.readContent(nodeId);
             if (typeof content !== 'string') return;
 
             const result: ProcessResult = await this.processor.process(content, {
@@ -113,8 +108,7 @@ export class BackgroundBrain {
                 _ai_processed: true
             };
 
-            // [修改] 使用 engine 更新元数据
-            await this.engine.updateMetadata(nodeId, newMetadata);
+            await this.engine.driver.updateMetadata(nodeId, newMetadata);
             
             console.log(`🧠 [BackgroundBrain] Processed ${nodeId}`);
             

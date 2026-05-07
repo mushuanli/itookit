@@ -176,6 +176,10 @@ export type {
     ISyncService,
 } from './sync/sync';
 
+// ── 驱动接口 ──
+export type { IFSDriverTransaction, IFSDriver } from './services/fs-driver';
+export type { IFSMetaDriver } from './services/fs-meta-driver';
+
 // ── 模块文件系统 ──
 export type { IFSTransaction, IModuleFS } from './services/module-fs';
 

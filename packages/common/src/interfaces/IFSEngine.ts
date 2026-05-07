@@ -3,6 +3,11 @@
  * @desc Defines the standard contract for a module-scoped virtual filesystem engine.
  * Enables UI and plugins to work transparently with different backends
  * (VFS, REST API, Electron FS, in-memory, etc.).
+ *
+ * @deprecated 使用 IModuleFS（完整模块接口）或 IFSDriver（CRUD + 事件驱动接口）替代。
+ *   - UI 层消费方（文件树、编辑器）：改用 IModuleFS
+ *   - IFile / IMDXFile / IChatFile 工厂：参数已改为 IModuleFS
+ *   - EngineNode → FSNode，EngineEventType → FSEventType，EngineEvent → FSEvent<E>
  */
 export type NodeType = 'file' | 'directory';
 
@@ -117,6 +122,8 @@ export interface SRSItemData {
  * Sits between UI layers and the underlying storage backend.
  * Each instance is bound to a specific module (chroot-isolated namespace).
  * Use IFile / IMDXFile / IChatFile for per-file operations.
+ *
+ * @deprecated 使用 IModuleFS 替代
  */
 export interface IFSEngine {
   // --- Read Operations ---

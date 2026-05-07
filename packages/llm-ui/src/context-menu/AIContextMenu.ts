@@ -18,7 +18,7 @@ import type {
     AgentDefinition,
     ContextMenuConfig,
     MenuItem,
-    IFSEngine,
+    IModuleFS,
 } from '@itookit/common';
 import { escapeHTML, escapeAttr } from '@itookit/common';
 
@@ -37,7 +37,7 @@ export interface AIContextMenuOptions {
     /** Agent service used to load the list of available agents. */
     agentService: IAgentConfigService;
     /** Session engine used to persist metadata changes. */
-    engine: IFSEngine;
+    engine: IModuleFS;
     /**
      * When true, AI items are hidden for file nodes (show only on directories).
      * Directories are the primary target: ai_defaultAgent and ai_initialPrompt
@@ -103,7 +103,7 @@ export function createAIContextMenuConfig(options: AIContextMenuOptions): Contex
 async function showAgentDialog(
     node: NodeItem,
     agentService: IAgentConfigService,
-    engine: IFSEngine,
+    engine: IModuleFS,
     currentAgentId: string | undefined
 ): Promise<void> {
     let agents: AgentDefinition[] = [];
@@ -195,7 +195,7 @@ async function showAgentDialog(
 
 function showInitialPromptDialog(
     node: NodeItem,
-    engine: IFSEngine,
+    engine: IModuleFS,
     currentPrompt: string | undefined
 ): void {
     const overlay = createOverlay();
@@ -253,7 +253,7 @@ function showInitialPromptDialog(
 
 function showSystemPromptDialog(
     node: NodeItem,
-    engine: IFSEngine,
+    engine: IModuleFS,
     currentPrompt: string | undefined
 ): void {
     const overlay = createOverlay();

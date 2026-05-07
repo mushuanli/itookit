@@ -2,12 +2,12 @@
  * @file vfs-ui/services/VFSService.ts
  * @desc Data mutation service implementing IDataOperationPort.
  */
-import type { IFSEngine, EngineNode } from '@itookit/common';
+import type { IModuleFS, FSNode } from '@itookit/common';
 import { formatDefaultFileTitle } from '@itookit/common';
 import type { IDataOperationPort } from '../contracts/ports';
 
 export interface VFSServiceDependencies {
-  engine: IFSEngine;
+  engine: IModuleFS;
   newFileContent?: string;
   defaultExtension?: string;
 }
@@ -26,7 +26,7 @@ export interface CreateMultipleFilesOptions {
 const EXT_REGEX = /\.[a-zA-Z0-9]{1,10}$/;
 
 export class VFSService implements IDataOperationPort {
-  private readonly engine: IFSEngine;
+  private readonly engine: IModuleFS;
   private readonly newFileContent: string;
   private readonly defaultExtension: string;
 
@@ -35,7 +35,7 @@ export class VFSService implements IDataOperationPort {
     newFileContent = '',
     defaultExtension = '.md',
   }: VFSServiceDependencies) {
-    if (!engine) throw new Error('VFSService requires an IFSEngine.');
+    if (!engine) throw new Error('VFSService requires an IModuleFS.');
     this.engine = engine;
     this.newFileContent = newFileContent;
     this.defaultExtension = defaultExtension.startsWith('.')
@@ -50,35 +50,40 @@ export class VFSService implements IDataOperationPort {
     title,
     parentId = null,
     content = this.newFileContent,
-  }: CreateFileOptions = {}): Promise<EngineNode> =>
-    this.engine.createFile(this.ensureExtension(title || formatDefaultFileTitle()), parentId, content);
+  }: CreateFileOptions = {}): Promise<FSNode> =>
+    this.engine.driver.createFile({
+      name: this.ensureExtension(title || formatDefaultFileTitle()),
+      parentIdOrPath: parentId,
+      content,
+    });
 
   createFiles = async ({
     parentId = null,
     files,
-  }: CreateMultipleFilesOptions): Promise<EngineNode[]> => {
+  }: CreateMultipleFilesOptions): Promise<FSNode[]> => {
     if (!files?.length) return [];
-    const processed = files.map(f => ({
-      ...f,
-      title: this.ensureExtension(f.title),
-    }));
-    return this.engine.createFiles
-      ? this.engine.createFiles(processed, parentId)
-      : Promise.all(
-          processed.map(f => this.engine.createFile(f.title, parentId, f.content))
-        );
+    return Promise.all(
+      files.map(f =>
+        this.engine.driver.createFile({
+          name: this.ensureExtension(f.title),
+          parentIdOrPath: parentId,
+          content: f.content,
+        })
+      )
+    );
   };
 
   createDirectory = ({
     title = 'New Directory',
     parentId = null,
-  }: { title?: string; parentId?: string | null } = {}): Promise<EngineNode> =>
-    this.engine.createDirectory(title, parentId);
+  }: { title?: string; parentId?: string | null } = {}): Promise<FSNode> =>
+    this.engine.driver.createDirectory({ name: title, parentIdOrPath: parentId });
 
   renameItem = (nodeId: string, newTitle: string): Promise<void> =>
-    this.engine.rename(nodeId, newTitle);
+    this.engine.driver.rename(nodeId, newTitle);
 
-  deleteItems = (nodeIds: string[]): Promise<void> => this.engine.delete(nodeIds);
+  deleteItems = (nodeIds: string[]): Promise<void> =>
+    this.engine.driver.delete(nodeIds);
 
   moveItems = ({
     itemIds,
@@ -86,7 +91,7 @@ export class VFSService implements IDataOperationPort {
   }: {
     itemIds: string[];
     targetId: string | null;
-  }): Promise<void> => this.engine.move(itemIds, targetId);
+  }): Promise<void> => this.engine.driver.move(itemIds, targetId);
 
   updateMultipleItemsTags = async ({
     itemIds,
@@ -95,16 +100,12 @@ export class VFSService implements IDataOperationPort {
     itemIds: string[];
     tags: string[];
   }): Promise<void> => {
-    if (this.engine.setTagsBatch) {
-      await this.engine.setTagsBatch(itemIds.map(id => ({ id, tags })));
-    } else {
-      await Promise.all(itemIds.map(id => this.engine.setTags(id, tags)));
-    }
+    await Promise.all(itemIds.map(id => this.engine.meta.tags.setTags(id, tags)));
   };
 
-  findItemById = (itemId: string) => this.engine.getNode(itemId);
+  findItemById = (itemId: string) => this.engine.driver.getNode(itemId);
   updateItemMetadata = (itemId: string, updates: Record<string, any>) =>
-    this.engine.updateMetadata(itemId, updates);
-  getAllFolders = () => this.engine.search({ type: 'directory' });
-  getAllFiles = () => this.engine.search({ type: 'file' });
+    this.engine.driver.updateMetadata(itemId, updates);
+  getAllFolders = () => this.engine.driver.search({ type: 'directory' });
+  getAllFiles = () => this.engine.driver.search({ type: 'file' });
 }

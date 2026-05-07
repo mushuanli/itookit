@@ -85,6 +85,8 @@ import {
 import * as P from '../utils/path';
 import { encodeId, decodeId } from './id-mapper';
 import { moduleDEBUG } from '../utils/debug';
+import { FSDriverAdapter, FSMetaDriverAdapter } from './fs-driver-adapter';
+import { FileHandle } from '../file-io/File';
 
 export interface ModuleFSDeps {
     moduleId: string;
@@ -146,6 +148,9 @@ export class ModuleFS implements IModuleFS {
     readonly seq?: ISeqFileOperations;
     readonly watcher?: IWatchOperations;
 
+    readonly driver: import('@itookit/common').IFSDriver;
+    readonly meta: import('@itookit/common').IFSMetaDriver;
+
     private readonly engine: VFSEngine;
     private readonly bus: EventBus;
     private readonly plugins: PluginPipeline;
@@ -205,6 +210,15 @@ export class ModuleFS implements IModuleFS {
         if (this.capabilities.seqFiles) {
             this.seq = new InlineSeqOps(this);
         }
+
+        this.driver = new FSDriverAdapter(this);
+        this.meta = new FSMetaDriverAdapter(this);
+    }
+
+    // ── IFile 工厂 ────────────────────────────────────────────
+
+    openFile(nodeId: string): import('@itookit/common').IFile {
+        return new FileHandle(this, nodeId);
     }
 
     // ══════════════════════════════════════════════════════════

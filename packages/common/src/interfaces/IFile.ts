@@ -16,16 +16,17 @@
  *  - delete() cascades to the assetdir.
  *  - move() / rename() keep the assetdir in sync.
  *
- * Create via factory: createFile(engine: IFSEngine, nodeId: string): IFile
+ * Create via: IModuleFS.openFile(nodeId) or factory functions createFile / createMDXFile / createChatFile
  */
-import type { EngineNode, EngineEventType, EngineEvent } from './IFSEngine';
+import type { FSNode } from './fs/core/types';
+import type { FSEventType, FSEvent } from './fs/core/events';
 
 export interface IFile {
     // ========== Identity ==========
     readonly nodeId: string;
     getName(): Promise<string>;
     getPath(): Promise<string>;
-    getNode(): Promise<EngineNode>;
+    getNode(): Promise<FSNode>;
 
     // ========== Metadata ==========
     /** Returns node.icon, or empty string when none is set */
@@ -111,5 +112,5 @@ export interface IFile {
     pruneAssets(referencedNames: string[]): Promise<number | null>;
 
     // ========== Events ==========
-    on(event: EngineEventType, callback: (event: EngineEvent) => void): () => void;
+    on<E extends FSEventType>(event: E, callback: (event: FSEvent<E>) => void): () => void;
 }

@@ -9,7 +9,7 @@
  */
 import YAML from 'yaml';
 import { FileHandle } from './File';
-import type { IFSEngine, IChatFile } from '@itookit/common';
+import type { IModuleFS, IChatFile } from '@itookit/common';
 import type {
     ChatManifest,
     ChatNode,
@@ -22,8 +22,8 @@ import { toString } from '../utils/encoding';
 const SETTINGS_FILENAME = 'settings.yaml';
 
 export class ChatFileHandle extends FileHandle implements IChatFile {
-    constructor(engine: IFSEngine, nodeId: string) {
-        super(engine, nodeId);
+    constructor(fs: IModuleFS, nodeId: string) {
+        super(fs, nodeId);
     }
 
     // ========== Manifest ==========
@@ -244,6 +244,6 @@ export class ChatFileHandle extends FileHandle implements IChatFile {
     }
 }
 
-export function createChatFile(engine: IFSEngine, nodeId: string): IChatFile {
-    return new ChatFileHandle(engine, nodeId);
+export function createChatFile(fs: IModuleFS, nodeId: string): IChatFile {
+    return new ChatFileHandle(fs, nodeId);
 }
