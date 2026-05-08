@@ -297,7 +297,7 @@ export class SettingsService {
                 const nodeWithModule = await this.vfs.getNodeById(nodeId);
                 if (nodeWithModule) {
                     const engine = this.vfs.getEngine(nodeWithModule.moduleName);
-                    await engine.tags?.removeTag(nodeId, tag.name);
+                    await engine.meta.tags?.removeTag(nodeId, tag.name);
                 }
             }));
         } catch (e) {
@@ -461,10 +461,10 @@ export class SettingsService {
     private async traverseModuleFiles(moduleName: string, list: FileMeta[]): Promise<void> {
         const engine = this.vfs.getEngine(moduleName);
 
-        await engine.walkTree?.(async (node) => {
+        await engine.driver.walkTree?.(async (node) => {
             if (node.type !== 'file') return;
             try {
-                const raw = await engine.readContent(node.id);
+                const raw = await engine.driver.readContent(node.id);
                 const buffer = this.toArrayBuffer(raw);
                 const hash = await this.computeSHA256(buffer);
                 list.push({
@@ -525,7 +525,7 @@ export class SettingsService {
                 const ownerName = innerParts[innerParts.length - 2].slice(1); // strip '_'
                 const ownerPath = '/' + [...innerParts.slice(0, -2), ownerName].join('/');
                 const engine = this.vfs.getEngine(moduleName);
-                await engine.assets?.putAsset(ownerPath, assetName, arrayBuffer);
+                await engine.meta.assets?.putAsset(ownerPath, assetName, arrayBuffer);
             } else {
                 const userPath = '/' + innerParts.join('/');
                 await this.vfs.write(moduleName, userPath, arrayBuffer);

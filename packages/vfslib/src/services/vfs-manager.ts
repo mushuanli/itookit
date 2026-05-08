@@ -275,17 +275,17 @@ export class VFSManager implements IVFSManager {
     // ══════════════════════════════════════════════════════════
 
     async read(moduleName: string, path: string): Promise<FileContent> {
-        return this.getEngine(moduleName).readContent(path);
+        return this.getEngine(moduleName).driver.readContent(path);
     }
 
     async write(moduleName: string, path: string, content: FileContent): Promise<void> {
         const eng = this.getEngine(moduleName);
-        if (await eng.exists(path)) {
-            await eng.writeContent(path, content);
+        if (await eng.driver.exists(path)) {
+            await eng.driver.writeContent(path, content);
         } else {
             const dir = P.dirname(path);
             const name = P.basename(path);
-            await eng.createFile({
+            await eng.driver.createFile({
                 name,
                 parentIdOrPath: dir === '/' ? null : dir,
                 content: content as string | ArrayBuffer,
@@ -295,7 +295,7 @@ export class VFSManager implements IVFSManager {
     }
 
     async exists(moduleName: string, path: string): Promise<boolean> {
-        return this.getEngine(moduleName).exists(path);
+        return this.getEngine(moduleName).driver.exists(path);
     }
 
     // ══════════════════════════════════════════════════════════
@@ -309,7 +309,7 @@ export class VFSManager implements IVFSManager {
         for (const mod of targetModules) {
             if (!this.modules.has(mod)) continue;
             try {
-                const result = await this.getEngine(mod).search(query);
+                const result = await this.getEngine(mod).driver.search(query);
                 for (const node of result.nodes) {
                     allResults.push({ ...node, moduleId: mod } as FSNode);
                 }
@@ -332,7 +332,7 @@ export class VFSManager implements IVFSManager {
     async getNodeById(nodeId: string): Promise<(FSNode & { moduleName: string }) | null> {
         for (const modName of this.modules.keys()) {
             try {
-                const node = await this.getEngine(modName).getNode(nodeId);
+                const node = await this.getEngine(modName).driver.getNode(nodeId);
                 if (node) return { ...node, moduleName: modName } as FSNode & { moduleName: string };
             } catch {
                 continue;
@@ -350,8 +350,8 @@ export class VFSManager implements IVFSManager {
         for (const modName of this.modules.keys()) {
             try {
                 const eng = this.getEngine(modName);
-                if (eng.tags) {
-                    const tags = await eng.tags.getAllTags();
+                if (eng.meta.tags) {
+                    const tags = await eng.meta.tags.getAllTags();
                     for (const t of tags) {
                         const existing = tagMap.get(t.name);
                         tagMap.set(t.name, {
@@ -370,8 +370,8 @@ export class VFSManager implements IVFSManager {
 
     async updateTagDefinition(tagName:string, updates: { color?: string }): Promise<void> {
         const eng = this.getEngine(CONFIG_MODULE);
-        if (eng.tags?.updateTagDefinition) {
-            await eng.tags.updateTagDefinition(tagName, updates);
+        if (eng.meta.tags?.updateTagDefinition) {
+            await eng.meta.tags.updateTagDefinition(tagName, updates);
         }
     }
 
@@ -380,8 +380,8 @@ export class VFSManager implements IVFSManager {
         for (const modName of this.modules.keys()) {
             try {
                 const eng = this.getEngine(modName);
-                if (eng.tags) {
-                    await eng.tags.walkByTag(tagName, (id) => {
+                if (eng.meta.tags) {
+                    await eng.meta.tags.walkByTag(tagName, (id) => {
                         results.push(id);
                         return true;
                     });
@@ -496,9 +496,7 @@ class InlineMountRouter implements IMountRouter {
                 semanticSearch: false,
                 syncable: false,
                 assets: true,
-                tags: true,
-                transaction: true,
-                deviceFiles: true,
+                tags: true,                deviceFiles: true,
                 seqFiles: !!backend.records,
                 references: true,
                 symlinks: true,
@@ -553,9 +551,7 @@ class InlineMountRouter implements IMountRouter {
                 semanticSearch: false,
                 syncable: options?.syncable ?? false,
                 assets: true,
-                tags: true,
-                transaction: true,
-                deviceFiles: false,
+                tags: true,                deviceFiles: false,
                 seqFiles: !!backend.records,
                 references: true,
                 symlinks: true,
@@ -641,7 +637,7 @@ class MaintenanceService implements IMaintenanceService {
         for (const modName of this.manager._modules.keys()) {
             try {
                 const eng = this.manager.getEngine(modName);
-                const stats = await eng.getStats?.();
+                const stats = await eng.driver.getStats?.();
                 if (stats) {
                     moduleStats[modName] = stats;
                     totalFiles += stats.fileCount;
@@ -678,7 +674,7 @@ class MaintenanceService implements IMaintenanceService {
         for (const modName of this.manager._modules.keys()) {
             try {
                 const eng = this.manager.getEngine(modName);
-                await eng.walkTree?.((node) => {
+                await eng.driver.walkTree?.((node) => {
                     if (node.type === 'symlink' && !(node as any).symlinkTarget) {
                         errors.push({
                             path: node.path,
@@ -728,10 +724,10 @@ class MaintenanceService implements IMaintenanceService {
         const nodes: FSNode[] = [];
         const contents: Record<string, string> = {};
 
-        await eng.walkTree?.((node) => {
+        await eng.driver.walkTree?.((node) => {
             nodes.push(node);
             if (node.type === 'file') {
-                eng.readContent(node.id, { encoding: 'utf-8' })
+                eng.driver.readContent(node.id, { encoding: 'utf-8' })
                     .then(c => {
                         if (typeof c === 'string') contents[node.id] = c;
                     })
@@ -745,7 +741,7 @@ class MaintenanceService implements IMaintenanceService {
         for (const node of nodes) {
             if (node.type === 'file') {
                 contentPromises.push(
-                    eng.readContent(node.id, { encoding: 'utf-8' })
+                    eng.driver.readContent(node.id, { encoding: 'utf-8' })
                         .then(c => {
                             if (typeof c === 'string') contents[node.id] = c;
                         })
@@ -781,14 +777,14 @@ class MaintenanceService implements IMaintenanceService {
             const parentPath = P.dirname(node.path);
             try {
                 if (node.type === 'directory') {
-                    await eng.createDirectory({
+                    await eng.driver.createDirectory({
                         name: node.name,
                         parentIdOrPath: parentPath,
                         metadata: node.metadata as any,
                         recursive: true,
                     });
                 } else if (node.type === 'file' || node.type === 'seqfile') {
-                    await eng.createFile({
+                    await eng.driver.createFile({
                         name: node.name,
                         parentIdOrPath: parentPath,
                         content: data.contents[node.id],

@@ -11,29 +11,29 @@ describe('Directory operations (IndexedDB backend)', () => {
 
     it('createDirectory creates an empty directory', async () => {
         const { fs } = vfs;
-        await fs.createDirectory({ name: 'docs', parentIdOrPath: null });
-        const node = await fs.getNode('/docs');
+        await fs.driver.createDirectory({ name: 'docs', parentIdOrPath: null });
+        const node = await fs.driver.getNode('/docs');
         expect(node?.type).toBe('directory');
     });
 
     it('createDirectory idempotent — repeated calls are safe', async () => {
         const { fs } = vfs;
-        await fs.createDirectory({ name: 'idm', parentIdOrPath: null });
-        await expect(fs.createDirectory({ name: 'idm', parentIdOrPath: null }))
+        await fs.driver.createDirectory({ name: 'idm', parentIdOrPath: null });
+        await expect(fs.driver.createDirectory({ name: 'idm', parentIdOrPath: null }))
             .resolves.toBeDefined();
     });
 
     it('createDirectory recursive creates nested dirs', async () => {
         const { fs } = vfs;
-        await fs.createDirectory({ name: 'sub', parentIdOrPath: '/a/b', recursive: true });
-        expect(await fs.exists('/a')).toBe(true);
-        expect(await fs.exists('/a/b')).toBe(true);
-        expect(await fs.exists('/a/b/sub')).toBe(true);
+        await fs.driver.createDirectory({ name: 'sub', parentIdOrPath: '/a/b', recursive: true });
+        expect(await fs.driver.exists('/a')).toBe(true);
+        expect(await fs.driver.exists('/a/b')).toBe(true);
+        expect(await fs.driver.exists('/a/b/sub')).toBe(true);
     });
 
     it('createFile recursive creates missing parent dirs', async () => {
         const { fs } = vfs;
-        await fs.createFile({
+        await fs.driver.createFile({
             name: 'deep.txt',
             parentIdOrPath: '/x/y/z',
             content: 'deep',
@@ -44,19 +44,19 @@ describe('Directory operations (IndexedDB backend)', () => {
 
     it('getChildren returns full FSNode[] by default', async () => {
         const { fs } = vfs;
-        await fs.createDirectory({ name: 'parent', parentIdOrPath: null });
-        await fs.createFile({ name: 'child1.txt', parentIdOrPath: '/parent', content: '' });
-        await fs.createFile({ name: 'child2.txt', parentIdOrPath: '/parent', content: '' });
-        const children = await fs.getChildren('/parent');
+        await fs.driver.createDirectory({ name: 'parent', parentIdOrPath: null });
+        await fs.driver.createFile({ name: 'child1.txt', parentIdOrPath: '/parent', content: '' });
+        await fs.driver.createFile({ name: 'child2.txt', parentIdOrPath: '/parent', content: '' });
+        const children = await fs.driver.getChildren('/parent');
         expect(children).toHaveLength(2);
         expect(children.map(c => c.name).sort()).toEqual(['child1.txt', 'child2.txt']);
     });
 
     it('getChildren with fields:entry returns lightweight DirEntry[]', async () => {
         const { fs } = vfs;
-        await fs.createDirectory({ name: 'dir', parentIdOrPath: null });
-        await fs.createFile({ name: 'a.txt', parentIdOrPath: '/dir', content: 'hi' });
-        const entries = await fs.getChildren('/dir', { fields: 'entry' });
+        await fs.driver.createDirectory({ name: 'dir', parentIdOrPath: null });
+        await fs.driver.createFile({ name: 'a.txt', parentIdOrPath: '/dir', content: 'hi' });
+        const entries = await fs.driver.getChildren('/dir', { fields: 'entry' });
         expect(entries[0]).toHaveProperty('name');
         expect(entries[0]).toHaveProperty('type');
         expect(entries[0]).not.toHaveProperty('metadata');
@@ -66,9 +66,9 @@ describe('Directory operations (IndexedDB backend)', () => {
         // Hidden names (dot-prefix) are excluded from default listings.
         // Any module can create them in its own space; they just won't appear here.
         const { fs } = vfs;
-        await fs.createDirectory({ name: 'hdir', parentIdOrPath: null });
-        await fs.createFile({ name: 'visible.txt', parentIdOrPath: '/hdir', content: '' });
-        const children = await fs.getChildren('/hdir');
+        await fs.driver.createDirectory({ name: 'hdir', parentIdOrPath: null });
+        await fs.driver.createFile({ name: 'visible.txt', parentIdOrPath: '/hdir', content: '' });
+        const children = await fs.driver.getChildren('/hdir');
         const names = children.map(c => c.name);
         expect(names).toContain('visible.txt');
         expect(names.filter(n => n.startsWith('.'))).toHaveLength(0);
@@ -76,22 +76,22 @@ describe('Directory operations (IndexedDB backend)', () => {
 
     it('delete directory with recursive:true removes all children', async () => {
         const { fs } = vfs;
-        await fs.createDirectory({ name: 'rm', parentIdOrPath: null });
-        await fs.createFile({ name: 'inner.txt', parentIdOrPath: '/rm', content: 'bye' });
-        await fs.delete(['/rm'], { recursive: true });
-        expect(await fs.exists('/rm')).toBe(false);
-        expect(await fs.exists('/rm/inner.txt')).toBe(false);
+        await fs.driver.createDirectory({ name: 'rm', parentIdOrPath: null });
+        await fs.driver.createFile({ name: 'inner.txt', parentIdOrPath: '/rm', content: 'bye' });
+        await fs.driver.delete(['/rm'], { recursive: true });
+        expect(await fs.driver.exists('/rm')).toBe(false);
+        expect(await fs.driver.exists('/rm/inner.txt')).toBe(false);
     });
 
     it('walkTree visits all nodes depth-first', async () => {
         const { fs } = vfs;
-        await fs.createDirectory({ name: 'walk', parentIdOrPath: null });
-        await fs.createDirectory({ name: 'sub', parentIdOrPath: '/walk' });
-        await fs.createFile({ name: 'a.txt', parentIdOrPath: '/walk', content: '' });
-        await fs.createFile({ name: 'b.txt', parentIdOrPath: '/walk/sub', content: '' });
+        await fs.driver.createDirectory({ name: 'walk', parentIdOrPath: null });
+        await fs.driver.createDirectory({ name: 'sub', parentIdOrPath: '/walk' });
+        await fs.driver.createFile({ name: 'a.txt', parentIdOrPath: '/walk', content: '' });
+        await fs.driver.createFile({ name: 'b.txt', parentIdOrPath: '/walk/sub', content: '' });
 
         const visited: string[] = [];
-        await fs.walkTree!((node) => { visited.push(node.path); });
+        await fs.driver.walkTree!((node) => { visited.push(node.path); });
 
         expect(visited).toContain('/walk');
         expect(visited).toContain('/walk/sub');
@@ -101,13 +101,13 @@ describe('Directory operations (IndexedDB backend)', () => {
 
     it('walkTree respects maxDepth', async () => {
         const { fs } = vfs;
-        await fs.createDirectory({ name: 'deep', parentIdOrPath: null });
-        await fs.createDirectory({ name: 'l2', parentIdOrPath: '/deep' });
-        await fs.createDirectory({ name: 'l3', parentIdOrPath: '/deep/l2' });
-        await fs.createFile({ name: 'file.txt', parentIdOrPath: '/deep/l2/l3', content: '' });
+        await fs.driver.createDirectory({ name: 'deep', parentIdOrPath: null });
+        await fs.driver.createDirectory({ name: 'l2', parentIdOrPath: '/deep' });
+        await fs.driver.createDirectory({ name: 'l3', parentIdOrPath: '/deep/l2' });
+        await fs.driver.createFile({ name: 'file.txt', parentIdOrPath: '/deep/l2/l3', content: '' });
 
         const visited: string[] = [];
-        await fs.walkTree!((node) => { visited.push(node.path); }, { maxDepth: 1 });
+        await fs.driver.walkTree!((node) => { visited.push(node.path); }, { maxDepth: 1 });
 
         expect(visited).toContain('/deep');
         expect(visited).toContain('/deep/l2');
@@ -116,22 +116,22 @@ describe('Directory operations (IndexedDB backend)', () => {
 
     it('walkTree typeFilter only returns matching types', async () => {
         const { fs } = vfs;
-        await fs.createDirectory({ name: 'tf', parentIdOrPath: null });
-        await fs.createFile({ name: 'a.txt', parentIdOrPath: '/tf', content: '' });
+        await fs.driver.createDirectory({ name: 'tf', parentIdOrPath: null });
+        await fs.driver.createFile({ name: 'a.txt', parentIdOrPath: '/tf', content: '' });
 
         const files: string[] = [];
-        await fs.walkTree!((node) => { files.push(node.path); }, { typeFilter: 'file' });
+        await fs.driver.walkTree!((node) => { files.push(node.path); }, { typeFilter: 'file' });
         expect(files.every(p => !p.endsWith('/tf'))).toBe(true);
     });
 
     it('walkTree callback returning false stops iteration', async () => {
         const { fs } = vfs;
-        await fs.createDirectory({ name: 'stop', parentIdOrPath: null });
+        await fs.driver.createDirectory({ name: 'stop', parentIdOrPath: null });
         for (let i = 0; i < 5; i++) {
-            await fs.createFile({ name: `f${i}.txt`, parentIdOrPath: '/stop', content: '' });
+            await fs.driver.createFile({ name: `f${i}.txt`, parentIdOrPath: '/stop', content: '' });
         }
         let count = 0;
-        await fs.walkTree!((node) => {
+        await fs.driver.walkTree!((node) => {
             if (node.type === 'file') {
                 count++;
                 if (count >= 2) return false;

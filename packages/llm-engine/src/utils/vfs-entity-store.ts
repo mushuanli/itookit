@@ -50,13 +50,18 @@ export class VFSEntityStore<T extends Identifiable> {
         };
 
         await this.service.ensureDirectory(this.config.dir);
-        const nodeId = await this.engine.resolvePath(fullPath);
+        const nodeId = await this.engine.driver.resolvePath(fullPath);
 
         if (nodeId) {
-            await this.engine.writeContent(nodeId, content);
-            await this.engine.updateMetadata(nodeId, metadata);
+            await this.engine.driver.writeContent(nodeId, content);
+            await this.engine.driver.updateMetadata(nodeId, metadata);
         } else {
-            await this.engine.createFile(filename, this.config.dir, content, metadata);
+            await this.engine.driver.createFile({
+                name: filename,
+                parentIdOrPath: this.config.dir,
+                content,
+                metadata,
+            });
         }
 
         // 更新缓存
@@ -76,10 +81,10 @@ export class VFSEntityStore<T extends Identifiable> {
      */
     async delete(id: string, cache: T[]): Promise<T[]> {
         const fullPath = `${this.config.dir}/${id}.json`;
-        const nodeId = await this.engine.resolvePath(fullPath);
+        const nodeId = await this.engine.driver.resolvePath(fullPath);
 
         if (nodeId) {
-            await this.engine.delete([nodeId]);
+            await this.engine.driver.delete([nodeId]);
             log.debug(`${this.config.typeName} file deleted`, { id });
         }
 

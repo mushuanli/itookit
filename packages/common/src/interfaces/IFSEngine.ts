@@ -1,18 +1,25 @@
 /**
  * @file common/interfaces/IFSEngine.ts
- * @desc Defines the standard contract for a module-scoped virtual filesystem engine.
- * Enables UI and plugins to work transparently with different backends
- * (VFS, REST API, Electron FS, in-memory, etc.).
  *
- * @deprecated 使用 IModuleFS（完整模块接口）或 IFSDriver（CRUD + 事件驱动接口）替代。
- *   - UI 层消费方（文件树、编辑器）：改用 IModuleFS
- *   - IFile / IMDXFile / IChatFile 工厂：参数已改为 IModuleFS
- *   - EngineNode → FSNode，EngineEventType → FSEventType，EngineEvent → FSEvent<E>
+ * @deprecated 整个文件已废弃。改用：
+ *   - IModuleFS / IFSDriver（文件操作）
+ *   - FSNode / FSEventType / FSEvent<E>（节点 / 事件类型）
+ *   - SRSItemData from '@itookit/common' srs（SRS 数据）
+ *
+ * 剩余消费方：VFSModuleEngine（deprecated adapter）、AssetManagerUI。
+ * 待这两处迁移完成后可整体删除。
  */
+
+// SRSItemData is now canonical in srs/ISRSService — import for use in this file, re-export for callers
+import type { SRSItemData } from './srs/ISRSService';
+export type { SRSItemData };
+
+/** @deprecated 使用 FSNodeType 替代 */
 export type NodeType = 'file' | 'directory';
 
 /**
  * Generic node data structure
+ * @deprecated 使用 FSNode (discriminated union) 替代
  */
 export interface EngineNode {
   id: string;
@@ -98,23 +105,6 @@ export interface EngineEvent {
   payload: unknown;
 }
 
-/**
- * SRS (Spaced Repetition System) item data
- */
-export interface SRSItemData {
-  /** Next review time (Unix timestamp) */
-  dueAt: number;
-  /** Last review time (Unix timestamp) */
-  lastReviewedAt: number;
-  /** Review count */
-  reviewCount: number;
-  /** Current interval (days) */
-  interval: number;
-  /** Ease factor */
-  ease: number;
-  /** Content snippet (optional) */
-  snippet?: string;
-}
 
 /**
  * Module-scoped virtual filesystem engine.

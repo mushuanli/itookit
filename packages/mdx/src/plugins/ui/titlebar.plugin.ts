@@ -226,7 +226,7 @@ export class CoreTitleBarPlugin implements MDxPlugin {
         return;
       }
       try {
-        await engine.rename(nodeId, finalName);
+        await engine.driver.rename(nodeId, finalName);
         this.currentTitle = newTitle;
       } catch {
         this.titleEl!.value = this.currentTitle;

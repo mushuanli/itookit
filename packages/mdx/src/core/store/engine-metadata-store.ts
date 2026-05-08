@@ -1,12 +1,14 @@
 // @mdx/core/store/engine-metadata-store.ts
-import type { IFSEngine } from '@itookit/common';
+import type { IModuleFS } from '@itookit/common';
 import type { ScopedPersistenceStore } from './types';
 
 type PluginDataRecord = Record<string, unknown>;
 
 /**
- * 基于 Engine 元数据的持久化存储
+ * 基于 IModuleFS 元数据的持久化存储
  * 特性：防抖批量写入、并发安全、销毁保护
+ *
+ * v3.3: 依赖 IModuleFS（不再依赖 IFSEngine）
  */
 export class EngineMetadataStore implements ScopedPersistenceStore {
     private pendingUpdates = new Map<string, unknown>();
@@ -15,7 +17,7 @@ export class EngineMetadataStore implements ScopedPersistenceStore {
     private isDestroyed = false;
 
     constructor(
-        private engine: IFSEngine,
+        private engine: IModuleFS,
         private nodeId: string,
         private pluginNamespace: string
     ) { }
@@ -27,13 +29,12 @@ export class EngineMetadataStore implements ScopedPersistenceStore {
     async get(key: string): Promise<unknown> {
         if (this.isDestroyed) return undefined;
 
-        // 优先从待写入队列读取
         if (this.pendingUpdates.has(key)) {
             return this.pendingUpdates.get(key);
         }
 
         try {
-            const node = await this.engine.getNode(this.nodeId);
+            const node = await this.engine.driver.getNode(this.nodeId);
             if (!node) return undefined;
             const pluginData = node.metadata?.[this.getMetaKey()] as PluginDataRecord | undefined;
             return pluginData?.[key];
@@ -72,7 +73,7 @@ export class EngineMetadataStore implements ScopedPersistenceStore {
 
         this.flushPromise = (async () => {
             try {
-                const node = await this.engine.getNode(this.nodeId);
+                const node = await this.engine.driver.getNode(this.nodeId);
                 if (!node) throw new Error(`Node ${this.nodeId} not found`);
 
                 const metaKey = this.getMetaKey();
@@ -83,7 +84,7 @@ export class EngineMetadataStore implements ScopedPersistenceStore {
                     else pluginData[k] = v;
                 }
 
-                await this.engine.updateMetadata(this.nodeId, {
+                await this.engine.driver.updateMetadata(this.nodeId, {
                     ...node.metadata,
                     [metaKey]: pluginData,
                 });

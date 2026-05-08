@@ -1,8 +1,12 @@
-// @file: llm-engine/src/persistence/types.ts
-// Core chat types have been moved to @itookit/common.
-// Re-exported here for backward compatibility.
+/**
+ * @file: llm-engine/src/persistence/types.ts
+ * Core chat types — re-exported from @itookit/common for backward compatibility.
+ *
+ * v3.3: IChatEngine no longer extends IFSEngine (deprecated).
+ *       Use fs: IModuleFS for file operations instead.
+ */
 
-import type { IFSEngine } from '@itookit/common';
+import type { FSNode } from '@itookit/common';
 
 export type {
     ChatAttachment,
@@ -17,7 +21,6 @@ export type {
 } from '@itookit/common';
 export { DEFAULT_SESSION_SETTINGS } from '@itookit/common';
 
-// Local re-import for use in IChatEngine signatures
 import type {
     ChatManifest,
     ChatNode,
@@ -29,10 +32,27 @@ import type {
 } from '@itookit/common';
 
 /**
- * Chat engine — extends the base IFSEngine with
- * chat-specific operations (session creation, message management, branches).
+ * Chat engine — chat-specific session operations.
+ * No longer extends IFSEngine (deprecated v3.3).
+ * File CRUD operations go through the underlying IModuleFS (accessible via
+ * the engine's .module or via WorkspaceStrategy.getEngine()).
  */
-export interface IChatEngine extends IFSEngine {
+export interface IChatEngine {
+    /** v3.3: 底层模块文件系统，供 UI 层文件树操作使用 */
+    readonly engine: import('@itookit/common').IModuleFS;
+
+    // ── IModuleFS 兼容层（委托给 this.engine） ──
+
+    /** 文件操作驱动（POSIX CRUD + 搜索 + 事件） */
+    readonly driver: import('@itookit/common').IFSDriver;
+    /** 扩展元信息驱动（assetdir / tags / seqfile / refs） */
+    readonly meta: import('@itookit/common').IFSMetaDriver;
+    readonly moduleId: string;
+    readonly capabilities: import('@itookit/common').FSCapabilities;
+    openFile(nodeId: string): import('@itookit/common').IFile;
+
+    // ── Chat-specific operations ──
+
     createSession(title: string, systemPrompt?: string): Promise<string>;
     initializeExistingFile(nodeId: string, title: string, systemPrompt?: string): Promise<string>;
 
@@ -70,4 +90,23 @@ export interface IChatEngine extends IFSEngine {
 
     validateManifest(nodeId: string, sessionId: string): Promise<boolean>;
     updateManifestHead(nodeId: string, sessionId: string, targetNodeId: string): Promise<void>;
+
+    // ── Convenience CRUD (delegates to underlying IModuleFS) ──
+    createFile(name: string, parentId: string | null, content?: string | ArrayBuffer): Promise<FSNode>;
+    createDirectory(name: string, parentId: string | null): Promise<FSNode>;
+    rename(id: string, newName: string): Promise<void>;
+    delete(ids: string[]): Promise<void>;
+    getNode(id: string): Promise<FSNode | null>;
+    readContent(id: string): Promise<string | ArrayBuffer>;
+    getChildren(parentId: string): Promise<FSNode[]>;
+    search(query: { type?: string; text?: string; tags?: string[]; limit?: number; scope?: string[] }): Promise<FSNode[]>;
+    updateMetadata(id: string, metadata: Record<string, unknown>): Promise<void>;
+    setTags(id: string, tags: string[]): Promise<void>;
+    createAsset(ownerNodeId: string, filename: string, content: string | ArrayBuffer): Promise<FSNode>;
+    getAssetDirectoryId(ownerNodeId: string): Promise<string | null>;
+    getAssets(ownerNodeId: string): Promise<FSNode[]>;
+
+    init(): Promise<void>;
+    dispose(): Promise<void>;
+    on(event: string, callback: (event: any) => void): () => void;
 }

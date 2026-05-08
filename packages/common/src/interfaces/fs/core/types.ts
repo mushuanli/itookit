@@ -210,7 +210,6 @@ export interface FSCapabilities {
     readonly syncable: boolean;
     readonly assets: boolean;
     readonly tags: boolean;
-    readonly transaction: boolean;
     readonly deviceFiles: boolean;
     readonly seqFiles: boolean;
     readonly references: boolean;

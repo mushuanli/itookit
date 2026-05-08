@@ -12,7 +12,8 @@
 
 import type {
     IModuleFS,
-    IFSTransaction,
+    IFSDriver,
+    IFSDriverTransaction,
     FSNode,
     DirEntry,
     FSCapabilities,
@@ -85,7 +86,7 @@ import {
 import * as P from '../utils/path';
 import { encodeId, decodeId } from './id-mapper';
 import { moduleDEBUG } from '../utils/debug';
-import { FSDriverAdapter, FSMetaDriverAdapter } from './fs-driver-adapter';
+import { FSMetaDriverAdapter } from './fs-driver-adapter';
 import { FileHandle } from '../file-io/File';
 
 export interface ModuleFSDeps {
@@ -138,7 +139,7 @@ class DeviceHandle implements IDeviceHandle {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-export class ModuleFS implements IModuleFS {
+export class ModuleFS implements IModuleFS, IFSDriver {
     readonly moduleId: string;
     readonly capabilities: FSCapabilities;
 
@@ -190,7 +191,6 @@ export class ModuleFS implements IModuleFS {
             syncable: false,
             assets: true,
             tags: true,
-            transaction: true,
             deviceFiles: true,
             seqFiles: !!backend.records,
             references: true,
@@ -211,7 +211,7 @@ export class ModuleFS implements IModuleFS {
             this.seq = new InlineSeqOps(this);
         }
 
-        this.driver = new FSDriverAdapter(this);
+        this.driver = this;
         this.meta = new FSMetaDriverAdapter(this);
     }
 
@@ -958,6 +958,10 @@ export class ModuleFS implements IModuleFS {
         return r.meta?.symlinkTarget ?? '';
     }
 
+    async hardlink(_linkPath: string, _targetPath: string): Promise<FSNode> {
+        throw new FSCapabilityError('hardlinks', this.moduleId);
+    }
+
     // ══════════════════════════════════════════════════════════
     // Device
     // ══════════════════════════════════════════════════════════
@@ -1060,11 +1064,7 @@ export class ModuleFS implements IModuleFS {
     // Transaction
     // ══════════════════════════════════════════════════════════
 
-    async transaction<T>(fn: (tx: IFSTransaction) => Promise<T>): Promise<T> {
-        if (!this.capabilities.transaction) {
-            throw new FSCapabilityError('transaction', this.moduleId);
-        }
-
+    async transaction<T>(fn: (tx: IFSDriverTransaction) => Promise<T>): Promise<T> {
         const buffer = new TransactionEventBuffer(this.bus, this.moduleId);
 
         // Swap event bus to buffer during transaction
@@ -1086,7 +1086,7 @@ export class ModuleFS implements IModuleFS {
         // that invoke backend.runInTransaction(), which would deadlock the txQueue
         // (outer waits for inner, inner waits for outer via Promise chain).
         // Individual operations are already serialized by their own txQueue items.
-        const tx: IFSTransaction = {
+        const tx: IFSDriverTransaction = {
             getNode: (id) => this.getNode(id),
             readContent: (id, opts) => this.readContent(id, opts),
             createFile: (opts) => this.createFile(opts),

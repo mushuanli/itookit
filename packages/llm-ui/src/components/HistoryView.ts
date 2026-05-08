@@ -1,7 +1,7 @@
 // @file: llm-ui/components/history/HistoryView.ts
 
 import type { SessionGroup, OrchestratorEvent } from '@itookit/llm-engine';
-import type { IFSEngine, IAgentRuntime } from '@itookit/common';
+import type { IModuleFS, IAgentRuntime } from '@itookit/common';
 import type { IHistoryPresenter } from '../domain/ports/IHistoryPresenter';
 import type { CollapseStateMap, NodeActionCallback } from '../domain/types';
 import type { IEditorEventBus } from '../domain/events';
@@ -26,7 +26,7 @@ export interface HistoryViewOptions {
     bus?: IEditorEventBus;
     nodeId?: string;
     ownerNodeId?: string;
-    sessionEngine?: IFSEngine;
+    sessionEngine?: IModuleFS;
     initialCollapseStates?: CollapseStateMap;
     onScroll?: () => void;
 }

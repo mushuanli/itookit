@@ -5,7 +5,7 @@
 
 import { BaseModuleService } from '@itookit/vfslib';
 import type { IVFSManager, VFSManagerEvent } from '@itookit/common';
-import type { EngineNode, EngineSearchQuery, RestorableItem } from '@itookit/common';
+import type { FSNode, FSSearchQuery, RestorableItem } from '@itookit/common';
 import { FS_MODULE_AGENTS } from '@itookit/common';
 import type {
     ILLMManagementService, ConnectionMeta, LLMConnection,
@@ -109,19 +109,20 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
             const filename = `${def.id}.agent`;
             const parentDir = def.initPath || AGENT_DEFAULT_DIR;
             const fullPath = `${parentDir}/${filename}`.replace(/\/+/g, '/');
-            if (await this.engine.pathExists(fullPath)) continue;
+            if (await this.engine.driver.exists(fullPath)) continue;
 
             const { initPath, initialTags, ...content } = def;
             if (!content.config.connectionId) content.config.connectionId = defaultConnId;
 
             try {
                 await this.ensureDirectory(parentDir);
-                const node = await this.engine.createFile(
-                    filename, parentDir,
-                    JSON.stringify(content, null, 2),
-                    { icon: def.icon || '🤖', title: def.name, description: def.description },
-                );
-                if (initialTags?.length && node?.id) await this.engine.setTags(node.id, initialTags);
+                const node = await this.engine.driver.createFile({
+                    name: filename,
+                    parentIdOrPath: parentDir,
+                    content: JSON.stringify(content, null, 2),
+                    metadata: { icon: def.icon || '🤖', title: def.name, description: def.description },
+                });
+                if (initialTags?.length && node?.id) await this.engine.meta.tags?.setTags(node.id, initialTags);
                 created++;
             } catch { /* ignore per-agent errors */ }
         }
@@ -172,19 +173,24 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
 
         const cachedId = this._agentNodeIds.get(agent.id);
         if (cachedId) {
-            await this.engine.writeContent(cachedId, contentStr);
-            await this.engine.updateMetadata(cachedId, metadata);
+            await this.engine.driver.writeContent(cachedId, contentStr);
+            await this.engine.driver.updateMetadata(cachedId, metadata);
         } else {
             // Cache miss: search for existing file (only before first scan completes)
-            const query: EngineSearchQuery = { text: filename, type: 'file' };
-            const results = await this.engine.search(query);
-            const existing = results.find((n: EngineNode) => n.name === filename);
+            const query: FSSearchQuery = { name: { contains: filename }, type: 'file' };
+            const results = await this.engine.driver.search(query);
+            const existing = Array.from(results.nodes).find((n: FSNode) => n.name === filename);
             if (existing) {
                 this._agentNodeIds.set(agent.id, existing.id);
-                await this.engine.writeContent(existing.id, contentStr);
-                await this.engine.updateMetadata(existing.id, metadata);
+                await this.engine.driver.writeContent(existing.id, contentStr);
+                await this.engine.driver.updateMetadata(existing.id, metadata);
             } else {
-                const node = await this.engine.createFile(filename, null, contentStr, metadata);
+                const node = await this.engine.driver.createFile({
+                    name: filename,
+                    parentIdOrPath: null,
+                    content: contentStr,
+                    metadata,
+                });
                 if (node?.id) this._agentNodeIds.set(agent.id, node.id);
             }
         }
@@ -202,14 +208,14 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
     async deleteAgent(agentId: string): Promise<void> {
         const cachedId = this._agentNodeIds.get(agentId);
         if (cachedId) {
-            await this.engine.delete([cachedId]);
+            await this.engine.driver.delete([cachedId]);
             this._agentNodeIds.delete(agentId);
         } else {
             const filename = `${agentId}.agent`;
-            const query: EngineSearchQuery = { text: filename, type: 'file' };
-            const results = await this.engine.search(query);
-            const node = results.find((n: EngineNode) => n.name === filename);
-            if (node) await this.engine.delete([node.id]);
+            const query: FSSearchQuery = { name: { contains: filename }, type: 'file' };
+            const results = await this.engine.driver.search(query);
+            const node = Array.from(results.nodes).find((n: FSNode) => n.name === filename);
+            if (node) await this.engine.driver.delete([node.id]);
         }
         this._agents = this._agents.filter(a => a.id !== agentId);
         this.notify();
@@ -369,13 +375,12 @@ export class VFSAgentService extends BaseModuleService implements IAgentManageme
         const agents: AgentDefinition[] = [];
         this._agentNodeIds.clear();
         try {
-            const query: EngineSearchQuery = { text: '.agent', type: 'file' };
-            const nodes = await this.engine.search(query);
+            const result = await this.engine.driver.search({ name: { contains: '.agent' }, type: 'file' });
 
-            const results = await Promise.all(nodes.map(async (node: EngineNode) => {
+            const results = await Promise.all(Array.from(result.nodes).map(async (node) => {
                 if (!node.name.endsWith('.agent')) return null;
                 try {
-                    const content = await this.engine.readContent(node.id);
+                    const content = await this.engine.driver.readContent(node.id);
                     if (!content) return null;
                     const jsonStr = typeof content === 'string' ? content : new TextDecoder().decode(content as ArrayBuffer);
                     const data = JSON.parse(jsonStr) as AgentDefinition;

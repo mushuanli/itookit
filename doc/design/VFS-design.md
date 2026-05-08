@@ -284,26 +284,33 @@ open() → 建立会话 → write(提示词) → readStream() → close()
 
 ### ModuleFS — chroot 隔离文件系统
 
-模块拿到的 `IModuleFS` 已经过 `ScopedView` 隔离：
+`ModuleFS` 同时实现 `IModuleFS` 和 `IFSDriver` — `IModuleFS` 是薄包装器（不重复 CRUD 方法），`IFSDriver` 通过 `this.driver = this` 自引用实现。
 
+```ts
+// IModuleFS: 薄包装器
+interface IModuleFS extends FSEventEmitter {
+    driver: IFSDriver;       // CRUD + links + transaction + search
+    meta: IFSMetaDriver;     // assets / tags / seq / refs / watcher
+    openFile(nodeId): IFile;
+    init(), dispose?();
+    openDevice?(), createDeviceFile?(), ioctl?();
+}
 ```
-模块视角              系统真实路径
-─────────────────    ─────────────────
-/           →        /module/<moduleId>/
-/dev/       →        /dev/              (只读)
-/etc/       →        /etc/              (只读)
+
+```ts
+// 使用方式
+const node = await fs.driver.getNode(fileId);
+await fs.driver.writeContent(fileId, content);
+await fs.meta.assets.putAsset(nodeId, 'img.png', data);
+const file = fs.openFile(nodeId);
 ```
 
-**能力声明** (FSCapabilities)：构造函数中根据后端能力动态计算。例如：
-- `seqFiles: !!backend.records` — 有 IRecordStore 才有 seqFiles
-- `partialRead: !!backend.content.readRange` — 有 readRange 才声明部分读取
-
-**能力子接口**（ISP 原则）：
-- `moduleFS.assets` → `IAssetOperations`（内联实现 `InlineAssetOps`）
-- `moduleFS.tags` → `ITagOperations`（`InlineTagOps`）
-- `moduleFS.seq` → `ISeqFileOperations`（`InlineSeqOps`，仅 seqFiles=true）
-- `moduleFS.refs` → `IRefOperations`（`InlineRefOps`）
-- `moduleFS.watcher` → `IWatchOperations`（暂无实现）
+**能力子接口**（均通过 `fs.meta.*` 访问）：
+- `fs.meta.assets` → `IAssetOperations`（始终存在，默认返回空值）
+- `fs.meta.tags` → `ITagOperations`（始终存在）
+- `fs.meta.seq` → `ISeqFileOperations`（仅 capabilities.seqFiles === true）
+- `fs.meta.refs` → `IRefOperations`（仅 capabilities.references === true）
+- `fs.meta.watcher` → `IWatchOperations`（暂未实现）
 
 **操作流程**（以 `createFile` 为例）：
 ```
@@ -328,38 +335,34 @@ open() → 建立会话 → write(提示词) → readStream() → close()
 
 通过 `isRealPathReadOnly()` 检查避免歧义：模块内的 `/module/<id>/dev` 目录不应被误判为只读 `/dev` 映射。
 
-### IFSDriver / IFSMetaDriver — 驱动层 (v3.3)
+### IFSDriver / IFSMetaDriver — 驱动层 (v3.3 → v4.0)
 
-v3.3 重构将原有两套并存的接口体系（`IModuleFS` + `IFSEngine`）统一为 `IFSDriver` + `IFSMetaDriver` 双驱动架构：
+v3.3 重构引入双驱动架构，v4.0 完成最终收尾——IModuleFS 彻底瘦身为薄包装器：
 
 ```
 重构前:                             重构后:
 IFile → IFSEngine（适配 VFS）       IFile → IFSDriver + IFSMetaDriver（直接操作）
-IModuleFS（扁平 20+ 方法）           IModuleFS.driver → IFSDriver
+IModuleFS（扁平 20+ 方法）           IModuleFS.driver → IFSDriver（ModuleFS self = this）
                                       IModuleFS.meta   → IFSMetaDriver
                                       IModuleFS.openFile() → IFile（轻量句柄工厂）
 ```
 
-**设计动机**：
-1. 普通文件系统和 VFS 扩展（assetdir/标签/引用）职责分离
-2. `IFile` 直接持有驱动引用，去除 `IFSEngine` 适配层
-3. 搜索语义统一：assetdir 内部命中 → 映射为宿主 `IFile`
-4. 事务/符号链接/硬链接：从可选提升为必选能力
+**v4.0 收尾**：
+- 删除 transition compat：`IModuleFS` 上的 `assets?/tags?/seq?/refs?/watcher?` 别名已移除
+- 删除 `IFSTransaction`（与 `IFSDriverTransaction` 统一）
+- 删除 `FSCapabilities.transaction`（`IFSDriver.transaction()` 现为必选方法）
+- 删除 `FSDriverAdapter` — `ModuleFS` 直接 `implements IFSDriver`（`this.driver = this`）
 
 #### IModuleFS 新接口
 
 ```ts
-interface IModuleFS {
-    driver: IFSDriver;       // POSIX CRUD + 搜索 + 事务 + 事件
-    meta: IFSMetaDriver;     // assetdir / tags / seq / refs / watcher
-    openFile(nodeId): IFile; // 轻量句柄工厂
-
-    // 兼容性别名（逐步迁移到 meta.*）
-    assets?: IAssetOperations;
-    tags?: ITagOperations;
-    seq?: ISeqFileOperations;
-    refs?: IRefOperations;
-    watcher?: IWatchOperations;
+interface IModuleFS extends FSEventEmitter {
+    moduleId, capabilities
+    driver: IFSDriver;       // CRUD + links + transaction + search
+    meta: IFSMetaDriver;     // assets / tags / seq / refs / watcher
+    openFile(nodeId): IFile;
+    init(), dispose?();
+    openDevice?(), createDeviceFile?(), ioctl?();  // VFS 特有
 }
 ```
 
@@ -368,14 +371,14 @@ interface IModuleFS {
 模块作用域级（已完成 chroot 隔离、路径解析、权限控制），替代 `IFSEngine` 的 CRUD 部分：
 
 ```ts
-interface IFSDriver {
+interface IFSDriver extends FSEventEmitter {
     // 必选能力（后端不支持时抛 FSCapabilityError）
     transaction<T>(fn): Promise<T>;   // 闭包式事务
     symlink(link, target): FSNode;    // 符号链接
     readlink(path): string;           // 读取链接目标
     hardlink(link, target): FSNode;   // 硬链接
 
-    // CRUD（与原有 IModuleFS 方法签名一致）
+    // CRUD
     getNode / getChildren / readContent / resolvePath / exists
     createFile / createDirectory / writeContent / appendContent
     rename / move / delete / updateMetadata / copy?
@@ -513,16 +516,29 @@ const file = fs.openFile(nodeId);
 | `app-shell/strategies` | `StandardWorkspaceStrategy` 直接返回 `IModuleFS` |
 | `llm-ui` | 类型注解迁移 `IFSEngine → IModuleFS` |
 | `common` | 新增 `IFSDriver` / `IFSMetaDriver` / `IFSDriverTransaction`，`IFSEngine` 标注 `@deprecated` |
-| `vfslib` | 新增 `FSDriverAdapter` / `FSMetaDriverAdapter`，`ModuleFS.driver/meta/openFile` |
+| `vfslib` | 新增 `IModuleFS` + `IFSDriver` 双接口；`ModuleFS` 直接实现 `IFSDriver`（自引用）；`FSMetaDriverAdapter` |
 
 ### 待迁移（用 @deprecated 保持功能）
 
 | 包 | 原因 | 优先级 |
 |---|---|---|
-| `app-settings/SettingsEngine` | 旧设置面板 mock `IFSEngine` 实现 | 中 |
-| `app-settings/SkillsEngine` | 旧技能面板 mock `IFSEngine` 实现 | 中 |
+| `app-settings/SettingsEngine` | 已实现 IModuleFS（v4.0 去除旧委托桩） | ~~中~~ → ✅ |
+| `app-settings/SkillsEngine` | 已实现 IModuleFS（v4.0 去除旧委托桩） | ~~中~~ → ✅ |
 | `llm-engine/ChatEngine` | `IChatEngine extends IFSEngine`，需专项设计 | 高 |
 | `vfs-ui/tests` | 测试 fixtures 引用 `EngineNode` | 低 |
+
+---
+
+## v4.0 接口精简
+
+- **IModuleFS 瘦身**: 从 30+ 方法缩减为 ~10 个（`driver`, `meta`, `openFile`, `init`, `dispose`, device ops）
+- **IFSTransaction 删除**: 与 `IFSDriverTransaction` 统一（两者结构完全相同）
+- **FSDriverAdapter 删除**: `ModuleFS` 直接 `implements IFSDriver`（`this.driver = this`）
+- **IModuleFS compat 别名删除**: `assets?`, `tags?`, `seq?`, `refs?`, `watcher?` → 统一用 `fs.meta.*`
+- **FSCapabilities.transaction 删除**: `IFSDriver.transaction()` 现为必选方法
+- **VFSSearchQuery**: `extends FSSearchQuery { modules?: string[] }`（消除 16 字段手写重复）
+- **VisibilityOptions 提取**: `includeHidden/includeAssetDirs/includeInternalDirs` 提取为公共基接口
+- **SRSItemData**: 重导出源修正到 `srs/ISRSService`（消除 IFSEngine.ts 重复定义）
 
 ---
 

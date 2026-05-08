@@ -1,7 +1,7 @@
 // @file: mdx/core/print.service.ts
 
 import { MDxRenderer } from '../../renderer/mdx-renderer';
-import type { IFSEngine } from '@itookit/common';
+import type { IModuleFS } from '@itookit/common';
 
 // ✅ 从常量文件导入样式
 import { PRINT_STYLES } from './print.styles';
@@ -76,10 +76,10 @@ export interface PrintService {
  */
 export class DefaultPrintService implements PrintService {
     private renderer: MDxRenderer | null = null;
-    private sessionEngine?: IFSEngine;
+    private sessionEngine?: IModuleFS;
     private nodeId?: string;
 
-    constructor(sessionEngine?: IFSEngine, nodeId?: string) {
+    constructor(sessionEngine?: IModuleFS, nodeId?: string) {
         this.sessionEngine = sessionEngine;
         this.nodeId = nodeId;
     }

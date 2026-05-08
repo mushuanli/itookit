@@ -10,18 +10,17 @@ VFSEngine  —  PathResolver, AccessController, EventBus, PluginPipeline
     ↕
 VFSManager (implements IVFSManager)  —  module lifecycle coordinator
     ↕
-ModuleFS (implements IModuleFS)  —  chroot-isolated view per module
-    ├── driver: IFSDriver           — POSIX CRUD + search + transaction
+ModuleFS (implements IModuleFS + IFSDriver)  —  chroot-isolated view per module
+    ├── driver: IFSDriver           — POSIX CRUD + search + transaction (self = this)
     ├── meta: IFSMetaDriver         — assets / tags / seq / refs / watcher
-    ├── .assets? / .tags? / .seq? / .refs? / .watcher?  ← compatibility aliases
     └── openFile(nodeId) → IFile    — FileHandle / MDXFileHandle / ChatFileHandle
 ```
 
-**IFSDriver/IFSMetaDriver** (added v3.3) split the old flat `IModuleFS` into two focused interfaces:
-- `IFSDriver` — all POSIX-style file operations (getNode, getChildren, readContent, createFile, createDirectory, writeContent, rename, move, delete, copy, symlink, readlink, hardlink, search, walkTree, stats, transaction)
+**IFSDriver/IFSMetaDriver** (added v3.3, finalised v4.0) split the old flat `IModuleFS` into two focused interfaces:
+- `IFSDriver` — all POSIX-style file operations (getNode, getChildren, readContent, createFile, createDirectory, writeContent, appendContent, rename, move, delete, copy, symlink, readlink, hardlink, search, walkTree, stats, transaction). **transaction() is now a required method** — implementations that don't support it throw `FSCapabilityError`.
 - `IFSMetaDriver` — capability-aggregated metadata operations: `assets` (IAssetOperations), `tags` (ITagOperations), `seq` (ISeqFileOperations), `refs` (IRefOperations), `watcher` (IWatchOperations)
 
-Concrete adapters in `vfslib/src/services/fs-driver-adapter.ts`: `FSDriverAdapter` (pass-through to ModuleFS/VFSEngine) and `FSMetaDriverAdapter` (composes InlineAssetOps, InlineTagOps, InlineRefOps, InlineSeqOps).
+**ModuleFS directly implements IFSDriver** (self-reference: `this.driver = this`), eliminating the intermediate `FSDriverAdapter` layer. `FSMetaDriverAdapter` (composes InlineAssetOps, InlineTagOps, InlineRefOps, InlineSeqOps) is used by both `ModuleFS` and custom engine implementations (`SettingsEngine`, `SkillsEngine`, `SystemVFSEngine`).
 
 All interfaces live in `packages/common/src/interfaces/fs/`. **Callers always type their VFS dependency as `IVFSManager`, `IModuleFS`, or `IFSDriver`** — never the concrete classes. Concrete wiring (`createVFS()`) happens only in `packages/app-shell/src/bootstrap.ts` (called by each app entry point).
 
@@ -31,21 +30,37 @@ Each **module** is a named namespace. A module's `IModuleFS` maps its `/` root t
 
 **Backup/restore/export/import** live on `vfs.maintenance.*` (a sub-service), not directly on `vfs`.
 
-### IModuleFS — the UI/backend contract (v3.3)
+### IModuleFS — the UI/backend contract (v4.0)
 
-~~`ISessionEngine`~~ (deprecated v3.3) has been superseded by `IModuleFS`. UI packages now depend directly on `IModuleFS` (which exposes `driver: IFSDriver` and `meta: IFSMetaDriver`) rather than going through an adapter layer.
+`IModuleFS` is a **thin wrapper** — it does NOT duplicate `IFSDriver` CRUD methods. All file operations go through `fs.driver.*`, all metadata operations through `fs.meta.*`.
+
+```ts
+interface IModuleFS extends FSEventEmitter {
+    readonly moduleId: string;
+    readonly capabilities: FSCapabilities;
+    readonly driver: IFSDriver;     // CRUD + links + transaction + search
+    readonly meta: IFSMetaDriver;   // assets / tags / seq / refs / watcher
+    openFile(nodeId: string): IFile;
+    init(): Promise<void>;
+    dispose?(): Promise<void>;
+    // VFS-specific device ops (not in IFSDriver)
+    openDevice?(idOrPath, options?): Promise<IDeviceHandle>;
+    createDeviceFile?(name, parentIdOrPath, handlerId): Promise<FSNode>;
+    ioctl?(idOrPath, command, arg?): Promise<unknown>;
+}
+```
 
 Key interfaces consumed by UI:
-- **`IModuleFS`** — full module filesystem (driver + meta + openFile)
-- **`IFSDriver`** — CRUD + search + events（文件树、编辑器直接用）
-- **`IFile`** — per-file handle（IModuleFS.openFile() 工厂创建）
+- **`IModuleFS`** — module filesystem entry (driver + meta + openFile factory)
+- **`IFSDriver`** — CRUD + search + events (used by file trees, editors)
+- **`IFile`** — per-file handle (via `IModuleFS.openFile()`)
 
 Three file handle implementations:
-- **`FileHandle`** — base `IFile`, wraps `IModuleFS`（v3.3: constructor 参数改为 `IModuleFS`）
-- **`MDXFileHandle`** — `IMDXFile` extends `IFile`, asset resolution
-- **`ChatFileHandle`** — `IChatFile` extends `IFile`, message tree + branches
+- **`FileHandle`** — base `IFile`, wraps `IModuleFS`
+- **`MDXFileHandle`** — `IMDXFile extends IFile`, asset resolution
+- **`ChatFileHandle`** — `IChatFile extends IFile`, message tree + branches
 
-~~`VFSModuleEngine`~~ is deprecated. `IVFSManager.getEngine(moduleName)` returns `IModuleFS` directly.
+~~`VFSModuleEngine`~~ (deprecated v3.3) — `IVFSManager.getEngine(moduleName)` returns `IModuleFS` directly.
 
 Services needing direct VFS access extend **`BaseModuleService`** (`packages/vfslib/src/adapter-session/`) — provides `readJson`/`writeJson` (upsert semantics), `ensureDirectory`.
 

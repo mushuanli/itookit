@@ -11,56 +11,56 @@ describe('Search (IndexedDB backend)', () => {
         vfs = await setupVFS();
         const { fs } = vfs;
         // Populate fixture data
-        await fs.createDirectory({ name: 'docs', parentIdOrPath: null });
-        await fs.createDirectory({ name: 'images', parentIdOrPath: null });
-        await fs.createFile({ name: 'readme.md', parentIdOrPath: '/docs', content: 'This is the readme file with important info.' });
-        await fs.createFile({ name: 'guide.md', parentIdOrPath: '/docs', content: 'User guide content here.' });
-        await fs.createFile({ name: 'logo.png', parentIdOrPath: '/images', content: 'fake-png' });
-        await fs.createFile({ name: 'banner.png', parentIdOrPath: '/images', content: 'fake-banner' });
-        await fs.createFile({ name: 'notes.txt', parentIdOrPath: null, content: 'Quick notes' });
-        await fs.tags!.setTags('/docs/readme.md', ['pinned', 'public']);
-        await fs.tags!.setTags('/docs/guide.md', ['public']);
-        await fs.updateMetadata('/docs/readme.md', { priority: 1 });
-        await fs.updateMetadata('/notes.txt', { priority: 2 });
+        await fs.driver.createDirectory({ name: 'docs', parentIdOrPath: null });
+        await fs.driver.createDirectory({ name: 'images', parentIdOrPath: null });
+        await fs.driver.createFile({ name: 'readme.md', parentIdOrPath: '/docs', content: 'This is the readme file with important info.' });
+        await fs.driver.createFile({ name: 'guide.md', parentIdOrPath: '/docs', content: 'User guide content here.' });
+        await fs.driver.createFile({ name: 'logo.png', parentIdOrPath: '/images', content: 'fake-png' });
+        await fs.driver.createFile({ name: 'banner.png', parentIdOrPath: '/images', content: 'fake-banner' });
+        await fs.driver.createFile({ name: 'notes.txt', parentIdOrPath: null, content: 'Quick notes' });
+        await fs.meta.tags!.setTags('/docs/readme.md', ['pinned', 'public']);
+        await fs.meta.tags!.setTags('/docs/guide.md', ['public']);
+        await fs.driver.updateMetadata('/docs/readme.md', { priority: 1 });
+        await fs.driver.updateMetadata('/notes.txt', { priority: 2 });
     });
 
     afterEach(async () => { await vfs.dispose(); });
 
     it('search with no filters returns all nodes', async () => {
-        const result = await vfs.fs.search({});
+        const result = await vfs.fs.driver.search({});
         expect(result.nodes.length).toBeGreaterThanOrEqual(5);
     });
 
     it('search by name.contains', async () => {
-        const result = await vfs.fs.search({ name: { contains: 'guide' } });
+        const result = await vfs.fs.driver.search({ name: { contains: 'guide' } });
         expect(result.nodes.every(n => n.name.includes('guide'))).toBe(true);
         expect(result.nodes.length).toBeGreaterThanOrEqual(1);
     });
 
     it('search by name.exact', async () => {
-        const result = await vfs.fs.search({ name: { exact: 'logo.png' } });
+        const result = await vfs.fs.driver.search({ name: { exact: 'logo.png' } });
         expect(result.nodes).toHaveLength(1);
         expect(result.nodes[0].name).toBe('logo.png');
     });
 
     it('search by name.endsWith', async () => {
-        const result = await vfs.fs.search({ name: { endsWith: '.png' } });
+        const result = await vfs.fs.driver.search({ name: { endsWith: '.png' } });
         expect(result.nodes.length).toBeGreaterThanOrEqual(2);
         expect(result.nodes.every(n => n.name.endsWith('.png'))).toBe(true);
     });
 
     it('search by type: file', async () => {
-        const result = await vfs.fs.search({ type: 'file' });
+        const result = await vfs.fs.driver.search({ type: 'file' });
         expect(result.nodes.every(n => n.type === 'file')).toBe(true);
     });
 
     it('search by type: directory', async () => {
-        const result = await vfs.fs.search({ type: 'directory' });
+        const result = await vfs.fs.driver.search({ type: 'directory' });
         expect(result.nodes.every(n => n.type === 'directory')).toBe(true);
     });
 
     it('search by tags.all', async () => {
-        const result = await vfs.fs.search({ tags: { all: ['pinned', 'public'] } });
+        const result = await vfs.fs.driver.search({ tags: { all: ['pinned', 'public'] } });
         expect(result.nodes.every(n => {
             const tags = n.tags ?? [];
             return tags.includes('pinned') && tags.includes('public');
@@ -69,32 +69,32 @@ describe('Search (IndexedDB backend)', () => {
     });
 
     it('search by tags.any', async () => {
-        const result = await vfs.fs.search({ tags: { any: ['pinned'] } });
+        const result = await vfs.fs.driver.search({ tags: { any: ['pinned'] } });
         expect(result.nodes.length).toBeGreaterThanOrEqual(1);
         expect(result.nodes.every(n => (n.tags ?? []).includes('pinned'))).toBe(true);
     });
 
     it('search by text (content match)', async () => {
-        const result = await vfs.fs.search({ text: 'readme', type: 'file' });
+        const result = await vfs.fs.driver.search({ text: 'readme', type: 'file' });
         expect(result.nodes.length).toBeGreaterThanOrEqual(1);
         const names = result.nodes.map(n => n.name);
         expect(names.some(n => n.includes('readme') || true)).toBe(true);
     });
 
     it('search by metadata field', async () => {
-        const result = await vfs.fs.search({ metadata: { priority: 1 } });
+        const result = await vfs.fs.driver.search({ metadata: { priority: 1 } });
         expect(result.nodes.length).toBeGreaterThanOrEqual(1);
         expect(result.nodes.every(n => n.metadata.priority === 1)).toBe(true);
     });
 
     it('search with limit paginates results', async () => {
-        const result = await vfs.fs.search({ limit: 2 });
+        const result = await vfs.fs.driver.search({ limit: 2 });
         expect(result.nodes.length).toBeLessThanOrEqual(2);
     });
 
     it('search with offset skips results', async () => {
-        const all = await vfs.fs.search({ type: 'file' });
-        const paged = await vfs.fs.search({ type: 'file', offset: 1, limit: 100 });
+        const all = await vfs.fs.driver.search({ type: 'file' });
+        const paged = await vfs.fs.driver.search({ type: 'file', offset: 1, limit: 100 });
         expect(paged.nodes.length).toBe(Math.max(0, all.nodes.length - 1));
     });
 
