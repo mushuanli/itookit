@@ -392,7 +392,7 @@ export class AgentConfigEditor implements IEditor {
                 if (!newName || newName === this.currentTitle) return;
                 const { filename } = buildRenamedFilename(newName, this.currentTitle + ext);
                 try {
-                    await engine.rename(nodeId, filename);
+                    await engine.driver.rename(nodeId, filename);
                     this.currentTitle = newName;
                 } catch {
                     nameInput.value = this.currentTitle;

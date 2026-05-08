@@ -339,10 +339,10 @@ export class PromptHistoryService extends BaseModuleService {
      * 复用 BaseModuleService 的 VFS 写入能力
      */
     private async writeYaml(path: string, yamlContent: string): Promise<void> {
-        const existingId = await this.engine.resolvePath(path);
+        const existingId = await this.engine.driver.resolvePath(path);
 
         if (existingId) {
-            await this.engine.writeContent(existingId, yamlContent);
+            await this.engine.driver.writeContent(existingId, yamlContent);
         } else {
             const lastSlash = path.lastIndexOf('/');
             const parentPath = lastSlash > 0 ? path.slice(0, lastSlash) : null;
@@ -352,7 +352,11 @@ export class PromptHistoryService extends BaseModuleService {
                 await this.ensureDirectory(parentPath);
             }
 
-            await this.engine.createFile(fileName, parentPath, yamlContent);
+            await this.engine.driver.createFile({
+                name: fileName,
+                parentIdOrPath: parentPath,
+                content: yamlContent,
+            });
         }
     }
 }

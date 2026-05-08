@@ -163,7 +163,8 @@ export class UploadPlugin implements MDxPlugin {
                 // 2.3 ✅ 调用 Engine 创建资产
                 // 注意：VFSCore 会根据 arrayBuffer 自动标记 isBinary: true
                 // MiddlewareRegistry 会根据此标记跳过 PlainTextMiddleware
-                const assetNode = await engine.createAsset(ownerNodeId, safeName, arrayBuffer);
+                // v3.3: IModuleFS.meta.assets.putAsset replaces deprecated IFSEngine.createAsset
+                const assetNode = await engine.meta.assets.putAsset(ownerNodeId, safeName, arrayBuffer);
 
                 // 2.4 生成 @asset/ 路径 Markdown
                 const path = generateAssetPath(assetNode.name);

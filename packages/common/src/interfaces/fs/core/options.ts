@@ -8,6 +8,18 @@
 
 import type { FSNodeType, FSNodeMetadata } from './types';
 
+/**
+ * 节点可见性过滤选项（ListOptions / TreeWalkOptions 共用）
+ */
+export interface VisibilityOptions {
+    /** 包含隐藏文件（. 开头）@default false */
+    includeHidden?: boolean;
+    /** 包含 assetdir（单下划线前缀，如 _note.md/）@default false */
+    includeAssetDirs?: boolean;
+    /** 包含模块内部配置目录（双下划线前缀，如 __meta/）@default false */
+    includeInternalDirs?: boolean;
+}
+
 export interface ReadOptions {
     /** 起始偏移（需要 capabilities.partialRead） */
     offset?: number;
@@ -141,43 +153,20 @@ export interface CopyOptions {
     recursive?: boolean;
 }
 
-export interface ListOptions {
-    /**
-     * 包含隐藏文件（. 开头）
-     * @default false
-     */
-    includeHidden?: boolean;
-    /**
-     * 包含 assetdir（单下划线前缀，如 _note.md/）
-     * @default false
-     */
-    includeAssetDirs?: boolean;
-    /**
-     * 包含模块内部配置目录（双下划线前缀，如 __meta/）
-     * @default false
-     */
-    includeInternalDirs?: boolean;
+export interface ListOptions extends VisibilityOptions {
     /**
      * 返回字段控制
-     *
      * - 'full': 返回完整 FSNode（默认）
      * - 'entry': 仅返回 DirEntry（轻量）
-     *
      * @default 'full'
      */
     fields?: 'full' | 'entry';
 }
 
-export interface TreeWalkOptions {
-    /**
-     * 遍历顺序
-     * @default 'depth-first'
-     */
+export interface TreeWalkOptions extends VisibilityOptions {
+    /** 遍历顺序 @default 'depth-first' */
     order?: 'breadth-first' | 'depth-first';
-    /**
-     * 最大深度，-1 无限制
-     * @default -1
-     */
+    /** 最大深度，-1 无限制 @default -1 */
     maxDepth?: number;
     /** 起始目录 @default 模块根目录 */
     rootIdOrPath?: string;
@@ -185,21 +174,6 @@ export interface TreeWalkOptions {
     typeFilter?: FSNodeType | FSNodeType[];
     /** 最大返回数量 */
     limit?: number;
-    /**
-     * 包含隐藏文件
-     * @default false
-     */
-    includeHidden?: boolean;
-    /**
-     * 包含 asset 目录（单 _ 前缀）
-     * @default false
-     */
-    includeAssetDirs?: boolean;
-    /**
-     * 包含模块内部配置目录（双 __ 前缀）
-     * @default false
-     */
-    includeInternalDirs?: boolean;
 }
 
 /**

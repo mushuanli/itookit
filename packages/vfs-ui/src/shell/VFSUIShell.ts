@@ -230,7 +230,7 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService> {
   }
 
   updateSessionContent = (sessionId: string, content: string): Promise<void> =>
-    this.engine.writeContent(sessionId, content);
+    this.engine.driver.writeContent(sessionId, content);
 
   toggleSidebar(): void {
     this.commandPort.execute('ui:toggleSidebar', undefined as any);

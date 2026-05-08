@@ -54,8 +54,8 @@ export class AssetManagerPlugin implements MDxPlugin {
             return;
         }
 
-        // ✅ 使用 Engine 获取目录 ID
-        const assetDirId = await engine.getAssetDirectoryId(ownerNodeId);
+        // v3.3: IModuleFS.meta.assets.getAssetDirId replaces deprecated IFSEngine.getAssetDirectoryId
+        const assetDirId = await engine.meta.assets.getAssetDirId(ownerNodeId);
 
         if (!assetDirId) {
             // 如果 ID 为空，说明目录尚未创建（即没有附件）
@@ -65,7 +65,8 @@ export class AssetManagerPlugin implements MDxPlugin {
         }
 
         if (this.currentUI) this.currentUI.close();
-        this.currentUI = new AssetManagerUI(engine, editor, this.options);
+        // v3.3: AssetManagerUI still expects IFSEngine shape; IModuleFS is compatible at runtime
+        this.currentUI = new AssetManagerUI(engine as any, editor, this.options);
         await this.currentUI.show(assetDirId);
     }
 

@@ -91,19 +91,19 @@ export async function setupDualMountVFS(opts?: {
 
 /** Assert a path exists and return its node. */
 export async function expectNode(fs: IModuleFS, path: string) {
-    const node = await fs.getNode(path);
+    const node = await fs.driver.getNode(path);
     if (!node) throw new Error(`Expected node at '${path}' but it does not exist`);
     return node;
 }
 
 /** Assert a path does not exist. */
 export async function expectMissing(fs: IModuleFS, path: string) {
-    const exists = await fs.exists(path);
+    const exists = await fs.driver.exists(path);
     if (exists) throw new Error(`Expected '${path}' to be absent but it exists`);
 }
 
 /** Read text content from a path. */
 export async function readText(fs: IModuleFS, path: string): Promise<string> {
-    const content = await fs.readContent(path, { encoding: 'utf-8' });
+    const content = await fs.driver.readContent(path, { encoding: 'utf-8' });
     return content as string;
 }

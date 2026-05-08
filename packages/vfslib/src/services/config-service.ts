@@ -28,7 +28,7 @@ export class ConfigService implements IConfigService {
     }
 
     async listConfigs(): Promise<ConfigFileDescriptor[]> {
-        const children = await this.fs.getChildren('/');
+        const children = await this.fs.driver.getChildren('/');
         return children
             .filter(c => c.type === 'seqfile' || c.type === 'file')
             .map(c => ({
@@ -82,8 +82,8 @@ export class ConfigService implements IConfigService {
         await this.ensureFile(configName);
         const oldValue = await this.get(configName, key);
 
-        if (this.fs.seq) {
-            await this.fs.seq.setEntry(this.seqPath(configName), key, value);
+        if (this.fs.meta.seq) {
+            await this.fs.meta.seq.setEntry(this.seqPath(configName), key, value);
         } else {
             const entries = await this.loadAll(configName);
             entries.set(key, value);
@@ -97,8 +97,8 @@ export class ConfigService implements IConfigService {
     async setBatch(configName: string, entries: Record<string, string>): Promise<void> {
         await this.ensureFile(configName);
 
-        if (this.fs.seq) {
-            await this.fs.seq.setEntries(this.seqPath(configName), entries);
+        if (this.fs.meta.seq) {
+            await this.fs.meta.seq.setEntries(this.seqPath(configName), entries);
         } else {
             const current = await this.loadAll(configName);
             for (const [k, v] of Object.entries(entries)) {
@@ -117,9 +117,9 @@ export class ConfigService implements IConfigService {
     async delete(configName: string, key: string): Promise<void> {
         const oldValue = await this.get(configName, key);
 
-        if (this.fs.seq) {
+        if (this.fs.meta.seq) {
             try {
-                await this.fs.seq.deleteEntry(this.seqPath(configName), key);
+                await this.fs.meta.seq.deleteEntry(this.seqPath(configName), key);
             } catch (e) {
                 if (e instanceof FSNotFoundError) return;
                 throw e;
@@ -166,10 +166,10 @@ export class ConfigService implements IConfigService {
         const entries = new Map<string, string>();
 
         // Try seqfile first
-        if (this.fs.seq) {
+        if (this.fs.meta.seq) {
             const path = this.seqPath(configName);
-            if (await this.fs.exists(path)) {
-                await this.fs.seq.walkEntries(path, (e) => { entries.set(e.key, e.value); return true; });
+            if (await this.fs.driver.exists(path)) {
+                await this.fs.meta.seq.walkEntries(path, (e) => { entries.set(e.key, e.value); return true; });
                 this.cache.set(configName, new Map(entries));
                 return entries;
             }
@@ -177,8 +177,8 @@ export class ConfigService implements IConfigService {
 
         // Fallback: JSON file
         const path = this.jsonPath(configName);
-        if (await this.fs.exists(path)) {
-            const content = await this.fs.readContent(path, { encoding: 'utf-8' });
+        if (await this.fs.driver.exists(path)) {
+            const content = await this.fs.driver.readContent(path, { encoding: 'utf-8' });
             if (typeof content === 'string' && content.length > 0) {
                 try {
                     const parsed = JSON.parse(content);
@@ -196,10 +196,10 @@ export class ConfigService implements IConfigService {
     }
 
     private async ensureFile(configName: string): Promise<void> {
-        if (this.fs.seq) {
+        if (this.fs.meta.seq) {
             const path = this.seqPath(configName);
-            if (!(await this.fs.exists(path))) {
-                await this.fs.createFile({
+            if (!(await this.fs.driver.exists(path))) {
+                await this.fs.driver.createFile({
                     name: `${configName}.seq`,
                     parentIdOrPath: null,
                     type: 'seqfile',
@@ -207,8 +207,8 @@ export class ConfigService implements IConfigService {
             }
         } else {
             const path = this.jsonPath(configName);
-            if (!(await this.fs.exists(path))) {
-                await this.fs.createFile({
+            if (!(await this.fs.driver.exists(path))) {
+                await this.fs.driver.createFile({
                     name: `${configName}.json`,
                     parentIdOrPath: null,
                     content: '{}',
@@ -220,7 +220,7 @@ export class ConfigService implements IConfigService {
     private async saveJson(configName: string, entries: Map<string, string>): Promise<void> {
         const path = this.jsonPath(configName);
         const obj = Object.fromEntries(entries);
-        await this.fs.writeContent(path, JSON.stringify(obj, null, 2));
+        await this.fs.driver.writeContent(path, JSON.stringify(obj, null, 2));
     }
 
     private notify(event: ConfigChangeEvent): void {

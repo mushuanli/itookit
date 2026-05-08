@@ -151,14 +151,14 @@ export class MemoryPlugin implements MDxPlugin {
     this.log(`Syncing store. FileID: ${fileId || 'N/A'}, Engine Available: ${!!engine}`);
 
     // 1. 尝试使用 Engine 加载 SRS (VFS SRS Store)
-    if (engine && engine.getSRSStatus && fileId) {
+    if (engine && (engine as any).getSRSStatus && fileId) {
       try {
-        const srsItems = await engine.getSRSStatus(fileId);
+        const srsItems = await (engine as any).getSRSStatus(fileId);
         const count = Object.keys(srsItems).length;
         this.log(`Loaded ${count} items from Engine VFS.`);
 
         // ✅ 现在 item 的类型是 SRSItemData
-        for (const [clozeId, item] of Object.entries(srsItems)) {
+        for (const [clozeId, item] of Object.entries(srsItems as Record<string, SRSItemData>)) {
           cache.set(clozeId, {
             dueAt: new Date(item.dueAt).toISOString(),
             lastReviewedAt: new Date(item.lastReviewedAt).toISOString(),
@@ -209,7 +209,8 @@ export class MemoryPlugin implements MDxPlugin {
     this.log(`Saving card ${clozeId} to FileID: ${fileId}`);
 
     // 1. 尝试使用 Engine 保存
-    if (engine && engine.updateSRSStatus && fileId) {
+    // v3.3: IModuleFS doesn't have updateSRSStatus; cast to access deprecated IFSEngine method
+    if (engine && (engine as any).updateSRSStatus && fileId) {
       try {
         // ✅ 构建符合 SRSItemData 类型的对象
         const srsData: SRSItemData = {
@@ -220,7 +221,7 @@ export class MemoryPlugin implements MDxPlugin {
           reviewCount: newState.reviewCount
         };
 
-        await engine.updateSRSStatus(fileId, clozeId, srsData);
+        await (engine as any).updateSRSStatus(fileId, clozeId, srsData);
         this.log(`Saved successfully to Engine VFS.`);
         return;
       } catch (e) {

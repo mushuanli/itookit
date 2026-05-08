@@ -66,6 +66,7 @@ export type { FSErrorCode } from './core/errors';
 
 // ── 选项 ──
 export type {
+    VisibilityOptions,
     ReadOptions,
     WriteOptions,
     CreateFileOptions,
@@ -181,7 +182,7 @@ export type { IFSDriverTransaction, IFSDriver } from './services/fs-driver';
 export type { IFSMetaDriver } from './services/fs-meta-driver';
 
 // ── 模块文件系统 ──
-export type { IFSTransaction, IModuleFS } from './services/module-fs';
+export type { IModuleFS } from './services/module-fs';
 
 // ── VFS 管理器 ──
 export type {

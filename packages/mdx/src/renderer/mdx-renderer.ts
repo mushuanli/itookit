@@ -5,13 +5,13 @@ import { SearchHighlighter } from './search-highlighter';
 import { MarkedAdapter } from './marked-adapter';
 import { StreamingDiffer } from './streaming-differ';
 import type { MDxPlugin } from '../core/types';
-import type { IFSEngine } from '@itookit/common';
+import type { IModuleFS } from '@itookit/common';
 
 export interface MDxRendererConfig {
   searchMarkClass?: string;
   nodeId?: string;
   ownerNodeId?: string;
-  sessionEngine?: IFSEngine;
+  sessionEngine?: IModuleFS;
 }
 
 export interface RenderOptions {
