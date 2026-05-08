@@ -70,7 +70,7 @@ export const createLLMFactory = (
         let effectiveNodeId = options.nodeId;
 
         // 类型转换，此时 sessionEngine 应该已经在 MemoryManager 中通过 Dependency Injection 注入
-        const llmOptions = options as LLMEditorOptions;
+        const llmOptions = options as unknown as LLMEditorOptions;
         const engine = llmOptions.sessionEngine as IChatEngine;
 
         if (!engine) {

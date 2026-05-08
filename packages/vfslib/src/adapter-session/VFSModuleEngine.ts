@@ -63,7 +63,7 @@ export class VFSModuleEngine implements IFSEngine {
     // ── 读取操作 ──────────────────────────────────────────────
 
     private async collectChildren(idOrPath: string): Promise<EngineNode[]> {
-        const children = await this.getModuleFS().getChildren(idOrPath) as FSNode[];
+        const children = await this.getModuleFS().driver.getChildren(idOrPath) as FSNode[];
         return Promise.all(children.map(async child => {
             const engineNode = this.toEngineNode(child);
             if (child.type === 'directory') {
@@ -74,18 +74,18 @@ export class VFSModuleEngine implements IFSEngine {
     }
 
     async getChildren(parentId: string): Promise<EngineNode[]> {
-        const children = await this.getModuleFS().getChildren(parentId) as FSNode[];
+        const children = await this.getModuleFS().driver.getChildren(parentId) as FSNode[];
         return children.map(n => this.toEngineNode(n));
     }
 
     async readContent(id: string): Promise<string | ArrayBuffer> {
-        const content = await this.getModuleFS().readContent(id);
+        const content = await this.getModuleFS().driver.readContent(id);
         if (typeof content === 'string') return content;
         return toBuffer(content);
     }
 
     async getNode(id: string): Promise<EngineNode | null> {
-        const node = await this.getModuleFS().getNode(id);
+        const node = await this.getModuleFS().driver.getNode(id);
         return node ? this.toEngineNode(node) : null;
     }
 
@@ -113,7 +113,7 @@ export class VFSModuleEngine implements IFSEngine {
         }
 
         // Module-local search.
-        const result = await this.getModuleFS().search({
+        const result = await this.getModuleFS().driver.search({
             name: nameQuery,
             type: query.type as any,
             tags: tagsQuery,
@@ -123,7 +123,7 @@ export class VFSModuleEngine implements IFSEngine {
     }
 
     async getAllTags(): Promise<Array<{ name: string; color?: string }>> {
-        const tags = await (this.getModuleFS().tags?.getAllTags() ?? Promise.resolve([]));
+        const tags = await (this.getModuleFS().meta.tags?.getAllTags() ?? Promise.resolve([]));
         return tags;
     }
 
@@ -159,16 +159,16 @@ export class VFSModuleEngine implements IFSEngine {
         if (cached) return cached;
 
         const fs = this.getModuleFS();
-        if (!fs.seq) return null;
+        if (!fs.meta.seq) return null;
 
-        const fileNode = await fs.getNode(fileId);
+        const fileNode = await fs.driver.getNode(fileId);
         if (!fileNode || fileNode.type !== 'file') return null;
 
         const path = this.srsPath(fileNode.path);
         const lastSlash = path.lastIndexOf('/');
 
-        if (!await fs.exists(path)) {
-            await fs.createFile({
+        if (!await fs.driver.exists(path)) {
+            await fs.driver.createFile({
                 name: 'srs',
                 parentIdOrPath: path.substring(0, lastSlash),
                 type: 'seqfile',
@@ -189,13 +189,13 @@ export class VFSModuleEngine implements IFSEngine {
         if (cached) return cached;
 
         const fs = this.getModuleFS();
-        if (!fs.seq) return null;
+        if (!fs.meta.seq) return null;
 
-        const fileNode = await fs.getNode(fileId);
+        const fileNode = await fs.driver.getNode(fileId);
         if (!fileNode || fileNode.type !== 'file') return null;
 
         const path = this.srsPath(fileNode.path);
-        if (!await fs.exists(path)) return null;
+        if (!await fs.driver.exists(path)) return null;
 
         this.srsSeqFilePaths.set(fileId, path);
         return path;
@@ -204,9 +204,9 @@ export class VFSModuleEngine implements IFSEngine {
     async getSRSStatus(fileId: string): Promise<Record<string, SRSItemData>> {
         const fs = this.getModuleFS();
         const seqPath = await this.getSRSSeqFilePath(fileId);
-        if (!seqPath || !fs.seq) return {};
+        if (!seqPath || !fs.meta.seq) return {};
         const result: Record<string, SRSItemData> = {};
-        await fs.seq.walkEntries(seqPath, (e) => {
+        await fs.meta.seq.walkEntries(seqPath, (e) => {
             result[e.key] = JSON.parse(e.value) as SRSItemData;
             return true;
         });
@@ -216,13 +216,13 @@ export class VFSModuleEngine implements IFSEngine {
     async updateSRSStatus(fileId: string, clozeId: string, status: SRSItemData): Promise<void> {
         const fs = this.getModuleFS();
         const seqPath = await this.getOrCreateSRSSeqFilePath(fileId);
-        if (!seqPath || !fs.seq) return;
-        await fs.seq.setEntry(seqPath, clozeId, JSON.stringify(status));
+        if (!seqPath || !fs.meta.seq) return;
+        await fs.meta.seq.setEntry(seqPath, clozeId, JSON.stringify(status));
     }
 
     async getDueCards(limit?: number): Promise<Array<{ fileId: string; clozeId: string; status: SRSItemData }>> {
         const fs = this.getModuleFS();
-        if (!fs.seq) return [];
+        if (!fs.meta.seq) return [];
         const now = Date.now();
         const result: Array<{ fileId: string; clozeId: string; status: SRSItemData }> = [];
         const files = this.flattenFiles(await this.collectChildren('/'));
@@ -230,7 +230,7 @@ export class VFSModuleEngine implements IFSEngine {
             if (limit && result.length >= limit) break;
             const seqPath = await this.getSRSSeqFilePath(node.id);
             if (!seqPath) continue;
-            await fs.seq.walkEntries(seqPath, (e) => {
+            await fs.meta.seq.walkEntries(seqPath, (e) => {
                 if (limit && result.length >= limit) return false;
                 const s = JSON.parse(e.value) as SRSItemData;
                 if (!s.dueAt || s.dueAt <= now) {
@@ -259,7 +259,7 @@ export class VFSModuleEngine implements IFSEngine {
         content: string | ArrayBuffer = '',
         metadata?: Record<string, unknown>,
     ): Promise<EngineNode> {
-        const node = await this.getModuleFS().createFile({
+        const node = await this.getModuleFS().driver.createFile({
             name,
             parentIdOrPath,
             content,
@@ -274,7 +274,7 @@ export class VFSModuleEngine implements IFSEngine {
         name: string,
         parentIdOrPath: string | null,
     ): Promise<EngineNode> {
-        const node = await this.getModuleFS().createDirectory({ name, parentIdOrPath });
+        const node = await this.getModuleFS().driver.createDirectory({ name, parentIdOrPath });
         const result = this.toEngineNode(node);
         result.children = [];
         return result;
@@ -285,52 +285,52 @@ export class VFSModuleEngine implements IFSEngine {
         filename: string,
         content: string | ArrayBuffer,
     ): Promise<EngineNode> {
-        const node = await this.getModuleFS().assets!.putAsset(ownerNodeId, filename, content);
+        const node = await this.getModuleFS().meta.assets!.putAsset(ownerNodeId, filename, content);
         return this.toEngineNode(node);
     }
 
     async getAssetDirectoryId(ownerNodeId: string): Promise<string | null> {
-        return this.getModuleFS().assets?.getAssetDirId(ownerNodeId) ?? null;
+        return this.getModuleFS().meta.assets?.getAssetDirId(ownerNodeId) ?? null;
     }
 
     async getAssets(ownerNodeId: string): Promise<EngineNode[]> {
-        const assets = this.getModuleFS().assets;
+        const assets = this.getModuleFS().meta.assets;
         if (!assets) return [];
         const dirId = await assets.getAssetDirId(ownerNodeId);
         if (!dirId) return [];
-        const children = await this.getModuleFS().getChildren(dirId) as FSNode[];
+        const children = await this.getModuleFS().driver.getChildren(dirId) as FSNode[];
         return children.map(n => this.toEngineNode(n));
     }
 
     async writeContent(id: string, content: string | ArrayBuffer): Promise<void> {
-        await this.getModuleFS().writeContent(id, content);
+        await this.getModuleFS().driver.writeContent(id, content);
     }
 
     async rename(id: string, newName: string): Promise<void> {
         this.srsSeqFilePaths.delete(id); // path changes after rename
-        await this.getModuleFS().rename(id, newName);
+        await this.getModuleFS().driver.rename(id, newName);
     }
 
     async move(ids: string[], targetParentId: string | null): Promise<void> {
         ids.forEach(id => this.srsSeqFilePaths.delete(id)); // path changes after move
-        await this.getModuleFS().move(ids, targetParentId);
+        await this.getModuleFS().driver.move(ids, targetParentId);
     }
 
     async delete(ids: string[]): Promise<void> {
         ids.forEach(id => this.srsSeqFilePaths.delete(id));
-        await this.getModuleFS().delete(ids, { recursive: true });
+        await this.getModuleFS().driver.delete(ids, { recursive: true });
     }
 
     async updateMetadata(id: string, metadata: Record<string, unknown>): Promise<void> {
-        await this.getModuleFS().updateMetadata(id, metadata);
+        await this.getModuleFS().driver.updateMetadata(id, metadata);
     }
 
     async setTags(id: string, tags: string[]): Promise<void> {
-        await this.getModuleFS().tags?.setTags(id, tags);
+        await this.getModuleFS().meta.tags?.setTags(id, tags);
     }
 
     async setTagsBatch(updates: Array<{ id: string; tags: string[] }>): Promise<void> {
-        const tagsOps = this.getModuleFS().tags;
+        const tagsOps = this.getModuleFS().meta.tags;
         if (!tagsOps) return;
         await Promise.all(updates.map(u => tagsOps.setTags(u.id, u.tags)));
     }
@@ -356,11 +356,11 @@ export class VFSModuleEngine implements IFSEngine {
     // ── 路径解析 ──────────────────────────────────────────────
 
     async resolvePath(path: string): Promise<string | null> {
-        return this.getModuleFS().resolvePath(path);
+        return this.getModuleFS().driver.resolvePath(path);
     }
 
     async pathExists(path: string): Promise<boolean> {
-        return this.getModuleFS().exists(path);
+        return this.getModuleFS().driver.exists(path);
     }
 
     // ── 内部辅助 ──────────────────────────────────────────────

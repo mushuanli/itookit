@@ -22,7 +22,7 @@
  * └────────────────────┴──────────────────────────────────────┘
  */
 
-import type { FSNode, FSSearchResult, FSModuleStats, FileContent } from '../core/types';
+import type { FSNode, FSSearchQuery, FSSearchResult, FSModuleStats, FileContent } from '../core/types';
 import type { IModuleFS } from './module-fs';
 import type { IStorageBackend } from '../storage/backend';
 import type { IMountRouter, MountPoint, MountOptions } from '../mount/mount';
@@ -126,31 +126,10 @@ export interface ModuleExportData {
 // 跨模块搜索
 // ═══════════════════════════════════════════════════════════════
 
-export interface VFSSearchQuery {
+/** 跨模块搜索查询：FSSearchQuery 的超集，额外支持 modules 字段过滤搜索范围 */
+export interface VFSSearchQuery extends FSSearchQuery {
     /** 搜索范围：undefined 搜所有，string[] 搜指定模块 */
     modules?: string[];
-    /** 文件名匹配 */
-    name?: {
-        exact?: string;
-        contains?: string;
-        startsWith?: string;
-        endsWith?: string;
-        pattern?: string;
-    };
-    text?: string;
-    type?: import('../core/types').FSNodeType | import('../core/types').FSNodeType[];
-    tags?: {
-        all?: string[];
-        any?: string[];
-        none?: string[];
-    };
-    metadata?: Record<string, unknown>;
-    modifiedAfter?: number;
-    modifiedBefore?: number;
-    limit?: number;
-    offset?: number;
-    orderBy?: 'name' | 'modifiedAt' | 'createdAt' | 'size';
-    orderDirection?: 'asc' | 'desc';
 }
 
 // ═══════════════════════════════════════════════════════════════

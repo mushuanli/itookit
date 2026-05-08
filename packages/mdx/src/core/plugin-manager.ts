@@ -11,7 +11,7 @@ import type {
   MDxPlugin, PluginContext,
   ToolbarButtonConfig, TitleBarButtonConfig,
 } from './types';
-import type { IFSEngine } from '@itookit/common';
+import type { IModuleFS } from '@itookit/common';
 
 /**
  * 插件管理器（精简版）
@@ -36,7 +36,7 @@ export class PluginManager {
   private commandRegistry = new CommandRegistry();
 
   // 上下文信息
-  private sessionEngine: IFSEngine | null = null;
+  private sessionEngine: IModuleFS | null = null;
   private currentNodeId: string | null = null;
 
   private ownerNodeId: string | null = null;
@@ -60,7 +60,7 @@ export class PluginManager {
 
   // === 上下文配置 ===
 
-  setContext(nodeId?: string, ownerNodeId?: string, engine?: IFSEngine): void {
+  setContext(nodeId?: string, ownerNodeId?: string, engine?: IModuleFS): void {
     if (nodeId) this.currentNodeId = nodeId;
     if (engine) this.sessionEngine = engine;
     this.ownerNodeId = ownerNodeId || nodeId || null;
@@ -74,7 +74,7 @@ export class PluginManager {
     this.storeCache.clear();
   }
 
-  setSessionEngine(engine: IFSEngine): void {
+  setSessionEngine(engine: IModuleFS): void {
     this.sessionEngine = engine;
     this.storeCache.clear();
   }

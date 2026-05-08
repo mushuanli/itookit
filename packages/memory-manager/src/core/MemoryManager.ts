@@ -71,7 +71,7 @@ export class MemoryManager {
                 this.vfsUI.toggleSidebar();
             },
             saveContent: async (nodeId: string, content: string) => {
-                await this.engine.writeContent(nodeId, content);
+                await this.engine.driver.writeContent(nodeId, content);
             },
             navigate: async (req: NavigationRequest) => {
                 console.log(`[MemoryManager:${this.config.scopeId}] Handling navigation:`, req);

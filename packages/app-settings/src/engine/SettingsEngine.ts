@@ -1,136 +1,231 @@
-// @file app-settings/engines/SettingsEngine.ts
-import { IFSEngine, EngineNode, EngineSearchQuery, EngineEvent, EngineEventType } from '@itookit/common';
+/**
+ * @file app-settings/engine/SettingsEngine.ts
+ * @desc Custom IModuleFS implementation — maps settings pages to virtual file nodes.
+ *       Read-only flat list; write operations throw "not supported".
+ *
+ * v3.3: Refactored from IFSEngine → IModuleFS.
+ *       Settings pages appear as file-type FSNode entries in a flat directory.
+ */
+import type {
+    IModuleFS,
+    IFSDriver,
+    IFSMetaDriver,
+    FSNode,
+    FSFileNode,
+    FSSearchResult,
+    FSCapabilities,
+    FSModuleStats,
+    FileContent,
+    ReadOptions,
+    FSEventType,
+    FSEvent,
+    IAssetOperations,
+    ITagOperations,
+} from '@itookit/common';
+import { FSCapabilityError } from '@itookit/common';
 import { SettingsService } from '../services/SettingsService';
 
 // UI 定义：ID -> 元数据
 export const SETTINGS_PAGES: Record<string, { name: string, icon: string }> = {
-    'storage': { name: '文件系统', icon: '💾' },
-    'tags': { name: 'Tags', icon: '🏷️' },
-    'contacts': { name: 'Contacts', icon: '📒' },
-    'providers': { name: 'LLM Providers', icon: '🏭' },
-    'connections': { name: 'LLM 连接', icon: '🔗' },
-    'mcp-servers': { name: 'MCP Servers', icon: '🔌' },
-    'recovery': { name: '系统恢复', icon: '🚑' },
-    'log': { name: '系统日志', icon: '📋' },
-    'about': { name: 'About', icon: 'ℹ️' },
-    'fs-explorer': { name: 'FS Explorer', icon: '🗂️' },
+    'storage':     { name: '文件系统',     icon: '💾' },
+    'tags':        { name: 'Tags',          icon: '🏷️' },
+    'contacts':    { name: 'Contacts',      icon: '📒' },
+    'providers':   { name: 'LLM Providers', icon: '🏭' },
+    'connections': { name: 'LLM 连接',      icon: '🔗' },
+    'mcp-servers': { name: 'MCP Servers',   icon: '🔌' },
+    'recovery':    { name: '系统恢复',      icon: '🚑' },
+    'log':         { name: '系统日志',      icon: '📋' },
+    'about':       { name: 'About',         icon: 'ℹ️' },
+    'fs-explorer': { name: 'FS Explorer',   icon: '🗂️' },
 };
 
-export class SettingsEngine implements IFSEngine {
-    // [修复] MemoryManager/VFSUIShell 需要 moduleName 来生成 localStorage key
-    public readonly moduleName = 'settings_root';
+function toFSNode(id: string, config: (typeof SETTINGS_PAGES)[string]): FSFileNode {
+    const now = Date.now();
+    return {
+        id,
+        parentId: null,
+        name: config.name,
+        type: 'file',
+        icon: config.icon,
+        path: `/${config.name}`,
+        size: 0,
+        createdAt: now,
+        modifiedAt: now,
+        version: 0,
+        nlink: 1,
+        moduleId: 'settings_ui',
+        tags: [],
+        metadata: { title: config.name, description: '' },
+    };
+}
 
-    private listeners: Map<string, Set<(event: EngineEvent) => void>> = new Map();
+// ── 空能力 ─────────────────────────────────────────────────────
 
-    constructor(private service: SettingsService) { }
+const READONLY_CAPS: FSCapabilities = Object.freeze({
+    readonly: true, search: true, semanticSearch: false, syncable: false,
+    assets: false, tags: false, deviceFiles: false,
+    seqFiles: false, references: false, symlinks: false, hardlinks: false,
+    partialRead: false, partialWrite: false, treeWalk: false,
+    streaming: false, watch: false, mount: false,
+});
 
-    async init() { }
+// ── Tags no-op ──────────────────────────────────────────────────
 
-    // Settings 结构是扁平的：getChildren('/') 返回所有设置页面，子页面返回空数组
-    async getChildren(parentId: string): Promise<EngineNode[]> {
-        if (parentId !== '/') return [];
-        await this.service.init();
-        return Object.entries(SETTINGS_PAGES).map(([id, config]) => ({
-            id: id,
-            parentId: null,
-            name: config.name,
-            type: 'file' as const,
-            icon: config.icon,
-            content: '',
-            size: 0,
-            createdAt: Date.now(),
-            modifiedAt: Date.now(),
-            path: `/${config.name}`,
-            moduleId: 'settings_ui',
-        }));
+const noopTags: ITagOperations = {
+    getAllTags: async () => [],
+    setTags: async () => {},
+    addTag: async () => {},
+    removeTag: async () => {},
+    walkByTag: async () => ({ total: 0, processed: 0 }),
+};
+
+// ── Assets no-op ───────────────────────────────────────────────
+
+const noopAssets: IAssetOperations = {
+    putAsset: async () => ({ type: 'file' } as FSFileNode),
+    getAsset: async () => null,
+    getAssetDirId: async () => null,
+    ensureAssetDir: async () => { throw new FSCapabilityError('assets', 'settings_root'); },
+    listAssets: async () => [],
+    deleteAsset: async () => {},
+    removeAssetDir: async () => {},
+    hasAssetDir: async () => false,
+};
+
+// ═══════════════════════════════════════════════════════════════
+// SettingsEngine
+// ═══════════════════════════════════════════════════════════════
+
+export class SettingsEngine implements IModuleFS {
+    readonly moduleId = 'settings_root';
+    readonly capabilities: FSCapabilities = READONLY_CAPS;
+    readonly driver: IFSDriver;
+    readonly meta: IFSMetaDriver = {
+        assets: noopAssets,
+        tags: noopTags,
+    };
+
+    private listeners = new Map<string, Set<(e: FSEvent) => void>>();
+
+    constructor(private _service: SettingsService) {
+        this.driver = new SettingsDriver(this, this.listeners);
     }
 
-    // 这是一个空操作，因为真正的读写通过 Service 直接进行，
-    // 或者通过 Factory 中的闭包进行。
-    // MemoryManager 需要这个方法返回内容来做一些基本处理，但对于 Settings 来说不是必须的。
-    async readContent(id: string): Promise<string> {
+    /** @internal — exposed for SettingsDriver */
+    get service(): SettingsService { return this._service; }
+
+    async init(): Promise<void> {}
+    async dispose(): Promise<void> {}
+
+    openFile(_nodeId: string): never {
+        throw new Error('SettingsEngine: openFile not supported — settings are not real files');
+    }
+
+    on = (e: any, cb: any) => this.driver.on(e, cb);
+    onAny = (cb: any): (() => void) => this.driver.onAny?.(cb) ?? (() => {});
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SettingsDriver — 内联 IFSDriver
+// ═══════════════════════════════════════════════════════════════
+
+class SettingsDriver implements IFSDriver {
+    readonly moduleId = 'settings_root';
+    readonly capabilities: FSCapabilities = READONLY_CAPS;
+
+    constructor(
+        private readonly engine: SettingsEngine,
+        private readonly listeners: Map<string, Set<(e: FSEvent) => void>>,
+    ) {}
+
+    // ── Events ───────────────────────────────────────
+    on<E extends FSEventType>(event: E, cb: (e: FSEvent<E>) => void): () => void {
+        const key = event;
+        if (!this.listeners.has(key)) this.listeners.set(key, new Set());
+        this.listeners.get(key)!.add(cb as any);
+        return () => this.listeners.get(key)?.delete(cb as any);
+    }
+
+    // ── Read ─────────────────────────────────────────
+    async getNode(id: string): Promise<FSNode | null> {
+        await this.engine.service.init();
+        const config = SETTINGS_PAGES[id];
+        return config ? toFSNode(id, config) : null;
+    }
+
+    async getChildren(parentId: string, _options?: any): Promise<FSNode[]> {
+        if (parentId !== '/') return [];
+        await this.engine.service.init();
+        return Object.entries(SETTINGS_PAGES).map(([id, c]) => toFSNode(id, c));
+    }
+
+    readContent(id: string, options: ReadOptions & { encoding: 'utf-8' }): Promise<string>;
+    readContent(id: string, options: ReadOptions & { encoding: 'binary' }): Promise<ArrayBuffer>;
+    readContent(id: string, options?: ReadOptions): Promise<FileContent>;
+    async readContent(id: string, _options?: ReadOptions): Promise<FileContent> {
         return id;
     }
 
-    // 简单搜索实现
-    async search(query: EngineSearchQuery): Promise<EngineNode[]> {
-        if (!query.text) return [];
-        const lower = query.text.toLowerCase();
-        return Object.entries(SETTINGS_PAGES)
-            .filter(([_, conf]) => conf.name.toLowerCase().includes(lower))
-            .map(([id, conf]) => ({
-                id,
-                parentId: null,
-                name: conf.name,
-                type: 'file',
-                path: `/${conf.name}`,
-                size: 0,
-                createdAt: Date.now(),
-                modifiedAt: Date.now()
-            }));
-    }
-
-    async getNode(id: string): Promise<EngineNode | null> {
-        const config = SETTINGS_PAGES[id];
-        if (!config) return null;
-        return {
-            id,
-            parentId: null,
-            name: config.name,
-            type: 'file',
-            icon: config.icon,
-            path: `/${config.name}`,
-            size: 0,
-            createdAt: Date.now(),
-            modifiedAt: Date.now()
-        };
-    }
-
-    // [修复] 防止 EditorConnector 尝试保存时报错
-    async writeContent(_id: string, _content: string | ArrayBuffer): Promise<void> {
-        // Settings Engine 是只读的树结构，具体内容修改由 SettingsService 处理
-        console.warn('Direct write to SettingsEngine ignored. Use SettingsService.');
-    }
-
-    // [修复] 防止 EditorConnector 尝试更新元数据时报错
-    async updateMetadata(_id: string, _metadata: Record<string, any>): Promise<void> {
-        // 无需持久化菜单的元数据
-    }
-
-    // 以下为只读存根
-    // 设置页面通常不支持创建/删除/移动/重命名，实现为空或抛错
-    async createFile(_name: string, _parentId: string | null, _content?: string): Promise<EngineNode> {
-        throw new Error("Cannot create new settings pages.");
-    }
-    async createDirectory(_name: string, _parentId: string | null): Promise<EngineNode> {
-        throw new Error("Cannot create directories in settings.");
-    }
-
-    // [新增] 实现接口缺失方法：创建资产
-    async createAsset(_ownerNodeId: string, _filename: string, _content: string | ArrayBuffer): Promise<EngineNode> {
-        throw new Error("Assets are not supported in settings engine.");
-    }
-
-    // [新增] 实现接口缺失方法：获取资产目录ID
-    async getAssetDirectoryId(_ownerNodeId: string): Promise<string | null> {
+    async resolvePath(_path: string): Promise<string | null> {
+        for (const [id, cfg] of Object.entries(SETTINGS_PAGES)) {
+            if (_path === `/${cfg.name}`) return id;
+        }
         return null;
     }
 
-    async rename(_id: string, _newName: string): Promise<void> {
-        throw new Error("Cannot rename settings.");
+    async exists(id: string): Promise<boolean> {
+        return id in SETTINGS_PAGES;
     }
-    async move(_ids: string[], _targetParentId: string | null): Promise<void> {
-        throw new Error("Cannot move settings.");
-    }
-    async delete(_ids: string[]): Promise<void> {
-        throw new Error("Cannot delete settings.");
-    }
-    async setTags(_id: string, _tags: string[]): Promise<void> { }
 
-    // --- Events Implementation ---
-    on(event: EngineEventType, callback: (event: EngineEvent) => void): () => void {
-        if (!this.listeners.has(event)) this.listeners.set(event, new Set());
-        this.listeners.get(event)!.add(callback);
-        return () => this.listeners.get(event)!.delete(callback);
+    async search(query: any): Promise<FSSearchResult> {
+        const text = query?.name?.contains as string | undefined;
+        const nodes: FSNode[] = [];
+        if (text) {
+            const lower = text.toLowerCase();
+            for (const [id, cfg] of Object.entries(SETTINGS_PAGES)) {
+                if (cfg.name.toLowerCase().includes(lower)) {
+                    nodes.push(toFSNode(id, cfg));
+                }
+            }
+        }
+        return { nodes: nodes, total: nodes.length, hasMore: false };
+    }
+
+    async getStats(): Promise<FSModuleStats> {
+        const count = Object.keys(SETTINGS_PAGES).length;
+        return { fileCount: count, directoryCount: 1, totalSize: 0, lastModifiedAt: Date.now() };
+    }
+
+    // ── Write (no-op or throw) ────────────────────────
+    async writeContent(): Promise<void> {
+        console.warn('Direct write to SettingsEngine ignored. Use SettingsService.');
+    }
+    async updateMetadata(): Promise<void> { /* no-op */ }
+    async appendContent(): Promise<void> { throw new Error('not supported'); }
+
+    async createFile(): Promise<FSNode> {
+        throw new Error('Cannot create new settings pages.');
+    }
+    async createDirectory(): Promise<FSNode> {
+        throw new Error('Cannot create directories in settings.');
+    }
+    async rename(): Promise<void> {
+        throw new Error('Cannot rename settings.');
+    }
+    async move(): Promise<void> {
+        throw new Error('Cannot move settings.');
+    }
+    async delete(): Promise<void> {
+        throw new Error('Cannot delete settings.');
+    }
+
+    // ── Links (unsupported) ───────────────────────────
+    async symlink(): Promise<FSNode> { throw new FSCapabilityError('symlinks', this.moduleId); }
+    async readlink(): Promise<string> { throw new FSCapabilityError('symlinks', this.moduleId); }
+    async hardlink(): Promise<FSNode> { throw new FSCapabilityError('hardlinks', this.moduleId); }
+
+    // ── Transaction (unsupported) ────────────────────
+    async transaction<T>(): Promise<T> {
+        throw new FSCapabilityError('transaction', this.moduleId);
     }
 }

@@ -1,6 +1,6 @@
 /**
  * @file SystemVFSEngine.ts
- * @desc Read-only cross-module IFSEngine for the System FS Explorer debug view.
+ * @desc Read-only cross-module IModuleFS for the System FS Explorer debug view.
  *
  * Tree layout:
  *   dev/                     ← synthetic /dev directory: registered device drivers
@@ -18,26 +18,33 @@
  *   Real node   : "<moduleName>|<realNodeId>"
  *
  * All write operations throw a read-only error.
+ *
+ * v3.3: Refactored from IFSEngine → IModuleFS.
  */
 import type {
-    IFSEngine,
-    IVFSManager,
     IModuleFS,
+    IFSDriver,
+    IVFSManager,
     FSNode,
-    EngineNode,
-    EngineSearchQuery,
-    EngineEvent,
-    EngineEventType,
+    FSFileNode,
+    FSDirectoryNode,
+    FSSearchResult,
+    FSCapabilities,
+    IAssetOperations,
+    ITagOperations,
+    FileContent,
+    ReadOptions,
 } from '@itookit/common';
+import { FSCapabilityError } from '@itookit/common';
 
 // ── ID helpers ────────────────────────────────────────────────────────────────
 
-const DEV_DIR_ID  = '__dev__';
-const DEV_PREFIX  = '__dev__|';
-const MOD_PREFIX  = '__mod__';
+const DEV_DIR_ID = '__dev__';
+const DEV_PREFIX = '__dev__|';
+const MOD_PREFIX = '__mod__';
 
 const moduleNodeId = (moduleName: string): string => `${MOD_PREFIX}${moduleName}`;
-const devNodeId    = (handlerId: string): string   => `${DEV_PREFIX}${handlerId}`;
+const devNodeId = (handlerId: string): string => `${DEV_PREFIX}${handlerId}`;
 
 const compositeId = (moduleName: string, realId: string): string =>
     `${moduleName}|${realId}`;
@@ -49,11 +56,6 @@ function parseComposite(id: string): { moduleName: string; realId: string } | nu
     return { moduleName: id.slice(0, sep), realId: id.slice(sep + 1) };
 }
 
-/**
- * 判断文件路径是否应屏蔽内容：路径任意分段以 "." 开头即视为敏感。
- * 例：/.connections/default 中，default 文件名不含 "."，但父目录 .connections 含，
- * 同样需要屏蔽内容。
- */
 const isSensitivePath = (path: string): boolean =>
     path.split('/').filter(Boolean).some(seg => seg.startsWith('.'));
 
@@ -63,120 +65,126 @@ const BLOCKED_CONTENT = (name: string, path: string, mod: string): string =>
     `Path  : ${path}\n` +
     `Module: ${mod}\n`;
 
-// ── FSNode → EngineNode conversion ───────────────────────────────────────────
+// ── FSNode wrapper for composite IDs ──────────────────────────────────────────
 
-function fsNodeToEngine(node: FSNode, id: string, parentId: string | null, moduleId: string): EngineNode {
-    const base = {
+function wrapFSNode(node: FSNode, id: string, parentId: string | null, moduleId: string): FSNode {
+    if (node.type === 'directory') {
+        return {
+            ...node,
+            id,
+            parentId,
+            moduleId,
+            tags: node.tags ? [...node.tags] : [],
+            metadata: { ...(node.metadata as Record<string, unknown>), _showAll: true },
+        } as FSDirectoryNode;
+    }
+    return {
+        ...node,
         id,
         parentId,
-        name: node.name,
-        path: node.path,
-        createdAt: node.createdAt,
-        modifiedAt: node.modifiedAt,
-        tags: [...(node.tags ?? [])] as string[],
-        // _showAll bypasses shouldFilterNode so hidden/asset nodes are visible
-        // in this debug view without modifying any shared UI layer code.
-        metadata: { ...(node.metadata as Record<string, unknown>), _showAll: true },
         moduleId,
-    };
-
-    if (node.type === 'file') {
-        return { ...base, type: 'file' as const, size: node.size };
-    }
-    return { ...base, type: 'directory' as const };
+        tags: node.tags ? [...node.tags] : [],
+        metadata: { ...(node.metadata as Record<string, unknown>), _showAll: true },
+    } as FSFileNode;
 }
 
-// Collect all nodes recursively from a module, building the full tree.
+// ── Tree collection ───────────────────────────────────────────────────────────
+
 async function collectTree(
     fs: IModuleFS,
     idOrPath: string,
     parentId: string,
     moduleName: string,
-): Promise<EngineNode[]> {
-    // Debug view: include all reserved entries (hidden, assetdirs, __config internal dirs).
-    const children = await fs.getChildren(idOrPath, { includeHidden: true, includeAssetDirs: true, includeInternalDirs: true }) as FSNode[];
-    const result: EngineNode[] = [];
+): Promise<FSNode[]> {
+    const children = await fs.driver.getChildren(idOrPath, {
+        includeHidden: true, includeAssetDirs: true, includeInternalDirs: true,
+    }) as FSNode[];
+    const result: FSNode[] = [];
 
     for (const child of children) {
         const cId = compositeId(moduleName, child.id);
-        const engineNode = fsNodeToEngine(child, cId, parentId, moduleName);
+        const wrapped = wrapFSNode(child, cId, parentId, moduleName);
 
-        if (child.type === 'directory') {
-            engineNode.children = await collectTree(fs, child.id, cId, moduleName);
-        } else if (!isSensitivePath(child.path)) {
-            // Eagerly load content so the editor receives it via item.content.data
-            // without needing a custom factory or event-driven reload.
-            // Skip files whose path contains any dot-prefix segment (hidden / system).
+        // Pre-load content for non-sensitive files (used by editor via item.content.data)
+        if (child.type !== 'directory' && !isSensitivePath(child.path)) {
             try {
-                const raw = await fs.readContent(child.id);
-                engineNode.content = typeof raw === 'string' ? raw : undefined;
-            } catch { /* unreadable files show as empty */ }
+                const raw = await fs.driver.readContent(child.id);
+                (wrapped as any)._content = raw;
+            } catch { /* unreadable */ }
         }
-        result.push(engineNode);
+        result.push(wrapped);
     }
     return result;
 }
 
-// ── Engine ────────────────────────────────────────────────────────────────────
+// ── Capabilities ──────────────────────────────────────────────────────────────
 
-export class SystemVFSEngine implements IFSEngine {
-    constructor(private readonly vfs: IVFSManager) {}
+const READONLY_CAPS: FSCapabilities = Object.freeze({
+    readonly: true, search: true, semanticSearch: false, syncable: false,
+    assets: false, tags: false, deviceFiles: false,
+    seqFiles: false, references: false, symlinks: false, hardlinks: false,
+    partialRead: false, partialWrite: false, treeWalk: false,
+    streaming: false, watch: false, mount: false,
+});
 
-    async init(): Promise<void> {}
+const noopTags: ITagOperations = {
+    getAllTags: async () => [],
+    setTags: async () => {},
+    addTag: async () => {},
+    removeTag: async () => {},
+    walkByTag: async () => ({ total: 0, processed: 0 }),
+};
 
-    // ── Tree ─────────────────────────────────────────────────────────────────
+const noopAssets: IAssetOperations = {
+    putAsset: async () => ({ type: 'file' } as FSFileNode),
+    getAsset: async () => null,
+    getAssetDirId: async () => null,
+    ensureAssetDir: async () => { throw new FSCapabilityError('assets', 'system'); },
+    listAssets: async () => [],
+    deleteAsset: async () => {},
+    removeAssetDir: async () => {},
+    hasAssetDir: async () => false,
+};
 
-    async getChildren(parentId: string): Promise<EngineNode[]> {
-        // Root: return top-level directory stubs (lazy — children not loaded yet)
-        if (parentId === '/') {
-            const nodes: EngineNode[] = [this.buildDevDirNode()];
-            const modules = this.vfs.getAllModules();
-            nodes.push(...modules.map(mod => ({
-                id: moduleNodeId(mod.name),
-                parentId: null,
-                name: mod.name,
-                type: 'directory' as const,
-                path: `/${mod.name}`,
-                createdAt: 0,
-                modifiedAt: 0,
-                tags: [] as string[],
-                metadata: { title: mod.name, description: mod.description ?? '', _showAll: true },
-                moduleId: 'system',
-            })));
-            return nodes;
-        }
+// ═══════════════════════════════════════════════════════════════════════════════
+// SystemVFSEngine
+// ═══════════════════════════════════════════════════════════════════════════════
 
-        // /dev/ 目录
-        if (parentId === DEV_DIR_ID) {
-            return this.buildDevChildNodes();
-        }
+export class SystemVFSEngine implements IModuleFS {
+    readonly moduleId = 'system';
+    readonly capabilities: FSCapabilities = READONLY_CAPS;
+    readonly driver: IFSDriver;
+    readonly meta: import('@itookit/common').IFSMetaDriver = {
+        assets: noopAssets,
+        tags: noopTags,
+    };
 
-        if (parentId.startsWith(MOD_PREFIX)) {
-            const moduleName = parentId.slice(MOD_PREFIX.length);
-            try {
-                const fs = this.vfs.getEngine(moduleName);
-                return await collectTree(fs, '/', parentId, moduleName);
-            } catch {
-                return [];
-            }
-        }
-
-        const parsed = parseComposite(parentId);
-        if (!parsed) return [];
-
-        try {
-            const fs = this.vfs.getEngine(parsed.moduleName);
-            const children = await fs.getChildren(parsed.realId, { includeHidden: true, includeAssetDirs: true, includeInternalDirs: true }) as FSNode[];
-            return children.map(c => {
-                const cId = compositeId(parsed.moduleName, c.id);
-                return fsNodeToEngine(c, cId, parentId, parsed.moduleName);
-            });
-        } catch {
-            return [];
-        }
+    constructor(private readonly vfs: IVFSManager) {
+        this.driver = new SystemFSDriver(this.vfs);
     }
 
-    async getNode(id: string): Promise<EngineNode | null> {
+    async init(): Promise<void> {}
+    openFile(_nodeId: string): never { throw new Error('not supported'); }
+
+    on = (e: any, cb: any) => this.driver.on(e, cb);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SystemFSDriver
+// ═══════════════════════════════════════════════════════════════════════════════
+
+class SystemFSDriver implements IFSDriver {
+    readonly moduleId = 'system';
+    readonly capabilities: FSCapabilities = READONLY_CAPS;
+
+    constructor(private readonly vfs: IVFSManager) {}
+
+    // ── Events (no-op) ───────────────────────────────
+    on(): () => void { return () => {}; }
+
+    // ── Read ─────────────────────────────────────────
+
+    async getNode(id: string): Promise<FSNode | null> {
         if (id === DEV_DIR_ID) return this.buildDevDirNode();
 
         if (id.startsWith(DEV_PREFIX)) {
@@ -196,8 +204,10 @@ export class SystemVFSEngine implements IFSEngine {
                 path: `/${moduleName}`,
                 createdAt: 0,
                 modifiedAt: 0,
+                version: 0,
+                nlink: 1,
                 tags: [],
-                metadata: { title: moduleName, description: info.description ?? '' },
+                metadata: { title: moduleName, description: info.description ?? '', _showAll: true },
                 moduleId: 'system',
             };
         }
@@ -207,21 +217,72 @@ export class SystemVFSEngine implements IFSEngine {
 
         try {
             const fs = this.vfs.getEngine(parsed.moduleName);
-            const node = await fs.getNode(parsed.realId) as FSNode | null;
+            const node = await fs.driver.getNode(parsed.realId);
             if (!node) return null;
-            return fsNodeToEngine(node, id, null, parsed.moduleName);
+            return wrapFSNode(node, id, null, parsed.moduleName);
         } catch {
             return null;
         }
     }
 
-    // ── Content ───────────────────────────────────────────────────────────────
+    async getChildren(parentId: string, _options?: any): Promise<FSNode[]> {
+        if (parentId === '/') {
+            const nodes: FSNode[] = [this.buildDevDirNode()];
+            const modules = this.vfs.getAllModules();
+            nodes.push(...modules.map(mod => ({
+                id: moduleNodeId(mod.name),
+                parentId: null,
+                name: mod.name,
+                type: 'directory' as const,
+                path: `/${mod.name}`,
+                createdAt: 0,
+                modifiedAt: 0,
+                version: 0,
+                nlink: 1,
+                tags: [] as string[],
+                metadata: { title: mod.name, description: mod.description ?? '', _showAll: true },
+                moduleId: 'system',
+            })));
+            return nodes;
+        }
 
-    async readContent(id: string): Promise<string | ArrayBuffer> {
-        // /dev/ 目录本身
+        if (parentId === DEV_DIR_ID) {
+            return this.buildDevChildNodes();
+        }
+
+        if (parentId.startsWith(MOD_PREFIX)) {
+            const moduleName = parentId.slice(MOD_PREFIX.length);
+            try {
+                const fs = this.vfs.getEngine(moduleName);
+                return await collectTree(fs, '/', parentId, moduleName);
+            } catch {
+                return [];
+            }
+        }
+
+        const parsed = parseComposite(parentId);
+        if (!parsed) return [];
+
+        try {
+            const fs = this.vfs.getEngine(parsed.moduleName);
+            const children = await fs.driver.getChildren(parsed.realId, {
+                includeHidden: true, includeAssetDirs: true, includeInternalDirs: true,
+            }) as FSNode[];
+            return children.map(c => {
+                const cId = compositeId(parsed.moduleName, c.id);
+                return wrapFSNode(c, cId, parentId, parsed.moduleName);
+            });
+        } catch {
+            return [];
+        }
+    }
+
+    async readContent(id: string, options: ReadOptions & { encoding: 'utf-8' }): Promise<string>;
+    async readContent(id: string, options: ReadOptions & { encoding: 'binary' }): Promise<ArrayBuffer>;
+    async readContent(id: string, options?: ReadOptions): Promise<FileContent>;
+    async readContent(id: string, _options?: any): Promise<FileContent> {
         if (id === DEV_DIR_ID) return '';
 
-        // /dev/<handlerId> 设备节点 → 显示驱动元数据
         if (id.startsWith(DEV_PREFIX)) {
             const handlerId = id.slice(DEV_PREFIX.length);
             return this.buildDevContent(handlerId);
@@ -234,14 +295,12 @@ export class SystemVFSEngine implements IFSEngine {
 
         const node = await this.getNode(id);
 
-        // Block content for files whose path contains any dot-prefix segment,
-        // including files nested under hidden directories (e.g. .connections/default).
         if (node && isSensitivePath(node.path)) {
             return BLOCKED_CONTENT(node.name, node.path, parsed.moduleName);
         }
 
         try {
-            const raw = await this.vfs.getEngine(parsed.moduleName).readContent(parsed.realId);
+            const raw = await this.vfs.getEngine(parsed.moduleName).driver.readContent(parsed.realId);
             if (typeof raw === 'string') return raw;
             if (raw instanceof ArrayBuffer) return raw;
             return (raw as Uint8Array).buffer.slice(
@@ -253,31 +312,52 @@ export class SystemVFSEngine implements IFSEngine {
         }
     }
 
-    // ── /dev/ helpers ─────────────────────────────────────────────────────────
+    async resolvePath(): Promise<string | null> { return null; }
+    async exists(): Promise<boolean> { return false; }
+    async search(): Promise<FSSearchResult> { return { nodes: [], total: 0, hasMore: false }; }
 
-    private buildDevDirNode(): EngineNode {
+    // ── Write (all throw read-only) ──────────────────
+    async writeContent(): Promise<void> { throw new Error('Read-only'); }
+    async appendContent(): Promise<void> { throw new Error('Read-only'); }
+    async createFile(): Promise<FSNode> { throw new Error('Read-only'); }
+    async createDirectory(): Promise<FSNode> { throw new Error('Read-only'); }
+    async rename(): Promise<void> { throw new Error('Read-only'); }
+    async delete(): Promise<void> { throw new Error('Read-only'); }
+    async move(): Promise<void> { throw new Error('Read-only'); }
+    async updateMetadata(): Promise<void> {}
+
+    // ── Links ────────────────────────────────────────
+    async symlink(): Promise<FSNode> { throw new FSCapabilityError('symlinks', this.moduleId); }
+    async readlink(): Promise<string> { throw new FSCapabilityError('symlinks', this.moduleId); }
+    async hardlink(): Promise<FSNode> { throw new FSCapabilityError('hardlinks', this.moduleId); }
+    async transaction(): Promise<never> { throw new FSCapabilityError('transaction', this.moduleId); }
+
+    // ── /dev/ helpers ───────────────────────────────
+
+    private buildDevDirNode(): FSNode {
         return {
             id: DEV_DIR_ID,
             parentId: null,
             name: 'dev',
-            type: 'directory' as const,
+            type: 'directory',
             path: '/dev',
             createdAt: 0,
             modifiedAt: 0,
+            version: 0,
+            nlink: 1,
             tags: [],
-            metadata: { title: '/dev', description: 'Registered virtual device drivers' },
+            metadata: { title: '/dev', description: 'Registered virtual device drivers', _showAll: true },
             moduleId: 'system',
-            children: this.buildDevChildNodes(),
         };
     }
 
-    private buildDevChildNodes(): EngineNode[] {
+    private buildDevChildNodes(): FSNode[] {
         return this.vfs.devices.list().map(handlerId =>
             this.buildDevFileNode(handlerId, DEV_DIR_ID),
         );
     }
 
-    private buildDevFileNode(handlerId: string, parentId: string): EngineNode {
+    private buildDevFileNode(handlerId: string, parentId: string): FSFileNode {
         const driver = this.vfs.devices.has(handlerId)
             ? this.vfs.devices.get(handlerId)
             : null;
@@ -285,13 +365,15 @@ export class SystemVFSEngine implements IFSEngine {
             id: devNodeId(handlerId),
             parentId,
             name: handlerId,
-            type: 'file' as const,
+            type: 'file',
             path: `/dev/${handlerId}`,
             createdAt: 0,
             modifiedAt: 0,
             size: 0,
+            version: 0,
+            nlink: 1,
             tags: [],
-            metadata: { title: handlerId, description: driver?.description ?? '' },
+            metadata: { title: handlerId, description: driver?.description ?? '', _showAll: true },
             moduleId: 'system',
         };
     }
@@ -306,43 +388,5 @@ export class SystemVFSEngine implements IFSEngine {
             streamable: driver.streamable ?? false,
             sessionable: driver.sessionable ?? false,
         }, null, 2);
-    }
-
-    // ── Search ────────────────────────────────────────────────────────────────
-
-    async search(_query: EngineSearchQuery): Promise<EngineNode[]> {
-        return [];
-    }
-
-    // ── Tags (no-op) ──────────────────────────────────────────────────────────
-
-    async getAllTags(): Promise<Array<{ name: string; color?: string }>> { return []; }
-    async setTags(_id: string, _tags: string[]): Promise<void> {}
-    async setTagsBatch(_updates: Array<{ id: string; tags: string[] }>): Promise<void> {}
-
-    // ── Assets (no-op) ────────────────────────────────────────────────────────
-
-    async createAsset(): Promise<EngineNode> { return this.throwReadOnly('createAsset'); }
-    async getAssetDirectoryId(): Promise<string | null> { return null; }
-    async getAssets(): Promise<EngineNode[]> { return []; }
-
-    // ── Mutations (read-only — all throw) ────────────────────────────────────
-
-    private throwReadOnly(op: string): never {
-        throw new Error(`[SystemVFSEngine] Read-only: ${op} is not allowed`);
-    }
-
-    async writeContent(): Promise<void>  { this.throwReadOnly('writeContent'); }
-    async createFile(): Promise<EngineNode> { return this.throwReadOnly('createFile'); }
-    async createDirectory(): Promise<EngineNode> { return this.throwReadOnly('createDirectory'); }
-    async rename(): Promise<void>  { this.throwReadOnly('rename'); }
-    async delete(): Promise<void>  { this.throwReadOnly('delete'); }
-    async move(): Promise<void>    { this.throwReadOnly('move'); }
-    async updateMetadata(): Promise<void> {}
-
-    // ── Events (static snapshot — no events) ─────────────────────────────────
-
-    on(_event: EngineEventType, _callback: (e: EngineEvent) => void): () => void {
-        return () => {};
     }
 }

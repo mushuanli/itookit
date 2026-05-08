@@ -396,10 +396,10 @@ export class SyncService {
     for (const mod of modules) {
       const engine = this.vfs.getEngine(mod.name);
       try {
-        await engine.walkTree?.(async (node) => {
+        await engine.driver.walkTree?.(async (node) => {
           if (node.type !== 'file') return;
           try {
-            const raw = await engine.readContent(node.id);
+            const raw = await engine.driver.readContent(node.id);
             const buf = this.toArrayBuffer(raw);
             files.push({
               path: `/${mod.name}${node.path}`,
@@ -458,7 +458,7 @@ export class SyncService {
         const ownerName = innerParts[innerParts.length - 2].slice(1); // strip '_'
         const ownerPath = '/' + [...innerParts.slice(0, -2), ownerName].join('/');
         const engine = this.vfs.getEngine(moduleName);
-        await engine.assets?.putAsset(ownerPath, assetName, buf);
+        await engine.meta.assets?.putAsset(ownerPath, assetName, buf);
       } else {
         await this.vfs.write(moduleName, '/' + innerParts.join('/'), buf);
       }

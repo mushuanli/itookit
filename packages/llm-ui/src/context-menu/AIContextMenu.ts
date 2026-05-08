@@ -172,7 +172,7 @@ async function showAgentDialog(
     });
 
     dialog.querySelector('[data-action="clear"]')?.addEventListener('click', async () => {
-        await engine.updateMetadata(node.id, { ai_defaultAgent: undefined });
+        await engine.driver.updateMetadata(node.id, { ai_defaultAgent: undefined });
         overlay.remove();
     });
 
@@ -181,7 +181,7 @@ async function showAgentDialog(
     });
 
     dialog.querySelector('[data-action="confirm"]')?.addEventListener('click', async () => {
-        await engine.updateMetadata(node.id, { ai_defaultAgent: selectedId });
+        await engine.driver.updateMetadata(node.id, { ai_defaultAgent: selectedId });
         overlay.remove();
     });
 
@@ -229,7 +229,7 @@ function showInitialPromptDialog(
     setTimeout(() => textarea?.focus(), 50);
 
     dialog.querySelector('[data-action="clear"]')?.addEventListener('click', async () => {
-        await engine.updateMetadata(node.id, { ai_initialPrompt: undefined });
+        await engine.driver.updateMetadata(node.id, { ai_initialPrompt: undefined });
         overlay.remove();
     });
 
@@ -239,7 +239,7 @@ function showInitialPromptDialog(
 
     dialog.querySelector('[data-action="confirm"]')?.addEventListener('click', async () => {
         const text = textarea.value.trim();
-        await engine.updateMetadata(node.id, { ai_initialPrompt: text || undefined });
+        await engine.driver.updateMetadata(node.id, { ai_initialPrompt: text || undefined });
         overlay.remove();
     });
 
@@ -289,7 +289,7 @@ function showSystemPromptDialog(
     setTimeout(() => textarea?.focus(), 50);
 
     dialog.querySelector('[data-action="clear"]')?.addEventListener('click', async () => {
-        await engine.updateMetadata(node.id, { ai_systemPrompt: undefined });
+        await engine.driver.updateMetadata(node.id, { ai_systemPrompt: undefined });
         overlay.remove();
     });
 
@@ -299,7 +299,7 @@ function showSystemPromptDialog(
 
     dialog.querySelector('[data-action="confirm"]')?.addEventListener('click', async () => {
         const text = textarea.value.trim();
-        await engine.updateMetadata(node.id, { ai_systemPrompt: text || undefined });
+        await engine.driver.updateMetadata(node.id, { ai_systemPrompt: text || undefined });
         overlay.remove();
     });
 

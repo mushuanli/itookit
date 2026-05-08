@@ -1,7 +1,12 @@
-// @file packages/vfslib/src/adapter-session/BaseModuleService.ts
+/**
+ * @file packages/vfslib/src/adapter-session/BaseModuleService.ts
+ * @desc 基础模块服务 — 提供模块初始化、JSON 读写、目录创建、变更通知。
+ *
+ * v3.3: engine 字段从 VFSModuleEngine 迁移为 IModuleFS。
+ *       VFSModuleEngine 已废弃，BaseModuleService 不再依赖它。
+ */
 
-import type { IVFSManager } from '@itookit/common';
-import { VFSModuleEngine } from './VFSModuleEngine';
+import type { IVFSManager, IModuleFS } from '@itookit/common';
 
 // ── 公共类型 ──────────────────────────────────────────────────
 
@@ -20,10 +25,11 @@ export interface ModuleServiceOptions {
  * 基础模块服务
  *
  * 提供模块初始化、JSON 读写、目录创建、变更通知等通用功能。
- * 依赖 IVFSManager（抽象接口），不再依赖旧版 VFS 实现。
+ * 依赖 IVFSManager（抽象接口），engine 字段为 IModuleFS (v3.3)。
  */
 export abstract class BaseModuleService {
-    public readonly engine: VFSModuleEngine;
+    /** v3.3: IModuleFS — 子类通过 engine.driver.* 进行文件操作 */
+    public readonly engine: IModuleFS;
     protected initialized = false;
     protected listeners = new Set<ChangeListener>();
 
@@ -32,16 +38,14 @@ export abstract class BaseModuleService {
         protected readonly options: ModuleServiceOptions = {},
         public readonly vfs: IVFSManager,
     ) {
-        this.engine = new VFSModuleEngine(moduleName, vfs, {
-            description: options.description,
-            isSystem: options.isSystem,
-        });
+        this.engine = this.vfs.getEngine(moduleName);
     }
 
     // ── 生命周期 ──────────────────────────────────────────────
 
     async init(): Promise<void> {
         if (this.initialized) return;
+        await this.vfs.mount(this.moduleName, this.options);
         await this.engine.init();
         await this.onLoad();
         this.initialized = true;
@@ -98,7 +102,7 @@ export abstract class BaseModuleService {
      * 确保目录存在（递归创建）
      */
     async ensureDirectory(path: string): Promise<void> {
-        const fs = this.engine.getModuleFS();
+        const fs = this.engine;
         const normalized = path.startsWith('/') ? path : '/' + path;
         const parts = normalized.split('/').filter(Boolean);
 
@@ -106,9 +110,8 @@ export abstract class BaseModuleService {
         for (const part of parts) {
             const next: string = current ? `${current}/${part}` : `/${part}`;
             try {
-                await fs.createDirectory({ name: part, parentIdOrPath: current });
+                await fs.driver.createDirectory({ name: part, parentIdOrPath: current });
             } catch (e: any) {
-                // Ignore if directory already exists (concurrent or pre-existing)
                 if (!isAlreadyExistsLike(e)) throw e;
             }
             current = next;
@@ -119,9 +122,9 @@ export abstract class BaseModuleService {
      * 删除文件（路径不存在时静默跳过）
      */
     protected async deleteFile(path: string): Promise<void> {
-        const nodeId = await this.engine.resolvePath(path);
+        const nodeId = await this.engine.driver.resolvePath(path);
         if (nodeId) {
-            await this.engine.delete([nodeId]);
+            await this.engine.driver.delete([nodeId]);
         }
     }
 
@@ -129,7 +132,7 @@ export abstract class BaseModuleService {
      * 检查文件是否存在
      */
     protected async fileExists(path: string): Promise<boolean> {
-        return this.engine.pathExists(path);
+        return this.engine.driver.exists(path);
     }
 
     // ── 变更通知 ──────────────────────────────────────────────

@@ -54,7 +54,7 @@ export class DependencyGraph {
     async expandDirectory(moduleName: string, dirPath: string): Promise<string[]> {
         const engine = this.vfs.getEngine(moduleName);
         try {
-            const children = await engine.getChildren(dirPath);
+            const children = await engine.driver.getChildren(dirPath);
             return children
                 .filter((n) => n.type === 'file' && !n.name.startsWith('_') && !n.name.startsWith('.'))
                 .map((n) => n.path);

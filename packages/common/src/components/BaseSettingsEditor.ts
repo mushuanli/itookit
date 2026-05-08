@@ -78,7 +78,7 @@ export abstract class BaseSettingsEditor<TService> implements IEditor {
         const engine = this.options.sessionEngine;
         const nodeId = this.options.nodeId;
         if (!engine || !nodeId) return;
-        await engine.updateMetadata(nodeId, changes);
+        await engine.driver.updateMetadata(nodeId, changes);
     }
 
     /**
@@ -89,7 +89,7 @@ export abstract class BaseSettingsEditor<TService> implements IEditor {
         const engine = this.options.sessionEngine;
         const nodeId = this.options.nodeId;
         if (!engine || !nodeId || !newName) return;
-        await engine.rename(nodeId, newName);
+        await engine.driver.rename(nodeId, newName);
     }
 
     abstract render(): void | Promise<void>;

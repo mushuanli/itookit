@@ -35,7 +35,7 @@ describe('Module lifecycle (IndexedDB backend)', () => {
         await vfs.manager.mount('engine-test');
         const fs = vfs.manager.getEngine('engine-test');
         expect(fs).toBeDefined();
-        expect(typeof fs.createFile).toBe('function');
+        expect(typeof fs.driver.createFile).toBe('function');
     });
 
     it('getEngine throws for unmounted module', () => {
@@ -198,7 +198,7 @@ describe('System-level readBySystemPath', () => {
 
     it('readBySystemPath reads file via absolute VFS path', async () => {
         const { fs, manager } = vfs;
-        await fs.createFile({ name: 'sys.txt', parentIdOrPath: null, content: 'sys-data' });
+        await fs.driver.createFile({ name: 'sys.txt', parentIdOrPath: null, content: 'sys-data' });
         // System path uses real VFS path: /module/test/sys.txt
         const content = await manager.readBySystemPath('/module/test/sys.txt');
         expect(typeof content === 'string' || content instanceof ArrayBuffer).toBe(true);
@@ -206,7 +206,7 @@ describe('System-level readBySystemPath', () => {
 
     it('manager.read convenience method reads file content', async () => {
         const { fs, manager } = vfs;
-        await fs.createFile({ name: 'mgr.txt', parentIdOrPath: null, content: 'mgr-data' });
+        await fs.driver.createFile({ name: 'mgr.txt', parentIdOrPath: null, content: 'mgr-data' });
         const content = await manager.read('test', '/mgr.txt');
         // FileContent can be string | ArrayBuffer | Uint8Array
         const text = typeof content === 'string'
@@ -219,12 +219,12 @@ describe('System-level readBySystemPath', () => {
         const { manager } = vfs;
         await manager.write('test', '/created-by-mgr.txt', 'mgr-content');
         const fs = manager.getEngine('test');
-        expect(await fs.exists('/created-by-mgr.txt')).toBe(true);
+        expect(await fs.driver.exists('/created-by-mgr.txt')).toBe(true);
     });
 
     it('manager.exists works across modules', async () => {
         const { fs, manager } = vfs;
-        await fs.createFile({ name: 'check.txt', parentIdOrPath: null, content: '' });
+        await fs.driver.createFile({ name: 'check.txt', parentIdOrPath: null, content: '' });
         expect(await manager.exists('test', '/check.txt')).toBe(true);
         expect(await manager.exists('test', '/no-such.txt')).toBe(false);
     });

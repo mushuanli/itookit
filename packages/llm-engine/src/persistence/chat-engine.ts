@@ -4,10 +4,8 @@ import YAML from 'yaml'; // 需要添加依赖: npm install yaml
 import { BaseModuleService } from '@itookit/vfslib';
 import type { IVFSManager } from '@itookit/common';
 import type {
-  EngineNode,
-  EngineSearchQuery,
-  EngineEvent,
-  EngineEventType
+  FSNode,
+  FSEvent,
 } from '@itookit/common';
 import {
   FS_MODULE_CHAT,
@@ -57,6 +55,16 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
     super(FS_MODULE_CHAT, { description: 'Chat Sessions' }, vfs);
   }
 
+  // ── v3.3: IModuleFS 兼容层（委托给内部 this.engine） ──────
+
+  /** 文件操作驱动（POSIX CRUD + 搜索 + 事件） */
+  get driver() { return this.engine.driver; }
+  /** 扩展元信息驱动（assetdir / tags / seqfile / refs） */
+  get meta() { return this.engine.meta; }
+  get moduleId() { return this.engine.moduleId; }
+  get capabilities() { return this.engine.capabilities; }
+  openFile(nodeId: string) { return this.engine.openFile(nodeId); }
+
   protected async onLoad(): Promise<void> {}
 
   // ============================================================
@@ -70,7 +78,7 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
   private async getAssetDirPath(chatFileId: string): Promise<string> {
     const cached = this.assetDirPaths.get(chatFileId);
     if (cached) return cached;
-    const node = await this.engine.getNode(chatFileId);
+    const node = await this.engine.driver.getNode(chatFileId);
     if (!node || !node.path) throw new Error(`Chat file not found: ${chatFileId}`);
     const lastSlash = node.path.lastIndexOf('/');
     const dir = node.path.substring(0, lastSlash);
@@ -112,8 +120,8 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
     const cached = this.chatFileIds.get(sessionId);
     if (cached) return cached;
 
-    const tree = await this.engine.getChildren('/');
-    const allFiles = this.collectAllFileNodes(tree);
+    const tree = await this.engine.driver.getChildren('/');
+    const allFiles = await this.collectAllFileNodes(tree);
 
     for (const node of allFiles) {
       if (!this.isChatFile(node.name)) continue;
@@ -141,13 +149,16 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
     return !name.includes('.');
   }
 
-  private collectAllFileNodes(nodes: EngineNode[]): EngineNode[] {
-    const result: EngineNode[] = [];
+  private async collectAllFileNodes(nodes: FSNode[]): Promise<FSNode[]> {
+    const result: FSNode[] = [];
     for (const node of nodes) {
       if (node.type === 'file') {
         result.push(node);
-      } else if (node.type === 'directory' && node.children) {
-        result.push(...this.collectAllFileNodes(node.children));
+      } else if (node.type === 'directory') {
+        try {
+          const children = await this.engine.driver.getChildren(node.id) as FSNode[];
+          result.push(...await this.collectAllFileNodes(children));
+        } catch { /* ignore */ }
       }
     }
     return result;
@@ -161,7 +172,7 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
     return {
       getManifest: (nodeId) => this.getManifest(nodeId),
       writeManifest: async (nodeId, manifest) => {
-        await this.engine.writeContent(nodeId, JSON.stringify(manifest, null, 2));
+        await this.engine.driver.writeContent(nodeId, JSON.stringify(manifest, null, 2));
       }
     };
   }
@@ -193,7 +204,7 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
       children_ids: [],
       status: 'active'
     };
-    await this.engine.createAsset(chatFileId, `${rootNodeId}.chat`, JSON.stringify(rootNode));
+    await this.engine.meta.assets.putAsset(chatFileId, `${rootNodeId}.chat`, JSON.stringify(rootNode));
 
     const manifest: ChatManifest = {
       version: '1.0',
@@ -212,7 +223,7 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
       branch_nums: { main: 0 },
     };
 
-    await this.engine.writeContent(chatFileId, JSON.stringify(manifest, null, 2));
+    await this.engine.driver.writeContent(chatFileId, JSON.stringify(manifest, null, 2));
     this.chatFileIds.set(sessionId, chatFileId);
 
     return { sessionId, rootNodeId, manifest };
@@ -309,7 +320,7 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
 
     if (Object.keys(metaUpdates).length > 0) {
       try {
-        await this.engine.updateMetadata(nodeId, metaUpdates);
+        await this.engine.driver.updateMetadata(nodeId, metaUpdates);
       } catch (e) {
         log.warn('Failed to update session metadata', { error: e });
       }
@@ -334,7 +345,7 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
 
   private async tryReadValidManifest(nodeId: string): Promise<ChatManifest | null> {
     try {
-      const content = await this.engine.readContent(nodeId);
+      const content = await this.engine.driver.readContent(nodeId);
       const byteLen = content instanceof ArrayBuffer ? content.byteLength : (content as string).length;
       console.log(`[tryReadValidManifest] nodeId=${nodeId} contentBytes=${byteLen}`);
       if (!content) return null;
@@ -355,7 +366,7 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
   }
 
   private async isSessionStructureIntact(chatFileId: string, manifest: ChatManifest): Promise<boolean> {
-    const assetDirId = await this.engine.getAssetDirectoryId(chatFileId);
+    const assetDirId = await this.engine.meta.assets.getAssetDirId(chatFileId);
     console.log(`[isSessionStructureIntact] chatFileId=${chatFileId} assetDirId=${assetDirId}`);
     if (!assetDirId) return false;
 
@@ -366,7 +377,7 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
     // If the root node file exists (assetDirId found) but can't be parsed,
     // treat as intact — unreadable != absent. Rebuild would wipe all nodes.
     if (!rootNode) {
-      const exists = await this.engine.pathExists(rootPath);
+      const exists = await this.engine.driver.exists(rootPath);
       console.log(`[isSessionStructureIntact] rootNode unreadable, file exists=${exists}`);
       return exists;
     }
@@ -676,12 +687,15 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
     title: string,
     systemPrompt: string = 'You are a helpful assistant.'
   ): Promise<string> {
-    const fileNode = await this.engine.createFile(
-      `${title}.chat`, null, '{}', { title, icon: '💬' }
-    );
+    const fileNode = await this.engine.driver.createFile({
+      name: `${title}.chat`,
+      parentIdOrPath: null,
+      content: '{}',
+      metadata: { title, icon: '💬' },
+    });
 
     const { sessionId } = await this.createSessionStructure(fileNode.id, title, systemPrompt);
-    await this.engine.updateMetadata(fileNode.id, { title, icon: '💬', sessionId });
+    await this.engine.driver.updateMetadata(fileNode.id, { title, icon: '💬', sessionId });
 
     this.notify();
     return sessionId;
@@ -700,7 +714,7 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
       // genuinely empty (new file) or absent. If the file already has content
       // but the manifest could not be parsed, it is corrupt — never overwrite
       // user data without explicit confirmation.
-      const existing = await this.engine.readContent(nodeId);
+      const existing = await this.engine.driver.readContent(nodeId);
       const existingSize = existing instanceof ArrayBuffer
         ? existing.byteLength
         : (existing as string).length;
@@ -734,7 +748,7 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
     systemPrompt: string
   ): Promise<string> {
     const { sessionId } = await this.createSessionStructure(nodeId, title, systemPrompt);
-    await this.engine.updateMetadata(nodeId, { title, icon: '💬', sessionId });
+    await this.engine.driver.updateMetadata(nodeId, { title, icon: '💬', sessionId });
 
     this.notify();
     return sessionId;
@@ -748,16 +762,17 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
     // Safety guard: check whether the asset dir has any nodes before deleting.
     // An asset dir with nodes means user data exists — do NOT auto-delete.
     // Only wipe when the asset dir is genuinely empty (no node files at all).
-    const assetDirId = await this.engine.getAssetDirectoryId(nodeId);
+    const assetDirId = await this.engine.meta.assets.getAssetDirId(nodeId);
     if (assetDirId) {
-      const assets = await this.engine.getAssets(nodeId);
+      const assetDirId2 = await this.engine.meta.assets.getAssetDirId(nodeId);
+      const assets = assetDirId2 ? await this.engine.driver.getChildren(assetDirId2) as FSNode[] : [];
       if (assets.length > 0) {
         console.warn(`[rebuildSessionStructure] nodeId=${nodeId} → asset dir has ${assets.length} nodes, refusing to delete user data`);
         throw new Error(`Session structure is broken but asset dir contains ${assets.length} node(s) — cannot auto-rebuild without data loss (nodeId=${nodeId}). Manual recovery required.`);
       }
       // Asset dir exists but is empty — safe to remove and recreate
       try {
-        await this.engine.delete([assetDirId]);
+        await this.engine.driver.delete([assetDirId]);
       } catch {
         // ignore
       }
@@ -793,7 +808,7 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
 
   async getManifest(nodeId: string): Promise<ChatManifest> {
     try {
-      const content = await this.engine.readContent(nodeId);
+      const content = await this.engine.driver.readContent(nodeId);
       if (!content) throw new Error('Empty file content');
 
       const str = typeof content === 'string' ? content : new TextDecoder().decode(content);
@@ -841,7 +856,7 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
         };
 
         manifest.updated_at = new Date().toISOString();
-        await this.engine.writeContent(nodeId, JSON.stringify(manifest, null, 2));
+        await this.engine.driver.writeContent(nodeId, JSON.stringify(manifest, null, 2));
       } catch (e: any) {
         if (e.message?.includes('not found') || e.message?.includes('Manifest missing')) {
           return;
@@ -883,7 +898,7 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
         meta,
         status: 'active'
       };
-      await this.engine.createAsset(nodeId, `${newNodeId}.chat`, JSON.stringify(newNode));
+      await this.engine.meta.assets.putAsset(nodeId, `${newNodeId}.chat`, JSON.stringify(newNode));
 
       await this.appendToParentChildren(assetDir, parentId, newNodeId);
 
@@ -894,7 +909,7 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
       manifest.current_head = newNodeId;
       manifest.branches[manifest.current_branch] = newNodeId;
       manifest.updated_at = now;
-      await this.engine.writeContent(nodeId, JSON.stringify(manifest, null, 2));
+      await this.engine.driver.writeContent(nodeId, JSON.stringify(manifest, null, 2));
 
       return newNodeId;
     });
@@ -1067,13 +1082,13 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
         }
       };
 
-      await this.engine.createAsset(nodeId, `${newNodeId}.chat`, JSON.stringify(newNode));
+      await this.engine.meta.assets.putAsset(nodeId, `${newNodeId}.chat`, JSON.stringify(newNode));
       await this.appendToParentChildren(assetDir, newNode.parent_id, newNodeId);
 
       manifest.current_head = newNodeId;
       manifest.branches[manifest.current_branch] = newNodeId;
       manifest.updated_at = now;
-      await this.engine.writeContent(nodeId, JSON.stringify(manifest, null, 2));
+      await this.engine.driver.writeContent(nodeId, JSON.stringify(manifest, null, 2));
 
       return newNodeId;
     });
@@ -1127,7 +1142,7 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
         },
       };
 
-      await this.engine.createAsset(nodeId, `${newNodeId}.chat`, JSON.stringify(newNode));
+      await this.engine.meta.assets.putAsset(nodeId, `${newNodeId}.chat`, JSON.stringify(newNode));
 
       if (newNode.parent_id) {
         await this.appendToParentChildren(assetDir, newNode.parent_id, newNodeId);
@@ -1137,7 +1152,7 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
       manifest.current_branch = branchName;
       manifest.current_head = newNodeId;
       manifest.updated_at = now;
-      await this.engine.writeContent(nodeId, JSON.stringify(manifest, null, 2));
+      await this.engine.driver.writeContent(nodeId, JSON.stringify(manifest, null, 2));
 
       return newNodeId;
     });
@@ -1152,7 +1167,7 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
       manifest.current_head = manifest.branches[branchName];
       manifest.updated_at = new Date().toISOString();
 
-      await this.engine.writeContent(nodeId, JSON.stringify(manifest, null, 2));
+      await this.engine.driver.writeContent(nodeId, JSON.stringify(manifest, null, 2));
     });
   }
 
@@ -1176,7 +1191,7 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
       manifest.current_head = leafId;
       manifest.updated_at = new Date().toISOString();
 
-      await this.engine.writeContent(nodeId, JSON.stringify(manifest, null, 2));
+      await this.engine.driver.writeContent(nodeId, JSON.stringify(manifest, null, 2));
       return name;
     });
   }
@@ -1329,7 +1344,7 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
       }
 
       manifest.updated_at = new Date().toISOString();
-      await this.engine.writeContent(nodeId, JSON.stringify(manifest, null, 2));
+      await this.engine.driver.writeContent(nodeId, JSON.stringify(manifest, null, 2));
     });
   }
 
@@ -1396,7 +1411,7 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
       }
 
       manifest.updated_at = new Date().toISOString();
-      await this.engine.writeContent(nodeId, JSON.stringify(manifest, null, 2));
+      await this.engine.driver.writeContent(nodeId, JSON.stringify(manifest, null, 2));
 
       return deletedIds;
     });
@@ -1457,7 +1472,7 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
       manifest.branches[manifest.current_branch] = targetNodeId;
       manifest.updated_at = new Date().toISOString();
 
-      await this.engine.writeContent(nodeId, JSON.stringify(manifest, null, 2));
+      await this.engine.driver.writeContent(nodeId, JSON.stringify(manifest, null, 2));
     });
   }
 
@@ -1492,30 +1507,30 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
   // IFSEngine file operations
   // ============================================================
 
-  async createDirectory(name: string, parentId: string | null): Promise<EngineNode> {
-    return this.engine.createDirectory(name, parentId);
+  async createDirectory(name: string, parentId: string | null): Promise<FSNode> {
+    return this.engine.driver.createDirectory({ name, parentIdOrPath: parentId });
   }
 
   async createFile(
     name: string,
     parentId: string | null,
     _content?: string | ArrayBuffer
-  ): Promise<EngineNode> {
+  ): Promise<FSNode> {
     const baseName = (name || 'New Chat').replace(/\.chat$/i, '');
     const availableName = await this.findAvailableFileName(baseName, parentId);
 
     // Create .chat file first, then build session structure
-    const node = await this.engine.createFile(
-      `${availableName}.chat`,
-      parentId,
-      '{}',
-      { title: availableName, icon: '💬' }
-    );
+    const node = await this.engine.driver.createFile({
+      name: `${availableName}.chat`,
+      parentIdOrPath: parentId,
+      content: '{}',
+      metadata: { title: availableName, icon: '💬' },
+    });
 
     const { sessionId } = await this.createSessionStructure(
       node.id, availableName, 'You are a helpful assistant.'
     );
-    await this.engine.updateMetadata(node.id, { title: availableName, icon: '💬', sessionId });
+    await this.engine.driver.updateMetadata(node.id, { title: availableName, icon: '💬', sessionId });
 
     this.notify();
     return node;
@@ -1529,8 +1544,8 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
 
     try {
       const children = parentId
-        ? await this.engine.getChildren(parentId)
-        : (await this.engine.getChildren('/')).filter(n => !n.parentId);
+        ? await this.engine.driver.getChildren(parentId)
+        : (await this.engine.driver.getChildren('/')).filter(n => !n.parentId);
 
       children.forEach(child => {
         if (child.name.endsWith('.chat')) {
@@ -1561,18 +1576,18 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
     // to the canonical .chat extension so the session remains recognisable.
     const sourceName = node.name.endsWith('.chat') ? node.name : `${node.name}.chat`;
     const { filename, title: cleanName } = buildRenamedFilename(newName, sourceName);
-    await this.engine.rename(id, filename);
+    await this.engine.driver.rename(id, filename);
 
     try {
       const manifest = await this.getManifest(id);
       manifest.title = cleanName;
       manifest.updated_at = new Date().toISOString();
-      await this.engine.writeContent(id, JSON.stringify(manifest, null, 2));
+      await this.engine.driver.writeContent(id, JSON.stringify(manifest, null, 2));
     } catch {
       // ignore
     }
 
-    await this.engine.updateMetadata(id, { title: cleanName });
+    await this.engine.driver.updateMetadata(id, { title: cleanName });
   }
 
   async delete(ids: string[]): Promise<void> {
@@ -1580,14 +1595,19 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
     // deleted (vfs-engine.ts: toAssetDirName → deleteRecursive). No manual
     // cleanup needed — attempting it first causes a double-delete ENOENT.
     ids.forEach(id => this.assetDirPaths.delete(id));
-    await this.engine.delete(ids);
+    await this.engine.driver.delete(ids);
     this.notify();
   }
 
-  async search(query: EngineSearchQuery): Promise<EngineNode[]> {
-    const results = await this.engine.search(query);
-    return results.filter(
-      (node: EngineNode) => node.type === 'file' && this.isChatFile(node.name)
+  async search(query: { type?: string; text?: string; tags?: string[]; limit?: number; scope?: string[] }): Promise<FSNode[]> {
+    const result = await this.engine.driver.search({
+      type: query.type as any,
+      name: query.text ? { contains: query.text } : undefined,
+      tags: query.tags ? { any: query.tags } : undefined,
+      limit: query.limit,
+    });
+    return Array.from(result.nodes).filter(
+      (node: FSNode) => node.type === 'file' && this.isChatFile(node.name)
     );
   }
 
@@ -1599,16 +1619,17 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
     ownerNodeId: string,
     filename: string,
     content: string | ArrayBuffer
-  ): Promise<EngineNode> {
-    return this.engine.createAsset(ownerNodeId, filename, content);
+  ): Promise<FSNode> {
+    return this.engine.meta.assets.putAsset(ownerNodeId, filename, content);
   }
 
   async getAssetDirectoryId(ownerNodeId: string): Promise<string | null> {
-    return this.engine.getAssetDirectoryId(ownerNodeId);
+    return this.engine.meta.assets.getAssetDirId(ownerNodeId);
   }
 
-  async getAssets(ownerNodeId: string): Promise<EngineNode[]> {
-    return this.engine.getAssets(ownerNodeId);
+  async getAssets(ownerNodeId: string): Promise<FSNode[]> {
+    const dirId = await this.engine.meta.assets.getAssetDirId(ownerNodeId);
+    return dirId ? await this.engine.driver.getChildren(dirId) as FSNode[] : [];
   }
 
   async readSessionAsset(sessionId: string, assetPath: string): Promise<Blob | null> {
@@ -1620,13 +1641,16 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
     const fullPath = `${assetDir}/${cleanPath}`;
 
     try {
-      const nodeId = await this.engine.resolvePath(fullPath);
+      const nodeId = await this.engine.driver.resolvePath(fullPath);
       if (!nodeId) return null;
 
-      const content = await this.engine.readContent(nodeId);
-      if (!content) return null;
+      const raw = await this.engine.driver.readContent(nodeId);
+      if (!raw) return null;
+      const blobContent = typeof raw === 'string' ? raw :
+        raw instanceof ArrayBuffer ? raw :
+        (raw.buffer as ArrayBuffer).slice(raw.byteOffset, raw.byteOffset + raw.byteLength);
 
-      return new Blob([content], { type: guessMimeType(cleanPath) });
+      return new Blob([blobContent], { type: guessMimeType(cleanPath) });
     } catch {
       return null;
     }
@@ -1636,10 +1660,10 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
   // proxy methods (IFSEngine interface)
   // ============================================================
 
-  async getChildren(parentId: string): Promise<EngineNode[]> {
-    const nodes = await this.engine.getChildren(parentId);
+  async getChildren(parentId: string): Promise<FSNode[]> {
+    const nodes = await this.engine.driver.getChildren(parentId);
     // Filter hidden files, asset dirs, and non-.chat files at every level
-    return nodes.filter((node: EngineNode) => {
+    return nodes.filter((node: FSNode) => {
       if (node.name.startsWith('.')) return false;
       if (node.name.startsWith('_')) return false;
       if (node.type === 'file') return this.isChatFile(node.name);
@@ -1649,40 +1673,46 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
   }
 
   async readContent(id: string): Promise<string | ArrayBuffer> {
-    return this.engine.readContent(id);
+    const raw = await this.engine.driver.readContent(id);
+    return typeof raw === 'string' ? raw :
+      raw instanceof ArrayBuffer ? raw : (raw.buffer as ArrayBuffer).slice(raw.byteOffset, raw.byteOffset + raw.byteLength);
   }
 
-  async getNode(id: string): Promise<EngineNode | null> {
-    return this.engine.getNode(id);
+  async getNode(id: string): Promise<FSNode | null> {
+    return this.engine.driver.getNode(id);
   }
 
   async writeContent(id: string, content: string | ArrayBuffer): Promise<void> {
-    return this.engine.writeContent(id, content);
+    return this.engine.driver.writeContent(id, content);
   }
 
   async move(ids: string[], targetParentId: string | null): Promise<void> {
     ids.forEach(id => this.assetDirPaths.delete(id));
-    return this.engine.move(ids, targetParentId);
+    return this.engine.driver.move(ids, targetParentId);
   }
 
   async updateMetadata(id: string, metadata: Record<string, any>): Promise<void> {
-    return this.engine.updateMetadata(id, metadata);
+    return this.engine.driver.updateMetadata(id, metadata);
   }
 
   async setTags(id: string, tags: string[]): Promise<void> {
-    return this.engine.setTags(id, tags);
+    await this.engine.meta.tags?.setTags(id, tags);
   }
 
   async setTagsBatch(updates: Array<{ id: string; tags: string[] }>): Promise<void> {
-    return this.engine.setTagsBatch(updates);
+    const tagsOps = this.engine.meta.tags;
+    if (tagsOps) {
+      await Promise.all(updates.map(u => tagsOps.setTags(u.id, u.tags)));
+    }
   }
 
   async getAllTags(): Promise<Array<{ name: string; color?: string }>> {
-    return this.engine.getAllTags();
+    const tags = this.engine.meta?.tags?.getAllTags();
+    return tags ?? [];
   }
 
-  on(event: EngineEventType, callback: (e: EngineEvent) => void): () => void {
-    return this.engine.on(event, callback);
+  on(event: string, callback: (e: FSEvent) => void): () => void {
+    return this.engine.driver.on(event as any, callback as any);
   }
 
   // ============================================================
@@ -1697,10 +1727,10 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
       const assetDir = await this.getAssetDirPath(chatFileId);
       const settingsPath = `${assetDir}/settings.yaml`;
 
-      const nodeId = await this.engine.resolvePath(settingsPath);
+      const nodeId = await this.engine.driver.resolvePath(settingsPath);
       if (!nodeId) return { ...DEFAULT_SESSION_SETTINGS };
 
-      const content = await this.engine.readContent(nodeId);
+      const content = await this.engine.driver.readContent(nodeId);
       if (!content) return { ...DEFAULT_SESSION_SETTINGS };
 
       const yamlStr = typeof content === 'string'
@@ -1740,7 +1770,7 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
 
       const yamlContent = YAML.stringify(merged, { indent: 2, lineWidth: 0 });
       // createAsset has put (upsert) semantics
-      await this.engine.createAsset(chatFileId, 'settings.yaml', yamlContent);
+      await this.engine.meta.assets.putAsset(chatFileId, 'settings.yaml', yamlContent);
     });
   }
 }

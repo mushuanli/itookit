@@ -62,7 +62,7 @@ import {
 } from '../components/input/SkillInvocationParser';
 import type { SkillInvocation } from '../components/input/SkillInvocationParser';
 
-export interface LLMEditorOptions extends EditorOptions {
+export interface LLMEditorOptions extends Omit<EditorOptions, 'sessionEngine'> {
     sessionEngine: IChatEngine;
     agentService: IAgentConfigService;
     initialInputState?: { text?: string; agentId?: string };
@@ -236,7 +236,8 @@ export class LLMWorkspaceEditor implements IEditor {
             bus: this.bus,
             nodeId: this.options.nodeId,
             ownerNodeId: this.options.ownerNodeId || this.options.nodeId,
-            sessionEngine: this.options.sessionEngine,
+            // v3.3: HistoryView still expects IFSEngine shape; IChatEngine is compatible at runtime
+            sessionEngine: this.options.sessionEngine as any,
             initialCollapseStates: this.stateManager.getCollapseStates(),
             onScroll: () => this.updateActiveSessionHighlight(),
         });
@@ -477,7 +478,8 @@ export class LLMWorkspaceEditor implements IEditor {
             const assetDirId = await this.assetService.getAssetDirectoryId(ownerNodeId);
             if (!assetDirId) { Toast.info('No attachments found'); return; }
 
-            const ui = new AssetManagerUI(this.engine, null as any, {});
+            // v3.3: AssetManagerUI expects IFSEngine; IChatEngine is compatible at runtime
+            const ui = new AssetManagerUI(this.engine as any, null as any, {});
             await ui.show(assetDirId);
         }, 'Open Asset Manager');
     }
