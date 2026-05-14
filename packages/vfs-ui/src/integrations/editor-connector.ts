@@ -171,10 +171,18 @@ export function connectEditorLifecycle(
         // Read file content (needed by both viewers and text editors).
         // item.content.data is only populated on in-memory update events;
         // on fresh page load, loadTree() omits file content → read from engine.
-        const initialContent =
+        const rawContent =
           item.content?.data !== undefined
             ? item.content.data
             : await engine.driver.readContent(item.id);
+        // readContent without 'utf-8' encoding may return ArrayBuffer;
+        // text editors need a string (CodeMirror calls .split() on the doc).
+        const initialContent =
+          typeof rawContent === 'string'
+            ? rawContent
+            : rawContent instanceof ArrayBuffer
+              ? new TextDecoder().decode(rawContent)
+              : '';
 
         // Re-check token after the async readContent — user may have switched files.
         if (myToken !== sessionToken) return;
@@ -183,7 +191,7 @@ export function connectEditorLifecycle(
         // Show a read-only viewer instead — editing binary content has no meaning.
         if (isBinaryViewable(mimeType)) {
             const viewer = new MediaViewerEditor(mimeType);
-            await viewer.init(editorContainer, initialContent as string | ArrayBuffer | undefined);
+            await viewer.init(editorContainer, rawContent as string | ArrayBuffer | undefined);
             if (myToken !== sessionToken) { await viewer.destroy(); return; }
             activeEditor = viewer;
             activeNode = item;
