@@ -70,6 +70,7 @@ export class IDBRecordStore implements IRecordStore {
         const idx = this.records.index('idx_ino');
         const rows = await collectCursor<RecordRow>(
             idx.openCursor(IDBKeyRange.only(ino)) as IDBRequest<IDBCursorWithValue | null>,
+            c => c.value as RecordRow,
         );
         const filtered = options?.prefix ? rows.filter(r => r.field.startsWith(options.prefix!)) : rows;
         const total = filtered.length;

@@ -2,7 +2,7 @@
  * @file mdx/plugins/ui/asset-manager.ui.ts
  * @desc 独立的资源管理器 UI 类，不绑定 MDxPlugin 上下文
  */
-import { Toast, guessMimeType, type IFSEngine, type EngineNode } from '@itookit/common';
+import { Toast, guessMimeType, type IModuleFS, type FSNode, type FSFileNode } from '@itookit/common';
 import type { MDxEditor } from '../../editor/mdx-editor';
 import {
     isAssetVisible,
@@ -12,7 +12,7 @@ import {
 } from '../../services/asset-helper';
 
 interface AssetDisplayItem {
-    node: EngineNode;
+    node: FSNode;
     isUsed: boolean;
     url?: string;
 }
@@ -26,7 +26,7 @@ export class AssetManagerUI {
     private currentAssetDirId: string = '';
 
     constructor(
-        private engine: IFSEngine,
+        private engine: IModuleFS,
         private editor: MDxEditor,
         private options: AssetConfigOptions = {}
     ) { }
@@ -62,9 +62,9 @@ export class AssetManagerUI {
 
         this.listContainer.innerHTML = '<div class="mdx-empty-state">加载中...</div>';
 
-        let files: EngineNode[] = [];
+        let files: FSNode[] = [];
         try {
-            files = await this.engine.getChildren(this.currentAssetDirId);
+            files = await this.engine.driver.getChildren(this.currentAssetDirId);
         } catch (e) {
             console.error('[AssetManager] Failed to get children:', e);
             this.listContainer.innerHTML = '<div class="mdx-empty-state">读取目录失败</div>';
@@ -166,11 +166,11 @@ export class AssetManagerUI {
             if (!this.isPreviewableImage(item.node.name)) return;
 
             try {
-                const buffer = await this.engine.readContent(item.node.id);
+                const buffer = await this.engine.driver.readContent(item.node.id);
                 if (!buffer) return;
 
                 const mimeType = guessMimeType(item.node.name);
-                const blob = new Blob([buffer], { type: mimeType });
+                const blob = new Blob([buffer as ArrayBuffer], { type: mimeType });
                 const url = URL.createObjectURL(blob);
                 this.objectUrls.push(url);
                 item.url = url;
@@ -231,7 +231,7 @@ export class AssetManagerUI {
         info.className = 'mdx-asset-info';
 
         const dateStr = new Date(item.node.createdAt).toLocaleDateString();
-        const sizeStr = this.formatFileSize(item.node.size || 0);
+        const sizeStr = this.formatFileSize((item.node as FSFileNode).size || 0);
 
         info.innerHTML = `
             <div class="mdx-asset-name" title="${item.node.name}">${item.node.name}</div>
@@ -280,7 +280,7 @@ export class AssetManagerUI {
             }
 
             try {
-                await this.engine.delete([item.node.id]);
+                await this.engine.driver.delete([item.node.id]);
                 Toast.success('删除成功');
                 await this.refreshAssetList();
             } catch (e) {
@@ -305,16 +305,16 @@ export class AssetManagerUI {
         return btn;
     }
 
-    private async handleDownload(node: EngineNode): Promise<void> {
+    private async handleDownload(node: FSNode): Promise<void> {
         try {
-            const content = await this.engine.readContent(node.id);
+            const content = await this.engine.driver.readContent(node.id);
             if (!content) {
                 Toast.error('文件内容为空');
                 return;
             }
 
             const mimeType = guessMimeType(node.name);
-            const blob = new Blob([content], { type: mimeType });
+            const blob = new Blob([content as ArrayBuffer], { type: mimeType });
             const url = URL.createObjectURL(blob);
 
             const a = document.createElement('a');
@@ -340,7 +340,7 @@ export class AssetManagerUI {
         if (!confirmed) return;
 
         try {
-            await this.engine.delete(items.map(i => i.node.id));
+            await this.engine.driver.delete(items.map(i => i.node.id));
             Toast.success(`已清理 ${items.length} 个文件`);
             await this.refreshAssetList();
         } catch (e) {

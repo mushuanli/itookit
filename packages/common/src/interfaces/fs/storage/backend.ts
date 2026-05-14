@@ -1,103 +1,82 @@
 /**
  * @file common/interfaces/fs/storage/backend.ts
- * @desc 存储后端主接口 + 事务
+ * @desc 统一 path-based 存储后端接口
  *
- * 设计决策：
- * 1. 基础后端只需实现三层 store — 门槛最低
- * 2. 可选 store 通过可选属性声明 — 渐进增强
- * 3. 事务使用闭包 API + ITransactionScope — 保证 commit/rollback 自动执行
- * 4. 类型守卫辅助上层判断后端能力
+ * v4.1: 废弃 IInodeStore / IMetaStore / IContentStore 三层分离。
+ * 后端使用 path 作为主键，统一暴露类 fs.promises API。
  *
- * 关键修正：
- * - runInTransaction 接收 ITransactionScope 而非 IStorageBackend
- *   避免嵌套事务语义混淆（scope 上没有 runInTransaction 方法）
+ * 可选能力（transaction / symlink / search / records）通过鸭子类型暴露。
+ * 不支持的实现将对应属性设为 undefined 或不定义。
  */
 
-import type { IInodeStore } from './inode-store';
-import type { IMetaStore } from './meta-store';
-import type { IContentStore } from './content-store';
+import type { FSNode, FSSearchQuery } from '../core/types';
 import type { IRecordStore } from './record-backend';
-import type { IHighLevelStore } from './high-level-backend';
-import type { ISyncableStore } from './syncable-backend';
 
-/**
- * 事务作用域
- *
- * 与 IStorageBackend 的区别：
- * - 没有 runInTransaction（防止嵌套事务）
- * - 没有 init/close（生命周期归后端管理）
- * - 只暴露三层 store + 可选增强 store
- */
-export interface ITransactionScope {
-    readonly inodes: IInodeStore;
-    readonly meta: IMetaStore;
-    readonly content: IContentStore;
-    readonly records?: IRecordStore;
-}
-
-/**
- * 存储后端 — 所有后端必须实现的最小接口
- */
 export interface IStorageBackend {
-    /** 后端名称（日志/调试用） */
     readonly name: string;
 
-    // ── 三层 Store ──
+    // ── 结构操作 ──
 
-    readonly inodes: IInodeStore;
-    readonly meta: IMetaStore;
-    readonly content: IContentStore;
+    /** 获取节点信息 */
+    stat(path: string): Promise<FSNode | null>;
 
-    // ── 可选增强 Store ──
+    /** 列出子节点 */
+    list(path: string): Promise<FSNode[]>;
 
-    readonly records?: IRecordStore;
-    readonly highLevel?: IHighLevelStore;
-    readonly syncable?: ISyncableStore;
+    /** 创建目录 */
+    mkdir(path: string): Promise<FSNode>;
+
+    /** 删除节点 */
+    delete(path: string, options?: { recursive?: boolean }): Promise<void>;
+
+    /** 重命名/移动 */
+    rename(fromPath: string, toPath: string): Promise<void>;
+
+    // ── 内容操作 ──
+
+    /** 读取文件内容 */
+    read(path: string, options?: { offset?: number; length?: number }): Promise<Uint8Array>;
+
+    /** 写入文件内容 */
+    write(path: string, content: Uint8Array): Promise<FSNode>;
+
+    // ── 元数据 ──
+
+    /** 更新元数据（合并语义） */
+    updateMetadata(path: string, metadata: Record<string, unknown>): Promise<void>;
+
+    /** 设置标签（全量替换） */
+    setTags(path: string, tags: string[]): Promise<void>;
+
+    /** 获取所有已使用的标签 */
+    getAllTags(): Promise<string[]>;
+
+    // ── 选配能力（不支持的后端返回 undefined） ──
+
+    /** SeqFile K-V 记录存储 */
+    records?: IRecordStore;
+
+    /** 全文/标签搜索 */
+    search?(query: FSSearchQuery): Promise<FSNode[]>;
+
+    /** 创建符号链接 */
+    symlink?(linkPath: string, target: string): Promise<void>;
+
+    /** 读取符号链接目标 */
+    readlink?(path: string): Promise<string>;
+
+    /** 事务（tx 复用 IStorageBackend 接口） */
+    transaction?<T>(fn: (tx: IStorageBackend) => Promise<T>): Promise<T>;
 
     // ── 生命周期 ──
 
     init(): Promise<void>;
     close(): Promise<void>;
-
-    // ── 事务 ──
-
-    /**
-     * 在事务中执行操作
-     *
-     * 后端保证事务内的所有操作要么全部成功，要么全部回滚。
-     * 不支持真正事务的后端（如纯 FS），可使用 WAL 或伪事务。
-     *
-     * 接收 ITransactionScope 而非 IStorageBackend：
-     * - 防止嵌套调用 runInTransaction
-     * - scope 上无生命周期方法
-     *
-     * @param mode 事务模式
-     * @param fn 事务体
-     */
-    runInTransaction<T>(
-        mode: 'readonly' | 'readwrite',
-        fn: (scope: ITransactionScope) => Promise<T>,
-    ): Promise<T>;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// 类型守卫
-// ═══════════════════════════════════════════════════════════════
-
+/** 类型守卫：检查后端是否有记录存储 */
 export function hasRecordStore(
     backend: IStorageBackend,
-): backend is IStorageBackend & { readonly records: IRecordStore } {
+): backend is IStorageBackend & { records: IRecordStore } {
     return backend.records != null;
-}
-
-export function hasHighLevelStore(
-    backend: IStorageBackend,
-): backend is IStorageBackend & { readonly highLevel: IHighLevelStore } {
-    return backend.highLevel != null;
-}
-
-export function hasSyncableStore(
-    backend: IStorageBackend,
-): backend is IStorageBackend & { readonly syncable: ISyncableStore } {
-    return backend.syncable != null;
 }

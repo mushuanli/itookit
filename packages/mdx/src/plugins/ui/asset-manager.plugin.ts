@@ -65,8 +65,7 @@ export class AssetManagerPlugin implements MDxPlugin {
         }
 
         if (this.currentUI) this.currentUI.close();
-        // v3.3: AssetManagerUI still expects IFSEngine shape; IModuleFS is compatible at runtime
-        this.currentUI = new AssetManagerUI(engine as any, editor, this.options);
+        this.currentUI = new AssetManagerUI(engine, editor, this.options);
         await this.currentUI.show(assetDirId);
     }
 
