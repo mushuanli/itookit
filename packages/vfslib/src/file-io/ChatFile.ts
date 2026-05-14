@@ -43,18 +43,13 @@ export class ChatFileHandle extends FileHandle implements IChatFile {
     // ========== Messages ==========
 
     async writeMessage(nodeId: string, node: ChatNode): Promise<void> {
-        await this.writeInternal(`${nodeId}.chat`, JSON.stringify(node));
+        await this.asset(`${nodeId}.chat`).write(JSON.stringify(node));
     }
 
     async readMessage(nodeId: string): Promise<ChatNode | null> {
-        const data = await this.readInternal(`${nodeId}.chat`);
+        const data = await this.asset(`${nodeId}.chat`).readText();
         if (!data) return null;
-        try {
-            const str = typeof data === 'string' ? data : toString(data as ArrayBuffer);
-            return JSON.parse(str) as ChatNode;
-        } catch {
-            return null;
-        }
+        try { return JSON.parse(data) as ChatNode; } catch { return null; }
     }
 
     async deleteMessage(nodeId: string): Promise<void> {
@@ -137,7 +132,7 @@ export class ChatFileHandle extends FileHandle implements IChatFile {
     // ========== User assets ==========
 
     async putUserAsset(name: string, content: ArrayBuffer): Promise<string> {
-        return this.putAsset(name, content);
+        return this.asset(name).write(content);
     }
 
     async listUserAssets(): Promise<string[]> {
@@ -149,10 +144,9 @@ export class ChatFileHandle extends FileHandle implements IChatFile {
 
     async getSettings(): Promise<ChatSessionSettings> {
         try {
-            const data = await this.readInternal(SETTINGS_FILENAME);
+            const data = await this.asset(SETTINGS_FILENAME).readText();
             if (!data) return { ...DEFAULT_SESSION_SETTINGS };
-            const str = typeof data === 'string' ? data : toString(data as ArrayBuffer);
-            return { ...DEFAULT_SESSION_SETTINGS, ...YAML.parse(str) };
+            return { ...DEFAULT_SESSION_SETTINGS, ...YAML.parse(data) };
         } catch {
             return { ...DEFAULT_SESSION_SETTINGS };
         }
@@ -166,7 +160,7 @@ export class ChatFileHandle extends FileHandle implements IChatFile {
             version: '1.0',
             updatedAt: new Date().toISOString(),
         };
-        await this.writeInternal(SETTINGS_FILENAME, YAML.stringify(merged, { indent: 2, lineWidth: 0 }));
+        await this.asset(SETTINGS_FILENAME).write(YAML.stringify(merged, { indent: 2, lineWidth: 0 }));
     }
 
     // ========== Private helpers ==========

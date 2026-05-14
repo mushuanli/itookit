@@ -12,13 +12,10 @@ export { createVFS } from './factory';
 
 // ── 引擎核心 ──
 export { VFSEngine } from './engine/vfs-engine';
-export { PathResolver, type ResolvedInode } from './engine/path-resolver';
-export { toFSNode } from './engine/node-mapper';
 export { EventBus, TransactionEventBuffer } from './event/event-bus';
 export { PluginPipeline } from './engine/plugin-pipeline';
 export { DeviceRegistry } from './engine/device-registry';
 export { AccessController, SYSTEM_CALLER, type CallerIdentity } from './engine/access-controller';
-export { deleteRecursive, copyRecursive } from './engine/tree-ops';
 
 // ── 服务层 ──
 export { ModuleFS, type ModuleFSDeps } from './services/module-fs';
@@ -34,7 +31,6 @@ export { nullDevice, zeroDevice, randomDevice } from './devices';
 export { MemoryBackend } from './backend';
 
 // ── セッションアダプター ──
-export { VFSModuleEngine } from './adapter-session/VFSModuleEngine';
 export {
     BaseModuleService,
     type ChangeListener,
@@ -42,7 +38,7 @@ export {
 } from './adapter-session/BaseModuleService';
 
 // ── 常量 ──
-export { ROOT_INO } from './engine/vfs-engine';
+// ROOT_INO removed in v4.1 — path-based engine uses '/' instead
 
 // ── File handles ──
 export { FileHandle, createFile, MDXFileHandle, createMDXFile, ChatFileHandle, createChatFile } from './file-io';

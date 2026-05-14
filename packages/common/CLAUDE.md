@@ -19,14 +19,14 @@ src/
 │   │   │   ├── config-service.ts ← IConfigService
 │   │   │   └── factory.ts        ← VFSFactory
 │   │   ├── core/         ← FSNode, FSEvent, FSError, Options
-│   │   ├── storage/      ← IStorageBackend + 3层 Store + 3可选增强
+│   │   ├── storage/      ← IStorageBackend (path-based) + IRecordStore
 │   │   ├── capabilities/ ← IAssetOperations, ITagOperations, ISeqFileOperations, IRefOperations, IWatchOperations
 │   │   ├── device/       ← IDeviceDriver, IDeviceHandle
 │   │   ├── mount/        ← IMountRouter, MountPoint
 │   │   ├── plugin/       ← IPlugin, IPluginManager
 │   │   └── sync/         ← ISyncService
-│   ├── IFSEngine.ts      ← @deprecated v3.3, 用 IModuleFS/IFSDriver 替代
-│   ├── IFile.ts          ← IFile (v3.3: 依赖 FSNode/FSEventType, 不再依赖 IFSEngine)
+│   ├── IFSEngine.ts      ← @deprecated v3.3
+│   ├── IFile.ts          ← IFile + AssetObj (v4.1: asset(name) API)
 │   ├── IMDXFile.ts       ← extends IFile
 │   ├── IChatFile.ts      ← extends IFile
 │   └── IEditor.ts        ← sessionEngine?: IModuleFS (v3.3)
@@ -39,16 +39,17 @@ src/
 
 接口详情: [接口目录](./interface-catalog.md)
 
-## v3.3 VFS 接口分层
+## v4.1 VFS 接口分层
 
 | 接口 | 层级 | 说明 |
 |---|---|---|
-| `IStorageBackend` | 存储 | 3层 Store (inode/meta/content) |
+| `IStorageBackend` | 存储 | path-based 统一接口 (stat/list/read/write/…) + 可选 records/search/symlink |
 | `IVFSManager` | 系统管理 | 模块生命周期、跨模块搜索 |
 | `IModuleFS` | 模块 | chroot 隔离、`driver` + `meta` + `openFile()` |
-| `IFSDriver` | 驱动 | POSIX CRUD + 事务(必选) + 链接(必选) + 搜索 |
-| `IFSMetaDriver` | 驱动 | assets/tags + seq?/refs?/watcher? |
-| `IFile` | 文件句柄 | 组合 IFSDriver + IFSMetaDriver |
+| `IFSDriver` | 驱动 | POSIX CRUD + 事务(必选) + 搜索 |
+| `IFSMetaDriver` | 驱动 | assets/tags |
+| `IFile` | 文件句柄 | 主文件 + `asset(name): AssetObj` |
+| `AssetObj` | 子文件 | assetdir 内子文件轻量句柄 (read/write/delete/exists) |
 
 调用方始终以接口为类型，具体装配只在 `app-shell/bootstrap.ts` 中。
 

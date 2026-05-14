@@ -57,8 +57,16 @@ export class MDXFileHandle extends FileHandle implements IMDXFile {
     async pruneUnusedAssets(): Promise<number> {
         const content = await this.read();
         const text = typeof content === 'string' ? content : new TextDecoder().decode(content);
-        const refs = this.extractReferencedAssets(text);
-        return (await this.pruneAssets(refs)) ?? 0;
+        const refs = new Set(this.extractReferencedAssets(text));
+        const all = await this.listAssets();
+        let count = 0;
+        for (const name of all) {
+            if (!refs.has(name)) {
+                await this.asset(name).delete();
+                count++;
+            }
+        }
+        return count;
     }
 
     destroy(): void {
@@ -66,12 +74,10 @@ export class MDXFileHandle extends FileHandle implements IMDXFile {
         this._blobUrls.clear();
     }
 
-    // ========== Private ==========
-
     private async _getOrCreateBlobUrl(name: string): Promise<string | null> {
         if (this._blobUrls.has(name)) return this._blobUrls.get(name)!;
 
-        const data = await this.getAsset(name);
+        const data = await this.asset(name).read();
         if (!data) return null;
 
         const url = URL.createObjectURL(new Blob([data], { type: guessMimeType(name) }));

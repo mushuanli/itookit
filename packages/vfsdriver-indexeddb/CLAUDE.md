@@ -1,31 +1,28 @@
 # CLAUDE.md — @itookit/vfsdriver-indexeddb
 
-浏览器 IndexedDB 存储后端。实现 `IStorageBackend` 三层存储接口（inode + meta + content），可选扩展 `IRecordStore`。
+浏览器 IndexedDB 存储后端。实现 v4.1 path-based `IStorageBackend`。
 
-## Architecture
+## Architecture (v4.1)
 
 ```
 src/
 ├── index.ts           ← 公共 API — 导出 IndexedDBBackend
-├── idb-backend.ts     ← IndexedDBBackend — IStorageBackend 实现
-├── inode-store.ts     ← IndexedDBInodeStore
-├── meta-store.ts      ← IndexedDBMetaStore
-├── content-store.ts   ← IndexedDBContentStore
-├── record-store.ts    ← IndexedDBRecordStore (可选)
-└── utils.ts           ← IndexedDB 工具函数
+├── idb-backend.ts     ← IndexedDBBackend — IStorageBackend 实现 (单 store)
+├── record-store.ts    ← IDBRecordStore — IRecordStore (K-V 查询)
+└── utils.ts           ← IDB 工具函数 (openDB/req/collectCursor/deleteCursor)
 ```
 
 ## IndexedDBBackend
 
-实现 `IStorageBackend` 接口。使用 IndexedDB 的 object stores 存储 VFS 的三种数据类型：
+单 object store 模型（`nodes`），path 做主键：
 
 | Store | Key Path | 存储内容 |
 |---|---|---|
-| `inodes` | `id` (自增) | 文件/目录 inode 记录 |
-| `meta` | `inodeId` | 节点元数据 |
-| `content` | `inodeId` | 文件内容 (ArrayBuffer) |
+| `nodes` | `path` (string) | 文件/目录节点（含 content/tags/metadata） |
+| `tags` | `id` (autoIncrement) | tag 反查索引 (tag + path) |
+| `records` | `[ino, field]` | SeqFile K-V 记录（可选） |
 
-数据库名称：`MindOS-v3`（旧版本 `MindOS-v2`、`MindOS` 不兼容）。
+数据库名称：`MindOS-v4`。
 
 ### 使用方式
 
@@ -33,17 +30,16 @@ src/
 import { IndexedDBBackend } from '@itookit/vfsdriver-indexeddb';
 import { createVFS } from '@itookit/vfslib';
 
-const backend = new IndexedDBBackend();
+const backend = new IndexedDBBackend({ dbName: 'my-app-vfs' });
 const { manager } = await createVFS({ rootBackend: backend, modules: [...] });
 ```
 
 ## 可选 Record Store
 
-`IndexedDBRecordStore` 实现 `IRecordStore`，提供泛型键值查询能力，用于需要结构化查询的场景。
+`IDBRecordStore` 实现 `IRecordStore`，提供泛型键值查询能力。通过 `LazyRecordStore` 包装器按需创建 IDB 事务。
 
-## Conventions
+## v4.1 变更
 
-- 所有 IndexedDB 操作返回 Promise
-- Transaction 使用 IndexedDB 原生 transaction 机制
-- `content` store 存储 `ArrayBuffer`（二进制友好）
-- DB 升级通过 `onupgradeneeded` 事件处理
+- 废弃 inode/meta/content 三层 object store → 单一 `nodes` store
+- path (string) 替代 ino (number) 作为主键
+- `ITransactionScope` → `transaction?(fn: (tx: IStorageBackend) => T)`

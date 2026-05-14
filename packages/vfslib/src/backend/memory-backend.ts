@@ -1,301 +1,261 @@
 /**
  * @file packages/vfslib/src/backend/memory-backend.ts
- * @desc 内存存储后端 — 用于测试和临时存储
+ * @desc 内存存储后端 — path-based IStorageBackend（测试和临时存储用）
  *
- * 完整实现 IStorageBackend 三层接口。
- * 所有数据存储在 Map 中，进程结束后丢失。
+ * v4.1: 简化为 path-based 统一接口，放弃 IInodeStore/IMetaStore/IContentStore 三层分离。
  */
 
-import type {
-    IStorageBackend,
-    ITransactionScope,
-    IInodeStore,
-    IMetaStore,
-    IContentStore,
-    InodeRecord,
-    MetaRecord,
-    InodeWalkOptions,
-    ContentStreamOptions,
-    ContentStreamResult,
-    MetaWalkOptions,
-} from '@itookit/common';
+import type { IStorageBackend, FSNode, FSFileNode, FSDirectoryNode, FSSearchQuery } from '@itookit/common';
 
-class MemoryInodeStore implements IInodeStore {
-    private readonly data = new Map<number, InodeRecord>();
-    private nextIno = 2; // 1 is reserved for root
-
-    async allocateIno(): Promise<number> {
-        return this.nextIno++;
-    }
-
-    async putInode(inode: InodeRecord): Promise<void> {
-        this.data.set(inode.ino, { ...inode });
-    }
-
-    async getInode(ino: number): Promise<InodeRecord | null> {
-        const rec = this.data.get(ino);
-        return rec ? { ...rec } : null;
-    }
-
-    async lookup(parentIno: number, name: string): Promise<InodeRecord | null> {
-        for (const rec of this.data.values()) {
-            if (rec.parentIno === parentIno && rec.name === name) {
-                return { ...rec };
-            }
-        }
-        return null;
-    }
-
-    async deleteInode(ino: number): Promise<void> {
-        this.data.delete(ino);
-    }
-
-    async updateInode(
-        ino: number,
-        updates: Partial<Pick<InodeRecord, 'parentIno' | 'name' | 'nlink'>>,
-    ): Promise<void> {
-        const rec = this.data.get(ino);
-        if (!rec) return;
-        if (updates.parentIno !== undefined) rec.parentIno = updates.parentIno;
-        if (updates.name !== undefined) rec.name = updates.name;
-        if (updates.nlink !== undefined) rec.nlink = updates.nlink;
-    }
-
-    async forEachInode(
-        inos: number[],
-        callback: (inode: InodeRecord, index: number) => boolean | Promise<boolean>,
-    ): Promise<void> {
-        for (let i = 0; i < inos.length; i++) {
-            const rec = this.data.get(inos[i]);
-            if (rec) {
-                if (!(await callback({ ...rec }, i))) break;
-            }
-        }
-    }
-
-    async walkTree(
-        parentIno: number,
-        callback: (inode: InodeRecord, depth: number) => boolean | 'skip' | Promise<boolean | 'skip'>,
-        options?: InodeWalkOptions,
-    ): Promise<void> {
-        if (options?.order === 'breadth-first') {
-            await this._walkBFS(parentIno, callback, options?.maxDepth ?? -1);
-        } else {
-            await this._walkDFS(parentIno, callback, 0, options?.maxDepth ?? -1);
-        }
-    }
-
-    private async _walkDFS(
-        parentIno: number,
-        callback: (inode: InodeRecord, depth: number) => boolean | 'skip' | Promise<boolean | 'skip'>,
-        depth: number,
-        maxDepth: number,
-    ): Promise<boolean> {
-        for (const rec of this.data.values()) {
-            if (rec.parentIno !== parentIno || rec.ino === parentIno) continue;
-            const result = await callback({ ...rec }, depth);
-            if (result === false) return false;
-            if (result !== 'skip' && rec.type === 'directory' && (maxDepth < 0 || depth < maxDepth)) {
-                if (!(await this._walkDFS(rec.ino, callback, depth + 1, maxDepth))) return false;
-            }
-        }
-        return true;
-    }
-
-    private async _walkBFS(
-        parentIno: number,
-        callback: (inode: InodeRecord, depth: number) => boolean | 'skip' | Promise<boolean | 'skip'>,
-        maxDepth: number,
-    ): Promise<void> {
-        const queue: Array<{ ino: number; depth: number }> = [{ ino: parentIno, depth: -1 }];
-        while (queue.length > 0) {
-            const { ino, depth } = queue.shift()!;
-            const nextDepth = depth + 1;
-            if (maxDepth >= 0 && nextDepth > maxDepth) continue;
-            for (const rec of this.data.values()) {
-                if (rec.parentIno !== ino || rec.ino === ino) continue;
-                const result = await callback({ ...rec }, nextDepth);
-                if (result === false) return;
-                if (result !== 'skip' && rec.type === 'directory' && (maxDepth < 0 || nextDepth < maxDepth)) {
-                    queue.push({ ino: rec.ino, depth: nextDepth });
-                }
-            }
-        }
-    }
-
-    async hasChildren(parentIno: number): Promise<boolean> {
-        for (const rec of this.data.values()) {
-            if (rec.parentIno === parentIno && rec.ino !== parentIno) return true;
-        }
-        return false;
-    }
+interface Entry {
+    type: 'file' | 'directory';
+    content: Uint8Array;
+    createdAt: number;
+    modifiedAt: number;
+    tags: string[];
+    metadata: Record<string, unknown>;
+    icon?: string;
+    symlinkTarget?: string;
+    extra?: Record<string, unknown>;
 }
 
-class MemoryMetaStore implements IMetaStore {
-    private readonly data = new Map<number, MetaRecord>();
-
-    async putMeta(meta: MetaRecord): Promise<void> {
-        this.data.set(meta.ino, { ...meta });
-    }
-
-    async getMeta(ino: number): Promise<MetaRecord | null> {
-        const rec = this.data.get(ino);
-        return rec ? { ...rec } : null;
-    }
-
-    async deleteMeta(ino: number): Promise<void> {
-        this.data.delete(ino);
-    }
-
-    async patchMeta(ino: number, partial: Partial<Omit<MetaRecord, 'ino'>>): Promise<void> {
-        const rec = this.data.get(ino);
-        if (!rec) return;
-        Object.assign(rec, partial);
-    }
-
-    async forEachMeta(
-        inos: number[],
-        callback: (meta: MetaRecord, index: number) => boolean | Promise<boolean>,
-    ): Promise<void> {
-        for (let i = 0; i < inos.length; i++) {
-            const rec = this.data.get(inos[i]);
-            if (rec) {
-                if (!(await callback({ ...rec }, i))) break;
-            }
-        }
-    }
-
-    async getAllDistinctTags(): Promise<string[]> {
-        const seen = new Set<string>();
-        for (const rec of this.data.values()) {
-            for (const tag of rec.tags ?? []) seen.add(tag);
-        }
-        return Array.from(seen);
-    }
-
-    async walkByTag(
-        tag: string,
-        callback: (ino: number) => boolean | Promise<boolean>,
-        options?: MetaWalkOptions,
-    ): Promise<{ total: number; processed: number }> {
-        const matched: number[] = [];
-        for (const rec of this.data.values()) {
-            if (rec.tags?.includes(tag)) matched.push(rec.ino);
-        }
-        const total = matched.length;
-        let processed = 0;
-        const offset = options?.offset ?? 0;
-        const limit = options?.limit ?? Infinity;
-        for (let i = offset; i < matched.length && processed < limit; i++) {
-            if (!(await callback(matched[i]))) break;
-            processed++;
-        }
-        return { total, processed };
-    }
-
-    async walkByMetadata(
-        field: string,
-        value: unknown,
-        callback: (ino: number) => boolean | Promise<boolean>,
-        options?: MetaWalkOptions,
-    ): Promise<{ total: number; processed: number }> {
-        const matched: number[] = [];
-        for (const rec of this.data.values()) {
-            if (rec.metadata && rec.metadata[field] === value) matched.push(rec.ino);
-        }
-        const total = matched.length;
-        let processed = 0;
-        const offset = options?.offset ?? 0;
-        const limit = options?.limit ?? Infinity;
-        for (let i = offset; i < matched.length && processed < limit; i++) {
-            if (!(await callback(matched[i]))) break;
-            processed++;
-        }
-        return { total, processed };
-    }
-}
-
-class MemoryContentStore implements IContentStore {
-    private readonly data = new Map<string, ArrayBuffer>();
-
-    async putData(ref: string, data: ArrayBuffer): Promise<void> {
-        this.data.set(ref, data.slice(0));
-    }
-
-    async getData(ref: string): Promise<ArrayBuffer | null> {
-        const buf = this.data.get(ref);
-        return buf ? buf.slice(0) : null;
-    }
-
-    async deleteData(ref: string): Promise<void> {
-        this.data.delete(ref);
-    }
-
-    async existsData(ref: string): Promise<boolean> {
-        return this.data.has(ref);
-    }
-
-    async sizeData(ref: string): Promise<number> {
-        return this.data.get(ref)?.byteLength ?? 0;
-    }
-
-    async appendData(ref: string, data: ArrayBuffer): Promise<void> {
-        const existing = this.data.get(ref);
-        if (existing) {
-            const merged = new Uint8Array(existing.byteLength + data.byteLength);
-            merged.set(new Uint8Array(existing), 0);
-            merged.set(new Uint8Array(data), existing.byteLength);
-            this.data.set(ref, merged.buffer as ArrayBuffer);
-        } else {
-            this.data.set(ref, data.slice(0));
-        }
-    }
-
-    async streamData(
-        ref: string,
-        callback: (chunk: ArrayBuffer, offset: number) => boolean | Promise<boolean>,
-        options?: ContentStreamOptions,
-    ): Promise<ContentStreamResult> {
-        const data = await this.getData(ref);
-        if (!data) return { bytesRead: 0, completed: false };
-        const chunkSize = options?.chunkSize ?? 65536;
-        const start = options?.startOffset ?? 0;
-        const end = options?.maxLength != null ? start + options.maxLength : data.byteLength;
-        let offset = start;
-        let bytesRead = 0;
-        while (offset < end) {
-            const chunk = data.slice(offset, Math.min(offset + chunkSize, end));
-            if (!(await callback(chunk, offset))) return { bytesRead, completed: false };
-            bytesRead += chunk.byteLength;
-            offset += chunk.byteLength;
-        }
-        return { bytesRead, completed: true };
-    }
-}
+const ROOT_ENTRY: Entry = Object.freeze({
+    type: 'directory' as const,
+    content: new Uint8Array(0),
+    createdAt: Date.now(),
+    modifiedAt: Date.now(),
+    tags: [],
+    metadata: {},
+});
 
 export class MemoryBackend implements IStorageBackend {
     readonly name = 'memory';
-    readonly inodes: IInodeStore = new MemoryInodeStore();
-    readonly meta: IMetaStore = new MemoryMetaStore();
-    readonly content: IContentStore = new MemoryContentStore();
+    private data = new Map<string, Entry>();
 
     async init(): Promise<void> {
-        // No-op
+        this.data.set('/', { ...ROOT_ENTRY, createdAt: Date.now(), modifiedAt: Date.now() });
     }
 
     async close(): Promise<void> {
-        // No-op
+        this.data.clear();
     }
 
-    async runInTransaction<T>(
-        _mode: 'readonly' | 'readwrite',
-        fn: (scope: ITransactionScope) => Promise<T>,
-    ): Promise<T> {
-        // Memory backend: no real transaction — passthrough
-        return fn({
-            inodes: this.inodes,
-            meta: this.meta,
-            content: this.content,
-        });
+    // ── Structure ──
+
+    async stat(path: string): Promise<FSNode | null> {
+        const entry = this.data.get(normalize(path));
+        if (!entry) return null;
+        return toFSNode(path, entry);
     }
+
+    async list(path: string): Promise<FSNode[]> {
+        const parent = normalize(path);
+        if (!this.data.has(parent)) return [];
+        const prefix = parent === '/' ? '/' : parent + '/';
+        const seen = new Set<string>();
+        const results: FSNode[] = [];
+
+        for (const [p, entry] of this.data) {
+            if (p === parent || !p.startsWith(prefix)) continue;
+            const rest = p.slice(prefix.length);
+            const segEnd = rest.indexOf('/');
+            const seg = segEnd === -1 ? rest : rest.slice(0, segEnd);
+            const fullPath = segEnd === -1 ? p : parent + '/' + seg;
+            if (seen.has(fullPath)) continue;
+            seen.add(fullPath);
+
+            const childEntry = this.data.get(fullPath);
+            if (childEntry) {
+                results.push(toFSNode(fullPath, childEntry));
+            }
+        }
+        return results;
+    }
+
+    async mkdir(path: string): Promise<FSNode> {
+        const p = normalize(path);
+        if (this.data.has(p)) {
+            const existing = this.data.get(p)!;
+            return toFSNode(p, existing);
+        }
+        const entry: Entry = {
+            type: 'directory',
+            content: new Uint8Array(0),
+            createdAt: Date.now(),
+            modifiedAt: Date.now(),
+            tags: [],
+            metadata: {},
+        };
+        this.data.set(p, entry);
+        return toFSNode(p, entry);
+    }
+
+    async delete(path: string, options?: { recursive?: boolean }): Promise<void> {
+        const p = normalize(path);
+        if (!this.data.has(p)) return;
+        const prefix = p === '/' ? '/' : p + '/';
+
+        if (options?.recursive) {
+            for (const key of this.data.keys()) {
+                if (key.startsWith(prefix)) this.data.delete(key);
+            }
+        }
+        this.data.delete(p);
+    }
+
+    async rename(fromPath: string, toPath: string): Promise<void> {
+        const from = normalize(fromPath);
+        const to = normalize(toPath);
+        const entry = this.data.get(from);
+        if (!entry) return;
+        const fromPrefix = from === '/' ? '/' : from + '/';
+        const toPrefix = to === '/' ? '/' : to + '/';
+
+        this.data.delete(from);
+        this.data.set(to, { ...entry, modifiedAt: Date.now() });
+
+        // Move children
+        for (const [p, e] of this.data) {
+            if (p.startsWith(fromPrefix)) {
+                const childRest = p.slice(fromPrefix.length - 1);
+                const newChildPath = to === '/' ? childRest : to + childRest;
+                this.data.delete(p);
+                this.data.set(newChildPath, e);
+            }
+        }
+    }
+
+    // ── Content ──
+
+    async read(path: string, options?: { offset?: number; length?: number }): Promise<Uint8Array> {
+        const entry = this.data.get(normalize(path));
+        if (!entry) throw new Error('ENOENT');
+        let buf = entry.content;
+        if (options?.offset !== undefined) {
+            buf = buf.slice(options.offset, options.length ? options.offset + options.length : undefined);
+        }
+        return buf;
+    }
+
+    async write(path: string, content: Uint8Array): Promise<FSNode> {
+        const p = normalize(path);
+        const existing = this.data.get(p);
+        const entry: Entry = {
+            type: 'file',
+            content: new Uint8Array(content),
+            createdAt: existing?.createdAt ?? Date.now(),
+            modifiedAt: Date.now(),
+            tags: existing?.tags ?? [],
+            metadata: existing?.metadata ?? {},
+            icon: existing?.icon,
+            symlinkTarget: existing?.symlinkTarget,
+            extra: existing?.extra,
+        };
+        this.data.set(p, entry);
+        return toFSNode(p, entry);
+    }
+
+    // ── Metadata ──
+
+    async updateMetadata(path: string, metadata: Record<string, unknown>): Promise<void> {
+        const entry = this.data.get(normalize(path));
+        if (!entry) return;
+        entry.metadata = { ...entry.metadata, ...metadata };
+        entry.modifiedAt = Date.now();
+    }
+
+    async setTags(path: string, tags: string[]): Promise<void> {
+        const entry = this.data.get(normalize(path));
+        if (!entry) return;
+        entry.tags = tags;
+        entry.modifiedAt = Date.now();
+    }
+
+    async getAllTags(): Promise<string[]> {
+        const seen = new Set<string>();
+        for (const entry of this.data.values()) {
+            for (const t of entry.tags) seen.add(t);
+        }
+        return [...seen];
+    }
+
+    // ── Search ──
+
+    async search(query: FSSearchQuery): Promise<FSNode[]> {
+        const results: FSNode[] = [];
+        for (const [path, entry] of this.data) {
+            const node = toFSNode(path, entry);
+            if (matchesSearch(node, query)) results.push(node);
+        }
+        if (query.orderBy === 'modifiedAt') {
+            results.sort((a, b) => query.orderDirection === 'desc' ? b.modifiedAt - a.modifiedAt : a.modifiedAt - b.modifiedAt);
+        }
+        const offset = query.offset ?? 0;
+        const limit = query.limit ?? 50;
+        return results.slice(offset, offset + limit);
+    }
+
+    // ── Transaction ──
+
+    async transaction<T>(fn: (tx: IStorageBackend) => Promise<T>): Promise<T> {
+        return fn(this); // Memory backend: no isolation
+    }
+}
+
+// ── Helpers ──
+
+function normalize(path: string): string {
+    if (path === '' || path === '/') return '/';
+    return '/' + path.split('/').filter(Boolean).join('/');
+}
+
+function toFSNode(path: string, entry: Entry): FSNode {
+    const name = path === '/' ? '' : path.split('/').pop()!;
+    const parentDir = path === '/' ? null : path.substring(0, path.lastIndexOf('/')) || '/';
+    const base = {
+        id: path,
+        parentId: parentDir,
+        name,
+        path,
+        createdAt: entry.createdAt,
+        modifiedAt: entry.modifiedAt,
+        version: Math.floor(entry.modifiedAt),
+        nlink: 1,
+        tags: entry.tags,
+        metadata: entry.metadata,
+        icon: entry.icon,
+    };
+
+    if (entry.type === 'directory') {
+        return { ...base, type: 'directory' } as FSDirectoryNode;
+    }
+
+    const fileBase = {
+        ...base,
+        type: 'file' as const,
+        size: entry.content.byteLength,
+        contentHash: undefined,
+        assetDirId: undefined,
+    };
+
+    if (entry.symlinkTarget) {
+        return { ...fileBase, type: 'symlink' as const, symlinkTarget: entry.symlinkTarget } as FSNode;
+    }
+
+    return fileBase as FSFileNode;
+}
+
+function matchesSearch(node: FSNode, q: FSSearchQuery): boolean {
+    if (q.type) {
+        const types = Array.isArray(q.type) ? q.type : [q.type];
+        if (!types.includes(node.type)) return false;
+    }
+    if (q.name?.contains && !node.name.toLowerCase().includes(q.name.contains.toLowerCase())) return false;
+    if (q.name?.exact && node.name !== q.name.exact) return false;
+    if (q.name?.startsWith && !node.name.startsWith(q.name.startsWith)) return false;
+    if (q.tags?.all && !q.tags.all.every(t => node.tags.includes(t))) return false;
+    if (q.tags?.any && !q.tags.any.some(t => node.tags.includes(t))) return false;
+    if (q.tags?.none && q.tags.none.some(t => node.tags.includes(t))) return false;
+    if (q.text && node.type === 'file') return false; // Memory backend can't full-text search content
+    return true;
 }

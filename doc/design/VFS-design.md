@@ -133,35 +133,61 @@ InodeRecord (Layer 1)    MetaRecord (Layer 2)         Content (Layer 3)
 
 ---
 
-## 存储后端层
+## 存储后端层 (v4.1)
 
-### IStorageBackend — 最小接口
+### IStorageBackend — path-based 统一接口
 
-所有后端必须实现三层 Store：
+废弃 IInodeStore/IMetaStore/IContentStore 三层分离。后端用 path 做主键：
 
 ```ts
 interface IStorageBackend {
-    readonly inodes: IInodeStore;   // Layer 1: 节点结构
-    readonly meta: IMetaStore;      // Layer 2: 元数据
-    readonly content: IContentStore; // Layer 3: 二进制内容
+    readonly name: string;
 
-    readonly records?: IRecordStore;     // 可选: SeqFile 字段级查询
-    readonly highLevel?: IHighLevelStore; // 可选: 远程后端聚合操作
-    readonly syncable?: ISyncableStore;   // 可选: 同步变更日志
+    // 结构: stat / list / mkdir / delete / rename
+    stat(path: string): Promise<FSNode | null>;
+    list(path: string): Promise<FSNode[]>;
+    mkdir(path: string): Promise<FSNode>;
+    delete(path: string, options?: { recursive?: boolean }): Promise<void>;
+    rename(fromPath: string, toPath: string): Promise<void>;
+
+    // 内容: read / write
+    read(path: string, options?: { offset?; length? }): Promise<Uint8Array>;
+    write(path: string, content: Uint8Array): Promise<FSNode>;
+
+    // 元数据: updateMetadata / setTags / getAllTags
+    updateMetadata(path: string, metadata: Record<string, unknown>): Promise<void>;
+    setTags(path: string, tags: string[]): Promise<void>;
+    getAllTags(): Promise<string[]>;
+
+    // 选配: records / search / symlink / readlink / transaction
+    records?: IRecordStore;
+    search?(query: FSSearchQuery): Promise<FSNode[]>;
+    symlink?(linkPath: string, target: string): Promise<void>;
+    readlink?(path: string): Promise<string>;
+    transaction?<T>(fn: (tx: IStorageBackend) => Promise<T>): Promise<T>;
 
     init(): Promise<void>;
     close(): Promise<void>;
-    runInTransaction<T>(mode, fn): Promise<T>;
 }
 ```
 
-### 可选增强模式
+### 后端实现
 
-| 增强接口 | 用途 | 未实现时行为 |
+| 后端 | 存储 | 行数 |
 |---|---|---|
-| `IRecordStore` | SeqFile 字段级查询 | 退化为 JSON 序列化到 ContentStore |
-| `IHighLevelStore` | 远程后端一次往返聚合 | 退化为逐次 getInode→getMeta→getData |
-| `ISyncableStore` | 后端原生变更日志 | ISyncService 监听 VFS 事件构建日志 |
+| MemoryBackend | Map<path, Entry> | ~200 |
+| IndexedDBBackend | IDB nodes store (path key) | ~280 |
+| LocalFSBackend | 原生 FS + sidecar SQLite (meta_ext) | ~240 |
+| FsBackend | SQLite + OS filesystem | ~220 |
+
+### 选配能力
+
+| 能力 | 用途 | 未实现时行为 |
+|---|---|---|
+| `records` | SeqFile K-V | 退化为 JSON 全量读写 |
+| `search` | 全文/标签搜索 | 退化为 walkTree + 线性扫描 |
+| `symlink/readlink` | 符号链接 | 抛 FSCapabilityError |
+| `transaction` | 原子操作 | 退化为逐个调用 |
 
 类型守卫函数 `hasRecordStore()` / `hasHighLevelStore()` / `hasSyncableStore()` 用于运行时能力检测。
 

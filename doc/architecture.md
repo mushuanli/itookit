@@ -4,23 +4,22 @@
 The VFS is a modular virtual filesystem with a clear layering:
 
 ```
-IStorageBackend  (IndexedDB / SQLite+FS)
+IStorageBackend  (path-based: Memory / LocalFS / IndexedDB / SQLite+FS)
     ↕
-VFSEngine  —  PathResolver, AccessController, EventBus, PluginPipeline
+VFSEngine  —  AccessController, EventBus, PluginPipeline, resolveStore/mapToSystemNode
     ↕
 VFSManager (implements IVFSManager)  —  module lifecycle coordinator
     ↕
 ModuleFS (implements IModuleFS + IFSDriver)  —  chroot-isolated view per module
-    ├── driver: IFSDriver           — POSIX CRUD + search + transaction (self = this)
-    ├── meta: IFSMetaDriver         — assets / tags / seq / refs / watcher
+    ├── driver: IFSDriver           — CRUD + transaction (self = this)
+    ├── meta: IFSMetaDriver         — assets / tags
     └── openFile(nodeId) → IFile    — FileHandle / MDXFileHandle / ChatFileHandle
+                                      └── asset(name) → AssetObj  (sub-files in assetdir)
 ```
 
-**IFSDriver/IFSMetaDriver** (added v3.3, finalised v4.0) split the old flat `IModuleFS` into two focused interfaces:
-- `IFSDriver` — all POSIX-style file operations (getNode, getChildren, readContent, createFile, createDirectory, writeContent, appendContent, rename, move, delete, copy, symlink, readlink, hardlink, search, walkTree, stats, transaction). **transaction() is now a required method** — implementations that don't support it throw `FSCapabilityError`.
-- `IFSMetaDriver` — capability-aggregated metadata operations: `assets` (IAssetOperations), `tags` (ITagOperations), `seq` (ISeqFileOperations), `refs` (IRefOperations), `watcher` (IWatchOperations)
+**v4.1 存储层**: IStorageBackend 统一为 path-based 单一接口（`stat/list/read/write/mkdir/delete/rename/updateMetadata/setTags/getAllTags`）。废弃了 IInodeStore/IMetaStore/IContentStore 三层分离，废弃了 PathResolver/node-mapper/tree-ops。
 
-**ModuleFS directly implements IFSDriver** (self-reference: `this.driver = this`), eliminating the intermediate `FSDriverAdapter` layer. `FSMetaDriverAdapter` (composes InlineAssetOps, InlineTagOps, InlineRefOps, InlineSeqOps) is used by both `ModuleFS` and custom engine implementations (`SettingsEngine`, `SkillsEngine`, `SystemVFSEngine`).
+**v4.1 文件层**: IFile 新增 `asset(name): AssetObj` 统一子文件操作。AssetObj 是 assetdir 内子文件的轻量句柄（read/readText/write/delete/exists）。eliminating the readInternal/writeInternal/putAsset/getAsset 的虚假区分。
 
 All interfaces live in `packages/common/src/interfaces/fs/`. **Callers always type their VFS dependency as `IVFSManager`, `IModuleFS`, or `IFSDriver`** — never the concrete classes. Concrete wiring (`createVFS()`) happens only in `packages/app-shell/src/bootstrap.ts` (called by each app entry point).
 

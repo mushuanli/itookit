@@ -98,16 +98,7 @@ export type {
 
 // ── 存储后端 ──
 export type {
-    InodeRecord,
-    IInodeStore,
-    InodeWalkOptions,
-    MetaRecord,
-    IMetaStore,
-    MetaWalkOptions,
-    IContentStore,
-    ContentStreamOptions,
-    ContentStreamResult,
-    ITransactionScope,
+    IStorageBackend,
     RecordValue,
     QueryOperator,
     RecordQuery,
@@ -115,15 +106,8 @@ export type {
     RecordQueryResult,
     RecordWalkOptions,
     IRecordStore,
-    IHighLevelStore,
-    ISyncableStore,
-    IStorageBackend,
 } from './storage';
-export {
-    hasRecordStore,
-    hasHighLevelStore,
-    hasSyncableStore,
-} from './storage';
+export { hasRecordStore } from './storage';
 
 // ── 能力子接口 ──
 export type { ISeqFileOperations } from './capabilities/seq-file';
