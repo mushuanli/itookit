@@ -50,20 +50,11 @@ export {
     type SessionManagerEvent,
     type SessionManagerCallback
 } from './interfaces/ISessionUI';
-// @deprecated — 使用 IModuleFS / IFSDriver 替代。EngineNode → FSNode, SRSItemData → from '@itookit/common' srs path
-export {
-    type EngineNode,
-    type EngineSearchQuery,
-    type EngineEventType,
-    type EngineEvent,
-    type IFSEngine,
-    type NodeType,
-} from './interfaces/IFSEngine';
 
 // SRS types — canonical source (SRSItemData was previously re-exported from deprecated IFSEngine.ts)
 export type { SRSItemData, SRSCardRef, SRSStats, ISRSService } from './interfaces/srs/ISRSService';
 
-export type { IFile } from './interfaces/IFile';
+export type { AssetObj, IFile } from './interfaces/IFile';
 export type { IMDXFile } from './interfaces/IMDXFile';
 export type { IChatFile } from './interfaces/IChatFile';
 export type {

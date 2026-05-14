@@ -15,9 +15,7 @@ import { ConfigService } from './services/config-service';
 import { nullDevice, zeroDevice, randomDevice } from './devices';
 
 export async function createVFS(options: VFSFactoryOptions): Promise<VFSInstance> {
-    const engine = new VFSEngine(options.rootBackend, {
-        maxSymlinkDepth: options.maxSymlinkDepth,
-    });
+    const engine = new VFSEngine(options.rootBackend);
 
     // Register user plugins (before init)
     if (options.plugins) {

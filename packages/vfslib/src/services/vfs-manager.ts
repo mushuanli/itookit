@@ -41,10 +41,9 @@ import {
     type IDeviceDriver,
 } from '@itookit/common';
 
-import { VFSEngine, ROOT_INO } from '../engine/vfs-engine';
+import { VFSEngine } from '../engine/vfs-engine';
 import { ModuleFS, type ModuleFSDeps } from './module-fs';
 import { EventBus } from '../event/event-bus';
-import { encodeId } from './id-mapper';
 import * as P from '../utils/path';
 
 export class VFSManager implements IVFSManager {
@@ -173,20 +172,12 @@ export class VFSManager implements IVFSManager {
         // ensureModuleDir always operates in the root backend (creates a stub entry).
         await this.engine.ensureModuleDir(moduleName);
 
-        // Determine which mount actually serves this module's data.
+        // v4.1: path-based — rootNodeId is the system path
         const modulePath = `/module/${moduleName}`;
-        const { mount } = this.mounts.router.resolve(modulePath);
-        const effectiveMountId = mount.mountId;
-        // Non-root backends use ROOT_INO=1 as their own root; root backend uses the
-        // ino of the stub directory created by ensureModuleDir.
-        const effectiveRootIno = mount.backend === this.engine.getBackend()
-            ? (await this.engine.ensureModuleDir(moduleName))
-            : ROOT_INO;
-
         this.modules.set(moduleName, {
             name: moduleName,
             description: options?.description,
-            rootNodeId: encodeId(effectiveMountId, effectiveRootIno),
+            rootNodeId: modulePath,
             isProtected: options?.isProtected,
             syncEnabled: options?.syncEnabled,
             isSystem: options?.isSystem,
@@ -501,8 +492,8 @@ class InlineMountRouter implements IMountRouter {
                 references: true,
                 symlinks: true,
                 hardlinks: false,
-                partialRead: !!backend.content.readRange,
-                partialWrite: !!backend.content.appendData,
+                partialRead: true,
+                partialWrite: true,
                 treeWalk: true,
                 streaming: false,
                 watch: false,
@@ -523,20 +514,10 @@ class InlineMountRouter implements IMountRouter {
 
         await backend.init();
 
-        // Bootstrap root inode (ino=1) in the mounted backend if absent.
-        // The root backend is bootstrapped by VFSEngine.bootstrap(); additional
-        // backends must set up their own root inode so PathResolver can start traversal.
-        const existingRoot = await backend.inodes.getInode(1);
+        // Bootstrap root in the mounted backend if absent
+        const existingRoot = await backend.stat('/');
         if (!existingRoot) {
-            await backend.runInTransaction('readwrite', async (scope) => {
-                await scope.inodes.putInode({
-                    ino: 1, parentIno: 1, name: '', type: 'directory',
-                    createdAt: Date.now(), nlink: 1,
-                });
-                await scope.meta.putMeta({
-                    ino: 1, modifiedAt: Date.now(), size: 0, version: 0,
-                });
-            });
+            await backend.mkdir('/');
         }
 
         const mp: MountPoint = {
@@ -556,8 +537,8 @@ class InlineMountRouter implements IMountRouter {
                 references: true,
                 symlinks: true,
                 hardlinks: false,
-                partialRead: !!backend.content.readRange,
-                partialWrite: !!backend.content.appendData,
+                partialRead: true,
+                partialWrite: true,
                 treeWalk: true,
                 streaming: false,
                 watch: false,

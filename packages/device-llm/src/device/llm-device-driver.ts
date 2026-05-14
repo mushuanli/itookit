@@ -719,8 +719,8 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
     }
 
     private async deleteProviderFromDisk(id: string): Promise<void> {
-        const nodeId = await this.engine.resolvePath(`${PROVIDERS_DIR}/${id}.json`);
-        if (nodeId) await this.engine.delete([nodeId]);
+        const nodeId = await this.engine.driver.resolvePath(`${PROVIDERS_DIR}/${id}.json`);
+        if (nodeId) await this.engine.driver.delete([nodeId]);
     }
 
     // ─── Connection storage ───────────────────────────────────────────────────
@@ -790,8 +790,8 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
     }
 
     private async deleteFromDisk(id: string): Promise<void> {
-        const nodeId = await this.engine.resolvePath(`${CONNECTIONS_DIR}/${id}.json`);
-        if (nodeId) await this.engine.delete([nodeId]);
+        const nodeId = await this.engine.driver.resolvePath(`${CONNECTIONS_DIR}/${id}.json`);
+        if (nodeId) await this.engine.driver.delete([nodeId]);
     }
 
     // ─── ILLMManagementService — Skills ──────────────────────────────────────
@@ -886,8 +886,8 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
     }
 
     private async deleteMCPFromDisk(id: string): Promise<void> {
-        const nodeId = await this.engine.resolvePath(`${MCP_DIR}/${id}.json`);
-        if (nodeId) await this.engine.delete([nodeId]);
+        const nodeId = await this.engine.driver.resolvePath(`${MCP_DIR}/${id}.json`);
+        if (nodeId) await this.engine.driver.delete([nodeId]);
     }
 
     // ─── MCP connection management ────────────────────────────────────────────
@@ -929,14 +929,14 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
             yaml.dump(skill, { lineWidth: -1, noRefs: true }),
         );
         // Remove legacy .json file if present (one-time migration on first save).
-        const oldId = await this.engine.resolvePath(`${SKILLS_DIR}/${skill.id}.json`);
-        if (oldId) await this.engine.delete([oldId]);
+        const oldId = await this.engine.driver.resolvePath(`${SKILLS_DIR}/${skill.id}.json`);
+        if (oldId) await this.engine.driver.delete([oldId]);
     }
 
     private async deleteSkillFromDisk(id: string): Promise<void> {
         for (const ext of ['.yaml', '.json']) {
-            const nodeId = await this.engine.resolvePath(`${SKILLS_DIR}/${id}${ext}`);
-            if (nodeId) { await this.engine.delete([nodeId]); break; }
+            const nodeId = await this.engine.driver.resolvePath(`${SKILLS_DIR}/${id}${ext}`);
+            if (nodeId) { await this.engine.driver.delete([nodeId]); break; }
         }
     }
 
@@ -1103,22 +1103,22 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
     private async migrateConnectionsIfNeeded(): Promise<void> {
         try {
             // Skip if new path already has data
-            const newDirId = await this.engine.resolvePath(CONNECTIONS_DIR);
+            const newDirId = await this.engine.driver.resolvePath(CONNECTIONS_DIR);
             if (newDirId) {
-                const children = await this.engine.getChildren(newDirId);
+                const children = await this.engine.driver.getChildren(newDirId);
                 if (children.some(c => c.type === 'file' && c.name.endsWith('.json'))) return;
             }
 
             // Check old path
-            const oldDirId = await this.engine.resolvePath(OLD_CONNECTIONS_DIR);
+            const oldDirId = await this.engine.driver.resolvePath(OLD_CONNECTIONS_DIR);
             if (!oldDirId) return;
 
             console.info('[LLMDeviceDriver] Migrating connections from old path...');
-            const children = await this.engine.getChildren(oldDirId);
+            const children = await this.engine.driver.getChildren(oldDirId);
             for (const child of children) {
                 if (child.type !== 'file' || !child.name.endsWith('.json')) continue;
                 try {
-                    const raw = await this.engine.readContent(child.id);
+                    const raw = await this.engine.driver.readContent(child.id);
                     const text = typeof raw === 'string' ? raw : new TextDecoder().decode(raw as ArrayBuffer);
                     await this.engineUpsert(`${CONNECTIONS_DIR}/${child.name}`, text);
                 } catch { /* skip */ }
@@ -1138,9 +1138,9 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
     private async migrateMCPIfNeeded(): Promise<void> {
         try {
             // Skip if new path already has data
-            const newDirId = await this.engine.resolvePath(MCP_DIR);
+            const newDirId = await this.engine.driver.resolvePath(MCP_DIR);
             if (newDirId) {
-                const children = await this.engine.getChildren(newDirId);
+                const children = await this.engine.driver.getChildren(newDirId);
                 if (children.some(c => c.type === 'file' && c.name.endsWith('.json'))) return;
             }
 
@@ -1149,15 +1149,15 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
             if (!this.vfs.getModule(agentsModule)) return;
 
             const agentsEngine = this.vfs.getEngine(agentsModule);
-            const oldMcpDirId = await agentsEngine.resolvePath('/.mcp');
+            const oldMcpDirId = await agentsEngine.driver.resolvePath('/.mcp');
             if (!oldMcpDirId) return;
 
             console.info('[LLMDeviceDriver] Migrating MCP servers from agents module...');
-            const children = await agentsEngine.getChildren(oldMcpDirId);
+            const children = await agentsEngine.driver.getChildren(oldMcpDirId);
             for (const child of children) {
                 if (child.type !== 'file' || !child.name.endsWith('.json')) continue;
                 try {
-                    const raw = await agentsEngine.readContent(child.id);
+                    const raw = await agentsEngine.driver.readContent(child.id);
                     const text = typeof raw === 'string' ? raw : new TextDecoder().decode(raw as ArrayBuffer);
                     await this.engineUpsert(`${MCP_DIR}/${child.name}`, text);
                 } catch { /* skip */ }
@@ -1249,9 +1249,9 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
 
     private async readJson<T>(path: string): Promise<T | null> {
         try {
-            const nodeId = await this.engine.resolvePath(path);
+            const nodeId = await this.engine.driver.resolvePath(path);
             if (!nodeId) return null;
-            const raw = await this.engine.readContent(nodeId);
+            const raw = await this.engine.driver.readContent(nodeId);
             const text = typeof raw === 'string' ? raw : new TextDecoder().decode(raw as ArrayBuffer);
             return JSON.parse(text) as T;
         } catch { return null; }
@@ -1262,13 +1262,13 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
     }
 
     private async engineUpsert(path: string, content: string): Promise<void> {
-        const nodeId = await this.engine.resolvePath(path);
+        const nodeId = await this.engine.driver.resolvePath(path);
         if (nodeId) {
-            await this.engine.writeContent(nodeId, content);
+            await this.engine.driver.writeContent(nodeId, content);
         } else {
             const name = path.substring(path.lastIndexOf('/') + 1);
             const parent = path.substring(0, path.lastIndexOf('/')) || '/';
-            await this.engine.createFile({
+            await this.engine.driver.createFile({
                 name,
                 parentIdOrPath: parent,
                 content,
@@ -1281,16 +1281,16 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
     private async loadJsonFilesFromDir<T>(dirPath: string): Promise<T[]> {
         const items: T[] = [];
         try {
-            const dirId = await this.engine.resolvePath(dirPath);
+            const dirId = await this.engine.driver.resolvePath(dirPath);
             if (!dirId) return [];
-            const children = await this.engine.getChildren(dirId);
+            const children = await this.engine.driver.getChildren(dirId);
             for (const child of children) {
                 if (child.type !== 'file') continue;
                 const isYaml = child.name.endsWith('.yaml') || child.name.endsWith('.yml');
                 const isJson = child.name.endsWith('.json');
                 if (!isYaml && !isJson) continue;
                 try {
-                    const raw = await this.engine.readContent(child.id);
+                    const raw = await this.engine.driver.readContent(child.id);
                     const text = typeof raw === 'string' ? raw : new TextDecoder().decode(raw as ArrayBuffer);
                     const parsed = isYaml
                         ? yaml.load(text) as T

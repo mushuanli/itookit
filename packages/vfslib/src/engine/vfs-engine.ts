@@ -1,48 +1,39 @@
 /**
  * @file packages/vfslib/src/engine/vfs-engine.ts
- * @desc VFS 引擎 — 系统级核心操作
+ * @desc VFS 引擎 — 系统级核心操作（v4.1: path-based 后端）
  *
  * 职责：
- * - 管理根后端
+ * - 管理根后端 + 挂载路由
  * - Bootstrap 基础目录结构 (/etc, /dev, /module)
- * - 系统级路径解析与文件操作
+ * - 系统级路径操作
  * - 持有 plugin pipeline、device registry、event bus、access controller
+ *
+ * v4.1 变更：
+ * - 废弃 IInodeStore/IMetaStore/IContentStore 三层分离
+ * - 所有存储操作通过 path-based IStorageBackend 接口
+ * - 删除 PathResolver、node-mapper、ROOT_INO、contentRef 中间层
  */
 
 import type {
     IStorageBackend,
-    InodeRecord,
-    MetaRecord,
-    FSNodeType,
+    FSNode,
     FileContent,
     WriteOptions,
     DeleteOptions,
-    RenameOptions,
-    MoveOptions,
     IMountRouter,
 } from '@itookit/common';
 
-import {
-    FSError,
-    FSAlreadyExistsError,
-    FSConflictError,
-    SYSTEM_DIRS,
-} from '@itookit/common';
+import { FSError, FSAlreadyExistsError, FSCapabilityError, SYSTEM_DIRS } from '@itookit/common';
 
-import { PathResolver, type ResolvedInode } from './path-resolver';
 import { AccessController } from './access-controller';
 import { EventBus } from '../event/event-bus';
 import { PluginPipeline } from './plugin-pipeline';
 import { DeviceRegistry } from './device-registry';
-import { deleteRecursive } from './tree-ops';
 import { toBuffer, toString } from '../utils/encoding';
 import * as P from '../utils/path';
 import { toAssetDirName, validateFilename } from '../utils/validation';
 
-export const ROOT_INO = 1;
-
 export class VFSEngine {
-    readonly resolver: PathResolver;
     readonly access: AccessController;
     readonly events: EventBus;
     readonly plugins: PluginPipeline;
@@ -54,62 +45,45 @@ export class VFSEngine {
 
     constructor(
         backend: IStorageBackend,
-        options?: { maxSymlinkDepth?: number },
     ) {
         this.backend = backend;
-        this.resolver = new PathResolver(options?.maxSymlinkDepth);
         this.access = new AccessController();
         this.events = new EventBus();
         this.plugins = new PluginPipeline();
         this.devices = new DeviceRegistry();
     }
 
-    get store(): IStorageBackend {
-        return this.backend;
-    }
+    get store(): IStorageBackend { return this.backend; }
+    getBackend(): IStorageBackend { return this.backend; }
 
-    getBackend(): IStorageBackend {
-        return this.backend;
-    }
+    setMountRouter(router: IMountRouter): void { this._mountRouter = router; }
 
-    /** Wire in the mount router so path operations route to the correct backend. */
-    setMountRouter(router: IMountRouter): void {
-        this._mountRouter = router;
-    }
-
-    /** Returns the backend responsible for `systemPath`. Falls back to root backend. */
     getBackendForPath(systemPath: string): IStorageBackend {
         if (!this._mountRouter) return this.backend;
         return this._mountRouter.resolve(systemPath).mount.backend;
     }
 
-    /** Returns the mount path (e.g. '/module/home') that owns `systemPath`. */
     getMountPathForPath(systemPath: string): string {
         if (!this._mountRouter) return '/';
         return this._mountRouter.resolve(systemPath).mount.mountPath;
     }
 
-    /**
-     * Returns the backend, local path, and mount path for a system path.
-     * For root-backend paths the original systemPath is preserved and mountPath is '/'.
-     * For mounted paths localPath is stripped of the mount prefix.
-     */
-    private getMountedStore(systemPath: string): { backend: IStorageBackend; localPath: string; mountPath: string } {
+    /** Resolve backend + local path + mount path for a system path. */
+    private resolveStore(systemPath: string): { backend: IStorageBackend; localPath: string; mountPath: string } {
         if (!this._mountRouter) return { backend: this.backend, localPath: systemPath, mountPath: '/' };
         const { mount, relativePath } = this._mountRouter.resolve(systemPath);
         if (mount.backend === this.backend) return { backend: this.backend, localPath: systemPath, mountPath: '/' };
-        const localPath = relativePath ? '/' + relativePath : '/';
-        return { backend: mount.backend, localPath, mountPath: mount.mountPath };
+        return { backend: mount.backend, localPath: relativePath ? '/' + relativePath : '/', mountPath: mount.mountPath };
     }
 
-    inoToId(ino: number): string {
-        return String(ino);
-    }
-
-    idToIno(id: string): number {
-        const n = parseInt(id, 10);
-        if (isNaN(n)) throw new FSError('EINVAL', `invalid node id: ${id}`);
-        return n;
+    /** Map a backend-local node to a system-path node. */
+    private mapToSystemNode(node: FSNode, mountPath: string): FSNode {
+        if (mountPath === '/') return node;
+        const mapPath = (p: string | null) => {
+            if (!p) return null;
+            return p === '/' ? mountPath : mountPath + p;
+        };
+        return { ...node, id: mapPath(node.id)!, path: mapPath(node.path)!, parentId: mapPath(node.parentId) };
     }
 
     // ── Lifecycle ──
@@ -132,729 +106,358 @@ export class VFSEngine {
         this.initialized = false;
     }
 
-    // ── Bootstrap ── (always uses root backend)
-
     private async bootstrap(): Promise<void> {
-        await this.backend.runInTransaction('readwrite', async (scope) => {
-            const rootInode = await scope.inodes.getInode(ROOT_INO);
-            if (!rootInode) {
-                await scope.inodes.putInode({
-                    ino: ROOT_INO,
-                    parentIno: ROOT_INO,
-                    name: '',
-                    type: 'directory',
-                    createdAt: Date.now(),
-                    nlink: 1,
-                });
-                await scope.meta.putMeta({
-                    ino: ROOT_INO,
-                    modifiedAt: Date.now(),
-                    size: 0,
-                    version: 0,
-                });
+        // Ensure root and system directories exist
+        if (!(await this.backend.stat('/'))) {
+            await this.backend.mkdir('/');
+        }
+        for (const dirName of SYSTEM_DIRS) {
+            if (!(await this.backend.stat(`/${dirName}`))) {
+                await this.backend.mkdir(`/${dirName}`);
             }
-
-            for (const dirName of SYSTEM_DIRS) {
-                const existing = await scope.inodes.lookup(ROOT_INO, dirName);
-                if (!existing) {
-                    const ino = await scope.inodes.allocateIno();
-                    await scope.inodes.putInode({
-                        ino,
-                        parentIno: ROOT_INO,
-                        name: dirName,
-                        type: 'directory',
-                        createdAt: Date.now(),
-                        nlink: 1,
-                    });
-                    await scope.meta.putMeta({
-                        ino,
-                        modifiedAt: Date.now(),
-                        size: 0,
-                        version: 0,
-                    });
-                }
-            }
-        });
+        }
     }
 
     // ── Path Resolution ──
 
-    async resolve(path: string, followSymlink = true): Promise<ResolvedInode> {
-        const { backend, localPath, mountPath } = this.getMountedStore(path);
-        const r = await this.resolver.resolve(
-            { inodes: backend.inodes, meta: backend.meta },
-            ROOT_INO,
-            localPath,
-            followSymlink,
-        );
-        // For non-root backends fullPath is local to the mount (e.g. '/log.txt').
-        // Restore the system path so callers can pass it back to engine methods.
-        if (mountPath !== '/') {
-            return { ...r, fullPath: r.fullPath === '/' ? mountPath : mountPath + r.fullPath };
-        }
-        return r;
+    /** Stat a path (throws if not found) */
+    async stat(path: string): Promise<import('@itookit/common').FSNode> {
+        const { backend, localPath, mountPath } = this.resolveStore(path);
+        const node = await backend.stat(localPath === '/' ? '/' : localPath);
+        if (!node) throw new FSError('ENOENT', 'not found', 'stat', path);
+        return this.mapToSystemNode(node, mountPath);
     }
 
-    async tryResolve(path: string, followSymlink = true): Promise<ResolvedInode | null> {
-        const { backend, localPath, mountPath } = this.getMountedStore(path);
-        const r = await this.resolver.tryResolve(
-            { inodes: backend.inodes, meta: backend.meta },
-            ROOT_INO,
-            localPath,
-            followSymlink,
-        );
-        if (!r) return null;
-        if (mountPath !== '/') {
-            return { ...r, fullPath: r.fullPath === '/' ? mountPath : mountPath + r.fullPath };
-        }
-        return r;
+    /** Stat that returns null on not found */
+    async tryStat(path: string): Promise<import('@itookit/common').FSNode | null> {
+        const { backend, localPath } = this.resolveStore(path);
+        return backend.stat(localPath === '/' ? '/' : localPath);
     }
 
-    // ── Module Directory Management ── (always root backend — creates stubs)
+    // ── Module Directory Management ──
 
-    async ensureModuleDir(moduleName: string): Promise<number> {
-        const moduleParent = await this.resolve('/module');
-        const existing = await this.backend.inodes.lookup(moduleParent.ino, moduleName);
-        if (existing) return existing.ino;
-
-        let resultIno = 0;
-        await this.backend.runInTransaction('readwrite', async (scope) => {
-            const check = await scope.inodes.lookup(moduleParent.ino, moduleName);
-            if (check) { resultIno = check.ino; return; }
-
-            const ino = await scope.inodes.allocateIno();
-            await scope.inodes.putInode({
-                ino,
-                parentIno: moduleParent.ino,
-                name: moduleName,
-                type: 'directory',
-                createdAt: Date.now(),
-                nlink: 1,
-            });
-            await scope.meta.putMeta({
-                ino,
-                modifiedAt: Date.now(),
-                size: 0,
-                version: 0,
-            });
-            resultIno = ino;
-        });
-
-        return resultIno;
+    async ensureModuleDir(moduleName: string): Promise<void> {
+        const path = `/module/${moduleName}`;
+        const { backend, localPath } = this.resolveStore(path);
+        const existing = await backend.stat(localPath);
+        if (existing) return;
+        await backend.mkdir(localPath);
     }
 
     async removeModuleDir(moduleName: string): Promise<void> {
-        const resolved = await this.tryResolve(`/module/${moduleName}`);
-        if (!resolved) return;
-
-        await this.backend.runInTransaction('readwrite', async (scope) => {
-            await deleteRecursive(scope, resolved.ino);
-        });
+        const path = `/module/${moduleName}`;
+        const { backend, localPath } = this.resolveStore(path);
+        const existing = await backend.stat(localPath);
+        if (!existing) return;
+        await backend.delete(localPath, { recursive: true });
     }
 
-    // ── System-Level Read ──
+    // ── Read ──
 
     async readBySystemPath(systemPath: string): Promise<FileContent> {
-        const { backend, localPath } = this.getMountedStore(systemPath);
-        const resolved = await this.resolver.resolve(
-            { inodes: backend.inodes, meta: backend.meta },
-            ROOT_INO,
-            localPath,
-        );
-        if (!resolved.meta?.contentRef) return '';
-        const data = await backend.content.getData(resolved.meta.contentRef);
-        if (!data) return '';
-        return toString(data);
+        const { backend, localPath } = this.resolveStore(systemPath);
+        try {
+            const data = await backend.read(localPath);
+            return toString(data.buffer as ArrayBuffer);
+        } catch {
+            return '';
+        }
     }
-
-    // ── System-Level Operations ──
 
     async readContent(path: string): Promise<ArrayBuffer> {
-        const { backend, localPath } = this.getMountedStore(path);
-        const resolved = await this.resolver.resolve(
-            { inodes: backend.inodes, meta: backend.meta },
-            ROOT_INO,
-            localPath,
-        );
-        if (resolved.inode.type === 'directory') {
-            throw new FSError('EISDIR', 'cannot read directory', 'read', path);
+        const { backend, localPath } = this.resolveStore(path);
+        const node = await backend.stat(localPath);
+        if (!node) throw new FSError('ENOENT', 'not found', 'read', path);
+        if (node.type === 'directory') throw new FSError('EISDIR', 'cannot read directory', 'read', path);
+        try {
+            const data = await backend.read(localPath);
+            return (data as Uint8Array).buffer as ArrayBuffer;
+        } catch {
+            return new ArrayBuffer(0);
         }
-        if (!resolved.meta?.contentRef) return new ArrayBuffer(0);
-        const data = await backend.content.getData(resolved.meta.contentRef);
-        return data ?? new ArrayBuffer(0);
     }
+
+    // ── Write ──
 
     async writeContent(
         path: string,
         content: FileContent,
-        opts?: WriteOptions,
+        options?: WriteOptions,
     ): Promise<void> {
-        const { backend, localPath } = this.getMountedStore(path);
-        const resolved = await this.resolver.resolve(
-            { inodes: backend.inodes, meta: backend.meta },
-            ROOT_INO,
-            localPath,
-        );
-        if (resolved.inode.type === 'directory') {
-            throw new FSError('EISDIR', 'cannot write to directory', 'write', path);
+        const { backend, localPath } = this.resolveStore(path);
+        const raw = toBuffer(content);
+        let buf = raw instanceof Uint8Array ? raw : new Uint8Array(raw);
+
+        if (options?.mode === 'append') {
+            try {
+                const existing = await backend.read(localPath);
+                const merged = new Uint8Array(existing.byteLength + buf.byteLength);
+                merged.set(new Uint8Array(existing), 0);
+                merged.set(buf, existing.byteLength);
+                buf = merged;
+            } catch { /* file doesn't exist yet, just write */ }
         }
 
-        if (opts?.expectedVersion != null && resolved.meta) {
-            if (resolved.meta.version !== opts.expectedVersion) {
-                throw new FSConflictError(path, opts.expectedVersion, resolved.meta.version);
-            }
-        }
-
-        await backend.runInTransaction('readwrite', async (scope) => {
-            const contentRef = String(resolved.ino);
-            const buf = toBuffer(content);
-
-            if (opts?.mode === 'append') {
-                if (scope.content.appendData) {
-                    await scope.content.appendData(contentRef, buf);
-                } else {
-                    const existing = await scope.content.getData(contentRef);
-                    if (existing) {
-                        const merged = new Uint8Array(existing.byteLength + buf.byteLength);
-                        merged.set(new Uint8Array(existing), 0);
-                        merged.set(new Uint8Array(buf), existing.byteLength);
-                        await scope.content.putData(contentRef, merged.buffer as ArrayBuffer);
-                    } else {
-                        await scope.content.putData(contentRef, buf);
-                    }
-                }
-            } else {
-                await scope.content.putData(contentRef, buf);
-            }
-
-            const currentMeta = await scope.meta.getMeta(resolved.ino);
-            const totalSize = opts?.mode === 'append'
-                ? (currentMeta?.size ?? 0) + buf.byteLength
-                : buf.byteLength;
-
-            await scope.meta.patchMeta(resolved.ino, {
-                modifiedAt: Date.now(),
-                size: totalSize,
-                version: (currentMeta?.version ?? 0) + 1,
-                contentRef,
-                ...(opts?.metadata ? { metadata: { ...currentMeta?.metadata, ...opts.metadata } } : {}),
-            });
-        });
+        await backend.write(localPath, buf);
     }
+
+    // ── Create ──
 
     async createFile(
         parentPath: string,
         name: string,
-        type: FSNodeType = 'file',
+        type: import('@itookit/common').FSNodeType = 'file',
         content?: FileContent,
         metadata?: Record<string, unknown>,
-        opts?: { overwrite?: boolean; recursive?: boolean },
-    ): Promise<{ ino: number; inode: InodeRecord; meta: MetaRecord }> {
-        const err = validateFilename(name);
-        if (err) throw new FSError('EINVAL', err, 'createFile', name);
+        opts?: { overwrite?: boolean; recursive?: boolean; deviceHandlerId?: string },
+    ): Promise<import('@itookit/common').FSNode> {
+        validateFilename(name);
+        const { backend, localPath: parentLocal, mountPath } = this.resolveStore(parentPath);
+        const fullPath = parentLocal === '/' ? `/${name}` : `${parentLocal}/${name}`;
 
-        const { backend, localPath: parentLocalPath } = this.getMountedStore(parentPath);
-
-        let parentIno: number;
-        if (opts?.recursive) {
-            parentIno = await this.ensureDirectoryPath(backend, parentLocalPath);
-        } else {
-            const parent = await this.resolver.resolve(
-                { inodes: backend.inodes, meta: backend.meta },
-                ROOT_INO,
-                parentLocalPath,
-            );
-            parentIno = parent.ino;
+        if (!opts?.overwrite) {
+            const existing = await backend.stat(fullPath);
+            if (existing) throw new FSAlreadyExistsError(name, parentPath);
         }
 
-        const existing = await backend.inodes.lookup(parentIno, name);
-        if (existing && !opts?.overwrite) {
-            throw new FSAlreadyExistsError(P.join(parentPath, name), 'createFile');
+        if (type === 'directory') {
+            const node = await backend.mkdir(fullPath);
+            if (metadata) await backend.updateMetadata(fullPath, metadata);
+            return this.mapToSystemNode(node, mountPath);
         }
 
-        let resultIno = 0;
-
-        await backend.runInTransaction('readwrite', async (scope) => {
-            if (existing && opts?.overwrite) {
-                await deleteRecursive(scope, existing.ino);
-            }
-
-            const ino = await scope.inodes.allocateIno();
-            const now = Date.now();
-            const contentRef = String(ino);
-            let size = 0;
-
-            if (content !== undefined) {
-                const buf = toBuffer(content);
-                await scope.content.putData(contentRef, buf);
-                size = buf.byteLength;
-            }
-
-            await scope.inodes.putInode({
-                ino,
-                parentIno,
-                name,
-                type,
-                createdAt: now,
-                nlink: 1,
-            });
-
-            await scope.meta.putMeta({
-                ino,
-                modifiedAt: now,
-                size,
-                version: 0,
-                contentRef: content !== undefined ? contentRef : undefined,
-                metadata: metadata as any,
-            });
-
-            resultIno = ino;
-        });
-
-        const inode = (await backend.inodes.getInode(resultIno))!;
-        const meta = (await backend.meta.getMeta(resultIno))!;
-        return { ino: resultIno, inode, meta };
+        const raw = content ? toBuffer(content) : new Uint8Array(0);
+        const buf = raw instanceof Uint8Array ? raw : new Uint8Array(raw);
+        const node = await backend.write(fullPath, buf);
+        if (metadata) await backend.updateMetadata(fullPath, metadata);
+        return this.mapToSystemNode(node, mountPath);
     }
 
     async createDirectory(
         parentPath: string,
         name: string,
         metadata?: Record<string, unknown>,
-        opts?: { recursive?: boolean },
-    ): Promise<{ ino: number; inode: InodeRecord; meta: MetaRecord }> {
-        const err = validateFilename(name);
-        if (err) throw new FSError('EINVAL', err, 'createDirectory', name);
-
-        const { backend, localPath: parentLocalPath } = this.getMountedStore(parentPath);
-
-        let parentIno: number;
-        if (opts?.recursive) {
-            parentIno = await this.ensureDirectoryPath(backend, parentLocalPath);
-        } else {
-            const parent = await this.resolver.resolve(
-                { inodes: backend.inodes, meta: backend.meta },
-                ROOT_INO,
-                parentLocalPath,
-            );
-            parentIno = parent.ino;
-        }
-
-        const existing = await backend.inodes.lookup(parentIno, name);
-        if (existing) {
-            if (existing.type === 'directory') {
-                const meta = await backend.meta.getMeta(existing.ino);
-                return { ino: existing.ino, inode: existing, meta: meta! };
-            }
-            throw new FSAlreadyExistsError(P.join(parentPath, name), 'createDirectory');
-        }
-
-        let resultIno = 0;
-
-        await backend.runInTransaction('readwrite', async (scope) => {
-            const ino = await scope.inodes.allocateIno();
-            const now = Date.now();
-
-            await scope.inodes.putInode({
-                ino,
-                parentIno,
-                name,
-                type: 'directory',
-                createdAt: now,
-                nlink: 1,
-            });
-
-            await scope.meta.putMeta({
-                ino,
-                modifiedAt: now,
-                size: 0,
-                version: 0,
-                metadata: metadata as any,
-            });
-
-            resultIno = ino;
-        });
-
-        const inode = (await backend.inodes.getInode(resultIno))!;
-        const meta = (await backend.meta.getMeta(resultIno))!;
-        return { ino: resultIno, inode, meta };
+    ): Promise<import('@itookit/common').FSNode> {
+        return this.createFile(parentPath, name, 'directory', undefined, metadata);
     }
 
-    async delete(path: string, opts?: DeleteOptions): Promise<number[]> {
-        if (P.isRoot(path)) {
-            throw new FSError('EINVAL', 'cannot delete root', 'delete', '/');
+    // ── Delete ──
+
+    async delete(path: string, options?: DeleteOptions): Promise<void> {
+        const { backend, localPath } = this.resolveStore(path);
+        const node = await backend.stat(localPath);
+        if (!node) {
+            if (options?.force) return;
+            throw new FSError('ENOENT', 'not found', 'delete', path);
         }
+        await backend.delete(localPath, { recursive: options?.recursive });
 
-        const { backend, localPath } = this.getMountedStore(path);
-        const resolved = await this.resolver.resolve(
-            { inodes: backend.inodes, meta: backend.meta },
-            ROOT_INO,
-            localPath,
-        );
-        const { ino, parentIno, name, inode } = resolved;
-
-        if (inode.type === 'directory' && !opts?.recursive) {
-            if (await backend.inodes.hasChildren(ino)) {
-                throw new FSError('ENOTEMPTY', 'directory not empty', 'delete', path);
-            }
+        // Cascade: delete companion asset dir
+        if (node.type !== 'directory' && options?.assetDirStrategy !== 'keep') {
+            const parentDir = P.dirname(localPath);
+            const assetDirName = toAssetDirName(nameFromPath(localPath));
+            try {
+                await backend.delete(`${parentDir}/${assetDirName}`, { recursive: true });
+            } catch { /* asset dir may not exist */ }
         }
-
-        const allDeleted: number[] = [];
-
-        await backend.runInTransaction('readwrite', async (scope) => {
-            const assetStrategy = opts?.assetDirStrategy ?? 'remove';
-            if (assetStrategy === 'remove' && (inode.type === 'file' || inode.type === 'seqfile')) {
-                const assetDirName = toAssetDirName(name);
-                const assetEntry = await scope.inodes.lookup(parentIno, assetDirName);
-                if (assetEntry) {
-                    const assetDeleted = await deleteRecursive(scope, assetEntry.ino);
-                    allDeleted.push(...assetDeleted);
-                }
-            }
-
-            const deleted = await deleteRecursive(scope, ino);
-            allDeleted.push(...deleted);
-        });
-
-        return allDeleted;
     }
 
-    async rename(path: string, newName: string, opts?: RenameOptions): Promise<void> {
-        const err = validateFilename(newName);
-        if (err) throw new FSError('EINVAL', err, 'rename', newName);
+    // ── Rename / Move ──
 
-        const { backend, localPath } = this.getMountedStore(path);
-        const resolved = await this.resolver.resolve(
-            { inodes: backend.inodes, meta: backend.meta },
-            ROOT_INO,
-            localPath,
-        );
-        const { ino, parentIno, name } = resolved;
-        if (name === newName) return;
+    async rename(path: string, newName: string): Promise<void> {
+        validateFilename(newName);
+        const { backend, localPath } = this.resolveStore(path);
+        const dir = P.dirname(localPath);
+        const newPath = dir === '/' ? `/${newName}` : `${dir}/${newName}`;
 
-        await backend.runInTransaction('readwrite', async (scope) => {
-            const conflict = await scope.inodes.lookup(parentIno, newName);
-            if (conflict && conflict.ino !== ino) {
-                throw new FSAlreadyExistsError(P.join(P.dirname(path), newName), 'rename');
-            }
+        const existing = await backend.stat(newPath);
+        if (existing) throw new FSAlreadyExistsError(newName, dir);
 
-            await scope.inodes.updateInode(ino, { name: newName });
-            await scope.meta.patchMeta(ino, { modifiedAt: Date.now() });
+        await backend.rename(localPath, newPath);
 
-            if (opts?.syncAssetDir !== false) {
-                const oldAssetName = toAssetDirName(name);
-                const newAssetName = toAssetDirName(newName);
-                const assetInode = await scope.inodes.lookup(parentIno, oldAssetName);
-                if (assetInode) {
-                    await scope.inodes.updateInode(assetInode.ino, { name: newAssetName });
-                }
-            }
-        });
+        // Rename companion asset dir
+        const oldAssetName = toAssetDirName(nameFromPath(localPath));
+        const newAssetName = toAssetDirName(newName);
+        try {
+            await backend.rename(`${dir}/${oldAssetName}`, `${dir}/${newAssetName}`);
+        } catch { /* no asset dir */ }
     }
 
-    async move(path: string, targetParentPath: string, opts?: MoveOptions): Promise<void> {
-        const src = this.getMountedStore(path);
-        const dst = this.getMountedStore(targetParentPath);
+    async move(sourcePath: string, targetParentPath: string): Promise<void> {
+        const { backend: srcBackend, localPath: srcLocal } = this.resolveStore(sourcePath);
+        const { backend: dstBackend, localPath: dstLocal } = this.resolveStore(targetParentPath);
 
-        if (src.backend !== dst.backend) {
-            throw new FSError('EXMOUNT', 'cross-mount move not supported', 'move', path);
+        if (srcBackend !== dstBackend) {
+            throw new FSError('EXMOUNT', 'cross-mount move not supported by engine; use copy+delete', 'move', sourcePath);
         }
 
-        const backend = src.backend;
-        const resolved = await this.resolver.resolve(
-            { inodes: backend.inodes, meta: backend.meta },
-            ROOT_INO,
-            src.localPath,
-        );
-        const targetParent = await this.resolver.resolve(
-            { inodes: backend.inodes, meta: backend.meta },
-            ROOT_INO,
-            dst.localPath,
-        );
+        const name = nameFromPath(srcLocal);
+        const newPath = dstLocal === '/' ? `/${name}` : `${dstLocal}/${name}`;
 
-        if (targetParent.inode.type !== 'directory') {
-            throw new FSError('ENOTDIR', 'target is not a directory', 'move', targetParentPath);
-        }
+        await srcBackend.rename(srcLocal, newPath);
 
-        await backend.runInTransaction('readwrite', async (scope) => {
-            const conflict = await scope.inodes.lookup(targetParent.ino, resolved.name);
-            if (conflict) {
-                throw new FSAlreadyExistsError(P.join(targetParentPath, resolved.name), 'move');
-            }
-
-            await scope.inodes.updateInode(resolved.ino, { parentIno: targetParent.ino });
-            await scope.meta.patchMeta(resolved.ino, { modifiedAt: Date.now() });
-
-            if (opts?.syncAssetDir !== false && (resolved.inode.type === 'file' || resolved.inode.type === 'seqfile')) {
-                const assetDirName = toAssetDirName(resolved.name);
-                const assetInode = await scope.inodes.lookup(resolved.parentIno, assetDirName);
-                if (assetInode) {
-                    await scope.inodes.updateInode(assetInode.ino, { parentIno: targetParent.ino });
-                }
-            }
-        });
+        // Move companion asset dir
+        const srcDir = P.dirname(srcLocal);
+        const assetDirName = toAssetDirName(name);
+        try {
+            await srcBackend.rename(`${srcDir}/${assetDirName}`, `${dstLocal}/${assetDirName}`);
+        } catch { /* no asset dir */ }
     }
+
+    // ── List ──
+
+    async listChildren(path: string): Promise<import('@itookit/common').FSNode[]> {
+        const { backend, localPath, mountPath } = this.resolveStore(path);
+        const nodes = await backend.list(localPath === '/' ? '/' : localPath);
+        return nodes.map(n => this.mapToSystemNode(n, mountPath));
+    }
+
+    // ── Metadata ──
 
     async updateMetadata(path: string, metadata: Record<string, unknown>): Promise<void> {
-        const { backend, localPath } = this.getMountedStore(path);
-        const resolved = await this.resolver.resolve(
-            { inodes: backend.inodes, meta: backend.meta },
-            ROOT_INO,
-            localPath,
-        );
-        await backend.runInTransaction('readwrite', async (scope) => {
-            const current = await scope.meta.getMeta(resolved.ino);
-            await scope.meta.patchMeta(resolved.ino, {
-                metadata: { ...current?.metadata, ...metadata },
-                modifiedAt: Date.now(),
-            });
-        });
+        const { backend, localPath } = this.resolveStore(path);
+        await backend.updateMetadata(localPath, metadata);
     }
 
-    async createSymlink(
-        parentPath: string,
-        name: string,
-        target: string,
-    ): Promise<{ ino: number; inode: InodeRecord; meta: MetaRecord }> {
-        const err = validateFilename(name);
-        if (err) throw new FSError('EINVAL', err, 'createSymlink', name);
+    // ── Symlink ──
 
-        const { backend, localPath: parentLocalPath } = this.getMountedStore(parentPath);
-        const parent = await this.resolver.resolve(
-            { inodes: backend.inodes, meta: backend.meta },
-            ROOT_INO,
-            parentLocalPath,
-        );
-        let resultIno = 0;
-
-        await backend.runInTransaction('readwrite', async (scope) => {
-            const conflict = await scope.inodes.lookup(parent.ino, name);
-            if (conflict) {
-                throw new FSAlreadyExistsError(P.join(parentPath, name), 'symlink');
-            }
-
-            const ino = await scope.inodes.allocateIno();
-            const now = Date.now();
-
-            await scope.inodes.putInode({
-                ino,
-                parentIno: parent.ino,
-                name,
-                type: 'symlink',
-                createdAt: now,
-                nlink: 1,
-            });
-
-            await scope.meta.putMeta({
-                ino,
-                modifiedAt: now,
-                size: 0,
-                version: 0,
-                symlinkTarget: target,
-            });
-
-            resultIno = ino;
-        });
-
-        const inode = (await backend.inodes.getInode(resultIno))!;
-        const meta = (await backend.meta.getMeta(resultIno))!;
-        return { ino: resultIno, inode, meta };
+    async createSymlink(parentPath: string, name: string, target: string): Promise<import('@itookit/common').FSNode> {
+        const { backend, localPath: parentLocal, mountPath } = this.resolveStore(parentPath);
+        const fullPath = parentLocal === '/' ? `/${name}` : `${parentLocal}/${name}`;
+        if (!backend.symlink) throw new FSCapabilityError('symlinks', 'engine');
+        await backend.symlink(fullPath, target);
+        const node = await backend.stat(fullPath);
+        if (!node) throw new FSError('EIO', 'symlink created but not found', 'symlink', fullPath);
+        return this.mapToSystemNode(node, mountPath);
     }
 
     async readSymlink(path: string): Promise<string> {
-        const { backend, localPath } = this.getMountedStore(path);
-        const resolved = await this.resolver.resolve(
-            { inodes: backend.inodes, meta: backend.meta },
-            ROOT_INO,
-            localPath,
-            false,
-        );
-        if (resolved.inode.type !== 'symlink') {
-            throw new FSError('EINVAL', 'not a symlink', 'readlink', path);
-        }
-        return resolved.meta?.symlinkTarget ?? '';
+        const { backend, localPath } = this.resolveStore(path);
+        if (!backend.readlink) throw new FSCapabilityError('symlinks', 'engine');
+        return backend.readlink(localPath);
     }
 
-    async createHardlink(
-        parentPath: string,
-        name: string,
-        targetPath: string,
-    ): Promise<{ ino: number; inode: InodeRecord; meta: MetaRecord }> {
-        const err = validateFilename(name);
-        if (err) throw new FSError('EINVAL', err, 'hardlink', name);
+    // ── Asset Dir ──
 
-        const srcMount = this.getMountedStore(targetPath);
-        const dstMount = this.getMountedStore(parentPath);
-        if (srcMount.backend !== dstMount.backend) {
-            throw new FSError('EXMOUNT', 'cross-mount hardlink not supported', 'hardlink', targetPath);
-        }
-
-        const backend = srcMount.backend;
-        const target = await this.resolver.resolve(
-            { inodes: backend.inodes, meta: backend.meta },
-            ROOT_INO,
-            srcMount.localPath,
-        );
-        if (target.inode.type === 'directory') {
-            throw new FSError('EINVAL', 'cannot hardlink a directory', 'hardlink', targetPath);
-        }
-
-        const parent = await this.resolver.resolve(
-            { inodes: backend.inodes, meta: backend.meta },
-            ROOT_INO,
-            dstMount.localPath,
-        );
-
-        await backend.runInTransaction('readwrite', async (scope) => {
-            const conflict = await scope.inodes.lookup(parent.ino, name);
-            if (conflict) {
-                throw new FSAlreadyExistsError(P.join(parentPath, name), 'hardlink');
-            }
-
-            await scope.inodes.updateInode(target.ino, { nlink: target.inode.nlink + 1 });
-
-            const ino = await scope.inodes.allocateIno();
-            await scope.inodes.putInode({
-                ino,
-                parentIno: parent.ino,
-                name,
-                type: target.inode.type,
-                createdAt: Date.now(),
-                nlink: 1,
-            });
-
-            await scope.meta.putMeta({
-                ino,
-                modifiedAt: Date.now(),
-                size: target.meta?.size ?? 0,
-                version: 0,
-                contentRef: target.meta?.contentRef,
-                contentHash: target.meta?.contentHash,
-                mimeType: target.meta?.mimeType,
-                metadata: target.meta?.metadata ? { ...target.meta.metadata } : undefined,
-                tags: target.meta?.tags ? [...target.meta.tags] : undefined,
-                extra: { hardlinkSource: target.ino },
-            });
-        });
-
-        const inode = (await backend.inodes.getInode(target.ino))!;
-        const meta = (await backend.meta.getMeta(target.ino))!;
-        return { ino: target.ino, inode, meta };
+    async getAssetDirPath(filePath: string): Promise<string | null> {
+        const { backend, localPath } = this.resolveStore(filePath);
+        const parentDir = P.dirname(localPath);
+        const name = nameFromPath(localPath);
+        const assetDirName = toAssetDirName(name);
+        const assetPath = parentDir === '/' ? `/${assetDirName}` : `${parentDir}/${assetDirName}`;
+        const exists = await backend.stat(assetPath);
+        return exists ? assetPath : null;
     }
 
-    // ── AssetDir helpers ──
+    async ensureAssetDir(filePath: string): Promise<string> {
+        const { backend, localPath } = this.resolveStore(filePath);
+        const parentDir = P.dirname(localPath);
+        const name = nameFromPath(localPath);
+        const assetDirName = toAssetDirName(name);
+        const assetPath = parentDir === '/' ? `/${assetDirName}` : `${parentDir}/${assetDirName}`;
 
-    async ensureAssetDir(filePath: string): Promise<number> {
-        const { backend, localPath } = this.getMountedStore(filePath);
-        const resolved = await this.resolver.resolve(
-            { inodes: backend.inodes, meta: backend.meta },
-            ROOT_INO,
-            localPath,
-        );
-        if (resolved.inode.type !== 'file' && resolved.inode.type !== 'seqfile') {
-            throw new FSError('EINVAL', 'only file and seqfile can have assetdir', 'assetdir', filePath);
-        }
+        const existing = await backend.stat(assetPath);
+        if (existing) return assetPath;
 
-        const assetDirName = toAssetDirName(resolved.name);
-        const existing = await backend.inodes.lookup(resolved.parentIno, assetDirName);
-        if (existing) return existing.ino;
-
-        let resultIno = 0;
-        await backend.runInTransaction('readwrite', async (scope) => {
-            const check = await scope.inodes.lookup(resolved.parentIno, assetDirName);
-            if (check) { resultIno = check.ino; return; }
-
-            const ino = await scope.inodes.allocateIno();
-            const now = Date.now();
-
-            await scope.inodes.putInode({
-                ino,
-                parentIno: resolved.parentIno,
-                name: assetDirName,
-                type: 'directory',
-                createdAt: now,
-                nlink: 1,
-            });
-
-            await scope.meta.putMeta({
-                ino,
-                modifiedAt: now,
-                size: 0,
-                version: 0,
-                isAssetDir: true,
-                ownerFileIno: resolved.ino,
-            });
-
-            await scope.meta.patchMeta(resolved.ino, { assetDirIno: ino });
-
-            resultIno = ino;
-        });
-
-        return resultIno;
+        await backend.mkdir(assetPath);
+        return assetPath;
     }
 
-    async getAssetDirIno(filePath: string): Promise<number | null> {
-        const { backend, localPath } = this.getMountedStore(filePath);
-        const resolved = await this.resolver.resolve(
-            { inodes: backend.inodes, meta: backend.meta },
-            ROOT_INO,
-            localPath,
-        );
-        const assetDirName = toAssetDirName(resolved.name);
-        const entry = await backend.inodes.lookup(resolved.parentIno, assetDirName);
-        return entry?.ino ?? null;
+    // ── Search ──
+
+    async search(path: string, query: import('@itookit/common').FSSearchQuery): Promise<import('@itookit/common').FSNode[]> {
+        const { backend } = this.resolveStore(path);
+        if (backend.search) return backend.search(query);
+        // Fallback: naive linear scan
+        const all: import('@itookit/common').FSNode[] = [];
+        await this._walkAndCollect(backend, '/', query, all);
+        return all;
     }
 
-    // ── Internal helpers ──
-
-    async listChildren(path: string): Promise<InodeRecord[]> {
-        const { backend, localPath } = this.getMountedStore(path);
-        const resolved = await this.resolver.resolve(
-            { inodes: backend.inodes, meta: backend.meta },
-            ROOT_INO,
-            localPath,
-        );
-        if (resolved.inode.type !== 'directory') {
-            throw new FSError('ENOTDIR', 'not a directory', 'list', path);
-        }
-        const children: InodeRecord[] = [];
-        await backend.inodes.walkTree(resolved.ino, (inode) => {
-            children.push(inode);
-            return 'skip';
-        }, { maxDepth: 0 });
-        return children;
-    }
-
-    private async ensureDirectoryPath(backend: IStorageBackend, localPath: string): Promise<number> {
-        const segs = P.segments(P.normalize(localPath));
-        let currentIno = ROOT_INO;
-
-        for (const seg of segs) {
-            const existing = await backend.inodes.lookup(currentIno, seg);
-            if (existing) {
-                if (existing.type !== 'directory') {
-                    throw new FSError('ENOTDIR', `${seg} is not a directory`, 'ensurePath');
+    private async _walkAndCollect(
+        backend: IStorageBackend,
+        dirPath: string,
+        query: import('@itookit/common').FSSearchQuery,
+        results: import('@itookit/common').FSNode[],
+    ): Promise<void> {
+        if (query.limit && results.length >= query.limit) return;
+        try {
+            const children = await backend.list(dirPath);
+            for (const child of children) {
+                if (query.limit && results.length >= query.limit) break;
+                if (matchSearch(child, query)) results.push(child);
+                if (child.type === 'directory') {
+                    await this._walkAndCollect(backend, child.path, query, results);
                 }
-                currentIno = existing.ino;
-            } else {
-                const ino = await backend.inodes.allocateIno();
-                await backend.inodes.putInode({
-                    ino,
-                    parentIno: currentIno,
-                    name: seg,
-                    type: 'directory',
-                    createdAt: Date.now(),
-                    nlink: 1,
-                });
-                await backend.meta.putMeta({
-                    ino,
-                    modifiedAt: Date.now(),
-                    size: 0,
-                    version: 0,
-                });
-                currentIno = ino;
+            }
+        } catch { /* skip */ }
+    }
+
+    // ── Ensure Directory Path (recursive mkdir) ──
+
+    async ensureDirectoryPath(systemPath: string): Promise<void> {
+        const { backend } = this.resolveStore(systemPath);
+        const parts = systemPath.split('/').filter(Boolean);
+        let current = '';
+        for (const seg of parts) {
+            current += '/' + seg;
+            const exists = await backend.stat(current);
+            if (!exists) {
+                await backend.mkdir(current);
             }
         }
-
-        return currentIno;
     }
+
+    // ── Walk Tree ──
+
+    async walkTree(
+        rootPath: string,
+        callback: (node: import('@itookit/common').FSNode, depth: number) => boolean | void | 'skip' | Promise<boolean | void | 'skip'>,
+        options?: { maxDepth?: number; includeHidden?: boolean; includeAssetDirs?: boolean },
+    ): Promise<number> {
+        const { backend, localPath } = this.resolveStore(rootPath);
+        return this._walkDFS(backend, localPath, callback, 0, options?.maxDepth ?? -1, options);
+    }
+
+    private async _walkDFS(
+        backend: IStorageBackend,
+        path: string,
+        callback: (node: import('@itookit/common').FSNode, depth: number) => boolean | void | 'skip' | Promise<boolean | void | 'skip'>,
+        depth: number,
+        maxDepth: number,
+        options?: { includeHidden?: boolean; includeAssetDirs?: boolean },
+    ): Promise<number> {
+        let count = 0;
+        const children = await backend.list(path === '/' ? '/' : path);
+        for (const child of children) {
+            if (!options?.includeHidden && child.name.startsWith('.')) continue;
+            if (!options?.includeAssetDirs && child.name.startsWith('_')) continue;
+            const result = await callback(child, depth);
+            count++;
+            if (result === false) return count;
+            if (result !== 'skip' && child.type === 'directory' && (maxDepth < 0 || depth < maxDepth)) {
+                count += await this._walkDFS(backend, child.path, callback, depth + 1, maxDepth, options);
+            }
+        }
+        return count;
+    }
+}
+
+// ── Helpers ──
+
+function nameFromPath(path: string): string {
+    if (path === '/' || path === '') return '';
+    const parts = path.split('/').filter(Boolean);
+    return parts[parts.length - 1] || '';
+}
+
+function matchSearch(node: import('@itookit/common').FSNode, query: import('@itookit/common').FSSearchQuery): boolean {
+    if (query.type) {
+        const types = Array.isArray(query.type) ? query.type : [query.type];
+        if (!types.includes(node.type)) return false;
+    }
+    if (query.name?.contains && !node.name.toLowerCase().includes(query.name.contains.toLowerCase())) return false;
+    if (query.tags?.all && !query.tags.all.every(t => node.tags.includes(t))) return false;
+    if (query.tags?.any && !query.tags.any.some(t => node.tags.includes(t))) return false;
+    return true;
 }

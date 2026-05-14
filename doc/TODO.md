@@ -1,25 +1,26 @@
-## ✅ RESOLVED (v4.0)
+## ✅ RESOLVED (v4.0 → v4.1)
 
-**P1: IModuleFS/IFSDriver 重复** — IModuleFS 现在是薄包装器，只暴露 `driver`, `meta`, `openFile`, `init`, `dispose` 及 VFS 特有设备方法。所有 CRUD 统一通过 `fs.driver.*`。
-- `IFSTransaction` 已删除（与 `IFSDriverTransaction` 统一）
-- `FSCapabilities.transaction` 已删除（`IFSDriver.transaction()` 现为必选方法）
-- `FSDriverAdapter` 已删除（ModuleFS 直接实现 IFSDriver，self-reference `this.driver = this`）
+### v4.0
+- **P1: IModuleFS/IFSDriver 重复** — IModuleFS 薄包装器
+- `IFSTransaction` + `FSDriverAdapter` + `FSCapabilities.transaction` 删除
+- **VFSSearchQuery** → `extends FSSearchQuery`
+- **IModuleFS compat 别名** → 统一 `fs.meta.*`
+- **VisibilityOptions** 提取
+- **SRSItemData** 导出源修正
 
-**VFSSearchQuery 重复** — 改为 `extends FSSearchQuery { modules?: string[] }`
-
-**IModuleFS compat 别名** — 已删除 `assets?`, `tags?`, `seq?`, `refs?`, `watcher?`，统一使用 `fs.meta.*`
-
-**ListOptions/TreeWalkOptions 重复字段** — 提取为 `VisibilityOptions` 基接口
-
-**IFSEngine/SRSItemData** — `SRSItemData` 重导出源已修正到 `srs/ISRSService`，`IFSEngine` 文件全面加注 `@deprecated`
+### v4.1
+- **IStorageBackend path-based** — 废弃 IInodeStore/IMetaStore/IContentStore 三层分离
+- **PathResolver / node-mapper / tree-ops** — 删除（3 文件，310 行）
+- **LocalFS backend** — path_ino 表删除，3 store 文件 → 1 backend（470 行删）
+- **IndexedDB backend** — 5 IDB store → 3，3 文件删除
+- **AssetObj** — IFile 新增 `asset(name): AssetObj`，统一 readInternal/putAsset 等
+- **IFile** — 方法数从 20 → 12
 
 ---
 
-## 🟡 已知设计权衡（非错误）
+## 🟡 已知设计权衡
 
-**两种事件系统**（FSEventPayloadMap vs VFSManagerEventPayloadMap）: payload 结构不同（细粒度 FS 事件 vs 跨模块 Manager 事件），属于合理分层，非重复。
-
-**FSCapabilities 字段不合并**（symlinks ≠ hardlinks, partialRead ≠ partialWrite, search ≠ semanticSearch）: 有独立语义，合并会丢失信息。
+**两种事件系统** — 合理分层。**FSCapabilities 字段** — 有独立语义。
 
 ---
 

@@ -1,315 +1,58 @@
 /**
  * @file vfsdriver-indexeddb/src/idb-backend.ts
- * @desc IndexedDB IStorageBackend implementation
- *
- * Design:
- * - All four stores (inodes, meta, content, records) live in one IDB database.
- * - runInTransaction opens a real IDB transaction that spans all stores,
- *   providing genuine ACID semantics within a single tab.
- * - Outside of runInTransaction, each store operation opens its own
- *   short-lived IDB transaction (auto-commits on success).
- * - The IRecordStore is always present, making seqFiles available by default.
- *
- * Transaction safety:
- *   IDB transactions stay open while there are pending IDB requests in the
- *   current microtask. Since all store methods only await IDB requests,
- *   the transaction remains alive throughout the async fn call.
+ * v4.1: Path-based IStorageBackend using a single IDB object store.
+ * No ino allocation, no separate inode/meta/content stores.
  */
 
-import type {
-    IStorageBackend,
-    ITransactionScope,
-    IInodeStore,
-    IMetaStore,
-    IContentStore,
-    IRecordStore,
-    InodeRecord,
-    InodeWalkOptions,
-} from '@itookit/common';
-
-import { IDBInodeStore, createInodeStore, createCounterStore } from './inode-store';
-import { IDBMetaStore, createMetaStore } from './meta-store';
-import { IDBContentStore, createContentStore } from './content-store';
+import type { IStorageBackend, FSNode, FSFileNode, FSDirectoryNode, IRecordStore, FSSearchQuery } from '@itookit/common';
+import { openDB, req, collectCursor, ALL_STORES, DB_VERSION, STORE_NODES, STORE_TAGS } from './utils';
 import { IDBRecordStore, createRecordStore } from './record-store';
-import {
-    openDB,
-    txDone,
-    req,
-    ALL_STORES,
-    DB_VERSION,
-    ROOT_INO,
-    COUNTER_INO,
-    STORE_INODES,
-    STORE_META,
-    STORE_CONTENT,
-    STORE_RECORDS,
-    STORE_COUNTERS,
-} from './utils';
+import { STORE_RECORDS } from './utils';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Options
-// ─────────────────────────────────────────────────────────────────────────────
+interface NodeEntry {
+    path: string;
+    type: 'file' | 'directory';
+    content: ArrayBuffer;
+    size: number;
+    createdAt: number;
+    modifiedAt: number;
+    icon?: string;
+    tags: string[];
+    metadata: string; // JSON
+}
 
 export interface IndexedDBBackendOptions {
-    /**
-     * IndexedDB database name.
-     * Use a unique name per mounted backend to avoid collisions.
-     * @default 'vfs'
-     */
     dbName?: string;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Scoped transaction stores (use a provided IDB transaction)
-// ─────────────────────────────────────────────────────────────────────────────
-
-function makeTxScope(tx: IDBTransaction): ITransactionScope {
-    return {
-        inodes: new IDBInodeStore(
-            tx.objectStore(STORE_INODES),
-            tx.objectStore(STORE_COUNTERS),
-        ),
-        meta: new IDBMetaStore(tx.objectStore(STORE_META)),
-        content: new IDBContentStore(tx.objectStore(STORE_CONTENT)),
-        records: new IDBRecordStore(tx.objectStore(STORE_RECORDS)),
-    };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Standalone stores (each operation opens its own short-lived IDB tx)
-// ─────────────────────────────────────────────────────────────────────────────
-
-class StandaloneInodeStore implements IInodeStore {
-    constructor(private readonly db: IDBDatabase) {}
-
-    private tx(mode: IDBTransactionMode = 'readonly'): IDBTransaction {
-        return this.db.transaction([STORE_INODES, STORE_COUNTERS], mode);
-    }
-
-    async allocateIno(): Promise<number> {
-        const tx = this.tx('readwrite');
-        const store = new IDBInodeStore(tx.objectStore(STORE_INODES), tx.objectStore(STORE_COUNTERS));
-        const ino = await store.allocateIno();
-        await txDone(tx);
-        return ino;
-    }
-
-    async putInode(inode: import('@itookit/common').InodeRecord): Promise<void> {
-        const tx = this.tx('readwrite');
-        await new IDBInodeStore(tx.objectStore(STORE_INODES), tx.objectStore(STORE_COUNTERS)).putInode(inode);
-        await txDone(tx);
-    }
-
-    async getInode(ino: number): Promise<import('@itookit/common').InodeRecord | null> {
-        const tx = this.tx();
-        return new IDBInodeStore(tx.objectStore(STORE_INODES), tx.objectStore(STORE_COUNTERS)).getInode(ino);
-    }
-
-    async lookup(parentIno: number, name: string): Promise<import('@itookit/common').InodeRecord | null> {
-        const tx = this.tx();
-        return new IDBInodeStore(tx.objectStore(STORE_INODES), tx.objectStore(STORE_COUNTERS)).lookup(parentIno, name);
-    }
-
-    async deleteInode(ino: number): Promise<void> {
-        const tx = this.tx('readwrite');
-        await new IDBInodeStore(tx.objectStore(STORE_INODES), tx.objectStore(STORE_COUNTERS)).deleteInode(ino);
-        await txDone(tx);
-    }
-
-    async updateInode(ino: number, updates: Partial<Pick<import('@itookit/common').InodeRecord, 'parentIno' | 'name' | 'nlink'>>): Promise<void> {
-        const tx = this.tx('readwrite');
-        await new IDBInodeStore(tx.objectStore(STORE_INODES), tx.objectStore(STORE_COUNTERS)).updateInode(ino, updates);
-        await txDone(tx);
-    }
-
-    async forEachInode(inos: number[], callback: (inode: InodeRecord, index: number) => boolean | Promise<boolean>): Promise<void> {
-        const tx = this.tx();
-        return new IDBInodeStore(tx.objectStore(STORE_INODES), tx.objectStore(STORE_COUNTERS)).forEachInode(inos, callback);
-    }
-
-    async walkTree(
-        parentIno: number,
-        callback: (inode: InodeRecord, depth: number) => boolean | 'skip' | Promise<boolean | 'skip'>,
-        options?: InodeWalkOptions,
-    ): Promise<void> {
-        const tx = this.tx();
-        return new IDBInodeStore(tx.objectStore(STORE_INODES), tx.objectStore(STORE_COUNTERS)).walkTree(parentIno, callback, options);
-    }
-
-    async hasChildren(parentIno: number): Promise<boolean> {
-        const tx = this.tx();
-        return new IDBInodeStore(tx.objectStore(STORE_INODES), tx.objectStore(STORE_COUNTERS)).hasChildren(parentIno);
-    }
-}
-
-class StandaloneMetaStore implements IMetaStore {
-    constructor(private readonly db: IDBDatabase) {}
-
-    private tx(mode: IDBTransactionMode = 'readonly'): IDBTransaction {
-        return this.db.transaction([STORE_META], mode);
-    }
-
-    private store(mode?: IDBTransactionMode): IDBMetaStore {
-        return new IDBMetaStore(this.tx(mode).objectStore(STORE_META));
-    }
-
-    async putMeta(meta: import('@itookit/common').MetaRecord): Promise<void> {
-        const tx = this.db.transaction([STORE_META], 'readwrite');
-        await new IDBMetaStore(tx.objectStore(STORE_META)).putMeta(meta);
-        await txDone(tx);
-    }
-
-    getMeta(ino: number) { return this.store().getMeta(ino); }
-
-    async deleteMeta(ino: number): Promise<void> {
-        const tx = this.db.transaction([STORE_META], 'readwrite');
-        await new IDBMetaStore(tx.objectStore(STORE_META)).deleteMeta(ino);
-        await txDone(tx);
-    }
-
-    async patchMeta(ino: number, partial: Partial<Omit<import('@itookit/common').MetaRecord, 'ino'>>): Promise<void> {
-        const tx = this.db.transaction([STORE_META], 'readwrite');
-        await new IDBMetaStore(tx.objectStore(STORE_META)).patchMeta(ino, partial);
-        await txDone(tx);
-    }
-
-    forEachMeta(inos: number[], callback: (meta: import('@itookit/common').MetaRecord, index: number) => boolean | Promise<boolean>) { return this.store().forEachMeta(inos, callback); }
-    getAllDistinctTags() { return this.store().getAllDistinctTags(); }
-    walkByTag(tag: string, callback: (ino: number) => boolean | Promise<boolean>, options?: import('@itookit/common').MetaWalkOptions) { return this.store().walkByTag(tag, callback, options); }
-    walkByMetadata(field: string, value: unknown, callback: (ino: number) => boolean | Promise<boolean>, options?: import('@itookit/common').MetaWalkOptions) { return this.store().walkByMetadata(field, value, callback, options); }
-}
-
-class StandaloneContentStore implements IContentStore {
-    constructor(private readonly db: IDBDatabase) {}
-
-    private tx(mode: IDBTransactionMode = 'readonly'): IDBObjectStore {
-        return this.db.transaction([STORE_CONTENT], mode).objectStore(STORE_CONTENT);
-    }
-
-    async putData(ref: string, data: ArrayBuffer): Promise<void> {
-        const tx = this.db.transaction([STORE_CONTENT], 'readwrite');
-        await new IDBContentStore(tx.objectStore(STORE_CONTENT)).putData(ref, data);
-        await txDone(tx);
-    }
-
-    getData(ref: string) { return new IDBContentStore(this.tx()).getData(ref); }
-    existsData(ref: string) { return new IDBContentStore(this.tx()).existsData(ref); }
-    sizeData(ref: string) { return new IDBContentStore(this.tx()).sizeData(ref); }
-    readRange(ref: string, offset: number, length: number) {
-        return new IDBContentStore(this.tx()).readRange(ref, offset, length);
-    }
-
-    async deleteData(ref: string): Promise<void> {
-        const tx = this.db.transaction([STORE_CONTENT], 'readwrite');
-        await new IDBContentStore(tx.objectStore(STORE_CONTENT)).deleteData(ref);
-        await txDone(tx);
-    }
-
-    async appendData(ref: string, data: ArrayBuffer): Promise<void> {
-        const tx = this.db.transaction([STORE_CONTENT], 'readwrite');
-        await new IDBContentStore(tx.objectStore(STORE_CONTENT)).appendData(ref, data);
-        await txDone(tx);
-    }
-}
-
-class StandaloneRecordStore implements IRecordStore {
-    constructor(private readonly db: IDBDatabase) {}
-
-    private ro(): IDBRecordStore {
-        return new IDBRecordStore(this.db.transaction([STORE_RECORDS], 'readonly').objectStore(STORE_RECORDS));
-    }
-
-    getRecordField(ino: number, field: string) { return this.ro().getRecordField(ino, field); }
-    queryRecordFields(ino: number, query: import('@itookit/common').RecordQuery, options?: import('@itookit/common').RecordQueryOptions) {
-        return this.ro().queryRecordFields(ino, query, options);
-    }
-    walkRecordFields(ino: number, callback: (field: string, value: import('@itookit/common').RecordValue) => boolean | Promise<boolean>, options?: import('@itookit/common').RecordWalkOptions) {
-        return this.ro().walkRecordFields(ino, callback, options);
-    }
-    walkRecordFieldNames(ino: number, callback: (field: string) => boolean | Promise<boolean>, options?: { prefix?: string; limit?: number }) {
-        return this.ro().walkRecordFieldNames(ino, callback, options);
-    }
-
-    async setRecordField(ino: number, field: string, value: import('@itookit/common').RecordValue): Promise<void> {
-        const tx = this.db.transaction([STORE_RECORDS], 'readwrite');
-        await new IDBRecordStore(tx.objectStore(STORE_RECORDS)).setRecordField(ino, field, value);
-        await txDone(tx);
-    }
-
-    async deleteRecordField(ino: number, field: string): Promise<void> {
-        const tx = this.db.transaction([STORE_RECORDS], 'readwrite');
-        await new IDBRecordStore(tx.objectStore(STORE_RECORDS)).deleteRecordField(ino, field);
-        await txDone(tx);
-    }
-
-    async setAllRecordFields(ino: number, fields: Record<string, import('@itookit/common').RecordValue>): Promise<void> {
-        const tx = this.db.transaction([STORE_RECORDS], 'readwrite');
-        await new IDBRecordStore(tx.objectStore(STORE_RECORDS)).setAllRecordFields(ino, fields);
-        await txDone(tx);
-    }
-
-    async clearRecordFields(ino: number): Promise<void> {
-        const tx = this.db.transaction([STORE_RECORDS], 'readwrite');
-        await new IDBRecordStore(tx.objectStore(STORE_RECORDS)).clearRecordFields(ino);
-        await txDone(tx);
-    }
-
-    createRecordIndex(ino: number, field: string) { return this.ro().createRecordIndex(ino, field); }
-    deleteRecordIndex(ino: number, field: string) { return this.ro().deleteRecordIndex(ino, field); }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Main backend
-// ─────────────────────────────────────────────────────────────────────────────
-
 export class IndexedDBBackend implements IStorageBackend {
     readonly name = 'indexeddb';
-
-    readonly inodes: IInodeStore;
-    readonly meta: IMetaStore;
-    readonly content: IContentStore;
     readonly records: IRecordStore;
-
     private db: IDBDatabase | null = null;
     private readonly dbName: string;
 
-    constructor(options?: IndexedDBBackendOptions) {
-        this.dbName = options?.dbName ?? 'vfs';
-
-        // Placeholder stores — replaced in init() with live instances.
-        // Use Promise.reject so callers can use .rejects in async tests.
-        const noDb = (): Promise<never> => Promise.reject(
-            new Error('IndexedDBBackend not initialized — call init() first'),
-        );
-        this.inodes = { allocateIno: noDb, putInode: noDb, getInode: noDb, lookup: noDb, forEachInode: noDb, deleteInode: noDb, updateInode: noDb, walkTree: noDb, hasChildren: noDb };
-        this.meta = { putMeta: noDb, getMeta: noDb, deleteMeta: noDb, patchMeta: noDb, forEachMeta: noDb, getAllDistinctTags: noDb, walkByTag: noDb, walkByMetadata: noDb };
-        this.content = { putData: noDb, getData: noDb, deleteData: noDb, existsData: noDb, sizeData: noDb };
-        this.records = { getRecordField: noDb, setRecordField: noDb, deleteRecordField: noDb, setAllRecordFields: noDb, clearRecordFields: noDb, createRecordIndex: noDb, deleteRecordIndex: noDb, queryRecordFields: noDb, walkRecordFields: noDb, walkRecordFieldNames: noDb };
+    constructor(options: IndexedDBBackendOptions = {}) {
+        this.dbName = options.dbName ?? 'MindOS-v4';
+        this.records = new LazyRecordStore(() => this._db());
     }
 
-    async init(): Promise<void> {
-        if (this.db) return;
+    // ══ Lifecycle ═════════════════════════════════════════════════
 
-        this.db = await openDB(this.dbName, DB_VERSION, (db, oldVersion) => {
-            if (oldVersion < 1) {
-                createInodeStore(db);
-                createCounterStore(db);
-                createMetaStore(db);
-                createContentStore(db);
+    async init(): Promise<void> {
+        this.db = await openDB(this.dbName, DB_VERSION, (db) => {
+            if (!db.objectStoreNames.contains(STORE_NODES)) {
+                const nodes = db.createObjectStore(STORE_NODES, { keyPath: 'path' });
+                nodes.createIndex('type', 'type');
+                nodes.createIndex('modifiedAt', 'modifiedAt');
+            }
+            if (!db.objectStoreNames.contains(STORE_TAGS)) {
+                const tags = db.createObjectStore(STORE_TAGS, { keyPath: 'id', autoIncrement: true });
+                tags.createIndex('tag', 'tag');
+                tags.createIndex('path', 'path');
+            }
+            if (!db.objectStoreNames.contains(STORE_RECORDS)) {
                 createRecordStore(db);
             }
-        });
-
-        // Seed the ino counter if this is a fresh database
-        await this.seedCounter();
-
-        // Replace placeholder stores with live instances
-        const db = this.db;
-        Object.assign(this, {
-            inodes: new StandaloneInodeStore(db),
-            meta: new StandaloneMetaStore(db),
-            content: new StandaloneContentStore(db),
-            records: new StandaloneRecordStore(db),
         });
     }
 
@@ -318,52 +61,278 @@ export class IndexedDBBackend implements IStorageBackend {
         this.db = null;
     }
 
-    async runInTransaction<T>(
-        mode: 'readonly' | 'readwrite',
-        fn: (scope: ITransactionScope) => Promise<T>,
-    ): Promise<T> {
-        const db = this.assertOpen();
-        const idbMode = mode === 'readwrite' ? 'readwrite' : 'readonly';
-        const tx = db.transaction([...ALL_STORES], idbMode);
-
-        // Register completion handlers BEFORE starting the async work so
-        // oncomplete is never missed even if fn() resolves synchronously.
-        const done = txDone(tx);
-        const scope = makeTxScope(tx);
-
-        try {
-            const result = await fn(scope);
-            await done;
-            return result;
-        } catch (e) {
-            try { tx.abort(); } catch { /* already completed or aborted */ }
-            // Suppress the AbortError that txDone will emit after tx.abort() —
-            // we are already throwing the original error below.
-            done.catch(() => { /* swallow AbortError */ });
-            throw e;
-        }
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // Helpers
-    // ─────────────────────────────────────────────────────────────────────────
-
-    private assertOpen(): IDBDatabase {
-        if (!this.db) throw new Error('IndexedDBBackend is not open — call init() first');
+    private _db(): IDBDatabase {
+        if (!this.db) throw new Error('IndexedDBBackend not initialized');
         return this.db;
     }
 
-    private async seedCounter(): Promise<void> {
-        const db = this.db!;
-        const tx = db.transaction([STORE_COUNTERS], 'readwrite');
-        const store = tx.objectStore(STORE_COUNTERS);
-        const existing = await req<{ name: string; value: number } | undefined>(
-            store.get(COUNTER_INO),
-        );
-        if (!existing) {
-            // Seed with ROOT_INO so allocateIno() returns ROOT_INO + 1 = 2 first
-            await req(store.put({ name: COUNTER_INO, value: ROOT_INO }));
-        }
-        await txDone(tx);
+    // ══ Structure ════════════════════════════════════════════════
+
+    async stat(path: string): Promise<FSNode | null> {
+        const entry = await this._getEntry(path);
+        return entry ? toFSNode(entry) : null;
     }
+
+    async list(dirPath: string): Promise<FSNode[]> {
+        const prefix = dirPath === '/' ? '/' : dirPath + '/';
+        const db = this._db();
+        const tx = db.transaction(STORE_NODES, 'readonly');
+        const entries = await collectCursor<NodeEntry>(
+            tx.objectStore(STORE_NODES).openCursor(),
+            (c) => c.value,
+        );
+        const seen = new Set<string>();
+        return entries
+            .filter(e => {
+                if (e.path === dirPath || !e.path.startsWith(prefix)) return false;
+                const rest = e.path.slice(prefix.length);
+                if (rest.includes('/')) return false;
+                if (seen.has(e.path)) return false;
+                seen.add(e.path);
+                return true;
+            })
+            .map(toFSNode);
+    }
+
+    async mkdir(path: string): Promise<FSNode> {
+        const existing = await this._getEntry(path);
+        if (existing) return toFSNode(existing);
+        const entry: NodeEntry = {
+            path, type: 'directory', content: new ArrayBuffer(0),
+            size: 0, createdAt: Date.now(), modifiedAt: Date.now(),
+            tags: [], metadata: '{}',
+        };
+        await this._putEntry(entry);
+        return toFSNode(entry);
+    }
+
+    async delete(path: string, options?: { recursive?: boolean }): Promise<void> {
+        const db = this._db();
+        const tx = db.transaction([STORE_NODES, STORE_TAGS], 'readwrite');
+        const nodes = tx.objectStore(STORE_NODES);
+
+        if (options?.recursive) {
+            const prefix = path === '/' ? '/' : path + '/';
+            const all = await collectCursor<NodeEntry>(nodes.openCursor(), c => c.value);
+            for (const e of all) {
+                if (e.path.startsWith(prefix)) {
+                    nodes.delete(e.path);
+                    await this._deleteTagRefs(tx, e.path);
+                }
+            }
+        }
+        nodes.delete(path);
+        await this._deleteTagRefs(tx, path);
+    }
+
+    async rename(fromPath: string, toPath: string): Promise<void> {
+        const entry = await this._getEntry(fromPath);
+        if (!entry) return;
+        const fromPrefix = fromPath + '/';
+        const toPrefix = toPath + '/';
+        const db = this._db();
+        const tx = db.transaction(STORE_NODES, 'readwrite');
+        const nodes = tx.objectStore(STORE_NODES);
+
+        const all = await collectCursor<NodeEntry>(nodes.openCursor(), c => c.value);
+        for (const e of all) {
+            if (e.path === fromPath) {
+                nodes.delete(fromPath);
+                await req(nodes.add({ ...entry, path: toPath, modifiedAt: Date.now() }));
+            } else if (e.path.startsWith(fromPrefix)) {
+                const newChildPath = toPrefix + e.path.slice(fromPrefix.length);
+                nodes.delete(e.path);
+                await req(nodes.add({ ...e, path: newChildPath, modifiedAt: Date.now() }));
+            }
+        }
+    }
+
+    // ══ Content ══════════════════════════════════════════════════
+
+    async read(path: string, options?: { offset?: number; length?: number }): Promise<Uint8Array> {
+        const entry = await this._getEntry(path);
+        if (!entry) throw new Error(`ENOENT: ${path}`);
+        const data = new Uint8Array(entry.content);
+        if (options?.offset !== undefined) {
+            return data.slice(options.offset, options.length ? options.offset + options.length : undefined);
+        }
+        return data;
+    }
+
+    async write(path: string, content: Uint8Array): Promise<FSNode> {
+        const existing = await this._getEntry(path);
+        const entry: NodeEntry = {
+            path,
+            type: existing?.type ?? 'file',
+            content: content.buffer as ArrayBuffer,
+            size: content.byteLength,
+            createdAt: existing?.createdAt ?? Date.now(),
+            modifiedAt: Date.now(),
+            icon: existing?.icon,
+            tags: existing?.tags ?? [],
+            metadata: existing?.metadata ?? '{}',
+        };
+        await this._putEntry(entry);
+        return toFSNode(entry);
+    }
+
+    // ══ Metadata ═════════════════════════════════════════════════
+
+    async updateMetadata(path: string, metadata: Record<string, unknown>): Promise<void> {
+        const entry = await this._getEntry(path);
+        if (!entry) return;
+        const existing = JSON.parse(entry.metadata);
+        entry.metadata = JSON.stringify({ ...existing, ...metadata });
+        entry.modifiedAt = Date.now();
+        await this._putEntry(entry);
+    }
+
+    async setTags(path: string, tags: string[]): Promise<void> {
+        const entry = await this._getEntry(path);
+        if (!entry) return;
+        entry.tags = tags;
+        entry.modifiedAt = Date.now();
+        await this._putEntry(entry);
+        await this._syncTags(path, tags);
+    }
+
+    async getAllTags(): Promise<string[]> {
+        const db = this._db();
+        const tx = db.transaction(STORE_TAGS, 'readonly');
+        const rows = await collectCursor<{ tag: string }>(tx.objectStore(STORE_TAGS).index('tag').openCursor(), c => c.value);
+        return [...new Set(rows.map(r => r.tag))];
+    }
+
+    // ══ Search ═══════════════════════════════════════════════════
+
+    async search(query: FSSearchQuery): Promise<FSNode[]> {
+        const db = this._db();
+        const tx = db.transaction(STORE_NODES, 'readonly');
+        const entries = await collectCursor<NodeEntry>(tx.objectStore(STORE_NODES).openCursor(), c => c.value);
+        return entries
+            .filter(e => {
+                if (query.type && e.type !== query.type) return false;
+                const name = e.path.split('/').pop() ?? '';
+                if (query.name?.contains && !name.toLowerCase().includes(query.name.contains.toLowerCase())) return false;
+                return true;
+            })
+            .map(toFSNode)
+            .slice(0, query.limit ?? 50);
+    }
+
+    // ══ Transaction ══════════════════════════════════════════════
+
+    async transaction<T>(fn: (tx: IStorageBackend) => Promise<T>): Promise<T> {
+        return fn(this);
+    }
+
+    // ══ Internal ═════════════════════════════════════════════════
+
+    private async _getEntry(path: string): Promise<NodeEntry | null> {
+        const db = this._db();
+        const tx = db.transaction(STORE_NODES, 'readonly');
+        return req<NodeEntry | undefined>(tx.objectStore(STORE_NODES).get(path)).then(r => r ?? null);
+    }
+
+    private async _putEntry(entry: NodeEntry): Promise<void> {
+        const db = this._db();
+        const tx = db.transaction(STORE_NODES, 'readwrite');
+        await req(tx.objectStore(STORE_NODES).put(entry));
+    }
+
+    private async _syncTags(path: string, tags: string[]): Promise<void> {
+        const db = this._db();
+        const tx = db.transaction(STORE_TAGS, 'readwrite');
+        const store = tx.objectStore(STORE_TAGS);
+        const idx = store.index('path');
+        const existing = await collectCursor<{ id: number }>(idx.openCursor(IDBKeyRange.only(path)), c => c.value);
+        for (const e of existing) store.delete(e.id);
+        for (const tag of tags) await req(store.add({ path, tag }));
+    }
+
+    private async _deleteTagRefs(tx: IDBTransaction, path: string): Promise<void> {
+        const store = tx.objectStore(STORE_TAGS);
+        const idx = store.index('path');
+        const existing = await collectCursor<{ id: number }>(idx.openCursor(IDBKeyRange.only(path)), c => c.value);
+        for (const e of existing) store.delete(e.id);
+    }
+}
+
+// ── FSNode Factory ─────────────────────────────────────────────────
+
+// ══ Lazy Record Store — wraps IDBRecordStore with per-op short-lived IDB tx ══
+
+class LazyRecordStore implements IRecordStore {
+    constructor(private readonly getDB: () => IDBDatabase) {}
+
+    private store(): IDBObjectStore {
+        const tx = this.getDB().transaction(STORE_RECORDS, 'readwrite');
+        return tx.objectStore(STORE_RECORDS);
+    }
+
+    private roStore(): IDBObjectStore {
+        const tx = this.getDB().transaction(STORE_RECORDS, 'readonly');
+        return tx.objectStore(STORE_RECORDS);
+    }
+
+    async getRecordField(ino: number, field: string) {
+        return new IDBRecordStore(this.roStore()).getRecordField(ino, field);
+    }
+    async setRecordField(ino: number, field: string, value: import('@itookit/common').RecordValue) {
+        return new IDBRecordStore(this.store()).setRecordField(ino, field, value);
+    }
+    async deleteRecordField(ino: number, field: string) {
+        return new IDBRecordStore(this.store()).deleteRecordField(ino, field);
+    }
+    async setAllRecordFields(ino: number, fields: Record<string, import('@itookit/common').RecordValue>) {
+        return new IDBRecordStore(this.store()).setAllRecordFields(ino, fields);
+    }
+    async clearRecordFields(ino: number) {
+        return new IDBRecordStore(this.store()).clearRecordFields(ino);
+    }
+    async walkRecordFields(ino: number, cb: any, opts?: any) {
+        return new IDBRecordStore(this.roStore()).walkRecordFields(ino, cb, opts);
+    }
+    async walkRecordFieldNames(ino: number, cb: any, opts?: any) {
+        return new IDBRecordStore(this.roStore()).walkRecordFieldNames(ino, cb, opts);
+    }
+    async createRecordIndex(ino: number, field: string) {
+        return new IDBRecordStore(this.store()).createRecordIndex(ino, field);
+    }
+    async deleteRecordIndex(ino: number, field: string) {
+        return new IDBRecordStore(this.store()).deleteRecordIndex(ino, field);
+    }
+    async queryRecordFields(ino: number, query: import('@itookit/common').RecordQuery, opts?: import('@itookit/common').RecordQueryOptions) {
+        return new IDBRecordStore(this.roStore()).queryRecordFields(ino, query, opts);
+    }
+}
+
+function toFSNode(entry: NodeEntry): FSNode {
+    const name = entry.path === '/' ? '' : entry.path.split('/').pop()!;
+    const parentPath = entry.path === '/' ? null : entry.path.substring(0, entry.path.lastIndexOf('/')) || '/';
+    const base = {
+        id: entry.path,
+        parentId: parentPath,
+        name,
+        path: entry.path,
+        createdAt: entry.createdAt,
+        modifiedAt: entry.modifiedAt,
+        version: Math.floor(entry.modifiedAt),
+        nlink: 1,
+        icon: entry.icon,
+        tags: entry.tags,
+        metadata: JSON.parse(entry.metadata) as Record<string, unknown>,
+    };
+
+    if (entry.type === 'directory') {
+        return { ...base, type: 'directory' } as FSDirectoryNode;
+    }
+
+    return {
+        ...base,
+        type: 'file',
+        size: entry.size,
+        contentHash: undefined,
+        assetDirId: undefined,
+    } as FSFileNode;
 }

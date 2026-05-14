@@ -1,122 +1,64 @@
 /**
- * @file llmdriver-indexeddb/src/utils.ts
- * @desc IndexedDB promise helpers and shared constants
+ * @file vfsdriver-indexeddb/src/utils.ts
+ * v4.1: path-based IDB stores. Single nodes store replaces inodes/meta/content split.
  */
 
-/** Object store names used by this backend. */
-export const STORE_INODES = 'inodes';
-export const STORE_META = 'meta';
-export const STORE_CONTENT = 'content';
+export const STORE_NODES = 'nodes';
 export const STORE_RECORDS = 'records';
-export const STORE_COUNTERS = '_counters';
+export const STORE_TAGS = 'tags';
 
-export const ALL_STORES = [
-    STORE_INODES,
-    STORE_META,
-    STORE_CONTENT,
-    STORE_RECORDS,
-    STORE_COUNTERS,
-] as const;
+export const ALL_STORES = [STORE_NODES, STORE_RECORDS, STORE_TAGS] as const;
+export const DB_VERSION = 2;
 
-/** Current database schema version. Bump when adding stores or indexes. */
-export const DB_VERSION = 1;
+// ── IDB Promise Wrappers ────────────────────────────────────────────
 
-/** Reserved ino for the filesystem root. */
-export const ROOT_INO = 1;
-
-/** Counter key name for the inode allocator. */
-export const COUNTER_INO = 'ino';
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Promise wrappers
-// ─────────────────────────────────────────────────────────────────────────────
-
-/** Wrap an IDBRequest in a Promise. */
-export function req<T>(request: IDBRequest<T>): Promise<T> {
-    return new Promise<T>((resolve, reject) => {
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
-    });
-}
-
-/** Wrap an IDBOpenDBRequest in a Promise, applying the upgrade handler. */
-export function openDB(
-    name: string,
-    version: number,
-    upgrade: (db: IDBDatabase, oldVersion: number) => void,
-): Promise<IDBDatabase> {
-    return new Promise<IDBDatabase>((resolve, reject) => {
+export function openDB(name: string, version: number, upgrade: (db: IDBDatabase) => void): Promise<IDBDatabase> {
+    return new Promise((resolve, reject) => {
         const request = indexedDB.open(name, version);
-        request.onupgradeneeded = (event) => {
-            upgrade(request.result, event.oldVersion);
-        };
+        request.onupgradeneeded = () => upgrade(request.result);
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error);
-        request.onblocked = () => reject(new Error(`IndexedDB blocked: ${name}`));
     });
 }
 
-/** Wait for an IDBTransaction to complete. */
 export function txDone(tx: IDBTransaction): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
+    return new Promise((resolve, reject) => {
         tx.oncomplete = () => resolve();
         tx.onerror = () => reject(tx.error);
-        tx.onabort = () => reject(new DOMException('Transaction aborted', 'AbortError'));
+        tx.onabort = () => reject(tx.error);
     });
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Cursor helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
-/** Iterate a cursor and collect all values. */
-export function collectCursor<T>(request: IDBRequest<IDBCursorWithValue | null>): Promise<T[]> {
-    return new Promise<T[]>((resolve, reject) => {
-        const results: T[] = [];
-        request.onsuccess = () => {
-            const cursor = request.result;
-            if (cursor) {
-                results.push(cursor.value as T);
-                cursor.continue();
-            } else {
-                resolve(results);
-            }
-        };
+export function req<T>(request: IDBRequest<T>): Promise<T> {
+    return new Promise((resolve, reject) => {
+        request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error);
     });
 }
 
-/** Iterate a cursor and collect only keys. */
-export function collectKeyCursor(request: IDBRequest<IDBCursor | null>): Promise<IDBValidKey[]> {
-    return new Promise<IDBValidKey[]>((resolve, reject) => {
-        const keys: IDBValidKey[] = [];
-        request.onsuccess = () => {
-            const cursor = request.result;
-            if (cursor) {
-                keys.push(cursor.key);
-                cursor.continue();
-            } else {
-                resolve(keys);
-            }
-        };
-        request.onerror = () => reject(request.error);
+export async function deleteCursor(req: IDBRequest<IDBCursorWithValue | null>): Promise<void> {
+    const cursor = await new Promise<IDBCursorWithValue | null>((resolve, reject) => {
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
     });
+    if (cursor) {
+        cursor.delete();
+        cursor.continue();
+        await deleteCursor(req);
+    }
 }
 
-/** Delete all records matching a cursor request. */
-export function deleteCursor(request: IDBRequest<IDBCursorWithValue | null>): Promise<number> {
-    return new Promise<number>((resolve, reject) => {
-        let count = 0;
-        request.onsuccess = () => {
-            const cursor = request.result;
-            if (cursor) {
-                cursor.delete();
-                count++;
-                cursor.continue();
-            } else {
-                resolve(count);
-            }
+export function collectCursor<T>(
+    req: IDBRequest<IDBCursorWithValue | null>,
+    mapper: (cursor: IDBCursorWithValue) => T,
+): Promise<T[]> {
+    const results: T[] = [];
+    return new Promise((resolve, reject) => {
+        req.onsuccess = () => {
+            const cursor = req.result;
+            if (cursor) { results.push(mapper(cursor)); cursor.continue(); }
+            else resolve(results);
         };
-        request.onerror = () => reject(request.error);
+        req.onerror = () => reject(req.error);
     });
 }

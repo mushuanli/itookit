@@ -49,7 +49,7 @@ export class AssetResolverPlugin implements MDxPlugin {
             const name = rawUrl.slice('@asset/'.length);
 
             resolvePromises.push(
-                fileIO.getAsset(name).then((data) => {
+                fileIO.asset(name).read().then((data) => {
                     if (!data) return;
                     const mimeType = guessMimeType(name);
                     const blobUrl = URL.createObjectURL(new Blob([data], { type: mimeType }));
