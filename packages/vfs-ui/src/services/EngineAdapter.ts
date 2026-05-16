@@ -186,13 +186,22 @@ export class EngineAdapter {
                     break;
                 }
                 case 'node:renamed': {
-                    const data = payload as { nodes?: Array<{ nodeId: string }> };
+                    const data = payload as { nodes?: Array<{ nodeId: string; oldPath?: string; newPath?: string }> };
+                    const oldIds: string[] = [];
                     data.nodes?.forEach(n => {
-                        if (n.nodeId) {
-                            this.queues.update.add(n.nodeId);
-                            adapterDEBUG.queued('update', n.nodeId, this.queues.update.size);
+                        if (n.newPath ?? n.nodeId) {
+                            this.queues.update.add(n.newPath ?? n.nodeId);
+                            adapterDEBUG.queued('update', n.newPath ?? n.nodeId, this.queues.update.size);
+                        }
+                        if (n.oldPath) {
+                            oldIds.push(n.oldPath);
                         }
                     });
+                    // Immediately remove old nodes so they don't linger as dead entries
+                    if (oldIds.length) {
+                        adapterDEBUG.dispatch('ITEM_DELETE_SUCCESS', `rename-old ids=[${oldIds.join(',')}]`);
+                        this.store.dispatch({ type: 'ITEM_DELETE_SUCCESS', payload: { itemIds: oldIds } });
+                    }
                     if (this.queues.update.size) scheduleProcess(this.queues.update, 'update', 50);
                     break;
                 }
