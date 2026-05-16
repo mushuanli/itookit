@@ -114,11 +114,13 @@ export class VFSEngine {
 
     private async bootstrap(): Promise<void> {
         // Ensure root and system directories exist
-        if (!(this._inc('stat'); await this.backend.stat('/'))) {
+        this._inc('stat');
+        if (!(await this.backend.stat('/'))) {
             this._inc('mkdir'); await this.backend.mkdir('/');
         }
         for (const dirName of SYSTEM_DIRS) {
-            if (!(this._inc('stat'); await this.backend.stat(`/${dirName}`))) {
+            this._inc('stat');
+            if (!(await this.backend.stat(`/${dirName}`))) {
                 this._inc('mkdir'); await this.backend.mkdir(`/${dirName}`);
             }
         }
@@ -129,7 +131,7 @@ export class VFSEngine {
     /** Stat a path (throws if not found) */
     async stat(path: string): Promise<import('@itookit/common').FSNode> {
         const { backend, localPath, mountPath } = this.resolveStore(path);
-        const node = this._inc('stat'); await backend.stat(localPath === '/' ? '/' : localPath);
+        this._inc('stat'); const node = await backend.stat(localPath === '/' ? '/' : localPath);
         if (!node) throw new FSError('ENOENT', 'not found', 'stat', path);
         return this.mapToSystemNode(node, mountPath);
     }
@@ -145,7 +147,7 @@ export class VFSEngine {
     async ensureModuleDir(moduleName: string): Promise<void> {
         const path = `/module/${moduleName}`;
         const { backend, localPath } = this.resolveStore(path);
-        const existing = this._inc('stat'); await backend.stat(localPath);
+        this._inc('stat'); const existing = await backend.stat(localPath);
         if (existing) return;
         this._inc('mkdir'); await backend.mkdir(localPath);
     }
@@ -153,7 +155,7 @@ export class VFSEngine {
     async removeModuleDir(moduleName: string): Promise<void> {
         const path = `/module/${moduleName}`;
         const { backend, localPath } = this.resolveStore(path);
-        const existing = this._inc('stat'); await backend.stat(localPath);
+        this._inc('stat'); const existing = await backend.stat(localPath);
         if (!existing) return;
         this._inc('delete'); await backend.delete(localPath, { recursive: true });
     }
@@ -163,7 +165,7 @@ export class VFSEngine {
     async readBySystemPath(systemPath: string): Promise<FileContent> {
         const { backend, localPath } = this.resolveStore(systemPath);
         try {
-            const data = this._inc('read'); await backend.read(localPath);
+            this._inc('read'); const data = await backend.read(localPath);
             return toString(data.buffer as ArrayBuffer);
         } catch {
             return '';
@@ -172,11 +174,11 @@ export class VFSEngine {
 
     async readContent(path: string): Promise<ArrayBuffer> {
         const { backend, localPath } = this.resolveStore(path);
-        const node = this._inc('stat'); await backend.stat(localPath);
+        this._inc('stat'); const node = await backend.stat(localPath);
         if (!node) throw new FSError('ENOENT', 'not found', 'read', path);
         if (node.type === 'directory') throw new FSError('EISDIR', 'cannot read directory', 'read', path);
         try {
-            const data = this._inc('read'); await backend.read(localPath);
+            this._inc('read'); const data = await backend.read(localPath);
             return (data as Uint8Array).buffer as ArrayBuffer;
         } catch {
             return new ArrayBuffer(0);
@@ -196,7 +198,7 @@ export class VFSEngine {
 
         if (options?.mode === 'append') {
             try {
-                const existing = this._inc('read'); await backend.read(localPath);
+                this._inc('read'); const existing = await backend.read(localPath);
                 const merged = new Uint8Array(existing.byteLength + buf.byteLength);
                 merged.set(new Uint8Array(existing), 0);
                 merged.set(buf, existing.byteLength);
@@ -228,19 +230,19 @@ export class VFSEngine {
         const fullPath = parentLocal === '/' ? `/${name}` : `${parentLocal}/${name}`;
 
         if (!opts?.overwrite) {
-            const existing = this._inc('stat'); await backend.stat(fullPath);
+            this._inc('stat'); const existing = await backend.stat(fullPath);
             if (existing) throw new FSAlreadyExistsError(name, parentPath);
         }
 
         if (type === 'directory') {
-            const node = this._inc('mkdir'); await backend.mkdir(fullPath);
-            if (metadata) this._inc('metadata'); await backend.updateMetadata(fullPath, metadata);
+            this._inc('mkdir'); const node = await backend.mkdir(fullPath);
+            if (metadata) { this._inc('metadata'); await backend.updateMetadata(fullPath, metadata); }
             return this.mapToSystemNode(node, mountPath);
         }
 
         const raw = content ? toBuffer(content) : new Uint8Array(0);
         const buf = raw instanceof Uint8Array ? raw : new Uint8Array(raw);
-        const node = this._inc('write'); await backend.write(fullPath, buf);
+        this._inc('write'); const node = await backend.write(fullPath, buf);
         if (metadata) this._inc('metadata'); await backend.updateMetadata(fullPath, metadata);
         return this.mapToSystemNode(node, mountPath);
     }
@@ -257,7 +259,7 @@ export class VFSEngine {
 
     async delete(path: string, options?: DeleteOptions): Promise<void> {
         const { backend, localPath } = this.resolveStore(path);
-        const node = this._inc('stat'); await backend.stat(localPath);
+        this._inc('stat'); const node = await backend.stat(localPath);
         if (!node) {
             if (options?.force) return;
             throw new FSError('ENOENT', 'not found', 'delete', path);
@@ -282,7 +284,7 @@ export class VFSEngine {
         const dir = P.dirname(localPath);
         const newPath = dir === '/' ? `/${newName}` : `${dir}/${newName}`;
 
-        const existing = this._inc('stat'); await backend.stat(newPath);
+        this._inc('stat'); const existing = await backend.stat(newPath);
         if (existing) throw new FSAlreadyExistsError(newName, dir);
 
         this._inc('rename'); await backend.rename(localPath, newPath);
@@ -320,7 +322,7 @@ export class VFSEngine {
 
     async listChildren(path: string): Promise<import('@itookit/common').FSNode[]> {
         const { backend, localPath, mountPath } = this.resolveStore(path);
-        const nodes = this._inc('list'); await backend.list(localPath === '/' ? '/' : localPath);
+        this._inc('list'); const nodes = await backend.list(localPath === '/' ? '/' : localPath);
         return nodes.map(n => this.mapToSystemNode(n, mountPath));
     }
 
@@ -338,7 +340,7 @@ export class VFSEngine {
         const fullPath = parentLocal === '/' ? `/${name}` : `${parentLocal}/${name}`;
         if (!backend.symlink) throw new FSCapabilityError('symlinks', 'engine');
         await backend.symlink(fullPath, target);
-        const node = this._inc('stat'); await backend.stat(fullPath);
+        this._inc('stat'); const node = await backend.stat(fullPath);
         if (!node) throw new FSError('EIO', 'symlink created but not found', 'symlink', fullPath);
         return this.mapToSystemNode(node, mountPath);
     }
@@ -357,7 +359,7 @@ export class VFSEngine {
         const name = nameFromPath(localPath);
         const assetDirName = toAssetDirName(name);
         const assetPath = parentDir === '/' ? `/${assetDirName}` : `${parentDir}/${assetDirName}`;
-        const exists = this._inc('stat'); await backend.stat(assetPath);
+        this._inc('stat'); const exists = await backend.stat(assetPath);
         return exists ? assetPath : null;
     }
 
@@ -368,7 +370,7 @@ export class VFSEngine {
         const assetDirName = toAssetDirName(name);
         const assetPath = parentDir === '/' ? `/${assetDirName}` : `${parentDir}/${assetDirName}`;
 
-        const existing = this._inc('stat'); await backend.stat(assetPath);
+        this._inc('stat'); const existing = await backend.stat(assetPath);
         if (existing) return assetPath;
 
         this._inc('mkdir'); await backend.mkdir(assetPath);
@@ -394,7 +396,7 @@ export class VFSEngine {
     ): Promise<void> {
         if (query.limit && results.length >= query.limit) return;
         try {
-            const children = this._inc('list'); await backend.list(dirPath);
+            this._inc('list'); const children = await backend.list(dirPath);
             for (const child of children) {
                 if (query.limit && results.length >= query.limit) break;
                 if (matchSearch(child, query)) results.push(child);
@@ -413,7 +415,7 @@ export class VFSEngine {
         let current = '';
         for (const seg of parts) {
             current += '/' + seg;
-            const exists = this._inc('stat'); await backend.stat(current);
+            this._inc('stat'); const exists = await backend.stat(current);
             if (!exists) {
                 this._inc('mkdir'); await backend.mkdir(current);
             }
@@ -440,7 +442,7 @@ export class VFSEngine {
         options?: { includeHidden?: boolean; includeAssetDirs?: boolean },
     ): Promise<number> {
         let count = 0;
-        const children = this._inc('list'); await backend.list(path === '/' ? '/' : path);
+        this._inc('list'); const children = await backend.list(path === '/' ? '/' : path);
         for (const child of children) {
             if (!options?.includeHidden && child.name.startsWith('.')) continue;
             if (!options?.includeAssetDirs && child.name.startsWith('_')) continue;
