@@ -4,12 +4,14 @@
  */
 
 import type { IDeviceDriver, IDeviceManager } from '@itookit/common';
-import { FSDeviceNotFoundError, FSAlreadyExistsError } from '@itookit/common';
+import { FSDeviceNotFoundError, FSAlreadyExistsError, FSDeviceFrozenError } from '@itookit/common';
 
 export class DeviceRegistry implements IDeviceManager {
     private readonly drivers = new Map<string, IDeviceDriver>();
+    private _frozen = false;
 
     register(driver: IDeviceDriver): void {
+        if (this._frozen) throw new FSDeviceFrozenError('register');
         if (this.drivers.has(driver.handlerId)) {
             throw new FSAlreadyExistsError(driver.handlerId, 'device:register');
         }
@@ -17,6 +19,7 @@ export class DeviceRegistry implements IDeviceManager {
     }
 
     unregister(handlerId: string): void {
+        if (this._frozen) throw new FSDeviceFrozenError('unregister');
         this.drivers.delete(handlerId);
     }
 
@@ -36,6 +39,14 @@ export class DeviceRegistry implements IDeviceManager {
         return [...this.drivers.keys()];
     }
 
+    freeze(): void {
+        this._frozen = true;
+    }
+
+    isFrozen(): boolean {
+        return this._frozen;
+    }
+
     async initAll(): Promise<void> {
         for (const driver of this.drivers.values()) {
             await driver.init?.();
@@ -47,5 +58,6 @@ export class DeviceRegistry implements IDeviceManager {
             await driver.dispose?.();
         }
         this.drivers.clear();
+        this._frozen = false;
     }
 }

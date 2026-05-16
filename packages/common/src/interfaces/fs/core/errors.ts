@@ -31,6 +31,7 @@ export type FSErrorCode =
     | 'ERESERVED'
     | 'ETYPEMISMATCH'
     | 'EDEVNOTFOUND'
+    | 'EFROZEN'
     | 'EINTERNAL';
 
 export class FSError extends Error {
@@ -172,5 +173,12 @@ export class FSDeviceNotFoundError extends FSError {
     constructor(handlerId: string) {
         super('EDEVNOTFOUND', `device driver '${handlerId}' not found`);
         this.name = 'FSDeviceNotFoundError';
+    }
+}
+
+export class FSDeviceFrozenError extends FSError {
+    constructor(operation?: string) {
+        super('EFROZEN', 'device registry is frozen — no new registrations allowed', operation);
+        this.name = 'FSDeviceFrozenError';
     }
 }

@@ -235,6 +235,12 @@ export class VFSManager implements IVFSManager {
 
         const moduleInfo = this.modules.get(moduleName)!;
         const { mount } = this.mounts.router.resolve(`/module/${moduleName}`);
+        // Resolve systemFS for non-system modules so openDevice can inject
+        // it into DeviceContext, allowing device drivers to proxy /etc hidden files.
+        const systemFS = moduleInfo.isSystem
+            ? undefined
+            : this.getEngine(CONFIG_MODULE);
+
         const deps: ModuleFSDeps = {
             moduleId: moduleName,
             engine: this.engine,
@@ -244,6 +250,7 @@ export class VFSManager implements IVFSManager {
             devices: this.engine.devices,
             mountId: mount.mountId,
             isSystem: moduleInfo.isSystem,
+            systemFS,
         };
         const fs = new ModuleFS(deps);
         fs.init().catch(() => {}); // lazy init
