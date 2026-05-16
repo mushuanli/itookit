@@ -8,16 +8,35 @@ export const STORE_RECORDS = 'records';
 export const STORE_TAGS = 'tags';
 
 export const ALL_STORES = [STORE_NODES, STORE_RECORDS, STORE_TAGS] as const;
+export const REQUIRED_STORES = [STORE_NODES, STORE_TAGS, STORE_RECORDS] as readonly string[];
 export const DB_VERSION = 2;
 
 // ── IDB Promise Wrappers ────────────────────────────────────────────
 
 export function openDB(name: string, version: number, upgrade: (db: IDBDatabase) => void): Promise<IDBDatabase> {
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open(name, version);
-        request.onupgradeneeded = () => upgrade(request.result);
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
+        let isRetry = false;
+        const attempt = () => {
+            const request = indexedDB.open(name, version);
+            request.onupgradeneeded = () => upgrade(request.result);
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => {
+                if (isRetry) {
+                    reject(request.error ?? new Error('Failed to open IndexedDB'));
+                    return;
+                }
+                isRetry = true;
+                const deleteReq = indexedDB.deleteDatabase(name);
+                deleteReq.onsuccess = () => attempt();
+                deleteReq.onerror = () => reject(request.error ?? new Error('Failed to delete corrupted database'));
+                deleteReq.onblocked = () => {
+                    // Blocked by another connection — retry anyway,
+                    // the blocking connection may close shortly.
+                    attempt();
+                };
+            };
+        };
+        attempt();
     });
 }
 
