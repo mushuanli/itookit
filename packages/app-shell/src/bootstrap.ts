@@ -293,6 +293,16 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
             })),
     });
 
+    // Helper to dump VFS I/O counters (for identifying redundant reads/writes)
+    const logIO = (label: string) => {
+        try {
+            const s = (vfs as any)._engine?.ioStats;
+            if (s) console.log(`[Boot]   ↳ IO after ${label}: stat=${s.stat} list=${s.list} read=${s.read} write=${s.write} mkdir=${s.mkdir} delete=${s.delete} rename=${s.rename}`);
+            (vfs as any)._engine?.resetIOStats();
+        } catch { /* ignore */ }
+    };
+    logIO('createVFS');
+
     // ── 2. LLM device driver ───────────────────────────────────────────────────
 
     logStep('加载 LLM 驱动…');
@@ -306,6 +316,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     console.log(`[Boot]   ↳ createDeviceNodes: +${(performance.now() - ts).toFixed(0)}ms`);
     setKernelDeviceManager(vfs.devices);
     vfs.devices.freeze();
+    logIO('LLM driver');
 
     // ── 3. Core services ───────────────────────────────────────────────────────
 
@@ -342,6 +353,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
         await harness.skillService.setCwd(cwd).catch(() => {});
         console.log(`[Boot]   ↳ setCwd: +${(performance.now() - ts).toFixed(0)}ms`);
     }
+    logIO('core services');
 
     logStep('初始化 LLM 引擎…');
     const { sessionManager } = await initializeLLMEngine({
