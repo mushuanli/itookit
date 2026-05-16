@@ -1339,11 +1339,13 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
     /** Load all YAML (preferred) and JSON (legacy) files from a VFS directory. */
     private async loadJsonFilesFromDir<T>(dirPath: string, systemFS?: IModuleFS): Promise<T[]> {
         const items: T[] = [];
+        const t0 = performance.now();
         try {
             const fs = systemFS ?? this.engine;
             const dirId = await fs.driver.resolvePath(dirPath);
-            if (!dirId) return [];
+            if (!dirId) { console.log(`[Boot]       loadDir ${dirPath}: empty`); return []; }
             const children = await fs.driver.getChildren(dirId);
+            console.log(`[Boot]       loadDir ${dirPath}: ${children.length} entries`);
             for (const child of children) {
                 if (child.type !== 'file') continue;
                 const isYaml = child.name.endsWith('.yaml') || child.name.endsWith('.yml');
@@ -1358,6 +1360,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
                     items.push(parsed);
                 } catch { /* skip malformed */ }
             }
+            console.log(`[Boot]       loadDir ${dirPath}: ${items.length} loaded in ${(performance.now() - t0).toFixed(0)}ms`);
         } catch { /* directory not yet created */ }
         return items;
     }
