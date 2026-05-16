@@ -241,28 +241,39 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         _log('mount');
         this.engine = this.vfs.getEngine(STORAGE_MODULE);
 
-        // Migrate data from old paths if needed
+        // Migrate data from old paths if needed (may write new files)
         await this.migrateConnectionsIfNeeded();
         _log('migrateConnections');
         await this.migrateMCPIfNeeded();
         _log('migrateMCP');
 
-        // Seed built-in providers to VFS + load user customizations
-        await this.syncDefaultProviders();
+        // Pre-load all data directories in parallel — avoids redundant VFS I/O.
+        // Previously syncDefaultProviders + reloadProviders both read PROVIDERS_DIR,
+        // and ensureDefaults + reload both read CONNECTIONS_DIR. Now read once each.
+        const [preProviders, preConnections, preMcps, preSkills] = await Promise.all([
+            this.loadJsonFilesFromDir<LLMProvider>(PROVIDERS_DIR),
+            this.loadJsonFilesFromDir<LLMConnection>(CONNECTIONS_DIR),
+            this.loadJsonFilesFromDir<MCPServer>(MCP_DIR),
+            this.loadJsonFilesFromDir<LLMSkill>(SKILLS_DIR),
+        ]);
+        _log('preloadDirs');
+
+        // Sync default providers (write missing built-ins), then merge into cache
+        await this.syncDefaultProviders(preProviders);
         _log('syncDefaultProviders');
-        await this.reloadProviders();
+        this.reloadProvidersFrom(preProviders);
         _log('reloadProviders');
 
-        // Write default connections (incremental)
-        await this.ensureDefaults();
+        // Sync default connections (write missing built-ins), then cache
+        const updatedConns = await this.ensureDefaultsWith(preConnections);
         _log('ensureDefaults');
-
-        // Load caches
-        await this.reload();
+        this._connections = updatedConns.map(c => this.normalizeConn(c));
         _log('reload');
-        await this.reloadMCP();
+
+        // Cache MCP & skills from pre-loaded data
+        this._mcpServers = preMcps;
         _log('reloadMCP');
-        await this.reloadSkills();
+        this._skills = preSkills;
         _log('reloadSkills');
 
         // Cross-tab sync
@@ -705,8 +716,8 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
     /**
      * 将内置 Provider 写入 VFS（首次）。已存在的条目保持不变（用户修改受保护）。
      */
-    private async syncDefaultProviders(): Promise<void> {
-        const existing = await this.loadJsonFilesFromDir<LLMProvider>(PROVIDERS_DIR);
+    private async syncDefaultProviders(preLoaded?: LLMProvider[]): Promise<void> {
+        const existing = preLoaded ?? await this.loadJsonFilesFromDir<LLMProvider>(PROVIDERS_DIR);
         const existingIds = new Set(existing.map(p => p.id));
         for (const [key, def] of Object.entries(LLM_PROVIDERS)) {
             if (!existingIds.has(key)) {
@@ -715,9 +726,7 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         }
     }
 
-    private async reloadProviders(): Promise<void> {
-        const fromVFS = await this.loadJsonFilesFromDir<LLMProvider>(PROVIDERS_DIR);
-        // Start with built-in defaults, overlay VFS data (user customizations win)
+    private reloadProvidersFrom(fromVFS: LLMProvider[]): void {
         const merged = new Map(Object.entries(LLM_PROVIDERS).map(([k, v]) => [k, { ...v, id: k }]));
         for (const p of fromVFS) {
             merged.set(p.id, p);
@@ -755,52 +764,59 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
 
     // ─── Connection storage ───────────────────────────────────────────────────
 
-    private async ensureDefaults(): Promise<void> {
+    private async ensureDefaultsWith(preLoaded: LLMConnection[]): Promise<LLMConnection[]> {
         try {
             const ver = await this.readJson<{ version: number }>(DEFAULTS_VERSION);
-            if (ver && ver.version >= CONST_CONFIG_VERSION) return;
-            await this.syncDefaultConnections();
+            if (ver && ver.version >= CONST_CONFIG_VERSION) return preLoaded;
+            const updated = await this.syncDefaultConnectionsFrom(preLoaded);
             await this.writeJson(DEFAULTS_VERSION, { version: CONST_CONFIG_VERSION, updatedAt: Date.now() });
+            return updated;
         } catch (e) {
             console.error('[LLMDeviceDriver] ensureDefaults failed', e);
+            return preLoaded;
         }
     }
 
-    private async syncDefaultConnections(): Promise<void> {
-        const current = await this.loadAll();
+    private async syncDefaultConnectionsFrom(current: LLMConnection[]): Promise<LLMConnection[]> {
         const byId = new Map(current.map(c => [c.id, c]));
+        const result = [...current];
 
         for (const def of DEFAULT_CONNECTIONS) {
             const existing = byId.get(def.id);
             if (!existing) {
-                await this.writeToDisk({
+                const newConn: LLMConnection = {
                     id: def.id,
                     name: def.name,
                     providerId: def.providerId,
                     tiers: def.tiers,
                     metadata: { isSystemDefault: true },
-                });
+                };
+                await this.writeToDisk(newConn);
+                result.push(newConn);
             } else {
                 const updated: LLMConnection = JSON.parse(JSON.stringify(existing));
                 let dirty = false;
-                // Migrate: ensure providerId is set (old data had only provider)
                 if (!updated.providerId && updated.provider) {
                     updated.providerId = updated.provider;
                     dirty = true;
                 }
-                // Back-fill tiers if missing
                 if (!updated.tiers && def.tiers) {
                     updated.tiers = def.tiers;
                     dirty = true;
                 }
-                // Drop deprecated fields
                 if (updated.availableModels !== undefined) {
                     delete updated.availableModels;
                     dirty = true;
                 }
-                if (dirty) await this.writeToDisk(updated);
+                if (dirty) {
+                    await this.writeToDisk(updated);
+                    // Replace in result
+                    const idx = result.findIndex(c => c.id === def.id);
+                    if (idx >= 0) result[idx] = updated;
+                }
             }
         }
+        return result;
     }
 
     private async reload(): Promise<void> {
