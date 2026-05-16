@@ -339,8 +339,12 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
                 resourceId: server.id,
             });
             if (server.autoConnect) {
+                // Race with a 3s timeout so a dead server doesn't block boot.
                 try {
-                    await this.connectMCPServer(server);
+                    await Promise.race([
+                        this.connectMCPServer(server),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000)),
+                    ]);
                 } catch (e) {
                     console.error(`[LLMDeviceDriver] Auto-connect MCP server '${server.id}' failed:`, e);
                 }
