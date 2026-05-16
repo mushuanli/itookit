@@ -147,13 +147,22 @@ function removeMountWorkspace(id: string): void {
 // ── Bootstrap ──────────────────────────────────────────────────────────────────
 
 async function bootstrap(): Promise<void> {
-    showLoading('正在初始化…');
+    const t0 = performance.now();
+    let t = t0;
+    const log = (label: string) => {
+        const now = performance.now();
+        console.log(`[Boot] ${label}: +${(now - t).toFixed(0)}ms (total ${(now - t0).toFixed(0)}ms)`);
+        t = now;
+        showLoading(label);
+    };
+
+    log('正在初始化…');
 
     // 1. Resolve paths
     //    homeDir   = working project directory (CWD or --home arg)
     //    rootDir = ~/.mindos — always the real user home, never the working dir
-    showLoading('获取路径…');
     const [homeDir, rootDir] = await Promise.all([getHomeDir(), getRootDir()]);
+    log(`路径解析 (home=${homeDir})`);
 
     const dirName = homeDir.split('/').filter(Boolean).pop() ?? homeDir;
     const navLabel = document.getElementById('nav-home-label');
@@ -173,7 +182,6 @@ async function bootstrap(): Promise<void> {
     //                         SQLite: ~/.mindos/meta/<path-derived>/
     //
     // Each module gets its own SQLite to eliminate cross-module DB locking.
-    showLoading('初始化文件系统…');
 
     const openBackend = (rootDir: string, sidecarDir: string) =>
         openLocalFSBackend({
@@ -187,6 +195,8 @@ async function bootstrap(): Promise<void> {
         .filter(ws => ws.type !== 'settings' && ws.moduleName !== 'home')
         .map(ws => ws.moduleName);
 
+    console.log(`[Boot] 创建 ${moduleNames.length + 2} 个文件系统后端 (${moduleNames.concat('root', 'home').join(', ')})`);
+
     // Open all backends in parallel — different SQLite files, no contention
     const [rootBackend, homeBackend, ...moduleBackends] = await Promise.all([
         openBackend(rootDir, `${rootDir}/_meta`),
@@ -195,6 +205,7 @@ async function bootstrap(): Promise<void> {
             openBackend(`${rootDir}/module/${name}`, `${rootDir}/_db/${name}`)
         ),
     ]);
+    log(`文件系统初始化 (${moduleNames.length + 2} backends)`);
 
     const moduleAdditionalMounts = moduleNames.map((name, i) => ({
         path: `/module/${name}`,
@@ -213,6 +224,7 @@ async function bootstrap(): Promise<void> {
         routeAliases: { home: 'home-workspace' },
         onProgress: showLoading,
     });
+    log('App 初始化完成');
 
     // 4. Local mount service (tauri-only dynamic mounts)
     const localMounts = new LocalMountService(app.vfs, rootDir);
@@ -257,10 +269,12 @@ async function bootstrap(): Promise<void> {
     });
 
     // Restore persisted mounts
-    showLoading('恢复挂载目录…');
+    const beforeRestore = performance.now();
     await localMounts.restoreMounts();
+    console.log(`[Boot] 恢复挂载: +${(performance.now() - beforeRestore).toFixed(0)}ms`);
 
     hideLoading();
+    console.log(`[Boot] 总启动耗时: ${(performance.now() - t0).toFixed(0)}ms`);
 }
 
 bootstrap().catch(err => {

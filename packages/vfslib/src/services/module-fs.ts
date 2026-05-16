@@ -367,8 +367,9 @@ export class ModuleFS implements IModuleFS, IFSDriver {
         this.assertWritable(realPath);
         await this.engine.rename(realPath, newName);
         const newRealPath = `${P.dirname(realPath)}/${newName}`;
+        const newVirtualPath = this.scope.toVirtualPath(newRealPath);
         const virtualNode = this.toVirtualNode(node);
-        this._emit('node:renamed', { nodes: [{ nodeId: virtualNode.id, oldName: node.name, newName, oldPath: virtualNode.path, newPath: this.scope.toVirtualPath(newRealPath) }] });
+        this._emit('node:renamed', { nodes: [{ nodeId: newVirtualPath, oldName: node.name, newName, oldPath: virtualNode.path, newPath: newVirtualPath }] });
     }
 
     async move(idsOrPaths: string[], targetParentIdOrPath: string | null): Promise<void> {
