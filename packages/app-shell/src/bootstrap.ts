@@ -297,9 +297,13 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
 
     logStep('加载 LLM 驱动…');
     const llmDriver = new LLMDeviceDriver(vfs);
+    let ts = performance.now();
     await llmDriver.init();
+    console.log(`[Boot]   ↳ llmDriver.init: +${(performance.now() - ts).toFixed(0)}ms`);
     vfs.devices.register(llmDriver);
+    ts = performance.now();
     await llmDriver.createDeviceNodes();
+    console.log(`[Boot]   ↳ createDeviceNodes: +${(performance.now() - ts).toFixed(0)}ms`);
     setKernelDeviceManager(vfs.devices);
     vfs.devices.freeze();
 
@@ -312,7 +316,9 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
 
     // Harness: AgentLoopExecutor + built-in tools + skill service.
     // createHarness() reads the default LLM connection from llmDriver automatically.
+    let ts = performance.now();
     const harness = await createHarness({ llmDriver });
+    console.log(`[Boot]   ↳ createHarness: +${(performance.now() - ts).toFixed(0)}ms`);
 
     // Inject VFS context so file tools work with the virtual filesystem in browser.
     // When node:fs is unavailable, tools fall back to ctx.vfs (ToolVFSContext).
@@ -320,7 +326,9 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
 
     // Bridge: sync VFS LLMSkills → harness SkillDefinition so /skills, /skill <id>,
     // and the skill picker panel all show the user's configured skills.
+    ts = performance.now();
     await syncSkillsToHarness(llmDriver, harness);
+    console.log(`[Boot]   ↳ syncSkillsToHarness: +${(performance.now() - ts).toFixed(0)}ms`);
     // Keep skills in sync when the user adds / edits / deletes skills in Settings.
     llmDriver.onChange(() => { syncSkillsToHarness(llmDriver, harness).catch(() => {}); });
 
@@ -330,7 +338,9 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
         ? process.cwd()
         : null;
     if (cwd) {
+        ts = performance.now();
         await harness.skillService.setCwd(cwd).catch(() => {});
+        console.log(`[Boot]   ↳ setCwd: +${(performance.now() - ts).toFixed(0)}ms`);
     }
 
     logStep('初始化 LLM 引擎…');
