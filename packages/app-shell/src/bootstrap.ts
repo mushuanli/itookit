@@ -243,6 +243,14 @@ async function syncSkillsToHarness(
 
 export async function initApp(options: AppOptions): Promise<AppHandle> {
     const { backend, additionalMounts, defaultSlug, routeAliases = {}, onProgress } = options;
+    const t0 = performance.now();
+    let t = t0;
+    const logStep = (label: string) => {
+        const now = performance.now();
+        console.log(`[Boot] ${label}: +${(now - t).toFixed(0)}ms (累计 ${(now - t0).toFixed(0)}ms)`);
+        t = now;
+        onProgress?.(label);
+    };
 
     // Mutable workspaces list — addWorkspace() appends here at runtime
     const workspaces: WorkspaceConfig[] = [...options.workspaces];
@@ -268,7 +276,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
 
     // ── 1. VFS ─────────────────────────────────────────────────────────────────
 
-    onProgress?.('初始化文件系统…');
+    logStep('初始化文件系统…');
     const { manager: vfs } = await createVFS({
         rootBackend: backend,
         additionalMounts,
@@ -287,7 +295,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
 
     // ── 2. LLM device driver ───────────────────────────────────────────────────
 
-    onProgress?.('加载 LLM 驱动…');
+    logStep('加载 LLM 驱动…');
     const llmDriver = new LLMDeviceDriver(vfs);
     await llmDriver.init();
     vfs.devices.register(llmDriver);
@@ -297,7 +305,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
 
     // ── 3. Core services ───────────────────────────────────────────────────────
 
-    onProgress?.('初始化核心服务…');
+    logStep('初始化核心服务…');
     const settingsModule = await createSettingsModule(vfs);
     const agentService   = new VFSAgentService(vfs, llmDriver);
     const sessionEngine  = new ChatEngine(vfs);
@@ -325,6 +333,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
         await harness.skillService.setCwd(cwd).catch(() => {});
     }
 
+    logStep('初始化 LLM 引擎…');
     const { sessionManager } = await initializeLLMEngine({
         agentService,
         sessionEngine,
