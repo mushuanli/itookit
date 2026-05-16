@@ -17,7 +17,7 @@ import type {
     LLMConnection, LLMProvider, ConnectionMeta, ChatMessage, ChatCompletionChunk,
     ChatCompletionParams, ChatCompletionResponse, TokenUsage,
     MCPServer, LLMSkill, CreateFileOptions, ToolDefinition,
-    ConnectionTestResult, InitialAgentDef,
+    ConnectionTestResult, InitialAgentDef, IModuleFS,
 } from '@itookit/common';
 import { toConnectionMeta, aggregateProviderCosts, CONFIG_MODULE } from '@itookit/common';
 import yaml from 'js-yaml';
@@ -206,6 +206,17 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
 
     private engine!: ReturnType<IVFSManager['getEngine']>;
     private readonly shellRunner: IShellRunner | undefined;
+
+    /**
+     * Resolve the system FS for /etc hidden-file access.
+     * Prefers ctx.systemFS (injected by openDevice) over this.engine (constructor-injected).
+     * This enables the device-proxy pattern: non-system modules open /dev/llm
+     * and the driver uses systemFS to read/write /etc hidden files on their behalf,
+     * masking sensitive data before returning to the caller.
+     */
+    private getSystemFS(ctx?: DeviceContext): IModuleFS {
+        return (ctx?.systemFS as IModuleFS | undefined) ?? this.engine;
+    }
 
     constructor(private readonly vfs: IVFSManager, options?: LLMDeviceDriverOptions) {
         this.shellRunner = options?.shellRunner;
@@ -415,12 +426,12 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
                 return this.findConn(arg as string) ?? null;
 
             case LLM_IOCTL.SAVE_CONNECTION: {
-                await this.saveConnection(arg as LLMConnection);
+                await this.saveConnection(arg as LLMConnection, this.getSystemFS(ctx));
                 return;
             }
 
             case LLM_IOCTL.DELETE_CONNECTION: {
-                await this.deleteConnection(arg as string);
+                await this.deleteConnection(arg as string, this.getSystemFS(ctx));
                 return;
             }
 
@@ -432,12 +443,12 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
                 return this._mcpServers.slice();
 
             case LLM_IOCTL.SAVE_MCP_SERVER: {
-                await this.saveMCPServer(arg as MCPServer);
+                await this.saveMCPServer(arg as MCPServer, this.getSystemFS(ctx));
                 return;
             }
 
             case LLM_IOCTL.DELETE_MCP_SERVER: {
-                await this.deleteMCPServer(arg as string);
+                await this.deleteMCPServer(arg as string, this.getSystemFS(ctx));
                 return;
             }
 
@@ -467,11 +478,11 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
                 return this.getFullProvider(arg as string) ?? null;
 
             case LLM_IOCTL.SAVE_PROVIDER:
-                await this.saveProvider(arg as LLMProvider);
+                await this.saveProvider(arg as LLMProvider, this.getSystemFS(ctx));
                 return;
 
             case LLM_IOCTL.DELETE_PROVIDER:
-                await this.deleteProvider(arg as string);
+                await this.deleteProvider(arg as string, this.getSystemFS(ctx));
                 return;
 
             // ── Skill 管理命令（无需 sessionId）────────────────────────────────
@@ -479,11 +490,11 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
                 return this._skills.slice();
 
             case LLM_IOCTL.SAVE_SKILL:
-                await this.saveSkill(arg as LLMSkill);
+                await this.saveSkill(arg as LLMSkill, this.getSystemFS(ctx));
                 return;
 
             case LLM_IOCTL.DELETE_SKILL:
-                await this.deleteSkill(arg as string);
+                await this.deleteSkill(arg as string, this.getSystemFS(ctx));
                 return;
         }
 
@@ -601,8 +612,8 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         return this.findConn(id) ?? null;
     }
 
-    async saveConnection(conn: LLMConnection): Promise<void> {
-        await this.writeToDisk(conn);
+    async saveConnection(conn: LLMConnection, systemFS?: IModuleFS): Promise<void> {
+        await this.writeToDisk(conn, systemFS);
         // Update in-memory cache directly; bindVFSEvents debounce handles cross-tab sync
         const idx = this._connections.findIndex(c => c.id === conn.id);
         if (idx >= 0) { this._connections[idx] = conn; } else { this._connections.push(conn); }
@@ -614,12 +625,12 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
 
         // Aggregate connection costs into provider dailyCosts
         if (conn.dailyCosts && conn.providerId) {
-            this.aggregateAndSaveProviderCosts(conn.providerId).catch(() => {});
+            this.aggregateAndSaveProviderCosts(conn.providerId, systemFS).catch(() => {});
         }
     }
 
     /** 聚合指定 Provider 下所有 Connection 的 dailyCosts，写入 Provider */
-    private async aggregateAndSaveProviderCosts(providerId: string): Promise<void> {
+    private async aggregateAndSaveProviderCosts(providerId: string, systemFS?: IModuleFS): Promise<void> {
         const provider = this._providers.get(providerId);
         if (!provider) return;
         const pid = providerId;
@@ -627,12 +638,12 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
             c => (c.providerId ?? c.provider) === pid
         );
         provider.dailyCosts = aggregateProviderCosts(sameProviderConns);
-        await this.saveProvider(provider);
+        await this.saveProvider(provider, systemFS);
     }
 
-    async deleteConnection(id: string): Promise<void> {
+    async deleteConnection(id: string, systemFS?: IModuleFS): Promise<void> {
         if (id === 'default') throw new Error('Cannot delete the default connection');
-        await this.deleteFromDisk(id);
+        await this.deleteFromDisk(id, systemFS);
         this._connections = this._connections.filter(c => c.id !== id);
         await this.vfs.removeDeviceNode(`/dev/llm/connection/${id}`);
         this.notify();
@@ -649,8 +660,8 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         return [...this._mcpServers];
     }
 
-    async saveMCPServer(server: MCPServer): Promise<void> {
-        await this.writeMCPToDisk(server);
+    async saveMCPServer(server: MCPServer, systemFS?: IModuleFS): Promise<void> {
+        await this.writeMCPToDisk(server, systemFS);
         const idx = this._mcpServers.findIndex(s => s.id === server.id);
         if (idx >= 0) { this._mcpServers[idx] = server; } else { this._mcpServers.push(server); }
         await this.vfs.createDeviceNode('llm', `/dev/llm/mcp/${server.id}`, {
@@ -660,8 +671,8 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         this.notify();
     }
 
-    async deleteMCPServer(id: string): Promise<void> {
-        await this.deleteMCPFromDisk(id);
+    async deleteMCPServer(id: string, systemFS?: IModuleFS): Promise<void> {
+        await this.deleteMCPFromDisk(id, systemFS);
         this._mcpServers = this._mcpServers.filter(s => s.id !== id);
         const conn = this._activeMCPConns.get(id);
         if (conn) {
@@ -697,30 +708,32 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         this._providers = merged;
     }
 
-    async saveProvider(provider: LLMProvider): Promise<void> {
-        await this.writeProviderToDisk(provider);
+    async saveProvider(provider: LLMProvider, systemFS?: IModuleFS): Promise<void> {
+        await this.writeProviderToDisk(provider, systemFS);
         this._providers.set(provider.id, provider);
         this.notify();
     }
 
-    async deleteProvider(id: string): Promise<void> {
+    async deleteProvider(id: string, systemFS?: IModuleFS): Promise<void> {
         const provider = this._providers.get(id);
         if (provider?.isBuiltin) throw new Error(`Cannot delete built-in provider: ${id}`);
-        await this.deleteProviderFromDisk(id);
+        await this.deleteProviderFromDisk(id, systemFS);
         this._providers.delete(id);
         this.notify();
     }
 
-    private async writeProviderToDisk(provider: LLMProvider): Promise<void> {
+    private async writeProviderToDisk(provider: LLMProvider, systemFS?: IModuleFS): Promise<void> {
         await this.engineUpsert(
             `${PROVIDERS_DIR}/${provider.id}.json`,
             JSON.stringify(provider, null, 2),
+            systemFS,
         );
     }
 
-    private async deleteProviderFromDisk(id: string): Promise<void> {
-        const nodeId = await this.engine.driver.resolvePath(`${PROVIDERS_DIR}/${id}.json`);
-        if (nodeId) await this.engine.driver.delete([nodeId]);
+    private async deleteProviderFromDisk(id: string, systemFS?: IModuleFS): Promise<void> {
+        const fs = systemFS ?? this.engine;
+        const nodeId = await fs.driver.resolvePath(`${PROVIDERS_DIR}/${id}.json`);
+        if (nodeId) await fs.driver.delete([nodeId]);
     }
 
     // ─── Connection storage ───────────────────────────────────────────────────
@@ -777,21 +790,23 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         this._connections = await this.loadAll();
     }
 
-    private async loadAll(): Promise<LLMConnection[]> {
-        const raw = await this.loadJsonFilesFromDir<LLMConnection>(CONNECTIONS_DIR);
+    private async loadAll(systemFS?: IModuleFS): Promise<LLMConnection[]> {
+        const raw = await this.loadJsonFilesFromDir<LLMConnection>(CONNECTIONS_DIR, systemFS);
         return raw.map(c => this.normalizeConn(c));
     }
 
-    private async writeToDisk(conn: LLMConnection): Promise<void> {
+    private async writeToDisk(conn: LLMConnection, systemFS?: IModuleFS): Promise<void> {
         await this.engineUpsert(
             `${CONNECTIONS_DIR}/${conn.id}.json`,
             JSON.stringify(conn, null, 2),
+            systemFS,
         );
     }
 
-    private async deleteFromDisk(id: string): Promise<void> {
-        const nodeId = await this.engine.driver.resolvePath(`${CONNECTIONS_DIR}/${id}.json`);
-        if (nodeId) await this.engine.driver.delete([nodeId]);
+    private async deleteFromDisk(id: string, systemFS?: IModuleFS): Promise<void> {
+        const fs = systemFS ?? this.engine;
+        const nodeId = await fs.driver.resolvePath(`${CONNECTIONS_DIR}/${id}.json`);
+        if (nodeId) await fs.driver.delete([nodeId]);
     }
 
     // ─── ILLMManagementService — Skills ──────────────────────────────────────
@@ -800,9 +815,9 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         return [...this._skills];
     }
 
-    async saveSkill(skill: LLMSkill): Promise<void> {
+    async saveSkill(skill: LLMSkill, systemFS?: IModuleFS): Promise<void> {
         skill = { ...skill, modifiedAt: Date.now() };
-        await this.writeSkillToDisk(skill);
+        await this.writeSkillToDisk(skill, systemFS);
         const idx = this._skills.findIndex(s => s.id === skill.id);
         if (idx >= 0) { this._skills[idx] = skill; } else { this._skills.push(skill); }
         await this.vfs.createDeviceNode('llm', `/dev/llm/skills/${skill.id}`, {
@@ -812,8 +827,8 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         this.notify();
     }
 
-    async deleteSkill(id: string): Promise<void> {
-        await this.deleteSkillFromDisk(id);
+    async deleteSkill(id: string, systemFS?: IModuleFS): Promise<void> {
+        await this.deleteSkillFromDisk(id, systemFS);
         this._skills = this._skills.filter(s => s.id !== id);
         await this.vfs.removeDeviceNode(`/dev/llm/skills/${id}`);
         this.notify();
@@ -878,16 +893,18 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         return this.loadJsonFilesFromDir<MCPServer>(MCP_DIR);
     }
 
-    private async writeMCPToDisk(server: MCPServer): Promise<void> {
+    private async writeMCPToDisk(server: MCPServer, systemFS?: IModuleFS): Promise<void> {
         await this.engineUpsert(
             `${MCP_DIR}/${server.id}.json`,
             JSON.stringify(server, null, 2),
+            systemFS,
         );
     }
 
-    private async deleteMCPFromDisk(id: string): Promise<void> {
-        const nodeId = await this.engine.driver.resolvePath(`${MCP_DIR}/${id}.json`);
-        if (nodeId) await this.engine.driver.delete([nodeId]);
+    private async deleteMCPFromDisk(id: string, systemFS?: IModuleFS): Promise<void> {
+        const fs = systemFS ?? this.engine;
+        const nodeId = await fs.driver.resolvePath(`${MCP_DIR}/${id}.json`);
+        if (nodeId) await fs.driver.delete([nodeId]);
     }
 
     // ─── MCP connection management ────────────────────────────────────────────
@@ -923,20 +940,23 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         return this.loadJsonFilesFromDir<LLMSkill>(SKILLS_DIR);
     }
 
-    private async writeSkillToDisk(skill: LLMSkill): Promise<void> {
+    private async writeSkillToDisk(skill: LLMSkill, systemFS?: IModuleFS): Promise<void> {
+        const fs = systemFS ?? this.engine;
         await this.engineUpsert(
             `${SKILLS_DIR}/${skill.id}.yaml`,
             yaml.dump(skill, { lineWidth: -1, noRefs: true }),
+            systemFS,
         );
         // Remove legacy .json file if present (one-time migration on first save).
-        const oldId = await this.engine.driver.resolvePath(`${SKILLS_DIR}/${skill.id}.json`);
-        if (oldId) await this.engine.driver.delete([oldId]);
+        const oldId = await fs.driver.resolvePath(`${SKILLS_DIR}/${skill.id}.json`);
+        if (oldId) await fs.driver.delete([oldId]);
     }
 
-    private async deleteSkillFromDisk(id: string): Promise<void> {
+    private async deleteSkillFromDisk(id: string, systemFS?: IModuleFS): Promise<void> {
+        const fs = systemFS ?? this.engine;
         for (const ext of ['.yaml', '.json']) {
-            const nodeId = await this.engine.driver.resolvePath(`${SKILLS_DIR}/${id}${ext}`);
-            if (nodeId) { await this.engine.driver.delete([nodeId]); break; }
+            const nodeId = await fs.driver.resolvePath(`${SKILLS_DIR}/${id}${ext}`);
+            if (nodeId) { await fs.driver.delete([nodeId]); break; }
         }
     }
 
@@ -1247,28 +1267,30 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
         return { role: 'user', content: text };
     }
 
-    private async readJson<T>(path: string): Promise<T | null> {
+    private async readJson<T>(path: string, systemFS?: IModuleFS): Promise<T | null> {
         try {
-            const nodeId = await this.engine.driver.resolvePath(path);
+            const fs = systemFS ?? this.engine;
+            const nodeId = await fs.driver.resolvePath(path);
             if (!nodeId) return null;
-            const raw = await this.engine.driver.readContent(nodeId);
+            const raw = await fs.driver.readContent(nodeId);
             const text = typeof raw === 'string' ? raw : new TextDecoder().decode(raw as ArrayBuffer);
             return JSON.parse(text) as T;
         } catch { return null; }
     }
 
-    private writeJson(path: string, data: unknown): Promise<void> {
-        return this.engineUpsert(path, JSON.stringify(data, null, 2));
+    private writeJson(path: string, data: unknown, systemFS?: IModuleFS): Promise<void> {
+        return this.engineUpsert(path, JSON.stringify(data, null, 2), systemFS);
     }
 
-    private async engineUpsert(path: string, content: string): Promise<void> {
-        const nodeId = await this.engine.driver.resolvePath(path);
+    private async engineUpsert(path: string, content: string, systemFS?: IModuleFS): Promise<void> {
+        const fs = systemFS ?? this.engine;
+        const nodeId = await fs.driver.resolvePath(path);
         if (nodeId) {
-            await this.engine.driver.writeContent(nodeId, content);
+            await fs.driver.writeContent(nodeId, content);
         } else {
             const name = path.substring(path.lastIndexOf('/') + 1);
             const parent = path.substring(0, path.lastIndexOf('/')) || '/';
-            await this.engine.driver.createFile({
+            await fs.driver.createFile({
                 name,
                 parentIdOrPath: parent,
                 content,
@@ -1278,19 +1300,20 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
     }
 
     /** Load all YAML (preferred) and JSON (legacy) files from a VFS directory. */
-    private async loadJsonFilesFromDir<T>(dirPath: string): Promise<T[]> {
+    private async loadJsonFilesFromDir<T>(dirPath: string, systemFS?: IModuleFS): Promise<T[]> {
         const items: T[] = [];
         try {
-            const dirId = await this.engine.driver.resolvePath(dirPath);
+            const fs = systemFS ?? this.engine;
+            const dirId = await fs.driver.resolvePath(dirPath);
             if (!dirId) return [];
-            const children = await this.engine.driver.getChildren(dirId);
+            const children = await fs.driver.getChildren(dirId);
             for (const child of children) {
                 if (child.type !== 'file') continue;
                 const isYaml = child.name.endsWith('.yaml') || child.name.endsWith('.yml');
                 const isJson = child.name.endsWith('.json');
                 if (!isYaml && !isJson) continue;
                 try {
-                    const raw = await this.engine.driver.readContent(child.id);
+                    const raw = await fs.driver.readContent(child.id);
                     const text = typeof raw === 'string' ? raw : new TextDecoder().decode(raw as ArrayBuffer);
                     const parsed = isYaml
                         ? yaml.load(text) as T

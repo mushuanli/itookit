@@ -293,6 +293,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
     vfs.devices.register(llmDriver);
     await llmDriver.createDeviceNodes();
     setKernelDeviceManager(vfs.devices);
+    vfs.devices.freeze();
 
     // ── 3. Core services ───────────────────────────────────────────────────────
 

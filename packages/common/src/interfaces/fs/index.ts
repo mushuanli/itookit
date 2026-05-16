@@ -61,6 +61,7 @@ export {
     FSBusyError,
     FSTypeMismatchError,
     FSDeviceNotFoundError,
+    FSDeviceFrozenError,
 } from './core/errors';
 export type { FSErrorCode } from './core/errors';
 

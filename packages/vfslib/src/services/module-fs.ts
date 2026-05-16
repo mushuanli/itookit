@@ -68,6 +68,11 @@ export interface ModuleFSDeps {
     devices: DeviceRegistry;
     mountId?: string;
     isSystem?: boolean;
+    /**
+     * CONFIG_MODULE 的系统级 IModuleFS 引用（isSystem=true）。
+     * 注入给非系统模块，用于 openDevice 时为设备驱动提供系统身份访问能力。
+     */
+    systemFS?: import('@itookit/common').IModuleFS;
 }
 
 // ─── DeviceHandle ─────────────────────────────────────────────────────────────
@@ -114,6 +119,7 @@ export class ModuleFS implements IModuleFS, IFSDriver {
     private readonly caller: CallerIdentity;
     private readonly _moduleBackend: IStorageBackend;
     private readonly _mountPath: string;
+    private readonly systemFS?: import('@itookit/common').IModuleFS;
     private initialized = false;
 
     constructor(deps: ModuleFSDeps) {
@@ -126,6 +132,7 @@ export class ModuleFS implements IModuleFS, IFSDriver {
         this.scope = new ScopedView(deps.moduleId);
         this.mountId = deps.mountId ?? 'mount_0';
         this.caller = { moduleId: deps.moduleId, isSystem: deps.isSystem ?? false };
+        this.systemFS = deps.systemFS;
         this._moduleBackend = deps.engine.getBackendForPath(`/module/${deps.moduleId}`);
         this._mountPath = deps.engine.getMountPathForPath(`/module/${deps.moduleId}`);
 
@@ -252,6 +259,7 @@ export class ModuleFS implements IModuleFS, IFSDriver {
     getChildren(idOrPath: string, options?: ListOptions): Promise<FSNode[] | DirEntry[]>;
     async getChildren(idOrPath: string, options?: any): Promise<FSNode[] | DirEntry[]> {
         const realPath = this.toRealPath(idOrPath);
+        this.access.checkAccess(this.caller, realPath, 'list');
         const children = await this.engine.listChildren(realPath);
         const filtered = children.filter(c => {
             if (!options?.includeHidden && isHiddenName(c.name)) return false;
@@ -274,7 +282,7 @@ export class ModuleFS implements IModuleFS, IFSDriver {
     readContent(idOrPath: string, options?: ReadOptions): Promise<FileContent>;
     async readContent(idOrPath: string, options?: ReadOptions): Promise<FileContent> {
         const { node, realPath } = await this.resolveNode(idOrPath);
-        this.assertWritable(realPath); // access check: verify not readonly mount
+        this.access.checkAccess(this.caller, realPath, 'read');
         const data = await this.engine.readContent(realPath);
         if (options?.encoding === 'utf-8') return toString(data);
         return data;
@@ -325,10 +333,12 @@ export class ModuleFS implements IModuleFS, IFSDriver {
 
     async createFile(options: CreateFileOptions): Promise<FSNode> {
         const parentPath = options.parentIdOrPath ? this.toRealPath(options.parentIdOrPath) : this.scope.toRealPath('/');
+        this.access.checkAccess(this.caller, parentPath, 'write');
         this.assertWritable(parentPath);
 
         const node = await this.engine.createFile(parentPath, options.name,
-            options.type ?? 'file', options.content, options.metadata, { overwrite: options.overwrite });
+            options.type ?? 'file', options.content, options.metadata,
+            { overwrite: options.overwrite, recursive: options.recursive });
 
         const virtual = this.toVirtualNode(node);
         this._emit('node:created', { nodes: [{ nodeId: virtual.id, parentId: virtual.parentId, path: virtual.path, type: virtual.type }] });
@@ -341,6 +351,7 @@ export class ModuleFS implements IModuleFS, IFSDriver {
 
     async writeContent(idOrPath: string, content: FileContent, options?: WriteOptions): Promise<void> {
         const { node, realPath } = await this.resolveNode(idOrPath);
+        this.access.checkAccess(this.caller, realPath, 'write');
         this.assertWritable(realPath);
         await this.engine.writeContent(realPath, content, options);
         this._emit('node:updated', { nodes: [{ nodeId: node.id, path: node.path, changedFields: ['content'] }] });
@@ -352,6 +363,7 @@ export class ModuleFS implements IModuleFS, IFSDriver {
 
     async rename(idOrPath: string, newName: string): Promise<void> {
         const { node, realPath } = await this.resolveNode(idOrPath);
+        this.access.checkAccess(this.caller, realPath, 'write');
         this.assertWritable(realPath);
         await this.engine.rename(realPath, newName);
         const newRealPath = `${P.dirname(realPath)}/${newName}`;
@@ -363,6 +375,7 @@ export class ModuleFS implements IModuleFS, IFSDriver {
         const targetPath = targetParentIdOrPath
             ? this.toRealPath(targetParentIdOrPath)
             : this.scope.toRealPath('/');
+        this.access.checkAccess(this.caller, targetPath, 'write');
         this.assertWritable(targetPath);
 
         for (const src of idsOrPaths) {
@@ -375,6 +388,7 @@ export class ModuleFS implements IModuleFS, IFSDriver {
     async delete(idsOrPaths: string[], options?: DeleteOptions): Promise<void> {
         for (const idOrPath of idsOrPaths) {
             const realPath = this.toRealPath(idOrPath);
+            this.access.checkAccess(this.caller, realPath, 'delete');
             this.assertWritable(realPath);
             await this.engine.delete(realPath, options);
         }
@@ -383,6 +397,7 @@ export class ModuleFS implements IModuleFS, IFSDriver {
 
     async updateMetadata(idOrPath: string, metadata: Record<string, unknown>): Promise<void> {
         const { node, realPath } = await this.resolveNode(idOrPath);
+        this.access.checkAccess(this.caller, realPath, 'write');
         await this.engine.updateMetadata(realPath, metadata);
         this._emit('node:updated', { nodes: [{ nodeId: node.id, path: node.path, changedFields: ['metadata'] }] });
     }
@@ -411,6 +426,7 @@ export class ModuleFS implements IModuleFS, IFSDriver {
         const dir = P.dirname(linkPath);
         const name = P.basename(linkPath);
         const realDir = this.toRealPath(dir);
+        this.access.checkAccess(this.caller, realDir, 'write');
         this.assertWritable(realDir);
         const node = await this.engine.createSymlink(realDir, name, targetPath);
         const virtual = this.toVirtualNode(node);
@@ -449,7 +465,15 @@ export class ModuleFS implements IModuleFS, IFSDriver {
         const handlerId = (node as any).deviceHandlerId;
         if (!handlerId) throw new FSError('ENOTTY', 'no device handler', 'openDevice', node.path);
         const driver = this.devices.get(handlerId);
-        const baseCtx: DeviceContext = { nodeId: node.id, name: node.name, metadata: node.metadata };
+        // Inject systemFS so device drivers can read/write /etc hidden files
+        // with system identity (driver can mask/filter sensitive data before
+        // returning to the non-system caller).
+        const baseCtx: DeviceContext = {
+            nodeId: node.id,
+            name: node.name,
+            metadata: node.metadata,
+            systemFS: this.systemFS,
+        };
         let sessionId: string | undefined;
         if (driver.sessionable && driver.open) sessionId = await driver.open(baseCtx, options);
         return new DeviceHandle(driver, { ...baseCtx, sessionId });

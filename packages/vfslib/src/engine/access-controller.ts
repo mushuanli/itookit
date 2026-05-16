@@ -47,11 +47,23 @@ export class AccessController {
         const moduleMatch = normalPath.match(/^\/module\/([^/]+)/);
         const pathModuleId = moduleMatch?.[1];
 
-        // Hidden-file access — Linux-like semantics:
-        //   • system module paths  → only system callers may touch dot-prefix entries
-        //   • own regular module   → accessible (hidden only means excluded from listings)
-        //   • elsewhere (no module owner, or another module) → blocked
+        // Hidden-file access — two-tier semantics:
+        //
+        // 1. /etc hidden files: strictly restricted. Only system callers (already returned
+        //    above) and device proxying (via systemFS) can access. No module-self exemption.
+        //    Normal users must go through /dev devices, which can mask sensitive data.
+        //
+        // 2. Non-/etc hidden files: Linux-like semantics — system module paths require
+        //    system callers; own regular module can access self-owned hidden files;
+        //    elsewhere blocked.
         const hasHiddenSegment = segments.some(s => isHiddenName(s));
+        if (hasHiddenSegment && pathUtils.isUnder(normalPath, '/etc')) {
+            throw new FSAccessDeniedError(
+                normalPath,
+                operation,
+                '/etc hidden files require system or device access',
+            );
+        }
         if (hasHiddenSegment) {
             const isOwnRegularModule =
                 pathModuleId === caller.moduleId && !this.isSystemModule(caller.moduleId);

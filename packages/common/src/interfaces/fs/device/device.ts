@@ -20,6 +20,12 @@ export interface DeviceContext {
     metadata?: Record<string, unknown>;
     /** 会话 ID（sessionable 设备需要） */
     sessionId?: string;
+    /**
+     * 系统文件系统引用（CONFIG_MODULE 的 IModuleFS，isSystem=true）。
+     * 设备驱动可通过此引用以系统身份访问 /etc 下的隐藏文件。
+     * 仅在通过 IModuleFS.openDevice() 打开设备时注入。
+     */
+    systemFS?: import('../services/module-fs').IModuleFS;
 }
 
 export interface IDeviceDriver {
@@ -65,6 +71,10 @@ export interface IDeviceManager {
     has(handlerId: string): boolean;
     get(handlerId: string): IDeviceDriver;
     list(): string[];
+    /** 冻结注册表，后续 register/unregister 均抛出 FSDeviceFrozenError */
+    freeze(): void;
+    /** 查询是否已冻结 */
+    isFrozen(): boolean;
 }
 
 /**

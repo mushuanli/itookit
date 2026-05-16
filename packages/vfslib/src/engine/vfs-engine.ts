@@ -212,6 +212,12 @@ export class VFSEngine {
         opts?: { overwrite?: boolean; recursive?: boolean; deviceHandlerId?: string },
     ): Promise<import('@itookit/common').FSNode> {
         validateFilename(name);
+
+        // Ensure intermediate directories when recursive is requested
+        if (opts?.recursive) {
+            await this.ensureDirectoryPath(parentPath);
+        }
+
         const { backend, localPath: parentLocal, mountPath } = this.resolveStore(parentPath);
         const fullPath = parentLocal === '/' ? `/${name}` : `${parentLocal}/${name}`;
 

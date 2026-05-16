@@ -113,6 +113,7 @@ beforeAll(async () => {
     vfs.devices.register(llmDriver);
     await llmDriver.createDeviceNodes();
     setKernelDeviceManager(vfs.devices);
+    vfs.devices.freeze();
 
     // ── 5. Core services ───────────────────────────────────────────────────────
     const agentService   = new VFSAgentService(vfs, llmDriver);
