@@ -492,11 +492,10 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
 
         if (initialResourceId && manager.getActiveSessionId() !== initialResourceId) {
             await manager.openFile(initialResourceId);
+            // Only wait for editor mount if we actually opened a file —
+            // otherwise no editor mounts and we'd hit the 15s timeout.
+            if (onProgress) await waitForEditorMount(container);
         }
-
-        // If a loading overlay is in use, wait until the editor is actually visible
-        // before letting the caller dismiss the overlay.
-        if (onProgress) await waitForEditorMount(container);
 
         return manager;
     };
