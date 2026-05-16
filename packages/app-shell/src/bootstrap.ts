@@ -316,7 +316,7 @@ export async function initApp(options: AppOptions): Promise<AppHandle> {
 
     // Harness: AgentLoopExecutor + built-in tools + skill service.
     // createHarness() reads the default LLM connection from llmDriver automatically.
-    let ts = performance.now();
+    ts = performance.now();
     const harness = await createHarness({ llmDriver });
     console.log(`[Boot]   ↳ createHarness: +${(performance.now() - ts).toFixed(0)}ms`);
 
