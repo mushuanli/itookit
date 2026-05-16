@@ -225,32 +225,49 @@ export class LLMDeviceDriver implements IDeviceDriver, ILLMManagementService {
     // ─── Lifecycle ────────────────────────────────────────────────────────────
 
     async init(): Promise<void> {
+        const t0 = performance.now();
+        let t = t0;
+        const _log = (label: string) => {
+            const now = performance.now();
+            console.log(`[Boot]     ↳ llm.${label}: +${(now - t).toFixed(0)}ms`);
+            t = now;
+        };
         if (!this.vfs.getModule(STORAGE_MODULE)) {
             await this.vfs.mount(STORAGE_MODULE, {
                 description: 'Settings Persistence',
                 isSystem: true,
             });
         }
+        _log('mount');
         this.engine = this.vfs.getEngine(STORAGE_MODULE);
 
         // Migrate data from old paths if needed
         await this.migrateConnectionsIfNeeded();
+        _log('migrateConnections');
         await this.migrateMCPIfNeeded();
+        _log('migrateMCP');
 
         // Seed built-in providers to VFS + load user customizations
         await this.syncDefaultProviders();
+        _log('syncDefaultProviders');
         await this.reloadProviders();
+        _log('reloadProviders');
 
         // Write default connections (incremental)
         await this.ensureDefaults();
+        _log('ensureDefaults');
 
         // Load caches
         await this.reload();
+        _log('reload');
         await this.reloadMCP();
+        _log('reloadMCP');
         await this.reloadSkills();
+        _log('reloadSkills');
 
         // Cross-tab sync
         this.bindVFSEvents();
+        console.log(`[Boot]     ↳ llm.init total: ${(performance.now() - t0).toFixed(0)}ms`);
     }
 
     async dispose(): Promise<void> {
