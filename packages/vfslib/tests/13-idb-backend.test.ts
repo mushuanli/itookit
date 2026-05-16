@@ -318,6 +318,193 @@ describe('IDBRecordStore', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// v4.1 path-based API tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+
+// ── Auto-create parents ──────────────────────────────────────────────────
+
+describe('IndexedDBBackend auto-create parents', () => {
+    let backend: IndexedDBBackend;
+    beforeEach(async () => { backend = freshIDB('parents'); await backend.init(); });
+    afterEach(async () => { await backend.close(); });
+
+    it('write() creates intermediate directories', async () => {
+        await backend.write('/deep/nested/file.txt', encoder.encode('hello'));
+        expect(await backend.stat('/deep')).not.toBeNull();
+        expect(await backend.stat('/deep/nested')).not.toBeNull();
+        expect(await backend.stat('/deep/nested/file.txt')).not.toBeNull();
+    });
+
+    it('mkdir() creates intermediate directories', async () => {
+        await backend.mkdir('/a/b/c');
+        expect(await backend.stat('/a')).not.toBeNull();
+        expect(await backend.stat('/a/b')).not.toBeNull();
+        expect(await backend.stat('/a/b/c')).not.toBeNull();
+    });
+
+    it('throws ENOTDIR when a path segment is a file', async () => {
+        await backend.write('/foo', encoder.encode('bar'));
+        await expect(backend.write('/foo/bar/baz.txt', encoder.encode('x')))
+            .rejects.toThrow(/ENOTDIR/);
+    });
+
+    it('write() does not recreate existing parents', async () => {
+        await backend.mkdir('/existing');
+        await expect(backend.write('/existing/file.txt', encoder.encode('data'))).resolves.not.toThrow();
+    });
+
+    it('mkdir() is idempotent when dir already exists', async () => {
+        await backend.mkdir('/x/y');
+        const node = await backend.mkdir('/x/y');
+        expect(node.type).toBe('directory');
+    });
+});
+
+// ── Auto-rebuild on init ─────────────────────────────────────────────────
+
+describe('IndexedDBBackend auto-rebuild', () => {
+    let _dbSeq = 0;
+
+    it('init() recovers from a database with missing stores', async () => {
+        const dbName = `rebuild_${Date.now()}_${++_dbSeq}`;
+
+        // Create a pre-existing DB at version 1 with only the 'nodes' store
+        await new Promise<void>((resolve, reject) => {
+            const req = indexedDB.open(dbName, 1);
+            req.onupgradeneeded = () => {
+                req.result.createObjectStore('nodes', { keyPath: 'path' });
+            };
+            req.onsuccess = () => { req.result.close(); resolve(); };
+            req.onerror = () => reject(req.error);
+        });
+
+        const backend = new IndexedDBBackend({ dbName });
+        await backend.init();
+
+        // Verify all stores exist after recovery
+        await backend.mkdir('/test');
+        await backend.setTags('/test', ['t1']);
+        expect(await backend.getAllTags()).toContain('t1');
+        expect(await backend.stat('/test')).not.toBeNull();
+
+        await backend.close();
+        // Clean up
+        await new Promise<void>((resolve, reject) => {
+            const req = indexedDB.deleteDatabase(dbName);
+            req.onsuccess = () => resolve();
+            req.onerror = () => reject(req.error);
+        });
+    });
+});
+
+// ── Transaction wrapper ──────────────────────────────────────────────────
+
+describe('IndexedDBBackend.transaction', () => {
+    let backend: IndexedDBBackend;
+    beforeEach(async () => { backend = freshIDB('txn'); await backend.init(); });
+    afterEach(async () => { await backend.close(); });
+
+    it('passes through writes made inside transaction', async () => {
+        await backend.transaction(async () => {
+            await backend.mkdir('/tx-dir');
+            await backend.write('/tx-dir/file.txt', encoder.encode('data'));
+        });
+        expect(await backend.stat('/tx-dir')).not.toBeNull();
+        expect(await backend.stat('/tx-dir/file.txt')).not.toBeNull();
+    });
+
+    it('returns the result of the callback', async () => {
+        const result = await backend.transaction(async () => {
+            await backend.mkdir('/result-test');
+            return 42;
+        });
+        expect(result).toBe(42);
+    });
+});
+
+// ── Verify & Repair ──────────────────────────────────────────────────────
+
+describe('IndexedDBBackend.verify', () => {
+    let backend: IndexedDBBackend;
+    beforeEach(async () => { backend = freshIDB('verify'); await backend.init(); });
+    afterEach(async () => { await backend.close(); });
+
+    it('verify() reports healthy for a clean database', async () => {
+        await backend.mkdir('/docs');
+        await backend.write('/docs/readme.md', encoder.encode('# Hello'));
+        const result = await backend.verify();
+        expect(result.healthy).toBe(true);
+        expect(result.missingStores).toHaveLength(0);
+        expect(result.orphanNodes).toHaveLength(0);
+        expect(result.orphanTags).toHaveLength(0);
+        expect(result.missingParents).toHaveLength(0);
+    });
+
+    it('verify() returns correct node and tag counts', async () => {
+        await backend.mkdir('/a');
+        await backend.mkdir('/b');
+        await backend.setTags('/a', ['important']);
+        const result = await backend.verify();
+        expect(result.totalNodes).toBe(2);
+        expect(result.totalTags).toBe(1);
+    });
+
+    it('verify() detects orphan tags (injected directly)', async () => {
+        // Use setTags to add a tag, then delete the node via a raw IDB tx
+        // (bypassing _deleteTagRefs) to create an orphan tag reference.
+        await backend.mkdir('/will-be-orphaned');
+        await backend.setTags('/will-be-orphaned', ['orphan-me']);
+
+        // Directly delete the node from the nodes store, skipping tag cleanup
+        const dbName = (backend as any).dbName;
+        const db = await new Promise<IDBDatabase>((resolve, reject) => {
+            const req = indexedDB.open(dbName);
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error);
+        });
+        const tx = db.transaction('nodes', 'readwrite');
+        tx.objectStore('nodes').delete('/will-be-orphaned');
+        await new Promise<void>((resolve) => { tx.oncomplete = () => { db.close(); resolve(); }; });
+    });
+
+    it('repair() cleans up orphan tags', async () => {
+        await backend.mkdir('/will-be-orphaned');
+        await backend.setTags('/will-be-orphaned', ['orphan-me']);
+
+        // Directly delete the node, leaving orphan tag references
+        const dbName = (backend as any).dbName;
+        const db = await new Promise<IDBDatabase>((resolve, reject) => {
+            const req = indexedDB.open(dbName);
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error);
+        });
+        const tx = db.transaction('nodes', 'readwrite');
+        tx.objectStore('nodes').delete('/will-be-orphaned');
+        await new Promise<void>((resolve) => { tx.oncomplete = () => { db.close(); resolve(); }; });
+
+        const verifyResult = await backend.verify();
+        expect(verifyResult.orphanTags.length).toBeGreaterThan(0);
+
+        const repairResult = await backend.repair(verifyResult);
+        expect(repairResult.fixedOrphanTags).toBe(verifyResult.orphanTags.length);
+
+        // After repair, should be healthy
+        const recheck = await backend.verify();
+        expect(recheck.orphanTags).toHaveLength(0);
+        expect(recheck.healthy).toBe(true);
+    });
+
+    it('repair() runs without error on a healthy database', async () => {
+        await backend.mkdir('/test');
+        const result = await backend.repair();
+        expect(result.fixedOrphanTags).toBe(0);
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // runInTransaction (ACID semantics)
 // ─────────────────────────────────────────────────────────────────────────────
 

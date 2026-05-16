@@ -5,7 +5,7 @@
  */
 
 import type { IStorageBackend, FSNode, FSFileNode, FSDirectoryNode, IRecordStore, FSSearchQuery } from '@itookit/common';
-import { openDB, req, collectCursor, ALL_STORES, DB_VERSION, STORE_NODES, STORE_TAGS } from './utils';
+import { openDB, req, collectCursor, ALL_STORES, REQUIRED_STORES, DB_VERSION, STORE_NODES, STORE_TAGS } from './utils';
 import { IDBRecordStore, createRecordStore } from './record-store';
 import { STORE_RECORDS } from './utils';
 
@@ -23,6 +23,23 @@ interface NodeEntry {
 
 export interface IndexedDBBackendOptions {
     dbName?: string;
+}
+
+export interface VerifyResult {
+    /** True if the database is healthy (no issues detected). */
+    healthy: boolean;
+    /** Object store names that are missing from the database. */
+    missingStores: string[];
+    /** Paths of nodes whose parent directory does not exist. */
+    orphanNodes: string[];
+    /** Distinct parent paths that are referenced but missing. */
+    missingParents: string[];
+    /** Tag record IDs that reference non-existent paths. */
+    orphanTags: number[];
+    /** Total number of nodes scanned. */
+    totalNodes: number;
+    /** Total number of tag records scanned. */
+    totalTags: number;
 }
 
 export class IndexedDBBackend implements IStorageBackend {
@@ -54,6 +71,29 @@ export class IndexedDBBackend implements IStorageBackend {
                 createRecordStore(db);
             }
         });
+
+        // Runtime check: if any required store is missing, bump version to recreate
+        const missingStores = REQUIRED_STORES.filter(s => !this.db!.objectStoreNames.contains(s));
+        if (missingStores.length > 0) {
+            const nextVersion = this.db!.version + 1;
+            this.db!.close();
+            this.db = null;
+            this.db = await openDB(this.dbName, nextVersion, (db) => {
+                for (const storeName of missingStores) {
+                    if (storeName === STORE_NODES && !db.objectStoreNames.contains(STORE_NODES)) {
+                        const nodes = db.createObjectStore(STORE_NODES, { keyPath: 'path' });
+                        nodes.createIndex('type', 'type');
+                        nodes.createIndex('modifiedAt', 'modifiedAt');
+                    } else if (storeName === STORE_TAGS && !db.objectStoreNames.contains(STORE_TAGS)) {
+                        const tags = db.createObjectStore(STORE_TAGS, { keyPath: 'id', autoIncrement: true });
+                        tags.createIndex('tag', 'tag');
+                        tags.createIndex('path', 'path');
+                    } else if (storeName === STORE_RECORDS && !db.objectStoreNames.contains(STORE_RECORDS)) {
+                        createRecordStore(db);
+                    }
+                }
+            });
+        }
     }
 
     async close(): Promise<void> {
@@ -95,6 +135,7 @@ export class IndexedDBBackend implements IStorageBackend {
     }
 
     async mkdir(path: string): Promise<FSNode> {
+        await this._ensureParents(path);
         const existing = await this._getEntry(path);
         if (existing) return toFSNode(existing);
         const entry: NodeEntry = {
@@ -160,6 +201,7 @@ export class IndexedDBBackend implements IStorageBackend {
     }
 
     async write(path: string, content: Uint8Array): Promise<FSNode> {
+        await this._ensureParents(path);
         const existing = await this._getEntry(path);
         const entry: NodeEntry = {
             path,
@@ -223,10 +265,126 @@ export class IndexedDBBackend implements IStorageBackend {
     // ══ Transaction ══════════════════════════════════════════════
 
     async transaction<T>(fn: (tx: IStorageBackend) => Promise<T>): Promise<T> {
+        // Internal methods (_getEntry, _putEntry) each create their own
+        // short-lived IDB transactions. Creating an outer IDB tx here would
+        // deadlock them. For true ACID across operations, a TransactionalBackend
+        // proxy that reuses a single IDB transaction is needed.
         return fn(this);
     }
 
+    // ══ Health ═══════════════════════════════════════════════════
+
+    async verify(): Promise<VerifyResult> {
+        const db = this._db();
+        const result: VerifyResult = {
+            healthy: true,
+            missingStores: [],
+            orphanNodes: [],
+            missingParents: [],
+            orphanTags: [],
+            totalNodes: 0,
+            totalTags: 0,
+        };
+
+        // 1. Check all required stores exist
+        const storeSet = new Set(db.objectStoreNames);
+        for (const name of REQUIRED_STORES) {
+            if (!storeSet.has(name)) {
+                result.missingStores.push(name);
+                result.healthy = false;
+            }
+        }
+
+        // 2. Scan all nodes — verify parent integrity
+        const tx = db.transaction([STORE_NODES, STORE_TAGS], 'readonly');
+        const allNodes = await collectCursor<NodeEntry>(
+            tx.objectStore(STORE_NODES).openCursor(), c => c.value,
+        );
+        result.totalNodes = allNodes.length;
+
+        const existingPaths = new Set<string>(allNodes.map(n => n.path));
+        existingPaths.add('/'); // root is always considered to exist
+
+        const missingParentSet = new Set<string>();
+        for (const node of allNodes) {
+            if (node.path === '/') continue;
+            const parentPath = node.path.substring(0, node.path.lastIndexOf('/')) || '/';
+            if (!existingPaths.has(parentPath)) {
+                result.orphanNodes.push(node.path);
+                missingParentSet.add(parentPath);
+                result.healthy = false;
+            }
+        }
+        result.missingParents = [...missingParentSet];
+
+        // 3. Check orphaned tag references
+        const allTags = await collectCursor<{ id: number; path: string; tag: string }>(
+            tx.objectStore(STORE_TAGS).openCursor(), c => c.value,
+        );
+        result.totalTags = allTags.length;
+
+        for (const tag of allTags) {
+            if (!existingPaths.has(tag.path)) {
+                result.orphanTags.push(tag.id);
+                result.healthy = false;
+            }
+        }
+
+        return result;
+    }
+
+    async repair(issues?: VerifyResult): Promise<{ fixedOrphanTags: number }> {
+        const problems = issues ?? await this.verify();
+        let fixedOrphanTags = 0;
+
+        // Fix orphan tags by deleting them
+        if (problems.orphanTags.length > 0) {
+            const db = this._db();
+            const repairTx = db.transaction(STORE_TAGS, 'readwrite');
+            const store = repairTx.objectStore(STORE_TAGS);
+            for (const id of problems.orphanTags) {
+                store.delete(id);
+                fixedOrphanTags++;
+            }
+        }
+
+        // missingStores requires re-init (destructive to data).
+        // orphanNodes / missingParents cannot be auto-repaired
+        // without knowledge of the intended filesystem structure.
+
+        return { fixedOrphanTags };
+    }
+
     // ══ Internal ═════════════════════════════════════════════════
+
+    private async _ensureParents(path: string): Promise<void> {
+        const parentPath = path.substring(0, path.lastIndexOf('/')) || '/';
+        if (parentPath === '/') return;
+
+        const segments = parentPath.split('/').filter(Boolean);
+        let current = '';
+        for (const segment of segments) {
+            current += '/' + segment;
+            const entry = await this._getEntry(current);
+            if (entry) {
+                if (entry.type === 'file') {
+                    throw new Error(`ENOTDIR: ${current} is a file`);
+                }
+                continue;
+            }
+            const dirEntry: NodeEntry = {
+                path: current,
+                type: 'directory',
+                content: new ArrayBuffer(0),
+                size: 0,
+                createdAt: Date.now(),
+                modifiedAt: Date.now(),
+                tags: [],
+                metadata: '{}',
+            };
+            await this._putEntry(dirEntry);
+        }
+    }
 
     private async _getEntry(path: string): Promise<NodeEntry | null> {
         const db = this._db();
