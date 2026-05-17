@@ -148,6 +148,13 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService> {
   }
 
   async start(): Promise<VFSNodeUI | undefined> {
+    const persistedActiveId = this.statePort.getState().activeId;
+    const persistedExpanded = [...this.statePort.getState().expandedFolderIds];
+    console.log('[VFSUIShell] start: scopeId=', this.options.scopeId,
+      'activeId=', persistedActiveId,
+      'expandedFolderIds=', persistedExpanded,
+      'selectedItemIds=', [...this.statePort.getState().selectedItemIds]);
+
     this.nodeList.init();
     this.fileOutline?.init();
     this.moveToModal.init();
@@ -163,23 +170,34 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService> {
 
       const { expandedFolderIds, items } = this.statePort.getState();
 
-      // 只找根级（parentId === null）且在 expandedFolderIds 中的第一个目录
-      // 手风琴约束：根级只展开一个
+      // Restore directory expansion from persisted state.
+      // Directories at root level may have parentId === null or parentId === '/'
+      // depending on the storage backend — accept both.
+      // Must await so the full expansion chain completes before we check
+      // whether the persisted activeId is now reachable.
+      const isRootLevel = (n: VFSNodeUI) =>
+        n.metadata.parentId === null || n.metadata.parentId === '/';
+
       for (const folderId of expandedFolderIds) {
         const node = findNodeById(items, folderId);
-        // 只处理根级目录，且 children 未加载
+        console.log('[VFSUIShell] start: expandLoop candidate:', folderId,
+          'found=', !!node,
+          'type=', node?.type,
+          'parentId=', node?.metadata?.parentId,
+          'hasChildren=', node?.children !== undefined);
+        // Only expand root-level directories whose children haven't been loaded yet
         if (
           node &&
           node.type === 'directory' &&
-          node.metadata.parentId === null &&
+          isRootLevel(node) &&
           node.children === undefined
         ) {
-          void this.engineAdapter.expandDirectory(folderId);
-          break;  // 根级只展开一个v
+          console.log('[VFSUIShell] start: expanding root directory:', folderId);
+          await this.engineAdapter.expandDirectory(folderId);
+          break;  // accordion: at most one root directory expanded
         }
       }
     }
-
 
     const state = this.statePort.getState();
     const startup = this.options.fileCreation;
@@ -201,8 +219,30 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService> {
       }
     }
 
-    let active = this.getActiveSession();
-    if (!active && this.statePort.getState().selectedItemIds.size === 0) {
+    // After data load + directory expansion is complete, check whether the
+    // persisted activeId is now reachable. If it is, re-emit sessionSelected
+    // so the editor connector picks up the restored file.
+    // This handles the case where activeId points to a file inside a directory
+    // — without this, the STATE_LOAD_SUCCESS _forceUpdateTimestamp fires too
+    // early (before children are loaded) and the sessionSelected event is
+    // "wasted" with item=undefined.
+    const currentActiveId = this.statePort.getState().activeId;
+    const activeAfterLoad = this.getActiveSession();
+    console.log('[VFSUIShell] start: after load+expand, activeId=', currentActiveId,
+      'found=', !!activeAfterLoad,
+      'selectedItemIds=', [...this.statePort.getState().selectedItemIds]);
+
+    let active = activeAfterLoad;
+    if (currentActiveId && activeAfterLoad) {
+      // activeId was restored and the file is now reachable — force
+      // re-emission so editor-connector opens the file.
+      console.log('[VFSUIShell] start: re-emitting sessionSelected for restored activeId=', currentActiveId);
+      this.statePort.dispatch({
+        type: 'SESSION_SELECT',
+        payload: { sessionId: currentActiveId }
+      });
+      active = this.getActiveSession();
+    } else if (!active && this.statePort.getState().selectedItemIds.size === 0) {
       const findFirst = (items: VFSNodeUI[]): VFSNodeUI | null => {
         for (const item of items) {
           if (item.type === 'file') return item;
@@ -213,6 +253,7 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService> {
       };
 
       const first = findFirst(this.statePort.getState().items);
+      console.log('[VFSUIShell] start: no active session, findFirst=', first?.id ?? null);
       if (first) {
         this.commandPort.execute('nav:selectSession', {
           sessionId: first.id,
@@ -221,6 +262,7 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService> {
       }
     }
 
+    console.log('[VFSUIShell] start: done, active=', active?.id ?? null);
     return active;
   }
 
@@ -362,6 +404,9 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService> {
         state._forceUpdateTimestamp !== this.lastForceTimestamp;
 
       if (activeChanged || this.navigationWasUserAction || forceUpdate) {
+        console.log('[VFSUIShell] emit sessionSelected: activeId=', state.activeId,
+          'item=', currentActive?.id ?? null,
+          'reason=', { activeChanged, wasUserAction: this.navigationWasUserAction, forceUpdate });
         this.lastActiveId = state.activeId;
         if (forceUpdate) this.lastForceTimestamp = state._forceUpdateTimestamp;
         this.eventPort.emit('sessionSelected', { item: currentActive });

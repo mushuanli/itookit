@@ -38,6 +38,8 @@ export class EngineAdapter {
 
     async loadData(): Promise<void> {
         adapterDEBUG.loadData('explicit call');
+        const { activeId } = this.store.getState();
+        console.log('[EngineAdapter] loadData start, persisted activeId:', activeId);
         try {
             this.store.dispatch({ type: 'ITEMS_LOAD_START' });
             const rootChildren = await this.engine.driver.getChildren('/') as FSNode[];
@@ -48,6 +50,8 @@ export class EngineAdapter {
                 this.showFileExtensions
             );
             const tags = this.buildTagsMap(uiItems);
+            console.log('[EngineAdapter] loadData: loaded', uiItems.length, 'root items, ids:',
+                uiItems.map(i => i.id));
             adapterDEBUG.dispatch('STATE_LOAD_SUCCESS', `${uiItems.length} items`);
             this.store.dispatch({
                 type: 'STATE_LOAD_SUCCESS',
@@ -236,8 +240,12 @@ export class EngineAdapter {
     }
 
     async expandDirectory(folderId: string): Promise<void> {
-        if (this.loadingFolderIds.has(folderId)) return;
+        if (this.loadingFolderIds.has(folderId)) {
+            console.log('[EngineAdapter] expandDirectory skipped (already loading):', folderId);
+            return;
+        }
         this.loadingFolderIds.add(folderId);
+        console.log('[EngineAdapter] expandDirectory start:', folderId);
 
         try {
             const children = await this.engine.driver.getChildren(folderId) as FSNode[];
@@ -245,11 +253,16 @@ export class EngineAdapter {
                 mapFSNodeToUIItem(n, this.iconResolver, undefined, this.showFileExtensions)
             );
 
+            console.log('[EngineAdapter] expandDirectory loaded:', folderId, `→ ${uiChildren.length} children`,
+                uiChildren.filter(c => c.type === 'directory').map(c => c.id));
+
             this.store.dispatch({
                 type: 'FOLDER_CHILDREN_LOADED',
                 payload: { parentId: folderId, children: uiChildren },
             });
 
+            // Recursively expand persisted subdirectories so the full tree is
+            // restored before the shell re-emits sessionSelected.
             const { expandedFolderIds } = this.store.getState();
             for (const child of uiChildren) {
                 if (
@@ -257,14 +270,15 @@ export class EngineAdapter {
                     expandedFolderIds.has(child.id) &&
                     child.children === undefined
                 ) {
-                    void this.expandDirectory(child.id);
-                    break;
+                    await this.expandDirectory(child.id);
+                    break; // accordion: at most one child branch per level
                 }
             }
         } catch (err) {
             console.error('[EngineAdapter] expandDirectory failed:', folderId, err);
         } finally {
             this.loadingFolderIds.delete(folderId);
+            console.log('[EngineAdapter] expandDirectory done:', folderId);
         }
     }
 
