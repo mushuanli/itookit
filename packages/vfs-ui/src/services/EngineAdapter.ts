@@ -7,7 +7,7 @@ import type { IModuleFS, FSNode, FSEventType, FSEvent } from '@itookit/common';
 import type { IStatePort, IFileTypePort } from '../contracts/ports';
 import type { VFSNodeUI, TagInfo } from '../contracts/types';
 import { mapFSNodeToUIItem, mapFSNodesToUIItems } from './NodeMapper';
-import { shouldFilterNode, traverseNodes } from '../utils/helpers';
+import { findNodeById, shouldFilterNode, traverseNodes } from '../utils/helpers';
 import { adapterDEBUG } from '../utils/adapter-debug';
 
 export class EngineAdapter {
@@ -38,8 +38,6 @@ export class EngineAdapter {
 
     async loadData(): Promise<void> {
         adapterDEBUG.loadData('explicit call');
-        const { activeId } = this.store.getState();
-        console.log('[EngineAdapter] loadData start, persisted activeId:', activeId);
         try {
             this.store.dispatch({ type: 'ITEMS_LOAD_START' });
             const rootChildren = await this.engine.driver.getChildren('/') as FSNode[];
@@ -50,8 +48,6 @@ export class EngineAdapter {
                 this.showFileExtensions
             );
             const tags = this.buildTagsMap(uiItems);
-            console.log('[EngineAdapter] loadData: loaded', uiItems.length, 'root items, ids:',
-                uiItems.map(i => i.id));
             adapterDEBUG.dispatch('STATE_LOAD_SUCCESS', `${uiItems.length} items`);
             this.store.dispatch({
                 type: 'STATE_LOAD_SUCCESS',
@@ -60,6 +56,31 @@ export class EngineAdapter {
         } catch (error) {
             console.error('[EngineAdapter] Failed to load data:', error);
             this.store.dispatch({ type: 'ITEMS_LOAD_ERROR', payload: { error } });
+        }
+    }
+
+    /**
+     * Restore directory expansion from persisted expandedFolderIds.
+     *
+     * Finds the first root-level directory whose children aren't loaded yet
+     * and expands it (recursively). The accordion constraint means at most
+     * one root-level path is restored.
+     *
+     * Root-level items may have parentId === null or parentId === '/'
+     * depending on the storage backend — handled transparently here.
+     */
+    async restoreExpansion(expandedFolderIds: Set<string>): Promise<void> {
+        const { items } = this.store.getState();
+        for (const folderId of expandedFolderIds) {
+            const node = findNodeById(items, folderId);
+            if (!node || node.type !== 'directory') continue;
+
+            const pid = node.metadata.parentId;
+            const isRoot = pid === null || pid === '/';
+            if (!isRoot || node.children !== undefined) continue;
+
+            await this.expandDirectory(folderId);
+            break; // accordion: at most one root branch
         }
     }
 
@@ -240,21 +261,14 @@ export class EngineAdapter {
     }
 
     async expandDirectory(folderId: string): Promise<void> {
-        if (this.loadingFolderIds.has(folderId)) {
-            console.log('[EngineAdapter] expandDirectory skipped (already loading):', folderId);
-            return;
-        }
+        if (this.loadingFolderIds.has(folderId)) return;
         this.loadingFolderIds.add(folderId);
-        console.log('[EngineAdapter] expandDirectory start:', folderId);
 
         try {
             const children = await this.engine.driver.getChildren(folderId) as FSNode[];
             const uiChildren = children.map(n =>
                 mapFSNodeToUIItem(n, this.iconResolver, undefined, this.showFileExtensions)
             );
-
-            console.log('[EngineAdapter] expandDirectory loaded:', folderId, `→ ${uiChildren.length} children`,
-                uiChildren.filter(c => c.type === 'directory').map(c => c.id));
 
             this.store.dispatch({
                 type: 'FOLDER_CHILDREN_LOADED',
@@ -278,7 +292,6 @@ export class EngineAdapter {
             console.error('[EngineAdapter] expandDirectory failed:', folderId, err);
         } finally {
             this.loadingFolderIds.delete(folderId);
-            console.log('[EngineAdapter] expandDirectory done:', folderId);
         }
     }
 

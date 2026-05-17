@@ -72,7 +72,7 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService> {
 
   // ===== 全部通过接口持有 =====
   private readonly statePort: IStatePort;
-  private readonly commandPort: ICommandPort;
+  private commandPort: ICommandPort;
   private readonly eventPort: IEventPort;
   private readonly fileTypePort: IFileTypePort;
 
@@ -121,8 +121,8 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService> {
     this.lastActiveId = this.statePort.getState().activeId;
     this.lastSidebarState = this.statePort.getState().isSidebarCollapsed;
 
-    // Intercept nav commands for user action tracking
-    this.interceptNavigation();
+    // Wrap command port to intercept nav commands
+    this.commandPort = this.wrapCommandPort(this.commandPort);
 
     // ===== Initialize UI =====
     this.initializeComponents();
@@ -148,13 +148,6 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService> {
   }
 
   async start(): Promise<VFSNodeUI | undefined> {
-    const persistedActiveId = this.statePort.getState().activeId;
-    const persistedExpanded = [...this.statePort.getState().expandedFolderIds];
-    console.log('[VFSUIShell] start: scopeId=', this.options.scopeId,
-      'activeId=', persistedActiveId,
-      'expandedFolderIds=', persistedExpanded,
-      'selectedItemIds=', [...this.statePort.getState().selectedItemIds]);
-
     this.nodeList.init();
     this.fileOutline?.init();
     this.moveToModal.init();
@@ -163,107 +156,78 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService> {
       return this.getActiveSession();
     }
 
+    // 1. Load root-level data from engine
     await this.engineAdapter.loadData();
 
     if (!this.options.readOnly) {
+      // 2. Start listening to engine events
       this.engineAdapter.connectEngineEvents();
 
-      const { expandedFolderIds, items } = this.statePort.getState();
-
-      // Restore directory expansion from persisted state.
-      // Directories at root level may have parentId === null or parentId === '/'
-      // depending on the storage backend — accept both.
-      // Must await so the full expansion chain completes before we check
-      // whether the persisted activeId is now reachable.
-      const isRootLevel = (n: VFSNodeUI) =>
-        n.metadata.parentId === null || n.metadata.parentId === '/';
-
-      for (const folderId of expandedFolderIds) {
-        const node = findNodeById(items, folderId);
-        console.log('[VFSUIShell] start: expandLoop candidate:', folderId,
-          'found=', !!node,
-          'type=', node?.type,
-          'parentId=', node?.metadata?.parentId,
-          'hasChildren=', node?.children !== undefined);
-        // Only expand root-level directories whose children haven't been loaded yet
-        if (
-          node &&
-          node.type === 'directory' &&
-          isRootLevel(node) &&
-          node.children === undefined
-        ) {
-          console.log('[VFSUIShell] start: expanding root directory:', folderId);
-          await this.engineAdapter.expandDirectory(folderId);
-          break;  // accordion: at most one root directory expanded
-        }
-      }
+      // 3. Restore directory expansion from persisted state
+      await this.engineAdapter.restoreExpansion(
+        this.statePort.getState().expandedFolderIds
+      );
     }
 
+    // 4. Create default file if the tree is empty
+    await this.ensureDefaultFile();
+
+    // 5. Restore the previously active session, or pick the first file
+    return this.restoreActiveSession();
+  }
+
+  // ── Private helpers ──────────────────────────────────────────────────
+
+  private async ensureDefaultFile(): Promise<void> {
     const state = this.statePort.getState();
     const startup = this.options.fileCreation;
-    if (
-      !state.items.length &&
-      !this.options.readOnly &&
-      startup?.startupFileName
-    ) {
+    if (!state.items.length && !this.options.readOnly && startup?.startupFileName) {
       try {
         await this.vfsService.createFile({
           title: startup.startupFileName,
-          content:
-            startup.startupContent ||
-            '# Welcome\n\nSelect a file to start.',
+          content: startup.startupContent || '# Welcome\n\nSelect a file to start.',
           parentId: null,
         });
       } catch (e) {
         console.error('[VFSUIShell] Failed to create default file:', e);
       }
     }
+  }
 
-    // After data load + directory expansion is complete, check whether the
-    // persisted activeId is now reachable. If it is, re-emit sessionSelected
-    // so the editor connector picks up the restored file.
-    // This handles the case where activeId points to a file inside a directory
-    // — without this, the STATE_LOAD_SUCCESS _forceUpdateTimestamp fires too
-    // early (before children are loaded) and the sessionSelected event is
-    // "wasted" with item=undefined.
-    const currentActiveId = this.statePort.getState().activeId;
-    const activeAfterLoad = this.getActiveSession();
-    console.log('[VFSUIShell] start: after load+expand, activeId=', currentActiveId,
-      'found=', !!activeAfterLoad,
-      'selectedItemIds=', [...this.statePort.getState().selectedItemIds]);
+  private restoreActiveSession(): VFSNodeUI | undefined {
+    const { activeId, selectedItemIds } = this.statePort.getState();
+    const active = this.getActiveSession();
 
-    let active = activeAfterLoad;
-    if (currentActiveId && activeAfterLoad) {
-      // activeId was restored and the file is now reachable — force
-      // re-emission so editor-connector opens the file.
-      console.log('[VFSUIShell] start: re-emitting sessionSelected for restored activeId=', currentActiveId);
+    if (activeId && active) {
+      // Persisted activeId is reachable — re-emit so editor connector opens the file.
+      // SESSION_SELECT with same oldId sets _forceUpdateTimestamp → connectStoreToPublicEvents emits.
       this.statePort.dispatch({
         type: 'SESSION_SELECT',
-        payload: { sessionId: currentActiveId }
+        payload: { sessionId: activeId }
       });
-      active = this.getActiveSession();
-    } else if (!active && this.statePort.getState().selectedItemIds.size === 0) {
-      const findFirst = (items: VFSNodeUI[]): VFSNodeUI | null => {
-        for (const item of items) {
-          if (item.type === 'file') return item;
-          const f = item.children && findFirst(item.children);
-          if (f) return f;
-        }
-        return null;
-      };
-
-      const first = findFirst(this.statePort.getState().items);
-      console.log('[VFSUIShell] start: no active session, findFirst=', first?.id ?? null);
-      if (first) {
-        this.commandPort.execute('nav:selectSession', {
-          sessionId: first.id,
-        });
-        active = this.getActiveSession();
-      }
+      return this.getActiveSession();
     }
 
-    console.log('[VFSUIShell] start: done, active=', active?.id ?? null);
-    return active;
+    // No valid persisted session with stale selected items — nothing to restore.
+    if (selectedItemIds.size > 0) return undefined;
+
+    // Pick the first file in the tree.
+    const first = this.findFirstFile(this.statePort.getState().items);
+    if (first) {
+      this.commandPort.execute('nav:selectSession', { sessionId: first.id });
+      return this.getActiveSession();
+    }
+
+    return undefined;
+  }
+
+  private findFirstFile(items: VFSNodeUI[]): VFSNodeUI | null {
+    for (const item of items) {
+      if (item.type === 'file') return item;
+      const f = item.children && this.findFirstFile(item.children);
+      if (f) return f;
+    }
+    return null;
   }
 
   getActiveSession(): VFSNodeUI | undefined {
@@ -313,34 +277,39 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService> {
 
   // ===== Private Methods =====
 
-  private interceptNavigation(): void {
-    const originalExecute = this.commandPort.execute.bind(this.commandPort);
+  /**
+   * Wraps the raw command port to intercept nav commands before they reach
+   * handlers. Uses object composition instead of monkey-patching so the
+   * original port stays unmodified.
+   */
+  private wrapCommandPort(raw: ICommandPort): ICommandPort {
     const shell = this;
+    const originalExecute = raw.execute.bind(raw);
+    return {
+      ...raw,
+      execute<T extends keyof import('../contracts/commands').CommandMap>(
+        command: T,
+        payload: import('../contracts/commands').CommandMap[T]
+      ): void {
+        if (command === 'nav:selectSession') {
+          shell.navigationWasUserAction = true;
+        }
 
-    (this.commandPort as any).execute = <T extends keyof import('../contracts/commands').CommandMap>(
-      command: T,
-      payload: import('../contracts/commands').CommandMap[T]
-    ): void => {
-      if (command === 'nav:selectSession') {
-        shell.navigationWasUserAction = true;
-      }
-
-      // Lazy-load directory children when the user expands a folder.
-      // Checked BEFORE the dispatch so expandedFolderIds still reflects the old state,
-      // making it easy to detect that the folder is about to be expanded (not collapsed).
-      if (command === 'nav:toggleFolder') {
-        const folderId = (payload as { folderId: string }).folderId;
-        const state = shell.statePort.getState();
-        const willExpand = !state.expandedFolderIds.has(folderId);
-        if (willExpand) {
-          const node = findNodeById(state.items, folderId);
-          if (node?.type === 'directory' && node.children === undefined) {
-            void shell.engineAdapter.expandDirectory(folderId);
+        // Lazy-load directory children when the user expands a folder.
+        if (command === 'nav:toggleFolder') {
+          const folderId = (payload as { folderId: string }).folderId;
+          const state = shell.statePort.getState();
+          const willExpand = !state.expandedFolderIds.has(folderId);
+          if (willExpand) {
+            const node = findNodeById(state.items, folderId);
+            if (node?.type === 'directory' && node.children === undefined) {
+              void shell.engineAdapter.expandDirectory(folderId);
+            }
           }
         }
-      }
 
-      originalExecute(command, payload);
+        originalExecute(command, payload);
+      }
     };
   }
 
@@ -404,9 +373,6 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService> {
         state._forceUpdateTimestamp !== this.lastForceTimestamp;
 
       if (activeChanged || this.navigationWasUserAction || forceUpdate) {
-        console.log('[VFSUIShell] emit sessionSelected: activeId=', state.activeId,
-          'item=', currentActive?.id ?? null,
-          'reason=', { activeChanged, wasUserAction: this.navigationWasUserAction, forceUpdate });
         this.lastActiveId = state.activeId;
         if (forceUpdate) this.lastForceTimestamp = state._forceUpdateTimestamp;
         this.eventPort.emit('sessionSelected', { item: currentActive });
