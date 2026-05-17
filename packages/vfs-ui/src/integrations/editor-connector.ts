@@ -272,7 +272,11 @@ export function connectEditorLifecycle(
   );
 
   const unsubSession = vfsManager.on('sessionSelected', handleSessionChange);
-  handleSessionChange({ item: vfsManager.getActiveSession() });
+
+  // Set initial placeholder — the first sessionSelected event will replace it
+  // when VFSUIShell.start() restores the active session.
+  editorContainer.innerHTML =
+    '<div class="editor-placeholder">Select a file...</div>';
 
   return () => {
     unsubSession();

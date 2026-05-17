@@ -79,13 +79,6 @@ export class VFSStore implements IStatePort {
           status: 'success',
           error: null,
         });
-        if (draft.activeId) {
-          draft._forceUpdateTimestamp = Date.now();
-          console.log('[VFSStore] STATE_LOAD_SUCCESS: activeId=', draft.activeId,
-            '_forceUpdateTimestamp set, items.length=', payload.items.length);
-        } else {
-          console.log('[VFSStore] STATE_LOAD_SUCCESS: no activeId, items.length=', payload.items.length);
-        }
       },
       'ITEMS_LOAD_START': () => {
         draft.status = 'loading';
@@ -160,10 +153,6 @@ export class VFSStore implements IStatePort {
           draft.expandedFolderIds.add(payload.parentId);
         }
         draft.tags = rebuildTagsMap(draft.items);
-        console.log('[VFSStore] FOLDER_CHILDREN_LOADED: parentId=', payload.parentId,
-          'children.length=', (payload.children as VFSNodeUI[]).length,
-          'activeId=', draft.activeId,
-          'expandedFolderIds=', [...draft.expandedFolderIds]);
       },
       'FOLDER_TOGGLE': () => this.handleFolderToggle(draft, payload.folderId),
       'OUTLINE_TOGGLE': () => this.toggleSet(draft.expandedOutlineIds, payload.itemId),
@@ -313,19 +302,13 @@ export class VFSStore implements IStatePort {
         draft.creatingItem = null;
         draft.selectedItemIds = new Set([sessionId]);
         if (oldId === sessionId) {
+          // Re-clicking the already-active file — force a refresh.
           draft._forceUpdateTimestamp = Date.now();
-          console.log('[VFSStore] SESSION_SELECT: re-click same file, _forceUpdateTimestamp set. sessionId=', sessionId);
-        } else {
-          console.log('[VFSStore] SESSION_SELECT: switched file, oldId=', oldId, '→ newId=', sessionId);
-          if (oldId) {
-            draft.expandedOutlineIds.delete(oldId);
-          }
+        } else if (oldId) {
+          draft.expandedOutlineIds.delete(oldId);
         }
-      } else {
-        console.log('[VFSStore] SESSION_SELECT: item not found or not a file, sessionId=', sessionId, 'item=', item?.type ?? null);
       }
     } else {
-      console.log('[VFSStore] SESSION_SELECT: clearing activeId');
       if (draft.activeId) draft.expandedOutlineIds.delete(draft.activeId);
       draft.activeId = null;
     }
