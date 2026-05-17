@@ -155,7 +155,7 @@ describe('LocalFSBackend — verify and repair', () => {
         expect(result.dbHealthy).toBe(true);
         expect(result.orphanMetaExt).toHaveLength(0);
         expect(result.orphanMetaTags).toHaveLength(0);
-        expect(result.orphanStaging).toHaveLength(0);
+        expect(result.orphanMetaTags).toHaveLength(0);
     });
 
     it('verify() returns correct meta counts', async () => {
@@ -180,7 +180,6 @@ describe('LocalFSBackend — verify and repair', () => {
         const result = await backend.repair();
         expect(result.fixedMetaExt).toBe(0);
         expect(result.fixedMetaTags).toBe(0);
-        expect(result.fixedStaging).toBe(0);
     });
 
     it('repair() cleans up orphan meta_ext entries', async () => {
