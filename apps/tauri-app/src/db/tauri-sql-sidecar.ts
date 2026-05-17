@@ -68,11 +68,6 @@ const DDL_STATEMENTS = [
     )`,
     'CREATE INDEX IF NOT EXISTS idx_meta_tags_tag ON meta_tags(tag)',
 
-    // Content staging for atomic write-before-commit
-    `CREATE TABLE IF NOT EXISTS staging (
-        path       TEXT PRIMARY KEY,
-        stage_path TEXT NOT NULL
-    )`,
 ];
 
 export class TauriSqlSidecarDb implements ISidecarDb {
@@ -182,34 +177,6 @@ export class TauriSqlSidecarDb implements ISidecarDb {
             [jsonPath, value],
         );
         return rows.map(r => r.path);
-    }
-
-    // ── staging ────────────────────────────────────────────────────────────────
-
-    async getStagePath(ref: string): Promise<string | null> {
-        const rows = await this.db.select<Array<{ path: string }>>(
-            'SELECT stage_path FROM staging WHERE path = ?',
-            [ref],
-        );
-        return rows[0]?.path ?? null;
-    }
-
-    async setStage(ref: string, stagePath: string): Promise<void> {
-        await this.db.execute(
-            'INSERT OR REPLACE INTO staging (path, stage_path) VALUES (?, ?)',
-            [ref, stagePath],
-        );
-    }
-
-    async clearStage(ref: string): Promise<void> {
-        await this.db.execute('DELETE FROM staging WHERE path = ?', [ref]);
-    }
-
-    async allStaged(): Promise<Array<{ ref: string; path: string }>> {
-        const rows = await this.db.select<Array<{ path: string; stage_path: string }>>(
-            'SELECT path as ref, stage_path FROM staging',
-        );
-        return rows.map(r => ({ ref: r.ref, path: r.stage_path }));
     }
 
     // ── health ─────────────────────────────────────────────────────────────────
