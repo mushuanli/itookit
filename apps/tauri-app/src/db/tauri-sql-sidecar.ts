@@ -3,24 +3,23 @@
  *
  * TauriSqlSidecarDb — ISidecarDb backed by @tauri-apps/plugin-sql (Rust SQLite).
  *
- * IMPORTANT: @tauri-apps/plugin-sql's execute() / select() uses rusqlite
- * underneath, which only accepts ONE statement per call.  The shared DDL
- * string cannot be passed as a single execute() argument.  We split the
- * schema into individual statements and execute them one-by-one.
+ * v4.1: Path-based schema — aligns with BetterSqliteSidecarDb.
+ *   - meta_ext keyed by path (TEXT), no ino allocation
+ *   - meta_tags references meta_ext(path) ON DELETE CASCADE
+ *   - Only stores non-derivable metadata (tags, icon, device_handler, etc.)
  *
- * PRAGMAs that return a result row (journal_mode, etc.) are run via select()
- * to avoid "row returned by non-rowid table" errors from rusqlite's execute().
+ * IMPORTANT: @tauri-apps/plugin-sql's execute() / select() uses rusqlite
+ * underneath, which only accepts ONE statement per call.
  */
 
 import Database from '@tauri-apps/plugin-sql';
 import { SCHEMA_VERSION } from '@itookit/vfsdriver-localfs';
-import type { ISidecarDb, PathEntry, MetaExtRow } from '@itookit/vfsdriver-localfs';
+import type { ISidecarDb, MetaExtRow } from '@itookit/vfsdriver-localfs';
 
 // ── Async mutex ───────────────────────────────────────────────────────────────
-// @tauri-apps/plugin-sql uses sqlx connection pools; PRAGMA busy_timeout only
-// applies to whichever connection is checked out, not to future pool entries.
-// We enforce transaction serialization at the JS layer so BEGIN IMMEDIATE never
-// races against another active write on the same file.
+// @tauri-apps/plugin-sql uses sqlx connection pools; we serialize write operations
+// so BEGIN IMMEDIATE never races against another active write on the same file.
+
 class AsyncMutex {
     private locked = false;
     private queue: Array<() => void> = [];
@@ -32,12 +31,49 @@ class AsyncMutex {
 
     release(): void {
         if (this.queue.length > 0) {
-            this.queue.shift()!();   // hand lock to next waiter
+            this.queue.shift()!();
         } else {
             this.locked = false;
         }
     }
 }
+
+// ── Path-based DDL — one statement per execute() ──────────────────────────────
+
+const DDL_STATEMENTS = [
+    // PRAGMAs via select() (they return rows)
+    'PRAGMA journal_mode = WAL',
+    'PRAGMA busy_timeout = 30000',
+    'PRAGMA foreign_keys = ON',
+
+    // Schema version
+    'CREATE TABLE IF NOT EXISTS _schema_version (version INTEGER PRIMARY KEY)',
+
+    // Non-derivable metadata keyed by relative path
+    `CREATE TABLE IF NOT EXISTS meta_ext (
+        path            TEXT PRIMARY KEY,
+        icon            TEXT,
+        device_handler  TEXT,
+        is_asset_dir    INTEGER NOT NULL DEFAULT 0,
+        tags            TEXT,
+        metadata        TEXT,
+        extra           TEXT
+    )`,
+
+    // Materialised tag index — FK to meta_ext
+    `CREATE TABLE IF NOT EXISTS meta_tags (
+        path TEXT NOT NULL REFERENCES meta_ext(path) ON DELETE CASCADE,
+        tag  TEXT NOT NULL,
+        PRIMARY KEY (path, tag)
+    )`,
+    'CREATE INDEX IF NOT EXISTS idx_meta_tags_tag ON meta_tags(tag)',
+
+    // Content staging for atomic write-before-commit
+    `CREATE TABLE IF NOT EXISTS staging (
+        path       TEXT PRIMARY KEY,
+        stage_path TEXT NOT NULL
+    )`,
+];
 
 export class TauriSqlSidecarDb implements ISidecarDb {
     private readonly txMutex = new AsyncMutex();
@@ -52,83 +88,19 @@ export class TauriSqlSidecarDb implements ISidecarDb {
         return instance;
     }
 
-    // ── Path → ino helpers ─────────────────────────────────────────────────────
-
-    private _relPath(path: string): string {
-        return path.startsWith('/') ? path.slice(1) : path;
-    }
-
-    private async _pathToIno(path: string, type: 'file' | 'directory' = 'file'): Promise<number> {
-        const rel = this._relPath(path);
-        const ino = await this.getInoForRel(rel);
-        if (ino !== null) return ino;
-        // Auto-register paths not yet in path_ino (handles files created without explicit registerPath)
-        return this.registerPath(rel, type, Date.now());
-    }
-
     // ── Schema ─────────────────────────────────────────────────────────────────
 
     private async initSchema(): Promise<void> {
-        // PRAGMAs: use select() because rusqlite's execute() rejects statements
-        // that return rows (journal_mode returns the new mode as a result row).
-        await this.db.select('PRAGMA journal_mode = WAL');
-        // Wait up to 5s on a locked DB instead of immediately returning SQLITE_BUSY.
-        // Needed because multiple backends initialise concurrently during boot.
-        await this.db.select('PRAGMA busy_timeout = 30000');
-        await this.db.select('PRAGMA foreign_keys = ON');
+        for (const stmt of DDL_STATEMENTS) {
+            // PRAGMAs return rows → use select(); DDL → use execute()
+            if (stmt.startsWith('PRAGMA')) {
+                await this.db.select(stmt);
+            } else {
+                await this.db.execute(stmt);
+            }
+        }
 
-        // DDL: one statement per execute() call (rusqlite restriction)
-        await this.db.execute(
-            'CREATE TABLE IF NOT EXISTS _schema_version (version INTEGER PRIMARY KEY)',
-        );
-        await this.db.execute(
-            'CREATE TABLE IF NOT EXISTS counters (name TEXT PRIMARY KEY, value INTEGER NOT NULL)',
-        );
-        await this.db.execute(
-            "INSERT OR IGNORE INTO counters (name, value) VALUES ('ino', 1)",
-        );
-        await this.db.execute(`
-            CREATE TABLE IF NOT EXISTS path_ino (
-                ino        INTEGER PRIMARY KEY,
-                rel        TEXT    NOT NULL UNIQUE,
-                type       TEXT    NOT NULL CHECK(type IN ('file', 'directory')),
-                created_at INTEGER NOT NULL
-            )
-        `);
-        // Root inode: ino=1, rel='' represents rootDir itself
-        await this.db.execute(
-            "INSERT OR IGNORE INTO path_ino (ino, rel, type, created_at) VALUES (1, '', 'directory', 0)",
-        );
-        await this.db.execute(`
-            CREATE TABLE IF NOT EXISTS meta_ext (
-                ino             INTEGER PRIMARY KEY REFERENCES path_ino(ino) ON DELETE CASCADE,
-                mime_type       TEXT,
-                icon            TEXT,
-                symlink_target  TEXT,
-                device_handler  TEXT,
-                asset_dir_ino   INTEGER,
-                owner_file_ino  INTEGER,
-                is_asset_dir    INTEGER NOT NULL DEFAULT 0,
-                tags            TEXT,
-                metadata        TEXT,
-                extra           TEXT
-            )
-        `);
-        await this.db.execute(`
-            CREATE TABLE IF NOT EXISTS meta_tags (
-                ino INTEGER NOT NULL REFERENCES path_ino(ino) ON DELETE CASCADE,
-                tag TEXT    NOT NULL,
-                PRIMARY KEY (ino, tag)
-            )
-        `);
-        await this.db.execute(
-            'CREATE INDEX IF NOT EXISTS idx_meta_tags_tag ON meta_tags (tag)',
-        );
-        await this.db.execute(
-            'CREATE TABLE IF NOT EXISTS staging (ref TEXT PRIMARY KEY, path TEXT NOT NULL)',
-        );
-
-        // Schema version stamp
+        // Version stamp
         const rows = await this.db.select<Array<{ version: number }>>(
             'SELECT version FROM _schema_version WHERE version = ?',
             [SCHEMA_VERSION],
@@ -141,92 +113,82 @@ export class TauriSqlSidecarDb implements ISidecarDb {
         }
     }
 
-    // ── Ino counter ────────────────────────────────────────────────────────────
+    // ── meta_ext (path-based) ──────────────────────────────────────────────────
 
-    async allocateIno(): Promise<number> {
-        await this.db.execute(
-            "UPDATE counters SET value = value + 1 WHERE name = 'ino'",
-        );
-        const rows = await this.db.select<Array<{ value: number }>>(
-            "SELECT value FROM counters WHERE name = 'ino'",
-        );
-        return rows[0].value;
-    }
-
-    // ── path_ino ───────────────────────────────────────────────────────────────
-
-    async getEntry(ino: number): Promise<PathEntry | null> {
-        const rows = await this.db.select<PathEntry[]>(
-            'SELECT rel, type FROM path_ino WHERE ino = ?',
-            [ino],
+    async getMetaExt(path: string): Promise<MetaExtRow | null> {
+        const rows = await this.db.select<MetaExtRow[]>(
+            'SELECT * FROM meta_ext WHERE path = ?',
+            [path],
         );
         return rows[0] ?? null;
     }
 
-    async getRelPath(ino: number): Promise<string | null> {
-        const rows = await this.db.select<Array<{ rel: string }>>(
-            'SELECT rel FROM path_ino WHERE ino = ?',
-            [ino],
-        );
-        return rows[0]?.rel ?? null;
-    }
-
-    async getInoForRel(rel: string): Promise<number | null> {
-        const rows = await this.db.select<Array<{ ino: number }>>(
-            'SELECT ino FROM path_ino WHERE rel = ?',
-            [rel],
-        );
-        return rows[0]?.ino ?? null;
-    }
-
-    async registerPath(rel: string, type: 'file' | 'directory', createdAt: number): Promise<number> {
-        const existing = await this.getInoForRel(rel);
-        if (existing !== null) return existing;
-        const ino = await this.allocateIno();
+    async upsertMetaExt(row: MetaExtRow): Promise<void> {
         await this.db.execute(
-            'INSERT OR IGNORE INTO path_ino (ino, rel, type, created_at) VALUES (?, ?, ?, ?)',
-            [ino, rel, type, createdAt],
+            `INSERT INTO meta_ext (path, icon, device_handler, is_asset_dir, tags, metadata, extra)
+             VALUES (?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(path) DO UPDATE SET
+                icon = excluded.icon, device_handler = excluded.device_handler,
+                is_asset_dir = excluded.is_asset_dir, tags = excluded.tags,
+                metadata = excluded.metadata, extra = excluded.extra`,
+            [
+                row.path, row.icon, row.device_handler, row.is_asset_dir,
+                row.tags, row.metadata, row.extra,
+            ],
         );
-        return ino;
     }
 
-    async insertPath(ino: number, rel: string, type: 'file' | 'directory', createdAt: number): Promise<void> {
+    async deleteMetaExt(path: string): Promise<void> {
+        await this.db.execute('DELETE FROM meta_ext WHERE path = ?', [path]);
+    }
+
+    // ── tags ───────────────────────────────────────────────────────────────────
+
+    async syncTags(path: string, tags: string[] | undefined): Promise<void> {
+        // Ensure meta_ext row exists (foreign_keys = ON requires it)
         await this.db.execute(
-            'INSERT OR IGNORE INTO path_ino (ino, rel, type, created_at) VALUES (?, ?, ?, ?)',
-            [ino, rel, type, createdAt],
+            `INSERT OR IGNORE INTO meta_ext (path, is_asset_dir) VALUES (?, 0)`,
+            [path],
         );
+        await this.db.execute('DELETE FROM meta_tags WHERE path = ?', [path]);
+        if (tags) {
+            for (const tag of tags) {
+                await this.db.execute(
+                    'INSERT OR IGNORE INTO meta_tags (path, tag) VALUES (?, ?)',
+                    [path, tag],
+                );
+            }
+        }
     }
 
-    async updateRel(ino: number, newRel: string): Promise<void> {
-        await this.db.execute('UPDATE path_ino SET rel = ? WHERE ino = ?', [newRel, ino]);
+    async getAllDistinctTags(): Promise<string[]> {
+        const rows = await this.db.select<Array<{ tag: string }>>(
+            'SELECT DISTINCT tag FROM meta_tags ORDER BY tag',
+        );
+        return rows.map(r => r.tag);
     }
 
-    async deletePath(ino: number): Promise<void> {
-        await this.db.execute('DELETE FROM path_ino WHERE ino = ?', [ino]);
+    async queryByTag(tag: string): Promise<string[]> {
+        const rows = await this.db.select<Array<{ path: string }>>(
+            'SELECT path FROM meta_tags WHERE tag = ?',
+            [tag],
+        );
+        return rows.map(r => r.path);
     }
 
-    async listDirectChildren(parentRel: string): Promise<Array<{ ino: number; name: string; type: 'file' | 'directory'; createdAt: number }>> {
-        type Row = { ino: number; rel: string; type: string; created_at: number };
-        const rows: Row[] = parentRel === ''
-            ? await this.db.select<Row[]>("SELECT ino, rel, type, created_at FROM path_ino WHERE rel != '' AND rel NOT GLOB '*/*'")
-            : await this.db.select<Row[]>(
-                'SELECT ino, rel, type, created_at FROM path_ino WHERE rel GLOB ? AND rel NOT GLOB ?',
-                [`${parentRel}/*`, `${parentRel}/*/*`],
-            );
-        const prefixLen = parentRel === '' ? 0 : parentRel.length + 1;
-        return rows.map(r => ({
-            ino: r.ino,
-            name: r.rel.slice(prefixLen),
-            type: r.type as 'file' | 'directory',
-            createdAt: r.created_at,
-        }));
+    async queryByMetadata(jsonPath: string, value: string): Promise<string[]> {
+        const rows = await this.db.select<Array<{ path: string }>>(
+            'SELECT path FROM meta_ext WHERE json_extract(metadata, ?) = ?',
+            [jsonPath, value],
+        );
+        return rows.map(r => r.path);
     }
 
-    // ── Staging ────────────────────────────────────────────────────────────────
+    // ── staging ────────────────────────────────────────────────────────────────
 
     async getStagePath(ref: string): Promise<string | null> {
         const rows = await this.db.select<Array<{ path: string }>>(
-            'SELECT path FROM staging WHERE ref = ?',
+            'SELECT stage_path FROM staging WHERE path = ?',
             [ref],
         );
         return rows[0]?.path ?? null;
@@ -234,101 +196,23 @@ export class TauriSqlSidecarDb implements ISidecarDb {
 
     async setStage(ref: string, stagePath: string): Promise<void> {
         await this.db.execute(
-            'INSERT OR REPLACE INTO staging (ref, path) VALUES (?, ?)',
+            'INSERT OR REPLACE INTO staging (path, stage_path) VALUES (?, ?)',
             [ref, stagePath],
         );
     }
 
     async clearStage(ref: string): Promise<void> {
-        await this.db.execute('DELETE FROM staging WHERE ref = ?', [ref]);
+        await this.db.execute('DELETE FROM staging WHERE path = ?', [ref]);
     }
 
     async allStaged(): Promise<Array<{ ref: string; path: string }>> {
-        return this.db.select<Array<{ ref: string; path: string }>>('SELECT ref, path FROM staging');
-    }
-
-    // ── meta_ext ───────────────────────────────────────────────────────────────
-
-    async getMetaExt(path: string): Promise<MetaExtRow | null> {
-        const ino = await this.getInoForRel(this._relPath(path));
-        if (ino === null) return null;
-        const rows = await this.db.select<MetaExtRow[]>(
-            'SELECT * FROM meta_ext WHERE ino = ?',
-            [ino],
+        const rows = await this.db.select<Array<{ path: string; stage_path: string }>>(
+            'SELECT path as ref, stage_path FROM staging',
         );
-        const row = rows[0] ?? null;
-        if (row) (row as any).path = path; // inject path for v4.1 MetaExtRow compatibility
-        return row;
+        return rows.map(r => ({ ref: r.ref, path: r.stage_path }));
     }
 
-    async upsertMetaExt(row: MetaExtRow): Promise<void> {
-        const ino = await this._pathToIno(row.path, 'file');
-        await this.db.execute(
-            `INSERT INTO meta_ext
-                (ino, icon, device_handler, is_asset_dir, tags, metadata, extra)
-             VALUES (?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT(ino) DO UPDATE SET
-                icon = excluded.icon, device_handler = excluded.device_handler,
-                is_asset_dir = excluded.is_asset_dir, tags = excluded.tags,
-                metadata = excluded.metadata, extra = excluded.extra`,
-            [
-                ino, row.icon, row.device_handler, row.is_asset_dir,
-                row.tags, row.metadata, row.extra,
-            ],
-        );
-    }
-
-    async deleteMetaExt(path: string): Promise<void> {
-        const ino = await this.getInoForRel(this._relPath(path));
-        if (ino === null) return;
-        await this.db.execute('DELETE FROM meta_ext WHERE ino = ?', [ino]);
-    }
-
-    async syncTags(path: string, tags: string[] | undefined): Promise<void> {
-        const ino = await this._pathToIno(path, 'file');
-        await this.db.execute('DELETE FROM meta_tags WHERE ino = ?', [ino]);
-        if (tags) {
-            for (const tag of tags) {
-                await this.db.execute(
-                    'INSERT OR IGNORE INTO meta_tags (ino, tag) VALUES (?, ?)',
-                    [ino, tag],
-                );
-            }
-        }
-    }
-
-    async queryByTag(tag: string): Promise<string[]> {
-        const rows = await this.db.select<Array<{ ino: number }>>(
-            'SELECT ino FROM meta_tags WHERE tag = ?',
-            [tag],
-        );
-        const paths: string[] = [];
-        for (const r of rows) {
-            const rel = await this.getRelPath(r.ino);
-            if (rel !== null) paths.push(rel);
-        }
-        return paths;
-    }
-
-    async getAllDistinctTags(): Promise<string[]> {
-        const rows = await this.db.select<Array<{ tag: string }>>(
-            'SELECT DISTINCT tag FROM meta_tags',
-        );
-        return rows.map(r => r.tag);
-    }
-
-    async queryByMetadata(jsonPath: string, value: string): Promise<string[]> {
-        const rows = await this.db.select<Array<{ ino: number }>>(
-            'SELECT ino FROM meta_ext WHERE json_extract(metadata, ?) = ?',
-            [jsonPath, value],
-        );
-        const paths: string[] = [];
-        for (const r of rows) {
-            const rel = await this.getRelPath(r.ino);
-            if (rel !== null) paths.push(rel);
-        }
-        return paths;
-    }
+    // ── health ─────────────────────────────────────────────────────────────────
 
     async healthCheck(): Promise<{ ok: boolean; error?: string }> {
         try {
@@ -342,12 +226,7 @@ export class TauriSqlSidecarDb implements ISidecarDb {
         }
     }
 
-    // ── Transaction (ISidecarDb) ───────────────────────────────────────────────
-    // LocalFSBackend no longer calls begin/commit/rollback at the _execTx level
-    // (holding BEGIN IMMEDIATE across async boundaries caused SQLITE_BUSY on the
-    // sqlx connection pool). These methods satisfy the ISidecarDb interface but
-    // are not called by LocalFSBackend. Per-method transactions (e.g. syncTags)
-    // use txMutex directly to keep transactions short and pool-safe.
+    // ── transaction ────────────────────────────────────────────────────────────
 
     async begin(): Promise<void> {
         await this.txMutex.acquire();
@@ -369,5 +248,9 @@ export class TauriSqlSidecarDb implements ISidecarDb {
         this.txMutex.release();
     }
 
-    async close(): Promise<void>    { await this.db.close(); }
+    // ── lifecycle ──────────────────────────────────────────────────────────────
+
+    async close(): Promise<void> {
+        await this.db.close();
+    }
 }
