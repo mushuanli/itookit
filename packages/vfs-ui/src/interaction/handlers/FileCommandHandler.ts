@@ -41,7 +41,7 @@ export class FileCommandHandler {
           }
         } catch (e) {
           console.error(`[FileCommandHandler] Create ${type} failed:`, e);
-          this.commandBus.execute('ui:startCreating', { type, parentId });
+          this.commandBus.execute('ui:cancelCreating', undefined as any);
           alert(`创建失败: ${(e as Error).message}`);
         }
       }),
