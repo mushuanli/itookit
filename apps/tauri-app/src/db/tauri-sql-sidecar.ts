@@ -79,8 +79,25 @@ export class TauriSqlSidecarDb implements ISidecarDb {
     static async open(dbPath: string): Promise<TauriSqlSidecarDb> {
         const db = await Database.load(`sqlite:${dbPath}`);
         const instance = new TauriSqlSidecarDb(db);
+        await instance.migrateSchema();
         await instance.initSchema();
         return instance;
+    }
+
+    // ── Schema migration ───────────────────────────────────────────────────────
+
+    private async migrateSchema(): Promise<void> {
+        // Detect legacy ino-based schema (path_ino table existed in pre-v4.1)
+        const tables = await this.db.select<Array<{ name: string }>>(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='path_ino'",
+        );
+        if (tables.length === 0) return; // already on path-based schema
+
+        // Drop legacy tables — data was corrupted by the path↔ino mismatch anyway
+        await this.db.execute('DROP TABLE IF EXISTS meta_tags');
+        await this.db.execute('DROP TABLE IF EXISTS meta_ext');
+        await this.db.execute('DROP TABLE IF EXISTS path_ino');
+        await this.db.execute('DROP TABLE IF EXISTS counters');
     }
 
     // ── Schema ─────────────────────────────────────────────────────────────────
