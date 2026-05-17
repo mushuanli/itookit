@@ -243,7 +243,7 @@ export class VFSEngine {
         const raw = content ? toBuffer(content) : new Uint8Array(0);
         const buf = raw instanceof Uint8Array ? raw : new Uint8Array(raw);
         this._inc('write'); const node = await backend.write(fullPath, buf);
-        if (metadata) this._inc('metadata'); await backend.updateMetadata(fullPath, metadata);
+        if (metadata) { this._inc('metadata'); await backend.updateMetadata(fullPath, metadata); }
         return this.mapToSystemNode(node, mountPath);
     }
 

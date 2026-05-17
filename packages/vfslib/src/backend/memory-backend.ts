@@ -55,7 +55,7 @@ export class MemoryBackend implements IStorageBackend {
         const seen = new Set<string>();
         const results: FSNode[] = [];
 
-        for (const [p, entry] of this.data) {
+        for (const [p] of this.data) {
             if (p === parent || !p.startsWith(prefix)) continue;
             const rest = p.slice(prefix.length);
             const segEnd = rest.indexOf('/');
@@ -109,7 +109,6 @@ export class MemoryBackend implements IStorageBackend {
         const entry = this.data.get(from);
         if (!entry) return;
         const fromPrefix = from === '/' ? '/' : from + '/';
-        const toPrefix = to === '/' ? '/' : to + '/';
 
         this.data.delete(from);
         this.data.set(to, { ...entry, modifiedAt: Date.now() });

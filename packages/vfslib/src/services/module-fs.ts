@@ -529,15 +529,17 @@ class InlineAssetOps implements IAssetOperations {
 
     async putAsset(ownerIdOrPath: string, assetName: string, content: FileContent): Promise<FSNode> {
         const { realPath } = await this.fs.resolveNode(ownerIdOrPath);
-        const assetPath = `${P.dirname(realPath)}/${assetName}`;
+        const assetDir = await this._engine().ensureAssetDir(realPath);
         const buf = toBuffer(content);
-        return this._engine().createFile(P.dirname(assetPath), assetName, 'file', buf);
+        return this._engine().createFile(assetDir, assetName, 'file', buf);
     }
 
     async getAsset(ownerIdOrPath: string, assetName: string): Promise<FileContent | null> {
         try {
             const { realPath } = await this.fs.resolveNode(ownerIdOrPath);
-            const assetPath = `${P.dirname(realPath)}/${assetName}`;
+            const assetDir = await this._engine().getAssetDirPath(realPath);
+            if (!assetDir) return null;
+            const assetPath = `${assetDir}/${assetName}`;
             const data = await this._engine().readContent(assetPath);
             return data;
         } catch { return null; }
@@ -568,7 +570,9 @@ class InlineAssetOps implements IAssetOperations {
 
     async deleteAsset(ownerIdOrPath: string, assetName: string): Promise<void> {
         const { realPath } = await this.fs.resolveNode(ownerIdOrPath);
-        const assetPath = `${P.dirname(realPath)}/${assetName}`;
+        const assetDir = await this._engine().getAssetDirPath(realPath);
+        if (!assetDir) return;
+        const assetPath = `${assetDir}/${assetName}`;
         await this._engine().delete(assetPath);
     }
 

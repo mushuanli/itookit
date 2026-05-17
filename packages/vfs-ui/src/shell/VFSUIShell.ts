@@ -279,38 +279,41 @@ export class VFSUIShell extends ISessionUI<VFSNodeUI, VFSService> {
 
   /**
    * Wraps the raw command port to intercept nav commands before they reach
-   * handlers. Uses object composition instead of monkey-patching so the
-   * original port stays unmodified.
+   * handlers. Uses Proxy to transparently delegate all methods while only
+   * intercepting execute().
    */
   private wrapCommandPort(raw: ICommandPort): ICommandPort {
     const shell = this;
-    const originalExecute = raw.execute.bind(raw);
-    return {
-      ...raw,
-      execute<T extends keyof import('../contracts/commands').CommandMap>(
-        command: T,
-        payload: import('../contracts/commands').CommandMap[T]
-      ): void {
-        if (command === 'nav:selectSession') {
-          shell.navigationWasUserAction = true;
-        }
-
-        // Lazy-load directory children when the user expands a folder.
-        if (command === 'nav:toggleFolder') {
-          const folderId = (payload as { folderId: string }).folderId;
-          const state = shell.statePort.getState();
-          const willExpand = !state.expandedFolderIds.has(folderId);
-          if (willExpand) {
-            const node = findNodeById(state.items, folderId);
-            if (node?.type === 'directory' && node.children === undefined) {
-              void shell.engineAdapter.expandDirectory(folderId);
+    return new Proxy(raw, {
+      get(target, prop, _receiver) {
+        if (prop === 'execute') {
+          return <T extends keyof import('../contracts/commands').CommandMap>(
+            command: T,
+            payload: import('../contracts/commands').CommandMap[T]
+          ): void => {
+            if (command === 'nav:selectSession') {
+              shell.navigationWasUserAction = true;
             }
-          }
-        }
 
-        originalExecute(command, payload);
+            // Lazy-load directory children when the user expands a folder.
+            if (command === 'nav:toggleFolder') {
+              const folderId = (payload as { folderId: string }).folderId;
+              const state = shell.statePort.getState();
+              const willExpand = !state.expandedFolderIds.has(folderId);
+              if (willExpand) {
+                const node = findNodeById(state.items, folderId);
+                if (node?.type === 'directory' && node.children === undefined) {
+                  void shell.engineAdapter.expandDirectory(folderId);
+                }
+              }
+            }
+
+            (target as ICommandPort).execute(command, payload);
+          };
+        }
+        return Reflect.get(target, prop, _receiver);
       }
-    };
+    }) as ICommandPort;
   }
 
   private initializeComponents(): void {

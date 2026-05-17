@@ -1,6 +1,7 @@
 // @file: llm-ui/services/SessionService.ts
 
 import { IChatEngine, SessionManager, SessionSnapshot } from '@itookit/llm-engine';
+import { FSAlreadyExistsError } from '@itookit/common';
 
 export interface SessionLoadResult {
     sessionId: string;
@@ -43,7 +44,10 @@ export class SessionService {
     }
 
     /**
-     * 获取或创建 SessionId
+     * 获取或创建 SessionId（幂等）
+     *
+     * 先尝试读取已有 manifest；不存在时初始化。如果初始化发现结构
+     * 已存在（并发调用或路径修复后重新进入），则重试读取。
      */
     private async getOrCreateSessionId(nodeId: string, title: string): Promise<string> {
         try {
@@ -53,8 +57,19 @@ export class SessionService {
             console.warn('[SessionService] Error reading manifest:', e);
         }
 
-        // 初始化新会话
-        return await this.engine.initializeExistingFile(nodeId, title);
+        try {
+            return await this.engine.initializeExistingFile(nodeId, title);
+        } catch (e) {
+            // Session structure already exists — a concurrent call or a
+            // previous partial initialization created it. Re-read the manifest.
+            if (e instanceof FSAlreadyExistsError) {
+                console.warn('[SessionService] Session structure already initialized:', nodeId);
+                const sessionId = await this.engine.getSessionIdFromNodeId(nodeId);
+                if (sessionId) return sessionId;
+                throw new Error(`Session structure exists for ${nodeId} but manifest is unreadable`);
+            }
+            throw e;
+        }
     }
 
     /**
