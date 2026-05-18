@@ -20,15 +20,11 @@ import type {
     FSSearchResult,
     FSEventType,
     FSEvent,
-    FSOperationType,
-    OperationContext,
     CreateFileOptions,
     CreateDirectoryOptions,
     WriteOptions,
     ReadOptions,
     DeleteOptions,
-    RenameOptions,
-    MoveOptions,
     ListOptions,
     TreeWalkOptions,
     TreeWalkCallback,
@@ -55,7 +51,7 @@ import { DeviceRegistry } from '../engine/device-registry';
 import { toBuffer, toString } from '../utils/encoding';
 import { isPath, isHiddenName, isAssetDirName, isInternalDirName } from '../utils/validation';
 import * as P from '../utils/path';
-import { moduleDEBUG } from '../utils/debug';
+
 import { FSMetaDriverAdapter } from './fs-driver-adapter';
 import { FileHandle } from '../file-io/File';
 
@@ -111,14 +107,12 @@ export class ModuleFS implements IModuleFS, IFSDriver {
 
     private readonly engine: VFSEngine;
     private readonly bus: EventBus;
-    private readonly plugins: PluginPipeline;
     private readonly access: AccessController;
     private readonly devices: DeviceRegistry;
     private readonly scope: ScopedView;
     private readonly mountId: string;
     private readonly caller: CallerIdentity;
     private readonly _moduleBackend: IStorageBackend;
-    private readonly _mountPath: string;
     private readonly systemFS?: import('@itookit/common').IModuleFS;
     private initialized = false;
 
@@ -126,7 +120,6 @@ export class ModuleFS implements IModuleFS, IFSDriver {
         this.moduleId = deps.moduleId;
         this.engine = deps.engine;
         this.bus = deps.eventBus;
-        this.plugins = deps.plugins;
         this.access = deps.access;
         this.devices = deps.devices;
         this.scope = new ScopedView(deps.moduleId);
@@ -134,8 +127,6 @@ export class ModuleFS implements IModuleFS, IFSDriver {
         this.caller = { moduleId: deps.moduleId, isSystem: deps.isSystem ?? false };
         this.systemFS = deps.systemFS;
         this._moduleBackend = deps.engine.getBackendForPath(`/module/${deps.moduleId}`);
-        this._mountPath = deps.engine.getMountPathForPath(`/module/${deps.moduleId}`);
-
         const backend = this._moduleBackend;
         this.capabilities = Object.freeze({
             readonly: false, search: true, semanticSearch: false, syncable: false,
@@ -234,13 +225,6 @@ export class ModuleFS implements IModuleFS, IFSDriver {
         this.bus.emit(type, payload, { moduleId: this.moduleId, mountId: this.mountId });
     }
 
-    /** Create plugin context. */
-    private ctx(operation: FSOperationType, args: Record<string, unknown>, node?: FSNode, path?: string): OperationContext {
-        const ctx: OperationContext = { operation, moduleId: this.moduleId, node, path, args };
-        ctx.getAssetDir = async (_ownerId: string) => null;
-        return ctx;
-    }
-
     // ══════════════════════════════════════════════════════════
     // IFSDriver Read
     // ══════════════════════════════════════════════════════════
@@ -281,7 +265,7 @@ export class ModuleFS implements IModuleFS, IFSDriver {
     readContent(idOrPath: string, options: ReadOptions & { encoding: 'binary' }): Promise<ArrayBuffer>;
     readContent(idOrPath: string, options?: ReadOptions): Promise<FileContent>;
     async readContent(idOrPath: string, options?: ReadOptions): Promise<FileContent> {
-        const { node, realPath } = await this.resolveNode(idOrPath);
+        const { realPath } = await this.resolveNode(idOrPath);
         this.access.checkAccess(this.caller, realPath, 'read');
         const data = await this.engine.readContent(realPath);
         if (options?.encoding === 'utf-8') return toString(data);
@@ -499,8 +483,8 @@ export class ModuleFS implements IModuleFS, IFSDriver {
             createFile: (opts) => this.createFile(opts),
             createDirectory: (opts) => this.createDirectory(opts),
             writeContent: (id, content, opts) => this.writeContent(id, content, opts),
-            rename: (id, newName, opts) => this.rename(id, newName),
-            move: (ids, target, opts) => this.move(ids, target),
+            rename: (id, newName, _opts) => this.rename(id, newName),
+            move: (ids, target, _opts) => this.move(ids, target),
             delete: (ids, opts) => this.delete(ids, opts),
             updateMetadata: (id, meta) => this.updateMetadata(id, meta),
         };

@@ -51,6 +51,6 @@ export default defineConfig({
     },
 
     optimizeDeps: {
-        exclude: ['better-sqlite3', '@itookit/vfsdriver-fs'],
+        exclude: ['better-sqlite3'],
     },
 });
