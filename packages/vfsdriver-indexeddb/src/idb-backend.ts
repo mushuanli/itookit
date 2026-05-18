@@ -5,7 +5,7 @@
  */
 
 import type { IStorageBackend, FSNode, FSFileNode, FSDirectoryNode, IRecordStore, FSSearchQuery } from '@itookit/common';
-import { openDB, req, collectCursor, ALL_STORES, REQUIRED_STORES, DB_VERSION, STORE_NODES, STORE_TAGS } from './utils';
+import { openDB, req, collectCursor, REQUIRED_STORES, DB_VERSION, STORE_NODES, STORE_TAGS } from './utils';
 import { IDBRecordStore, createRecordStore } from './record-store';
 import { STORE_RECORDS } from './utils';
 
