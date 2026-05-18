@@ -13,16 +13,28 @@ export class AgentLoader {
      */
     async loadAgents(): Promise<ExecutorOption[]> {
         try {
-            const agents = await this.agentService.getAgents();
+            const [agents, connections] = await Promise.all([
+                this.agentService.getAgents(),
+                this.agentService.getConnections().catch(() => []),
+            ]);
+            const connMap = new Map(connections.map(c => [c.id, c]));
 
-            let agentOptions: ExecutorOption[] = agents.map(agent => ({
-                id: agent.id,
-                name: agent.name,
-                icon: agent.icon,
-                category: agent.type === 'agent' ? 'Agents' :
-                    agent.type === 'workflow' ? 'Workflows' : 'Other',
-                description: agent.description,
-            }));
+            let agentOptions: ExecutorOption[] = agents.map(agent => {
+                const conn = agent.config?.connectionId
+                    ? connMap.get(agent.config.connectionId)
+                    : undefined;
+                return {
+                    id: agent.id,
+                    name: agent.name,
+                    icon: agent.icon,
+                    category: agent.type === 'agent' ? 'Agents' :
+                        agent.type === 'workflow' ? 'Workflows' : 'Other',
+                    description: agent.description,
+                    provider: conn?.provider,
+                    connectionName: conn?.name,
+                    connectionId: agent.config?.connectionId,
+                };
+            });
 
             // 确保有默认 Agent
             if (!agentOptions.some(a => a.id === 'default')) {

@@ -57,6 +57,12 @@ export interface ExecutorOption {
     icon?: string;
     category?: string;
     description?: string;
+    /** Provider name resolved from agent's configured connection, e.g. "Anthropic" */
+    provider?: string;
+    /** Connection display name resolved from agent's configured connection */
+    connectionName?: string;
+    /** Agent's configured connectionId (for connection override linkage) */
+    connectionId?: string;
 }
 
 export interface ModelOption {

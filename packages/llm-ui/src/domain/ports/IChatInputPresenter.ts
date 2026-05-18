@@ -1,7 +1,7 @@
 // @file: llm-ui/domain/ports/IChatInputPresenter.ts
 
 import type { IAgentRuntime } from '@itookit/common';
-import type { SkillInfo, TokenStats } from '../types';
+import type { ExecutorOption, SkillInfo, TokenStats } from '../types';
 
 export interface IChatInputConfig {
     text: string;
@@ -20,10 +20,7 @@ export interface IChatInputPresenter {
     getConfig(): IChatInputConfig;
     restoreInput(text: string, agentId?: string): void;
     focus(): void;
-    refreshAgents(
-        agents: Array<{ id: string; name: string; icon?: string; category?: string }>,
-        validateAgentId: (id: string) => string
-    ): boolean;
+    refreshAgents(agents: ExecutorOption[], validateAgentId: (id: string) => string): boolean;
 
     /**
      * 更新 token 用量统计显示。

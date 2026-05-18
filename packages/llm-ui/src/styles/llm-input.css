@@ -250,45 +250,152 @@
 /* --- 主输入区域 --- */
 .llm-input__main {
     display: flex;
-    align-items: flex-end;
-    gap: 8px;
-    padding: 8px;
+    flex-direction: column;
+    gap: 0;
+    padding: 6px 8px 8px;
 }
 
-/* 执行器选择器 */
-.llm-input__executor-wrapper {
-    flex-shrink: 0;
-    position: relative;
+/* Selectors row: agent picker + connection quick-switch */
+.llm-input__selectors-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
     margin-bottom: 4px;
 }
 
-.llm-input__executor-select {
-    appearance: none;
-    background-color: var(--llm-bg-tertiary);
+/* ─── Agent Picker (custom combobox) ─────────────────────────────────────── */
+
+.llm-input__agent-picker {
+    position: relative;
+    flex-shrink: 0;
+}
+
+.llm-input__agent-trigger {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 8px 4px 8px;
+    background: var(--llm-bg-tertiary);
     border: 1px solid transparent;
-    padding: 6px 24px 6px 10px;
     border-radius: var(--llm-radius-md);
     font-size: 0.85rem;
     font-weight: 500;
     color: var(--llm-text-primary);
     cursor: pointer;
-    max-width: 120px;
-    text-overflow: ellipsis;
+    max-width: 260px;
+    transition: background var(--llm-transition-fast), border-color var(--llm-transition-fast);
+}
+
+.llm-input__agent-trigger:hover {
+    background: var(--llm-bg-hover);
+}
+
+.llm-input__agent-trigger:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.llm-input__agent-icon {
+    flex-shrink: 0;
+    font-size: 0.9em;
+}
+
+.llm-input__agent-name {
     white-space: nowrap;
     overflow: hidden;
-    transition: all var(--llm-transition-normal);
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23666' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right 6px center;
+    text-overflow: ellipsis;
+    max-width: 100px;
 }
 
-.llm-input__executor-select:hover {
-    background-color: var(--llm-bg-hover);
+.llm-input__agent-meta {
+    font-size: 0.72rem;
+    color: var(--llm-text-tertiary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 110px;
+    opacity: 0.85;
 }
 
-.llm-input__executor-select:focus {
-    outline: none;
-    border-color: var(--llm-color-primary);
+.llm-input__agent-chevron {
+    flex-shrink: 0;
+    font-size: 0.7em;
+    color: var(--llm-text-tertiary);
+    margin-left: 1px;
+}
+
+/* Agent dropdown is managed by PopupPanel (mounted on body, position:fixed) */
+
+/* ─── Connection Quick-Switch ──────────────────────────────────────────────── */
+
+.llm-input__conn-quick-wrapper {
+    position: relative;
+    flex-shrink: 0;
+}
+
+.llm-input__conn-quick {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 7px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--llm-radius-md);
+    font-size: 0.8rem;
+    color: var(--llm-text-secondary);
+    cursor: pointer;
+    transition: background var(--llm-transition-fast), color var(--llm-transition-fast);
+    white-space: nowrap;
+}
+
+.llm-input__conn-quick:hover {
+    background: var(--llm-bg-hover);
+    color: var(--llm-text-primary);
+}
+
+.llm-input__conn-quick--active {
+    color: var(--llm-color-primary);
+    background: var(--llm-color-primary-bg);
+}
+
+.llm-input__conn-quick--active:hover {
+    background: var(--llm-color-primary-bg);
+}
+
+.llm-input__conn-quick:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.llm-input__conn-quick-icon {
+    font-size: 0.85em;
+    opacity: 0.7;
+}
+
+.llm-input__conn-quick-label {
+    max-width: 90px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.llm-input__conn-quick-clear {
+    font-size: 0.9em;
+    line-height: 1;
+    opacity: 0.6;
+    cursor: pointer;
+}
+
+.llm-input__conn-quick-clear:hover {
+    opacity: 1;
+}
+
+/* Connection dropdown is managed by PopupPanel (mounted on body, position:fixed) */
+
+/* Input row: field-wrapper + action buttons side-by-side */
+.llm-input__input-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
 }
 
 /* 输入框区域 */
