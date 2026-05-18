@@ -205,28 +205,69 @@ export const ChatInputTemplates = {
 
     /**
      * 渲染主输入区域
+     *
+     * 布局分两行：
+     * - 第一行：agent picker + connection quick-switch
+     * - 第二行：field-wrapper + action buttons（水平排列）
      */
     renderInputArea(): string {
         return `
             <div class="llm-input__main">
-                ${this.renderExecutorSelector()}
-                ${this.renderFieldWrapper()}
-                ${this.renderActions()}
+                <div class="llm-input__selectors-row">
+                    ${this.renderAgentPicker()}
+                    ${this.renderConnQuick()}
+                </div>
+                <div class="llm-input__input-row">
+                    ${this.renderFieldWrapper()}
+                    ${this.renderActions()}
+                </div>
             </div>
         `;
     },
 
     /**
-     * Agent 选择器
+     * Agent 选择器 — 自定义 Combobox（替代原生 select）
+     *
+     * Trigger 按钮常驻显示：icon + name + provider·connection meta。
+     * 下拉列表由 PopupPanel 管理（挂载在 body，position:fixed，规避 overflow:hidden）。
      */
-    renderExecutorSelector(): string {
+    renderAgentPicker(): string {
         return `
-            <div class="llm-input__executor-wrapper">
-                <select class="llm-input__executor-select" title="Select Agent/Executor">
-                    <option value="default">🤖 Assistant</option>
-                </select>
+            <div class="llm-input__agent-picker">
+                <button class="llm-input__agent-trigger" type="button" title="Select Agent">
+                    <span class="llm-input__agent-icon">🤖</span>
+                    <span class="llm-input__agent-name">Assistant</span>
+                    <span class="llm-input__agent-meta"></span>
+                    <span class="llm-input__agent-chevron">▾</span>
+                </button>
             </div>
         `;
+    },
+
+
+    /**
+     * Connection 快速切换 pill（位于 selectors-row，始终可见）
+     *
+     * 默认显示 "Default"；有 override 时显示连接名并附带 × 清除按钮。
+     * 下拉列表由 PopupPanel 管理（挂载在 body，position:fixed，规避 overflow:hidden）。
+     */
+    renderConnQuick(): string {
+        return `
+            <div class="llm-input__conn-quick-wrapper">
+                <button class="llm-input__conn-quick" type="button" title="Override LLM connection">
+                    <span class="llm-input__conn-quick-icon">🔌</span>
+                    <span class="llm-input__conn-quick-label">Default</span>
+                    <span class="llm-input__conn-quick-clear" style="display:none" title="Clear override">×</span>
+                </button>
+            </div>
+        `;
+    },
+
+    /**
+     * @deprecated 由 renderAgentPicker() 取代，保留以防外部引用
+     */
+    renderExecutorSelector(): string {
+        return this.renderAgentPicker();
     },
 
     /**

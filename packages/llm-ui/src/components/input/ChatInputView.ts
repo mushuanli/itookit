@@ -12,6 +12,8 @@ import type { InputPlugin, InputPluginContext } from './plugins/InputPlugin';
 import type { HarnessPlugin } from './plugins/HarnessPlugin';
 import { MentionPlugin } from './plugins/MentionPlugin';
 import { TokenMeterPlugin } from './plugins/TokenMeterPlugin';
+import { PopupPanel } from './plugins/PopupPanel';
+import type { PopupItem } from './plugins/PopupPanel';
 
 export interface ChatInputOptions {
     onSend: (text: string, files: File[], executorId: string, overrides?: ChatOverrides) => Promise<void>;
@@ -81,7 +83,7 @@ export class ChatInput implements IChatInputPresenter {
     private stopBtn!: HTMLButtonElement;
     private attachBtn!: HTMLButtonElement;
     private settingsBtn!: HTMLButtonElement;
-    private executorSelect!: HTMLSelectElement;
+    // Settings panel still has a native connection select for Settings-panel usage
     private connectionSelect!: HTMLSelectElement;
     private tierPillsContainer!: HTMLElement;
     private historySlider!: HTMLInputElement;
@@ -91,6 +93,20 @@ export class ChatInput implements IChatInputPresenter {
     private fileInput!: HTMLInputElement;
     private attachmentContainer!: HTMLElement;
     private inputWrapper!: HTMLElement;
+
+    // ── Agent Picker (custom combobox, popup via PopupPanel) ─────────────────
+    private agents: ExecutorOption[] = [];
+    private agentPickerBtn!: HTMLButtonElement;
+    private agentNameEl!: HTMLSpanElement;
+    private agentMetaEl!: HTMLSpanElement;
+    private agentIconEl!: HTMLSpanElement;
+    private agentPopup: PopupPanel | null = null;
+
+    // ── Connection Quick Switch (popup via PopupPanel) ───────────────────────
+    private connQuickBtn!: HTMLButtonElement;
+    private connQuickLabel!: HTMLSpanElement;
+    private connQuickClear!: HTMLElement;
+    private connPopup: PopupPanel | null = null;
 
     private outsideClickHandler: ((e: MouseEvent) => void) | null = null;
     private loading = false;
@@ -222,7 +238,8 @@ export class ChatInput implements IChatInputPresenter {
         this.sendBtn.style.display = loading ? 'none' : 'flex';
         this.stopBtn.style.display = loading ? 'flex' : 'none';
         this.textarea.disabled = loading;
-        this.executorSelect.disabled = loading;
+        this.agentPickerBtn.disabled = loading;
+        this.connQuickBtn.disabled = loading;
         this.connectionSelect.disabled = loading;
         this.attachBtn.disabled = loading;
         this.settingsBtn.disabled = loading;
@@ -241,6 +258,7 @@ export class ChatInput implements IChatInputPresenter {
 
         if (config.agentId && config.agentId !== this.currentAgentId) {
             this.currentAgentId = config.agentId;
+            this.updateAgentTrigger();
         }
     }
 
@@ -261,7 +279,8 @@ export class ChatInput implements IChatInputPresenter {
         }
         if (agentId) {
             this.config.agentId = agentId;
-            this.setExecutorValue(agentId);
+            this.currentAgentId = agentId;
+            this.updateAgentTrigger();
         }
         this.textarea.focus();
         this.textarea.selectionStart = this.textarea.selectionEnd = this.textarea.value.length;
@@ -271,10 +290,7 @@ export class ChatInput implements IChatInputPresenter {
         this.textarea?.focus();
     }
 
-    refreshAgents(
-        agents: ExecutorOption[],
-        validateAgentId: (id: string) => string  // ✅ 签名简化，不再需要 agents 参数
-    ): boolean {
+    refreshAgents(agents: ExecutorOption[], validateAgentId: (id: string) => string): boolean {
         const currentAgentId = this.config.agentId;
         this.updateExecutors(agents);
 
@@ -289,7 +305,7 @@ export class ChatInput implements IChatInputPresenter {
             this.updateActiveBadges();
         }
 
-        this.setExecutorValue(this.config.agentId);
+        this.updateAgentTrigger();
         return changed;
     }
 
@@ -352,6 +368,10 @@ export class ChatInput implements IChatInputPresenter {
             document.removeEventListener('click', this.outsideClickHandler);
             this.outsideClickHandler = null;
         }
+        this.agentPopup?.destroy();
+        this.agentPopup = null;
+        this.connPopup?.destroy();
+        this.connPopup = null;
         this.container.innerHTML = '';
         this.files = [];
     }
@@ -499,7 +519,18 @@ code {
         this.stopBtn = q('.llm-input__btn--stop');
         this.attachBtn = q('.llm-input__btn--attach');
         this.settingsBtn = q('.llm-input__btn--settings');
-        this.executorSelect = q('.llm-input__executor-select');
+
+        // Agent Picker combobox elements
+        this.agentPickerBtn = q('.llm-input__agent-trigger');
+        this.agentIconEl = q('.llm-input__agent-icon');
+        this.agentNameEl = q('.llm-input__agent-name');
+        this.agentMetaEl = q('.llm-input__agent-meta');
+
+        // Connection quick-switch elements
+        this.connQuickBtn = q('.llm-input__conn-quick');
+        this.connQuickLabel = q('.llm-input__conn-quick-label');
+        this.connQuickClear = q('.llm-input__conn-quick-clear');
+
         this.connectionSelect = q('.llm-input__connection-select');
         this.tierPillsContainer = q('.llm-input__tier-pills');
         this.historySlider = q('.llm-input__history-slider');
@@ -585,18 +616,23 @@ code {
     }
 
     private bindSettingsEvents(): void {
-        this.executorSelect.addEventListener('change', () => {
-            const newAgentId = this.executorSelect.value;
-            this.config.agentId = newAgentId;
-            if (newAgentId !== this.currentAgentId) {
-                this.currentAgentId = newAgentId;
+        // Agent Picker combobox — popup handled by PopupPanel
+        this.agentPickerBtn.addEventListener('click', () => this.toggleAgentPicker());
+
+        // Connection quick-switch — popup handled by PopupPanel
+        this.connQuickBtn.addEventListener('click', (e) => {
+            // ×-clear button sits inside the quick button — intercept it
+            if ((e.target as HTMLElement).closest('.llm-input__conn-quick-clear')) {
+                this.selectConnection('');
+                return;
             }
-            this.options.onExecutorChange?.(newAgentId);
-            this.notifyConfigChange();
+            this.toggleConnPicker();
         });
 
+        // Settings panel connection select — keeps in sync with conn-quick
         this.connectionSelect.addEventListener('change', () => {
             this.config.settings.connectionId = this.connectionSelect.value || undefined;
+            this.updateConnQuick();
             this.updateActiveBadges();
             this.notifyConfigChange();
         });
@@ -707,8 +743,8 @@ code {
 
     private bindOutsideClickHandler(): void {
         this.outsideClickHandler = (e: MouseEvent) => {
+            const target = e.target as HTMLElement;
             if (this.settingsExpanded) {
-                const target = e.target as HTMLElement;
                 if (!this.settingsPanel.contains(target) && !this.settingsBtn.contains(target)) {
                     this.toggleSettings(false);
                 }
@@ -821,6 +857,7 @@ code {
         try {
             this.connections = await this.options.onRequestConnections();
             this.updateConnectionOptions();
+            this.updateConnQuick();
         } catch (e) {
             console.error('[ChatInput] Failed to load connections:', e);
         }
@@ -835,10 +872,11 @@ code {
             this.textarea.value = this.config.text;
             this.adjustTextareaHeight();
         }
-        if (this.executorSelect) this.setExecutorValue(this.config.agentId);
+        if (this.agentPickerBtn) this.updateAgentTrigger();
         if (this.connectionSelect && this.config.settings.connectionId) {
             this.connectionSelect.value = this.config.settings.connectionId;
         }
+        if (this.connQuickBtn) this.updateConnQuick();
         this.updateTierPills(this.config.settings.modelTier ?? 'auto');
         if (this.historySlider) {
             this.historySlider.value = this.config.settings.historyLength.toString();
@@ -873,7 +911,7 @@ code {
 
     private syncConfigFromUI(): void {
         this.config.text = this.textarea?.value || '';
-        this.config.agentId = this.executorSelect?.value || 'default';
+        this.config.agentId = this.currentAgentId;
         this.config.settings.connectionId = this.connectionSelect?.value || undefined;
         // modelTier is kept in-memory; pills don't have a native value to read
         this.config.settings.historyLength = parseInt(this.historySlider?.value || '-1');
@@ -1139,6 +1177,7 @@ code {
 
         activeContainer.style.display = hasActive ? 'flex' : 'none';
         this.settingsBtn.classList.toggle('has-overrides', hasActive);
+        this.updateConnQuick();
     }
 
     private updateTierPills(tier: 'auto' | ModelTier): void {
@@ -1213,7 +1252,8 @@ code {
     }
 
     private updateExecutors(executors: ExecutorOption[]): void {
-        this.executorSelect.innerHTML = ChatInputTemplates.renderExecutorOptions(executors);
+        this.agents = executors;
+        this.updateAgentTrigger();
     }
 
     private updateConnectionOptions(): void {
@@ -1223,8 +1263,141 @@ code {
         );
     }
 
-    private setExecutorValue(id: string): void {
-        const option = this.executorSelect.querySelector(`option[value="${id}"]`);
-        this.executorSelect.value = option ? id : 'default';
+    // ── Agent Picker methods ──────────────────────────────────────────────────
+
+    private getOrCreateAgentPopup(): PopupPanel {
+        if (!this.agentPopup) {
+            this.agentPopup = new PopupPanel(this.agentPickerBtn, {
+                showSearch: true,
+                searchPlaceholder: 'Search by name, provider...',
+                emptyText: 'No agents match',
+                animated: true,
+            });
+        }
+        return this.agentPopup;
+    }
+
+    private openAgentPicker(): void {
+        this.connPopup?.hide();
+        const popup = this.getOrCreateAgentPopup();
+        popup.show(this.buildAgentItems(), {
+            onSelect: (item) => this.selectAgent(item.id),
+        });
+    }
+
+    private toggleAgentPicker(): void {
+        const popup = this.getOrCreateAgentPopup();
+        if (popup.isVisible) popup.hide();
+        else this.openAgentPicker();
+    }
+
+    /** Convert agents list to PopupItem[] for the picker. */
+    private buildAgentItems(): PopupItem[] {
+        return this.agents.map(a => {
+            const meta = [a.provider, a.connectionName].filter(Boolean).join(' · ');
+            return {
+                id: a.id,
+                label: a.name,
+                icon: a.icon ?? '🤖',
+                description: meta || undefined,
+                group: a.category,
+                searchText: [a.provider, a.connectionName, a.category].filter(Boolean).join(' '),
+            };
+        });
+    }
+
+    /** Select an agent from the picker. */
+    private selectAgent(id: string): void {
+        this.config.agentId = id;
+        this.currentAgentId = id;
+        this.updateAgentTrigger();
+        this.options.onExecutorChange?.(id);
+        this.notifyConfigChange();
+    }
+
+    /** Update trigger button text/icon/meta from current agentId. */
+    private updateAgentTrigger(): void {
+        const agent = this.agents.find(a => a.id === this.config.agentId);
+        if (!this.agentNameEl) return;
+        if (agent) {
+            this.agentIconEl.textContent = agent.icon ?? '🤖';
+            this.agentNameEl.textContent = agent.name;
+            const meta = [agent.provider, agent.connectionName].filter(Boolean).join(' · ');
+            this.agentMetaEl.textContent = meta;
+            this.agentMetaEl.style.display = meta ? '' : 'none';
+        } else {
+            this.agentIconEl.textContent = '🤖';
+            this.agentNameEl.textContent = 'Assistant';
+            this.agentMetaEl.textContent = '';
+            this.agentMetaEl.style.display = 'none';
+        }
+    }
+
+    // ── Connection Quick-Switch methods ──────────────────────────────────────
+
+    private getOrCreateConnPopup(): PopupPanel {
+        if (!this.connPopup) {
+            this.connPopup = new PopupPanel(this.connQuickBtn, {
+                emptyText: 'No connections',
+                animated: true,
+            });
+        }
+        return this.connPopup;
+    }
+
+    private openConnPicker(): void {
+        this.agentPopup?.hide();
+        const popup = this.getOrCreateConnPopup();
+        popup.show(this.buildConnItems(), {
+            onSelect: (item) => this.selectConnection(item.id),
+        });
+    }
+
+    private toggleConnPicker(): void {
+        const popup = this.getOrCreateConnPopup();
+        if (popup.isVisible) popup.hide();
+        else this.openConnPicker();
+    }
+
+    /** Convert connections to PopupItem[] for the picker. */
+    private buildConnItems(): PopupItem[] {
+        const currentId = this.config.settings.connectionId ?? '';
+        const items: PopupItem[] = [
+            { id: '', label: 'Agent Default', icon: currentId === '' ? '✓' : '' },
+        ];
+        for (const c of this.connections) {
+            items.push({
+                id: c.id,
+                label: c.name,
+                description: c.provider,
+                icon: c.id === currentId ? '✓' : (c.hasTiers ? '⚡' : ''),
+            });
+        }
+        return items;
+    }
+
+    /** Select a connection from the quick-switch popup ('' = clear override). */
+    private selectConnection(id: string): void {
+        this.config.settings.connectionId = id || undefined;
+        if (this.connectionSelect) this.connectionSelect.value = id;
+        this.updateConnQuick();
+        this.updateActiveBadges();
+        this.notifyConfigChange();
+    }
+
+    /** Update the conn-quick button label and clear button visibility. */
+    private updateConnQuick(): void {
+        if (!this.connQuickLabel) return;
+        const id = this.config.settings.connectionId;
+        if (id) {
+            const conn = this.connections.find(c => c.id === id);
+            this.connQuickLabel.textContent = conn?.name ?? id;
+            this.connQuickClear.style.display = '';
+            this.connQuickBtn.classList.add('llm-input__conn-quick--active');
+        } else {
+            this.connQuickLabel.textContent = 'Default';
+            this.connQuickClear.style.display = 'none';
+            this.connQuickBtn.classList.remove('llm-input__conn-quick--active');
+        }
     }
 }
