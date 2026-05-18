@@ -73,17 +73,19 @@ export class ScrollController {
 
         this._isUserScrolledUp = !isNearBottom;
 
+        // Transition callbacks fire before the lock guard so state
+        // transitions are never lost, even during scrollLockUntil.
+        if (!wasScrolledUp && this._isUserScrolledUp) {
+            this.callbacks.onUserScrolledUp?.();
+        } else if (wasScrolledUp && !this._isUserScrolledUp) {
+            this.callbacks.onUserScrolledDown?.();
+        }
+
         if (this._isStreamingMode) {
             this.shouldAutoScroll = !this._isUserScrolledUp;
         } else {
             if (Date.now() < this.scrollLockUntil) return;
             this.shouldAutoScroll = isNearBottom;
-        }
-
-        if (!wasScrolledUp && this._isUserScrolledUp) {
-            this.callbacks.onUserScrolledUp?.();
-        } else if (wasScrolledUp && !this._isUserScrolledUp) {
-            this.callbacks.onUserScrolledDown?.();
         }
 
         this.callbacks.onScroll?.();
@@ -178,6 +180,20 @@ export class ScrollController {
 
     enterStreamingMode(): void {
         if (this._isStreamingMode) return;
+
+        // Flush any pending scroll-to-bottom frame from the previous
+        // exit cycle BEFORE reading the scroll position. Otherwise a
+        // deferred RAF from forceScrollToBottom / scrollToBottom can
+        // race with enterStreamingMode, causing stale scrollTop to be
+        // misread as "user scrolled up" and the "New response available"
+        // indicator to appear incorrectly.
+        if (this.scrollFrameId !== null) {
+            cancelAnimationFrame(this.scrollFrameId);
+            this.scrollFrameId = null;
+            this.container.scrollTop = this.container.scrollHeight;
+            this.lastScrollHeight = this.container.scrollHeight;
+        }
+
         this._isStreamingMode = true;
 
         const { scrollTop, scrollHeight, clientHeight } = this.container;

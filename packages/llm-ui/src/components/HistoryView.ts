@@ -71,7 +71,13 @@ export class HistoryView implements IHistoryPresenter {
         this.renderer = new SessionRenderer(container, ctx, options.onContentChange);
 
         this.scrollController = new ScrollController(container, {
-            onUserScrolledUp: () => this.showNewContentIndicator(),
+            onUserScrolledUp: () => {
+                // Only show the indicator during streaming — scrolling up
+                // while reviewing old content is normal reading, not "new content".
+                if (this.stream.isStreamingMode) {
+                    this.showNewContentIndicator();
+                }
+            },
             onUserScrolledDown: () => this.hideNewContentIndicator(),
             onScroll: () => {
                 if (!this.suppressScrollHighlight) {
