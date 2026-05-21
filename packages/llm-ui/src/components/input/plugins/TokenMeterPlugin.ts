@@ -89,13 +89,11 @@ export class TokenMeterPlugin implements InputPlugin {
             this.strip.className = 'token-meter';
             this.strip.style.display = 'none';
 
-            // Insert after the textarea, before the actions row
-            // (.llm-input__actions is a sibling of .llm-input__field-wrapper inside .llm-input__main)
-            const fieldWrapper = this.ctx!.container.querySelector('.llm-input__field-wrapper');
-            const parent = fieldWrapper?.parentElement ?? this.ctx!.container;
-            const actions = parent.querySelector('.llm-input__actions');
-            if (actions) parent.insertBefore(this.strip, actions);
-            else parent.appendChild(this.strip);
+            // Append as the last child of .llm-input__main so it renders as a
+            // full-width status row below the input row, not as a flex sibling
+            // inside the horizontal .llm-input__input-row.
+            const main = this.ctx!.container.querySelector('.llm-input__main') ?? this.ctx!.container;
+            main.appendChild(this.strip);
         }
         return this.strip;
     }
