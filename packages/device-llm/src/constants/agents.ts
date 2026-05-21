@@ -78,7 +78,7 @@ export const DEFAULT_AGENTS: InitialAgentDef[] = [
         description: '编程大师（Gemini）：遵循 SOLID / DRY / KISS / YAGNI / CoC / LoD 开发原则',
         initialTags: ['default'],
         initPath: AGENT_DEFAULT_DIR,
-        config: { connectionId: 'conn-rdsec-gemini', modelTier: 'optimal', systemPrompt: DEV_SYSTEM_PROMPT },
+        config: { connectionId: 'conn-gemini', modelTier: 'optimal', systemPrompt: DEV_SYSTEM_PROMPT },
         interface: { inputs: [{ name: 'prompt', type: 'string' }], outputs: [{ name: 'response', type: 'string' }] },
     },
     {
@@ -89,10 +89,9 @@ export const DEFAULT_AGENTS: InitialAgentDef[] = [
         description: '编程大师（DeepSeek）：遵循 SOLID / DRY / KISS / YAGNI / CoC / LoD 开发原则',
         initialTags: ['default'],
         initPath: AGENT_DEFAULT_DIR,
-        config: { connectionId: 'conn-rdsec-deepseek', modelTier: 'optimal', systemPrompt: DEV_SYSTEM_PROMPT },
+        config: { connectionId: 'conn-deepseek', modelTier: 'optimal', systemPrompt: DEV_SYSTEM_PROMPT },
         interface: { inputs: [{ name: 'prompt', type: 'string' }], outputs: [{ name: 'response', type: 'string' }] },
     },
-
     // ── 费曼大师系列 ────────────────────────────────────────────────────────────
     {
         id: 'learn-id',
@@ -113,7 +112,7 @@ export const DEFAULT_AGENTS: InitialAgentDef[] = [
         description: '你是一位体现理查德·费曼简化复杂概念理念的杰出教师。',
         initialTags: ['default'],
         initPath: AGENT_DEFAULT_DIR,
-        config: { connectionId: 'conn-rdsec-deepseek', modelTier: 'optimal', systemPrompt: FEYNMAN_SYSTEM_PROMPT },
+        config: { connectionId: 'conn-deepseek', modelTier: 'optimal', systemPrompt: FEYNMAN_SYSTEM_PROMPT },
         interface: { inputs: [{ name: 'prompt', type: 'string' }], outputs: [{ name: 'response', type: 'string' }] },
     },
     {

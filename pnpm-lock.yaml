@@ -538,6 +538,9 @@ importers:
       '@itookit/common':
         specifier: workspace:*
         version: link:../common
+      '@itookit/device-llm':
+        specifier: workspace:*
+        version: link:../device-llm
       '@itookit/llm-engine':
         specifier: workspace:*
         version: link:../llm-engine

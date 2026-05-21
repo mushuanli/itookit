@@ -14,11 +14,14 @@
 import { Modal, Toast, BaseSettingsEditor, generateShortUUID } from '@itookit/common';
 import type {
     IConnectionService, LLMProvider, LLMModel,
-    LLMProviderImplementation,
+    LLMProviderImplementation, ConnectionMeta, AgentDefinition,
 } from '@itookit/common';
+import { exportBundleToLLM, fromConnectionDef } from '@itookit/device-llm';
+import { runLLMImport } from './llm-import';
 
 export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionService> {
     private editModels: LLMModel[] = [];
+    private _checkedIds = new Set<string>();
 
     async render() {
         const providers = this.service.getProviders();
@@ -32,6 +35,8 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
             return (a.name || '').localeCompare(b.name || '');
         });
 
+        const checkedCount = this._checkedIds.size;
+
         this.container.innerHTML = `
             <div class="settings-page">
                 <div class="settings-page__header">
@@ -42,9 +47,27 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
                             连接（API Key）在「LLM 连接」页配置。
                         </p>
                     </div>
-                    <button id="btn-add-provider" class="settings-btn settings-btn--primary">
-                        <span class="settings-btn__icon">+</span> 添加自定义
-                    </button>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+                        <input type="file" id="llm-provider-import-file"
+                               accept=".llm,.yaml,.yml" multiple style="display:none">
+                        <button id="btn-import-provider-llm" class="settings-btn settings-btn--secondary"
+                                title="从 .llm 文件导入 Provider 和连接">
+                            ↑ 导入 .llm
+                        </button>
+                        <button id="btn-export-provider-llm" class="settings-btn settings-btn--secondary"
+                                ${checkedCount === 0 ? 'disabled' : ''}
+                                title="将选中 Provider 及其连接导出为 .llm 文件">
+                            ↓ 导出${checkedCount > 0 ? ` (${checkedCount})` : ''}
+                        </button>
+                        <button id="btn-delete-provider-batch" class="settings-btn settings-btn--danger"
+                                ${checkedCount === 0 ? 'disabled' : ''}
+                                title="删除选中的自定义 Provider（内置 Provider 不可删除）">
+                            🗑️ 删除${checkedCount > 0 ? ` (${checkedCount})` : ''}
+                        </button>
+                        <button id="btn-add-provider" class="settings-btn settings-btn--primary">
+                            <span class="settings-btn__icon">+</span> 添加自定义
+                        </button>
+                    </div>
                 </div>
 
                 <div id="providers-list" class="settings-connection-grid">
@@ -62,7 +85,10 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
         const fullP    = this.service.getFullProvider?.(p.id);
         const hasKey   = !!(fullP?.apiKey?.trim());
         const enabled  = p.enabled !== false;
-        const badge = p.isBuiltin
+        // A provider is "currently built-in" only if it exists in the live catalog.
+        const currentBuiltins = this.service.getProviderDefaults?.() ?? {};
+        const isCurrentBuiltin = !!currentBuiltins[p.id];
+        const badge = isCurrentBuiltin
             ? '<span class="settings-badge settings-badge--info">内置</span>'
             : '<span class="settings-badge settings-badge--warning">自定义</span>';
         const keyBadge = hasKey
@@ -70,10 +96,21 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
             : '<span class="settings-badge settings-badge--warning" style="font-size:0.7rem">需配置 Key</span>';
         const disabledStyle = enabled ? '' : 'opacity:0.55;';
 
+        const isChecked = this._checkedIds.has(p.id);
+
         return `
             <div class="settings-connection-card" data-id="${p.id}" style="${disabledStyle}">
                 <div class="settings-connection-card__header">
-                    <h3 class="settings-connection-card__title">${p.icon ?? ''} ${p.name}</h3>
+                    <div style="display:flex;align-items:center;gap:6px;min-width:0">
+                        <input type="checkbox" class="chk-provider-select" data-id="${p.id}"
+                               ${isChecked ? 'checked' : ''}
+                               title="选中以批量导出"
+                               style="flex-shrink:0;cursor:pointer;width:15px;height:15px">
+                        <h3 class="settings-connection-card__title"
+                            style="margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+                            ${p.icon ?? ''} ${p.name}
+                        </h3>
+                    </div>
                     <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">
                         ${badge}${keyBadge}
                         <label class="llm-enable-toggle" title="${enabled ? '点击禁用' : '点击启用'}">
@@ -116,7 +153,7 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
                     <button class="settings-btn settings-btn--secondary settings-btn--sm btn-edit-provider" style="flex:1">
                         ✏️ 编辑
                     </button>
-                    ${p.isBuiltin
+                    ${isCurrentBuiltin
                         ? '<button class="settings-btn settings-btn--sm btn-reset-provider" style="flex:1">↩️ 重置</button>'
                         : '<button class="settings-btn settings-btn--danger settings-btn--sm btn-delete-provider" style="flex:1">🗑️ 删除</button>'
                     }
@@ -132,25 +169,53 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
         this.clearListeners();
 
         this.bindButton('#btn-add-provider', () => this.showEditModal(null));
+        this.bindButton('#btn-import-provider-llm', () => {
+            (this.container.querySelector('#llm-provider-import-file') as HTMLInputElement)?.click();
+        });
+        this.bindButton('#btn-export-provider-llm', () => this.exportSelected());
+        this.bindButton('#btn-delete-provider-batch', () => { void this.batchDelete(); });
+
+        const fileInput = this.container.querySelector('#llm-provider-import-file') as HTMLInputElement | null;
+        if (fileInput) {
+            this.addEventListener(fileInput, 'change', async () => {
+                if (fileInput.files?.length) {
+                    await this.importLLMFiles(fileInput.files);
+                    fileInput.value = '';
+                }
+            });
+        }
 
         const list = this.container.querySelector('#providers-list');
         if (!list) return;
 
-        // Enable/disable toggle (checkbox change)
+        // Multi-select checkbox
         this.addEventListener(list, 'change', async (e) => {
             const target = e.target as HTMLInputElement;
-            if (!target.classList.contains('chk-provider-enabled')) return;
-            const id = target.dataset.id!;
-            const full = this.service.getFullProvider?.(id);
-            if (!full) return;
-            await this.service.saveProvider({ ...full, enabled: target.checked });
-            this.render();
+            if (target.classList.contains('chk-provider-select')) {
+                const id = target.dataset.id!;
+                if (target.checked) this._checkedIds.add(id);
+                else this._checkedIds.delete(id);
+                const count = this._checkedIds.size;
+                const exportBtn = this.container.querySelector('#btn-export-provider-llm') as HTMLButtonElement | null;
+                if (exportBtn) { exportBtn.disabled = count === 0; exportBtn.textContent = `↓ 导出${count > 0 ? ` (${count})` : ''}`; }
+                const deleteBtn = this.container.querySelector('#btn-delete-provider-batch') as HTMLButtonElement | null;
+                if (deleteBtn) { deleteBtn.disabled = count === 0; deleteBtn.textContent = `🗑️ 删除${count > 0 ? ` (${count})` : ''}`; }
+                return;
+            }
+            // Enable/disable toggle
+            if (target.classList.contains('chk-provider-enabled')) {
+                const id = target.dataset.id!;
+                const full = this.service.getFullProvider?.(id);
+                if (!full) return;
+                await this.service.saveProvider({ ...full, enabled: target.checked });
+                this.render();
+            }
         });
 
         this.addEventListener(list, 'click', async (e) => {
             const target = e.target as HTMLElement;
-            // Don't intercept toggle clicks
-            if (target.closest('.llm-enable-toggle')) return;
+            // Don't intercept toggle/checkbox clicks
+            if (target.closest('.llm-enable-toggle') || target.classList.contains('chk-provider-select')) return;
             const card   = target.closest('[data-id]') as HTMLElement | null;
             if (!card) return;
             const id = card.dataset.id!;
@@ -161,11 +226,216 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
             if (target.closest('.btn-edit-provider')) {
                 this.showEditModal(provider);
             } else if (target.closest('.btn-delete-provider')) {
-                this.confirmDelete(provider);
+                void this.confirmDelete(provider);
             } else if (target.closest('.btn-reset-provider')) {
                 this.confirmReset(provider);
             }
         });
+    }
+
+    // ── Import / Export ────────────────────────────────────────────────────────
+
+    private async importLLMFiles(files: FileList): Promise<void> {
+        const imported = await runLLMImport(files, this.service);
+        if (imported) this.render();
+    }
+
+    private async exportSelected(): Promise<void> {
+        const ids = [...this._checkedIds];
+        if (!ids.length) return;
+
+        const allProviders = this.service.getProviders();
+        const providers = allProviders.filter(p => ids.includes(p.id));
+        const allConns = await this.service.getConnections();
+        const connections = allConns
+            .filter(c => ids.includes(c.providerId ?? (c as { provider?: string }).provider ?? ''))
+            .map(c => fromConnectionDef({ id: c.id, name: c.name, providerId: c.providerId, tiers: c.tiers }));
+
+        const yamlStr = exportBundleToLLM(providers, connections);
+        const filename = providers.length === 1 ? `${providers[0].id}.llm` : 'providers-export.llm';
+        const blob = new Blob([yamlStr], { type: 'text/yaml' });
+        const a = Object.assign(document.createElement('a'), {
+            href: URL.createObjectURL(blob), download: filename,
+        });
+        a.click();
+        URL.revokeObjectURL(a.href);
+    }
+
+    private async batchDelete(): Promise<void> {
+        const ids = [...this._checkedIds];
+        if (!ids.length) return;
+
+        const allProviders = this.service.getProviders();
+        const currentBuiltins = this.service.getProviderDefaults?.() ?? {};
+        const deletable = allProviders.filter(p => ids.includes(p.id) && !currentBuiltins[p.id]);
+        const skipped   = ids.length - deletable.length;
+
+        if (!deletable.length) {
+            Toast.error('选中的 Provider 均为当前内置项，无法删除（可禁用或重置）');
+            return;
+        }
+
+        // ── Cascade analysis ───────────────────────────────────────────────────
+        const deletableIds   = new Set(deletable.map(p => p.id));
+        const allConns       = await this.service.getConnections();
+        const affectedConns  = allConns.filter(c => deletableIds.has(c.providerId ?? ''));
+        const affectedConnIds = new Set(affectedConns.map(c => c.id));
+        // Connections available as replacement targets (not being deleted)
+        const replacementConns = allConns.filter(c => !affectedConnIds.has(c.id));
+
+        type AgentSvc = {
+            getAgents(): Promise<AgentDefinition[]>;
+            saveAgent(a: AgentDefinition): Promise<void>;
+            deleteAgent(id: string): Promise<void>;
+        };
+        const agentSvc = 'getAgents' in this.service ? this.service as unknown as AgentSvc : null;
+        const affectedAgents: AgentDefinition[] = agentSvc
+            ? (await agentSvc.getAgents()).filter(a => affectedConnIds.has(a.config.connectionId))
+            : [];
+
+        this.showDeleteImpactModal({
+            deletable, skipped,
+            affectedConns,
+            affectedAgents, replacementConns,
+            agentSvc,
+        });
+    }
+
+    private showDeleteImpactModal(opts: {
+        deletable: LLMProvider[];
+        skipped: number;
+        affectedConns: ConnectionMeta[];
+        affectedAgents: AgentDefinition[];
+        replacementConns: ConnectionMeta[];
+        agentSvc: {
+            saveAgent(a: AgentDefinition): Promise<void>;
+            deleteAgent(id: string): Promise<void>;
+        } | null;
+    }): void {
+        const { deletable, skipped, affectedConns, affectedAgents, replacementConns, agentSvc } = opts;
+
+        const providerListHtml = deletable.map(p =>
+            `<li>${p.icon ?? ''} <strong>${p.name}</strong> <code style="font-size:.75rem;opacity:.7">${p.id}</code></li>`,
+        ).join('');
+
+        const skippedHint = skipped > 0
+            ? `<p style="margin:0 0 12px;font-size:.8rem;color:var(--st-text-secondary)">
+                   另有 ${skipped} 个当前内置 Provider 将跳过。
+               </p>`
+            : '';
+
+        const connSectionHtml = affectedConns.length > 0 ? `
+            <div class="llm-delete-impact-section llm-delete-impact-section--warn">
+                <div class="llm-delete-impact-section__title">
+                    ⚠️ 同时将删除以下关联连接（${affectedConns.length} 个）
+                </div>
+                <ul class="llm-delete-impact-list">
+                    ${affectedConns.map(c => `<li><strong>${c.name}</strong> <code style="font-size:.75rem;opacity:.7">${c.id}</code></li>`).join('')}
+                </ul>
+            </div>
+        ` : '';
+
+        const replacementOptions = replacementConns.map(c =>
+            `<option value="${c.id}">${c.name}</option>`,
+        ).join('');
+
+        const agentSectionHtml = affectedAgents.length > 0 ? `
+            <div class="llm-delete-impact-section llm-delete-impact-section--info">
+                <div class="llm-delete-impact-section__title">
+                    以下 Agent 引用了被删除的连接（${affectedAgents.length} 个）
+                </div>
+                <ul class="llm-delete-impact-list">
+                    ${affectedAgents.map(a => {
+                        const connName = opts.affectedConns.find(c => c.id === a.config.connectionId)?.name ?? a.config.connectionId;
+                        return `<li>${a.icon ?? '🤖'} <strong>${a.name}</strong> <span style="opacity:.6;font-size:.8rem">→ ${connName}</span></li>`;
+                    }).join('')}
+                </ul>
+                <fieldset style="border:none;padding:8px 0 0;margin:0">
+                    <legend style="font-size:.8rem;font-weight:600;margin-bottom:8px;color:var(--st-text-primary)">Agent 处理方式</legend>
+                    <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer;font-size:.875rem">
+                        <input type="radio" name="agent-action" value="delete">
+                        删除以上 Agent
+                    </label>
+                    <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer;font-size:.875rem">
+                        <input type="radio" name="agent-action" value="replace" ${replacementConns.length > 0 ? 'checked' : 'disabled'}>
+                        替换连接为
+                        <select id="agent-replacement-conn" class="settings-form__select"
+                                style="padding:2px 6px;font-size:.8rem;min-width:140px"
+                                ${replacementConns.length === 0 ? 'disabled' : ''}>
+                            ${replacementConns.length > 0 ? replacementOptions : '<option>（无可用连接）</option>'}
+                        </select>
+                    </label>
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:.875rem">
+                        <input type="radio" name="agent-action" value="keep" ${replacementConns.length === 0 ? 'checked' : ''}>
+                        保留 Agent（连接引用失效，可手动修复）
+                    </label>
+                </fieldset>
+            </div>
+        ` : '';
+
+        const body = `
+            <div style="font-size:.875rem">
+                ${skippedHint}
+                <div class="llm-delete-impact-section">
+                    <div class="llm-delete-impact-section__title">将删除以下 Provider（${deletable.length} 个）</div>
+                    <ul class="llm-delete-impact-list">${providerListHtml}</ul>
+                </div>
+                ${connSectionHtml}
+                ${agentSectionHtml}
+            </div>
+            <style>
+                .llm-delete-impact-section { margin-bottom:14px; padding:10px 12px; border-radius:6px; background:var(--st-bg-secondary,#f8f8f8); }
+                .llm-delete-impact-section--warn { background:var(--st-warning-bg,#fff8e1); }
+                .llm-delete-impact-section--info { background:var(--st-info-bg,#e8f4fd); }
+                .llm-delete-impact-section__title { font-weight:600; margin-bottom:6px; }
+                .llm-delete-impact-list { margin:0; padding-left:18px; }
+                .llm-delete-impact-list li { margin-bottom:3px; }
+            </style>
+        `;
+
+        new Modal('确认删除 Provider', body, {
+            confirmText: '确认删除',
+            type: 'danger',
+            width: '520px',
+            onConfirm: async () => {
+                // 1. Delete providers
+                for (const p of deletable) {
+                    await this.service.deleteProvider(p.id);
+                }
+                // 2. Delete affected connections
+                for (const c of affectedConns) {
+                    await this.service.deleteConnection(c.id);
+                }
+                // 3. Handle affected agents
+                if (agentSvc && affectedAgents.length > 0) {
+                    const radio = document.querySelector(
+                        'input[name="agent-action"]:checked',
+                    ) as HTMLInputElement | null;
+                    const action = radio?.value ?? 'keep';
+
+                    if (action === 'delete') {
+                        for (const a of affectedAgents) {
+                            await agentSvc.deleteAgent(a.id);
+                        }
+                    } else if (action === 'replace') {
+                        const sel = document.getElementById('agent-replacement-conn') as HTMLSelectElement | null;
+                        const newConnId = sel?.value;
+                        if (newConnId) {
+                            for (const a of affectedAgents) {
+                                await agentSvc.saveAgent({ ...a, config: { ...a.config, connectionId: newConnId } });
+                            }
+                        }
+                    }
+                    // 'keep' → do nothing
+                }
+
+                this._checkedIds.clear();
+                const parts = [`${deletable.length} 个 Provider`];
+                if (affectedConns.length) parts.push(`${affectedConns.length} 个连接`);
+                Toast.success(`已删除：${parts.join('、')}`);
+                this.render();
+            },
+        }).show();
     }
 
     // ── Edit modal ─────────────────────────────────────────────────────────────
@@ -413,16 +683,30 @@ export class ProviderSettingsEditor extends BaseSettingsEditor<IConnectionServic
 
     // ── Delete / Reset ─────────────────────────────────────────────────────────
 
-    private confirmDelete(provider: LLMProvider) {
-        Modal.confirm(
-            '确认删除',
-            `确定要删除 Provider「${provider.name}」吗？\n使用此 Provider 的连接将失去模型信息。`,
-            async () => {
-                await this.service.deleteProvider(provider.id);
-                Toast.success('Provider 已删除');
-                this.render();
-            },
-        );
+    private async confirmDelete(provider: LLMProvider): Promise<void> {
+        const allConns       = await this.service.getConnections();
+        const affectedConns  = allConns.filter(c => (c.providerId ?? '') === provider.id);
+        const affectedConnIds = new Set(affectedConns.map(c => c.id));
+        const replacementConns = allConns.filter(c => !affectedConnIds.has(c.id));
+
+        type AgentSvc = {
+            getAgents(): Promise<AgentDefinition[]>;
+            saveAgent(a: AgentDefinition): Promise<void>;
+            deleteAgent(id: string): Promise<void>;
+        };
+        const agentSvc = 'getAgents' in this.service ? this.service as unknown as AgentSvc : null;
+        const affectedAgents: AgentDefinition[] = agentSvc
+            ? (await agentSvc.getAgents()).filter(a => affectedConnIds.has(a.config.connectionId))
+            : [];
+
+        this.showDeleteImpactModal({
+            deletable: [provider],
+            skipped: 0,
+            affectedConns,
+            affectedAgents,
+            replacementConns,
+            agentSvc,
+        });
     }
 
     private confirmReset(provider: LLMProvider) {

@@ -3,6 +3,7 @@
 // 职责：持有 apiKey + 模型目录，是认证与模型信息的唯一来源。
 
 import type { LLMProvider } from '@itookit/common';
+import { externalProviders } from './llm-configs';
 
 // ─── VFS 存储路径 ──────────────────────────────────────────────────────────────
 /** VFS __config 模块中 Provider 数据的存储目录 */
@@ -114,44 +115,8 @@ export const MODEL_NAME_XAI_GROK4 = 'xAI: Grok 4';
  * 用户自定义覆盖持久化在 VFS PROVIDERS_DIR 中。
  */
 export const LLM_PROVIDERS: Record<string, LLMProvider> = {
-    rdsec: {
-        id: 'rdsec', isBuiltin: true,
-        name: 'RDSec',
-        implementation: 'openai-compatible',
-        baseURL: 'https://api.rdsec.trendmicro.com/prod/aiendpoint/v1/chat/completions',
-        icon: '🛡️',
-        supportsThinking: true,
-        models: [
-            { id: 'claude-4.6-opus', name: MODEL_NAME_CLAUDE_46_OPUS, icon: '👑', inputPricePerMillion: P.CLAUDE_OPUS_IN, outputPricePerMillion: P.CLAUDE_OPUS_OUT },
-            { id: 'gemini-3.1-pro', name: MODEL_NAME_GEMINI_31_PRO, icon: '💫', inputPricePerMillion: P.GEMINI_PRO_IN, outputPricePerMillion: P.GEMINI_PRO_OUT },
-            { id: 'claude-4.6-sonnet', name: MODEL_NAME_CLAUDE_46_SONNET, icon: '🎭', inputPricePerMillion: P.CLAUDE_SONNET_IN, outputPricePerMillion: P.CLAUDE_SONNET_OUT },
-            { id: 'gemini-3-flash', name: MODEL_NAME_GEMINI_3_FLASH, icon: '⚡', inputPricePerMillion: P.GEMINI_FLASH_IN, outputPricePerMillion: P.GEMINI_FLASH_OUT },
-            { id: 'gpt-5.2', name: MODEL_NAME_GPT52, icon: '✨', inputPricePerMillion: P.GPT_PRO_IN, outputPricePerMillion: P.GPT_PRO_OUT },
-            { id: 'gemini-3-pro', name: MODEL_NAME_GEMINI_3_PRO, icon: '💫', inputPricePerMillion: P.GEMINI_PRO_IN, outputPricePerMillion: P.GEMINI_PRO_OUT },
-            { id: 'claude-4.5-haiku', name: MODEL_NAME_CLAUDE_45_HAIKU, icon: '🍃', inputPricePerMillion: P.CLAUDE_HAIKU_IN, outputPricePerMillion: P.CLAUDE_HAIKU_OUT },
-            { id: 'claude-4.5-opus', name: MODEL_NAME_CLAUDE_45_OPUS, icon: '👑', inputPricePerMillion: P.CLAUDE_OPUS_IN, outputPricePerMillion: P.CLAUDE_OPUS_OUT },
-            { id: 'gpt-4o', name: MODEL_NAME_GPT4O_OPENAI, icon: '🤖', inputPricePerMillion: P.GPT4O_IN, outputPricePerMillion: P.GPT4O_OUT },
-            { id: 'claude-4-sonnet', name: MODEL_NAME_CLAUDE_4_SONNET, icon: '🏺', inputPricePerMillion: P.CLAUDE_SONNET_IN, outputPricePerMillion: P.CLAUDE_SONNET_OUT },
-            { id: 'deepseek-r1', name: MODEL_NAME_DEEPSEEK_R1, icon: '🧠', inputPricePerMillion: P.DEEPSEEK_REASONER_IN, outputPricePerMillion: P.DEEPSEEK_REASONER_OUT, supportsThinking: true },
-            { id: 'deepseek-r1-0528', name: MODEL_NAME_DEEPSEEK_R1_0528, icon: '🧠', inputPricePerMillion: P.DEEPSEEK_REASONER_IN, outputPricePerMillion: P.DEEPSEEK_REASONER_OUT, supportsThinking: true },
-            { id: 'deepseek-r1-aws', name: MODEL_NAME_DEEPSEEK_R1_AWS, icon: '☁️', inputPricePerMillion: P.DEEPSEEK_REASONER_IN, outputPricePerMillion: P.DEEPSEEK_REASONER_OUT, supportsThinking: true },
-            { id: 'deepseek-v3.1', name: MODEL_NAME_DEEPSEEK_V31, icon: '🐋', inputPricePerMillion: P.DEEPSEEK_CHAT_IN, outputPricePerMillion: P.DEEPSEEK_CHAT_OUT },
-            { id: 'gemini-2.5-flash', name: MODEL_NAME_GEMINI_25_FLASH, icon: '✨', inputPricePerMillion: P.GEMINI_FLASH_IN, outputPricePerMillion: P.GEMINI_FLASH_OUT },
-            { id: 'gemini-2.5-pro', name: MODEL_NAME_GEMINI_25_PRO, icon: '🌟', inputPricePerMillion: P.GEMINI_PRO_IN, outputPricePerMillion: P.GEMINI_PRO_OUT },
-            { id: 'gpt-4', name: MODEL_NAME_GPT4, icon: '🧱', inputPricePerMillion: P.GPT4_IN, outputPricePerMillion: P.GPT4_OUT },
-            { id: 'gpt-4-32k', name: MODEL_NAME_GPT4_32K, icon: '📦', inputPricePerMillion: P.GPT4_32K_IN, outputPricePerMillion: P.GPT4_32K_OUT },
-            { id: 'gpt-4.1', name: MODEL_NAME_GPT41, icon: '🔧', inputPricePerMillion: P.GPT41_IN, outputPricePerMillion: P.GPT41_OUT },
-            { id: 'gpt-4.1-mini', name: MODEL_NAME_GPT41_MINI, icon: '🍃', inputPricePerMillion: P.GPT41_MINI_IN, outputPricePerMillion: P.GPT41_MINI_OUT },
-            { id: 'gpt-4.1-nano', name: MODEL_NAME_GPT41_NANO, icon: '🧬', inputPricePerMillion: P.GPT41_NANO_IN, outputPricePerMillion: P.GPT41_NANO_OUT },
-            { id: 'gpt-4o-mini', name: MODEL_NAME_GPT4O_MINI, icon: '⚡', inputPricePerMillion: P.GPT4O_MINI_IN, outputPricePerMillion: P.GPT4O_MINI_OUT },
-            { id: 'gpt-5', name: MODEL_NAME_GPT5, icon: '🚀', inputPricePerMillion: P.GPT_STD_IN, outputPricePerMillion: P.GPT_STD_OUT },
-            { id: 'gpt-5-chat', name: MODEL_NAME_GPT5_CHAT, icon: '💬', inputPricePerMillion: P.GPT_STD_IN, outputPricePerMillion: P.GPT_STD_OUT },
-            { id: 'gpt-5-codex', name: MODEL_NAME_GPT5_CODEX, icon: '💻', inputPricePerMillion: P.GPT_PRO_IN, outputPricePerMillion: P.GPT_PRO_OUT },
-            { id: 'gpt-5-mini', name: MODEL_NAME_GPT5_MINI, icon: '🍃', inputPricePerMillion: P.GPT_MINI_IN, outputPricePerMillion: P.GPT_MINI_OUT },
-            { id: 'gpt-5-nano', name: MODEL_NAME_GPT5_NANO, icon: '🧬', inputPricePerMillion: P.GPT_NANO_IN, outputPricePerMillion: P.GPT_NANO_OUT },
-            { id: 'gpt-5.1', name: MODEL_NAME_GPT51, icon: '🎯', inputPricePerMillion: P.GPT51_IN, outputPricePerMillion: P.GPT51_OUT },
-        ],
-    },
+    // External providers loaded from .llm configs
+    ...externalProviders,
 
     anthropic: {
         id: 'anthropic', isBuiltin: true,

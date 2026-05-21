@@ -6,11 +6,14 @@
 
 import { Modal, Toast, BaseSettingsEditor, generateShortUUID, ENTITY_ICONS } from '@itookit/common';
 import type { IConnectionService, ConnectionMeta, LLMConnection, LLMProvider, ModelTier } from '@itookit/common';
+import { fromConnectionDef, serializeLLMConfig } from '@itookit/device-llm';
+import { runLLMImport } from './llm-import';
 
 export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionService> {
     private currentEditTiers: Partial<Record<ModelTier, string>> = {};
     private currentEditTierThinking: Partial<Record<ModelTier, boolean>> = {};
     private providers: Record<string, LLMProvider> = {};
+    private _checkedIds = new Set<string>();
 
     async render() {
         this.providers = Object.fromEntries(
@@ -27,6 +30,8 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
             return (a.name || '').localeCompare(b.name || '');
         });
 
+        const checkedCount = this._checkedIds.size;
+
         this.container.innerHTML = `
             <div class="settings-page">
                 <div class="settings-page__header">
@@ -34,9 +39,27 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
                         <h2 class="settings-page__title">LLM 连接配置</h2>
                         <p class="settings-page__description">为云提供商配置 API Key，并设置模型层级（optimal / standard / fast）</p>
                     </div>
-                    <button id="btn-add-connection" class="settings-btn settings-btn--primary">
-                        <span class="settings-btn__icon">+</span> 添加连接
-                    </button>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+                        <input type="file" id="llm-conn-import-file"
+                               accept=".llm,.yaml,.yml" multiple style="display:none">
+                        <button id="btn-import-conn-llm" class="settings-btn settings-btn--secondary"
+                                title="从 .llm 文件导入连接（和可选的 Provider 定义）">
+                            ↑ 导入 .llm
+                        </button>
+                        <button id="btn-export-conn-llm" class="settings-btn settings-btn--secondary"
+                                ${checkedCount === 0 ? 'disabled' : ''}
+                                title="将选中连接导出为 .llm 文件">
+                            ↓ 导出${checkedCount > 0 ? ` (${checkedCount})` : ''}
+                        </button>
+                        <button id="btn-delete-conn-batch" class="settings-btn settings-btn--danger"
+                                ${checkedCount === 0 ? 'disabled' : ''}
+                                title="删除选中的连接（默认连接不可删除）">
+                            🗑️ 删除${checkedCount > 0 ? ` (${checkedCount})` : ''}
+                        </button>
+                        <button id="btn-add-connection" class="settings-btn settings-btn--primary">
+                            <span class="settings-btn__icon">+</span> 添加连接
+                        </button>
+                    </div>
                 </div>
 
                 <div id="connections-list" class="settings-connection-grid">
@@ -74,11 +97,22 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
             badgeHtml = '<span class="settings-badge settings-badge--warning">需配置</span>';
         }
 
+        const isChecked = this._checkedIds.has(conn.id);
+
         return `
             <div class="settings-connection-card ${isDefault ? 'settings-connection-card--default' : ''} ${statusClass}"
                  data-id="${conn.id}" data-name="${conn.name}" style="${disabledStyle}">
                 <div class="settings-connection-card__header">
-                    <h3 class="settings-connection-card__title">${conn.name}</h3>
+                    <div style="display:flex;align-items:center;gap:6px;min-width:0">
+                        <input type="checkbox" class="chk-conn-select" data-id="${conn.id}"
+                               ${isChecked ? 'checked' : ''}
+                               title="选中以批量导出"
+                               style="flex-shrink:0;cursor:pointer;width:15px;height:15px">
+                        <h3 class="settings-connection-card__title"
+                            style="margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+                            ${conn.name}
+                        </h3>
+                    </div>
                     <div style="display:flex;gap:4px;align-items:center">
                         ${badgeHtml}
                         <label class="llm-enable-toggle" title="${enabled ? '点击禁用' : '点击启用'}">
@@ -148,23 +182,53 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
     private bindEvents() {
         this.clearListeners();
         this.bindButton('#btn-add-connection', () => this.showEditModal(null));
+        this.bindButton('#btn-import-conn-llm', () => {
+            (this.container.querySelector('#llm-conn-import-file') as HTMLInputElement)?.click();
+        });
+        this.bindButton('#btn-export-conn-llm', () => this.exportSelected());
+        this.bindButton('#btn-delete-conn-batch', () => this.batchDelete());
+
+        const fileInput = this.container.querySelector('#llm-conn-import-file') as HTMLInputElement | null;
+        if (fileInput) {
+            this.addEventListener(fileInput, 'change', async () => {
+                if (fileInput.files?.length) {
+                    await this.importLLMFiles(fileInput.files);
+                    fileInput.value = '';
+                }
+            });
+        }
 
         const list = this.container.querySelector('#connections-list');
         if (list) {
-            // Enable/disable toggle
             this.addEventListener(list, 'change', async (e) => {
                 const target = e.target as HTMLInputElement;
-                if (!target.classList.contains('chk-conn-enabled')) return;
-                const id = target.dataset.id!;
-                const full = await this.service.getFullConnection(id);
-                if (!full) return;
-                await this.service.saveConnection({ ...full, enabled: target.checked });
-                this.render();
+
+                // Multi-select checkbox
+                if (target.classList.contains('chk-conn-select')) {
+                    const id = target.dataset.id!;
+                    if (target.checked) this._checkedIds.add(id);
+                    else this._checkedIds.delete(id);
+                    const count = this._checkedIds.size;
+                    const exportBtn = this.container.querySelector('#btn-export-conn-llm') as HTMLButtonElement | null;
+                    if (exportBtn) { exportBtn.disabled = count === 0; exportBtn.textContent = `↓ 导出${count > 0 ? ` (${count})` : ''}`; }
+                    const deleteBtn = this.container.querySelector('#btn-delete-conn-batch') as HTMLButtonElement | null;
+                    if (deleteBtn) { deleteBtn.disabled = count === 0; deleteBtn.textContent = `🗑️ 删除${count > 0 ? ` (${count})` : ''}`; }
+                    return;
+                }
+
+                // Enable/disable toggle
+                if (target.classList.contains('chk-conn-enabled')) {
+                    const id = target.dataset.id!;
+                    const full = await this.service.getFullConnection(id);
+                    if (!full) return;
+                    await this.service.saveConnection({ ...full, enabled: target.checked });
+                    this.render();
+                }
             });
 
             this.addEventListener(list, 'click', async (e) => {
                 const target = e.target as HTMLElement;
-                if (target.closest('.llm-enable-toggle')) return;  // handled by change
+                if (target.closest('.llm-enable-toggle') || target.classList.contains('chk-conn-select')) return;
                 const card = target.closest('.settings-connection-card') as HTMLElement;
                 if (!card) return;
                 const id = card.dataset.id!;
@@ -176,6 +240,64 @@ export class ConnectionSettingsEditor extends BaseSettingsEditor<IConnectionServ
                 }
             });
         }
+    }
+
+    // ── Import / Export ────────────────────────────────────────────────────────
+
+    private async importLLMFiles(files: FileList): Promise<void> {
+        const imported = await runLLMImport(files, this.service);
+        if (imported) this.render();
+    }
+
+    private async exportSelected(): Promise<void> {
+        const ids = [...this._checkedIds];
+        if (!ids.length) return;
+
+        const allConns = await this.service.getConnections();
+        const selected = allConns.filter(c => ids.includes(c.id));
+        const connDefs = selected.map(c =>
+            fromConnectionDef({ id: c.id, name: c.name, providerId: c.providerId, tiers: c.tiers }),
+        );
+
+        const yaml = serializeLLMConfig({ connections: connDefs });
+        const filename = selected.length === 1 ? `${selected[0].id}.llm` : 'connections-export.llm';
+        const blob = new Blob([yaml], { type: 'text/yaml' });
+        const a = Object.assign(document.createElement('a'), {
+            href: URL.createObjectURL(blob), download: filename,
+        });
+        a.click();
+        URL.revokeObjectURL(a.href);
+    }
+
+    private async batchDelete(): Promise<void> {
+        const ids = [...this._checkedIds];
+        if (!ids.length) return;
+
+        const allConns = await this.service.getConnections();
+        // Default connection cannot be deleted
+        const deletable = allConns.filter(c => ids.includes(c.id) && c.id !== 'default');
+        const skipped   = ids.length - deletable.length;
+
+        if (!deletable.length) {
+            Toast.error('选中的连接均不可删除（默认连接不可删除）');
+            return;
+        }
+
+        const names = deletable.map(c => `「${c.name}」`).join('、');
+        const hint  = skipped > 0 ? `\n（另有 ${skipped} 个默认连接将跳过）` : '';
+
+        Modal.confirm(
+            '批量删除连接',
+            `确定删除 ${names}？此操作不可撤销。${hint}`,
+            async () => {
+                for (const c of deletable) {
+                    await this.service.deleteConnection(c.id);
+                }
+                this._checkedIds.clear();
+                Toast.success(`已删除 ${deletable.length} 个连接`);
+                this.render();
+            },
+        );
     }
 
     // ── Edit modal ─────────────────────────────────────────────────────────────
