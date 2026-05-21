@@ -4,9 +4,9 @@
 // Connection 不持有 apiKey（在 Provider 层），也不持有模型目录（在 Provider 层）。
 //
 // 同一 Provider 可有多个 Connection，每个 Connection 选取不同的模型族作为 tier 策略。
-// 例：rdsec 提供商下分设 rdsec（Claude）、rdsec-gemini、rdsec-deepseek 三条连接。
 
 import type { DefaultConnectionDef } from '@itookit/common';
+import { externalConnections } from './llm-configs';
 
 /** 系统默认连接 ID */
 export const LLM_DEFAULT_ID = 'default';
@@ -28,39 +28,19 @@ export type { DefaultConnectionDef };
  * 同一 Provider 可出现多次，代表不同的模型族策略。
  */
 export const DEFAULT_CONNECTIONS: DefaultConnectionDef[] = [
-    // ── RDSec — Claude 系列（系统默认连接）──────────────────────────────────
+    // ── DeepSeek — 系统默认连接 ──────────────────────────────────────────
     {
         id: 'default',
-        name: 'RDSec',
-        providerId: 'rdsec',
+        name: 'DeepSeek',
+        providerId: 'deepseek',
         tiers: {
-            optimal: 'claude-4.6-opus',
-            standard: 'claude-4.6-sonnet',
-            fast: 'claude-4.5-haiku',
+            optimal: 'deepseek-v4-pro',
+            standard: 'deepseek-v4-flash',
+            fast: 'deepseek-v4-flash',
         },
     },
-    // ── RDSec — Gemini 系列 ───────────────────────────────────────────────
-    {
-        id: 'conn-rdsec-gemini',
-        name: 'RDSec Gemini',
-        providerId: 'rdsec',
-        tiers: {
-            optimal: 'gemini-3.1-pro',
-            standard: 'gemini-3-flash',
-            fast: 'gemini-3-flash',
-        },
-    },
-    // ── RDSec — DeepSeek 系列 ────────────────────────────────────────────
-    {
-        id: 'conn-rdsec-deepseek',
-        name: 'RDSec DeepSeek',
-        providerId: 'rdsec',
-        tiers: {
-            optimal: 'deepseek-r1',
-            standard: 'deepseek-v3.1',
-            fast: 'deepseek-v3.1',
-        },
-    },
+    // External connections loaded from .llm configs
+    ...externalConnections,
 
     // ── Anthropic ─────────────────────────────────────────────────────────
     {

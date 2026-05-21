@@ -94,7 +94,7 @@ Agent      ──  个性化定制（system prompt + tier 偏好）
 | `standard` | 日常工作 | claude-sonnet-4.6 |
 | `fast` | 简单/廉价任务 | claude-haiku-4.5 |
 
-同一 Provider 可创建多个 Connection（如 `rdsec-claude` / `rdsec-gemini` / `rdsec-deepseek`），灵活应对多模型混用场景。
+同一 Provider 可创建多个 Connection（如 `deepseek-reasoner` / `deepseek-chat`），灵活应对多模型混用场景。
 
 #### 5. 多轮 Agent 循环 — `packages/llm-harness`
 

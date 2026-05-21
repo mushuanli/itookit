@@ -94,7 +94,7 @@ Agent      ── Functional customization (system prompt + tier preference)
 | `standard` | Most daily work | claude-sonnet-4.6 |
 | `fast` | Simple / low-cost tasks | claude-haiku-4.5 |
 
-A single Provider can have multiple Connections (e.g., `rdsec-claude` / `rdsec-gemini` / `rdsec-deepseek`), enabling flexible multi-model setups.
+A single Provider can have multiple Connections (e.g., `deepseek-reasoner` / `deepseek-chat`), enabling flexible multi-model setups.
 
 #### 5. Multi-turn Agent Loop — `packages/llm-harness`
 

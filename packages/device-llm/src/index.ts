@@ -154,6 +154,31 @@ export {
     DEFAULT_AGENTS,
 } from './constants/';
 
+// ── .llm 配置格式 (parse / serialize / convert) ─────────────────────────────
+export {
+    parseLLMConfig,
+    serializeLLMConfig,
+    getProviderDefs,
+    toLLMProvider,
+    toConnectionDef,
+    toRuntimeConnection,
+    toRuntimeSkill,
+    toRuntimeAgent,
+    fromLLMProvider,
+    fromConnectionDef,
+    fromSkillDef,
+    fromAgentDef,
+    exportToLLM,
+    exportBundleToLLM,
+    type LLMConfigFile,
+    type LLMProviderDef,
+    type LLMConnectionDef,
+    type LLMModelDef,
+    type LLMSkillDef,
+    type LLMAgentDef,
+    type LLMMCPDef,
+} from './constants/llm-loader';
+
 // ============================================
 // 工具函数
 // ============================================
