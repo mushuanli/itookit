@@ -1578,16 +1578,20 @@ export class ChatEngine extends BaseModuleService implements IChatEngine {
     const { filename, title: cleanName } = buildRenamedFilename(newName, sourceName);
     await this.engine.driver.rename(id, filename);
 
+    // After rename, the old id (path) is gone; compute the new path.
+    const lastSlash = id.lastIndexOf('/');
+    const newId = lastSlash >= 0 ? id.substring(0, lastSlash + 1) + filename : filename;
+
     try {
-      const manifest = await this.getManifest(id);
+      const manifest = await this.getManifest(newId);
       manifest.title = cleanName;
       manifest.updated_at = new Date().toISOString();
-      await this.engine.driver.writeContent(id, JSON.stringify(manifest, null, 2));
+      await this.engine.driver.writeContent(newId, JSON.stringify(manifest, null, 2));
     } catch {
       // ignore
     }
 
-    await this.engine.driver.updateMetadata(id, { title: cleanName });
+    await this.engine.driver.updateMetadata(newId, { title: cleanName });
   }
 
   async delete(ids: string[]): Promise<void> {
