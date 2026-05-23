@@ -21,7 +21,7 @@ export class FileMentionSource extends BaseMentionSource {
         limit: 20,
       });
       return this.filterResults(Array.from(result.nodes)).map(node => ({
-        id: node.id,
+        id: node.path,
         label: this.formatLabel(node),
         title: node.name,
         type: 'file',
@@ -94,7 +94,7 @@ export class FileMentionSource extends BaseMentionSource {
       if (!node) return null;
       const content = await this.engine.driver.readContent(fileId);
       return {
-        id: node.id,
+        id: node.path,
         title: node.name,
         content,
         tags: node.tags,

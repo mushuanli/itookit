@@ -64,18 +64,18 @@ describe('AssetDir operations (IndexedDB backend)', () => {
         expect(typeof id1).toBe('string');
     });
 
-    it('getAssetDirId returns null before creation', async () => {
+    it('getAssetDirPath returns null before creation', async () => {
         const { fs } = vfs;
         await createOwner(fs);
-        expect(await fs.meta.assets!.getAssetDirId(ownerPath)).toBeNull();
+        expect(await fs.meta.assets!.getAssetDirPath(ownerPath)).toBeNull();
     });
 
-    it('getAssetDirId returns ID after ensureAssetDir', async () => {
+    it('getAssetDirPath returns path after ensureAssetDir', async () => {
         const { fs } = vfs;
         await createOwner(fs);
-        const ensuredId = await fs.meta.assets!.ensureAssetDir(ownerPath);
-        const fetchedId = await fs.meta.assets!.getAssetDirId(ownerPath);
-        expect(fetchedId).toBe(ensuredId);
+        const ensuredPath = await fs.meta.assets!.ensureAssetDir(ownerPath);
+        const fetchedPath = await fs.meta.assets!.getAssetDirPath(ownerPath);
+        expect(fetchedPath).toBe(ensuredPath);
     });
 
     it('listAssets returns all asset names', async () => {
