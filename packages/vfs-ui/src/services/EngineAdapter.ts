@@ -167,37 +167,37 @@ export class EngineAdapter {
 
             switch (type) {
                 case 'node:created': {
-                    const data = payload as { nodes?: Array<{ nodeId: string }> };
+                    const data = payload as { nodes?: Array<{ path: string }> };
                     data.nodes?.forEach(n => {
-                        if (n.nodeId) {
-                            this.queues.create.add(n.nodeId);
-                            adapterDEBUG.queued('create', n.nodeId, this.queues.create.size);
+                        if (n.path) {
+                            this.queues.create.add(n.path);
+                            adapterDEBUG.queued('create', n.path, this.queues.create.size);
                         }
                     });
                     if (this.queues.create.size) scheduleProcess(this.queues.create, 'create', 50);
                     break;
                 }
                 case 'node:deleted': {
-                    const data = payload as { allDeletedIds?: string[]; requestedIds?: string[] };
-                    (data.allDeletedIds || data.requestedIds || [])
+                    const data = payload as { allDeletedPaths?: string[]; requestedPaths?: string[] };
+                    (data.allDeletedPaths || data.requestedPaths || [])
                         .filter(Boolean)
-                        .forEach(id => {
-                            this.queues.delete.add(id);
-                            adapterDEBUG.queued('delete', id, this.queues.delete.size);
+                        .forEach(path => {
+                            this.queues.delete.add(path);
+                            adapterDEBUG.queued('delete', path, this.queues.delete.size);
                         });
                     if (this.queues.delete.size) scheduleProcess(this.queues.delete, 'delete', 20);
                     break;
                 }
                 case 'node:updated': {
-                    const data = payload as { nodes?: Array<{ nodeId: string }>; reason?: string };
+                    const data = payload as { nodes?: Array<{ path: string }>; reason?: string };
                     if (data.reason === 'metadata') {
                         adapterDEBUG.received('node:updated[metadata-skip]', payload);
                         break;
                     }
                     data.nodes?.forEach(n => {
-                        if (n.nodeId) {
-                            this.queues.update.add(n.nodeId);
-                            adapterDEBUG.queued('update', n.nodeId, this.queues.update.size);
+                        if (n.path) {
+                            this.queues.update.add(n.path);
+                            adapterDEBUG.queued('update', n.path, this.queues.update.size);
                         }
                     });
                     if (this.queues.update.size) scheduleProcess(this.queues.update, 'update', 50);
@@ -211,12 +211,12 @@ export class EngineAdapter {
                     break;
                 }
                 case 'node:renamed': {
-                    const data = payload as { nodes?: Array<{ nodeId: string; oldPath?: string; newPath?: string }> };
+                    const data = payload as { nodes?: Array<{ oldPath: string; newPath: string; oldName: string; newName: string }> };
                     const oldIds: string[] = [];
                     data.nodes?.forEach(n => {
-                        if (n.newPath ?? n.nodeId) {
-                            this.queues.update.add(n.newPath ?? n.nodeId);
-                            adapterDEBUG.queued('update', n.newPath ?? n.nodeId, this.queues.update.size);
+                        if (n.newPath) {
+                            this.queues.update.add(n.newPath);
+                            adapterDEBUG.queued('update', n.newPath, this.queues.update.size);
                         }
                         if (n.oldPath) {
                             oldIds.push(n.oldPath);
